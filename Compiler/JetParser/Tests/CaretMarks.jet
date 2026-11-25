@@ -3,11 +3,15 @@
 // spellings no longer parse as marks.
 use jet_parser.[jet_format_source]
 
-caret_marks_same: fn(name: String, caret: String) Never! {
+caret_marks_stable: fn(name: String, caret: String) Never! {
     formatted: jet_format_source(caret, false)
     if !formatted.ok -> panic("caret marks: {name}: the caret source does not format")
     again: jet_format_source(formatted.text, false)
     if !again.ok || again.text != formatted.text -> panic("caret marks: {name}: fmt is not stable:\n{again.text}")
+}
+
+caret_marks_same: fn(name: String, caret: String) Never! {
+    caret_marks_stable(name, caret)
     retired: jet_format_source(caret.replace("^", "&"), false)
     if retired.ok -> panic("caret marks: {name}: the retired spelling still parses")
 }
@@ -55,7 +59,10 @@ caret_marks_same: fn(name: String, caret: String) Never! {
         "match subject",
         "Shape: enum {{\n    Dot(Int),\n    Line(Int),\n}}\n\nrun: fn(shape: ^Shape) {{\n    if ^shape == {{\n        .Dot(size) -> size += 1\n        .Line(size) -> size += 2\n    }}\n}}\n",
     )
-    caret_marks_same(
+    // The retired `task &&rows {…}` now reads as the logical and
+    // `task && rows{…}`, an ordinary expression, so only the caret spelling is
+    // checked here.
+    caret_marks_stable(
         "task capture",
         "run: fn(rows: [Int]) -> Int {{\n    done: task ^^rows {{ rows.len() }}\n    done.wait()\n}}\n",
     )

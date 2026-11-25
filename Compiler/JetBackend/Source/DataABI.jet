@@ -44,18 +44,8 @@ DYN_ENTRY_KEY: I64{0}
 
 DYN_ENTRY_VALUE: I64{8}
 
-// Process value enums. Shell/tag layout reuses EncodingABI's
-// ENCODING_ENUM_BYTES/TAG.
-PROCESS_STREAM_STREAM: I64{0}
-
-PROCESS_STREAM_INHERIT: I64{1}
-
-PROCESS_STREAM_CAPTURE: I64{2}
-
-// Stdout, legal only on stderr: the child's stderr is a copy of its stdout.
-PROCESS_STREAM_STDOUT: I64{3}
-
-// Private prepared transport data (/dev/null), never a public enum arm.
+// Private prepared transport data (/dev/null), never a public enum arm: the
+// word after ProcessStreamMode's cases (CoreEnumABI's PROCESS_STREAM_*).
 PROCESS_STREAM_NULL: I64{4}
 
 // ONE private public ProcessSpec value carrier.
@@ -140,61 +130,3 @@ PROCESS_KEEP_REFUSED_SLOT: I64{-1}
 PROCESS_KEEP_REFUSED_TAKEN: I64{-2}
 
 PROCESS_SPEC_DEFAULT_OUTPUT_LIMIT: I64{67108864}
-
-// CR4 #4828 one shared native CMS state, not a cloned snapshot.
-CMS_BYTES: I64{4112}
-
-CMS_REFS: I64{0}
-
-CMS_MUTEX: I64{8}
-
-CMS_DATA: I64{16}
-
-CMS_ROWS: I64{4}
-
-CMS_COLUMNS: I64{256}
-
-CMS_COUNTER_BYTES: I64{4}
-
-// #4828: shared HLL owner, packed U8 register stride is exactly one.
-HLL_BYTES: I64{272}
-
-HLL_REFS: I64{0}
-
-HLL_MUTEX: I64{8}
-
-HLL_DATA: I64{16}
-
-HLL_REGISTERS: I64{256}
-
-HLL_REGISTER_BYTES: I64{1}
-
-// #4828: shared TDigest40 embeds the canonical sequence header at16.
-TD_BYTES: I64{40}
-
-TD_REFS: I64{0}
-
-TD_MUTEX: I64{8}
-
-TD_SEQUENCE: I64{16}
-
-TD_CENTROID_BYTES: I64{16}
-
-TD_MEAN: I64{0}
-
-TD_WEIGHT: I64{8}
-
-// #4828: shared Reservoir64; count and RNG contain complete U64 bit patterns.
-RESERVOIR_BYTES: I64{64}
-
-RESERVOIR_REFS: I64{0}
-
-RESERVOIR_MUTEX: I64{8}
-
-RESERVOIR_LIMIT: I64{16}
-
-RESERVOIR_COUNT: I64{24}
-
-RESERVOIR_RNG: I64{32}
-
-RESERVOIR_SEQUENCE: I64{40}

@@ -12,6 +12,7 @@ use {
         Item,
         Interner,
         InternerDelta,
+        NameTable,
         ParseResult,
         Span,
         TComptimeField,
@@ -25,6 +26,9 @@ use {
         diagnostic_repair_paths,
         interner_empty,
         interner_fork,
+        name_column,
+        name_column_set,
+        name_column_table,
         type_intern_syntax,
         type_name,
     ]
@@ -1181,8 +1185,10 @@ JetCompilerServicesTypeTable: struct {
     // key.
     heads: [SemaTypeIDHead],
     // The row of the type each spelling the root module names a declared
-    // type by names, bare (`Point`) or through its import (`geo.Point`).
-    roots: [String:Int],
+    // type by names, bare (`Point`) or through its import (`geo.Point`),
+    // at the spelling's id in `root_names`.
+    root_names: NameTable,
+    roots: [Int],
     // The bare spelling of each declared type a module the build makes
     // sees, by its row: that module shares the root module's namespace and
     // imports nothing, so it sees a type of the root module or of its
@@ -1192,7 +1198,7 @@ JetCompilerServicesTypeTable: struct {
 
 // A table with no rows: the view of a build no body can read.
 jet_eval_compiler_services_type_table_empty: fn() -> JetCompilerServicesTypeTable Never! {
-    JetCompilerServicesTypeTable{interner: interner_empty(), heads: [SemaTypeIDHead]{}, roots: [String:Int]{}, scope: [Int:String]{}}
+    JetCompilerServicesTypeTable{interner: interner_empty(), heads: [SemaTypeIDHead]{}, root_names: name_column_table(), roots: name_column(), scope: [Int:String]{}}
 }
 
 // The type table of `registration`'s view over `frozen`, its interner as
@@ -1200,7 +1206,7 @@ jet_eval_compiler_services_type_table_empty: fn() -> JetCompilerServicesTypeTabl
 // the root module to that very type; each type is keyed as the checker
 // keys it (sema_type_resolve_declared_recursive).
 jet_eval_compiler_services_type_table: fn(registration: SemaRegistrationGraph, frozen: Interner) -> JetCompilerServicesTypeTable {
-    table := JetCompilerServicesTypeTable{interner: frozen, heads: [SemaTypeIDHead]{}, roots: [String:Int]{}, scope: [Int:String]{}}
+    table := JetCompilerServicesTypeTable{interner: frozen, heads: [SemaTypeIDHead]{}, root_names: name_column_table(), roots: name_column(), scope: [Int:String]{}}
     root: sema_registration_module_index(registration, registration.entry_module_identity) ?? return table
     namespace: registration.modules[root].namespace
     aliases := [String]{}
@@ -1219,7 +1225,7 @@ jet_eval_compiler_services_type_table: fn(registration: SemaRegistrationGraph, f
                 if found.module_index == module_index && found.row == row {
                     keyed: sema_type_resolve_declared_recursive(registration, Type.Named{name: spelling}, root, [TGenericParam]{})
                     sema_comptime_reflection_type_heads_into(registration, root, keyed, table.heads)
-                    table.roots["{spelling}"] = Int{type_intern_syntax(table.interner, keyed).id}
+                    name_column_set(table.root_names, table.roots, spelling, Int{type_intern_syntax(table.interner, keyed).id})
                 }
             }
             if module_index == root || (namespace != "" && module_row.namespace == namespace) {

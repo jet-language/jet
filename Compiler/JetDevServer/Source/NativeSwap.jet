@@ -454,7 +454,7 @@ NativeSwapRestartBoundary: struct {
     kept: [String],
     reset: [String],
 
-    in_place: fn() -> NativeSwapRestartBoundary Never! {
+    not_required: fn() -> NativeSwapRestartBoundary Never! {
         NativeSwapRestartBoundary{required: false, reason: None, affected: [String]{}, kept: [String]{}, reset: [String]{}}
     }
 
@@ -837,7 +837,7 @@ NativeSwapState: struct {
             reset_listeners: reset_listeners,
             preserved_connections: sorted_keys(checkpoint.connections),
             reset_connections: reset_connections,
-            restart_boundary: NativeSwapRestartBoundary.in_place(),
+            restart_boundary: NativeSwapRestartBoundary.not_required(),
             explanation: Val(explanation),
         }
         self.executable = checkpoint.executable

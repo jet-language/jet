@@ -55,6 +55,7 @@ use {
         TOKEN_AT,
         TOKEN_BANG,
         TOKEN_BLOCK_COMMENT,
+        TOKEN_CARET,
         TOKEN_CHAR,
         TOKEN_COLON,
         TOKEN_COLON_COLON,
@@ -549,12 +550,16 @@ parser_chunk_head_at: fn(tokens: [Token], index: Int, to: Int) -> Bool Never! {
     if parser_is_item_keyword(kind) || kind == TOKEN_KW_PRIV || kind == TOKEN_HASH || kind == TOKEN_PREP {
         return true
     }
-    if kind == TOKEN_IDENT {
+    if kind == TOKEN_IDENT || kind == TOKEN_CARET {
         after := index + 1
+        if kind == TOKEN_CARET {
+            if after >= to || tokens[after].kind != TOKEN_IDENT -> return false
+            after += 1
+        }
         loop after < to && parser_is_trivia(tokens[after].kind) -> after += 1
         if after < to {
             next_kind: tokens[after].kind
-            return next_kind == TOKEN_COLON || next_kind == TOKEN_COLON_EQ
+            return next_kind == TOKEN_COLON || (kind == TOKEN_IDENT && next_kind == TOKEN_COLON_EQ)
         }
     }
     false
@@ -1874,6 +1879,7 @@ parser_marked_module_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
         head_end = offset
         loop parser_kind_at(state, offset) == TOKEN_SEMI -> offset += 1
     }
+    if parser_changeable_name_ahead(state, offset) -> offset += 1
     if parser_kind_at(state, offset) != TOKEN_IDENT -> return false
     next: parser_kind_at(state, offset + 1)
     if next != TOKEN_COLON && next != TOKEN_COLON_EQ -> return false
@@ -1882,7 +1888,7 @@ parser_marked_module_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if bytes.len() == 0 || !((bytes[0] >= 97 && bytes[0] <= 122) || bytes[0] == 95) -> return false
     // Markers on lines of their own above a function or another item take
     // the item route, which attaches them the same way.
-    if offset == head_end -> return true
+    if offset == head_end || (offset == head_end + 1 && parser_kind_at(state, head_end) == TOKEN_CARET) -> return true
     value: parser_kind_at(state, offset + 2)
     !parser_is_item_keyword(value) && !parser_prep_verb_ahead(state, offset + 2, TOKEN_KW_FN)
 }

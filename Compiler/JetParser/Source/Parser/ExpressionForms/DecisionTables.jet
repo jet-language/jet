@@ -1035,7 +1035,7 @@ parser_expression_form_parse_if: fn(state: ^JetParserState, depth: Int, lint_sty
     }
     saved_position: state.position
     saved_diagnostics: state.diagnostics.len()
-    subject: if parser_write_mark(parser_current_kind(state)) -> parser_parse_marked_place(state, depth + 1, false, true) else -> parser_parse_expression_no_struct_lit_no_cmp(state, depth + 1)
+    subject: if parser_write_mark(parser_current_kind(state)) -> parser_parse_marked_place(state, depth + 1, false, true) else -> parser_in_place_window(parser_parse_expression_no_struct_lit_no_cmp(state, depth + 1))
     dispatch: parser_expression_form_dispatch_op(parser_current_kind(state))
     if dispatch == .Val(dispatch_op) && parser_kind_at(state, 1) == TOKEN_LBRACE && !parser_expression_form_record_test_ahead(state) {
         parser_bump(state)

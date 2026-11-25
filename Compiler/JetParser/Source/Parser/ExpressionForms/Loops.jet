@@ -21,6 +21,8 @@ use {
         expr_span,
     ]
     jet_lexer.[
+        TOKEN_CARET,
+        TOKEN_COLON,
         TOKEN_COLON_EQ,
         TOKEN_COMMA,
         TOKEN_DOT_DOT,
@@ -316,8 +318,10 @@ parser_expression_form_make_loop_lambda: fn(state: ^JetParserState, body: [Stmt]
 }
 
 parser_expression_form_parse_counted_loop: fn(state: ^JetParserState, start: Span, depth: Int) -> ParserExpressionFormCountedLoop {
+    marked: parser_current_kind(state) == TOKEN_CARET
+    if marked -> parser_bump(state)
     name: parser_expect_name(state, "as the counted-loop binding")
-    sigil: parser_expect(state, TOKEN_COLON_EQ, "after the counted-loop binding name")
+    sigil: if marked -> parser_expect(state, TOKEN_COLON, "after the counted-loop binding name") else -> parser_expect(state, TOKEN_COLON_EQ, "after the counted-loop binding name")
     initial: parser_parse_expression_no_struct_lit(state, depth + 1)
     init: ast_binding(parser_value(state, name), name.span, true, initial.expr, Val(sigil.span))
     parser_expression_form_loop_header_separator(state, "after the counted-loop initializer")
@@ -356,7 +360,7 @@ parser_expression_form_parse_loop: fn(state: ^JetParserState, depth: Int) -> Par
     head: parser_current_kind(state)
     following: parser_kind_at(state, 1)
     binding_head: head == TOKEN_IDENT || head == TOKEN_KW_IT
-    finite_header: head == TOKEN_LPAREN || (binding_head && (following == TOKEN_COLON_EQ || following == TOKEN_SEMI || following == TOKEN_COMMA || following == TOKEN_KW_IF || following == TOKEN_KW_IN || following == TOKEN_UNIFIED_ARROW)) || parser_loop_pattern_head_ahead(state)
+    finite_header: head == TOKEN_LPAREN || (binding_head && (following == TOKEN_COLON_EQ || following == TOKEN_SEMI || following == TOKEN_COMMA || following == TOKEN_KW_IF || following == TOKEN_KW_IN || following == TOKEN_UNIFIED_ARROW)) || parser_changeable_name_ahead(state, 0) || parser_loop_pattern_head_ahead(state)
     if !finite_header {
         parser_add_fatal_code(state, "E0072", start.span, "this collecting loop cannot return a List because it has no finite exhaustion edge", "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary", "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`")
         return ParsedExpr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}, span: start.span}
@@ -365,7 +369,7 @@ parser_expression_form_parse_loop: fn(state: ^JetParserState, depth: Int) -> Par
     counted := ParserExpressionFormCountedLoop?{None}
     clauses := [ParserExpressionFormLoopClause]{}
     if {
-        parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON_EQ -> {
+        (parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON_EQ) || parser_changeable_name_ahead(state, 0) -> {
             counted = Val(parser_expression_form_parse_counted_loop(state, start.span, depth + 1))
         }
         bindingless -> {

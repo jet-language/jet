@@ -1607,7 +1607,8 @@ sema_comptime_reflection_drop_types: fn(value: ^TComptimeValue, types: ^[Interne
 SemaTypeIDHead: struct {
     written: String,
     identity: String,
-    name: String,
+    // None for a type the root module can't name: it shows its identity.
+    name: String?,
     params: [String],
     kind: String,
     // A distinct type's base type, as the checker keys it.
@@ -1677,14 +1678,13 @@ sema_comptime_reflection_type_head_add: fn(graph: SemaRegistrationGraph, caller:
 
 // The head `written`, as module row `caller` resolves it.
 sema_comptime_reflection_type_head: fn(graph: SemaRegistrationGraph, caller: Int, written: String) -> SemaTypeIDHead {
-    head := SemaTypeIDHead{written: written, identity: written, name: type_unqualified_text(written, true), params: [String]{}, kind: "Builtin", base: None}
+    head := SemaTypeIDHead{written: written, identity: written, name: Val(type_unqualified_text(written, true)), params: [String]{}, kind: "Builtin", base: None}
     row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: written}, caller) ?? return head
     declaring: graph.modules[row.module_index]
     nominal: declaring.nominals[row.row]
     if !sema_comptime_reflection_bare_module(declaring) {
         head.identity = sema_comptime_reflection_declared_identity(declaring, nominal.symbol.name)
-        // copy: the head keeps its identity, which also names a type its root module can't name
-        head.name = sema_comptime_reflection_root_name(graph, row, nominal.symbol.name) ?? head.identity.copy()
+        head.name = sema_comptime_reflection_root_name(graph, row, nominal.symbol.name)
     }
     head.params = loop param in nominal.generic_params -> param.name
     head.kind = if nominal.kind == {
@@ -1866,7 +1866,7 @@ sema_comptime_reflection_head_bindings: fn(heads: [SemaTypeIDHead], written: Str
 // without a module identity when not `qualified` (type_unqualified_text).
 priv sema_comptime_reflection_head_name: fn(heads: [SemaTypeIDHead], written: String, qualified: Bool) -> String Never! {
     loop head in heads {
-        if head.written == written -> return if qualified -> head.identity else -> head.name
+        if head.written == written -> return if qualified -> head.identity else -> head.name ?? head.identity
     }
     if qualified -> written else -> type_unqualified_text(written, true)
 }
@@ -2844,8 +2844,11 @@ sema_comptime_reflection_variant_type_id: fn(registration: SemaRegistrationGraph
     if payload == {
         .Unit -> sema_comptime_reflection_type_id(registration, types, caller, Type.Named{name: "Unit"})
         .Single(ty, _) -> sema_comptime_reflection_type_id(registration, types, caller, ty)
-        // copy: the record type owns its field types; the payload keeps its own.
-        .Named(fields) -> sema_comptime_reflection_type_id(registration, types, caller, Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: field.ty.copy()}})
+        // Keyed field by field, as sema_type_resolve_declared_recursive keys a tuple.
+        .Named(fields) -> {
+            keyed: Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: sema_type_resolve_declared_recursive(registration, field.ty, caller, [TGenericParam]{})}}
+            sema_comptime_reflection_type_id_headed(sema_comptime_reflection_type_heads(registration, caller, keyed), keyed, registration.interner, types)
+        }
     }
 }
 

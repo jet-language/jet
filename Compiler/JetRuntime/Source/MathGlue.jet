@@ -1,4 +1,4 @@
-// MathGlueABI owns offsets. Clone/drop/ordered IEEE equality reuse geometry.
+// CoreLayoutABI owns offsets. Clone/drop/ordered IEEE equality reuse geometry.
 // Scalar inputs are borrowed; Float lanes are returned.
 #Export(c) jet_rt_record_new_jet_complex: fn(real: Float, imaginary: Float) -> I64 {
     result: jet_rt_alloc(MATH_COMPLEX_BYTES, I64{8})
@@ -86,20 +86,4 @@
 
 #Export(c) jet_rt_record_get_jet_size_constraint_max_height: fn(value: I64) -> Float {
     rt_f64_from_bits(geometry_word(wrapping(value + MATH_SIZE_MAX_HEIGHT)))
-}
-
-#Export(c) jet_rt_handle_clone_rng: fn(value: I64) -> I64 { geometry_clone(value, MATH_RNG_BYTES) }
-
-#Export(c) jet_rt_handle_drop_rng: fn(value: I64) { geometry_drop(value, MATH_RNG_BYTES) }
-
-#Export(c) jet_rt_handle_eq_rng: fn(left: I64, right: I64) -> Bool {
-    geometry_word(wrapping(left + MATH_RNG_STATE)) == geometry_word(wrapping(right + MATH_RNG_STATE))
-}
-
-#Export(c) jet_rt_handle_show_rng: fn(value: I64) -> I64 {
-    // CommonTypes6809-6811 hides state; there is no Rng ctor/getter census.
-    target: jet_rt_string_builder_new()
-    rt_text_push_word(target, I64{3327632887867985490}, I64{8})  // "RNG { .."
-    rt_text_push_word(target, I64{32032}, I64{2})
-    jet_rt_string_builder_finish(target)
 }

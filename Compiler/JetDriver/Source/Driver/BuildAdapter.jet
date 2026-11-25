@@ -2,7 +2,7 @@
 // code (JetEval Native.jet) reaches every host service of the invocation
 // (JET_DRIVER_BUILD_SERVICES) through it.
 use {
-    jet_foundation.[InternerDelta, SemaNameCase, Span, TComptimeField, TComptimeReport, TComptimeValue, Type, TypeID, TypeTupleField, comptime_type_id_row, comptime_value_remap_types, foundation_byte_text, sema_casing_ascii_has_case, type_find_syntax, type_name, type_syntax]
+    jet_foundation.[InternerDelta, SemaNameCase, Span, TComptimeField, TComptimeReport, TComptimeValue, Type, TypeID, TypeTupleField, comptime_type_id_row, comptime_value_remap_types, foundation_byte_text, name_column_get, sema_casing_ascii_has_case, type_find_syntax, type_name, type_syntax]
     jet_eval.[JetCompilerServicesTypeTable, JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_reflection_calls_to, jet_eval_reflection_marked_functions]
     build_input_crypto: core.crypto
     build_input_url: core.net.url
@@ -847,7 +847,7 @@ jet_driver_meta_type_key: fn(table: ^JetCompilerServicesTypeTable, made: [BuildS
             return Val(Type.Named{name: "{struct_made.identity}"})
         }
     }
-    row: table.roots.get(name) ?? return None
+    row: name_column_get(table.root_names, table.roots, name) ?? return None
     Val(type_syntax(table.interner, TypeID{id: U32{row}}))
 }
 
@@ -857,7 +857,7 @@ jet_driver_meta_made_head: fn(table: ^JetCompilerServicesTypeTable, name: String
     loop head in table.heads {
         if head.written == identity -> return
     }
-    table.heads.push(SemaTypeIDHead{written: "{identity}", identity: "{identity}", name: "{name}", params: [String]{}, kind: "Struct", base: None})
+    table.heads.push(SemaTypeIDHead{written: "{identity}", identity: "{identity}", name: Val("{name}"), params: [String]{}, kind: "Struct", base: None})
 }
 
 // The row TypeId `value` names in the session's type table; None for a

@@ -92,16 +92,16 @@ static void unit_cases(const char *const *goldens,int64_t variants,int64_t *(*cl
 }
 static void ws_error_cases(void) {
     // Custom, not derive Debug: raw operation, signed limit.
-    const char *goldens[]={"websocket URL is invalid","websocket handshake failed","websocket protocol error","websocket message exceeds -9223372036854775808 bytes","websocket I/O failed during read\"\n","websocket timed out","websocket is closed","websocket canceled","this build target lacks websocket client connect"};
+    const char *goldens[]={"websocket URL is invalid","websocket handshake failed","websocket protocol error","websocket timed out","websocket is closed","websocket canceled","this build target lacks websocket client connect","websocket message exceeds -9223372036854775808 bytes","websocket I/O failed during read\"\n"};
     for(int64_t kind=0;kind<9;++kind) {
-        WsError *a=jet_rt_alloc(24,8);a->kind=kind;a->limit=kind==3?INT64_MIN:0;a->operation=kind==4?text("read\"\n"):NULL;
+        WsError *a=jet_rt_alloc(24,8);a->kind=kind;a->limit=kind==7?INT64_MIN:0;a->operation=kind==8?text("read\"\n"):NULL;
         WsError *b=jet_rt_handle_clone_jet_ws_error(a);assert(a!=b && jet_rt_handle_eq_jet_ws_error(a,a) && jet_rt_handle_eq_jet_ws_error(a,b));
-        if(kind==4) assert(a->operation==b->operation && owners(a->operation)==2);
+        if(kind==8) assert(a->operation==b->operation && owners(a->operation)==2);
         expect(jet_rt_handle_show_jet_ws_error(a),goldens[kind]);expect(jet_rt_handle_debug_jet_ws_error(a),goldens[kind]);expect(jet_rt_handle_display_jet_ws_error(a),goldens[kind]);
         b->kind=(kind+1)%9;assert(!jet_rt_handle_eq_jet_ws_error(a,b));b->kind=kind;
-        if(kind==3) { b->limit=INT64_MAX;assert(!jet_rt_handle_eq_jet_ws_error(a,b));expect(jet_rt_handle_show_jet_ws_error(b),"websocket message exceeds 9223372036854775807 bytes"); }
-        if(kind==4) { Text *shared=b->operation;b->operation=flipped(shared);assert(!jet_rt_handle_eq_jet_ws_error(a,b));jet_rt_string_drop(b->operation);b->operation=shared; }
-        watch(a,24,8);watch(b,24,8);if(kind==4) { watch_text(a->operation);watch_text(b->operation); }
+        if(kind==7) { b->limit=INT64_MAX;assert(!jet_rt_handle_eq_jet_ws_error(a,b));expect(jet_rt_handle_show_jet_ws_error(b),"websocket message exceeds 9223372036854775807 bytes"); }
+        if(kind==8) { Text *shared=b->operation;b->operation=flipped(shared);assert(!jet_rt_handle_eq_jet_ws_error(a,b));jet_rt_string_drop(b->operation);b->operation=shared; }
+        watch(a,24,8);watch(b,24,8);if(kind==8) { watch_text(a->operation);watch_text(b->operation); }
         unsigned before=intercepted;jet_rt_handle_drop_jet_ws_error(a);jet_rt_handle_drop_jet_ws_error(b);freed(before);
     }
     jet_rt_handle_drop_jet_ws_error(NULL);

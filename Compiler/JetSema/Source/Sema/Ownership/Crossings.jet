@@ -360,15 +360,10 @@ sema_ownership_crossing_type_inner: fn(ty: Type, crossing: SemaSendCrossing, clo
             if sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, program, true) && (leaf == "Cell" || leaf == "CellReadGuard" || leaf == "CellEditGuard") {
                 return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: leaf}))
             }
-            shared_guard := sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, program, true) && leaf == "SharedGuard"
-            if shared_guard && cell_only -> return None
-            if shared_guard {
-                return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: leaf}))
-            }
-            // A carrier the compiler types itself (`Atomic<Int>`) has no
-            // nominal row. Its Core declaration says whether it is `#Local`;
-            // one that isn't crosses with the values it stores, as a channel
-            // end does.
+            // A carrier the compiler types itself (`Atomic<Int>`,
+            // `SharedGuard<T>`) has no nominal row. Its Core declaration
+            // says whether it is `#Local`; one that isn't crosses with the
+            // values it stores, as a channel end does.
             if builtin_carrier_named(leaf) && sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, program, true) {
                 if !cell_only && builtin_carrier_declares(leaf, MarkerHook.Local) {
                     return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.DeclaredLocal{key: leaf}))
@@ -536,13 +531,18 @@ sema_ownership_crossing_local_cell: fn(problem: SemaSendabilityProblem) -> Bool 
 }
 
 // How the headline names the crossing value's type. A `#Local` type is keyed
-// by its declaring module, a spelling no source writes, so a value of that
-// type is named by its declared name (`Pool`, not `app.Pool`); a written
-// module path (`browser.Browser`) stays.
+// by its declaring module. A Core key is a module identity, which the
+// diagnostic renderer spells as the reader writes it (`browser.Browser` when
+// the reason also names a plain `Browser`), whether the value's type carries
+// that identity or the bare name the compiler gives a constructed handle
+// (`Fixed`). Any other key is a spelling no source writes, so a value of that
+// type is named by its declared name (`Pool`, not `app.Pool`).
 sema_ownership_crossing_type_shown: fn(ty: Type, problem: SemaSendabilityProblem) -> String Never! {
     if problem.kind == .DeclaredLocal(key) {
-        if ty == .Named(head) && head == key -> return type_unqualified_name(key)
-        if ty == .Apply(head, _) && head == key -> return "{type_unqualified_name(key)}{type_name(ty).removeprefix(key)}"
+        leaf: type_unqualified_name(key)
+        shown: if sema_module_is_core_source(key) -> key else -> leaf
+        if ty == .Named(head) && (head == key || head == leaf) -> return shown
+        if ty == .Apply(head, _) && (head == key || head == leaf) -> return "{shown}{type_name(ty).removeprefix(head)}"
     }
     type_name(ty)
 }

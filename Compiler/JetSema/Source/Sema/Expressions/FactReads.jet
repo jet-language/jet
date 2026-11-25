@@ -1425,7 +1425,7 @@ sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph, types:
 // derive templates; no program can name them, and the IR builds a record
 // constant from its declared layout. A struct with no declared row at all is
 // not a Core record and keeps every field. A written marker argument keeps its
-// value too (sema_fact_answered_member).
+// value, and a TypeId its handle and table, too (sema_fact_answered_member).
 sema_fact_declared_value: fn(value: TComptimeValue) -> TComptimeValue Never! {
     if value == {
         .Struct(type_name, fields) -> {
@@ -1452,9 +1452,12 @@ sema_fact_declared_value: fn(value: TComptimeValue) -> TComptimeValue Never! {
 
 // A member with no Core record row that the compiler still answers from: a
 // written marker argument's `value` (its type is the marker parameter's) is
-// what `info.marker(T)` reads into its `T` (jet_eval_reflection_marker_value).
-// The IR lays the record out from its declared rows, so a program never sees it.
+// what `info.marker(T)` reads into its `T` (jet_eval_reflection_marker_value),
+// and a TypeId's `handle` and `table` name the type row the compiler reads it
+// back by (comptime_type_id_row). The IR lays each out as a word past the
+// declared rows, so a program never sees it.
 sema_fact_answered_member: fn(type_name: String, field: String) -> Bool Never! {
+    if type_name == "TypeId" -> return field == "handle" || field == "table"
     type_name == "MarkerArgInfo" && field == "value"
 }
 

@@ -301,10 +301,12 @@ place_mark_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
 }
 
-// `{ member: local, … }: tuple` at line start renames tuple members, so
-// it begins a statement rather than continuing the line above.
+// `{ member: local, … }: tuple` or `{^lo, hi}: bounds` at line start
+// destructures a record, so it begins a statement rather than continuing the
+// line above.
 tuple_rename_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
-    if kind_at(facts, index + 1) != TOKEN_IDENT -> return false
+    first: kind_at(facts, index + 1)
+    if first != TOKEN_IDENT && !(first == TOKEN_CARET && kind_at(facts, index + 2) == TOKEN_IDENT) -> return false
     depth := 0
     at := index
     loop at * 4 < facts.len() {

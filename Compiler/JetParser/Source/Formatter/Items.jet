@@ -2959,12 +2959,10 @@ jfmt_fmt_const: fn(f: ^JetFmt, c: ConstDef) {
         }
     }
     // `#Persist` on a binding, its value `#run …` when the author wrote it
-    // so. Preserve `:` vs `:=`.
+    // so. Preserve `:` vs `:=` (jfmt_fmt_const_name).
     if c.is_persist {
         jfmt_write(f, "#Persist ")
-        jfmt_fmt_written_privacy(f, c.is_pub, c.name_span.start)
-        jfmt_write(f, c.name)
-        jfmt_write(f, if c.mutable -> " := " else -> ": ")
+        jfmt_fmt_const_name(f, c)
         if c.is_comptime -> jfmt_fmt_prepared_value(f, c.value) else {
             jfmt_fmt_expr(f, c.value, JFMT_PREC_OR_FALLBACK)
         }
@@ -2998,10 +2996,25 @@ jfmt_fmt_const: fn(f: ^JetFmt, c: ConstDef) {
         }
     }
     // Runtime module bindings retain their authored mutability.
-    jfmt_fmt_written_privacy(f, c.is_pub, c.name_span.start)
+    jfmt_fmt_const_name(f, c)
+    jfmt_fmt_expr(f, c.value, JFMT_PREC_OR_FALLBACK)
+}
+
+// A module binding's privacy, name and sigil: `^name: ` when changeable.
+// D-BIND-MARK1 stage 1, temporary: an ordinary format keeps a written
+// `name := `, the migration format (JetFmt.bind_mark1) rewrites it.
+jfmt_fmt_const_name: fn(f: ^JetFmt, c: ConstDef) {
+    start: c.name_span.start
+    caret: start > 0 && jfmt_src_valid(f, start - 1, start) && jfmt_src_text(f, start - 1, start) == "^"
+    jfmt_fmt_written_privacy(f, c.is_pub, if caret -> start - 1 else -> start)
+    if c.mutable && (caret || f.bind_mark1) {
+        jfmt_write(f, "^")
+        jfmt_write(f, c.name)
+        jfmt_write(f, ": ")
+        return
+    }
     jfmt_write(f, c.name)
     jfmt_write(f, if c.mutable -> " := " else -> ": ")
-    jfmt_fmt_expr(f, c.value, JFMT_PREC_OR_FALLBACK)
 }
 
 // The imports of one scope (#6542): two or more print as one `use { … }`

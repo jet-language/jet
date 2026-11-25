@@ -1,12 +1,12 @@
-Error: Jet.MoveWithoutMarker: `core.data.arrow.import` takes `batch`, but `batch` is used again later
-  --> Tests/UI/arrow_batch_use_after_move.jet:4:26
-    |
-  4 |     _moved: arrow.import(batch)
-    |                          ^^^^^
+Error: Jet.UseAfterMove: `batch` was consumed by `core.data.arrow.import`, so it can't be used here
   --> Tests/UI/arrow_batch_use_after_move.jet:5:18
     |
   5 |     arrow.import(batch)
-    |                  ^^^^^ `batch` is used again here
- Why: `core.data.arrow.import` takes ownership of this argument, and a call never copies on its own, so `batch` has no value after this call
- Fix: Write `batch.copy()` to pass a copy and keep `batch`, or reorder so this call is the last use of `batch`
-More: jet-lang.dev/e/Jet.MoveWithoutMarker
+    |                  ^^^^^
+  --> Tests/UI/arrow_batch_use_after_move.jet:4:26
+    |
+  4 |     _moved: arrow.import(batch)
+    |                          ^^^^^ `batch` moved to `core.data.arrow.import` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `batch` after the move, or give `core.data.arrow.import` a copy with `batch.copy()` where it moved.
+More: jet-lang.dev/e/Jet.UseAfterMove

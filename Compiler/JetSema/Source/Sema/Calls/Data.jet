@@ -21,7 +21,6 @@ use jet_foundation.[
     expr_source_span,
     expr_span,
     type_name,
-    type_unqualified_nominals,
     UnOp,
     core_identity_in_module,
     module_text,
@@ -1311,9 +1310,6 @@ sema_data_check_analytics_sql_schema: fn(row: Type, query: Expr, span: Span, che
 }
 
 sema_call_try_data_core_call: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
-    if module_name == "core.data" && member == "schema" {
-        return sema_data_check_schema(args, type_args, span, expected, check)
-    }
     if module_name == "core.data" && member == "query" {
         if type_args.len() != 0 {
             sema_data_check_explicit_type_args("{module_name}.{member}", type_args, 0, span, check.diagnostics)
@@ -1362,90 +1358,4 @@ sema_call_try_data_core_call: fn(module_name: String, member: String, args: [Cal
         return SemaDirectSpecialCheck{handled: true, value: Val(result)}
     }
     SemaDirectSpecialCheck{handled: false, value: None}
-}
-
-// `data.schema(rows)` reads its columns from the row type: a struct row expands
-// into its stored fields with the row's type arguments substituted, any other
-// row is one `value` column. An explicit `data.schema<T>(rows)` checks `rows`
-// as `[T]`. The source schema receives the rows and the column names and type
-// names this check derives.
-sema_data_check_schema: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
-    if type_args.len() > 1 || args.len() != 1 {
-        if type_args.len() > 1 {
-            sema_data_check_explicit_type_args("core.data.schema", type_args, 1, span, check.diagnostics)
-        }
-        if args.len() != 1 {
-            sema_data_arity_diagnostic("core.data.schema", 1, args.len(), span, check.diagnostics)
-        }
-        sema_data_check_discarded_arguments(args, check)
-        return SemaDirectSpecialCheck{handled: true, value: None}
-    }
-    checked := TExpr?{None}
-    if type_args.len() == 1 {
-        // copy: the explicit row type stays in the caller's type argument list; the required list type owns this one
-        checked = sema_data_expect_core_arg("core.data.schema", 0, Type.List{element: type_args[0].copy()}, args[0], check)
-    } else { checked = sema_check_expression(args[0].expr, None, check) }
-    rows: checked ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    row: if rows.ty == {
-        .List(element) -> element
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
-            check.diagnostics.push(sema_error("E0112", args[0].span, "`data.schema` needs a typed row list, not {sema_type_show(rows.ty)}", "core.data schema reads column names and types from ordinary rows", "pass a `[T]` value"))
-            return SemaDirectSpecialCheck{handled: true, value: None}
-        }
-    }
-    columns: sema_data_schema_columns(row, check)
-    texts: Type.List{element: Type.String}
-    name_exprs := [Expr]{}
-    type_exprs := [Expr]{}
-    name_values := [TExpr]{}
-    type_values := [TExpr]{}
-    loop column in columns {
-        name_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: column.name}}, span: span, id: AST_NODE_GENERATED})
-        type_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: column.type_name}}, span: span, id: AST_NODE_GENERATED})
-        name_values.push(sema_call_http_core_string(column.name, span))
-        type_values.push(sema_call_http_core_string(column.type_name, span))
-    }
-    record := sema_call_core_record("core.data", "schema", 1, span, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    record.signature = CoreCallSignature{arity: 3, max_arity: 3, borrow_mask: [Bool]{true, true, true}}
-    source_args: [CallArg]{args[0], sema_call_http_core_synthetic_arg(Expr.ListLit{elements: name_exprs, span: span, id: AST_NODE_GENERATED}, span), sema_call_http_core_synthetic_arg(Expr.ListLit{elements: type_exprs, span: span, id: AST_NODE_GENERATED}, span)}
-    typed: [TExpr]{rows, sema_tree_node(texts, TExprKind.ListLit{values: name_values}, span), sema_tree_node(texts, TExprKind.ListLit{values: type_values}, span)}
-    result_type: Type.List{element: Type.Named{name: sema_data_source_type_name(check, "DataColumn")}}
-    result: sema_data_core_emit(record, "core.data.schema", source_args, [Type]{rows.ty, texts, texts}, typed, [Type]{row}, result_type, span, expected, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    SemaDirectSpecialCheck{handled: true, value: Val(result)}
-}
-
-sema_data_schema_columns: fn(row: Type, check: ^SemaBodyCheck) -> [{name: String, type_name: String}] {
-    single: [{name: String, type_name: String}]{{name: "value", type_name: sema_data_schema_type_name(row)}}
-    owner_name: if row == {
-        .Named(name) | .Apply(name, _) -> name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
-            return single
-        }
-    }
-    owner_args: if row == {
-        .Apply(_, args) -> args
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
-    }
-    // An exact number (`[2.5, 1.0]` is `[Decimal]`) is a scalar row like a
-    // Float, never the fields that represent it (sema_expr_precise_name).
-    if sema_expr_precise_name(row) != None -> return single
-    owner := sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, owner_name)
-    if owner == None {
-        owner = sema_expression_carrier_type_symbol(check.environment.*, check.program.*, owner_name)
-    }
-    owner_symbol: owner ?? return single
-    definition: sema_scope_declaration_struct(check.environment.*, check.program.*, owner_symbol.id) ?? return single
-    names: loop parameter in definition.type_params -> parameter.name
-    columns := [{name: String, type_name: String}]{}
-    loop field in definition.fields {
-        if field.computed != None -> next
-        field_type: sema_inference_substitute_type(sema_expression_field_owner_type(check.environment.*, check.program.*, owner_symbol.module_identity, field.ty, names), names, owner_args)
-        columns.push({name: field.name, type_name: sema_data_schema_type_name(field_type)})
-    }
-    columns
-}
-
-// A column's type as its row declares it, without module qualifiers.
-sema_data_schema_type_name: fn(ty: Type) -> String Never! {
-    type_name(type_unqualified_nominals(ty))
 }

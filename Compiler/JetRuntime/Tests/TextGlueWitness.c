@@ -10,9 +10,7 @@
 typedef struct { unsigned char *data; int64_t length,capacity,cache; } Text;
 typedef struct { Text *message; } Message;
 typedef struct { Text *path,*reason; } Field;
-typedef struct { int64_t insensitive,multiline,dotall; } Flags;
 _Static_assert(sizeof(Message)==8 && sizeof(Field)==16,"error layouts");
-_Static_assert(sizeof(Flags)==24 && offsetof(Flags,dotall)==16,"flags layout");
 extern void jet_rt_alloc_init(void);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
@@ -36,14 +34,6 @@ extern Text *jet_rt_record_get_field_error_reason(Field *);
 extern Text *jet_rt_handle_show_field_error(Field *);
 extern Text *jet_rt_handle_display_field_error(Field *);
 extern Text *jet_rt_handle_debug_field_error(Field *);
-extern Flags *jet_rt_record_new_regex_flags(uint8_t,uint8_t,uint8_t);
-extern Flags *jet_rt_handle_clone_regex_flags(Flags *);
-extern void jet_rt_handle_drop_regex_flags(Flags *);
-extern bool jet_rt_handle_eq_regex_flags(Flags *,Flags *);
-extern bool jet_rt_record_get_regex_flags_case_insensitive(Flags *);
-extern bool jet_rt_record_get_regex_flags_multiline(Flags *);
-extern bool jet_rt_record_get_regex_flags_dotall(Flags *);
-extern Text *jet_rt_handle_show_regex_flags(Flags *);
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[40];
 static size_t count;
 static unsigned intercepted;
@@ -121,30 +111,10 @@ static void fields(void) {
     }
     jet_rt_handle_drop_field_error(NULL);
 }
-static void flags(void) {
-    const char *goldens[]={"RegexFlags()","RegexFlags(i)","RegexFlags(m)","RegexFlags(im)","RegexFlags(s)","RegexFlags(is)","RegexFlags(ms)","RegexFlags(ims)"};
-    for(unsigned mask=0;mask<8;++mask) {
-        Flags *a=jet_rt_record_new_regex_flags((mask&1)?255:0,(mask&2)?128:0,(mask&4)?2:0), *b=jet_rt_handle_clone_regex_flags(a);
-        assert(a!=b && jet_rt_handle_eq_regex_flags(a,b));
-        assert(a->insensitive==((mask&1)!=0) && a->multiline==((mask&2)!=0) && a->dotall==((mask&4)!=0));
-        assert(jet_rt_record_get_regex_flags_case_insensitive(a)==((mask&1)!=0));
-        assert(jet_rt_record_get_regex_flags_multiline(a)==((mask&2)!=0));
-        assert(jet_rt_record_get_regex_flags_dotall(a)==((mask&4)!=0));
-        int64_t *slots[]={&b->insensitive,&b->multiline,&b->dotall};
-        for(size_t i=0;i<3;++i) {
-            *slots[i]^=1; assert(!jet_rt_handle_eq_regex_flags(a,b)); *slots[i]^=1;
-            *slots[i]^=INT64_C(0x100); assert(jet_rt_handle_eq_regex_flags(a,b)); *slots[i]^=INT64_C(0x100);
-        }
-        Text *shown=jet_rt_handle_show_regex_flags(a); text_is(shown,goldens[mask]);
-        watch(a,24,8); watch(b,24,8); watch_text(shown);
-        jet_rt_handle_drop_regex_flags(a); jet_rt_handle_drop_regex_flags(b); jet_rt_string_drop(shown); done();
-    }
-    jet_rt_handle_drop_regex_flags(NULL);
-}
 int main(void) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     MessageAPI apis[]={API(text_error,message),API(utf8_error,message),API(range_error,reason)};
     for(size_t i=0;i<3;++i) messages(apis[i]);
-    fields(); flags(); puts("TextGlue ownership/equality/render OK"); return 0;
+    fields(); puts("TextGlue ownership/equality/render OK"); return 0;
 }

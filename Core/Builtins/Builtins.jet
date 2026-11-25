@@ -70,13 +70,12 @@
 // (GroupSumInt, GroupSumFloat, GroupSumF32, GroupSumI8 through GroupSumI64,
 // GroupSumU8 through GroupSumU64), the event-time stages `with_event_time`
 // by an `Int` (StreamWithEventTime) or a `DateTime` (StreamWithEventDatetime)
-// stamp, `key_by` (StreamKeyBy) and `window` (StreamWindow), and
-// `data.schema` (DataSchema). The source functions other Core calls forward
-// to fill roles too: a list's SQL `query` (ListQuery), a typed
-// `json.decode<T>` (JSONTypedDecode), `toml.decode<T>` (TOMLTypedDecode) and
-// `yaml.decode<T>` (YAMLTypedDecode), a `JobQueue`'s `enqueue` (JobEnqueue)
-// and `delay` (JobDelay), a service's `app.enqueue` (AppEnqueue),
-// `net.unix_connect` without (UnixConnect) and with a deadline
+// stamp, `key_by` (StreamKeyBy) and `window` (StreamWindow). The source
+// functions other Core calls forward to fill roles too: a list's SQL `query`
+// (ListQuery), a typed `json.decode<T>` (JSONTypedDecode), `toml.decode<T>`
+// (TOMLTypedDecode) and `yaml.decode<T>` (YAMLTypedDecode), a `JobQueue`'s
+// `enqueue` (JobEnqueue) and `delay` (JobDelay), a service's `app.enqueue`
+// (AppEnqueue), `net.unix_connect` without (UnixConnect) and with a deadline
 // (UnixConnectDeadline), `tls.client` over a stream (TLSClientStream), with a
 // deadline (TLSClientDeadline) and with a config and a deadline
 // (TLSClientConfigDeadline), `term.take` (TermTake) and `task.timeout`
@@ -220,7 +219,6 @@ RoleKind: enum {
     GroupSumU32,
     GroupSumU64,
     GroupMean,
-    DataSchema,
     ContextOnStop,
     ContextTrace,
     InputCSV,
@@ -507,9 +505,9 @@ Word: struct<bits: Int> {}
 FloatWord: struct<exponent: Int, fraction: Int> {}
 
 // The carriers the compiler types and lowers itself, declared `priv` and by
-// arity alone, so a bare `Atomic<Int>` still names the compiler's type and
-// never this declaration. Its facts are the markers written here, which the
-// compiler reads while it builds
+// arity alone, so a bare `Atomic<Int>` or a Cell's guard still names the
+// compiler's type and never this declaration. Its facts are the markers
+// written here, which the compiler reads while it builds
 // (Compiler/JetFoundation/Source/Registry/BuiltinCarriers.jet): a
 // `#MoveOnly` value moves and never copies, and a `#Local` one stays on the
 // thread that made it. Each marker goes on the line right above its type.
@@ -518,6 +516,18 @@ priv Atomic: struct<T> {}
 
 #MoveOnly
 priv ViewMut: struct<T> {}
+
+#MoveOnly
+priv ViewIter: struct<T> {}
+
+#[MoveOnly, Local]
+priv SharedGuard: struct<T> {}
+
+#[MoveOnly, Local]
+priv CellReadGuard: struct<T> {}
+
+#[MoveOnly, Local]
+priv CellEditGuard: struct<T> {}
 
 // The test harness's evidence and temporary-directory operations
 // (jet.runtime.testing's, behind `core.testing`'s snap, golden, fixture and

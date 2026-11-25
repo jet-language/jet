@@ -82,7 +82,10 @@ sema_stmt_mutable_binding: fn(binding: Binding, sigil: Span) -> SemaOwnershipMut
     SemaOwnershipMutableBinding{name: names.join(", "), name_span: binding.name_span, sigil: Span{start: binding.name_span.end, end: sigil.end}, starts: starts}
 }
 
-sema_stmt_destructure_local: fn(name: BindName, ty: Type, mutable: Bool, check: ^SemaBodyCheck) -> TLocal? {
+// `binding_mutable` is the whole binding's mark; `^name` in the pattern makes
+// only that name changeable (`{^lo, hi}: bounds`).
+sema_stmt_destructure_local: fn(name: BindName, ty: Type, binding_mutable: Bool, check: ^SemaBodyCheck) -> TLocal? {
+    mutable: binding_mutable || name.mutable
     local_name := if name.rename == .Val(rename) -> rename.name else -> name.name
     local_span := if name.rename == .Val(rename) -> rename.span else -> name.span
     owner := sema_scope_local_owner_key(check.scopes)

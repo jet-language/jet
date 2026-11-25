@@ -3,8 +3,8 @@
     kind: dyn_word(wrapping(value + WS_ERROR_TAG))
     result: jet_rt_alloc(WS_ERROR_BYTES, I64{8})
     dyn_store(wrapping(result + WS_ERROR_TAG), kind)
-    dyn_store(wrapping(result + WS_ERROR_LIMIT), if (kind == I64{3}) -> dyn_word(wrapping(value + WS_ERROR_LIMIT)) else -> I64{0})
-    dyn_store(wrapping(result + WS_ERROR_OPERATION), if (kind == I64{4}) -> jet_rt_string_clone(dyn_word(wrapping(value + WS_ERROR_OPERATION))) else -> I64{0})
+    dyn_store(wrapping(result + WS_ERROR_LIMIT), if (kind == WS_ERROR_MESSAGE_TOO_LARGE) -> dyn_word(wrapping(value + WS_ERROR_LIMIT)) else -> I64{0})
+    dyn_store(wrapping(result + WS_ERROR_OPERATION), if (kind == WS_ERROR_IO) -> jet_rt_string_clone(dyn_word(wrapping(value + WS_ERROR_OPERATION))) else -> I64{0})
     result
 }
 
@@ -12,7 +12,7 @@
     if (value == I64{0}) {
         return
     }
-    if (dyn_word(wrapping(value + WS_ERROR_TAG)) == I64{4}) {
+    if (dyn_word(wrapping(value + WS_ERROR_TAG)) == WS_ERROR_IO) {
         jet_rt_string_drop(dyn_word(wrapping(value + WS_ERROR_OPERATION)))
     }
     jet_rt_free(value, WS_ERROR_BYTES, I64{8})
@@ -21,10 +21,10 @@
 #Export(c) jet_rt_handle_eq_jet_ws_error: fn(left: I64, right: I64) -> Bool {
     kind: dyn_word(wrapping(left + WS_ERROR_TAG))
     if kind != dyn_word(wrapping(right + WS_ERROR_TAG)) -> return false
-    if (kind == I64{3}) {
+    if (kind == WS_ERROR_MESSAGE_TOO_LARGE) {
         return dyn_word(wrapping(left + WS_ERROR_LIMIT)) == dyn_word(wrapping(right + WS_ERROR_LIMIT))
     }
-    if (kind == I64{4}) {
+    if (kind == WS_ERROR_IO) {
         return jet_rt_string_eq(dyn_word(wrapping(left + WS_ERROR_OPERATION)), dyn_word(wrapping(right + WS_ERROR_OPERATION)))
     }
     true
@@ -35,37 +35,37 @@
 #Export(c) jet_rt_handle_show_jet_ws_error: fn(value: I64) -> I64 {
     kind: dyn_word(wrapping(value + WS_ERROR_TAG))
     result: jet_rt_string_builder_new()
-    if (kind == I64{8}) {
+    if (kind == WS_ERROR_UNSUPPORTED_TARGET) {
         jet_rt_string_builder_push(result, rt_static_text("this build target lacks websocket client connect"))
         return result
     }
     rt_text_push_word(result, I64{7308044150667109751}, I64{8})  // "websocke"
     if {
-        (kind == I64{0}) -> {
+        (kind == WS_ERROR_INVALID_URL) -> {
             rt_text_push_word(result, I64{8316213699087245428}, I64{8})
             rt_text_push_word(result, I64{7235433442201987360}, I64{8})
         }
-        (kind == I64{1}) -> {
+        (kind == WS_ERROR_INVALID_HANDSHAKE) -> {
             jet_rt_string_builder_push(result, rt_static_text("t handshake failed"))
         }
-        (kind == I64{2}) -> {
+        (kind == WS_ERROR_PROTOCOL) -> {
             rt_text_push_word(result, I64{7165073554179891316}, I64{8})
             rt_text_push_word(result, I64{8245935278387129455}, I64{8})
         }
-        (kind == I64{3}) -> {
+        (kind == WS_ERROR_MESSAGE_TOO_LARGE) -> {
             jet_rt_string_builder_push(result, rt_static_text("t message exceeds "))
             rt_text_push_number(result, dyn_word(wrapping(value + WS_ERROR_LIMIT)))
             rt_text_push_word(result, I64{126879583003168}, I64{6})
         }
-        (kind == I64{4}) -> {
+        (kind == WS_ERROR_IO) -> {
             jet_rt_string_builder_push(result, rt_static_text("t I/O failed during "))
             jet_rt_string_builder_push(result, dyn_word(wrapping(value + WS_ERROR_OPERATION)))
         }
-        (kind == I64{5}) -> {
+        (kind == WS_ERROR_TIMEOUT) -> {
             rt_text_push_word(result, I64{2334102027479818356}, I64{8})
             rt_text_push_word(result, I64{7632239}, I64{3})
         }
-        (kind == I64{6}) -> {
+        (kind == WS_ERROR_CLOSED) -> {
             rt_text_push_word(result, I64{8028901226721124468}, I64{8})
             rt_text_push_word(result, I64{6579571}, I64{3})
         }

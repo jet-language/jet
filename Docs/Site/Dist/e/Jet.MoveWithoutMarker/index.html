@@ -36,18 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Pass a copy with `.copy()`, reorder so the call is the name&#39;s last use, or write `x.move()` where a value with cleanup is handed over.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.MoveWithoutMarker</code>: <code>Tests/UI/arrow_batch_use_after_move.stderr</code>.</p>
-<pre class="diag">Error: Jet.MoveWithoutMarker: `core.data.arrow.import` takes `batch`, but `batch` is used again later
-  --&gt; Tests/UI/arrow_batch_use_after_move.jet:4:26
+<p>First UI snapshot mentioning <code>Jet.MoveWithoutMarker</code>: <code>Tests/UI/card_2387_core_field_policy_probe.stderr</code>.</p>
+<pre class="diag">Error: Jet.MoveWithoutMarker: Implicit clone of `value`
+  --&gt; Tests/UI/card_2387_core_field_policy_probe.jet:4:21
     |
-  4 |     _moved: arrow.import(batch)
-    |                          ^^^^^
-  --&gt; Tests/UI/arrow_batch_use_after_move.jet:5:18
-    |
-  5 |     arrow.import(batch)
-    |                  ^^^^^ `batch` is used again here
- Why: `core.data.arrow.import` takes ownership of this argument, and a call never copies on its own, so `batch` has no value after this call
- Fix: Write `batch.copy()` to pass a copy and keep `batch`, or reorder so this call is the last use of `batch`
+  4 |     node: JSON.Text(value)
+    |                     ^^^^^
+ Why: `Text` stores its own copy of this value
+ Fix: Write `value.copy()` to copy explicitly
 More: jet-lang.dev/e/Jet.MoveWithoutMarker
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

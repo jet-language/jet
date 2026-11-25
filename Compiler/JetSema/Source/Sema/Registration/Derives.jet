@@ -2336,7 +2336,7 @@ sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool, default: Span?,
 // `kind` (a TypeKind variant), and a distinct type's `base`. Its `methods`
 // lists only those a provider asks after (`has_method`).
 sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: [CtValue], methods: [CtValue], base: Type?, table: Interner, types: ^[InternerDelta]) -> CtValue {
-    own: SemaTypeIDHead{written: name, identity: name, name: name, params: [String]{}, kind: kind, base: base}
+    own: SemaTypeIDHead{written: name, identity: name, name: Val(name), params: [String]{}, kind: kind, base: base}
     identity: sema_derive_type_id([SemaTypeIDHead]{own}, Type.Named{name: name}, table, types)
     sema_derive_ct_struct(
         "TypeInfo",

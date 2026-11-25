@@ -3584,13 +3584,15 @@ body_codec_put_bindname: fn(out: ^BodyCodecOut, value: BindName) Never! {
     body_codec_put_string(out, value.name)
     body_codec_put_span(out, value.span)
     body_codec_put_opt_bindnamerename(out, value.rename)
+    body_codec_put_bool(out, value.mutable)
 }
 
 body_codec_get_bindname: fn(bytes: [U8], input: ^BodyCodecIn) -> BindName Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_span(bytes, input)
     f2: body_codec_get_opt_bindnamerename(bytes, input)
-    BindName{name: f0, span: f1, rename: f2}
+    f3: body_codec_get_bool(bytes, input)
+    BindName{name: f0, span: f1, rename: f2, mutable: f3}
 }
 
 body_codec_put_bindnamerename: fn(out: ^BodyCodecOut, value: BindNameRename) Never! {

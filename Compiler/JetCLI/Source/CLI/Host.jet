@@ -107,6 +107,7 @@ use {
         ENV_JET_DEVTOOLS_RELAY_SOURCE_ID,
         ENV_JET_DEVTOOLS_RELAY_WORLD_ID,
         ENV_JET_DEV_PORT,
+        ENV_JET_FMT_BIND_MARK1,
         ENV_JET_FRONT_LIBRARY_OBJECT_OUTPUT,
         ENV_JET_FUZZ_ITERATIONS,
         ENV_JET_ICE_SELF_TEST,
@@ -236,6 +237,7 @@ use {
         JetFormatResult,
         jet_format_library_source,
         jet_format_source,
+        jet_format_source_bind_mark1,
     ]
     jet_plugin.[jet_plugin_link]
     jet_sema.[SEMA_CLI_ENTRY_NAME, sema_no_run_diagnostic, sema_user_template_ct_value]
@@ -4334,6 +4336,9 @@ jet_cli_fmt_ordinary: fn(source: String, simplify: Bool, library: Bool) -> JetFo
 }
 
 jet_cli_fmt_parsed: fn(source: String, simplify: Bool, library: Bool) -> JetFormatResult {
+    // D-BIND-MARK1 stage 1, temporary: the migration format, the one place
+    // that reads its switch. Stage 2 deletes it with `:=`.
+    if (cli_sys.get(ENV_JET_FMT_BIND_MARK1) ?? "") == "1" -> return jet_format_source_bind_mark1(source, simplify, library)
     if library -> return jet_format_library_source(source, simplify)
     jet_format_source(source, simplify)
 }

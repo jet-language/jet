@@ -129,7 +129,7 @@ net_dns_get: fn(value: I64, ordinal: I64) -> I64 {
 }
 
 net_error_new: fn(ordinal: I64, payload: I64) -> I64 {
-    if (ordinal < NET_ERROR_INVALID_INPUT || ordinal > NET_ERROR_OTHER) {
+    if (ordinal < NET_ERROR_INVALID_INPUT || ordinal > NET_ERROR_DNS) {
         trap_native_index_range_stop()
     }
     result: jet_rt_alloc(NET_ERROR_BYTES, I64{8})
@@ -172,22 +172,11 @@ net_error_get: fn(value: I64, ordinal: I64) -> I64 {
     if ordinal == NET_ERROR_DNS -> jet_rt_handle_eq_jet_net_dns_error(a, b) else -> jet_rt_handle_eq_jet_net_error_detail(a, b)
 }
 
-// One explicit conversion table: CAbiRoutes declaration tags -> NetHTTP530-558 render surface.
-net_render_ordinal: fn(ordinal: I64) -> I64 {
-    if {
-        ordinal == NET_ERROR_DNS -> NET_RENDER_DNS
-        ordinal == NET_ERROR_TLS -> NET_RENDER_TLS
-        ordinal == NET_ERROR_PROTOCOL -> NET_RENDER_PROTOCOL
-        ordinal == NET_ERROR_OTHER -> NET_RENDER_OTHER
-        else -> ordinal
-    }
-}
-
 #Export(c) jet_rt_handle_show_jet_net_error: fn(value: I64) -> I64 {
-    ordinal: net_render_ordinal(encoding_word(wrapping(value + NET_ERROR_TAG)))
+    ordinal: encoding_word(wrapping(value + NET_ERROR_TAG))
     payload: encoding_word(wrapping(value + NET_ERROR_PAYLOAD))
     // Every detail is message-only; DNS Failure also message-only.
-    if ordinal != NET_RENDER_DNS {
+    if ordinal != NET_ERROR_DNS {
         return jet_rt_string_clone(encoding_word(wrapping(payload + NET_DETAIL_MESSAGE)))
     }
     text: encoding_word(wrapping(payload + NET_DNS_PAYLOAD))

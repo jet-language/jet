@@ -36,19 +36,18 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Stop using `{name}` after the move, or give {consumer} a copy with `{name}.copy()` where it moved.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.UseAfterMove</code>: <code>Tests/UI/assignment_move_use_after_move.stderr</code>.</p>
-<pre class="diag">Error: Jet.UseAfterMove: `evens` was consumed by the assignment to `kept`, so it can&#39;t be used here
-  --&gt; Tests/UI/assignment_move_use_after_move.jet:8:11
+<p>First UI snapshot mentioning <code>Jet.UseAfterMove</code>: <code>Tests/UI/arrow_batch_use_after_move.stderr</code>.</p>
+<pre class="diag">Error: Jet.UseAfterMove: `batch` was consumed by `core.data.arrow.import`, so it can&#39;t be used here
+  --&gt; Tests/UI/arrow_batch_use_after_move.jet:5:18
     |
-  8 |     print(evens.to_list())
-    |           ^^^^^
-  --&gt; Tests/UI/assignment_move_use_after_move.jet:6:12
+  5 |     arrow.import(batch)
+    |                  ^^^^^
+  --&gt; Tests/UI/arrow_batch_use_after_move.jet:4:26
     |
-  6 |     kept = evens
-    |            ^^^^^ `evens` moved to the assignment to `kept` here
+  4 |     _moved: arrow.import(batch)
+    |                          ^^^^^ `batch` moved to `core.data.arrow.import` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `evens` after the move, or give the assignment to `kept` a copy with `evens.copy()` where it moved.
- Note: `evens` is one-pass — materialize it first with `evens.to_list()`, or create a fresh source for the second drive
+ Fix: Stop using `batch` after the move, or give `core.data.arrow.import` a copy with `batch.copy()` where it moved.
 More: jet-lang.dev/e/Jet.UseAfterMove
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
