@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114276,
+    "rev": 114287,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75406,7 +75406,7 @@
       "id": "c0aq9dry",
       "num": 7003,
       "title": "Clause sublanguages become marker vocabularies: #States, #Protocol, #Migration, #Defer, x.freeze() and Distinct<T>",
-      "body": "Owner approved greenfield proposal item P1 ('Clause sublanguages become marker vocabularies') on 2026-11-25 in chat. Each remaining contextual-keyword clause becomes a Prelude marker or method that takes an ordinary value; the generated handle types, checks and diagnostics stay the same. 13 words leave the language here: state, protocol, client, server, migration, rename, add, remove, change, via, defer, freeze, distinct. validate and check go with item P5, policy and wrap with item P2. The second tier (extern, task, yield, it) is not part of this approval and waits on the owner. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P1; evidence and first review: Docs/Audits/2026-11-24-greenfield-language-review.md (both in the master checkout, not yet on dev).",
+      "body": "Owner approved greenfield proposal item P1 ('Clause sublanguages become marker vocabularies') on 2026-11-25 in chat. Each remaining contextual-keyword clause becomes a Prelude marker or method that takes an ordinary value; the generated handle types, checks and diagnostics stay the same. 13 words leave the language here: state, protocol, client, server, migration, rename, add, remove, change, via, defer, freeze, distinct. validate and check go with item P5, policy and wrap with item P2. The second tier (extern, task, yield, it) is not part of this approval and waits on the owner. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P1; evidence and first review: Docs/Audits/2026-11-24-greenfield-language-review.md (both in the master checkout, not yet on dev). Second-tier ballots posted 2026-11-25 (reviewed by ReviewTierTwo): D-FOREIGN-MARKER1 (recommends building the ratified #Import rust.<crate> form), D-TASKS-SPAWN1 (recommends keeping task), D-YIELD-EMIT1 (recommends emit(v) through Emit<T>), D-TABLE-IT1 (recommends retiring it). Their review is Docs/Audits/2026-11-25-p1-second-tier-review.md (in the master checkout, to land on dev). Note from the review: a retired word stays reserved until its lexer row is deleted (Keywords.jet:2), so each cutover deletes the row.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G1",
@@ -75419,7 +75419,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Pip",
+          "text": "Posted the four P1 second-tier ballots; recorded two defects the review found."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -75512,6 +75518,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-25T17:59:27.334Z"
+        },
+        {
+          "n": 11,
+          "text": "Independent of the ballots: the loop meaning of `it`, which D-LOOP-SUBJECT1=A rejected, is built anyway (`loop nums -> it * 2` gives [2, 4, 6] on jet a0.0.46), and Compiler/JetSema/Source/Sema/Diagnostics.jet:381-382 teaches it. Proof: that loop is refused with a registered diagnostic and a UI snapshot, and no diagnostic text teaches it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T22:34:45.430Z"
+        },
+        {
+          "n": 12,
+          "text": "Independent of the ballots: E0805's text says \"declare `Stream<T> ->`\" but Jet writes `-> Stream<T>` (Compiler/JetSema/Source/Sema/Statements/Loops.jet:196, Tests/UI/yield_outside_generator.stderr:6-7), and the comments at Compiler/JetFoundation/Data/Syntax/Spellings.jet:153 and PackageFiles.jet:461 call `task` reserved although it is contextual (`task: \"…\"` binds). Proof: corrected text, regenerated snapshot, and `jet test Compiler --profile ui --filter yield_outside_generator` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T22:34:46.788Z"
         }
       ],
       "refs": [],
@@ -75519,9 +75543,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:38:31.481Z",
-      "updated": "2026-11-25T17:59:27.334Z",
+      "updated": "2026-11-25T22:34:50.044Z",
       "updatedBy": "Pip",
-      "criteriaLastN": 10
+      "criteriaLastN": 12
     },
     {
       "id": "c044xzcw",
@@ -141115,6 +141139,899 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-25T21:50:13.266Z"
+    },
+    {
+      "id": "D-FOREIGN-MARKER1",
+      "cardId": "c0aq9dry",
+      "group": "language",
+      "title": "Hand-written Rust rows: build the ratified #Import form, adopt the proposal's #Foreign marker, or keep extern rust",
+      "situation": "Jet code can call a Rust crate through a hand-written block that starts with the words extern rust and pins the crate version in source. C libraries already use another form: the library sits in the package header, and the rows sit in an #Import module. On 2026-10-30 the owner ratified D-FFI-RUSTIMPORT1=A, which moves Rust onto that same form. No build card has a criterion for it, and the compiler still refuses a Rust import path. The greenfield proposal now suggests a third form, a #Foreign marker on a module. This ballot asks that settled question again, plainly, because the proposal reopens it. We recommend A: build the ratified form, so extern stops being reserved and Rust looks like C.",
+      "gist": "Which form do hand-written Rust rows take, and do the words extern and rust leave the language?",
+      "lesson": "A foreign row is a Jet signature for a function written in another language, such as a crate's encode function. Jet has two forms for these rows. C rows sit in an #Import module, with the library named in the package header. Rust rows sit in an extern rust block, with the crate version written in the source file. The owner already chose one form for every language on 2026-10-30. This ballot decides whether that choice stands against the proposal's new #Foreign marker, or whether today's extern block stays.",
+      "explainer": "",
+      "story": "Priya wraps a Rust crate and a C library in one package. The C rows go in an #Import module, and the library sits in the package header with the other dependencies. The Rust rows need a different block with its own version string in the source file. When she bumps the crate, she edits a source file instead of the header, and the dependency report misses it.",
+      "inWild": "// Swift: the version lives in the manifest, the source only imports.\n// https://docs.swift.org/package-manager/PackageDescription/PackageDescription.html\n// Package.swift\n.package(url: \"https://github.com/apple/swift-collections\", from: \"1.1.0\")\n// Sources/App/main.swift\nimport Collections\n\n// Rust: foreign rows sit in an extern block; versions live in Cargo.toml.\n// https://doc.rust-lang.org/reference/items/external-blocks.html\nextern \"C\" {\n    fn abs(input: i32) -> i32;\n}\n\n// Go: cgo imports C as a package; module versions live in go.mod.\n// https://pkg.go.dev/cmd/cgo\nimport \"C\"",
+      "detail": "What this decides. Card #7003 carries the second tier of greenfield proposal item P1 (Docs/Proposals/2026-11-24-greenfield-language.md:227-238). Its first row is foreign code: the proposal turns `extern rust \"base64@0.22\" { }` into `#Foreign(.Rust, \"base64@0.22\")` on a module (proposal lines 229 and 2364). This ballot decides that row alone.\n\nA settled choice is asked again. On 2026-10-30 the owner ratified D-FFI-RUSTIMPORT1=A on card c08rdp62: hand-written imports use one form for every language. The dependency goes in package.jet, and the rows go in `#Import module <lang>.<name>` under a language root. Option A reaffirms that ruling. Option B replaces it with the proposal's marker. Option C amends it to its own option B and keeps `extern rust`.\n\nWhat is built today. The lexer reserves `extern` (Compiler/JetLexer/Data/Lexer/Keywords.jet:36). The registry names `KW_EXTERN` and `KW_RUST` as S50 (Compiler/JetFoundation/Data/Syntax/MathLayout.jet:565-568) and lists both in JET_KEYWORD_LIST (PackageFiles.jet:423-425). The parser reads the block in Compiler/JetParser/Source/Parser/Declarations/Foreign.jet:55-70. The spec teaches it at Docs/Spec/spec.md:5203-5227, with E0701 to E0705.\n\nThe ratified form is not built. On jet a0.0.46, `#Import rust.base64: module { }` fails with Jet.InvalidStatement (E0003), \"A C module path starts with `c.`, found `rust`\". The ruling's own probe on 2026-10-30 got the same refusal. Card c08rdp62 sits in the plan lane, and card c0ru6u3t, user Rust crates, is frozen.\n\nCard #6951 (frozen) cites D-FFI-RUSTIMPORT1=A in its body, but its criteria c2 and c4 still say `extern rust`, and no criterion builds the #Import form.\n\n```text\nProbes, jet a0.0.46 (c137227f92), scratch dir, deleted after\nextern rust \"base64@0.22\" { ... }        Jet.MissingCargo: needs cargo (this machine has none)\n#Import rust.base64: module { ... }      Jet.InvalidStatement (E0003) \"A C module path starts with `c.`, found `rust`\"\n#Foreign(.Rust, \"base64@0.22\") b64: module { ... }   parse error at the row's `=`\nuse b64: rust.base64 (no #Import)        Jet.ReservedRootShadowed: `rust` is reserved for first-party or foreign packages\ndeps: { base64: rust@\"base64@0.22\" }     the in-file header parsed; a C import beside it ran and printed 7\n```\n\nEvery site of the same mechanism. Hand-written C rows: `#Import c.<lib>: module`. Generated C rows: `#Bindgen c.<lib>.__bindgen__: module` and `use \"z.h\"` (spec.md:5229-5242, S58, S59). Inline foreign bodies: `#FFI(c|cpp|asm)` (spec.md:5190-5201, D-FFI-INLINE1, D-FFI-ONE1).\n\nThe rest of the family. Language readers as packages (D-FFI-BINDER1, D-FFI-LANG1). Exports (D-FFI-EXPORT3). Foreign dependency rows, `name: lang@\"ref\"`, parsed by Jetpack/PackageModel/Source/Manifest/Blocks/Dependencies.jet:177-192 and locked as `LockSource.Foreign`. Hand-written Rust rows: `extern rust`. Only the last one has its own words.\n\nUse counts on dev de8a554abe1, outside comments and strings. Line-start `extern rust` blocks in .jet files: Tests 51, Examples 1 (FFI.jet:11), Tools 1, Docs 1; Core, Compiler and Jetpack 0. One more fixture writes `extern c { }` to test a refusal. The .case files hold 16 more lines in 12 files. `#Import c.` blocks: Examples 13, Tests 108, Tools 3 and Jetpack 1.\n\nThe implementation is larger than the words. The text `extern rust` appears in 18 Compiler files and 6 Jetpack files. The AST item behind it, `Item.ExternRust`, appears on 358 lines in 124 Compiler files and in 7 Jetpack files. Most of those are arms of exhaustive item matches, such as Compiler/JetSema/Source/Sema/Calls/Direct.jet:1470 and Effects/Checks.jet:2062.\n\nWhat A changes. One item serves both languages. Today `CModule{kind, lib, path_span, functions: [ExternFn], span}` (Compiler/JetFoundation/Source/AST/Items.jet:428) and `ExternRustBlock{crate_spec, crate_span, functions: [ExternFn], span}` (Items.jet:831) already share their rows. A merges them into one import-module item keyed by its language root. It deletes `Item.ExternRust` and its arms in the 124 files.\n\nThe `#Import` head accepts any foreign root the FFI list names (Compiler/Prelude/Effects.jet:73-98), as the ruling's `<lang>` says. A root with no bridge for hand-written rows is refused with a new error that names the roots that have one, today c and rust. The crate and version come from a package header row, `deps: { base64: rust@\"base64@0.22\" }`, the form Jetpack already parses and locks.\n\nC libraries already come from `name: c@\"path\"` rows (Examples/Interop/FFI/NativeC/package.jet:7). E0701's version-pin check moves to the deps row. The hidden cargo bridge reads crates from those rows. E0703 for a missing cargo, `#Close(close)` rows and `#Unsafe(\"reason\") { }` vouch blocks (D-FFI-VOUCH1) stay.\n\nGrants follow the C rule (D-FFI-EFFECTS1, spec.md:5250-5271). A C call records `FFI.C(\"<lib>\")`, and a written `#Import` with no row descriptor needs that grant in `authority`. Under A a Rust call records `FFI.Rust(\"<crate>\")` under the same rule, so the example grants `FFI.Rust(\"base64\")`. Today's typed Rust rows charge no FFI leaf [INFERENCE: no FFI.Rust appears in Compiler/JetSema]. So the rewrite adds that grant.\n\nOverlays follow the C rule too. A C `#Import` overlays the generated `#Bindgen` union, and the overlay wins (spec.md:5229-5242). Rust rows overlay a generated Rust binding the same way once a Rust binder exists.\n\nThe word leaves the lexer. Keywords.jet:2 says a retired word stays reserved. A deletes the `KW_EXTERN` row instead, since a reserved word for nothing is the cost being removed. The old spelling is taught by the registered `jet fix` rewrite (Compiler/JetFoundation/Data/Syntax/Spellings.jet:101-109). `rust` stays what `c` is, a reserved import root.\n\nCounted surface (Tools/Agent/surface_budget.tsv). Keywords are 21 today; A makes them 20. B also makes them 20 and raises markers from 80 to 81 for `#Foreign`. C keeps 21.\n\nCutover list for A. `jet fix` rewrites each block: it moves the crate string into a deps row, adds the grant, writes the module head and `use` line, and qualifies the calls. The words leave Keywords.jet:36, MathLayout.jet:565-568, PackageFiles.jet:423-425, Highlights.jet:117-121 and SyntaxDictionaryData. The parser's `parser_parse_extern_rust`, `ExternRustBlock` and `Item.ExternRust` are deleted with their 124-file match arms.\n\nThe rest of the cutover. The 7 Jetpack files that read `Item.ExternRust` (Integrations Foreign/RustBridge, Recipe, Foundation SyntaxRegistry.jet:1196) read the merged item. Prelude Diagnostics.jet:9813-9855 and the spec section are rewritten. The 54 blocks and 16 case lines migrate. Card #6951's criteria c2 and c4 are respelled.\n\nEdge cases. A single-file script keeps its deps in the in-file header, as the probe shows. A crate whose name has a hyphen gets a Jet key, as in `unicode_width: rust@\"unicode-width@0.1\"`. Two versions of one crate need two keys. The `std` crate needs no deps row, as `extern rust \"std\"` needs no dependency today (spec.md:5206-5207).\n\nCalls become qualified (`b64.encode`), as C calls already are. A crate used without a deps row is refused with a fix that writes the row. A `use name: rust.<crate>` with no `#Import` stays Jet.ReservedRootShadowed.\n\nBeginner path. Beginners use generated bindings (`use \"z.h\"` or a reader package) under every option. Hand-written rows are an expert path. Under A, that path has one shape for every language, so learning C rows teaches Rust rows.\n\nExpert path. Experts see every dependency, Rust or C, in one deps list, which tools can read without scanning source [INFERENCE: no dependency report was checked for this]. Under B, versions live in source markers, so such a tool must also scan modules. Under C, they live in extern blocks, as today.\n\nCosts. A needs a parser change, a merged AST item touching 124 files, the Rust grant and one `jet fix` rewrite. It removes one lexer word and one listed word. No runtime cost changes, because the bridge and the calls are the same. B adds a marker and keeps a second form beside C's. C keeps both words and both forms.\n\nThe proposal at its best. `#Foreign` could also take C, as `#Foreign(.C, \"z\")`, which would give one form too. That costs rewriting about 125 `#Import c` blocks, and it keeps versions in source, against the deps rows Jetpack already locks. The proposal does not suggest that, and its B as written leaves two forms.\n\nPeers. Swift, Go and Rust keep versions in a manifest and imports in source. Kotlin/Native and Zig declare C interfaces through a tool or builtin, never with a version in code. None of them gives one foreign language a separate declaration keyword.",
+      "options": [
+        {
+          "name": "Build the ratified form: Rust rows in #Import rust.<crate>: module, the version in the package header",
+          "key": "A",
+          "detail": "Rust rows use the shape C rows use today. The crate and its version go in the package header's deps list. The rows go in an #Import module under the rust root, and code calls them through a use name. extern stops being reserved, rust stays only an import root, and jet fix rewrites every block.",
+          "technical": "Reaffirms D-FFI-RUSTIMPORT1=A in today's #Import c.<lib>: module shape. Merges CModule and ExternRustBlock into one import-module item keyed by language root, deleting Item.ExternRust and its arms in 124 Compiler files. The #Import head accepts any FFI root and refuses one with no hand-written bridge. The bridge reads crates from deps rows; E0701 moves to the row. Rust calls take the C grant rule, FFI.Rust(\"crate\"). Deletes the KW_EXTERN lexer row rather than retiring it; keywords 21 to 20.\n\nBeginner path: generated bindings, unchanged. Expert path: one shape for every language, all versions in one list. Costs: the merged item, one jet fix rewrite of 54 blocks and 16 case lines, a grant per crate. Edge cases: in-file headers, hyphenated crates, two versions, qualified calls.",
+          "code": "// A: the dependency in the package header, the rows in #Import (as C does today)\npackage: {\n    name: \"lowlevel_ffi\"\n    version: \"0.1.0\"\n    authority: { allow: [IO, FFI.Rust(\"base64\")] }\n    deps: { base64: rust@\"base64@0.22\" }\n}\n\nuse b64: rust.base64\n\n#Import rust.base64: module {\n    encode: fn(s: String) -> String = \"base64::encode\"\n}\n\nrun: fn() { print(b64.encode(\"hi\")) }\n\n// The C form it mirrors, unchanged (Examples/Interop/FFI/LibraryGrant.jet:5-15):\n// authority: { allow: [IO, FFI.C(\"c\")] }\nuse native: c.c\n#Import c.c: module {\n    absolute: fn(n: Int) -> Int = \"labs\"\n}"
+        },
+        {
+          "name": "Adopt the proposal's marker: #Foreign(.Rust, \"crate@version\") on a module",
+          "key": "B",
+          "detail": "Rust rows sit in an ordinary module carrying a #Foreign marker, as the proposal writes it. The version stays in source. C rows keep #Import, so Jet gains a third foreign form beside #Import and #FFI. The word extern still stops being reserved.",
+          "technical": "Replaces D-FFI-RUSTIMPORT1=A. New marker #Foreign registered beside #Import and #FFI; the bridge reads its argument. Keywords 21 to 20, markers 80 to 81. The probe on a0.0.46 fails to parse the module rows, so the marker and row grammar are both new. Extending #Foreign to C would give one form but rewrite about 125 #Import c blocks.\n\nBeginner path: unchanged. Expert path: Rust and C rows look different again. Costs: a new marker, a second module form, and versions scattered across source. Edge cases match A, plus a #Foreign module with no version.",
+          "code": "// B: the proposal's marker on a module, version in source\npackage: {\n    name: \"lowlevel_ffi\"\n    version: \"0.1.0\"\n    authority: { allow: [IO] }\n}\n\n#Foreign(.Rust, \"base64@0.22\")\nb64: module {\n    encode: fn(s: String) -> String = \"base64::encode\"\n}\n\nrun: fn() { print(b64.encode(\"hi\")) }\n\n// C libraries keep #Import c.<lib>: module, so two forms remain."
+        },
+        {
+          "name": "Keep extern rust as it is",
+          "key": "C",
+          "detail": "Today's block stays: extern rust, the crate and version in a string, and the rows inside. No code moves. Rust keeps a form of its own, and extern stays reserved.",
+          "technical": "Amends D-FFI-RUSTIMPORT1 to its option B. S50 stands. The lexer keeps extern, and the registry keeps KW_EXTERN and KW_RUST; keywords stay 21.\n\nBeginner path: unchanged. Expert path: two shapes for hand-written rows and versions in two places. Costs: none now; the dependency report keeps reading extern blocks. Edge cases: unchanged.",
+          "code": "// C: keep today's block (D-FFI-RUSTIMPORT1 amended to its option B)\nextern rust \"base64@0.22\" {\n    b64encode: fn(s: String) -> String = \"base64::encode\"\n}\n\nrun: fn() { print(b64encode(\"hi\")) }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Package.swift lists every dependency with its version; source files only write import. C libraries come in through module maps the same way. Source: https://docs.swift.org/package-manager/PackageDescription/PackageDescription.html",
+          "code": "// Package.swift\n.package(url: \"https://github.com/apple/swift-collections\", from: \"1.1.0\")\n// main.swift\nimport Collections"
+        },
+        {
+          "lang": "Rust",
+          "note": "Foreign rows sit in an extern block, but the block names an ABI, not a crate or a version. Versions live in Cargo.toml. Source: https://doc.rust-lang.org/reference/items/external-blocks.html",
+          "code": "extern \"C\" {\n    fn abs(input: i32) -> i32;\n}"
+        },
+        {
+          "lang": "Go",
+          "note": "cgo makes C look like a package named C. Module versions live in go.mod, never in source. Source: https://pkg.go.dev/cmd/cgo",
+          "code": "// #include <stdlib.h>\nimport \"C\"\nfunc main() { C.abs(-7) }"
+        },
+        {
+          "lang": "Zig",
+          "note": "C headers come in through a builtin that returns an ordinary namespace; packages and versions live in build.zig.zon. Source: https://ziglang.org/documentation/master/#cImport",
+          "code": "const c = @cImport(@cInclude(\"stdlib.h\"));\npub fn main() void { _ = c.abs(-7); }"
+        },
+        {
+          "lang": "Kotlin/Native",
+          "note": "A .def file read by the cinterop tool declares the C library; Gradle holds versions. Source: https://kotlinlang.org/docs/native-c-interop.html",
+          "code": "// png.def\nheaders = png.h\npackage = libpng"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A is the owner's own 2026-10-30 ruling. It gives Rust the shape C already has and keeps every version in one header list. The proposal's goal, removing extern, is met without adding a third foreign form. B would add that third form and keep versions in source. C keeps two shapes for one job.",
+        "tradeoff": "One merged AST item, a grant per crate and one jet fix rewrite of 54 blocks buy one foreign form for every language, one dependency list, and one fewer reserved word. Calls become qualified, as C calls are today.",
+        "gains": [
+          "Rust and C rows share one shape, so learning one teaches the other.",
+          "Every dependency version sits in the package header, where the report reads it.",
+          "extern leaves the 21 reserved words, and rust stays only an import root, as c is.",
+          "The parser, sema and diagnostics lose a form of their own, and two AST items become one."
+        ],
+        "losses": [
+          {
+            "loss": "Calls become qualified, so b64encode(\"hi\") becomes b64.encode(\"hi\").",
+            "mitigation": "jet fix writes the use name and rewrites each call. C calls are already qualified, so both read the same."
+          },
+          {
+            "loss": "The 54 blocks, 16 case lines, the spec section and 124 compiler files change in one cutover.",
+            "mitigation": "jet fix moves each crate string into a deps row and writes the module head; Tests hold 51 of the blocks. Most compiler sites are match arms that disappear."
+          },
+          {
+            "loss": "A package calling Rust rows must grant FFI.Rust for each crate, as it grants FFI.C for each C library.",
+            "mitigation": "jet fix adds the grant, and the grant makes visible that the crate's code can do anything."
+          },
+          {
+            "loss": "A reader no longer sees the crate version next to the rows.",
+            "mitigation": "Hover on the import path shows the version, and the package header is the one place it changes."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps two foreign forms, since C stays on #Import, adds a counted marker and puts versions back in source files. It replaces a ruling the owner made four weeks earlier with no new evidence."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps a second shape for hand-written rows and a reserved word for one language. The dependency report keeps reading versions from source blocks."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewTierTwo. The review found the cutover understated by about 120 files and A missing the C grant rule, the every-language root and the lexer row deletion. It repaired A to merge the two AST items, take the grant rule, and state B's best case and the keyword counts."
+      },
+      "checkInstructions": "On dev, read Examples/Interop/FFI/FFI.jet and Examples/Interop/FFI/LibraryGrant.jet for the two forms. Read Compiler/JetLexer/Data/Lexer/Keywords.jet:1-36, Compiler/JetFoundation/Data/Syntax/MathLayout.jet:565-642 and PackageFiles.jet:417-494 for the words. Read Compiler/JetParser/Source/Parser/Declarations/Foreign.jet:55-70 for the block parser. Read Compiler/JetFoundation/Source/AST/Items.jet:428 and 831 for the two items. Read Docs/Spec/spec.md:5190-5271 for the foreign tiers and grants.\n\nRun node Tools/Tower/tower.mjs decision show D-FFI-RUSTIMPORT1 --json and confirm A matches its option A, with the declaration in today's #Import c.<lib>: module shape. Run card show 6951 and card show 7003 to see which criteria name extern rust.\n\nCount blocks with git grep -n -E '^\\s*extern\\s+rust' -- '*.jet' and git grep -n 'extern rust' -- '*.case' on dev. Count the item with git grep -c ExternRust -- 'Compiler/*.jet'.\n\nIn a scratch directory, write FFI.jet as in option A and run jet run FFI.jet on jet a0.0.46: expect Jet.InvalidStatement (E0003) naming the c root. Write today's form: expect Jet.MissingCargo on a machine without cargo, and the base64 output aGk= where cargo exists. Delete the directory.",
+      "surface": {
+        "gist": "Should hand-written Rust rows use the #Import form C rows use, a new #Foreign marker, or today's extern rust block?",
+        "lesson": "Jet calls a Rust crate through rows that give each function a Jet signature. C rows sit in an #Import module, with the library in the package header. Rust rows sit in an extern rust block with the version in source. The owner chose one form for both in October, but it was never built.",
+        "trio": {
+          "current": {
+            "note": "Today Rust rows have their own block, with the version in source.",
+            "code": "extern rust \"base64@0.22\" {\n    b64encode: fn(s: String) -> String = \"base64::encode\"\n}\n\nrun: fn() { print(b64encode(\"hi\")) }"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "Versions live in the manifest; source files only import.",
+            "code": "// Package.swift\n.package(url: \"https://github.com/apple/swift-collections\", from: \"1.1.0\")\n// main.swift\nimport Collections"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "The ratified #Import form",
+            "gist": "Rust rows sit in an #Import module like C rows, and the version moves to the package header.",
+            "proposed": {
+              "code": "package: {\n    name: \"lowlevel_ffi\"\n    authority: { allow: [IO, FFI.Rust(\"base64\")] }\n    deps: { base64: rust@\"base64@0.22\" }\n}\n\nuse b64: rust.base64\n\n#Import rust.base64: module {\n    encode: fn(s: String) -> String = \"base64::encode\"\n}\n\nrun: fn() { print(b64.encode(\"hi\")) }"
+            },
+            "gains": [
+              "Rust and C rows share one shape.",
+              "Every version sits in one header list.",
+              "extern stops being reserved."
+            ],
+            "losses": [
+              "Calls become qualified, as C calls are.",
+              "Each crate needs a grant, as each C library does.",
+              "54 blocks move in one jet fix rewrite."
+            ]
+          },
+          {
+            "key": "B",
+            "name": "The proposal's #Foreign marker",
+            "gist": "A marker on an ordinary module names the language and the crate version.",
+            "proposed": {
+              "code": "#Foreign(.Rust, \"base64@0.22\")\nb64: module {\n    encode: fn(s: String) -> String = \"base64::encode\"\n}\n\nrun: fn() { print(b64.encode(\"hi\")) }"
+            },
+            "gains": [
+              "extern stops being reserved.",
+              "The version stays beside the rows."
+            ],
+            "losses": [
+              "C keeps #Import, so two forms remain.",
+              "A new marker is counted.",
+              "Versions stay scattered across source files."
+            ]
+          },
+          {
+            "key": "C",
+            "name": "Keep extern rust",
+            "gist": "Today's block stays, and nothing moves.",
+            "proposed": {
+              "code": "extern rust \"base64@0.22\" {\n    b64encode: fn(s: String) -> String = \"base64::encode\"\n}"
+            },
+            "gains": [
+              "No code changes."
+            ],
+            "losses": [
+              "Rust keeps a form of its own.",
+              "extern stays a reserved word."
+            ]
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A is the owner's October ruling. Rust rows get the shape C rows have, every version sits in one list, and extern stops being reserved.",
+          "tradeoff": "One rewrite of 54 blocks and a grant per crate buy one foreign form and one fewer reserved word.",
+          "gains": [
+            "One shape for Rust and C rows.",
+            "One list holds every dependency version.",
+            "One fewer reserved word."
+          ],
+          "losses": [
+            {
+              "loss": "Calls become qualified, like b64.encode.",
+              "mitigation": "jet fix writes the use name and rewrites each call."
+            },
+            {
+              "loss": "54 blocks change in one cutover.",
+              "mitigation": "jet fix moves each crate string into the header and adds the grant."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It keeps two foreign forms, adds a marker and keeps versions in source."
+            },
+            {
+              "key": "C",
+              "reason": "It keeps a second form and a reserved word for one language."
+            }
+          ]
+        }
+      },
+      "reports": [
+        {
+          "title": "Greenfield language proposal",
+          "path": "Docs/Proposals/2026-11-24-greenfield-language.md",
+          "note": "Part 2 item P1, second tier: extern rust becomes a #Foreign marker (lines 227-238, 229 and 2364)."
+        },
+        {
+          "title": "P1 second-tier ballots, adversarial review",
+          "path": "Docs/Audits/2026-11-25-p1-second-tier-review.md",
+          "note": "Claims, probes, counts and repairs for this ballot and its three siblings."
+        }
+      ],
+      "draftedBy": "Pip",
+      "reviewedBy": "ReviewTierTwo",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T22:34:19.957Z"
+    },
+    {
+      "id": "D-TASKS-SPAWN1",
+      "cardId": "c0aq9dry",
+      "group": "language",
+      "title": "Starting tasks: keep the task word and its family, or move to a spawn function inside a #Tasks block",
+      "situation": "Jet starts a task by writing the word task before a call or a block, and fans work out with task.all, task.race, task.any and task.group. The owner chose that exact family on 2026-08-06, in D-CONC-SPAWN1, from his own feedback. That ballot rejected a block plus a library spawn call that wraps each child in a lambda. The greenfield proposal now suggests nearly that rejected shape: a spawn function taking a lambda, inside a #Tasks block that joins its children. This ballot asks the question again, plainly, for this one word. Task is not a reserved word today, so retiring it frees no name, and the proposal's block would add a counted marker. We recommend A: keep the task family as ratified.",
+      "gist": "Should tasks start with the task word as today, or with a spawn function call inside a #Tasks block?",
+      "lesson": "A task is work that runs at the same time as the code that started it. Jet starts one by writing task before a call, as in task size(url). The combinators task.all, task.race and task.any start several and wait, and task.group opens a scope that waits for its children. The proposal would write spawn(fn() { size(url) }) inside a #Tasks block instead. This ballot decides which spelling Jet keeps for starting and grouping tasks.",
+      "explainer": "",
+      "story": "Sam's compiler pass splits a file list into chunks and checks each chunk in its own task. Today each line reads head: task check_range(files, from, to). Under the proposal each becomes head: spawn(fn() { check_range(files, from, to) }). The Jet compiler itself has about 230 lines that bind a name to a task, and Sam's tests have hundreds more.",
+      "inWild": "// Go: one keyword starts a goroutine; no lambda for a plain call.\n// https://go.dev/ref/spec#Go_statements\ngo fetch(url)\n\n// Kotlin: a scope function and a launch call that takes a lambda.\n// https://kotlinlang.org/docs/coroutines-basics.html\ncoroutineScope {\n    launch { fetch(url) }\n}\n\n// Swift: async let for a fixed set, a task group with closures for a dynamic set.\n// https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/\nasync let first = size(urls[0])\nawait withTaskGroup(of: Int.self) { group in\n    for url in urls { group.addTask { size(url) } }\n}",
+      "detail": "What this decides. Card #7003 carries the second tier of greenfield proposal item P1 (Docs/Proposals/2026-11-24-greenfield-language.md:227-238). Its second row is `task { }` (Spellings.jet:154, Examples/Apps/Web/AppImages.jet:68). The proposal writes it as a Prelude `spawn(fn() { })` inside a `#Tasks { }` block that joins its tasks. See proposal lines 2256 and 2360, and section 3.13 at 1998-2032. This ballot decides that row alone.\n\nA settled choice is asked again. D-CONC-SPAWN1=D, ratified 2026-08-06, chose `task`, `task.all`, `task.race`, `task.any` and `task.group`. Its option D came from the owner's own feedback on that ballot. The same ballot's option B kept a `taskgroup` block, a `core.tasks` import and a lambda wrapper around each child. It lost for its import and lambda ceremony. The proposal's form is close to that rejected option.\n\nOption A here reaffirms D-CONC-SPAWN1=D. Option B would replace it. The proposal's best case is fair to state: concurrency would be a library function and a block marker, with no syntax of its own, as in Kotlin, Python and Rust. Its `#Tasks` block also follows the proposal's one rule that markers stand before what they mark.\n\nWhat is built today. `KW_CONC_TASK: \"task\"` sits at Compiler/JetFoundation/Data/Syntax/Spellings.jet:154, with `task.all` to `task.group` at 166-175. JET_KEYWORD_LIST lists it at PackageFiles.jet:462. The lexer does not reserve it: Compiler/JetLexer/Data/Lexer/Keywords.jet has 21 reserved words, and `task` is not one. The parser reads `task` only where a task form follows (Compiler/JetParser/Source/Parser/Statements.jet:659 and 2154).\n\nThe ratified text and the build differ on one point. D-CONC-SPAWN1's option D says \"Only task becomes a reserved word\", and the comments at Spellings.jet:153 and PackageFiles.jet:461 still call it reserved. The build made it contextual instead, which is kinder to users. Option A confirms the contextual status and corrects those two comments.\n\nThe word is already sugar over a spawn call. Compiler/JetFoundation/Source/AST/Expressions.jet:619-676 writes each task form as a one-argument call on a receiver no source can spell. `task f()` becomes that hidden spawn call with a lambda around `f()`. The comment says \"The language owns them\": the spawned lambda gets the task capture rules, not a closure's. So the proposal's `spawn` would still be compiler-owned, a word in a function's clothing.\n\n```text\nProbes, jet a0.0.46 (c137227f92), scratch dir, deleted after\ntoday: task.all {first: ..., second: ...} and task.group g { task size(url) }\n       prints \"pair 9 10\" and \"total 30\"\nproposal: #Tasks { pa: spawn(fn() { size(urls[0]) }) ... }\n       Jet.UnknownAppliedRule: `#Tasks` isn't a known applied rule\n       Jet.UnknownFunction: Nothing named `spawn` exists here\nname:  task: \"write the report\"; print(task)    prints the text\nname:  all: 3 beside task.all                    works\nuser fn task(n) = n * 2 beside spawning:\n       task(4) -> 8; task (size(\"abc\")) -> 6; task size(\"abc\") joined -> 3\n```\n\nUse counts on dev de8a554abe1, outside comments and strings. Spawn forms are `task f()`, `task { }` and `task ^^name { }`. The drafter's patterns find about 1,150: Compiler about 244 in 69 files, Core 43, Jetpack 26, Tools 36, Examples 82, Tests 703 and Docs 17. A broader pattern finds about 1,270 (Compiler 263, Jetpack 30, Tools 43, Examples 94, Tests 779, Docs 20). The .case files add 10 lines.\n\nCombinators (`task.all`, `task.race`, `task.any`, `task.group`, `task.timeout`): Compiler 163, Core 6, Jetpack 4, Tools 8, Examples 35, Tests 272 to 276, Docs 1, so about 490. All told about 1,650 to 1,760 sites.\n\nThe compiler is the heaviest user. It has 233 lines of the form `name: task …`, about 100 of them named `head`. Examples are Compiler/JetBackend/Source/Image/Dwarf.jet:295, `head: task dwarf_eh_chunk(...)`, and Compiler/JetSema/Source/Sema/Effects/Checks.jet:7970. Under B every one gains `spawn(fn() { … })`, eleven more characters and a nesting level.\n\nCounted surface (Tools/Agent/surface_budget.tsv). `task` is not a counted keyword, because the lexer does not reserve it. So A changes no count. B keeps keywords at 21 and raises markers from 80 to 81 for `#Tasks`: the proposal's form grows the counted surface. C changes no count.\n\nEvery site of the same mechanism. Starting work: `task` forms. Fan-out: `task.all`, `task.race`, `task.any` (D-CONC-FAIL1). Scopes: `task.group name(limit:, stack:) { }` (D-THREAD-STACK1), a `Group` parameter (D-CONC-GROUP1, D-TASKGROUP-PARAM1). Handles: `Task<T>`, `join`, `detach` (D-CONC-JOIN1, D-DETACH1). Deadlines: `task.timeout` (Examples/Concurrency/TaskTimeoutDeadline.jet).\n\nCaptures: `task ^^name` moves, `freeze` shares (D-CONC-FREEZE1, D-CONC-CROSS1, D-CALLSITE-MARK2), and a group child may borrow (D-TASKBORROW1, D-TASK-WINDOW1). Streams run their producers as tasks (D-CONC-STREAM1). Background queues (D-CONC-BACKGROUND1) and `par_map` (D-PARA-LIMIT1) start no tasks by hand.\n\nWhat B would change. `spawn` becomes a Prelude function, but the compiler must still give its lambda the task capture rules. `#Tasks` becomes a block marker that joins, a second spelling of what `task.group` does today. `task.all` and its siblings become library calls over lambdas. About 1,650 sites change.\n\nA named `task.all {first: …, second: …}` returns a record, which a library function can only build from a typed record of lambdas [INFERENCE: no such generic exists today]. `task.group g(limit: 4)` needs a marker argument and a way to name the group for helpers. Detached tasks become `spawn(…, detached: true)`.\n\nWhat A keeps. Nothing changes in code, the parser or the spec; only the two comments above are corrected. The proposal's section 3.5, 3.6 and 3.13 examples would be respelled with `task` when the proposal is next edited.\n\nEdge cases. Under A, `task` stays usable as a name, as the probe shows. A user function named `task` also stays callable: `task(` is a call, and only `task` before another form spawns. Under B, `spawn` becomes a Prelude name, so a user function called `spawn` shadows it [INFERENCE: ordinary Prelude shadowing]. A `#Tasks` block inside a generator, a `Group` passed to a method, and `task.timeout` would each need a new spelling under B.\n\nBeginner path. Today a beginner writes `h: task work()` and `h.join()`, or `task.all { a(), b() }`. Under B the first lesson also teaches lambdas and a block marker. Expert path. Experts keep group limits, stacks, `Group` parameters and capture marks under A. Under B each needs a new argument or marker.\n\nCosts. A costs nothing. B costs about 1,650 rewrites, a compiler-owned function, new library combinators and a marker, and adds characters to the most common concurrency line. Performance is the same under both, because both lower to the same hidden spawn call.\n\nPeers. Go spells spawning as one keyword. Kotlin, Python and Rust use scope functions with lambdas, because they have no syntax of their own for it. Swift has both: `async let` for a fixed set and task groups with closures for dynamic sets.",
+      "options": [
+        {
+          "name": "Keep the task family as ratified",
+          "key": "A",
+          "detail": "task f() starts a child, task.all, task.race and task.any fan out, and task.group opens a scope that waits. Nothing changes. task stays a contextual word, so it is still usable as a name.",
+          "technical": "Reaffirms D-CONC-SPAWN1=D (2026-08-06) with D-CONC-GROUP1, D-CONC-JOIN1, D-CONC-FAIL1 and the capture decisions. Confirms task as contextual, as built, where D-CONC-SPAWN1's text said reserved; the comments at Spellings.jet:153 and PackageFiles.jet:461 are corrected. No counted surface changes. The proposal's P1 second-tier task row and its section 3.5, 3.6 and 3.13 examples are respelled to task.\n\nBeginner path: h: task work() and h.join(). Expert path: group limits and stacks, Group parameters, capture marks. Costs: none. Edge cases: unchanged.",
+          "code": "size: fn(url: String) -> Int { url.len() }\n\nrun: fn() {\n    urls: [String]{\"a.example\", \"bb.example\", \"ccc.example\"}\n    pair: (task.all {first: size(urls[0]), second: size(urls[1])}) ?? panic(\"task.all failed\")\n    print(\"pair {pair.first} {pair.second}\")\n    task.group g {\n        ^handles: [Task<Int>]{}\n        loop url in urls { handles.push(task size(url)) }\n        ^total: 0\n        loop h in handles { total += h.join() ?? 0 }\n        print(\"total {total}\")\n    }\n}\n// prints: pair 9 10, then total 30"
+        },
+        {
+          "name": "The proposal: spawn(fn() { }) inside a #Tasks block",
+          "key": "B",
+          "detail": "A #Tasks block waits for every task started inside it. spawn takes a lambda and returns a handle. Combinators become library calls over lambdas, and a detached task passes detached: true. The task word leaves JET_KEYWORD_LIST.",
+          "technical": "Replaces D-CONC-SPAWN1=D, close to its rejected option B. New block marker #Tasks, replacing task.group; markers 80 to 81, keywords stay 21. spawn is a Prelude function the compiler still owns for capture rules. task.all, task.race, task.any, task.group and task.timeout each need a library or marker spelling. About 1,650 sites migrate.\n\nBeginner path: lambdas and a block marker in the first lesson. Expert path: limits, stacks and group names need marker arguments. Costs: the rewrite, new combinators, longer lines. Edge cases: Prelude shadowing of spawn; named all results.",
+          "code": "size: fn(url: String) -> Int { url.len() }\n\nrun: fn() {\n    urls: [String]{\"a.example\", \"bb.example\", \"ccc.example\"}\n    #Tasks {\n        pa: spawn(fn() { size(urls[0]) })\n        pb: spawn(fn() { size(urls[1]) })\n        print(\"pair {pa.join() ?? 0} {pb.join() ?? 0}\")\n    }\n    #Tasks {\n        ^handles: [Task<Int>]{}\n        loop url in urls { handles.push(spawn(fn() { size(url) })) }\n        ^total: 0\n        loop h in handles { total += h.join() ?? 0 }\n        print(\"total {total}\")\n    }\n}\n// a0.0.46: Jet.UnknownAppliedRule, `#Tasks` isn't a known applied rule"
+        },
+        {
+          "name": "Rename the word to spawn and keep the shapes",
+          "key": "C",
+          "detail": "spawn f() replaces task f(), and spawn.all, spawn.race, spawn.any and spawn.group replace the task forms. The shapes stay; only the word changes, to match Rust, Tokio and Trio.",
+          "technical": "Amends D-CONC-SPAWN1=D's word only. Same parser, AST and sema; the registry row and every site change. No counted surface changes.\n\nBeginner path: as A with a different word. Expert path: as A. Costs: about 1,650 rewrites for a synonym, and Task<T> no longer matches the word that makes it. Edge cases: spawn becomes contextual as task is.",
+          "code": "size: fn(url: String) -> Int { url.len() }\n\nrun: fn() {\n    urls: [String]{\"a.example\", \"bb.example\", \"ccc.example\"}\n    pair: (spawn.all {first: size(urls[0]), second: size(urls[1])}) ?? panic(\"spawn.all failed\")\n    print(\"pair {pair.first} {pair.second}\")\n    spawn.group g {\n        ^handles: [Task<Int>]{}\n        loop url in urls { handles.push(spawn size(url)) }\n        ^total: 0\n        loop h in handles { total += h.join() ?? 0 }\n        print(\"total {total}\")\n    }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "The go statement starts a goroutine from a plain call, with no lambda and no scope. Source: https://go.dev/ref/spec#Go_statements",
+          "code": "go fetch(url)"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Structured concurrency is a scope function plus launch or async calls that take lambdas; the compiler has no special syntax. Source: https://kotlinlang.org/docs/coroutines-basics.html",
+          "code": "coroutineScope {\n    val a = async { size(urls[0]) }\n    val b = async { size(urls[1]) }\n    println(\"pair ${a.await()} ${b.await()}\")\n}"
+        },
+        {
+          "lang": "Swift",
+          "note": "async let starts a child from a plain expression; a task group takes closures for dynamic counts. Source: https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/",
+          "code": "async let first = size(urls[0])\nlet total = await withTaskGroup(of: Int.self) { group in\n    for url in urls { group.addTask { size(url) } }\n    return await group.reduce(0, +)\n}"
+        },
+        {
+          "lang": "Python",
+          "note": "asyncio.TaskGroup waits for every task created inside its with block. Source: https://docs.python.org/3/library/asyncio-task.html#task-groups",
+          "code": "async with asyncio.TaskGroup() as tg:\n    a = tg.create_task(size(urls[0]))\nprint(a.result())"
+        },
+        {
+          "lang": "Rust",
+          "note": "Scoped threads take closures and join at the scope's end, so they may borrow locals. Source: https://doc.rust-lang.org/std/thread/fn.scope.html",
+          "code": "std::thread::scope(|s| {\n    s.spawn(|| size(&urls[0]));\n});"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The change is worse for users here. task is not a reserved word, so retiring it shrinks nothing the lexer reserves, and #Tasks would add a counted marker. It is the most frequent concurrency line in the repository, and the compiler already owns the hidden spawn call behind it. The owner chose this family on 2026-08-06 over the same lambda-wrapper shape.",
+        "tradeoff": "Keeping task leaves one contextual word in JET_KEYWORD_LIST. In return about 1,650 lines stay short, beginners meet no lambda in their first task, and no ruling is reversed.",
+        "gains": [
+          "About 1,650 task lines stay as they are, with no lambda wrapper.",
+          "A beginner's first task needs no lambda and no block marker.",
+          "Group limits, stacks, Group parameters and capture marks keep their spellings.",
+          "The owner's 2026-08-06 ruling stands, and the counted surface does not grow."
+        ],
+        "losses": [
+          {
+            "loss": "task stays in JET_KEYWORD_LIST, so the word list does not shrink by one.",
+            "mitigation": "The lexer never reserved task, so it stays usable as a name and costs users nothing."
+          },
+          {
+            "loss": "Concurrency keeps syntax of its own, where Kotlin and Python use library calls.",
+            "mitigation": "The compiler owns the spawn call's capture rules either way, so a library spelling would only hide that."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It wraps every one of about 1,150 to 1,270 spawn sites in a lambda and needs new library combinators. It frees no reserved word and adds a counted marker. Its spawn would still be compiler-owned, and it nearly restores an option the owner rejected."
+          },
+          {
+            "key": "C",
+            "reason": "It rewrites about 1,650 sites to trade one contextual word for another, and Task<T> would no longer match the word that makes it."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewTierTwo. The review reran the probes, recounted the sites and found the spawn forms understated. It added that B grows the counted surface by one marker and that the ratified text called task reserved where the build made it contextual."
+      },
+      "checkInstructions": "On dev, read Compiler/JetFoundation/Data/Syntax/Spellings.jet:146-212 for the task family. Read Compiler/JetLexer/Data/Lexer/Keywords.jet for the 21 reserved words. Read Compiler/JetFoundation/Source/AST/Expressions.jet:619-676 for the hidden spawn call. Read Compiler/JetParser/Source/Parser/Statements.jet:659 and 2154 for where task is read. Read Docs/Spec/spec.md:4450-4583 and 4854-4953, and Tools/Agent/surface_budget.tsv for the counts.\n\nRun node Tools/Tower/tower.mjs decision show D-CONC-SPAWN1 --json and compare its options B and D with this ballot's B and A.\n\nCount with git grep -n -E '(:|=)\\s*task\\s' and git grep -n -E 'task\\.(all|race|any|group|timeout)' per top directory. Expect numbers near the detail's, which came from scans that skip comments and strings.\n\nIn a scratch directory on jet a0.0.46, run option A's program with the installed spelling of a changeable local, x := 0 where dev writes ^x: 0. Expect pair 9 10 and total 30. Run option B's program and expect Jet.UnknownAppliedRule for #Tasks. Run task: \"write the report\" then print(task) and expect the text. Delete the directory.",
+      "surface": {
+        "gist": "Should tasks start with the task word as today, or with spawn(fn() { }) inside a #Tasks block?",
+        "lesson": "A task runs at the same time as the code that started it. Jet writes task before a call, and task.all or task.group start and wait for several. The proposal would write spawn(fn() { … }) inside a #Tasks block instead. The owner chose the task family in August.",
+        "trio": {
+          "current": {
+            "note": "Today one word starts each task, and task.group waits for them.",
+            "code": "pair: (task.all {first: size(urls[0]), second: size(urls[1])}) ?? panic(\"failed\")\ntask.group g {\n    ^handles: [Task<Int>]{}\n    loop url in urls { handles.push(task size(url)) }\n    ^total: 0\n    loop h in handles { total += h.join() ?? 0 }\n}"
+          },
+          "wild": {
+            "lang": "Kotlin",
+            "note": "A scope function waits; each child is a lambda.",
+            "code": "coroutineScope {\n    val a = async { size(urls[0]) }\n    val b = async { size(urls[1]) }\n    println(\"pair ${a.await()} ${b.await()}\")\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep the task family",
+            "gist": "task f() starts a child; task.all, task.race, task.any and task.group stay.",
+            "proposed": {
+              "code": "h: task size(url)\nprint(h.join() ?? 0)\n\ntask.group g {\n    loop url in urls { handles.push(task size(url)) }\n}"
+            },
+            "gains": [
+              "About 1,650 lines stay short.",
+              "A first task needs no lambda.",
+              "The August ruling stands."
+            ],
+            "losses": [
+              "task stays on the keyword list."
+            ]
+          },
+          {
+            "key": "B",
+            "name": "spawn inside #Tasks",
+            "gist": "A #Tasks block waits for its children; spawn takes a lambda.",
+            "proposed": {
+              "code": "#Tasks {\n    pa: spawn(fn() { size(urls[0]) })\n    loop url in urls { handles.push(spawn(fn() { size(url) })) }\n}"
+            },
+            "gains": [
+              "task leaves the keyword list.",
+              "Spawning looks like a function call."
+            ],
+            "losses": [
+              "Every spawn site gains a lambda.",
+              "No reserved word is freed, and a marker is added.",
+              "New combinators are needed."
+            ]
+          },
+          {
+            "key": "C",
+            "name": "Rename task to spawn",
+            "gist": "Same shapes, with spawn in place of task.",
+            "proposed": {
+              "code": "h: spawn size(url)\nspawn.group g {\n    loop url in urls { handles.push(spawn size(url)) }\n}"
+            },
+            "gains": [
+              "The word matches Rust and Trio."
+            ],
+            "losses": [
+              "About 1,650 lines change for a synonym.",
+              "Task<T> no longer matches its word."
+            ]
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "task is not reserved, so retiring it frees nothing, and #Tasks would add a marker. It is the most common concurrency line, and the owner chose it in August over a lambda form.",
+          "tradeoff": "One contextual word stays listed; about 1,650 lines stay short.",
+          "gains": [
+            "No rewrite of about 1,650 lines.",
+            "Beginners start tasks without lambdas.",
+            "No ruling is reversed."
+          ],
+          "losses": [
+            {
+              "loss": "task stays on the keyword list.",
+              "mitigation": "The lexer never reserved it, so it is still usable as a name."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It wraps every spawn in a lambda, frees no reserved word and adds a marker."
+            },
+            {
+              "key": "C",
+              "reason": "It rewrites about 1,650 lines for a synonym."
+            }
+          ]
+        }
+      },
+      "reports": [
+        {
+          "title": "Greenfield language proposal",
+          "path": "Docs/Proposals/2026-11-24-greenfield-language.md",
+          "note": "Part 2 item P1, second tier: task becomes spawn inside #Tasks (lines 227-238, 1998-2032, 2256 and 2360)."
+        },
+        {
+          "title": "P1 second-tier ballots, adversarial review",
+          "path": "Docs/Audits/2026-11-25-p1-second-tier-review.md",
+          "note": "Claims, probes, counts and repairs for this ballot and its three siblings."
+        }
+      ],
+      "draftedBy": "Pip",
+      "reviewedBy": "ReviewTierTwo",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T22:34:23.999Z"
+    },
+    {
+      "id": "D-YIELD-EMIT1",
+      "cardId": "c0aq9dry",
+      "group": "language",
+      "title": "Generators: keep the yield keyword, or make yield an Emit effect that helpers and recursion can perform",
+      "situation": "A Jet generator is a function that returns a Stream and hands out values one at a time with the reserved word yield. Only the generator's own body may yield. A helper cannot hand values to its caller's stream, so a recursive generator re-yields everything its inner call yields. That copy makes deep recursion quadratic: at depth 3000 a run took about five seconds against a tenth of a second for a flat loop. The greenfield proposal turns yield into an Emit effect, consumed through a stream wrapper. We recommend A: keep functions that return a Stream and plain loops over them, but write emit(v) instead of yield v, so helpers may emit too. yield then stops being a reserved word.",
+      "gist": "Should generators keep the yield keyword, or emit values through an Emit effect that helpers can share?",
+      "lesson": "A generator produces a sequence one value at a time, pausing between values until the consumer asks for the next. In Jet it is a function that returns Stream<T>, and its body writes yield v for each value. A loop pulls the values. An effect is something a function does that its signature declares, such as reading files. The proposal makes handing out a value an effect named Emit, so any function that declares it can hand values to the stream that called it.",
+      "explainer": "",
+      "story": "Lena walks a folder tree and wants a stream of every file. Her generator yields the files in the top folder, then loops over a recursive call for each subfolder and yields each value again. On a deep tree each file is handed up through every level, and the walk slows to a crawl. She cannot move the inner part into a helper, because a helper may not yield.",
+      "inWild": "# Python: yield marks a generator; yield from delegates without a copy loop.\n# https://docs.python.org/3/reference/expressions.html#yield-expressions\ndef down(n):\n    if n > 0:\n        yield n\n        yield from down(n - 1)\n\n// Kotlin: sequence and flow are library functions; yield and emit are calls.\n// https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.sequences/sequence.html\nfun down(n: Int): Sequence<Int> = sequence {\n    if (n > 0) { yield(n); yieldAll(down(n - 1)) }\n}",
+      "detail": "What this decides. Card #7003 carries the second tier of greenfield proposal item P1 (Docs/Proposals/2026-11-24-greenfield-language.md:227-238). Its first row is `yield` in a function returning `Stream<T>`. The proposal turns it into an `Emit<T>` effect consumed with `stream(…)` (proposal lines 231-235, 1479-1499, 2255 and 2340). This ballot decides that row alone.\n\nWhich rulings this touches. D-STREAMYIELD1=A (2026-07-01) chose the keyword `yield` and the type `Stream<T>`. D-ONCE-WORD1=A (2026-08-07) fixed the vocabulary: `stream` and `yield` each mean one thing, and a collecting loop is never called yielding. Options A and C retire the word. Then D-STREAMYIELD1's keyword half and D-ONCE-WORD1's `yield` half lapse, and the collecting-loop rule stays.\n\nProposal line 1499 calls a collecting loop \"the yielding loop\", which D-ONCE-WORD1 forbids; the build must not adopt that wording. D-CONC-STREAM1=A, \"a stream is a task\", stays under every option. So do D-COROUTINE1=A and D-ITERATOR-FAIL1=A.\n\nThe proposal's first stated gain already holds. It says generators would \"use the same suspension as tasks\" (line 2255). They already do. Compiler/JetRuntime/Source/Generator.jet:1-6 runs each producer as a scheduler child task, and each `yield` is a wait point. Compiler/JetIR/Source/BuildGenerator.jet:1-8 builds the factory. The second gain, \"any function can emit\", is new and is the real question.\n\nWhat is built today. The lexer reserves `yield` (Compiler/JetLexer/Data/Lexer/Keywords.jet:34). The registry has `KW_YIELD` at Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:510 and `TYPE_STREAM` at 513. The proposal cites lines 505-510, which hold the comment above it. The parser reads `yield` at Statements.jet:116, 572-576 and 2166.\n\nA `yield` outside a `Stream<T>` body, including inside a lambda in a generator, is Jet.YieldOutsideStream (E0805, Compiler/JetSema/Source/Sema/Statements/Loops.jet:196). That message tells the user to declare `Stream<T> ->`, which is not Jet's order; the return type is written `-> Stream<T>`. That is a defect in today's text under every option.\n\n```text\nProbes, jet a0.0.46 (c137227f92), scratch dir, deleted after\ntoday's program above                        prints 0 1 2, then down 3 2 1\nyield inside a helper called by a generator  Jet.YieldOutsideStream\nyield inside xs.each(fn(x) { yield x })      Jet.YieldOutsideStream\n-[Emit<Int>]> in a row                       \"Expected `,` between effects in the row, found `<`\"\nrecursive re-yield, depth 3000, whole run    4797 ms and 5085 ms (drafter: 5427 and 5093)\nrecursive re-yield, depth 1500, whole run    1111 ms and 1098 ms\nflat loop yielding the same 3000 values      100 ms and 99 ms (drafter: 50 and 48)\nloop over 1..3001 with no generator          134 ms\n```\n\nThe times are whole `jet run` wall times, so they include building. The flat loop costs no more than the plain range loop, so its generator work is lost in the build time. Doubling the depth multiplies the time by about 4.4, which is the quadratic copy. The re-yield costs about a microsecond per handoff, roughly 4.5 million handoffs at depth 3000.\n\nUse counts on dev de8a554abe1, outside comments and strings. Core writes `yield` 11 times, in Core/App/App.jet:6491-6608 and Core/Data/Data.jet:1497-1548. Examples write it 7 times, all in Generators.jet. Tests have 71, Tools 20 and Docs 1. Compiler and Jetpack write none; the one Compiler hit is JavaScript inside a string. About 110 in all. `Stream<` appears in about 75 places, and those stay.\n\nDelegation is real. Core/Data/Data.jet:1496-1500 loops over a helper stream only to re-yield each value. Each re-yield is a full task handoff, so a chain of depth d costs d handoffs per value.\n\nEvery site of the same mechanism. Generators: `-> Stream<T>` plus `yield`. Collecting loops: `loop x in xs -> x * 2` builds a list and reuses the internal yield node (Compiler/JetParser/Source/Parser/ExpressionForms/Loops.jet:458), with no source `yield`. Stream adapters: `map`, `filter` and windows in Core/Data. Channels (D-CONC-CHAN1). Iterators with a `next` method (D-ITERATOR-FAIL1). Only generators use the word.\n\nWhat A changes. `emit(v)` is a Prelude function that performs `Emit<T>`. `Emit<T>` is a Prelude effect that the compiler knows, as `Stream<T>` is a Prelude type today. A function returning `Stream<T>` handles `Emit<T>` for its body. A helper that declares `-[Emit<T>]>` emits into whichever stream called it, on the same producer task. So recursion and helpers hand each value over once, not once per level.\n\nOne mechanism (I8). The handoff is today's: a wait point on the producer task. Two rules are new to the effect checker, and A must reuse what exists for both. First, a `Stream<T>` body removes `Emit<T>` from the row it publishes. D-UNSAFE-EFFECT (ratified) already defines that kind of removal for `Unsafe` at a reviewed boundary. Only the known component goes, and an unknown row `E` stays `E`. Emit uses the same rule; it is not built for either yet (card c08rdp62 is in the plan lane).\n\nSecond, `Emit<T>` is the only effect with a type argument, and that argument may name a type parameter in scope, as Core's `fn<K, T>` generators need. A trait argument naming an in-scope parameter is E0104 (Docs/Spec/spec.md:1132-1139). Emit takes the per-instance rule `Stream<T>` already has [INFERENCE: the per-instance build resolves `Stream<T>` this way]. User effects gain no type arguments. If D-EFFECT-TRAIT1 passes, `Emit<T>` is declared in its effect form and the Stream body is its one provider.\n\nCounted surface (Tools/Agent/surface_budget.tsv, Tools/Agent/SurfaceBudget.jet). Keywords are 21 today. A and C make them 20, and B and D keep 21. Markers stay 80 under every option.\n\nThe word leaves the lexer. Keywords.jet:2 says a retired word stays reserved. A deletes the `KW_YIELD` row instead, so `yield` becomes an ordinary name, useful for finance and farming code. The old spelling is taught by the registered `jet fix` rewrite (Compiler/JetFoundation/Data/Syntax/Spellings.jet:101-109), not by a reserved word.\n\nCutover list for A, words. Parser: the `yield` statement (Statements.jet:76, 116, 572-576, 2166; ColonDeclarations.jet:71). Lexer: Keywords.jet:34, Tokens.jet:330, KeywordSpans.jet:68-69 and 110. Registry: CoreSurface.jet:510, PackageFiles.jet:434, Highlights.jet:65, Compiler/JetFoundation/Source/Syntax/Spellings.jet:68 and Jetpack/Foundation/Source/SyntaxRegistry.jet:96 and 1388.\n\nCutover list for A, tools and checks. Compiler/JetCLI/Source/CLI/EditorGrammars.jet:89, SyntaxDictionaryData.jet:48 and EmitAST.jet:438. Compiler/JetEval/Source/CompilerServices.jet:92 and 447. Compiler/JetCanvas GraphStatements.jet:238 and NodeCatalog.jet:59. Sema's generator checks move to `Emit<T>` (Statements/Loops.jet:195-196, Expressions/Places.jet:1040, InlineModules.jet:1565, Registration/Derives.jet:1658, PreludeRows.jet).\n\nCutover list for A, lowering and text. BuildGenerator.jet lowers `emit` where it lowered `yield`; the internal node that collecting loops use stays. Jet.YieldOutsideStream becomes Jet.EmitOutsideStream with the `-> Stream<T>` order. `jet fix` rewrites `yield v` to `emit(v)` at about 110 sites. Generators.jet and spec text change.\n\nEdge cases. `emit` inside a `task { }` within a generator is refused, because `Emit` does not cross tasks, as `yield` does not today. A lambda passed to a synchronous caller such as `each` carries `Emit<T>` through an open row, which today's yield refuses [INFERENCE: open rows pass it as they pass other effects]. A stored callback that emits can only run where a stream handles `Emit<T>`.\n\nA helper declaring `-[Emit<T>]>` called outside any Stream body is refused like any unhandled effect. `emit` stays a wait point, so a dropped stream cancels the producer there (Generator.jet:74-76). Failure carriers are unchanged (BuildGenerator.jet:24).\n\nNaming. Top-level functions named `emit` exist at Compiler/JetLexer/Source/Lexer/Scan.jet:104 and Core/UI/Dbus.jet:450. Methods named `emit` exist at Core/Log/Log.jet:300, Core/Regex/Regex.jet:1104 and Compiler/JetPlugin/Source/Plugin/Translate.jet:258. A module's own `emit` shadows the Prelude one there [INFERENCE: ordinary Prelude shadowing]. Methods do not collide.\n\nBeginner path. A beginner writes a function returning `Stream<Int>` and loops over it, as today. Only `yield i` becomes `emit(i)`. Effects appear only when a helper emits. Expert path. Experts split generators into helpers, write recursive walks, and emit from row-generic lambdas.\n\nPerformance. A removes the per-level handoff, so delegation becomes linear. Under B the same speed-up needs a compiler rewrite of the delegation loop [INFERENCE: equal semantics, including cancellation and cleanup order]. Whichever wins, the build card owes a paired two-program cell: the depth-3000 recursive walk against the flat loop, before and after. Costs. A needs the two effect rules above and one `jet fix` rewrite. C also rewrites every consumer and `Stream<T>` signature.\n\nPeers. Python, C# and JavaScript reserve `yield`, and Python and JavaScript add `yield from` and `yield*` to delegate. Kotlin has no generator keyword: `sequence { yield(x) }` and `flow { emit(x) }` are library calls, and a helper can extend the sequence scope to yield. Effekt, Koka and OCaml 5 build generators from effects and handlers.",
+      "options": [
+        {
+          "name": "Keep Stream<T> functions and plain loops; emit(v) performs an Emit<T> effect that helpers may share",
+          "key": "A",
+          "detail": "Generators still return Stream<T>, and consumers still loop over the call. The body writes emit(v) where it wrote yield v. A helper that declares -[Emit<T>]> emits into its caller's stream, so recursion hands each value over once. yield leaves the reserved words.",
+          "technical": "Lapses the keyword half of D-STREAMYIELD1=A and the yield half of D-ONCE-WORD1=A; keeps D-CONC-STREAM1=A. Emit<T> is a Prelude effect the compiler knows; a Stream<T> body removes it from its row by D-UNSAFE-EFFECT's removal rule. Only Emit's type argument may name an in-scope parameter. The KW_YIELD lexer row is deleted, not retired. Jet.YieldOutsideStream becomes Jet.EmitOutsideStream. jet fix rewrites about 110 sites. Keywords 21 to 20.\n\nBeginner path: unchanged apart from emit(i). Expert path: helpers, recursion, emitting lambdas. Costs: row grammar for one type argument and the removal rule. Edge cases: no emit across a task; stored callbacks; Prelude shadowing of emit.",
+          "code": "count: fn(n: Int) -> Stream<Int> {\n    ^i: 0\n    loop i < n {\n        emit(i)\n        i += 1\n    }\n}\n\n// A helper emits into its caller's stream on the same producer task.\ncount_down: fn(n: Int) -[Emit<Int>]> {\n    if n > 0 {\n        emit(n)\n        count_down(n - 1)\n    }\n}\n\ndown: fn(n: Int) -> Stream<Int> { count_down(n) }\n\nrun: fn() {\n    loop x in count(3) -> print(\"{x}\")\n    loop v in down(3) -> print(\"down {v}\")\n}"
+        },
+        {
+          "name": "Keep yield and Stream<T> as they are, and speed up delegation in the compiler",
+          "key": "B",
+          "detail": "Today's form stays: yield v inside a function returning Stream<T>. The compiler recognizes a loop that only re-yields an inner generator and runs the inner one on the outer producer, which removes the slow-down. A helper is then written as a Stream<T> function and called with that one-line loop, at no copy cost. Helpers that are not Stream functions still cannot yield.",
+          "technical": "Keeps D-STREAMYIELD1=A. New lowering for loop v in g() -> yield v. yield stays reserved; keywords stay 21.\n\nBeginner path: unchanged. Expert path: recursion becomes fast, and helpers return streams that the caller delegates to in one line. Costs: one optimization whose behavior on break, cleanup and failures must match the copy loop. Edge cases: a loop that changes values before yielding gets no speed-up; a lambda still cannot yield.",
+          "code": "// B: today's program unchanged; the compiler runs the inner\n// loop v in down(n - 1) -> yield v on the outer producer.\ndown: fn(n: Int) -> Stream<Int> {\n    if n > 0 {\n        yield n\n        loop v in down(n - 1) -> yield v\n    }\n}\n\nrun: fn() {\n    loop v in down(3) -> print(\"down {v}\")\n}"
+        },
+        {
+          "name": "The proposal: Emit<T> functions consumed through stream(fn() { })",
+          "key": "C",
+          "detail": "Generators become ordinary functions that declare -[Emit<T>]>. A consumer turns one into a sequence by wrapping the call: loop x in stream(fn() { count(3) }). Functions returning Stream<T> with a body that yields are retired.",
+          "technical": "Amends D-STREAMYIELD1=A and D-ONCE-WORD1=A. Adds a Prelude stream function taking an emitting lambda. Every generator signature and every consumer call changes, about 110 yield sites plus their callers.\n\nBeginner path: lambdas and an effect row in the first generator lesson. Expert path: as A. Costs: the A work, plus a wrapper at every call. Edge cases: as A, plus a stream of a stream needing two wrappers.",
+          "code": "// C: the proposal as written. No Stream<T> functions; every\n// consumer wraps the call in stream(fn() { ... }).\ncount: fn(n: Int) -[Emit<Int>]> {\n    ^i: 0\n    loop i < n {\n        emit(i)\n        i += 1\n    }\n}\n\ndown: fn(n: Int) -[Emit<Int>]> {\n    if n > 0 {\n        emit(n)\n        down(n - 1)\n    }\n}\n\nrun: fn() {\n    loop x in stream(fn() { count(3) }) -> print(\"{x}\")\n    loop v in stream(fn() { down(3) }) -> print(\"down {v}\")\n}"
+        },
+        {
+          "name": "Keep the yield word, and let helpers yield through a declared Yield<T> effect",
+          "key": "D",
+          "detail": "Generators and their loops stay exactly as today, and yield v keeps its spelling. A helper that declares -[Yield<T>]> may also yield into its caller's stream, so recursion hands each value over once. Nothing is rewritten; yield stays a reserved word.",
+          "technical": "Keeps D-STREAMYIELD1=A and D-ONCE-WORD1=A. Same effect machinery as A under the name Yield<T>: a Stream<T> body removes it by D-UNSAFE-EFFECT's rule, and only its type argument may name an in-scope parameter. The yield statement performs the effect instead of being body-only. Keywords stay 21.\n\nBeginner path: unchanged. Expert path: as A. Costs: as A, without the jet fix rewrite. Edge cases: as A.",
+          "code": "count: fn(n: Int) -> Stream<Int> {\n    ^i: 0\n    loop i < n {\n        yield i\n        i += 1\n    }\n}\n\n// A helper yields into its caller's stream on the same producer task.\ncount_down: fn(n: Int) -[Yield<Int>]> {\n    if n > 0 {\n        yield n\n        count_down(n - 1)\n    }\n}\n\ndown: fn(n: Int) -> Stream<Int> { count_down(n) }\n\nrun: fn() {\n    loop x in count(3) -> print(\"{x}\")\n    loop v in down(3) -> print(\"down {v}\")\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "yield is reserved; yield from delegates to an inner generator without a copy loop. Source: https://docs.python.org/3/reference/expressions.html#yield-expressions and https://peps.python.org/pep-0380/",
+          "code": "def down(n):\n    if n > 0:\n        yield n\n        yield from down(n - 1)"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "No generator keyword: sequence is a library function and yield and yieldAll are calls on its scope; flow uses emit. Source: https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.sequences/sequence.html and https://kotlinlang.org/docs/flow.html",
+          "code": "fun down(n: Int): Sequence<Int> = sequence {\n    if (n > 0) { yield(n); yieldAll(down(n - 1)) }\n}"
+        },
+        {
+          "lang": "C#",
+          "note": "yield return inside a method returning IEnumerable; no delegation form, so nested generators copy. Source: https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/statements/yield",
+          "code": "IEnumerable<int> Down(int n) {\n    if (n > 0) { yield return n; foreach (var v in Down(n - 1)) yield return v; }\n}"
+        },
+        {
+          "lang": "JavaScript",
+          "note": "function* marks a generator; yield* delegates. Source: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/yield*",
+          "code": "function* down(n) {\n  if (n > 0) { yield n; yield* down(n - 1); }\n}"
+        },
+        {
+          "lang": "OCaml 5",
+          "note": "Generators are built from an effect and a handler that captures the continuation. Source: https://ocaml.org/manual/5.2/effects.html",
+          "code": "type _ Effect.t += Yield : int -> unit Effect.t\nlet rec down n = if n > 0 then (Effect.perform (Yield n); down (n - 1))"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the beginner form, a function returning Stream<T> and a plain loop over it, and changes one word per value. It gives the proposal's real gain: helpers, lambdas and recursion hand each value over once, removing a measured quadratic slow-down. yield stops being reserved and becomes a usable name. D gives the same gain but keeps the word, C puts a wrapper at every call, and B only speeds up one loop shape.",
+        "tradeoff": "One effect learns a type argument, a Stream body learns to remove it from its row, and about 110 sites change from yield v to emit(v). In return the reserved list shrinks and generators split into helpers.",
+        "gains": [
+          "Helpers and recursive walks emit into the caller's stream directly.",
+          "Deep recursion hands each value over once instead of once per level.",
+          "yield leaves the 21 reserved words, and handing out a value becomes an effect a helper can declare.",
+          "Generator signatures and every consumer loop stay as they are."
+        ],
+        "losses": [
+          {
+            "loss": "Effect rows must accept a type argument, which a0.0.46 refuses, and a Stream body must remove Emit from its row.",
+            "mitigation": "Only Emit<T> takes a type argument, resolved per instance as Stream<T> is today, so user effects stay as they are. The removal reuses the rule D-UNSAFE-EFFECT already ratified for Unsafe."
+          },
+          {
+            "loss": "About 110 yield sites and the generator teaching text change.",
+            "mitigation": "jet fix rewrites yield v to emit(v); 71 of the sites are tests, and Compiler writes none."
+          },
+          {
+            "loss": "A module's own emit function hides the Prelude one there.",
+            "mitigation": "Only the lexer's Scan.jet and Core's Dbus.jet define a top-level emit, and neither holds a generator."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps the reserved word, and a helper must be a whole Stream function joined by a delegation loop; a lambda still cannot yield. Its speed-up covers only loops that re-yield unchanged values, and its behavior on break and cleanup must be proven separately."
+          },
+          {
+            "key": "C",
+            "reason": "C does all of A's work and adds a lambda wrapper at every consumer call. Beginners would meet effects and lambdas in their first generator."
+          },
+          {
+            "key": "D",
+            "reason": "D builds the same effect as A but keeps yield reserved, so the keyword count stays 21 and the name stays unusable. The rewrite D avoids is mechanical and touches about 110 lines."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewTierTwo. The review reran the probes and timings, recounted the sites, and named the two new effect rules Emit needs, tying the removal rule to D-UNSAFE-EFFECT. It added a keep-the-word option D, replaced the hundredfold claim with the measured figures, and completed the cutover list."
+      },
+      "checkInstructions": "On dev, read Examples/Collections/Iterators/Generators.jet. Read Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:500-515 and Compiler/JetLexer/Data/Lexer/Keywords.jet:1-34. Read Compiler/JetRuntime/Source/Generator.jet:1-6 and 72-77, and Compiler/JetIR/Source/BuildGenerator.jet:1-24. Read Core/Data/Data.jet:1496-1500 for delegation, Docs/Spec/spec.md:1132-1139 for trait arguments, and Compiler/JetSema/Source/Sema/Statements/Loops.jet:196 for today's message.\n\nRun node Tools/Tower/tower.mjs decision show D-STREAMYIELD1 --json, then D-ONCE-WORD1, D-CONC-STREAM1 and D-UNSAFE-EFFECT, to see what A lapses, keeps and reuses. Read Tools/Agent/surface_budget.tsv for the keyword count.\n\nCount with git grep -n -w yield -- '*.jet' per top directory, and drop comment and string hits.\n\nIn a scratch directory on jet a0.0.46, run today's program with the installed spelling i := 0 where dev writes ^i: 0. Expect 0 1 2 and down 3 2 1. Write a helper with -[Emit<Int>]> and expect the row error. Time a recursive re-yield at depth 3000 and 1500 against a flat loop of 3000 values; expect about 5 s, about 1.1 s and about 0.1 s as whole runs. Delete the directory.",
+      "surface": {
+        "gist": "Should generators keep the yield keyword, or emit values through an effect that helpers and recursion can share?",
+        "lesson": "A generator hands out values one at a time while a loop pulls them. Jet writes it as a function returning Stream<T> whose body says yield v. Only that body may yield, so recursion must copy every inner value upward. The proposal makes handing out a value an effect named Emit.",
+        "trio": {
+          "current": {
+            "note": "Today recursion re-yields each inner value at every level.",
+            "code": "down: fn(n: Int) -> Stream<Int> {\n    if n > 0 {\n        yield n\n        loop v in down(n - 1) -> yield v\n    }\n}\n\nrun: fn() { loop v in down(3) -> print(\"down {v}\") }"
+          },
+          "wild": {
+            "lang": "Kotlin",
+            "note": "yield is a library call inside a sequence block.",
+            "code": "fun down(n: Int): Sequence<Int> = sequence {\n    if (n > 0) { yield(n); yieldAll(down(n - 1)) }\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "emit with Stream functions kept",
+            "gist": "Write emit(v) instead of yield v; helpers may declare Emit and emit too.",
+            "proposed": {
+              "code": "count_down: fn(n: Int) -[Emit<Int>]> {\n    if n > 0 {\n        emit(n)\n        count_down(n - 1)\n    }\n}\n\ndown: fn(n: Int) -> Stream<Int> { count_down(n) }\n\nrun: fn() { loop v in down(3) -> print(\"down {v}\") }"
+            },
+            "gains": [
+              "Helpers and recursion emit directly.",
+              "Consumer loops stay the same.",
+              "yield leaves the reserved words."
+            ],
+            "losses": [
+              "Effect rows need one type argument.",
+              "About 110 yield lines change."
+            ]
+          },
+          {
+            "key": "B",
+            "name": "Keep yield",
+            "gist": "Nothing changes; the compiler speeds up loops that only re-yield.",
+            "proposed": {
+              "code": "down: fn(n: Int) -> Stream<Int> {\n    if n > 0 {\n        yield n\n        loop v in down(n - 1) -> yield v\n    }\n}"
+            },
+            "gains": [
+              "No code changes.",
+              "Recursion through Stream functions gets fast."
+            ],
+            "losses": [
+              "Plain helpers and lambdas still cannot yield.",
+              "yield stays reserved."
+            ]
+          },
+          {
+            "key": "C",
+            "name": "The proposal's stream wrapper",
+            "gist": "Generators declare Emit, and every consumer wraps the call in stream.",
+            "proposed": {
+              "code": "down: fn(n: Int) -[Emit<Int>]> {\n    if n > 0 {\n        emit(n)\n        down(n - 1)\n    }\n}\n\nrun: fn() { loop v in stream(fn() { down(3) }) -> print(\"down {v}\") }"
+            },
+            "gains": [
+              "One function form for all generators."
+            ],
+            "losses": [
+              "Every consumer needs a wrapper.",
+              "Beginners meet effects first."
+            ]
+          },
+          {
+            "key": "D",
+            "name": "Keep the word, add the effect",
+            "gist": "yield v stays; helpers may declare Yield and yield too.",
+            "proposed": {
+              "code": "count_down: fn(n: Int) -[Yield<Int>]> {\n    if n > 0 {\n        yield n\n        count_down(n - 1)\n    }\n}\n\ndown: fn(n: Int) -> Stream<Int> { count_down(n) }"
+            },
+            "gains": [
+              "Helpers and recursion yield directly.",
+              "No code changes."
+            ],
+            "losses": [
+              "Effect rows need one type argument.",
+              "yield stays reserved."
+            ]
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps the simple form and loop, changes one word per value, lets helpers emit, and removes a measured quadratic slow-down in deep recursion.",
+          "tradeoff": "One effect learns a type argument; the reserved list shrinks by one.",
+          "gains": [
+            "Recursion hands each value over once.",
+            "Consumers do not change.",
+            "One fewer reserved word."
+          ],
+          "losses": [
+            {
+              "loss": "Effect rows need one type argument.",
+              "mitigation": "Only Emit takes one, resolved like Stream."
+            },
+            {
+              "loss": "About 110 yield lines change.",
+              "mitigation": "jet fix rewrites each one to emit."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Plain helpers and lambdas still cannot emit, and yield stays reserved."
+            },
+            {
+              "key": "C",
+              "reason": "Every consumer call gains a wrapper."
+            },
+            {
+              "key": "D",
+              "reason": "Same work as A, but yield stays a reserved word."
+            }
+          ]
+        }
+      },
+      "reports": [
+        {
+          "title": "Greenfield language proposal",
+          "path": "Docs/Proposals/2026-11-24-greenfield-language.md",
+          "note": "Part 2 item P1, second tier: yield becomes an Emit effect (lines 227-238, 1479-1499, 2255 and 2340)."
+        },
+        {
+          "title": "P1 second-tier ballots, adversarial review",
+          "path": "Docs/Audits/2026-11-25-p1-second-tier-review.md",
+          "note": "Claims, probes, timings, counts and repairs for this ballot and its three siblings."
+        }
+      ],
+      "draftedBy": "Pip",
+      "reviewedBy": "ReviewTierTwo",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T22:34:27.079Z"
+    },
+    {
+      "id": "D-TABLE-IT1",
+      "cardId": "c0aq9dry",
+      "group": "language",
+      "title": "The it name: retire it from tables and loops and name the value instead, keep it, or make it a contextual name",
+      "situation": "When a Jet table compares a computed value rather than a plain name, its arms can read that value through the reserved word it. The compiler also accepts it as the item of a loop with no binding, although the owner rejected that spelling on 2026-08-04. The repository writes it only three times outside documents, and two later rulings refused to add an implicit it elsewhere. Because it is reserved, no parameter or field may be called it. The greenfield proposal removes it and asks authors to bind a name. We recommend A: retire it everywhere, keep bare members for loops, and let a jet fix rewrite name the value at the three sites.",
+      "gist": "Should the reserved word it, the implicit name of a table's computed subject, leave the language?",
+      "lesson": "A table, written if value == { arms }, picks the first arm that matches one value. When that value is computed, as in if age /% 10 == { }, the arms have no name for it, so Jet supplies one: it. The compiler also lets it stand for the item of a loop written without a name. The proposal drops the word: the author names the value on the line above, and the arms read that name.",
+      "explainer": "",
+      "story": "Omar writes a table over age /% 10 and reads the result as it in the else arm. Later he wraps the table in a loop over people with no item name, so it now has two meanings, and the example's own comment has to explain which one wins. When he tries to call a test helper's parameter it, the compiler refuses because the word is reserved.",
+      "inWild": "// Kotlin: it is an implicit lambda parameter; when binds its subject with val.\n// https://kotlinlang.org/docs/lambdas.html#it-implicit-name-of-a-single-parameter\n// https://kotlinlang.org/docs/control-flow.html#when-expressions-and-statements\nwhen (val decade = age / 10) {\n    0 -> \"under ten\"\n    else -> \"in the ${decade}0s\"\n}\n\n// Rust: an identifier pattern names the matched value.\n// https://doc.rust-lang.org/reference/patterns.html#identifier-patterns\nmatch age / 10 {\n    0 => \"under ten\".to_string(),\n    decade => format!(\"in the {decade}0s\"),\n}",
+      "detail": "What this decides. Card #7003 carries the second tier of greenfield proposal item P1 (Docs/Proposals/2026-11-24-greenfield-language.md:227-238). Its last row is `it`, the name of an anonymous table subject. The proposal removes it with nothing in its place: bind a name instead (proposal lines 2258 and 2343). This ballot decides that row alone.\n\nWhat is built today. The lexer reserves `it` (Compiler/JetLexer/Data/Lexer/Keywords.jet:31). The registry row is `KW_IT` at Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:219; the proposal cites 222, which now holds `FOREIGN_AS`. Its comment at 216-218 calls it \"Foundational keyword predating the S-numbered decision log\". No ratified decision created it, so A amends none.\n\nTwo meanings share the word. A table over a computed subject names it `it` (Examples/Basics/ValueDispatch.jet:17-25). A table over a plain name has no `it`: the arms read the name. A loop with no binding also names its item `it`: `loop nums -> it * 2` prints `[2, 4, 6]` on a0.0.46.\n\nSema teaches the loop meaning in its unknown-name hint (Compiler/JetSema/Source/Sema/Diagnostics.jet:381-382). ValueDispatch.jet:43-44 needs a comment to explain which `it` wins when a table sits inside such a loop. In `loop nums -> if it * 10 == { else -> \"x{it}\" }` the header's `it` is the item and the arm's is the subject.\n\nThe loop meaning was rejected. D-LOOP-SUBJECT1=A (2026-08-04) chose bare members for bindingless loops, as in `loop words -> .len()`. Its option B, \"Named `it` subject\", lost because \"It mints a contextual pronoun that collides with user names\". D-SCRIPT-ONELINER1 (2026-10-29) refused an implicit `it` for one-liners, and D-LAMBDA-SHAPE1 (2026-11-01) refused Kotlin's `it` for lambdas. No file outside research records writes the loop meaning.\n\nA recent ruling sits next to this one. D-IFHOLE2=A (2026-11-15) kept the plain header `if subject == {` for any subject, computed or not, and said no existing table changes. Its losing option B would also have removed `it`, but it lost over the header, not over `it`. Option A keeps that header and every computed subject. Only reading the value inside an arm needs a name, which changes three written tables. A narrows D-IFHOLE2's \"no table changes\" for those three.\n\n```text\nProbes, jet a0.0.46 (c137227f92), scratch dir, deleted after\nif score(\"jet\") == { 0 -> ...; else -> print(\"score {it}\") }      prints score 30\nif code == { else -> \"{it}\" } with code a plain name               Jet.UnknownName, hint teaches the loop it\nValueDispatch.jet today, and rewritten as option A                both print in the 30s, [in the 30s, under ten]\nloop nums -> it * 2 / loop words -> .len() / loop n in nums -> n * 2   [2, 4, 6] [1, 2] [2, 4, 6]\nloop nums -> if it * 10 == { 10 -> \"ten\"; else -> \"x{it}\" }       [ten, x20]: two its, two values\ntwice: fn(it: Int)                                                \"found the keyword `it`\"\nif n * 3 == { 6 -> ...; other -> ... }                            Jet.UnknownName: no binding arm\nif n * 3 == { limit -> ... } with limit: 6                        a bare name arm compares: hit the limit\n```\n\nUse counts on dev de8a554abe1, outside comments, and counting `{it}` inside quoted text. Written `it`: Examples 2 (ValueDispatch.jet:23 and 49), Tests 1 (Tests/UI/E0107_it_outside_a_loop.jet:3, a refusal test). Core, Compiler, Jetpack and Tools write none. Docs: spec.md:711-713 teaches it, spec.md:4174 names it, and Docs/Research/Assets/20261104Pipes p16 to p20 probe it as research records.\n\nEvery site of the same mechanism, the names Jet supplies without a binding. `it` for a table's computed subject and a bindingless loop's item. Bare `.member` on a loop or call subject (D-LOOP-SUBJECT1, D-SUBJECT-CALL1, D-SUBJECT-COHERE1). `<>` for a pipe step's value and a table hole (D-PIPE1, D-IFHOLE2).\n\nThe rest of that family. `err` in a `??` route, a contextual name and not a lexer word (Examples/Apps/Web/AppImages.jet:66). `case` in a claim, which the owner left optional with `case` as default (D-CLAIM-CASES1). `self` in methods. Only `it` is reserved and has two meanings.\n\nWhat A changes. `it` leaves the lexer, the registry and JET_KEYWORD_LIST, and becomes an ordinary name. A table over a computed subject still works, and an arm that needs the value reads a name bound on the line above. A bindingless loop keeps bare members, and one that needs the whole item names it: `loop n in nums -> n * 2`.\n\nThe word leaves the lexer. Keywords.jet:2 says a retired word stays reserved. A deletes the `KW_IT` row instead, since freeing the name is the point. The old spelling is taught by the registered `jet fix` rewrite (Compiler/JetFoundation/Data/Syntax/Spellings.jet:101-109), not by a reserved word.\n\nThe rewrite. One `jet fix` rewrite names the subject on the line above and reads the name in the arms. It reuses the naming of the hole-header fix, Jet.HoleHeaderEffect (E0442, Compiler/JetSema/Source/Sema/Expressions/HoleHeaders.jet:108-135). That fix names the called method, or `value` for anything else, with a number on a clash. It is applied only where the table starts its statement, so no effect moves.\n\nThe hole-header fix itself does not cover this case: it fires only for a call with an effect in a hole header. So the rewrite is new, built from its naming helper. An author may then rename `value` to something better, as the examples below do with `decade`.\n\nThe internal name must change. Today the compiler itself uses the name `it` for the subject and the bindingless loop. Bare `.age` in such a loop is checked as `it.age` (Compiler/JetSema/Source/Sema/Expressions.jet:8164-8172). The parser marks a bindingless loop by naming its item `it` (ExpressionForms/Loops.jet:377).\n\nUnder A a user may write `loop it in nums`, which that test would misread as bindingless. So every internal use moves to a name no source can spell, as the hidden task spawn call does (Compiler/JetFoundation/Source/AST/Expressions.jet:619-676). The sites are in the cutover list.\n\nCounted surface (Tools/Agent/surface_budget.tsv). Keywords are 21 today. A and C make them 20; B keeps 21. Nothing else counted changes.\n\nCutover list for A, words. Lexer Keywords.jet:31, KeywordSpans.jet:17-18 and Tokens.jet:322. Registry EffectsSurface.jet:219, Highlights.jet:297 and PackageFiles.jet:492, and Jetpack/Foundation/Source/SyntaxRegistry.jet:174 and 1446. Tools: JetEval CompilerServices.jet:83 and 443, JetCLI SyntaxDictionaryData.jet:95, and Migrations/BitSigils1.jet:22 and 267.\n\nCutover list for A, parser and formatter. ColonDeclarations.jet:63 and 120, ExpressionForms/Loops.jet:33 and 362-377, Expressions.jet:90, 345 and 1204, Statements.jet:72, 1140-1146 and 2193, DecisionTables.jet:259 and 584-586. Formatter Expressions.jet:677-681 and 2186, and Statements.jet:1295-1298 and 2118-2129.\n\nCutover list for A, sema. Expressions.jet:8164-8172, Statements.jet:539, Statements/Switches.jet:225-265, Expressions/Control.jet:1992, 2120-2151 and 2201-2209, Diagnostics.jet:373-382, Ownership/Checks.jet:1246 and 6012, and Ownership/CopySites.jet:399-402. Text: Examples/Basics/ValueDispatch.jet, the E0107 test, and spec.md:711-713 and 4174.\n\nEdge cases. A table in an expression position, such as an argument, gets the rewrite shown rather than applied. Nested tables no longer shadow each other, because each value has its own name. After the cutover a stray `it` in an arm is an ordinary unknown name. An `else` arm on `Int?` stays Jet.ClosedSetElse.\n\nOptions considered and left out. A Rust-style binding arm, `decade -> …`, cannot work: a bare name arm already compares against that name's value, as the probe shows. A Kotlin-style binding in the header, `when (val decade = …)`, would add a counted lexical form for three uses.\n\nBeginner path. Beginners name values before using them, as everywhere else in Jet, and meet no hidden name. Expert path. Experts lose a one-line form for a computed subject they read. Costs. A rewrites three written uses and about 45 implementation sites, and frees a word. No runtime cost changes, because the named value is the same local the compiler already makes.\n\nPeers. Kotlin binds a `when` subject with `val` and keeps `it` only for lambdas. Rust and Swift name a matched value with an identifier pattern or `case let`. Groovy uses `it` in closures. None of these four gives a match subject an implicit name.",
+      "options": [
+        {
+          "name": "Retire it everywhere; name the value, and keep bare members for loops",
+          "key": "A",
+          "detail": "it leaves the reserved words and becomes an ordinary name. A table over a computed subject still works; an arm that needs the value reads a name bound on the line above. A loop with no item name keeps bare members, as ratified; one that needs the whole item names it.",
+          "technical": "Enforces D-LOOP-SUBJECT1=A. Narrows D-IFHOLE2=A's no-change promise for three written tables. Deletes the KW_IT lexer row rather than retiring it; keywords 21 to 20. A new jet fix rewrite names the subject with the hole-header fix's naming (E0442): method name or value, number on clash, applied only at statement start. The compiler's internal it becomes a name no source can spell; about 45 implementation sites change.\n\nBeginner path: name values first, no hidden name. Expert path: one extra line where a computed subject is read. Costs: three source rewrites, the cutover list. Edge cases: expression-position tables get a shown rewrite; nested tables stop shadowing.",
+          "code": "// A: name the value; it is an ordinary name again\nage_band: fn(age: Int) -> String {\n    decade: age /% 10\n    if decade == {\n        0 -> \"under ten\"\n        1 -> \"a teen\"\n        else -> \"in the {decade}0s\"\n    }\n}\n\nPerson: struct {\n    age: Int,\n}\n\nrun: fn() {\n    print(age_band(34))\n    people: [Person]{Person{age: 34}, Person{age: 7}}\n    print(\n        loop person in people -> {\n            decade: person.age /% 10\n            if decade == {\n                0 -> \"under ten\"\n                else -> \"in the {decade}0s\"\n            }\n        },\n    )\n}\n// prints: in the 30s, then [in the 30s, under ten]"
+        },
+        {
+          "name": "Keep it as it is",
+          "key": "B",
+          "detail": "it stays reserved, names a table's computed subject, and names the item of a bindingless loop. No code changes. No parameter, field or local may be called it.",
+          "technical": "No decision changes, and D-LOOP-SUBJECT1's rejected option B stays built. KW_IT stays; keywords stay 21.\n\nBeginner path: two meanings for one word, and a nested table shadows the loop item. Expert path: one-line reads of computed subjects. Costs: none now. Edge cases: unchanged, including the shadowing comment in ValueDispatch.jet.",
+          "code": "// Examples/Basics/ValueDispatch.jet today (abridged)\nage_band: fn(age: Int) -> String {\n    if age /% 10 == {\n        0 -> \"under ten\"\n        1 -> \"a teen\"\n        else -> \"in the {it}0s\"\n    }\n}\n\nPerson: struct {\n    age: Int,\n}\n\nrun: fn() {\n    print(age_band(34))\n    // In a bindingless loop the item is `it`; a table inside it still gives\n    // its arms its own subject as `it`.\n    people: [Person]{Person{age: 34}, Person{age: 7}}\n    print(\n        loop people -> if .age /% 10 == {\n            0 -> \"under ten\"\n            else -> \"in the {it}0s\"\n        },\n    )\n}\n// prints: in the 30s, then [in the 30s, under ten]"
+        },
+        {
+          "name": "Keep the feature but make it a contextual name, like err",
+          "key": "C",
+          "detail": "Tables and bindingless loops still supply it, but it is no longer reserved. Outside those places a parameter or local may be called it. Inside them, a user name it would be hidden by the supplied one.",
+          "technical": "Moves KW_IT out of the lexer into the contextual list beside err; keywords 21 to 20. Keeps the loop meaning that D-LOOP-SUBJECT1 rejected, and still needs the internal name moved, since a user may now write loop it in nums.\n\nBeginner path: as B, plus a name that means one thing in a table and another outside it. Expert path: as B. Costs: a shadowing rule and its diagnostic. Edge cases: a parameter named it read inside a table.",
+          "code": "// C: the feature stays, but it is a contextual name, as err is\nage_band: fn(age: Int) -> String {\n    if age /% 10 == {\n        0 -> \"under ten\"\n        1 -> \"a teen\"\n        else -> \"in the {it}0s\"\n    }\n}\n\n// Outside a table or a bindingless loop, it is an ordinary name.\ntwice: fn(it: Int) -> Int { it * 2 }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin",
+          "note": "it is the implicit parameter of a one-parameter lambda; a when subject is bound with val instead. Source: https://kotlinlang.org/docs/lambdas.html#it-implicit-name-of-a-single-parameter and https://kotlinlang.org/docs/control-flow.html#when-expressions-and-statements",
+          "code": "when (val decade = age / 10) {\n    0 -> \"under ten\"\n    else -> \"in the ${decade}0s\"\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "An identifier pattern binds the matched value; x @ pattern binds and tests at once. Jet cannot copy this, because a bare name arm compares. Source: https://doc.rust-lang.org/reference/patterns.html#identifier-patterns",
+          "code": "match age / 10 {\n    0 => \"under ten\".to_string(),\n    decade => format!(\"in the {decade}0s\"),\n}"
+        },
+        {
+          "lang": "Swift",
+          "note": "A case let pattern binds the value inside a switch. Source: https://docs.swift.org/swift-book/documentation/the-swift-programming-language/controlflow/#Value-Bindings",
+          "code": "switch age / 10 {\ncase 0: print(\"under ten\")\ncase let decade: print(\"in the \\(decade)0s\")\n}"
+        },
+        {
+          "lang": "Groovy",
+          "note": "it is the implicit parameter of a closure, not a match subject. Source: https://groovy-lang.org/closures.html#implicit-it",
+          "code": "[1, 2, 3].collect { it * 2 }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The repository writes it three times, and three rulings refused an implicit it elsewhere. The loop meaning was rejected and is built anyway, and one word with two meanings needs a comment to explain shadowing. Naming the value costs one line, a jet fix rewrite writes it, and a reserved word is freed.",
+        "tradeoff": "An arm that reads a computed subject needs a name on the line above. In return Jet has one less reserved word and no hidden name with two meanings.",
+        "gains": [
+          "it leaves the reserved words, so parameters and fields may use it.",
+          "Tables and loops lose a hidden name with two meanings.",
+          "The built compiler matches D-LOOP-SUBJECT1's ruling on bindingless loops.",
+          "Nested tables cannot shadow each other's subject."
+        ],
+        "losses": [
+          {
+            "loss": "Reading a computed subject inside an arm takes one more line.",
+            "mitigation": "A jet fix rewrite writes the line at the three sites, naming the value as the hole-header fix does."
+          },
+          {
+            "loss": "A loop that reads the whole item must name it.",
+            "mitigation": "Bare members still work, and no file outside research records writes the loop meaning."
+          },
+          {
+            "loss": "Three written tables change, narrowing D-IFHOLE2's promise that none would.",
+            "mitigation": "The plain header and computed subjects stay; only the three reads of it change."
+          },
+          {
+            "loss": "The compiler's own uses of the name it must move to a hidden name.",
+            "mitigation": "The cutover list names every site, and the hidden task spawn call already shows the pattern."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a reserved word for three uses, keeps a loop meaning the owner rejected, and keeps one name with two meanings."
+          },
+          {
+            "key": "C",
+            "reason": "C frees the word outside tables but adds a shadowing rule inside them, and still keeps the rejected loop meaning."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewTierTwo. The review found that the cited E0950 fix is a different error and that the compiler itself uses the name it internally. It replaced the fix with a jet fix rewrite built on E0442's naming, and added the internal sites, the lexer row deletion and the keyword counts."
+      },
+      "checkInstructions": "On dev, read Examples/Basics/ValueDispatch.jet. Read Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:212-222 and Compiler/JetLexer/Data/Lexer/Keywords.jet:1-31. Read Compiler/JetSema/Source/Sema/Diagnostics.jet:373-382 for the loop meaning. Read Compiler/JetSema/Source/Sema/Expressions/HoleHeaders.jet:1-12 and 108-135 for the naming fix. Read Compiler/JetSema/Source/Sema/Statements/Switches.jet:225-265 for the internal it. Read Docs/Spec/spec.md:711-713 and 4174.\n\nRun node Tools/Tower/tower.mjs decision show D-LOOP-SUBJECT1 --json and confirm option B, the named it subject, was rejected. Run the same for D-IFHOLE2 and read its options A and B. Check D-SCRIPT-ONELINER1 and D-LAMBDA-SHAPE1 for their refusals of an implicit it.\n\nCount with git grep -n -w it -- '*.jet' per top directory, keep {it} inside quoted text, and drop comments and prose.\n\nIn a scratch directory on jet a0.0.46, run ValueDispatch.jet and option A's program; both print in the 30s and [in the 30s, under ten]. Run loop nums -> it * 2 and expect [2, 4, 6]. Declare twice: fn(it: Int) and expect the keyword error. Delete the directory.",
+      "surface": {
+        "gist": "Should the reserved word it, the hidden name of a table's computed value, leave the language?",
+        "lesson": "A table picks the first arm that matches one value. When that value is computed, Jet names it it, so an arm can read it. The compiler also lets it name a loop item. The proposal drops the word; the author names the value on the line above.",
+        "trio": {
+          "current": {
+            "note": "Today the arm reads the computed value as it.",
+            "code": "age_band: fn(age: Int) -> String {\n    if age /% 10 == {\n        0 -> \"under ten\"\n        1 -> \"a teen\"\n        else -> \"in the {it}0s\"\n    }\n}"
+          },
+          "wild": {
+            "lang": "Kotlin",
+            "note": "A when subject gets a name with val.",
+            "code": "when (val decade = age / 10) {\n    0 -> \"under ten\"\n    else -> \"in the ${decade}0s\"\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Name the value",
+            "gist": "it becomes an ordinary name; arms read a name bound first.",
+            "proposed": {
+              "code": "age_band: fn(age: Int) -> String {\n    decade: age /% 10\n    if decade == {\n        0 -> \"under ten\"\n        1 -> \"a teen\"\n        else -> \"in the {decade}0s\"\n    }\n}"
+            },
+            "gains": [
+              "One fewer reserved word.",
+              "No hidden name with two meanings.",
+              "Loops match the August ruling."
+            ],
+            "losses": [
+              "One more line where the value is read."
+            ]
+          },
+          {
+            "key": "B",
+            "name": "Keep it",
+            "gist": "Nothing changes.",
+            "proposed": {
+              "code": "if age /% 10 == {\n    0 -> \"under ten\"\n    else -> \"in the {it}0s\"\n}"
+            },
+            "gains": [
+              "No code changes."
+            ],
+            "losses": [
+              "it stays reserved for three uses.",
+              "A rejected loop meaning stays."
+            ]
+          },
+          {
+            "key": "C",
+            "name": "it as a contextual name",
+            "gist": "Tables keep it, but it is no longer reserved elsewhere.",
+            "proposed": {
+              "code": "twice: fn(it: Int) -> Int { it * 2 }\n\nif age /% 10 == {\n    else -> \"in the {it}0s\"\n}"
+            },
+            "gains": [
+              "Parameters may be called it."
+            ],
+            "losses": [
+              "Inside tables, it hides a user name."
+            ]
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "it is written three times and has two meanings, one already rejected. Naming the value costs one line, a jet fix rewrite writes it, and a reserved word goes.",
+          "tradeoff": "One more line where an arm reads a computed value.",
+          "gains": [
+            "One fewer reserved word.",
+            "No hidden name.",
+            "The built compiler matches the rulings."
+          ],
+          "losses": [
+            {
+              "loss": "One more line to read a computed value.",
+              "mitigation": "A jet fix rewrite writes that line."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It keeps a reserved word for three uses."
+            },
+            {
+              "key": "C",
+              "reason": "It adds a shadowing rule and keeps the rejected loop meaning."
+            }
+          ]
+        }
+      },
+      "reports": [
+        {
+          "title": "Greenfield language proposal",
+          "path": "Docs/Proposals/2026-11-24-greenfield-language.md",
+          "note": "Part 2 item P1, second tier: it is removed and authors bind a name (lines 227-238, 2258 and 2343)."
+        },
+        {
+          "title": "P1 second-tier ballots, adversarial review",
+          "path": "Docs/Audits/2026-11-25-p1-second-tier-review.md",
+          "note": "Claims, probes, counts and repairs for this ballot and its three siblings."
+        }
+      ],
+      "draftedBy": "Pip",
+      "reviewedBy": "ReviewTierTwo",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T22:34:30.386Z"
     }
   ],
   "questions": [
@@ -143357,6 +144274,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T22:34:50.044Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c0aq9dry",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-25T22:34:46.788Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0aq9dry",
+      "note": "12 criteria, soft limit 6: Defects found by the P1 second-tier review on 2026-11-25; they hold whichever options win"
+    },
+    {
+      "at": "2026-11-25T22:34:46.788Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0aq9dry",
+      "note": "#12 Independent of the ballots: E0805's text says \"declare `Stre"
+    },
+    {
+      "at": "2026-11-25T22:34:45.430Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0aq9dry",
+      "note": "11 criteria, soft limit 6: Defects found by the P1 second-tier review on 2026-11-25; they hold whichever options win"
+    },
+    {
+      "at": "2026-11-25T22:34:45.430Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0aq9dry",
+      "note": "#11 Independent of the ballots: the loop meaning of `it`, which "
+    },
+    {
+      "at": "2026-11-25T22:34:31.631Z",
+      "by": "Pip",
+      "action": "decision.post",
+      "ref": "D-TABLE-IT1",
+      "note": "reviewed by ReviewTierTwo"
+    },
+    {
+      "at": "2026-11-25T22:34:30.386Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-TABLE-IT1",
+      "note": "The it name: retire it from tables and loops and name the value instead, keep it, or make it a contextual name (draft)"
+    },
+    {
+      "at": "2026-11-25T22:34:28.293Z",
+      "by": "Pip",
+      "action": "decision.post",
+      "ref": "D-YIELD-EMIT1",
+      "note": "reviewed by ReviewTierTwo"
+    },
+    {
+      "at": "2026-11-25T22:34:27.079Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-YIELD-EMIT1",
+      "note": "Generators: keep the yield keyword, or make yield an Emit effect that helpers and recursion can perform (draft)"
+    },
+    {
+      "at": "2026-11-25T22:34:25.206Z",
+      "by": "Pip",
+      "action": "decision.post",
+      "ref": "D-TASKS-SPAWN1",
+      "note": "reviewed by ReviewTierTwo"
+    },
+    {
+      "at": "2026-11-25T22:34:23.999Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-TASKS-SPAWN1",
+      "note": "Starting tasks: keep the task word and its family, or move to a spawn function inside a #Tasks block (draft)"
+    },
+    {
+      "at": "2026-11-25T22:34:21.162Z",
+      "by": "Pip",
+      "action": "decision.post",
+      "ref": "D-FOREIGN-MARKER1",
+      "note": "reviewed by ReviewTierTwo"
+    },
+    {
+      "at": "2026-11-25T22:34:19.957Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-FOREIGN-MARKER1",
+      "note": "Hand-written Rust rows: build the ratified #Import form, adopt the proposal's #Foreign marker, or keep extern rust (draft)"
+    },
     {
       "at": "2026-11-25T22:06:02.146Z",
       "by": "Orchestrator",
