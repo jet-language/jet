@@ -510,7 +510,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "style_force" -> None
             else -> Val("IO")
         }
-        "core.net" -> if member == "__ip_from_bytes" || member == "__socket_from_parts" -> None else -> Val("Net")
+        "core.net" -> Val("Net")
         "core.watcher" -> if member == {
             "files" -> Val("FS")
             "process_pid" -> Val("Exec")
@@ -590,7 +590,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__list_directory" | "__directory_fd" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
             // #3593 provider leaves behind Core/Files/files.jet.
             // The compiler-private non-blocking open only reads (RawHostKeys.jet).
-            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "__mkdtemp_raw" | "__temp_dir_raw" | "__temp_file_raw" | "try_lock" -> Val("FS.Write")
+            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "try_lock" -> Val("FS.Write")
             else -> None
         }
         "core.term" -> if member == {

@@ -2447,13 +2447,13 @@ glob: fn(pattern: Path | String) -[FS]> [String] IOError! {
 temp_dir: fn(prefix: String) -[FS]> TempDir IOError! {
     path: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
-    core.files.__temp_dir_raw(path)
+    rt.temp_dir_raw(path)
 }
 
 mkdtemp: fn(prefix: String) -[FS]> String IOError! {
     path: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
-    core.files.__mkdtemp_raw(path)
+    rt.mkdtemp_raw(path)
 }
 
 files_temp_path: fn(prefix: String) -[FS]> String Never! {
@@ -2467,7 +2467,7 @@ files_temp_path: fn(prefix: String) -[FS]> String Never! {
 temp_file: fn(prefix: String) -[FS]> TempFile IOError! {
     path: files_temp_path(prefix)
     files8_preflight("FS.Write", .Write, path)
-    core.files.__temp_file_raw(path)
+    rt.temp_file_raw(path)
 }
 
 /// Wait for an exclusive operating-system lock. A missing

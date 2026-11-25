@@ -320,7 +320,7 @@ ip_addr: fn(text: String) -> IPAddr NetError! {
     }
     bytes: parse_ip_bytes(text) ?? return Err(net_err("parse IP address", text, "invalid IP address `{text}`: invalid IP address syntax"))
     #Unsafe("checked IPv4/IPv6 octets transferred into the native address carrier") {
-        return core.net.__ip_from_bytes(bytes)
+        return rt.ip_from_bytes(bytes)
     }
 }
 
@@ -391,8 +391,8 @@ socket_addr_parse: fn(text: String) -> SocketAddr NetError! {
     }
     port: parse_port(port_text) ?? return Err(invalid_socket(text))
     #Unsafe("validated IP octets, port and IPv6 numeric scope transferred into the socket carrier") {
-        ip: core.net.__ip_from_bytes(bytes)
-        return core.net.__socket_from_parts(ip, U16{port}, U32{0}, U32{scope})
+        ip: rt.ip_from_bytes(bytes)
+        return rt.socket_from_parts(ip, U16{port}, U32{0}, U32{scope})
     }
 }
 

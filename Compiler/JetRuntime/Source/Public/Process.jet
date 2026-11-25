@@ -39,4 +39,16 @@ process: module {
     // The exit status text of the finished child `pid`, None when this
     // process holds none for it. `priv`: only Core calls these.
     #Import(c) priv exit_status: fn(pid: Int) -[Exec]> String? = "jet_process_exit_status_raw"
+
+    // Takes `spec` and answers it marked so its child gets SIGKILL when this
+    // process dies (Linux PR_SET_PDEATHSIG; ProcessSpec.jet).
+    #Import(c) priv spec_parent_death: fn(spec: ^^ProcessSpec) -[Exec]> ProcessSpec = "jet_process_spec_parent_death"
+
+    // Takes `spec` and answers it passing its child a duplicate of the
+    // descriptor `fd` at `child_fd`, as its working directory when `as_cwd`
+    // (ProcessRoutes.jet): `assigned_fd` is the parent's duplicate, or -1
+    // with the failed duplication's `errno`, or with `errno` 0 for a slot
+    // out of range or one the spec already passes. `available` is false
+    // on a host that can't duplicate.
+    #Import(c) priv keep_open_raw: fn(spec: ^^ProcessSpec, fd: Int, child_fd: Int, as_cwd: Bool) -[FS.Read]> {spec: ProcessSpec, available: Bool, assigned_fd: Int, errno: Int} = "jet_process_spec_keep_open_raw"
 }
