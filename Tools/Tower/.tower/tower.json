@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7035,
-    "rev": 114210,
+    "nextNum": 7038,
+    "rev": 114215,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74398,6 +74398,16 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "n=22, decided 2026-11-25: TempDir, TempFile, FileLock, UnixListener, UnixStream, Pool, TLSStream, HTTPRequest and HTTPResponse are on sema's synthetic Printable list, but showing any of them is an internal compiler error (display of core.files.TempFile, display of Shared<…>). They leave the list. The structural derive refuses a Core type whose own handle row has no render form, through the existing derive-refusal diagnostic with a UI snapshot. They never printed, so no feature is removed, and no output format is invented. Giving these types a Display text would be a public product choice, made only by a ballot."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "B (n=2) slice 3 plan, accepted 2026-11-25 (G1Checkers): 38 Core.rows dispatcher rows in 4 families. A: 16 receiver role rows on Core structs (Query, DataGroupedQuery, Stream, JobQueue) become #Builtin.Role methods. B: 8 native receiver rows become methods over jet.runtime #Import(c) bindings, in two seed stages. C: 8 module rows become Core declarations, with the sema specials moving into bodies or Core rule impls. D: 6 native module rows become bodies over jet.runtime bindings. CoreCallRows.jet, CoreCalls.jet and TExpr CoreCall are deleted last (about 300 references). Rulings: list .query gets no role-resolved receiver sugar (a hidden second dispatch path); it uses an existing [T] method form, or a ballot if none exists. reflect.of may add a RoleKind case if role cases are compiler data, not registered syntax. worker handler_name goes to a ballot only if no comptime form exists."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "n=22, decided 2026-11-25: SocketAddr and UDPPacket are runtime-owned native addresses, so their façade fields become priv in Core. A literal outside core.net gets the private-field diagnostic (UI snapshot), not an ICE. Handles print through their Core Display impl as the one path, not through an IR fallback. Still open: sema rewrites addr.host/addr.port into net.socket_host/socket_port calls (JetSema Places.jet:484), a field read the declaration doesn't carry. Whether it moves to Core-declared accessors is a public-surface question for a later B slice, and goes to a ballot if the spelling would change."
         },
         {
@@ -74978,7 +74988,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T18:00:41.285Z",
+      "updated": "2026-11-25T18:17:09.526Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 22
     },
@@ -77541,6 +77551,225 @@
       "needsAcceptance": false,
       "created": "2026-11-25T18:01:35.588Z",
       "updated": "2026-11-25T18:01:35.588Z",
+      "updatedBy": "Pip"
+    },
+    {
+      "id": "c028o7uk",
+      "num": 7035,
+      "title": "Effect classes in plain words: Reads, Adds or Replaces, plus repeatable, checked at routes, retries, transactions and previews",
+      "body": "Owner approved the reworded greenfield proposal item P7 for ballot D-EFFECT-CLASS1 on 2026-11-25. Each effect operation answers three separate questions: what it does to existing data (Reads: only looks; Adds: makes something new and leaves existing data alone; Replaces: old data is gone afterward), whether calling it twice ends the same as once (repeatable), and whether it can be taken back (the existing irreversible() flag, Compiler/Prelude/Effects.jet:14-15, kept separate: an email Adds and can't be undone, a database delete Replaces and can be rolled back). The words map one to one onto MCP tool annotations (readOnlyHint, destructiveHint, idempotentHint). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P7 (master checkout, not yet on dev).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design review: a dated audit in Docs/Audits attacks ballot D-EFFECT-CLASS1's whole mechanism, names every place effect facts live today (Prelude and Core effect declarations, irreversible(), #Transact, manifests, --allow/--deny, reflection) with the exact cutover list, and passes; the ballot's recorded review cites it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:02.711Z"
+        },
+        {
+          "n": 2,
+          "text": "D-EFFECT-CLASS1 is decided by the owner, and every machine and Core effect leaf declares its ratified class and repeatable fact in one place that sema, reflection and tools read.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:02.711Z"
+        },
+        {
+          "n": 3,
+          "text": "The checks are built with registered diagnostics and UI snapshots: a GET route that reaches an Adds or Replaces effect is refused, a retry of a call that is not repeatable needs an idempotency key, and #Transact refuses an irreversible effect.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:02.711Z"
+        },
+        {
+          "n": 4,
+          "text": "`--preview` lists every Adds and Replaces effect a run would reach and highlights Replaces, and agent tool metadata carries readOnlyHint, destructiveHint and idempotentHint derived from the classes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:02.711Z"
+        },
+        {
+          "n": 5,
+          "text": "An executable example with golden output proves the ratified design on every applicable tier, and the spec, reference pages and editor grammars describe it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:02.711Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T18:17:02.711Z",
+      "updated": "2026-11-25T18:17:02.711Z",
+      "updatedBy": "Pip"
+    },
+    {
+      "id": "c0pej44b",
+      "num": 7036,
+      "title": "Grammar literals: one Core Grammar type gives typed trees, parse, print and build-time format errors, and serves the checked text heads",
+      "body": "Owner accepted greenfield proposal item P31 on 2026-11-25, low priority. `Grammar{\"\"\"…\"\"\"}` is a Core library type using the existing checked-literal form and compile-time code: its rules generate the result types, a parse function, a print function and positioned errors, and an ambiguous grammar is a build error. The owner asked whether it improves the existing checked text heads: today the `check` of SQL (Core/DB/DB.jet:330), Sh (Core/Process/Process.jet:142) and HTML (Core/Text/HTML.jet:115) accepts any text, so a misspelt query or broken markup is found only at run time, and every hole is stringified through Printable. Core holds 246 hand-written parse and lex functions in 104 files; the SQL parser alone is 2,162 lines (Core/DB/Engine/Parse.jet). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P31 (master checkout, not yet on dev).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design review: a dated audit in Docs/Audits compares the design with Raku grammars, pest, nom and lark, names every hand-written text-format parser and checked text head in Core with the exact cutover list, and passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:04.112Z"
+        },
+        {
+          "n": 2,
+          "text": "`Grammar{\"\"\"…\"\"\"}` is built in Core: the rules generate typed result types, `parse` with line:column errors and `print`, and a left-recursive or ambiguous grammar is a build error with a registered diagnostic.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:04.112Z"
+        },
+        {
+          "n": 3,
+          "text": "The SQL, HTML and Sh heads check their literal text at build time against their grammar, so a malformed literal is a build error, and each hole is typed and escaped by the position the grammar gives it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:04.112Z"
+        },
+        {
+          "n": 4,
+          "text": "Every hand-written text-format parser in Core that a grammar can express is replaced by its grammar, with equal or better parse speed shown by a paired benchmark.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:04.112Z"
+        },
+        {
+          "n": 5,
+          "text": "An executable example with golden output proves the ratified design on every applicable tier, and the spec, reference pages and editor grammars describe it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:04.112Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T18:17:04.112Z",
+      "updated": "2026-11-25T18:17:04.112Z",
+      "updatedBy": "Pip"
+    },
+    {
+      "id": "c0hnoa1d",
+      "num": 7037,
+      "title": "Edit marks at call sites: `^` on every named argument a call changes, never required on receivers, inserted by jet fmt",
+      "body": "Owner direction on 2026-11-25, to be decided as ballot D-CALLSITE-MARK3 (reopening D-CALLSITE-MARK2=A, card #6586): a call writes `^` before each named argument it changes, as in `grow(^xs)`; a receiver never needs a mark (`xs.push(4)`); a move at a name's last use needs no mark, because it is a backend fact and not a frontend requirement, but a written `^^` is accepted and checked; and `jet fmt` inserts every required mark from checked facts with no manual work at any of the existing call sites. The owner also fully rejected UFCS for now (D-UFCS1=B stands), since pipes give chaining. Sema already computes every site: `jet audit writes` lists them and E0228 carries a Safe edit under #Policy(writes: .Explicit) (Docs/Spec/Reference/cli.md:1425-1436).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design review: a dated audit in Docs/Audits attacks ballot D-CALLSITE-MARK3's whole mechanism, names every place call marks live today (#Policy(writes: .Explicit), E0228, jet audit writes, the parser's call marks, the language server's hints) with the exact cutover list and site counts, and passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:12.350Z"
+        },
+        {
+          "n": 2,
+          "text": "D-CALLSITE-MARK3 is decided by the owner, and sema requires `^` on every named argument a call changes, with a registered diagnostic whose Safe fix inserts it, never on a receiver, and accepts a written `^^` at a take, checking that the name is not used again.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:12.350Z"
+        },
+        {
+          "n": 3,
+          "text": "`jet fmt` inserts every required call mark from the checked compile, as `--explicit-failures` does for failures, and one run over the repository leaves `jet check` clean with no hand edits; a file that does not check keeps its text and reports why.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:12.350Z"
+        },
+        {
+          "n": 4,
+          "text": "One greenfield cutover migrates every in-repository call, example, snapshot, doc and editor grammar, and #Policy(writes: .Explicit) is removed or narrowed as the ratified outcome says, with no parallel rule left.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:12.350Z"
+        },
+        {
+          "n": 5,
+          "text": "An executable example with golden output proves the ratified design on every applicable tier, and the spec, reference pages and editor grammars describe it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:17:12.350Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T18:17:12.350Z",
+      "updated": "2026-11-25T18:17:12.350Z",
       "updatedBy": "Pip"
     }
   ],
@@ -141329,6 +141558,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T18:17:12.350Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c0hnoa1d",
+      "note": "Edit marks at call sites: `^` on every named argument a call changes, never required on receivers, inserted by jet fmt"
+    },
+    {
+      "at": "2026-11-25T18:17:09.526Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T18:17:04.112Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c0pej44b",
+      "note": "Grammar literals: one Core Grammar type gives typed trees, parse, print and build-time format errors, and serves the checked text heads"
+    },
+    {
+      "at": "2026-11-25T18:17:02.711Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c028o7uk",
+      "note": "Effect classes in plain words: Reads, Adds or Replaces, plus repeatable, checked at routes, retries, transactions and previews"
+    },
+    {
+      "at": "2026-11-25T18:09:38.213Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-25T18:01:35.588Z",
       "by": "Pip",
