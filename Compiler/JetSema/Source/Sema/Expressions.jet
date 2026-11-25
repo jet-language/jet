@@ -4983,10 +4983,7 @@ sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: Str
     if sema_call_math_lane_reduce_rejected(receiver_value.ty, method, args, check.diagnostics) {
         return None
     }
-    if method == "routes" {
-        _ := sema_call_app_route_registrations(receiver, receiver_value, method, args, method_span, check)
-        sema_call_app_route_root(receiver, receiver_value, args, method_span, check)
-    }
+    if method == "routes" -> sema_call_app_route_root(receiver, receiver_value, args, method_span, check)
     if method == "csr" || method == "island" || method == "hydration_dev" || method == "hydration_release" {
         sema_call_app_browser_feature(receiver_value, method, method_span, check.environment.*, check.program.*, check.context.function_name, check.diagnostics)
     }

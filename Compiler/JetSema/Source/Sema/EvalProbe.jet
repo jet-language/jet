@@ -355,7 +355,6 @@ sema_eval_answer_put: fn(answers: ^[SemaEvalProbeAnswer], answer: ^^SemaEvalProb
 sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool, check: ^SemaBodyCheck) -> SemaEvalProbeAnswer {
     probe_state := sema_ownership_state_snapshot(check.state)
     probe_context := sema_check_context_snapshot(check.context)
-    routes_kept: sema_check_routes_lend(check.context, probe_context)
     // The probe's own check answers no probe.
     probe_context.eval_walk = SemaEvalWalk{}
     probe_context.fresh_expr_ids = true
@@ -370,7 +369,6 @@ sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool,
     checked: sema_expression_lambda_with_host(lambda, Val(expected), check, false, false, false, true)
     sema_body_check_swap_diagnostics(check, diagnostics)
     sema_body_check_swap(check, probe_state, probe_context)
-    sema_check_routes_take_back(check.context, probe_context, routes_kept)
     answer := SemaEvalProbeAnswer{probe: probe, expression: expression, function: check.context.eval_walk.function, exact: exact, span: span, complete: false, value_type: None, captures: [TCapture]{}, refusals: [Diagnostic]{}, effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}, lent: lent}
     loop diagnostic in diagnostics.move() {
         if diagnostic.severity != DIAGNOSTIC_ERROR || (diagnostic.detail ?? "").starts_with(sema_failure_obligation_mark()) || (lent && diagnostic.code == "E0120") {

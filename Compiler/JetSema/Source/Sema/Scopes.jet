@@ -931,10 +931,6 @@ SemaCheckContext: struct {
     // the compiler records it builds each heard call from
     // (SEMA_CALL_RULE_RECORDS), which no program writes.
     compiler_records: Bool{false},
-    // Each static route a body registers, `binding|method|pattern`, to the
-    // span that registered it first: one index, made on the first route. A
-    // nested check borrows its enclosing check's (sema_check_routes_lend).
-    http_routes: [SemaHTTPRouteIndex]{[SemaHTTPRouteIndex]{}},
     // The tables the body's heard calls add rows to (sema_rule_table).
     rule_tables: SemaRuleTables{SemaRuleTables{}},
     hardware_use: TargetHardwareUse,
@@ -1843,64 +1839,6 @@ sema_body_check_swap_tail_store: fn(check: ^SemaBodyCheck, tail_store: ^SemaStat
     tail_store = held
 }
 
-// `recorded` holds the rows `spans` set, in order: a rollback clears the ones
-// after its mark instead of saving a copy of the index.
-SemaHTTPRouteIndex: struct {
-    keys: SemaKeyRows{SemaKeyRows{}},
-    spans: [Span?]{[Span?]{}},
-    recorded: [Int]{[Int]{}},
-}
-
-// The span of the first route `binding` registered for method `wire` at
-// address shape `shape`; None when this is the first, which is recorded.
-sema_check_context_http_route_record: fn(context: ^SemaCheckContext, binding: String, wire: String, shape: String, span: Span) -> Span? Never! {
-    if context.http_routes.len() == 0 -> context.http_routes.push(SemaHTTPRouteIndex{})
-    binding_id: sema_key_text(context.http_routes[0].keys, binding)
-    wire_id: sema_key_text(context.http_routes[0].keys, wire)
-    shape_id: sema_key_text(context.http_routes[0].keys, shape)
-    address: sema_key_pair(context.http_routes[0].keys, wire_id, shape_id)
-    id: sema_key_pair(context.http_routes[0].keys, binding_id, address)
-    loop context.http_routes[0].spans.len() <= id -> context.http_routes[0].spans.push(None)
-    if context.http_routes[0].spans[id] == .Val(existing) -> return Val(existing)
-    context.http_routes[0].spans[id] = Val(span)
-    context.http_routes[0].recorded.push(id)
-    None
-}
-
-// How many routes `context` has recorded: a mark's length.
-sema_check_context_http_routes_length: fn(context: SemaCheckContext) -> Int Never! {
-    if context.http_routes.len() == 0 -> return 0
-    context.http_routes[0].recorded.len()
-}
-
-// Forgets the routes `context` recorded after the first `kept`.
-sema_check_context_http_routes_truncate: fn(context: ^SemaCheckContext, kept: Int) Never! {
-    if context.http_routes.len() == 0 -> return
-    loop context.http_routes[0].recorded.len() > kept {
-        id: context.http_routes[0].recorded.pop() ?? break
-        context.http_routes[0].spans[id] = None
-    }
-}
-
-// A nested check on a snapshot sees the routes of the check it nests in:
-// that check lends its index to the snapshot before the nested check, and
-// takes it back after (sema_check_routes_take_back). Returns the index's
-// length when lent.
-sema_check_routes_lend: fn(context: ^SemaCheckContext, nested: ^SemaCheckContext) -> Int Never! {
-    kept: sema_check_context_http_routes_length(context)
-    routes: context.http_routes.pop() ?? return kept
-    nested.http_routes.push(routes)
-    kept
-}
-
-// Takes the index lent to `nested` back into `context`, without the routes
-// the nested check recorded after `kept`.
-sema_check_routes_take_back: fn(context: ^SemaCheckContext, nested: ^SemaCheckContext, kept: Int) Never! {
-    routes: nested.http_routes.pop() ?? return
-    if context.http_routes.len() == 0 -> context.http_routes.push(routes)
-    sema_check_context_http_routes_truncate(context, kept)
-}
-
 sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Never! {
     snapshot := SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
@@ -1917,8 +1855,6 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         lambda_statement_tails: source.lambda_statement_tails.copy(),
         call_facts: source.call_facts.copy(),
         module_writes: source.module_writes.copy(),
-        // Lent by the enclosing check when it nests one (sema_check_routes_lend).
-        http_routes: [SemaHTTPRouteIndex]{},
         rule_tables: if source.rule_tables.calls_at.len() == 0 -> SemaRuleTables{} else -> source.rule_tables.copy(),
         hardware_use: sema_hardware_use_snapshot(source.hardware_use),
         call_return_views: source.call_return_views.copy(),
@@ -2050,7 +1986,6 @@ SemaCheckContextMark: struct {
     index_proofs: Int,
     filed_expr_ids: Int,
     next_expr_id: Int,
-    http_routes: Int,
     saved: SemaCheckContextSaved,
 }
 
@@ -2152,7 +2087,6 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
         index_proofs: context.index_proofs.len(),
         filed_expr_ids: context.filed_expr_ids.len(),
         next_expr_id: context.next_expr_id,
-        http_routes: sema_check_context_http_routes_length(context),
         saved: SemaCheckContextSaved{
             exact_int_reachable: context.exact_int_reachable,
             unsafe_depth: context.unsafe_depth,
@@ -2276,7 +2210,6 @@ sema_check_context_rollback: fn(context: ^SemaCheckContext, mark: ^^SemaCheckCon
     loop context.incomplete_reasons.len() > mark.incomplete_reasons {
         _ := context.incomplete_reasons.pop()
     }
-    sema_check_context_http_routes_truncate(context, mark.http_routes)
     saved := mark.saved.move()
     context.comptime_body_values = saved.comptime_body_values.move()
     context.exact_int_reachable = saved.exact_int_reachable

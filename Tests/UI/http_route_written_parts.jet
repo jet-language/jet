@@ -12,10 +12,10 @@ Record: struct {
 
 handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
 
-// core.http's StaticRoutes rule refuses a router path written as a String
-// literal with holes from the parts it hears, each hole as `{name}`, or
-// `{…}` when it is not a bare name. A literal in parentheses, a raw String
-// and a `+` join are not such a literal, so the ordinary checks answer them.
+// core.http's StaticRoutes rule refuses a router's or App's path written as a
+// String literal with holes, an App's page, route or layout path too, each
+// hole as `{name}`, or `{…}` when it is not a bare name. A literal in parens,
+// a raw String and a `+` join are not such a literal; the ordinary checks do.
 run: fn() {
     router: http.router()
     id: "42"
@@ -31,4 +31,7 @@ run: fn() {
     router.custom("PURGE", "/i/{id}", handle)
     app: web.app()
     app.get("/j/{id}", handle)
+    app.route("/k/{id}", home)
 }
+
+home: fn() -> WebPage { web.page("Home", "body") }

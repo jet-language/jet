@@ -2238,9 +2238,6 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     // The body interns into this check's type delta, handed back on every exit.
     sema_check_delta_pass(check.context.type_delta, lambda_context.type_delta)
     defer sema_check_delta_pass(lambda_context.type_delta, check.context.type_delta)
-    // The body sees this check's static routes; the ones it records stay its own.
-    routes_kept: sema_check_routes_lend(check.context, lambda_context)
-    defer sema_check_routes_take_back(check.context, lambda_context, routes_kept)
     // The loop-borrow check (E0507) stays active in a lambda body: a body that
     // changes the collection an enclosing loop reads is refused there too.
     lambda_context.iter_borrowed = check.context.iter_borrowed.copy()
