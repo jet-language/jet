@@ -51,4 +51,47 @@ process: module {
     // out of range or one the spec already passes. `available` is false
     // on a host that can't duplicate.
     #Import(c) priv keep_open_raw: fn(spec: ^^ProcessSpec, fd: Int, child_fd: Int, as_cwd: Bool) -[FS.Read]> {spec: ProcessSpec, available: Bool, assigned_fd: Int, errno: Int} = "jet_process_spec_keep_open_raw"
+
+    // The spec builders (ProcessSpec.jet): each takes `spec` and answers it
+    // with one setting changed. `spec_args_extend` and `spec_cpu_affinity`
+    // append to the argv and the CPU set; `spec_env_clear` starts the child
+    // from an empty environment; `spec_under` bounds the child by
+    // `authority`.
+    #Import(c) priv spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec = "jet_process_spec_cwd"
+    #Import(c) priv spec_arg: fn(spec: ^^ProcessSpec, extra: String) -> ProcessSpec = "jet_process_spec_arg"
+    #Import(c) priv spec_args_extend: fn(spec: ^^ProcessSpec, extra: [String]) -> ProcessSpec = "jet_process_spec_args_extend"
+    #Import(c) priv spec_env: fn(spec: ^^ProcessSpec, name: String, value: String) -> ProcessSpec = "jet_process_spec_env"
+    #Import(c) priv spec_env_remove: fn(spec: ^^ProcessSpec, name: String) -> ProcessSpec = "jet_process_spec_env_remove"
+    #Import(c) priv spec_env_clear: fn(spec: ^^ProcessSpec) -> ProcessSpec = "jet_process_spec_env_clear"
+    #Import(c) priv spec_output_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec = "jet_process_spec_output_limit"
+    #Import(c) priv spec_memory_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec = "jet_process_spec_memory_limit"
+    #Import(c) priv spec_memory_scope: fn(spec: ^^ProcessSpec, bytes: Int) -> ProcessSpec = "jet_process_spec_memory_scope"
+    #Import(c) priv spec_open_file_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec = "jet_process_spec_open_file_limit"
+    #Import(c) priv spec_cpu_affinity: fn(spec: ^^ProcessSpec, cpus: [Int]) -> ProcessSpec = "jet_process_spec_cpu_affinity"
+    #Import(c) priv spec_io_priority: fn(spec: ^^ProcessSpec, level: Int) -> ProcessSpec = "jet_process_spec_io_priority"
+    #Import(c) priv spec_io_idle: fn(spec: ^^ProcessSpec) -> ProcessSpec = "jet_process_spec_io_idle"
+    #Import(c) priv spec_detached: fn(spec: ^^ProcessSpec) -> ProcessSpec = "jet_process_spec_detached"
+    #Import(c) priv spec_terminal: fn(spec: ^^ProcessSpec) -> ProcessSpec = "jet_process_spec_terminal"
+    #Import(c) priv spec_terminal_with_policy: fn(spec: ^^ProcessSpec, policy: TerminalPolicy) -> ProcessSpec = "jet_process_spec_terminal_with_policy"
+    #Import(c) priv spec_under: fn(spec: ^^ProcessSpec, authority: Authority) -> ProcessSpec = "jet_std_process_spec_under"
+
+    // The launch steps of a spec (ProcessExecutionRoutes.jet). `spec_plan`
+    // resolves the spec without starting it; `spec_run` runs it to its
+    // receipt, and `spec_run_checked` also fails on a nonzero exit;
+    // `spec_spawn` starts it and answers the running child.
+    #Import(c) priv spec_plan: fn(spec: ProcessSpec) -> ProcessPlan IOError! = "jet_process_spec_plan"
+    #Import(c) priv spec_run: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! = "jet_process_spec_run"
+    #Import(c) priv spec_run_checked: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! = "jet_process_spec_run_checked"
+    #Import(c) priv spec_spawn: fn(spec: ProcessSpec) -[Exec]> ProcessChild IOError! = "jet_process_spec_spawn"
+
+    // A spawned child's steps (ProcessExecutionRoutes.jet,
+    // ProcessExecutionCollect.jet): its process id; waiting for its receipt;
+    // whether it has exited, without waiting; and the SIGKILL, SIGTERM and
+    // SIGINT its process group gets (a finished child takes them as done).
+    #Import(c) priv child_id: fn(child: ProcessChild) -> Int = "jet_process_child_id"
+    #Import(c) priv child_wait: fn(child: ProcessChild) -[Exec]> ProcessReceipt IOError! = "jet_process_child_wait"
+    #Import(c) priv child_exited: fn(child: ProcessChild) -[Exec]> Bool IOError! = "jet_process_child_exited"
+    #Import(c) priv child_kill: fn(child: ProcessChild) -[Exec]> IOError! = "jet_process_child_kill"
+    #Import(c) priv child_terminate: fn(child: ProcessChild) -[Exec]> IOError! = "jet_process_child_terminate"
+    #Import(c) priv child_interrupt: fn(child: ProcessChild) -[Exec]> IOError! = "jet_process_child_interrupt"
 }
