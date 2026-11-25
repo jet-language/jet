@@ -196,9 +196,9 @@ SemaEffectModuleInput: struct {
     source_segments: [SemaSourceSegment],
     // This rule trait-method effect ceilings this module declares (E0742).
     trait_bounds: [SemaEffectTraitBound]{[SemaEffectTraitBound]{}},
-    // `{trait}.{owner}` implementations this module declares
+    // The (trait, owner) implementations this module declares
     // (sema_effect_trait_implementers), for generic dispatch.
-    trait_implementers: [String]{[String]{}},
+    trait_implementers: [SemaEffectTraitImplementer]{[SemaEffectTraitImplementer]{}},
     // The owned trait each method of an `impl Owner.Add` or `impl
     // Owner.CheckedText` block implements, by function symbol id: the trait
     // has no source row, so the checked body is a plain method (E0742 still
@@ -219,6 +219,13 @@ SemaEffectTraitBound: struct {
     trait_name: String,
     method: String,
     bound: [String],
+}
+
+// One `impl Owner.Trait` or struct/enum trait-impl block: `owner` implements
+// `trait_name`.
+SemaEffectTraitImplementer: struct {
+    trait_name: String,
+    owner: String,
 }
 
 SemaEffectGraphResult: struct {
@@ -6722,8 +6729,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
         module_row: inputs[module_index]
         module_identity: module_text(table, modules[module_row.module_index].module_identity)
         loop row in module_row.trait_implementers {
-            pair: row.cut_last(".") ?? next
-            _ := sema_effect_add_implementer(impls, module_identity, pair.before, pair.after)
+            _ := sema_effect_add_implementer(impls, module_identity, row.trait_name, row.owner)
         }
         sema_effect_add_trait_impls(modules[module_row.module_index].functions, module_row, source_indices[module_index], symbols, impls)
     }

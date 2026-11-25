@@ -1,0 +1,20 @@
+# An `impl Rock.Patch.Shape` block, whose owner `Rock.Patch` has two
+# segments, is the implementation a `Shape`-bounded call bound to
+# `Rock.Patch` runs and takes the effects of. In run.jet a `-[IO]>` caller
+# covers the patch's printing area and a `-[]>` caller binds the pure
+# square. In narrow.jet a `-[]>` caller that binds the patch is refused for
+# `IO`, and the one that binds the square is not.
+fixture: ADottedImplOwnerTakesItsImplementationsEffects.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step: jet run -O0 run.jet
+exit: 0
+stdout: = "rock 2 true\nsquare 4\npatch area\npatch 3\n"
+step: jet run -O2 run.jet
+exit: 0
+stdout: = "rock 2 true\nsquare 4\npatch area\npatch 3\n"
+step: jet check narrow.jet
+exit: 1
+stderr: count "Error: Jet.ImpureCallInPureContext" = 1 # only the patch caller
+stderr: ~ "`pure_patch` calls or reaches impure effects `IO`"

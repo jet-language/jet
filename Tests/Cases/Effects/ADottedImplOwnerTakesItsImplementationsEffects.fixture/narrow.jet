@@ -1,0 +1,42 @@
+// The patch's `Shape` implementation is the one `impl Rock.Patch.Shape`
+// writes: its area prints, so a `-[]>` caller that binds the bound to
+// `Rock.Patch` is refused for `IO`, and one that binds it to the pure square
+// is not.
+Shape: trait {
+    area: fn(self) -> Int,
+}
+
+Square: struct {
+    side: Int,
+
+    impl Shape {
+        area: fn(self) -> Int { self.side * self.side }
+    }
+}
+
+#Patchable
+Rock: struct {
+    size: Int{1},
+    hard: Bool{true},
+}
+
+impl Rock.Patch.Shape {
+    area: fn(self) -> Int {
+        print("patch area")
+        3
+    }
+}
+
+measure: fn<S: Shape>(shape: S) -> Int { shape.area() }
+
+pure_square: fn() -[]> Int { measure(Square{side: 2}) }
+
+pure_patch: fn() -[]> Int { measure(Rock.Patch{size: 3}) }
+
+run: fn() {
+    rock := Rock{}
+    rock = rock.apply(Rock.Patch{size: 2})
+    print("rock {rock.size} {rock.hard}")
+    print("square {pure_square()}")
+    print("patch {pure_patch()}")
+}
