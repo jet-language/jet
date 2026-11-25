@@ -19,19 +19,6 @@ NET_UDP_PACKET_BYTES: I64{96}
     jet_rt_free(value, NET_UDP_PACKET_BYTES, I64{8})
 }
 
-// "UDPPacket({len} bytes from {addr})".
-#Export(c) jet_rt_handle_show_jet_udp_packet: fn(value: I64) -> I64 {
-    result: jet_rt_string_builder_new()
-    jet_rt_string_builder_push(result, rt_static_text("UDPPacket("))
-    rt_text_push_number(result, net_word(value, I64{64}))
-    jet_rt_string_builder_push(result, rt_static_text(" bytes from "))
-    address: net_route_socket_text(value)
-    jet_rt_string_builder_push(result, address)
-    jet_rt_string_drop(address)
-    jet_rt_string_builder_push(result, rt_static_text(")"))
-    result
-}
-
 // Field projections borrow the packet's inline storage. A header field
 // writes its lent copy into the caller's `out` slot: the 56-byte socket
 // address, or the data List's [length, capacity, data] header.

@@ -1,0 +1,12 @@
+// A socket address is the runtime's native address, so its `host` and `port`
+// are `priv` and user code cannot build one by hand (E0605); a UDP packet
+// holds one, so it can't be built either. `net.socket_addr_parse` and
+// `net.udp_receive` make them.
+use net: core.net
+
+run: fn() {
+    addr: net.SocketAddr{host: "127.0.0.1", port: 8080}
+    packet: net.UDPPacket{data: [U8]{1}, host: "127.0.0.1", port: 53, original_len: 1, truncated: false}
+    print(addr)
+    print(packet)
+}
