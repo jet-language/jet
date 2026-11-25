@@ -786,7 +786,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, check: ^Sem
     }
     sema_single_use_note_binding(check, symbol)
     if binding.name == "_" {
-        sema_single_use_check_discard(init.ty, binding.name_span, check.context.taskgroups.in_spawn, check.environment.*, check.program.*, check.diagnostics)
+        sema_single_use_check_discard(init.ty, binding.name_span, check.environment.*, check.program.*, check.diagnostics)
         // An ordinary fallible call already propagates its failure in statement
         // position, so its Unit success has nothing to bind.
         if !binding.is_comptime && sema_expr_unwrap_tag(init.ty) == (Type.Named{name: "Unit"}) && sema_stmt_is_propagated_call(init) {

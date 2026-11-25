@@ -1775,10 +1775,10 @@ sema_stmt_check_drop: fn(expr: Expr, check: ^SemaBodyCheck) -> SemaDropStatement
                 check.diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))
             }
             checked: sema_check_expression_carrier(receiver, None, check) ?? return SemaDropStatement{handled: true, value: None}
-            // (L1101): `.drop()` on a task discards the handle
-            // without joining it; `.detach()` is the fire-and-forget word.
-            if sema_single_use_is_task(checked.ty) {
-                check.diagnostics.push(sema_single_use_diag_unjoined("this task", "`.drop()` discards the handle without joining it, so the task may outlive the function", expr_span(expr)))
+            // `.drop()` on a `#SingleUse` value throws it away with its job
+            // undone (E0140); `consume` in an audited region is the discard.
+            if sema_single_use_type(checked.ty, check.environment.*, check.program.*) {
+                check.diagnostics.push(sema_single_use_diag_discarded(sema_single_use_duty_methods(checked.ty), "`.drop()`", expr_span(expr)))
             }
             return SemaDropStatement{handled: true, value: Val(TStmt.ExprStmt{value: checked, span: expr_span(expr)})}
         }

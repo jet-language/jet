@@ -242,8 +242,9 @@ SemaOwnershipBindingFact: struct {
     // This binding owns a `#SingleUse` value's consume duty
     // (Ownership/SingleUse.jet).
     single_use: Bool,
-    // The duty is a task handle's `join` (L1101), not `consume`.
-    owes_join: Bool{false},
+    // The methods its type declares to consume it (a task's `join` and
+    // `detach`), which its diagnostics name; empty for `consume`.
+    duty_methods: [String]{[String]{}},
     // The fields of a record or tuple that hold its duty: moving each of them
     // out discharges it as a move of the whole value does.
     duty_fields: [String]{[String]{}},

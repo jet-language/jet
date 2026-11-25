@@ -1,12 +1,14 @@
 // A `#MustUse` result carries work or a resource that is lost when nothing
 // checks it, so dropping it as a bare expression statement is E0419. The result
 // is must-use when the statement calls a `#MustUse` function or method, or when
-// its type is a `#MustUse` struct or enum or a Core guard/handle. Task handles
-// owe `join` instead (L1101). `.drop("reason")` is the explicit discard.
+// its type is a `#MustUse` struct or enum or a Core guard/handle. A
+// `#SingleUse` carrier (a task handle) owes its duty instead (E0140).
+// `.drop("reason")` is the explicit discard.
 use jet_foundation.[
     Call,
     Diagnostic,
     Expr,
+    MarkerHook,
     Span,
     Type,
     type_name,
@@ -70,11 +72,7 @@ sema_must_use_call_target: fn(expr: Expr, check: SemaBodyCheck) -> String? {
 
 // An ignored must-use value, for a statement whose value is not fallible.
 sema_must_use_check_statement: fn(expr: Expr, ty: Type, span: Span, check: ^SemaBodyCheck) {
-    if ty == .Apply(name, _) {
-        if name == "Task" {
-            return
-        }
-    }
+    if sema_copy_carrier_declares(ty, MarkerHook.SingleUse) -> return
     target := sema_must_use_call_target(expr, check)
     if target == None {
         if ty == (Type.Named{name: "Unit"}) {

@@ -17486,23 +17486,19 @@ OpenNotPublicEnum: struct {
     }
 }
 
-UndischargedTask: struct {
+RetiredUndischargedTask: struct {
     impl Diagnostic {
         code: "L1101",
-        safety_class: .Soundness,
-        safety_reason: "The program may end before the task finishes, so its work and the resources it holds are lost unseen.",
-        expert_path: "`.detach()`, which lets the task go free",
-        meaning: "Bound `Task` value dropped without discharge",
+        status: .Retired,
+        no_fix: None,
 
-        what: fn(self) -> String { "A bound `Task` still owes `join`." }
+        what: fn(self) -> String { "*Retired* (was: a bound `Task` still owes `join`)" }
 
         why: fn(self) -> String {
-            "The program may end before that task finishes; a task's duty is discharged by joining it or using its result."
+            "A task's join is the `#SingleUse` duty its type declares; Jet.SingleUseDropped reports an unjoined task, naming `join` and `detach`"
         }
 
-        fix: fn(self) -> String {
-            "Join it with `.join()`, use its result, or write `.detach()` to let it go free."
-        }
+        fix: fn(self) -> String { "Follow the guidance for Jet.SingleUseDropped" }
     }
 }
 

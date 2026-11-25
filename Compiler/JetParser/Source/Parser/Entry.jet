@@ -433,7 +433,6 @@ parser_parse_prepared: fn(input: ^^ParserFenceExpansion, lexer_diagnostics: [Dia
     state.bound_size_rows = parser_bound_size_rows(state.tokens, state.tables[0])
     program := parser_parse_program(state)
     program.has_scope_member = state.has_scope_member
-    program.has_task_spawn = state.has_task_spawn
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
     loop declaration in state.block_policy_declarations {
@@ -504,7 +503,6 @@ ParserChunkOutput: struct {
     block_policy_declarations: [PolicyDeclaration],
     statement_rules: [AppliedRuleApplication],
     has_scope_member: Bool{false},
-    has_task_spawn: Bool{false},
     debug_sites: [DebugTraceSite]{[DebugTraceSite]{}},
     import_scan: ParserChunkImportScan{ParserChunkImportScan{ident_seen: [Bool]{}, marker_qualifiers: [String]{}, low_level_tier: false}},
     has_reexport: Bool{false},
@@ -1030,7 +1028,7 @@ parser_parse_slot_part: fn(marker_scopes: [ParserMarkerScope], source_end: Int, 
     state_sites := [StateMarkerSite]{}
     parser_state_marker_sites(program.items, state_sites)
     kept_tables: state.tables.move()
-    permit.value.outputs.push(ParserChunkOutput{program: program.move(), diagnostics: state.diagnostics.move(), block_spans: state.block_spans.move(), else_arms: state.else_arms.move(), block_policy_declarations: state.block_policy_declarations.move(), statement_rules: state.statement_rules.move(), has_scope_member: state.has_scope_member, has_task_spawn: state.has_task_spawn, debug_sites: debug_sites.move(), import_scan: import_scan.move(), has_reexport: has_reexport, state_marker_sites: state_sites.move(), tables: kept_tables.move()})
+    permit.value.outputs.push(ParserChunkOutput{program: program.move(), diagnostics: state.diagnostics.move(), block_spans: state.block_spans.move(), else_arms: state.else_arms.move(), block_policy_declarations: state.block_policy_declarations.move(), statement_rules: state.statement_rules.move(), has_scope_member: state.has_scope_member, debug_sites: debug_sites.move(), import_scan: import_scan.move(), has_reexport: has_reexport, state_marker_sites: state_sites.move(), tables: kept_tables.move()})
     1
 }
 
@@ -1188,7 +1186,6 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
     program := ast_program()
     program.file_cap = file_cap.move()
     program.has_scope_member = false
-    program.has_task_spawn = false
     if total_imports > 0 -> program.imports.try_reserve(total_imports) ?? ()
     if total_items > 0 -> program.items.try_reserve(total_items) ?? ()
     diagnostics := [Diagnostic]{}
@@ -1204,7 +1201,6 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
     state_marker_sites := [StateMarkerSite]{}
     loop index in 0..<outputs.len() {
         if outputs[index].has_scope_member -> program.has_scope_member = true
-        if outputs[index].has_task_spawn -> program.has_task_spawn = true
         compiler_transfer_rows<ImportDecl>(program.imports, outputs[index].program.imports)
         compiler_transfer_rows<Item>(program.items, outputs[index].program.items)
         compiler_transfer_rows<Stmt>(program.script_body, outputs[index].program.script_body)

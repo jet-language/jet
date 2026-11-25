@@ -507,8 +507,12 @@ FloatWord: struct<exponent: Int, fraction: Int> {}
 // compiler's type and never this declaration. Its facts are the markers
 // written here, which the compiler reads while it builds
 // (Compiler/JetFoundation/Source/Registry/BuiltinCarriers.jet): a
-// `#MoveOnly` value moves and never copies, and a `#Local` one stays on the
-// thread that made it. Each marker goes on the line right above its type.
+// `#MoveOnly` value moves and never copies, a `#Local` one stays on the
+// thread that made it, and a `#SingleUse` one owes one of the methods that
+// consume it (`^^self`) on every path. Each marker goes on the line right
+// above its type. A consuming method is declared for its name only: the
+// compiler types each call itself (a task's `join` returns its `T` or its
+// `TaskFailure`).
 #MoveOnly
 priv Atomic: struct<T> {}
 
@@ -526,6 +530,19 @@ priv CellReadGuard: struct<T> {}
 
 #[MoveOnly, Local]
 priv CellEditGuard: struct<T> {}
+
+#[MoveOnly, SingleUse]
+priv Task: struct<T> {
+    join: fn(^^self) {}
+
+    detach: fn(^^self) {}
+}
+
+priv Receiver: struct<T> {}
+
+priv Sender: struct<T> {}
+
+priv ProcessChild: struct {}
 
 // The test harness's evidence and temporary-directory operations
 // (jet.runtime.testing's, behind `core.testing`'s snap, golden, fixture and

@@ -6,6 +6,7 @@
 // nominal capabilities from a successful lowering.
 use jet_foundation.[
     builtin_carrier_declares,
+    builtin_carrier_named,
     effect_vocabulary_view_count,
     CopyFact,
     symbol_key_names,
@@ -1065,12 +1066,12 @@ sema_copy_apply_facts: fn(
     walk: ^SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     dynamic_loan: sema_copy_apply_is_dynamic_loan(name)
-    // A task handle is the builtin `Task<T>` even where the program declares
-    // a `Task` of its own, so no nominal row stands for it.
-    task_handle: sema_type_is_builtin_handle(ty, "Task")
+    // A carrier (`Task<T>`) is the builtin type even where the program
+    // declares a type of that name, so no nominal row stands for it.
+    carrier: builtin_carrier_named(name) && sema_type_is_builtin_handle(ty, name)
     // A bare head taints a query, not the table's walk (sema_copy_named_facts).
     if !walk.table && !name.contains(".") -> walk.tainted = true
-    if !task_handle && sema_type_resolve_nominal_row_at(graph, ty, caller) == .Val(row) {
+    if !carrier && sema_type_resolve_nominal_row_at(graph, ty, caller) == .Val(row) {
         nested: sema_copy_stored_nested_facts(graph.modules[row.module_index].nominals[row.row], args, graph, table, caller, generic_params, walk)
         nominal_facts: sema_copy_nominal_facts(graph.modules[row.module_index].nominals[row.row], row, ty, graph, table, caller, generic_params, walk)
         return SemaCopyTypeFacts{
@@ -1086,7 +1087,7 @@ sema_copy_apply_facts: fn(
     }
     if !walk.table -> walk.tainted = true
     nested: sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, walk)
-    if sema_copy_apply_is_noncloneable(name) || task_handle {
+    if sema_copy_apply_is_noncloneable(name) {
         return sema_copy_facts_holding(sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true), nested.holds_resource)
     }
     if name == "View" && args.len() == 1 {
@@ -1396,11 +1397,11 @@ sema_copy_holds_declared_in: fn(ty: Type, environment: SemaScopeEnvironment, pro
 // Whether a value of `ty` acts when it goes: a resource or a value holding
 // one (a Close duty at any depth, a handle that never clones), a cell or
 // shared guard, a child process (its tree ends with its last handle), a
-// temporary directory (removed when its owner drops) or a task handle (its
-// join duty speaks for it). A binding of one is used by being held, so it
-// is no unused binding (L0101).
+// temporary directory (removed when its owner drops) or a `#SingleUse`
+// carrier such as a task handle (its duty speaks for it). A binding of one is
+// used by being held, so it is no unused binding (L0101).
 sema_copy_acts_when_dropped: fn(ty: Type, check: SemaBodyCheck, generic_params: [TGenericParam]) -> Bool Never! {
-    if sema_single_use_is_task(ty) -> return true
+    if sema_copy_carrier_declares(ty, MarkerHook.SingleUse) -> return true
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .String | .Fn(_, _, _, _, _, _) -> return false
         .Named(name) | .Apply(name, _) -> {

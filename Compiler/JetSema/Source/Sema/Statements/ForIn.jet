@@ -10,11 +10,13 @@ use jet_foundation.[
     Lambda,
     BodyTree,
     body_each_node_kind_child,
+    builtin_carrier_declares,
     body_each_stmt_child,
     NamedSpan,
     OrFallback,
     PlaceAccess,
     Span,
+    MarkerHook,
     Stmt,
     Symbol,
     SymbolID,
@@ -147,11 +149,13 @@ sema_stmt_for_in_type_is_named: fn(ty: Type, name: String) -> Bool Never! {
     actual == name || actual.ends_with(".{name}")
 }
 
+// Whether `ty` holds a `#SingleUse` carrier (`Task<T>`) at any depth, so a
+// walk over it has to own its items.
 sema_stmt_for_in_type_requires_owned_iteration: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, args) -> {
             if name == "ViewMut" -> return false
-            if name == "Task" -> return true
+            if builtin_carrier_declares(name, MarkerHook.SingleUse) -> return true
             loop arg in args {
                 if sema_stmt_for_in_type_requires_owned_iteration(arg) -> return true
             }

@@ -4507,15 +4507,17 @@ and `freeze_capture.out`; UI fixtures are
 
 ### Task completion and cancellation
 
-`handle.join()` consumes a task handle and returns `T TaskFailure!`. Calling
-`join()` twice is **E0121**. Dropping a bound `Task` without joining, using its
-result, or detaching it is the compile error **L1101**. A failure is `.Panicked(reason)`,
+`Task<T>` is `#SingleUse`: a bound handle owes `join` or `detach`, and its type
+declares both as the consuming methods. `handle.join()` consumes the handle and
+returns `T TaskFailure!`. Calling `join()` twice is **E0121**. Dropping a bound
+`Task` without joining, using its result, or detaching it is **E0140**, whose
+text names `join` and `detach`. A failure is `.Panicked(reason)`,
 `.Canceled`, or `.DeadlineBlown`. An error that leaves a task body whose element
 is not a `Result` or `Option` stops the task as a panic does: its join reports
 `.Panicked(reason)` with the error's text.
 
 `handle.detach()` consumes the handle and lets the task run in the background;
-it suppresses **L1101**. Detach is sound only when the child owns all data it
+it discharges the same duty. Detach is sound only when the child owns all data it
 can use. A detached child that captures or returns a `view` borrow reports
 **E1106**; another sendability failure reports **E1103** (D-DETACH1).
 

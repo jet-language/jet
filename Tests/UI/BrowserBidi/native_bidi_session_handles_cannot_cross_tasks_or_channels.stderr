@@ -16,11 +16,11 @@ Error: Jet.ValueNotSendable: `session` can't be sent because `browser.Browser` i
  Fix: Send plain owned data instead, or rebuild the value as an owned copy before calling `.send()`
 More: jet-lang.dev/e/Jet.ValueNotSendable
 
-Error: Jet.UndischargedTask: `handle` still owes `join`
+Error: Jet.SingleUseDropped: `handle` still owes `join` or `detach`
   --> Tests/UI/BrowserBidi/native_bidi_session_handles_cannot_cross_tasks_or_channels.jet:10:5
     |
  10 |     handle: task session.close()
     |     ^^^^^^
- Why: The program may end before this task finishes
- Fix: Join it with `.join()`, use its result, or write `.detach()` to let it go free
-More: jet-lang.dev/e/Jet.UndischargedTask
+ Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
+ Fix: Consume it exactly once: call `.join()` or `.detach()` on it, pass it to a `^^` parameter, or `return` it — or write `#Unsafe("reason") { consume(handle) }` to discard it deliberately
+More: jet-lang.dev/e/Jet.SingleUseDropped

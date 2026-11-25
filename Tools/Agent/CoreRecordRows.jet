@@ -429,7 +429,9 @@ member_end: fn(bytes: [U8], start: Int) -> Int Never! {
 }
 
 // Each struct the Core sources declare at a line start (`X: struct`, after
-// indentation and an optional `pub` or `priv`), by name, in source order.
+// indentation and an optional `pub` or `priv`), by name, in source order. A
+// `priv` struct of Core's builtins door is a compiler carrier
+// (BuiltinCarriers.jet), which no record name reaches, so it is no site.
 struct_sites: fn(paths: [String], texts: [String:String]) -> [String:[StructSite]] Never! {
     sites := [String:[StructSite]]{}
     loop path in paths {
@@ -441,10 +443,14 @@ struct_sites: fn(paths: [String], texts: [String:String]) -> [String:[StructSite
                 at += 1
             }
             if at + 4 <= bytes.len() && byte_text(bytes, at, at + 4) == "pub " -> at += 4
-            if at + 5 <= bytes.len() && byte_text(bytes, at, at + 5) == "priv " -> at += 5
+            carrier := false
+            if at + 5 <= bytes.len() && byte_text(bytes, at, at + 5) == "priv " {
+                at += 5
+                carrier = path == "Core/Builtins/Builtins.jet"
+            }
             end := at
             loop end < bytes.len() && word_byte(code_at(bytes, end)) -> end += 1
-            if end > at && upper_byte(code_at(bytes, at)) && end + 8 <= bytes.len() && byte_text(bytes, end, end + 8) == ": struct" {
+            if !carrier && end > at && upper_byte(code_at(bytes, at)) && end + 8 <= bytes.len() && byte_text(bytes, end, end + 8) == ": struct" {
                 brace: skip_space(bytes, end + 8)
                 open: if brace < bytes.len() && code_at(bytes, brace) == 123 -> brace else -> -1
                 name: byte_text(bytes, at, end)
@@ -714,6 +720,15 @@ run: fn() { print(core_record_rows_main(process.args()) ?? process.fail(1, err.m
     assert_eq(result.text, "ROWS: [CoreRecordFieldRow]{{\n{FIELD_OPEN}Device\", field: \"label\", ty: Type.String}},\n}}\nLITERALS: [CoreRecordLiteralRow]{{\n}}")
     again: record_rows(result.text, sites, texts)
     assert_eq(again.stale.len(), 0)
+}
+
+#Test("a priv struct of Core's builtins door is a carrier, not a record's site") {
+    texts := [String:String]{}
+    texts["Core/Builtins/Builtins.jet"] = "priv ProcessChild: struct {{}}\nPlain: struct {{\n    v: Int,\n}}\n"
+    texts["Core/Demo/Demo.jet"] = "priv Kept: struct {{\n    v: Int,\n}}\n"
+    sites: struct_sites([String]{"Core/Builtins/Builtins.jet", "Core/Demo/Demo.jet"}, texts)
+    assert(!sites.has_key("ProcessChild"))
+    assert(sites.has_key("Plain") && sites.has_key("Kept"))
 }
 
 #Test("a carrier holds a word per field, a scalar option as a presence word and its value") {

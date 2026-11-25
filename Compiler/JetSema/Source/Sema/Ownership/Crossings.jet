@@ -347,10 +347,6 @@ sema_ownership_crossing_type_inner: fn(ty: Type, crossing: SemaSendCrossing, clo
             sema_ownership_crossing_named_type(ty, name, crossing, strict_callable, cell_only, environment, program, context, walk)
         }
         .Apply(name, args) -> {
-            if sema_type_is_builtin_handle(ty, "Task") || sema_type_is_builtin_handle(ty, "Receiver") || sema_type_is_builtin_handle(ty, "Sender") {
-                if cell_only -> return None
-                return sema_ownership_crossing_stored_types(args, crossing, strict_callable, cell_only, environment, program, context, walk)
-            }
             leaf := sema_ownership_crossing_type_leaf(name)
             view_apply := sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, program, true) && (leaf == "View" || leaf == "ViewMut" || leaf == "Pin" || leaf == "ViewIter")
             if view_apply && cell_only -> return None
@@ -361,10 +357,11 @@ sema_ownership_crossing_type_inner: fn(ty: Type, crossing: SemaSendCrossing, clo
                 return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: leaf}))
             }
             // A carrier the compiler types itself (`Atomic<Int>`,
-            // `SharedGuard<T>`) has no nominal row. Its Core declaration
-            // says whether it is `#Local`; one that isn't crosses with the
-            // values it stores, as a channel end does.
-            if builtin_carrier_named(leaf) && sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, program, true) {
+            // `SharedGuard<T>`, `Task<T>`) has no nominal row, and a bare one
+            // is the builtin even where the program declares a type of its
+            // name. Its Core declaration says whether it is `#Local`; one that
+            // isn't crosses with the values it stores, as a channel end does.
+            if builtin_carrier_named(leaf) && (sema_type_is_builtin_handle(ty, leaf) || sema_ownership_crossing_intrinsic_apply(ty, leaf, environment, program, true)) {
                 if !cell_only && builtin_carrier_declares(leaf, MarkerHook.Local) {
                     return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.DeclaredLocal{key: leaf}))
                 }
