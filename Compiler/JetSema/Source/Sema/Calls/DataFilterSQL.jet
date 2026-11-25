@@ -244,13 +244,13 @@ sema_data_filter_texts: fn(sql: SemaDataFilterSQL, span: Span) -> Expr Never! {
 // `row`: the predicate as SQL and the list of its values' text, read here.
 // Values that do not check give the empty condition, and the predicate
 // reports what is wrong with them.
-sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, source_args: ^[CallArg], argument_types: ^[Type], typed: ^[TExpr]) {
+sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, source_args: ^[CallArg], argument_types: ^[Type], typed: ^[TExpr]) {
     sql := sema_data_filter_sql(callback, row, environment, program)
     texts := sema_data_filter_texts(sql, span)
     text_list: Type.List{element: Type.String}
     probe := [Diagnostic]{}
     sema_body_check_swap_diagnostics(check, probe)
-    bound := sema_check_expression(texts, Val(text_list), environment, program, scopes, check)
+    bound := sema_check_expression(texts, Val(text_list), environment, program, check)
     sema_body_check_swap_diagnostics(check, probe)
     if bound == None || sema_has_error_since(probe, 0) {
         sql = sema_data_filter_none()

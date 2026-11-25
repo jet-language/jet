@@ -10,7 +10,7 @@ sema_dev_context_method_known: fn(method: String) -> Bool Never! {
     method == "watch" || method == "serve" || method == "reload"
 }
 
-sema_call_try_dev_context_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_try_dev_context_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Dev"}) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -51,7 +51,7 @@ sema_call_try_dev_context_method: fn(receiver: Expr, receiver_value: TExpr, meth
         value = Val(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: mode}}}, argument.span))
     } else {
         required: if method == "watch" -> Type.String else -> Type.Int
-        checked: sema_check_expression(argument.expr, Val(required), environment, program, scopes, check) ?? return failed
+        checked: sema_check_expression(argument.expr, Val(required), environment, program, check) ?? return failed
         compatible: sema_call_type_assignable(required, checked.ty, environment, program) ?? return failed
         if !compatible {
             check.diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span, program))
@@ -61,7 +61,7 @@ sema_call_try_dev_context_method: fn(receiver: Expr, receiver_value: TExpr, meth
     }
     params: [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
     ordinary := [CallArg]{argument}
-    ownership: sema_ownership_check_method_call(check.state, "Dev.{method}", receiver, AccessConvention.Read, params, ordinary, scopes, span, check.diagnostics)
+    ownership: sema_ownership_check_method_call(check.state, "Dev.{method}", receiver, AccessConvention.Read, params, ordinary, check.scopes, span, check.diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
     result: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: [TExpr]{value ?? return failed}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, check.diagnostics)}

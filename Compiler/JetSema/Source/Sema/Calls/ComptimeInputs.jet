@@ -87,7 +87,7 @@ sema_comptime_input_value_problem: fn(builtin: String, named: String, span: Span
     Val(sema_error("E0957", span, "`{builtin}` {noun} `{named}` can't use `..`", "comptime inputs are named from this file's own directory down, so a build can audit them; `..` is refused in a computed {noun} too", "compute a {noun} under this file's directory, without `..`"))
 }
 
-sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     builtin: call.name
     failed: SemaDirectSpecialCheck{handled: true, value: None}
     noun: sema_comptime_input_noun(builtin)
@@ -95,9 +95,9 @@ sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: Sem
         check.diagnostics.push(sema_error("E0104", call.name_span, "`{builtin}` expects 1 argument, got {call.args.len()}", "a comptime input names exactly one {noun}", "pass one String {noun}"))
         return failed
     }
-    path: sema_comptime_input_path_value(call, environment, program, scopes, check) ?? return failed
+    path: sema_comptime_input_path_value(call, environment, program, check) ?? return failed
     result_type: sema_comptime_input_type(builtin)
-    if !sema_comptime_input_record_effect(builtin, "FS.Read", result_type, call.name_span, environment, program, scopes, check.context, check.diagnostics) {
+    if !sema_comptime_input_record_effect(builtin, "FS.Read", result_type, call.name_span, environment, program, check.scopes, check.context, check.diagnostics) {
         return failed
     }
     node: sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: path, pin: None}}, call.name_span)
@@ -108,7 +108,7 @@ sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: Sem
 // normalized and held to the path law here, or the computed String
 // expression, whose value the driver holds to it when the evaluation reaches
 // the call. None after a reported problem.
-sema_comptime_input_path_value: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_comptime_input_path_value: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     builtin: call.name
     if sema_comptime_input_literal(call.args[0].expr) == .Val(literal) {
         named: sema_comptime_input_named(literal)
@@ -118,7 +118,7 @@ sema_comptime_input_path_value: fn(call: Call, environment: SemaScopeEnvironment
         }
         return Val(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: named}}}, call.args[0].span))
     }
-    checked: sema_check_expression(call.args[0].expr, Val(Type.String), environment, program, scopes, check) ?? return None
+    checked: sema_check_expression(call.args[0].expr, Val(Type.String), environment, program, check) ?? return None
     if sema_expr_unwrap_tag(checked.ty) != Type.String {
         noun: sema_comptime_input_noun(builtin)
         example: if builtin == "find" -> "content/**/*.jet" else -> "data/file"
@@ -150,7 +150,7 @@ sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_ty
 // `Net`. The compiler fetches the URL while it builds (the driver's
 // jet_driver_build_fetch), and content that misses the pin is E3413. Another
 // `core.net` member is not handled here.
-sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
+sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     if module_name != "core.net" || member != "fetch" {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
@@ -165,12 +165,12 @@ sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [Cal
         check.diagnostics.push(sema_error("E3414", span, "`net.fetch` takes a URL and a literal `sha256:` pin", "a compile-time download is pinned by the content hash written in the source", "write `net.fetch(\"https://example.com/data.txt\", sha256: \"<64 hex digits>\")`"))
         return failed
     }
-    url: sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, check) ?? return failed
+    url: sema_check_expression(args[0].expr, Val(Type.String), environment, program, check) ?? return failed
     if sema_expr_unwrap_tag(url.ty) != Type.String {
         check.diagnostics.push(sema_error("E3414", args[0].span, "`net.fetch` URL must be a String, not {sema_type_show(url.ty)}", "the compiler downloads the URL the String names while it builds", "pass a String URL, e.g. `net.fetch(\"https://example.com/data.txt\", sha256: \"…\")`"))
         return failed
     }
-    if !sema_comptime_input_record_effect("net.fetch", "Net", Type.String, span, environment, program, scopes, check.context, check.diagnostics) {
+    if !sema_comptime_input_record_effect("net.fetch", "Net", Type.String, span, environment, program, check.scopes, check.context, check.diagnostics) {
         return failed
     }
     node: sema_tree_node(Type.String, TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: "fetch", path: url, pin: Val(sha256)}}, span)

@@ -1724,8 +1724,9 @@ sema_function_declares_span: fn(methods: [Func], span: Span) -> Bool Never! {
 
 // One check of `func` (sema_function_check_passes). `updated` already carries
 // the function's merged generic parameters (`generics.merged`) and name. The
-// pass's record collects its findings in `diagnostics`' place
-// (sema_body_check_swap_diagnostics) while the body is checked.
+// pass's record collects its findings in `diagnostics`' place and checks on
+// the caller's scope table (sema_body_check_swap_diagnostics,
+// sema_body_check_swap_scopes) while the body is checked.
 sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFuncKind, raw_protocol_return: Bool, updated: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, share_known: [Span], share_found: ^[SemaOwnershipShareSite], number_known: [SemaNumberRetype], number_found: ^[SemaNumberRetype], diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
     diagnostics_start: diagnostics.len()
     module_identity := updated.module_identity
@@ -1752,6 +1753,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     check := sema_body_check_init()
     sema_body_check_swap_diagnostics(check, diagnostics)
+    sema_body_check_swap_scopes(check, scopes)
     check.state.fixed_length_write_params = updated.fixed_length_write_params
     check.state.share_known = share_known
     check.state.static_roots = sema_function_static_roots(updated, program, module_identity)
@@ -1760,13 +1762,13 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // checks its body against the declared return, not the failure rail.
     effective_return := sema_checked_return_type(func.return_type, raw_protocol_return)
     effective_return = sema_function_resolve_declared(updated, program, effective_return, module_identity, generic_params)
-    sema_scope_enter(scopes, check.state, owner_key)
-    scopes.return_type = Val(effective_return)
-    scopes.failure_carrier = Val(sema_failure_carrier(Val(effective_return)))
-    scopes.loop_depth = 0
-    scopes.ownership_call_depth = 0
-    scopes.comptime_execution_depth = 0
-    if func.is_comptime -> scopes.comptime_execution_depth = 1
+    sema_scope_enter(check.scopes, check.state, owner_key)
+    check.scopes.return_type = Val(effective_return)
+    check.scopes.failure_carrier = Val(sema_failure_carrier(Val(effective_return)))
+    check.scopes.loop_depth = 0
+    check.scopes.ownership_call_depth = 0
+    check.scopes.comptime_execution_depth = 0
+    if func.is_comptime -> check.scopes.comptime_execution_depth = 1
     check.context.host_hooks = host_hooks
     check.context.number_retypes_known = number_known
     check.context.generic_params = generic_params
@@ -1942,9 +1944,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             // gets; a `#here` default is E2428.
             declared_default: func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span, id: AST_NODE_GENERATED}
             sema_site_here_default_check(declared_default, check.diagnostics)
-            caller_default: if declared_default == .Ident(_, caller_span, _) && sema_site_is_caller(declared_default) -> Val(sema_site_location_expr("", updated, program, scopes, caller_span)) else -> Expr?{None}
+            caller_default: if declared_default == .Ident(_, caller_span, _) && sema_site_is_caller(declared_default) -> Val(sema_site_location_expr("", updated, program, check.scopes, caller_span)) else -> Expr?{None}
             sema_body_check_swap_context(check, default_context)
-            checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), updated, program, scopes, check)
+            checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), updated, program, check)
             sema_body_check_swap_context(check, default_context)
             sema_check_delta_pass(default_context.type_delta, check.context.type_delta)
             default_arena: check.context.arena
@@ -1987,7 +1989,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             }
         }
         if {
-            !sema_scope_declare_local(scopes, scope_symbol, param_key, param_mutable, func.params[param_index].convention, param_bounds, false) -> {
+            !sema_scope_declare_local(check.scopes, scope_symbol, param_key, param_mutable, func.params[param_index].convention, param_bounds, false) -> {
                 check.diagnostics.push(sema_already_defined(func.params[param_index].name, func.params[param_index].name_span))
                 complete = false
             }
@@ -2021,20 +2023,20 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // position free, as the contract conditions do (sema_contract_check_expr).
     // A `#Deadline(limit)` function bounds the waits of its whole body, as a
     // `#Deadline` block around it would.
-    marker_position_free: scopes.position_free
-    scopes.position_free = true
-    markers_valid: sema_marker_rules_check_function_markers(func, updated, program, scopes, check)
+    marker_position_free: check.scopes.position_free
+    check.scopes.position_free = true
+    markers_valid: sema_marker_rules_check_function_markers(func, updated, program, check)
     deadline_guards := [TContextGuard]{}
     loop marker in func.markers {
         if stand_in != None || !markers_valid || !sema_marker_is_hook(marker, MarkerHook.Deadline) || marker.negated || marker.args.len() != 1 {
             next
         }
         if marker.args[0] == .Expr(value) {
-            limit: sema_check_expression(value, None, updated, program, scopes, check) ?? next
+            limit: sema_check_expression(value, None, updated, program, check) ?? next
             deadline_guards.push(sema_stmt_deadline_guard(limit, marker.span))
         }
     }
-    scopes.position_free = marker_position_free
+    check.scopes.position_free = marker_position_free
     if stand_in == None && markers_valid {
         graph: program.registration_graph
         sema_app_server_only_endpoint_check(func, graph, module_identity, check.diagnostics)
@@ -2056,12 +2058,12 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // `#Kernel(.parallel)` (E1102); its effect and body obligations wait for
     // the effect rows (Kernel.jet).
     if func.kernel == .Val(kernel) {
-        if !sema_kernel_check_declaration(func, kernel, is_method, params, effective_return, updated, program, scopes, check.context, check.diagnostics) {
+        if !sema_kernel_check_declaration(func, kernel, is_method, params, effective_return, updated, program, check.scopes, check.context, check.diagnostics) {
             complete = false
         }
     }
     if func.is_unsafe && unsafe_gate_valid -> check.context.unsafe_depth = 1
-    contract: sema_contract_check_function(func, updated, program, scopes, check)
+    contract: sema_contract_check_function(func, updated, program, check)
     if !contract.complete -> complete = false
 
     body := [TStmt]{}
@@ -2096,23 +2098,23 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         if returns_value {
             sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, check.context.fallback_tables, check.diagnostics)
         }
-        statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, check, 0)
+        statements := sema_check_statements(func.body, Val(effective_return), updated, program, check, 0)
         // The caller's group joins every task this body spawned into a `Group`
         // parameter, so those handles owe no `join` here.
-        sema_taskgroup_mark_spawns_owned(check.context, SemaTaskGroupOrigin.Parameter, scopes, check.state, check.diagnostics)
+        sema_taskgroup_mark_spawns_owned(check.context, SemaTaskGroupOrigin.Parameter, check.scopes, check.state, check.diagnostics)
         check.context.lost_tail_span = None
         check.context.value_tail_span = None
         check.context.fallback_tables = [Int]{}
         loop site in check.state.share_found -> share_found.push(site)
         loop retype in check.context.number_retypes_found -> number_found.push(retype)
         if !statements.complete -> complete = false
-        if !sema_check_never_fallthrough(func, updated, program, scopes, check.diagnostics) {
+        if !sema_check_never_fallthrough(func, updated, program, check.scopes, check.diagnostics) {
             complete = false
         }
         sema_lint_inferred_never_return(func, owner_key, updated, program, check.diagnostics)
         sema_function_header_external_target(func, check.diagnostics, diagnostics_start)
         // A value body reports E0114 when it can reach its end without a value.
-        if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, check.context.function_name, scopes, check.diagnostics) {
+        if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, check.context.function_name, check.scopes, check.diagnostics) {
             complete = false
         }
         // Validation borrows the original checked rows. Once that loan ends the
@@ -2150,8 +2152,8 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     name_references.extend(check.context.name_references.move())
     check.context.name_references = [SemaNameReferenceFact]{}
-    if stand_in == None -> sema_single_use_leave_scope(scopes, check.state, check.diagnostics) else {
-        sema_scope_leave(scopes, check.state)
+    if stand_in == None -> sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics) else {
+        sema_scope_leave(check.scopes, check.state)
     }
     source_line := sema_source_line_at(updated.source_segments, func.name_span)
     if source_line == None {
@@ -2162,8 +2164,10 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     if stand_in == None {
         return_view_provenance = sema_function_return_view_provenance(func, check.context.return_view_provenance, check.diagnostics, complete)
     }
-    // The pass reports nothing further: the findings go back to the caller.
+    // The pass reports nothing further and checks no more code: the findings
+    // and the scope table go back to the caller.
     sema_body_check_swap_diagnostics(check, diagnostics)
+    sema_body_check_swap_scopes(check, scopes)
     if !complete {
         return sema_function_result(None, owner_key, check.context.move())
     }

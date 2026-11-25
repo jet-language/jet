@@ -272,11 +272,11 @@ sema_stmt_return_lift_arm: fn(body: [Stmt], value: Expr, return_type: Type?, env
     Expr.Ok{value: value.copy(), span: expr_span(value), id: AST_NODE_GENERATED}
 }
 
-sema_stmt_check_return_value: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_stmt_check_return_value: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     diagnostic_start: check.diagnostics.len()
-    checked: sema_stmt_check_return_value_typed(value, return_type, environment, program, scopes, check)
+    checked: sema_stmt_check_return_value_typed(value, return_type, environment, program, check)
     if checked == None {
-        sema_stmt_value_return_mismatch(value, return_type, diagnostic_start, environment, program, scopes, check)
+        sema_stmt_value_return_mismatch(value, return_type, diagnostic_start, environment, program, check)
     }
     checked
 }
@@ -334,11 +334,11 @@ sema_stmt_returns_module_call: fn(value: Expr, environment: SemaScopeEnvironment
 
 // A returned value (a `return` or a value tail) with its ownership and view
 // obligations: the value moves out and its views must outlive the call.
-sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    if sema_stmt_never_contract_returns_err(value, value, environment, program, scopes, check) {
+sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    if sema_stmt_never_contract_returns_err(value, value, environment, program, check) {
         return None
     }
-    if sema_ownership_report_lending_view_escape(value, "be returned", scopes, check.context, check.diagnostics) {
+    if sema_ownership_report_lending_view_escape(value, "be returned", check.scopes, check.context, check.diagnostics) {
         // The view-return check still runs on the lent view, whose loan names
         // no stable owner (E2305).
         if sema_stmt_return_success_is_view(return_type) {
@@ -346,7 +346,7 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
             success: if declared == .Result(ok, _) -> ok else -> declared
             access: sema_stmt_view_access(success) ?? AccessConvention.Read
             provenance := check.context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
-            _ := sema_ownership_record_view_returns(check.state, [SemaOwnershipPlace]{}, access, [String]{}, check.context.return_view_receiver_key, check.context.return_view_parameter_keys, scopes, provenance, expr_span(value), check.diagnostics)
+            _ := sema_ownership_record_view_returns(check.state, [SemaOwnershipPlace]{}, access, [String]{}, check.context.return_view_receiver_key, check.context.return_view_parameter_keys, check.scopes, provenance, expr_span(value), check.diagnostics)
             check.context.return_view_provenance = Val(provenance)
         }
         return None
@@ -354,22 +354,22 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
     // A returned arena view would outlive the
     // arena, which drops at scope end; `context.scratch` would outlive the
     // borrow of the task's arena.
-    if sema_ownership_report_arena_view_escape(check.state, value, "be returned", scopes, check.diagnostics) {
+    if sema_ownership_report_arena_view_escape(check.state, value, "be returned", check.scopes, check.diagnostics) {
         return None
     }
-    if sema_stmt_context_scratch(value, environment, program, scopes, check.context) {
+    if sema_stmt_context_scratch(value, environment, program, check.scopes, check.context) {
         check.diagnostics.push(sema_ownership_diag_scratch_escape(expr_span(value), "be returned"))
         return None
     }
     // A bare range place is a read window at a named `View<T>` return boundary,
     // acquired explicitly so the returned type stays a view instead of a
     // materialized list.
-    if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_is_bare_range_place(value, scopes, check.state) {
-        return sema_stmt_check_returned_value(Expr.Place{value: value, access: PlaceAccess.Read, span: expr_span(value), id: AST_NODE_GENERATED}, return_type, environment, program, scopes, check)
+    if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_is_bare_range_place(value, check.scopes, check.state) {
+        return sema_stmt_check_returned_value(Expr.Place{value: value, access: PlaceAccess.Read, span: expr_span(value), id: AST_NODE_GENERATED}, return_type, environment, program, check)
     }
     if sema_stmt_return_is_view_boundary(return_type) {
-        if sema_stmt_whole_list_window(value, environment, program, scopes, check.state) == .Val(window) {
-            return sema_stmt_check_returned_value(window, return_type, environment, program, scopes, check)
+        if sema_stmt_whole_list_window(value, environment, program, check.scopes, check.state) == .Val(window) {
+            return sema_stmt_check_returned_value(window, return_type, environment, program, check)
         }
     }
     // `Ok(place)` fills the same view success slot: return the window itself,
@@ -385,23 +385,23 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
             }
         }
         if payload == .Val(ok_value) {
-            if sema_stmt_is_bare_range_place(ok_value, scopes, check.state) {
-                return sema_stmt_check_returned_value(Expr.Place{value: ok_value, access: PlaceAccess.Read, span: expr_span(ok_value), id: AST_NODE_GENERATED}, return_type, environment, program, scopes, check)
+            if sema_stmt_is_bare_range_place(ok_value, check.scopes, check.state) {
+                return sema_stmt_check_returned_value(Expr.Place{value: ok_value, access: PlaceAccess.Read, span: expr_span(ok_value), id: AST_NODE_GENERATED}, return_type, environment, program, check)
             }
-            if sema_stmt_whole_list_window(ok_value, environment, program, scopes, check.state) == .Val(window) {
-                return sema_stmt_check_returned_value(window, return_type, environment, program, scopes, check)
+            if sema_stmt_whole_list_window(ok_value, environment, program, check.scopes, check.state) == .Val(window) {
+                return sema_stmt_check_returned_value(window, return_type, environment, program, check)
             }
         }
     }
     diagnostics_before: check.diagnostics.len()
-    checked: sema_stmt_check_return_value(value, return_type, environment, program, scopes, check) ?? {
-        sema_stmt_report_ownerless_view_return(value, return_type, diagnostics_before, scopes, check.state, check.context, check.diagnostics)
+    checked: sema_stmt_check_return_value(value, return_type, environment, program, check) ?? {
+        sema_stmt_report_ownerless_view_return(value, return_type, diagnostics_before, check.scopes, check.state, check.context, check.diagnostics)
         return None
     }
-    if sema_stmt_returns_module_call(value, environment, program, scopes) {
-        sema_stmt_lint_blocked_tail_call(expr_span(value), environment, program, scopes, check.state, check.diagnostics)
+    if sema_stmt_returns_module_call(value, environment, program, check.scopes) {
+        sema_stmt_lint_blocked_tail_call(expr_span(value), environment, program, check.scopes, check.state, check.diagnostics)
     }
-    if !sema_stmt_return_is_view_boundary(return_type) && !check.context.return_view_declared && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, check.state, check.context, check.diagnostics, false) {
+    if !sema_stmt_return_is_view_boundary(return_type) && !check.context.return_view_declared && !sema_copy_site_check_guard_owned(checked, environment, program, check.scopes, check.state, check.context, check.diagnostics, false) {
         return None
     }
     if return_type != None && sema_contains_expiring_secret_loan(checked.ty) {
@@ -414,8 +414,8 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
     // Classify the value, not the enclosing Result/Option rail. The failure
     // solver also wraps an infallible view return in `View<str> Never!`.
     returned_success: sema_stmt_return_success_type(Val(checked.ty))
-    string_view_return := sema_stmt_string_view_type(returned_success) && (value_is_ident || sema_string_view_call_sources(value, scopes, check.state).len() > 0)
-    materialized_string_view: sema_string_view_owning_read(value, returned_success, scopes)
+    string_view_return := sema_stmt_string_view_type(returned_success) && (value_is_ident || sema_string_view_call_sources(value, check.scopes, check.state).len() > 0)
+    materialized_string_view: sema_string_view_owning_read(value, returned_success, check.scopes)
     // An owning materialization returns new storage, not the source window's
     // provenance. A view return must instead prove its original owner. An
     // `Ok(view)` exit proves its success payload's owners; an `Err(..)` exit
@@ -433,7 +433,7 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
             recorded_ty = ok_ty
         }
         if value == .Place(_, _, _, _) || one_value_window -> recorded_ty = ok_ty
-        if sema_stmt_return_known_type(value, environment, scopes) == .Val(known) {
+        if sema_stmt_return_known_type(value, environment, check.scopes) == .Val(known) {
             if sema_stmt_view_access(known) != None -> recorded_ty = ok_ty
         }
     }
@@ -444,15 +444,15 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
             if err_call.name == "Err" && err_call.args.len() == 1 -> failure_exit = true
         }
     }
-    view_valid := materialized_string_view || failure_exit || if string_view_return -> sema_string_view_record_return(value, scopes, check.state, check.context, check.diagnostics) else -> sema_stmt_record_return_views(recorded_value, recorded_ty, scopes, check.state, check.context, check.diagnostics)
+    view_valid := materialized_string_view || failure_exit || if string_view_return -> sema_string_view_record_return(value, check.scopes, check.state, check.context, check.diagnostics) else -> sema_stmt_record_return_views(recorded_value, recorded_ty, check.scopes, check.state, check.context, check.diagnostics)
     // A named `View<T>` boundary reads every bare place through a window, so
     // only other returns are audited.
     if return_type != None && !sema_stmt_return_is_view_boundary(return_type) {
-        sema_copy_site_check_borrowed_return(value, environment, program, scopes, check.context, check.diagnostics)
+        sema_copy_site_check_borrowed_return(value, environment, program, check.scopes, check.context, check.diagnostics)
     }
     // Neither a returned window nor its owning copy moves the window's owner;
     // nor does a one-value window over a map value.
-    moved: materialized_string_view || string_view_return || one_value_window || (!view_valid) || sema_stmt_move_direct(value, check.state, scopes, "`return`", check.diagnostics)
+    moved: materialized_string_view || string_view_return || one_value_window || (!view_valid) || sema_stmt_move_direct(value, check.state, check.scopes, "`return`", check.diagnostics)
     if !view_valid || !moved -> return None
     Val(checked)
 }
@@ -461,11 +461,11 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
 // or a value tail, `returned` as written) is a failure outside it: E2404
 // names what the `Err` fails with and offers the return type that admits
 // it. Answers whether it reported.
-sema_stmt_never_contract_returns_err: fn(value: Expr, returned: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
+sema_stmt_never_contract_returns_err: fn(value: Expr, returned: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> Bool {
     if value == .Paren(inner, _, _) {
-        return sema_stmt_never_contract_returns_err(inner, returned, environment, program, scopes, check)
+        return sema_stmt_never_contract_returns_err(inner, returned, environment, program, check)
     }
-    contract: scopes.return_type ?? return false
+    contract: check.scopes.return_type ?? return false
     denied := false
     // A success slot that holds the default error (`-> Err Never!`, `Err?`)
     // takes `Err(…)` as its value, not as a failure.
@@ -477,17 +477,17 @@ sema_stmt_never_contract_returns_err: fn(value: Expr, returned: Expr, environmen
     failure := ""
     if value == .Err(payload, _, _) {
         found = true
-        failure = sema_stmt_denied_err_failure(payload, environment, program, scopes, check)
+        failure = sema_stmt_denied_err_failure(payload, environment, program, check)
     }
     if value == .Call(call, _) {
         if call.name != "Err" || call.args.len() != 1 || call.args[0].label != None -> return false
-        if sema_scope_resolve_index(scopes, call.name) == .Val(index) {
-            if !sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err") {
+        if sema_scope_resolve_index(check.scopes, call.name) == .Val(index) {
+            if !sema_scope_binding_is_compiler_builtin(check.scopes.bindings[index], "Err") {
                 return false
             }
         }
         found = true
-        failure = sema_stmt_denied_err_failure(call.args[0].expr, environment, program, scopes, check)
+        failure = sema_stmt_denied_err_failure(call.args[0].expr, environment, program, check)
     }
     if !found -> return false
     what: if failure == "" -> "This `Err` can't propagate into `Never` here" else -> "This `Err` fails with `{failure}`, which can't propagate into `Never` here"
@@ -505,9 +505,9 @@ sema_stmt_never_contract_returns_err: fn(value: Expr, returned: Expr, environmen
 // What a returned `Err(payload)` fails with: the default `Err` for a message,
 // else the payload's error type; empty when the payload's type needs the
 // contract to infer (`Err(.Empty)`).
-sema_stmt_denied_err_failure: fn(payload: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> String {
+sema_stmt_denied_err_failure: fn(payload: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> String {
     probe_diagnostics := [Diagnostic]{}
-    probed: sema_probe_expression(payload, None, environment, program, scopes, check, probe_diagnostics) ?? return ""
+    probed: sema_probe_expression(payload, None, environment, program, check, probe_diagnostics) ?? return ""
     if sema_expr_unwrap_tag(probed.ty) == Type.String -> return "Err"
     sema_failure_conversion_leaf(probed.ty)
 }
@@ -539,8 +539,8 @@ sema_stmt_report_ownerless_view_return: fn(value: Expr, return_type: Type?, at: 
 // later one must fit it; a row a propagated fallible call gave first is that
 // call's carrier, and a value fits its success. The value stays the
 // callback's result, so its caller still judges it.
-sema_stmt_check_open_callback_return: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    checked: sema_check_expression(value, None, environment, program, scopes, check) ?? return None
+sema_stmt_check_open_callback_return: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    checked: sema_check_expression(value, None, environment, program, check) ?? return None
     if check.context.callback_return_row == .Val(row) {
         // A Result row is a propagated call's carrier; a plain row is the
         // value an earlier `return` handed back.
@@ -590,7 +590,7 @@ sema_stmt_return_success_is_view: fn(return_type: Type?) -> Bool Never! {
 
 // With a written return type, a value that does not fit it is E0113 about the
 // value itself, replacing the generic E0108 at the value.
-sema_stmt_value_return_mismatch: fn(value: Expr, return_type: Type?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) {
+sema_stmt_value_return_mismatch: fn(value: Expr, return_type: Type?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) {
     if sema_stmt_return_success_type(return_type) == (Type.Named{name: "Unit"}) {
         return
     }
@@ -598,7 +598,7 @@ sema_stmt_value_return_mismatch: fn(value: Expr, return_type: Type?, diagnostic_
     mismatch_index: sema_value_mismatch_index(check.diagnostics, diagnostic_start, value_span) ?? return
     // The value's own type, inferred without the return type as a target.
     probe_diagnostics := [Diagnostic]{}
-    offered: sema_probe_expression(value, None, environment, program, scopes, check, probe_diagnostics) ?? return
+    offered: sema_probe_expression(value, None, environment, program, check, probe_diagnostics) ?? return
     check.diagnostics[mismatch_index] = sema_return_value_mismatch(sema_stmt_return_owner(check.context), sema_stmt_return_required_type(return_type), check.context.return_alias, offered.ty, value_span)
 }
 
@@ -615,10 +615,10 @@ sema_stmt_return_owner: fn(context: SemaCheckContext) -> String? {
 // returns as-is. The syntactic carrier test above cannot see such a value's
 // type, so it is inferred here on its own. A `T E!` slot keeps method and
 // value calls on the payload route, where their failure propagates.
-sema_stmt_return_probed_carrier: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
+sema_stmt_return_probed_carrier: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> Bool {
     if !sema_stmt_return_is_carrier(return_type) -> return false
     required: sema_stmt_return_required_type(return_type)
-    if sema_stmt_return_known_type(value, environment, scopes) == .Val(known) {
+    if sema_stmt_return_known_type(value, environment, check.scopes) == .Val(known) {
         // A generic callee declares its result as its own parameter (`-> T`),
         // so only the call's inferred type shows whether it is the carrier.
         if !(sema_stmt_return_unparen(value) == .Call(_, _)) || sema_stmt_return_types_are_carriers(known, required) {
@@ -628,7 +628,7 @@ sema_stmt_return_probed_carrier: fn(value: Expr, return_type: Type?, environment
         return false
     }
     probe_diagnostics := [Diagnostic]{}
-    probed: sema_probe_expression(value, None, environment, program, scopes, check, probe_diagnostics) ?? return false
+    probed: sema_probe_expression(value, None, environment, program, check, probe_diagnostics) ?? return false
     sema_stmt_return_types_are_carriers(probed.ty, required)
 }
 
@@ -652,29 +652,29 @@ sema_stmt_return_probe_shape: fn(value: Expr, optional_slot: Bool) -> Bool Never
     }
 }
 
-sema_stmt_check_return_value_typed: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_stmt_check_return_value_typed: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     required := sema_stmt_return_required_type(return_type)
-    if sema_stmt_return_if_mixes_carrier(value, return_type, environment, scopes) {
-        lifted: sema_stmt_return_lift_if_arms(value, return_type, environment, scopes)
-        table: sema_check_expression(lifted, Val(required), environment, program, scopes, check) ?? return None
+    if sema_stmt_return_if_mixes_carrier(value, return_type, environment, check.scopes) {
+        lifted: sema_stmt_return_lift_if_arms(value, return_type, environment, check.scopes)
+        table: sema_check_expression(lifted, Val(required), environment, program, check) ?? return None
         if sema_stmt_type_is_fallible_result(table.ty) -> check.context.failure_direct_source = true
         return Val(table)
     }
     success: sema_stmt_return_success_type(return_type)
-    widened_call: sema_stmt_return_call_widening(value, success, environment, program, scopes, check)
-    if widened_call == None && (sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, program, scopes, check)) {
-        carrier: sema_check_expression(value, Val(required), environment, program, scopes, check) ?? return None
+    widened_call: sema_stmt_return_call_widening(value, success, environment, program, check)
+    if widened_call == None && (sema_stmt_return_expr_is_carrier(value, return_type, environment, check.scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, program, check)) {
+        carrier: sema_check_expression(value, Val(required), environment, program, check) ?? return None
         // #3708: a fallible value returned as-is (not an `Ok`/`Err` written
         // here) is this body's own failure source.
-        if !sema_stmt_is_written_carrier(value, Val(required), scopes) && sema_stmt_type_is_fallible_result(carrier.ty) {
+        if !sema_stmt_is_written_carrier(value, Val(required), check.scopes) && sema_stmt_type_is_fallible_result(carrier.ty) {
             check.context.failure_direct_source = true
         }
         return Val(carrier)
     }
     if !sema_stmt_return_is_carrier(return_type) {
-        return sema_stmt_check_return_payload(value, required, widened_call, environment, program, scopes, check)
+        return sema_stmt_check_return_payload(value, required, widened_call, environment, program, check)
     }
-    payload: sema_stmt_check_return_payload(value, success, widened_call, environment, program, scopes, check) ?? return None
+    payload: sema_stmt_check_return_payload(value, success, widened_call, environment, program, check) ?? return None
     normalized := sema_expr_unwrap_tag(required)
     if normalized == {
         .Result(_, _) -> return Val(sema_tree_node(required, TExprKind.Ok{value: payload}, expr_span(value)))
@@ -687,10 +687,10 @@ sema_stmt_check_return_value_typed: fn(value: Expr, return_type: Type?, environm
 // success slot: the call is inferred alone, its failure propagates, and its
 // payload converts like any other widened return. A checked widening keeps
 // the slot as the call's inference target. The call's own success type.
-sema_stmt_return_call_widening: fn(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Type? {
+sema_stmt_return_call_widening: fn(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> Type? {
     if !sema_expr_is_numeric(success) || !sema_stmt_return_call_shape(value) -> return None
     probe_diagnostics := [Diagnostic]{}
-    probe: sema_probe_expression(value, None, environment, program, scopes, check, probe_diagnostics) ?? return None
+    probe: sema_probe_expression(value, None, environment, program, check, probe_diagnostics) ?? return None
     own := probe.ty
     unwrapped: sema_expr_unwrap_tag(probe.ty)
     if unwrapped == .Result(ok, _) -> own = ok
@@ -706,26 +706,26 @@ sema_stmt_return_call_widening: fn(value: Expr, success: Type, environment: Sema
 // widening counts, a lossless one (U8 into Int) as well as a checked one. A
 // widened call (`sema_stmt_return_call_widening`) is checked on its own success
 // type.
-sema_stmt_check_return_payload: fn(value: Expr, success: Type, call_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    known := sema_stmt_return_numeric_source(value, environment, scopes)
+sema_stmt_check_return_payload: fn(value: Expr, success: Type, call_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    known := sema_stmt_return_numeric_source(value, environment, check.scopes)
     // copy: `call_type` is the caller's read parameter, which keeps its value
     if call_type == .Val(own) -> known = Val(own.copy())
     if known == .Val(source) && sema_expr_is_numeric(success) && !type_identity_equal(source, success) && sema_expr_numeric_widening_to(source, success) != None {
-        checked: sema_check_expression(value, call_type, environment, program, scopes, check) ?? return None
+        checked: sema_check_expression(value, call_type, environment, program, check) ?? return None
         line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, success, checked.span, line, check.diagnostics)
     }
     // A `View<str>` return reads a string view as itself.
-    if sema_stmt_string_view_type(success) && sema_string_view_return_source(value, scopes, check.state) {
-        return sema_string_view_return_value(value, success, environment, program, scopes, check)
+    if sema_stmt_string_view_type(success) && sema_string_view_return_source(value, check.scopes, check.state) {
+        return sema_string_view_return_value(value, success, environment, program, check)
     }
     // A returned string view becomes an owned `String`.
-    if sema_string_view_owning_read(value, success, scopes) {
+    if sema_string_view_owning_read(value, success, check.scopes) {
         if value == .Ident(name, name_span, _) {
-            return sema_string_view_materialize(name, name_span, Val(success), environment, program, scopes, check)
+            return sema_string_view_materialize(name, name_span, Val(success), environment, program, check)
         }
     }
-    sema_check_expression(value, Val(success), environment, program, scopes, check)
+    sema_check_expression(value, Val(success), environment, program, check)
 }
 
 sema_stmt_return_call_shape: fn(value: Expr) -> Bool Never! {
@@ -963,7 +963,7 @@ sema_stmt_mark_discarded_result: fn(program: SemaProgramTables, checked: TExpr, 
 // may also fill the success side of a promised `T? Err!` or `T?`: the
 // closing `None` of a marker's `check` rule after an unconditional `reject`
 // is the rule's `CompilerRejection?`.
-sema_stmt_check_dead_value_tail: fn(tail: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
+sema_stmt_check_dead_value_tail: fn(tail: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> Bool {
     expected := Type?{None}
     candidates := [Type?]{return_type}
     if sema_stmt_return_is_carrier(return_type) {
@@ -971,11 +971,11 @@ sema_stmt_check_dead_value_tail: fn(tail: Expr, return_type: Type?, environment:
     }
     loop candidate in candidates {
         probe_diagnostics := [Diagnostic]{}
-        probed: sema_probe_expression(tail, candidate, environment, program, scopes, check, probe_diagnostics)
+        probed: sema_probe_expression(tail, candidate, environment, program, check, probe_diagnostics)
         if probed != None && !sema_has_error_since(probe_diagnostics, 0) {
             expected = candidate
             break
         }
     }
-    sema_check_expression(tail, expected, environment, program, scopes, check) != None
+    sema_check_expression(tail, expected, environment, program, check) != None
 }

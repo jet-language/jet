@@ -75,20 +75,20 @@ sema_call_shared_owner_param: fn(name: String, convention: AccessConvention, ty:
 // Capture either the whole cloneable payload or one
 // pure, cloneable projection. The callback runs under the Shared read lock,
 // so its returned value is paired with one committed revision.
-sema_call_shared_owner_capture: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_capture: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if args.len() > 1 {
         check.diagnostics.push(sema_error("E0104", span, "`capture` expects 0 or 1 argument, got {args.len()}", "`capture` takes no argument or one pure projection closure", "call `.capture(fn(value) {{ … }})`"))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() == 0 {
         if !sema_call_shared_owner_cloneable(inner, environment, program, check.context) {
             check.diagnostics.push(sema_error("E0112", span, "`Shared<{type_name(inner)}>.capture()` cannot copy its value", "`capture` owns an independent snapshot, so the stored type must support copying", "capture a cloneable projection instead, or add the required copy implementation"))
         }
-        return sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{}, sema_call_shared_owner_snapshot_type(inner, inner), span, expected, environment, program, scopes, check.context, check.diagnostics)
+        return sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{}, sema_call_shared_owner_snapshot_type(inner, inner), span, expected, environment, program, check.scopes, check.context, check.diagnostics)
     }
     callback_is_lambda: if args[0].expr == {
         .Lambda(_, _) -> true
@@ -96,11 +96,11 @@ sema_call_shared_owner_capture: fn(receiver: Expr, receiver_value: TExpr, inner:
     }
     if !callback_is_lambda {
         check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`capture` needs a lambda, not a value", "`.capture` runs a short function against the locked value", "write `.capture(fn(value) {{ … }})`"))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     callback_expected: Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    callback := sema_expression_lambda_host_callback(args[0].expr, Val(callback_expected), false, environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    callback := sema_expression_lambda_host_callback(args[0].expr, Val(callback_expected), false, environment, program, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     projected: sema_call_resolved_type(sema_call_signature_return(callback.ty) ?? Type.Named{name: "Unit"}, environment, program)
     if !sema_call_shared_owner_cloneable(projected, environment, program, check.context) {
         check.diagnostics.push(sema_error("E0112", span, "`Shared<{type_name(inner)}>.capture(projection)` returns non-copyable `{type_name(projected)}`", "a captured projection is an owned value retained by the snapshot", "return a cloneable value from the projection"))
@@ -109,20 +109,20 @@ sema_call_shared_owner_capture: fn(receiver: Expr, receiver_value: TExpr, inner:
         check.diagnostics.push(sema_error("E3401", expr_span(args[0].expr), "`Shared.capture` calls the impure function `capture projection`", "`capture projection` is impure, but `Shared.capture` declares `-[]>`", "remove the call from `Shared.capture`, or drop the `-[]>` bound from `Shared.capture` so its effects are inferred"))
     }
     tree_expr_retype(callback, Type.Fn{params: [Type]{inner}, ret: Val(projected), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
-    sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{callback}, sema_call_shared_owner_snapshot_type(inner, projected), span, expected, environment, program, scopes, check.context, check.diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{callback}, sema_call_shared_owner_snapshot_type(inner, projected), span, expected, environment, program, check.scopes, check.context, check.diagnostics)
 }
 
 // Consume one owner-bound snapshot ticket plus a
 // replacement payload. The runtime performs the atomic owner/revision
 // comparison; sema only fixes the generic source type.
-sema_call_shared_owner_try_replace: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_try_replace: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if args.len() != 2 {
         check.diagnostics.push(sema_error("E0104", span, "`try_replace` expects 2 arguments, got {args.len()}", "`try_replace` takes one snapshot ticket and one replacement value", "call `.try_replace(snapshot, value)`"))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     updated_args := args
-    snapshot: sema_check_expression(updated_args[0].expr, None, environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    snapshot: sema_check_expression(updated_args[0].expr, None, environment, program, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     valid_source := if snapshot.ty == {
         .Apply(name, type_args) -> name == SEMA_SHARED_SNAPSHOT_TYPE && type_args.len() == 2 && type_identity_equal(type_args[0], inner)
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
@@ -131,39 +131,39 @@ sema_call_shared_owner_try_replace: fn(receiver: Expr, receiver_value: TExpr, in
         check.diagnostics.push(sema_error("E0112", expr_span(updated_args[0].expr), "`try_replace` needs a `SharedSnapshot<{type_name(inner)}, U>`, got `{type_name(snapshot.ty)}`", "a snapshot ticket is bound to the exact Shared payload type", "capture the snapshot from this Shared value before publishing"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    replacement_checked: sema_check_expression(updated_args[1].expr, Val(inner), environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_shared_cycle_check_replace(inner, updated_args[1].expr, expr_span(updated_args[1].expr), environment, program, scopes, check.state, check.diagnostics)
+    replacement_checked: sema_check_expression(updated_args[1].expr, Val(inner), environment, program, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_shared_cycle_check_replace(inner, updated_args[1].expr, expr_span(updated_args[1].expr), environment, program, check.scopes, check.state, check.diagnostics)
     replacement: sema_expr_expected(replacement_checked, Val(inner), environment, program, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     params: [SemaCallParam]{sema_call_shared_owner_param("snapshot", AccessConvention.Move, snapshot.ty), sema_call_shared_owner_param("value", AccessConvention.Move, inner)}
-    ownership := sema_ownership_check_method_call(check.state, "Shared.try_replace", receiver, AccessConvention.Read, params, updated_args, scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check.state, "Shared.try_replace", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     values: [TExpr]{snapshot, replacement}
     result: Type.Result{ok: Type.Bool, err: Type.Named{name: SEMA_SHARED_REVISION_ERROR_TYPE}}
-    sema_scope_record_module_write(receiver, span, environment, scopes, check.context)
-    sema_call_shared_owner_host_value(receiver_value, "try_replace", values, result, span, expected, environment, program, scopes, check.context, check.diagnostics)
+    sema_scope_record_module_write(receiver, span, environment, check.scopes, check.context)
+    sema_call_shared_owner_host_value(receiver_value, "try_replace", values, result, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
 }
 
 // `a.same(b)` asks whether two `Shared<T>` handles name one cell. Identity
 // only, like `Rc::ptr_eq`; `==` on `Shared<T>` stays an error. The argument
 // is only read, so neither handle is moved.
-sema_call_shared_owner_same: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_same: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if args.len() != 1 {
         check.diagnostics.push(sema_error("E0104", span, "`same` expects 1 argument, got {args.len()}", "`same` compares this Shared handle with one other handle", "call `.same(other)`"))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     shared_type: Type.Shared{inner: inner}
     updated_args := args
-    other_checked: sema_check_expression(updated_args[0].expr, Val(shared_type), environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    other_checked: sema_check_expression(updated_args[0].expr, Val(shared_type), environment, program, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     other: sema_expr_expected(other_checked, Val(shared_type), environment, program, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     params: [SemaCallParam]{sema_call_shared_owner_param("other", AccessConvention.Read, shared_type)}
-    ownership := sema_ownership_check_method_call(check.state, "Shared.same", receiver, AccessConvention.Read, params, updated_args, scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check.state, "Shared.same", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    sema_call_shared_owner_host_value(receiver_value, "same", [TExpr]{other}, Type.Bool, span, expected, environment, program, scopes, check.context, check.diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, "same", [TExpr]{other}, Type.Bool, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
 }
 
 sema_call_shared_owner_nullary: fn(receiver: Expr, receiver_value: TExpr, method: String, result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -177,13 +177,13 @@ sema_call_shared_owner_nullary: fn(receiver: Expr, receiver_value: TExpr, method
 // `try_guard_edit()` take it only when it is free now, and
 // `guard_read_within(limit)`/`guard_edit_within(limit)` wait at most the
 // Duration `limit`; both answer None when the permit stayed taken.
-sema_call_shared_owner_guard: fn(receiver: Expr, receiver_value: TExpr, inner: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_guard: fn(receiver: Expr, receiver_value: TExpr, inner: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     timed: method == "guard_read_within" || method == "guard_edit_within"
     wanted: if timed -> 1 else -> 0
     if args.len() != wanted {
         check.diagnostics.push(sema_wrong_core_arity(method, wanted, args.len(), span))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return failed
     }
     if sema_call_shared_owner_lexical_tail_len(check.tail_store, check.context) >= SEMA_SHARED_GUARD_LONG_SCOPE {
@@ -197,20 +197,20 @@ sema_call_shared_owner_guard: fn(receiver: Expr, receiver_value: TExpr, inner: T
     if timed {
         duration: Type.Named{name: "Duration"}
         updated_args := args
-        checked: sema_check_expression(updated_args[0].expr, Val(duration), environment, program, scopes, check) ?? return failed
+        checked: sema_check_expression(updated_args[0].expr, Val(duration), environment, program, check) ?? return failed
         limit: sema_expr_expected(checked, Val(duration), environment, program, check.diagnostics) ?? return failed
         params: [SemaCallParam]{sema_call_shared_owner_param("limit", AccessConvention.Read, duration)}
-        ownership := sema_ownership_check_method_call(check.state, "Shared.{method}", receiver, AccessConvention.Read, params, updated_args, scopes, span, check.diagnostics)
+        ownership := sema_ownership_check_method_call(check.state, "Shared.{method}", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
         if !ownership.accepted || !ownership.complete -> return failed
         values.push(limit)
-    } else if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, check.diagnostics) {
+    } else if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
         return failed
     }
     // An edit lease is the write: every edit through the guard reaches the cell.
     if editable {
-        sema_scope_record_module_write(receiver, span, environment, scopes, check.context)
+        sema_scope_record_module_write(receiver, span, environment, check.scopes, check.context)
     }
-    sema_call_shared_owner_host_value(receiver_value, method, values, result, span, expected, environment, program, scopes, check.context, check.diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, method, values, result, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
 }
 
 // (`Cell` receivers), `finish_cell_*` and `cell_method_return` /
@@ -222,51 +222,51 @@ sema_call_cell_guard_type: fn(editable: Bool, inner: Type) -> Type Never! {
     Type.Apply{name: if editable -> "CellEditGuard" else -> "CellReadGuard", args: [Type]{inner}}
 }
 
-sema_call_cell_get: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_cell_get: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if args.len() != 0 {
         check.diagnostics.push(sema_wrong_core_arity("get", 0, args.len(), span))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if !sema_call_shared_owner_cloneable(inner, environment, program, check.context) {
         check.diagnostics.push(sema_error("E0112", span, "`Cell<{sema_type_show(inner)}>.get()` cannot copy its value", "`get` returns an independent owned value, so the stored type must support copying", "use `.read(fn(value) {{ ... }})` to inspect it without making a copy"))
     }
-    sema_call_shared_owner_nullary(receiver, receiver_value, "get", inner, span, expected, environment, program, scopes, check.state, check.context, check.diagnostics)
+    sema_call_shared_owner_nullary(receiver, receiver_value, "get", inner, span, expected, environment, program, check.scopes, check.state, check.context, check.diagnostics)
 }
 
 // `set` and `replace` consume the new value; `replace` returns the old one.
-sema_call_cell_write: fn(receiver: Expr, receiver_value: TExpr, owner: String, inner: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_cell_write: fn(receiver: Expr, receiver_value: TExpr, owner: String, inner: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if args.len() != 1 {
         check.diagnostics.push(sema_wrong_core_arity(method, 1, args.len(), span))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     updated_args := args
-    checked: sema_check_expression(updated_args[0].expr, Val(inner), environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    checked: sema_check_expression(updated_args[0].expr, Val(inner), environment, program, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value: sema_expr_expected(checked, Val(inner), environment, program, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     params: [SemaCallParam]{sema_call_shared_owner_param("value", AccessConvention.Move, inner)}
-    ownership := sema_ownership_check_method_call(check.state, "{owner}.{method}", receiver, AccessConvention.Read, params, updated_args, scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check.state, "{owner}.{method}", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result: if method == "replace" -> inner else -> Type.Named{name: "Unit"}
-    sema_scope_record_module_write(receiver, span, environment, scopes, check.context)
-    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, environment, program, scopes, check.context, check.diagnostics)
+    sema_scope_record_module_write(receiver, span, environment, check.scopes, check.context)
+    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
 }
 
 // `get_or_set` initializes an empty `Cell<T?>` from a zero-parameter lambda
 // and returns an owned copy of its `T`.
-sema_call_cell_get_or_set: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_cell_get_or_set: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     stored_type := Type?{None}
     if inner == .Option(value) -> stored_type = Val(value)
     stored: stored_type ?? {
         check.diagnostics.push(sema_error("E0112", span, "`Cell<{sema_type_show(inner)}>` is not an optional cell", "`get_or_set` initializes an empty `Cell<T?>` and returns its `T` value", "use `Cell<T?>`, or use `.get()` for a cell that always has a value"))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() != 1 {
         check.diagnostics.push(sema_wrong_core_arity("get_or_set", 1, args.len(), span))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     is_lambda: if args[0].expr == {
@@ -277,16 +277,16 @@ sema_call_cell_get_or_set: fn(receiver: Expr, receiver_value: TExpr, inner: Type
         check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`get_or_set` needs a zero-parameter lambda", "the initializer runs only when the cell is empty", "write `.get_or_set(fn() {{ value }})`"))
     }
     initializer_type: Type.Fn{params: [Type]{}, ret: Val(stored), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    initializer := sema_check_expression_with_lambda_escapes(args[0].expr, Val(initializer_type), environment, program, scopes, check, Val(false))
+    initializer := sema_check_expression_with_lambda_escapes(args[0].expr, Val(initializer_type), environment, program, check, Val(false))
     if !sema_call_shared_owner_cloneable(stored, environment, program, check.context) {
         check.diagnostics.push(sema_error("E0112", span, "`Cell<{sema_type_show(stored)}?>.get_or_set()` cannot copy its value", "`get_or_set` returns an independent owned value, so `T` must support copying", "use `.edit(fn(value) {{ ... }})` when the cached value cannot be copied"))
     }
     if !is_lambda -> return SemaMethodSpecialCheck{handled: true, value: None}
     callback: initializer ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    sema_call_shared_owner_host_value(receiver_value, "get_or_set", [TExpr]{callback}, stored, span, expected, environment, program, scopes, check.context, check.diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, "get_or_set", [TExpr]{callback}, stored, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
 }
 
 // The lambda parameter itself or a chain of field reads from it.
@@ -334,21 +334,21 @@ sema_call_cell_guard_paths_overlap: fn(first: [String], second: [String]) -> Boo
 }
 
 // One lambda over the guarded value; an edit guard lends the value mutably.
-sema_call_cell_closure: fn(method: String, inner: Type, argument: CallArg, editable: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_call_cell_closure: fn(method: String, inner: Type, argument: CallArg, editable: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     is_lambda: if argument.expr == {
         .Lambda(_, _) -> true
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
     if !is_lambda {
         check.diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`{method}` needs a lambda, not a value", "`.{method}` runs a short function against the locked value", "write `.{method}(fn(value) {{ … }})`"))
-        _ := sema_check_expression(argument.expr, None, environment, program, scopes, check)
+        _ := sema_check_expression(argument.expr, None, environment, program, check)
         return None
     }
     expected: Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    sema_expression_lambda_host_callback(argument.expr, Val(expected), editable, environment, program, scopes, check)
+    sema_expression_lambda_host_callback(argument.expr, Val(expected), editable, environment, program, check)
 }
 
-sema_call_cell_guard_map: fn(receiver: Expr, receiver_value: TExpr, editable: Bool, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_cell_guard_map: fn(receiver: Expr, receiver_value: TExpr, editable: Bool, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     projection := [String]?{None}
     if args.len() > 0 {
         projection = sema_call_cell_guard_projection(args[0].expr)
@@ -358,12 +358,12 @@ sema_call_cell_guard_map: fn(receiver: Expr, receiver_value: TExpr, editable: Bo
     }
     if args.len() != 1 {
         check.diagnostics.push(sema_call_builtin_host_arity_diagnostic("map", args.len(), span))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    callback: sema_call_cell_closure("map", inner, args[0], editable, environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    callback: sema_call_cell_closure("map", inner, args[0], editable, environment, program, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     path: projection ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_method_receiver(check.state, receiver, AccessConvention.Move, "map", scopes, span, check.diagnostics) {
+    if !sema_ownership_check_method_receiver(check.state, receiver, AccessConvention.Move, "map", check.scopes, span, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     projected: sema_call_signature_return(callback.ty) ?? Type.Named{name: "Unit"}
@@ -373,10 +373,10 @@ sema_call_cell_guard_map: fn(receiver: Expr, receiver_value: TExpr, editable: Bo
 }
 
 // An edit guard splits only into disjoint fields; read guards may overlap.
-sema_call_cell_guard_split: fn(receiver: Expr, receiver_value: TExpr, editable: Bool, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_cell_guard_split: fn(receiver: Expr, receiver_value: TExpr, editable: Bool, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if args.len() != 2 {
         check.diagnostics.push(sema_wrong_core_arity("split", 2, args.len(), span))
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     complete := true
@@ -393,12 +393,12 @@ sema_call_cell_guard_split: fn(receiver: Expr, receiver_value: TExpr, editable: 
         check.diagnostics.push(sema_error("E0112", expr_span(args[1].expr), "`guard.split` projections overlap", "each edit guard must cover a disjoint field of the original value", "project two different fields, or keep one guard and edit through it"))
         complete = false
     }
-    first: sema_call_cell_closure("split", inner, args[0], editable, environment, program, scopes, check)
-    second: sema_call_cell_closure("split", inner, args[1], editable, environment, program, scopes, check)
+    first: sema_call_cell_closure("split", inner, args[0], editable, environment, program, check)
+    second: sema_call_cell_closure("split", inner, args[1], editable, environment, program, check)
     first_callback: first ?? return SemaMethodSpecialCheck{handled: true, value: None}
     second_callback: second ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_method_receiver(check.state, receiver, AccessConvention.Move, "split", scopes, span, check.diagnostics) {
+    if !sema_ownership_check_method_receiver(check.state, receiver, AccessConvention.Move, "split", check.scopes, span, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     first_guard: sema_call_cell_guard_type(editable, sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"})
@@ -408,30 +408,30 @@ sema_call_cell_guard_split: fn(receiver: Expr, receiver_value: TExpr, editable: 
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, check.diagnostics)}
 }
 
-sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: String, type_args: [Type], method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: String, type_args: [Type], method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if type_args.len() != 1 -> return SemaMethodSpecialCheck{handled: false, value: None}
     inner: type_args[0]
     if name == "Cell" {
         if method == "get" {
-            return sema_call_cell_get(receiver, receiver_value, inner, args, span, expected, environment, program, scopes, check)
+            return sema_call_cell_get(receiver, receiver_value, inner, args, span, expected, environment, program, check)
         }
         if method == "set" || method == "replace" {
-            return sema_call_cell_write(receiver, receiver_value, name, inner, method, args, span, expected, environment, program, scopes, check)
+            return sema_call_cell_write(receiver, receiver_value, name, inner, method, args, span, expected, environment, program, check)
         }
         if method == "get_or_set" {
-            return sema_call_cell_get_or_set(receiver, receiver_value, inner, args, span, expected, environment, program, scopes, check)
+            return sema_call_cell_get_or_set(receiver, receiver_value, inner, args, span, expected, environment, program, check)
         }
         if method == "guard_read" || method == "guard_edit" {
             if args.len() != 0 {
                 check.diagnostics.push(sema_wrong_core_arity(method, 0, args.len(), span))
-                sema_call_memory_discard_args(args, environment, program, scopes, check)
+                sema_call_memory_discard_args(args, environment, program, check)
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             // An edit lease is the write: every edit through the guard reaches the cell.
             if method == "guard_edit" {
-                sema_scope_record_module_write(receiver, span, environment, scopes, check.context)
+                sema_scope_record_module_write(receiver, span, environment, check.scopes, check.context)
             }
-            return sema_call_shared_owner_nullary(receiver, receiver_value, method, sema_call_cell_guard_type(method == "guard_edit", inner), span, expected, environment, program, scopes, check.state, check.context, check.diagnostics)
+            return sema_call_shared_owner_nullary(receiver, receiver_value, method, sema_call_cell_guard_type(method == "guard_edit", inner), span, expected, environment, program, check.scopes, check.state, check.context, check.diagnostics)
         }
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -440,16 +440,16 @@ sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: Strin
     }
     editable: name == "CellEditGuard"
     if method == "get" {
-        return sema_call_cell_get(receiver, receiver_value, inner, args, span, expected, environment, program, scopes, check)
+        return sema_call_cell_get(receiver, receiver_value, inner, args, span, expected, environment, program, check)
     }
     if method == "set" && editable {
-        return sema_call_cell_write(receiver, receiver_value, name, inner, method, args, span, expected, environment, program, scopes, check)
+        return sema_call_cell_write(receiver, receiver_value, name, inner, method, args, span, expected, environment, program, check)
     }
     if method == "map" {
-        return sema_call_cell_guard_map(receiver, receiver_value, editable, inner, args, span, expected, environment, program, scopes, check)
+        return sema_call_cell_guard_map(receiver, receiver_value, editable, inner, args, span, expected, environment, program, check)
     }
     if method == "split" {
-        return sema_call_cell_guard_split(receiver, receiver_value, editable, inner, args, span, expected, environment, program, scopes, check)
+        return sema_call_cell_guard_split(receiver, receiver_value, editable, inner, args, span, expected, environment, program, check)
     }
     SemaMethodSpecialCheck{handled: false, value: None}
 }
@@ -459,7 +459,7 @@ sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: Strin
 // `ID<T>`. `add` and `remove` change the pool, so like `pool[id] = v` they need
 // a writable pool (a `:=` binding or a `^` parameter); the call site needs no
 // `^` mark. Each lowers to the plain `JetPool<T>` method.
-sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     id_type: Type.Apply{name: "ID", args: [Type]{element}}
     wanted: if method == "ids" -> 0 else -> 1
@@ -474,69 +474,69 @@ sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, 
                 check.diagnostics.push(sema_error("E0104", span, "`{method}` expects 1 argument, got {args.len()}", why, fix))
             }
         }
-        sema_call_memory_discard_args(args, environment, program, scopes, check)
+        sema_call_memory_discard_args(args, environment, program, check)
         return failed
     }
     if method == "ids" {
-        if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, check.diagnostics) {
+        if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
             return failed
         }
-        return sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{}, Type.List{element: id_type}, span, expected, environment, program, scopes, check.context, check.diagnostics)
+        return sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{}, Type.List{element: id_type}, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
     }
     updated_args := args
     slot: if method == "add" -> element else -> id_type
-    checked: sema_check_expression(updated_args[0].expr, Val(slot), environment, program, scopes, check) ?? return failed
+    checked: sema_check_expression(updated_args[0].expr, Val(slot), environment, program, check) ?? return failed
     value: sema_expr_expected(checked, Val(slot), environment, program, check.diagnostics) ?? return failed
     convention: if method == "add" -> AccessConvention.Move else -> AccessConvention.Read
     params: [SemaCallParam]{sema_call_shared_owner_param(if method == "add" -> "value" else -> "id", convention, slot)}
-    ownership := sema_ownership_check_method_call(check.state, "Pool.{method}", receiver, AccessConvention.Read, params, updated_args, scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check.state, "Pool.{method}", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
-    if !sema_ownership_check_receiver_write(check.state, receiver, method, params, scopes, expr_span(receiver), check.diagnostics) {
+    if !sema_ownership_check_receiver_write(check.state, receiver, method, params, check.scopes, expr_span(receiver), check.diagnostics) {
         return failed
     }
     result: if method == "add" -> id_type else -> Type.Option{inner: element}
-    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, environment, program, scopes, check.context, check.diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
 }
 
-sema_call_try_shared_owner_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_call_try_shared_owner_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if receiver_value.ty == {
         .Shared(inner) -> {
             if method == "capture" {
-                return sema_call_shared_owner_capture(receiver, receiver_value, inner, args, span, expected, environment, program, scopes, check)
+                return sema_call_shared_owner_capture(receiver, receiver_value, inner, args, span, expected, environment, program, check)
             }
             if method == "try_replace" {
-                return sema_call_shared_owner_try_replace(receiver, receiver_value, inner, args, span, expected, environment, program, scopes, check)
+                return sema_call_shared_owner_try_replace(receiver, receiver_value, inner, args, span, expected, environment, program, check)
             }
             if method == "same" {
-                return sema_call_shared_owner_same(receiver, receiver_value, inner, args, span, expected, environment, program, scopes, check)
+                return sema_call_shared_owner_same(receiver, receiver_value, inner, args, span, expected, environment, program, check)
             }
             if method == "try_guard_read" || method == "try_guard_edit" || method == "guard_read_within" || method == "guard_edit_within" {
-                return sema_call_shared_owner_guard(receiver, receiver_value, inner, method, args, span, expected, environment, program, scopes, check)
+                return sema_call_shared_owner_guard(receiver, receiver_value, inner, method, args, span, expected, environment, program, check)
             }
             if args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
             if method == "guard_read" || method == "guard_edit" {
-                return sema_call_shared_owner_guard(receiver, receiver_value, inner, method, args, span, expected, environment, program, scopes, check)
+                return sema_call_shared_owner_guard(receiver, receiver_value, inner, method, args, span, expected, environment, program, check)
             }
             // Expert weak edge for intentional cycles.
             if method == "downgrade" {
-                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Apply{name: SEMA_SHARED_WEAK_TYPE, args: [Type]{inner}}, span, expected, environment, program, scopes, check.state, check.context, check.diagnostics)
+                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Apply{name: SEMA_SHARED_WEAK_TYPE, args: [Type]{inner}}, span, expected, environment, program, check.scopes, check.state, check.context, check.diagnostics)
             }
             if method == "strong_count" {
-                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Int, span, expected, environment, program, scopes, check.state, check.context, check.diagnostics)
+                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Int, span, expected, environment, program, check.scopes, check.state, check.context, check.diagnostics)
             }
         }
         .Apply(name, type_args) -> {
             if name == "Pool" && type_args.len() == 1 && (method == "add" || method == "remove" || method == "ids") {
-                return sema_call_pool_method(receiver, receiver_value, type_args[0], method, args, span, expected, environment, program, scopes, check)
+                return sema_call_pool_method(receiver, receiver_value, type_args[0], method, args, span, expected, environment, program, check)
             }
-            cell: sema_call_try_cell_method(receiver, receiver_value, name, type_args, method, args, span, expected, environment, program, scopes, check)
+            cell: sema_call_try_cell_method(receiver, receiver_value, name, type_args, method, args, span, expected, environment, program, check)
             if cell.handled -> return cell
             if args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
             if name == SEMA_SHARED_SNAPSHOT_TYPE && type_args.len() == 2 && method == "value" {
-                return sema_call_shared_owner_nullary(receiver, receiver_value, method, type_args[1], span, expected, environment, program, scopes, check.state, check.context, check.diagnostics)
+                return sema_call_shared_owner_nullary(receiver, receiver_value, method, type_args[1], span, expected, environment, program, check.scopes, check.state, check.context, check.diagnostics)
             }
             if name == SEMA_SHARED_WEAK_TYPE && type_args.len() == 1 && method == "upgrade" {
-                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Option{inner: Type.Shared{inner: type_args[0]}}, span, expected, environment, program, scopes, check.state, check.context, check.diagnostics)
+                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Option{inner: Type.Shared{inner: type_args[0]}}, span, expected, environment, program, check.scopes, check.state, check.context, check.diagnostics)
             }
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}

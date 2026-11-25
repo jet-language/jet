@@ -276,14 +276,14 @@ sema_stmt_destructure_alias: fn(ty: Type, environment: SemaScopeEnvironment, pro
     None
 }
 
-sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TStmt? {
+sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TStmt? {
     if pattern == {
-        .Refutable(inner, fallback, names, span) -> return sema_stmt_check_refutable_binding(binding, inner, fallback, names, span, environment, program, scopes, check)
+        .Refutable(inner, fallback, names, span) -> return sema_stmt_check_refutable_binding(binding, inner, fallback, names, span, environment, program, check)
         .Struct(_, _, _, _, _) | .List(_, _) | .Tuple(_, _) -> {}
     }
     before := check.diagnostics.len()
-    init: sema_check_expression(binding.init, None, environment, program, scopes, check) ?? {
-        sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, scopes, check.state, check.context, check.diagnostics)
+    init: sema_check_expression(binding.init, None, environment, program, check) ?? {
+        sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, check.scopes, check.state, check.context, check.diagnostics)
         return None
     }
     ty: sema_stmt_destructure_alias(init.ty, environment, program) ?? init.ty
@@ -304,7 +304,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
             }
             if !actual_is_struct {
                 check.diagnostics.push(sema_error("E0313", type_span, "`{written_type} {{ … }}` can only destructure a `{written_type}` value, but this is {sema_type_show(ty)}", "destructuring with `{{ }}` pulls fields out of a struct value", "destructure a `{written_type}`, or bind the whole value with a name"))
-                sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, scopes, check.state, check.context, check.diagnostics)
+                sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, check.scopes, check.state, check.context, check.diagnostics)
                 return None
             }
             nominal_row: actual ?? return None
@@ -317,7 +317,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
             }
             if !named_matches {
                 check.diagnostics.push(sema_error("E0313", type_span, "this value is a `{nominal.symbol.name}`, not a `{written_type}`", "the type named before `{{ }}` must match the value you destructure", "write `{nominal.symbol.name} {{ … }}` to match the value"))
-                sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, scopes, check.state, check.context, check.diagnostics)
+                sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, check.scopes, check.state, check.context, check.diagnostics)
                 return None
             }
             generic_names := (loop parameter in nominal.generic_params -> parameter.name)
@@ -378,7 +378,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
                 }
                 .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
                     check.diagnostics.push(sema_error("E0313", pattern_span, "`[ … ]` can only destructure a list, but this is {sema_type_show(ty)}", "destructuring with `[ ]` pulls elements out of a list value", "destructure a list, or bind the whole value with a name"))
-                    sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, scopes, check.state, check.context, check.diagnostics)
+                    sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, check.scopes, check.state, check.context, check.diagnostics)
                     return None
                 }
             }
@@ -407,7 +407,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
             }
             if fields.len() == 0 && ty != (Type.Tuple{fields: [TypeTupleField]{}}) {
                 check.diagnostics.push(sema_error("E0313", pattern_span, "`( … )` can only destructure a tuple, but this is {sema_type_show(ty)}", "destructuring with `( )` pulls named members out of a tuple value", "destructure a tuple, or bind the whole value with a name"))
-                sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, scopes, check.state, check.context, check.diagnostics)
+                sema_stmt_destructure_recover(pattern, binding.mutable, environment, program, check.scopes, check.state, check.context, check.diagnostics)
                 return None
             }
             if {
@@ -443,7 +443,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
     loop (index, name) in names {
         if index >= fields.len() -> break
         field := fields[index]
-        local: sema_stmt_destructure_local(name, field.ty, binding.mutable, environment, program, scopes, check.state, check.context, check.diagnostics) ?? next
+        local: sema_stmt_destructure_local(name, field.ty, binding.mutable, environment, program, check.scopes, check.state, check.context, check.diagnostics) ?? next
         locals.push(local.copy())
         binds.push(TDestructureBinding{local: local, field: field.name})
         projected_binding := binding
@@ -455,7 +455,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
             .List(_, _) -> Expr.Index{base: binding.init, index: Expr.Int{value: index, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, kind: IndexKind.List, id: AST_NODE_GENERATED}
             .Struct(_, _, _, _, _) | .Tuple(_, _) | .Refutable(_, _, _, _) -> Expr.Field{base: binding.init, member: field.name, span: span, id: AST_NODE_GENERATED}
         }
-        if !sema_stmt_record_binding_views(projected_binding, field.ty, scopes, check.state, check.context, check.diagnostics) {
+        if !sema_stmt_record_binding_views(projected_binding, field.ty, check.scopes, check.state, check.context, check.diagnostics) {
             return None
         }
         if sema_stmt_destructure_moves_field(field.ty, pattern, environment, program) {
@@ -463,8 +463,8 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
         }
     }
     if binding.init == .Ident(name, _, _) {
-        source: sema_scope_resolve(scopes, name) ?? return None
-        if source.kind != SymbolKind.Parameter && !sema_stmt_move_direct(binding.init, check.state, scopes, "the destructuring binding", check.diagnostics) {
+        source: sema_scope_resolve(check.scopes, name) ?? return None
+        if source.kind != SymbolKind.Parameter && !sema_stmt_move_direct(binding.init, check.state, check.scopes, "the destructuring binding", check.diagnostics) {
             return None
         }
     }
@@ -598,39 +598,39 @@ sema_stmt_declare_unchecked_binding: fn(binding: Binding, environment: SemaScope
     _ := sema_scope_declare_local(scopes, symbol, key, binding.mutable, AccessConvention.Read, None, binding.string_view)
 }
 
-sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TStmt? {
+sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TStmt? {
     loop marker in binding.markers {
-        if marker.name == MARKER_META && !marker.negated && sema_marker_rules_check_rule_signature(marker, environment, program, scopes, check) {
+        if marker.name == MARKER_META && !marker.negated && sema_marker_rules_check_rule_signature(marker, environment, program, check) {
             sema_marker_rules_check_local_meta(marker, check.diagnostics)
         }
     }
     if binding.name == "err" -> check.diagnostics.push(sema_err_shadow_lint(binding.name_span))
-    if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", scopes, check.context, check.diagnostics) {
+    if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", check.scopes, check.context, check.diagnostics) {
         return None
     }
     // `y: x` would move an arena view to a new, possibly longer-lived
     // binding. The escape is the binding's one fault: the name is declared
     // unchecked, so the move out of the arena slot reports no second E0201.
-    if sema_ownership_report_arena_view_escape(check.state, binding.init, "be stored in another binding", scopes, check.diagnostics) {
-        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, check.context)
+    if sema_ownership_report_arena_view_escape(check.state, binding.init, "be stored in another binding", check.scopes, check.diagnostics) {
+        sema_stmt_declare_unchecked_binding(binding, environment, program, check.scopes, check.context)
         return None
     }
     if binding.uninit {
-        return sema_stmt_check_uninit_binding(binding, environment, program, scopes, check.state, check.context, check.diagnostics)
+        return sema_stmt_check_uninit_binding(binding, environment, program, check.scopes, check.state, check.context, check.diagnostics)
     }
     if binding.arena_view -> return None
     // A lambda is already its value, and a function is no compile-time data:
     // `name: #run { () -> … }` binds the lambda as a runtime binding does.
     if binding.is_comptime && !(binding.init == .Lambda(_, _)) {
-        return sema_stmt_check_prepared_binding(binding, environment, program, scopes, check)
+        return sema_stmt_check_prepared_binding(binding, environment, program, check)
     }
     if binding.pattern == .Val(pattern) {
-        statement := sema_stmt_check_destructure(binding, pattern, environment, program, scopes, check)
+        statement := sema_stmt_check_destructure(binding, pattern, environment, program, check)
         if statement != None {
             loop name in sema_stmt_destructure_names(pattern) {
                 local_name := if name.rename == .Val(rename) -> rename.name else -> name.name
-                index: sema_scope_resolve_index(scopes, local_name) ?? next
-                sema_ownership_note_frozen_binding(check.state, scopes.bindings[index].symbol.id, binding.init, scopes)
+                index: sema_scope_resolve_index(check.scopes, local_name) ?? next
+                sema_ownership_note_frozen_binding(check.state, check.scopes.bindings[index].symbol.id, binding.init, check.scopes)
             }
         }
         return statement
@@ -639,14 +639,14 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     if binding.init == .Lambda(lambda, _) && sema_ownership_last_use_expr(binding.init, binding.name) {
         check.diagnostics.push(sema_error("E0804", lambda.span, "a lambda can't call itself as `{binding.name}`", "short functions stored in a binding can't recurse in v1", "write a named `fn` instead of assigning the lambda to `{binding.name}`"))
     }
-    sema_copy_site_check_borrowed_binding(binding, environment, program, scopes, check.context, check.diagnostics)
+    sema_copy_site_check_borrowed_binding(binding, environment, program, check.scopes, check.context, check.diagnostics)
     binding_expr := sema_stmt_install_binding_loop_label(binding.init, binding.name, binding.name_span)
     // An immutable binding of a bare range place is a read window into its
     // source, typed `View<T>`.
-    if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, check.state) {
+    if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, check.scopes, check.state) {
         binding_expr = Expr.Place{value: binding_expr, access: PlaceAccess.Read, span: expr_span(binding.init), id: AST_NODE_GENERATED}
     }
-    range_head: sema_stmt_range_conversion_head(binding.init, environment, program, scopes)
+    range_head: sema_stmt_range_conversion_head(binding.init, environment, program, check.scopes)
     fact_start: check.context.call_facts.len()
     reference_start: check.context.name_references.len()
     node_start: check.context.arena.tree.nodes.len()
@@ -671,7 +671,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     // (Expressions/NumberNames.jet).
     declared: if binding.ty == .Val(written) -> Val(sema_expr_expected_type(written, environment, program)) else if binding.mutable -> sema_expr_number_retype(binding.name_span, check.context.number_retypes_known) else -> None
     init_diagnostic_start: check.diagnostics.len()
-    checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, declared, environment, program, scopes, check) else -> sema_check_expression_with_lambda_escapes(binding_expr, declared, environment, program, scopes, check, lambda_escapes)
+    checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, declared, environment, program, check) else -> sema_check_expression_with_lambda_escapes(binding_expr, declared, environment, program, check, lambda_escapes)
     loop check.state.deferred_view_opens.len() > deferred_before {
         _ := check.state.deferred_view_opens.pop()
     }
@@ -679,7 +679,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     check.context.allow_fixed_constructor = previous_fixed_constructor
     check.context.taskgroups.binding_name = previous_binding_name
     checked_value: checked_init ?? {
-        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, check.context)
+        sema_stmt_declare_unchecked_binding(binding, environment, program, check.scopes, check.context)
         return None
     }
     // A body already reported (an unknown parameter type, say) has no
@@ -687,13 +687,13 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     if binding.ty == None && check.diagnostics.len() == init_diagnostic_start {
         sema_stmt_check_stored_lambda_result(binding, checked_value, check.diagnostics)
     }
-    init: sema_stmt_owning_view_init(checked_value, binding, environment, program, scopes, check.context)
-    owned: if !binding.mutable && sema_stmt_binding_reads_projection(binding.init, scopes) -> sema_copy_site_check_view_binding(init, environment, program, scopes, check.state, check.context, check.diagnostics) else -> sema_copy_site_check_guard_owned(init, environment, program, scopes, check.state, check.context, check.diagnostics, false)
-    if !owned || (binding.mutable && !sema_copy_site_refuse_borrowed_copy(binding.init, "the binding `{binding.name}`", environment, program, scopes, check.context, check.diagnostics)) {
-        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, check.context)
+    init: sema_stmt_owning_view_init(checked_value, binding, environment, program, check.scopes, check.context)
+    owned: if !binding.mutable && sema_stmt_binding_reads_projection(binding.init, check.scopes) -> sema_copy_site_check_view_binding(init, environment, program, check.scopes, check.state, check.context, check.diagnostics) else -> sema_copy_site_check_guard_owned(init, environment, program, check.scopes, check.state, check.context, check.diagnostics, false)
+    if !owned || (binding.mutable && !sema_copy_site_refuse_borrowed_copy(binding.init, "the binding `{binding.name}`", environment, program, check.scopes, check.context, check.diagnostics)) {
+        sema_stmt_declare_unchecked_binding(binding, environment, program, check.scopes, check.context)
         return None
     }
-    sema_copy_site_check_conditional(binding.init, declared, environment, program, scopes, check.context, check.diagnostics)
+    sema_copy_site_check_conditional(binding.init, declared, environment, program, check.scopes, check.context, check.diagnostics)
     // An ExpiringSecret loan lives only while its `.with` callback runs.
     if sema_contains_expiring_secret_loan(init.ty) {
         check.diagnostics.push(sema_error("E0201", expr_span(binding.init), "an ExpiringSecret loan cannot be stored", "the callback parameter is a temporary read-only loan that ends when `.with` returns", "use the loan inside the callback and store only a non-secret result"))
@@ -715,15 +715,15 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     // a `:=` binding keeps the owned result, since it may later be reassigned
     // an owned `String`. A `s.slice(..)` binding stays owned too: a slice is a
     // view only where a `View<str>` slot (a return or a field) asks for one.
-    view_sources := if binding.mutable || sema_string_view_is_slice_call(binding.init) -> [SemaOwnershipPlace]{} else -> sema_string_view_call_sources(binding.init, scopes, check.state)
+    view_sources := if binding.mutable || sema_string_view_is_slice_call(binding.init) -> [SemaOwnershipPlace]{} else -> sema_string_view_call_sources(binding.init, check.scopes, check.state)
     view_init := if view_sources.len() > 0 -> sema_string_view_lower_init(init) else -> None
     string_view := view_init != None
-    if !string_view && !sema_stmt_move_direct(binding_expr, check.state, scopes, "the binding `{binding.name}`", check.diagnostics) {
-        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, check.context)
+    if !string_view && !sema_stmt_move_direct(binding_expr, check.state, check.scopes, "the binding `{binding.name}`", check.diagnostics) {
+        sema_stmt_declare_unchecked_binding(binding, environment, program, check.scopes, check.context)
         return None
     }
     kind: SymbolKind.Local
-    owner := sema_scope_local_owner_key(scopes)
+    owner := sema_scope_local_owner_key(check.scopes)
     local_module: sema_scope_environment_module_text(environment, program)
     key: symbol_key_text(kind, local_module, owner, binding.name)
     id: sema_symbol_id_of(program, check.context, key)
@@ -732,10 +732,10 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     // the build on, at every tier (tree_expr_fold_int).
     folded: if binding.mutable -> None else -> tree_expr_fold_int(init)
     bounds: if folded == .Val(number) -> Val(integer_bounds_exact(number)) else if binding.mutable -> None else -> checked_cost_integer_bounds(init)
-    number_literal: if binding.ty == None -> sema_expr_number_literal_init(binding.init, scopes) else -> None
-    if !sema_scope_declare_local(scopes, symbol, key, binding.mutable, AccessConvention.Read, bounds, string_view) {
+    number_literal: if binding.ty == None -> sema_expr_number_literal_init(binding.init, check.scopes) else -> None
+    if !sema_scope_declare_local(check.scopes, symbol, key, binding.mutable, AccessConvention.Read, bounds, string_view) {
         check.diagnostics.push(sema_already_defined(binding.name, binding.name_span))
-        sema_stmt_shadow_refused_binding(symbol, key, binding.mutable, scopes, check.state)
+        sema_stmt_shadow_refused_binding(symbol, key, binding.mutable, check.scopes, check.state)
         return None
     }
     sema_ownership_declare_binding(check.state, symbol, false)
@@ -746,21 +746,21 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     }
     // `name: root.field` / `name: root[i]` reads the
     // place through a view; an exact `name.move()` later would copy it (E0201).
-    if !binding.mutable && !string_view && sema_stmt_binding_reads_projection(binding.init, scopes) {
-        sema_scope_mark_place_alias(scopes, binding.name)
+    if !binding.mutable && !string_view && sema_stmt_binding_reads_projection(binding.init, check.scopes) {
+        sema_scope_mark_place_alias(check.scopes, binding.name)
     }
     if !binding.mutable && binding.sigil_span == .Val(sigil) {
-        sema_scope_mark_binding_sigil(scopes, binding.name, Span{start: binding.name_span.end, end: sigil.end})
+        sema_scope_mark_binding_sigil(check.scopes, binding.name, Span{start: binding.name_span.end, end: sigil.end})
     }
     if number_literal != None {
-        sema_scope_mark_number_literal(scopes, binding.name, number_literal)
+        sema_scope_mark_number_literal(check.scopes, binding.name, number_literal)
     }
     if !binding.mutable && sema_expr_unit_fact(init.ty, environment, program) != None {
-        if sema_expr_unit_concrete_value(init, scopes, check.context) == .Val(magnitude) {
-            sema_scope_mark_unit_magnitude(scopes, binding.name, magnitude)
+        if sema_expr_unit_concrete_value(init, check.scopes, check.context) == .Val(magnitude) {
+            sema_scope_mark_unit_magnitude(check.scopes, binding.name, magnitude)
         }
     }
-    sema_ownership_note_frozen_binding(check.state, symbol.id, binding.init, scopes)
+    sema_ownership_note_frozen_binding(check.state, symbol.id, binding.init, check.scopes)
     // A bound lambda that takes a capture runs once; one that writes a
     // capture changes it at each call.
     if binding.init == .Lambda(bound_lambda, _) {
@@ -774,13 +774,13 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     graph: program.registration_graph
     // Snapshot: a ClosureInfo's types come from the registered TypeId maker, which a lone program lacks.
     if !binding.mutable && init.kind == .Lambda(reflected_lambda) && graph.mode == .Program {
-        closure_function: scopes.location_function ?? environment.function_name
+        closure_function: check.scopes.location_function ?? environment.function_name
         closure_location: sema_comptime_reflection_location(environment.source_segments, sema_site_module(environment, closure_function), Val(binding.name_span))
-        sema_scope_mark_closure(scopes, binding.name, sema_comptime_reflection_closure_info(graph, environment.module_identity, binding.name, binding.name_span, reflected_lambda, closure_location, environment.source_file))
+        sema_scope_mark_closure(check.scopes, binding.name, sema_comptime_reflection_closure_info(graph, environment.module_identity, binding.name, binding.name_span, reflected_lambda, closure_location, environment.source_file))
     }
     if binding.init == .Lambda(captured_lambda, _) {
         if init.kind == .Lambda(viewing_lambda) {
-            sema_ownership_bind_closure_captures(check.state, key, captured_lambda.span, viewing_lambda.captures, viewing_lambda.capture_facts, scopes)
+            sema_ownership_bind_closure_captures(check.state, key, captured_lambda.span, viewing_lambda.captures, viewing_lambda.capture_facts, check.scopes)
         }
     }
     sema_single_use_note_binding(check.state, symbol, environment, program)
@@ -798,20 +798,20 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     if sema_checked_type_is_float(init.ty) && sema_checked_money_like_name(binding.name) {
         check.diagnostics.push(sema_lint("L0504", binding.name_span, "binding `{binding.name}` looks like money but has type `Float`", "floating-point money loses cents on common values like `0.1 + 0.2`", "use `Decimal` for exact money: `price: Decimal(\"9.99\")`"))
     }
-    sema_stmt_track_origin(binding, environment, program, scopes)
-    sema_stmt_note_normalized_path_text(binding, init, scopes)
-    _ := sema_hardware_bind_pending_dma_transfer(binding_expr, symbol, key, scopes)
+    sema_stmt_track_origin(binding, environment, program, check.scopes)
+    sema_stmt_note_normalized_path_text(binding, init, check.scopes)
+    _ := sema_hardware_bind_pending_dma_transfer(binding_expr, symbol, key, check.scopes)
     view_diagnostics_before: check.diagnostics.len()
     // An owning copy of a read view (`entries := stream.object_entries(tree)`)
     // is new storage: the binding holds no window into the view's source.
     owned_copy: init.kind == .MaterializeView(_)
-    if !owned_copy && !sema_stmt_record_binding_views(binding, init.ty, scopes, check.state, check.context, check.diagnostics) {
+    if !owned_copy && !sema_stmt_record_binding_views(binding, init.ty, check.scopes, check.state, check.context, check.diagnostics) {
         if !sema_has_error_since(check.diagnostics, view_diagnostics_before) {
             sema_check_unsupported(check.context, "the view held by `{binding.name}` (offset {binding.name_span.start}) could not be recorded")
         }
         return None
     }
-    if string_view && !sema_string_view_record_binding(check.state, binding.name, binding.name_span, view_sources, scopes) {
+    if string_view && !sema_string_view_record_binding(check.state, binding.name, binding.name_span, view_sources, check.scopes) {
         if !sema_has_error_since(check.diagnostics, view_diagnostics_before) {
             sema_check_unsupported(check.context, "the string view held by `{binding.name}` (offset {binding.name_span.start}) could not be recorded")
         }
@@ -835,7 +835,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
         stored = sema_tree_node(init.ty, TExprKind.IntLit{value: number, width: None}, init.span)
     } else if !binding.mutable && !string_view && binding.name != "_" {
         // Computed while compiling when it can be (Comptime/LocalValues.jet).
-        computed := sema_comptime_local_value(binding.name, binding.name_span, binding.init, stored, fact_start, reference_start, node_start, environment, program, scopes, check.context)
+        computed := sema_comptime_local_value(binding.name, binding.name_span, binding.init, stored, fact_start, reference_start, node_start, environment, program, check.scopes, check.context)
         if computed.value == .Val(value) {
             stored = value
             // A call spans only its name, so the statement of a landed
@@ -921,8 +921,8 @@ sema_stmt_range_conversion_head: fn(init: Expr, environment: SemaScopeEnvironmen
     None
 }
 
-sema_stmt_check_range_conversion: fn(init: Expr, head: String, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    value: sema_check_expression_carrier(init, None, environment, program, scopes, check) ?? return None
+sema_stmt_check_range_conversion: fn(init: Expr, head: String, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    value: sema_check_expression_carrier(init, None, environment, program, check) ?? return None
     if sema_expr_unwrap_tag(value.ty) == .Result(success, _) {
         if init == .MethodCall(_, method, _, _, _, args, _) {
             check.diagnostics.push(sema_range_runtime_conversion(head, method, expr_span(args[0].expr)))
@@ -1193,30 +1193,30 @@ sema_stmt_path_method_receiver: fn(value: TExpr, method: String) -> TExpr? {
 // the value, except for the reads of the name: the staged local lands in its
 // owner body like a local value (Comptime/LocalSplice.jet) instead of
 // finalizing the program again.
-sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TStmt? {
+sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TStmt? {
     if sema_runtime_policy_only(check.context.runtime_policy) {
         check.diagnostics.push(sema_runtime_only_build_time_diagnostic("This `#run` runs its code", expr_span(binding.init)))
-        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, check.context)
+        sema_stmt_declare_unchecked_binding(binding, environment, program, check.scopes, check.context)
         return None
     }
     fact_start: check.context.call_facts.len()
     reference_start: check.context.name_references.len()
-    scopes.comptime_execution_depth += 1
-    checked: sema_check_expression(binding.init, binding.ty, environment, program, scopes, check)
-    scopes.comptime_execution_depth -= 1
+    check.scopes.comptime_execution_depth += 1
+    checked: sema_check_expression(binding.init, binding.ty, environment, program, check)
+    check.scopes.comptime_execution_depth -= 1
     init: checked ?? {
-        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, check.context)
+        sema_stmt_declare_unchecked_binding(binding, environment, program, check.scopes, check.context)
         return None
     }
     if sema_stmt_comptime_site_refused(program, check.context, fact_start, check.diagnostics) {
-        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, check.context)
+        sema_stmt_declare_unchecked_binding(binding, environment, program, check.scopes, check.context)
         return None
     }
     // A prepared value is data the later compile-time code reads; a
     // runtime handle has none to keep.
     if sema_comptime_value_runtime_handle(init.ty, environment, program) == .Val(handle) {
         check.diagnostics.push(sema_comptime_runtime_handle_diagnostic(binding.name, handle, binding.name_span))
-        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, check.context)
+        sema_stmt_declare_unchecked_binding(binding, environment, program, check.scopes, check.context)
         return None
     }
     value := sema_expr_comptime_value(init, check.context)
@@ -1226,13 +1226,13 @@ sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnv
     if value == None {
         // An initializer that reads a local still waiting for its value
         // waits with it, and its own name waits in turn.
-        if sema_comptime_reads_pending_local(scopes, check.context, reference_start) {
-            _ := sema_stmt_declare_comptime_local(binding, ty, None, environment, program, scopes, check.state, check.context, check.diagnostics)
+        if sema_comptime_reads_pending_local(check.scopes, check.context, reference_start) {
+            _ := sema_stmt_declare_comptime_local(binding, ty, None, environment, program, check.scopes, check.state, check.context, check.diagnostics)
             return None
         }
-        body_value: sema_comptime_body_value_find(check.context, environment.module_identity, sema_scope_function_owner_key(scopes), init_span, binding.name_span) ?? {
-            sema_comptime_body_capture_binding(check.context, environment, scopes, binding.name, binding.init, init.ty, init_span, binding.name_span)
-            if !sema_stmt_declare_comptime_local(binding, ty, None, environment, program, scopes, check.state, check.context, check.diagnostics) {
+        body_value: sema_comptime_body_value_find(check.context, environment.module_identity, sema_scope_function_owner_key(check.scopes), init_span, binding.name_span) ?? {
+            sema_comptime_body_capture_binding(check.context, environment, check.scopes, binding.name, binding.init, init.ty, init_span, binding.name_span)
+            if !sema_stmt_declare_comptime_local(binding, ty, None, environment, program, check.scopes, check.state, check.context, check.diagnostics) {
                 return None
             }
             // The binding emits no run-time code before its value lands, as
@@ -1243,7 +1243,7 @@ sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnv
         ty = body_value.ty
     }
     known: value ?? return None
-    if !sema_stmt_declare_comptime_local(binding, ty, Val(known), environment, program, scopes, check.state, check.context, check.diagnostics) {
+    if !sema_stmt_declare_comptime_local(binding, ty, Val(known), environment, program, check.scopes, check.state, check.context, check.diagnostics) {
         return None
     }
     sema_origin_prepared_projection(binding.init, ty, known, check.context)
@@ -1311,20 +1311,20 @@ sema_stmt_unknown_assignment_target: fn(name: String, name_span: Span, op: BinOp
     diagnostic_with_edit(declared, TextEdit{span: op_span, new_text: ":="})
 }
 
-sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TStmt? {
-    index: sema_scope_resolve_index(scopes, name)
+sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TStmt? {
+    index: sema_scope_resolve_index(check.scopes, name)
     if index == None {
-        check.diagnostics.push(sema_stmt_unknown_assignment_target(name, name_span, op, op_span, environment, program, scopes))
+        check.diagnostics.push(sema_stmt_unknown_assignment_target(name, name_span, op, op_span, environment, program, check.scopes))
         return None
     }
-    binding: sema_scope_binding_row(environment, scopes, index)
-    if sema_ownership_deep_check_change(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, "be assigned", scopes, check.diagnostics) {
+    binding: sema_scope_binding_row(environment, check.scopes, index)
+    if sema_ownership_deep_check_change(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, "be assigned", check.scopes, check.diagnostics) {
         // The refused value is still checked, so the names it reads count as
         // used.
-        _ := sema_check_expression(expr, binding.symbol.ty, environment, program, scopes, check)
+        _ := sema_check_expression(expr, binding.symbol.ty, environment, program, check)
         return None
     }
-    if sema_ownership_reject_frozen_write(check.state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, "be assigned", name_span, scopes, check.diagnostics) {
+    if sema_ownership_reject_frozen_write(check.state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, "be assigned", name_span, check.scopes, check.diagnostics) {
         return None
     }
     // A module-level `name := …` is the one module-level write target; it
@@ -1338,7 +1338,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
                 return None
             }
             check.context.module_writes.push(TEffectSpan{name: name, span: name_span})
-            return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, environment, program, scopes, check)
+            return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, environment, program, check)
         }
     }
     if binding.mutable -> sema_ownership_note_mutation(check.state, binding.symbol.span.start)
@@ -1354,23 +1354,23 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
         // The refused value is still checked, so the names it reads count as
         // used: `total = total + n` must not leave `n` an unused binding whose
         // `_n` rename `jet fix` would apply.
-        _ := sema_check_expression(expr, binding.symbol.ty, environment, program, scopes, check)
+        _ := sema_check_expression(expr, binding.symbol.ty, environment, program, check)
         return None
     }
     if binding.symbol.ty == None {
         // An unchecked target already carries its initializer's report.
-        _ := sema_check_expression(expr, None, environment, program, scopes, check)
+        _ := sema_check_expression(expr, None, environment, program, check)
         return None
     }
     if op != None {
-        if !sema_ownership_note_reference(check.state, name, name_span, scopes, AccessConvention.Read) {
+        if !sema_ownership_note_reference(check.state, name, name_span, check.scopes, AccessConvention.Read) {
             return None
         }
-        if !sema_ownership_check_use(check.state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, scopes, check.diagnostics) {
+        if !sema_ownership_check_use(check.state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, check.scopes, check.diagnostics) {
             return None
         }
     }
-    if !sema_hardware_note_cpu_use(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, scopes, check.state, check.context, check.diagnostics) {
+    if !sema_hardware_note_cpu_use(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, check.scopes, check.state, check.context, check.diagnostics) {
         return None
     }
     required: binding.symbol.ty ?? Type.Named{name: "Unit"}
@@ -1379,8 +1379,8 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     // typed value written to it (`total := 0` then `total = price` or
     // `total += price`), so a plain write's value is checked on its own and
     // decides it (sema_expr_number_target_retype).
-    number_target: sema_expr_number_target_open(index, scopes, check.context)
-    plain_self_typed: op == None && (sema_stmt_numeric_slot_self_typed(expr, required, environment, program, scopes) || (number_target && sema_expr_number_target_value_typed(expr, environment, program, scopes)))
+    number_target: sema_expr_number_target_open(index, check.scopes, check.context)
+    plain_self_typed: op == None && (sema_stmt_numeric_slot_self_typed(expr, required, environment, program, check.scopes) || (number_target && sema_expr_number_target_value_typed(expr, environment, program, check.scopes)))
     if op == None && !plain_self_typed -> expected = Val(required)
     // The place type feeds the RHS for compound updates too, so
     // `price *= 2.0` with `price: Float` reads the literal as Float rather
@@ -1388,14 +1388,14 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) {
         expected = Val(required)
     }
-    checked_value: sema_check_expression(expr, expected, environment, program, scopes, check) ?? return None
+    checked_value: sema_check_expression(expr, expected, environment, program, check) ?? return None
     if number_target {
-        sema_expr_number_target_retype(index, checked_value.ty, name_span, environment, program, scopes, check)
+        sema_expr_number_target_retype(index, checked_value.ty, name_span, environment, program, check)
     }
-    if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, check.state, check.context, check.diagnostics, false) {
+    if !sema_copy_site_check_guard_owned(checked_value, environment, program, check.scopes, check.state, check.context, check.diagnostics, false) {
         return None
     }
-    if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment to `{name}`", environment, program, scopes, check.context, check.diagnostics) {
+    if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment to `{name}`", environment, program, check.scopes, check.context, check.diagnostics) {
         return None
     }
     checked := checked_value
@@ -1408,7 +1408,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if plain_self_typed {
         checked = sema_stmt_numeric_slot_value(checked, required, environment, program, check.diagnostics) ?? return None
     }
-    if op == None && sema_copy_site_check_assignment(expr, environment, program, scopes, check.context, check.diagnostics) {
+    if op == None && sema_copy_site_check_assignment(expr, environment, program, check.scopes, check.context, check.diagnostics) {
         return None
     }
     // A plain `name = …` gives a `Type{ uninit }`
@@ -1425,7 +1425,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     tree_op := BinOp?{None}
     if op != None {
         operator: op
-        result: sema_stmt_compound_result(operator, required, checked.ty, expr, op_span, scopes, check.diagnostics) ?? return None
+        result: sema_stmt_compound_result(operator, required, checked.ty, expr, op_span, check.scopes, check.diagnostics) ?? return None
         if !sema_type_assignable(required, result) {
             check.diagnostics.push(sema_slot_holds_mismatch("`{name}`", "binding", required, result, name_span))
             return None
@@ -1433,14 +1433,14 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
         tree_op = Val(operator)
     }
     sema_ownership_release_value_only_views(check, LValue.Local{name: name, name_span: name_span})
-    if !sema_ownership_check_lvalue_write(check.state, LValue.Local{name: name, name_span: name_span}, scopes, check.diagnostics) {
+    if !sema_ownership_check_lvalue_write(check.state, LValue.Local{name: name, name_span: name_span}, check.scopes, check.diagnostics) {
         return None
     }
-    if !sema_stmt_move_direct(expr, check.state, scopes, "the assignment to `{name}`", check.diagnostics) {
+    if !sema_stmt_move_direct(expr, check.state, check.scopes, "the assignment to `{name}`", check.diagnostics) {
         return None
     }
     if op == None {
-        sema_ownership_note_frozen_binding(check.state, binding.symbol.id, expr, scopes)
+        sema_ownership_note_frozen_binding(check.state, binding.symbol.id, expr, check.scopes)
     }
     line: sema_source_line_at(environment.source_segments, name_span) ?? return None
     local := checked_symbol_local(name, binding.symbol.span, binding.symbol.id, required)
@@ -1458,10 +1458,10 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     updated_bounds := TIntegerBounds?{None}
     // Mutable loop-carried values cannot inherit a one-iteration interval.
     // Their declared range remains available through the type fact channel.
-    sema_scope_note_binding_edit(scopes, index)
-    scopes.bindings[index].integer_bounds = updated_bounds
+    sema_scope_note_binding_edit(check.scopes, index)
+    check.scopes.bindings[index].integer_bounds = updated_bounds
     // A new value has no `#Track` origin.
-    scopes.bindings[index].origin = None
+    check.scopes.bindings[index].origin = None
     Val(TStmt.Assign{place: TPlace.Local{local: local}, op: tree_op, value: value, line: line, span: span})
 }
 
@@ -1493,10 +1493,10 @@ sema_stmt_module_storage_binding: fn(environment: SemaScopeEnvironment, program:
 // Assignment to a module-level mutable binding: the value checks against the
 // declared place type, and the write lands in the binding's persistent
 // storage cell.
-sema_stmt_check_module_storage_assignment: fn(symbol: Symbol, name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TStmt? {
+sema_stmt_check_module_storage_assignment: fn(symbol: Symbol, name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TStmt? {
     required: symbol.ty ?? {
         // An unchecked module binding already carries its initializer's report.
-        _ := sema_check_expression(expr, None, environment, program, scopes, check)
+        _ := sema_check_expression(expr, None, environment, program, check)
         return None
     }
     expected := Type?{None}
@@ -1504,7 +1504,7 @@ sema_stmt_check_module_storage_assignment: fn(symbol: Symbol, name: String, name
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) {
         expected = Val(required)
     }
-    checked_value: sema_check_expression(expr, expected, environment, program, scopes, check) ?? return None
+    checked_value: sema_check_expression(expr, expected, environment, program, check) ?? return None
     checked := checked_value
     if op != None && sema_stmt_compound_widens(checked, required) {
         widen_line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
@@ -1513,20 +1513,20 @@ sema_stmt_check_module_storage_assignment: fn(symbol: Symbol, name: String, name
     tree_op := BinOp?{None}
     if op != None {
         operator: op
-        result: sema_stmt_compound_result(operator, required, checked.ty, expr, op_span, scopes, check.diagnostics) ?? return None
+        result: sema_stmt_compound_result(operator, required, checked.ty, expr, op_span, check.scopes, check.diagnostics) ?? return None
         if !sema_type_assignable(required, result) {
             check.diagnostics.push(sema_type_mismatch(required, result, op_span, program))
             return None
         }
         tree_op = Val(operator)
     }
-    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, check.state, check.context, check.diagnostics, false) {
+    if !sema_copy_site_check_guard_owned(checked, environment, program, check.scopes, check.state, check.context, check.diagnostics, false) {
         return None
     }
-    if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment to `{name}`", environment, program, scopes, check.context, check.diagnostics) {
+    if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment to `{name}`", environment, program, check.scopes, check.context, check.diagnostics) {
         return None
     }
-    if !sema_stmt_move_direct(expr, check.state, scopes, "the assignment to `{name}`", check.diagnostics) {
+    if !sema_stmt_move_direct(expr, check.state, check.scopes, "the assignment to `{name}`", check.diagnostics) {
         return None
     }
     line: sema_source_line_at(environment.source_segments, name_span) ?? return None

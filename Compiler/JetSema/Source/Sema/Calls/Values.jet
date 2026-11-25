@@ -55,7 +55,7 @@ sema_call_local_value_defaults: fn(callee: Expr, binding: SemaCallBinding, envir
     Val(defaults)
 }
 
-sema_call_value_checked_from_type: fn(check: ^SemaBodyCheck, callee: Expr, callee_value: TExpr, signature: Type, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> SemaCallChecked? {
+sema_call_value_checked_from_type: fn(check: ^SemaBodyCheck, callee: Expr, callee_value: TExpr, signature: Type, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCallChecked? {
     resolved_signature: sema_call_resolved_type(signature, environment, program)
     // A callee that names a function declaration (directly, parenthesized or
     // as every branch of an `if`) binds like a direct call of that function:
@@ -67,7 +67,7 @@ sema_call_value_checked_from_type: fn(check: ^SemaBodyCheck, callee: Expr, calle
         .Ident(name, _, _) -> name.copy()
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> "this function value"
     }
-    declared: sema_call_value_is_declaration(callee, scopes)
+    declared: sema_call_value_is_declaration(callee, check.scopes)
     value_params: if declared -> sema_call_params_from_type(resolved_signature) else -> sema_call_params_from_value_type(resolved_signature)
     params: value_params ?? {
         check.diagnostics.push(sema_call_value_not_callable(callee, resolved_signature, span))
@@ -82,7 +82,7 @@ sema_call_value_checked_from_type: fn(check: ^SemaBodyCheck, callee: Expr, calle
             if {
                 // Snapshot: a lone program's defaults are its own declarations' (sema_call_local_value_defaults).
                 program.registration_graph.mode == .Snapshot -> {
-                    local_defaults: sema_call_local_value_defaults(callee, binding, environment, program, scopes) ?? {
+                    local_defaults: sema_call_local_value_defaults(callee, binding, environment, program, check.scopes) ?? {
                         check.diagnostics.push(sema_error("E0906", span, "a default argument for this function value could not be resolved", "callable defaults retain their owning declaration and source identity", "resolve the owning declaration before calling this value"))
                         return None
                     }
@@ -102,28 +102,28 @@ sema_call_value_checked_from_type: fn(check: ^SemaBodyCheck, callee: Expr, calle
         resolved_binding = resolved
     }
     // A call reads the lambda's captures: not after one moved.
-    sema_ownership_check_closure_captures(check.state, callee, scopes, check.diagnostics)
+    sema_ownership_check_closure_captures(check.state, callee, check.scopes, check.diagnostics)
     // A lambda that takes a capture with `.move()` runs once.
-    sema_ownership_call_once_lambda(check.state, callee, scopes)
+    sema_ownership_call_once_lambda(check.state, callee, check.scopes)
     // A lambda that writes a capture changes it: not while a loop reads it,
     // and not while a view looks into it.
     if callee == .Ident(callee_name, callee_span, _) {
-        loop written in sema_ownership_closure_writes(check.state, callee, scopes) {
+        loop written in sema_ownership_closure_writes(check.state, callee, check.scopes) {
             if check.context.iter_borrowed.contains(written) {
                 check.diagnostics.push(sema_collection_changed_in_loop(written, "calling `{callee_name}`, which writes `{written}` through its capture,", callee_span))
             }
-            sema_ownership_check_closure_write_views(check.state, written, callee_name, callee_span, scopes, check.diagnostics)
+            sema_ownership_check_closure_write_views(check.state, written, callee_name, callee_span, check.scopes, check.diagnostics)
         }
     }
-    {lowered, pins} := sema_call_check_bound_arguments_owned(check, shown_callee, params, None, false, resolved_binding, checked_args, environment, program, scopes, span) ?? return None
+    {lowered, pins} := sema_call_check_bound_arguments_owned(check, shown_callee, params, None, false, resolved_binding, checked_args, environment, program, span) ?? return None
     call_callee := callee_value
     if pins.len() > 0 {
-        owner: sema_scope_function_owner_key(scopes)
+        owner: sema_scope_function_owner_key(check.scopes)
         pin_slot: -checked_args.len() - 1
         symbol: sema_call_binder_ref_symbol(environment, program, check.context, owner, span.start, pin_slot, "callee", callee_value.ty, span)
         local := checked_symbol_local("binder_ref_{span.start}_{pin_slot}", span, symbol.id, callee_value.ty)
         local.generated = true
-        borrowed: sema_ownership_places_from_expr_in_state(callee, scopes, check.state).len() > 0
+        borrowed: sema_ownership_places_from_expr_in_state(callee, check.scopes, check.state).len() > 0
         local.deref = borrowed
         init := callee_value
         if borrowed {
@@ -139,7 +139,7 @@ sema_call_value_checked_from_type: fn(check: ^SemaBodyCheck, callee: Expr, calle
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
     if sema_call_value_root_name(callee) == .Val(root_name) {
-        if sema_scope_resolve(scopes, root_name) == .Val(target) {
+        if sema_scope_resolve(check.scopes, root_name) == .Val(target) {
             // The callee's declaration is copied only when a call checks its clauses.
             contract_callee := Func?{None}
             if sema_contract_function_checks_calls(environment, program, target.id) {
@@ -147,7 +147,7 @@ sema_call_value_checked_from_type: fn(check: ^SemaBodyCheck, callee: Expr, calle
             }
             if contract_callee == .Val(contract) {
                 slots: loop slot in 0..<params.len() -> slot
-                checked_contract: sema_contract_check_call(contract, target.id, None, lowered, slots, span, environment, program, scopes, check) ?? return None
+                checked_contract: sema_contract_check_call(contract, target.id, None, lowered, slots, span, environment, program, check) ?? return None
                 contract_bindings = checked_contract.bindings
                 contract_nodes = checked_contract.contracts
             }
@@ -170,13 +170,13 @@ sema_call_value_checked_from_type: fn(check: ^SemaBodyCheck, callee: Expr, calle
     // contributes no effect; the callback's effects are the argument's,
     // accounted where it is passed. Any other unannotated function value stays
     // an unknown callee.
-    if facts.effect_bound == None && sema_call_value_is_parameter(callee, scopes) {
+    if facts.effect_bound == None && sema_call_value_is_parameter(callee, check.scopes) {
         facts.effect_bound = Val([EffectRowEntry]{})
     }
-    facts.local_lambda = sema_scope_local_lambda_effects(scopes, callee)
-    return_view_facts: if sema_call_value_undeclared_view_provenance(callee, resolved_signature, scopes) == {
-        .Val(provenance) -> sema_call_return_view_facts(Type.Fn{params: [Type]{}, ret: Val(result_type_raw), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: Val(provenance)}, None, checked_args, resolved_binding, scopes, check.state, span, check.diagnostics)
-        .None -> sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, scopes, check.state, span, check.diagnostics)
+    facts.local_lambda = sema_scope_local_lambda_effects(check.scopes, callee)
+    return_view_facts: if sema_call_value_undeclared_view_provenance(callee, resolved_signature, check.scopes) == {
+        .Val(provenance) -> sema_call_return_view_facts(Type.Fn{params: [Type]{}, ret: Val(result_type_raw), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: Val(provenance)}, None, checked_args, resolved_binding, check.scopes, check.state, span, check.diagnostics)
+        .None -> sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, check.scopes, check.state, span, check.diagnostics)
     }
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
@@ -224,14 +224,14 @@ sema_call_value_is_declaration: fn(callee: Expr, scopes: SemaScopeTable) -> Bool
     }
 }
 
-sema_call_value_inline_loop: fn(lambda: Lambda, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaCallChecked? {
+sema_call_value_inline_loop: fn(lambda: Lambda, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaCallChecked? {
     // With no expected value (an unannotated binding), the loop's own result
     // type stands; a written expectation becomes the callable's result.
     // copy: `result` is a payload of read parameter `expected`, which keeps the original; the Val carrier owns this one
     expected_function := if expected == .Val(result) -> Val(Type.Fn{params: [Type]{}, ret: Val(result.copy()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}) else -> None
     previous_escapes := check.context.lambda_escapes
     check.context.lambda_escapes = Val(false)
-    checked_lambda := sema_expression_lambda(lambda, expected_function, environment, program, scopes, check)
+    checked_lambda := sema_expression_lambda(lambda, expected_function, environment, program, check)
     check.context.lambda_escapes = previous_escapes
     lambda_value: checked_lambda ?? return None
     signature: lambda_value.ty
@@ -259,7 +259,7 @@ sema_call_value_inline_loop: fn(lambda: Lambda, span: Span, expected: Type?, env
     // facts of the owner, so the loop site itself is known-pure rather than an
     // unknown callee.
     facts.effect_bound = Val([EffectRowEntry]{})
-    return_view_facts := sema_call_return_view_facts(signature, None, checked_args, binding, scopes, check.state, span, check.diagnostics)
+    return_view_facts := sema_call_return_view_facts(signature, None, checked_args, binding, check.scopes, check.state, span, check.diagnostics)
     Val(SemaCallChecked{value: checked_value, binding: binding, facts: facts, return_view_facts: return_view_facts})
 }
 
@@ -279,10 +279,10 @@ sema_call_value_lambda: fn(callee: Expr) -> Lambda? Never! {
     }
 }
 
-sema_call_check_value_owned: fn(check: ^SemaBodyCheck, callee: Expr, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> SemaCallChecked? {
+sema_call_check_value_owned: fn(check: ^SemaBodyCheck, callee: Expr, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCallChecked? {
     if sema_call_value_is_inline_loop(callee, args) {
         if callee == .Lambda(lambda, _) {
-            return sema_call_value_inline_loop(lambda, span, expected, environment, program, scopes, check)
+            return sema_call_value_inline_loop(lambda, span, expected, environment, program, check)
         }
     }
     // A lambda called where it is written ends with the call: it does not
@@ -293,7 +293,7 @@ sema_call_check_value_owned: fn(check: ^SemaBodyCheck, callee: Expr, args: [Call
         check.context.lambda_escapes = Val(false)
         sema_ownership_note_direct_call_lambda(check.state, called.span)
     }
-    checked_callee := sema_check_expression(callee, None, environment, program, scopes, check)
+    checked_callee := sema_check_expression(callee, None, environment, program, check)
     check.context.lambda_escapes = previous_escapes
     callee_value: checked_callee ?? return None
     signature: callee_value.ty
@@ -301,7 +301,7 @@ sema_call_check_value_owned: fn(check: ^SemaBodyCheck, callee: Expr, args: [Call
         check.diagnostics.push(sema_call_value_not_callable(callee, signature, span))
         return None
     }
-    sema_call_value_checked_from_type(check, callee, callee_value, signature, args, span, defaults, expected, environment, program, scopes)
+    sema_call_value_checked_from_type(check, callee, callee_value, signature, args, span, defaults, expected, environment, program)
 }
 
 // A callee that isn't a function. A named one is reported by its name; any

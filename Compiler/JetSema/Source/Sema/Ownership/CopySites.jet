@@ -622,13 +622,13 @@ sema_copy_site_check_field: fn(value: Expr, environment: SemaScopeEnvironment, p
 // else a clone refuses) is never copied into the field
 // (sema_copy_site_refuse_copy). `consumer` names the literal in the report.
 // False when the move is invalid.
-sema_copy_site_record_move: fn(value: Expr, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
+sema_copy_site_record_move: fn(value: Expr, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> Bool {
     payload: sema_copy_site_payload(value)
-    site: sema_copy_site_owned_ident(payload, scopes, check.context) ?? return true
+    site: sema_copy_site_owned_ident(payload, check.scopes, check.context) ?? return true
     if site.borrowed || sema_ownership_name_live_after(site.name, check.tail_store, check.context) {
         // `copies: .Explicit` already reported this copy site (E0120).
-        if scopes.copies_explicit -> return true
-        return sema_copy_site_refuse_copy(payload, site, consumer, environment, program, scopes, check.state, check.context, check.diagnostics)
+        if check.scopes.copies_explicit -> return true
+        return sema_copy_site_refuse_copy(payload, site, consumer, environment, program, check.scopes, check.state, check.context, check.diagnostics)
     }
     // A Copy value (`Complex`, `Range`, a `Ptr`) copies at its last use as at
     // any other: nothing moves, so nothing repeats on a loop's next iteration
@@ -636,7 +636,7 @@ sema_copy_site_record_move: fn(value: Expr, consumer: String, environment: SemaS
     facts: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, check.context.generic_params, false)
     if facts.complete && facts.copyable -> return true
     first: check.state.moved.len()
-    moved: sema_ownership_mark_unmarked_move(check.state, payload, scopes, consumer, check.diagnostics)
+    moved: sema_ownership_mark_unmarked_move(check.state, payload, check.scopes, consumer, check.diagnostics)
     // Copy facts this check cannot settle (a nominal it cannot resolve here)
     // let a later use copy the value (sema_copy_site_refuse_copy); the next
     // pass of a loop is such a use.

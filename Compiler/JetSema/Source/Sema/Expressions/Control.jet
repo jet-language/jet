@@ -197,7 +197,7 @@ sema_expression_failure_carrier: fn(ty: Type) -> TFailureCarrier Never! {
     }
 }
 
-sema_expression_present: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_present: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     expected_inner := Type?{None}
     result_ty := Type?{None}
     if expected == .Val(expected_ty) {
@@ -213,7 +213,7 @@ sema_expression_present: fn(value: Expr, span: Span, expected: Type?, environmen
             }
         }
     }
-    payload: sema_check_expression(value, expected_inner, environment, program, scopes, check) ?? return None
+    payload: sema_check_expression(value, expected_inner, environment, program, check) ?? return None
     // The payload fills the declared slot through the registration graph: a
     // declared `module.Name` and a literal's written `Name` are one type. A
     // refusal is reported here, never dropped silently.
@@ -329,16 +329,16 @@ sema_expression_default_err_struct: fn(value: Expr) -> Bool Never! {
 // The payload of `Err(x)` toward the default `Err` domain is inferred first, and
 // only a `String` builds the default error from a message; a value that already
 // is an `Err` (`?? return Err(err)`) is the failure itself.
-sema_expression_err_payload_is_err: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
+sema_expression_err_payload_is_err: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> Bool {
     probe_diagnostics := [Diagnostic]{}
-    probed: sema_probe_expression(value, None, environment, program, scopes, check, probe_diagnostics) ?? return false
+    probed: sema_probe_expression(value, None, environment, program, check, probe_diagnostics) ?? return false
     sema_expr_unwrap_tag(probed.ty) == Type.Named{name: "Err"}
 }
 
-sema_expression_default_err_call: fn(value: Expr, span: Span, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_default_err_call: fn(value: Expr, span: Span, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     argument: CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     call: Call{name: "Err", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}}
-    sema_call_check_default_err(call, Val(expected), environment, program, scopes, check)
+    sema_call_check_default_err(call, Val(expected), environment, program, check)
 }
 
 // The parser stores `Ok(x.f.move())`'s move mark on the CallArg. A marked field
@@ -384,18 +384,18 @@ sema_result_payload_misplaced: fn(success: Bool, span: Span) -> Diagnostic Never
 // A unit success carries nothing, so `Ok` and `.Ok` take no argument where
 // the expected success type is `()`. Reports the written argument and
 // checks it for its own errors; returns whether it reported.
-sema_expression_unit_success_with_argument: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
+sema_expression_unit_success_with_argument: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> Bool {
     unit_success: if sema_expr_unwrap_tag(expected ?? Type.Named{name: "Never"}) == {
         .Result(ok, _) -> ok == (Type.Named{name: "Unit"})
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !unit_success -> return false
-    _ := sema_check_expression(value, None, environment, program, scopes, check)
+    _ := sema_check_expression(value, None, environment, program, check)
     check.diagnostics.push(sema_error("E0104", span, "`Ok` takes no argument when the success type is `()`", "a unit success carries no value", "write `Ok()`"))
     true
 }
 
-sema_expression_result_payload: fn(value: Expr, success: Bool, take_field: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_result_payload: fn(value: Expr, success: Bool, take_field: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     expected_ok := Type?{None}
     expected_err := Type?{None}
     if expected == {
@@ -417,15 +417,15 @@ sema_expression_result_payload: fn(value: Expr, success: Bool, take_field: Bool,
             return None
         }
     }
-    default_message: !success && !sema_expression_default_err_struct(value) && !sema_expression_err_payload_is_err(value, environment, program, scopes, check)
-    message_payload: default_message && (expected_err == (Val(Type.Named{name: "Err"})) || sema_call_default_err_message_into_open_union(value, expected_err ?? Type.Named{name: "Never"}, environment, program, scopes, check))
+    default_message: !success && !sema_expression_default_err_struct(value) && !sema_expression_err_payload_is_err(value, environment, program, check)
+    message_payload: default_message && (expected_err == (Val(Type.Named{name: "Err"})) || sema_call_default_err_message_into_open_union(value, expected_err ?? Type.Named{name: "Never"}, environment, program, check))
     if message_payload {
         result_type: Type.Result{ok: expected_ok ?? Type.Named{name: "Unit"}, err: expected_err ?? Type.Named{name: "Err"}}
-        checked_default: sema_expression_default_err_call(value, span, result_type, environment, program, scopes, check) ?? return None
+        checked_default: sema_expression_default_err_call(value, span, result_type, environment, program, check) ?? return None
         return Val(checked_default)
     }
     payload_expected := if success -> expected_ok else -> expected_err
-    checked_payload: sema_check_expression(value, payload_expected, environment, program, scopes, check) ?? return None
+    checked_payload: sema_check_expression(value, payload_expected, environment, program, check) ?? return None
     payload: if take_field -> sema_tree_node(checked_payload.ty, TExprKind.Move{value: checked_payload}, checked_payload.span) else -> checked_payload
     ok_ty := expected_ok ?? Type.Named{name: "Unit"}
     err_ty := expected_err ?? Type.Named{name: "Err"}
@@ -614,16 +614,16 @@ sema_expression_carrier_case_subject: fn(subject: Expr, carrier: ^^TExpr?, envir
 // The subject of one pattern. An `.Ok`/`.Err` pattern consumes the subject's
 // Result carrier, so its call root must not propagate, unless the pattern
 // names a case of the call's success enum.
-sema_check_pattern_subject: fn(subject: Expr, pattern: Pattern, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_check_pattern_subject: fn(subject: Expr, pattern: Pattern, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     if !sema_pattern_consumes_result_carrier(pattern) {
-        return sema_check_expression(subject, expected, environment, program, scopes, check)
+        return sema_check_expression(subject, expected, environment, program, check)
     }
-    carrier: sema_check_expression_carrier(subject, expected, environment, program, scopes, check)
-    success: sema_expression_carrier_success_enum(subject, carrier, environment, program, scopes)
+    carrier: sema_check_expression_carrier(subject, expected, environment, program, check)
+    success: sema_expression_carrier_success_enum(subject, carrier, environment, program, check.scopes)
     if success == None || !sema_pattern_tests_carrier(pattern, success, environment, program) {
         return carrier
     }
-    sema_expression_carrier_case_subject(subject, carrier, environment, program, scopes, check.context, check.diagnostics)
+    sema_expression_carrier_case_subject(subject, carrier, environment, program, check.scopes, check.context, check.diagnostics)
 }
 
 // Call checkers finish through this check. While the dispatcher has opened a
@@ -1466,27 +1466,27 @@ sema_expression_rejected_call_propagation: fn(result_type: Type, source: Expr?, 
     sema_link_reports_to_first_error(diagnostics, root_mark, mark)
 }
 
-sema_expression_try: fn(value: Expr, span: Span, conversion: TryConvert, context_expr: Expr?, try_id: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_try: fn(value: Expr, span: Span, conversion: TryConvert, context_expr: Expr?, try_id: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     if sema_failure_marks_written(value, conversion, context_expr, try_id) {
-        return sema_failure_marks_check_written(value, span, expected, environment, program, scopes, check)
+        return sema_failure_marks_check_written(value, span, expected, environment, program, check)
     }
     // Explicit `?` owns its operand's carrier: the call root must not
     // propagate a second time before this check sees it.
-    inner: sema_check_expression_carrier(value, None, environment, program, scopes, check) ?? return None
+    inner: sema_check_expression_carrier(value, None, environment, program, check) ?? return None
     try_conversion: if conversion == {
-        .NoConversion -> sema_expression_propagation_conversion(inner.ty, Val(value), sema_failure_method_callee(inner, program, check.context), span, false, environment, program, scopes, check.context, check.diagnostics) ?? return None
+        .NoConversion -> sema_expression_propagation_conversion(inner.ty, Val(value), sema_failure_method_callee(inner, program, check.context), span, false, environment, program, check.scopes, check.context, check.diagnostics) ?? return None
         .Never | .DefaultErr | .Typed(_, _, _) | .WidenUnion(_, _) -> {
             unreachable_route: if conversion == {
                 .Never -> true
                 .NoConversion | .DefaultErr | .Typed(_, _, _) | .WidenUnion(_, _) -> false
             }
             if !unreachable_route {
-                if sema_body_propagates(check.context, scopes, span, check.diagnostics) {
+                if sema_body_propagates(check.context, check.scopes, span, check.diagnostics) {
                     return None
                 }
-                sema_failure_record_edge(sema_failure_callee_of(Val(value), sema_failure_method_callee(inner, program, check.context), environment, program, scopes), check.context)
+                sema_failure_record_edge(sema_failure_callee_of(Val(value), sema_failure_method_callee(inner, program, check.context), environment, program, check.scopes), check.context)
             }
-            sema_expression_try_declared_conversion(inner, conversion, span, environment, scopes, check.context, check.diagnostics) ?? return None
+            sema_expression_try_declared_conversion(inner, conversion, span, environment, check.scopes, check.context, check.diagnostics) ?? return None
         }
     }
     value_tree := sema_expression_propagated(inner, try_conversion, span) ?? return None
@@ -1494,11 +1494,11 @@ sema_expression_try: fn(value: Expr, span: Span, conversion: TryConvert, context
         // The note's ownership effects are discarded: it is checked inside a
         // fork and rolled back.
         context_fork: sema_ownership_fork(check.state)
-        checked_note: sema_check_expression(context_source, Val(Type.String), environment, program, scopes, check)
+        checked_note: sema_check_expression(context_source, Val(Type.String), environment, program, check)
         sema_ownership_fork_rollback(check.state, context_fork)
         sema_ownership_fork_close(check.state, context_fork)
         note: checked_note ?? return None
-        location: sema_expression_panic_location(environment, program, scopes, span)
+        location: sema_expression_panic_location(environment, program, check.scopes, span)
         value_tree = sema_tree_node(value_tree.ty, TExprKind.TryWithContext{inner: inner, note: Val(note), convert: try_conversion, file: location.file, line: location.line, function: location.function}, span)
     }
     sema_expr_expected(value_tree, expected, environment, program, check.diagnostics)
@@ -1653,13 +1653,13 @@ sema_or_fallback_mismatch: fn(payload: Type, offered: Type, span: Span) -> Diagn
     sema_error("E0405", span, "the fallback is {sema_type_show(offered)}, but the success value is {sema_type_show(payload)}", "both sides of `??` must be the same type", sema_type_fix_hint(payload, offered))
 }
 
-sema_expression_or_fallback: fn(value: Expr, fallback: OrFallback, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_or_fallback: fn(value: Expr, fallback: OrFallback, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     if sema_control_value_loop_requires_route(value) {
-        routed: sema_control_value_loop_attach_fallback(value, fallback, scopes, check.diagnostics) ?? return None
-        return sema_check_expression(routed, expected, environment, program, scopes, check)
+        routed: sema_control_value_loop_attach_fallback(value, fallback, check.scopes, check.diagnostics) ?? return None
+        return sema_check_expression(routed, expected, environment, program, check)
     }
     // `??` owns its subject's carrier; the call root must not auto-propagate.
-    subject: sema_check_expression_carrier(value, None, environment, program, scopes, check) ?? return None
+    subject: sema_check_expression_carrier(value, None, environment, program, check) ?? return None
     payload_ty: if subject.ty == {
         .Result(ok, _) -> if ok == {
             .Option(inner) -> Val(inner)
@@ -1676,7 +1676,7 @@ sema_expression_or_fallback: fn(value: Expr, fallback: OrFallback, span: Span, e
     // the live ownership state, both rolled back (sema_ownership_fork),
     // instead of on copies of the whole table and state.
     fork: sema_ownership_fork(check.state)
-    fallback_mark: sema_scope_mark(scopes)
+    fallback_mark: sema_scope_mark(check.scopes)
     // A `?? panic` on a checked core.compute Tensor operation is that
     // operation's failure route, which autodiff admits; the route reads and
     // clears the flag.
@@ -1688,10 +1688,10 @@ sema_expression_or_fallback: fn(value: Expr, fallback: OrFallback, span: Span, e
     enclosing_err_denial: check.context.fallback_err_denial.copy()
     route_diagnostics: check.diagnostics.len()
     route_reasons: check.context.incomplete_reasons.len()
-    route: sema_expression_or_fallback_route(fallback, span, subject.ty, payload, environment, program, scopes, check)
+    route: sema_expression_or_fallback_route(fallback, span, subject.ty, payload, environment, program, check)
     check.context.autodiff_safe_panic_context = saved_safe_panic_context
     check.context.fallback_err_denial = enclosing_err_denial
-    sema_scope_rollback(scopes, fallback_mark)
+    sema_scope_rollback(check.scopes, fallback_mark)
     fallback_path: sema_ownership_fork_path(check.state, fork)
     checked_route: route ?? {
         sema_ownership_fork_drop(check.state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
@@ -1774,8 +1774,10 @@ sema_fallback_unit_call_name: fn(value: Expr, scopes: SemaScopeTable) -> String?
 
 // The fallback route of `??`, checked in its own frame on the caller's marked
 // scope table; the caller rolls the table back on every path.
-sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_ty: Type, payload: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaOrFallbackRoute? {
-    if sema_body_fallback_exit(fallback, check.context, scopes, check.diagnostics) -> return None
+sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_ty: Type, payload: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaOrFallbackRoute? {
+    if sema_body_fallback_exit(fallback, check.context, check.scopes, check.diagnostics) {
+        return None
+    }
     fallback_payload := payload
     fallback_tree := TOrFallback?{None}
     // Only the `panic` route itself is the operation's failure fallback; a
@@ -1785,21 +1787,21 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
     // copy: `outer_return_type` restores scopes.return_type after the fallback frame, which
     // overwrites it. Jet has no exchange on a field of the write-borrowed `scopes`, so the old
     // value is copied out before it is overwritten.
-    outer_return_type: scopes.return_type.copy()
-    outer_loop_depth := scopes.loop_depth
-    sema_scope_enter(scopes, check.state, "or.fallback@{span.start}")
+    outer_return_type: check.scopes.return_type.copy()
+    outer_loop_depth := check.scopes.loop_depth
+    sema_scope_enter(check.scopes, check.state, "or.fallback@{span.start}")
     ambient_err := TLocal?{None}
     if subject_ty == .Result(_, error_type) {
         // The report is declared in this fallback's own frame with none of
         // `declare`'s redefinition checks and no single-use duty, so a nested
         // fallible `??` shadows an enclosing `err` (as the refutable fallback's
         // `err` already does).
-        owner: sema_scope_local_owner_key(scopes)
+        owner: sema_scope_local_owner_key(check.scopes)
         local_module: sema_scope_environment_module_text(environment, program)
         key: symbol_key_text(SymbolKind.Local, local_module, owner, "err")
         symbol: Symbol{id: sema_symbol_id_of(program, check.context, key), kind: SymbolKind.Local, name: "err", module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_type), visibility: 0}
-        frame: scopes.current
-        sema_scope_push_binding(scopes, SemaScopeBinding{frame: frame, symbol: symbol, key: key.copy(), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+        frame: check.scopes.current
+        sema_scope_push_binding(check.scopes, SemaScopeBinding{frame: frame, symbol: symbol, key: key.copy(), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
         sema_ownership_declare_ambient_binding(check.state, symbol)
         ambient_err = Val(checked_symbol_local("err", span, symbol.id, error_type))
     }
@@ -1815,10 +1817,10 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
             // The success payload is the fallback's hint: its own E0108 against
             // it is the `??` mismatch.
             fallback_start: check.diagnostics.len()
-            checked: sema_check_expression(other, fallback_expected, environment, program, scopes, check) ?? {
+            checked: sema_check_expression(other, fallback_expected, environment, program, check) ?? {
                 if fallback_expected != None && sema_value_mismatch_index(check.diagnostics, fallback_start, expr_span(other)) == .Val(mismatch_index) {
                     probe_diagnostics := [Diagnostic]{}
-                    if sema_probe_expression(other, None, environment, program, scopes, check, probe_diagnostics) == .Val(offered) {
+                    if sema_probe_expression(other, None, environment, program, check, probe_diagnostics) == .Val(offered) {
                         check.diagnostics[mismatch_index] = sema_or_fallback_mismatch(payload, offered.ty, expr_span(other))
                     }
                 }
@@ -1861,33 +1863,33 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                 }
             }
             // The block's own frame is rolled back after it, as its copy was.
-            block_mark: sema_scope_mark(scopes)
-            sema_scope_enter(scopes, check.state, "or.fallback@{block_span.start}")
-            checked_block: sema_check_statements(body, outer_return_type, environment, program, scopes, check, outer_loop_depth)
+            block_mark: sema_scope_mark(check.scopes)
+            sema_scope_enter(check.scopes, check.state, "or.fallback@{block_span.start}")
+            checked_block: sema_check_statements(body, outer_return_type, environment, program, check, outer_loop_depth)
             if !checked_block.complete {
-                sema_scope_leave(scopes, check.state)
+                sema_scope_leave(check.scopes, check.state)
                 return None
             }
             tail_value := TExpr?{None}
             if tail != None {
                 fallback_expected: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
-                tail_value = sema_check_expression(tail, fallback_expected, environment, program, scopes, check)
+                tail_value = sema_check_expression(tail, fallback_expected, environment, program, check)
                 if tail_value == None {
-                    sema_scope_leave(scopes, check.state)
+                    sema_scope_leave(check.scopes, check.state)
                     return None
                 }
                 checked_tail: tail_value ?? return None
-                if sema_expr_unwrap_tag(checked_tail.ty) == (Type.Named{name: "Unit"}) && sema_fallback_unit_call_name(tail, scopes) == .Val(call_name) {
+                if sema_expr_unwrap_tag(checked_tail.ty) == (Type.Named{name: "Unit"}) && sema_fallback_unit_call_name(tail, check.scopes) == .Val(call_name) {
                     check.diagnostics.push(sema_error("E0116", expr_span(tail), "`{call_name}` doesn't hand back a value", "a `??` fallback block ends with a value or leaves the enclosing function; a call that returns nothing is only a statement", "end the block with `()` after the call, or use `return` to leave the enclosing function"))
-                    sema_scope_leave(scopes, check.state)
+                    sema_scope_leave(check.scopes, check.state)
                     return None
                 }
                 if payload == (Type.Named{name: "Never"}) {
                     fallback_payload = if tail_value == .Val(value) -> value.ty else -> Type.Named{name: "Never"}
                 }
             }
-            sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
-            sema_scope_rollback(scopes, block_mark)
+            sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+            sema_scope_rollback(check.scopes, block_mark)
             if {
                 checked_block.value.len() == 0 && tail_value != None -> {
                     fallback_tree = Val(TOrFallback.Value{value: tail_value ?? sema_node(check.context, fallback_payload, NodeKind.Unit, block_span)})
@@ -1923,11 +1925,11 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                         check.diagnostics.push(sema_error("E0405", return_span, "`?? return` can't return a value here", "this function returns nothing, so `return` can't carry a value", "drop the value, or add a return type before `->`"))
                         return None
                     }
-                    checked_return: sema_stmt_check_return_value(returned_expr, return_type, environment, program, scopes, check) ?? return None
-                    if !sema_stmt_record_return_views(returned_expr, checked_return.ty, scopes, check.state, check.context, check.diagnostics) {
+                    checked_return: sema_stmt_check_return_value(returned_expr, return_type, environment, program, check) ?? return None
+                    if !sema_stmt_record_return_views(returned_expr, checked_return.ty, check.scopes, check.state, check.context, check.diagnostics) {
                         return None
                     }
-                    if !sema_stmt_move_direct(returned_expr, check.state, scopes, "`or return`", check.diagnostics) {
+                    if !sema_stmt_move_direct(returned_expr, check.state, check.scopes, "`or return`", check.diagnostics) {
                         return None
                     }
                     fallback_tree = Val(TOrFallback.Return{value: Val(checked_return)})
@@ -1940,9 +1942,9 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
                 return None
             }
             sema_compute_note_panic(check.context, safe_compute_panic)
-            message: sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, check) ?? return None
-            location := sema_expression_panic_location(environment, program, scopes, name_span)
-            location.locals = sema_expression_panic_locals(scopes, name_span)
+            message: sema_check_expression(args[0].expr, Val(Type.String), environment, program, check) ?? return None
+            location := sema_expression_panic_location(environment, program, check.scopes, name_span)
+            location.locals = sema_expression_panic_locals(check.scopes, name_span)
             fallback_tree = Val(TOrFallback.Panic{message: message, location: location})
         }
         .Break(route_span) -> {
@@ -1963,14 +1965,14 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
             fallback_tree = Val(TOrFallback.Continue)
         }
         .BreakLabel(label, route_span) -> {
-            if outer_loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
+            if outer_loop_depth <= 0 || !sema_scope_has_loop_label(check.scopes, label) {
                 check.diagnostics.push(sema_error("E0405", route_span, "the `?? break` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 return None
             }
             fallback_tree = Val(TOrFallback.BreakLabel{label: label})
         }
         .ContinueLabel(label, route_span) -> {
-            if outer_loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
+            if outer_loop_depth <= 0 || !sema_scope_has_loop_label(check.scopes, label) {
                 check.diagnostics.push(sema_error("E0405", route_span, "the `?? next` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 return None
             }
@@ -1980,7 +1982,7 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
             fallback_tree = Val(TOrFallback.ContinueLabel{label: label})
         }
     }
-    sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
+    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
     Val(SemaOrFallbackRoute{payload: fallback_payload, value: fallback_tree, reaches_merge: fallback_reaches_merge, ambient_err: ambient_err})
 }
 
@@ -2096,17 +2098,17 @@ sema_expression_if_chain_tests_carrier: fn(value: Expr, subject_span: Span, succ
 
 // Check a hoisted dispatch subject once and bind it to the compiler local
 // that the rebound chain reads. The value form and the statement form share it.
-sema_expression_if_bind_subject: fn(subject: Expr, condition: Expr, else_value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TStmt? {
+sema_expression_if_bind_subject: fn(subject: Expr, condition: Expr, else_value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TStmt? {
     subject_span: expr_span(subject)
     carrier: sema_expression_if_condition_tests_carrier(condition, None, environment, program) || sema_expression_if_chain_tests_carrier(else_value, subject_span, None, environment, program)
-    checked_subject := if carrier -> sema_check_expression_carrier(subject, None, environment, program, scopes, check) else -> sema_check_expression(subject, None, environment, program, scopes, check)
-    success: if carrier -> sema_expression_carrier_success_enum(subject, checked_subject, environment, program, scopes) else -> None
+    checked_subject := if carrier -> sema_check_expression_carrier(subject, None, environment, program, check) else -> sema_check_expression(subject, None, environment, program, check)
+    success: if carrier -> sema_expression_carrier_success_enum(subject, checked_subject, environment, program, check.scopes) else -> None
     if success != None && (sema_expression_if_condition_tests_carrier(condition, success, environment, program) || sema_expression_if_chain_tests_carrier(else_value, subject_span, success, environment, program)) {
-        checked_subject = sema_expression_carrier_case_subject(subject, checked_subject.move(), environment, program, scopes, check.context, check.diagnostics)
+        checked_subject = sema_expression_carrier_case_subject(subject, checked_subject.move(), environment, program, check.scopes, check.context, check.diagnostics)
     }
     init: checked_subject ?? return None
     name: sema_expression_if_subject_local_name(subject)
-    owner: sema_scope_local_owner_key(scopes)
+    owner: sema_scope_local_owner_key(check.scopes)
     local_module: sema_scope_environment_module_text(environment, program)
     key: symbol_key_text(SymbolKind.Local, local_module, owner, name)
     id: sema_symbol_id_of(program, check.context, key)
@@ -2120,20 +2122,22 @@ sema_expression_if_bind_subject: fn(subject: Expr, condition: Expr, else_value: 
     bounds: tree_expr_known_bounds(init)
     // The hoisted local reads its subject's place in place when the subject
     // does, so the arms' payload bindings do too.
-    in_place: !window && sema_expression_source_reads_in_place(subject, scopes)
+    in_place: !window && sema_expression_source_reads_in_place(subject, check.scopes)
     access: if window -> AccessConvention.Write else -> AccessConvention.Read
     // A value table's `it` lives in the table's own frame and shadows an
     // enclosing table's `it`, as the statement form's does; any other hoisted
     // local has a unique name and declares normally.
     if sema_expression_if_subject_is_table_it(subject) {
-        sema_scope_push_binding(scopes, SemaScopeBinding{frame: scopes.current, symbol: symbol, key: key.copy(), mutable: window, access: access, integer_bounds: bounds, string_view: false, compiler_builtin: false})
-    } else { _ := sema_scope_declare_local(scopes, symbol, key, window, access, bounds, false) }
-    if in_place -> sema_scope_mark_place_alias(scopes, name)
+        sema_scope_push_binding(check.scopes, SemaScopeBinding{frame: check.scopes.current, symbol: symbol, key: key.copy(), mutable: window, access: access, integer_bounds: bounds, string_view: false, compiler_builtin: false})
+    } else {
+        _ := sema_scope_declare_local(check.scopes, symbol, key, window, access, bounds, false)
+    }
+    if in_place -> sema_scope_mark_place_alias(check.scopes, name)
     sema_ownership_declare_binding(check.state, symbol, false)
     // The arms' payload sources are rooted at this local; the subject it
     // stands for decides whether a payload moves out of a named place.
     sema_copy_site_note_subject(check.state, name, subject_span, subject)
-    _ := sema_ownership_record_pattern_views(check.state, name, subject_span, [Expr]{subject}, if window -> AccessConvention.Write else -> AccessConvention.Read, scopes)
+    _ := sema_ownership_record_pattern_views(check.state, name, subject_span, [Expr]{subject}, if window -> AccessConvention.Write else -> AccessConvention.Read, check.scopes)
     local := checked_symbol_local(name, subject_span, id, init.ty)
     local.generated = true
     local.integer_bounds = bounds
@@ -2371,24 +2375,24 @@ sema_expression_reject_read_write_view_payload: fn(state: ^SemaOwnershipState, s
 }
 
 // One pattern test condition, with payload aliases for the success branch.
-sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaConditionCheck {
-    subject_value: sema_check_pattern_subject(subject, pattern, None, environment, program, scopes, check)
+sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaConditionCheck {
+    subject_value: sema_check_pattern_subject(subject, pattern, None, environment, program, check)
     checked_subject: subject_value ?? {
         names := [BindName]{}
         sema_pattern_test_binding_names(pattern, names)
-        return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings(names, [SemaConditionBinding]{}, sema_scope_local_owner_key(scopes), sema_scope_environment_module_text(environment, program), environment.module_identity, program, check.context))
+        return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings(names, [SemaConditionBinding]{}, sema_scope_local_owner_key(check.scopes), sema_scope_environment_module_text(environment, program), environment.module_identity, program, check.context))
     }
     if sema_pattern_tests_absence(pattern) {
         if sema_expr_none_comparison_refused(checked_subject.ty, true, span, environment, program) == .Val(refused) {
             check.diagnostics.push(refused)
-            return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings([BindName]{}, [SemaConditionBinding]{}, sema_scope_local_owner_key(scopes), sema_scope_environment_module_text(environment, program), environment.module_identity, program, check.context))
+            return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings([BindName]{}, [SemaConditionBinding]{}, sema_scope_local_owner_key(check.scopes), sema_scope_environment_module_text(environment, program), environment.module_identity, program, check.context))
         }
     }
-    source: sema_expression_window_source(subject, scopes)
+    source: sema_expression_window_source(subject, check.scopes)
     window_names := [String]{}
     if source != None -> sema_expression_window_names(pattern, window_names)
-    checked_pattern := sema_check_pattern(checked_subject, pattern, TPatternPosition.Arm, false, false, environment, program, scopes, check)
-    owner: sema_scope_local_owner_key(scopes)
+    checked_pattern := sema_check_pattern(checked_subject, pattern, TPatternPosition.Arm, false, false, environment, program, check)
+    owner: sema_scope_local_owner_key(check.scopes)
     local_module: sema_scope_environment_module_text(environment, program)
     // A failed pattern (an arm E0305 refused) still declares every name it
     // binds: a recovered binding with its type, the rest untyped, so the
@@ -2416,7 +2420,7 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
             sources := [Expr]{}
             sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, fact.name, environment, program, sources, check.diagnostics)
             if !window && !sema_expression_subject_moved(subject) {
-                sema_expression_reject_read_write_view_payload(check.state, subject, checked_subject.ty, fact.ty, scopes, check.diagnostics)
+                sema_expression_reject_read_write_view_payload(check.state, subject, checked_subject.ty, fact.ty, check.scopes, check.diagnostics)
             }
             // An explicit `name.move()` takes this payload out of its subject
             // (sema_ownership_move_pattern_payload) when the subject stays
@@ -2480,34 +2484,34 @@ sema_expression_unchecked_condition_bindings: fn(names: [BindName], bound: [Sema
     bindings
 }
 
-sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaConditionCheck {
+sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaConditionCheck {
     if condition == {
         .Paren(inner, span, _) -> {
             // A hole table's arm test: its header, marked as in
             // sema_expr_check_paren (E0442).
-            outer: scopes.hole_header
+            outer: check.scopes.hole_header
             if inner == .Paren(_, inner_span, _) && inner_span == span {
-                scopes.hole_header = Val(span)
+                check.scopes.hole_header = Val(span)
             }
-            checked: sema_expression_check_condition_inner(inner, environment, program, scopes, check)
-            scopes.hole_header = outer
+            checked: sema_expression_check_condition_inner(inner, environment, program, check)
+            check.scopes.hole_header = outer
             return checked
         }
-        .PatternTest(subject, pattern, span, _) -> return sema_expression_check_pattern_condition(subject, pattern, span, environment, program, scopes, check)
+        .PatternTest(subject, pattern, span, _) -> return sema_expression_check_pattern_condition(subject, pattern, span, environment, program, check)
         .Binary(op, left, right, span, _) -> {
             if op == BinOp.And && sema_expression_condition_binds(condition) {
-                left_check: sema_expression_check_condition_inner(left, environment, program, scopes, check)
+                left_check: sema_expression_check_condition_inner(left, environment, program, check)
                 left_checked: left_check.checked ?? {
                     names := [BindName]{}
                     sema_expression_condition_binding_names(right, names)
-                    unchecked: sema_expression_unchecked_condition_bindings(names, left_check.bindings, sema_scope_local_owner_key(scopes), sema_scope_environment_module_text(environment, program), environment.module_identity, program, check.context)
+                    unchecked: sema_expression_unchecked_condition_bindings(names, left_check.bindings, sema_scope_local_owner_key(check.scopes), sema_scope_environment_module_text(environment, program), environment.module_identity, program, check.context)
                     bindings := left_check.bindings
                     loop binding in unchecked -> bindings.push(binding)
                     return sema_expression_condition_failed(bindings)
                 }
                 // The right side of `^^` reads the names the left side bound.
-                sema_expression_declare_condition_bindings(left_checked.bindings, environment, program, scopes, check.state, false, check.diagnostics)
-                right_check: sema_expression_check_condition_inner(right, environment, program, scopes, check)
+                sema_expression_declare_condition_bindings(left_checked.bindings, environment, program, check.scopes, check.state, false, check.diagnostics)
+                right_check: sema_expression_check_condition_inner(right, environment, program, check)
                 bindings := left_checked.bindings
                 loop binding in right_check.bindings -> bindings.push(binding)
                 right_checked: right_check.checked ?? return sema_expression_condition_failed(bindings)
@@ -2518,8 +2522,8 @@ sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScop
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     diagnostic_start: check.diagnostics.len()
-    value: sema_check_expression(condition, Val(Type.Bool), environment, program, scopes, check) ?? {
-        sema_expression_condition_replace_mismatch(condition, diagnostic_start, environment, program, scopes, check)
+    value: sema_check_expression(condition, Val(Type.Bool), environment, program, check) ?? {
+        sema_expression_condition_replace_mismatch(condition, diagnostic_start, environment, program, check)
         return sema_expression_condition_failed([SemaConditionBinding]{})
     }
     sema_expression_condition_checked(SemaCheckedCondition{condition: TIfCond.Plain{value: value}, value: value, bindings: [SemaConditionBinding]{}})
@@ -2528,11 +2532,11 @@ sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScop
 // A condition is inferred with Bool as its target, and one of another type is
 // E0110 about the condition, in place of the generic E0108 its check against
 // Bool reported.
-sema_expression_condition_replace_mismatch: fn(condition: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) {
+sema_expression_condition_replace_mismatch: fn(condition: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) {
     value_span: expr_span(condition)
     mismatch_index: sema_value_mismatch_index(check.diagnostics, diagnostic_start, value_span) ?? return
     probe_diagnostics := [Diagnostic]{}
-    offered: sema_probe_expression(condition, None, environment, program, scopes, check, probe_diagnostics) ?? return
+    offered: sema_probe_expression(condition, None, environment, program, check, probe_diagnostics) ?? return
     check.diagnostics[mismatch_index] = sema_error("E0110", value_span, "a condition must be {sema_type_show(Type.Bool)}, but this is {sema_type_show(offered.ty)}", "the program needs a clear yes or no here", "compare the value to something, e.g. `x > 0` or `name == \"ok\"`")
 }
 
@@ -2632,17 +2636,17 @@ sema_expression_rewrite_optional_ne_none: fn(condition: Expr, scopes: SemaScopeT
 // `sema_expression_declare_condition_bindings`. The condition's own frame
 // (`pattern@…`) keeps chain bindings out of later arms and fixes their
 // symbol identities for the branch.
-sema_expression_check_condition: fn(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaConditionCheck {
-    rewritten: sema_expression_rewrite_optional_ne_none(condition, scopes)
+sema_expression_check_condition: fn(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaConditionCheck {
+    rewritten: sema_expression_rewrite_optional_ne_none(condition, check.scopes)
     if rewritten == .Val(presence) {
-        return sema_expression_check_condition(presence, environment, program, scopes, check)
+        return sema_expression_check_condition(presence, environment, program, check)
     }
     if !sema_expression_condition_binds(condition) {
-        return sema_expression_check_condition_inner(condition, environment, program, scopes, check)
+        return sema_expression_check_condition_inner(condition, environment, program, check)
     }
-    _ := sema_scope_enter(scopes, check.state, "pattern@{expr_span(condition).start}")
-    checked := sema_expression_check_condition_inner(condition, environment, program, scopes, check)
-    sema_scope_leave(scopes, check.state)
+    _ := sema_scope_enter(check.scopes, check.state, "pattern@{expr_span(condition).start}")
+    checked := sema_expression_check_condition_inner(condition, environment, program, check)
+    sema_scope_leave(check.scopes, check.state)
     checked
 }
 
@@ -2727,12 +2731,12 @@ sema_expression_if_rebound_chain: fn(subject: Expr, else_value: Expr) -> Expr {
     sema_expression_if_rebind_chain(else_value, expr_span(subject), Expr.Ident{name: sema_expression_if_subject_local_name(subject), span: expr_span(subject), id: AST_NODE_GENERATED})
 }
 
-sema_expression_if_hoisted: fn(subject: Expr, condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_if_hoisted: fn(subject: Expr, condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     table_it: sema_expression_if_subject_is_table_it(subject)
-    if table_it -> sema_scope_enter(scopes, check.state, "if.it@{span.start}")
-    binding: sema_expression_if_bind_subject(subject, condition, else_value, environment, program, scopes, check)
-    checked: if binding != None -> sema_expression_if(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, expected, environment, program, scopes, check) else -> None
-    if table_it -> sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
+    if table_it -> sema_scope_enter(check.scopes, check.state, "if.it@{span.start}")
+    binding: sema_expression_if_bind_subject(subject, condition, else_value, environment, program, check)
+    checked: if binding != None -> sema_expression_if(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, expected, environment, program, check) else -> None
+    if table_it -> sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
     binding_stmt: binding ?? return None
     table: checked ?? return None
     Val(sema_tree_node(table.ty, TExprKind.InlineBlock{body: [TStmt]{binding_stmt, TStmt.ExprStmt{value: table, span: span}}}, span))
@@ -2812,32 +2816,32 @@ sema_expression_if_next_value: fn(value: Expr, scopes: SemaScopeTable, condition
     value.copy()
 }
 
-sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    if sema_expression_if_next_word(then_value, scopes, condition, true) || sema_expression_if_next_word(else_value, scopes, condition, false) {
-        return sema_expression_if(condition, sema_expression_if_next_body(then_body, then_value, scopes, condition, true), sema_expression_if_next_value(then_value, scopes, condition, true), sema_expression_if_next_body(else_body, else_value, scopes, condition, false), sema_expression_if_next_value(else_value, scopes, condition, false), span, expected, environment, program, scopes, check)
+sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    if sema_expression_if_next_word(then_value, check.scopes, condition, true) || sema_expression_if_next_word(else_value, check.scopes, condition, false) {
+        return sema_expression_if(condition, sema_expression_if_next_body(then_body, then_value, check.scopes, condition, true), sema_expression_if_next_value(then_value, check.scopes, condition, true), sema_expression_if_next_body(else_body, else_value, check.scopes, condition, false), sema_expression_if_next_value(else_value, check.scopes, condition, false), span, expected, environment, program, check)
     }
-    type_param: sema_expression_type_table_param(condition, environment, scopes)
+    type_param: sema_expression_type_table_param(condition, environment, check.scopes)
     if type_param == .Val(param) {
-        return sema_expression_type_table(param, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, check)
+        return sema_expression_type_table(param, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, check)
     }
     dispatch_subject: sema_expression_if_dispatch_subject(condition, else_value)
     if dispatch_subject == .Val(subject) {
-        return sema_expression_if_hoisted(subject, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, check)
+        return sema_expression_if_hoisted(subject, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, check)
     }
     // An arm for a failure the subject can no longer fail with is left out
     // (sema_gone_failure_arm): the table goes on from the arm after it.
     if else_body.len() == 0 && else_value == .If(next_condition, _, _, _, _, next_span, _) {
         if next_span == span {
-            if sema_gone_failure_arm(condition, scopes, environment, program) == .Val(gone) {
+            if sema_gone_failure_arm(condition, check.scopes, environment, program) == .Val(gone) {
                 check.diagnostics.push(sema_gone_failure_lint(gone, None, sema_gone_failure_value_end(then_body, then_value), environment, program))
                 if else_value == .If(_, next_then_body, next_then_value, next_else_body, next_else_value, _, _) {
-                    return sema_expression_if(next_condition, next_then_body, next_then_value, next_else_body, next_else_value, span, expected, environment, program, scopes, check)
+                    return sema_expression_if(next_condition, next_then_body, next_then_value, next_else_body, next_else_value, span, expected, environment, program, check)
                 }
             }
-            if sema_gone_failure_arm(next_condition, scopes, environment, program) == .Val(gone) {
+            if sema_gone_failure_arm(next_condition, check.scopes, environment, program) == .Val(gone) {
                 if else_value == .If(_, next_then_body, next_then_value, next_else_body, next_else_value, _, _) {
                     check.diagnostics.push(sema_gone_failure_lint(gone, None, sema_gone_failure_value_end(next_then_body, next_then_value), environment, program))
-                    return sema_expression_if(condition, then_body, then_value, next_else_body, next_else_value, span, expected, environment, program, scopes, check)
+                    return sema_expression_if(condition, then_body, then_value, next_else_body, next_else_value, span, expected, environment, program, check)
                 }
             }
         }
@@ -2846,8 +2850,8 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     // swapped, so the other branch holds the payload. Source order of
     // evaluation is unchanged.
     if sema_expression_absent_optional_test(condition) == .Val(test) {
-        if sema_expression_flow_optional_payload(scopes, test.name.name) != None && sema_expression_if_absent_test_swaps(else_value, test.name.name) {
-            return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, environment, program, scopes, check)
+        if sema_expression_flow_optional_payload(check.scopes, test.name.name) != None && sema_expression_if_absent_test_swaps(else_value, test.name.name) {
+            return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, environment, program, check)
         }
     }
     // Card #1440 / E0307: the outermost level of an else-less dispatch chain
@@ -2859,9 +2863,9 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     else_table_head: !chain_head && !check.context.noelse_chain_starts.contains(span.start) && sema_coverage_is_else_table(environment, program, span)
     if else_table_head -> check.context.noelse_chain_starts.push(span.start)
     // A catch-all `.Err(e)` over an open failure union binds `e` as `Err`.
-    caught: sema_catch_all_err_arm(condition, scopes, environment, program)
+    caught: sema_catch_all_err_arm(condition, check.scopes, environment, program)
     condition_mark: check.diagnostics.len()
-    condition_check: if caught == .Val(found) -> sema_expression_check_condition(found.cond, environment, program, scopes, check) else -> sema_expression_check_condition(condition, environment, program, scopes, check)
+    condition_check: if caught == .Val(found) -> sema_expression_check_condition(found.cond, environment, program, check) else -> sema_expression_check_condition(condition, environment, program, check)
     if condition_check.checked == None && !sema_has_error_since(check.diagnostics, condition_mark) {
         return None
     }
@@ -2875,13 +2879,13 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     // the arm is still checked for its types but reports nothing.
     quiet_then: condition_check.checked == None && sema_expression_condition_binds(condition)
     then_diagnostic_start: check.diagnostics.len()
-    then_mark: sema_scope_mark(scopes)
-    sema_scope_enter(scopes, check.state, "if.then@{span.start}")
-    sema_expression_declare_condition_bindings(condition_check.bindings, environment, program, scopes, check.state, true, check.diagnostics)
-    then_result: if caught == .Val(found) -> sema_catch_all_err_check_body(found, then_body, then_mark.return_type, environment, program, scopes, check, then_mark.loop_depth) else -> sema_check_statements(then_body, then_mark.return_type, environment, program, scopes, check, then_mark.loop_depth)
+    then_mark: sema_scope_mark(check.scopes)
+    sema_scope_enter(check.scopes, check.state, "if.then@{span.start}")
+    sema_expression_declare_condition_bindings(condition_check.bindings, environment, program, check.scopes, check.state, true, check.diagnostics)
+    then_result: if caught == .Val(found) -> sema_catch_all_err_check_body(found, then_body, then_mark.return_type, environment, program, check, then_mark.loop_depth) else -> sema_check_statements(then_body, then_mark.return_type, environment, program, check, then_mark.loop_depth)
     if !then_result.complete {
-        sema_scope_leave(scopes, check.state)
-        sema_scope_rollback(scopes, then_mark)
+        sema_scope_leave(check.scopes, check.state)
+        sema_scope_rollback(check.scopes, then_mark)
         found_sites: check.state.share_found.copy()
         sema_ownership_fork_drop(check.state, fork, found_sites, [SemaOwnershipShareSite]{})
         if quiet_then {
@@ -2897,7 +2901,7 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     // a fallible sibling's carrier in either order. Keep only that sibling
     // root from propagating; its nested calls still propagate normally.
     // The paired root-26 corpus also covers deferred payload moves/scopes.
-    defer_then_err: expected == None && sema_expression_uncontextual_err_arm(then_value, scopes)
+    defer_then_err: expected == None && sema_expression_uncontextual_err_arm(then_value, check.scopes)
     defer_then: defer_then_err || (sibling_rule && sema_expression_bare_absent_arm(then_value, false))
     then_first := TExpr?{None}
     deferred_then_scopes := [SemaScopeTable]{}
@@ -2907,14 +2911,14 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     // of sema_single_use_leave_scope remains); reported after the else arm.
     then_end_diagnostics := [Diagnostic]{}
     if defer_then {
-        deferred_then_scopes.push(sema_scope_snapshot(scopes))
+        deferred_then_scopes.push(sema_scope_snapshot(check.scopes))
         deferred_then_state.push(sema_ownership_state_snapshot(check.state))
     } else {
-        carrier_sibling: expected == None && sema_expression_uncontextual_err_arm(else_value, scopes)
-        first_value: if carrier_sibling -> sema_check_expression_carrier(then_value, expected, environment, program, scopes, check) else -> sema_check_expression(then_value, expected, environment, program, scopes, check)
+        carrier_sibling: expected == None && sema_expression_uncontextual_err_arm(else_value, check.scopes)
+        first_value: if carrier_sibling -> sema_check_expression_carrier(then_value, expected, environment, program, check) else -> sema_check_expression(then_value, expected, environment, program, check)
         first: first_value ?? {
-            sema_scope_leave(scopes, check.state)
-            sema_scope_rollback(scopes, then_mark)
+            sema_scope_leave(check.scopes, check.state)
+            sema_scope_rollback(check.scopes, then_mark)
             found_sites: check.state.share_found.copy()
             sema_ownership_fork_drop(check.state, fork, found_sites, [SemaOwnershipShareSite]{})
             if quiet_then {
@@ -2930,16 +2934,16 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     if quiet_then {
         loop check.diagnostics.len() > then_diagnostic_start -> _ := check.diagnostics.pop()
     }
-    sema_scope_rollback(scopes, then_mark)
+    sema_scope_rollback(check.scopes, then_mark)
     sema_ownership_fork_rollback(check.state, fork)
     then_found: if defer_then -> deferred_then_state[0].share_found else -> then_path.share_found
 
-    else_mark: sema_scope_mark(scopes)
-    sema_scope_enter(scopes, check.state, "if.else@{span.start}")
-    else_result: sema_check_statements(else_body, else_mark.return_type, environment, program, scopes, check, else_mark.loop_depth)
+    else_mark: sema_scope_mark(check.scopes)
+    sema_scope_enter(check.scopes, check.state, "if.else@{span.start}")
+    else_result: sema_check_statements(else_body, else_mark.return_type, environment, program, check, else_mark.loop_depth)
     if !else_result.complete {
-        sema_scope_leave(scopes, check.state)
-        sema_scope_rollback(scopes, else_mark)
+        sema_scope_leave(check.scopes, check.state)
+        sema_scope_rollback(check.scopes, else_mark)
         else_found: check.state.share_found.copy()
         sema_ownership_fork_drop(check.state, fork, then_found, else_found)
         return None
@@ -2950,33 +2954,35 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     sibling_expected: sema_expression_absent_sibling(then_first)
     else_expected: if {
         sibling_rule && optional_continuation && sibling_expected != None -> Val(sibling_expected)
-        expected == None && sema_expression_uncontextual_err_arm(else_value, scopes) -> sema_expression_err_sibling(then_first)
+        expected == None && sema_expression_uncontextual_err_arm(else_value, check.scopes) -> sema_expression_err_sibling(then_first)
         else -> expected
     }
     // An else-if link continues this level's chain, so a chain of any length
     // is one source nesting level; only the forms inside an arm nest deeper.
     chain_link: else_body.len() == 0 && else_value == .If(_, _, _, _, _, _, _)
     if chain_link -> sema_leave_source_nesting(check.context)
-    else_value_checked: if defer_then_err -> sema_check_expression_carrier(else_value, else_expected, environment, program, scopes, check) else -> sema_check_expression(else_value, else_expected, environment, program, scopes, check)
+    else_value_checked: if defer_then_err -> sema_check_expression_carrier(else_value, else_expected, environment, program, check) else -> sema_check_expression(else_value, else_expected, environment, program, check)
     if chain_link -> check.context.source_nesting += 1
     else_checked: else_value_checked ?? {
-        sema_scope_leave(scopes, check.state)
-        sema_scope_rollback(scopes, else_mark)
+        sema_scope_leave(check.scopes, check.state)
+        sema_scope_rollback(check.scopes, else_mark)
         else_found: check.state.share_found.copy()
         sema_ownership_fork_drop(check.state, fork, then_found, else_found)
         // Both arms are bare `None`: neither gives the other a type, so the
         // deferred then arm is its own E0308, not hidden by the else arm's.
         if defer_then && !defer_then_err && !quiet_then && sema_expression_bare_absent_arm(else_value, true) {
             sema_body_check_swap_state(check, deferred_then_state[0])
-            _ := sema_check_expression(then_value, expected, environment, program, deferred_then_scopes[0], check)
+            sema_body_check_swap_scopes(check, deferred_then_scopes[0])
+            _ := sema_check_expression(then_value, expected, environment, program, check)
+            sema_body_check_swap_scopes(check, deferred_then_scopes[0])
             sema_body_check_swap_state(check, deferred_then_state[0])
             sema_ownership_keep_mutations(check.state, deferred_then_state[0])
         }
         return None
     }
     else_reaches_merge: !sema_stmt_block_has_no_fallthrough(else_body) && else_checked.ty != Type.Named{name: "Never"}
-    sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
-    sema_scope_rollback(scopes, else_mark)
+    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+    sema_scope_rollback(check.scopes, else_mark)
     else_path: sema_ownership_fork_path(check.state, fork)
     sema_ownership_fork_rollback(check.state, fork)
 
@@ -2984,7 +2990,9 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     then_checked: then_first ?? {
         deferred_expected: if defer_then_err -> sema_expression_err_sibling(Val(else_checked)) else -> sema_expression_absent_sibling(Val(else_checked))
         sema_body_check_swap_state(check, deferred_then_state[0])
-        deferred_checked: sema_check_expression(then_value, deferred_expected, environment, program, deferred_then_scopes[0], check)
+        sema_body_check_swap_scopes(check, deferred_then_scopes[0])
+        deferred_checked: sema_check_expression(then_value, deferred_expected, environment, program, check)
+        sema_body_check_swap_scopes(check, deferred_then_scopes[0])
         sema_body_check_swap_state(check, deferred_then_state[0])
         deferred_checked ?? {
             sema_scope_leave(deferred_then_scopes[0], deferred_then_state[0])
@@ -3104,7 +3112,7 @@ sema_expression_type_table_param: fn(condition: Expr, environment: SemaScopeEnvi
 // table's span; the whole chain is checked here as the statement table is
 // (sema_stmt_check_switch): each arm with `T` read as its type, then rebuilt
 // as the same IfExpr levels on TypeTest conditions the IR folds per instance.
-sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     heads := [Expr]{condition.copy()}
     bodies := [[Stmt]]{then_body.copy()}
     values := [Expr]{then_value.copy()}
@@ -3148,13 +3156,13 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
         if is_else && no_else -> break
         target := Type?{None}
         if !is_else {
-            target = sema_stmt_type_switch_target(param, heads[index], targets, environment, program, scopes, check.diagnostics)
+            target = sema_stmt_type_switch_target(param, heads[index], targets, environment, program, check.scopes, check.diagnostics)
             if target == None {
                 complete = false
                 next
             }
         }
-        mark: sema_scope_mark(scopes)
+        mark: sema_scope_mark(check.scopes)
         arm_expected := expected.copy()
         arm_return := mark.return_type.copy()
         if target == .Val(arm_type) {
@@ -3166,25 +3174,25 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
                 arm_return = Val(sema_inference_substitute_type(declared, names, actuals))
             }
             // After the mark, so the rollback below puts the rebound rows back.
-            sema_stmt_type_switch_rebind(scopes, param, arm_type)
+            sema_stmt_type_switch_rebind(check.scopes, param, arm_type)
             targets.push(arm_type.copy())
             tests.push(sema_stmt_type_test_condition(param, arm_type, expr_span(heads[index]), check.context).value)
         }
         branch_fork: sema_ownership_fork(check.state)
         arm_span: if is_else -> span else -> expr_span(heads[index])
-        sema_scope_enter(scopes, check.state, "if.arm@{arm_span.start}")
+        sema_scope_enter(check.scopes, check.state, "if.arm@{arm_span.start}")
         arm_body: if is_else -> rest_body else -> bodies[index]
         arm_value: if is_else -> rest_value else -> values[index]
-        body := sema_check_statements(arm_body, arm_return, environment, program, scopes, check, mark.loop_depth)
+        body := sema_check_statements(arm_body, arm_return, environment, program, check, mark.loop_depth)
         value := TExpr?{None}
         if body.complete {
-            value = sema_check_expression(arm_value, arm_expected, environment, program, scopes, check)
+            value = sema_check_expression(arm_value, arm_expected, environment, program, check)
         }
-        sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
+        sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
         path: sema_ownership_fork_path(check.state, fork)
         sema_ownership_fork_rollback(check.state, branch_fork)
         sema_ownership_fork_close(check.state, branch_fork)
-        sema_scope_rollback(scopes, mark)
+        sema_scope_rollback(check.scopes, mark)
         loop site in path.share_found -> arm_found.push(site)
         checked: value ?? {
             complete = false
@@ -3257,14 +3265,14 @@ sema_expression_lift_into_carrier: fn(value: TExpr, carrier: Type) -> TExpr {
     sema_tree_node(carrier, TExprKind.Ok{value: value}, value.span)
 }
 
-sema_expression_compare_chain: fn(operands: [Expr], ops: [BinOp], hooks: [Bool], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_compare_chain: fn(operands: [Expr], ops: [BinOp], hooks: [Bool], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     if operands.len() == 0 || ops.len() + 1 != operands.len() {
         check.diagnostics.push(sema_error("E0109", span, "a comparison chain needs one operator between each pair of operands", "each comparison joins two neighboring values", "write a complete comparison expression"))
         return None
     }
     checked := [TExpr]{}
     loop operand in operands {
-        value: sema_check_expression(operand, None, environment, program, scopes, check) ?? return None
+        value: sema_check_expression(operand, None, environment, program, check) ?? return None
         checked.push(value)
     }
     line: sema_source_line_at(environment.source_segments, span) ?? return None

@@ -73,10 +73,10 @@ SemaStatementRollbackMethods: struct {
     restore: TMethodRef,
 }
 
-sema_stmt_check_block: fn(body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, owner: String, loop_depth: Int) -> SemaStatementResult {
-    sema_scope_enter(scopes, check.state, owner)
-    result: sema_check_statements(body, return_type, environment, program, scopes, check, loop_depth)
-    sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
+sema_stmt_check_block: fn(body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, owner: String, loop_depth: Int) -> SemaStatementResult {
+    sema_scope_enter(check.scopes, check.state, owner)
+    result: sema_check_statements(body, return_type, environment, program, check, loop_depth)
+    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
     result
 }
 
@@ -213,9 +213,9 @@ sema_stmt_loop_value_break_missing_payload: fn(frame: SemaLoopValueFrame, span: 
     false
 }
 
-sema_stmt_check_loop_value_break: fn(value: Expr, label: String?, label_span: Span, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TStmt? {
-    if label == .Val(name) && !sema_scope_has_loop_label(scopes, name) {
-        check.diagnostics.push(sema_stmt_unknown_loop_label(scopes, name, label_span))
+sema_stmt_check_loop_value_break: fn(value: Expr, label: String?, label_span: Span, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TStmt? {
+    if label == .Val(name) && !sema_scope_has_loop_label(check.scopes, name) {
+        check.diagnostics.push(sema_stmt_unknown_loop_label(check.scopes, name, label_span))
         return None
     }
     frame_index: sema_loop_value_resolve_frame(check.context, label) ?? {
@@ -229,8 +229,8 @@ sema_stmt_check_loop_value_break: fn(value: Expr, label: String?, label_span: Sp
     if frame.ty == .Val(expected_type) && !sema_expr_is_numeric(expected_type) {
         payload_expected = Val(expected_type)
     }
-    checked: sema_check_expression(value, payload_expected, environment, program, scopes, check) ?? return None
-    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, check.state, check.context, check.diagnostics, false) {
+    checked: sema_check_expression(value, payload_expected, environment, program, check) ?? return None
+    if !sema_copy_site_check_guard_owned(checked, environment, program, check.scopes, check.state, check.context, check.diagnostics, false) {
         return None
     }
     // A payload the loop cannot carry is reported on the `break` keyword.
@@ -244,44 +244,46 @@ sema_stmt_check_loop_value_break: fn(value: Expr, label: String?, label_span: Sp
         return None
     }
     result: sema_loop_value_check_result_exit(check.context, frame_index, checked, environment, program, check.diagnostics) ?? return None
-    if !sema_stmt_move_direct(value, check.state, scopes, "the loop `break`", check.diagnostics) {
+    if !sema_stmt_move_direct(value, check.state, check.scopes, "the loop `break`", check.diagnostics) {
         return None
     }
     sema_loop_value_record_break(check.context, frame_index, check.state)
     Val(TStmt.BreakValue{label: label, value: result, span: span})
 }
 
-sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TStmt? {
+sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TStmt? {
     if span.start == span.end && check.context.collect_item_types.len() > 0 {
-        item: sema_loop_value_check_collecting_item(value, expr_span(value), environment, program, scopes, check) ?? return None
-        if !sema_copy_site_check_guard_owned(item, environment, program, scopes, check.state, check.context, check.diagnostics, false) {
+        item: sema_loop_value_check_collecting_item(value, expr_span(value), environment, program, check) ?? return None
+        if !sema_copy_site_check_guard_owned(item, environment, program, check.scopes, check.state, check.context, check.diagnostics, false) {
             return None
         }
-        if !sema_stmt_move_direct(value, check.state, scopes, "the collecting loop", check.diagnostics) {
+        if !sema_stmt_move_direct(value, check.state, check.scopes, "the collecting loop", check.diagnostics) {
             return None
         }
         return Val(TStmt.ExprStmt{value: item, span: span})
     }
     stream_return := return_type
-    if sema_stmt_stream_element_type(stream_return) == None -> stream_return = scopes.return_type
+    if sema_stmt_stream_element_type(stream_return) == None {
+        stream_return = check.scopes.return_type
+    }
     elem_type: sema_stmt_stream_element_type(stream_return) ?? {
         // The report sits at the `yield` keyword.
         keyword: Span{start: span.start, end: span.start + "yield".count_bytes()}
         check.diagnostics.push(sema_error("E0805", keyword, "`yield` outside a generator", "`yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it", "declare `Stream<T> ->` on this function, or remove the `yield`"))
-        _ := sema_check_expression(value, None, environment, program, scopes, check)
+        _ := sema_check_expression(value, None, environment, program, check)
         return None
     }
     diagnostic_start: check.diagnostics.len()
-    checked: sema_check_expression(value, Val(elem_type), environment, program, scopes, check) ?? {
+    checked: sema_check_expression(value, Val(elem_type), environment, program, check) ?? {
         // The element type is the yielded value's target, and a value of
         // another type is E0807 about the stream.
         mismatch_index: sema_value_mismatch_index(check.diagnostics, diagnostic_start, expr_span(value)) ?? return None
         probe_diagnostics := [Diagnostic]{}
-        offered: sema_probe_expression(value, None, environment, program, scopes, check, probe_diagnostics) ?? return None
+        offered: sema_probe_expression(value, None, environment, program, check, probe_diagnostics) ?? return None
         check.diagnostics[mismatch_index] = sema_stmt_yield_mismatch(elem_type, offered.ty, expr_span(value))
         return None
     }
-    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, check.state, check.context, check.diagnostics, false) {
+    if !sema_copy_site_check_guard_owned(checked, environment, program, check.scopes, check.state, check.context, check.diagnostics, false) {
         return None
     }
     yielded := checked
@@ -297,7 +299,7 @@ sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, environme
             }
         }
     }
-    if !sema_stmt_move_direct(value, check.state, scopes, "`yield`", check.diagnostics) {
+    if !sema_stmt_move_direct(value, check.state, check.scopes, "`yield`", check.diagnostics) {
         return None
     }
     call := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.YieldSend{value: yielded}}, span)
@@ -311,12 +313,14 @@ sema_stmt_yield_mismatch: fn(element: Type, offered: Type, span: Span) -> Diagno
 // E0806: a generator (`Stream<T> ->`) yields its values;
 // `return` only ends the stream early, so it can't carry one. True when this
 // return was rejected.
-sema_stmt_generator_return_rejected: fn(value: Expr?, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
+sema_stmt_generator_return_rejected: fn(value: Expr?, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> Bool {
     returned: value ?? return false
     stream_return := return_type
-    if sema_stmt_stream_element_type(stream_return) == None -> stream_return = scopes.return_type
+    if sema_stmt_stream_element_type(stream_return) == None {
+        stream_return = check.scopes.return_type
+    }
     if sema_stmt_stream_element_type(stream_return) == None -> return false
-    _ := sema_check_expression(returned, None, environment, program, scopes, check)
+    _ := sema_check_expression(returned, None, environment, program, check)
     check.diagnostics.push(sema_error("E0806", expr_span(returned), "`{check.context.function_name}` yields values, so `return` can't carry one", "a generator body produces values with `yield`; `return` only ends the stream early", "write `yield ...;` to hand back a value, or a bare `return;` to end the stream"))
     true
 }
@@ -972,11 +976,11 @@ sema_stmt_missing_value: fn(expected: Type?, uncovered: String?, function_name: 
     sema_error("E0114", span, "this block promises to produce {expected_name}, but its last line produces no value", why, "end the block with an expression that produces {expected_name}, or `return` a value on every path")
 }
 
-sema_stmt_check_loop_step: fn(step: Stmt, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TStmt? {
+sema_stmt_check_loop_step: fn(step: Stmt, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TStmt? {
     if step == {
-        .Assign(target, op, op_span, expr) -> sema_stmt_check_assignment(target, op, op_span, expr, environment, program, scopes, check)
+        .Assign(target, op, op_span, expr) -> sema_stmt_check_assignment(target, op, op_span, expr, environment, program, check)
         .Expr(expr) -> {
-            value: sema_check_expression(expr, None, environment, program, scopes, check) ?? return None
+            value: sema_check_expression(expr, None, environment, program, check) ?? return None
             if value.ty != (Type.Named{name: "Unit"}) -> return None
             return Val(TStmt.ExprStmt{value: value, span: expr_span(expr)})
         }
@@ -994,7 +998,7 @@ sema_stmt_leave_statements: fn(context: ^SemaCheckContext, tail_store: ^SemaStat
     if nested -> sema_leave_source_nesting(context)
 }
 
-sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int) -> SemaStatementResult {
+sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, loop_depth: Int) -> SemaStatementResult {
     // E1403: a statement list is one source nesting level below its owner,
     // as each of its statements is.
     entered_nesting := false
@@ -1008,23 +1012,23 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
     tail_frame_depth := check.context.lambda_statement_tails.len()
     tail_body_id := sema_statement_tail_store_add_body(check.tail_store, statements)
     check.context.lambda_statement_tails.push(SemaStatementTailFrame{body_id: tail_body_id, start_index: 0})
-    previous_return_type := scopes.return_type
-    previous_failure_carrier := scopes.failure_carrier
-    previous_loop_depth := scopes.loop_depth
+    previous_return_type := check.scopes.return_type
+    previous_failure_carrier := check.scopes.failure_carrier
+    previous_loop_depth := check.scopes.loop_depth
     // A nested block keeps the carrier its owner established (a lambda's is
     // not the implicit `Err!` of a function); only a new return type, or a
     // root with no carrier outside an open callback, derives it.
     if return_type != previous_return_type || (previous_failure_carrier == None && !check.context.failure_inference) {
-        scopes.failure_carrier = Val(sema_failure_carrier(return_type))
+        check.scopes.failure_carrier = Val(sema_failure_carrier(return_type))
     }
-    scopes.return_type = return_type
-    scopes.loop_depth = loop_depth
+    check.scopes.return_type = return_type
+    check.scopes.loop_depth = loop_depth
     // A body a derive writes (`func.compiler_generated`, the origin the
     // compiler records on the function) is no user dispatch to rewrite.
     if !check.context.compiler_generated {
         sema_stmt_lint_same_subject_dispatch(statements, environment, program, check.diagnostics)
     }
-    sema_stmt_lint_map_group_round_trip(statements, environment, program, scopes, check.diagnostics)
+    sema_stmt_lint_map_group_round_trip(statements, environment, program, check.scopes, check.diagnostics)
     output := [TStmt]{}
     complete := true
     reachable := true
@@ -1034,7 +1038,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
         // the row copied the whole statement, its nested bodies included.
         check.context.lambda_statement_tails[tail_frame_depth].start_index = index + 1
         if !reachable {
-            if !sema_stmt_check_unreachable_statement(statements[index], index, statements, return_type, environment, program, scopes, check, loop_depth) {
+            if !sema_stmt_check_unreachable_statement(statements[index], index, statements, return_type, environment, program, check, loop_depth) {
                 complete = false
             }
             index += 1
@@ -1044,20 +1048,20 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
             index += 1
             next
         }
-        if sema_stmt_body_exit(statements[index], check.context, scopes, check.diagnostics) {
+        if sema_stmt_body_exit(statements[index], check.context, check.scopes, check.diagnostics) {
             complete = false
             index += 1
             next
         }
         sema_ownership_release_dead_views(check, statements[index])
         if check.context.eval_walk.rows.len() > 0 {
-            sema_eval_probe_visit(sema_eval_probe_stmt_span(statements[index]), true, environment, program, scopes, check)
+            sema_eval_probe_visit(sema_eval_probe_stmt_span(statements[index]), true, environment, program, check)
         }
         output_start := output.len()
         statement_diagnostics: check.diagnostics.len()
         statement_reasons: check.context.incomplete_reasons.len()
         statement_complete: complete
-        sema_marker_rules_check_statement_facts(sema_compiler_index_stmt_span(statements[index]), environment, program, scopes, check)
+        sema_marker_rules_check_statement_facts(sema_compiler_index_stmt_span(statements[index]), environment, program, check)
         // #3708: these statements own a failure route of their own (task
         // groups, transactions, reactive scopes, generators, deferred closes).
         if statements[index] == {
@@ -1074,8 +1078,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
             .Val(.Result(success, _)) -> success == (Type.Named{name: "Unit"})
             .Val(_) | .None -> false
         }
-        if index + 1 == statements.len() && statements[index] == .Expr(tail) && (check.context.value_tail_span == (Val(expr_span(tail))) || (unit_result_return && sema_stmt_return_expr_is_carrier(tail, return_type, environment, scopes))) && (tail == .Todo(_, _, _) || !sema_stmt_refutable_expr_diverges(tail)) {
-            returned: sema_stmt_check_returned_value(tail, return_type, environment, program, scopes, check)
+        if index + 1 == statements.len() && statements[index] == .Expr(tail) && (check.context.value_tail_span == (Val(expr_span(tail))) || (unit_result_return && sema_stmt_return_expr_is_carrier(tail, return_type, environment, check.scopes))) && (tail == .Todo(_, _, _) || !sema_stmt_refutable_expr_diverges(tail)) {
+            returned: sema_stmt_check_returned_value(tail, return_type, environment, program, check)
             if returned == {
                 .Val(value) -> {
                     output.push(TStmt.Return{value: Val(value), span: expr_span(tail)})
@@ -1088,22 +1092,22 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
         }
         if statements[index] == {
             .Expr(expr) -> {
-                if !sema_stmt_check_expression_statement(expr, return_type, environment, program, scopes, check, loop_depth, output) {
+                if !sema_stmt_check_expression_statement(expr, return_type, environment, program, check, loop_depth, output) {
                     complete = false
                 }
             }
             .DeferClose(close, span) -> {
-                checked := sema_stmt_check_defer_close(close, span, environment, program, scopes, check)
+                checked := sema_stmt_check_defer_close(close, span, environment, program, check)
                 if checked == {
                     .Val(checked_statement) -> { output.push(checked_statement) }
                     .None -> complete = false
                 }
             }
             .Switch(subject, arms, else_body, span) -> {
-                exit_guard: if index + 1 < statements.len() -> sema_stmt_optional_exit_guard_name(subject, arms, else_body, span, scopes) else -> None
+                exit_guard: if index + 1 < statements.len() -> sema_stmt_optional_exit_guard_name(subject, arms, else_body, span, check.scopes) else -> None
                 if exit_guard == {
                     .Val(guarded_name) -> {
-                        refined: sema_stmt_check_optional_refinement(guarded_name, OrFallback.Block{body: arms[0].body, value: None, span: span}, span, environment, program, scopes, check)
+                        refined: sema_stmt_check_optional_refinement(guarded_name, OrFallback.Block{body: arms[0].body, value: None, span: span}, span, environment, program, check)
                         if refined == {
                             .Val(refined_statement) -> { output.push(refined_statement) }
                             .None -> complete = false
@@ -1113,7 +1117,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         // A guard table that ends a value block with no `else`
                         // can skip every arm (E0114).
                         value_guard: index + 1 == statements.len() && check.context.value_tail_span == (Val(span)) && else_body == None && sema_stmt_refutable_is_subjectless_guard(subject, span)
-                        checked: sema_stmt_check_switch(subject, arms, else_body, span, return_type, environment, program, scopes, check, loop_depth)
+                        checked: sema_stmt_check_switch(subject, arms, else_body, span, return_type, environment, program, check, loop_depth)
                         if value_guard {
                             check.diagnostics.push(sema_stmt_missing_value(return_type, sema_stmt_uncovered_guard_path(statements), check.context.function_name, span))
                             complete = false
@@ -1125,8 +1129,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                                     output.push(checked_statement)
                                 }
                                 if index + 1 < statements.len() {
-                                    loop refinement in sema_stmt_exit_guard_bound_refinements(subject, arms, else_body, span, environment, scopes) {
-                                        refined: sema_stmt_check_bounds_refinement(refinement, span, environment, program, scopes, check)
+                                    loop refinement in sema_stmt_exit_guard_bound_refinements(subject, arms, else_body, span, environment, check.scopes) {
+                                        refined: sema_stmt_check_bounds_refinement(refinement, span, environment, program, check)
                                         if refined == {
                                             .Val(refined_statement) -> {
                                                 output.push(refined_statement)
@@ -1144,47 +1148,47 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 lambda_escapes := check.context.lambda_escapes
                 if binding.init == {
                     .Lambda(_, _) -> {
-                        lambda_escapes = sema_expression_lambda_bound_escapes(binding, statements, index + 1, environment, program, scopes, check)
+                        lambda_escapes = sema_expression_lambda_bound_escapes(binding, statements, index + 1, environment, program, check)
                     }
                     .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
                 }
-                checked: sema_stmt_check_binding(binding, lambda_escapes, environment, program, scopes, check)
+                checked: sema_stmt_check_binding(binding, lambda_escapes, environment, program, check)
                 if checked == {
                     .Val(value) -> {
-                        sema_rule_table_join(binding, scopes, check.context)
+                        sema_rule_table_join(binding, check.scopes, check.context)
                         if value == .Let(local, _, _, _, _, _) {
                             if local.ty == Type.String && sema_stmt_ascii_case_ladder(statements, index, binding) {
                                 check.diagnostics.push(sema_lint("L0521", binding.name_span, "a complete ASCII case ladder repeats a direct case conversion", "all 26 constant ASCII branches inspect the same value and only change its case", "replace the complete ladder with value.to_ascii_lower() or value.to_ascii_upper()"))
                             }
                         }
                         if !binding.mutable && binding.pattern == None {
-                            sema_scope_mark_lambda_binding(scopes, binding.name, value)
-                            sema_call_authority_note_binding(scopes, binding.name, value, environment)
+                            sema_scope_mark_lambda_binding(check.scopes, binding.name, value)
+                            sema_call_authority_note_binding(check.scopes, binding.name, value, environment)
                         }
                         if !binding.mutable && binding.pattern == None && sema_stmt_binds_map_slot(value) {
-                            sema_scope_mark_map_slot(scopes, binding.name)
+                            sema_scope_mark_map_slot(check.scopes, binding.name)
                         }
                         output.push(value)
                         // A bare `None` start can check as a value after its E0308.
-                        sema_stmt_empty_start_report(binding, statements, index, return_type, check.context.value_tail_span, environment, scopes, check.diagnostics)
+                        sema_stmt_empty_start_report(binding, statements, index, return_type, check.context.value_tail_span, environment, check.scopes, check.diagnostics)
                         if !binding.mutable && binding.pattern == None && sema_shared_cycle_kept_init(binding.init) {
-                            sema_scope_mark_fresh_cell(scopes, binding.name, binding.init)
+                            sema_scope_mark_fresh_cell(check.scopes, binding.name, binding.init)
                         }
                         if !binding.mutable && binding.pattern == None && sema_scope_own_cell_init(binding.init) {
-                            sema_scope_mark_own_cell(scopes, binding.name)
+                            sema_scope_mark_own_cell(check.scopes, binding.name)
                         }
                         if binding.mutable && !binding.uninit && !binding.is_comptime && binding.name != "_" && binding.sigil_span == .Val(sigil) {
                             sema_ownership_note_mutable_binding(check.state, sema_stmt_mutable_binding(binding, sigil))
                         }
                     }
                     .None -> {
-                        sema_stmt_empty_start_report(binding, statements, index, return_type, check.context.value_tail_span, environment, scopes, check.diagnostics)
+                        sema_stmt_empty_start_report(binding, statements, index, return_type, check.context.value_tail_span, environment, check.scopes, check.diagnostics)
                         complete = false
                     }
                 }
             }
             .Assign(target, op, op_span, expr) -> {
-                checked: sema_stmt_check_assignment(target, op, op_span, expr, environment, program, scopes, check)
+                checked: sema_stmt_check_assignment(target, op, op_span, expr, environment, program, check)
                 if checked == {
                     .Val(value) -> { output.push(value) }
                     .None -> complete = false
@@ -1192,7 +1196,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
             }
             .Return(value, span) -> {
                 if {
-                    sema_stmt_generator_return_rejected(value, return_type, environment, program, scopes, check) -> {
+                    sema_stmt_generator_return_rejected(value, return_type, environment, program, check) -> {
                         complete = false
                     }
                     sema_stmt_never_return_rejected(value, return_type, check.context.function_name, span, check.diagnostics) -> {
@@ -1210,7 +1214,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                     else -> {
                         // `value` is narrowed to the returned expression here (the
                         // None arm above); it is read in place through a read parameter.
-                        checked: if return_type == None && check.context.callback_return_open -> sema_stmt_check_open_callback_return(value, environment, program, scopes, check) else -> sema_stmt_check_returned_value(value, return_type, environment, program, scopes, check)
+                        checked: if return_type == None && check.context.callback_return_open -> sema_stmt_check_open_callback_return(value, environment, program, check) else -> sema_stmt_check_returned_value(value, return_type, environment, program, check)
                         if {
                             checked == None -> { complete = false }
                             else -> { output.push(TStmt.Return{value: checked, span: span}) }
@@ -1228,11 +1232,11 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
             .For(var, var_span, var2, kind, body, span, arrow_body, label, _) -> {
                 if kind == {
                     .Range(start_expr, end_expr, step_expr, exclusive) -> {
-                        start_value := sema_stmt_check_range_endpoint(start_expr, "start", environment, program, scopes, check)
-                        end_value := sema_stmt_check_range_endpoint(end_expr, "end", environment, program, scopes, check)
+                        start_value := sema_stmt_check_range_endpoint(start_expr, "start", environment, program, check)
+                        end_value := sema_stmt_check_range_endpoint(end_expr, "end", environment, program, check)
                         step_value := TExpr?{None}
                         if step_expr != None {
-                            step_value = sema_stmt_check_range_stride(step_expr, environment, program, scopes, check)
+                            step_value = sema_stmt_check_range_stride(step_expr, environment, program, check)
                         }
                         // Written ends that count the wrong
                         // way are a check error; computed ends stay empty.
@@ -1251,17 +1255,17 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
 
                         // The body runs in place from this mark (sema_ownership_mark).
                         loop_fork: sema_ownership_mark(check.state)
-                        sema_scope_enter(scopes, check.state, "for@{span.start}")
+                        sema_scope_enter(check.scopes, check.state, "for@{span.start}")
                         label_name := String?{None}
                         if label != None {
                             label_name = Val(label.name)
-                            if !sema_scope_push_loop_label(scopes, label.name) {
+                            if !sema_scope_push_loop_label(check.scopes, label.name) {
                                 check.diagnostics.push(sema_already_defined(label.name, label.span))
                                 valid = false
                             }
                         }
                         module_name := sema_scope_environment_module_text(environment, program)
-                        owner := sema_scope_local_owner_key(scopes)
+                        owner := sema_scope_local_owner_key(check.scopes)
                         key: symbol_key_text(SymbolKind.Local, module_name, owner, var)
                         symbol := Symbol{
                             id: sema_symbol_id_of(program, check.context, key),
@@ -1274,12 +1278,12 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                             visibility: 0,
                         }
                         if {
-                            !sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false) -> {
+                            !sema_scope_declare_local(check.scopes, symbol, key, false, AccessConvention.Read, None, false) -> {
                                 check.diagnostics.push(sema_already_defined(var, var_span))
                                 valid = false
                             }
                             else -> {
-                                sema_scope_mark_loop_item(scopes, var)
+                                sema_scope_mark_loop_item(check.scopes, var)
                                 sema_ownership_declare_binding(check.state, symbol, false)
                             }
                         }
@@ -1287,7 +1291,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         sema_loop_value_push_frame(check.context, label_name, loop_fork)
                         previous_arrow_loop_body := check.context.arrow_loop_body
                         check.context.arrow_loop_body = arrow_body
-                        nested := sema_check_statements(body, return_type, environment, program, scopes, check, loop_depth + 1)
+                        nested := sema_check_statements(body, return_type, environment, program, check, loop_depth + 1)
                         if !nested.complete -> valid = false
                         check.context.arrow_loop_body = previous_arrow_loop_body
                         // E0364: inclusive `0..xs.len()` whose body
@@ -1295,23 +1299,23 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         if !exclusive && sema_stmt_range_end_len_root(end_expr) == .Val(len_root) && sema_stmt_index_root_with_stmts(body, len_root, var) {
                             check.diagnostics.push(sema_error("E0364", expr_span(end_expr), "this range includes `{len_root}.len()`, one past the last index", "`{len_root}.len()` is the count of items, so inclusive `..` runs one step too far when the body indexes `{len_root}`", "write `loop (i, item) in {len_root}` — or `loop i in {len_root}.indexes()` — or `0..<{len_root}.len()`"))
                         }
-                        if label != None -> sema_scope_pop_loop_label(scopes)
-                        sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
+                        if label != None -> sema_scope_pop_loop_label(check.scopes)
+                        sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
                         if !sema_stmt_close_loop_value_frame(check.context, loop_frame_index, nested.value, check.state, loop_fork, false, true, environment, program, check.diagnostics) {
                             valid = false
                         }
-                        sema_stmt_uninit_fill_range(environment.tables, check.state, scopes, var, start_expr, end_expr, step_expr, exclusive, body)
+                        sema_stmt_uninit_fill_range(environment.tables, check.state, check.scopes, var, start_expr, end_expr, step_expr, exclusive, body)
                         if {
                             !valid -> complete = false
                             else -> {
                                 start_tree: start_value ?? {
                                     sema_stmt_leave_statements(check.context, check.tail_store, tail_frame_depth, tail_body_id, entered_nesting)
-                                    sema_stmt_restore_statement_scopes(scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
+                                    sema_stmt_restore_statement_scopes(check.scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
                                     return SemaStatementResult{value: output, complete: false}
                                 }
                                 end_tree: end_value ?? {
                                     sema_stmt_leave_statements(check.context, check.tail_store, tail_frame_depth, tail_body_id, entered_nesting)
-                                    sema_stmt_restore_statement_scopes(scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
+                                    sema_stmt_restore_statement_scopes(check.scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
                                     return SemaStatementResult{value: output, complete: false}
                                 }
                                 local: checked_symbol_local(var, var_span, symbol.id, range_var_type)
@@ -1322,15 +1326,15 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                     .In(written_collection, step_expr) -> {
                         // `loop x in xs.move()` takes the source: every shape
                         // check below reads it as the exact take.
-                        collection_expr: sema_expr_take_place_form(written_collection, scopes) ?? written_collection
-                        collection_value := sema_check_expression(collection_expr, None, environment, program, scopes, check)
+                        collection_expr: sema_expr_take_place_form(written_collection, check.scopes) ?? written_collection
+                        collection_value := sema_check_expression(collection_expr, None, environment, program, check)
                         collection: collection_value ?? sema_node(check.context, Type.Named{name: "Unit"}, NodeKind.Unit, expr_span(collection_expr))
                         if collection_value != None && var2 == None {
-                            sema_stmt_lint_walk_filter(var, collection_expr, body, environment, program, scopes, check.diagnostics)
+                            sema_stmt_lint_walk_filter(var, collection_expr, body, environment, program, check.scopes, check.diagnostics)
                         }
                         step_value := TExpr?{None}
                         if step_expr != None {
-                            step_value = sema_stmt_check_source_stride(step_expr, environment, program, scopes, check)
+                            step_value = sema_stmt_check_source_stride(step_expr, environment, program, check)
                         }
                         valid := collection_value != None
                         if step_expr != None && step_value == None -> valid = false
@@ -1338,7 +1342,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         method_kind := sema_stmt_for_in_method_kind(collection_expr, collection)
                         iterable_item_type := Type?{None}
                         if method_kind == None && !range_source {
-                            iterable := sema_stmt_for_in_iterable_fact(environment, program, collection.ty, expr_span(collection_expr), scopes, check.context, check.diagnostics)
+                            iterable := sema_stmt_for_in_iterable_fact(environment, program, collection.ty, expr_span(collection_expr), check.scopes, check.context, check.diagnostics)
                             if iterable == None {
                                 iterable = sema_stmt_for_in_reader_fact(environment, program, collection.ty)
                             }
@@ -1398,10 +1402,10 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         // A list whose elements owe a `#SingleUse` duty hands each one over.
                         consumes_collection := sema_stmt_for_in_consumes_collection(collection.ty, item_type) || (sema_stmt_for_in_is_list(collection.ty) && sema_single_use_type(item_type, environment, program))
                         task_list_consume: consumes_collection && sema_stmt_for_in_is_list(collection.ty)
-                        owns_collection := !consumes_collection || (sema_stmt_for_in_can_consume_collection(collection_expr) && (!task_list_consume || sema_stmt_for_in_frame_owns(collection_expr, scopes, check.state)))
+                        owns_collection := !consumes_collection || (sema_stmt_for_in_can_consume_collection(collection_expr) && (!task_list_consume || sema_stmt_for_in_frame_owns(collection_expr, check.scopes, check.state)))
                         if !owns_collection {
                             if task_list_consume {
-                                check.diagnostics.push(sema_stmt_for_in_borrowed_task_list(collection_expr, collection.ty, scopes, check.state))
+                                check.diagnostics.push(sema_stmt_for_in_borrowed_task_list(collection_expr, collection.ty, check.scopes, check.state))
                             } else {
                                 check.diagnostics.push(sema_error("E0120", expr_span(collection_expr), "this loop can't take a stream or iterator out of a field or index", "each step pulls from the source itself, so the loop must take a whole value this scope owns", "bind it into a local this scope owns first (`src := …`), then write `loop x in src {{ … }}`"))
                             }
@@ -1410,22 +1414,22 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         loop_fork: sema_ownership_mark(check.state)
                         // #4318 §4: the source's root, resolved before the loop
                         // names can shadow it.
-                        stable_root_id: sema_stmt_for_in_stable_root_id(collection_expr, scopes, check.state)
+                        stable_root_id: sema_stmt_for_in_stable_root_id(collection_expr, check.scopes, check.state)
                         // The loop names over a collection a read or write
                         // parameter owns, or over a list of resources read in
                         // place, read each element through a view (resolved
                         // before the names can shadow the root).
-                        parameter_elements: !consumes_collection && !range_source && sema_stmt_for_in_borrowed_elements(collection_expr, scopes)
+                        parameter_elements: !consumes_collection && !range_source && sema_stmt_for_in_borrowed_elements(collection_expr, check.scopes)
                         borrowed_elements: parameter_elements || (!consumes_collection && !range_source && sema_stmt_for_in_resource_elements(collection_expr, collection.ty, item_type, environment, program, check.context))
                         element_places := [SemaOwnershipPlace]{}
                         if parameter_elements {
-                            element_places = sema_ownership_element_places(collection_expr, var_span, scopes, check.state)
+                            element_places = sema_ownership_element_places(collection_expr, var_span, check.scopes, check.state)
                         }
-                        sema_scope_enter(scopes, check.state, "for.in@{span.start}")
+                        sema_scope_enter(check.scopes, check.state, "for.in@{span.start}")
                         label_name := String?{None}
                         if label != None {
                             label_name = Val(label.name)
-                            if !sema_scope_push_loop_label(scopes, label.name) {
+                            if !sema_scope_push_loop_label(check.scopes, label.name) {
                                 check.diagnostics.push(sema_already_defined(label.name, label.span))
                                 valid = false
                             }
@@ -1449,32 +1453,32 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         element_owes_duty: ((consumes_collection && sema_stmt_for_in_is_list(collection.ty)) || sema_stmt_for_in_takes_map(collection_expr, collection.ty)) && !sema_stmt_for_in_type_requires_owned_iteration(item_type)
                         first_local := TLocal?{None}
                         if nested_bindingless -> valid = false else {
-                            first_local = sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, element_owes_duty, environment, program, scopes, check.state, check.context, check.diagnostics)
+                            first_local = sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, element_owes_duty, environment, program, check.scopes, check.state, check.context, check.diagnostics)
                             if first_local == None -> valid = false
                         }
                         variable_two := TLocal?{None}
                         if var2 == .Val(second) && (second_type != None || !source_checked || pair_rejected) {
-                            variable_two = sema_stmt_for_in_decl_loop_local(second.name, second.span, second_local_type, element_owes_duty, environment, program, scopes, check.state, check.context, check.diagnostics)
+                            variable_two = sema_stmt_for_in_decl_loop_local(second.name, second.span, second_local_type, element_owes_duty, environment, program, check.scopes, check.state, check.context, check.diagnostics)
                             if variable_two == None -> valid = false
                         }
                         if borrowed_elements && !nested_bindingless {
-                            sema_scope_mark_place_alias(scopes, var)
+                            sema_scope_mark_place_alias(check.scopes, var)
                             if var2 == .Val(second) {
-                                sema_scope_mark_place_alias(scopes, second.name)
+                                sema_scope_mark_place_alias(check.scopes, second.name)
                             }
                         }
                         // The element name (the second of a list's index and
                         // item) keeps the parameter-owned element it reads.
                         if parameter_elements && !nested_bindingless {
                             if var2 == .Val(second) {
-                                sema_scope_mark_element_places(scopes, second.name, element_places)
+                                sema_scope_mark_element_places(check.scopes, second.name, element_places)
                             } else {
-                                sema_scope_mark_element_places(scopes, var, element_places)
+                                sema_scope_mark_element_places(check.scopes, var, element_places)
                             }
                         }
                         lending_depth: check.context.lending_view_parameter_keys.len()
-                        sema_stmt_for_in_lend_view_item(first_local, first_type, collection_expr, scopes, check.state, check.context)
-                        sema_stmt_for_in_lend_view_item(variable_two, second_type ?? item_type, collection_expr, scopes, check.state, check.context)
+                        sema_stmt_for_in_lend_view_item(first_local, first_type, collection_expr, check.scopes, check.state, check.context)
+                        sema_stmt_for_in_lend_view_item(variable_two, second_type ?? item_type, collection_expr, check.scopes, check.state, check.context)
                         loop_frame_index := check.context.loop_value_frames.len()
                         sema_loop_value_push_frame(check.context, label_name, loop_fork)
                         previous_arrow_loop_body := check.context.arrow_loop_body
@@ -1487,7 +1491,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         if bindingless && !nested_bindingless {
                             check.context.implicit_loop_subject_depth += 1
                         }
-                        nested := sema_check_statements(body, return_type, environment, program, scopes, check, loop_depth + 1)
+                        nested := sema_check_statements(body, return_type, environment, program, check, loop_depth + 1)
                         if bindingless && !nested_bindingless {
                             check.context.implicit_loop_subject_depth -= 1
                         }
@@ -1503,15 +1507,15 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         }
                         check.context.arrow_loop_body = previous_arrow_loop_body
                         if !nested.complete -> valid = false
-                        if label != None -> sema_scope_pop_loop_label(scopes)
-                        sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
+                        if label != None -> sema_scope_pop_loop_label(check.scopes)
+                        sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
                         if !sema_stmt_close_loop_value_frame(check.context, loop_frame_index, nested.value, check.state, loop_fork, false, true, environment, program, check.diagnostics) {
                             valid = false
                         }
                         if consumes_collection && owns_collection {
                             if collection_expr == {
                                 .Ident(_, _, _) -> {
-                                    if !sema_ownership_mark_move(check.state, collection_expr, scopes, "`.loop()`", check.diagnostics) {
+                                    if !sema_ownership_mark_move(check.state, collection_expr, check.scopes, "`.loop()`", check.diagnostics) {
                                         valid = false
                                     }
                                 }
@@ -1547,19 +1551,19 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 // while the binding, condition and body checks write context.lambda_escapes through
                 // `^context`, so a view would be live across those writes.
                 init_lambda_escapes: check.context.lambda_escapes.copy()
-                sema_scope_enter(scopes, check.state, "counted@{span.start}")
+                sema_scope_enter(check.scopes, check.state, "counted@{span.start}")
                 loop_scope_valid := true
                 label_name := String?{None}
                 if label != None {
                     label_name = Val(label.name)
-                    if !sema_scope_push_loop_label(scopes, label.name) {
+                    if !sema_scope_push_loop_label(check.scopes, label.name) {
                         check.diagnostics.push(sema_already_defined(label.name, label.span))
                         loop_scope_valid = false
                     }
                 }
-                init_tree := sema_stmt_check_binding(init, init_lambda_escapes, environment, program, scopes, check)
-                sema_shared_access_lint_busy_wait(environment.tables, cond, body, scopes, check.diagnostics)
-                cond_tree := sema_check_expression(cond, None, environment, program, scopes, check)
+                init_tree := sema_stmt_check_binding(init, init_lambda_escapes, environment, program, check)
+                sema_shared_access_lint_busy_wait(environment.tables, cond, body, check.scopes, check.diagnostics)
+                cond_tree := sema_check_expression(cond, None, environment, program, check)
                 cond_valid := cond_tree != None
                 if cond_tree != None && sema_stmt_condition_type(cond_tree) != Type.Bool {
                     cond_ty: sema_stmt_condition_type(cond_tree)
@@ -1573,20 +1577,20 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 sema_loop_value_push_frame(check.context, label_name, loop_fork)
                 previous_arrow_loop_body := check.context.arrow_loop_body
                 check.context.arrow_loop_body = arrow_body
-                nested := sema_stmt_check_block(body, return_type, environment, program, scopes, check, "counted.body@{span.start}", loop_depth + 1)
+                nested := sema_stmt_check_block(body, return_type, environment, program, check, "counted.body@{span.start}", loop_depth + 1)
                 check.context.arrow_loop_body = previous_arrow_loop_body
                 step_tree := TStmt?{None}
                 step_valid := true
                 if step != None {
-                    checked_step: sema_stmt_check_loop_step(step, environment, program, scopes, check)
+                    checked_step: sema_stmt_check_loop_step(step, environment, program, check)
                     if checked_step == None -> step_valid = false else -> step_tree = checked_step
                 }
-                if label != None -> sema_scope_pop_loop_label(scopes)
-                sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
+                if label != None -> sema_scope_pop_loop_label(check.scopes)
+                sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
                 if !sema_stmt_close_loop_value_frame(check.context, loop_frame_index, nested.value, check.state, loop_fork, true, true, environment, program, check.diagnostics) {
                     loop_scope_valid = false
                 }
-                sema_stmt_uninit_fill_counted(environment.tables, check.state, scopes, init, cond, step, body)
+                sema_stmt_uninit_fill_counted(environment.tables, check.state, check.scopes, init, cond, step, body)
                 // The unchanged-state check runs once the statement is checked.
                 sema_stmt_check_state_loop_unchanged(environment.tables, init, cond, step, body, label, check.diagnostics)
                 if {
@@ -1596,12 +1600,12 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                     else -> {
                         init_value: init_tree ?? {
                             sema_stmt_leave_statements(check.context, check.tail_store, tail_frame_depth, tail_body_id, entered_nesting)
-                            sema_stmt_restore_statement_scopes(scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
+                            sema_stmt_restore_statement_scopes(check.scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
                             return SemaStatementResult{value: output, complete: false}
                         }
                         cond_value: cond_tree ?? {
                             sema_stmt_leave_statements(check.context, check.tail_store, tail_frame_depth, tail_body_id, entered_nesting)
-                            sema_stmt_restore_statement_scopes(scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
+                            sema_stmt_restore_statement_scopes(check.scopes, previous_return_type, previous_failure_carrier, previous_loop_depth)
                             return SemaStatementResult{value: output, complete: false}
                         }
                         output.push(TStmt.CountedLoop{label: label_name, init: init_value, condition: cond_value, step: step_tree, vectorization: None, body: nested.value, span: span})
@@ -1609,18 +1613,18 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 }
             }
             .While(condition, body, span, arrow_body, label) -> {
-                sema_shared_access_lint_busy_wait(environment.tables, condition, body, scopes, check.diagnostics)
+                sema_shared_access_lint_busy_wait(environment.tables, condition, body, check.scopes, check.diagnostics)
                 // `loop items.pop() == .Val(item) { … }` binds the payload for
                 // each pass, checked as `loop { if items.pop() == .Val(item) { … }
                 // else { break } }` so the pattern test runs before every pass.
                 binding_loop: sema_expression_condition_binds(condition)
                 if binding_loop {
                     gate: Stmt.Switch{subject: Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, arms: [SwitchArm]{SwitchArm{cond: condition.copy(), body: body.copy(), span: expr_span(condition)}}, else_body: Val([Stmt]{Stmt.Break{span: span}}), span: span}
-                    if !sema_stmt_check_loop([Stmt]{gate}, span, arrow_body, label, return_type, environment, program, scopes, check, loop_depth, output) {
+                    if !sema_stmt_check_loop([Stmt]{gate}, span, arrow_body, label, return_type, environment, program, check, loop_depth, output) {
                         complete = false
                     }
                 }
-                cond: if binding_loop -> TExpr?{None} else -> sema_check_expression(condition, None, environment, program, scopes, check)
+                cond: if binding_loop -> TExpr?{None} else -> sema_check_expression(condition, None, environment, program, check)
                 if {
                     binding_loop -> {}
                     cond == None -> { complete = false }
@@ -1632,11 +1636,11 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                     else -> {
                         loop_fork: sema_ownership_mark(check.state)
                         loop_scope_valid := true
-                        sema_scope_enter(scopes, check.state, "while@{span.start}")
+                        sema_scope_enter(check.scopes, check.state, "while@{span.start}")
                         label_name := String?{None}
                         if label != None {
                             label_name = Val(label.name)
-                            if !sema_scope_push_loop_label(scopes, label.name) {
+                            if !sema_scope_push_loop_label(check.scopes, label.name) {
                                 check.diagnostics.push(sema_already_defined(label.name, label.span))
                                 loop_scope_valid = false
                             }
@@ -1645,20 +1649,20 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         sema_loop_value_push_frame(check.context, label_name, loop_fork)
                         previous_arrow_loop_body := check.context.arrow_loop_body
                         check.context.arrow_loop_body = arrow_body
-                        nested := sema_stmt_check_block(body, return_type, environment, program, scopes, check, "while.body@{span.start}", loop_depth + 1)
+                        nested := sema_stmt_check_block(body, return_type, environment, program, check, "while.body@{span.start}", loop_depth + 1)
                         check.context.arrow_loop_body = previous_arrow_loop_body
-                        if label != None -> sema_scope_pop_loop_label(scopes)
-                        sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
+                        if label != None -> sema_scope_pop_loop_label(check.scopes)
+                        sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
                         // A literal `true` condition never skips the body, as
                         // `loop`.
                         if !sema_stmt_close_loop_value_frame(check.context, loop_frame_index, nested.value, check.state, loop_fork, false, !sema_stmt_refutable_expr_is_true(condition), environment, program, check.diagnostics) {
                             loop_scope_valid = false
                         }
                         if index > 0 && statements[index - 1] == .Val(previous) {
-                            sema_stmt_uninit_fill_counted(environment.tables, check.state, scopes, previous, condition, None, body)
+                            sema_stmt_uninit_fill_counted(environment.tables, check.state, check.scopes, previous, condition, None, body)
                         }
                         if nested.complete && loop_scope_valid {
-                            sema_single_use_note_drain(environment.tables, check.state, condition, body, scopes)
+                            sema_single_use_note_drain(environment.tables, check.state, condition, body, check.scopes)
                         }
                         if {
                             !nested.complete || !loop_scope_valid -> complete = false
@@ -1670,7 +1674,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 }
             }
             .Loop(body, span, arrow_body, label) -> {
-                if !sema_stmt_check_loop(body, span, arrow_body, label, return_type, environment, program, scopes, check, loop_depth, output) {
+                if !sema_stmt_check_loop(body, span, arrow_body, label, return_type, environment, program, check, loop_depth, output) {
                     complete = false
                 }
             }
@@ -1696,7 +1700,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 }
             }
             .BreakValue(value, span) -> {
-                checked: sema_stmt_check_loop_value_break(value, None, span, span, environment, program, scopes, check)
+                checked: sema_stmt_check_loop_value_break(value, None, span, span, environment, program, check)
                 if checked == {
                     .Val(checked_statement) -> { output.push(checked_statement) }
                     .None -> complete = false
@@ -1717,7 +1721,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 }
             }
             .BreakLabel(name, span) -> {
-                resolved: if sema_scope_has_loop_label(scopes, name) -> sema_loop_value_resolve_frame(check.context, Val(name)) else -> None
+                resolved: if sema_scope_has_loop_label(check.scopes, name) -> sema_loop_value_resolve_frame(check.context, Val(name)) else -> None
                 if resolved == .Val(frame_index) {
                     frame: check.context.loop_value_frames[frame_index]
                     if {
@@ -1730,12 +1734,12 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         }
                     }
                 } else {
-                    check.diagnostics.push(sema_stmt_unknown_loop_label(scopes, name, span))
+                    check.diagnostics.push(sema_stmt_unknown_loop_label(check.scopes, name, span))
                     complete = false
                 }
             }
             .BreakLabelValue(name, name_span, value, span) -> {
-                checked: sema_stmt_check_loop_value_break(value, Val(name), name_span, span, environment, program, scopes, check)
+                checked: sema_stmt_check_loop_value_break(value, Val(name), name_span, span, environment, program, check)
                 if checked == {
                     .Val(checked_statement) -> { output.push(checked_statement) }
                     .None -> complete = false
@@ -1743,8 +1747,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
             }
             .ContinueLabel(name, span) -> {
                 if {
-                    !sema_scope_has_loop_label(scopes, name) -> {
-                        check.diagnostics.push(sema_stmt_unknown_loop_label(scopes, name, span))
+                    !sema_scope_has_loop_label(check.scopes, name) -> {
+                        check.diagnostics.push(sema_stmt_unknown_loop_label(check.scopes, name, span))
                         complete = false
                     }
                     else -> {
@@ -1756,24 +1760,24 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 }
             }
             .Yield(value, span) -> {
-                checked: sema_stmt_check_yield(value, span, return_type, environment, program, scopes, check)
+                checked: sema_stmt_check_yield(value, span, return_type, environment, program, check)
                 if checked == {
                     .Val(checked_statement) -> { output.push(checked_statement) }
                     .None -> complete = false
                 }
             }
             .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Region(_, _, _, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .Switched(_, _, _) | .Transact(_, _, _, _, _) | .Policy(_, _, _) | .AuthorityScope(_, _, _, _, _) | .TaskGroup(_, _, _, _, _) -> {
-                if !sema_stmt_check_scoped_statement(statements[index], return_type, environment, program, scopes, check, loop_depth, output) {
+                if !sema_stmt_check_scoped_statement(statements[index], return_type, environment, program, check, loop_depth, output) {
                     complete = false
                 }
             }
             .ComptimeIf(cond, cond_span, then_body, else_body, span, _) -> {
-                if !sema_stmt_check_prep_if(cond, cond_span, then_body, else_body, span, return_type, environment, program, scopes, check, loop_depth, output) {
+                if !sema_stmt_check_prep_if(cond, cond_span, then_body, else_body, span, return_type, environment, program, check, loop_depth, output) {
                     complete = false
                 }
             }
             .ComptimeSwitch(subject, arms, else_body, span) -> {
-                if !sema_stmt_check_prep_switch(subject, arms, else_body, span, return_type, environment, program, scopes, check, loop_depth, output) {
+                if !sema_stmt_check_prep_switch(subject, arms, else_body, span, return_type, environment, program, check, loop_depth, output) {
                     complete = false
                 }
             }
@@ -1781,17 +1785,17 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 if is_template_loop {
                     complete = false
                     sema_check_unsupported(check.context, "the statement-level `#run` block at offset {span.start} is not executed by the self-hosted checker yet")
-                } else if !sema_stmt_check_comptime_block(body, span, environment, program, scopes, check) {
+                } else if !sema_stmt_check_comptime_block(body, span, environment, program, check) {
                     complete = false
                 }
             }
             .ContextBlock(fields, body, span) -> {
-                if !sema_stmt_check_context_block(fields, body, span, return_type, environment, program, scopes, check, loop_depth, output) {
+                if !sema_stmt_check_context_block(fields, body, span, return_type, environment, program, check, loop_depth, output) {
                     complete = false
                 }
             }
             .Layout(name, name_span, body, span) -> {
-                if !sema_stmt_check_layout(name, name_span, body, span, environment, program, scopes, check, output) {
+                if !sema_stmt_check_layout(name, name_span, body, span, environment, program, check, output) {
                     complete = false
                 }
             }
@@ -1834,22 +1838,22 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
         index += 1
     }
     sema_stmt_leave_statements(check.context, check.tail_store, tail_frame_depth, tail_body_id, entered_nesting)
-    scopes.return_type = previous_return_type
-    scopes.failure_carrier = previous_failure_carrier
-    scopes.loop_depth = previous_loop_depth
+    check.scopes.return_type = previous_return_type
+    check.scopes.failure_carrier = previous_failure_carrier
+    check.scopes.loop_depth = previous_loop_depth
     SemaStatementResult{value: output, complete: complete}
 }
 
 // A `loop { … }` statement: its label and value frame, then its body one
 // loop level deeper. False when the loop does not check.
-sema_stmt_check_loop: fn(body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
+sema_stmt_check_loop: fn(body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
     loop_fork: sema_ownership_mark(check.state)
-    sema_scope_enter(scopes, check.state, "loop@{span.start}")
+    sema_scope_enter(check.scopes, check.state, "loop@{span.start}")
     label_name := String?{None}
     label_valid := true
     if label != None {
         label_name = Val(label.name)
-        if !sema_scope_push_loop_label(scopes, label.name) {
+        if !sema_scope_push_loop_label(check.scopes, label.name) {
             check.diagnostics.push(sema_already_defined(label.name, label.span))
             label_valid = false
         }
@@ -1858,10 +1862,10 @@ sema_stmt_check_loop: fn(body: [Stmt], span: Span, arrow_body: Bool, label: Name
     sema_loop_value_push_frame(check.context, label_name, loop_fork)
     previous_arrow_loop_body := check.context.arrow_loop_body
     check.context.arrow_loop_body = arrow_body
-    nested := sema_stmt_check_block(body, return_type, environment, program, scopes, check, "loop.body@{span.start}", loop_depth + 1)
+    nested := sema_stmt_check_block(body, return_type, environment, program, check, "loop.body@{span.start}", loop_depth + 1)
     check.context.arrow_loop_body = previous_arrow_loop_body
-    if label != None -> sema_scope_pop_loop_label(scopes)
-    sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
+    if label != None -> sema_scope_pop_loop_label(check.scopes)
+    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
     if !sema_stmt_close_loop_value_frame(check.context, loop_frame_index, nested.value, check.state, loop_fork, false, false, environment, program, check.diagnostics) {
         label_valid = false
     }
@@ -1896,11 +1900,11 @@ sema_stmt_note_silent_incomplete: fn(statement: Stmt, was_complete: Bool, comple
 // and rolled back, keeping only its failure rows. False when it is incomplete.
 // A separate function keeps sema_check_statements within what one backend
 // codegen unit compiles quickly; the split arms below exist for the same reason.
-sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int) -> Bool {
+sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, loop_depth: Int) -> Bool {
     complete := true
     // Checked on the live tables and rolled back; only its failure
     // rows are kept.
-    dead_scope_mark: sema_scope_mark(scopes)
+    dead_scope_mark: sema_scope_mark(check.scopes)
     dead_state := sema_ownership_state_snapshot(check.state)
     dead_mark: sema_check_context_mark(check.context)
     // A dead last line is checked for its own diagnostics, never as the value
@@ -1911,14 +1915,14 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
         dead_value_tail = true
         check.context.value_tail_span = None
         sema_body_check_swap_state(check, dead_state)
-        dead_tail_complete: sema_stmt_check_dead_value_tail(tail, return_type, environment, program, scopes, check)
+        dead_tail_complete: sema_stmt_check_dead_value_tail(tail, return_type, environment, program, check)
         sema_body_check_swap_state(check, dead_state)
         if !dead_tail_complete -> complete = false
     }
     check.context.value_tail_span = None
     if !dead_value_tail {
         sema_body_check_swap_state(check, dead_state)
-        dead_result: sema_check_statements([Stmt]{statement}, return_type, environment, program, scopes, check, loop_depth)
+        dead_result: sema_check_statements([Stmt]{statement}, return_type, environment, program, check, loop_depth)
         sema_body_check_swap_state(check, dead_state)
         if !dead_result.complete -> complete = false
     }
@@ -1940,7 +1944,7 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
     dead_union_edges: loop union_edge_index in dead_mark.failure_union_edges..<check.context.failure_union_edges.len() -> check.context.failure_union_edges[union_edge_index]
     dead_general: check.context.failure_union_general
     sema_check_context_rollback(check.context, dead_mark.move())
-    sema_scope_rollback(scopes, dead_scope_mark)
+    sema_scope_rollback(check.scopes, dead_scope_mark)
     // #3708: dead source still counts toward the body's failure rows.
     loop edge in dead_edges -> check.context.failure_edges.push(edge)
     if dead_direct_source -> check.context.failure_direct_source = true
@@ -1958,15 +1962,15 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
 }
 
 // sema_check_statements's expression statement. False when it is incomplete.
-sema_stmt_check_expression_statement: fn(expr: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
+sema_stmt_check_expression_statement: fn(expr: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
     // A parenthesized `if` statement is the same statement as the bare one.
     if expr == .Paren(inner, _, _) && sema_stmt_is_paren_if(inner) {
-        return sema_stmt_check_expression_statement(inner, return_type, environment, program, scopes, check, loop_depth, output)
+        return sema_stmt_check_expression_statement(inner, return_type, environment, program, check, loop_depth, output)
     }
     complete := true
     // `.drop("reason")` is the explicit-discard
     // terminal; it checks its receiver without propagation.
-    dropped: sema_stmt_check_drop(expr, environment, program, scopes, check)
+    dropped: sema_stmt_check_drop(expr, environment, program, check)
     if dropped.handled {
         if dropped.value == {
             .Val(statement_value) -> { output.push(statement_value) }
@@ -1976,9 +1980,9 @@ sema_stmt_check_expression_statement: fn(expr: Expr, return_type: Type?, environ
     // A writing call on a shared place whose arguments read shared state runs
     // in one implicit transaction with them (sema_shared_access_place_call_transaction).
     if !dropped.handled {
-        if sema_shared_access_place_call_transaction(expr, environment, program, scopes) == .Val(transaction) {
-            checked: sema_stmt_check_shared_transaction(transaction, environment, program, scopes, check)
-            sema_shared_cycle_check_hoisted_call(expr, environment, program, scopes, check.state, check.diagnostics)
+        if sema_shared_access_place_call_transaction(expr, environment, program, check.scopes) == .Val(transaction) {
+            checked: sema_stmt_check_shared_transaction(transaction, environment, program, check)
+            sema_shared_cycle_check_hoisted_call(expr, environment, program, check.scopes, check.state, check.diagnostics)
             if checked == {
                 .Val(value) -> { output.push(value) }
                 .None -> complete = false
@@ -1989,7 +1993,7 @@ sema_stmt_check_expression_statement: fn(expr: Expr, return_type: Type?, environ
     if !dropped.handled {
         if expr == {
             .If(_, _, _, _, _, _, _) -> {
-                checked: sema_stmt_check_unit_if(expr, return_type, environment, program, scopes, check, loop_depth)
+                checked: sema_stmt_check_unit_if(expr, return_type, environment, program, check, loop_depth)
                 if {
                     !checked.complete || checked.value.len() == 0 -> complete = false
                     else -> {
@@ -2014,8 +2018,8 @@ sema_stmt_check_expression_statement: fn(expr: Expr, return_type: Type?, environ
                 // keeps the Result its callee declares: the statement reports
                 // it unchecked (E0402) and the callback's return row becomes
                 // that carrier.
-                raw_call: check.context.failure_inference && check.context.callback_return_open && expr == .Call(_, _) && sema_failure_source_declares_failure(Val(expr), environment, program, scopes)
-                value: if raw_call -> sema_check_expression_carrier(expr, None, environment, program, scopes, check) else -> sema_check_expression(expr, None, environment, program, scopes, check)
+                raw_call: check.context.failure_inference && check.context.callback_return_open && expr == .Call(_, _) && sema_failure_source_declares_failure(Val(expr), environment, program, check.scopes)
+                value: if raw_call -> sema_check_expression_carrier(expr, None, environment, program, check) else -> sema_check_expression(expr, None, environment, program, check)
                 if raw_call && check.context.callback_return_row == None && value == .Val(raw) {
                     if sema_stmt_type_is_fallible(raw.ty) && sema_expr_unwrap_tag(raw.ty) == .Result(_, _) {
                         check.context.callback_return_row = Val(sema_expr_unwrap_tag(raw.ty))
@@ -2026,7 +2030,7 @@ sema_stmt_check_expression_statement: fn(expr: Expr, return_type: Type?, environ
                         checked: value
                         // E0419: a `#MustUse` result dropped here.
                         if !sema_stmt_type_is_fallible(checked.ty) {
-                            sema_must_use_check_statement(expr, checked.ty, expr_span(expr), environment, program, scopes, check.diagnostics)
+                            sema_must_use_check_statement(expr, checked.ty, expr_span(expr), environment, program, check.scopes, check.diagnostics)
                         }
                         if {
                             sema_stmt_type_is_unit_success(checked.ty) -> {
@@ -2093,22 +2097,22 @@ sema_stmt_is_paren_if: fn(expr: Expr) -> Bool Never! {
 // (the marker binding, E0930). Then the body is an ordinary nested block.
 // Lowering installs the guards around the body (IR BuildTransact.jet
 // ir_context_block).
-sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
+sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
     // The block's `#Context` or `#Deadline` application binds first; fields
     // that do not bind (E0930) get no E0762 of their own.
-    signature_valid: sema_marker_rules_check_context_fact(span, environment, program, scopes, check)
+    signature_valid: sema_marker_rules_check_context_fact(span, environment, program, check)
     complete := signature_valid
     guards := [TContextGuard]{}
     loop field in fields {
         if !sema_context_field_settable(field.name) {
             name_span: Span{start: field.span.start, end: field.span.start + field.name.len()}
-            found: sema_context_label_key(field.name, environment, program, scopes) ?? {
-                _ := sema_check_expression(field.value, None, environment, program, scopes, check)
+            found: sema_context_label_key(field.name, environment, program, check.scopes) ?? {
+                _ := sema_check_expression(field.value, None, environment, program, check)
                 check.diagnostics.push(sema_error("E0761", name_span, "`{field.name}` isn't a context field or key", "`#Context` sets `allocator`, `logger` and `on_stop`, and the constants a package declares with `#ContextKey`", "declare `#ContextKey {field.name}: …` or write `#Context(allocator: …)`, `#Context(logger: …)` or `#Context(on_stop: …)`"))
                 complete = false
                 next
             }
-            checked_key: sema_check_expression(field.value, Val(found.ty), environment, program, scopes, check) ?? {
+            checked_key: sema_check_expression(field.value, Val(found.ty), environment, program, check) ?? {
                 complete = false
                 next
             }
@@ -2121,11 +2125,11 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             guards.push(TContextGuard{field: field.name, value: value, key: found.key})
             next
         }
-        if field.name == "allocator" && sema_stmt_context_scratch(field.value, environment, program, scopes, check.context) {
+        if field.name == "allocator" && sema_stmt_context_scratch(field.value, environment, program, check.scopes, check.context) {
             guards.push(TContextGuard{field: field.name, value: sema_tree_node(Type.Named{name: "Arena"}, TExprKind.HostCall{call: THostCall.ContextRead{field: "scratch"}}, field.span)})
             next
         }
-        checked: sema_check_expression(field.value, None, environment, program, scopes, check) ?? {
+        checked: sema_check_expression(field.value, None, environment, program, check) ?? {
             complete = false
             next
         }
@@ -2138,7 +2142,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
                 check.diagnostics.push(sema_error("E0762", field.span, "`allocator` needs an allocator, got {sema_type_show(checked.ty)}", "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value, or a value whose type implements `mem.Allocator`", "pass an allocator, e.g. `mem.Arena.new()`"))
                 complete = false
             } else {
-                handler: sema_stmt_context_allocator_handler(field, checked.ty, environment, program, scopes, check) ?? {
+                handler: sema_stmt_context_allocator_handler(field, checked.ty, environment, program, check) ?? {
                     complete = false
                     next
                 }
@@ -2148,7 +2152,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
         }
         guards.push(TContextGuard{field: field.name, value: checked})
     }
-    previous_allocation: scopes.context_allocation
+    previous_allocation: check.scopes.context_allocation
     // Each open block's allocator stays in place while the block runs
     // (Ownership/Checks.jet SemaOwnershipBlockAllocator).
     open_allocators: check.state.block_allocators.len()
@@ -2156,7 +2160,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
     loop field in fields {
         if field.name != "allocator" -> next
         names_allocator = true
-        places: sema_ownership_places_from_expr_in_state(field.value, scopes, check.state)
+        places: sema_ownership_places_from_expr_in_state(field.value, check.scopes, check.state)
         if places.len() > 0 && !symbol_is_none(places[0].root_id) {
             check.state.block_allocators.push(SemaOwnershipBlockAllocator{name: sema_ownership_place_name(places[0]), id: SymbolID{id: places[0].root_id.id}})
         }
@@ -2164,12 +2168,12 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
     // A `#Deadline` block, the block of the one `deadline` field, sets no
     // allocation context of its own; L0506 reads the enclosing one.
     deadline_only: fields.len() == 1 && fields[0].name == "deadline"
-    scopes.context_allocation = if names_allocator || previous_allocation == 2 -> 2 else if deadline_only -> previous_allocation else -> 1
-    nested: sema_stmt_check_block(body, return_type, environment, program, scopes, check, "context@{span.start}", loop_depth)
+    check.scopes.context_allocation = if names_allocator || previous_allocation == 2 -> 2 else if deadline_only -> previous_allocation else -> 1
+    nested: sema_stmt_check_block(body, return_type, environment, program, check, "context@{span.start}", loop_depth)
     loop check.state.block_allocators.len() > open_allocators {
         _ := check.state.block_allocators.pop()
     }
-    scopes.context_allocation = previous_allocation
+    check.scopes.context_allocation = previous_allocation
     if !nested.complete -> return false
     if !complete -> return false
     output.push(TStmt.ContextBlock{guards: guards, body: nested.value, span: span})
@@ -2232,7 +2236,7 @@ sema_stmt_context_user_allocator: fn(ty: Type, environment: SemaScopeEnvironment
 // and release inside the block (JetRuntime Alloc.jet alloc_user_call). It
 // lends `a` as `^`, and the block keeps `a` in place until it ends (E0204,
 // Ownership/Checks.jet SemaOwnershipBlockAllocator).
-sema_stmt_context_allocator_handler: fn(field: ContextField, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_stmt_context_allocator_handler: fn(field: ContextField, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     if sema_call_core_module_identity(environment, program, "core.mem") == None -> return None
     graph: program.registration_graph
     filler: sema_core_role_function(graph, "AllocatorHandler") ?? {
@@ -2244,9 +2248,9 @@ sema_stmt_context_allocator_handler: fn(field: ContextField, ty: Type, environme
         return None
     }
     args := [CallArg]{CallArg{convention: AccessConvention.Write, expr: field.value, span: field.span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
-    scopes.ownership_call_depth += 1
-    value := sema_call_core_check_source_owned(target, "#Context(allocator:)", [Type]{ty}, args, field.span, None, environment, program, scopes, check)
-    scopes.ownership_call_depth -= 1
+    check.scopes.ownership_call_depth += 1
+    value := sema_call_core_check_source_owned(target, "#Context(allocator:)", [Type]{ty}, args, field.span, None, environment, program, check)
+    check.scopes.ownership_call_depth -= 1
     value
 }
 
@@ -2258,25 +2262,27 @@ sema_stmt_context_allocator_handler: fn(field: ContextField, ty: Type, environme
 // inline; the dropped arm is checked for name resolution only (its other
 // reports and everything it did to the scope, the context and the ownership
 // state are rolled back). False while the arm is unselected or incomplete.
-sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
+sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
     // `#if T == Int { … }` is the one-arm type test,
     // which already keeps its arm only in the `Int` instance.
-    if sema_expression_type_table_param(cond, environment, scopes) != None {
+    if sema_expression_type_table_param(cond, environment, check.scopes) != None {
         arm: SwitchArm{cond: cond, body: then_body, span: cond_span}
-        return sema_stmt_check_prep_type_table(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, [SwitchArm]{arm}, else_body, span, return_type, environment, program, scopes, check, loop_depth, output)
+        return sema_stmt_check_prep_type_table(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, [SwitchArm]{arm}, else_body, span, return_type, environment, program, check, loop_depth, output)
     }
     fact_start: check.context.call_facts.len()
     reference_start: check.context.name_references.len()
-    scopes.comptime_execution_depth += 1
-    checked: sema_check_expression(cond, None, environment, program, scopes, check)
-    scopes.comptime_execution_depth -= 1
+    check.scopes.comptime_execution_depth += 1
+    checked: sema_check_expression(cond, None, environment, program, check)
+    check.scopes.comptime_execution_depth -= 1
     condition: checked ?? return false
     if sema_stmt_comptime_site_refused(program, check.context, fact_start, check.diagnostics) {
         return false
     }
     // A condition that reads a `name: #run value` local still waiting for
     // its value waits with it.
-    if sema_comptime_reads_pending_local(scopes, check.context, reference_start) -> return false
+    if sema_comptime_reads_pending_local(check.scopes, check.context, reference_start) {
+        return false
+    }
     // A prepared local reads as its value, so a local left in the checked
     // condition is known only at run time.
     runtime_local := false
@@ -2298,9 +2304,9 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
             check.diagnostics.push(sema_runtime_only_build_time_diagnostic("This `#if` runs its condition", cond_span))
             return false
         }
-        staged: sema_comptime_body_value_find(check.context, environment.module_identity, sema_scope_function_owner_key(scopes), cond_span, span)
+        staged: sema_comptime_body_value_find(check.context, environment.module_identity, sema_scope_function_owner_key(check.scopes), cond_span, span)
         if staged == .Val(body_value) -> value = Val(body_value.value) else {
-            _ := sema_comptime_body_capture(check.context, environment, program, scopes, "#if", cond, condition.ty, cond_span, span)
+            _ := sema_comptime_body_capture(check.context, environment, program, check.scopes, "#if", cond, condition.ty, cond_span, span)
             return false
         }
     }
@@ -2313,15 +2319,15 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
     owner: "prep-if@{span.start}"
     nested := SemaStatementResult{value: [TStmt]{}, complete: true}
     if selected {
-        nested = sema_stmt_check_block(then_body, return_type, environment, program, scopes, check, owner, loop_depth)
+        nested = sema_stmt_check_block(then_body, return_type, environment, program, check, owner, loop_depth)
         if else_body == .Val(dropped) {
-            sema_stmt_check_dropped_prep_arm(dropped, return_type, environment, program, scopes, check, owner, loop_depth)
+            sema_stmt_check_dropped_prep_arm(dropped, return_type, environment, program, check, owner, loop_depth)
         }
     } else {
         if else_body == .Val(chosen) {
-            nested = sema_stmt_check_block(chosen, return_type, environment, program, scopes, check, owner, loop_depth)
+            nested = sema_stmt_check_block(chosen, return_type, environment, program, check, owner, loop_depth)
         }
-        sema_stmt_check_dropped_prep_arm(then_body, return_type, environment, program, scopes, check, owner, loop_depth)
+        sema_stmt_check_dropped_prep_arm(then_body, return_type, environment, program, check, owner, loop_depth)
     }
     if !nested.complete -> return false
     output.push(TStmt.Inline{body: nested.value, span: span})
@@ -2333,12 +2339,12 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
 // once the run lands, the owner body is checked again and the block leaves
 // nothing behind. A failed check or a panic stops the build.
 // False while the block is staged.
-sema_stmt_check_comptime_block: fn(body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
+sema_stmt_check_comptime_block: fn(body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> Bool {
     if sema_runtime_policy_only(check.context.runtime_policy) {
         check.diagnostics.push(sema_runtime_only_build_time_diagnostic("This `#run` block runs its code", span))
         return false
     }
-    if sema_comptime_body_value_find(check.context, environment.module_identity, sema_scope_function_owner_key(scopes), span, span) != None {
+    if sema_comptime_body_value_find(check.context, environment.module_identity, sema_scope_function_owner_key(check.scopes), span, span) != None {
         return true
     }
     block: Expr.If{
@@ -2352,15 +2358,17 @@ sema_stmt_check_comptime_block: fn(body: [Stmt], span: Span, environment: SemaSc
     }
     fact_start: check.context.call_facts.len()
     reference_start: check.context.name_references.len()
-    scopes.comptime_execution_depth += 1
-    checked: sema_check_expression(block, None, environment, program, scopes, check)
-    scopes.comptime_execution_depth -= 1
+    check.scopes.comptime_execution_depth += 1
+    checked: sema_check_expression(block, None, environment, program, check)
+    check.scopes.comptime_execution_depth -= 1
     checked_block: checked ?? return false
     if sema_stmt_comptime_site_refused(program, check.context, fact_start, check.diagnostics) {
         return false
     }
-    if sema_comptime_reads_pending_local(scopes, check.context, reference_start) -> return false
-    _ := sema_comptime_body_capture(check.context, environment, program, scopes, "comptime block", block, checked_block.ty, span, span)
+    if sema_comptime_reads_pending_local(check.scopes, check.context, reference_start) {
+        return false
+    }
+    _ := sema_comptime_body_capture(check.context, environment, program, check.scopes, "comptime block", block, checked_block.ty, span, span)
     false
 }
 
@@ -2392,18 +2400,18 @@ sema_stmt_prep_if_not_bool: fn(cond_span: Span) -> Diagnostic {
 // The dropped arm is not a path through this code.
 // It is walked for name resolution only: unknown names (E0107, E0102) are
 // reported, and nothing else it reports or does survives it.
-sema_stmt_check_dropped_prep_arm: fn(body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, owner: String, loop_depth: Int) {
-    scope_mark: sema_scope_mark(scopes)
+sema_stmt_check_dropped_prep_arm: fn(body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, owner: String, loop_depth: Int) {
+    scope_mark: sema_scope_mark(check.scopes)
     context_mark: sema_check_context_mark(check.context)
     fork: sema_ownership_fork(check.state)
     arm_diagnostics := [Diagnostic]{}
     sema_body_check_swap_diagnostics(check, arm_diagnostics)
-    _ := sema_stmt_check_block(body, return_type, environment, program, scopes, check, "{owner}.dropped", loop_depth)
+    _ := sema_stmt_check_block(body, return_type, environment, program, check, "{owner}.dropped", loop_depth)
     sema_body_check_swap_diagnostics(check, arm_diagnostics)
     sema_ownership_fork_rollback(check.state, fork)
     sema_ownership_fork_close(check.state, fork)
     sema_check_context_rollback(check.context, context_mark.move())
-    sema_scope_rollback(scopes, scope_mark)
+    sema_scope_rollback(check.scopes, scope_mark)
     loop diagnostic in arm_diagnostics {
         if diagnostic.code == "E0107" || diagnostic.code == "E0102" {
             check.diagnostics.push(diagnostic)
@@ -2413,8 +2421,8 @@ sema_stmt_check_dropped_prep_arm: fn(body: [Stmt], return_type: Type?, environme
 
 // `#run` on a type table or type test changes nothing: it is checked
 // as the plain form (sema_stmt_check_switch).
-sema_stmt_check_prep_type_table: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
-    table := sema_stmt_check_switch(subject, arms, else_body, span, return_type, environment, program, scopes, check, loop_depth)
+sema_stmt_check_prep_type_table: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
+    table := sema_stmt_check_switch(subject, arms, else_body, span, return_type, environment, program, check, loop_depth)
     loop statement in table.value -> output.push(statement)
     table.complete
 }
@@ -2427,11 +2435,11 @@ sema_stmt_check_prep_type_table: fn(subject: Expr, arms: [SwitchArm], else_body:
 // whatever the target: `OS` is a closed set, so an `else` is E0641. A
 // `#build.settings.<key>` dispatch folds against the declared setting's value
 // (sema_stmt_check_setting_switch).
-sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
+sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
     // `#if T == { … }` over a type parameter is the
     // type table, which already keeps one arm per instance.
-    if sema_stmt_type_switch_param(subject, environment, scopes) != None {
-        return sema_stmt_check_prep_type_table(subject, arms, else_body, span, return_type, environment, program, scopes, check, loop_depth, output)
+    if sema_stmt_type_switch_param(subject, environment, check.scopes) != None {
+        return sema_stmt_check_prep_type_table(subject, arms, else_body, span, return_type, environment, program, check, loop_depth, output)
     }
     subject_span: expr_span(subject)
     path: sema_fact_expr_path(subject)
@@ -2439,7 +2447,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         if path == .Val(text) {
             if sema_fact_build_setting_key(text) == .Val(key) {
                 setting: sema_fact_build_setting(key, subject_span, environment, program, check.diagnostics) ?? return false
-                return sema_stmt_check_setting_switch(key, setting.value, arms, else_body, span, return_type, environment, program, scopes, check, loop_depth, output)
+                return sema_stmt_check_setting_switch(key, setting.value, arms, else_body, span, return_type, environment, program, check, loop_depth, output)
             }
         }
         check.diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `#if … == {{ … }}` dispatch branches on `#build.target.os`", "`#build.target.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `#if #build.target.os == {{ .Linux -> … }}` with an arm for every OS, or use a plain runtime `if` for a value that isn't known at compile time"))
@@ -2489,7 +2497,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
     // Only an `else` arm: it always runs.
     if arms.len() == 0 {
         fallback: else_body ?? return true
-        nested: sema_stmt_check_block(fallback, return_type, environment, program, scopes, check, "prep-switch@{span.start}", loop_depth)
+        nested: sema_stmt_check_block(fallback, return_type, environment, program, check, "prep-switch@{span.start}", loop_depth)
         if !nested.complete -> return false
         output.push(TStmt.Inline{body: nested.value, span: span})
         return true
@@ -2504,7 +2512,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         tail = Val([Stmt]{node})
     }
     first: arms[0]
-    sema_stmt_check_prep_if(Expr.Bool{value: selects[0], span: first.span, id: AST_NODE_GENERATED}, first.span, first.body, tail, first.span, return_type, environment, program, scopes, check, loop_depth, output)
+    sema_stmt_check_prep_if(Expr.Bool{value: selects[0], span: first.span, id: AST_NODE_GENERATED}, first.span, first.body, tail, first.span, return_type, environment, program, check, loop_depth, output)
 }
 
 // Whether a setting dispatch arm head names `value`: a literal or `.Variant`
@@ -2558,7 +2566,7 @@ sema_stmt_setting_arm_matches: fn(cond: Expr, value: TComptimeValue) -> Bool? Ne
 // select the arm through the `#if` chain, as the `#build.target.os`
 // dispatch does. Over an enum setting the table is over a closed set, so an
 // `else` is E0641 (#6281); a Bool, number or text setting keeps its `else`.
-sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
+sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
     matched := [Bool]{}
     valid := true
     loop arm in arms {
@@ -2573,7 +2581,7 @@ sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [Sw
     }
     if arms.len() == 0 {
         fallback: else_body ?? return true
-        nested: sema_stmt_check_block(fallback, return_type, environment, program, scopes, check, "prep-switch@{span.start}", loop_depth)
+        nested: sema_stmt_check_block(fallback, return_type, environment, program, check, "prep-switch@{span.start}", loop_depth)
         if !nested.complete -> return false
         output.push(TStmt.Inline{body: nested.value, span: span})
         return true
@@ -2587,7 +2595,7 @@ sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [Sw
         tail = Val([Stmt]{node})
     }
     first: arms[0]
-    sema_stmt_check_prep_if(Expr.Bool{value: matched[0], span: first.span, id: AST_NODE_GENERATED}, first.span, first.body, tail, first.span, return_type, environment, program, scopes, check, loop_depth, output)
+    sema_stmt_check_prep_if(Expr.Bool{value: matched[0], span: first.span, id: AST_NODE_GENERATED}, first.span, first.body, tail, first.span, return_type, environment, program, check, loop_depth, output)
 }
 
 // E0641: the variants of an enum setting that a dispatch's `else` stands for.
@@ -2666,7 +2674,7 @@ sema_stmt_os_dispatch_arm_head: fn(cond: Expr) -> String Never! {
 // sema_check_statements's block-scoped statements (unsafe, impure, reactive,
 // shield, region, scope members, switched, transactions, policies, authority
 // scopes, task groups). False when one is incomplete.
-sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
+sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
     complete := true
     if statement == {
         .Unsafe(audit, audit_expr, body, span) -> {
@@ -2677,7 +2685,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                 else -> {
                     previous_unsafe_depth := check.context.unsafe_depth
                     check.context.unsafe_depth += 1
-                    nested: sema_stmt_check_block(body, return_type, environment, program, scopes, check, "unsafe@{span.start}", loop_depth)
+                    nested: sema_stmt_check_block(body, return_type, environment, program, check, "unsafe@{span.start}", loop_depth)
                     check.context.unsafe_depth = previous_unsafe_depth
                     source_file := sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
                     source_line := sema_source_line_at(environment.source_segments, span)
@@ -2699,7 +2707,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             if reason == None && reason_expr == None {
                 check.diagnostics.push(sema_lint("L3102", span, "this `#Impure` block has no reason", "every comptime effect gate records why ambient I/O is needed", "add the reason: `#Impure(\"reading build config\") {{ … }}`"))
             }
-            nested: sema_stmt_check_block(body, return_type, environment, program, scopes, check, "impure@{span.start}", loop_depth)
+            nested: sema_stmt_check_block(body, return_type, environment, program, check, "impure@{span.start}", loop_depth)
             if {
                 !nested.complete -> { complete = false }
                 else -> { output.push(TStmt.Impure{body: nested.value, span: span}) }
@@ -2707,14 +2715,14 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         }
         .Reactive(body, span) -> {
             check.state.reactive_bodies.push(span.copy())
-            checked := sema_stmt_check_reactive(body, span, environment, program, scopes, check)
+            checked := sema_stmt_check_reactive(body, span, environment, program, check)
             if checked == {
                 .Val(value) -> { output.push(TStmt.Reactive{executable: value, span: span}) }
                 .None -> complete = false
             }
         }
         .Shield(body, span) -> {
-            nested: sema_stmt_check_block(body, return_type, environment, program, scopes, check, "shield@{span.start}", loop_depth)
+            nested: sema_stmt_check_block(body, return_type, environment, program, check, "shield@{span.start}", loop_depth)
             if {
                 !nested.complete -> { complete = false }
                 else -> { output.push(TStmt.Shield{body: nested.value, span: span}) }
@@ -2725,9 +2733,9 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         // moves when the block ends, as a `defer close` does.
         .Defer(body, span) -> {
             outer_frame: check.context.defer_frame
-            check.context.defer_frame = Val(SemaDeferFrame{loop_depth: scopes.loop_depth, labels: scopes.loop_labels.len()})
+            check.context.defer_frame = Val(SemaDeferFrame{loop_depth: check.scopes.loop_depth, labels: check.scopes.loop_labels.len()})
             moved_before := check.state.moved.len()
-            nested: sema_stmt_check_block(body, return_type, environment, program, scopes, check, "defer@{span.start}", loop_depth)
+            nested: sema_stmt_check_block(body, return_type, environment, program, check, "defer@{span.start}", loop_depth)
             sema_ownership_defer_moves(check.state, moved_before)
             check.context.defer_frame = outer_frame
             if {
@@ -2741,7 +2749,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                 complete = false
                 check.diagnostics.push(sema_error("E3301", span, "`#Live {{ … }}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", "Terminal I/O requires an OS terminal device. Select a hosted target or declare an IO.Write provider."))
             }
-            nested: sema_stmt_check_block(body, return_type, environment, program, scopes, check, "live@{span.start}", loop_depth)
+            nested: sema_stmt_check_block(body, return_type, environment, program, check, "live@{span.start}", loop_depth)
             if {
                 !nested.complete -> complete = false
                 else -> output.push(TStmt.Live{body: nested.value, span: span})
@@ -2750,21 +2758,21 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         // The audited `#Nondeterministic("reason")` body is a lexical block
         // (the gate ledger records the audit).
         .AssumeDet(_, _, body, span) -> {
-            nested: sema_stmt_check_block(body, return_type, environment, program, scopes, check, "nondeterministic@{span.start}", loop_depth)
+            nested: sema_stmt_check_block(body, return_type, environment, program, check, "nondeterministic@{span.start}", loop_depth)
             if {
                 !nested.complete -> complete = false
                 else -> output.push(TStmt.Region{body: nested.value, span: span})
             }
         }
         .Region(_, _, body, span) -> {
-            nested: sema_stmt_check_block(body, return_type, environment, program, scopes, check, "region@{span.start}", loop_depth)
+            nested: sema_stmt_check_block(body, return_type, environment, program, check, "region@{span.start}", loop_depth)
             if {
                 !nested.complete -> { complete = false }
                 else -> { output.push(TStmt.Region{body: nested.value, span: span}) }
             }
         }
         .ScopeMember(name, _, args, args_span, body, dsl, _, span) -> {
-            checked := sema_stmt_check_scope_member(name, args, args_span, body, dsl, span, return_type, environment, program, scopes, check, loop_depth)
+            checked := sema_stmt_check_scope_member(name, args, args_span, body, dsl, span, return_type, environment, program, check, loop_depth)
             // A checked text block's
             // name, site and header were validated by the scope-member pass
             // (ScopeMembers.jet, E0927/E0355/E0617); its body is ordinary
@@ -2787,14 +2795,14 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                         check.diagnostics.push(sema_error("E0397", marker.span, "`#{marker.name}(.{condition})` is not a switch attribute.", "`#Off` takes `.Release` and `#On` takes `.Deep`: each build condition belongs to one marker.", "Write `#{pairing}(.{condition})`."))
                     }
                     kept: !wrong && condition != ""
-                    erased_scope_mark: sema_scope_mark(scopes)
+                    erased_scope_mark: sema_scope_mark(check.scopes)
                     if kept && marker.name == MARKER_ON {
-                        scopes.deep_check = Val(SemaDeepFrame{loop_depth: scopes.loop_depth, labels: scopes.loop_labels.len(), bindings: scopes.bindings.len(), exits: true})
+                        check.scopes.deep_check = Val(SemaDeepFrame{loop_depth: check.scopes.loop_depth, labels: check.scopes.loop_labels.len(), bindings: check.scopes.bindings.len(), exits: true})
                     }
                     erased_state := sema_ownership_state_snapshot(check.state)
                     erased_mark: sema_check_context_mark(check.context)
                     sema_body_check_swap_state(check, erased_state)
-                    checked: sema_check_statements(body, return_type, environment, program, scopes, check, loop_depth)
+                    checked: sema_check_statements(body, return_type, environment, program, check, loop_depth)
                     sema_body_check_swap_state(check, erased_state)
                     sema_ownership_keep_mutations(check.state, erased_state)
                     // The body reads its bindings whatever a build keeps of
@@ -2814,7 +2822,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                         }
                         else -> sema_check_context_rollback(check.context, erased_mark.move())
                     }
-                    sema_scope_rollback(scopes, erased_scope_mark)
+                    sema_scope_rollback(check.scopes, erased_scope_mark)
                     if {
                         !checked.complete -> {
                             complete = false
@@ -2830,7 +2838,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                 }
                 // Any other switched marker's body checks as a plain block.
                 else -> {
-                    nested: sema_stmt_check_block(body, return_type, environment, program, scopes, check, "switched@{span.start}", loop_depth)
+                    nested: sema_stmt_check_block(body, return_type, environment, program, check, "switched@{span.start}", loop_depth)
                     if {
                         !nested.complete -> complete = false
                         else -> output.push(TStmt.Region{body: nested.value, span: span})
@@ -2839,15 +2847,15 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             }
         }
         .Transact(name, name_span, body, implicit, span) -> {
-            checked: sema_stmt_check_transaction(name, name_span, body, implicit, span, environment, program, scopes, check)
+            checked: sema_stmt_check_transaction(name, name_span, body, implicit, span, environment, program, check)
             if checked == {
                 .Val(value) -> { output.push(value) }
                 .None -> complete = false
             }
         }
         .Policy(declarations, body, span) -> {
-            previous_unit_policy := sema_scope_push_unit_policy(scopes, declarations)
-            previous_copies_policy := sema_string_view_push_copies_policy(scopes, declarations)
+            previous_unit_policy := sema_scope_push_unit_policy(check.scopes, declarations)
+            previous_copies_policy := sema_string_view_push_copies_policy(check.scopes, declarations)
             // `#Overflow(mode) { … }` is one lexical
             // fixed-width arithmetic mode over the block, read by the
             // operator checks as `context.arithmetic_policy`.
@@ -2862,19 +2870,19 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             if sema_policy_runtime_mode(declarations) == .Val(mode) && !sema_runtime_policy_only(outer_runtime) {
                 check.context.runtime_policy = Val(mode)
             }
-            if scopes.comptime_execution_depth > 0 && sema_runtime_policy_only(sema_policy_runtime_mode(declarations)) {
+            if check.scopes.comptime_execution_depth > 0 && sema_runtime_policy_only(sema_policy_runtime_mode(declarations)) {
                 check.diagnostics.push(sema_runtime_only_build_time_diagnostic("Compile-time code runs this block", span))
                 complete = false
             }
-            previous_writes_policy := sema_call_marks_push_policy(scopes, declarations)
-            previous_failures_policy := sema_failure_marks_push_policy(scopes, declarations)
-            nested: sema_stmt_check_block(body, return_type, environment, program, scopes, check, "policy@{span.start}", loop_depth)
+            previous_writes_policy := sema_call_marks_push_policy(check.scopes, declarations)
+            previous_failures_policy := sema_failure_marks_push_policy(check.scopes, declarations)
+            nested: sema_stmt_check_block(body, return_type, environment, program, check, "policy@{span.start}", loop_depth)
             check.context.arithmetic_policy = outer_arithmetic
             check.context.runtime_policy = outer_runtime
-            sema_scope_pop_unit_policy(scopes, previous_unit_policy)
-            scopes.copies_explicit = previous_copies_policy
-            scopes.writes_explicit = previous_writes_policy
-            scopes.failures_explicit = previous_failures_policy
+            sema_scope_pop_unit_policy(check.scopes, previous_unit_policy)
+            check.scopes.copies_explicit = previous_copies_policy
+            check.scopes.writes_explicit = previous_writes_policy
+            check.scopes.failures_explicit = previous_failures_policy
             // `#Policy(sentries: …)` turns the sentry's checks on or off over
             // its body at run time (JetIR ir_sentry_policy), so it stays a
             // scope of its own; any other policy only changed how the body
@@ -2894,21 +2902,21 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             // The body is a lexical block; a named head binds the scoped
             // `Authority` handle. The cap subset check (E0712) runs over the
             // lowered region in the effect pass.
-            sema_scope_enter(scopes, check.state, "fx@{span.start}")
+            sema_scope_enter(check.scopes, check.state, "fx@{span.start}")
             region_body := [TStmt]{}
             if binding == .Val(handle) {
-                owner := sema_scope_local_owner_key(scopes)
+                owner := sema_scope_local_owner_key(check.scopes)
                 local_module: sema_scope_environment_module_text(environment, program)
                 key: symbol_key_text(SymbolKind.Local, local_module, owner, handle.name)
                 id := sema_symbol_id_of(program, check.context, key)
                 symbol := Symbol{id: id, kind: SymbolKind.Local, name: handle.name, module_identity: environment.module_identity, owner: Val(owner), span: handle.span, ty: Val(Type.Named{name: "Authority"}), visibility: 0}
                 if {
-                    sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false) -> {
+                    sema_scope_declare_local(check.scopes, symbol, key, false, AccessConvention.Read, None, false) -> {
                         sema_ownership_declare_binding(check.state, symbol, false)
                         // A scope head's handle names the scope; holding it
                         // is its use.
                         check.state.used_ids[id.id] = true
-                        sema_call_authority_note_scope_head(scopes, handle.name, caps, handle.span, environment)
+                        sema_call_authority_note_scope_head(check.scopes, handle.name, caps, handle.span, environment)
                         // A used handle is an ordinary runtime
                         // `Authority` built from the resolved cap list.
                         if sema_ownership_last_use_statements(body, handle.name) {
@@ -2917,7 +2925,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                             reference: TMethodRef{symbol: sema_symbol_id(program, check.context, SymbolKind.Function, "", "JetAuthority", "from_rights"), name: "from_rights", mangled: false, trait_owner: None, operator_identity: None}
                             // Building the handle is effect-free; record the known-pure site so
                             // the effect pass does not treat it as an unknown call.
-                            _ := sema_effect_record_intrinsic_effects(environment, program, scopes, check.context, "Authority.from_rights", handle.span, [EffectRowEntry]{}, check.diagnostics)
+                            _ := sema_effect_record_intrinsic_effects(environment, program, check.scopes, check.context, "Authority.from_rights", handle.span, [EffectRowEntry]{}, check.diagnostics)
                             rights_arg: TCallArg{value: rights_value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
                             init: sema_tree_node(Type.Named{name: "Authority"}, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{rights_arg}}, handle.span)
                             region_body.push(TStmt.Let{local: checked_symbol_local(handle.name, handle.span, symbol.id, Type.Named{name: "Authority"}), let_ty: TLetTy.Annotated{ty: Type.Named{name: "Authority"}, wrapper: TLetWrapper.Plain}, init: init, gc_promotion: None, gc_transferred: false, span: handle.span})
@@ -2929,8 +2937,8 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                     }
                 }
             }
-            nested: sema_check_statements(body, return_type, environment, program, scopes, check, loop_depth)
-            sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
+            nested: sema_check_statements(body, return_type, environment, program, check, loop_depth)
+            sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
             if {
                 !nested.complete -> { complete = false }
                 else -> {
@@ -2940,7 +2948,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             }
         }
         .TaskGroup(name, name_span, args, body, span) -> {
-            checked := sema_taskgroup_check_statement(name, name_span, args, body, span, return_type, environment, program, scopes, check, loop_depth)
+            checked := sema_taskgroup_check_statement(name, name_span, args, body, span, return_type, environment, program, check, loop_depth)
             if checked == {
                 .Val(value) -> { output.push(value) }
                 .None -> complete = false

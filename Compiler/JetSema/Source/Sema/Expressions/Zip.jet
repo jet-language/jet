@@ -217,12 +217,12 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
     return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
 }
 
-sema_expression_zip_infer_arg: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    sema_check_expression(argument.expr, None, environment, program, scopes, check)
+sema_expression_zip_infer_arg: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    sema_check_expression(argument.expr, None, environment, program, check)
 }
 
-sema_expression_zip_free_call: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    if !sema_expression_zip_family_name(call.name) || sema_scope_resolve_index(scopes, call.name) != None {
+sema_expression_zip_free_call: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    if !sema_expression_zip_family_name(call.name) || sema_scope_resolve_index(check.scopes, call.name) != None {
         return None
     }
     method := call.name
@@ -235,7 +235,7 @@ sema_expression_zip_free_call: fn(call: Call, expected: Type?, environment: Sema
             .None -> None
         }
         if is_pad && (label == (Val("fill")) || label == (Val("fills"))) -> next
-        checked: sema_expression_zip_infer_arg(call.args[arg_index], environment, program, scopes, check) ?? return None
+        checked: sema_expression_zip_infer_arg(call.args[arg_index], environment, program, check) ?? return None
         fields.push(sema_expression_zip_field_name(inputs.len(), label))
         inputs.push(checked)
     }
@@ -253,11 +253,11 @@ sema_expression_zip_free_call: fn(call: Call, expected: Type?, environment: Sema
     common_fill := TExpr?{None}
     column_fills := TExpr?{None}
     if common_fill_arg == .Val(arg) {
-        checked: sema_expression_zip_infer_arg(arg, environment, program, scopes, check) ?? return None
+        checked: sema_expression_zip_infer_arg(arg, environment, program, check) ?? return None
         common_fill = Val(checked)
     }
     if column_fills_arg == .Val(arg) {
-        checked: sema_expression_zip_infer_arg(arg, environment, program, scopes, check) ?? return None
+        checked: sema_expression_zip_infer_arg(arg, environment, program, check) ?? return None
         column_fills = Val(checked)
     }
     fill_args := [TExpr]{}
@@ -275,7 +275,7 @@ sema_expression_zip_free_call: fn(call: Call, expected: Type?, environment: Sema
             }
         }
     }
-    sema_expression_zip_family(method, inputs, fields, common_fill, column_fills, fill_args.move(), call.name_span, expected, environment, program, scopes, check.diagnostics)
+    sema_expression_zip_family(method, inputs, fields, common_fill, column_fills, fill_args.move(), call.name_span, expected, environment, program, check.scopes, check.diagnostics)
 }
 
 sema_expression_zip_consume_receiver: fn(receiver: Expr, receiver_type: Type, method: String, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, diagnostics: ^[Diagnostic]) -> Bool {
@@ -294,9 +294,9 @@ sema_expression_zip_consume_receiver: fn(receiver: Expr, receiver_type: Type, me
     true
 }
 
-sema_expression_zip_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_expression_zip_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if method == "zip" && receiver_value.ty == .Option(_) {
-        return sema_expression_option_zip(receiver_value, args, span, expected, environment, program, scopes, check)
+        return sema_expression_option_zip(receiver_value, args, span, expected, environment, program, check)
     }
     if !sema_expression_zip_family_name(method) || sema_expression_zip_sequence_elem(receiver_value.ty) == None {
         return SemaMethodSpecialCheck{handled: false, value: None}
@@ -314,43 +314,43 @@ sema_expression_zip_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         }
         if {
             is_pad && label == (Val("fill")) -> {
-                checked: sema_expression_zip_infer_arg(arg, environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                checked: sema_expression_zip_infer_arg(arg, environment, program, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
                 common_fill = Val(checked)
                 fill_args.push(checked)
             }
             is_pad && label == (Val("fills")) -> {
-                checked: sema_expression_zip_infer_arg(arg, environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                checked: sema_expression_zip_infer_arg(arg, environment, program, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
                 column_fills = Val(checked)
                 fill_args.push(checked)
             }
             else -> {
-                checked: sema_expression_zip_infer_arg(arg, environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                checked: sema_expression_zip_infer_arg(arg, environment, program, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
                 fields.push(sema_expression_zip_field_name(inputs.len(), label))
                 inputs.push(checked)
             }
         }
     }
     if sema_expression_zip_is_iter(receiver_value.ty) {
-        if !sema_expression_zip_consume_receiver(receiver, receiver_value.ty, method, scopes, check.state, check.diagnostics) {
+        if !sema_expression_zip_consume_receiver(receiver, receiver_value.ty, method, check.scopes, check.state, check.diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    value: sema_expression_zip_family(method, inputs, fields, common_fill, column_fills, fill_args.move(), span, expected, environment, program, scopes, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    value: sema_expression_zip_family(method, inputs, fields, common_fill, column_fills, fill_args.move(), span, expected, environment, program, check.scopes, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
 }
 
 // finish_option_zip: `a: T?`.zip(`b: U?`) is `{a: T, b: U}?`, present only when
 // both are.
-sema_expression_option_zip: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+sema_expression_option_zip: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != 1 {
         check.diagnostics.push(sema_error("E0104", span, "`.zip()` takes one optional argument, got {args.len()}", "`.zip(other)` pairs this optional with another: present only when both are", "call `a.zip(b)` with exactly one `T?` argument"))
         loop argument in args {
-            _ := sema_expression_zip_infer_arg(argument, environment, program, scopes, check)
+            _ := sema_expression_zip_infer_arg(argument, environment, program, check)
         }
         return failed
     }
-    other: sema_expression_zip_infer_arg(args[0], environment, program, scopes, check) ?? return failed
+    other: sema_expression_zip_infer_arg(args[0], environment, program, check) ?? return failed
     fields := [TypeTupleField]{}
     if receiver_value.ty == .Option(left) && other.ty == .Option(right) {
         // copy: `left` and `right` are payloads of the operands' types, which the operands keep

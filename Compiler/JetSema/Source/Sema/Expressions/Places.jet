@@ -179,14 +179,14 @@ sema_expression_place_below_element: fn(expr: Expr) -> Bool Never! {
 // collection (E0225); a read or write parameter owns nothing to give away
 // (E0201). Pins are judged after the read. `span` covers `p.move()`; only a
 // name or a field reaches here.
-sema_expression_exact_move: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    checked: sema_check_expression(value, expected, environment, program, scopes, check) ?? return None
+sema_expression_exact_move: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    checked: sema_check_expression(value, expected, environment, program, check) ?? return None
     if sema_ownership_type_is_copy(checked.ty) -> return Val(checked)
     // A computed field has no storage to give away.
-    if sema_expression_refuse_computed_place(checked, "taken", environment, program, scopes, check.diagnostics) {
+    if sema_expression_refuse_computed_place(checked, "taken", environment, program, check.scopes, check.diagnostics) {
         return None
     }
-    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, check.state, check.context, check.diagnostics, true) {
+    if !sema_copy_site_check_guard_owned(checked, environment, program, check.scopes, check.state, check.context, check.diagnostics, true) {
         return None
     }
     // A field below an element (`items[i].tags.move()`): the element keeps
@@ -206,7 +206,7 @@ sema_expression_exact_move: fn(value: Expr, span: Span, expected: Type?, environ
     // A read or write parameter owns nothing to give away. A call argument
     // `p.f.move()` to a take parameter is the call's own take
     // (sema_expr_argument_move_place) and never reaches here.
-    binding: sema_ownership_binding_for_expr(check.state, value, scopes)
+    binding: sema_ownership_binding_for_expr(check.state, value, check.scopes)
     if binding != None {
         info: binding
         if sema_ownership_binding_is_borrowed_param(info) {
@@ -214,11 +214,11 @@ sema_expression_exact_move: fn(value: Expr, span: Span, expected: Type?, environ
             return None
         }
     }
-    if !sema_pin_check_move(check.state, value, scopes, check.diagnostics) -> return None
+    if !sema_pin_check_move(check.state, value, check.scopes, check.diagnostics) -> return None
     // `p.move()` of a match payload takes it out of its subject, never a copy.
-    payload: sema_ownership_move_pattern_payload(check.state, value, span, scopes, check.diagnostics)
+    payload: sema_ownership_move_pattern_payload(check.state, value, span, check.scopes, check.diagnostics)
     if payload < 0 -> return None
-    if !sema_ownership_consume_expression(check.state, Expr.Place{value: value, access: PlaceAccess.Take, span: span, id: AST_NODE_GENERATED}, scopes, "`{sema_expression_move_mark_text(value)}.move()`", check.diagnostics) {
+    if !sema_ownership_consume_expression(check.state, Expr.Place{value: value, access: PlaceAccess.Take, span: span, id: AST_NODE_GENERATED}, check.scopes, "`{sema_expression_move_mark_text(value)}.move()`", check.diagnostics) {
         return None
     }
     moved: if payload > 0 -> sema_expression_payload_take(checked) else -> checked.move()
@@ -237,12 +237,12 @@ sema_expression_payload_take: fn(value: ^^TExpr) -> TExpr Never! {
     taken
 }
 
-sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     if access == PlaceAccess.Take {
-        return sema_expression_exact_move(value, span, expected, environment, program, scopes, check)
+        return sema_expression_exact_move(value, span, expected, environment, program, check)
     }
     if !sema_expression_is_place(value) {
-        nested: sema_check_expression(value, None, environment, program, scopes, check)
+        nested: sema_check_expression(value, None, environment, program, check)
         check.diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
         return None
     }
@@ -251,12 +251,12 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
     // `^s` would otherwise meet its own loan).
     previous_root_read: check.context.suppress_partial_move_root_read
     check.context.suppress_partial_move_root_read = true
-    checked_value: sema_check_expression(value, None, environment, program, scopes, check)
+    checked_value: sema_check_expression(value, None, environment, program, check)
     check.context.suppress_partial_move_root_read = previous_root_read
     checked: checked_value ?? return None
     convention: if access == PlaceAccess.Write -> AccessConvention.Write else -> AccessConvention.Read
     // A computed field has no storage to lend for writing.
-    if convention == AccessConvention.Write && sema_expression_refuse_computed_place(checked, "lent for writing", environment, program, scopes, check.diagnostics) {
+    if convention == AccessConvention.Write && sema_expression_refuse_computed_place(checked, "lent for writing", environment, program, check.scopes, check.diagnostics) {
         return None
     }
     // A subrange of a declared view takes its write window from the view's own
@@ -287,8 +287,8 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
     sema_expr_expected(result, expected, environment, program, check.diagnostics)
 }
 
-sema_expression_deref: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    checked: sema_check_expression(value, None, environment, program, scopes, check) ?? return None
+sema_expression_deref: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    checked: sema_check_expression(value, None, environment, program, check) ?? return None
     if checked.ty == .Apply(name, args) {
         if name == "Ptr" && args.len() == 1 {
             if !sema_expr_require_unsafe("pointer dereference", span, check.context, check.diagnostics) {
@@ -694,11 +694,11 @@ sema_expression_vjp_run_field: fn(gradient: Type, member: String) -> Type? {
 
 // `field` is the whole `base.member` expression (spanning `span`): the moved
 // checks read it in place instead of rebuilding it around a copy of `base`.
-sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     base_local_slot := Int?{None}
     if base == .Ident(root, _, _) {
-        if sema_scope_resolve_index(scopes, root) == .Val(found) {
-            kind: scopes.bindings[found].symbol.kind
+        if sema_scope_resolve_index(check.scopes, root) == .Val(found) {
+            kind: check.scopes.bindings[found].symbol.kind
             if kind == SymbolKind.Local || kind == SymbolKind.Parameter {
                 base_local_slot = Val(found)
             }
@@ -706,14 +706,14 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     }
     member_span: Span{start: span.end - member.len(), end: span.end}
     if base_local_slot == None {
-        if sema_core_path_unimported(base, member, "", scopes) == .Val(report) {
+        if sema_core_path_unimported(base, member, "", check.scopes) == .Val(report) {
             check.diagnostics.push(report)
             return None
         }
         // `task.x` with no local named `task` in scope: `x` is not a task
         // combinator (the parser takes only the complete task surface), so teach
         // the selectors rather than report an unknown `task`.
-        if base == .Ident(root, _, _) && root == "task" && sema_scope_resolve_index(scopes, root) == None {
+        if base == .Ident(root, _, _) && root == "task" && sema_scope_resolve_index(check.scopes, root) == None {
             check.diagnostics.push(sema_error("E0003", member_span, "unknown task selector `{member}`", "task selectors use `timeout`, `all`, `race`, or `any`", "write `task.timeout(duration)`, `task.all {{ … }}`, `task.race {{ … }}`, or `task.any {{ … }}`"))
             return None
         }
@@ -721,8 +721,8 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         // `context` nothing in scope declares, or an import of `core.context`),
         // reads the task context.
         if base == .Ident(root, root_span, _) {
-            if sema_context_root(root, root_span, environment, program, scopes, check.context) {
-                return sema_expression_context_read(member, member_span, span, expected, environment, program, scopes, check.context, check.diagnostics)
+            if sema_context_root(root, root_span, environment, program, check.scopes, check.context) {
+                return sema_expression_context_read(member, member_span, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
             }
         }
         // `#package.*` / `#build.*` fold from the build snapshot.
@@ -731,21 +731,21 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     }
     // `subject.$fact` reads a compiler-held plane.
     if member.starts_with("$") {
-        fact: sema_fact_read_check(base, member, span, expected, environment, program, scopes, check)
+        fact: sema_fact_read_check(base, member, span, expected, environment, program, check)
         if fact.handled -> return fact.value
     }
     // `T.reflect().values` is enum `T`'s typed catalog of case values.
     if member == "values" {
-        catalog: sema_fact_enum_values(base, span, expected, environment, program, scopes, check)
+        catalog: sema_fact_enum_values(base, span, expected, environment, program, check)
         if catalog.handled -> return catalog.value
     }
     // `U8.MAX`, `Int.MIN`, `Float.INFINITY`/`NEG_INFINITY`/`NAN`/`EPSILON` are
     // the numeric type's own constants.
     if base_local_slot == None || member == "MIN" || member == "MAX" || member == "INFINITY" || member == "NEG_INFINITY" || member == "NAN" || member == "EPSILON" {
-        if sema_expression_numeric_bound_type(base, member, environment, program, scopes) == .Val(bound_type) {
+        if sema_expression_numeric_bound_type(base, member, environment, program, check.scopes) == .Val(bound_type) {
             // A numeric constant is a value, not a call, so the site is
             // known-pure rather than an unknown callee.
-            if !sema_effect_record_intrinsic_effects(environment, program, scopes, check.context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, check.diagnostics) {
+            if !sema_effect_record_intrinsic_effects(environment, program, check.scopes, check.context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, check.diagnostics) {
                 return None
             }
             bound: sema_tree_node(bound_type, TExprKind.HostCall{call: THostCall.NumericBounds{ty: bound_type, member: member}}, span)
@@ -756,36 +756,36 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         // `TerminalFact.resize` is a stable key of the terminal fact report
         // (`ProcessSpec.abilities()`), read as its key text, unless the program
         // declares its own `TerminalFact`.
-        if base == .Ident(owner, _, _) && owner == "TerminalFact" && sema_scope_resolve_index(scopes, owner) == None && sema_expression_type_symbol(scopes, environment, program, owner) == None {
+        if base == .Ident(owner, _, _) && owner == "TerminalFact" && sema_scope_resolve_index(check.scopes, owner) == None && sema_expression_type_symbol(check.scopes, environment, program, owner) == None {
             return sema_expression_terminal_fact(member, member_span, expected, environment, program, check.diagnostics)
         }
         // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the
         // variant; a payload case read without a call is its constructor value.
-        if sema_expression_enum_variant_path(base, member, environment, program, scopes) == .Val(path) {
+        if sema_expression_enum_variant_path(base, member, environment, program, check.scopes) == .Val(path) {
             type_args: sema_expression_path_type_args(base)
-            constructor: sema_expression_enum_constructor_value(path, type_args, member_span, Span{start: expr_span(base).start, end: span.end}, expected, environment, program, scopes, check)
+            constructor: sema_expression_enum_constructor_value(path, type_args, member_span, Span{start: expr_span(base).start, end: span.end}, expected, environment, program, check)
             if constructor.handled -> return constructor.value
-            return sema_expression_enum_literal(path.enum_name, type_args, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, scopes, check)
+            return sema_expression_enum_literal(path.enum_name, type_args, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, check)
         }
         // `alias.NAME` where `alias` is a whole-module import reads that
         // module's constant `NAME`, and `core.math.NAME` through
         // `use core: core` the nested module's.
         if base == .Ident(alias, _, _) {
-            module_constant: sema_expression_module_constant(alias, member, member_span, span, expected, environment, program, scopes, check.context, check.diagnostics)
+            module_constant: sema_expression_module_constant(alias, member, member_span, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
             if module_constant.handled -> return module_constant.value
-            if sema_call_taken_over_file_member(alias, member, member_span, environment, program, scopes) == .Val(taken) {
+            if sema_call_taken_over_file_member(alias, member, member_span, environment, program, check.scopes) == .Val(taken) {
                 check.diagnostics.push(taken)
                 return None
             }
             // `m: lib.inner`: a module named through its parent is not a value.
-            if sema_expr_core_module_alias_visible(alias, scopes) && sema_call_module_member_is_module(environment, program, alias, member) {
+            if sema_expr_core_module_alias_visible(alias, check.scopes) && sema_call_module_member_is_module(environment, program, alias, member) {
                 check.diagnostics.push(sema_module_used_as_value("{alias}.{member}", span))
                 return None
             }
         }
         if base == .Field(root, nested, _, _) {
             if root == .Ident(alias, _, _) {
-                nested_constant: sema_expression_core_nested_constant(alias, nested, member, member_span, span, expected, environment, program, scopes, check.context, check.diagnostics)
+                nested_constant: sema_expression_core_nested_constant(alias, nested, member, member_span, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
                 if nested_constant.handled -> return nested_constant.value
             }
         }
@@ -794,9 +794,9 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         // of the struct. A trait constant (`Type.name`, `T.name`) is the one
         // static member a type has.
         if base == .Ident(type_name, _, _) {
-            trait_constant: sema_expression_trait_constant(type_name, member, member_span, span, expected, environment, program, scopes, check.context, check.diagnostics)
+            trait_constant: sema_expression_trait_constant(type_name, member, member_span, span, expected, environment, program, check.scopes, check.context, check.diagnostics)
             if trait_constant.handled -> return trait_constant.value
-            owner: sema_expression_type_symbol(scopes, environment, program, type_name)
+            owner: sema_expression_type_symbol(check.scopes, environment, program, type_name)
             if owner == .Val(symbol) {
                 if sema_scope_declaration_struct_states(environment, program, symbol.id) == .Val(states) {
                     check.diagnostics.push(sema_expression_struct_static_member_error(type_name, member, states, member_span))
@@ -808,19 +808,19 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     // copy: the owner read is reported at the member name, so it checks the
     // place under that span; `field` itself spans the whole path. With no
     // live view the check cannot fail and reads nothing else, so it is skipped.
-    if check.state.views.len() > 0 && !sema_ownership_check_owner_read(check.state, Expr.Field{base: base.copy(), member: member, span: member_span, id: AST_NODE_GENERATED}, scopes, check.diagnostics) {
+    if check.state.views.len() > 0 && !sema_ownership_check_owner_read(check.state, Expr.Field{base: base.copy(), member: member, span: member_span, id: AST_NODE_GENERATED}, check.scopes, check.diagnostics) {
         return None
     }
     // A projected base suppresses descendant moves, but still answers for
     // moves of itself or its ancestors. The complete place checks all moves.
-    moved_ok: if check.context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(check.state, field, scopes, check.diagnostics) else -> sema_ownership_check_moved_place_use(check.state, field, scopes, check.diagnostics)
+    moved_ok: if check.context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(check.state, field, check.scopes, check.diagnostics) else -> sema_ownership_check_moved_place_use(check.state, field, check.scopes, check.diagnostics)
     if !moved_ok -> return None
     // Plain local/parameter bases whose known type is a non-generic nominal
     // cannot trigger Shared, Rows, computed-field, swizzle, or bound-method
     // rewrites when none of those surfaces apply, so skip rollback snapshots.
     skip_rollback := false
     if base_local_slot == .Val(slot) && !program.has_computed_fields && !sema_expression_is_swizzle_member(member) {
-        if sema_scope_binding_type(environment, scopes, slot) == .Val(known_ty) {
+        if sema_scope_binding_type(environment, check.scopes, slot) == .Val(known_ty) {
             if known_ty == .Named(_) && (expected == None || sema_expression_fn_slot(expected, environment, program) == None) {
                 skip_rollback = true
             }
@@ -830,43 +830,43 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     if skip_rollback {
         previous_root_read: check.context.suppress_partial_move_root_read
         check.context.suppress_partial_move_root_read = true
-        checked_base_value = sema_check_expression(base, None, environment, program, scopes, check)
+        checked_base_value = sema_check_expression(base, None, environment, program, check)
         check.context.suppress_partial_move_root_read = previous_root_read
     } else {
         // The base is checked once, for real. When it is a shared handle, that
         // check is rolled back and the locked-read rewrite is checked instead.
         // (Probing the base before checking it re-checked every prefix of a field
         // chain twice per level: exponential in the chain depth.)
-        base_scope_mark: sema_scope_mark(scopes)
+        base_scope_mark: sema_scope_mark(check.scopes)
         base_context_mark: sema_check_context_save(check.context)
         base_fork: sema_ownership_mark(check.state)
         base_diagnostic_count: check.diagnostics.len()
         base_tail_body_count: check.tail_store.bodies.len()
         previous_root_read: check.context.suppress_partial_move_root_read
         check.context.suppress_partial_move_root_read = true
-        checked_base_value = sema_check_expression(base, None, environment, program, scopes, check)
+        checked_base_value = sema_check_expression(base, None, environment, program, check)
         check.context.suppress_partial_move_root_read = previous_root_read
         if checked_base_value == .Val(probe_value) {
-            rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty, scopes)
+            rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty, check.scopes)
             if rewritten == None {
-                rewritten = sema_expression_rows_view(base, member, span, probe_value.ty, environment, program, scopes)
+                rewritten = sema_expression_rows_view(base, member, span, probe_value.ty, environment, program, check.scopes)
             }
             if rewritten == None {
-                rewritten = sema_expression_computed_field_read(base, member, span, probe_value.ty, environment, program, scopes)
+                rewritten = sema_expression_computed_field_read(base, member, span, probe_value.ty, environment, program, check.scopes)
             }
             if rewritten == None {
                 swizzle: sema_expression_swizzle_read(base, member, span, probe_value.ty, environment, program, check.diagnostics)
                 if swizzle.invalid {
-                    sema_scope_commit(scopes, base_scope_mark)
+                    sema_scope_commit(check.scopes, base_scope_mark)
                     sema_ownership_fork_commit(check.state)
                     return None
                 }
                 rewritten = swizzle.read
             }
             if rewritten == None {
-                bound: sema_expression_bound_method(base, member, span, probe_value.ty, expected, environment, program, scopes, check.diagnostics)
+                bound: sema_expression_bound_method(base, member, span, probe_value.ty, expected, environment, program, check.scopes, check.diagnostics)
                 if bound.invalid {
-                    sema_scope_commit(scopes, base_scope_mark)
+                    sema_scope_commit(check.scopes, base_scope_mark)
                     sema_ownership_fork_commit(check.state)
                     return None
                 }
@@ -874,18 +874,18 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
             }
             if rewritten == .Val(generated) {
                 sema_check_context_rollback(check.context, base_context_mark.move())
-                sema_scope_rollback(scopes, base_scope_mark)
+                sema_scope_rollback(check.scopes, base_scope_mark)
                 sema_ownership_fork_rollback(check.state, base_fork)
                 sema_ownership_fork_close(check.state, base_fork)
                 loop check.diagnostics.len() > base_diagnostic_count -> _ := check.diagnostics.pop()
                 loop check.tail_store.bodies.len() > base_tail_body_count {
                     _ := check.tail_store.bodies.pop()
                 }
-                checked_generated: sema_check_expression(generated, expected, environment, program, scopes, check) ?? return None
+                checked_generated: sema_check_expression(generated, expected, environment, program, check) ?? return None
                 return Val(checked_generated)
             }
         }
-        sema_scope_commit(scopes, base_scope_mark)
+        sema_scope_commit(check.scopes, base_scope_mark)
         sema_ownership_fork_commit(check.state)
     }
     checked_base: checked_base_value ?? return None
@@ -897,15 +897,15 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
             return None
         }
         key: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, member_span)
-        operation: BodyHandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, program, scopes, span)}
+        operation: BodyHandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, program, check.scopes, span)}
         value: sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{key}}, span)
         return sema_expr_expected_owned(value, expected, environment, program, check.diagnostics)
     }
-    sema_ownership_note_close_owner(check.state, base, checked_base.ty, environment, program, scopes)
+    sema_ownership_note_close_owner(check.state, base, checked_base.ty, environment, program, check.scopes)
     if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, program, check.context, check.diagnostics) {
         return None
     }
-    value: sema_expression_field_checked(checked_base, member, span, expected, environment, program, scopes, check.context, check.diagnostics) ?? return None
+    value: sema_expression_field_checked(checked_base, member, span, expected, environment, program, check.scopes, check.context, check.diagnostics) ?? return None
     // Lambda capture moves ask whether the captured field is a copy type.
     sema_ownership_note_place_type(check.state, span, value.ty)
     Val(value)
@@ -1749,8 +1749,8 @@ sema_expression_secret_declared_by: fn(graph: SemaRegistrationGraph, ty: Type, c
 
 // S71 the chain yields `T?`; an already-optional member flattens, so
 // `user?.address?.city` stays one optional layer deep.
-sema_expression_optional_field: fn(base: Expr, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    checked_base: sema_check_expression(base, None, environment, program, scopes, check) ?? return None
+sema_expression_optional_field: fn(base: Expr, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    checked_base: sema_check_expression(base, None, environment, program, check) ?? return None
     inner_ty: if checked_base.ty == {
         .Option(value) -> value
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
@@ -1759,7 +1759,7 @@ sema_expression_optional_field: fn(base: Expr, member: String, member_span: Span
         }
     }
     inner_base: TExpr{ty: inner_ty, kind: checked_base.kind, span: checked_base.span}
-    checked_field: sema_expression_field_checked(inner_base, member, span, None, environment, program, scopes, check.context, check.diagnostics) ?? return None
+    checked_field: sema_expression_field_checked(inner_base, member, span, None, environment, program, check.scopes, check.context, check.diagnostics) ?? return None
     field_ty: checked_field.ty
     flatten: if field_ty == {
         .Option(_) -> true
@@ -1775,8 +1775,8 @@ sema_expression_optional_field: fn(base: Expr, member: String, member_span: Span
 // receiver is present; its result lifts to `R?` and flattens like `?.field`.
 // The call keeps its own failure rule: a fallible method propagates exactly as
 // the same call on a plain receiver would.
-sema_expression_optional_method_call: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
-    checked_base: sema_check_expression(receiver, None, environment, program, scopes, check) ?? return None
+sema_expression_optional_method_call: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
+    checked_base: sema_check_expression(receiver, None, environment, program, check) ?? return None
     inner_ty: if checked_base.ty == {
         .Option(value) -> value
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
@@ -1786,9 +1786,9 @@ sema_expression_optional_method_call: fn(receiver: Expr, method: String, method_
     }
     receiver_span: expr_span(receiver)
     name: "__jet_optional_receiver_{method_span.start}"
-    sema_scope_enter(scopes, check.state, "optional-call@{method_span.start}")
+    sema_scope_enter(check.scopes, check.state, "optional-call@{method_span.start}")
     module_name: sema_scope_environment_module_text(environment, program)
-    owner: sema_scope_local_owner_key(scopes)
+    owner: sema_scope_local_owner_key(check.scopes)
     key: symbol_key_text(SymbolKind.Local, module_name, owner, name)
     symbol: Symbol{
         id: sema_symbol_id_of(program, check.context, key),
@@ -1800,15 +1800,15 @@ sema_expression_optional_method_call: fn(receiver: Expr, method: String, method_
         ty: Val(inner_ty),
         visibility: 0,
     }
-    if !sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false) {
-        sema_scope_leave(scopes, check.state)
+    if !sema_scope_declare_local(check.scopes, symbol, key, false, AccessConvention.Read, None, false) {
+        sema_scope_leave(check.scopes, check.state)
         check.diagnostics.push(sema_already_defined(name, receiver_span))
         return None
     }
     sema_ownership_declare_binding(check.state, symbol, false)
     call_expr: expr_optional_method_call_as_call(Expr.Ident{name: name, span: receiver_span, id: AST_NODE_GENERATED}, method, method_span, type_args, args)
-    checked_call := sema_check_expression(call_expr, None, environment, program, scopes, check)
-    sema_scope_leave(scopes, check.state)
+    checked_call := sema_check_expression(call_expr, None, environment, program, check)
+    sema_scope_leave(check.scopes, check.state)
     call: checked_call ?? return None
     flatten: if call.ty == {
         .Option(_) -> true

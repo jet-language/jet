@@ -52,7 +52,7 @@ sema_loop_value_check_result_exit: fn(context: ^SemaCheckContext, frame_index: I
     Val(value)
 }
 
-sema_loop_value_check_collecting_item: fn(value: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
+sema_loop_value_check_collecting_item: fn(value: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck) -> TExpr? {
     if check.context.collect_item_types.len() == 0 -> return None
     expected := sema_loop_value_collecting_type(check.context)
     checked_expected := expected
@@ -61,7 +61,7 @@ sema_loop_value_check_collecting_item: fn(value: Expr, span: Span, environment: 
     }
     outer_item_if: check.context.collect_item_if
     check.context.collect_item_if = if value == .If(_, _, _, _, _, _, _) -> Val(span) else -> None
-    checked_value: sema_check_expression(value, checked_expected, environment, program, scopes, check)
+    checked_value: sema_check_expression(value, checked_expected, environment, program, check)
     check.context.collect_item_if = outer_item_if
     checked: checked_value ?? return None
     if checked.ty == (Type.Named{name: "Unit"}) {
