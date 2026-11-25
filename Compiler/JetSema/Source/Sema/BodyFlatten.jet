@@ -685,7 +685,6 @@ body_flat_expr_kind: fn(value: TExprKind, flat: ^BodyFlat) -> NodeKind Never! {
         .LayoutCompare(f_op, f_lhs, f_rhs) -> NodeKind.LayoutCompare{op: f_op, lhs: body_flat_expr(f_lhs, flat), rhs: body_flat_expr(f_rhs, flat)}
         .SharedGuardValue(f_guard) -> NodeKind.SharedGuardValue{guard: body_flat_expr(f_guard, flat)}
         .SharedGuardWait(f_guard, f_condition, f_predicate) -> NodeKind.SharedGuardWait{guard: body_flat_expr(f_guard, flat), condition: body_flat_expr(f_condition, flat), predicate: body_flat_lambda(f_predicate, flat)}
-        .CoreCall(f_record, f_args, f_source_span, f_type_args, f_widen_to_vec, f_fallibility) -> NodeKind.CoreCall{record: f_record, args: body_flat_list_expr(f_args, flat), source_span: f_source_span, type_args: f_type_args, widen_to_vec: f_widen_to_vec, fallibility: f_fallibility}
         .HostCall(f_call) -> NodeKind.HostCall{call: body_flat_host_call(f_call, flat)}
         .AllocNew(f_ctor, f_args) -> NodeKind.AllocNew{ctor: f_ctor, args: body_flat_list_call_arg(f_args, flat)}
         .EnumLit(f_enum_type, f_variant, f_payload) -> NodeKind.EnumLit{enum_type: f_enum_type, variant: f_variant, payload: body_flat_enum_payload(f_payload, flat)}
@@ -1307,7 +1306,6 @@ body_copy_expr_kind: fn(value: NodeKind, flat: ^BodyFlat) -> NodeKind Never! {
         .SharedGuardSplit(f_guard, f_first, f_second, f_editable) -> NodeKind.SharedGuardSplit{guard: body_copy_expr(f_guard, flat), first: f_first, second: f_second, editable: f_editable}
         .SharedGuardWait(f_guard, f_condition, f_predicate) -> NodeKind.SharedGuardWait{guard: body_copy_expr(f_guard, flat), condition: body_copy_expr(f_condition, flat), predicate: body_copy_lambda(f_predicate, flat)}
         .ConditionNotify(f_condition, f_all) -> NodeKind.ConditionNotify{condition: body_copy_expr(f_condition, flat), all: f_all}
-        .CoreCall(f_record, f_args, f_source_span, f_type_args, f_widen_to_vec, f_fallibility) -> NodeKind.CoreCall{record: f_record, args: body_copy_list_expr(f_args, flat), source_span: f_source_span, type_args: f_type_args, widen_to_vec: f_widen_to_vec, fallibility: f_fallibility}
         .HostCall(f_call) -> NodeKind.HostCall{call: body_copy_host_call(f_call, flat)}
         .AllocNew(f_ctor, f_args) -> NodeKind.AllocNew{ctor: f_ctor, args: body_copy_list_call_arg(f_args, flat)}
         .EnumLit(f_enum_type, f_variant, f_payload) -> NodeKind.EnumLit{enum_type: f_enum_type, variant: f_variant, payload: body_copy_enum_payload(f_payload, flat)}

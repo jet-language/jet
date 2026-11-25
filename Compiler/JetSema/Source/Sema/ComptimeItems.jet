@@ -193,7 +193,7 @@ sema_comptime_reachable_function_keys: fn(graph: SemaRegistrationGraph, call_fac
 sema_comptime_drop_close_keys: fn(graph: SemaRegistrationGraph, type_delta: [InternerDelta], tree: BodyTree, module_identity: ModuleID, keys: ^[String]) {
     ^dropped: [Int]{}
     loop node in tree.nodes {
-        made: node.kind == .Call(_, _, _) || node.kind == .IndirectCall(_, _, _, _) || node.kind == .MethodCall(_, _, _, _) || node.kind == .StaticCall(_, _, _, _, _) || node.kind == .CoreCall(_, _, _, _, _, _) || node.kind == .StructLit(_) || node.kind == .EnumCtor(_, _, _)
+        made: node.kind == .Call(_, _, _) || node.kind == .IndirectCall(_, _, _, _) || node.kind == .MethodCall(_, _, _, _) || node.kind == .StaticCall(_, _, _, _, _) || node.kind == .StructLit(_) || node.kind == .EnumCtor(_, _, _)
         if made -> dropped.push(node.id)
     }
     loop statement in tree.stmts {

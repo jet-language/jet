@@ -1,6 +1,6 @@
 // Complete checked top-level functions into backend-neutral IR.
 use {
-    jet_foundation.[AccessConvention, Interner, CORE_CALLS, CallablePolicy, CallablePolicyChain, CoreCallRecord, CoreCapabilityContract, FunctionCallMetadata, FunctionDefaultRef, AuthorityDecision, ModuleID, NameVisibility, Span, TEffectFacts, TEffectSpan, TFailureCarrier, FnBody, TFuncKind, TGenericParam, BodyLambda, BodyParameter, TWebParamReconstruction, Type, body_tree_new, core_call_key, type_identity_key, body_type]
+    jet_foundation.[AccessConvention, Interner, CallablePolicy, CallablePolicyChain, FunctionCallMetadata, FunctionDefaultRef, ModuleID, NameVisibility, Span, TEffectFacts, TEffectSpan, TFailureCarrier, FnBody, TFuncKind, TGenericParam, BodyLambda, BodyParameter, TWebParamReconstruction, Type, body_tree_new, type_identity_key, body_type]
     jet_sema.[
         SemaComptimeItemRequest,
     ]
@@ -36,74 +36,6 @@ ir_impl_method_leaf: fn(key: String) -> String Never! {
     String.from_bytes(bytes[start..<end].copy()) ?? ""
 }
 
-ir_string_rows_equal: fn(left: [String], right: [String]) -> Bool Never! {
-    if left.len() != right.len() -> return false
-    ^index: 0
-    loop index < left.len() {
-        if left[index] != right[index] -> return false
-        index += 1
-    }
-    true
-}
-
-ir_bool_rows_equal: fn(left: [Bool], right: [Bool]) -> Bool Never! {
-    if left.len() != right.len() -> return false
-    ^index: 0
-    loop index < left.len() {
-        if left[index] != right[index] -> return false
-        index += 1
-    }
-    true
-}
-
-ir_core_capability_equal: fn(left: CoreCapabilityContract, right: CoreCapabilityContract) -> Bool Never! {
-    left.kind == right.kind && left.provider == right.provider && left.fallback == right.fallback && left.failure == right.failure
-}
-
-ir_authority_decisions_equal: fn(left: AuthorityDecision?, right: AuthorityDecision?) -> Bool Never! {
-    if left == None -> return right == None
-    if right == None -> return false
-    first: left
-    second: right
-    first.import.id == second.import.id && first.import.operation == second.import.operation && first.import.required_right == second.import.required_right && ir_string_rows_equal(first.import.parameter_type_ids, second.import.parameter_type_ids) && first.import.result_type_id == second.import.result_type_id && first.authority_argument == second.authority_argument && first.inherited == second.inherited
-}
-
-ir_core_records_match: fn(left: CoreCallRecord, right: CoreCallRecord) -> Bool Never! {
-    if left.module_name != right.module_name || left.member != right.member || !ir_string_rows_equal(left.receiver_types, right.receiver_types) {
-        return false
-    }
-    if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !ir_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) {
-        return false
-    }
-    if left.fallibility != right.fallibility || !ir_string_rows_equal(left.effects, right.effects) {
-        return false
-    }
-    if left.pure_route != right.pure_route || left.symbol != right.symbol -> return false
-    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct {
-        return false
-    }
-    if !ir_core_capability_equal(left.capability, right.capability) -> return false
-    ir_authority_decisions_equal(left.authority, right.authority)
-}
-
-ir_canonical_core_record: fn(record: CoreCallRecord) -> CoreCallRecord? Never! {
-    ir_canonical_core_record_in(CORE_CALLS, record)
-}
-
-// The registry is a read parameter, so the scan reads its rows in place.
-// CORE_CALLS holds one row per key (core_call_rows), so the scan stops at
-// the first. None when no row has the record's key or its row disagrees
-// with the record.
-ir_canonical_core_record_in: fn(rows: [CoreCallRecord], record: CoreCallRecord) -> CoreCallRecord? Never! {
-    ^key: core_call_key(record)
-    loop candidate in rows {
-        if core_call_key(candidate) == key {
-            if !ir_core_records_match(candidate, record) -> return None
-            return Val(candidate)
-        }
-    }
-    None
-}
 
 ir_lambda_function_type: fn(lambda: BodyLambda) -> Type Never! {
     ^metadata: FunctionCallMetadata?{None}

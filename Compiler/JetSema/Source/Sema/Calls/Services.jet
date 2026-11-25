@@ -148,7 +148,7 @@ sema_services_core_call: fn(record: CoreCallRecord, arguments: [TExpr], fallback
         index += 1
     }
     ^failure: sema_services_result_carrier(result_type)
-    value: sema_call_core_tree(record, call_arguments, span, [Type]{}, [Bool]{}, result_type, failure, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    value: sema_call_core_tree(record, call_arguments, span, [Type]{}, result_type, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_services_record_call_effects(record, value, span, result_type, failure, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -159,8 +159,7 @@ sema_services_core_call: fn(record: CoreCallRecord, arguments: [TExpr], fallback
 // Core source body reaches. A call checked into its Jet source function
 // records that function as the callee, so the effect graph infers the row
 // from the body (and its jet.runtime leaves) like any source call; a fixed
-// record row would hide them. A call still checked into a CoreCall node keeps
-// its record row.
+// record row would hide them. Any other call keeps its record row.
 sema_services_record_call_effects: fn(record: CoreCallRecord, value: TExpr, span: Span, result_type: Type, failure: TFailureCarrier, check: ^SemaBodyCheck) -> Bool Never! {
     if value.kind == .Call(_, _, _) {
         check.context.call_facts.push(
@@ -614,6 +613,6 @@ sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method
     if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, check) {
         return failed
     }
-    value: sema_call_core_tree(record, normalized, span, [Type]{payload_type}, [Bool]{}, result_type, failure, expected, check)
+    value: sema_call_core_tree(record, normalized, span, [Type]{payload_type}, result_type, expected, check)
     return SemaMethodSpecialCheck{handled: true, value: value}
 }

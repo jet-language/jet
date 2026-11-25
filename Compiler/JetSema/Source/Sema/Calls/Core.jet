@@ -1163,8 +1163,9 @@ sema_call_core_source_arguments: fn(args: [TExpr], params: [SemaCallParam], chec
     result
 }
 
-// A checked Core call.
-sema_call_core_tree: fn(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], result_type: Type, fallibility: TFailureCarrier, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+// A checked Core call: a call of the Core function that fills its row's role,
+// else of the one its source target or member names.
+sema_call_core_tree: fn(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     process_run_boundary: record.module_name == "core.process" && record.member == "run" && args.len() == record.signature.arity + 1
     if !core_call_accepts_arity(record, args.len()) && !process_run_boundary {
         ^maximum: record.signature.max_arity
@@ -1180,20 +1181,16 @@ sema_call_core_tree: fn(record: CoreCallRecord, args: [TExpr], span: Span, type_
         }
         return sema_call_core_run_source(record, filler.module_identity, filler.name, args, span, type_args, result_type, expected, check)
     }
-    if core_call_source_member(record) == .Val(member) {
-        path: sema_call_core_source_path(record.module_name, member) ?? return None
-        identity: sema_call_core_module_identity(check.environment.*, check.program.*, path.module_name) ?? {
-            check.diagnostics.push(sema_error("E0902", span, "source-owned Core module `{path.module_name}` is not loaded", "this declaration has no host implementation route", "load the owning Core source package"))
-            return None
-        }
-        return sema_call_core_run_source(record, identity, path.member, args, span, type_args, result_type, expected, check)
+    member: core_call_source_member(record) ?? {
+        check.diagnostics.push(sema_error("E0902", span, "Core call `{record.module_name}.{record.member}` names no Core declaration", "every Core call runs the Core function it names", "declare the call as a Core function"))
+        return None
     }
-    ^value: sema_tree_node(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, fallibility: fallibility}, span)
-    // The slot type reaches a call only as an inference hint: a Core call that
-    // returns `Never` produces no value, and the enclosing `??` or branch
-    // accepts its divergence.
-    if result_type == (Type.Named{name: "Never"}) -> return Val(value)
-    sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)
+    path: sema_call_core_source_path(record.module_name, member) ?? return None
+    identity: sema_call_core_module_identity(check.environment.*, check.program.*, path.module_name) ?? {
+        check.diagnostics.push(sema_error("E0902", span, "source-owned Core module `{path.module_name}` is not loaded", "this declaration has no host implementation route", "load the owning Core source package"))
+        return None
+    }
+    sema_call_core_run_source(record, identity, path.member, args, span, type_args, result_type, expected, check)
 }
 
 // A source-owned Core call as a call of the Core function `name` of module
@@ -1333,7 +1330,7 @@ sema_call_core_function_effects: fn(source: SemaCoreRoleFunction, check: SemaBod
 }
 
 // Record the call's effects (including known purity) and enforce authored
-// transaction walls before the CoreCall reaches effect-graph collection. A
+// transaction walls before the call reaches effect-graph collection. A
 // source-owned row's effects are its Core declaration's row; an adapter row
 // carries its own.
 sema_call_core_record_effects: fn(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], check: ^SemaBodyCheck) -> Bool Never! {
@@ -1516,16 +1513,15 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         } else { values.push(argument.value) }
     }
     result_type: sema_call_core_result_type(names, return_type, resolved_type_args)
-    // The CoreCall carrier is derived from the checked result type
+    // The call's carrier is derived from the checked result type
     // (`TFailureCarrier.from_checked_type`: only a Result or Option result can
     // fail), and its type arguments are the call's written ones. The inferred
-    // signature arguments type the result and record the call fact; the
-    // native kernel takes no inferred generic.
+    // signature arguments type the result and record the call fact.
     ^fallibility: sema_expression_failure_carrier(result_type)
     if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, binding.default_refs, check) {
         return None
     }
-    value: sema_call_core_tree(canonical_record, values, span, type_args, loop _ in values -> false, result_type, fallibility, None, check) ?? return None
+    value: sema_call_core_tree(canonical_record, values, span, type_args, result_type, None, check) ?? return None
     sema_expression_call_expected(sema_call_with_binder_pins(pins, value, span), expected, check)
 }
 
