@@ -1,0 +1,42 @@
+Error: Jet.RouteMethodTokenRefused: HTTPRouter custom route method must be a static String
+  --> run.jet:7:24
+    |
+  7 |     print(table.custom(method, "/cache", "purge"))
+    |                        ^^^^^^
+ Why: Router and `#Server.Custom` routes are fully checked while building; only an App takes a run-time method, checked when it registers
+ Fix: Use a literal or compile-time String constant, or register the route on a `web.app()`
+More: jet-lang.dev/e/Jet.RouteMethodTokenRefused
+
+Error: Jet.InvalidRoute: Invalid HTTP route `/users/{id}`: brace interpolation is not allowed in route patterns
+  --> run.jet:13:21
+    |
+ 13 |     print(table.get("/users/{id}", "show"))
+    |                     ^^^^^^^^^^^^^
+ Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+More: jet-lang.dev/e/Jet.InvalidRoute
+
+Error: Jet.AmbiguousRoute: Two routes both match `GET /a/:name`.
+  --> run.jet:15:17
+    |
+ 15 |     print(table.get("/a/:name", "b"))
+    |                 ^^^
+  --> run.jet:14:17
+    |
+ 14 |     print(table.get("/a/:id", "a"))
+    |                 ^^^ first registered here
+ Why: Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added.
+ Fix: Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).
+More: jet-lang.dev/e/Jet.AmbiguousRoute
+
+Error: Jet.ExpiringForce: `ExpiringValue.force` bypasses expiry checking
+  --> run.jet:18:17
+    |
+ 18 |     print(lease.force())
+    |                 ^^^^^
+ Why: TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly
+ Fix: Use `.get(clock)` and handle `Expired`
+More: jet-lang.dev/e/Jet.ExpiringForce
+
+4 problems found
+Run `jet explain Jet.RouteMethodTokenRefused` to learn more

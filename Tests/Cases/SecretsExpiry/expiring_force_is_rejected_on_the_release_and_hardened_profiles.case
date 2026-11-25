@@ -1,0 +1,17 @@
+# Core declares the `ExpiringValue.force` rule (Core/Time/Time.jet
+# ExpiryChecked), and its check holds on every tier: the build profiles
+# that load Core lazily from the built-in interface reject the call as
+# `jet check` does (Tests/UI/expiring_force_unwrap.jet).
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+copy: {root}/Tests/UI/expiring_force_unwrap.jet main.jet
+step: jet build --release main.jet
+exit: 1
+stderr: ~ "Error: Jet.ExpiringForce: `ExpiringValue.force` bypasses expiry checking" # the rule's finding, as Tests/UI/expiring_force_unwrap.stderr reports it
+stderr: ~ "main.jet:11:13" # at the `force` call
+file: .jet/build/app absent
+step: jet build --profile=hardened main.jet
+exit: 1
+stderr: ~ "Error: Jet.ExpiringForce: `ExpiringValue.force` bypasses expiry checking" # the rule's finding, as Tests/UI/expiring_force_unwrap.stderr reports it
+stderr: ~ "main.jet:11:13" # at the `force` call
+file: .jet/build/app absent
