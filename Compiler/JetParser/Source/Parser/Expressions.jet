@@ -438,6 +438,8 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
             next
         }
 
+        // `slot.in_place() == .Val(item)` is the same one-arm writing match.
+        if pattern_test -> left = parser_in_place_window(left)
         if pattern_test {
             // A `Point{…}` head that does not read as a pattern
             // (`Envelope{ badge: dep.Badge{ … } }`) is the struct value it
@@ -2387,6 +2389,26 @@ parser_parse_marked_place: fn(state: ^JetParserState, depth: Int, allow_struct_l
         return ParsedExpr{expr: call, span: span}
     }
     ParsedExpr{expr: Expr.Place{value: operand.expr, access: PlaceAccess.Write, span: span, id: parser_node_id(state)}, span: span}
+}
+
+// `place.in_place()` makes the write window `^place` makes. A binding's
+// value, a match subject, a one-arm writing match and a loop source read it
+// here, so `.in_place()` is never a method call there. It ends the place:
+// `shape.inner.in_place()`. Anywhere else it is an ordinary call, which no
+// type declares.
+// The window takes the call's node id: the call is gone.
+parser_in_place_window: fn(parsed: ^^ParsedExpr) -> ParsedExpr {
+    if parsed.expr == .MethodCall(receiver, method, _, owner_type_args, type_args, args, id) {
+        if method == "in_place" && owner_type_args.len() == 0 && type_args.len() == 0 && args.len() == 0 && parser_mark_place(receiver) {
+            return ParsedExpr{expr: Expr.Place{value: receiver, access: PlaceAccess.Write, span: parsed.span, id: id}, span: parsed.span}
+        }
+    }
+    parsed
+}
+
+parser_is_write_window: fn(expr: Expr) -> Bool Never! {
+    if expr == .Place(_, access, _, _) -> return access == PlaceAccess.Write
+    false
 }
 
 // `^^buf.seal()`: the take mark on a receiver. Any other `^^` in value

@@ -1,0 +1,29 @@
+# D-BIND-MARK1 stage 1: the migration format (`JET_FMT_BIND_MARK1=1 jet fmt`)
+# writes every changeable name `^name: value` (a local, `_`, destructured
+# names, a module and a `#Persist` name, a state loop's name) and every write
+# window `place.in_place()` (a binding's value, a match subject, a one-arm
+# writing match, a loop source). An ordinary format keeps the spelling the
+# source wrote, and the migrated program runs as the original did.
+fixture: FmtBindMark1Migration/Input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0
+file: run.jet = FmtBindMark1Migration/Input/run.jet # an ordinary format keeps `:=` and `^place`
+step: jet run run.jet
+exit: 0
+stdout: = "1 3 2 6 7 30 21 3 7 8 3 2 11 0 0\n"
+step: jet fmt run.jet
+env: JET_FMT_BIND_MARK1=1
+exit: 0
+file: run.jet = FmtBindMark1Migration/migrated.out
+step: jet fmt run.jet
+env: JET_FMT_BIND_MARK1=1
+exit: 0
+file: run.jet = FmtBindMark1Migration/migrated.out # the migration is stable
+step: jet fmt --check run.jet
+exit: 0
+step: jet run run.jet
+exit: 0
+stdout: = "1 3 2 6 7 30 21 3 7 8 3 2 11 0 0\n"

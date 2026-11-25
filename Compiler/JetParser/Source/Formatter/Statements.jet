@@ -1275,7 +1275,7 @@ jfmt_fmt_loop_head_pattern: fn(f: ^JetFmt, var: String, body: [Stmt]) -> Bool {
     if !ast_loop_destructures(var, body) -> return false
     if body[0] == .Val(binding) {
         if binding.pattern == .Val(pattern) {
-            jfmt_fmt_bind_pattern(f, pattern)
+            jfmt_fmt_bind_pattern(f, pattern, false)
             return true
         }
     }
@@ -1343,7 +1343,7 @@ jfmt_fmt_for_head: fn(f: ^JetFmt, var: String, var_span: Span, var2: NamedSpan?,
             header_end = if step == .Val(value) -> expr_span(value).end else -> expr_span(end).end
         }
         .In(collection, step) -> {
-            jfmt_fmt_expr(f, collection, JFMT_PREC_OR_FALLBACK)
+            jfmt_fmt_window(f, collection, JFMT_PREC_OR_FALLBACK)
             if step == .Val(value) {
                 jfmt_loop_clause_separator(f, expr_span(value).start, wrap)
                 jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
@@ -1517,7 +1517,7 @@ jfmt_switch_written_on_one_line: fn(f: JetFmt, start: Int, arms: [SwitchArm]) ->
 jfmt_fmt_dispatch_table: fn(f: ^JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, compact: Bool) {
     table_op: jfmt_dispatch_op_from_source(f, subject) ?? jfmt_dispatch_op(f, subject, arms)
     statement_table: jfmt_table_is_statements(f, arms, else_body)
-    jfmt_fmt_expr(f, subject, JFMT_PREC_OR_FALLBACK)
+    jfmt_fmt_window(f, subject, JFMT_PREC_OR_FALLBACK)
     jfmt_write(f, " ")
     jfmt_write(f, jfmt_bin_op_spell(table_op))
     jfmt_write(f, " ")
@@ -2156,6 +2156,7 @@ jfmt_fmt_binding: fn(f: ^JetFmt, b: Binding) {
         jfmt_fmt_prepared_value(f, b.init)
         return
     }
+    colon_eq: jfmt_bind_keeps_colon_eq(f, b.mutable, b.sigil_span)
     if {
         b.pattern == .Val(pattern_value) -> {
             if pattern_value == .Refutable(pattern, fallback, _, _) {
@@ -2172,13 +2173,16 @@ jfmt_fmt_binding: fn(f: ^JetFmt, b: Binding) {
                 return
             }
             // S74: a destructuring target stands in for the name.
-            jfmt_fmt_bind_pattern(f, pattern_value)
+            jfmt_fmt_bind_pattern(f, pattern_value, b.mutable && !colon_eq)
         }
-        else -> { jfmt_write(f, b.name) }
+        else -> {
+            if b.mutable && !colon_eq -> jfmt_write(f, "^")
+            jfmt_write(f, b.name)
+        }
     }
-    // Bindings are always bare (`name: …` / `name := …`).
+    // Bindings are always bare (`name: …` / `^name: …`).
     // Types ride the value (`Type{ … }`), never the binding name.
-    jfmt_write(f, if b.mutable -> " := " else -> ": ")
+    jfmt_write(f, if colon_eq -> " := " else -> ": ")
     // Print `Type{ uninit }` from the binding's type.
     if {
         b.uninit -> {
@@ -2192,8 +2196,20 @@ jfmt_fmt_binding: fn(f: ^JetFmt, b: Binding) {
                 else -> { jfmt_write(f, "uninit") }
             }
         }
-        else -> { jfmt_fmt_expr(f, b.init, JFMT_PREC_OR_FALLBACK) }
+        else -> { jfmt_fmt_window(f, b.init, JFMT_PREC_OR_FALLBACK) }
     }
+}
+
+// D-BIND-MARK1 stage 1, temporary: whether a binding keeps the retiring
+// `:=`. An ordinary format keeps the sigil the author wrote, and a
+// changeable binding with none written (one the parser made) keeps `:=`;
+// the migration format (JetFmt.bind_mark1) never keeps it.
+jfmt_bind_keeps_colon_eq: fn(f: JetFmt, mutable: Bool, sigil: Span?) -> Bool Never! {
+    if f.bind_mark1 -> return false
+    if sigil == .Val(span) && jfmt_src_range_valid(f, span.start, span.end) {
+        return jfmt_src_text(f, span.start, span.end) == ":="
+    }
+    mutable
 }
 
 // The prepared value of a compile-time binding keeps the spelling the author
@@ -2223,14 +2239,31 @@ jfmt_prepared_operand: fn(value: Expr) -> Bool {
     }
 }
 
-jfmt_fmt_bind_names: fn(f: ^JetFmt, elems: [BindName]) {
+// `^` marks each changeable name: every name of a changeable binding, or the
+// ones written `^name` (`{^lo, hi}: bounds`).
+jfmt_fmt_bind_names: fn(f: ^JetFmt, elems: [BindName], mutable: Bool) {
     loop index in 0..<elems.len() {
         if index > 0 -> jfmt_write(f, ", ")
+        if mutable || elems[index].mutable -> jfmt_write(f, "^")
         jfmt_write(f, elems[index].name)
     }
 }
 
-jfmt_fmt_bind_pattern: fn(f: ^JetFmt, pat: BindPattern) {
+// A destructured name and its rename: the mark sits on the name bound.
+jfmt_fmt_bind_renamed: fn(f: ^JetFmt, elem: BindName, mutable: Bool) {
+    marked: mutable || elem.mutable
+    if elem.rename == .Val(rename) {
+        jfmt_write(f, elem.name)
+        jfmt_write(f, ": ")
+        if marked -> jfmt_write(f, "^")
+        jfmt_write(f, rename.name)
+        return
+    }
+    if marked -> jfmt_write(f, "^")
+    jfmt_write(f, elem.name)
+}
+
+jfmt_fmt_bind_pattern: fn(f: ^JetFmt, pat: BindPattern, mutable: Bool) {
     if pat == {
         .Struct(type_name, _, fields, rest, _) -> {
             // Emit `Type{x, y}`.
@@ -2239,11 +2272,7 @@ jfmt_fmt_bind_pattern: fn(f: ^JetFmt, pat: BindPattern) {
             jfmt_write(f, "{{")
             loop index in 0..<fields.len() {
                 if index > 0 -> jfmt_write(f, ", ")
-                jfmt_write(f, fields[index].name)
-                if fields[index].rename == .Val(rename) {
-                    jfmt_write(f, ": ")
-                    jfmt_write(f, rename.name)
-                }
+                jfmt_fmt_bind_renamed(f, fields[index], mutable)
             }
             if rest != None {
                 if fields.len() > 0 -> jfmt_write(f, ", ")
@@ -2253,7 +2282,7 @@ jfmt_fmt_bind_pattern: fn(f: ^JetFmt, pat: BindPattern) {
         }
         .List(elems, _) -> {
             jfmt_write(f, "[")
-            jfmt_fmt_bind_names(f, elems)
+            jfmt_fmt_bind_names(f, elems, mutable)
             jfmt_write(f, "]")
         }
         // `{min, max}` destructures a record; `{ member: local, … }`
@@ -2265,18 +2294,14 @@ jfmt_fmt_bind_pattern: fn(f: ^JetFmt, pat: BindPattern) {
             }
             if !renamed {
                 jfmt_write(f, "{{")
-                jfmt_fmt_bind_names(f, elems)
+                jfmt_fmt_bind_names(f, elems, mutable)
                 jfmt_write(f, "}}")
                 return
             }
             jfmt_write(f, "{{ ")
             loop index in 0..<elems.len() {
                 if index > 0 -> jfmt_write(f, ", ")
-                jfmt_write(f, elems[index].name)
-                if elems[index].rename == .Val(rename) {
-                    jfmt_write(f, ": ")
-                    jfmt_write(f, rename.name)
-                }
+                jfmt_fmt_bind_renamed(f, elems[index], mutable)
             }
             jfmt_write(f, " }}")
         }

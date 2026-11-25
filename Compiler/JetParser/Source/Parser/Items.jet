@@ -2714,9 +2714,10 @@ parser_check_step_limit: fn(state: ^JetParserState, markers: [Marker]) {
     }
 }
 
-// `name: value` / `name := value` at file scope declares a module binding, not
-// an executable script statement.
+// `name: value` / `^name: value` / `name := value` at file scope declares a
+// module binding, not an executable script statement.
 parser_module_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
+    if parser_changeable_name_ahead(state, 0) -> return true
     if parser_current_kind(state) != TOKEN_IDENT -> return false
     next: parser_kind_at(state, 1)
     if next == TOKEN_COLON_EQ || next == TOKEN_COLON -> return true
@@ -2766,11 +2767,11 @@ parser_module_binding_def: fn(statement: Stmt, start: Span, end: Int) -> ConstDe
     None
 }
 
-// `#Persist name := value` at file scope: module state that survives a
+// `#Persist ^name: value` at file scope: module state that survives a
 // `jet dev` reload. A local `#Persist` never reaches here and keeps the
 // statement parser's E0145.
 parser_persist_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
-    parser_current_kind(state) == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Persist" && parser_kind_at(state, 2) == TOKEN_IDENT
+    parser_current_kind(state) == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Persist" && (parser_kind_at(state, 2) == TOKEN_IDENT || parser_changeable_name_ahead(state, 2))
 }
 
 // The marker, then one named module binding.
