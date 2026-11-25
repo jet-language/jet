@@ -61,6 +61,8 @@ use {
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_render_all,
+        effect_vocabulary_list_strings,
+        effect_vocabulary_list_view_count,
         effect_vocabulary_view_count,
         policy_gate_parse,
         policy_key_parse,
@@ -447,6 +449,15 @@ JET_CLI_OWNS_FLAGS: [String]{
     "completions",
     "self-update",
 }
+
+// PACKAGE_DEPENDENCY_COMMANDS, the commands jet hands to Jetpack's package
+// host, picks from JET_CLI_OWNS_FLAGS: the host validates each one's flags.
+// PACKAGE_DEPENDENCY_OUTPUT_FLAGS, the output flags the front applies before
+// the hand-off, picks from JET_CLI_GLOBAL_FLAGS, apart from `-q`, `--verbose`
+// and `-v`, which that list does not hold.
+PACKAGE_DEPENDENCY_COMMAND_COUNT: #run effect_vocabulary_list_view_count("Jetpack/CLI/Source/Hosts/PackageDependencyHost.jet", effect_vocabulary_list_strings("Jetpack/CLI/Source/Hosts/PackageDependencyHost.jet", embed_file("toolchain:Jetpack/CLI/Source/Hosts/PackageDependencyHost.jet"), "PACKAGE_DEPENDENCY_COMMANDS"), "PACKAGE_DEPENDENCY_COMMANDS", JET_CLI_OWNS_FLAGS, "JET_CLI_OWNS_FLAGS", [String]{})
+
+PACKAGE_DEPENDENCY_OUTPUT_FLAG_COUNT: #run effect_vocabulary_list_view_count("Jetpack/CLI/Source/Hosts/PackageDependencyHost.jet", effect_vocabulary_list_strings("Jetpack/CLI/Source/Hosts/PackageDependencyHost.jet", embed_file("toolchain:Jetpack/CLI/Source/Hosts/PackageDependencyHost.jet"), "PACKAGE_DEPENDENCY_OUTPUT_FLAGS"), "PACKAGE_DEPENDENCY_OUTPUT_FLAGS", JET_CLI_GLOBAL_FLAGS, "JET_CLI_GLOBAL_FLAGS", [String]{"-q", "--verbose", "-v"})
 
 // Flags whose value is the next argv word.
 JET_CLI_SEPARATE_VALUE_FLAGS: [String]{

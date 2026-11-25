@@ -1,0 +1,24 @@
+// Checks for the Jetpack closed-list views whose vocabulary is in another
+// area. An embed path may not contain `..`, so a view in Image/ cannot embed
+// its vocabulary from Store/. This file sits above every area and holds each
+// such check. It is listed under CLI, the one area whose unit holds every
+// other. Each constant stops the build and names any view case its
+// vocabulary lacks, apart from the cases listed in `outside`.
+use jet_foundation.[effect_vocabulary_list_view_count, effect_vocabulary_view_count]
+
+// ImageError and RecipeError pick from StoreError: the Image and Recipe areas
+// fail the way the store does. RecipeError's `Update` is a failed toolchain
+// update.
+IMAGE_ERROR_COUNT: #run effect_vocabulary_view_count("Image/Source/OCI/ImageError.jet", embed_file("Image/Source/OCI/ImageError.jet"), "ImageError", "Store/Source/Hangar/StoreError.jet", embed_file("Store/Source/Hangar/StoreError.jet"), "StoreError", [String]{})
+
+RECIPE_ERROR_COUNT: #run effect_vocabulary_view_count("Recipe/Source/Build/RecipeDiagnostics.jet", embed_file("Recipe/Source/Build/RecipeDiagnostics.jet"), "RecipeError", "Store/Source/Hangar/StoreError.jet", embed_file("Store/Source/Hangar/StoreError.jet"), "StoreError", [String]{"Update"})
+
+// RegistryTarKind picks from HangarArchiveNodeKind: a fetched tar entry is a
+// node kind a Hangar archive holds, apart from `Special`, any other tar entry
+// type.
+REGISTRY_TAR_KIND_COUNT: #run effect_vocabulary_view_count("Provider/Source/Registries/RegistryFetch.jet", embed_file("Provider/Source/Registries/RegistryFetch.jet"), "RegistryTarKind", "Store/Source/Archive/HangarArchiveFormat.jet", embed_file("Store/Source/Archive/HangarArchiveFormat.jet"), "HangarArchiveNodeKind", [String]{"Special"})
+
+// CFFI_ALWAYS_LINKED_LIBC picks from CC_PACK_MUSL_EMPTY_LIBS: each library
+// the platform C library always provides is one musl folds into libc.a, apart
+// from `c`, libc itself.
+CFFI_ALWAYS_LINKED_LIBC_COUNT: #run effect_vocabulary_list_view_count("Integrations/Source/Foreign/C/LinkResolution.jet", CFFI_ALWAYS_LINKED_LIBC, "CFFI_ALWAYS_LINKED_LIBC", CC_PACK_MUSL_EMPTY_LIBS, "CC_PACK_MUSL_EMPTY_LIBS", [String]{"c"})

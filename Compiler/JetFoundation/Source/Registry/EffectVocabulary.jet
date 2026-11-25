@@ -208,6 +208,29 @@ effect_vocabulary_lowered: fn(names: [String]) -> [String] {
     loop name in names -> name.lower()
 }
 
+// The string literals of the list `<name>: [String]{ … }` in `text`, the
+// text of the file `file`, from its head line to the line its closing brace
+// ends; else the build stops. A list view reads this way a list in a package
+// its own package cannot import.
+effect_vocabulary_list_strings: fn(file: String, text: String, name: String) -> [String] {
+    head: "{name}: [String]{{"
+    out := [String]{}
+    inside := false
+    loop line in text.split("\n") {
+        if !inside {
+            if !line.starts_with(head) -> next
+            inside = true
+        }
+        quoted := false
+        loop piece in line.split("\"") {
+            if quoted -> out.push(piece)
+            quoted = !quoted
+        }
+        if line.ends_with("}}") -> return out
+    }
+    build_time_refused("{file} declares no `{name}: [String]{{ … }}`")
+}
+
 // The words of `text`, split at whitespace and at the commas that end enum
 // cases.
 effect_vocabulary_words: fn(text: String) -> [String] {

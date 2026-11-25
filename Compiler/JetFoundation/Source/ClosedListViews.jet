@@ -79,3 +79,9 @@ JET_DATA_PLOT_AGGREGATE_COUNT: #run effect_vocabulary_view_count("Core/Data/Data
 // the ones an XML document declares. They differ only in case, so both are
 // compared in lower case.
 WIRE_ENCODING_COUNT: #run effect_vocabulary_list_view_count("Core/Encoding/XMLEngine.jet", effect_vocabulary_lowered(effect_vocabulary_enum_names("Core/Encoding/XMLEngine.jet", embed_file("toolchain:Core/Encoding/XMLEngine.jet"), "WireEncoding")), "WireEncoding", effect_vocabulary_lowered(effect_vocabulary_enum_names("Core/Encoding/XML.jet", embed_file("toolchain:Core/Encoding/XML.jet"), "XMLEncoding")), "`XMLEncoding` in Core/Encoding/XML.jet", [String]{})
+
+// EncodingFormat picks from ACRONYMS (here its checked copy,
+// SEMA_CASING_ACRONYMS): each Core format is named by its initials, in the
+// lexicon's caps, apart from `ETF`, Erlang's term format, which the lexicon
+// does not list.
+ENCODING_FORMAT_COUNT: #run effect_vocabulary_enum_view_count("Core/Encoding/Encoding.jet", embed_file("toolchain:Core/Encoding/Encoding.jet"), "EncodingFormat", SEMA_CASING_ACRONYMS, "ACRONYMS", [String]{"ETF"})

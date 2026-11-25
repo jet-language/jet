@@ -78,6 +78,11 @@ JetpackVerb: enum {
     }
 }
 
+// JetpackVerb, in lower case, picks from JETPACK_VERBS: each verb this
+// dispatcher routes is a listed Jetpack verb, apart from the hidden `__dev`
+// and `__service-probe`, JetOS's `os`, and `help`, which the list leaves out.
+JETPACK_VERB_COUNT: #run effect_vocabulary_list_view_count("Dispatch/VerbDispatch.jet", effect_vocabulary_lowered(effect_vocabulary_enum_names("Dispatch/VerbDispatch.jet", embed_file("VerbDispatch.jet"), "JetpackVerb")), "JetpackVerb", JETPACK_VERBS, "JETPACK_VERBS", [String]{"dev", "serviceprobe", "os", "help"})
+
 // Read-only commands observe state without repairing or migrating it: a
 // `hangar list` must not create its profile lock or rewrite a drifted pin.
 cli_read_only_command: fn(verb: String, parsed: CLIParsed) -> Bool Never! {
