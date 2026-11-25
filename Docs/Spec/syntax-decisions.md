@@ -3026,7 +3026,7 @@ type has, and suggests a method call. A struct that should act as a
 function hands out a lambda through a method it writes (`triple.as_fn()`).
 
 **D-ROLLBACK-TRAIT**: `Rollback: trait { Snapshot: type; snapshot: fn(self) Snapshot;
-restore: fn(&self, snap: Snapshot) }`; restore total; the
+restore: fn(^self, snap: Snapshot) }`; restore total; the
 compiler-generated field-wise Rollback implementation is the canonical
 implementation.
 

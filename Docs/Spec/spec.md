@@ -2324,8 +2324,8 @@ parameter or turn an unmarked owned slice into a write view.
 A name bound to one map value (`w: ^m[key]`) reads and writes as that value.
 Where a `ViewMut<V>` of the value's type is expected (a return, a parameter),
 it is a window over that one value, used as `w[0]` like the one-element list
-window `^xs[i..i]`. A `slot: fn(m: &[String: [Int]], key: String) ->
-ViewMut<[Int]> from m` whose body binds `w: &m[key]` and returns `w` lets the
+window `^xs[i..i]`. A `slot: fn(m: ^[String: [Int]], key: String) ->
+ViewMut<[Int]> from m` whose body binds `w: ^m[key]` and returns `w` lets the
 caller edit the entry by `s[0].push(1)`. A missing key stops as `m[key]` does,
 and while the window lives the map cannot gain or lose entries (E0220, E0212).
 At a string boundary, fill `View<str>` only from `.trim()`, `.after()`,
@@ -2777,9 +2777,9 @@ before the parameter name and on its type is E0029:
 Error: Jet.DuplicateAccessMarker: `p` has two access markers
   --> file.jet:4:10
     |
-  4 | bad: fn(&p: &&Player) { print(p.hp) }
+  4 | bad: fn(^p: ^^Player) { print(p.hp) }
     |          ^
- Why: The write-access marker `&` before the parameter name conflicts with the take marker `&&` on its type; a parameter can declare only one access marker
+ Why: The write-access marker `^` before the parameter name conflicts with the take marker `^^` on its type; a parameter can declare only one access marker
  Fix: Keep one access marker on the type or receiver and remove the other
 ```
 

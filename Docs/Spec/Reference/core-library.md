@@ -1350,7 +1350,7 @@ of the input. `read_into` appends at most `limit` bytes to the caller's
 bound passes each argument with the access the trait declares, so
 `source.read_into(out, n)` grows the caller's `out` in place. An
 implementation must declare the same access for each parameter that the
-trait writes (`^`) or moves (`^^`); `read_into: fn(&self, buffer: [U8],
+trait writes (`^`) or moves (`^^`); `read_into: fn(^self, buffer: [U8],
 limit: Int)` is E0907.
 
 `write_bytes` writes all of `bytes` or fails; `flush` pushes what the sink
