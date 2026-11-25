@@ -1265,11 +1265,14 @@ ir_core_role_row: fn(p: IRProgram, role: String) -> Int? {
 // Core's builder intrinsics, by role: a call of the Core function that fills
 // jet_builtins role `role` is its operation, never a call
 // (ir_intrinsic_call). Each such role's name starts with `Inline`. The
-// core.math bit copies (InlineFloatBits, InlineFloatFromBits;
-// Core/Math/Math.jet) are the runtime bitcasts' frame-word copy on every tier
-// and in compile-time evaluation, so Core's bit work stays in I64 where Int
-// to_bits would box; their Jet bodies are only what a compiler without this
-// table (the seed) runs. The core.mem rows (Core/Mem/Mem.jet) are the raw
+// core.math bit copies (InlineFloatBits, InlineFloatFromBits, InlineF32Bits,
+// InlineF32FromBits; Core/Math/Math.jet) are the runtime bitcasts'
+// frame-word copy on every tier and in compile-time evaluation, so Core's
+// bit work stays in I64 where Int to_bits would box, and a signaling NaN
+// keeps its bits; InlineFloatSqrt is the IEEE square root and InlineFloatFma
+// the runtime's fma, which x86-64 builds as one instruction behind an FMA3
+// probe. Their Jet bodies are only what a compiler without this table (the
+// seed) runs. The core.mem rows (Core/Mem/Mem.jet) are the raw
 // List layout and bulk List moves, volatile and streaming access, the raw
 // pointer steps, and the raw block copy and fill at the call's one type
 // argument, and the raw heap allocation and release, the memory sentry's
@@ -1283,6 +1286,10 @@ IRCoreIntrinsicRow: struct {
 IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{role: "InlineFloatBits", intrinsic: IRRuntimeIntrinsic.FloatBits},
     IRCoreIntrinsicRow{role: "InlineFloatFromBits", intrinsic: IRRuntimeIntrinsic.FloatFromBits},
+    IRCoreIntrinsicRow{role: "InlineFloatSqrt", intrinsic: IRRuntimeIntrinsic.FloatSqrt},
+    IRCoreIntrinsicRow{role: "InlineFloatFma", intrinsic: IRRuntimeIntrinsic.FloatFma},
+    IRCoreIntrinsicRow{role: "InlineF32Bits", intrinsic: IRRuntimeIntrinsic.F32Bits},
+    IRCoreIntrinsicRow{role: "InlineF32FromBits", intrinsic: IRRuntimeIntrinsic.F32FromBits},
     IRCoreIntrinsicRow{role: "InlineTypeSize", intrinsic: IRRuntimeIntrinsic.TypeSize},
     IRCoreIntrinsicRow{role: "InlineListCapacity", intrinsic: IRRuntimeIntrinsic.ListCapacity},
     IRCoreIntrinsicRow{role: "InlineListReserveExact", intrinsic: IRRuntimeIntrinsic.ListReserveExact},
@@ -1323,7 +1330,8 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> IRIntrinsics Never! {
     intrinsics
 }
 
-// A bitcast reads its one scalar; a core.mem layout, access, pointer or
+// A bitcast reads its one scalar, and the square root its one Float and fma
+// its three; a core.mem layout, access, pointer or
 // block operation is generic over the one type its call instantiates, a raw
 // View over its element and owner types, the
 // raw heap pair is not, a region's reserve reads its size and its release
@@ -1333,6 +1341,10 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
         .FloatFromBits -> ir_bitcast_signature(function, false)
+        .FloatSqrt -> ir_float_op_signature(function, 1)
+        .FloatFma -> ir_float_op_signature(function, 3)
+        .F32Bits -> ir_f32_bits_signature(function, true)
+        .F32FromBits -> ir_f32_bits_signature(function, false)
         .TypeSize | .ListCapacity | .ListReserveExact | .ListAppend | .ListCopy | .VolatileRead | .VolatileWrite | .StreamStore | .PtrOffset | .PtrByteOffset | .MemCopy | .MemFill -> function.generic_params.len() == 1
         .ViewFromRaw -> function.generic_params.len() == 2
         .AllocRaw | .FreeRaw -> function.generic_params.len() == 0

@@ -62,6 +62,10 @@ IRLibraryResult: struct {
 IRRuntimeIntrinsic: enum {
     FloatBits,
     FloatFromBits,
+    FloatSqrt,
+    FloatFma,
+    F32Bits,
+    F32FromBits,
     FunctionAddress(key: String),
     StaticText,
     FaultReport,
@@ -90,6 +94,9 @@ IRRuntimeIntrinsic: enum {
 }
 
 // The IEEE bits of a Float as an I64, and back.
+// Core's Float square root (IROp.Sqrt) and fused multiply-add (the
+// jet_std_math_fma call x86-64 selection builds as vfmadd213sd behind an
+// FMA3 probe), and an F32's binary32 bits as an I64 in 0..<2^32, and back.
 // The code address of the exported function `key`.
 // The immortal String of a literal (the value a ConstText gives).
 // A call of the fault report the linker writes (ir_fault_report_call).
@@ -1192,16 +1199,42 @@ ir_address_target_signature: fn(function: FnBody, arity: Int) -> Bool Never! {
     ir_i64_type(ir_executable_return(function))
 }
 
+ir_f32_type: fn(ty: Type?) -> Bool Never! {
+    written: ty ?? return false
+    ir_untag(written) == Type.Float32
+}
+
+// `count` read Float parameters and a Float result: Core's sqrt and fma.
+ir_float_op_signature: fn(function: FnBody, count: Int) -> Bool Never! {
+    if !ir_intrinsic_signature(function, count) -> return false
+    loop param in function.params {
+        if param.convention != AccessConvention.Read || !ir_float_type(Val(param.ty)) -> return false
+    }
+    ir_float_type(ir_executable_return(function))
+}
+
+// Core's F32 bits read an F32 and return I64; the reverse reads an I64 and
+// returns an F32.
+ir_f32_bits_signature: fn(function: FnBody, to_bits: Bool) -> Bool Never! {
+    if !ir_intrinsic_signature(function, 1) || function.params[0].convention != AccessConvention.Read {
+        return false
+    }
+    input: function.params[0].ty
+    if to_bits -> return ir_f32_type(Val(input)) && ir_i64_type(ir_executable_return(function))
+    ir_i64_type(Val(input)) && ir_f32_type(ir_executable_return(function))
+}
+
 // A call of runtime intrinsic `intrinsic` at its instance `type_args`, built
 // as its operation. rt_static_text of a literal is the literal's immortal
 // String (the ConstText of its data row) as an I64; a bit cast stores its
-// operand in a frame word and loads it back in the other class; an address
-// intrinsic is the FunctionAddress of its export; rt_fault_print is a call of
-// the fault report the linker writes; a core.mem operation is its inline
-// lowering (BuildRoutes.jet ir_core_list_leaf, ir_core_stream_store,
-// ir_core_region, BuildSentry.jet ir_core_volatile, ir_core_mem_block,
-// ir_core_list_append, ir_core_list_copy, ir_core_alloc_raw and
-// ir_core_free_raw, BuildExpr.jet ir_core_ptr_step and
+// operand in a frame word and loads it back in the other class; Core's Float
+// square root is IROp.Sqrt and its fma the runtime's fma call
+// (ir_float_fma); an address intrinsic is the FunctionAddress of its export;
+// rt_fault_print is a call of the fault report the linker writes; a core.mem
+// operation is its inline lowering (BuildRoutes.jet ir_core_list_leaf,
+// ir_core_stream_store, ir_core_region, BuildSentry.jet ir_core_volatile,
+// ir_core_mem_block, ir_core_list_append, ir_core_list_copy,
+// ir_core_alloc_raw and ir_core_free_raw, BuildExpr.jet ir_core_ptr_step and
 // ir_core_view_from_raw).
 ir_intrinsic_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, intrinsic: IRRuntimeIntrinsic, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     word_row: ir_word_row(m)
@@ -1210,6 +1243,10 @@ ir_intrinsic_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, intrinsic: IRRu
         .StaticText -> ir_static_text_call(m, p, b, args, word_row, span)
         .FloatBits -> ir_bitcast(m, p, b, args, float_row, word_row, span)
         .FloatFromBits -> ir_bitcast(m, p, b, args, word_row, float_row, span)
+        .FloatSqrt -> ir_float_sqrt(m, p, b, args, float_row, span)
+        .FloatFma -> ir_float_fma(m, p, b, args, float_row, span)
+        .F32Bits -> ir_f32_bitcast(m, p, b, args, true, word_row, span)
+        .F32FromBits -> ir_f32_bitcast(m, p, b, args, false, word_row, span)
         .FunctionAddress(key) -> ir_address_call(m, p, b, key, args, word_row, span)
         .FaultReport -> ir_fault_report_call(m, p, b, args, word_row, span)
         .TypeSize | .ListCapacity | .ListReserveExact -> ir_core_list_leaf(m, p, b, intrinsic, ir_intrinsic_nodes(args), type_args, span)
@@ -1306,6 +1343,51 @@ ir_reinterpret: fn(m: ^IRModule, b: ^IRBuilder, value: Int, output: Int) -> Int 
     ir_emit(b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
     ir_emit(b.f, IROp.Store, -1, area, 0, value, b.line)
     out: ir_temp(m, b, output)
+    ir_emit(b.f, IROp.Load, out, area, 0, -1, b.line)
+    out
+}
+
+// sqrt(x) of a Float: the IEEE square root, correctly rounded, one
+// operation on every tier.
+ir_float_sqrt: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyCallArg], float_row: Int, span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(b, span, "a Float square root reads one value")
+    value: ir_value_as(m, p, b, args[0].value, float_row, span)
+    if ir_failed(b) -> return -1
+    root: ir_temp(m, b, float_row)
+    ir_emit(b.f, IROp.Sqrt, root, value, -1, -1, b.line)
+    root
+}
+
+// fma(a, b, c) of Floats, rounded once: a call of the runtime's
+// jet_std_math_fma, which x86-64 selection builds as one vfmadd213sd behind
+// an FMA3 probe with that call as its slow path (X64Select.jet ir_x64_fma).
+ir_float_fma: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyCallArg], float_row: Int, span: Span) -> Int Never! {
+    if args.len() != 3 -> return ir_fail_slot(b, span, "a Float fma reads three values")
+    values := [Int]{}
+    loop arg in args {
+        value: ir_value_as(m, p, b, arg.value, float_row, span)
+        if ir_failed(b) -> return -1
+        values.push(value)
+    }
+    ir_runtime(m, b, "jet_std_math_fma", values, float_row)
+}
+
+// An F32's binary32 bits as an I64 in 0..<2^32, stored over a zeroed frame
+// word and read back whole, and the F32 of an I64's low 32 bits. No
+// conversion runs, so a NaN payload and a signaling NaN cross unchanged.
+ir_f32_bitcast: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyCallArg], to_bits: Bool, word_row: Int, span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(b, span, "an F32 bit cast reads one value")
+    f32_row: ir_type_row(m, Type.Float32) ?? return ir_fail_slot(b, span, "type F32")
+    value: ir_value_as(m, p, b, args[0].value, if to_bits -> f32_row else -> word_row, span)
+    if ir_failed(b) -> return -1
+    if !to_bits -> return ir_reinterpret(m, b, value, f32_row)
+    pointer_row: ir_pointer_row(m)
+    area: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, area, 0, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, area, 0, value, b.line)
+    out: ir_temp(m, b, word_row)
     ir_emit(b.f, IROp.Load, out, area, 0, -1, b.line)
     out
 }
