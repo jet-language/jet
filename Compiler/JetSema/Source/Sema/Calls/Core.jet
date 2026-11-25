@@ -1295,12 +1295,6 @@ sema_call_core_declared_effects: fn(record: CoreCallRecord, check: SemaBodyCheck
 // carries its own.
 sema_call_core_record_effects: fn(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], check: ^SemaBodyCheck) -> Bool Never! {
     api: if record.module_name != "" -> "{record.module_name}.{record.member}" else -> record.member
-    sema_call_core_record_effects_as(record, api, span, type_args, result_type, fallibility, default_refs, check)
-}
-
-// The same, reported as `api`: a handle method a host leaf answers reads as
-// the method the program wrote (`ProcessChild.wait`), never as the leaf.
-sema_call_core_record_effects_as: fn(record: CoreCallRecord, api: String, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], check: ^SemaBodyCheck) -> Bool Never! {
     effect_bound := [EffectRowEntry]{}
     declared := [String]{}
     if sema_call_core_declared_effects(record, check, declared) {

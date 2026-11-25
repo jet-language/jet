@@ -4,7 +4,6 @@ use jet_foundation.[
     BodyHandleOp,
     AST_NODE_GENERATED,
     AccessConvention,
-    CORE_BUILTINS_MODULE,
     CallArg,
     Diagnostic,
     EffectRowEntry,
@@ -16,7 +15,6 @@ use jet_foundation.[
     TFailureCarrier,
     TagMarker,
     Type,
-    core_call,
     expr_span,
 ]
 
@@ -242,29 +240,7 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    // The stream routes and the Duration limits are still the host leaves
-    // `jet_builtins.process_spec_<method>`: their Core call facts name the
-    // effects and their row names the runtime export every tier runs.
-    if method == "stdin" || method == "stdout" || method == "stderr" || method == "timeout" || method == "cpu_time_limit" {
-        rejected: SemaMethodSpecialCheck{handled: true, value: None}
-        record: core_call(CORE_BUILTINS_MODULE, "process_spec_{method}") ?? {
-            check.diagnostics.push(sema_error("E0003", span, "`ProcessSpec.{method}` has no host leaf `jet_builtins.process_spec_{method}`", "this ProcessSpec builder lowers onto its jet_builtins host leaf row", "restore the `process_spec_{method}` row in Compiler/Prelude/Core.rows"))
-            return rejected
-        }
-        fallibility: sema_expression_failure_carrier(result)
-        if !sema_call_core_record_effects_as(record, "ProcessSpec.{method}", span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, check) {
-            return rejected
-        }
-        call_args := [TExpr]{receiver_value}
-        widen := [Bool]{false}
-        loop argument in values {
-            call_args.push(argument)
-            widen.push(false)
-        }
-        value: sema_call_core_tree(record, call_args, span, [Type]{}, widen, result, fallibility, None, check) ?? return rejected
-        return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
-    }
-    // Every other method is the ordinary Core source body that fills its
+    // Each method is the ordinary Core source body that fills its
     // jet_builtins role (sema_process_spec_role; `abilities` reports the
     // checked TerminalFact set), so every tier runs the same Jet code.
     effect: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""
@@ -274,9 +250,8 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
 }
 
 // The jet_builtins role of the Core body a ProcessSpec method other than
-// the stream routes and Duration limits calls, given its argument count
-// (`terminal(policy)` fills ProcessSpecTerminalWithPolicy); "" for no such
-// method.
+// `keep_open` calls, given its argument count (`terminal(policy)` fills
+// ProcessSpecTerminalWithPolicy); "" for no such method.
 sema_process_spec_role: fn(method: String, argc: Int) -> String Never! {
     if method == {
         "abilities" -> "ProcessSpecAbilities"
@@ -296,6 +271,11 @@ sema_process_spec_role: fn(method: String, argc: Int) -> String Never! {
         "detached" -> "ProcessSpecDetached"
         "terminal" -> if argc == 1 -> "ProcessSpecTerminalWithPolicy" else -> "ProcessSpecTerminal"
         "under" -> "ProcessSpecUnder"
+        "stdin" -> "ProcessSpecStdin"
+        "stdout" -> "ProcessSpecStdout"
+        "stderr" -> "ProcessSpecStderr"
+        "timeout" -> "ProcessSpecTimeout"
+        "cpu_time_limit" -> "ProcessSpecCPUTimeLimit"
         "plan" -> "ProcessSpecPlan"
         "run" -> "ProcessSpecRun"
         "run_checked" -> "ProcessSpecRunChecked"
