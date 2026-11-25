@@ -1280,6 +1280,7 @@ sema_contract_rule_hears: fn(marker: String, callee: String, answer: SemaContrac
         if sema_comptime_body_value_find(check.context, check.environment.module_identity, owner, rule.span, call_span) == .Val(landed) {
             return !sema_call_rule_rejects(landed.value, call_span, check.diagnostics)
         }
+        if sema_comptime_body_source_row(check.context, check.environment.module_identity, owner, rule.span, call_span) != None -> return true
         call: sema_rule_call_value(graph, Val(target), callee, call_span, call_span, [CallArg]{}, None, None, call_span, None, [String]{}, owner, check)
         sema_call_rule_stage(check, owner, owner, rule, call, call_span)
     }

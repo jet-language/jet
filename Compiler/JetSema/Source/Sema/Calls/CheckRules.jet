@@ -181,8 +181,12 @@ sema_call_rules_hear: fn(
     // A check without the registration graph (a compile-time run's own
     // program) hears no rule; the compile's own check of the same call does.
     graph: check.program.registration_graph
-    call := sema_rule_call_value(graph, callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, source, sema_rule_table_keys(table, frame, check.scopes), owner, check)
+    keys: sema_rule_table_keys(table, frame, check.scopes)
+    // Each waiting rule takes its own row, made for it, so none is copied:
+    // a call most often has one rule.
     loop index in waiting {
+        if sema_comptime_body_source_row(check.context, check.environment.module_identity, site_owner, rules[index].span, name_span) != None -> next
+        call := sema_rule_call_value(graph, callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, source, keys, owner, check)
         call.words[SEMA_CALL_RULE_PAIRED_WORD] = if rules[index].paired -> 1 else -> 0
         sema_call_rule_stage(check, owner, site_owner, rules[index], call, name_span)
     }
@@ -363,15 +367,13 @@ sema_call_rules_hold: fn(hearing: SemaCallRuleHearing, held: ^^[Diagnostic], che
     false
 }
 
-// Stages one rule's site at a call: the rule's marker value and the call's
-// row, which the driver's batch of the rule hears (sema_call_rule_batches).
-// The site is keyed by `site_owner`, the body's key or a stand-in's.
-sema_call_rule_stage: fn(check: ^SemaBodyCheck, owner: String, site_owner: String, rule: SemaCallRule, call: SemaCallRuleHeard, site_span: Span) Never! {
-    if sema_comptime_body_source_row(check.context, check.environment.module_identity, site_owner, rule.span, site_span) != None {
-        return
-    }
+// Stages one rule's site at a call, which no row holds yet: the rule's
+// marker value and the call's row, which the driver's batch of the rule
+// hears (sema_call_rule_batches). The site is keyed by `site_owner`, the
+// body's key or a stand-in's.
+sema_call_rule_stage: fn(check: ^SemaBodyCheck, owner: String, site_owner: String, rule: SemaCallRule, call: ^^SemaCallRuleHeard, site_span: Span) Never! {
     destination_key: sema_comptime_body_destination_key(site_owner, rule.span, site_span)
-    sema_comptime_body_source_append(
+    sema_comptime_body_source_push(
         check.context,
         SemaComptimeBodySource{
             module_identity: check.environment.module_identity,
@@ -386,7 +388,7 @@ sema_call_rule_stage: fn(check: ^SemaBodyCheck, owner: String, site_owner: Strin
             span: rule.span,
             site_span: site_span,
             prepared: [SemaComptimePreparedLocal]{},
-            rule: Val(SemaComptimeRuleSite{module_identity: rule.module_identity, marker: rule.marker, value: rule.value, call: call}),
+            rule: Val(SemaComptimeRuleSite{module_identity: rule.module_identity, marker: rule.marker, value: rule.value, call: call.move()}),
         },
     )
 }

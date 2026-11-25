@@ -199,7 +199,13 @@ sema_comptime_body_source_row: fn(context: SemaCheckContext, module_identity: Mo
 // Only capture deduplicates, returning the first existing row; the index
 // keeps a place's first row, so truncation can drop each appended row's entry.
 sema_comptime_body_source_append: fn(context: ^SemaCheckContext, source: SemaComptimeBodySource) Never! {
-    context.comptime_body_sources.push(source.copy())
+    sema_comptime_body_source_push(context, source.copy())
+}
+
+// sema_comptime_body_source_append of a row the caller hands over, which is
+// moved in, not copied: a rule stages one row per heard call.
+sema_comptime_body_source_push: fn(context: ^SemaCheckContext, source: ^^SemaComptimeBodySource) Never! {
+    context.comptime_body_sources.push(source.move())
     sema_comptime_body_source_index(context, context.comptime_body_sources.len() - 1)
 }
 
