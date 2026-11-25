@@ -532,9 +532,8 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             else -> None
         }
         "core.files" -> if member == {
-            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__list_directory" | "__directory_fd" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
+            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__list_directory" | "__directory_fd" | "__walk_parallel_raw" -> Val("FS.Read")
             // #3593 provider leaves behind Core/Files/files.jet.
-            // The compiler-private non-blocking open only reads (RawHostKeys.jet).
             "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "try_lock" -> Val("FS.Write")
             else -> None
         }

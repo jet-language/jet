@@ -1,8 +1,7 @@
 // The typed call contracts of the Core calls no Core declaration types: the
-// compiler-owned plugin handle's `plugin.load`, the arity-picked network
-// forms of `tls.client` and `net.unix_connect`, and the compiler's raw
-// spelling of `files.open_nonblocking`. Every other Core row's call is
-// checked against its Core declaration (sema_call_core_check_fixed_record).
+// compiler-owned plugin handle's `plugin.load` and the arity-picked network
+// forms of `tls.client` and `net.unix_connect`. Every other Core row's call
+// is checked against its Core declaration (sema_call_core_check_fixed_record).
 
 // The one argument default a typed Core parameter carries: the parameter's
 // struct type built from its declared field defaults.
@@ -131,16 +130,8 @@ core_sig_plugin_load: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSign
     Val(signature)
 }
 
-// `files.jet_std_files_open_reader_nonblocking(path)`: the raw spelling the
-// compiler's own sources call until they call `files.open_nonblocking`.
-core_sig_files_nonblocking: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
-    if request.module_name != "core.files" || request.member != "jet_std_files_open_reader_nonblocking" -> return None
-    Val(core_sig(request.module_name, request.member, [CoreCallTypedParameter]{core_sig_positional(Type.String, AccessConvention.Read)}, Val(core_sig_result(core_sig_named("FileReader"), core_sig_named("IOError")))))
-}
-
 core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     if core_sig_network(request) == Val(network) -> return Val(network)
-    if core_sig_files_nonblocking(request) == Val(files) -> return Val(files)
     core_sig_plugin_load(request)
 }
 
