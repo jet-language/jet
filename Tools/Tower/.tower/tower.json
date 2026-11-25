@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114289,
+    "rev": 114295,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77998,7 +77998,7 @@
       "id": "c0hnoa1d",
       "num": 7037,
       "title": "Edit marks at call sites: `^` on every named argument a call changes, never required on receivers, inserted by jet fmt",
-      "body": "Owner direction on 2026-11-25, to be decided as ballot D-CALLSITE-MARK3 (reopening D-CALLSITE-MARK2=A, card #6586): a call writes `^` before each named argument it changes, as in `grow(^xs)`; a receiver never needs a mark (`xs.push(4)`); a move at a name's last use needs no mark, because it is a backend fact and not a frontend requirement, but a written `^^` is accepted and checked; and `jet fmt` inserts every required mark from checked facts with no manual work at any of the existing call sites. The owner also fully rejected UFCS for now (D-UFCS1=B stands), since pipes give chaining. Sema already computes every site: `jet audit writes` lists them and E0228 carries a Safe edit under #Policy(writes: .Explicit) (Docs/Spec/Reference/cli.md:1425-1436). Owner answers (2026-11-25): a move at a name's last use needs no `^^` but a written one is kept and checked; receivers carry no mark, as in other languages; jet fmt leaves optional marks as written; #Policy(writes: .Explicit) is deleted. Owner confirmed (2026-11-25): every named argument a call changes carries `^`, with no exceptions; a parameter that is already writable (`fn load(buf: ^Buffer) { fill(^buf) }`) is marked like any other argument. Only receivers are unmarked.",
+      "body": "Owner direction on 2026-11-25, to be decided as ballot D-CALLSITE-MARK3 (reopening D-CALLSITE-MARK2=A, card #6586): a call writes `^` before each named argument it changes, as in `grow(^xs)`; a receiver never needs a mark (`xs.push(4)`); a move at a name's last use needs no mark, because it is a backend fact and not a frontend requirement, but a written `^^` is accepted and checked; and `jet fmt` inserts every required mark from checked facts with no manual work at any of the existing call sites. The owner also fully rejected UFCS for now (D-UFCS1=B stands), since pipes give chaining. Sema already computes every site: `jet audit writes` lists them and E0228 carries a Safe edit under #Policy(writes: .Explicit) (Docs/Spec/Reference/cli.md:1425-1436). Owner answers (2026-11-25): a move at a name's last use needs no `^^` but a written one is kept and checked; receivers carry no mark, as in other languages; jet fmt leaves optional marks as written; #Policy(writes: .Explicit) is deleted. Owner confirmed (2026-11-25): every named argument a call changes carries `^`, with no exceptions; a parameter that is already writable (`fn load(buf: ^Buffer) { fill(^buf) }`) is marked like any other argument. Only receivers are unmarked. Ballot D-CALLSITE-MARK3 posted 2026-11-25 (reviewed by ReviewCallMark3); its review is Docs/Audits/2026-11-25-call-marks-review.md (in the master checkout, to land on dev). About 105,000 call sites gain a mark, all inserted by jet fmt.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G2",
@@ -78011,7 +78011,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Pip",
+          "text": "Posted D-CALLSITE-MARK3 to the owner; recorded three tool defects the review found."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -78057,6 +78063,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-25T18:17:12.350Z"
+        },
+        {
+          "n": 6,
+          "text": "Independent of the ballot: the call-mark fix for a slice argument lands in the wrong place (`sort_part(xs[0..2])` became `xs&[0..2]`, which does not compile) because `expr_source_start` has no slice arm (Compiler/JetFoundation/Source/AST/Expressions.jet:809-818, called from CallMarks.jet:122), and `jet fix` still prints \"applied 1 fix\" in file, package and --dry-run modes because its rollback check misses the new error (Compiler/JetCLI FixCommands.jet:427-456; cause not yet isolated between 47-66 and 102-110). Proof: a case where the slice fix compiles, and a case where a fix that adds an error is rolled back and reported.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:14:02.620Z"
+        },
+        {
+          "n": 7,
+          "text": "Independent of the ballot: `jet fix` makes a binding immutable while a call that may change it is unresolved (with `badsig: fn(n: &Missing)`, it rewrote `k := 2` to `k: 2` although `badsig(k)` may change `k`), and `jet fix` on a file that does not parse prints \"no changes made\" without naming the parse error (probed on jet a0.0.46). Proof: one case for each.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:14:03.742Z"
+        },
+        {
+          "n": 8,
+          "text": "Independent of the ballot: the refusal of a write through a computed pipe head leaks the internal name `__jet_pipe_174` instead of naming `<>` (Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3540-3570 never checks `pipe_value_is_name`, AST/Expressions.jet:87; location inferred), and E0228 says the callee \"reads this input\" for takes such as `seal(&&st.buf)` (CallMarks.jet:115, 184-185). Proof: corrected texts with UI snapshots.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T23:14:04.877Z"
         }
       ],
       "refs": [],
@@ -78064,8 +78097,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T18:17:12.350Z",
-      "updated": "2026-11-25T18:35:24.899Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-25T23:14:07.729Z",
+      "updatedBy": "Pip",
+      "criteriaLastN": 8
     }
   ],
   "decisions": [
@@ -142050,6 +142084,276 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-25T22:34:30.386Z"
+    },
+    {
+      "id": "D-CALLSITE-MARK3",
+      "cardId": "c0hnoa1d",
+      "group": "language",
+      "title": "Calls write ^ before each named argument they change",
+      "situation": "Today a Jet call is written plain, and only the signature says that it changes an argument (D-CALLSITE-MARK2=A, ratified 2026-11-06). A reader of grow(xs) cannot tell from that line that xs changes, and a diff or a web page shows no editor hints. The answers were an opt-in policy, an audit command and editor hints; only four test files use the policy. On 2026-11-25 you ruled that a call writes ^ before every named argument it changes, that receivers stay unmarked, and that jet fmt inserts every required mark. This ballot settles the mechanism around that ruling: the error and its fix, cheap mark placement in fmt, the editor, and the cutover of about 105,000 call sites.",
+      "gist": "Should a call write ^ before each named argument it changes, with jet fmt and the editor writing every mark for you?",
+      "lesson": "A signature says what a function does to each input: a plain parameter reads it, ^ changes it and ^^ takes it. A call-site mark repeats that fact where the call is written, so a reader of grow(^xs) sees the change without opening grow. The compiler checks each mark against the signature, so a mark can never claim a change that does not happen.",
+      "explainer": "## Read the example\n\n`grow: fn(xs: ^[Int])` declares that `grow` changes the list it gets. Today the call reads `grow(xs)`, exactly like a call that only reads. Under A the call reads `grow(^xs)`, and the compiler refuses `grow(xs)` with a fix that writes the mark.\n\n## What stays as it is\n\nSignatures keep their marks. A method's receiver stays plain, as in Swift, Rust and C#: `xs.push(4)`. A move at a name's last use needs no mark, though `seal(^^buf)` may be written there and is checked.\n\n## Who types the marks\n\nNobody has to. `jet fmt` and `jet fix` write every missing mark from the checked program. In the editor, the error's quick fix and fix-on-save write the same marks, and completion offers `^xs` in a slot that changes its argument.",
+      "story": "Mira reviews a teammate's change. One line says `apply_discount(order, code)`. Today she must open `apply_discount` to learn that it changes `order`, because the review page shows no editor hints. Under A the line reads `apply_discount(^order, code)`, so the change is visible in the diff itself.\n\nHer teammate never typed the mark. He wrote the plain call, the editor underlined `order` with the missing-mark error, and saving the file applied the fix. Had he been on the command line, `jet fmt` would have written it.",
+      "inWild": "// C#: ref is written at the call as well as in the signature, even when forwarding; receivers are plain.\n// https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/ref\nGrow(ref xs);\n// Swift: an inout argument is written &xs, even when it is already inout; a mutating receiver is plain.\n// https://docs.swift.org/swift-book/documentation/the-swift-programming-language/functions/\ngrow(&xs); xs.append(4)\n// Rust: a fresh mutable borrow is written &mut xs; method receivers borrow automatically.\n// https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html\ngrow(&mut xs); xs.push(4);\n// Mojo: mut sits only in the signature, so the call is plain; a move into a var parameter is written xs^.\n// https://mojolang.org/docs/manual/values/ownership/\ngrow(xs); take(xs^)\n// Hylo: an inout argument is written &xs, and so is a mutating receiver.\n// https://github.com/hylo-lang/specification/blob/main/spec.md\ngrow(&xs); &xs.append(4)",
+      "detail": "## What the ruling fixes and what this ballot settles\n\nYour 2026-11-25 ruling fixes the rule itself. A call writes `^` before every named argument it changes, including one that is already a `^` parameter. Receivers are never marked. A take at a last use needs no mark, but a written `^^` there is accepted and checked, and fmt leaves it as written. `jet fmt` inserts every required mark. `#Policy(writes: .Explicit)` is deleted, and UFCS stays rejected (D-UFCS1=B); pipes give chaining.\n\nOption A is that ruling. This ballot settles the mechanism around it: which arguments count, how wrong marks are refused and fixed, how fmt places marks cheaply, what the editor does, and what is deleted. Options B, C and D record the alternatives the ruling set aside, so the record states their costs. They are not open questions.\n\n## The rule, exactly\n\nA named argument is a place rooted at a name: a name, `self`, or either followed by fields, indexes or ranges. That is the place `sema_receiver_mark_place_root` already recognizes (Compiler/JetSema/Source/Sema/Ownership/Checks.jet:4765-4773). A literal, a call result, `x.copy()` or a lambda is fresh, so it never takes a mark.\n\n\n- A named argument bound to a `^` parameter must be written `^place`. A missing mark is E0228 `Jet.CallMarkRequired`, now a default error with no policy.\n\n- The mark sits before the root of the place: `sort_part(^xs[0..2])`, `grow(^st.items)`. A labeled argument writes the label first: `copy(to: ^dst, from: src)`.\n\n- A whole name bound to a `^^` parameter may be written plain or `^^name`. Either way, a later use is E0209 naming the call.\n\n- `^` where the parameter takes, or `^^` where it only changes, is E0228 with a Safe replacement.\n\n- A mark on a receiver, on a read argument or on a fresh value is E0225 `Jet.UnusedPlaceMark` with a Safe removal. `^xs.push(4)` is therefore refused, and the fix writes `xs.push(4)`.\n\n- `^^` on a name whose type copies, or on a function item, is E0225 with a Safe removal. The call copies, so the name stays usable and a take mark would be false.\n\n- `^^` on a field, as in `seal(^^st.buf)`, is E0225 with a Safe rewrite to `seal(st.buf.move())`. A field take keeps `owner.field.move()` (Docs/Spec/spec.md:2282-2283).\n\n- Operators are never marked. `xs[i] = v`, `n += 1` and `a == b` have no argument slot to hold a mark, as in C#.\n\n- One rule here goes beyond the ruling. `name.move()` written straight into a `^^` parameter is E0225 with a Safe rewrite to `^^name`, so a call take has one spelling. It amends D-MOVE-SIGIL1's `x.move()` for call arguments only.\n\n- A constructor or a variant payload is no `^^` parameter, so `Dyn.Text(text.move())` keeps its spelling (spec.md:2213-2214). Every other value position keeps `x.move()` too.\n\n## Edge cases\n\n\n- Generic and trait-bound calls take marks from the bound's signature: `put_one(^xs, 9)` and `use_filler(Ones{n: 2}, ^xs)` checked on a0.0.46 in the old spelling.\n\n- A stored function value takes marks from its function type: `st.action(^m)`. This amends D-FNVAL-WRITE1's \"called plainly\".\n\n- A method call marks its arguments, never its receiver: `st.add_into(^xs)`.\n\n- A closure that captures `xs` and changes it marks the write inside its body. Calling the closure is plain, because the call passes no argument.\n\n- A task call follows the same rule. `task ^^name { … }` keeps its capture mark, and `t.join()` is a receiver, so it stays plain.\n\n- A function that writes only on some branches is still a `^` parameter, so the call is marked. The signature decides, never the body.\n\n- A call resolves to one declaration before marks are checked, so the mark follows that declaration. Dynamic dispatch through a trait value uses the trait method's signature.\n\n- Two marks on one name in one call stay E0204, unchanged.\n\n## Pipes\n\nA pipe whose head is a name lets its first step change that name in place, written `^<>`: `xs |> grow(^<>)`. Today such a step already changes `xs` in place; a probe printed the grown length.\n\nThat contradicts ratified D-PIPE1=A. Its text says a first step that also writes the name keeps the hidden binding, which is immutable (Docs/Spec/syntax-decisions.md:949-953). A takes your words \"pipes give chaining\" as the authority to amend D-PIPE1, so the in-place write becomes the rule.\n\nThe `<>` of a computed head or of a later step stays a hidden read-only value, as D-PIPE1 lowers it. A writing step there is refused, as today. Today's message leaks a hidden name: \"Cannot edit through `__jet_pipe_174`\". Under A it names `<>` and offers binding the head to a name first.\n\n`^<>` gives a registered token a new use. So the `<>` row (Compiler/JetFoundation/Data/Syntax/Spellings.jet:71) and the sigil table (Tests/Guards/SigilMeaningTable/sigil_meaning_table.jet:209) gain it.\n\n## How fmt places the marks, and what that costs\n\nToday plain layout never compiles (Compiler/JetCLI/Source/CLI/Host.jet:4275-4302), and editor formatting is text-only (Compiler/JetLSP/Source/LSP/Formatting.jet:24-31). The compiling fmt passes are `--explicit-copies` and `--explicit-failures` (Front.jet:358-361).\n\nThose two share `jet_cli_fmt_policy_marks` (Host.jet:4199-4269), which compiles each file twice. The first compile refuses on any other error (Host.jet:4205-4208), and the second prepends a policy (Host.jet:4213). No fmt pass writes call marks today; under the writes policy only `jet fix` does.\n\nThe design removes each cost:\n\n\n- Layout never waits for a check. A file that parses is laid out exactly as today.\n\n- Marks come from one compile per package. The ordinary check already carries every E0228 Safe edit, so no policy is prepended.\n\n- The shared machinery becomes one checked-insertion pass for call marks, copies and failures alike. So the two compiles per file go for all three.\n\n- An error blocks only the marks it touches. An error in a declaration, such as an unknown type in a signature, blocks the mark at every call that resolves through it, in any body.\n\n- An error inside a body blocks only the calls whose callee or argument place did not resolve. fmt names each blocked call and its error.\n\n- A file that does not parse gets no marks and keeps its text. fmt prints one line naming the parse error.\n\n- fmt inserts marks only. It never removes or adds an optional `^^`, never applies another fix, and re-parses the result under the structure guard (Host.jet:4292).\n\n- `jet fmt --check` runs the same path, so CI reports a missing mark as a dirty file.\n\n- `--stdin-path` checks the buffer against its package. Editor fix-on-save takes the marks from the server's last check instead, so it never compiles again.\n\nThe cost is real today. On a0.0.46, `jet fmt --check` of Examples/Systems/Files/CompressZstdStream.jet at c137227f92 took 18 to 56 ms. `jet check` of the same file took 1.4 to 2.3 s, and a nine-line file checked in about 27 ms.\n\nSo a marking fmt costs one package check. The build card measures that on the repository and on single files, and owns making it cheap.\n\n## The editor and the beginner path\n\nA beginner writes `grow(xs)`. The editor shows E0228 with its preferred quick fix, which comes from the Safe edit (Compiler/JetLSP/Source/LSP/CodeActions.jet:28-80). A new `source.fixAll` code action applies every Safe mark insert from the editor's last check. Today the server offers only quickfix, refactor.rewrite and source.organizeImports (Requests.jet:123).\n\nCompletion inside a `^` slot inserts `^name`, and signature help shows the `^T` parameter. On the command line, `jet run` prints \"Fix: write `^xs`\", and `jet fix` applies it.\n\nInlay hints drop the argument `^`, which the text now shows. Today one hint label joins the parameter name and its mark (Compiler/JetLSP/Source/LSP/Hints.jet:132-175), so A splits it and keeps the name. Receiver `^` and `^^` hints stay, and a `^^` hint shows only where no `^^` is written. The underline of changed names stays (Tokens.jet:120-127).\n\n## Diagnostics\n\n\n- E0228 `Jet.CallMarkRequired` (Compiler/Prelude/Diagnostics.jet:4327-4350) loses its policy wording at 4331, 4332, 4339 and 4343. It names the whole place, for example \"write `^st.items`\", and its fix names `jet fmt` and `jet fix`. It stays Opinion with a Safe edit, and its UI snapshot is replaced.\n\n- The edit must sit before the place root. Today it sits at `expr_source_start` of the argument (Compiler/JetSema/Source/Sema/Ownership/CallMarks.jet:122). That function has no arm for a slice, so a slice falls to the default arm (Compiler/JetFoundation/Source/AST/Expressions.jet:816).\n\n- So on a0.0.46 the fix for `sort_part(xs[0..2])` wrote `xs&[0..2]`, which then failed with \"This operator works on integer values only\". An index is placed right: `bump(xs[0])` became `bump(&xs[0])`.\n\n- `jet fix` still reported \"applied 1 fix\", for a file or a package, and `--dry-run` said \"would apply 1 fix\". Its rollback check (Compiler/JetCLI/Source/CLI/FixCommands.jet:427-456) missed the new error. Both defects are fixed with A, each with a regression case.\n\n- E0225 (Diagnostics.jet:4279-4301) today means a place mark sits where nothing writes or takes a named place. A receiver mark on a writing method does write, so its meaning, message, why and safety text are all rewritten.\n\n- Each new E0225 case gets a UI snapshot: receiver, read argument, fresh value, `.move()` argument, field `^^`, and `^^` on a copied type.\n\n- Today's extra-mark text is false for takes. On a0.0.46, `seal(&&st.buf)` and `take_n(&&n)` with an `Int` both say the callee reads this input (CallMarks.jet:115 and 184-185). The E0225 cases above replace it.\n\n- E0003 \"expected a value, found `^`\" no longer fires for an argument mark (CallMarks.jet:191-193).\n\n- A dead-key layout types `^s` as `ŝ`. The dead-key fixes already planned on card #6998 apply to an unknown name such as `ŝtate` and offer `^state`.\n\n## What is deleted or rewritten, and where the old fact lives\n\nThe fact \"calls carry no marks\" lives in many places, and each changes in the same cutover.\n\n\n- Policy: `writes:` in Compiler/JetParser/Source/Parser/Declarations/Policies.jet:205 and 216, and Compiler/JetFoundation/Source/Policy/Policy.jet:30, 59, 67, 222, 319, 409 and 480. Also SyntaxCodec.jet:4278 and 4308, and Formatter/Statements.jet:181.\n\n- Sema: the policy gate in CallMarks.jet:97-156 and the `writes_explicit` flag in Scopes.jet (1209, 1246-1248, 1338, 2392, 2428, 2493, 2793, 2821, 3389 and 3455). Also Statements.jet:1431, Checks.jet:4125, 4700 and 4971, FunctionMemory.jet:656, and AuditCopies.jet:48 and 77-78.\n\n- Kept and generalized: Host.jet:4159-4164 and 4199-4269 hold the copies and failures policies and their shared mark pass. They serve `--explicit-copies` and `--explicit-failures`, so they are not deleted.\n\n- `jet audit writes`: Compiler/JetCLI/Source/CLI/AuditWrites.jet works only by prepending the policy (line 18), so it goes. So does cli.md:1428-1438, which still shows the stale `mark=<&|&&>`.\n\n- Its plan arm goes too: Front.jet:141 and 326 with its other `.AuditWrites` arms, and Host.jet:4973, 4998 and 5166-5168. So do CheckReceipt.jet:295, Entry.jet:1557, Publish.jet:678, RemoteRun.jet:188 and TestSettingLayers.jet:401.\n\n- Also InspectB.jet:993-1004, hot-text.list:5765 and 8971, and the audit rows in six Compiler/JetCLI/Tests files. The audit also listed changed receivers and unwritten takes. Under A that listing lives only in editor hints.\n\n- Registry and syntax data: Spellings.jet:71-74 and CoreSurface.jet:362-371 in Compiler/JetFoundation/Data/Syntax. Also SyntaxDictionaryData.jet:187-188 and DiagnosticRows.jet:3862-3871.\n\n- The sigil table row at sigil_meaning_table.jet:174 teaches `^items.push(x)`, which A refuses, so its example changes. Its `f(^^xs)` row at line 176 stays.\n\n- Compiler code: Formatter/Expressions.jet:2950-2951, Parser/Expressions.jet:2503 and 2576-2584, and AST/Expressions.jet:140, where `CallArg.mark` already exists. Sema notes sit at Checks.jet:519 and 4877, WindowFacts.jet:7, Scopes.jet:1246 and FunctionMemory.jet:647.\n\n- Editor: Hints.jet:132 says \"since calls carry no marks\", and Tokens.jet:120. In Tools/Editors, the TreeSitter grammar.js:25-26, 69, 198 and 222, with its generated src files rebuilt. Also Zed highlights.scm:100, 109 and 126-130, jet.tmGrammar:203 and Highlights.jet:669-676.\n\n- Docs: spec.md:2187-2201, 2227-2237, 2259-2273 and 2277-2287. Also syntax-decisions.md:91-93, 949-953, 2246, 3686 and 3728-3745, core-library.md:892 and 4101, and syntax-surface.jet:551. Plus the memory-marks proposal at lines 26, 124 and 264.\n\n- Prose outside Docs: Examples/Text/README.md:29, Tools/AgentEval/jet-context-capsule.md:97 and Tools/Editors/Vscode/README.md:152. The generated page Docs/Site/Dist/e/Jet.CallMarkRequired is rebuilt.\n\n- Tests that use the policy: four `.jet` files and their outputs, among them Tests/UI/writes_policy_call_marks, Tests/Cases/Fmt/FmtKeepsCallMarksUnderWritesPolicy and Tests/Cases/Migrations/MarkCaret1RewritesEveryMark.\n\n- Also the writes-audit case in Tests/Cases/Ownership, two inspect-guarantees outputs, Tests/UI/policy_conflicting_module.stderr, Tests/diagnostics_census.tsv and the E0225 snapshots Tests/UI/move_mark_*.\n\n- Migration: a `call-mark3` row in LANGUAGE_REWRITES (Spellings.jet:111-122). It runs the checked insertion, because a text rewrite cannot see signatures. It also applies the `.move()` rewrite above, which fmt never does.\n\n## Code that no compile checks\n\nNo manual work also covers Jet that no compile reaches. The repository holds 853 Jet fences in Markdown, 433 `.template` files (427 under Tests/Cases), Jet inside test strings, and about 3,059 `.stderr` snapshots that quote source lines.\n\nThe migration runs the checked insertion on every runnable fence, checked the way Tests/Guards/doc_blocks.jet checks them, and the snapshots are regenerated. Compiler/Migrations/MarkCaret1.jet shows the earlier text migration covering fences and snapshots.\n\nA fragment that does not check is listed by the migration with its path. That residue is counted when the row is built; it is not measured yet.\n\n## How many call sites gain a mark\n\nMethod: a script lists the tracked `.jet` files under Core, Compiler, Jetpack, Tools, Examples and Tests. It blanks comments and string text and collects every `name: fn(…)` declaration with each parameter's mark. Then it maps each call's arguments by label or position and counts named arguments bound to a `^` parameter.\n\nA site counts as \"certain\" when every declaration with that name agrees the slot changes. The looser \"possible\" count needs only one such declaration.\n\nCalibration: at `5ef77a52ad^`, the last tree where every changing argument carried a written `&`, the code holds 67,629 such marks. The certain count marked 67,003 slots, 65,448 of them right.\n\nSo the certain count has precision 65,448 / 67,003 = 0.977 and recall 65,448 / 67,629 = 0.968. The script's printed line, precision 0.840 and recall 0.979, belongs to the looser count.\n\nToday, on dev at `de8a554abe1`, 22,953 files hold 1,050,119 calls. The certain count is 104,619 sites in 1,616 files: Compiler 82,909, Core 16,266, Tests 2,312, Jetpack 2,002, Tools 995 and Examples 135.\n\nScaled by recall over precision, that is about 105,600, so about 105,000 sites change. The possible count is 126,336. About two in three of those pass on a name that is already a `^` parameter, and the ruling marks those too.\n\nFor comparison, D-CALLSITE-MARK2 counted 69,758 argument marks and about 29,800 receiver marks on dev `b486d6c09a` (2026-11-05). That was a raw text count. The same text pattern finds 69,817 at `5ef77a52ad^`, including comments, strings, fixtures and Docs.\n\nThe cutover commit `5ef77a52ad` changed 4,097 files, but it also changed other spellings, so that is no count of marked files. Since `5ef77a52ad^`, calls grew from 680,361 to 1,050,119, and certain sites grew in Compiler from 60,524 and in Core from 1,325.\n\nUnder A no receiver gains a mark. The script found 909 arguments written as a whole-name `x.move()`. Of those, 408 certainly reach a `^^` parameter and 610 possibly do; each becomes `^^x`.\n\n## Probes\n\nThe installed jet is a0.0.46, which still spells the marks `&` and `&&`. Every probe used that spelling under `#Policy(writes: .Explicit)`, the nearest thing to A that runs.\n\n- The same-program example checks and prints 2. The policy reports five E0228 sites with fixes, and `jet fix` inserted every mark.\n\n- Generic, trait-bound, trait-value, function-value, field, labeled and index arguments all got the right mark.\n\n- A pipe step `xs |> grow(<>)` changed `xs` in place, and the fix wrote `grow(&<>)`. With a computed head, `make() |> grow(<>)` was refused with the leaked `__jet_pipe_174` name.\n\n- An unknown type in one function's signature removed the mark at its call in another body. `jet fix` then also rewrote that argument's `k := 2` to `k: 2`, a binding the call may change.\n\n- A type error inside one body left the marks in that body in place.\n\n- A file with a parse error got \"no changes made\" with no line naming the error.\n\n## Decisions this amends\n\n\n- D-CALLSITE-MARK2=A: its call half is reversed. Calls mark changed arguments; the policy, `jet audit writes` and argument hints go. Its signature rules, receiver rule and its law that a call never copies on its own stand.\n\n- D-MOVE-SIGIL1=A and D-MARK-CARET1: \"calls stay unmarked\" becomes \"calls mark changed arguments; a `^^` take mark is optional\". A whole-name `x.move()` argument into a `^^` slot becomes `^^x`.\n\n- D-PIPE1=A: a first step on a named head changes it in place through `^<>`, and syntax-decisions.md:949-953 is rewritten. A computed head stays read-only.\n\n- D-BIND-MARK1=A: its text on `^` surviving only as the policy's audit mark changes. `^buf.push(` versus `^buf:` stays, now as E0225.\n\n- D-FNVAL-WRITE1=A: a stored function value is called with marks, `st.action(^m)`, as that decision first said.\n\n- D-COPY-DEFAULT1=A and D-CAP-RECEIVER1=D: the historical notes point here.\n\n- D-RECEIVER-MARK1=A (2026-10-30) stands: receivers are plain and changed arguments are marked. A returns to that rule in the `^` spelling, with tools writing the marks.\n\n- Card #6418 criterion c9 (inlay hints) narrows to receivers and unwritten takes.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Mark every changed named argument; fmt and the editor write the marks",
+          "detail": "A call writes `^` before every named argument it changes, and the compiler refuses a missing or wrong mark with a Safe fix. Receivers stay plain, and `^^` at a last-use take is optional and checked. `jet fmt`, `jet fix`, the editor's quick fix and fix-on-save write the marks.\n\nBeginner path: write `grow(xs)`, see the error, apply the fix or save. Expert path: type `grow(^xs)` directly, and add `^^` where a take should stand out.",
+          "technical": "E0228 becomes a default error whose Safe edit inserts the mark before the place root. E0225 refuses receiver, read, fresh, field-take and copied-take marks, and rewrites a whole-name .move() argument to ^^name. fmt lays out at once, then inserts marks from one compile per package, shared with the copies and failures passes. The writes policy, its audit and the argument hint are deleted.",
+          "code": "Buffer: struct { bytes: [U8] }\nfill: fn(buf: ^Buffer) { buf.bytes.push(U8{7}) }\nload: fn(buf: ^Buffer) { fill(^buf) }      // buf is ^ here too: still marked\nseal: fn(buf: ^^Buffer) -> Int { buf.bytes.len() }\n\nrun: fn() {\n    ^buf: Buffer{bytes: [U8]{}}\n    load(^buf)                  // required: load changes buf\n    buf.bytes.push(U8{1})       // receiver: never marked\n    print(seal(buf))            // last use: seal(^^buf) also accepted\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep today's plain calls (D-CALLSITE-MARK2=A)",
+          "detail": "Calls stay plain and the signature alone says what happens. A module can opt into marks with `#Policy(writes: .Explicit)`, `jet audit writes` lists every changing call, and editor hints show the marks.\n\nBeginner path: nothing to write. Expert path: read signatures, the audit or the hints to see changes.",
+          "technical": "No compiler change. Under the policy only jet fix writes marks, and it marks receivers too, which your ruling rejects. The misplaced slice edit (Compiler/JetFoundation/Source/AST/Expressions.jet:816), the unchecked rollback in jet fix and the stale audit text still need fixing.",
+          "code": "Buffer: struct { bytes: [U8] }\nfill: fn(buf: ^Buffer) { buf.bytes.push(U8{7}) }\nload: fn(buf: ^Buffer) { fill(buf) }\n\nseal: fn(buf: ^^Buffer) -> Int { buf.bytes.len() }\n\nrun: fn() {\n    ^buf: Buffer{bytes: [U8]{}}\n    load(buf)                   // the signature alone says buf changes\n    buf.bytes.push(U8{1})\n    print(seal(buf))\n}\n// #Policy(writes: .Explicit) makes a module write load(^buf),\n// ^buf.bytes.push(U8{1}) and seal(^^buf)."
+        },
+        {
+          "key": "C",
+          "name": "Show marks only as editor hints",
+          "detail": "The source stays plain, and the editor draws `^` and `^^` before changed and taken arguments and underlines them. The policy and the audit are deleted.\n\nBeginner path: nothing to write; the editor shows the change. Expert path: the same, but reviews in a browser, a terminal or a diff show nothing.",
+          "technical": "Delete the policy, E0228 and jet audit writes. Hints.jet already draws per-argument hints from the checked index, so the editor needs no new work.",
+          "code": "Buffer: struct { bytes: [U8] }\nfill: fn(buf: ^Buffer) { buf.bytes.push(U8{7}) }\nload: fn(buf: ^Buffer) { fill(buf) }\n\nseal: fn(buf: ^^Buffer) -> Int { buf.bytes.len() }\n\nrun: fn() {\n    ^buf: Buffer{bytes: [U8]{}}\n    load(buf)                   // the editor draws a grey ^ before buf\n    buf.bytes.push(U8{1})       // and underlines changed names\n    print(seal(buf))            // a grey ^^ before buf\n}\n// The text on disk, in a diff or on a web page has no marks."
+        },
+        {
+          "key": "D",
+          "name": "Require marks only in package library code",
+          "detail": "Library source that `jet publish` ships must mark changed arguments, and fmt inserts the marks there. Apps, scripts and tests may write them or leave them out, and a written mark is still checked.\n\nBeginner path: nothing to write until code becomes a library. Expert path: library authors work as in A.",
+          "technical": "E0228 fires only in files the formatter already classifies as library source (Host.jet:4291). Two dialects of call syntax coexist, and moving a function between a library and an app changes which spelling is required.",
+          "code": "// Lib/buffer.jet: library source that jet publish ships\nload: fn(buf: ^Buffer) { fill(^buf) }      // mark required here\n\n// App/main.jet: an app, a script or a test\nrun: fn() {\n    ^buf: Buffer{bytes: [U8]{}}\n    load(buf)                   // accepted plain\n    load(^buf)                  // also accepted, and checked\n    print(seal(buf))\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "An inout argument is written &xs at every call, including when the caller forwards its own inout parameter. A mutating method receiver is plain.",
+          "code": "func load(_ buf: inout Buffer) { fill(&buf) }\nload(&buf)\nbuf.bytes.append(1)"
+        },
+        {
+          "lang": "C#",
+          "note": "ref and out are repeated at the call, including when forwarding a ref parameter. Receivers are plain.",
+          "code": "static void Load(ref Buffer buf) { Fill(ref buf); }\nLoad(ref buf);"
+        },
+        {
+          "lang": "Rust",
+          "note": "A fresh mutable borrow is written &mut xs, but a caller forwards its own &mut parameter plainly. Receivers borrow automatically.",
+          "code": "fn load(buf: &mut Buffer) { fill(buf) }\nload(&mut buf);\nbuf.bytes.push(1);"
+        },
+        {
+          "lang": "Mojo",
+          "note": "mut sits only in the signature, and its call is plain. A var parameter takes ownership; the caller moves with a postfix ^, and without it the value is copied.",
+          "code": "def load(mut buf: Buffer): fill(buf)\nload(buf)\ntake(buf^)"
+        },
+        {
+          "lang": "Hylo",
+          "note": "An inout argument is written &x at the call, and so are mutating receivers and operators. Only Hylo marks receivers.",
+          "code": "swap(&x, &y)\n&numbers.append(4)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A is your ruling, made cheap: the change is visible in every diff and page, the compiler checks each mark, and fmt, fix and the editor write all of them. It matches Swift and C#, and D-RECEIVER-MARK1.",
+        "tradeoff": "Visible changes in plain text, for about 105,000 marks in one cutover and a compile inside fmt.",
+        "gains": [
+          "Every changed argument is visible in diffs, reviews and pages.",
+          "One rule with no policy, audit command or second compile.",
+          "No one has to type a mark: fmt, fix and the editor write them."
+        ],
+        "losses": [
+          {
+            "loss": "About 105,000 call sites change in one cutover.",
+            "mitigation": "One checked fmt run writes them in a mark-only commit that blame can skip."
+          },
+          {
+            "loss": "fmt must compile to place marks; today a check costs about 27 ms to 2.3 s per program against fmt's 8 to 56 ms.",
+            "mitigation": "One compile per package, shared with the copies and failures passes; layout never waits, and fix-on-save reuses the editor's last check."
+          },
+          {
+            "loss": "Changed receivers and changed arguments look different.",
+            "mitigation": "Your ruling; the signature, the underline and the receiver hint still show receiver changes."
+          },
+          {
+            "loss": "Deleting jet audit writes leaves no command-line list of changed receivers and unwritten takes.",
+            "mitigation": "Changed arguments now show in the text, and editor hints still show receivers and takes."
+          },
+          {
+            "loss": "D-PIPE1 is amended: a pipe's first step changes its named head in place.",
+            "mitigation": "Today's compiler already does this; `^<>` now shows it, and a computed head stays read-only."
+          },
+          {
+            "loss": "Dead-key keyboards type ^s as ŝ.",
+            "mitigation": "Fixes and completion write marks, and the planned dead-key fix offers ^state for ŝtate."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps changes invisible outside the editor, which your ruling rejects, and its policy marks receivers too."
+          },
+          {
+            "key": "C",
+            "reason": "C helps only inside an editor; diffs, reviews, terminals and docs still show nothing."
+          },
+          {
+            "key": "D",
+            "reason": "D makes two call dialects, so code moved into a library changes spelling."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewCallMark3. The review kept A's rule as ruled and repaired its mechanism: the fmt cutover, per-call error blocking, the computed pipe head and the counts. It added missing cutover sites, uncompiled sources, take-mark edge cases and the D-PIPE1 amendment."
+      },
+      "checkInstructions": "To check the counts, list the tracked .jet files under Core, Compiler, Jetpack, Tools, Examples and Tests on dev at de8a554abe1. Collect every name: fn(…) declaration with its parameter marks, then map each call's arguments by label or position. Count named arguments bound to a ^ parameter where every same-named declaration agrees.\n\nTo calibrate, run the same count at 5ef77a52ad^ with & as the write mark, and compare it with the written & argument marks there. Expect 67,629 written marks and 67,003 certain predictions, 65,448 of them right. Precision is 65,448 / 67,003 = 0.977 and recall is 65,448 / 67,629 = 0.968. A printed 0.840 and 0.979 belong to the looser count.\n\nTo check the 69,758 figure, read D-CALLSITE-MARK2: it was a raw text count on b486d6c09a. A text search for an & argument mark finds 69,817 at 5ef77a52ad^.\n\nTo check the mechanism, read Compiler/JetSema/Source/Sema/Ownership/CallMarks.jet:97-193 and Checks.jet:4765-4773. Then read Compiler/Prelude/Diagnostics.jet:4279-4350 and Compiler/JetCLI/Source/CLI/Host.jet:4159-4302. Host.jet:4199-4269 serves the copies and failures passes, which A keeps.\n\nAlso read Compiler/JetFoundation/Source/AST/Expressions.jet:809-818 for the slice defect and Compiler/JetCLI/Source/CLI/FixCommands.jet:427-456 for the rollback. Read AuditWrites.jet, Compiler/JetLSP/Source/LSP/Hints.jet:132-244, CodeActions.jet:28-80 and Formatting.jet:24-31.\n\nTo reproduce the probes, use jet a0.0.46 with & for ^ and && for ^^. Put #Policy(writes: .Explicit) on the same-program example. Expect E0228 at the load and fill calls and at the receiver, and expect jet fix to insert every mark.\n\nThen probe sort_part(xs[0..2]): the fix writes xs&[0..2], the result fails to check, and jet fix still reports one fix applied. Probe xs |> grow(<>) to see xs change, and make() |> grow(<>) to see the refusal that names __jet_pipe_N.\n\nProbe an unknown type in one function's signature: its calls in other bodies lose their E0228. Probe seal(&&st.buf) and take_n(&&n) on an Int to see the false reads-this-input text. A parse error gives no changes made.",
+      "surface": {
+        "gist": "Should a call write ^ before each named argument it changes, with jet fmt inserting the marks?",
+        "lesson": "A signature says what a function does to each input: plain reads, ^ changes, ^^ takes. A call mark repeats that where the call is written, so grow(^xs) shows the change in any diff. The compiler checks every mark, and tools write them.",
+        "trio": {
+          "current": {
+            "note": "Calls are plain; only the signature says buf changes.",
+            "code": "load: fn(buf: ^Buffer) { fill(buf) }\n\nrun: fn() {\n    ^buf: Buffer{bytes: [U8]{}}\n    load(buf)\n    buf.bytes.push(U8{1})\n    print(seal(buf))\n}"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "An inout argument is marked at every call; receivers are plain.",
+            "code": "func load(_ buf: inout Buffer) { fill(&buf) }\n\nload(&buf)\nbuf.bytes.append(1)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Mark changed arguments; tools write them",
+            "gist": "Every changed named argument carries ^; receivers stay plain.",
+            "proposed": {
+              "code": "load: fn(buf: ^Buffer) { fill(^buf) }\n\nrun: fn() {\n    ^buf: Buffer{bytes: [U8]{}}\n    load(^buf)\n    buf.bytes.push(U8{1})\n    print(seal(buf))   // seal(^^buf) also accepted\n}"
+            },
+            "gains": [
+              "Changes show in every diff and page.",
+              "Nobody types marks: fmt and the editor do."
+            ],
+            "losses": [
+              "About 105,000 call sites change once.",
+              "fmt compiles to place marks."
+            ]
+          },
+          {
+            "key": "B",
+            "name": "Keep today's plain calls",
+            "gist": "Calls stay plain; an opt-in policy, an audit and hints show changes.",
+            "proposed": {
+              "code": "load: fn(buf: ^Buffer) { fill(buf) }\n\nrun: fn() {\n    ^buf: Buffer{bytes: [U8]{}}\n    load(buf)\n    buf.bytes.push(U8{1})\n    print(seal(buf))\n}"
+            },
+            "gains": [
+              "No change to any program."
+            ],
+            "losses": [
+              "Changes are invisible outside the editor.",
+              "The policy also marks receivers."
+            ]
+          },
+          {
+            "key": "C",
+            "name": "Editor hints only",
+            "gist": "Source stays plain; the editor draws ^ and ^^ before arguments.",
+            "proposed": {
+              "code": "load: fn(buf: ^Buffer) { fill(buf) }\n\nrun: fn() {\n    ^buf: Buffer{bytes: [U8]{}}\n    load(buf)        // editor shows ^buf\n    buf.bytes.push(U8{1})\n    print(seal(buf)) // editor shows ^^buf\n}"
+            },
+            "gains": [
+              "No marks to write or migrate."
+            ],
+            "losses": [
+              "Diffs, reviews and docs show nothing."
+            ]
+          },
+          {
+            "key": "D",
+            "name": "Marks only in library code",
+            "gist": "Published library source must mark; apps, scripts and tests may.",
+            "proposed": {
+              "code": "// library source: required\nload: fn(buf: ^Buffer) { fill(^buf) }\n\n// app or script: optional\nrun: fn() {\n    ^buf: Buffer{bytes: [U8]{}}\n    load(buf)\n}"
+            },
+            "gains": [
+              "Scripts stay short."
+            ],
+            "losses": [
+              "Two call dialects.",
+              "Moving code into a library changes its spelling."
+            ]
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Your ruling, made cheap: changes show in every diff, the compiler checks each mark, and fmt, fix and the editor write them.",
+          "tradeoff": "Visible changes, for one large cutover and a compile in fmt.",
+          "gains": [
+            "Visible changes everywhere.",
+            "One rule, no policy.",
+            "No typing."
+          ],
+          "losses": [
+            {
+              "loss": "About 105,000 sites change once.",
+              "mitigation": "One checked fmt run in a mark-only commit."
+            },
+            {
+              "loss": "fmt compiles to place marks.",
+              "mitigation": "One compile per package, shared with other fmt passes; only calls an error touches lose marks."
+            },
+            {
+              "loss": "Receivers and arguments look different.",
+              "mitigation": "The underline and receiver hint still show receiver changes."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Changes stay invisible outside the editor."
+            },
+            {
+              "key": "C",
+              "reason": "Helps only inside an editor."
+            },
+            {
+              "key": "D",
+              "reason": "Two call dialects."
+            }
+          ]
+        }
+      },
+      "reports": [
+        {
+          "title": "Write sigil at call sites research",
+          "path": "Docs/Research/2026-10-29-write-sigil-at-call-sites.md",
+          "note": "The language survey behind D-CALLSITE-MARK1 and D-CALLSITE-MARK2: which languages mark changed arguments and receivers."
+        },
+        {
+          "title": "Memory marks in signatures proposal",
+          "path": "Docs/Proposals/2026-11-06-memory-marks-in-signatures.md",
+          "note": "The D-CALLSITE-MARK2 proposal. Lines 26, 124 and 264 state the plain-call rule this ballot reverses."
+        },
+        {
+          "title": "Caret marks adversarial review",
+          "path": "Docs/Audits/2026-11-24-caret-marks-adversarial-review.md",
+          "note": "Claim 2 assumed every call is plain, and claim 3 measured the dead-key cost of ^, which grows under A."
+        },
+        {
+          "title": "Call marks review",
+          "path": "Docs/Audits/2026-11-25-call-marks-review.md",
+          "note": "Fresh adversarial review of this ballot: it reconciles the counts, confirms the slice-edit and pipe defects with their causes, and corrects the fmt cutover, the error-blocking rule and the computed pipe head."
+        }
+      ],
+      "draftedBy": "Pip",
+      "reviewedBy": "ReviewCallMark3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T23:13:48.366Z"
     }
   ],
   "questions": [
@@ -144292,6 +144596,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T23:14:07.730Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c0hnoa1d",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-25T23:14:04.877Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0hnoa1d",
+      "note": "8 criteria, soft limit 6: Defects in today's code found by the D-CALLSITE-MARK3 review on 2026-11-25; they hold whichever option wins"
+    },
+    {
+      "at": "2026-11-25T23:14:04.877Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0hnoa1d",
+      "note": "#8 Independent of the ballot: the refusal of a write through a "
+    },
+    {
+      "at": "2026-11-25T23:14:03.742Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0hnoa1d",
+      "note": "7 criteria, soft limit 6: Defects in today's code found by the D-CALLSITE-MARK3 review on 2026-11-25; they hold whichever option wins"
+    },
+    {
+      "at": "2026-11-25T23:14:03.742Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0hnoa1d",
+      "note": "#7 Independent of the ballot: `jet fix` makes a binding immutab"
+    },
+    {
+      "at": "2026-11-25T23:14:02.620Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0hnoa1d",
+      "note": "#6 Independent of the ballot: the call-mark fix for a slice arg"
+    },
+    {
+      "at": "2026-11-25T23:13:49.470Z",
+      "by": "Pip",
+      "action": "decision.post",
+      "ref": "D-CALLSITE-MARK3",
+      "note": "reviewed by ReviewCallMark3"
+    },
+    {
+      "at": "2026-11-25T23:13:48.366Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-CALLSITE-MARK3",
+      "note": "Calls write ^ before each named argument they change (draft)"
+    },
     {
       "at": "2026-11-25T22:52:50.953Z",
       "by": "Orchestrator",
