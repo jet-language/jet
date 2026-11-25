@@ -78,7 +78,7 @@ sema_call_reflection_names: fn(ty: Type, span: Span, environment: SemaScopeEnvir
 // (`impl Int.Shown`) is its carrier identity, and it reflects under its own
 // spelling (`Int`) for both names, as any value of it does.
 sema_call_reflection_declared_impls: fn(bounds: [String], span: Span, program: SemaProgramTables, args: ^[TExpr]) -> Int {
-    graph: program.registration_graph ?? return 0
+    graph: program.registration_graph
     holders: sema_call_reflection_trait_holders(graph, bounds) ?? return 0
     rows := [SemaRegistrationRowRef]{}
     builtins := 0
@@ -188,7 +188,7 @@ sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_spa
         args[count_at] = sema_tree_node(Type.Int, TExprKind.IntLit{value: cases.len(), width: None}, span)
         return true
     }
-    graph: program.registration_graph ?? return true
+    graph: program.registration_graph
     row: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return true
     nominal: graph.modules[row.module_index].nominals[row.row]
     if nominal.kind != SemaRegistrationNominalKind.Enum || nominal.compiler_owned -> return true
@@ -281,10 +281,9 @@ sema_call_reflection_field_capturable: fn(ty: Type, environment: SemaScopeEnviro
 // part named the same way: an `Int? Lookup!` field is `Int? Lookup!` at
 // `Int? app.Lookup!`, never its module identity.
 sema_call_reflection_type_names: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> {type_name: String, path: String} {
-    if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == .Val(row) {
-            return sema_call_reflection_row_names(graph, row)
-        }
+    graph: program.registration_graph
+    if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == .Val(row) {
+        return sema_call_reflection_row_names(graph, row)
     }
     if ty == .Option(inner) {
         names: sema_call_reflection_marked_names(inner, environment, program)
@@ -379,16 +378,15 @@ sema_call_reflection_core_shown: fn(name: String) -> Bool Never! {
 }
 
 sema_call_reflection_bound: fn(ty: Type, bound: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        if sema_type_bound_satisfied_at(graph, ty, bound, sema_scope_caller_row(environment, graph), environment.generic_params) == (Val(true)) {
-            return true
-        }
-        // Imported nominal capabilities belong to their declaring registry. A
-        // caller need not import the trait name as well as the displayed type.
-        owner: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
-        nominal: graph.modules[owner.module_index].nominals[owner.row]
-        sema_type_bound_satisfied_with_generics(graph, nominal.ty, bound, graph.modules[owner.module_index].module_identity, environment.generic_params) ?? false
-    } else { return false }
+    graph: program.registration_graph
+    if sema_type_bound_satisfied_at(graph, ty, bound, sema_scope_caller_row(environment, graph), environment.generic_params) == (Val(true)) {
+        return true
+    }
+    // Imported nominal capabilities belong to their declaring registry. A
+    // caller need not import the trait name as well as the displayed type.
+    owner: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
+    nominal: graph.modules[owner.module_index].nominals[owner.row]
+    sema_type_bound_satisfied_with_generics(graph, nominal.ty, bound, graph.modules[owner.module_index].module_identity, environment.generic_params) ?? false
 }
 
 sema_call_reflection_named_displayable: fn(name: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
@@ -457,7 +455,7 @@ sema_call_reflection_is_displayable: fn(ty: Type, environment: SemaScopeEnvironm
         }
         .TraitObject(bounds) -> {
             if sema_call_reflection_has_name(bounds, "Renderable") -> return true
-            graph: program.registration_graph ?? return false
+            graph: program.registration_graph
             holders: sema_call_reflection_trait_holders(graph, bounds) ?? return false
             loop reference in holders.impls {
                 if !sema_call_reflection_is_displayable(graph.modules[reference.module_index].impls[reference.row].target_type, environment, program) {
@@ -506,6 +504,8 @@ SemaCallTraitHolders: struct {
 
 sema_call_reflection_trait_holders: fn(graph: SemaRegistrationGraph, bounds: [String]) -> SemaCallTraitHolders? Never! {
     if bounds.len() != 1 -> return None
+    // Snapshot: a lone program registers no impl or nominal to hold the trait.
+    if graph.mode == .Snapshot -> return None
     leaf: sema_call_reflection_leaf_name(bounds[0])
     holders := SemaCallTraitHolders{impls: [SemaRegistrationRowRef]{}, nominals: [SemaRegistrationRowRef]{}}
     if sema_registration_impl_trait_name_slot(graph, leaf) == .Val(slot) {
@@ -547,7 +547,7 @@ sema_call_reflection_body_implements: fn(item: Item, leaf: String) -> Bool Never
 // per parameter does (E0904): no catalog is filtered, and none is made up.
 // None for any other type, whose catalog is empty.
 sema_call_reflection_cases_refusal: fn(owner: Symbol, written: String, args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     row: sema_type_graph_nominal_row(graph, owner.id) ?? return None
     item: sema_registration_nominal_source_item(graph.modules[row.module_index].nominals[row.row].source) ?? return None
     if item == .Enum(definition) {
@@ -777,7 +777,8 @@ sema_call_reflection_marker_lookup: fn(
     }
     written: sema_call_reflection_marker_name(args[0].expr) ?? ""
     declaration := MarkerDecl?{None}
-    if written != "" && program.registration_graph == .Val(graph) {
+    graph: program.registration_graph
+    if written != "" {
         declaration = sema_marker_module_resolve(graph, environment.module_identity, written).declaration
     }
     // A Prelude marker is no type in the program: its record is a compiler

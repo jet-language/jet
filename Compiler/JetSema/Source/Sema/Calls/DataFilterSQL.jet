@@ -128,17 +128,18 @@ sema_data_filter_derived: fn(definition: TTypeDef) -> Bool Never! {
 
 // Whether a `migration` block names `type_name` in any module: a table may
 // hold rows of an older shape, whose field columns say what that shape
-// stored. Unknown without the registration graph, so then true.
+// stored. Unknown in a snapshot check, so then true.
 sema_data_filter_migrated: fn(program: SemaProgramTables, type_name: String) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        loop module_index in 0..<graph.modules.len() {
-            loop item in graph.modules[module_index].program.items {
-                if item == .Migration(block) && block.type_name == type_name -> return true
-            }
+    graph: program.registration_graph
+    // Snapshot: the empty graph holds no module to search, so a migration is
+    // not ruled out.
+    if graph.mode == .Snapshot -> return true
+    loop module_index in 0..<graph.modules.len() {
+        loop item in graph.modules[module_index].program.items {
+            if item == .Migration(block) && block.type_name == type_name -> return true
         }
-        return false
     }
-    true
+    false
 }
 
 // `predicate` as a condition over `fields` of the row `parameter` names,

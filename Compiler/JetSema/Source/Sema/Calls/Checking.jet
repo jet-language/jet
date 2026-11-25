@@ -69,29 +69,20 @@ sema_call_resolved_type: fn(ty: Type, environment: SemaScopeEnvironment, program
         .IntN(signed, bits) -> return Type.IntN{signed: signed, bits: bits}
         .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
-    if program.registration_graph == .Val(graph) {
-        sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
-    } else {
-        // copy: the resolved type is a new owned Type. When nothing resolves it equals `ty`, the
-        // caller's signature type (a read parameter), which stays in the signature.
-        return ty.copy()
-    }
+    graph: program.registration_graph
+    sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
 }
 
 // sema_type_alias_shown from the checked scope: how a diagnostic names a
 // written generic alias, or None for any other type.
 sema_call_alias_shown: fn(written: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -[]> String? {
-    if program.registration_graph == .Val(graph) {
-        return sema_type_alias_shown(graph, written, sema_scope_caller_row(environment, graph), environment.generic_params)
-    }
-    None
+    graph: program.registration_graph
+    sema_type_alias_shown(graph, written, sema_scope_caller_row(environment, graph), environment.generic_params)
 }
 
 sema_call_type_assignable: fn(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
-    if program.registration_graph == {
-        .Val(graph) -> sema_type_assignable_in_graph_at(graph, required, offered, sema_scope_caller_row(environment, graph), environment.generic_params)
-        .None -> Val(sema_type_assignable(required, offered))
-    }
+    graph: program.registration_graph
+    sema_type_assignable_in_graph_at(graph, required, offered, sema_scope_caller_row(environment, graph), environment.generic_params)
 }
 
 sema_call_box_as_trait: fn(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
@@ -387,7 +378,8 @@ sema_call_is_scalar: fn(ty: Type) -> Bool Never! {
 // A registered function's body. A registration row's declaration may hold
 // none; sema_registration_function_body reads it from the row's item.
 sema_call_registered_function_body: fn(program: SemaProgramTables, function: SemaRegistrationFunction) -> [Stmt] {
-    if program.registration_graph == .Val(graph) && sema_registration_module_index(graph, function.symbol.module_identity) == .Val(owner_row) {
+    graph: program.registration_graph
+    if sema_registration_module_index(graph, function.symbol.module_identity) == .Val(owner_row) {
         return sema_registration_function_body(graph.modules[owner_row], function)
     }
     function.declaration.body
@@ -959,10 +951,8 @@ sema_call_variadic_bound_met: fn(bound: String, ty: Type, environment: SemaScope
     if sema_call_type_assignable(Type.TraitObject{bounds: [String]{bound}}, ty, environment, program) == (Val(true)) {
         return Val(true)
     }
-    if program.registration_graph == .Val(graph) {
-        return sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params)
-    }
-    None
+    graph: program.registration_graph
+    sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params)
 }
 
 // E1313: an argument of a trait-bounded variadic `parameter` misses `bound`.
@@ -1256,11 +1246,9 @@ sema_call_argument_fix_hint: fn(required: Type, offered: Type, value: Expr) -> S
 // same error again (#6294).
 sema_call_parameter_type_undeclared: fn(required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     generic_names: loop param in environment.generic_params -> param.name
-    if program.registration_graph == .Val(graph) {
-        caller: sema_scope_caller_row(environment, graph)
-        return sema_type_names_undeclared(graph, caller, required, generic_names) || sema_type_names_bare_generic(graph, caller, required, generic_names)
-    }
-    false
+    graph: program.registration_graph
+    caller: sema_scope_caller_row(environment, graph)
+    sema_type_names_undeclared(graph, caller, required, generic_names) || sema_type_names_bare_generic(graph, caller, required, generic_names)
 }
 
 // Drops the generic E0108 the argument's own check reported against an
@@ -1373,15 +1361,13 @@ sema_call_default_owner_scope: fn(source: SemaCallArgSource, parameter: SemaCall
 
 // The module that declares the callable a default belongs to.
 sema_call_default_ref_module: fn(program: SemaProgramTables, reference: FunctionDefaultRef) -> ModuleID? {
-    if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row(graph, reference.owner_key) ?? return None
-        module_index: if row == {
-            .Function(index, _) | .Foreign(index, _) -> index
-            .NominalMethod(index, _, _) | .ImplMethod(index, _, _) -> index
-        }
-        return Val(graph.modules[module_index].module_identity)
+    graph: program.registration_graph
+    row: sema_registration_callable_row(graph, reference.owner_key) ?? return None
+    module_index: if row == {
+        .Function(index, _) | .Foreign(index, _) -> index
+        .NominalMethod(index, _, _) | .ImplMethod(index, _, _) -> index
     }
-    None
+    Val(graph.modules[module_index].module_identity)
 }
 
 // A default argument written in another module, checked in that module's

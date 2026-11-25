@@ -85,7 +85,7 @@ sema_call_compute_window_copy: fn(value: TExpr, span: Span, expected: Type?, env
 // The name of the core.compute function that fills `role`, or E1015 when no
 // loaded Core function fills it.
 sema_call_compute_role_name: fn(role: String, span: Span, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> String? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     helper: sema_core_role_function(graph, role) ?? {
         diagnostics.push(sema_missing_core_role(role, span))
         return None

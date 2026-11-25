@@ -174,7 +174,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
         diagnostics.push(sema_call_arity_diagnostic(source.name, source.params.len(), supplied, false, source_span))
         return sema_live_rejected()
     }
-    graph: program.registration_graph ?? return sema_live_rejected()
+    graph: program.registration_graph
     role: if member == {
         "live" -> "LiveBind"
         "subscribe" -> "LivePoll"
@@ -313,7 +313,7 @@ sema_live_source: fn(expression: Expr, member: String, environment: SemaScopeEnv
             if member == "subscribe" && !sema_live_subscribable(name, effect_bound, source_span, diagnostics) {
                 return None
             }
-            graph: program.registration_graph ?? return None
+            graph: program.registration_graph
             if !sema_live_codable(graph, name, "result", ok, environment, source_span, diagnostics) {
                 return None
             }
@@ -408,7 +408,7 @@ sema_live_remote_call: fn(call: Expr, span: Span, environment: SemaScopeEnvironm
 // name is the service's module path, name and method; its result and error
 // are the method's.
 sema_live_remote_endpoint: fn(service: Type, holder: String, holder_span: Span, holder_id: Int, method: String, method_span: Span, args: [CallArg], call_id: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaLiveSource? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     row: sema_type_resolve_nominal_row(graph, service, environment.module_identity) ?? return None
     service_module: graph.modules[row.module_index].module_identity
     service_name: graph.modules[row.module_index].nominals[row.row].symbol.name

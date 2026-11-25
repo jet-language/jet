@@ -40,7 +40,7 @@ SemaFieldErrorPath: struct {
 // is reported (E2813), so the caller checks the call no further.
 sema_app_field_error_refused: fn(module_name: String, member: String, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     if module_name != SEMA_APP_MARKER_MODULE || member != SEMA_FIELD_ERROR_MEMBER -> return false
-    graph: program.registration_graph ?? return false
+    graph: program.registration_graph
     at: sema_field_error_at(args) ?? return false
     at_span: expr_span(at.expr)
     roots: sema_field_error_roots(graph, environment, scopes)

@@ -699,7 +699,7 @@ sema_call_try_raw_pointer_step: fn(receiver: Expr, receiver_value: TExpr, method
         diagnostics.push(sema_error("E3102", span, "`{method}` on a raw pointer is part of the low-level tier", "stepping a `Ptr` needs the discovery gate", "add `use core.mem;`"))
         return rejected
     }
-    graph: program.registration_graph ?? return rejected
+    graph: program.registration_graph
     filler: sema_core_role_function(graph, role) ?? {
         diagnostics.push(sema_missing_core_role(role, span))
         return rejected

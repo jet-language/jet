@@ -107,7 +107,7 @@ SemaAppState: struct {
 
 // Whether `ty` is `app.App`, the app graph.
 sema_app_is_graph: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    graph: program.registration_graph ?? return false
+    graph: program.registration_graph
     row: sema_type_resolve_nominal_row(graph, sema_call_resolved_type(ty, environment, program), environment.module_identity) ?? return false
     module_row: graph.modules[row.module_index]
     module_is_core(module_row.module_identity) && module_row.module_name == SEMA_APP_MARKER_MODULE && module_row.nominals[row.row].symbol.name == SEMA_APP_GRAPH
@@ -167,7 +167,7 @@ sema_app_no_screen: fn(state: String, span: Span) -> Diagnostic {
 // (`sema_app_screen_callback`).
 sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
-    graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    graph: program.registration_graph
     positional := [CallArg]{}
     signed_in := Expr?{None}
     loop argument in args {
@@ -338,7 +338,7 @@ sema_app_reply_key: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: 
 // `graph.__cache<V>(key, policy)`, `key` naming `V` (`sema_app_reply_key`).
 sema_call_app_cache: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
-    graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    graph: program.registration_graph
     if type_args.len() != 1 {
         diagnostics.push(sema_error("E0119", span, "`.cache` expects exactly one type argument, got {type_args.len()}", "`.cache<V>(policy)` sets how the replies of the type `V` may be kept", "write the reply type: `.cache<V>(.Public(max_age: 10min))`"))
         return rejected
@@ -369,7 +369,7 @@ SEMA_APP_ADDRESS_TEXT: "__address_text"
 // whose screen opens for a caller who is not signed in (app.sitemap).
 sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
-    graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    graph: program.registration_graph
     if args.len() != 1 {
         diagnostics.push(sema_call_arity_diagnostic("sitemap", 1, args.len(), false, span))
         return rejected
@@ -440,7 +440,7 @@ SEMA_APP_HEAD: "__head"
 // function for the state at its address, so `V` derives `Decode`.
 sema_call_app_head: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
-    graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    graph: program.registration_graph
     if args.len() != 1 {
         diagnostics.push(sema_call_arity_diagnostic("head", 1, args.len(), false, span))
         return rejected
@@ -573,7 +573,7 @@ sema_app_lambda: fn(params: [LambdaParam], value: Expr, span: Span) -> Expr Neve
 // `App.__remote<S>` finds the service by.
 sema_call_app_api: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
-    graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    graph: program.registration_graph
     shape: "`.api<S>(path, max_upload:)` declares the service `S` its clients reach at `path`"
     positional := [CallArg]{}
     max_upload := Expr?{None}
@@ -641,7 +641,7 @@ sema_call_app_graph_method: fn(receiver: Expr, receiver_value: TExpr, method: St
 // opens it: `alias.App.__go<V>(key, fields, texts)`.
 sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     rejected: SemaDirectSpecialCheck{handled: true, value: None}
-    graph: program.registration_graph ?? return rejected
+    graph: program.registration_graph
     if type_args.len() != 0 {
         diagnostics.push(sema_call_not_generic_diagnostic(member, span))
         return rejected
@@ -775,7 +775,7 @@ sema_app_notify_here: fn(args: [CallArg]) -> Bool Never! {
 // (`sema_app_state_made`).
 sema_call_app_current: fn(alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     rejected: SemaDirectSpecialCheck{handled: true, value: None}
-    graph: program.registration_graph ?? return rejected
+    graph: program.registration_graph
     if args.len() != 0 {
         diagnostics.push(sema_call_arity_diagnostic("current", 0, args.len(), false, span))
         return rejected

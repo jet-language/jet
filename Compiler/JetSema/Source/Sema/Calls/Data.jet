@@ -50,20 +50,19 @@ sema_data_source_type_name: fn(environment: SemaScopeEnvironment, program: SemaP
 // declares (the identity of `core.data.DataJoin`); just `leaf` for a
 // compiler-owned row, or when the load holds no such declaration.
 sema_core_source_type_name: fn(program: SemaProgramTables, module_name: String, leaf: String) -> String Never! {
-    if program.registration_graph == .Val(graph) {
-        loop module_row_index in 0..<graph.modules.len() {
-            if graph.modules[module_row_index].module_name != module_name -> next
-            loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
-                if graph.modules[module_row_index].nominals[nominal_index].symbol.name == leaf {
-                    if graph.modules[module_row_index].nominals[nominal_index].compiler_owned {
-                        return "{leaf}"
-                    }
-                    return "{module_text(graph.module_table, graph.modules[module_row_index].nominals[nominal_index].symbol.module_identity)}.{leaf}"
+    graph: program.registration_graph
+    loop module_row_index in 0..<graph.modules.len() {
+        if graph.modules[module_row_index].module_name != module_name -> next
+        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+            if graph.modules[module_row_index].nominals[nominal_index].symbol.name == leaf {
+                if graph.modules[module_row_index].nominals[nominal_index].compiler_owned {
+                    return "{leaf}"
                 }
+                return "{module_text(graph.module_table, graph.modules[module_row_index].nominals[nominal_index].symbol.module_identity)}.{leaf}"
             }
         }
-        return "{leaf}"
-    } else { return leaf.copy() }
+    }
+    return "{leaf}"
 }
 
 sema_dyn_is_type: fn(ty: Type) -> Bool Never! { ty == (Type.Named{name: "Dyn"}) }
@@ -785,9 +784,8 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                         return SemaMethodSpecialCheck{handled: true, value: None}
                     }
                     target := type_args[0]
-                    if program.registration_graph == .Val(graph) {
-                        target = sema_type_resolve_declared_with_generics(graph, target, environment.module_identity, environment.generic_params)
-                    }
+                    graph: program.registration_graph
+                    target = sema_type_resolve_declared_with_generics(graph, target, environment.module_identity, environment.generic_params)
                     admitted: if stored -> sema_serde_stored_is_admissible(environment, program, target, SemaSerdeDirection.Decode) else -> sema_serde_type_is_admissible(environment, program, target, SemaSerdeDirection.Decode)
                     if !admitted {
                         fix: sema_serde_shape_fix(target, "Decode") ?? "derive `Decode` on `{type_name(target)}`, or write `impl {type_name(target)}.Decode`"
@@ -1140,9 +1138,8 @@ sema_data_core_target_type: fn(type_args: [Type], name: String, span: Span, envi
         return None
     }
     target := type_args[0]
-    if program.registration_graph == .Val(graph) {
-        target = sema_type_resolve_declared_with_generics(graph, target, environment.module_identity, environment.generic_params)
-    }
+    graph: program.registration_graph
+    target = sema_type_resolve_declared_with_generics(graph, target, environment.module_identity, environment.generic_params)
     Val(target)
 }
 

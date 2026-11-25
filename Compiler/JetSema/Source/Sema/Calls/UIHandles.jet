@@ -288,7 +288,7 @@ sema_ui_handle_text_input: fn(args: [CallArg], span: Span, expected: Type?, envi
         slots.push(drop_slot)
         role = SEMA_CORE_ROLE_TEXT_INPUT_CHANGE
     }
-    graph: program.registration_graph ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    graph: program.registration_graph
     builder: sema_core_role_function(graph, role) ?? {
         diagnostics.push(sema_missing_core_role(role, span))
         return SemaDirectSpecialCheck{handled: true, value: None}
@@ -351,7 +351,7 @@ sema_ui_asset_refused: fn(args: [CallArg], environment: SemaScopeEnvironment, pr
         diagnostics.push(sema_comptime_input_path_error("ui.asset", problem, expr_span(args[0].expr)))
         return true
     }
-    graph: program.registration_graph ?? return false
+    graph: program.registration_graph
     row: sema_app_module_row(environment, graph)
     if row < 0 || !graph.modules[row].program.app_missing_assets.contains(path) -> return false
     file: graph.modules[row].source_file

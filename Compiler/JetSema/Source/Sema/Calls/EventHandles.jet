@@ -41,10 +41,9 @@ sema_event_handle_family: fn(ty: Type) -> String? {
 // `sema_type_graph_unique_type_owner`).
 sema_event_handle_owner: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     owner: sema_event_handle_family(ty) ?? return None
-    if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None {
-            return None
-        }
+    graph: program.registration_graph
+    if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None {
+        return None
     }
     Val(owner)
 }

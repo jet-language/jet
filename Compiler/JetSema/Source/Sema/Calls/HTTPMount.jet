@@ -240,7 +240,7 @@ SEMA_APP_REMOTE_RAISE: "__raise"
 
 // Whether `ty`, a resolved type of one type argument, is `app.Remote<S>`.
 sema_app_is_remote: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    graph: program.registration_graph ?? return false
+    graph: program.registration_graph
     row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return false
     graph.modules[row.module_index].module_name == SEMA_APP_MARKER_MODULE && graph.modules[row.module_index].nominals[row.row].symbol.name == SEMA_APP_REMOTE
 }
@@ -264,7 +264,7 @@ sema_app_upload_params: fn(method: Func, graph: SemaRegistrationGraph, module_id
 // (`sema_app_remote_call`). Any other method of `S` is server-only (E2812),
 // and a name `S` does not declare is no method of the Remote (E0102).
 sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     shown := "app.Remote<{type_name(service)}>"
     declared := false
     if sema_type_resolve_nominal_row(graph, service, environment.module_identity) == .Val(row) {
@@ -317,7 +317,7 @@ sema_call_app_endpoints: fn(alias: String, type_args: [Type], args: [CallArg], s
         diagnostics.push(sema_error("E0119", span, "`{callee}` expects exactly one type argument, got {type_args.len()}", "`{callee}<S>()` lists the endpoints of one service, `S`", "write `{callee}<S>()` with the service as its type argument"))
         return sema_live_rejected()
     }
-    graph: program.registration_graph ?? return sema_live_rejected()
+    graph: program.registration_graph
     service: sema_type_resolve_declared_with_generics(graph, type_args[0], environment.module_identity, environment.generic_params)
     row: sema_type_resolve_nominal_row(graph, service, environment.module_identity) ?? return sema_app_endpoints_no_service(callee, service, span, diagnostics)
     definition: sema_http_route_find_struct(environment, program, service, environment.module_identity) ?? return sema_app_endpoints_no_service(callee, service, span, diagnostics)
@@ -360,7 +360,7 @@ sema_app_remote_method_call: fn(remote: String, method: String, type_args: [Type
 // queue, so it lowers to `__write` or `__write_value`. The call's type is
 // `R E!`, or `R app.CallError!` for a method that can't fail.
 sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declaration: Func, service_module: ModuleID, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     method: declaration.name
     concrete: declaration.params.len() > 0 && declaration.params[0].name == "self" && declaration.params[0].convention == AccessConvention.Read && declaration.type_params.len() == 0
     read_only: loop index in 1..<declaration.params.len() {
@@ -625,144 +625,143 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         if sema_http_route_find_struct(environment, program, value_ty, environment.module_identity) == .Val(definition) {
-            if program.registration_graph == .Val(graph) {
-                nominal_row: sema_type_resolve_nominal_row(graph, value_ty, environment.module_identity) ?? {
-                    check.context.incomplete_reasons.push("mount has no nominal row")
-                    return SemaMethodSpecialCheck{handled: true, value: None}
+            graph: program.registration_graph
+            nominal_row: sema_type_resolve_nominal_row(graph, value_ty, environment.module_identity) ?? {
+                check.context.incomplete_reasons.push("mount has no nominal row")
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+            method_module: graph.modules[nominal_row.module_index].module_identity
+            // The graph's endpoints are keyed by the service's identity,
+            // the key its Remotes find them by.
+            if on_graph {
+                prefix = graph.modules[nominal_row.module_index].nominals[nominal_row.row].identity_key.copy()
+            }
+            loop method in definition.methods {
+                uploads: sema_app_upload_params(method, graph, method_module)
+                // An endpoint method answers POST `{prefix}/{name}`, once
+                // whatever markers it carries; one that takes an `Upload`
+                // through an upload endpoint.
+                loop marker in method.markers {
+                    access: sema_app_endpoint_access(marker, graph, method_module) ?? next
+                    if uploads.len() > 0 && on_graph {
+                        diagnostics.push(sema_app_graph_mount_refused(method.name, "an upload endpoint", marker.span))
+                        break
+                    }
+                    mux_node: sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span)
+                    endpoint: if uploads.len() == 0 -> sema_app_mount_endpoint(mux_node, value_name, method, method_module, access, marker, prefix, span, environment, program, scopes, check, diagnostics) else -> sema_app_mount_upload(mux_node, value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].identity_key, definition.methods, method, method_module, uploads, access, marker, prefix, span, environment, program, scopes, check, diagnostics)
+                    if endpoint == .Val(value) {
+                        body.push(TStmt.ExprStmt{value: value, span: span})
+                    }
+                    break
                 }
-                method_module: graph.modules[nominal_row.module_index].module_identity
-                // The graph's endpoints are keyed by the service's identity,
-                // the key its Remotes find them by.
-                if on_graph {
-                    prefix = graph.modules[nominal_row.module_index].nominals[nominal_row.row].identity_key.copy()
-                }
-                loop method in definition.methods {
-                    uploads: sema_app_upload_params(method, graph, method_module)
-                    // An endpoint method answers POST `{prefix}/{name}`, once
-                    // whatever markers it carries; one that takes an `Upload`
-                    // through an upload endpoint.
+                // `#App.UploadCheck` checks an upload before it is read,
+                // so marks only a method that takes one.
+                if uploads.len() == 0 {
                     loop marker in method.markers {
-                        access: sema_app_endpoint_access(marker, graph, method_module) ?? next
-                        if uploads.len() > 0 && on_graph {
-                            diagnostics.push(sema_app_graph_mount_refused(method.name, "an upload endpoint", marker.span))
-                            break
-                        }
-                        mux_node: sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span)
-                        endpoint: if uploads.len() == 0 -> sema_app_mount_endpoint(mux_node, value_name, method, method_module, access, marker, prefix, span, environment, program, scopes, check, diagnostics) else -> sema_app_mount_upload(mux_node, value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].identity_key, definition.methods, method, method_module, uploads, access, marker, prefix, span, environment, program, scopes, check, diagnostics)
-                        if endpoint == .Val(value) {
-                            body.push(TStmt.ExprStmt{value: value, span: span})
-                        }
-                        break
-                    }
-                    // `#App.UploadCheck` checks an upload before it is read,
-                    // so marks only a method that takes one.
-                    if uploads.len() == 0 {
-                        loop marker in method.markers {
-                            if sema_app_marker_is(marker, SEMA_APP_UPLOAD_CHECK_MARKER, graph, method_module) {
-                                diagnostics.push(sema_error("E2805", marker.span, "`{method.name}` takes no `app.Upload`, so it has no upload to check", "`#App.UploadCheck` names the check an upload endpoint runs before it reads the request's file", "remove the marker, or take the file as an `app.Upload` parameter of `{method.name}`"))
-                            }
-                        }
-                    }
-                    // A webhook answers POST `{prefix}{path}` for its sender.
-                    loop marker in method.markers {
-                        if !sema_app_marker_is(marker, SEMA_APP_WEBHOOK_MARKER, graph, method_module) {
-                            next
-                        }
-                        if on_graph {
-                            diagnostics.push(sema_app_graph_mount_refused(method.name, "a webhook", marker.span))
-                            break
-                        }
-                        hook: sema_app_mount_webhook(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, definition.methods, method, method_module, marker, prefix, span, environment, program, scopes, check, diagnostics)
-                        if hook == .Val(value) {
-                            body.push(TStmt.ExprStmt{value: value, span: span})
-                        }
-                        break
-                    }
-                    // A schedule runs on its cron line once the App serves.
-                    loop marker in method.markers {
-                        if !sema_app_marker_is(marker, SEMA_APP_EVERY_MARKER, graph, method_module) {
-                            next
-                        }
-                        if on_graph {
-                            diagnostics.push(sema_app_graph_mount_refused(method.name, "a schedule", marker.span))
-                            break
-                        }
-                        schedule: sema_app_mount_schedule(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, method, method_module, marker, span, environment, program, scopes, check, diagnostics)
-                        if schedule == .Val(value) {
-                            body.push(TStmt.ExprStmt{value: value, span: span})
-                        }
-                        break
-                    }
-                    // A job's rows a store keeps run on a serving server.
-                    loop marker in method.markers {
-                        if !sema_app_marker_is(marker, SEMA_APP_JOB_MARKER, graph, method_module) {
-                            next
-                        }
-                        job: sema_app_mount_job(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, method, method_module, marker, span, environment, program, scopes, check, diagnostics)
-                        if job == .Val(value) -> body.push(TStmt.ExprStmt{value: value, span: span})
-                        break
-                    }
-                    loop marker in method.markers {
-                        verb: sema_http_route_marker_verb(marker, graph, method_module) ?? next
-                        if on_graph {
-                            diagnostics.push(sema_app_graph_mount_refused(method.name, "an HTTP route", marker.span))
-                            next
-                        }
-                        if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
-                            diagnostics.push(sema_error("E2805", marker.span, "HTTP route method `{method.name}` needs read-only self and a concrete signature", "mounted handlers retain shared state and are called on request workers", "write `{method.name}: fn(self, ...)` without method type parameters; use Shared<T> for mutable shared state"))
-                            next
-                        }
-                        // `#Custom` takes its method token before the path.
-                        marked := [CallArg]{}
-                        loop mark_arg in marker.args {
-                            if mark_arg == .Expr(mark_value) {
-                                marked.push(sema_http_mount_arg(mark_value, expr_span(mark_value)))
-                            }
-                        }
-                        custom: verb == sema_http_route_custom_verb()
-                        marked_count: if custom -> 2 else -> 1
-                        if marker.args.len() != marked_count || marked.len() != marked_count -> next
-                        if custom && sema_http_route_constant_string(marked[0].expr, environment, program, scopes) == None {
-                            diagnostics.push(sema_error("E2808", marked[0].span, "`#Server.Custom` route method must be a static String", "a marked route is fully checked while building; only `app.custom` takes a run-time method, checked when it registers", "use a literal or compile-time String constant, or register the route with `app.custom`"))
-                            next
-                        }
-                        if prefix != "" {
-                            path_at: marked_count - 1
-                            path: sema_http_route_constant_string(marked[path_at].expr, environment, program, scopes) ?? {
-                                diagnostics.push(sema_error("E2805", marked[path_at].span, "a route marker under a mount prefix needs a static path", "the mounted route's address is the prefix and the marker's path, checked while building", "use a literal or compile-time String constant"))
-                                next
-                            }
-                            marked[path_at] = sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{prefix}{path}"}}, span: marked[path_at].span, id: AST_NODE_GENERATED}, marked[path_at].span)
-                        }
-                        params := [LambdaParam]{}
-                        call_args := [CallArg]{}
-                        loop index in 1..<method.params.len() {
-                            parameter_ty: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
-                            params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None, convention: AccessConvention.Read})
-                            argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
-                            argument.convention = method.params[index].convention
-                            call_args.push(argument)
-                        }
-                        invocation: Expr.MethodCall{receiver: Expr.Ident{name: value_name.copy(), span: span, id: AST_NODE_GENERATED}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
-                        meta := ast_empty_lambda_meta()
-                        nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-                        loop registered in nominal.methods {
-                            if registered.declaration.name == method.name {
-                                meta.http_route_source = Val(symbol_table_key(graph.symbols, registered.symbol.id))
-                            }
-                        }
-                        // The marked method stands for the call `verb(path)`
-                        // at its marker, which the receiver's rules hear.
-                        _ := sema_call_rules_hear_stand_in(receiver, receiver_value, verb, marker.span, marked, None, "mount{span.start}", call_frame, environment, program, scopes, check, diagnostics)
-                        handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
-                        marked.push(sema_http_mount_arg(handler, marker.span))
-                        registration: sema_call_try_http_router(receiver, sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, marked, marker.span, None, environment, program, scopes, check, diagnostics)
-                        if registration.value == .Val(value) {
-                            body.push(TStmt.ExprStmt{value: value, span: marker.span})
+                        if sema_app_marker_is(marker, SEMA_APP_UPLOAD_CHECK_MARKER, graph, method_module) {
+                            diagnostics.push(sema_error("E2805", marker.span, "`{method.name}` takes no `app.Upload`, so it has no upload to check", "`#App.UploadCheck` names the check an upload endpoint runs before it reads the request's file", "remove the marker, or take the file as an `app.Upload` parameter of `{method.name}`"))
                         }
                     }
                 }
-            } else { panic("mount has no registration graph") }
+                // A webhook answers POST `{prefix}{path}` for its sender.
+                loop marker in method.markers {
+                    if !sema_app_marker_is(marker, SEMA_APP_WEBHOOK_MARKER, graph, method_module) {
+                        next
+                    }
+                    if on_graph {
+                        diagnostics.push(sema_app_graph_mount_refused(method.name, "a webhook", marker.span))
+                        break
+                    }
+                    hook: sema_app_mount_webhook(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, definition.methods, method, method_module, marker, prefix, span, environment, program, scopes, check, diagnostics)
+                    if hook == .Val(value) {
+                        body.push(TStmt.ExprStmt{value: value, span: span})
+                    }
+                    break
+                }
+                // A schedule runs on its cron line once the App serves.
+                loop marker in method.markers {
+                    if !sema_app_marker_is(marker, SEMA_APP_EVERY_MARKER, graph, method_module) {
+                        next
+                    }
+                    if on_graph {
+                        diagnostics.push(sema_app_graph_mount_refused(method.name, "a schedule", marker.span))
+                        break
+                    }
+                    schedule: sema_app_mount_schedule(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, method, method_module, marker, span, environment, program, scopes, check, diagnostics)
+                    if schedule == .Val(value) {
+                        body.push(TStmt.ExprStmt{value: value, span: span})
+                    }
+                    break
+                }
+                // A job's rows a store keeps run on a serving server.
+                loop marker in method.markers {
+                    if !sema_app_marker_is(marker, SEMA_APP_JOB_MARKER, graph, method_module) {
+                        next
+                    }
+                    job: sema_app_mount_job(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, method, method_module, marker, span, environment, program, scopes, check, diagnostics)
+                    if job == .Val(value) -> body.push(TStmt.ExprStmt{value: value, span: span})
+                    break
+                }
+                loop marker in method.markers {
+                    verb: sema_http_route_marker_verb(marker, graph, method_module) ?? next
+                    if on_graph {
+                        diagnostics.push(sema_app_graph_mount_refused(method.name, "an HTTP route", marker.span))
+                        next
+                    }
+                    if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
+                        diagnostics.push(sema_error("E2805", marker.span, "HTTP route method `{method.name}` needs read-only self and a concrete signature", "mounted handlers retain shared state and are called on request workers", "write `{method.name}: fn(self, ...)` without method type parameters; use Shared<T> for mutable shared state"))
+                        next
+                    }
+                    // `#Custom` takes its method token before the path.
+                    marked := [CallArg]{}
+                    loop mark_arg in marker.args {
+                        if mark_arg == .Expr(mark_value) {
+                            marked.push(sema_http_mount_arg(mark_value, expr_span(mark_value)))
+                        }
+                    }
+                    custom: verb == sema_http_route_custom_verb()
+                    marked_count: if custom -> 2 else -> 1
+                    if marker.args.len() != marked_count || marked.len() != marked_count -> next
+                    if custom && sema_http_route_constant_string(marked[0].expr, environment, program, scopes) == None {
+                        diagnostics.push(sema_error("E2808", marked[0].span, "`#Server.Custom` route method must be a static String", "a marked route is fully checked while building; only `app.custom` takes a run-time method, checked when it registers", "use a literal or compile-time String constant, or register the route with `app.custom`"))
+                        next
+                    }
+                    if prefix != "" {
+                        path_at: marked_count - 1
+                        path: sema_http_route_constant_string(marked[path_at].expr, environment, program, scopes) ?? {
+                            diagnostics.push(sema_error("E2805", marked[path_at].span, "a route marker under a mount prefix needs a static path", "the mounted route's address is the prefix and the marker's path, checked while building", "use a literal or compile-time String constant"))
+                            next
+                        }
+                        marked[path_at] = sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{prefix}{path}"}}, span: marked[path_at].span, id: AST_NODE_GENERATED}, marked[path_at].span)
+                    }
+                    params := [LambdaParam]{}
+                    call_args := [CallArg]{}
+                    loop index in 1..<method.params.len() {
+                        parameter_ty: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
+                        params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None, convention: AccessConvention.Read})
+                        argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
+                        argument.convention = method.params[index].convention
+                        call_args.push(argument)
+                    }
+                    invocation: Expr.MethodCall{receiver: Expr.Ident{name: value_name.copy(), span: span, id: AST_NODE_GENERATED}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
+                    meta := ast_empty_lambda_meta()
+                    nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+                    loop registered in nominal.methods {
+                        if registered.declaration.name == method.name {
+                            meta.http_route_source = Val(symbol_table_key(graph.symbols, registered.symbol.id))
+                        }
+                    }
+                    // The marked method stands for the call `verb(path)`
+                    // at its marker, which the receiver's rules hear.
+                    _ := sema_call_rules_hear_stand_in(receiver, receiver_value, verb, marker.span, marked, None, "mount{span.start}", call_frame, environment, program, scopes, check, diagnostics)
+                    handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
+                    marked.push(sema_http_mount_arg(handler, marker.span))
+                    registration: sema_call_try_http_router(receiver, sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, marked, marker.span, None, environment, program, scopes, check, diagnostics)
+                    if registration.value == .Val(value) {
+                        body.push(TStmt.ExprStmt{value: value, span: marker.span})
+                    }
+                }
+            }
         } else {
             diagnostics.push(sema_error("E2805", value_arg.span, "app.mount needs an ordinary struct, not `{type_name(value_ty)}`", "only the explicitly mounted struct's tagged methods contribute routes", "pass a struct value with #Server.Get or another core.http.server verb marker"))
         }
@@ -795,7 +794,7 @@ sema_app_graph_mount_refused: fn(method: String, what: String, span: Span) -> Di
 // another file, or outside the function that mounts, and a generated
 // handler is a lambda of that function.
 sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method_module: ModuleID, access: String, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     if !sema_app_mount_concrete(method) {
         diagnostics.push(sema_error("E2805", marker.span, "endpoint method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
         return None
@@ -839,7 +838,7 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
 // (`sema_app_mount_endpoint`). The generated code is the mount call's, at
 // `span`.
 sema_app_mount_upload: fn(mux: TExpr, value_name: String, service: String, methods: [Func], method: Func, method_module: ModuleID, uploads: [Int], access: String, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     if !sema_app_mount_concrete(method) {
         diagnostics.push(sema_error("E2805", marker.span, "upload endpoint `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
         return None
@@ -939,7 +938,7 @@ sema_app_signing_key_at: fn(methods: [Func], name: String, graph: SemaRegistrati
 // (`sema_app_webhook_key`). The generated code is the mount call's, at
 // `span`.
 sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, methods: [Func], method: Func, method_module: ModuleID, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     if !sema_app_mount_concrete(method) {
         diagnostics.push(sema_error("E2805", marker.span, "webhook method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted webhook decodes its arguments from the delivery and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
         return None
@@ -1003,7 +1002,7 @@ sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, meth
 // module's scheduler reads (E2805 otherwise). The generated code is the
 // mount call's, at `span`.
 sema_app_mount_schedule: fn(mux: TExpr, value_name: String, service: String, method: Func, method_module: ModuleID, marker: Marker, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     if !sema_app_mount_concrete(method) || method.params.len() != 1 {
         diagnostics.push(sema_error("E2805", marker.span, "schedule method `{method.name}` needs read-only self, no other parameters and a concrete signature", "the scheduler calls a schedule's method at each due minute, with nothing to pass it", "write `{method.name}: fn(self)` without method type parameters"))
         return None
@@ -1037,7 +1036,7 @@ sema_app_mount_schedule: fn(mux: TExpr, value_name: String, service: String, met
 // parameters that are Encode and Decode, and has a concrete signature
 // (E2805 otherwise). The generated code is the mount call's, at `span`.
 sema_app_mount_job: fn(mux: TExpr, value_name: String, service: String, method: Func, method_module: ModuleID, marker: Marker, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     if !sema_app_mount_concrete(method) {
         diagnostics.push(sema_error("E2805", marker.span, "job method `{method.name}` needs read-only self and a concrete signature", "a serving server runs a job's kept rows on a copy of the mounted service", "write `{method.name}: fn(self, ...)` without method type parameters"))
         return None
@@ -1125,7 +1124,7 @@ sema_app_cron_number: fn(text: String) -> Int? {
 // the signing-key method `key_method` from those, by name, and gives
 // `Ok(value.key_method(...))`.
 sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, method: Func, method_module: ModuleID, path_params: [Int], address: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TCallArg? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     if !sema_app_mount_concrete(key_method) {
         diagnostics.push(sema_error("E2805", key_method.name_span, "signing-key method `{key_method.name}` needs read-only self, read parameters and a concrete signature", "a webhook runs its signing-key method on each delivery's path parameters, on request workers", "write `{key_method.name}: fn(self, ...)` with read parameters and without method type parameters"))
         return None
@@ -1156,10 +1155,7 @@ sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, metho
 // The type of parameter `index` of the App's registration method `name`;
 // None, with the reason on `check`, when the App surface does not declare it.
 sema_app_mux_param_type: fn(mux: TExpr, name: String, index: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> Type? {
-    graph: program.registration_graph ?? {
-        check.context.incomplete_reasons.push("an App registration has no registration graph")
-        return None
-    }
+    graph: program.registration_graph
     candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, mux.ty, name, [Type]{}, [Type]{}, span, environment, program, diagnostics)
     candidate: candidates.pop() ?? {
         check.context.incomplete_reasons.push("App.{name} is not registered")
@@ -1185,7 +1181,7 @@ sema_app_mux_param_type: fn(mux: TExpr, name: String, index: Int, span: Span, en
 // argument from the call's JSON array in turn, runs the method, and gives its
 // encoded reply.
 sema_app_mount_answer: fn(value_name: String, method: Func, method_module: ModuleID, answer_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TCallArg? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     args_name: "__jet_http_mount_args_{span.start}"
     statements := [Stmt]{}
     reads := [CallArg]{}
@@ -1234,7 +1230,7 @@ sema_app_mount_reply: fn(args_name: String, statements: ^[Stmt], invocation: ^^E
 // mounted call does (`sema_app_mount_reply`), so a check that fails refuses
 // the upload.
 sema_app_upload_check: fn(mux: TExpr, value_name: String, check_method: Func, method: Func, method_module: ModuleID, upload_at: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TCallArg? {
-    graph: program.registration_graph ?? return None
+    graph: program.registration_graph
     if !sema_app_mount_concrete(check_method) {
         diagnostics.push(sema_error("E2805", check_method.name_span, "upload check `{check_method.name}` needs read-only self, read parameters and a concrete signature", "the server runs an upload endpoint's check on the call's other arguments, on request workers, before it reads the file", "write `{check_method.name}: fn(self, ...)` with read parameters and without method type parameters"))
         return None

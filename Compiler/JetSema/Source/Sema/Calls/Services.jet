@@ -345,11 +345,10 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
     }
     handler_name: shaped ?? ""
     registered := false
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_registration_lookup_name(graph, environment.module_identity, handler_name)
-        if resolved == .Val(function) && sema_resolved_kind(graph, function) == SymbolKind.Function {
-            registered = true
-        }
+    graph: program.registration_graph
+    resolved: sema_registration_lookup_name(graph, environment.module_identity, handler_name)
+    if resolved == .Val(function) && sema_resolved_kind(graph, function) == SymbolKind.Function {
+        registered = true
     }
     if !registered {
         diagnostics.push(sema_error("E0112", handler_span, "service worker handler has no checked top-level function identity", "service handlers must resolve to registered top-level function bodies", "pass a registered top-level function"))
@@ -384,10 +383,8 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
 // Whether `ty` meets the compiler-owned `bound` where the call is written; a
 // type parameter is not known to.
 sema_services_type_meets: fn(ty: Type, bound: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        return sema_type_bound_satisfied_at(graph, ty, bound, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
-    }
-    false
+    graph: program.registration_graph
+    sema_type_bound_satisfied_at(graph, ty, bound, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
 }
 
 // `tree.send(endpoint, message)`, `tree.call(endpoint, message)` and
@@ -474,12 +471,11 @@ sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_valu
         handler := values[1]
         handler_symbol: sema_services_const_symbol(handler, check.context)
         registered_function := false
-        if program.registration_graph == .Val(graph) {
-            resolved := sema_registration_lookup_name(graph, environment.module_identity, handler_name)
-            if resolved == .Val(function) && sema_resolved_kind(graph, function) == SymbolKind.Function {
-                if handler_symbol == .Val(symbol) && symbol == sema_resolved_id(graph, function) {
-                    registered_function = true
-                }
+        graph: program.registration_graph
+        resolved := sema_registration_lookup_name(graph, environment.module_identity, handler_name)
+        if resolved == .Val(function) && sema_resolved_kind(graph, function) == SymbolKind.Function {
+            if handler_symbol == .Val(symbol) && symbol == sema_resolved_id(graph, function) {
+                registered_function = true
             }
         }
         if !registered_function {
@@ -521,21 +517,20 @@ SemaServiceFunctionRow: struct {
 // compiler-owned contract: enqueue/delay are not string-selected public
 // operations.
 sema_core_module_nominal: fn(program: SemaProgramTables, module_name: String, leaf: String) -> String Never! {
-    if program.registration_graph == .Val(graph) {
-        loop module_index in 0..<graph.modules.len() {
-            if graph.modules[module_index].module_name != module_name -> next
-            loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
-                // Read in place: binding the row copied each module nominal.
-                if graph.modules[module_index].nominals[nominal_index].symbol.name == leaf {
-                    if graph.modules[module_index].nominals[nominal_index].compiler_owned {
-                        return leaf.copy()
-                    }
-                    return "{module_text(graph.module_table, graph.modules[module_index].nominals[nominal_index].symbol.module_identity)}.{leaf}"
+    graph: program.registration_graph
+    loop module_index in 0..<graph.modules.len() {
+        if graph.modules[module_index].module_name != module_name -> next
+        loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
+            // Read in place: binding the row copied each module nominal.
+            if graph.modules[module_index].nominals[nominal_index].symbol.name == leaf {
+                if graph.modules[module_index].nominals[nominal_index].compiler_owned {
+                    return leaf.copy()
                 }
+                return "{module_text(graph.module_table, graph.modules[module_index].nominals[nominal_index].symbol.module_identity)}.{leaf}"
             }
         }
-        leaf.copy()
-    } else { return leaf.copy() }
+    }
+    leaf.copy()
 }
 
 sema_job_queue_function: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationRowRef? {
@@ -548,20 +543,19 @@ sema_job_queue_function: fn(expression: Expr, environment: SemaScopeEnvironment,
             return None
         }
     }
-    if program.registration_graph == .Val(graph) {
-        resolved: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return None
-        if sema_resolved_kind(graph, resolved) != SymbolKind.Function -> return None
-        module_index: sema_registration_module_index(graph, resolved.source_module_identity) ?? return None
-        id: sema_resolved_id(graph, resolved)
-        loop index in 0..<graph.modules[module_index].functions.len() {
-            if graph.modules[module_index].functions[index].symbol.id != id -> next
-            if !graph.modules[module_index].functions[index].declaration.is_job || graph.modules[module_index].functions[index].declaration.params.len() != 1 {
-                return None
-            }
-            return Val(SemaRegistrationRowRef{module_index: module_index, row: index})
+    graph: program.registration_graph
+    resolved: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return None
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Function -> return None
+    module_index: sema_registration_module_index(graph, resolved.source_module_identity) ?? return None
+    id: sema_resolved_id(graph, resolved)
+    loop index in 0..<graph.modules[module_index].functions.len() {
+        if graph.modules[module_index].functions[index].symbol.id != id -> next
+        if !graph.modules[module_index].functions[index].declaration.is_job || graph.modules[module_index].functions[index].declaration.params.len() != 1 {
+            return None
         }
-        return None
-    } else { return None }
+        return Val(SemaRegistrationRowRef{module_index: module_index, row: index})
+    }
+    return None
 }
 
 sema_job_queue_identity_error: fn(method: String, span: Span) -> Diagnostic Never! {
@@ -599,29 +593,28 @@ sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method
         sema_services_check_untyped_args(updated_args, environment, program, scopes, check, diagnostics)
         return failed
     }
-    if program.registration_graph == .Val(graph) {
-        job_name: graph.modules[job.module_index].functions[job.row].declaration.name
-        payload_type: sema_type_resolve_declared_with_generics(graph, graph.modules[job.module_index].functions[job.row].declaration.params[0].ty, graph.modules[job.module_index].module_identity, [TGenericParam]{})
-        job_span: expr_span(updated_args[0].expr)
-        updated_args[0].expr = Expr.Str{parts: [StrPart]{StrPart.Lit{text: job_name}}, span: job_span, id: AST_NODE_GENERATED}
-        sema_call_http_check_serde(SemaSerdeDirection.Encode, payload_type, expr_span(updated_args[1].expr), environment, program, diagnostics)
-        payload: sema_check_expression(updated_args[1].expr, Val(payload_type), environment, program, scopes, check, diagnostics) ?? return failed
-        last_type: if method == "enqueue" -> Type.Option{inner: Type.String} else -> Type.Named{name: "Duration"}
-        last: if updated_args.len() == 3 -> sema_check_expression(updated_args[2].expr, Val(last_type), environment, program, scopes, check, diagnostics) ?? return failed else -> sema_node(check.context, last_type, NodeKind.Absent, span)
-        parameter_types: if updated_args.len() == 3 -> [Type]{Type.String, payload_type, last_type} else -> [Type]{Type.String, payload_type}
-        params: sema_services_method_params(parameter_types, [AccessConvention]{})
-        ownership: sema_ownership_check_method_call(check.state, "JobQueue.{method}", receiver, AccessConvention.Write, params, updated_args, scopes, span, diagnostics)
-        if !ownership.accepted || !ownership.complete -> return failed
-        // Source takes its immutable shared handle as a normal read, not the old
-        // native mutable carrier. Receiver ownership has already been checked.
-        normalized: [TExpr]{receiver_value, sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: job_name}}}, job_span), payload, last}
-        record: sema_call_core_receiver_record(Type.Named{name: "JobQueue"}, method, normalized.len(), span, diagnostics) ?? return failed
-        result_type: sema_services_result_type(Type.Named{name: sema_core_module_nominal(program, "core.jobs", "JobQueueReceipt")})
-        failure: sema_services_result_carrier(result_type)
-        if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, scopes, check.context, environment, program, diagnostics) {
-            return failed
-        }
-        value: sema_call_core_tree(record, normalized, span, [Type]{payload_type}, [Bool]{}, result_type, failure, expected, environment, program, diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: value}
-    } else { return failed }
+    graph: program.registration_graph
+    job_name: graph.modules[job.module_index].functions[job.row].declaration.name
+    payload_type: sema_type_resolve_declared_with_generics(graph, graph.modules[job.module_index].functions[job.row].declaration.params[0].ty, graph.modules[job.module_index].module_identity, [TGenericParam]{})
+    job_span: expr_span(updated_args[0].expr)
+    updated_args[0].expr = Expr.Str{parts: [StrPart]{StrPart.Lit{text: job_name}}, span: job_span, id: AST_NODE_GENERATED}
+    sema_call_http_check_serde(SemaSerdeDirection.Encode, payload_type, expr_span(updated_args[1].expr), environment, program, diagnostics)
+    payload: sema_check_expression(updated_args[1].expr, Val(payload_type), environment, program, scopes, check, diagnostics) ?? return failed
+    last_type: if method == "enqueue" -> Type.Option{inner: Type.String} else -> Type.Named{name: "Duration"}
+    last: if updated_args.len() == 3 -> sema_check_expression(updated_args[2].expr, Val(last_type), environment, program, scopes, check, diagnostics) ?? return failed else -> sema_node(check.context, last_type, NodeKind.Absent, span)
+    parameter_types: if updated_args.len() == 3 -> [Type]{Type.String, payload_type, last_type} else -> [Type]{Type.String, payload_type}
+    params: sema_services_method_params(parameter_types, [AccessConvention]{})
+    ownership: sema_ownership_check_method_call(check.state, "JobQueue.{method}", receiver, AccessConvention.Write, params, updated_args, scopes, span, diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    // Source takes its immutable shared handle as a normal read, not the old
+    // native mutable carrier. Receiver ownership has already been checked.
+    normalized: [TExpr]{receiver_value, sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: job_name}}}, job_span), payload, last}
+    record: sema_call_core_receiver_record(Type.Named{name: "JobQueue"}, method, normalized.len(), span, diagnostics) ?? return failed
+    result_type: sema_services_result_type(Type.Named{name: sema_core_module_nominal(program, "core.jobs", "JobQueueReceipt")})
+    failure: sema_services_result_carrier(result_type)
+    if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, scopes, check.context, environment, program, diagnostics) {
+        return failed
+    }
+    value: sema_call_core_tree(record, normalized, span, [Type]{payload_type}, [Bool]{}, result_type, failure, expected, environment, program, diagnostics)
+    return SemaMethodSpecialCheck{handled: true, value: value}
 }

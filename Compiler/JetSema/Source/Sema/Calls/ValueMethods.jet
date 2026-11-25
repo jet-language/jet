@@ -148,7 +148,10 @@ sema_value_method_core_source: fn(owner: String, role: String, receiver_value: T
         diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    graph: program.registration_graph ?? {
+    graph: program.registration_graph
+    // Snapshot: a role's filler is a registered Core function, and a lone
+    // program registers none.
+    if graph.mode == .Snapshot {
         diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
