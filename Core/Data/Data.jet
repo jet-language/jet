@@ -578,12 +578,12 @@ Query: struct<T> {
 // group value. It sits in a Shared cell because a function value cannot be
 // copied.
 priv QueryKeyCell: struct<T, K> {
-    key: fn(T) -> K DataError!,
+    key: fn(T) -[]> K DataError!,
 }
 
 // A grouped sum's addition, shared the same way.
 priv QueryAddCell: struct<V> {
-    add: fn(V, V) -> V DataError!,
+    add: fn(V, V) -[]> V DataError!,
 }
 
 // `query.group_by(key)`: the grouped carrier its count/sum/mean reducers read.
@@ -626,7 +626,7 @@ priv TrackedTable: struct<T, K> {
     next_order: Int,
     revision: Int,
     changes: [TrackedChange<T>],
-    key: fn(T) -> K DataError!,
+    key: fn(T) -[]> K DataError!,
 }
 
 // One edit of a tracked table: from `revision` on, the row stamped `order`
@@ -641,8 +641,8 @@ priv TrackedChange: struct<T> {
 // A tracked table as a watch reads it, without its key type: `snapshot`
 // reads every row, `changes` the changes after a revision (TrackedDelta).
 priv TrackedReader: struct<T> {
-    snapshot: fn() -> TrackedSnapshot<T> Never!,
-    changes: fn(Int) -> TrackedDelta<T> DataError!,
+    snapshot: fn() -[]> TrackedSnapshot<T> Never!,
+    changes: fn(Int) -[]> TrackedDelta<T> DataError!,
 }
 
 priv TrackedSnapshot: struct<T> {
@@ -683,15 +683,21 @@ priv WatchStep: struct<T> {
 
 // Makes the source of a new watch; None when its input has none.
 priv WatchFactory: struct<T> {
-    make: fn() -> WatchSource<T>? Never!,
+    make: fn() -[]> WatchSource<T>? Never!,
 }
 
 priv WatchDerive: struct<S, T> {
-    run: fn([WatchEntry<S>]) -> [WatchEntry<T>] DataError!,
+    run: fn([WatchEntry<S>]) -[]> [WatchEntry<T>] DataError!,
 }
 
 priv WatchJoin: struct<T, U, O> {
-    run: fn([T], [U]) -> [O] DataError!,
+    run: fn([T], [U]) -[]> [O] DataError!,
+}
+
+// A join side's rows as a watch that does not maintain the side reads them
+// (watch_static).
+priv QueryRowsCell: struct<T> {
+    read: fn() -[]> [T] DataError!,
 }
 
 // One row of a maintained result. `order` is the stamp of its tracked row
@@ -714,14 +720,14 @@ priv WatchView: struct<T> {
     recomputed: Bool,
     changed: Bool,
     retained_rows: Int,
-    commit: fn() Never!,
+    commit: fn() -[]> Never!,
 }
 
 // `refresh(revision, prior)` brings `prior`, the result published at
 // `revision`, up to the source's current revision.
 priv WatchSource: struct<T> {
-    initial: fn() -> WatchView<T> DataError!,
-    refresh: fn(Int, [WatchEntry<T>]) -> WatchView<T> DataError!,
+    initial: fn() -[]> WatchView<T> DataError!,
+    refresh: fn(Int, [WatchEntry<T>]) -[]> WatchView<T> DataError!,
 }
 
 // A watch's published result and lifecycle. `publications` counts the
@@ -1825,7 +1831,9 @@ priv query_extreme_pick: fn<V: Comparable>(candidates: [V], maximum: Bool, opera
         right_keys: query_join_keys<U>(right_rows, right_cell) ?? return Err(err)
         inner_join_keyed<T, U>(left_rows, right_rows, left_keys, right_keys)
     }}}
-    query_join<T, U, DataJoin<T, U>>(left, right, join, "inner_join")
+    left_side: left.copy()
+    right_side: right.copy()
+    query_join<T, U, DataJoin<T, U>>(left, right, join, "inner_join", fn() { query_rows<T>(left_side) }, fn() { query_rows<U>(right_side) })
 }
 
 #Builtin.Role(.QueryLeftJoin) priv __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
@@ -1836,12 +1844,16 @@ priv query_extreme_pick: fn<V: Comparable>(candidates: [V], maximum: Bool, opera
         right_keys: query_join_keys<U>(right_rows, right_cell) ?? return Err(err)
         left_join_keyed<T, U>(left_rows, right_rows, left_keys, right_keys)
     }}}
-    query_join<T, U, DataJoin<T, U?>>(left, right, join, "left_join")
+    left_side: left.copy()
+    right_side: right.copy()
+    query_join<T, U, DataJoin<T, U?>>(left, right, join, "left_join", fn() { query_rows<T>(left_side) }, fn() { query_rows<U>(right_side) })
 }
 
 // The join of `left`'s rows with `right`'s, and its maintained result
-// (watch_join) when a watch maintains either side.
-priv query_join: fn<T, U, O>(left: Query<T>, right: Query<U>, join: Shared<WatchJoin<T, U, O>>, step: String) -> Query<O> Never! {
+// (watch_join) when a watch maintains either side. `left_read` and
+// `right_read` read a side's rows once for a watch that does not maintain
+// that side (watch_static).
+priv query_join: fn<T, U, O>(left: Query<T>, right: Query<U>, join: Shared<WatchJoin<T, U, O>>, step: String, left_read: ^^fn() -> [T] DataError!, right_read: ^^fn() -> [U] DataError!) -> Query<O> Never! {
     batch_join: join.copy()
     batch_left: left.copy()
     batch_right: right.copy()
@@ -1853,9 +1865,11 @@ priv query_join: fn<T, U, O>(left: Query<T>, right: Query<U>, join: Shared<Watch
     if !query_maintained<T>(left) && !query_maintained<U>(right) -> return joined
     left_query: left.copy()
     right_query: right.copy()
+    left_static: Shared{QueryRowsCell<T>{read: fn() { left_read() }}}
+    right_static: Shared{QueryRowsCell<U>{read: fn() { right_read() }}}
     query_live<O>(joined, Val(Shared{QueryLive<O>{reader: None, steps: [WatchStep<O>]{}, derived: Val(Shared{WatchFactory<O>{make: fn() {
-        left_source: query_watch_source<T>(left_query) ?? watch_static<T>(left_query)
-        right_source: query_watch_source<U>(right_query) ?? watch_static<U>(right_query)
+        left_source: query_watch_source<T>(left_query) ?? watch_static<T>(left_static)
+        right_source: query_watch_source<U>(right_query) ?? watch_static<U>(right_static)
         Val(watch_join<T, U, O>(left_source, right_source, join))
     }}})}}))
 }
@@ -2119,7 +2133,7 @@ priv query_maintained: fn<T>(query: Query<T>) -> Bool Never! {
 
 // The `__live` of a query whose step derives its rows from `query`'s by
 // `derive` (watch_derived), or None when no watch maintains `query`.
-priv query_live_derived: fn<S, T>(query: Query<S>, derive: ^^fn([WatchEntry<S>]) -> [WatchEntry<T>] DataError!) -> Shared<QueryLive<T>>? Never! {
+priv query_live_derived: fn<S, T>(query: Query<S>, derive: ^^fn([WatchEntry<S>]) -[]> [WatchEntry<T>] DataError!) -> Shared<QueryLive<T>>? Never! {
     if !query_maintained<S>(query) -> return None
     source: query.copy()
     cell: Shared{WatchDerive<S, T>{run: derive.move()}}
@@ -2132,7 +2146,7 @@ priv query_live_derived: fn<S, T>(query: Query<S>, derive: ^^fn([WatchEntry<S>])
 // The `__live` of a filter or sort after `query`: one more step over the
 // tracked rows when `query` reads them through filters and sorts only, and
 // otherwise a derived step running `derive`.
-priv query_live_step: fn<T>(query: Query<T>, step: WatchStep<T>, derive: ^^fn([WatchEntry<T>]) -> [WatchEntry<T>] DataError!) -> Shared<QueryLive<T>>? Never! {
+priv query_live_step: fn<T>(query: Query<T>, step: WatchStep<T>, derive: ^^fn([WatchEntry<T>]) -[]> [WatchEntry<T>] DataError!) -> Shared<QueryLive<T>>? Never! {
     cell: query.__live.copy() ?? return None
     live: cell.guard_read()
     reader: live.value.reader.copy() ?? return query_live_derived<T, T>(query, derive)
@@ -2409,13 +2423,13 @@ priv watch_join_mode: fn(left: String, right: String) -> String Never! {
 
 // A join side no watch maintains: read once when the watch starts, and
 // unchanged after.
-priv watch_static: fn<T>(query: Query<T>) -> WatchSource<T> Never! {
-    source: query.copy()
+priv watch_static: fn<T>(source: Shared<QueryRowsCell<T>>) -> WatchSource<T> Never! {
+    reader: source.copy()
     count: Shared{0}
     initial_count: count.copy()
     WatchSource<T>{
         initial: fn() {
-            rows: query_rows<T>(source) ?? return Err(err)
+            rows: reader.guard_read().value.read() ?? return Err(err)
             entries := [WatchEntry<T>]{}
             loop index in 0..<rows.len() -> entries.push(WatchEntry<T>{order: index, keys: [String]{}, value: rows[index].copy()})
             total: rows.len()
@@ -2453,7 +2467,7 @@ priv GroupWatchState: struct<K, V> {
 
 // The `__live` of a grouped reducer: maintained only over a query that reads
 // tracked rows through filters and sorts (watch_group).
-priv group_live: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: Shared<QueryKeyCell<T, V>>, aggregate: ^^fn([V]) -> V DataError!, operation: String, mode: String) -> Shared<QueryLive<Group<K, V>>>? Never! {
+priv group_live: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: Shared<QueryKeyCell<T, V>>, aggregate: ^^fn([V]) -[]> V DataError!, operation: String, mode: String) -> Shared<QueryLive<Group<K, V>>>? Never! {
     cell: grouped.__query.__live.copy() ?? return None
     live: cell.guard_read()
     reader: live.value.reader.copy() ?? return None
