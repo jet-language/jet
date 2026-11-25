@@ -6,7 +6,9 @@
 // marks the returned ones (sema_recorded_mark_returned). A FunctionInfo of
 // the caller takes them from its module's check: a rule's from the pass the
 // rule runs in (sema_recorded_info_filled), a compiler service's from the
-// checked module (sema_recorded_lists).
+// checked module (sema_recorded_lists). A lambda argument's FunctionInfo
+// takes the ones written inside it, and its own body's return paths decide
+// its `returns`.
 use {
     jet_foundation.[
         CallArg,
@@ -137,22 +139,29 @@ sema_recorded_arg_value: fn(heard: SemaCallRuleHeard, at: Int, file: String) -> 
     }
 }
 
-// The calls in `calls` the check of the function keyed `key` recorded.
-sema_recorded_lists: fn(calls: [SemaRecordedCall], key: String) -> SemaRecordedLists {
+// The calls in `calls` that `source` names: those the check of its body
+// recorded, or for a lambda those written inside it, whose returns are its
+// own body's.
+sema_recorded_lists: fn(calls: [SemaRecordedCall], source: SemaRuleFunctionSource) -> SemaRecordedLists {
     ^lists: SemaRecordedLists{recorded: [TComptimeValue]{}, returns: [TComptimeValue]{}}
     loop call in calls {
-        if call.function_key != key -> next
+        if call.function_key != source.key -> next
+        ^returned: call.returned
+        if source.within == .Val(span) {
+            if call.at < span.start || call.at >= span.end -> next
+            returned = source.returned.contains(call.at)
+        }
         lists.recorded.push(call.call)
-        if call.returned -> lists.returns.push(call.call)
+        if returned -> lists.returns.push(call.call)
     }
     lists
 }
 
-// `info`, a FunctionInfo of the function keyed `key`, with the calls its
+// `info`, a FunctionInfo of the function `source` names, with the calls its
 // check in `modules` recorded.
-sema_recorded_info_filled: fn(info: ^^TComptimeValue, key: String, modules: [SemaGraphModuleResult]) -> TComptimeValue {
+sema_recorded_info_filled: fn(info: ^^TComptimeValue, source: SemaRuleFunctionSource, modules: [SemaGraphModuleResult]) -> TComptimeValue {
     loop checked in modules {
-        lists: sema_recorded_lists(checked.recorded_calls, key)
+        lists: sema_recorded_lists(checked.recorded_calls, source)
         if lists.recorded.len() > 0 -> return sema_recorded_info_with(info.move(), lists.move())
     }
     info.move()

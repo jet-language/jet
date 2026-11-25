@@ -661,17 +661,28 @@ SemaComptimeRuleSite: struct {
 // known argument values, named functions and written parts by index into
 // its own `texts`, `types`, `values`, `functions` and `written`, which its
 // batch renumbers into the batch's. The call's caller, callee, module, file
-// and name are its first five texts. `function_keys` holds the declaration
-// key of each FunctionInfo of `functions`, at its position, by which its
-// batch finds the function's recorded calls.
+// and name are its first five texts. `function_sources` says, for each
+// FunctionInfo of `functions` at its position, where its batch finds the
+// function's recorded calls.
 SemaCallRuleHeard: struct {
     words: [Int],
     texts: [String],
     types: [TComptimeValue],
     values: [TComptimeValue],
     functions: [TComptimeValue],
-    function_keys: [String],
+    function_sources: [SemaRuleFunctionSource],
     written: [TComptimeValue],
+}
+
+// Where the recorded calls of a heard argument's function are: those the
+// check of the body keyed `key` recorded. A lambda's are the ones written
+// inside it (`within`, the lambda's span) in its enclosing function's body,
+// and its returns are those that start at an offset of `returned`, the
+// calls a return path of the lambda's own body returns.
+SemaRuleFunctionSource: struct {
+    key: String,
+    within: Span?,
+    returned: [Int],
 }
 
 // One call of a `#Recorded` callee in the checked body keyed

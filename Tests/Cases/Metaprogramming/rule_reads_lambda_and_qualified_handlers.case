@@ -1,0 +1,13 @@
+# A rule hears a FunctionInfo for a handler named through a module alias
+# and for a lambda written in place, with the lambda's own recorded calls
+# and returns.
+fixture: RuleReadsLambdaAndQualifiedHandlers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # both handlers read as written
+stderr: !~ "known.Misread" # each handler is heard as a FunctionInfo with its calls
+step: jet run main.jet
+exit: 0
+stdout: = "7\n7\n" # the rule only reads; the calls run as written

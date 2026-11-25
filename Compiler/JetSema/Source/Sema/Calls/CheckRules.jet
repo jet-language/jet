@@ -21,11 +21,15 @@ use {
         EnumDef,
         Expr,
         InternerDelta,
+        Lambda,
         Marker,
         ModuleID,
         NameTable,
+        Param,
+        ParamZone,
         Span,
         StructDef,
+        Symbol,
         SymbolID,
         SymbolKind,
         TComptimeEnumArg,
@@ -34,6 +38,7 @@ use {
         TComptimeValue,
         TUnaryOp,
         Type,
+        ast_func,
         codable_tag_field,
         codable_untagged,
         core_decl_utf8,
@@ -419,9 +424,9 @@ sema_call_rule_stage: fn(check: ^SemaBodyCheck, owner: String, site_owner: Strin
 // (sema_rule_value_dyn). A literal is heard as that check would hear it,
 // without the check (sema_rule_literal). A type name, which checks only
 // where a `Type` is expected, is heard as that `Type` value
-// (sema_rule_probe). The `function` an argument names is its FunctionInfo
-// (sema_rule_function_named), and the parts an interpolated String literal
-// spells are its `written` (sema_rule_written).
+// (sema_rule_probe). The `function` an argument names or writes is its
+// FunctionInfo (sema_rule_function_of), and the parts an interpolated String
+// literal spells are its `written` (sema_rule_written).
 sema_rule_call_value: fn(
     graph: SemaRegistrationGraph,
     callee: SymbolID?,
@@ -451,7 +456,7 @@ sema_rule_call_value: fn(
         types: [TComptimeValue]{},
         values: [TComptimeValue]{},
         functions: [TComptimeValue]{},
-        function_keys: [String]{},
+        function_sources: [SemaRuleFunctionSource]{},
         written: [TComptimeValue]{},
     }
     if source == .Val(text) {
@@ -469,7 +474,7 @@ sema_rule_call_value: fn(
         heard_arg: sema_rule_literal(argument.expr) ?? sema_rule_heard_arg(argument.expr, check)
         ^label: String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
-        function: sema_rule_function_named(argument.expr, argument.span, check)
+        function: sema_rule_function_of(argument.expr, heard_arg.ty, argument.span, check)
         sema_rule_call_arg(heard, label, heard_arg.ty, heard_arg.known, function, sema_rule_written(argument.expr, file), argument.span, graph, check.context.type_delta, check.environment.*)
     }
     heard.words.push(tables.len())
@@ -570,32 +575,87 @@ sema_rule_heard_arg: fn(expression: Expr, check: ^SemaBodyCheck) -> SemaRuleHear
     SemaRuleHeardArg{ty: ty, known: known}
 }
 
-// A function an argument names: its FunctionInfo and its declaration key.
+// A function an argument names or writes: its FunctionInfo and where its
+// recorded calls are.
 SemaRuleFunction: struct {
     info: TComptimeValue,
-    key: String,
+    source: SemaRuleFunctionSource,
 }
 
-// The FunctionInfo of the declared function the argument `expression` names
-// by its bare name, resolved as `f.reflect()` resolves it
-// (sema_call_static_reflect_function), with the function's key; None for
-// any other argument, a local that shadows the function included.
-sema_rule_function_named: fn(expression: Expr, span: Span, check: ^SemaBodyCheck) -> SemaRuleFunction? {
+// The FunctionInfo of the function the argument `expression`, of the probed
+// type `ty`, is: a declared function it names by its bare name, resolved as
+// `f.reflect()` resolves it (sema_call_static_reflect_function), or through
+// a module alias (`handlers.list`), or a lambda it writes
+// (sema_rule_lambda_function). None for any other argument, a local that
+// shadows the function or the alias included.
+sema_rule_function_of: fn(expression: Expr, ty: Type, span: Span, check: ^SemaBodyCheck) -> SemaRuleFunction? {
+    if expression == .Lambda(lambda, _) -> return sema_rule_lambda_function(lambda, ty, check)
+    graph: check.program.registration_graph
+    ^resolved: Symbol?{None}
     if expression == .Ident(name, _, _) {
-        graph: check.program.registration_graph
         local: sema_scope_resolve_index(check.scopes, name)
-        resolved: if local == .Val(index) -> sema_scope_binding_symbol(check.environment.*, check.scopes, index) else -> sema_resolved_symbol(graph, sema_type_graph_lookup_symbol(graph, check.environment.module_identity, name) ?? return None)
-        if resolved.kind != SymbolKind.Function -> return None
-        ^probe_diagnostics: [Diagnostic]{}
-        info: sema_fact_function_info(resolved, graph, check.context.type_delta, None, span, probe_diagnostics) ?? return None
-        return Val(SemaRuleFunction{info: sema_fact_declared_value(info), key: sema_symbol_key(check.program.*, check.context, resolved.id)})
+        resolved = Val(if local == .Val(index) -> sema_scope_binding_symbol(check.environment.*, check.scopes, index) else -> sema_resolved_symbol(graph, sema_type_graph_lookup_symbol(graph, check.environment.module_identity, name) ?? return None))
     }
-    None
+    if expression == .Field(base, member, _, _) && base == .Ident(alias, _, _) && sema_scope_resolve_index(check.scopes, alias) == None {
+        resolved = Val(sema_resolved_symbol(graph, sema_registration_lookup_qualified(graph, check.environment.module_identity, alias, member) ?? return None))
+    }
+    symbol: resolved ?? return None
+    if symbol.kind != SymbolKind.Function -> return None
+    ^probe_diagnostics: [Diagnostic]{}
+    info: sema_fact_function_info(symbol, graph, check.context.type_delta, None, span, probe_diagnostics) ?? return None
+    Val(SemaRuleFunction{info: sema_fact_declared_value(info), source: SemaRuleFunctionSource{key: sema_symbol_key(check.program.*, check.context, symbol.id), within: None, returned: [Int]{}}})
+}
+
+// The FunctionInfo of a lambda written as an argument, of the probed type
+// `ty`, in the body being checked. A lambda has no name, and its identity
+// is its module's name followed by `fn@` and the offset it starts at. Each
+// parameter has its written type, else the probed one, else `_`, and the
+// result is the written or the probed one. Its recorded calls are the ones
+// its enclosing function's check recorded inside it, and its returns the
+// ones a return path of its own body returns.
+sema_rule_lambda_function: fn(lambda: Lambda, ty: Type, check: ^SemaBodyCheck) -> SemaRuleFunction? {
+    graph: check.program.registration_graph
+    module_index: sema_registration_module_index(graph, check.environment.module_identity) ?? return None
+    registered_module: graph.modules[module_index]
+    ^probed: [Type]{}
+    ^result: lambda.result
+    if ty == .Fn(params, ret, _, _, _, _) {
+        probed = params
+        if result == None -> result = ret
+    }
+    ^function: ast_func("", lambda.span, lambda.span)
+    function.params = loop (position, parameter) in lambda.params -> Param{
+        convention: parameter.convention,
+        root: false,
+        name: parameter.name,
+        name_span: parameter.name_span,
+        public_label: None,
+        zone: ParamZone.Either,
+        ty: parameter.ty ?? probed.get(position) ?? Type.Named{name: "_"},
+        ty_span: parameter.ty_span ?? parameter.name_span,
+        default: None,
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+        declared_footprint: None,
+    }
+    function.return_type = result
+    identity: "{registered_module.module_name}.fn@{lambda.span.start}"
+    info: sema_comptime_reflection_function_info(graph, check.context.type_delta, module_index, function, registered_module.module_name, identity, registered_module.package_identity, registered_module, [TComptimeValue]{}, [SemaInferenceBinding]{})
+    ^returned: [Int]{}
+    if lambda.body == {
+        .Expr(value) -> {
+            values: sema_recorded_returned_expr(value, [SemaRecordedAlias]{}, returned)
+            returned.extend(values)
+        }
+        .Block(body) -> sema_recorded_returned_statements(body, [SemaRecordedAlias]{}, returned, tail: true)
+    }
+    Val(SemaRuleFunction{info: sema_fact_declared_value(info), source: SemaRuleFunctionSource{key: sema_scope_function_owner_key(check.scopes), within: Val(lambda.span), returned: returned}})
 }
 
 // Appends the words of one CompilerArg of a heard call, whose value the
-// build knows as `known`, which names the function `function`
-// (sema_rule_function_named) and which spells the parts `parts`
+// build knows as `known`, which names or writes the function `function`
+// (sema_rule_function_of) and which spells the parts `parts`
 // (sema_rule_written), to `heard`; its type is the TypeId the one maker
 // makes in `graph`.
 sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, known: TComptimeValue?, function: ^^SemaRuleFunction?, parts: ^^TComptimeValue?, span: Span, graph: SemaRegistrationGraph, types: ^[InternerDelta], environment: SemaScopeEnvironment) Never! {
@@ -607,7 +667,7 @@ sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, kn
     ^named: 0
     if function.move() == .Val(named_function) {
         heard.functions.push(named_function.info.move())
-        heard.function_keys.push(named_function.key.move())
+        heard.function_sources.push(named_function.source.move())
         named = heard.functions.len()
     }
     ^value: 0
@@ -1289,9 +1349,9 @@ sema_call_rule_columns_add: fn(columns: ^SemaCallRuleColumns, staged: ^^SemaComp
     // The call's FunctionInfos, popped (an owned move) from its first.
     ^functions: call.functions.move()
     functions.reverse()
-    loop key in call.function_keys {
+    loop source in call.function_sources {
         info: functions.pop() ?? break
-        columns.functions.push(sema_recorded_info_filled(info.move(), key, modules))
+        columns.functions.push(sema_recorded_info_filled(info.move(), source, modules))
     }
     columns.written.extend(call.written.move())
     ^words: call.words.move()

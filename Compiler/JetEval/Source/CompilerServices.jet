@@ -162,6 +162,7 @@ use {
         SemaComptimeReflectionSource,
         SemaGraphModuleResult,
         SemaRecordedLists,
+        SemaRuleFunctionSource,
         SemaGraphResult,
         SemaRegistrationGraph,
         SemaTypeIDHead,
@@ -726,7 +727,7 @@ jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph
                     if effect_name == "Panic" -> reaches_panic = true
                 }
             }
-            recorded = sema_recorded_lists(checked.recorded_calls, key)
+            recorded = sema_recorded_lists(checked.recorded_calls, SemaRuleFunctionSource{key: key, within: None, returned: [Int]{}})
         }
     }
     arithmetic: sema_comptime_reflection_arithmetic_facts(function, registration_module.source_file)

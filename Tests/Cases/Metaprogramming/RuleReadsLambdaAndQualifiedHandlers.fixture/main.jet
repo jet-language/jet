@@ -1,0 +1,55 @@
+// A rule hears a FunctionInfo for a handler named through a module alias
+// and for a lambda written in place. The lambda has no name. Its parameters
+// and result are the written ones, its `recorded` calls are the ones written
+// inside it, and its `returns` are the ones its own return paths return.
+use pages: pages
+
+Misread: struct {
+    heard: String,
+
+    impl Diagnostic {
+        code: "known.Misread",
+
+        what: fn(self) -> String { "the handler reads as `{self.heard}`" }
+
+        why: fn(self) -> String { "a named or lambda handler is a FunctionInfo while building" }
+
+        fix: fn(self) -> String { "hear the handler's FunctionInfo" }
+    }
+}
+
+Handles: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args[0].function == .Val(info) {
+                params: (loop param in info.signature.params -> "{param.name}: {param.type.name}").join(", ")
+                recorded: (loop made in info.recorded -> "{made.name.text}<{(loop ty in made.type_args -> ty.name).join(",")}>").join(" ")
+                returns: (loop made in info.returns -> "{made.name.text}<{(loop ty in made.type_args -> ty.name).join(",")}>").join(" ")
+                heard: "{info.name}({params}) {recorded} | {returns}"
+                expected: if info.name == "" -> "(id: Int, name: String) mark<> answer<String> answer<Int> | answer<String> answer<Int>" else -> "show(id: Int, name: String) note<> reply<String> reply<Int> | reply<String> reply<Int>"
+                if heard != expected -> reject(Misread{heard: heard}, at: call.args[0])
+            } else {
+                reject(Misread{heard: "no FunctionInfo"}, at: call.args[0])
+            }
+        }
+    }
+}
+
+#Recorded
+mark: fn(text: String) -> String { "{text}" }
+
+#Recorded
+answer: fn<T: Printable>(value: T) -> String { "{value}" }
+
+#Handles route: fn(handler: fn(Int, String) -> String, path: String) -> String { handler(7, path) }
+
+run: fn() {
+    print(route(pages.show, "/item"))
+    print(route(fn(id: Int, name: String) -> String {
+        seen: mark(name)
+        if seen == "" -> return answer<String>("nobody")
+        answer<Int>(id)
+    }, "/lambda"))
+}
