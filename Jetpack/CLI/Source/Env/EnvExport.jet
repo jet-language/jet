@@ -21,10 +21,11 @@ cli_print_raw: fn(text: String) -[IO]> Never! {
 cli_cmd_env_hook: fn(theme: Theme, parsed: CLIParsed) -[IO, Env, Time.Wait]> Int Never! {
     shell: if parsed.positional.len() > 1 -> Val(parsed.positional[1]) else -> String?{None}
     kind: ShellKind.parse(shell) ?? {
+        tries: loop name in SHELL_KIND_NAMES -> "`jet env hook {name}`"
         theme.error(
             "unknown shell for `jet env hook`",
-            "the auto-activation hook is available for bash, zsh, and fish.",
-            "try `jet env hook bash`, `jet env hook zsh`, or `jet env hook fish`.",
+            "the auto-activation hook is available for: {SHELL_KIND_NAMES.join(", ")}.",
+            "try one of {tries.join(", ")}.",
         )
         return EXIT_USAGE
     }
