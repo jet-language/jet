@@ -7,18 +7,22 @@
     encoding_enum_eq(left, right)
 }
 
-#Export(c) jet_rt_record_new_jet_task_status_running: fn() -> I64 { encoding_enum_new(I64{0}) }
+#Export(c) jet_rt_record_new_jet_task_status_running: fn() -> I64 {
+    encoding_enum_new(TASK_STATUS_RUNNING)
+}
 
-#Export(c) jet_rt_record_new_jet_task_status_paused: fn() -> I64 { encoding_enum_new(I64{1}) }
+#Export(c) jet_rt_record_new_jet_task_status_paused: fn() -> I64 {
+    encoding_enum_new(TASK_STATUS_PAUSED)
+}
 
 #Export(c) jet_rt_record_new_jet_task_status_cancel_requested: fn() -> I64 {
-    encoding_enum_new(I64{2})
+    encoding_enum_new(TASK_STATUS_CANCEL_REQUESTED)
 }
 
 #Export(c) jet_rt_handle_show_jet_task_status: fn(value: I64) -> I64 {
     kind: encoding_word(wrapping(value + ENCODING_ENUM_TAG))
     result: jet_rt_string_builder_new()
-    if (kind == I64{0}) { rt_text_push_word(result, I64{29113321704551762}, I64{7}) } else if (kind == I64{1}) {
+    if (kind == TASK_STATUS_RUNNING) { rt_text_push_word(result, I64{29113321704551762}, I64{7}) } else if (kind == TASK_STATUS_PAUSED) {
         rt_text_push_word(result, I64{110386891546960}, I64{6})
     } else {
         rt_text_push_word(result, I64{7301017128636670275}, I64{8})

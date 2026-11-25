@@ -21,36 +21,36 @@
 }
 
 #Export(c) jet_rt_record_new_jet_service_restart_one_for_one: fn() -> I64 {
-    encoding_enum_new(I64{0})
+    encoding_enum_new(SERVICE_RESTART_ONE_FOR_ONE)
 }
 
 #Export(c) jet_rt_record_new_jet_service_restart_one_for_all: fn() -> I64 {
-    encoding_enum_new(I64{1})
+    encoding_enum_new(SERVICE_RESTART_ONE_FOR_ALL)
 }
 
 #Export(c) jet_rt_record_new_jet_service_restart_rest_for_one: fn() -> I64 {
-    encoding_enum_new(I64{2})
+    encoding_enum_new(SERVICE_RESTART_REST_FOR_ONE)
 }
 
 #Export(c) jet_rt_record_new_jet_service_delivery_at_most_once: fn() -> I64 {
-    encoding_enum_new(I64{0})
+    encoding_enum_new(SERVICE_DELIVERY_AT_MOST_ONCE)
 }
 
 #Export(c) jet_rt_record_new_jet_service_delivery_durable_at_least_once: fn() -> I64 {
-    encoding_enum_new(I64{1})
+    encoding_enum_new(SERVICE_DELIVERY_DURABLE_AT_LEAST_ONCE)
 }
 
 service_restart_label: fn(target: I64, ordinal: I64) {
     if {
-        (ordinal == I64{0}) -> {
+        (ordinal == SERVICE_RESTART_ONE_FOR_ONE) -> {
             rt_text_push_word(target, I64{7948697689580203599}, I64{8})  // OneForOn
             rt_text_push_word(target, I64{101}, I64{1})
         }
-        (ordinal == I64{1}) -> {
+        (ordinal == SERVICE_RESTART_ONE_FOR_ALL) -> {
             rt_text_push_word(target, I64{7800641851830398543}, I64{8})  // OneForAl
             rt_text_push_word(target, I64{108}, I64{1})
         }
-        (ordinal == I64{2}) -> {
+        (ordinal == SERVICE_RESTART_REST_FOR_ONE) -> {
             rt_text_push_word(target, I64{5724760424733435218}, I64{8})  // RestForO
             rt_text_push_word(target, I64{25966}, I64{2})
         }
@@ -60,11 +60,11 @@ service_restart_label: fn(target: I64, ordinal: I64) {
 
 service_delivery_label: fn(target: I64, ordinal: I64) {
     if {
-        (ordinal == I64{0}) -> {
+        (ordinal == SERVICE_DELIVERY_AT_MOST_ONCE) -> {
             rt_text_push_word(target, I64{7948699906469622849}, I64{8})  // AtMostOn
             rt_text_push_word(target, I64{25955}, I64{2})
         }
-        (ordinal == I64{1}) -> {
+        (ordinal == SERVICE_DELIVERY_DURABLE_AT_LEAST_ONCE) -> {
             rt_text_push_word(target, I64{4712291754910577988}, I64{8})  // DurableA
             rt_text_push_word(target, I64{7948699906236304500}, I64{8})  // tLeastOn
             rt_text_push_word(target, I64{25955}, I64{2})
