@@ -549,7 +549,7 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
             loop merged_text.len() < want -> merged_text.push(U8{0xcc})
             merged_text.extend(reads.value.functions[index].code)
         }
-        code := if own -> codes.pop() ?? panic("a .text thread lost the code of {reads.value.functions[index].name}") else -> [U8]{}
+        code := if own -> compiler_threads_taken(codes) else -> [U8]{}
         reloc_count: reads.value.functions[index].relocs.len()
         loop r in 0..<reloc_count {
             reloc_at: reads.value.functions[index].relocs[r].at

@@ -122,7 +122,7 @@ sema_comptime_use_check: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThr
     loop found.len() > 0 {
         slot := found.pop() ?? break
         row := compiler_threads_slot_taken(slot)
-        module_found := row.comptime.move() ?? panic("a #run use scan found no module scan")
+        module_found := compiler_threads_slot_taken(row.comptime.move())
         loop diagnostic in module_found.diagnostics {
             sema_registration_push_graph_diagnostic(owned, module_found.module_index, diagnostic)
         }
@@ -200,7 +200,7 @@ sema_graph_scan: fn(scan: ^^SemaGraphScan, workers: Int) -> SemaGraphScanDone {
         loop position in 0..<owned.rows.len() {
             found[position] = Val(sema_graph_scan_row(owned, position))
         }
-        graph := owned.graphs.pop() ?? panic("the scanned graph left its scan")
+        graph := compiler_threads_taken(owned.graphs)
         return SemaGraphScanDone{graph: graph, modules: owned.modules.move(), rows: owned.rows.move(), order: owned.order.move(), found: found}
     }
     shared_state: Shared{owned.move()}

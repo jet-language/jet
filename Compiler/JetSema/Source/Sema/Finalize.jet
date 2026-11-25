@@ -36,6 +36,7 @@ use jet_foundation.[
     compiler_threads_limit,
     compiler_threads_joined,
     compiler_threads_partition,
+    compiler_threads_taken,
     compiler_transfer_rows,
     symbol_find,
     symbol_table_key,
@@ -671,7 +672,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     // checks, where they always read. Beside the pass the two share the
     // threads: the effect pass takes what the walk leaves.
     taint_reports := [Diagnostic]{}
-    taint_catalog: taint_prepared.pop() ?? panic("the side checks left no taint catalog")
+    taint_catalog: compiler_threads_taken(taint_prepared)
     walk_inputs: sema_finalize_walk_inputs(taint_catalog, diagnostics, threads, taint_reports)
     effect_threads: if walk_inputs.beside -> compiler_threads_beside(threads, walk_inputs.workers) else -> threads
     walked := SemaFinalizeWalked{found: [[Diagnostic]]{}, masked: [[Span]]{}, fixed: [[String]]{}}

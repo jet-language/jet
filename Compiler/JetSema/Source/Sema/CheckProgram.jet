@@ -81,6 +81,7 @@ use jet_foundation.[
     compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_joined,
+    compiler_threads_taken,
     compiler_transfer_rows,
     effect_scope_descriptor,
     expr_span,
@@ -4791,7 +4792,7 @@ sema_check_registration_module: fn(owned_environment: ^^SemaScopeEnvironment, ow
             environment = sema_check_shared_take_environment(schedule.shared_state)
             program = sema_check_shared_take_program(schedule.shared_state)
             memory_plan = sema_check_shared_take_memory_plan(schedule.shared_state)
-            run.scopes = run.method_ready.scopes.pop() ?? panic("the method wave lost its module scope")
+            run.scopes = compiler_threads_taken(run.method_ready.scopes)
         }
     }
     module_result := sema_check_registration_module_tail(run, environment, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, pending_obligations, counter_phase, trace_sink)

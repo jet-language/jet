@@ -1182,7 +1182,7 @@ sema_check_body_stream_lead: fn(shared: Shared<SemaCheckShared>, cells: SemaStre
                     sink.progress("counters.{phase}.items_scanned", sema_check_registered_module_item_count(inputs.value.environments[0], inputs.value.programs[0], module_index), -1)
                     sink.progress("counters.{phase}.summary_functions_checked", step.summary_checked, -1)
                 }
-                scopes := bodies.scopes.pop() ?? panic("a demand wave module lost its post-summary scope")
+                scopes := compiler_threads_taken(bodies.scopes)
                 body_values := environment.comptime_body_publication.copy()
                 sema_scope_environment_enter_module(environment, inputs.value.programs[0], module_index, body_values)
                 if trace_sink == .Val(sink) {

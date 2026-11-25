@@ -3573,7 +3573,7 @@ jet_driver_run_comptime_carried: fn(
     }
     // The completed run hands the graph on as `graph`; any other exit hands
     // it back here.
-    run_program: programs.pop() ?? panic("a comptime run lost its program tables slot")
+    run_program: compiler_threads_taken(programs)
     if result.graph_finished -> result.graph = Val(run_program.registration_graph.move()) else {
         result.partial_graph = Val(run_program.registration_graph.move())
     }

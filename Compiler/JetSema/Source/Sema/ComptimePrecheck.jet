@@ -17,6 +17,7 @@ use jet_foundation.[
     compiler_threads_limit,
     compiler_threads_failure_text,
     compiler_threads_joined,
+    compiler_threads_slot_taken,
     compiler_threads_taken,
     symbol_find,
     symbol_key_text,
@@ -852,8 +853,8 @@ sema_comptime_precheck_wave: fn(shared_state: Shared<SemaPrecheckShared>, module
             entered := sema_comptime_precheck_enter_take(run, offset)
             if !entered.kept -> next
             if entered.scope_items > scope_items -> scope_items = entered.scope_items
-            permit.value.module_environments.push(entered.environment.move() ?? panic("a kept precheck module lost its environment"))
-            permit.value.comptime_scopes.push(entered.scopes.move() ?? panic("a kept precheck module lost its scopes"))
+            permit.value.module_environments.push(compiler_threads_slot_taken(entered.environment.move()))
+            permit.value.comptime_scopes.push(compiler_threads_slot_taken(entered.scopes.move()))
             row: start + offset
             wave_module: firsts.len()
             firsts.push(positions.len())
@@ -985,8 +986,8 @@ SemaPrecheckDone: struct {
 // permit and serialize the threads. The result is its old flag.
 sema_comptime_precheck_fill: fn(shared_state: Shared<SemaPrecheckShared>, environments: ^[SemaScopeEnvironment], programs: ^[SemaProgramTables]) -> Bool {
     permit: shared_state.guard_edit()
-    environment := environments.pop() ?? panic("the run's environment left its slot")
-    program := programs.pop() ?? panic("the run's program tables left their slot")
+    environment := compiler_threads_taken(environments)
+    program := compiler_threads_taken(programs)
     counting: sema_comptime_precheck_graph_counting(program)
     program.registration_graph.counting = false
     permit.value.environments.push(environment)

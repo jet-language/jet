@@ -997,7 +997,7 @@ ir_x64_compile_module_logged: fn(program: ^^IRModule, threads: CompilerThreads, 
     if trace_sink == .Val(sink) -> sink.end("ir.x64.select", count)
     if trace_sink == .Val(sink) -> sink.begin("ir.x64.scatter", "", -1, -1)
     shells := ir_x64_take_inputs(inputs)
-    program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
+    program_back := compiler_threads_taken(shells.programs)
     tables := compiler_threads_taken(tables_box)
     if shells.fast.use_indexed_rt -> tables.runtime_symbols = shells.fast.runtime_symbols.move()
     has_stops: stops.len() == count

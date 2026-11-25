@@ -1379,7 +1379,7 @@ sema_comptime_modules_with_values: fn(programs: ^[SemaProgramTables], values: [S
     module_count: programs[0].registration_graph.modules.len()
     environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), None, false)
-    program := programs.pop() ?? panic("the staging run's program tables left their slot")
+    program := compiler_threads_taken(programs)
     module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     // A declaration check reads no memory plan.
     sema_check_shared_fill(module_state, environment, program, sema_function_memory_plan_new())

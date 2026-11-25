@@ -186,7 +186,7 @@ sema_divergence_take: fn(found: ^^[SemaGraphScanFound?]) -> [SemaDivergenceWalke
     loop slots.len() > 0 {
         slot := slots.pop() ?? break
         row := compiler_threads_slot_taken(slot)
-        taken.push(row.divergence.move() ?? panic("a divergence scan found no walk"))
+        taken.push(compiler_threads_slot_taken(row.divergence.move()))
     }
     taken
 }
