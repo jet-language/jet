@@ -8,7 +8,9 @@ use {
         JetCLISemOp,
         JetCLISourceChange,
         jet_cli_commit_source_changes,
+        jet_cli_fix_added,
         jet_cli_fix_checked,
+        jet_cli_fix_collect,
         jet_cli_fix_errors,
         jet_cli_fix_log,
         jet_cli_fix_rewrite,
@@ -92,4 +94,57 @@ JetCLITransactionFixtureRoot: struct {
     changes: [JetCLISourceChange]{{path: file, before: source.bytes(), after: checked.source.bytes()}}
     log: String.from_bytes(jet_cli_fix_log(root, "recheck", changes, [JetCLISemOp]{}, rejected)) ?? panic("fix log is UTF-8")
     assert(log.contains("\"title\":\"rename the use\"") && log.contains("\"replacement\":\"missing\"") && log.contains("\"reason\":\"the edited file no longer checks: "))
+}
+
+// A run that repairs many errors but adds one the file did not have is
+// rolled back whole: errors are compared one by one, not by their count.
+#Test("fix_trade_rolls_back") {
+    root: "{cli_sys.temp_dir()}/jet-fix-trade-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test project")
+    owner: JetCLITransactionFixtureRoot{path: root}
+    defer close(owner)
+    file: "{root}/run.jet"
+    head: "helper: fn(x: Int) -> Int {{ x }}\n\nrun: fn() {{\n"
+    body := ""
+    loop index in 0..<27 -> body = "{body}    print(gone_{index})\n"
+    source: "{head}{body}}}\n"
+    cli_files.write(file, source) ?? panic("run source")
+    baseline: jet_cli_fix_errors(file, source, [JetCLIFixFile]{}, [String?]{}, "")
+    assert(baseline.len() == 27)
+    trade: JetCLIFix{title: "trade the errors", edit: TextEdit{span: Span{start: head.len(), end: head.len() + body.len()}, new_text: "    print(helpr(1))\n    print(helpr(2))\n"}, applicability: .Safe, safety: .BehaviorPreserving}
+    traded: jet_cli_fix_errors(file, "{head}    print(helpr(1))\n    print(helpr(2))\n}}\n", [JetCLIFixFile]{}, [String?]{}, "")
+    assert(traded.len() == 2 && (jet_cli_fix_added(traded, baseline) ?? -1) == 0)
+    rejected := [JetCLIFixSkip]{}
+    refused := [JetCLIFixSkip]{}
+    checked: jet_cli_fix_checked(file, source, [JetCLIFixFile]{}, [JetCLIFix]{trade}, baseline, rejected, refused, "")
+    assert(checked.source == source && checked.applied == 0)
+    assert(rejected.len() == 1 && rejected[0].reason.contains("helpr"))
+    // The same errors in another order, or fewer of them, add none; one
+    // more copy of an error the file had is an added one.
+    assert(jet_cli_fix_added([String]{"E0102: b", "E0102: a"}, [String]{"E0102: a", "E0102: b"}) == None)
+    assert(jet_cli_fix_added([String]{"E0102: a"}, [String]{"E0102: a", "E0102: b"}) == None)
+    assert((jet_cli_fix_added([String]{"E0102: a", "E0102: a"}, [String]{"E0102: a", "E0102: b"}) ?? -1) == 1)
+}
+
+// A file that does not check on its own still calls its private helpers:
+// one only through a misspelled call, one beside an unresolved name. No fix
+// removes or renames either, since an error leaves the references unknown.
+#Test("fix_keeps_helpers_of_a_failing_file") {
+    root: "{cli_sys.temp_dir()}/jet-fix-helpers-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test project")
+    owner: JetCLITransactionFixtureRoot{path: root}
+    defer close(owner)
+    file: "{root}/run.jet"
+    helpers: "priv slab_unlink: fn(x: Int) -> Int {{ x + 1 }}\n\npriv slab_return: fn(x: Int) -> Int {{ x * 2 }}\n\n"
+    source: "{helpers}run: fn() {{\n    free: os_load_i64(1)\n    print(\"{{slab_unlnk(free)}}\")\n    print(\"{{slab_return(free)}}\")\n}}\n"
+    cli_files.write(file, source) ?? panic("run source")
+    if jet_cli_fix_collect(file, source, [JetCLIFixFile]{}, [String?]{}, false, "") == {
+        .Refused(_) -> panic("the compiler refused the fixture")
+        .Fixes(fixes, errors, _, _) -> {
+            assert(errors.len() >= 2)
+            loop fix in fixes {
+                if fix.edit.span.start < helpers.len() -> panic("a fix edits a helper: {fix.title}")
+            }
+        }
+    }
 }

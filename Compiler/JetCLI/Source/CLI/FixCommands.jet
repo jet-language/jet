@@ -386,8 +386,9 @@ jet_cli_fix_settle: fn(files: ^[JetCLIFixFile], texts: ^^[String?]) Never! {
 
 // Applies `fixes` to `source` and the file table `files`
 // (jet_cli_fix_apply_non_overlapping) and checks the result: an edit is
-// kept only while the files, and the package folder `scope` sweeps, have no
-// more errors than `baseline`, their errors before `jet fix`. When the
+// kept only while the files, and the package folder `scope` sweeps, report
+// no error that `baseline`, their errors before `jet fix`, does not
+// (jet_cli_fix_added): fewer errors in all do not pay for a new one. When the
 // whole set adds errors, each file's fixes are tried together on top of the
 // ones kept so far (the whole set is one file's when its fixes change one
 // file), and a file's set that adds errors is tried by halves
@@ -398,7 +399,7 @@ jet_cli_fix_settle: fn(files: ^[JetCLIFixFile], texts: ^^[String?]) Never! {
 jet_cli_fix_checked: fn(file: String, source: String, files: [JetCLIFixFile], fixes: [JetCLIFix], baseline: [String], rejected: ^[JetCLIFixSkip], refused: ^[JetCLIFixSkip], scope: String) -> JetCLIFixApply {
     whole: jet_cli_fix_apply_non_overlapping(source, files, fixes, jet_cli_fix_all(fixes))
     loop refusal in whole.refused -> jet_cli_fix_skip(refused, fixes[refusal.fix], refusal.reason)
-    if !jet_cli_fix_changes(whole, source, files) || jet_cli_fix_errors(file, whole.source, files, whole.texts, scope).len() <= baseline.len() {
+    if !jet_cli_fix_changes(whole, source, files) || jet_cli_fix_added(jet_cli_fix_errors(file, whole.source, files, whole.texts, scope), baseline) == None {
         return whole
     }
     trial := JetCLIFixTrial{file: file, source: source, scope: scope, kept: [Int]{}, result: JetCLIFixApply{source: source, applied: 0, deferred: whole.deferred}}
@@ -423,10 +424,10 @@ JetCLIFixTrial: struct {
 }
 
 // Tries the fixes at `part` together on top of the ones `trial` kept: kept
-// when the files check no worse than `baseline`; else rolled back into
-// `rejected` when `part` is one fix, with the first error it adds, or tried
-// again by halves (jet_cli_fix_halves). A set that changes nothing more is
-// left out.
+// when the files report no error `baseline` does not (jet_cli_fix_added);
+// else rolled back into `rejected` when `part` is one fix, with the first
+// error it adds, or tried again by halves (jet_cli_fix_halves). A set that
+// changes nothing more is left out.
 jet_cli_fix_bisect: fn(trial: ^JetCLIFixTrial, files: [JetCLIFixFile], fixes: [JetCLIFix], baseline: [String], part: [Int], rejected: ^[JetCLIFixSkip]) {
     chosen := [Int]{}
     loop earlier in trial.kept -> chosen.push(earlier)
@@ -434,7 +435,7 @@ jet_cli_fix_bisect: fn(trial: ^JetCLIFixTrial, files: [JetCLIFixFile], fixes: [J
     applied: jet_cli_fix_apply_non_overlapping(trial.source, files, fixes, chosen)
     if !jet_cli_fix_differs(applied, trial.result) -> return
     errors: jet_cli_fix_errors(trial.file, applied.source, files, applied.texts, trial.scope)
-    if errors.len() <= baseline.len() {
+    added: jet_cli_fix_added(errors, baseline) ?? {
         loop index in part -> trial.kept.push(index)
         trial.result = JetCLIFixApply{source: applied.source, applied: applied.applied, deferred: trial.result.deferred, texts: applied.texts, fixes: applied.fixes}
         return
@@ -443,14 +444,28 @@ jet_cli_fix_bisect: fn(trial: ^JetCLIFixTrial, files: [JetCLIFixFile], fixes: [J
         jet_cli_fix_halves(trial, files, fixes, baseline, part, rejected)
         return
     }
-    added := errors[0]
-    loop error in errors {
-        if !baseline.contains(error) {
-            added = error
+    jet_cli_fix_skip(rejected, fixes[part[0]], "the edited file no longer checks: {errors[added]}")
+}
+
+// The index in `errors` of the first error `baseline` does not hold, each
+// baseline error matching one error at most: errors are compared as
+// `[path: ]CODE: what` (jet_cli_fix_error), which names what each refers
+// to; spans are left out because the fixes move them. None when every error
+// was there before.
+jet_cli_fix_added: fn(errors: [String], baseline: [String]) -> Int? Never! {
+    used := [Bool]{}
+    loop _ in 0..<baseline.len() -> used.push(false)
+    loop (index, error) in errors {
+        matched := false
+        loop (row, known) in baseline {
+            if used[row] || known != error -> next
+            used[row] = true
+            matched = true
             break
         }
+        if !matched -> return Val(index)
     }
-    jet_cli_fix_skip(rejected, fixes[part[0]], "the edited file no longer checks: {added}")
+    None
 }
 
 // The fixes at `part`, which add errors together on top of the ones `trial`
@@ -564,7 +579,7 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
         // The moved file must check no worse than the input.
         applied = jet_cli_fix_markers(before, markers == "inside")
         count = applied.applied
-        if applied.source != before && jet_cli_fix_errors(file, applied.source, files, [String?]{}, scope).len() > baseline.len() {
+        if applied.source != before && jet_cli_fix_added(jet_cli_fix_errors(file, applied.source, files, [String?]{}, scope), baseline) != None {
             return jet_cli_report_output("", "E2105", "moving the markers {markers} would make `{file}` fail to check", jet_cli_why("E2105"), "fix the file's errors first, then run `jet fix --markers {markers}` again", color, JET_DRIVER_EXIT_USER_ERROR)
         }
     } else if mode == JetCLIFixMode.Style {
@@ -572,7 +587,7 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
         applied = jet_cli_fix_style(before)
         count = applied.applied
         skipped = applied.deferred
-        if applied.source != before && jet_cli_fix_errors(file, applied.source, files, [String?]{}, scope).len() > baseline.len() {
+        if applied.source != before && jet_cli_fix_added(jet_cli_fix_errors(file, applied.source, files, [String?]{}, scope), baseline) != None {
             return jet_cli_report_output("", "E2105", "moving the impls into their types would make `{file}` fail to check", jet_cli_why("E2105"), "fix the file's errors first, then run `jet fix --style` again", color, JET_DRIVER_EXIT_USER_ERROR)
         }
     } else if mode == JetCLIFixMode.PinFailures {
@@ -584,7 +599,7 @@ jet_cli_fix_run: fn(target: String, dry_run: Bool, all: Bool, markers: String, m
             }
         }
         count = applied.applied
-        if applied.source != before && jet_cli_fix_errors(file, applied.source, files, [String?]{}, scope).len() > baseline.len() {
+        if applied.source != before && jet_cli_fix_added(jet_cli_fix_errors(file, applied.source, files, [String?]{}, scope), baseline) != None {
             return jet_cli_report_output("", "E2105", "pinning the failure contracts would make `{file}` fail to check", jet_cli_why("E2105"), "write the contracts that fail by hand, then run `jet fix --pin-failures` again", color, JET_DRIVER_EXIT_USER_ERROR)
         }
     } else {
