@@ -612,24 +612,25 @@ parser_size_params: fn(tokens: [Token], open: Int, ids: [Int], rows: [Int]) -> I
     names
 }
 
-// The type of the first parameter of `source`'s function `name`.
-parser_size_test_param_type: fn(source: String, name: String) -> Type {
+// The type of the first parameter of `source`'s function `name`, if the
+// source declares that function.
+parser_size_test_param_type: fn(source: String, name: String) -> Type? {
     parsed: parse_source(source.bytes())
     loop item in parsed.program.items {
-        if item == .Func(function) && function.name == name -> return function.params[0].ty
+        if item == .Func(function) && function.name == name -> return Val(function.params[0].ty)
     }
-    panic("`{name}` is not a function of the source")
+    None
 }
 
 #Test("a size name the file binds stays a name; every other size name is its type") {
     declared: "U8: struct {{\n    v: Int,\n}}\n\nf: fn(x: U8) -> Int {{ x.v }}\n\ng: fn(x: I8) -> I8 {{ x }}\n"
-    assert(parser_size_test_param_type(declared, "f") == Type.Named{name: "U8"})
-    assert(parser_size_test_param_type(declared, "g") == Type.IntN{signed: true, bits: 8})
+    assert(parser_size_test_param_type(declared, "f") == Val(Type.Named{name: "U8"}))
+    assert(parser_size_test_param_type(declared, "g") == Val(Type.IntN{signed: true, bits: 8}))
     parameter: "f: fn<U16>(x: U16) -> U16 {{ x }}\n\ng: fn(x: U8) -> U8 {{ x }}\n"
-    assert(parser_size_test_param_type(parameter, "f") == Type.Named{name: "U16"})
-    assert(parser_size_test_param_type(parameter, "g") == Type.IntN{signed: false, bits: 8})
+    assert(parser_size_test_param_type(parameter, "f") == Val(Type.Named{name: "U16"}))
+    assert(parser_size_test_param_type(parameter, "g") == Val(Type.IntN{signed: false, bits: 8}))
     keyed: "Rows: struct {{\n    at: [U32:Int],\n}}\n\nf: fn(x: U32) -> U32 {{ x }}\n"
-    assert(parser_size_test_param_type(keyed, "f") == Type.IntN{signed: false, bits: 32})
+    assert(parser_size_test_param_type(keyed, "f") == Val(Type.IntN{signed: false, bits: 32}))
 }
 
 parser_parse_collection_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {

@@ -224,11 +224,11 @@ parser_policy_declarations_from_marker: fn(state: ^JetParserState, marker: Marke
                 parser_add_error_code(state, "E0355", name_span, "`sentries` needs an explicit mode", "sentry instrumentation is either on or off; it is not a boolean memory fact", "write `sentries: .Off` or `sentries: .On`")
                 return None
             }
-            // `#Overflow` and `#Runtime` declare the arithmetic and run-time
-            // keys; no policy name parses to either.
-            .Arithmetic | .Runtime -> panic("policy_key_parse never names a body-policy key")
             .ScopedGC | .ExplicitUnits -> PolicyValue.Enabled
-            .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride | .HostFacts -> {
+            // `#Overflow` and `#Runtime` declare the arithmetic and run-time
+            // keys; policy_key_parse names neither, and a source policy could
+            // not set them anyway.
+            .Arithmetic | .Runtime | .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride | .HostFacts -> {
                 parser_add_error_code(state, "E0355", name_span, "`{name}` is not a source policy", "organization and package policy own the audited-escape floor; source code can only write the corresponding marker", "use the audited marker, or `policy: {{ {name}: .Forbid }}` in `package.jet`")
                 return None
             }
