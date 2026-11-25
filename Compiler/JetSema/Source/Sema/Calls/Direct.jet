@@ -179,8 +179,8 @@ sema_call_debug_traceable: fn(ty: Type, check: SemaBodyCheck) -> Bool Never! {
             sema_comparability_implements(check.environment.*, check.program.*, ty, "Debug")
         }
         .Apply(name, args) -> {
-            if sema_call_reflection_leaf_name(name) == "KeyRef" -> return true
-            if !sema_comparability_implements(check.environment.*, check.program.*, ty, "Debug") {
+            if sema_call_reflection_leaf_name(name) == "KeyRef" || sema_call_reflection_pool_id(ty) -> return true
+            if !sema_call_reflection_cache(ty) && !sema_comparability_implements(check.environment.*, check.program.*, ty, "Debug") {
                 return false
             }
             loop argument in args {

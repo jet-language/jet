@@ -207,8 +207,8 @@ jet_eval_ir_host_row: fn(types: IRModule, s: ^JetEvalIRState, key: Int) -> Int? 
 // query (owner `compiler`, no receiver) the compiler's query host answers,
 // or the build host's, which places its record or failure at the call's
 // `span` in source file `file`. `BuildError.into_err` is the default Err a
-// BuildError converts to (JetIR ir_try_reraise): its own record, which
-// already is that Err.
+// BuildError converts to and shows as (JetIR ir_try_convert_routine,
+// ir_render): its own record, which already is that Err.
 jet_eval_ir_host_answer: fn(s: ^JetEvalIRState, owner: String, method: String, member: String, values: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -> TComptimeValue? {
     if owner == "compiler" -> return jet_eval_ir_compiler_query(s, method, values, span)
     if member == "BuildError.into_err" && values.len() == 1 -> return Val(values[0])

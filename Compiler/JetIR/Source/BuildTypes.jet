@@ -4,7 +4,7 @@
 use {
     jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, build_time_refused, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, BinOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_leaf, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
     jet_foundation.[IR_GENERATED_RECORDS, TShapeFormatName, core_type_modules, ir_handle_laid_opaque, ir_record_schema, ir_record_schema_row, ir_record_variant_position, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_selector_style, symbol_key_leaf, symbol_key_names]
-    jet_sema.[sema_type_def_instance_type]
+    jet_sema.[JET_CORE_ERROR_FAMILY, sema_type_def_instance_type]
 }
 
 // A rendered type's identity: its declaration key when it names one (every
@@ -863,6 +863,17 @@ ir_host_value_type: fn(p: IRProgram, name: String) -> String? Never! {
 ir_host_value_row: fn(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
     if m.types[row].kind != .Word -> return None
     if ir_row_ty(m, p, row) == .Named(name) -> return ir_host_value_type(p, name)
+    None
+}
+
+// The compiler value type row `row` holds as a host word when its record
+// already is a default Err: a host value of the standard error family
+// (JET_CORE_ERROR_FAMILY, Prelude/Errors.jet's `impl <name> -> Err`), the
+// build's BuildError. The compiler answers its conversion to Err
+// (`<name>.into_err`, JetEval Host.jet).
+ir_host_err_name: fn(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
+    host: ir_host_value_row(m, p, row) ?? return None
+    if JET_CORE_ERROR_FAMILY.contains(host) -> return Val(host)
     None
 }
 
@@ -1911,6 +1922,17 @@ ir_render: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, slot: Int, mo
             text: ir_unit_text(m, p, b, ty, slot)
             if text >= 0 -> return text
         }
+    }
+    // A compiler value whose record already is a default Err (a BuildError,
+    // ir_host_err_name) renders as that Err does: its message, in every mode.
+    if ir_host_err_name(m, p, b.f.slot_type[slot]) == .Val(host) {
+        err_ty: Type.Named{name: "Err"}
+        converted: ir_host_method_words(m, p, b, err_ty, "{host}.into_err", [Int]{slot}, span)
+        if ir_failed(b) -> return -1
+        b.fresh[converted] = true
+        text: ir_render(m, p, b, err_ty, converted, mode, span)
+        ir_release(m, b, converted)
+        return text
     }
     if ir_is_handle(m, b.f.slot_type[slot]) && !ir_carrier_type(ty) {
         // A runtime handle renders through its runtime type's own JetDisplay
@@ -4090,12 +4112,13 @@ ir_err_payload_node: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, payload: Int,
 // The failure `payload` (laid out as `source_row`) passed to the conversion
 // routine `function_name` into `target`; its result is the converted value.
 ir_try_convert_routine: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, payload: Int, source_row: Int, function_name: String, target: Type, span: Span) -> Int Never! {
-    if (ir_host_value_row(m, p, source_row) ?? "") == "BuildError" && ir_default_err(p, target) {
+    host: ir_host_err_name(m, p, source_row) ?? ""
+    if host != "" && ir_default_err(p, target) {
         // A BuildError is a compiler value whose record already is a
         // default Err with its typed identity and details; the
         // compiler answers it as that Err rather than through the
         // Prelude's message-only conversion.
-        converted: ir_host_method_words(m, p, b, target, "BuildError.into_err", [Int]{payload}, span)
+        converted: ir_host_method_words(m, p, b, target, "{host}.into_err", [Int]{payload}, span)
         if ir_failed(b) -> return -1
         b.fresh[converted] = true
         ir_release(m, b, payload)

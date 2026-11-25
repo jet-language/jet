@@ -20,7 +20,9 @@ use jet_foundation.[
     Type,
     TypeParam,
     core_identity_in_module,
+    ir_host_value_name,
     ir_runtime_handle_row,
+    sema_collection_kind,
     symbol_key_leaf,
     type_carrier_identity,
     type_name,
@@ -395,7 +397,7 @@ sema_call_reflection_named_displayable: fn(name: String, ty: Type, environment: 
     if sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" {
         return true
     }
-    if sema_call_reflection_synthetic_printable(name) || sema_call_reflection_runtime_shown(name, ty, environment, program) {
+    if sema_call_reflection_err_record(ty) || sema_call_reflection_runtime_shown(name, ty, environment, program) {
         return true
     }
     if sema_call_reflection_bound(ty, "Display", environment, program) || sema_call_reflection_bound(ty, "Printable", environment, program) {
@@ -422,15 +424,30 @@ sema_call_reflection_runtime_shown: fn(name: String, ty: Type, environment: Sema
     sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) == None
 }
 
-// The compiler-owned values the trait registry admits as `Printable` with no
-// source impl and no runtime handle row: the build error, a pool's `ID`, a
-// `JSON` tree and a `Cache`.
-sema_call_reflection_synthetic_printable: fn(name: String) -> Bool Never! {
-    leaf: sema_call_reflection_leaf_name(name)
-    if leaf == {
-        "BuildError" | "ID" | "JSON" | "Cache" -> true
-        else -> false
-    }
+// A compiler value whose record already is a default Err: a host value
+// (ir_host_value_name) of the standard error family (JET_CORE_ERROR_FAMILY,
+// Prelude/Errors.jet's `impl <name> -> Err`), the build's `BuildError`. It
+// shows as that Err does, its message in every form (JetIR ir_render). A
+// program's own type of the name is spelled by its key, never bare.
+sema_call_reflection_err_record: fn(ty: Type) -> Bool Never! {
+    if ty == .Named(name) -> return ir_host_value_name(name) && JET_CORE_ERROR_FAMILY.contains(name)
+    false
+}
+
+// A pool's `ID<T>`, the carrier the checker types itself (SharedOwner): a
+// plain index and generation that never touches `T`, so it shows as that
+// record whatever `T` is.
+sema_call_reflection_pool_id: fn(ty: Type) -> Bool Never! {
+    if ty == .Apply(name, args) -> return name == "ID" && args.len() == 1
+    false
+}
+
+// A `Cache<K, V>` (SemaCollectionKind.Cache): it shows as its capacity and
+// entries, each key and value in the form asked for.
+sema_call_reflection_cache: fn(ty: Type) -> Bool Never! {
+    kind: sema_collection_kind(ty) ?? return false
+    if kind == .Cache(_, _) -> return true
+    false
 }
 
 sema_call_reflection_is_displayable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
@@ -447,8 +464,8 @@ sema_call_reflection_is_displayable: fn(ty: Type, environment: SemaScopeEnvironm
             // A string view shows its text, as the String it borrows from.
             if sema_stmt_string_view_type(ty) -> return true
             leaf: sema_call_reflection_leaf_name(name)
-            if sema_call_reflection_bound(ty, "Display", environment, program) -> return true
-            native_composite: leaf == "List" || leaf == "Set" || leaf == "Rank" || leaf == "PriorityQueue" || leaf == "Queue" || leaf == "LRU" || leaf == "ExpiringValue" || leaf == "Loadable" || leaf == "View"
+            if sema_call_reflection_bound(ty, "Display", environment, program) || sema_call_reflection_pool_id(ty) -> return true
+            native_composite: leaf == "List" || leaf == "Set" || leaf == "Rank" || leaf == "PriorityQueue" || leaf == "Queue" || leaf == "ExpiringValue" || leaf == "Loadable" || leaf == "View" || sema_call_reflection_cache(ty)
             if !native_composite && !sema_call_reflection_named_displayable(name, ty, environment, program) {
                 return false
             }
