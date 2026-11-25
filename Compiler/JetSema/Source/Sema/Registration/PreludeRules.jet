@@ -28,7 +28,9 @@ Pre: struct {
         repeatable: true,
 
         check: fn(self, call: CompilerCall) {
-            if required_contract_finding(self.callee, "Pre", self.condition, self.reason) == .Val(finding) -> reject(finding, at: call.name)
+            if required_contract_finding(self.callee, "Pre", self.condition, self.reason) == .Val(finding) {
+                reject(finding, at: call.name)
+            }
         }
     }
 }
@@ -43,7 +45,9 @@ Post: struct {
         repeatable: true,
 
         check: fn(self, call: CompilerCall) {
-            if required_contract_finding(self.callee, "Post", self.condition, self.reason) == .Val(finding) -> reject(finding, at: call.name)
+            if required_contract_finding(self.callee, "Post", self.condition, self.reason) == .Val(finding) {
+                reject(finding, at: call.name)
+            }
         }
     }
 }
@@ -70,11 +74,17 @@ RequiredContractNotTrue: struct {
     impl Diagnostic {
         code: "E0180",
 
-        what: fn(self) -> String { "`{self.callee}`'s `#{self.clause}` condition {self.answer} for this call while building" }
+        what: fn(self) -> String {
+            "`{self.callee}`'s `#{self.clause}` condition {self.answer} for this call while building"
+        }
 
-        why: fn(self) -> String { "The condition is written `#run {{ … }}`, so every call decides it while building from its arguments{self.reason}" }
+        why: fn(self) -> String {
+            "The condition is written `#run {{ … }}`, so every call decides it while building from its arguments{self.reason}"
+        }
 
-        fix: fn(self) -> String { "Pass arguments {self.remedy}, or drop `#run` so the condition is checked when the program runs" }
+        fix: fn(self) -> String {
+            "Pass arguments {self.remedy}, or drop `#run` so the condition is checked when the program runs"
+        }
     }
 }
 ``` }
