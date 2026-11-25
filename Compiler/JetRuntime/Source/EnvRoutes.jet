@@ -21,3 +21,46 @@
     rt_text_put(removed, status)
     I64{1}
 }
+
+// The route forms of the logical environment's reads (Public/Sys.jet). IR
+// lowers those bindings through IR_ENVIRONMENT_ROUTES, as it lowers env_set;
+// these adapters are the same reads in the binding's own carriers.
+
+// A set variable's value bytes, in storage of the List's own alignment
+// (`data_out`, `length_out`); 0 when `name` is unset.
+#Export(c) jet_sys_env_value_raw: fn(name: I64, data_out: I64, length_out: I64) -> I64 {
+    if jet_rt_logical_env_get_os(name, data_out, length_out) == (I64{0}) -> return I64{0}
+    length: rt_text_word(length_out)
+    raw: rt_text_word(data_out)
+    rt_text_store(data_out, host_startup_bytes(raw, length))
+    if length != (I64{0}) { jet_rt_free(raw, length, I64{1}) }
+    I64{1}
+}
+
+// The program's environment, then the startup one, as alternating name and
+// value byte Lists: the rows land at `data_out` and their count returns.
+#Export(c) jet_sys_env_columns_raw: fn(data_out: I64) -> I64 {
+    header: jet_rt_alloc(I64{24}, I64{8})
+    jet_rt_logical_env_columns(header)
+    env_route_columns(header, data_out)
+}
+
+#Export(c) jet_sys_startup_env_columns_raw: fn(data_out: I64) -> I64 {
+    header: jet_rt_alloc(I64{24}, I64{8})
+    jet_rt_startup_env_columns(header)
+    env_route_columns(header, data_out)
+}
+
+// Moves the exactly sized rows of a columns List header to `data_out`, frees
+// the header and returns the row count.
+env_route_columns: fn(header: I64, data_out: I64) -> I64 {
+    length: rt_text_word(header)
+    rt_text_store(data_out, rt_text_word(wrapping(header + I64{16})))
+    jet_rt_free(header, I64{24}, I64{8})
+    length
+}
+
+// The host's order of two names' bytes as an Int: -1, 0 or 1.
+#Export(c) jet_sys_env_key_compare_raw: fn(left: I64, left_length: I64, right: I64, right_length: I64) -> I64 {
+    jet_int_owned_from_i64(env_key_order(left, left_length, right, right_length))
+}

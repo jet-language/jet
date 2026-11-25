@@ -16,6 +16,12 @@ use {
         TFuncKind,
         Type,
         TypeTupleField,
+        RUNTIME_GENERIC_HANDLES,
+        core_enum_cases,
+        core_enum_payload_variants,
+        core_module_type_leaf,
+        core_type_modules,
+        ir_native_provider_handle_row,
         ir_runtime_handle_row,
         module_is_core,
         runtime_c_export,
@@ -305,7 +311,7 @@ sema_guest_runtime_only_read: fn(package_identity: String, function: Func) -> St
 
 // A value a runtime route carries: Int and the machine integers as a Word,
 // Float, Bool as a Flag, String as Text, a Core type the runtime holds as a
-// handle (sema_guest_runtime_handle), and a List of those.
+// handle (sema_guest_runtime_handle), and a List of those or of carried Lists.
 sema_guest_runtime_scalar: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) -> true
@@ -313,11 +319,25 @@ sema_guest_runtime_scalar: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// A Core type with a runtime handle row (Authority, LogSpan, LogField): it
-// crosses as the runtime's handle, a record the program lays out itself as a
-// runtime record made for the call (IR ir_route_carrier_of).
+// A Core type with a runtime handle row (Authority, LogSpan, LogField) or an
+// opaque native provider row (ProcessStdoutStream): it crosses as the
+// runtime's handle, a record the program lays out itself as a runtime record
+// made for the call, a word record (Instant) as its word (IR
+// ir_route_carrier_of).
 sema_guest_runtime_handle: fn(ty: Type) -> Bool Never! {
-    if ty == .Named(name) -> return ir_runtime_handle_row(name) != None
+    if ty == .Named(name) -> return ir_runtime_handle_row(name) != None || ir_native_provider_handle_row(name) != None || sema_guest_core_leaf_handle(name)
+    false
+}
+
+// A Core type the runtime's own bindings spell by its bare leaf (`Instant`),
+// whose runtime row only its Core identity keys; the generated interface unit
+// spells it by that identity. A Core enum is no such handle: a payload-free
+// one crosses only as a read tag (sema_guest_runtime_tag).
+sema_guest_core_leaf_handle: fn(name: String) -> Bool Never! {
+    if core_module_type_leaf(name) != name || core_enum_cases(name) != None -> return false
+    loop module_name in core_type_modules(name) {
+        if ir_runtime_handle_row("<corelib>/{module_name}.{name}") != None -> return true
+    }
     false
 }
 
@@ -325,7 +345,7 @@ sema_guest_runtime_value: fn(ty: Type) -> Bool Never! {
     if ty == {
         .String -> true
         .Named(_) -> sema_guest_runtime_handle(ty)
-        .List(item) -> item == Type.String || sema_guest_runtime_scalar(item) || sema_guest_runtime_handle(item)
+        .List(item) -> item == Type.String || sema_guest_runtime_scalar(item) || sema_guest_runtime_handle(item) || (item == .List(_) && sema_guest_runtime_value(item))
         .Int | .Float | .Bool | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> sema_guest_runtime_scalar(ty)
     }
 }
@@ -346,10 +366,12 @@ sema_guest_runtime_tuple: fn(fields: [TypeTupleField]) -> Bool Never! {
 
 // A runtime route result: a carried value, an Option of one or of a tuple, a
 // tuple of carried values and Options of them (its items cross in the checked
-// tuple's member order), or a fallible `T E!` whose success is a carried
-// value, an Option of one or Unit. Its error is the default `Err`, which
-// crosses as its message text, or a Core type the runtime holds as a handle
-// (`EncodingCause`, `IOError`), which crosses as that handle.
+// tuple's member order), a generic Core family the runtime answers as one
+// handle (RUNTIME_GENERIC_HANDLES: `Receiver<T>`, `Event<T>`), or a fallible
+// `T E!` whose success is a carried value, an Option of one or Unit. Its
+// error is the default `Err`, which crosses as its message text, or a Core
+// type the runtime holds as a handle (`EncodingCause`, `IOError`), which
+// crosses as that handle.
 sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Option(inner) -> {
@@ -358,13 +380,15 @@ sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
         }
         .Tuple(fields) -> sema_guest_runtime_tuple(fields)
         .Result(ok, err) -> (ok == Type.Named{name: "Unit"} || sema_guest_runtime_item(ok)) && (err == Type.Named{name: "Err"} || sema_guest_runtime_handle(err))
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> sema_guest_runtime_value(ty)
+        .Apply(name, args) -> RUNTIME_GENERIC_HANDLES.contains(name) && args.len() == 1
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> sema_guest_runtime_value(ty)
     }
 }
 
 // A parameter a runtime route carries: a read carried value, a read View of
-// a scalar (its window crosses as a List), a written (`^`) runtime handle
-// or List of scalars, which the runtime changes in place, or a taken (`^^`)
+// a scalar (its window crosses as a List), a read payload-free Core enum
+// (its tag word, sema_guest_runtime_tag), a written (`^`) runtime handle or
+// List of scalars, which the runtime changes in place, or a taken (`^^`)
 // carried value, which the runtime export consumes.
 sema_guest_runtime_param: fn(convention: AccessConvention, ty: Type) -> Bool Never! {
     if convention == {
@@ -372,7 +396,7 @@ sema_guest_runtime_param: fn(convention: AccessConvention, ty: Type) -> Bool Nev
             if ty == .Apply(name, args) {
                 return name == "View" && args.len() == 1 && sema_guest_runtime_scalar(args[0])
             }
-            sema_guest_runtime_value(ty)
+            sema_guest_runtime_value(ty) || sema_guest_runtime_tag(ty)
         }
         .Write -> {
             if ty == .List(item) -> return sema_guest_runtime_scalar(item)
@@ -382,12 +406,23 @@ sema_guest_runtime_param: fn(convention: AccessConvention, ty: Type) -> Bool Nev
     }
 }
 
+// A payload-free Core enum (ProcessSignal), by either spelling: it crosses
+// as its tag word (IR ir_route_enum_tag), whichever name the binding's unit
+// resolves it to.
+sema_guest_runtime_tag: fn(ty: Type) -> Bool Never! {
+    if ty == .Named(name) {
+        leaf: core_module_type_leaf(name)
+        return core_enum_cases(leaf) != None && core_enum_payload_variants(leaf) == None
+    }
+    false
+}
+
 // E3203 for a runtime binding's parameter or result no runtime route carries;
 // true when every one is carried.
 sema_guest_check_runtime_binding: fn(function: Func, diagnostics: ^[Diagnostic]) -> Bool Never! {
     valid := true
     why: "a jet.runtime function crosses the runtime's route carriers"
-    fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those, a View of a scalar, a written (`^`) handle or List of scalars, or a taken (`^^`) carried value; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, or `T E!` with a carried, Option or Unit success and the default Err or a handle error"
+    fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those or of such Lists, a View of a scalar or a payload-free Core enum (read only), a written (`^`) handle or List of scalars, or a taken (`^^`) carried value; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, a `Receiver<T>` or `Event<T>`, or `T E!` with a carried, Option or Unit success and the default Err or a handle error"
     loop param in function.params {
         if !sema_guest_runtime_param(param.convention, param.ty) {
             diagnostics.push(sema_error("E3203", param.ty_span, "`{type_name(param.ty)}` is not a runtime carrier for the parameter `{param.name}` of `{function.name}`", why, fix))

@@ -612,6 +612,35 @@ ir_runtime_handle_row: fn(name: String) -> Int? Never! {
     ir_key_row(IR_RUNTIME_HANDLE_KEYS, IR_RUNTIME_HANDLE_KEY_ROWS, name)
 }
 
+// Opaque native providers: physical ownership ABI only. A Core-declared shape
+// here crosses a route as a heap shell of its declared bytes (IR
+// ir_route_shell): `KeyRef<T>` from jet_vault_current_impl. The IR consults
+// these rows after IR_RUNTIME_HANDLES (ir_runtime_handle), and a jet.runtime
+// binding may carry them as handles.
+IR_NATIVE_PROVIDER_HANDLES: #run { [IRRuntimeHandle]{
+    IRRuntimeHandle{jet_name: "<corelib>/core.crypto.vault.KeyRef", runtime: "JetVaultKeyRef", clone: false, display: false, show: false, debug: false, eq: false},
+    IRRuntimeHandle{jet_name: "<corelib>/core.process.ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
+    IRRuntimeHandle{jet_name: "ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
+    IRRuntimeHandle{jet_name: "<corelib>/core.process.ProcessStdin", runtime: "ProcessStdin", clone: true, display: false, show: false, debug: false, eq: false},
+    IRRuntimeHandle{jet_name: "ProcessStdin", runtime: "ProcessStdin", clone: true, display: false, show: false, debug: false, eq: false},
+    IRRuntimeHandle{jet_name: "<corelib>/core.process.ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
+    IRRuntimeHandle{jet_name: "ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
+} }
+
+IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS: #run ir_key_index(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES))
+
+IR_NATIVE_PROVIDER_HANDLE_KEYS: #run ir_key_index_keys(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES), IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS)
+
+// The row of IR_NATIVE_PROVIDER_HANDLES that `name` keys, if any.
+ir_native_provider_handle_row: fn(name: String) -> Int? Never! {
+    ir_key_row(IR_NATIVE_PROVIDER_HANDLE_KEYS, IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS, name)
+}
+
+// The generic Core families a runtime export answers as one handle word,
+// whatever their element: a jet.runtime binding result `Receiver<T>` crosses
+// as the runtime's channel receiver, `Event<T>` as its event bus.
+RUNTIME_GENERIC_HANDLES: #run { [String]{"Event", "Receiver"} }
+
 // The IR type of `MarkerArgInfo.value`, a written marker argument's value: a
 // host word in compile-time code (JetIR ir_compiler_owned_core_fields), which
 // `info.marker(T)` reads its `T` from. No program can name it.

@@ -3,7 +3,7 @@
 // (its last segment). This is authored Jet source and the routes' only home:
 // keep every row table sorted by hand. Each table's KEYS/KEY_ROWS lookup
 // index is computed from the table at build time (ir_key_index).
-use jet_foundation.[IRRuntimeHandle, IR_RUNTIME_HANDLES, RUNTIME_C_EXPORTS, ir_key_index, ir_key_index_keys, ir_key_row, ir_runtime_handle_keys, ir_runtime_handle_row]
+use jet_foundation.[IRRuntimeHandle, IR_NATIVE_PROVIDER_HANDLES, IR_RUNTIME_HANDLES, RUNTIME_C_EXPORTS, ir_key_index, ir_key_index_keys, ir_key_row, ir_native_provider_handle_row, ir_runtime_handle_row]
 
 // The runtime ABI atom projection; nominal identities stay unchanged.
 runtime_abi_atom: fn(name: String) -> String Never! {
@@ -1283,23 +1283,6 @@ ir_runtime_route: fn(symbol: String) -> IRRoute? {
     Val(IR_RUNTIME_ROUTES[position].copy())
 }
 
-// Opaque native providers: physical ownership ABI only. A Core-declared shape
-// here crosses a route as a heap shell of its declared bytes
-// (ir_route_shell): `KeyRef<T>` from jet_vault_current_impl.
-IR_NATIVE_PROVIDER_HANDLES: #run { [IRRuntimeHandle]{
-    IRRuntimeHandle{jet_name: "<corelib>/core.crypto.vault.KeyRef", runtime: "JetVaultKeyRef", clone: false, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "<corelib>/core.process.ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "<corelib>/core.process.ProcessStdin", runtime: "ProcessStdin", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "ProcessStdin", runtime: "ProcessStdin", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "<corelib>/core.process.ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
-    IRRuntimeHandle{jet_name: "ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
-} }
-
-IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS: #run ir_key_index(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES))
-
-IR_NATIVE_PROVIDER_HANDLE_KEYS: #run ir_key_index_keys(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES), IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS)
-
 // The runtime's C export table (RUNTIME_C_EXPORTS, generated from every
 // JetRuntime #Export(c)), indexed for halving search.
 IR_RUNTIME_EXPORT_KEY_ROWS: #run ir_key_index(RUNTIME_C_EXPORTS)
@@ -1330,7 +1313,7 @@ ir_runtime_handle: fn(name: String) -> IRRuntimeHandle? {
         return Val(IR_RUNTIME_HANDLES[position].copy())
     }
     // Existing Rust rows win in seed mode; absent nominals may use a provider.
-    position: ir_key_row(IR_NATIVE_PROVIDER_HANDLE_KEYS, IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS, name) ?? return None
+    position: ir_native_provider_handle_row(name) ?? return None
     // copy: the caller gets an owned handle row, while the row stays in the global
     // IR_NATIVE_PROVIDER_HANDLES table, which can't be moved from.
     Val(IR_NATIVE_PROVIDER_HANDLES[position].copy())
@@ -1353,7 +1336,7 @@ ir_runtime_handle_spelled: fn(name: String) -> IRRuntimeHandle? {
 // that has `name`, as ir_runtime_handle finds it.
 ir_runtime_handle_spelling_at: fn(name: String) -> Int? Never! {
     if ir_runtime_handle_row(name) == .Val(position) -> return Val(position)
-    position: ir_key_row(IR_NATIVE_PROVIDER_HANDLE_KEYS, IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS, name) ?? return None
+    position: ir_native_provider_handle_row(name) ?? return None
     Val(IR_RUNTIME_HANDLES.len() + position)
 }
 
