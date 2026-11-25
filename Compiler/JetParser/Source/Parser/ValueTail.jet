@@ -14,10 +14,9 @@ use jet_foundation.[
     expr_source_start,
 ]
 
-// One arm's `return value`: where `return` starts and where its value ends.
+// One arm's `return value`: where `return` starts.
 ParserArmReturn: struct {
     keyword: Int,
-    value_end: Int,
 }
 
 ParserValueTailKind: enum {
@@ -156,8 +155,8 @@ parser_else_arm_tail: fn(table: Stmt, fallback: Stmt) -[]> ParserValueTail? Neve
             loop arm in arms {
                 if parser_readiness_arm(arm.cond) || arm.body.len() != 1 -> return None
                 if arm.body[0] == .Return(arm_value, return_span) {
-                    returned: arm_value ?? return None
-                    returns.push(ParserArmReturn{keyword: return_span.start, value_end: expr_source_span(returned).end})
+                    if arm_value == None -> return None
+                    returns.push(ParserArmReturn{keyword: return_span.start})
                     next
                 }
                 return None
@@ -182,10 +181,11 @@ parser_final_return_edit: fn(keyword: Int, value: Int) -[]> TextEdit Never! {
 
 // The one edit, from the table's `if` to the end of its default return,
 // that gives an `ElseArm` table its `else`: each arm loses its `return`
-// keyword (and an authored `;`), the table gains `else -> default` before
-// its closing brace, and the default return goes; every comment and space
-// stays where it was written, and no brace is added that the source did not
-// write. None when `raw` does not hold the parts in order.
+// keyword (a `;` after the arm stays, the line break between rows), the
+// table gains `else -> default` before its closing brace, and the default
+// return goes; every comment and space stays where it was written, and no
+// brace is added that the source did not write. None when `raw` does not
+// hold the parts in order.
 parser_else_arm_edit: fn(raw: [U8], table: Span, returns: [ParserArmReturn], fallback: Int, default: Span) -[]> TextEdit? Never! {
     // The cuts run in source order; inserts[i] replaces cuts[i].
     cuts := [Span]{}
@@ -193,10 +193,6 @@ parser_else_arm_edit: fn(raw: [U8], table: Span, returns: [ParserArmReturn], fal
     loop arm in returns {
         cuts.push(parser_return_keyword(raw, arm.keyword) ?? return None)
         inserts.push("")
-        if parser_authored_semicolon(raw, arm.value_end) == .Val(semicolon) {
-            cuts.push(Span{start: semicolon, end: semicolon + 1})
-            inserts.push("")
-        }
     }
     close: parser_table_close(raw, table.start) ?? return None
     default_text: parser_tail_text(raw, default) ?? return None

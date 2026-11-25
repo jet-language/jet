@@ -30,6 +30,7 @@ use {
         TOKEN_BLOCK_COMMENT,
         TOKEN_BREAK,
         TOKEN_CHAR,
+        TOKEN_COMMA,
         TOKEN_EOF,
         TOKEN_FLOAT,
         TOKEN_GT,
@@ -69,6 +70,7 @@ use {
         token_string_part_count,
         token_string_parts,
         token_suffix,
+        token_is_authored_semicolon,
         token_synthetic,
         token_text,
     ]
@@ -94,8 +96,6 @@ JetParserState: struct {
     // program's policy declarations after the parse.
     block_policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}},
     statement_rules: [AppliedRuleApplication]{[AppliedRuleApplication]{}},
-    // An authored `;` reports E0373 once per file.
-    explicit_semicolon_reported: Bool{false},
     has_scope_member: Bool{false},
     has_task_spawn: Bool{false},
     // The source text, when known; L0507 and E0373 build their edits from it.
@@ -583,8 +583,8 @@ parser_bump: fn(state: ^JetParserState) -> Token Never! {
         return token
     }
     token: parser_current(state)
-    if token.kind == TOKEN_SEMI && token.span.start < token.span.end && !state.explicit_semicolon_reported {
-        parser_report_explicit_semicolon(state, token.span)
+    if token.kind == TOKEN_SEMI && token.span.start < token.span.end {
+        parser_report_explicit_semicolon(state, token.span, false)
     }
     if token.kind == TOKEN_IDENT && state.tables.len() > 0 && state.tables[0].has_paste {
         if {
@@ -634,29 +634,32 @@ parser_report_glued_paste: fn(state: ^JetParserState, token: Token) Never! {
     state.diagnostics.push(diagnostic_from_registry("E0003", Val(token.span), "`{word}` glues a paste onto letters", "a paste `#{{…}}` stands for a whole name; it never joins the letters beside it, so `pkg#1.4` and `[Int#4]` keep their meaning", "build the name as a string first, as in `method: \"get_{{field.name}}\"`, then paste `#{{method}}`"))
 }
 
-// An explicit `;` stays a statement boundary but is not canonical
-// Jet. The edit replaces it with a line break when code follows on the same
-// line and deletes it otherwise.
-parser_report_explicit_semicolon: fn(state: ^JetParserState, span: Span) Never! {
-    state.explicit_semicolon_reported = true
-    next_start := -1
-    loop index in (state.position + 1)..<state.tokens.len() {
-        kind: state.tokens[index].kind
-        if !parser_is_trivia(kind) && kind != TOKEN_SEMI && kind != TOKEN_EOF {
-            next_start = state.tokens[index].span.start
-            break
-        }
+// A `;` means a line break, so the lexer lands an accepted one
+// as the zero-width terminator a line break leaves, at the `;` itself and
+// marked as authored (token_authored_semicolon); token_is_authored_semicolon
+// tells it from a line break's. Whether `span`, where the parse refuses what
+// it found, is the authored `;` at the cursor:
+parser_authored_semicolon_span: fn(state: ^JetParserState, span: Span) -> Bool Never! {
+    token: parser_current(state)
+    token_is_authored_semicolon(token) && token.span.start == span.start
+}
+
+// E0373: a `;` only separates statements and items, so one that stands
+// where the parse wants something else (a comma between members or
+// arguments, a loop header's `in`, the rest of a type or a hole) is refused,
+// once however often the parse reaches it. The suggested edit makes it the
+// comma a member or argument list takes (`comma`, or the `;` directly inside
+// `(` or `[`) and deletes it otherwise.
+parser_report_explicit_semicolon: fn(state: ^JetParserState, at: Span, comma: Bool) Never! {
+    span: Span{start: at.start, end: at.start + 1}
+    loop reported in state.diagnostics {
+        if reported.code == "E0373" && reported.span == (Val(span)) -> return
     }
-    same_line := next_start >= state.source_offset && next_start <= parser_source_end_offset(state)
-    if same_line {
-        loop index in span.end..<next_start {
-            byte: parser_source_byte(state, index)
-            if byte == 10 || byte == 13 -> same_line = false
-        }
-    }
-    new_text: if same_line -> "\n" else -> ""
-    diagnostic: diagnostic_from_registry("E0373", Val(span), "This explicit semicolon is not part of canonical Jet syntax.", "Jet uses line boundaries for statements; the parser preserves this boundary so the same program can be repaired without changing behavior.", "Replace the semicolon with a line break when code follows it, or remove it at the end of a line; `jet fmt` applies this fix.")
-    state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: new_text}))
+    in_list := comma
+    if parser_innermost_open_delimiter(state) == .Val(open) -> in_list = in_list || open.kind == TOKEN_LPAREN || open.kind == TOKEN_LBRACKET
+    edit: if in_list -> TextEdit{span: span, new_text: ","} else -> parser_deletion_edit(state, span)
+    diagnostic: diagnostic_from_registry("E0373", Val(span), "A `;` can't stand here: it only separates statements and items", "A `;` means a line break between statements or items; inside a member list, an argument list, a type, a loop header or an interpolation hole it separates nothing.", "Write `,` between members or arguments, or remove the `;`.")
+    state.diagnostics.push(diagnostic_with_edit(diagnostic, edit))
 }
 
 parser_type_close_here: fn(state: ^JetParserState) -> Bool Never! {
@@ -711,12 +714,17 @@ parser_deletion_edit: fn(state: JetParserState, span: Span) -> TextEdit Never! {
 }
 
 // A fatal error ends the statement or item, so nothing more is reported until
-// the enclosing loop resynchronizes.
+// the enclosing loop resynchronizes. A generic refusal of an authored `;` is
+// the semicolon's own report, E0373.
 parser_add_fatal_code: fn(state: ^JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
     if parser_aborting(state) {
         return
     }
-    state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
+    if code == "E0003" && parser_authored_semicolon_span(state, span) {
+        parser_report_explicit_semicolon(state, span, false)
+    } else {
+        state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
+    }
     state.abort_mark = state.diagnostics.len()
     state.abort_position = state.position
 }
@@ -770,12 +778,12 @@ parser_add_error_here: fn(state: ^JetParserState, what: String, why: String, fix
     parser_add_error(state, span, what, why, fix)
 }
 
-// `describe`: name what the reader sees. Users never type `;`: the lexer
-// inserts it at a line end, and an explicit one is retired.
+// `describe`: name what the reader sees. The lexer inserts `;` at a line
+// end, and lands an authored `;` as that same terminator.
 parser_describe_token: fn(state: JetParserState, token: Token) -> String Never! {
     kind: token.kind
     if kind == TOKEN_EOF -> return "the end of the file"
-    if kind == TOKEN_SEMI -> return "the end of the line"
+    if kind == TOKEN_SEMI -> return if token_is_authored_semicolon(token) -> "`;`" else -> "the end of the line"
     if kind == TOKEN_IDENT -> return "the name `{parser_text(state, token)}`"
     if kind == TOKEN_STRING -> return "a piece of quoted text"
     if kind == TOKEN_RAW_STRING -> return "a piece of raw text"
@@ -789,9 +797,22 @@ parser_describe_token: fn(state: JetParserState, token: Token) -> String Never! 
     "`{parser_text(state, token)}`"
 }
 
+// An authored `;` where a `,` belongs is refused as itself (E0373) and read as
+// that `,`, so the rest of the list still parses.
+parser_semicolon_as_comma: fn(state: ^JetParserState) -> Bool {
+    token: parser_current(state)
+    if !token_is_authored_semicolon(token) -> return false
+    parser_report_explicit_semicolon(state, token.span, true)
+    true
+}
+
 parser_expect: fn(state: ^JetParserState, kind: Int, context: String) -> Token {
     if parser_current_kind(state) == kind -> return parser_bump(state)
     span: parser_current(state).span
+    if kind == TOKEN_COMMA && parser_semicolon_as_comma(state) {
+        parser_bump(state)
+        return parser_synthetic_token(kind, span)
+    }
     parser_report_expected(state, context)
     parser_synthetic_token(kind, span)
 }
@@ -891,7 +912,8 @@ parser_previous_end: fn(state: JetParserState) -> Int Never! {
 // separator before an invisible terminator. Returns true when it reported.
 parser_unclosed_delimiter: fn(state: ^JetParserState, construct: String) -> Bool {
     token: parser_current(state)
-    at_line_end: token.kind == TOKEN_SEMI && token.span.start == token.span.end
+    // An authored `;` here is refused as itself (E0373), not as a cut.
+    at_line_end: token.kind == TOKEN_SEMI && token.span.start == token.span.end && !token_is_authored_semicolon(token)
     if !(at_line_end || token.kind == TOKEN_EOF || parser_is_closer(token.kind)) -> return false
     cutoff: if {
         at_line_end -> "the end of the line"
@@ -1059,12 +1081,13 @@ parser_error_since: fn(state: JetParserState, mark: Int) -> Bool Never! {
 }
 
 // True when a line ends between token indexes `start` and `end` (the lexer's
-// zero-width terminator marks every authored line break).
+// zero-width terminator marks every authored line break; an authored `;`
+// means one but is not one).
 parser_authored_line_break: fn(state: JetParserState, start: Int, end: Int) -> Bool Never! {
     loop index in start..<end {
         if index >= 0 && index < state.tokens.len() {
             token: state.tokens[index]
-            if token.kind == TOKEN_SEMI && token.span.start == token.span.end -> return true
+            if token.kind == TOKEN_SEMI && token.span.start == token.span.end && !token_is_authored_semicolon(token) -> return true
         }
     }
     false

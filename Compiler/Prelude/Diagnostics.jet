@@ -6246,24 +6246,70 @@ EffectBodyWithoutBraces: struct {
 ExplicitSemicolon: struct {
     impl Diagnostic {
         code: "E0373",
-        safety_class: .Opinion,
-        safety_reason: "The semicolon marks the boundary a line break marks, so the program is defined, and Jet keeps one spelling.",
+        safety_class: .Soundness,
+        safety_reason: "A `;` inside a member list, an argument list, a type, a loop header or an interpolation hole separates nothing, so it has no one reading.",
+        expert_path: "none: write the `,` or the `in` the list or header takes",
         stage: [.Parse],
-        meaning: "Explicit semicolons are statement boundaries, not canonical Jet syntax",
+        meaning: "A `;` outside a list of statements or items",
         detail: true,
-        structured_fix: .SourceEdit,
+        structured_fix: .SuggestedSourceEdit,
         no_fix: None,
-        fix_safety: .BehaviorPreserving,
-        fmt_applies_fix: true,
+        fix_safety: .NeedsReview,
 
-        what: fn(self) -> String { "This explicit semicolon is not part of canonical Jet syntax." }
+        what: fn(self) -> String { "A `;` can't stand here: it only separates statements and items" }
 
         why: fn(self) -> String {
-            "Jet uses line boundaries for statements; the parser preserves this boundary so the same program can be repaired without changing behavior."
+            "A `;` means a line break between statements or items; inside a member list, an argument list, a type, a loop header or an interpolation hole it separates nothing."
+        }
+
+        fix: fn(self) -> String { "Write `,` between members or arguments, or remove the `;`." }
+    }
+}
+
+// The lexer accepts a `;` only where its own line-break test
+// would end the statement.
+SemicolonWithoutLineBreak: struct {
+    impl Diagnostic {
+        code: "E0447",
+        safety_class: .Soundness,
+        safety_reason: "A `;` means exactly a line break, and a line break here would continue the statement, so the `;` would give the line a second reading.",
+        expert_path: "none: a `;` stands only where a line break would end the statement",
+        stage: [.Lex],
+        meaning: "A `;` where a line break would not end the statement",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "A `;` can't stand here, because a line break here would not end the statement" }
+
+        why: fn(self) -> String {
+            "A `;` means exactly a line break, so it stands only where a line break would end the statement; here the next line would continue this one, or nothing before it is a statement to end."
+        }
+
+        fix: fn(self) -> String { "Remove the `;`, or finish the statement before it." }
+    }
+}
+
+// A one-line arm holds one statement, so a `;` after it with
+// code on the same line has two readings.
+SemicolonAfterArm: struct {
+    impl Diagnostic {
+        code: "E0448",
+        safety_class: .Soundness,
+        safety_reason: "The code after the `;` could belong to the one-line arm or run after it, and the two readings run differently.",
+        expert_path: "none: braces or a line break say which reading is meant",
+        stage: [.Parse],
+        meaning: "A `;` after a one-line arm with code following on the same line",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "A `;` can't follow a one-line arm on the same line" }
+
+        why: fn(self) -> String {
+            "A one-line arm holds one statement, so the code after this `;` could belong to the arm or run after it, and Jet will not guess which."
         }
 
         fix: fn(self) -> String {
-            "Replace the semicolon with a line break when code follows it, or remove it at the end of a line; `jet fmt` applies this fix."
+            "Brace the arm to run both under it, as in `-> {{ a(); b() }}`, or start the next statement on its own line."
         }
     }
 }

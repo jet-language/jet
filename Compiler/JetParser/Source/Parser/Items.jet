@@ -146,6 +146,7 @@ use {
         TOKEN_TRUE,
         TOKEN_UNIFIED_ARROW,
         Token,
+        token_is_authored_semicolon,
     ]
 }
 
@@ -1602,7 +1603,6 @@ parser_result_type_follows_arrow: fn(state: ^JetParserState) -> Bool {
     saved_else_arms: state.else_arms.len()
     saved_type_gt: state.pending_type_gt
     saved_type_gt_span: Span{start: state.pending_type_gt_span.start, end: state.pending_type_gt_span.end}
-    saved_semicolon: state.explicit_semicolon_reported
     parsed: parser_parse_type(state, 0)
     clean: !record || state.diagnostics.len() == saved_diagnostics
     failed: parser_aborting(state) && state.abort_mark > saved_diagnostics
@@ -1614,7 +1614,6 @@ parser_result_type_follows_arrow: fn(state: ^JetParserState) -> Bool {
     parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     state.pending_type_gt = saved_type_gt
     state.pending_type_gt_span = saved_type_gt_span
-    state.explicit_semicolon_reported = saved_semicolon
     clean && !failed && boundary
 }
 
@@ -2605,11 +2604,12 @@ parser_finish_data_member: fn(state: ^JetParserState, what: String) -[]> {
     ahead := 0
     loop parser_kind_at(state, ahead) == TOKEN_SEMI -> ahead += 1
     closer: parser_kind_at(state, ahead)
-    // An authored `;` where the comma goes is already the parse's explicit
-    // semicolon report (parser_bump): that one character is reported once.
+    // An authored `;` where the comma goes is its own report (E0373), whose
+    // edit writes the comma.
     next_token: parser_current(state)
-    authored_semicolon: next_token.kind == TOKEN_SEMI && next_token.span.start < next_token.span.end && !state.explicit_semicolon_reported
-    if closer != TOKEN_RBRACE && closer != TOKEN_EOF && !authored_semicolon {
+    if token_is_authored_semicolon(next_token) {
+        parser_report_explicit_semicolon(state, next_token.span, true)
+    } else if closer != TOKEN_RBRACE && closer != TOKEN_EOF {
         end: parser_data_member_end(state)
         parser_add_report(state, diagnostic_from_registry("E0003", Val(Span{start: end, end: end}), "expected `,` after this {what}", "the data members of a brace body are separated by commas, on one line or many", "add `,` after the {what}"))
     }

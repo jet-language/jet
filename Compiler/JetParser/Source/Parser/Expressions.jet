@@ -2502,7 +2502,7 @@ parser_parse_call_args: fn(state: ^JetParserState, depth: Int, allow_marker_labe
                 }
             }
             if parser_current_kind(state) == TOKEN_RPAREN -> break
-            if parser_current_kind(state) != TOKEN_COMMA {
+            if parser_current_kind(state) != TOKEN_COMMA && !parser_semicolon_as_comma(state) {
                 if parser_unclosed_delimiter(state, "call") -> return args
                 token: parser_current(state)
                 parser_add_error(state, token.span, "expected `,` between call arguments", "call arguments are comma-separated", "add a comma or close the call")

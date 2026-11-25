@@ -5,7 +5,7 @@
 // Repl.jet); nothing here refuses a feature by name.
 use {
     jet_foundation.[ASTTables, Diagnostic, DiagnosticLabel, Item, ParseResult, Span, StmtNode, TextEdit, ast_stmt]
-    jet_lexer.[lex]
+    jet_lexer.[lex, statement_starts]
     jet_parser.[parse_generated_source, parse_source]
 }
 
@@ -57,12 +57,12 @@ repl_rejected: fn(diagnostics: [Diagnostic], offset: Int) -> ReplInputParse Neve
     ReplInputParse.Rejected{diagnostics: repl_reanchor_all(diagnostics, offset)}
 }
 
-// Whether `body` is one bare expression, whose value the turn shows. The
-// Prelude's `print` and `eprint` return Unit and show nothing, so their turn
-// builds once, without the echo.
+// Whether the last statement of `body` is a bare expression, whose value the
+// turn shows (`a(); b` shows `b`). The Prelude's `print` and `eprint` return
+// Unit and show nothing, so their turn builds once, without the echo.
 repl_shows_value: fn(tables: ASTTables, body: [StmtNode]) -> Bool Never! {
-    if body.len() != 1 -> return false
-    if ast_stmt(tables, body[0]) == .Expr(expr) {
+    if body.len() == 0 -> return false
+    if ast_stmt(tables, body[body.len() - 1]) == .Expr(expr) {
         if expr == .Call(call, _) -> return call.name != "print" && call.name != "eprint"
         return true
     }
@@ -118,8 +118,15 @@ repl_classify: fn(source: String, step: Int) -> ReplInputParse {
         if body.len() == 0 -> return ReplInputParse.Accepted{input: ReplInput.Empty}
         return ReplInputParse.Accepted{input: ReplInput.Stmts{tables: plain.program.tables, body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
     }
-    // A bare expression binds its value, which the turn shows.
-    echo: parse_generated_source("{wrapper}__repl_echo__: {plain_input}\n}}\n".bytes())
+    // A bare last expression binds its value, which the turn shows; the
+    // statements before it, up to the line break or `;` that ends them, stay
+    // as written.
+    bytes: plain_input.bytes()
+    starts: statement_starts(lex(bytes).tokens)
+    last: starts[starts.len() - 1]
+    head: String.from_bytes(bytes.slice(0, last)) ?? ""
+    tail: String.from_bytes(bytes.slice(last, bytes.len())) ?? ""
+    echo: parse_generated_source("{wrapper}{head}__repl_echo__: {tail}\n}}\n".bytes())
     if echo.diagnostics.len() == 0 && repl_first_function_body(echo.program.items) == .Val(body) {
         if body.len() > 0 {
             return ReplInputParse.Accepted{input: ReplInput.Stmts{tables: echo.program.tables, body: body, suppress_echo: suppress, echo: true, check_source: plain_input}}

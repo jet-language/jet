@@ -3,16 +3,17 @@
 # PENDING-GRAMMAR(batch-four).
 fixture: Fixtures/Safety
 copy: exposed.jet exposed.bytes
-step: jet check {work}/formatting.jet --json
+step: jet check {work}/member_semicolon.jet --json
 env: NO_COLOR=1
 exit: 1
 json: stdout doc $ valid # original predicate: parses
 json: stdout doc $.reports[0].code = "E0373"
-json: stdout doc $.reports[0].applicability = "safe"
+json: stdout doc $.reports[0].applicability = "suggested"
 json: stdout doc $.reports[0].fix_edits : array # original pattern
 json: stdout doc $.reports[0].fix_edits #= 1
-# The E0373 registry row ranks the semicolon repair behavior-preserving.
-json: stdout doc $.reports[0].fix_edits[0].safety = "behavior-preserving"
+# A `;` between struct fields separates nothing; the `,` it
+# offers is the needs-review tier, since only the author knows the intent.
+json: stdout doc $.reports[0].fix_edits[0].safety = "needs-review"
 step: jet check {work}/immutable.jet --json
 env: NO_COLOR=1
 exit: 1
@@ -38,11 +39,11 @@ step: jet fix {work}/typo.jet
 env: NO_COLOR=1
 exit: 0
 file: typo.jet = safety-typo-fixed.bytes
-step: jet fix {work}/formatting.jet
+step: jet fix {work}/member_semicolon.jet
 env: NO_COLOR=1
 exit: 0
-file: formatting.jet ~ "loop item in [1, 2, 3] { print(item) }\n" # the semicolon became a line break
-file: formatting.jet !~ ";" # no semicolon separator is left
+file: member_semicolon.jet ~ "x: Int; y: Int" # a needs-review edit is reported, not applied, without --all
+stderr: ~ "no changes made (1 suggestion need review)"
 step: jet fix {work}/immutable.jet
 env: NO_COLOR=1
 exit: 0

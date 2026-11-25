@@ -468,17 +468,10 @@ parser_expression_form_value_block: fn(state: ^JetParserState, depth: Int) -> Pa
             saved_else_arms: state.else_arms.len()
             parsed: parser_parse_expression(state, 1, depth + 1)
             if !parser_error_since(state, saved_diagnostics) {
+                // The lexer ends a tail value's line with a terminator
+                // before `}`, a line break's or an authored `;`'s alike;
+                // that value is still the branch value.
                 if parser_current_kind(state) == TOKEN_SEMI && parser_kind_at(state, 1) == TOKEN_RBRACE {
-                    semi: parser_current(state)
-                    // S6-R: the lexer ends a tail value's line with a zero-width
-                    // terminator before `}`; that value is still the branch value.
-                    // An authored `;` makes it a unit statement unless it diverges.
-                    if semi.span.start != semi.span.end && !parser_expression_definitely_diverges(parsed.expr) {
-                        parser_expression_form_error(state, "E0114", parsed.span, "this value branch ends with a semicolon-terminated expression", "a value branch produces its result only from an unadorned final expression", "remove the semicolon or use an early exit")
-                        parser_bump(state)
-                        statements.push(Stmt.Expr{expr: parsed.expr})
-                        next
-                    }
                     parser_bump(state)
                 }
                 if parser_current_kind(state) == TOKEN_RBRACE {
@@ -1067,7 +1060,9 @@ parser_expression_form_parse_if: fn(state: ^JetParserState, depth: Int, lint_sty
         return ParsedExpr{expr: condition.expr, span: parser_cover(start.span, condition.span)}
     }
     then_start: parser_current(state).span.start
+    then_exits: parser_expression_form_exit_arm_ahead(state)
     then_branch: parser_expression_form_selected_value(state, depth + 1)
+    if then_exits -> parser_check_arm_semicolon(state)
     parts.push(ParserBranchPart{is_else: false, cond: cond_span, body: Span{start: then_start, end: parser_prev_token_end(state)}})
     else_body := [Stmt]{}
     else_value := Expr.NoElse{span: then_branch.span, id: parser_node_id(state)}
@@ -1088,7 +1083,9 @@ parser_expression_form_parse_if: fn(state: ^JetParserState, depth: Int, lint_sty
         else -> {
             parser_expect_unified_arrow(state, "after `else` in a value-producing `if`")
             else_start: parser_current(state).span.start
+            else_exits: parser_expression_form_exit_arm_ahead(state)
             else_branch: parser_expression_form_selected_value(state, depth + 1)
+            if else_exits -> parser_check_arm_semicolon(state)
             parts.push(ParserBranchPart{is_else: true, cond: Span{start: else_start, end: else_start}, body: Span{start: else_start, end: parser_prev_token_end(state)}})
             else_body = else_branch.body
             else_value = else_branch.value
@@ -1100,4 +1097,11 @@ parser_expression_form_parse_if: fn(state: ^JetParserState, depth: Int, lint_sty
         parser_prefer_arm_table(state, start.span, parts, saved_diagnostics)
     }
     ParsedExpr{expr: Expr.If{cond: condition.expr, then_body: then_branch.body, then_value: then_branch.value, else_body: else_body.move(), else_value: else_value.move(), span: span, id: parser_node_id(state)}, span: span}
+}
+
+// A `return`, `break` or `next` arm of a value `if` is a statement arm, so a
+// `;` after it on the same line is refused as after any one-line arm (E0448).
+parser_expression_form_exit_arm_ahead: fn(state: ^JetParserState) -> Bool {
+    token: parser_current(state)
+    token.kind == TOKEN_RETURN || token.kind == TOKEN_BREAK || (token.kind == TOKEN_IDENT && parser_value(state, token) == "next")
 }

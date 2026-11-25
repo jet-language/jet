@@ -986,7 +986,7 @@ values: loop item in items -> item.value
 left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
 `in` joins a source binding to its source. Commas separate later loop header
-clauses. Semicolons remain statement boundaries only.
+clauses; a `;` there is E0373, as it only separates statements.
 A pattern test in a conditional loop binds its names for the body of each
 pass, as in an `if` condition: `loop cur == .Val(c) { …; cur = next(c) }`
 runs once per `Val` and stops at the first `None`, and `c` is not visible
@@ -5064,12 +5064,14 @@ The registry spellings are `COMMENT_PREFIX`, `DOC_COMMENT_PREFIX`,
 `Data/Syntax/CoreSurface.jet`, and the lexer and the tools that scan for
 comments read them.
 
-**S6 — No visible semicolons** *(S6-R, amended by D-LOOP-COMMA1=A)*: statements end at line end; the
+**S6 — Statements end at line end** *(S6-R, amended by D-LOOP-COMMA1=A and D-SEMI-LINE1=A)*: statements end at line end; the
 lexer inserts Go-style terminators after any line whose last token can end a
 statement. Layout rules: `-> Type` and `{` stay on the closing-`)` line; a
 terminator is suppressed when the next non-blank line starts with `.` (chain)
-or a binary/logical operator. Loop header clauses use commas; the retired
-semicolon spelling is E0373. New terminal tokens must be added to `ends_statement`.
+or a binary/logical operator. A `;` is that terminator written on one line: it
+stands only where a line break would end the statement (E0447 elsewhere, E0448
+after a one-line arm with code following), and `jet fmt` writes the line break.
+Loop header clauses use commas, and a `;` there is E0373. New terminal tokens must be added to `ends_statement`.
 
 **S44 — Formatter** *(D-FMT1, D-FMTPARENS1, D-NARG2, D-BRACE1=A, D-FMTCOLLAPSE1=B)*: one style, zero
 config — 4-space indent, same-line `{`, width 100, spaced binary operators.
@@ -9402,8 +9404,10 @@ a REPL cell and a notebook cell obey one rule.
 every value-expected function, method, lambda, and value block gives its
 expected type to the sole final expression. That expression is the block value;
 it is not rewritten into a source `return`. Explicit `return` remains an early
-exit. A semicolon-terminated expression, assignment, declaration, or other
-statement tail produces unit and is diagnosed when a value is required. The
+exit. An assignment, declaration, or other statement tail produces unit and is
+diagnosed when a value is required; a `;` after the final expression is the
+line break it means, so `{ 5; }` is `{ 5 }` (D-SEMI-LINE1 retired the
+semicolon clause). The
 same law applies to value arm tables and fallback blocks. A final audited
 `#Unsafe("reason") { … }` region forwards the value expectation to its own
 tail without relaxing the lexical unsafe gate. Engines lower the checked value
@@ -10680,15 +10684,23 @@ after the last item counts as part of the multi-line form. **Technical:** Parser
 same
 optional-final-comma rule; formatter list renderers use source delimiters and comments to choose multiline
 layout. 
-- **D-SEMI1=A —** An explicit semicolon is the ratified E0373 with a
-  behavior-preserving edit: a line break when code follows on the same line,
-  removal at line end. The parser keeps a boundary at the same position so one
-  file reports once and parsing resumes at the next statement. Explicit and
-  inserted terminators share `TOKEN_SEMI`; the diagnostic dispatches on a
-  non-empty source span, and the E0373 row carries `fix_edits`.
-  The Jet parser contract fixtures in
-  `Compiler/JetParser/Tests/ContractFixtures.fixture/ContractFixtures.jet` pin both edits and statement
-  recovery through the production parser.
+- **D-SEMI1=A —** *(superseded by D-SEMI-LINE1=A)* An explicit semicolon was
+  E0373 with a behavior-preserving edit: a line break when code follows on the
+  same line, removal at line end.
+- **D-SEMI-LINE1=A —** *(ratified, card c090agiq; reopens D-SEMI1)*
+  A `;` between statements or items means a line break, in files, `jet eval`
+  and the REPL alike. The lexer accepts it only where its own line-break test
+  (`line_break_event`, Terminators.jet) would end the statement, and lands it
+  as the zero-width terminator that line break would be; anywhere else it is
+  E0447. Right after a one-line `if`, `else` or `loop` arm, or a `return`,
+  `break` or `next` arm, a `;` with code after it on the same line is E0448:
+  whether that code belongs to the arm is not something a `;` decides. Inside
+  a decision table a `;` ends a row. A trailing or doubled `;` is accepted.
+  Inside a member list, an argument list, a type, a loop header or an
+  interpolation hole a `;` separates nothing and stays E0373, whose edit writes
+  the `,` a member or argument list takes. `jet fmt` prints one statement per
+  line and drops every `;`. `jet eval` and the REPL part their one line by the
+  terminators the parser ends statements at (`statement_starts`).
 - **D-MARKERSHAPE1=B —** One bare rule, one list for several, E0999 with the
   rewrite otherwise. The audit found no new evidence; the surface does not
   change.

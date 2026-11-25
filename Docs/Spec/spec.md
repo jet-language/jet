@@ -339,18 +339,22 @@ vocabulary](vocabulary.md).
   exact `Duration`; calendar totals need an explicit date anchor. Jet has no
   separate `YearMonth` or `MonthDay` types without a later owner-ratified type
   decision (D-TIMEDEPTH1, D-TIME-CALENDAR1).
-- `true` and `false` are `Bool` literals. Source has no visible statement
-  separator. The lexer inserts an internal terminator after a line ending a
-  statement; a leading `.`, binary operator, or logical operator continues the
-  expression (S6-R). It recovers from bad characters and reports every lexical
-  error found in one run.
+- `true` and `false` are `Bool` literals. A line break ends a statement: the
+  lexer inserts an internal terminator after a line ending a statement; a
+  leading `.`, binary operator, or logical operator continues the expression
+  (S6-R). A `;` is that line break written on one line (D-SEMI-LINE1): it
+  stands only where a line break would end the statement (E0447 elsewhere),
+  not right after a one-line arm with code after it (E0448), and not inside a
+  member list, an argument list, a type, a loop header or an interpolation
+  hole (E0373); `jet fmt` writes the line break. The lexer recovers from bad
+  characters and reports every lexical error found in one run.
 
 ## Core grammar
 
 The following compact grammar shows the surface that the rules below rely on;
 the parser and the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/) own the
-complete token ledger. `;` is shown only as the internal terminator `NL`, not as
-source syntax.
+complete token ledger. The grammar's own `;` ends a rule; a source `;` is the
+internal terminator `NL`.
 
 ```text
 program  = { item | module-binding | script-stmt } ;
@@ -921,8 +925,8 @@ docs and fixtures use canonical syntax only.
 Struct fields, enum cases, and the leaves of an enum variant group share one
 separator rule: a `,` or a line break ends each entry, so `Point: struct { x:
 Int, y: Int }` and `Mode: enum { Fast, Safe }` are the one-line forms of the
-one-per-line bodies `jet fmt` prints. An authored `;` is E0373 there as
-everywhere.
+one-per-line bodies `jet fmt` prints. A `;` separates only statements and
+items, so one between entries is E0373, whose edit writes the `,`.
 
 Structs and enums carry data; methods attach behavior. A struct literal is
 `Type{field: value}` or an expected-type-inferred `{field: value}`. Enum values
@@ -4054,17 +4058,17 @@ run: fn() {
 }
 ```
 
-`math: module;` declares a file module. The loader searches beside the file for
+`math: module` declares a file module. The loader searches beside the file for
 `math.jet`, then for `math/module.jet`. Neither file is **E0607**; finding both
 is **E0606**. `math: module { ... }` is inline and adds the `math` namespace to
 the containing file; it performs no file lookup. The same `module` keyword is
-used by JetOS declarations. The semicolon form always declares a code module,
+used by JetOS declarations. The bodiless form always declares a code module,
 and the parser distinguishes braced code and JetOS contributions from their
 contents. A struct declared in an inline module prints by its own name:
 `geo.Point{x: 1, y: 2}` prints `Point { x: 1, y: 2 }`.
 
-Qualified access always works. `use math.clamp;` imports one member, and
-`use math.[clamp, lerp];` imports a member group. The `.[ ]` member-list form
+Qualified access always works. `use math.clamp` imports one member, and
+`use math.[clamp, lerp]` imports a member group. The `.[ ]` member-list form
 has the same meaning after `use` and in an expression such as
 `point.[x, y]`; use entries may also have aliases and dotted paths. Wildcard
 imports are rejected with **E0612**. An unqualified import of an undefined
@@ -5907,11 +5911,11 @@ pass a failure up. For a write-free preview, use `--check` and optionally
 
 Canonical style uses four-space indentation, an opening brace on the header
 line, one statement per line, at most one blank line between top-level items,
-spaces around binary operators, no space before `;`, `,`, or a call `(`, and
-trailing commas only on multiline comma lists. Explicit semicolons are not
-canonical: E0373 supplies the behavior-preserving line-break or end-of-line
-fix. Comments are retained and reattached by source span. A real parse error
-blocks formatting. (D-TRAILCOMMA1, D-SEMI1)
+spaces around binary operators, no space before `,` or a call `(`, and
+trailing commas only on multiline comma lists. A `;` between statements is
+the line break it means (D-SEMI-LINE1): `jet fmt` prints that line break and
+drops every `;`. Comments are retained and reattached by source span. A real
+parse error blocks formatting. (D-TRAILCOMMA1, D-SEMI-LINE1)
 
 Source-edit migrations reject out-of-range, overlapping, or reversed spans and
 spans that split a UTF-8 scalar. No edit is applied when the edit set is invalid.

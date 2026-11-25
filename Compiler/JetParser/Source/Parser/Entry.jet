@@ -723,7 +723,7 @@ parser_chunk_remap_literal: fn(old_row: Int, old_tables: TokenTables, new_tables
                 loop tok in part.tokens {
                     text: parser_chunk_remap_name(tok.text, old_tables.names, new_tables.names, name_map)
                     decoded: parser_chunk_remap_name(tok.decoded, old_tables.names, new_tables.names, name_map)
-                    lit: if tok.literal >= 0 -> parser_chunk_remap_literal(tok.literal, old_tables, new_tables, name_map) else -> -1
+                    lit: if tok.literal >= 0 -> parser_chunk_remap_literal(tok.literal, old_tables, new_tables, name_map) else -> tok.literal
                     nested.push(Token{kind: tok.kind, span: tok.span, text: text, decoded: decoded, literal: lit})
                 }
             }
@@ -753,7 +753,7 @@ parser_slice_chunk_tokens_and_tables: fn(tokens: [Token], tok_start: Int, tok_en
         tok: tokens[index]
         text: parser_chunk_remap_name(tok.text, old_tables.names, local_tables.names, name_map)
         decoded: parser_chunk_remap_name(tok.decoded, old_tables.names, local_tables.names, name_map)
-        lit: if tok.literal >= 0 -> parser_chunk_remap_literal(tok.literal, old_tables, local_tables, name_map) else -> -1
+        lit: if tok.literal >= 0 -> parser_chunk_remap_literal(tok.literal, old_tables, local_tables, name_map) else -> tok.literal
         local_tokens.push(Token{kind: tok.kind, span: tok.span, text: text, decoded: decoded, literal: lit})
     }
     {tokens: local_tokens.move(), tables: local_tables.move()}
