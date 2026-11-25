@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
-    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, build_time_refused, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, BinOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
+    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, build_time_refused, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, BinOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_leaf, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
     jet_foundation.[TShapeFormatName, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_selector_style, symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
@@ -550,12 +550,12 @@ ir_value_type_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, tid: TypeID, laying
     if ir_type_handle(p, ty) {
         return Val(ir_intern_type(m, "typeid:handle", ir_layout(IRTypeKind.Word, tid, 8, 8, IRClass.Integer, false, 64, "")))
     }
-    row: ir_type_def(p, name) ?? {
-        if args.len() == 0 && ir_host_value_name(name) {
-            return Val(ir_intern_type(m, "host:{name}", ir_layout(IRTypeKind.Word, tid, 8, 8, IRClass.Integer, false, 64, "")))
-        }
-        return None
+    // A compiler value (ir_host_value_type) is the word naming it in the
+    // evaluator's host table, declared or not.
+    if args.len() == 0 && ir_host_value_type(p, name) != None {
+        return Val(ir_intern_type(m, "host:{name}", ir_layout(IRTypeKind.Word, tid, 8, 8, IRClass.Integer, false, 64, "")))
     }
+    row: ir_type_def(p, name) ?? return None
     definition: p.types[row]
     // A generic declaration lays out per instance, its parameters bound to the
     // instance's arguments; an instance of a generic a Core module exports
@@ -821,12 +821,12 @@ ir_handle_row_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, name: String) -> In
     Val(ir_intern_type(m, key, ir_owned_layout(IRTypeKind.Pointer, spelled_tid, "jet_rt_handle_drop_{atom}", clone)))
 }
 
-// Whether a value of `ty` holds a compiler value host word (ir_host_value_name)
-// or a TypeId handle (ir_type_handle) anywhere: itself, or an element, payload
-// or member of it.
+// Whether a value of `ty` holds a compiler value host word
+// (ir_host_value_type) or a TypeId handle (ir_type_handle) anywhere: itself,
+// or an element, payload or member of it.
 ir_host_value_held: fn(p: IRProgram, ty: Type) -> Bool Never! {
     if ir_untag(ty) == {
-        .Named(name) -> return (ir_host_value_name(name) && ir_type_def(p, name) == None) || ir_type_handle(p, ty)
+        .Named(name) -> return ir_host_value_type(p, name) != None || ir_type_handle(p, ty)
         .List(element) -> return ir_host_value_held(p, element)
         .Option(inner) -> return ir_host_value_held(p, inner)
         .Result(ok, err) -> return ir_host_value_held(p, ok) || ir_host_value_held(p, err)
@@ -840,12 +840,20 @@ ir_host_value_held: fn(p: IRProgram, ty: Type) -> Bool Never! {
     false
 }
 
+// The compiler value type `name` names in `p`, if any (ir_host_value_leaf):
+// a bare compiler value name `p` lays out no record for, or the key of its
+// `core.compiler` declaration, which the evaluator answers as a host word
+// all the same.
+ir_host_value_type: fn(p: IRProgram, name: String) -> String? Never! {
+    leaf: ir_host_value_leaf(name) ?? return None
+    if leaf != name || ir_type_def(p, name) == None -> return Val(leaf)
+    None
+}
+
 // The compiler value name type row `row` holds as a host word, if any.
 ir_host_value_row: fn(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
     if m.types[row].kind != .Word -> return None
-    if ir_row_ty(m, p, row) == .Named(name) {
-        if ir_host_value_name(name) && ir_type_def(p, name) == None -> return Val(name.copy())
-    }
+    if ir_row_ty(m, p, row) == .Named(name) -> return ir_host_value_type(p, name)
     None
 }
 

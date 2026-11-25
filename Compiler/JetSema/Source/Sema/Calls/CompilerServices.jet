@@ -13,6 +13,7 @@ use jet_foundation.[
     ParamZone,
     Span,
     Type,
+    ir_host_value_leaf,
     symbol_key_leaf,
 ]
 
@@ -20,7 +21,8 @@ use jet_foundation.[
 // its fields and methods while it serves comptime and build code (JetIR
 // ir_host_method); no runtime layout holds one, so a running program can't
 // read it. A declared type resolves to its canonical `module.Name`, so a
-// bare name here is the compiler's own.
+// bare name here is the compiler's own; a `core.compiler` declaration of one
+// is the same value (ir_host_value_leaf).
 sema_compiler_host_value_name: fn(name: String) -> Bool Never! {
     if name == {
         "CompilerError" | "CompilerDiagnostic" | "CompilerDiagnosticOrigin" | "CompilerFixEdit" | "CompilerLexed" | "CompilerToken" | "CompilerSyntaxTree" | "CompilerNode" | "CompilerChecked" | "CompilerSemanticIndex" | "CompilerSourceMap" | "CompilerGeneratedLine" -> true
@@ -36,7 +38,9 @@ sema_compiler_host_value_held: fn(ty: Type) -> String? Never! {
     if ty == {
         .Tagged(_, inner) -> return sema_compiler_host_value_held(inner)
         .Named(name) -> {
-            if sema_compiler_host_value_name(name) -> return Val(name.copy())
+            if ir_host_value_leaf(name) == .Val(leaf) && sema_compiler_host_value_name(leaf) {
+                return Val(leaf)
+            }
         }
         .List(element) -> return sema_compiler_host_value_held(element)
         .Option(inner) -> return sema_compiler_host_value_held(inner)
