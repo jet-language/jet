@@ -3344,19 +3344,18 @@ sema_derive_unordered_comparable: fn(item: Item, diagnostics: ^[Diagnostic]) -> 
 // registration (sema_derive_unordered_comparable); the rest is answered here
 // against the checked types, E0905 at the request naming trait and base.
 sema_derive_check_distinct_forwards: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, diagnostics: ^[Diagnostic]) {
-    if program.registration_graph == .Val(graph) {
-        loop item in graph.modules[module_index].program.items {
-            if item == .Distinct(definition) {
-                base := sema_type_resolve_declared(graph, definition.base, environment.module_identity)
-                reported := [Span]{}
-                loop derived in definition.derives {
-                    if reported.contains(derived.span) -> next
-                    if sema_derive_distinct_base_has(environment, program, derived.name, base) {
-                        next
-                    }
-                    reported.push(derived.span)
-                    diagnostics.push(sema_derive_distinct_forward_error(definition.name, type_name(definition.base), derived.name, derived.span))
+    graph: program.registration_graph
+    loop item in graph.modules[module_index].program.items {
+        if item == .Distinct(definition) {
+            base := sema_type_resolve_declared(graph, definition.base, environment.module_identity)
+            reported := [Span]{}
+            loop derived in definition.derives {
+                if reported.contains(derived.span) -> next
+                if sema_derive_distinct_base_has(environment, program, derived.name, base) {
+                    next
                 }
+                reported.push(derived.span)
+                diagnostics.push(sema_derive_distinct_forward_error(definition.name, type_name(definition.base), derived.name, derived.span))
             }
         }
     }

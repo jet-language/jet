@@ -2128,22 +2128,21 @@ sema_codec_demand_take: fn(demand: Shared<SemaCodecDemand>) -> [SemaCodecWant] {
 // `encode` method on a receiver (Encode) or a `decode` call whose result
 // carries the decoded type (Decode), whichever impl dispatch then selects.
 sema_codec_demand_call: fn(program: SemaProgramTables, callee: SymbolID?, value: TExpr, return_type: Type) {
-    if program.registration_graph == .Val(graph) {
-        if graph.codec_method_rows.len() == 0 {
+    graph: program.registration_graph
+    if graph.codec_method_rows.len() == 0 {
+        return
+    }
+    if callee == .Val(id) {
+        if graph.codec_method_rows.get(id.id) == .Val(found) {
+            trait_name: graph.modules[found.module_index].impls[found.row].trait_name ?? return
+            permit: graph.codec_demand.guard_edit()
+            sema_codec_demand_record(permit.value, trait_name, graph.modules[found.module_index].impls[found.row].target_type_name)
             return
         }
-        if callee == .Val(id) {
-            if graph.codec_method_rows.get(id.id) == .Val(found) {
-                trait_name: graph.modules[found.module_index].impls[found.row].trait_name ?? return
-                permit: graph.codec_demand.guard_edit()
-                sema_codec_demand_record(permit.value, trait_name, graph.modules[found.module_index].impls[found.row].target_type_name)
-                return
-            }
-        }
-        if value.kind == .MethodCall(receiver, method, _, _) {
-            if method.name == "encode" -> sema_codec_demand_type(graph, "Encode", receiver.ty)
-            if method.name == "decode" -> sema_codec_demand_type(graph, "Decode", return_type)
-        }
+    }
+    if value.kind == .MethodCall(receiver, method, _, _) {
+        if method.name == "encode" -> sema_codec_demand_type(graph, "Encode", receiver.ty)
+        if method.name == "decode" -> sema_codec_demand_type(graph, "Decode", return_type)
     }
 }
 
@@ -2449,16 +2448,15 @@ sema_derive_demand_capture_take: fn(graph: SemaRegistrationGraph, capturing: Boo
 
 // A checked call names a demand-checked derived method.
 sema_derive_demand_call: fn(program: SemaProgramTables, callee: SymbolID?) {
-    if program.registration_graph == .Val(graph) {
-        if graph.derive_method_rows.len() == 0 {
-            return
-        }
-        id: callee ?? return
-        if graph.derive_method_rows.get(id.id) == None {
-            return
-        }
-        sema_derive_demand_add(graph.derive_demand, [String]{symbol_table_key(graph.symbols, id)})
+    graph: program.registration_graph
+    if graph.derive_method_rows.len() == 0 {
+        return
     }
+    id: callee ?? return
+    if graph.derive_method_rows.get(id.id) == None {
+        return
+    }
+    sema_derive_demand_add(graph.derive_demand, [String]{symbol_table_key(graph.symbols, id)})
 }
 
 // An Equatable or Comparable bound is met at `ty`: every nominal inside it
