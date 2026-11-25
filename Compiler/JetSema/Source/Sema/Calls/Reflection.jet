@@ -407,11 +407,10 @@ sema_call_reflection_named_displayable: fn(name: String, ty: Type, environment: 
 }
 
 // The Core values the trait registry admits as `Printable` with no source impl
-// (their Prelude `JetShow` hooks, every SIMD lane and the linear-algebra
-// values), and the Core types it registers a `Display` impl for.
+// (their Prelude `JetShow` hooks), and the Core types it registers a `Display`
+// impl for.
 sema_call_reflection_synthetic_printable: fn(name: String) -> Bool Never! {
     leaf: sema_call_reflection_leaf_name(name)
-    if sema_core_is_math_type(leaf) -> return true
     if leaf == {
         "Bits" | "BuildError" | "Bytes" | "Dyn" | "FieldError" | "DNSSRV" | "FileLock" | "GameAssets" | "GameBackend" | "GameFrame" | "GameImage" | "GameInputMap" | "GameInputSnapshot" | "GameReplay" | "GameScene" | "GameSound" | "HTTPHeaderName" | "HTTPHeaderValue" | "HTTPMethod" | "HTTPRequest" | "HTTPResponse" | "HTTPStatus" | "HTTPVersion" | "ID" | "IOError" | "IPAddr" | "JSON" | "Cache" | "Pool" | "ProcessChild" | "ProcessReceipt" | "ProcessResult" | "ProcessSpec" | "Range" | "RangeError" | "RNG" | "Stopwatch" | "Test" | "TcpListener" | "TcpStream" | "TempDir" | "TempFile" | "TextError" | "TLSStream" | "UdpSocket" | "UnixListener" | "UnixStream" | "UTF8Error" | "Value" | "ComputeDevice" | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "ServiceRestart" | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" -> true
         else -> false
