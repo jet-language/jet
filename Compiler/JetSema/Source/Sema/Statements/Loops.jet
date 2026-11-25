@@ -1,0 +1,309 @@
+// Loops and generators: whether a loop body breaks or a block falls through,
+// value breaks, `yield` and generator returns, the loop-value frame, and the
+// check of a `loop` statement and its step.
+use jet_foundation.[
+    Diagnostic,
+    Expr,
+    NamedSpan,
+    Span,
+    Stmt,
+    Type,
+    expr_span,
+    type_identity_equal,
+]
+
+sema_stmt_tree_loop_body_has_break: fn(statements: [TStmt], label: String?, allow_unlabeled: Bool) -> Bool Never! {
+    loop statement in statements {
+        if statement == {
+            .Break(target, _) -> {
+                if target == .Val(name) {
+                    if label == (Val(name)) -> return true
+                }
+                if target == None && allow_unlabeled -> return true
+            }
+            .If(_, then_body, else_body, _, _) -> {
+                if sema_stmt_tree_loop_body_has_break(then_body, label, allow_unlabeled) {
+                    return true
+                }
+                if else_body == .Val(else_statements) && sema_stmt_tree_loop_body_has_break(else_statements, label, allow_unlabeled) {
+                    return true
+                }
+            }
+            .Match(_, arms, _, _) -> {
+                loop arm in arms {
+                    if sema_stmt_tree_loop_body_has_break(arm.body, label, allow_unlabeled) {
+                        return true
+                    }
+                }
+            }
+            .EnumMatch(_, arms, else_body, _, _) -> {
+                loop arm in arms {
+                    if sema_stmt_tree_loop_body_has_break(arm.body, label, allow_unlabeled) {
+                        return true
+                    }
+                }
+                if else_body == .Val(else_statements) && sema_stmt_tree_loop_body_has_break(else_statements, label, allow_unlabeled) {
+                    return true
+                }
+            }
+            .RangeSwitch(_, arms, else_body, _) -> {
+                loop arm in arms {
+                    if sema_stmt_tree_loop_body_has_break(arm.body, label, allow_unlabeled) {
+                        return true
+                    }
+                }
+                if sema_stmt_tree_loop_body_has_break(else_body, label, allow_unlabeled) {
+                    return true
+                }
+            }
+            .MixedSwitch(_, _, arms, else_body, _) -> {
+                loop arm in arms {
+                    if sema_stmt_tree_loop_body_has_break(arm.body, label, allow_unlabeled) {
+                        return true
+                    }
+                }
+                if else_body == .Val(else_statements) && sema_stmt_tree_loop_body_has_break(else_statements, label, allow_unlabeled) {
+                    return true
+                }
+            }
+            // A nested loop owns its unlabeled breaks; a labeled one can
+            // still leave this loop.
+            .Loop(_, body, _) | .While(_, _, body, _) | .CountedLoop(_, _, _, _, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) -> {
+                if label != None && sema_stmt_tree_loop_body_has_break(body, label, false) {
+                    return true
+                }
+            }
+            .RefutableBind(_, _, fallback, _) -> {
+                if sema_stmt_tree_loop_body_has_break(fallback, label, allow_unlabeled) {
+                    return true
+                }
+            }
+            .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .ScopeMember(_, body, _) -> {
+                if sema_stmt_tree_loop_body_has_break(body, label, allow_unlabeled) -> return true
+            }
+            .Unsafe(_, body) | .TaskGroup(_, _, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .Transact(_, _, _, body, _) | .ContractScope(_, body, _, _, _) -> {
+                if sema_stmt_tree_loop_body_has_break(body, label, allow_unlabeled) -> return true
+            }
+            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+        }
+    }
+    false
+}
+
+// Statements are read in place (read windows): an index read or an unwrapped
+// optional would copy the statement, and with it a whole else-if chain.
+sema_stmt_tree_block_can_fall_through: fn(statements: [TStmt]) -> Bool Never! {
+    seen := 0
+    loop last in statements {
+        seen += 1
+        if seen < statements.len() -> next
+        if last == {
+            .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return false
+            .ExprStmt(value, _) -> return value.ty != (Type.Named{name: "Never"})
+            .If(_, then_body, else_body, _, _) -> {
+                if else_body == .Val(else_statements) {
+                    return sema_stmt_tree_block_can_fall_through(then_body) || sema_stmt_tree_block_can_fall_through(else_statements)
+                }
+                return true
+            }
+            .Match(_, arms, exhaustive, _) -> {
+                if !exhaustive -> return true
+                loop arm in arms {
+                    if sema_stmt_tree_block_can_fall_through(arm.body) -> return true
+                }
+                return false
+            }
+            .Loop(label, body, _) -> return sema_stmt_tree_loop_body_has_break(body, label, true)
+            // A wrapper block's own exit leaves the block.
+            .Inline(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Shield(body, _) | .Region(body, _) -> return sema_stmt_tree_block_can_fall_through(body)
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .While(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) | .Defer(_, _) -> return true
+        }
+    }
+    true
+}
+
+// A stream's element type comes from the declared return type. The scope
+// holds the effective return, where a plain `Stream<T>` became `Stream<T> Err!`
+// (`sema_effective_return_type`), so that carrier is unwrapped.
+sema_stmt_stream_element_type: fn(return_type: Type?) -> Type? {
+    resolved: return_type ?? return None
+    if resolved == {
+        .Apply(name, args) -> {
+            if name == "Stream" && args.len() == 1 -> return Val(args[0])
+        }
+        .Result(ok, err) -> {
+            if err == (Type.Named{name: "Err"}) -> return sema_stmt_stream_element_type(Val(ok))
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    None
+}
+
+sema_stmt_loop_value_break_missing_payload: fn(frame: SemaLoopValueFrame, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
+    if frame.kind != SemaLoopValueKind.Result -> return true
+    diagnostics.push(sema_error("E0076", span, "this loop break needs a value", "an ordinary loop used as a value needs a payload on every matching break", "write `break value`"))
+    false
+}
+
+sema_stmt_check_loop_value_break: fn(value: Expr, label: String?, label_span: Span, span: Span, check: ^SemaBodyCheck) -> TStmt? {
+    if label == .Val(name) && !sema_scope_has_loop_label(check.scopes, name) {
+        check.diagnostics.push(sema_stmt_unknown_loop_label(check.scopes, name, label_span))
+        return None
+    }
+    frame_index: sema_loop_value_resolve_frame(check.context, label) ?? {
+        check.diagnostics.push(sema_error("E0115", label_span, "`break value` only works inside a loop", "a loop value needs an active target", "move this inside a loop"))
+        return None
+    }
+    // copy: `frame` is read after sema_check_expression and loop-value recording, which write
+    // context.loop_value_frames (`^context`). A view would be live across those writes.
+    frame: check.context.loop_value_frames[frame_index].copy()
+    payload_expected := Type?{None}
+    if frame.ty == .Val(expected_type) && !sema_expr_is_numeric(expected_type) {
+        payload_expected = Val(expected_type)
+    }
+    checked: sema_check_expression(value, payload_expected, check) ?? return None
+    if !sema_copy_site_check_guard_owned(checked, check, false) -> return None
+    // A payload the loop cannot carry is reported on the `break` keyword.
+    keyword_span: Span{start: span.start, end: span.start + "break".len()}
+    if frame.kind == SemaLoopValueKind.Collecting {
+        check.diagnostics.push(sema_error("E0075", keyword_span, "this collecting loop cannot use a break payload", "its result is already the accumulated List, so a second payload would give one exit two result channels", "write `break` to return the accumulated list"))
+        return None
+    }
+    if frame.kind == SemaLoopValueKind.Effect {
+        check.diagnostics.push(sema_error("E0079", keyword_span, "this effect-only loop uses a result exit", "a break payload makes an effect-only loop a value expression", "bind the loop with `:`, or remove the payload"))
+        return None
+    }
+    result: sema_loop_value_check_result_exit(check, frame_index, checked) ?? return None
+    if !sema_stmt_move_direct(value, check, "the loop `break`") -> return None
+    sema_loop_value_record_break(check, frame_index)
+    Val(TStmt.BreakValue{label: label, value: result, span: span})
+}
+
+sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, check: ^SemaBodyCheck) -> TStmt? {
+    if span.start == span.end && check.context.collect_item_types.len() > 0 {
+        item: sema_loop_value_check_collecting_item(value, expr_span(value), check) ?? return None
+        if !sema_copy_site_check_guard_owned(item, check, false) -> return None
+        if !sema_stmt_move_direct(value, check, "the collecting loop") -> return None
+        return Val(TStmt.ExprStmt{value: item, span: span})
+    }
+    stream_return := return_type
+    if sema_stmt_stream_element_type(stream_return) == None {
+        stream_return = check.scopes.return_type
+    }
+    elem_type: sema_stmt_stream_element_type(stream_return) ?? {
+        // The report sits at the `yield` keyword.
+        keyword: Span{start: span.start, end: span.start + "yield".count_bytes()}
+        check.diagnostics.push(sema_error("E0805", keyword, "`yield` outside a generator", "`yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it", "declare `Stream<T> ->` on this function, or remove the `yield`"))
+        _ := sema_check_expression(value, None, check)
+        return None
+    }
+    diagnostic_start: check.diagnostics.len()
+    checked: sema_check_expression(value, Val(elem_type), check) ?? {
+        // The element type is the yielded value's target, and a value of
+        // another type is E0807 about the stream.
+        mismatch_index: sema_value_mismatch_index(check.diagnostics, diagnostic_start, expr_span(value)) ?? return None
+        probe_diagnostics := [Diagnostic]{}
+        offered: sema_probe_expression(value, None, check, probe_diagnostics) ?? return None
+        check.diagnostics[mismatch_index] = sema_stmt_yield_mismatch(elem_type, offered.ty, expr_span(value))
+        return None
+    }
+    if !sema_copy_site_check_guard_owned(checked, check, false) -> return None
+    yielded := checked
+    if !type_identity_equal(checked.ty, elem_type) {
+        if {
+            sema_expr_numeric_value_widening(checked, elem_type) == (Val(true)) -> {
+                line: sema_source_line_at(check.environment.source_segments, checked.span) ?? 0
+                yielded = sema_expr_numeric_literal_conversion(checked, elem_type, checked.span, line, check.diagnostics) ?? return None
+            }
+            else -> {
+                check.diagnostics.push(sema_stmt_yield_mismatch(elem_type, checked.ty, checked.span))
+                return None
+            }
+        }
+    }
+    if !sema_stmt_move_direct(value, check, "`yield`") -> return None
+    call := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.YieldSend{value: yielded}}, span)
+    Val(TStmt.ExprStmt{value: call, span: span})
+}
+
+sema_stmt_yield_mismatch: fn(element: Type, offered: Type, span: Span) -> Diagnostic {
+    sema_error("E0807", span, "this yields {sema_type_show(offered)}, but the stream is `Stream<{sema_type_show(element)}>`", "every `yield` in a generator must hand back the stream's element type", sema_type_fix_hint(element, offered))
+}
+
+// E0806: a generator (`Stream<T> ->`) yields its values;
+// `return` only ends the stream early, so it can't carry one. True when this
+// return was rejected.
+sema_stmt_generator_return_rejected: fn(value: Expr?, return_type: Type?, check: ^SemaBodyCheck) -> Bool {
+    returned: value ?? return false
+    stream_return := return_type
+    if sema_stmt_stream_element_type(stream_return) == None {
+        stream_return = check.scopes.return_type
+    }
+    if sema_stmt_stream_element_type(stream_return) == None -> return false
+    _ := sema_check_expression(returned, None, check)
+    check.diagnostics.push(sema_error("E0806", expr_span(returned), "`{check.context.function_name}` yields values, so `return` can't carry one", "a generator body produces values with `yield`; `return` only ends the stream early", "write `yield ...;` to hand back a value, or a bare `return;` to end the stream"))
+    true
+}
+
+sema_stmt_close_loop_value_frame: fn(check: ^SemaBodyCheck, frame_index: Int, body: ^[TStmt], fork: SemaOwnershipFork, outer: Bool, may_skip: Bool) -> Bool {
+    valid := true
+    frame := SemaLoopValueFrame?{None}
+    if frame_index >= 0 && frame_index < check.context.loop_value_frames.len() {
+        frame = Val(check.context.loop_value_frames[frame_index])
+    }
+    if frame == .Val(value) && value.kind == SemaLoopValueKind.Result && value.ty != None {
+        result_type: value.ty ?? Type.Named{name: "Unit"}
+        if !sema_loop_value_widen_result_breaks(body, value.label, result_type, check) {
+            valid = false
+        }
+    }
+    body_falls_through := sema_stmt_tree_block_can_fall_through(body)
+    if body_falls_through && frame != None {
+        sema_ownership_check_loop_move_backedge(check.state, check.context.loop_value_frames[frame_index], check.diagnostics)
+    }
+    _ := sema_ownership_join_loop_value_paths(check, frame_index, fork, outer, body_falls_through, may_skip)
+    sema_loop_value_pop_frame(check.context)
+    valid
+}
+
+sema_stmt_check_loop_step: fn(step: Stmt, check: ^SemaBodyCheck) -> TStmt? {
+    if step == {
+        .Assign(target, op, op_span, expr) -> sema_stmt_check_assignment(target, op, op_span, expr, check)
+        .Expr(expr) -> {
+            value: sema_check_expression(expr, None, check) ?? return None
+            if value.ty != (Type.Named{name: "Unit"}) -> return None
+            return Val(TStmt.ExprStmt{value: value, span: expr_span(expr)})
+        }
+        .Val(_) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> None
+    }
+}
+
+// A `loop { … }` statement: its label and value frame, then its body one
+// loop level deeper. False when the loop does not check.
+sema_stmt_check_loop: fn(body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?, return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
+    loop_fork: sema_ownership_mark(check.state)
+    sema_scope_enter(check.scopes, check.state, "loop@{span.start}")
+    label_name := String?{None}
+    label_valid := true
+    if label != None {
+        label_name = Val(label.name)
+        if !sema_scope_push_loop_label(check.scopes, label.name) {
+            check.diagnostics.push(sema_already_defined(label.name, label.span))
+            label_valid = false
+        }
+    }
+    loop_frame_index := check.context.loop_value_frames.len()
+    sema_loop_value_push_frame(check.context, label_name, loop_fork)
+    previous_arrow_loop_body := check.context.arrow_loop_body
+    check.context.arrow_loop_body = arrow_body
+    nested := sema_stmt_check_block(body, return_type, check, "loop.body@{span.start}", loop_depth + 1)
+    check.context.arrow_loop_body = previous_arrow_loop_body
+    if label != None -> sema_scope_pop_loop_label(check.scopes)
+    sema_single_use_leave_scope(check)
+    if !sema_stmt_close_loop_value_frame(check, loop_frame_index, nested.value, loop_fork, false, false) {
+        label_valid = false
+    }
+    if !nested.complete || !label_valid -> return false
+    output.push(TStmt.Loop{label: label_name, body: nested.value, span: span})
+    true
+}
