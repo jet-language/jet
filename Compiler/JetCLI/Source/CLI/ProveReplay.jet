@@ -41,6 +41,7 @@ use {
         canonical_json_bytes,
         canonical_json_value,
         core_call,
+        effect_vocabulary_list_view_count,
         foundation_byte_text,
         import_alias,
         import_walk_bindings,
@@ -124,12 +125,15 @@ JET_CLI_REPLAY_TERM_READS: [String]{"readline", "read_all_input"}
 // the 1 MiB payload limit.
 JET_CLI_REPLAY_IO_CHUNK_BYTES: 524288
 
-// The portable I/O error registry and the one Linux errno each name
-// replays as. An errno outside it, or one of two that share a name
-// (EPERM beside EACCES, EWOULDBLOCK is EAGAIN), cannot be replayed exactly.
+// The names of the portable I/O error registry (JET_CLI_REPLAY_NET_ERRORS)
+// that one Linux errno each replays as. An errno outside it, or one of two
+// that share a name (EPERM beside EACCES, EWOULDBLOCK is EAGAIN), cannot be
+// replayed exactly; `unexpected_eof` and `invalid_data` have no errno.
 JET_CLI_REPLAY_IO_ERRORS: [String]{"interrupted", "timed_out", "would_block", "broken_pipe", "connection_aborted", "connection_refused", "connection_reset", "not_connected", "address_in_use", "address_unavailable", "permission_denied", "not_found"}
 
 JET_CLI_REPLAY_IO_ERRNOS: [Int]{4, 110, 11, 32, 103, 111, 104, 107, 98, 99, 13, 2}
+
+JET_CLI_REPLAY_IO_ERROR_COUNT: #run effect_vocabulary_list_view_count("CLI/ProveReplay.jet", JET_CLI_REPLAY_IO_ERRORS, "JET_CLI_REPLAY_IO_ERRORS", JET_CLI_REPLAY_NET_ERRORS, "JET_CLI_REPLAY_NET_ERRORS", [String]{})
 
 // The whole portable registry, which a NetEnd outcome names: Core's HTTP
 // client fails a replayed hop with the error's name as its message.

@@ -65,10 +65,22 @@ use {
     jetpack_artifact_store.[ArtifactStore]
 }
 
-// `InspectPlane.ALL`, in order, then `live` (a running program's tasks,
-// channels, deadlines and effects), `target` (the target machine dossier)
-// and `events` (the compiler event schema).
-JET_CLI_INSPECT_PLANES: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates", "memory", "choices", "live", "target", "events"}
+// The planes: the `inspect` actions the command registry (JET_CLI_COMMANDS)
+// routes to the `InspectPlane` handler, in its order. `live` is a running
+// program's tasks, channels, deadlines and effects, `target` the target
+// machine dossier and `events` the compiler event schema.
+JET_CLI_INSPECT_PLANES: #run jet_cli_inspect_plane_names()
+
+jet_cli_inspect_plane_names: fn() -> [String] {
+    out := [String]{}
+    loop command in JET_CLI_COMMANDS {
+        if command.name != "inspect" -> next
+        loop action in command.actions {
+            if action.handler == "InspectPlane" -> out.push(action.name.copy())
+        }
+    }
+    out
+}
 
 // `InspectScope`: `Target` is a source file or a package directory (a target
 // machine name for the `target` plane).
@@ -662,7 +674,7 @@ jet_cli_coverage_baseline: fn(text: String) -> JetCLICoverageBaseline Never! {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
         fields := [String]{}
-        loop word in line.copy().replace("\t", " ").split(" ") {
+        loop word in line.replace("\t", " ").split(" ") {
             if word != "" -> fields.push(word)
         }
         number: index + 1
