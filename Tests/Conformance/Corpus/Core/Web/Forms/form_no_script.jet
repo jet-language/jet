@@ -3,9 +3,9 @@ use api: core.web.forms
 
 JetForm: struct { jet: String }
 
-markup: fn(form: ^api.WebFormTyped<JetForm>) -> String Never! { form.no_script() ?? "refused" }
+markup: fn(form: api.WebFormTyped<JetForm>) -> String Never! { form.no_script() ?? "refused" }
 
 run: fn() {
-    form := api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form: api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     print(markup(form))
 }

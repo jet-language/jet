@@ -3184,7 +3184,7 @@ ir_order_step: fn(m: ^IRModule, b: ^IRBuilder, a: Int, c: Int, sign: Int, decide
 }
 
 // `sign` = -1 when `below` holds, else 1; then leaves `decided`.
-ir_order_decide: fn(m: ^IRModule, b: ^IRBuilder, below: Int, sign: Int, decided: Int) Never! {
+ir_order_decide: fn(m: IRModule, b: ^IRBuilder, below: Int, sign: Int, decided: Int) Never! {
     ir_emit(b.f, IROp.Const, sign, 1, -1, -1, b.line)
     ir_open_if(b.f, below, b.line)
     ir_emit(b.f, IROp.Const, sign, -1, -1, -1, b.line)
@@ -3810,7 +3810,7 @@ ir_union_lend: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, payload: Int, membe
 // Stores the bits of `payload`, laid out as `row`, at `offset` in the box
 // `holder` with no new owner (no clone, no move): the box only lends the
 // value (IRBoxLend).
-ir_store_lent: fn(m: ^IRModule, b: ^IRBuilder, holder: Int, offset: Int, payload: Int, row: Int) Never! {
+ir_store_lent: fn(m: IRModule, b: ^IRBuilder, holder: Int, offset: Int, payload: Int, row: Int) Never! {
     if m.types[row].kind == .Aggregate {
         address: ir_temp(m, b, row)
         ir_emit(b.f, IROp.Offset, address, holder, offset, -1, b.line)

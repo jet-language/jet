@@ -87,7 +87,7 @@ message_whole: fn(text: String) -> Bool {
 }
 
 // Reads one HTTP message from `stream`, whole.
-read_message: fn(stream: ^net.TCPStream) -> String {
+read_message: fn(stream: net.TCPStream) -> String {
     text := ""
     loop !message_whole(text) {
         chunk: stream.read_bytes(65536, deadline: 5s) ?? panic("read")
@@ -101,9 +101,9 @@ read_message: fn(stream: ^net.TCPStream) -> String {
 // request to the server, and the server's reply back to the client, unless
 // `drop` holds. Then the client's connection closes with no reply.
 relay: fn(listener: net.TCPListener, server: String, drop: Bool) {
-    client := net.tcp_accept(listener) ?? panic("accept")
+    client: net.tcp_accept(listener) ?? panic("accept")
     request: read_message(client)
-    upstream := net.tcp_connect(server) ?? panic("connect")
+    upstream: net.tcp_connect(server) ?? panic("connect")
     net.tcp_write_text(upstream, request) ?? panic("forward the request")
     reply: read_message(upstream)
     net.tcp_close(upstream) ?? panic("close the server's connection")

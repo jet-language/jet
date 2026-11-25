@@ -45,7 +45,7 @@ posting: fn(addr: String, name: String, framing: String) -> TCPStream NetError! 
 }
 
 // The answer's status line and body, read within five seconds.
-answer: fn(stream: ^TCPStream) -> String {
+answer: fn(stream: TCPStream) -> String {
     got := [U8]{}
     loop _ in 0..<20 {
         more: stream.read_bytes(8192, deadline: time.duration_ms(5000)) ?? break
@@ -87,15 +87,15 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     serving: task {
         loop _ in 0..<3 { served.serve_once(listener) }
     }
-    announced := posting(addr, "big.txt", "Content-Length: 100") ?? return Err(err)
+    announced: posting(addr, "big.txt", "Content-Length: 100") ?? return Err(err)
     print("announces 100 bytes: {answer(announced)}")
     print("staged: {staged()}")
-    chunked := posting(addr, "chunks.txt", "Transfer-Encoding: chunked") ?? return Err(err)
+    chunked: posting(addr, "chunks.txt", "Transfer-Encoding: chunked") ?? return Err(err)
     chunked.write_bytes("20{CRLF}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{CRLF}40{CRLF}".bytes()) ?? return Err(err)
     print("a chunk passes 64 bytes: {answer(chunked)}")
     print("staged: {staged()}")
     note: "a note of forty bytes sent in two parts\n"
-    sending := posting(addr, "note.txt", "Content-Length: {note.len()}") ?? return Err(err)
+    sending: posting(addr, "note.txt", "Content-Length: {note.len()}") ?? return Err(err)
     sending.write_bytes(note.bytes().slice(0, 20)) ?? return Err(err)
     print("staged after the first half: {staged_holding(20)}")
     sending.write_bytes(note.bytes().slice(20, note.len())) ?? return Err(err)

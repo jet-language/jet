@@ -1,6 +1,6 @@
 use db: core.db
 
-count_people: fn<T: Driver>(conn: ^T) -> Int DBError! {
+count_people: fn<T: Driver>(conn: T) -> Int DBError! {
     row: conn.query_one(SQL{"SELECT COUNT(*) AS n FROM person"})
     found: row ?? panic("missing")
     missing: conn.query_one(SQL{"SELECT id, name FROM person WHERE id = 99"})
@@ -11,7 +11,7 @@ count_people: fn<T: Driver>(conn: ^T) -> Int DBError! {
 run: fn() {
     conn := db.open_memory()
     policy: db.policy("person", "true") ?? panic("policy")
-    scoped := conn.with_policy(policy, "owner")
+    scoped: conn.with_policy(policy, "owner")
     _: db.migrate(
         scoped,
         "person-v1",

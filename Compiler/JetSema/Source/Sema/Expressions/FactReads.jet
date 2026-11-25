@@ -1252,7 +1252,7 @@ SemaInstanceConstants: struct {
 // row, no E0302 and nothing staged, as JetIR never builds that arm. The
 // program holds these rows, never a module: which rows there are depends on
 // every instance the program builds.
-sema_fact_instance_constants: fn(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], reflections: [SemaTypeReflection], values: [SemaComptimeItemValue], diagnostics: ^[Diagnostic]) -> SemaInstanceConstants {
+sema_fact_instance_constants: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], reflections: [SemaTypeReflection], values: [SemaComptimeItemValue], diagnostics: ^[Diagnostic]) -> SemaInstanceConstants {
     rows := [TConstantDef]{}
     sources := [SemaComptimeBodySource]{}
     // The value each reflection's site took at its instance, once the
@@ -1318,7 +1318,7 @@ sema_fact_site_landed: fn(values: [SemaComptimeItemValue], site: SemaComptimeBod
 
 // The Bool `reflection`'s site took at its instance, once the instance's
 // copy has landed among `values`.
-sema_fact_site_holds: fn(modules: ^[SemaGraphModuleResult], values: [SemaComptimeItemValue], reflection: SemaTypeReflection) -> Bool? {
+sema_fact_site_holds: fn(modules: [SemaGraphModuleResult], values: [SemaComptimeItemValue], reflection: SemaTypeReflection) -> Bool? {
     if reflection.site == "" -> return None
     site: sema_fact_generic_site(modules, reflection.site) ?? return None
     row: sema_fact_site_landed(values, site, reflection.ty) ?? return None
@@ -1354,7 +1354,7 @@ sema_fact_key_taken: fn(key: String, reflections: [SemaTypeReflection], taken: [
     false
 }
 // The generic site of `modules` whose key is `key`.
-sema_fact_generic_site: fn(modules: ^[SemaGraphModuleResult], key: String) -> SemaComptimeBodySource? {
+sema_fact_generic_site: fn(modules: [SemaGraphModuleResult], key: String) -> SemaComptimeBodySource? {
     loop module_result in modules {
         loop source in module_result.comptime_body_sources {
             if source.key == key && sema_comptime_generic_site(source) -> return Val(source)

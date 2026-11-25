@@ -1148,7 +1148,7 @@ resolve_compound_order_by: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int) -[DB]> Int Nev
 // sqlite3ResolveOrderGroupBy: each ORDER BY or GROUP BY term of `ob` that
 // names a result column (iOrderByCol) becomes a copy of that column's
 // expression. Nonzero on error.
-resolve_order_group_by: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, ob: Int, z_type: String) -> Int Never! {
+resolve_order_group_by: fn(p: cg.Parse, a: ^ast.AST, sel: Int, ob: Int, z_type: String) -> Int Never! {
     if ob < 0 || p.db.malloc_failed || ast.in_rename(a) -> return 0
     if ast.list_len(a, ob) > p.db.limits[ast.LIMIT_COLUMN] {
         ast.error(a, "too many terms in {z_type} BY clause")

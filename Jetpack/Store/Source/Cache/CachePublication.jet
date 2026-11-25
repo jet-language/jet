@@ -112,7 +112,7 @@ CacheReceiptPin: struct {
 
 // Publish one reproducible Hangar entry to the first bound mirror that
 // accepts it. Every mirror failure is reported if none does.
-store_publish_cache_entry: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
+store_publish_cache_entry: fn(verification: StoreVerification, roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
     binding: store_read_cache_binding(roots, role)
     if !binding.allow_write {
         return Err(StoreError.InvalidData("cache binding is read-only; publishing needs a write grant"))
@@ -185,7 +185,7 @@ store_publish_cache_entry: fn(verification: ^StoreVerification, roots: HangarRoo
 // receipt, and HMAC signing as a normal publish, but the endpoint is always
 // a local directory. No network mirror is contacted and the host role secret
 // stays under the Jetpack root.
-store_stage_cache_from_hangar: fn(verification: ^StoreVerification, roots: HangarRoots, destination: String, role: String) -> CacheStageReport StoreError! {
+store_stage_cache_from_hangar: fn(verification: StoreVerification, roots: HangarRoots, destination: String, role: String) -> CacheStageReport StoreError! {
     binding: store_read_cache_binding(roots, role)
     if !binding.allow_write {
         return Err(StoreError.InvalidData("cache binding is read-only; staging needs a write grant"))
@@ -223,7 +223,7 @@ store_stage_cache_from_hangar: fn(verification: ^StoreVerification, roots: Hanga
 
 // Find a verifying hit for `target` on the role's mirrors, in order, without
 // restoring it.
-store_verify_cache_transfer: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
+store_verify_cache_transfer: fn(verification: StoreVerification, roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
     binding: store_read_cache_binding(roots, role)
     expected: store_cache_select_entry(verification, roots, target)
     store_cache_ensure_reproducible_for_shared_cache(roots, expected)
@@ -286,7 +286,7 @@ store_verify_cache_transfer: fn(verification: ^StoreVerification, roots: HangarR
 
 // Restore `target` from the first verifying mirror into `destination`, which
 // must not exist yet. A failed restore removes its partial output.
-store_substitute_cache_entry: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, role: String, destination: String) -> CacheTransferReport StoreError! {
+store_substitute_cache_entry: fn(verification: StoreVerification, roots: HangarRoots, target: String, role: String, destination: String) -> CacheTransferReport StoreError! {
     binding: store_read_cache_binding(roots, role)
     if store_archive_lstat_ok(destination) != None {
         return Err(StoreError.InvalidData("cache substitution destination already exists"))
@@ -400,7 +400,7 @@ store_cache_require_allowed_builder: fn(roots: HangarRoots, role: String, entry:
 
 // The entry whose id, reference, output digest, or `name@version` equals
 // `target`.
-store_cache_select_entry: fn(verification: ^StoreVerification, roots: HangarRoots, target: String) -> StoreEntry StoreError! {
+store_cache_select_entry: fn(verification: StoreVerification, roots: HangarRoots, target: String) -> StoreEntry StoreError! {
     loop entry in store_list_checked(verification, roots) {
         if entry.id == target || entry.reference == target || entry.envelope.output_hash == target || "{entry.name}@{entry.version}" == target {
             return Ok(entry)
@@ -1070,7 +1070,7 @@ store_cache_publish_endpoint: fn(endpoint: CacheEndpoint, info: NarInfo, nar: [U
 }
 
 // The Hangar endpoint verifies the live output and serves its NAR.
-store_cache_verify_hangar_endpoint: fn(verification: ^StoreVerification, roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry) -> [U8]? StoreError! {
+store_cache_verify_hangar_endpoint: fn(verification: StoreVerification, roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry) -> [U8]? StoreError! {
     if !endpoint.is_hangar() -> return Ok(None)
     if store_try_entry_output_hash(verification, roots, entry) != entry.envelope.output_hash {
         return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
@@ -1080,7 +1080,7 @@ store_cache_verify_hangar_endpoint: fn(verification: ^StoreVerification, roots: 
 
 // The Hangar endpoint copies the live output to `destination`, seals and
 // re-hashes it, and serves its NAR; a failure removes the copy.
-store_cache_substitute_hangar_endpoint: fn(verification: ^StoreVerification, roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry, destination: String) -> [U8]? StoreError! {
+store_cache_substitute_hangar_endpoint: fn(verification: StoreVerification, roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry, destination: String) -> [U8]? StoreError! {
     if !endpoint.is_hangar() -> return Ok(None)
     nar: store_cache_copy_hangar_output(verification, roots, entry, destination) ?? {
         store_cache_remove_tree(destination).drop("the failed copy may not have created the destination")
@@ -1089,7 +1089,7 @@ store_cache_substitute_hangar_endpoint: fn(verification: ^StoreVerification, roo
     Ok(Val(nar))
 }
 
-store_cache_copy_hangar_output: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, destination: String) -> [U8] StoreError! {
+store_cache_copy_hangar_output: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, destination: String) -> [U8] StoreError! {
     if store_try_entry_output_hash(verification, roots, entry) != entry.envelope.output_hash {
         return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
     }

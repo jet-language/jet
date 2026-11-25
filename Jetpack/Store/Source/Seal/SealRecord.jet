@@ -92,7 +92,7 @@ SealRecord: struct {
     tuple_digest: String,
 }
 
-store_seal_census_note: fn(verification: ^StoreVerification, path: String) Never! {
+store_seal_census_note: fn(verification: StoreVerification, path: String) Never! {
     state: verification.state
     permit := state.guard_edit()
     if !permit.value.seal_census_enabled {
@@ -103,7 +103,7 @@ store_seal_census_note: fn(verification: ^StoreVerification, path: String) Never
 
 // Render the census when enabled: total checks, distinct objects, and the
 // most re-walked objects. `None` unless `JETPACK_SEAL_CENSUS` is set.
-store_seal_census_report: fn(verification: ^StoreVerification) -> String? Never! {
+store_seal_census_report: fn(verification: StoreVerification) -> String? Never! {
     state: verification.state
     permit: state.guard_read()
     if !permit.value.seal_census_enabled -> return None
@@ -137,20 +137,20 @@ store_seal_pad_left: fn(text: String, width: Int) -> String Never! {
 
 // One owner keeps the armed view until command exit; library owners begin
 // strictly disarmed.
-store_arm_command_memo: fn(verification: ^StoreVerification) Never! {
+store_arm_command_memo: fn(verification: StoreVerification) Never! {
     state: verification.state
     permit := state.guard_edit()
     permit.value.seal_memo_armed = true
 }
 
-store_seal_memo_get: fn(verification: ^StoreVerification, path: String) -> String? Never! {
+store_seal_memo_get: fn(verification: StoreVerification, path: String) -> String? Never! {
     state: verification.state
     permit: state.guard_read()
     if !permit.value.seal_memo_armed -> return None
     permit.value.seal_memo.get(path)
 }
 
-store_seal_memo_put: fn(verification: ^StoreVerification, path: String, digest: String) Never! {
+store_seal_memo_put: fn(verification: StoreVerification, path: String, digest: String) Never! {
     state: verification.state
     permit := state.guard_edit()
     if !permit.value.seal_memo_armed {
@@ -159,7 +159,7 @@ store_seal_memo_put: fn(verification: ^StoreVerification, path: String, digest: 
     permit.value.seal_memo[path] = digest
 }
 
-store_seal_memo_forget: fn(verification: ^StoreVerification, path: String) Never! {
+store_seal_memo_forget: fn(verification: StoreVerification, path: String) Never! {
     state: verification.state
     permit := state.guard_edit()
     if !permit.value.seal_memo_armed {
@@ -170,7 +170,7 @@ store_seal_memo_forget: fn(verification: ^StoreVerification, path: String) Never
 
 // The sealed digest when `path` is the direct canonical object named by its
 // digest and every recorded filesystem tuple still matches.
-store_check_seal: fn(verification: ^StoreVerification, path: String, hangar: String) -> String? StoreError! {
+store_check_seal: fn(verification: StoreVerification, path: String, hangar: String) -> String? StoreError! {
     store_seal_census_note(verification, path)
     if store_seal_memo_get(verification, path) == {
         .Val(digest) -> return Ok(Val(digest))
@@ -193,7 +193,7 @@ store_check_seal: fn(verification: ^StoreVerification, path: String, hangar: Str
 
 // Write or replace the seal for one canonical Hangar object. Callers hold
 // the Hangar lock; the temporary file and rename make the metadata atomic.
-store_write_seal: fn(verification: ^StoreVerification, path: String, hangar: String, digest: String) StoreError! {
+store_write_seal: fn(verification: StoreVerification, path: String, hangar: String, digest: String) StoreError! {
     if store_object_digest_for_path(path, hangar) != Val(digest) {
         return Err(StoreError.InvalidInput("cannot seal a non-canonical Hangar object"))
     }
@@ -223,7 +223,7 @@ store_seal_publish: fn(temporary: String, target: String, bytes: [U8]) StoreErro
 }
 
 // Remove a seal when its canonical object is rolled back or quarantined.
-store_remove_seal: fn(verification: ^StoreVerification, path: String, hangar: String) StoreError! {
+store_remove_seal: fn(verification: StoreVerification, path: String, hangar: String) StoreError! {
     store_seal_memo_forget(verification, path)
     digest: store_object_digest_for_path(path, hangar) ?? return
     // A removed seal means the object is quarantined or replaced; drop the
@@ -361,7 +361,7 @@ store_seal_ensure_real_directory: fn(path: String, label: String) StoreError! {
 
 // Test seam for the memo lifetime: a fresh run starts disarmed, which this
 // models by disarming and clearing the memo.
-store_disarm_command_memo: fn(verification: ^StoreVerification) Never! {
+store_disarm_command_memo: fn(verification: StoreVerification) Never! {
     state: verification.state
     permit := state.guard_edit()
     permit.value.seal_memo_armed = false

@@ -159,7 +159,7 @@ coalesce_function: fn(a: ^ast.AST, args: Int) -> Int Never! {
 // sqlite3ProcessJoin: NATURAL joins become USING joins, and the USING and
 // ON constraints join the WHERE clause marked EP_OUTER_ON or EP_INNER_ON.
 // The number of errors.
-process_join: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -> Int Never! {
+process_join: fn(p: cg.Parse, a: ^ast.AST, s: Int) -> Int Never! {
     src: a.selects[s].src
     n: ast.src_len(a, src)
     loop i in 0..<(n - 1) {
@@ -562,7 +562,7 @@ select_inner_loop: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, src_tab: Int, sort: ^So
 
 // generateSortTail: the loop that reads the sorter `sort` filled and sends
 // its rows (n_column columns) to dest.
-generate_sort_tail: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, sort: ^SortCtx, n_column0: Int, dest: ^cg.SelectDest) Never! {
+generate_sort_tail: fn(p: ^cg.Parse, a: ast.AST, s: Int, sort: SortCtx, n_column0: Int, dest: cg.SelectDest) Never! {
     addr_break: sort.label_done
     addr_continue: cg.v_make_label(p)
     addr_once := 0
@@ -742,7 +742,7 @@ column_type_impl: fn(p: cg.Parse, a: ast.AST, srcs: [Int], e: Int) -> ColumnOrig
 
 // generateColumnTypes: the declared types and origins of the result
 // columns elist over FROM list src.
-generate_column_types: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, elist: Int) Never! {
+generate_column_types: fn(p: ^cg.Parse, a: ast.AST, src: Int, elist: Int) Never! {
     srcs: [Int]{src}
     loop i in 0..<ast.list_len(a, elist) {
         e: ast.list_expr(a, elist, i)
@@ -756,7 +756,7 @@ generate_column_types: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, elist: Int) Never
 
 // sqlite3GenerateColumnNames: the names of the result columns of SELECT
 // s0 (its compound's left-most SELECT), once per statement.
-generate_column_names: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int) Never! {
+generate_column_names: fn(p: ^cg.Parse, a: ast.AST, s0: Int) Never! {
     if p.f.col_names_set {
         return
     }
@@ -805,7 +805,7 @@ name_with_counter: fn(z: [U8], n: Int, cnt: Int) -> [U8] Never! {
 // sqlite3ColumnsFromExprList: the columns, uniquely named, of a table to
 // hold the rows of result list elist (their types and collations unset);
 // none on error.
-columns_from_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, elist: Int) -[DB]> [conn.Column] Never! {
+columns_from_expr_list: fn(p: cg.Parse, a: ast.AST, elist: Int) -[DB]> [conn.Column] Never! {
     n_col := ast.list_len(a, elist)
     if n_col > 32767 -> n_col = 32767
     cols := [conn.Column]{}
@@ -1360,7 +1360,7 @@ multi_select: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest) -[DB]>
 // the previous row (in the registers after reg_prev, with reg_prev set
 // once there is one) unless reg_prev is 0, and returning through
 // reg_return; the LIMIT jumps to i_break.
-generate_output_subroutine: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, inp: cg.SelectDest, dest: ^cg.SelectDest, reg_return: Int, reg_prev: Int, key_dup: record.KeyInfo, i_break: Int) -[DB]> Int Never! {
+generate_output_subroutine: fn(p: ^cg.Parse, a: ast.AST, s: Int, inp: cg.SelectDest, dest: ^cg.SelectDest, reg_return: Int, reg_prev: Int, key_dup: record.KeyInfo, i_break: Int) -[DB]> Int Never! {
     addr: cg.v_current_addr(p)
     i_continue: cg.v_make_label(p)
     if reg_prev != 0 {
@@ -1723,7 +1723,7 @@ ColUsedWalker: struct {
 }
 
 // recomputeColumnsUsed: FROM item si's colUsed from what SELECT s uses.
-recompute_columns_used: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, si: Int) Never! {
+recompute_columns_used: fn(p: cg.Parse, a: ^ast.AST, s: Int, si: Int) Never! {
     if a.items[si].tab < 0 {
         return
     }
@@ -1808,7 +1808,7 @@ find_leftmost_exprlist: fn(a: ast.AST, s0: Int) -> Int Never! {
 
 // compoundHasDifferentAffinities: whether a result column's affinity
 // differs between the terms of compound s.
-compound_has_different_affinities: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -> Bool Never! {
+compound_has_different_affinities: fn(p: cg.Parse, a: ast.AST, s: Int) -> Bool Never! {
     list: a.selects[s].elist
     loop ii in 0..<ast.list_len(a, list) {
         e: ast.list_expr(a, list, ii)
@@ -2217,7 +2217,7 @@ push_down_where_terms: fn(p: ^cg.Parse, a: ^ast.AST, sub: Int, wh0: Int, src_lis
 
 // disableUnusedSubqueryResultColumns: the result columns of FROM item
 // si's subquery that nothing reads become NULL; how many.
-disable_unused_subquery_result_columns: fn(p: ^cg.Parse, a: ^ast.AST, si: Int) -> Int Never! {
+disable_unused_subquery_result_columns: fn(p: cg.Parse, a: ^ast.AST, si: Int) -> Int Never! {
     if a.items[si].is_correlated || a.items[si].is_cte -> return 0
     t: a.items[si].tab
     sub: a.items[si].select
@@ -2264,7 +2264,7 @@ disable_unused_subquery_result_columns: fn(p: ^cg.Parse, a: ^ast.AST, si: Int) -
 // minMaxQuery: for the one aggregate e, WHERE_ORDERBY_MIN or _MAX with
 // the ORDER BY (its argument) that finds the answer first, when e is
 // min() or max() of one argument.
-min_max_query: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -> {ret: Int, ob: Int} Never! {
+min_max_query: fn(p: cg.Parse, a: ^ast.AST, e: Int) -> {ret: Int, ob: Int} Never! {
     elist: a.exprs[e].x
     if elist < 0 || ast.list_len(a, elist) != 1 || ast.has(a, e, ast.EP_WIN_FUNC) || cg.opt_disabled(p, cg.OPT_MIN_MAX_OPT) {
         return {ret: cg.WHERE_ORDERBY_NORMAL, ob: -1}
@@ -3033,7 +3033,7 @@ reset_accumulator: fn(p: ^cg.Parse, a: ^ast.AST, ai: Int) -[DB]> Never! {
 
 // finalizeAggFunctions: OP_AggFinal for each aggregate, after the deferred
 // OP_AggStep calls, in ORDER BY order, of an ORDER BY aggregate.
-finalize_agg_functions: fn(p: ^cg.Parse, a: ^ast.AST, ai: Int) -[DB]> Never! {
+finalize_agg_functions: fn(p: ^cg.Parse, a: ast.AST, ai: Int) -[DB]> Never! {
     loop i in 0..<p.aggs[ai].funcs.len() {
         f: p.aggs[ai].funcs[i].copy()
         list: a.exprs[f.f_expr].x
@@ -3267,7 +3267,7 @@ is_self_join_view: fn(db: conn.Conn, a: ast.AST, tab_list: Int, this_si: Int, i_
 // countOfViewOptimization: "SELECT count(*) FROM (a UNION ALL b ..)"
 // becomes "SELECT (SELECT count(*) FROM a) + (SELECT count(*) FROM b) ..";
 // whether it did.
-count_of_view_optimization: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -> Bool Never! {
+count_of_view_optimization: fn(p: cg.Parse, a: ^ast.AST, s: Int) -> Bool Never! {
     if a.selects[s].sel_flags & ast.SF_AGGREGATE == 0 -> return false
     elist: a.selects[s].elist
     if ast.list_len(a, elist) != 1 -> return false

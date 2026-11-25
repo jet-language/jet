@@ -556,7 +556,7 @@ ir_lazy_meta_trait: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, meta: Int, ty:
 // The runtime took over the Iter in `slot`: a fresh temporary is no longer
 // the frame's to drop; a variable moved into the route is cleared, so its
 // scope-end drop (jet_rt_native_iter_drop, null-safe) does nothing.
-ir_lazy_consumed: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) Never! {
+ir_lazy_consumed: fn(m: IRModule, b: ^IRBuilder, slot: Int) Never! {
     if slot < 0 {
         return
     }
@@ -1397,7 +1397,7 @@ ir_lazy_walk: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, label: String?, vari
 
 // Whether `text` is a String operand, so `loop x in text.split(sep)` and
 // `loop line in text.lines()` with no stride lower as ir_text_walk.
-ir_text_walk_receiver: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, text: Int) -> Bool Never! {
+ir_text_walk_receiver: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, text: Int) -> Bool Never! {
     text_tid: ir_ty_id(m, p, b, text)
     (ir_value_type_id(m, p, text_tid) ?? -1) == ir_string_row(m)
 }

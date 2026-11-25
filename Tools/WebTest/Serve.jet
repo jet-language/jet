@@ -132,7 +132,7 @@ head_end: fn(head: [U8]) -> Bool {
     false
 }
 
-send: fn(stream: ^TCPStream, reply: Reply) {
+send: fn(stream: TCPStream, reply: Reply) {
     reason: if reply.status == 200 -> "OK" else if reply.status == 400 -> "Bad Request" else -> "Not Found"
     content_type: if reply.content_type == "" -> "" else -> "content-type: {reply.content_type}\r\n"
     // Cross-origin isolation: the web runtime shares its memory through a

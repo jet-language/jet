@@ -84,13 +84,13 @@ store_external_root_targets_unlocked: fn(roots: HangarRoots, reference: String, 
     Err(StoreError.NotFound("no Hangar entry matches `{reference}`"))
 }
 
-store_external_root_targets_locked: fn(verification: ^StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> [String] StoreError! {
+store_external_root_targets_locked: fn(verification: StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> [String] StoreError! {
     _session: store_lifecycle_session(verification, roots)
     graph: store_lifecycle_closure_graph_unlocked(verification, roots)
     store_external_root_targets_unlocked(roots, reference, graph)
 }
 
-store_external_root_targets: fn(verification: ^StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> [String] ExternalRootError! {
+store_external_root_targets: fn(verification: StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> [String] ExternalRootError! {
     if store_external_root_targets_locked(verification, roots, reference) == {
         .Ok(targets) -> Ok(targets)
         .Err(error) -> {
@@ -109,7 +109,7 @@ store_external_root_is_missing_reference: fn(error: StoreError, reference: Strin
     }
 }
 
-store_external_root_closure_size: fn(verification: ^StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> Int ExternalRootError! {
+store_external_root_closure_size: fn(verification: StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> Int ExternalRootError! {
     targets: store_external_root_targets(verification, roots, reference)
     Ok(targets.len())
 }
@@ -132,7 +132,7 @@ store_external_root_map_error: fn(label: String, error: StoreError) -> ExternalR
     }
 }
 
-store_external_root_register_locked: fn(verification: ^StoreVerification, roots: HangarRoots, id: RootID, producer: ProducerID, label: String, reference: String, metadata: RootMetadata, expected_etag: String?, expected: RootEtag?, at: Int) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+store_external_root_register_locked: fn(verification: StoreVerification, roots: HangarRoots, id: RootID, producer: ProducerID, label: String, reference: String, metadata: RootMetadata, expected_etag: String?, expected: RootEtag?, at: Int) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     graph: store_lifecycle_closure_graph_unlocked(verification, roots)
     targets: store_external_root_targets_unlocked(roots, reference, graph)
@@ -142,7 +142,7 @@ store_external_root_register_locked: fn(verification: ^StoreVerification, roots:
     store_lifecycle_atomic_update_unlocked(roots, update, expected, session.known, session.closure_head)
 }
 
-store_external_root_register_snapshot: fn(verification: ^StoreVerification, roots: HangarRoots, id: RootID, producer: ProducerID, label: String, reference: String, metadata: RootMetadata, expected_etag: String?, expected: RootEtag?, at: Int) -[FS, Env, Time]> LifecycleSnapshot ExternalRootError! {
+store_external_root_register_snapshot: fn(verification: StoreVerification, roots: HangarRoots, id: RootID, producer: ProducerID, label: String, reference: String, metadata: RootMetadata, expected_etag: String?, expected: RootEtag?, at: Int) -[FS, Env, Time]> LifecycleSnapshot ExternalRootError! {
     if store_external_root_register_locked(verification, roots, id, producer, label, reference, metadata, expected_etag, expected, at) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> {
@@ -158,7 +158,7 @@ store_external_root_register_snapshot: fn(verification: ^StoreVerification, root
 // owns the typed identity, the compare-and-swap check, expiry metadata and the
 // prepare/commit sequence; this adapter resolves the reference to its complete
 // closure.
-store_register_external_root_at: fn(verification: ^StoreVerification, roots: HangarRoots, principal: String, label: String, reference: String, expires_at: Int?, expected_etag: String?, at: Int) -[FS, Env, Time]> ExternalRootView ExternalRootError! {
+store_register_external_root_at: fn(verification: StoreVerification, roots: HangarRoots, principal: String, label: String, reference: String, expires_at: Int?, expected_etag: String?, at: Int) -[FS, Env, Time]> ExternalRootView ExternalRootError! {
     store_external_root_validate_label(label)
     producer: ProducerID.new(principal)
     expiry: if expires_at == {
@@ -178,7 +178,7 @@ store_register_external_root_at: fn(verification: ^StoreVerification, roots: Han
 }
 
 // The principal's live manual roots.
-store_list_external_roots: fn(verification: ^StoreVerification, roots: HangarRoots, principal: String) -[FS, Env, Time]> [ExternalRootView] ExternalRootError! {
+store_list_external_roots: fn(verification: StoreVerification, roots: HangarRoots, principal: String) -[FS, Env, Time]> [ExternalRootView] ExternalRootError! {
     producer: ProducerID.new(principal)
     snapshot: store_lifecycle_snapshot(verification, roots)
     views := [ExternalRootView]{}
@@ -192,14 +192,14 @@ store_list_external_roots: fn(verification: ^StoreVerification, roots: HangarRoo
     Ok(views)
 }
 
-store_external_root_remove: fn(verification: ^StoreVerification, roots: HangarRoots, id: RootID, label: String, expected_etag: String, at: Int) -[FS, Env, Time]> LifecycleSnapshot ExternalRootError! {
+store_external_root_remove: fn(verification: StoreVerification, roots: HangarRoots, id: RootID, label: String, expected_etag: String, at: Int) -[FS, Env, Time]> LifecycleSnapshot ExternalRootError! {
     if store_lifecycle_atomic_remove(verification, roots, id, expected_etag, LifecycleTimestamp.from_unix_seconds(at)) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> Err(store_external_root_map_error(label, error))
     }
 }
 
-store_unregister_external_root_at: fn(verification: ^StoreVerification, roots: HangarRoots, principal: String, label: String, expected_etag: String, at: Int) -[FS, Env, Time]> ExternalRootError! {
+store_unregister_external_root_at: fn(verification: StoreVerification, roots: HangarRoots, principal: String, label: String, expected_etag: String, at: Int) -[FS, Env, Time]> ExternalRootError! {
     store_external_root_validate_label(label)
     producer: ProducerID.new(principal)
     id: store_external_root_manual_id(producer, label)
@@ -217,7 +217,7 @@ store_unregister_external_root_at: fn(verification: ^StoreVerification, roots: H
 // Prepare the immutable root of one profile generation; None when it is already
 // committed, otherwise the exact incarnation and witness the caller must
 // commit.
-store_reconcile_profile_generation_root: fn(verification: ^StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String], at: Int) -[FS, Env, Time]> PreparedProfileGenerationRoot? StoreError! {
+store_reconcile_profile_generation_root: fn(verification: StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String], at: Int) -[FS, Env, Time]> PreparedProfileGenerationRoot? StoreError! {
     id: RootID.new("profile-generation:{owner}:{profile}:{generation}")
     incarnation: Incarnation.new(1)
     root_witness: RootWitness.new(witness)

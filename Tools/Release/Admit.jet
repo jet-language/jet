@@ -1243,7 +1243,7 @@ Census: struct {
 }
 
 // One keep-going Jetpack/Bootstrap check with `jet` on the tree `root`.
-jetpack_census: fn(ctx: ^Ctx, side: String, jet: String, identity: String, root: String) -[Env, Exec, FS, Time, Time.Wait]> Census Never! {
+jetpack_census: fn(ctx: Ctx, side: String, jet: String, identity: String, root: String) -[Env, Exec, FS, Time, Time.Wait]> Census Never! {
     worker: "release-{side}-{sys.pid()}"
     clear_scratch(ctx.state, worker)
     vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", root), set_var("JETPACK_WORKER", worker), set_var("JET", jet)})
@@ -1430,7 +1430,7 @@ SuiteBatch: struct {
     jobs: [Job],
 }
 
-suite_batch: fn(ctx: ^Ctx, side: String, profile: String, label_tag: String, extra: [String], shards: Int) -[Env]> SuiteBatch Never! {
+suite_batch: fn(ctx: Ctx, side: String, profile: String, label_tag: String, extra: [String], shards: Int) -[Env]> SuiteBatch Never! {
     release: side == "release"
     jet: if release -> ctx.baseline.jet.copy() else -> ctx.candidate.jet.copy()
     identity: if release -> ctx.baseline.identity.copy() else -> ctx.candidate.identity.copy()
@@ -1457,7 +1457,7 @@ suite_batch: fn(ctx: ^Ctx, side: String, profile: String, label_tag: String, ext
 }
 
 // The rows `batch`'s processes wrote, merged; `results` are their exits in order.
-suite_rows: fn(ctx: ^Ctx, batch: SuiteBatch, results: [Finished]) -[FS]> SuiteRun Never! {
+suite_rows: fn(ctx: Ctx, batch: SuiteBatch, results: [Finished]) -[FS]> SuiteRun Never! {
     kit: files.join(ctx.work, "kit")
     rows := [SuiteRow]{}
     errors := [String]{}
@@ -1485,7 +1485,7 @@ suite_rows: fn(ctx: ^Ctx, batch: SuiteBatch, results: [Finished]) -[FS]> SuiteRu
 
 // One side's run of test profile `profile` in one kit process, alone in the
 // slot: a retry or a rerun of a `--cases` list.
-suite_run: fn(ctx: ^Ctx, side: String, profile: String, label_tag: String, extra: [String]) -[Env, Exec, FS, Time, Time.Wait]> SuiteRun Never! {
+suite_run: fn(ctx: Ctx, side: String, profile: String, label_tag: String, extra: [String]) -[Env, Exec, FS, Time, Time.Wait]> SuiteRun Never! {
     batch: suite_batch(ctx, side, profile, label_tag, extra, 1)
     suite_rows(ctx, batch, run_batch(batch.jobs.copy()))
 }
@@ -1617,7 +1617,7 @@ row_file_problems: fn(file: RowFile, path: String, source: String, suites: [Stri
     problems
 }
 
-reuse_plan: fn(ctx: ^Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
+reuse_plan: fn(ctx: Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
     plan := ReusePlan{active: false, prior: "", rows: [SuiteRow]{}, paths: [String]{}, ledger: [String]{}, error: ""}
     if ctx.options.reuse == "" -> return plan
     plan.active = true
@@ -1699,7 +1699,7 @@ merged_rows: fn(prior: [SuiteRow], fresh: [SuiteRow], ids: [String]) -> [SuiteRo
 // name, jet, identity and tree, its jetpack engine, the filter and the time
 // limit), holding every release row the last run against that column ran or
 // carried, as of the commit it gated.
-release_cache: fn(ctx: ^Ctx) -[FS]> String Never! {
+release_cache: fn(ctx: Ctx) -[FS]> String Never! {
     engine: if ctx.baseline.jetpack != "" -> sha256_file(ctx.baseline.jetpack) else -> ""
     key: cache_key([String]{ctx.baseline.name, ctx.baseline.jet_sha, ctx.baseline.identity, ctx.baseline.commit, engine, ctx.options.filter, if ctx.options.timeout > 0 -> "{ctx.options.timeout}" else -> "0"})
     files.join(files.join(ctx.work_root, "cache"), "release-rows-{key}.json")
@@ -1750,7 +1750,7 @@ Carried: struct {
 
 no_carry: fn() -> Carried Never! { Carried{rows: [SuiteRow]{}, from: "", dropped: 0} }
 
-carried_rows: fn(ctx: ^Ctx, sources: [String:String]) -[Exec, FS, Time.Wait]> Carried Never! {
+carried_rows: fn(ctx: Ctx, sources: [String:String]) -[Exec, FS, Time.Wait]> Carried Never! {
     text: read_text(release_cache(ctx)) ?? return no_carry()
     file: parse_row_file(text) ?? return no_carry()
     if file.compiler != ctx.baseline.identity -> return no_carry()

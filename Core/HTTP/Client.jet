@@ -2192,7 +2192,7 @@ priv client_take_u64: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // A TLS stream owns its socket until closed: close it so the peer sees
 // close_notify; the reply is already decided either way.
-priv client_close: fn(wire: ^BuildWire) -[Net, Time.Wait]> Never! {
+priv client_close: fn(wire: BuildWire) -[Net, Time.Wait]> Never! {
     if wire.tls == .Val(stream) {
         if stream.close() == {
             .Ok(_) -> {}

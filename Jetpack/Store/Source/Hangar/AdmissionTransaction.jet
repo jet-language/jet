@@ -94,7 +94,7 @@ AdmissionTransaction: struct {
     priv receipts: [String],
     priv committed: Bool,
 
-    new: fn(verification: ^StoreVerification, roots: HangarRoots) -> AdmissionTransaction StoreError! {
+    new: fn(verification: StoreVerification, roots: HangarRoots) -> AdmissionTransaction StoreError! {
         hangar: roots.hangar_dir()
         store_ensure_real_directory(hangar, "Hangar root")
         stage_parent: files.join(hangar, STORE_STAGE_DIR)
@@ -446,7 +446,7 @@ AdmissionTransaction: struct {
 }
 
 // Reverse one publication step, best effort.
-store_transaction_undo: fn(verification: ^StoreVerification, hangar: String, published: PublishedObject) Never! {
+store_transaction_undo: fn(verification: StoreVerification, hangar: String, published: PublishedObject) Never! {
     if published.pending == {
         .Val(pending) -> {
             if files.lexists(pending) {

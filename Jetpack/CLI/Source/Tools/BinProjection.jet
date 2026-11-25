@@ -31,7 +31,7 @@ ToolLiveInstall: struct {
 // Copy every tool's executables into `generation_dir/bin`, record each
 // projection digest on the tool, and sync the directory. A live install
 // supplies its own lease; any other tool re-leases its checked StoreEntry.
-cli_materialize_generation_bins: fn(verification: ^StoreVerification, generation_dir: String, tools: ^[InstalledUserTool], live: ^^ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> CLIError! {
+cli_materialize_generation_bins: fn(verification: StoreVerification, generation_dir: String, tools: ^[InstalledUserTool], live: ^^ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> CLIError! {
     bin_dir: files.join(generation_dir, "bin")
     files.create_dir_all(bin_dir)
     projected := [String]{}
@@ -66,7 +66,7 @@ cli_materialize_generation_bins: fn(verification: ^StoreVerification, generation
 }
 
 // The checked StoreEntry that authorizes a recorded tool.
-cli_tool_store_entry: fn(verification: ^StoreVerification, roots: HangarRoots, tool: InstalledUserTool) -> StoreEntry CLIError! {
+cli_tool_store_entry: fn(verification: StoreVerification, roots: HangarRoots, tool: InstalledUserTool) -> StoreEntry CLIError! {
     loop entry in (store_list_checked(verification, roots) ?? return Err(CLIError.Store(err))) {
         if entry.reference == tool.reference && entry.envelope.output_hash == tool.output_hash {
             return Ok(entry)
@@ -100,7 +100,7 @@ cli_tool_project_bins: fn(bin_dir: String, tool: InstalledUserTool, lease: ^Cach
 }
 
 // The member's no-follow source file inside the tool's checked StoreEntry.
-cli_validated_store_member: fn(verification: ^StoreVerification, tool: InstalledUserTool, member: String) -[FS, Env, Time]> String CLIError! {
+cli_validated_store_member: fn(verification: StoreVerification, tool: InstalledUserTool, member: String) -[FS, Env, Time]> String CLIError! {
     entry: cli_tool_store_entry(verification, HangarRoots{root: tool.store_root, dev_mode: true}, tool)
     source: files.join(entry.bin, member)
     info: files.stat(source)
@@ -113,7 +113,7 @@ cli_validated_store_member: fn(verification: ^StoreVerification, tool: Installed
 // The generation's `bin` directory holds exactly the tools' physical names,
 // every member still resolves inside its checked StoreEntry, and every
 // projection matches its recorded digest (and is executable on Unix).
-cli_validate_generation_bins: fn(verification: ^StoreVerification, generation: Int, tools: [InstalledUserTool]) -[FS, Env, Time]> CLIError! {
+cli_validate_generation_bins: fn(verification: StoreVerification, generation: Int, tools: [InstalledUserTool]) -[FS, Env, Time]> CLIError! {
     bin_dir: files.join(files.join(cli_tool_generations_dir(), "{generation}"), "bin")
     expected := [String]{}
     loop tool in tools {

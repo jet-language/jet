@@ -375,7 +375,7 @@ patch_add_use: fn(p: ^IRPatchEmitter, kind: ^^IRX64UseKind, data: Int, text: ^^S
     id
 }
 
-patch_use_len: fn(p: ^IRPatchEmitter, local_id: Int) -> Int Never! {
+patch_use_len: fn(p: IRPatchEmitter, local_id: Int) -> Int Never! {
     p.use_lengths[local_id - IR_X64_LOCAL_DATA]
 }
 
@@ -2808,7 +2808,7 @@ patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
 // ---------------------------------------------------------------------------
 // Out-of-line stop points & O(N) suffix-trie stop-edge sharing (G1 compliant).
 
-patch_stop_edge_is_bare_return: fn(p: ^IRPatchEmitter, f: IRFunction, branch: Int, end_idx: Int) -> Bool Never! {
+patch_stop_edge_is_bare_return: fn(p: IRPatchEmitter, f: IRFunction, branch: Int, end_idx: Int) -> Bool Never! {
     if end_idx <= branch + 1 -> return false
     last: end_idx - 1
     if f.op[last] != .Return || f.a[last] >= 0 || f.b[last] == IR_TAIL_JUMP -> return false
@@ -2833,7 +2833,7 @@ patch_stop_edge_is_drop_chain: fn(f: IRFunction, branch: Int, end_idx: Int) -> B
     true
 }
 
-patch_in_loop: fn(p: ^IRPatchEmitter, f: IRFunction) -> Bool Never! {
+patch_in_loop: fn(p: IRPatchEmitter, f: IRFunction) -> Bool Never! {
     loop opener in p.ctrl_open {
         if f.op[opener] == .Loop -> return true
     }
@@ -3000,7 +3000,7 @@ patch_stop_point: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: 
 }
 
 // G1b: validates cleanup token locally inside (first+1)..<leave without p.starts/p.ends.
-patch_cleanup_edge: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, branch: Int, end_idx: Int) -> {ok: Bool, first: Int, leave: Int, token: Int} Never! {
+patch_cleanup_edge: fn(p: IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, branch: Int, end_idx: Int) -> {ok: Bool, first: Int, leave: Int, token: Int} Never! {
     none: {ok: false, first: -1, leave: -1, token: -1}
     last: end_idx - 1
     if last <= branch + 2 -> return none
@@ -3111,7 +3111,7 @@ patch_group_hash: fn(f: IRFunction, s: Int, e: Int) -> Int Never! {
     h
 }
 
-patch_suffix_find: fn(p: ^IRPatchEmitter, slot: Int, next_off: Int) -> Int Never! {
+patch_suffix_find: fn(p: IRPatchEmitter, slot: Int, next_off: Int) -> Int Never! {
     loop i in 0..<p.suffix_slot.len() {
         if p.suffix_slot[i] == slot && p.suffix_next[i] == next_off -> return p.suffix_off[i]
     }
@@ -3360,7 +3360,7 @@ patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule
 // ---------------------------------------------------------------------------
 // Cold slow paths & stack-grow path.
 
-patch_cold_target: fn(p: ^IRPatchEmitter, pad: Int, exit: Int) -> Int Never! {
+patch_cold_target: fn(p: IRPatchEmitter, pad: Int, exit: Int) -> Int Never! {
     if pad >= 0 && pad < p.stop_edges.len() && p.stop_edges[pad].offset >= 0 {
         return p.stop_edges[pad].offset
     }

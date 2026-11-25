@@ -319,7 +319,7 @@ jet_cli_try_stage: fn(plan: JetCLITryPlan, baseline: ^JetCLITryChecked) -> [JetC
 // The canonical file of a checked index module path. The index names a module
 // by its display path; the retained projection's doc module carries the
 // physical file it was loaded from, as `jet codemod` maps it.
-jet_cli_try_module_file: fn(baseline: ^JetCLITryChecked, module_path: String) -> String Never! {
+jet_cli_try_module_file: fn(baseline: JetCLITryChecked, module_path: String) -> String Never! {
     if baseline.checked.product == .RetainedCheckedProjection(projection) {
         loop doc_module in projection.compile.doc_modules {
             if doc_module.path == module_path {

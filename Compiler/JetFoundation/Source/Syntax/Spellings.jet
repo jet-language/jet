@@ -16,6 +16,35 @@ classify_identifier: fn(name: String) -> IdentifierClass Never! {
     IdentifierClass.Ordinary
 }
 
+// The letters `^` composes with on a keyboard where `^` is a dead key (the
+// X11 compose table and the Windows and macOS European layouts): `^` then
+// `I` types `Î`, `^` then `s` types `ŝ`. DEAD_KEY_CIRCUMFLEX_BASE[i] is the
+// letter DEAD_KEY_CIRCUMFLEX_COMPOSED[i] was typed from.
+DEAD_KEY_CIRCUMFLEX_COMPOSED: [String]{"Â", "Ê", "Î", "Ô", "Û", "Ĉ", "Ĝ", "Ĥ", "Ĵ", "Ŝ", "Ŵ", "Ŷ", "Ẑ", "â", "ê", "î", "ô", "û", "ĉ", "ĝ", "ĥ", "ĵ", "ŝ", "ŵ", "ŷ", "ẑ"}
+DEAD_KEY_CIRCUMFLEX_BASE: [String]{"A", "E", "I", "O", "U", "C", "G", "H", "J", "S", "W", "Y", "Z", "a", "e", "i", "o", "u", "c", "g", "h", "j", "s", "w", "y", "z"}
+
+// `name` read back as typed on a dead-key layout: when its first letter is
+// a circumflex composition, the name with that letter's base (`Înt` gives
+// `Int`, `ŝelf` gives `self`), which the writer meant to follow the `^` mark.
+dead_key_circumflex_base: fn(name: String) -> String? Never! {
+    loop i in 0..<DEAD_KEY_CIRCUMFLEX_COMPOSED.len() {
+        if name.starts_with(DEAD_KEY_CIRCUMFLEX_COMPOSED[i]) {
+            return Val("{DEAD_KEY_CIRCUMFLEX_BASE[i]}{name.slice(1, name.len())}")
+        }
+    }
+    None
+}
+
+// The why and fix of a report on `name`, typed on a dead-key layout where
+// `intended`, a `^` mark and the base, was meant.
+dead_key_circumflex_why: fn(name: String, intended: String) -> String Never! {
+    "on a keyboard layout where `^` is a dead key, `^` and the letter after it combine into one accented letter, so `{intended}` was typed as `{name}`"
+}
+
+dead_key_circumflex_fix: fn(intended: String) -> String Never! {
+    "write `{intended}`; on a dead-key layout type `^` then a space, or switch to the layout's no-dead-keys variant"
+}
+
 // The current keyword catalog in registry order, for completion and rename:
 // structure, control flow, declarations, compiler facts, migrations,
 // ownership, expert scopes, concurrency, tests, typestate, protocols,

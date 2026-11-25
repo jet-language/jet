@@ -1,0 +1,27 @@
+// @all_diags
+// E0518 on a dead-key layout: `^^self` typed as `^` `^` `s` can arrive as
+// `^self`, which lends the box where the method meant to take it. A `^`
+// parameter or receiver that the body never writes through is reported, so
+// the lost take shows. A function read as a value keeps the marks of the
+// function type it fills, so `count` is not reported.
+Box: struct {
+    n: Int,
+
+    get: fn(^self) -> Int { self.n }
+}
+
+peek: fn(xs: ^[Int]) -> Int { xs.len() }
+
+count: fn(xs: ^[Int]) -> Int { xs.len() }
+
+apply: fn(f: fn(^[Int]) -> Int) -> Int {
+    ys := [3]
+    f(ys)
+}
+
+run: fn() {
+    xs := [1, 2]
+    box := Box{n: 7}
+    print("{peek(xs)} {xs.len()}")
+    print("{box.get()} {box.n} {apply(count)}")
+}

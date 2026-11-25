@@ -350,7 +350,8 @@ semindex_callable_kind: fn(tables: ASTTables, function: Func, source: String) ->
 }
 
 // `function_parameter_parts`: the public call surface, with the `*` and `/`
-// zone separators as their own parts.
+// zone separators as their own parts and each written or taken parameter's
+// `^` or `^^` mark on its type, as a signature writes it.
 semindex_parameter_parts: fn(params: [SemParam]) -> [String] Never! {
     parts := [String]{}
     star_done := false
@@ -365,7 +366,7 @@ semindex_parameter_parts: fn(params: [SemParam]) -> [String] Never! {
             else -> "{parameter.label} {parameter.name}"
         }
         rest: if parameter.variadic -> "..." else -> ""
-        parts.push("{shown}: {rest}{type_name(parameter.ty)}")
+        parts.push("{shown}: {rest}{access_sigil(parameter.access)}{type_name(parameter.ty)}")
         next_positional: index + 1 < params.len() && params[index + 1].zone == ParamZone.PositionalOnly
         if parameter.zone == ParamZone.PositionalOnly && !next_positional -> parts.push("/")
     }
@@ -404,13 +405,10 @@ semindex_fn_signature: fn(name: String, callable: SemCallable, view_provenance: 
     loop part_index in 0..<parts.len() {
         if parts[part_index] == "/" || parts[part_index] == "*" -> next
         if parameter_index < callable.params.len() {
-            parameter: callable.params[parameter_index]
-            text := "{access_sigil(parameter.access)}{parts[part_index]}"
-            if parameter.default == .Val(default) {
-                text = "{text}{{"
-                text = "{text}{default.source_text}}}"
+            if callable.params[parameter_index].default == .Val(default) {
+                parts[part_index] = "{parts[part_index]}{{"
+                parts[part_index] = "{parts[part_index]}{default.source_text}}}"
             }
-            parts[part_index] = text
         }
         parameter_index += 1
     }
@@ -703,7 +701,7 @@ semindex_state_marker_refs: fn(item: Item, db: ^SemDB, ctx: SemWalk) {
 // ---------------------------------------------------------------------------
 // Structural boundaries (`record_node`, `structural_slot`).
 
-semindex_record_node: fn(db: ^SemDB, ctx: ^SemWalk, class: String, shape: String, span: Span) -> Int? {
+semindex_record_node: fn(db: ^SemDB, ctx: SemWalk, class: String, shape: String, span: Span) -> Int? {
     if span.end < span.start -> return None
     id: db.nodes.len()
     parent := Int?{None}
@@ -1501,7 +1499,7 @@ semindex_binding: fn(binding: Binding, db: ^SemDB, ctx: ^SemWalk, modules: [JetD
 
 // The lexical `#Overflow(mode)` operations of one function, from the
 // shared sema scan the compiler semantic index and reflection also read.
-semindex_function_arithmetic: fn(function: Func, db: ^SemDB, ctx: ^SemWalk) {
+semindex_function_arithmetic: fn(function: Func, db: ^SemDB, ctx: SemWalk) {
     loop fact in sema_arithmetic_policy_facts(function) {
         operation: semindex_arithmetic_operation(fact) ?? next
         db.arithmetic.push(SemArithmetic{operation: operation, policy: overflow_mode_name(fact.mode), module_path: ctx.module_path, operation_span: fact.operation_span, scope_span: fact.scope_span})

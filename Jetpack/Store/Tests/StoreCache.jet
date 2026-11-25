@@ -428,7 +428,7 @@ store_test_spawn_leased_detached: fn(lease: ^CacheLease, argv: [String]) -[FS, E
 // The verified hit's lease alone, with the hit dropped here: a hit still in
 // scope keeps its own reference to a lease consumed out of it, and with it
 // the live lock, until that scope ends.
-store_test_verified_lease: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -> CacheLease Never! {
+store_test_verified_lease: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry) -> CacheLease Never! {
     hit := (if store_find_verified_by_reference(verification, roots, entry.reference, store_test_expectation(entry.out)) == {
         .Ok(found) -> found
         .Err(error) -> panic("lookup")

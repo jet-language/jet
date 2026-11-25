@@ -2381,7 +2381,7 @@ priv calls_take: fn(call: Int) -> CallRun? Never! {
 // Keeps `run`'s reply under its request key in the first store it joined,
 // in call `call`'s transaction there, or on its own for call 0; true when
 // the run carries no key, has no reply or joined no store.
-priv calls_answered: fn(run: ^CallRun, call: Int) -> Bool Never! {
+priv calls_answered: fn(run: CallRun, call: Int) -> Bool Never! {
     if run.joins.len() == 0 -> return true
     if run.request == .Val(request) {
         if run.reply == .Val(reply) -> return run.joins[0].outbox.answered(call, request, reply)

@@ -3516,6 +3516,8 @@ sema_scope_record_module_write: fn(place: Expr, span: Span, check: ^SemaBodyChec
         return
     }
     if kind == SymbolKind.Parameter && check.scopes.bindings[index].access == AccessConvention.Write {
+        // The `^` mark is what lends this write, so the write uses it (E0518).
+        sema_ownership_note_binding_write(check.state, check.scopes.bindings[index])
         return
     }
     check.context.module_writes.push(TEffectSpan{name: name, span: span, held: true})

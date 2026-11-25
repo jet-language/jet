@@ -753,7 +753,7 @@ ir_rust_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: Sem
 // Whether a value of type row `row` crosses a Rust slot descriptor: a String
 // as its bytes, or in the value word an exact Int, a machine integer, a
 // float, a Bool or a Char.
-ir_rust_slot_crosses: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_rust_slot_crosses: fn(m: IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if ir_option_inline(m, row) -> return false
     if m.types[row].kind == {
         .Int | .Bool | .Float | .Float32 | .Char | .String -> true

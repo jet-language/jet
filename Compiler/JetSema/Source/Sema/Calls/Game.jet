@@ -363,9 +363,7 @@ sema_call_try_game_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
 sema_game_needs_edit: fn(receiver: Expr, api: String, check: ^SemaBodyCheck) {
     root: sema_receiver_mark_place_root(receiver) ?? return
     index: sema_scope_resolve_index(check.scopes, root) ?? return
-    if check.scopes.bindings[index].mutable {
-        sema_ownership_note_mutation(check.state, check.scopes.bindings[index].symbol.span.start)
-    }
+    sema_ownership_note_binding_write(check.state, check.scopes.bindings[index])
     if !check.scopes.bindings[index].mutable {
         check.diagnostics.push(sema_ownership_diag_unchangeable(check.scopes.bindings[index], root, expr_span(receiver), "`{api}` changes durable scene state, so `{root}` must be mutable (`:=`)"))
     }

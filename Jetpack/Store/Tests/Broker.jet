@@ -51,7 +51,7 @@ store_broker_test_serve_once: fn(socket: String, config: SharedStoreConfig) -> T
     }
 }
 
-store_broker_test_serve_result: fn(verification: ^StoreVerification, listener: UnixListener, config: SharedStoreConfig) -> String Never! {
+store_broker_test_serve_result: fn(verification: StoreVerification, listener: UnixListener, config: SharedStoreConfig) -> String Never! {
     stream := net.unix_accept(listener) ?? panic("broker accept")
     if store_broker_serve_peer(verification, stream, config, store_broker_current_uid() ?? panic("current uid")) == {
         .Ok(_) -> ""

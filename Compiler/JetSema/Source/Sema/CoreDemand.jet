@@ -920,7 +920,7 @@ sema_check_registered_locate_diagnostics: fn(environment: SemaScopeEnvironment, 
 // would. The calls of the bodies that join the wave are read on the
 // threads too (sema_core_demand_callees), once every key named so far is
 // demanded, and name their callees in the order the bodies joined.
-sema_core_demand_named: fn(graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], read_functions: ^[Int], read_facts: ^[Int], names: ^SemaCoreDemandNames, wave: ^NameTable, affected: ^[Int], host_hooks: SemaHostHookAccess?, threads: CompilerThreads) {
+sema_core_demand_named: fn(graph: ^SemaRegistrationGraph, modules: [SemaGraphModuleResult], read_functions: ^[Int], read_facts: ^[Int], names: ^SemaCoreDemandNames, wave: ^NameTable, affected: ^[Int], host_hooks: SemaHostHookAccess?, threads: CompilerThreads) {
     loop read_functions.len() < modules.len() -> read_functions.push(0)
     loop read_facts.len() < modules.len() -> read_facts.push(0)
     loop {

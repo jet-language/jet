@@ -36,7 +36,7 @@ ProviderAdapter: enum {
 
     // The exact current identity required to trust a cached output. A
     // provider that cannot derive it gets no early cache path.
-    cache_expectation: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
+    cache_expectation: fn(self, verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
         if self == {
             .Nix -> NixProvider{}.cache_expectation(verification, spec, table, ctx)
             .Core -> CoreProvider{}.cache_expectation(verification, spec, table, ctx)
@@ -58,7 +58,7 @@ ProviderAdapter: enum {
 
     // Plan acquisition for this adapter's refs; the caller groups refs by
     // adapter so Nix can plan one shared closure.
-    plan_downloads: fn(self, verification: ^StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
+    plan_downloads: fn(self, verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
         if self == {
             .Nix -> NixProvider{}.plan_downloads(verification, specs, table, ctx)
             .Core -> CoreProvider{}.plan_downloads(verification, specs, table, ctx)
@@ -87,7 +87,7 @@ ProviderAdapter: enum {
         }
     }
 
-    realize: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    realize: fn(self, verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         if self == {
             .Nix -> NixProvider{}.realize(verification, spec, table, ctx)
             .Core -> CoreProvider{}.realize(verification, spec, table, ctx)
@@ -128,7 +128,7 @@ provider_validate_cache_authority: fn(spec: RefSpec, table: SourceTable, ctx: Pr
 }
 
 // Independently derive every fact required to trust an existing cache record.
-provider_cache_expectation: fn(verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
+provider_cache_expectation: fn(verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
     provider_for_ref(spec, table, ctx).cache_expectation(verification, spec, table, ctx)
 }
 
@@ -187,7 +187,7 @@ provider_resolve_kind_in_context: fn(spec: RefSpec, table: SourceTable, ctx: Pro
 // in first-seen order. Nix uses the signed index plus narinfo closure; native
 // release fixtures contribute their exact artifact length. Providers without
 // a byte-bearing metadata seam keep the total unknown instead of inventing it.
-provider_plan_downloads: fn(verification: ^StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan ProviderError! {
+provider_plan_downloads: fn(verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan ProviderError! {
     kinds := [ProviderKind]{}
     grouped := [[RefSpec]]{}
     loop spec in specs {
@@ -234,7 +234,7 @@ provider_requires_acquisition: fn(spec: RefSpec, table: SourceTable, offline: Bo
 
 // Realize a ref through its provider. The resolver never knows which backend
 // runs; every result carries the refreshed shared provider facts.
-provider_realize: fn(verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+provider_realize: fn(verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
     realized := provider_for_ref(spec, table, ctx).realize(verification, spec, table, ctx)
     provider_refresh_provider_facts(realized.producer, realized.reference)
     Ok(realized)

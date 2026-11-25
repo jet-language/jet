@@ -12,7 +12,7 @@ store_test_nix_producer: fn(drv: String, output_name: String, output: String, re
 }
 
 // Register one entry under the Hangar lock and return the result.
-store_test_try_register: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
+store_test_try_register: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_register_entry_unlocked(verification, roots, entry)
 }
@@ -113,7 +113,7 @@ store_test_count_transactions: fn(journal: String) -> Int Never! {
     store_test_drop_roots(roots)
 }
 
-store_test_record_action: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, bytes: String) -> StoreEntry StoreError! {
+store_test_record_action: fn(verification: StoreVerification, roots: HangarRoots, name: String, bytes: String) -> StoreEntry StoreError! {
     out: files.join(roots.root, name)
     files.create_dir_all(out) ?? panic("dir")
     files.write(files.join(out, "payload"), bytes) ?? panic("payload")

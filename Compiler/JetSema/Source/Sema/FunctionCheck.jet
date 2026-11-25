@@ -1011,6 +1011,12 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     if !check.context.compiler_generated && stand_in == None && !sema_has_unresolved_name_since(check.diagnostics, diagnostics_start) {
         sema_ownership_finalize_references(check)
         sema_ownership_report_never_written(check)
+        // E0518 judges a written body that checked whole: a refused write
+        // records nothing, and a trait method's marks are the trait's, in an
+        // `impl` block of its own or one written in its type's body.
+        if func.body.len() > 0 && (function_kind == .TopLevel || function_kind == .Method(_, _)) && !sema_has_error_since(check.diagnostics, diagnostics_start) && !sema_function_trait_block_method(program, owner_key) {
+            sema_ownership_report_unwritten_marks(check, func.params)
+        }
     }
     // The context's facts move to the caller's lists; each emptied field is
     // set again so the spent context still moves whole into the result.
@@ -1161,4 +1167,14 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     result := sema_function_result(Val(flat), owner_key, check.context.move())
     result.failure = Val(stand_in.failure)
     result
+}
+
+// True for a method of an `impl Trait { … }` block written in its type's
+// body, which registers as one of the type's methods.
+sema_function_trait_block_method: fn(program: SemaProgramTables, owner_key: String) -> Bool Never! {
+    graph: program.registration_graph
+    id: sema_symbol_find(program, owner_key) ?? return false
+    row: sema_registration_callable_row_of(graph, id) ?? return false
+    if row == .NominalMethod(module_index, owner, index) -> return graph.modules[module_index].nominals[owner].methods[index].trait_block_index >= 0
+    false
 }

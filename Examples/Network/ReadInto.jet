@@ -125,7 +125,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
 
 // Appends what `stream` sends to `buffer` until the peer closes, sixteen
 // bytes a read, each waiting at most five seconds.
-read_until_end: fn(stream: ^net.UnixStream, buffer: ^[U8]) {
+read_until_end: fn(stream: net.UnixStream, buffer: ^[U8]) {
     loop {
         count: stream.read_into(buffer, 16, deadline: 5s) ?? panic("unix read_into")
         if count == 0 -> break

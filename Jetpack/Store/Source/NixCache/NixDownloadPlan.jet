@@ -62,7 +62,7 @@ store_nix_take_wave: fn(queue: ^Rank<String>, limit: Int) -> [String] Never! {
 // Resolve and verify closure metadata without downloading or publishing any
 // NAR. Each wave is walked in sorted order, so results and first failures are
 // deterministic.
-store_plan_nix_downloads: fn(verification: ^StoreVerification, roots: HangarRoots, store_paths: [String], offline: Bool, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> NixDownloadPlan NixCacheError! {
+store_plan_nix_downloads: fn(verification: StoreVerification, roots: HangarRoots, store_paths: [String], offline: Bool, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> NixDownloadPlan NixCacheError! {
     endpoint: NixCacheEndpoint.from_roots(roots)
     store_dir := "/nix/store"
     cache_info_loaded := offline
@@ -178,13 +178,13 @@ store_nix_planned_key: fn(roots: HangarRoots, endpoint: NixCacheEndpoint) -> Str
     "{endpoint.endpoint}\t{roots.root}"
 }
 
-store_nix_remember_planned_narinfos: fn(verification: ^StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint, infos: [String:FetchedInfo]) Never! {
+store_nix_remember_planned_narinfos: fn(verification: StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint, infos: [String:FetchedInfo]) Never! {
     state: verification.state
     permit := state.guard_edit()
     permit.value.planned_narinfos[store_nix_planned_key(roots, endpoint)] = infos
 }
 
-store_nix_planned_narinfos: fn(verification: ^StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint) -> [String:FetchedInfo] Never! {
+store_nix_planned_narinfos: fn(verification: StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint) -> [String:FetchedInfo] Never! {
     state: verification.state
     permit: state.guard_read()
     if permit.value.planned_narinfos.get(store_nix_planned_key(roots, endpoint)) == {

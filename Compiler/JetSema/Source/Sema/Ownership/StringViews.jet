@@ -83,7 +83,7 @@ sema_string_view_push_copies_policy: fn(table: ^SemaScopeTable, declarations: [P
 
 // The owner places of a `trim`/`after`/`before`/`slice` call on a plain local
 // or parameter `String` name; empty for any other initializer.
-sema_string_view_call_sources: fn(init: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> [SemaOwnershipPlace] {
+sema_string_view_call_sources: fn(init: Expr, scopes: SemaScopeTable, state: SemaOwnershipState) -> [SemaOwnershipPlace] {
     none := [SemaOwnershipPlace]{}
     if init == {
         .MethodCall(receiver, method, _, _, _, args, _) -> {
@@ -309,7 +309,7 @@ sema_string_view_return_boundary: fn(span: Span, diagnostics: ^[Diagnostic]) {
 
 // A `View<str>` return reads a string-view binding, or a
 // `trim`/`after`/`before` call on a `String` name, as the view itself.
-sema_string_view_return_source: fn(value: Expr, check: ^SemaBodyCheck) -> Bool {
+sema_string_view_return_source: fn(value: Expr, check: SemaBodyCheck) -> Bool {
     if value == .Ident(name, _, _) {
         if sema_string_view_binding(check.scopes, name) -> return true
     }

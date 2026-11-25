@@ -45,6 +45,7 @@ use jet_foundation.[
     measure_literal_value,
     symbol_key_text,
     symbol_table_key,
+    dead_key_circumflex_base,
     checked_generated_local,
     checked_symbol_local,
     type_identity_equal,
@@ -1356,12 +1357,25 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
             return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, check)
         }
     }
-    if binding.mutable -> sema_ownership_note_mutation(check.state, binding.symbol.span.start)
+    sema_ownership_note_binding_write(check.state, binding)
     if !binding.mutable && !sema_stmt_binding_is_write_window(check.state, binding.symbol.id) {
+        is_param: binding.symbol.kind == SymbolKind.Parameter
+        param_type: type_name(binding.symbol.ty ?? Type.Named{name: "Unit"})
+        // An unchecked binding already carries its initializer's report, and
+        // a parameter typed `Înt` was meant as `^Int` on a dead-key layout,
+        // which the type's E0119 already says.
+        if binding.symbol.ty == None || (is_param && dead_key_circumflex_base(param_type) != None) {
+            _ := sema_check_expression(expr, binding.symbol.ty, check)
+            return None
+        }
         // A loop variable's fix names a copy distinct from it: one function
         // gives each name one meaning (E0118).
         copy_name: if name == "n" -> "m" else -> "n"
-        diagnostic := if binding.loop_item -> sema_error("E0111", name_span, "`{name}` is a loop variable, so it can't change", "a loop variable holds the item of the current pass, and each pass binds it afresh", "make a changeable copy inside the loop body: `{copy_name} := {name}`") else -> sema_error("E0111", name_span, "`{name}` was made with `:`, so it can't change", "only `:=` bindings and parameters declared with the write mark `^` can be changed", "declare it with `{name} := ...` instead")
+        diagnostic := if {
+            binding.loop_item -> sema_error("E0111", name_span, "`{name}` is a loop variable, so it can't change", "a loop variable holds the item of the current pass, and each pass binds it afresh", "make a changeable copy inside the loop body: `{copy_name} := {name}`")
+            is_param -> sema_ownership_read_parameter_error("E0111", name_span, "`{name}` is a read parameter, so it can't change", "an unmarked parameter gives read access only; assigning to it needs write access", name, param_type)
+            else -> sema_error("E0111", name_span, "`{name}` was made with `:`, so it can't change", "only `:=` bindings and parameters declared with the write mark `^` can be changed", "declare it with `{name} := ...` instead")
+        }
         if binding.binding_sigil == .Val(sigil) {
             diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: " :="})
         }

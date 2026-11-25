@@ -67,7 +67,7 @@ pkg_fetch_battery_source: fn(name: String, version: String, content_hash: String
 
 // The graph node of the battery at `directory`: its tree enters the source
 // store like a path dependency's, and the lock pins its version and hash.
-pkg_fetch_battery_node: fn(verification: ^StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: ^PackageFetchResolver, name: String, directory: String, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
+pkg_fetch_battery_node: fn(verification: StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: ^PackageFetchResolver, name: String, directory: String, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
     snapshot: pkg_source_snapshot_tree(directory) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
     manifest: pkg_fetch_load_manifest(snapshot.path(), name)
     result: pkg_fetch_source_node(verification, roots, context, resolver, name, pkg_fetch_battery_source(name, manifest.package.version, snapshot.content_hash), None, snapshot, chain)

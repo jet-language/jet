@@ -201,7 +201,7 @@ DashboardLoader: struct {
     // sender matters, so nothing reads it.
     priv _held: Sender<DashboardLoadResult>?,
 
-    spawn: fn(verification: ^StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoader Never! {
+    spawn: fn(verification: StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoader Never! {
         {sender, receiver}: channel<DashboardLoadResult>(capacity: 1)
         // A borrowed owner cannot cross into the detached task; a copy of the
         // owner shares its locked verification ledger.
@@ -243,7 +243,7 @@ DashboardLoaderFactory: struct {
         DashboardLoaderFactory{script: Val(results), starts: 0}
     }
 
-    start: fn(^self, verification: ^StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoader Never! {
+    start: fn(^self, verification: StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoader Never! {
         index: self.starts
         self.starts += 1
         results: self.script ?? return DashboardLoader.spawn(verification)
@@ -294,7 +294,7 @@ DashboardOutput: struct {
 
 // Run the bare command. The TTY check stays here, at the dispatch seam, so
 // the non-interactive path can never emit an alternate-screen sequence.
-cli_run_dashboard: fn(verification: ^StoreVerification) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_run_dashboard: fn(verification: StoreVerification) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     stdout_tty: term.stdout().is_tty()
     choice: if stdout_tty -> ColorChoice.Auto else -> ColorChoice.Never
@@ -318,7 +318,7 @@ cli_run_dashboard: fn(verification: ^StoreVerification) -[IO, FS, Env, Exec, Net
 // The interactive loop. The loading frame is drawn and the key reader is
 // live before the first Store read starts. A busy store backs off
 // exponentially up to 2 s; `r` restarts the load at once.
-cli_dashboard_run_loop: fn(verification: ^StoreVerification, reader: ^DashboardKeyReader, loader: ^DashboardLoader?, frame: ^DashboardFrame, output: ^DashboardOutput, theme: Theme, factory: ^DashboardLoaderFactory, clock: ^DashboardClock) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+cli_dashboard_run_loop: fn(verification: StoreVerification, reader: ^DashboardKeyReader, loader: ^DashboardLoader?, frame: ^DashboardFrame, output: ^DashboardOutput, theme: Theme, factory: ^DashboardLoaderFactory, clock: ^DashboardClock) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     output.draw(frame, theme)
     retry_delay := DASHBOARD_RETRY_INITIAL_MS
     next_retry := clock.now() + retry_delay
@@ -403,7 +403,7 @@ cli_dashboard_stale_snapshot: fn(frame: DashboardFrame) -> DashboardSnapshot? Ne
 // retrying frame; an idle store proceeds to the lock-free snapshot read. The
 // dashboard reads the committed metadata projection, not the checked listing
 // (which takes the exclusive Hangar lock and verifies every output tree).
-cli_dashboard_load_snapshot: fn(verification: ^StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoadResult Never! {
+cli_dashboard_load_snapshot: fn(verification: StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoadResult Never! {
     // Each background refresh is its own discovery session; no cross-task memo.
     cache := WorkspaceDeclarationCache.new()
     roots: pkg_resolve_roots()
@@ -413,12 +413,12 @@ cli_dashboard_load_snapshot: fn(verification: ^StoreVerification) -[IO, FS, Env,
     DashboardLoadResult.Ready(cli_dashboard_collect_snapshot_from(verification, cache, roots, store_list_read_only(roots)))
 }
 
-cli_dashboard_collect_snapshot: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardSnapshot Never! {
+cli_dashboard_collect_snapshot: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardSnapshot Never! {
     roots: pkg_resolve_roots()
     cli_dashboard_collect_snapshot_from(verification, cache, roots, store_list_read_only(roots))
 }
 
-cli_dashboard_collect_snapshot_from: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, roots: HangarRoots, listed: [StoreEntry]) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardSnapshot Never! {
+cli_dashboard_collect_snapshot_from: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, roots: HangarRoots, listed: [StoreEntry]) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardSnapshot Never! {
     current_dir: sys.current_dir() ?? "."
     project_root: cli_project_root(cache, current_dir)
     env_file: EnvFile.path_in(project_root)
@@ -516,7 +516,7 @@ cli_dashboard_age_label: fn(timestamp: Int, now: Int) -> String Never! {
     }
 }
 
-cli_dashboard_print_status_summary: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time, Time.Wait]> Never! {
+cli_dashboard_print_status_summary: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time, Time.Wait]> Never! {
     snapshot: cli_dashboard_collect_snapshot(verification, cache)
     stdout_handle := term.stdout()
     stdout_handle.write(cli_dashboard_render_status_summary(snapshot, theme)).drop("a closed stdout cannot take the status summary")

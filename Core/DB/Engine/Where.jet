@@ -2133,7 +2133,7 @@ path_satisfies_order_by: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^we.WhereInfo, ob: In
 
 // whereSortingCost: the cost of sorting n_row rows on n_order_by keys of
 // which the first n_sorted are in order.
-sorting_cost: fn(a: ^ast.AST, wi: we.WhereInfo, n_row0: Int, n_order_by: Int, n_sorted: Int) -> Int Never! {
+sorting_cost: fn(a: ast.AST, wi: we.WhereInfo, n_row0: Int, n_order_by: Int, n_sorted: Int) -> Int Never! {
     n_col: util.log_est((ast.list_len(a, a.selects[wi.select].elist) + 59) /% 30)
     r := n_row0 + n_col
     if n_sorted > 0 -> r += util.log_est((n_order_by - n_sorted) * 100 /% n_order_by) - 66
@@ -2322,7 +2322,7 @@ path_solver: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^we.WhereInfo, n_row_est: Int) ->
 // whereShortCut: a single table with == constraints on its rowid or on
 // every column of a unique index planned without the solver; whether it
 // applied.
-short_cut: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^we.WhereInfo, b: ^WhereLoopBuilder) -> Bool Never! {
+short_cut: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^we.WhereInfo, b: WhereLoopBuilder) -> Bool Never! {
     if wi.wctrl_flags & cg.WHERE_OR_SUBCLAUSE != 0 -> return false
     si: ast.src_item(a, wi.tab_list, 0)
     t: a.items[si].tab
@@ -2424,7 +2424,7 @@ expr_is_deterministic: fn(a: ^ast.AST, e: Int) -> Bool Never! {
 
 // whereOmitNoopJoin: drop the LEFT JOIN levels that cannot change the
 // result; not_ready less their tables.
-omit_noop_join: fn(a: ^ast.AST, wi: ^we.WhereInfo, not_ready: Int) -> Int Never! {
+omit_noop_join: fn(a: ast.AST, wi: ^we.WhereInfo, not_ready: Int) -> Int Never! {
     tab_used := we.expr_list_usage(wi.mask_set, a, wi.result_set)
     if wi.order_by >= 0 -> tab_used |= we.expr_list_usage(wi.mask_set, a, wi.order_by)
     has_right_join: a.items[ast.src_item(a, wi.tab_list, 0)].jointype & ast.JT_LTORJ != 0
@@ -2470,7 +2470,7 @@ omit_noop_join: fn(a: ^ast.AST, wi: ^we.WhereInfo, not_ready: Int) -> Int Never!
 
 // whereCheckIfBloomFilterIsUseful: WHERE_BLOOMFILTER on the SEARCH loops
 // run more often than their table, as ANALYZE knows it, has rows.
-check_bloom_filter_useful: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^we.WhereInfo) Never! {
+check_bloom_filter_useful: fn(p: ^cg.Parse, a: ast.AST, wi: ^we.WhereInfo) Never! {
     n_search := 0
     req: we.WHERE_SELFCULL | we.WHERE_COLUMN_EQ
     loop i in 0..<wi.n_level {
@@ -2517,7 +2517,7 @@ add_indexed_expr: fn(p: ^cg.Parse, a: ^ast.AST, ix: Int, i_idx_cur: Int, si: Int
 
 // whereReverseScanOrder: PRAGMA reverse_unordered_selects over every table
 // but a MATERIALIZED CTE with an ORDER BY of its own.
-reverse_scan_order: fn(a: ^ast.AST, wi: ^we.WhereInfo) Never! {
+reverse_scan_order: fn(a: ast.AST, wi: ^we.WhereInfo) Never! {
     loop ii in 0..<ast.src_len(a, wi.tab_list) {
         fi: a.items[ast.src_item(a, wi.tab_list, ii)]
         if !fi.is_cte || a.cte_uses[fi.u2].m10d != ast.M10D_YES || fi.select < 0 || a.selects[fi.select].order_by < 0 {
@@ -3002,7 +3002,7 @@ explain_index_range: fn(db: conn.Conn, wl: we.WhereLoop) -> String Never! {
 
 // sqlite3WhereExplainOneScan: the OP_Explain of level lv over FROM list
 // tab_list under EXPLAIN QUERY PLAN; its address, or 0.
-explain_one_scan: fn(p: ^cg.Parse, a: ^ast.AST, wi: we.WhereInfo, tab_list: Int, lv: Int, wctrl: Int) -> Int Never! {
+explain_one_scan: fn(p: ^cg.Parse, a: ast.AST, wi: we.WhereInfo, tab_list: Int, lv: Int, wctrl: Int) -> Int Never! {
     if a.ctx.explain != 2 -> return 0
     si: ast.src_item(a, tab_list, wi.levels[lv].i_from)
     wl: wi.loops[wi.levels[lv].w_loop]
@@ -3041,7 +3041,7 @@ explain_one_scan: fn(p: ^cg.Parse, a: ^ast.AST, wi: we.WhereInfo, tab_list: Int,
 
 // sqlite3WhereExplainBloomFilter: the OP_Explain of the Bloom filter on
 // level lv; its address.
-where_explain_bloom_filter: fn(p: ^cg.Parse, a: ^ast.AST, wi: we.WhereInfo, lv: Int) -> Int Never! {
+where_explain_bloom_filter: fn(p: ^cg.Parse, a: ast.AST, wi: we.WhereInfo, lv: Int) -> Int Never! {
     si: ast.src_item(a, wi.tab_list, wi.levels[lv].i_from)
     wl: wi.loops[wi.levels[lv].w_loop]
     msg := "BLOOM FILTER ON {src_item_text(a, si)} ("
@@ -3125,7 +3125,7 @@ update_range_affinity_str: fn(db: conn.Conn, a: ast.AST, right: Int, n: Int, aff
 
 // removeUnindexableInClauseTerms: a copy of vector IN x whose LHS and
 // SELECT results keep only the fields loop l indexes, in index order.
-remove_unindexable_in_clause_terms: fn(p: ^cg.Parse, a: ^ast.AST, wi: we.WhereInfo, i_eq: Int, l: Int, x: Int) -> Int Never! {
+remove_unindexable_in_clause_terms: fn(p: cg.Parse, a: ^ast.AST, wi: we.WhereInfo, i_eq: Int, l: Int, x: Int) -> Int Never! {
     nw: ast.expr_dup(a, x, 0)
     if p.db.malloc_failed -> return nw
     s := a.exprs[nw].x
@@ -4089,7 +4089,7 @@ code_one_loop_start: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^we.WhereInfo, lv: Int, n
 // sqlite3WhereRightJoinLoop: the loop over the rows of the right table of
 // RIGHT JOIN level lv that matched no row, run through the interior
 // subroutine with every table to its left a NULL row.
-right_join_loop: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^we.WhereInfo, lv: Int) -[DB]> Never! {
+right_join_loop: fn(p: ^cg.Parse, a: ^ast.AST, wi: we.WhereInfo, lv: Int) -[DB]> Never! {
     rj: wi.levels[lv].rj
     l: wi.levels[lv].w_loop
     si: ast.src_item(a, wi.tab_list, wi.levels[lv].i_from)

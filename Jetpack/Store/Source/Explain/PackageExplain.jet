@@ -527,7 +527,7 @@ store_explain_empty_dash: fn(value: String) -> String Never! {
 // exists for the query. The read-only listing preserves damaged state long
 // enough to report the missing proof instead of replaying recovery.
 // Lifecycle and output proof use the caller's operation-scoped verifier.
-store_explain_package: fn(verification: ^StoreVerification, roots: HangarRoots, query: String, lens: ExplainLens) -> PackageExplain? StoreError! {
+store_explain_package: fn(verification: StoreVerification, roots: HangarRoots, query: String, lens: ExplainLens) -> PackageExplain? StoreError! {
     entries: store_list_read_only(roots)
     found: store_explain_find_entry(entries, query)
     entry: found ?? return store_explain_without_entry(roots, query, lens)
@@ -630,7 +630,7 @@ store_explain_entry_projection: fn(entry: StoreEntry) -> ExplainEntry Never! {
 
 // The closure proof, or at least its structure; each unavailable view is a
 // loss.
-store_explain_load_graph: fn(verification: ^StoreVerification, roots: HangarRoots, reports: ^[ExplainReport]) -> ClosureGraph? Never! {
+store_explain_load_graph: fn(verification: StoreVerification, roots: HangarRoots, reports: ^[ExplainReport]) -> ClosureGraph? Never! {
     if store_closure_graph_read_only(verification, roots) == {
         .Ok(graph) -> return Val(graph)
         .Err(error) -> {
@@ -1014,7 +1014,7 @@ store_explain_owner_label: fn(entries: [StoreEntry], record: ClosureRecord) -> S
 
 // Why the entry is live: the nearest project lock naming it, and every
 // active lifecycle root protecting it or its closure.
-store_explain_liveness_projection: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: ^[ExplainReport]) -> ExplainLiveness Never! {
+store_explain_liveness_projection: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: ^[ExplainReport]) -> ExplainLiveness Never! {
     reasons := [ExplainRoot]{}
     if store_explain_project_lock_matches(entry, reports) {
         lock: store_explain_nearest_lock()
@@ -1147,7 +1147,7 @@ store_explain_provider_is_usable: fn(provider: ExplainProvider) -> Bool Never! {
 
 // Whether the stored output, its digest, the closure action record, the
 // producer provenance, and the receipt still support the realized result.
-store_explain_rebuild_projection: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: ^[ExplainReport]) -> ExplainRebuild Never! {
+store_explain_rebuild_projection: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: ^[ExplainReport]) -> ExplainRebuild Never! {
     checks := [String:String]{}
     provider_usable: if provider == {
         .Val(found) -> store_explain_provider_is_usable(found)

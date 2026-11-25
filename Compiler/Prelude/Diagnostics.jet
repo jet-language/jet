@@ -7963,6 +7963,29 @@ DeepCheckChangesState: struct {
     }
 }
 
+WriteMarkNeverWritten: struct {
+    name: String,
+
+    impl Diagnostic {
+        code: "E0518",
+        safety_class: .Opinion,
+        safety_reason: "A `^` parameter nothing writes runs exactly like a read parameter, and the report shows a `^^` that a dead key collapsed into `^`.",
+        meaning: "A `^` parameter is never written",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "`{self.name}` gives write access, but the body never writes through it" }
+
+        why: fn(self) -> String {
+            "`^` tells every caller that the function changes the value it lends; on a dead-key layout a typed `^^` can also arrive as `^`, which lends the value instead of taking it"
+        }
+
+        fix: fn(self) -> String {
+            "Remove the `^` so `{self.name}` is read, or write `^^` if the function takes it (on a dead-key layout type `^` then a space, twice)"
+        }
+    }
+}
+
 SliceCopyInLoop: struct {
     impl Diagnostic {
         code: "L0501",

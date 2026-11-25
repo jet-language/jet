@@ -600,7 +600,7 @@ coll_defined: fn(db: conn.Conn, id: Int) -> Bool Never! {
 // sqlite3GetCollSeq: `id` if it names a defined collation, else -1 with
 // "no such collation sequence" left in the Parse. No collation-needed
 // callback exists, and every defined collation serves every encoding.
-get_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, id: Int, name: [U8]) -> Int Never! {
+get_coll_seq: fn(p: cg.Parse, a: ^ast.AST, id: Int, name: [U8]) -> Int Never! {
     if id >= 0 && coll_defined(p.db, id) -> return id
     ast.error(a, "no such collation sequence: {ast.text(name)}")
     a.ctx.rc = base.ERROR_MISSING_COLLSEQ
@@ -618,7 +618,7 @@ locate_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, name: [U8]) -> Int Never! {
 
 // sqlite3CheckCollSeq: SQLITE_OK when `id` (or no collation, -1) may be
 // used.
-check_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, id: Int) -> Int Never! {
+check_coll_seq: fn(p: cg.Parse, a: ^ast.AST, id: Int) -> Int Never! {
     if id < 0 || coll_defined(p.db, id) -> return base.OK
     name: conn.coll_name(p.db, id)
     if get_coll_seq(p, a, id, name) < 0 -> return base.ERROR

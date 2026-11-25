@@ -2,7 +2,7 @@
 // locks, cache, and signing health.
 use sys: core.sys
 
-cli_cmd_doctor: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_doctor: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if parsed.positional.len() > 0 || parsed.command != None {
         theme.error_coded("E2102", "jetpack doctor takes no positional arguments", "the doctor command checks the current machine and does not inspect a named target", "run `jetpack doctor` without a positional argument")
         return EXIT_USAGE

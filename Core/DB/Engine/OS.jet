@@ -895,7 +895,7 @@ os_shm_closed: fn() -> DBShm Never! {
 
 // unixShmSystemLock: one record lock (F_UNLCK, F_RDLCK or F_WRLCK) on
 // bytes [ofst, ofst+n) of the -shm file; BUSY when it cannot be taken.
-os_shm_system_lock: fn(file: ^DBFile, kind: Int, ofst: Int, n: Int) -[DB]> Int Never! {
+os_shm_system_lock: fn(file: DBFile, kind: Int, ofst: Int, n: Int) -[DB]> Int Never! {
     if file.shm.fd < 0 -> return base.OK
     if os_file_lock(file.shm.fd, kind, ofst, n) < 0 -> return base.BUSY
     base.OK

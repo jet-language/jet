@@ -284,7 +284,7 @@ services_log_redirect_argv: fn(stdout_path: String, stderr_path: String, run: [S
 
 // The verified identity of a just-spawned child: its pid and start token.
 // A child whose identity cannot be read is killed and reaped.
-services_capture_process_state: fn(child: ^ProcessChild, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> ServiceProcessState ServicesError! {
+services_capture_process_state: fn(child: ProcessChild, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> ServiceProcessState ServicesError! {
     pid: child.id()
     problem: if services_process_start_identity(pid) == {
         .Ok(found) -> {
@@ -301,7 +301,7 @@ services_capture_process_state: fn(child: ^ProcessChild, authority: ServiceAutho
 
 // Publish the verified identity of a just-spawned child. A child whose
 // identity cannot be recorded is killed and reaped, never left running.
-services_publish_identity: fn(child: ^ProcessChild, state: ServiceProcessState, path: String, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> ServiceProcessState ServicesError! {
+services_publish_identity: fn(child: ProcessChild, state: ServiceProcessState, path: String, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> ServiceProcessState ServicesError! {
     if services_write_atomic(path, state.encode().bytes()) == {
         .Ok(_) -> Ok(state)
         .Err(error) -> {
@@ -312,7 +312,7 @@ services_publish_identity: fn(child: ^ProcessChild, state: ServiceProcessState, 
 }
 
 // Capture the child's identity and publish it.
-services_publish_process_state: fn(child: ^ProcessChild, path: String, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> ServiceProcessState ServicesError! {
+services_publish_process_state: fn(child: ProcessChild, path: String, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> ServiceProcessState ServicesError! {
     state: services_capture_process_state(child, authority)
     services_publish_identity(child, state, path, authority)
 }
@@ -504,7 +504,7 @@ services_stopping_requested: fn(project_dir: String, plan: DevServicePlan) -[FS]
     files.is_file(files.join(services_service_dir(project_dir, plan.name), ".stopping"))
 }
 
-services_stop_started_process: fn(started: ^StartedService, shutdown: ShutdownPolicy?) -[FS, Env, Exec, Time, Time.Wait]> ServicesError! {
+services_stop_started_process: fn(started: StartedService, shutdown: ShutdownPolicy?) -[FS, Env, Exec, Time, Time.Wait]> ServicesError! {
     services_stop_process_with_authority(started.state, shutdown, Val(started.authority))
 }
 
@@ -530,7 +530,7 @@ services_mark_lifecycle_ready: fn(project_dir: String, plan: DevServicePlan) -[F
 // Close one supervised generation under the services-state lock: stop its
 // persisted authority, record the outcome, remove runtime files, and on
 // failure stop every dependent.
-services_finish_supervisor: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan, started: ^StartedService, error: String?) -[FS, Env, Exec, Rand, Time, Time.Wait]> {
+services_finish_supervisor: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan, started: StartedService, error: String?) -[FS, Env, Exec, Rand, Time, Time.Wait]> {
     dir: services_service_dir(project_dir, plan.name)
     // Never remove state without the lock `up`/`down` use: stale evidence is
     // safer than racing a live supervisor or a user-issued shutdown.
@@ -831,7 +831,7 @@ services_down_authority: fn(host: ServiceHost, lifecycle: LifecycleFacts?) -> Se
 
 // Stop a generation's authority from its supervisor: through the live child
 // when the leader still matches, then through the persisted authority facts.
-services_stop_supervisor_authority: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan, started: ^StartedService) -[FS, Env, Exec, Rand, Time, Time.Wait]> ServicesError! {
+services_stop_supervisor_authority: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan, started: StartedService) -[FS, Env, Exec, Rand, Time, Time.Wait]> ServicesError! {
     // The live attempt: whether it ran, and its failure if any.
     live_attempted := false
     live_error := ServicesError?{None}

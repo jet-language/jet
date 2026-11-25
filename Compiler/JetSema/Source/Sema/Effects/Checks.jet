@@ -2816,7 +2816,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
 // Intrinsic producers use the same fact carrier as checked calls. The effect
 // row is authoritative producer input: an empty present row means known-pure,
 // while an absent row remains unknown and is conservatively maximal downstream.
-sema_effect_record_intrinsic_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: ^[Diagnostic]) -> Bool Never! {
+sema_effect_record_intrinsic_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: ^SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: ^[Diagnostic]) -> Bool Never! {
     wall := sema_effect_check_transaction_wall(environment, program, scopes, facts.effect_bound, api, span, diagnostics)
     allowed: wall ?? return false
     if !allowed -> return false

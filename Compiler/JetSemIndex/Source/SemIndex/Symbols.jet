@@ -22,6 +22,7 @@ use {
         builtin_static_numeric_row,
         builtin_static_rows,
         type_name,
+        access_sigil,
         marker_decl_signature,
         name_ledger_display_path,
         name_ledger_display_path_at,
@@ -592,7 +593,15 @@ semindex_symbol_shape: fn(name: String, kind: SemKind, owner: String?) -> SemSym
         .Function(callable) -> {
             params: semindex_parameter_parts(callable.params).join(", ")
             prefix: if owner == .Val(owner_name) -> "{owner_name}.{name}" else -> "{name}: fn"
-            shape = SemSymbolShape{kind: SemSymbolKind.Function, signature: "{prefix}({params}){semindex_signature_tail(callable)}"}
+            // A method that writes or takes its receiver shows the marked
+            // `self` first; a read receiver stays implicit.
+            receiver: if owner != None && callable.receiver == .Val(access) -> access_sigil(access) else -> ""
+            listed: if {
+                receiver == "" -> params
+                params == "" -> "{receiver}self"
+                else -> "{receiver}self, {params}"
+            }
+            shape = SemSymbolShape{kind: SemSymbolKind.Function, signature: "{prefix}({listed}){semindex_signature_tail(callable)}"}
         }
         .Struct(fields, _) -> {
             shown: loop field in fields -> "{field.name}: {type_name(field.ty)}"

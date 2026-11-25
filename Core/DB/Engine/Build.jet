@@ -160,7 +160,7 @@ fixer_find_db: fn(f: DBFixer, name: [U8]) -> Int Never! {
 
 // sqlite3FixInit: a fixer for database i_db; `name` is the object's name
 // and name_off where its token lies in the statement, -1 if it does not.
-fix_init: fn(p: ^cg.Parse, i_db: Int, z_type: String, name: String, name_off: Int) -> DBFixer Never! {
+fix_init: fn(p: cg.Parse, i_db: Int, z_type: String, name: String, name_off: Int) -> DBFixer Never! {
     names := [[U8]]{}
     loop d in p.db.dbs -> names.push(d.name.copy())
     DBFixer{b_temp: i_db == 1, i_db: i_db, busy: p.db.init.busy, db_names: names, schema: p.db.dbs[i_db].schema, z_type: z_type, name: name, name_off: name_off}
@@ -225,7 +225,7 @@ find_db: fn(db: conn.Conn, a: ast.AST, t: ast.SQLTok) -> Int Never! {
 
 // sqlite3TwoPartName: the database of "name1.name2" (or of "name1") and
 // the unqualified name; i_db -1 after an error.
-two_part_name: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -> {i_db: Int, name: ast.SQLTok} Never! {
+two_part_name: fn(p: cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -> {i_db: Int, name: ast.SQLTok} Never! {
     if name2.n > 0 {
         if p.db.init.busy {
             ast.error(a, "corrupt database")
@@ -245,7 +245,7 @@ two_part_name: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTo
 
 // sqlite3CheckObjectName: 0 when `name` may name a new `typ` object on
 // table `tbl`, else nonzero with the error left in the Parse.
-check_object_name: fn(p: ^cg.Parse, a: ^ast.AST, name: [U8], typ: String, tbl: [U8]) -[DB]> Int Never! {
+check_object_name: fn(p: cg.Parse, a: ^ast.AST, name: [U8], typ: String, tbl: [U8]) -[DB]> Int Never! {
     db: p.db
     if cat.conn_writable_schema(db) || db.init.imposter_table != 0 -> return base.OK
     if db.init.busy {
@@ -485,7 +485,7 @@ add_column: fn(p: ^cg.Parse, a: ^ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) N
 }
 
 // sqlite3AddNotNull: NOT NULL on the last column.
-add_not_null: fn(p: ^cg.Parse, a: ^ast.AST, on_error: Int) Never! {
+add_not_null: fn(p: ^cg.Parse, a: ast.AST, on_error: Int) Never! {
     t: p.f.new_table
     if t < 0 || p.db.tables[t].cols.len() < 1 {
         return

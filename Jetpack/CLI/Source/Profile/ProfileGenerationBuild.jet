@@ -130,7 +130,7 @@ cli_package_profile_owner: fn(project_dir: String) -> String Never! {
 
 // Realize every package fact, project the chosen outputs into a staged
 // generation root, record and root its lock, and publish the generation.
-cli_build_package_generation: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
+cli_build_package_generation: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
     realized := [RealizedProfilePackage]{}
     // Every realized lease is released whether or not the build succeeded.
     generation := 0
@@ -144,7 +144,7 @@ cli_build_package_generation: fn(verification: ^StoreVerification, cache: ^Works
     Ok(generation)
 }
 
-cli_build_package_generation_body: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan, realized: ^[RealizedProfilePackage]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
+cli_build_package_generation_body: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan, realized: ^[RealizedProfilePackage]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
     state: cli_package_profile_state_dir(project_dir, plan.name)
     generations: cli_package_generations_dir(state)
     files.create_dir_all(generations)
@@ -482,7 +482,7 @@ cli_collect_output_nodes_inner: fn(lease: ^CacheLease, prefix: String, package: 
 
 // Materialize the selected nodes under the generation root, in path order.
 // File bytes stream from the handle each package's lease holds.
-cli_copy_package_projection: fn(root: String, selected: [String:PackageOutputNode], realized: ^[RealizedProfilePackage]) -[FS, Env]> CLIError! {
+cli_copy_package_projection: fn(root: String, selected: [String:PackageOutputNode], realized: [RealizedProfilePackage]) -[FS, Env]> CLIError! {
     paths := selected.keys().to_list()
     paths.sort()
     loop relative in paths {
@@ -535,7 +535,7 @@ cli_ensure_projection_parent: fn(path: String) -[FS]> CLIError! {
 
 // Copy one regular file from its lease, keep its permission bits, and prove
 // the copy still has the digest the node recorded.
-cli_copy_projection_file: fn(lease: ^CacheLease, relative: String, destination: String, expected: String) -[FS, Env]> CLIError! {
+cli_copy_projection_file: fn(lease: CacheLease, relative: String, destination: String, expected: String) -[FS, Env]> CLIError! {
     info: lease.output_entry(relative)
     if info.is_symlink || !info.is_file {
         return Err(CLIError.Other("profile projection source is not a regular file"))
@@ -580,7 +580,7 @@ cli_next_package_generation: fn(state: String) -[FS]> Int CLIError! {
 }
 
 // Every complete generation, ascending; abandoned stages are removed first.
-cli_read_package_generations: fn(verification: ^StoreVerification, state: String) -[FS, Env, Time]> [PackageGenerationRecord] CLIError! {
+cli_read_package_generations: fn(verification: StoreVerification, state: String) -[FS, Env, Time]> [PackageGenerationRecord] CLIError! {
     directory: cli_package_generations_dir(state)
     info: cli_stat_optional(directory) ?? return Ok([PackageGenerationRecord]{})
     if info.is_symlink || !info.is_dir {
@@ -617,7 +617,7 @@ cli_positive_json_int: fn(value: Dyn?) -> Int? Never! {
 // profile, number, fingerprint, root hash, each package's provider facts and
 // their digest, the completion witness, the projected root, and its Store
 // root.
-cli_read_package_generation_record: fn(verification: ^StoreVerification, state: String, generation: Int) -[FS, Env, Time]> PackageGenerationRecord CLIError! {
+cli_read_package_generation_record: fn(verification: StoreVerification, state: String, generation: Int) -[FS, Env, Time]> PackageGenerationRecord CLIError! {
     directory: files.join(cli_package_generations_dir(state), "{generation}")
     metadata: cli_read_bounded(files.join(directory, PACKAGE_PROFILE_META_FILE))
     object: pkg_json_object(cli_json_parse(metadata)) ?? return Err(CLIError.Other(PKG_JSON_NOT_OBJECT))
@@ -715,7 +715,7 @@ cli_validate_package_generation_entry: fn(package: [String:Dyn]) -> String CLIEr
 }
 
 // The published pointer, verified against the generation it names.
-cli_read_package_current_pointer: fn(verification: ^StoreVerification, state: String) -[FS, Env, Time]> PackageGenerationPointer? CLIError! {
+cli_read_package_current_pointer: fn(verification: StoreVerification, state: String) -[FS, Env, Time]> PackageGenerationPointer? CLIError! {
     path: files.join(state, PACKAGE_PROFILE_CURRENT_FILE)
     info: cli_stat_optional(path) ?? return Ok(None)
     if info.is_symlink || !info.is_file {
@@ -740,7 +740,7 @@ cli_read_package_current_pointer: fn(verification: ^StoreVerification, state: St
 
 // Point `current` at one verified generation (refusing a stale one when the
 // plan fingerprint is given) and re-read the pointer to prove it.
-cli_activate_package_generation: fn(verification: ^StoreVerification, project_dir: String, profile: String, generation: Int, expected_fingerprint: String?) -[FS, Env, Time]> PackageGenerationRecord CLIError! {
+cli_activate_package_generation: fn(verification: StoreVerification, project_dir: String, profile: String, generation: Int, expected_fingerprint: String?) -[FS, Env, Time]> PackageGenerationRecord CLIError! {
     state: cli_package_profile_state_dir(project_dir, profile)
     record: cli_read_package_generation_record(verification, state, generation)
     if expected_fingerprint == .Val(expected) {
@@ -766,7 +766,7 @@ cli_activate_package_generation: fn(verification: ^StoreVerification, project_di
 // `switch` selects the active generation; the shell never rebuilds a profile
 // or adds source outputs directly. `--env` selects an environment module,
 // not a package generation.
-cli_dev_shell_projection: fn(verification: ^StoreVerification, project_dir: String, environment: EnvironmentFacts) -[FS, Env, Time]> String? CLIError! {
+cli_dev_shell_projection: fn(verification: StoreVerification, project_dir: String, environment: EnvironmentFacts) -[FS, Env, Time]> String? CLIError! {
     name: "dev"
     declared := false
     loop profile in environment.package_profiles {

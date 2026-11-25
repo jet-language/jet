@@ -4,7 +4,7 @@
 // activated broker takes its listener from the service manager (Store
 // `store_serve_shared_store`), so `broker` has no descriptor argument.
 
-cli_cmd_shared_store: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_shared_store: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     verb: if parsed.positional.len() == 0 -> "install" else -> parsed.positional[0]
     roots: pkg_resolve_roots()
     if verb == {

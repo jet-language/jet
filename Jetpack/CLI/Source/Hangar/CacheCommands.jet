@@ -19,7 +19,7 @@ CacheTransferAction: enum {
     }
 }
 
-cli_cmd_cache: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_cache: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     action: if parsed.positional.len() == 0 -> "list" else -> parsed.positional[0]
     roots: pkg_resolve_roots()
     if action == {
@@ -99,7 +99,7 @@ cli_cache_remove: fn(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, 
     EXIT_OK
 }
 
-cli_cache_transfer: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed, roots: HangarRoots, action: CacheTransferAction) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Int Never! {
+cli_cache_transfer: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed, roots: HangarRoots, action: CacheTransferAction) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Int Never! {
     if parsed.positional.len() < 2 {
         return cli_cache_usage(theme, parsed, "cache transfer needs an entry, reference, or output digest", "jetpack hangar cache verify <entry> --role public")
     }
@@ -130,7 +130,7 @@ cli_cache_transfer: fn(verification: ^StoreVerification, theme: Theme, parsed: C
     }
 }
 
-cli_cache_stage: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Int Never! {
+cli_cache_stage: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Int Never! {
     destination: parsed.flags.archive_to ?? {
         return cli_cache_usage(theme, parsed, "`cache stage` needs `--to <directory>`", "jetpack hangar cache stage --role public --to <staging-dir> --yes")
     }

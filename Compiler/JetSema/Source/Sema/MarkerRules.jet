@@ -709,7 +709,7 @@ sema_marker_rules_constant_for_reference: fn(symbol: SemaNameReferent, key: Stri
     None
 }
 
-sema_marker_rules_constant_value: fn(checked: TExpr, marker: Marker, source_index: Int, reference_start: Int, check: ^SemaBodyCheck, values: [SemaComptimeItemValue]) -> TComptimeValue? {
+sema_marker_rules_constant_value: fn(checked: TExpr, marker: Marker, source_index: Int, reference_start: Int, check: SemaBodyCheck, values: [SemaComptimeItemValue]) -> TComptimeValue? {
     if source_index == 0 && marker.ct == .Val(value) -> return sema_checked_comptime(value)
     staged: sema_marker_rules_staged_argument_value(values, check, marker, source_index)
     if staged != None -> return staged

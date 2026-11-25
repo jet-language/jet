@@ -1237,7 +1237,7 @@ sema_comptime_walk_admit: fn(threads: CompilerThreads, program: SemaProgramTable
 // A walk on `workers` threads over the run's environment, program tables,
 // available constants, values and memory plan, with nothing queued yet.
 // `host_hooks` are the run's own (SemaComptimeScopes.host_hooks).
-sema_comptime_walk_open: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, values: [SemaComptimeItemValue], memory_plan: SemaFunctionMemoryPlan, host_hooks: SemaHostHookAccess?, workers: Int) -> SemaComptimeWalk {
+sema_comptime_walk_open: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, values: [SemaComptimeItemValue], memory_plan: SemaFunctionMemoryPlan, host_hooks: SemaHostHookAccess?, workers: Int) -> SemaComptimeWalk {
     core_held := false
     graph: program.registration_graph
     core_held = sema_core_bodies_hold(graph, host_hooks)
@@ -1604,7 +1604,7 @@ sema_comptime_walk_take: fn(walk: SemaComptimeWalk) -> [SemaComptimeWalkDone] {
 // Queues `jobs` on the walk and wakes its threads without blocking the driver:
 // any missing module scope is queued for the walk's workers to prepare in
 // parallel as soon as a thread is free.
-sema_comptime_walk_push: fn(walk: ^SemaComptimeWalk, environment: ^SemaScopeEnvironment, program: SemaProgramTables, version: Int, jobs: [SemaComptimeFunctionJob]) {
+sema_comptime_walk_push: fn(walk: ^SemaComptimeWalk, environment: SemaScopeEnvironment, program: SemaProgramTables, version: Int, jobs: [SemaComptimeFunctionJob]) {
     missing_modules := [ModuleID]{}
     missing_at := [Int]{}
     missing_rows := [Int]{}

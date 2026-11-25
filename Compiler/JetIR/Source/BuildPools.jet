@@ -81,7 +81,7 @@ ir_pool_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver
 }
 
 // Fresh frame storage for a pool entry or an ID of type row `row`.
-ir_pool_record: fn(m: ^IRModule, b: ^IRBuilder, row: Int) -> Int Never! {
+ir_pool_record: fn(m: IRModule, b: ^IRBuilder, row: Int) -> Int Never! {
     storage: ir_fresh_temp(m, b, row)
     ir_emit(b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
     storage

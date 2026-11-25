@@ -47,7 +47,7 @@ store_hex8: fn(value: Int) -> String Never! {
     String.from_bytes(out) ?? panic("hex digits are ASCII")
 }
 
-store_share_tree_files: fn(verification: ^StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> StoreError! {
+store_share_tree_files: fn(verification: StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> StoreError! {
     if allow_semantic_xattrs {
         return
     }
@@ -55,11 +55,11 @@ store_share_tree_files: fn(verification: ^StoreVerification, roots: HangarRoots,
     store_share_tree_files_unlocked(verification, roots, root, allow_semantic_xattrs)
 }
 
-store_share_tree_files_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> StoreError! {
+store_share_tree_files_unlocked: fn(verification: StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> StoreError! {
     store_share_tree_files_unlocked_with_report(verification, roots, root, allow_semantic_xattrs)
 }
 
-store_share_tree_files_unlocked_with_report: fn(verification: ^StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> SharedCASReport StoreError! {
+store_share_tree_files_unlocked_with_report: fn(verification: StoreVerification, roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> SharedCASReport StoreError! {
     empty: SharedCASReport{optimized_files: 0, optimized_bytes: 0}
     if allow_semantic_xattrs -> return Ok(empty)
     if files.stat(root).is_symlink -> return Ok(empty)

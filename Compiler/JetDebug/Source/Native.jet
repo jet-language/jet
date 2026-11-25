@@ -2623,7 +2623,7 @@ NativeSession: struct {
 
     // The source file of the program's entry (`program_entry`), as the
     // image's line table records it; "" when the image names no entry.
-    entry_source: fn(^self) -> String Never! {
+    entry_source: fn(self) -> String Never! {
         if self.program_entry < 0 -> return ""
         found: self.image.lines.functions[self.program_entry]
         native_line_source(found.dir, found.file)
@@ -2632,7 +2632,7 @@ NativeSession: struct {
     // The file the program's entry source (entry_source) is read from
     // (source_file); entry_source's path when none is found as this build
     // read it, "" when the image names no entry.
-    entry_file: fn(^self) -> String Never! {
+    entry_file: fn(self) -> String Never! {
         source: self.entry_source()
         self.source_file(source) ?? source
     }
@@ -2640,7 +2640,7 @@ NativeSession: struct {
     // The lines of the program's entry source, from the file source_file
     // finds; none when none is found as this build read it, so a stop's
     // line says why (frame_source).
-    entry_lines: fn(^self) -> [String] Never! {
+    entry_lines: fn(self) -> [String] Never! {
         source: self.entry_source()
         found: self.source_file(source) ?? return [String]{}
         text: native_files.read(found) ?? return [String]{}
@@ -2650,7 +2650,7 @@ NativeSession: struct {
     // The optimization level the program was built at (0, 1 or 2), which an
     // expression's compile and a fix compile at: the same code is built
     // again around them only at the same level.
-    level: fn(^self) -> Int Never! { self.image.level }
+    level: fn(self) -> Int Never! { self.image.level }
 
     // Run the program with `args` to the start of its entry (`program_entry`),
     // in the Jet source `file` whose text is `lines`. None when the image
@@ -4996,7 +4996,7 @@ NativeSession: struct {
     }
 
     // Whether `stop` is the pause of task `task` at `pc`.
-    stopped_at: fn(^self, stop: NativeStop, pc: Int, task: Int) -> Bool NativeDebugError! {
+    stopped_at: fn(self, stop: NativeStop, pc: Int, task: Int) -> Bool NativeDebugError! {
         if stop.kind != NativeStopKind.Paused || !self.alive() -> return Ok(false)
         registers: self.registers() ?? return Err(err)
         Ok(registers[X64_TRACE_RIP] == pc && self.thread_task(self.trace.thread, registers).task == task)

@@ -441,7 +441,7 @@ ir_x64_debug_handle: fn(tables: ^IRX64Tables, name: String, first: String, secon
 // variant: the value's own word (an inline Option), its own box pointer (a
 // boxed Option, null when absent), or, through a typedef of the box
 // pointer, the box's selector word at 0 (an enum, union or Result box).
-ir_x64_debug_variants: fn(m: IRModule, tables: ^IRX64Tables, shared: ^IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType? Never! {
+ir_x64_debug_variants: fn(m: IRModule, tables: ^IRX64Tables, shared: IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType? Never! {
     list: m.debug_variants.get(row) ?? return None
     if list < 0 -> return None
     described: m.variant_lists[list]
@@ -476,7 +476,7 @@ ir_x64_debug_variants: fn(m: IRModule, tables: ^IRX64Tables, shared: ^IRX64Debug
 // payload member itself (a present Option's value, behind the box pointer
 // for a Pointer selector; a union's member), else a struct named as Jet
 // spells the variant whose members are its payload at their offsets.
-ir_x64_debug_arm: fn(tables: ^IRX64Tables, shared: ^IRX64DebugRows, selector: IRDebugSelector, variant: IRDebugVariant) -> X64DebugMember Never! {
+ir_x64_debug_arm: fn(tables: ^IRX64Tables, shared: IRX64DebugRows, selector: IRDebugSelector, variant: IRDebugVariant) -> X64DebugMember Never! {
     if variant.name == "" && variant.members.len() == 1 {
         held: variant.members[0]
         target: if held.boxed -> shared.pointer else -> held.ty

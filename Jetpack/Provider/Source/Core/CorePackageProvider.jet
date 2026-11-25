@@ -21,7 +21,7 @@ CoreProvider: struct {
         !upstream.starts_with("path:")
     }
 
-    cache_expectation: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
+    cache_expectation: fn(self, verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
         provider_core_cache_expectation(spec, table, ctx)
     }
 
@@ -29,7 +29,7 @@ CoreProvider: struct {
         provider_core_approval_facts(spec, table, ctx)
     }
 
-    plan_downloads: fn(self, verification: ^StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+    plan_downloads: fn(self, verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
         loop spec in specs {
             if self.requires_acquisition(spec, table) {
@@ -39,7 +39,7 @@ CoreProvider: struct {
         Ok(plan)
     }
 
-    realize: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    realize: fn(self, verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         source_name: spec.source.label()
         upstream: table.upstream(source_name) ?? return Err(ProviderError.CoreBuild("source `{source_name}` has no upstream"))
         repo: provider_source_repo(upstream, spec.package, ctx)

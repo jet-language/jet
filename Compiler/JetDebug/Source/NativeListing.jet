@@ -131,7 +131,7 @@ native_disassemble: fn(session: ^NativeSession, operand: String, file: String, l
 }
 
 // Whether a fix made the code at `low` jump to its edit's.
-native_listing_replaced: fn(session: ^NativeSession, low: Int) -> Bool Never! {
+native_listing_replaced: fn(session: NativeSession, low: Int) -> Bool Never! {
     loop fixed in session.fixed {
         if fixed.was == low -> return true
     }
@@ -144,7 +144,7 @@ native_listing_replaced: fn(session: ^NativeSession, low: Int) -> Bool Never! {
 // image's level, where it is and how big; a row starting a new line is
 // headed by the line and its source text; a run of inlined code is headed
 // by the function inlined and the line of its call (native_listing_call_line).
-native_listing_block: fn(session: ^NativeSession, symbols: [X64ListingSymbol], function: Int, low: Int, high: Int, name: String, ask: NativeListingAsk, file: String, lines: [String]) -> String Never! {
+native_listing_block: fn(session: NativeSession, symbols: [X64ListingSymbol], function: Int, low: Int, high: Int, name: String, ask: NativeListingAsk, file: String, lines: [String]) -> String Never! {
     marks := [Int:String]{}
     loop breakpoint in session.breakpoints {
         loop at in breakpoint.addresses {
@@ -391,7 +391,7 @@ native_listing_invalid: fn(address: Int) -> NativeListedRow Never! {
 // next free byte. Then, between two of them at most NATIVE_LISTING_GAP
 // bytes apart, the padding. A stretch overlapping an earlier one is left
 // out.
-native_listing_spans: fn(session: ^NativeSession, symbols: [X64ListingSymbol]) -> [NativeListingSpan] Never! {
+native_listing_spans: fn(session: NativeSession, symbols: [X64ListingSymbol]) -> [NativeListingSpan] Never! {
     found := [NativeListingSpan]{}
     loop symbol in symbols {
         if symbol.size <= 0 -> next
@@ -428,7 +428,7 @@ native_listing_spans: fn(session: ^NativeSession, symbols: [X64ListingSymbol]) -
 }
 
 // The rows of the stretch `span`, through the one listing builder.
-native_listing_span_rows: fn(session: ^NativeSession, symbols: [X64ListingSymbol], span: NativeListingSpan) -> [NativeListedRow] Never! {
+native_listing_span_rows: fn(session: NativeSession, symbols: [X64ListingSymbol], span: NativeListingSpan) -> [NativeListedRow] Never! {
     file := ""
     path := ""
     if span.function >= 0 {

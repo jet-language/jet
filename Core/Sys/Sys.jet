@@ -950,7 +950,7 @@ env_braced: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> Stri
 /// scope := EnvScope{vars: [String: String]{"A": "env", "B": "env"}, assigned: [String: String]{"A": "file"}, readonly: [String]{}}
 /// env_lookup("A", scope) == Val("file") && env_lookup("B", scope) == Val("env") && env_lookup("C", scope) == None // => true
 /// ```
-env_lookup: fn(name: String, scope: ^EnvScope) -> String? Never! {
+env_lookup: fn(name: String, scope: EnvScope) -> String? Never! {
     if scope.assigned.get(name) == .Val(value) -> return Val(value.copy())
     if scope.vars.get(name) == .Val(value) -> return Val(value.copy())
     None

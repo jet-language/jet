@@ -649,7 +649,7 @@ transfer_bindings: fn(db: ^conn.Conn, from: Int, to: Int) -> Int Never! {
 // setResultStrOrError: the result becomes z (n bytes of it, or to its
 // terminator for n < 0) of encoding enc, or a blob for enc 0, converted to
 // the connection's encoding; SQLITE_TOOBIG past SQLITE_LIMIT_LENGTH.
-result_str: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int, enc: Int) Never! {
+result_str: fn(db: conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int, enc: Int) Never! {
     o: v.fctx.out
     limit: db.limits[ast.LIMIT_LENGTH]
     rc: mem.set_str(v.mem[o], z, n, enc, limit)
@@ -662,7 +662,7 @@ result_str: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int, enc: Int) Never! 
 }
 
 // sqlite3_result_blob: n bytes of z; a negative n is SQLITE_TOOBIG.
-result_blob: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
+result_blob: fn(db: conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     if n < 0 {
         result_error_toobig(v)
         return
@@ -671,7 +671,7 @@ result_blob: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
 }
 
 // sqlite3_result_blob64: past 0x7fffffff bytes, SQLITE_TOOBIG.
-result_blob64: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
+result_blob64: fn(db: conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     if n < 0 || n > 2147483647 {
         result_error_toobig(v)
         return
@@ -733,14 +733,14 @@ result_subtype: fn(v: ^conn.Vdbe, e_subtype: Int) Never! {
 }
 
 // sqlite3_result_text.
-result_text: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
+result_text: fn(db: conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     result_str(db, v, z, n, base.UTF8)
 }
 
 // sqlite3_result_text64: text of encoding enc (SQLITE_UTF16 is the native
 // order); UTF-16 drops an odd last byte; past 0x7fffffff bytes,
 // SQLITE_TOOBIG.
-result_text64: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int, enc_in: Int) Never! {
+result_text64: fn(db: conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int, enc_in: Int) Never! {
     enc := enc_in
     len := n
     if enc != base.UTF8 {
@@ -755,17 +755,17 @@ result_text64: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int, enc_in: Int) N
 }
 
 // sqlite3_result_text16.
-result_text16: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
+result_text16: fn(db: conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     result_str(db, v, z, util.clear_bits(n, 1), base.UTF16NATIVE)
 }
 
 // sqlite3_result_text16be.
-result_text16be: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
+result_text16be: fn(db: conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     result_str(db, v, z, util.clear_bits(n, 1), base.UTF16BE)
 }
 
 // sqlite3_result_text16le.
-result_text16le: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
+result_text16le: fn(db: conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     result_str(db, v, z, util.clear_bits(n, 1), base.UTF16LE)
 }
 
@@ -795,7 +795,7 @@ result_zeroblob64: fn(db: conn.Conn, v: ^conn.Vdbe, n: Int) -> Int Never! {
 
 // sqlite3_result_error_code: the call fails with code err_code, its
 // message that code's text unless one is set.
-result_error_code: fn(db: ^conn.Conn, v: ^conn.Vdbe, err_code: Int) Never! {
+result_error_code: fn(db: conn.Conn, v: ^conn.Vdbe, err_code: Int) Never! {
     v.fctx.is_error = if err_code != 0 -> err_code else -> -1
     if v.mem[v.fctx.out].flags & base.MEM_NULL != 0 {
         result_str(db, v, base.error_string(err_code).bytes(), -1, base.UTF8)

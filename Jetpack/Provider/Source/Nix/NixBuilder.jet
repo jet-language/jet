@@ -192,7 +192,7 @@ nix_builder_rewrite_output_paths: fn(value: String, evaluation: NixNativeDerivat
 // Read one repository flake, evaluate its bounded package output and admit
 // the result through the native builder. The file is source input, never a
 // pinned output fixture.
-provider_nix_build_repository_output: fn(verification: ^StoreVerification, roots: HangarRoots, project_dir: String, flake_path: String, system: String, attribute: String, reference: String, version: String) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry NativeNixBuildError! {
+provider_nix_build_repository_output: fn(verification: StoreVerification, roots: HangarRoots, project_dir: String, flake_path: String, system: String, attribute: String, reference: String, version: String) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry NativeNixBuildError! {
     nix_builder_validate_source_dir(project_dir)
     project: files.canonicalize(project_dir) ?? return Err(NativeNixBuildError.Invalid("canonicalizing project source: {err}"))
     info: files.stat(flake_path) ?? return Err(NativeNixBuildError.Invalid("flake source `{flake_path}`: {err}"))
@@ -212,13 +212,13 @@ provider_nix_build_repository_output: fn(verification: ^StoreVerification, roots
 // Promote a native build through the same Nix Store registration as
 // substituted outputs; the build scratch is removed once the projection has
 // moved every output into Hangar (or refused them).
-provider_nix_admit_built_derivation: fn(verification: ^StoreVerification, roots: HangarRoots, build: NativeNixBuild, reference: String, version: String) -[FS, Env, Time]> StoreEntry NativeNixBuildError! {
+provider_nix_admit_built_derivation: fn(verification: StoreVerification, roots: HangarRoots, build: NativeNixBuild, reference: String, version: String) -[FS, Env, Time]> StoreEntry NativeNixBuildError! {
     admitted: nix_builder_admit(verification, roots, build, reference, version)
     build.scratch.remove()
     admitted
 }
 
-nix_builder_admit: fn(verification: ^StoreVerification, roots: HangarRoots, build: NativeNixBuild, reference: String, version: String) -[FS, Env, Time]> StoreEntry NativeNixBuildError! {
+nix_builder_admit: fn(verification: StoreVerification, roots: HangarRoots, build: NativeNixBuild, reference: String, version: String) -[FS, Env, Time]> StoreEntry NativeNixBuildError! {
     primary: build.outputs.get("out") ?? (build.outputs.get("bin") ?? return Err(NativeNixBuildError.Invalid("derivation has no `out` or `bin` output")))
     named_outputs := [String:String]{}
     facts := provider_nix_build_facts_record()

@@ -2061,7 +2061,7 @@ sema_expr_unit_exact_proof: fn(concrete: Float, source: SemaRegistrationUnitFact
     }
 }
 
-sema_expr_unit_conversion_gate: fn(value: TExpr, source: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
+sema_expr_unit_conversion_gate: fn(value: TExpr, source: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
     if source.name == destination.name -> return true
     if sema_expr_unit_is_measured(source) || sema_expr_unit_is_measured(destination) {
         measured := if sema_expr_unit_is_measured(source) -> source else -> destination
@@ -2097,7 +2097,7 @@ sema_expr_unit_conversion_gate: fn(value: TExpr, source: SemaRegistrationUnitFac
     true
 }
 
-sema_expr_unit_conversion_pair_allowed: fn(left_value: TExpr, left: SemaRegistrationUnitFact, left_destination: SemaRegistrationUnitFact, right_value: TExpr, right: SemaRegistrationUnitFact, right_destination: SemaRegistrationUnitFact, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
+sema_expr_unit_conversion_pair_allowed: fn(left_value: TExpr, left: SemaRegistrationUnitFact, left_destination: SemaRegistrationUnitFact, right_value: TExpr, right: SemaRegistrationUnitFact, right_destination: SemaRegistrationUnitFact, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
     if !sema_expr_unit_conversion_gate(left_value, left, left_destination, span, environment, program, scopes, context, diagnostics) {
         return false
     }
@@ -3038,7 +3038,7 @@ sema_expr_comptime_local_method_target: fn(check: SemaBodyCheck, symbol: SymbolI
     None
 }
 
-sema_expr_comptime_target: fn(check: ^SemaBodyCheck, symbol: SymbolID) -> SemaExprComptimeTarget? {
+sema_expr_comptime_target: fn(check: SemaBodyCheck, symbol: SymbolID) -> SemaExprComptimeTarget? {
     graph: check.program.registration_graph
     // Snapshot: a lone program's compile-time targets are its own
     // declarations in scope.
@@ -3055,7 +3055,7 @@ sema_expr_comptime_target: fn(check: ^SemaBodyCheck, symbol: SymbolID) -> SemaEx
 
 // A lone program's compile-time target `symbol`: a function declaration in
 // scope is the checked module's own, since no import resolves.
-sema_expr_comptime_local_target: fn(check: ^SemaBodyCheck, symbol: SymbolID) -> SemaExprComptimeTarget? {
+sema_expr_comptime_local_target: fn(check: SemaBodyCheck, symbol: SymbolID) -> SemaExprComptimeTarget? {
     declaration: sema_scope_resolve_declaration(check.environment.*, check.program.*, symbol) ?? {
         target: sema_expr_comptime_local_method_target(check, symbol) ?? return None
         return Val(target)
@@ -3069,7 +3069,7 @@ sema_expr_comptime_local_target: fn(check: ^SemaBodyCheck, symbol: SymbolID) -> 
 
 // Whether sema_expr_comptime_target's target for `symbol` is declared
 // `#run`, read in place from the graph rows.
-sema_expr_comptime_target_declared: fn(check: ^SemaBodyCheck, symbol: SymbolID) -> Bool {
+sema_expr_comptime_target_declared: fn(check: SemaBodyCheck, symbol: SymbolID) -> Bool {
     graph: check.program.registration_graph
     // Snapshot: a lone program's compile-time targets are its own
     // declarations in scope.

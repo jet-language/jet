@@ -1898,7 +1898,7 @@ ir_cache_take_value: fn(m: ^IRModule, b: ^IRBuilder, shape: IRCacheShape, addres
 }
 
 // Drops the owned value in `slot` (-1: Unit) whose type has a drop.
-ir_cache_drop: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) Never! {
+ir_cache_drop: fn(m: IRModule, b: ^IRBuilder, slot: Int) Never! {
     if slot >= 0 && ir_has_drop(m, b, slot) -> ir_emit(b.f, IROp.Drop, -1, slot, -1, -1, b.line)
 }
 
@@ -2568,7 +2568,7 @@ ir_closure_walk_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, 
 }
 
 // The row of the items of `source`: a List's elements, or an Iter's items.
-ir_items_element: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, source: Int) -> Int? Never! {
+ir_items_element: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, source: Int) -> Int? Never! {
     if ir_iter_element(ir_lazy_slot_type(m, p, b, source)) == .Val(item) {
         return ir_value_type(m, p, item)
     }
@@ -5492,7 +5492,7 @@ ir_word_record_new: fn(m: ^IRModule, b: ^IRBuilder, record: IRWordRecord, exact:
 
 // A List header (len, cap, data) at `offset` of `base` from a route's
 // (data, length) pair.
-ir_route_list_header: fn(m: ^IRModule, b: ^IRBuilder, base: Int, offset: Int, data: Int, length: Int) Never! {
+ir_route_list_header: fn(m: IRModule, b: ^IRBuilder, base: Int, offset: Int, data: Int, length: Int) Never! {
     ir_emit(b.f, IROp.Store, -1, base, offset, length, b.line)
     ir_emit(b.f, IROp.Store, -1, base, offset + 8, length, b.line)
     ir_emit(b.f, IROp.Store, -1, base, offset + 16, data, b.line)

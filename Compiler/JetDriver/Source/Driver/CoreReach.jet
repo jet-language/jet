@@ -228,7 +228,7 @@ jet_driver_reach_pascal: fn(name: String) -> Bool Never! {
 
 // Whether the token at `at`, right after a function's `(`, starts a
 // variant head (`Circle(r: Float)`, `Empty()`), as the parser reads one.
-jet_driver_reach_variant_head: fn(lexed: ^Lexed, at: Int) -> Bool Never! {
+jet_driver_reach_variant_head: fn(lexed: Lexed, at: Int) -> Bool Never! {
     if at + 1 >= lexed.tokens.len() || lexed.tokens[at].kind != TOKEN_IDENT -> return false
     after: lexed.tokens[at + 1].kind
     after == TOKEN_LPAREN || (after == TOKEN_RPAREN && jet_driver_reach_upper(name_text(lexed.tables.names, lexed.tokens[at].decoded)))
@@ -237,7 +237,7 @@ jet_driver_reach_variant_head: fn(lexed: ^Lexed, at: Int) -> Bool Never! {
 // Whether the statement's tokens `code..<to` are markers alone (`#Name` or
 // `@Name`, each with an optional `( … )`), the line that marks the
 // declaration below it.
-jet_driver_reach_marker_line: fn(lexed: ^Lexed, code: Int, to: Int) -> Bool Never! {
+jet_driver_reach_marker_line: fn(lexed: Lexed, code: Int, to: Int) -> Bool Never! {
     at := code
     markers := 0
     loop at < to {

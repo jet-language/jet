@@ -74,7 +74,7 @@ ssl_cache_find_entry: fn(cache: SSLCacheContext, session_id: [U8]) -> Int ssldef
 
 /// The session stored under `session_id` (mbedtls_ssl_cache_get):
 /// CacheEntryNotFound when there is none or it has expired.
-ssl_cache_get: fn(cache: ^SSLCacheContext, session_id: [U8]) -> ssldefs.SSLSession ssldefs.SSLError! {
+ssl_cache_get: fn(cache: SSLCacheContext, session_id: [U8]) -> ssldefs.SSLSession ssldefs.SSLError! {
     i: ssl_cache_find_entry(cache, session_id) ?? return Err(err)
     session := ssldefs.SSLSession{}
     sslser.ssl_session_load(session, cache.chain[i].session) ?? return Err(err)

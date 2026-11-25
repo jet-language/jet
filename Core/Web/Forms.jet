@@ -137,7 +137,7 @@ WebFormTyped: struct<Model> {
     submit: fn(^self) -> String WebFormError! { typed_submit(self) }
 
     // The form as script-free HTML.
-    no_script: fn(^self) -> String WebFormError! { typed_no_script(self) }
+    no_script: fn(self) -> String WebFormError! { typed_no_script(self) }
 
     // The form's status by name.
     state: fn(self) -> String Never! { typed_state(self) }
@@ -465,7 +465,7 @@ typed_submit: fn<Model>(form: ^WebFormTyped<Model>) -> String WebFormError! {
     typed_html(form)
 }
 
-typed_no_script: fn<Model>(form: ^WebFormTyped<Model>) -> String WebFormError! { typed_html(form) }
+typed_no_script: fn<Model>(form: WebFormTyped<Model>) -> String WebFormError! { typed_html(form) }
 
 typed_submit_async: fn<Model>(form: WebFormTyped<Model>) -> WebFormTypedSubmission<Model> Never! {
     out := form.copy()

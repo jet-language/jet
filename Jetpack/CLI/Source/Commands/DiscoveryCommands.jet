@@ -15,7 +15,7 @@ cli_empty_dash: fn(value: String) -> String Never! {
 }
 
 // `jet search <query>`: local/offline package discovery (U26).
-cli_cmd_search: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_search: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     query: parsed.positional.get(0) ?? {
         theme.error("search needs a query", "`jet search` reads the local discovery index; it never fetches.", "write `jet search postgres`.")
@@ -39,7 +39,7 @@ cli_cmd_search: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIPa
 }
 
 // `jet info <ref>`: local/offline package metadata (U26).
-cli_cmd_info: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_info: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     query: parsed.positional.get(0) ?? {
         theme.error("info needs a package ref", "`jet info` reads the local discovery index; it never fetches.", "write `jet info default.ripgrep`.")
@@ -78,7 +78,7 @@ cli_cmd_info: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIPars
 
 // The project discovery index merged with Hangar records, the lock, and the
 // project's declared refs; written back when the project has an env file.
-cli_discovery_index: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> PackageIndex CLIError! {
+cli_discovery_index: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> PackageIndex CLIError! {
     project_dir: cli_current_dir()
     index := if env_discovery_load(project_dir) == {
         .Val(found) -> found

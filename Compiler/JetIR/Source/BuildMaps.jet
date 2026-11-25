@@ -2072,7 +2072,7 @@ ir_map_ordered: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, map: Int) -> Int N
 }
 
 // Drops the ordered header `header` of the Map at `map` (ir_map_ordered).
-ir_map_ordered_end: fn(m: ^IRModule, b: ^IRBuilder, map: Int, header: Int) Never! {
+ir_map_ordered_end: fn(m: IRModule, b: ^IRBuilder, map: Int, header: Int) Never! {
     if header == map || !ir_owned_binding(b, header) {
         return
     }
@@ -2254,7 +2254,7 @@ ir_map_walk_entry: fn(m: ^IRModule, b: ^IRBuilder, map: Int, data: Int, length: 
 // The `part` of the entry at `item` a step of a Map walk binds: read in
 // place, or, when the step `takes` the entry (ir_map_walk_takes), the step's
 // own value, an aggregate copied out of the entry.
-ir_map_walk_part: fn(m: ^IRModule, b: ^IRBuilder, item: Int, part: IRMember, takes: Bool) -> Int Never! {
+ir_map_walk_part: fn(m: IRModule, b: ^IRBuilder, item: Int, part: IRMember, takes: Bool) -> Int Never! {
     read: ir_load_at(m, b, item, part.offset, part.ty)
     if !takes || read < 0 -> return read
     taken := read

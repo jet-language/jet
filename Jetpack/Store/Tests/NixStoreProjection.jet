@@ -27,7 +27,7 @@ store_test_find_entry: fn(entries: [StoreEntry], store_path: String) -> StoreEnt
 }
 
 // Re-register every admitted record with complete Nix build facts.
-store_test_canonicalize_admitted_records: fn(verification: ^StoreVerification, roots: HangarRoots, admitted: AdmittedNixClosure) -> [StoreEntry] Never! {
+store_test_canonicalize_admitted_records: fn(verification: StoreVerification, roots: HangarRoots, admitted: AdmittedNixClosure) -> [StoreEntry] Never! {
     canonical := [StoreEntry]{}
     loop original in store_list_checked(verification, roots) ?? panic("listing") {
         entry := original
@@ -44,7 +44,7 @@ store_test_canonicalize_admitted_records: fn(verification: ^StoreVerification, r
     store_list_checked(verification, roots) ?? panic("listing")
 }
 
-store_test_register_canonical: fn(verification: ^StoreVerification, roots: HangarRoots, entries: ^[StoreEntry]) Never! {
+store_test_register_canonical: fn(verification: StoreVerification, roots: HangarRoots, entries: ^[StoreEntry]) Never! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     loop index in 0..<entries.len() {
         entry := entries[index]
@@ -110,7 +110,7 @@ store_test_stop_cache_server: fn(cache: ^^StoreTestCacheServer) Never! {
 
 // Admit the two-object signed closure (`root` references `leaf`) through
 // the standard Nix cache endpoint.
-store_test_admit_signed_closure: fn(verification: ^StoreVerification, roots: HangarRoots) -> AdmittedNixClosure Never! {
+store_test_admit_signed_closure: fn(verification: StoreVerification, roots: HangarRoots) -> AdmittedNixClosure Never! {
     source: files.join(roots.root, "nix-projection-source")
     files.create_dir_all(files.join(source, "root/bin")) ?? panic("root dir")
     files.create_dir_all(files.join(source, "leaf")) ?? panic("leaf dir")
@@ -225,7 +225,7 @@ store_test_admit_signed_closure: fn(verification: ^StoreVerification, roots: Han
     store_test_drop_roots(roots)
 }
 
-store_test_register_conflict: fn(verification: ^StoreVerification, roots: HangarRoots, original: StoreEntry) -> Bool StoreError! {
+store_test_register_conflict: fn(verification: StoreVerification, roots: HangarRoots, original: StoreEntry) -> Bool StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     entry := original
     store_prepare_entry_receipt(roots, entry)

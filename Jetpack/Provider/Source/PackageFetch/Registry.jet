@@ -126,7 +126,7 @@ pkg_fetch_registry_plan: fn(resolver: PackageFetchResolver, manifest: Manifest) 
     Ok(plan)
 }
 
-pkg_fetch_registry_node: fn(verification: ^StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: ^PackageFetchResolver, name: String, raw_requirement: String, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
+pkg_fetch_registry_node: fn(verification: StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: ^PackageFetchResolver, name: String, raw_requirement: String, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
     registry: pkg_fetch_registry_config(resolver, name)
     selected := PublicationIndexEntry?{resolver.registry_plan.get(name)}
     if selected == None {
@@ -245,7 +245,7 @@ pkg_fetch_registry_node: fn(verification: ^StoreVerification, roots: HangarRoots
 // `reuse` is an exact lock's pin: its Hangar object, admitted with the receipt
 // of its first fetch (an advisory feed that has since expired included), is
 // reused when its cache identity still matches rather than re-ingested.
-pkg_fetch_registry_ingest: fn(verification: ^StoreVerification, roots: HangarRoots, resolver: PackageFetchResolver, registry: PublicationRegistryConfig, entry: PublicationIndexEntry, artifact: String, references: [String], advisory: PublicationAdvisoryPolicy?, receipt: PublicationPackagePolicyReceipt, exception: PackagePolicyException?, reuse: Bool) -[FS, Env, Time]> StoreEntry PackageFetchError! {
+pkg_fetch_registry_ingest: fn(verification: StoreVerification, roots: HangarRoots, resolver: PackageFetchResolver, registry: PublicationRegistryConfig, entry: PublicationIndexEntry, artifact: String, references: [String], advisory: PublicationAdvisoryPolicy?, receipt: PublicationPackagePolicyReceipt, exception: PackagePolicyException?, reuse: Bool) -[FS, Env, Time]> StoreEntry PackageFetchError! {
     reference: "registry:{registry.name}:{entry.name}#{entry.version}"
     identity: CacheIdentity{source_fingerprint: entry.content_hash, recipe_fingerprint: entry.fingerprint, policy_fingerprint: receipt.fingerprint, platform: pkg_host_platform()}
     if reuse && store_find_by_reference(verification, roots, reference) == .Val(existing) && existing.cache_identity == identity {

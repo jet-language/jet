@@ -1291,7 +1291,7 @@ rec: fn(c: ^Chain, cells: [String]) { c.rows.push(cells.join("\t")) }
 since: fn(t0: Int) -[Time]> String Never! { tenths(time.unix_ns() - t0) }
 
 // A stage's key: SHA-256 over its material lines and the canonical root.
-key_of: fn(c: ^Chain, mat: [String]) -> String Never! {
+key_of: fn(c: Chain, mat: [String]) -> String Never! {
     text := "chain-stage-v1\n"
     loop line in mat -> text = "{text}{line}\n"
     hasher := crypto.new()
@@ -1299,11 +1299,11 @@ key_of: fn(c: ^Chain, mat: [String]) -> String Never! {
     hasher.digest()
 }
 
-write_keys: fn(c: ^Chain, name: String, mat: [String]) -[FS]> {
+write_keys: fn(c: Chain, name: String, mat: [String]) -[FS]> {
     files.write(files.join(c.out, "keys/{name}.txt"), "{mat.join("\n")}\n") ?? ()
 }
 
-find_entry: fn(c: ^Chain, k: String) -[FS]> String Never! {
+find_entry: fn(c: Chain, k: String) -[FS]> String Never! {
     stores: [String]{c.store.copy(), "{c.r.scratch}/stagestore", "{c.r.run}/stagestore"}
     loop store in stores {
         if files.is_file("{store}/{k}/meta") -> return "{store}/{k}"
@@ -1331,7 +1331,7 @@ STAGE_FILES: ["jet", "jet.debug", "jet.o", "jet-bare", "IDENTITY"]
 // Store `src` (a build's STAGE_FILES and jet-runtime/, or a check's
 // logs) under `k` with meta `lines`, built in a temp dir and renamed in; then
 // evict the store to its cap.
-store_put: fn(c: ^Chain, k: String, kind: String, src: String, lines: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> {
+store_put: fn(c: Chain, k: String, kind: String, src: String, lines: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> {
     dest: files.join(c.store, k)
     if files.is_dir(dest) {
         return
@@ -1370,7 +1370,7 @@ store_put: fn(c: ^Chain, k: String, kind: String, src: String, lines: [String]) 
 
 // The material of a build stage's key. `files` names what its store entry
 // holds, so an entry stored with fewer files is never reused.
-build_mat: fn(c: ^Chain, builder: String, builder_pack: String, identity: String, threads: Int) -> [String] Never! {
+build_mat: fn(c: Chain, builder: String, builder_pack: String, identity: String, threads: Int) -> [String] Never! {
     [String]{"kind=build", "builder={builder}", "builderpack={builder_pack}", "inputs={c.bin}", "identity={identity}", "args=JetEnv.jet --norust jet build -O1 --keep-going --threads {threads} Compiler", "files={STAGE_FILES.join(" ")} jet-runtime"}
 }
 
@@ -1384,7 +1384,7 @@ StageRun: struct {
 // under the chain's memory cap (no swap) and the slot's CPUs. `vars` are
 // its NAME=VALUE settings. A `canonical` stage runs with the tree mounted at
 // the canonical root in a private mount namespace (`inroot`), from there.
-stage_run: fn(c: ^Chain, name: String, argv: [String], vars: [String], seconds: Int, canonical: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> StageRun Never! {
+stage_run: fn(c: Chain, name: String, argv: [String], vars: [String], seconds: Int, canonical: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> StageRun Never! {
     spec := process.cmd(argv).cwd(c.tree)
     if canonical {
         files.create_dir_all(files.join(c.nsdir, "snap")) ?? fail("cannot create `{c.nsdir}/snap`: {err}")
@@ -1629,7 +1629,7 @@ check_stage: fn(c: ^Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     worst
 }
 
-same_build: fn(c: ^Chain, left: String, right: String) -[FS]> Bool Never! {
+same_build: fn(c: Chain, left: String, right: String) -[FS]> Bool Never! {
     one: files.join(c.out, left)
     two: files.join(c.out, right)
     if !same_file("{one}/jet", "{two}/jet") -> return false
@@ -1638,7 +1638,7 @@ same_build: fn(c: ^Chain, left: String, right: String) -[FS]> Bool Never! {
 }
 
 // The largest peak of the stages this run built, in MB.
-peak_mb: fn(c: ^Chain) -> Int Never! {
+peak_mb: fn(c: Chain) -> Int Never! {
     peak := 0
     loop row in c.rows {
         cells: row.split("\t").to_list()
@@ -1709,7 +1709,7 @@ finish: fn(c: ^Chain, slot_note: String) -[Env, Exec, FS, IO, Time, Time.Wait]> 
     code
 }
 
-write_report: fn(c: ^Chain, verdict: String, code: Int, note: String, slot_note: String) -[Env, Exec, FS, IO, Time]> {
+write_report: fn(c: Chain, verdict: String, code: Int, note: String, slot_note: String) -[Env, Exec, FS, IO, Time]> {
     total: since(c.started)
     rows := [String]{"stage\tstatus\trc\twall_s\tpeak_rss_mb\tsha256\tkey\tnote"}
     rows.extend(c.rows.copy())

@@ -89,7 +89,7 @@ table_affinity: fn(p: ^cg.Parse, t: Int, i_reg: Int) Never! {
 
 // readsTable: whether the program so far opens table t of database i_db,
 // or one of its indices, for reading.
-reads_table: fn(p: ^cg.Parse, i_db: Int, t: Int) -> Bool Never! {
+reads_table: fn(p: cg.Parse, i_db: Int, t: Int) -> Bool Never! {
     i_end: cg.v_current_addr(p)
     loop i in 1..<i_end {
         if p.f.v.ops[i].opcode == opc.OP_OPEN_READ && p.f.v.ops[i].p3 == i_db {
@@ -593,7 +593,7 @@ generate_constraint_checks: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, a_reg_idx: [In
 // else OPFLAG_ISUPDATE with perhaps OPFLAG_SAVEPOSITION; append_bias
 // says the rowid is likely the largest; use_seek that the OP_NoConflict
 // seeks may be reused (OPFLAG_USESEEKRESULT).
-complete_insertion: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, reg_new_data: Int, a_reg_idx: [Int], update_flags: Int, append_bias: Bool, use_seek: Bool) Never! {
+complete_insertion: fn(p: ^cg.Parse, a: ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, reg_new_data: Int, a_reg_idx: [Int], update_flags: Int, append_bias: Bool, use_seek: Bool) Never! {
     has_rowid: ex.has_rowid(p.db, t)
     i := 0
     ix := p.db.tables[t].index

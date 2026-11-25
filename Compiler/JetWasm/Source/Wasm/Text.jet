@@ -487,7 +487,7 @@ wat_signature: fn(m: ^WatModule, items: [Int], from: Int) -> WatSig WasmError! {
     Ok(sig)
 }
 
-wat_limits: fn(m: ^WatModule, out: ^[U8], items: [Int], from: Int) -> Int WasmError! {
+wat_limits: fn(m: WatModule, out: ^[U8], items: [Int], from: Int) -> Int WasmError! {
     tree: m.tree
     k := from
     if k >= items.len() || !tree.is_atom(items[k]) {
@@ -733,7 +733,7 @@ wat_encode_module: fn(tree: WatTree, root: Int, first: Int) -> [U8] WasmError! {
     Ok(out)
 }
 
-wat_func_type_body: fn(m: ^WatModule, node: Int) -> WasmFuncType WasmError! {
+wat_func_type_body: fn(m: WatModule, node: Int) -> WasmFuncType WasmError! {
     tree: m.tree
     items: tree.kids(node)
     params := [Int]{}
@@ -811,7 +811,7 @@ wat_put_import_desc: fn(m: ^WatModule, module_name: String, name: String, kind: 
     m.import_count += 1
 }
 
-wat_encode_table: fn(m: ^WatModule, out: ^[U8], items: [Int], from: Int) WasmError! {
+wat_encode_table: fn(m: WatModule, out: ^[U8], items: [Int], from: Int) WasmError! {
     limits := [U8]{}
     next: wat_limits(m, limits, items, from)
     if next >= items.len() -> return Err(m.fail(items[0], "expected a table element type"))
@@ -819,7 +819,7 @@ wat_encode_table: fn(m: ^WatModule, out: ^[U8], items: [Int], from: Int) WasmErr
     wat_put_bytes(out, limits)
 }
 
-wat_global_type: fn(m: ^WatModule, out: ^[U8], node: Int) WasmError! {
+wat_global_type: fn(m: WatModule, out: ^[U8], node: Int) WasmError! {
     tree: m.tree
     if {
         tree.head(node) == "mut" -> {
@@ -1145,7 +1145,7 @@ wat_folded: fn(m: ^WatModule, out: ^[U8], node: Int) WasmError! {
     wat_put_bytes(out, op)
 }
 
-wat_label: fn(m: ^WatModule, id: Int) -> Int WasmError! {
+wat_label: fn(m: WatModule, id: Int) -> Int WasmError! {
     tree: m.tree
     if tree.is_id(id) {
         name: tree.atom(id)
@@ -1160,7 +1160,7 @@ wat_label: fn(m: ^WatModule, id: Int) -> Int WasmError! {
     Ok(value)
 }
 
-wat_local: fn(m: ^WatModule, id: Int) -> Int WasmError! {
+wat_local: fn(m: WatModule, id: Int) -> Int WasmError! {
     tree: m.tree
     text: tree.atom(id)
     if text.starts_with("$") {
@@ -1442,7 +1442,7 @@ WatComponent: struct {
     }
 }
 
-wat_type_ref: fn(tree: WatTree, space: ^WatTypeSpace, id: Int) -> Int WasmError! {
+wat_type_ref: fn(tree: WatTree, space: WatTypeSpace, id: Int) -> Int WasmError! {
     text: tree.atom(id)
     if text.starts_with("$") {
         index: space.names.get(text) ?? return Err(tree.fail(id, "unknown type `{text}`"))

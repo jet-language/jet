@@ -298,7 +298,7 @@ Allocator: trait {
 // address was taken in this function's frame, which has returned by then.
 // The closure's type has no failure: the runtime takes its result as a bare
 // Int, and `-> Int Never!` here would make it a failure-carrying result.
-#Builtin.Role(.AllocatorHandler) priv __allocator_handler: fn<A: Allocator>(allocator: ^A) -> fn(Int, Int, Int) -> Int {
+#Builtin.Role(.AllocatorHandler) priv __allocator_handler: fn<A: Allocator>(allocator: A) -> fn(Int, Int, Int) -> Int {
     address := 0
     #Unsafe("the allocator is a place the `#Context(allocator:)` block keeps in place until it ends") {
         address = mem.address_of(allocator)

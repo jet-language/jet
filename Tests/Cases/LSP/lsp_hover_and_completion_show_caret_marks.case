@@ -1,0 +1,29 @@
+# Hover and completion show the marks a signature writes: a written
+# parameter as `count: ^Int`, a taken one as `items: ^^[Int]`, and a method
+# that writes its receiver with `^self` first, on its hover and on its
+# completion item's detail.
+session lsp content-length: jet self lsp
+send lsp: Messages/LSPCaretMarkSignatures/0.json
+recv lsp until $.id = 1
+stdout: ~ "hoverProvider" # the capability is advertised
+send lsp: Messages/LSPCaretMarkSignatures/1.json
+send lsp: Messages/LSPCaretMarkSignatures/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # the document checked
+send lsp: Messages/LSPCaretMarkSignatures/3.json
+recv lsp until $.id = 2
+stdout: ~ "jet\\nbump: fn(count: ^Int)" # the write mark on the parameter's type
+send lsp: Messages/LSPCaretMarkSignatures/4.json
+recv lsp until $.id = 3
+stdout: ~ "jet\\ndrain: fn(items: ^^[Int]) -> Int" # the take mark on the parameter's type
+send lsp: Messages/LSPCaretMarkSignatures/5.json
+recv lsp until $.id = 4
+stdout: ~ "jet\\nCounter.tally(^self, by: Int)\\n```" # a written receiver shows first
+send lsp: Messages/LSPCaretMarkSignatures/6.json
+recv lsp collect until ndjson $[?id=5] #>= 1
+json: stdout ndjson $[?id=5][0].result.items[?label="tally"] #= 1
+stdout: ~ "\"detail\":\"Counter.tally(^self, by: Int)\"" # the completion detail keeps the receiver mark
+send lsp: Messages/LSPCaretMarkSignatures/7.json
+recv lsp until $.id = 99
+close lsp
+exit: 0

@@ -25,12 +25,12 @@ cli_test_image_scratch: fn(label: String) -[FS]> String {
     files.tmpdir("jet-image-{label}-") ?? panic("claim image scratch")
 }
 
-cli_test_ingest_executable: fn(verification: ^StoreVerification, root: String, name: String, reference: String, binary: String) -[FS, Env, Time]> {
+cli_test_ingest_executable: fn(verification: StoreVerification, root: String, name: String, reference: String, binary: String) -[FS, Env, Time]> {
     cli_test_ingest_executable_for_platform(verification, root, name, reference, binary, pkg_host_platform())
 }
 
 // Ingest one fake executable package into the Hangar under `root`.
-cli_test_ingest_executable_for_platform: fn(verification: ^StoreVerification, root: String, name: String, reference: String, binary: String, platform: String) -[FS, Env, Time]> {
+cli_test_ingest_executable_for_platform: fn(verification: StoreVerification, root: String, name: String, reference: String, binary: String, platform: String) -[FS, Env, Time]> {
     source: files.join(root, "source-{name}")
     files.create_dir_all(files.join(source, "bin")) ?? panic("create source bin")
     cli_test_write_script(files.join(files.join(source, "bin"), binary), "#!/bin/sh\necho image\n")

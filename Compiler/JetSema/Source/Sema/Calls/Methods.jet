@@ -813,7 +813,7 @@ sema_call_method_candidate_with_inference: fn(candidate: SemaCallMethodCandidate
     Val(specialized)
 }
 
-sema_call_infer_method_candidate_from_types: fn(candidate: SemaCallMethodCandidate, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallMethodCandidate? {
+sema_call_infer_method_candidate_from_types: fn(candidate: SemaCallMethodCandidate, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallMethodCandidate? {
     if candidate.generic_params.len() == 0 -> return Val(candidate)
     return_type: sema_call_signature_return(candidate.signature) ?? return None
     caller_module: scopes.module_identity

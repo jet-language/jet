@@ -364,7 +364,7 @@ sema_stmt_call_view_has_dynamic_source: fn(fact: SemaCallReturnViewFact) -> Bool
     false
 }
 
-sema_stmt_record_call_view_return: fn(state: ^SemaOwnershipState, fact: SemaCallReturnViewFact, slot: [String], scopes: SemaScopeTable, context: ^SemaCheckContext, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
+sema_stmt_record_call_view_return: fn(state: SemaOwnershipState, fact: SemaCallReturnViewFact, slot: [String], scopes: SemaScopeTable, context: ^SemaCheckContext, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     provenance := context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
     valid := true
     if {
@@ -537,7 +537,7 @@ sema_stmt_binds_map_slot: fn(statement: TStmt) -> Bool Never! {
 
 // `xs[a..b]` over a named place (through fields and indexes) is the source of a
 // read window, and so is `xs[band]` when the local `band` holds a range.
-sema_stmt_is_bare_range_place: fn(expr: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Bool {
+sema_stmt_is_bare_range_place: fn(expr: Expr, scopes: SemaScopeTable, state: SemaOwnershipState) -> Bool {
     if expr == .Slice(_, _, _, _, _, _) {
         return sema_ownership_places_from_expr_in_state(expr, scopes, state).len() > 0
     }

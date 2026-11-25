@@ -379,7 +379,7 @@ sema_call_direct_target_with_inference: fn(target: SemaCallDirectTarget, result:
     Val(specialized)
 }
 
-sema_call_infer_direct_target_from_types: fn(target: SemaCallDirectTarget, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallDirectTarget? {
+sema_call_infer_direct_target_from_types: fn(target: SemaCallDirectTarget, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallDirectTarget? {
     if target.generic_params.len() == 0 -> return Val(target)
     return_type: sema_call_signature_return(target.signature) ?? return None
     caller_module: scopes.module_identity

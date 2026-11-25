@@ -759,7 +759,7 @@ parser_parse_marker_required_arg: fn(state: ^JetParserState, args: ^[MarkerCallA
 
 // The marker as written after its `#`, for E0999 repair edits; None when the
 // parse has no source text.
-parser_marker_written_text: fn(state: ^JetParserState, marker: Marker) -> String? {
+parser_marker_written_text: fn(state: JetParserState, marker: Marker) -> String? {
     start := marker.span.start
     end: marker.span.end
     if start < state.source_offset || end > parser_source_end_offset(state) || end <= start -> return None

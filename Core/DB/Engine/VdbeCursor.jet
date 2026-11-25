@@ -119,7 +119,7 @@ real_of_int: fn(m: ^base.Mem, clear_str: Bool) Never! {
 // Records.
 
 // OP_IfNullRow: a cursor on its NULL row sets P3 to NULL and jumps.
-op_if_null_row: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
+op_if_null_row: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     ci: v.csr_base + r.p1
     if v.csr[ci].live && v.csr[ci].null_row {
         run.reg_null(v, v.mem_base + r.p3)
@@ -309,7 +309,7 @@ op_type_check: fn(db: conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
 }
 
 // OP_Affinity: the affinities of P4, one a register from P1.
-op_affinity: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
+op_affinity: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     aff: run.p4_text(v, r.pc) ?? [U8]{}
     i := v.mem_base + r.p1
     loop k in 0..<aff.len() {
@@ -325,7 +325,7 @@ op_affinity: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
 // OP_MakeRecord: the record of the P2 registers from P1 into P3, with the
 // affinities of P4 applied first. Zero-blob bytes at the end stay a
 // MEM_Zero count.
-op_make_record: fn(db: conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
+op_make_record: fn(db: conn.Conn, v: ^conn.Vdbe, r: Run) -> Int Never! {
     first: v.mem_base + r.p1
     n_field: r.p2
     if v.ops[r.pc].p4 == .Text(aff) {
@@ -610,7 +610,7 @@ op_transaction: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]
 }
 
 // OP_ReadCookie: meta value P3 of database P1 into P2.
-op_read_cookie: fn(db: conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
+op_read_cookie: fn(db: conn.Conn, v: ^conn.Vdbe, r: Run) -> Int Never! {
     i_meta: btree.btree_get_meta(db.btrees[db.dbs[r.p1].bt], r.p3)
     o: v.mem_base + r.p2
     run.out2(v, o)
@@ -620,7 +620,7 @@ op_read_cookie: fn(db: conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
 
 // OP_SetCookie: meta value P2 of database P1 becomes P3 (the schema
 // cookie P3 - P5 in memory).
-op_set_cookie: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
+op_set_cookie: fn(db: ^conn.Conn, v: conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     rc: btree.btree_update_meta(db.btrees[db.dbs[r.p1].bt], r.p2, r.p3)
     s: db.dbs[r.p1].schema
     if r.p2 == btree.BTREE_SCHEMA_VERSION {
@@ -772,7 +772,7 @@ op_open_ephemeral: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[
 }
 
 // OP_SorterOpen: cursor P1 on a new sorter of records under KeyInfo P4.
-op_sorter_open: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
+op_sorter_open: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: Run) -[DB]> Int Never! {
     ci: run.alloc_cursor<H>(h, db, v, r.p1, r.p2, conn.CURTYPE_SORTER)
     if v.ops[r.pc].p4 == .KeyInfo(k) {
         v.csr[ci].key_info = Val(k.copy())
@@ -783,7 +783,7 @@ op_sorter_open: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]
 
 // OP_SequenceTest: jump when cursor P1's sequence counter was 0, counting
 // it up.
-op_sequence_test: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
+op_sequence_test: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     ci: v.csr_base + r.p1
     was: v.csr[ci].seq_count
     v.csr[ci].seq_count = was + 1
@@ -792,7 +792,7 @@ op_sequence_test: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
 }
 
 // OP_OpenPseudo: cursor P1 on the record register P2 holds, of P3 columns.
-op_open_pseudo: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
+op_open_pseudo: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: Run) -[DB]> Int Never! {
     ci: run.alloc_cursor<H>(h, db, v, r.p1, r.p3, conn.CURTYPE_PSEUDO)
     v.csr[ci].null_row = true
     v.csr[ci].pseudo_reg = v.mem_base + r.p2
@@ -801,7 +801,7 @@ op_open_pseudo: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]
 }
 
 // OP_Close.
-op_close: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
+op_close: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     if v.csr[ci].live -> aux.free_cursor<H>(h, db, v, ci)
     GO_NEXT
@@ -925,7 +925,7 @@ op_seek_scan: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
 }
 
 // OP_SeekHit: cursor P1's seek_hit clamped into P2..P3.
-op_seek_hit: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
+op_seek_hit: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     ci: v.csr_base + r.p1
     if v.csr[ci].seek_hit < r.p2 -> v.csr[ci].seek_hit = r.p2 else if v.csr[ci].seek_hit > r.p3 {
         v.csr[ci].seek_hit = r.p3
@@ -934,7 +934,7 @@ op_seek_hit: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
 }
 
 // OP_IfNotOpen: jump when cursor P1 is closed or on its NULL row.
-op_if_not_open: fn(v: conn.Vdbe, r: ^Run) -> Int Never! {
+op_if_not_open: fn(v: conn.Vdbe, r: Run) -> Int Never! {
     ci: v.csr_base + r.p1
     if !v.csr[ci].live || v.csr[ci].null_row -> return GO_JUMP_CHECK
     GO_NEXT
@@ -1013,7 +1013,7 @@ op_seek_rowid: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
 }
 
 // OP_Sequence: cursor P1's sequence counter into P2, counting it up.
-op_sequence: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
+op_sequence: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     ci: v.csr_base + r.p1
     o: v.mem_base + r.p2
     run.out2(v, o)
@@ -1108,7 +1108,7 @@ op_insert: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int
 
 // OP_RowCell: copy the row cursor P2 is on into cursor P1 as row P3
 // (VACUUM and the xfer optimization).
-op_row_cell: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
+op_row_cell: fn(db: ^conn.Conn, v: conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     dest: v.csr_base + r.p1
     src: v.csr_base + r.p2
     i_key: if r.p3 != 0 -> v.mem[v.mem_base + r.p3].i else -> 0
@@ -1161,7 +1161,7 @@ op_reset_count: fn(db: ^conn.Conn, v: ^conn.Vdbe) -> Int Never! {
 
 // OP_SorterCompare: jump when the first P4 fields of sorter P1's record
 // differ from record P3.
-op_sorter_compare: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
+op_sorter_compare: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     ci: v.csr_base + r.p1
     s := sorter_take(v, ci)
     res: sorter.sorter_compare(s, v.csr[ci].key_info ?? no_key_info(), v.mem[v.mem_base + r.p3].z, run.p4_int(v, r.pc))
@@ -1171,7 +1171,7 @@ op_sorter_compare: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
 }
 
 // OP_SorterData: sorter P1's record into P2; pseudo cursor P3 rereads it.
-op_sorter_data: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
+op_sorter_data: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     ci: v.csr_base + r.p1
     s := sorter_take(v, ci)
     key: sorter.sorter_key(s)
@@ -1227,7 +1227,7 @@ op_rowid: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int 
 
 // OP_NullRow: cursor P1 (opened as an empty pseudo cursor when closed) is
 // on its NULL row.
-op_null_row: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
+op_null_row: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: Run) -[DB]> Int Never! {
     ci := v.csr_base + r.p1
     if !v.csr[ci].live {
         ci = run.alloc_cursor<H>(h, db, v, r.p1, 1, conn.CURTYPE_PSEUDO)
@@ -1268,7 +1268,7 @@ op_last: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
 
 // OP_IfSmaller: jump when cursor P1's table is empty or has fewer than
 // about 10^(P3/10) rows.
-op_if_smaller: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
+op_if_smaller: fn(db: ^conn.Conn, v: conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     bt: v.csr[ci].bt
     btc: v.csr[ci].btc
@@ -1350,7 +1350,7 @@ op_idx_insert: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
 }
 
 // OP_SorterInsert: the record P2 into sorter P1.
-op_sorter_insert: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
+op_sorter_insert: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     ci: v.csr_base + r.p1
     i2: v.mem_base + r.p2
     mem.expand_blob(v.mem[i2])
@@ -1424,7 +1424,7 @@ op_finish_seek: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
 
 // OP_IdxLE, OP_IdxGT, OP_IdxLT, OP_IdxGE: jump when index cursor P1's
 // entry, without its rowid, compares so with the P4 registers from P3.
-op_idx_compare: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
+op_idx_compare: fn(db: ^conn.Conn, v: conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     key := regs_key(v, ci, v.mem_base + r.p3, run.p4_int(v, r.pc))
     key.default_rc = if r.op < opc.OP_IDX_LT -> -1 else -> 0

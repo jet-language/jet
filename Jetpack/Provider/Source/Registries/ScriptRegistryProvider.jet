@@ -108,7 +108,7 @@ ScriptRegistryProvider: struct {
         provider_ensure_locked_authority(self.kind.title, locked.repository, locked.authority, current)
     }
 
-    cache_expectation: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+    cache_expectation: fn(self, verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
         project: ctx.project_dir ?? return None
         locked: pkg_lock_registry_realization(project, self.kind.label(), spec.raw) ?? return None
         authority: provider_script_registry_cache_authority(self.kind, ctx) ?? return None
@@ -117,7 +117,7 @@ ScriptRegistryProvider: struct {
         Val(CacheExpectation{identity: identity, owned_output: Val(locked.output), allow_unsigned_local: true})
     }
 
-    plan_downloads: fn(self, verification: ^StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+    plan_downloads: fn(self, verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
         loop spec in specs {
             plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
@@ -125,7 +125,7 @@ ScriptRegistryProvider: struct {
         Ok(plan)
     }
 
-    realize: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    realize: fn(self, verification: StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         if ctx.offline {
             return Err(ProviderError.Offline("`{spec.raw}` is not in verified Hangar and --offline forbids {self.kind.title} metadata or source fetches"))
         }

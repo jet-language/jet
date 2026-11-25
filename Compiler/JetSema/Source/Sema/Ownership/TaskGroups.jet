@@ -272,7 +272,7 @@ sema_taskgroup_register_spawn: fn(context: ^SemaCheckContext, group_name: String
     )
 }
 
-sema_taskgroup_expression_moved: fn(check: ^SemaBodyCheck, expression: Expr) -> Bool {
+sema_taskgroup_expression_moved: fn(check: SemaBodyCheck, expression: Expr) -> Bool {
     places := sema_ownership_places_from_expr_in_state(expression, check.scopes, check.state)
     loop place in places {
         if sema_ownership_place_moved(check.state, place) != None -> return true

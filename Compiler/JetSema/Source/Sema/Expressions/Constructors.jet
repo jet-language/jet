@@ -232,7 +232,7 @@ sema_expression_enum_variant_path: fn(base: Expr, member: String, check: ^SemaBo
 
 // The Core enum leaf a local type alias binds (`Tree` for `Dyn`): an
 // imported Core carrier keeps its builtin type under the local name.
-sema_expression_core_enum_alias: fn(name: String, scopes: ^SemaScopeTable) -> String? {
+sema_expression_core_enum_alias: fn(name: String, scopes: SemaScopeTable) -> String? {
     index: sema_scope_resolve_index(scopes, name) ?? return None
     symbol: scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Type -> return None

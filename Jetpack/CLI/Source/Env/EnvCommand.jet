@@ -37,7 +37,7 @@ EnvSubverb: enum {
     }
 }
 
-cli_cmd_env: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_env: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     // One env command verifies each Hangar object once.
     store_arm_command_memo(verification)
@@ -74,7 +74,7 @@ cli_debug_duration: fn(duration: time.Duration) -> String Never! {
     "{whole}.{text}{unit.name}"
 }
 
-cli_cmd_env_project: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_env_project: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if parsed.positional.len() > 0 {
         if EnvSubverb.parse(parsed.positional[0]) == .Val(subverb) {
             return if subverb == {
@@ -236,7 +236,7 @@ cli_receipt_secret_matches: fn(receipt: EnvEntryReceipt?, identity: String?) -> 
 // Replay every lock-pinned Nix admission through the Store authority and
 // fold the checked realizations into `warm`. False when the project lock
 // pins no Nix package; an error when it pins only part of the closure.
-cli_replay_locked_nix: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, project_dir: String, refs: [RefSpec], table: SourceTable, offline: Bool, local_nix_catalog: Bool, warm: ^[VerifiedRealization]?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Bool CLIError! {
+cli_replay_locked_nix: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, project_dir: String, refs: [RefSpec], table: SourceTable, offline: Bool, local_nix_catalog: Bool, warm: ^[VerifiedRealization]?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Bool CLIError! {
     if pkg_lock_load_strict(project_dir) == {
         .Val(_) -> {}
         .None -> return Ok(false)
@@ -408,7 +408,7 @@ cli_configure_project_catalog: fn(theme: Theme, roots: HangarRoots, project_dir:
 // `jet env test [-- command]`: run lifecycle hooks and checks with a clean
 // child environment. Without a command the declared checks are the whole
 // operation.
-cli_cmd_env_test: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_env_test: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir: cli_project_env_root(cache, cli_current_dir())
     roots: pkg_resolve_roots()
     plan := cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
@@ -437,7 +437,7 @@ JETPACK_DEV_VERB: "__dev"
 // `run: fn`) runs as `jet dev <entry>` inside the project environment, after
 // the trust gate, the declared-secret check, the `on_enter` hooks and every
 // enabled dev service reporting healthy.
-cli_cmd_dev: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_dev: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     roots: pkg_resolve_roots()
     if roots.dev_mode -> theme.detail(theme.gray("user-owned hangar: using {roots.root}"))
@@ -478,7 +478,7 @@ cli_cmd_dev: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParse
 // built once per pack) is content-sealed under the Hangar's objects, and
 // shared by every project. `--json` prints the pack root, the musl sysroot
 // and the versions; jet's native C link (ForeignLink.jet) reads both paths.
-cli_cmd_env_fetch_toolchain: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_env_fetch_toolchain: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if parsed.positional.len() > 1 {
         theme.error_coded("E2102", "`jet env fetch-toolchain` takes no arguments", "unexpected `{parsed.positional[1]}`", "run `jet env fetch-toolchain` on its own")
         return EXIT_USAGE
@@ -578,7 +578,7 @@ cli_project_declares_env: fn(dir: String) -[FS, Env, Exec, Time.Wait]> Bool Neve
 // native evaluator as `bridge flake`. Package lists become ordinary Jetpack
 // refs and fields with no `env.*` meaning are reported as L0204 losses.
 // Jetpack never delegates this product path to an installed `nix` binary.
-cli_enter_foreign_flake: fn(verification: ^StoreVerification, theme: Theme, project_dir: String, flake_path: String, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_enter_foreign_flake: fn(verification: StoreVerification, theme: Theme, project_dir: String, flake_path: String, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if trust_gate_flake(theme, trust_store_path(), project_dir, flake_path, parsed.flags.trust) == .Val(code) {
         return code
     }

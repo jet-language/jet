@@ -1211,7 +1211,7 @@ btree_compute_free_space: fn(bt: ^Btree, s: Int) -> Int Never! {
 }
 
 // btreeCellSizeCheck.
-btree_cell_size_check: fn(bt: ^Btree, s: Int) -> Int Never! {
+btree_cell_size_check: fn(bt: Btree, s: Int) -> Int Never! {
     i_cell_first: bt.mem[s].cell_offset + 2 * bt.mem[s].n_cell
     usable: bt.usable_size
     i_cell_last := usable - 4
@@ -3499,7 +3499,7 @@ straddles: fn(src: Int, off: Int, sz: Int, end_slot: Int, page_size: Int) -> Boo
 }
 
 // rebuildPage: page s holds exactly cells i_first..<i_first + n_cell.
-rebuild_page: fn(bt: ^Btree, b: ^CellArray, i_first: Int, n_cell: Int, s: Int) -> Int Never! {
+rebuild_page: fn(bt: ^Btree, b: CellArray, i_first: Int, n_cell: Int, s: Int) -> Int Never! {
     hdr: bt.mem[s].hdr_offset
     usable: bt.usable_size
     j := pg2(bt, s, hdr + 5)

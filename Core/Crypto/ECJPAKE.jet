@@ -237,7 +237,7 @@ ecjpake_mul_secret: fn<R: RNG>(x: bn.Mpi, s: bn.Mpi, n: bn.Mpi, rng: ^R, negate:
 /// Our round-two message: xm = xm2 s, Xm = xm G for G = Xp1 + Xp2 + Xm1,
 /// as an ECJPAKEKeyKP after the curve when the server writes, at most limit
 /// bytes (mbedtls_ecjpake_write_round_two; S: 7.4.2.5, C: 7.4.2.6).
-ecjpake_write_round_two: fn<R: RNG>(ctx: ^ECJPAKEContext, limit: Int, rng: ^R) -> [U8] ecp.EcpError! {
+ecjpake_write_round_two: fn<R: RNG>(ctx: ECJPAKEContext, limit: Int, rng: ^R) -> [U8] ecp.EcpError! {
     g: add3(ctx.grp, ctx.pp1, ctx.pp2, ctx.pm1)
     xm: ecjpake_mul_secret(ctx.xm2, ctx.s, ctx.grp.n, rng)
     big_xm: ecp.ecp_mul(ctx.grp, xm, g, rng)

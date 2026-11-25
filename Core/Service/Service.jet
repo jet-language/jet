@@ -675,7 +675,7 @@ ServiceTree: struct {
 
     stop: fn(^self) ServiceError! { stop(self) }
 
-    send: fn(^self, endpoint: ServiceEndpoint, message: String) ServiceError! { send(self, endpoint, message) }
+    send: fn(self, endpoint: ServiceEndpoint, message: String) ServiceError! { send(self, endpoint, message) }
 
     send_durable: fn(^self, endpoint: ServiceEndpoint, message: String, *, key: String) -> Delivery ServiceError! { send_durable(self, endpoint, message, key) }
 
@@ -3953,7 +3953,7 @@ priv directory_resolve: fn(tree: ServiceTree, name: String) -> ServiceEndpoint S
     Ok(endpoint)
 }
 
-priv send: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceError! {
+priv send: fn(tree: ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     validate_tree_endpoint(tree, endpoint)
     if !valid_record_payload(message) {
@@ -5570,7 +5570,7 @@ priv typed_queue: fn<Q, R>(tree: ServiceTree, endpoint: Endpoint<Q, R>) -> TreeW
 
 /// Queues `message` for the worker behind `endpoint`, which runs its
 /// handler on it after every message sent before.
-typed_send: fn<Q, R>(tree: ^ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q) ServiceError! {
+typed_send: fn<Q, R>(tree: ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q) ServiceError! {
     worker: typed_queue(tree, endpoint)
     endpoint.inbox.send(Job<Q, R>.Message{message: message, reply: None, receipt: None}) ?? {
         endpoint.room.release()
@@ -5580,7 +5580,7 @@ typed_send: fn<Q, R>(tree: ^ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q)
 
 /// Sends `message` and waits for the handler's answer. A handler that
 /// fails while handling it leaves the outcome unknown: Ambiguous.
-call: fn<Q, R>(tree: ^ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q) -> R ServiceError! {
+call: fn<Q, R>(tree: ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q) -> R ServiceError! {
     worker: typed_queue(tree, endpoint)
     answer: endpoint.inbox.ask<R, Never>(fn(reply: service_actor.Reply<R>) -> Job<Q, R> Never! { Job<Q, R>.Message{message: message, reply: Val(reply), receipt: None} })
     handled: answer ?? return Err(ServiceError.Ambiguous("worker `{worker.name}` failed while handling the call"))
@@ -5591,7 +5591,7 @@ call: fn<Q, R>(tree: ^ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q) -> R 
 /// it as JSON until the worker's handler succeeds on it, across restarts. A
 /// key already used answers its first receipt; a full mailbox is Full before
 /// the authority keeps anything.
-typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ^ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q, key: String) -> Delivery ServiceError! {
+typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q, key: String) -> Delivery ServiceError! {
     if tree.delivery != ServiceDelivery.DurableAtLeastOnce {
         return Err(ServiceError.Policy("send_durable requires DurableAtLeastOnce delivery"))
     }

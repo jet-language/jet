@@ -669,7 +669,7 @@ JetCLIDap: struct {
     // Run the program as the console run command `word` says, or, for "",
     // as `configurationDone` does: from its start, to the start of its
     // entry (NativeSession.program_entry) under `stopOnEntry`.
-    start: fn(^self, session: ^NativeSession, word: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeSettled NativeDebugError! {
+    start: fn(self, session: ^NativeSession, word: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeSettled NativeDebugError! {
         if word != "" -> return session.run(word)
         if !self.stop_on_entry {
             first: session.launch(self.args) ?? return Err(err)
@@ -691,7 +691,7 @@ JetCLIDap: struct {
     // has the program's first Jet frame. A breakpoint the program reaches
     // first, or its end, is the stop instead. None when the image names no
     // entry.
-    to_start: fn(^self, session: ^NativeSession) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeSettled? NativeDebugError! {
+    to_start: fn(self, session: ^NativeSession) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeSettled? NativeDebugError! {
         number := -1
         if session.break_in_entry() == {
             .Ok(found) -> number = found ?? return Ok(None)
@@ -826,7 +826,7 @@ JetCLIDap: struct {
     // from (NativeSession.source_file), else `path` itself, made absolute.
     // A Core source is no file: the `source` request reads it by its
     // `sourceReference` (NativeSession.source_text).
-    source: fn(^self, session: ^NativeSession, file: String, path: String) -> String Never! {
+    source: fn(^self, session: NativeSession, file: String, path: String) -> String Never! {
         name: foundation_json_quote(dap_files.basename(file))
         if path.starts_with(MODULE_CORE_PREFIX) {
             return "{{\"name\":{name},\"path\":{foundation_json_quote(path)},\"sourceReference\":{self.source_reference(path)}}}"
@@ -838,7 +838,7 @@ JetCLIDap: struct {
     // One instruction `disassemble` answers: its address, bytes, text and
     // the code it is in, its source and line when its function has them;
     // an address no code is known at is `invalid`, as DAP asks.
-    instruction: fn(^self, session: ^NativeSession, row: NativeListedRow) -> String Never! {
+    instruction: fn(^self, session: NativeSession, row: NativeListedRow) -> String Never! {
         address: native_debug_hex(row.address)
         if !row.valid {
             return "{{\"address\":\"{address}\",\"instruction\":\"(no code)\",\"presentationHint\":\"invalid\"}}"
@@ -1248,7 +1248,7 @@ jet_cli_dap_frame_key: fn(task: Int, index: Int) -> Int Never! {
 
 // `variables` of the machine frame `index`'s `[raw] Locals`: its pc and
 // canonical frame address.
-jet_cli_dap_raw_variables: fn(session: ^NativeSession, index: Int) -> String NativeDebugError! {
+jet_cli_dap_raw_variables: fn(session: NativeSession, index: Int) -> String NativeDebugError! {
     machine: session.unwind() ?? return Err(err)
     if index < 0 || index >= machine.len() -> return Ok("{{\"variables\":[]}}")
     pc: "{{\"name\":\"pc\",\"value\":\"{native_debug_hex(machine[index].pc)}\",\"variablesReference\":0}}"
@@ -1343,7 +1343,7 @@ jet_cli_dap_register_value: fn(row: NativeRegisterRow) -> String Never! {
 // can't be read, as `memory` reads them (native_memory_view: the program's
 // own bytes under the debugger's traps), in base64, and how many after them
 // can't be read, which an editor skips before it reads on.
-jet_cli_dap_memory: fn(session: ^NativeSession, address: Int, count: Int) -> String Never! {
+jet_cli_dap_memory: fn(session: NativeSession, address: Int, count: Int) -> String Never! {
     view: native_memory_view(session, None, address, count)
     read := 0
     loop read < count && view.mapped[read] -> read += 1

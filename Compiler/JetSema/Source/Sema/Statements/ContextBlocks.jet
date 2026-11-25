@@ -73,6 +73,11 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
                 check.diagnostics.push(sema_error("E0762", field.span, "`allocator` needs an allocator, got {sema_type_show(checked.ty)}", "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value, or a value whose type implements `mem.Allocator`", "pass an allocator, e.g. `mem.Arena.new()`"))
                 complete = false
             } else {
+                // The block's allocations write through the allocator it
+                // names, so the block writes that binding (E0514, E0518).
+                if sema_scope_place_root(field.value) == .Val(root) && sema_scope_resolve_index(check.scopes, root) == .Val(index) {
+                    sema_ownership_note_binding_write(check.state, check.scopes.bindings[index])
+                }
                 handler: sema_stmt_context_allocator_handler(field, checked.ty, check) ?? {
                     complete = false
                     next

@@ -93,27 +93,27 @@ LifecycleJournalScan: struct {
 
 // Take the Hangar lock, recover abandoned partials and read the closure
 // inputs.
-store_lifecycle_session: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LifecycleSession StoreError! {
+store_lifecycle_session: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LifecycleSession StoreError! {
     lock: env_runtime_lock(roots.root, "hangar")
     store_lifecycle_recover_unlocked(roots)
     inputs: store_lifecycle_inputs_unlocked(verification, roots)
     Ok(LifecycleSession{lock: lock, known: inputs.known, closure_head: inputs.closure_head})
 }
 
-store_lifecycle_prepare: fn(verification: ^StoreVerification, roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+store_lifecycle_prepare: fn(verification: StoreVerification, roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     store_lifecycle_prepare_unlocked(roots, identity, targets, at, session.known)
     store_lifecycle_snapshot_unlocked(roots, session.known, session.closure_head, [LegacyRoot]{})
 }
 
-store_lifecycle_commit: fn(verification: ^StoreVerification, roots: HangarRoots, id: RootID, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+store_lifecycle_commit: fn(verification: StoreVerification, roots: HangarRoots, id: RootID, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     state := store_lifecycle_load_state(roots, session.known)
     store_lifecycle_apply_or_compact(roots, state, LifecycleJournalEntry.Commit{id: id, incarnation: incarnation, witness: witness, at: at}, LifecycleWriteControl.none())
     store_lifecycle_snapshot_from_state(state, session.closure_head)
 }
 
-store_lifecycle_remove_root: fn(verification: ^StoreVerification, roots: HangarRoots, id: RootID, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+store_lifecycle_remove_root: fn(verification: StoreVerification, roots: HangarRoots, id: RootID, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     state := store_lifecycle_load_state(roots, session.known)
     store_lifecycle_apply_or_compact(roots, state, LifecycleJournalEntry.Tombstone{id: id, incarnation: incarnation, witness: witness, at: at}, LifecycleWriteControl.none())
@@ -144,7 +144,7 @@ store_lifecycle_apply_if_new: fn(roots: HangarRoots, state: ^[String:LifecycleRo
 // one Hangar lock. If the process dies between them, the prepared union stays
 // protected and the same request resumes by witness, metadata and target
 // identity instead of silently rebinding.
-store_lifecycle_atomic_update: fn(verification: ^StoreVerification, roots: HangarRoots, update: RootUpdate) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+store_lifecycle_atomic_update: fn(verification: StoreVerification, roots: HangarRoots, update: RootUpdate) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     expected := RootEtag?{None}
     if update.expected_etag == {
         .Val(text) -> { expected = Val(RootEtag.parse(text)) }
@@ -211,7 +211,7 @@ store_lifecycle_atomic_update_unlocked: fn(roots: HangarRoots, update: RootUpdat
 // Prepare an immutable root only when its stable identity is absent. The
 // existence check and the append share one lock, so no caller can observe an
 // absent root and race another producer into it.
-store_lifecycle_prepare_if_absent: fn(verification: ^StoreVerification, roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+store_lifecycle_prepare_if_absent: fn(verification: StoreVerification, roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     proposed: store_lifecycle_checked_targets(targets, session.known)
     state: store_lifecycle_load_state(roots, session.known)
@@ -232,7 +232,7 @@ store_lifecycle_prepare_if_absent: fn(verification: ^StoreVerification, roots: H
 
 // Tombstone a typed root with one compare-and-swap check. Repeating a removal
 // whose tombstone is durable succeeds.
-store_lifecycle_atomic_remove: fn(verification: ^StoreVerification, roots: HangarRoots, id: RootID, expected_etag: String, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+store_lifecycle_atomic_remove: fn(verification: StoreVerification, roots: HangarRoots, id: RootID, expected_etag: String, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     expected: RootEtag.parse(expected_etag)
     session: store_lifecycle_session(verification, roots)
     state := store_lifecycle_load_state(roots, session.known)
@@ -270,7 +270,7 @@ store_lifecycle_cas_conflict: fn(expected: RootEtag?, current: RootEtag?) -> Sto
     StoreError.LifecycleConflict{expected: expected_text, current: current_text}
 }
 
-store_lifecycle_import_legacy_root: fn(verification: ^StoreVerification, roots: HangarRoots, legacy: LegacyRoot) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+store_lifecycle_import_legacy_root: fn(verification: StoreVerification, roots: HangarRoots, legacy: LegacyRoot) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     targets: store_lifecycle_checked_targets(legacy.targets, session.known)
     state := store_lifecycle_load_state(roots, session.known)
@@ -280,12 +280,12 @@ store_lifecycle_import_legacy_root: fn(verification: ^StoreVerification, roots: 
 }
 
 // Every durable root in root-id order.
-store_lifecycle_list: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> [LifecycleRoot] StoreError! {
+store_lifecycle_list: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> [LifecycleRoot] StoreError! {
     snapshot: store_lifecycle_snapshot(verification, roots)
     Ok(snapshot.root_list())
 }
 
-store_lifecycle_snapshot: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+store_lifecycle_snapshot: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     store_lifecycle_snapshot_with_legacy(verification, roots, [LegacyRoot]{})
 }
 
@@ -306,13 +306,13 @@ store_lifecycle_protected_targets_unlocked: fn(roots: HangarRoots, graph: Closur
 
 // Legacy roots absent from the journal are protected in this view without being
 // persisted.
-store_lifecycle_snapshot_with_legacy: fn(verification: ^StoreVerification, roots: HangarRoots, legacy: [LegacyRoot]) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
+store_lifecycle_snapshot_with_legacy: fn(verification: StoreVerification, roots: HangarRoots, legacy: [LegacyRoot]) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     store_lifecycle_snapshot_unlocked(roots, session.known, session.closure_head, legacy)
 }
 
 // The number of abandoned partial members removed.
-store_lifecycle_recover: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> Int StoreError! {
+store_lifecycle_recover: fn(verification: StoreVerification, roots: HangarRoots) -[FS, Env, Time]> Int StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
     recovered: store_lifecycle_recover_unlocked(roots)
     inputs: store_lifecycle_inputs_unlocked(verification, roots)

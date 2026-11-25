@@ -63,7 +63,7 @@ DoctorScan: struct {
     repair_paths: [String:String],
 }
 
-store_hangar_doctor: fn(verification: ^StoreVerification, roots: HangarRoots, repair: Bool, offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> HangarDoctorReport StoreError! {
+store_hangar_doctor: fn(verification: StoreVerification, roots: HangarRoots, repair: Bool, offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> HangarDoctorReport StoreError! {
     if !repair {
         scan: store_scan_hangar_doctor(verification, roots, false)
         return Ok(scan.report)
@@ -144,7 +144,7 @@ store_hangar_doctor: fn(verification: ^StoreVerification, roots: HangarRoots, re
     Ok(scan.report)
 }
 
-store_scan_hangar_doctor: fn(verification: ^StoreVerification, roots: HangarRoots, write_seals: Bool) -[FS, Env]> DoctorScan StoreError! {
+store_scan_hangar_doctor: fn(verification: StoreVerification, roots: HangarRoots, write_seals: Bool) -[FS, Env]> DoctorScan StoreError! {
     hangar: roots.hangar_dir()
     scan := DoctorScan{report: HangarDoctorReport.empty(), repair_paths: [String:String]{}}
     found: store_node_stat(hangar)
@@ -186,7 +186,7 @@ store_doctor_sorted_entries: fn(path: String) -[FS]> [DirEntry] StoreError! {
 
 // Verify every canonical object's content digest against its name; the CAS keys
 // the object files would use.
-store_scan_doctor_objects: fn(verification: ^StoreVerification, hangar: String, report: ^HangarDoctorReport, write_seals: Bool) -[FS, Env]> [String] StoreError! {
+store_scan_doctor_objects: fn(verification: StoreVerification, hangar: String, report: ^HangarDoctorReport, write_seals: Bool) -[FS, Env]> [String] StoreError! {
     objects: files.join(hangar, STORE_OBJECTS_DIR)
     found: store_node_stat(objects)
     pool: found ?? return Ok([String]{})
@@ -355,7 +355,7 @@ store_doctor_repair_paths: fn(entries: [StoreEntry], paths: ^[String:String]) Ne
     }
 }
 
-store_doctor_object_digest: fn(verification: ^StoreVerification, path: String, hangar: String, write_seal: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
+store_doctor_object_digest: fn(verification: StoreVerification, path: String, hangar: String, write_seal: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
     store_verified_output_hash_with_options(verification, path, Val(hangar), false, false, write_seal)
 }
 

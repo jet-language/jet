@@ -45,7 +45,7 @@ cli_render_env_diagnostic: fn(src: String, error: EnvModelEvalError) -[IO, Time.
     terminal_write_output(diagnostic_render_all(ENV_FILE, src, [Diagnostic]{error.diagnostic}, false))
 }
 
-cli_cmd_image: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_image: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     dir: cli_current_dir()
     src: files.read(EnvFile.path_in(dir)) ?? {
         theme.error("no image here", "there is no {ENV_FILE} declaring any `image.<name>`.", "declare `image.<name>: module {{ kind: .Oci, from: packages.<name> }}`, then `jet image <name>`.")
@@ -610,7 +610,7 @@ cli_shell_quote: fn(value: String) -> String Never! { "'{value.replace("'", "'\"
 // Environment image layers: each package's verified Hangar binaries plus
 // the one shell they provide as `/bin/sh`. An empty result means a refusal
 // was already rendered.
-cli_environment_image_files: fn(verification: ^StoreVerification, theme: Theme, roots: HangarRoots, plan: EnvPlan, name: String, target: String, projection: ^ProjectionReport) -[IO, FS, Env, Time, Time.Wait]> [LayerFile] Never! {
+cli_environment_image_files: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, plan: EnvPlan, name: String, target: String, projection: ^ProjectionReport) -[IO, FS, Env, Time, Time.Wait]> [LayerFile] Never! {
     package_refs := [String]{}
     loop reference in plan.package_refs {
         if !package_refs.contains(reference) -> package_refs.push(reference.copy())
@@ -734,7 +734,7 @@ cli_write_rejected_projection: fn(out_dir: String, projection: ProjectionReport)
 
 // The Hangar entry's output must be its verified content-addressed object,
 // with a real bin projection inside it.
-cli_verify_realized_hangar_package: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> CLIError! {
+cli_verify_realized_hangar_package: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> CLIError! {
     store_verify_hangar_object(verification, roots, entry) ?? return Err(CLIError.Other("{err}"))
     if entry.envelope.output_hash == "" {
         return Err(CLIError.Other("the Hangar entry has no canonical output digest"))

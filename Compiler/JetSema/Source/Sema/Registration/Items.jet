@@ -1688,7 +1688,7 @@ sema_registration_extern_signature: fn(function: ExternFn, owner: SemaRegistrati
     Type.Fn{params: params, ret: Val(ret), effect_bound: None, param_contract: sema_registration_extern_contract(function.params), call_metadata: Val(metadata), return_view_provenance: None}
 }
 
-sema_registration_extern_parameters: fn(function: ExternFn, module_id: ModuleID, module_identity: String, owner_key: String, symbols: ^SymbolTable, signature: Type) -> [SemaRegistrationParameter] Never! {
+sema_registration_extern_parameters: fn(function: ExternFn, module_id: ModuleID, module_identity: String, owner_key: String, symbols: SymbolTable, signature: Type) -> [SemaRegistrationParameter] Never! {
     parameters := [SemaRegistrationParameter]{}
     loop (index, parameter) in function.params {
         parameter_ty: if parameter.variadic -> Type.List{element: parameter.ty} else -> parameter.ty
@@ -3258,7 +3258,7 @@ sema_registration_root_span: fn(item: Item) -> Span Never! {
     }
 }
 
-sema_registration_root_symbol: fn(item: Item, module_id: ModuleID, module_identity: String, module_name: String, symbols: ^SymbolTable, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: ^[Diagnostic]) -> Symbol? {
+sema_registration_root_symbol: fn(item: Item, module_id: ModuleID, module_identity: String, module_name: String, symbols: ^SymbolTable, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: [Diagnostic]) -> Symbol? {
     if item == {
         // sema_registration_add_root registers a function through sema_registration_function.
         .Func(_) -> None

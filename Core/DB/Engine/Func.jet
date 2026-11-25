@@ -166,7 +166,7 @@ skip_accumulator_load: fn(v: ^conn.Vdbe) Never! {
 
 // contextMalloc's size check: SQLITE_TOOBIG for n_byte past
 // SQLITE_LIMIT_LENGTH, false then.
-context_size_ok: fn(db: ^conn.Conn, v: ^conn.Vdbe, n_byte: Int) -> Bool Never! {
+context_size_ok: fn(db: conn.Conn, v: ^conn.Vdbe, n_byte: Int) -> Bool Never! {
     if n_byte > db.limits[ast.LIMIT_LENGTH] {
         api.result_error_toobig(v)
         return false
@@ -204,7 +204,7 @@ bytes_equal: fn(a: [U8], i: Int, b: [U8], j: Int, n: Int) -> Bool Never! {
 
 // minmaxFunc: the least (user_data 0) or greatest argument under the
 // function's collation; NULL if any argument is NULL.
-minmax_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+minmax_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     is_max: v.fctx.user_data != 0
     coll: v.fctx.coll
     best := 0
@@ -224,7 +224,7 @@ minmax_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 }
 
 // typeofFunc.
-typeof_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+typeof_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     names: [String]{"integer", "real", "text", "blob", "null"}
     t: arg_type(v, 0)
     api.result_text(db, v, names[t - 1].bytes(), -1)
@@ -260,7 +260,7 @@ length_func: fn(v: ^conn.Vdbe) Never! {
 }
 
 // bytelengthFunc (octet_length).
-bytelength_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+bytelength_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     t: arg_type(v, 0)
     if t == base.SQL_BLOB {
         n: arg_bytes(v, 0)
@@ -278,7 +278,7 @@ bytelength_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 }
 
 // absFunc.
-abs_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+abs_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     t: arg_type(v, 0)
     if t == base.SQL_INTEGER {
         x: arg_int64(v, 0)
@@ -341,7 +341,7 @@ instr_func: fn(v: ^conn.Vdbe) Never! {
 }
 
 // printfFunc (printf and format).
-printf_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+printf_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     if v.fctx.argc < 1 {
         return
     }
@@ -356,7 +356,7 @@ printf_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 // substrFunc: p2 characters (bytes of a blob) of x from the 1-based p1;
 // a negative p1 counts from the end, a negative p2 takes the characters
 // before p1.
-substr_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+substr_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     argc: v.fctx.argc
     if arg_type(v, 1) == base.SQL_NULL || (argc == 3 && arg_type(v, 2) == base.SQL_NULL) {
         return
@@ -456,7 +456,7 @@ round_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 }
 
 // upperFunc and lowerFunc: ASCII case folding.
-case_func: fn(db: ^conn.Conn, v: ^conn.Vdbe, upper: Bool) Never! {
+case_func: fn(db: conn.Conn, v: ^conn.Vdbe, upper: Bool) Never! {
     z: arg_text(v, 0) ?? return
     n: z.len()
     if !context_size_ok(db, v, n + 1) {
@@ -481,7 +481,7 @@ random_func: fn(v: ^conn.Vdbe) -[DB]> Never! {
 }
 
 // randomBlob: N random bytes, at least one.
-random_blob: fn(db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Never! {
+random_blob: fn(db: conn.Conn, v: ^conn.Vdbe) -[DB]> Never! {
     n := arg_int64(v, 0)
     if n < 1 -> n = 1
     if !context_size_ok(db, v, n) {
@@ -652,7 +652,7 @@ str_like: fn(pattern: [U8], str: [U8], esc: Int) -> Int Never! {
 }
 
 // likeFunc: like(pattern, string[, escape]) and glob(pattern, string).
-like_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+like_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     info := like_info(v.fctx.user_data)
     n_pat: arg_bytes(v, 0)
     if n_pat > db.limits[ast.LIMIT_LIKE_PATTERN_LENGTH] {
@@ -678,7 +678,7 @@ like_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 }
 
 // nullifFunc.
-nullif_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+nullif_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     a: v.mem[arg_reg(v, 0)]
     b: v.mem[arg_reg(v, 1)]
     if record.mem_compare(a, b, v.fctx.coll) != 0 -> api.result_value(db, v, a)
@@ -746,7 +746,7 @@ quote_value: fn(acc: ^printf.StrAccum, m: ^Mem) Never! {
 }
 
 // quoteFunc.
-quote_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+quote_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     acc := printf.str_new(db.limits[ast.LIMIT_LENGTH])
     quote_value(acc, v.mem[arg_reg(v, 0)])
     if acc.acc_error != 0 {
@@ -765,7 +765,7 @@ unicode_func: fn(v: ^conn.Vdbe) Never! {
 
 // charFunc: the text of the code points of the arguments; one out of
 // range is U+FFFD.
-char_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+char_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     out := [U8]{}
     loop i in 0..<v.fctx.argc {
         x := arg_int64(v, i)
@@ -789,7 +789,7 @@ char_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 }
 
 // hexFunc: the argument's bytes as upper-case hexadecimal text.
-hex_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+hex_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     k: arg_reg(v, 0)
     _: mem.value_blob(v.mem[k])
     blob: v.mem[k].z.copy()
@@ -843,7 +843,7 @@ unhex_decode: fn(hex: [U8], pass: [U8]) -> [U8]? Never! {
 }
 
 // unhexFunc.
-unhex_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+unhex_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     hex: arg_text(v, 0)
     pass: if v.fctx.argc == 2 -> arg_text(v, 1) else -> Val([U8]{})
     z_hex: hex ?? return
@@ -855,7 +855,7 @@ unhex_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 }
 
 // zeroblobFunc.
-zeroblob_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+zeroblob_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     n := arg_int64(v, 0)
     if n < 0 -> n = 0
     rc: api.result_zeroblob64(db, v, n)
@@ -863,7 +863,7 @@ zeroblob_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 }
 
 // replaceFunc: A with every occurrence of B replaced by C.
-replace_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+replace_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     z: arg_text(v, 0) ?? return
     n_str: z.len()
     pattern: arg_text(v, 1) ?? return
@@ -903,7 +903,7 @@ replace_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 
 // trimFunc: user_data 1 trims the left, 2 the right, 3 both; the
 // characters trimmed are those of the second argument, else a space.
-trim_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+trim_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     if arg_type(v, 0) == base.SQL_NULL {
         return
     }
@@ -964,7 +964,7 @@ trim_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 
 // concatFuncCore: the non-NULL arguments first ..< first + argc joined by
 // sep.
-concat_core: fn(db: ^conn.Conn, v: ^conn.Vdbe, first: Int, argc: Int, sep: [U8]) Never! {
+concat_core: fn(db: conn.Conn, v: ^conn.Vdbe, first: Int, argc: Int, sep: [U8]) Never! {
     out := [U8]{}
     loop i in first..<(first + argc) {
         k: arg_bytes(v, i)
@@ -981,7 +981,7 @@ concat_core: fn(db: ^conn.Conn, v: ^conn.Vdbe, first: Int, argc: Int, sep: [U8])
 }
 
 // soundexFunc.
-soundex_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+soundex_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     codes: [Int]{
         0,
         0,
@@ -1138,7 +1138,7 @@ soundex_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 // loadExt: load_extension(file[, entry]). Only with SQLITE_LoadExtFunc
 // set; the build has no shared libraries to open, so a load fails as
 // sqlite3LoadExtension's does when no file can be opened.
-load_ext: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+load_ext: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     if db.flags & conn.SQLITE_LOAD_EXT_FUNC == 0 {
         api.result_error(db, v, "not authorized".bytes(), -1)
         return
@@ -1159,7 +1159,7 @@ load_ext: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 
 // sqlite3InvalidFunction: the stand-in sqlite3_overload_function installs
 // fails every call.
-invalid_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+invalid_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     i_op: v.fctx.i_op
     def: vs.p4_func(v, i_op)
     name: if def == .Val(f) -> f.name else -> [U8]{}
@@ -1269,7 +1269,7 @@ sum_approx: fn(p: conn.AggState) -> Float Never! {
 }
 
 // sumFinalize.
-sum_finalize: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+sum_finalize: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 0)
     if k < 0 || v.aggs[k].n <= 0 {
         return
@@ -1346,7 +1346,7 @@ minmax_step: fn(v: ^conn.Vdbe) Never! {
 }
 
 // minMaxValueFinalize: the best value; finalizing releases it.
-minmax_value_finalize: fn(db: ^conn.Conn, v: ^conn.Vdbe, is_value: Bool) Never! {
+minmax_value_finalize: fn(db: conn.Conn, v: ^conn.Vdbe, is_value: Bool) Never! {
     k: api.aggregate_context(v, 0)
     if k < 0 {
         return
@@ -1395,7 +1395,7 @@ gc_append: fn(p: ^conn.AggState, z: [U8], n: Int, mx: Int) Never! {
 
 // groupConcatStep: the separator (',' by default) goes before every value
 // but the first.
-group_concat_step: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+group_concat_step: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     if arg_type(v, 0) == base.SQL_NULL {
         return
     }
@@ -1464,7 +1464,7 @@ group_concat_inverse: fn(v: ^conn.Vdbe) Never! {
 }
 
 // groupConcatFinalize (sqlite3ResultStrAccum).
-group_concat_finalize: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+group_concat_finalize: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 0)
     if k < 0 || v.aggs[k].ints.len() == 0 {
         return
@@ -2173,7 +2173,7 @@ json_parse_nan_inf: fn(p: ^JSONParse, i: Int) -> Int Never! {
 
 // jsonConvertTextToBlob: parse the whole of json into blob; true after an
 // error, the call's result then "malformed JSON".
-json_convert_text_to_blob: fn(db: ^conn.Conn, v: ^conn.Vdbe, p: ^JSONParse) -> Bool Never! {
+json_convert_text_to_blob: fn(db: conn.Conn, v: ^conn.Vdbe, p: ^JSONParse) -> Bool Never! {
     i := json_translate_text_to_blob(p, 0)
     if i > 0 {
         loop json_is_space(json_byte(p, i)) -> i += 1
@@ -2421,7 +2421,7 @@ json_text5_to_text: fn(a: [U8], from: Int, sz: Int, out: ^JSONString) Never! {
 // jsonParseFuncArg with no flags: the JSONB of argument i, which is JSONB
 // itself (a blob whose header covers it) or JSON text to translate. None
 // for NULL, or after an error ("malformed JSON") that is the result.
-json_parse_func_arg: fn(db: ^conn.Conn, v: ^conn.Vdbe, i: Int) -> [U8]? Never! {
+json_parse_func_arg: fn(db: conn.Conn, v: ^conn.Vdbe, i: Int) -> [U8]? Never! {
     e_type: arg_type(v, i)
     if e_type == base.SQL_NULL -> return None
     if e_type == base.SQL_BLOB {
@@ -2450,7 +2450,7 @@ json_parse_func_arg: fn(db: ^conn.Conn, v: ^conn.Vdbe, i: Int) -> [U8]? Never! {
 // jsonReturnParse: the JSONB blob as the result of a jsonb function
 // (JSON_BLOB set in the user data), else its JSON text with subtype
 // JSON_SUBTYPE (jsonReturnString).
-json_return_parse: fn(db: ^conn.Conn, v: ^conn.Vdbe, blob: [U8]) Never! {
+json_return_parse: fn(db: conn.Conn, v: ^conn.Vdbe, blob: [U8]) Never! {
     if api.user_data(v) & cat.JSON_BLOB != 0 {
         api.result_blob(db, v, blob, blob.len())
         return
@@ -2465,7 +2465,7 @@ json_return_parse: fn(db: ^conn.Conn, v: ^conn.Vdbe, blob: [U8]) Never! {
 
 // jsonRemoveFunc for json(X), jsonb(X) and json_remove(X): X as JSON text
 // or JSONB. json_remove's paths are not ported.
-json_remove_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+json_remove_func: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     argc: v.fctx.argc
     if argc < 1 {
         return
@@ -2481,7 +2481,7 @@ json_remove_func: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
 // The error of a built-in function whose C implementation is not in this
 // port: date.c, the json.c functions but json() and jsonb(), alter.c and
 // analyze.c.
-not_supported: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
+not_supported: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     def: vs.p4_func(v, v.fctx.i_op)
     name: if def == .Val(f) -> f.name else -> [U8]{}
     msg := "The SQL function ".bytes()

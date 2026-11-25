@@ -55,7 +55,7 @@ use jet_foundation.[
 // keeps its rows in the table) is out of scope at the lambda under lexical
 // lookup; counting it made a lambda local of the same name, whose `if` block
 // has since rolled back, read as an outer capture.
-sema_expression_lambda_binding_frame: fn(name: String, use_span: Span, frame: Int, scopes: ^SemaScopeTable) -> Int Never! {
+sema_expression_lambda_binding_frame: fn(name: String, use_span: Span, frame: Int, scopes: SemaScopeTable) -> Int Never! {
     selected_frame := -1
     selected_start := -1
     // Only bindings named `name` can match; visit them in table order.
@@ -552,14 +552,14 @@ sema_expression_lambda_statement_use_outer: fn(statement: Stmt, frame: Int, para
     }
 }
 
-sema_expression_lambda_effects: fn(lambda: ^Lambda) -> TEffectFacts Never! {
+sema_expression_lambda_effects: fn(lambda: Lambda) -> TEffectFacts Never! {
     direct := [String]{}
     loop name in lambda.meta.effect_direct { sema_expression_lambda_append_name(direct, name) }
     spans: loop row in lambda.meta.effect_direct_spans -> TEffectSpan{name: row.name, span: row.span}
     TEffectFacts{direct: direct, solved: lambda.meta.effect_solved, call_edges: lambda.meta.effect_call_edges, maximal: lambda.meta.effect_maximal, direct_spans: spans}
 }
 
-sema_expression_lambda_add_effect_facts: fn(program: SemaProgramTables, source: ^SemaCheckContext, first_call: Int, direct: ^[String], edges: ^[String], spans: ^[TEffectSpan], maximal: ^Bool) Never! {
+sema_expression_lambda_add_effect_facts: fn(program: SemaProgramTables, source: SemaCheckContext, first_call: Int, direct: ^[String], edges: ^[String], spans: ^[TEffectSpan], maximal: ^Bool) Never! {
     index := first_call
     loop index < source.call_facts.len() {
         fact := source.call_facts[index]
@@ -1213,7 +1213,7 @@ sema_expression_lambda_bound_escapes: fn(binding: Binding, statements: [Stmt], s
     None
 }
 
-sema_expression_lambda_outer_binding: fn(name: String, use_span: Span, frame: Int, scopes: ^SemaScopeTable) -> Int? {
+sema_expression_lambda_outer_binding: fn(name: String, use_span: Span, frame: Int, scopes: SemaScopeTable) -> Int? {
     index: sema_scope_resolve_index_at(scopes, name, use_span) ?? return None
     binding: scopes.bindings[index]
     if binding.frame < frame && (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) {
@@ -1222,7 +1222,7 @@ sema_expression_lambda_outer_binding: fn(name: String, use_span: Span, frame: In
     None
 }
 
-sema_expression_lambda_outer_binding_key: fn(key: SymbolID, frame: Int, scopes: ^SemaScopeTable) -> Int? {
+sema_expression_lambda_outer_binding_key: fn(key: SymbolID, frame: Int, scopes: SemaScopeTable) -> Int? {
     index := 0
     loop index < scopes.bindings.len() {
         binding: scopes.bindings[index]
@@ -1243,7 +1243,7 @@ sema_expression_lambda_add_capture_key: fn(keys: ^[SymbolID], key: SymbolID) Nev
     keys.push(SymbolID{id: key.id})
 }
 
-sema_expression_lambda_collect_reference_keys: fn(state: ^SemaOwnershipState, first_reference: Int, frame: Int, scopes: ^SemaScopeTable, keys: ^[SymbolID], mutable_keys: ^[SymbolID]) Never! {
+sema_expression_lambda_collect_reference_keys: fn(state: SemaOwnershipState, first_reference: Int, frame: Int, scopes: SemaScopeTable, keys: ^[SymbolID], mutable_keys: ^[SymbolID]) Never! {
     index := first_reference
     loop index < state.references.len() {
         reference: state.references[index]
@@ -1259,7 +1259,7 @@ sema_expression_lambda_collect_reference_keys: fn(state: ^SemaOwnershipState, fi
     }
 }
 
-sema_expression_lambda_collect_tree_capture_local: fn(local: TLocal, frame: Int, scopes: ^SemaScopeTable, keys: ^[SymbolID]) Never! {
+sema_expression_lambda_collect_tree_capture_local: fn(local: TLocal, frame: Int, scopes: SemaScopeTable, keys: ^[SymbolID]) Never! {
     symbol: local.symbol_id ?? return
     index := 0
     loop index < scopes.bindings.len() {
@@ -1744,7 +1744,7 @@ sema_expression_lambda_keep_waits: fn(source: SemaCheckContext, target: ^SemaChe
     }
 }
 
-sema_expression_lambda_merge_context_facts: fn(source: ^SemaCheckContext, target: ^SemaCheckContext, call_start: Int, name_start: Int, comptime_start: Int, body_source_start: Int, compute_call_start: Int, autodiff_obligation_start: Int, copy_start: Int) Never! {
+sema_expression_lambda_merge_context_facts: fn(source: SemaCheckContext, target: ^SemaCheckContext, call_start: Int, name_start: Int, comptime_start: Int, body_source_start: Int, compute_call_start: Int, autodiff_obligation_start: Int, copy_start: Int) Never! {
     index := call_start
     loop index < source.call_facts.len() {
         target.call_facts.push(source.call_facts[index])

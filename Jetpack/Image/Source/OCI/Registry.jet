@@ -332,12 +332,12 @@ image_registry_request: fn(request: RegistryRequest) -[Env, Exec, Time.Wait]> Re
 }
 
 // Kill and reap the child after an abandoned exchange.
-image_abandon_registry_child: fn(child: ^ProcessChild) -[Exec, Time.Wait]> {
+image_abandon_registry_child: fn(child: ProcessChild) -[Exec, Time.Wait]> {
     image_kill_quiet(child)
     _: child.wait() ?? return
 }
 
-image_kill_quiet: fn(child: ^ProcessChild) -[Exec]> { child.kill() ?? return }
+image_kill_quiet: fn(child: ProcessChild) -[Exec]> { child.kill() ?? return }
 
 // The trimmed value of the first header line named `wanted` (ASCII
 // case-insensitive), lossily decoded.

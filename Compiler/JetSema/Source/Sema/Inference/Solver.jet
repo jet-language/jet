@@ -356,7 +356,7 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph, context: ^SemaI
     Val(evidence)
 }
 
-sema_inference_type_args: fn(context: ^SemaInferenceContext, bindings: [SemaInferenceBinding]) -> [Type]? {
+sema_inference_type_args: fn(context: SemaInferenceContext, bindings: [SemaInferenceBinding]) -> [Type]? {
     result := [Type]{}
     loop parameter in context.type_params {
         actual: sema_inference_binding_at(bindings, parameter.name) ?? return None
@@ -379,7 +379,7 @@ sema_inference_count_diagnostic: fn(expected: Int, actual: Int, span: Span, diag
     diagnostics.push(sema_error("E0119", span, "expected {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site arguments must have the same arity", "provide one type argument for each declared generic parameter"))
 }
 
-sema_inference_prepare_explicit: fn(context: ^SemaInferenceContext, explicit_type_args: [Type], bindings: ^[SemaInferenceBinding], span: Span, diagnostics: ^[Diagnostic]) -> Bool {
+sema_inference_prepare_explicit: fn(context: SemaInferenceContext, explicit_type_args: [Type], bindings: ^[SemaInferenceBinding], span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if explicit_type_args.len() == 0 -> return true
     if context.type_params.len() == 0 {
         sema_inference_count_diagnostic(0, explicit_type_args.len(), span, diagnostics)

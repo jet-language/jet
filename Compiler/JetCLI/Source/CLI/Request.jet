@@ -2401,7 +2401,7 @@ jet_cli_build_read_same_file: fn(left: cli_files.Stat, right: cli_files.Stat) ->
     right.is_file && right.links == 1 && left.id == right.id && left.size == right.size && left.modified == right.modified && left.changed == right.changed
 }
 
-jet_cli_build_read_chain_current: fn(directories: ^[cli_files.Directory], names: ^[String], initial: String) -[FS.Read]> Bool JetCLIReadError! {
+jet_cli_build_read_chain_current: fn(directories: [cli_files.Directory], names: [String], initial: String) -[FS.Read]> Bool JetCLIReadError! {
     base: cli_files.stat(initial) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
     held_base: directories[0].stat() ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
     if !base.is_dir || base.is_symlink || base.id != held_base.id {

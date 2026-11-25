@@ -141,7 +141,7 @@ native_panel_jet_frame: fn(session: ^NativeSession) -> NativePanelJet? NativeDeb
 }
 
 // The memory a stop's places are read from: a dump's, else the program's.
-native_panel_memory: fn(session: ^NativeSession) -> NativeMemory Never! {
+native_panel_memory: fn(session: NativeSession) -> NativeMemory Never! {
     if session.dump == .Val(dumped) -> return dumped.memory
     NativeMemory{trace: Val(session.trace), blocks: [NativeBlock]{}}
 }
@@ -263,7 +263,7 @@ native_memory_points: fn(spans: [NativeMemorySpan], value: Int) -[]> String {
 }
 
 // The bytes the frame's locals own (NativeMemorySpan), in their order.
-native_memory_spans: fn(session: ^NativeSession, at: NativePanelFrame) -> [NativeMemorySpan] Never! {
+native_memory_spans: fn(session: NativeSession, at: NativePanelFrame) -> [NativeMemorySpan] Never! {
     spans := [NativeMemorySpan]{}
     function: native_function_at(session.image, at.lookup) ?? return spans
     memory: native_panel_memory(session)
@@ -315,7 +315,7 @@ native_memory_list: fn(image: NativeImage, memory: NativeMemory, own: {address: 
 // them. A live program's are read a mapping at a time; a byte past a
 // mapping's end is tried again at the next page. The bytes under the
 // debugger's trap bytes, placed jumps and zone probes are the program's own.
-native_memory_view: fn(session: ^NativeSession, at: NativePanelFrame?, address: Int, count: Int) -> NativeMemoryView Never! {
+native_memory_view: fn(session: NativeSession, at: NativePanelFrame?, address: Int, count: Int) -> NativeMemoryView Never! {
     bytes := loop _ in 0..<count -> U8{0}
     mapped := loop _ in 0..<count -> false
     if session.dump == {
@@ -774,7 +774,7 @@ native_memory_answer: fn(session: ^NativeSession, ask: NativeMemoryAsk, path: Na
 // to follow. A word with a byte that is unmapped, redacted or the
 // debugger's own is none, and so is one pointing into the debugger's own
 // bytes. Each page a word points into is looked up once.
-native_memory_pointers: fn(session: ^NativeSession, view: NativeMemoryView) -> [Int] Never! {
+native_memory_pointers: fn(session: NativeSession, view: NativeMemoryView) -> [Int] Never! {
     found := [Int]{}
     memory: native_panel_memory(session)
     pages := [Int:Bool]{}
@@ -798,7 +798,7 @@ native_memory_pointers: fn(session: ^NativeSession, view: NativeMemoryView) -> [
 
 // Whether `address` is one of the debugger's own bytes in a live program:
 // a placed condition's, or the evaluation room's.
-native_memory_debugger: fn(session: ^NativeSession, address: Int) -> Bool Never! {
+native_memory_debugger: fn(session: NativeSession, address: Int) -> Bool Never! {
     if session.dump != None -> return false
     loop placed in session.placed {
         if address >= placed.low && address < placed.high -> return true
@@ -859,7 +859,7 @@ native_memory_byte_rows: fn(session: ^NativeSession, view: NativeMemoryView) -> 
 // NATIVE_MEMORY_ROW_VALUES. A value with an unmapped byte shows as `??`,
 // one a dump redacted as `##`, one in the debugger's own bytes as
 // `[debugger]`.
-native_memory_value_rows: fn(session: ^NativeSession, view: NativeMemoryView, type_name: String, size: Int) -> String Never! {
+native_memory_value_rows: fn(session: NativeSession, view: NativeMemoryView, type_name: String, size: Int) -> String Never! {
     text := ""
     values: view.bytes.len().div_euclid(size)
     row := 0
@@ -917,7 +917,7 @@ native_memory_unsigned: fn(word: Int) -[]> String {
 // What starts in the bytes [low, high) of the program: the frame's locals
 // and List items whose bytes do (`items[2..4]` for a run of items), and a
 // fix's jump.
-native_memory_row_labels: fn(session: ^NativeSession, view: NativeMemoryView, low: Int, high: Int) -> String Never! {
+native_memory_row_labels: fn(session: NativeSession, view: NativeMemoryView, low: Int, high: Int) -> String Never! {
     labels := [String]{}
     loop span in view.spans {
         if span.stride == 0 {
