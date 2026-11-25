@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114269,
+    "rev": 114271,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56317,6 +56317,11 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "D-CORE-LASTROWS1 posted for the owner's vote (two adversarial passes; the second, LastRowsReview2, verified the first's 10 findings and fixed 11 more). Rec A: tls.client keeps the ratified stream spelling, the host/port form becomes tls.connect, term.take becomes take_bytes. n18's last two rows (core.term take, core.net.tls client) wait on it."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "c3 route: S2-S4's handler typing and the OpenAPI contract are not open questions. D-RULE-REWRITE1=A (the contract as a per-call #run parameter default) and D-RULE-BODYFACTS1=A (#Recorded calls in FunctionInfo) are ratified, and their builds are now criteria 39 and 40. Call-site rewriting stays ruled out (D-RULE-REWRITE1 whyNot B; no macros, syntax-decisions.md). The only unowned gate is REWRITE1's fifth, the typed-handler adaptation to one request; its ballot D-HTTP-HANDLER-DECODE1 is being narrowed to that after review (HandlerDecodeReview: the draft re-balloted REWRITE1 and BODYFACTS1)."
         },
         {
@@ -57004,7 +57009,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-25T21:32:22.788Z",
+      "updated": "2026-11-25T21:42:16.061Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 41
     },
@@ -140409,6 +140414,328 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-25T21:07:55.154Z"
+    },
+    {
+      "id": "D-CORE-LASTROWS1",
+      "cardId": "c0e6znz4",
+      "group": "library",
+      "title": "How term.take and the stream forms of tls.client stop needing compiler rows",
+      "situation": "Almost every Core call is now checked against the Core function that declares it. At this tree Core.rows still has four dispatcher rows: `core.term take`, `core.net.tls client`, `core.net sendfile` and `core.crypto.vault get`. A pending change deletes the sendfile and vault rows, so two are left, and this ballot is about them. `term.take(n)` reads up to n bytes from stdin, but `take` is a retired word that no declaration may use as its name. `tls.client` is one name with four shapes: `(host, port)`, `(stream, server_name)`, and two labeled forms over a stream with a deadline and an optional config. Jet has no overloading, so Core declares one of them and the compiler picks among three hidden role functions for the rest. You are asked how these two calls get a plain Core declaration. We recommend A: `tls.client` keeps the stream spelling the owner ratified, the host and port form becomes `tls.connect`, and stdin's read becomes `term.take_bytes`.",
+      "gist": "Two Core calls still need a compiler table row, because Core can't declare them as written. Rename one of the TLS forms, read stdin another way, allow `take` as a member name, add a marker, or keep the rows.",
+      "lesson": "Most Core calls are checked against their Core declaration, so a package that declares the same shape gets the same checks. Two calls can't be declared as they are spelled. `term.take(n)` is named with the retired word `take`, which Jet accepts after a dot but refuses as a declared name. `tls.client` has four shapes under one name, and Jet has no overloading. The compiler keeps one table row for each to pick the Core function that runs.",
+      "explainer": "Today both calls work, but only through compiler rows:\n\n```jet\nuse {\n    term: core.term\n    net: core.net\n    tls: core.net.tls\n}\n\nrun: fn() -[IO, Net, Time.Wait]> {\n    bytes: term.take(64) ?? return\n    tcp: net.tcp_connect(\"example.org:443\") ?? return\n    secure: tls.client(tcp, server_name: \"example.org\", deadline: 5s) ?? return\n    print(bytes.len())\n}\n```\n\nThe first call needs the Core.rows row `core.term take`, which points at the role TermTake. The third needs the row `core.net.tls client` and Sema's arity rule in Sema/Calls/Core.jet `sema_call_core_arity_source_record`, which points at TLSClientStream, TLSClientDeadline or TLSClientConfigDeadline.",
+      "story": "A contributor reads Core/Term/Term.jet to see what `term.take(64)` does. There is no `take` in the file, only a private `__take_bytes` with a role marker. The link between the two is a row in Compiler/Prelude/Core.rows. For `tls.client(tcp, server_name: \"x\", deadline: 1s)` the trail is longer. Sema counts the arguments and checks whether the first is moved. Then it picks one of three private role functions in Core/Net/TLS.jet.",
+      "inWild": "Most languages solve a keyword clash with a raw name, such as Rust's `r#match` or Kotlin's backquoted `when`, or by picking another word.\nOverloads by arity are common in C++, Java and Swift. Rust and Go have none, and name each form instead.\nGo's crypto/tls names the dialing form `Dial` and the wrapping form `Client`.\nRust's native-tls has only the wrapping form, `TlsConnector::connect(domain, stream)`, and the caller dials the TCP stream first.",
+      "detail": "Facts at the batch-48 tree 08d2eae9774. The cited lines are the same at dev 35cc4235d3b.\n\nRows: Core.rows 304 maps `core.term take` to the role TermTake. Core.rows 305 keeps `core.net.tls client` as source-owned, with arity 2 up to 4. Rows 307 `core.net sendfile` and 308 `core.crypto.vault get` are native dispatcher rows too. The pending change 6851-n18-p11-r2-s2-b48 deletes rows 307 and 308. Every claim below that the dispatcher table empties holds only once that change lands.\n\n`term.take`: Core/Term/Term.jet 272 declares `#Builtin.Role(.TermTake) priv __take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError!`. Inside Term.jet, the stdin Reader's `read_bytes` (line 72) and a test (line 866) call it directly. Its neighbour `take_within(n, wait)` at 286 is a plain declaration.\n\n`take` is a retired keyword that the lexer still reserves. Compiler/JetLexer/Source/Lexer/KeywordSpans.jet 116-121 lists it, and Compiler/JetFoundation/Data/Syntax/CoreSurface.jet 411-413 names it KW_MOVE. The parser refuses it as a declared function name, at module level or in a struct, and as a bare call. It accepts it after a dot, as in `reader.take(n)`, and as a struct field name, as in Core/App/App.jet 2071.\n\nSix calls use `term.take`. One is in an example: Examples/Systems/IOSurface.jet 30 calls `io.take(0)` through `use io: core.term`, and IOSurface.out 8 pins its output. One is Compiler/JetLSP/Source/LSP/Loop.jet 52.\n\nThree are in Jetpack/CLI: HangarArchiveCommands.jet 90, BuildPluginHost.jet 44 and CompilerExtensionHost.jet 19. The sixth is Tests/Conformance/Corpus/Core/Term/take.jet 5, which calls `take(0)`. The spec rows are core-library.md 192-195 and the `take(n)` table row at 2664.\n\n`tls.client`: Core/Net/TLS.jet 316 declares `client(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError!`. Lines 335, 340 and 344 declare the role entries TLSClientStream, TLSClientDeadline and TLSClientConfigDeadline over a moved `TCPStream`. Core/HTTP/Client.jet 815 and 2005 call two of them by name: `build_tls.__client_deadline_entry` and `build_tls.__client_config_deadline_entry`.\n\nTLS.jet 516 declares a second dial form, `connect_host(cfg, port)`, which takes its host from `ClientConfig.host` (line 33). It has 2 callers: the CoreLib fixture CoreTLSConfigurationCarriersPreservePolicy and the conformance file Net/TLS/connect_host.jet. Another Core module already exports a bare `connect`: `ws.connect(url)` at Core/Net/Ws.jet 66.\n\nSema picks a TLS role in Compiler/JetSema/Source/Sema/Calls/Core.jet `sema_call_core_arity_source_record` (1100-1113), by argument count and by whether the first argument is moved. Its caller is Core.jet 1463. `sema_call_core_configured_client` and `sema_call_core_native_resource_consumer` (622-629) special-case `tls.client` too.\n\nTheir `configured_client` flag runs through three route resolvers, fed from Core.jet 1536, Expressions.jet 4275 and Direct.jet 1230. A test at Core.jet 1696-1705 checks the consumer rule. `sema_call_core_has_explicit_source_target` (631-634) is true only for row 304, the one row with a source role.\n\n`git grep 'tls\\.client('` over `*.jet` finds 14 lines, but three are not calls. One is a comment at Sema/Calls/Core.jet 622, and two are strings in Tools/Agent/CoreSurfaceLedger.jet 1075-1076. Six `.template` fixtures also call the stream form. The stream form has 11 call lines: 2 examples, 3 `.jet` fixtures and 6 templates. The host and port form has 5 calls and one label-error fixture.\n\nConformance witnesses are keyed by their path (Tools/Hardening/Manifest.jet 142-148). Corpus/Core/Term/take.jet witnesses `core.term.take`. Corpus/Core/Net/TLS/client.jet witnesses `core.net.tls.client` with a host and port call.\n\nThe TLS spec rows are core-library.md 7895 (stream form), 7896 (host and port form) and 7916-7917. Docs/Spec/syntax-decisions.md 5977-5983 records D-NETTLSSTREAM1=A. That decision ratified the labeled stream spelling `tls.client(stream, server_name:, config:, deadline:)`. CoreSurfaceLedger.jet 1075-1076 record D-CORESURF-SMALL1's note that TLS start ships as `tls.client()`.\n\nExpected output names the spelling too. Tests/Cases/CoreNetTLS/configured_tls_client_keeps_native_builder_identity_and_exact_labels.case 9 expects \"`tls.client` has no parameter labeled `host`\", and Tests/known-failing.tsv 116 lists that case. Tests/Cases/CoreLib/core_net_ratified_named_forms_require_exact_labels.case 57 expects a fix naming `host:` for the host and port form.\n\nName-keyed stores outside the rows: Compiler/JetFoundation/Source/CoreDeclarations/Calls.jet keys effects by module and member at 464, 504, 518 and 521-522. Compiler/JetFoundation/Source/Target/TargetMachine.jet 788 lists `take` among core.term reads. Core.rows 184-185 and 220-221 list `client` and `take` in the export and ownership lines. Core/Builtins/Builtins.jet holds the four RoleKind cases at 381-383 and 430, and its comment at 77-79 names them.\n\nThe row table has readers in every tier. Foundation has Registry/CoreCallRows.jet, Registry/CoreCalls.jet, CoreDeclarations/Declarations.jet and Sources.jet. JetIR has Lint.jet `ir_lint_core_routes` and CoreRecords.jet. Driver has CoreReach.jet 772. JetCLI has InspectStructure.jet 102-154 and ProveReplay.jet 2842. Sema has Taint.jet 486, Scheduling/FrameCalls.jet 122 and Calls/ReactiveHandles.jet 101. Tools and guards have DeadRowSweep.jet, RuntimeEffectRows.jet, Tools/Hardening/Facts.jet and Tests/Guards/runtime_leaf_exports.jet.\n\n`CoreCallRecord` has two makers that need no row. `core_call_role_receiver` (Registry/CoreCalls.jet 174) serves data-query roles from Sema/Calls/Data.jet 612. `core_call_source_function` (183) serves Sema/Calls/Core.jet 1255. So the record type outlives every option here. Card criterion 18 deletes Registry/CoreCalls.jet, so those makers need their own move. Card criteria 4 and 6 move the Services.jet and Data.jet checkers that call them.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep `tls.client` for the stream, rename the dial form to `tls.connect`",
+          "detail": "`tls.client(tcp, server_name:, config:, deadline:)` becomes one plain declaration, so the spelling D-NETTLSSTREAM1 ratified stays. Its `config` defaults to `ClientConfig{}` and its `deadline` to none, which means no deadline. Core already declares `net.unix_connect(path, /, *, deadline: Duration?{None})` in this shape (Core/Net/Net.jet 655). A probe on the batch-48 seed declares this shape and checks all three stream calls clean.\n\nThe host and port convenience becomes `tls.connect(host, port)`. `term.take(n)` becomes `term.take_bytes(n)`, a plain Core function next to `take_within`. Both rows and the arity rule go.\n\nThis is Go's split: `tls.Dial` dials and `tls.Client` wraps a connection. It also uses Core's dial verb. `ws.connect(url)` is already a bare `connect` in a sibling module, and `net.tcp_connect` and `net.unix_connect` carry the verb in their names.\n\nBeginner path: `tls.connect(\"example.org\", 443)` and `term.take_bytes(64)`. Expert path: `tls.client(tcp, server_name: \"example.org\", config: cfg, deadline: 5s)`, unchanged.",
+          "technical": "Core/Net/TLS.jet renames `client(host, port)` at 316 to `connect`, which keeps `IOError!`. Its `tls_error` operation text \"client\" at 318, 321 and 326, and the test of that text at 562, become \"connect\". The comments at 313-315 and 332-334 go.\n\nIn place of the role entries at 335-346 it declares `client: fn(stream: ^^TCPStream, /, *, server_name: String, config: ClientConfig{ClientConfig{}}, deadline: Duration?{None}) -[Net, Time.Wait]> TLSStream NetError!`. A None deadline calls `client_connect` with `forever()`. Core/HTTP/Client.jet 815 and 2005 call `build_tls.client(…)` in place of the two role entries they name.\n\nCore/Term/Term.jet renames `__take_bytes` to the public `take_bytes` and drops its role marker; lines 72 and 866 call the new name. Core/Builtins/Builtins.jet drops RoleKind TermTake, TLSClientStream, TLSClientDeadline and TLSClientConfigDeadline, and their comment at 77-79. Core.rows drops rows 304 and 305.\n\nCore.rows also adds `connect` to the core.net.tls lines (184-185) and renames `take` in the core.term lines (220-221). CoreDeclarations/Calls.jet renames `take` at 518 and adds `connect` at 522. TargetMachine.jet 788 renames `take`.\n\nSema/Calls/Core.jet deletes `sema_call_core_arity_source_record` and its call at 1463. It also deletes `sema_call_core_configured_client`, `sema_call_core_native_resource_consumer`, the comment at 622 and the test at 1696-1705. The `configured_client` parameter leaves the three route resolvers and their callers at Core.jet 1536, Expressions.jet 4275 and Direct.jet 1230.\n\nRow 304 is the only row with a source role, so `sema_call_core_has_explicit_source_target` and its uses at 673 and 732 go too. hot-text.list drops 8639 and 8642.\n\nOnce rows 307 and 308 are gone too, the dispatcher table is empty. CORE_CALLS and its key index then go with the `dispatcher_row` parser in Declarations.jet. The IR rule `ir_lint_core_routes`, InspectStructure's call listing and the row readers in Tools go with them.\n\nCallers that move: the 6 `term.take` calls, with Examples/Systems/IOSurface.jet 30 and its comment at 27, and the 5 host and port calls. Those are Core/Net/SSL/TLS.jet 2955, two Tests/Cases/CoreLib fixtures, the CoreNetTLS fixture TLSRejectsEmptyDNSLabelsBeforeTransportOnAllTiers and the conformance corpus. The label fixture 17.jet moves with its .case 57 fix text. So do core-library.md 192-195, 2664, 7896 and 7916-7917.\n\nConformance files move by path. Corpus/Core/Term/take.jet becomes take_bytes.jet, and Corpus/Core/Net/TLS/client.jet becomes connect.jet. A new Net/TLS/client.jet witnesses the stream form. The case core_tls_client_rejects_invalid_port_without_connecting and its fixture folder are renamed for `connect`.\n\nWhat stays: the 11 stream lines (both examples among them), the .case 9 text, known-failing.tsv 116, CoreSurfaceLedger.jet 1075-1076 and syntax-decisions.md 5977-5983.\n\nEdge cases:\n\n- An old `tls.client(\"example.org\", 443)` call now meets the stream form. A same-shape probe on the batch-48 seed gives LabelOnlyPassedByPosition at `443`, not a rename hint. Its fix line says to write `server_name:` there, which misleads.\n\n- The positional `tls.client(tcp, \"host\")` form goes, since `server_name` is label-only. No file calls it; only a research note from 2026-09 quotes it.\n\n- `tls.connect_host(cfg, port)` at TLS.jet 516 stays a separate dial form. It reads its host from `ClientConfig.host`, so folding it into `connect(host, port)` would give one call two hosts. It keeps its name and its 2 callers.\n\n- Two submodules now export `connect`, core.net.tls and core.net.ws. A mistaken `net.connect(…)` gets a submodule hint (Sema/Calls/Core.jet 585-589) that names only the first match; today it names `core.net.ws`.",
+          "code": "use {\n    term: core.term\n    net: core.net\n    tls: core.net.tls\n}\n\nrun: fn() -[IO, Net, Time.Wait]> {\n    bytes: term.take_bytes(64) ?? return\n    tcp: net.tcp_connect(\"example.org:443\") ?? return\n    secure: tls.client(tcp, server_name: \"example.org\", deadline: 5s) ?? return\n    quick: tls.connect(\"example.org\", 443) ?? return\n    print(bytes.len())\n}"
+        },
+        {
+          "key": "B",
+          "name": "A Core marker that serves a name: `#Builtin.Serves(.take)`",
+          "detail": "Spellings stay. A new jet_builtins marker lets a Core function answer a call name it can't declare. `#Builtin.Serves(.take)` on `take_bytes` makes `term.take(n)` call it. The three stream entries each carry `#Builtin.Serves(.client)`, and the compiler picks among the functions that serve one name by their declared parameters.\n\nBeginner path: unchanged. Expert path: unchanged.",
+          "technical": "jet_builtins gains a `Serves` marker and a closed enum of served names. Sema's member lookup consults served names before it reports a missing member. Picking among several servers is a small overload resolver: by arity, then by labels, then by the first argument's convention. The rows and the arity rule go, but the resolver replaces them. The name-keyed effect lists in CoreDeclarations/Calls.jet and TargetMachine.jet 788 keep their keys.\n\nEdge cases:\n\n- Only Core can use jet_builtins markers, so a user package can't declare the same shape and get the same checks. The existing `#Builtin.Role` marker, on 316 Core functions, is Core-only in the same way.\n\n- Two servers whose parameters both fit a call need an ambiguity error and a rule for it.",
+          "code": "use {\n    term: core.term\n    net: core.net\n    tls: core.net.tls\n}\n\nrun: fn() -[IO, Net, Time.Wait]> {\n    bytes: term.take(64) ?? return\n    tcp: net.tcp_connect(\"example.org:443\") ?? return\n    secure: tls.client(tcp, server_name: \"example.org\", deadline: 5s) ?? return\n    print(bytes.len())\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep the two rows behind a closed guard",
+          "detail": "Nothing changes for users. The two Core.rows dispatcher rows and Sema's arity rule stay. A guard test fails if any other dispatcher row comes back, so the table can't grow again.\n\nBeginner path: unchanged. Expert path: unchanged.",
+          "technical": "Tests/Guards gains a check that Core.rows holds exactly the `core.term take` and `core.net.tls client` dispatcher rows. The row table and every reader listed in the detail stay. So do the Sema special cases for `tls.client` and the four RoleKind cases.\n\nEdge cases:\n\n- The rule that a call's checks come from its Core declaration has two exceptions, which the spec must name.\n\n- A package that copies the `tls.client` shape can't get the same checks.",
+          "code": "use {\n    term: core.term\n    net: core.net\n    tls: core.net.tls\n}\n\nrun: fn() -[IO, Net, Time.Wait]> {\n    bytes: term.take(64) ?? return            // still a compiler row\n    tcp: net.tcp_connect(\"example.org:443\") ?? return\n    secure: tls.client(tcp, server_name: \"example.org\", deadline: 5s) ?? return\n    print(bytes.len())\n}"
+        },
+        {
+          "key": "D",
+          "name": "Rename only `take`, keep `tls.client` with a row",
+          "detail": "`term.take(n)` becomes `term.take_bytes(n)` as in A. `tls.client` keeps its four shapes and its row, behind a guard as in C.\n\nBeginner path: `term.take_bytes(64)`; TLS calls are unchanged. Expert path: unchanged.",
+          "technical": "The Term half of A and the TLS half of C.\n\nEdge cases:\n\n- The row table and its readers in five tiers stay whole for one row.",
+          "code": "use {\n    term: core.term\n    net: core.net\n    tls: core.net.tls\n}\n\nrun: fn() -[IO, Net, Time.Wait]> {\n    bytes: term.take_bytes(64) ?? return\n    tcp: net.tcp_connect(\"example.org:443\") ?? return\n    secure: tls.client(tcp, server_name: \"example.org\", deadline: 5s) ?? return\n    print(bytes.len())\n}"
+        },
+        {
+          "key": "E",
+          "name": "Rename: `term.take_bytes(n)` and `tls.wrap_client(tcp, …)`",
+          "detail": "`term.take(n)` becomes `term.take_bytes(n)`, a plain Core function next to `take_within`. The three stream forms of `tls.client` become one function, `tls.wrap_client(tcp, server_name:, config:, deadline:)`, with A's defaults. `tls.client(host, port)` keeps its name. Both rows and the arity rule go.\n\nBeginner path: `tls.client(\"example.org\", 443)` is unchanged, and `term.take(64)` becomes `term.take_bytes(64)`. Expert path: `tls.wrap_client(tcp, server_name: \"example.org\", config: cfg, deadline: 5s)`.",
+          "technical": "Core/Term/Term.jet changes as in A. Core/Net/TLS.jet replaces the role entries at 335-346 with `wrap_client: fn(stream: ^^TCPStream, /, *, server_name: String, config: ClientConfig{ClientConfig{}}, deadline: Duration?{None}) -[Net, Time.Wait]> TLSStream NetError!`. `client(host, port)` at 316 stays.\n\nThe RoleKind, row, Sema and hot-text edits are A's. Core.rows adds `wrap_client` to the core.net.tls lines (184-185), and CoreDeclarations/Calls.jet adds it at 522.\n\nCallers move in the same change. These are the 6 `term.take` calls and the 11 stream-form lines (2 examples, 3 `.jet` fixtures, 6 templates). Core/HTTP/Client.jet 815 and 2005 call `build_tls.wrap_client`. The .case 9 expected text, its known-failing row and CoreSurfaceLedger.jet 1075-1076 move too. So do core-library.md 192-195, 2664, 7895 and 7916-7917, and syntax-decisions.md 5977-5983.\n\nConformance: Corpus/Core/Term/take.jet becomes take_bytes.jet, and a new Corpus/Core/Net/TLS/wrap_client.jet witnesses the stream form.\n\nEdge cases:\n\n- The positional `tls.client(tcp, \"host\")` form returned `IOError`. Under E every stream form returns `NetError`, as the labeled forms already do. The positional form has no caller anywhere.\n\n- An old `tls.client(tcp, server_name: …)` call now meets `client(host, port)` and gets a label or type error, not a rename hint.\n\n- `wrap_client` replaces the stream spelling D-NETTLSSTREAM1 ratified, so ruling E supersedes that decision. It also changes the `tls.client()` spelling that CoreSurfaceLedger.jet records for D-CORESURF-SMALL1.",
+          "code": "use {\n    term: core.term\n    net: core.net\n    tls: core.net.tls\n}\n\nrun: fn() -[IO, Net, Time.Wait]> {\n    bytes: term.take_bytes(64) ?? return\n    tcp: net.tcp_connect(\"example.org:443\") ?? return\n    secure: tls.wrap_client(tcp, server_name: \"example.org\", deadline: 5s) ?? return\n    print(bytes.len())\n}"
+        },
+        {
+          "key": "F",
+          "name": "Read stdin through its Reader, and split the TLS forms as in A",
+          "detail": "`term.take` goes away with no new name. Standard input already implements the Prelude `Reader`, and its `read_bytes(limit)` reads through the same private function. Callers bind the handle and read: `^input: term.stdin()`, then `input.read_bytes(n)`. The TLS half is A's: `tls.client` wraps a stream and `tls.connect` dials.\n\nBeginner path: two lines instead of one. Expert path: the same handle works with any code that takes a `Reader`.",
+          "technical": "Core/Term/Term.jet makes `__take_bytes` a plain private helper with no role marker, and RoleKind loses TermTake. No public `take` replaces it. The 6 callers move to `read_bytes` on a bound `term.stdin()`. core-library.md 192-195 and 2664 drop the `take` rows, and Core.rows 220-221, Calls.jet 518 and TargetMachine.jet 788 drop `take`. The conformance file Corpus/Core/Term/take.jet goes. The TLS edits are A's.\n\nEdge cases:\n\n- `read_bytes(0)` is an error (Term.jet 71), but `take(0)` returns an empty list. The example Examples/Systems/IOSurface.jet 30 and the conformance file take.jet 5 both call `take(0)`. So the example's pinned output (IOSurface.out 8) changes.\n\n- A negative limit gets \"the read limit must be positive\" instead of \"negative take\".\n\n- `take_within` keeps its name with no `take` partner.",
+          "code": "use {\n    term: core.term\n    net: core.net\n    tls: core.net.tls\n}\n\nrun: fn() -[IO, Net, Time.Wait]> {\n    ^input: term.stdin()\n    bytes: input.read_bytes(64) ?? return\n    tcp: net.tcp_connect(\"example.org:443\") ?? return\n    secure: tls.client(tcp, server_name: \"example.org\", deadline: 5s) ?? return\n    print(bytes.len())\n}"
+        },
+        {
+          "key": "G",
+          "name": "Let `take` name a module member, and split the TLS forms as in A",
+          "detail": "Jet already accepts the retired word `take` after a dot and as a struct field name. G lets any module declare a function named `take` too. It is called only with a qualifier, such as `term.take(n)`. A bare `take(…)` stays refused. The TLS half is A's: `tls.client` wraps a stream and `tls.connect` dials.\n\nBeginner path: `term.take(64)` is unchanged. Expert path: a package can declare its own `take` the same way.",
+          "technical": "The parser's declaration-name rule accepts the retired `take` token for a module member. `parser_colon_word` in Compiler/JetParser/Source/Parser/ColonDeclarations.jet 117-121 already does this for colon words. Two UI snapshots that pin the refusal change: Tests/UI/UnitFamily/bare_float_does_not_coerce_into_unit.stderr and Tests/UI/CffiEnumBoundaries/CffiEnumUnknownTagWidthStaysAtTheCheckedBoundary/stderr. `jet inspect reserved` (Compiler/JetCLI/Source/CLI/InspectB.jet) must say the word is reserved only as a bare name.\n\nCore/Term/Term.jet renames `__take_bytes` to `take` and drops the role. The row and RoleKind TermTake go, and call sites stay. The TLS edits are A's.\n\nEdge cases:\n\n- Term.jet 72 and 866 call the function bare today. Under G they need a qualified form or a private helper.\n\n- The syntax rule changes, so G is a syntax decision as well as a library one.\n\n- Methods spelled `take` are compiler-known today (Sema/Calls/StreamHandles.jet 228, JetFoundation/Source/Collections.jet 381). G would let them be declared later too.",
+          "code": "// Core/Term/Term.jet\ntake: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! { … }\n\n// a caller\nuse {\n    term: core.term\n    net: core.net\n    tls: core.net.tls\n}\n\nrun: fn() -[IO, Net, Time.Wait]> {\n    bytes: term.take(64) ?? return\n    tcp: net.tcp_connect(\"example.org:443\") ?? return\n    secure: tls.client(tcp, server_name: \"example.org\", deadline: 5s) ?? return\n    print(bytes.len())\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "No overloading. native-tls has only the wrapping form, `TlsConnector::connect(domain, stream)`, and the caller dials the TCP stream first.",
+          "code": "let tcp = TcpStream::connect(\"example.org:443\")?;\nlet tls = connector.connect(\"example.org\", tcp)?;"
+        },
+        {
+          "lang": "Go",
+          "note": "crypto/tls has `Dial` for host and port and `Client` to wrap a connection you already have. Option A uses the same split.",
+          "code": "conn, err := tls.Dial(\"tcp\", \"example.org:443\", cfg)\nwrapped := tls.Client(tcp, cfg)"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "A keyword can be a name if you backquote it. Kotlin code calls Mockito's `when` that way.",
+          "code": "`when`(repo.find(1)).thenReturn(user)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives both calls a plain Core declaration, so the last two dispatcher rows, the arity rule and the `tls.client` special cases in Sema go. Once the pending change removes the sendfile and vault rows, the row table goes too. A package can declare the same shapes and get the same checks.\n\nA keeps the stream spelling the owner ratified in D-NETTLSSTREAM1, which both examples and 9 other files use. It renames only the host and port form, which 5 calls use and no example does. `tls.connect` uses Core's dial verb, as `ws.connect(url)` already does, and follows Go's `Dial`/`Client` split.\n\nE reaches the same end, but it overturns a ratified spelling and moves 11 stream lines. B keeps the spellings with an overload resolver only Core can use. C and D keep the exception, and F and G change how stdin bytes are read or named.",
+        "gains": [
+          "No call is checked through a compiler table; every check comes from a Core declaration.",
+          "The arity rule, the `tls.client` special cases in Sema and four RoleKind cases are deleted.",
+          "The stream form has one declaration with defaults instead of three hidden entries, under the spelling the owner already ratified.",
+          "The dial form uses Core's dial verb, as `ws.connect(url)` does.",
+          "`take_bytes` says it returns bytes, as `read_bytes` does."
+        ],
+        "losses": [
+          {
+            "loss": "The beginner call `tls.client(host, port)` becomes `tls.connect(host, port)`.",
+            "mitigation": "No example uses it, and its 5 callers move in the same change. The `client` spec row and doc comment name `connect` for dialing a host."
+          },
+          {
+            "loss": "An old `tls.client(\"example.org\", 443)` call gets LabelOnlyPassedByPosition at `443`, not a rename hint.",
+            "mitigation": "A rename table would keep the old spelling, which the cutover rule forbids. The error points at the call, and the spec row says which call dials. Its fix line says to write `server_name:`, which misleads, so the spec row for `client` names `connect` too."
+          },
+          {
+            "loss": "`term.take(n)` becomes `term.take_bytes(n)`, and the near-name hint can't reach it, at 6 edits.",
+            "mitigation": "E1004's fallback lists the module's items, `take_bytes` among them (Sema/Calls/Core.jet 564-569); a probe shows that 31-item list today. The 6 callers, one example among them, move in the same change."
+          },
+          {
+            "loss": "The positional `tls.client(tcp, \"host\")` form goes, and its IOError with it.",
+            "mitigation": "No file calls it. The labeled form covers it with `server_name:`, and returns NetError as the other stream forms do."
+          },
+          {
+            "loss": "`CoreCallRecord` and Registry/CoreCalls.jet survive A, because two makers build records with no row.",
+            "mitigation": "They serve only Data.jet's query, stream and list roles and Services.jet's worker and JobQueue calls. They go when those checkers move to Core under criteria 4 and 6 of this card."
+          },
+          {
+            "loss": "Two Net submodules export `connect`, so the hint for a mistaken `net.connect(…)` names only one of them.",
+            "mitigation": "The hint already picks one submodule today. The spec rows for `tls.connect` and `ws.connect` each say what they dial."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "E",
+            "reason": "It overturns the ratified stream spelling and moves 11 stream lines, both examples among them, to keep a host form no example uses."
+          },
+          {
+            "key": "B",
+            "reason": "It adds an overload resolver that only Core can use, so user packages still can't match Core's shapes. The existing Role marker is Core-only too, but a role names one function, and B picks among several."
+          },
+          {
+            "key": "C",
+            "reason": "It keeps two exceptions to the rule that checks come from declarations, and all the machinery for them."
+          },
+          {
+            "key": "D",
+            "reason": "It keeps the row table and its readers alive for one TLS row."
+          },
+          {
+            "key": "F",
+            "reason": "Every stdin read needs a bound handle first, and a zero-length read becomes an error. It does avoid a second public name for the same read."
+          },
+          {
+            "key": "G",
+            "reason": "It changes a syntax rule for one Core name, and Core's own file can't call the function bare."
+          }
+        ],
+        "tradeoff": "A renames the host and port form and stdin's read to delete the last compiler rows, and keeps the ratified stream spelling. E keeps the host form but overturns that spelling and moves more lines. The take half and the TLS half are independent, so the owner may pair F or G with A's TLS half."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude. Fresh agent: LastRowsReview2. The adversarial review attacked the recommendation, and the reviewer applied every fix in this copy.\n\nVerdict: post this revised copy; A holds, since a probe declares its stream `client` and its `connect` as plain functions and every call form checks clean\n\nThe findings fix facts, the cutover list and the code samples, not the choice\n\nPass 1 (LastRowsReview) at dev 35cc4235d3b: findings 1, 3, 4, 6, 7, 9 and 10 are fixed; finding 2 kept one wrong word, and findings 5 and 8 missed sites\n\nFinding 1, invalid Jet: every sample opened with a one-line `use { term: core.term, … }`, which the seed refuses at the first comma; samples now use a block `use`\n\nFinding 2, missed callers: Core/HTTP/Client.jet 815 and 2005 call `build_tls.__client_deadline_entry` and `build_tls.__client_config_deadline_entry`, which A and E delete\n\nFinding 3, missed call: Examples/Systems/IOSurface.jet 30 calls `io.take(0)` on core.term, with output pinned in IOSurface.out 8; there are 6 calls, not 5\n\nFinding 4, missed Sema sites: Sema/Calls/Core.jet 1463 and 1536, Expressions.jet 4275, Direct.jet 1230 and the test at Core.jet 1696-1705\n\nFinding 4, continued: `sema_call_core_has_explicit_source_target` (631-634) is true only for row 304, so A deletes it and hot-text.list 8639 at once\n\nFinding 5, TLS text: the `tls_error` operation \"client\" at TLS.jet 318, 321 and 326 and its test at 562, comments at 313-315 and 332-334, and Builtins.jet 77-79\n\nFinding 6, witnesses: Tools/Hardening/Manifest.jet 142-148 keys witnesses by path, so Term/take.jet and Net/TLS/client.jet are renamed and the stream `client` needs a new witness\n\nFinding 7, untreated sibling: `connect_host(cfg, port)` at TLS.jet 516 also dials, with its host from `ClientConfig.host`; A now says why it stays apart\n\nFinding 8, wrong fact: `take` is a retired keyword still reserved (CoreSurface.jet 411-413 KW_MOVE), and the parser reports \"found the keyword `take`\", so \"not a keyword\" is gone\n\nFinding 9, wrong cutover item: CoreSurfaceLedger.jet 1075-1076 record D-CORESURF-SMALL1's `tls.client()` spelling, which A keeps, so they move only under E\n\nFinding 10, edge cases: the `net.connect` submodule hint (Core.jet 585-589) names only the first of two `connect` exports, and the old-call fix line wrongly suggests `server_name:`\n\nFinding 11, consistency: `ws.connect(url)` at Ws.jet 66 is the closest precedent and was uncited, and `take_within` also returns bytes, so the pair claim is dropped\n\nProbes on the batch-48 seed: the old-call shape gives LabelOnlyPassedByPosition at `443`; `term.take_bytes` gets E1004 with a 31-item menu; a `take: fn` declaration is refused\n\nCounts with git grep, aliases included: 14 `tls.client(` lines, 11 stream lines, 5 host calls, 316 Role markers and 6 take calls; `connect` is in no keyword list\n\nChange 1: the detail, A's technical, E, F, the losses and checkInstructions carry findings 2 to 11\n\nChange 2: every sample's `use` is a block, and the surface counts now say 19 and 6"
+      },
+      "checkInstructions": "Check these lines at batch-48 tree 08d2eae9774. Compiler/Prelude/Core.rows has dispatcher rows 304, 305, 307 and 308, and export lines 184-185 and 220-221. Core/Term/Term.jet has `__take_bytes` at 272, its callers at 72 and 866, and `take_within` at 286. Core/Net/TLS.jet has the TLS entries at 316-346 and `connect_host` at 516.\n\nCompiler/JetSema/Source/Sema/Calls/Core.jet has the TLS special cases at 622-629, the source-target test at 631-634, the arity rule at 1100-1113 and its callers at 1463 and 1536. Compiler/JetFoundation/Source/CoreDeclarations/Calls.jet has the name-keyed effects at 518 and 521-522, and Target/TargetMachine.jet has `take` at 788.\n\nCore/HTTP/Client.jet calls the TLS role entries at 815 and 2005. Examples/Systems/IOSurface.jet calls `io.take(0)` at 30. Tools/Hardening/Manifest.jet keys conformance witnesses by path at 142-148.\n\nDocs/Spec/Reference/core-library.md has the spec at 192-195, 2664, 7895-7896 and 7916-7917. Docs/Spec/syntax-decisions.md has D-NETTLSSTREAM1 at 5977-5983.\n\nCount call sites with `git grep -n -E '[a-z_]+\\.take\\(' -- '*.jet'` and keep only core.term aliases, such as `term` and `io`. Count TLS calls with `git grep -n -e 'tls\\.client(' -- '*.jet' '*.template' '*.case'` and `git grep -n -E '__client_(deadline|config_deadline|stream)_entry'`. Find the Sema sites with `git grep -n -e configured_client -e arity_source_record -e has_explicit_source_target -- Compiler`. Find the row-free record makers with `git grep -n -e core_call_role_receiver -e core_call_source_function`.",
+      "surface": {
+        "gist": "Core can't declare `term.take` or the `tls.client` stream forms. Rename, change a rule, add a marker, or keep rows?",
+        "lesson": "Every other Core call is checked against its declaration. These two still need a compiler row. `take` is a retired word no declaration may use, and Jet has no overloading for the four `tls.client` shapes.",
+        "trio": {
+          "current": {
+            "note": "Both spellings work only through compiler rows.",
+            "code": "bytes: term.take(64) ?? return\nsecure: tls.client(tcp, server_name: \"x\", deadline: 5s) ?? return"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go names the wrapping form `Client` and the dialing form `Dial`.",
+            "code": "conn, err := tls.Dial(\"tcp\", \"example.org:443\", cfg)\nwrapped := tls.Client(tcp, cfg)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Rename the dial form",
+            "gist": "`tls.connect(host, port)` dials, `tls.client(tcp, …)` wraps, and `take` becomes `take_bytes`.",
+            "gains": [
+              "No compiler rows are left.",
+              "Keeps the ratified stream spelling, as Go does."
+            ],
+            "losses": [
+              "The `tls.client(host, port)` call, used by no example, changes name."
+            ],
+            "proposed": {
+              "code": "bytes: term.take_bytes(64) ?? return\nsecure: tls.client(tcp, server_name: \"x\", deadline: 5s) ?? return\nquick: tls.connect(\"x\", 443) ?? return"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Serves marker",
+            "gist": "A Core-only marker lets a function answer a name, and the compiler picks among several.",
+            "gains": [
+              "No spelling changes."
+            ],
+            "losses": [
+              "A Core-only overload resolver."
+            ],
+            "proposed": {
+              "code": "bytes: term.take(64) ?? return\nsecure: tls.client(tcp, server_name: \"x\", deadline: 5s) ?? return"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep two rows",
+            "gist": "The two rows stay, and a guard stops new ones.",
+            "gains": [
+              "Nothing changes."
+            ],
+            "losses": [
+              "Two exceptions and their machinery stay."
+            ],
+            "proposed": {
+              "code": "bytes: term.take(64) ?? return\nsecure: tls.client(tcp, server_name: \"x\", deadline: 5s) ?? return"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Rename only take",
+            "gist": "`take` becomes `take_bytes`, and `tls.client` keeps its row.",
+            "gains": [
+              "TLS callers don't change."
+            ],
+            "losses": [
+              "The row machinery stays for one row."
+            ],
+            "proposed": {
+              "code": "bytes: term.take_bytes(64) ?? return\nsecure: tls.client(tcp, server_name: \"x\", deadline: 5s) ?? return"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Rename the stream form",
+            "gist": "`term.take_bytes(n)` and `tls.wrap_client(tcp, …)`, each a plain Core function.",
+            "gains": [
+              "No compiler rows are left."
+            ],
+            "losses": [
+              "Nineteen call lines change spelling.",
+              "Replaces the ratified stream spelling."
+            ],
+            "proposed": {
+              "code": "bytes: term.take_bytes(64) ?? return\nsecure: tls.wrap_client(tcp, server_name: \"x\", deadline: 5s) ?? return"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Read stdin as a Reader",
+            "gist": "`term.take` goes, and callers use stdin's existing `read_bytes`. TLS changes as in A.",
+            "gains": [
+              "No new name for stdin bytes."
+            ],
+            "losses": [
+              "Two lines instead of one.",
+              "A zero-length read becomes an error."
+            ],
+            "proposed": {
+              "code": "^input: term.stdin()\nbytes: input.read_bytes(64) ?? return"
+            }
+          },
+          {
+            "key": "G",
+            "name": "Allow `take` as a member name",
+            "gist": "Any module may declare `take`, called only with a qualifier. TLS changes as in A.",
+            "gains": [
+              "`term.take` keeps its spelling.",
+              "Packages get the same rule."
+            ],
+            "losses": [
+              "A syntax rule changes for one word."
+            ],
+            "proposed": {
+              "code": "take: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! { … }\nbytes: term.take(64) ?? return"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives both calls plain declarations, so the last compiler rows go. It keeps the ratified stream spelling and renames only the host form, which no example uses.",
+          "gains": [
+            "Every Core call is checked against its declaration.",
+            "The ratified `tls.client` stream spelling stays."
+          ],
+          "losses": [
+            {
+              "loss": "`tls.client(host, port)` becomes `tls.connect(host, port)`.",
+              "mitigation": "No example uses it, and its 5 callers move with it."
+            },
+            {
+              "loss": "`term.take` becomes `term.take_bytes`.",
+              "mitigation": "E1004 lists `take_bytes`, and the 6 callers move with it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "E",
+              "reason": "It overturns a ratified spelling and moves more lines."
+            },
+            {
+              "key": "B",
+              "reason": "Only Core could use the marker."
+            },
+            {
+              "key": "C",
+              "reason": "Two exceptions stay."
+            },
+            {
+              "key": "D",
+              "reason": "The machinery stays for one row."
+            },
+            {
+              "key": "F",
+              "reason": "Callers bind a handle, and zero-length reads fail."
+            },
+            {
+              "key": "G",
+              "reason": "It changes a syntax rule for one name."
+            }
+          ],
+          "tradeoff": "Two rarely used spellings change so no Core call needs a compiler row."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "LastRowsReview2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T21:41:59.890Z"
     }
   ],
   "questions": [
@@ -142651,6 +142978,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T21:42:16.061Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T21:41:59.890Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-CORE-LASTROWS1",
+      "note": "How term.take and the stream forms of tls.client stop needing compiler rows"
+    },
     {
       "at": "2026-11-25T21:32:22.788Z",
       "by": "Orchestrator",
