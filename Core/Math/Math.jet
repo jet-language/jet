@@ -37844,7 +37844,7 @@ to_bits: fn(n: Float) -> Int Never! { Int{__to_bits_i64(n)} }
 // (no conversion), so NaN payloads and signaling NaNs cross unchanged.
 #Builtin.Role(.ToBitsF32) priv __to_bits_f32: fn(n: F32) -> Int Never! { Int{__f32_bits_i64(n)} }
 
-priv __from_bits_f32: fn(bits: Int) -> F32 Never! { __f32_from_bits_i64(wrapping(I64{bits})) }
+priv __from_bits_f32: fn(bits: Int) -> F32 Never! { __f32_from_bits_i64(checked(I64{bits}) ?? core.math.__numeric_stop("Value doesn't fit in destination type")) }
 
 // The binary32 bits of n as an I64 in 0..<2^32, and the F32 of the low 32
 // bits of `bits`: one copy each (InlineF32Bits, InlineF32FromBits). These
@@ -37889,7 +37889,8 @@ f32_to_bits: fn(value: F32) -> U32 Never! { wrapping(U32{__f32_bits_i64(value)})
 
 f32_from_bits: fn(word: U32) -> F32 Never! { __f32_from_bits_i64(I64{word}) }
 
-from_bits: fn(bits: Int) -> Float Never! { __from_bits_i64(wrapping(I64{bits})) }
+// An Int past the I64 range is no machine word: it stops at the caller's line.
+from_bits: fn(bits: Int) -> Float Never! { __from_bits_i64(checked(I64{bits}) ?? core.math.__numeric_stop("Value doesn't fit in destination type")) }
 
 // The bits of n as an I64, and the Float of `bits`: one bit copy each, as
 // to_bits and from_bits, without the Int those box past +-2^62. The

@@ -1315,11 +1315,17 @@ jet_driver_reach_core_demands: fn(reach: ^JetDriverReach, unit: Int, demand: Jet
         reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "pow"), dotted: true, module_name: "core.math", bare: true, open: false, followed: false})
     }
     loop module_name in demand.source_modules {
-        if module_name == "core.regex" {
-            reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "Regex"), dotted: false, module_name: "core.regex", bare: true, open: true, followed: false})
-        }
-        if module_name == "core.time" {
-            reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "timeout"), dotted: true, module_name: "core.time", bare: true, open: true, followed: false})
+        if module_name == {
+            "core.regex" -> {
+                reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "Regex"), dotted: false, module_name: "core.regex", bare: true, open: true, followed: false})
+            }
+            "core.time" -> {
+                reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "timeout"), dotted: true, module_name: "core.time", bare: true, open: true, followed: false})
+            }
+            "core.tasks" -> {
+                reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "channel"), dotted: false, module_name: "core.tasks", bare: true, open: true, followed: false})
+            }
+            else -> {}
         }
         loop row in BUILTIN_METHOD_ROWS {
             if row.lowering == .CoreSource(owner, _) {
