@@ -241,36 +241,7 @@ core_sig_network: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignatur
     None
 }
 
-// `core.crypto.vault.current(name)`: the newest key reference of one sealed
-// vault key type `T` (SigningKey or X25519SecretKey; a generic body defers
-// the bound to monomorphization), or None.
-core_sig_vault: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
-    if module_name != "core.crypto.vault" || member != "current" -> return None
-    key_ref: core_sig_apply("KeyRef", core_sig_named("T"))
-    parameters: [CoreCallTypedParameter]{core_sig_positional(Type.String, AccessConvention.Read)}
-    Val(core_sig_generic(module_name, member, parameters, Val(core_sig_result(Type.Option{inner: key_ref}, core_sig_named("VaultError"))), core_sig_type_parameter("T", CoreCallTypeConstraint.VaultKey)))
-}
-
-// `core.plugin.load(path, authority, limits:)`. The limits name Core's
-// plugin `Limits` by its canonical identity, so a program's own `Limits` or
-// `core.image`'s never stands in, and an absent label builds it from its
-// declared field defaults.
-core_sig_plugin_load: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
-    if module_name != "core.plugin" || member != "load" -> return None
-    read: AccessConvention.Read
-    limits: Type.Named{name: "<corelib>/core.plugin.Limits"}
-    parameters: [CoreCallTypedParameter]{
-        core_sig_positional(Type.String, read),
-        core_sig_positional(core_sig_named("Authority"), read),
-        core_sig_parameter("limits", "limits", ParamZone.LabelOnly, read, limits, Val(CoreCallDefault.FieldDefaults)),
-    }
-    signature := core_sig(module_name, member, parameters, Val(core_sig_named("Plugin")))
-    signature.min_arity = 2
-    Val(signature)
-}
-
 core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
-    if core_sig_vault(request.module_name, request.member) == Val(vault) -> return Val(vault)
     if core_sig_network(request) == Val(network) -> return Val(network)
     if core_sig_math_fixed(request.module_name, request.member) == Val(math_fixed) {
         return Val(math_fixed)
@@ -280,9 +251,6 @@ core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature?
     }
     if core_host_fixed_signature(request.module_name, request.member) == Val(host) {
         return Val(host)
-    }
-    if core_sig_plugin_load(request.module_name, request.member) == Val(plugin) {
-        return Val(plugin)
     }
     core_platform_fixed_signature(request.module_name, request.member)
 }

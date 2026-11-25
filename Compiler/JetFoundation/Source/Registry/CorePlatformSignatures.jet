@@ -5,14 +5,19 @@
 // one branch per member, so the compiler and its emitted code stay linear in
 // the table size. One row per line: `module member[|member…] params return
 // [type_parameter|…]`, fields separated by one space. `params` is `-` (none)
-// or a comma list of positional parameter types, each optionally prefixed `^^`
-// (taken) or `^` (written); `return` is `-` (none) or a type; the optional
-// fifth field names the signature's unconstrained type parameters. Types:
+// or a comma list of parameter types, each optionally prefixed `^^` (taken)
+// or `^` (written); a parameter spelled `label:T` takes its argument only by
+// that label, and `label:T=` may be left out, the argument then built from
+// T's declared field defaults. `return` is `-` (none) or a type; the optional
+// fifth field names the signature's type parameters, `T` unconstrained or
+// `T:VaultKey` sealed to the vault's key types. Types:
 // `String` `Int` `Float` `F32` `Bool` `Char`; `u8` / `i32` / `U16` / `I64` (IntN); `[T]` list;
 // `[K:V]` map; `T?` option; `Result<T,E>`; `Union<A,B,…>`; `Name<T,…>`
 // (Apply); `fn(A,B)` and `fn(A,B;R)` (no effect row or call metadata);
-// `(name:T,…)` tuple; any other name is Named. The first row whose module
-// and member match wins; no row is None.
+// `(name:T,…)` tuple; `<corelib>/module.Name` a Core type by its canonical
+// identity, which no program type of the same short name stands in for; any
+// other name is Named. The first row whose module and member match wins; no
+// row is None.
 // The lookup splits the table at `\n{module_name} `, so only that module's
 // rows are copied out and parsed; every other row is passed over by the
 // runtime search.
@@ -36,6 +41,7 @@ core_sig_row_lookup: fn(rows: String, module_name: String, member: String) -> Co
             next
         }
         parameters := [CoreCallTypedParameter]{}
+        required := 0
         if fields[2] != "-" {
             loop text in core_sig_row_parameters(fields[2]) {
                 bytes: text.bytes()
@@ -51,19 +57,45 @@ core_sig_row_lookup: fn(rows: String, module_name: String, member: String) -> Co
                         start = 1
                     }
                 }
-                parameters.push(core_sig_positional(core_sig_row_type(text, start), access))
+                label_end := start
+                loop core_sig_row_is_name_code(core_sig_row_code(bytes, label_end)) -> label_end += 1
+                if label_end > start && core_sig_row_code(bytes, label_end) == 58 {
+                    defaulted: core_sig_row_code(bytes, bytes.len() - 1) == 61
+                    type_end: if defaulted -> bytes.len() - 1 else -> bytes.len()
+                    typed: String.from_bytes(bytes.slice(label_end + 1, type_end)) ?? ""
+                    name: String.from_bytes(bytes.slice(start, label_end)) ?? ""
+                    label: String.from_bytes(bytes.slice(start, label_end)) ?? ""
+                    default: if defaulted -> Val(CoreCallDefault.FieldDefaults) else -> CoreCallDefault?{None}
+                    if !defaulted -> required += 1
+                    parameters.push(core_sig_parameter(name, label, ParamZone.LabelOnly, access, core_sig_row_type(typed, 0), default))
+                } else {
+                    required += 1
+                    parameters.push(core_sig_positional(core_sig_row_type(text, start), access))
+                }
             }
         }
         return_type: if fields[3] == "-" -> Type?{None} else -> Val(core_sig_row_type(fields[3], 0))
         signature := core_sig(module_name, member, parameters, return_type)
+        signature.min_arity = required
         signature.native_return_labels = core_sig_row_tuple_labels(fields[3])
         if fields.len() == 5 {
-            type_parameters: loop name in fields[4].split("|") -> core_sig_type_parameter(name, CoreCallTypeConstraint.Any)
+            type_parameters: loop spelled in fields[4].split("|") -> core_sig_row_type_parameter(spelled)
             signature.type_parameters = type_parameters
         }
         return Val(signature)
     }
     None
+}
+
+// One entry of a row's type parameter field: `T`, or `T:VaultKey` for a
+// parameter sealed to the vault's key types (SigningKey, X25519SecretKey; a
+// generic body defers the bound to monomorphization).
+core_sig_row_type_parameter: fn(spelled: String) -> CoreCallTypeParameter Never! {
+    if spelled.split_once(":") == .Val(parts) {
+        constraint: if parts.after == "VaultKey" -> CoreCallTypeConstraint.VaultKey else -> CoreCallTypeConstraint.Any
+        return core_sig_type_parameter(parts.before, constraint)
+    }
+    core_sig_type_parameter(spelled, CoreCallTypeConstraint.Any)
 }
 
 // A `(name:T,…)` return's labels, or a `Result<T,(name:T,…)>` return's error
@@ -181,6 +213,14 @@ core_sig_row_atom_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
             next = field.next + 1
         }
         return CoreSigRowType{ty: Type.Tuple{fields: fields}, next: next}
+    }
+    // `<corelib>/module.Name`: the Core type of that canonical identity.
+    if first == 60 {
+        end := start
+        loop end < bytes.len() && core_sig_row_code(bytes, end) != 47 -> end += 1
+        end += 1
+        loop core_sig_row_is_name_code(core_sig_row_code(bytes, end)) || core_sig_row_code(bytes, end) == 46 -> end += 1
+        return CoreSigRowType{ty: Type.Named{name: String.from_bytes(bytes.slice(start, end)) ?? ""}, next: end}
     }
     end := start
     loop core_sig_row_is_name_code(core_sig_row_code(bytes, end)) -> end += 1
