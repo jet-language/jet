@@ -4429,7 +4429,7 @@ ir_print_pieces: fn(m: ^IRModule, b: ^IRBuilder, pieces: [IRStringPiece]) Never!
 // callee's executable return type.
 ir_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, key: String, type_args: [Type], receiver: Int, receiver_backs: [IRWriteBack], args: [BodyCallArg], span: Span) -> Int Never! {
     if ir_intrinsic_of(p, key) == .Val(intrinsic) {
-        return ir_intrinsic_call(m, p, b, intrinsic, type_args, args, span)
+        return ir_intrinsic_call(m, p, b, intrinsic, key, type_args, args, span)
     }
     if ir_foreign_of(p, key) == .Val(foreign) -> return ir_foreign_call(m, p, b, foreign, args, span)
     row: ir_function_row(p, key) ?? return ir_fail_slot(b, span, "call of a function outside the checked program: {key}")
@@ -4442,7 +4442,7 @@ ir_call_decl: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, callee: DeclID, type
     row: ir_decl_row(p, callee)
     if row >= 0 && p.intrinsics.values.len() > 0 {
         if ir_intrinsic_of(p, p.functions[row].key) == .Val(intrinsic) {
-            return ir_intrinsic_call(m, p, b, intrinsic, type_args, args, span)
+            return ir_intrinsic_call(m, p, b, intrinsic, p.functions[row].key, type_args, args, span)
         }
     }
     foreign: ir_decl_foreign(p, callee)
@@ -4606,9 +4606,8 @@ ir_call_row_emit: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, type_a
         callee = ir_function_row_id(m, p, row, type_args) ?? return ir_fail_slot(b, span, "call of {p.functions[row].key}")
     }
     dst := -1
-    declared: if p.functions[row].ret == .Val(written) -> Val(ir_callee_fact(p, b, row, type_args, written, span)) else -> Type?{None}
+    returned: ir_call_return(p, b, row, type_args, span)
     if ir_failed(b) -> return -1
-    returned: ir_executable_return_in(p.functions[row], declared) ?? Type.Named{name: "Unit"}
     if !ir_unit_type(returned) {
         result: ir_value_type(m, p, returned) ?? return ir_type_fail(b, span, returned)
         dst = ir_fresh_temp(m, b, result)

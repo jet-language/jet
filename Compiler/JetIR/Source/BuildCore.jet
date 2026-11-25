@@ -624,8 +624,7 @@ ir_core_bound: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, type_args
 // result has no value type.
 ir_core_call_signature: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, slots: [Int], span: Span) -> String Never! {
     words: loop slot in slots -> ir_core_layout(ir_export_layout(m.types[b.f.slot_type[slot]]))
-    declared: if p.functions[row].ret == .Val(written) -> Val(ir_callee_fact(p, b, row, [Type]{}, written, span)) else -> Type?{None}
-    returned: ir_executable_return_in(p.functions[row], declared) ?? Type.Named{name: "Unit"}
+    returned: ir_call_return(p, b, row, [Type]{}, span)
     result := "void"
     if !ir_unit_type(returned) {
         result_row: ir_value_type(m, p, returned) ?? return ""

@@ -315,12 +315,21 @@ ir_event_ok_type: fn(ty: Type) -> Type? Never! {
 }
 
 // `core.event.__async_new<T, E>(policy, failures)`: the source validated the
-// capacity, so the provider's event is always the Ok payload; the policy
-// record is borrowed and released here when consumed. The provider keeps E's
-// descriptor and the handler result's (`Result<Unit, E>`): it reads each
-// handler's Ok or Err and keeps an Err's E for its DispatchReport.
+// capacity, so the provider's event is always the Ok payload
+// (ir_async_event_make).
 ir_async_event_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     event_ty: ir_event_ok_type(result_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(result_ty)}")
+    event: ir_async_event_make(m, p, b, event_ty, args, span)
+    if ir_failed(b) || event < 0 -> return -1
+    ir_result_box(m, p, b, result_ty, true, event)
+}
+
+// An AsyncEvent<T, E> of type `event_ty` under `policy` and `failures`
+// (`args`), whose capacity the source validated; the policy record is
+// borrowed and released here when consumed. The provider keeps E's
+// descriptor and the handler result's (`Result<Unit, E>`): it reads each
+// handler's Ok or Err and keeps an Err's E for its DispatchReport.
+ir_async_event_make: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, event_ty: Type, args: [Int], span: Span) -> Int Never! {
     row: ir_event_family_row(m, p, event_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(event_ty)}")
     if args.len() != 2 -> return ir_fail_slot(b, span, "AsyncEvent.new with {args.len()} arguments")
     failure_ty := ir_type_args(ir_untag(event_ty))[1].copy()
@@ -337,7 +346,7 @@ ir_async_event_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Typ
     b.fresh[event] = true
     ir_release(m, b, failures)
     ir_release(m, b, policy)
-    ir_result_box(m, p, b, result_ty, true, event)
+    event
 }
 
 // DispatchReport.failures(): the provider builds the List of

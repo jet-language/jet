@@ -1278,6 +1278,11 @@ ir_core_role_row: fn(p: IRProgram, role: String) -> Int? {
 // argument, and the raw heap allocation and release, the memory sentry's
 // account of an OS mapping, a region's reserve and release of fresh pages,
 // and `context.allocator`'s take, give and room of a block, which take none.
+// The core.tasks rows (Core/Tasks/Tasks.jet) make a channel's endpoint pair,
+// unbounded or bounded, and a timer Receiver; the core.event rows
+// (Core/Event/Event.jet) make an Event under a policy, a Hook, a
+// DecisionHook and an AsyncEvent: each at the type arguments of the call's
+// result, which the runtime provider is handed descriptors of.
 IRCoreIntrinsicRow: struct {
     role: String,
     intrinsic: IRRuntimeIntrinsic,
@@ -1312,6 +1317,13 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{role: "InlineContextTake", intrinsic: IRRuntimeIntrinsic.ContextTake},
     IRCoreIntrinsicRow{role: "InlineContextGive", intrinsic: IRRuntimeIntrinsic.ContextGive},
     IRCoreIntrinsicRow{role: "InlineContextRoom", intrinsic: IRRuntimeIntrinsic.ContextRoom},
+    IRCoreIntrinsicRow{role: "InlineChannelNew", intrinsic: IRRuntimeIntrinsic.ChannelNew},
+    IRCoreIntrinsicRow{role: "InlineChannelBounded", intrinsic: IRRuntimeIntrinsic.ChannelBounded},
+    IRCoreIntrinsicRow{role: "InlineTimerAfter", intrinsic: IRRuntimeIntrinsic.TimerAfter},
+    IRCoreIntrinsicRow{role: "InlineEventWithPolicy", intrinsic: IRRuntimeIntrinsic.EventWithPolicy},
+    IRCoreIntrinsicRow{role: "InlineHookNew", intrinsic: IRRuntimeIntrinsic.HookNew},
+    IRCoreIntrinsicRow{role: "InlineDecisionHookNew", intrinsic: IRRuntimeIntrinsic.DecisionHookNew},
+    IRCoreIntrinsicRow{role: "InlineAsyncEventNew", intrinsic: IRRuntimeIntrinsic.AsyncEventNew},
 }
 
 // The checked Core functions that fill an IR_CORE_INTRINSICS role, by
@@ -1336,7 +1348,10 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> IRIntrinsics Never! {
 // View over its element and owner types, the
 // raw heap pair is not, a region's reserve reads its size and its release
 // the address and size, and a context block's take reads its size and
-// align, its give and room the address.
+// align, its give and room the address. A channel or timer constructor is
+// generic over its element, an Event's over its payload, and a Hook's,
+// DecisionHook's or AsyncEvent's over its payload and result or failure
+// type; each reads the arguments its lowering does.
 ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) -> Bool Never! {
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
@@ -1350,8 +1365,18 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
         .AllocRaw | .FreeRaw -> function.generic_params.len() == 0
         .RegionReserve | .ContextRoom -> ir_intrinsic_signature(function, 1)
         .RegionRelease | .ContextTake | .ContextGive | .Mapped | .Unmapping -> ir_intrinsic_signature(function, 2)
+        .ChannelNew -> ir_intrinsic_generic_shape(function, 1, 0)
+        .ChannelBounded | .EventWithPolicy -> ir_intrinsic_generic_shape(function, 1, 1)
+        .TimerAfter -> ir_intrinsic_generic_shape(function, 1, 2)
+        .HookNew | .DecisionHookNew -> ir_intrinsic_generic_shape(function, 2, 1)
+        .AsyncEventNew -> ir_intrinsic_generic_shape(function, 2, 2)
         .FunctionAddress(_) | .StaticText | .FaultReport -> false
     }
+}
+
+// Whether `function` has `generics` type parameters and `params` parameters.
+ir_intrinsic_generic_shape: fn(function: FnBody, generics: Int, params: Int) -> Bool Never! {
+    function.generic_params.len() == generics && function.params.len() == params
 }
 
 // Selects function `index` as `owner`'s `trait_short` hook for the
@@ -1979,6 +2004,14 @@ ir_executable_return_in: fn(function: FnBody, declared: Type?) -> Type? Never! {
     if ir_plain_return(function) == None -> return declared.copy()
     if declared == .Val(written) -> return ir_never_carrier_success(written)
     None
+}
+
+// The type a call of function row `row` at its instance `type_args`
+// produces: ir_executable_return_in of sema's row for its declared return,
+// Unit when it declares none.
+ir_call_return: fn(p: IRProgram, b: ^IRBuilder, row: Int, type_args: [Type], span: Span) -> Type Never! {
+    declared: if p.functions[row].ret == .Val(written) -> Val(ir_callee_fact(p, b, row, type_args, written, span)) else -> Type?{None}
+    ir_executable_return_in(p.functions[row], declared) ?? Type.Named{name: "Unit"}
 }
 
 // Fact type `ty` of the builder's checked function (a binder's, a call's
