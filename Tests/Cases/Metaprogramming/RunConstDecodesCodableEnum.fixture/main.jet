@@ -1,0 +1,16 @@
+// A `#run` constant decodes into a `#Codable` enum while building, as a
+// run-time body does: the compile-time check finds the derived Decode the
+// enum registered.
+use json: core.encoding.json
+
+#Codable
+Shape: enum {
+    Dot,
+    Circle(Int),
+}
+
+SHAPE: #run { json.decode<Shape>(json.to_string(Shape.Circle(7))) ?? Shape.Dot }
+
+run: fn() {
+    print(json.to_string(SHAPE))
+}
