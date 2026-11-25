@@ -40,6 +40,7 @@ use {
         diagnostic_registry_row,
         diagnostic_sentence_case_line,
         diagnostic_with_label,
+        expr_source_span,
         expr_span,
         name_column_table,
         name_index,
@@ -536,8 +537,9 @@ sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, kn
 // with at least one hole (`CompilerArg.written`): each
 // run of its text as a CompilerWrittenPart.Text, and each hole as a
 // CompilerWrittenPart.Hole with its name when the hole is a bare name and
-// its span in `file`. None for any other argument: a plain literal, a
-// constant, a parenthesized literal and a run-time value spell none.
+// the span of its whole expression in `file` (`record.id`, not `id`). None
+// for any other argument: a plain literal, a constant, a parenthesized
+// literal and a run-time value spell none.
 sema_rule_written: fn(expression: Expr, file: String) -> TComptimeValue? {
     if expression == .Str(parts, _, _) {
         written := [TComptimeValue]{}
@@ -557,7 +559,7 @@ sema_rule_written: fn(expression: Expr, file: String) -> TComptimeValue? {
                         variant: "Hole",
                         args: [TComptimeEnumArg]{
                             TComptimeEnumArg{name: Val("name"), value: name},
-                            TComptimeEnumArg{name: Val("span"), value: sema_compiler_index_span(expr_span(inner), file)},
+                            TComptimeEnumArg{name: Val("span"), value: sema_compiler_index_span(expr_source_span(inner), file)},
                         },
                     })
                 }
