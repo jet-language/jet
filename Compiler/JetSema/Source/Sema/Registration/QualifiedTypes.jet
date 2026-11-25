@@ -190,9 +190,10 @@ sema_registration_qualified_apply_functions: fn(functions: ^[SemaRegistrationFun
     }
 }
 
-// The next slot's rewritten type, None to keep the row's own.
+// The next slot's rewritten type, None to keep the row's own (as every row
+// past the last slot does).
 sema_registration_qualified_next: fn(slots: ^[Type?]) -> Type? {
-    slots.pop() ?? panic("a module's rewritten types ran out before its rows")
+    slots.pop() ?? None
 }
 
 // Each alias-qualified or bare type name the module's declarations write,

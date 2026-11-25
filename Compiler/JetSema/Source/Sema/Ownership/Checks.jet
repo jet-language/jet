@@ -7251,7 +7251,7 @@ sema_ownership_check_loop_move_backedge: fn(state: ^SemaOwnershipState, frame: S
         if state.moved[index].origin.share_ty == None && state.moved[index].origin.implicit_take == None {
             repeated.push(state.moved[index].copy())
         } else {
-            repeated.push(state.moved.remove(index, .Slot) ?? panic("a repeated move left the ownership state"))
+            if state.moved.remove(index, .Slot) == .Val(removed) -> repeated.push(removed)
         }
     }
     repeated.reverse()

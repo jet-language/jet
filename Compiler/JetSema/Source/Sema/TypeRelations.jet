@@ -2444,7 +2444,7 @@ sema_type_graph_is_checked_text_impl: fn(graph: SemaRegistrationGraph, implement
     }
     trait_symbol: resolved ?? return false
     if trait_symbol.kind != SymbolKind.Trait || trait_symbol.name != "CheckedText" -> return false
-    owner: sema_registration_module_index(graph, trait_symbol.module_identity) ?? panic("checked trait identity has no registered owner module")
+    owner: sema_registration_module_index(graph, trait_symbol.module_identity) ?? return false
     graph.modules[owner].module_name == "core.prelude"
 }
 
