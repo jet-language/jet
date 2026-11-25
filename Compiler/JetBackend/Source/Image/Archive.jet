@@ -84,32 +84,40 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
         }
         first: Int{bytes[at]}
         second: Int{bytes[at + 1]}
-        if first == 0x2f && second == 0x20 {
-            index_at = start
-            index_size = size
-            index_word = 4
-        } else if first == 0x2f && link_ar_text(bytes, at, at + 16, 0x20) == "/SYM64/" {
-            index_at = start
-            index_size = size
-            index_word = 8
-        } else if first == 0x2f && second == 0x2f {
-            long_names_at = start
-            long_names_end = start + size
-        } else {
-            name := ""
-            if first == 0x2f {
-                // `/<decimal>`: an offset into the long name table.
-                offset: link_ar_decimal(bytes, at + 1, 15)
-                if long_names_at < 0 || long_names_at + offset >= long_names_end {
-                    archive.errors.push("{path}: member at offset {at} names a missing long name")
-                    return archive
+        if {
+            first == 0x2f && second == 0x20 -> {
+                index_at = start
+                index_size = size
+                index_word = 4
+            }
+            first == 0x2f && link_ar_text(bytes, at, at + 16, 0x20) == "/SYM64/" -> {
+                index_at = start
+                index_size = size
+                index_word = 8
+            }
+            first == 0x2f && second == 0x2f -> {
+                long_names_at = start
+                long_names_end = start + size
+            }
+            else -> {
+                name := ""
+                if {
+                    first == 0x2f -> {
+                        // `/<decimal>`: an offset into the long name table.
+                        offset: link_ar_decimal(bytes, at + 1, 15)
+                        if long_names_at < 0 || long_names_at + offset >= long_names_end {
+                            archive.errors.push("{path}: member at offset {at} names a missing long name")
+                            return archive
+                        }
+                        name = link_ar_text(bytes, long_names_at + offset, long_names_end, 0x2f)
+                    }
+                    else -> { name = link_ar_text(bytes, at, at + 16, 0x2f) }
                 }
-                name = link_ar_text(bytes, long_names_at + offset, long_names_end, 0x2f)
-            } else { name = link_ar_text(bytes, at, at + 16, 0x2f) }
-            ordinals.add(at, archive.names.len()).drop("member header offsets are unique")
-            archive.names.push(name)
-            archive.starts.push(start)
-            archive.sizes.push(size)
+                ordinals.add(at, archive.names.len()).drop("member header offsets are unique")
+                archive.names.push(name)
+                archive.starts.push(start)
+                archive.sizes.push(size)
+            }
         }
         at = start + size + size % 2
     }

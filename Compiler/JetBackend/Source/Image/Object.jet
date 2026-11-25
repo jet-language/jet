@@ -474,7 +474,7 @@ x64_object_text_finalize_items: fn(items: ^^[X64ObjectTextFinalize]) -> [X64Obje
     out := [X64ObjectTextRows]{}
     task.group x64_object_text_finalize_threads {
         done_head: task x64_object_text_finalize_one(head)
-        rest := x64_object_text_finalize_items(owned)
+        rest: x64_object_text_finalize_items(owned)
         first: compiler_threads_joined(done_head)
         out.push(first)
         loop row in rest.move() -> out.push(row)
@@ -483,7 +483,7 @@ x64_object_text_finalize_items: fn(items: ^^[X64ObjectTextFinalize]) -> [X64Obje
 }
 
 x64_object_text_finalize_one: fn(item: ^^X64ObjectTextFinalize) -> X64ObjectTextRows Never! {
-    owned := item.move()
+    owned: item.move()
     rows := owned.rows.move()
     globals: owned.globals
     loop (at_index, at) in rows.runtime_at {
@@ -549,47 +549,57 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
             loop merged_text.len() < want -> merged_text.push(U8{0xcc})
             merged_text.extend(reads.value.functions[index].code)
         }
-        code := if own -> compiler_threads_taken(codes) else -> [U8]{}
+        code: if own -> compiler_threads_taken(codes) else -> [U8]{}
         reloc_count: reads.value.functions[index].relocs.len()
         loop r in 0..<reloc_count {
             reloc_at: reads.value.functions[index].relocs[r].at
             reloc_kind: reads.value.functions[index].relocs[r].kind
             reloc_target: reads.value.functions[index].relocs[r].target
             at: offset + reloc_at
-            if reloc_kind == X64_RELOC_FUNCTION {
-                row: if reloc_target >= -1 && reloc_target + 1 < function_rows.len() -> function_rows[reloc_target + 1] else -> -1
-                if {
-                    row < 0 -> {
-                        errors.push("{reads.value.functions[index].name}: call to function {reloc_target}, which is not in the object")
-                    }
-                    own && provider_hooks[reloc_target + 1] >= 0 -> {
-                        x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, RUNTIME_PROVIDER_HOOKS[provider_hooks[reloc_target + 1]], ELF64_R_X86_64_PLT32)
-                    }
-                    own -> {
-                        x64_object_rela_put(relas, at, function_symbols[row], ELF64_R_X86_64_PC32, -4)
-                    }
-                    else -> {
-                        x64_patch_rel32(merged_text, want + reloc_at, reads.value.offsets[row] - part_base)
+            if {
+                reloc_kind == X64_RELOC_FUNCTION -> {
+                    row: if reloc_target >= -1 && reloc_target + 1 < function_rows.len() -> function_rows[reloc_target + 1] else -> -1
+                    if {
+                        row < 0 -> {
+                            errors.push("{reads.value.functions[index].name}: call to function {reloc_target}, which is not in the object")
+                        }
+                        own && provider_hooks[reloc_target + 1] >= 0 -> {
+                            x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, RUNTIME_PROVIDER_HOOKS[provider_hooks[reloc_target + 1]], ELF64_R_X86_64_PLT32)
+                        }
+                        own -> {
+                            x64_object_rela_put(relas, at, function_symbols[row], ELF64_R_X86_64_PC32, -4)
+                        }
+                        else -> {
+                            x64_patch_rel32(merged_text, want + reloc_at, reads.value.offsets[row] - part_base)
+                        }
                     }
                 }
-            } else if reloc_kind == X64_RELOC_DATA {
-                if reloc_target < 0 || reloc_target >= data_offsets.len() {
-                    errors.push("{reads.value.functions[index].name}: data {reloc_target} is not in the module")
-                } else {
-                    x64_object_rela_put(relas, at, data_symbols[reloc_target], ELF64_R_X86_64_PC32, data_offsets[reloc_target] - 4)
-                }
-            } else {
-                elf_kind: if reloc_kind == X64_RELOC_RUNTIME -> ELF64_R_X86_64_PLT32 else -> ELF64_R_X86_64_PC32
-                if reloc_target >= 0 && reloc_target < rt_local_of.len() && reads.value.functions[index].relocs[r].symbol == "" {
-                    cached := rt_local_of[reloc_target]
-                    if cached < 0 {
-                        cached = x64_object_import_local(imports, import_names, import_of, runtime_symbols[reloc_target])
-                        rt_local_of[reloc_target] = cached
+                reloc_kind == X64_RELOC_DATA -> {
+                    if {
+                        reloc_target < 0 || reloc_target >= data_offsets.len() -> {
+                            errors.push("{reads.value.functions[index].name}: data {reloc_target} is not in the module")
+                        }
+                        else -> {
+                            x64_object_rela_put(relas, at, data_symbols[reloc_target], ELF64_R_X86_64_PC32, data_offsets[reloc_target] - 4)
+                        }
                     }
-                    x64_object_import_rela(runtime_at, runtime_local, relas, at, cached, elf_kind)
-                } else {
-                    sym: x64_reloc_symbol(reads.value.functions[index].relocs[r], runtime_symbols)
-                    x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, sym, elf_kind)
+                }
+                else -> {
+                    elf_kind: if reloc_kind == X64_RELOC_RUNTIME -> ELF64_R_X86_64_PLT32 else -> ELF64_R_X86_64_PC32
+                    if {
+                        reloc_target >= 0 && reloc_target < rt_local_of.len() && reads.value.functions[index].relocs[r].symbol == "" -> {
+                            cached := rt_local_of[reloc_target]
+                            if cached < 0 {
+                                cached = x64_object_import_local(imports, import_names, import_of, runtime_symbols[reloc_target])
+                                rt_local_of[reloc_target] = cached
+                            }
+                            x64_object_import_rela(runtime_at, runtime_local, relas, at, cached, elf_kind)
+                        }
+                        else -> {
+                            sym: x64_reloc_symbol(reads.value.functions[index].relocs[r], runtime_symbols)
+                            x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, sym, elf_kind)
+                        }
+                    }
                 }
             }
         }
@@ -1123,24 +1133,30 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
         data_est := 0
         loop index in order {
             align: program.data[index].align
-            if x64_object_read_only(program.data[index]) {
-                rodata_est += program.data[index].bytes.len() + align
-            } else { data_est += program.data[index].bytes.len() + align }
+            if {
+                x64_object_read_only(program.data[index]) -> {
+                    rodata_est += program.data[index].bytes.len() + align
+                }
+                else -> { data_est += program.data[index].bytes.len() + align }
+            }
         }
         if rodata_est > 0 -> rodata.try_reserve(rodata_est) ?? ()
         if data_est > 0 -> data.try_reserve(data_est) ?? ()
         loop index in order {
             align: program.data[index].align
-            if x64_object_read_only(program.data[index]) {
-                elf64_pad(rodata, align)
-                if align > rodata_align -> rodata_align = align
-                data_offsets[index] = rodata.len()
-                rodata.extend(program.data[index].bytes)
-            } else {
-                elf64_pad(data, align)
-                if align > data_align -> data_align = align
-                data_offsets[index] = data.len()
-                data.extend(program.data[index].bytes)
+            if {
+                x64_object_read_only(program.data[index]) -> {
+                    elf64_pad(rodata, align)
+                    if align > rodata_align -> rodata_align = align
+                    data_offsets[index] = rodata.len()
+                    rodata.extend(program.data[index].bytes)
+                }
+                else -> {
+                    elf64_pad(data, align)
+                    if align > data_align -> data_align = align
+                    data_offsets[index] = data.len()
+                    data.extend(program.data[index].bytes)
+                }
             }
         }
     }
@@ -1302,7 +1318,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
     pending_finalize := [X64ObjectTextFinalize]{}
     next_strtab := strtab_size
     loop part in parts {
-        rows := x64_object_text_part_take(part)
+        rows: x64_object_text_part_take(part)
         globals := [Int]{}
         loop symbol in rows.imports {
             id: x64_object_symbol(symbol_names, import_of, export_of, symbol)
@@ -1353,7 +1369,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
             piece: pieces.pop() ?? panic("the object writer lost a function's code")
             target: ELF64_OBJECT_FIRST_OWN + own.len()
             own.push(X64ObjectSection{name: ".text", kind: 1, flags: 6, bytes: [U8]{}, pieces: [X64ObjectPiece]{piece}, link: 0, info: 0, align: rows.aligns[row], entry_size: 0})
-            relas := x64_object_bytes(rows.relas, rela_from, rela_end)
+            relas: x64_object_bytes(rows.relas, rela_from, rela_end)
             own.push(x64_object_rela_bytes_section(".rela.text", relas, target))
             rela_from = rela_end
         }
@@ -1488,7 +1504,7 @@ x64_object_materialize_parallel: fn(items: ^^[X64ObjectSection]) -> [[U8]] Never
     out := [[U8]]{}
     task.group x64_object_materialize_threads {
         done_head: task ^^head { x64_object_materialize_one(head) }
-        rest := x64_object_materialize_parallel(owned)
+        rest: x64_object_materialize_parallel(owned)
         first: compiler_threads_joined(done_head)
         out.push(first)
         loop row in rest.move() -> out.push(row)
@@ -1529,9 +1545,12 @@ x64_object_split_flatten: fn(header: ^^[U8], split_bufs: [[U8]], split_sec_buf: 
         if align < 1 -> align = 1
         elf64_pad(out, align)
         buf_idx: if k < split_sec_buf.len() -> split_sec_buf[k] else -> -1
-        if buf_idx >= 0 -> out.extend(split_bufs[buf_idx]) else if size > 0 {
-            old_off: x64_object_test_field(header, h + 24, 8)
-            out.extend(header[old_off..<old_off + size])
+        if {
+            buf_idx >= 0 -> out.extend(split_bufs[buf_idx])
+            size > 0 -> {
+                old_off: x64_object_test_field(header, h + 24, 8)
+                out.extend(header[old_off..<old_off + size])
+            }
         }
     }
     elf64_pad(out, 8)
@@ -1555,33 +1574,36 @@ x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], t
     rela_line_sec := X64ObjectSection{name: ".rela.debug_line", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_DEBUG_LINE, align: 8, entry_size: ELF64_RELA_SIZE}
     rela_jet_line_sec := X64ObjectSection{name: ".rela.debug_jetline", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_DEBUG_JETLINE, align: 8, entry_size: ELF64_RELA_SIZE}
     rela_addr_sec := X64ObjectSection{name: ".rela.debug_addr", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_DEBUG_ADDR, align: 8, entry_size: ELF64_RELA_SIZE}
-    if parallel_relas && (data_relas.len() + dwarf.eh_relas.len() + dwarf.info_relas.len() + dwarf.line_relas.len() + dwarf.jet_line_relas.len() + dwarf.addr_relas.len()) >= 16384 {
-        task.group x64_object_rela_threads {
-            t_data: task x64_object_encode_relas(data_relas)
-            t_eh: task x64_object_encode_relas(dwarf.eh_relas)
-            t_info: task x64_object_encode_relas(dwarf.info_relas)
-            t_line: task x64_object_encode_relas(dwarf.line_relas)
-            t_jet: task x64_object_encode_relas(dwarf.jet_line_relas)
-            b_addr := x64_object_encode_relas(dwarf.addr_relas)
-            b_data := compiler_threads_joined(t_data)
-            b_eh := compiler_threads_joined(t_eh)
-            b_info := compiler_threads_joined(t_info)
-            b_line := compiler_threads_joined(t_line)
-            b_jet := compiler_threads_joined(t_jet)
-            rela_data_sec = x64_object_rela_bytes_section(".rela.data", b_data, ELF64_OBJECT_DATA)
-            rela_eh_sec = x64_object_rela_bytes_section(".rela.eh_frame", b_eh, ELF64_OBJECT_EH_FRAME)
-            rela_info_sec = x64_object_rela_bytes_section(".rela.debug_info", b_info, ELF64_OBJECT_DEBUG_INFO)
-            rela_line_sec = x64_object_rela_bytes_section(".rela.debug_line", b_line, ELF64_OBJECT_DEBUG_LINE)
-            rela_jet_line_sec = x64_object_rela_bytes_section(".rela.debug_jetline", b_jet, ELF64_OBJECT_DEBUG_JETLINE)
-            rela_addr_sec = x64_object_rela_bytes_section(".rela.debug_addr", b_addr, ELF64_OBJECT_DEBUG_ADDR)
+    if {
+        parallel_relas && (data_relas.len() + dwarf.eh_relas.len() + dwarf.info_relas.len() + dwarf.line_relas.len() + dwarf.jet_line_relas.len() + dwarf.addr_relas.len()) >= 16384 -> {
+            task.group x64_object_rela_threads {
+                t_data: task x64_object_encode_relas(data_relas)
+                t_eh: task x64_object_encode_relas(dwarf.eh_relas)
+                t_info: task x64_object_encode_relas(dwarf.info_relas)
+                t_line: task x64_object_encode_relas(dwarf.line_relas)
+                t_jet: task x64_object_encode_relas(dwarf.jet_line_relas)
+                b_addr: x64_object_encode_relas(dwarf.addr_relas)
+                b_data: compiler_threads_joined(t_data)
+                b_eh: compiler_threads_joined(t_eh)
+                b_info: compiler_threads_joined(t_info)
+                b_line: compiler_threads_joined(t_line)
+                b_jet: compiler_threads_joined(t_jet)
+                rela_data_sec = x64_object_rela_bytes_section(".rela.data", b_data, ELF64_OBJECT_DATA)
+                rela_eh_sec = x64_object_rela_bytes_section(".rela.eh_frame", b_eh, ELF64_OBJECT_EH_FRAME)
+                rela_info_sec = x64_object_rela_bytes_section(".rela.debug_info", b_info, ELF64_OBJECT_DEBUG_INFO)
+                rela_line_sec = x64_object_rela_bytes_section(".rela.debug_line", b_line, ELF64_OBJECT_DEBUG_LINE)
+                rela_jet_line_sec = x64_object_rela_bytes_section(".rela.debug_jetline", b_jet, ELF64_OBJECT_DEBUG_JETLINE)
+                rela_addr_sec = x64_object_rela_bytes_section(".rela.debug_addr", b_addr, ELF64_OBJECT_DEBUG_ADDR)
+            }
         }
-    } else {
-        rela_data_sec = x64_object_rela_section(".rela.data", data_relas, ELF64_OBJECT_DATA)
-        rela_eh_sec = x64_object_rela_section(".rela.eh_frame", dwarf.eh_relas, ELF64_OBJECT_EH_FRAME)
-        rela_info_sec = x64_object_rela_section(".rela.debug_info", dwarf.info_relas, ELF64_OBJECT_DEBUG_INFO)
-        rela_line_sec = x64_object_rela_section(".rela.debug_line", dwarf.line_relas, ELF64_OBJECT_DEBUG_LINE)
-        rela_jet_line_sec = x64_object_rela_section(".rela.debug_jetline", dwarf.jet_line_relas, ELF64_OBJECT_DEBUG_JETLINE)
-        rela_addr_sec = x64_object_rela_section(".rela.debug_addr", dwarf.addr_relas, ELF64_OBJECT_DEBUG_ADDR)
+        else -> {
+            rela_data_sec = x64_object_rela_section(".rela.data", data_relas, ELF64_OBJECT_DATA)
+            rela_eh_sec = x64_object_rela_section(".rela.eh_frame", dwarf.eh_relas, ELF64_OBJECT_EH_FRAME)
+            rela_info_sec = x64_object_rela_section(".rela.debug_info", dwarf.info_relas, ELF64_OBJECT_DEBUG_INFO)
+            rela_line_sec = x64_object_rela_section(".rela.debug_line", dwarf.line_relas, ELF64_OBJECT_DEBUG_LINE)
+            rela_jet_line_sec = x64_object_rela_section(".rela.debug_jetline", dwarf.jet_line_relas, ELF64_OBJECT_DEBUG_JETLINE)
+            rela_addr_sec = x64_object_rela_section(".rela.debug_addr", dwarf.addr_relas, ELF64_OBJECT_DEBUG_ADDR)
+        }
     }
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
@@ -1729,17 +1751,20 @@ x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], t
         }
         if multi_items.len() > 0 {
             multi_items.reverse()
-            materialized := if parallel_relas && multi_items.len() > 1 -> x64_object_materialize_parallel(multi_items) else -> {
-                out_m := [[U8]]{}
-                loop multi_items.len() > 0 {
-                    item := multi_items.pop() ?? break
-                    out_m.push(x64_object_materialize_one(item))
+            materialized := if {
+                parallel_relas && multi_items.len() > 1 -> x64_object_materialize_parallel(multi_items)
+                else -> {
+                    out_m := [[U8]]{}
+                    loop multi_items.len() > 0 {
+                        item: multi_items.pop() ?? break
+                        out_m.push(x64_object_materialize_one(item))
+                    }
+                    out_m
                 }
-                out_m
             }
             materialized.reverse()
             loop sec_idx in multi_sec_indices {
-                buf := materialized.pop() ?? panic("lost materialized section")
+                buf: materialized.pop() ?? panic("lost materialized section")
                 buf_idx: split_bufs.len()
                 split_bufs.push(buf.move())
                 split_sec_buf[sec_idx] = buf_idx

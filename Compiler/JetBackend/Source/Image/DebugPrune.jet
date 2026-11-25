@@ -42,17 +42,20 @@ link_debug_bytes: fn(c: ^LinkContext, debug: LinkDebug, pieces: ^LinkPieces, tex
     loop group in 0..<debug.names.len() {
         bytes := [U8]{}
         rows: debug.rows[group]
-        if rows.len() == 1 && c.live_addr[rows[0]] == 0 && pieces.bytes.len() > 0 && pieces.chunks[rows[0]].len() == 0 {
-            row: rows[0]
-            bytes = compiler_take_rows<U8>(pieces.bytes[row])
-            c.errors.extend(pieces.errors[row])
-        } else {
-            if debug.sizes[group] > 0 {
-                bytes.try_reserve(debug.sizes[group]) ?? ()
+        if {
+            rows.len() == 1 && c.live_addr[rows[0]] == 0 && pieces.bytes.len() > 0 && pieces.chunks[rows[0]].len() == 0 -> {
+                row: rows[0]
+                bytes = compiler_take_rows<U8>(pieces.bytes[row])
+                c.errors.extend(pieces.errors[row])
             }
-            loop row in rows {
-                link_pad_to(bytes, c.live_addr[row], 0)
-                link_place_row(c, bytes, pieces, row)
+            else -> {
+                if debug.sizes[group] > 0 {
+                    bytes.try_reserve(debug.sizes[group]) ?? ()
+                }
+                loop row in rows {
+                    link_pad_to(bytes, c.live_addr[row], 0)
+                    link_place_row(c, bytes, pieces, row)
+                }
             }
         }
         link_pad_to(bytes, debug.sizes[group], 0)
@@ -217,7 +220,7 @@ link_debug_form_end: fn(bytes: [U8], at: Int, form: Int) -> Int Never! {
         length: link_debug_uleb(bytes, end)
         return if length < 0 -> -1 else -> end + length
     }
-    return -1
+    -1
 }
 
 // ---------------------------------------------------------------------------
@@ -407,13 +410,16 @@ link_info_plan: fn(info: [U8], abbrev: [U8], addr: [U8], text_start: Int, text_e
             pos = link_info_attributes(info, table, entry, body, unit, addr, bases, plan, drop_start < 0 && !candidate, low_pc)
             if pos < 0 || pos > end -> return None
             if candidate {
-                if low_pc >= 0 && (low_pc < text_start || low_pc >= text_end) {
-                    if table.children[entry] -> drop_start = die else {
-                        plan.drops.push(die)
-                        plan.drops.push(pos)
+                if {
+                    low_pc >= 0 && (low_pc < text_start || low_pc >= text_end) -> {
+                        if table.children[entry] -> drop_start = die else {
+                            plan.drops.push(die)
+                            plan.drops.push(pos)
+                        }
                     }
-                } else {
-                    _ := link_info_attributes(info, table, entry, body, unit, addr, bases, plan, true, low_pc)
+                    else -> {
+                        _ := link_info_attributes(info, table, entry, body, unit, addr, bases, plan, true, low_pc)
+                    }
                 }
             }
             if table.children[entry] -> depth += 1
@@ -510,24 +516,28 @@ link_line_prune: fn(line: ^[U8], text_start: Int, text_end: Int, moved: ^[Int:In
                 }
                 op: Int{line[pos]}
                 pos += 1
-                if op == 0 {
-                    size: link_debug_uleb(line, pos)
-                    if size < 1 || pos + size > end {
-                        return
+                if {
+                    op == 0 -> {
+                        size: link_debug_uleb(line, pos)
+                        if size < 1 || pos + size > end {
+                            return
+                        }
+                        sub: Int{line[pos]}
+                        // DW_LNE_set_address: the sequence's first decides.
+                        if sub == 2 && !addressed && size == 9 {
+                            address = link_debug_addr(line, pos + 1)
+                            addressed = true
+                        }
+                        ended = sub == 1
+                        pos += size
                     }
-                    sub: Int{line[pos]}
-                    // DW_LNE_set_address: the sequence's first decides.
-                    if sub == 2 && !addressed && size == 9 {
-                        address = link_debug_addr(line, pos + 1)
-                        addressed = true
+                    op == 9 -> {
+                        // DW_LNS_fixed_advance_pc: a uhalf operand.
+                        pos += 2
                     }
-                    ended = sub == 1
-                    pos += size
-                } else if op == 9 {
-                    // DW_LNS_fixed_advance_pc: a uhalf operand.
-                    pos += 2
-                } else if op < opcode_base {
-                    loop _ in 0..<(Int{line[unit + 17 + op]}) -> pos = link_debug_leb_end(line, pos)
+                    op < opcode_base -> {
+                        loop _ in 0..<(Int{line[unit + 17 + op]}) -> pos = link_debug_leb_end(line, pos)
+                    }
                 }
             }
             if pos > end {
@@ -567,17 +577,22 @@ link_list_end: fn(lists: [U8], from: Int, end: Int) -> Int Never! {
         // The bounds: startx_endx, startx_length, offset_pair two ulebs,
         // start_end two addresses, start_length an address and a uleb,
         // default_location none.
-        if kind == 2 || kind == 3 || kind == 4 {
-            at = link_debug_leb_end(lists, link_debug_leb_end(lists, at))
-        } else if kind == 7 { at += 16 } else if kind == 8 {
-            at = link_debug_leb_end(lists, at + 8)
-        } else if kind != 5 { return -1 }
+        if {
+            kind == 2 || kind == 3 || kind == 4 -> {
+                at = link_debug_leb_end(lists, link_debug_leb_end(lists, at))
+            }
+            kind == 7 -> { at += 16 }
+            kind == 8 -> {
+                at = link_debug_leb_end(lists, at + 8)
+            }
+            kind != 5 -> { return -1 }
+        }
         if at >= end -> return -1
         length: link_debug_uleb(lists, at)
         if length < 0 -> return -1
         at += length
     }
-    return -1
+    -1
 }
 
 // The offset after the range list at `at`; -1 when it runs past `end`.
@@ -602,7 +617,7 @@ link_range_end: fn(lists: [U8], from: Int, end: Int) -> Int Never! {
             else -> link_debug_leb_end(lists, link_debug_leb_end(lists, at))
         }
     }
-    return -1
+    -1
 }
 
 // Keep only the referred lists of `lists` (DWARF 5 units, location lists

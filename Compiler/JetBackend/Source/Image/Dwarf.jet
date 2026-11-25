@@ -341,7 +341,7 @@ dwarf_eh_frame_threads: fn(debug: [X64FunctionDebug], offsets: [Int], sizes: [In
     bounds := [Int]{}
     loop p in 0..<workers -> bounds.push((count * p) /% workers)
     bounds.push(count)
-    chunks := dwarf_eh_chunks(debug, offsets, sizes, symbols, bounds, 0)
+    chunks: dwarf_eh_chunks(debug, offsets, sizes, symbols, bounds, 0)
     total_bytes := eh.len()
     total_relas := 0
     loop c in chunks {
@@ -833,15 +833,18 @@ dwarf_location_into: fn(expr: ^[U8], location: X64DebugLocation, indirect: Bool)
         .EntryValue(reg) -> {
             number: x64_dwarf_register(reg)
             dwarf_u8(expr, 0xa3)
-            if number < 32 {
-                dwarf_u8(expr, 1)
-                dwarf_u8(expr, 0x50 + number)
-            } else {
-                start: expr.len()
-                dwarf_u8(expr, 0)
-                dwarf_u8(expr, 0x90)
-                dwarf_uleb(expr, number)
-                expr[start] = U8{expr.len() - start - 1}
+            if {
+                number < 32 -> {
+                    dwarf_u8(expr, 1)
+                    dwarf_u8(expr, 0x50 + number)
+                }
+                else -> {
+                    start: expr.len()
+                    dwarf_u8(expr, 0)
+                    dwarf_u8(expr, 0x90)
+                    dwarf_uleb(expr, number)
+                    expr[start] = U8{expr.len() - start - 1}
+                }
             }
             if !indirect -> dwarf_u8(expr, 0x9f)
         }
@@ -910,12 +913,15 @@ dwarf_range_order: fn(ranges: [X64VariableRange]) -> [Int] Never! {
             right := middle
             out := start
             loop left < middle && right < end {
-                if ranges[order[right]].start < ranges[order[left]].start {
-                    scratch[out] = order[right]
-                    right += 1
-                } else {
-                    scratch[out] = order[left]
-                    left += 1
+                if {
+                    ranges[order[right]].start < ranges[order[left]].start -> {
+                        scratch[out] = order[right]
+                        right += 1
+                    }
+                    else -> {
+                        scratch[out] = order[left]
+                        left += 1
+                    }
                 }
                 out += 1
             }
@@ -1037,14 +1043,17 @@ dwarf_info: fn(sections: ^X64DwarfSections, program: X64ObjectModule, functions:
     widths: DwarfListWidths{lists: dwarf_uleb_size(variables), ranges: dwarf_uleb_size(runs)}
     taken := [DwarfInfoRows]{}
     workers: compiler_threads_admit(threads, functions.len(), total, DWARF_INFO_MIN_WEIGHT_PER_THREAD, 0, 0)
-    if workers <= 1 {
-        taken.push(dwarf_info_rows(program, functions, debug, offsets, sizes, type_offsets, symbols, widths, 0, functions.len()))
-    } else {
-        bounds: compiler_threads_partition(weights, workers)
-        inputs: Shared{DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, sizes: sizes, type_offsets: type_offsets, symbols: symbols, widths: widths}}
-        parts: loop part in 0..<(bounds.len() - 1) -> Shared{DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}}}
-        _ := dwarf_info_parts(inputs, parts, 0)
-        loop part in parts -> taken.push(dwarf_info_part_take(part))
+    if {
+        workers <= 1 -> {
+            taken.push(dwarf_info_rows(program, functions, debug, offsets, sizes, type_offsets, symbols, widths, 0, functions.len()))
+        }
+        else -> {
+            bounds: compiler_threads_partition(weights, workers)
+            inputs: Shared{DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, sizes: sizes, type_offsets: type_offsets, symbols: symbols, widths: widths}}
+            parts: loop part in 0..<(bounds.len() - 1) -> Shared{DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}}}
+            _ := dwarf_info_parts(inputs, parts, 0)
+            loop part in parts -> taken.push(dwarf_info_part_take(part))
+        }
     }
     // The unit's length counts every part and its closing null entry; an
     // offsets table entry counts from the table's start, past the table.
@@ -1086,7 +1095,7 @@ dwarf_info: fn(sections: ^X64DwarfSections, program: X64ObjectModule, functions:
     patch_jobs := [DwarfInfoPatch]{}
     taken.reverse()
     loop taken.len() > 0 {
-        rows := taken.pop() ?? break
+        rows: taken.pop() ?? break
         info_at: info_base
         list_at: list_base
         range_at: range_base
@@ -1099,21 +1108,24 @@ dwarf_info: fn(sections: ^X64DwarfSections, program: X64ObjectModule, functions:
         range_index += rows.ranges.offsets.len()
         patch_jobs.push(DwarfInfoPatch{rows: rows.move(), info_at: info_at, list_at: list_at, range_at: range_at, list_index: l_idx, range_index: r_idx, widths: widths})
     }
-    patched := if patch_jobs.len() > 1 -> {
-        patch_jobs.reverse()
-        dwarf_info_patch_parts(patch_jobs)
-    } else -> {
-        out_p := [DwarfInfoPatched]{}
-        loop patch_jobs.len() > 0 {
-            job := patch_jobs.pop() ?? break
-            out_p.push(dwarf_info_patch_one(job))
+    patched := if {
+        patch_jobs.len() > 1 -> {
+            patch_jobs.reverse()
+            dwarf_info_patch_parts(patch_jobs)
         }
-        out_p
+        else -> {
+            out_p := [DwarfInfoPatched]{}
+            loop patch_jobs.len() > 0 {
+                job: patch_jobs.pop() ?? break
+                out_p.push(dwarf_info_patch_one(job))
+            }
+            out_p
+        }
     }
     relas.try_reserve(total_relas) ?? ()
     patched.reverse()
     loop patched.len() > 0 {
-        item := patched.pop() ?? break
+        item: patched.pop() ?? break
         relas.extend(item.relas.move())
         info_pieces.push(X64ObjectPiece{at: item.info_at, bytes: item.info.move()})
         list_pieces.push(X64ObjectPiece{at: item.list_at, bytes: item.lists.move()})
@@ -1147,7 +1159,7 @@ DwarfInfoPatched: struct {
 }
 
 dwarf_info_patch_one: fn(job: ^^DwarfInfoPatch) -> DwarfInfoPatched Never! {
-    item := job.move()
+    item: job.move()
     rows := item.rows.move()
     info_at: item.info_at
     loop pair in 0..<(rows.refs.len() >> 1) {
@@ -1161,7 +1173,7 @@ dwarf_info_patch_one: fn(job: ^^DwarfInfoPatch) -> DwarfInfoPatched Never! {
 
 dwarf_info_patch_parts: fn(jobs: ^[DwarfInfoPatch]) -> [DwarfInfoPatched] Never! {
     if jobs.len() == 0 -> return [DwarfInfoPatched]{}
-    head := jobs.pop() ?? return [DwarfInfoPatched]{}
+    head: jobs.pop() ?? return [DwarfInfoPatched]{}
     if jobs.len() == 0 -> return [DwarfInfoPatched]{dwarf_info_patch_one(head)}
     out := [DwarfInfoPatched]{}
     task.group dwarf_info_patch_group {
@@ -1454,15 +1466,18 @@ dwarf_info_call_sites: fn(info: ^[U8], relas: ^[X64ObjectRela], sites: [X64CallS
         loop j in 0..<sites[i].arguments.len() {
             dwarf_uleb(info, DWARF_ABBREV_CALL_ARGUMENT)
             number: x64_dwarf_register(sites[i].arguments[j].reg)
-            if number < 32 {
-                dwarf_u8(info, 1)
-                dwarf_u8(info, 0x50 + number)
-            } else {
-                reg_len_at: info.len()
-                dwarf_u8(info, 0)
-                dwarf_u8(info, 0x90)
-                dwarf_uleb(info, number)
-                info[reg_len_at] = U8{info.len() - reg_len_at - 1}
+            if {
+                number < 32 -> {
+                    dwarf_u8(info, 1)
+                    dwarf_u8(info, 0x50 + number)
+                }
+                else -> {
+                    reg_len_at: info.len()
+                    dwarf_u8(info, 0)
+                    dwarf_u8(info, 0x90)
+                    dwarf_uleb(info, number)
+                    info[reg_len_at] = U8{info.len() - reg_len_at - 1}
+                }
             }
             val_len_at: info.len()
             dwarf_u8(info, 0)
@@ -1643,7 +1658,7 @@ dwarf_line_threads: fn(program: X64ObjectModule, functions: [X64CompiledFunction
     admitted: compiler_threads_admit(threads, count, total_rows, DWARF_LINE_MIN_ROWS_PER_THREAD, 0, 0)
     workers: if admitted > 8 -> 8 else -> admitted
     if workers <= 1 {
-        body := dwarf_line_range(program, functions, debug, offsets, sizes, symbols, 0, count)
+        body: dwarf_line_range(program, functions, debug, offsets, sizes, symbols, 0, count)
         base: line.len()
         line.extend(body.bytes)
         loop r in body.relas {
@@ -1653,7 +1668,7 @@ dwarf_line_threads: fn(program: X64ObjectModule, functions: [X64CompiledFunction
         return DwarfSectionRows{bytes: line.move(), relas: relas.move()}
     }
     bounds: compiler_threads_partition(weights, workers)
-    chunks := dwarf_line_chunks(program, functions, debug, offsets, sizes, symbols, bounds, 0)
+    chunks: dwarf_line_chunks(program, functions, debug, offsets, sizes, symbols, bounds, 0)
     total_bytes := line.len()
     total_relas := 0
     loop c in chunks {
@@ -1757,55 +1772,58 @@ dwarf_jet_line_threads: fn(program: X64ObjectModule, functions: [X64CompiledFunc
     elf64_u32(table, 0)
     admitted: compiler_threads_admit(threads, kept.len(), total_rows, DWARF_LINE_MIN_ROWS_PER_THREAD, 0, 0)
     workers: if admitted > 8 -> 8 else -> admitted
-    if workers <= 1 {
-        loop index in kept {
-            function: functions[index]
-            facts: dwarf_function_debug(program, function)
-            dwarf_address(table, relas, dwarf_function_symbol(symbols, index), offsets[index])
-            elf64_u32(table, sizes[index])
-            elf64_u32(table, strings.len())
-            dwarf_string(strings, facts.name)
-            if paths[facts.file] < 0 {
-                paths[facts.file] = strings.len()
-                dwarf_string(strings, program.debug.files[facts.file])
+    if {
+        workers <= 1 -> {
+            loop index in kept {
+                function: functions[index]
+                facts: dwarf_function_debug(program, function)
+                dwarf_address(table, relas, dwarf_function_symbol(symbols, index), offsets[index])
+                elf64_u32(table, sizes[index])
+                elf64_u32(table, strings.len())
+                dwarf_string(strings, facts.name)
+                if paths[facts.file] < 0 {
+                    paths[facts.file] = strings.len()
+                    dwarf_string(strings, program.debug.files[facts.file])
+                }
+                elf64_u32(table, paths[facts.file])
+                elf64_u32(table, facts.line)
+                elf64_u32(table, rows.len())
+                from: rows.len()
+                x64_jetline_rows(rows, debug[index].lines)
+                elf64_u32(table, rows.len() - from)
             }
-            elf64_u32(table, paths[facts.file])
-            elf64_u32(table, facts.line)
-            elf64_u32(table, rows.len())
-            from: rows.len()
-            x64_jetline_rows(rows, debug[index].lines)
-            elf64_u32(table, rows.len() - from)
         }
-    } else {
-        bounds: compiler_threads_partition(weights, workers)
-        chunks := dwarf_jet_line_chunks(kept, debug, bounds, 0)
-        row_lens := [Int]{}
-        row_lens.try_reserve(kept.len()) ?? ()
-        total_row_bytes := 0
-        loop c in chunks -> total_row_bytes += c.rows.len()
-        rows.try_reserve(total_row_bytes) ?? ()
-        loop chunk in chunks.move() {
-            rows.extend(chunk.rows)
-            row_lens.extend(chunk.lens)
-        }
-        row_off := 0
-        loop (pos, index) in kept {
-            function: functions[index]
-            facts: dwarf_function_debug(program, function)
-            dwarf_address(table, relas, dwarf_function_symbol(symbols, index), offsets[index])
-            elf64_u32(table, sizes[index])
-            elf64_u32(table, strings.len())
-            dwarf_string(strings, facts.name)
-            if paths[facts.file] < 0 {
-                paths[facts.file] = strings.len()
-                dwarf_string(strings, program.debug.files[facts.file])
+        else -> {
+            bounds: compiler_threads_partition(weights, workers)
+            chunks: dwarf_jet_line_chunks(kept, debug, bounds, 0)
+            row_lens := [Int]{}
+            row_lens.try_reserve(kept.len()) ?? ()
+            total_row_bytes := 0
+            loop c in chunks -> total_row_bytes += c.rows.len()
+            rows.try_reserve(total_row_bytes) ?? ()
+            loop chunk in chunks.move() {
+                rows.extend(chunk.rows)
+                row_lens.extend(chunk.lens)
             }
-            elf64_u32(table, paths[facts.file])
-            elf64_u32(table, facts.line)
-            elf64_u32(table, row_off)
-            row_len: row_lens[pos]
-            elf64_u32(table, row_len)
-            row_off += row_len
+            row_off := 0
+            loop (pos, index) in kept {
+                function: functions[index]
+                facts: dwarf_function_debug(program, function)
+                dwarf_address(table, relas, dwarf_function_symbol(symbols, index), offsets[index])
+                elf64_u32(table, sizes[index])
+                elf64_u32(table, strings.len())
+                dwarf_string(strings, facts.name)
+                if paths[facts.file] < 0 {
+                    paths[facts.file] = strings.len()
+                    dwarf_string(strings, program.debug.files[facts.file])
+                }
+                elf64_u32(table, paths[facts.file])
+                elf64_u32(table, facts.line)
+                elf64_u32(table, row_off)
+                row_len: row_lens[pos]
+                elf64_u32(table, row_len)
+                row_off += row_len
+            }
         }
     }
     strings_start: table.len()
