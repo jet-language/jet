@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114266,
+    "rev": 114269,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56317,6 +56317,11 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "c3 route: S2-S4's handler typing and the OpenAPI contract are not open questions. D-RULE-REWRITE1=A (the contract as a per-call #run parameter default) and D-RULE-BODYFACTS1=A (#Recorded calls in FunctionInfo) are ratified, and their builds are now criteria 39 and 40. Call-site rewriting stays ruled out (D-RULE-REWRITE1 whyNot B; no macros, syntax-decisions.md). The only unowned gate is REWRITE1's fifth, the typed-handler adaptation to one request; its ballot D-HTTP-HANDLER-DECODE1 is being narrowed to that after review (HandlerDecodeReview: the draft re-balloted REWRITE1 and BODYFACTS1)."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "c7: G1Checkers found and fixed the root of release and hardened builds dropping Core check rules. Lazy Core restore counted a marker check that held only the parser-appended None as non-blank, so every lazily loaded Core rule ran as { None }. The fix is jet_driver_core_body_blank in JetDriver CoreInterface.jet, with the DeclaredCallChecks golden (o0/o1/o2) and the case expiring_force_is_rejected_on_the_release_and_hardened_profiles. It goes in batch 45; o0/o1 already pass on the batch-44 compiler. c3/c5 finding: the remaining TimeHandles, StreamHandles, ProcessHandles, UIHandles and HTTP checks aren't rule moves. They type compiler-built handle types that Core doesn't declare, so c5 first needs those types declared in Core with ordinary Core functions. HTTP forms/E2411, StreamHandles E0904 and Geometry E2521 wait on criterion 35 (D-RULE-TYPEARGS1=A build), which G1Checkers takes next."
         },
         {
@@ -56963,6 +56968,32 @@
           "verifiedBy": null,
           "evidence": "batch 43 (dev 70ff64f2288, master 911872e93df), run43d on the batch compiler built from that tree, O0: ui PASS for the review's probes: Tests/UI/template_paste_dunder_member.jet (#{hook} = __hidden_hook, refused), Tests/UI/template_paste_core_dunder_call.jet (args.#{hook} = __cli_is_int, refused), Tests/UI/template_paste_core_trait_dunder_member.jet and Tests/UI/core_trait_dunder_member_user_impl.jet (non-Core impl of a Core trait's __ member, refused).",
           "at": "2026-11-25T10:45:29.541Z"
+        },
+        {
+          "n": 40,
+          "text": "D-RULE-BODYFACTS1=A is built: Core marks HTTPRequest.json, server.json, server.response and server.empty_response #Recorded; each function's FunctionInfo lists its calls of recorded callees as CompilerCall values (recorded), and a second list holds those whose value a return path returns, following local aliases (returns). A check rule reading handler.recorded and handler.returns sees a 404 returned through a local alias, which today's body walk drops. Proof: a cases/Metaprogramming case whose rule prints a handler's recorded and returns lists passes on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T21:32:21.049Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Metaprogramming/rule_reads_recorded_calls"
+          }
+        },
+        {
+          "n": 41,
+          "text": "D-RULE-REWRITE1=A is built: a parameter's default may be #run over earlier parameters, evaluated at each call with those parameters bound to the call's argument facts; a call may write that parameter only by forwarding its own caller's parameter with the same default, and any other written value is refused with a registered code, what/why/fix text and a UI snapshot. The route contract reaches each route call this way, and a handler used on many routes is computed once. Proof: a cases/Metaprogramming case for the per-call default and its forwarding, and the UI snapshot for the refusal, pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T21:32:22.788Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Metaprogramming/per_call_run_default"
+          }
         }
       ],
       "refs": [],
@@ -56973,9 +57004,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-25T17:38:29.314Z",
+      "updated": "2026-11-25T21:32:22.788Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 39
+      "criteriaLastN": 41
     },
     {
       "id": "c0sdz4q0",
@@ -142620,6 +142651,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T21:32:22.788Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0e6znz4",
+      "note": "40 criteria, soft limit 6: c3's own gates (ratified decisions it depends on); owner order: a gap is a criterion on the card that owns the area, never a new card"
+    },
+    {
+      "at": "2026-11-25T21:32:22.788Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#41 D-RULE-REWRITE1=A is built: a parameter's default may be #ru"
+    },
+    {
+      "at": "2026-11-25T21:32:21.049Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0e6znz4",
+      "note": "39 criteria, soft limit 6: c3's own gates (ratified decisions it depends on); owner order: a gap is a criterion on the card that owns the area, never a new card"
+    },
+    {
+      "at": "2026-11-25T21:32:21.049Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#40 D-RULE-BODYFACTS1=A is built: Core marks HTTPRequest.json, s"
+    },
+    {
+      "at": "2026-11-25T21:32:08.906Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-25T21:08:28.462Z",
       "by": "Pip",
