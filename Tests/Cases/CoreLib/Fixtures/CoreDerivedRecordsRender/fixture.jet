@@ -1,0 +1,29 @@
+// Plain Core records and enums with neither a Display impl nor a runtime
+// show hook render through their structural derive: print, `{value}` and
+// `{value:Debug}`, bare, in a list and as a program struct's field.
+use {
+    tls: core.net.tls
+    reflect: core.reflect
+    ui: core.ui
+}
+
+Probe: struct {
+    version: tls.TLSVersion,
+    value: reflect.ReflectValue,
+    result: ui.EventResult,
+}
+
+run: fn() {
+    version: tls.TLSVersion.TLS13
+    print(version)
+    print("{version:Debug}")
+    print("{[tls.TLSVersion]{tls.TLSVersion.TLS12, version}}")
+    value: reflect.ReflectValue{type_name: "Int", display: "3"}
+    print(value)
+    print("{value:Debug}")
+    handled: ui.EventResult.Handled
+    print("{handled}")
+    probe: Probe{version: version, value: value, result: handled}
+    print(probe)
+    print("{probe:Debug}")
+}

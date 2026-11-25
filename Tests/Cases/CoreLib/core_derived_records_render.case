@@ -1,0 +1,15 @@
+# Plain Core records and enums with neither a Display impl nor a runtime
+# show hook (tls.TLSVersion, reflect.ReflectValue, ui.EventResult) are
+# admitted by their structural derive: print, `{value}` and `{value:Debug}`,
+# bare, in a list and as a program struct's fields, at every optimization
+# level.
+fixture: Fixtures/CoreDerivedRecordsRender
+step: jet run fixture.jet
+stdout: = core_derived_records_render.out
+stderr: empty
+step: jet run -O1 fixture.jet
+stdout: = core_derived_records_render.out
+stderr: empty
+step: jet run -O2 fixture.jet
+stdout: = core_derived_records_render.out
+stderr: empty
