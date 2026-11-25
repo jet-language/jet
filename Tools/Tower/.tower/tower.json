@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114244,
+    "rev": 114247,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77329,7 +77329,7 @@
       "id": "c0clpv28",
       "num": 7031,
       "title": "Handles that read like links: relationships held as pool IDs with short, checked navigation instead of stored @T links",
-      "body": "Owner asked on 2026-11-25 for greenfield proposal item P9 as a ballot of the best-of-both design, with every downside engineered away: keep handles (Pool<T> with generational ID<T>) and views as the one way to hold a relationship, and make navigating them as short as a link. It reopens D-MEMREF1 (live links @T, already built on dev: Spellings.jet:31, Sema/Links.jet, JetIR BuildLinks.jet, runtime Links.jet, Examples/Memory/LiveLinks.jet, and used by the compiler's SemaBodyCheck; open cards #4500, #4756). Owner bar: Jet must be able to do everything any other language can as an end result, easy to reason about and use, with friction in proportion to how often a thing is done. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P9 (master checkout, not yet on dev). Owner direction (2026-11-25, second round): free `@` as a symbol for possible later use, and deliver the best of both worlds with the downsides engineered away; rewriting the compiler's own link code is acceptable (greenfield). Two downsides must be removed, not just mitigated: (1) sharing an object must not require the programmer to make a pool first (today's `alias: hero` case), and (2) a handle to a removed item must not be only a run-time stop. The paused fresh review's findings (in the drafting notes) are also to be engineered away: a handle layout fixed per type rather than by whole-program counting, assignment through `?.` treated as a new feature for every optional place, built-versus-design stated plainly, the superseded rules D-MEMREF1 replaced listed, and the blast radius of a second store of one type.",
+      "body": "Owner asked on 2026-11-25 for greenfield proposal item P9 as a ballot of the best-of-both design, with every downside engineered away: keep handles (Pool<T> with generational ID<T>) and views as the one way to hold a relationship, and make navigating them as short as a link. It reopens D-MEMREF1 (live links @T, already built on dev: Spellings.jet:31, Sema/Links.jet, JetIR BuildLinks.jet, runtime Links.jet, Examples/Memory/LiveLinks.jet, and used by the compiler's SemaBodyCheck; open cards #4500, #4756). Owner bar: Jet must be able to do everything any other language can as an end result, easy to reason about and use, with friction in proportion to how often a thing is done. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P9 (master checkout, not yet on dev). Owner direction (2026-11-25, second round): free `@` as a symbol for possible later use, and deliver the best of both worlds with the downsides engineered away; rewriting the compiler's own link code is acceptable (greenfield). Two downsides must be removed, not just mitigated: (1) sharing an object must not require the programmer to make a pool first (today's `alias: hero` case), and (2) a handle to a removed item must not be only a run-time stop. The paused fresh review's findings (in the drafting notes) are also to be engineered away: a handle layout fixed per type rather than by whole-program counting, assignment through `?.` treated as a new feature for every optional place, built-versus-design stated plainly, the superseded rules D-MEMREF1 replaced listed, and the blast radius of a second store of one type. Ballot D-HANDLE-NAV1 posted 2026-11-25 (reviewed by ReviewHandleNav2); its review is Docs/Audits/2026-11-25-handle-navigation-review.md (in the master checkout, to land on dev). If option A is ratified, its sharing story depends on D-SHARED-CYCLE2 (#6066) and D-GC-OPTIN1 (#6295) being built, plus a one-thread Shared cell with no lock (a paired benchmark is owed: a field write through a cell measured about 55 ns against about 1 ns through a pool slot).",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G4",
@@ -77343,6 +77343,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Pip",
+          "text": "Posted D-HANDLE-NAV1 to the owner; audit draft ready to land on dev."
+        },
         {
           "at": "2026-11-25",
           "by": "Pip",
@@ -77406,7 +77411,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:58:59.300Z",
-      "updated": "2026-11-25T18:34:06.791Z",
+      "updated": "2026-11-25T20:00:14.990Z",
       "updatedBy": "Pip"
     },
     {
@@ -139454,6 +139459,306 @@
       "created": "2026-11-25T16:44:31.865Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-25"
+    },
+    {
+      "id": "D-HANDLE-NAV1",
+      "cardId": "c0clpv28",
+      "group": "language",
+      "title": "Handles read like links and stale handles are a compile-time question; one shared object is a `Shared` cell; `@T` live links retire and prefix `@` is freed",
+      "situation": "Jet has two ways for one value to refer to another. A live link, written `@Person`, is a counted pointer that every holder reads and writes. A handle, an `ID<Person>`, names a slot in a pool. Links share one object with no setup, but they are half built and put a count and a check word on every linked object. Handles are cheap plain numbers, but every lookup names the pool, and a removed slot stops the program at run time. The owner asked to retire links, free the `@` symbol, and keep both strengths with neither weakness.",
+      "gist": "Should handles read like links, one shared object live in a `Shared` cell, and stale handles be caught, retiring `@T`?",
+      "lesson": "A handle is a small number naming a slot in a store, plus a count that changes when the slot empties. A live link is a counted pointer to one object. A `Shared` cell is one object that many names can hold. This vote decides how handles read, how one object is shared without a store, and how stale handles are caught.",
+      "explainer": "",
+      "story": "Maya builds a family tree and a small game. Under A she writes `ben.parent?.name`, and the tree saves as plain numbers. When she removes a cousin, the compiler makes her say what each possibly stale handle should do. Her hero is `hero: Shared{Player{…}}`, and `alias: hero` shares it with no store at all.",
+      "inWild": "// Rust: a slotmap key is a 32-bit index and a 32-bit version; every lookup names the map.\n// https://docs.rs/slotmap\nlet name = people[ben].parent.map(|p| people[p].name.as_str());\n\n// Swift: a weak reference reads as nil once its object is gone, and `?.` also assigns.\n// https://docs.swift.org/swift-book/documentation/the-swift-programming-language/optionalchaining/\nben.parent?.hp -= 1\n\n// Bevy: an Entity is an index plus a generation, read through a query.\n// https://docs.rs/bevy/latest/bevy/ecs/entity/struct.Entity.html\nlet parent = parents.get(ben)?.get();",
+      "detail": "Sites are at dev 8f4309b5023 (2026-11-25). Every cited file is unchanged since 43951bb7788, and the earlier draft's 4b48f2bc485 sites were all re-read. Counts are pattern counts with comments and strings removed. Probes ran on the installed jet a0.0.46. Code uses the ratified spellings `^name: value` and `place.in_place()` (D-BIND-MARK1=A). Dev still spells them `name := value` (Spellings.jet:13) and `^place` (spec.md:2402-2404).\n\nThis ballot reopens D-MEMREF1=A, which made `@T` live links the way to share one value. The owner direction of 2026-11-25 binds it. Free `@`, keep the strengths of handles and links, and design out two downsides. Sharing must need no store first, and a stale handle must not be only a run-time stop.\n\n```text\nBuilt today (dev 8f4309b5023)\n- `@` is the live-link sigil: Spellings.jet:31, CoreSurface.jet:373-374, Syntax Markers.jet:10-12.\n- Link stack: JetSema Sema/Links.jet (304 lines; sema_link_classify at 57), JetIR\n  BuildLinks.jet (427), JetRuntime Links.jet (163; a 24-byte header with count +0,\n  exclusivity +8 and size +16, lines 3-10), 18 jet_rt_link_* exports (RuntimeCExports.jet:1666-1683).\n- Examples/Memory/LiveLinks.jet:33-34 shares one object: `hero := @Player{…}` then `alias: hero`.\n- The compiler holds two links: SemaBodyCheck.program and .environment (Scopes.jet:1188-1190),\n  made by sema_body_check_init (Scopes.jet:1788-1789) at five sites: Calls/Checking.jet:1384,\n  Expressions/Constructors.jet:545, FunctionCheck.jet:630, MarkerRules.jet:1270 and\n  ComptimeItems.jet:1680. They are read with `.*` on 1,355 lines in 98 files. A pattern search\n  for assignments, writing calls and `^` marks through them finds none.\n- Link card #4500 has open criteria c1 and c5-c13. Two of them (c10, c11) record four ways\n  safe code keeps a dangling link today. Card #4756 (stored sibling links) is open.\n- Shared<T>: `Shared{value}`, one lock per field read or write, one lock per statement, and a\n  clone shares the cell (spec.md:2513-2520). A write that could close a strong loop is refused\n  with E0221, and Weak back edges break loops (spec.md:2521-2531). `same` and `downgrade`\n  exist (SharedOwner.jet:506, 517).\n- Probes on Shared: `hero: Shared{Player{…}}; alias: hero; alias.hp -= 1` runs, and hero\n  shows the change. A parent pointer typed `Shared.Weak<Node>?` and set from downgrade() runs.\n  Pushing one existing node into two parents (no loop) is refused with E0221, and so is\n  moving a node from one parent to another.\n- Probe on cost, at --release: 20 million `cell.hp += 1` writes through a Shared cell took\n  about 1.1 s; the same writes through `pool[id].hp += 1` took about 20 ms. That is about\n  55 ns against 1 ns per write.\n- D-SHARED-CYCLE2=A (prove safe writes, through helpers and aliases) and D-GC-OPTIN1=A\n  (`#Policy(gc)` on a module opts its types into a collector, and E0221 skips them) are\n  ratified and unbuilt: with the opt-in the two-parent probe is still E0221.\n- Pool<T> is a list of (generation I64, value T?) entries. ID<T> is (index I64, generation\n  I64), 16 bytes, with no store stamp (BuildPools.jet:31-49). `add` always appends, so slots\n  are never reused (BuildPools.jet:90-108). `remove` empties a slot and bumps its generation\n  (140-162). `ids()` builds a new list of handles before a loop (164-195). `pool[id]` stops\n  on a stale ID with \"this ID no longer refers to a live value\" (197-224). Methods are add,\n  remove and ids only (SharedOwner.jet:453-495). `pool[id]` is the PoolSlot node, and a wrong\n  index type is E0112 (Literals.jet:1268-1285).\n- Probe: a loop over `ids()` that removes a later handle, then reads it, stops with that message.\n- Rows<T>/Row<T>: add-only; Row<T> is a U32 with index() (Core Collections.jet:45-74). Only\n  the row type is checked (spec.md:2682-2684, Literals.jet:1441).\n- `?.` reads (S71): MathLayout.jet:769-771, syntax-decisions.md:1492-1496; a non-optional\n  left side is E0047. A field read on T? is E0310 (spec.md:2050-2054).\n- Probes: `x?.hp -= 1` is Jet.CompoundAssignNotPlace, `x?.hp = 1` is Jet.InvalidStatement,\n  and `pool.has(id)` is Jet.UnknownFunction (D-POOL-HAS1 is unbuilt). Plain\n  `xs[idx()] = val()` runs val() before idx(). A written match subject refuses even a read\n  of its owner inside the arm (Jet.ReadDuringWriteWindow).\n- Probe: `Ghost: distinct Person` type-checks, but no Ghost can be made: `Ghost(p)`,\n  `Ghost{p}` and `Ghost.from(p)` all fail. The spec shows `distinct` only over Int\n  (spec.md:1157-1158).\n- Probe: a `View<T>` struct field cannot hold one table: storing it is a type mismatch, and\n  `.count` through it is an unknown field. A plain value field filled from a read parameter\n  works: 2,000 inits sharing one million-element list took 13-25 ms, so nothing was deep\n  copied, and `jet audit copies` lists the store as one implicit read-view copy.\n- Lambda captures: spec.md:1861-1888. Field footprints are inferred and published in the API\n  snapshot (spec.md:2478-2484). View facts and their invalidation: spec.md:2438-2448.\n- Markers that exist in Prelude Markers.jet: #Local (521-528), #Shared (530), #Transact (582),\n  #Context (612) and #ContextKey (626).\nDesign (nothing below is built)\n- The follow rule, liveness proofs, assignment through `?.`, the fixed 8-byte handle with slot\n  reuse, `has`, the one-thread form of Shared cells, tracked reads of slots and cells, saving a\n  store with its free list, and the compiler cutover. A also depends on D-SHARED-CYCLE2=A and\n  D-GC-OPTIN1=A being built.\n```\n\n```text\nThe rule (A)\n1. Follow. When h is a handle (ID<T>, Row<T>, or an index type of a `[T#IX]` list) or an\n   optional of one, and the next step names a member of T, `h.m` means that member of h's\n   entry in its store. A handle step follows again: who.parent?.parent?.name.\n2. Store. The one Pool<T> (for ID<T>), Rows<T> (for Row<T>) or `[T#IX]` list (for IX) in\n   reach: a parameter, a local, a captured name, or a field one level inside one of those\n   (town.people). A Shared<Pool<T>> in those places counts. Context values and module\n   statics are never searched.\n3. Zero stores in reach: compile error; the fix adds the store parameter.\n4. Two or more: compile error naming each; the fix writes `store[h].m`. Depth never decides.\n5. Generic code resolves at its definition against declared types: a Pool<T> parameter\n   serves ID<T>. An instantiation never changes the store and never adds an error.\n6. Writes need the store writable, else E0205, as `store[h].m = v` does (spec.md:2652-2654).\n7. Handle members and universal methods act on the handle: h.copy(), h.move(), r.index().\n   Any other name that is both a handle member and a member of T is a compile error naming\n   both; write store[h].m. jet fmt never rewrites store[h].copy() as h.copy().\n8. A handle passed where a handle is expected stays a handle: hire(town, ben, mill).\n9. Captures. A lambda that does not escape follows through a captured store under the\n   capture rules: it reads its own copy, and a call after the store changed is E0204\n   (spec.md:1863-1871). A lambda that escapes would own a copy of the store\n   (spec.md:1871-1876), so a follow there is a compile error. The fix takes the store as a\n   lambda parameter or captures a Shared<Pool<T>>. No follow silently reads a snapshot.\n10. Lowering. One match becomes the existing PoolSlot node (Literals.jet:1277), so IR and\n    backends reuse `pool[id]` code. A proven follow drops the generation compare.\n11. One handle family. A `[T#IX]` list (D-ARRAY-INDEX1, unbuilt) has one slot per index\n    value, so its follows are always proven and never checked. Game asset handles\n    (D-GAME-ASSET1, unbuilt) are ID<T> into a store reached through `scene.assets`, so they\n    follow, prove and go stale by this rule. No second handle kind exists.\n```\n\n**Downside 1: sharing needs no store.** One object with many holders is a `Shared` cell: `hero: Shared{Player{name: \"Aria\", hp: 10}}`, then `alias: hero`. Both names reach one object, and `alias.hp -= 1` shows through `hero`. This is built today, and the probe above ran it. It is the link example with `Shared{…}` in place of `@`, and no pool exists anywhere.\n\n```text\nShared cells by case\n- One object, many holders (a hero, a settings object): built and probed.\n- A tree built in place with parent pointers: built. Children are Shared<Node>, and the parent\n  is a Shared.Weak<Node>? from downgrade() (probed).\n- Observers: the subject keeps Shared.Weak entries, so a dropped observer reads as gone and\n  nothing keeps it alive.\n- One child under two parents, or a node moved to a new parent: refused today with E0221 even\n  when no loop forms (probed). D-SHARED-CYCLE2=A accepts such a write once its alias and call\n  summaries prove no loop.\n- Real loops (a graph with cycles, GUI nodes that point at each other): D-GC-OPTIN1=A lets\n  `#Policy(gc)` on the module opt those types into a collector. Without the opt-in, the\n  E0221 fixes are a Weak back edge, a handle, or the opt-in line, which `jet fix` writes.\n- Across tasks: the cell takes its locked form (below).\nNo case needs a store first. A graph with many nodes and frequent removal still fits a store\nbetter: a handle costs 8 bytes and no count.\n```\n\n**Cost of a cell.** Today every field read or write of a cell takes a lock. The probe above measured about 55 ns per write against about 1 ns through a pool slot. That fails the performance gate for games and GUI trees. So A moves D-MEMREF-TASK1=A's law from links to cells. If any cell of a type can reach another task, cells of that type use an atomic count and the lock. Otherwise they use a plain count and no lock.\n\n`#Local` forbids crossing, `#Shared` forces the locked form, and `jet inspect` lists each switch, as D-DATARACE1=C already does for reactive boxes. Sendability is checked on concrete types at each generic use, so each type has one form. A paired two-program cell must show a one-thread cell write at plain field cost and the locked form still correct across tasks.\n\nA second name for a place inside one function needs no cell: a write window, `edit: hero.in_place()`, is the place itself.\n\n```text\nDesigns rejected for downside 1\n- An implicit store per type: hides which store a function touches, loses no-alias facts,\n  and leaves open when its slots are freed.\n- An implicit store per function: fixes only the demo; a value that leaves the function\n  needs a real store again.\n- Generational references on every object, as Vale does: a check per use, and aliasing the\n  optimizer cannot see.\n- A collector for every object, as Java, Go and Pony do: every program pays for it, while\n  D-GC-OPTIN1 makes only types with real loops pay.\n- Regions with free pointers inside, as Verona has: a region is a store under another name,\n  and its inner pointers still need a collector or a stale check.\n```\n\n**Downside 2: a stale handle is a compile-time question.** The compiler tracks which handles are proven live. That is the same kind of fact it keeps for windows, which an invalidating event ends (spec.md:2438-2448). A removal is one more such event. A plain `.` follows only a proven handle. Every other handle is followed with `?.`, checked with `has`, or indexed as `store[h]`. So the only run-time stop left is one the programmer writes.\n\n```text\nStale handles (A)\nA proof says: this handle is live in this one store place. With a proof, plain `.` compiles\nand the follow skips the generation compare. The bounds compare stays, so a wrong proof can\nnever read outside the store. At a join, a handle is proven only if every path proved it.\nProven live:\n- h from store.add(...) in this function.\n- h bound by `loop h in store.ids()`, inside the body, when the body removes nothing from that\n  store except h and calls nothing that may. ids() is a list made before the loop, so a handle\n  removed earlier in the loop is still visited (probed).\n- After store.has(h) is true: in the true branch, or after `if !store.has(h) -> return`.\n- A handle a call returns proven in a store the caller passed, as in `e: spawn(world)`.\n  \"Returns proven\" is inferred and published like may-remove.\n- A handle parameter whose store is reached through another parameter. If the body follows it\n  with plain `.` before any check, the function requires it live. That fact is inferred and\n  published, and each caller must pass a handle proven in the same store it passes, else a\n  compile error at the call. Function values and trait methods always require it.\nA proof ends at:\n- a `remove` on that store, unless the removed handle is proven different (another add, or\n  checked != h);\n- an assignment, move or replacement of the store or of any value that holds it;\n- a call that takes the store, or a value holding it, writable and may remove or replace.\n  \"May remove\" is inferred per function and published in the API snapshot, as field\n  footprints are (spec.md:2478-2484). A call through a function value or trait method may;\n- a call to a local lambda that captured the store writable;\n- the end of the statement or #Transact block, for a store inside a Shared cell, a context or\n  a static, since another holder may remove at any time.\nAfter store.remove(h), h is known removed, and any follow of h is a compile error.\nUnproven: a handle read from a field, list, map, file, channel, context or static, or one whose\nproof ended. A plain `.` on it is a compile error whose fixes are `?.`, `has` or `store[h]`.\n`h?.m` reads a removed slot as absent. On a non-optional handle it means \"if live\", which\nextends E0047 to allow handles on the left.\n`store[h]` keeps today's stop for a stale h, like list indexing. It is the explicit opt-in.\n[INFERENCE] Compile cost: one flow pass per function over handle locals, as for moves, and one\npublished fact per store parameter; not measured.\n```\n\n```text\nWhat remains after A, and its cost\n- store[h] on a stale h stops, as today. It is written on purpose, like xs[i].\n- h?.m on a removed slot is absent: a read falls back and a write is skipped. A logic error is\n  still possible, as with a Swift weak reference that became nil.\n- Walking handles kept in fields (tree children, graph edges) writes `?.` (skip) or `store[h]`\n  (stop) at each step. No short form means \"follow or stop\".\n- A handle from another store of the same type follows into the store in reach. The generation\n  compare catches it unless that slot's generation happens to match. Today's 16-byte ID has no\n  store stamp either (BuildPools.jet:42-49).\n- A Row<T> from another table of the same row type reads another row; only bounds are checked.\n- Across tasks proofs are one statement long, so code on a shared store mostly writes `?.`.\n- Handles loaded from disk or received from a channel start unproven.\n- A store deeper than one field inside a parameter is not searched; pass the inner value.\n- ids() builds a list per loop (BuildPools.jet:164-195); the benchmark pair covers it.\n- [INFERENCE] Code that removes often inside loops over other handles will write more `?.`.\n```\n\n**Handle layout.** `ID<T>` becomes 8 bytes for every T: a 32-bit slot and a 32-bit generation. The size never depends on how many stores a program makes, and no whole-program count exists. Today's ID is 16 bytes with no store stamp, so nothing that catches a wrong store today is lost.\n\nStores reuse emptied slots. A slot whose generation would reach the all-ones value is retired, so a generation never wraps. The all-ones generation is never live, so `ID<T>?` uses it for None and is also 8 bytes. A store holds at most 4,294,967,295 slots, retired ones included, and `add` past that stops, as Rows' add does (Core Collections.jet:61-65).\n\nRust slotmap keys are also 8 bytes, but a version wraps after 2^31 reuses of one slot, which its docs call a rare spurious match. Retiring the slot removes that case at the cost of one slot per about four billion reuses. A 16-byte stamped handle was rejected: handles sit in every record edge, so their size sets peak memory and cache use. A store saves its slots, generations and free list, and a handle saves as two numbers. Loaded handles start unproven, so no remap pass runs.\n\n```text\nAssignment through ?. (one new statement form for every optional place)\n- Forms: `a?.b = v`, `a?.b op= v`, and a writing call such as `a?.items.push(x)`. Each `?.`\n  step is a T? place or a handle. It is a statement and has no value.\n- Order: the chain's tests run left to right. Each `?.` step tests its value: None, or a\n  removed slot, is absent. If any step is absent, nothing more runs: the right side is not\n  evaluated and nothing is written. Otherwise the right side runs, then the one write.\n- Plain assignment runs the other way: `xs[idx()] = val()` runs val() first (probed). A `?.`\n  write must test first to skip the right side, so the spec states both orders.\n- The right side may read anything. It may not write a place the chain passes through, remove\n  from a store the chain follows, or call something that may. That is a compile error whose\n  fix binds the value on the line before, so no test goes stale before the write. A written\n  match already guards its owner this way (Jet.ReadDuringWriteWindow, probed).\n- Place: the base must be writable: a `^` binding, a `^` parameter, or a writable store.\n- Today `x?.hp -= 1` is Jet.CompoundAssignNotPlace and `x?.hp = 1` is Jet.InvalidStatement.\n- Swift skips the right side of `a?.b = f()` when a is nil; A matches that.\n```\n\n**A second store of one type.** A second `Pool<Person>` field in `Town` makes every bare `ID<Person>` follow that sees `Town` a compile error. Each error carries a machine fix that writes the store, so meaning never changes silently. The way to avoid it is a wrapper element type, `Ghost: struct { person: Person }`, so the second store's handles are `ID<Ghost>`. This builds today.\n\nA `distinct` struct type cannot be made today (probed), so it is not offered. Rust slotmap solves the same case with a key type per map (`new_key_type!`). A Jet spelling for that would need its own ballot.\n\n**Rows on the wrong table.** A `Row<T>` from another table of the same row type reads the wrong row with only a bounds check. That holds today and under A (Core Collections.jet:45-52, spec.md:2682-2684). Under A the follow uses the one table in reach, so the risk needs a row to cross between two tables of one type. The wrapper fix applies. Typed-index lists (D-ARRAY-INDEX1, unbuilt) let two lists share an index type, which is memory-safe because the index fits both.\n\n**The compiler's own links.** `program` and `environment` become plain value fields, `program: SemaProgramTables` and `environment: SemaScopeEnvironment`. A `View<T>` field was tried and fails: it cannot hold one table (probed). A value field filled from a read parameter shares the tables instead of copying them (spec.md:2318-2330), and the probe above measured no deep copy.\n\nThe 1,355 reads drop `.*`, and the five init sites drop `@`. `jet audit copies` will list each init as an implicit read-view copy. [INFERENCE] Behavior is unchanged, since no write goes through the links; the compiler's own tests decide.\n\n```text\nEvery downside, and what removes it\n1. Sharing needs a store -> a Shared cell plus a second name, never a store. Built for one\n   object, trees and Weak back edges; shared children, moves and real loops need\n   D-SHARED-CYCLE2 and D-GC-OPTIN1 built.\n2. Stale handle only stops at run time -> proofs make plain `.` safe; the rest is `?.`, `has`\n   or an explicit store[h]. Remaining cost: the list above.\n3. Lookups name the store -> the follow rule finds the one store in reach.\n4. Handle size chosen by counting -> fixed 8 bytes for every T, `ID<T>?` included.\n5. `?.` cannot write -> one new statement form with a fixed order and a guarded right side.\n6. Two stores of one type -> compile error with a fix; a wrapper element type avoids it.\n7. Member clashes -> handle members and copy/move win; other clashes are compile errors.\n8. Generic code -> resolved at the definition, never per instantiation.\n9. Escaping lambdas -> a follow through a captured plain store is a compile error.\n10. Check cost in hot loops -> proven follows drop the generation compare; a benchmark pair\n    against hand-written index code is still owed.\n11. Hidden lookup -> hover names the store; signatures list every store.\n12. Cycles -> handle cycles cost nothing; Shared loops use Weak, proven writes, or the\n    opt-in collector.\n13. FFI, intrusive and self-referential data -> mem.Ptr<T> under #Unsafe and Pin<T>, unchanged.\n14. Cell cost -> the one-thread form for every type that never reaches a task.\n15. Several handle kinds -> ID, Row, typed indexes and asset handles share one rule.\n```\n\n```text\nRules D-MEMREF1=A superseded or retired, and what holds under A\n- D-MEM1/S3 stored-reference ban -> returns as today's text: no raw stored references; only\n  View/ViewMut with proven owner paths (spec.md:2347-2359).\n- D-MEM-VIEWRET1 View<T> -> returns as amended by D-MEM-COPYSEM1: storing a read view stores\n  a copy (spec.md:2348-2355).\n- D-SHARED-API1, D-CONC-SHARE1 -> return as built: Shared{x}, plain field access, one lock\n  per statement (spec.md:2513-2520), now only for types that reach a task. The closure API\n  stays retired.\n- D-LOCALCELL1 Cell<T> -> returns unchanged (spec.md:2632-2645).\n- D-PIN3 field form -> returns unchanged: a field typed Pin<T> (Examples/Memory/Pin.jet:36,\n  59-62). Link card criterion 1, which respells it with @T, is withdrawn.\n- D-REACT-REF1 -> amended. Signal stays as built (D-SIGNAL1, Core Reactive.jet:18-72) and does\n  not become @T. Its promise, that a view updates when data it read changes, is served by\n  tracked reads: a reactive scope that reads a slot field subscribes to (store, slot, field),\n  and one that reads a cell field subscribes to (cell, field). Writes to a store or cell type\n  that some reactive scope reads carry a notify; `remove` notifies readers of that slot.\n  Types no reactive scope reads carry no notify code.\n- D-MEMREF-LIFE1 -> retires for links: no counted link storage, no link cycle collection, no\n  link cases in jet gc report. Shared loops keep D-SHARED-CYCLE2=A and D-GC-OPTIN1=A, which\n  already narrowed it and do not depend on links. Weak stays. !Mem.Rc stays (spec.md:2693);\n  !Mem.Gc is untouched (spec.md:2705-2707).\n- D-MEMREF-TASK1 -> amended, not retired: its automatic switch and #Local/#Shared pins move\n  from links to Shared cells. D-DATARACE1 -> unchanged; cells reuse its representation choice.\n- D-SYSSCHED1 -> amended: a system's access set comes from its store parameters.\n- D-RAWPTR2 -> unchanged: `*T` raw pointers, and mem.Ptr<T> under #Unsafe.\n- D-ONCE-AT1 prefix @ -> stays retired. Prefix and type-position @ become unassigned.\n  Infix @, the package-source reference, is untouched (Syntax Markers.jet:12).\n- D-OPTGC1 scope identity -> stays retired.\n- D-LINK-ITEM1 (spec.md:2471-2476) -> retires; a kept item is a handle or an index.\n- D-LINK-SIBLING1 -> retires. A record that kept links into its own text keeps ranges instead\n  and reads `doc.text[span]`; a range is bounds-checked and needs no frozen source.\n- D-MEMREF1, D-MEMREF-EXCL1 -> retire.\n- D-POOLID-API1 -> amended: the stale stop stays only for store[h]. D-POOL-HAS1 -> built here.\n- D-ARRAY-INDEX1, D-GAME-ASSET1 -> amended: their handles follow by rule 11.\n- D-INVALIDATE1 -> link fields become store slots. D-STATE-HOLDERS1 -> unchanged; it already\n  teaches a plain value, Shared, and Pool with IDs.\n- D-HOTSTATE1 -> no change; handles are data. D-AUTOPIN1 -> no handle layout choice remains.\n- D-MEM-POOL-NAME1 is open -> whichever name wins, the handle store is meant here.\n```\n\n```text\nMeasured (dev 8f4309b5023, pattern counts, comments and strings removed)\n- @T link types in Jet code: LiveLinks.jet 10 lines, Sema/Links.jet tests 6, Scopes.jet 3,\n  parser test Entry.jet:603-607 3. Other `@` hits are C text inside strings in Jetpack binders.\n- Link reads `.*` in the compiler: 1,355 lines in 98 files, all on check.program and\n  check.environment; writes found by pattern: 0.\n- Link machinery: 894 lines in 3 files and 18 runtime exports.\n- Shared cell write about 55 ns, pool slot write about 1 ns (probe above).\n```\n\n```text\nCutover (A)\nDelete or rewrite\n- Spellings.jet:31 -> a retirement row; CoreSurface.jet:373-374 SIGIL_LINK; Syntax\n  Markers.jet:10-12 link sentence.\n- Sema/Links.jet, BuildLinks.jet, runtime Links.jet, RuntimeCExports.jet:1666-1683.\n- The link type and its uses: Foundation Types.jet:204, Sema Places.jet:302 and 443,\n  Formatter Expressions.jet:1671, and every other use of that type found at build time.\n- InspectB.jet:156, SyntaxDictionaryData.jet:322, Tests/CLI/explain_syntax_at.txt:5 and 13,\n  sigil_meaning_table.jet:201-202.\n- The retired-@NAME diagnostic says prefix @ marks a live link: DiagnosticRows.jet:5707,\n  Prelude Diagnostics.jet:6487 -> prefix @ is unassigned.\n- LiveLinks.jet -> the Shared form; parser test Entry.jet:603-612; spec.md:2471-2476.\n- Scopes.jet:1188-1190 and 1788-1789 -> value fields; 1,355 `.*` reads; the five init sites.\n- BuildPools.jet:31-49 layout, 90-108 slot reuse, 118-136 compare dropped when proven,\n  197-224 stop kept for store[h]; SharedOwner.jet:453-495 has; Literals.jet:1268-1285 follow.\n- Shared cell lowering -> the one-thread form by type, with the paired benchmark.\n- EntityWorld.jet and EntityTree.jet in the short form; spec.md:2389 and 2647-2687.\nAdd\n- New registered diagnostics, each with what/why/fix and a UI snapshot: unproven follow,\n  follow after remove, zero stores, two stores, member clash, follow in an escaping lambda,\n  and a `?.` right side that writes the chain.\nDecisions: as in the table above. Close link card #4500 (c1, c5-c13) and sibling-link card\n#4756 as superseded.\nKeep unchanged: Shared<T> and same, Weak, Cell<T>, Pin<T>, `*T`, mem.Ptr<T>, View<T>, Signal.\n```\n\nPeers split four ways. Swift, C#, Java and Go give stored references with counting or a collector. Rust slotmap, Bevy, Flecs and the Zig compiler use handles, and every lookup names the store. Pony and Verona share objects through reference capabilities, with a collector per actor or per region. Hylo and Austral forbid stored references and offer no short form. A is the handle model with a link-length reading, Swift's `?.` writes and weak-style absence, and counted cells that collect only types that opt in.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Follow handles through the one store in reach and share objects with Shared cells",
+          "detail": "Relationships are handles: an `ID<T>` into a `Pool<T>`, or a `Row<T>` into `Rows<T>`. Writing `who.parent?.name` follows the handle through the one store of that type the function can see. One object with many holders needs no store: `hero: Shared{Player{…}}`, then `alias: hero`. Trees use Weak parent pointers, and types with real loops opt into a collector. Live `@T` links retire, and prefix `@` is free.\n\nThe compiler tracks which handles are proven live. A handle from `add`, from a loop over `ids()` that removes nothing else, or after `has` follows with a plain `.` and no check. A handle read from a field follows with `?.`, which treats a removed slot as absent. A plain `.` on an unproven handle is a compile error, so no stale handle stops a program by surprise. Only an explicit `store[h]` keeps today's stop.",
+          "technical": "Sema resolves a member step on a handle type against the store types in reach and lowers one match to the existing pool-slot node. Liveness facts come from `add`, `ids` loops, `has`, published parameter and result facts, and end at a statement that may remove or replace the store. Each function's may-remove fact is inferred and published with its API, as field footprints are. Proven follows drop the generation compare and keep the bounds compare.\n\nHandles are 8 bytes for every type, `ID<T>?` included. `?.` gains assignment for every optional place: tests first, then the right side, which may not write the chain. Shared cells take a one-thread form for every type that never reaches a task. The compiler's two links become value fields.",
+          "code": "Person: struct {\n    name: String,\n    hp: Int,\n    parent: ID<Person>?,\n    employer: ID<Firm>?,\n}\n\nFirm: struct {\n    name: String,\n    staff: Int,\n}\n\nTown: struct {\n    people: Pool<Person>,\n    firms: Pool<Firm>,\n}\n\nPlayer: struct {\n    name: String,\n    hp: Int,\n}\n\n// The caller proves `who` live, so `who.name` needs no check.\n// `who.parent` came from a field, so it follows with `?.`.\nfamily_line: fn(town: Town, who: ID<Person>) -> String {\n    parent: who.parent?.name ?? \"nobody\"\n    \"{who.name}, child of {parent}\"\n}\n\n// A write needs the store writable, as town.people[who] would.\nhire: fn(town: ^Town, who: ID<Person>, firm: ID<Firm>) {\n    who.employer = Val(firm)\n    firm.staff += 1\n    who.parent?.hp -= 1            // skipped when absent or removed\n}\n\n// Two stores of one type: name the store.\nmourn: fn(alive: Pool<Person>, dead: Pool<Person>, who: ID<Person>) -> String {\n    dead[who].name\n}\n\nrun: fn() {\n    ^town: Town{people: Pool<Person>.new(), firms: Pool<Firm>.new()}\n    ada: town.people.add(Person{name: \"Ada\", hp: 10, parent: None, employer: None})\n    ben: town.people.add(Person{name: \"Ben\", hp: 10, parent: Val(ada), employer: None})\n    mill: town.firms.add(Firm{name: \"Mill\", staff: 0})\n    hire(town, ben, mill)          // all three came from add: proven\n    print(family_line(town, ben))\n    if town.people.remove(ada) == .Val(p) -> print(\"removed {p.name}\")\n    // print(ada.name)             // compile error: ada was removed\n    print(ben.parent?.name ?? \"gone\")   // ben is still proven; its parent is not\n\n    hero: Shared{Player{name: \"Aria\", hp: 10}}   // one object, no store\n    alias: hero\n    alias.hp -= 1                                  // hero.hp is 9 too\n}"
+        },
+        {
+          "key": "B",
+          "name": "Name the store once per chain",
+          "detail": "Everything in A holds except the short form. Every chain starts at the store, as in `town.people[who].parent?.name`. Handle fields inside the chain follow within that store, or within its one sibling store of the right type.\n\nNothing is found by searching what is in reach, so each line shows its store. Every chain is longer than a link by the store name and brackets. Sharing uses `Shared` cells, and stale-handle proofs work as in A.",
+          "technical": "Sema resolves handle fields inside a chain whose root is a `store[h]` place. A field of another handle type resolves to the one store of that type beside the root. Proofs, `?.` writes, layout, cells and the compiler cutover are as in A.",
+          "code": "// Same types as A. Every chain starts at the store, and handle fields\n// inside the chain follow within that store or its one sibling store.\nfamily_line: fn(town: Town, who: ID<Person>) -> String {\n    parent: town.people[who].parent?.name ?? \"nobody\"\n    \"{town.people[who].name}, child of {parent}\"\n}\n\nhire: fn(town: ^Town, who: ID<Person>, firm: ID<Firm>) {\n    town.people[who].employer = Val(firm)\n    town.firms[firm].staff += 1\n    town.people[who].parent?.hp -= 1\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep live links as they are today",
+          "detail": "Keep `@Person` as the way to share one object, and finish building it. Links are partly built: they parse, check and run today, and the compiler itself holds two of them. Pools stay for games and graphs, with today's run-time stop on a stale handle.\n\nThe link work still owes runtime alias checks, counted lifetimes with cycle collection, and task-safe counting that costs no atomics in one-thread code. It also owes four safety fixes: today safe code can keep a dangling link in four ways (#4500 c10, c11). The `@` symbol stays taken. Retiring links later costs a migration of everything built on them by then.",
+          "technical": "Keeps Sema/Links.jet, BuildLinks.jet and the runtime header with a count, an exclusivity word and a size. Every kept link pays a count change on copy and drop, atomic when shared. Any call that receives a link may write through an alias, so the optimizer loses no-alias facts at link uses. The `?.` writes, stale-handle proofs and one-thread cells of A could still be adopted on their own.",
+          "code": "// Built today: a live link is a counted pointer to one value.\nPlayer: struct {\n    name: String,\n    hp: Int,\n}\n\nNode: struct {\n    value: Int,\n    next: @Node?,\n}\n\nheal: fn(p: ^@Player, amount: Int) { p.hp += amount }\n\nrun: fn() {\n    hero := @Player{name: \"Aria\", hp: 10}\n    alias: hero\n    heal(hero, 5)\n    print(\"same={hero.same(alias)} hp={alias.hp}\")\n    tail: @Node{value: 30, next: None}\n    head: @Node{value: 10, next: Val(tail)}\n}"
+        },
+        {
+          "key": "D",
+          "name": "Search the context too",
+          "detail": "This is the starting idea as stated. It works as A, and a store set with `#Context(people: town.people) { }` is also searched. Deep call chains need no store parameter.\n\nContext values are fixed for their block and kept by tasks started inside it. A store found there can be read but not written, and a task may keep reading it after the block ends. A signature no longer shows which stores a function reads, so may-remove facts and parameter proofs no longer cover every follow.",
+          "technical": "Context reads are hidden inputs, so sema must add each followed store to the function facts that signatures used to show. Writes through a context store need a new writable context, which the context design does not have. Tasks inheriting a context store would share it without `Shared`. Handles followed through the context start unproven, so most follows there need `?.`.",
+          "code": "// As A, and a store set by a context block is also searched.\n#ContextKey people: Pool<Person>.new()\n\nfamily_line: fn(who: ID<Person>) -> String {\n    name: who?.name ?? \"someone\"            // unproven: no store parameter\n    parent: who.parent?.name ?? \"nobody\"    // found in the context\n    \"{name}, child of {parent}\"\n}\n\nrun: fn() {\n    ^town: Town{people: Pool<Person>.new(), firms: Pool<Firm>.new()}\n    ben: town.people.add(Person{name: \"Ben\", hp: 10, parent: None, employer: None})\n    #Context(people: town.people) { print(family_line(ben)) }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (slotmap)",
+          "note": "Versioned keys are a 32-bit index and a 32-bit version. The version wraps after 2^31 reuses of one slot, which may give a spurious match, and a key from another map is a logic error, not undefined behavior. A key type per map (`new_key_type!`) catches the wrong map. Source: docs.rs/slotmap, crate docs and KeyData.",
+          "code": "let mut people = SlotMap::new();\nlet ben = people.insert(Person { name: \"Ben\".into(), parent: Some(ada) });\nlet parent = people[ben].parent.map(|p| &people[p].name);"
+        },
+        {
+          "lang": "Rust (references)",
+          "note": "A tree with parent pointers needs `Rc`, `RefCell` and `Weak`, and stored `&T` needs lifetime parameters. Source: The Rust Book, chapter 15.6.",
+          "code": "struct Node {\n    parent: RefCell<Weak<Node>>,\n    children: RefCell<Vec<Rc<Node>>>,\n}"
+        },
+        {
+          "lang": "Bevy (Rust ECS)",
+          "note": "An `Entity` is a 32-bit index plus a generation in 8 bytes, looked up through a query or the world; one from another world fails or reads the wrong entity. Source: docs.rs/bevy 0.15, bevy::ecs::entity::Entity and Parent.",
+          "code": "fn heal(mut q: Query<&mut Health>, parents: Query<&Parent>, e: Entity) {\n    if let Ok(p) = parents.get(e) { q.get_mut(p.get()).unwrap().0 += 1; }\n}"
+        },
+        {
+          "lang": "Flecs (C ECS)",
+          "note": "Entity ids are 64-bit with a generation in the upper half; relationships such as ChildOf are pairs. Source: flecs.dev docs, Relationships manual.",
+          "code": "ecs_entity_t parent = ecs_get_target(world, e, EcsChildOf, 0);\nconst Name *n = ecs_get(world, parent, Name);"
+        },
+        {
+          "lang": "Swift",
+          "note": "Classes are counted references; back edges are `weak` and read as nil once their object is gone. Optional chaining also assigns and skips the right side on nil. Source: The Swift Programming Language, Optional Chaining and Automatic Reference Counting.",
+          "code": "class Person { weak var parent: Person?; var hp = 10 }\nben.parent?.hp -= 1   // skipped when parent is nil"
+        },
+        {
+          "lang": "C#",
+          "note": "Objects are references under a tracing collector; `?.` follows a nullable reference. Source: Microsoft Learn, member access operators.",
+          "code": "var name = ben.Parent?.Name ?? \"nobody\";"
+        },
+        {
+          "lang": "Java",
+          "note": "Every object is a reference under a tracing collector, so cycles cost nothing to write and every program pays for collection. Source: The Java Language Specification, chapter 4.3 and 12.6.",
+          "code": "class Person { String name; Person parent; }\nString name = ben.parent != null ? ben.parent.name : \"nobody\";"
+        },
+        {
+          "lang": "Go",
+          "note": "Pointers under a tracing collector; cycles are fine and aliasing is unchecked. Source: The Go Programming Language Specification.",
+          "code": "type Person struct { Name string; Parent *Person }\nname := ben.Parent.Name"
+        },
+        {
+          "lang": "Pony",
+          "note": "Reference capabilities decide who may read or write an object, so objects are shared with no data races and no store; each actor has its own collector (ORCA). Source: Pony tutorial, Reference Capabilities; Clebsch et al., Orca, OOPSLA 2017.",
+          "code": "class Person\n  var name: String\n  var parent: (Person ref | None) = None"
+        },
+        {
+          "lang": "Verona",
+          "note": "Objects live in regions; pointers inside a region are free, and each region picks its own memory manager (arena, counting or tracing). Source: Arvidsson et al., Reference Capabilities for Flexible Memory Management, OOPSLA 2023.",
+          "code": "// Research language; no stable syntax.\n// A region owns a group of objects that point at each other freely,\n// and the whole region is sent or freed through one owning reference."
+        },
+        {
+          "lang": "Zig",
+          "note": "Raw optional pointers, and the Zig compiler stores its trees as 32-bit indices into arrays. Source: Andrew Kelley, Practical Data Oriented Design, Handmade Seattle 2021.",
+          "code": "const Node = struct { parent: ?*Node, name: []const u8 };\nconst name = if (ben.parent) |p| p.name else \"nobody\";"
+        },
+        {
+          "lang": "Odin and Jai",
+          "note": "Raw pointers by default; handle maps are a common library pattern. Weissflog argues handles beat pointers for safety and memory layout. Source: floooh.github.io, Handles are the better pointers, 2018.",
+          "code": "Person :: struct { name: string, parent: ^Person }\nname := ben.parent.name if ben.parent != nil else \"nobody\""
+        },
+        {
+          "lang": "Vale",
+          "note": "Every non-owning reference checks a generation; regions remove checks for data a pure call cannot change. Source: verdagon.dev, Generational References and Zero-Cost Borrowing with Vale Regions.",
+          "code": "struct Person { name str; parent Opt<&Person>; }\n// each use of a non-owning reference checks its generation"
+        },
+        {
+          "lang": "Hylo",
+          "note": "Mutable value semantics: no stored references, access through projections that cannot escape. Source: Racordon et al., Implementation Strategies for Mutable Value Semantics, JOT 2022.",
+          "code": "subscript person(_ i: Int): Person { yield people[i] }\ninout p = &town.people[i]"
+        },
+        {
+          "lang": "Mojo",
+          "note": "References carry an origin the compiler tracks; storing one in a struct needs an origin parameter. Source: Mojo manual, Lifetimes, origins and references.",
+          "code": "struct View[origin: Origin]:\n    var p: Pointer[Person, origin]"
+        },
+        {
+          "lang": "Austral",
+          "note": "Linear types and region borrows; a reference cannot be stored past its region. Source: Austral specification, Borrowing.",
+          "code": "borrow person as ref in R do\n    printLn(!ref.name);\nend;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the short reading and no-setup sharing of a link and the safety and speed of a handle. Stale handles become compile-time choices, cells cost a plain count unless they reach a task, signatures keep every store, and `@` is freed.",
+        "gains": [
+          "`who.parent?.name` reads as short as a link.",
+          "One object, many holders, no store: a `Shared` cell and a second name.",
+          "A stale handle stops only where the code writes `store[h]`.",
+          "Handles are 8-byte plain numbers, optional ones too: they save, compare and cross tasks.",
+          "Prefix `@` is free, and about 900 lines of link machinery retire."
+        ],
+        "losses": [
+          {
+            "loss": "A function that follows handles must take their store.",
+            "mitigation": "One world value can carry every store, and the compiler offers the parameter as a fix."
+          },
+          {
+            "loss": "Handles read from fields need `?.`, a `has` check or `store[h]` at each step.",
+            "mitigation": "The fix is one character or one line, and it replaces a surprise stop with a choice."
+          },
+          {
+            "loss": "A `?.` on a removed slot silently does nothing.",
+            "mitigation": "Code that must not skip writes `store[h]`, which keeps today's stop and message."
+          },
+          {
+            "loss": "A cell of a type that reaches a task pays a lock and an atomic count per step.",
+            "mitigation": "Every other type uses the one-thread form with a plain count and no lock, and hot data can live in stores."
+          },
+          {
+            "loss": "Shared objects that form real loops need their module opted into a collector.",
+            "mitigation": "Trees, observers and shared children need no collector: Weak back edges and proven writes cover them, and `jet fix` writes the opt-in line."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It is A without the short form. Every chain repeats the store name, which is the friction the owner asked to remove."
+          },
+          {
+            "key": "C",
+            "reason": "Every link, even one to a local place, is a counted pointer the optimizer must treat as an alias. The link work still has four open ways to keep a dangling link in safe code, and `@` stays taken. A's cells give the same sharing only where a program asks for it."
+          },
+          {
+            "key": "D",
+            "reason": "Context stores cannot be written, stay readable by tasks after their block, and hide from signatures what a function reads."
+          }
+        ],
+        "tradeoff": "Each function that follows handles names its store once, and each unproven handle says what happens when its slot is gone. In return navigation reads like a link and costs what an index costs."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewHandleNav2. Probes found Shared refusing shared children and moves at 55 ns per write, five unsound proof gaps, a stale test in `?.` writes, and two fixes that could not build. All are repaired, and each claim holds within stated limits once D-SHARED-CYCLE2, D-GC-OPTIN1 and the benchmarks are built (Docs/Audits/2026-11-25-handle-navigation-review.md)."
+      },
+      "checkInstructions": "Read Spellings.jet:13 and 31 and CoreSurface.jet:373-374 in Compiler/JetFoundation/Data/Syntax. Read the link stack in JetSema Sema/Links.jet:57, JetIR BuildLinks.jet and JetRuntime Links.jet:1-15. Read its compiler use at Scopes.jet:1188-1190 and 1788-1789 and the five sema_body_check_init sites. Read link cards #4500 (c9-c13) and #4756.\n\nRead pools at BuildPools.jet:31-224, SharedOwner.jet:453-517 and Literals.jet:1268-1285. Read Rows at Core Collections.jet:45-74, and spec.md:1861-1888, 2318-2330, 2347-2359, 2438-2448, 2513-2531 and 2647-2687.\n\nRerun the probes named under Built today with the installed jet. They cover the Shared alias, the Weak parent, a node pushed into two parents (E0221), and Shared against pool write timing at --release. They also cover the ids() loop that removes a later handle, `xs[idx()] = val()` order, `?.` writes, `pool.has`, `Ghost: distinct Person`, and a `View<T>` field against a value field. Check D-MEMREF1, D-MEMREF-LIFE1, D-MEMREF-TASK1, D-DATARACE1, D-SHARED-CYCLE2, D-GC-OPTIN1, D-ARRAY-INDEX1, D-POOL-HAS1, D-BIND-MARK1 and D-REACT-REF1 on the board. The adversarial audit is 2026-11-25-handle-navigation-review.md, to land in Docs/Audits.",
+      "surface": {
+        "gist": "Should handles read like links, one shared object live in a `Shared` cell, and stale handles be caught, retiring `@T`?",
+        "lesson": "A handle is a small number naming a slot in a store, plus a count that changes when the slot empties. A live link is a counted pointer to one object. A `Shared` cell is one object that many names can hold. This vote decides how handles read, how objects are shared, and how stale handles are caught.",
+        "trio": {
+          "current": {
+            "note": "Today a handle lookup names the pool at every step, and `@` links share objects.",
+            "code": "parent: town.people[who].parent\nname: if parent == .Val(p) -> town.people[p].name else -> \"nobody\"\nhero := @Player{name: \"Aria\", hp: 10}\nalias: hero"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "A weak reference reads as nil once its object is gone, and `?.` also assigns.",
+            "code": "class Person { weak var parent: Person?; var hp = 10 }\nben.parent?.hp -= 1   // skipped when parent is nil"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Follow handles through the one store in reach and share objects with Shared cells",
+            "gist": "Handles follow through their store; unproven handles use `?.`; shared objects are cells.",
+            "gains": [
+              "Reads as short as a link.",
+              "Sharing one object needs no store.",
+              "Stale handles are caught while compiling."
+            ],
+            "losses": [
+              "A function that follows handles takes their store.",
+              "Handles read from fields need `?.` or a check.",
+              "Shared objects in real loops need an opt-in collector."
+            ],
+            "proposed": {
+              "code": "family_line: fn(town: Town, who: ID<Person>) -> String {\n    parent: who.parent?.name ?? \"nobody\"   // a removed parent is absent\n    \"{who.name}, child of {parent}\"        // the caller proved who live\n}\n\nhire: fn(town: ^Town, who: ID<Person>, firm: ID<Firm>) {\n    firm.staff += 1\n    who.parent?.hp -= 1                    // skipped when absent or removed\n}\n\nhero: Shared{Player{name: \"Aria\", hp: 10}}   // one object, no store\nalias: hero\nalias.hp -= 1                                // hero sees it"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Name the store once per chain",
+            "gist": "As A, but each chain starts at the store.",
+            "gains": [
+              "Every line shows its store."
+            ],
+            "losses": [
+              "Each chain repeats the store name."
+            ],
+            "proposed": {
+              "code": "parent: town.people[who].parent?.name ?? \"nobody\"\ntown.firms[firm].staff += 1"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep live links as they are today",
+            "gist": "Finish building `@Player` counted pointers; pools stay as they are.",
+            "gains": [
+              "The shortest sharing: `@` and a second name."
+            ],
+            "losses": [
+              "A count and header on every linked object.",
+              "Open safety holes to fix, and `@` stays taken.",
+              "Retiring links later costs a bigger migration."
+            ],
+            "proposed": {
+              "code": "hero := @Player{name: \"Aria\", hp: 10}\nalias: hero\nnext: @Node?"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Search the context too",
+            "gist": "As A, and a store set by a context block is also found.",
+            "gains": [
+              "Deep call chains need no store parameter."
+            ],
+            "losses": [
+              "Signatures stop showing what a function reads.",
+              "Context stores cannot be written."
+            ],
+            "proposed": {
+              "code": "#Context(people: town.people) {\n    print(family_line(ben))\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A reads like a link, shares one object with no setup, and turns stale handles into compile-time choices. Signatures keep every store, so code stays fast, saves as numbers, and frees `@`.",
+          "gains": [
+            "Navigation as short as a link.",
+            "Sharing one object needs no store.",
+            "Stale handles stop only where code asks."
+          ],
+          "losses": [
+            {
+              "loss": "Functions that follow handles take their store.",
+              "mitigation": "One world value carries every store; the compiler offers the fix."
+            },
+            {
+              "loss": "Handles read from fields need `?.` or a check.",
+              "mitigation": "The compiler offers the fix, and `?.` is one character."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It repeats the store name in every chain."
+            },
+            {
+              "key": "C",
+              "reason": "Links cost a count per object, still have open safety holes, and keep `@` taken."
+            },
+            {
+              "key": "D",
+              "reason": "Context stores cannot be written and hide what a function reads."
+            }
+          ],
+          "tradeoff": "Each following function names its store once, and unproven handles say what happens when the slot is gone."
+        }
+      },
+      "draftedBy": "Pip",
+      "reviewedBy": "ReviewHandleNav2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T19:59:48.841Z"
     }
   ],
   "questions": [
@@ -141696,6 +142001,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T20:00:14.990Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c0clpv28",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-25T19:59:52.325Z",
+      "by": "Pip",
+      "action": "decision.post",
+      "ref": "D-HANDLE-NAV1",
+      "note": "reviewed by ReviewHandleNav2"
+    },
+    {
+      "at": "2026-11-25T19:59:48.841Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-HANDLE-NAV1",
+      "note": "Handles read like links and stale handles are a compile-time question; one shared object is a `Shared` cell; `@T` live links retire and prefix `@` is freed (draft)"
+    },
     {
       "at": "2026-11-25T19:30:14.461Z",
       "by": "Orchestrator",
