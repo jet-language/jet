@@ -12597,7 +12597,13 @@ priv SINH_HARD: [Float]{
     -2.2067993803420066e255,
 }
 
-sqrt: fn(n: Float) -> Float Never! { core.math.sqrt(n) }
+/// The square root of `n`, correctly rounded (IEEE 754 squareRoot): -0 for
+/// -0, +inf for +inf, and NaN below zero.
+sqrt: fn(n: Float) -> Float Never! { __float_sqrt(n) }
+
+// sqrt is the IEEE square root (InlineFloatSqrt, one instruction). This
+// body is what a compiler without the operation runs.
+#Builtin.Role(.InlineFloatSqrt) priv __float_sqrt: fn(n: Float) -> Float Never! { core.math.sqrt(n) }
 
 /// 1/sqrt(x), correctly rounded (C23 rsqrt; CORE-MATH rsqrt.c): +inf for +0,
 /// -inf for -0, +0 for +inf and NaN below zero. One Newton step on
@@ -37362,7 +37368,12 @@ copysign: fn(value: Float, sign_value: Float) -> Float Never! {
     __from_bits_i64(magnitude | sign)
 }
 
-fma: fn(a: Float, b: Float, c: Float) -> Float Never! { core.math.fma(a, b, c) }
+/// a * b + c rounded once (IEEE 754 fusedMultiplyAdd).
+fma: fn(a: Float, b: Float, c: Float) -> Float Never! { __float_fma(a, b, c) }
+
+// fma is the fused operation (InlineFloatFma). This body is what a compiler
+// without it runs.
+#Builtin.Role(.InlineFloatFma) priv __float_fma: fn(a: Float, b: Float, c: Float) -> Float Never! { core.math.fma(a, b, c) }
 
 muladd: fn(a: Float, b: Float, c: Float) -> Float Never! { fma(a, b, c) }
 
@@ -37752,11 +37763,16 @@ priv __from_bits_f32: fn(bits: Int) -> F32 Never! { core.math.__from_bits_f32(bi
 /// The binary32 bits of `value`, and the F32 whose bits are `word`: one bit
 /// copy each, so NaN payloads, signaling NaNs and the sign of zero cross
 /// unchanged, with no allocation and no failure.
-f32_to_bits: fn(value: F32) -> U32 Never! {
-    checked(U32{__to_bits_f32(value)}) ?? panic("binary32 bits fit a U32")
-}
+f32_to_bits: fn(value: F32) -> U32 Never! { wrapping(U32{__f32_bits_i64(value)}) }
 
-f32_from_bits: fn(word: U32) -> F32 Never! { __from_bits_f32(Int{word}) }
+f32_from_bits: fn(word: U32) -> F32 Never! { __f32_from_bits_i64(I64{word}) }
+
+// The binary32 bits of n as an I64 in 0..<2^32, and the F32 of the low 32
+// bits of `bits`: one copy each (InlineF32Bits, InlineF32FromBits), with no
+// Int between. These bodies are what a compiler without the copies runs.
+#Builtin.Role(.InlineF32Bits) priv __f32_bits_i64: fn(n: F32) -> I64 Never! { I64{__to_bits_f32(n)} }
+
+#Builtin.Role(.InlineF32FromBits) priv __f32_from_bits_i64: fn(bits: I64) -> F32 Never! { __from_bits_f32(Int{bits & 0xFFFF_FFFF}) }
 
 from_bits: fn(bits: Int) -> Float Never! { core.math.from_bits(bits) }
 
