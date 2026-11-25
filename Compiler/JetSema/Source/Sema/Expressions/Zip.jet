@@ -352,7 +352,7 @@ sema_expression_option_zip: fn(receiver_value: TExpr, args: [CallArg], span: Spa
     fields := [TypeTupleField]{}
     if receiver_value.ty == .Option(left) && other.ty == .Option(right) {
         // copy: `left` and `right` are payloads of the operands' types, which the operands keep
-        fields = [TypeTupleField]{TypeTupleField{name: "a", ty: left.copy()}, TypeTupleField{name: "b", ty: right.copy()}}
+        fields = [TypeTupleField]{TypeTupleField{name: "a", ty: left.copy()}, TypeTupleField{name: "b", ty: right}}
     }
     if fields.len() == 0 {
         check.diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`.zip()` needs an optional argument, got {sema_type_show(other.ty)}", "`.zip(other)` combines two optionals into one paired optional", "pass a `T?` value"))

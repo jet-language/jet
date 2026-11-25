@@ -1256,7 +1256,7 @@ sema_finalize_walk_claimed: fn(graph: SemaRegistrationGraph, inputs: SemaFinaliz
         module_index: inputs.taint_order[rank]
         found := [Diagnostic]{}
         sema_taint_check_module(graph, state, module_index, found)
-        claimed.push(SemaTaintWalked{module_index: module_index, found: found.move(), masked: state.masked.copy(), fixed_tags: state.fixed_tags.copy()})
+        claimed.push(SemaTaintWalked{module_index: module_index, found: found.move(), masked: state.masked, fixed_tags: state.fixed_tags})
         rank = sema_finalize_core_claim(queue)
     }
     claimed

@@ -656,7 +656,7 @@ sema_genmod_instantiate: fn(graph: SemaRegistrationGraph, alias: ModuleAliasDef,
         if template.params[index] == {
             .Type(name, _) -> {
                 if arg == .Type(ty) {
-                    type_names.push(name.copy())
+                    type_names.push(name)
                     type_actuals.push(ty)
                 }
             }
@@ -1338,7 +1338,7 @@ sema_genmod_value_name: fn(alias: String, name: String) -> String {
     bytes: alias.bytes()
     end := bytes.len()
     loop end > 0 && (Int{bytes[end - 1]}) == 95 -> end -= 1
-    trimmed: String.from_bytes(bytes[0..<end]) ?? alias.copy()
+    trimmed: String.from_bytes(bytes[0..<end]) ?? alias
     "{trimmed}_{sema_inline_trim_leading_underscores(name)}"
 }
 

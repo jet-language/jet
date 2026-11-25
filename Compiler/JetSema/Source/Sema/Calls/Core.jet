@@ -1107,8 +1107,7 @@ sema_call_core_typed_decode_role: fn(module_name: String) -> String? Never! {
 sema_call_core_source_arguments: fn(args: [TExpr], params: [SemaCallParam], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [TCallArg] Never! {
     result := [TCallArg]{}
     loop index in 0..<args.len() {
-        // copy: the source call owns its argument; the Core call's checked argument stays the caller's.
-        value: args[index].copy()
+        value: args[index]
         param: params[index]
         result.push(
             TCallArg{
@@ -1622,7 +1621,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     values := [TExpr]{}
     loop argument in lowered {
         if argument.mut_borrow {
-            ty: argument.value.ty.copy()
+            ty: argument.value.ty
             at: argument.value.span
             values.push(sema_tree_node(ty, TExprKind.Borrow{place: argument.value, access: AccessConvention.Write}, at))
         } else { values.push(argument.value) }

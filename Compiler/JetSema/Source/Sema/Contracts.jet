@@ -1253,8 +1253,7 @@ sema_contract_required_post_answer: fn(func: Func, clause: ContractClause, recal
     }
     if !has_call {
         args: loop param in func.params -> CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: param.name, span: call_span, id: AST_NODE_GENERATED}, span: call_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
-        // copy: the staged call owns its type arguments; the call site keeps the written ones.
-        again: Expr.Call{call: Call{name: written.call.name, name_span: written.call.name_span, type_args: written.call.type_args.copy(), args: args}, id: AST_NODE_GENERATED}
+        again: Expr.Call{call: Call{name: written.call.name, name_span: written.call.name_span, type_args: written.call.type_args, args: args}, id: AST_NODE_GENERATED}
         _ := sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "#Post", again, result_type, clause.span, call_span)
         sema_scope_leave(check.scopes, check.state)
         return sema_contract_answer(SemaContractVerdict.Staged)

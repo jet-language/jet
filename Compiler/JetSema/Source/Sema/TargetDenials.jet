@@ -63,12 +63,12 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         if sema_effect_covered(effects.solved, denied).len() == 0 -> next
         loop edge in effects.call_edges {
             if slots.get(edge) == None || seen.get(edge) != None -> next
-            seen[edge.copy()] = true
+            seen[edge] = true
             reached.push(edge.copy())
         }
         loop edge in effects.value_edges {
             if slots.get(edge) == None || seen.get(edge) != None -> next
-            seen[edge.copy()] = true
+            seen[edge] = true
             reached.push(edge.copy())
         }
     }
@@ -301,7 +301,7 @@ sema_target_capability_check: fn(graph: SemaRegistrationGraph, core_usage: SemaC
                 if declared.contains(error) || reported.contains(error) -> next
                 diagnostic := jet_target_machine_error_diagnostic(machine, error)
                 if diagnostic.code != "E3311" -> next
-                reported.push(error.copy())  // copy: the validator's list keeps its row.
+                reported.push(error)  // copy: the validator's list keeps its row.
                 diagnostic.span = Val(site.span)
                 found.push(diagnostic)
             }

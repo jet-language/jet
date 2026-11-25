@@ -242,7 +242,7 @@ sema_registration_unit_type_name: fn(name: String) -> String Never! {
         piece_start = false
     }
     if output.is_empty() -> return name.copy()
-    String.from_bytes(output) ?? name.copy()
+    String.from_bytes(output) ?? name
 }
 
 sema_registration_unit_leaf_name: fn(ty: Type) -> String? {
@@ -3708,7 +3708,7 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, module_text: Stri
         if valid {
             // copy: each method keeps the conditions; the declaration keeps its own.
             loop index in 0..<methods.len() {
-                methods[index].impl_conditions = definition.type_params.copy()
+                methods[index].impl_conditions = definition.type_params
             }
         }
     }
@@ -5807,7 +5807,7 @@ sema_registration_core_private: fn(graph: SemaRegistrationGraph, module_row: Sem
     leaf := name.copy()
     if name.cut_last(".") == .Val(parts) {
         owner = "{owner}.{parts.before}"
-        leaf = parts.after.copy()
+        leaf = parts.after
     }
     if core_module_export(owner) == None -> return false
     if core_module_has_member(owner, leaf) || core_module_has_type(owner, leaf) || core_module_export("{owner}.{leaf}") != None {
@@ -6145,7 +6145,7 @@ sema_registration_populate_imports: fn(graph: ^SemaRegistrationGraph, module_ind
         }
         // Only the target's name is kept: a whole-module copy per import made
         // registration imports × module size (the AST rides in the row).
-        target_name: graph.modules[target_index].module_name.copy()
+        target_name: graph.modules[target_index].module_name
         if declaration.kind == {
             .Unqualified(_, _, items, _, _) -> {
                 loop item in items {
@@ -6800,7 +6800,7 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
                     next
                 }
                 target_identity: graph.modules[target].module_identity
-                target_package: graph.modules[target].package_identity.copy()
+                target_package: graph.modules[target].package_identity
                 sema_registration_add_import(graph, registered, hoisted_module, "", declaration, target_identity, target_package)
             }
         }
@@ -6841,7 +6841,7 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
                     target_package = graph.modules[target_index].package_identity
                 }
                 lifted := sema_registration_foreign_import_declaration(edge)
-                lifted.alias = declaration.alias.copy()
+                lifted.alias = declaration.alias
                 lifted.is_pub = false
                 lifted.is_package_pub = false
                 sema_registration_add_import(graph, registered, aliased_module, "", lifted, edge.target_module_identity, target_package)

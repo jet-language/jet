@@ -197,7 +197,7 @@ sema_expression_exact_move: fn(value: Expr, span: Span, expected: Type?, check: 
         if check.environment.source_origin == SemaSourceOrigin.Snapshot && facts.complete && facts.cloneable && !facts.resource {
             formatter := jfmt_new(ast_program(), "", [Token]{}, false)
             jfmt_fmt_expr(formatter, value, 0)
-            replacement: "{jfmt_out_text(formatter)}.copy()"
+            replacement: "{jfmt_out_text(formatter)}"
             diagnostic = diagnostic_with_edit_grade(diagnostic, TextEdit{span: span, new_text: replacement}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
         }
         check.diagnostics.push(diagnostic)
@@ -473,7 +473,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
     // is the mark (a `Pin<U>` field comes back as `Pin<U>`). A tagged value's
     // field (`key.limbs` of a `#Secret Key`) resolves on the struct; the
     // taint check carries the value's tags into the read.
-    owner_ty: sema_expr_unwrap_tag(sema_pin_target(base.ty) ?? base.ty.copy())
+    owner_ty: sema_expr_unwrap_tag(sema_pin_target(base.ty) ?? base.ty)
     owner_name: if owner_ty == {
         .Named(name) -> name
         .Apply(name, _) -> name

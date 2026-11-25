@@ -129,10 +129,10 @@ sema_event_value_parameters: fn(owner: String, method: String, args: [Type]) -> 
         params.push(sema_event_parameter("priority", Type.Int, AccessConvention.Read))
     }
     if method == "emit" || method == "emit_async" || method == "run" {
-        params.push(sema_event_parameter("payload", args[0].copy(), AccessConvention.Move))
+        params.push(sema_event_parameter("payload", args[0], AccessConvention.Move))
     }
     if owner == "Hook" && method == "run" {
-        params.push(sema_event_parameter("fallback", args[1].copy(), AccessConvention.Move))
+        params.push(sema_event_parameter("fallback", args[1], AccessConvention.Move))
     }
     params
 }

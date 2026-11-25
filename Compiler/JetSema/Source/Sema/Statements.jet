@@ -1547,10 +1547,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, check: ^SemaBo
                 }
             }
             .CountedLoop(init, cond, step, body, span, arrow_body, label) -> {
-                // copy: sema_stmt_check_binding reads the escapes as they were before the loop,
-                // while the binding, condition and body checks write context.lambda_escapes through
-                // `^context`, so a view would be live across those writes.
-                init_lambda_escapes: check.context.lambda_escapes.copy()
+                init_lambda_escapes: check.context.lambda_escapes
                 sema_scope_enter(check.scopes, check.state, "counted@{span.start}")
                 loop_scope_valid := true
                 label_name := String?{None}

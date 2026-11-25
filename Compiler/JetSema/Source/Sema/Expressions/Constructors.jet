@@ -1416,7 +1416,7 @@ sema_expression_hook_decision_literal: fn(variant: String, args: [EnumLitArg], v
     type_args := [Type]{}
     if expected == .Val(wanted) {
         if sema_expr_unwrap_tag(wanted) == .Apply(name, found) && name == "HookDecision" && found.len() == 2 {
-            type_args = found.copy()
+            type_args = found
         }
     }
     if type_args.len() != 2 {
@@ -1452,7 +1452,7 @@ sema_expression_union_case_literal: fn(union_ty: Type, variant: String, payload_
         check.diagnostics.push(sema_error("E0104", span, "case `{variant}` takes one value", "a named union case carries exactly one positional payload value", "write `.{variant}(value)`"))
         return None
     }
-    sema_expression_core_enum_positional_literal("", type_name(union_ty), variant, [Type]{payload_ty.copy()}, union_ty, args, span, expected, check)
+    sema_expression_core_enum_positional_literal("", type_name(union_ty), variant, [Type]{payload_ty}, union_ty, args, span, expected, check)
 }
 
 // The positional payload of a Core enum variant without a source

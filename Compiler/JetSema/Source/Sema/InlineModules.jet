@@ -451,7 +451,7 @@ sema_inline_trim_leading_underscores: fn(name: String) -> String Never! {
     bytes: name.bytes()
     start := 0
     loop start < bytes.len() && (Int{bytes[start]}) == 95 -> start += 1
-    String.from_bytes(bytes[start..<bytes.len()]) ?? name.copy()
+    String.from_bytes(bytes[start..<bytes.len()]) ?? name
 }
 
 sema_inline_type_prefix: fn(alias: String) -> String {
@@ -730,10 +730,7 @@ sema_inline_rewrite_type: fn(rewrite: SemaInlineRewrite, ty: Type) -> Type Never
             if sema_inline_alias_name(rewrite, name) == .Val(renamed) {
                 return Type.Named{name: renamed}
             }
-            // copy: the rewrite walks the module program by borrowed payload views (Jet has no
-            // consuming match), so an unchanged type is copied into the rebuilt program, while the
-            // caller's program keeps the original until it is replaced.
-            ty.copy()
+            ty
         }
         .List(inner) -> Type.List{element: sema_inline_rewrite_type(rewrite, inner)}
         .Shared(inner) -> Type.Shared{inner: sema_inline_rewrite_type(rewrite, inner)}
@@ -796,10 +793,7 @@ sema_inline_rewrite_measure: fn(rewrite: SemaInlineRewrite, measure: Measure) ->
             if sema_inline_value_of(rewrite.values, name) == .Val(.Int(value, _, _, _, _)) {
                 if value >= 0 -> return Measure.Literal{kind: kind, value: value}
             }
-            // copy: the rewrite walks the module program by borrowed payload views (Jet has no
-            // consuming match), so an unchanged measure is copied into the rebuilt program, while
-            // the caller's program keeps the original.
-            measure.copy()
+            measure
         }
         .Combined(kind, rule, left, right) -> {
             resolved_left: sema_inline_rewrite_measure(rewrite, left)

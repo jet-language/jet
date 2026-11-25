@@ -538,7 +538,7 @@ sema_serde_items_distinct_codec: fn(definition: DistinctDef, trait_name: String,
         return sema_serde_items_impl(definition.name, "Encode", [Func]{method}, definition.is_pub, definition.is_package_pub, span)
     }
     target: Type.Named{name: definition.name}
-    method: sema_serde_items_method("decode", [TypeParam]{}, [Param]{sema_serde_items_param("tree", sema_dyn_type(), span)}, sema_data_result(target.copy(), sema_data_decode_error()), sema_serde_items_decode_span(span))
+    method: sema_serde_items_method("decode", [TypeParam]{}, [Param]{sema_serde_items_param("tree", sema_dyn_type(), span)}, sema_data_result(target, sema_data_decode_error()), sema_serde_items_decode_span(span))
     sema_serde_items_impl(definition.name, "Decode", [Func]{method, sema_serde_items_read_method([TypeParam]{}, target, span)}, definition.is_pub, definition.is_package_pub, span)
 }
 
@@ -558,7 +558,7 @@ sema_serde_items_distinct_body: fn(definition: DistinctDef, encode: Bool, span: 
     converted: if definition.range == None -> conversion else -> Expr.OrFallback{value: conversion, fallback: OrFallback.Return{value: Val(refusal), span: span}, is_option: false, span: span, id: AST_NODE_GENERATED}
     convert: [Stmt]{sema_serde_items_return(Expr.Ok{value: converted, span: span, id: AST_NODE_GENERATED}, span)}
     [Stmt]{
-        sema_serde_items_binding("jet_serde_base", Val(sema_data_result(definition.base.copy(), sema_data_decode_error())), sema_serde_items_reader_read(definition.base, span), false, span),
+        sema_serde_items_binding("jet_serde_base", Val(sema_data_result(definition.base, sema_data_decode_error())), sema_serde_items_reader_read(definition.base, span), false, span),
         sema_serde_items_result_switch(sema_serde_items_ident("jet_serde_base", span), "jet_serde_base_value", convert, "jet_serde_base_errors", [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident("jet_serde_base_errors", span), span: span, id: AST_NODE_GENERATED}, span)}, span),
         sema_serde_items_return(Expr.Err{value: Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}, span),
     }
@@ -637,7 +637,7 @@ sema_serde_items_codec_body: fn(items: [Item], position: Int, trait_name: String
             return Val(SemaSerdeCodecBody{body: sema_serde_items_enum_decode_body(definition, span), read: read, wire: sema_serde_items_enum_wire(definition)})
         }
         .Distinct(definition) -> {
-            wire: [Type]{definition.base.copy()}
+            wire: [Type]{definition.base}
             if encode {
                 return Val(SemaSerdeCodecBody{body: sema_serde_items_distinct_body(definition, true, span), read: [Stmt]{}, wire: wire})
             }
@@ -2300,7 +2300,7 @@ sema_codec_impl_position: fn(items: [Item], type_name: String, trait_name: Strin
 // items). Empty bodies undo it.
 sema_codec_set_body: fn(graph: ^SemaRegistrationGraph, module_index: Int, row: Int, generated: SemaSerdeCodecBody, position: Int?) Never! {
     loop method_index in 0..<graph.modules[module_index].impls[row].methods.len() {
-        name: graph.modules[module_index].impls[row].methods[method_index].declaration.name.copy()
+        name: graph.modules[module_index].impls[row].methods[method_index].declaration.name
         graph.modules[module_index].impls[row].methods[method_index].declaration.body = sema_serde_items_method_body(generated, name)
     }
     item_index: position ?? return
@@ -2355,7 +2355,7 @@ sema_derive_index_methods: fn(graph: ^SemaRegistrationGraph) {
                 leaf: sema_serde_named_leaf(graph.modules[module_index].nominals[nominal].symbol.name)
                 leaf_id: name_index(name_intern(types.leaves, leaf))
                 if leaf_id == types.keys.len() -> types.keys.push([String]{})
-                types.keys[leaf_id].push(key.copy())
+                types.keys[leaf_id].push(key)
             }
         }
     }

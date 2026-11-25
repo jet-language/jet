@@ -102,13 +102,13 @@ sema_data_filter_fields: fn(row: Type, environment: SemaScopeEnvironment, progra
                 // A bound value is text: an Int is cast, a Bool compares as
                 // the 1 or 0 its column holds.
                 if field.ty == Type.Int {
-                    out.push(SemaDataFilterField{name: field.name.copy(), bound: "CAST(? AS INTEGER)", ordered: true})
+                    out.push(SemaDataFilterField{name: field.name, bound: "CAST(? AS INTEGER)", ordered: true})
                 }
                 if field.ty == Type.String {
-                    out.push(SemaDataFilterField{name: field.name.copy(), bound: "?", ordered: false})
+                    out.push(SemaDataFilterField{name: field.name, bound: "?", ordered: false})
                 }
                 if field.ty == Type.Bool {
-                    out.push(SemaDataFilterField{name: field.name.copy(), bound: "(? = 'true')", ordered: false})
+                    out.push(SemaDataFilterField{name: field.name, bound: "(? = 'true')", ordered: false})
                 }
             }
         }
@@ -257,7 +257,7 @@ sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, check: ^SemaBod
         texts = sema_data_filter_texts(sql, span)
         bound = Val(sema_tree_node(text_list, TExprKind.ListLit{values: [TExpr]{}}, span))
     }
-    condition: Expr.Str{parts: [StrPart]{StrPart.Lit{text: sql.condition.copy()}}, span: span, id: AST_NODE_GENERATED}
+    condition: Expr.Str{parts: [StrPart]{StrPart.Lit{text: sql.condition}}, span: span, id: AST_NODE_GENERATED}
     _: sema_data_query_push_argument(sema_call_http_core_synthetic_arg(condition, span), Val(sema_call_http_core_string(sql.condition, span)), source_args, argument_types, typed)
     _: sema_data_query_push_argument(sema_call_http_core_synthetic_arg(texts, span), bound, source_args, argument_types, typed)
 }

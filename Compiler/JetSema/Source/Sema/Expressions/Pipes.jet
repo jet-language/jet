@@ -126,7 +126,7 @@ sema_expr_pipe_placements: fn(step: PipeStep, check: ^SemaBodyCheck) -> [SemaPip
         }
         if !call.name.contains(".") {
             // copy: each placement owns its rewritten step.
-            method: Expr.MethodCall{receiver: sema_expr_pipe_value(step), method: call.name.copy(), method_span: call.name_span, owner_type_args: [Type]{}, type_args: call.type_args.copy(), args: call.args.copy(), id: id}
+            method: Expr.MethodCall{receiver: sema_expr_pipe_value(step), method: call.name.copy(), method_span: call.name_span, owner_type_args: [Type]{}, type_args: call.type_args, args: call.args, id: id}
             placements.push(SemaPipePlacement{value: method, edit: TextEdit{span: Span{start: call.name_span.start, end: call.name_span.start}, new_text: "<>."}, shown: "<>.{call.name}({written.join(", ")})", method: true})
         }
     }

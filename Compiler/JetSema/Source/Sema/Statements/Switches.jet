@@ -986,8 +986,8 @@ sema_stmt_type_test_condition: fn(param: String, target: Type, span: Span, conte
 // parameter whose type names `T` takes the substituted type. The caller's
 // branch rollback puts the rows back.
 sema_stmt_type_switch_rebind: fn(scopes: ^SemaScopeTable, param: String, target: Type) Never! {
-    names: [String]{param.copy()}
-    actuals: [Type]{target.copy()}
+    names: [String]{param}
+    actuals: [Type]{target}
     loop index in 0..<scopes.bindings.len() {
         rebound: sema_stmt_type_switch_rebound(scopes.bindings[index].symbol, names, actuals) ?? next
         sema_scope_note_binding_edit(scopes, index)

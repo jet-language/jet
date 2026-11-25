@@ -1515,11 +1515,11 @@ sema_expr_check_precise_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
     // An exact Int crosses into Decimal without loss, so it meets a Decimal as
     // a Decimal of the same value (`qty * price`).
     if lname == (Val("Decimal")) && rname == None && rhs.ty == Type.Int {
-        right = sema_expr_decimal_from_int(rhs.copy(), span)
+        right = sema_expr_decimal_from_int(rhs, span)
         rname = Val("Decimal")
     }
     if rname == (Val("Decimal")) && lname == None && lhs.ty == Type.Int {
-        left = sema_expr_decimal_from_int(lhs.copy(), span)
+        left = sema_expr_decimal_from_int(lhs, span)
         lname = Val("Decimal")
     }
     if (lname == (Val("Decimal")) && (rhs.ty == Type.Float || rhs.ty == Type.Float32)) || (rname == (Val("Decimal")) && (lhs.ty == Type.Float || lhs.ty == Type.Float32)) {
@@ -2123,7 +2123,7 @@ sema_expr_unit_coherent_value: fn(value: TExpr, required: Type, environment: Sem
     dimension: if value.ty == {
         .Quantity(base, quantity_dimension) -> {
             if base != Type.Float -> return None
-            quantity_dimension.copy()
+            quantity_dimension
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> {
             return None
@@ -3484,7 +3484,7 @@ sema_expr_restated_type_args: fn(params: [SemaRegistrationGenericParam], owner: 
     args := [Type]{}
     loop param in params {
         binding: sema_inference_binding_at(owner, param.name) ?? return written.copy()
-        args.push(binding.ty.copy())
+        args.push(binding.ty)
     }
     args
 }
@@ -3894,8 +3894,7 @@ sema_probe_expression_in: fn(value: Expr, expected: Type?, check: ^SemaBodyCheck
     context_mark: sema_check_context_mark(check.context)
     fork: sema_ownership_fork(check.state)
     checked: sema_check_expression(value, expected, check)
-    // copy: the rollback below restores `state.share_found`; the sites the probe found are kept from this copy.
-    found_sites: check.state.share_found.copy()
+    found_sites: check.state.share_found
     sema_ownership_fork_drop(check.state, fork, found_sites, [SemaOwnershipShareSite]{})
     sema_check_context_rollback(check.context, context_mark.move())
     sema_scope_rollback(check.scopes, scope_mark)
@@ -7667,8 +7666,7 @@ sema_expr_check_pipe: fn(head: Expr, steps: [PipeStep], span: Span, expected: Ty
         loop bindings.len() > bound -> _ := bindings.pop()
     }
     last: steps[steps.len() - 1]
-    // copy: the scope's return type is read across the frame the pipe enters.
-    return_type: check.scopes.return_type.copy()
+    return_type: check.scopes.return_type
     mark: sema_scope_mark(check.scopes)
     sema_scope_enter(check.scopes, check.state, "pipe@{span.start}")
     checked_bindings: sema_check_statements(bindings, return_type, check, check.scopes.loop_depth)
@@ -7855,7 +7853,7 @@ sema_expr_check_list_type_static: fn(written: Type, method: String, method_span:
         binding: Stmt.Val{binding: Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: name, name_span: method_span, sigil_span: None, pattern: None, ty: Val(element), ty_span: Val(method_span), init: args[0].expr.copy(), is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
         slots: loop _ in 0..<length -> Expr.Ident{name: name.copy(), span: method_span, id: AST_NODE_GENERATED}
         filled: Expr.TypedLit{head: Val(written.copy()), body: TypedLitBody.Elements{elements: slots}, span: span, id: AST_NODE_GENERATED}
-        return_type: check.scopes.return_type.copy()
+        return_type: check.scopes.return_type
         mark: sema_scope_mark(check.scopes)
         sema_scope_enter(check.scopes, check.state, "filled@{method_span.start}")
         checked_binding: sema_check_statements([Stmt]{binding}, return_type, check, check.scopes.loop_depth)

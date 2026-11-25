@@ -89,7 +89,7 @@ sema_call_enqueue: fn(alias: String, args: [CallArg], span: Span, expected: Type
         return sema_live_rejected()
     }
     result_type: sema_call_resolved_type(declared_result, check.environment.*, check.program.*)
-    call: sema_tree_node(result_type.copy(), TExprKind.Call{callee: callee, type_args: target.type_args, args: [TCallArg]{name_arg, encoded_arg, retries_arg, run}}, span)  // copy: the block's value keeps its own type
+    call: sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: target.type_args, args: [TCallArg]{name_arg, encoded_arg, retries_arg, run}}, span)  // copy: the block's value keeps its own type
     body.push(TStmt.ExprStmt{value: call, span: span})
     sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
     lowered_value: sema_tree_node(result_type, TExprKind.InlineBlock{body: body}, span)
@@ -263,7 +263,7 @@ sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_s
         if missing != "" {
             return sema_app_job_not_one("parameter `{declaration.params[index].name}` of `{service_name}.{method}` has the type {sema_type_show_quoted(param)}, which isn't `{missing}`", argument.span, diagnostics)
         }
-        encoded.push(sema_live_module_call(alias, arg_member, [Type]{param}, [CallArg]{sema_live_arg(argument.expr.copy(), argument.span)}, argument.span))  // copy: the written call keeps its argument
+        encoded.push(sema_live_module_call(alias, arg_member, [Type]{param}, [CallArg]{sema_live_arg(argument.expr, argument.span)}, argument.span))  // copy: the written call keeps its argument
     }
     Val(SemaAppJob{method: declaration, module: service_module, wire: "{module_text(graph.module_table, service_module)}.{service_name}.{method}", retries: sema_app_job_retries(marker), receiver_span: receiver_span, receiver_id: receiver_id, encoded: encoded})
 }

@@ -67,11 +67,11 @@ sema_call_memory_pin: fn(args: [CallArg], span: Span, expected: Type?, check: ^S
     if sema_pin_type(checked.ty) {
         return sema_expr_expected_owned(checked, expected, check.environment.*, check.program.*, check.diagnostics)
     }
-    parameter: SemaCallParam{label: "place", name: "place", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(checked.ty.copy()), variadic: false}
+    parameter: SemaCallParam{label: "place", name: "place", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(checked.ty), variadic: false}
     call_args := [CallArg]{argument}
     ownership: sema_ownership_check_call_arguments(check.state, "pin", [SemaCallParam]{parameter}, call_args, check.scopes, check.diagnostics)
     if !ownership.accepted -> return None
-    pinned_ty: Type.Apply{name: "Pin", args: [Type]{checked.ty.copy()}}
+    pinned_ty: Type.Apply{name: "Pin", args: [Type]{checked.ty}}
     pinned: sema_tree_node(pinned_ty, TExprKind.Borrow{place: checked, access: AccessConvention.Write}, span)
     sema_expr_expected_owned(pinned, expected, check.environment.*, check.program.*, check.diagnostics)
 }

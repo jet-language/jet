@@ -51,11 +51,10 @@ sema_script_helper_writes: fn(stage: ^^SemaComptimeDeclarationStage, candidates:
         loop parameter in function.params {
             // copy: the checked body keeps its parameter's name; the answer holds its own
             if names.contains(parameter.name) && sema_script_body_writes(function.tree, parameter.local, passed) {
-                writes.push(parameter.name.copy())
+                writes.push(parameter.name)
             }
         }
-        // copy: `candidates` keeps its key
-        written[helper.copy()] = writes
+        written[helper] = writes
     }
     written
 }

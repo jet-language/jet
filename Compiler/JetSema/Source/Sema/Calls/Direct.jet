@@ -430,8 +430,7 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, check: ^SemaBodyC
             // A math type Core's source declares builds through its own `new`.
             graph: check.program.registration_graph
             if sema_type_source_owns_nominal(graph, call.name, sema_scope_caller_row(check.environment.*, graph)) {
-                // copy: the generated call owns its arguments; `call` keeps the written ones.
-                invocation: Expr.MethodCall{receiver: Expr.Ident{name: call.name, span: call.name_span, id: AST_NODE_GENERATED}, method: "new", method_span: call.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call.args.copy(), id: AST_NODE_GENERATED}
+                invocation: Expr.MethodCall{receiver: Expr.Ident{name: call.name, span: call.name_span, id: AST_NODE_GENERATED}, method: "new", method_span: call.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call.args, id: AST_NODE_GENERATED}
                 return SemaDirectSpecialCheck{handled: true, value: sema_check_expression(invocation, expected, check)}
             }
             components: loop _ in 0..<sema_call_math_arity(call.name) -> sema_call_math_scalar_type(call.name)
@@ -964,7 +963,7 @@ sema_call_check_term_progress_iter: fn(args: [CallArg], span: Span, expected: Ty
         check.diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`progress` with a description reads a List or an Iter, not `{type_name(items.ty)}`", "the described progress form reports each item the loop pulls", "pass the items to report, or call `progress(label)` alone"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    result: items.ty.copy()
+    result: items.ty
     if !sema_stmt_move_direct(args[0].expr, check.state, check.scopes, "`progress`", check.diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}
     }

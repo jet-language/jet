@@ -819,8 +819,7 @@ sema_state_check_needs: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyT
     if walk.table.needs[id].len() == 0 {
         return
     }
-    // copy: the loop adds findings to the walk that holds the table.
-    needs: walk.table.needs[id].copy()
+    needs: walk.table.needs[id]
     loop need in needs {
         subject := receiver
         if need.arg >= 0 -> subject = if need.arg < args.len() -> Val(args[need.arg]) else -> None
@@ -1008,7 +1007,7 @@ sema_state_expr: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, va
         }
         .If(cond, then_body, then_value, else_body, else_value, span, _) -> {
             sema_state_expr(walk, interner, tree, cond)
-            before: walk.flow.current.copy()
+            before: walk.flow.current
             paths := [SemaFlowFacts]{}
             // A value `if door == { .Locked(_) -> … }` nests its arms as `if`s
             // on pattern tests: the branch sees the local in the tested case.

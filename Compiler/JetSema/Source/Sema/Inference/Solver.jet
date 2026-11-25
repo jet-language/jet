@@ -391,7 +391,7 @@ sema_inference_prepare_explicit: fn(context: ^SemaInferenceContext, explicit_typ
     }
     conflict := SemaInferenceConflict?{None}
     loop index in 0..<context.type_params.len() {
-        name: context.type_params[index].name.copy()
+        name: context.type_params[index].name
         if !sema_inference_bind(context, bindings, name, explicit_type_args[index], "the explicit type argument", conflict) {
             if conflict == .Val(row) -> sema_inference_conflict_diagnostic(row, span, diagnostics)
             return false

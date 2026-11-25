@@ -797,7 +797,7 @@ sema_call_builtin_static_argument: fn(argument: CallArg, declared: Type, row: Bu
         }
         // copy: `required` stays the coercion target below
         if required == .Union(_) && sema_expr_decimal_literal_operand(argument.expr, false) {
-            hint = Val(required.copy())
+            hint = Val(required)
         }
         checked: sema_check_expression(argument.expr, hint, check) ?? return None
         return sema_call_builtin_static_coerce(checked, required, argument.span, check.environment.*, check.program.*, check.diagnostics)

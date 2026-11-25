@@ -659,14 +659,14 @@ sema_error_conversion_items: fn(items: ^[Item], facts: ^[AppliedRuleApplication]
             loop marker in definition.markers {
                 facts.push(AppliedRuleApplication{marker: marker, target: Val(definition.from_span), site: Val(RuleSite.Impl)})
             }
-            type_params: conversion_params[converted].copy()
+            type_params: conversion_params[converted]
             converted += 1
             routine := sema_error_conversion_routine(definition, "self", AccessConvention.Move, type_params, local_types, edges, diagnostics) ?? next
             output.push(routine)
             next
         }
         if sema_error_conversion_from_route(plain_types, item) == .Val(route) {
-            type_params: conversion_params[converted].copy()
+            type_params: conversion_params[converted]
             converted += 1
             // A target this file declares keeps its impl, so `AppErr.from(e)`
             // and `AppErr{e}` call the hook, whose body becomes a call of the
@@ -704,7 +704,7 @@ sema_error_conversion_items: fn(items: ^[Item], facts: ^[AppliedRuleApplication]
         routines := [Item]{}
         dropped := [Int]{}
         loop nested in nested_routes {
-            type_params: conversion_params[converted].copy()
+            type_params: conversion_params[converted]
             converted += 1
             routine: sema_error_conversion_routine(nested.route, nested.param_name, nested.convention, type_params, local_types, edges, diagnostics) ?? {
                 dropped.push(nested.index)

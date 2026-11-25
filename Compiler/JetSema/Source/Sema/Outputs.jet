@@ -83,7 +83,7 @@ sema_output_fields: fn(args: [EnumLitArg], span: Span, diagnostics: ^[Diagnostic
                 diagnostics.push(sema_output_error(expr_span(value), "Output field `{label}` is written twice", "one Output field has one checked value", "remove one `{label}:` field"))
                 return None
             }
-            fields[label.copy()] = index
+            fields[label] = index
         } else {
             diagnostics.push(sema_output_error(span, "an Output payload uses named fields", "Output facts need stable field names for checking and inspection", "write `.Executable.{{ name: \"app\", entry: run }}`"))
             return None
@@ -114,7 +114,7 @@ sema_output_path: fn(value: Expr) -> {root: String, root_span: Span, members: [E
         .Ident(name, span, _) -> Val({members: [ExprMember]{}, root: name.copy(), root_span: span})
         .Field(base, member, span, _) -> {
             path := sema_output_path(base) ?? return None
-            path.members.push(ExprMember{name: member.copy(), span: span})
+            path.members.push(ExprMember{name: member, span: span})
             Val(path.move())
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
@@ -151,7 +151,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                 // copy: the resolved symbol owns its texts, while `found` is a payload view of the
                 // export row in the read-only graph, which keeps them.
                 if exported == .Val(found) {
-                    resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol.copy()}, source_module_identity: found.source_module_identity.copy(), target_module_identity: found.source_module_identity.copy(), visibility: found.visibility})
+                    resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol}, source_module_identity: found.source_module_identity, target_module_identity: found.source_module_identity, visibility: found.visibility})
                 }
             }
         }
@@ -183,9 +183,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                         }
                         target_index: sema_registration_module_index(graph, imported.target_module_identity) ?? break
                         exported: sema_registration_resolve_export(graph, target_index, target.member, owner.module_identity, owner.package_identity, [String]{}) ?? break
-                        // copy: the registered symbol owns its texts, while `exported` is a view of
-                        // an export row in the read-only graph, which keeps them.
-                        registered = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: exported.symbol.copy()}, source_module_identity: exported.source_module_identity.copy(), target_module_identity: exported.source_module_identity.copy(), visibility: exported.visibility})
+                        registered = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: exported.symbol}, source_module_identity: exported.source_module_identity, target_module_identity: exported.source_module_identity, visibility: exported.visibility})
                         break
                     }
                 } else {
@@ -266,8 +264,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                         if sema_registration_resolve_export(graph, current, lifted, owner.module_identity, owner.package_identity, [String]{}) == .Val(found) {
                             references.push(sema_output_import_reference(graph, graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
                             source_name = Val(last.name.copy())
-                            // copy: as for the export row below.
-                            resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol.copy()}, source_module_identity: found.source_module_identity.copy(), target_module_identity: found.source_module_identity.copy(), visibility: found.visibility})
+                            resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol}, source_module_identity: found.source_module_identity, target_module_identity: found.source_module_identity, visibility: found.visibility})
                             break
                         }
                     }
@@ -281,9 +278,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                 references.push(sema_output_import_reference(graph, graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
                 current = sema_registration_module_index(graph, exported.source_module_identity) ?? return None
             } else {
-                // copy: the resolved symbol owns its texts, while `exported` is a view of an export
-                // row in the read-only graph, which keeps them.
-                resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: exported.symbol.copy()}, source_module_identity: exported.source_module_identity.copy(), target_module_identity: exported.source_module_identity.copy(), visibility: exported.visibility})
+                resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: exported.symbol}, source_module_identity: exported.source_module_identity, target_module_identity: exported.source_module_identity, visibility: exported.visibility})
             }
         }
     } else {
@@ -422,7 +417,7 @@ sema_output_fact: fn(graph: SemaRegistrationGraph, declaring_index: Int, address
     // copy: the ResolvedOutput fact owns its texts. address/output_name are the caller's read
     // parameters, and module_path, source_name and the declaration name/return stay in the
     // read-only graph rows.
-    fact: ResolvedOutput{address: address.copy(), kind: kind, output_name: output_name.copy(), module_id: target.module_index, source_path: module_row.module_path.copy(), source_name: target.source_name.copy(), semantic_name: function.declaration.name.copy(), lowered_name: lowered_name.move(), params: params.move(), return_type: function.declaration.return_type.copy(), failure_contract: failure_contract_of_function(function.declaration.return_type, function.declaration.return_type_span), reference: expr_span(entry), definition: function.symbol.span, authority: OutputCallableAuthority.SafeJet, effects: [String]{}, selected: false, selection_reason: "not selected"}
+    fact: ResolvedOutput{address: address.copy(), kind: kind, output_name: output_name.copy(), module_id: target.module_index, source_path: module_row.module_path.copy(), source_name: target.source_name, semantic_name: function.declaration.name.copy(), lowered_name: lowered_name.move(), params: params.move(), return_type: function.declaration.return_type.copy(), failure_contract: failure_contract_of_function(function.declaration.return_type, function.declaration.return_type_span), reference: expr_span(entry), definition: function.symbol.span, authority: OutputCallableAuthority.SafeJet, effects: [String]{}, selected: false, selection_reason: "not selected"}
     target.references.push(sema_name_reference(expr_span(entry), function.symbol, Val(SymbolKind.Function)))
     Val({fact: fact.move(), references: target.references.move()})
 }
@@ -553,7 +548,7 @@ sema_output_resolve: fn(graph: ^SemaRegistrationGraph, intent: SemaOutputIntent,
                 choices := [String]{}
                 loop row in rows {
                     if row.module_index == entry_index && (row.fact.kind == OutputKind.Executable || row.fact.kind == OutputKind.Service) {
-                        choices.push(row.fact.address.copy())
+                        choices.push(row.fact.address)
                     }
                 }
                 choices.sort()
@@ -625,7 +620,7 @@ sema_output_resolve: fn(graph: ^SemaRegistrationGraph, intent: SemaOutputIntent,
             // copy: the resolved fact is stored twice: on this registered
             // constant and, moved, on the program item below.
             if graph.modules[row.module_index].constants[constant_index].declaration.name_span == declaration_span {
-                graph.modules[row.module_index].constants[constant_index].declaration.resolved_output = Val(row.fact.copy())
+                graph.modules[row.module_index].constants[constant_index].declaration.resolved_output = Val(row.fact)
             }
         }
         if graph.modules[row.module_index].program.items[row.item_index] == .Const(definition) {

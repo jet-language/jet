@@ -652,7 +652,7 @@ sema_publish_expression: fn(value: TExpr, program: SemaProgramTables, context: ^
     tree := flat.tree.move()
     sema_precise_bind(tree, program)
     // The expression's own symbol keys leave with it (body_flat_function).
-    tree.symbols = context.arena.tree.symbols.copy()
+    tree.symbols = context.arena.tree.symbols
     body_tree_finish(tree)
     BodyExpr{root: root, tree: tree.move()}
 }
@@ -2001,7 +2001,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
                 if function_kind == {
                     .Method(_, _) | .TraitMethod(_, _, _, _, _) -> {
                         if param_index == 0 && func.params[param_index].name == "self" {
-                            check.context.return_view_receiver_key = param_key.copy()
+                            check.context.return_view_receiver_key = param_key
                         } else { check.context.return_view_parameter_keys.push(param_key.copy()) }
                     }
                     .TopLevel -> check.context.return_view_parameter_keys.push(param_key.copy())
@@ -5010,7 +5010,7 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
     reads := [SemaModuleValueRead]{}
     loop candidate in candidates {
         consumer: sema_module_value_consumer(bodies, candidate.span) ?? next
-        reads.push(SemaModuleValueRead{key: candidate.key, name: candidate.name.copy(), consumer: consumer, span: candidate.span})
+        reads.push(SemaModuleValueRead{key: candidate.key, name: candidate.name, consumer: consumer, span: candidate.span})
     }
     if reads.len() < 2 {
         return
@@ -5485,10 +5485,10 @@ sema_script_entry: fn(program: ^Program) {
         item := reversed.pop() ?? break
         if item == .Const(definition) && sema_script_entry_local(definition) {
             binding := ast_binding(definition.name.copy(), definition.name_span, definition.mutable, definition.value.copy(), None)
-            binding.ty = definition.ty.copy()
-            binding.meta = definition.meta.copy()
-            binding.markers = definition.markers.copy()
-            program.entry_locals.push(definition.name.copy())
+            binding.ty = definition.ty
+            binding.meta = definition.meta
+            binding.markers = definition.markers
+            program.entry_locals.push(definition.name)
             locals.push(Stmt.Val{binding: binding})
             next
         }

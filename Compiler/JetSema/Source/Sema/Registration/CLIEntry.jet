@@ -197,7 +197,7 @@ sema_cli_entry_expand_imported: fn(program: ^Program, imported: [Item]) {
             ty: sema_cli_entry_param(imported, target.function) ?? next
             if ty == .Named(name) {
                 if name.contains(".") -> next
-                type_name = name.copy()
+                type_name = name
             } else { next }
             qualifier = "{alias}."
         } else {
@@ -243,7 +243,7 @@ sema_cli_entry_pending: fn(items: [Item]) -> [SemaCLIEntryTarget] {
                             }
                         } else if sema_output_path(value) == .Val(path) {
                             if path.members.len() == 1 {
-                                targets.push(SemaCLIEntryTarget{wrapper: wrapper, function: path.members[0].name.copy(), module_alias: Val(path.root.copy())})
+                                targets.push(SemaCLIEntryTarget{wrapper: wrapper, function: path.members[0].name.copy(), module_alias: Val(path.root)})
                             }
                         }
                     }
@@ -632,11 +632,11 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
     lines.push("    __pos := [String]{{}}")
     lines.push("    __i := 1")
     lines.push("    loop __i < __argv.len() {{")
-    lines.push("    __a: __argv[__i].copy()")
+    lines.push("    __a: __argv[__i]")
     lines.push("    if __a == \"--\" {{")
     lines.push("    __i += 1")
     lines.push("    loop __i < __argv.len() {{")
-    lines.push("    __pos.push(__argv[__i].copy())")
+    lines.push("    __pos.push(__argv[__i])")
     lines.push("    __i += 1")
     lines.push("    }}")
     lines.push("    break")
@@ -691,7 +691,7 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
         if input.flag -> next
         body := [String]{"    __i += 1"}
         sema_cli_entry_fail(body, "__i >= __argv.len()", sema_cli_entry_usage(sema_cli_entry_text("`--{input.name}` requires a value")), projection)
-        body.push("    __w: __argv[__i].copy()")
+        body.push("    __w: __argv[__i]")
         sema_cli_entry_store(body, input, slot, "__w", projection, marks)
         sema_cli_entry_next(body)
         long.push(SemaCLIArm{patterns: [sema_cli_entry_text(input.name)], body: body})
@@ -722,7 +722,7 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
                 body.push("    if __w.bytes().len() == 0 {{")
                 body.push("    __i += 1")
                 sema_cli_entry_fail(body, "__i >= __argv.len()", sema_cli_entry_usage(sema_cli_entry_text("`-{input.short}` requires a value")), projection)
-                body.push("    __w = __argv[__i].copy()")
+                body.push("    __w = __argv[__i]")
                 body.push("    }}")
                 sema_cli_entry_store(body, input, slot, "__w", projection, marks)
                 body.push("    break")
@@ -739,7 +739,7 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
     lines.push("    __i += 1")
     lines.push("    next")
     lines.push("    }}")
-    lines.push("    __pos.push(__a.copy())")
+    lines.push("    __pos.push(__a)")
     lines.push("    __i += 1")
     lines.push("    }}")
     // Named wins: a named value satisfies its positional slot and
@@ -756,7 +756,7 @@ sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: St
         lines.push("    if __bare < __pos.len() -> __bare += 1")
         lines.push("    }}")
         lines.push("    if __v{slot} == None && __bare < __pos.len() {{")
-        lines.push("    __p: __pos[__bare].copy()")
+        lines.push("    __p: __pos[__bare]")
         sema_cli_entry_store(lines, input, slot, "__p", projection, false)
         lines.push("    __bare += 1")
         lines.push("    }}")
@@ -886,7 +886,7 @@ sema_cli_entry_store: fn(lines: ^[String], input: SemaCLIInput, slot: Int, value
         outside: loop choice in input.choices -> "{value} != {sema_cli_entry_text(choice)}"
         sema_cli_entry_fail(lines, outside.join(" && "), "{sema_cli_call("CLIChoiceRefusal")}({name}, {value}, {sema_cli_entry_text(input.choices.join(", "))})", projection)
     }
-    lines.push("    __v{slot} = Val({value}.copy())")
+    lines.push("    __v{slot} = Val({value})")
     if marks -> lines.push("    __x{slot} = true")
 }
 

@@ -3659,8 +3659,7 @@ sema_scope_mark_map_slot: fn(table: ^SemaScopeTable, name: String) Never! {
 sema_scope_mark_fresh_cell: fn(table: ^SemaScopeTable, name: String, init: Expr) Never! {
     index: sema_scope_resolve_index(table, name) ?? return
     sema_scope_note_binding_edit(table, index)
-    // copy: `init` is the binding statement's initializer, which the statement keeps.
-    table.bindings[index].fresh_cell = Val(init.copy())
+    table.bindings[index].fresh_cell = Val(init)
 }
 
 // Keeps the rights of the `Authority` the binding `name` just declared holds

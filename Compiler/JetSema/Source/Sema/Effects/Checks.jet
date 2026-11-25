@@ -2616,7 +2616,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.source_display = sema_effect_source_display(function.source_file)
     node.chain_name = sema_effect_chain_name(function).replace(".", ".")
     node.owner_params = sema_effect_owner_params(function.kind)
-    node.type_params = node.owner_params.copy()
+    node.type_params = node.owner_params
     loop param in function.generic_params -> sema_effect_set_add(node.type_params, param.name)
     if function.kind == .TraitMethod(_, _, _, trait_symbol, _) {
         if !symbol_is_local(trait_symbol) -> node.trait_symbol = Val(trait_symbol)
@@ -2637,14 +2637,12 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.unsafe_reason = actual.unsafe_reason
     node.effect_via = actual.effect_via
     node.unsafe_span = actual.unsafe_span
-    // copy: the node keeps the spans; the source row stays with its module input.
-    node.loop_spans = actual.loop_spans.copy()
+    node.loop_spans = actual.loop_spans
     if actual.assume_det_spans.len() > 0 || actual.module_caps.len() > 0 {
         sema_effect_node_rare_open(node)
         if ^node.rare == .Val(rare) {
-            // copy: as above.
-            rare.assume_det_spans = actual.assume_det_spans.copy()
-            rare.module_caps = actual.module_caps.copy()
+            rare.assume_det_spans = actual.assume_det_spans
+            rare.module_caps = actual.module_caps
         }
     }
     node.memo_span = actual.memo_span
@@ -3370,7 +3368,7 @@ sema_effect_record_lambda_bound: fn(nodes: ^[SemaEffectNode], node_index: Int, f
     sema_effect_node_rare_open(nodes[node_index])
     if ^nodes[node_index].rare == .Val(rare) {
         if hook == .Val(taken) {
-            rare.hook_lambdas.push(SemaEffectHookLambda{direct: walked.direct.copy(), call_edges: walked.call_edges.copy(), maximal: walked.maximal, taken: taken, span: span})
+            rare.hook_lambdas.push(SemaEffectHookLambda{direct: walked.direct, call_edges: walked.call_edges, maximal: walked.maximal, taken: taken, span: span})
         }
         if row == .Val(bound) {
             rare.lambda_bounds.push(SemaEffectLambdaBound{direct: walked.direct.move(), call_edges: walked.call_edges.move(), maximal: walked.maximal, row: bound, span: span})
@@ -4990,7 +4988,7 @@ sema_effect_dispatch_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bo
     }
     cursor := 0
     loop cursor < pending.len() {
-        incoming: pending[cursor].copy()
+        incoming: pending[cursor]
         cursor += 1
         loop caller in callers[incoming] {
             if reach[caller] -> next

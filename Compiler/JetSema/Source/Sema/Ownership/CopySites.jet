@@ -85,13 +85,13 @@ sema_copy_site_find: fn(value: Expr, environment: SemaScopeEnvironment, program:
 
 // The `.copy()` edit only for a proven cloneable, non-resource type.
 sema_copy_site_report: fn(site: SemaCopySite, what: String, why: String, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
-    sema_copy_site_push(sema_error("E0120", site.span, what, why, "copy it explicitly with `{site.name}.copy()`"), site, environment, program, context, diagnostics)
+    sema_copy_site_push(sema_error("E0120", site.span, what, why, "copy it explicitly with `{site.name}`"), site, environment, program, context, diagnostics)
 }
 
 sema_copy_site_push: fn(diagnostic: Diagnostic, site: SemaCopySite, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
     facts: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if facts.complete && facts.cloneable && !facts.resource {
-        diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: site.span.end, end: site.span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+        diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: site.span.end, end: site.span.end}, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
         return
     }
     diagnostics.push(diagnostic.copy())
@@ -153,7 +153,7 @@ sema_copy_site_check_owned_walk: fn(value: TExpr, environment: SemaScopeEnvironm
         // the value, so a `.move()` out of the guard would close or free it twice
         // (#6450). Assigning through the guard replaces it in place.
         if walk.exact_move || walk.taken {
-            diagnostics.push(sema_error("E0120", value.span, "`.move()` cannot take a value out of a guard", "the shared storage keeps owning the guard's payload; a move would leave it without that value while its other guards and its cleanup still use it", "copy the value with `.copy()` when it supports copying, or assign a new value through the guard to replace it in place"))
+            diagnostics.push(sema_error("E0120", value.span, "`.move()` cannot take a value out of a guard", "the shared storage keeps owning the guard's payload; a move would leave it without that value while its other guards and its cleanup still use it", "copy the value with `` when it supports copying, or assign a new value through the guard to replace it in place"))
             return false
         }
         // Under `??` or an arm tail the guard read is judged only when its
@@ -163,9 +163,9 @@ sema_copy_site_check_owned_walk: fn(value: TExpr, environment: SemaScopeEnvironm
         if !scopes.copies_explicit && facts.complete && facts.cloneable && !facts.resource {
             return true
         }
-        diagnostic: sema_error("E0120", value.span, "this guard lends its value, so it cannot be moved into an owning destination", "the value stays owned by the shared storage; moving it would leave the guard and the destination owning the same data", "copy the value explicitly with `.copy()`, or pass it to a read parameter instead")
+        diagnostic: sema_error("E0120", value.span, "this guard lends its value, so it cannot be moved into an owning destination", "the value stays owned by the shared storage; moving it would leave the guard and the destination owning the same data", "copy the value explicitly with ``, or pass it to a read parameter instead")
         if facts.complete && facts.cloneable && !facts.resource {
-            diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: value.span.end, end: value.span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+            diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: value.span.end, end: value.span.end}, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
         } else { diagnostics.push(diagnostic) }
         return false
     }
@@ -502,7 +502,7 @@ sema_copy_site_refuse_in_place_copy: fn(value: TExpr, environment: SemaScopeEnvi
     diagnostic: sema_error("E0120", span, "{subject} is read in place, so it cannot fill an owned value as-is", "the place keeps its value, so this owning position would copy it, and `copies: .Explicit` is active, so the copy must be written", "copy it explicitly with {written}")
     facts: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if facts.complete && facts.cloneable && !facts.resource {
-        diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: value.span.end, end: value.span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+        diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: value.span.end, end: value.span.end}, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
     } else { diagnostics.push(diagnostic) }
     false
 }
@@ -588,7 +588,7 @@ sema_copy_site_check_borrowed_binding: fn(binding: Binding, environment: SemaSco
         return
     }
     site: sema_copy_site_borrowed_param(binding.init, scopes) ?? return
-    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be taken with `.move()`", "this function has read access only and does not own the value", "copy it instead: `{binding.name}: {site.name}.copy()`"), site, environment, program, context, diagnostics)
+    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be taken with `.move()`", "this function has read access only and does not own the value", "copy it instead: `{binding.name}: {site.name}`"), site, environment, program, context, diagnostics)
 }
 
 // A bare borrowed parameter returned as-is is E0120 unless its type is one of
@@ -603,7 +603,7 @@ sema_copy_site_check_borrowed_return: fn(value: Expr, environment: SemaScopeEnvi
     if sema_copy_site_is_type_parameter(site.ty, context) {
         return
     }
-    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be returned as-is", "this function has read access only and does not own the value", "return a copy: `return {site.name}.copy()` — or take ownership: `{site.name}: ^^{type_name(site.ty)}`. To return borrowed data, declare `-> View<T> from {site.name}` and return a view derived from `{site.name}`"), site, environment, program, context, diagnostics)
+    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be returned as-is", "this function has read access only and does not own the value", "return a copy: `return {site.name}` — or take ownership: `{site.name}: ^^{type_name(site.ty)}`. To return borrowed data, declare `-> View<T> from {site.name}` and return a view derived from `{site.name}`"), site, environment, program, context, diagnostics)
 }
 
 // An owned struct or variant field filled from `value`.
