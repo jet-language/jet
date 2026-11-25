@@ -1051,9 +1051,11 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     sema_body_check_swap_diagnostics(check, diagnostics)
     sema_body_check_swap_scopes(check, scopes)
     if !complete {
+        sema_function_pass_hand_delta(scopes, check.context)
         return sema_function_result(None, owner_key, check.context.move())
     }
     source_line_value: source_line ?? {
+        sema_function_pass_hand_delta(scopes, check.context)
         return sema_function_result(None, owner_key, check.context.move())
     }
     source_file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
@@ -1154,19 +1156,27 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             flat.receiver_footprint = sema_footprint_for_method_span(graph.modules[module_index], func.span)
         }
     }
-    scopes.type_delta = [InternerDelta]{}
-    if check.context.type_delta.len() > 0 {
-        if check.context.type_delta.pop() == .Val(delta) {
-            if delta_has_rows(delta) {
-                scopes.type_delta.push(delta)
-            }
-        }
-    }
+    sema_function_pass_hand_delta(scopes, check.context)
     if stand_in == None -> return sema_function_result(Val(flat), owner_key, check.context.move())
     flat.stand_in = true
     result := sema_function_result(Val(flat), owner_key, check.context.move())
     result.failure = Val(stand_in.failure)
     result
+}
+
+// Hands the rows the pass interned to the scope table, whose drain merges
+// them and renumbers the body and the comptime requests the pass handed
+// out. A pass that ends without a body hands them over too: its requests
+// (a checked text's tree) still name them.
+sema_function_pass_hand_delta: fn(scopes: ^SemaScopeTable, context: ^SemaCheckContext) Never! {
+    scopes.type_delta = [InternerDelta]{}
+    if context.type_delta.len() > 0 {
+        if context.type_delta.pop() == .Val(delta) {
+            if delta_has_rows(delta) {
+                scopes.type_delta.push(delta)
+            }
+        }
+    }
 }
 
 // True for a method of an `impl Trait { … }` block written in its type's
