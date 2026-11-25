@@ -1,20 +1,20 @@
 {
   "name": "corelib-compare",
   "mode": "tool",
-  "description": "Tools/Perf/CoreLibCompare.py and its Jet twin CoreLibCompare/run.jet, matched Core workloads timed after compilation: base64 encoding through a standalone Rust program, Jet's Rust-backed Core API and a Jet source module, each built in a scratch directory under corelib-compare in the state directory (the original's ~/.cache/jet-dev, the twin's JET_STATE_ROOT of the dev tool roots), checked, sampled, and reported as JSON with each arm's median and its ratio to the Rust arm. HOME is the case directory's home/, JET_STATE_ROOT its home/.cache/jet-dev, and XDG_CONFIG_HOME its home/.config, so no machine env file moves the twin's state root. The repository has no Tools/Perf/package.jet, which the scratch package copies, so every run that gets past its arguments makes the scratch root, then exits 1 and leaves it empty. Cases: the defaults; every option, by prefix and with `=`; --help; a zero round count, a negative sample count, a word for a count, a missing value, an extra argument and a value for --require-win (each exit 2, no scratch root).",
+  "description": "Tools/Perf/CoreLibCompare.py and its Jet twin CoreLibCompare/run.jet, matched Core workloads timed after compilation: base64 encoding through a standalone Rust program, Jet's Rust-backed Core API and a Jet source module, each built in a scratch directory under corelib-compare in the state directory (both read $JET_STATE_ROOT, the dev tool roots' state directory), checked, sampled, and reported as JSON with each arm's median and its ratio to the Rust arm. HOME is the case directory's home/, JET_STATE_ROOT its home/state, and XDG_CONFIG_HOME its home/.config, so no machine env file moves the twin's state root. The repository has no Tools/Perf/package.jet, which the scratch package copies, so every run that gets past its arguments makes the scratch root, then exits 1 and leaves it empty. Cases: the defaults; every option, by prefix and with `=`; --help; a zero round count, a negative sample count, a word for a count, a missing value, an extra argument and a value for --require-win (each exit 2, no scratch root).",
   "tool": {
     "original": "Tools/Perf/CoreLibCompare.py",
     "jet": "Tools/Perf/CoreLibCompare/run.jet",
     "cases": [
-      {"args": [], "env": {"HOME": "home", "JET_STATE_ROOT": "home/.cache/jet-dev", "XDG_CONFIG_HOME": "home/.config"}, "exit": 1, "check": "check.jet", "expected": "Expected/scratch.out"},
-      {"args": ["--ro", "10", "--sa=1", "--require-win"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/.cache/jet-dev", "XDG_CONFIG_HOME": "home/.config"}, "exit": 1, "check": "check.jet", "expected": "Expected/scratch.out"},
-      {"args": ["--help"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/.cache/jet-dev", "XDG_CONFIG_HOME": "home/.config"}, "check": "check.jet", "expected": "Expected/help.out"},
-      {"args": ["--rounds", "0"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/.cache/jet-dev", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"},
-      {"args": ["--samples", "-3"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/.cache/jet-dev", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"},
-      {"args": ["--rounds", "many"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/.cache/jet-dev", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"},
-      {"args": ["--samples"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/.cache/jet-dev", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"},
-      {"args": ["extra"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/.cache/jet-dev", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"},
-      {"args": ["--require-win=yes"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/.cache/jet-dev", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"}
+      {"args": [], "env": {"HOME": "home", "JET_STATE_ROOT": "home/state", "XDG_CONFIG_HOME": "home/.config"}, "exit": 1, "check": "check.jet", "expected": "Expected/scratch.out"},
+      {"args": ["--ro", "10", "--sa=1", "--require-win"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/state", "XDG_CONFIG_HOME": "home/.config"}, "exit": 1, "check": "check.jet", "expected": "Expected/scratch.out"},
+      {"args": ["--help"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/state", "XDG_CONFIG_HOME": "home/.config"}, "check": "check.jet", "expected": "Expected/help.out"},
+      {"args": ["--rounds", "0"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/state", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"},
+      {"args": ["--samples", "-3"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/state", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"},
+      {"args": ["--rounds", "many"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/state", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"},
+      {"args": ["--samples"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/state", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"},
+      {"args": ["extra"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/state", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"},
+      {"args": ["--require-win=yes"], "env": {"HOME": "home", "JET_STATE_ROOT": "home/state", "XDG_CONFIG_HOME": "home/.config"}, "exit": 2, "check": "check.jet", "expected": "Expected/refused.out"}
     ]
   }
 }

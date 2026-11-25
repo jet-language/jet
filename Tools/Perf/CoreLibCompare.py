@@ -35,7 +35,7 @@ from statistics import median
 ROOT = Path(__file__).resolve().parents[2]
 JET_BIN = ROOT / "target" / "debug" / "jet"
 JET_ENV = ROOT / "Tools/Agent/JetEnv.jet"
-SCRATCH_ROOT = Path.home() / ".cache" / "jet-dev" / "corelib-compare"
+SCRATCH_ROOT = Path(os.environ.get("JET_STATE_ROOT") or Path.home() / ".cache" / "jet-dev") / "corelib-compare"
 JET_WORKLOAD = r'''to_u8: fn(n: Int) -> U8 { (U8{n & 255}) }
 
 run: fn() {
