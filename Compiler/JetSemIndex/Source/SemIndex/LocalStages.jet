@@ -176,11 +176,14 @@ semindex_local_stage_effect: fn(function: FnBody, span: Span, summaries: [SemSum
         if found != None && fact.span.start >= found_at -> next
         callee_id: fact.callee ?? next
         // The fact's caller is `function`, so a local callee is one of its own.
-        target := symbol_key(permit.value.symbols, function.tree.symbols, callee_id)
+        target: symbol_key(permit.value.symbols, function.tree.symbols, callee_id)
         row := [String]{}
         indexed: by_raw_key.get(target)
-        if indexed == .Val(index) -> row = summaries[index].solved.copy() else if fact.facts.effect_bound == .Val(bound) {
-            row = loop entry in bound -> entry.name.copy()
+        if {
+            indexed == .Val(index) -> row = summaries[index].solved.copy()
+            fact.facts.effect_bound == .Val(bound) -> {
+                row = loop entry in bound -> entry.name.copy()
+            }
         }
         loop effect_name in row {
             if authority_is_deny_only(effect_name) -> next
