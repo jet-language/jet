@@ -2,7 +2,12 @@
 // the same check: a `#MoveOnly` value moves and never copies, a `#Local`
 // value never leaves the thread that made it, a type with `impl Close` is a
 // resource that never copies, and a `#SingleUse` value owes one consume. A
-// record that holds one of them has the fact too.
+// record that holds one of them has the fact too. Core's `FileWriter` is a
+// resource by its own `impl Close`, as `Handle` is.
+use {
+    files: core.files
+}
+
 #MoveOnly Ticket: struct {
     seat: Int,
 }
@@ -36,6 +41,8 @@ copy_ticket: fn(ticket: Ticket) -> Ticket { ticket.copy() }
 copy_ticket_holder: fn(holder: TicketHolder) -> TicketHolder { holder.copy() }
 
 copy_handle: fn(handle: Handle) -> Handle { handle.copy() }
+
+copy_writer: fn(writer: files.FileWriter) -> files.FileWriter { writer.copy() }
 
 send_pool: fn(pool: Pool) {
     worker: task {

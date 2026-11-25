@@ -1,0 +1,97 @@
+// Core's four streams whose `close` returns an error are resources by their
+// Core identity, each in its own module: `TCPStream` and `UnixStream` in
+// core.net, `TLSStream` in core.net.tls and `WsConn` in core.net.ws. A struct
+// or an enum that holds one owns the stream too, so a read parameter of it
+// can't be copied into an owned field: the copy and the caller would both
+// close the one connection.
+use {
+    net: core.net
+    tls: core.net.tls
+    ws: core.net.ws
+}
+
+TCPWire: struct {
+    conn: net.TCPStream,
+}
+
+UnixWire: struct {
+    conn: net.UnixStream,
+}
+
+TLSWire: struct {
+    conn: tls.TLSStream,
+}
+
+WsWire: struct {
+    conn: ws.WsConn,
+}
+
+TCPSide: enum {
+    Open(conn: net.TCPStream),
+    Shut,
+}
+
+UnixSide: enum {
+    Open(conn: net.UnixStream),
+    Shut,
+}
+
+TLSSide: enum {
+    Open(conn: tls.TLSStream),
+    Shut,
+}
+
+WsSide: enum {
+    Open(conn: ws.WsConn),
+    Shut,
+}
+
+TCPWireHeld: struct {
+    wire: TCPWire,
+}
+
+UnixWireHeld: struct {
+    wire: UnixWire,
+}
+
+TLSWireHeld: struct {
+    wire: TLSWire,
+}
+
+WsWireHeld: struct {
+    wire: WsWire,
+}
+
+TCPSideHeld: struct {
+    side: TCPSide,
+}
+
+UnixSideHeld: struct {
+    side: UnixSide,
+}
+
+TLSSideHeld: struct {
+    side: TLSSide,
+}
+
+WsSideHeld: struct {
+    side: WsSide,
+}
+
+hold_tcp_wire: fn(wire: TCPWire) -> TCPWireHeld { TCPWireHeld{wire: wire} }
+
+hold_unix_wire: fn(wire: UnixWire) -> UnixWireHeld { UnixWireHeld{wire: wire} }
+
+hold_tls_wire: fn(wire: TLSWire) -> TLSWireHeld { TLSWireHeld{wire: wire} }
+
+hold_ws_wire: fn(wire: WsWire) -> WsWireHeld { WsWireHeld{wire: wire} }
+
+hold_tcp_side: fn(side: TCPSide) -> TCPSideHeld { TCPSideHeld{side: side} }
+
+hold_unix_side: fn(side: UnixSide) -> UnixSideHeld { UnixSideHeld{side: side} }
+
+hold_tls_side: fn(side: TLSSide) -> TLSSideHeld { TLSSideHeld{side: side} }
+
+hold_ws_side: fn(side: WsSide) -> WsSideHeld { WsSideHeld{side: side} }
+
+run: fn() {}

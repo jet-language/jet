@@ -293,6 +293,12 @@ FileScope: struct {
 
     /// Read only through the authority's descriptor-relative no-follow roots.
     read: fn(self, path: String) -[FS.Read]> String IOError! { scoped_read(self, path) }
+
+    // A scope keeps its authority for one owner. Its drop releases the
+    // authority after this close, so the close has nothing left to do.
+    impl Close {
+        close: fn(^^self) {}
+    }
 }
 
 // The native file resources below are filled only by Core's own opens:
@@ -385,6 +391,12 @@ FileLock: struct {
     priv stored_path: String,
     path: String -> stored_path,
     priv handle: Int,
+
+    // The runtime handle's drop releases the lock after this close, so the
+    // close has nothing left to do; being `Close` keeps the lock to one owner.
+    impl Close {
+        close: fn(^^self) {}
+    }
 }
 
 // The fd is guarded before it becomes the native FileLock carrier. Failed
@@ -520,6 +532,12 @@ FileReader: struct {
             rt.reader_read_into(self, buffer, limit)
         }
     }
+
+    // The runtime handle's drop closes the file after this close, so the
+    // close has nothing left to do; being `Close` keeps the file to one owner.
+    impl Close {
+        close: fn(^^self) {}
+    }
 }
 
 /// An open file for writing. `write`, `write_line`, `write_bytes` and
@@ -564,6 +582,13 @@ FileWriter: struct {
         // Every `flush` call on a FileWriter reaches this method, so it calls
         // the runtime's flush, never the handle's by name.
         flush: fn(^self) -[Time.Wait]> IOError! { rt.writer_flush(self) }
+    }
+
+    // The runtime handle's drop flushes and closes the file after this close,
+    // so the close has nothing left to do; being `Close` keeps the file to one
+    // owner.
+    impl Close {
+        close: fn(^^self) {}
     }
 }
 

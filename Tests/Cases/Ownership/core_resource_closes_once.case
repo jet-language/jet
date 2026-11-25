@@ -1,0 +1,14 @@
+# Core's `FileWriter` and `FileLock` are resources by their own `impl Close`,
+# whose close leaves the release to the runtime handle's drop. The handle
+# closes once, whether `close(…)` consumes it or its scope ends: a written file
+# keeps its bytes, and a lock taken, closed and dropped can be taken again.
+fixture: CoreResourceClosesOnce.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+write: run.jet core_resource_closes_once.run.jet
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "closed: one\ndropped: two\nlock: taken\nlock: taken again\nlock: taken a third time\n"
