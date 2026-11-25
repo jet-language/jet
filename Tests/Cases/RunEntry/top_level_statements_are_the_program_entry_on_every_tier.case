@@ -4,8 +4,9 @@
 # and a lambda in it captures, beside its declarations (`greet` is declared
 # after the statement that calls it). The file
 # checks clean, and jet run FILE, jet -e with the same statements and the
-# file piped to `jet run -` print the same lines on O0, O1 and O2. A file with
-# statements and `run: fn` is E0621
+# file piped to `jet run -` print the same lines on O0, O1 and O2; on the
+# one `-e` line the loop's body is braced, since a `;` can't follow a one-line
+# arm. A file with statements and `run: fn` is E0621
 # (loose_statements_are_rejected_even_with_explicit_run.case); lib.jet, with
 # neither, is a library: it checks clean and `jet run` of it is E0101.
 fixture: TopLevelStatementsAreTheProgramEntryOnEveryTier.fixture
@@ -29,15 +30,15 @@ step file_o2: jet run -O2 main.jet
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step eval_o0: jet run -O0 -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
+step eval_o0: jet run -O0 -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit { total += n + 1 }; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step eval_o1: jet run -O1 -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
+step eval_o1: jet run -O1 -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit { total += n + 1 }; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
 exit: 0
 stdout: == file_o0
 stderr: = ""
-step eval_o2: jet run -O2 -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit -> total += n + 1; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
+step eval_o2: jet run -O2 -e 'print("first"); limit: 3; total := 0; loop n in 0..<limit { total += n + 1 }; print("total {total}"); print(greet("jet")); add := fn(x: Int) { x + total }; print("add {add(4)}"); greet: fn(name: String) -> String { "hi {name}" }'
 exit: 0
 stdout: == file_o0
 stderr: = ""

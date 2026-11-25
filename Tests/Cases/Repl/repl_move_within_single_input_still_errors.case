@@ -3,6 +3,8 @@
 # CLI banner: crates/jet-repl/src/Render.rs24-37; prompts: Render.rs67-74, lib.rs2528-2535.
 # No assertion needle appears in the fixed banner/prompt; no stripping/projection.
 # lib.rs2469-2470: cooked floor mirrors transcript; EOF does not append :quit.
+# The input's `;` is the line break it means, so `y: x.move(); x` is one input
+# of two statements; a binding shares its value, so the move is `.move()`.
 fixture: ReplMoveWithinSingleInputStillErrors.fixture
 step: jet repl
 env: NO_COLOR=1
@@ -10,3 +12,4 @@ env: XDG_STATE_HOME={work}/state
 stdin: ReplMoveWithinSingleInputStillErrors.fixture/input.txt
 exit: any # original library predicate did not assert process status
 stdout|stderr: ~ "Error: " # original `error` needle came from run_transcript's `error [CODE]`; the CLI renders the fixed `Error: CODE:` heading (Docs/Spec/diagnostics.md:64)
+stdout|stderr: ~ "Jet.UseAfterMove" # `x` is read after `x.move()` consumed it in the same input

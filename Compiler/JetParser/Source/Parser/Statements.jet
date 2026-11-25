@@ -934,25 +934,50 @@ parser_check_arm_semicolon: fn(state: ^JetParserState) {
             return
         }
     }
+    if !parser_semicolon_joins_line(state, index) {
+        return
+    }
+    semi: state.tokens[index]
+    parser_add_error_code(state, "E0448", Span{start: semi.span.start, end: semi.span.start + 1}, "A `;` can't follow a one-line arm on the same line", "A one-line arm holds one statement, so the code after this `;` could belong to the arm or run after it, and Jet will not guess which.", "Brace the arm to run both under it, as in `-> {{ a(); b() }}`, or start the next statement on its own line.")
+}
+
+// Whether code follows the authored `;` at token `index` on its own line,
+// rather than a line break, a `}` or the end of the input.
+parser_semicolon_joins_line: fn(state: ^JetParserState, index: Int) -> Bool {
     semi: state.tokens[index]
     ^after: index + 1
     loop after < state.tokens.len() && (state.tokens[after].kind == TOKEN_SEMI || parser_is_trivia(state.tokens[after].kind)) {
         after += 1
     }
-    if after >= state.tokens.len() {
-        return
-    }
+    if after >= state.tokens.len() -> return false
     following: state.tokens[after]
-    if following.kind == TOKEN_RBRACE || following.kind == TOKEN_EOF {
-        return
-    }
+    if following.kind == TOKEN_RBRACE || following.kind == TOKEN_EOF -> return false
     loop at in (semi.span.start + 1)..<following.span.start {
         byte: parser_source_byte(state, at)
-        if byte == 10 || byte == 13 {
-            return
-        }
+        if byte == 10 || byte == 13 -> return false
     }
-    parser_add_error_code(state, "E0448", Span{start: semi.span.start, end: semi.span.start + 1}, "A `;` can't follow a one-line arm on the same line", "A one-line arm holds one statement, so the code after this `;` could belong to the arm or run after it, and Jet will not guess which.", "Brace the arm to run both under it, as in `-> {{ a(); b() }}`, or start the next statement on its own line.")
+    true
+}
+
+// Whether the cursor is in an arm of a one-line `if` that ends at an authored
+// `;` code follows on the same line. That `;` is refused (E0448), and a value
+// arm before it is reported as that `;` rather than as a line that does
+// nothing: `if c -> "a" else -> "b"; print(1)`.
+parser_arm_before_joining_semicolon: fn(state: ^JetParserState) -> Bool {
+    if state.adjacent_if_body_depth == 0 -> return false
+    ^at: state.position
+    ^depth: 0
+    loop at < state.tokens.len() {
+        kind: state.tokens[at].kind
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1 else if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE {
+            if depth == 0 -> return false
+            depth -= 1
+        } else if kind == TOKEN_EOF { return false } else if kind == TOKEN_SEMI && depth == 0 {
+            return token_is_authored_semicolon(state.tokens[at]) && parser_semicolon_joins_line(state, at)
+        }
+        at += 1
+    }
+    false
 }
 
 parser_teach_control_braces: fn(state: ^JetParserState, body: String, span: Span) {
@@ -2123,11 +2148,13 @@ parser_parse_assignment_or_expression: fn(state: ^JetParserState) -> Stmt {
         return Stmt.Assign{target: target.move(), op: parser_assignment_binop(operator), op_span: op_token.span, value: parser_assignment_value(state, op_token, right)}
     }
     if parser_report_step_habit(state) -> return Stmt.Expr{expr: left.expr}
-    if named && !parser_named_line_does_work(state, left.expr) {
+    // In an arm of a one-line `if` that a joining `;` ends, that `;` is the
+    // report (E0448), not the value the arm computes.
+    if named && !parser_named_line_does_work(state, left.expr) && !parser_arm_before_joining_semicolon(state) {
         parser_add_error(state, expr_span(left.expr), "this line computes a value but doesn't do anything with it", "only calls, bindings, assignments, and `return` are allowed here", "use the value, e.g. `x: ...` or `print(...)`")
         return Stmt.Expr{expr: left.expr}
     }
-    if !named && !parser_at_callable_tail(state) {
+    if !named && !parser_at_callable_tail(state) && !parser_arm_before_joining_semicolon(state) {
         parser_report_not_a_statement(state, start)
         return Stmt.Expr{expr: left.expr}
     }
