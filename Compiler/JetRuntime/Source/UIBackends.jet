@@ -1,64 +1,6 @@
-// The Rect/Size/InputEvent records core.ui's backends cross the runtime
-// with, a web build's scene, and the click slots of buttons and the drop and
+// A web build's scene, and the click slots of buttons and the drop and
 // change slots of text inputs. The backends themselves are Jet
-// (Core/UI/UI.jet). Rect and Size are CoreLayoutABI.jet carriers.
-
-// ---- Rect / Size / InputEvent records -------------------------------------
-
-#Export(c) jet_rt_record_new_jet_rect: fn(x: Float, y: Float, width: Float, height: Float) -> I64 {
-    ui_rect_new(x, y, width, height)
-}
-
-#Export(c) jet_rt_handle_drop_jet_rect: fn(value: I64) { geometry_drop(value, UI_RECT_BYTES) }
-
-#Export(c) jet_rt_record_new_jet_size: fn(width: Float, height: Float) -> I64 {
-    result: jet_rt_alloc(UI_SIZE_BYTES, I64{8})
-    ui_float_store(wrapping(result + UI_SIZE_WIDTH), width)
-    ui_float_store(wrapping(result + UI_SIZE_HEIGHT), height)
-    result
-}
-
-#Export(c) jet_rt_handle_drop_jet_size: fn(value: I64) { geometry_drop(value, UI_SIZE_BYTES) }
-
-#Export(c) jet_rt_record_get_jet_size_width: fn(value: I64) -> Float {
-    ui_float_at(wrapping(value + UI_SIZE_WIDTH))
-}
-
-#Export(c) jet_rt_record_get_jet_size_height: fn(value: I64) -> Float {
-    ui_float_at(wrapping(value + UI_SIZE_HEIGHT))
-}
-
-// Key borrows its code; Resize takes the Size record over (its two lanes
-// move inline, UiEvents.jet's layout).
-#Export(c) jet_rt_record_new_jet_input_event_key: fn(code: I64) -> I64 {
-    result: jet_rt_alloc(UI_EVENT_BYTES, I64{8})
-    ui_carrier_store(wrapping(result + UI_EVENT_KIND), I64{0})
-    ui_carrier_store(wrapping(result + UI_EVENT_FIRST), jet_rt_string_clone(code))
-    ui_carrier_store(wrapping(result + UI_EVENT_SECOND), I64{0})
-    result
-}
-
-#Export(c) jet_rt_record_new_jet_input_event_resize: fn(size: I64) -> I64 {
-    result: jet_rt_alloc(UI_EVENT_BYTES, I64{8})
-    ui_carrier_store(wrapping(result + UI_EVENT_KIND), I64{1})
-    ui_carrier_store(wrapping(result + UI_EVENT_FIRST), ui_carrier_word(wrapping(size + UI_SIZE_WIDTH)))
-    ui_carrier_store(wrapping(result + UI_EVENT_SECOND), ui_carrier_word(wrapping(size + UI_SIZE_HEIGHT)))
-    geometry_drop(size, UI_SIZE_BYTES)
-    result
-}
-
-ui_float_at: fn(address: I64) -> Float { rt_f64_from_bits(ui_carrier_word(address)) }
-
-ui_float_store: fn(address: I64, value: Float) { ui_carrier_store(address, rt_f64_bits(value)) }
-
-ui_rect_new: fn(x: Float, y: Float, width: Float, height: Float) -> I64 {
-    result: jet_rt_alloc(UI_RECT_BYTES, I64{8})
-    ui_float_store(wrapping(result + UI_RECT_X), x)
-    ui_float_store(wrapping(result + UI_RECT_Y), y)
-    ui_float_store(wrapping(result + UI_RECT_WIDTH), width)
-    ui_float_store(wrapping(result + UI_RECT_HEIGHT), height)
-    result
-}
+// (Core/UI/UI.jet).
 
 // ---- web scene --------------------------------------------------------------
 

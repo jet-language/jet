@@ -28,7 +28,7 @@ PLAIN_RANGES: "CharDebugPlain.ranges"
 
 ORACLE_SHA256: "4df07a213d8bc130872d2b1358ef8cd04f9bba01a02db5edac23995e99427b72"
 
-WITNESSES: "char-debug, choices, cursor, events, form-action-error, view-snapshots"
+WITNESSES: "char-debug, choices, cursor, form-action-error, view-snapshots"
 
 OUTPUT_MISMATCH: "byte-exact output mismatch"
 
@@ -82,9 +82,6 @@ variant_stops: fn(operand: String, golden: String, modes: [String], exit_gap: St
 
 // The witness a name selects; an unknown name has no cases.
 witness: fn(key: String) -> Witness Never! {
-    if key == "events" {
-        return plain("UI_EVENTS_WITNESS", "UIEventsWitness.stdout", "UI events: real-provider ownership byte-identical")
-    }
     if key == "form-action-error" {
         return plain("UI_ACTION_ERROR_WITNESS", "UIFormActionErrorWitness.stdout", "UI ActionError: real consumed producers and transitive ownership byte-identical")
     }
