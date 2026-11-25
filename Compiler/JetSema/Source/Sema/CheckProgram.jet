@@ -2129,8 +2129,10 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     // Unused-binding lints and E0514 address authored code; a
     // compiler-generated body (derived codec scaffolding) binds every slot it
-    // may need.
-    if !check.context.compiler_generated && stand_in == None {
+    // may need. A body with an unresolved name gives neither: the reads and
+    // writes under that name's expression go unrecorded, so a used binding
+    // would look unread and a reassigned `:=` unwritten.
+    if !check.context.compiler_generated && stand_in == None && !sema_has_unresolved_name_since(diagnostics, diagnostics_start) {
         sema_ownership_finalize_references(check.state, diagnostics)
         sema_ownership_report_never_written(check.state, diagnostics)
     }
