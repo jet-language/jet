@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7042,
-    "rev": 114393,
+    "rev": 114396,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -78460,7 +78460,7 @@
       "id": "c05bs1oq",
       "num": 7034,
       "title": "How failure points read in source: decide D-FAIL-VISIBLE2 and finish the failure-point tools",
-      "body": "Owner asked on 2026-11-25 for greenfield proposal item P36 (explicit failure marks by default, reopening D-FAIL-VISIBLE1=A) to go to ballot D-FAIL-VISIBLE2. The drafting pass measured one added mark per 12-17 lines in code that can fail and found five defects in today's failure-point tools (rows 3-5), which are fixed whichever option wins; #3838, which built the tools, is done. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P36 (master checkout, not yet on dev). Owner direction (2026-11-25): reframe D-FAIL-VISIBLE2 under the same rule as the call marks of D-CALLSITE-MARK3 (#7037): jet fmt inserts every required mark with no manual work; recount the cost (the fresh review found 311-454 added marks in Examples against the draft's 785) and post it.",
+      "body": "Owner asked on 2026-11-25 for greenfield proposal item P36 (explicit failure marks by default, reopening D-FAIL-VISIBLE1=A) to go to ballot D-FAIL-VISIBLE2. The drafting pass measured one added mark per 12-17 lines in code that can fail and found five defects in today's failure-point tools (rows 3-5), which are fixed whichever option wins; #3838, which built the tools, is done. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P36 (master checkout, not yet on dev). Owner direction (2026-11-25): reframe D-FAIL-VISIBLE2 under the same rule as the call marks of D-CALLSITE-MARK3 (#7037): jet fmt inserts every required mark with no manual work; recount the cost (the fresh review found 311-454 added marks in Examples against the draft's 785) and post it. Ballot D-FAIL-VISIBLE2 reframed under the jet-fmt-inserts rule and posted 2026-11-25 (reviewed by ReviewFailVisible3); its review is Docs/Audits/2026-11-25-failure-marks-review.md (in the master checkout, to land on dev). Recount: about 27,000 marks repository-wide, written by jet fmt; the 311-454 Examples range is superseded (measured 1,054 in Examples).",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G2",
@@ -78473,7 +78473,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Pip",
+          "text": "Posted the reframed D-FAIL-VISIBLE2 to the owner."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -78535,7 +78541,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T18:01:35.588Z",
-      "updated": "2026-11-25T18:23:39.663Z",
+      "updated": "2026-11-25T23:55:39.364Z",
       "updatedBy": "Pip"
     },
     {
@@ -143486,6 +143492,246 @@
       "created": "2026-11-25T23:13:48.366Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-25"
+    },
+    {
+      "id": "D-FAIL-VISIBLE2",
+      "cardId": "c05bs1oq",
+      "group": "language",
+      "title": "Calls that pass a failure up are written with ?, and jet fmt writes the marks",
+      "situation": "A Jet call that fails passes the failure up, and the function holding it returns early, with nothing written at the call. Only the editor's faint `?`, `jet review` and an opt-in setting show those exits, so a pull request on the web and a model reading files see none. On 2026-11-25 you ruled for call marks that `jet fmt` writes every required mark, and asked that failures be weighed under the same rule. The old case against required marks was the work of writing one every 12 to 17 lines, and under your rule tools do that work. We recommend that every call that can pass a failure up is written `call()?`, inserted by the same checked fmt pass as the call marks.",
+      "gist": "Should every call that can pass a failure up be written with `?`, with `jet fmt` writing the marks?",
+      "lesson": "A call that fails passes the failure up, so the function holding it returns early too. Today nothing is written there. Under A the call reads `files.read(path)?`, the compiler checks every mark, and `jet fmt` and the editor write them. A marked call runs exactly like an unmarked one; the mark only shows the exit.",
+      "explainer": "## Read the example\n\n`files.read(path)` can fail. Today the call reads `files.read(path)`, and nothing in the text says the function may stop there. Under A it reads `files.read(path)?`, and the compiler refuses the plain call with a fix that writes the mark.\n\n## What needs no mark\n\nA call whose failure is handled, with `??`, a match or `.drop(…)`, needs no mark, because the failure never leaves. Neither does a call that cannot fail, a call the compiler wrote, or a call whose only failure is a refused allocation.\n\n## Who types the marks\n\nNobody has to. `jet fmt`, `jet fix`, the editor's quick fix and fix-on-save write every missing mark from the checked program. They also delete a `?` on a call that can no longer fail, so every mark stays true.",
+      "story": "Sam reviews a pull request on a web page. Between two ledger edits sits `save(order)`, and today nothing shows that it can return early and leave the second edit undone. Under A the line reads `save(order)?`, so the early exit is in the diff.\n\nThe author never typed the mark. Saving the file in the editor wrote it, and `jet fmt` would have too. A week later `price(item)` starts reading a file, and the same change gains a `?` at each caller that now passes that failure up.",
+      "inWild": "// Rust: `?` returns the error early, and is written at every such call.\n// https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html\nlet text = fs::read_to_string(path)?;\n\n// Swift: `try` marks each expression that can throw, and a loop whose step can throw.\n// https://docs.swift.org/swift-book/documentation/the-swift-programming-language/errorhandling/\nlet text = try String(contentsOfFile: path)\nfor try await line in url.lines { print(line) }",
+      "detail": "## What changed, and what this ballot settles\n\nYour 2026-11-25 ruling on call marks (D-CALLSITE-MARK3=A) set one rule: `jet fmt` inserts every required mark from the checked compile. Nobody writes a mark by hand at an existing call. You asked that proposal P36, which reopens D-FAIL-VISIBLE1, be weighed under that rule.\n\nThe earlier draft kept marks optional mainly because writing them is work: a mark every 12 to 17 lines in code that can fail. Under the rule that work moves to tools, so this ballot rebuilds the recommendation from what remains. Option A requires the mark and shares the call marks' checked fmt pass, quick fix and fix-on-save. It designs no second pass (I8).\n\nOption B is today's rule, kept as a fair choice with its unbuilt tools finished. Option C mirrors the call-mark ballot's library-only option. The letters follow the recommendation, so the flip P36 describes is A.\n\nCited lines are at dev e3bf920e00a (2026-11-25). Probes used the installed jet a0.0.46, built from c137227f924, in a scratch directory since deleted.\n\n## The rule under A, exactly\n\n- A call that can pass a failure up is written `call()?`, or `call()?(text)` to add one context frame (S7, D-FAIL-CTX1). Both are the mark; the second also adds text to the report.\n\n- A missing mark is E0434 `Jet.FailureMarkRequired`, a default error whose Safe edit writes the mark. `#Policy(failures: .Explicit)` is deleted, so nothing turns the rule on or off.\n\n- A call used as a receiver is written `(call()?).field`, because `call()?.field` is an optional chain. The Safe edit writes the parentheses, as it does today. A probe of `files.read(p)?.count_bytes()` gave E0047, and the fix wrapped the call.\n\n- A call whose failure is handled owes no mark: `call() ?? fallback`, a match with an `.Err` arm, an `== .Ok(…)` test, or `.drop(\"reason\")`. The failure never leaves the function there.\n\n- A call of a function that cannot fail owes no mark. Which calls can fail is the failure solve's answer, the same fact E0434 reads today (Compiler/JetSema/Source/Sema/FailureMarks.jet:119-145).\n\n- A marked call checks and runs exactly as an unmarked one, as now (Docs/Spec/spec.md:2058-2065). Marks show exits; they never change them. Failures still pass up by themselves under D-FAILURE-FOUNDATION1.\n\n## Each remaining downside, and how A removes it\n\nStale marks. Today a mark on a call that cannot fail is accepted (spec.md:2063-2064). A probe confirmed it: `twice(2)?` on a function that cannot fail checks clean under the setting. Under A a bare `?` there is a new warning, `Jet.UnusedFailureMark`, whose Safe edit deletes it. The shared fmt pass applies that edit, so when a callee stops failing, the next fmt removes the marks at its callers.\n\nA `?(text)` on a call that cannot fail warns too, but fmt keeps it, because it holds words someone wrote. `jet fix` and the quick fix delete it. Both are warnings, not errors, so a callee that stops failing never breaks its callers' build.\n\nChurn up the call chain. When a leaf newly can fail, every function above it whose failures are inferred can fail too, and each call on the way owes a mark. The next `jet fmt`, fix-on-save or `jet fix` writes all of them in the same change, from one compile per package. So the diff shows exactly the new exits, which is the point of the rule.\n\nThe chain stops at a call that handles the failure, and at a function whose written contract excludes it; there the compiler already demands handling. `jet review` keeps its `newly can fail` flag (Compiler/JetCLI/Source/CLI/Review.jet:1590-1682), so a reviewer sees which leaf caused the added marks.\n\nA published package also needs acknowledgment before a public function newly fails (D-FAIL-PUBSIG1). A dependent package that upgrades gets E0434 until its own fmt runs, which is one command, not work at each call.\n\nAllocation failure. D-ALLOC-FAIL1=C (ratified 2026-11-11, not built) makes a refused allocation an ordinary failure, `AllocError`, that passes up by itself. If it counted, nearly every call that builds a list or a string would need a mark. So E0434 leaves `AllocError` out when it asks whether a call can fail, and a call that can fail only that way owes no mark.\n\nA mark written on such a call is accepted and is not stale, because the call can still leave the function. So the stale-mark warning fires only where a call cannot fail at all, `AllocError` included, and fmt never deletes a mark that shows a real exit.\n\nThat is an honest limit: a refused allocation can still leave a function with no mark in the text. Swift's design note says the same of any language whose allocation failures are recoverable (swift/docs/ErrorHandlingRationale.md). Literals and string building allocate with no call to mark, so no spelling could cover them. A call that can also fail some other way is marked, and its mark covers the allocation too.\n\nLoop headers. Under D-ITERATOR-FAIL1=A, `loop x in source` calls `next` at each step, and a failure from `next` leaves the function from the header. Today that path skips E0434. The header's `next` is a generated method call (Compiler/JetSema/Source/Sema/Statements/ForIn.jet:241-298, node id `AST_NODE_GENERATED` at 284), and FailureMarks.jet:124 exempts generated nodes.\n\nA `?` after the source cannot mark the step, because it marks the source's own call. So A adds one spelling: `loop? x in source` marks a header whose step can fail, as Swift writes `for try await x in sequence`. E0434 reports at the header with a Safe edit that writes `loop?`, and a `loop?` whose step cannot fail is the stale-mark warning.\n\n`loop?` gets a registry row beside `loop` (Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:503-505, I7), and the editor grammars are regenerated from it. `results()` keeps per-item recovery and needs no mark, because its step does not fail.\n\nStyle selectors. Under D-FORMAT-TRAIT1=A, `{x:Hex(2)}` calls a style trait method. A user implementation that can fail passes its failure up (Compiler/JetSema/Source/Sema/Expressions.jet:2993-2999), and today the string has no place for a mark. A lets `?` or `?(text)` follow the selector inside the braces: `{x:Hex(2)?}`.\n\nThe selector parser (Compiler/JetParser/Source/Parser/Expressions.jet:1450-1482) accepts the mark, and the Safe edit lands after the selector. The selector rail's registry row (Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:173-181) gains the trailing mark. A plain call inside braces needs no new rule: `\"{load(p)?}\"` is an ordinary marked call.\n\nThese are the only call roots that pass a failure up. Operators, indexing and fields never do (Expressions/Control.jet:526-537), so no other spelling is needed.\n\nGenerated calls. The `#CLI` entry wraps the user's `run(args: T)` in a generated function whose source is parsed at Compiler/JetSema/Source/Sema/Registration/CLIEntry.jet:165. Only items with an `external_type` get `compiler_generated` (CLIEntry.jet:174-176), so the wrapper's call of `run` reaches E0434.\n\nOn a0.0.46 that call got E0434 with no edit, at a line past the end of the file. The count saw it in 7 Examples/Network/Browser programs and 15 Tools/Gauntlet entries, and a 12-line probe reproduced it.\n\nUnder A a call the compiler wrote owes no mark, because nobody reads it. The test cannot live in `parse_generated_source`: it also parses embedded Core (Compiler/JetParser/Source/Parser/Entry.jet:164-170), so a bit set there would excuse every Core call.\n\nJetIR already names the generated functions: `__jet_cli_run` and the synthetic decode, merge and enum bodies (Compiler/JetIR/Source/BuildExpr.jet:7115-7119). That test moves to one shared place, and E0434 and `jet review` skip calls in those functions. It cannot reuse `compiler_generated`, which also stops automatic propagation (Expressions/Control.jet:1440-1444). The user's own `run` body is marked like any body.\n\nLambdas. A lambda's own calls are marked like any body's, and the call that runs a failing lambda is marked too: `paths.map(fn(p: String) { size(p)? })?`. Today `jet review` skips every point inside a lambda (Review.jet:1520-1537). Under A those points are in the text, and the review lists them under the lambda.\n\nScripts and `jet eval`. `run: fn()` can fail by default (D-FAIL-EXIT1), and a script's lines are its run body, so they carry marks too. The error prints the marked line, and `jet fmt` fixes a script file.\n\nTargets. A callee can fail on one target and not on another, through a `#Target` impl or an `#if #build.target.os` arm (spec.md:1451-1471). If marks followed one machine's check, fmt on Linux could add a mark that fmt on Windows deletes. So a call owes a mark when its callee can fail on any target the package builds for, and a mark is stale only when it fails on none.\n\nWhether the failure solve joins the targets today was not checked [inference]; the build card proves it with a two-target case.\n\nCode that no compile checks is covered by the migration below.\n\n## How fmt and the editor write the marks\n\nA designs no pass of its own. D-CALLSITE-MARK3=A turns the shared `jet_cli_fmt_policy_marks` machinery (Compiler/JetCLI/Source/CLI/Host.jet:4199-4269) into one checked-insertion pass for call marks, copies and failures. That pass lays out first without compiling, then inserts marks from one compile per package; an error blocks only the marks it touches.\n\nToday failure marks come only from `jet fmt --explicit-failures` (Host.jet:4286-4290). It prepends the setting and compiles each file twice (Host.jet:4205-4213). Under A, failures are a default part of plain `jet fmt` and the flag goes. The ordinary check already carries every E0434 Safe edit, so nothing is prepended.\n\nThe pass gains one thing for failures: it also applies the Safe deletion of a stale bare `?` or `loop?`. That amends D-CALLSITE-MARK3's sentence that fmt inserts marks only, for failure marks alone; its `^` rule is unchanged. `jet fmt --check` runs the same path, so CI reports a missing or stale mark as a dirty file.\n\nIn the editor, E0434's quick fix comes from its Safe edit (Compiler/JetLSP/Source/LSP/CodeActions.jet:28-80). D-CALLSITE-MARK3's new `source.fixAll` applies every Safe mark edit from the server's last check, and fix-on-save uses that check, so it never compiles again.\n\nThe faint `?` hints and their second compile are deleted, because the text now shows the marks. They live in Compiler/JetCLI/Source/CLI/LSP.jet:91-132, and in JetLSP Check.jet:74-81, Server.jet:71-72 and Hints.jet:40-44.\n\nMark placement must be exact before any of this runs. The tree keeps no `)`, so FailureMarks.jet:147-195 guesses a call's end from its last argument. On a0.0.46, `each_size([String]{\"a.txt\"})` became `each_size([?String]{\"a.txt\"})`, and a `map(fn(p: String) {…})` call got `fn?(`. The parser records each call's `)`, and the edit lands after it.\n\n## Code that no compile checks\n\nThe repository holds 853 Jet fences in Markdown, 433 `.template` files and about 3,059 `.stderr` snapshots that quote source. Test strings hold Jet too. Those counts were taken for D-CALLSITE-MARK3. A adds a `fail-mark2` row to LANGUAGE_REWRITES (Compiler/JetFoundation/Data/Syntax/Spellings.jet:112) beside the call marks' row.\n\nThe row runs the checked insertion on every runnable fence, checked the way Tests/Guards/doc_blocks.jet checks them, and on each template as the case runner instantiates it. Snapshots are regenerated. A fragment that does not check is listed with its path; that residue is counted when the row is built, not measured yet.\n\nThe seed compiler accepts a call's `?` only under the setting, and the compiler builds itself with the seed. So the cutover first writes `#Policy(failures: .Explicit)` into each package and lone file, inserts the marks, and then flips the default. The setting lines are deleted once a seed with the new default is published.\n\n## How many calls gain a mark\n\nTwo methods, each reproducible with a script kept beside this ballot: D-FAIL-VISIBLE2.count-compiled.mjs and D-FAIL-VISIBLE2.count-static.mjs.\n\nMeasured. The installed a0.0.46 checks only its own syntax, so the measurement uses Examples, Tools and Tests at c137227f924, the commit it was built from. Each file is checked as written, and a file with any error is left out. Then the setting goes on its own line after a leading `#!` line or an inline `package:` header, else at the top. Each E0434 in that file is one call A marks.\n\nEach check ran alone in a 4 GiB memory scope. Tests were sampled: the 400 paths with the smallest SHA-1 of their path, of 14,484 files.\n\n```text\nMeasured with a0.0.46 at c137227f924\ntree      checked files   lines    marks  per 1,000 lines  files with a mark      receiver  no edit\nExamples  992 of 1,058   40,976    1,054       25.7        242 (one per 12.4 lines)    23        7\nTools     707 of 894    122,726    2,250       18.3        168 (one per 33.5 lines)   154       15\nTests     254 of 400      4,833      103       21.3         33 (one per 8.6 lines)      0        0\n\nreceiver: the edit wraps the call as (call()?).  no edit: the generated run(args: T) call.\nleft out: files with errors as written (Tests holds many on purpose) and 2 Examples files\nthat gained other errors under the setting.\n```\n\nWhy the earlier figures differ. The draft's 785 came from 726 Examples files. The stopped review's 311 came from 902 files, with the setting placed above `package:` headers, which broke every file that opens with one. Placed after the header, 992 files check and give 1,054, close to the draft's 1.08 marks per file. The card's 311-454 range is superseded.\n\nEstimated. a0.0.46 cannot check today's syntax, nor Compiler, Core or Jetpack one file at a time. So a static script counts every tree on dev 72bd6f6904c. It blanks comments and string text, keeps interpolations, and classes each `name: fn(…)` by its written contract: `Never!`, another `E!`, or none.\n\nIt solves the inferred contracts to a fixed point: a body that builds `Err(…)` or holds an unhandled failing call can fail. A call counts as certain when every visible declaration of its name can fail and nothing handles it. A method call weighs every method of that name; `alias.f(` on a Core module alias weighs that module.\n\nCalibration. On the measured files, the certain count found 2,545 of the 3,407 measured marks and predicted 3,378, so precision is 0.753 and recall 0.747. By tree: Examples 0.794 and 0.649, Tools 0.737 and 0.802, Tests 0.851 and 0.553. Predicted and measured totals agree within 1 percent, so the totals below need no scaling.\n\n```text\nEstimated on dev 72bd6f6904c (.jet files except package.jet)\ntree      files     lines     certain  per 1,000 lines  possible  receiver  ?(\"text\") now  ?? now\nCompiler  1,905    984,342     9,323        9.5          33,350      197          0      22,524\nCore        306    318,082     2,933        9.2           7,021       13          2       7,744\nJetpack     774    237,172     7,818       33.0          13,268       68          0      12,799\nTools       916    144,742     2,734       18.9           8,487       80         14       8,512\nExamples  1,084     44,376       921       20.8           2,466       28          3       2,631\nTests    14,844    299,860     3,172       10.6          16,633       46         47      14,660\ntotal    19,829  2,028,574    26,901                     81,225      432         66      68,870\n\npossible: one visible declaration of the name can fail (precision about 0.3, not a bound).\n?(\"text\") now and ?? now: plain text counts of written context marks and fallbacks.\n```\n\nRead about 27,000 as the size of the cutover. Calibrated trees are good to roughly a quarter either way. Compiler, Core and Jetpack are not calibrated, because a per-file check cannot reach them; their method names collide most, so the Compiler figure could be off by half [inference]. Most Compiler helpers are written `Never!`, which is why its rate is low.\n\nThe review reran the static script and got 26,901 again. It also measured 18 fresh files, 12 from Examples and 6 from Tools: 260 marks, of which the script predicted 254.\n\nThe earlier draft extrapolated 36,000 to 53,000 from 2 percent of the lines, assuming every tree failed like Examples. For scale, the call marks changed about 105,000 sites.\n\n## Probes on a0.0.46\n\n- Option A's code and option B's code, each under the setting where it marks, check clean and print 12 with a six-byte a.txt.\n\n- `twice(2)?` and `twice(3)?(\"doubling\")` on a function that cannot fail check clean under the setting. Outside it, the `?(text)` form is accepted too.\n\n- `files.read(p)?.count_bytes()` is E0047, the optional chain; the E0434 edit for a receiver writes `(` and `?)`.\n\n- `jet fmt --explicit-failures` on `each_size([String]{\"a.txt\"})` and on a `map(fn(p: String) {…})` call wrote `?` inside the literal and the lambda, and the output failed to parse.\n\n- A `#CLI` program whose `run(args)` body can fail got E0434 on `run` at line 12 of an 11-line file, with no edit.\n\n- Read from code only: a0.0.46's `next` cannot fail (Compiler/Prelude/Traits.jet:302 at c137227f924), and it predates user style selectors (E0914 on `{n:Shout}`). Loop headers and selectors follow today's dev code.\n\n```text\nCutover if A wins (dev e3bf920e00a, paths under the repository root)\n1. Registry: CoreSurface.jet:205-208 OP_TRY_SUFFIX says `?` marks a call that passes a failure\n   up and `?(text)` marks it with a frame. A `loop?` row joins KW_LOOP (CoreSurface.jet:503-505),\n   and the selector rail row (EffectsSurface.jet:173-181) gains its trailing mark.\n   Tools/Editors grammars regenerate.\n2. Parser: Compiler/JetParser/Source/Parser/Expressions.jet:2298-2319 keeps `call()?` and\n   `call()?(text)`; each call records its `)`; `loop?` parses before a header; the selector rule\n   (1450-1482) takes `?` and `?(text)`.\n3. Sema: E0434 runs at every propagating call root: Expressions/Control.jet:1423-1424 loses its\n   setting test. ForIn.jet:241-298 reports a failing header; Expressions.jet:2993-2999 a failing\n   selector. FailureMarks.jet:147-195 uses the recorded `)`. AllocError is left out of the\n   failure set E0434 reads, and that set joins every target the package builds for. A bare `?`\n   or `loop?` on a call that cannot fail at all is the new warning Jet.UnusedFailureMark with a\n   Safe deletion; a mark on a call that fails only with AllocError stays.\n4. Setting deleted: FailureMarks.jet:32-72 and 89-113; failures_explicit in Sema/Scopes.jet:1237,\n   1278, 1366, 2425, 2461, 2526, 2826, 2854, 3422 and 3488, Sema/Statements.jet:1432 and\n   Sema/Expressions.jet:8325. PolicyKey.Failures in JetFoundation/Source/Policy/Policy.jet:31,\n   60, 67, 223, 320, 409 and 480; Parser/Declarations/Policies.jet:167, 175, 205 and 219-220;\n   JetParser Formatter/Statements.jet:182; Facts/SyntaxCodec.jet:4281 and 4311 (tag 23\n   retired); AST/Statements.jet:111. A written #Policy(failures: .Explicit) becomes a teaching\n   error whose edit deletes it.\n5. Generated calls: the generated-function test in JetIR's ir_generated_fragment_function\n   (Compiler/JetIR/Source/BuildExpr.jet:7115-7119) moves to one shared place that JetIR,\n   FailureMarks.jet:124 and Review.jet read. parse_generated_source gains no bit, because\n   embedded Core parses through it too.\n6. Diagnostics: the E-ERR-PROPAGATE for a mark after a call (FailureMarks.jet:103-106;\n   Compiler/Prelude/Diagnostics.jet:7030-7052, BareQuestionMark) is deleted; the parser's\n   E-ERR-PROPAGATE for `?` after a non-call stays (Parser/Expressions.jet:2312-2313). E0434\n   (Diagnostics.jet:7569-7592; JetFoundation/Source/Registry/DiagnosticRows.jet:6659-6662) drops\n   the setting from its meaning, what, why, safety reason and fix, and names jet fmt.\n   DiagnosticRows.jet:6155-6157, Tests/diagnostics_census.tsv and\n   Docs/Site/Dist/e/Jet.FailureMarkRequired are rebuilt.\n7. CLI: --explicit-failures is deleted: Host.jet:4164 and 4286-4290, Front.jet:360-361 and 2959,\n   JetFoundation/Source/Registry/CLICommands.jet:1060, Tests/CLI/command_settings_census.tsv:1461,\n   and the help, man and completion snapshots. The failures arm runs in plain jet fmt.\n8. Editor: LSP.jet:10-11 and 91-132, JetLSP Check.jet:74-81, Server.jet:71-72, Hints.jet:40-44,\n   the nine Compiler/JetLSP/Tests/LSP checkers that implement failure_marks, and\n   lsp_inlay_hints_mark_failure_propagation.case go. The quick fix and source.fixAll come with\n   D-CALLSITE-MARK3.\n9. Review: jet review and jet diff keep the failure lists and the newly-can-fail flag\n   (Review.jet:1477-1682). Points inside lambdas list under the lambda (1520-1537), and a\n   failing loop header is a point (1547-1559).\n10. Tests: Tests/UI/failures_explicit_policy{,_block,_function}.jet and .stderr,\n    failures_explicit_policy.fixed.jet, bare_call_question_before_paren and\n    Tests/Cases/Fmt/fmt_inserts_failure_marks.case are rewritten. New UI cases cover the stale\n    mark, a kept mark on an AllocError-only call, `loop?`, `{x:Hex(2)?}`, the generated run call,\n    a callee that fails on one target only, and `)` placement, and one executable example with\n    goldens on every tier (card #7034 c6).\n11. Docs: spec.md:2050-2065, 5926 and 5943-5944; spec.md:3865-3876 gains that AllocError owes no\n    mark; Docs/Spec/Reference/cli.md:520-524 and 1395-1397; syntax-decisions.md S7 and the\n    D-FAILURE-FOUNDATION1 entry; the agent primer line Compiler/JetCLI/Source/CLI/InspectB.jet:405.\n12. Migration: the fail-mark2 row in LANGUAGE_REWRITES (Spellings.jet:112), as above.\n```\n\n```text\nCutover if B (keep) wins\n1. jet review --annotations github|auto writes every new failure point to the job summary\n   ($GITHUB_STEP_SUMMARY, up to 1 MiB per step) and the first ten as ::warning annotations,\n   GitHub's cap per step. It reuses jet budget's output (BudgetMeasure.jet:603-634). Jet's own\n   repository has no hosted CI until D-SEED-DIST1 (AGENTS.md:736-737).\n2. Review.jet:1520-1559 lists points inside lambdas under their own heading, and failing loop\n   headers.\n3. The parser records each call's `)`; FailureMarks.jet:147-195 uses it. This fixes\n   jet fmt --explicit-failures and the editor hints together.\n4. Generated calls owe no mark, as A item 5. Under the setting a failing header takes `loop?` and\n   a failing selector `{x:Hex(2)?}`, as A items 1-3.\n5. A stale mark under the setting becomes the warning of A item 3.\n6. The agent primer line (InspectB.jet:405) says a plain call may return early and names\n   jet fmt --explicit-failures --diff, which writes nothing, as the marked view.\nAmends D-ITERATOR-FAIL1=A and D-FORMAT-TRAIT1=A (the two new marks); D-FAIL-VISIBLE1=A stands.\n```\n\n```text\nCutover if C (library code only) wins\nAs A, except E0434 fires only in library source, a classification sema and fmt both gain: the\nfiles jet publish ships apart from entries, tests and examples. Today's only library test\n(jet_cli_fmt_is_library_source, Host.jet:4349-4366) knows just Core and the Prelude. Elsewhere\na written mark is checked and a stale one warns. The faint hints and their second compile stay\nfor other files, and the setting is deleted. Moving a function between an app and a library\nchanges its spelling.\nAmends what A amends, with D-FAIL-VISIBLE1=A reversed for library code only.\n```\n\n## Card #7034\n\nCriterion c3 (placement inside a typed literal or lambda) holds under every option, through the recorded `)`.\n\nCriterion c4 says `jet review` and `jet diff` list points inside lambdas and loop headers, and E0434 covers a loop header. The earlier draft left headers unmarked, which contradicted that clause. This ballot withdraws that rule: under A, and under B's setting, E0434 covers a failing loop header and its mark is `loop?`. The clause stands as written.\n\nCriterion c5 asks for pull-request annotations, as D-FAIL-VISIBLE1=A promised, and no E0434 without a fix on a generated `run(args: T)` call. Under A the marks are in the diff, so the annotation half is dropped and the generated-call half stands. Under B both halves stand. Criteria c1, c2 and c6 stand.\n\n## Decisions this amends if A wins\n\n- D-FAIL-VISIBLE1=A (2026-09-30) is reversed: marks are required, tools write them, and the setting, the flag and the faint hints go.\n\n- D-FAILURE-FOUNDATION1=A: failures still pass up by themselves, but the call is marked. Its bare call `?`, kept as a diagnostic only, becomes the mark.\n\n- S7 and D-FAIL-CTX1=A: `?(text)` is still no second propagation operator; it becomes the framed form of the required mark.\n\n- D-ITERATOR-FAIL1=A: a header whose step can fail is written `loop?`.\n\n- D-FORMAT-TRAIT1=A: a selector whose method can fail takes `?` inside the braces.\n\n- D-ALLOC-FAIL1=C keeps its behavior and gains one sentence: a failure that is only `AllocError` owes no mark, and a mark written there stays.\n\n- D-CALLSITE-MARK3=A: its shared pass applies failure marks in plain fmt, and deletes a stale bare `?` or `loop?`. Its sentence that fmt inserts marks only gains that exception, and its note that `--explicit-failures` is kept no longer holds.\n\n- D-FAIL-PUBSIG1=A and D-FAIL-EXIT1 stand.\n\n## History and what was left out\n\nJet once required `?` at every call that passed a failure up. D-FAILURE-FOUNDATION1=A (2026-08-25) made plain calls propagate. D-FAIL-VISIBLE1=A (2026-09-30) chose tools plus an opt-in setting, because required marks add a mark to one of the most common operations and collide with `?.`.\n\nThe first reason is the typing cost your ruling removes. The second remains as the receiver form `(f()?).x`, which fmt writes: 23 of 1,054 measured marks in Examples and 154 of 2,250 in Tools. No code in Core, Examples, Tools or Jetpack opts into the setting today.\n\nConsidered and left out. Marks only where a failure leaves a public function: declarations are public by default (spec.md:4052), so this is nearly A, and `priv` would silently drop marks. Marks only on calls into another package still mark every Core I/O call. Hints only, as the call-mark ballot's C, is B without the setting.\n\nWhat a mark does not buy. A mark changes no behavior, and a half-done update like the story's is still possible. `#Transact` checks that case: it rolls back `Shared` writes on every exit, including a passed-up failure, and refuses irreversible effects inside (spec.md:2592-2600, E0746).\n\nResearch. Rust, Swift and Zig require a mark at each call that passes an error up, and Swift marks a loop whose step can throw. Go writes the check out by hand. Kotlin and Java mark nothing at the call. Gleam deprecated its `try` keyword in 2023 for `use` with `result.try`. The comparisons give sources.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Mark every call that passes a failure up; fmt writes the marks",
+          "detail": "A call that can pass a failure up is written `call()?`, or `call()?(text)` to add a context frame. A missing mark is E0434, a default error with a Safe fix. `jet fmt`, `jet fix`, the editor's quick fix and fix-on-save write every mark, through the one checked pass the call marks already use. A `?` on a call that cannot fail warns, and fmt deletes it.\n\nBeginner path: write `files.read(path)`, see the error, then save or run `jet fmt`. Expert path: type the `?` directly; `jet review` still names the function that newly can fail.",
+          "technical": "E0434 runs at every propagating call root with no setting. The setting, `--explicit-failures`, the editor's second compile and the parse error for a call's `?` outside the setting are deleted. A refused allocation and a call the compiler wrote owe no mark. A loop header whose step can fail is written `loop? x in source`, and a failing style selector `{x:Hex(2)?}`. The parser records each call's `)`, so every edit lands after it.",
+          "code": "use files: core.files\n\nsize: fn(path: String) -> Int {\n    text: files.read(path)?\n    n: (files.read(path)?).count_bytes()   // a receiver is wrapped\n    text.count_bytes() + n\n}\n\ntotal: fn(paths: [String]) -> Int {\n    ^sum: 0\n    loop path in paths -> sum += size(path)?\n    sum\n}\n\nrun: fn() { print(total([String]{\"a.txt\"})?) }"
+        },
+        {
+          "key": "B",
+          "name": "Keep today's rule: tools show exits, and teams may require marks",
+          "detail": "Failures keep passing up with no mark (D-FAIL-VISIBLE1=A). The editor draws a faint `?`, `jet review` and `jet diff` list each call that can pass a failure up, and `#Policy(failures: .Explicit)` makes marks required. The unbuilt part of that rule is finished: pull-request summaries, points inside lambdas and loop headers, correct mark placement, and a marked view for models.\n\nBeginner path: nothing to write. Expert path: read the hints or the review list, or opt into marks.",
+          "technical": "No default changes. `jet review --annotations github|auto` writes every new failure point to the job summary and the first ten as annotations, GitHub's cap per step. The review lists lambda bodies and loop headers. The parser records each call's `)`. Under the setting, generated calls owe no mark, and loop headers and selectors take `loop?` and `{x:Hex(2)?}` as in A.",
+          "code": "use files: core.files\n\nsize: fn(path: String) -> Int {\n    text: files.read(path)        // editor: a faint ? here\n    text.count_bytes()\n}\n\n#Policy(failures: .Explicit) strict_size: fn(path: String) -> Int {\n    text: files.read(path)?\n    text.count_bytes()\n}\n\nrun: fn() { print(size(\"a.txt\") + strict_size(\"a.txt\")) }"
+        },
+        {
+          "key": "C",
+          "name": "Require marks only in package library code",
+          "detail": "Library source that `jet publish` ships must mark each call that passes a failure up, and fmt writes the marks there. Apps, scripts and tests may write marks or leave them out, and a written mark is still checked. This mirrors option D of the call-mark ballot, which you set aside.\n\nBeginner path: nothing to write until code becomes a library. Expert path: library authors work as in A.",
+          "technical": "C needs a classification that does not exist: the files `jet publish` ships, apart from entries, tests and examples. The formatter's only library test knows just Core and the Prelude (Host.jet:4349-4366). E0434 fires in those files and the setting is deleted. Elsewhere the faint hints and their second compile stay. Compiler, Core and Jetpack hold about three quarters of the estimated marks, so C writes most of A's marks anyway [inference].",
+          "code": "// Lib/orders.jet: library source that jet publish ships\nsave: fn(order: Order) {\n    files.write(order_path(order), order.json())?   // required here\n}\n\n// App/main.jet: an app, a script or a test\nrun: fn() {\n    save(order)       // accepted plain; the editor shows a faint ?\n    save(order)?      // also accepted, and checked\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "The `?` operator returns an `Err` early and is required at each call that passes one up; `f()?.x` chains on the success. Source: The Rust Book, chapter 9.2.",
+          "code": "let text = fs::read_to_string(path)?;\nlet n = fs::read_to_string(path)?.len();"
+        },
+        {
+          "lang": "Swift",
+          "note": "`try` is required before an expression that can throw and covers the whole expression. A loop over an asynchronous sequence whose step can throw is written `for try await` (SE-0298). The design note calls this marked propagation. It adds that a language whose allocation failures are recoverable cannot claim it fully. Sources: The Swift Programming Language, Error Handling; swift/docs/ErrorHandlingRationale.md.",
+          "code": "let n = try String(contentsOfFile: path).count\nfor try await line in url.lines { print(line) }"
+        },
+        {
+          "lang": "Zig",
+          "note": "`try x` means `x catch |err| return err`, written at every call; error return traces show the path. Source: Zig language reference, try and Error Return Traces.",
+          "code": "const text = try file.readToEndAlloc(alloc, max);"
+        },
+        {
+          "lang": "Go",
+          "note": "The check is written out after every call. In June 2025 the Go team stopped pursuing shorter syntax after three proposals, and mentioned editor support for reading them. Source: go.dev/blog/error-syntax.",
+          "code": "text, err := os.ReadFile(path)\nif err != nil {\n    return err\n}"
+        },
+        {
+          "lang": "Kotlin and Java",
+          "note": "Exceptions pass up with nothing at the call. Kotlin has no checked exceptions; Java lists checked ones in `throws`, still unmarked at the call. Sources: kotlinlang.org/docs/exceptions.html; Hejlsberg, \"The Trouble with Checked Exceptions\", artima.com.",
+          "code": "val text = File(path).readText()   // may throw; no mark"
+        },
+        {
+          "lang": "Gleam",
+          "note": "Errors are values, with no exceptions. Gleam v0.25 (2022) added `use`, and v0.27.0 (2023-02-26) deprecated the `try` keyword for `use` with `result.try`, which marks each step. Sources: gleam.run/news/v0.25-introducing-use-expressions; Gleam CHANGELOG v0.27.0.",
+          "code": "use text <- result.try(simplifile.read(path))\nOk(string.length(text))"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Under your rule nobody types a mark, so the cost that kept marks optional is gone. What remains is the gain: every early exit shows in plain text, for reviewers on the web and for models. A callee's new exits show at each caller in the same diff, and the marks come from the pass the call marks already need.",
+        "gains": [
+          "Every early exit shows in diffs, web pages, printed listings and the files a model reads.",
+          "A callee that newly can fail changes each caller's text in the same change, because fmt adds the marks.",
+          "One mark mechanism with the call marks: one checked fmt pass, one quick fix, one fix-on-save.",
+          "The setting, the `--explicit-failures` flag, the editor's second compile and a special parse error are deleted."
+        ],
+        "losses": [
+          {
+            "loss": "About 27,000 calls gain a mark in one cutover, and code that can fail carries one every 9 to 34 lines.",
+            "mitigation": "The migration writes them through the checked pass, Markdown fences and snapshots included, so nobody types one. New code gets its marks from fmt and fix-on-save."
+          },
+          {
+            "loss": "fmt must compile a package to place marks.",
+            "mitigation": "The call marks already need that compile, so failures add none. Layout never waits for it, and fix-on-save reuses the editor's last check."
+          },
+          {
+            "loss": "A call used as a receiver reads `(f()?).x`, because `f()?.x` is an optional chain.",
+            "mitigation": "fmt writes the parentheses. It was 23 of 1,054 marks in Examples and 154 of 2,250 in Tools."
+          },
+          {
+            "loss": "A leaf that newly can fail adds marks up its call chain, and a dependent package fails to build until its fmt runs.",
+            "mitigation": "fmt writes the whole chain in that change, and the chain stops at a call that handles the failure. `jet review` names the leaf, and a published package needs acknowledgment first (D-FAIL-PUBSIG1)."
+          },
+          {
+            "loss": "A refused allocation still leaves a function unmarked.",
+            "mitigation": "Marking it would put `?` on nearly every line that builds a list or string, and literals have no call to mark. Swift's design note says a language whose allocation failures are recoverable cannot mark every exit. A mark written on such a call is accepted and never removed."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps exits invisible outside the editor and the review tools, and a callee's new exits change no caller's text. Its main argument was the work of writing marks, and under your rule fmt does that work."
+          },
+          {
+            "key": "C",
+            "reason": "C gives one call two spellings, so code moved into a library changes. Apps, scripts and tests still hide their exits, and the hints and their second compile stay."
+          }
+        ],
+        "tradeoff": "Every early exit visible in plain text, for about 27,000 marks written once by tools and a compile inside fmt that the call marks already pay."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewFailVisible3. The review reproduced the 26,901 estimate, spot-checked the measured count on 18 files, and confirmed the loop-header and selector exits in dev code. It fixed the generated-call exemption, which would have excused all of Core, kept allocation-only marks, and added the multi-target rule, the selector registry row and B's fair gain."
+      },
+      "checkInstructions": "To check the measured counts, unpack `git archive c137227f924 Examples Tools Tests Core Compiler/Prelude` into a scratch directory. That commit is the source of the installed jet a0.0.46, so every file is in its syntax. List each tree's `.jet` files except `package.jet`; for Tests take the 400 paths with the smallest SHA-1 of their path.\n\nRun `node D-FAIL-VISIBLE2.count-compiled.mjs <root> <out.jsonl> <list>`, kept beside this ballot. It checks each file as written, inserts `#Policy(failures: .Explicit)` after any `#!` line or inline `package:` header, and counts E0434 in that file. Expect Examples 1,054 marks in 992 files, Tools 2,250 in 707, and Tests 103 in 254.\n\nTo check the estimate, run `node D-FAIL-VISIBLE2.count-static.mjs <dev checkout> out.json Compiler Core Jetpack Tools Examples Tests` on dev 72bd6f6904c. Expect 26,901 certain sites. With `--calibrate` and the three row files on the c137227f924 root, expect pooled precision 0.753 and recall 0.747.\n\nTo check the mechanism at dev e3bf920e00a, read Compiler/JetSema/Source/Sema/FailureMarks.jet:89-195, Expressions/Control.jet:1420-1466, Statements/ForIn.jet:241-298, Registration/CLIEntry.jet:160-180 and Expressions.jet:2993-2999. Then read Compiler/JetCLI/Source/CLI/Host.jet:4199-4302, LSP.jet:91-132 and Review.jet:1520-1682.\n\nTo reproduce the probes on a0.0.46, put the setting on each file, since a0.0.46 refuses a call's `?` outside it. Option A's code checks and prints 12 with a six-byte a.txt. `twice(2)?` on a function that cannot fail checks clean. A `#CLI` program whose `run(args)` body can fail gets an E0434 with no edit past the end of the file.",
+      "surface": {
+        "gist": "Should every call that can pass a failure up be written with `?`, with `jet fmt` writing the marks?",
+        "lesson": "A call that fails passes the failure up, so the function holding it returns early too. Today nothing is written there. Under A the call reads `files.read(path)?`, the compiler checks every mark, and `jet fmt` and the editor write them. A marked call runs exactly like an unmarked one; the mark only shows the exit.",
+        "trio": {
+          "current": {
+            "note": "No mark at the call; the editor shows a faint `?`.",
+            "code": "text: files.read(path)    // editor: faint ?\ntext: files.read(path)?   // error outside the setting"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Every call that passes an error up carries `?`. Source: The Rust Book.",
+            "code": "let text = fs::read_to_string(path)?;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Mark every call that passes a failure up; fmt writes the marks",
+            "gist": "Each such call reads `call()?`; fmt and the editor insert and remove marks.",
+            "gains": [
+              "Every early exit shows in diffs, web pages and model input.",
+              "A callee's new exits appear at each caller in the same change."
+            ],
+            "losses": [
+              "About 27,000 marks in one cutover.",
+              "Receiver calls read `(f()?).x`.",
+              "Refused allocations still leave unmarked."
+            ],
+            "proposed": {
+              "code": "text: files.read(path)?\nn: (files.read(path)?).count_bytes()\nloop? line in source -> print(line)   // a step that can fail"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep today's rule: tools show exits",
+            "gist": "No mark by default; editor, review and an opt-in setting show exits.",
+            "gains": [
+              "Nothing in today's code changes.",
+              "One setting gives audited code marks.",
+              "A callee that newly can fail breaks no caller's build."
+            ],
+            "losses": [
+              "Plain text without tools hides exits.",
+              "A callee's new exits change no caller's text."
+            ],
+            "proposed": {
+              "code": "text: files.read(path)    // editor: faint ?\n\n#Policy(failures: .Explicit) strict: fn(path: String) -> Int {\n    (files.read(path)?).count_bytes()\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Require marks only in library code",
+            "gist": "Library code writes `?`; apps, scripts and tests may leave it out.",
+            "gains": [
+              "Shared libraries show their exits."
+            ],
+            "losses": [
+              "Code moved into a library changes spelling.",
+              "Apps, scripts and tests still hide exits."
+            ],
+            "proposed": {
+              "code": "// library\ntext: files.read(path)?\n\n// app or script\ntext: files.read(path)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Nobody types the marks, so their old cost is gone. What remains is the gain: every early exit shows in plain text, and a callee's new exits show at each caller.",
+          "gains": [
+            "Exits visible without tools, to people and models.",
+            "One mark mechanism shared with the call marks."
+          ],
+          "losses": [
+            {
+              "loss": "About 27,000 marks change in one cutover.",
+              "mitigation": "A migration writes them with the checked fmt pass, Markdown fences and snapshots included."
+            },
+            {
+              "loss": "fmt compiles each package to place marks.",
+              "mitigation": "The call marks already pay that compile, and fix-on-save reuses the editor's last check."
+            },
+            {
+              "loss": "Refused allocations still leave unmarked.",
+              "mitigation": "Marking them would put `?` on most lines; Swift's note says no such language can mark every exit."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Exits stay invisible without tools, and its cost argument assumed people type marks."
+            },
+            {
+              "key": "C",
+              "reason": "Two spellings of one call, and apps and scripts still hide exits."
+            }
+          ],
+          "tradeoff": "Every exit visible in plain text, for one cutover and a compile fmt already pays."
+        }
+      },
+      "reports": [
+        {
+          "title": "Greenfield language proposal, item P36",
+          "path": "Docs/Proposals/2026-11-24-greenfield-language.md",
+          "note": "Part 2, P36 (line 693) proposes required failure marks and ranks it last because the tools already show the exits."
+        },
+        {
+          "title": "Call marks review",
+          "path": "Docs/Audits/2026-11-25-call-marks-review.md",
+          "note": "The review of D-CALLSITE-MARK3, whose checked fmt pass, quick fix and migration this ballot shares."
+        },
+        {
+          "title": "Failure marks review",
+          "path": "Docs/Audits/2026-11-25-failure-marks-review.md",
+          "note": "Fresh adversarial review of this ballot: it reproduces the estimate, spot-checks the measured count, and corrects the generated-call exemption, the stale-mark rule for allocation-only calls and the multi-target rule."
+        }
+      ],
+      "draftedBy": "Pip",
+      "reviewedBy": "ReviewFailVisible3",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T23:55:33.674Z"
     }
   ],
   "questions": [
@@ -145728,6 +145974,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T23:55:39.364Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c05bs1oq",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-25T23:55:35.262Z",
+      "by": "Pip",
+      "action": "decision.post",
+      "ref": "D-FAIL-VISIBLE2",
+      "note": "reviewed by ReviewFailVisible3"
+    },
+    {
+      "at": "2026-11-25T23:55:33.674Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-FAIL-VISIBLE2",
+      "note": "Calls that pass a failure up are written with ?, and jet fmt writes the marks (draft)"
+    },
     {
       "at": "2026-11-25T23:47:44.659Z",
       "by": "Orchestrator",
