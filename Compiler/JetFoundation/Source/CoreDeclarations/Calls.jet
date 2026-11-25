@@ -568,7 +568,7 @@ core_decl_plain_record: fn(module_name: String, member: String, symbol: String, 
     }
     if leaf != "" -> effects.push(leaf)
     arity: mask.len()
-    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: effects, capability: capability, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None}
+    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: effects, capability: capability, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, marker: None, authority: None}
 }
 
 // A record the Jet source of its module defines: no Prelude symbol, no
@@ -625,7 +625,7 @@ core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, consta
             core_decl_require_jet_route(call.args[3], context) ?? return Err(err)
             mask: core_decl_rust_bools(call.args[4], context) ?? return Err(err)
             arity: mask.len()
-            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: core_decl_pure_capability(), pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None})
+            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: core_decl_pure_capability(), pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, marker: None, authority: None})
         }
         else -> Err(core_decl_fail("unsupported CoreCallRecord constructor in {context}: {call.name}"))
     }
@@ -634,11 +634,10 @@ core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, consta
 // `record` with the builder `.name(args)` applied.
 core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, context: String, constants: CoreDeclTexts) -> CoreCallRecord CoreDeclarationError! {
     built := record
-    if call.name == "without_direct_aot" || call.name == "with_native_int_result" || call.name == "with_source_owned" {
+    if call.name == "without_direct_aot" || call.name == "with_source_owned" {
         core_decl_expect_args(call, 0, context) ?? return Err(err)
         if call.name == {
             "without_direct_aot" -> built.aot_direct = false
-            "with_native_int_result" -> built.native_int_result = true
             else -> built = core_decl_source_owned(built)
         }
         return Ok(built)
@@ -649,7 +648,6 @@ core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, cont
         "with_max_arity" -> built.signature.max_arity = core_decl_rust_int(argument, context) ?? return Err(err)
         "with_pure_route" -> built.pure_route = core_decl_pure_route(argument, context) ?? return Err(err)
         "with_capability" -> built.capability = core_decl_capability(argument, context, constants) ?? return Err(err)
-        "with_ui_capabilities" -> built.ui_capabilities = core_decl_rust_strings(argument, context, constants) ?? return Err(err)
         "with_source_target" -> built.source_target = Val(core_decl_rust_string(argument, context, constants) ?? return Err(err))
         "with_source_role" -> built.source_role = Val(core_decl_rust_string(argument, context, constants) ?? return Err(err))
         "with_marker" -> built.marker = Val(core_decl_marker(argument, context, constants) ?? return Err(err))

@@ -89,12 +89,8 @@ ir_core_records_match: fn(left: CoreCallRecord, right: CoreCallRecord) -> Bool N
         return false
     }
     if left.pure_route != right.pure_route || left.symbol != right.symbol -> return false
-    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.native_int_result != right.native_int_result {
-        return false
-    }
-    if !ir_core_capability_equal(left.capability, right.capability) || !ir_string_rows_equal(left.ui_capabilities, right.ui_capabilities) {
-        return false
-    }
+    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct -> return false
+    if !ir_core_capability_equal(left.capability, right.capability) -> return false
     ir_authority_decisions_equal(left.authority, right.authority) && ir_core_markers_equal(left.marker, right.marker)
 }
 
