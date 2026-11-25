@@ -1767,12 +1767,12 @@ PixelFormat: enum {
     XBGR8888,
 }
 
-atexit: fn(handler: fn()) -[Env]> Never! { core.sys.__atexit_os(handler) }
+atexit: fn(handler: fn()) -[Env]> Never! { sys_rt.atexit(handler) }
 
 // Every registered handler runs, in registration order, once per SIGINT the
 // process receives, each under its own stop boundary on the runtime's signal
 // dispatcher thread (ProcessSignal.jet jet_rt_native_interrupt).
-on_interrupt: fn(handler: fn()) -[Env]> Never! { core.sys.__interrupt_os(handler) }
+on_interrupt: fn(handler: fn()) -[Env]> Never! { sys_rt.on_interrupt(handler) }
 
 #Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates")
 mkfifo: fn(path: String, mode: Int) -[FS, Env]> IOError! {

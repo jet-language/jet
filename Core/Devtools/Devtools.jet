@@ -13,10 +13,8 @@ package: {
 // core.devtools — the typed inspector publication boundary.
 //
 // The checked `field:`/`value:` form supplies package/module/panel identity.
-// Source owns the canonical identity and escaped field envelope. The raw leaf
-// only attaches the existing typed payload to the validated event and fans
-// it out through the existing global sink; no sink means no durable delivery.
-use core: core
+// Source owns the canonical identity and escaped field envelope
+// (envelope_fields) a devtools event carries.
 
 // The first three strings are the existing checked publication ABI facts,
 // not user labels. The public field/value check still runs before lowering.
@@ -59,14 +57,11 @@ envelope_fields: fn(package: String, module_name: String, panel: String, field: 
     "{{\"package\":\"{json_escape(package)}\",\"module\":\"{json_escape(module_name)}\",\"panel\":\"{json_escape(panel)}\",\"field\":\"{json_escape(field)}\"}}"
 }
 
-publish: fn<T>(package: String, module_name: String, panel: String, field: String, value: T) Never! {
-    source: "{package}::{module_name}"
-    entity: "{source}::{panel}"
-    fields: envelope_fields(package, module_name, panel, field)
-    // copy: `field` and `value` are read parameters (the caller keeps them); the payload owns its own
-    // texts and value. An exact `.move()` of a read parameter is E0201.
-    core.devtools.__publish_payload(source, entity, fields, field.copy(), value.copy())
-}
+// A publication reaches only installed devtools event sinks, and the native
+// runtime installs none (RouteACore.jet jet_job_queue_publish_parts): a
+// published value has no observer, so the checked call ends here.
+#Allow(Jet.UnusedParameter, "the native runtime installs no devtools event sink to hand a publication to")
+publish: fn<T>(package: String, module_name: String, panel: String, field: String, value: T) Never! {}
 
 #Test("devtools identity field envelope has canonical order and exact escapes") {
     assert_eq(
