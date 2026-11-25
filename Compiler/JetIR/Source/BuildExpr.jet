@@ -7253,14 +7253,18 @@ ir_failure_stop: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, subject: Int, is_
 // view-typed result whose fallback is a view too (or does not return) holds
 // the storage address of either view and is read as a view of it; with a
 // plain fallback value the result takes a copy of the Ok. A narrowing
-// conversion's Result whose error the fallback does not read is never built
-// (ir_try_from_or). For a place-borrowing Let's `place ?? leave` (JetSema
-// PlaceBorrows.jet; IRBuilder.or_lend names its operand) a payload the held
-// carrier keeps is the result itself: no copy, and not fresh, so the binding
-// reads it in place.
+// conversion's Result whose error the fallback does not read, and a
+// `checked(T{x})`'s Option, are never built (ir_try_from_or). For a
+// place-borrowing Let's `place ?? leave` (JetSema PlaceBorrows.jet;
+// IRBuilder.or_lend names its operand) a payload the held carrier keeps is
+// the result itself: no copy, and not fresh, so the binding reads it in
+// place.
 ir_or_fallback: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: Int, fallback: BodyOrFallback, ambient: TLocal?, span: Span) -> Int Never! {
     value_ty: ir_ty(m, p, b, value)
     if ir_body_node(p, b, value).kind == .NumericMethod(receiver, .TryFrom(_)) && !ir_fallback_reads_error(p, b, fallback, ambient) {
+        return ir_try_from_or(m, p, b, ty, value_ty, receiver, fallback, span)
+    }
+    if ir_body_node(p, b, value).kind == .NumericMethod(receiver, .FixedNarrow(.Absent, _)) && ambient == None {
         return ir_try_from_or(m, p, b, ty, value_ty, receiver, fallback, span)
     }
     subject: ir_expr_split(m, p, b, value)
@@ -7496,12 +7500,13 @@ ir_fallback_reads_error: fn(p: IRProgram, b: IRBuilder, fallback: BodyOrFallback
 }
 
 // `T.from_x(v) ?? fallback` whose fallback does not read the error
-// (ir_fallback_reads_error; ir_or_fallback):
-// the converted word when `v` fits T's range, else the fallback, after the
-// handled failure's journey ends (jet_journey_reset) as any `??` ends it. No
-// Result is built: the Err's text is never read, so neither its box nor its
-// String is made, and the conversion costs the range test alone, at every
-// tier. `ty` is the `??`'s type, `conversion_ty` the conversion's Result.
+// (ir_fallback_reads_error; ir_or_fallback), and `checked(T{v}) ?? fallback`:
+// the converted word when `v` fits T's range, else the fallback, after a
+// handled failure's journey ends (jet_journey_reset) as any `??` of a Result
+// ends it. No Result or Option is built: the Err's text is never read and
+// the Some is read at once, so no box and no String is made, and the
+// conversion costs the range test alone, at every tier. `ty` is the `??`'s
+// type, `conversion_ty` the conversion's Result or Option.
 ir_try_from_or: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, conversion_ty: Type, receiver: Int, fallback: BodyOrFallback, span: Span) -> Int Never! {
     value: ir_expr(m, p, b, receiver)
     if ir_failed(b) || value < 0 -> return -1
@@ -7536,7 +7541,9 @@ ir_try_from_or: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, conversi
     // function or the loop.
     b.fresh[value] = owned
     ir_release(m, b, value)
-    _: ir_runtime(m, b, "jet_journey_reset", [Int]{}, -1)
+    if ir_untag(conversion_ty) == .Result(_, _) {
+        _: ir_runtime(m, b, "jet_journey_reset", [Int]{}, -1)
+    }
     ir_fallback_route(m, p, b, fallback, result, span)
     ir_end(b.f, b.line)
     fallback_leaves: ir_fallback_leaves(m, p, b, fallback)

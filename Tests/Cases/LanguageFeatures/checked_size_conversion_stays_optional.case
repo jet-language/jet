@@ -1,5 +1,19 @@
-# `checked(Size{value}) ?? fallback` stays an optional conversion for each standard size, beside map keys written with the size names and in a file that also takes each size name as a type parameter.
+# `checked(Size{value}) ?? fallback` stays an optional conversion for each standard size, beside map keys written with the size names and in a file that also takes each size name as a type parameter, on every tier.
 fixture: CheckedSizeConversionStaysOptional/Input
+step: jet run -O0 run.jet
+exit: 0
+stdout: = "100 -1\n30000 -1\n2000000000 -1\n-5 9223372036854775807 -1\n200 0\n60000 0\n4000000000 0\n5000000000 0\n1 7\n"
 step: jet run run.jet
 exit: 0
-stdout: = "100 -1\n30000 -1\n2000000000 -1\n-5 9223372036854775807\n200 0\n60000 0\n4000000000 0\n5000000000 0\n1 7\n"
+stdout: = "100 -1\n30000 -1\n2000000000 -1\n-5 9223372036854775807 -1\n200 0\n60000 0\n4000000000 0\n5000000000 0\n1 7\n"
+step: jet run -O2 run.jet
+exit: 0
+stdout: = "100 -1\n30000 -1\n2000000000 -1\n-5 9223372036854775807 -1\n200 0\n60000 0\n4000000000 0\n5000000000 0\n1 7\n"
+# The `??` reads the converted word where it fits and takes the fallback
+# where it doesn't: no Option is built, so nothing is allocated, and a big
+# Int asks the runtime's range test alone (JetIR ir_try_from_or).
+step: jet inspect decisions -O1 run.jet
+env: JET_OPT_DUMP=to_i64
+exit: 0
+stdout: ~ "jet_int_fixed_fits" # the big Int's range test
+stdout: count "jet_rt_alloc" = 0 # no Option box on either path
