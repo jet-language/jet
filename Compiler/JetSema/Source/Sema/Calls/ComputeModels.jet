@@ -145,27 +145,26 @@ sema_call_compute_literal_int: fn(expression: Expr) -> Int? {
     }
 }
 
-sema_call_compute_alias_type: fn(member: String, args: [CallArg]) -> Type? {
+// The Tensor result type of `compute.vec` (member "vec") or `compute.matrix`
+// (any other member: sema_call_try_compute_alias admits only these two).
+sema_call_compute_alias_type: fn(member: String, args: [CallArg]) -> Type {
     error := Type.Named{name: "ComputeError"}
     if member == "vec" {
         length := Int?{None}
         if args.len() > 0 -> length = sema_call_compute_literal_int(args[0].expr)
         output := Type.Apply{name: "Vec", args: [Type]{Type.Int}}
         if length == .Val(value) && value >= 0 -> output = compute_shape_type("Vec", [Int]{value})
-        return Val(Type.Result{ok: output, err: error})
+        return Type.Result{ok: output, err: error}
     }
-    if member == "matrix" {
-        rows := Int?{None}
-        cols := Int?{None}
-        if args.len() > 0 -> rows = sema_call_compute_literal_int(args[0].expr)
-        if args.len() > 1 -> cols = sema_call_compute_literal_int(args[1].expr)
-        output := Type.Apply{name: "Matrix", args: [Type]{Type.Int, Type.Int}}
-        if rows == .Val(row) && cols == .Val(col) && row >= 0 && col >= 0 {
-            output = compute_shape_type("Matrix", [Int]{row, col})
-        }
-        return Val(Type.Result{ok: output, err: error})
+    rows := Int?{None}
+    cols := Int?{None}
+    if args.len() > 0 -> rows = sema_call_compute_literal_int(args[0].expr)
+    if args.len() > 1 -> cols = sema_call_compute_literal_int(args[1].expr)
+    output := Type.Apply{name: "Matrix", args: [Type]{Type.Int, Type.Int}}
+    if rows == .Val(row) && cols == .Val(col) && row >= 0 && col >= 0 {
+        output = compute_shape_type("Matrix", [Int]{row, col})
     }
-    return None
+    Type.Result{ok: output, err: error}
 }
 
 sema_call_compute_arity_error: fn(member: String, expected: Int, actual: Int, span: Span, diagnostics: ^[Diagnostic]) {
@@ -199,7 +198,7 @@ sema_call_try_compute_alias: fn(module_name: String, member: String, target: Sem
     value := sema_call_core_check_source_owned(target, "core.compute.{member}", [Type]{}, args, span, None, check)
     check.scopes.ownership_call_depth -= 1
     checked := value ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    checked.ty = sema_call_compute_alias_type(member, args) ?? panic("core.compute.{member} has an alias type")
+    checked.ty = sema_call_compute_alias_type(member, args)
     checked.type_id = type_none()
     return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, check.environment.*, check.program.*, check.diagnostics)}
 }

@@ -1846,9 +1846,9 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_index: Int, solve
             sema_effect_check_stack(stack, frames, nodes, node_index, EffectRowEntry{name: effect_name, span: span}, "cap `#FX({entry.name})` over {node.display_key}", diagnostics)
             next
         }
-        if sema_effect_memory_fact(effect_name) != None {
+        if sema_effect_memory_fact(effect_name) == .Val(fact) {
             span: if cap.site == None -> entry.span else -> node.name_span
-            _: sema_effect_memory_project(nodes, node_index, EffectRowEntry{name: effect_name, span: span}, diagnostics)
+            _: sema_effect_memory_project(nodes, node_index, EffectRowEntry{name: effect_name, span: span}, fact, diagnostics)
             next
         }
         reached: sema_effect_covered(solved, [String]{effect_name.copy()})
@@ -6627,9 +6627,10 @@ sema_effect_memory_violation: fn(nodes: [SemaEffectNode], root: Int, denial: Eff
 }
 
 // 2: a `-[!Mem.Alloc]>`, `-[!Mem.Rc]>` or `-[!Mem.Alloc(above: N)]>` denial
-// holds for every function the root can reach (E0921).
-sema_effect_memory_project: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, diagnostics: ^[Diagnostic]) -> SemaMemoryProjection {
-    fact: sema_effect_memory_fact(denial.name) ?? panic("invalid checked memory denial")
+// holds for every function the root can reach (E0921). `fact` is the
+// denial's memory fact (sema_effect_memory_fact), which each caller reads
+// to pick the denials this projects.
+sema_effect_memory_project: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, fact: String, diagnostics: ^[Diagnostic]) -> SemaMemoryProjection {
     limit: sema_effect_memory_bound(denial.name)
     if limit == .Val(bytes_limit) {
         visiting := (loop _ in nodes -> false)
@@ -6660,8 +6661,8 @@ sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], root: Int, stack: 
             sema_effect_check_stack(stack, frames, nodes, root, denial, "signature denial `-[!{denial.name}]>` in {nodes[root].source_display}", diagnostics)
             next
         }
-        if sema_effect_memory_fact(denial.name) == None -> next
-        projection: sema_effect_memory_project(nodes, root, denial, diagnostics)
+        fact: sema_effect_memory_fact(denial.name) ?? next
+        projection: sema_effect_memory_project(nodes, root, denial, fact, diagnostics)
         sema_effect_memory_publish(nodes, root, denial, projection, facts)
     }
 }
@@ -7019,8 +7020,16 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
         loop fact in facts {
             detail: fact.detail ?? next
             lifetime: detail.shared_lifetime ?? next
-            initializer: fact.callee ?? panic("Core publication obligation has no initializer")
-            target: sema_effect_node_index(calls.node_by_key, symbol_table_key(calls.symbols, initializer)) ?? panic("Core publication initializer has no solved effect row")
+            // A publication with no initializer, or one whose effects were
+            // not solved, has no direct Core initializer to prove pure.
+            initializer: fact.callee ?? {
+                site_diagnostics.push(sema_call_core_shared_diagnostic(detail.shared_member, fact.span))
+                next
+            }
+            target: sema_effect_node_index(calls.node_by_key, symbol_table_key(calls.symbols, initializer)) ?? {
+                site_diagnostics.push(sema_call_core_shared_diagnostic(detail.shared_member, fact.span))
+                next
+            }
             // `Panic` is the deny-only stop row, not an effect
             // the published value can carry, so it does not make it impure.
             impure := false
@@ -7143,7 +7152,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
         memory_facts.declarations.push(declaration)
         loop root in 0..<nodes.len() {
             memory_diagnostics := [Diagnostic]{}
-            projection: sema_effect_memory_project(nodes, root, EffectRowEntry{name: name.copy(), span: Span{start: 0, end: 0}}, memory_diagnostics)
+            projection: sema_effect_memory_project(nodes, root, EffectRowEntry{name: name.copy(), span: Span{start: 0, end: 0}}, fact, memory_diagnostics)
             memory_facts.projections.push(SemaMemoryProjectionRow{root: nodes[root].display_key, fact: fact.copy(), projection: projection})
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[root].module_index].source_segments, memory_diagnostics)
         }

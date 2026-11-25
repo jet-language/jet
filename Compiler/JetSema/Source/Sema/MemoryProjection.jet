@@ -36,8 +36,10 @@ sema_effect_memory_projection: fn(finding: SemaMemoryFinding) -> SemaMemoryProje
     if finding.event == .Val(event) {
         return SemaMemoryProjection.Violated{call_path: finding.path, operation: event.operation}
     }
-    open: finding.open ?? panic("memory finding has neither an operation nor open dispatch")
-    SemaMemoryProjection.OpenWorld{call_path: finding.path, reason: open.reason}
+    // A finding with neither reads as its E0921 does
+    // (sema_effect_memory_violation): a memory proof that is incomplete.
+    reason: if finding.open == .Val(open) -> open.reason else -> "memory proof is incomplete"
+    SemaMemoryProjection.OpenWorld{call_path: finding.path, reason: reason}
 }
 
 sema_effect_memory_publish: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, projection: SemaMemoryProjection, facts: ^SemaMemoryProjectionFacts) Never! {

@@ -2870,8 +2870,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, check.diagnostics) ?? return None
                 outcome: sema_expr_narrow_outcome(word, check.context.arithmetic_policy)
-                if outcome != TNarrowOutcome.Stop && sema_expr_is_narrowing(converted) {
-                    narrowed: sema_expr_narrowing_with(converted, outcome, line)
+                if outcome != TNarrowOutcome.Stop && sema_expr_narrowing_with(converted, outcome, line) == .Val(narrowed) {
                     return sema_expr_expected_owned(narrowed, expected, check.environment.*, check.program.*, check.diagnostics)
                 }
             }
@@ -2920,8 +2919,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                 if needs_conversion {
                     converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, check.diagnostics) ?? return None
                     outcome: sema_expr_narrow_outcome(word, check.context.arithmetic_policy)
-                    if outcome != TNarrowOutcome.Stop && sema_expr_is_narrowing(converted) {
-                        narrowed: sema_expr_narrowing_with(converted, outcome, line)
+                    if outcome != TNarrowOutcome.Stop && sema_expr_narrowing_with(converted, outcome, line) == .Val(narrowed) {
                         return sema_expr_expected_owned(narrowed, expected, check.environment.*, check.program.*, check.diagnostics)
                     }
                 }
