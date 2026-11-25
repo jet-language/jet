@@ -18,7 +18,7 @@ typedef struct { int64_t kind; Text *reason; } Failure;
 typedef struct { double lanes[4]; } Lane;
 _Static_assert(sizeof(WsError)==24 && offsetof(WsError,operation)==16,"WsABI error");
 _Static_assert(sizeof(Message)==24 && offsetof(Message,reason)==16,"WsABI message");
-_Static_assert(sizeof(Failure)==16 && offsetof(Failure,reason)==8,"TaskFailureABI");
+_Static_assert(sizeof(Failure)==16 && offsetof(Failure,reason)==8,"CoreEnumABI TASK_FAILURE");
 _Static_assert(sizeof(Lane)==32,"SimdLaneABI");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
