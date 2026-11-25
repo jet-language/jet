@@ -389,9 +389,11 @@ jet_cli_fix_name: fn(stem: String) -> String Never! {
     sanitized
 }
 
-// `others`: the other files the fix changes, committed with `file` in the
-// one transaction.
-jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?, skipped: [JetCLIFixSkip], others: ^^[JetCLISourceChange]) -[FS, Env, Exec, Time, IO, FFI.C, FFI.Asm, Net]> String JetCLIReadError! {
+// `semantic_ops`: the fix's renames (jet_cli_semantic_rename_ops), none when
+// it renames nothing or its checks gave no rename authority; the receipt then
+// records the exact changed byte region instead. `others`: the other files
+// the fix changes, committed with `file` in the one transaction.
+jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: ^^[JetCLISemOp], skipped: [JetCLIFixSkip], others: ^^[JetCLISourceChange]) -[FS, Env, Exec, Time, IO, FFI.C, FFI.Asm, Net]> String JetCLIReadError! {
     path: cli_files.realpath(file) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{file}`: {jet_cli_io_error_text(err)}"))
     parent: jet_cli_parent(path) ?? return Err(jet_cli_read_error("fix target has no parent directory"))
     cache := WorkspaceDeclarationCache.new()
@@ -430,7 +432,7 @@ jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: [
         suffix += 1
         name = "{base}-{suffix}"
     }
-    operations := if semantic_ops == .Val(provided) -> provided else -> jet_cli_fix_semantic_ops(path, before, staged)
+    operations := semantic_ops.move()
     if operations.len() == 0 -> operations = jet_cli_fix_rewrite(before, staged)
     changes := [JetCLISourceChange]{JetCLISourceChange{path: path, before: before, after: staged}}
     loop other in others.move() {

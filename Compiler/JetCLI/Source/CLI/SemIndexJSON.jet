@@ -51,9 +51,10 @@ use {
 // jet-semindex `open`: the semantic index of one checked compile result, its
 // effect projection the application authority of that program. Every semantic
 // consumer (semindex, doc, impact, find, help, expand, blame, review, codemod)
-// reads this one index.
-jet_cli_checked_semindex: fn(result: JetDriverCompileResult) -> SemIndex {
-    semindex_build(result.doc_modules, result.doc_interner ?? interner_empty(), jet_cli_effect_projection(jet_cli_application_authority(result, None)))
+// reads this one index; without `effects` it has no effect rows
+// (semindex_build).
+jet_cli_checked_semindex: fn(result: JetDriverCompileResult, effects: Bool{true}) -> SemIndex {
+    semindex_build(result.doc_modules, result.doc_interner ?? interner_empty(), jet_cli_effect_projection(jet_cli_application_authority(result, None)), effects: effects)
 }
 
 jet_cli_sem_json_span: fn(span: Span) -> String Never! {

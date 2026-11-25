@@ -4,6 +4,7 @@ use {
     cli_files: core.files
     cli_sem_json: core.encoding.json
     core.encoding.[Dyn]
+    jet_driver.[JetDriverCompileResult]
     jet_semindex.[SemDefinitionFact]
 }
 
@@ -144,55 +145,83 @@ jet_cli_sem_op_value: fn(operation: JetCLISemOp) -> JetCLIStatusValue Never! {
     )
 }
 
+// One rename jet_cli_semantic_rename_ops finds: the fact at `before` in the
+// facts before the edit is the fact at `after` in the facts after it.
+JetCLIRenamePair: struct {
+    before: Int,
+    after: Int,
+}
+
+// The order jet_cli_semantic_rename_ops groups definition facts by: what a
+// rename keeps, the fact's kind, module and signature.
+jet_cli_rename_order: fn(left: SemDefinitionFact, right: SemDefinitionFact) -> Ordering Never! {
+    (left.kind <=> right.kind).then(left.module_path <=> right.module_path).then(left.signature_id <=> right.signature_id)
+}
+
 // semantic_rename_ops: only the tool's checked before/after snapshots can
-// record rename intent; ordinary review never infers a receipt.
+// record rename intent; ordinary review never infers a receipt. A fact before
+// is renamed when exactly one fact after that no earlier rename claimed shares
+// its kind, module and signature under another name, and no other fact before
+// shares them under a name other than that one's. Both sides are sorted by
+// those three (jet_cli_rename_order), so a fact is compared only with its own
+// group, never with every fact of the program; the renames come out in the
+// order of the facts before.
 jet_cli_semantic_rename_ops: fn(before: [SemDefinitionFact], after: [SemDefinitionFact]) -> [JetCLISemOp] Never! {
-    used := [Int]{}
-    operations := [JetCLISemOp]{}
-    loop (old_index, old) in before {
-        candidates := [Int]{}
-        loop (new_index, candidate) in after {
-            if !used.contains(new_index) && old.kind == candidate.kind && old.module_path == candidate.module_path && old.signature_id == candidate.signature_id && old.name != candidate.name {
-                candidates.push(new_index)
+    olds := loop index in 0..<before.len() -> index
+    olds.sort_by(fn(left: Int, right: Int) { jet_cli_rename_order(before[left], before[right]).then(left <=> right) })
+    news := loop index in 0..<after.len() -> index
+    news.sort_by(fn(left: Int, right: Int) { jet_cli_rename_order(after[left], after[right]).then(left <=> right) })
+    used := loop _ in 0..<after.len() -> false
+    pairs := [JetCLIRenamePair]{}
+    start := 0
+    group := 0
+    loop group < olds.len() {
+        key: before[olds[group]]
+        end := group + 1
+        loop end < olds.len() && jet_cli_rename_order(before[olds[end]], key) == Ordering.Equal -> end += 1
+        loop start < news.len() && jet_cli_rename_order(after[news[start]], key) == Ordering.Less -> start += 1
+        stop := start
+        loop stop < news.len() && jet_cli_rename_order(after[news[stop]], key) == Ordering.Equal -> stop += 1
+        loop slot in group..<end {
+            old: before[olds[slot]]
+            found := -1
+            count := 0
+            loop at in start..<stop {
+                index: news[at]
+                if !used[index] && after[index].name != old.name {
+                    found = index
+                    count += 1
+                }
             }
-        }
-        if candidates.len() != 1 -> next
-        index: candidates[0]
-        candidate: after[index]
-        reverse := 0
-        loop (other_index, other) in before {
-            if other_index == old_index || (other.kind == candidate.kind && other.module_path == candidate.module_path && other.signature_id == candidate.signature_id && other.name != candidate.name) {
-                reverse += 1
+            if count != 1 -> next
+            reverse := 0
+            loop other in group..<end {
+                if other == slot || before[olds[other]].name != after[found].name -> reverse += 1
             }
+            if reverse != 1 -> next
+            used[found] = true
+            pairs.push(JetCLIRenamePair{before: olds[slot], after: found})
         }
-        if reverse != 1 -> next
-        used.push(index)
-        target: JetCLISemOpTarget{stable_id: old.stable_id, before: old.human_identity, after: candidate.human_identity, kind: candidate.kind, module_path: candidate.module_path}
-        operations.push(JetCLISemOp{kind: "rename", rule_id: Val("jet-fix"), from: Val(old.name), to: Val(candidate.name), node: None, match_template: None, replace_template: None, targets: [JetCLISemOpTarget]{target}, files: [JetCLISemOpFile]{}})
+        group = end
     }
-    operations
+    pairs.sort_by(fn(left: JetCLIRenamePair, right: JetCLIRenamePair) { left.before <=> right.before })
+    loop pair in pairs -> {
+        old: before[pair.before]
+        renamed: after[pair.after]
+        target: JetCLISemOpTarget{stable_id: old.stable_id, before: old.human_identity, after: renamed.human_identity, kind: renamed.kind, module_path: renamed.module_path}
+        JetCLISemOp{kind: "rename", rule_id: Val("jet-fix"), from: Val(old.name), to: Val(renamed.name), node: None, match_template: None, replace_template: None, targets: [JetCLISemOpTarget]{target}, files: [JetCLISemOpFile]{}}
+    }
 }
 
-// A refused/invalid structural check has no rename authority. The fix receipt
-// then records the exact changed byte region instead.
-jet_cli_fix_definition_facts: fn(file: String, source: String) -> [SemDefinitionFact]? {
-    compiled: jet_cli_fix_compile(file, source, [JetCLIFixFile]{}, [String?]{}) ?? return None
-    if compiled == {
-        .Refused(_) -> return None
-        .Compiled(result, _) -> {
-            if !result.complete || result.internal_problem != None || jet_cli_errors(result.diagnostics).len() > 0 {
-                return None
-            }
-            index: jet_cli_checked_semindex(result) ?? return None
-            return Val(index.definition_facts)
-        }
+// The definition facts of `result`, a `jet fix` compile
+// (jet_cli_fix_compile), that rename receipts compare; the index is built
+// without its effect rows, which they never read. A refused or invalid check
+// has no rename authority, so it has none: the fix receipt then records the
+// exact changed byte region instead.
+jet_cli_fix_result_facts: fn(result: JetDriverCompileResult) -> [SemDefinitionFact]? {
+    if !result.complete || result.internal_problem != None || jet_cli_errors(result.diagnostics).len() > 0 {
+        return None
     }
-}
-
-jet_cli_fix_semantic_ops: fn(file: String, before: [U8], after: [U8]) -> [JetCLISemOp] {
-    old: String.from_bytes(before) ?? return [JetCLISemOp]{}
-    new: String.from_bytes(after) ?? return [JetCLISemOp]{}
-    old_facts: jet_cli_fix_definition_facts(file, old) ?? return [JetCLISemOp]{}
-    new_facts: jet_cli_fix_definition_facts(file, new) ?? return [JetCLISemOp]{}
-    jet_cli_semantic_rename_ops(old_facts, new_facts)
+    index: jet_cli_checked_semindex(result, effects: false) ?? return None
+    Val(index.definition_facts)
 }

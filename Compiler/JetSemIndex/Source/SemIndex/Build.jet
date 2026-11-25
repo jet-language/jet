@@ -3144,7 +3144,10 @@ semindex_instance_key: fn(identity: String, module_path: String, span: Span) -> 
 // `build_symbol_db` + `SymbolDB.finalize_index`: the semantic index of the
 // checked user modules. `interner` names the TypeIDs of their checked bodies;
 // `effect_projection` is the application authority of the same program.
-semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_projection: SemEffectProjection) -> SemIndex {
+// Without `effects` the index has no effect rows (semindex_effects, whose
+// witness search is most of a large program's index cost), for a reader of
+// its definitions alone.
+semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_projection: SemEffectProjection, effects: Bool{true}) -> SemIndex {
     db := semindex_db()
     db.declarations = semindex_declarations(modules)
     module_paths: semindex_module_paths(modules)
@@ -3215,7 +3218,7 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
         effect_projection: effect_projection,
         references: db.refs,
         calls: db.calls,
-        effects: semindex_effects(summaries, modules),
+        effects: if effects -> semindex_effects(summaries, modules) else -> [SemEffect]{},
         arithmetic: arithmetic,
         members: db.members,
         nodes: db.nodes,
