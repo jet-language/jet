@@ -180,7 +180,7 @@ ir_runtime_binding_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: 
     impure: p.invocation && b.impure > 0
     if impure -> _: ir_host_method_words(m, p, b, Type.Bool, "Impure.enter", [Int]{}, span)
     ir_route_ambient_refusals(m, p, b, foreign.symbol, span)
-    result: ir_route_call_args(m, p, b, foreign.symbol, Val(route), values, borrow_mask, ty, [String]{}, false, span)
+    result: ir_route_call_args(m, p, b, foreign.symbol, Val(route), values, borrow_mask, ty, [String]{}, span)
     if ir_failed(b) -> return -1
     if impure -> _: ir_host_method_words(m, p, b, Type.Bool, "Impure.leave", [Int]{}, span)
     result

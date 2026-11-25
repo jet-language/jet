@@ -6755,12 +6755,9 @@ ir_core_call_routed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rec
     if symbol == "jet_reflect_of" -> return ir_reflect_of(m, p, b, ty, args, span)
     if symbol == "jet_plugin_load" -> return ir_plugin_load(m, p, b, ty, args, span)
     if ir_lazy_core_call(m, p, b, symbol, ty, args, span) == .Val(result) -> return result
-    // Bounded Core slots take I64, but `keep<T>` returns its argument at
-    // the checked type: it does not narrow exact Int.
-    typed_carrier_value: canonical.module_name == "core.prelude" && canonical.member == "keep"
     labels: core_call_native_return_labels(canonical.module_name, canonical.member)
     b.split_armed = split_armed
-    ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, labels, typed_carrier_value, span)
+    ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, labels, span)
 }
 
 // The refusals a route call reading ambient state meets before it runs. A
@@ -6786,9 +6783,8 @@ ir_route_ambient_refusals: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol:
 
 // The route `symbol` (`declared`, else its table row) on the checked
 // argument expressions `args`, typed `ty`: an exact Int argument the route
-// consumes (borrow_mask false) crosses as its native I64 unless
-// `typed_carrier_value`.
-ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, declared: IRRoute?, args: [Int], borrow_mask: [Bool], ty: Type, labels: [String], typed_carrier_value: Bool, span: Span) -> Int Never! {
+// consumes (borrow_mask false) crosses as its native I64.
+ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, declared: IRRoute?, args: [Int], borrow_mask: [Bool], ty: Type, labels: [String], span: Span) -> Int Never! {
     // Only the route call itself may split a `??` or `?` operand, not the
     // argument conversions before it.
     split_armed: b.split_armed
@@ -6810,7 +6806,7 @@ ir_route_call_args: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String
         if ir_body_node(p, b, arg).kind == .Borrow(_, access) {
             if access == .Write -> ir_make_unique(m, p, b, slot)
         }
-        if !typed_carrier_value && index < borrow_mask.len() && !borrow_mask[index] && ir_untag(ir_ty(m, p, b, arg)) == Type.Int {
+        if index < borrow_mask.len() && !borrow_mask[index] && ir_untag(ir_ty(m, p, b, arg)) == Type.Int {
             slots.push(ir_core_native_int(m, b, slot, span))
             if ir_failed(b) -> return -1
         } else { slots.push(slot) }
