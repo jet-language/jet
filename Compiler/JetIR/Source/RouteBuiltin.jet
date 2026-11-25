@@ -13,15 +13,17 @@ use jet_foundation.[
 ]
 
 // A builtin's route: the runtime symbol it calls, its operand count and which
-// operands it borrows.
+// operands it borrows. A route function gives None for an operation and
+// receiver it has no route for; ir_builtin_route and ir_builtin_on report
+// that as a lowering failure at the call (ir_fail_slot).
 IRBuiltinRoute: struct {
     symbol: String,
     arity: Int,
     borrow_mask: [Bool],
 }
 
-ir_builtin_route_row: fn(symbol: String, arity: Int, borrow_mask: [Bool]) -> IRBuiltinRoute Never! {
-    IRBuiltinRoute{symbol: symbol, arity: arity, borrow_mask: borrow_mask}
+ir_builtin_route_row: fn(symbol: String, arity: Int, borrow_mask: [Bool]) -> IRBuiltinRoute? Never! {
+    Val(IRBuiltinRoute{symbol: symbol, arity: arity, borrow_mask: borrow_mask})
 }
 
 ir_builtin_untag: fn(ty: Type) -> Type Never! {
@@ -50,7 +52,7 @@ ir_builtin_iter_receiver: fn(ty: Type) -> Bool Never! {
 // A builtin whose route depends on its receiver: a String, an inline range
 // and a Range value (BUILTIN_METHOD_ROWS) keep their own runtime functions;
 // a collection takes its family's.
-ir_builtin_route_for_receiver: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+ir_builtin_route_for_receiver: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute? Never! {
     if ir_builtin_string_receiver(receiver) {
         if operation == TBuiltinOp.LenList {
             return ir_builtin_route_row("jet_char_len", 1, [Bool]{true})
@@ -257,10 +259,10 @@ ir_builtin_route_for_receiver: fn(operation: TBuiltinOp, receiver: Type, carrier
         }
         .AtomicMethod(_) | .LenString | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Flatten | .Intersperse | .Unzip | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> {}
     }
-    panic("checked receiver-sensitive TBuiltinOp has no canonical route for its receiver type")
+    None
 }
 
-ir_builtin_container_route: fn(operation: TBuiltinOp) -> IRBuiltinRoute Never! {
+ir_builtin_container_route: fn(operation: TBuiltinOp) -> IRBuiltinRoute? Never! {
     if operation == {
         .SetFrom -> return ir_builtin_route_row("jet_set_from", 1, [Bool]{false})
         .SetToList -> return ir_builtin_route_row("jet_set_to_list", 1, [Bool]{true})
@@ -301,7 +303,7 @@ ir_builtin_container_route: fn(operation: TBuiltinOp) -> IRBuiltinRoute Never! {
             if mode == {
                 .Value -> return ir_builtin_route_row("jet_priority_queue_remove_value", 2, [Bool]{true, false})
                 .Slot -> return ir_builtin_route_row("jet_priority_queue_remove_slot_canonical", 2, [Bool]{true, false})
-                .Dynamic -> panic("dynamic priority queue removal requires structural lowering")
+                .Dynamic -> return None
             }
         }
         .LRUPut -> return ir_builtin_route_row("jet_lru_put", 3, [Bool]{true, false, false})
@@ -333,14 +335,14 @@ ir_builtin_container_route: fn(operation: TBuiltinOp) -> IRBuiltinRoute Never! {
         .DequeFrom -> return ir_builtin_route_row("jet_deque_from", 1, [Bool]{false})
         .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetCapacity | .SetShuffle | .KeyOrdered(_, _) | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .DequeCapacity | .DequeGet | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> {}
     }
-    panic("checked container TBuiltinOp has no canonical Prelude route")
+    None
 }
 
-ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute? Never! {
     if operation == {
         // ir_builtin lowers an Atomic method (ir_atomic_method) before it
         // looks for a route.
-        .AtomicMethod(_) -> panic("a checked Atomic method lowers through ir_atomic_method, never a route")
+        .AtomicMethod(_) -> return None
         .LenString -> return ir_builtin_route_row("jet_char_len", 1, [Bool]{true})
         .LenList | .IsEmpty | .GetMap | .GetList | .First | .Last | .Contains | .ContainsKey | .MapFromKeys | .ListUnion | .ListIntersection | .ListDifference | .ListRandom -> return ir_builtin_route_for_receiver(operation, receiver, carrier)
         // Sema checks each of these on the one collection family whose
@@ -368,7 +370,7 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
         .TryStringPush -> return ir_builtin_route_row("jet_string_try_push", 2, [Bool]{true, true})
         // ir_builtin lowers an in-place String edit (ir_string_edit) before
         // it looks for a route.
-        .StringEdit(_) -> panic("a checked String edit lowers through ir_string_edit, never a route")
+        .StringEdit(_) -> return None
         .Pop -> return ir_builtin_route_row("jet_list_pop_kernel", 1, [Bool]{true})
         .IterNext -> return ir_builtin_route_row("jet_iter_next", 1, [Bool]{true})
         .PriorityQueuePop -> return ir_builtin_route_row("jet_priority_queue_pop_kernel", 1, [Bool]{true})
@@ -383,7 +385,7 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
             if mode == {
                 .Value -> return ir_builtin_route_row("jet_list_remove_value", 2, [Bool]{true, false})
                 .Slot -> return ir_builtin_route_row("jet_list_remove_slot", 2, [Bool]{true, false})
-                .Dynamic -> panic("dynamic list removal requires structural lowering")
+                .Dynamic -> return None
             }
         }
         .CountList -> return ir_builtin_route_row("jet_list_count", 2, [Bool]{true, true})
@@ -487,7 +489,8 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
         .Indexed -> return ir_builtin_route_row("jet_iter_enumerate", 2, [Bool]{false, false})
         .IterSplit -> return ir_builtin_route_row("jet_iter_split_at", 3, [Bool]{false, false, false})
         .SetFrom | .SetToList | .SetSort | .SetEqual | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SortedSetFrom | .SortedSetToList | .SortedSetInsert | .SortedSetRemove | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequeFrom | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeContains | .DequeDelete | .DequeToList | .DequeJoin | .DequeSplit | .DequeReverse -> return ir_builtin_container_route(operation)
-        .OptionZip(_) | .Zip(_, _, _, _, _, _) | .Unzip -> panic("checked structural builtin requires its dedicated non-route lowering")
+        // Each of these has its own lowering, not a route.
+        .OptionZip(_) | .Zip(_, _, _, _, _, _) | .Unzip -> return None
         .TryCollect | .IterToList | .IterCollect | .ListLazy | .Take | .Skip | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare -> return ir_builtin_iter_route(operation, receiver, carrier)
         .StringMethod(symbol) -> return ir_builtin_string_method_route(symbol)
         .ByteBufferMethod(symbol) | .ByteBufferWrite(symbol) -> return ir_builtin_byte_buffer_route(symbol)
@@ -504,7 +507,7 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
     ir_builtin_route_for_receiver(operation, receiver, carrier)
 }
 
-ir_builtin_iter_route: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+ir_builtin_iter_route: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute? Never! {
     if operation == {
         .ListLazy -> {
             is_list_receiver := if ir_builtin_untag(receiver) == {
@@ -514,15 +517,13 @@ ir_builtin_iter_route: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailu
             if is_list_receiver {
                 return ir_builtin_route_row("jet_iter_from_vec", 1, [Bool]{false})
             }
-            panic("checked ListLazy builtin has a non-list receiver")
+            return None
         }
         // One collector for lists and iterators: `[T E!]` becomes `[T] E!`.
         .TryCollect -> return ir_builtin_route_row("jet_list_try_collect", 1, [Bool]{false})
         .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> {}
     }
-    if !ir_builtin_iter_receiver(receiver) {
-        panic("checked iterator builtin has a non-iterator receiver")
-    }
+    if !ir_builtin_iter_receiver(receiver) -> return None
     if operation == {
         .IterToList -> return ir_builtin_route_row("jet_iter_to_list", 1, [Bool]{false})
         .IterCollect -> return ir_builtin_route_row("jet_iter_collect", 1, [Bool]{false})
@@ -545,7 +546,7 @@ ir_builtin_iter_route: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailu
             return ir_builtin_route_row("jet_iter_average_int", 1, [Bool]{false})
         }
         .IterCompare -> return ir_builtin_route_row("jet_iter_compare", 2, [Bool]{false, false})
-        .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .ListLazy | .IterNext | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> panic("checked iterator operation has no canonical route")
+        .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .ListLazy | .IterNext | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> None
     }
 }
 
@@ -553,7 +554,7 @@ ir_builtin_iter_route: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailu
 // names, taking the receiver and the row's parameters. Every operand is
 // borrowed but expandtabs's tab size, which that runtime function takes by
 // value.
-ir_builtin_string_method_route: fn(symbol: String) -> IRBuiltinRoute Never! {
+ir_builtin_string_method_route: fn(symbol: String) -> IRBuiltinRoute? Never! {
     arity := 0
     loop row in BUILTIN_METHOD_ROWS {
         if row.lowering == .Builtin(operation) && operation == .StringMethod(row_symbol) && row_symbol == symbol {
@@ -561,7 +562,7 @@ ir_builtin_string_method_route: fn(symbol: String) -> IRBuiltinRoute Never! {
             break
         }
     }
-    if arity == 0 -> panic("checked StringMethod `{symbol}` has no row in BUILTIN_METHOD_ROWS")
+    if arity == 0 -> return None
     mask := [Bool]{}
     loop index in 0..<arity -> mask.push(index == 0 || symbol != "jet_text_expandtabs")
     ir_builtin_route_row(symbol, arity, mask)
@@ -571,7 +572,7 @@ ir_builtin_string_method_route: fn(symbol: String) -> IRBuiltinRoute Never! {
 // names, taking the receiver and the row's parameters. Every operand is
 // borrowed (an index or count is read from its exact Int) but a written
 // scalar, which the runtime takes by value.
-ir_builtin_byte_buffer_route: fn(symbol: String) -> IRBuiltinRoute Never! {
+ir_builtin_byte_buffer_route: fn(symbol: String) -> IRBuiltinRoute? Never! {
     row: builtin_byte_buffer_row(symbol)
     mask := [Bool]{true}
     writes := false

@@ -1274,7 +1274,7 @@ ir_builtin_on: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver_
         return ir_key_ordered(m, p, b, ty, descending, from, subject, operands, span)
     }
     if operation == .SetFrom || operation == .SortedSetFrom || ir_set_element(receiver_ty) != None {
-        set_route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
+        set_route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty)) ?? return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)} has no route on {receiver_ty:Debug}")
         result: ir_set_builtin(m, p, b, ty, set_route.symbol, subject, operands, span) ?? return ir_fail_slot(b, span, "set builtin {set_route.symbol}")
         if mutates || operation == .SetFrom || operation == .SortedSetFrom -> return result
         return ir_end_builtin_receiver(m, p, b, subject, result, span)
@@ -1289,7 +1289,7 @@ ir_builtin_on: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver_
         return ir_cache_builtin(m, p, b, ty, receiver_ty, operation, subject, operands, span)
     }
     if ir_map_entry_type(receiver_ty) != None {
-        map_route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
+        map_route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty)) ?? return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)} has no route on {receiver_ty:Debug}")
         result: ir_map_builtin(m, p, b, ty, map_route.symbol, subject, operands, span) ?? return ir_fail_slot(b, span, "map builtin {map_route.symbol}")
         if mutates -> return result
         return ir_end_builtin_receiver(m, p, b, subject, result, span)
@@ -2003,7 +2003,7 @@ ir_builtin_route: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiv
     if checked_builtin_mutates_receiver(operation) && !ir_is_handle(m, b.f.slot_type[operands[0]]) {
         return ir_fail_slot(b, span, "mutating builtin {ir_builtin_name(operation)} on {receiver_ty}")
     }
-    route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
+    route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty)) ?? return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)} has no route on {receiver_ty:Debug}")
     if route.arity != operands.len() {
         return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)} with {operands.len()} of {route.arity} operands")
     }
