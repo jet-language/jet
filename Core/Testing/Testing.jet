@@ -10,6 +10,7 @@ package: {
 }
 
 use {
+    builtin: jet_builtins
     core: core
     files: core.files
     sys: core.sys
@@ -453,8 +454,8 @@ suite_row_field: fn(text: String) -> String Never! {
 /// `t.suite(name, body)`: run `body` when this run is the profile child of
 /// the code suite `name` (JET_TEST_SUITE), recording its rows in
 /// JET_TEST_SUITE_ROWS and selecting them by JET_TEST_SUITE_FILTER; any
-/// other run skips it.
-priv __suite_run: fn(name: String, body: fn(TestRows)) -[FS, Env]> {
+/// other run skips it. The compiler calls it through the TestSuiteRun role.
+#Builtin.Role(.TestSuiteRun) priv __suite_run: fn(name: String, body: fn(TestRows)) -[FS, Env]> {
     if (sys.get("JET_TEST_SUITE") ?? "") != name {
         return
     }

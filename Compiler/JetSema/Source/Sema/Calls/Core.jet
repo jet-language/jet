@@ -1244,6 +1244,16 @@ sema_call_core_role_source: fn(role: String, values: [TExpr], result: Type, span
     sema_call_core_source_in(filler.module_identity, filler.name, values, result, true, span, environment, program, diagnostics)
 }
 
+// The checked source target of the Core function that fills `role`, with
+// `type_args`; E1015 when no Core function fills it.
+sema_call_core_role_target: fn(role: String, type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaCallDirectTarget? {
+    filler: sema_core_role_function(program.registration_graph, role) ?? {
+        diagnostics.push(sema_missing_core_role(role, span))
+        return None
+    }
+    sema_call_core_source_target(environment, program, filler.module_identity, filler.name, type_args, span, true, diagnostics)
+}
+
 // The call sema_call_core_source makes, of `member` of the Core module `identity`.
 sema_call_core_source_in: fn(identity: ModuleID, member: String, values: [TExpr], result: Type, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
     target: sema_call_core_source_target(environment, program, identity, member, [Type]{}, span, registered, diagnostics) ?? return None

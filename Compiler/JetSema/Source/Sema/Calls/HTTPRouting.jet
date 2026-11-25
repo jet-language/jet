@@ -1035,13 +1035,13 @@ sema_http_route_custom_verb: fn() -> String Never! { SEMA_HTTP_ROUTE_CUSTOM_CASE
 sema_http_route_method_name: fn(method: String) -> String Never! { method.upper() }
 
 // A static custom method token is checked while building by core.http's one
-// method token check, `__method_token_check`, staged as a checked text
-// literal's `check` is; a run-time App token meets the same check when it
-// registers (`App.__http_route_custom`).
+// method token check, the function that fills the HTTPMethodTokenCheck role,
+// staged as a checked text literal's `check` is; a run-time App token meets
+// the same check when it registers (`App.__http_route_custom`).
 sema_http_route_stage_token_check: fn(token: String, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) Never! {
     span: argument.span
     identity: sema_call_core_module_identity(environment, program, "core.http") ?? return
-    target: sema_call_core_source_target(environment, program, identity, "__method_token_check", [Type]{}, span, true, diagnostics) ?? return
+    target: sema_call_core_role_target("HTTPMethodTokenCheck", [Type]{}, span, environment, program, diagnostics) ?? return
     callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return
     result: sema_call_signature_return(target.signature) ?? return
     text: sema_call_http_core_string(token, span)

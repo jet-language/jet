@@ -1832,21 +1832,22 @@ sema_expression_lambda_expects_http_handler: fn(expected: Type?, environment: Se
 }
 
 // A lambda where an `HTTPHandler` is expected (a middleware returning the
-// handler that wraps `next`) is that handler: it checks and runs as
-// `core.http.server.__handler(lambda)`, the constructor every route uses.
+// handler that wraps `next`) is that handler: it checks and runs as the call
+// of the core.http.server function that fills the HTTPHandlerNew role, the
+// constructor every route uses.
 sema_expression_lambda_http_handler: fn(lambda: Lambda, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     span: lambda.span
-    identity: sema_call_core_module_identity(check.environment.*, check.program.*, "core.http.server") ?? {
+    if sema_call_core_module_identity(check.environment.*, check.program.*, "core.http.server") == None {
         check.diagnostics.push(sema_error("E0003", span, "the HTTP server source module is not loaded", "a lambda used as an `HTTPHandler` runs as `core.http.server` builds every handler", "load the registered Core HTTP server source module"))
         return None
     }
-    target: sema_call_core_source_target(check.environment.*, check.program.*, identity, "__handler", [Type]{}, span, true, check.diagnostics) ?? {
+    target: sema_call_core_role_target("HTTPHandlerNew", [Type]{}, span, check.environment.*, check.program.*, check.diagnostics) ?? {
         check.diagnostics.push(sema_error("E0003", span, "the HTTP handler constructor is not available", "a lambda used as an `HTTPHandler` runs as `core.http.server` builds every handler", "load the registered Core HTTP server source function"))
         return None
     }
     handler := Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED}
     source_args: [CallArg]{CallArg{convention: AccessConvention.Move, expr: handler, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
-    // `__handler` is `HTTPHandler Never!`: its proven `Never` rail unwraps
+    // The constructor is `HTTPHandler Never!`: its proven `Never` rail unwraps
     // to the handler the slot expects.
     built: sema_call_core_check_source_owned(target, "HTTPHandler", [Type]{}, source_args, span, None, check) ?? return None
     if !sema_expression_lambda_never_rail(built.ty) {

@@ -10,6 +10,7 @@ package: {
 }
 
 use {
+    builtin: jet_builtins
     core: core
     provider: core.http.client
     http_url: core.net.url
@@ -950,7 +951,7 @@ priv __MethodTokenError: struct {
 // registers. Any RFC 9110 token is a method, kept in its exact case; only a
 // token that is exactly a standard method is refused, since that method has
 // its own verb.
-priv __method_token_check: fn(token: String) -[]> __MethodTokenError! {
+#Builtin.Role(.HTTPMethodTokenCheck) priv __method_token_check: fn(token: String) -[]> __MethodTokenError! {
     if !valid_method(token) {
         return Err(__MethodTokenError{reason: "`{token}` is not an HTTP method token: a method is one or more letters, digits or characters of !#$%&'*+-.^_`|~"})
     }
