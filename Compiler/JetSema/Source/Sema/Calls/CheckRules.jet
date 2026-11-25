@@ -156,7 +156,6 @@ sema_call_rules_hear: fn(
     program: SemaProgramTables,
     scopes: ^SemaScopeTable,
     check: ^SemaBodyCheck,
-    diagnostics: ^[Diagnostic],
 ) -> SemaCallRuleHearing {
     hearing := SemaCallRuleHearing{from: check.context.comptime_body_sources.len()}
     owner: sema_scope_function_owner_key(scopes)
@@ -172,7 +171,7 @@ sema_call_rules_hear: fn(
     waiting := [Int]{}
     loop index in 0..<rules.len() {
         if sema_comptime_body_value_find(check.context, environment.module_identity, site_owner, rules[index].span, name_span) == .Val(landed) {
-            if sema_call_rule_rejects(landed.value, span, diagnostics) {
+            if sema_call_rule_rejects(landed.value, span, check.diagnostics) {
                 hearing.rejected = true
                 return hearing
             }
@@ -213,13 +212,12 @@ sema_call_rules_hear_stand_in: fn(
     program: SemaProgramTables,
     scopes: ^SemaScopeTable,
     check: ^SemaBodyCheck,
-    diagnostics: ^[Diagnostic],
 ) -> Bool {
     if !sema_call_rules_heard_here(scopes) -> return false
     graph: program.registration_graph
     rules: sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
     if rules.len() == 0 -> return false
-    sema_call_rules_hear(rules, None, name, name_span, args, Val(receiver), Val(receiver_value.ty), None, receiver_value.span, source, site, frame, environment, program, scopes, check, diagnostics).rejected
+    sema_call_rules_hear(rules, None, name, name_span, args, Val(receiver), Val(receiver_value.ty), None, receiver_value.span, source, site, frame, environment, program, scopes, check).rejected
 }
 
 // The tables heard calls add rows to (SemaCheckContext.rule_tables). A

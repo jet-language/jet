@@ -369,16 +369,16 @@ sema_taskgroup_receiver_ok: fn(receiver: Expr, span: Span, scopes: SemaScopeTabl
 // and fiber stack at 8 GiB (Thread.jet THREAD_STACK_MAXIMUM).
 SEMA_TASKGROUP_STACK_MAXIMUM: 8589934592
 
-sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGroupArgs, body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic], loop_depth: Int) -> TStmt? {
+sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGroupArgs, body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int) -> TStmt? {
     checked_limit := TExpr?{None}
     checked_stack := TExpr?{None}
-    valid := !sema_taskgroup_web_refused(name_span, environment, program, diagnostics)
+    valid := !sema_taskgroup_web_refused(name_span, environment, program, check.diagnostics)
     if args.limit == .Val(expression) {
-        checked: sema_check_expression(expression, None, environment, program, scopes, check, diagnostics)
+        checked: sema_check_expression(expression, None, environment, program, scopes, check)
         if checked == {
             .Val(value) -> {
                 if !sema_expr_is_integer(value.ty) {
-                    diagnostics.push(sema_error("E0112", expr_span(expression), "a task-group limit must be an integer", "the limit bounds the number of concurrently running children", "use an Int or inline-range value"))
+                    check.diagnostics.push(sema_error("E0112", expr_span(expression), "a task-group limit must be an integer", "the limit bounds the number of concurrently running children", "use an Int or inline-range value"))
                     valid = false
                 }
                 checked_limit = Val(value)
@@ -387,12 +387,14 @@ sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGrou
         }
     }
     if args.stack == .Val(expression) {
-        if !sema_taskgroup_check_stack_literal(expression, scopes, diagnostics) -> valid = false
-        checked: sema_check_expression(expression, None, environment, program, scopes, check, diagnostics)
+        if !sema_taskgroup_check_stack_literal(expression, scopes, check.diagnostics) {
+            valid = false
+        }
+        checked: sema_check_expression(expression, None, environment, program, scopes, check)
         if checked == {
             .Val(value) -> {
                 if !sema_expr_is_integer(value.ty) {
-                    diagnostics.push(sema_error("E0112", expr_span(expression), "a task-group stack must be an integer", "the stack is the least number of bytes each task of the group runs on", "use an Int byte count, e.g. `stack: 256 * 1024 * 1024`"))
+                    check.diagnostics.push(sema_error("E0112", expr_span(expression), "a task-group stack must be an integer", "the stack is the least number of bytes each task of the group runs on", "use an Int byte count, e.g. `stack: 256 * 1024 * 1024`"))
                     valid = false
                 }
                 checked_stack = Val(value)
@@ -409,21 +411,21 @@ sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGrou
     symbol := Symbol{id: id, kind: SymbolKind.Local, name: name, module_identity: environment.module_identity, owner: Val(symbol_owner), span: name_span, ty: Val(Type.Named{name: "Group"}), visibility: 0}
     if {
         !sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false) -> {
-            diagnostics.push(sema_already_defined(name, name_span))
+            check.diagnostics.push(sema_already_defined(name, name_span))
             valid = false
         }
         else -> {
             sema_ownership_declare_binding(check.state, symbol, false)
-            group_ref: sema_check_expression(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, Val(Type.Named{name: "Group"}), environment, program, scopes, check, diagnostics)
+            group_ref: sema_check_expression(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, Val(Type.Named{name: "Group"}), environment, program, scopes, check)
             if group_ref == None -> valid = false
         }
     }
     check.context.taskgroups.stack.push(sema_taskgroup_frame(name, SemaTaskGroupOrigin.Lexical, name_span))
-    nested := sema_check_statements(body, return_type, environment, program, scopes, check, diagnostics, loop_depth)
-    sema_taskgroup_mark_spawns_owned(check.context, SemaTaskGroupOrigin.Lexical, scopes, check.state, diagnostics)
+    nested := sema_check_statements(body, return_type, environment, program, scopes, check, loop_depth)
+    sema_taskgroup_mark_spawns_owned(check.context, SemaTaskGroupOrigin.Lexical, scopes, check.state, check.diagnostics)
     if check.context.taskgroups.stack.len() > 0 -> _ := check.context.taskgroups.stack.pop()
     sema_taskgroup_publish_loans(check.context, check.state)
-    sema_single_use_leave_scope(scopes, check.state, diagnostics)
+    sema_single_use_leave_scope(scopes, check.state, check.diagnostics)
     if !nested.complete || !valid -> return None
     group_local := checked_symbol_local(name, name_span, id, Type.Named{name: "Group"})
     TStmt.TaskGroup{group: group_local, args: TTaskGroupArgs{limit: checked_limit, stack: checked_stack}, body: nested.value, span: span}
@@ -476,19 +478,19 @@ sema_taskgroup_task_element: fn(ty: Type) -> Type? {
     None
 }
 
-sema_taskgroup_check_discarded_arguments: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) Never! {
+sema_taskgroup_check_discarded_arguments: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) Never! {
     saved_binding := check.context.taskgroups.binding_name
     check.context.taskgroups.binding_name = None
     loop argument in args {
-        _ := sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics)
+        _ := sema_check_expression(argument.expr, None, environment, program, scopes, check)
     }
     check.context.taskgroups.binding_name = saved_binding
 }
 
-sema_taskgroup_check_arity: fn(args: [CallArg], expected: Int, label: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> Bool {
+sema_taskgroup_check_arity: fn(args: [CallArg], expected: Int, label: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
     if args.len() == expected -> return true
-    diagnostics.push(sema_error("E0104", span, "`{label}` takes {expected} argument{if expected == 1 -> "" else -> "s"}, got {args.len()}", "the task surface has a fixed callable/result contract", "pass exactly {expected} argument{if expected == 1 -> "" else -> "s"}"))
-    sema_taskgroup_check_discarded_arguments(args, environment, program, scopes, check, diagnostics)
+    check.diagnostics.push(sema_error("E0104", span, "`{label}` takes {expected} argument{if expected == 1 -> "" else -> "s"}, got {args.len()}", "the task surface has a fixed callable/result contract", "pass exactly {expected} argument{if expected == 1 -> "" else -> "s"}"))
+    sema_taskgroup_check_discarded_arguments(args, environment, program, scopes, check)
     false
 }
 
@@ -571,14 +573,14 @@ sema_taskgroup_call_body_result: fn(signature: Type) -> Type? {
     }
 }
 
-sema_taskgroup_task_group_expr: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic], span: Span) -> TExpr? {
+sema_taskgroup_task_group_expr: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, span: Span) -> TExpr? {
     index: sema_taskgroup_spawn_group_index(check.context) ?? return None
     name := check.context.taskgroups.stack[index].name
     // The group reference is checked on a copy of the context; only its
     // expression-type rows come back.
     updated_context := check.context.copy()
     sema_body_check_swap_context(check, updated_context)
-    group: sema_check_expression(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, Val(Type.Named{name: "Group"}), environment, program, scopes, check, diagnostics)
+    group: sema_check_expression(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, Val(Type.Named{name: "Group"}), environment, program, scopes, check)
     sema_body_check_swap_context(check, updated_context)
     sema_check_context_return_expr_ids(updated_context, check.context)
     sema_eval_walk_take_back(check.context, updated_context)
@@ -917,8 +919,8 @@ sema_taskgroup_mark_branch_move: fn(expression: Expr, scopes: SemaScopeTable, st
     }
 }
 
-sema_taskgroup_check_branches: fn(args: [CallArg], span: Span, method: String, all: Bool, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
-    if !sema_taskgroup_check_arity(args, 1, method, span, environment, program, scopes, check, diagnostics) {
+sema_taskgroup_check_branches: fn(args: [CallArg], span: Span, method: String, all: Bool, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    if !sema_taskgroup_check_arity(args, 1, method, span, environment, program, scopes, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     empty := if args[0].expr == {
@@ -926,14 +928,14 @@ sema_taskgroup_check_branches: fn(args: [CallArg], span: Span, method: String, a
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
     if empty {
-        diagnostics.push(sema_error("E1112", expr_span(args[0].expr), "`{method}` needs at least one task branch", "a task combinator must have a child to join or select", "write `{method}` {{ work() }} with one or more branches"))
+        check.diagnostics.push(sema_error("E1112", expr_span(args[0].expr), "`{method}` needs at least one task branch", "a task combinator must have a child to join or select", "write `{method}` {{ work() }} with one or more branches"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     saved_binding := check.context.taskgroups.binding_name
     check.context.taskgroups.binding_name = None
     saved_branch: check.context.taskgroups.combinator_branch
     check.context.taskgroups.combinator_branch = true
-    branches := sema_check_expression(args[0].expr, None, environment, program, scopes, check, diagnostics)
+    branches := sema_check_expression(args[0].expr, None, environment, program, scopes, check)
     check.context.taskgroups.combinator_branch = saved_branch
     check.context.taskgroups.binding_name = saved_binding
     values: branches ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -941,20 +943,20 @@ sema_taskgroup_check_branches: fn(args: [CallArg], span: Span, method: String, a
     if values.ty == {
         .List(inner) -> {
             elem: sema_taskgroup_task_element(inner) ?? {
-                diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "each branch must produce one Task result", "write `{method}([task_a, task_b])` with Task values"))
+                check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "each branch must produce one Task result", "write `{method}([task_a, task_b])` with Task values"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             result_ty = Val(if all -> Type.List{element: elem} else -> elem)
         }
         .Tuple(fields) -> {
             if !all {
-                diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a list of task branches, not a named tuple", "race and any choose one completed task from a list", "write a list of Task values"))
+                check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a list of task branches, not a named tuple", "race and any choose one completed task from a list", "write a list of Task values"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             result_fields := [TypeTupleField]{}
             loop field in fields {
                 result_elem: sema_taskgroup_task_element(field.ty) ?? {
-                    diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` field `{field.name}` is not a Task", "each named branch must produce one Task result", "give every named branch a Task value"))
+                    check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` field `{field.name}` is not a Task", "each named branch must produce one Task result", "give every named branch a Task value"))
                     return SemaMethodSpecialCheck{handled: true, value: None}
                 }
                 result_fields.push(TypeTupleField{name: field.name, ty: result_elem})
@@ -962,11 +964,11 @@ sema_taskgroup_check_branches: fn(args: [CallArg], span: Span, method: String, a
             result_ty = Val(Type.Tuple{fields: result_fields})
         }
         .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
-            diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "the combinator consumes a [Task<T>] or, for all, a named tuple of Tasks", "pass a list of Task values"))
+            check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "the combinator consumes a [Task<T>] or, for all, a named tuple of Tasks", "pass a list of Task values"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
-    sema_taskgroup_collect_branch_moves(args[0].expr, scopes, check.state, diagnostics)
+    sema_taskgroup_collect_branch_moves(args[0].expr, scopes, check.state, check.diagnostics)
     sema_taskgroup_note_time_effect(check.context, span)
     ok: result_ty ?? Type.Named{name: "Unit"}
     result_type := sema_taskgroup_failure_result(ok)
@@ -977,12 +979,12 @@ sema_taskgroup_check_branches: fn(args: [CallArg], span: Span, method: String, a
             else -> TExprKind.TaskGroupAny{tasks: values}
         }
     }
-    checked := sema_expr_expected_owned(sema_tree_node(result_type, operation.move(), span), expected, environment, program, diagnostics)
+    checked := sema_expr_expected_owned(sema_tree_node(result_type, operation.move(), span), expected, environment, program, check.diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-sema_taskgroup_check_spawn: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
-    if !sema_taskgroup_check_arity(args, 1, "task", span, environment, program, scopes, check, diagnostics) {
+sema_taskgroup_check_spawn: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    if !sema_taskgroup_check_arity(args, 1, "task", span, environment, program, scopes, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     saved_in_spawn := check.context.taskgroups.in_spawn
@@ -1005,7 +1007,7 @@ sema_taskgroup_check_spawn: fn(args: [CallArg], span: Span, expected: Type?, env
     saved_spawn_scoped: check.context.taskgroups.spawn_scoped
     check.context.taskgroups.spawn_scoped = sema_taskgroup_scoped_spawn(check.context)
     check.context.taskgroups.combinator_branch = false
-    checked_body := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, scopes, check, Val(true), diagnostics)
+    checked_body := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, scopes, check, Val(true))
     check.context.taskgroups.combinator_branch = branch
     check.context.taskgroups.spawn_scoped = saved_spawn_scoped
     check.context.taskgroups.spawn_body = saved_spawn_body
@@ -1016,18 +1018,18 @@ sema_taskgroup_check_spawn: fn(args: [CallArg], span: Span, expected: Type?, env
     check.context.taskgroups.spawn_binding = saved_spawn_binding
     body: checked_body ?? return SemaMethodSpecialCheck{handled: true, value: None}
     body_ty: sema_taskgroup_call_body_result(body.ty) ?? {
-        diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body, not `{type_name(body.ty)}`", "a spawned task executes one zero-parameter callable on a worker thread", "pass a zero-parameter lambda or function"))
+        check.diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body, not `{type_name(body.ty)}`", "a spawned task executes one zero-parameter callable on a worker thread", "pass a zero-parameter lambda or function"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     lambda := if body.kind == {
         .Lambda(value) -> value
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> sema_taskgroup_callable_wrapper(body, body.ty, args[0].span, check.context) ?? {
-            diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body that can be captured for execution", "the worker closure must retain the callable until the task runs", "use a lambda or a direct function value"))
+            check.diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body that can be captured for execution", "the worker closure must retain the callable until the task runs", "use a lambda or a direct function value"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
     if lambda.param_types.len() != 0 {
-        diagnostics.push(sema_error("E0104", args[0].span, "`task` needs a zero-parameter body, got {lambda.param_types.len()} parameters", "a task body captures values from the enclosing scope instead of taking arguments", "move or capture data rather than declaring lambda parameters"))
+        check.diagnostics.push(sema_error("E0104", args[0].span, "`task` needs a zero-parameter body, got {lambda.param_types.len()} parameters", "a task body captures values from the enclosing scope instead of taking arguments", "move or capture data rather than declaring lambda parameters"))
     }
     if body.kind == {
         .Lambda(_) -> { sema_function_reactive_note_task_lambda(check.context, lambda) }
@@ -1052,18 +1054,18 @@ sema_taskgroup_check_spawn: fn(args: [CallArg], span: Span, expected: Type?, env
             }
         }
     }
-    sema_taskgroup_check_lambda_captures(lambda, capture_span, environment, program, scopes, check.state, check.context, diagnostics)
+    sema_taskgroup_check_lambda_captures(lambda, capture_span, environment, program, scopes, check.state, check.context, check.diagnostics)
     task_result_ty := body_ty
     problem := sema_ownership_crossing_problem(task_result_ty, SemaSendCrossing.TaskResult, false, environment, program, scopes, check.context)
     if problem == .Val(value) {
         sema_taskgroup_note_detach_problem(check.context, value.kind == SemaSendProblemKind.ViewBorrow)
-        diagnostics.push(sema_ownership_crossing_diagnostic("this task", task_result_ty, value, SemaSendCrossing.TaskResult, spawned_span))
+        check.diagnostics.push(sema_ownership_crossing_diagnostic("this task", task_result_ty, value, SemaSendCrossing.TaskResult, spawned_span))
     } else {
         sema_generic_crossing_note(task_result_ty, SemaSendCrossing.TaskResult, false, false, environment, program, check.context)
     }
     group := TExpr?{None}
     if sema_taskgroup_spawn_group_index(check.context) != None {
-        group = sema_taskgroup_task_group_expr(environment, program, scopes, check, diagnostics, span)
+        group = sema_taskgroup_task_group_expr(environment, program, scopes, check, span)
         if group == None -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
     task_type := Type.Apply{name: "Task", args: [Type]{task_result_ty}}
@@ -1074,24 +1076,24 @@ sema_taskgroup_check_spawn: fn(args: [CallArg], span: Span, expected: Type?, env
         group_name := check.context.taskgroups.stack[index].name
         sema_taskgroup_register_spawn(check.context, group_name, saved_binding_name, span)
     }
-    checked := sema_expr_expected(value, expected, environment, program, diagnostics)
+    checked := sema_expr_expected(value, expected, environment, program, check.diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-sema_taskgroup_check_surface_method: fn(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_taskgroup_check_surface_method: fn(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if !sema_taskgroup_is_internal_receiver(receiver) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     if method == sema_taskgroup_internal_spawn_method() {
-        return sema_taskgroup_check_spawn(args, span, expected, environment, program, scopes, check, diagnostics)
+        return sema_taskgroup_check_spawn(args, span, expected, environment, program, scopes, check)
     }
     if method == sema_taskgroup_internal_timeout_method() {
-        if !sema_taskgroup_check_arity(args, 1, "task.timeout", span, environment, program, scopes, check, diagnostics) {
+        if !sema_taskgroup_check_arity(args, 1, "task.timeout", span, environment, program, scopes, check) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        duration: sema_check_expression(args[0].expr, None, environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        duration: sema_check_expression(args[0].expr, None, environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if duration.ty != (Type.Named{name: "Duration"}) {
-            diagnostics.push(sema_error("E0112", args[0].span, "`task.timeout` needs a Duration, not `{type_name(duration.ty)}`", "task timeouts use a canonical Time delta", "pass a Duration value"))
+            check.diagnostics.push(sema_error("E0112", args[0].span, "`task.timeout` needs a Duration, not `{type_name(duration.ty)}`", "task timeouts use a canonical Time delta", "pass a Duration value"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_taskgroup_note_time_effect(check.context, span)
@@ -1099,11 +1101,11 @@ sema_taskgroup_check_surface_method: fn(receiver: Expr, method: String, args: [C
         // function `core.time.__task_timeout` (jet.runtime.time
         // task_timeout); the next wait point past it stops.
         unit: Type.Named{name: "Unit"}
-        value: sema_call_core_source("core.time", "__task_timeout", [TExpr]{duration}, unit, true, span, environment, program, diagnostics) ?? {
-            diagnostics.push(sema_error("E0906", span, "the source `core.time.__task_timeout` declaration for `task.timeout` is unavailable", "a task timeout installs its deadline through the Core time source", "restore the `core.time` source module"))
+        value: sema_call_core_source("core.time", "__task_timeout", [TExpr]{duration}, unit, true, span, environment, program, check.diagnostics) ?? {
+            check.diagnostics.push(sema_error("E0906", span, "the source `core.time.__task_timeout` declaration for `task.timeout` is unavailable", "a task timeout installs its deadline through the Core time source", "restore the `core.time` source module"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, check.diagnostics)}
     }
     if method == sema_taskgroup_internal_all_method() || method == sema_taskgroup_internal_race_method() || method == sema_taskgroup_internal_any_method() {
         all := method == sema_taskgroup_internal_all_method()
@@ -1114,24 +1116,24 @@ sema_taskgroup_check_surface_method: fn(receiver: Expr, method: String, args: [C
                 else -> "task.any"
             }
         }
-        return sema_taskgroup_check_branches(args, span, label, all, expected, environment, program, scopes, check, diagnostics)
+        return sema_taskgroup_check_branches(args, span, label, all, expected, environment, program, scopes, check)
     }
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
-sema_taskgroup_check_group_method: fn(receiver: Expr, receiver_ty: Type, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_taskgroup_check_group_method: fn(receiver: Expr, receiver_ty: Type, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     if receiver_ty != (Type.Named{name: "Group"}) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    if !sema_taskgroup_receiver_ok(receiver, span, scopes, check.context, diagnostics) {
-        sema_taskgroup_check_discarded_arguments(args, environment, program, scopes, check, diagnostics)
+    if !sema_taskgroup_receiver_ok(receiver, span, scopes, check.context, check.diagnostics) {
+        sema_taskgroup_check_discarded_arguments(args, environment, program, scopes, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     message := if method == "select" -> "`Group` has no method `select`" else -> "`Group` has no method `{method}`"
     why := if method == "select" -> "readiness waits are subjectless `if` tables on plain endpoints" else -> "task groups use the `task` surface; Group values do not own readiness waits"
     fix := if method == "select" -> "write a subjectless readiness table" else -> "write `task work()`, `task.all(…)`, or a subjectless readiness table"
-    diagnostics.push(sema_error("E0102", span, message, why, fix))
-    sema_taskgroup_check_discarded_arguments(args, environment, program, scopes, check, diagnostics)
+    check.diagnostics.push(sema_error("E0102", span, message, why, fix))
+    sema_taskgroup_check_discarded_arguments(args, environment, program, scopes, check)
     SemaMethodSpecialCheck{handled: true, value: None}
 }
 
@@ -1184,7 +1186,7 @@ sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, meth
 // takes an optional `mode: TaskPauseMode` (`.WaitPoints`, the default, or
 // `.CheckLoops`), and every hook reads the handle (it is not consumed) and
 // returns nothing.
-sema_taskgroup_check_task_control: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_taskgroup_check_task_control: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     selected: if {
         method == "pause" && (args.len() == 0 || args.len() == 1) -> Val(BodyHandleOp.TaskPause)
         method == "resume" && args.len() == 0 -> Val(BodyHandleOp.TaskResume)
@@ -1199,14 +1201,14 @@ sema_taskgroup_check_task_control: fn(receiver: Expr, receiver_value: TExpr, met
     if args.len() == 1 {
         params.push(SemaCallParam{label: "mode", name: "mode", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Named{name: "TaskPauseMode"}), variadic: false})
     }
-    typed: sema_stream_handle_checked_args("Task.{method}", params, args, None, None, AccessConvention.Read, -1, span, environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+    typed: sema_stream_handle_checked_args("Task.{method}", params, args, None, None, AccessConvention.Read, -1, span, environment, program, scopes, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type: Type.Named{name: "Unit"}
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
-    checked: sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_stream_handle_effect_fact(environment, program, scopes, check.context, "Task.{method}", span, result_type, "", diagnostics) {
+    checked: sema_expression_call_expected(value, expected, environment, program, check.context, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_stream_handle_effect_fact(environment, program, scopes, check.context, "Task.{method}", span, result_type, "", check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
@@ -1227,26 +1229,26 @@ sema_channel_capacity_literal: fn(expr: Expr) -> Int? Never! {
     }
 }
 
-sema_call_check_channel: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_check_channel: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     if call.args.len() > 1 {
-        sema_stream_handle_infer_args(call.args, environment, program, scopes, check, diagnostics)
-        diagnostics.push(sema_call_arity_diagnostic("channel", 1, call.args.len(), false, call.name_span))
+        sema_stream_handle_infer_args(call.args, environment, program, scopes, check)
+        check.diagnostics.push(sema_call_arity_diagnostic("channel", 1, call.args.len(), false, call.name_span))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if call.type_args.len() != 1 {
-        sema_stream_handle_infer_args(call.args, environment, program, scopes, check, diagnostics)
-        diagnostics.push(sema_error("E0904", call.name_span, "`channel` needs a type argument to infer the element type", "the element type `T` cannot be guessed from an empty channel", "call it with an explicit type argument: `channel<T>()`"))
+        sema_stream_handle_infer_args(call.args, environment, program, scopes, check)
+        check.diagnostics.push(sema_error("E0904", call.name_span, "`channel` needs a type argument to infer the element type", "the element type `T` cannot be guessed from an empty channel", "call it with an explicit type argument: `channel<T>()`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     params := [SemaCallParam]{}
     if call.args.len() == 1 {
         params.push(SemaCallParam{label: "capacity", name: "capacity", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Int), variadic: false})
     }
-    values: sema_stream_handle_checked_args("channel", params, call.args, None, None, AccessConvention.Read, 0, call.name_span, environment, program, scopes, check, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    values: sema_stream_handle_checked_args("channel", params, call.args, None, None, AccessConvention.Read, 0, call.name_span, environment, program, scopes, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if call.args.len() == 1 {
         if sema_channel_capacity_literal(call.args[0].expr) == .Val(capacity) {
             if capacity < 1 {
-                diagnostics.push(sema_error("E0395", expr_span(call.args[0].expr), "A channel capacity must be at least 1, not `{capacity}`.", "A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (Jet.Panic).", "Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel."))
+                check.diagnostics.push(sema_error("E0395", expr_span(call.args[0].expr), "A channel capacity must be at least 1, not `{capacity}`.", "A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (Jet.Panic).", "Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel."))
                 return SemaDirectSpecialCheck{handled: true, value: None}
             }
         }
@@ -1259,8 +1261,8 @@ sema_call_check_channel: fn(call: Call, expected: Type?, environment: SemaScopeE
         },
     }
     member: if call.args.len() == 0 -> "__channel_new" else -> "__channel_bounded"
-    record: sema_call_core_record("core.tasks", member, values.len(), call.name_span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    value: sema_call_core_tree(record, values, call.name_span, [Type]{element}, [Bool]{}, result_type, TFailureCarrier.Infallible, expected, environment, program, diagnostics)
+    record: sema_call_core_record("core.tasks", member, values.len(), call.name_span, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value: sema_call_core_tree(record, values, call.name_span, [Type]{element}, [Bool]{}, result_type, TFailureCarrier.Infallible, expected, environment, program, check.diagnostics)
     SemaDirectSpecialCheck{handled: true, value: value}
 }
 
@@ -1326,28 +1328,28 @@ sema_readiness_receiver_payload: fn(ty: Type) -> Type? Never! {
 // One readiness arm head: a receive arm validates one plain `Receiver<T>` and
 // returns the payload binding its body declares; an `after` arm validates one
 // `Duration` and records the Time effect.
-sema_readiness_check_head: fn(cond: Expr, table: ^SemaReadinessTable, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaConditionBinding? {
+sema_readiness_check_head: fn(cond: Expr, table: ^SemaReadinessTable, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaConditionBinding? {
     cond_span: expr_span(cond)
     head: sema_readiness_head(cond) ?? {
-        diagnostics.push(sema_error("E0112", cond_span, "a readiness table cannot mix channel arms with Boolean guards", "every arm in one readiness table waits on a Receiver<T> or a Duration", "write `value, receiver -> ...` or move the Boolean guard to a separate `if`"))
+        check.diagnostics.push(sema_error("E0112", cond_span, "a readiness table cannot mix channel arms with Boolean guards", "every arm in one readiness table waits on a Receiver<T> or a Duration", "write `value, receiver -> ...` or move the Boolean guard to a separate `if`"))
         table.arms.push(None)
         return None
     }
     if head == {
         .Receive(binding, source) -> {
             source_span: expr_span(source)
-            checked: sema_check_expression(source, None, environment, program, scopes, check, diagnostics)
+            checked: sema_check_expression(source, None, environment, program, scopes, check)
             payload := Type.Named{name: "Unit"}
             if checked == .Val(receiver) {
                 if sema_readiness_receiver_payload(receiver.ty) == .Val(element) {
                     payload = element
                 } else {
-                    diagnostics.push(sema_error("E0112", source_span, "a readiness receive arm needs Receiver<T>, not {sema_type_show(receiver.ty)}", "a receive arm waits on one plain channel endpoint", "use the receiver returned by `channel<T>()`"))
+                    check.diagnostics.push(sema_error("E0112", source_span, "a readiness receive arm needs Receiver<T>, not {sema_type_show(receiver.ty)}", "a receive arm waits on one plain channel endpoint", "use the receiver returned by `channel<T>()`"))
                 }
             }
             if table.element == .Val(previous) {
                 if !type_identity_equal(previous, payload) {
-                    diagnostics.push(sema_error("E0112", source_span, "readiness receive arms must share one element type, got {sema_type_show(previous)} and {sema_type_show(payload)}", "one readiness table returns one receive payload type", "use receivers with the same T, or split the table"))
+                    check.diagnostics.push(sema_error("E0112", source_span, "readiness receive arms must share one element type, got {sema_type_show(previous)} and {sema_type_show(payload)}", "one readiness table returns one receive payload type", "use receivers with the same T, or split the table"))
                 }
             } else { table.element = Val(payload) }
             owner: sema_scope_local_owner_key(scopes)
@@ -1362,7 +1364,7 @@ sema_readiness_check_head: fn(cond: Expr, table: ^SemaReadinessTable, environmen
             return Val(SemaConditionBinding{symbol: symbol, key: key, window: false, sources: [Expr]{}})
         }
         .After(duration) -> {
-            checked: sema_check_expression(duration, None, environment, program, scopes, check, diagnostics)
+            checked: sema_check_expression(duration, None, environment, program, scopes, check)
             shown := "this value"
             is_duration := false
             if checked == .Val(value) {
@@ -1370,7 +1372,7 @@ sema_readiness_check_head: fn(cond: Expr, table: ^SemaReadinessTable, environmen
                 shown = sema_type_show(value.ty)
             }
             if !is_duration {
-                diagnostics.push(sema_error("E0112", expr_span(duration), "`after` needs a Duration, not {shown}", "a readiness timeout is one canonical Duration delta", "write `after 100ms` or pass a Duration binding"))
+                check.diagnostics.push(sema_error("E0112", expr_span(duration), "`after` needs a Duration, not {shown}", "a readiness timeout is one canonical Duration delta", "write `after 100ms` or pass a Duration binding"))
             }
             sema_taskgroup_note_time_effect(check.context, cond_span)
             if checked == .Val(value) {

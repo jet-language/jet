@@ -766,13 +766,12 @@ sema_call_reflection_marker_lookup: fn(
     program: SemaProgramTables,
     scopes: ^SemaScopeTable,
     check: ^SemaBodyCheck,
-    diagnostics: ^[Diagnostic],
 ) -> SemaMethodSpecialCheck {
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() != 1 || args[0].label != None {
-        diagnostics.push(sema_error("E0104", span, "`{owner}.marker` expects one marker type, got {args.len()} arguments", "`marker(T)` reads the one marker `T` written on the reflected item", "call `.marker(T)` with the marker struct's name"))
+        check.diagnostics.push(sema_error("E0104", span, "`{owner}.marker` expects one marker type, got {args.len()} arguments", "`marker(T)` reads the one marker `T` written on the reflected item", "call `.marker(T)` with the marker struct's name"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     written: sema_call_reflection_marker_name(args[0].expr) ?? ""
@@ -791,10 +790,10 @@ sema_call_reflection_marker_lookup: fn(
     }
     marker: declaration ?? {
         shown: if written == "" -> "this argument" else -> "`{written}`"
-        diagnostics.push(sema_error("E1134", args[0].span, "{shown} is not a marker", "`marker(T)` reads the marker `T` written on a reflected item, so `T` names a struct with an `impl Marker` block or a Prelude marker", "name a marker struct visible here or a Prelude marker such as `Codable`"))
+        check.diagnostics.push(sema_error("E1134", args[0].span, "{shown} is not a marker", "`marker(T)` reads the marker `T` written on a reflected item, so `T` names a struct with an `impl Marker` block or a Prelude marker", "name a marker struct visible here or a Prelude marker such as `Codable`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, check.context, "{owner}.marker", span, [EffectRowEntry]{}, diagnostics) {
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, check.context, "{owner}.marker", span, [EffectRowEntry]{}, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     host_args := [TExpr]{sema_call_reflection_text(marker.name, span)}
@@ -803,19 +802,22 @@ sema_call_reflection_marker_lookup: fn(
         default: param.value ?? next
         if prelude {
             refusals := [Diagnostic]{}
-            checked: sema_check_expression(default, None, environment, program, scopes, check, refusals) ?? next
+            sema_body_check_swap_diagnostics(check, refusals)
+            refused_checked: sema_check_expression(default, None, environment, program, scopes, check)
+            sema_body_check_swap_diagnostics(check, refusals)
+            checked: refused_checked ?? next
             if refusals.len() > 0 -> next
             host_args.push(sema_call_reflection_text(param.name, span))
             host_args.push(checked)
             next
         }
-        checked: sema_check_expression(default, None, environment, program, scopes, check, diagnostics) ?? next
+        checked: sema_check_expression(default, None, environment, program, scopes, check) ?? next
         host_args.push(sema_call_reflection_text(param.name, span))
         host_args.push(checked)
     }
     marker_type: if prelude -> Type.Named{name: IR_PRELUDE_MARKER_RECORD} else -> sema_call_resolved_type(Type.Named{name: written}, environment, program)
     value := sema_tree_node(Type.Option{inner: marker_type}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "marker", args: host_args}}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, check.diagnostics)}
 }
 
 sema_call_try_reflection_metadata_method: fn(
@@ -829,44 +831,43 @@ sema_call_try_reflection_metadata_method: fn(
     program: SemaProgramTables,
     scopes: ^SemaScopeTable,
     check: ^SemaBodyCheck,
-    diagnostics: ^[Diagnostic],
 ) -> SemaMethodSpecialCheck {
     owner: sema_call_reflection_metadata_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_call_reflection_metadata_method(owner, method) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     if method == "marker" {
-        return sema_call_reflection_marker_lookup(owner, receiver, receiver_value, args, span, expected, environment, program, scopes, check, diagnostics)
+        return sema_call_reflection_marker_lookup(owner, receiver, receiver_value, args, span, expected, environment, program, scopes, check)
     }
     if args.len() != 1 {
         loop argument in args {
-            _ := sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics)
+            _ := sema_check_expression(argument.expr, None, environment, program, scopes, check)
         }
-        if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+        if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, check.diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects one String argument, got {args.len()}", "metadata predicates inspect one trait or method name", "call `.{method}(name)` with one String"))
+        check.diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects one String argument, got {args.len()}", "metadata predicates inspect one trait or method name", "call `.{method}(name)` with one String"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     params := [SemaCallParam]{SemaCallParam{label: "name", name: "name", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
     checked_args := args
-    binding: sema_call_bind_args("{owner}.{method}", params, checked_args, span, diagnostics) ?? {
+    binding: sema_call_bind_args("{owner}.{method}", params, checked_args, span, check.diagnostics) ?? {
         loop argument in checked_args {
-            _ := sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics)
+            _ := sema_check_expression(argument.expr, None, environment, program, scopes, check)
         }
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    typed: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, checked_args, environment, program, scopes, check, span, diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    ownership := sema_ownership_check_method_call(check.state, "{owner}.{method}", receiver, AccessConvention.Read, params, checked_args, scopes, span, diagnostics)
+    typed: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, checked_args, environment, program, scopes, check, span, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    ownership := sema_ownership_check_method_call(check.state, "{owner}.{method}", receiver, AccessConvention.Read, params, checked_args, scopes, span, check.diagnostics)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, check.context, "{owner}.{method}", span, [EffectRowEntry]{}, diagnostics) {
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, check.context, "{owner}.{method}", span, [EffectRowEntry]{}, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type: sema_call_reflection_method_return(owner, method, [Type]{Type.String}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed.values}}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, check.diagnostics)}
 }
 
 sema_call_reflection_handle_operation: fn(owner: String, method: String) -> BodyHandleOp? {
@@ -900,9 +901,8 @@ sema_call_try_reflection_handle_method: fn(
     program: SemaProgramTables,
     scopes: ^SemaScopeTable,
     check: ^SemaBodyCheck,
-    diagnostics: ^[Diagnostic],
 ) -> SemaMethodSpecialCheck {
-    metadata := sema_call_try_reflection_metadata_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, check, diagnostics)
+    metadata := sema_call_try_reflection_metadata_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, check)
     if metadata.handled -> return metadata
     owner: if receiver_value.ty == {
         .Named(name) -> name
@@ -910,17 +910,17 @@ sema_call_try_reflection_handle_method: fn(
     }
     operation: sema_call_reflection_handle_operation(owner, method)
     if operation == None -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() != 0 {
         loop argument in args {
-            _ := sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics)
+            _ := sema_check_expression(argument.expr, None, environment, program, scopes, check)
         }
-        diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` takes no arguments, got {args.len()}", "reflection handle accessors only inspect their existing value", "call `.{method}()` with no arguments"))
+        check.diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` takes no arguments, got {args.len()}", "reflection handle accessors only inspect their existing value", "call `.{method}()` with no arguments"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type: sema_call_reflection_method_return(owner, method, [Type]{}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, check.diagnostics)}
 }

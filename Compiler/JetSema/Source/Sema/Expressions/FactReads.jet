@@ -1580,11 +1580,11 @@ sema_fact_read_no_value: fn(member: String, span: Span, diagnostics: ^[Diagnosti
 
 // Resolve `base.$member`. `handled: false` leaves an unregistered `$` member
 // (or a nominal fact the subject cannot answer) to the ordinary field path.
-sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaFactReadCheck {
+sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaFactReadCheck {
     read: sema_fact_read_kind(member) ?? return sema_fact_read_unhandled()
     if !sema_scope_build_time(scopes, environment, program) {
         fix: if sema_fact_path_text(base, member) == .Val(path) -> "Write `FACT: #run {path.replace(".$", ".reflect().")}`, then use `FACT` in this expression" else -> "Move the read into a prepared value `NAME: #run {{ … }}` or a `#run {{ … }}` block"
-        diagnostics.push(sema_error("E0302", span, "fact read `{sema_fact_member_display(member)}` is compile-time only", "a fact is a value known before code generation; it never selects runtime behavior", fix))
+        check.diagnostics.push(sema_error("E0302", span, "fact read `{sema_fact_member_display(member)}` is compile-time only", "a fact is a value known before code generation; it never selects runtime behavior", fix))
         return sema_fact_read_failed()
     }
     if base == .Ident(name, _, _) {
@@ -1606,10 +1606,10 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
             bound: symbol ?? return sema_fact_read_failed()
             check.state.used_ids[bound.id.id] = true
             if read == FactRead.Sendability {
-                local_ty: bound.ty ?? return sema_fact_read_no_value(member, span, diagnostics)
+                local_ty: bound.ty ?? return sema_fact_read_no_value(member, span, check.diagnostics)
                 problem: sema_ownership_crossing_problem_for_name(name, local_ty, SemaSendCrossing.TaskCapture, true, environment, program, scopes, check.state, check.context)
                 value: sema_fact_known("SendabilityInfo", problem == None)
-                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_named("SendabilityInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, diagnostics)}
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_named("SendabilityInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, check.diagnostics)}
             }
             if read == FactRead.Movedness {
                 moved := false
@@ -1618,7 +1618,7 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
                     moved = sema_ownership_place_moved(check.state, found) != None
                 }
                 value: sema_fact_known("MovednessInfo", moved)
-                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_named("MovednessInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, diagnostics)}
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_named("MovednessInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, check.diagnostics)}
             }
             if read == FactRead.Origin {
                 binding_index: index ?? return sema_fact_read_failed()
@@ -1628,31 +1628,31 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
                     origin = None
                 }
                 value: sema_fact_local_origin(origin)
-                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_optional("OriginInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, diagnostics)}
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_optional("OriginInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, check.diagnostics)}
             }
             if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields {
                 return sema_fact_read_unhandled()
             }
-            return sema_fact_read_no_value(member, span, diagnostics)
+            return sema_fact_read_no_value(member, span, check.diagnostics)
         }
         if !is_constant && read == FactRead.Uses {
-            return sema_fact_uses_check(name, symbol, span, expected, environment, program, diagnostics)
+            return sema_fact_uses_check(name, symbol, span, expected, environment, program, check.diagnostics)
         }
         if !is_constant {
             resolved: sema_fact_subject_value(read, name, symbol, environment, program) ?? {
                 if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields {
                     return sema_fact_read_unhandled()
                 }
-                return sema_fact_read_no_value(member, span, diagnostics)
+                return sema_fact_read_no_value(member, span, check.diagnostics)
             }
             folded: sema_tree_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
-            return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)}
+            return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, check.diagnostics)}
         }
     }
     // `module.Marker.reflect().uses` names a marker struct of another module.
     if base == .Field(_, _, _, _) && read == FactRead.Uses {
         if sema_fact_expr_path(base) == .Val(path) {
-            return sema_fact_uses_check(path, None, span, expected, environment, program, diagnostics)
+            return sema_fact_uses_check(path, None, span, expected, environment, program, check.diagnostics)
         }
     }
     // `module.Type.reflect().name`: a qualified type path is no value to check; it reads
@@ -1661,27 +1661,27 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
         if sema_fact_expr_path(base) == .Val(path) {
             if sema_fact_subject_value(read, path, None, environment, program) == .Val(resolved) {
                 folded: sema_tree_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
-                return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)}
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, check.diagnostics)}
             }
         }
     }
-    checked_base: sema_check_expression(base, None, environment, program, scopes, check, diagnostics) ?? return sema_fact_read_failed()
+    checked_base: sema_check_expression(base, None, environment, program, scopes, check) ?? return sema_fact_read_failed()
     aggregate_ty: sema_fact_reflected_type(checked_base.ty, read)
     if aggregate_ty == .Val(ty) {
         if checked_base.kind == .CtLit(aggregate) {
-            value: sema_fact_reflected_field(aggregate, member) ?? return sema_fact_read_no_value(member, span, diagnostics)
-            return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(ty, TExprKind.CtLit{value: value}, span), expected, environment, program, diagnostics)}
+            value: sema_fact_reflected_field(aggregate, member) ?? return sema_fact_read_no_value(member, span, check.diagnostics)
+            return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(ty, TExprKind.CtLit{value: value}, span), expected, environment, program, check.diagnostics)}
         }
         if sema_fact_constant_path(checked_base, check.context) {
             reference: TFieldRef{owner: None, name: member, ty: ty, boxed: false}
-            return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(ty, TExprKind.Field{receiver: checked_base, field: reference}, span), expected, environment, program, diagnostics)}
+            return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(ty, TExprKind.Field{receiver: checked_base, field: reference}, span), expected, environment, program, check.diagnostics)}
         }
-        return sema_fact_read_no_value(member, span, diagnostics)
+        return sema_fact_read_no_value(member, span, check.diagnostics)
     }
     if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields {
         return sema_fact_read_unhandled()
     }
-    sema_fact_read_no_value(member, span, diagnostics)
+    sema_fact_read_no_value(member, span, check.diagnostics)
 }
 
 // `T.reflect().values`: every case of enum `T` once, in declaration order, a
@@ -1689,7 +1689,7 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
 // literal `[T]{T.A, T.Group.B}`, so each item is the ordinary case value, and
 // every read builds its own list. Only a reflected type is a subject: a value
 // named `values` and a user `values` method are untouched.
-sema_fact_enum_values: fn(base: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaFactReadCheck {
+sema_fact_enum_values: fn(base: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaFactReadCheck {
     if base == .MethodCall(receiver, method, _, owner_type_args, type_args, args, _) {
         if method != "reflect" || owner_type_args.len() > 0 || type_args.len() > 0 || args.len() > 0 {
             return sema_fact_read_unhandled()
@@ -1698,29 +1698,29 @@ sema_fact_enum_values: fn(base: Expr, span: Span, expected: Type?, environment: 
         at: Span{start: span.end - "values".len(), end: span.end}
         // A builtin type (`Int`, `String`) is never an enum.
         if !(foundation_named_type(written) == .Named(_)) {
-            diagnostics.push(sema_fact_enum_values_not_enum(written, at))
+            check.diagnostics.push(sema_fact_enum_values_not_enum(written, at))
             return sema_fact_read_failed()
         }
         symbol: sema_expression_type_symbol(scopes, environment, program, written) ?? return sema_fact_read_unhandled()
         shape: sema_scope_declaration_enum(environment, program, symbol.id) ?? {
-            diagnostics.push(sema_fact_enum_values_not_enum(written, at))
+            check.diagnostics.push(sema_fact_enum_values_not_enum(written, at))
             return sema_fact_read_failed()
         }
         if shape.type_params.len() > 0 {
-            diagnostics.push(sema_error("E0949", at, "`{written}` is generic, so its cases have no one type to list", "`.values` lists each case as a value of one enum type, and a generic enum is a family of types", "list the values of the specialization you need yourself"))
+            check.diagnostics.push(sema_error("E0949", at, "`{written}` is generic, so its cases have no one type to list", "`.values` lists each case as a value of one enum type, and a generic enum is a family of types", "list the values of the specialization you need yourself"))
             return sema_fact_read_failed()
         }
         elements := [Expr]{}
         loop variant in shape.variants {
             if !(variant.payload == .Unit) {
-                diagnostics.push(sema_error("E0949", at, "`{written}.{variant.name}` carries a payload, so `{written}` has no list of case values", "`.values` lists every case once as a value, and a case with a payload is no value until its data is given", "remove the payload from `{variant.name}`, or list the values you need yourself"))
+                check.diagnostics.push(sema_error("E0949", at, "`{written}.{variant.name}` carries a payload, so `{written}` has no list of case values", "`.values` lists every case once as a value, and a case with a payload is no value until its data is given", "remove the payload from `{variant.name}`, or list the values you need yourself"))
                 return sema_fact_read_failed()
             }
             elements.push(sema_fact_enum_value_path(written, variant.name, span))
         }
         head: Type.List{element: Type.Named{name: written}}
         catalog: Expr.TypedLit{head: Val(head), body: TypedLitBody.Elements{elements: elements}, span: span, id: AST_NODE_GENERATED}
-        return SemaFactReadCheck{handled: true, value: sema_check_expression(catalog, expected, environment, program, scopes, check, diagnostics)}
+        return SemaFactReadCheck{handled: true, value: sema_check_expression(catalog, expected, environment, program, scopes, check)}
     }
     sema_fact_read_unhandled()
 }

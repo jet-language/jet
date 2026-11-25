@@ -766,7 +766,9 @@ sema_marker_rules_observe_argument: fn(marker: Marker, source_index: Int, expect
     probe_context_mark: sema_check_context_mark(check.context)
     reference_start := check.context.name_references.len()
     request_start := check.context.comptime_requests.len()
-    checked := sema_check_expression(argument, checked_expected, environment, program, scopes, check, diagnostics)
+    sema_body_check_swap_diagnostics(check, diagnostics)
+    checked := sema_check_expression(argument, checked_expected, environment, program, scopes, check)
+    sema_body_check_swap_diagnostics(check, diagnostics)
     sema_ownership_fork_rollback(check.state, probe_fork)
     sema_ownership_fork_close(check.state, probe_fork)
     checked_value := false
@@ -918,10 +920,10 @@ sema_marker_rules_unknown_variant_error: fn(marker: Marker, menu: TAppliedRuleAr
     sema_error("E0930", Span{start: start, end: marker.span.end}, "`#{marker.name}` has no `{menu.name}` called `{written}`", "`{menu.name}` is a closed menu: {choices}", "pick one of {choices}")
 }
 
-sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?, declared: Bool, owns_menu: Bool, registry: SemaScopeMembersMarkerRegistry, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, values: [SemaComptimeItemValue], facts: ^[SemaMarkerRuleArgumentFact], comptime_sources: ^[SemaComptimeItemSource], comptime_requests: ^[SemaComptimeRequest], diagnostics: ^[Diagnostic]) -> Bool {
+sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?, declared: Bool, owns_menu: Bool, registry: SemaScopeMembersMarkerRegistry, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, values: [SemaComptimeItemValue], facts: ^[SemaMarkerRuleArgumentFact], comptime_sources: ^[SemaComptimeItemSource], comptime_requests: ^[SemaComptimeRequest]) -> Bool {
     bindings: sema_marker_rules_marker_signature_bindings(marker, signature, Val(registry.format_names)) ?? {
         failure: if sema_marker_is_hook(marker, MarkerHook.Rename) -> sema_marker_rules_rename_error(marker, signature, registry.format_names) else -> sema_marker_rules_signature_error(marker, signature, declared)
-        diagnostics.push(failure)
+        check.diagnostics.push(failure)
         return false
     }
     valid := true
@@ -934,7 +936,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
                 pending_facts.push(SemaMarkerRuleArgumentFact{marker_span: marker.name_span, source_index: binding.source_index, parameter_index: binding.parameter_index, kind: binding.kind, ty: None, constant: None, checked: false, comptime_requests: [SemaComptimeRequest]{}})
                 next
             }
-            diagnostics.push(sema_marker_rules_signature_error(marker, signature, declared))
+            check.diagnostics.push(sema_marker_rules_signature_error(marker, signature, declared))
             return false
         }
         argument: expression
@@ -967,7 +969,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
                             if candidate != "" && !menu.variants.contains(candidate) {
                                 // An unknown effect root is the effect vocabulary's own E0119, reported once.
                                 unknown: if menu.name == "Effect" -> sema_effect_unknown(candidate, sema_marker_rules_root_span(element)) else -> sema_marker_rules_unknown_variant_error(marker, menu, candidate, element)
-                                diagnostics.push(unknown)
+                                check.diagnostics.push(unknown)
                                 return false
                             }
                         }
@@ -1004,7 +1006,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
         if observe {
             capture_constant := declared || binding.kind == TAppliedRuleArgKind.String || binding.kind == TAppliedRuleArgKind.Bool || binding.kind == TAppliedRuleArgKind.Int
             observation = sema_marker_rules_observe_argument(marker, binding.source_index, if declared -> expected_type else -> None, capture_constant, argument, environment, program, scopes, check, values)
-            loop diagnostic in observation.diagnostics { diagnostics.push(diagnostic) }
+            loop diagnostic in observation.diagnostics { check.diagnostics.push(diagnostic) }
             if declared && observation.diagnostics.len() > 0 -> had_declared_expression_error = true
             if observation.comptime_source == .Val(source) {
                 sema_marker_rules_append_comptime_source(comptime_sources, source)
@@ -1042,7 +1044,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
     }
     if !valid {
         if !had_declared_expression_error {
-            diagnostics.push(sema_marker_rules_signature_error(marker, signature, declared))
+            check.diagnostics.push(sema_marker_rules_signature_error(marker, signature, declared))
         }
         return false
     }
@@ -1057,7 +1059,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
 // (sema_marker_rules_check_context_fact), a function or method, and the
 // static-product sites (sema_marker_rules_check_static_sites). True when the
 // arguments bind or no registered rule governs the marker.
-sema_marker_rules_check_rule_signature: fn(marker: Marker, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> Bool {
+sema_marker_rules_check_rule_signature: fn(marker: Marker, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
     if marker.declaration_module != None -> return true
     graph: program.registration_graph
     if graph.marker_catalog == .Val(registry) {
@@ -1066,7 +1068,7 @@ sema_marker_rules_check_rule_signature: fn(marker: Marker, environment: SemaScop
         facts := [SemaMarkerRuleArgumentFact]{}
         sources := [SemaComptimeItemSource]{}
         requests := [SemaComptimeRequest]{}
-        return sema_marker_rules_validate_argument_signature(marker, registry.applied_rules[rule_index].signature, expected_types, None, false, registry.applied_rules[rule_index].owns_menu, registry, environment, program, scopes, check, [SemaComptimeItemValue]{}, facts, sources, requests, diagnostics)
+        return sema_marker_rules_validate_argument_signature(marker, registry.applied_rules[rule_index].signature, expected_types, None, false, registry.applied_rules[rule_index].owns_menu, registry, environment, program, scopes, check, [SemaComptimeItemValue]{}, facts, sources, requests)
     }
     true
 }
@@ -1084,10 +1086,10 @@ sema_marker_rules_line_needs_bool: fn(marker: Marker, signature: TAppliedRuleSig
 
 // Every marker of `markers` through sema_marker_rules_check_rule_signature;
 // true when all of them bind.
-sema_marker_rules_check_rule_signatures: fn(markers: [Marker], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> Bool {
+sema_marker_rules_check_rule_signatures: fn(markers: [Marker], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
     valid := true
     loop marker in markers {
-        if !sema_marker_rules_check_rule_signature(marker, environment, program, scopes, check, diagnostics) {
+        if !sema_marker_rules_check_rule_signature(marker, environment, program, scopes, check) {
             valid = false
         }
     }
@@ -1099,10 +1101,10 @@ sema_marker_rules_check_rule_signatures: fn(markers: [Marker], environment: Sema
 // moment and `#On(stage, Marker)` joins a tool stage (ToolStages.jet), so the
 // stage and the hook's shape are checked, not the statement site's `build`
 // condition. True when all of them bind.
-sema_marker_rules_check_function_markers: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> Bool {
+sema_marker_rules_check_function_markers: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
     valid := true
     loop marker in func.markers {
-        bound: if marker.name == MARKER_ON && marker.declaration_module == None -> sema_marker_rules_check_stage_hook(func, marker, diagnostics) else -> sema_marker_rules_check_rule_signature(marker, environment, program, scopes, check, diagnostics)
+        bound: if marker.name == MARKER_ON && marker.declaration_module == None -> sema_marker_rules_check_stage_hook(func, marker, check.diagnostics) else -> sema_marker_rules_check_rule_signature(marker, environment, program, scopes, check)
         if !bound -> valid = false
     }
     valid
@@ -1201,7 +1203,7 @@ sema_marker_rules_unqualified_type: fn(text: String) -> String Never! {
 // signature (`#HTML(path)` at the file site, bare `#HTML { … }` at the block
 // site) is bare at its block site. The block form's header is the checked text
 // block's own law (sema_stmt_check_scope_member, E0617).
-sema_marker_rules_check_statement_facts: fn(target: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) {
+sema_marker_rules_check_statement_facts: fn(target: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) {
     graph: program.registration_graph
     if graph.marker_catalog == .Val(registry) {
         row: sema_scope_caller_row(environment, graph)
@@ -1223,7 +1225,7 @@ sema_marker_rules_check_statement_facts: fn(target: Span, environment: SemaScope
             if graph.modules[row].program.rule_facts[index].site == (Val(RuleSite.Block)) && sema_marker_rules_block_form_is_bare(registry, graph.modules[row].program.rule_facts[index].marker) {
                 next
             }
-            _ := sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, scopes, check, diagnostics)
+            _ := sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, scopes, check)
         }
     }
 }
@@ -1240,7 +1242,7 @@ sema_marker_rules_block_form_is_bare: fn(registry: SemaScopeMembersMarkerRegistr
 // left out (ContextKeys.jet sema_context_marker_fields), and its `#Deadline`
 // application against `Deadline(limit:)`. False when it does not bind; the
 // field checks then stay quiet.
-sema_marker_rules_check_context_fact: fn(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> Bool {
+sema_marker_rules_check_context_fact: fn(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
     graph: program.registration_graph
     if graph.marker_catalog == None -> return true
     row: sema_scope_caller_row(environment, graph)
@@ -1251,9 +1253,9 @@ sema_marker_rules_check_context_fact: fn(span: Span, environment: SemaScopeEnvir
             next
         }
         if deadline {
-            return sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, scopes, check, diagnostics)
+            return sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, scopes, check)
         }
-        return sema_marker_rules_check_rule_signature(sema_context_marker_fields(graph.modules[row].program.rule_facts[index].marker), environment, program, scopes, check, diagnostics)
+        return sema_marker_rules_check_rule_signature(sema_context_marker_fields(graph.modules[row].program.rule_facts[index].marker), environment, program, scopes, check)
     }
     true
 }
@@ -1268,39 +1270,41 @@ sema_marker_rules_check_static_sites: fn(environment: SemaScopeEnvironment, prog
         return
     }
     check := sema_body_check_init()
+    sema_body_check_swap_diagnostics(check, diagnostics)
     loop index in 0..<graph.modules[module_index].program.rule_facts.len() {
         if graph.modules[module_index].program.rule_facts[index].site != (Val(RuleSite.File)) {
             next
         }
-        _ := sema_marker_rules_check_rule_signature(graph.modules[module_index].program.rule_facts[index].marker, environment, program, scopes, check, diagnostics)
+        _ := sema_marker_rules_check_rule_signature(graph.modules[module_index].program.rule_facts[index].marker, environment, program, scopes, check)
     }
     loop item_index in 0..<graph.modules[module_index].program.items.len() {
-        sema_marker_rules_check_static_item(graph.modules[module_index].program.items[item_index], environment, program, scopes, check, diagnostics)
+        sema_marker_rules_check_static_item(graph.modules[module_index].program.items[item_index], environment, program, scopes, check)
     }
+    sema_body_check_swap_diagnostics(check, diagnostics)
 }
 
-sema_marker_rules_check_static_item: fn(item: Item, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) {
+sema_marker_rules_check_static_item: fn(item: Item, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) {
     if item == {
         .Struct(definition) -> {
-            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, environment, program, scopes, check, diagnostics)
-            _ := sema_marker_rules_check_rule_signatures(definition.serde_markers, environment, program, scopes, check, diagnostics)
+            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, environment, program, scopes, check)
+            _ := sema_marker_rules_check_rule_signatures(definition.serde_markers, environment, program, scopes, check)
             loop field in definition.fields {
-                _ := sema_marker_rules_check_rule_signatures(field.serde_markers, environment, program, scopes, check, diagnostics)
+                _ := sema_marker_rules_check_rule_signatures(field.serde_markers, environment, program, scopes, check)
             }
         }
         .Enum(definition) -> {
-            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, environment, program, scopes, check, diagnostics)
-            _ := sema_marker_rules_check_rule_signatures(definition.serde_markers, environment, program, scopes, check, diagnostics)
+            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, environment, program, scopes, check)
+            _ := sema_marker_rules_check_rule_signatures(definition.serde_markers, environment, program, scopes, check)
             loop variant in definition.variants {
-                _ := sema_marker_rules_check_rule_signatures(variant.serde_markers, environment, program, scopes, check, diagnostics)
+                _ := sema_marker_rules_check_rule_signatures(variant.serde_markers, environment, program, scopes, check)
             }
         }
         .Distinct(definition) -> {
-            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, environment, program, scopes, check, diagnostics)
+            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, environment, program, scopes, check)
         }
         .Const(definition) -> {
-            _ := sema_marker_rules_check_rule_signatures(definition.markers, environment, program, scopes, check, diagnostics)
-            sema_context_key_check_declaration(definition, environment.module_name, diagnostics)
+            _ := sema_marker_rules_check_rule_signatures(definition.markers, environment, program, scopes, check)
+            sema_context_key_check_declaration(definition, environment.module_name, check.diagnostics)
         }
         .Test(test) -> {
             args := [MarkerCallArg]{}
@@ -1321,7 +1325,7 @@ sema_marker_rules_check_static_item: fn(item: Item, environment: SemaScopeEnviro
                 return
             }
             marker: Marker{name: "Test", negated: false, name_span: test.span, args: args, arg_labels: labels, span: test.span, ct: None}
-            _ := sema_marker_rules_check_rule_signature(marker, environment, program, scopes, check, diagnostics)
+            _ := sema_marker_rules_check_rule_signature(marker, environment, program, scopes, check)
         }
         .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
@@ -2022,13 +2026,17 @@ sema_marker_rules_validate_arguments: fn(registry: SemaScopeMembersMarkerRegistr
         if builtin_index != None {
             rule := registry.applied_rules[builtin_index ?? 0]
             expected_types: (loop _ in rule.signature.params -> Type?{None})
-            sema_marker_rules_validate_argument_signature(marker, rule.signature, expected_types, None, false, rule.owns_menu, registry, environment, program, scopes, check, values, result.argument_facts, result.comptime_sources, result.comptime_requests, result.diagnostics)
+            sema_body_check_swap_diagnostics(check, result.diagnostics)
+            sema_marker_rules_validate_argument_signature(marker, rule.signature, expected_types, None, false, rule.owns_menu, registry, environment, program, scopes, check, values, result.argument_facts, result.comptime_sources, result.comptime_requests)
+            sema_body_check_swap_diagnostics(check, result.diagnostics)
         }
         user_index := sema_marker_rules_user_rule_index(registry, marker)
         if user_index != None {
             rule := registry.marker_rules[user_index ?? 0]
             signature: sema_marker_rules_declared_signature(rule)
-            sema_marker_rules_validate_argument_signature(marker, signature.signature, signature.expected_types, signature.variadic_expected_type, true, false, registry, environment, program, scopes, check, values, result.argument_facts, result.comptime_sources, result.comptime_requests, result.diagnostics)
+            sema_body_check_swap_diagnostics(check, result.diagnostics)
+            sema_marker_rules_validate_argument_signature(marker, signature.signature, signature.expected_types, signature.variadic_expected_type, true, false, registry, environment, program, scopes, check, values, result.argument_facts, result.comptime_sources, result.comptime_requests)
+            sema_body_check_swap_diagnostics(check, result.diagnostics)
         }
     }
 }
@@ -2519,15 +2527,15 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
 // `#NoPrelude` turns the curated prelude names `print` and
 // `input` off for its file (E0429) unless the file declares its own. The
 // arguments are still checked; the call reports once and yields no value.
-sema_marker_rules_no_prelude_call: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> Bool {
+sema_marker_rules_no_prelude_call: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> Bool {
     if call.name != "print" && call.name != "input" -> return false
     if !sema_module_no_prelude(environment, program) || !sema_call_gate_is_unshadowed(call.name, scopes) {
         return false
     }
     fix: if call.name == "print" -> "write `use io: core.term` and call `io.print(…)`, or remove `#NoPrelude`" else -> "write `use io: core.term` and read a line with `io.readline(…)`, or remove `#NoPrelude`"
-    diagnostics.push(sema_marker_rules_no_prelude_error(call.name, call.name_span, fix))
+    check.diagnostics.push(sema_marker_rules_no_prelude_error(call.name, call.name_span, fix))
     loop argument_index in 0..<call.args.len() {
-        _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, scopes, check, diagnostics)
+        _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, scopes, check)
     }
     true
 }

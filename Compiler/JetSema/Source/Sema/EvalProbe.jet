@@ -366,7 +366,9 @@ sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool,
     expected: Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     diagnostics := [Diagnostic]{}
     sema_body_check_swap(check, probe_state, probe_context)
-    checked: sema_expression_lambda_with_host(lambda, Val(expected), environment, program, scopes, check, diagnostics, false, false, false, true)
+    sema_body_check_swap_diagnostics(check, diagnostics)
+    checked: sema_expression_lambda_with_host(lambda, Val(expected), environment, program, scopes, check, false, false, false, true)
+    sema_body_check_swap_diagnostics(check, diagnostics)
     sema_body_check_swap(check, probe_state, probe_context)
     sema_check_routes_take_back(check.context, probe_context, routes_kept)
     answer := SemaEvalProbeAnswer{probe: probe, expression: expression, function: check.context.eval_walk.function, exact: exact, span: span, complete: false, value_type: None, captures: [TCapture]{}, refusals: [Diagnostic]{}, effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}, lent: lent}

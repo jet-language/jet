@@ -233,7 +233,7 @@ sema_context_root: fn(root: String, root_span: Span, environment: SemaScopeEnvir
 // and a `#Memo` key holds the value (Effects/Checks.jet
 // sema_effect_context_reach), compared by the type's equality.
 // Unhandled unless the receiver names the task context (sema_context_root).
-sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     root := ""
     root_span := Span{start: 0, end: 0}
@@ -247,11 +247,11 @@ sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [C
     failed: SemaDirectSpecialCheck{handled: true, value: None}
     span: Span{start: expr_span(receiver).start, end: method_span.end}
     if method != "get" {
-        diagnostics.push(sema_error("E0302", method_span, "`context` has no method `{method}`", "the task context reads its fields as `context.<field>` and a package's keys as `context.get(key)`", "write `context.get(key)` for a `#ContextKey` constant"))
+        check.diagnostics.push(sema_error("E0302", method_span, "`context` has no method `{method}`", "the task context reads its fields as `context.<field>` and a package's keys as `context.get(key)`", "write `context.get(key)` for a `#ContextKey` constant"))
         return failed
     }
     if args.len() != 1 || args[0].label != None {
-        diagnostics.push(sema_error("E0761", method_span, "`context.get` takes one context key", "`context.get(key)` reads the value a `#Context` block set for a `#ContextKey` constant", "write `context.get(frame_index)` for `#ContextKey frame_index: …`"))
+        check.diagnostics.push(sema_error("E0761", method_span, "`context.get` takes one context key", "`context.get(key)` reads the value a `#Context` block set for a `#ContextKey` constant", "write `context.get(frame_index)` for `#ContextKey frame_index: …`"))
         return failed
     }
     name := ""
@@ -263,19 +263,19 @@ sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [C
         // the wait, and the check runs again once the value lands
         // (sema_check_comptime_function).
         if name != "" && sema_context_key_waits(name, environment, scopes) {
-            _ := sema_check_expression(args[0].expr, None, environment, program, scopes, check, diagnostics)
+            _ := sema_check_expression(args[0].expr, None, environment, program, scopes, check)
             return failed
         }
-        diagnostics.push(sema_error("E0761", expr_span(args[0].expr), "`context.get` needs a context key", "only a constant declared with `#ContextKey` names a context value", "declare a snake_case key such as `#ContextKey frame_index: 0` and pass its name"))
+        check.diagnostics.push(sema_error("E0761", expr_span(args[0].expr), "`context.get` needs a context key", "only a constant declared with `#ContextKey` names a context value", "declare a snake_case key such as `#ContextKey frame_index: 0` and pass its name"))
         return failed
     }
-    default: sema_check_expression(args[0].expr, None, environment, program, scopes, check, diagnostics) ?? return failed
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, check.context, "context.get", span, [EffectRowEntry]{}, diagnostics) {
+    default: sema_check_expression(args[0].expr, None, environment, program, scopes, check) ?? return failed
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, check.context, "context.get", span, [EffectRowEntry]{}, check.diagnostics) {
         return failed
     }
     equatable: sema_type_equatable(environment, program, found.ty)
     read: sema_tree_node(found.ty, TExprKind.HostCall{call: THostCall.ContextGet{key: found.key, default: default, equatable: equatable}}, span)
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(read, expected, environment, program, diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(read, expected, environment, program, check.diagnostics)}
 }
 
 // Whether `name` binds a constant whose type a value computed while building

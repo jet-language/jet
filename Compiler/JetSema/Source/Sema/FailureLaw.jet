@@ -327,10 +327,10 @@ sema_catch_all_err_rewrite: fn(subject: Expr, name: String, name_span: Span, pat
 
 // A catch-all arm's body, checked in the arm's open scope behind the `Err`
 // binding it starts with (SemaCatchAllErr).
-sema_catch_all_err_check_body: fn(caught: SemaCatchAllErr, body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic], loop_depth: Int) -> SemaStatementResult {
-    bound := sema_check_statements(caught.bind, return_type, environment, program, scopes, check, diagnostics, loop_depth)
+sema_catch_all_err_check_body: fn(caught: SemaCatchAllErr, body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, loop_depth: Int) -> SemaStatementResult {
+    bound := sema_check_statements(caught.bind, return_type, environment, program, scopes, check, loop_depth)
     if !bound.complete -> return bound
-    rest: sema_check_statements(body, return_type, environment, program, scopes, check, diagnostics, loop_depth)
+    rest: sema_check_statements(body, return_type, environment, program, scopes, check, loop_depth)
     loop statement in rest.value -> bound.value.push(statement)
     bound.complete = rest.complete
     bound
@@ -1777,19 +1777,19 @@ SemaDropStatement: struct {
     value: TStmt?,
 }
 
-sema_stmt_check_drop: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaDropStatement {
+sema_stmt_check_drop: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaDropStatement {
     if expr == {
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             if method != "drop" -> return SemaDropStatement{handled: false, value: None}
             reason: sema_drop_reason_problem(args)
             if reason == .Val(problem) {
-                diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))
+                check.diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))
             }
-            checked: sema_check_expression_carrier(receiver, None, environment, program, scopes, check, diagnostics) ?? return SemaDropStatement{handled: true, value: None}
+            checked: sema_check_expression_carrier(receiver, None, environment, program, scopes, check) ?? return SemaDropStatement{handled: true, value: None}
             // (L1101): `.drop()` on a task discards the handle
             // without joining it; `.detach()` is the fire-and-forget word.
             if sema_single_use_is_task(checked.ty) {
-                diagnostics.push(sema_single_use_diag_unjoined("this task", "`.drop()` discards the handle without joining it, so the task may outlive the function", expr_span(expr)))
+                check.diagnostics.push(sema_single_use_diag_unjoined("this task", "`.drop()` discards the handle without joining it, so the task may outlive the function", expr_span(expr)))
             }
             return SemaDropStatement{handled: true, value: Val(TStmt.ExprStmt{value: checked, span: expr_span(expr)})}
         }

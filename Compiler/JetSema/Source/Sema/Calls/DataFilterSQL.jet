@@ -249,7 +249,9 @@ sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, environment: Se
     texts := sema_data_filter_texts(sql, span)
     text_list: Type.List{element: Type.String}
     probe := [Diagnostic]{}
-    bound := sema_check_expression(texts, Val(text_list), environment, program, scopes, check, probe)
+    sema_body_check_swap_diagnostics(check, probe)
+    bound := sema_check_expression(texts, Val(text_list), environment, program, scopes, check)
+    sema_body_check_swap_diagnostics(check, probe)
     if bound == None || sema_has_error_since(probe, 0) {
         sql = sema_data_filter_none()
         texts = sema_data_filter_texts(sql, span)
