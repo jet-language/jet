@@ -59,6 +59,7 @@ CoreCapabilityContract: struct {
     failure: String?,
 }
 
+// A `#Deprecated` declaration's lifecycle payload (sema_lifecycle_marker).
 CoreMarkerApplication: struct {
     member: String,
     since: String,
@@ -88,7 +89,6 @@ CoreCallRecord: struct {
     source_role: String?{None},
     coverage: CoreCallCoverage,
     aot_direct: Bool,
-    marker: CoreMarkerApplication?,
     authority: AuthorityDecision?,
 }
 
@@ -194,21 +194,6 @@ core_receiver_method_in: fn(rows: [CoreCallRecord], receiver_type: String, membe
 
 core_receiver_method: fn(receiver_type: String, member: String) -> CoreCallRecord? {
     core_receiver_method_in(CORE_CALLS, receiver_type, member)
-}
-
-core_marker_application: fn(module_name: String, member: String) -> CoreMarkerApplication? {
-    core_marker_application_in(CORE_CALLS, module_name, member)
-}
-
-core_marker_application_in: fn(rows: [CoreCallRecord], module_name: String, member: String) -> CoreMarkerApplication? {
-    loop row in rows {
-        if row.module_name == module_name && row.receiver_types.len() == 0 {
-            if row.marker == .Val(marker) {
-                if marker.member == member -> return Val(marker)
-            }
-        }
-    }
-    None
 }
 
 core_call_projection_in: fn(rows: [CoreCallRecord], module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {

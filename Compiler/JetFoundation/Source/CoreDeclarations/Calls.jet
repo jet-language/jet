@@ -334,15 +334,6 @@ core_decl_rust_strings: fn(expression: String, context: String, constants: CoreD
     Ok(out)
 }
 
-// `Some(<string>)`'s string.
-core_decl_rust_some_string: fn(expression: String, context: String, constants: CoreDeclTexts) -> String CoreDeclarationError! {
-    call: core_decl_whole_call(expression, context, "optional Rust string") ?? return Err(err)
-    if call.name != "Some" || call.args.len() != 1 {
-        return Err(core_decl_fail("unsupported optional Rust string in {context}: {expression.trim()}"))
-    }
-    core_decl_rust_string(call.args[0], context, constants)
-}
-
 // The CoreCallPureRoute a `CoreCallPureRoute.<Rust variant>` names: Jet
 // spells acronyms in caps; the retired Rust enum kept its Rust variant names.
 core_decl_pure_route: fn(expression: String, context: String) -> CoreCallPureRoute CoreDeclarationError! {
@@ -419,21 +410,6 @@ core_decl_capability: fn(expression: String, context: String, constants: CoreDec
         call.name == "CoreCapabilityContract.explicit_simulation" && count == 2 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.ExplicitSimulation, provider: Val(strings[0].copy()), fallback: None, failure: Val(strings[1].copy())})
     }
     Err(core_decl_fail("unsupported CoreCapabilityContract in {context}: {call.name}"))
-}
-
-core_decl_marker: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreMarkerApplication CoreDeclarationError! {
-    call: core_decl_whole_call(expression, context, "CoreMarkerApplication") ?? return Err(err)
-    if call.name != "CoreMarkerApplication.deprecated" || call.args.len() != 4 {
-        return Err(core_decl_fail("unsupported CoreMarkerApplication in {context}"))
-    }
-    Ok(
-        CoreMarkerApplication{
-            member: core_decl_rust_string(call.args[0], context, constants) ?? return Err(err),
-            since: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err),
-            replacement: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err),
-            removed_in: if call.args[3].trim() == "None" -> None else -> Val(core_decl_rust_some_string(call.args[3], context, constants) ?? return Err(err)),
-        },
-    )
 }
 
 // ---- Core call facts ----------------------------------------------------
@@ -567,7 +543,7 @@ core_decl_plain_record: fn(module_name: String, member: String, symbol: String, 
     }
     if leaf != "" -> effects.push(leaf)
     arity: mask.len()
-    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: effects, capability: capability, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, marker: None, authority: None}
+    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: effects, capability: capability, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, authority: None}
 }
 
 // A record the Jet source of its module defines: no Prelude symbol, no
@@ -624,7 +600,7 @@ core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, consta
             core_decl_require_jet_route(call.args[3], context) ?? return Err(err)
             mask: core_decl_rust_bools(call.args[4], context) ?? return Err(err)
             arity: mask.len()
-            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: core_decl_pure_capability(), pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, marker: None, authority: None})
+            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: core_decl_pure_capability(), pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, authority: None})
         }
         else -> Err(core_decl_fail("unsupported CoreCallRecord constructor in {context}: {call.name}"))
     }
@@ -649,7 +625,6 @@ core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, cont
         "with_capability" -> built.capability = core_decl_capability(argument, context, constants) ?? return Err(err)
         "with_source_target" -> built.source_target = Val(core_decl_rust_string(argument, context, constants) ?? return Err(err))
         "with_source_role" -> built.source_role = Val(core_decl_rust_string(argument, context, constants) ?? return Err(err))
-        "with_marker" -> built.marker = Val(core_decl_marker(argument, context, constants) ?? return Err(err))
         else -> return Err(core_decl_fail("unsupported CoreCallRecord builder in {context}: {call.name}"))
     }
     Ok(built)
