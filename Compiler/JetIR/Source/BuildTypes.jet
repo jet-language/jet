@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
     jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, build_time_refused, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, BinOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_leaf, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
-    jet_foundation.[IR_GENERATED_RECORDS, TShapeFormatName, ir_handle_laid_opaque, ir_record_schema, ir_record_schema_row, ir_record_variant_position, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_selector_style, symbol_key_leaf, symbol_key_names]
+    jet_foundation.[IR_GENERATED_RECORDS, TShapeFormatName, core_type_modules, ir_handle_laid_opaque, ir_record_schema, ir_record_schema_row, ir_record_variant_position, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_selector_style, symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -4364,7 +4364,14 @@ ir_variant_members_laid: fn(m: ^IRModule, p: IRProgram, row: Int, args: [Type], 
         sizes := [Int]{}
         aligns := [Int]{}
         loop (position, name) in names {
-            ty: ir_value_type(m, p, sema_type_def_instance_type(p.types[row], args, types[position])) ?? return None
+            held: sema_type_def_instance_type(p.types[row], args, types[position])
+            // The Dyn enum's DateTime case holds Core's ZonedDateTime. A
+            // program that never loads core.time cannot build one, so there
+            // the case keeps an inert word: ir_dyn_schema then finds no
+            // ZonedDateTime layout, and the runtime stops on any DateTime it
+            // would bridge.
+            unloaded: ir_dyn_declaration(definition) && ir_core_type_unloaded(p, held)
+            ty: ir_value_type(m, p, if unloaded -> Type.Int else -> held) ?? return None
             boxed: (definition.boxed_edges.contains(edges[position]) && ir_edge_wrapped(m, ty)) || ir_variant_member_outsized(m, definition, ty)
             sizes.push(if boxed -> 8 else -> m.types[ty].size)
             aligns.push(if boxed || m.types[ty].kind == .Aggregate -> 8 else -> m.types[ty].align)
@@ -4377,6 +4384,13 @@ ir_variant_members_laid: fn(m: ^IRModule, p: IRProgram, row: Int, args: [Type], 
         loop at in 0..<members.len() -> members[at].offset = placed.offsets[at]
     }
     Val(members)
+}
+
+// Whether `ty` names a Core declaration whose module this program never
+// loads: it has no type row and no runtime handle row here.
+ir_core_type_unloaded: fn(p: IRProgram, ty: Type) -> Bool Never! {
+    name: ir_nominal_name(ir_untag(ty)) ?? return false
+    ir_type_def(p, name) == None && ir_runtime_handle(name) == None && core_type_modules(name).len() > 0
 }
 
 // Whether the member of type row `ty` in a variant of `definition` is held
