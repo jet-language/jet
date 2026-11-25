@@ -34,9 +34,6 @@ LOG_STATE_FILTER: I64{72}
 
 LOG_SPAN_SLOT: I64{24}
 
-// LogField32: key0 value8 kind16 owned E4s, redacted24.
-LOG_FIELD_BYTES: I64{32}
-
 log_state_key := I64{0}
 
 // The process's sink, LogProcess24: lock0 (a mutex word every sink read and
@@ -496,13 +493,13 @@ log_fields_json_push: fn(target: I64, data: I64, count: I64) {
     loop at < count {
         field: rt_text_word(wrapping(data + at * I64{8}))
         jet_rt_string_builder_push(target, rt_static_text(",\""))
-        log_json_escape_push(target, rt_text_word(field))
+        log_json_escape_push(target, rt_text_word(wrapping(field + LOG_FIELD_KEY)))
         jet_rt_string_builder_push(target, rt_static_text("\":"))
-        kind: rt_text_word(wrapping(field + I64{16}))
+        kind: rt_text_word(wrapping(field + LOG_FIELD_KIND))
         raw: log_text_is(kind, rt_static_text("int")) || log_text_is(kind, rt_static_text("float")) || log_text_is(kind, rt_static_text("bool")) || log_text_is(kind, rt_static_text("counter"))
-        if raw -> jet_rt_string_builder_push(target, rt_text_word(wrapping(field + I64{8}))) else {
+        if raw -> jet_rt_string_builder_push(target, rt_text_word(wrapping(field + LOG_FIELD_VALUE))) else {
             jet_rt_string_builder_push(target, rt_static_text("\""))
-            log_json_escape_push(target, rt_text_word(wrapping(field + I64{8})))
+            log_json_escape_push(target, rt_text_word(wrapping(field + LOG_FIELD_VALUE)))
             jet_rt_string_builder_push(target, rt_static_text("\""))
         }
         at += I64{1}
@@ -669,9 +666,9 @@ log_emit_text: fn(state: I64, level: I64, message: I64, ts: I64, fields: I64, co
     loop at < count {
         field: rt_text_word(wrapping(fields + at * I64{8}))
         if (at != I64{0}) { jet_rt_string_builder_push(line, rt_static_text(" ")) }
-        jet_rt_string_builder_push(line, rt_text_word(field))
+        jet_rt_string_builder_push(line, rt_text_word(wrapping(field + LOG_FIELD_KEY)))
         jet_rt_string_builder_push(line, rt_static_text("="))
-        jet_rt_string_builder_push(line, rt_text_word(wrapping(field + I64{8})))
+        jet_rt_string_builder_push(line, rt_text_word(wrapping(field + LOG_FIELD_VALUE)))
         at += I64{1}
     }
     log_write(line)
@@ -685,7 +682,8 @@ log_format_active: fn() -> I64 {
     if host_is_tty(I64{2}) -> I64{2} else -> I64{1}
 }
 
-// `fields` borrows a buffer of `count` LogField32 handles.
+// `fields` borrows a buffer of `count` LogField records (CoreLayoutABI
+// LOG_FIELD).
 #Export(c) jet_log_record_emit_raw: fn(level: I64, message: I64, fields: I64, count: I64) {
     state: log_state()
     if (rt_text_word(wrapping(state + LOG_STATE_DISABLED)) != I64{0}) {
@@ -704,46 +702,46 @@ log_format_active: fn() -> I64 {
     }
 }
 
-// LogField record carrier: text members are copied.
+// LogField record carrier (CoreLayoutABI LOG_FIELD): text members are copied.
 #Export(c) jet_rt_record_new_log_field: fn(key: I64, value: I64, kind: I64, redacted: Bool) -> I64 {
     result: jet_rt_alloc(LOG_FIELD_BYTES, I64{8})
-    rt_text_store(result, jet_rt_string_clone(key))
-    rt_text_store(wrapping(result + I64{8}), jet_rt_string_clone(value))
-    rt_text_store(wrapping(result + I64{16}), jet_rt_string_clone(kind))
-    rt_text_store(wrapping(result + I64{24}), if redacted -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(result + LOG_FIELD_KEY), jet_rt_string_clone(key))
+    rt_text_store(wrapping(result + LOG_FIELD_VALUE), jet_rt_string_clone(value))
+    rt_text_store(wrapping(result + LOG_FIELD_KIND), jet_rt_string_clone(kind))
+    rt_text_store(wrapping(result + LOG_FIELD_REDACTED), if redacted -> I64{1} else -> I64{0})
     result
 }
 
 #Export(c) jet_rt_record_get_log_field_key: fn(value: I64) -> I64 {
-    jet_rt_string_clone(rt_text_word(value))
+    jet_rt_string_clone(rt_text_word(wrapping(value + LOG_FIELD_KEY)))
 }
 
 #Export(c) jet_rt_record_get_log_field_value: fn(value: I64) -> I64 {
-    jet_rt_string_clone(rt_text_word(wrapping(value + I64{8})))
+    jet_rt_string_clone(rt_text_word(wrapping(value + LOG_FIELD_VALUE)))
 }
 
 #Export(c) jet_rt_record_get_log_field_kind: fn(value: I64) -> I64 {
-    jet_rt_string_clone(rt_text_word(wrapping(value + I64{16})))
+    jet_rt_string_clone(rt_text_word(wrapping(value + LOG_FIELD_KIND)))
 }
 
 #Export(c) jet_rt_record_get_log_field_redacted: fn(value: I64) -> Bool {
-    rt_text_word(wrapping(value + I64{24})) != I64{0}
+    rt_text_word(wrapping(value + LOG_FIELD_REDACTED)) != I64{0}
 }
 
 #Export(c) jet_rt_handle_clone_log_field: fn(value: I64) -> I64 {
-    jet_rt_record_new_log_field(rt_text_word(value), rt_text_word(wrapping(value + I64{8})), rt_text_word(wrapping(value + I64{16})), rt_text_word(wrapping(value + I64{24})) != I64{0})
+    jet_rt_record_new_log_field(rt_text_word(wrapping(value + LOG_FIELD_KEY)), rt_text_word(wrapping(value + LOG_FIELD_VALUE)), rt_text_word(wrapping(value + LOG_FIELD_KIND)), rt_text_word(wrapping(value + LOG_FIELD_REDACTED)) != I64{0})
 }
 
 #Export(c) jet_rt_handle_drop_log_field: fn(value: I64) {
     if (value == I64{0}) {
         return
     }
-    jet_rt_string_drop(rt_text_word(value))
-    jet_rt_string_drop(rt_text_word(wrapping(value + I64{8})))
-    jet_rt_string_drop(rt_text_word(wrapping(value + I64{16})))
+    jet_rt_string_drop(rt_text_word(wrapping(value + LOG_FIELD_KEY)))
+    jet_rt_string_drop(rt_text_word(wrapping(value + LOG_FIELD_VALUE)))
+    jet_rt_string_drop(rt_text_word(wrapping(value + LOG_FIELD_KIND)))
     jet_rt_free(value, LOG_FIELD_BYTES, I64{8})
 }
 
 #Export(c) jet_rt_handle_eq_log_field: fn(left: I64, right: I64) -> Bool {
-    jet_rt_string_eq(rt_text_word(left), rt_text_word(right)) && jet_rt_string_eq(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8}))) && jet_rt_string_eq(rt_text_word(wrapping(left + I64{16})), rt_text_word(wrapping(right + I64{16}))) && rt_text_word(wrapping(left + I64{24})) == rt_text_word(wrapping(right + I64{24}))
+    jet_rt_string_eq(rt_text_word(wrapping(left + LOG_FIELD_KEY)), rt_text_word(wrapping(right + LOG_FIELD_KEY))) && jet_rt_string_eq(rt_text_word(wrapping(left + LOG_FIELD_VALUE)), rt_text_word(wrapping(right + LOG_FIELD_VALUE))) && jet_rt_string_eq(rt_text_word(wrapping(left + LOG_FIELD_KIND)), rt_text_word(wrapping(right + LOG_FIELD_KIND))) && rt_text_word(wrapping(left + LOG_FIELD_REDACTED)) == rt_text_word(wrapping(right + LOG_FIELD_REDACTED))
 }
