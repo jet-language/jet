@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114255,
+    "rev": 114259,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57874,12 +57874,12 @@
         },
         {
           "n": 7,
-          "text": "A function changes a module variable in place like a local: `enemies.push(e)`, `frame[i] = v` and lending it to a `^` parameter work, and E0223's refusal of every non-#Persist changeable module root (Ownership/StaticCells.jet:1-62, callers Ownership/Checks.jet:2409, 2538, 3471-3477, 5008) is removed; Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet then edits its [U8] without #Unsafe.",
+          "text": "A function changes a module variable in place like a local: `enemies.push(e)`, `frame[i] = v` and lending it to a `^` parameter work (today `frame[i] = v` is refused with E0111 and the wrong text \"is a constant\", and `push` with E0223), and E0223's refusal of every non-#Persist changeable module root (Ownership/StaticCells.jet:1-62, callers Ownership/Checks.jet:2409, 2538, 3471-3477, 5008) is removed; Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet then edits its [U8] without #Unsafe.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-25T18:25:21.366Z"
+          "at": "2026-11-25T20:21:22.493Z"
         },
         {
           "n": 8,
@@ -57927,7 +57927,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:42.821Z",
-      "updated": "2026-11-25T18:25:28.387Z",
+      "updated": "2026-11-25T20:21:22.493Z",
       "updatedBy": "Pip",
       "criteriaLastN": 11
     },
@@ -77428,7 +77428,7 @@
       "id": "c01wqict",
       "num": 7032,
       "title": "Changeable module globals stay, with their downsides engineered away: per-test isolation, task safety and visible global writes",
-      "body": "Owner asked on 2026-11-25 to keep mutable module globals (game development needs them) and to find every way to engineer away their downsides, presented as ballot D-GLOBAL-SAFE1, instead of greenfield proposal item P10's context slots. Today `name := value` at file scope is a changeable global computed while building, with no startup copy (D-JAI-COMPTIME1=A; spec.md:455-479). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P10 (master checkout, not yet on dev). The unbuilt parts of the already-ratified rule D-MODULE-VAR1=A (function writes, in-place edits, per-test copies, #Persist races, the one touch fact, C callbacks, diagnostics and docs) are criteria on #6859; this card holds only what D-GLOBAL-SAFE1 decides.",
+      "body": "Owner asked on 2026-11-25 to keep mutable module globals (game development needs them) and to find every way to engineer away their downsides, presented as ballot D-GLOBAL-SAFE1, instead of greenfield proposal item P10's context slots. Today `name := value` at file scope is a changeable global computed while building, with no startup copy (D-JAI-COMPTIME1=A; spec.md:455-479). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P10 (master checkout, not yet on dev). The unbuilt parts of the already-ratified rule D-MODULE-VAR1=A (function writes, in-place edits, per-test copies, #Persist races, the one touch fact, C callbacks, diagnostics and docs) are criteria on #6859; this card holds only what D-GLOBAL-SAFE1 decides. Ballot D-GLOBAL-SAFE1 posted 2026-11-25 (reviewed by ReviewGlobalSafe1); it decides only what D-MODULE-VAR1=A left open, and its review is Docs/Audits/2026-11-25-global-state-review.md (in the master checkout, to land on dev).",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G4",
@@ -77441,7 +77441,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Pip",
+          "text": "Posted D-GLOBAL-SAFE1 to the owner."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -77503,7 +77509,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:59:00.830Z",
-      "updated": "2026-11-25T18:25:48.520Z",
+      "updated": "2026-11-25T20:21:30.542Z",
       "updatedBy": "Pip",
       "criteriaLastN": 6
     },
@@ -139769,6 +139775,287 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-25T19:59:48.841Z"
+    },
+    {
+      "id": "D-GLOBAL-SAFE1",
+      "cardId": "c01wqict",
+      "group": "language",
+      "title": "Changeable module globals: what group workers, pure code, caches and tests may do with them",
+      "situation": "A game keeps its score, its enemy list and its level in changeable values at the top of a file, and many functions use them. A ratified rule already lets every function read and change these values and keeps other tasks away from them. It left four things open or unsafe. Worker tasks in a group may not even read a global. Pure functions and caches can depend on one unseen, so a cache can return a stale answer. Each test gets its own copy only by slowing every access in test builds. We recommend A: group workers borrow globals as they borrow locals, pure code and caches may not read them, and each test restores the start values.",
+      "gist": "Should group workers borrow changeable module globals, should pure code and caches be barred from reading them, and how should each test start fresh?",
+      "lesson": "A module global is a changeable value declared at the top of a file, such as a game's score. A ratified rule already lets functions read and change one and keeps other tasks away from it. Three questions remain open: may worker tasks in a group use it, may pure functions and caches read it, and how does each test start fresh without slowing shipped code?",
+      "explainer": "",
+      "story": "Sam is writing a small arcade game. The score, the enemy list and the current level sit at the top of the file, and a dozen functions use them. Sam adds worker tasks that plan each enemy's next move, a cached cost function, and a test that a hit adds five points. Sam should not need to copy the enemy list before each fan-out, see a cache return last level's answer, or chase a test that fails only when another test ran first.",
+      "inWild": "// D: a pure function may not read a changeable global.\n// https://dlang.org/spec/function.html#pure-functions\nint level = 1;\npure int cost(int x) { return x * level; }   // error: reads mutable global\n\n// Rust: scoped threads may borrow the caller's locals until they join.\n// https://doc.rust-lang.org/std/thread/fn.scope.html\nthread::scope(|s| { s.spawn(|| think(&enemies)); });\n\n// Swift 6: a global var must belong to one actor, or the compiler refuses it.\n// https://www.swift.org/migration/documentation/swift-6-concurrency-migration-guide/commonproblems/\n@MainActor var score = 0\n\n// cargo-nextest: each test runs in its own process, so globals never leak.\n// https://nexte.st/docs/design/why-process-per-test/",
+      "detail": "What this decides. The ratified module-variable rule (D-MODULE-VAR1=A, 2026-11-10) already settles most of how a changeable global behaves. Card #6859 builds it, and its criteria C1-C11 hold every part this ballot does not reopen. This ballot decides only what that rule left open, and it says plainly where it amends the rule. The spelling stays `^score: 0` (D-BIND-MARK1=A, 2026-11-25); today's compiler still spells it `score := 0`.\n\n```text\nAlready ratified and built under card #6859 (not reopened here)\n- Functions, run included, read and write globals; the E0111 module branch goes (rule 1; C3).\n- One touch fact per function, inferred through calls, closures, function values and trait\n  dispatch, shown by hover, docs and jet inspect; the second read scan is deleted (rules 2, 4; C1, C9).\n- The main task owns every global. A task whose work touches one is a build error naming the\n  variable and the call path (rule 3; C2). #Persist globals follow the same rule (C8).\n- No write behind a reader's back: a call that may write a global while the caller looks into\n  it is refused (rule 5; C4).\n- In-place edits (enemies.push(e), frame[i] = v, lending to a ^ parameter); E0223 retires (C7).\n- A C callback that touches a global is refused, because C picks its thread (C10).\n- A generic module gets one copy per instance; E0003 for it retires (C5).\n- Each test starts with its own copy of every global and module Shared holder (rule 6; C6).\n- The E0338 row text, docs of a public function's touches, a reference page (C11).\n- Start values are baked while building (D-JAI-COMPTIME1=A); no code runs before run (E0643).\n  jet dev restarts the program and keeps only #Persist values (D-DEV-STATE1=A, D-PERSIST-ONLY1=A).\n```\n\n```text\nDecided here, and what each part amends\n1 Group workers borrow globals: task.group children, task.all, task.race and task.any branches,\n  and para_map, para_filter, para_partition and para_fold callbacks.\n  Amends D-MODULE-VAR1 rule 3, which refuses any task \"even to read\".\n2 Every other task stays refused, as ratified. A function exported to C joins the C callback\n  rule, because a C host may call it on any thread. New.\n3 A -[]> function may not read changeable module state. E3401 widens; amends spec.md:3075-3082.\n4 A #Memo function may not read or write it. E0938 widens (card #7032 criterion 3).\n5 How each test starts fresh: restore start values in one process, and run tests side by side\n  in separate processes. Amends the mechanism of D-MODULE-VAR1 rule 6, one sentence of\n  D-CORE-GLOBAL-STATE1, and what output checks see (Reference/cli.md:1169).\n```\n\n```text\nToday on dev 8f4309b5023, with probes run on the installed jet a0.0.46\n- A function that writes a plain global is E0111 (JetSema Statements/Bindings.jet:1352-1357).\n- enemies.push(e) on a global is E0223 (Ownership/StaticCells.jet). frame[i] = v on a := global\n  is E0111 saying \"frame is a constant\", which is wrong for a := global. Both stay refused\n  inside #Unsafe.\n- A whole-value write inside #Unsafe compiles. Then, in probes:\n  - two tests that each call hit(5) and expect 5: the second fails, \"expected: 5, got: 10\";\n  - a #Memo -[]> function reading level prints 2, and 2 again after level goes from 1 to 10;\n  - the same stale answer with a module Shared holder in place of the global;\n  - task.group children reading the global, and a task writing it, compile and run unchecked;\n  - a #Persist global written by two group children compiles and runs.\n- E3401 refuses writes of module state in -[]> code, and reads are not recorded\n  (Effects/Checks.jet:1442-1463; spec.md:3075-3082). E0938 reads only the effect row\n  (Effects/Checks.jet:6675-6684).\n- jet test runs a file's tests one after another in one process (JetRuntime TestHarness.jet:148-156).\n  Child processes start only for reruns after a fatal trap, isolated tests and time limits\n  (Reference/cli.md:1153-1161; JetCLI NativeTests.jet:461-539).\n- Output checks run after the tests in the same process and see what the tests left\n  (Reference/cli.md:1169; Tests/Cases/OutputCallable/OutputCheckObservesTheJoinedBatchState.fixture).\n- Module Shared holders are Process sites, never reset (JetIR BuildSharedSites.jet:62-90). The\n  World-site reset jet_rt_global_reset_registered (JetRuntime Shared.jet:614) exists, but no\n  harness calls it; only Tests/shared-publication-fixture.c does.\n- The debugger checks a watched expression as -[]> and refuses only writes\n  (JetSema EvalProbe.jet:436-447), with its own call-graph walk (EvalProbe.jet:531-551).\n- All eleven criteria of card #6859 are open.\n```\n\nWorker tasks. A task.group joins every child at its closing brace, so a child may already borrow the opener's locals (spec.md:4923-4948). Under A a changeable global is borrowed the same way. Reads are free. A write needs a place no other child reaches: distinct fields and constant indexes are separate, and a dynamic index overlaps. A write made inside a called function holds the whole global. The global's type must be able to cross tasks, as a borrowed local's must.\n\nNesting and the opener. A child lends only what it holds, so a group inside a child follows the same rule. Code in the group body runs beside the children, so it joins the check as it does for locals (E1101). The branches of task.all, task.race and task.any borrow until the combinator returns. The parallel list adapters join before they return, so their callbacks may read globals. A callback that writes one is E1101, as an ordinary changeable capture is today (spec.md:4844-4847).\n\nOther tasks. A handle task started outside a group body can outlive the function that started it, and a detached task outlives everything. A child spawned through a Group parameter joins in another frame, so the opener can't see what it touches. All three stay refused, as ratified. The task error gains a third fix: do the work in a task.group. On the web a browser refuses task groups (spec.md:4889-4891), so only the main task touches a global there.\n\nThreads that C or Core chooses. A C callback that touches a global is refused (ratified, card #6859 C10). A function exported with #Export(c) is the same case, because a C host may call it on any thread. Under A it is refused with the same row unless every global it touches is a raw word. Core functions that run a callback on another thread, such as interrupt handlers and realtime audio callbacks, accept only functions that touch nothing, by ratified rule 4.\n\nPure code. A -[]> function already may not write changeable module state, because a later call would see the write. Under A it may not read that state either, because an earlier write would change its answer. The state is the list E3401 already names for writes: a global, a #Persist global, a module Shared holder's value and a module Cell. Context reads stay allowed, as today. A pure function that needs a global takes its value as a parameter.\n\nCaches. A #Memo function may neither read nor write that state, so its cache can't go stale. Its key already holds every context value it reads (Examples/Concurrency/ContextReads.jet). Option C keeps the reads and keys the cache on a write count instead. Core's process-lifetime caches whose contents can't change an answer are not state for this rule; the sweep classes each of Core's 18 lifetime sites.\n\nThe debugger. The debugger checks a watched expression as a -[]> function and refuses only writes; jet eval --pure runs the same check. Both keep refusing writes only, so a watch on a global still works. The debugger's own call-graph walk (EvalProbe.jet:531-551) reads the touch fact instead and is deleted.\n\nTests, the mechanism. Ratified rule 6 reaches every global through the test's world, one extra load per access in test builds. A drops that load. A test build keeps a read-only copy of each changeable start value, including the data it points to. Before each test, rerun attempt and output check, the harness drops the live value of each global the test touches that an earlier test wrote. Then it copies the start value back.\n\nThe touch fact gives each test's set while building, and the harness knows the run order, so nothing is tracked while running. Module Shared holders and declared event points publish as World sites in test builds. After each test the harness calls the existing world-site reset, which nothing calls today. The reset also clears #Memo caches. A test ends when its tasks end: the harness cancels and joins any task the test left running before it restores.\n\nTests side by side. Under A one process runs one test at a time, because its tests share one copy. To run tests in parallel, the runner gives each core a child process and splits a file's tests between them. Today children start only for reruns, isolated tests and time limits, so this is new runner work. A child starts once and runs many tests. The ratified world pointer would also have needed new work to run tests in parallel.\n\nWhat A amends in ratified text. D-CORE-GLOBAL-STATE1 says no process-wide clear before each test is allowed. A's restore is a compiler-built clear, so A amends that sentence for program globals and module holders. Core storage keeps its per-world tables. D-TEST-SCHEDULES1 runs reruns side by side on the profile's workers, and under A those workers are processes. A world made with testing.world shares its test's globals.\n\nOutput checks. Reference/cli.md:1169 says output checks run after the tests in the same process and see what they left. Once tests run in several processes there is no single batch state to see. So under A a check starts from start values and reads what the tests wrote to files. OutputCheckObservesTheJoinedBatchState.fixture reads a #Persist global today, so it is rewritten to read its events file.\n\nShipped builds. Group loans, purity and #Memo checks run while building. The start-value copy, the restore and the World sites exist only in test builds. A release, run or dev build pays nothing while running, which meets the performance gate. The compile cost is one more set per function, solved in the walk E3401 already does. The solver skips it when a program has no changeable global (Effects/Checks.jet:7069-7085).\n\n```text\nEdge cases\n- A write in a function a child calls holds the whole global; a write in the child's own body\n  holds just the field or constant index it names.\n- A global whose type can't cross tasks, such as one holding a Cell, can't be lent to a child.\n- Function values: a dynamic call touches every possible target's set (ratified).\n- Raw words: a global whose every write sits inside #Unsafe skips the task check and the test\n  restore, but purity and #Memo still see it. One plain write makes it tracked.\n- #Persist: tests restore it like any global. jet dev keeps it across restarts, and an edited\n  start value does not replace a kept one (D-DEV-STATE1=A).\n- Hot reload: live code swap is retired, so a save restarts the program and plain globals start\n  over. If a swap engine returns, a swap must wait until no group that lends a global is open.\n- Shared holders build on first read and keep the first published cell (BuildSharedSites.jet:5-7),\n  so two children reading one never race on its start.\n- Packages: a library's touch facts travel in its published interface, as its effect rows do\n  [inference; the package format was not read].\n- Statement files: a top-level ^count: 0 among statements stays a local of that run\n  (D-SCRIPT-HELPERS1=A).\n- Plugins run in their own sandboxed memory and never see host globals\n  [inference from D-PLUGIN-ENGINE1=A].\n- Wasm and no-OS targets copy start values in before run (D-JAI-COMPTIME1=A); the rules are the same.\n```\n\n```text\nMeasured sites. Line-start pattern counts, not parses.\nBy the drafter on dev 4b48f2bc485 (Compiler, Core, Examples, Tools, Jetpack, Tests):\n- File-scope := globals: 241 in 88 files; 208 of them in Compiler/JetRuntime, all raw words.\n  Tests 26, other Compiler fixtures 7, Core, Examples, Jetpack and Tools 0.\n- #Persist 17; module Shared holders 91 in 76 files; Core lifetime sites 18; event points 10;\n  #ContextKey 8; #Test bodies 7,287.\n- -[]> or #Memo bodies naming a same-file global: none outside the E3401 refusal tests.\nBy the reviewer on dev 8f4309b5023:\n- #Export(c) outside the runtime: 240 in 61 files. None touches a changeable global, since\n  no global exists outside the runtime and tests.\n- para_map, para_filter, para_partition, para_fold calls: 116 in 64 files.\n- on_interrupt( calls: 21 in 12 files.\nNot counted: holder reads inside -[]> and #Memo functions across files; the built check finds them.\n```\n\n```text\nCutover for what this ballot decides (built with card #6859, whose criteria own the rest)\n1 Group loans\n  - Ownership/TaskGroups.jet and Ownership/Crossings.jet: the borrowed-capture check reads each\n    child's touches from the fact and treats a global as an owner that outlives the group.\n    task.all, task.race and task.any branches and the para adapters use the same check.\n  - The task row that C2 adds offers task.group as a third fix.\n  - Calls/Checking.jet: an #Export(c) function joins the row that C10 adds.\n2 Purity and caches\n  - Effects/Checks.jet:1442-1469: E3401 adds reads of the state it lists for writes.\n  - Effects/Checks.jet:6675-6684: E0938 adds any touch of that state.\n  - EvalProbe.jet:436-447 keeps a writes-only check; its walk (EvalProbe.jet:531-551) is\n    deleted and reads the touch fact. jet eval --pure (JetCLI Front.jet) follows it.\n3 Tests\n  - JetIR BuildTests.jet: a restore before each test, rerun attempt and output check, and a call\n    to jet_rt_global_reset_registered after each test.\n  - Test builds emit a read-only copy of each changeable start value and the data it points to.\n  - JetIR BuildSharedSites.jet:62-131: module holders and event points publish as World sites in\n    test builds. Each of Core's 18 lifetime sites is classed World or Process in the sweep.\n  - JetRuntime TestHarness.jet: cancel and join a test's leftover tasks; clear #Memo caches.\n  - JetCLI NativeTests.jet: split a file's tests across per-core child processes; the batch-state\n    special cases (NativeTests.jet:495-497, 534-539) go.\n4 Registry, spec, teaching\n  - Compiler/Prelude/Diagnostics.jet: the E3401, E0938 and debugger texts reworded; the\n    Foundation registry regenerated from it.\n  - spec.md:459-500, 3072-3082, 4824-4847, 4923-4948; Reference/cli.md:1153-1173.\n  - The syntax-decisions.md entry for D-MODULE-VAR1 notes the amendments.\n  - An example in Examples/Concurrency where group workers read globals, with golden output.\n5 Sweep (card #7032 criterion 4)\n  - Every -[]> or #Memo function the widened checks refuse is fixed in the same submission.\n  - Tests that depend on another test's writes, and the two OutputCallable batch-state cases,\n    are rewritten to prove a fresh start.\n```\n\nWhat A cannot remove. A program holds one copy of each global, so two independent games in one process need a struct; D buys many copies for a load on every access. A task that can outlive its starter can't touch a global. A pure function can't read one. Test builds carry a second copy of each start value, and running tests side by side costs one child process per core.\n\nNot verified. The restore and child-process costs are estimated, not measured. Holder reads inside -[]> functions across files were not counted. The package-interface and plugin claims are inferences, and no future swap engine exists to check.",
+      "options": [
+        {
+          "name": "Group workers borrow globals; pure code and caches can't read them; tests restore start values",
+          "detail": "Globals stay one line and read and write like locals, as ratified. Workers in a task.group, the branches of task.all, task.race and task.any, and the parallel list adapters borrow globals as they borrow the opener's locals. Every other task, and any function C may call, still may not touch one. Pure and memoised functions may not read changeable module state. Each test, rerun and output check starts from start values, restored in one process, and tests run side by side in separate processes.",
+          "technical": "Group loans reuse the borrowed-capture rule (spec.md:4923-4948), with the touch fact naming each child's global places. E3401 adds reads of the state it already lists for writes, and E0938 adds any touch. The debugger and jet eval --pure keep a writes-only check. An #Export(c) function joins the C callback row. Test builds keep a read-only copy of each start value and restore touched globals an earlier test wrote. Holders and event points become World sites there. The runner splits a file's tests across per-core child processes.",
+          "code": "// game.jet: the same program under every option\nEnemy: struct { x: Int, hp: Int }\nTILE_COSTS: build_costs(4096)          // fixed table, baked while building\n^score: 0                              // the code still spells this score := 0\n^level: 1\n^enemies: [Enemy]{}\n\nhit: fn(points: Int) { score += points }\nspawn: fn(e: ^^Enemy) { enemies.push(e) }\nthink: fn(e: Enemy) -> Int { TILE_COSTS[e.x] + enemies.len() }\n#Memo cost: fn(x: Int) -[]> Int { x * level }\n\nrun: fn() {\n    spawn(Enemy{x: 3, hp: 2})\n    task.group workers {\n        loop e in enemies -> task think(e)   // A: workers borrow enemies until the }\n    }\n    hit(5)\n    print(\"score {score}\")\n}\n\n#Test(\"a hit scores five\") {\n    hit(5)\n    assert_eq(score, 5)                  // A: score starts at 0 in every test\n}\n\n#Test(\"a spawn adds one enemy\") {\n    spawn(Enemy{x: 1, hp: 1})\n    assert_eq(enemies.len(), 1)\n}\n\n// Proposed (A), not built: prints score 5, and both tests pass in any order.\n// cost is refused: a #Memo function reads module state `level`.\n// A task that can outlive run is refused:\n//   t: task hit(1)\n//   error: a task can't touch module variable `score`\n//     task hit(1) -> hit -> score += points\n//     fix: pass the score in, keep it in Shared, or do the work in a task.group",
+          "key": "A"
+        },
+        {
+          "name": "The ratified rule as written, plus the cache fix",
+          "detail": "Functions read and write globals, and the compiler refuses any task that touches one, even a group worker that only reads. Pure functions may still read a global. A #Memo function may not read one, because card #7032 requires a cache fix whatever wins. Each test gets its own copy through one extra load on every access in test builds, and tests run side by side in one process.",
+          "technical": "D-MODULE-VAR1=A alone, as card #6859 builds it, plus E0938 widened to touches. The task row refuses group children, combinator branches and para adapter callbacks that touch a global. E3401 stays writes-only. Test builds reach every global through a world base pointer, and the harness runs tests in parallel inside one process, which is new runner work.",
+          "code": "// game.jet: the same program under every option\nEnemy: struct { x: Int, hp: Int }\nTILE_COSTS: build_costs(4096)\n^score: 0\n^level: 1\n^enemies: [Enemy]{}\n\nhit: fn(points: Int) { score += points }\nspawn: fn(e: ^^Enemy) { enemies.push(e) }\nthink_from: fn(e: Enemy, all: [Enemy]) -> Int { TILE_COSTS[e.x] + all.len() }\n#Memo cost: fn(x: Int) -[]> Int { x * level }   // B: refused, reads `level`\n\nrun: fn() {\n    spawn(Enemy{x: 3, hp: 2})\n    copy: enemies.copy()                 // B: workers can't read enemies\n    task.group workers {\n        loop e in copy -> task think_from(e, copy)\n    }\n    hit(5)\n    print(\"score {score}\")\n}\n\n#Test(\"a hit scores five\") {\n    hit(5)\n    assert_eq(score, 5)    // B: passes; each access goes through the test's world\n}\n\n// Ratified (B), not built: prints score 5.",
+          "key": "B"
+        },
+        {
+          "name": "As A, but pure code may read globals and caches track their writes",
+          "detail": "Group loans, task refusals and the test restore are A's. A pure function may read a changeable global, as it may read the task context. A #Memo function may read a global too: the program counts the writes to each global a cache reads, and the cache key holds those counts. Module Shared holders and Cells stay refused in a #Memo function, because writes reach them through copies the compiler can't follow.",
+          "technical": "E3401 stays writes-only. Each := or #Persist global that some #Memo function reads gets a write counter. Every write site the touch fact lists adds one to it. A plain add is enough, because no two tasks write one global at once. A #Memo lookup compares one counter per global read. E0938 adds holder and Cell touches only. This extends how a #Memo key already holds context values (Examples/Concurrency/ContextReads.jet).",
+          "code": "// game.jet: the same program under every option\nEnemy: struct { x: Int, hp: Int }\nTILE_COSTS: build_costs(4096)\n^score: 0\n^level: 1\n^enemies: [Enemy]{}\n\nhit: fn(points: Int) { score += points }\nspawn: fn(e: ^^Enemy) { enemies.push(e) }\nthink: fn(e: Enemy) -> Int { TILE_COSTS[e.x] + enemies.len() }\n#Memo cost: fn(x: Int) -[]> Int { x * level }   // C: allowed\n\nrun: fn() {\n    spawn(Enemy{x: 3, hp: 2})\n    task.group workers {\n        loop e in enemies -> task think(e)   // as A\n    }\n    print(cost(2))   // 2\n    level = 10       // adds one to level's write count\n    print(cost(2))   // 20: the count changed, so the cache misses\n}\n\n// Proposed (C), not built. Tests behave as under A.",
+          "key": "C"
+        },
+        {
+          "name": "Every global lives in a world, and a program can make many worlds",
+          "detail": "As A, but every global is reached through the current world in every build, not only in tests. A program can run several worlds at once, such as many matches on one server, and tests run side by side in one process with no restore. Every access to a global costs one extra load, in shipped builds too.",
+          "technical": "A world base pointer in a register or thread slot, set by world.run. Each world copies all start values when it is made, so the baked no-copy start applies only to the first world. Group loans, task refusals, purity and #Memo rules are A's. Tests need no restore and no child processes.",
+          "code": "// game.jet: the same program under every option\nEnemy: struct { x: Int, hp: Int }\nTILE_COSTS: build_costs(4096)\n^score: 0\n^enemies: [Enemy]{}\n\nhit: fn(points: Int) { score += points }\nspawn: fn(e: ^^Enemy) { enemies.push(e) }\n\nrun: fn() {\n    // Proposed (D), not built: each world has its own score and enemies.\n    matches: [World]{World.new(), World.new()}\n    loop m in matches {\n        m.run(fn() {\n            spawn(Enemy{x: 3, hp: 2})\n            hit(5)\n        })\n    }\n    print(\"score {score}\")   // the first world's score: 0, untouched\n}\n// Every read of score and enemies loads the current world first.",
+          "key": "D"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "A `static mut` may be touched only in unsafe code, and since the 2024 edition a lint denies taking a reference to one by default. Safe code wraps a global in a `Mutex` or keeps one copy per thread. Scoped threads may borrow the caller's locals until they join, which is A's rule for group workers, but not a `static mut`. Sources: https://doc.rust-lang.org/edition-guide/rust-2024/static-mut-references.html and https://doc.rust-lang.org/std/thread/fn.scope.html",
+          "code": "static SCORE: Mutex<i32> = Mutex::new(0);\nfn hit(points: i32) { *SCORE.lock().unwrap() += points; }\nthread::scope(|s| { s.spawn(|| think(&enemies)); });"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift 6 refuses a plain global var as \"not concurrency-safe\" unless it belongs to a global actor such as the main actor, or is marked nonisolated(unsafe). That is close to Jet's main-task owner, but written on every declaration. Other code reaches it by awaiting a hop to the main actor. Source: https://www.swift.org/migration/documentation/swift-6-concurrency-migration-guide/commonproblems/",
+          "code": "@MainActor var score = 0\n@MainActor func hit(_ points: Int) { score += points }\nnonisolated(unsafe) var raw = 0"
+        },
+        {
+          "lang": "D",
+          "note": "A pure function may not read or write a changeable global, and may read an immutable one. That is A's rule for -[]> code. Source: https://dlang.org/spec/function.html#pure-functions",
+          "code": "int level = 1;\npure int cost(int x) { return x * level; }   // error: reading mutable global state"
+        },
+        {
+          "lang": "Kotlin/Native",
+          "note": "The legacy memory manager confined top-level state to the main thread and checked it while running. The new memory manager, the default since Kotlin 1.7.20, lifted that limit, so any thread may change a top-level property. A keeps the confinement but checks it while building and lets group workers in. Source: https://kotlinlang.org/docs/native-migration-guide.html",
+          "code": "var score = 0   // legacy: only the main thread; since 1.7.20: any thread"
+        },
+        {
+          "lang": "Zig",
+          "note": "A container-level var is a plain global with no race or test check, and threadlocal gives each thread its own copy. Source: https://ziglang.org/documentation/master/#Container-Level-Variables",
+          "code": "var score: i32 = 0;\nthreadlocal var scratch: [256]u8 = undefined;"
+        },
+        {
+          "lang": "Odin",
+          "note": "Package-level variables are plain globals, and the thread_local attribute gives each thread a copy. Nothing checks tasks or tests. Source: https://odin-lang.org/docs/overview/",
+          "code": "score: int\n@(thread_local) scratch: [256]u8"
+        },
+        {
+          "lang": "Jai",
+          "note": "Globals are plain and fast, and a global changed while compiling is copied into the program, as Jet bakes a start value. A hidden context carries the allocator and logger instead of globals. Sources: Jonathan Blow, https://www.youtube.com/watch?v=OHZwYYW9koI at 00:18:04; Docs/Audits/jai-parity-2026-10-16.md.",
+          "code": "score: int;\n#run { score = compute_start(); }   // kept in the executable"
+        },
+        {
+          "lang": "Go",
+          "note": "Package variables are plain, and parallel tests share them. The race detector only finds races that happen while running, so it misses paths a test never takes. Source: https://go.dev/doc/articles/race_detector",
+          "code": "var score int\nfunc TestHit(t *testing.T) { t.Parallel(); hit(5) }   // shares score"
+        },
+        {
+          "lang": "cargo-nextest",
+          "note": "Each test runs in its own process, so singletons and globals separate per test with no coordination. The stated costs are slower process creation on Windows and harder sharing between tests. A runs many tests per child process and restores start values between them. Source: https://nexte.st/docs/design/why-process-per-test/",
+          "code": "cargo nextest run   # one process per test"
+        },
+        {
+          "lang": "C# and xUnit",
+          "note": "Static fields are one per process, and xUnit runs test classes in parallel by default, so shared statics need a collection that turns parallelism off. Source: https://xunit.net/docs/running-tests-in-parallel",
+          "code": "static int score;\n[Collection(\"serial\")] public class HitTests { /* ... */ }"
+        },
+        {
+          "lang": "Bevy",
+          "note": "A game-wide value is a resource. The scheduler runs systems in parallel unless they conflict, and a system that changes a resource runs alone. Jet's group loans give workers the same rule, checked while building. Source: https://bevy-cheatbook.github.io/programming/system-order.html",
+          "code": "fn think(costs: Res<TileCosts>) { /* readers run together */ }\nfn hit(mut score: ResMut<Score>) { score.0 += 5; }"
+        },
+        {
+          "lang": "Unity",
+          "note": "With domain reload off, static fields keep their values between Play mode runs, so scripts must reset them, by hand or with an attribute. That is the stale-state problem a test restore removes. Source: https://docs.unity3d.com/Manual/DomainReloading.html",
+          "code": "static int score;\n[RuntimeInitializeOnLoadMethod] static void Reset() { score = 0; }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the one-line global that games want and removes each danger where the compiler can see it. Group workers borrow globals by the rule they already use for locals. Pure functions and caches can't depend on a changing global, and each test starts fresh with no cost in shipped builds.",
+        "tradeoff": "Checked sharing with group workers, honest caches and fresh tests. In return, tasks that can outlive their starter stay refused, a pure function takes a global as a parameter, and parallel tests need new runner work.",
+        "gains": [
+          "Group workers, combinator branches and the parallel list adapters read globals and write separate places, checked while building.",
+          "A pure function's answer depends only on its arguments and context, so a #Memo cache can't go stale.",
+          "Each test, rerun and output check starts every global at its start value, with no cost per access.",
+          "Shipped builds pay nothing: every new check runs while building, and the restore exists only in test builds."
+        ],
+        "losses": [
+          {
+            "loss": "A task that can outlive the function that started it, or a function C may call on any thread, can't touch a global.",
+            "mitigation": "Group workers can. The error names the variable and the call path and offers a task.group, Shared, or passing the value in. The ratified rule refused every task, so A only loosens it."
+          },
+          {
+            "loss": "A -[]> or #Memo function that needs a global must take its value as a parameter.",
+            "mitigation": "Context reads stay allowed, and option C shows the tracking alternative. No -[]> or #Memo function in the repository names a same-file global today; the built check finds the rest."
+          },
+          {
+            "loss": "Tests run side by side only in separate processes, which is new runner work.",
+            "mitigation": "Each child process starts once and runs many tests, as cargo-nextest shows processes scale. The ratified world pointer also needed new work to run tests in parallel."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B refuses every worker task, even one that only reads, so a game copies its tables before each fan-out. Test builds pay one extra load on every global access, and parallel tests are still new runner work."
+          },
+          {
+            "key": "C",
+            "reason": "C lets a -[]> function give two answers for the same arguments, which breaks what pure means to a reader. Every write to a global a cache reads costs an add in shipped builds, and holders still can't be read in a cache."
+          },
+          {
+            "key": "D",
+            "reason": "D charges one extra load on every global access in shipped builds, the hot loops that games use globals for. A program that needs many matches can keep each match in a struct instead."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewGlobalSafe1. Probes and code reads found re-balloted card #6859 work, a test restore contradicting two ratified decisions and the runner, stale holder caches, a broken debugger check and invalid code. All are repaired, every amendment is stated, a tracking option replaces the rejected context slots, and A stays recommended (Docs/Audits/2026-11-25-global-state-review.md)."
+      },
+      "checkInstructions": "On dev, read JetSema Statements/Bindings.jet:1352-1357 for today's function-write ban. Read Effects/Checks.jet:1442-1469 and 6675-6684 for the purity and #Memo checks, and EvalProbe.jet:436-447 and 531-551 for the debugger's check. Read JetRuntime TestHarness.jet:148-156, JetCLI NativeTests.jet:461-539 and Reference/cli.md:1153-1173 for how tests run. Read spec.md:3072-3082, 4824-4847 and 4923-4948. Run `node Tools/Tower/tower.mjs card show 6859 --json` for the ratified parts, and `decision show D-MODULE-VAR1 --json` for the rule this amends.",
+      "surface": {
+        "gist": "Should group workers borrow module globals, should pure code and caches be barred from them, and how do tests start fresh?",
+        "lesson": "A module global is a changeable value at the top of a file, like a game's score. A ratified rule lets functions change it. Still open: may group workers use it, may pure code and caches read it, and how does each test start fresh?",
+        "trio": {
+          "current": {
+            "note": "Today changing a global needs an unsafe block, and a cache can go stale.",
+            "code": "level := 1\nbump: fn() { #Unsafe(\"demo\") { level = 10 } }   // plain write: E0111\n\n#Memo cost: fn(x: Int) -[]> Int { x * level }\n\nrun: fn() {\n    print(cost(2))   // 2\n    bump()\n    print(cost(2))   // 2 again: a stale answer\n}"
+          },
+          "wild": {
+            "lang": "D",
+            "note": "Pure code may not read a changeable global.",
+            "code": "int level = 1;\n\npure int cost(int x) {\n    return x * level;   // error: reading mutable global state\n}"
+          }
+        },
+        "options": [
+          {
+            "name": "Workers borrow, pure code can't read, tests restore",
+            "gist": "Group workers borrow globals; pure code and caches can't read them; tests restore start values.",
+            "proposed": {
+              "code": "^level: 1\n^enemies: [Enemy]{}\n\nrun: fn() {\n    task.group workers {\n        loop e in enemies -> task think(e)  // allowed: joins at }\n    }\n    t: task think_all()                 // error: may outlive run\n}\n\n#Memo cost: fn(x: Int) -[]> Int { x * level }   // error: reads level\n\n#Test(\"starts fresh\") { assert_eq(level, 1) }   // in every test"
+            },
+            "key": "A",
+            "gains": [
+              "Group workers read globals with no copy.",
+              "Pure code and caches can't depend on a changing global.",
+              "Tests start fresh; shipped code pays nothing."
+            ],
+            "losses": [
+              "Tasks that can outlive their starter can't touch a global.",
+              "Parallel tests need one process per core."
+            ]
+          },
+          {
+            "name": "The ratified rule, plus the cache fix",
+            "gist": "No task may touch a global, even a reading group worker.",
+            "proposed": {
+              "code": "^level: 1\n^enemies: [Enemy]{}\n\nrun: fn() {\n    copy: enemies.copy()              // workers can't read enemies\n    task.group workers {\n        loop e in copy -> task think_from(e, copy)\n    }\n}\n\n#Memo cost: fn(x: Int) -[]> Int { x * level }   // error: reads level\n// Tests reach every global through their world: one more load each."
+            },
+            "key": "B",
+            "gains": [
+              "Already ratified; the least new design."
+            ],
+            "losses": [
+              "No worker task may read a global.",
+              "Test builds add one load to every global access."
+            ]
+          },
+          {
+            "name": "As A, but caches track writes",
+            "gist": "Pure code may read globals; a cache counts their writes.",
+            "proposed": {
+              "code": "^level: 1\n\n#Memo cost: fn(x: Int) -[]> Int { x * level }   // allowed\n\nrun: fn() {\n    print(cost(2))   // 2\n    level = 10       // counts one write to level\n    print(cost(2))   // 20: the count changed\n}"
+            },
+            "key": "C",
+            "gains": [
+              "Pure functions may read globals, like context.",
+              "Caches stay correct by counting writes."
+            ],
+            "losses": [
+              "Each write to a cached global costs a count, even shipped.",
+              "A pure answer can change for the same arguments."
+            ]
+          },
+          {
+            "name": "Globals live in worlds a program can multiply",
+            "gist": "As A, but each world has its own globals, in every build.",
+            "proposed": {
+              "code": "^score: 0\n\nhit: fn(points: Int) { score += points }\n\nrun: fn() {\n    matches: [World]{World.new(), World.new()}\n    loop m in matches -> m.run(fn() { hit(5) })\n    print(\"score {score}\")   // 0: each world has its own\n}\n// Every read of score loads the current world first."
+            },
+            "key": "D",
+            "gains": [
+              "Many independent worlds, such as matches."
+            ],
+            "losses": [
+              "One extra load on every global access, in shipped code too."
+            ]
+          }
+        ],
+        "recommendation": {
+          "why": "A keeps one-line globals and refuses only what can go wrong. Workers read them, caches can't go stale, and tests start fresh at no shipped cost.",
+          "tradeoff": "Safe workers, honest caches and fresh tests, for refusing long-lived tasks and a test runner rework.",
+          "rec": "A",
+          "gains": [
+            "Group workers read and split-write globals, checked while building.",
+            "Caches and pure functions never see a changing global.",
+            "Tests start fresh; shipped code pays nothing."
+          ],
+          "losses": [
+            {
+              "loss": "A task that can outlive its starter can't touch a global.",
+              "mitigation": "The error offers a task group, Shared, or passing the value in."
+            },
+            {
+              "loss": "A pure function takes a global as a parameter.",
+              "mitigation": "Context reads stay allowed."
+            },
+            {
+              "loss": "Parallel tests need a process per core.",
+              "mitigation": "Each child starts once and runs many tests."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Workers can't read globals; test builds pay a load per access."
+            },
+            {
+              "key": "C",
+              "reason": "Pure answers could change between equal calls; shipped writes pay a count."
+            },
+            {
+              "key": "D",
+              "reason": "Every global access costs an extra load in shipped programs."
+            }
+          ]
+        }
+      },
+      "reports": [
+        {
+          "title": "Global state review: claims, probes and gaps",
+          "path": "Docs/Audits/2026-11-25-global-state-review.md",
+          "note": "Adversarial review of this ballot: strongest existing solutions, each claim attacked with probes on the installed jet, a verdict per claim, and every gap named."
+        }
+      ],
+      "draftedBy": "Pip",
+      "reviewedBy": "ReviewGlobalSafe1",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-25T20:21:05.518Z"
     }
   ],
   "questions": [
@@ -142011,6 +142298,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T20:21:30.542Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c01wqict",
+      "note": "body,logEntry"
+    },
+    {
+      "at": "2026-11-25T20:21:22.493Z",
+      "by": "Pip",
+      "action": "card.criteria-edit",
+      "ref": "c0uxxmpm",
+      "note": "#7: ReviewGlobalSafe1 probe: index writes hit E0111 with wrong text, not E0223; was: A function changes a module variable in place like a local: `enemies.push(e)`, `frame[i] = v` and lending it to a `^` parameter work, and E0223's refusal of every non-#Persist changeable module root ("
+    },
+    {
+      "at": "2026-11-25T20:21:08.723Z",
+      "by": "Pip",
+      "action": "decision.post",
+      "ref": "D-GLOBAL-SAFE1",
+      "note": "reviewed by ReviewGlobalSafe1"
+    },
+    {
+      "at": "2026-11-25T20:21:05.518Z",
+      "by": "Pip",
+      "action": "decision.add",
+      "ref": "D-GLOBAL-SAFE1",
+      "note": "Changeable module globals: what group workers, pure code, caches and tests may do with them (draft)"
+    },
     {
       "at": "2026-11-25T20:12:38.329Z",
       "by": "Orchestrator",
