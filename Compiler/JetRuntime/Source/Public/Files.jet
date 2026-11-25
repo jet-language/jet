@@ -191,6 +191,10 @@ files: module {
     // descriptors, whether `handle` is still held, and the number.
     #Import(c) priv directory_fd: fn(handle: Int) -[FS.Read]> {available: Bool, held: Bool, fd: Int} = "jet_fs_directory_fd_raw"
 
+    // The entries of the held directory `handle`, unsorted: each row is a
+    // kind byte (1 for a directory) and then the entry's name bytes.
+    #Import(c) priv list_directory: fn(handle: Int) -[FS.Read]> [[U8]] IOError! = "jet_fs_directory_list"
+
     // The descriptor numbers of a reader, a writer and a lock.
     #Import(c) priv reader_fd: fn(reader: FileReader) -[FS.Read]> Int IOError! = "jet_std_file_reader_fd_raw"
 
@@ -217,6 +221,10 @@ files: module {
     // Closes `fd`; its errno, 0 when it closed. A negative `fd` closes
     // nothing.
     #Import(c) priv lock_close: fn(fd: Int) -[FS.Write]> Int = "jet_fs_lock_close_raw"
+
+    // The FileLock that owns the open lock file `path` at descriptor `fd`
+    // from now on; it closes `fd` when it ends.
+    #Import(c) priv lock_owner: fn(path: ^^String, fd: Int) -[FS.Write]> FileLock = "jet_fs_lock_owner_raw"
 
     // The file the descriptor `fd` or the path `path` (not following a
     // final link) names, so a replaced lock file is told apart from the
