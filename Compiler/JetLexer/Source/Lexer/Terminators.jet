@@ -11,7 +11,7 @@ use jet_foundation.[
 // check without a division on every call.
 kind_at: fn(facts: [Int], index: Int) -> Int Never! {
     if index < 0 || index * 4 >= facts.len() -> return 0
-    return facts[index * 4]
+    facts[index * 4]
 }
 
 ends_statement: fn(kind: Int) -> Bool Never! {
@@ -121,13 +121,13 @@ scope_member_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
         if kind == TOKEN_EOF -> return false
         cursor += 1
     }
-    return kind_at(facts, cursor) == TOKEN_LBRACE
+    kind_at(facts, cursor) == TOKEN_LBRACE
 }
 
 leading_dot_variant: fn(facts: [Int], index: Int) -> Bool Never! {
     kind: kind_at(facts, index)
     if kind == TOKEN_NULL -> return true
-    return kind == TOKEN_IDENT && facts[index * 4 + 3] == 1
+    kind == TOKEN_IDENT && facts[index * 4 + 3] == 1
 }
 
 skip_comment_tokens: fn(facts: [Int], index: Int) -> Int Never! {
@@ -136,7 +136,7 @@ skip_comment_tokens: fn(facts: [Int], index: Int) -> Int Never! {
         kind: kind_at(facts, cursor)
         if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> cursor += 1 else -> break
     }
-    return cursor
+    cursor
 }
 
 // Whether `source` may pin an inline dependency version, `use name#1.4`:
@@ -188,7 +188,7 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
         cursor = skip_comment_tokens(facts, cursor)
         loop {
             if kind_at(facts, cursor) != TOKEN_DOT -> break
-            variant := skip_comment_tokens(facts, cursor + 1)
+            variant: skip_comment_tokens(facts, cursor + 1)
             if !leading_dot_variant(facts, variant) -> break
             cursor = variant + 1
             cursor = skip_comment_tokens(facts, cursor)
@@ -261,7 +261,7 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
         }
         return false
     }
-    return arrow(kind_at(facts, cursor))
+    arrow(kind_at(facts, cursor))
 }
 
 // The end of an arm's name after its leading `.`: the modules that lead to a
@@ -298,7 +298,7 @@ place_mark_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     if mark != TOKEN_CARET && mark != TOKEN_TILDE -> return false
     name: kind_at(facts, index + 1)
     if name != TOKEN_IDENT && name != TOKEN_SELF -> return false
-    return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
+    facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
 }
 
 // `{ member: local, … }: tuple` at line start renames tuple members, so
@@ -461,7 +461,7 @@ lex_with_terminators: fn(source: [U8], config_surface: Bool, allow_reserved_iden
     tables.has_paste = scanned.has_paste
     events: terminator_events(source, facts)
     terminator_diagnostics := [Diagnostic]{}
-    lexed := lex_payload_from_facts(source, facts, events, config_surface, allow_reserved_identifiers, 0, 0, source.len(), tables, terminator_diagnostics)
+    lexed: lex_payload_from_facts(source, facts, events, config_surface, allow_reserved_identifiers, 0, 0, source.len(), tables, terminator_diagnostics)
     diagnostics := lexed.diagnostics.move()
     diagnostics.extend(terminator_diagnostics)
     Lexed{tokens: lexed.tokens.move(), tables: tables.move(), diagnostics: diagnostics.move()}

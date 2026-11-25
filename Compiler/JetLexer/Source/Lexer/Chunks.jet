@@ -102,7 +102,7 @@ lex_generated_threads: fn(source: [U8], threads: CompilerThreads) -> LexedThread
 // Lexes `source` into verified per-chunk `LexedChunk`s without flattening
 // tokens or merging `TokenTables`.
 lex_chunks_threads: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, threads: CompilerThreads) -> LexedChunks {
-    outputs := lexer_lex_source_chunks(source, config_surface, allow_reserved_identifiers, threads)
+    outputs: lexer_lex_source_chunks(source, config_surface, allow_reserved_identifiers, threads)
     has_fences := false
     chunks := [LexedChunk]{}
     chunks.try_reserve(outputs.len()) ?? ()
@@ -115,7 +115,7 @@ lex_chunks_threads: fn(source: [U8], config_surface: Bool, allow_reserved_identi
 
 // The one-thread lex of `source` with its newline table and one run.
 lexed_threads_single: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> LexedThreads {
-    lexed := lex_with_terminators(source, config_surface, allow_reserved_identifiers)
+    lexed: lex_with_terminators(source, config_surface, allow_reserved_identifiers)
     count: lexed.tokens.len()
     LexedThreads{lexed: lexed.move(), line_starts: lexer_line_starts(source, 0, source.len(), true), runs: [Int]{0, count}}
 }
@@ -292,13 +292,16 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
         }
         run_start := bounds[k]
         run_end_idx := k + 1
-        if !bodies_flags[k] && accepted.pop() == .Val(prev) {
-            run_start = prev.start
-        } else if run_end_idx < chunk_count {
-            run_end_idx += 1
+        if {
+            !bodies_flags[k] && accepted.pop() == .Val(prev) -> {
+                run_start = prev.start
+            }
+            run_end_idx < chunk_count -> {
+                run_end_idx += 1
+            }
         }
         loop {
-            merged := lexer_lex_chunk_range(source, config_surface, allow_reserved_identifiers, run_start, bounds[run_end_idx])
+            merged: lexer_lex_chunk_range(source, config_surface, allow_reserved_identifiers, run_start, bounds[run_end_idx])
             if merged.clean {
                 accepted.push(merged.move())
                 k = run_end_idx
@@ -348,14 +351,14 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
         end: chunk.end
         parts.push(Shared{LexerChunkPart{start: start, end: end, outputs: [LexerChunkOutput]{chunk.move()}}})
     }
-    first := lexer_chunk_part_take(parts[0])
+    first: lexer_chunk_part_take(parts[0])
     tables := first.tables.move()
     total_tokens := first.tokens.len()
     total_literals := tables.literals.len()
     total_line_starts := first.line_starts.len()
     literal_base := total_literals
     loop chunk in 1..<parts.len() {
-        map := lexer_chunk_name_map(parts[chunk], tables)
+        map: lexer_chunk_name_map(parts[chunk], tables)
         permit := parts[chunk].guard_edit()
         total_tokens += permit.value.outputs[0].tokens.len()
         chunk_literals: permit.value.outputs[0].tables.literals.len()
@@ -476,14 +479,14 @@ lexer_lex_chunk_range: fn(source: [U8], config_surface: Bool, allow_reserved_ide
     events: terminator_events(source, facts)
     terminator_diagnostics := [Diagnostic]{}
     bidi_diagnostics := [Diagnostic]{}
-    lexed := lex_payload_from_facts_range(source, facts, events, config_surface, allow_reserved_identifiers, 0, from, to, seed && seed_rbrace >= 0, tables, terminator_diagnostics, bidi_diagnostics)
+    lexed: lex_payload_from_facts_range(source, facts, events, config_surface, allow_reserved_identifiers, 0, from, to, seed && seed_rbrace >= 0, tables, terminator_diagnostics, bidi_diagnostics)
     LexerChunkOutput{start: from, end: to, tokens: lexed.tokens.move(), tables: tables.move(), diagnostics: lexed.diagnostics.move(), bidi_diagnostics: bidi_diagnostics.move(), terminator_diagnostics: terminator_diagnostics.move(), line_starts: lexer_line_starts(source, from, to, from == 0), clean: clean, bodies_local: !seed || scanned.bodies_local, map: [Name]{}, literal_base: 0}
 }
 
 // One thread: lexes its chunk byte range and stores the output in `part`.
 lexer_lex_chunk_part: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, part: Shared<LexerChunkPart>) -> Int {
     permit := part.guard_edit()
-    output := lexer_lex_chunk_range(source, config_surface, allow_reserved_identifiers, permit.value.start, permit.value.end)
+    output: lexer_lex_chunk_range(source, config_surface, allow_reserved_identifiers, permit.value.start, permit.value.end)
     permit.value.outputs.push(output.move())
     1
 }
@@ -507,7 +510,7 @@ lexer_remap_chunk_parts: fn(parts: [Shared<LexerChunkPart>], from: Int) -> Int {
 lexer_remap_chunk_part: fn(part: Shared<LexerChunkPart>) -> Int {
     permit := part.guard_edit()
     output := compiler_threads_taken(permit.value.outputs)
-    map := output.map.move()
+    map: output.map.move()
     base: output.literal_base
     lexer_remap_tokens(output.tokens, map, base)
     loop row in 0..<output.tables.literals.len() {
