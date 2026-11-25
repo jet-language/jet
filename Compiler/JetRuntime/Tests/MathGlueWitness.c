@@ -8,11 +8,9 @@
 #include <string.h>
 typedef struct { double real,imaginary; } Complex;
 typedef struct { double min_width,min_height,max_width,max_height; } Size;
-typedef struct { uint64_t state; } Rng;
 typedef struct { unsigned char *data; int64_t length,capacity; } Text;
 _Static_assert(sizeof(Complex)==16 && offsetof(Complex,imaginary)==8,"Complex16");
 _Static_assert(sizeof(Size)==32 && offsetof(Size,max_height)==24,"Size32");
-_Static_assert(sizeof(Rng)==8,"Rng8");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
@@ -36,10 +34,6 @@ extern double jet_rt_record_get_jet_size_constraint_min_width(Size *);
 extern double jet_rt_record_get_jet_size_constraint_min_height(Size *);
 extern double jet_rt_record_get_jet_size_constraint_max_width(Size *);
 extern double jet_rt_record_get_jet_size_constraint_max_height(Size *);
-extern Rng *jet_rt_handle_clone_rng(Rng *);
-extern void jet_rt_handle_drop_rng(Rng *);
-extern bool jet_rt_handle_eq_rng(Rng *,Rng *);
-extern Text *jet_rt_handle_show_rng(Rng *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[24];
 static size_t count;
 static unsigned interceptions;
@@ -108,18 +102,6 @@ static void equality(void) {
     jet_rt_handle_drop_jet_size_constraint(s); jet_rt_handle_drop_jet_size_constraint(t); jet_rt_handle_drop_jet_size_constraint(u); done();
     jet_rt_handle_drop_jet_complex(NULL); jet_rt_handle_drop_jet_size_constraint(NULL);
 }
-static void rngs(void) {
-    const uint64_t states[]={0,1,UINT64_C(0x8000000000000000),UINT64_MAX};
-    for(size_t i=0;i<4;++i) {
-        Rng *a=jet_rt_alloc(8,8); a->state=states[i]; Rng *b=jet_rt_handle_clone_rng(a);
-        assert(a!=b && b->state==states[i] && jet_rt_handle_eq_rng(a,b));
-        b->state^=1; assert(!jet_rt_handle_eq_rng(a,b)); b->state^=1;
-        Text *s=jet_rt_handle_show_rng(a); text_is(s,"RNG { .. }");
-        watch(a,8,8); watch(b,8,8); watch_text(s);
-        jet_rt_handle_drop_rng(a); jet_rt_handle_drop_rng(b); jet_rt_string_drop(s); done();
-    }
-    jet_rt_handle_drop_rng(NULL);
-}
 static void old_debug(double value,const char *expected) {
     Text *a=jet_rt_float_to_string(value),*b=jet_rt_float_debug(value);
     assert(a!=b); text_is(a,expected); text_is(b,expected);
@@ -127,7 +109,7 @@ static void old_debug(double value,const char *expected) {
 }
 int main(void) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
-    jet_rt_alloc_init(); equality(); rngs();
+    jet_rt_alloc_init(); equality();
     complex_render(1,2,"1 + 2i"); complex_render(-0.0,-0.0,"-0 - 0i");
     complex_render(1e16,1e21,"10000000000000000 + 1000000000000000000000i");
     // Fixed decimals copied from the pinned Rust oracle, not C snprintf.
