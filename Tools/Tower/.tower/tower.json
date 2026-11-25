@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 7030,
-    "rev": 114200,
+    "nextNum": 7035,
+    "rev": 114210,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74398,6 +74398,11 @@
         {
           "at": "2026-11-25",
           "by": "Orchestrator",
+          "text": "n=22, decided 2026-11-25: SocketAddr and UDPPacket are runtime-owned native addresses, so their façade fields become priv in Core. A literal outside core.net gets the private-field diagnostic (UI snapshot), not an ICE. Handles print through their Core Display impl as the one path, not through an IR fallback. Still open: sema rewrites addr.host/addr.port into net.socket_host/socket_port calls (JetSema Places.jet:484), a field read the declaration doesn't carry. Whether it moves to Core-declared accessors is a public-surface question for a later B slice, and goes to a ballot if the spelling would change."
+        },
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
           "text": "B (n=2) scope, decided 2026-11-25: Core.rows rendered by the compiler from hand-written CoreCallRecord rows (CoreCalls.jet, CoreCallRows.jet) is a second source of truth and does not meet n=2. Plan, largest first, G1Checkers: (1) field-default params on the declared-signature path; (2) plugin.load moves to a Core declaration with a body over a jet.runtime.plugin binding, in two seed stages, which deletes CoreSignatures.jet (p5 leaves plugin.load as its only row); (3) the dispatcher rows migrate family by family to Core-declared forms, and CoreCalls.jet and CoreCallRows.jet are deleted with the last family. Any form not already registered goes to a ballot first."
         },
         {
@@ -74973,7 +74978,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-25T17:58:43.235Z",
+      "updated": "2026-11-25T18:00:41.285Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 22
     },
@@ -75324,6 +75329,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-25T17:38:31.481Z"
+        },
+        {
+          "n": 7,
+          "text": "The ballot D-FOREIGN-MARKER1 (proposal item P1 second tier: foreign code blocks `extern rust \"…\" { }` become a `#Foreign(…)` marker) is decided, and its ratified outcome is built in one cutover with every in-repository use migrated.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:24.679Z"
+        },
+        {
+          "n": 8,
+          "text": "The ballot D-TASKS-SPAWN1 (proposal item P1 second tier: the `task` word becomes `spawn` inside a `#Tasks { }` scope) is decided, and its ratified outcome is built in one cutover with every in-repository use migrated.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:25.546Z"
+        },
+        {
+          "n": 9,
+          "text": "The ballot D-YIELD-EMIT1 (proposal item P1 second tier: the `yield` word becomes an `Emit<T>` effect) is decided, and its ratified outcome is built in one cutover with every in-repository use migrated.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:26.426Z"
+        },
+        {
+          "n": 10,
+          "text": "The ballot D-TABLE-IT1 (proposal item P1 second tier: the table word `it` becomes a bound name) is decided, and its ratified outcome is built in one cutover with every in-repository use migrated.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:27.334Z"
         }
       ],
       "refs": [],
@@ -75331,8 +75372,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:38:31.481Z",
-      "updated": "2026-11-25T17:39:44.239Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-25T17:59:27.334Z",
+      "updatedBy": "Pip",
+      "criteriaLastN": 10
     },
     {
       "id": "c044xzcw",
@@ -77143,6 +77185,362 @@
       "needsAcceptance": false,
       "created": "2026-11-25T17:39:31.253Z",
       "updated": "2026-11-25T17:39:31.253Z",
+      "updatedBy": "Pip"
+    },
+    {
+      "id": "c0on1be8",
+      "num": 7030,
+      "title": "An effect is its provider trait: one name per service in effect rows, manifests, contexts and tests",
+      "body": "Owner asked on 2026-11-25 for greenfield proposal item P3 to go to ballot D-EFFECT-TRAIT1. Today a service has two names: the effect in rows, manifests and --allow/--deny (FS.Read, Net, DB.Write; Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet) and the provider trait D-CORE-PROVIDER1=A ratified for #Context blocks, boards and tests (mostly unbuilt: Allocator and Scheduler are traits, Clock is a struct). The ballot decides whether the provider trait becomes the effect. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P3 (master checkout, not yet on dev).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of ballot D-EFFECT-TRAIT1, names every place the same fact lives today with the exact cutover list and the copies it deletes, and passes; the ballot's recorded review cites it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:58:57.851Z"
+        },
+        {
+          "n": 2,
+          "text": "The ratified outcome of D-EFFECT-TRAIT1 is built in sema, Core, manifests, --allow/--deny and #Context, with one declaration per service and the copies it replaces deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:58:57.851Z"
+        },
+        {
+          "n": 3,
+          "text": "Every effect row, manifest authority list, diagnostic and doc in the repository migrates to the ratified names in one cutover.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:58:57.851Z"
+        },
+        {
+          "n": 4,
+          "text": "An executable example with golden output proves the ratified design on every applicable tier, and the spec, reference pages and editor grammars describe it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:58:57.851Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T17:58:57.851Z",
+      "updated": "2026-11-25T17:58:57.851Z",
+      "updatedBy": "Pip"
+    },
+    {
+      "id": "c0clpv28",
+      "num": 7031,
+      "title": "Handles that read like links: relationships held as pool IDs with short, checked navigation instead of stored @T links",
+      "body": "Owner asked on 2026-11-25 for greenfield proposal item P9 as a ballot of the best-of-both design, with every downside engineered away: keep handles (Pool<T> with generational ID<T>) and views as the one way to hold a relationship, and make navigating them as short as a link. It reopens D-MEMREF1 (live links @T, unbuilt: #4500, #4756). Owner bar: Jet must be able to do everything any other language can as an end result, easy to reason about and use, with friction in proportion to how often a thing is done. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P9 (master checkout, not yet on dev).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of ballot D-HANDLE-NAV1, names every place the same fact lives today with the exact cutover list and the copies it deletes, and passes; the ballot's recorded review cites it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:58:59.300Z"
+        },
+        {
+          "n": 2,
+          "text": "The ratified outcome of D-HANDLE-NAV1 is built: the navigation form, the pool lookup rule and the stale-handle behavior, on every tier, with D-REACT-REF1's reactive reads served by the same mechanism.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:58:59.300Z"
+        },
+        {
+          "n": 3,
+          "text": "A capability matrix proves every relationship shape other languages express (parent pointers, cycles, doubly linked lists, observers, shared objects, intrusive lists, cross-task sharing) is written in the ratified form, each with a runnable example.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:58:59.300Z"
+        },
+        {
+          "n": 4,
+          "text": "A benchmark pair shows ratified navigation costs no more than hand-written index code, and the optimizer keeps its no-alias facts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:58:59.300Z"
+        },
+        {
+          "n": 5,
+          "text": "An executable example with golden output proves the ratified design on every applicable tier, and the spec, reference pages and editor grammars describe it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:58:59.300Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T17:58:59.300Z",
+      "updated": "2026-11-25T17:58:59.300Z",
+      "updatedBy": "Pip"
+    },
+    {
+      "id": "c01wqict",
+      "num": 7032,
+      "title": "Changeable module globals stay, with their downsides engineered away: per-test isolation, task safety and visible global writes",
+      "body": "Owner asked on 2026-11-25 to keep mutable module globals (game development needs them) and to find every way to engineer away their downsides, presented as ballot D-GLOBAL-SAFE1, instead of greenfield proposal item P10's context slots. Today `name := value` at file scope is a changeable global computed while building, with no startup copy (D-JAI-COMPTIME1=A; spec.md:455-479). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P10 (master checkout, not yet on dev).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design review: a dated audit in Docs/Audits attacks the whole mechanism of ballot D-GLOBAL-SAFE1, names every place the same fact lives today with the exact cutover list and the copies it deletes, and passes; the ballot's recorded review cites it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:00.830Z"
+        },
+        {
+          "n": 2,
+          "text": "The ratified outcome of D-GLOBAL-SAFE1 is built: each listed downside (test interference, cross-task races, hidden writes in purity and effect facts, hot reload, initialization order) has its ratified remedy with a registered diagnostic where a rule refuses code.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:00.830Z"
+        },
+        {
+          "n": 3,
+          "text": "Two tests that write the same global run in parallel and each sees only its own writes, proved by a case run under the parallel test runner.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:00.830Z"
+        },
+        {
+          "n": 4,
+          "text": "A sweep of every Jet source in the repository finds and fixes every site the new rules refuse, in the same submission.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:00.830Z"
+        },
+        {
+          "n": 5,
+          "text": "An executable example with golden output proves the ratified design on every applicable tier, and the spec, reference pages and editor grammars describe it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:00.830Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T17:59:00.830Z",
+      "updated": "2026-11-25T17:59:00.830Z",
+      "updatedBy": "Pip"
+    },
+    {
+      "id": "c0pi4dar",
+      "num": 7033,
+      "title": "Show what a block reads and writes: the editor and jet inspect report the inferred footprint of any selected block",
+      "body": "Owner chose option B for greenfield proposal item P21 on 2026-11-25: no new syntax. A block's footprint (the names and fields it reads, writes and takes) is inferred and shown on request; a block that needs a checked footprint is written as a local function, whose parameters already state it. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P21 (master checkout, not yet on dev).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design review: a dated audit in Docs/Audits checks the inferred footprint against every place reads and writes are already computed (ownership facts, effect facts, ^self.[a, b] receiver footprints) so one source serves all, and passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:02.257Z"
+        },
+        {
+          "n": 2,
+          "text": "`jet inspect footprint FILE:LINE[-LINE]` prints the names and fields a block or line range reads, writes and takes, with their kinds, from checked facts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:02.257Z"
+        },
+        {
+          "n": 3,
+          "text": "The language server shows the same footprint for a selected range (hover or code lens), and an extract-function action turns the selection into a local function whose parameters carry that footprint.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:02.257Z"
+        },
+        {
+          "n": 4,
+          "text": "An executable example with golden output proves the ratified design on every applicable tier, and the spec, reference pages and editor grammars describe it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T17:59:02.257Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T17:59:02.257Z",
+      "updated": "2026-11-25T17:59:02.257Z",
+      "updatedBy": "Pip"
+    },
+    {
+      "id": "c05bs1oq",
+      "num": 7034,
+      "title": "How failure points read in source: decide D-FAIL-VISIBLE2 and finish the failure-point tools",
+      "body": "Owner asked on 2026-11-25 for greenfield proposal item P36 (explicit failure marks by default, reopening D-FAIL-VISIBLE1=A) to go to ballot D-FAIL-VISIBLE2. The drafting pass measured one added mark per 12-17 lines in code that can fail and found five defects in today's failure-point tools (rows 3-5), which are fixed whichever option wins; #3838, which built the tools, is done. Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P36 (master checkout, not yet on dev).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design review: the D-FAIL-VISIBLE2 ballot's recorded adversarial review attacks every option, names every place failure marks live today (the failures policy, sema E0434, jet fmt insertion, editor faint marks, jet review and jet diff lists) with the exact cutover list, and passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:01:35.588Z"
+        },
+        {
+          "n": 2,
+          "text": "D-FAIL-VISIBLE2 is decided by the owner, and its ratified outcome is built in one cutover with every in-repository use, doc and snapshot migrated.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:01:35.588Z"
+        },
+        {
+          "n": 3,
+          "text": "Failure marks land at the call, never inside a trailing typed list literal or lambda: `jet fmt --explicit-failures` and the editor's faint marks place `?` correctly for `each_size([String]{…})` and `map(fn(…) {…})`, and the formatted output parses (FailureMarks.jet:184-193).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:01:35.588Z"
+        },
+        {
+          "n": 4,
+          "text": "`jet review` and `jet diff` list failure points inside lambdas and in loop headers over a failing source, and E0434 covers a loop header (Review.jet:1524-1541, ForIn.jet:233-285).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:01:35.588Z"
+        },
+        {
+          "n": 5,
+          "text": "`jet review` publishes failure points as code-host pull-request annotations, as D-FAIL-VISIBLE1=A promised, and a compiler-generated entry call `run(args: T)` raises no E0434 without a fix.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:01:35.588Z"
+        },
+        {
+          "n": 6,
+          "text": "An executable example with golden output proves the ratified failure-mark behavior on every applicable tier, and the spec and reference pages describe it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:01:35.588Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-25T18:01:35.588Z",
+      "updated": "2026-11-25T18:01:35.588Z",
       "updatedBy": "Pip"
     }
   ],
@@ -140931,6 +141329,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T18:01:35.588Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c05bs1oq",
+      "note": "How failure points read in source: decide D-FAIL-VISIBLE2 and finish the failure-point tools"
+    },
+    {
+      "at": "2026-11-25T18:00:41.286Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T17:59:27.334Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0aq9dry",
+      "note": "10 criteria, soft limit 6: Owner asked on 2026-11-25 to ballot each greenfield proposal item P1 second-tier respelling individually on this card"
+    },
+    {
+      "at": "2026-11-25T17:59:27.334Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0aq9dry",
+      "note": "#10 The ballot D-TABLE-IT1 (proposal item P1 second tier: the ta"
+    },
+    {
+      "at": "2026-11-25T17:59:26.426Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0aq9dry",
+      "note": "9 criteria, soft limit 6: Owner asked on 2026-11-25 to ballot each greenfield proposal item P1 second-tier respelling individually on this card"
+    },
+    {
+      "at": "2026-11-25T17:59:26.426Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0aq9dry",
+      "note": "#9 The ballot D-YIELD-EMIT1 (proposal item P1 second tier: the "
+    },
+    {
+      "at": "2026-11-25T17:59:25.546Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0aq9dry",
+      "note": "8 criteria, soft limit 6: Owner asked on 2026-11-25 to ballot each greenfield proposal item P1 second-tier respelling individually on this card"
+    },
+    {
+      "at": "2026-11-25T17:59:25.546Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0aq9dry",
+      "note": "#8 The ballot D-TASKS-SPAWN1 (proposal item P1 second tier: the"
+    },
+    {
+      "at": "2026-11-25T17:59:24.679Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0aq9dry",
+      "note": "7 criteria, soft limit 6: Owner asked on 2026-11-25 to ballot each greenfield proposal item P1 second-tier respelling individually on this card"
+    },
+    {
+      "at": "2026-11-25T17:59:24.679Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0aq9dry",
+      "note": "#7 The ballot D-FOREIGN-MARKER1 (proposal item P1 second tier: "
+    },
+    {
+      "at": "2026-11-25T17:59:02.257Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c0pi4dar",
+      "note": "Show what a block reads and writes: the editor and jet inspect report the inferred footprint of any selected block"
+    },
+    {
+      "at": "2026-11-25T17:59:00.830Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c01wqict",
+      "note": "Changeable module globals stay, with their downsides engineered away: per-test isolation, task safety and visible global writes"
+    },
+    {
+      "at": "2026-11-25T17:58:59.300Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c0clpv28",
+      "note": "Handles that read like links: relationships held as pool IDs with short, checked navigation instead of stored @T links"
+    },
+    {
+      "at": "2026-11-25T17:58:57.851Z",
+      "by": "Pip",
+      "action": "card.add",
+      "ref": "c0on1be8",
+      "note": "An effect is its provider trait: one name per service in effect rows, manifests, contexts and tests"
+    },
     {
       "at": "2026-11-25T17:58:43.235Z",
       "by": "Orchestrator",
