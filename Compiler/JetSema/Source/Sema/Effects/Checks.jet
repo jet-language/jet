@@ -137,10 +137,12 @@ use jet_foundation.[
     module_text,
     foundation_byte_text,
     COMPTIME_SITE_TRAIT,
+    TYPE_ID_TRAIT,
     TYPE_REFLECTION_TRAIT,
     comptime_site_constant_key,
     name_count,
     type_carrier_identity,
+    type_id_constant_key,
     type_reflection_constant_key,
 ]
 
@@ -382,21 +384,23 @@ SemaEffectInstantiation: struct {
 }
 
 // A read a generic body makes that each instance answers on its own: a
-// `T.reflect()` read, where `owner` names the type parameter it reflects, or
-// the value of a compile-time site (`site`, its key), where `owner` applies
-// COMPTIME_SITE_TRAIT to the type parameters the site reads. `span` is the
-// read.
+// `T.reflect()` read, or a `TypeId{T}` read (`type_id`), where `owner` names
+// the type parameter it reads, or the value of a compile-time site (`site`,
+// its key), where `owner` applies COMPTIME_SITE_TRAIT to the type
+// parameters the site reads. `span` is the read.
 SemaEffectTypeRead: struct {
     owner: Type,
     span: Span,
     site: String{""},
+    type_id: Bool{false},
 }
 
 // One instance of a read (SemaEffectTypeRead): `ty` the read's owner there,
 // the module of the non-generic function whose calls build that instance,
 // which names its types, the read and its module, the constant row `key` it
-// reads (sema_effect_type_reflections), the site a site's read names, and
-// the type parameters the read's owner names, which `ty` fills in order.
+// reads (sema_effect_type_reflections), the site a site's read names,
+// whether it reads a TypeId, and the type parameters the read's owner
+// names, which `ty` fills in order.
 SemaTypeReflection: struct {
     ty: Type,
     module_identity: ModuleID,
@@ -404,6 +408,7 @@ SemaTypeReflection: struct {
     read_module_identity: ModuleID,
     key: String,
     site: String{""},
+    type_id: Bool{false},
     params: [String]{[String]{}},
 }
 
@@ -3931,12 +3936,16 @@ sema_effect_type_reflections: fn(nodes: [SemaEffectNode]) -> [SemaTypeReflection
         if nodes[at].rare == .Val(rare) {
             loop read in rare.type_reads {
                 concrete: sema_expr_unwrap_tag(sema_inference_substitute_type(read.owner, nodes[at].type_params, queue[current].args))
-                key: if read.site == "" -> type_reflection_constant_key(concrete) else -> comptime_site_constant_key(read.site, concrete)
+                key: if {
+                    read.site != "" -> comptime_site_constant_key(read.site, concrete)
+                    read.type_id -> type_id_constant_key(concrete)
+                    else -> type_reflection_constant_key(concrete)
+                }
                 before: name_count(types)
                 _ := name_intern(types, key)
                 if name_count(types) == before -> next
                 params: if read.owner == .Apply(_, written) -> (loop param in written -> type_name(param)) else -> [String]{type_name(read.owner)}
-                found.push(SemaTypeReflection{ty: concrete, module_identity: nodes[origin].module_identity, span: read.span, read_module_identity: nodes[at].module_identity, key: key, site: read.site, params: params})
+                found.push(SemaTypeReflection{ty: concrete, module_identity: nodes[origin].module_identity, span: read.span, read_module_identity: nodes[at].module_identity, key: key, site: read.site, type_id: read.type_id, params: params})
             }
         }
         loop site in nodes[at].instantiations {
@@ -4348,11 +4357,11 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
         }
         .TraitConst(owner, trait_name, name) -> {
             sema_effect_walk_record_exact_fact(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller)
-            if trait_name == TYPE_REFLECTION_TRAIT || trait_name == COMPTIME_SITE_TRAIT {
+            if trait_name == TYPE_REFLECTION_TRAIT || trait_name == TYPE_ID_TRAIT || trait_name == COMPTIME_SITE_TRAIT {
                 site: if trait_name == COMPTIME_SITE_TRAIT -> name else -> ""
                 sema_effect_node_rare_open(nodes[node_index])
                 if ^nodes[node_index].rare == .Val(rare) {
-                    rare.type_reads.push(SemaEffectTypeRead{owner: owner, span: node.span, site: site})
+                    rare.type_reads.push(SemaEffectTypeRead{owner: owner, span: node.span, site: site, type_id: trait_name == TYPE_ID_TRAIT})
                 }
             }
             return false

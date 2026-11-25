@@ -18,6 +18,7 @@ use {
         BinOp,
         BodyNode,
         NodeKind,
+        TYPE_ID_TRAIT,
         TExprType,
         ModuleID,
         module_is_core,
@@ -8171,9 +8172,14 @@ sema_expr_check_bare_member_chain: fn(expr: Expr, expected: Type?, check: ^SemaB
 // The TypeId of a type the module sees, written where a `TypeId` is
 // expected: bare (`I64`, `geo.Point`, `[Point]`) or as `TypeId{…}` (whose
 // one name, `TypeId{Point}`, reads as a shorthand field). It is made here,
-// with the identity reflection gives the same type. None for any other
-// value, which checks as it is written, and for a program's own `TypeId`.
-sema_expr_type_id_written: fn(expr: Expr, check: SemaBodyCheck) -> TExpr? {
+// with the identity reflection gives the same type. A type parameter `T` of
+// a generic body is the TypeId of the type each instance fills `T` with:
+// the body holds one read no instance shapes, a TraitConst of TYPE_ID_TRAIT,
+// whose rows the program publishes (sema_effect_type_reflections); the
+// staged check of an instance's copy of a compile-time site reads the TypeId
+// it binds (sema_comptime_bound_type_id). None for any other value, which
+// checks as it is written, and for a program's own `TypeId`.
+sema_expr_type_id_written: fn(expr: Expr, check: ^SemaBodyCheck) -> TExpr? {
     graph: check.program.registration_graph
     // Snapshot: a TypeId is a registered type's identity, and a lone program registers none.
     if graph.mode == .Snapshot -> return None
@@ -8191,6 +8197,15 @@ sema_expr_type_id_written: fn(expr: Expr, check: SemaBodyCheck) -> TExpr? {
             .Elements(_) | .Entries(_) | .ByteText(_) | .Empty -> {
                 return None
             }
+        }
+    }
+    if written == .Ident(name, _, _) {
+        if sema_comptime_bound_type_id(name, check) == .Val(id) {
+            return Val(sema_tree_node(Type.Named{name: "TypeId"}, TExprKind.CtLit{value: id}, expr_span(expr)))
+        }
+        if sema_type_name_is_generic(check.environment.generic_params, name) && sema_scope_resolve_index(check.scopes, name) == None {
+            check.context.generic_reflections.push(Type.Named{name: name})
+            return Val(sema_node(check.context, Type.Named{name: "TypeId"}, NodeKind.TraitConst{owner: Type.Named{name: name}, trait_name: TYPE_ID_TRAIT, name: ""}, expr_span(expr)))
         }
     }
     ty: sema_call_type_written_as_value(written, check.environment.*, graph) ?? return None

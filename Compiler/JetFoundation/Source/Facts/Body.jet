@@ -326,6 +326,18 @@ type_reflection_constant_key: fn(concrete: Type) -> String Never! {
     "reflect:{type_carrier_identity(concrete)}"
 }
 
+// The trait name of a TraitConst node that reads `TypeId{T}` over a type
+// parameter `T`: each instance reads the TypeId of the type that fills `T`,
+// which every type has, published as the constant row type_id_constant_key
+// names.
+TYPE_ID_TRAIT: "type_id"
+
+// The constant key of the TypeId of `concrete`, which a `TypeId{T}` read at
+// an instance whose `T` is `concrete` reads.
+type_id_constant_key: fn(concrete: Type) -> String Never! {
+    "type_id:{type_carrier_identity(concrete)}"
+}
+
 // The trait name of a TraitConst node that reads the value a compile-time
 // site of a generic body (a `#if` condition or a `name: #run value`) takes
 // at one instance. The node's owner applies this name to the type

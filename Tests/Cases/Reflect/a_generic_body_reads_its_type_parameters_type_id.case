@@ -1,0 +1,16 @@
+# `TypeId{T}` over a generic body's type parameter is the TypeId of the type
+# each call fills `T` with, for every type, a builtin `String` with no
+# TypeInfo record among them: in ordinary code (`shown`) and in a
+# `name: #run value` local, which each instance answers on its own, on every
+# tier.
+fixture: AGenericBodyReadsItsTypeParametersTypeId.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "Int one\nString one\n[Int] list\nPoint one\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: == o0
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0

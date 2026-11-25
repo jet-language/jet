@@ -1329,8 +1329,10 @@ sema_call_static_reflect_param: fn(name: String, span: Span, expected: Type?, ch
 
 // `T.reflect()` in the staged check of one instance of a generic body's
 // compile-time site: the TypeInfo record of the type that fills `T` there
-// (sema_comptime_bound_reflection). None when the check binds no `T`.
+// (sema_comptime_bound_reflection), E0302 for a type with none
+// (sema_comptime_unreflected). None when the check binds no `T`.
 sema_call_static_reflect_bound: fn(name: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck? {
+    if sema_comptime_unreflected(name, span, check) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     info: sema_comptime_bound_reflection(name, check) ?? return None
     folded: sema_tree_node(sema_fact_named("TypeInfo"), TExprKind.CtLit{value: info}, span)
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(folded, expected, check.environment.*, check.program.*, check.diagnostics)})
