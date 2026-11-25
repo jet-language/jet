@@ -462,35 +462,38 @@ jet_cli_budget_store_verify_manifest: fn(bytes: [U8], expected_name: String) -> 
         if !agrees -> return Err(jet_cli_budget_failure("audit kind, flags, and reason disagree"))
         prior_state: jet_cli_budget_store_nullable(audit, "prior_state_id", "prior_state_id") ?? return Err(err)
         prior_head: jet_cli_budget_store_nullable(audit, "prior_head_report_id", "prior_head_report_id") ?? return Err(err)
-        if index == 0 {
-            if prior_state != .Null || prior_head != .Null {
-                return Err(jet_cli_budget_failure("first generation has prior CAS links"))
-            }
-            if kind != "bootstrap" {
-                return Err(jet_cli_budget_failure("first generation is not a bootstrap audit"))
-            }
-        } else {
-            expected_head: jet_cli_budget_store_text(generations[index - 1], "report_id", "report_id") ?? return Err(err)
-            prefix_content: perf_report_object_new(
-                [CanonicalJSONField]{
-                    CanonicalJSONField{key: "generations", value: CanonicalJSON.Array(prefix.copy())},  // copy: the next generation's prefix extends this one.
-                    CanonicalJSONField{key: "head_report_id", value: CanonicalJSON.String(expected_head.copy())},  // copy: the head is compared below.
-                    CanonicalJSONField{key: "name", value: CanonicalJSON.String(expected_name.copy())},  // copy: every generation names the baseline.
-                },
-            )
-            chained := false
-            if prior_state == .String(state_link) {
-                if prior_head == .String(head_link) {
-                    chained = state_link == perf_stable_id(prefix_content) && head_link == expected_head
+        if {
+            index == 0 -> {
+                if prior_state != .Null || prior_head != .Null {
+                    return Err(jet_cli_budget_failure("first generation has prior CAS links"))
+                }
+                if kind != "bootstrap" {
+                    return Err(jet_cli_budget_failure("first generation is not a bootstrap audit"))
                 }
             }
-            if !chained {
-                return Err(jet_cli_budget_failure("manifest generation CAS chain is broken"))
+            else -> {
+                expected_head: jet_cli_budget_store_text(generations[index - 1], "report_id", "report_id") ?? return Err(err)
+                prefix_content: perf_report_object_new(
+                    [CanonicalJSONField]{
+                        CanonicalJSONField{key: "generations", value: CanonicalJSON.Array(prefix.copy())},  // copy: the next generation's prefix extends this one.
+                        CanonicalJSONField{key: "head_report_id", value: CanonicalJSON.String(expected_head.copy())},  // copy: the head is compared below.
+                        CanonicalJSONField{key: "name", value: CanonicalJSON.String(expected_name.copy())},  // copy: every generation names the baseline.
+                    },
+                )
+                chained := false
+                if prior_state == .String(state_link) {
+                    if prior_head == .String(head_link) {
+                        chained = state_link == perf_stable_id(prefix_content) && head_link == expected_head
+                    }
+                }
+                if !chained {
+                    return Err(jet_cli_budget_failure("manifest generation CAS chain is broken"))
+                }
             }
         }
         audit_id: jet_cli_budget_store_text(audit, "audit_id", "audit_id") ?? return Err(err)
         body := [CanonicalJSONField]{}
-        audit_fields := jet_cli_budget_fields(audit)
+        audit_fields: jet_cli_budget_fields(audit)
         loop field in audit_fields.move() {
             if field.key != "audit_id" -> body.push(field)
         }

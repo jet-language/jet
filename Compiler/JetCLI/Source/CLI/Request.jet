@@ -284,8 +284,8 @@ jet_cli_runtime_with_core: fn(request: ^^JetDriverCompileRequest, prefix: String
     building: task jet_cli_core_library_built(jet_eval_native_session(JET_CLI_RUNTIME_IMAGE_FILE, JetCLICoreImageReader{arrival: arrival, carried: carried, threads: core_threads}), core_prefix, threads_arrival, core_threads, trace_sink)
     checked := X64ImageFile?{None}
     compiler_threads_join()
-    runtime_ir := jet_cli_runtime_ir(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
-    made := if runtime_ir.move() == {
+    runtime_ir: jet_cli_runtime_ir(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
+    made: if runtime_ir.move() == {
         .Stopped(result) -> {
             if !image_carried -> jet_cli_core_threads_send(runtime_threads, None).drop("a Core check that stopped reads no thread receipt")
             JetCLIRuntimeMade.Stopped{result: result}
@@ -324,14 +324,17 @@ jet_cli_runtime_with_core: fn(request: ^^JetDriverCompileRequest, prefix: String
         }
     }
     core: building.join() ?? return jet_driver_compile_escaped_failure("the Core library build stopped: {compiler_threads_failure_text(err)}")
-    finished: if stopped_result.move() == .Val(result) -> result else -> {
-        if made_object_problem != "" {
-            return jet_driver_compile_escaped_failure(made_object_problem)
+    finished: if {
+        stopped_result.move() == .Val(result) -> result
+        else -> {
+            if made_object_problem != "" {
+                return jet_driver_compile_escaped_failure(made_object_problem)
+            }
+            if finish_problem != "" -> return jet_driver_compile_escaped_failure(finish_problem)
+            if core.problem != "" -> return jet_driver_compile_escaped_failure(core.problem)
+            res: made_result.move() ?? return jet_driver_compile_escaped_failure("the runtime compile result was lost")
+            jet_cli_runtime_packed(res, prefix, made_pack, Val(core.bytes.move()), compiler_threads, trace_sink)
         }
-        if finish_problem != "" -> return jet_driver_compile_escaped_failure(finish_problem)
-        if core.problem != "" -> return jet_driver_compile_escaped_failure(core.problem)
-        res: made_result.move() ?? return jet_driver_compile_escaped_failure("the runtime compile result was lost")
-        jet_cli_runtime_packed(res, prefix, made_pack, Val(core.bytes.move()), compiler_threads, trace_sink)
     }
     interface_problem: interfacing.join() ?? return jet_driver_compile_escaped_failure("the Core interface stopped: {compiler_threads_failure_text(err)}")
     if interface_problem != "" -> return jet_driver_compile_escaped_failure(interface_problem)
@@ -356,7 +359,7 @@ JetCLIRuntimeMade: enum {
 // pack's bytes, so a pack that links is written to its file first, before
 // the Core object is made, and marked `written`.
 jet_cli_runtime_made_built: fn(result: ^^JetDriverCompileResult, library: ^^IRLibraryResult, interface_text: String, threads: CompilerThreads, prefix: String, checked: ^X64ImageFile?, trace_sink: JetCLITraceSink?, carried: Bool{false}) -> JetCLIRuntimeMade {
-    object := jet_cli_runtime_object_emit(library, interface_text, threads, prefix, trace_sink)
+    object: jet_cli_runtime_object_emit(library, interface_text, threads, prefix, trace_sink)
     if object.problem != "" {
         return JetCLIRuntimeMade.Made{result: result.move(), object_problem: object.problem, pack: None, deferred: None}
     }
@@ -434,12 +437,12 @@ JetCLIRuntimeObject: struct {
 }
 
 jet_cli_runtime_ir: fn(front: ^^JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeIR {
-    owned := front.move()
-    result := owned.compile.move()
+    owned: front.move()
+    result: owned.compile.move()
     if !result.complete || result.internal_problem != None {
         return JetCLIRuntimeIR.Stopped{result: result}
     }
-    checked := owned.inputs.move() ?? return jet_cli_runtime_stopped("the runtime front end returned no checked inputs")
+    checked: owned.inputs.move() ?? return jet_cli_runtime_stopped("the runtime front end returned no checked inputs")
     // The lifecycle list and the export and interface rows the IR build reads.
     if trace_sink == .Val(sink) -> sink.begin("runtime.inputs", "", -1, -1)
     lifecycle_path: lifecycle ?? return jet_cli_runtime_stopped("runtime packaging requires the lifecycle list")
@@ -501,7 +504,7 @@ JetCLILibraryIR: struct {
 // build through it.
 jet_cli_library_ir: fn(checked: ^^JetDriverLoweringInputs, rows: [IRLibraryExportRow], lifecycle_rows: [String], opt: IROptOptions, stops: Bool, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLILibraryIR {
     owned := checked.move()
-    declarations := jet_driver_checked_declarations(owned)
+    declarations: jet_driver_checked_declarations(owned)
     // The eval receipt reads each composed unit's sources (the runtime is
     // built as one unit), so a function answers to the source it stands in.
     units := [IREvalUnit]{}
@@ -554,7 +557,7 @@ jet_cli_runtime_object_emit: fn(library: ^^IRLibraryResult, interface_text: Stri
     compiled := ir_x64_compile_module(owned.program.move(), threads)
     if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
     if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
-    object := ir_x64_library_object_into(compiled, owned.exports, owned.data, true, true)
+    object: ir_x64_library_object_into(compiled, owned.exports, owned.data, true, true)
     if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
     if object.errors.len() > 0 {
         cli_files.write("{prefix}.issues", object.errors.join("\n")) ?? return jet_cli_runtime_object_failed("cannot write runtime library findings: {err}")
@@ -570,7 +573,7 @@ jet_cli_runtime_object_emit: fn(library: ^^IRLibraryResult, interface_text: Stri
 jet_cli_runtime_object_finish: fn(deferred: JetCLIRuntimeDeferred, prefix: String, trace_sink: JetCLITraceSink?) -> String {
     if cli_sys.get(ENV_JET_FRONT_RUNTIME_WEB_OUTPUT) == .Val(web_prefix) {
         if trace_sink == .Val(sink) -> sink.begin("runtime.web", "", -1, -1)
-        web := web_runtime_partition(deferred.library.program, deferred.library.exports, deferred.library.data)
+        web: web_runtime_partition(deferred.library.program, deferred.library.exports, deferred.library.data)
         if trace_sink == .Val(sink) -> sink.end("runtime.web", web.bytes.len())
         if web.errors.len() > 0 {
             cli_files.write("{prefix}.issues", web.errors.join("\n")) ?? return "cannot write runtime library findings: {err}"
@@ -650,7 +653,7 @@ jet_cli_runtime_pack_linked: fn(prefix: String, object: ^^[U8], trace_sink: JetC
 // the runtime's alone.
 jet_cli_runtime_pack: fn(result: ^^JetDriverCompileResult, prefix: String, pack: ^^JetCLIRuntimePackLinked?, core: ^^[U8]?, threads: CompilerThreads) -> JetDriverCompileResult {
     if pack.move() == .Val(made) {
-        linked := made.linked.move()
+        linked: made.linked.move()
         if linked.errors.len() > 0 {
             cli_files.write("{prefix}.pack-issues", linked.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack findings: {err}")
             return jet_driver_compile_escaped_failure("runtime pack linking failed; see {prefix}.pack-issues")
@@ -659,14 +662,17 @@ jet_cli_runtime_pack: fn(result: ^^JetDriverCompileResult, prefix: String, pack:
             cli_files.write_bytes(made.path, linked.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack: {err}")
         }
         if cli_sys.get(ENV_JET_FRONT_RUNTIME_IMAGE_OUTPUT) == .Val(image_path) {
-            image: if core.move() == .Val(code) -> {
-                // The runtime object moved into the pack link; it is read
-                // back from the file the runtime build wrote.
-                runtime_object := cli_files.read_bytes("{prefix}.o") ?? return jet_driver_compile_escaped_failure("cannot read the runtime object back: {err}")
-                x64_link_runtime_image_objects([String]{"{prefix}.o", "the Core library object"}, [[U8]]{runtime_object.move(), code}, threads)
-            } else -> {
-                prelinked := if made.written -> cli_files.read_bytes(made.path) ?? return jet_driver_compile_escaped_failure("cannot read the runtime pack back: {err}") else -> linked.bytes.move()
-                x64_link_runtime_image(made.path, prelinked.move(), threads)
+            image: if {
+                core.move() == .Val(code) -> {
+                    // The runtime object moved into the pack link; it is read
+                    // back from the file the runtime build wrote.
+                    runtime_object: cli_files.read_bytes("{prefix}.o") ?? return jet_driver_compile_escaped_failure("cannot read the runtime object back: {err}")
+                    x64_link_runtime_image_objects([String]{"{prefix}.o", "the Core library object"}, [[U8]]{runtime_object.move(), code}, threads)
+                }
+                else -> {
+                    prelinked: if made.written -> cli_files.read_bytes(made.path) ?? return jet_driver_compile_escaped_failure("cannot read the runtime pack back: {err}") else -> linked.bytes.move()
+                    x64_link_runtime_image(made.path, prelinked.move(), threads)
+                }
             }
             if image.errors.len() > 0 {
                 cli_files.write("{prefix}.pack-issues", image.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime image findings: {err}")
@@ -1199,25 +1205,28 @@ jet_cli_module_candidates: fn(name: String) -> [String] Never! {
 
 jet_cli_held_project_boundary: fn(directory: cli_files.Directory) -[FS]> Bool JetCLIReadError! {
     loop marker in JET_CLI_PROJECT_MARKERS {
-        if marker == ".jet/lock" {
-            info: directory.entry_stat(".jet") ?? {
-                if err == .NotFound(_) -> next
-                return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+        if {
+            marker == ".jet/lock" -> {
+                info: directory.entry_stat(".jet") ?? {
+                    if err == .NotFound(_) -> next
+                    return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+                }
+                if info.is_symlink -> return Ok(true)
+                if !info.is_dir -> next
+                nested: directory.open_directory(".jet") ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+                lock: nested.entry_stat("lock") ?? {
+                    if err == .NotFound(_) -> next
+                    return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+                }
+                if lock.is_file || lock.is_symlink -> return Ok(true)
             }
-            if info.is_symlink -> return Ok(true)
-            if !info.is_dir -> next
-            nested: directory.open_directory(".jet") ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
-            lock: nested.entry_stat("lock") ?? {
-                if err == .NotFound(_) -> next
-                return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+            else -> {
+                info: directory.entry_stat(marker) ?? {
+                    if err == .NotFound(_) -> next
+                    return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
+                }
+                if info.is_file || info.is_symlink -> return Ok(true)
             }
-            if lock.is_file || lock.is_symlink -> return Ok(true)
-        } else {
-            info: directory.entry_stat(marker) ?? {
-                if err == .NotFound(_) -> next
-                return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
-            }
-            if info.is_file || info.is_symlink -> return Ok(true)
         }
     }
     Ok(false)
@@ -1810,16 +1819,19 @@ jet_cli_core_sources: fn(input: String) -> JetCLICoreSources Never! {
         return JetCLICoreSources.Missing{what: missing.what, fix: missing.fix}
     }
     core_sources := [JetDriverCoreSource]{}
-    if jet_cli_named_toolchain(input) == .Val(toolchain) {
-        rows: jet_cli_toolchain_core_rows(toolchain) ?? return JetCLICoreSources.Missing{what: err.message, fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, and keep its `{CORE_DECLARATIONS_PARTS_PATH}` rows whole"}
-        loop row in rows {
-            core_path: jet_cli_authority_path(toolchain, row.path)
-            if !cli_files.is_file(core_path) {
-                return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
+    if {
+        jet_cli_named_toolchain(input) == .Val(toolchain) -> {
+            rows: jet_cli_toolchain_core_rows(toolchain) ?? return JetCLICoreSources.Missing{what: err.message, fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, and keep its `{CORE_DECLARATIONS_PARTS_PATH}` rows whole"}
+            loop row in rows {
+                core_path: jet_cli_authority_path(toolchain, row.path)
+                if !cli_files.is_file(core_path) {
+                    return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
+                }
+                core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(core_path, JetCLICoreSourceReader{})})
             }
-            core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(core_path, JetCLICoreSourceReader{})})
         }
-    } else { core_sources.extend(jet_cli_builtin_core_rows()) }
+        else -> { core_sources.extend(jet_cli_builtin_core_rows()) }
+    }
     // The jet.runtime interface modules ride with Core: they are embedded in
     // jet whether or not a toolchain tree is present (RuntimeInterface.jet).
     core_sources.extend(jet_driver_runtime_interface_sources())
@@ -2728,7 +2740,7 @@ jet_cli_compile_executable: fn(prepared: ^^JetCLIPrepared, entry: String?, optio
             selected.output_settings = options.output_settings
             if options.output_triple != "" -> selected.host_facts.target_triple = Val(options.output_triple)
             // A `jet build` compile already carries what its build generated.
-            contributed := jet_cli_contributed_request(selected, options.command != "build", color)
+            contributed: jet_cli_contributed_request(selected, options.command != "build", color)
             // copy: `refusal` is a payload view of `contributed`.
             if contributed.refusal == .Val(refusal) {
                 return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
@@ -2884,7 +2896,7 @@ jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: 
             }
         }
     }
-    organization := if pkg_load_organization_gate_policy() == {
+    organization: if pkg_load_organization_gate_policy() == {
         .Ok(policy) -> policy
         .Err(error) -> {
             return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
@@ -3360,12 +3372,15 @@ JetCLITraceSink: struct {
             task: jet_cli_trace_lane(permit.value, cli_tasks.current_task())
             ts: if now > self.start_us -> now - self.start_us else -> 0
             line := ""
-            if self.human {
-                depth: (permit.value.stacks.get(task) ?? [JetCLITraceSpan]{}).len()
-                of: if total > 0 -> "/{total}" else -> ""
-                line = "{jet_cli_trace_prefix(self, ts, task, depth)}~ {name} {done}{of}{jet_cli_trace_resident(jet_cli_trace_memory())}\n"
-            } else {
-                line = "{jet_cli_trace_head(name, None, "C", ts, self.pid, task)},\"args\":{{\"done\":{done},\"total\":{total}}}}},\n"
+            if {
+                self.human -> {
+                    depth: (permit.value.stacks.get(task) ?? [JetCLITraceSpan]{}).len()
+                    of: if total > 0 -> "/{total}" else -> ""
+                    line = "{jet_cli_trace_prefix(self, ts, task, depth)}~ {name} {done}{of}{jet_cli_trace_resident(jet_cli_trace_memory())}\n"
+                }
+                else -> {
+                    line = "{jet_cli_trace_head(name, None, "C", ts, self.pid, task)},\"args\":{{\"done\":{done},\"total\":{total}}}}},\n"
+                }
             }
             jet_cli_trace_write(self.target, permit.value, line)
         }
@@ -3609,12 +3624,15 @@ jet_cli_trace_open: fn(sink: JetCLITraceSink, name: String, detail: String, args
         start = jet_cli_trace_process(permit.value, (sink.start_us + ts) /% 1000, cpu_ns, stack.len() == 0)
     }
     line := ""
-    if sink.human {
-        shown: if detail == "" -> "" else -> " {detail}"
-        line = "{jet_cli_trace_prefix(sink, ts, task, stack.len())}> {name}{shown}{place}\n"
-    } else {
-        if !permit.value.stacks.has_key(task) -> line = jet_cli_trace_task_name(sink.pid, task)
-        line = "{line}{jet_cli_trace_head(label, Val(name), "B", ts, sink.pid, task)}{args}}},\n"
+    if {
+        sink.human -> {
+            shown: if detail == "" -> "" else -> " {detail}"
+            line = "{jet_cli_trace_prefix(sink, ts, task, stack.len())}> {name}{shown}{place}\n"
+        }
+        else -> {
+            if !permit.value.stacks.has_key(task) -> line = jet_cli_trace_task_name(sink.pid, task)
+            line = "{line}{jet_cli_trace_head(label, Val(name), "B", ts, sink.pid, task)}{args}}},\n"
+        }
     }
     // A top-level span's begin writes every event waiting, so a span that
     // never closes (an early return) still shows where it started.
@@ -3681,7 +3699,7 @@ jet_cli_trace_task_name: fn(pid: Int, task: Int) -> String Never! {
 
 // The readable stream's line prefix: elapsed seconds, a non-main lane's
 // number, and two spaces per open span.
-jet_cli_trace_prefix: fn(sink: JetCLITraceSink, ts: Int, task: Int, depth: Int) -> String Never! {
+jet_cli_trace_prefix: fn(_sink: JetCLITraceSink, ts: Int, task: Int, depth: Int) -> String Never! {
     lane: if task == JET_CLI_TRACE_MAIN_LANE -> "" else -> "[t{task}] "
     indent := ""
     loop indent.len() < depth * 2 -> indent = "{indent}  "
@@ -3698,7 +3716,11 @@ jet_cli_trace_clock: fn(us: Int) -> String Never! {
 jet_cli_trace_seconds: fn(us: Int) -> String Never! {
     seconds: us /% 1000000
     millis: (us %% 1000000) /% 1000
-    pad: if millis < 10 -> "00" else if millis < 100 -> "0" else -> ""
+    pad: if {
+        millis < 10 -> "00"
+        millis < 100 -> "0"
+        else -> ""
+    }
     "{seconds}.{pad}{millis}"
 }
 

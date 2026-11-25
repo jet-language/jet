@@ -122,45 +122,54 @@ jet_cli_sem_json_callable_fields: fn(callable: SemCallable, views: String, produ
     effects := "null"
     effect_status := jet_cli_sem_json_unavailable(SemUnavailable{required_stage: "Typed", reason: "the checker has not published a checked callable effect row"})
     effect_facts := "null"
-    if callable.effect_via == .Val(via) {
-        effects = jet_cli_sem_json_strings([String]{"via {via.name}"})
-        effect_status = "{{\"status\":\"checked\"}}"
-        effect_facts = "[{{\"kind\":\"via_parameter\",\"name\":{jet_cli_json_string(via.name)},\"source\":{jet_cli_sem_json_span(via.span)}}}]"
-    } else if callable.effects == .Val(rows) {
-        names: loop row in rows -> row.name
-        facts: loop row in rows -> "{{\"kind\":\"named\",\"name\":{jet_cli_json_string(row.name)},\"source\":{jet_cli_sem_json_span(row.span)}}}"
-        effects = jet_cli_sem_json_strings(names)
-        effect_status = "{{\"status\":\"checked\"}}"
-        effect_facts = "[{facts.join(",")}]"
+    if {
+        callable.effect_via == .Val(via) -> {
+            effects = jet_cli_sem_json_strings([String]{"via {via.name}"})
+            effect_status = "{{\"status\":\"checked\"}}"
+            effect_facts = "[{{\"kind\":\"via_parameter\",\"name\":{jet_cli_json_string(via.name)},\"source\":{jet_cli_sem_json_span(via.span)}}}]"
+        }
+        callable.effects == .Val(rows) -> {
+            names: loop row in rows -> row.name
+            facts: loop row in rows -> "{{\"kind\":\"named\",\"name\":{jet_cli_json_string(row.name)},\"source\":{jet_cli_sem_json_span(row.span)}}}"
+            effects = jet_cli_sem_json_strings(names)
+            effect_status = "{{\"status\":\"checked\"}}"
+            effect_facts = "[{facts.join(",")}]"
+        }
     }
     errors := "null"
     failure_contract := "null"
     failure_source := "null"
     failure_status := "null"
-    if callable.failure_contract == .Val(contract) {
-        effective: failure_contract_shown_type(contract)
-        error_names := [String]{}
-        if effective == .Result(_, err) {
-            never := false
-            if err == .Named(name) {
-                if name == "Never" -> never = true
+    if {
+        callable.failure_contract == .Val(contract) -> {
+            effective: failure_contract_shown_type(contract)
+            error_names := [String]{}
+            if effective == .Result(_, err) {
+                never := false
+                if err == .Named(name) {
+                    if name == "Never" -> never = true
+                }
+                if !never -> error_names.push(type_name(err))
             }
-            if !never -> error_names.push(type_name(err))
+            errors = jet_cli_sem_json_strings(error_names)
+            failure_contract = jet_cli_json_string(failure_contract_shown_name(contract))
+            failure_source = jet_cli_json_string(failure_contract_source(contract))
+            failure_status = "{{\"status\":\"checked\"}}"
         }
-        errors = jet_cli_sem_json_strings(error_names)
-        failure_contract = jet_cli_json_string(failure_contract_shown_name(contract))
-        failure_source = jet_cli_json_string(failure_contract_source(contract))
-        failure_status = "{{\"status\":\"checked\"}}"
-    } else if callable.failure_unavailable == .Val(unavailable) {
-        failure_status = jet_cli_sem_json_unavailable(unavailable)
+        callable.failure_unavailable == .Val(unavailable) -> {
+            failure_status = jet_cli_sem_json_unavailable(unavailable)
+        }
     }
     generic_parameters := "null"
     generic_status := "null"
-    if callable.generic_parameters == .Val(names) {
-        generic_parameters = jet_cli_sem_json_strings(names)
-        generic_status = "{{\"status\":\"checked\"}}"
-    } else if callable.generic_unavailable == .Val(unavailable) {
-        generic_status = jet_cli_sem_json_unavailable(unavailable)
+    if {
+        callable.generic_parameters == .Val(names) -> {
+            generic_parameters = jet_cli_sem_json_strings(names)
+            generic_status = "{{\"status\":\"checked\"}}"
+        }
+        callable.generic_unavailable == .Val(unavailable) -> {
+            generic_status = jet_cli_sem_json_unavailable(unavailable)
+        }
     }
     return_type: if callable.return_type == .Val(ty) -> jet_cli_json_string(type_name(ty)) else -> "null"
     policies: loop policy in callable.policies -> semindex_policy_display(policy)

@@ -62,7 +62,11 @@ jet_cli_control_written: fn(control: JetCLIControlSpec, words: [String]) -> JetC
         if control.value == {
             .Switch | .Bool -> { found = Val(jet_cli_status_bool(!valued || value == "true")) }
             .Optional -> {
-                found = Val(if !valued -> jet_cli_status_bool(true) else if value == "off" -> jet_cli_status_bool(false) else -> jet_cli_status_text(value))
+                found = Val(if {
+                    !valued -> jet_cli_status_bool(true)
+                    value == "off" -> jet_cli_status_bool(false)
+                    else -> jet_cli_status_text(value)
+                })
             }
             .Value -> { found = Val(jet_cli_status_text(value)) }
             .Repeated -> {
@@ -286,7 +290,7 @@ jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, js
         }
         values.push(jet_cli_control_resolve(control, flags, settings, controls_sys.get(control.variable)))
     }
-    registered := if include_all -> jet_cli_env_registered_set() else -> [JetCLIRegisteredEnvValue]{}
+    registered: if include_all -> jet_cli_env_registered_set() else -> [JetCLIRegisteredEnvValue]{}
     if json {
         return jet_cli_done("{jet_cli_status_render("env.vars", true, jet_cli_env_vars_fields(command, settings_word, values, include_all, registered.move()))}\n", "", JET_DRIVER_EXIT_OK)
     }
@@ -350,7 +354,7 @@ jet_cli_env_redact_for: fn(name: String, text: String) -> String Never! {
 // currently set in the process environment, in sorted key order.
 jet_cli_env_registered_set: fn() -[Env]> [JetCLIRegisteredEnvValue] Never! {
     out := [JetCLIRegisteredEnvValue]{}
-    names := controls_sys.vars() ?? return out
+    names: controls_sys.vars() ?? return out
     loop name in names.move() {
         if jet_cli_env_is_control_variable(name) -> next
         section: jet_cli_env_registered_section(name) ?? next
@@ -442,9 +446,12 @@ jet_cli_env_redact_query: fn(query: String) -> String Never! {
     parts := [String]{}
     loop pair in fragment.head.split("&") {
         kv: pair.partition("=")
-        if kv.sep != "" && kv.tail != "" && jet_cli_env_is_secret_query_key(kv.head) {
-            parts.push("{kv.head}=***")
-        } else { parts.push("{pair}") }
+        if {
+            kv.sep != "" && kv.tail != "" && jet_cli_env_is_secret_query_key(kv.head) -> {
+                parts.push("{kv.head}=***")
+            }
+            else -> { parts.push("{pair}") }
+        }
     }
     "{parts.join("&")}{fragment.sep}{fragment.tail}"
 }

@@ -70,23 +70,26 @@ jet_cli_explain_loaded_policy: fn(key: PolicyKey, loaded: JetDriverSourceQueryRe
         return jet_cli_done("", stderr, JET_DRIVER_EXIT_USER_ERROR)
     }
     declarations := [PolicyDeclaration]{}
-    if line == .Val(number) {
-        // Marker-site selection intentionally sees only the entry module.
-        source_module: loaded.modules[0]
-        offset: jet_cli_explain_marker_offset(source_module.source, number)
-        loop declaration in source_module.program.policy_declarations {
-            if declaration.key != key -> next
-            if declaration.scope == PolicyScope.Function || declaration.scope == PolicyScope.Block {
-                target: declaration.target ?? next
-                if offset < target.start || offset > target.end -> next
-            }
-            declarations.push(declaration.copy())
-        }
-    } else {
-        // Whole-file policy queries combine every loaded module, not just entry.
-        loop source_module in loaded.modules {
+    if {
+        line == .Val(number) -> {
+            // Marker-site selection intentionally sees only the entry module.
+            source_module: loaded.modules[0]
+            offset: jet_cli_explain_marker_offset(source_module.source, number)
             loop declaration in source_module.program.policy_declarations {
-                if declaration.key == key -> declarations.push(declaration.copy())
+                if declaration.key != key -> next
+                if declaration.scope == PolicyScope.Function || declaration.scope == PolicyScope.Block {
+                    target: declaration.target ?? next
+                    if offset < target.start || offset > target.end -> next
+                }
+                declarations.push(declaration.copy())
+            }
+        }
+        else -> {
+            // Whole-file policy queries combine every loaded module, not just entry.
+            loop source_module in loaded.modules {
+                loop declaration in source_module.program.policy_declarations {
+                    if declaration.key == key -> declarations.push(declaration.copy())
+                }
             }
         }
     }

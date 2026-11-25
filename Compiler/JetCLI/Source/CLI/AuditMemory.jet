@@ -176,12 +176,15 @@ jet_cli_memory_read: fn(path: String) -[FS]> [JetCLIMemoryRow] JetCLIReadError! 
             left := start
             right := middle
             loop left < middle || right < end {
-                if right >= end || (left < middle && !jet_cli_memory_before(rows[right], rows[left])) {
-                    merged.push(rows[left])
-                    left += 1
-                } else {
-                    merged.push(rows[right])
-                    right += 1
+                if {
+                    right >= end || (left < middle && !jet_cli_memory_before(rows[right], rows[left])) -> {
+                        merged.push(rows[left])
+                        left += 1
+                    }
+                    else -> {
+                        merged.push(rows[right])
+                        right += 1
+                    }
                 }
             }
             start = end

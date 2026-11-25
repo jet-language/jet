@@ -498,16 +498,23 @@ jet_cli_perf_causal_section: fn(source: ^^String, experiments: ^^[JetCLIPerfExpe
         loop group in groups {
             chosen: group.chosen
             why := ""
-            if chosen.len() < JET_CLI_PERF_CAUSAL_MIN || base.len() < JET_CLI_PERF_CAUSAL_MIN {
-                why = "{chosen.len()} experiments on it and {base.len()} baselines; it needs {JET_CLI_PERF_CAUSAL_MIN} of each"
-            } else if jet_cli_perf_causal_line(experiments, base, chosen, slot, fit) == .Val(predicted) {
-                if predicted.high - predicted.low > JET_CLI_PERF_CAUSAL_WIDEST {
-                    why = "its interval is {jet_cli_perf_causal_percent(predicted.low)} to {jet_cli_perf_causal_percent(predicted.high)}, wider than {JET_CLI_PERF_CAUSAL_WIDEST /% 10} points"
-                } else {
-                    found.push(predicted.move())
-                    next
+            if {
+                chosen.len() < JET_CLI_PERF_CAUSAL_MIN || base.len() < JET_CLI_PERF_CAUSAL_MIN -> {
+                    why = "{chosen.len()} experiments on it and {base.len()} baselines; it needs {JET_CLI_PERF_CAUSAL_MIN} of each"
                 }
-            } else { why = "no pass of the point came in its experiments or the baselines" }
+                jet_cli_perf_causal_line(experiments, base, chosen, slot, fit) == .Val(predicted) -> {
+                    if {
+                        predicted.high - predicted.low > JET_CLI_PERF_CAUSAL_WIDEST -> {
+                            why = "its interval is {jet_cli_perf_causal_percent(predicted.low)} to {jet_cli_perf_causal_percent(predicted.high)}, wider than {JET_CLI_PERF_CAUSAL_WIDEST /% 10} points"
+                        }
+                        else -> {
+                            found.push(predicted.move())
+                            next
+                        }
+                    }
+                }
+                else -> { why = "no pass of the point came in its experiments or the baselines" }
+            }
             unranked.push(
                 CanonicalJSON.Object(
                     [CanonicalJSONField]{

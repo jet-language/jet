@@ -128,7 +128,7 @@ jet_cli_core_library_ir: fn(native: Shared<JetEvalNativeSession>, compiler_threa
 }
 
 jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibraryIR {
-    checked := jet_cli_core_checked(native, compiler_threads.cap, trace_sink)
+    checked: jet_cli_core_checked(native, compiler_threads.cap, trace_sink)
     inputs := if checked.move() == {
         .Stopped(output) -> {
             return jet_cli_core_library_stopped("The Core check of the Core library stopped:\n{output.stderr}{output.stdout}", compiler_threads)
@@ -141,7 +141,7 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
     captures: inputs.core_bodies.move()
     inputs.core_bodies = SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}
     writing: task jet_cli_core_bodies_file(captures, trace_sink)
-    declarations := jet_driver_checked_declarations(inputs)
+    declarations: jet_driver_checked_declarations(inputs)
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
     library := ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), inputs.interner.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, JET_CLI_CORE_LOWERED, compiler_threads)
     if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
@@ -162,7 +162,7 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
     // it by key with no Core facts beside it.
     seal: sema_core_seal_bound(inputs.core_seal.move(), jet_cli_core_facts(ir_core_facts_text(library.facts).bytes()).sealed).join("\n")
     inputs.core_seal = [String]{}
-    bodies_file := writing.join() ?? return jet_cli_core_library_stopped("the Core bodies file stopped: {compiler_threads_failure_text(err)}", threads)
+    bodies_file: writing.join() ?? return jet_cli_core_library_stopped("the Core bodies file stopped: {compiler_threads_failure_text(err)}", threads)
     if bodies_file.problem == .Val(problem) {
         issues.push("the Core bodies file does not read back: {problem}")
     }
@@ -200,7 +200,7 @@ JetCLICoreBodiesFile: struct {
 // the build's error (sema_core_bodies_problem).
 jet_cli_core_bodies_file: fn(captures: ^^SemaCoreCaptures, trace_sink: JetCLITraceSink?) -> JetCLICoreBodiesFile {
     if trace_sink == .Val(sink) -> sink.begin("runtime.core.bodies", "", -1, -1)
-    held := captures.move()
+    held: captures.move()
     bytes: sema_core_bodies_bytes(held.bodies.move(), held.context)
     problem: sema_core_bodies_problem(bytes)
     if trace_sink == .Val(sink) -> sink.end("runtime.core.bodies", bytes.len())
@@ -215,14 +215,14 @@ jet_cli_core_bodies_file: fn(captures: ^^SemaCoreCaptures, trace_sink: JetCLITra
 // (compiler_threads_join), and leaves them while it waits for the receipt.
 jet_cli_core_library_built: fn(native: Shared<JetEvalNativeSession>, prefix: String, threads_arrival: Receiver<[String]?>, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
     compiler_threads_join()
-    built := jet_cli_core_library_ir(native, compiler_threads, trace_sink)
+    built: jet_cli_core_library_ir(native, compiler_threads, trace_sink)
     compiler_threads_leave()
     if built.stopped != None {
         return jet_cli_core_library_made(built, prefix, [String]{}, trace_sink)
     }
     runtime_threads: threads_arrival.receive() ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: ""}
     compiler_threads_join()
-    made := jet_cli_core_library_made(built, prefix, runtime_threads, trace_sink)
+    made: jet_cli_core_library_made(built, prefix, runtime_threads, trace_sink)
     compiler_threads_leave()
     made
 }
@@ -234,7 +234,7 @@ jet_cli_core_library_built: fn(native: Shared<JetEvalNativeSession>, prefix: Str
 jet_cli_core_library_made: fn(built: ^^JetCLICoreLibraryIR, prefix: String, runtime_threads: [String], trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
     owned := built.move()
     if owned.stopped == .Val(problem) -> return JetCLICoreLibrary{bytes: [U8]{}, problem: problem}
-    library := owned.library.pop() ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "the Core library IR was lost"}
+    library: owned.library.pop() ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "the Core library IR was lost"}
     if trace_sink == .Val(sink) -> sink.begin("runtime.core.object", "", -1, -1)
     made: jet_cli_core_library(prefix, library, owned.issues.move(), owned.seal, owned.bodies.move(), runtime_threads, owned.threads, trace_sink)
     if trace_sink == .Val(sink) -> sink.end("runtime.core.object", made.bytes.len())
@@ -246,12 +246,12 @@ jet_cli_core_library_made: fn(built: ^^JetCLICoreLibraryIR, prefix: String, runt
 // Core bodies file `bodies`, once the runtime's thread receipt
 // `runtime_threads` is known.
 jet_cli_core_library: fn(prefix: String, library: ^^IRCoreLibrary, found: ^^[String], seal: String, bodies_in: ^^[U8], runtime_threads: [String], threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
-    bodies := bodies_in.move()
+    bodies: bodies_in.move()
     issues := found.move()
     if issues.len() == 0 {
         thread_exports: ir_thread_exports(library.program, library.exports, runtime_threads)
         if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
-        compiled := ir_x64_compile_module(library.program.move(), threads)
+        compiled: ir_x64_compile_module(library.program.move(), threads)
         if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
         if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
         // A section per function and data object, numbered past ELF's 16-bit
@@ -261,12 +261,12 @@ jet_cli_core_library: fn(prefix: String, library: ^^IRCoreLibrary, found: ^^[Str
         object := ir_x64_library_object(compiled, library.exports, library.data, true, true)
         if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
         if object.errors.len() == 0 {
-            o_bytes := object.bytes.move()
-            rows := library.rows.move()
-            facts := library.facts.move()
-            skipped_rows := library.skipped.move()
-            drop_exports := library.exports.move()
-            drop_data := library.data.move()
+            o_bytes: object.bytes.move()
+            rows: library.rows.move()
+            facts: library.facts.move()
+            skipped_rows: library.skipped.move()
+            drop_exports: library.exports.move()
+            drop_data: library.data.move()
             rel_exports: task ^^drop_exports { drop_exports.len() }
             rel_exports.detach()
             rel_data: task ^^drop_data { drop_data.len() }
@@ -402,7 +402,7 @@ jet_cli_core_checked: fn(native: Shared<JetEvalNativeSession>, threads: Int?, tr
     entry: "{scratch.path}/core.jet"
     source: jet_cli_core_check_source()
     core_library_files.write(entry, source) ?? return JetCLICoreChecked.Stopped{output: jet_cli_maintenance_error("E2105", "couldn't write the Core entry `{entry}`: {jet_cli_io_error_text(err)}", None, false, false)}
-    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetDriverSourceDocument]{}, false, true) == {
+    prepared: if jet_cli_prepare_snapshot(entry, entry, [JetDriverSourceDocument]{}, false, true) == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, threads, JetDriverCompileMode.Check, None, "", None, true)
     }
@@ -417,7 +417,7 @@ jet_cli_core_checked: fn(native: Shared<JetEvalNativeSession>, threads: Int?, tr
             // The Core library's Core bodies carry the local values this
             // check computes (JetSema Comptime/LocalValues.jet).
             selected.eval_config.native = Val(native)
-            front := jet_driver_lowering_inputs(selected, None)
+            front: jet_driver_lowering_inputs(selected, None)
             if trace_sink == .Val(sink) -> sink.begin("core_check.diagnostics", "", -1, -1)
             diagnostics: jet_driver_present_diagnostics(front.compile.diagnostics, snapshot, front.compile.generated_source_files)
             if trace_sink == .Val(sink) -> sink.end("core_check.diagnostics", diagnostics.len())

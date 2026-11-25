@@ -182,7 +182,7 @@ jet_cli_structure_core: fn(json: Bool) -> JetDriverVerbOutput Never! {
 // A checked result ends the process behind `notice` (jet_cli_finish).
 jet_cli_structure_host: fn(file: String, color: Bool, json: Bool, threads: Int?, notice: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    prepared := jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Doc)
+    prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Doc)
     compiled: if prepared.move() == {
         .Refused(refusal) -> JetCLICompiled.Refused{output: refusal}
         .Prepared(request, snapshot) -> {
@@ -243,12 +243,15 @@ jet_cli_structure_result: fn(file: String, color: Bool, json: Bool, result: JetD
         stderr := ""
         loop row in ledger.diagnostic_rows {
             source: jet_cli_inspection_source(result, snapshot, row.source)
-            if json {
-                loop report in jet_cli_reports_json(jet_cli_report_base(row.source), row.source, source, [Diagnostic]{row.diagnostic}) {
-                    reports.push(report)
+            if {
+                json -> {
+                    loop report in jet_cli_reports_json(jet_cli_report_base(row.source), row.source, source, [Diagnostic]{row.diagnostic}) {
+                        reports.push(report)
+                    }
                 }
-            } else {
-                stderr = "{stderr}{diagnostic_render_all(row.source, source, [Diagnostic]{row.diagnostic}, color)}"
+                else -> {
+                    stderr = "{stderr}{diagnostic_render_all(row.source, source, [Diagnostic]{row.diagnostic}, color)}"
+                }
             }
         }
         return JetDriverVerbOutput{stdout: if json -> jet_cli_status_render_with_reports("inspect.structure", false, reports, [JetCLIStatusField]{}) else -> "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}

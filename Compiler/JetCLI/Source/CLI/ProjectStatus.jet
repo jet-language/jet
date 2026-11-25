@@ -75,17 +75,21 @@ jet_cli_project_status_summarize: fn(root: String, receipts: [JetDriverRunReceip
     selected := JetDriverRunReceipt?{None}
     state := "unproven"
     reason := "no receipt proves this claim"
-    if failure != None {
-        selected = failure
-        reason = "current receipt records failure"
-    } else if success != None {
-        selected = success
-        state = "proven"
-        reason = "current receipt records success"
-    } else if stale != None {
-        selected = stale
-        state = "stale"
-        reason = "receipt input closure changed"
+    if {
+        failure != None -> {
+            selected = failure
+            reason = "current receipt records failure"
+        }
+        success != None -> {
+            selected = success
+            state = "proven"
+            reason = "current receipt records success"
+        }
+        stale != None -> {
+            selected = stale
+            state = "stale"
+            reason = "receipt input closure changed"
+        }
     }
     receipt_id := String?{None}
     sections := jet_cli_status_object([JetCLIStatusField]{})

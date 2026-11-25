@@ -81,7 +81,7 @@ jet_cli_choice_kind_rank: fn(kind: String) -> Int Never! {
     loop at in 0..<JET_CLI_CHOICE_KINDS.len() {
         if JET_CLI_CHOICE_KINDS[at] == kind -> return at
     }
-    return JET_CLI_CHOICE_KINDS.len()
+    JET_CLI_CHOICE_KINDS.len()
 }
 
 // Whether `out` has a row identical to `choice`: each instance of a generic
@@ -362,7 +362,7 @@ jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String,
             ),
         )
     }
-    fields := [JetCLIStatusField]{
+    fields: [JetCLIStatusField]{
         jet_cli_status_field("scope", jet_cli_status_text(scope)),
         jet_cli_status_field("source", jet_cli_status_text(file)),
         jet_cli_status_field("profile", jet_cli_status_text(profile)),
@@ -384,9 +384,9 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
         .Prepared(value, _) -> {
             request := value.move()
             request.profile = job.profile
-            sources := request.authorized_sources
+            sources: request.authorized_sources
             compiler_threads: request.compiler_threads.copy()
-            front := jet_cli_lowering_inputs(request, None)
+            front: jet_cli_lowering_inputs(request, None)
             errors: jet_cli_errors(jet_driver_present_diagnostics(front.compile.diagnostics, sources, front.compile.generated_source_files))
             if errors.len() > 0 {
                 jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
@@ -394,7 +394,7 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             if front.compile.internal_problem == .Val(problem) {
                 jet_cli_inspect_finish(job, jet_cli_ice(problem))
             }
-            inputs := front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
+            inputs: front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             choices := jet_cli_storage_choices(inputs.functions)
             jet_cli_collection_choices(inputs.functions, choices)
             jet_cli_copy_choices(inputs.functions, choices)

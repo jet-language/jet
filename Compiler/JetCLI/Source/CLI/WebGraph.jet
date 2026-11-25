@@ -528,11 +528,14 @@ jet_cli_web_contract: fn(function: Func?) -> JetCLIWebContract {
         if parameter.name != "self" -> params.push("{parameter.name}:{type_name(parameter.ty)}")
     }
     input := "Unit"
-    if params.len() == 1 {
-        loop parameter in known.params {
-            if parameter.name != "self" -> input = type_name(parameter.ty)
+    if {
+        params.len() == 1 -> {
+            loop parameter in known.params {
+                if parameter.name != "self" -> input = type_name(parameter.ty)
+            }
         }
-    } else if params.len() > 1 { input = "({params.join(",")})" }
+        params.len() > 1 -> { input = "({params.join(",")})" }
+    }
     output := ""
     error := ""
     if failure_contract_of_function(known.return_type, known.return_type_span) == {
@@ -779,16 +782,19 @@ jet_cli_web_apply: fn(tables: ASTTables, method: String, args: [CallArg], span: 
         return
     }
     if method == "cache" {
-        if jet_cli_web_const_text(tables, args, 1) == .Val(policy) {
-            last: walk.graph.routes.len() - 1
-            if last >= 0 && jet_cli_web_const_text(tables, args, 0) == .Val(target) && target == walk.graph.routes[last].path {
-                if jet_cli_web_cache_parse(policy) == .Val(cache) {
-                    walk.graph.routes[last].cache = cache
+        if {
+            jet_cli_web_const_text(tables, args, 1) == .Val(policy) -> {
+                last: walk.graph.routes.len() - 1
+                if last >= 0 && jet_cli_web_const_text(tables, args, 0) == .Val(target) && target == walk.graph.routes[last].path {
+                    if jet_cli_web_cache_parse(policy) == .Val(cache) {
+                        walk.graph.routes[last].cache = cache
+                    }
                 }
+                walk.graph.cache.push(policy)
             }
-            walk.graph.cache.push(policy)
-        } else if jet_cli_web_const_text(tables, args, 0) == .Val(policy) {
-            walk.graph.cache.push(policy)
+            jet_cli_web_const_text(tables, args, 0) == .Val(policy) -> {
+                walk.graph.cache.push(policy)
+            }
         }
         return
     }
@@ -1040,16 +1046,19 @@ jet_cli_web_route_inputs: fn(modules: [JetDriverDocModule], handler: JetCLIWebFu
             record = jet_cli_web_struct(modules, name)
         }
         if record == None && parameter.name != "search" && parameter.name != "query" -> next
-        if record == .Val(found) {
-            fields := [JetCLIWebField]{}
-            loop field in found.definition.fields {
-                if field.computed != None -> next
-                fields.push(jet_cli_web_route_field(found.tables, field.name, field.ty, field.default, !jet_cli_web_is_option(field.ty) && field.default == None))
+        if {
+            record == .Val(found) -> {
+                fields := [JetCLIWebField]{}
+                loop field in found.definition.fields {
+                    if field.computed != None -> next
+                    fields.push(jet_cli_web_route_field(found.tables, field.name, field.ty, field.default, !jet_cli_web_is_option(field.ty) && field.default == None))
+                }
+                route.search_params = fields
+                route.search_codec = "json"
             }
-            route.search_params = fields
-            route.search_codec = "json"
-        } else {
-            route.search_params = [JetCLIWebField]{jet_cli_web_route_field(handler.tables, parameter.name, parameter.ty, parameter.default, !jet_cli_web_is_option(parameter.ty) && parameter.default == None)}
+            else -> {
+                route.search_params = [JetCLIWebField]{jet_cli_web_route_field(handler.tables, parameter.name, parameter.ty, parameter.default, !jet_cli_web_is_option(parameter.ty) && parameter.default == None)}
+            }
         }
         return
     }
@@ -1317,12 +1326,15 @@ jet_cli_web_query: fn(tables: ASTTables, expression: ExprNode, source: String) -
     found: jet_cli_web_namespace_call(tables, expression, "query") ?? return None
     key := ""
     footprint := ""
-    if found.kind == "load" {
-        key = jet_cli_web_const_text(tables, found.args, 0) ?? ""
-        footprint = jet_cli_web_const_text(tables, found.args, 1) ?? ""
-    } else if jet_cli_web_const_text(tables, found.args, 0) == .Val(named) {
-        key = named
-        footprint = "ext:{named}"
+    if {
+        found.kind == "load" -> {
+            key = jet_cli_web_const_text(tables, found.args, 0) ?? ""
+            footprint = jet_cli_web_const_text(tables, found.args, 1) ?? ""
+        }
+        jet_cli_web_const_text(tables, found.args, 0) == .Val(named) -> {
+            key = named
+            footprint = "ext:{named}"
+        }
     }
     if key.trim() == "" || footprint.trim() == "" -> return None
     Val(JetCLIWebQuery{key: key, footprint: footprint, source: source, kind: found.kind})
@@ -1441,16 +1453,19 @@ jet_cli_web_graph: fn(modules: [JetDriverDocModule], entry_identity: String) -> 
     entry: modules[entry_index]
     functions: jet_cli_web_user_functions(modules)
     walk := JetCLIWebWalk{graph: JetCLIWebGraph{entry: entry.path}}
-    if app_entry_run_fn(entry.items) == .Val(run) {
-        jet_cli_web_walk_run(entry.tables, run, walk, functions)
-    } else {
-        // A `run: fn` written without its `App` return is an app entry when its
-        // chain starts at `app()`.
-        entry_functions := [Func]{}
-        jet_cli_web_collect_functions(entry.items, entry_functions)
-        run: jet_cli_web_function(entry_functions, "run") ?? return None
-        jet_cli_web_walk_run(entry.tables, run, walk, functions)
-        if !walk.found_app -> return None
+    if {
+        app_entry_run_fn(entry.items) == .Val(run) -> {
+            jet_cli_web_walk_run(entry.tables, run, walk, functions)
+        }
+        else -> {
+            // A `run: fn` written without its `App` return is an app entry when its
+            // chain starts at `app()`.
+            entry_functions := [Func]{}
+            jet_cli_web_collect_functions(entry.items, entry_functions)
+            run: jet_cli_web_function(entry_functions, "run") ?? return None
+            jet_cli_web_walk_run(entry.tables, run, walk, functions)
+            if !walk.found_app -> return None
+        }
     }
     jet_cli_web_expand_roots(walk, entry.app_route_roots)
     jet_cli_web_expand_mounts(modules, walk.graph.table)
@@ -1822,7 +1837,7 @@ jet_cli_web_routes_report: fn(result: JetDriverCompileResult, json: Bool) -> Jet
     base: jet_cli_relative_parent(found.entry)
     sites: loop row in found.table -> {
         file: if row.file == "" -> found.entry else -> row.file
-        site := jet_cli_web_relative(base, jet_cli_web_row_path(result.doc_modules, file))
+        site: jet_cli_web_relative(base, jet_cli_web_row_path(result.doc_modules, file))
         "{site}:{jet_cli_web_row_line(result.doc_modules, file, row)}"
     }
     if json {

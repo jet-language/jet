@@ -101,7 +101,7 @@ jet_cli_memory_report: fn(bounds: [IRX64StackBound], keys: [String], sema: [JetC
             ),
         )
     }
-    fields := [JetCLIStatusField]{
+    fields: [JetCLIStatusField]{
         jet_cli_status_field("scope", jet_cli_status_text(scope)),
         jet_cli_status_field("source", jet_cli_status_text(file)),
         jet_cli_status_field("profile", jet_cli_status_text(profile)),
@@ -123,9 +123,9 @@ jet_cli_inspect_memory_host: fn(job: JetCLIInspectJob, source: String) -> JetDri
         .Prepared(value, snapshot) -> {
             request := value.move()
             request.profile = job.profile
-            sources := request.authorized_sources
+            sources: request.authorized_sources
             compiler_threads: request.compiler_threads.copy()
-            front := jet_cli_lowering_inputs(request, None)
+            front: jet_cli_lowering_inputs(request, None)
             errors: jet_cli_errors(jet_driver_present_diagnostics(front.compile.diagnostics, sources, front.compile.generated_source_files))
             if errors.len() > 0 {
                 jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
@@ -133,7 +133,7 @@ jet_cli_inspect_memory_host: fn(job: JetCLIInspectJob, source: String) -> JetDri
             if front.compile.internal_problem == .Val(problem) {
                 jet_cli_inspect_finish(job, jet_cli_ice(problem))
             }
-            inputs := front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
+            inputs: front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             entry_key: inputs.entry_key ?? jet_cli_inspect_finish(job, jet_cli_native_report(job.file, "inspect memory", JetCLINativeFailure.NoEntry, job.color))
             sema: jet_cli_memory_sema(inputs.functions, entry_key)
             build := build_options_stock("build")
@@ -143,12 +143,12 @@ jet_cli_inspect_memory_host: fn(job: JetCLIInspectJob, source: String) -> JetDri
                 jet_cli_inspect_finish(job, jet_cli_native_report(job.file, "inspect memory", failure, job.color))
             }
             census := [JetDriverIceRow]{}
-            built := jet_cli_native_program(front.compile, inputs, None, build, runtime, census, job.file, jet_driver_entry_root_path(snapshot))
+            built: jet_cli_native_program(front.compile, inputs, None, build, runtime, census, job.file, jet_driver_entry_root_path(snapshot))
             if built.failure == .Val(failure) {
                 jet_cli_inspect_finish(job, jet_cli_native_report(job.file, "inspect memory", failure, job.color))
             }
             threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
-            compiled := ir_x64_compile_module(built.program.move(), threads)
+            compiled: ir_x64_compile_module(built.program.move(), threads)
             loop error in compiled.errors {
                 jet_driver_ice_record(census, "-", "ir.x64", "select", error)
             }

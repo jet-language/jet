@@ -272,7 +272,7 @@ jet_cli_import_indexed_comparison: fn(index: JetCLIRecordIndex, root: String, cw
 }
 
 jet_cli_import_accept_update_replacement: fn(plan: ^JetCLIImportPlan, cwd: String) -[FS, Time.Wait, Env]> ForeignSourceReceipt JetCLIImportPlanError! {
-    boundary := plan.boundary.copy()
+    boundary: plan.boundary.copy()
     if !boundary.has_complete_artifact_coverage() {
         return Err(jet_cli_import_update_error("source import replacement coverage is incomplete"))
     }
@@ -350,7 +350,7 @@ jet_cli_import_accepted_receipt_json: fn(receipt: ForeignSourceReceipt, assumpti
     Ok(value)
 }
 
-jet_cli_import_persist_accepted_receipt: fn(plan: JetCLIImportPlan, receipt: ForeignSourceReceipt, cwd: String) -[FS, Env, Time, IO]> JetCLIImportPlanError! {
+jet_cli_import_persist_accepted_receipt: fn(plan: JetCLIImportPlan, receipt: ForeignSourceReceipt, _cwd: String) -[FS, Env, Time, IO]> JetCLIImportPlanError! {
     receipt.validate() ?? return Err(jet_cli_import_update_error(err.message))
     files := [String]{}
     jet_cli_import_collect_sources(plan.source, plan.source, plan.language, files) ?? return Err(err)

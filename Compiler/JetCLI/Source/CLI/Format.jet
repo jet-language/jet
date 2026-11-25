@@ -43,20 +43,24 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
     color: request.color
     cwd: cli_files.cwd() ?? "."
     files := [String]{}
-    if request.changed {
-        files = jet_cli_fmt_changed_files() ?? return jet_cli_report_output("", "E2104", "`--changed` requires a git repository", "`jet fmt --changed` uses git to find modified .jet files", "run from inside a git repository, or format specific files with `jet fmt <path>`", color, JET_DRIVER_EXIT_USAGE)
-    } else if request.paths.len() == 0 {
-        jet_cli_fmt_walk(jet_cli_manifest_root(cwd) ?? cwd, files)
-    } else {
-        loop raw in request.paths {
-            if cli_files.is_dir(raw) -> jet_cli_fmt_walk(raw, files) else -> files.push(raw.copy())
+    if {
+        request.changed -> {
+            files = jet_cli_fmt_changed_files() ?? return jet_cli_report_output("", "E2104", "`--changed` requires a git repository", "`jet fmt --changed` uses git to find modified .jet files", "run from inside a git repository, or format specific files with `jet fmt <path>`", color, JET_DRIVER_EXIT_USAGE)
         }
-        files.sort()
-        unique := [String]{}
-        loop file in files {
-            if unique.len() == 0 || unique[unique.len() - 1] != file -> unique.push(file)
+        request.paths.len() == 0 -> {
+            jet_cli_fmt_walk(jet_cli_manifest_root(cwd) ?? cwd, files)
         }
-        files = unique
+        else -> {
+            loop raw in request.paths {
+                if cli_files.is_dir(raw) -> jet_cli_fmt_walk(raw, files) else -> files.push(raw.copy())
+            }
+            files.sort()
+            unique := [String]{}
+            loop file in files {
+                if unique.len() == 0 || unique[unique.len() - 1] != file -> unique.push(file)
+            }
+            files = unique
+        }
     }
     if files.len() == 0 -> return jet_cli_external_fmt_ok(json)
     results := [JetCLIFmtFile]{}
@@ -137,23 +141,29 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
         stdout := ""
         entries := [JetCLIStatusValue]{}
         loop index in order {
-            if json {
-                if request.diff {
-                    diff: jet_format_unified_diff(relative[index], dirty[index].original, dirty[index].formatted)
-                    entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(relative[index])), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
-                } else { entries.push(jet_cli_status_text(dirty[index].path)) }
-            } else {
-                // JSON names the original path without --diff.
-                stdout = "{stdout}{relative[index]}\n"
-                if request.diff {
-                    stdout = "{stdout}{jet_format_unified_diff(relative[index], dirty[index].original, dirty[index].formatted)}"
+            if {
+                json -> {
+                    if {
+                        request.diff -> {
+                            diff: jet_format_unified_diff(relative[index], dirty[index].original, dirty[index].formatted)
+                            entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(relative[index])), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
+                        }
+                        else -> { entries.push(jet_cli_status_text(dirty[index].path)) }
+                    }
+                }
+                else -> {
+                    // JSON names the original path without --diff.
+                    stdout = "{stdout}{relative[index]}\n"
+                    if request.diff {
+                        stdout = "{stdout}{jet_format_unified_diff(relative[index], dirty[index].original, dirty[index].formatted)}"
+                    }
                 }
             }
         }
         if json -> stdout = jet_cli_external_fmt_status("dirty", Val(entries))
         return JetDriverVerbOutput{stdout: stdout, stderr: skipped, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    stderr := skipped
+    stderr: skipped
     loop result in results {
         if !result.changed -> next
         cli_files.write(result.path, result.formatted) ?? return JetDriverVerbOutput{stdout: "", stderr: "{stderr}{jet_cli_report("E2105", "couldn't write `{result.path}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", exit_code: JET_DRIVER_EXIT_USAGE}

@@ -253,29 +253,32 @@ jet_cli_table_cluster: fn(source: [U8], start: Int, limit: Int) -> JetCLITableCl
     first: foundation_read_bytes_scalar_at(source, start)
     end := first.next_byte
     width := jet_cli_table_scalar_width(first.codepoint)
-    if jet_cli_table_regional(first.codepoint) {
-        if end < limit {
-            next_scalar: foundation_read_bytes_scalar_at(source, end)
-            if jet_cli_table_regional(next_scalar.codepoint) {
-                end = next_scalar.next_byte
-                width = 2
+    if {
+        jet_cli_table_regional(first.codepoint) -> {
+            if end < limit {
+                next_scalar: foundation_read_bytes_scalar_at(source, end)
+                if jet_cli_table_regional(next_scalar.codepoint) {
+                    end = next_scalar.next_byte
+                    width = 2
+                }
             }
         }
-    } else {
-        loop {
-            loop end < limit {
-                extension: foundation_read_bytes_scalar_at(source, end)
-                if !jet_cli_table_extend(extension.codepoint) -> break
-                end = extension.next_byte
+        else -> {
+            loop {
+                loop end < limit {
+                    extension: foundation_read_bytes_scalar_at(source, end)
+                    if !jet_cli_table_extend(extension.codepoint) -> break
+                    end = extension.next_byte
+                }
+                if end >= limit -> break
+                joiner: foundation_read_bytes_scalar_at(source, end)
+                if joiner.codepoint != 0x200d -> break
+                end = joiner.next_byte
+                if end >= limit -> break
+                joined: foundation_read_bytes_scalar_at(source, end)
+                end = joined.next_byte
+                width = jet_cli_table_max(width, jet_cli_table_scalar_width(joined.codepoint))
             }
-            if end >= limit -> break
-            joiner: foundation_read_bytes_scalar_at(source, end)
-            if joiner.codepoint != 0x200d -> break
-            end = joiner.next_byte
-            if end >= limit -> break
-            joined: foundation_read_bytes_scalar_at(source, end)
-            end = joined.next_byte
-            width = jet_cli_table_max(width, jet_cli_table_scalar_width(joined.codepoint))
         }
     }
     JetCLITableCluster{end: end, width: width}
@@ -297,12 +300,19 @@ jet_cli_table_strip_ansi: fn(source: [U8]) -> [U8] Never! {
                     foundation_append_read_bytes(out, source, index, scalar.next_byte)
                 }
             }
-            1 -> state = if code == 91 -> 2 else if code == 93 -> 3 else -> 0
+            1 -> state = if {
+                code == 91 -> 2
+                code == 93 -> 3
+                else -> 0
+            }
             2 -> {
                 if code >= 64 && code <= 126 -> state = 0
             }
             3 -> {
-                if code == 7 -> state = 0 else if code == 27 -> state = 4
+                if {
+                    code == 7 -> state = 0
+                    code == 27 -> state = 4
+                }
             }
             4 -> state = if code == 92 -> 0 else -> 3
             else -> state = 0
@@ -446,12 +456,15 @@ jet_cli_table_clip: fn(text: [U8], width: Int, unicode: Bool) -> [U8] Never! {
         used += cluster.width
         index = cluster.end
     }
-    if unicode {
-        out.push(U8{226})
-        out.push(U8{128})
-        out.push(U8{166})
-    } else {
-        loop _ in 0..<3 -> out.push(U8{46})
+    if {
+        unicode -> {
+            out.push(U8{226})
+            out.push(U8{128})
+            out.push(U8{166})
+        }
+        else -> {
+            loop _ in 0..<3 -> out.push(U8{46})
+        }
     }
     out
 }

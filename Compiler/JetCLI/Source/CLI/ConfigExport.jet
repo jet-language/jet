@@ -324,7 +324,11 @@ jet_config_export_ct_value: fn(value: CtValue, ty: Type, items: [Item], format: 
             Val(jet_cli_status_array(arr))
         }
         .List(values) -> {
-            elem_ty: if ty == .List(inner) -> inner else if ty == .FixedList(inner, _) -> inner else -> Type.String
+            elem_ty: if {
+                ty == .List(inner) -> inner
+                ty == .FixedList(inner, _) -> inner
+                else -> Type.String
+            }
             arr := [JetCLIStatusValue]{}
             loop item in values {
                 encoded: jet_config_export_ct_value(item, elem_ty, items, format) ?? return None
@@ -859,9 +863,12 @@ jet_config_export_yaml: fn(value: JetCLIStatusValue, depth: Int) -> String Never
         .Array(items) -> {
             lines := [String]{}
             loop item in items {
-                if jet_config_export_yaml_is_scalar(item) {
-                    lines.push("{pad}- {jet_config_export_yaml_scalar(item)}")
-                } else { lines.push("{pad}-\n{jet_config_export_yaml(item, depth + 1)}") }
+                if {
+                    jet_config_export_yaml_is_scalar(item) -> {
+                        lines.push("{pad}- {jet_config_export_yaml_scalar(item)}")
+                    }
+                    else -> { lines.push("{pad}-\n{jet_config_export_yaml(item, depth + 1)}") }
+                }
             }
             lines.join("\n")
         }
@@ -869,10 +876,13 @@ jet_config_export_yaml: fn(value: JetCLIStatusValue, depth: Int) -> String Never
             lines := [String]{}
             loop field in fields {
                 key: config_export_yaml.to_string(field.name)
-                if jet_config_export_yaml_is_scalar(field.value) {
-                    lines.push("{pad}{key}: {jet_config_export_yaml_scalar(field.value)}")
-                } else {
-                    lines.push("{pad}{key}:\n{jet_config_export_yaml(field.value, depth + 1)}")
+                if {
+                    jet_config_export_yaml_is_scalar(field.value) -> {
+                        lines.push("{pad}{key}: {jet_config_export_yaml_scalar(field.value)}")
+                    }
+                    else -> {
+                        lines.push("{pad}{key}:\n{jet_config_export_yaml(field.value, depth + 1)}")
+                    }
                 }
             }
             lines.join("\n")

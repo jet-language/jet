@@ -283,9 +283,12 @@ jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filte
     if faults.len() > 0 -> return Err(faults.join("\n"))
     rows.sort_by(fn(left: JetNativeTestRow, right: JetNativeTestRow) {
         module_order: left.module_name <=> right.module_name
-        if module_order != Ordering.Equal -> module_order else -> {
-            source_order: left.start <=> right.start
-            if source_order != Ordering.Equal -> source_order else -> left.test.name <=> right.test.name
+        if {
+            module_order != Ordering.Equal -> module_order
+            else -> {
+                source_order: left.start <=> right.start
+                if source_order != Ordering.Equal -> source_order else -> left.test.name <=> right.test.name
+            }
         }
     })
     selected := loop row in rows -> row.test
@@ -300,7 +303,7 @@ jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filte
             // copy: a Fisher-Yates swap of two list slots (owners: selected[index] and
             // selected[chosen]); an element cannot be moved out of its list (E0225) and Jet code
             // outside Core has no slot swap.
-            saved := selected[index].copy()
+            saved: selected[index].copy()
             // copy: as above; the slot is overwritten with its partner's value.
             selected[index] = selected[chosen].copy()
             selected[chosen] = saved.move()
@@ -326,9 +329,12 @@ jet_native_test_failure: fn(test: JetNativeTestCase, receipt: ProcessReceipt) ->
     if receipt.timed_out {
         message = "test exceeded its time limit and was stopped\n{receipt.errors}"
     } else if message.len() == 0 {
-        if receipt.signal == .Val(signal) {
-            message = "native test executable terminated by signal {signal}"
-        } else { message = "native test executable ended without an outcome (exit {receipt.code})" }
+        if {
+            receipt.signal == .Val(signal) -> {
+                message = "native test executable terminated by signal {signal}"
+            }
+            else -> { message = "native test executable ended without an outcome (exit {receipt.code})" }
+        }
     }
     // A process-fatal fault is never an expected assertion failure. Canonical
     // reporting must call it a failure, not an expected-failure surprise pass.
@@ -550,44 +556,47 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
     batch_errors := ""
     // The tests the batch ran but reported no outcome for.
     batch_missing := 0
-    if time_limit != None && check_names.len() == 0 {
-        loop test in tests -> missing.push(test.copy())
-    } else {
-        batch_path: "{records_path}.batch"
-        native_test_files.write(batch_path, "") ?? {
-            fault = Val(JetNativeTestRecordsFault{path: batch_path.copy(), cause: jet_cli_io_error_text(err)})
-            return Err("couldn't create native test records: {err}")
+    if {
+        time_limit != None && check_names.len() == 0 -> {
+            loop test in tests -> missing.push(test.copy())
         }
-        batch_spec := clean.env(ENV_JET_NATIVE_TEST_RECORDS_PATH, batch_path)
-        if time_limit == .Val(limit) {
-            batch_spec = batch_spec.timeout(limit * (tests.len() + check_names.len()))
-        }
-        batch: batch_spec.run() ?? {
-            native_test_files.remove(batch_path).drop("native test spawn already failed")
-            return Err("couldn't run native tests: {err}")
-        }
-        outputs.push(batch.output)
-        errors.push(batch.errors)
-        batch_success = batch.success
-        batch_errors = batch.errors
-        completed: jet_native_test_read_records(batch_path, batch, observed, fault)
-        // An unserial batch joins its tests after spawning them all, so its
-        // failures can't name a test.
-        if !serial {
-            loop at in 0..<observed.len() {
-                observed[at].test_id = None
-                observed[at].last = false
+        else -> {
+            batch_path: "{records_path}.batch"
+            native_test_files.write(batch_path, "") ?? {
+                fault = Val(JetNativeTestRecordsFault{path: batch_path.copy(), cause: jet_cli_io_error_text(err)})
+                return Err("couldn't create native test records: {err}")
             }
-        }
-        jet_native_test_merge(completed, selected, outcomes)
-        loop test in tests {
-            if outcomes.get(test.id) == None -> missing.push(test.copy())
-        }
-        loop test in missing {
-            if !test.isolated -> batch_missing += 1
-        }
-        if batch_missing > 0 && batch.success {
-            return Err("native test executable completed without every selected outcome")
+            batch_spec := clean.env(ENV_JET_NATIVE_TEST_RECORDS_PATH, batch_path)
+            if time_limit == .Val(limit) {
+                batch_spec = batch_spec.timeout(limit * (tests.len() + check_names.len()))
+            }
+            batch: batch_spec.run() ?? {
+                native_test_files.remove(batch_path).drop("native test spawn already failed")
+                return Err("couldn't run native tests: {err}")
+            }
+            outputs.push(batch.output)
+            errors.push(batch.errors)
+            batch_success = batch.success
+            batch_errors = batch.errors
+            completed: jet_native_test_read_records(batch_path, batch, observed, fault)
+            // An unserial batch joins its tests after spawning them all, so its
+            // failures can't name a test.
+            if !serial {
+                loop at in 0..<observed.len() {
+                    observed[at].test_id = None
+                    observed[at].last = false
+                }
+            }
+            jet_native_test_merge(completed, selected, outcomes)
+            loop test in tests {
+                if outcomes.get(test.id) == None -> missing.push(test.copy())
+            }
+            loop test in missing {
+                if !test.isolated -> batch_missing += 1
+            }
+            if batch_missing > 0 && batch.success {
+                return Err("native test executable completed without every selected outcome")
+            }
         }
     }
     // Every outcome streamed, then the batch died: no record names the
@@ -606,74 +615,77 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
         outcomes = [U64:String]{}
     }
     fatal_attributed := batch_success
-    if serial {
-        loop test in missing {
-            path: "{records_path}.{test.id}"
-            native_test_files.write(path, "") ?? {
-                fault = Val(JetNativeTestRecordsFault{path: path.copy(), cause: jet_cli_io_error_text(err)})
-                return Err("couldn't create selected native test records: {err}")
-            }
-            receipt: jet_native_test_alone_run(alone.copy().env(ENV_JET_NATIVE_TEST_ID, "{test.id}").env(ENV_JET_NATIVE_TEST_RECORDS_PATH, path)) ?? {
-                native_test_files.remove(path).drop("selected native test spawn already failed")
-                return Err("couldn't run native test {test.name}: {err}")
-            }
-            wire: jet_native_test_one(test, receipt, path, observed, fault)
-            if !receipt.success -> fatal_attributed = true
-            // A fatal receipt's raw streams already live inside its failure
-            // outcome. Successful tests' uncaptured streams remain separate.
-            if receipt.success && (!exit_fatal || test.isolated) {
-                outputs.push(receipt.output)
-                errors.push(receipt.errors)
-            }
-            jet_native_test_settle(outcomes, streamed, test.id, wire, receipt.success)
-        }
-    } else {
-        // Children run in waves of `width`, reaped in test order, so every
-        // outcome and stream lands where an unbounded launch put it.
-        width: jet_cli_native_test_width(native_test_sys.cpu_count(), jet_cli_memory_available(), JET_NATIVE_TEST_CHILD_MEMORY)
-        spawn_error := String?{None}
-        wait_error := String?{None}
-        start := 0
-        loop start < missing.len() && spawn_error == None {
-            end: if start + width < missing.len() -> start + width else -> missing.len()
-            children := [JetNativeTestChild]{}
-            loop index in start..<end {
-                test: missing[index]
+    if {
+        serial -> {
+            loop test in missing {
                 path: "{records_path}.{test.id}"
                 native_test_files.write(path, "") ?? {
                     fault = Val(JetNativeTestRecordsFault{path: path.copy(), cause: jet_cli_io_error_text(err)})
-                    spawn_error = Val("couldn't create selected native test records: {err}")
-                    break
+                    return Err("couldn't create selected native test records: {err}")
                 }
-                child: alone.copy().env(ENV_JET_NATIVE_TEST_ID, "{test.id}").env(ENV_JET_NATIVE_TEST_RECORDS_PATH, path).spawn() ?? {
+                receipt: jet_native_test_alone_run(alone.copy().env(ENV_JET_NATIVE_TEST_ID, "{test.id}").env(ENV_JET_NATIVE_TEST_RECORDS_PATH, path)) ?? {
                     native_test_files.remove(path).drop("selected native test spawn already failed")
-                    spawn_error = Val("couldn't run native test {test.name}: {err}")
-                    break
+                    return Err("couldn't run native test {test.name}: {err}")
                 }
-                children.push(JetNativeTestChild{test: test, child: child, path: path})
-            }
-            // Reap every child already launched even when a later spawn fails.
-            loop running in children {
-                receipt: running.child.wait() ?? {
-                    native_test_files.remove(running.path).drop("selected native test wait already failed")
-                    wait_error = Val("couldn't wait for native test {running.test.name}: {err}")
-                    next
-                }
-                wire: jet_native_test_one(running.test, receipt, running.path, observed, fault) ?? {
-                    wait_error = Val(err.message)
-                    next
-                }
+                wire: jet_native_test_one(test, receipt, path, observed, fault)
                 if !receipt.success -> fatal_attributed = true
-                if receipt.success && (!exit_fatal || running.test.isolated) {
+                // A fatal receipt's raw streams already live inside its failure
+                // outcome. Successful tests' uncaptured streams remain separate.
+                if receipt.success && (!exit_fatal || test.isolated) {
                     outputs.push(receipt.output)
                     errors.push(receipt.errors)
                 }
-                jet_native_test_settle(outcomes, streamed, running.test.id, wire, receipt.success)
+                jet_native_test_settle(outcomes, streamed, test.id, wire, receipt.success)
             }
-            start = end
         }
-        if spawn_error == .Val(error) -> return Err(error)
-        if wait_error == .Val(error) -> return Err(error)
+        else -> {
+            // Children run in waves of `width`, reaped in test order, so every
+            // outcome and stream lands where an unbounded launch put it.
+            width: jet_cli_native_test_width(native_test_sys.cpu_count(), jet_cli_memory_available(), JET_NATIVE_TEST_CHILD_MEMORY)
+            spawn_error := String?{None}
+            wait_error := String?{None}
+            start := 0
+            loop start < missing.len() && spawn_error == None {
+                end: if start + width < missing.len() -> start + width else -> missing.len()
+                children := [JetNativeTestChild]{}
+                loop index in start..<end {
+                    test: missing[index]
+                    path: "{records_path}.{test.id}"
+                    native_test_files.write(path, "") ?? {
+                        fault = Val(JetNativeTestRecordsFault{path: path.copy(), cause: jet_cli_io_error_text(err)})
+                        spawn_error = Val("couldn't create selected native test records: {err}")
+                        break
+                    }
+                    child: alone.copy().env(ENV_JET_NATIVE_TEST_ID, "{test.id}").env(ENV_JET_NATIVE_TEST_RECORDS_PATH, path).spawn() ?? {
+                        native_test_files.remove(path).drop("selected native test spawn already failed")
+                        spawn_error = Val("couldn't run native test {test.name}: {err}")
+                        break
+                    }
+                    children.push(JetNativeTestChild{test: test, child: child, path: path})
+                }
+                // Reap every child already launched even when a later spawn fails.
+                loop running in children {
+                    receipt: running.child.wait() ?? {
+                        native_test_files.remove(running.path).drop("selected native test wait already failed")
+                        wait_error = Val("couldn't wait for native test {running.test.name}: {err}")
+                        next
+                    }
+                    wire: jet_native_test_one(running.test, receipt, running.path, observed, fault) ?? {
+                        wait_error = Val(err.message)
+                        next
+                    }
+                    if !receipt.success -> fatal_attributed = true
+                    if receipt.success && (!exit_fatal || running.test.isolated) {
+                        outputs.push(receipt.output)
+                        errors.push(receipt.errors)
+                    }
+                    jet_native_test_settle(outcomes, streamed, running.test.id, wire, receipt.success)
+                }
+                start = end
+            }
+            if spawn_error == .Val(error) -> return Err(error)
+            if wait_error == .Val(error) -> return Err(error)
+        }
     }
     // A batch that died with no rerun reproducing it cannot honestly be
     // attributed to one test, nor converted to a successful run just because

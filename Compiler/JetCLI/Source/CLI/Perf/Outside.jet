@@ -436,7 +436,7 @@ jet_cli_perf_attach_sampled: fn(command: ^^[String], out: String?, allowlist: [S
     sections: jet_cli_perf_outside_sections(fold, taken, fold.pids.len(), fold.tids.len(), wall /% 1000000, None, run.sampler.origin_unix_ns, phases)
     lines: jet_cli_perf_outside_lines(sections.functions.value)
     // After the sections, which sort the rows the hottest first.
-    profiled := jet_cli_perf_outside_profile(fold, taken, path)
+    profiled: jet_cli_perf_outside_profile(fold, taken, path)
     capture := jet_cli_perf_command_profiled(profiled.profile.move(), profiled.sources.move(), run.cpu_ns, wall)
     capture.receipts.push(sections.functions)
     capture.receipts.push(sections.timeline)
@@ -849,9 +849,12 @@ jet_cli_perf_outside_take: fn(fold: ^JetCLIPerfOutsideFold, taken: ^X64Samples) 
         }
         fold.working[package] = fold.working[package, or: 0] + 1
         node: jet_cli_perf_outside_tree_add(fold.tree, chain)
-        if fold.timeline.len() < JET_CLI_PERF_OUTSIDE_TIMELINE {
-            fold.timeline.push(JetCLIPerfOutsideMoment{us: (time - fold.origin_ns) /% 1000, node: node})
-        } else { fold.dropped += 1 }
+        if {
+            fold.timeline.len() < JET_CLI_PERF_OUTSIDE_TIMELINE -> {
+                fold.timeline.push(JetCLIPerfOutsideMoment{us: (time - fold.origin_ns) /% 1000, node: node})
+            }
+            else -> { fold.dropped += 1 }
+        }
         at += 4 + count
         fold.sample += 1
     }

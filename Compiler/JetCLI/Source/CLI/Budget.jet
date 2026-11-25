@@ -104,13 +104,17 @@ jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIUsageError!
                 if value.starts_with("-") {
                     return Err(jet_cli_usage_error("E2104", "flag `{flag}` needs a value"))
                 }
-                if flag == "--baseline" -> out.baseline = Val(value.copy()) else if flag == "--reason" {
-                    out.reason = Val(value.copy())
-                } else {
-                    if value != "auto" && value != "none" && value != "github" {
-                        return Err(jet_cli_usage_error("E2104", "`--annotations` accepts auto, none, or github"))
+                if {
+                    flag == "--baseline" -> out.baseline = Val(value.copy())
+                    flag == "--reason" -> {
+                        out.reason = Val(value.copy())
                     }
-                    out.annotations = value.copy()
+                    else -> {
+                        if value != "auto" && value != "none" && value != "github" {
+                            return Err(jet_cli_usage_error("E2104", "`--annotations` accepts auto, none, or github"))
+                        }
+                        out.annotations = value.copy()
+                    }
                 }
             }
             else -> {
@@ -145,7 +149,7 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
     measured_start: jet_cli_rfc3339(cli_time.unix_ns())
     prepared: jet_cli_prepare_overlays(entry, entry, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Check)
     if prepared == {
-        .Refused(output) -> return output.move()
+        .Refused(output) -> output.move()
         .Prepared(request, snapshot) -> {
             // copy: the request moves into the projection below.
             profile: request.profile.copy()
@@ -171,7 +175,7 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
                     sources.push(JetCLIBudgetSource{path: file.path.removeprefix(prefix), sha256: budget_crypto.sha256(file.source.bytes()).hex()})
                 }
             }
-            return jet_cli_budget_check(options, root, entry, active, projection.budget_facts, sources, measured_start, profile, color)
+            jet_cli_budget_check(options, root, entry, active, projection.budget_facts, sources, measured_start, profile, color)
         }
     }
 }
@@ -234,13 +238,16 @@ jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: Stri
     loop row in ordered {
         kind: sema_budget_provider_kind(row.spec.provider)
         metric: sema_budget_provider_kind(row.spec.metric)
-        if kind == "BuildArtifact" {
-            if metric != "BinarySize" && metric != "ArtifactSize" {
-                return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: its `BuildArtifact` provider measures only artifact size, not `{metric}`", jet_cli_why("E2104"), "remove the budget or measure it with a `jet` that runs the built artifact", color, JET_DRIVER_EXIT_USAGE)
+        if {
+            kind == "BuildArtifact" -> {
+                if metric != "BinarySize" && metric != "ArtifactSize" {
+                    return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: its `BuildArtifact` provider measures only artifact size, not `{metric}`", jet_cli_why("E2104"), "remove the budget or measure it with a `jet` that runs the built artifact", color, JET_DRIVER_EXIT_USAGE)
+                }
+                sized = true
             }
-            sized = true
-        } else if kind != "CompilerFacts" && kind != "ServiceProbe" {
-            return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: its `{kind}` provider is not built", jet_cli_why("E2104"), "remove the budget or measure it with a `jet` that has the `{kind}` provider", color, JET_DRIVER_EXIT_USAGE)
+            kind != "CompilerFacts" && kind != "ServiceProbe" -> {
+                return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: its `{kind}` provider is not built", jet_cli_why("E2104"), "remove the budget or measure it with a `jet` that has the `{kind}` provider", color, JET_DRIVER_EXIT_USAGE)
+            }
         }
         if row.spec.comparison_fact.baseline == .Val(baseline) {
             return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: it compares against baseline `{baseline}`, and baseline history is not built", jet_cli_why("E2104"), "compare the budget with `Absolute`, or measure it with a `jet` that has baseline history", color, JET_DRIVER_EXIT_USAGE)
@@ -325,7 +332,11 @@ jet_cli_budget_update: fn(options: JetCLIBudgetOptions, root: String, built: Jet
     baseline: options.baseline ?? ""
     reason: options.reason ?? ""
     // copy: the options keep their reason.
-    kind: if options.bootstrap -> JetCLIBudgetUpdateKind.Bootstrap(reason.copy()) else if options.accept_regression -> JetCLIBudgetUpdateKind.AcceptRegression(reason.copy()) else -> JetCLIBudgetUpdateKind.Pass
+    kind: if {
+        options.bootstrap -> JetCLIBudgetUpdateKind.Bootstrap(reason.copy())
+        options.accept_regression -> JetCLIBudgetUpdateKind.AcceptRegression(reason.copy())
+        else -> JetCLIBudgetUpdateKind.Pass
+    }
     plan: jet_cli_budget_plan_update(root, baseline, built.report, built.report_id, kind, jet_cli_rfc3339(cli_time.unix_ns())) ?? return jet_cli_budget_report_failure(options, built.report_id, "baseline plan refused: {err.message}", color)
     created: jet_cli_budget_report_created(root, built) ?? return jet_cli_budget_report_failure(options, built.report_id, "report inspection refused: {err.message}", color)
     if options.json {
@@ -356,13 +367,17 @@ jet_cli_budget_update: fn(options: JetCLIBudgetOptions, root: String, built: Jet
         stderr = ""
         apply = jet_cli_budget_confirm()
     }
-    if apply {
-        if jet_cli_budget_accept(root, plan, built) == .Err(failure) {
-            refused: jet_cli_budget_report_failure(options, built.report_id, failure.message, color)
-            return JetDriverVerbOutput{stdout: refused.stdout, stderr: "{stderr}{refused.stderr}", exit_code: refused.exit_code}
+    if {
+        apply -> {
+            if jet_cli_budget_accept(root, plan, built) == .Err(failure) {
+                refused: jet_cli_budget_report_failure(options, built.report_id, failure.message, color)
+                return JetDriverVerbOutput{stdout: refused.stdout, stderr: "{stderr}{refused.stderr}", exit_code: refused.exit_code}
+            }
         }
-    } else if interactive { stderr = "{stderr}Plan canceled; no baseline changed\n" } else {
-        stderr = "{stderr}Plan only; pass -y or --yes to apply in a non-interactive shell\n"
+        interactive -> { stderr = "{stderr}Plan canceled; no baseline changed\n" }
+        else -> {
+            stderr = "{stderr}Plan only; pass -y or --yes to apply in a non-interactive shell\n"
+        }
     }
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
 }
@@ -472,18 +487,21 @@ jet_cli_budget_toolchain: fn(entry: String) -> CanonicalJSON JetCLIBudgetFailure
 // when a source can't be read.
 jet_cli_budget_stdlib_id: fn(entry: String) -> String? {
     framed := [U8]{}
-    if jet_cli_named_toolchain(entry) == .Val(toolchain) {
-        core_rows: jet_cli_toolchain_core_rows(toolchain) ?? return None
-        loop row in core_rows {
-            bytes: cli_files.read_bytes(jet_cli_authority_path(toolchain, row.path)) ?? return None
-            jet_driver_run_receipt_frame(framed, row.path.bytes())
-            jet_driver_run_receipt_frame(framed, bytes)
+    if {
+        jet_cli_named_toolchain(entry) == .Val(toolchain) -> {
+            core_rows: jet_cli_toolchain_core_rows(toolchain) ?? return None
+            loop row in core_rows {
+                bytes: cli_files.read_bytes(jet_cli_authority_path(toolchain, row.path)) ?? return None
+                jet_driver_run_receipt_frame(framed, row.path.bytes())
+                jet_driver_run_receipt_frame(framed, bytes)
+            }
         }
-    } else {
-        loop row in CORE_SOURCE_OWNED_ROWS {
-            text: jet_cli_core_source_text(row.path) ?? return None
-            jet_driver_run_receipt_frame(framed, row.path.bytes())
-            jet_driver_run_receipt_frame(framed, text.bytes())
+        else -> {
+            loop row in CORE_SOURCE_OWNED_ROWS {
+                text: jet_cli_core_source_text(row.path) ?? return None
+                jet_driver_run_receipt_frame(framed, row.path.bytes())
+                jet_driver_run_receipt_frame(framed, text.bytes())
+            }
         }
     }
     Val(budget_crypto.sha256(framed).hex())

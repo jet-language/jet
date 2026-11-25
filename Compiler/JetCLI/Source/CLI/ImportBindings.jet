@@ -34,7 +34,7 @@ jet_cli_import_collect_foreign_body: fn(lines: [String], open_line: Int) -> JetC
         fragment: if index == open_line -> jet_cli_import_byte_slice(raw.bytes(), open + 1, raw.bytes().len()) else -> raw.copy()
         before: level
         delta: jet_cli_import_brace_delta(fragment)
-        content := jet_cli_import_strip_unquoted_braces(fragment).trim().copy()
+        content: jet_cli_import_strip_unquoted_braces(fragment).trim().copy()
         if !content.is_empty() && (index != open_line || before > 0 || delta < 0) {
             body.push(JetCLIImportBodyLine{line: index + 1, text: content.move()})
         }
@@ -107,12 +107,15 @@ jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImpor
         loop doc_tag in param_tags {
             position: jet_cli_import_find_bytes(line.bytes(), doc_tag, false) ?? next
             rest: jet_cli_import_byte_slice(line.bytes(), position + doc_tag.bytes().len(), line.bytes().len())
-            if jet_cli_import_parse_javascript_param_doc(rest) == .Val(param) {
-                if jet_cli_import_map_javascript_doc_type(param.ty) == {
-                    .Ok(mapped) -> { docs.params[param.name] = mapped }
-                    .Err(error) -> docs.error = Val(error.message.copy())
+            if {
+                jet_cli_import_parse_javascript_param_doc(rest) == .Val(param) -> {
+                    if jet_cli_import_map_javascript_doc_type(param.ty) == {
+                        .Ok(mapped) -> { docs.params[param.name] = mapped }
+                        .Err(error) -> docs.error = Val(error.message.copy())
+                    }
                 }
-            } else { docs.error = Val("JavaScript parameter JSDoc needs `{{type}} name`") }
+                else -> { docs.error = Val("JavaScript parameter JSDoc needs `{{type}} name`") }
+            }
             break
         }
         loop doc_tag in return_tags {
@@ -182,23 +185,26 @@ jet_cli_import_infer_javascript_types: fn(function: ^JetCLIImportFunction, docs:
             known[name.copy()] = ty.copy()
         }
     }
-    if function.result == "__js__" {
-        if docs.result == .Val(result) -> function.result = result.copy() else {
-            result := String?{None}
-            loop statement in body.split(";") {
-                trimmed: statement.trim().copy()
-                if trimmed.starts_with("return ") {
-                    expression: jet_cli_import_byte_slice(trimmed.bytes(), 7, trimmed.bytes().len())
-                    result = Val(jet_cli_import_infer_javascript_value_type(expression, known) ?? "__js__")
-                    break
+    if {
+        function.result == "__js__" -> {
+            if docs.result == .Val(result) -> function.result = result.copy() else {
+                result := String?{None}
+                loop statement in body.split(";") {
+                    trimmed: statement.trim().copy()
+                    if trimmed.starts_with("return ") {
+                        expression: jet_cli_import_byte_slice(trimmed.bytes(), 7, trimmed.bytes().len())
+                        result = Val(jet_cli_import_infer_javascript_value_type(expression, known) ?? "__js__")
+                        break
+                    }
                 }
+                function.result = result ?? "()"
             }
-            function.result = result ?? "()"
         }
-    } else {
-        if docs.result == .Val(result) {
-            if result != function.result {
-                return Err(jet_cli_import_text_error("JavaScript JSDoc return type conflicts with the declaration"))
+        else -> {
+            if docs.result == .Val(result) {
+                if result != function.result {
+                    return Err(jet_cli_import_text_error("JavaScript JSDoc return type conflicts with the declaration"))
+                }
             }
         }
     }
@@ -219,9 +225,12 @@ jet_cli_import_infer_javascript_parameter_type: fn(body: String, name: String) -
     different_quotes := false
     loop piece in pieces {
         if jet_cli_import_contains_quote(piece) {
-            if quoted == .Val(first) {
-                if piece != first -> different_quotes = true
-            } else { quoted = Val(piece.copy()) }
+            if {
+                quoted == .Val(first) -> {
+                    if piece != first -> different_quotes = true
+                }
+                else -> { quoted = Val(piece.copy()) }
+            }
         }
     }
     loop piece in pieces {
@@ -268,21 +277,24 @@ jet_cli_import_infer_javascript_value_type: fn(raw: String, known: [String:Strin
     loop token in tokens {
         if token == {
             .Word(word) -> {
-                if word == "true" || word == "false" {
-                    saw_value = true
-                    has_boolean = true
-                } else {
-                    ty: known.get(word) ?? return None
-                    saw_value = true
-                    if ty == {
-                        "Float" -> {
-                            has_float = true
-                            has_numeric = true
+                if {
+                    word == "true" || word == "false" -> {
+                        saw_value = true
+                        has_boolean = true
+                    }
+                    else -> {
+                        ty: known.get(word) ?? return None
+                        saw_value = true
+                        if ty == {
+                            "Float" -> {
+                                has_float = true
+                                has_numeric = true
+                            }
+                            "String" -> has_string = true
+                            "Bool" -> has_boolean = true
+                            "Int" -> has_numeric = true
+                            else -> return None
                         }
-                        "String" -> has_string = true
-                        "Bool" -> has_boolean = true
-                        "Int" -> has_numeric = true
-                        else -> return None
                     }
                 }
             }
@@ -361,7 +373,7 @@ jet_cli_import_enterprise_unit_name: fn(language: String, raw: String, source: S
         loop end < bytes_tail.len() && (jet_cli_import_alpha(bytes_tail[end]) || jet_cli_import_digit(bytes_tail[end]) || bytes_tail[end] == (U8{95}) || bytes_tail[end] == (U8{46})) {
             end += 1
         }
-        name := jet_cli_import_byte_slice(bytes_tail, 0, end)
+        name: jet_cli_import_byte_slice(bytes_tail, 0, end)
         dot: jet_cli_import_find_bytes(name.bytes(), ".", true)
         last: if dot == .Val(at) -> jet_cli_import_byte_slice(name.bytes(), at + 1, name.bytes().len()) else -> name.move()
         if !last.is_empty() -> return Val(last)

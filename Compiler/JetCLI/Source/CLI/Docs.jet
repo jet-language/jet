@@ -134,10 +134,13 @@ jet_cli_doc_collapse_whitespace: fn(text: String) -> String Never! {
     words := [String]{}
     start := -1
     loop index in 0..<bytes.len() {
-        if jet_cli_doc_is_space(bytes[index]) {
-            if start >= 0 -> words.push(semindex_doc_text(bytes, start, index))
-            start = -1
-        } else if start < 0 { start = index }
+        if {
+            jet_cli_doc_is_space(bytes[index]) -> {
+                if start >= 0 -> words.push(semindex_doc_text(bytes, start, index))
+                start = -1
+            }
+            start < 0 -> { start = index }
+        }
     }
     if start >= 0 -> words.push(semindex_doc_text(bytes, start, bytes.len()))
     words.join(" ")
@@ -240,10 +243,13 @@ jet_cli_doc_source_docs: fn(source: String, def_start: Int) -> SemDocComment Nev
     position = collected.len() - 1
     loop position >= 0 {
         line: collected[position]
-        if semindex_doc_strip_prefix(line, "Example:") == .Val(example) {
-            comment.examples.push(example.trim())
-        } else if comment.summary == "" && line != "" && !line.starts_with("```") {
-            comment.summary = line
+        if {
+            semindex_doc_strip_prefix(line, "Example:") == .Val(example) -> {
+                comment.examples.push(example.trim())
+            }
+            comment.summary == "" && line != "" && !line.starts_with("```") -> {
+                comment.summary = line
+            }
         }
         position -= 1
     }
@@ -553,23 +559,26 @@ jet_cli_doc_module_position: fn(modules: [JetDriverDocModule], path: String) -> 
 
 jet_cli_doc_enrich: fn(items: ^[JetCLIDocItem], index: SemIndex) Never! {
     loop item_index in 0..<items.len() {
-        if items[item_index].kind == "function" {
-            callable: jet_cli_doc_callable_for(index, items[item_index]) ?? next
-            if !callable.signature_facts_available -> next
-            failure: semindex_failure_contract_name(callable)
-            source: semindex_failure_source_name(callable)
-            signature := "{items[item_index].signature}\nfailure: unavailable"
-            if failure == .Val(failure_name) {
-                if source == .Val(source_name) {
-                    signature = "{items[item_index].signature}\nfailure: {failure_name} ({source_name})"
+        if {
+            items[item_index].kind == "function" -> {
+                callable: jet_cli_doc_callable_for(index, items[item_index]) ?? next
+                if !callable.signature_facts_available -> next
+                failure: semindex_failure_contract_name(callable)
+                source: semindex_failure_source_name(callable)
+                signature := "{items[item_index].signature}\nfailure: unavailable"
+                if failure == .Val(failure_name) {
+                    if source == .Val(source_name) {
+                        signature = "{items[item_index].signature}\nfailure: {failure_name} ({source_name})"
+                    }
                 }
+                items[item_index].failure_contract = failure
+                items[item_index].failure_source = source
+                items[item_index].signature = signature
             }
-            items[item_index].failure_contract = failure
-            items[item_index].failure_source = source
-            items[item_index].signature = signature
-        } else if items[item_index].kind == "distinct" {
-            contracts: jet_cli_doc_nominal_contracts(index, items[item_index]) ?? next
-            items[item_index].signature = "{items[item_index].signature}{contracts}"
+            items[item_index].kind == "distinct" -> {
+                contracts: jet_cli_doc_nominal_contracts(index, items[item_index]) ?? next
+                items[item_index].signature = "{items[item_index].signature}{contracts}"
+            }
         }
     }
 }
@@ -663,16 +672,19 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
             in_fence = false
             next
         }
-        if jet_cli_doc_expect_marker(doc_line.copy()) == .Val(marker) {
-            bytes: doc_line.copy().bytes()
-            expectations.push(
-                JetCLIDocExpectation{
-                    expression: semindex_doc_text(bytes, 0, marker).trim(),
-                    expected: semindex_doc_text(bytes, marker + JET_CLI_DOC_EXPECT_MARKER.bytes().len(), bytes.len()).trim(),
-                    line: line_number,
-                },
-            )
-        } else if doc_line != "" { setup.push(doc_line.copy()) }
+        if {
+            jet_cli_doc_expect_marker(doc_line.copy()) == .Val(marker) -> {
+                bytes: doc_line.copy().bytes()
+                expectations.push(
+                    JetCLIDocExpectation{
+                        expression: semindex_doc_text(bytes, 0, marker).trim(),
+                        expected: semindex_doc_text(bytes, marker + JET_CLI_DOC_EXPECT_MARKER.bytes().len(), bytes.len()).trim(),
+                        line: line_number,
+                    },
+                )
+            }
+            doc_line != "" -> { setup.push(doc_line.copy()) }
+        }
     }
     tests
 }

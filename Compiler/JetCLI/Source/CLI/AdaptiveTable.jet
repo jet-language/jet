@@ -252,11 +252,18 @@ jet_cli_table_layout: fn(table: JetCLIAdaptiveTable, profile: JetCLIOutputProfil
 }
 
 jet_cli_table_mark: fn(out: ^[U8], mark: Int, unicode: Bool) Never! {
-    if unicode {
-        out.push(U8{226})
-        out.push(U8{148})
-        out.push(JET_CLI_TABLE_MARK_BYTES[mark])
-    } else { out.push(if mark == 9 -> U8{45} else if mark == 10 -> U8{124} else -> U8{43}) }
+    if {
+        unicode -> {
+            out.push(U8{226})
+            out.push(U8{148})
+            out.push(JET_CLI_TABLE_MARK_BYTES[mark])
+        }
+        else -> { out.push(if {
+            mark == 9 -> U8{45}
+            mark == 10 -> U8{124}
+            else -> U8{43}
+        }) }
+    }
 }
 
 jet_cli_table_border: fn(out: ^[U8], widths: [Int], left: Int, joint: Int, right: Int, unicode: Bool, leading_newline: Bool) Never! {
@@ -273,7 +280,11 @@ jet_cli_table_grid_row: fn(out: ^[U8], cells: [JetCLITableCell], columns: [JetCL
     wrapped := [[[U8]]]{}
     height := 1
     loop (index, width) in widths {
-        pieces: if header -> jet_cli_table_wrap(columns[index].name, width) else if index < cells.len() -> jet_cli_table_cell_lines(cells[index], width) else -> [[U8]]{[U8]{}}
+        pieces: if {
+            header -> jet_cli_table_wrap(columns[index].name, width)
+            index < cells.len() -> jet_cli_table_cell_lines(cells[index], width)
+            else -> [[U8]]{[U8]{}}
+        }
         height = jet_cli_table_max(height, pieces.len())
         wrapped.push(pieces)
     }
@@ -283,9 +294,12 @@ jet_cli_table_grid_row: fn(out: ^[U8], cells: [JetCLITableCell], columns: [JetCL
         loop (index, width) in widths {
             if index != 0 -> jet_cli_table_mark(out, 10, unicode)
             out.push(U8{32})
-            if line < wrapped[index].len() {
-                jet_cli_table_append_pad(out, wrapped[index][line], width, columns[index].alignment)
-            } else { jet_cli_table_repeat(out, U8{32}, width) }
+            if {
+                line < wrapped[index].len() -> {
+                    jet_cli_table_append_pad(out, wrapped[index][line], width, columns[index].alignment)
+                }
+                else -> { jet_cli_table_repeat(out, U8{32}, width) }
+            }
             out.push(U8{32})
         }
         jet_cli_table_mark(out, 10, unicode)
@@ -363,13 +377,16 @@ jet_cli_table_narrow: fn(table: JetCLIAdaptiveTable, width: Int) -> [U8] Never! 
             pieces: if index < row.cells.len() -> jet_cli_table_cell_lines(row.cells[index], value_width) else -> [[U8]]{[U8]{}}
             loop (line_index, piece) in pieces {
                 line := [U8]{}
-                if line_index == 0 {
-                    jet_cli_table_append_pad(line, label, label_width, .Left)
-                    if label_width != 0 {
-                        line.push(U8{58})
-                        line.push(U8{32})
+                if {
+                    line_index == 0 -> {
+                        jet_cli_table_append_pad(line, label, label_width, .Left)
+                        if label_width != 0 {
+                            line.push(U8{58})
+                            line.push(U8{32})
+                        }
                     }
-                } else if label_width != 0 { jet_cli_table_repeat(line, U8{32}, label_width + 2) }
+                    label_width != 0 -> { jet_cli_table_repeat(line, U8{32}, label_width + 2) }
+                }
                 foundation_append_read_bytes(line, piece, 0, piece.len())
                 bounded: jet_cli_table_bound_text(line)
                 clipped: jet_cli_table_clip(bounded, width, true)
@@ -387,5 +404,9 @@ jet_cli_table_narrow: fn(table: JetCLIAdaptiveTable, width: Int) -> [U8] Never! 
 
 jet_cli_table_render: fn(table: JetCLIAdaptiveTable, layout: JetCLITableLayout) -> [U8]? Never! {
     if !layout.human -> return None
-    Val(if layout.plain -> jet_cli_table_plain(table, layout.width) else if layout.narrow -> jet_cli_table_narrow(table, layout.width) else -> jet_cli_table_grid(table, layout))
+    Val(if {
+        layout.plain -> jet_cli_table_plain(table, layout.width)
+        layout.narrow -> jet_cli_table_narrow(table, layout.width)
+        else -> jet_cli_table_grid(table, layout)
+    })
 }

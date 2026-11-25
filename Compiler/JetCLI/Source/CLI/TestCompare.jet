@@ -64,8 +64,11 @@ jet_cli_comparison_bool: fn(value: Dyn, key: String) -> Bool? Never! {
 
 jet_cli_comparison_strings: fn(value: Dyn, key: String) -> [String] JetCLIComparisonError! {
     child: jet_cli_comparison_value(value, key) ?? return Ok([String]{})
-    values: if child == .Array(items) -> items else -> {
-        return Err(jet_cli_comparison_error("`{key}` must be an array"))
+    values: if {
+        child == .Array(items) -> items
+        else -> {
+            return Err(jet_cli_comparison_error("`{key}` must be an array"))
+        }
     }
     result := [String]{}
     loop item in values {
@@ -102,8 +105,11 @@ jet_cli_comparison_binding: fn(root: Dyn) -> JetCLIComparisonBinding JetCLICompa
             fields.push("")
             next
         }
-        text: if child == .Text(text) -> text else -> {
-            return Err(jet_cli_comparison_error("foreign binding `{key}` must be a string"))
+        text: if {
+            child == .Text(text) -> text
+            else -> {
+                return Err(jet_cli_comparison_error("foreign binding `{key}` must be a string"))
+            }
         }
         if text.trim() == "" {
             return Err(jet_cli_comparison_error("foreign binding `{key}` must not be empty"))
@@ -112,12 +118,18 @@ jet_cli_comparison_binding: fn(root: Dyn) -> JetCLIComparisonBinding JetCLICompa
     }
     assumptions := [String]{}
     if jet_cli_comparison_value(binding, "assumptions") == .Val(child) {
-        values: if child == .Array(items) -> items else -> {
-            return Err(jet_cli_comparison_error("foreign binding `assumptions` must be an array"))
+        values: if {
+            child == .Array(items) -> items
+            else -> {
+                return Err(jet_cli_comparison_error("foreign binding `assumptions` must be an array"))
+            }
         }
         loop item in values {
-            text: if item == .Text(text) -> text else -> {
-                return Err(jet_cli_comparison_error("foreign binding `assumptions` entries must be strings"))
+            text: if {
+                item == .Text(text) -> text
+                else -> {
+                    return Err(jet_cli_comparison_error("foreign binding `assumptions` entries must be strings"))
+                }
             }
             if text.trim() == "" {
                 return Err(jet_cli_comparison_error("foreign binding `assumptions` entries must not be empty"))
@@ -228,8 +240,11 @@ jet_cli_comparison_parse: fn(input: String, relation_override: String?) -> JetCL
     discarded: jet_cli_comparison_int(root, "discarded_cases") ?? jet_cli_comparison_int(root, "discarded") ?? 0
     if discarded < 0 -> return Err(jet_cli_comparison_error("discarded_cases must be nonnegative"))
     cases_value: jet_cli_comparison_value(root, "cases") ?? return Err(jet_cli_comparison_error("record is missing `cases`"))
-    cases: if cases_value == .Array(items) -> items else -> {
-        return Err(jet_cli_comparison_error("record `cases` must be an array"))
+    cases: if {
+        cases_value == .Array(items) -> items
+        else -> {
+            return Err(jet_cli_comparison_error("record `cases` must be an array"))
+        }
     }
     samples: loop (index, value) in cases -> jet_cli_comparison_sample(value, index, seed, source, tool, target, relation)
     record := testing_compare_samples_with_discarded(relation, samples, discarded)

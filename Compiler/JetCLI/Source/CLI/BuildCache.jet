@@ -103,7 +103,7 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
         }
         if verbose -> log = "{log}[build] cache miss -> compiling\n"
     }
-    built := jet_cli_build_binary(file, name, "build", color, options, result, inputs, snapshot, invocation, digests)
+    built: jet_cli_build_binary(file, name, "build", color, options, result, inputs, snapshot, invocation, digests)
     if built.move() == {
         .Failed(failure) -> JetCLIStoredBuild.Failed{output: failure}
         .Image(executable, path) -> JetCLIStoredBuild.Written{path: path, log: "{log}{jet_cli_build_store(store, key, path, executable, verbose)}", reused: false}
@@ -206,14 +206,17 @@ jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, s
     }
     parts.push(compiler)
     parts.push(jet_cli_runtime_key(jet_cli_runtime_dir()) ?? return None)
-    if jet_cli_named_toolchain(file) == .Val(toolchain) {
-        core_rows: jet_cli_toolchain_core_rows(toolchain) ?? return None
-        loop row in core_rows {
-            path: jet_cli_authority_path(toolchain, row.path)
-            parts.push(row.path)
-            parts.push(jet_cli_identity_key("file", cli_files.stat(path) ?? return None))
+    if {
+        jet_cli_named_toolchain(file) == .Val(toolchain) -> {
+            core_rows: jet_cli_toolchain_core_rows(toolchain) ?? return None
+            loop row in core_rows {
+                path: jet_cli_authority_path(toolchain, row.path)
+                parts.push(row.path)
+                parts.push(jet_cli_identity_key("file", cli_files.stat(path) ?? return None))
+            }
         }
-    } else { parts.push("core built in") }
+        else -> { parts.push("core built in") }
+    }
     // The sources by their paths from the entry root, which itself names
     // where they are.
     parts.push(jet_driver_entry_root_path(snapshot))

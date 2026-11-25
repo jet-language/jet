@@ -44,7 +44,7 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     if jet_cli_build_option_gate_refusal(file, snapshot.roots[0].canonical_path, result, options, color) == .Val(refused) {
         return refused
     }
-    checked := inputs.move() ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
+    checked: inputs.move() ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
     if checked.entry_key == None {
         return jet_cli_native_report(file, "build", JetCLINativeFailure.NoEntry, color)
     }
@@ -58,12 +58,12 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     receipt_bytes: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_WEB_RECEIPT_FILE) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime's web receipt: {err.message}"}, color)
     receipt: String.from_bytes(receipt_bytes) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "the Jet runtime's web receipt {jet_cli_runtime_label(runtime_dir, JET_CLI_RUNTIME_WEB_RECEIPT_FILE)} is not UTF-8"}, color)
     census := [JetDriverIceRow]{}
-    built := jet_cli_native_program(result, checked, None, options, runtime, census, file, jet_driver_entry_root_path(snapshot))
+    built: jet_cli_native_program(result, checked, None, options, runtime, census, file, jet_driver_entry_root_path(snapshot))
     if built.failure == .Val(failure) -> return jet_cli_native_report(file, "build", failure, color)
     entry: built.program.entry
     entry_source: if entry >= 0 && entry < built.program.functions.len() -> built.program.functions[entry].source_file.copy() else -> ""
     if result.trace_sink == .Val(sink) -> sink.begin("web.module", "", -1, -1)
-    web := web_program(built.program.move(), receipt)
+    web: web_program(built.program.move(), receipt)
     if result.trace_sink == .Val(sink) -> sink.end("web.module", web.bytes.len())
     loop error in web.errors -> jet_driver_ice_record(census, "-", "web", "select", error)
     if census.len() > 0 -> return jet_cli_ice_census(file, census)
@@ -272,7 +272,7 @@ JetCLIDevWebBuilt: struct {
 }
 
 jet_cli_dev_web_build: fn(file: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetCLIDevWebBuilt {
-    compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
+    compiled: jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
     if compiled.move() == {
         .Refused(refusal) -> JetCLIDevWebBuilt{output: refusal, build_dir: ""}
         .Checked(result, inputs, snapshot) -> {

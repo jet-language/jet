@@ -57,14 +57,17 @@ jet_cli_gate_append_package_writers: fn(ledger: ^GateLedger, snapshot: JetDriver
         break
     }
     lock: jet_cli_entry_lock(snapshot) ?? return
-    if lock.authority == .Val(authority) {
-        jet_cli_gate_append_authority(ledger, authority, UNIFIED_LOCK_FILE)
-    } else {
-        loop package in lock.packages {
-            if package.effect_grants.len() == 0 && package.granted_effects.len() == 0 -> next
-            authority: package.effect_authority ?? ".jet/lock effect provenance"
-            detail: "required effects: {jet_cli_gate_effect_names(package.required_effects, package.effects)}; granted effects: {jet_cli_gate_effect_names(package.granted_effects, package.effect_grants)}; denied effects: {jet_cli_gate_effect_names(package.denied_effects, [String]{})}; authority: {authority}"
-            gate_ledger_push(ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", UNIFIED_LOCK_FILE, package.name, detail, [String]{"{UNIFIED_LOCK_FILE}:dependency.effect-grants"}))
+    if {
+        lock.authority == .Val(authority) -> {
+            jet_cli_gate_append_authority(ledger, authority, UNIFIED_LOCK_FILE)
+        }
+        else -> {
+            loop package in lock.packages {
+                if package.effect_grants.len() == 0 && package.granted_effects.len() == 0 -> next
+                authority: package.effect_authority ?? ".jet/lock effect provenance"
+                detail: "required effects: {jet_cli_gate_effect_names(package.required_effects, package.effects)}; granted effects: {jet_cli_gate_effect_names(package.granted_effects, package.effect_grants)}; denied effects: {jet_cli_gate_effect_names(package.denied_effects, [String]{})}; authority: {authority}"
+                gate_ledger_push(ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", UNIFIED_LOCK_FILE, package.name, detail, [String]{"{UNIFIED_LOCK_FILE}:dependency.effect-grants"}))
+            }
         }
     }
     grants := lock.workspace_overlay_policy.build_grants.copy()

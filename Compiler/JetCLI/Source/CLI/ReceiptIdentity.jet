@@ -131,10 +131,13 @@ jet_cli_receipt_context_identity: fn(verb: String, argv: [String], terminal: [U8
             next
         }
         jet_driver_run_receipt_frame(tools, path.bytes())
-        digest: if name == "jet" -> jet_cli_compiler_identity() ?? return Err(jet_cli_read_error(jet_cli_identity_missing().what)) else -> {
-            if cli_files.read_bytes(path) == {
-                .Ok(bytes) -> receipt_crypto.sha256(bytes).hex()
-                .Err(_) -> "unreadable"
+        digest: if {
+            name == "jet" -> jet_cli_compiler_identity() ?? return Err(jet_cli_read_error(jet_cli_identity_missing().what))
+            else -> {
+                if cli_files.read_bytes(path) == {
+                    .Ok(bytes) -> receipt_crypto.sha256(bytes).hex()
+                    .Err(_) -> "unreadable"
+                }
             }
         }
         jet_driver_run_receipt_frame(tools, digest.bytes())
@@ -148,10 +151,13 @@ jet_cli_receipt_context_identity: fn(verb: String, argv: [String], terminal: [U8
 // malformed authorities so they cannot make an old claim appear current.
 jet_cli_receipt_authority_roots: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> [String] Never! {
     root := cli_files.realpath(start) ?? start
-    if jet_cli_find_workspace_root_checked(cache, start) == .Ok(found) && found == .Val(found_root) {
-        root = found_root
-    } else if jet_cli_find_package_root_checked(cache, start) == .Ok(found) && found == .Val(found_root) {
-        root = found_root
+    if {
+        jet_cli_find_workspace_root_checked(cache, start) == .Ok(found) && found == .Val(found_root) -> {
+            root = found_root
+        }
+        jet_cli_find_package_root_checked(cache, start) == .Ok(found) && found == .Val(found_root) -> {
+            root = found_root
+        }
     }
     roots := [String]{root}
     directory := start
@@ -264,11 +270,14 @@ jet_cli_receipt_secret_values: fn(argv: [String]) -[Env]> [String] Never! {
     }
     loop (index, argument) in argv {
         pieces: argument.split("=").to_list()
-        if pieces.len() > 1 {
-            value: argument.removeprefix("{pieces[0]}=")
-            if jet_cli_receipt_secret_name(pieces[0]) && value != "" -> values.push(value)
-        } else if jet_cli_receipt_secret_name(argument) && index + 1 < argv.len() && argv[index + 1] != "" {
-            values.push(argv[index + 1])
+        if {
+            pieces.len() > 1 -> {
+                value: argument.removeprefix("{pieces[0]}=")
+                if jet_cli_receipt_secret_name(pieces[0]) && value != "" -> values.push(value)
+            }
+            jet_cli_receipt_secret_name(argument) && index + 1 < argv.len() && argv[index + 1] != "" -> {
+                values.push(argv[index + 1])
+            }
         }
     }
     values.sort_by(fn(left: String, right: String) { right.bytes().len() <=> left.bytes().len() })
@@ -318,9 +327,12 @@ jet_cli_receipt_target_identity: fn(cache: ^WorkspaceDeclarationCache, target: S
     }
     // The authority walk takes a directory: a file target (a comparison
     // corpus) starts at the directory that holds it.
-    directory: if target_info.is_dir -> target else -> {
-        absolute: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize canonical target `{target}`: {jet_cli_io_error_text(err)}"))
-        jet_cli_parent(absolute) ?? "/"
+    directory: if {
+        target_info.is_dir -> target
+        else -> {
+            absolute: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize canonical target `{target}`: {jet_cli_io_error_text(err)}"))
+            jet_cli_parent(absolute) ?? "/"
+        }
     }
     start: AuthorityResolver.authority_walk_root(directory) ?? return Err(jet_cli_read_error("couldn't resolve canonical target directory"))
     roots := [String]{}

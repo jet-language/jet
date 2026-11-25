@@ -71,9 +71,9 @@ jet_cli_fill_candidate_checks: fn(file: String, source: String, span: Span, cand
     replacement: "{semindex_doc_text(bytes, 0, span.start)}{candidate}{semindex_doc_text(bytes, span.end, bytes.len())}"
     compiled: jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(replacement), None) ?? return Err(jet_cli_read_error("the fill candidate compiler failed before returning diagnostics"))
     if compiled == {
-        .Refused(_) -> return false
+        .Refused(_) -> false
         .Compiled(result, _) -> {
-            return jet_cli_errors(result.diagnostics).len() == 0 && result.internal_problem == .None
+            jet_cli_errors(result.diagnostics).len() == 0 && result.internal_problem == .None
         }
     }
 }
@@ -99,28 +99,35 @@ jet_cli_fill_literal: fn(expected: String) -> String Never! {
 jet_cli_fill_card: fn(unit: JetDriverDocModule, span: Span, goal_line: Int, name: String, effects: String, goal: TTypedGoal, checked: Bool, cards: ^[JetCLIStatusValue]) -> String JetCLIReadError! {
     values := [JetCLIStatusValue]{}
     listed := ""
-    if checked {
-        literal: jet_cli_fill_literal(goal.expected)
-        loop candidate in goal.candidates {
-            if !candidate.ends_with("(…)") && jet_cli_fill_candidate_checks(unit.physical_path, unit.source, span, candidate) {
-                values.push(jet_cli_status_text(candidate))
-                listed = "{listed}    {values.len()}. {candidate} (checked)\n"
+    if {
+        checked -> {
+            literal: jet_cli_fill_literal(goal.expected)
+            loop candidate in goal.candidates {
+                if !candidate.ends_with("(…)") && jet_cli_fill_candidate_checks(unit.physical_path, unit.source, span, candidate) {
+                    values.push(jet_cli_status_text(candidate))
+                    listed = "{listed}    {values.len()}. {candidate} (checked)\n"
+                }
+            }
+            if literal != "" && !goal.candidates.contains(literal) && jet_cli_fill_candidate_checks(unit.physical_path, unit.source, span, literal) {
+                values.push(jet_cli_status_text(literal))
+                listed = "{listed}    {values.len()}. {literal} (checked)\n"
             }
         }
-        if literal != "" && !goal.candidates.contains(literal) && jet_cli_fill_candidate_checks(unit.physical_path, unit.source, span, literal) {
-            values.push(jet_cli_status_text(literal))
-            listed = "{listed}    {values.len()}. {literal} (checked)\n"
+        else -> {
+            loop candidate in goal.candidates -> values.push(jet_cli_status_text(candidate))
         }
-    } else {
-        loop candidate in goal.candidates -> values.push(jet_cli_status_text(candidate))
     }
     text := "Goal: {unit.path}:{goal_line} ({name})\n  Expected type: {goal.expected}\n  Required effects: {effects}\n"
-    if !checked {
-        shown: if goal.candidates.len() == 0 -> "none in scope" else -> goal.candidates.join(", ")
-        text = "{text}  Candidates: {shown}\n"
-    } else if values.len() == 0 {
-        text = "{text}  Candidates: none (no local expression passed the checker)\n"
-    } else { text = "{text}  Candidates:\n{listed}" }
+    if {
+        !checked -> {
+            shown: if goal.candidates.len() == 0 -> "none in scope" else -> goal.candidates.join(", ")
+            text = "{text}  Candidates: {shown}\n"
+        }
+        values.len() == 0 -> {
+            text = "{text}  Candidates: none (no local expression passed the checker)\n"
+        }
+        else -> { text = "{text}  Candidates:\n{listed}" }
+    }
     cards.push(
         jet_cli_status_object(
             [JetCLIStatusField]{
@@ -155,11 +162,14 @@ jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int
                 if line == .Val(filter_line) && filter_line != goal_line -> next
                 name: jet_cli_fill_function_name(function)
                 effects: jet_cli_fill_effects(function, unit.alias, index.effects)
-                if goal.row >= 0 {
-                    text = "{text}{jet_cli_fill_card(unit, goal.span, goal_line, name, effects, function.typed_goals[goal.row], checked, cards)}"
-                } else {
-                    unknown: TTypedGoal{span: goal.span, expected: "(unknown)", candidates: [String]{}}
-                    text = "{text}{jet_cli_fill_card(unit, goal.span, goal_line, name, effects, unknown, checked, cards)}"
+                if {
+                    goal.row >= 0 -> {
+                        text = "{text}{jet_cli_fill_card(unit, goal.span, goal_line, name, effects, function.typed_goals[goal.row], checked, cards)}"
+                    }
+                    else -> {
+                        unknown: TTypedGoal{span: goal.span, expected: "(unknown)", candidates: [String]{}}
+                        text = "{text}{jet_cli_fill_card(unit, goal.span, goal_line, name, effects, unknown, checked, cards)}"
+                    }
                 }
             }
         }
@@ -178,10 +188,10 @@ jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int
 jet_cli_check_goal_cards: fn(file: String, color: Bool) -> String JetCLIReadError! {
     compiled: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc) ?? return Err(jet_cli_read_error("the goal-card projection of `{file}` failed before returning diagnostics"))
     if compiled == {
-        .Refused(_) -> return Err(jet_cli_read_error("the goal-card projection of `{file}` was refused after its check passed"))
+        .Refused(_) -> Err(jet_cli_read_error("the goal-card projection of `{file}` was refused after its check passed"))
         .Compiled(result, _) -> {
             report: jet_cli_fill_report(result, Val(file), None, false, false)
-            return report ?? ""
+            report ?? ""
         }
     }
 }

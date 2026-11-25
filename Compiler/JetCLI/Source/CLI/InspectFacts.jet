@@ -154,10 +154,13 @@ jet_cli_inspect_facts: fn(jet_argv: [String], color: Bool{false}, json: Bool{fal
     }
     origin := JetCLIFactsStore{store: store, field: "snapshot", snapshot: "", identity_field: "", identity: ""}
     outcome := JetCLIFactsOutcome.Failed{reason: ""}
-    if store == "run" {
-        origin = JetCLIFactsStore{store: store, field: "receipt", snapshot: sources[0].copy(), identity_field: "digest", identity: ""}
-        outcome = jet_cli_facts_run_answer(sources[0], kind)
-    } else { outcome = jet_cli_facts_answer(kind) }
+    if {
+        store == "run" -> {
+            origin = JetCLIFactsStore{store: store, field: "receipt", snapshot: sources[0].copy(), identity_field: "digest", identity: ""}
+            outcome = jet_cli_facts_run_answer(sources[0], kind)
+        }
+        else -> { outcome = jet_cli_facts_answer(kind) }
+    }
     if outcome == {
         .Answered(answer, snapshot) -> {
             if store == "run" -> origin.identity = snapshot.copy() else {
@@ -178,14 +181,14 @@ jet_cli_inspect_facts: fn(jet_argv: [String], color: Bool{false}, json: Bool{fal
 jet_cli_inspect_facts_host: fn(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     kind: job.subject ?? "marker"
-    prepared := jet_cli_prepare_overlays(job.file, job.file, [JetDriverSourceDocument]{}, job.color, job.threads, JetDriverCompileMode.Check)
+    prepared: jet_cli_prepare_overlays(job.file, job.file, [JetDriverSourceDocument]{}, job.color, job.threads, JetDriverCompileMode.Check)
     if prepared.move() == {
         .Refused(refused) -> { output = refused }
         .Prepared(request, snapshot) -> {
             checking := request
             checking.capture_build_program = true
             checking.read_build_program = true
-            result := jet_driver_compile(checking)
+            result: jet_driver_compile(checking)
             errors: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
             if errors.len() > 0 {
                 jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
@@ -474,8 +477,8 @@ jet_cli_facts_run_answer: fn(path: String, kind: String) -> JetCLIFactsOutcome N
 // invocation and evaluator.
 jet_cli_facts_invoke: fn(program: String, args: [TComptimeValue], core_sources: [JetDriverCoreSource], base: String) -> JetCLIFactsOutcome {
     request := jet_cli_driver_request(jet_cli_facts_snapshot(program, base), core_sources, None, JetDriverCompileMode.RootRun)
-    selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, None, Val(JET_CLI_FACTS_ENTRY), false, false, None)
-    compiled := selection.compile.move()
+    selection: jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, None, Val(JET_CLI_FACTS_ENTRY), false, false, None)
+    compiled: selection.compile.move()
     if compiled.internal_problem == .Val(problem) {
         return JetCLIFactsOutcome.Failed{reason: problem.copy()}
     }
@@ -484,16 +487,16 @@ jet_cli_facts_invoke: fn(program: String, args: [TComptimeValue], core_sources: 
             return JetCLIFactsOutcome.Failed{reason: diagnostic_headline(diagnostic.code, diagnostic.what)}
         }
     }
-    inputs := selection.inputs.move() ?? return JetCLIFactsOutcome.Failed{reason: "the query program lost its checked functions"}
-    run := jet_driver_invocation_run(inputs, args, jet_eval_runtime_config(request.eval_config), Span{start: 0, end: 0})
-    evaluated := run.result.move() ?? return JetCLIFactsOutcome.Failed{reason: run.problem.move() ?? "the query program did not run"}
+    inputs: selection.inputs.move() ?? return JetCLIFactsOutcome.Failed{reason: "the query program lost its checked functions"}
+    run: jet_driver_invocation_run(inputs, args, jet_eval_runtime_config(request.eval_config), Span{start: 0, end: 0})
+    evaluated: run.result.move() ?? return JetCLIFactsOutcome.Failed{reason: run.problem.move() ?? "the query program did not run"}
     if evaluated.error == .Val(failure) {
         return JetCLIFactsOutcome.Failed{reason: diagnostic_headline(failure.diagnostic.code, failure.diagnostic.what)}
     }
     if evaluated.internal_problem == .Val(internal) {
         return JetCLIFactsOutcome.Failed{reason: internal.message.copy()}
     }
-    value := evaluated.value.move() ?? return JetCLIFactsOutcome.Failed{reason: "the query program returned no answer"}
+    value: evaluated.value.move() ?? return JetCLIFactsOutcome.Failed{reason: "the query program returned no answer"}
     jet_cli_facts_record(value)
 }
 
@@ -558,6 +561,6 @@ jet_cli_facts_snapshot: fn(program: String, base: String) -> JetDriverAuthorized
 // comptime stage (jet_config_compile's shape). Unannotated like
 // `jet_cli_compile_file`: the driver makes dynamic host calls.
 jet_cli_facts_compile: fn(program: String, core_sources: [JetDriverCoreSource], base: String) -> JetDriverCompileResult {
-    request := jet_cli_driver_request(jet_cli_facts_snapshot(program, base), core_sources, None, JetDriverCompileMode.Comptime)
+    request: jet_cli_driver_request(jet_cli_facts_snapshot(program, base), core_sources, None, JetDriverCompileMode.Comptime)
     jet_driver_compile(request)
 }

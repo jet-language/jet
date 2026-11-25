@@ -136,24 +136,29 @@ jet_cli_perf_attach_syscalls: fn(command: ^^[String], counts: Bool, out: String?
         refused: 0,
     }
     trace := x64_trace_command(path, command, None)
-    if trace.refused != 0 {
-        // The program exited before its execve, so the command never ran:
-        // it runs now, untraced.
-        run.refused = trace.refused
-        x64_trace_close(trace)
-        run.counted = x64_counted_run(path, command, None)
-    } else if trace.failure != "" {
-        failure: "{trace.failure}"
-        x64_trace_close(trace)
-        return jet_cli_perf_failed("Jet can't run `{name}`: {failure}", color)
-    } else if counts {
-        counters: x64_counters_open(trace.pid)
-        jet_cli_perf_syscalls_follow(trace, run)
-        x64_counters_close(counters, run.counted)
-        x64_trace_close(trace)
-    } else {
-        jet_cli_perf_syscalls_follow(trace, run)
-        x64_trace_close(trace)
+    if {
+        trace.refused != 0 -> {
+            // The program exited before its execve, so the command never ran:
+            // it runs now, untraced.
+            run.refused = trace.refused
+            x64_trace_close(trace)
+            run.counted = x64_counted_run(path, command, None)
+        }
+        trace.failure != "" -> {
+            failure: "{trace.failure}"
+            x64_trace_close(trace)
+            return jet_cli_perf_failed("Jet can't run `{name}`: {failure}", color)
+        }
+        counts -> {
+            counters: x64_counters_open(trace.pid)
+            jet_cli_perf_syscalls_follow(trace, run)
+            x64_counters_close(counters, run.counted)
+            x64_trace_close(trace)
+        }
+        else -> {
+            jet_cli_perf_syscalls_follow(trace, run)
+            x64_trace_close(trace)
+        }
     }
     wall: started.elapsed().ns
     if run.counted.failure != "" {

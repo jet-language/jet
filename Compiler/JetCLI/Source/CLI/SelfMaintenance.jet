@@ -74,8 +74,11 @@ jet_cli_collect_cases: fn(directory: String, files: ^[String]) -[FS]> Never! {
     entries: cli_files.listdir(directory) ?? return
     loop name in entries {
         path: "{directory}/{name}"
-        if cli_files.is_dir(path) -> jet_cli_collect_cases(path, files) else if name.ends_with(".case") && name != ".case" {
-            files.push(path)
+        if {
+            cli_files.is_dir(path) -> jet_cli_collect_cases(path, files)
+            name.ends_with(".case") && name != ".case" -> {
+                files.push(path)
+            }
         }
     }
 }

@@ -94,22 +94,26 @@ jet_cli_solver_combine: fn(left: JetCLISolverAffine, factor: Int, right: JetCLIS
     loop i < left.terms.len() || j < right.terms.len() {
         take_left: j >= right.terms.len() || (i < left.terms.len() && left.terms[i].variable < right.terms[j].variable)
         take_right: i >= left.terms.len() || (j < right.terms.len() && right.terms[j].variable < left.terms[i].variable)
-        if take_left {
-            terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: left.terms[i].coefficient})
-            i += 1
-        } else if take_right {
-            scaled: jet_cli_solver_checked(factor * right.terms[j].coefficient)
-            if scaled != 0 {
-                terms.push(JetCLISolverTerm{variable: right.terms[j].variable, coefficient: scaled})
+        if {
+            take_left -> {
+                terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: left.terms[i].coefficient})
+                i += 1
             }
-            j += 1
-        } else {
-            sum: jet_cli_solver_checked(left.terms[i].coefficient + jet_cli_solver_checked(factor * right.terms[j].coefficient))
-            if sum != 0 {
-                terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: sum})
+            take_right -> {
+                scaled: jet_cli_solver_checked(factor * right.terms[j].coefficient)
+                if scaled != 0 {
+                    terms.push(JetCLISolverTerm{variable: right.terms[j].variable, coefficient: scaled})
+                }
+                j += 1
             }
-            i += 1
-            j += 1
+            else -> {
+                sum: jet_cli_solver_checked(left.terms[i].coefficient + jet_cli_solver_checked(factor * right.terms[j].coefficient))
+                if sum != 0 {
+                    terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: sum})
+                }
+                i += 1
+                j += 1
+            }
         }
     }
     Ok(JetCLISolverAffine{constant: jet_cli_solver_checked(left.constant + jet_cli_solver_checked(factor * right.constant)), terms: terms})
@@ -252,7 +256,7 @@ jet_cli_solver_normalize_list: fn(conj: Bool, children: [JetCLISolverBool]) -> J
     keyed := [JetCLISolverKeyed]{}
     nodes := [JetCLISolverBool]{}
     loop child in children {
-        normal := jet_cli_solver_normalize(child)
+        normal: jet_cli_solver_normalize(child)
         flat := [JetCLISolverBool]{}
         if normal == {
             .Constant(value) -> {
@@ -465,8 +469,12 @@ jet_cli_solver_refute: fn(ineqs: [JetCLISolverAffine], steps: ^JetCLISolverSteps
         next_rows := [JetCLISolverDerived]{}
         loop row in rows {
             c: jet_cli_solver_coefficient(row.affine, variable)
-            if c > 0 -> positive.push(row) else if c < 0 -> negative.push(row) else {
-                next_rows.push(row)
+            if {
+                c > 0 -> positive.push(row)
+                c < 0 -> negative.push(row)
+                else -> {
+                    next_rows.push(row)
+                }
             }
         }
         loop p in positive {
@@ -507,12 +515,15 @@ jet_cli_solver_refute: fn(ineqs: [JetCLISolverAffine], steps: ^JetCLISolverSteps
                     }
                 }
             }
-            if c > 0 {
-                bound: (-rest) /% c
-                hi = if hi == .Val(old) && old < bound -> Val(old) else -> Val(bound)
-            } else {
-                bound: -((-rest) /% (-c))
-                lo = if lo == .Val(old) && old > bound -> Val(old) else -> Val(bound)
+            if {
+                c > 0 -> {
+                    bound: (-rest) /% c
+                    hi = if hi == .Val(old) && old < bound -> Val(old) else -> Val(bound)
+                }
+                else -> {
+                    bound: -((-rest) /% (-c))
+                    lo = if lo == .Val(old) && old > bound -> Val(old) else -> Val(bound)
+                }
             }
         }
         value: jet_cli_solver_pick(lo, hi) ?? return Ok(JetCLISolverSearch.Split(JetCLISolverValue{name: variable, value: hi ?? 0}))

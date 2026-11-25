@@ -186,19 +186,22 @@ jet_cli_measure_settle: fn(wire: String, name: String, plan: JetCLIMeasurePlan, 
         value: jet_cli_measure_rank(sorted, permille)
         diagnostics := [Diagnostic]{}
         verdict := JetCLIMeasureVerdict{name: spec.name, metric: spec.metric, status: "pass", value_ps: value, limit_ns: None}
-        if spec.comparison == "AbsoluteFrom" && spec.limit_fact.quantity == .DurationNs(limit) {
-            verdict.limit_ns = Val(limit)
-            if value > limit * 1000 {
-                verdict.status = if spec.enforcement == "Warn" -> "warn" else -> "miss"
-                diagnostic := diagnostic_from_registry(missed.code, Val(spec.span), "Performance budget `{spec.name}` regressed: {spec.metric} of `{name}` is {jet_cli_measure_ns(value)} ns per iteration, over its limit of {limit} ns", missed.why, missed.fix)
-                if spec.enforcement == "Warn" -> diagnostic.severity = DIAGNOSTIC_LINT
+        if {
+            spec.comparison == "AbsoluteFrom" && spec.limit_fact.quantity == .DurationNs(limit) -> {
+                verdict.limit_ns = Val(limit)
+                if value > limit * 1000 {
+                    verdict.status = if spec.enforcement == "Warn" -> "warn" else -> "miss"
+                    diagnostic := diagnostic_from_registry(missed.code, Val(spec.span), "Performance budget `{spec.name}` regressed: {spec.metric} of `{name}` is {jet_cli_measure_ns(value)} ns per iteration, over its limit of {limit} ns", missed.why, missed.fix)
+                    if spec.enforcement == "Warn" -> diagnostic.severity = DIAGNOSTIC_LINT
+                    diagnostics.push(diagnostic)
+                }
+            }
+            else -> {
+                verdict.status = "unevaluated"
+                diagnostic := diagnostic_from_registry(unproven.code, Val(spec.span), "Performance budget `{spec.name}` has no usable evidence: `{spec.comparison}` needs a recorded baseline, and `jet test --measure` keeps none", unproven.why, unproven.fix)
+                diagnostic.severity = DIAGNOSTIC_LINT
                 diagnostics.push(diagnostic)
             }
-        } else {
-            verdict.status = "unevaluated"
-            diagnostic := diagnostic_from_registry(unproven.code, Val(spec.span), "Performance budget `{spec.name}` has no usable evidence: `{spec.comparison}` needs a recorded baseline, and `jet test --measure` keeps none", unproven.why, unproven.fix)
-            diagnostic.severity = DIAGNOSTIC_LINT
-            diagnostics.push(diagnostic)
         }
         if verdict.status == "miss" && passed {
             parts.flags &= 6
@@ -216,7 +219,11 @@ jet_cli_measure_settle: fn(wire: String, name: String, plan: JetCLIMeasurePlan, 
 // Picoseconds as nanoseconds with three decimals.
 jet_cli_measure_ns: fn(ps: Int) -> String Never! {
     fraction: ps % 1000
-    pad: if fraction < 10 -> "00" else if fraction < 100 -> "0" else -> ""
+    pad: if {
+        fraction < 10 -> "00"
+        fraction < 100 -> "0"
+        else -> ""
+    }
     "{ps.div_euclid(1000)}.{pad}{fraction}"
 }
 

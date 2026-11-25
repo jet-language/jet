@@ -284,10 +284,13 @@ jet_cli_rust_foreign_metadata: fn(text: String, crate_name: String) -> Bool JetD
                 }
             }
             loop kind in kinds {
-                if kind == .Text(value) {
-                    if value == "custom-build" || value == "proc-macro" -> present = true
-                } else {
-                    return Err(jet_cli_rust_foreign_io("Cargo metadata target kind must be a string"))
+                if {
+                    kind == .Text(value) -> {
+                        if value == "custom-build" || value == "proc-macro" -> present = true
+                    }
+                    else -> {
+                        return Err(jet_cli_rust_foreign_io("Cargo metadata target kind must be a string"))
+                    }
                 }
             }
         }
@@ -352,56 +355,59 @@ jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, re
         resolved: cli_files.canonicalize(directory) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve immutable Rust toolchain `{directory}`: {err}"))
         jet_cli_rust_foreign_mount(args, resolved, directory)
     }
-    if source == "" {
-        loop argument in ([String]{"--dir", "/work", "--chdir", "/work"}) -> args.push(argument)
-    } else {
-        loop argument in
-            ([String]{"--dir", "/work", "--ro-bind", source, "/work/source", "--bind", output, "/work/output", "--chdir", "/work/source", "--setenv", ENV_JET_BUILD_OUTPUT, "/work/output", "--setenv", "CARGO_HOME", "/work/output/cargo-home", "--setenv", "CARGO_TARGET_DIR", "/work/output", "--setenv", "HOME", "/work/output/home", "--setenv", "SOURCE_DATE_EPOCH", "0"}) {
-            args.push(argument)
+    if {
+        source == "" -> {
+            loop argument in ([String]{"--dir", "/work", "--chdir", "/work"}) -> args.push(argument)
         }
-        if registry != "" {
+        else -> {
             loop argument in
-                ([String]{"--dir", "/work/output/cargo-home", "--dir", "/work/output/cargo-home/registry"}) {
+                ([String]{"--dir", "/work", "--ro-bind", source, "/work/source", "--bind", output, "/work/output", "--chdir", "/work/source", "--setenv", ENV_JET_BUILD_OUTPUT, "/work/output", "--setenv", "CARGO_HOME", "/work/output/cargo-home", "--setenv", "CARGO_TARGET_DIR", "/work/output", "--setenv", "HOME", "/work/output/home", "--setenv", "SOURCE_DATE_EPOCH", "0"}) {
                 args.push(argument)
             }
-            jet_cli_rust_foreign_overlay(args, registry, "/work/output/cargo-home/registry")
-        }
-        if cli_files.is_dir(rustup_home) {
-            loop argument in ([String]{"--setenv", "RUSTUP_HOME", rustup_home}) {
-                args.push(argument)
-            }
-        }
-        rustc: jet_cli_rust_foreign_rustc()
-        loop argument in ([String]{"--setenv", "RUSTC", rustc}) -> args.push(argument)
-        if cli_sys.get(ENV_JET_RUST_MUSL_LINKER) == .Val(linker) {
-            loop name in
-                ([String]{"CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", "CC_x86_64_unknown_linux_musl"}) {
-                loop argument in ([String]{"--setenv", name, linker.copy()}) -> args.push(argument)
-            }
-        }
-        if cli_sys.get(ENV_JET_RUST_MUSL_AR) == .Val(archiver) {
-            loop argument in ([String]{"--setenv", "AR_x86_64_unknown_linux_musl", archiver}) {
-                args.push(argument)
-            }
-        }
-        if cli_sys.get(ENV_JET_RUST_MUSL_TOOLCHAIN) == .Val(toolchain) {
-            if !toolchain.starts_with("/nix/store/") && !toolchain.starts_with("/usr/") {
-                resolved: cli_files.canonicalize(toolchain) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve native helper toolchain: {err}"))
-                jet_cli_rust_foreign_mount(args, resolved, toolchain)
-            }
-        }
-        if cli_sys.get("PATH") == .Val(path) && path != "" {
-            loop argument in ([String]{"--setenv", "PATH", path}) -> args.push(argument)
-        }
-        if cli_sys.get("CARGO_BUILD_JOBS") == .Val(jobs) {
-            loop argument in ([String]{"--setenv", "CARGO_BUILD_JOBS", jobs}) -> args.push(argument)
-        }
-        // The host's metadata preflight inherits offline resolution control;
-        // its isolated build forwards only the explicit Cargo worker bound.
-        if metadata {
-            if cli_sys.get("CARGO_NET_OFFLINE") == .Val(offline) {
-                loop argument in ([String]{"--setenv", "CARGO_NET_OFFLINE", offline}) {
+            if registry != "" {
+                loop argument in
+                    ([String]{"--dir", "/work/output/cargo-home", "--dir", "/work/output/cargo-home/registry"}) {
                     args.push(argument)
+                }
+                jet_cli_rust_foreign_overlay(args, registry, "/work/output/cargo-home/registry")
+            }
+            if cli_files.is_dir(rustup_home) {
+                loop argument in ([String]{"--setenv", "RUSTUP_HOME", rustup_home}) {
+                    args.push(argument)
+                }
+            }
+            rustc: jet_cli_rust_foreign_rustc()
+            loop argument in ([String]{"--setenv", "RUSTC", rustc}) -> args.push(argument)
+            if cli_sys.get(ENV_JET_RUST_MUSL_LINKER) == .Val(linker) {
+                loop name in
+                    ([String]{"CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", "CC_x86_64_unknown_linux_musl"}) {
+                    loop argument in ([String]{"--setenv", name, linker.copy()}) -> args.push(argument)
+                }
+            }
+            if cli_sys.get(ENV_JET_RUST_MUSL_AR) == .Val(archiver) {
+                loop argument in ([String]{"--setenv", "AR_x86_64_unknown_linux_musl", archiver}) {
+                    args.push(argument)
+                }
+            }
+            if cli_sys.get(ENV_JET_RUST_MUSL_TOOLCHAIN) == .Val(toolchain) {
+                if !toolchain.starts_with("/nix/store/") && !toolchain.starts_with("/usr/") {
+                    resolved: cli_files.canonicalize(toolchain) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve native helper toolchain: {err}"))
+                    jet_cli_rust_foreign_mount(args, resolved, toolchain)
+                }
+            }
+            if cli_sys.get("PATH") == .Val(path) && path != "" {
+                loop argument in ([String]{"--setenv", "PATH", path}) -> args.push(argument)
+            }
+            if cli_sys.get("CARGO_BUILD_JOBS") == .Val(jobs) {
+                loop argument in ([String]{"--setenv", "CARGO_BUILD_JOBS", jobs}) -> args.push(argument)
+            }
+            // The host's metadata preflight inherits offline resolution control;
+            // its isolated build forwards only the explicit Cargo worker bound.
+            if metadata {
+                if cli_sys.get("CARGO_NET_OFFLINE") == .Val(offline) {
+                    loop argument in ([String]{"--setenv", "CARGO_NET_OFFLINE", offline}) {
+                        args.push(argument)
+                    }
                 }
             }
         }
@@ -465,13 +471,16 @@ jet_cli_rust_foreign_output_rows: fn(directory: cli_files.Directory, counts: ^[S
         if info.is_symlink || (!info.is_dir && !info.is_file) {
             return Err(jet_cli_rust_foreign_sandbox_error("Cargo output `{entry.path}` is not a private regular file or directory"))
         }
-        if info.is_dir {
-            child: directory.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_sandbox_error("Cargo output directory changed identity: {err}"))
-            jet_cli_rust_foreign_output_rows(child, counts, links)
-        } else {
-            key: "{info.id.device}:{info.id.inode}"
-            counts[key] = (counts.get(key) ?? 0) + 1
-            links[key] = info.links
+        if {
+            info.is_dir -> {
+                child: directory.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_sandbox_error("Cargo output directory changed identity: {err}"))
+                jet_cli_rust_foreign_output_rows(child, counts, links)
+            }
+            else -> {
+                key: "{info.id.device}:{info.id.inode}"
+                counts[key] = (counts.get(key) ?? 0) + 1
+                links[key] = info.links
+            }
         }
     }
     Ok()
@@ -509,16 +518,19 @@ jet_cli_rust_foreign_copy_tree: fn(source: cli_files.Directory, destination: cli
         if info.is_symlink || (!info.is_dir && !info.is_file) {
             return Err(jet_cli_rust_foreign_sandbox_error("Cargo output `{entry.path}` is not a private regular file or directory"))
         }
-        if info.is_dir {
-            if !cli_files.exists("{destination.path}/{entry.name}") {
-                created: destination.create_directory(entry.name, Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create Cargo output directory: {err}"))
+        if {
+            info.is_dir -> {
+                if !cli_files.exists("{destination.path}/{entry.name}") {
+                    created: destination.create_directory(entry.name, Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create Cargo output directory: {err}"))
+                }
+                child_source: source.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't open Cargo output directory: {err}"))
+                child_destination: destination.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_sandbox_error("Cargo destination directory is not a real directory: {err}"))
+                jet_cli_rust_foreign_copy_tree(child_source, child_destination)
             }
-            child_source: source.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't open Cargo output directory: {err}"))
-            child_destination: destination.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_sandbox_error("Cargo destination directory is not a real directory: {err}"))
-            jet_cli_rust_foreign_copy_tree(child_source, child_destination)
-        } else {
-            bytes: jet_cli_rust_foreign_read(source, entry.name)
-            jet_cli_rust_foreign_write(destination, entry.name, bytes, false, info.mode)
+            else -> {
+                bytes: jet_cli_rust_foreign_read(source, entry.name)
+                jet_cli_rust_foreign_write(destination, entry.name, bytes, false, info.mode)
+            }
         }
     }
     Ok()
@@ -555,14 +567,18 @@ jet_cli_rust_foreign_move_tree: fn(source: cli_files.Directory, destination: cli
         }
         from: "{source.path}/{entry.name}"
         to: "{destination.path}/{entry.name}"
-        if info.is_dir && cli_files.exists(to) {
-            child_source: source.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't open Cargo output directory: {err}"))
-            child_destination: destination.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_sandbox_error("Cargo destination directory is not a real directory: {err}"))
-            jet_cli_rust_foreign_move_tree(child_source, child_destination)
-        } else if info.is_dir {
-            cli_files.rename(from, to, if_exists: .Refuse) ?? return Err(jet_cli_rust_foreign_io("couldn't publish Cargo output `{entry.name}`: {err}"))
-        } else {
-            cli_files.rename(from, to) ?? return Err(jet_cli_rust_foreign_io("couldn't publish Cargo output `{entry.name}`: {err}"))
+        if {
+            info.is_dir && cli_files.exists(to) -> {
+                child_source: source.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't open Cargo output directory: {err}"))
+                child_destination: destination.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_sandbox_error("Cargo destination directory is not a real directory: {err}"))
+                jet_cli_rust_foreign_move_tree(child_source, child_destination)
+            }
+            info.is_dir -> {
+                cli_files.rename(from, to, if_exists: .Refuse) ?? return Err(jet_cli_rust_foreign_io("couldn't publish Cargo output `{entry.name}`: {err}"))
+            }
+            else -> {
+                cli_files.rename(from, to) ?? return Err(jet_cli_rust_foreign_io("couldn't publish Cargo output `{entry.name}`: {err}"))
+            }
         }
     }
     Ok()

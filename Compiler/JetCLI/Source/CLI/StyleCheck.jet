@@ -64,12 +64,15 @@ jet_cli_fix_style: fn(before: String) -> JetCLIFixApply Never! {
             if parser_impl_placement_exception(value) != None -> next
             lifted := JetCLIStyleLift?{None}
             if at >= 0 -> lifted = jet_cli_style_lift(bytes, value, floor)
-            if lifted == .Val(block) {
-                edits.push(TextEdit{span: Span{start: block.start, end: block.end}, new_text: ""})
-                floor = block.end
-                if !order.contains(value.type_name) -> order.push(value.type_name.copy())  // copy: the order list keeps the name.
-                moved[value.type_name] = "{moved.get(value.type_name) ?? ""}\n{block.text}"
-            } else { deferred += 1 }
+            if {
+                lifted == .Val(block) -> {
+                    edits.push(TextEdit{span: Span{start: block.start, end: block.end}, new_text: ""})
+                    floor = block.end
+                    if !order.contains(value.type_name) -> order.push(value.type_name.copy())  // copy: the order list keeps the name.
+                    moved[value.type_name] = "{moved.get(value.type_name) ?? ""}\n{block.text}"
+                }
+                else -> { deferred += 1 }
+            }
         }
     }
     if edits.len() == 0 {
@@ -123,32 +126,43 @@ jet_cli_style_lift: fn(bytes: [U8], value: ImplDef, floor: Int) -> JetCLIStyleLi
     }
     leading: jet_cli_style_text(bytes, start, head)
     body := ""
-    if value.trait_name == None {
-        // Inherent: the members, at the indentation they already have.
-        open: jet_cli_style_find(bytes, value.type_span.end, 123)
-        close: value.span.end - 1
-        if open < 0 || open >= close -> return None
-        if jet_cli_style_blank(bytes, open + 1, jet_cli_style_line_end(bytes, open) - 1) && jet_cli_style_line_start(bytes, close) > open {
-            if !jet_cli_style_blank(bytes, jet_cli_style_line_start(bytes, close), close) {
-                return None
+    if {
+        value.trait_name == None -> {
+            // Inherent: the members, at the indentation they already have.
+            open: jet_cli_style_find(bytes, value.type_span.end, 123)
+            close: value.span.end - 1
+            if open < 0 || open >= close -> return None
+            if {
+                jet_cli_style_blank(bytes, open + 1, jet_cli_style_line_end(bytes, open) - 1) && jet_cli_style_line_start(bytes, close) > open -> {
+                    if !jet_cli_style_blank(bytes, jet_cli_style_line_start(bytes, close), close) {
+                        return None
+                    }
+                    body = "{jet_cli_style_indent(leading)}{jet_cli_style_text(bytes, jet_cli_style_line_end(bytes, open), jet_cli_style_line_start(bytes, close))}"
+                }
+                jet_cli_style_line_start(bytes, close) == head -> {
+                    body = "{jet_cli_style_indent(leading)}    {jet_cli_style_text(bytes, open + 1, close).trim()}\n"
+                }
+                else -> { return None }
             }
-            body = "{jet_cli_style_indent(leading)}{jet_cli_style_text(bytes, jet_cli_style_line_end(bytes, open), jet_cli_style_line_start(bytes, close))}"
-        } else if jet_cli_style_line_start(bytes, close) == head {
-            body = "{jet_cli_style_indent(leading)}    {jet_cli_style_text(bytes, open + 1, close).trim()}\n"
-        } else { return None }
-    } else if value.trait_span == .Val(trait_span) {
-        // A trait impl: `impl T.Trait` is written `impl Trait` in the body.
-        written: "{leading}{jet_cli_style_text(bytes, head, value.type_span.start)}{jet_cli_style_text(bytes, trait_span.start, after)}"
-        body = jet_cli_style_indent(written)
-    } else { return None }
+        }
+        value.trait_span == .Val(trait_span) -> {
+            // A trait impl: `impl T.Trait` is written `impl Trait` in the body.
+            written: "{leading}{jet_cli_style_text(bytes, head, value.type_span.start)}{jet_cli_style_text(bytes, trait_span.start, after)}"
+            body = jet_cli_style_indent(written)
+        }
+        else -> { return None }
+    }
     end := after
     // One blank line beside the impl goes with it: the one after, else the
     // one before.
-    if end < bytes.len() && jet_cli_style_blank(bytes, end, jet_cli_style_line_end(bytes, end) - 1) {
-        end = jet_cli_style_line_end(bytes, end)
-    } else if start > floor {
-        above: jet_cli_style_line_start(bytes, start - 1)
-        if above >= floor && jet_cli_style_blank(bytes, above, start - 1) -> start = above
+    if {
+        end < bytes.len() && jet_cli_style_blank(bytes, end, jet_cli_style_line_end(bytes, end) - 1) -> {
+            end = jet_cli_style_line_end(bytes, end)
+        }
+        start > floor -> {
+            above: jet_cli_style_line_start(bytes, start - 1)
+            if above >= floor && jet_cli_style_blank(bytes, above, start - 1) -> start = above
+        }
     }
     Val(JetCLIStyleLift{start: start, end: end, text: body})
 }

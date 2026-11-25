@@ -182,11 +182,18 @@ jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: Strin
             .None -> { writes.push(JetCLIImportWrite{path: target, contents: contents}) }
             .Val(current) -> {
                 if current != contents {
-                    if mode == JetCLIImportMode.Create -> conflicts.push(target.copy()) else if prior == .Val(old) {
-                        if current == old {
-                            writes.push(JetCLIImportWrite{path: target, contents: contents})
-                        } else if contents != old { conflicts.push(target.copy()) }
-                    } else { conflicts.push(target.copy()) }
+                    if {
+                        mode == JetCLIImportMode.Create -> conflicts.push(target.copy())
+                        prior == .Val(old) -> {
+                            if {
+                                current == old -> {
+                                    writes.push(JetCLIImportWrite{path: target, contents: contents})
+                                }
+                                contents != old -> { conflicts.push(target.copy()) }
+                            }
+                        }
+                        else -> { conflicts.push(target.copy()) }
+                    }
                 }
             }
         }

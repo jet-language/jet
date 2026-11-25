@@ -61,20 +61,23 @@ jet_cli_data_bind_prepare: fn(format: String, args: [String], color: Bool) -[FS]
     index := 1
     loop index < args.len() {
         argument: args[index]
-        if argument == "--type" || argument == "-o" || argument == "--out" {
-            flag: if argument == "--type" -> "--type" else -> "-o"
-            if index + 1 >= args.len() {
-                return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, "E2104", "inspect bind {format} requires a value after {flag}", color)}
+        if {
+            argument == "--type" || argument == "-o" || argument == "--out" -> {
+                flag: if argument == "--type" -> "--type" else -> "-o"
+                if index + 1 >= args.len() {
+                    return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, "E2104", "inspect bind {format} requires a value after {flag}", color)}
+                }
+                value: args[index + 1]
+                if value == "" {
+                    field: if argument == "--type" -> "type name" else -> "output path"
+                    return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, "E2104", "inspect bind {format} {field} cannot be empty", color)}
+                }
+                if argument == "--type" -> root_type = Val(value) else -> output = Val(value)
+                index += 2
             }
-            value: args[index + 1]
-            if value == "" {
-                field: if argument == "--type" -> "type name" else -> "output path"
-                return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, "E2104", "inspect bind {format} {field} cannot be empty", color)}
+            else -> {
+                return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, if argument.starts_with("-") -> "E2102" else -> "E2104", "unknown inspect bind {format} argument {argument}", color)}
             }
-            if argument == "--type" -> root_type = Val(value) else -> output = Val(value)
-            index += 2
-        } else {
-            return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, if argument.starts_with("-") -> "E2102" else -> "E2104", "unknown inspect bind {format} argument {argument}", color)}
         }
     }
     input: binding_files.read(input_path) ?? return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_io_error(format, input_path, "read", "the input could not be read ({err})", color)}
@@ -104,30 +107,33 @@ jet_cli_data_bind_finish: fn(job: JetCLIDataBindJob, selected_root: String) -[FS
         command.push(path.copy())
     }
     result: pkg_generate_data(format, input_path, job.input, root_type, command.join(" ")) ?? return jet_cli_fail("E3208", "Could not generate {format} bindings from {input_path}.", "{err.message}.", "provide a well-formed {format} schema and rerun `jet inspect bind {format}`.", color, JET_DRIVER_EXIT_USER_ERROR)
-    if output == .None {
-        held: JetCLIRootedDirectory.open(selected_root, [String]{".jet", "bindings"}, true) ?? return jet_cli_data_bind_io_error(format, output_path, "create", err.message, color)
-        owner: held.lock("binding output") ?? return jet_cli_data_bind_io_error(format, output_path, "write", err.message, color)
-        name: jet_cli_file_name(output_path)
-        prior: if held.read(name, Int.MAX) == {
-            .Val(bytes) -> Val(bytes)
-            .None -> None
-            .Err(error) -> {
-                return jet_cli_data_bind_io_error(format, output_path, "inspect", error.message, color)
+    if {
+        output == .None -> {
+            held: JetCLIRootedDirectory.open(selected_root, [String]{".jet", "bindings"}, true) ?? return jet_cli_data_bind_io_error(format, output_path, "create", err.message, color)
+            owner: held.lock("binding output") ?? return jet_cli_data_bind_io_error(format, output_path, "write", err.message, color)
+            name: jet_cli_file_name(output_path)
+            prior: if held.read(name, Int.MAX) == {
+                .Val(bytes) -> Val(bytes)
+                .None -> None
+                .Err(error) -> {
+                    return jet_cli_data_bind_io_error(format, output_path, "inspect", error.message, color)
+                }
             }
-        }
-        if prior == .Val(bytes) {
-            existing: String.from_bytes(bytes) ?? return jet_cli_data_bind_io_error(format, output_path, "inspect", "the existing output is not UTF-8", color)
-            if jet_cli_binding_generated_command(result.source) != jet_cli_binding_generated_command(existing) {
-                return jet_cli_fail("E2104", "the default {format} binding output `{output_path}` is already in use", "sanitizing `{input_path}` produces the same output name as an existing binding", "rerun with `-o <different-output>` to choose an explicit path", color, JET_DRIVER_EXIT_USER_ERROR)
+            if prior == .Val(bytes) {
+                existing: String.from_bytes(bytes) ?? return jet_cli_data_bind_io_error(format, output_path, "inspect", "the existing output is not UTF-8", color)
+                if jet_cli_binding_generated_command(result.source) != jet_cli_binding_generated_command(existing) {
+                    return jet_cli_fail("E2104", "the default {format} binding output `{output_path}` is already in use", "sanitizing `{input_path}` produces the same output name as an existing binding", "rerun with `-o <different-output>` to choose an explicit path", color, JET_DRIVER_EXIT_USER_ERROR)
+                }
             }
+            held.replace(name, result.source.bytes(), None) ?? return jet_cli_data_bind_io_error(format, output_path, "write", err.message, color)
         }
-        held.replace(name, result.source.bytes(), None) ?? return jet_cli_data_bind_io_error(format, output_path, "write", err.message, color)
-    } else {
-        parent: jet_cli_parent(output_path) ?? ""
-        if parent != "" {
-            binding_files.create_dir_all(parent) ?? return jet_cli_data_bind_io_error(format, output_path, "create", "could not create output directory {parent} ({err})", color)
+        else -> {
+            parent: jet_cli_parent(output_path) ?? ""
+            if parent != "" {
+                binding_files.create_dir_all(parent) ?? return jet_cli_data_bind_io_error(format, output_path, "create", "could not create output directory {parent} ({err})", color)
+            }
+            binding_files.write(output_path, result.source) ?? return jet_cli_data_bind_io_error(format, output_path, "write", "could not write {output_path} ({err})", color)
         }
-        binding_files.write(output_path, result.source) ?? return jet_cli_data_bind_io_error(format, output_path, "write", "could not write {output_path} ({err})", color)
     }
     plural: if result.record_count == 1 -> "" else -> "s"
     jet_cli_done("Bound {result.record_count} {format} record{plural} from {input_path} → {output_path}\n", "", JET_DRIVER_EXIT_OK)

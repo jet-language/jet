@@ -29,15 +29,21 @@ jet_cli_derivation_entry: fn(query: String, file: String?) -[FS, Env]> String? N
         if pieces.len() == 2 && !jet_cli_derivation_offset(pieces[1]) -> return None
     }
     entry := ""
-    if file == .Val(named) {
-        entry = jet_cli_inspect_absolute(named)
-    } else {
-        notices := [String]{}
-        cwd: cli_files.cwd() ?? return None
-        if jet_cli_find_project_entry(cwd, "explain", false, notices) == .Entry(found) {
-            entry = found.path
-        } else {
-            return None
+    if {
+        file == .Val(named) -> {
+            entry = jet_cli_inspect_absolute(named)
+        }
+        else -> {
+            notices := [String]{}
+            cwd: cli_files.cwd() ?? return None
+            if {
+                jet_cli_find_project_entry(cwd, "explain", false, notices) == .Entry(found) -> {
+                    entry = found.path
+                }
+                else -> {
+                    return None
+                }
+            }
         }
     }
     if !cli_files.is_file(entry) -> return None

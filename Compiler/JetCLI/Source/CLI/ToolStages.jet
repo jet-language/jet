@@ -39,7 +39,7 @@ jet_cli_tool_stage_run: fn(document: String, overlays: ^^[JetDriverSourceDocumen
     if bodies.len() == 0 {
         return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, stop: None}
     }
-    ran := jet_cli_tool_stage_values(document, overlays.move(), program.move())
+    ran: jet_cli_tool_stage_values(document, overlays.move(), program.move())
     if ran.stop.move() == .Val(stop) {
         return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, stop: Val(stop)}
     }
@@ -60,9 +60,9 @@ jet_cli_tool_stage_values: fn(document: String, overlays: ^^[JetDriverSourceDocu
     given := overlays.move()
     given.push(JetDriverSourceDocument{path: jet_cli_tool_stage_file(document), source: program.move()})
     if jet_cli_prepare_overlays(document, jet_cli_tool_stage_file(document), given, false, None, JetDriverCompileMode.Comptime) == {
-        .Refused(output) -> return jet_cli_tool_stage_stopped(output.stderr.trim())
+        .Refused(output) -> jet_cli_tool_stage_stopped(output.stderr.trim())
         .Prepared(request, _) -> {
-            result := jet_driver_compile(request) ?? return jet_cli_tool_stage_stopped("internal compiler error: {err}")
+            result: jet_driver_compile(request) ?? return jet_cli_tool_stage_stopped("internal compiler error: {err}")
             loop diagnostic in result.diagnostics.move() {
                 if diagnostic.severity == DIAGNOSTIC_ERROR {
                     return JetCLIToolStageValues{values: [SemaComptimeItemValue]{}, stop: Val(diagnostic)}
@@ -71,7 +71,7 @@ jet_cli_tool_stage_values: fn(document: String, overlays: ^^[JetDriverSourceDocu
             if result.internal_problem == .Val(problem) {
                 return jet_cli_tool_stage_stopped("internal compiler error: {problem}")
             }
-            return JetCLIToolStageValues{values: result.comptime_values.move(), stop: None}
+            JetCLIToolStageValues{values: result.comptime_values.move(), stop: None}
         }
     }
 }
@@ -93,7 +93,7 @@ jet_cli_tool_stage_file: fn(document: String) -> String Never! {
 // with that report's own code, naming the moment and the hook. None when
 // every call ran, or no hook hooks a moment of `records`.
 jet_cli_moment_hooks_run: fn(file: String, hooks: [JetDriverMomentHook], records: [CompilerEventRecord], color: Bool) -> JetDriverVerbOutput? Never! {
-    plan := jet_driver_moment_plan(hooks, records)
+    plan: jet_driver_moment_plan(hooks, records)
     if plan.calls.len() == 0 -> return None
     ran: jet_cli_tool_stage_values(file, [JetDriverSourceDocument]{}, plan.program.move())
     if ran.stop == .Val(stop) {
@@ -176,7 +176,7 @@ jet_cli_fmt_block_hooks: fn(text: ^^String, origin: String, color: Bool, memo: ^
             modules: jet_driver_compile(request).doc_modules
             loop (index, module_ref) in modules {
                 if module_ref.physical_path != overlays[0].path -> next
-                plan := jet_driver_tool_stage_plan(modules, index, TOOL_STAGE_FMT_BLOCK)
+                plan: jet_driver_tool_stage_plan(modules, index, TOOL_STAGE_FMT_BLOCK)
                 bodies = plan.bodies.move()
                 program = plan.program.move()
             }
@@ -186,7 +186,7 @@ jet_cli_fmt_block_hooks: fn(text: ^^String, origin: String, color: Bool, memo: ^
     if bodies.len() == 0 -> return jet_cli_fmt_formatted(formatted.source)
     // The hooks' program needs no overlay: the file on disk parses as its
     // formatted text does.
-    run := jet_cli_tool_stage_run(origin, [JetDriverSourceDocument]{}, TOOL_STAGE_FMT_BLOCK, bodies, program)
+    run: jet_cli_tool_stage_run(origin, [JetDriverSourceDocument]{}, TOOL_STAGE_FMT_BLOCK, bodies, program)
     if run.stop == .Val(stop) {
         return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(jet_cli_report(stop.code, "a `fmt.block` hook for `{origin}` did not run: {stop.what}", stop.why, stop.fix, color))}
     }

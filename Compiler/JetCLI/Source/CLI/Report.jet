@@ -87,7 +87,7 @@ JetCLIReportBase: struct {
 // `file`, else the working directory's.
 jet_cli_report_base: fn(file: String) -[FS, Env]> JetCLIReportBase? Never! {
     cwd: jet_cli_report_cwd()
-    absolute := jet_cli_report_path(cwd, file)
+    absolute: jet_cli_report_path(cwd, file)
     start := cwd ?? ""
     if absolute.starts_with("/") {
         start = if cli_files.is_dir(absolute) -> absolute.move() else -> jet_cli_parent(absolute) ?? absolute.move()
@@ -229,9 +229,12 @@ jet_cli_json_control_quote: fn(value: String) -> String Never! {
                 }
             }
         }
-        if escape.len() > 0 {
-            loop escaped in escape.bytes() -> out.push(escaped)
-        } else { out.push(bytes[index]) }
+        if {
+            escape.len() > 0 -> {
+                loop escaped in escape.bytes() -> out.push(escaped)
+            }
+            else -> { out.push(bytes[index]) }
+        }
         index += width
     }
     out.push(U8{34})
@@ -413,10 +416,13 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
         out = "{out},\"applicability\":{jet_cli_json_string(grade)}"
     }
     out = "{out},\"detail\":{jet_cli_report_optional_string(diagnostic.detail)},\"denial_kind\":{jet_cli_report_optional_string(diagnostic.denial_kind)},\"call_chain\":{jet_cli_report_strings(diagnostic.call_chain)},\"scope_chain\":{jet_cli_report_strings(diagnostic.scope_chain)},\"nearest_granting_scope\":{jet_cli_report_optional_string(diagnostic.nearest_granting_scope)}"
-    if diagnostic.span == .Val(span) {
-        position: diagnostic_source_position(sources, diagnostic.origin, source)
-        out = "{out},\"line\":{diagnostic_source_line(sources.texts[position], span.start)},\"col\":{diagnostic_source_column(sources.texts[position], span.start)}"
-    } else { out = "{out},\"line\":null,\"col\":null" }
+    if {
+        diagnostic.span == .Val(span) -> {
+            position: diagnostic_source_position(sources, diagnostic.origin, source)
+            out = "{out},\"line\":{diagnostic_source_line(sources.texts[position], span.start)},\"col\":{diagnostic_source_column(sources.texts[position], span.start)}"
+        }
+        else -> { out = "{out},\"line\":null,\"col\":null" }
+    }
     if diagnostic.no_fix_reason == .Val(reason) {
         out = "{out},\"no_fix_reason\":{{\"kind\":{jet_cli_json_string(jet_cli_report_no_fix_kind(reason.kind))},\"next\":{jet_cli_json_string(reason.next)}}}"
     }

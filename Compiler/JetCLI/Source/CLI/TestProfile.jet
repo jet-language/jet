@@ -126,12 +126,12 @@ JetCLITestRowsDiff: struct {
 // profile nor an output is refused. `flags` are the run's flag layer.
 jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_default: Bool, flags: [TestSetting], color: Bool, quiet: Bool) -[FS, Env, Exec]> JetCLIPlan? Never! {
     if cli_sys.get(JET_CLI_TEST_PROFILE_ENV) != None || show_default -> return None
-    named := jet_cli_profile_name(jet_argv)
+    named: jet_cli_profile_name(jet_argv)
     package_target: positionals.len() == 0 || cli_files.is_dir(positionals[0])
     if named == "" && !package_target -> return None
     start := if positionals.len() == 0 -> cli_files.cwd() ?? "." else -> positionals[0].copy()
     if !package_target -> start = jet_cli_parent(start) ?? "."
-    root := jet_cli_manifest_root(start) ?? return None
+    root: jet_cli_manifest_root(start) ?? return None
     manifest: jet_cli_rooted_join(root, JET_CLI_PACKAGE_FILE)
     source: cli_files.read(manifest) ?? return None
     facts: PackageFacts.parse_uncomposed(source, manifest) ?? return None
@@ -139,8 +139,11 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
     from_default: chosen == ""
     if from_default {
         chosen = facts.defaults.get("test") ?? {
-            if facts.strictness == .Val(level) && level.hardened() && facts.test_profile("hardened") != None -> "hardened" else -> {
-                return None
+            if {
+                facts.strictness == .Val(level) && level.hardened() && facts.test_profile("hardened") != None -> "hardened"
+                else -> {
+                    return None
+                }
             }
         }
     }
@@ -433,50 +436,53 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
         rows := [String]{}
         // The status a recorded run keeps.
         status := child.code
-        if run.suite != "" {
-            // A suite that wrote no row leaves no file: it has no rows.
-            text: cli_files.read(jet_cli_rooted_join(scratch.path, "{index}.rows")) ?? ""
-            stopped: if child.code == JET_DRIVER_EXIT_OK -> String?{None} else -> Val(jet_cli_test_stop_reason(child.errors, child.code))
-            code: jet_cli_test_code_rows(text, stopped, known)
-            rows = code.rows.copy()  // copy: the failure lines stay with `code`.
-            status = if code.failures.len() > 0 -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
-            if !quiet {
-                loop verdict in code.verdicts {
-                    label: if verdict.status == {
-                        "FAIL" -> "failed"
-                        "UNEXPECTED-PASS" -> "unexpected-pass"
-                        "KNOWN-FAILING" -> "known-failing"
-                        else -> ""
-                    }
-                    if label != "" {
-                        summary = "{summary}{site}: {label} {verdict.id}: {verdict.detail}\n"
+        if {
+            run.suite != "" -> {
+                // A suite that wrote no row leaves no file: it has no rows.
+                text: cli_files.read(jet_cli_rooted_join(scratch.path, "{index}.rows")) ?? ""
+                stopped: if child.code == JET_DRIVER_EXIT_OK -> String?{None} else -> Val(jet_cli_test_stop_reason(child.errors, child.code))
+                code: jet_cli_test_code_rows(text, stopped, known)
+                rows = code.rows.copy()  // copy: the failure lines stay with `code`.
+                status = if code.failures.len() > 0 -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
+                if !quiet {
+                    loop verdict in code.verdicts {
+                        label: if verdict.status == {
+                            "FAIL" -> "failed"
+                            "UNEXPECTED-PASS" -> "unexpected-pass"
+                            "KNOWN-FAILING" -> "known-failing"
+                            else -> ""
+                        }
+                        if label != "" {
+                            summary = "{summary}{site}: {label} {verdict.id}: {verdict.detail}\n"
+                        }
                     }
                 }
+                loop verdict in code.verdicts {
+                    // copy: `code` keeps its verdicts; each result names its suite and row.
+                    results.push(KitCaseResult{suite: run.suite.copy(), case: verdict.id.copy(), tier: "-", status: verdict.status.copy(), detail: verdict.detail.copy(), exit: 0})
+                }
             }
-            loop verdict in code.verdicts {
-                // copy: `code` keeps its verdicts; each result names its suite and row.
-                results.push(KitCaseResult{suite: run.suite.copy(), case: verdict.id.copy(), tier: "-", status: verdict.status.copy(), detail: verdict.detail.copy(), exit: 0})
-            }
-        } else {
-            // An exit that isn't a test verdict (an internal error) stands.
-            if child.code != JET_DRIVER_EXIT_OK && child.code != JET_DRIVER_EXIT_USER_ERROR && child.code > exit_code {
-                exit_code = child.code
-            }
-            report_path: jet_cli_rooted_join(scratch.path, "{index}.bin")
-            if !cli_files.exists(report_path) {
-                // The child stopped before its tests ran; its own stderr says why.
-                if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
-                summary = "{summary}{site}: no test ran\n"
-                next
-            }
-            report: evidence_report_read(report_path) ?? {
-                if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
-                summary = "{summary}{site}: couldn't read its test evidence: {err.message}\n"
-                next
-            }
-            rows = jet_cli_test_profile_rows(report.records)
-            loop result in jet_cli_test_record_results(report.records, TEST_SUITE_TESTS, run.label) {
-                results.push(result)
+            else -> {
+                // An exit that isn't a test verdict (an internal error) stands.
+                if child.code != JET_DRIVER_EXIT_OK && child.code != JET_DRIVER_EXIT_USER_ERROR && child.code > exit_code {
+                    exit_code = child.code
+                }
+                report_path: jet_cli_rooted_join(scratch.path, "{index}.bin")
+                if !cli_files.exists(report_path) {
+                    // The child stopped before its tests ran; its own stderr says why.
+                    if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+                    summary = "{summary}{site}: no test ran\n"
+                    next
+                }
+                report: evidence_report_read(report_path) ?? {
+                    if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+                    summary = "{summary}{site}: couldn't read its test evidence: {err.message}\n"
+                    next
+                }
+                rows = jet_cli_test_profile_rows(report.records)
+                loop result in jet_cli_test_record_results(report.records, TEST_SUITE_TESTS, run.label) {
+                    results.push(result)
+                }
             }
         }
         // The run's own verdict stands with or without a baseline.
@@ -578,7 +584,7 @@ jet_cli_test_code_rows: fn(text: String, stopped: String?, accepted: [String:Str
     loop line in text.split("\n").to_list() {
         if line == "" -> next
         parts: line.split("\t").to_list()
-        id := parts[0].copy()
+        id: parts[0].copy()
         at := -1
         loop (seen, known) in ids {
             if known == id {
@@ -609,12 +615,15 @@ jet_cli_test_code_rows: fn(text: String, stopped: String?, accepted: [String:Str
         // copy: the row keeps its detail; the verdict owns its own.
         detail := details[at].copy()
         owner: accepted.get(id) ?? ""
-        if owner != "" && status == "FAIL" {
-            status = "KNOWN-FAILING"
-            detail = "{owner}: {detail}"
-        } else if owner != "" && status == "PASS" {
-            status = "UNEXPECTED-PASS"
-            detail = "{owner}: remove stale known-failing annotation"
+        if {
+            owner != "" && status == "FAIL" -> {
+                status = "KNOWN-FAILING"
+                detail = "{owner}: {detail}"
+            }
+            owner != "" && status == "PASS" -> {
+                status = "UNEXPECTED-PASS"
+                detail = "{owner}: remove stale known-failing annotation"
+            }
         }
         if status == "FAIL" || status == "UNEXPECTED-PASS" -> failures.push("{id}: {detail}")
         // copy: the row keeps its id; the verdict owns its own.

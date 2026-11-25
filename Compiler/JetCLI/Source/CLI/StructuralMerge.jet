@@ -81,7 +81,7 @@ jet_cli_struct_index_error: fn(context: String, diagnostics: [Diagnostic]) -> Je
 jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
     source: cli_files.read(path) ?? return JetCLIStructLoaded.Failed{output: jet_cli_struct_fail("could not read `{path}`: {jet_cli_io_error_text(err)}", "pass a readable Jet source file")}
     if jet_cli_compile_file(path, false, None, JetDriverCompileMode.Doc) == {
-        .Refused(refusal) -> return JetCLIStructLoaded.Failed{output: refusal}
+        .Refused(refusal) -> JetCLIStructLoaded.Failed{output: refusal}
         .Compiled(result, _) -> {
             if jet_cli_errors(result.diagnostics).len() > 0 {
                 return JetCLIStructLoaded.Failed{output: jet_cli_struct_index_error("`{path}` did not pass parser and sema", result.diagnostics)}
@@ -120,7 +120,7 @@ jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
                 cursor = fact.span.end
             }
             hash: sha256_hex(source)
-            return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: semindex_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash), failures: jet_cli_failure_functions(result.doc_interner ?? interner_empty(), result.doc_modules, jet_cli_sem_normalize(path))}}
+            JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: semindex_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash), failures: jet_cli_failure_functions(result.doc_interner ?? interner_empty(), result.doc_modules, jet_cli_sem_normalize(path))}}
         }
     }
 }
@@ -190,10 +190,13 @@ jet_cli_struct_match: fn(base: [JetCLIStructUnit], side: [JetCLIStructUnit], ope
             }
             if selected.len() > 0 -> break
         }
-        if selected.len() == 1 {
-            result[row] = selected[0]
-            used[selected[0]] = true
-        } else if selected.len() > 1 { ambiguous[row] = selected }
+        if {
+            selected.len() == 1 -> {
+                result[row] = selected[0]
+                used[selected[0]] = true
+            }
+            selected.len() > 1 -> { ambiguous[row] = selected }
+        }
     }
     JetCLIStructMatches{matched: result, ambiguous: ambiguous}
 }
@@ -227,10 +230,13 @@ jet_cli_struct_diff: fn(before: JetCLIStructDocument, after: JetCLIStructDocumen
         if before.path != after.path && (rename != None || signature || content) {
             changes.push(jet_cli_struct_change(3, "moved", left, Val(right), None))
         }
-        if signature {
-            changes.push(jet_cli_struct_change(4, "signature_changed", left, Val(right), None))
-        } else if content {
-            changes.push(jet_cli_struct_change(5, "body_changed", left, Val(right), None))
+        if {
+            signature -> {
+                changes.push(jet_cli_struct_change(4, "signature_changed", left, Val(right), None))
+            }
+            content -> {
+                changes.push(jet_cli_struct_change(5, "body_changed", left, Val(right), None))
+            }
         }
     }
     loop (row, unit) in after.units {
@@ -351,10 +357,15 @@ jet_cli_struct_merge_units: fn(base: JetCLIStructDocument, ours: JetCLIStructDoc
         t: theirs.units[ti]
         leading: jet_cli_struct_merge_text("inter_item_trivia", original.fact.stable_id, original.fact.human_identity, original.leading, o.leading, t.leading, conflicts)
         chosen := String?{None}
-        if o.fact.content_id == t.fact.content_id -> chosen = Val(o.source) else if o.fact.content_id == original.fact.content_id {
-            chosen = Val(t.source)
-        } else if t.fact.content_id == original.fact.content_id { chosen = Val(o.source) } else {
-            chosen = jet_cli_struct_merge_rename(original, o, t, ours_ops, theirs_ops)
+        if {
+            o.fact.content_id == t.fact.content_id -> chosen = Val(o.source)
+            o.fact.content_id == original.fact.content_id -> {
+                chosen = Val(t.source)
+            }
+            t.fact.content_id == original.fact.content_id -> { chosen = Val(o.source) }
+            else -> {
+                chosen = jet_cli_struct_merge_rename(original, o, t, ours_ops, theirs_ops)
+            }
         }
         if chosen == .Val(source) -> text = "{text}{leading}{source}" else {
             conflicts.push(jet_cli_struct_conflict("overlapping_edit", original, o, t))
@@ -369,18 +380,25 @@ jet_cli_struct_merge_units: fn(base: JetCLIStructDocument, ours: JetCLIStructDoc
                 candidates.push(index)
             }
         }
-        if candidates.len() == 0 -> text = "{text}{o.leading}{o.source}" else if candidates.len() == 1 {
-            index: candidates[0]
-            theirs_paired[index] = true
-            t: theirs.units[index]
-            if o.fact.content_id != t.fact.content_id {
-                conflicts.push(jet_cli_struct_conflict("competing_add", o, o, t))
-            } else {
-                leading: jet_cli_struct_merge_text("inter_item_trivia", o.fact.stable_id, o.fact.human_identity, "", o.leading, t.leading, conflicts)
-                text = "{text}{leading}{o.source}"
+        if {
+            candidates.len() == 0 -> text = "{text}{o.leading}{o.source}"
+            candidates.len() == 1 -> {
+                index: candidates[0]
+                theirs_paired[index] = true
+                t: theirs.units[index]
+                if {
+                    o.fact.content_id != t.fact.content_id -> {
+                        conflicts.push(jet_cli_struct_conflict("competing_add", o, o, t))
+                    }
+                    else -> {
+                        leading: jet_cli_struct_merge_text("inter_item_trivia", o.fact.stable_id, o.fact.human_identity, "", o.leading, t.leading, conflicts)
+                        text = "{text}{leading}{o.source}"
+                    }
+                }
             }
-        } else {
-            conflicts.push(JetCLIStructConflict{kind: "ambiguous_identity", stable_id: o.fact.stable_id, identity: o.fact.human_identity, ours: o.fact.content_id, theirs: "ambiguous additions"})
+            else -> {
+                conflicts.push(JetCLIStructConflict{kind: "ambiguous_identity", stable_id: o.fact.stable_id, identity: o.fact.human_identity, ours: o.fact.content_id, theirs: "ambiguous additions"})
+            }
         }
     }
     loop (row, t) in theirs.units {
@@ -392,14 +410,17 @@ jet_cli_struct_merge_units: fn(base: JetCLIStructDocument, ours: JetCLIStructDoc
 
 jet_cli_struct_conflicts: fn(conflicts: [JetCLIStructConflict], json: Bool) -> JetDriverVerbOutput Never! {
     stderr := ""
-    if json {
-        rows: loop conflict in conflicts -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(conflict.kind)), jet_cli_status_field("stable_id", jet_cli_status_text(conflict.stable_id)), jet_cli_status_field("human_identity", jet_cli_status_text(conflict.identity)), jet_cli_status_field("ours", jet_cli_status_text(conflict.ours)), jet_cli_status_field("theirs", jet_cli_status_text(conflict.theirs))})
-        stderr = "{jet_cli_status_render("merge.structural", false, [JetCLIStatusField]{jet_cli_status_field("structural_merge", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("conflicts", jet_cli_status_array(rows))}))})}\n"
-    } else {
-        loop conflict in conflicts {
-            stderr = "{stderr}Conflict: {conflict.identity} ({conflict.kind})\n Stable id: {conflict.stable_id}\n Ours: {conflict.ours}\n Theirs: {conflict.theirs}\n"
+    if {
+        json -> {
+            rows: loop conflict in conflicts -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(conflict.kind)), jet_cli_status_field("stable_id", jet_cli_status_text(conflict.stable_id)), jet_cli_status_field("human_identity", jet_cli_status_text(conflict.identity)), jet_cli_status_field("ours", jet_cli_status_text(conflict.ours)), jet_cli_status_field("theirs", jet_cli_status_text(conflict.theirs))})
+            stderr = "{jet_cli_status_render("merge.structural", false, [JetCLIStatusField]{jet_cli_status_field("structural_merge", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("conflicts", jet_cli_status_array(rows))}))})}\n"
         }
-        stderr = "{stderr}Merge stopped: resolve conflicts manually; no output was written\n"
+        else -> {
+            loop conflict in conflicts {
+                stderr = "{stderr}Conflict: {conflict.identity} ({conflict.kind})\n Stable id: {conflict.stable_id}\n Ours: {conflict.ours}\n Theirs: {conflict.theirs}\n"
+            }
+            stderr = "{stderr}Merge stopped: resolve conflicts manually; no output was written\n"
+        }
     }
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
@@ -491,19 +512,22 @@ jet_cli_structural: fn(argv: [String], command: String, json: Bool) -> JetDriver
         changes: jet_cli_struct_diff(documents[0], documents[1])
         failures: jet_cli_failure_changes(documents[0].failures, documents[1].failures)
         stdout := ""
-        if json {
-            rows := [JetCLIStatusValue]{}
-            loop change in changes {
-                operation: if change.operation == .Val(op) -> jet_cli_sem_op_value(op) else -> JetCLIStatusValue.Null
-                rows.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(change.kind)), jet_cli_status_field("stable_id", jet_cli_status_text(change.stable_id)), jet_cli_status_field("before", jet_cli_status_optional_text(change.before)), jet_cli_status_field("after", jet_cli_status_optional_text(change.after)), jet_cli_status_field("semantic_op", operation)}))
+        if {
+            json -> {
+                rows := [JetCLIStatusValue]{}
+                loop change in changes {
+                    operation: if change.operation == .Val(op) -> jet_cli_sem_op_value(op) else -> JetCLIStatusValue.Null
+                    rows.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(change.kind)), jet_cli_status_field("stable_id", jet_cli_status_text(change.stable_id)), jet_cli_status_field("before", jet_cli_status_optional_text(change.before)), jet_cli_status_field("after", jet_cli_status_optional_text(change.after)), jet_cli_status_field("semantic_op", operation)}))
+                }
+                stdout = "{jet_cli_status_render("diff.structural", true, [JetCLIStatusField]{jet_cli_status_field("structural_diff", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("changes", jet_cli_status_array(rows)), jet_cli_status_field("failures", jet_cli_failure_value(failures))}))})}\n"
             }
-            stdout = "{jet_cli_status_render("diff.structural", true, [JetCLIStatusField]{jet_cli_status_field("structural_diff", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("changes", jet_cli_status_array(rows)), jet_cli_status_field("failures", jet_cli_failure_value(failures))}))})}\n"
-        } else {
-            if changes.len() == 0 -> stdout = "No structural changes\n"
-            loop change in changes {
-                stdout = "{stdout}{change.kind}: {change.after ?? (change.before ?? "definition")} [{change.stable_id}]\n"
+            else -> {
+                if changes.len() == 0 -> stdout = "No structural changes\n"
+                loop change in changes {
+                    stdout = "{stdout}{change.kind}: {change.after ?? (change.before ?? "definition")} [{change.stable_id}]\n"
+                }
+                loop line in jet_cli_failure_lines(failures, "") -> stdout = "{stdout}{line}\n"
             }
-            loop line in jet_cli_failure_lines(failures, "") -> stdout = "{stdout}{line}\n"
         }
         return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }

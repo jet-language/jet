@@ -214,11 +214,15 @@ jet_cli_budget_relative: fn(root: String, message: String) -> String Never! {
     out := parts[0].copy()
     loop index in 1..<parts.len() {
         rest: parts[index]
-        if rest.starts_with("/") {
-            tail: rest.removeprefix("/")
-            out = "{out}{tail}"
-        } else if jet_cli_budget_name_continues(rest) { out = "{out}{root}{rest}" } else {
-            out = "{out}.{rest}"
+        if {
+            rest.starts_with("/") -> {
+                tail: rest.removeprefix("/")
+                out = "{out}{tail}"
+            }
+            jet_cli_budget_name_continues(rest) -> { out = "{out}{root}{rest}" }
+            else -> {
+                out = "{out}.{rest}"
+            }
         }
     }
     out

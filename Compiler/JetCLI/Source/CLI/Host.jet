@@ -310,7 +310,7 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // With `finish` the process ends below with `compiled` still held, so the
     // check's compile state need not drop first (jet_cli_compile_prepared).
-    compiled := jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink, settings, profile, target_machine, hold_check_state: finish, release_state_aside: release_state_aside)
+    compiled: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink, settings, profile, target_machine, hold_check_state: finish, release_state_aside: release_state_aside)
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal.move() }
         .Compiled(result, snapshot) -> {
@@ -412,7 +412,7 @@ jet_cli_compile_core_check: fn(core: String, color: Bool, quiet: Bool, threads: 
     entry: "{scratch.path}/core.jet"
     source: jet_cli_core_check_source()
     cli_files.write(entry, source) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet check: couldn't write the Core entry `{entry}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetDriverSourceDocument]{}, color, true) == {
+    prepared: if jet_cli_prepare_snapshot(entry, entry, [JetDriverSourceDocument]{}, color, true) == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Check, Val(core), "", None, true)
     }
@@ -549,7 +549,7 @@ jet_cli_test_members_run: fn(heading: String, names: [String], argvs: [[String]]
                 running += 1
                 next
             }
-            run := finished.receive() ?? break
+            run: finished.receive() ?? break
             running -= 1
             runs[run.index] = run
             loop written < runs.len() && runs[written].done {
@@ -566,7 +566,7 @@ jet_cli_test_members_run: fn(heading: String, names: [String], argvs: [[String]]
 // reports its member, as a failure.
 jet_cli_test_member_report: fn(index: Int, argv: [String], env: [String], done: Sender<JetCLITestMemberRun>) {
     member: task jet_cli_test_member(index, argv.copy(), env.copy())
-    run := member.join() ?? JetCLITestMemberRun{index: index, done: true, code: JET_DRIVER_EXIT_USER_ERROR, output: "", errors: "jet test: the run of `{argv.join(" ")}` stopped before it reported\n"}
+    run: member.join() ?? JetCLITestMemberRun{index: index, done: true, code: JET_DRIVER_EXIT_USER_ERROR, output: "", errors: "jet test: the run of `{argv.join(" ")}` stopped before it reported\n"}
     jet_cli_test_member_send(done, run).drop("nobody collects a stopped test run")
 }
 
@@ -624,7 +624,7 @@ jet_cli_write_notice: fn(notice: String) {
 jet_cli_compile_emit: fn(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if tier == "ast" -> return jet_cli_emit_ast(file, source, color, json, function)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled := jet_cli_compile_executable_file(file, None, color, None, build_options_stock("build"), trace_sink)
+    compiled: jet_cli_compile_executable_file(file, None, color, None, build_options_stock("build"), trace_sink)
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal }
         .Checked(result, inputs, snapshot) -> {
@@ -647,7 +647,7 @@ jet_cli_compile_eval: fn(file: String, pure: Bool, color: Bool, json: Bool) -> J
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     mode: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.RootRun
     prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, mode)
-    compiled := jet_cli_compile_executable(prepared, None, build_options_stock("run"), None, None, color)
+    compiled: jet_cli_compile_executable(prepared, None, build_options_stock("run"), None, None, color)
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal }
         .Checked(result, inputs, snapshot) -> {
@@ -667,9 +667,9 @@ jet_cli_eval_result: fn(file: String, source: String, color: Bool, json: Bool, r
     if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
     checked := inputs.move() ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its checked functions"))
     entry_key: checked.entry_key ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry"))
-    declarations := jet_driver_checked_declarations(checked)
+    declarations: jet_driver_checked_declarations(checked)
     // copy: the builder consumes its own type rows; the evaluator reads the value back by them.
-    layouts := ir_program_new([FnBody]{}, DeclTable{}, symbol_table(), interner_empty(), declarations.type_defs.copy(), [TImplDef]{}, IRSourceTexts{}, [TConstantDef]{})
+    layouts: ir_program_new([FnBody]{}, DeclTable{}, symbol_table(), interner_empty(), declarations.type_defs.copy(), [TImplDef]{}, IRSourceTexts{}, [TConstantDef]{})
     // A failure the evaluator reports points at `run`.
     span := Span{start: 0, end: 0}
     loop function in checked.functions {
@@ -1127,7 +1127,7 @@ jet_cli_ice_report: fn(summary: String, census: [JetDriverIceRow]) -[FS, Env, Ex
 // (jet_cli_build_digests).
 jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, options: BuildOptions, runtime_dir: String, executable_path: String, base: Int, census: ^[JetDriverIceRow], file: String, root: String, hot: [String], debug_link: String?, recorded: [X64DebugSource]) -[FS, Env, Exec, Time, FFI.Asm]> JetCLINativeLinked Never! {
     trace_sink: result.trace_sink
-    checked := inputs.move()
+    checked: inputs.move()
     if harness == None && checked.entry_key == None {
         return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.NoEntry}
     }
@@ -1192,7 +1192,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
         bind && !jet_cli_native_c_linked(first_facts) && first_facts.inline_c.len() == 0 && rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 -> {
             realizing: jet_cli_native_foreign_realize(first_facts, rust_helper, sources, runtime_dir, runtime_key, bind)
             closures.push(realizing)
-            object := jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot, recorded)
+            object: jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot, recorded)
             if object.failure == None && trace_sink == .Val(sink) {
                 sink.begin("native.foreign", "", -1, -1)
             }
@@ -1202,7 +1202,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
             task.group native_foreign {
                 realizing: task jet_cli_native_foreign_realize(first_facts, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, bind)
                 // Split-buffer direct handoff skips the flat ELF copy when StaticLink consumes the object directly.
-                object := jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot, recorded, !bind && !jet_cli_link_hooked(options))
+                object: jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot, recorded, !bind && !jet_cli_link_hooked(options))
                 if object.failure == None && trace_sink == .Val(sink) {
                     sink.begin("native.foreign", "", -1, -1)
                 }
@@ -1211,7 +1211,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
             }
         }
     }
-    built := objects.pop() ?? panic("the native route lost its object")
+    built: objects.pop() ?? panic("the native route lost its object")
     if built.failure == .Val(failure) -> return JetCLINativeLinked.Failed{failure: failure}
     realized: closures.pop() ?? panic("the native route lost its C closure")
     object := built.bytes.move()
@@ -1230,7 +1230,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
         // runtime provider hook) links the pack in full.
         if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
         // copy: the full link needs the object again when the bind refuses it.
-        bound := x64_bind_runtime_image(executable_path, object.copy(), runtime, runtime_path, realized.runtime_stamp, realized.runtime_at, realized.runtime_gap_at, realized.runtime_gap, debug_info)
+        bound: x64_bind_runtime_image(executable_path, object.copy(), runtime, runtime_path, realized.runtime_stamp, realized.runtime_at, realized.runtime_gap_at, realized.runtime_gap, debug_info)
         if trace_sink == .Val(sink) -> sink.end("native.link", 2)
         if bound.errors.len() == 0 {
             if trace_sink == .Val(sink) {
@@ -1264,7 +1264,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
             }
             // `runtime` is the pack: the collection names the live undefined
             // symbols, and only their declarations' providers are realized.
-            query := x64_link_live_undefined([String]{"{executable_path} (program object)", runtime_path}, [[U8]]{object.move(), runtime.move()})
+            query: x64_link_live_undefined([String]{"{executable_path} (program object)", runtime_path}, [[U8]]{object.move(), runtime.move()})
             live := [String:Bool]{}
             loop symbol in query.symbols -> live[symbol.copy()] = true
             queried := query.bufs.move()
@@ -1300,7 +1300,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^^JetDrive
     if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
     // The memory term is read now: the link's section pieces are new work.
     link_threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    linked := jet_cli_link_image(names, bytes, split_bufs, split_sec_buf, retry, base, link_threads, debug_info, debug_link, link_roots)
+    linked: jet_cli_link_image(names, bytes, split_bufs, split_sec_buf, retry, base, link_threads, debug_info, debug_link, link_roots)
     errors: linked.errors.move()
     undefined: linked.undefined.move()
     executable: linked.executable.move()
@@ -1468,7 +1468,7 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
         image_path: "{runtime_dir}/{JET_CLI_RUNTIME_IMAGE_FILE}"
         // The loader maps the image part from this file when it is still
         // the one read here (Image/Loader.jet x64_executable_load).
-        image := x64_image_file_read(image_path)
+        image: x64_image_file_read(image_path)
         if image.failure == "" {
             realized.runtime_gap_at = image.gap_at
             realized.runtime_gap = image.gap
@@ -1561,9 +1561,9 @@ jet_cli_runtime_quiet_routes: fn(runtime: JetCLIRuntimeExports) -> NameTable Nev
     prev_s0 := -1
     prev_s1 := -1
     loop s_pos < receipt.len() {
-        start := s_pos
+        start: s_pos
         loop s_pos < receipt.len() && receipt[s_pos] != (U8{10}) -> s_pos += 1
-        end := s_pos
+        end: s_pos
         if s_pos < receipt.len() -> s_pos += 1
         if end > start {
             s0 = start
@@ -1573,9 +1573,9 @@ jet_cli_runtime_quiet_routes: fn(runtime: JetCLIRuntimeExports) -> NameTable Nev
         }
     }
     loop e_pos < exp_bytes.len() {
-        e0 := e_pos
+        e0: e_pos
         loop e_pos < exp_bytes.len() && exp_bytes[e_pos] != (U8{10}) -> e_pos += 1
-        e1 := e_pos
+        e1: e_pos
         if e_pos < exp_bytes.len() -> e_pos += 1
         if e1 == e0 -> next
         if prev_e0 >= 0 && jet_cli_bytes_range_compare(exp_bytes, e0, e1, exp_bytes, prev_e0, prev_e1) < 0 {
@@ -1589,9 +1589,9 @@ jet_cli_runtime_quiet_routes: fn(runtime: JetCLIRuntimeExports) -> NameTable Nev
             prev_s1 = s1
             s_has = false
             loop s_pos < receipt.len() {
-                start := s_pos
+                start: s_pos
                 loop s_pos < receipt.len() && receipt[s_pos] != (U8{10}) -> s_pos += 1
-                end := s_pos
+                end: s_pos
                 if s_pos < receipt.len() -> s_pos += 1
                 if end > start {
                     if prev_s0 >= 0 && jet_cli_bytes_range_compare(receipt, start, end, receipt, prev_s0, prev_s1) < 0 {
@@ -1615,18 +1615,18 @@ jet_cli_runtime_quiet_routes: fn(runtime: JetCLIRuntimeExports) -> NameTable Nev
     stopping := name_table_sized(stop_cap)
     pos := 0
     loop pos < receipt.len() {
-        start := pos
+        start: pos
         loop pos < receipt.len() && receipt[pos] != (U8{10}) -> pos += 1
-        end := pos
+        end: pos
         if pos < receipt.len() -> pos += 1
         if end > start -> _ := name_intern(stopping, stops.slice(start, end))
     }
     fallback := name_table_sized(quiet_cap)
     pos = 0
     loop pos < exp_bytes.len() {
-        start := pos
+        start: pos
         loop pos < exp_bytes.len() && exp_bytes[pos] != (U8{10}) -> pos += 1
-        end := pos
+        end: pos
         if pos < exp_bytes.len() -> pos += 1
         if end > start {
             symbol: exports.slice(start, end)
@@ -1679,10 +1679,13 @@ jet_cli_single_thread_check: fn(m: IRModule, called: [Bool], runtime: JetCLIRunt
     loop (row, calls) in called {
         if !calls -> next
         name: m.names[row]
-        if foreign.get(name) == None {
-            starts[name.copy()] = false
-            if name.starts_with(IR_CORE_FUNCTION_PREFIX) -> core_calls = true
-        } else if !JET_CLI_SINGLE_THREAD_FOREIGN.contains(name) { return false }
+        if {
+            foreign.get(name) == None -> {
+                starts[name.copy()] = false
+                if name.starts_with(IR_CORE_FUNCTION_PREFIX) -> core_calls = true
+            }
+            !JET_CLI_SINGLE_THREAD_FOREIGN.contains(name) -> { return false }
+        }
     }
     jet_cli_runtime_exports_mark(receipt, starts)
     if core_calls {
@@ -1802,7 +1805,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: ^^JetDriverLo
     checked := inputs.move()
     checks := jet_cli_native_checks(result, checked, options, runtime)
     checks.roots = loop key in roots -> "{key}"
-    declarations := jet_driver_checked_declarations(checked)
+    declarations: jet_driver_checked_declarations(checked)
     // The program's C closure defines its foreign functions' symbols. An
     // `extern rust` function is called through the slot descriptor its helper
     // crate's archive defines (JetIR BuildForeign.jet ir_rust_foreign_call).
@@ -1928,7 +1931,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: ^^JetDriverLo
     // them until the caller's object is written and free them all there; a
     // fresh module in its place leaves the route their one owner
     // (ir_x64_object frees them beside the object write).
-    program := built.program.move()
+    program: built.program.move()
     built.program = ir_module_new()
     JetCLINativeProgram{program: program.move(), failure: None}
 }
@@ -2074,7 +2077,7 @@ jet_cli_native_object: fn(result: JetDriverCompileResult, inputs: ^^JetDriverLow
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
     hot_missing: ir_x64_hot_order(compiled, hot)
-    object := ir_x64_object(compiled, build_options_value(options, "debug_info") != "false", split)
+    object: ir_x64_object(compiled, build_options_value(options, "debug_info") != "false", split)
     if trace_sink == .Val(sink) {
         sink.end("ir.object", function_count)
         sink.progress("counters.ir.object.bytes", jet_cli_object_byte_len(object.bytes, object.split_bufs), -1)
@@ -2145,7 +2148,7 @@ jet_cli_build_native: fn(file: String, command: String, options: BuildOptions, r
     if command == "build" && build_options_value(options, "debug_info") == "split" {
         debug_link = Val("{cli_files.basename(binary)}.debug")
     }
-    linked := jet_cli_native_executable(result, inputs, None, sources, options, jet_cli_runtime_dir(), binary, base, census, file, jet_driver_entry_root_path(snapshot), hot, debug_link, recorded)
+    linked: jet_cli_native_executable(result, inputs, None, sources, options, jet_cli_runtime_dir(), binary, base, census, file, jet_driver_entry_root_path(snapshot), hot, debug_link, recorded)
     if census.len() > 0 {
         // `--keep-going` still writes the image, each faulty function a trap.
         if jet_cli_keep_going_enabled() {
@@ -2254,9 +2257,12 @@ jet_cli_ir_checks: fn(result: JetDriverCompileResult, inputs: JetDriverLoweringI
     loop job in inputs.jobs {
         stripped: release && !job.shipped
         if !stripped -> checks.declared_jobs.push(job.name.copy())
-        if job.selectable {
-            checks.jobs.push(IRJob{key: job.key.copy(), name: job.name.copy(), stripped: stripped})
-        } else { checks.passthrough_jobs.push(job.name.copy()) }
+        if {
+            job.selectable -> {
+                checks.jobs.push(IRJob{key: job.key.copy(), name: job.name.copy(), stripped: stripped})
+            }
+            else -> { checks.passthrough_jobs.push(job.name.copy()) }
+        }
     }
     // A typed `run: fn(args: T)` starts at its generated CLI wrapper, which
     // parses argv itself: its words are no unknown jobs.
@@ -2348,7 +2354,7 @@ jet_cli_build_binary: fn(file: String, name: String, command: String, color: Boo
     if jet_cli_build_option_gate_refusal(file, snapshot.roots[0].canonical_path, result, options, color) == .Val(refused) {
         return JetCLIBuilt.Failed{output: refused}
     }
-    checked := inputs.move() ?? return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")}
+    checked: inputs.move() ?? return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")}
     build_dir: if command == "build" -> jet_cli_output_dir_path(snapshot, options) else -> jet_cli_build_dir_path(snapshot)
     binary: "{build_dir}/{name}"
     if command == "run" {
@@ -2357,7 +2363,7 @@ jet_cli_build_binary: fn(file: String, name: String, command: String, color: Boo
     if jet_cli_build_dir(build_dir, color) == .Val(refused) {
         return JetCLIBuilt.Failed{output: refused}
     }
-    built := jet_cli_build_native(file, command, options, result, checked, snapshot, binary, invocation, color, recorded)
+    built: jet_cli_build_native(file, command, options, result, checked, snapshot, binary, invocation, color, recorded)
     if built == .Image(executable, path) && !jet_cli_link_hooked(options) {
         if result.trace_sink == .Val(sink) -> sink.begin("native.write", "", -1, -1)
         written: jet_cli_native_write(path, executable)
@@ -2475,28 +2481,31 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     // The image written, as the compiler.emitted moment `jet build --json`
     // lists; a web build writes none.
     emitted := CompilerEventRecord?{None}
-    if build_options_value(options, "os") == "web" {
-        built = jet_cli_build_web(file, color, options, result, inputs, snapshot)
-    } else {
-        if jet_cli_build_stored(file, name, color, options, result, inputs, snapshot, verbose, invocation) == {
-            .Failed(failure) -> return failure
-            .Written(path, lines, reused) -> {
-                log = lines
-                if json {
-                    emitted = Val(compiler_event_record(COMPILER_EVENT_EMITTED, [TComptimeValue]{TComptimeValue.String{value: name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: ""}}))
-                }
-                if hooks.len() > 0 {
-                    written: [CompilerEventRecord]{
-                        compiler_event_record(COMPILER_EVENT_EMITTED, [TComptimeValue]{TComptimeValue.String{value: name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: ""}}),
-                        compiler_event_record(COMPILER_EVENT_BUILD_AFTER_WRITE, [TComptimeValue]{TComptimeValue.String{value: name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: ""}}),
+    if {
+        build_options_value(options, "os") == "web" -> {
+            built = jet_cli_build_web(file, color, options, result, inputs, snapshot)
+        }
+        else -> {
+            if jet_cli_build_stored(file, name, color, options, result, inputs, snapshot, verbose, invocation) == {
+                .Failed(failure) -> return failure
+                .Written(path, lines, reused) -> {
+                    log = lines
+                    if json {
+                        emitted = Val(compiler_event_record(COMPILER_EVENT_EMITTED, [TComptimeValue]{TComptimeValue.String{value: name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: ""}}))
                     }
-                    if jet_cli_moment_hooks_run(file, hooks, written, color) == .Val(stopped) {
-                        cli_files.remove(path).drop("an executable that is already gone is what a stopped hook leaves")
-                        return stopped
+                    if hooks.len() > 0 {
+                        written: [CompilerEventRecord]{
+                            compiler_event_record(COMPILER_EVENT_EMITTED, [TComptimeValue]{TComptimeValue.String{value: name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: ""}}),
+                            compiler_event_record(COMPILER_EVENT_BUILD_AFTER_WRITE, [TComptimeValue]{TComptimeValue.String{value: name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: ""}}),
+                        }
+                        if jet_cli_moment_hooks_run(file, hooks, written, color) == .Val(stopped) {
+                            cli_files.remove(path).drop("an executable that is already gone is what a stopped hook leaves")
+                            return stopped
+                        }
                     }
+                    if sbom -> built = jet_cli_build_sbom(file, name, source, path, color, quiet)
+                    built.reused = reused
                 }
-                if sbom -> built = jet_cli_build_sbom(file, name, source, path, color, quiet)
-                built.reused = reused
             }
         }
     }
@@ -2660,7 +2669,7 @@ jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: Bu
         return members
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
+    compiled: jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal }
         .Checked(result, inputs, snapshot) -> {
@@ -2876,25 +2885,28 @@ jet_cli_launch: fn(executable: X64Executable, file: String, binary: String, prog
             threads = x64_process_threads()
             waited += 1
         }
-        if threads == 1 {
-            jet_cli_perf_map(executable, cli_process.current_pid())
-            reason = x64_image_exec(loaded, launch)
-            x64_image_unload(loaded)
-        } else {
-            if verbose {
-                cli_term.eprint("jet run: running the program in a child process: {jet_cli_threads_reason(joined, threads)}")
+        if {
+            threads == 1 -> {
+                jet_cli_perf_map(executable, cli_process.current_pid())
+                reason = x64_image_exec(loaded, launch)
+                x64_image_unload(loaded)
             }
-            spawned: x64_image_spawn(loaded, launch, [Int]{})
-            x64_image_unload(loaded)
-            if spawned.failure == "" {
-                jet_cli_perf_map(executable, spawned.pid)
-                status: x64_process_wait_foreground(spawned.pid)
-                if status < 0 {
-                    return jet_cli_launch_failed("couldn't wait for the program (errno {-status})", color)
+            else -> {
+                if verbose {
+                    cli_term.eprint("jet run: running the program in a child process: {jet_cli_threads_reason(joined, threads)}")
                 }
-                return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: x64_process_mirror(status)}
+                spawned: x64_image_spawn(loaded, launch, [Int]{})
+                x64_image_unload(loaded)
+                if spawned.failure == "" {
+                    jet_cli_perf_map(executable, spawned.pid)
+                    status: x64_process_wait_foreground(spawned.pid)
+                    if status < 0 {
+                        return jet_cli_launch_failed("couldn't wait for the program (errno {-status})", color)
+                    }
+                    return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: x64_process_mirror(status)}
+                }
+                reason = spawned.failure
             }
-            reason = spawned.failure
         }
     }
     if verbose -> cli_term.eprint("jet run: running {binary} from a file: {reason}")
@@ -3071,7 +3083,7 @@ jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildO
 // the main thread (jet_cli_run_step).
 jet_cli_run_result: fn(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIRunStep {
     read_scope: jet_cli_run_read_scope(jet_cli_policy_authority([String]{}, result.authority_policy), invocation)
-    built := jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot)
+    built: jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot)
     if built.move() == {
         .Failed(failure) -> JetCLIRunStep.Output{output: failure}
         .Image(executable, path) -> JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: path, program_args: program_args, options: options, invocation: invocation, read_scope: read_scope, verbose: verbose, color: color, json: json}
@@ -3090,7 +3102,7 @@ jet_cli_compile_run: fn(file: String, entry: String?, source: String, color: Boo
         return jet_cli_compile_kept(file, source, color, json, options, threads, program_args, invocation)
     }
     step := JetCLIRunStep.Output{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
-    compiled := jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
+    compiled: jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
     if compiled.move() == {
         .Refused(refusal) -> { step = JetCLIRunStep.Output{output: refusal} }
         .Checked(result, inputs, snapshot) -> {
@@ -3127,7 +3139,7 @@ jet_cli_compile_kept: fn(file: String, source: String, color: Bool, json: Bool, 
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
     }
     kept_core: jet_cli_script_with_core(keep, prepared)
-    compiled := jet_cli_compile_executable(prepared, None, options, jet_cli_script_input_log(kept_core), None, color)
+    compiled: jet_cli_compile_executable(prepared, None, options, jet_cli_script_input_log(kept_core), None, color)
     if compiled.move() == {
         .Refused(refusal) -> { step = JetCLIRunStep.Output{output: refusal} }
         .Checked(result, inputs, snapshot) -> {
@@ -3142,7 +3154,7 @@ jet_cli_compile_kept: fn(file: String, source: String, color: Bool, json: Bool, 
 jet_cli_script_build_and_run: fn(file: String, source: String, color: Bool, json: Bool, options: BuildOptions, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, keep: JetCLIScriptKeep?) -> JetCLIRunStep {
     // The kept program's authority is the compile's own.
     authority: jet_cli_application_authority(result, None)
-    built := jet_cli_run_build(file, source, color, options, false, json, invocation, result, inputs, snapshot)
+    built: jet_cli_run_build(file, source, color, options, false, json, invocation, result, inputs, snapshot)
     if built.move() == {
         .Failed(failure) -> JetCLIRunStep.Output{output: failure}
         .Image(executable, path) -> jet_cli_script_launch(keep, authority, executable, file, path, program_args, options, invocation, color, json)
@@ -3227,7 +3239,11 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     // (JET_TEST_SUITE, TestProfile.jet) runs `test: fn` for that suite's rows
     // alone: no #Test and no output check.
     code_suite: cli_sys.get(JET_CLI_TEST_SUITE_ENV) != None
-    documented: if code_suite -> [JetNativeTestCase]{} else if options.docs -> jet_cli_doctest_claims(selected, doctests) else -> selected
+    documented: if {
+        code_suite -> [JetNativeTestCase]{}
+        options.docs -> jet_cli_doctest_claims(selected, doctests)
+        else -> selected
+    }
     measured_tests: if measure == .Val(measured) -> jet_cli_measure_claims(documented, measured) else -> documented
     // `cases` keeps the tests its file names, then `shard` I/N runs its
     // slice of them (jet_cli_test_shard).
@@ -3570,11 +3586,11 @@ jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Boo
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
-    snapshotted := jet_cli_prepare_snapshot(file, file, [JetDriverSourceDocument]{}, color)
+    snapshotted: jet_cli_prepare_snapshot(file, file, [JetDriverSourceDocument]{}, color)
     doctests := [JetCLIDoctestFile]{}
     measure := JetCLIMeasurePlan?{None}
     tested := source
-    prepared := if snapshotted.move() == {
+    prepared: if snapshotted.move() == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
         .Held(snapshot) -> {
             held := snapshot
@@ -3591,7 +3607,7 @@ jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Boo
         }
     }
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    compiled := jet_cli_compile_executable(prepared, None, options.build, None, trace_sink, color)
+    compiled: jet_cli_compile_executable(prepared, None, options.build, None, trace_sink, color)
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal }
         .Checked(result, inputs, snapshot) -> {
@@ -3621,7 +3637,7 @@ jet_cli_compile_core_test: fn(file: String, source: String, path: String, color:
         doctests.push(doctest_file)
     }
     measure := JetCLIMeasurePlan?{None}
-    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetDriverSourceDocument]{}, color, true) == {
+    prepared: if jet_cli_prepare_snapshot(entry, entry, [JetDriverSourceDocument]{}, color, true) == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
         .Held(snapshot) -> {
             if options.measure {
@@ -3631,7 +3647,7 @@ jet_cli_compile_core_test: fn(file: String, source: String, path: String, color:
         }
     }
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    compiled := jet_cli_compile_executable(prepared, None, options.build, None, trace_sink, color)
+    compiled: jet_cli_compile_executable(prepared, None, options.build, None, trace_sink, color)
     if compiled.move() == {
         .Refused(refusal) -> refusal
         .Checked(result, inputs, snapshot) -> jet_cli_test_result(file, tested ?? source, doctests, measure, color, verbose, options, result, inputs, snapshot)
@@ -3737,13 +3753,16 @@ jet_cli_new_lock: fn(root: String) -> String {
     platform: "{cli_sys.arch()}-{cli_sys.name()}"
     id: "jet-{version}-{sha256_hex("{version}:{platform}").slice(0..<8)}"
     stamp := "\n[build.stamp]\n"
-    if jet_cli_git_output(root, [String]{"rev-parse", "HEAD"}) == .Val(revision) {
-        status: jet_cli_git_output(root, [String]{"status", "--porcelain", "--untracked-files=all"}) ?? ""
-        if {
-            status.len() > 0 -> stamp = "{stamp}git = \"{revision}-dirty\"\ndirty = true\n"
-            else -> stamp = "{stamp}git = \"{revision}\"\ndirty = false\n"
+    if {
+        jet_cli_git_output(root, [String]{"rev-parse", "HEAD"}) == .Val(revision) -> {
+            status: jet_cli_git_output(root, [String]{"status", "--porcelain", "--untracked-files=all"}) ?? ""
+            if {
+                status.len() > 0 -> stamp = "{stamp}git = \"{revision}-dirty\"\ndirty = true\n"
+                else -> stamp = "{stamp}git = \"{revision}\"\ndirty = false\n"
+            }
         }
-    } else { stamp = "{stamp}dirty = false\n" }
+        else -> { stamp = "{stamp}dirty = false\n" }
+    }
     stamp = "{stamp}toolchain = \"{version}\"\nat = \"{jet_cli_rfc3339(cli_time.unix_ns())}\"\n"
     "version = 1\n{stamp}\n[[toolchain]]\nid = \"{id}\"\nchannel = \"{channel}\"\nversion = \"{version}\"\noutput-hash = \"\"\nplatform = \"{platform}\"\nprovenance = \"jet-{version} via toolchain\"\n\n[root]\ndependencies = []\n"
 }
@@ -3971,12 +3990,12 @@ JetCLISemindexSide: enum {
 
 jet_cli_semindex_side: fn(file: String, color: Bool, json: Bool) -> JetCLISemindexSide {
     if jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc) == {
-        .Refused(refusal) -> return JetCLISemindexSide.Stopped{output: refusal}
+        .Refused(refusal) -> JetCLISemindexSide.Stopped{output: refusal}
         .Compiled(result, snapshot) -> {
             if jet_cli_errors(result.diagnostics).len() > 0 || result.internal_problem != None {
                 return JetCLISemindexSide.Stopped{output: jet_cli_semindex_result(file, color, json, result, snapshot)}
             }
-            return JetCLISemindexSide.Indexed{index: jet_cli_checked_semindex(result)}
+            JetCLISemindexSide.Indexed{index: jet_cli_checked_semindex(result)}
         }
     }
 }
@@ -4010,10 +4029,10 @@ jet_cli_semindex_audit: fn(before_file: String, after_file: String, color: Bool,
 // check stops the command with its `jet inspect semindex` report.
 jet_cli_semindex_blame: fn(file: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     if jet_cli_semindex_side(file, color, json) == {
-        .Stopped(output) -> return output.move()
+        .Stopped(output) -> output.move()
         .Indexed(index) -> {
             source: cli_files.read(file) ?? return jet_cli_ice("`{file}` checked, but reading it again failed: {err}")
-            return JetDriverVerbOutput{stdout: jet_cli_semantic_blame_report(file, source, index, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            JetDriverVerbOutput{stdout: jet_cli_semantic_blame_report(file, source, index, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
     }
 }
@@ -4065,8 +4084,11 @@ jet_cli_fmt_after_last: fn(text: String, needle: String) -> String? Never! {
 jet_cli_fmt_skip_walk_path: fn(path: String) -> Bool Never! {
     normalized: path.replace("\\", "/")
     rel := normalized
-    if jet_cli_fmt_after_last(normalized, "/Tests/") == .Val(rest) -> rel = "Tests/{rest}" else if jet_cli_fmt_after_last(normalized, "/docs/") == .Val(rest) {
-        rel = "docs/{rest}"
+    if {
+        jet_cli_fmt_after_last(normalized, "/Tests/") == .Val(rest) -> rel = "Tests/{rest}"
+        jet_cli_fmt_after_last(normalized, "/docs/") == .Val(rest) -> {
+            rel = "docs/{rest}"
+        }
     }
     if rel == "Docs/Spec/Reference/syntax-surface.jet" || rel.ends_with("/Docs/Spec/Reference/syntax-surface.jet") || rel == "syntax-surface.jet" {
         return true
@@ -4097,12 +4119,15 @@ jet_cli_fmt_walk: fn(directory: String, files: ^[String]) {
         path: if directory.ends_with("/") -> "{directory}{name}" else -> "{directory}/{name}"
         // A symlink is not followed: a link back to `.` or `..` would walk forever.
         if cli_files.is_symlink(path) -> next
-        if cli_files.is_dir(path) {
-            if !JET_CLI_FMT_IGNORED_DIRS.contains(name) && !jet_cli_fmt_skip_walk_path(path) {
-                jet_cli_fmt_walk(path, files)
+        if {
+            cli_files.is_dir(path) -> {
+                if !JET_CLI_FMT_IGNORED_DIRS.contains(name) && !jet_cli_fmt_skip_walk_path(path) {
+                    jet_cli_fmt_walk(path, files)
+                }
             }
-        } else if name.ends_with(".jet") && name != "pkg.jet" && !jet_cli_fmt_skip_walk_path(path) {
-            files.push(path)
+            name.ends_with(".jet") && name != "pkg.jet" && !jet_cli_fmt_skip_walk_path(path) -> {
+                files.push(path)
+            }
         }
     }
 }
@@ -4468,11 +4493,14 @@ jet_cli_external_fmt_walk: fn(directory: String, language: String, files: ^[Stri
         path: jet_cli_authority_path(directory, name)
         stat: cli_files.stat(path) ?? next
         if stat.is_symlink -> next
-        if stat.is_dir {
-            if !JET_CLI_FMT_IGNORED_DIRS.contains(name) {
-                jet_cli_external_fmt_walk(path, language, files)
+        if {
+            stat.is_dir -> {
+                if !JET_CLI_FMT_IGNORED_DIRS.contains(name) {
+                    jet_cli_external_fmt_walk(path, language, files)
+                }
             }
-        } else if stat.is_file && jet_cli_external_fmt_matches(path, language) { files.push(path) }
+            stat.is_file && jet_cli_external_fmt_matches(path, language) -> { files.push(path) }
+        }
     }
 }
 
@@ -4486,8 +4514,11 @@ jet_cli_external_fmt_collect: fn(cwd: String, project_dir: String, explicit_path
             path: if raw.starts_with("/") -> raw else -> jet_cli_authority_path(cwd, raw)
             stat: cli_files.stat(path) ?? return Val("{path}: {jet_cli_io_error_text(err)}")
             if stat.is_symlink -> next
-            if stat.is_dir -> jet_cli_external_fmt_walk(path, language, found) else if stat.is_file && jet_cli_external_fmt_matches(path, language) {
-                found.push(path)
+            if {
+                stat.is_dir -> jet_cli_external_fmt_walk(path, language, found)
+                stat.is_file && jet_cli_external_fmt_matches(path, language) -> {
+                    found.push(path)
+                }
             }
         }
     }
@@ -4757,8 +4788,8 @@ jet_cli_schema_host: fn(action: String, root: String, before: String, color: Boo
 // `jet explain` policy essays over the authorized load-only query of `file`.
 jet_cli_policy_explain_host: fn(key: PolicyKey, file: String, site: String?, line: U64?, color: Bool, json: Bool) -> JetCLIPlan {
     if jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Doc) == {
-        .Refused(output) -> return JetCLIPlan.Done{output: output}
-        .Prepared(request, _) -> return jet_cli_explain_loaded_policy(key, jet_driver_source_query(request), site, line, color, json)
+        .Refused(output) -> JetCLIPlan.Done{output: output}
+        .Prepared(request, _) -> jet_cli_explain_loaded_policy(key, jet_driver_source_query(request), site, line, color, json)
     }
 }
 
@@ -4766,8 +4797,8 @@ jet_cli_policy_explain_host: fn(key: PolicyKey, file: String, site: String?, lin
 // the authorized load-only request of `file`.
 jet_cli_diagnostic_type_explain_host: fn(name: String, file: String, color: Bool, json: Bool) -> JetCLIPlan {
     if jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Doc) == {
-        .Refused(output) -> return JetCLIPlan.Done{output: output}
-        .Prepared(request, _) -> return jet_cli_explain_loaded_diagnostic_type(name, jet_driver_source_query(request), color, json)
+        .Refused(output) -> JetCLIPlan.Done{output: output}
+        .Prepared(request, _) -> jet_cli_explain_loaded_diagnostic_type(name, jet_driver_source_query(request), color, json)
     }
 }
 
@@ -4780,11 +4811,11 @@ jet_cli_diagnostic_type_explain_host: fn(name: String, file: String, color: Bool
 jet_cli_gates_run: fn(file: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Doc)
     if prepared == {
-        .Refused(output) -> return output.move()
+        .Refused(output) -> output.move()
         .Prepared(request, snapshot) -> {
             gated := request.move()
             gated.external_gate_entries = jet_cli_external_gate_rows(gated.external_gate_entries.move(), snapshot, args)
-            return jet_cli_gates_host(gated, args, file, color, json)
+            jet_cli_gates_host(gated, args, file, color, json)
         }
     }
 }
@@ -4808,18 +4839,18 @@ jet_cli_external_gate_rows: fn(external: ^^[GateEntry], snapshot: JetDriverAutho
 jet_cli_output_run: fn(file: String, address: String?, color: Bool, json: Bool) -> JetDriverVerbOutput {
     prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Doc)
     if prepared == {
-        .Refused(output) -> return output.move()
-        .Prepared(request, _) -> return jet_cli_output_host(request, address, file, json)
+        .Refused(output) -> output.move()
+        .Prepared(request, _) -> jet_cli_output_host(request, address, file, json)
     }
 }
 
 jet_cli_maintenance_host: fn(action: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     if action == {
-        "new-ui" -> return jet_cli_devtools_new_ui(args, color, json)
-        "check-fixture-paths" -> return jet_cli_devtools_fixture_paths(color, json)
-        "reduce" -> return jet_cli_devtools_reduce(args, color, json)
-        "embed" -> return jet_cli_devtools_embed(args, color, json)
-        else -> return jet_cli_devtools_ice_report(args, color, json)
+        "new-ui" -> jet_cli_devtools_new_ui(args, color, json)
+        "check-fixture-paths" -> jet_cli_devtools_fixture_paths(color, json)
+        "reduce" -> jet_cli_devtools_reduce(args, color, json)
+        "embed" -> jet_cli_devtools_embed(args, color, json)
+        else -> jet_cli_devtools_ice_report(args, color, json)
     }
 }
 
@@ -4903,7 +4934,7 @@ jet_cli_compile_on_worker: fn(plan: ^^JetCLIPlan, discovery: ^WorkspaceDeclarati
         if trace_sink == .Val(sink) -> jet_cli_trace_finish(sink)
         steps.push(step)
     }
-    step := steps.pop() ?? panic("the compile thread lost its step")
+    step: steps.pop() ?? panic("the compile thread lost its step")
     jet_cli_run_step(step, discovery)
 }
 
@@ -4995,10 +5026,13 @@ jet_cli_execute: fn(plan: ^^JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         .Build(file, source, color, options, threads, invocation, notice, json, sbom, quiet, verbose) -> {
             jet_cli_write_notice(notice)
             // `jet build --lib` writes the entry's native Library (LibraryBuild.jet).
-            if options.library {
-                output = jet_cli_build_library(file, source, color, options.move(), threads, trace_sink)
-            } else {
-                output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, verbose, trace_sink)
+            if {
+                options.library -> {
+                    output = jet_cli_build_library(file, source, color, options.move(), threads, trace_sink)
+                }
+                else -> {
+                    output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, verbose, trace_sink)
+                }
             }
         }
         .BuildPackage(file, color, options, build_args, threads, invocation, notice, locked) -> {
@@ -5170,7 +5204,7 @@ JetCLIDevConfigured: enum {
 jet_cli_dev_config: fn(file: String, source: String, color: Bool, threads: Int?) -> JetCLIDevConfigured {
     prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Doc)
     if prepared.move() == {
-        .Refused(output) -> return JetCLIDevConfigured.Refused{output: output}
+        .Refused(output) -> JetCLIDevConfigured.Refused{output: output}
         .Prepared(request, _) -> {
             queried: jet_driver_query_dev_config(request)
             if queried.internal_problem == .Val(problem) {
@@ -5179,7 +5213,7 @@ jet_cli_dev_config: fn(file: String, source: String, color: Bool, threads: Int?)
             if !queried.complete || jet_cli_errors(queried.diagnostics).len() > 0 {
                 return JetCLIDevConfigured.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, jet_cli_errors(queried.diagnostics), color, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
             }
-            return JetCLIDevConfigured.Config{config: queried.config}
+            JetCLIDevConfigured.Config{config: queried.config}
         }
     }
 }
@@ -5207,7 +5241,7 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
             hot_noted = true
         }
         read := [JetDriverComptimeInputRecord]{}
-        compiled := jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
+        compiled: jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
         if compiled.move() == {
             .Refused(refusal) -> {
                 // jet_cli_dev_config printed the same refusal when it refused too.
@@ -5338,9 +5372,12 @@ jet_cli_dev_stamp: fn(root: String, watch: [String]) -[FS]> String Never! {
     }
     loop path in watch {
         full: jet_cli_entry_join(root, path)
-        if cli_files.is_dir(full) {
-            loop watched in jet_cli_dev_files(full) -> files.push(watched)
-        } else { files.push(full) }
+        if {
+            cli_files.is_dir(full) -> {
+                loop watched in jet_cli_dev_files(full) -> files.push(watched)
+            }
+            else -> { files.push(full) }
+        }
     }
     latest := 0
     count := 0
@@ -5412,18 +5449,21 @@ JetCLILinkedImage: struct {
 }
 
 jet_cli_link_image: fn(names: [String], bytes: ^^[[U8]], split_bufs: ^^[[U8]], split_sec_buf: [Int], retry: ^^[[U8]]?, base: Int, link_threads: CompilerThreads, debug_info: Bool, debug_link: String?, link_roots: [String]) -> JetCLILinkedImage Never! {
-    extra := split_bufs.move()
-    if debug_link == .Val(name) {
-        split := if extra.len() > 0 -> x64_link_executable_split_direct(names, bytes, extra, split_sec_buf, base, link_threads, name, link_roots) else -> x64_link_executable_split(names, bytes, base, link_threads, name, link_roots)
-        errors: split.errors.copy()
-        undefined: split.undefined.copy()
-        return JetCLILinkedImage{executable: x64_executable_split(split), errors: errors, undefined: undefined}
-    } else {
-        image := if extra.len() > 0 -> x64_link_executable_direct(names, bytes, extra, split_sec_buf, base, link_threads, debug_info, link_roots) else -> x64_link_executable(names, bytes, base, link_threads, debug_info, link_roots)
-        if image.errors.len() > 0 && retry.move() == .Val(inputs_again) {
-            image = x64_link_executable(names, inputs_again, LINK_RUN_LOW_BASE, link_threads, debug_info, link_roots)
+    extra: split_bufs.move()
+    if {
+        debug_link == .Val(name) -> {
+            split: if extra.len() > 0 -> x64_link_executable_split_direct(names, bytes, extra, split_sec_buf, base, link_threads, name, link_roots) else -> x64_link_executable_split(names, bytes, base, link_threads, name, link_roots)
+            errors: split.errors.copy()
+            undefined: split.undefined.copy()
+            return JetCLILinkedImage{executable: x64_executable_split(split), errors: errors, undefined: undefined}
         }
-        return JetCLILinkedImage{executable: x64_executable_whole(image.bytes.move()), errors: image.errors.move(), undefined: image.undefined.move()}
+        else -> {
+            image := if extra.len() > 0 -> x64_link_executable_direct(names, bytes, extra, split_sec_buf, base, link_threads, debug_info, link_roots) else -> x64_link_executable(names, bytes, base, link_threads, debug_info, link_roots)
+            if image.errors.len() > 0 && retry.move() == .Val(inputs_again) {
+                image = x64_link_executable(names, inputs_again, LINK_RUN_LOW_BASE, link_threads, debug_info, link_roots)
+            }
+            return JetCLILinkedImage{executable: x64_executable_whole(image.bytes.move()), errors: image.errors.move(), undefined: image.undefined.move()}
+        }
     }
 }
 

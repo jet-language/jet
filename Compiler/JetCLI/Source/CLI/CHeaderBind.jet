@@ -156,40 +156,46 @@ jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: ^[String:HandleOverla
 jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl], items: [Item], headers: ^[JetCLICHeaderImport], modules: ^[String]) Never! {
     loop declaration in imports {
         if declaration.kind == .File(path, _) {
-            if jet_driver_foreign_library_from_header(path) == .Val(lib) {
-                known: loop existing in headers {
-                    if existing.lib == lib {
-                        break true
-                    }
-                } ?? false
-                duplicated: loop other in imports {
-                    imported: jet_driver_foreign_import_libraries(other)
-                    if imported.form == "header" -> next
-                    named: loop library in imported.libraries {
-                        if library == lib {
+            if {
+                jet_driver_foreign_library_from_header(path) == .Val(lib) -> {
+                    known: loop existing in headers {
+                        if existing.lib == lib {
                             break true
                         }
                     } ?? false
-                    if named {
-                        break true
+                    duplicated: loop other in imports {
+                        imported: jet_driver_foreign_import_libraries(other)
+                        if imported.form == "header" -> next
+                        named: loop library in imported.libraries {
+                            if library == lib {
+                                break true
+                            }
+                        } ?? false
+                        if named {
+                            break true
+                        }
+                    } ?? false
+                    if !known && !duplicated {
+                        headers.push(JetCLICHeaderImport{lib: lib, header: path})
                     }
-                } ?? false
-                if !known && !duplicated {
-                    headers.push(JetCLICHeaderImport{lib: lib, header: path})
                 }
-            } else {
-                jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, path).path, modules)
+                else -> {
+                    jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, path).path, modules)
+                }
             }
         }
     }
     loop item in items {
         if item == {
             .CodeModule(definition) -> {
-                if definition.body == .Val(body) {
-                    jet_cli_c_bind_collect_imports(relative_path, definition.imports, body, headers, modules)
-                } else {
-                    jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, definition.name).path, modules)
-                    jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, "{definition.name}/module").path, modules)
+                if {
+                    definition.body == .Val(body) -> {
+                        jet_cli_c_bind_collect_imports(relative_path, definition.imports, body, headers, modules)
+                    }
+                    else -> {
+                        jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, definition.name).path, modules)
+                        jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, "{definition.name}/module").path, modules)
+                    }
                 }
             }
             .GenericModule(definition) -> {

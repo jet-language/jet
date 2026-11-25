@@ -46,9 +46,9 @@ jet_cli_pinned_toolchain: fn(cache: ^WorkspaceDeclarationCache, raw: [String], t
     root: found ?? return None
     offline: raw.contains("--offline") || raw.contains("--locked")
     if trust_pin_decide(root, JET_VERSION, offline) == {
-        .RunNative -> return None
-        .Report(diagnostic) -> return Val(JetCLIPlan.Refused{report: diagnostic, color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""})
-        .ReExec(binary, channel, version) -> return Val(JetCLIPlan.Done{output: jet_cli_pinned_exec(binary, channel, version, raw, quiet)})
+        .RunNative -> None
+        .Report(diagnostic) -> Val(JetCLIPlan.Refused{report: diagnostic, color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""})
+        .ReExec(binary, channel, version) -> Val(JetCLIPlan.Done{output: jet_cli_pinned_exec(binary, channel, version, raw, quiet)})
     }
 }
 

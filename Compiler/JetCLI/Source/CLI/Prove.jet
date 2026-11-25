@@ -66,7 +66,7 @@ JetCLIProveTarget: struct {
 
 // `jet prove` after the front: `words` are the argv words after `prove`.
 jet_cli_prove: fn(words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    request := jet_cli_prove_parse(words) ?? return jet_cli_prove_fail(err, color, json)
+    request: jet_cli_prove_parse(words) ?? return jet_cli_prove_fail(err, color, json)
     target: jet_cli_prove_resolve(request.target) ?? return jet_cli_prove_fail(err, color, json)
     if (request.save != None || request.unsave != None) && (request.capture != None || request.replay != None) {
         return jet_cli_prove_fail(jet_cli_prove_refusal("E2104", "`jet prove` can't combine `--save` or `--unsave` with capture or replay", "run the save or unsave alone, then capture or replay in a second command", JET_DRIVER_EXIT_USAGE), color, json)

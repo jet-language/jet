@@ -163,9 +163,13 @@ jet_cli_crash_hex: fn(text: String) -> Int? Never! {
     value := 0
     loop byte in text.bytes() {
         digit: Int{byte}
-        if digit >= 48 && digit <= 57 -> value = value * 16 + digit - 48 else if digit >= 97 && digit <= 102 {
-            value = value * 16 + digit - 87
-        } else { return None }
+        if {
+            digit >= 48 && digit <= 57 -> value = value * 16 + digit - 48
+            digit >= 97 && digit <= 102 -> {
+                value = value * 16 + digit - 87
+            }
+            else -> { return None }
+        }
     }
     Val(value)
 }
