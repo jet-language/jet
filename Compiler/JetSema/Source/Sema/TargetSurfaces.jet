@@ -1,0 +1,149 @@
+// Target surface checks: the core APIs a web host cannot serve and the socket
+// surfaces a target's operating system lacks.
+use jet_foundation.[
+    Diagnostic,
+    core_module_export,
+    module_is_core,
+    module_text,
+    foundation_byte_text,
+]
+
+// Exact registered APIs without a browser host provider. The compiler witness
+// pins this list and rejects unknown Core members.
+sema_web_host_unsupported_core_apis: fn() -> [String] Never! {
+    [String]{
+        "core.auth.magic_link_consume",
+        "core.auth.magic_link_issue",
+        "core.auth.oauth_begin",
+        "core.auth.oauth_finish",
+        "core.auth.password_login",
+        "core.auth.register_user",
+        "core.auth.session_validate",
+        "core.sys.decode",
+        "core.sys.expand",
+        "core.sys.get",
+        "core.sys.getenv",
+        "core.sys.home_dir",
+        "core.sys.set",
+        "core.sys.temp_dir",
+        "core.sys.unset",
+        "core.sys.vars",
+    }
+}
+
+sema_web_host_check_core_usage: fn(target_name: String, used_core: [String], diagnostics: ^[Diagnostic]) -> Bool Never! {
+    if target_name != "wasm.browser" -> return true
+    unsupported: sema_web_host_unsupported_core_apis()
+    complete := true
+    loop usage in used_core {
+        if !unsupported.contains(usage) -> next
+        operation: usage.replace(".", ".")
+        diagnostics.push(
+            sema_error_optional(
+                "E-WEB-UNSUPPORTED",
+                None,
+                "Web output cannot compile `{operation}` yet.",
+                "this Core operation needs a host provider that the browser target does not supply",
+                "move this operation behind a native or server boundary",
+            ),
+        )
+        complete = false
+    }
+    complete
+}
+
+// Reuses TargetSurface from 371361c3e against current registration facts.
+sema_target_is_socket_surface: fn(path: String) -> Bool Never! {
+    if path == {
+        "core.net" | "core.net.tls" | "core.net.ws" | "core.http" | "core.http.client" | "core.http.server" -> true
+        else -> false
+    }
+}
+
+sema_target_socket_surface: fn(path: String) -> String? Never! {
+    if sema_target_is_socket_surface(path) -> return Val(path)
+    if core_module_export(path) != None -> return None
+    separator: path.rfind(".")
+    if separator < 0 -> return None
+    owner: foundation_byte_text(path.bytes(), 0, separator)
+    if sema_target_is_socket_surface(owner) -> Val(owner) else -> None
+}
+
+sema_target_wasip2_unsupported_operations: fn(used_core: [String]) -> [String] Never! {
+    operations := [String]{}
+    loop usage in used_core {
+        separator: usage.rfind(".")
+        if separator < 0 -> next
+        module_name: foundation_byte_text(usage.bytes(), 0, separator)
+        member: foundation_byte_text(usage.bytes(), separator + 1, usage.count_bytes())
+        unsupported: if module_name == {
+            "core.net" -> if member == {
+                "tcp_connect_happy" | "tcp_ready" | "udp_ready" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" | "dns_a" | "dns_aaaa" | "dns_txt" | "dns_ptr" | "dns_srv" -> true
+                else -> member.starts_with("unix_")
+            }
+            "core.http" -> member == "get" || member == "post" || member == "request"
+            "core.http.server" -> member == "tls"
+            "core.net.tls" | "core.http.client" -> true
+            else -> false
+        }
+        if unsupported -> sema_core_string_add(operations, "{module_name}.{member}")
+    }
+    operations
+}
+
+sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [String], diagnostics: ^[Diagnostic]) -> Bool Never! {
+    target: if graph.target_machine.name == "wasm.browser" -> "web" else -> graph.target_machine.triple
+    wasip2: target == "wasm32-wasip2"
+    socket_target: wasip2 || target.contains("linux") || target.contains("android") || target.contains("apple") || target.contains("darwin") || target.contains("windows") || target.contains("freebsd") || target.contains("openbsd") || target.contains("netbsd")
+    if socket_target && !wasip2 -> return true
+    operations: if wasip2 -> sema_target_wasip2_unsupported_operations(used_core) else -> [String]{}
+    complete := true
+    loop module_row_index in 0..<graph.modules.len() {
+        // The surface is the one the program's own `use` names. Core's
+        // imports are its implementation: which of that code a target reaches
+        // is settled where Core gates it on the target (`#build.target.os`,
+        // `#Target`) and by the denial row of the target's `core.target` facts.
+        if module_is_core(graph.modules[module_row_index].module_identity) -> next
+        diagnostic_start: diagnostics.len()
+        // Each module's reports, once per (code, span, surface or operation).
+        seen := SemaKeyRows{}
+        loop imported_index in 0..<graph.modules[module_row_index].imports.len() {
+            target_identity: graph.modules[module_row_index].imports[imported_index].target_module_identity
+            path := module_text(graph.module_table, target_identity)
+            if sema_registration_module_index(graph, target_identity) == .Val(index) {
+                path = graph.modules[index].module_name
+            }
+            surface: sema_target_socket_surface(path) ?? next
+            // The diagnostic names the module, so it points at the path the
+            // `use` names, or at the members a member import takes from it.
+            span: if graph.modules[module_row_index].imports[imported_index].declaration.kind == {
+                .Unqualified(_, _, _, items_span, _) -> items_span
+                .File(_, path_span) -> path_span
+                .Module(_, path_span) -> path_span
+            }
+            if !socket_target && sema_key_report_first(seen, "E3304", Val(span), "") {
+                diagnostics.push(sema_error("E3304", span, "`{surface}` is not available for target `{target}`.", "`{surface}` needs native sockets or WASI Preview 2 sockets, and this target provides neither runtime boundary. A `jet build` or `jet run` run reports this target-support diagnostic.", "Build for `wasm32-wasip2` or a supported native target, or remove the `{surface}` import."))
+                complete = false
+            }
+            if !wasip2 -> next
+            unsupported_surface: surface == "core.net.tls" || surface == "core.net.ws" || surface == "core.http.client"
+            if unsupported_surface {
+                if sema_key_report_first(seen, "E3305", Val(span), surface) {
+                    diagnostics.push(sema_error("E3305", span, "`{surface}` is not available for target `{target}`.", "The selected target has no Prelude adapter for `{surface}`; WASI Preview 2 provides TCP/UDP sockets but not this operation. A `jet build` or `jet run` run reports this target-support diagnostic.", "Use a supported TCP/UDP operation, or build for a native target."))
+                    complete = false
+                }
+            }
+            loop operation in operations {
+                separator: operation.rfind(".")
+                if separator < 0 || foundation_byte_text(operation.bytes(), 0, separator) != surface {
+                    next
+                }
+                if !sema_key_report_first(seen, "E3305", Val(span), operation) -> next
+                diagnostics.push(sema_error("E3305", span, "`{operation}` is not available for target `{target}`.", "The selected target has no Prelude adapter for `{operation}`; WASI Preview 2 provides TCP/UDP sockets but not this operation. A `jet build` or `jet run` run reports this target-support diagnostic.", "Use a supported TCP/UDP operation, or build for a native target."))
+                complete = false
+            }
+        }
+        sema_attach_diagnostic_source_locations(diagnostics, diagnostic_start, graph.modules[module_row_index].source_segments)
+    }
+    complete
+}

@@ -1,0 +1,201 @@
+// Program entries: the run and script entry sites a checked program declares
+// and the checks on a script entry function.
+use jet_foundation.[
+    Diagnostic,
+    ast_binding,
+    ast_func,
+    ConstDef,
+    SemaNameCase,
+    sema_casing_has_case,
+    module_is_core,
+    Item,
+    Program,
+    Span,
+    Stmt,
+    Type,
+    compiler_transfer_rows,
+    ImportDecl,
+    import_walk_bindings,
+]
+
+// One entry of a program in module row `row`: a file's top-level
+// statements, or a `run` entry, which is a `run: fn` or an import that binds
+// `run`.
+SemaProgramEntrySite: struct {
+    row: Int,
+    span: Span,
+    // How a report names it: "top-level statements", "`run: fn`" or "the
+    // `run` import".
+    kind: String,
+}
+
+// A program has one entry: its entry file's top-level statements, or one
+// `run: fn`. Outside Core, a `run: fn` anywhere in the load graph (a module,
+// a nested module, another file of the package, a generated module) or an
+// import that binds `run` (a rename or a re-export) refuses top-level
+// statements anywhere in it, and the reverse; with no `run` entry, the
+// statements of a file other than the entry file are a second entry. Each
+// file's statements are one E0621, spanning the first through the last
+// statement and naming the other entry's file and line. The entry file's
+// statements reach this check as the `run: fn` sema_script_entry generates
+// from them, or, beside a `run` entry of the file's own, as its script body.
+// A file-scope `name: value` binding is a module global the parser already
+// registers as a declaration.
+sema_check_script_entries: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) -> Bool {
+    statements := [SemaProgramEntrySite]{}
+    runs := [SemaProgramEntrySite]{}
+    entry := -1
+    loop index in 0..<graph.modules.len() {
+        if module_is_core(graph.modules[index].module_identity) -> next
+        if graph.modules[index].module_identity == graph.entry_module_identity -> entry = index
+        body: graph.modules[index].program.script_body
+        if body.len() > 0 {
+            span: Span{start: sema_compiler_index_stmt_span(body[0]).start, end: sema_compiler_index_stmt_span(body[body.len() - 1]).end}
+            statements.push(SemaProgramEntrySite{row: index, span: span, kind: "top-level statements"})
+        }
+        // Another entry file of the package (a named entry or a `run.jet`
+        // home) keeps its `run: fn` to itself: that is a program of its own.
+        separate: graph.modules[index].module_identity != graph.entry_module_identity && graph.modules[index].namespace_private.contains("run")
+        sema_program_entry_sites(index, graph.modules[index].program.imports, graph.modules[index].program.items, statements, runs, separate_entry: separate)
+    }
+    found := false
+    loop site in statements {
+        if runs.len() == 0 && site.row == entry -> next
+        chosen: sema_program_entry_run(runs, site.row)
+        other: if chosen >= 0 -> "{runs[chosen].kind} at `{sema_effect_cap_site(graph.modules[runs[chosen].row], runs[chosen].span)}`" else -> sema_program_entry_script(graph, statements, entry)
+        fix: if {
+            chosen < 0 -> "move the statements into the entry file, or import a declaration-only file"
+            runs[chosen].kind == "`run: fn`" -> "move the statements into `run: fn`, or remove `run: fn` so the statements run"
+            else -> "move the statements into the function the `run` import names, or rename the import so the statements run"
+        }
+        start: diagnostics.len()
+        diagnostics.push(sema_error("E0621", site.span, "top-level statements at `{sema_effect_cap_site(graph.modules[site.row], site.span)}` and {other} are two entries of one program", "a program is script style, its entry file's top-level statements, or one `run: fn`, never both, so it starts in one place", fix))
+        sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[site.row].source_segments)
+        found = true
+    }
+    found
+}
+
+// The `runs` row a report on statements in module row `row` names: the
+// file's own `run` entry when it has one, else the first; -1 for none.
+sema_program_entry_run: fn(runs: [SemaProgramEntrySite], row: Int) -> Int Never! {
+    loop (position, candidate) in runs {
+        if candidate.row == row -> return position
+    }
+    if runs.len() > 0 -> 0 else -> -1
+}
+
+// How a report names the entry file, `entry` (-1 for none), beside another
+// file's statements: by its own statements' site when it has some.
+sema_program_entry_script: fn(graph: SemaRegistrationGraph, statements: [SemaProgramEntrySite], entry: Int) -> String {
+    if entry < 0 -> return "the entry file"
+    loop site in statements {
+        if site.row == entry {
+            return "{site.kind} at `{sema_effect_cap_site(graph.modules[entry], site.span)}`"
+        }
+    }
+    "the entry file `{sema_effect_source_display(graph.modules[entry].source_file)}`"
+}
+
+// The entries `imports` and `items` declare in module row `row`, nested
+// modules included: a nested module's `run: fn` is either still in its body
+// or, once sema_inline_modules_lower has lifted it, a top-level function
+// whose lifted name reads back as `run`. The `run: fn` sema_script_entry
+// generates, whose name is zero-width at the first statement, is its file's
+// top-level statements. A `separate_entry` file's own top-level `run: fn` is
+// not one of them.
+sema_program_entry_sites: fn(row: Int, imports: [ImportDecl], items: [Item], statements: ^[SemaProgramEntrySite], runs: ^[SemaProgramEntrySite], separate_entry: Bool) Never! {
+    loop declaration in imports {
+        loop binding in import_walk_bindings(declaration) {
+            if binding.local != "run" -> next
+            span: if binding.local_span.end > binding.local_span.start -> binding.local_span else -> binding.import_span
+            runs.push(SemaProgramEntrySite{row: row, span: span, kind: "the `run` import"})
+        }
+    }
+    loop item in items {
+        if item == .CodeModule(definition) && definition.body == .Val(body) {
+            sema_program_entry_sites(row, definition.imports, body, statements, runs, separate_entry: false)
+        }
+        if item == .Func(function) && function.external_type == None && ((function.name == "run" && !separate_entry) || (function.name != "run" && sema_inline_member_source_name(function.name) == "run")) {
+            generated: function.name_span.start == function.name_span.end
+            site: SemaProgramEntrySite{row: row, span: if generated -> function.span else -> function.name_span, kind: if generated -> "top-level statements" else -> "`run: fn`"}
+            if generated -> statements.push(site) else -> runs.push(site)
+        }
+    }
+}
+
+// The entry file `program` of a load: a file whose top level holds
+// statements and declares no `run: fn` is a program whose `run: fn` runs
+// those statements in order (owner ruling 2026-11-09, #6281). Its
+// top-level bindings are part of that order: `total := 0` and `limit: 3`
+// are locals of the generated `run: fn` (Main ruling 2026-11-09, option A),
+// so its functions don't see them (sema_unknown_entry_local). An ALL_CAPS
+// constant, a `#Persist` or comptime binding and the Output defaults record
+// stay module declarations. A file that also declares `run: fn` or imports a
+// name as `run` keeps its statements for E0621 (sema_check_script_entries).
+sema_script_entry: fn(program: ^Program) {
+    count: program.script_body.len()
+    if count == 0 {
+        return
+    }
+    loop item in program.items {
+        if item == .Func(function) && function.name == "run" && function.external_type == None {
+            return
+        }
+    }
+    loop declaration in program.imports {
+        loop binding in import_walk_bindings(declaration) {
+            if binding.local == "run" {
+                return
+            }
+        }
+    }
+    statements := [Stmt]{}
+    compiler_transfer_rows<Stmt>(statements, program.script_body)
+    // Popped twice, the items come back in source order.
+    reversed := [Item]{}
+    loop program.items.len() > 0 {
+        reversed.push(program.items.pop() ?? break)
+    }
+    locals := [Stmt]{}
+    loop {
+        item := reversed.pop() ?? break
+        if item == .Const(definition) && sema_script_entry_local(definition) {
+            binding := ast_binding(definition.name.copy(), definition.name_span, definition.mutable, definition.value.copy(), None)
+            binding.ty = definition.ty
+            binding.meta = definition.meta
+            binding.markers = definition.markers
+            program.entry_locals.push(definition.name)
+            locals.push(Stmt.Val{binding: binding})
+            next
+        }
+        program.items.push(item)
+    }
+    // `statements` and `locals` are each in source order: take the later of
+    // the two tails into `order`, which then pops in source order.
+    order := [Stmt]{}
+    loop {
+        local_last: locals.len() > 0 && (statements.len() == 0 || sema_compiler_index_stmt_span(locals[locals.len() - 1]).start > sema_compiler_index_stmt_span(statements[statements.len() - 1]).start)
+        // With both lists empty `statements` pops nothing, which ends it.
+        taken: if local_last -> locals.pop() else -> statements.pop()
+        order.push(taken ?? break)
+    }
+    start: sema_compiler_index_stmt_span(order[order.len() - 1]).start
+    end: sema_compiler_index_stmt_span(order[0]).end
+    entry := ast_func("run", Span{start: start, end: start}, Span{start: start, end: end})
+    loop order.len() > 0 {
+        entry.body.push(order.pop() ?? break)
+    }
+    program.items.push(Item.Func{value: entry})
+}
+
+// Whether the file-scope binding `definition` of an entry file of
+// top-level statements is a local of its entry (sema_script_entry). A
+// `#ContextKey` stays the module's: its identity is the constant's.
+sema_script_entry_local: fn(definition: ConstDef) -> Bool Never! {
+    if definition.is_persist || definition.is_comptime || sema_context_key_declared(definition) {
+        return false
+    }
+    if definition.ty == (Val(Type.Named{name: "__OutputDefaults"})) -> return false
+    definition.mutable || sema_casing_has_case(definition.name, SemaNameCase.Snake)
+}
