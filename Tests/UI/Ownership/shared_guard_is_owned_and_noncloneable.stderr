@@ -3,6 +3,6 @@ Error: Jet.CopyNotSupported: `SharedGuard<Int>` can't be copied
     |
   4 |     _: guard.copy()
     |        ^^^^^^^^^^
- Why: Copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet
- Fix: Move it instead with `.move()` if this is its last use, or change the type so every part can be copied
+ Why: `SharedGuard<Int>` is `#MoveOnly`: its values move and never copy
+ Fix: Move it instead with `.move()`; a second one has to come from wherever this one came from
 More: jet-lang.dev/e/Jet.CopyNotSupported

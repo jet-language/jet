@@ -386,13 +386,9 @@ sema_copy_handle_without_clone: fn(name: String) -> Bool Never! {
 // One Atomic owner recognition shared by field initialization and task groups.
 sema_atomic_type_name: fn(name: String) -> Bool Never! { name == "Atomic" }
 
-// A builtin head whose values move and never copy: one whose Core
-// declaration is `#MoveOnly` (`Atomic`, `ViewMut`), or a reserved carrier
-// Core does not declare yet (`ViewIter`, the Cell and Shared guards).
-sema_copy_apply_is_noncloneable: fn(name: String) -> Bool Never! {
-    if builtin_carrier_declares(name, MarkerHook.MoveOnly) -> return true
-    name == "ViewIter" || name == "CellReadGuard" || name == "CellEditGuard" || name == "SharedGuard"
-}
+// A builtin head whose Core declaration is `#MoveOnly` (`Atomic`, the Cell
+// and Shared guards, the mutable views): its values move and never copy.
+sema_copy_apply_is_noncloneable: fn(name: String) -> Bool Never! { builtin_carrier_declares(name, MarkerHook.MoveOnly) }
 
 // Whether `ty` is a builtin head (`Atomic<Int>`) whose Core declaration
 // carries the marker that reaches `hook` (builtin_carrier_declares).
