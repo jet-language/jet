@@ -9,6 +9,7 @@
 use jet_foundation.[
     symbol_table_key,
     CONTEXT_ON_STOP_KEY,
+    CONTEXT_PRINT_KEY,
     CallArg,
     CallLabel,
     ConstDef,
@@ -57,12 +58,12 @@ SEMA_CONTEXT_CORE_FIELDS: [String]{"allocator", "logger", "on_stop", "print", "t
 // The Core module that carries the context field `name`: `logger` is
 // core.log's `logger` key, a `log.Handler`; `on_stop` is a
 // `fn(debug.Stop)`, whose default is the core.debug function that fills the
-// ContextOnStop role; `print` is a `term.PrintStyle`, whose default is
-// core.term's `__print_style`; `trace` is read through the core.debug
-// function that fills the ContextTrace role (Places.jet
-// sema_expression_context_trace) and has no key, so no block sets it;
-// `allocator` is read through core.mem's `__context_allocator` (Places.jet
-// sema_expression_context_allocator) and set by the block itself.
+// ContextOnStop role; `print` is a `term.PrintStyle`, whose default is what
+// the core.term function that fills the ContextPrint role returns; `trace`
+// is read through the core.debug function that fills the ContextTrace role
+// (Places.jet sema_expression_context_trace) and has no key, so no block
+// sets it; `allocator` is read through core.mem's `__context_allocator`
+// (Places.jet sema_expression_context_allocator) and set by the block itself.
 sema_context_field_module: fn(name: String) -> String? Never! {
     if name == {
         "allocator" -> Val("core.mem")
@@ -82,10 +83,12 @@ sema_context_field_companion: fn(name: String) -> String? Never! {
 }
 
 // The value a Core-carried context field has where no `#Context` block set
-// it: a `#ContextKey` constant, or a function of the module read as a value.
+// it: a `#ContextKey` constant, a function of the module read as a value, or
+// what a call of a function of the module returns.
 SemaContextDefault: enum {
     Constant(symbol: SymbolID),
     Function(function: DeclID),
+    Call(function: DeclID),
 }
 
 // A context field a Core module carries: the key, and the field's value
@@ -96,35 +99,42 @@ SemaContextFieldKey: struct {
 }
 
 // The key behind the context field `name`, when the program loaded its Core
-// module: `logger` is its `#ContextKey` constant; `print` is keyed and
-// defaults by core.term's constant `__print_style` (core.term's `print` is
-// its function, and the constant is no key a program may name); and
-// `on_stop` is CONTEXT_ON_STOP_KEY, typed as the core.debug function that
-// fills the ContextOnStop role and defaulting to it.
+// module: `logger` is its `#ContextKey` constant; `on_stop` is
+// CONTEXT_ON_STOP_KEY, typed as the core.debug function that fills the
+// ContextOnStop role and defaulting to it; and `print` is CONTEXT_PRINT_KEY,
+// typed as what the core.term function that fills the ContextPrint role
+// returns and defaulting to its call (no key a program may name).
 sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaContextFieldKey? {
     module_name: sema_context_field_module(name) ?? return None
     graph: program.registration_graph
-    if name == "on_stop" {
-        filler: sema_core_role_function(graph, "ContextOnStop") ?? return None
-        loop module_row in graph.modules {
-            if module_row.module_identity != filler.module_identity -> next
-            loop function in module_row.functions {
-                if function.symbol.name != filler.name -> next
-                id: sema_registration_callable_id(graph, function.symbol.id) ?? return None
-                ty: sema_type_resolve_declared(graph, function.signature, module_row.module_identity)
-                return Val(SemaContextFieldKey{key: SemaContextKey{key: CONTEXT_ON_STOP_KEY, ty: ty}, default: SemaContextDefault.Function{function: id}})
-            }
-        }
-        return None
-    }
+    if name == "on_stop" -> return sema_context_role_field_key(graph, "ContextOnStop", CONTEXT_ON_STOP_KEY, false)
+    if name == "print" -> return sema_context_role_field_key(graph, "ContextPrint", CONTEXT_PRINT_KEY, true)
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].module_name != module_name -> next
         loop constant in graph.modules[module_index].constants {
-            found: if name == "print" -> constant.symbol.name == "__print_style" else -> constant.symbol.name == name && sema_context_key_declared(constant.declaration)
-            if !found -> next
+            if constant.symbol.name != name || !sema_context_key_declared(constant.declaration) -> next
             declared: constant.symbol.ty ?? constant.ty ?? return None
             ty: sema_type_resolve_declared(graph, declared, graph.modules[module_index].module_identity)
             return Val(SemaContextFieldKey{key: SemaContextKey{key: symbol_table_key(graph.symbols, constant.symbol.id), ty: ty}, default: SemaContextDefault.Constant{symbol: constant.symbol.id.copy()}})
+        }
+    }
+    None
+}
+
+// The context field keyed `key` whose default is the Core function that
+// fills `role`: the function itself as a value, or with `call` what calling
+// it returns, typed to match.
+sema_context_role_field_key: fn(graph: SemaRegistrationGraph, role: String, key: String, call: Bool) -> SemaContextFieldKey? {
+    filler: sema_core_role_function(graph, role) ?? return None
+    loop module_row in graph.modules {
+        if module_row.module_identity != filler.module_identity -> next
+        loop function in module_row.functions {
+            if function.symbol.name != filler.name -> next
+            id: sema_registration_callable_id(graph, function.symbol.id) ?? return None
+            signature: sema_type_resolve_declared(graph, function.signature, module_row.module_identity)
+            if !call -> return Val(SemaContextFieldKey{key: SemaContextKey{key: key, ty: signature}, default: SemaContextDefault.Function{function: id}})
+            returned: sema_call_signature_return(signature) ?? return None
+            return Val(SemaContextFieldKey{key: SemaContextKey{key: key, ty: returned}, default: SemaContextDefault.Call{function: id}})
         }
     }
     None
@@ -135,6 +145,7 @@ sema_context_field_default: fn(field: SemaContextFieldKey, ty: Type, span: Span,
     if field.default == {
         .Constant(symbol) -> sema_node(context, ty, NodeKind.ConstRef{symbol: symbol}, span)
         .Function(function) -> sema_tree_node(ty, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, span)
+        .Call(function) -> sema_tree_node(ty, TExprKind.Call{callee: function, type_args: [Type]{}, args: [TCallArg]{}}, span)
     }
 }
 

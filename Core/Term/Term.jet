@@ -205,9 +205,8 @@ PrintStyle: struct {
 }
 
 // The style `context.print` reads where no `#Context(print: …)` block set
-// one, and the key such a block sets (sema ContextKeys.jet
-// sema_context_field_key).
-priv __print_style: PrintStyle{}
+// one (sema ContextKeys.jet sema_context_field_key).
+#Builtin.Role(.ContextPrint) priv __print_style: fn() -> PrintStyle Never! { PrintStyle{} }
 
 print: fn(text: String) -[IO, Time.Wait]> Never! {
     out := stdout()
