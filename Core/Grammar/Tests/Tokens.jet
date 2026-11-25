@@ -57,7 +57,7 @@ faults_of: fn(text: String) -> [GrammarFault] Never! {
 }
 
 #Test("a literal and a token class that match the same text are no clash") {
-    plan: plan_of("s : 'select'i name=NAME ;\nNAME : [a-z]+ ;")
+    plan: plan_of("s : 'select'i name=NAME ;\nNAME : [a-z]+ ;\nWS : ' '+ -> skip ;")
     assert_eq(lexer_match(plan.lexer, 1, "select".bytes(), 0), 6)
 }
 
@@ -67,7 +67,7 @@ faults_of: fn(text: String) -> [GrammarFault] Never! {
     assert_eq(faults[0].kind, GrammarFaultKind.TokenClash)
     assert_eq(faults[0].message, "the token rules `NAME` and `HEX` both match \"a\" where the parser can take either")
     assert_eq(faults[0].at.offset, 33)
-    plan: plan_of("v : 'x' name=NAME # Name | 'y' hex=HEX # Hex ;\nNAME : [a-z]+ ;\nHEX : [0-9a-f]+ ;")
+    plan: plan_of("v : '+' name=NAME # Name | '-' hex=HEX # Hex ;\nNAME : [a-z]+ ;\nHEX : [0-9a-f]+ ;")
     assert_eq(plan.tokens.len(), 5)
 }
 
@@ -82,7 +82,7 @@ faults_of: fn(text: String) -> [GrammarFault] Never! {
     assert_eq(faults.len(), 1)
     assert_eq(faults[0].kind, GrammarFaultKind.TokenClash)
     assert_eq(faults[0].message, "the literals \"select\" and \"SELECT\" both match \"select\" where the parser can take either")
-    plan: plan_of("s : 'select'i 'x' # X | 'SELECT'i 'y' # Y ;")
+    plan: plan_of("s : 'select'i '+' # X | 'SELECT'i '-' # Y ;")
     assert_eq(plan.tokens.len(), 4)
 }
 

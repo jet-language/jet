@@ -45,7 +45,7 @@ tree_of: fn(text: String) -> RuleTree Never! {
 }
 
 #Test("both quote styles, escapes and the case-folding suffix") {
-    tree: tree_of("kw : 'select'i \"a\\tb\" '\\u{{41}}' '\\'' ;")
+    tree: tree_of("kw : 'select'i \"a\\tb\" '\\u{{41}}' '\\'' ;\nWS : ' '+ -> skip ;")
     alt: tree.nodes[tree.nodes[tree.rules[0].body].children[0]]
     select: tree.nodes[alt.children[0]]
     assert_eq(select.text, "select")

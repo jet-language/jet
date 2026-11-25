@@ -1,0 +1,72 @@
+// The plan as data: a compile-time value of it matches the plan built at
+// run time, ASCII columns come from the class table, and each decision is
+// found from its node.
+use {
+    core.grammar.[analyze]
+    core.grammar.plan.[GrammarPlan, GrammarSource]
+    core.grammar.runtime.[bounds_column, lexer_column]
+}
+
+INI: "ini : lines+=line (EOL lines+=line)* ;\nline : section | entry | blank ;\nsection : '[' name=KEY ']' ;\nentry : name=KEY SEP value? ;\nblank : ;\nvalue : text=QUOTED # Quoted | text=BARE # Bare ;\nKEY : [A-Za-z0-9_.\\-]+ ;\nSEP : '=' | ':' ;\nQUOTED : '\"' [^\"\\r\\n]* '\"' ;\nBARE : [^ \\t\\r\\n;#\"'] [^\\r\\n;#]* ;\nEOL : '\\r'? '\\n' ;\nWS : [ \\t]+ -> skip ;\nCOMMENT : [;#] [^\\r\\n]* -> skip ;"
+
+plan_of: fn(text: String) -> GrammarPlan Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan
+        .Err(error) -> panic("{error}")
+    }
+}
+
+/// The INI plan, built while building the test.
+INI_PLAN: #run { plan_of(INI) }
+
+#Test("a plan built while building is the plan built at run time") {
+    plan: plan_of(INI)
+    assert_eq(INI_PLAN.tree.nodes.len(), plan.tree.nodes.len())
+    assert_eq(INI_PLAN.tree.rules.len(), plan.tree.rules.len())
+    assert_eq(INI_PLAN.tokens.len(), plan.tokens.len())
+    assert_eq(INI_PLAN.decision_of, plan.decision_of)
+    assert_eq(INI_PLAN.lexer.bounds, plan.lexer.bounds)
+    assert_eq(INI_PLAN.lexer.ascii, plan.lexer.ascii)
+    assert_eq(INI_PLAN.lexer.next, plan.lexer.next)
+    assert_eq(INI_PLAN.lexer.accept, plan.lexer.accept)
+    assert_eq(INI_PLAN.printer.texts, plan.printer.texts)
+    assert_eq(INI_PLAN.printer.glue, plan.printer.glue)
+    assert_eq(INI_PLAN.shapes.len(), plan.shapes.len())
+    loop (s, shape) in plan.shapes {
+        assert_eq(INI_PLAN.shapes[s].name, shape.name)
+        assert_eq(INI_PLAN.shapes[s].fields.len(), shape.fields.len())
+        assert_eq(INI_PLAN.shapes[s].cases.len(), shape.cases.len())
+    }
+    loop (d, decision) in plan.decisions {
+        assert_eq(INI_PLAN.decisions[d].node, decision.node)
+        assert_eq(INI_PLAN.decisions[d].steps.len(), decision.steps.len())
+    }
+}
+
+#Test("ASCII columns come from the class table, with property bits when masked") {
+    plain: plan_of(INI)
+    masked: plan_of("a : word=WORD ;\nWORD : \\p{{L}}+ ;")
+    assert(!plain.lexer.masked)
+    assert(masked.lexer.masked)
+    loop lexer in [plain.lexer, masked.lexer] {
+        assert_eq(lexer.ascii.len(), 128)
+        loop cp in 0..<128 {
+            assert_eq(lexer_column(lexer, cp), bounds_column(lexer, cp))
+        }
+    }
+    assert(lexer_column(masked.lexer, 97) != lexer_column(masked.lexer, 49))
+    assert_eq(lexer_column(masked.lexer, 233), bounds_column(masked.lexer, 233))
+}
+
+#Test("each decision is found from the node it decides") {
+    plan: plan_of(INI)
+    assert_eq(plan.decision_of.len(), plan.tree.nodes.len())
+    ^found: 0
+    loop (n, d) in plan.decision_of {
+        if d < 0 -> next
+        assert_eq(plan.decisions[d].node, n)
+        found += 1
+    }
+    assert_eq(found, plan.decisions.len())
+    assert(found > 0)
+}

@@ -47,7 +47,7 @@ decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
 }
 
 #Test("a stop decided past the end of the rule uses what follows it") {
-    plan: plan_of("s : list 'x' 'y' ;\nlist : ('x' 'w')* ;")
+    plan: plan_of("s : list '+' '-' ;\nlist : ('+' '*')* ;")
     alt: plan.tree.nodes[plan.tree.nodes[plan.tree.rules[1].body].children[0]]
     decision: decision_at(plan, alt.children[0])
     assert_eq(decision.depth, 2)

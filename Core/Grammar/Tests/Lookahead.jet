@@ -51,7 +51,7 @@ decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
 }
 
 #Test("an optional part is skipped on what follows it") {
-    plan: plan_of("a : 'x' b? 'y' ;\nb : 'z' ;", "A")
+    plan: plan_of("a : '(' b? ')' ;\nb : '*' ;", "A")
     alt: plan.tree.nodes[plan.tree.nodes[plan.tree.rules[0].body].children[0]]
     decision: decision_at(plan, alt.children[1])
     x: plan.tree.nodes[alt.children[0]].token
@@ -63,7 +63,7 @@ decision_at: fn(plan: GrammarPlan, node: Int) -> GrammarDecision Never! {
 }
 
 #Test("the end of input follows only the start rule") {
-    plan: plan_of("list : item* ;\nitem : 'x' ;", "List")
+    plan: plan_of("list : item* ;\nitem : ';' ;", "List")
     alt: plan.tree.nodes[plan.tree.nodes[plan.tree.rules[0].body].children[0]]
     decision: decision_at(plan, alt.children[0])
     assert_eq(decision.steps[0].kinds, [Int]{0, 1})

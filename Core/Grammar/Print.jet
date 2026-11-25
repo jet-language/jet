@@ -3,17 +3,18 @@
 // A token no field keeps prints as its literal, or as the first fixed text
 // its token rule matches. Two tokens are separated where they could lex as
 // one: where a token the lexer may try there can run on from the first
-// into the character the second starts with. They are also separated where
-// a word character meets a word character, so `SELECT id` stays apart for
-// lexers that are not contextual. The separator is a space, or a newline
-// or tab, that a `skip` token matches. An operator rule's grouping
-// alternative parenthesizes a hand-built operand that binds looser than
-// its place. A token that prints nothing, and two tokens nothing can keep
-// apart, are refused.
+// into the character the second starts with. A keyword runs on into every
+// word character, since it only matches a whole word. They are also
+// separated where a word character meets a word character, so `SELECT id`
+// stays apart for lexers that are not contextual. The separator is a
+// space, or a newline or tab, that a `skip` token matches. An operator
+// rule's grouping alternative parenthesizes a hand-built operand that
+// binds looser than its place. A token that prints nothing, and two tokens
+// nothing can keep apart, are refused.
 use {
     core.grammar.error.[grammar_fault]
     core.grammar.plan.[GrammarField, GrammarLexer, GrammarPrinter, GrammarShape]
-    core.grammar.runtime.[code_point_at, fold_code_point, lexer_match]
+    core.grammar.runtime.[code_point_at, fold_code_point, is_word_byte, lexer_match, word_shaped]
     __core_grammar_analyze.[GrammarWork]
     __core_grammar_lookahead.[empty_set, is_terminal, parsed, set_add, set_has, set_items, set_meets, set_union, set_words]
     __core_grammar_tokens.[char_columns, code_points, interval_end]
@@ -336,6 +337,10 @@ plan_printer: fn(work: ^GrammarWork, lexer: GrammarLexer, shapes: [GrammarShape]
     report_textless(work, shapes, texts)
     viable: viable_kinds(work)
     words: set_words(lexer.columns)
+    ^word_bytes: empty_set(words)
+    loop c in 0..<128 {
+        if is_word_byte(c) -> _: set_union(word_bytes, char_columns(lexer, c, false))
+    }
     ^runs: [[Int]]{}
     ^starts: [[Int]]{}
     loop a in 0..<kinds {
@@ -345,6 +350,7 @@ plan_printer: fn(work: ^GrammarWork, lexer: GrammarLexer, shapes: [GrammarShape]
             loop k in set_items(viable[a]) {
                 if k < kinds && printed_kind(work, k) -> run_on(work, lexer, points, a, k, run)
             }
+            if literal_kind(work, a) && word_shaped(work.tokens[a].text) -> _: set_union(run, word_bytes)
             if literal_kind(work, a) && points[a].len() > 0 {
                 start = char_columns(lexer, points[a][0], work.tokens[a].fold)
             } else if !literal_kind(work, a) { start = live_columns(lexer, [Int]{lexer.starts[a]}) }

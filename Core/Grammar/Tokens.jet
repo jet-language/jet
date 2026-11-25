@@ -11,7 +11,7 @@
 use {
     core.grammar.error.[grammar_fault]
     core.grammar.plan.[GrammarClass, GrammarLexer]
-    core.grammar.runtime.[ascii_property_bits, code_point_at, code_point_text, code_point_width, fold_text]
+    core.grammar.runtime.[ascii_property_bits, bounds_column, code_point_at, code_point_text, code_point_width, fold_text]
     __core_grammar_analyze.[GrammarWork]
     __core_grammar_lookahead.[empty_set, set_add, set_has, set_words]
 }
@@ -102,7 +102,11 @@ column_bounds: fn(work: GrammarWork) -> GrammarLexer Never! {
     }
     ^width: 1
     if masked -> width = 8
-    GrammarLexer{bounds: bounds, masked: masked, columns: bounds.len() * width, starts: [Int]{}, next: [Int]{}, accept: [Int]{}}
+    ^lexer: GrammarLexer{bounds: bounds, masked: masked, columns: bounds.len() * width, ascii: [Int]{}, starts: [Int]{}, next: [Int]{}, accept: [Int]{}}
+    ^ascii: [Int]{}
+    loop cp in 0..<128 -> ascii.push(bounds_column(lexer, cp))
+    lexer.ascii = ascii
+    lexer
 }
 
 /// The last code point of interval `i`.

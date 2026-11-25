@@ -82,6 +82,13 @@ glued: fn(plan: GrammarPlan, a: String, b: String) -> Bool Never! {
     assert_eq(fault.message, "the tokens \"-\" and \">\" can come one after the other and lex as one, and no `skip` token matches a space to keep them apart")
 }
 
+#Test("a keyword runs on into any word character, since it matches only a whole word") {
+    fault: only_fault("s : 'limit' count=NUM ;\nNUM : [0-9]+ ;")
+    assert_eq(fault.message, "the tokens \"limit\" and NUM can come one after the other and lex as one, and no `skip` token matches a space to keep them apart")
+    plan: plan_of("s : 'limit' count=NUM ;\nNUM : [0-9]+ ;\nWS : ' '+ -> skip ;")
+    assert(glued(plan, "\"limit\"", "NUM"))
+}
+
 #Test("a separator that would run on into the token before is refused") {
     fault: only_fault("s : a=TEXT b=TEXT ;\nTEXT : [a-z] [a-z ]* ;\nWS : ' '+ -> skip ;")
     assert_eq(fault.message, "the tokens TEXT and TEXT can come one after the other and lex as one, and the separator between them would run on into them too")

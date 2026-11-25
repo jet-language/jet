@@ -3,7 +3,7 @@
 // Every meaning a generated parser has lives here: the cursor, the
 // character columns, the token automata, keyword lookup, the depth bound,
 // error text and resynchronization. The generated code only arranges calls.
-use core.grammar.plan.[GrammarLexer]
+use core.grammar.plan.[GrammarKeywords, GrammarLexer]
 
 /// The byte length of the UTF-8 sequence that starts with `lead`. Jet
 /// Strings are valid UTF-8.
@@ -90,8 +90,96 @@ fold_text: fn(text: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-/// The column of code point `cp` in `lexer`.
-lexer_column: fn(lexer: GrammarLexer, cp: Int) -> Int Never! {
+/// Whether byte `b` is a word character: an ASCII letter, digit or `_`.
+is_word_byte: fn(b: Int) -> Bool Never! {
+    (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || b == 95 || (b >= 97 && b <= 122)
+}
+
+/// Whether `text` is spelled as a word: an ASCII letter or `_`, then word
+/// characters. A literal spelled so is a keyword.
+word_shaped: fn(text: String) -> Bool Never! {
+    bytes: text.bytes()
+    if bytes.len() == 0 -> return false
+    first: Int{bytes[0]}
+    if first >= 48 && first <= 57 -> return false
+    loop b in bytes {
+        if !is_word_byte(Int{b}) -> return false
+    }
+    true
+}
+
+/// The end of the run of word characters that starts at byte `at`.
+word_end: fn(bytes: [U8], at: Int) -> Int Never! {
+    ^end: at
+    loop end < bytes.len() && is_word_byte(Int{bytes[end]}) {
+        end += 1
+    }
+    end
+}
+
+/// The hash of bytes `from..<to`, ASCII capitals lowered: 32-bit FNV-1a.
+keyword_hash: fn(bytes: [U8], from: Int, to: Int) -> Int Never! {
+    ^hash: 2166136261
+    loop i in from..<to {
+        hash = ((hash ~ fold_code_point(Int{bytes[i]})) * 16777619) & 4294967295
+    }
+    hash
+}
+
+/// The slot a keyword of hash `hash` takes in a table of `size` slots when
+/// its bucket is displaced by `shift`.
+keyword_slot: fn(hash: Int, shift: Int, size: Int) -> Int Never! {
+    ^x: (hash ~ (shift * 2654435761)) & 4294967295
+    x = ((x ~ (x >> 16)) * 73244475) & 4294967295
+    x = ((x ~ (x >> 16)) * 73244475) & 4294967295
+    (x ~ (x >> 16)) % size
+}
+
+/// Whether keyword entry `entry` is spelled by bytes `from..<to`.
+keyword_spells: fn(keywords: GrammarKeywords, entry: Int, bytes: [U8], from: Int, to: Int) -> Bool Never! {
+    text: keywords.texts[entry].bytes()
+    if text.len() != to - from -> return false
+    fold: keywords.folds[entry]
+    loop i in 0..<text.len() {
+        ^x: Int{text[i]}
+        ^y: Int{bytes[from + i]}
+        if fold {
+            x = fold_code_point(x)
+            y = fold_code_point(y)
+        }
+        if x != y -> return false
+    }
+    true
+}
+
+/// The first keyword entry from `entry` on its chain spelled by bytes
+/// `from..<to`, or -1.
+keyword_chain: fn(keywords: GrammarKeywords, entry: Int, bytes: [U8], from: Int, to: Int) -> Int Never! {
+    ^at: entry
+    loop at >= 0 {
+        if keyword_spells(keywords, at, bytes, from, to) -> return at
+        at = keywords.next[at]
+    }
+    -1
+}
+
+/// The keyword entry the word at bytes `from..<to` spells, or -1: one hash
+/// and one compare. `keywords.kinds[entry]` is its token kind.
+keyword_find: fn(keywords: GrammarKeywords, bytes: [U8], from: Int, to: Int) -> Int Never! {
+    if keywords.slots.len() == 0 -> return -1
+    hash: keyword_hash(bytes, from, to)
+    shift: keywords.displace[hash % keywords.displace.len()]
+    keyword_chain(keywords, keywords.slots[keyword_slot(hash, shift, keywords.slots.len())], bytes, from, to)
+}
+
+/// The next keyword entry after `entry` that the same word spells (it
+/// differs only in case), or -1.
+keyword_next: fn(keywords: GrammarKeywords, entry: Int, bytes: [U8], from: Int, to: Int) -> Int Never! {
+    keyword_chain(keywords, keywords.next[entry], bytes, from, to)
+}
+
+/// The column of code point `cp` in `lexer`, found among its bounds.
+bounds_column: fn(lexer: GrammarLexer, cp: Int) -> Int Never! {
     ^low: 0
     ^high: lexer.bounds.len()
     loop high - low > 1 {
@@ -100,6 +188,12 @@ lexer_column: fn(lexer: GrammarLexer, cp: Int) -> Int Never! {
     }
     if lexer.masked -> return low * 8 + property_bits(cp)
     low
+}
+
+/// The column of code point `cp` in `lexer`: ASCII from its table.
+lexer_column: fn(lexer: GrammarLexer, cp: Int) -> Int Never! {
+    if cp < 128 -> return lexer.ascii[cp]
+    bounds_column(lexer, cp)
 }
 
 /// The end of the longest match of token `kind` at byte `at` of `bytes`

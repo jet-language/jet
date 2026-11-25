@@ -9,6 +9,7 @@ use {
     core.grammar.error.[GrammarFaults, grammar_faults]
     core.grammar.plan.[GrammarPlan, GrammarSource]
     __core_grammar_analyze.[mark_nullable, mark_parents, report_left_recursion, resolve, split_operators]
+    __core_grammar_keywords.[plan_keywords]
     __core_grammar_lookahead.[assign_tokens, plan_decisions, plan_sets]
     __core_grammar_precedence.[plan_precedence, report_empty_repeats]
     __core_grammar_print.[plan_printer]
@@ -38,5 +39,9 @@ analyze: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarPla
     if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
     printer: plan_printer(work, lexer, shapes)
     if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
-    Ok(GrammarPlan{tree: work.tree, start: work.start, parent: work.parent, nullable: work.nullable, operators: work.operators, tokens: work.tokens, decisions: work.decisions, lexer: lexer, shapes: shapes, printer: printer})
+    keywords: plan_keywords(work)
+    ^decision_of: [Int]{}
+    loop _ in work.tree.nodes -> decision_of.push(-1)
+    loop (d, decision) in work.decisions -> decision_of[decision.node] = d
+    Ok(GrammarPlan{tree: work.tree, start: work.start, parent: work.parent, nullable: work.nullable, operators: work.operators, tokens: work.tokens, decisions: work.decisions, decision_of: decision_of, lexer: lexer, keywords: keywords, shapes: shapes, printer: printer})
 }

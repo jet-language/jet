@@ -2,7 +2,9 @@
 //
 // `RuleTree` is the notation as written: rules over a flat list of nodes.
 // A node names its children by index, so the tree is lists and structs
-// only, the data a compile-time value can hold.
+// only, the data a compile-time value can hold. Every type here keeps to
+// that algebra (Int, Bool, String, enums, lists and structs; no maps and
+// no handles), so a whole `GrammarPlan` is a compile-time value.
 
 /// What a grammar node is.
 GrammarNodeKind: enum {
@@ -182,18 +184,37 @@ GrammarDecision: struct {
 /// The token automata of a grammar. A code point falls in a column: the
 /// interval of it among `bounds` (sorted interval starts, the first 0),
 /// times 8 plus its Unicode property bits when `masked` (a grammar that
-/// uses `\p{…}`). Each token kind a rule matches has a DFA: `starts[kind]`
-/// is its first state (-1 for a kind no rule matches), `next[state *
-/// columns + column]` the state a column leads to (-1 for none), and
-/// `accept[state]` 0 (no match yet), 1 (a match that may grow) or 2 (a
-/// match that ends the token: the literal after a non-greedy repeat).
+/// uses `\p{…}`). `ascii[cp]` is that column for each ASCII code point, so
+/// ASCII text needs no search. Each token kind a rule matches has a DFA:
+/// `starts[kind]` is its first state (-1 for a kind no rule matches),
+/// `next[state * columns + column]` the state a column leads to (-1 for
+/// none), and `accept[state]` 0 (no match yet), 1 (a match that may grow)
+/// or 2 (a match that ends the token: the literal after a non-greedy
+/// repeat).
 GrammarLexer: struct {
     bounds: [Int],
     masked: Bool,
     columns: Int,
+    ascii: [Int],
     starts: [Int],
     next: [Int],
     accept: [Int],
+}
+
+/// The keywords of a grammar, its literals spelled as words, by perfect
+/// hash. The word of hash `h` can only be the keyword in slot
+/// `keyword_slot(h, displace[h % displace.len()], slots.len())`:
+/// `slots[slot]` is an entry (-1 for none). Entry `e` is token kind
+/// `kinds[e]`, spelled `texts[e]`, compared ignoring ASCII case when
+/// `folds[e]`; `next[e]` is the next entry spelled the same up to case (-1
+/// for none).
+GrammarKeywords: struct {
+    displace: [Int],
+    slots: [Int],
+    kinds: [Int],
+    texts: [String],
+    folds: [Bool],
+    next: [Int],
 }
 
 /// What a field of a generated type holds: the text of a token, a literal
@@ -254,7 +275,8 @@ GrammarPrinter: struct {
 /// A checked grammar: what a generated parser and printer run from.
 /// `start` is the start rule (-1: any parser rule may start a parse).
 /// `parent` is each node's parent in the parsed structure (-1 at a rule
-/// body, -2 for a node no parse reaches).
+/// body, -2 for a node no parse reaches). `decision_of[node]` is the
+/// decision taken at that node, an index into `decisions` (-1 for none).
 GrammarPlan: struct {
     tree: RuleTree,
     start: Int,
@@ -263,7 +285,9 @@ GrammarPlan: struct {
     operators: [GrammarOperatorRule],
     tokens: [GrammarToken],
     decisions: [GrammarDecision],
+    decision_of: [Int],
     lexer: GrammarLexer,
+    keywords: GrammarKeywords,
     shapes: [GrammarShape],
     printer: GrammarPrinter,
 }
