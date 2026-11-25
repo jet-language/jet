@@ -4,7 +4,9 @@
 // `Rock.reflect()` and fn build each print one line per field of `Rock`.
 // `type` is a TypeId, `offset` the field's byte offset, and `default` the
 // DefaultInfo whose `source` is where the written default stands (`size`'s
-// `1.5`), or None for `name`, which has none. Reading it never runs it.
+// `1.5`), or None for `name`, which has none. Reading it never runs it. Each
+// rung prints how many bytes that span covers, so the lines don't move when
+// text earlier in this file does.
 Facts: struct {}
 
 // The marker-body rung: the generated method matches the spliced
@@ -19,7 +21,7 @@ FromMarker: struct {
                     ^out: ""
                     #loop field in target.reflect().fields {
                         default: if field.default == {
-                            Val(d) -> "{d.source.start}..{d.source.end}"
+                            Val(d) -> "{d.source.end - d.source.start} bytes"
                             None -> "none"
                         }
                         out = "{out} {field.name}: {field.type.name} default={default} offset={field.offset ?? -1};"
@@ -44,7 +46,7 @@ Describe: struct {
                     #loop field in target.reflect().fields {
                         start: field.default?.source?.start ?? -1
                         end: field.default?.source?.end ?? -1
-                        default: if start < 0 -> "none" else -> "{start}..{end}"
+                        default: if start < 0 -> "none" else -> "{end - start} bytes"
                         out = "{out} {field.name}: {field.type.name} default={default} offset={field.offset ?? -1};"
                     }
                     out
@@ -65,7 +67,7 @@ describe: fn(info: TypeInfo) -> String {
     ^out: ""
     loop field in info.fields {
         default: if field.default == {
-            Val(d) -> "{d.source.start}..{d.source.end}"
+            Val(d) -> "{d.source.end - d.source.start} bytes"
             None -> "none"
         }
         out = "{out} {field.name}: {field.type.name} default={default} offset={field.offset ?? -1};"
