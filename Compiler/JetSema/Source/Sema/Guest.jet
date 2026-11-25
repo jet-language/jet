@@ -389,22 +389,49 @@ sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
 // A parameter a runtime route carries: a read carried value, a read View of
 // a scalar (its window crosses as a List), a read payload-free Core enum
 // (its tag word, sema_guest_runtime_tag), a written (`^`) runtime handle or
-// List of scalars, which the runtime changes in place, or a taken (`^^`)
-// carried value, which the runtime export consumes.
+// List of scalars, which the runtime changes in place, a taken (`^^`)
+// carried value, which the runtime export consumes, or a read or taken
+// callback (sema_guest_runtime_callback).
 sema_guest_runtime_param: fn(convention: AccessConvention, ty: Type) -> Bool Never! {
     if convention == {
         .Read -> {
             if ty == .Apply(name, args) {
                 return name == "View" && args.len() == 1 && sema_guest_runtime_scalar(args[0])
             }
-            sema_guest_runtime_value(ty) || sema_guest_runtime_tag(ty)
+            sema_guest_runtime_value(ty) || sema_guest_runtime_tag(ty) || sema_guest_runtime_callback(ty)
         }
         .Write -> {
             if ty == .List(item) -> return sema_guest_runtime_scalar(item)
             sema_guest_runtime_handle(ty)
         }
-        .Move -> sema_guest_runtime_value(ty)
+        .Move -> sema_guest_runtime_value(ty) || sema_guest_runtime_callback(ty)
     }
+}
+
+// A function value the runtime calls back (IR Callback carrier): it crosses
+// as its closure box, which the export holds a reference to until it
+// releases it, with its lazy.callback invoke, which lends each argument
+// through one slot; so every parameter is read and it returns nothing.
+sema_guest_runtime_callback: fn(ty: Type) -> Bool Never! {
+    if ty == .Fn(_, returned, _, _, metadata, _) {
+        if returned == .Val(result) && result != (Type.Named{name: "Unit"}) -> return false
+        if metadata == .Val(call) {
+            loop convention in call.conventions {
+                if convention != AccessConvention.Read -> return false
+            }
+        }
+        return true
+    }
+    false
+}
+
+#Test("a runtime binding takes a read or taken callback that returns nothing") {
+    body: Type.Fn{params: [Type]{Type.Int}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    assert(sema_guest_runtime_param(AccessConvention.Read, body))
+    assert(sema_guest_runtime_param(AccessConvention.Move, body))
+    assert(!sema_guest_runtime_param(AccessConvention.Write, body))
+    answering: Type.Fn{params: [Type]{}, ret: Val(Type.Int), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    assert(!sema_guest_runtime_param(AccessConvention.Read, answering))
 }
 
 // A payload-free Core enum (ProcessSignal), by either spelling: it crosses
@@ -423,7 +450,7 @@ sema_guest_runtime_tag: fn(ty: Type) -> Bool Never! {
 sema_guest_check_runtime_binding: fn(function: Func, diagnostics: ^[Diagnostic]) -> Bool Never! {
     valid := true
     why: "a jet.runtime function crosses the runtime's route carriers"
-    fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those or of such Lists, a View of a scalar or a payload-free Core enum (read only), a written (`^`) handle or List of scalars, or a taken (`^^`) carried value; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, a `Receiver<T>` or `Event<T>`, `Never`, or `T E!` with a carried, Option or Unit success and the default Err or a handle error"
+    fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those or of such Lists, a View of a scalar or a payload-free Core enum (read only), a written (`^`) handle or List of scalars, a taken (`^^`) carried value, or a read or taken function whose parameters are read and that returns nothing; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, a `Receiver<T>` or `Event<T>`, `Never`, or `T E!` with a carried, Option or Unit success and the default Err or a handle error"
     loop param in function.params {
         if !sema_guest_runtime_param(param.convention, param.ty) {
             diagnostics.push(sema_error("E3203", param.ty_span, "`{type_name(param.ty)}` is not a runtime carrier for the parameter `{param.name}` of `{function.name}`", why, fix))
