@@ -5443,7 +5443,9 @@ ir_try_from_ok_row: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, ty
 // where negative reads past every bound); an exact source compares exactly.
 // A 64-bit target's bounds past the inline range hold for every inline
 // Int, so an inline source tests only its word's sign (U64) or nothing
-// (I64), and only a big Int builds the bounds and compares them exactly.
+// (I64), and a big Int asks the runtime (jet_int_fixed_fits, kind 3 or 7),
+// which reads its limbs against the bound: no bound is boxed, no compare
+// runs, and nothing is dropped, on every call of `checked(I64{x})`.
 ir_fixed_in_range: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t_bits: Int) -> Int Never! {
     source: m.types[b.f.slot_type[value]]
     bool_row: ir_type_row(m, Type.Bool) ?? 0
@@ -5463,13 +5465,15 @@ ir_fixed_in_range: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t
                 ir_emit(b.f, IROp.Ge, fits, bits, zero, -1, b.line)
             }
             ir_else(b.f, b.line)
+            kind: ir_word_const(m, b, if t_signed -> 3 else -> 7)
+            fit: ir_runtime(m, b, "jet_int_fixed_fits", [Int]{value, kind}, word_row)
+            zero: ir_word_const(m, b, 0)
+            ir_emit(b.f, IROp.Ne, fits, fit, zero, -1, b.line)
+            ir_end(b.f, b.line)
+            return fits
         }
         low: ir_int_constant(m, b, int_row, lowest)
-        high := -1
-        if t_bits == 64 && !t_signed {
-            high = ir_fresh_temp(m, b, int_row)
-            ir_emit(b.f, IROp.ConstBigInt, high, ir_intern_name(m, "18446744073709551615"), -1, -1, b.line)
-        } else { high = ir_int_constant(m, b, int_row, highest) }
+        high: ir_int_constant(m, b, int_row, highest)
         above: ir_bool_op(m, b, IROp.Ge, value, low)
         ir_open_if(b.f, above, b.line)
         below: ir_bool_op(m, b, IROp.Le, value, high)
@@ -5477,7 +5481,6 @@ ir_fixed_in_range: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t
         ir_end(b.f, b.line)
         ir_release(m, b, low)
         ir_release(m, b, high)
-        if t_bits == 64 -> ir_end(b.f, b.line)
         return fits
     }
     wide: ir_copy_word(m, b, value, word_row)
@@ -5506,46 +5509,34 @@ ir_fixed_in_range: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t
 
 // The 64-bit word of `value`, emitted where ir_fixed_fits holds: a fixed
 // source's extended word, or an exact Int's value, where a U64 target above
-// I64.MAX takes the bits of x - 2^64. An inline Int's word is its value, so
-// only a big Int compares with I64.MAX.
+// I64.MAX takes the bits of x - 2^64. An inline Int's word is its value; a
+// big Int's word is jet_int_checked_fixed's (kind 7, the U64 range it already
+// lies in), the low 64 bits of its limbs, so no bound is boxed.
 ir_fixed_fit_word: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t_bits: Int) -> Int Never! {
     word_row: ir_word_row(m)
     if m.types[b.f.slot_type[value]].kind != .Int -> return ir_copy_word(m, b, value, word_row)
     if !(t_bits == 64 && !t_signed) {
         return ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row)
     }
-    int_row: b.f.slot_type[value]
     word: ir_temp(m, b, word_row)
     bits: ir_int_word(m, b, value)
     inline: ir_int_word_inline(m, b, bits)
     ir_open_if(b.f, inline, b.line)
     ir_emit(b.f, IROp.Copy, word, bits, -1, -1, b.line)
     ir_else(b.f, b.line)
-    signed_max: ir_int_constant(m, b, int_row, 9223372036854775807)
-    low_half: ir_bool_op(m, b, IROp.Le, value, signed_max)
-    ir_release(m, b, signed_max)
-    ir_open_if(b.f, low_half, b.line)
-    direct: ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row)
-    ir_emit(b.f, IROp.Copy, word, direct, -1, -1, b.line)
-    ir_else(b.f, b.line)
-    modulus: ir_fresh_temp(m, b, int_row)
-    ir_emit(b.f, IROp.ConstBigInt, modulus, ir_intern_name(m, "18446744073709551616"), -1, -1, b.line)
-    shifted: ir_fresh_temp(m, b, int_row)
-    ir_emit(b.f, IROp.Sub, shifted, value, modulus, IR_OVERFLOW_TRAP, b.line)
-    wrapped: ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{shifted}, word_row)
-    ir_emit(b.f, IROp.Copy, word, wrapped, -1, -1, b.line)
-    ir_release(m, b, shifted)
-    ir_release(m, b, modulus)
-    ir_end(b.f, b.line)
+    args := [Int]{value, ir_word_const(m, b, 7)}
+    loop arg in ir_location(m, b, b.line) -> args.push(arg)
+    low: ir_runtime(m, b, ir_route_export("jet_std.jet_int_checked_fixed"), args, word_row)
+    ir_emit(b.f, IROp.Copy, word, low, -1, -1, b.line)
     ir_end(b.f, b.line)
     word
 }
 
 // `checked(I64{x})`, `wrapping(U64{x})` and the other 64-bit narrowings of an
-// exact Int: the path an inline x takes (each If's then arm, each Else
-// skipped to its End) builds no boxed bound, so it calls no
-// jet_int_owned_from_i64 and holds no ConstBigInt; the big Int's arm does.
-#Test("An inline Int's 64-bit narrowing builds no boxed bound") {
+// exact Int build no boxed bound on any path: an inline x takes each If's
+// then arm, and a big x's arms (each Else) ask the runtime, so no arm calls
+// jet_int_owned_from_i64 or jet_int_compare or holds a ConstBigInt.
+#Test("An exact Int's 64-bit narrowing builds no boxed bound") {
     widths: [Bool]{true, false}
     loop t_signed in widths {
         m := ir_module_new()
@@ -5559,19 +5550,19 @@ ir_fixed_fit_word: fn(m: ^IRModule, b: ^IRBuilder, value: Int, t_signed: Bool, t
         ir_end(b.f, b.line)
         boxed := 0
         cold := 0
-        at := 0
-        loop at < b.f.op.len() {
-            op: b.f.op[at]
-            if op == .Else {
-                cold += 1
-                at = b.f.a[at]
-            } else {
-                if op == .ConstBigInt || (op == .CallRuntime && m.names[b.f.a[at]] == "jet_int_owned_from_i64") -> boxed += 1
-                at += 1
+        tested := 0
+        loop (at, op) in b.f.op {
+            if op == .Else -> cold += 1
+            if op == .ConstBigInt -> boxed += 1
+            if op == .CallRuntime {
+                name: m.names[b.f.a[at]]
+                if name == "jet_int_owned_from_i64" || name == "jet_int_compare" -> boxed += 1
+                if name == "jet_int_fixed_fits" -> tested += 1
             }
         }
         assert_eq(boxed, 0)
-        assert(cold >= (if t_signed -> 1 else -> 2), "the big Int's arms: {cold}")
+        assert_eq(tested, 1)
+        assert_eq(cold, if t_signed -> 1 else -> 2)
     }
 }
 

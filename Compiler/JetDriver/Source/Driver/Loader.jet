@@ -121,6 +121,7 @@ use {
         TOKEN_QUESTION_DOT,
         TOKEN_SEMI,
         TOKEN_STRING,
+        TOKEN_UNIT_NUMBER,
         Lexed,
         Token,
         TokenTables,
@@ -131,6 +132,7 @@ use {
         lexer_chunk_cut,
         token_decoded,
         token_string_parts,
+        token_suffix,
     ]
     jet_parser.[
         parse_lexed_with_source,
@@ -4305,7 +4307,9 @@ JetDriverCoreIdentifierDemand: struct {
     option_or_err: Bool,
     // A `.abs` or `.pow` receiver call: Int `abs` and the typed `abs`
     // helpers, and Float and F32 `pow`, lower to their `Core/Math/Math.jet`
-    // source helpers, so core.math loads.
+    // source helpers, so core.math loads. So does an imaginary literal
+    // (`4i`): Sema types it core.math's Complex, which lowering builds with
+    // that module's `#Builtin.Role(.ComplexFromParts)` function.
     math_receiver: Bool,
     // The Core source modules the spelling needs: a `Regex{…}` checked
     // literal (produced by `core.regex.compile`) needs core.regex, and a
@@ -4821,6 +4825,9 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
         }
         if collect_bare && tokens[index].kind == TOKEN_KW_IN && jet_driver_dotted_call(tokens, from, to, index) && !demand.source_modules.contains("core.time") {
             demand.source_modules.push("core.time")
+        }
+        if tokens[index].kind == TOKEN_UNIT_NUMBER && token_suffix(tables, tokens[index]) == "i" {
+            demand.math_receiver = true
         }
         if tokens[index].literal < 0 -> next
         loop part in token_string_parts(tables, tokens[index]) {

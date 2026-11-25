@@ -533,16 +533,11 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
     int_word(value)
 }
 
-#Export(c) jet_int_checked_fixed: fn(value: I64, kind: I64, file: I64, file_len: I64, line: I64) -> I64 {
-    if (kind < I64{0} || kind > I64{7}) {
-        int_stop(file, file_len, line, I64{3})
-        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    }
+// Whether the exact Int `value` is a value of the fixed kind `kind`, one of
+// 0..3 (I8, I16, I32, I64) or 4..7 (U8, U16, U32, U64).
+int_fixed_fits: fn(value: I64, kind: I64) -> Bool {
     negative: int_negative(value)
-    if (kind >= I64{4} && negative) {
-        int_stop(file, file_len, line, I64{3})
-        if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    }
+    if (kind >= I64{4} && negative) { return false }
     bound := U64{18446744073709551615}
     if {
         (kind == I64{0}) -> bound = if negative -> U64{128} else -> U64{127}
@@ -556,11 +551,24 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
         (kind == I64{6}) -> bound = U64{4294967295}
         else -> {}
     }
-    if !int_fits(value, bound) {
+    int_fits(value, bound)
+}
+
+#Export(c) jet_int_checked_fixed: fn(value: I64, kind: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    if (kind < I64{0} || kind > I64{7} || !int_fixed_fits(value, kind)) {
         int_stop(file, file_len, line, I64{3})
         if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     }
     int_word(value)
+}
+
+// 1 when the exact Int `value` is a value of the fixed kind `kind`
+// (jet_int_checked_fixed's kinds), else 0; a kind outside 0..7 is 0. Nothing
+// stops and nothing is built, so a 64-bit narrowing of a big Int (JetIR
+// ir_fixed_in_range) tests its fit with no boxed bound and no compare.
+#Export(c) jet_int_fixed_fits: fn(value: I64, kind: I64) -> I64 {
+    if (kind < I64{0} || kind > I64{7} || !int_fixed_fits(value, kind)) { return I64{0} }
+    I64{1}
 }
 
 int_mul_small_into: fn(node: I64, value: I64, factor: I64) {
