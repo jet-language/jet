@@ -3,7 +3,6 @@
 // immutable interface facts.
 use jet_foundation.[
     BodyHandleOp,
-    symbol_table_key,
     AccessConvention,
     CallArg,
     Diagnostic,
@@ -98,7 +97,15 @@ sema_plugin_checked_type_definition: fn(check: SemaBodyCheck, module_identity: M
     Val(check.program.checked_types[row])
 }
 
-sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, check: SemaBodyCheck, ty: Type, seen: [String]) -> ComponentTypeDescriptor? {
+// One nominal a component descriptor is being built for: its row in the
+// graph, (module index << 32) | nominal row, at the type `shape` spells. A
+// descriptor that reaches a step it is already in is recursive and has none.
+SemaPluginDescriptorStep: struct {
+    nominal: Int,
+    shape: String,
+}
+
+sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, check: SemaBodyCheck, ty: Type, seen: [SemaPluginDescriptorStep]) -> ComponentTypeDescriptor? {
     if ty == {
         .Int -> return Val(ComponentTypeDescriptor.Int)
         .Float -> return Val(ComponentTypeDescriptor.Float)
@@ -128,12 +135,12 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, check: SemaBo
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
             }
             if type_args.len() != definition.generic_params.len() -> return None
-            key := "{symbol_table_key(graph.symbols, nominal.symbol.id)}|{type_name(ty)}"
+            step: SemaPluginDescriptorStep{nominal: (nominal_row.module_index << 32) | nominal_row.row, shape: type_name(ty)}
             loop prior in seen {
-                if prior == key -> return None
+                if prior.nominal == step.nominal && prior.shape == step.shape -> return None
             }
             next_seen := seen
-            next_seen.push(key)
+            next_seen.push(step)
             generic_names := (loop parameter in definition.generic_params -> parameter.name)
             if definition.kind == {
                 .Alias(target) -> {
@@ -164,7 +171,7 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, check: SemaBo
 // fills the member `order[N]`.
 sema_plugin_result_descriptor: fn(graph: SemaRegistrationGraph, check: SemaBodyCheck, ty: Type, order: [String]) -> ComponentTypeDescriptor? {
     members: if ty == .Tuple(found) -> found else -> {
-        return sema_plugin_component_descriptor(graph, check, ty, [String]{})
+        return sema_plugin_component_descriptor(graph, check, ty, [SemaPluginDescriptorStep]{})
     }
     if members.len() != order.len() -> return None
     fields := [ComponentTypeField]{}
@@ -174,7 +181,7 @@ sema_plugin_result_descriptor: fn(graph: SemaRegistrationGraph, check: SemaBodyC
                 break candidate
             }
         } ?? return None
-        descriptor: sema_plugin_component_descriptor(graph, check, member.ty, [String]{}) ?? return None
+        descriptor: sema_plugin_component_descriptor(graph, check, member.ty, [SemaPluginDescriptorStep]{}) ?? return None
         if descriptor == {
             .Int | .Float | .Bool | .String -> fields.push(ComponentTypeField{index: index, name: name, ty: descriptor})
             .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) -> return None
@@ -303,7 +310,7 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     loop index in 0..<export_value.params.len() {
         parameter := export_value.params[index]
         required := sema_type_resolve_declared(graph, parameter.ty, check.environment.module_identity)
-        descriptor := sema_plugin_component_descriptor(graph, check, required, [String]{})
+        descriptor := sema_plugin_component_descriptor(graph, check, required, [SemaPluginDescriptorStep]{})
         if {
             descriptor == None -> {
                 sema_plugin_unsupported_component_diagnostic(export_value.name, required, checked_args[index].span, check.diagnostics)
