@@ -143,7 +143,7 @@ parser_prepare_tokens: fn(input: ^^[Token], tables: ^TokenTables) -> ParserFence
 // parser skips comment trivia itself. A fenced source is expanded over its
 // comment-free tokens, so a comment never splits or joins a fence entry.
 parser_prepare_declared: fn(input: ^^[Token], tables: ^TokenTables) -> ParserFenceExpansion {
-    tokens := input.move()
+    tokens: input.move()
     if !tables.has_fences {
         return ParserFenceExpansion{tokens: tokens.move(), fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
     }

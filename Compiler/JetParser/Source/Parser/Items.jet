@@ -178,7 +178,7 @@ ParsedUserPolicy: struct {
 }
 
 parser_user_policy_ahead: fn(state: ^JetParserState) -> Bool Never! {
-    token := parser_current(state)
+    token: parser_current(state)
     token.kind == TOKEN_IDENT && parser_value(state, token) == "policy"
 }
 
@@ -186,7 +186,7 @@ parser_user_policy_ahead: fn(state: ^JetParserState) -> Bool Never! {
 parser_parse_user_policy: fn(state: ^JetParserState) -> ParsedUserPolicy {
     start: parser_expect_name(state, "to start a policy declaration")
     name: parser_expect_name(state, "as the policy setting name")
-    params := parser_parse_param_list(state)
+    params: parser_parse_param_list(state)
     parser_expect(state, TOKEN_LBRACE, "before the policy wrapper")
     wrap: parser_expect_name(state, "`wrap` in a policy declaration")
     valid := true
@@ -201,13 +201,13 @@ parser_parse_user_policy: fn(state: ^JetParserState) -> ParsedUserPolicy {
         valid = false
     }
     parser_expect(state, TOKEN_RPAREN, "after the policy callable parameter")
-    body := parser_parse_block(state)
+    body: parser_parse_block(state)
     // The wrapper body's line end lexes as `;` before the outer `}` (skips
     // every `Semi` in this gap).
     parser_skip_semicolons(state)
     close: parser_expect(state, TOKEN_RBRACE, "after the policy wrapper body")
     parser_finish_statement(state)
-    value := UserPolicyDecl{is_pub: true, name: parser_value(state, name), name_span: name.span, params: params, body: body.statements, span: parser_cover(start.span, close.span)}
+    value: UserPolicyDecl{is_pub: true, name: parser_value(state, name), name_span: name.span, params: params, body: body.statements, span: parser_cover(start.span, close.span)}
     ParsedUserPolicy{value: value, valid: valid}
 }
 
@@ -242,12 +242,12 @@ parser_parse_item_or_import: fn(state: ^JetParserState) -> ParsedItemOrImport {
         }
         parser_state_section_ahead(state) -> {
             section_start: parser_current(state).span
-            section := parser_parse_state_section(state, "", section_start)
+            section: parser_parse_state_section(state, "", section_start)
             parser_report_ineligible_state_section(state, section, "module")
             return ParsedItemOrImport{item: None, handled: true}
         }
         parser_state_ahead(state) -> {
-            declaration := parser_parse_state_decl(state, modifiers)
+            declaration: parser_parse_state_decl(state, modifiers)
             parser_report_top_level_state_decl(state, declaration)
             return ParsedItemOrImport{item: None, handled: true}
         }
@@ -351,7 +351,7 @@ parser_report_top_level_state_decl: fn(state: ^JetParserState, declaration: Stat
         state_names = "{state_names}{state_name.name}"
         index += 1
     }
-    states := "{{ {state_names} }}"
+    states: "{{ {state_names} }}"
     parser_add_error_code(state, "E0157", declaration.span, "`state {declaration.type_name} {{ … }}` is not a type declaration", "Typestate facts belong to the struct that owns them; a sibling declaration repeats the type name and creates a false namespace boundary", "move the states into the owner: write `{declaration.type_name}: struct` with `state {states}` inside its body")
 }
 
@@ -368,16 +368,16 @@ parser_report_repeated_state_section: fn(state: ^JetParserState, section: StateD
 // declaration is reported with a fix that deletes it, and the declaration
 // parses as if it were absent.
 parser_parse_item_modifiers: fn(state: ^JetParserState, item_visibility: Bool) -> ParsedItemModifiers {
-    start := parser_current(state).span
+    start: parser_current(state).span
     is_pub := true
     is_package_pub := false
-    is_comptime := false
+    is_comptime: false
     markers := [Marker]{}
     marker_chunks := 0
     bracket_chunks := 0
     sequence := parser_current(state).span
     loop {
-        kind := parser_current_kind(state)
+        kind: parser_current_kind(state)
         if kind == TOKEN_KW_PRIV {
             word: parser_bump(state)
             marker_span := word.span
@@ -507,8 +507,8 @@ parser_check_empty_marker_parens: fn(state: ^JetParserState, name: String, paren
 parser_marker_first_expr: fn(marker: Marker) -> Expr? {
     if marker.args.len() == 0 -> return None
     if marker.args[0] == {
-        .Expr(value) -> return Val(value)
-        .EffectRow(_, _) -> return None
+        .Expr(value) -> Val(value)
+        .EffectRow(_, _) -> None
     }
 }
 
@@ -578,7 +578,7 @@ parser_parse_import_row: fn(state: ^JetParserState, start: Span) -> ImportDecl {
     last_span := first.span
     parts := [Token]{first}
     loop parser_current_kind(state) == TOKEN_DOT {
-        next_kind := parser_lookahead(state, 1).kind
+        next_kind: parser_lookahead(state, 1).kind
         if next_kind == TOKEN_LBRACKET || next_kind == TOKEN_STAR -> break
         parser_bump(state)
         member: parser_expect_name(state, "after `.` in an import path")
@@ -586,7 +586,7 @@ parser_parse_import_row: fn(state: ^JetParserState, start: Span) -> ImportDecl {
         path = "{path}.{parser_value(state, member)}"
         last_span = member.span
     }
-    module_span := parser_cover(first.span, last_span)
+    module_span: parser_cover(first.span, last_span)
     if parser_current_kind(state) == TOKEN_DOT {
         parser_bump(state)
         if parser_current_kind(state) == TOKEN_LBRACKET {
@@ -600,7 +600,7 @@ parser_parse_import_row: fn(state: ^JetParserState, start: Span) -> ImportDecl {
             star: parser_bump(state)
             parser_add_fatal_code(state, "E0612", star.span, "wildcard imports are not supported", "`use {path}.*` would hide where each name comes from", "list each item instead: `use {path}.[item, other]`")
             parser_finish_statement(state)
-            end := parser_lookahead(state, -1).span
+            end: parser_lookahead(state, -1).span
             return ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: parser_value(state, parts[parts.len() - 1]), alias_span: start, span: parser_cover(start, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
         }
         suffix: parser_current(state)
@@ -623,9 +623,9 @@ parser_parse_import_row: fn(state: ^JetParserState, start: Span) -> ImportDecl {
     parser_finish_statement(state)
     end := last_span
     if state.position > 0 -> end = parser_lookahead(state, -1).span
-    span := parser_cover(start, end)
+    span: parser_cover(start, end)
     if parts.len() == 2 && !explicit_alias {
-        item_span := parts[1].span
+        item_span: parts[1].span
         return ImportDecl{kind: ImportKind.Unqualified{module_alias: parser_value(state, first), module_alias_span: first.span, items: [ImportedItem]{ImportedItem{original: parser_value(state, parts[1]), alias: None}}, items_span: item_span, span: span}, alias: alias, alias_span: item_span, span: span, item_spans: [Span]{item_span}, local_spans: [Span]{item_span}, is_pub: false, is_package_pub: false, inline_version: None}
     }
     ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: alias, alias_span: alias_span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: inline_version}
@@ -637,7 +637,7 @@ parser_parse_import_member_list: fn(state: ^JetParserState, start: Span, module_
     items := [ImportedItem]{}
     item_spans := [Span]{}
     local_spans := [Span]{}
-    next_kind := parser_current_kind(state)
+    next_kind: parser_current_kind(state)
     if next_kind == close_kind || next_kind == TOKEN_EOF {
         parser_add_error(state, open.span, "an import member list cannot be empty", "the `.[…]` form must name at least one member", "write `use {module_alias}.[member]`")
     }
@@ -660,16 +660,16 @@ parser_parse_import_member_list: fn(state: ^JetParserState, start: Span, module_
         parser_bump(state)
     }
     close: parser_expect(state, TOKEN_RBRACKET, "`]` after imported members")
-    items_span := parser_cover(open.span, close.span)
+    items_span: parser_cover(open.span, close.span)
     parser_finish_statement(state)
-    end := parser_lookahead(state, -1).span
-    span := parser_cover(start, end)
+    end: parser_lookahead(state, -1).span
+    span: parser_cover(start, end)
     ImportDecl{kind: ImportKind.Unqualified{module_alias: module_alias, module_alias_span: module_alias_span, items: items, items_span: items_span, span: span}, alias: module_alias, alias_span: module_alias_span, span: span, item_spans: item_spans, local_spans: local_spans, is_pub: false, is_package_pub: false, inline_version: None}
 }
 
 parser_parse_inline_version: fn(state: ^JetParserState) -> InlineVersion {
     hash: parser_bump(state)
-    first := parser_current(state)
+    first: parser_current(state)
     if first.kind != TOKEN_INT && first.kind != TOKEN_FLOAT {
         parser_add_error(state, first.span, "expected a version number after `#`", "`use package#version;` pins an inline dependency version", "write numeric version components after `#`")
         return InlineVersion{text: "", span: hash.span}
@@ -766,11 +766,14 @@ parser_parse_param_list: fn(state: ^JetParserState) -> [Param] {
                 }
                 parser_current_kind(state) == TOKEN_STAR -> {
                     span: parser_bump(state).span
-                    if star != None {
-                        parser_add_error_code(state, "E0763", span, "`*` appears twice in this parameter list", "each parameter list has at most one positional-only `/` and one label-only `*`", "remove the extra `*`")
-                    } else {
-                        star = Val(span)
-                        zone = ParamZone.LabelOnly
+                    if {
+                        star != None -> {
+                            parser_add_error_code(state, "E0763", span, "`*` appears twice in this parameter list", "each parameter list has at most one positional-only `/` and one label-only `*`", "remove the extra `*`")
+                        }
+                        else -> {
+                            star = Val(span)
+                            zone = ParamZone.LabelOnly
+                        }
                     }
                 }
                 else -> params.push(parser_parse_param(state, zone))
@@ -874,29 +877,35 @@ parser_parse_param: fn(state: ^JetParserState, zone: ParamZone) -> Param {
     if name.kind == TOKEN_SELF && convention != AccessConvention.Move && parser_current_kind(state) == TOKEN_DOT {
         parser_bump(state)
         fields := [NamedSpan]{}
-        if parser_current_kind(state) == TOKEN_LBRACKET {
-            parser_bump(state)
-            if parser_current_kind(state) != TOKEN_RBRACKET {
-                loop {
-                    if parser_current_kind(state) == TOKEN_IDENT {
-                        field: parser_bump(state)
-                        fields.push(NamedSpan{name: parser_value(state, field), span: field.span})
-                    } else {
-                        bad: parser_current(state).span
-                        parser_add_error_code(state, "E0961", bad, "`.[ ]` lists member names, not calls or expressions", "member spread names fields or package names that hang off the prefix", "write bare names like `default.[cargo, ripgrep]`")
-                        loop parser_current_kind(state) != TOKEN_COMMA && parser_current_kind(state) != TOKEN_RBRACKET && parser_current_kind(state) != TOKEN_EOF {
-                            parser_bump(state)
+        if {
+            parser_current_kind(state) == TOKEN_LBRACKET -> {
+                parser_bump(state)
+                if parser_current_kind(state) != TOKEN_RBRACKET {
+                    loop {
+                        if {
+                            parser_current_kind(state) == TOKEN_IDENT -> {
+                                field: parser_bump(state)
+                                fields.push(NamedSpan{name: parser_value(state, field), span: field.span})
+                            }
+                            else -> {
+                                bad: parser_current(state).span
+                                parser_add_error_code(state, "E0961", bad, "`.[ ]` lists member names, not calls or expressions", "member spread names fields or package names that hang off the prefix", "write bare names like `default.[cargo, ripgrep]`")
+                                loop parser_current_kind(state) != TOKEN_COMMA && parser_current_kind(state) != TOKEN_RBRACKET && parser_current_kind(state) != TOKEN_EOF {
+                                    parser_bump(state)
+                                }
+                            }
                         }
+                        if parser_current_kind(state) != TOKEN_COMMA -> break
+                        parser_bump(state)
+                        if parser_current_kind(state) == TOKEN_RBRACKET -> break
                     }
-                    if parser_current_kind(state) != TOKEN_COMMA -> break
-                    parser_bump(state)
-                    if parser_current_kind(state) == TOKEN_RBRACKET -> break
                 }
+                _ := parser_expect(state, TOKEN_RBRACKET, "`]` to close a member spread `.[…]`")
             }
-            _ := parser_expect(state, TOKEN_RBRACKET, "`]` to close a member spread `.[…]`")
-        } else {
-            field: parser_expect_name(state, "for a receiver footprint field")
-            fields.push(NamedSpan{name: parser_value(state, field), span: field.span})
+            else -> {
+                field: parser_expect_name(state, "for a receiver footprint field")
+                fields.push(NamedSpan{name: parser_value(state, field), span: field.span})
+            }
         }
         declared_footprint = Val(fields)
     }
@@ -917,7 +926,7 @@ parser_parse_param: fn(state: ^JetParserState, zone: ParamZone) -> Param {
                 param_name: parser_text(state, name)
                 parser_add_error(state, name.span, "expected `:` after the parameter `{param_name}`", "every parameter except `self` needs a type after its name", "write `{param_name}: Type`")
             }
-            cap_kind := parser_current_kind(state)
+            cap_kind: parser_current_kind(state)
             if parser_write_mark(cap_kind) || parser_take_mark(cap_kind) {
                 cap: parser_bump(state)
                 type_convention: if parser_write_mark(cap.kind) -> AccessConvention.Write else -> AccessConvention.Move
@@ -974,13 +983,17 @@ parser_parse_param: fn(state: ^JetParserState, zone: ParamZone) -> Param {
         sources := [String]{}
         loop {
             source: parser_current(state)
-            if source.kind == TOKEN_SELF || (source.kind == TOKEN_IDENT && parser_value(state, source) == "self") {
-                parser_bump(state)
-                sources.push("self")
-            } else if source.kind == TOKEN_IDENT {
-                parser_bump(state)
-                sources.push(parser_value(state, source))
-            } else { break }
+            if {
+                source.kind == TOKEN_SELF || (source.kind == TOKEN_IDENT && parser_value(state, source) == "self") -> {
+                    parser_bump(state)
+                    sources.push("self")
+                }
+                source.kind == TOKEN_IDENT -> {
+                    parser_bump(state)
+                    sources.push(parser_value(state, source))
+                }
+                else -> { break }
+            }
             // A projection names a field of the source; the requirement keys
             // on the owner name only.
             loop parser_current_kind(state) == TOKEN_DOT {
@@ -1019,30 +1032,33 @@ parser_parse_function: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
         func_name = parser_value(state, method)
         func_name_span = method.span
     }
-    type_params := parser_parse_type_params(state)
+    type_params: parser_parse_type_params(state)
     // S83: one bare variant head, `Circle(r: Float)` or `Empty()`, in place
     // of the parameter list; its payload parameters feed sema's dispatch fold.
     // A unit head is a variant name: `twice: fn(n)` is one untyped parameter
     // and reports the missing type, not a variant head.
     head_pattern := Pattern?{None}
     params := [Param]{}
-    if parser_current_kind(state) == TOKEN_LPAREN && parser_kind_at(state, 1) == TOKEN_IDENT && (parser_kind_at(state, 2) == TOKEN_LPAREN || (parser_kind_at(state, 2) == TOKEN_RPAREN && parser_pascal_name(parser_value_at(state, 1)))) {
-        parser_bump(state)
-        variant: parser_expect_name(state, "for a multi-head variant")
-        pattern_end := variant.span.end
-        if parser_current_kind(state) == TOKEN_LPAREN {
-            params = parser_parse_param_list(state)
-            pattern_end = parser_lookahead(state, -1).span.end
-        }
-        parser_expect(state, TOKEN_RPAREN, "`)` after a multi-head variant")
-        bindings := [PatSlot]{}
-        loop param in params {
-            if param.name == "_" -> bindings.push(PatSlot.Wildcard) else {
-                bindings.push(PatSlot.Bind{name: param.name, span: param.name_span})
+    if {
+        parser_current_kind(state) == TOKEN_LPAREN && parser_kind_at(state, 1) == TOKEN_IDENT && (parser_kind_at(state, 2) == TOKEN_LPAREN || (parser_kind_at(state, 2) == TOKEN_RPAREN && parser_pascal_name(parser_value_at(state, 1)))) -> {
+            parser_bump(state)
+            variant: parser_expect_name(state, "for a multi-head variant")
+            pattern_end := variant.span.end
+            if parser_current_kind(state) == TOKEN_LPAREN {
+                params = parser_parse_param_list(state)
+                pattern_end = parser_lookahead(state, -1).span.end
             }
+            parser_expect(state, TOKEN_RPAREN, "`)` after a multi-head variant")
+            bindings := [PatSlot]{}
+            loop param in params {
+                if param.name == "_" -> bindings.push(PatSlot.Wildcard) else {
+                    bindings.push(PatSlot.Bind{name: param.name, span: param.name_span})
+                }
+            }
+            head_pattern = Val(Pattern.Variant{variant: parser_value(state, variant), bindings: bindings, leading_dot: false, span: Span{start: variant.span.start, end: pattern_end}})
         }
-        head_pattern = Val(Pattern.Variant{variant: parser_value(state, variant), bindings: bindings, leading_dot: false, span: Span{start: variant.span.start, end: pattern_end}})
-    } else { params = parser_parse_param_list(state) }
+        else -> { params = parser_parse_param_list(state) }
+    }
     // `x.copy()` and `x.move()` are the compiler's own
     // copy and take, so a method may not take either name (E0436). A module
     // function keeps it (`files.move(from, to)`).
@@ -1113,18 +1129,21 @@ parser_parse_function: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
     }
     if body_marker && parser_current_kind(state) != TOKEN_LBRACE {
         value_body = true
-        if parser_function_body_missing(state) {
-            missing: parser_current(state).span
-            parser_add_error_code(state, "E0081", missing, "`{func_name}: fn` has no body", "Jet functions are defined, not declared: a signature without `{{ … }}` is not a complete function. Host and FFI cells use `#Import` / `#FFI` with their required body form.", "Add a `{{ … }}` block.")
-        } else {
-            if arrow_marker -> parser_report_arrow_function_body(state, marker_span)
-            if effect_body && teach_arrow_body {
-                body_span: parser_current(state).span
-                parser_report_arrow_function_body(state, body_span)
+        if {
+            parser_function_body_missing(state) -> {
+                missing: parser_current(state).span
+                parser_add_error_code(state, "E0081", missing, "`{func_name}: fn` has no body", "Jet functions are defined, not declared: a signature without `{{ … }}` is not a complete function. Host and FFI cells use `#Import` / `#FFI` with their required body form.", "Add a `{{ … }}` block.")
             }
-            value: parser_parse_expression(state, 1, 0)
-            parser_finish_statement(state)
-            retired_body = Val(Stmt.Expr{expr: value.expr})
+            else -> {
+                if arrow_marker -> parser_report_arrow_function_body(state, marker_span)
+                if effect_body && teach_arrow_body {
+                    body_span: parser_current(state).span
+                    parser_report_arrow_function_body(state, body_span)
+                }
+                value: parser_parse_expression(state, 1, 0)
+                parser_finish_statement(state)
+                retired_body = Val(Stmt.Expr{expr: value.expr})
+            }
         }
     }
     signature_end := parser_lookahead(state, -1).span
@@ -1382,20 +1401,23 @@ parser_parse_opt_func_effects: fn(state: ^JetParserState) -> ParsedFuncEffects {
 parser_parse_effect_row_entries: fn(state: ^JetParserState, close: Int) -> [EffectRowEntry] {
     effects := [EffectRowEntry]{}
     loop parser_current_kind(state) != close && !parser_aborting(state) {
-        if parser_current_kind(state) == TOKEN_DOT_DOT {
-            parser_bump(state)
-            open_name: parser_expect_name(state, "for an open effect-row name")
-            effects.push(EffectRowEntry{name: "..{parser_value(state, open_name)}", span: open_name.span})
-        } else {
-            prohibited: parser_current_kind(state) == TOKEN_BANG
-            if prohibited -> parser_bump(state)
-            entry: parser_expect_effect_path_name(state)
-            if !prohibited && (entry.name.starts_with("Mem.Alloc(") || entry.name.starts_with("Mem.Stack(")) {
-                parser_add_fatal_code(state, "E0119", entry.span, "`{entry.name}` is only valid as a memory denial", "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound", "write `-[!{entry.name}]>`")
-                break
+        if {
+            parser_current_kind(state) == TOKEN_DOT_DOT -> {
+                parser_bump(state)
+                open_name: parser_expect_name(state, "for an open effect-row name")
+                effects.push(EffectRowEntry{name: "..{parser_value(state, open_name)}", span: open_name.span})
             }
-            name: if prohibited -> "!{entry.name}" else -> entry.name
-            effects.push(EffectRowEntry{name: name, span: entry.span})
+            else -> {
+                prohibited: parser_current_kind(state) == TOKEN_BANG
+                if prohibited -> parser_bump(state)
+                entry: parser_expect_effect_path_name(state)
+                if !prohibited && (entry.name.starts_with("Mem.Alloc(") || entry.name.starts_with("Mem.Stack(")) {
+                    parser_add_fatal_code(state, "E0119", entry.span, "`{entry.name}` is only valid as a memory denial", "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound", "write `-[!{entry.name}]>`")
+                    break
+                }
+                name: if prohibited -> "!{entry.name}" else -> entry.name
+                effects.push(EffectRowEntry{name: name, span: entry.span})
+            }
         }
         if parser_current_kind(state) == close -> break
         parser_expect(state, TOKEN_COMMA, "`,` between effects in the row")
@@ -1602,12 +1624,15 @@ parser_parse_callable_result: fn(state: ^JetParserState) -> ParsedCallableResult
         parser_at_unified_arrow(state) -> {
             before: state.position
             parser_bump(state)
-            if parser_result_type_follows_arrow(state) {
-                plain_arrow = true
-                result = Val(parser_parse_type(state, 0))
-            } else {
-                result = parser_parse_unit_fallible_return(state)
-                if parser_has_type(result) -> plain_arrow = true else -> state.position = before
+            if {
+                parser_result_type_follows_arrow(state) -> {
+                    plain_arrow = true
+                    result = Val(parser_parse_type(state, 0))
+                }
+                else -> {
+                    result = parser_parse_unit_fallible_return(state)
+                    if parser_has_type(result) -> plain_arrow = true else -> state.position = before
+                }
             }
         }
         else -> { result = parser_parse_unit_fallible_return(state) }
@@ -1834,7 +1859,7 @@ parser_apply_function_markers: fn(state: ^JetParserState, func: ^Func, markers: 
             .Unsafe -> {
                 func.is_unsafe = true
                 func.unsafe_span = Val(marker.span)
-                first := parser_marker_first_expr(marker)
+                first: parser_marker_first_expr(marker)
                 if first == .Val(reason) -> func.unsafe_reason = parser_expr_literal_string(reason)
                 if parser_unsafe_obligation_policy(state, marker, PolicyScope.Function, func.span) == .Val(declaration) {
                     state.block_policy_declarations.push(declaration)
@@ -1902,15 +1927,18 @@ parser_apply_function_markers: fn(state: ^JetParserState, func: ^Func, markers: 
             // A callable chain (`#Policy(retry(3))`) stays a marker; the scoped
             // form declares function-scoped policies targeting the function.
             .Policy -> {
-                if parser_callable_policy_marker(marker) {
-                    if callable_policy_seen {
-                        parser_add_fatal_code(state, "E0355", marker.span, "a function can have only one `#Policy` callable chain", "the declaration marker supplies one default chain; a call-site `apply(...)` supplies replacements", "merge the policies into one `#Policy(...)` marker")
-                        return
+                if {
+                    parser_callable_policy_marker(marker) -> {
+                        if callable_policy_seen {
+                            parser_add_fatal_code(state, "E0355", marker.span, "a function can have only one `#Policy` callable chain", "the declaration marker supplies one default chain; a call-site `apply(...)` supplies replacements", "merge the policies into one `#Policy(...)` marker")
+                            return
+                        }
+                        callable_policy_seen = true
                     }
-                    callable_policy_seen = true
-                } else {
-                    declarations: parser_policy_declarations_from_marker(state, marker, PolicyScope.Function) ?? return
-                    loop declaration in declarations -> policy.push(declaration)
+                    else -> {
+                        declarations: parser_policy_declarations_from_marker(state, marker, PolicyScope.Function) ?? return
+                        loop declaration in declarations -> policy.push(declaration)
+                    }
                 }
             }
             .Meta -> {
@@ -1936,11 +1964,14 @@ parser_apply_function_markers: fn(state: ^JetParserState, func: ^Func, markers: 
                     return
                 }
                 values: parser_marker_bindings(marker, [String]{"mode"}) ?? [Expr?]{None}
-                if values[0] == .Val(mode) && parser_marker_enum_variant(mode) == "parallel" {
-                    func.kernel = Val(KernelMarker{mode: KernelMode.Parallel, span: marker.span, proof: None})
-                } else {
-                    parser_marker_shape_fatal(state, marker)
-                    return
+                if {
+                    values[0] == .Val(mode) && parser_marker_enum_variant(mode) == "parallel" -> {
+                        func.kernel = Val(KernelMarker{mode: KernelMode.Parallel, span: marker.span, proof: None})
+                    }
+                    else -> {
+                        parser_marker_shape_fatal(state, marker)
+                        return
+                    }
                 }
             }
             // `#State(S)` and `#State(A -> B)` are retired: state types carry
@@ -1954,11 +1985,14 @@ parser_apply_function_markers: fn(state: ^JetParserState, func: ^Func, markers: 
             }
             .Undo -> {
                 values: parser_marker_bindings(marker, [String]{"inverse"}) ?? [Expr?]{None}
-                if values[0] == .Val(written) && written == .Ident(inverse, span, _) {
-                    func.undo = Val(NamedSpan{name: inverse, span: span})
-                } else {
-                    parser_marker_shape_fatal(state, marker)
-                    return
+                if {
+                    values[0] == .Val(written) && written == .Ident(inverse, span, _) -> {
+                        func.undo = Val(NamedSpan{name: inverse, span: span})
+                    }
+                    else -> {
+                        parser_marker_shape_fatal(state, marker)
+                        return
+                    }
                 }
             }
             .Target -> {
@@ -2045,15 +2079,18 @@ parser_function_web_partition: fn(state: ^JetParserState, marker: Marker) -> Web
     if name == "Wasm" -> return Val(WebPartitionMarker.Wasm)
     if name == "JS" -> return Val(WebPartitionMarker.JS)
     segments: name.split(".").to_list()
-    if segments.len() > 1 && segments[0] == "OS" {
-        os: segments[1..<segments.len()].join(".")
-        if target_os_named(os) == None {
-            parser_add_fatal_code(state, "E0003", expr_span(target), "`#Target(OS.{os})` is not a known OS", "OS targets are {target_os_gates()}", "write `#Target(OS.Linux)` or another OS of the list")
+    if {
+        segments.len() > 1 && segments[0] == "OS" -> {
+            os: segments[1..<segments.len()].join(".")
+            if target_os_named(os) == None {
+                parser_add_fatal_code(state, "E0003", expr_span(target), "`#Target(OS.{os})` is not a known OS", "OS targets are {target_os_gates()}", "write `#Target(OS.Linux)` or another OS of the list")
+                return None
+            }
+        }
+        name != "Web" -> {
+            parser_add_fatal_code(state, "E0003", expr_span(target), "`#Target({name})` is not a known web partition", "web targets are `Wasm` (compute), `JS` (DOM/view), `Web` (default CLI backend), or `OS.Linux`/`OS.MacOS`/`OS.Windows` (native platform gating)", "write `#Target(Wasm)`, `#Target(JS)`, `#Target(Web)`, or `#Target(OS.{{Linux|MacOS|Windows}})`")
             return None
         }
-    } else if name != "Web" {
-        parser_add_fatal_code(state, "E0003", expr_span(target), "`#Target({name})` is not a known web partition", "web targets are `Wasm` (compute), `JS` (DOM/view), `Web` (default CLI backend), or `OS.Linux`/`OS.MacOS`/`OS.Windows` (native platform gating)", "write `#Target(Wasm)`, `#Target(JS)`, `#Target(Web)`, or `#Target(OS.{{Linux|MacOS|Windows}})`")
-        return None
     }
     parser_add_fatal_code(state, "E0003", marker.span, "`#Target` on a function needs `Wasm` or `JS`", "function target rules select one web partition", "write `#Target(Wasm)` or `#Target(JS)`")
     None
@@ -2106,7 +2143,7 @@ parser_parse_struct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) 
         member_modifiers := parser_parse_item_modifiers(state, false)
         if parser_state_section_ahead(state) {
             type_name: parser_value(state, name)
-            section := parser_parse_state_section(state, type_name, name.span)
+            section: parser_parse_state_section(state, type_name, name.span)
             if value.state == {
                 .None -> { value.state = Val(section) }
                 .Val(_) -> parser_report_repeated_state_section(state, section, type_name)
@@ -2157,15 +2194,15 @@ parser_parse_struct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) 
                 }
             }
             else -> {
-                field_markers := member_modifiers.markers
-                field_pub := member_modifiers.is_pub
-                field_package_pub := member_modifiers.is_package_pub
+                field_markers: member_modifiers.markers
+                field_pub: member_modifiers.is_pub
+                field_package_pub: member_modifiers.is_package_pub
                 field_name: parser_field_name(state, "in a struct field")
                 parser_expect(state, TOKEN_COLON, "`:` after a struct field name")
                 field_type: parser_parse_type(state, 0)
                 computed := Expr?{None}
                 default := Expr?{None}
-                default_kind := parser_current_kind(state)
+                default_kind: parser_current_kind(state)
                 if {
                     // `name: T -> expr` is a computed field;
                     // sema rewrites sibling field names to `self.<field>`.
@@ -2255,7 +2292,7 @@ parser_parse_enum: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) ->
             next
         }
         if parser_state_section_ahead(state) {
-            section := parser_parse_state_section(state, value.name, value.name_span)
+            section: parser_parse_state_section(state, value.name, value.name_span)
             if value.state == {
                 .None -> { value.state = Val(section) }
                 .Val(_) -> parser_report_repeated_state_section(state, section, value.name)
@@ -2315,16 +2352,19 @@ parser_parse_variant_markers: fn(state: ^JetParserState) -> [Marker] {
     bracket_chunks := 0
     sequence := parser_current(state).span
     loop parser_current_kind(state) == TOKEN_HASH && !parser_aborting(state) {
-        if parser_kind_at(state, 1) == TOKEN_LBRACKET {
-            group: parser_parse_marker_group_list(state)
-            loop marker in group.markers -> markers.push(marker)
-            sequence.end = group.span.end
-            bracket_chunks += 1
-        } else {
-            marker: parser_parse_marker(state)
-            markers.push(marker.copy())
-            sequence.end = marker.span.end
-            parser_skip_semicolons(state)
+        if {
+            parser_kind_at(state, 1) == TOKEN_LBRACKET -> {
+                group: parser_parse_marker_group_list(state)
+                loop marker in group.markers -> markers.push(marker)
+                sequence.end = group.span.end
+                bracket_chunks += 1
+            }
+            else -> {
+                marker: parser_parse_marker(state)
+                markers.push(marker.copy())
+                sequence.end = marker.span.end
+                parser_skip_semicolons(state)
+            }
         }
         chunks += 1
     }
@@ -2347,9 +2387,12 @@ parser_parse_variant_entry: fn(state: ^JetParserState, prefix: String, value: ^E
         open: parser_bump(state)
         parsed: parser_parse_variant_payload(state)
         close: parser_expect(state, TOKEN_RPAREN, "`)` after a variant's payload")
-        if parser_current_kind(state) == TOKEN_LBRACE {
-            parser_add_error_code(state, "E0331", parser_cover(open.span, close.span), "group `{path}` can't carry a payload", "a variant group only names its subtree — data lives on the leaf variants", "move the payload onto the leaf variants inside the `{{ }}`, or remove the `(...)`")
-        } else { payload = parsed }
+        if {
+            parser_current_kind(state) == TOKEN_LBRACE -> {
+                parser_add_error_code(state, "E0331", parser_cover(open.span, close.span), "group `{path}` can't carry a payload", "a variant group only names its subtree — data lives on the leaf variants", "move the payload onto the leaf variants inside the `{{ }}`, or remove the `(...)`")
+            }
+            else -> { payload = parsed }
+        }
     }
     discriminant := Int?{None}
     discriminant_expr := Expr?{None}
@@ -2471,7 +2514,7 @@ parser_parse_trait_impl_block: fn(state: ^JetParserState, above: [Marker]) -> Tr
             next
         }
         if parser_state_section_ahead(state) {
-            section := parser_parse_state_section(state, "", token.span)
+            section: parser_parse_state_section(state, "", token.span)
             parser_report_ineligible_state_section(state, section, "impl")
             next
         }
@@ -2580,22 +2623,29 @@ parser_parse_const: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) -
     binding_name: parser_value(state, name_token)
     prepared := false
     parsed_value := ParsedExpr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}, span: start.span}
-    if parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) {
-        head: parser_bump(state)
-        block: parser_parse_value_block(state, 0, true)
-        span: parser_cover(head.span, block.span)
-        parsed_value = ParsedExpr{expr: Expr.Unit{span: span, id: parser_node_id(state)}, span: span}
-        if block.statements.len() == 0 && block.tail == .Val(tail) {
-            prepared = true
-            parsed_value = ParsedExpr{expr: tail, span: span}
-        } else {
-            parser_add_error_code(state, "E0391", span, "`#run {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `NAME: #run value` with one final expression, or a `#run {{ … }}` statement")
+    if {
+        parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) -> {
+            head: parser_bump(state)
+            block: parser_parse_value_block(state, 0, true)
+            span: parser_cover(head.span, block.span)
+            parsed_value = ParsedExpr{expr: Expr.Unit{span: span, id: parser_node_id(state)}, span: span}
+            if {
+                block.statements.len() == 0 && block.tail == .Val(tail) -> {
+                    prepared = true
+                    parsed_value = ParsedExpr{expr: tail, span: span}
+                }
+                else -> {
+                    parser_add_error_code(state, "E0391", span, "`#run {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `NAME: #run value` with one final expression, or a `#run {{ … }}` statement")
+                }
+            }
         }
-    } else if parser_prep_operand_ahead(state, 0) {
-        prepared = true
-        parsed_value = parser_parse_prep_operand(state)
-    } else { parsed_value = parser_parse_expression(state, 1, 0) }
-    terminator := parser_current(state)
+        parser_prep_operand_ahead(state, 0) -> {
+            prepared = true
+            parsed_value = parser_parse_prep_operand(state)
+        }
+        else -> { parsed_value = parser_parse_expression(state, 1, 0) }
+    }
+    terminator: parser_current(state)
     terminator_span := terminator.span
     if terminator.kind == TOKEN_RBRACE || terminator.kind == TOKEN_EOF {
         terminator_span = parsed_value.span
@@ -2728,12 +2778,12 @@ parser_parse_persist_binding: fn(state: ^JetParserState) -> Item? {
 // `Name<N: Int>: Bound #run { if cond -> Type else -> Type }`.
 parser_parse_type_alias: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) -> TypeAliasDef {
     name: parser_bump(state)
-    type_params := parser_parse_type_params(state)
+    type_params: parser_parse_type_params(state)
     parser_expect(state, TOKEN_COLON, "`:` before the aliased type")
-    target := if {
+    target: if {
         parser_state_section_ahead(state) -> {
             section_start: parser_current(state).span
-            section := parser_parse_state_section(state, "", section_start)
+            section: parser_parse_state_section(state, "", section_start)
             parser_report_ineligible_state_section(state, section, "alias")
             ParsedType{ty: Type.Named{name: "__jet_error"}, span: section.span}
         }
@@ -2852,7 +2902,7 @@ parser_parse_trait: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) -
         }
         if parser_state_section_ahead(state) {
             section_start: parser_current(state).span
-            section := parser_parse_state_section(state, "", section_start)
+            section: parser_parse_state_section(state, "", section_start)
             parser_report_ineligible_state_section(state, section, "trait")
             next
         }
@@ -2894,13 +2944,16 @@ parser_parse_trait: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) -
             // `#Test name: fn(a: Self, …) { … }` is a law, its `#Pre` lines
             // above it.
             parser_current_kind(state) == TOKEN_KW_FN || parser_current_kind(state) == TOKEN_HASH -> {
-                method_modifiers := parser_parse_item_modifiers(state, false)
+                method_modifiers: parser_parse_item_modifiers(state, false)
                 if parser_test_ahead(state) {
                     law_start: parser_current(state).span
                     if parser_parse_test(state, method_modifiers.markers) == .Test(law) {
-                        if law.fn_keyword_span == None || law.params.len() == 0 {
-                            parser_add_error(state, law_start, "a law takes the values it checks as parameters", "a `#Test` in a trait body is a law: `jet test` runs it on generated values of every type that implements the trait", "write `#Test name: fn(a: Self) {{ … }}`")
-                        } else { laws.push(law) }
+                        if {
+                            law.fn_keyword_span == None || law.params.len() == 0 -> {
+                                parser_add_error(state, law_start, "a law takes the values it checks as parameters", "a `#Test` in a trait body is a law: `jet test` runs it on generated values of every type that implements the trait", "write `#Test name: fn(a: Self) {{ … }}`")
+                            }
+                            else -> { laws.push(law) }
+                        }
                     }
                     next
                 }
@@ -2910,7 +2963,7 @@ parser_parse_trait: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) -
                     next
                 }
                 parsed: parser_parse_function(state, method_modifiers, false)
-                method := parsed.value
+                method: parsed.value
                 default_body := [Stmt]?{None}
                 if parsed.has_body -> default_body = Val(method.body) else {
                     parser_finish_data_member(state, "requirement")
@@ -3076,11 +3129,14 @@ parser_parse_operator_rhs: fn(state: ^JetParserState, trait_name: String?, owner
     }
     if name == "To" {
         source: parser_source_text(state, rhs.span)
-        if owner == .Val(target) && head == .Val(start) {
-            whole: Span{start: start.start, end: parser_prev_token_end(state)}
-            parser_add_error_code_edit(state, "E0003", whole, "`impl {target}.To({source})` is not an impl", "`To(T)` is only a bound: `S: To({source})` holds when `{source}.From(S)` exists, so a conversion is written on the type it makes", "write `impl {source}.From({target})`", TextEdit{span: whole, new_text: "{source}.From({target})"})
-        } else {
-            parser_add_error(state, rhs.span, "`impl To({source})` is not an impl", "`To(T)` is only a bound: `S: To({source})` holds when `{source}.From(S)` exists, so a conversion is written on the type it makes", "write `impl {source}.From(ThisType)` at the top level")
+        if {
+            owner == .Val(target) && head == .Val(start) -> {
+                whole: Span{start: start.start, end: parser_prev_token_end(state)}
+                parser_add_error_code_edit(state, "E0003", whole, "`impl {target}.To({source})` is not an impl", "`To(T)` is only a bound: `S: To({source})` holds when `{source}.From(S)` exists, so a conversion is written on the type it makes", "write `impl {source}.From({target})`", TextEdit{span: whole, new_text: "{source}.From({target})"})
+            }
+            else -> {
+                parser_add_error(state, rhs.span, "`impl To({source})` is not an impl", "`To(T)` is only a bound: `S: To({source})` holds when `{source}.From(S)` exists, so a conversion is written on the type it makes", "write `impl {source}.From(ThisType)` at the top level")
+            }
         }
         return None
     }
@@ -3258,7 +3314,7 @@ parser_parse_impl: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) ->
             next
         }
         if parser_state_section_ahead(state) {
-            section := parser_parse_state_section(state, "", token.span)
+            section: parser_parse_state_section(state, "", token.span)
             parser_report_ineligible_state_section(state, section, "impl")
             next
         }

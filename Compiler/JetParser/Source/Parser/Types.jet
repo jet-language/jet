@@ -783,13 +783,16 @@ parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: S
             if {
                 token.kind == TOKEN_SLASH -> {
                     parser_bump(state)
-                    if saw_slash || saw_star || params.len() == 0 {
-                        parser_report_fn_type_zone(state, token.span)
-                    } else {
-                        saw_slash = true
-                        positional := [ParamZone]{}
-                        loop _ in zones -> positional.push(ParamZone.PositionalOnly)
-                        zones = positional
+                    if {
+                        saw_slash || saw_star || params.len() == 0 -> {
+                            parser_report_fn_type_zone(state, token.span)
+                        }
+                        else -> {
+                            saw_slash = true
+                            positional := [ParamZone]{}
+                            loop _ in zones -> positional.push(ParamZone.PositionalOnly)
+                            zones = positional
+                        }
                     }
                 }
                 token.kind == TOKEN_STAR -> {
@@ -936,9 +939,12 @@ parser_parse_applied_type: fn(state: ^JetParserState, name: String, prefix: Span
     shaped: name == "Vec" || name == "Matrix" || name.ends_with(".Vec") || name.ends_with(".Matrix")
     if !parser_type_close_here(state) {
         loop {
-            if shaped {
-                args.push(Type.Measure{measure: parser_parse_measure(state, "shape", depth + 1)})
-            } else { args.push(parser_parse_type_argument(state, depth + 1)) }
+            if {
+                shaped -> {
+                    args.push(Type.Measure{measure: parser_parse_measure(state, "shape", depth + 1)})
+                }
+                else -> { args.push(parser_parse_type_argument(state, depth + 1)) }
+            }
             if parser_type_close_here(state) -> break
             if parser_current_kind(state) != TOKEN_COMMA {
                 token: parser_current(state)

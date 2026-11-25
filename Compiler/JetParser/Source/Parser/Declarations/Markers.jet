@@ -668,15 +668,18 @@ parser_parse_marker_args: fn(state: ^JetParserState, marker_name: String) -> Par
                 if label_token.kind == TOKEN_KW_USE -> label_name = "use"
                 label = Val(CallLabel{name: label_name, span: label_token.span})
             }
-            if parser_current_kind(state) == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET {
-                start: parser_bump(state)
-                parser_bump(state)
-                effects: parser_parse_effect_row_entries(state, TOKEN_RBRACKET)
-                parser_expect(state, TOKEN_RBRACKET, "`]` to close the effect row")
-                close: parser_expect(state, TOKEN_GT, "`>` after the effect row")
-                args.push(MarkerCallArg.EffectRow{effects: effects, span: parser_cover(start.span, close.span)})
-            } else {
-                label = parser_parse_marker_value_arg(state, marker_name, label, args, labels, required)
+            if {
+                parser_current_kind(state) == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET -> {
+                    start: parser_bump(state)
+                    parser_bump(state)
+                    effects: parser_parse_effect_row_entries(state, TOKEN_RBRACKET)
+                    parser_expect(state, TOKEN_RBRACKET, "`]` to close the effect row")
+                    close: parser_expect(state, TOKEN_GT, "`>` after the effect row")
+                    args.push(MarkerCallArg.EffectRow{effects: effects, span: parser_cover(start.span, close.span)})
+                }
+                else -> {
+                    label = parser_parse_marker_value_arg(state, marker_name, label, args, labels, required)
+                }
             }
             labels.push(label)
             if parser_current_kind(state) == TOKEN_RPAREN -> break

@@ -343,7 +343,7 @@ parser_parse_code_module_after_name: fn(state: ^JetParserState, modifiers: Parse
             if parser_parse_inbody_marker(state) == .Val(line) -> inside.push(line)
             next
         }
-        before := state.position
+        before: state.position
         declaration: parser_parse_item_or_import(state)
         loop import in declaration.imports -> imports.push(import)
         if declaration.item == .Val(value) -> body.push(value)
@@ -400,9 +400,12 @@ parser_fx_cap_marker: fn(state: ^JetParserState, markers: [Marker], noun: String
 parser_module_fx_cap: fn(state: ^JetParserState, marker: Marker, owner: String) -> ModuleCap? {
     entries := [EffectRowEntry]{}
     loop argument in marker.args {
-        expr: if argument == .Expr(value) -> value else -> {
-            parser_marker_shape_error(state, marker)
-            return None
+        expr: if {
+            argument == .Expr(value) -> value
+            else -> {
+                parser_marker_shape_error(state, marker)
+                return None
+            }
         }
         prefix := ""
         path := expr.copy()
@@ -702,7 +705,7 @@ parser_parse_generic_module_after_name: fn(state: ^JetParserState, modifiers: Pa
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
         parser_skip_semicolons(state)
         if parser_current_kind(state) == TOKEN_RBRACE -> break
-        before := state.position
+        before: state.position
         declaration: parser_parse_item_or_import(state)
         loop import in declaration.imports -> imports.push(import)
         if declaration.item == .Val(value) -> body.push(value)
@@ -809,7 +812,7 @@ parser_parse_role_module: fn(state: ^JetParserState, modifiers: ParsedItemModifi
             if parser_parse_inbody_marker(state) == .Val(line) -> inside.push(line)
             next
         }
-        before := state.position
+        before: state.position
         if parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "sources" && parser_kind_at(state, 1) == TOKEN_COLON {
             parsed_sources: parser_module_sources(state)
             loop source in parsed_sources -> sources.push(source)
@@ -851,19 +854,23 @@ parser_parse_role_module: fn(state: ^JetParserState, modifiers: ParsedItemModifi
                 field: parser_expect_name(state, "for a performance field")
                 parser_expect(state, TOKEN_COLON, "after a performance field")
                 field_name: parser_value(state, field)
-                if field_name == "budgets" && !perf_budgets_seen {
-                    parsed: parser_module_perf_budgets(state)
-                    perf_budgets = parsed.budgets
-                    perf_budgets_span = parsed.span
-                    perf_list_span = parsed.span
-                    perf_budgets_seen = true
-                } else if field_name == "compile_workloads" && perf_compile_workloads_span == None {
-                    parsed: parser_module_perf_workloads(state)
-                    perf_compile_workloads = parsed.workloads
-                    perf_compile_workloads_span = Val(field.span)
-                } else {
-                    parser_add_fatal_code(state, "E2903", field.span, "performance budget role `{role.name}` is not valid", "a performance role contains one `budgets` list and at most one `compile_workloads` map", "write `budgets: [Budget{{ ... }}]` and, for edit probes, `compile_workloads: {{ ... }}`")
-                    parser_parse_expression(state, 1, 0)
+                if {
+                    field_name == "budgets" && !perf_budgets_seen -> {
+                        parsed: parser_module_perf_budgets(state)
+                        perf_budgets = parsed.budgets
+                        perf_budgets_span = parsed.span
+                        perf_list_span = parsed.span
+                        perf_budgets_seen = true
+                    }
+                    field_name == "compile_workloads" && perf_compile_workloads_span == None -> {
+                        parsed: parser_module_perf_workloads(state)
+                        perf_compile_workloads = parsed.workloads
+                        perf_compile_workloads_span = Val(field.span)
+                    }
+                    else -> {
+                        parser_add_fatal_code(state, "E2903", field.span, "performance budget role `{role.name}` is not valid", "a performance role contains one `budgets` list and at most one `compile_workloads` map", "write `budgets: [Budget{{ ... }}]` and, for edit probes, `compile_workloads: {{ ... }}`")
+                        parser_parse_expression(state, 1, 0)
+                    }
                 }
             }
         }

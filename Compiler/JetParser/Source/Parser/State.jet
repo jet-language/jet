@@ -587,10 +587,13 @@ parser_bump: fn(state: ^JetParserState) -> Token Never! {
         parser_report_explicit_semicolon(state, token.span)
     }
     if token.kind == TOKEN_IDENT && state.tables.len() > 0 && state.tables[0].has_paste {
-        if parser_glued_paste(state, token) {
-            parser_report_glued_paste(state, token)
-        } else if state.derive_template_depth == 0 && parser_template_paste(state, token) {
-            parser_report_paste_outside_template(state, token)
+        if {
+            parser_glued_paste(state, token) -> {
+                parser_report_glued_paste(state, token)
+            }
+            state.derive_template_depth == 0 && parser_template_paste(state, token) -> {
+                parser_report_paste_outside_template(state, token)
+            }
         }
     }
     if token.kind != TOKEN_EOF && state.position < state.tokens.len() -> state.position += 1
@@ -1178,15 +1181,18 @@ parser_indent_following_lines: fn(state: JetParserState, piece: Span, unit: Stri
         line_end := line_start
         loop line_end < piece.end && parser_source_byte(state, line_end) != 10 -> line_end += 1
         line: parser_source_slice(state, line_start, line_end)
-        if first {
-            out = line
-            first = false
-        } else {
-            blank := true
-            loop index in line_start..<line_end {
-                if !parser_is_space_byte(parser_source_byte(state, index)) -> blank = false
+        if {
+            first -> {
+                out = line
+                first = false
             }
-            out = if blank -> "{out}\n" else -> "{out}\n{unit}{line}"
+            else -> {
+                blank := true
+                loop index in line_start..<line_end {
+                    if !parser_is_space_byte(parser_source_byte(state, index)) -> blank = false
+                }
+                out = if blank -> "{out}\n" else -> "{out}\n{unit}{line}"
+            }
         }
         if line_end >= piece.end -> break
         line_start = line_end + 1

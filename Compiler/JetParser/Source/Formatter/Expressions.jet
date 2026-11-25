@@ -196,9 +196,12 @@ jfmt_fmt_if_expr: fn(f: ^JetFmt, expr: Expr, inline: Bool) {
     jfmt_write(f, "if ")
     jfmt_fmt_cond(f, parts.cond)
     jfmt_write(f, " -> ")
-    if parts.then_body.len() == 0 && !jfmt_value_was_braced(f, parts.then_value) {
-        jfmt_fmt_expr(f, parts.then_value, JFMT_PREC_OR_FALLBACK)
-    } else { jfmt_fmt_value_block(f, parts.then_body, parts.then_value, inline) }
+    if {
+        parts.then_body.len() == 0 && !jfmt_value_was_braced(f, parts.then_value) -> {
+            jfmt_fmt_expr(f, parts.then_value, JFMT_PREC_OR_FALLBACK)
+        }
+        else -> { jfmt_fmt_value_block(f, parts.then_body, parts.then_value, inline) }
+    }
     // An `else` value that is a table of its own (`else -> if s == { … }`)
     // is not the next link of this chain: as `else if s == .A -> …` it
     // would read as a chain of tests.
@@ -625,9 +628,12 @@ jfmt_expr_was_parenthesized: fn(f: JetFmt, expr: Expr) -> Bool Never! {
     loop index >= 0 {
         kind: f.source_toks[index].kind
         if !jfmt_is_comment_kind(kind) {
-            if kind == TOKEN_RPAREN -> depth += 1 else if kind == TOKEN_LPAREN {
-                depth -= 1
-                if depth == 0 -> return true
+            if {
+                kind == TOKEN_RPAREN -> depth += 1
+                kind == TOKEN_LPAREN -> {
+                    depth -= 1
+                    if depth == 0 -> return true
+                }
             }
         }
         index -= 1
@@ -819,28 +825,37 @@ jfmt_fmt_type_at: fn(f: ^JetFmt, ty: Type, source: Span?) {
             }
             jfmt_comma_end(f, multiline, param_source)
             jfmt_write(f, ")")
-            if effect_bound == .Val(bound) {
-                jfmt_write(f, " -[")
-                row_source := JetFmtSourceList?{None}
-                if source == .Val(span) {
-                    row_source = jfmt_source_effect_row_span_after(f, span.start)
-                }
-                jfmt_fmt_effect_row(f, bound, row_source)
-                jfmt_write(f, "]>")
-                if ret == .Val(returned) {
-                    if jfmt_is_unit_fallible_type(returned) {
-                        jfmt_fmt_unit_fallible_return(f, returned)
-                    } else {
-                        jfmt_write(f, " ")
-                        jfmt_fmt_type(f, returned)
+            if {
+                effect_bound == .Val(bound) -> {
+                    jfmt_write(f, " -[")
+                    row_source := JetFmtSourceList?{None}
+                    if source == .Val(span) {
+                        row_source = jfmt_source_effect_row_span_after(f, span.start)
+                    }
+                    jfmt_fmt_effect_row(f, bound, row_source)
+                    jfmt_write(f, "]>")
+                    if ret == .Val(returned) {
+                        if {
+                            jfmt_is_unit_fallible_type(returned) -> {
+                                jfmt_fmt_unit_fallible_return(f, returned)
+                            }
+                            else -> {
+                                jfmt_write(f, " ")
+                                jfmt_fmt_type(f, returned)
+                            }
+                        }
                     }
                 }
-            } else if ret == .Val(returned) {
-                if jfmt_is_unit_fallible_type(returned) {
-                    jfmt_fmt_unit_fallible_return(f, returned)
-                } else {
-                    jfmt_write(f, " -> ")
-                    jfmt_fmt_type(f, returned)
+                ret == .Val(returned) -> {
+                    if {
+                        jfmt_is_unit_fallible_type(returned) -> {
+                            jfmt_fmt_unit_fallible_return(f, returned)
+                        }
+                        else -> {
+                            jfmt_write(f, " -> ")
+                            jfmt_fmt_type(f, returned)
+                        }
+                    }
                 }
             }
             if return_view_provenance == .Val(map) {
@@ -1021,11 +1036,14 @@ jfmt_fmt_marked_type: fn(f: ^JetFmt, ty: Type) {
         .Union(_) | .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> true
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
-    if grouped {
-        jfmt_write(f, "(")
-        jfmt_fmt_type(f, ty)
-        jfmt_write(f, ")")
-    } else { jfmt_fmt_type(f, ty) }
+    if {
+        grouped -> {
+            jfmt_write(f, "(")
+            jfmt_fmt_type(f, ty)
+            jfmt_write(f, ")")
+        }
+        else -> { jfmt_fmt_type(f, ty) }
+    }
 }
 
 // The error contract `E!` / `(E1 | E2)!`.
@@ -1130,23 +1148,26 @@ jfmt_fmt_struct_lit_body: fn(f: ^JetFmt, fields: [ExprField], span: Span) {
 
 // One multiline list of expressions: `[`/`(` already written by the caller.
 jfmt_fmt_expr_list: fn(f: ^JetFmt, elements: [Expr], span: Span) {
-    if jfmt_source_span_multiline(f, span) {
-        jfmt_newline(f)
-        f.indent += 1
-        loop (index, element) in elements {
-            if index > 0 -> jfmt_newline(f)
-            jfmt_emit_leading(f, expr_span(element).start)
-            jfmt_fmt_expr(f, element, JFMT_PREC_OR_FALLBACK)
-            jfmt_write(f, ",")
-            jfmt_emit_trailing(f, expr_span(element).end)
+    if {
+        jfmt_source_span_multiline(f, span) -> {
+            jfmt_newline(f)
+            f.indent += 1
+            loop (index, element) in elements {
+                if index > 0 -> jfmt_newline(f)
+                jfmt_emit_leading(f, expr_span(element).start)
+                jfmt_fmt_expr(f, element, JFMT_PREC_OR_FALLBACK)
+                jfmt_write(f, ",")
+                jfmt_emit_trailing(f, expr_span(element).end)
+            }
+            jfmt_emit_leading(f, span.end)
+            f.indent -= 1
+            if !f.at_line_start -> jfmt_newline(f)
         }
-        jfmt_emit_leading(f, span.end)
-        f.indent -= 1
-        if !f.at_line_start -> jfmt_newline(f)
-    } else {
-        loop (index, element) in elements {
-            if index > 0 -> jfmt_write(f, ", ")
-            jfmt_fmt_expr(f, element, JFMT_PREC_OR_FALLBACK)
+        else -> {
+            loop (index, element) in elements {
+                if index > 0 -> jfmt_write(f, ", ")
+                jfmt_fmt_expr(f, element, JFMT_PREC_OR_FALLBACK)
+            }
         }
     }
 }
@@ -1301,11 +1322,14 @@ jfmt_enum_lit_arg_span: fn(arg: EnumLitArg) -> Span Never! {
 
 jfmt_fmt_enum_lit: fn(f: ^JetFmt, type_name: String, variant: String, variant_span: Span?, args: [EnumLitArg], leading_dot: Bool, span: Span) {
     head_at: jfmt_write_at(f)
-    if type_name.len() == 0 {
-        if leading_dot -> jfmt_write(f, ".")
-    } else {
-        jfmt_write(f, type_name)
-        jfmt_write(f, ".")
+    if {
+        type_name.len() == 0 -> {
+            if leading_dot -> jfmt_write(f, ".")
+        }
+        else -> {
+            jfmt_write(f, type_name)
+            jfmt_write(f, ".")
+        }
     }
     jfmt_write(f, variant)
     if args.len() == 0 {
@@ -1386,21 +1410,24 @@ jfmt_fmt_method_call: fn(f: ^JetFmt, receiver: Expr, method: String, method_span
     receiver_end: expr_span(receiver).end
     if !list_type_owner -> jfmt_fmt_call_type_args(f, owner_type_args, receiver_end)
     // S69 keep an author-placed break before `.method(...)`.
-    if jfmt_chain_break_between(f, receiver_end, method_span.start) {
-        jfmt_emit_trailing(f, receiver_end)
-        f.indent += 1
-        jfmt_newline(f)
-        jfmt_emit_leading(f, method_span.start)
-        jfmt_write(f, ".")
-        jfmt_write_postfix_member(f, method)
-        jfmt_fmt_call_type_args(f, type_args, method_span.end)
-        jfmt_fmt_method_args(f, method, args, Val(method_span.end))
-        f.indent -= 1
-    } else {
-        jfmt_write(f, ".")
-        jfmt_write_postfix_member(f, method)
-        jfmt_fmt_call_type_args(f, type_args, method_span.end)
-        jfmt_fmt_method_args(f, method, args, Val(method_span.end))
+    if {
+        jfmt_chain_break_between(f, receiver_end, method_span.start) -> {
+            jfmt_emit_trailing(f, receiver_end)
+            f.indent += 1
+            jfmt_newline(f)
+            jfmt_emit_leading(f, method_span.start)
+            jfmt_write(f, ".")
+            jfmt_write_postfix_member(f, method)
+            jfmt_fmt_call_type_args(f, type_args, method_span.end)
+            jfmt_fmt_method_args(f, method, args, Val(method_span.end))
+            f.indent -= 1
+        }
+        else -> {
+            jfmt_write(f, ".")
+            jfmt_write_postfix_member(f, method)
+            jfmt_fmt_call_type_args(f, type_args, method_span.end)
+            jfmt_fmt_method_args(f, method, args, Val(method_span.end))
+        }
     }
 }
 
@@ -1418,15 +1445,18 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
                 return
             }
             // The whole chain shares one line shape.
-            if jfmt_if_expr_chain_inlineable(f, expr) {
-                mark: jfmt_mark(f)
-                jfmt_fmt_if_expr(f, expr, true)
-                // Never leave a mixed inline/expanded chain.
-                if jfmt_out_since_has_newline(f, mark.out_len) {
-                    jfmt_rollback(f, mark)
-                    jfmt_fmt_if_expr(f, expr, false)
+            if {
+                jfmt_if_expr_chain_inlineable(f, expr) -> {
+                    mark: jfmt_mark(f)
+                    jfmt_fmt_if_expr(f, expr, true)
+                    // Never leave a mixed inline/expanded chain.
+                    if jfmt_out_since_has_newline(f, mark.out_len) {
+                        jfmt_rollback(f, mark)
+                        jfmt_fmt_if_expr(f, expr, false)
+                    }
                 }
-            } else { jfmt_fmt_if_expr(f, expr, false) }
+                else -> { jfmt_fmt_if_expr(f, expr, false) }
+            }
         }
         .Str(parts, span, _) -> {
             // Source spans identify raw ordinary strings.
@@ -1443,12 +1473,15 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
         // (c7shift): a pattern-literal argument.
         .StrMatchLit(parts, span, _) -> {
             typed_head: jfmt_is_typed_head_body(f, span)
-            if !typed_head && jfmt_str_match_has_computed_hole(f, span) {
-                // The parts keep only each hole's name; a computed hole
-                // (`{id + 1}`, which check reports) prints as written.
-                written: jfmt_src_text(f, span.start, span.end)
-                jfmt_write(f, written)
-            } else { jfmt_fmt_str_match_parts(f, parts, typed_head) }
+            if {
+                !typed_head && jfmt_str_match_has_computed_hole(f, span) -> {
+                    // The parts keep only each hole's name; a computed hole
+                    // (`{id + 1}`, which check reports) prints as written.
+                    written: jfmt_src_text(f, span.start, span.end)
+                    jfmt_write(f, written)
+                }
+                else -> { jfmt_fmt_str_match_parts(f, parts, typed_head) }
+            }
         }
         // The byte-mode sibling.
         .BinMatchLit(parts, _, _) -> { jfmt_fmt_bin_match_parts(f, parts) }
@@ -1495,34 +1528,37 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
         // A record value is written in braces, `{min: 1, max: 9}`.
         .TupleLit(fields, span, _, _) -> {
             jfmt_write(f, "{{")
-            if jfmt_source_span_multiline(f, span) {
-                jfmt_newline(f)
-                f.indent += 1
-                loop (index, field) in fields {
-                    if index > 0 -> jfmt_newline(f)
-                    value_start: expr_span(field.value).start
-                    field_start: if index == 0 -> span.start else -> expr_span(fields[index - 1].value).end
-                    colon := value_start
-                    if jfmt_src_valid(f, field_start, value_start) {
-                        found: jfmt_bytes_rfind(f.src_bytes, value_start, ":")
-                        if found >= field_start -> colon = found
+            if {
+                jfmt_source_span_multiline(f, span) -> {
+                    jfmt_newline(f)
+                    f.indent += 1
+                    loop (index, field) in fields {
+                        if index > 0 -> jfmt_newline(f)
+                        value_start: expr_span(field.value).start
+                        field_start: if index == 0 -> span.start else -> expr_span(fields[index - 1].value).end
+                        colon := value_start
+                        if jfmt_src_valid(f, field_start, value_start) {
+                            found: jfmt_bytes_rfind(f.src_bytes, value_start, ":")
+                            if found >= field_start -> colon = found
+                        }
+                        jfmt_emit_leading(f, colon)
+                        jfmt_write(f, field.name)
+                        jfmt_write(f, ": ")
+                        jfmt_emit_leading(f, value_start)
+                        jfmt_fmt_expr(f, field.value, JFMT_PREC_OR_FALLBACK)
+                        jfmt_write(f, ",")
+                        jfmt_emit_trailing(f, expr_span(field.value).end)
                     }
-                    jfmt_emit_leading(f, colon)
-                    jfmt_write(f, field.name)
-                    jfmt_write(f, ": ")
-                    jfmt_emit_leading(f, value_start)
-                    jfmt_fmt_expr(f, field.value, JFMT_PREC_OR_FALLBACK)
-                    jfmt_write(f, ",")
-                    jfmt_emit_trailing(f, expr_span(field.value).end)
+                    f.indent -= 1
+                    if !f.at_line_start -> jfmt_newline(f)
                 }
-                f.indent -= 1
-                if !f.at_line_start -> jfmt_newline(f)
-            } else {
-                loop (index, field) in fields {
-                    if index > 0 -> jfmt_write(f, ", ")
-                    jfmt_write(f, field.name)
-                    jfmt_write(f, ": ")
-                    jfmt_fmt_expr(f, field.value, JFMT_PREC_OR_FALLBACK)
+                else -> {
+                    loop (index, field) in fields {
+                        if index > 0 -> jfmt_write(f, ", ")
+                        jfmt_write(f, field.name)
+                        jfmt_write(f, ": ")
+                        jfmt_fmt_expr(f, field.value, JFMT_PREC_OR_FALLBACK)
+                    }
                 }
             }
             jfmt_write(f, "}}")
@@ -1530,28 +1566,31 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
         // An empty map is spelled `[]`, like an empty list.
         .MapLit(entries, span, _) -> {
             jfmt_write(f, "[")
-            if jfmt_source_span_multiline(f, span) {
-                jfmt_newline(f)
-                f.indent += 1
-                loop (index, entry) in entries {
-                    if index > 0 -> jfmt_newline(f)
-                    jfmt_emit_leading(f, expr_span(entry.key).start)
-                    jfmt_fmt_expr(f, entry.key, JFMT_PREC_OR_FALLBACK)
-                    jfmt_write(f, ": ")
-                    jfmt_emit_leading(f, expr_span(entry.value).start)
-                    jfmt_fmt_expr(f, entry.value, JFMT_PREC_OR_FALLBACK)
-                    jfmt_write(f, ",")
-                    jfmt_emit_trailing(f, expr_span(entry.value).end)
+            if {
+                jfmt_source_span_multiline(f, span) -> {
+                    jfmt_newline(f)
+                    f.indent += 1
+                    loop (index, entry) in entries {
+                        if index > 0 -> jfmt_newline(f)
+                        jfmt_emit_leading(f, expr_span(entry.key).start)
+                        jfmt_fmt_expr(f, entry.key, JFMT_PREC_OR_FALLBACK)
+                        jfmt_write(f, ": ")
+                        jfmt_emit_leading(f, expr_span(entry.value).start)
+                        jfmt_fmt_expr(f, entry.value, JFMT_PREC_OR_FALLBACK)
+                        jfmt_write(f, ",")
+                        jfmt_emit_trailing(f, expr_span(entry.value).end)
+                    }
+                    jfmt_emit_leading(f, span.end)
+                    f.indent -= 1
+                    if !f.at_line_start -> jfmt_newline(f)
                 }
-                jfmt_emit_leading(f, span.end)
-                f.indent -= 1
-                if !f.at_line_start -> jfmt_newline(f)
-            } else {
-                loop (index, entry) in entries {
-                    if index > 0 -> jfmt_write(f, ", ")
-                    jfmt_fmt_expr(f, entry.key, JFMT_PREC_OR_FALLBACK)
-                    jfmt_write(f, ": ")
-                    jfmt_fmt_expr(f, entry.value, JFMT_PREC_OR_FALLBACK)
+                else -> {
+                    loop (index, entry) in entries {
+                        if index > 0 -> jfmt_write(f, ", ")
+                        jfmt_fmt_expr(f, entry.key, JFMT_PREC_OR_FALLBACK)
+                        jfmt_write(f, ": ")
+                        jfmt_fmt_expr(f, entry.value, JFMT_PREC_OR_FALLBACK)
+                    }
                 }
             }
             jfmt_write(f, "]")
@@ -1561,10 +1600,13 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
             jfmt_write(f, "[")
             selector := String?{None}
             if index == .Ident(name, _, _) -> selector = jfmt_layout_selector_name(name)
-            if selector == .Val(field) {
-                jfmt_write(f, ".")
-                jfmt_write(f, field)
-            } else { jfmt_fmt_expr(f, index, JFMT_PREC_OR_FALLBACK) }
+            if {
+                selector == .Val(field) -> {
+                    jfmt_write(f, ".")
+                    jfmt_write(f, field)
+                }
+                else -> { jfmt_fmt_expr(f, index, JFMT_PREC_OR_FALLBACK) }
+            }
             jfmt_write(f, "]")
         }
         .Slice(base, start, end, range, _, _) -> {
@@ -1592,16 +1634,20 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
         }
         .Call(call, _) -> {
             // The index of `m[key, or: start]` (expr_map_slot_or) and live links `@expr`.
-            if expr_is_map_slot_or(call) {
-                jfmt_fmt_expr(f, call.args[0].expr, JFMT_PREC_OR_FALLBACK)
-                jfmt_write(f, ", or: ")
-                jfmt_fmt_expr(f, call.args[1].expr, JFMT_PREC_OR_FALLBACK)
-            } else if call.name == "__jet_link" && call.args.len() == 1 {
-                if prec > JFMT_PREC_UNARY -> jfmt_write(f, "(")
-                jfmt_write(f, "@")
-                jfmt_fmt_expr(f, call.args[0].expr, JFMT_PREC_UNARY)
-                if prec > JFMT_PREC_UNARY -> jfmt_write(f, ")")
-            } else { jfmt_fmt_call(f, call) }
+            if {
+                expr_is_map_slot_or(call) -> {
+                    jfmt_fmt_expr(f, call.args[0].expr, JFMT_PREC_OR_FALLBACK)
+                    jfmt_write(f, ", or: ")
+                    jfmt_fmt_expr(f, call.args[1].expr, JFMT_PREC_OR_FALLBACK)
+                }
+                call.name == "__jet_link" && call.args.len() == 1 -> {
+                    if prec > JFMT_PREC_UNARY -> jfmt_write(f, "(")
+                    jfmt_write(f, "@")
+                    jfmt_fmt_expr(f, call.args[0].expr, JFMT_PREC_UNARY)
+                    if prec > JFMT_PREC_UNARY -> jfmt_write(f, ")")
+                }
+                else -> { jfmt_fmt_call(f, call) }
+            }
         }
         .Unary(op, inner, _, _) -> {
             // Wrap only when the surrounding slot binds tighter.
@@ -1617,29 +1663,35 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
         .Binary(op, left, right, _, _) -> {
             op_prec: jfmt_prec_of_bin(op)
             if prec > op_prec -> jfmt_write(f, "(")
-            if jfmt_bin_op_method(op) == .Val(method) {
-                jfmt_fmt_expr(f, left, JFMT_PREC_POSTFIX)
-                jfmt_write(f, ".{method}(")
-                jfmt_fmt_expr(f, right, JFMT_PREC_OR_FALLBACK)
-                jfmt_write(f, ")")
-            } else {
-                spelled: jfmt_bin_op_spell(op)
-                left_prec := op_prec
-                right_prec := jfmt_prec_add_rhs(op_prec)
-                // E0082 an `&&` operand of `||` always
-                // prints with its grouping parentheses.
-                if spelled == "||" {
-                    if jfmt_is_and_operand(left) -> left_prec = jfmt_prec_add_rhs(JFMT_PREC_AND)
-                    if jfmt_is_and_operand(right) -> right_prec = jfmt_prec_add_rhs(JFMT_PREC_AND)
+            if {
+                jfmt_bin_op_method(op) == .Val(method) -> {
+                    jfmt_fmt_expr(f, left, JFMT_PREC_POSTFIX)
+                    jfmt_write(f, ".{method}(")
+                    jfmt_fmt_expr(f, right, JFMT_PREC_OR_FALLBACK)
+                    jfmt_write(f, ")")
                 }
-                jfmt_fmt_expr(f, left, left_prec)
-                // `a & ~b` clears bits and prints as `a &~ b`.
-                if op == BinOp.BitAnd && right == .Unary(.Complement, cleared, _, _) {
-                    jfmt_write(f, " &~ ")
-                    jfmt_fmt_expr(f, cleared, right_prec)
-                } else {
-                    jfmt_write(f, " {spelled} ")
-                    jfmt_fmt_expr(f, right, right_prec)
+                else -> {
+                    spelled: jfmt_bin_op_spell(op)
+                    left_prec := op_prec
+                    right_prec := jfmt_prec_add_rhs(op_prec)
+                    // E0082 an `&&` operand of `||` always
+                    // prints with its grouping parentheses.
+                    if spelled == "||" {
+                        if jfmt_is_and_operand(left) -> left_prec = jfmt_prec_add_rhs(JFMT_PREC_AND)
+                        if jfmt_is_and_operand(right) -> right_prec = jfmt_prec_add_rhs(JFMT_PREC_AND)
+                    }
+                    jfmt_fmt_expr(f, left, left_prec)
+                    // `a & ~b` clears bits and prints as `a &~ b`.
+                    if {
+                        op == BinOp.BitAnd && right == .Unary(.Complement, cleared, _, _) -> {
+                            jfmt_write(f, " &~ ")
+                            jfmt_fmt_expr(f, cleared, right_prec)
+                        }
+                        else -> {
+                            jfmt_write(f, " {spelled} ")
+                            jfmt_fmt_expr(f, right, right_prec)
+                        }
+                    }
                 }
             }
             if prec > op_prec -> jfmt_write(f, ")")
@@ -1691,17 +1743,20 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
             jfmt_fmt_expr(f, base, JFMT_PREC_POSTFIX)
             base_end: expr_span(base).end
             // S69 keep an author-placed break before `.field`.
-            if jfmt_chain_break_between(f, base_end, span.end) {
-                jfmt_emit_trailing(f, base_end)
-                f.indent += 1
-                jfmt_newline(f)
-                jfmt_emit_leading(f, span.end)
-                jfmt_write(f, ".")
-                jfmt_write_field_member(f, field, span)
-                f.indent -= 1
-            } else {
-                jfmt_write(f, ".")
-                jfmt_write_field_member(f, field, span)
+            if {
+                jfmt_chain_break_between(f, base_end, span.end) -> {
+                    jfmt_emit_trailing(f, base_end)
+                    f.indent += 1
+                    jfmt_newline(f)
+                    jfmt_emit_leading(f, span.end)
+                    jfmt_write(f, ".")
+                    jfmt_write_field_member(f, field, span)
+                    f.indent -= 1
+                }
+                else -> {
+                    jfmt_write(f, ".")
+                    jfmt_write_field_member(f, field, span)
+                }
             }
         }
         .OptField(base, member, _, _, _, _) -> {
@@ -1771,11 +1826,14 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
         // never written, so it prints no mark.
         .Try(inner, _, _, note, id) -> {
             jfmt_fmt_expr(f, inner, JFMT_PREC_POSTFIX)
-            if note == .Val(context) {
-                jfmt_write(f, "?(")
-                jfmt_fmt_expr(f, context, JFMT_PREC_POSTFIX)
-                jfmt_write(f, ")")
-            } else if id != AST_NODE_GENERATED { jfmt_write(f, "?") }
+            if {
+                note == .Val(context) -> {
+                    jfmt_write(f, "?(")
+                    jfmt_fmt_expr(f, context, JFMT_PREC_POSTFIX)
+                    jfmt_write(f, ")")
+                }
+                id != AST_NODE_GENERATED -> { jfmt_write(f, "?") }
+            }
         }
         .OrFallback(value, fallback, _, _, _) -> {
             if prec > JFMT_PREC_OR_FALLBACK -> jfmt_write(f, "(")
@@ -1798,16 +1856,19 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
                     if lambda.body == .Block(stmts) {
                         if stmts.len() == 1 {
                             if stmts[0] == .Loop(body, _, _, _) {
-                                if lambda.meta.requires_exhaustion_route {
-                                    jfmt_fmt_value_loop(f, body, lambda.meta.exhaustion_route_attached)
-                                } else {
-                                    jfmt_write(f, "loop {{")
-                                    jfmt_newline(f)
-                                    f.indent += 1
-                                    jfmt_fmt_block_stmts(f, body)
-                                    f.indent -= 1
-                                    jfmt_newline(f)
-                                    jfmt_write(f, "}}")
+                                if {
+                                    lambda.meta.requires_exhaustion_route -> {
+                                        jfmt_fmt_value_loop(f, body, lambda.meta.exhaustion_route_attached)
+                                    }
+                                    else -> {
+                                        jfmt_write(f, "loop {{")
+                                        jfmt_newline(f)
+                                        f.indent += 1
+                                        jfmt_fmt_block_stmts(f, body)
+                                        f.indent -= 1
+                                        jfmt_newline(f)
+                                        jfmt_write(f, "}}")
+                                    }
                                 }
                                 return
                             }
@@ -1841,16 +1902,19 @@ jfmt_fmt_expr: fn(f: ^JetFmt, expr: Expr, prec: Int) {
             // name as `<>` while it stays its own line.
             in_place := ""
             loop (index, step) in steps {
-                if rest.len() == 0 {
-                    if jfmt_pipe_step_joins(step, joined) == .Val(call) {
-                        joined = call
-                        next
+                if {
+                    rest.len() == 0 -> {
+                        if jfmt_pipe_step_joins(step, joined) == .Val(call) {
+                            joined = call
+                            next
+                        }
                     }
-                } else {
-                    last: rest.len() - 1
-                    if jfmt_pipe_step_joins(step, rest[last]) == .Val(call) {
-                        rest[last] = call
-                        next
+                    else -> {
+                        last: rest.len() - 1
+                        if jfmt_pipe_step_joins(step, rest[last]) == .Val(call) {
+                            rest[last] = call
+                            next
+                        }
                     }
                 }
                 // copy: the printed step is the pipe's own value, read in place.
@@ -2331,27 +2395,33 @@ jfmt_fmt_pattern: fn(f: ^JetFmt, pattern: Pattern) {
                     .Wildcard | .Bind(_, _) | .Range(_, _) | .Nested(_) | .Value(_) -> {}
                 }
             }
-            if named {
-                // `field: field` prints as `field`.
-                jfmt_write(f, "{{")
-                loop (index, slot) in bindings {
-                    if index > 0 -> jfmt_write(f, ", ")
-                    if slot == .Named(field, _, inner) {
-                        jfmt_write(f, field)
-                        if (jfmt_slot_bind_name(inner) ?? "") != field {
-                            jfmt_write(f, ": ")
-                            jfmt_fmt_pat_slot(f, inner)
+            if {
+                named -> {
+                    // `field: field` prints as `field`.
+                    jfmt_write(f, "{{")
+                    loop (index, slot) in bindings {
+                        if index > 0 -> jfmt_write(f, ", ")
+                        if {
+                            slot == .Named(field, _, inner) -> {
+                                jfmt_write(f, field)
+                                if (jfmt_slot_bind_name(inner) ?? "") != field {
+                                    jfmt_write(f, ": ")
+                                    jfmt_fmt_pat_slot(f, inner)
+                                }
+                            }
+                            else -> { jfmt_fmt_pat_slot(f, slot) }
                         }
-                    } else { jfmt_fmt_pat_slot(f, slot) }
+                    }
+                    jfmt_write(f, "}}")
                 }
-                jfmt_write(f, "}}")
-            } else if bindings.len() > 0 {
-                jfmt_write(f, "(")
-                loop (index, slot) in bindings {
-                    if index > 0 -> jfmt_write(f, ", ")
-                    jfmt_fmt_pat_slot(f, slot)
+                bindings.len() > 0 -> {
+                    jfmt_write(f, "(")
+                    loop (index, slot) in bindings {
+                        if index > 0 -> jfmt_write(f, ", ")
+                        jfmt_fmt_pat_slot(f, slot)
+                    }
+                    jfmt_write(f, ")")
                 }
-                jfmt_write(f, ")")
             }
         }
         .Present(binding, _, inner, _) -> { jfmt_fmt_payload_pattern(f, "Val", binding, inner) }
@@ -2858,12 +2928,15 @@ jfmt_fmt_str_raw: fn(f: ^JetFmt, parts: [StrPart], span: Span) {
     written_inside := false
     any_other := false
     loop byte in text.bytes() {
-        if byte == 96 {
-            run += 1
-            if run > max_run -> max_run = run
-        } else {
-            if run == written -> written_inside = true
-            run = 0
+        if {
+            byte == 96 -> {
+                run += 1
+                if run > max_run -> max_run = run
+            }
+            else -> {
+                if run == written -> written_inside = true
+                run = 0
+            }
         }
         if byte != 32 -> any_other = true
     }

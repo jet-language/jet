@@ -111,7 +111,7 @@ parser_parse_c_module: fn(state: ^JetParserState) -> Item {
         if parser_current_kind(state) == TOKEN_RBRACE || parser_current_kind(state) == TOKEN_EOF {
             break
         }
-        before := state.position
+        before: state.position
         lib_name: parser_value(state, lib)
         function: parser_c_module_callback_metadata(parser_parse_extern_fn(state, true), lib_name)
         functions.push(function)
@@ -172,10 +172,13 @@ parser_parse_extern_fn: fn(state: ^JetParserState, allow_missing_semicolon: Bool
     close_name := NamedSpan?{None}
     markers := [Marker]{}
     loop parser_current_kind(state) == TOKEN_HASH {
-        if parser_kind_at(state, 1) == TOKEN_LBRACKET {
-            group: parser_parse_marker_group_list(state)
-            loop marker in group.markers -> markers.push(marker.copy())
-        } else { markers.push(parser_parse_marker(state)) }
+        if {
+            parser_kind_at(state, 1) == TOKEN_LBRACKET -> {
+                group: parser_parse_marker_group_list(state)
+                loop marker in group.markers -> markers.push(marker.copy())
+            }
+            else -> { markers.push(parser_parse_marker(state)) }
+        }
         parser_skip_semicolons(state)
     }
     loop marker in markers {

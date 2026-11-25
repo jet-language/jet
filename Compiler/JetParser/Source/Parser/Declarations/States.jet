@@ -67,28 +67,31 @@ parser_state_list: fn(state: ^JetParserState) -> ParsedStateList {
         }
         before: state.position
         head: parser_state_name(state, "for a state name")
-        if parser_current_kind(state) == TOKEN_COLON {
-            parser_bump(state)
-            members := [NamedSpan]{parser_state_name(state, "for a state in a group")}
-            loop parser_current_kind(state) == TOKEN_PIPE {
+        if {
+            parser_current_kind(state) == TOKEN_COLON -> {
                 parser_bump(state)
-                members.push(parser_state_name(state, "after `|` in a state group"))
-            }
-            span: parser_cover(head.span, members[members.len() - 1].span)
-            list.groups.push(StateGroup{name: head, members: members, span: span})
-        } else {
-            targets := [NamedSpan]{}
-            if parser_current_kind(state) == TOKEN_UNIFIED_ARROW {
-                parser_bump(state)
-                targets.push(parser_state_name(state, "after `->` in a state list"))
-                loop parser_current_kind(state) == TOKEN_COMMA && parser_kind_at(state, 1) == TOKEN_IDENT {
+                members := [NamedSpan]{parser_state_name(state, "for a state in a group")}
+                loop parser_current_kind(state) == TOKEN_PIPE {
                     parser_bump(state)
-                    targets.push(parser_state_name(state, "after `,` in a state's moves"))
+                    members.push(parser_state_name(state, "after `|` in a state group"))
                 }
+                span: parser_cover(head.span, members[members.len() - 1].span)
+                list.groups.push(StateGroup{name: head, members: members, span: span})
             }
-            end: if targets.len() > 0 -> targets[targets.len() - 1].span else -> head.span
-            list.arrows.push(StateArrow{from: head.copy(), to: targets, span: parser_cover(head.span, end)})
-            list.states.push(head)
+            else -> {
+                targets := [NamedSpan]{}
+                if parser_current_kind(state) == TOKEN_UNIFIED_ARROW {
+                    parser_bump(state)
+                    targets.push(parser_state_name(state, "after `->` in a state list"))
+                    loop parser_current_kind(state) == TOKEN_COMMA && parser_kind_at(state, 1) == TOKEN_IDENT {
+                        parser_bump(state)
+                        targets.push(parser_state_name(state, "after `,` in a state's moves"))
+                    }
+                }
+                end: if targets.len() > 0 -> targets[targets.len() - 1].span else -> head.span
+                list.arrows.push(StateArrow{from: head.copy(), to: targets, span: parser_cover(head.span, end)})
+                list.states.push(head)
+            }
         }
         // A token that is no state entry is reported once and skipped.
         if state.position == before -> parser_bump(state)
