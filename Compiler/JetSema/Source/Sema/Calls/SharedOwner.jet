@@ -378,14 +378,13 @@ sema_call_cell_guard_split: fn(receiver: Expr, receiver_value: TExpr, editable: 
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     ^complete: true
-    ^paths: [[String]]{}
-    loop argument in args {
+    paths: loop argument in args -> {
         path: sema_call_cell_guard_projection(argument.expr) ?? {
             check.diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`guard.split` needs two field projections", "each split guard must point into the value covered by the original dynamic loan", "write `.split(fn(value) {{ value.left }}, fn(value) {{ value.right }})`"))
             complete = false
             next
         }
-        paths.push(path)
+        path
     }
     if editable && paths.len() == 2 && sema_call_cell_guard_paths_overlap(paths[0], paths[1]) {
         check.diagnostics.push(sema_error("E0112", expr_span(args[1].expr), "`guard.split` projections overlap", "each edit guard must cover a disjoint field of the original value", "project two different fields, or keep one guard and edit through it"))

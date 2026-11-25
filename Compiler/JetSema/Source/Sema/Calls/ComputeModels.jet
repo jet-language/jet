@@ -214,10 +214,9 @@ sema_call_compute_wrt_name: fn(item: Expr) -> String? {
 sema_call_compute_wrt_names: fn(expression: Expr) -> [String]? {
     if expression == {
         .ListLit(items, _, _) -> {
-            ^names: [String]{}
-            loop item in items {
+            names: loop item in items -> {
                 name: sema_call_compute_wrt_name(item) ?? return None
-                names.push(name)
+                name
             }
             Val(names)
         }
@@ -245,8 +244,7 @@ sema_call_compute_function_names: fn(expression: Expr, ty: Type, scopes: SemaSco
     if expression == {
         .Paren(inner, _, _) -> return sema_call_compute_function_names(inner, ty, scopes)
         .Lambda(lambda, _) -> {
-            ^params: [String]{}
-            loop parameter in lambda.params -> params.push(parameter.name)
+            params: loop parameter in lambda.params -> parameter.name
             if ty == {
                 .Fn(types, _, _, _, _, _) -> {
                     if types.len() == params.len() -> return Val(params)
@@ -500,8 +498,7 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
     if gradient_output && output == .Tuple(fields) {
         loop field in fields -> output_fields.push(field.name)
     }
-    ^values: [CallArg]{}
-    loop index in value_indexes -> values.push(args[index])
+    values: loop index in value_indexes -> args[index]
     helpers: sema_call_compute_tape_roles(span, check) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     tape: sema_call_compute_tape(member, alias, helpers, args[0].expr, params, names, selected, output_fields, gradient_type, fallible, values, span)
     // The callable is checked against the transform's signature, so it
@@ -561,10 +558,9 @@ sema_call_compute_tape: fn(member: String, alias: String, helpers: SemaComputeTa
     }
     if member == "jvp" {
         ^leaves: [Expr]{}
-        ^tangents: [Expr]{}
-        loop index in 0..<params.len() {
+        tangents: loop index in 0..<params.len() -> {
             leaves.push(sema_call_compute_tape_copy("__ad_l{index}", span))
-            tangents.push(sema_call_compute_tape_copy("__ad_t{index}", span))
+            sema_call_compute_tape_copy("__ad_t{index}", span)
         }
         tangent: sema_call_compute_tape_member(alias, helpers.tangent, [Expr]{out, Expr.ListLit{elements: leaves, span: span, id: AST_NODE_GENERATED}, Expr.ListLit{elements: tangents, span: span, id: AST_NODE_GENERATED}}, span)
         body.push(Stmt.Val{binding: ast_binding("__ad_jvp", span, false, tangent, None)})
@@ -616,10 +612,9 @@ sema_call_compute_tape_forward: fn(member: String, alias: String, helpers: SemaC
         leaf: sema_call_compute_tape_member(alias, helpers.leaf, [Expr]{sema_call_compute_tape_ident("{source}{index}", span)}, span)
         body.push(Stmt.Val{binding: ast_binding("{prefix}l{index}", span, false, leaf, None)})
     }
-    ^inputs: [CallArg]{}
-    loop index in 0..<count {
+    inputs: loop index in 0..<count -> {
         name: if selected.contains(index) -> "{prefix}l{index}" else -> "{source}{index}"
-        inputs.push(sema_call_compute_tape_arg(sema_call_compute_tape_ident(name, span), span))
+        sema_call_compute_tape_arg(sema_call_compute_tape_ident(name, span), span)
     }
     ^called: sema_call_compute_tape_call(function, inputs, span)
     if fallible {
@@ -644,11 +639,10 @@ sema_call_compute_tape_forward: fn(member: String, alias: String, helpers: SemaC
 sema_call_compute_tape_pull: fn(alias: String, helpers: SemaComputeTape, function: Expr, count: Int, names: [String], fallible: Bool, span: Span) -> Expr Never! {
     ^every: (loop index in 0..<count -> index)
     ^body: sema_call_compute_tape_forward("vjp", alias, helpers, function, count, every, "__ad_pull_", "__ad_k", fallible, span)
-    ^gradients: [TupleField]{}
-    loop index in every {
+    gradients: loop index in every -> {
         gradient: sema_call_compute_tape_member(alias, helpers.pull, [Expr]{sema_call_compute_tape_ident("__ad_pull_out", span), sema_call_compute_tape_ident("__ad_pull_l{index}", span), sema_call_compute_tape_ident("__ad_seed", span)}, span)
         body.push(Stmt.Val{binding: ast_binding("__ad_pull_g{index}", span, false, gradient, None)})
-        gradients.push(TupleField{name: names[index], value: sema_call_compute_tape_ident("__ad_pull_g{index}", span)})
+        TupleField{name: names[index], value: sema_call_compute_tape_ident("__ad_pull_g{index}", span)}
     }
     body.push(Stmt.Expr{expr: sema_call_compute_tape_member(alias, helpers.exit, [Expr]{}, span)})
     body.push(Stmt.Expr{expr: Expr.TupleLit{fields: gradients, span: span, ty: None, id: AST_NODE_GENERATED}})
@@ -668,10 +662,9 @@ sema_call_compute_tape_gradient: fn(alias: String, helpers: SemaComputeTape, lea
     if output_fields.len() == 0 {
         return sema_call_compute_tape_member(alias, helpers.gradient, [Expr]{sema_call_compute_tape_ident("__ad_out", span), sema_call_compute_tape_ident(leaf, span)}, span)
     }
-    ^fields: [TupleField]{}
-    loop field in output_fields {
+    fields: loop field in output_fields -> {
         part: Expr.Field{base: sema_call_compute_tape_ident("__ad_out", span), member: field, span: span, id: AST_NODE_GENERATED}
-        fields.push(TupleField{name: field, value: sema_call_compute_tape_member(alias, helpers.gradient, [Expr]{part, sema_call_compute_tape_ident(leaf, span)}, span)})
+        TupleField{name: field, value: sema_call_compute_tape_member(alias, helpers.gradient, [Expr]{part, sema_call_compute_tape_ident(leaf, span)}, span)}
     }
     Expr.TupleLit{fields: fields, span: span, ty: None, id: AST_NODE_GENERATED}
 }
@@ -688,8 +681,7 @@ sema_call_compute_tape_call: fn(function: Expr, inputs: [CallArg], span: Span) -
 }
 
 sema_call_compute_tape_member: fn(alias: String, member: String, args: [Expr], span: Span) -> Expr Never! {
-    ^call_args: [CallArg]{}
-    loop argument in args -> call_args.push(sema_call_compute_tape_arg(argument, span))
+    call_args: loop argument in args -> sema_call_compute_tape_arg(argument, span)
     Expr.MethodCall{receiver: sema_call_compute_tape_ident(alias, span), method: member, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
 }
 

@@ -1495,6 +1495,12 @@ ZonedDateTime: struct {
         debug: fn(^^self) -> String { self.to_string() }
     }
 
+    // A ZonedDateTime encodes as the Dyn.DateTime payload, which every data
+    // format writes as RFC 3339 text and Decode below reads back.
+    impl Encode {
+        encode: fn(self) -> Dyn { Dyn.DateTime(self.copy()) }
+    }
+
     // The Dyn.DateTime payload decodes as itself; RFC 3339 text decodes as
     // Dyn.parse_datetime reads it (Foundation DynDateTime.parse_rfc3339): the
     // instant at its fixed offset, in the zone that offset names.

@@ -35,7 +35,7 @@ stdin: disassemble_maps_inlined_code_at_every_tier.named.stdin
 exit: 0
 stdout: ~ "disas sum_squares\nsum_squares  prog.jet:5-11  -O0  0x" # a function by name
 stdout: ~ "prog.jet:5   sum_squares: fn(n: Int) -> Int {\n       0x" # each of its lines
-stdout: ~ "prog.jet:6   total := 0\n       0x" # heads its rows
+stdout: ~ "prog.jet:6   ^total: 0\n       0x" # heads its rows
 stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # the loop
 stdout: ~ "prog.jet:8   sq: square(i)\n       0x" # the call
 stdout: ~ "prog.jet:9   total += sq\n       0x" # the sum
@@ -54,7 +54,7 @@ stdout: ~ "disas\nrun  prog.jet:3-16  -O1  0x" # run holds the stop's code; its 
 stdout: ~ "prog.jet:14   run: fn() {\n       0x" # run's own lines head their rows
 stdout: ~ "prog.jet:15   n: Int.parse(process.args().get(0) ?? \"1000\") ?? 1000\n  inlined args, called on line 15\n       0x" # a call line, with the callee inlined there
 stdout: ~ "prog.jet:16   print(\"{sum_squares(n)}\")\n       0x" # the line that calls sum_squares
-stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n       0x" # an inlined callee's line, under its call
+stdout: ~ "prog.jet:6   ^total: 0\n  inlined sum_squares, called on line 16\n       0x" # an inlined callee's line, under its call
 stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # its loop
 stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n   b2  0x" # square inlined inside it, from the breakpoint's row
 stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum
@@ -67,7 +67,7 @@ env: PATH={work}/no-tools
 stdin: disassemble_maps_inlined_code_at_every_tier.named.stdin
 exit: 0
 stdout: ~ "disas sum_squares\nsum_squares, inlined into run on line 16  prog.jet:3-9  -O1  0x" # an inlined function by name
-stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n       0x" # each of its lines
+stdout: ~ "prog.jet:6   ^total: 0\n  inlined sum_squares, called on line 16\n       0x" # each of its lines
 stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # heads its rows
 stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n       0x" # the code inlined at its call
 stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum
@@ -85,7 +85,7 @@ stdout: ~ "disas\nrun  prog.jet:3-16  -O2  0x" # run holds the stop's code at -O
 stdout: ~ "prog.jet:14   run: fn() {\n       0x" # run's own lines head their rows
 stdout: ~ "prog.jet:15   n: Int.parse(process.args().get(0) ?? \"1000\") ?? 1000\n  inlined args, called on line 15\n       0x" # a call line, with the callee inlined there
 stdout: ~ "prog.jet:16   print(\"{sum_squares(n)}\")\n       0x" # the line that calls sum_squares
-stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n       0x" # an inlined callee's line, under its call
+stdout: ~ "prog.jet:6   ^total: 0\n  inlined sum_squares, called on line 16\n       0x" # an inlined callee's line, under its call
 stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # its loop
 stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n   b2  0x" # square inlined inside it, from the breakpoint's row
 stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum
@@ -99,7 +99,7 @@ env: PATH={work}/no-tools
 stdin: disassemble_maps_inlined_code_at_every_tier.named.stdin
 exit: 0
 stdout: ~ "disas sum_squares\nsum_squares, inlined into run on line 16  prog.jet:3-9  -O2  0x" # an inlined function by name at -O2
-stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n       0x" # each of its lines
+stdout: ~ "prog.jet:6   ^total: 0\n  inlined sum_squares, called on line 16\n       0x" # each of its lines
 stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # heads its rows
 stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n       0x" # the code inlined at its call
 stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum

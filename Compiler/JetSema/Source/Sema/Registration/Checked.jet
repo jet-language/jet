@@ -152,8 +152,7 @@ sema_checked_standard_unit_defs: fn(module_row: SemaRegistrationModule, module_n
         return
     }
     loop definition in unit_family_distinct_defs(family) {
-        ^derives: [String]{}
-        loop named in definition.derives -> derives.push(named.name)
+        derives: loop named in definition.derives -> named.name
         rows.push(
             TTypeDef{
                 module_identity: module_row.module_identity,
@@ -272,10 +271,7 @@ sema_checked_marker_text_label: fn(marker: Marker, label: String) -> String? {
 // Derive lowering drops the `#CLI` marker; it is a CLI entry fact, not a
 // derived trait.
 sema_checked_derive_names: fn(derives: [NamedSpan]) -> [String] Never! {
-    ^names: [String]{}
-    loop derived in derives {
-        if derived.name != "CLI" -> names.push(derived.name)
-    }
+    names: loop derived in derives if derived.name != "CLI" -> derived.name
     names
 }
 
@@ -343,12 +339,11 @@ sema_checked_shape_names: fn(name: String) -> TShapeFieldNames Never! {
 // parameters names a format (sema_marker_rules_marker_signature_bindings
 // checks the name), with its written text.
 sema_checked_rename_formats: fn(marker: Marker) -> [TShapeFormatName] Never! {
-    ^formats: [TShapeFormatName]{}
-    loop label in marker.arg_labels {
+    formats: loop label in marker.arg_labels -> {
         written: label ?? next
         if RENAME_PARAMETERS.contains(written.name) -> next
         key: sema_checked_marker_text_label(marker, written.name) ?? next
-        formats.push(TShapeFormatName{format: written.name, name: key})
+        TShapeFormatName{format: written.name, name: key}
     }
     formats
 }
@@ -690,23 +685,21 @@ sema_checked_foreign_provider: fn(input: SemaForeignProviderInput, diagnostics: 
             },
         )
     }
-    ^close_adapters: [SemaCheckedForeignCloseAdapter]{}
-    loop adapter in input.close_adapters {
+    close_adapters: loop adapter in input.close_adapters -> {
         if adapter.library != input.library || adapter.handle_type == "" || adapter.raw_function == "" || adapter.adapter_function == "" {
             diagnostics.push(sema_checked_foreign_provider_error(input.source_span, "foreign provider has an invalid close adapter", "status-returning native closers need one complete raw/adapter identity", "preserve the approved close adapter metadata"))
             valid = false
             next
         }
-        close_adapters.push(SemaCheckedForeignCloseAdapter{library: input.library, handle_type: adapter.handle_type, raw_function: adapter.raw_function, adapter_function: adapter.adapter_function})
+        SemaCheckedForeignCloseAdapter{library: input.library, handle_type: adapter.handle_type, raw_function: adapter.raw_function, adapter_function: adapter.adapter_function}
     }
-    ^overrides: [SemaCheckedForeignOverlayOverride]{}
-    loop override in input.overrides {
+    overrides: loop override in input.overrides -> {
         if override.generated_symbol == "" || override.overlay_symbol == "" {
             diagnostics.push(sema_checked_foreign_provider_error(input.source_span, "foreign provider has an incomplete overlay override", "each accepted generated-symbol replacement must retain both exact Rust symbols", "preserve the generated binding symbol and overlay Rust path"))
             valid = false
             next
         }
-        overrides.push(SemaCheckedForeignOverlayOverride{generated_symbol: override.generated_symbol, overlay_symbol: override.overlay_symbol})
+        SemaCheckedForeignOverlayOverride{generated_symbol: override.generated_symbol, overlay_symbol: override.overlay_symbol}
     }
     ^boundary: SemaCheckedForeignBoundary?{None}
     if input.boundary == .Val(value) {
@@ -738,10 +731,9 @@ sema_checked_foreign_provider: fn(input: SemaForeignProviderInput, diagnostics: 
 }
 
 sema_checked_foreign_providers: fn(inputs: [SemaForeignProviderInput], diagnostics: ^[Diagnostic]) -> [SemaCheckedForeignProvider] Never! {
-    ^result: [SemaCheckedForeignProvider]{}
-    loop input in inputs {
+    result: loop input in inputs -> {
         value: sema_checked_foreign_provider(input, diagnostics) ?? next
-        result.push(value)
+        value
     }
     result
 }
@@ -1473,8 +1465,7 @@ sema_checked_foreign_undo: fn(graph: SemaRegistrationGraph, module_row: SemaRegi
         }
     }
     if owners.len() > 1 {
-        ^names: [String]{}
-        loop position in owners -> names.push(graph.modules[position].module_name)
+        names: loop position in owners -> graph.modules[position].module_name
         diagnostics.push(sema_error("E0105", inverse.span, "undo function `{inverse.name}` is ambiguous for foreign binding `{registered.declaration.name}`", "the shared C binding is imported by more than one module that defines `{inverse.name}`: {names.join(", ")}", "give the foreign binding one uniquely named inverse in one defining module"))
         return false
     }
@@ -2219,14 +2210,13 @@ sema_checked_variant_wire_name: fn(variant: Variant, style: String?) -> String N
 }
 
 sema_checked_cli_bindings: fn(module_name: String, definition: StructDef) -> [TCLIBinding] Never! {
-    ^result: [TCLIBinding]{}
-    loop binding in definition.cli_bindings {
+    result: loop binding in definition.cli_bindings -> {
         target_name: if binding.target == {
             .Ident(name, _, _) -> name
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> binding.name
         }
         markers: loop marker in binding.markers if !marker.negated -> marker.name
-        result.push(TCLIBinding{name: binding.name, span: binding.name_span, function_key: sema_checked_module_key(module_name, target_name), markers: markers})
+        TCLIBinding{name: binding.name, span: binding.name_span, function_key: sema_checked_module_key(module_name, target_name), markers: markers}
     }
     result
 }
@@ -2277,15 +2267,14 @@ sema_checked_member_types_name_nothing: fn(graph: SemaRegistrationGraph, module_
 }
 
 sema_checked_struct_fields: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: StructDef, generic_params: [TGenericParam], diagnostics: ^[Diagnostic]) -> [TField] {
-    ^fields: [TField]{}
-    loop source_index in 0..<definition.fields.len() {
+    fields: loop source_index in 0..<definition.fields.len() -> {
         sema_checked_member_type_names(graph, module_row, definition.fields[source_index].ty, definition.fields[source_index].ty_span, generic_params, diagnostics)
         ty: sema_checked_qualify_type_with_generics(graph, definition.fields[source_index].ty, module_row.module_identity, generic_params)
         if sema_type_has_forbidden_never(definition.fields[source_index].ty, false) {
             diagnostics.push(sema_never_as_value(definition.fields[source_index].ty_span))
         }
         sema_checked_validate_struct_field(definition, definition.fields[source_index], diagnostics)
-        fields.push(sema_checked_field(definition.fields[source_index], ty, sema_checked_field_shape_names(definition, definition.fields[source_index])))
+        sema_checked_field(definition.fields[source_index], ty, sema_checked_field_shape_names(definition, definition.fields[source_index]))
     }
     fields
 }
@@ -2524,16 +2513,12 @@ sema_checked_validate_field_policy: fn(definition: StructDef, diagnostics: ^[Dia
         return
     }
     // `expr_refs_name`: an identifier read or a call name.
-    ^deps: [[Int]]{}
-    loop formula in formulas {
+    deps: loop formula in formulas -> {
         ^referenced: [String]{}
         loop site in comptime_walk_identifiers(formula) -> referenced.push(site.name)
         loop site in comptime_walk_calls(formula) -> referenced.push(site.name)
-        ^edges: [Int]{}
-        loop index in 0..<names.len() {
-            if referenced.contains(names[index]) -> edges.push(index)
-        }
-        deps.push(edges)
+        edges: loop index in 0..<names.len() if referenced.contains(names[index]) -> index
+        edges
     }
     ^colors: [Int]{}
     ^reported: [Bool]{}
@@ -2885,8 +2870,7 @@ sema_checked_type_has_boxed_edge: fn(definition: TTypeDef, edge: String) -> Bool
 }
 
 sema_checked_generic_params: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, params: [SemaRegistrationGenericParam], diagnostics: ^[Diagnostic]) -> [TGenericParam] {
-    ^result: [TGenericParam]{}
-    loop parameter in params {
+    result: loop parameter in params -> {
         ^bounds: [SymbolID]{}
         loop bound in parameter.bounds {
             // An unregistered bound name is never rejected at the declaration
@@ -2898,7 +2882,7 @@ sema_checked_generic_params: fn(graph: SemaRegistrationGraph, module_row: SemaRe
             }
             bounds.push(sema_resolved_id(graph, symbol))
         }
-        result.push(TGenericParam{name: parameter.name, bounds: bounds, number: parameter.number})
+        TGenericParam{name: parameter.name, bounds: bounds, number: parameter.number}
     }
     result
 }
@@ -3492,8 +3476,7 @@ sema_checked_trait_method_expected: fn(declaration: TraitMethodSig, names: [Stri
         } else if returned == (Type.Named{name: "Unit"}) { success_value = false }
     }
     if declaration.declared_effects == .Val(effects) {
-        ^effect_names: [String]{}
-        loop entry in effects -> effect_names.push(entry.name)
+        effect_names: loop entry in effects -> entry.name
         rendered = "{rendered} -[{effect_names.join(", ")}]>"
     } else if declaration.is_pure { rendered = "{rendered} -[]>" } else if success_value {
         rendered = "{rendered} ->"
@@ -4057,18 +4040,16 @@ sema_checked_comptime_key: fn(key: CtKey) -> TComptimeKey? {
         .Bool(value) -> Val(TComptimeKey.Bool{value: value})
         .Char(value) -> sema_checked_const_char("{value}").map(fn(code) { TComptimeKey.Char{value: code} })
         .Tuple(fields) -> {
-            ^result: [TComptimeKeyField]{}
-            loop field in fields {
+            result: loop field in fields -> {
                 nested: sema_checked_comptime_key(field.value) ?? return None
-                result.push(TComptimeKeyField{name: field.name, key: nested})
+                TComptimeKeyField{name: field.name, key: nested}
             }
             Val(TComptimeKey.Tuple{fields: result})
         }
         .Struct(type_name, fields) -> {
-            ^result: [TComptimeKeyField]{}
-            loop field in fields {
+            result: loop field in fields -> {
                 nested: sema_checked_comptime_key(field.value) ?? return None
-                result.push(TComptimeKeyField{name: field.name, key: nested})
+                TComptimeKeyField{name: field.name, key: nested}
             }
             Val(TComptimeKey.Struct{type_name: type_name, fields: result})
         }
@@ -4089,35 +4070,31 @@ sema_checked_comptime: fn(source: CtValue) -> TComptimeValue? {
         .BigInt(decimal) -> Val(TComptimeValue.BigInt{decimal: decimal})
         .Bytes(bytes) -> Val(TComptimeValue.Bytes{value: bytes})
         .List(values) -> {
-            ^result: [TComptimeValue]{}
-            loop item in values {
+            result: loop item in values -> {
                 converted: sema_checked_comptime(item) ?? return None
-                result.push(converted)
+                converted
             }
             Val(TComptimeValue.List{values: result})
         }
         .Map(entries) -> {
-            ^result: [TComptimeMapEntry]{}
-            loop entry in entries {
+            result: loop entry in entries -> {
                 key: sema_checked_comptime_key(entry.key) ?? return None
                 item: sema_checked_comptime(entry.value) ?? return None
-                result.push(TComptimeMapEntry{key: key, value: item})
+                TComptimeMapEntry{key: key, value: item}
             }
             Val(TComptimeValue.Map{entries: result})
         }
         .Struct(type_name, fields) -> {
-            ^result: [TComptimeField]{}
-            loop field in fields {
+            result: loop field in fields -> {
                 item: sema_checked_comptime(field.value) ?? return None
-                result.push(TComptimeField{name: field.name, value: item})
+                TComptimeField{name: field.name, value: item}
             }
             Val(TComptimeValue.Struct{type_name: type_name, fields: result})
         }
         .Enum(type_name, variant, args) -> {
-            ^result: [TComptimeEnumArg]{}
-            loop argument in args {
+            result: loop argument in args -> {
                 item: sema_checked_comptime(argument.value) ?? return None
-                result.push(TComptimeEnumArg{name: argument.label, value: item})
+                TComptimeEnumArg{name: argument.label, value: item}
             }
             Val(TComptimeValue.Enum{type_name: type_name, variant: variant, args: result})
         }

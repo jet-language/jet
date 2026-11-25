@@ -1116,8 +1116,7 @@ sema_expression_lambda_bound_statements_mut_use: fn(statements: [Stmt], name: St
 // are copied at closure creation (the escaping route). `written` names the
 // locals the checked body is known to write beyond its visible assignments.
 sema_expression_lambda_bound_capture_escapes: fn(lambda: Lambda, written: [String], check: ^SemaBodyCheck) -> Bool? {
-    ^parameter_names: [String]{}
-    loop parameter in lambda.params -> parameter_names.push(parameter.name)
+    parameter_names: loop parameter in lambda.params -> parameter.name
     ^used_indexes: [Int]{}
     ^mutated_flags: [Bool]{}
     ^writes_local: false
@@ -1530,7 +1529,7 @@ sema_expression_lambda_collect_tree_expr: fn(value: TExpr, frame: Int, scopes: ^
             sema_expression_lambda_collect_tree_optional_expr(after_value, frame, scopes, keys)
         }
         .FnValue(kind) -> sema_expression_lambda_collect_tree_fn_value(kind, frame, scopes, keys)
-        .IntLit(_, _) | .StrLit(_) | .CtLit(_) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .StructLit(_) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .StaticCall(_, _, _, _, _) | .DistinctRaw(_) | .PatternMatches(_, _) | .OverflowOpt(_, _, _, _, _) | .Flat(_) -> {}
+        .IntLit(_, _) | .StrLit(_) | .CtLit(_) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .StructLit(_) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .StaticCall(_, _, _, _, _) | .DistinctRaw(_) | .PatternMatches(_, _) | .OverflowOpt(_, _, _, _, _) | .Flat(_) -> {}
     }
 }
 
@@ -2716,8 +2715,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
                 sema_expression_lambda_add_capture_key(capture_keys, check.scopes.bindings[outer_index ?? 0].symbol.id)
                 sema_expression_lambda_append_name(lambda_work.meta.moved_captures, capture.name)
             }
-            ^declared_mutable: [String]{}
-            loop name in lambda_work.meta.mut_captures -> declared_mutable.push(name)
+            declared_mutable: loop name in lambda_work.meta.mut_captures -> name
             lambda_work.meta.mut_captures = [String]{}
             loop name in declared_mutable {
                 ^outer_index: sema_expression_lambda_outer_binding(name, lambda.span, frame, check.scopes)
@@ -3057,12 +3055,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     // them (the unused-binding lints); its moves and write windows stay with
     // the body's own state (an inline loop joins its whole state below).
     if !inline_loop {
-        ^outer: [SemaOwnershipReference]{}
-        loop body_reference in first_reference..<lambda_state.references.len() {
-            if sema_ownership_first_row(check.state, lambda_state.references[body_reference].def_id) >= 0 {
-                outer.push(lambda_state.references[body_reference])
-            }
-        }
+        outer: loop body_reference in first_reference..<lambda_state.references.len() if sema_ownership_first_row(check.state, lambda_state.references[body_reference].def_id) >= 0 -> lambda_state.references[body_reference]
         sema_ownership_merge_references(check.state, outer)
     }
     // The lowered parameters' access: a host write callback's one parameter
@@ -3075,8 +3068,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     // An inline loop body builds into its owner's code, under its frame.
     ^written_row: [String]?{None}
     if !inline_loop && lambda.effects == .Val(row) {
-        ^names: [String]{}
-        loop entry in row -> names.push(entry.name.copy())
+        names: loop entry in row -> entry.name.copy()
         written_row = Val(names)
     }
     ^lambda_value: TLambda{
@@ -3125,6 +3117,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     loop call_index in generic_call_start..<lambda_context.generic_calls.len() {
         check.context.generic_calls.push(lambda_context.generic_calls[call_index])
     }
+    // A call of a `#Recorded` callee in the body is the enclosing function's
+    // (Calls/Recorded.jet); the body's context began with none.
+    check.context.recorded_calls.extend(lambda_context.recorded_calls.move())
     // A state write in the body belongs to the function that writes the
     // lambda, as its effects do: the body runs on the function's behalf, so
     // a pure function may not hide a write in a lambda (E3401).

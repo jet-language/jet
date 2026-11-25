@@ -1,0 +1,11 @@
+// E0642: a call passes its own value for a parameter whose `#run` default
+// the build computes for each call.
+#run doubled: fn(value: Int) -> Int {
+    value * 2
+}
+
+scaled: fn(width: Int, twice: Int{#run doubled(width)}) -> Int {
+    twice + 1
+}
+
+run: fn() { print(scaled(20, 7)) }

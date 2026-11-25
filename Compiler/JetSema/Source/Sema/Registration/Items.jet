@@ -501,6 +501,8 @@ SemaRegistrationParameter: struct {
     variadic: Bool,
     default: Expr?,
     default_ref: FunctionDefaultRef?,
+    // A default written `Type{#run value}` (Param.default_run).
+    default_run: Bool{false},
 }
 
 SemaRegistrationCallableABI: struct {
@@ -1667,8 +1669,7 @@ sema_registration_extern_signature: fn(function: ExternFn, owner: SemaRegistrati
     ^names: [String]{}
     ^defaults: [FunctionDefaultRef?]{}
     ^variadic: [Bool]{}
-    ^conventions: [AccessConvention]{}
-    loop parameter_index in 0..<function.params.len() {
+    conventions: loop parameter_index in 0..<function.params.len() -> {
         ty: function.params[parameter_index].ty
         if function.params[parameter_index].variadic -> params.push(Type.List{element: ty}) else {
             params.push(ty.copy())
@@ -1676,7 +1677,7 @@ sema_registration_extern_signature: fn(function: ExternFn, owner: SemaRegistrati
         names.push(function.params[parameter_index].name)
         defaults.push(None)
         variadic.push(function.params[parameter_index].variadic)
-        conventions.push(function.params[parameter_index].convention)
+        function.params[parameter_index].convention
     }
     metadata: FunctionCallMetadata{
         names: names,
@@ -1764,6 +1765,7 @@ sema_registration_function_parameters: fn(func: Func, signature: Type) -> [SemaR
                 variadic: parameter.variadic,
                 default: parameter.default,
                 default_ref: default_ref,
+                default_run: parameter.default_run,
             },
         )
     }
@@ -2559,8 +2561,7 @@ SemaRegistrationImplResolved: struct {
 }
 
 sema_registration_resolve_impl_traits_range: fn(graph: SemaRegistrationGraph, from: Int, to: Int) -> [[SemaRegistrationImplResolved]] {
-    ^out: [[SemaRegistrationImplResolved]]{}
-    loop module_index in from..<to {
+    out: loop module_index in from..<to -> {
         ^rows: [SemaRegistrationImplResolved]{}
         loop row in 0..<graph.modules[module_index].impls.len() {
             target_nominal: sema_type_graph_impl_target_nominal(graph, graph.modules[module_index].impls[row])
@@ -2568,7 +2569,7 @@ sema_registration_resolve_impl_traits_range: fn(graph: SemaRegistrationGraph, fr
             checked_text: sema_type_graph_is_checked_text_impl(graph, graph.modules[module_index].impls[row])
             rows.push(SemaRegistrationImplResolved{target_nominal: target_nominal, trait_id: trait_id, checked_text: checked_text})
         }
-        out.push(rows.move())
+        rows.move()
     }
     out
 }
@@ -2853,6 +2854,7 @@ sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: Stri
                 variadic: parameter.variadic,
                 default: parameter.default,
                 default_ref: default_ref,
+                default_run: parameter.default_run,
             },
         )
     }
@@ -4086,8 +4088,7 @@ sema_registration_attach_namespace_impls: fn(graph: ^SemaRegistrationGraph) {
             // diagnostics; re-keying them under the owner repeats nothing.
             ^repeated: [Diagnostic]{}
             ^row: sema_registration_impl(graph.modules[module_index], module_text(graph.module_table, graph.modules[module_index].module_identity), graph.symbols, definition, graph.modules[owner_index], sema_registration_impl_rows(graph.modules[owner_index]), sema_registration_impl_rows(graph.modules[module_index]), repeated)
-            ^attached_methods: [SemaRegistrationFunction]{}
-            loop m_idx in 0..<row.methods.len() {
+            attached_methods: loop m_idx in 0..<row.methods.len() -> {
                 if m_idx < graph.modules[module_index].impls[impl_index].methods.len() {
                     row.methods[m_idx].item_index = graph.modules[module_index].impls[impl_index].methods[m_idx].item_index
                     row.methods[m_idx].method_index = graph.modules[module_index].impls[impl_index].methods[m_idx].method_index
@@ -4101,7 +4102,7 @@ sema_registration_attach_namespace_impls: fn(graph: ^SemaRegistrationGraph) {
                     attached.method_index = -1
                     attached.trait_block_index = -1
                 }
-                attached_methods.push(attached)
+                attached
             }
             // Only the attached registration knows the owner's parameters.
             if definition.type_params.len() > 0 {
@@ -6387,10 +6388,9 @@ sema_registration_populate_imports: fn(graph: ^SemaRegistrationGraph, module_ind
 // populate, so every module's are minted first, in module order.
 sema_registration_mint_module_imports: fn(graph: ^SemaRegistrationGraph, module_index: Int) {
     source_text: module_text(graph.module_table, graph.modules[module_index].module_identity)
-    ^keys: [String]{}
-    loop import in graph.modules[module_index].imports {
+    keys: loop import in graph.modules[module_index].imports -> {
         if import.declaration.kind == .Unqualified(_, _, _, _, _) -> next
-        keys.push(symbol_key_text(SymbolKind.Import, source_text, module_text(graph.module_table, import.target_module_identity), import.declaration.alias))
+        symbol_key_text(SymbolKind.Import, source_text, module_text(graph.module_table, import.target_module_identity), import.declaration.alias)
     }
     loop key in keys -> ^_: symbol_intern(graph.symbols, key)
 }
@@ -6860,12 +6860,7 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
     ^hoisted_rows: [Int]{-1}
     ^hoisted_indexed: false
     loop hoisted_module in 0..<graph.modules.len() {
-        ^hoisted: [ImportDecl]{}
-        loop declaration in graph.modules[hoisted_module].program.imports {
-            if sema_inline_core_alias_import(declaration) || sema_module_meta_import(declaration) {
-                hoisted.push(declaration)
-            }
-        }
+        hoisted: loop declaration in graph.modules[hoisted_module].program.imports if sema_inline_core_alias_import(declaration) || sema_module_meta_import(declaration) -> declaration
         if hoisted.len() == 0 -> next
         if !hoisted_indexed {
             hoisted_indexed = true
@@ -6899,10 +6894,7 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
     ^edges_by_source: [U32:[Int]]{}
     ^edges_indexed: false
     loop aliased_module in 0..<graph.modules.len() {
-        ^aliased: [ImportDecl]{}
-        loop declaration in graph.modules[aliased_module].program.imports {
-            if sema_inline_module_alias_import(declaration) -> aliased.push(declaration)
-        }
+        aliased: loop declaration in graph.modules[aliased_module].program.imports if sema_inline_module_alias_import(declaration) -> declaration
         if aliased.len() == 0 -> next
         if !edges_indexed {
             edges_indexed = true
@@ -7413,10 +7405,10 @@ sema_registration_core_unit_index: fn(graph: SemaRegistrationGraph, module_name:
     None
 }
 
-// The default expression `reference` names. Its owner is one keyed callable
-// lookup; trait method declarations, which are not callable rows, are searched
-// only when the owner is not one.
-sema_registration_resolve_default: fn(graph: SemaRegistrationGraph, reference: FunctionDefaultRef) -> Expr? {
+// The default `reference` names. Its owner is one keyed callable lookup;
+// trait method declarations, which are not callable rows, are searched only
+// when the owner is not one.
+sema_registration_resolve_default: fn(graph: SemaRegistrationGraph, reference: FunctionDefaultRef) -> SemaCallDefaultValue? {
     if sema_registration_callable_row(graph, reference.owner_key) == .Val(row) {
         if row == {
             .Function(module_index, index) -> {
@@ -7444,11 +7436,12 @@ sema_registration_resolve_default: fn(graph: SemaRegistrationGraph, reference: F
     None
 }
 
-sema_registration_parameter_default: fn(parameters: [SemaRegistrationParameter], reference: FunctionDefaultRef) -> Expr? {
+sema_registration_parameter_default: fn(parameters: [SemaRegistrationParameter], reference: FunctionDefaultRef) -> SemaCallDefaultValue? {
     if reference.parameter_index < 0 || reference.parameter_index >= parameters.len() -> return None
     parameter: parameters[reference.parameter_index]
     if parameter.default_ref != reference -> return None
-    parameter.default
+    expression: parameter.default ?? return None
+    Val(SemaCallDefaultValue{reference: reference, expression: expression, run: parameter.default_run})
 }
 
 sema_registration_apply_graph_module: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {

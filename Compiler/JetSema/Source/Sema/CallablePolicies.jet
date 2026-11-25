@@ -159,8 +159,7 @@ sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, 
     all_params: sema_call_params_from_type(wrapper.signature) ?? return None
     target_params: sema_call_params_from_type(target.signature) ?? return None
     count: all_params.len() - target_params.len() - 1
-    ^params: [SemaCallParam]{}
-    loop index in 0..<count -> params.push(all_params[index])
+    params: loop index in 0..<count -> all_params[index]
     ^arguments: policy.args
     ^binding: sema_call_bind_args(policy.name, params, arguments, policy.name_span, check.diagnostics) ?? return None
     if binding.default_refs.len() > 0 {

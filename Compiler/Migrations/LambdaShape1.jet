@@ -10,7 +10,7 @@
 // line. The code spans (`…`) of Markdown prose and of string literals are
 // read the same way, so a fix text teaches the `fn` form too.
 use {
-    jet_lexer.[Token, TokenTables, lex_generated, STRING_PART_INTERPOLATION, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_EQ, TOKEN_GT, TOKEN_HASH, TOKEN_IDENT, TOKEN_KW_ELSE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_MINUS, TOKEN_PIPE_GT, TOKEN_QUESTION, TOKEN_QUESTION_DOT, TOKEN_QUESTION_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_STRING, TOKEN_UNIFIED_ARROW, TOKEN_AND_AND, TOKEN_OR_OR, lexer_without_comments]
+    jet_lexer.[Token, TokenTables, lex_generated, STRING_PART_INTERPOLATION, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_EQ, TOKEN_GT, TOKEN_HASH, TOKEN_IDENT, TOKEN_KW_ELSE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_MINUS, TOKEN_PIPE_GT, TOKEN_QUESTION, TOKEN_QUESTION_DOT, TOKEN_QUESTION_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_STRING, TOKEN_UNIFIED_ARROW, TOKEN_AND_AND, TOKEN_OR_OR, lexer_without_comments, token_is_authored_semicolon]
     jet_parser.[parse_generated_source]
 }
 
@@ -412,9 +412,7 @@ lambda_shape1_body_end: fn(bytes: [U8], tokens: [Token], body: Int, enclosing: I
         kind: tokens[index].kind
         closer: kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE
         if depth == 0 && index > body {
-            if kind == TOKEN_COMMA || closer || (kind == TOKEN_SEMI && tokens[index].span.end > tokens[index].span.start && bytes[tokens[index].span.start] == 59) {
-                break
-            }
+            if kind == TOKEN_COMMA || closer || token_is_authored_semicolon(tokens[index]) { break }
             if enclosing == TOKEN_LBRACE && lambda_shape1_newline(bytes, tokens[index - 1].span.end, tokens[index].span.start) && !lambda_shape1_continues(tokens, index) {
                 break
             }

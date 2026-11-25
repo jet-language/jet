@@ -215,10 +215,9 @@ sema_call_collections_reject_callback_shape: fn(method: String, callback_return:
 // The ownership walk's parameter rows: a slot the row stores is a take
 // (`^^`) parameter, every other slot reads (collection_row_takes_argument).
 sema_call_collections_ownership_params: fn(contract: SemaCollectionMethodContract, required_types: [Type]) -> [SemaCallParam] Never! {
-    ^params: [SemaCallParam]{}
-    loop (index, ty) in required_types {
+    params: loop (index, ty) in required_types -> {
         convention: if collection_row_takes_argument(contract.row, index) -> AccessConvention.Move else -> AccessConvention.Read
-        params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false})
+        SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
     }
     return params
 }
@@ -360,7 +359,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             }
             callback_mutable = if value.kind == {
                 .Lambda(lambda) -> lambda.capture_facts.needs_fn_mut
-                .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> callback_mutable
+                .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> callback_mutable
             }
         }
         // A named binary function given to `sort_by` is its
@@ -630,16 +629,14 @@ sema_call_collections_record_disjoint_views: fn(receiver: Expr, method: String, 
         }
     }
     bases: sema_ownership_places_from_expr_in_state(receiver, check.scopes, check.state)
-    ^facts: [SemaCallReturnViewFact]{}
-    loop index in 0..<proof_spans.len() {
-        ^places: [SemaOwnershipPlace]{}
-        loop base in bases {
+    facts: loop index in 0..<proof_spans.len() -> {
+        places: loop base in bases -> {
             ^place: sema_ownership_place_snapshot(base)
             place.projections.push("[fresh]")
             place.typed_projections.push(SemaOwnershipProjection.Fresh{span: proof_spans[index]})
-            places.push(place)
+            place
         }
-        facts.push(SemaCallReturnViewFact{slot: slots[index], access: AccessConvention.Write, places: places, sources: [ViewSourcePath]{}, temporaries: [Span]{}})
+        SemaCallReturnViewFact{slot: slots[index], access: AccessConvention.Write, places: places, sources: [ViewSourcePath]{}, temporaries: [Span]{}}
     }
     sema_ownership_note_call_views(check.state, span, facts)
     check.context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})

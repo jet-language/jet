@@ -128,10 +128,7 @@ core_failure_record_check: fn(source: String, module_identity: String, expected_
 // Core reads only the target's facts. A fact of one program (its package,
 // profile, stamp or settings) is refused in Core and read in a user module.
 core_target_fact_codes: fn(source: String, module_identity: String) -> [String] {
-    ^codes: [String]{}
-    loop diagnostic in core_failure_record_diagnostics(source, module_identity) {
-        if diagnostic.code.starts_with("E") -> codes.push(diagnostic.code.copy())
-    }
+    codes: loop diagnostic in core_failure_record_diagnostics(source, module_identity) if diagnostic.code.starts_with("E") -> diagnostic.code.copy()
     codes
 }
 

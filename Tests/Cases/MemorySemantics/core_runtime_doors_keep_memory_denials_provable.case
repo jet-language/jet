@@ -1,0 +1,23 @@
+# Core's bodies are checked from source, and a call one makes through a
+# jet.runtime door (`Arena.new` calls `rt.arena`) is toolchain code, not an
+# open dispatch: `!Mem.Rc` and `!Mem.Stack(above: N)` stay provable through
+# it, and the constructor's literal capacity is the heap `jet inspect memory`
+# counts. A finding inside a Core body reports at the denying function's own
+# call that reaches it, not at a line of the user's file the Core span
+# happens to name.
+fixture: CoreRuntimeDoorsKeepMemoryDenialsProvable.fixture
+env: NO_COLOR=1
+step rc: jet check rc.jet
+exit: 0
+stderr: !~ "Error: " # the door holds no reference count
+step stack: jet check stack.jet
+exit: 0
+stderr: !~ "Error: " # the door's runtime frame is not a missing body
+step heap: jet inspect memory heap.jet
+exit: 0
+stdout: ~ "Heap: 8 B" # the literal capacity bounds the heap
+stdout: !~ "unbounded" # neither the heap nor the stack meets an open door
+step corebody: jet check corebody.jet
+exit: nonzero
+stderr: ~ "at CSV.jet violates the effective `!Mem.Alloc`" # the allocation is in Core's body
+stderr: ~ "--> corebody.jet:4:" # reported at render's call into Core

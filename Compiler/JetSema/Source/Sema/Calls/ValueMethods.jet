@@ -315,10 +315,9 @@ sema_value_method_precise: fn(receiver: Expr, receiver_value: TExpr, method: Str
     if !sema_value_method_check_labels(method, args, check.diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    ^typed: [TExpr]{}
-    loop argument in args {
+    typed: loop argument in args -> {
         value: sema_check_expression(argument.expr, None, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        typed.push(value)
+        value
     }
     if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -358,12 +357,11 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         }
     }
     ^typed: [TExpr]{}
-    ^params: [SemaCallParam]{}
-    loop (index, argument) in args {
+    params: loop (index, argument) in args -> {
         ^required: builtin_method_bind(row.parameters[index], receiver_value.ty)
         value: sema_value_method_argument(argument, method, index, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         typed.push(value)
-        params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(required), variadic: false})
+        SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(required), variadic: false}
     }
     if !labels_valid -> return SemaMethodSpecialCheck{handled: true, value: None}
     ^updated_args: args

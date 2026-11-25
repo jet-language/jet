@@ -240,6 +240,18 @@ body_codec_get_list_semaevalprobeanswer: fn(bytes: [U8], input: ^BodyCodecIn) ->
     values
 }
 
+body_codec_put_list_semarecordedcall: fn(out: ^BodyCodecOut, values: [SemaRecordedCall]) Never! {
+    body_codec_put_count(out, values.len())
+    loop value in values -> body_codec_put_semarecordedcall(out, value)
+}
+
+body_codec_get_list_semarecordedcall: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaRecordedCall] Never! {
+    count: body_codec_get_count(bytes, input, 1)
+    values := [SemaRecordedCall]{}
+    loop _ in 0..<count -> values.push(body_codec_get_semarecordedcall(bytes, input))
+    values
+}
+
 body_codec_put_semafunctionresult: fn(out: ^BodyCodecOut, value: SemaFunctionResult) Never! {
     body_codec_put_opt_fnbody(out, value.value)
     body_codec_put_bool(out, value.complete)
@@ -253,6 +265,7 @@ body_codec_put_semafunctionresult: fn(out: ^BodyCodecOut, value: SemaFunctionRes
     body_codec_put_opt_list_semapreludeconversiondemand(out, value.prelude_demands)
     body_codec_put_opt_symbollocalkeys(out, value.failed_locals)
     body_codec_put_list_semaevalprobeanswer(out, value.eval_answers)
+    body_codec_put_list_semarecordedcall(out, value.recorded_calls)
 }
 
 body_codec_get_semafunctionresult: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaFunctionResult Never! {
@@ -268,7 +281,8 @@ body_codec_get_semafunctionresult: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaF
     f9: body_codec_get_opt_list_semapreludeconversiondemand(bytes, input)
     f10: body_codec_get_opt_symbollocalkeys(bytes, input)
     f11: body_codec_get_list_semaevalprobeanswer(bytes, input)
-    SemaFunctionResult{value: f0, complete: f1, exact_int_reachable: f2, copy_events: f3, hardware_use: f4, comptime_body_sources: f5, compute_facts: f6, failure: f7, incomplete_reasons: f8, prelude_demands: f9, failed_locals: f10, eval_answers: f11}
+    f12: body_codec_get_list_semarecordedcall(bytes, input)
+    SemaFunctionResult{value: f0, complete: f1, exact_int_reachable: f2, copy_events: f3, hardware_use: f4, comptime_body_sources: f5, compute_facts: f6, failure: f7, incomplete_reasons: f8, prelude_demands: f9, failed_locals: f10, eval_answers: f11, recorded_calls: f12}
 }
 
 body_codec_put_semacopyevent: fn(out: ^BodyCodecOut, value: SemaCopyEvent) Never! {
@@ -673,12 +687,25 @@ body_codec_get_semacomptimerulesite: fn(bytes: [U8], input: ^BodyCodecIn) -> Sem
     SemaComptimeRuleSite{module_identity: f0, marker: f1, value: f2, call: f3}
 }
 
+body_codec_put_list_semarulefunctionsource: fn(out: ^BodyCodecOut, values: [SemaRuleFunctionSource]) Never! {
+    body_codec_put_count(out, values.len())
+    loop value in values -> body_codec_put_semarulefunctionsource(out, value)
+}
+
+body_codec_get_list_semarulefunctionsource: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaRuleFunctionSource] Never! {
+    count: body_codec_get_count(bytes, input, 1)
+    values := [SemaRuleFunctionSource]{}
+    loop _ in 0..<count -> values.push(body_codec_get_semarulefunctionsource(bytes, input))
+    values
+}
+
 body_codec_put_semacallruleheard: fn(out: ^BodyCodecOut, value: SemaCallRuleHeard) Never! {
     body_codec_put_list_int(out, value.words)
     body_codec_put_list_string(out, value.texts)
     body_codec_put_list_tcomptimevalue(out, value.types)
     body_codec_put_list_tcomptimevalue(out, value.values)
     body_codec_put_list_tcomptimevalue(out, value.functions)
+    body_codec_put_list_semarulefunctionsource(out, value.function_sources)
     body_codec_put_list_tcomptimevalue(out, value.written)
 }
 
@@ -688,8 +715,22 @@ body_codec_get_semacallruleheard: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCa
     f2: body_codec_get_list_tcomptimevalue(bytes, input)
     f3: body_codec_get_list_tcomptimevalue(bytes, input)
     f4: body_codec_get_list_tcomptimevalue(bytes, input)
-    f5: body_codec_get_list_tcomptimevalue(bytes, input)
-    SemaCallRuleHeard{words: f0, texts: f1, types: f2, values: f3, functions: f4, written: f5}
+    f5: body_codec_get_list_semarulefunctionsource(bytes, input)
+    f6: body_codec_get_list_tcomptimevalue(bytes, input)
+    SemaCallRuleHeard{words: f0, texts: f1, types: f2, values: f3, functions: f4, function_sources: f5, written: f6}
+}
+
+body_codec_put_semarulefunctionsource: fn(out: ^BodyCodecOut, value: SemaRuleFunctionSource) Never! {
+    body_codec_put_string(out, value.key)
+    body_codec_put_opt_span(out, value.within)
+    body_codec_put_list_int(out, value.returned)
+}
+
+body_codec_get_semarulefunctionsource: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaRuleFunctionSource Never! {
+    f0: body_codec_get_string(bytes, input)
+    f1: body_codec_get_opt_span(bytes, input)
+    f2: body_codec_get_list_int(bytes, input)
+    SemaRuleFunctionSource{key: f0, within: f1, returned: f2}
 }
 
 body_codec_put_list_semacomputecallfact: fn(out: ^BodyCodecOut, values: [SemaComputeCallFact]) Never! {
@@ -1727,6 +1768,21 @@ body_codec_get_diagnosticerrorspan: fn(bytes: [U8], input: ^BodyCodecIn) -> Diag
     f0: body_codec_get_int(bytes, input)
     f1: body_codec_get_int(bytes, input)
     DiagnosticErrorSpan{start: f0, end: f1}
+}
+
+body_codec_put_semarecordedcall: fn(out: ^BodyCodecOut, value: SemaRecordedCall) Never! {
+    body_codec_put_string(out, value.function_key)
+    body_codec_put_tcomptimevalue(out, value.call)
+    body_codec_put_int(out, value.at)
+    body_codec_put_bool(out, value.returned)
+}
+
+body_codec_get_semarecordedcall: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaRecordedCall Never! {
+    f0: body_codec_get_string(bytes, input)
+    f1: body_codec_get_tcomptimevalue(bytes, input)
+    f2: body_codec_get_int(bytes, input)
+    f3: body_codec_get_bool(bytes, input)
+    SemaRecordedCall{function_key: f0, call: f1, at: f2, returned: f3}
 }
 
 body_codec_put_opt_semacallsitedetail: fn(out: ^BodyCodecOut, value: SemaCallSiteDetail?) Never! {

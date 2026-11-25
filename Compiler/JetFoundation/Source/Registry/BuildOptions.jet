@@ -880,6 +880,14 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
             }
             current = choice.copy()
         }
+        // Each layer's reader refuses a value outside its row (build_option_flags,
+        // a profile's fields in JetCLI Front.jet, the build session's option
+        // calls); one written by any other way is refused here, so every
+        // resolved value is one of its row's (the stock ones are: see the test
+        // below).
+        if current.layer != BuildOptionLayer.Stock && !build_option_accepts(row, current.value) {
+            return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(current)} isn't a value of `{row.name}`", fix: "write `{row.name}` with {build_option_value_hint(row)}"}
+        }
         values.push(current)
     }
     // A full backtrace names frames from the DWARF that `debug_info: false`
@@ -986,6 +994,21 @@ BUILD_REUSE_SAVED_WORK: false
 
 #Test("no command reuses work an earlier run saved") {
     assert(!BUILD_REUSE_SAVED_WORK)
+}
+
+#Test("every row's stock values are values of the row, and a written value outside its row is refused") {
+    loop row in JET_BUILD_OPTIONS {
+        assert(build_option_accepts(row, row.stock_build))
+        assert(build_option_accepts(row, row.stock_run))
+    }
+    bounds: [BuildOptionChoice]{BuildOptionChoice{name: "bounds", value: "loose", layer: BuildOptionLayer.Code, written: "b.bounds(.Loose)", site: "at build.jet:3", pinned: false}}
+    if build_options_resolve("build", "", bounds) == {
+        .Resolved(_, _) -> { panic("`bounds: loose` resolved") }
+        .Refused(code, what, _) -> {
+            assert_eq(code, "E2104")
+            assert_eq(what, "`b.bounds(.Loose)` at build.jet:3 isn't a value of `bounds`")
+        }
+    }
 }
 
 #Test("a link row takes default or a hook path, and a command refuses a hook it doesn't run") {

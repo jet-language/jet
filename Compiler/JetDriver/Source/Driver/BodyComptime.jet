@@ -459,7 +459,7 @@ jet_driver_comptime_body_pass: fn(
         if source.rule != None || rules_only -> next
         jet_driver_comptime_body_source_add(body_sources, known, source)
     }
-    ^batches: sema_call_rule_batches(registration, pending, pass, body_sources)
+    ^batches: sema_call_rule_batches(registration, pending, pass, body_sources, current_graph.modules)
     jet_driver_trace_body_begin(request.trace_sink, "comptime.body.run", body_sources, pass)
     ^memory_plan: [SemaFunctionMemoryPlan]{}
     ^run: jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions, request, diagnostics, memory_plan)

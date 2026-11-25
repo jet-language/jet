@@ -12,6 +12,7 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [Complex32](Complex32.jet) — Single-precision complex numbers sharing the same operations at F32 precision, with lossless widening and fallible narrowing.
 - [ComplexConjugate](ComplexConjugate.jet) — Complex.conj() and Complex32.conj() return the conjugate at the value's own precision.
 - [Constants](Constants/) — core.math constants: PI, E, TAU, INFINITY and NAN are comptime values, read as `math.PI`, never called.
+- [CoreMathReferenceValues](CoreMathReferenceValues.jet) — sqrt, floor, ceil, trunc, fabs, fmod, fma, cmp, the class tests and the bit casts at signed zeros, infinities, NaNs, subnormals and huge arguments, each within one ulp of MPFR's correctly rounded result.
 - [Decimal](Decimal.jet) — Decimal literals use exact base-10 arithmetic.
 - [ExpMinusOne](ExpMinusOne.jet) — 2^x - 1 and 10^x - 1, correctly rounded: the same bits on every tier, and full precision for small x, where exp2(x) - 1 cancels.
 - [F32CorrectlyRounded](F32CorrectlyRounded.jet) — An all-F32 call of a correctly rounded function returns the correctly rounded F32, never the Float result rounded a second time.

@@ -1,20 +1,30 @@
 // Push-loop sweep: a list built by pushing one value per loop pass becomes
 // the collecting loop that says so.
 //
-//     names := [String]{}            names: loop param in params -> param.name
+//     ^names: [String]{}             names: loop param in params -> param.name
 //     loop param in params {    =>
 //         names.push(param.name)
 //     }
 //
-// Only that exact four-line shape is rewritten, and only when nothing later
-// in the same function changes the list (no method that edits it, no
-// assignment to it or into it, no `^` borrow, no move), the pushed value
-// needs no expected type (no `.Case`, no bare number) and carries no control
-// flow (`return`, `break`, `next`, `?`), the element type is neither an
+// The loop that fills the list may also be written on one line
+// (`loop param in params -> names.push(param.name)`), and its one push may sit
+// under one `if`, either `if cond -> names.push(v)` or a braced `if cond { … }`
+// holding only the push; the condition becomes the loop's guard
+// (`names: loop param in params if cond -> v`). A braced loop body whose last
+// line is the push becomes the value body `loop … -> { … }`: its other lines
+// stay, the push becomes its value, and a `next` in it still omits the pass.
+// (A braced body without the arrow is a find loop, ended by `break value`.)
+//
+// A site is rewritten only when nothing later in the same function changes
+// the list (no method that edits it, no assignment to it or into it, no `^`
+// borrow, no move), no part of the loop names the list or breaks out of it,
+// the pushed value needs no expected type (no `.Case`, no bare number), the
+// header, guard and value carry no control flow (`return`, `break`, `next`,
+// `?`, `^`), the guard binds no pattern, the element type is neither an
 // option nor a union, which the collected value would not widen to, and the
-// loop header holds no braced literal, which the collecting form cannot read.
-// A generated file is left to its generator. A site the checker still
-// refuses is named in a skip file and left alone.
+// loop header holds no braced literal and no guard of its own. A generated
+// file is left to its generator. A site the checker still refuses is named in
+// a skip file and left alone.
 //
 // Usage (from the repository root):
 //   jet Tools/Agent/PushLoopSweep.jet [--write] [--skip=FILE] [PATH...]
@@ -27,21 +37,29 @@ use {
     term: core.term
 }
 
-DECLARATION: Regex{"^( *)([a-z_][A-Za-z0-9_]*) := \[(.+)\](..)$"}
+DECLARATION: Regex{"^( *)\^([a-z_][A-Za-z0-9_]*): \[(.+)\](..)$"}
 
 LOOP_OPEN: Regex{"^( *)loop (.+) (.)$"}
+
+STOPS: Regex{"(?:^|[^A-Za-z0-9_])(?:return|break|next)(?:$|[^A-Za-z0-9_])|\?|\^"}
+
+PATTERN_TEST: Regex{"(?:==|!=) *\.?[A-Z][A-Za-z0-9_]*\("}
 
 #Error
 SweepError: struct {
     message: String,
 }
 
-// One rewritable site: lines `index` to `index + 3` of its file.
+// One rewritable site: lines `index` to `index + span - 1` of its file. A
+// braced loop keeps its `body` lines, and its push becomes the body's value.
 Site: struct {
     index: Int,
+    span: Int,
     indent: String,
     name: String,
     header: String,
+    guard: String,
+    body: [String],
     value: String,
 }
 
@@ -51,20 +69,50 @@ after: fn(line: String, prefix: String) -> String? Never! {
     Val(line.partition(prefix).tail.copy())
 }
 
-// Whether `text` has as many closing parentheses, brackets and braces as
-// opening ones.
-balanced: fn(text: String) -> Bool Never! {
-    text.split("(").len() == text.split(")").len() && text.split("[").len() == text.split("]").len() && text.split("{{").len() == text.split("}}").len()
+// Whether `text` nests its parentheses, brackets and braces: no closer
+// before its opener and none left open.
+nested: fn(text: String) -> Bool Never! {
+    ^depth: 0
+    loop scalar in text.chars() {
+        piece: "{scalar}"
+        if piece == "(" || piece == "[" || piece == "{{" -> depth += 1
+        if piece == ")" || piece == "]" || piece == "}}" {
+            depth -= 1
+            if depth < 0 -> return false
+        }
+    }
+    depth == 0
 }
 
-// Whether the collected value can stand alone: it needs no expected type and
-// leaves its loop pass only by finishing.
-plain_value: fn(value: String) -> Bool Never! {
-    if value == "" || value.starts_with(".") || !balanced(value) -> return false
+// Whether `text` names the list `name`.
+names_list: fn(text: String, name: String) -> Bool Never! {
+    word: regex.compile("(?:^|[^A-Za-z0-9_.]){name}(?:$|[^A-Za-z0-9_])") ?? return true
+    word.is_match(text)
+}
+
+// Whether a piece of a site (header, guard or value) stands alone in the
+// collecting loop: it nests, holds no arrow, never names the list and leaves
+// its loop pass only by finishing.
+plain_piece: fn(text: String, name: String) -> Bool Never! {
+    text != "" && nested(text) && !text.contains("->") && !names_list(text, name) && !STOPS.is_match(text)
+}
+
+// Whether the collected value can stand alone: it needs no expected type.
+plain_value: fn(value: String, name: String) -> Bool Never! {
+    if !plain_piece(value, name) || value.starts_with(".") -> return false
     number: Regex{"^-?[0-9][0-9_]*$"}
-    if number.is_match(value) -> return false
-    stops: Regex{"(?:^|[^A-Za-z0-9_])(?:return|break|next)(?:$|[^A-Za-z0-9_])|\?|\^"}
-    !stops.is_match(value)
+    !number.is_match(value)
+}
+
+// Whether the condition can become the loop's guard: it binds no pattern.
+plain_guard: fn(guard: String, name: String) -> Bool Never! {
+    plain_piece(guard, name) && !guard.contains("{{") && !PATTERN_TEST.is_match(guard)
+}
+
+// Whether the loop header can head the collecting loop: a source loop with
+// no braced literal and no guard of its own.
+plain_header: fn(header: String, name: String) -> Bool Never! {
+    plain_piece(header, name) && header.contains(" in ") && !header.contains("{{") && !header.contains(" if ")
 }
 
 // Whether a line of the function after the loop changes `name`.
@@ -73,33 +121,71 @@ mutates: fn(line: String, name: String) -> Bool Never! {
     edits.is_match(line)
 }
 
-// The site starting at line `index`, when the four lines there have the shape
-// and the rest of the function leaves the list alone.
-site_at: fn(lines: [String], index: Int) -> Site? Never! {
+// The one push of `name` that is all of `line`: its value.
+pushed_value: fn(line: String, prefix: String, name: String) -> String? Never! {
+    push: regex.compile("^{prefix}{name}\\.push\\((.*)\\)$") ?? return None
+    found: push.matches(line)
+    if found.len() != 1 -> return None
+    Val(found[0].groups[0].copy())
+}
+
+// The loop after the declaration at `index` of `name`, when its passes do
+// nothing but push one value each: the site, short of the later-use check.
+loop_site: fn(lines: [String], index: Int, indent: String, name: String) -> Site? Never! {
+    line: lines[index + 1]
+    arrow: regex.compile("^{indent}loop (.+) -> {name}\\.push\\((.*)\\)$") ?? return None
+    one_line: arrow.matches(line)
+    if one_line.len() == 1 {
+        return Val(Site{index: index, span: 2, indent: indent.copy(), name: name.copy(), header: one_line[0].groups[0].copy(), guard: "", body: [String]{}, value: one_line[0].groups[1].copy()})
+    }
+    opened: LOOP_OPEN.matches(line)
+    if opened.len() != 1 || opened[0].groups[0] != indent || opened[0].groups[2] != "{{" -> return None
+    header: opened[0].groups[1].copy()
     if index + 3 >= lines.len() -> return None
+    guarded: regex.compile("^{indent}    if (.+) -> {name}\\.push\\((.*)\\)$") ?? return None
+    guard_arrow: guarded.matches(lines[index + 2])
+    if guard_arrow.len() == 1 {
+        if lines[index + 3] != "{indent}}}" -> return None
+        return Val(Site{index: index, span: 4, indent: indent.copy(), name: name.copy(), header: header, guard: guard_arrow[0].groups[0].copy(), body: [String]{}, value: guard_arrow[0].groups[1].copy()})
+    }
+    block: regex.compile("^{indent}    if (.+) \\{{$") ?? return None
+    opened_guard: block.matches(lines[index + 2])
+    if opened_guard.len() == 1 && index + 5 < lines.len() && lines[index + 4] == ("{indent}    }}") && lines[index + 5] == ("{indent}}}") {
+        if pushed_value(lines[index + 3], "{indent}        ", name) == .Val(value) {
+            return Val(Site{index: index, span: 6, indent: indent.copy(), name: name.copy(), header: header, guard: opened_guard[0].groups[0].copy(), body: [String]{}, value: value.copy()})
+        }
+    }
+    // A braced body whose last line is the push: the lines before it stay,
+    // when none names the list or breaks out of the loop.
+    ^close: index + 2
+    loop close < lines.len() && lines[close] != "{indent}}}" -> close += 1
+    if close >= lines.len() -> return None
+    value: pushed_value(lines[close - 1], "{indent}    ", name) ?? return None
+    body: loop at in (index + 2)..<(close - 1) -> lines[at].copy()
+    breaks: Regex{"(?:^|[^A-Za-z0-9_])break(?:$|[^A-Za-z0-9_])"}
+    loop text in body {
+        if text != "" && !text.starts_with("{indent}    ") -> return None
+        if names_list(text, name) || breaks.is_match(text) -> return None
+    }
+    Val(Site{index: index, span: close - index + 1, indent: indent.copy(), name: name.copy(), header: header, guard: "", body: body, value: value})
+}
+
+// The site starting at line `index`, when the lines there have one of the
+// shapes and the rest of the function leaves the list alone.
+site_at: fn(lines: [String], index: Int) -> Site? Never! {
+    if index + 1 >= lines.len() -> return None
     found: DECLARATION.matches(lines[index])
     if found.len() != 1 || found[0].groups[3] != "{{}}" -> return None
-    indent: found[0].groups[0].copy()
-    name: found[0].groups[1].copy()
     element: found[0].groups[2]
     if element.contains("?") || element.contains("|") -> return None
-    opened: LOOP_OPEN.matches(lines[index + 1])
-    if opened.len() != 1 || opened[0].groups[0] != indent || opened[0].groups[2] != "{{" {
-        return None
-    }
-    header: opened[0].groups[1].copy()
-    if !header.contains(" in ") || header.contains("{{") || !balanced(header) -> return None
-    push: regex.compile("^{indent}    {name}\\.push\\((.*)\\)$") ?? return None
-    pushed: push.matches(lines[index + 2])
-    if pushed.len() != 1 -> return None
-    value: pushed[0].groups[0]
-    if !plain_value(value) -> return None
-    if lines[index + 3] != "{indent}}}" -> return None
-    loop rest in (index + 4)..<lines.len() {
+    site: loop_site(lines, index, found[0].groups[0], found[0].groups[1]) ?? return None
+    if !plain_header(site.header, site.name) || !plain_value(site.value, site.name) -> return None
+    if site.guard != "" && !plain_guard(site.guard, site.name) -> return None
+    loop rest in (index + site.span)..<lines.len() {
         if lines[rest] == "}}" -> break
-        if mutates(lines[rest], name) -> return None
+        if mutates(lines[rest], site.name) -> return None
     }
-    Val(Site{index: index, indent: indent, name: name, header: header, value: value.copy()})
+    Val(site)
 }
 
 // Whether `source` is a generator's output, whose header says so; its
@@ -126,14 +212,24 @@ sites_in: fn(path: String, source: String, skips: [String:Bool]) -> [Site] Never
         if index >= lines.len() -> break
         if site_at(lines, index) == .Val(site) {
             if skips.get(skip_key(path, site)) == None {
+                index += site.span
                 sites.push(site.copy())
-                index += 4
                 next
             }
         }
         index += 1
     }
     sites
+}
+
+// The collecting loop that replaces `site`, one line or its braced body.
+collected: fn(site: Site) -> String Never! {
+    if site.body.len() == 0 {
+        guard: if site.guard == "" -> "" else -> " if {site.guard}"
+        return "{site.indent}{site.name}: loop {site.header}{guard} -> {site.value}"
+    }
+    body: site.body.join("\n")
+    "{site.indent}{site.name}: loop {site.header} -> {{\n{body}\n{site.indent}    {site.value}\n{site.indent}}}"
 }
 
 // `source` with every site rewritten as its collecting loop.
@@ -145,9 +241,8 @@ rewrite: fn(source: String, sites: [Site]) -> String Never! {
     loop {
         if index >= lines.len() -> break
         if next_site < sites.len() && sites[next_site].index == index {
-            site: sites[next_site]
-            out.push("{site.indent}{site.name}: loop {site.header} -> {site.value}")
-            index += 4
+            out.push(collected(sites[next_site]))
+            index += sites[next_site].span
             next_site += 1
             next
         }
@@ -164,10 +259,7 @@ tracked_sources: fn(roots: [String]) -[Exec, IO, Time.Wait]> [String] SweepError
     if receipt.code != 0 {
         return Err(SweepError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
     }
-    ^paths: [String]{}
-    loop path in receipt.output.split("\n") {
-        if path.ends_with(".jet") -> paths.push(path.copy())
-    }
+    paths: loop path in receipt.output.split("\n") if path.ends_with(".jet") -> path.copy()
     Ok(paths)
 }
 
@@ -219,29 +311,69 @@ run: fn() {
 }
 
 #Test("the four-line push loop becomes its collecting loop") {
-    source: "f: fn(params: [Param]) -> [String] {{\n    names := [String]{{}}\n    loop param in params {{\n        names.push(param.name)\n    }}\n    names\n}}\n"
+    source: "f: fn(params: [Param]) -> [String] {{\n    ^names: [String]{{}}\n    loop param in params {{\n        names.push(param.name)\n    }}\n    names\n}}\n"
     sites: sites_in("a.jet", source, [String:Bool]{})
     assert_eq(sites.len(), 1)
     assert_eq(rewrite(source, sites), "f: fn(params: [Param]) -> [String] {{\n    names: loop param in params -> param.name\n    names\n}}\n")
 }
 
+#Test("a one-line push loop becomes its collecting loop") {
+    source: "f: fn(params: [Param]) -> [String] {{\n    ^names: [String]{{}}\n    loop param in params -> names.push(param.name)\n    names\n}}\n"
+    sites: sites_in("a.jet", source, [String:Bool]{})
+    assert_eq(sites.len(), 1)
+    assert_eq(rewrite(source, sites), "f: fn(params: [Param]) -> [String] {{\n    names: loop param in params -> param.name\n    names\n}}\n")
+}
+
+#Test("a push under one if becomes the loop's guard") {
+    arrow: "f: fn(params: [Param]) -> [String] {{\n    ^names: [String]{{}}\n    loop param in params {{\n        if param.used -> names.push(param.name)\n    }}\n    names\n}}\n"
+    arrow_sites: sites_in("a.jet", arrow, [String:Bool]{})
+    assert_eq(arrow_sites.len(), 1)
+    assert_eq(rewrite(arrow, arrow_sites), "f: fn(params: [Param]) -> [String] {{\n    names: loop param in params if param.used -> param.name\n    names\n}}\n")
+    braced: "f: fn(params: [Param]) -> [String] {{\n    ^names: [String]{{}}\n    loop param in params {{\n        if param.used && !param.hidden {{\n            names.push(param.name)\n        }}\n    }}\n    names\n}}\n"
+    braced_sites: sites_in("a.jet", braced, [String:Bool]{})
+    assert_eq(braced_sites.len(), 1)
+    assert_eq(rewrite(braced, braced_sites), "f: fn(params: [Param]) -> [String] {{\n    names: loop param in params if param.used && !param.hidden -> param.name\n    names\n}}\n")
+}
+
 #Test("a list changed later, a value needing its type, or a stop is left alone") {
-    later: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n    names.push(\"x\")\n}}\n"
+    later: "f: fn() {{\n    ^names: [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n    names.push(\"x\")\n}}\n"
     assert_eq(sites_in("a.jet", later, [String:Bool]{}).len(), 0)
-    sorted: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n    names.sort()\n}}\n"
+    sorted: "f: fn() {{\n    ^names: [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n    names.sort()\n}}\n"
     assert_eq(sites_in("a.jet", sorted, [String:Bool]{}).len(), 0)
-    case: "f: fn() {{\n    kinds := [Kind]{{}}\n    loop p in ps {{\n        kinds.push(.Plain)\n    }}\n}}\n"
+    case: "f: fn() {{\n    ^kinds: [Kind]{{}}\n    loop p in ps {{\n        kinds.push(.Plain)\n    }}\n}}\n"
     assert_eq(sites_in("a.jet", case, [String:Bool]{}).len(), 0)
-    stop: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name ?? return)\n    }}\n}}\n"
+    stop: "f: fn() {{\n    ^names: [String]{{}}\n    loop p in ps {{\n        names.push(p.name ?? return)\n    }}\n}}\n"
     assert_eq(sites_in("a.jet", stop, [String:Bool]{}).len(), 0)
-    optional: "f: fn() {{\n    names := [String?]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n}}\n"
+    optional: "f: fn() {{\n    ^names: [String?]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n}}\n"
     assert_eq(sites_in("a.jet", optional, [String:Bool]{}).len(), 0)
-    borrowed: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n    fill(^names)\n}}\n"
+    borrowed: "f: fn() {{\n    ^names: [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n    fill(^names)\n}}\n"
     assert_eq(sites_in("a.jet", borrowed, [String:Bool]{}).len(), 0)
-    indexed: "f: fn() {{\n    parts := [[Int]]{{}}\n    loop p in ps {{\n        parts.push([Int]{{}})\n    }}\n    parts[0].push(1)\n}}\n"
+    indexed: "f: fn() {{\n    ^parts: [[Int]]{{}}\n    loop p in ps {{\n        parts.push([Int]{{}})\n    }}\n    parts[0].push(1)\n}}\n"
     assert_eq(sites_in("a.jet", indexed, [String:Bool]{}).len(), 0)
-    braced: "f: fn() {{\n    names := [String]{{}}\n    loop p in ([[P]]{{a, b}}) {{\n        names.push(p.name)\n    }}\n}}\n"
+    braced: "f: fn() {{\n    ^names: [String]{{}}\n    loop p in ([[P]]{{a, b}}) {{\n        names.push(p.name)\n    }}\n}}\n"
     assert_eq(sites_in("a.jet", braced, [String:Bool]{}).len(), 0)
+}
+
+#Test("a braced body keeps its lines and yields its push") {
+    source: "f: fn(params: [Param]) -> [String] {{\n    ^names: [String]{{}}\n    loop param in params {{\n        if param.hidden -> next\n        label: param.name.upper()\n        names.push(label)\n    }}\n    names\n}}\n"
+    sites: sites_in("a.jet", source, [String:Bool]{})
+    assert_eq(sites.len(), 1)
+    assert_eq(rewrite(source, sites), "f: fn(params: [Param]) -> [String] {{\n    names: loop param in params -> {{\n        if param.hidden -> next\n        label: param.name.upper()\n        label\n    }}\n    names\n}}\n")
+    breaks: "f: fn(params: [Param]) -> [String] {{\n    ^names: [String]{{}}\n    loop param in params {{\n        if param.last -> break\n        names.push(param.name)\n    }}\n    names\n}}\n"
+    assert_eq(sites_in("a.jet", breaks, [String:Bool]{}).len(), 0)
+    twice: "f: fn(params: [Param]) -> [String] {{\n    ^names: [String]{{}}\n    loop param in params {{\n        names.push(param.alias)\n        names.push(param.name)\n    }}\n    names\n}}\n"
+    assert_eq(sites_in("a.jet", twice, [String:Bool]{}).len(), 0)
+}
+
+#Test("a guard that binds, reads the list or stops is left alone") {
+    binds: "f: fn() {{\n    ^names: [String]{{}}\n    loop p in ps {{\n        if p.alias == .Val(alias) -> names.push(alias)\n    }}\n}}\n"
+    assert_eq(sites_in("a.jet", binds, [String:Bool]{}).len(), 0)
+    reads: "f: fn() {{\n    ^names: [String]{{}}\n    loop p in ps {{\n        if !names.contains(p.name) -> names.push(p.name)\n    }}\n}}\n"
+    assert_eq(sites_in("a.jet", reads, [String:Bool]{}).len(), 0)
+    otherwise: "f: fn() {{\n    ^names: [String]{{}}\n    loop p in ps {{\n        if p.used -> names.push(p.name) else -> other.push(p.name)\n    }}\n}}\n"
+    assert_eq(sites_in("a.jet", otherwise, [String:Bool]{}).len(), 0)
+    guarded: "f: fn() {{\n    ^names: [String]{{}}\n    loop p in ps if p.used {{\n        names.push(p.name)\n    }}\n}}\n"
+    assert_eq(sites_in("a.jet", guarded, [String:Bool]{}).len(), 0)
 }
 
 #Test("a generated file is left to its generator") {
@@ -250,7 +382,7 @@ run: fn() {
 }
 
 #Test("a skipped site stays") {
-    source: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n}}\n"
+    source: "f: fn() {{\n    ^names: [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n}}\n"
     ^skips: [String:Bool]{}
     skips["a.jet\tnames\tp in ps"] = true
     assert_eq(sites_in("a.jet", source, skips).len(), 0)

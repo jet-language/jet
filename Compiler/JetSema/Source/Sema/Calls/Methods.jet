@@ -141,7 +141,7 @@ sema_call_try_transaction_hook: fn(receiver: Expr, receiver_value: TExpr, method
     callback: checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
     executable: if callback.kind == {
         .Lambda(value) -> Val(value)
-        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
     } ?? {
         check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a lambda, not {sema_type_show(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(fn() {{ … }})`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -675,8 +675,7 @@ sema_call_method_candidate_from_func: fn(func: Func, module_name: String, owner_
 
     ^footprint: [String]?{None}
     if func.params[0].declared_footprint == .Val(declared) {
-        ^names: [String]{}
-        loop field in declared -> names.push(field.name)
+        names: loop field in declared -> field.name
         footprint = Val(names)
     }
     reference: TMethodRef{symbol: symbol, name: func.name, mangled: mangled, trait_owner: trait_owner, operator_identity: None}
@@ -784,7 +783,7 @@ sema_call_local_method_defaults: fn(candidate: SemaCallMethodCandidate, binding:
         }
         source_file: sema_source_file_at(check.environment.source_segments, reference.source_file, check.environment.source_origin, expression_span)
         if source_file != reference.source_file -> return None
-        defaults.push(SemaCallDefaultValue{reference: reference, expression: expression})
+        defaults.push(SemaCallDefaultValue{reference: reference, expression: expression, run: func.params[parameter_index].default_run})
     }
     Val(defaults)
 }
@@ -963,8 +962,7 @@ sema_call_typecheck_host_bound_arguments: fn(callee: String, params: [SemaCallPa
     }
     ^values: [TExpr]{}
     ^slots: [Int]{}
-    ^required_types: [Type]{}
-    loop index in 0..<args.len() {
+    required_types: loop index in 0..<args.len() -> {
         slot: sema_call_bound_slot(binding, binding.sources[index], args[index])
         if slot < 0 || slot >= params.len() -> return None
         parameter: params[slot]
@@ -987,7 +985,7 @@ sema_call_typecheck_host_bound_arguments: fn(callee: String, params: [SemaCallPa
         }
         values.push(value)
         slots.push(slot)
-        required_types.push(required)
+        required
     }
     Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: loop _ in values -> -1})
 }
@@ -1033,8 +1031,12 @@ sema_call_method_checked_from_value: fn(check: ^SemaBodyCheck, receiver: Expr, r
             return None
         }
     }
-    // A method call hears the `check` rules of its method's markers before
-    // its arguments bind (Calls/CheckRules.jet).
+    // A method call is recorded when its method carries `#Recorded`
+    // (Calls/Recorded.jet), and hears the `check` rules of its method's
+    // markers before its arguments bind (Calls/CheckRules.jet).
+    if sema_recorded_here(check, candidate.method.symbol) {
+        sema_recorded_note(check, candidate.method.symbol, candidate.method.name, span, args, candidate.type_args, Val(receiver_value))
+    }
     ^rules: [SemaCallRule]{}
     if sema_call_rules_heard_here(check.scopes) {
         rules = sema_call_rules_of_callee(graph, candidate.method.symbol)
@@ -1042,7 +1044,7 @@ sema_call_method_checked_from_value: fn(check: ^SemaBodyCheck, receiver: Expr, r
     if rules.len() == 0 {
         return sema_call_method_checked_visible(check, receiver, receiver_value, candidate, args, defaults, expected, span)
     }
-    hearing: sema_call_rules_hear(rules, Val(candidate.method.symbol), candidate.method.name, span, args, Val(receiver), Val(receiver_value.ty), sema_rule_known(receiver_value, check), receiver_value.span, None, "", check.scopes.current, check)
+    hearing: sema_call_rules_hear(rules, Val(candidate.method.symbol), candidate.method.name, span, args, candidate.type_args, Val(receiver), Val(receiver_value.ty), sema_rule_known(receiver_value, check), receiver_value.span, None, "", check.scopes.current, check)
     if hearing.rejected -> return None
     if !hearing.staged {
         return sema_call_method_checked_visible(check, receiver, receiver_value, candidate, args, defaults, expected, span)
@@ -1472,15 +1474,14 @@ sema_app_route_binding: fn(method: String, handler: Expr, check: SemaBodyCheck) 
             optional = true
         }
         if sema_http_route_find_struct(check, ty, shape.module_identity) == .Val(definition) {
-            ^fields: [String]{}
-            loop field in definition.fields {
+            fields: loop field in definition.fields -> {
                 ^field_type: field.ty
                 ^suffix: ""
                 if field_type == .Option(inner) {
                     field_type = inner
                     suffix = "?"
                 }
-                fields.push("{field.name}={sema_app_route_wire_type(field_type)}{suffix}")
+                "{field.name}={sema_app_route_wire_type(field_type)}{suffix}"
             }
             parts.push("s=json:{fields.join(",")}")
             next
@@ -1869,9 +1870,6 @@ sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     arity: sema_app_handler_arity(method, args.len())
     if arity < 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
     graph: check.program.registration_graph
-    if (method == "route" || method == "page" || method == "layout") && args.len() > 0 {
-        ^_: sema_http_route_check_literal(args[0], check)
-    }
     if args.len() != arity {
         check.diagnostics.push(sema_call_arity_diagnostic(method, arity, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}

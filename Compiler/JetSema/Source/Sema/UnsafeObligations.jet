@@ -1007,10 +1007,7 @@ sema_unsafe_discharge: fn(operations: ^^[SemaUnsafeOperation], asserted: [String
             gate.memory_operations.push(operation)
             next
         }
-        ^missing: [String]{}
-        loop name in operation.required {
-            if !asserted.contains(name) -> missing.push(name.copy())
-        }
+        missing: loop name in operation.required if !asserted.contains(name) -> name.copy()
         discharged: !track || missing.len() == 0
         if !discharged {
             diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3107", operation.span, "`{operation.kind}` is missing unsafe obligations: {missing.join(", ")}", "the effective `.Obligations` policy requires a typed proof immediately after each low-level operation", "add `assert {operation.required.join(", ")}` immediately after this operation")})

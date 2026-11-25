@@ -29,8 +29,7 @@ sema_variadic_bounds_expand: fn(program: ^Program) {
     ^calls: sema_inline_rewrite_empty()
     calls.variadic_keys = fixed_keys.move()
     calls.variadic = fixed.move()
-    ^rewritten: [Item]{}
-    loop item in program.items -> rewritten.push(sema_inline_rewrite_item(calls, item))
+    rewritten: loop item in program.items -> sema_inline_rewrite_item(calls, item)
     ^expanded: [Item]{}
     loop item in rewritten {
         if item == .Func(function) {

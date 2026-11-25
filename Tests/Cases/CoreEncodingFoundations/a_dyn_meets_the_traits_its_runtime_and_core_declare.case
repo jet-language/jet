@@ -1,0 +1,19 @@
+# Dyn has no source declaration. Its runtime row says it renders, so it meets
+# Display and Debug; Core's `impl Dyn.Encode` and `impl Dyn.Decode` give the
+# codecs. A JSON binding is a spelling of Dyn and meets the same traits, so the
+# fixture's `spelled` checks too. The same output on O0, O1 and O2.
+fixture: ADynMeetsTheTraitsItsRuntimeAndCoreDeclare.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "[1,\"a\",{\"k\":true}]\nArray([Number(\"1\"), Text(\"a\"), Object([(key,value) { key: \"k\", value: Bool(true) }])])\n[1,\"a\",{\"k\":true}]\ntrue\n"
+stderr: empty
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "[1,\"a\",{\"k\":true}]\nArray([Number(\"1\"), Text(\"a\"), Object([(key,value) { key: \"k\", value: Bool(true) }])])\n[1,\"a\",{\"k\":true}]\ntrue\n"
+stderr: empty
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "[1,\"a\",{\"k\":true}]\nArray([Number(\"1\"), Text(\"a\"), Object([(key,value) { key: \"k\", value: Bool(true) }])])\n[1,\"a\",{\"k\":true}]\ntrue\n"
+stderr: empty

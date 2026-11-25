@@ -1,10 +1,10 @@
 // The plan as data: a compile-time value of it matches the plan built at
-// run time, ASCII columns come from the class table, and each decision is
-// found from its node.
+// run time, and each decision is found from its node. That ASCII columns
+// come from the class table is tested in Grammar.jet, the Core source that
+// can reach the run-time lexer.
 use {
     core.grammar.[analyze]
     core.grammar.plan.[GrammarPlan, GrammarSource]
-    core.grammar.runtime.[bounds_column, lexer_column]
 }
 
 INI: "ini : lines+=line (EOL lines+=line)* ;\nline : section | entry | blank ;\nsection : '[' name=KEY ']' ;\nentry : name=KEY SEP value? ;\nblank : ;\nvalue : text=QUOTED # Quoted | text=BARE # Bare ;\nKEY : [A-Za-z0-9_.\\-]+ ;\nSEP : '=' | ':' ;\nQUOTED : '\"' [^\"\\r\\n]* '\"' ;\nBARE : [^ \\t\\r\\n;#\"'] [^\\r\\n;#]* ;\nEOL : '\\r'? '\\n' ;\nWS : [ \\t]+ -> skip ;\nCOMMENT : [;#] [^\\r\\n]* -> skip ;"
@@ -41,21 +41,6 @@ INI_PLAN: #run { plan_of(INI) }
         assert_eq(INI_PLAN.decisions[d].node, decision.node)
         assert_eq(INI_PLAN.decisions[d].steps.len(), decision.steps.len())
     }
-}
-
-#Test("ASCII columns come from the class table, with property bits when masked") {
-    plain: plan_of(INI)
-    masked: plan_of("a : word=WORD ;\nWORD : \\p{{L}}+ ;")
-    assert(!plain.lexer.masked)
-    assert(masked.lexer.masked)
-    loop lexer in [plain.lexer, masked.lexer] {
-        assert_eq(lexer.ascii.len(), 128)
-        loop cp in 0..<128 {
-            assert_eq(lexer_column(lexer, cp), bounds_column(lexer, cp))
-        }
-    }
-    assert(lexer_column(masked.lexer, 97) != lexer_column(masked.lexer, 49))
-    assert_eq(lexer_column(masked.lexer, 233), bounds_column(masked.lexer, 233))
 }
 
 #Test("each decision is found from the node it decides") {

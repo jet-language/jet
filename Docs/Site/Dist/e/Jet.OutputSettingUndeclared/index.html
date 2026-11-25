@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>Jet.OutputSettingUndeclared</code>: <code>Tests/UI/OutputSettingUndeclared/stderr</code>.</p>
 <pre class="diag">Error: Jet.OutputSettingUndeclared: This output&#39;s options set `max_partcles`, which the package does not declare
-  --&gt; Tests/UI/OutputSettingUndeclared/run.jet:3:76
+  --&gt; Tests/UI/OutputSettingUndeclared/run.jet:3:74
     |
-  3 |     fast: b.add_executable(&quot;fast&quot;, [&quot;run.jet&quot;], [], options: { settings: { max_partcles: 2000 } })
-    |                                                                            ^^^^^^^^^^^^
+  3 |     fast: b.add_executable(&quot;fast&quot;, [&quot;run.jet&quot;], [], options: {settings: {max_partcles: 2000}})
+    |                                                                          ^^^^^^^^^^^^
  Why: An output&#39;s `options: {settings: ...}` gives its own values to the settings `package.jet` declares, and code reads them as `#build.settings.&lt;key&gt;`
  Fix: Declare `max_partcles: Type = default` in the `settings: { … }` block of `package.jet`, or drop it from the output&#39;s options
 More: jet-lang.dev/e/Jet.OutputSettingUndeclared

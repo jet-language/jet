@@ -306,7 +306,7 @@ sema_call_check_special_debug: fn(call: Call, expected: Type?, check: ^SemaBodyC
                 fact: sema_copy_hidden_fact_of(checked.ty, CopyFact.Materialize, check, check.context.generic_params)
                 traced = sema_tree_node(checked.ty, TExprKind.Clone{value: checked, fact: fact}, checked.span)
             }
-            .IntLit(_, _) | .StrLit(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {}
+            .IntLit(_, _) | .StrLit(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {}
         }
     }
     local: checked_generated_local("__jet_debug_trace_{call.name_span.start}", call.name_span, checked.ty)
@@ -552,8 +552,7 @@ sema_call_check_value_constructor: fn(call: Call, type_name_value: String, compo
             type_name_value == "Decimal" -> "write `Decimal(\"12.34\")`"
             type_name_value == "Complex" -> "write `Complex(real, imaginary)`"
             else -> {
-                ^slots: [String]{}
-                loop _ in components -> slots.push("…")
+                slots: loop _ in components -> "…"
                 "write `{type_name_value}({slots.join(", ")})`"
             }
         }
@@ -679,12 +678,11 @@ sema_call_check_ambient_print: fn(call: Call, check: ^SemaBodyCheck) -> SemaDire
         return SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.Print{value: values[0]}, call.name_span))}
     }
     ^body: [TStmt]{}
-    ^prints: [TStmt]{}
-    loop index in 0..<values.len() {
+    prints: loop index in 0..<values.len() -> {
         local: checked_generated_local("__jet_print_arg_{call.name_span.start}_{index}", call.name_span, values[index].ty)
         body.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: values[index], gc_promotion: None, gc_transferred: false, span: call.name_span})
         read: sema_tree_node(values[index].ty, TExprKind.Local{local: local}, call.name_span)
-        prints.push(TStmt.ExprStmt{value: sema_tree_node(unit, TExprKind.Print{value: read}, call.name_span), span: call.name_span})
+        TStmt.ExprStmt{value: sema_tree_node(unit, TExprKind.Print{value: read}, call.name_span), span: call.name_span}
     }
     loop statement in prints -> body.push(statement)
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.InlineBlock{body: body}, call.name_span))}
@@ -1132,7 +1130,7 @@ sema_call_try_scope_guard: fn(module_name: String, member: String, alias: String
     callback: sema_check_expression(args[0].expr, Val(callback_type), check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     cleanup: if callback.kind == {
         .Lambda(value) -> Val(value)
-        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
     } ?? {
         check.diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`scope.guard` needs a lambda, not {sema_type_show(callback.ty)}", "a scope guard runs a cleanup lambda when the binding goes out of scope", "write `scope.guard(fn() {{ cleanup_code }})`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
@@ -1485,7 +1483,7 @@ sema_call_local_default_values: fn(target: SemaCallDirectTarget, binding: SemaCa
         }
         source_file: sema_source_file_at(check.environment.source_segments, reference.source_file, check.environment.source_origin, expression_span)
         if source_file != reference.source_file -> return None
-        defaults.push(SemaCallDefaultValue{reference: reference, expression: expression})
+        defaults.push(SemaCallDefaultValue{reference: reference, expression: expression, run: func.params[parameter_index].default_run})
     }
     Val(defaults)
 }
@@ -2135,9 +2133,13 @@ sema_call_written_arg_for_slot: fn(slots: [Int], slot: Int) -> Int? Never! {
     None
 }
 
-// A direct call hears the `check` rules of its callee's markers before its
-// arguments bind (Calls/CheckRules.jet).
+// A direct call is recorded when its callee carries `#Recorded`
+// (Calls/Recorded.jet), and hears the `check` rules of its callee's markers
+// before its arguments bind (Calls/CheckRules.jet).
 sema_call_check_direct_target_owned: fn(check: ^SemaBodyCheck, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?) -> SemaCallChecked? {
+    if sema_recorded_here(check, target.symbol.id) {
+        sema_recorded_note(check, target.symbol.id, call.name, call.name_span, call.args, target.type_args, None)
+    }
     ^rules: [SemaCallRule]{}
     graph: check.program.registration_graph
     if sema_call_rules_heard_here(check.scopes) {
@@ -2146,7 +2148,7 @@ sema_call_check_direct_target_owned: fn(check: ^SemaBodyCheck, target: SemaCallD
     if rules.len() == 0 {
         return sema_call_direct_checked_from_target(check, target, call, defaults, expected)
     }
-    hearing: sema_call_rules_hear(rules, Val(target.symbol.id), call.name, call.name_span, call.args, None, None, None, call.name_span, None, "", check.scopes.current, check)
+    hearing: sema_call_rules_hear(rules, Val(target.symbol.id), call.name, call.name_span, call.args, target.type_args, None, None, None, call.name_span, None, "", check.scopes.current, check)
     if hearing.rejected -> return None
     if !hearing.staged {
         return sema_call_direct_checked_from_target(check, target, call, defaults, expected)
@@ -2175,13 +2177,12 @@ sema_call_try_direct_forms: fn(call: Call, expected: Type?, check: ^SemaBodyChec
             check.diagnostics.push(sema_error("E0104", call.name_span, "`measurement` needs a value and labeled uncertainty", "a measured value enters the exactness plane at one explicit constructor", "write `measurement(value, uncertainty: standard_uncertainty)`"))
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
-        ^values: [TExpr]{}
-        loop argument_index in 0..<call.args.len() {
+        values: loop argument_index in 0..<call.args.len() -> {
             value: sema_check_expression(call.args[argument_index].expr, Val(Type.Float), check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
             if !sema_ownership_check_call_receiver(check, call.args[argument_index].expr, AccessConvention.Read, call.args[argument_index].span) {
                 return SemaDirectSpecialCheck{handled: true, value: None}
             }
-            values.push(value)
+            value
         }
         result: Type.Apply{name: "Measurement", args: [Type]{Type.Float}}
         value: sema_expression_measurement_source_call("MeasurementNew", values, result, call.name_span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}

@@ -1,0 +1,63 @@
+// The analysis fits the compile-time step limit: a generated grammar of
+// 400 parser rules, with 717 keywords, an operator rule and decisions
+// that read two tokens, is analyzed inside one compile-time call.
+use {
+    core.grammar.[analyze]
+    core.grammar.plan.[GrammarPlan, GrammarSource]
+}
+
+plan_of: fn(text: String) -> GrammarPlan Never! {
+    if analyze(text, "", [GrammarSource]{}) == {
+        .Ok(plan) -> plan
+        .Err(error) -> panic("{error}")
+    }
+}
+
+/// A grammar of `rules` parser rules: `file`, the operator rule `expr`,
+/// and a chain `r0`, `r1`, … in which every tenth rule decides on two
+/// tokens and the others on a keyword of their own.
+budget_grammar: fn(rules: Int) -> String Never! {
+    ^lines: [String]{
+        "file : items+=r0+ EOF ;",
+        "expr : left=expr op=('*' | '/') right=expr # Mul",
+        "     | left=expr op=('+' | '-') right=expr # Add",
+        "     | value=NUM # Num",
+        "     | '(' inner=expr ')' # Group",
+        "     ;",
+    }
+    chain: rules - 2
+    loop i in 0..<chain {
+        ^next: ""
+        if i + 1 < chain -> next = " tail=r{i + 1}?"
+        if i % 10 == 9 {
+            lines.push("r{i} : target=NAME '=' value=expr{next} # Set{i} | callee=NAME '(' arg=expr? ')'{next} # Call{i} ;")
+        } else if i + 1 < chain {
+            lines.push("r{i} : 'k{i}'i head=NAME{next} (',' more+=expr)* ';' # Main{i} | 'w{i}' '[' body=r{i + 1} ']' # Wrap{i} ;")
+        } else {
+            lines.push("r{i} : 'k{i}'i head=NAME (',' more+=expr)* ';' ;")
+        }
+    }
+    lines.push("NAME : [a-z_] [a-z0-9_]* ;")
+    lines.push("NUM : [0-9]+ ;")
+    lines.push("WS : [ \\t\\n]+ -> skip ;")
+    lines.join("\n")
+}
+
+/// Analyzed while building. The limit of a compile-time call is
+/// 10,000,000 steps, and a grammar that needed more would stop the build
+/// with E0952. This analysis measured between 2,800,000 and 2,900,000
+/// steps; the limit here holds it near that, so a change that makes the
+/// analysis slower shows here first.
+#StepLimit(3500000) BUDGET_PLAN: #run { plan_of(budget_grammar(400)) }
+
+#Test("a 400-rule grammar is analyzed inside one compile-time call's step limit") {
+    assert_eq(BUDGET_PLAN.shapes.len(), 400)
+    assert_eq(BUDGET_PLAN.keywords.kinds.len(), 717)
+    plan: plan_of(budget_grammar(400))
+    assert_eq(plan.decisions.len(), BUDGET_PLAN.decisions.len())
+    ^deep: 0
+    loop decision in plan.decisions {
+        if decision.depth == 2 -> deep += 1
+    }
+    assert(deep >= 39)
+}

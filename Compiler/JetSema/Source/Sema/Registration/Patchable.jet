@@ -28,10 +28,7 @@ sema_patchable_expand: fn(items: ^[Item]) {
     loop index in 0..<items.len() {
         if items[index].in_place() == .Struct(definition) {
             if !sema_patchable_eligible(definition) -> next
-            ^fields: [Field]{}
-            loop field in definition.fields {
-                if field.computed == None -> fields.push(field.copy())
-            }
+            fields: loop field in definition.fields if field.computed == None -> field.copy()
             parsed: parse_generated_source(sema_patchable_source(definition.name, fields).bytes())
             if parsed.diagnostics.len() > 0 -> next
             loop item in parsed.program.items {

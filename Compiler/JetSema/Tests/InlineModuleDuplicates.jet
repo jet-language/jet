@@ -2,10 +2,9 @@
 // level is: a name declared twice there is one E0105 at its second
 // declaration, whatever kinds the two declarations are.
 inline_duplicate_reports: fn(source: String) -> String {
-    ^rows: [String]{}
-    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+    rows: loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") -> {
         start: if diagnostic.span == .Val(at) -> at.start else -> -1
-        rows.push("{diagnostic.code} {start}: {diagnostic.what}")
+        "{diagnostic.code} {start}: {diagnostic.what}"
     }
     rows.join("; ")
 }

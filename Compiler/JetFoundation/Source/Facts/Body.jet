@@ -414,7 +414,6 @@ NodeKind: enum {
     SharedGuardSplit(guard: Int, first: [TFieldRef], second: [TFieldRef], editable: Bool),
     SharedGuardWait(guard: Int, condition: Int, predicate: BodyLambda),
     ConditionNotify(condition: Int, all: Bool),
-    CoreCall(record: CoreCallRecord, args: [Int], source_span: Span, type_args: [Type], widen_to_vec: [Bool], fallibility: TFailureCarrier),
     HostCall(call: BodyHostCall),
     AllocNew(ctor: TAllocCtor, args: [BodyCallArg]),
     EnumLit(enum_type: String, variant: String, payload: BodyEnumPayload),
@@ -1236,9 +1235,6 @@ body_each_node_kind_child: fn(tree: BodyTree, value: NodeKind, visit: fn(Int) -[
             body_each_lambda_child(tree, f2, visit)
         }
         .ConditionNotify(f0, _) -> { visit(f0) }
-        .CoreCall(_, f1, _, _, _, _) -> {
-            loop item in f1 { visit(item) }
-        }
         .HostCall(f0) -> { body_each_host_call_child(tree, f0, visit) }
         .AllocNew(_, f1) -> {
             loop item in f1 { body_each_call_arg_child(tree, item, visit) }

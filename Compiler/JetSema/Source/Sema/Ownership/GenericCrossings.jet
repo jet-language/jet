@@ -92,8 +92,7 @@ sema_generic_crossing_plain: fn(ty: Type) -> Bool Never! {
 
 // A call to generic function `callee` whose type arguments are settled.
 sema_generic_call_note: fn(callee: String, name: String, substitutions: [SemaInferenceBinding], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext) {
-    ^arguments: [SemaGenericCallArgument]{}
-    loop binding in substitutions {
+    arguments: loop binding in substitutions -> {
         if sema_generic_crossing_plain(binding.ty) -> next
         given: sema_ownership_crossing_body_problem(binding.ty, SemaSendCrossing.TaskCapture, true, environment, program, context)
         kept: sema_ownership_crossing_body_problem(binding.ty, SemaSendCrossing.TaskCapture, false, environment, program, context)
@@ -101,7 +100,7 @@ sema_generic_call_note: fn(callee: String, name: String, substitutions: [SemaInf
         reaches: sema_ownership_crossing_generic_reach(binding.ty, SemaSendCrossing.TaskCapture, environment, program, context)
         if given == None && kept == None && strict == None && reaches.len() == 0 -> next
         cloneable: sema_copy_classify(binding.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false).cloneable
-        arguments.push(SemaGenericCallArgument{param: binding.name.copy(), ty: binding.ty.copy(), given: given, kept: kept, strict: strict, cloneable: cloneable, reaches: reaches})
+        SemaGenericCallArgument{param: binding.name.copy(), ty: binding.ty.copy(), given: given, kept: kept, strict: strict, cloneable: cloneable, reaches: reaches}
     }
     if arguments.len() == 0 {
         return

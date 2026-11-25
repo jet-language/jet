@@ -656,6 +656,7 @@ sema_check_registration_top_level_declared: fn(declaration: Func, module_index: 
             // #3708: the reused body joins the bundle solve like one checked
             // here: its failure row, and the obligations the solve settles.
             if checked_function.failure == .Val(facts) -> result.failure_facts.push(facts)
+            loop call in checked_function.recorded_calls -> result.recorded_calls.push(call)
             sema_comptime_push_obligations(checked_function, result.diagnostics)
             sema_comptime_replay_demand(checked_function, program)
         }
@@ -701,6 +702,7 @@ sema_check_registration_top_level_declared: fn(declaration: Func, module_index: 
             result.comptime_body_sources.extend(checked.comptime_body_sources.move())
             result.compute_facts.push(checked.compute_facts)
             if checked.failure == .Val(facts) -> result.failure_facts.push(facts.copy())
+            result.recorded_calls.extend(checked.recorded_calls.move())
             if checked.value == .Val(function) {
                 if sema_function_publish_return_views(scopes, return_view_rows, function, owner_id) {
                     scopes_changed = true

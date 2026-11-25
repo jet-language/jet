@@ -561,8 +561,7 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
         performed.push(META_TYPES)
         performed.push(META_RAW)
     }
-    ^entries: [EffectRowEntry]{}
-    loop name in performed -> entries.push(EffectRowEntry{name: name, span: span})
+    entries: loop name in performed -> EffectRowEntry{name: name, span: span}
     if !sema_effect_record_intrinsic_effects(check, "Compiler.{method}", span, entries) {
         return failed
     }
@@ -629,8 +628,7 @@ sema_call_compiler_add_struct: fn(receiver: Expr, receiver_value: TExpr, args: [
     ownership: sema_ownership_check_method_call(check, "Compiler.add_struct", receiver, AccessConvention.Read, params, ordinary, span)
     if !ownership.accepted || !ownership.complete -> return failed
     performed: [String]{META_GENERATE, META_TYPES}
-    ^entries: [EffectRowEntry]{}
-    loop name in performed -> entries.push(EffectRowEntry{name: name, span: span})
+    entries: loop name in performed -> EffectRowEntry{name: name, span: span}
     if !sema_effect_record_intrinsic_effects(check, "Compiler.add_struct", span, entries) {
         return failed
     }
@@ -988,11 +986,10 @@ sema_call_compiler_report_finding: fn(receiver: Expr, receiver_value: TExpr, arg
     if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return failed
     }
-    ^values: [TExpr]{}
-    loop (index, argument) in args {
+    values: loop (index, argument) in args -> {
         required: if index == 7 -> Type.Named{name: "CompilerCall"} else -> Type.String
         value: sema_check_expression(argument.expr, Val(required), check) ?? return failed
-        values.push(value)
+        value
     }
     if !sema_effect_record_intrinsic_effects(check, "Compiler.report", span, [EffectRowEntry]{}) {
         return failed
@@ -1674,10 +1671,9 @@ sema_build_option_value: fn(row: BuildOptionRow, expr: Expr) -> String? {
         .Text -> return sema_build_option_literal(expr)
         .List -> {
             if expr == .ListLit(elements, _, _) {
-                ^items: [String]{}
-                loop element in elements {
+                items: loop element in elements -> {
                     item: sema_build_option_literal(element) ?? return None
-                    items.push(item)
+                    item
                 }
                 return Val(build_option_list_value(items))
             }
@@ -1694,10 +1690,9 @@ sema_build_option_value: fn(row: BuildOptionRow, expr: Expr) -> String? {
         }
         .Hooks -> {
             if expr == .ListLit(elements, _, _) {
-                ^items: [String]{}
-                loop element in elements {
+                items: loop element in elements -> {
                     item: sema_build_hook_path(element) ?? return None
-                    items.push(item)
+                    item
                 }
                 return Val(build_option_list_value(items))
             }

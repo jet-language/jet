@@ -1,0 +1,49 @@
+// A rule reads the calls a handler's body makes to `#Recorded` functions
+// from the handler's FunctionInfo: `recorded` lists each call in the order
+// it is written, with its explicit type arguments, and `returns` the ones a
+// return path returns, through a `return` or a local the last line names.
+Misread: struct {
+    heard: String,
+
+    impl Diagnostic {
+        code: "known.Misread",
+
+        what: fn(self) -> String { "the handler's recorded calls read as `{self.heard}`" }
+
+        why: fn(self) -> String { "a handler's calls of `#Recorded` functions are known while building" }
+
+        fix: fn(self) -> String { "read each recorded call, and the returned ones" }
+    }
+}
+
+Handles: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args[0].function == .Val(info) {
+                recorded: (loop made in info.recorded -> "{made.name.text}<{(loop ty in made.type_args -> ty.name).join(",")}>").join(" ")
+                returns: (loop made in info.returns -> "{made.name.text}<{(loop ty in made.type_args -> ty.name).join(",")}>").join(" ")
+                heard: "{recorded} | {returns}"
+                if heard != "note<> reply<String> reply<Int> | reply<String> reply<Int>" -> reject(Misread{heard: heard}, at: call.args[0])
+            }
+        }
+    }
+}
+
+#Recorded
+note: fn(text: String) -> String { "{text}" }
+
+#Recorded
+reply: fn<T: Printable>(value: T) -> String { "{value}" }
+
+show: fn(id: Int, name: String) -> String {
+    seen: note(name)
+    if seen == "" -> return reply<String>("nobody")
+    answer: reply<Int>(id)
+    answer
+}
+
+#Handles route: fn(handler: fn(Int, String) -> String, path: String) -> String { handler(7, path) }
+
+run: fn() { print(route(show, "/item")) }

@@ -1564,7 +1564,8 @@ IRX64Selected: struct {
 // Runs the selecting threads until every row of `outputs` holds its result
 // or `stops` the panic text of a thread that stopped on it. A stopped
 // thread's finished rows go with it and are selected again (selection is
-// deterministic), so a round that leaves rows behind has stopped on one.
+// deterministic), so a round that leaves rows behind has stopped on one;
+// one that left rows with no stop gives each that stop instead.
 ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: ^[IRX64FunctionResult?], stops: ^[String]) {
     total: outputs.len()
     ^filled: 0
@@ -1596,8 +1597,14 @@ ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: ^[IRX
         if missing.len() == 0 {
             return
         }
+        // No thread stopped on a function, so another round would leave the
+        // same rows: each becomes a stop of its own, which its function's
+        // error row reports (ir_x64_compile_module_logged).
         if stopped == 0 {
-            panic("the x64 selection threads left {missing.len()} functions unselected")
+            stops.try_reserve(total) ?? ()
+            loop stops.len() < total -> stops.push("")
+            loop row in missing -> stops[row] = "the x64 selection threads left it unselected"
+            return
         }
         ir_x64_reclaim(inputs, missing)
     }

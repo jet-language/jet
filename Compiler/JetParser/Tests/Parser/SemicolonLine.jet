@@ -66,6 +66,12 @@ semicolon_line_errors: fn(source: String) -> String {
     exits: "run: fn(c: Bool) -> Int {{\n    v: if c -> 1 else -> return 0; print(v)\n    v\n}}\n"
     exits_at: parser_test_find(exits, "; print(v)")
     assert_eq(semicolon_line_errors(exits), "E0448@{exits_at}")
+    valued: "run: fn() {{\n    if 1 > 0 -> \"a\" else -> \"b\"; print(1)\n}}\n"
+    valued_at: parser_test_find(valued, "; print(1)")
+    assert_eq(semicolon_line_errors(valued), "E0448@{valued_at}")
+    named: "run: fn(a: Int, b: Int) {{\n    if a > b -> a else -> b; print(1)\n}}\n"
+    named_at: parser_test_find(named, "; print(1)")
+    assert_eq(semicolon_line_errors(named), "E0448@{named_at}")
 }
 
 #Test("a semicolon ending a one-line arm before a line break or brace is accepted") {

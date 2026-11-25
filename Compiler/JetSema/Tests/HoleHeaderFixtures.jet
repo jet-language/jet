@@ -61,10 +61,7 @@ hole_header_errors: fn(failures: ^[String], source: String) -> [Diagnostic]? {
         failures.push("finalization failed {err}: {source}")
         return None
     }
-    ^errors: [Diagnostic]{}
-    loop diagnostic in checked.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic.copy())
-    }
+    errors: loop diagnostic in checked.diagnostics if diagnostic.severity == DIAGNOSTIC_ERROR -> diagnostic.copy()
     Val(errors)
 }
 
@@ -91,8 +88,7 @@ hole_header_clean: fn(failures: ^[String], source: String) {
 hole_header_expect: fn(failures: ^[String], source: String, code: String, what: String, fix: String, applied: String) {
     errors: hole_header_errors(failures, source) ?? return
     if errors.len() != 1 {
-        ^codes: [String]{}
-        loop error in errors -> codes.push("{error.code}: {error.what}")
+        codes: loop error in errors -> "{error.code}: {error.what}"
         failures.push("wanted one {code}, found [{codes.join("; ")}] in {source}")
         return
     }

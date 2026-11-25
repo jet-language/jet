@@ -1,6 +1,6 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
 // the route table (argument and result carriers, payloads).
-use jet_foundation.[CoreCallRecord, RUNTIME_GENERIC_HANDLES, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index, ir_native_type, ir_record_schema_row]
+use jet_foundation.[RUNTIME_GENERIC_HANDLES, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index, ir_native_type, ir_record_schema_row]
 
 // A buffer of `bytes` bytes (a slot) for elements of row `element` to
 // replace the one of the List at `list`, null when `try` and refused. In a
@@ -2203,7 +2203,7 @@ ir_fn_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, kind: BodyF
             if ir_body_node(p, b, value).kind == {
                 .Lambda(lambda) -> return ir_lambda(m, p, b, ty, lambda, span)
                 .FnValue(inner) -> return ir_fn_value(m, p, b, ty, inner, span)
-                .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+                .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
             }
             return ir_expr(m, p, b, value)
         }
@@ -6571,48 +6571,6 @@ ir_reflect_literal: fn(p: IRProgram, b: IRBuilder, node: Int) -> String Never! {
         }
     }
     text
-}
-
-// A Core call: its checked arguments to the record's runtime route. In a
-// build invocation an `#Impure` block's Core call runs between the host marks
-// Impure.enter and Impure.leave (IRProgram.invocation), as its function
-// calls do (ir_call_row_emit).
-// A `??` or `?` operand (BuildExpr.jet ir_expr_split) splits only through the
-// closing route call of ir_core_call_routed: a dedicated builder may branch
-// around its route call or use its value, so it gets the boxed Result.
-ir_core_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
-    split_armed: b.split_armed
-    b.split_armed = false
-    if !p.invocation || b.impure == 0 {
-        return ir_core_call_routed(m, p, b, ty, record, args, type_args, widen, split_armed, span)
-    }
-    _: ir_host_method_words(m, p, b, Type.Bool, "Impure.enter", [Int]{}, span)
-    result: ir_core_call_routed(m, p, b, ty, record, args, type_args, widen, split_armed, span)
-    if ir_failed(b) -> return -1
-    _: ir_host_method_words(m, p, b, Type.Bool, "Impure.leave", [Int]{}, span)
-    result
-}
-
-ir_core_call_routed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], split_armed: Bool, span: Span) -> Int Never! {
-    canonical: ir_canonical_core_record(record) ?? return ir_fail_slot(b, span, "Core call {record.module_name}.{record.member}, which the canonical registry does not hold as checked")
-    if type_args.len() > 0 {
-        return ir_fail_slot(b, span, "generic Core call {canonical.module_name}.{canonical.member}")
-    }
-    loop flag in widen {
-        if flag {
-            return ir_fail_slot(b, span, "Core call {canonical.module_name}.{canonical.member} widening a fixed list")
-        }
-    }
-    symbol: if canonical.symbol == {
-        .Prelude(name) -> name
-        .SourceOwned -> {
-            return ir_fail_slot(b, span, "source-owned Core call {canonical.module_name}.{canonical.member}")
-        }
-    }
-    ir_route_ambient_refusals(m, p, b, symbol, span)
-    if ir_lazy_core_call(m, p, b, symbol, ty, args, span) == .Val(result) -> return result
-    b.split_armed = split_armed
-    ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, [String]{}, span)
 }
 
 // The refusals a route call reading ambient state meets before it runs. A

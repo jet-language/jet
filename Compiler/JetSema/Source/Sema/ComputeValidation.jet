@@ -215,12 +215,7 @@ sema_compute_autodiff_reach: fn(index: SemaComputeIndex, modules: [SemaGraphModu
         }
         loop edge in function.effects.call_edges -> pending.push(edge.copy())
     }
-    ^result: [String]{}
-    loop effect_name in solved {
-        if reached.contains(effect_name) || (panics && sema_effect_root(effect_name) == "Panic") {
-            result.push(effect_name.copy())
-        }
-    }
+    result: loop effect_name in solved if reached.contains(effect_name) || (panics && sema_effect_root(effect_name) == "Panic") -> effect_name.copy()
     result
 }
 

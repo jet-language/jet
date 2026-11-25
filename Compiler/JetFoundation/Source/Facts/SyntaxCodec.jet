@@ -2120,6 +2120,7 @@ body_codec_put_callargflags: fn(out: ^BodyCodecOut, value: CallArgFlags) Never! 
     body_codec_put_opt_callablepolicychain(out, value.callable_policy)
     body_codec_put_bool(out, value.authority_boundary)
     body_codec_put_bool(out, value.shared_operand)
+    body_codec_put_bool(out, value.run_default)
 }
 
 body_codec_get_callargflags: fn(bytes: [U8], input: ^BodyCodecIn) -> CallArgFlags Never! {
@@ -2140,7 +2141,8 @@ body_codec_get_callargflags: fn(bytes: [U8], input: ^BodyCodecIn) -> CallArgFlag
     f14: body_codec_get_opt_callablepolicychain(bytes, input)
     f15: body_codec_get_bool(bytes, input)
     f16: body_codec_get_bool(bytes, input)
-    CallArgFlags{owned_last_use: f0, shared_access_desugar: f1, template_items: f2, c_callback_symbol: f3, c_callback_function_key: f4, c_callback_managed: f5, c_callback_plan_digest: f6, c_callback_identity: f7, trusted_html: f8, source_index: f9, binder_slot: f10, binder_label: f11, binder_refs: f12, binder_site: f13, callable_policy: f14, authority_boundary: f15, shared_operand: f16}
+    f17: body_codec_get_bool(bytes, input)
+    CallArgFlags{owned_last_use: f0, shared_access_desugar: f1, template_items: f2, c_callback_symbol: f3, c_callback_function_key: f4, c_callback_managed: f5, c_callback_plan_digest: f6, c_callback_identity: f7, trusted_html: f8, source_index: f9, binder_slot: f10, binder_label: f11, binder_refs: f12, binder_site: f13, callable_policy: f14, authority_boundary: f15, shared_operand: f16, run_default: f17}
 }
 
 body_codec_put_derivebodyitem: fn(out: ^BodyCodecOut, value: DeriveBodyItem) Never! {
@@ -4759,6 +4761,7 @@ body_codec_put_param: fn(out: ^BodyCodecOut, value: Param) Never! {
     body_codec_put_opt_list_string(out, value.declared_view_from_names)
     body_codec_put_opt_list_namedspan(out, value.declared_footprint)
     body_codec_put_bool(out, value.script_variable)
+    body_codec_put_bool(out, value.default_run)
 }
 
 body_codec_get_param: fn(bytes: [U8], input: ^BodyCodecIn) -> Param Never! {
@@ -4776,7 +4779,8 @@ body_codec_get_param: fn(bytes: [U8], input: ^BodyCodecIn) -> Param Never! {
     f11: body_codec_get_opt_list_string(bytes, input)
     f12: body_codec_get_opt_list_namedspan(bytes, input)
     f13: body_codec_get_bool(bytes, input)
-    Param{convention: f0, root: f1, name: f2, name_span: f3, public_label: f4, zone: f5, ty: f6, ty_span: f7, default: f8, variadic: f9, variadic_bound_list: f10, declared_view_from_names: f11, declared_footprint: f12, script_variable: f13}
+    f14: body_codec_get_bool(bytes, input)
+    Param{convention: f0, root: f1, name: f2, name_span: f3, public_label: f4, zone: f5, ty: f6, ty_span: f7, default: f8, variadic: f9, variadic_bound_list: f10, declared_view_from_names: f11, declared_footprint: f12, script_variable: f13, default_run: f14}
 }
 
 body_codec_put_opt_jobskip: fn(out: ^BodyCodecOut, value: JobSkip?) Never! {

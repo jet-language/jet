@@ -478,12 +478,7 @@ SemaComptimeLocalValuesAhead: struct {
 
 sema_comptime_local_values_ahead: fn(values: [SemaComptimeItemValue], pending: [SemaComptimeBodySource]) -> SemaComptimeLocalValuesAhead {
     ^ahead: SemaComptimeLocalValuesAhead{values: [SemaComptimeItemValue]{}, covered: [Bool]{}}
-    ^computed: [Int]{}
-    loop index in 0..<values.len() {
-        if values[index].kind == SemaComptimeItemKind.BodyExpression && values[index].destination_key.contains(SEMA_COMPTIME_LOCAL_VALUE_AHEAD) {
-            computed.push(index)
-        }
-    }
+    computed: loop index in 0..<values.len() if values[index].kind == SemaComptimeItemKind.BodyExpression && values[index].destination_key.contains(SEMA_COMPTIME_LOCAL_VALUE_AHEAD) -> index
     loop source in pending {
         ahead.covered.push(false)
         if computed.len() == 0 || !source.local_value || source.local_binding -> next

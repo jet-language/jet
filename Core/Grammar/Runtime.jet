@@ -3,7 +3,16 @@
 // Every meaning a generated parser has lives here: the cursor, the
 // character columns, the token automata, keyword lookup, the depth bound,
 // error text and resynchronization. The generated code only arranges calls.
-use core.grammar.plan.[GrammarKeywords, GrammarLexer]
+//
+// Lexing is contextual: the parser asks for the next token among the kinds
+// it can take there, so a word is a keyword only where the keyword can
+// come. Skipped tokens (spaces, comments) go first; then the longest match
+// among the kinds wins, a literal over a token rule of the same length. A
+// keyword matches a whole word only: the word is scanned and looked up.
+use {
+    core.grammar.error.[GrammarError, grammar_error_at, literal_name]
+    core.grammar.plan.[GrammarKeywords, GrammarLexer, GrammarPlan, GrammarScanner]
+}
 
 /// The byte length of the UTF-8 sequence that starts with `lead`. Jet
 /// Strings are valid UTF-8.
@@ -108,10 +117,11 @@ word_shaped: fn(text: String) -> Bool Never! {
     true
 }
 
-/// The end of the run of word characters that starts at byte `at`.
-word_end: fn(bytes: [U8], at: Int) -> Int Never! {
+/// The end of the run of word characters that starts at byte `at`, before
+/// byte `stop`.
+word_end: fn(bytes: [U8], at: Int, stop: Int) -> Int Never! {
     ^end: at
-    loop end < bytes.len() && is_word_byte(Int{bytes[end]}) {
+    loop end < stop && is_word_byte(Int{bytes[end]}) {
         end += 1
     }
     end
@@ -199,14 +209,307 @@ lexer_column: fn(lexer: GrammarLexer, cp: Int) -> Int Never! {
 /// The end of the longest match of token `kind` at byte `at` of `bytes`
 /// (the first match, past a non-greedy repeat), or -1 for none.
 lexer_match: fn(lexer: GrammarLexer, kind: Int, bytes: [U8], at: Int) -> Int Never! {
+    lexer_match_to(lexer, kind, bytes, at, bytes.len())
+}
+
+/// `lexer_match` reading no byte at or past `stop`.
+lexer_match_to: fn(lexer: GrammarLexer, kind: Int, bytes: [U8], at: Int, stop: Int) -> Int Never! {
     ^state: lexer.starts[kind]
     ^end: -1
     ^pos: at
     loop state >= 0 {
         if lexer.accept[state] > 0 -> end = pos
-        if lexer.accept[state] == 2 || pos >= bytes.len() -> return end
+        if lexer.accept[state] == 2 || pos >= stop -> return end
         state = lexer.next[state * lexer.columns + lexer_column(lexer, code_point_at(bytes, pos))]
         pos += code_point_width(Int{bytes[pos]})
     }
     end
+}
+
+/// The most rules a parse may be inside at once. Deeper input is a
+/// `GrammarError`, never a stack overflow. The parsers grammars replace
+/// bound their nesting at 4,096 levels or fewer (SQLite's expressions at
+/// 1,000), and one level of nesting enters a few rules; a format with a
+/// smaller bound enforces it in its sink.
+GRAMMAR_MAX_DEPTH: 10000
+
+/// The kind of a lexeme where nothing the parser can take matches.
+NO_TOKEN: -1
+
+/// The kind of a lexeme at a hole where the parser can take no hole.
+NO_HOLE: -2
+
+/// One token read from the input: its kind (or `NO_TOKEN`, `NO_HOLE`), its
+/// bytes `start..<end`, and `hole`, the index of the first hole not yet
+/// passed after it.
+GrammarLexeme: struct {
+    kind: Int,
+    start: Int,
+    end: Int,
+    hole: Int,
+}
+
+/// Where a parse is. `text` is the input (the parts joined, for a checked
+/// literal with holes) and `holes` the byte offsets the holes sit at, in
+/// order. `at` is the next byte to read, with skipped tokens not yet
+/// passed, and `hole` the index of the next hole. `depth` counts the rules
+/// the parse is inside. `errors` are the errors so far; `quiet` is set
+/// after an error until the parser resynchronizes, so one spot reports
+/// once.
+GrammarCursor: struct {
+    text: String,
+    bytes: [U8],
+    holes: [Int],
+    at: Int,
+    hole: Int,
+    depth: Int,
+    quiet: Bool,
+    errors: [GrammarError],
+}
+
+/// What a generated parser lexes `plan`'s input with.
+grammar_scanner: fn(plan: GrammarPlan) -> GrammarScanner Never! {
+    ^names: [String]{}
+    ^texts: [String]{}
+    ^folds: [Bool]{}
+    ^words: [Bool]{}
+    ^skips: [Int]{}
+    ^holes: [Int]{}
+    loop (k, token) in plan.tokens {
+        literal: k > 0 && token.rule < 0 && token.hole == ""
+        names.push(token.name.copy())
+        if literal -> texts.push(token.text.copy()) else -> texts.push("")
+        folds.push(token.fold)
+        words.push(literal && word_shaped(token.text))
+        if token.skip -> skips.push(k)
+        if token.hole != "" -> holes.push(k)
+    }
+    GrammarScanner{lexer: plan.lexer, keywords: plan.keywords, names: names, texts: texts, folds: folds, words: words, skips: skips, holes: holes}
+}
+
+/// A cursor at the start of `text`.
+cursor_of: fn(text: String) -> GrammarCursor Never! {
+    GrammarCursor{text: text.copy(), bytes: text.bytes(), holes: [Int]{}, at: 0, hole: 0, depth: 0, quiet: false, errors: [GrammarError]{}}
+}
+
+/// A cursor at the start of a checked literal's `parts`, with a hole
+/// between each two.
+cursor_of_parts: fn(parts: [String]) -> GrammarCursor Never! {
+    ^holes: [Int]{}
+    ^length: 0
+    loop (i, part) in parts {
+        if i > 0 -> holes.push(length)
+        length += part.bytes().len()
+    }
+    text: parts.join("")
+    GrammarCursor{text: text.copy(), bytes: text.bytes(), holes: holes, at: 0, hole: 0, depth: 0, quiet: false, errors: [GrammarError]{}}
+}
+
+/// Whether `kinds` holds `kind`.
+kinds_have: fn(kinds: [Int], kind: Int) -> Bool Never! {
+    loop k in kinds {
+        if k == kind -> return true
+    }
+    false
+}
+
+/// The end of literal `kind` at byte `at`, before byte `stop`, or -1.
+literal_end: fn(scanner: GrammarScanner, kind: Int, bytes: [U8], at: Int, stop: Int) -> Int Never! {
+    text: scanner.texts[kind].bytes()
+    if at + text.len() > stop -> return -1
+    fold: scanner.folds[kind]
+    loop i in 0..<text.len() {
+        ^x: Int{text[i]}
+        ^y: Int{bytes[at + i]}
+        if fold {
+            x = fold_code_point(x)
+            y = fold_code_point(y)
+        }
+        if x != y -> return -1
+    }
+    at + text.len()
+}
+
+/// The skipped token at byte `at`, before byte `stop`: the longest match
+/// of a skip kind, or a `NO_TOKEN` lexeme when none matches.
+skip_at: fn(scanner: GrammarScanner, bytes: [U8], at: Int, stop: Int, hole: Int) -> GrammarLexeme Never! {
+    ^kind: NO_TOKEN
+    ^end: at
+    loop k in scanner.skips {
+        m: lexer_match_to(scanner.lexer, k, bytes, at, stop)
+        if m > end {
+            kind = k
+            end = m
+        }
+    }
+    GrammarLexeme{kind: kind, start: at, end: end, hole: hole}
+}
+
+/// The next token at or after byte `at` among `kinds`, `hole` being the
+/// next hole: skipped tokens are passed first. At a hole it is the first
+/// hole kind among `kinds`, or `NO_HOLE`; at the end of the input kind 0;
+/// where no kind matches, `NO_TOKEN`.
+scan_from: fn(scanner: GrammarScanner, cursor: GrammarCursor, at: Int, hole: Int, kinds: [Int]) -> GrammarLexeme Never! {
+    bytes: cursor.bytes
+    ^stop: bytes.len()
+    if hole < cursor.holes.len() -> stop = cursor.holes[hole]
+    ^start: at
+    loop start < stop {
+        skipped: skip_at(scanner, bytes, start, stop, hole)
+        if skipped.kind == NO_TOKEN -> break
+        start = skipped.end
+    }
+    if start >= stop && hole < cursor.holes.len() {
+        loop k in kinds {
+            if kinds_have(scanner.holes, k) -> return GrammarLexeme{kind: k, start: start, end: start, hole: hole + 1}
+        }
+        return GrammarLexeme{kind: NO_HOLE, start: start, end: start, hole: hole + 1}
+    }
+    if start >= bytes.len() -> return GrammarLexeme{kind: 0, start: start, end: start, hole: hole}
+    ^kind: NO_TOKEN
+    ^end: -1
+    first: Int{bytes[start]}
+    if is_word_byte(first) && !(first >= 48 && first <= 57) {
+        word: word_end(bytes, start, stop)
+        ^entry: keyword_find(scanner.keywords, bytes, start, word)
+        loop entry >= 0 {
+            if kinds_have(kinds, scanner.keywords.kinds[entry]) {
+                kind = scanner.keywords.kinds[entry]
+                end = word
+                break
+            }
+            entry = keyword_next(scanner.keywords, entry, bytes, start, word)
+        }
+    }
+    loop k in kinds {
+        if k <= 0 || scanner.words[k] -> next
+        if scanner.texts[k] != "" {
+            m: literal_end(scanner, k, bytes, start, stop)
+            if m > end || (m >= 0 && m == end && scanner.texts[kind] == "") {
+                kind = k
+                end = m
+            }
+        } else if k < scanner.lexer.starts.len() && scanner.lexer.starts[k] >= 0 {
+            m: lexer_match_to(scanner.lexer, k, bytes, start, stop)
+            if m > end {
+                kind = k
+                end = m
+            }
+        }
+    }
+    if kind == NO_TOKEN -> end = start
+    GrammarLexeme{kind: kind, start: start, end: end, hole: hole}
+}
+
+/// The next token among `kinds`; the cursor does not move.
+scan: fn(scanner: GrammarScanner, cursor: GrammarCursor, kinds: [Int]) -> GrammarLexeme Never! {
+    scan_from(scanner, cursor, cursor.at, cursor.hole, kinds)
+}
+
+/// The token after `before` among `kinds`, for a decision that reads more
+/// than one token; the cursor does not move.
+scan_after: fn(scanner: GrammarScanner, cursor: GrammarCursor, before: GrammarLexeme, kinds: [Int]) -> GrammarLexeme Never! {
+    scan_from(scanner, cursor, before.end, before.hole, kinds)
+}
+
+/// Moves the cursor past `lexeme`.
+cursor_take: fn(cursor: ^GrammarCursor, lexeme: GrammarLexeme) Never! {
+    cursor.at = lexeme.end
+    cursor.hole = lexeme.hole
+}
+
+/// How an error shows what the parser found: `end of input`, `end of
+/// line`, a hole, or the token's text (one character where no token
+/// matches) in quotes.
+lexeme_found: fn(scanner: GrammarScanner, cursor: GrammarCursor, lexeme: GrammarLexeme) -> String Never! {
+    bytes: cursor.bytes
+    if lexeme.kind == NO_HOLE -> return "a hole"
+    if lexeme.kind > 0 && kinds_have(scanner.holes, lexeme.kind) -> return scanner.names[lexeme.kind].copy()
+    if lexeme.kind == 0 || lexeme.start >= bytes.len() -> return "end of input"
+    first: Int{bytes[lexeme.start]}
+    if first == 10 || (first == 13 && lexeme.start + 1 < bytes.len() && Int{bytes[lexeme.start + 1]} == 10) -> return "end of line"
+    ^end: lexeme.end
+    if lexeme.kind == NO_TOKEN || end <= lexeme.start -> end = lexeme.start + code_point_width(first)
+    ^found: [U8]{}
+    loop i in lexeme.start..<end -> found.push(bytes[i])
+    literal_name(String.from_bytes(found) ?? "")
+}
+
+/// How an error lists `kinds`: each name once, in order.
+expected_names: fn(scanner: GrammarScanner, kinds: [Int]) -> [String] Never! {
+    ^names: [String]{}
+    loop k in kinds {
+        name: scanner.names[k]
+        ^seen: false
+        loop have in names {
+            if have == name -> seen = true
+        }
+        if !seen -> names.push(name.copy())
+    }
+    names
+}
+
+/// Records that the parser expected one of `kinds` where it found
+/// `lexeme`, unless an error is already reported since the last
+/// resynchronization. Line and column are counted here, only on error.
+cursor_fail: fn(cursor: ^GrammarCursor, scanner: GrammarScanner, lexeme: GrammarLexeme, kinds: [Int]) Never! {
+    if cursor.quiet -> return
+    error: grammar_error_at(cursor.text, lexeme.start, expected_names(scanner, kinds), lexeme_found(scanner, cursor, lexeme))
+    cursor.errors.push(error)
+    cursor.quiet = true
+}
+
+/// The next token, taken when it is one of `kinds`; otherwise it stays,
+/// and the error is recorded.
+cursor_expect: fn(cursor: ^GrammarCursor, scanner: GrammarScanner, kinds: [Int]) -> GrammarLexeme Never! {
+    lexeme: scan(scanner, cursor, kinds)
+    if kinds_have(kinds, lexeme.kind) -> cursor_take(cursor, lexeme) else -> cursor_fail(cursor, scanner, lexeme, kinds)
+    lexeme
+}
+
+/// Enters a rule: false, with an error recorded, when that nests deeper
+/// than `GRAMMAR_MAX_DEPTH`.
+cursor_enter: fn(cursor: ^GrammarCursor) -> Bool Never! {
+    cursor.depth += 1
+    if cursor.depth <= GRAMMAR_MAX_DEPTH -> return true
+    if !cursor.quiet {
+        cursor.errors.push(grammar_error_at(cursor.text, cursor.at, [String]{}, "nesting deeper than {GRAMMAR_MAX_DEPTH} rules"))
+        cursor.quiet = true
+    }
+    false
+}
+
+/// Leaves a rule.
+cursor_leave: fn(cursor: ^GrammarCursor) Never! {
+    cursor.depth -= 1
+}
+
+/// After an error, passes tokens up to the next of `stops` (the separator
+/// or closing literal of the nearest enclosing repeat) and returns it
+/// untaken. Nothing is invented: a token of any kind is passed whole, and
+/// a character no token matches alone. Errors are reported again from a
+/// stop on; at the end of the input, unless it is a stop, they stay quiet.
+cursor_resync: fn(cursor: ^GrammarCursor, scanner: GrammarScanner, stops: [Int]) -> GrammarLexeme Never! {
+    ^any: [Int]{}
+    loop k in 1..<scanner.names.len() {
+        if !kinds_have(scanner.holes, k) -> any.push(k)
+    }
+    loop {
+        lexeme: scan(scanner, cursor, stops)
+        if lexeme.kind >= 0 && kinds_have(stops, lexeme.kind) {
+            cursor.quiet = false
+            return lexeme
+        }
+        if lexeme.kind == 0 -> return lexeme
+        if lexeme.kind == NO_HOLE {
+            cursor_take(cursor, lexeme)
+            next
+        }
+        passed: scan_from(scanner, cursor, lexeme.start, lexeme.hole, any)
+        if passed.kind > 0 && passed.end > passed.start {
+            cursor_take(cursor, passed)
+        } else {
+            cursor.at = lexeme.start + code_point_width(Int{cursor.bytes[lexeme.start]})
+        }
+    }
 }

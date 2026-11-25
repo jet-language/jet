@@ -3325,12 +3325,7 @@ sema_taint_check_function: fn(graph: SemaRegistrationGraph, state: ^SemaTaintFlo
     state.exit_marks = [Int]{}
     sema_taint_check_block(graph, state, function.body)
     if state.exits.len() > 0 {
-        ^read: [String]{}
-        loop parameter in function.params {
-            if parameter.convention == .Read && sema_taint_is_list(parameter.ty) {
-                read.push(parameter.name.copy())
-            }
-        }
+        read: loop parameter in function.params if parameter.convention == .Read && sema_taint_is_list(parameter.ty) -> parameter.name.copy()
         sema_taint_settle_exits(state, function.body, read)
     }
     sema_taint_finish_body(graph, state, module_index, found)

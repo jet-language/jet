@@ -1,0 +1,18 @@
+// A `Type{#run value}` default reads an earlier function-typed argument as
+// that function's FunctionInfo, through `.reflect()`: for a named function
+// and for a lambda written in place. Each call computes its own default.
+#run described: fn(info: FunctionInfo) -> String {
+    params: (loop param in info.signature.params -> "{param.name}: {param.type.name}").join(", ")
+    "{info.name}({params})"
+}
+
+route: fn(handler: fn(Int) -> String, contract: String{#run described(handler.reflect())}) -> String {
+    "{contract} -> {handler(7)}"
+}
+
+show: fn(id: Int) -> String { "item {id}" }
+
+run: fn() {
+    print(route(show))
+    print(route(fn(count: Int) -> String { "{count} items" }))
+}

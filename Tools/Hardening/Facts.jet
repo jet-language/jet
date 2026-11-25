@@ -268,7 +268,7 @@ ir_route: fn(symbol: String, route_files: [SourceFile]) -> Route? Never! {
     if ir_runtime_route(routed) != None {
         return Val(Route{kind: "ir-runtime", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{routed}\""), symbol: routed.copy()})
     }
-    // ir_core_call's named arms: `if symbol == "<name>" -> return ir_<lowering>(…)`.
+    // A named arm of a builder dispatch: `if name == "<name>" -> return ir_<lowering>(…)`.
     arm: file_line(route_files, BUILD_ROUTES_PATH, "== \"{routed}\" -> return ir_")
     if arm > 0 {
         return Val(Route{kind: "ir-core-call", path: BUILD_ROUTES_PATH, line: arm, symbol: routed.copy()})

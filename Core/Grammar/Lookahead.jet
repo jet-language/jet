@@ -11,7 +11,7 @@
 // refusal that shows the sample; more than 4,096 configurations at one
 // decision is a refusal too.
 use {
-    core.grammar.error.[grammar_fault]
+    core.grammar.error.[grammar_fault, literal_name]
     core.grammar.plan.[GrammarDecision, GrammarStep, GrammarToken]
     core.grammar.runtime.[fold_text]
     __core_grammar_analyze.[GrammarWork]
@@ -30,6 +30,12 @@ empty_set: fn(words: Int) -> [Int] Never! {
     loop _ in 0..<words -> out.push(0)
     out
 }
+
+/// The bit index of a one-bit word `low`, by de Bruijn multiplication:
+/// the top five bits of `low * 0x077CB531` are distinct for each bit.
+BIT_INDEX: [0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8, 31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9]
+
+bit_index: fn(low: Int) -> Int Never! { BIT_INDEX[((low * 125613361) & 4294967295) >> 27] }
 
 set_add: fn(set: ^[Int], k: Int) Never! { set[k /% 32] = set[k /% 32] | (1 << (k % 32)) }
 
@@ -55,31 +61,37 @@ set_meets: fn(a: [Int], b: [Int]) -> Bool Never! {
     false
 }
 
+/// The members of `set` in increasing order, one step per word and
+/// member.
 set_items: fn(set: [Int]) -> [Int] Never! {
     ^out: [Int]{}
-    loop k in 0..<set.len() * 32 {
-        if set_has(set, k) -> out.push(k)
+    loop (k, word) in set {
+        ^rest: word
+        loop rest != 0 {
+            low: rest & -rest
+            out.push(k * 32 + bit_index(low))
+            rest = rest - low
+        }
     }
     out
 }
 
-/// How an error shows a literal: in double quotes, or single quotes when
-/// it holds a double quote.
-literal_name: fn(text: String) -> String Never! {
-    if text.contains("\"") -> return "'{text}'"
-    "\"{text}\""
+/// The literal node a token rule is exactly (a parser literal with the
+/// same text and fold lexes as the rule), or -1.
+rule_literal: fn(work: GrammarWork, rule: Int) -> Int Never! {
+    if work.tree.rules[rule].kind != .Token || work.tree.rules[rule].skip -> return -1
+    alts: work.tree.nodes[work.tree.rules[rule].body].children
+    if alts.len() != 1 -> return -1
+    kids: work.tree.nodes[alts[0]].children
+    if kids.len() != 1 || work.tree.nodes[kids[0]].kind != .Literal -> return -1
+    kids[0]
 }
 
-/// Whether `rule` is a token rule that is exactly one literal: a parser
-/// literal with the same text lexes as it.
-literal_rule: fn(work: GrammarWork, rule: Int, text: String, fold: Bool) -> Bool Never! {
-    if work.tree.rules[rule].kind != .Token || work.tree.rules[rule].skip -> return false
-    alts: work.tree.nodes[work.tree.rules[rule].body].children
-    if alts.len() != 1 -> return false
-    kids: work.tree.nodes[alts[0]].children
-    if kids.len() != 1 -> return false
-    node: work.tree.nodes[kids[0]]
-    node.kind == .Literal && node.text == text && node.fold == fold
+/// The key a literal is found by: its exact text, or its folded text for
+/// an `i` literal, which any literal of the same folded text reuses.
+literal_key: fn(text: String, fold: Bool) -> String Never! {
+    if fold -> return "i{fold_text(text)}"
+    "c{text}"
 }
 
 /// Numbers the token kinds: 0 is the end of input, then the token rules in
@@ -89,12 +101,21 @@ literal_rule: fn(work: GrammarWork, rule: Int, text: String, fold: Bool) -> Bool
 assign_tokens: fn(work: ^GrammarWork) Never! {
     work.tokens = [GrammarToken]{GrammarToken{name: "end of input", text: "", fold: false, rule: -1, skip: false, hole: ""}}
     ^rule_kind: [Int]{}
+    // The token rule each literal text and fold is exactly, the first one.
+    ^spelled: [String:Int]{}
     loop (r, rule) in work.tree.rules {
         if rule.kind == .Token {
             rule_kind.push(work.tokens.len())
+            literal: rule_literal(work, r)
+            if literal >= 0 {
+                node: work.tree.nodes[literal]
+                key: "{node.fold}:{node.text}"
+                if (spelled.get(key) ?? -1) < 0 -> _: spelled.add(key, work.tokens.len())
+            }
             work.tokens.push(GrammarToken{name: rule.name.copy(), text: "", fold: false, rule: r, skip: rule.skip, hole: ""})
         } else { rule_kind.push(-1) }
     }
+    ^literals: [String:Int]{}
     loop n in 0..<work.tree.nodes.len() {
         owner: work.owner[n]
         if owner < 0 || work.tree.rules[owner].kind != .Parser -> next
@@ -103,17 +124,15 @@ assign_tokens: fn(work: ^GrammarWork) Never! {
         if node.kind == .End -> kind = 0 else if node.kind == .Ref {
             if node.rule >= 0 -> kind = rule_kind[node.rule]
         } else if node.kind == .Literal {
-            loop r in 0..<work.tree.rules.len() {
-                if kind < 0 && literal_rule(work, r, node.text, node.fold) -> kind = rule_kind[r]
-            }
-            loop (k, token) in work.tokens {
-                if kind < 0 && token.rule < 0 && token.hole == "" && k > 0 && token.fold == node.fold && (token.text == node.text || (node.fold && fold_text(token.text) == fold_text(node.text))) {
-                    kind = k
-                }
-            }
+            kind = spelled.get("{node.fold}:{node.text}") ?? -1
             if kind < 0 {
-                kind = work.tokens.len()
-                work.tokens.push(GrammarToken{name: literal_name(node.text), text: node.text.copy(), fold: node.fold, rule: -1, skip: false, hole: ""})
+                key: literal_key(node.text, node.fold)
+                kind = literals.get(key) ?? -1
+                if kind < 0 {
+                    kind = work.tokens.len()
+                    _: literals.add(key, kind)
+                    work.tokens.push(GrammarToken{name: literal_name(node.text), text: node.text.copy(), fold: node.fold, rule: -1, skip: false, hole: ""})
+                }
             }
         } else if node.kind == .Hole {
             loop (k, token) in work.tokens {
@@ -141,45 +160,49 @@ is_terminal: fn(work: GrammarWork, n: Int) -> Bool Never! {
     kind == .Ref && work.tree.nodes[n].token >= 0
 }
 
-/// FIRST and FOLLOW of every parsed node, by fixed points.
+/// FIRST and FOLLOW of every parsed node, by fixed points. A child comes
+/// after its parent among the nodes, so FIRST is taken from the last node
+/// back and FOLLOW from the first on; after the first pass only a node
+/// whose parent or rule gained FOLLOW is taken again.
 plan_sets: fn(work: ^GrammarWork) Never! {
     words: set_words(work.tokens.len())
     count: work.tree.nodes.len()
+    blank: empty_set(words)
     work.first = [[Int]]{}
     work.follow = [[Int]]{}
-    loop _ in 0..<count {
-        work.first.push(empty_set(words))
-        work.follow.push(empty_set(words))
-    }
+    ^dirty: [Bool]{}
     loop n in 0..<count {
-        if parsed(work, n) && is_terminal(work, n) {
-            set_add(work.first[n], work.tree.nodes[n].token)
-        }
+        ^first: blank.copy()
+        if parsed(work, n) && is_terminal(work, n) -> set_add(first, work.tree.nodes[n].token)
+        work.first.push(first)
+        work.follow.push(blank.copy())
+        dirty.push(true)
     }
     ^changed: true
     loop changed {
         changed = false
-        loop n in 0..<count {
+        loop back in 0..<count {
+            n: count - 1 - back
             if !parsed(work, n) || is_terminal(work, n) -> next
             work.steps += 1
             node: work.tree.nodes[n]
-            ^add: empty_set(words)
             if node.kind == .Ref {
-                if node.rule >= 0 -> _: set_union(add, work.first[work.tree.rules[node.rule].body])
-            } else if node.kind == .Alt {
-                loop child in node.children {
-                    _: set_union(add, work.first[child])
-                    if !work.nullable[child] -> break
+                if node.rule >= 0 {
+                    from: work.first[work.tree.rules[node.rule].body].copy()
+                    if set_union(work.first[n], from) -> changed = true
                 }
             } else {
-                loop child in node.children -> _: set_union(add, work.first[child])
+                loop child in node.children {
+                    from: work.first[child].copy()
+                    if set_union(work.first[n], from) -> changed = true
+                    if node.kind == .Alt && !work.nullable[child] -> break
+                }
             }
-            if set_union(work.first[n], add) -> changed = true
         }
     }
     ^rule_follow: [[Int]]{}
     loop (r, rule) in work.tree.rules {
-        ^set: empty_set(words)
+        ^set: blank.copy()
         if rule.kind == .Parser && (work.start == r || work.start < 0) -> set_add(set, 0)
         rule_follow.push(set)
     }
@@ -187,36 +210,42 @@ plan_sets: fn(work: ^GrammarWork) Never! {
     loop changed {
         changed = false
         loop n in 0..<count {
+            if !dirty[n] -> next
+            dirty[n] = false
             if !parsed(work, n) -> next
             work.steps += 1
             p: work.parent[n]
-            ^add: empty_set(words)
-            if p == -1 -> _: set_union(add, rule_follow[work.owner[n]]) else {
+            ^grew: false
+            if p == -1 {
+                grew = set_union(work.follow[n], rule_follow[work.owner[n]])
+            } else {
                 parent: work.tree.nodes[p]
+                ^rest_nullable: true
                 if parent.kind == .Alt {
-                    ^at: 0
-                    loop (j, child) in parent.children {
-                        if child == n -> at = j
-                    }
-                    ^rest_nullable: true
-                    loop j in at + 1..<parent.children.len() {
-                        sibling: parent.children[j]
-                        _: set_union(add, work.first[sibling])
-                        if !work.nullable[sibling] {
-                            rest_nullable = false
-                            break
+                    ^after: false
+                    loop sibling in parent.children {
+                        if after && rest_nullable {
+                            from: work.first[sibling].copy()
+                            if set_union(work.follow[n], from) -> grew = true
+                            if !work.nullable[sibling] -> rest_nullable = false
                         }
+                        if sibling == n -> after = true
                     }
-                    if rest_nullable -> _: set_union(add, work.follow[p])
                 } else if parent.kind == .Star || parent.kind == .Plus {
-                    _: set_union(add, work.first[n])
-                    _: set_union(add, work.follow[p])
-                } else { _: set_union(add, work.follow[p]) }
+                    from: work.first[n].copy()
+                    if set_union(work.follow[n], from) -> grew = true
+                }
+                if rest_nullable {
+                    from: work.follow[p].copy()
+                    if set_union(work.follow[n], from) -> grew = true
+                }
             }
-            if set_union(work.follow[n], add) -> changed = true
+            if !grew -> next
+            changed = true
+            loop child in work.tree.nodes[n].children -> dirty[child] = true
             node: work.tree.nodes[n]
             if node.kind == .Ref && node.rule >= 0 && work.tree.rules[node.rule].kind == .Parser {
-                if set_union(rule_follow[node.rule], work.follow[n]) -> changed = true
+                if set_union(rule_follow[node.rule], work.follow[n]) -> dirty[work.tree.rules[node.rule].body] = true
             }
         }
     }
@@ -437,29 +466,33 @@ plan_decisions: fn(work: ^GrammarWork) Never! {
         starts: branch_starts(work, n)
         ^sets: [[Int]]{}
         loop start in starts {
-            ^set: empty_set(words)
-            if start < 0 -> _: set_union(set, work.follow[n]) else {
-                _: set_union(set, work.first[start])
-                if work.nullable[start] -> _: set_union(set, work.follow[n])
+            if start < 0 {
+                sets.push(work.follow[n].copy())
+                next
             }
+            ^set: work.first[start].copy()
+            if work.nullable[start] -> _: set_union(set, work.follow[n])
             sets.push(set)
         }
         ^clash: false
-        loop i in 0..<sets.len() {
-            loop j in i + 1..<sets.len() {
-                if set_meets(sets[i], sets[j]) -> clash = true
-            }
+        ^seen: empty_set(words)
+        loop set in sets {
+            if set_meets(seen, set) -> clash = true
+            _: set_union(seen, set)
         }
         if !clash {
+            // Each kind is in one branch's set: sort the kinds, each with its
+            // branch below it.
+            ^keyed: [Int]{}
+            loop (b, set) in sets {
+                loop k in set_items(set) -> keyed.push(k * sets.len() + b)
+            }
+            keyed.sort()
             ^kinds: [Int]{}
             ^targets: [Int]{}
-            loop k in 0..<words * 32 {
-                loop (b, set) in sets {
-                    if set_has(set, k) {
-                        kinds.push(k)
-                        targets.push(b)
-                    }
-                }
+            loop key in keyed {
+                kinds.push(key /% sets.len())
+                targets.push(key % sets.len())
             }
             work.decisions.push(GrammarDecision{node: n, depth: 1, fallback: -1, steps: [GrammarStep]{GrammarStep{kinds: kinds, targets: targets}}})
             next

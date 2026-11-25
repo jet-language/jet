@@ -343,17 +343,15 @@ sema_marker_module_bind_marker: fn(marker: Marker, bindings: [SemaMarkerModuleBi
 }
 
 sema_marker_module_bind_markers: fn(markers: [Marker], bindings: [SemaMarkerModuleBinding]) -> [Marker] Never! {
-    ^bound: [Marker]{}
-    loop marker in markers -> bound.push(sema_marker_module_bind_marker(marker, bindings))
+    bound: loop marker in markers -> sema_marker_module_bind_marker(marker, bindings)
     bound
 }
 
 sema_marker_module_bind_functions: fn(functions: [Func], bindings: [SemaMarkerModuleBinding]) -> [Func] Never! {
-    ^bound: [Func]{}
-    loop function in functions {
+    bound: loop function in functions -> {
         ^value: function.copy()
         value.markers = sema_marker_module_bind_markers(function.markers, bindings)
-        bound.push(value)
+        value
     }
     bound
 }

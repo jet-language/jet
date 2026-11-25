@@ -289,6 +289,7 @@ cli_realize_ref_outcome: fn(verification: StoreVerification, theme: Theme, roots
     }
     if uses_nix && !cli_package_fixture_available(flags, spec) && !cache_candidate_ok && !allow_local {
         if provider_needs_nix_bridge(spec, table, flags.offline, store_dir, project_dir) == .Val(need) {
+            cli_stop_spinner(spinner)
             return RefOutcome.NeedsNix(need)
         }
     }
@@ -328,6 +329,7 @@ cli_realize_ref_outcome: fn(verification: StoreVerification, theme: Theme, roots
                 cli_clear_live_region(live)
                 env_warn_sandbox_fallback(theme)
                 if trust_gate_build_identity(theme, trust_store_path(), project_dir ?? ".", identity, flags.trust) != None {
+                    cli_stop_spinner(spinner)
                     return RefOutcome.Failed
                 }
             }

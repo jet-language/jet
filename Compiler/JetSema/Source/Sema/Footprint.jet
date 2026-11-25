@@ -169,10 +169,7 @@ sema_footprint_solve_module: fn(tables: ASTTables, items: [Item]) -> SemaFootpri
     loop item in items {
         if item == {
             .Struct(definition) -> {
-                ^stored: [String]{}
-                loop field in definition.fields {
-                    if field.computed == None -> stored.push(field.name)
-                }
+                stored: loop field in definition.fields if field.computed == None -> field.name
                 fields[definition.name] = stored
                 ^methods: definition.methods
                 loop block in definition.trait_impls {

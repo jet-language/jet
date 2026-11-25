@@ -302,8 +302,8 @@ IRBuilder: struct {
     loop_edges: [IRLoopEdge]{[IRLoopEdge]{}},
     // A `??` or `?` that reads its operand's success straight from a Result
     // route's words (ir_expr_split): `split_armed` holds from the operand's
-    // dispatch to the closing route call of its handle method or Core call
-    // (ir_handle_method, ir_core_call_routed), never across its receiver,
+    // dispatch to the closing route call of its handle method
+    // (ir_handle_method), never across its receiver,
     // its arguments (ir_expr) or a dedicated builder that may branch around
     // or use its route call. That call, of type `split_ty`, leaves its
     // selector and out words in `split` instead of a Result box
@@ -669,9 +669,9 @@ IRProgram: struct {
     // reaches it (ir_comptime_ambient_refusal).
     comptime_values: Bool{false},
     // Whether this program is a build invocation (fn build, fn dev) the
-    // evaluator runs in its runtime child: each Core or function call inside
-    // an `#Impure` block is bracketed by the host routes `Impure.enter` and
-    // `Impure.leave` (ir_core_call, ir_call_row_emit), so when the package
+    // evaluator runs in its runtime child: each function call inside an
+    // `#Impure` block is bracketed by the host routes `Impure.enter` and
+    // `Impure.leave` (ir_call_row_emit), so when the package
     // holds `Meta.Host` the child admits the file calls it makes, and a
     // system call the child's filter refuses there is that block's Tier-2
     // effect, not an unsupported one.
@@ -2923,11 +2923,11 @@ ir_body_node_or_fallback_operand: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int
 ir_body_node_is_split_call: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
     if id <= IR_FIRST_NODE_ID {
         idx: ir_made_node_index(id)
-        return b.made.nodes[idx].kind == .HandleMethod(_, _, _) || b.made.nodes[idx].kind == .CoreCall(_, _, _, _, _, _)
+        return b.made.nodes[idx].kind == .HandleMethod(_, _, _)
     }
     tree: ir_builder_body(p, b.row)[0].tree
     idx: body_node_index(tree, id)
-    tree.nodes[idx].kind == .HandleMethod(_, _, _) || tree.nodes[idx].kind == .CoreCall(_, _, _, _, _, _)
+    tree.nodes[idx].kind == .HandleMethod(_, _, _)
 }
 
 ir_body_node_is_no_else: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {

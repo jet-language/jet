@@ -106,8 +106,7 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, che
         if derived.unsupported != "" {
             call_args.push(sema_call_devtools_text_arg("__unsupported", derived.unsupported, span))
         } else {
-            ^rows: [String]{}
-            loop row in derived.variants -> rows.push("\"{row}\"")
+            rows: loop row in derived.variants -> "\"{row}\""
             variants_text = "[String]{{{rows.join(", ")}}}"
             make_text = derived.make.move()
         }
@@ -188,8 +187,7 @@ sema_call_histories_derive: fn(written: String, command_type: String, check: Sem
     variants: sema_call_histories_enum_variants(definition) ?? return sema_call_histories_unsupported(no_schema)
     if variants.len() == 0 -> return sema_call_histories_unsupported(no_schema)
     ^rows: [String]{}
-    ^arms: [String]{}
-    loop position in 0..<variants.len() {
+    arms: loop position in 0..<variants.len() -> {
         variant: variants[position]
         unsupported: sema_call_histories_unsupported("core.testing.histories command type `{command_type}` has unsupported variant `{variant.name}`: no type-valid scalar generator/codec")
         if variant.wire_name == "" || variant.wire_name.contains(":") || variant.wire_name.contains("\"") || variant.wire_name.contains("\\") || variant.wire_name.contains("{") || variant.wire_name.contains("}") {
@@ -223,12 +221,11 @@ sema_call_histories_derive: fn(written: String, command_type: String, check: Sem
             .Unit -> {}
             .Single(_) -> { constructor = "{constructor}({values[0]})" }
             .Named(_) -> {
-                ^labeled: [String]{}
-                loop index in 0..<names.len() -> labeled.push("{names[index]}: {values[index]}")
+                labeled: loop index in 0..<names.len() -> "{names[index]}: {values[index]}"
                 constructor = "{constructor}{{{labeled.join(", ")}}}"
             }
         }
-        arms.push(constructor)
+        constructor
     }
     ^body: arms[arms.len() - 1]
     if arms.len() > 1 {

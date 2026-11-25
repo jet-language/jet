@@ -1,0 +1,13 @@
+# A rule reads a handler's calls of `#Recorded` functions from its
+# FunctionInfo: `recorded` holds each call with its explicit type
+# arguments, and `returns` the ones a return path returns.
+fixture: RuleReadsRecordedCalls.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # the handler's recorded and returned calls read as written
+stderr: !~ "known.Misread" # each recorded call is heard, the returned ones marked
+step: jet run main.jet
+exit: 0
+stdout: = "7\n" # the rule only reads; the call runs as written

@@ -661,14 +661,39 @@ SemaComptimeRuleSite: struct {
 // known argument values, named functions and written parts by index into
 // its own `texts`, `types`, `values`, `functions` and `written`, which its
 // batch renumbers into the batch's. The call's caller, callee, module, file
-// and name are its first five texts.
+// and name are its first five texts. `function_sources` says, for each
+// FunctionInfo of `functions` at its position, where its batch finds the
+// function's recorded calls.
 SemaCallRuleHeard: struct {
     words: [Int],
     texts: [String],
     types: [TComptimeValue],
     values: [TComptimeValue],
     functions: [TComptimeValue],
+    function_sources: [SemaRuleFunctionSource],
     written: [TComptimeValue],
+}
+
+// Where the recorded calls of a heard argument's function are: those the
+// check of the body keyed `key` recorded. A lambda's are the ones written
+// inside it (`within`, the lambda's span) in its enclosing function's body,
+// and its returns are those that start at an offset of `returned`, the
+// calls a return path of the lambda's own body returns.
+SemaRuleFunctionSource: struct {
+    key: String,
+    within: Span?,
+    returned: [Int],
+}
+
+// One call of a `#Recorded` callee in the checked body keyed
+// `function_key` (Calls/Recorded.jet): the CompilerCall a rule hears at it,
+// the offset its name starts at, and whether a return path of the body
+// returns its value.
+SemaRecordedCall: struct {
+    function_key: String,
+    call: TComptimeValue,
+    at: Int,
+    returned: Bool,
 }
 
 SemaComptimeBodyValue: struct {
@@ -943,6 +968,8 @@ SemaCheckContext: struct {
     name_references: [SemaNameReferenceFact],
     comptime_requests: [SemaComptimeRequest],
     comptime_body_sources: [SemaComptimeBodySource],
+    // The calls of `#Recorded` callees this body makes (Calls/Recorded.jet).
+    recorded_calls: [SemaRecordedCall],
     comptime_body_values: SemaComptimeBodyValues,
     // Derived module/place indexes into the canonical ordered source rows.
     comptime_body_source_modules: [Int],
@@ -1718,11 +1745,9 @@ sema_scope_environment_boxed_edge: fn(environment: SemaScopeEnvironment, program
 }
 
 sema_loop_break_flows_snapshot: fn(source: [SemaLoopBreakFlows]) -> [SemaLoopBreakFlows] Never! {
-    ^result: [SemaLoopBreakFlows]{}
-    loop frame in source {
-        ^paths: [SemaOwnershipState]{}
-        loop path in frame.paths -> paths.push(sema_ownership_state_snapshot(path))
-        result.push(SemaLoopBreakFlows{paths: paths})
+    result: loop frame in source -> {
+        paths: loop path in frame.paths -> sema_ownership_state_snapshot(path)
+        SemaLoopBreakFlows{paths: paths}
     }
     result
 }
@@ -1750,6 +1775,7 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         name_references: [SemaNameReferenceFact]{},
         comptime_requests: [SemaComptimeRequest]{},
         comptime_body_sources: [SemaComptimeBodySource]{},
+        recorded_calls: [SemaRecordedCall]{},
         comptime_body_values: SemaComptimeBodyValues{},
         comptime_body_source_modules: [Int]{},
         comptime_body_source_rows: [SemaComptimePlaceRows]{},
@@ -1874,6 +1900,10 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         name_references: source.name_references.copy(),
         comptime_requests: source.comptime_requests.copy(),
         comptime_body_sources: source.comptime_body_sources.copy(),
+        // A lambda body's recorded calls move back to its function's context
+        // (sema_expression_lambda_with_host_in_frame); no other snapshot's
+        // are the body's.
+        recorded_calls: [SemaRecordedCall]{},
         // Sharing the publication does not visit, copy, or reindex its rows.
         // copy: sema_check_context_snapshot builds an independent context: the snapshot's body
         // values (a handle: Shared facts plus length) outlive the live context's later publication
@@ -1981,6 +2011,7 @@ SemaCheckContextMark: struct {
     name_references: Int,
     comptime_requests: Int,
     comptime_body_sources: Int,
+    recorded_calls: Int,
     compute_calls: Int,
     autodiff_obligations: Int,
     generic_crossings: Int,
@@ -2082,6 +2113,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
         name_references: context.name_references.len(),
         comptime_requests: context.comptime_requests.len(),
         comptime_body_sources: context.comptime_body_sources.len(),
+        recorded_calls: context.recorded_calls.len(),
         compute_calls: context.compute_calls.len(),
         autodiff_obligations: context.autodiff_obligations.len(),
         generic_crossings: context.generic_crossings.len(),
@@ -2188,6 +2220,7 @@ sema_check_context_rollback: fn(context: ^SemaCheckContext, mark: ^^SemaCheckCon
         ^_: context.comptime_requests.pop()
     }
     sema_comptime_body_sources_truncate(context, mark.comptime_body_sources)
+    loop context.recorded_calls.len() > mark.recorded_calls -> ^_: context.recorded_calls.pop()
     loop context.compute_calls.len() > mark.compute_calls -> ^_: context.compute_calls.pop()
     loop context.autodiff_obligations.len() > mark.autodiff_obligations {
         ^_: context.autodiff_obligations.pop()
@@ -2358,8 +2391,7 @@ sema_check_context_rollback_keep_calls: fn(context: ^SemaCheckContext, mark: ^^S
 }
 
 sema_scope_hardware_transfers_snapshot: fn(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
-    ^result: [SemaHardwareDMATransferFact]{}
-    loop fact in source -> result.push(fact.copy())
+    result: loop fact in source -> fact.copy()
     result
 }
 

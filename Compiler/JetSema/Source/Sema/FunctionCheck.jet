@@ -797,8 +797,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         }
         ^default_expr: TExpr?{None}
         // A script variable's default names a variable of the calling script
-        // lines, which each call checks where it is made.
-        if func.params[param_index].default != None && !func.params[param_index].script_variable && !forward_defaults.contains(param_index) {
+        // lines, and a `#run` default reads the arguments each call's build
+        // knows; each call checks either where it is made.
+        if func.params[param_index].default != None && !func.params[param_index].script_variable && !func.params[param_index].default_run && !forward_defaults.contains(param_index) {
             ^default_context: sema_check_context_init()
             default_context.is_snapshot = true
             default_context.unsafe_depth = check.context.unsafe_depth
@@ -1034,6 +1035,11 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     name_references.extend(check.context.name_references.move())
     check.context.name_references = [SemaNameReferenceFact]{}
+    // Each recorded call a return path returns is marked so
+    // (Calls/Recorded.jet).
+    if stand_in == None && check.context.recorded_calls.len() > 0 {
+        sema_recorded_mark_returned(func.body, check.context.recorded_calls)
+    }
     if stand_in == None -> sema_single_use_leave_scope(check) else {
         sema_scope_leave(check.scopes, check.state)
     }
@@ -1081,8 +1087,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     ^written_row: [String]?{None}
     if func.declared_effects == .Val(row) {
-        ^names: [String]{}
-        loop entry in row -> names.push(entry.name.copy())
+        names: loop entry in row -> entry.name.copy()
         written_row = Val(names)
     }
     effect_scope: effect_scope_descriptor(func.name, owner_key, func.params.len() > 0 && func.params[0].name == "path", written_row)

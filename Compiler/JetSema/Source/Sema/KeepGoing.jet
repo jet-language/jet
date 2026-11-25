@@ -124,12 +124,7 @@ sema_keep_going_rekey_references: fn(references: ^[SemaNameReferenceFact], start
 // error reports it made since `start`.
 sema_keep_going_cause: fn(causes: [String], diagnostics: [Diagnostic], start: Int) -> String Never! {
     if causes.len() > 0 -> return causes.join("; ")
-    ^reported: [String]{}
-    loop index in start..<diagnostics.len() {
-        if diagnostics[index].severity == DIAGNOSTIC_ERROR {
-            reported.push("{diagnostics[index].code} {diagnostics[index].what}")
-        }
-    }
+    reported: loop index in start..<diagnostics.len() if diagnostics[index].severity == DIAGNOSTIC_ERROR -> "{diagnostics[index].code} {diagnostics[index].what}"
     if reported.len() == 0 -> "body checking is incomplete" else -> "body checking stopped on {reported.join("; ")}"
 }
 

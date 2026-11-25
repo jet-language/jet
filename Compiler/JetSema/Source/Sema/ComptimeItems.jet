@@ -153,10 +153,7 @@ sema_comptime_available_version: fn(available: SemaComptimeAvailableConstants) -
 }
 
 sema_comptime_waiting_dependencies: fn(available: SemaComptimeAvailableConstants, dependencies: [String]) -> [String] Never! {
-    ^waiting: [String]{}
-    loop key in dependencies {
-        if name_find(available.keys, key) == None -> waiting.push(key.copy())
-    }
+    waiting: loop key in dependencies if name_find(available.keys, key) == None -> key.copy()
     waiting
 }
 
@@ -193,7 +190,7 @@ sema_comptime_reachable_function_keys: fn(graph: SemaRegistrationGraph, call_fac
 sema_comptime_drop_close_keys: fn(graph: SemaRegistrationGraph, type_delta: [InternerDelta], tree: BodyTree, module_identity: ModuleID, keys: ^[String]) {
     ^dropped: [Int]{}
     loop node in tree.nodes {
-        made: node.kind == .Call(_, _, _) || node.kind == .IndirectCall(_, _, _, _) || node.kind == .MethodCall(_, _, _, _) || node.kind == .StaticCall(_, _, _, _, _) || node.kind == .CoreCall(_, _, _, _, _, _) || node.kind == .StructLit(_) || node.kind == .EnumCtor(_, _, _)
+        made: node.kind == .Call(_, _, _) || node.kind == .IndirectCall(_, _, _, _) || node.kind == .MethodCall(_, _, _, _) || node.kind == .StaticCall(_, _, _, _, _) || node.kind == .StructLit(_) || node.kind == .EnumCtor(_, _, _)
         if made -> dropped.push(node.id)
     }
     loop statement in tree.stmts {
@@ -695,7 +692,9 @@ sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, boun
 // store and the hit and miss counts `name.cache()` reads belong to the
 // running program, and a call computed while building would never reach them.
 // A call of a `#Runtime(.Only)` function is refused whatever `runtime_runs`:
-// the mark keeps it to the running program.
+// the mark keeps it to the running program. With `runtime_runs`, so is a
+// `reflect.of` call: the build makes its `Value` from the value's checked type
+// in the program it emits, so the running program computes it.
 sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact], runtime_runs: Bool) -> String? Never! {
     loop fact in call_facts {
         detail: sema_call_site_detail(fact)
@@ -708,6 +707,9 @@ sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: 
             if runtime_runs {
                 return Val("it calls {name}, which the runtime answers from the running program")
             }
+        }
+        if runtime_runs && detail.intrinsic_api == .Val(api) && api == SEMA_CALL_REFLECT_OF_API {
+            return Val("it calls {name}, whose `Value` the running program makes")
         }
         if fact.callee == .Val(callee) {
             if sema_registration_callable_row_of(graph, callee) == .Val(row) {
@@ -1251,8 +1253,7 @@ sema_collect_comptime_declarations: fn(graph: ^^SemaRegistrationGraph, package_p
     module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     // A declaration check reads no memory plan.
     sema_check_shared_fill(module_state, initial_environment, initial_program, sema_function_memory_plan_new())
-    ^every_module: [Int]{}
-    loop module_index in 0..<module_count -> every_module.push(module_index)
+    every_module: loop module_index in 0..<module_count -> module_index
     ^checks: sema_check_declaration_modules(module_state, every_module, [SemaComptimeItemValue]{}, true, threads)
     ^pass_environment: sema_check_shared_take_environment(module_state)
     ^pass_program: sema_check_shared_take_program(module_state)
@@ -1356,8 +1357,7 @@ sema_comptime_modules_with_values: fn(programs: ^[SemaProgramTables], values: [S
     module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     // A declaration check reads no memory plan.
     sema_check_shared_fill(module_state, environment, program, sema_function_memory_plan_new())
-    ^every_module: [Int]{}
-    loop module_index in 0..<module_count -> every_module.push(module_index)
+    every_module: loop module_index in 0..<module_count -> module_index
     ^checks: sema_check_declaration_modules(module_state, every_module, values, true, threads)
     programs.push(sema_check_shared_take_program(module_state))
     ^modules: [SemaGraphModuleResult]{}

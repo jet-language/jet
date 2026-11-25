@@ -1,0 +1,17 @@
+// A CSV row is its Core record: a clone keeps its line and fields, two rows
+// compare by both, and a list holds clones of them.
+use csv: core.encoding.csv
+
+run: fn() {
+    rows: csv.rows("a,b\nc,d\n") ?? panic("rows")
+    first: rows[0]
+    twin: first.clone()
+    print(twin.line)
+    print(twin.fields)
+    print(twin == first)
+    print(rows[1] == first)
+    kept: [csv.CSVRow]{twin, rows[1].clone()}
+    print(kept.len())
+    print(kept[1].fields[1])
+    print(kept[1].line)
+}

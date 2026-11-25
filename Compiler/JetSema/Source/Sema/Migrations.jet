@@ -43,10 +43,7 @@ sema_migration_insert_sorted: fn(values: [String], value: String) -> [String] Ne
 }
 
 sema_migration_remove: fn(values: [String], value: String) -> [String] Never! {
-    ^result: [String]{}
-    loop current in values {
-        if current != value -> result.push(current.copy())
-    }
+    result: loop current in values if current != value -> current.copy()
     result
 }
 

@@ -355,12 +355,11 @@ sema_public_api_type_params: fn(params: [TypeParam], units: SemaPublicAPISpellin
 }
 
 sema_public_api_params: fn(params: [Param], units: SemaPublicAPISpellings) -> String Never! {
-    ^texts: [String]{}
-    loop param in params {
+    texts: loop param in params -> {
         label: if param.public_label == .Val(public_label) && public_label.name != param.name -> "{public_label.name} " else -> ""
         variadic: if param.variadic -> "..." else -> ""
         default: if param.default != None -> " = _" else -> ""
-        texts.push("{label}{param.name}: {variadic}{access_sigil(param.convention)}{sema_public_api_type(param.ty, units)}{default}")
+        "{label}{param.name}: {variadic}{access_sigil(param.convention)}{sema_public_api_type(param.ty, units)}{default}"
     }
     texts.join(", ")
 }
@@ -552,10 +551,9 @@ sema_public_api_unit_family: fn(definition: UnitFamilyDef, prefix: String) -> Pu
     dimension: if definition.resolved_dimension == .Val(value) -> "[{dimension_identity(value)}]" else -> "[]"
     base: if definition.base == .Val(value) -> " base {value.name}" else -> ""
     owner: if definition.resolved_owner == .Val(value) -> " owner {value}" else -> ""
-    ^members: [String]{}
-    loop member in definition.members {
+    members: loop member in definition.members -> {
         offset: if member.offset.numerator == 0 -> "" else -> " + {member.offset.numerator}/{member.offset.denominator}"
-        members.push("{member.name} = {member.scale.numerator}/{member.scale.denominator}{offset}")
+        "{member.name} = {member.scale.numerator}/{member.scale.denominator}{offset}"
     }
     PublicAPIItem{kind: "unit", name: name, signature: "unit {name}{dimension}{base}{owner} {{ {members.join(", ")} }}"}
 }

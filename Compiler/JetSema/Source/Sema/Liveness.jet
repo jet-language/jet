@@ -835,15 +835,6 @@ sema_liveness_member_body_uses: fn(interner: Interner, function: FnBody, uses: ^
         if kind == .Call(_, type_args, _) -> sema_liveness_generic_uses(type_args, uses)
         if kind == .IndirectCall(_, type_args, _, _) -> sema_liveness_generic_uses(type_args, uses)
         if kind == .StaticCall(_, _, _, type_args, _) -> sema_liveness_generic_uses(type_args, uses)
-        if kind == .CoreCall(record, args, _, type_args, _, _) {
-            sema_liveness_generic_uses(type_args, uses)
-            if sema_call_reflection_leaf_name(record.module_name) == "reflect" {
-                loop arg in args {
-                    sema_liveness_node_type_names(interner, type_delta, tree, arg, uses.read_types)
-                    sema_liveness_node_type_names(interner, type_delta, tree, arg, uses.built_types)
-                }
-            }
-        }
         // A game scene's `component<T>()` and `query<A, B>()` hand their
         // types over as text (Calls/Game.jet); the scene stores, replays and
         // prints those values, so it reads and builds them.

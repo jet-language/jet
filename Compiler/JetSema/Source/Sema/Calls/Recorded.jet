@@ -1,0 +1,284 @@
+// `#Recorded` (Compiler/Prelude/Markers.jet): each call of a function or
+// method that carries it is listed in its caller's FunctionInfo as the
+// CompilerCall a `check` rule hears at it (`recorded`), and in `returns` too
+// when a return path of the caller returns its value. The caller's check
+// records its calls (sema_recorded_note) and, once its body is checked,
+// marks the returned ones (sema_recorded_mark_returned). A FunctionInfo of
+// the caller takes them from its module's check: a rule's from the pass the
+// rule runs in (sema_recorded_info_filled), a compiler service's from the
+// checked module (sema_recorded_lists). A lambda argument's FunctionInfo
+// takes the ones written inside it, and its own body's return paths decide
+// its `returns`.
+use {
+    jet_foundation.[
+        CallArg,
+        Expr,
+        MARKER_RECORDED,
+        Marker,
+        Span,
+        Stmt,
+        SymbolID,
+        TComptimeField,
+        TComptimeValue,
+        Type,
+    ]
+}
+
+// The calls one function's check recorded: `recorded` lists each, and
+// `returns` the ones a return path returns.
+SemaRecordedLists: struct {
+    recorded: [TComptimeValue],
+    returns: [TComptimeValue],
+}
+
+// A local a return path may name, and where each call starts whose value
+// it holds.
+SemaRecordedAlias: struct {
+    name: String,
+    at: [Int],
+}
+
+// Whether the callable registered as `callee` carries `#Recorded`.
+sema_recorded_callee: fn(graph: SemaRegistrationGraph, callee: SymbolID) -> Bool Never! {
+    row: sema_registration_callable_row_of(graph, callee) ?? return false
+    if row == {
+        .Function(module_index, index) -> sema_recorded_marked(graph.modules[module_index].functions[index].declaration.markers)
+        .Foreign(_, _) -> false
+        .NominalMethod(module_index, owner, index) -> sema_recorded_marked(graph.modules[module_index].nominals[owner].methods[index].declaration.markers)
+        .ImplMethod(module_index, owner, index) -> sema_recorded_marked(graph.modules[module_index].impls[owner].methods[index].declaration.markers)
+    }
+}
+
+sema_recorded_marked: fn(markers: [Marker]) -> Bool Never! {
+    loop marker in markers {
+        if marker.name == MARKER_RECORDED && !marker.negated -> return true
+    }
+    false
+}
+
+// Whether this check records a call of `callee`: `callee` carries
+// `#Recorded`, and the body is not one a compile-time run checks, which
+// hears no rule.
+sema_recorded_here: fn(check: SemaBodyCheck, callee: SymbolID) -> Bool {
+    sema_call_rules_heard_here(check.scopes) && sema_recorded_callee(check.program.registration_graph, callee)
+}
+
+// Records the call of `callee` written `name` at `name_span` with `args`
+// and the checked explicit type arguments `type_args`, and for a method
+// call the checked receiver `receiver`: the CompilerCall a rule hears there
+// (sema_rule_call_value).
+sema_recorded_note: fn(check: ^SemaBodyCheck, callee: SymbolID, name: String, name_span: Span, args: [CallArg], type_args: [Type], receiver: TExpr?) {
+    graph: check.program.registration_graph
+    owner: sema_scope_function_owner_key(check.scopes)
+    ^end: name_span.end
+    loop argument in args -> end = argument.span.end
+    ^receiver_type: Type?{None}
+    ^receiver_known: TComptimeValue?{None}
+    ^receiver_span: name_span
+    if receiver == .Val(value) {
+        receiver_type = Val(value.ty)
+        receiver_known = sema_rule_known(value, check)
+        receiver_span = value.span
+    }
+    heard: sema_rule_call_value(graph, Val(callee), name, name_span, Span{start: name_span.start, end: end}, args, type_args, receiver_type, receiver_known, receiver_span, None, [String]{}, owner, check)
+    check.context.recorded_calls.push(SemaRecordedCall{function_key: owner, call: sema_recorded_call_value(heard), at: name_span.start, returned: false})
+}
+
+// The CompilerCall of the row `heard`, made as a rule's batch makes it
+// (sema_call_rule_call_text).
+sema_recorded_call_value: fn(heard: SemaCallRuleHeard) -> TComptimeValue {
+    file: heard.texts[heard.words[4]]
+    count: heard.words[SEMA_CALL_RULE_COUNT_WORD]
+    args: loop arg in 0..<count -> sema_recorded_arg_value(heard, SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * arg, file)
+    receiver: if heard.words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] == 0 -> sema_comptime_reflection_none(Type.Named{name: "CompilerArg"}) else -> TComptimeValue.Present{value: sema_recorded_arg_value(heard, SEMA_CALL_RULE_RECEIVER_WORD, file)}
+    source_word: heard.words[SEMA_CALL_RULE_SOURCE_WORD]
+    source: if source_word == 0 -> sema_comptime_reflection_none(Type.String) else -> TComptimeValue.Present{value: sema_compiler_index_string(heard.texts[source_word - 1])}
+    keys: SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * count
+    types: keys + 1 + heard.words[keys]
+    type_args: loop at in types + 1..<types + 1 + heard.words[types] -> heard.types[heard.words[at]]
+    name: TComptimeValue.Struct{
+        type_name: "CompilerName",
+        fields: [TComptimeField]{
+            TComptimeField{name: "text", value: sema_compiler_index_string(heard.texts[heard.words[7]])},
+            TComptimeField{name: "span", value: sema_compiler_index_span(Span{start: heard.words[8], end: heard.words[9]}, file)},
+        },
+    }
+    TComptimeValue.Struct{
+        type_name: "CompilerCall",
+        fields: [TComptimeField]{
+            TComptimeField{name: "caller", value: sema_compiler_index_string(heard.texts[heard.words[1]])},
+            TComptimeField{name: "callee", value: sema_compiler_index_string(heard.texts[heard.words[2]])},
+            TComptimeField{name: "module", value: sema_compiler_index_string(heard.texts[heard.words[3]])},
+            TComptimeField{name: "span", value: sema_compiler_index_span(Span{start: heard.words[5], end: heard.words[6]}, file)},
+            TComptimeField{name: "name", value: name},
+            TComptimeField{name: "args", value: TComptimeValue.List{values: args}},
+            TComptimeField{name: "receiver", value: receiver},
+            TComptimeField{name: "source", value: source},
+            TComptimeField{name: "type_args", value: TComptimeValue.List{values: type_args}},
+        },
+    }
+}
+
+// The CompilerArg whose words start at `at` in the row `heard`, written in
+// `file`.
+sema_recorded_arg_value: fn(heard: SemaCallRuleHeard, at: Int, file: String) -> TComptimeValue {
+    label: heard.words[at]
+    value: heard.words[at + 2]
+    function: heard.words[at + 3]
+    written: heard.words[at + 6]
+    TComptimeValue.Struct{
+        type_name: "CompilerArg",
+        fields: [TComptimeField]{
+            TComptimeField{name: "label", value: if label == 0 -> sema_comptime_reflection_none(Type.String) else -> TComptimeValue.Present{value: sema_compiler_index_string(heard.texts[label - 1])}},
+            TComptimeField{name: "type", value: heard.types[heard.words[at + 1]]},
+            TComptimeField{name: "value", value: if value == 0 -> sema_comptime_reflection_none(Type.Named{name: "Dyn"}) else -> TComptimeValue.Present{value: heard.values[value - 1]}},
+            TComptimeField{name: "function", value: if function == 0 -> sema_comptime_reflection_none(Type.Named{name: "FunctionInfo"}) else -> TComptimeValue.Present{value: heard.functions[function - 1]}},
+            TComptimeField{name: "span", value: sema_compiler_index_span(Span{start: heard.words[at + 4], end: heard.words[at + 5]}, file)},
+            TComptimeField{name: "written", value: if written == 0 -> sema_comptime_reflection_none(Type.List{element: Type.Named{name: "CompilerWrittenPart"}}) else -> TComptimeValue.Present{value: heard.written[written - 1]}},
+        },
+    }
+}
+
+// The calls in `calls` that `source` names: those the check of its body
+// recorded, or for a lambda those written inside it, whose returns are its
+// own body's.
+sema_recorded_lists: fn(calls: [SemaRecordedCall], source: SemaRuleFunctionSource) -> SemaRecordedLists {
+    ^lists: SemaRecordedLists{recorded: [TComptimeValue]{}, returns: [TComptimeValue]{}}
+    loop call in calls {
+        if call.function_key != source.key -> next
+        ^returned: call.returned
+        if source.within == .Val(span) {
+            if call.at < span.start || call.at >= span.end -> next
+            returned = source.returned.contains(call.at)
+        }
+        lists.recorded.push(call.call)
+        if returned -> lists.returns.push(call.call)
+    }
+    lists
+}
+
+// `info`, a FunctionInfo of the function `source` names, with the calls its
+// check in `modules` recorded.
+sema_recorded_info_filled: fn(info: ^^TComptimeValue, source: SemaRuleFunctionSource, modules: [SemaGraphModuleResult]) -> TComptimeValue {
+    loop checked in modules {
+        lists: sema_recorded_lists(checked.recorded_calls, source)
+        if lists.recorded.len() > 0 -> return sema_recorded_info_with(info.move(), lists.move())
+    }
+    info.move()
+}
+
+// `info`, a FunctionInfo, with `lists` as its `recorded` and `returns`.
+sema_recorded_info_with: fn(info: ^^TComptimeValue, lists: ^^SemaRecordedLists) -> TComptimeValue {
+    ^value: info.move()
+    if ^value == .Struct(_, fields) {
+        sema_recorded_field_put(fields, "recorded", lists.recorded.move())
+        sema_recorded_field_put(fields, "returns", lists.returns.move())
+    }
+    value
+}
+
+// Sets the field `name` of `fields` to the list `values`, adding it when
+// `fields` has none.
+sema_recorded_field_put: fn(fields: ^[TComptimeField], name: String, values: ^^[TComptimeValue]) {
+    loop index in 0..<fields.len() {
+        if fields[index].name == name {
+            fields[index].value = TComptimeValue.List{values: values.move()}
+            return
+        }
+    }
+    fields.push(TComptimeField{name: name, value: TComptimeValue.List{values: values.move()}})
+}
+
+// Marks each call in `calls` whose value a return path of the function body
+// `statements` returns: its last line, a `return`, or a local holding the
+// call's value that one of them names.
+sema_recorded_mark_returned: fn(statements: [Stmt], calls: ^[SemaRecordedCall]) {
+    ^returned: [Int]{}
+    sema_recorded_returned_statements(statements, [SemaRecordedAlias]{}, returned, tail: true)
+    loop index in 0..<calls.len() {
+        if returned.contains(calls[index].at) -> calls[index].returned = true
+    }
+}
+
+// Appends to `returned` where each call starts whose value a return path in
+// `statements` returns, `initial` naming the locals that hold call values.
+// With `tail`, the block's last line is a value the function returns.
+sema_recorded_returned_statements: fn(statements: [Stmt], initial: [SemaRecordedAlias], returned: ^[Int], tail: Bool{false}) {
+    ^aliases: initial
+    loop (position, statement) in statements {
+        last: tail && position == statements.len() - 1
+        if statement == {
+            .Expr(expression) -> {
+                values: sema_recorded_returned_expr(expression, aliases, returned)
+                if last -> returned.extend(values)
+            }
+            .Return(value, _) -> {
+                if value == .Val(expression) {
+                    values: sema_recorded_returned_expr(expression, aliases, returned)
+                    returned.extend(values)
+                }
+            }
+            .Val(binding) -> {
+                values: sema_recorded_returned_expr(binding.init, aliases, returned)
+                sema_recorded_alias_bind(aliases, binding.name, values.move())
+            }
+            .Assign(target, _, _, value) -> {
+                values: sema_recorded_returned_expr(value, aliases, returned)
+                if target == .Local(name, _) -> sema_recorded_alias_bind(aliases, name, values.move())
+            }
+            .Switch(_, arms, else_body, _) -> {
+                loop arm in arms -> sema_recorded_returned_statements(arm.body, aliases, returned, tail: last)
+                if else_body == .Val(body) -> sema_recorded_returned_statements(body, aliases, returned, tail: last)
+            }
+            // A block whose last line is its value.
+            .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ContextBlock(_, body, _) | .AssumeDet(_, _, body, _) -> {
+                sema_recorded_returned_statements(body, aliases, returned, tail: last)
+            }
+            .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .Reactive(body, _) | .Defer(body, _) | .Switched(_, body, _) | .TaskGroup(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> {
+                sema_recorded_returned_statements(body, aliases, returned)
+            }
+            .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .CountedLoop(_, _, _, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
+        }
+    }
+}
+
+// Binds `name` in `aliases` anew, to the call values `values`.
+sema_recorded_alias_bind: fn(aliases: ^[SemaRecordedAlias], name: String, values: ^^[Int]) {
+    ^index: 0
+    loop index < aliases.len() {
+        if {
+            aliases[index].name == name -> ^_: aliases.remove(index, .Slot)
+            else -> index += 1
+        }
+    }
+    if values.len() > 0 -> aliases.push(SemaRecordedAlias{name: name, at: values.move()})
+}
+
+// Where each call starts whose value `expression` is, through parentheses,
+// `?`, `Ok(…)`, `if` arms and the locals `aliases` name. A `return` inside
+// it appends to `returned`.
+sema_recorded_returned_expr: fn(expression: Expr, aliases: [SemaRecordedAlias], returned: ^[Int]) -> [Int] {
+    if expression == {
+        .Paren(inner, _, _) | .Ok(inner, _, _) | .Try(inner, _, _, _, _) -> return sema_recorded_returned_expr(inner, aliases, returned)
+        .If(_, then_body, then_value, else_body, else_value, _, _) -> {
+            sema_recorded_returned_statements(then_body, aliases, returned)
+            sema_recorded_returned_statements(else_body, aliases, returned)
+            ^values: sema_recorded_returned_expr(then_value, aliases, returned)
+            values.extend(sema_recorded_returned_expr(else_value, aliases, returned))
+            return values
+        }
+        .Ident(name, _, _) -> {
+            loop alias in aliases {
+                if alias.name == name -> return alias.at
+            }
+        }
+        .Call(call, _) -> {
+            // `Ok(value)` parses as a call named `Ok`.
+            if call.name == "Ok" && call.args.len() == 1 -> return sema_recorded_returned_expr(call.args[0].expr, aliases, returned)
+            return [Int]{call.name_span.start}
+        }
+        .MethodCall(_, _, method_span, _, _, _, _) -> return [Int]{method_span.start}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Err(_, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    [Int]{}
+}

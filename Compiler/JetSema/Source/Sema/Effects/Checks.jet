@@ -95,7 +95,6 @@ use jet_foundation.[
     compiler_threads_taken,
     compiler_threads_partition,
     compiler_transfer_rows,
-    CoreCallRecord,
     diagnostic_with_label,
     diagnostic_with_rights,
     body_node,
@@ -288,15 +287,15 @@ SemaMemoryOpen: struct {
 }
 
 // The first violation on a path: an event (in node `owner`) or an open
-// dispatch, and the arena bytes used up to it. A search's finding also
-// keeps its path as the nodes from its root to `owner` (`steps`).
+// dispatch, and the arena bytes used up to it. Its path is the nodes from
+// its root to `owner` (`steps`), by display key (`path`).
 SemaMemoryFinding: struct {
     event: SemaMemoryEvent?,
     owner: Int,
     open: SemaMemoryOpen?,
     path: [String],
     used: Int,
-    steps: [Int]{[Int]{}},
+    steps: [Int],
 }
 
 // An arena proof, or the finding that stops the proof.
@@ -767,8 +766,6 @@ sema_effect_nondeterministic_core: fn(node: SemaEffectNode, expression: BodyNode
         if !module_is_none(callee_module) && !module_is_core(callee_module) -> return None
         callee: fact.callee ?? return None
         api = sema_effect_decl_label(symbol_key(symbols, tree.symbols, callee))
-    } else if expression.kind == .CoreCall(record, _, _, _, _, _) {
-        api = sema_effect_member_label(record.module_name, record.member)
     }
     if api == "" -> return None
     row: fact.facts.effect_bound ?? return None
@@ -1168,7 +1165,6 @@ sema_effect_decl_label: fn(key: String) -> String Never! {
 
 sema_effect_call_api: fn(program: SemaProgramTables, value: TExpr) -> String Never! {
     if value.kind == {
-        .CoreCall(record, _, _, _, _, _) -> sema_effect_member_label(record.module_name, record.member)
         .Call(callee, _, _) -> sema_effect_decl_label(sema_program_decl_key(program, callee))
         .MethodCall(_, method, _, _) -> method.name
         .IndirectCall(_, _, _, _) -> "indirect call"
@@ -1184,7 +1180,6 @@ sema_effect_call_api: fn(program: SemaProgramTables, value: TExpr) -> String Nev
 // direct callee, its key a row of `symbols`.
 sema_effect_node_call_api: fn(decls: DeclTable, symbols: SymbolTable, kind: NodeKind) -> String Never! {
     if kind == {
-        .CoreCall(record, _, _, _, _, _) -> sema_effect_member_label(record.module_name, record.member)
         .Call(callee, _, _) -> sema_effect_decl_label(decl_table_key(decls, symbols, callee))
         .MethodCall(_, method, _, _) -> method.name
         .IndirectCall(_, _, _, _) -> "indirect call"
@@ -2133,8 +2128,7 @@ sema_effect_cap_ceiling: fn(cap: ModuleCap) -> [String]? Never! {
 sema_effect_cap_frames: fn(caps: [SemaEffectModuleCap]) -> String Never! {
     ^frames: [String]{}
     loop cap in caps {
-        ^entries: [String]{}
-        loop entry in cap.cap.entries -> entries.push(entry.name.copy())
+        entries: loop entry in cap.cap.entries -> entry.name.copy()
         frame: effect_scope_descriptor("{cap.cap.scope} {cap.cap.owner}", "", false, Val(entries))
         if frame != "" -> frames.push(frame)
     }
@@ -2308,8 +2302,7 @@ sema_effect_panic_steps: fn(nodes: [SemaEffectNode], node_index: Int) -> [String
     ^seen: (loop _ in nodes -> false)
     path: sema_effect_panic_path(nodes, node_index, seen)
     if path.len() == 0 -> return [String]{"the reachable call graph"}
-    ^steps: [String]{}
-    loop at in 1..<path.len() -> steps.push(nodes[path[at]].chain_name)
+    steps: loop at in 1..<path.len() -> nodes[path[at]].chain_name
     steps
 }
 
@@ -2371,8 +2364,7 @@ sema_effect_unsafe_reach: fn(nodes: [SemaEffectNode], node_index: Int) -> SemaEf
     if path.len() == 0 {
         return SemaEffectUnsafeReach{steps: [String]{"the reachable call graph"}, gate: ""}
     }
-    ^steps: [String]{}
-    loop at in 1..<path.len() -> steps.push(nodes[path[at]].chain_name)
+    steps: loop at in 1..<path.len() -> nodes[path[at]].chain_name
     SemaEffectUnsafeReach{steps: steps, gate: nodes[path[path.len() - 1]].unsafe_site}
 }
 
@@ -2955,10 +2947,11 @@ sema_effect_record_fact: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex
         sema_effect_record_memory_open(nodes, node_index, fact.span, "foreign or dynamically selected function body")
     }
     // A callee with no body in this program has no effects: only its declared
-    // row, recorded above, contributes. Its memory behavior stays unproven.
-    // A trait method called through a trait value is no such callee: the
-    // call runs the implementations (sema_effect_dispatched_call).
-    if callee_key != "" && !known_callee && !row_known && !sema_effect_dispatched_call(facts, tree, expression) {
+    // row, recorded above, contributes. Its memory behavior stays unproven,
+    // unless it is a runtime door (sema_effect_runtime_door_callee). A trait
+    // method called through a trait value is no such callee: the call runs
+    // the implementations (sema_effect_dispatched_call).
+    if callee_key != "" && !known_callee && !row_known && !sema_effect_runtime_door_callee(callee_key) && !sema_effect_dispatched_call(facts, tree, expression) {
         sema_effect_record_memory_open(nodes, node_index, fact.span, "callee body is unavailable and has no verified signed memory summary")
     }
 }
@@ -2993,6 +2986,22 @@ sema_effect_dispatched_call: fn(facts: SemaEffectCallIndex, tree: BodyTree, expr
 // (`kind:module.owner.name`): a collecting thread holds only its own node.
 sema_effect_core_db_callee: fn(callee_key: String) -> Bool Never! {
     callee_key.contains(":<corelib>/core.db.")
+}
+
+// The module identity prefix of the jet.runtime interface units (Driver
+// RuntimeInterface.jet jet_driver_runtime_interface_sources): Core units
+// that only the toolchain writes, so no package's module carries it.
+SEMA_EFFECT_RUNTIME_DOOR_MODULES: "<corelib>/jet.runtime."
+
+// A member of the jet.runtime interface: Core's body-less `#Import(c)` door
+// into the runtime (sema_guest_runtime_binding). It is toolchain code, not an
+// open-world body: its declaration is its contract, so its call is no open
+// memory dispatch. What it reserves is counted where Core's source states
+// it, as an allocator constructor's literal capacity is at the constructor's
+// call (sema_call_memory_allocator_name), and the stack proof leaves its
+// runtime frame uncounted. The key alone decides it (`kind:module.name`).
+sema_effect_runtime_door_callee: fn(callee_key: String) -> Bool Never! {
+    (callee_key.split_once(":") ?? return false).after.starts_with(SEMA_EFFECT_RUNTIME_DOOR_MODULES)
 }
 
 sema_effect_record_memory_open: fn(nodes: ^[SemaEffectNode], node_index: Int, span: Span, reason: String) Never! {
@@ -3231,7 +3240,7 @@ sema_effect_clock_intrinsic_position: fn(index: SemaEffectCallIndex, module_fact
 
 sema_effect_is_call: fn(kind: NodeKind) -> Bool Never! {
     if kind == {
-        .Call(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .CoreCall(_, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .HostCall(_) | .AllocNew(_, _) | .BuiltinMethod(_, _, _) | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .SharedGuardWait(_, _, _) | .CoreClosureCall(_) -> true
+        .Call(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .HostCall(_) | .AllocNew(_, _) | .BuiltinMethod(_, _, _) | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .SharedGuardWait(_, _, _) | .CoreClosureCall(_) -> true
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .OverflowOpt(_, _, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> false
     }
 }
@@ -3260,7 +3269,7 @@ sema_effect_is_compiler_intrinsic: fn(kind: NodeKind) -> Bool Never! {
     if kind == {
         .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .HostCall(_) | .HandleMethod(_, _, _) -> true
         .Close(_) | .Drop(_) | .CoreClosureCall(_) | .AllocNew(_, _) -> true
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .Print(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .Print(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> false
     }
 }
 
@@ -3320,16 +3329,19 @@ sema_effect_record_unresolved_call: fn(nodes: ^[SemaEffectNode], facts: SemaEffe
     callee: if expression.kind == {
         .MethodCall(_, method, _, _) -> method.symbol.copy()
         .StaticCall(_, _, method, _, _) -> method.symbol.copy()
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> symbol_none()
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> symbol_none()
     }
     callee_key: if symbol_is_none(callee) -> "" else -> symbol_key(facts.symbols, tree.symbols, callee)
     if {
         callee_key != "" && sema_effect_node_index(facts.node_by_key, callee_key) != None -> {
             sema_effect_node_add_edge(nodes, node_index, callee_key)
         }
-        // A named callee with no body in this program has no effects.
+        // A named callee with no body in this program has no effects; a
+        // runtime door is no open memory dispatch (sema_effect_runtime_door_callee).
         callee_key != "" -> {
-            sema_effect_record_memory_open(nodes, node_index, expression.span, "callee body is unavailable and has no verified signed memory summary")
+            if !sema_effect_runtime_door_callee(callee_key) {
+                sema_effect_record_memory_open(nodes, node_index, expression.span, "callee body is unavailable and has no verified signed memory summary")
+            }
         }
         else -> {
             nodes[node_index].maximal = true
@@ -3541,7 +3553,7 @@ sema_effect_record_dispatch: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallI
                 sema_effect_node_add_edge(nodes, node_index, impl_key)
             }
         }
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
 }
 
@@ -3582,7 +3594,7 @@ sema_effect_record_value_reads: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCa
                 }
             }
         }
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
 }
 
@@ -3619,7 +3631,7 @@ sema_effect_record_static_dispatch: fn(nodes: ^[SemaEffectNode], facts: SemaEffe
             sema_effect_add_dispatch_union(nodes, facts, node_index, method_row, fact.span)
             true
         }
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> false
     }
 }
 
@@ -3669,7 +3681,7 @@ sema_effect_record_instantiation: fn(nodes: ^[SemaEffectNode], node_index: Int, 
             type_args = args
         }
         .Call(_, args, _) -> type_args = args
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> return
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> return
     }
     if owner_args.len() == 0 && type_args.len() == 0 {
         return
@@ -4034,11 +4046,10 @@ sema_effect_guards_shown: fn(guards: [SemaTypeReflectionGuard]) -> String Never!
 // The instance reaches of `node` with each target's solved row.
 sema_effect_instance_notes: fn(nodes: [SemaEffectNode], solved: [[String]], node: SemaEffectNode) -> [SemaEffectInstanceNote] Never! {
     rare: node.rare ?? return [SemaEffectInstanceNote]{}
-    ^notes: [SemaEffectInstanceNote]{}
-    loop reach in rare.instance_reaches {
+    notes: loop reach in rare.instance_reaches -> {
         target: reach.target_node
         if target < 0 -> next
-        notes.push(SemaEffectInstanceNote{label: reach.label, callee: nodes[target].chain_name, row: solved[target], span: reach.span})
+        SemaEffectInstanceNote{label: reach.label, callee: nodes[target].chain_name, row: solved[target], span: reach.span}
     }
     notes
 }
@@ -4058,17 +4069,6 @@ sema_effect_with_instance_notes: fn(diagnostic: Diagnostic, notes: [SemaEffectIn
         labeled = diagnostic_with_label(labeled, note.span, "`{note.label}` runs `{note.callee}` here, which uses `{sema_effect_show(hits)}`")
     }
     labeled
-}
-
-// A Core call's effects from its record, as sema_call_core_record_effects
-// records them on a call-site fact. A CoreCall node is an adapter row's: a
-// source-owned row is checked as a call of its Core declaration.
-sema_effect_record_core_row: fn(nodes: ^[SemaEffectNode], node_index: Int, record: CoreCallRecord, span: Span) Never! {
-    loop name in record.effects {
-        if sema_effect_parse_name(name) == .Val(effect) {
-            sema_effect_node_add_direct(nodes, node_index, effect, span)
-        }
-    }
 }
 
 // A call to a Core scope publisher narrows the effect the callee declares to
@@ -4214,12 +4214,7 @@ sema_effect_walk_record_call_node: fn(nodes: ^[SemaEffectNode], node_index: Int,
             }
         }
         .None -> {
-            // A Core call checked without a call-site fact still
-            // carries its record: its declared root and leaf are its
-            // effects, never an unknown callee's maximal row.
-            if node.kind == .CoreCall(record, _, _, _, _, _) {
-                sema_effect_record_core_row(nodes, node_index, record, node.span)
-            } else if !sema_effect_is_compiler_intrinsic(node.kind) {
+            if !sema_effect_is_compiler_intrinsic(node.kind) {
                 sema_effect_record_unresolved_call(nodes, facts, tree, node_index, node)
             }
         }
@@ -4324,7 +4319,7 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
                 return true
             }
         }
-        .ClosureMethod(_, _, _) | .CoreCall(_, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .HandleMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .SharedGuardWait(_, _, _) | .CoreClosureCall(_) -> {
+        .ClosureMethod(_, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .HandleMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .SharedGuardWait(_, _, _) | .CoreClosureCall(_) -> {
             if !sema_effect_in_assume_det(nodes[node_index], node.span) && sema_effect_walk_record_call_node(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller) {
                 return true
             }
@@ -4497,7 +4492,7 @@ sema_effect_check_unsafe_enter: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCa
             sema_effect_check_unsafe_call_site(facts, module_facts, caller, node.span, audited, diagnostics)
             return false
         }
-        .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .HandleMethod(_, _, _) | .SharedGuardWait(_, _, _) -> {
+        .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .HandleMethod(_, _, _) | .SharedGuardWait(_, _, _) -> {
             sema_effect_check_unsafe_call_site(facts, module_facts, caller, node.span, audited, diagnostics)
         }
         .Lambda(value) -> {
@@ -5091,10 +5086,7 @@ sema_effect_solve: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] N
             solved.push(unique_rows[slot])
             next
         }
-        ^row: [String]{}
-        loop k in 0..<ordered_masks.len() {
-            if (mask & ordered_masks[k]) != 0 -> row.push(ordered_names[k])
-        }
+        row: loop k in 0..<ordered_masks.len() if (mask & ordered_masks[k]) != 0 -> ordered_names[k]
         slot: unique_rows.len()
         by_mask[mask] = slot
         unique_rows.push(row)
@@ -5332,8 +5324,14 @@ sema_effect_memory_sorted_calls: fn(calls: [SemaMemoryCall]) -> [SemaMemoryCall]
     sorted
 }
 
-sema_effect_memory_open_finding: fn(span: Span, source: String, reason: String, owner: Int, path: [String], used: Int) -> SemaMemoryFinding Never! {
-    SemaMemoryFinding{event: None, owner: owner, open: Val(SemaMemoryOpen{span: span, source: source, reason: reason}), path: path, used: used}
+// The finding at `owner` along `steps`, its nodes from its root.
+sema_effect_memory_finding: fn(nodes: [SemaEffectNode], event: SemaMemoryEvent?, owner: Int, open: SemaMemoryOpen?, steps: [Int], used: Int) -> SemaMemoryFinding Never! {
+    path: loop step in steps -> nodes[step].display_key
+    SemaMemoryFinding{event: event, owner: owner, open: open, path: path, used: used, steps: steps}
+}
+
+sema_effect_memory_open_finding: fn(nodes: [SemaEffectNode], span: Span, source: String, reason: String, owner: Int, steps: [Int], used: Int) -> SemaMemoryFinding Never! {
+    sema_effect_memory_finding(nodes, None, owner, Val(SemaMemoryOpen{span: span, source: source, reason: reason}), steps, used)
 }
 
 sema_effect_arena_failure: fn(finding: SemaMemoryFinding) -> SemaMemoryArena Never! {
@@ -5480,23 +5478,24 @@ sema_effect_unsized_alloc: fn(node: SemaEffectNode, event: SemaMemoryEvent) -> B
 }
 
 // The proven arena bytes `index` can reserve, with the event that witnesses the
-// total, or the finding that stops the proof.
-sema_effect_arena_bound: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], path: [String]) -> SemaMemoryArena {
+// total, or the finding that stops the proof. `steps` are the nodes from the
+// proof's root to `index`.
+sema_effect_arena_bound: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], steps: [Int]) -> SemaMemoryArena {
     if visiting[index] {
-        return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[index].display_key, "recursive call multiplicity is not statically bounded for arena accounting", index, path, 0))
+        return sema_effect_arena_failure(sema_effect_memory_open_finding(nodes, Span{start: 0, end: 0}, nodes[index].display_key, "recursive call multiplicity is not statically bounded for arena accounting", index, steps, 0))
     }
     visiting[index] = true
-    result: sema_effect_arena_bound_inner(nodes, index, visiting, path)
+    result: sema_effect_arena_bound_inner(nodes, index, visiting, steps)
     visiting[index] = false
     result
 }
 
-sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], path: [String]) -> SemaMemoryArena {
+sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], steps: [Int]) -> SemaMemoryArena {
     node: nodes[index]
     // copy: the arena failure owns its open site, while the site stays in `node`, a row of the
     // caller's read-only effect graph, which later searches read.
     if node.rare == .Val(rare) && rare.memory_opens.len() > 0 {
-        return sema_effect_arena_failure(SemaMemoryFinding{event: None, owner: index, open: Val(rare.memory_opens[0].copy()), path: path, used: 0})
+        return sema_effect_arena_failure(sema_effect_memory_finding(nodes, None, index, Val(rare.memory_opens[0].copy()), steps, 0))
     }
     ^total: 0
     ^witness: SemaMemoryFinding?{None}
@@ -5504,13 +5503,13 @@ sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting:
         // A heap allocation has no proven size, so a byte bound cannot hold
         // over it; the arena reservation at the same site is counted instead.
         if sema_effect_unsized_alloc(node, event) {
-            return sema_effect_arena_failure(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: total})
+            return sema_effect_arena_failure(sema_effect_memory_finding(nodes, Val(event), index, None, steps, total))
         }
         if event.kind != "arena" -> next
-        bytes: event.bytes ?? return sema_effect_arena_failure(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: total})
-        executions: event.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(event.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, path, total))
+        bytes: event.bytes ?? return sema_effect_arena_failure(sema_effect_memory_finding(nodes, Val(event), index, None, steps, total))
+        executions: event.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(nodes, event.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, steps, total))
         total += bytes * executions
-        witness = Val(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: 0})
+        witness = Val(sema_effect_memory_finding(nodes, Val(event), index, None, steps, 0))
     }
     loop target in node.call_targets {
         if target < 0 -> next
@@ -5521,25 +5520,25 @@ sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting:
         if called -> next
         ^reach_visiting: (loop _ in nodes -> false)
         if sema_effect_may_reach_arena(nodes, target, reach_visiting) {
-            return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[target].display_key, "call-site multiplicity is unavailable for arena accounting", index, path, total))
+            return sema_effect_arena_failure(sema_effect_memory_open_finding(nodes, Span{start: 0, end: 0}, nodes[target].display_key, "call-site multiplicity is unavailable for arena accounting", index, steps, total))
         }
         // With no arena below it, the callee's multiplicity does not matter:
         // any heap allocation it reaches breaks the bound.
         if sema_effect_memory_search(nodes, target, "alloc") == .Val(found) {
-            ^full: path.copy()
-            loop step in found.path -> full.push(step)
-            return sema_effect_arena_failure(SemaMemoryFinding{event: found.event, owner: found.owner, open: found.open, path: full, used: total})
+            ^full: steps.copy()
+            loop step in found.steps -> full.push(step)
+            return sema_effect_arena_failure(sema_effect_memory_finding(nodes, found.event, found.owner, found.open, full, total))
         }
     }
     loop call in sema_effect_memory_sorted_calls(node.memory_calls) {
         target: call.target
         if target < 0 -> next
-        ^call_path: path.copy()
-        call_path.push(nodes[target].display_key)
-        proof: sema_effect_arena_bound(nodes, target, visiting, call_path)
+        ^call_steps: steps.copy()
+        call_steps.push(target)
+        proof: sema_effect_arena_bound(nodes, target, visiting, call_steps)
         if proof.failure != None -> return proof
         if proof.bytes == 0 -> next
-        executions: call.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(call.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, call_path, total))
+        executions: call.executions ?? return sema_effect_arena_failure(sema_effect_memory_open_finding(nodes, call.span, node.source_display, "loop iteration count is not statically bounded for arena accounting", index, call_steps, total))
         total += proof.bytes * executions
         if proof.witness != None -> witness = proof.witness
     }
@@ -5913,10 +5912,9 @@ sema_effect_stack_bodies_claimed: fn(modules: [SemaGraphModuleResult], nodes: [S
 
 // The nodes of `keys` that have a body, in order.
 sema_effect_stack_call_targets: fn(keys: [String], node_by_key: SemaEffectNodeKeys) -> [Int] Never! {
-    ^targets: [Int]{}
-    loop key in keys {
+    targets: loop key in keys -> {
         target: sema_effect_node_index(node_by_key, key) ?? next
-        targets.push(target)
+        target
     }
     targets
 }
@@ -6625,11 +6623,28 @@ sema_effect_memory_violation: fn(nodes: [SemaEffectNode], root: Int, denial: Eff
         if bounded {
             arena = if event.kind == "alloc" -> "; sema proves no byte size for this heap allocation, so it cannot be counted against the bound" else -> "; the proven path total is {finding.used} bytes"
         }
-        return sema_error("E0921", event.span, "{event.operation} at {owner.source_display} violates the effective `{fact}` declared at {declared_at}", "{owner.source_display} is reachable through {path_text} from code governed by `{fact}`{arena}; declaration provenance: {provenance}; operation provenance: {owner.name} in {owner.source_display}", "remove or replace the incompatible operation, seal the target set, or move the call outside this denial")
+        return sema_error("E0921", sema_effect_memory_site(nodes, root, denial, finding, event.span), "{event.operation} at {owner.source_display} violates the effective `{fact}` declared at {declared_at}", "{owner.source_display} is reachable through {path_text} from code governed by `{fact}`{arena}; declaration provenance: {provenance}; operation provenance: {owner.name} in {owner.source_display}", "remove or replace the incompatible operation, seal the target set, or move the call outside this denial")
     }
     open: finding.open ?? SemaMemoryOpen{span: denial.span, source: declared_at, reason: "memory proof is incomplete"}
-    span: if open.span.start == open.span.end -> denial.span else -> open.span
-    sema_error("E0921", span, "`{fact}` cannot be proved through the open dispatch at {open.source}", "{open.reason} is reachable through {path_text}; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: {provenance}", "seal the target set, consume a verified signed dependency summary that proves the denial, or move the dispatch outside it")
+    sema_error("E0921", sema_effect_memory_site(nodes, root, denial, finding, open.span), "`{fact}` cannot be proved through the open dispatch at {open.source}", "{open.reason} is reachable through {path_text}; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: {provenance}", "seal the target set, consume a verified signed dependency summary that proves the denial, or move the dispatch outside it")
+}
+
+// Where a finding reports, given its own `site`: the diagnostic reads its
+// span in the root's file. A site of a function of the root's module is its
+// own (an empty one is the denial); a site in another module, a Core body's
+// included, would name an unrelated line of that file, so the report is at
+// the root's call that leads toward it (the first of `finding.steps`), or at
+// the denial when no counted call does.
+sema_effect_memory_site: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, finding: SemaMemoryFinding, site: Span) -> Span Never! {
+    if nodes[finding.owner].module_index == nodes[root].module_index {
+        return if site.start == site.end -> denial.span else -> site
+    }
+    if finding.steps.len() > 1 {
+        loop call in nodes[root].memory_calls {
+            if call.target == finding.steps[1] -> return call.span
+        }
+    }
+    denial.span
 }
 
 // 2: a `-[!Mem.Alloc]>`, `-[!Mem.Rc]>` or `-[!Mem.Alloc(above: N)]>` denial
@@ -6640,13 +6655,13 @@ sema_effect_memory_project: fn(nodes: [SemaEffectNode], root: Int, denial: Effec
     limit: sema_effect_memory_bound(denial.name)
     if limit == .Val(bytes_limit) {
         ^visiting: (loop _ in nodes -> false)
-        proof: sema_effect_arena_bound(nodes, root, visiting, [String]{nodes[root].display_key})
+        proof: sema_effect_arena_bound(nodes, root, visiting, [Int]{root})
         if proof.failure == .Val(failure) {
             diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, true, failure))
             return sema_effect_memory_projection(failure)
         }
         if proof.bytes <= bytes_limit -> return SemaMemoryProjection.Proven
-        finding: proof.witness ?? sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[root].display_key, "the verified upper bound is {proof.bytes} bytes, above the declared {bytes_limit} bytes", root, [String]{nodes[root].display_key}, 0)
+        finding: proof.witness ?? sema_effect_memory_open_finding(nodes, Span{start: 0, end: 0}, nodes[root].display_key, "the verified upper bound is {proof.bytes} bytes, above the declared {bytes_limit} bytes", root, [Int]{root}, 0)
         ^finding_total: finding
         finding_total.used = proof.bytes
         diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, true, finding_total))
@@ -6716,11 +6731,10 @@ sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reache
             reached: sema_effect_without_deny_only(solved)
             // A non-deterministic Core call in this body already reported
             // E3403 for its `Time`/`Rand` row; any other effect still reports.
-            ^over: [String]{}
-            loop name in reached {
+            over: loop name in reached -> {
                 root: sema_effect_root(name)
                 if node.nondeterministic_call && (root == "Time" || root == "Rand") -> next
-                over.push(name)
+                name
             }
             if node.nondeterministic_call -> valid = false
             if over.len() > 0 {
@@ -7212,8 +7226,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
         if nodes[node_index].direct_spans.len() == 0 -> next
         policy: package_policies[expert_modules[graph_module]]
         main: policy.package_identity == main_package
-        ^expert_diagnostics: [Diagnostic]{}
-        loop used in nodes[node_index].direct_spans {
+        expert_diagnostics: loop used in nodes[node_index].direct_spans -> {
             if !authority_expert(used.name) -> next
             ^row_denied: false
             loop bound in nodes[node_index].prohibited {
@@ -7225,7 +7238,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
             if verdict == AuthorityVerdict.Allowed || (main && verdict == AuthorityVerdict.Denied) {
                 next
             }
-            expert_diagnostics.push(sema_effect_expert_not_held_diagnostic(nodes[node_index], used.name, used.span, policy, main, verdict))
+            sema_effect_expert_not_held_diagnostic(nodes[node_index], used.name, used.span, policy, main, verdict)
         }
         if expert_diagnostics.len() > 0 {
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, expert_diagnostics)
@@ -8045,8 +8058,7 @@ sema_effect_check_module_regions: fn(functions: [FnBody], module_facts: [SemaCal
 
 // A discarded call result of a function whose row has no outcome (L0508).
 sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: SemaEffectNodeKeys, symbols: SymbolTable, solved: [[String]], diagnostics: ^[Diagnostic]) {
-    ^discarded: [Diagnostic]{}
-    loop fact in call_facts {
+    discarded: loop fact in call_facts -> {
         if !fact.discarded -> next
         callee: fact.callee ?? next
         callee_key: sema_effect_run_key(symbols, callee) ?? next
@@ -8055,7 +8067,7 @@ sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: Sema
         // work (`measure(Square{…})` runs `Square.area`).
         if nodes[node_index].rare == .Val(rare) && rare.param_dispatches.len() > 0 -> next
         if !sema_effect_row_has_no_outcome(nodes[node_index], solved[node_index]) -> next
-        discarded.push(sema_effect_discarded_result_diagnostic(nodes[node_index], fact.span))
+        sema_effect_discarded_result_diagnostic(nodes[node_index], fact.span)
     }
     sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, discarded)
 }
@@ -8157,7 +8169,7 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts
                 .Lambda(value) -> {
                     sema_effect_record_lambda_bound(nodes, node_index, facts, caller, tree, value, body_type(facts.interner, tree, expression), node.span)
                 }
-                .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+                .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
             }
             Val(walk)
         }
@@ -8186,7 +8198,7 @@ sema_effect_record_stop: fn(nodes: ^[SemaEffectNode], node_index: Int, node: Bod
             }
         }
         .Slice(_, _, _, _, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
 }
 
@@ -8395,11 +8407,6 @@ sema_effect_walk_expr_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode
         }
         .ConditionNotify(condition, _) -> {
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, condition)
-        }
-        .CoreCall(_, args, _, _, _, _) -> {
-            loop value in args {
-                sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, value)
-            }
         }
         .HostCall(call) -> {
             sema_effect_walk_host_call_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, call)

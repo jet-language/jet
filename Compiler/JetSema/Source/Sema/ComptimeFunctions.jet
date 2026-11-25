@@ -141,10 +141,9 @@ sema_comptime_body_value_from_item: fn(value: SemaComptimeItemValue) -> SemaComp
 }
 
 sema_comptime_body_values_from_items: fn(values: [SemaComptimeItemValue]) -> [SemaComptimeBodyValue] Never! {
-    ^result: [SemaComptimeBodyValue]{}
-    loop value in values {
+    result: loop value in values -> {
         if value.kind != SemaComptimeItemKind.BodyExpression -> next
-        result.push(sema_comptime_body_value_from_item(value))
+        sema_comptime_body_value_from_item(value)
     }
     result
 }
@@ -218,6 +217,9 @@ SemaComptimeFunctionResult: struct {
     // which a body pass that takes this result records again.
     codec_demand: [SemaCodecWant]{[SemaCodecWant]{}},
     derive_demand: [String]{[String]{}},
+    // The calls of `#Recorded` callees the body makes, which a body pass
+    // that takes this result records again (Calls/Recorded.jet).
+    recorded_calls: [SemaRecordedCall]{[SemaRecordedCall]{}},
     // The Prelude error conversion routines the body's propagation sites
     // demand, checked under its module (sema_check_comptime_function); a
     // closure that builds the body builds them too.
@@ -242,10 +244,7 @@ sema_comptime_find_checked_function: fn(functions: [SemaComptimeFunctionResult],
 sema_comptime_functions_without: fn(functions: [SemaComptimeFunctionResult], keys: [String]) -> [SemaComptimeFunctionResult] Never! {
     ^dropped: name_table_sized(keys.len() + 1)
     loop key in keys -> ^_: name_intern(dropped, key)
-    ^kept: [SemaComptimeFunctionResult]{}
-    loop function in functions {
-        if name_find(dropped, function.function_key) == None -> kept.push(function.copy())
-    }
+    kept: loop function in functions if name_find(dropped, function.function_key) == None -> function.copy()
     kept
 }
 
@@ -637,6 +636,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
         obligations_pending: settled && !complete && !sema_check_function_failed(diagnostics, 0, true),
         codec_demand: demand.codecs.move(),
         derive_demand: demand.derived.move(),
+        recorded_calls: checked.recorded_calls.move(),
         conversions: conversions,
         type_delta: fn_delta.move(),
     }

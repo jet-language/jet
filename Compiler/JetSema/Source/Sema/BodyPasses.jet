@@ -968,10 +968,9 @@ sema_check_bodies_parallel: fn(shared: Shared<SemaCheckShared>, module_index: In
     sema_check_body_plan_fill(plan, plan_jobs, order)
     queue: SemaBodyQueue{next: 0}
     sema_check_shared_lend_scope(shared, scopes)
-    ^slots: [Shared<SemaBodyPart>]{}
-    loop _ in 0..<workers {
+    slots: loop _ in 0..<workers -> {
         slot: Shared{SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaClaimedBody]{}}}
-        slots.push(slot)
+        slot
     }
     ^_: sema_check_body_parts(shared, slots, plan, queue, 0, module_index, trace_sink)
     ^restored: sema_check_shared_return_scope(shared)
@@ -1533,12 +1532,11 @@ sema_check_body_stream: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Se
     ^job_count: 0
     ^body_work: 0
     ^scope_rows: 0
-    ^module_weights: [Int]{}
-    loop row in scanned {
+    module_weights: loop row in scanned -> {
         if row.has_work && row.rows > scope_rows -> scope_rows = row.rows
         body_work += row.body_work
         job_count += row.job_count
-        module_weights.push(row.body_work)
+        row.body_work
     }
     workers: compiler_threads_admit(threads, job_count, body_work, SEMA_BODY_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
     if kind != SemaWaveKind.Modules && trace_sink == .Val(sink) {

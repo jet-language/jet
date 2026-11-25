@@ -476,10 +476,7 @@ sema_frame_reuse: fn(operations: [FrameOperation], events: [FrameEventIndex], co
         }
     }
     sema_frame_sort_uses(uses)
-    ^candidates: [FrameUse]{}
-    loop usage in uses {
-        if usage.temporary -> candidates.push(usage)
-    }
+    candidates: loop usage in uses if usage.temporary -> usage
     ^reuse: [FrameReuse]{}
     loop right in candidates {
         ^left_index: -1
@@ -743,8 +740,7 @@ sema_frame_explain_access: fn(access: ResourceAccess) -> String Never! {
 sema_frame_schedule_explain: fn(schedule: FrameSchedule) -> String Never! {
     ^lines: [String]{"Why did these operations run in order?"}
     loop operation in schedule.operations {
-        ^accesses: [String]{}
-        loop access in operation.accesses -> accesses.push(sema_frame_explain_access(access))
+        accesses: loop access in operation.accesses -> sema_frame_explain_access(access)
         ^description: if accesses.len() == 0 -> "no resource access" else -> accesses.join(", ")
         lines.push("  {operation.name} {description}")
     }

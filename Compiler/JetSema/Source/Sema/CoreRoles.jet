@@ -228,12 +228,7 @@ sema_core_role_owned_filler: fn(role: String) -> String Never! {
 // function fills is E1015, at the case.
 sema_core_roles_check_filled: fn(graph: ^SemaRegistrationGraph, fill: SemaCoreRoleFill) {
     kind: fill.kind ?? return
-    ^problems: [Diagnostic]{}
-    loop (index, variant) in graph.modules[kind.module_index].nominals[kind.nominal_index].variants {
-        if fill.fillers[index] == "" {
-            problems.push(sema_missing_core_role(variant.symbol.name, variant.symbol.span))
-        }
-    }
+    problems: loop (index, variant) in graph.modules[kind.module_index].nominals[kind.nominal_index].variants if fill.fillers[index] == "" -> sema_missing_core_role(variant.symbol.name, variant.symbol.span)
     loop problem in problems {
         sema_registration_push_graph_diagnostic(graph, kind.module_index, problem)
     }

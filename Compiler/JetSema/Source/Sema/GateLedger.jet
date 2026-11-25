@@ -461,8 +461,7 @@ sema_gate_statement_gates: fn(source: String, body: [Stmt], ledger: ^GateLedger)
                 gate_ledger_push(ledger, gate_source_entry(GateKind.Impure, "security", "block", source, span, "#Impure", reason, "ambient comptime effect gate", if reason != None -> "recorded" else -> "missing"))
             }
             .AuthorityScope(caps, _, _, _, span) -> {
-                ^effects: [String]{}
-                loop cap in caps -> effects.push(cap.name)
+                effects: loop cap in caps -> cap.name
                 gate_ledger_push(ledger, gate_source_entry(GateKind.DependencyGrant, "security", "block", source, span, "#FX", None, "effects: {effects.join(",")}", "recorded"))
             }
             .AssumeDet(reason, _, _, span) -> {

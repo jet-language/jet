@@ -107,10 +107,9 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
         }
     }
 
-    ^names: [String]{}
-    loop (index, _) in elements {
+    names: loop (index, _) in elements -> {
         name: if index < fields.len() -> fields[index] else -> sema_expression_zip_field_name(index, None)
-        names.push(name)
+        name
     }
     ^seen: [String]{}
     loop name in names {
@@ -195,8 +194,7 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
     ^tuple_ty: Type.Tuple{fields: tuple_fields}
     ^result_ty: Type.Apply{name: "Iter", args: [Type]{tuple_ty}}
     ^receiver: inputs[0]
-    ^field_types: [Type]{}
-    loop field in tuple_fields -> field_types.push(field.ty)
+    field_types: loop field in tuple_fields -> field.ty
     ^fill_mode: TZipFillMode.DefaultNone
     if method == "zip_pad" && fill_args.len() == 1 {
         if fill_args[0].ty == {

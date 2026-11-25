@@ -834,10 +834,7 @@ sema_pattern_place_named_slots: fn(written: [PatSlot], fields: [VariantField], v
             .Wildcard | .Bind(_, _) | .Range(_, _) | .Nested(_) | .Value(_) -> {}
         }
     }
-    ^missing: [String]{}
-    loop (index, name) in names {
-        if placed[index] == None -> missing.push(name)
-    }
+    missing: loop (index, name) in names if placed[index] == None -> name
     missing_list: missing.join(", ")
     if rest == {
         .Val(rest_span) -> {
@@ -857,8 +854,7 @@ sema_pattern_place_named_slots: fn(written: [PatSlot], fields: [VariantField], v
 // Which declared fields a named payload pattern writes a label for, one flag
 // per declared field.
 sema_pattern_written_labels: fn(written: [PatSlot], declared: [String]) -> [Bool] {
-    ^flags: [Bool]{}
-    loop name in declared {
+    flags: loop name in declared -> {
         ^found: false
         loop entry in written {
             if entry == {
@@ -868,7 +864,7 @@ sema_pattern_written_labels: fn(written: [PatSlot], declared: [String]) -> [Bool
                 .Wildcard | .Bind(_, _) | .Range(_, _) | .Nested(_) | .Value(_) | .Rest(_) -> {}
             }
         }
-        flags.push(found)
+        found
     }
     flags
 }
@@ -1737,10 +1733,9 @@ sema_pattern_source_text: fn(pattern: Pattern) -> String? {
             return Val("{head}({joined})")
         }
         .Or(alternatives, _) -> {
-            ^parts: [String]{}
-            loop alternative in alternatives {
+            parts: loop alternative in alternatives -> {
                 text: sema_pattern_source_text(alternative) ?? return None
-                parts.push(text)
+                text
             }
             return Val(parts.join(" | "))
         }

@@ -161,6 +161,8 @@ use {
         SemaDiagnosticOrigin,
         SemaComptimeReflectionSource,
         SemaGraphModuleResult,
+        SemaRecordedLists,
+        SemaRuleFunctionSource,
         SemaGraphResult,
         SemaRegistrationGraph,
         SemaTypeIDHead,
@@ -190,6 +192,7 @@ use {
         sema_comptime_reflection_package_function_markers,
         sema_comptime_reflection_package_registry,
         sema_registration_module_index,
+        sema_recorded_lists,
         sema_diagnostic_checked_origins,
         sema_diagnostic_loaded_origins,
         sema_diagnostic_origin_file_row,
@@ -706,13 +709,15 @@ jet_eval_compiler_services_parse: fn(input: JetCompilerServicesSourceInput) -> J
 // the loader gives it; `module_index` is the row of its module in
 // `registration`. `markers` are the function's written MarkerInfo rows
 // (sema_comptime_reflection_written_markers); `source` is its module's text,
-// read for the function's documentation.
+// read for the function's documentation. Its `recorded` and `returns` calls
+// are the ones its check in `checked_module` recorded.
 jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph, types: ^[InternerDelta], module_index: Int, function: Func, source: SemaComptimeReflectionSource, checked_module: SemaGraphModuleResult?, function_key: String?, markers: [TComptimeValue]) -> TComptimeValue {
     registration_module: registration.modules[module_index]
     // The solved row, when the check solved this function (a failed check
     // leaves it None, read as not yet inferred).
     ^solved_effects: [String]?{None}
     ^reaches_panic: false
+    ^recorded: SemaRecordedLists{recorded: [TComptimeValue]{}, returns: [TComptimeValue]{}}
     if checked_module == .Val(checked) {
         if function_key == .Val(key) {
             loop checked_function in checked.functions {
@@ -722,6 +727,7 @@ jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph
                     if effect_name == "Panic" -> reaches_panic = true
                 }
             }
+            recorded = sema_recorded_lists(checked.recorded_calls, SemaRuleFunctionSource{key: key, within: None, returned: [Int]{}})
         }
     }
     arithmetic: sema_comptime_reflection_arithmetic_facts(function, registration_module.source_file)
@@ -742,6 +748,8 @@ jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph
             TComptimeField{name: "markers", value: TComptimeValue.List{values: markers}},
             TComptimeField{name: "location", value: sema_comptime_reflection_location(registration_module.source_segments, sema_comptime_reflection_module_of(registration_module), Val(function.name_span))},
             TComptimeField{name: "documentation", value: TComptimeValue.List{values: sema_comptime_reflection_documentation(source, Val(function.name_span))}},
+            TComptimeField{name: "recorded", value: TComptimeValue.List{values: recorded.recorded}},
+            TComptimeField{name: "returns", value: TComptimeValue.List{values: recorded.returns}},
         },
     }
 }

@@ -1017,14 +1017,22 @@ parser_parse_param: fn(state: ^JetParserState, zone: ParamZone) -> Param {
         if sources.len() > 0 -> declared_from = Val(sources)
     }
     ^default: Expr?{None}
-    if parser_current_kind(state) == TOKEN_LBRACE {
+    ^default_run: false
+    // `Type{#run value}`: each call computes the default while building.
+    if parser_current_kind(state) == TOKEN_LBRACE && parser_prep_operand_ahead(state, 1) {
+        parser_bump(state)
+        operand: parser_parse_prep_operand(state)
+        ^_: parser_expect(state, TOKEN_RBRACE, "`}}` after the parameter default")
+        default = Val(operand.expr)
+        default_run = true
+    } else if parser_current_kind(state) == TOKEN_LBRACE {
         default = Val(parser_parse_declared_default(state, ty, ty_span, "`}}` after the parameter default").expr)
     }
     if variadic && default != None {
         param_name: parser_value(state, name)
         parser_add_error_code(state, "E1310", name.span, "variadic parameter `{param_name}` can't have a default value", "a `...` rest parameter collects trailing arguments — it can't also be optional", "remove the `{{…}}` default from the variadic parameter")
     }
-    Param{convention: convention, root: root, name: parser_value(state, name), name_span: name.span, public_label: public_label, zone: zone, ty: ty, ty_span: ty_span, default: default, variadic: variadic, variadic_bound_list: variadic_bounds, declared_view_from_names: declared_from, declared_footprint: declared_footprint}
+    Param{convention: convention, root: root, name: parser_value(state, name), name_span: name.span, public_label: public_label, zone: zone, ty: ty, ty_span: ty_span, default: default, variadic: variadic, variadic_bound_list: variadic_bounds, declared_view_from_names: declared_from, declared_footprint: declared_footprint, default_run: default_run}
 }
 
 parser_parse_function: fn(state: ^JetParserState, modifiers: ParsedItemModifiers, body_required: Bool) -> ParsedFunction {

@@ -5,8 +5,8 @@ Error: Jet.UseAfterMove: `owned` was consumed by `consume`, so it can't be used 
     |                   ^
   --> Tests/UI/E0121_task_capture_used_after_its_move_in_the_body.jet:11:29
     |
- 11 |             first := consume(owned)
-    |                              ^^^^^ `owned` moved to `consume` here
+ 11 |             ^first: consume(owned)
+    |                             ^^^^^ `owned` moved to `consume` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `owned` after the move, or give `consume` a copy with `owned.copy()` where it moved.
 More: jet-lang.dev/e/Jet.UseAfterMove

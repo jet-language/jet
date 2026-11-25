@@ -321,10 +321,7 @@ sema_trait_constant_enum_variants: fn(graph: SemaRegistrationGraph, type_module:
     if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Enum {
         return None
     }
-    ^names: [String]{}
-    loop variant in graph.modules[row.module_index].nominals[row.row].variants {
-        if variant.payload == .Unit -> names.push(variant.symbol.name.copy())
-    }
+    names: loop variant in graph.modules[row.module_index].nominals[row.row].variants if variant.payload == .Unit -> variant.symbol.name.copy()
     Val(names)
 }
 

@@ -60,12 +60,7 @@ sema_inference_declared_name: fn(name: String) -> String Never! {
 // Declared spelling -> solver spelling, for each callee parameter a caller's
 // in-scope parameter shadows.
 sema_inference_callee_renames: fn(context: SemaInferenceContext) -> [SemaInferenceBinding] Never! {
-    ^renames: [SemaInferenceBinding]{}
-    loop parameter in context.type_params {
-        if sema_inference_is_lexical_param(context, parameter.name) {
-            renames.push(SemaInferenceBinding{name: parameter.name, ty: Type.Named{name: "{parameter.name}{SEMA_INFERENCE_CALLEE_SUFFIX}"}, source: "the callee's own parameter"})
-        }
-    }
+    renames: loop parameter in context.type_params if sema_inference_is_lexical_param(context, parameter.name) -> SemaInferenceBinding{name: parameter.name, ty: Type.Named{name: "{parameter.name}{SEMA_INFERENCE_CALLEE_SUFFIX}"}, source: "the callee's own parameter"}
     renames
 }
 
@@ -357,10 +352,9 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph, context: ^SemaI
 }
 
 sema_inference_type_args: fn(context: SemaInferenceContext, bindings: [SemaInferenceBinding]) -> [Type]? {
-    ^result: [Type]{}
-    loop parameter in context.type_params {
+    result: loop parameter in context.type_params -> {
         actual: sema_inference_binding_at(bindings, parameter.name) ?? return None
-        result.push(sema_inference_resolve_type_bindings(actual.ty, bindings))
+        sema_inference_resolve_type_bindings(actual.ty, bindings)
     }
     Val(result)
 }

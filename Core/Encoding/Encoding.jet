@@ -335,6 +335,11 @@ impl Dyn.Decode {
     decode: fn(tree: Dyn) -> Dyn [FieldError]! { Ok(tree.copy()) }
 }
 
+// A Dyn encodes as its own copy.
+impl Dyn.Encode {
+    encode: fn(self) -> Dyn { self.copy() }
+}
+
 // `receipt.attach(value)` (JetSema Calls/Receipts.jet): publishes `tree`, the
 // value's canonical encoding, as the receipt section `section` with its
 // declared `type_name` and `schema` digest. The checker calls it through its

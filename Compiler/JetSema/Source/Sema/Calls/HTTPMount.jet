@@ -202,8 +202,7 @@ sema_function_system_run: fn(func: Func, graph: SemaRegistrationGraph, module_id
 // String literal shows as `…`, and a labeled one keeps its label.
 sema_marker_written: fn(marker: Marker) -> String {
     if marker.args.len() == 0 -> return "#{marker.name}"
-    ^args: [String]{}
-    loop (index, argument) in marker.args {
+    args: loop (index, argument) in marker.args -> {
         ^text: "…"
         if argument == .Expr(value) {
             if value == .Str(parts, _, _) {
@@ -215,7 +214,7 @@ sema_marker_written: fn(marker: Marker) -> String {
         if index < marker.arg_labels.len() {
             if marker.arg_labels[index] == .Val(label) -> text = "{label.name}: {text}"
         }
-        args.push(text)
+        text
     }
     "#{marker.name}({args.join(", ")})"
 }
@@ -405,8 +404,7 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
         body.push(held)
     }
     ^encoded: [Expr]{}
-    ^reads: [CallArg]{}
-    loop index in 0..<args.len() {
+    reads: loop index in 0..<args.len() -> {
         // A bare name is read where it stands (a read parameter cannot be
         // moved into a local); any other argument is bound once, as its
         // parameter's type, so it runs once.
@@ -424,7 +422,7 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
             body.push(statement)
         }
         encoded.push(sema_app_remote_method_call(remote, SEMA_APP_REMOTE_ARG, [Type]{}, [CallArg]{sema_http_mount_arg(sema_app_remote_ident(local_name, args[index].span), args[index].span)}, args[index].span))
-        reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, args[index].span), args[index].span))
+        sema_http_mount_arg(sema_app_remote_ident(local_name, args[index].span), args[index].span)
     }
     service_name: "{hidden}_service"
     invocation: Expr.MethodCall{receiver: sema_app_remote_ident(service_name, method_span), method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
@@ -731,13 +729,12 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                         marked[path_at] = sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{prefix}{path}"}}, span: marked[path_at].span, id: AST_NODE_GENERATED}, marked[path_at].span)
                     }
                     ^params: [LambdaParam]{}
-                    ^call_args: [CallArg]{}
-                    loop index in 1..<method.params.len() {
+                    call_args: loop index in 1..<method.params.len() -> {
                         parameter_ty: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
                         params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None, convention: AccessConvention.Read})
                         ^argument: sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
                         argument.convention = method.params[index].convention
-                        call_args.push(argument)
+                        argument
                     }
                     invocation: Expr.MethodCall{receiver: Expr.Ident{name: value_name.copy(), span: span, id: AST_NODE_GENERATED}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
                     ^meta: ast_empty_lambda_meta()
@@ -1063,10 +1060,7 @@ sema_app_mount_job: fn(mux: TExpr, value_name: String, service: String, method: 
 // Why `text` is not a cron line, in the grammar the app module's scheduler
 // reads (`Every`); None when it is one.
 sema_app_cron_error: fn(text: String) -> String? {
-    ^fields: [String]{}
-    loop part in text.split(" ") {
-        if part != "" -> fields.push(part)
-    }
+    fields: loop part in text.split(" ") if part != "" -> part
     if fields.len() != 5 -> return Val("it has {fields.len()} fields, not 5")
     loop (index, field) in fields {
         // The field's name, and the values it allows.
@@ -1127,8 +1121,7 @@ sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, metho
     }
     args_name: "__jet_http_webhook_key_{span.start}"
     ^statements: [Stmt]{}
-    ^reads: [CallArg]{}
-    loop index in 1..<key_method.params.len() {
+    reads: loop index in 1..<key_method.params.len() -> {
         name: key_method.params[index].name
         ^position: -1
         loop (at, param_index) in path_params {
@@ -1141,7 +1134,7 @@ sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, metho
         local_name: "{args_name}_{index}"
         decoded: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__take", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{sema_type_resolve_declared(graph, key_method.params[index].ty, method_module)}, args: [CallArg]{sema_http_mount_arg(Expr.Int{value: position, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span)}, id: AST_NODE_GENERATED}
         statements.push(Stmt.Val{binding: ast_binding(local_name, span, false, decoded, None)})
-        reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, span), span))
+        sema_http_mount_arg(sema_app_remote_ident(local_name, span), span)
     }
     call: Expr.MethodCall{receiver: sema_app_remote_ident(value_name, span), method: key_method.name, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
     statements.push(Stmt.Expr{expr: Expr.Ok{value: call, span: span, id: AST_NODE_GENERATED}})
@@ -1180,12 +1173,11 @@ sema_app_mount_answer: fn(value_name: String, method: Func, method_module: Modul
     graph: check.program.registration_graph
     args_name: "__jet_http_mount_args_{span.start}"
     ^statements: [Stmt]{}
-    ^reads: [CallArg]{}
-    loop index in 1..<method.params.len() {
+    reads: loop index in 1..<method.params.len() -> {
         local_name: "{args_name}_{index}"
         decoded: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__take", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{sema_type_resolve_declared(graph, method.params[index].ty, method_module)}, args: [CallArg]{sema_http_mount_arg(Expr.Int{value: index - 1, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span)}, id: AST_NODE_GENERATED}
         statements.push(Stmt.Val{binding: ast_binding(local_name, span, false, decoded, None)})
-        reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, span), span))
+        sema_http_mount_arg(sema_app_remote_ident(local_name, span), span)
     }
     invocation: Expr.MethodCall{receiver: sema_app_remote_ident(value_name, span), method: method.name, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
     sema_app_mount_reply(args_name, statements, invocation, sema_type_resolve_declared(graph, method.return_type ?? Type.Named{name: "Unit"}, method_module), span)
@@ -1233,8 +1225,7 @@ sema_app_upload_check: fn(mux: TExpr, value_name: String, check_method: Func, me
     }
     args_name: "__jet_http_upload_check_{span.start}"
     ^statements: [Stmt]{}
-    ^reads: [CallArg]{}
-    loop index in 1..<check_method.params.len() {
+    reads: loop index in 1..<check_method.params.len() -> {
         name: check_method.params[index].name
         // The call's arguments skip the Upload.
         ^position: -1
@@ -1250,7 +1241,7 @@ sema_app_upload_check: fn(mux: TExpr, value_name: String, check_method: Func, me
         local_name: "{args_name}_{index}"
         decoded: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__take", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{sema_type_resolve_declared(graph, check_method.params[index].ty, method_module)}, args: [CallArg]{sema_http_mount_arg(Expr.Int{value: position, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span)}, id: AST_NODE_GENERATED}
         statements.push(Stmt.Val{binding: ast_binding(local_name, span, false, decoded, None)})
-        reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, span), span))
+        sema_http_mount_arg(sema_app_remote_ident(local_name, span), span)
     }
     invocation: Expr.MethodCall{receiver: sema_app_remote_ident(value_name, span), method: check_method.name, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
     sema_app_mount_reply(args_name, statements, invocation, sema_type_resolve_declared(graph, check_method.return_type ?? Type.Named{name: "Unit"}, method_module), span)

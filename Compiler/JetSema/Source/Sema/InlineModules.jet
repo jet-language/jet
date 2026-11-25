@@ -92,7 +92,6 @@ use {
         TraitConstDecl,
         TraitDef,
         TraitImplBlock,
-        TraitMethodSig,
         TupleField,
         Type,
         TypeTupleField,
@@ -725,8 +724,7 @@ sema_inline_rewrite_type: fn(rewrite: SemaInlineRewrite, ty: Type) -> Type Never
         .Map(key, key_span, value) -> Type.Map{key: sema_inline_rewrite_type(rewrite, key), key_span: key_span.copy(), value: sema_inline_rewrite_type(rewrite, value)}
         .Result(ok, err) -> Type.Result{ok: sema_inline_rewrite_type(rewrite, ok), err: sema_inline_rewrite_type(rewrite, err)}
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
-            ^mapped: [Type]{}
-            loop param in params -> mapped.push(sema_inline_rewrite_type(rewrite, param))
+            mapped: loop param in params -> sema_inline_rewrite_type(rewrite, param)
             Type.Fn{params: mapped, ret: ret.map(fn(value) { sema_inline_rewrite_type(rewrite, value) }), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         // A generic member's head renames like a plain member
@@ -819,8 +817,7 @@ sema_inline_qualified_call: fn(rewrite: ^SemaInlineRewrite, target: SemaInlineTa
 }
 
 sema_inline_rewrite_types: fn(rewrite: SemaInlineRewrite, types: [Type]) -> [Type] Never! {
-    ^mapped: [Type]{}
-    loop ty in types -> mapped.push(sema_inline_rewrite_type(rewrite, ty))
+    mapped: loop ty in types -> sema_inline_rewrite_type(rewrite, ty)
     mapped
 }
 
@@ -832,8 +829,7 @@ sema_inline_rewrite_optional_type: fn(rewrite: SemaInlineRewrite, ty: Type?) -> 
 }
 
 sema_inline_rewrite_exprs: fn(rewrite: ^SemaInlineRewrite, expressions: [Expr]) -> [Expr] Never! {
-    ^mapped: [Expr]{}
-    loop expression in expressions -> mapped.push(sema_inline_rewrite_expr(rewrite, expression))
+    mapped: loop expression in expressions -> sema_inline_rewrite_expr(rewrite, expression)
     mapped
 }
 
@@ -845,11 +841,10 @@ sema_inline_rewrite_optional_expr: fn(rewrite: ^SemaInlineRewrite, expression: E
 }
 
 sema_inline_rewrite_call_args: fn(rewrite: ^SemaInlineRewrite, args: [CallArg]) -> [CallArg] Never! {
-    ^mapped: [CallArg]{}
-    loop arg in args {
+    mapped: loop arg in args -> {
         ^updated: arg.copy()
         updated.expr = sema_inline_rewrite_expr(rewrite, arg.expr)
-        mapped.push(updated)
+        updated
     }
     mapped
 }
@@ -1456,13 +1451,12 @@ sema_inline_rewrite_struct_pattern_field: fn(rewrite: SemaInlineRewrite, field: 
 }
 
 sema_inline_rewrite_arms: fn(rewrite: ^SemaInlineRewrite, arms: [SwitchArm]) -> [SwitchArm] Never! {
-    ^mapped: [SwitchArm]{}
-    loop arm in arms {
+    mapped: loop arm in arms -> {
         saved: rewrite.locals.len()
         cond: sema_inline_rewrite_expr(rewrite, arm.cond)
         body: sema_inline_rewrite_stmts(rewrite, arm.body)
         sema_inline_restore_locals(rewrite, saved)
-        mapped.push(SwitchArm{cond: cond, body: body, span: arm.span, through: arm.through})
+        SwitchArm{cond: cond, body: body, span: arm.span, through: arm.through}
     }
     mapped
 }
@@ -1489,8 +1483,7 @@ sema_inline_rewrite_lvalue: fn(rewrite: ^SemaInlineRewrite, target: LValue) -> L
 // A block's bindings shadow module names for the rest of that block only.
 sema_inline_rewrite_stmts: fn(rewrite: ^SemaInlineRewrite, stmts: [Stmt]) -> [Stmt] Never! {
     saved: rewrite.locals.len()
-    ^mapped: [Stmt]{}
-    loop stmt in stmts -> mapped.push(sema_inline_rewrite_stmt(rewrite, stmt))
+    mapped: loop stmt in stmts -> sema_inline_rewrite_stmt(rewrite, stmt)
     sema_inline_restore_locals(rewrite, saved)
     mapped
 }
@@ -1575,8 +1568,7 @@ sema_inline_rewrite_stmt: fn(rewrite: ^SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
 }
 
 sema_inline_rewrite_markers: fn(rewrite: ^SemaInlineRewrite, markers: [Marker]) -> [Marker] Never! {
-    ^mapped: [Marker]{}
-    loop marker in markers {
+    mapped: loop marker in markers -> {
         ^updated: marker.copy()
         ^args: [MarkerCallArg]{}
         loop arg in marker.args {
@@ -1588,7 +1580,7 @@ sema_inline_rewrite_markers: fn(rewrite: ^SemaInlineRewrite, markers: [Marker]) 
             }
         }
         updated.args = args
-        mapped.push(updated)
+        updated
     }
     mapped
 }
@@ -1618,12 +1610,11 @@ sema_inline_rewrite_meta: fn(rewrite: ^SemaInlineRewrite, meta: MetaAttr?) -> Me
 }
 
 sema_inline_rewrite_clauses: fn(rewrite: ^SemaInlineRewrite, clauses: [ContractClause]) -> [ContractClause] Never! {
-    ^mapped: [ContractClause]{}
-    loop clause in clauses {
+    mapped: loop clause in clauses -> {
         ^updated: clause.copy()
         updated.cond = sema_inline_rewrite_expr(rewrite, clause.cond)
         updated.message_expr = sema_inline_rewrite_expr(rewrite, clause.message_expr)
-        mapped.push(updated)
+        updated
     }
     mapped
 }
@@ -1644,11 +1635,10 @@ sema_inline_rewrite_params: fn(rewrite: ^SemaInlineRewrite, params: [Param]) -> 
 // A bound names a trait the rewrite may rename (`<M: Native>` inside an
 // instance whose `Native` became the generated nominal).
 sema_inline_rewrite_type_params: fn(rewrite: SemaInlineRewrite, params: [TypeParam]) -> [TypeParam] Never! {
-    ^mapped: [TypeParam]{}
-    loop param in params {
+    mapped: loop param in params -> {
         ^updated: param.copy()
         updated.bounds = loop bound in param.bounds -> sema_inline_mapped_name(rewrite, bound)
-        mapped.push(updated)
+        updated
     }
     mapped
 }
@@ -1675,31 +1665,28 @@ sema_inline_rewrite_func: fn(rewrite: ^SemaInlineRewrite, function: Func) -> Fun
 }
 
 sema_inline_rewrite_funcs: fn(rewrite: ^SemaInlineRewrite, functions: [Func]) -> [Func] Never! {
-    ^mapped: [Func]{}
-    loop function in functions -> mapped.push(sema_inline_rewrite_func(rewrite, function))
+    mapped: loop function in functions -> sema_inline_rewrite_func(rewrite, function)
     mapped
 }
 
 sema_inline_rewrite_named_types: fn(rewrite: SemaInlineRewrite, types: [NamedType]) -> [NamedType] Never! {
-    ^mapped: [NamedType]{}
-    loop entry in types {
+    mapped: loop entry in types -> {
         ^updated: entry.copy()
         updated.ty = sema_inline_rewrite_type(rewrite, entry.ty)
-        mapped.push(updated)
+        updated
     }
     mapped
 }
 
 sema_inline_rewrite_trait_blocks: fn(rewrite: ^SemaInlineRewrite, blocks: [TraitImplBlock]) -> [TraitImplBlock] Never! {
-    ^mapped: [TraitImplBlock]{}
-    loop block in blocks {
+    mapped: loop block in blocks -> {
         ^updated: block.copy()
         updated.trait_name = sema_inline_mapped_name(rewrite, block.trait_name)
         updated.methods = sema_inline_rewrite_funcs(rewrite, block.methods)
         updated.operator_rhs = sema_inline_rewrite_optional_type(rewrite, block.operator_rhs)
         updated.assoc_type_impls = sema_inline_rewrite_named_types(rewrite, block.assoc_type_impls)
         updated.constants = sema_inline_rewrite_impl_constants(rewrite, block.constants)
-        mapped.push(updated)
+        updated
     }
     mapped
 }
@@ -1713,13 +1700,12 @@ sema_inline_rewrite_struct: fn(rewrite: ^SemaInlineRewrite, definition: StructDe
     ^updated: definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
     updated.type_params = sema_inline_rewrite_type_params(rewrite, definition.type_params)
-    ^fields: [Field]{}
-    loop field_index in 0..<definition.fields.len() {
+    fields: loop field_index in 0..<definition.fields.len() -> {
         ^mapped: definition.fields[field_index]
         mapped.ty = sema_inline_rewrite_type(rewrite, definition.fields[field_index].ty)
         mapped.computed = sema_inline_rewrite_optional_expr(rewrite, definition.fields[field_index].computed)
         mapped.serde_markers = sema_inline_rewrite_markers(rewrite, definition.fields[field_index].serde_markers)
-        fields.push(mapped)
+        mapped
     }
     updated.fields = fields
     updated.methods = sema_inline_rewrite_funcs(rewrite, definition.methods)
@@ -1735,8 +1721,7 @@ sema_inline_rewrite_enum: fn(rewrite: ^SemaInlineRewrite, definition: EnumDef, a
     ^updated: definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
     updated.type_params = sema_inline_rewrite_type_params(rewrite, definition.type_params)
-    ^variants: [Variant]{}
-    loop variant_index in 0..<definition.variants.len() {
+    variants: loop variant_index in 0..<definition.variants.len() -> {
         ^mapped: definition.variants[variant_index]
         mapped.payload = if definition.variants[variant_index].payload == {
             .Unit -> VariantPayload.Unit
@@ -1748,7 +1733,7 @@ sema_inline_rewrite_enum: fn(rewrite: ^SemaInlineRewrite, definition: EnumDef, a
         }
         mapped.discriminant_expr = sema_inline_rewrite_optional_expr(rewrite, definition.variants[variant_index].discriminant_expr)
         mapped.serde_markers = sema_inline_rewrite_markers(rewrite, definition.variants[variant_index].serde_markers)
-        variants.push(mapped)
+        mapped
     }
     updated.variants = variants
     updated.methods = sema_inline_rewrite_funcs(rewrite, definition.methods)
@@ -1762,8 +1747,7 @@ sema_inline_rewrite_enum: fn(rewrite: ^SemaInlineRewrite, definition: EnumDef, a
 sema_inline_rewrite_trait: fn(rewrite: ^SemaInlineRewrite, definition: TraitDef) -> TraitDef Never! {
     ^updated: definition
     updated.name = sema_inline_mapped_name(rewrite, definition.name)
-    ^methods: [TraitMethodSig]{}
-    loop method_index in 0..<definition.methods.len() {
+    methods: loop method_index in 0..<definition.methods.len() -> {
         ^mapped: definition.methods[method_index]
         saved: rewrite.locals.len()
         mapped.params = sema_inline_rewrite_params(rewrite, definition.methods[method_index].params)
@@ -1771,7 +1755,7 @@ sema_inline_rewrite_trait: fn(rewrite: ^SemaInlineRewrite, definition: TraitDef)
         mapped.default_body = sema_inline_rewrite_optional_body(rewrite, definition.methods[method_index].default_body)
         mapped.markers = sema_inline_rewrite_markers(rewrite, definition.methods[method_index].markers)
         sema_inline_restore_locals(rewrite, saved)
-        methods.push(mapped)
+        mapped
     }
     updated.methods = methods
     updated.constants = loop constant in definition.constants -> TraitConstDecl{name: constant.name, name_span: constant.name_span, ty: sema_inline_rewrite_type(rewrite, constant.ty), ty_span: constant.ty_span, default: sema_inline_rewrite_optional_expr(rewrite, constant.default), span: constant.span}
@@ -2763,13 +2747,12 @@ sema_inline_modules_lower: fn(program: ^Program, diagnostics: ^[Diagnostic]) -> 
                 loop diagnostic in siblings.diagnostics -> diagnostics.push(diagnostic)
                 sema_inline_lift_nested(body, definition.name, nested, nested_bindings, lifted, owners, diagnostics)
                 ^module_item: definition
-                ^stripped: [Item]{}
-                loop kept in sema_inline_strip_members(body) {
+                stripped: loop kept in sema_inline_strip_members(body) -> {
                     // A refused `tools: helpers` leaves the body with its E0609.
                     if kept == .ModuleAlias(alias) && surface_index >= 0 && name_find(surfaces[surface_index].broken, alias.name) != None {
                         next
                     }
-                    stripped.push(kept)
+                    kept
                 }
                 module_item.body = Val(stripped)
                 lowered_items.push(Item.CodeModule{value: module_item})

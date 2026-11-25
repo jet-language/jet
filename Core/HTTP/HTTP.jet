@@ -766,7 +766,8 @@ HTTPRouter: struct {
 // The rule of a route table checked while building: each method call on a
 // marked value is heard. A route path written as a String literal with
 // holes is refused (E2805), at a verb and at a page, route or layout alike:
-// a route's holes are `:name` segments, never interpolation. A registration
+// a route's holes are `:name` segments, never interpolation. So is a path
+// the build knows that the route grammar refuses. A registration
 // whose method and path are known then has a row, its method and the shape
 // of its path, so two registrations of one table with one row are two
 // routes that both match the same requests (E2804), reported at the later
@@ -795,6 +796,9 @@ StaticRoutes: struct {
             registers: custom || standard || served
             if registers && call.args.len() > at && call.args[at].written == .Val(parts) {
                 reject(RouteInterpolated{pattern: route_written_pattern(parts)}, at: call.args[at])
+            }
+            if registers && static_route_text(call, at) == .Val(pattern) && routes.__route_pattern_error(pattern) == .Val(reason) {
+                reject(RouteInvalid{pattern: pattern, reason: reason}, at: call.args[at])
             }
             if !self.runtime_methods && custom && call.args.len() == 3 {
                 if call.args[1].value != None && call.args[0].value == None {
@@ -838,6 +842,26 @@ priv RouteInterpolated: struct {
         what: fn(self) -> String {
             "invalid HTTP route `{self.pattern}`: brace interpolation is not allowed in route patterns"
         }
+
+        why: fn(self) -> String {
+            "route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree"
+        }
+
+        fix: fn(self) -> String {
+            "use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`"
+        }
+    }
+}
+
+// E2805: a route path the build knows that the route grammar refuses.
+priv RouteInvalid: struct {
+    pattern: String,
+    reason: String,
+
+    impl Diagnostic {
+        code: "E2805",
+
+        what: fn(self) -> String { "invalid HTTP route `{self.pattern}`: {self.reason}" }
 
         why: fn(self) -> String {
             "route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree"

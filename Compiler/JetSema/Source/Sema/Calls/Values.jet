@@ -38,8 +38,7 @@ sema_call_local_value_defaults: fn(callee: Expr, binding: SemaCallBinding, check
     }
 
     owner_key: sema_scope_resolve_key(check.scopes, name) ?? return None
-    ^defaults: [SemaCallDefaultValue]{}
-    loop reference in binding.default_refs {
+    defaults: loop reference in binding.default_refs -> {
         if reference.owner_key != owner_key -> return None
         parameter_index: reference.parameter_index
         if parameter_index < 0 || parameter_index >= func.params.len() -> return None
@@ -50,7 +49,7 @@ sema_call_local_value_defaults: fn(callee: Expr, binding: SemaCallBinding, check
         }
         source_file: sema_source_file_at(check.environment.source_segments, reference.source_file, check.environment.source_origin, expression_span)
         if source_file != reference.source_file -> return None
-        defaults.push(SemaCallDefaultValue{reference: reference, expression: expression})
+        SemaCallDefaultValue{reference: reference, expression: expression, run: func.params[parameter_index].default_run}
     }
     Val(defaults)
 }
@@ -201,12 +200,7 @@ sema_call_value_undeclared_view_provenance: fn(callee: Expr, signature: Type, sc
         if provenance == .Val(_) -> return None
         result: ret ?? return None
         access: sema_stmt_view_access(sema_call_view_result_success(result)) ?? return None
-        ^sources: [ViewSourcePath]{}
-        loop index in 0..<params.len() {
-            if !sema_ownership_type_is_scalar(params[index]) {
-                sources.push(ViewSourcePath{source: ViewSource.Parameter{index: index}, projections: [ViewSourceProjection]{}})
-            }
-        }
+        sources: loop index in 0..<params.len() if !sema_ownership_type_is_scalar(params[index]) -> ViewSourcePath{source: ViewSource.Parameter{index: index}, projections: [ViewSourceProjection]{}}
         return Val(ViewProvenanceMap{entries: [ViewProvenanceEntry]{ViewProvenanceEntry{slot: [String]{}, value: ViewProvenance{sources: sources, mutable: access == AccessConvention.Write}}}})
     }
     None

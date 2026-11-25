@@ -68,10 +68,9 @@ callable_access_diagnostics: fn(failures: ^[String], source: String) -> [Diagnos
 // `wanted`.
 callable_access_expect: fn(failures: ^[String], name: String, source: String, wanted: [String]) {
     diagnostics: callable_access_diagnostics(failures, source) ?? return
-    ^found: [String]{}
-    loop diagnostic in diagnostics {
+    found: loop diagnostic in diagnostics -> {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
-        found.push("{diagnostic.code} {diagnostic.what}")
+        "{diagnostic.code} {diagnostic.what}"
     }
     codes: loop entry in found -> entry.partition(" ").head
     if codes != wanted {

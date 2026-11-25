@@ -1,0 +1,12 @@
+// A pattern that binds Dyn.DateTime's payload holds core.time's
+// ZonedDateTime, so the program loads that module without importing it, and
+// the binding has its layout on every tier.
+run: fn() {
+    values: [Dyn]{Dyn.Int(1), Dyn.Text("x")}
+    loop v in values {
+        if v == {
+            .DateTime(d) -> print(d)
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .Array(_) | .Object(_) -> print("other")
+        }
+    }
+}

@@ -171,8 +171,7 @@ sema_expression_panic_locals: fn(scopes: SemaScopeTable, span: Span) -> [TPanicL
         rows[name] = row
     }
     names.sort()
-    ^locals: [TPanicLocal]{}
-    loop name in names {
+    locals: loop name in names -> {
         row: rows.get(name) ?? {
             next
         }
@@ -180,7 +179,7 @@ sema_expression_panic_locals: fn(scopes: SemaScopeTable, span: Span) -> [TPanicL
         local_ty: symbol.ty ?? {
             next
         }
-        locals.push(TPanicLocal{display_name: name.copy(), local: checked_symbol_local(name, symbol.span, symbol.id, local_ty)})
+        TPanicLocal{display_name: name.copy(), local: checked_symbol_local(name, symbol.span, symbol.id, local_ty)}
     }
     locals
 }
@@ -692,8 +691,7 @@ sema_failure_conversion_leaf: fn(ty: Type) -> String Never! {
     normalized: sema_expr_unwrap_tag(ty)
     if normalized == .Named(name) -> return sema_error_conversion_leaf(name)
     if normalized == .Union(members) {
-        ^names: [String]{}
-        loop member in members -> names.push(sema_failure_conversion_leaf(member))
+        names: loop member in members -> sema_failure_conversion_leaf(member)
         return names.join(" | ")
     }
     type_name(normalized)
@@ -1020,12 +1018,11 @@ sema_failure_union_record_propagation: fn(callee: SemaFailureCallee?, error: Typ
 // appended. An edge is new when interning it into `seen` adds a name.
 sema_failure_union_edges_once: fn(edges: ^^[String]) -> [String] Never! {
     ^seen: name_table_sized(edges.len() * 2)
-    ^once: [String]{}
-    loop edge in edges.move() {
+    once: loop edge in edges.move() -> {
         known: name_count(seen)
         ^_: name_intern(seen, edge)
         if name_count(seen) == known -> next
-        once.push(edge)
+        edge
     }
     once
 }
@@ -2110,7 +2107,7 @@ sema_expression_if_bind_subject: fn(subject: Expr, condition: Expr, else_value: 
     // the arm patterns that test it bind write windows.
     window: if init.kind == {
         .Borrow(_, access) -> access == AccessConvention.Write
-        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> false
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> false
     }
     bounds: tree_expr_known_bounds(init)
     // The hoisted local reads its subject's place in place when the subject
@@ -2443,13 +2440,12 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
 // The bindings a failed pattern test still declares: each named recovery
 // binding with its recovered type and no payload sources.
 sema_expression_recovery_condition_bindings: fn(facts: [TPatternBindingFact], window_names: [String], owner: String, local_module: String, module_identity: ModuleID, program: SemaProgramTables, context: ^SemaCheckContext) -> [SemaConditionBinding] {
-    ^bindings: [SemaConditionBinding]{}
-    loop fact in facts {
+    bindings: loop fact in facts -> {
         if fact.name == "" || fact.name == "_" -> next
         key: symbol_key_text(SymbolKind.Local, local_module, owner, fact.name)
         id: sema_symbol_id_of(program, context, key)
         symbol: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_identity: module_identity, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
-        bindings.push(SemaConditionBinding{symbol: symbol, key: key, window: window_names.contains(fact.name), sources: [Expr]{}})
+        SemaConditionBinding{symbol: symbol, key: key, window: window_names.contains(fact.name), sources: [Expr]{}}
     }
     bindings
 }
@@ -2461,8 +2457,7 @@ sema_expression_recovery_condition_bindings: fn(facts: [TPatternBindingFact], wi
 // nothing and add no report, so the subject's own fault is the only one
 // instead of an E0107 per name. Names `bound` already declares are skipped.
 sema_expression_unchecked_condition_bindings: fn(names: [BindName], bound: [SemaConditionBinding], owner: String, local_module: String, module_identity: ModuleID, program: SemaProgramTables, context: ^SemaCheckContext) -> [SemaConditionBinding] {
-    ^bindings: [SemaConditionBinding]{}
-    loop name in names {
+    bindings: loop name in names -> {
         if name.name == "" || name.name == "_" -> next
         ^declared: false
         loop binding in bound {
@@ -2472,7 +2467,7 @@ sema_expression_unchecked_condition_bindings: fn(names: [BindName], bound: [Sema
         key: symbol_key_text(SymbolKind.Local, local_module, owner, name.name)
         id: sema_symbol_id_of(program, context, key)
         symbol: Symbol{id: id, kind: SymbolKind.Local, name: name.name, module_identity: module_identity, owner: Val(owner), span: name.span, ty: None, visibility: 0}
-        bindings.push(SemaConditionBinding{symbol: symbol, key: key, window: false, sources: [Expr]{}})
+        SemaConditionBinding{symbol: symbol, key: key, window: false, sources: [Expr]{}}
     }
     bindings
 }
@@ -3197,8 +3192,7 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
         arm_values.push(checked)
     }
     sema_ownership_fork_rollback(check.state, fork)
-    ^single_use_moves: [[Bool]]{}
-    loop path in reaching -> single_use_moves.push(sema_single_use_path_moves(check.state, path))
+    single_use_moves: loop path in reaching -> sema_single_use_path_moves(check.state, path)
     sema_single_use_check_paths(check, single_use_moves)
     base: sema_ownership_fork_base(fork)
     joined: if sema_ownership_paths_join(check.state, fork, reaching) == .Val(merged) -> sema_ownership_path_join(check.state, fork, merged, merged, true, check.state.share_found) else -> sema_ownership_path_join(check.state, fork, base, base, false, check.state.share_found)
@@ -3259,10 +3253,9 @@ sema_expression_compare_chain: fn(operands: [Expr], ops: [BinOp], hooks: [Bool],
         check.diagnostics.push(sema_error("E0109", span, "a comparison chain needs one operator between each pair of operands", "each comparison joins two neighboring values", "write a complete comparison expression"))
         return None
     }
-    ^checked: [TExpr]{}
-    loop operand in operands {
+    checked: loop operand in operands -> {
         value: sema_check_expression(operand, None, check) ?? return None
-        checked.push(value)
+        value
     }
     line: sema_source_line_at(check.environment.source_segments, span) ?? return None
     loop (index, op) in ops {

@@ -555,12 +555,7 @@ sema_output_resolve: fn(graph: ^SemaRegistrationGraph, intent: SemaOutputIntent,
                 diagnostics.push(sema_output_error(sema_output_entry_span(graph, entry_index), "no compatible Output named `{address}`", "available compatible Outputs: {choices.join(", ")}", "choose one listed Output address"))
             }
         } else if legacy == None {
-            ^compatible: [Int]{}
-            loop (index, row) in rows {
-                if row.module_index == entry_index && row.fact.kind == OutputKind.Executable {
-                    compatible.push(index)
-                }
-            }
+            compatible: loop (index, row) in rows if row.module_index == entry_index && row.fact.kind == OutputKind.Executable -> index
             if compatible.len() == 1 {
                 index: compatible[0]
                 rows[index].fact.selected = true

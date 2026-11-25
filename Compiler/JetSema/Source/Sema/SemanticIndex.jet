@@ -146,14 +146,12 @@ sema_compiler_index_option_string: fn(value: String?) -> TComptimeValue Never! {
 }
 
 sema_compiler_index_strings: fn(values: [String]) -> TComptimeValue Never! {
-    ^output: [TComptimeValue]{}
-    loop value in values -> output.push(sema_compiler_index_string(value))
+    output: loop value in values -> sema_compiler_index_string(value)
     TComptimeValue.List{values: output}
 }
 
 sema_compiler_index_span_list: fn(values: [Span], file: String) -> TComptimeValue Never! {
-    ^output: [TComptimeValue]{}
-    loop value in values -> output.push(sema_compiler_index_span(value, file))
+    output: loop value in values -> sema_compiler_index_span(value, file)
     TComptimeValue.List{values: output}
 }
 
@@ -590,8 +588,8 @@ sema_compiler_index_call: fn(call: SemaCallSiteFact, registration: SemaRegistrat
 
 // A CompilerCall a build watches or the semantic index lists. Its call fact
 // keeps no argument facts, so its name is the callee's own over the call's
-// span and it holds no arguments or receiver; a call a marker's `check` rule
-// hears carries all three (sema_rule_call_value).
+// span and it holds no arguments, receiver or type arguments; a call a
+// marker's `check` rule hears carries all of them (sema_rule_call_value).
 sema_compiler_call_heard: fn(caller: String, callee: String, module_name: String, span: Span, file: String) -> TComptimeValue Never! {
     path: sema_compiler_identity_path(callee)
     leaf: if path.cut_last(".") == .Val(parts) -> "{parts.after}" else -> path
@@ -606,6 +604,7 @@ sema_compiler_call_heard: fn(caller: String, callee: String, module_name: String
             TComptimeField{name: "args", value: TComptimeValue.List{values: [TComptimeValue]{}}},
             TComptimeField{name: "receiver", value: sema_comptime_reflection_none(Type.Named{name: "CompilerArg"})},
             TComptimeField{name: "source", value: sema_comptime_reflection_none(Type.String)},
+            TComptimeField{name: "type_args", value: TComptimeValue.List{values: [TComptimeValue]{}}},
         },
     }
 }
@@ -865,8 +864,7 @@ sema_compiler_index_fact_registry: fn(registration: SemaRegistrationGraph) -> TC
         }
     }
     loop fact in sema_state_graph_facts(all_items) {
-        ^members: [String]{}
-        loop node in fact.states -> members.push(node.name)
+        members: loop node in fact.states -> node.name
         rows.push(
             SemaCompilerFactRegistryRow{
                 kind: "State",
@@ -1737,20 +1735,17 @@ sema_compiler_index_view_provenance: fn(value: ViewProvenance) -> String Never! 
 
 sema_compiler_index_view_map: fn(map: ViewProvenanceMap?) -> String Never! {
     value: map ?? return ""
-    ^rows: [String]{}
-    loop entry in value.entries {
+    rows: loop entry in value.entries -> {
         ^slot: if entry.slot.len() == 0 -> "$" else -> entry.slot.join(".")
-        rows.push("{slot}={sema_compiler_index_view_provenance(entry.value)}")
+        "{slot}={sema_compiler_index_view_provenance(entry.value)}"
     }
     rows.join("|")
 }
 
 sema_compiler_index_function_signature: fn(function: SemaRegistrationFunction) -> String Never! {
     if function.signature == .Fn(parameters, return_type, _, contract, _, provenance) {
-        ^parameter_names: [String]{}
-        loop parameter in parameters -> parameter_names.push(type_name(parameter))
-        ^contracts: [String]{}
-        loop index in 0..<parameters.len() {
+        parameter_names: loop parameter in parameters -> type_name(parameter)
+        contracts: loop index in 0..<parameters.len() -> {
             ^label: ""
             ^zone: ParamZone.Either
             ^variadic: false
@@ -1764,7 +1759,7 @@ sema_compiler_index_function_signature: fn(function: SemaRegistrationFunction) -
                 label = rows[index].label
                 zone = rows[index].zone
             }
-            contracts.push("{label}:{sema_compiler_index_param_zone(zone)}:{variadic}")
+            "{label}:{sema_compiler_index_param_zone(zone)}:{variadic}"
         }
         ^ret: if return_type == .Val(value) -> type_name(value) else -> "()"
         ^view: sema_compiler_index_view_map(provenance)
@@ -1806,8 +1801,7 @@ sema_compiler_index_definition_signature: fn(symbol: Symbol, registered_module: 
         loop nominal in registered_module.nominals {
             if nominal.symbol.id != symbol.id -> next
             if nominal.kind == SemaRegistrationNominalKind.Struct {
-                ^fields: [String]{}
-                loop field in nominal.fields -> fields.push(type_name(field.ty))
+                fields: loop field in nominal.fields -> type_name(field.ty)
                 return "{{{fields.join(",")}}}"
             }
             if nominal.kind == SemaRegistrationNominalKind.Enum {
@@ -2055,8 +2049,7 @@ sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, module_
     }
     // Stable, as the insertion sort this replaces: equal (subject, claim) keep record order.
     records.sort_by(fn(left: DerivationRecord, right: DerivationRecord) { (left.subject <=> right.subject).then(left.claim <=> right.claim) })
-    ^values: [TComptimeValue]{}
-    loop record in records -> values.push(sema_compiler_index_derivation_value(record))
+    values: loop record in records -> sema_compiler_index_derivation_value(record)
     SemaCompilerIndexDerivationFacts{value: TComptimeValue.List{values: values}, missing: missing}
 }
 

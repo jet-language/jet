@@ -331,7 +331,11 @@ ir_core_library_from: fn(program: ^^IRProgram, entry_module: ModuleID, lowered: 
         }
         ^more: skipped.move()
         compiler_transfer_rows<IRBuildFailure>(more, built.failures)
-        kept.program.interner = built.program.interner.pop() ?? panic("the Core build's module lost the program's interner")
+        // The build left interner_empty() in the program's interner's place
+        // (ir_build_waves_parted) and gave the merged module the interner
+        // only when it holds rows (ir_merge_with); without them the program
+        // keeps the empty one.
+        if built.program.interner.pop() == .Val(table) -> kept.program.interner = table
         return ir_core_library_from(kept.program.move(), entry_module, lowered, more, threads)
     }
     ^m: built.program.move()

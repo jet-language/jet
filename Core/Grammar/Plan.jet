@@ -217,6 +217,22 @@ GrammarKeywords: struct {
     next: [Int],
 }
 
+/// What a generated parser lexes with: the plan's `lexer` and `keywords`
+/// and, for each token kind, how an error names it (`names`), its literal
+/// text ("" for a kind that is no literal), whether it compares ignoring
+/// ASCII case (`folds`) and whether it is a keyword (`words`). `skips` are
+/// the kinds skipped between tokens and `holes` the hole kinds.
+GrammarScanner: struct {
+    lexer: GrammarLexer,
+    keywords: GrammarKeywords,
+    names: [String],
+    texts: [String],
+    folds: [Bool],
+    words: [Bool],
+    skips: [Int],
+    holes: [Int],
+}
+
 /// What a field of a generated type holds: the text of a token, a literal
 /// or a choice of them (`String`), a value of rule `rule`'s type, or
 /// whether an optional literal was there (`Bool`).

@@ -273,8 +273,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
     }
     text: if node -> [Type]{} else -> [Type]{shown}
     opener: sema_app_screen_callback(sema_app_screen_opener(positional[1].expr, services, states[0], text, found, graph, span), sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 4, span, check) ?? return rejected, span, check) ?? return rejected
-    ^query: [Expr]{}
-    loop field in found.query -> query.push(sema_app_text(field, span))
+    query: loop field in found.query -> sema_app_text(field, span)
     listed: sema_app_strings(query, span)
     queried: sema_check_expression(listed, Val(sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 2, span, check) ?? return rejected), check) ?? return rejected
     open: signed_in ?? Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}
@@ -412,11 +411,10 @@ sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg]
     graph_name: "__jet_sitemap_graph_{span.start}"
     state_name: "__jet_sitemap_state_{span.start}"
     ^names: [Expr]{}
-    ^texts: [Expr]{}
-    loop field in found.fields {
+    texts: loop field in found.fields -> {
         names.push(sema_app_text(field, span))
         read: Expr.Field{base: Expr.Ident{name: state_name, span: span, id: AST_NODE_GENERATED}, member: field, span: span, id: AST_NODE_GENERATED}
-        texts.push(Expr.MethodCall{receiver: Expr.Ident{name: graph_name, span: span, id: AST_NODE_GENERATED}, method: SEMA_APP_ADDRESS_TEXT, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{sema_app_arg(read, AccessConvention.Read, span)}, id: AST_NODE_GENERATED})
+        Expr.MethodCall{receiver: Expr.Ident{name: graph_name, span: span, id: AST_NODE_GENERATED}, method: SEMA_APP_ADDRESS_TEXT, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{sema_app_arg(read, AccessConvention.Read, span)}, id: AST_NODE_GENERATED}
     }
     params: [LambdaParam]{
         LambdaParam{name: graph_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read},
@@ -514,10 +512,9 @@ sema_app_screen_opener: fn(view: Expr, services: [{ty: Type, key: String}?], sta
     graph_name: "__jet_app_graph_{span.start}"
     fields_name: "__jet_app_fields_{span.start}"
     state_name: "__jet_app_state_{span.start}"
-    ^view_args: [CallArg]{}
-    loop service in services {
+    view_args: loop service in services -> {
         argument: if service == .Val(remote) -> sema_app_member_call(sema_app_ident(graph_name, span), "__remote", [Type]{remote.ty.copy()}, [CallArg]{sema_app_arg(sema_app_text(remote.key.copy(), span), AccessConvention.Read, span)}, span) else -> sema_app_ident(state_name, span)
-        view_args.push(sema_app_arg(argument, AccessConvention.Read, span))
+        sema_app_arg(argument, AccessConvention.Read, span)
     }
     called: if {
         view == .Ident(name, name_span, _) -> Expr.Call{call: Call{name: name, name_span: name_span, type_args: [Type]{}, args: view_args}, id: AST_NODE_GENERATED}
@@ -727,11 +724,10 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
     }
     opened: locals[state_slot] ?? panic("the state's argument was bound above")
     ^names: [Expr]{}
-    ^texts: [Expr]{}
-    loop field in found.fields {
+    texts: loop field in found.fields -> {
         names.push(sema_app_text(field, view_span))
         read: Expr.Field{base: opened.copy(), member: field.copy(), span: view_span, id: AST_NODE_GENERATED}  // copy: each field reads the one bound state
-        texts.push(sema_app_graph_call(alias, SEMA_APP_ADDRESS_ARG, [Type]{}, [CallArg]{sema_live_arg(read, view_span)}, view_span))
+        sema_app_graph_call(alias, SEMA_APP_ADDRESS_ARG, [Type]{}, [CallArg]{sema_live_arg(read, view_span)}, view_span)
     }
     taken: if member == "go" -> SEMA_APP_GO else -> SEMA_APP_URL_OF
     address: sema_app_graph_call(alias, taken, [Type]{ty}, [CallArg]{sema_live_arg(sema_app_text(found.key, view_span), view_span), sema_live_arg(sema_app_strings(names, view_span), view_span), sema_live_arg(sema_app_strings(texts, view_span), view_span)}, view_span)
