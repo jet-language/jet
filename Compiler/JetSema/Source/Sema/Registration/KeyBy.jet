@@ -85,7 +85,7 @@ sema_key_by_alone: fn(graph: SemaRegistrationGraph, module_row: SemaRegistration
     }
     row: owner ?? return
     key: sema_comparability_nominal_key(graph, graph.modules[row.module_index].nominals[row.row]) ?? return
-    visited := [String:Bool]{}
+    visited := [Int:Bool]{}
     if sema_key_by_reaches(graph, row, key, row.module_index, visited) {
         diagnostics.push(sema_error("E0502", key_span, "the key of `{owner_name}` comes back to `{owner_name}`", "comparing two `{owner_name}` values compares their keys, so a key that holds the type itself would never finish", "key the type by values that don't hold it"))
     }
@@ -93,7 +93,7 @@ sema_key_by_alone: fn(graph: SemaRegistrationGraph, module_row: SemaRegistration
 
 // Whether the key type `ty`, followed through the keys of the KeyBy types it
 // holds, reaches the nominal `owner`.
-sema_key_by_reaches: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationRowRef, ty: Type, caller: Int, visited: ^[String:Bool]) -> Bool {
+sema_key_by_reaches: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationRowRef, ty: Type, caller: Int, visited: ^[Int:Bool]) -> Bool {
     if ty == .List(inner) -> return sema_key_by_reaches(graph, owner, inner, caller, visited)
     if ty == .Option(inner) -> return sema_key_by_reaches(graph, owner, inner, caller, visited)
     if ty == .Tagged(_, inner) -> return sema_key_by_reaches(graph, owner, inner, caller, visited)
@@ -106,7 +106,7 @@ sema_key_by_reaches: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationRow
     if ty == .Named(_) || ty == .Apply(_, _) {
         row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return false
         if row.module_index == owner.module_index && row.row == owner.row -> return true
-        seen: "{row.module_index}.{row.row}"
+        seen: (row.module_index << 32) | row.row
         if visited.get(seen) != None -> return false
         visited[seen] = true
         key: sema_comparability_nominal_key(graph, graph.modules[row.module_index].nominals[row.row]) ?? return false
@@ -128,7 +128,7 @@ sema_key_by_declaration: fn(graph: SemaRegistrationGraph, module_row: SemaRegist
         sign: if marker.negated -> "#!" else -> "#"
         diagnostics.push(sema_key_by_second(owner_name, "`{sign}{marker.name}`", marker.name, marker.name_span, key_span, None))
     }
-    visited := [String:Bool]{}
+    visited := SemaKeyRows{}
     if sema_key_by_changing_item(graph, module_row.module_identity, item, visited) == .Val(held) {
         diagnostics.push(sema_error("E0502", key_span, "`{owner_name}` holds `{held}`, so its key could change while it is stored", "a Map or Set files a value under its key once; a Shared, Cell, Atomic, weak or runtime-handle value can change after that", "keep the changing value out of the key type, or store an id for it"))
     }
@@ -532,15 +532,15 @@ sema_key_by_code_end: fn(source: String, offset: Int) -> Int {
 
 // The first Shared, Cell, Atomic, weak or runtime-handle type `ty` holds at
 // any depth, through the fields of the declared types it names.
-sema_key_by_changing: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, visited: ^[String:Bool]) -> String? {
+sema_key_by_changing: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, visited: ^SemaKeyRows) -> String? {
     if ty == {
         .Shared(_) -> Val(type_name(ty))
         .Named(name) -> {
             leaf: sema_serde_named_leaf(name)
             if leaf.starts_with("Atomic") || ir_runtime_handle_row(leaf) != None -> return Val(leaf)
-            seen: "{module_identity.id}.{name}"
-            if visited.get(seen) != None -> return None
-            visited[seen] = true
+            name_id: sema_key_text(visited, name)
+            seen: sema_key_pair(visited, Int{module_identity.id}, name_id)
+            if !sema_key_first(visited, seen) -> return None
             resolved: sema_type_graph_lookup_symbol_at(graph, sema_type_module_row(graph, module_identity), name) ?? return None
             row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
             nominal: graph.modules[row.module_index].nominals[row.row]
@@ -588,7 +588,7 @@ sema_key_by_changing: fn(graph: SemaRegistrationGraph, module_identity: ModuleID
     }
 }
 
-sema_key_by_changing_item: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item, visited: ^[String:Bool]) -> String? {
+sema_key_by_changing_item: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item, visited: ^SemaKeyRows) -> String? {
     if item == .Struct(definition) {
         loop field in definition.fields {
             if field.computed != None -> next

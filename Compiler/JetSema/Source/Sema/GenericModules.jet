@@ -68,7 +68,7 @@ SemaGenericModuleTemplate: struct {
 SemaGenericModuleCheck: struct {
     module_identity: ModuleID,
     diagnostics: [Diagnostic],
-    seen: NameTable,
+    seen: SemaKeyRows,
 }
 
 SemaGenericModuleEdge: struct {
@@ -102,7 +102,7 @@ sema_generic_modules_collect: fn(graph: SemaRegistrationGraph, inputs: [SemaRegi
     templates_by_module := [[SemaGenericModuleTemplate]]{}
     output := [[Diagnostic]]{}
     loop module_row_index in 0..<graph.modules.len() {
-        check := SemaGenericModuleCheck{module_identity: graph.modules[module_row_index].module_identity, diagnostics: [Diagnostic]{}, seen: name_table_sized(2)}
+        check := SemaGenericModuleCheck{module_identity: graph.modules[module_row_index].module_identity, diagnostics: [Diagnostic]{}, seen: SemaKeyRows{}}
         templates := [SemaGenericModuleTemplate]{}
         if sema_genmod_written_input(inputs, graph.modules[module_row_index].module_identity) == .Val(index) {
             templates = sema_genmod_collect_templates(inputs[index].program.items, check)
@@ -111,7 +111,7 @@ sema_generic_modules_collect: fn(graph: SemaRegistrationGraph, inputs: [SemaRegi
         output.push(check.diagnostics)
     }
     loop (module_index, module_row) in graph.modules {
-        check := SemaGenericModuleCheck{module_identity: module_row.module_identity, diagnostics: output[module_index], seen: name_table_sized(2)}
+        check := SemaGenericModuleCheck{module_identity: module_row.module_identity, diagnostics: output[module_index], seen: SemaKeyRows{}}
         if sema_genmod_written_input(inputs, module_row.module_identity) == .Val(index) {
             sema_genmod_check_module(graph, module_row, inputs[index].program.items, templates_by_module, check)
         }
@@ -226,13 +226,13 @@ sema_genmod_find_alias: fn(aliases: [ModuleAliasDef], name: String) -> ModuleAli
     found
 }
 
+// Keeps `diagnostic` once per (code, span, what); a missing span counts as
+// the empty span at 0.
 sema_genmod_push: fn(check: ^SemaGenericModuleCheck, diagnostic: Diagnostic) {
     span: diagnostic.span ?? Span{start: 0, end: 0}
-    key: "{diagnostic.code}|{span.start}|{span.end}|{diagnostic.what}"
-    if name_find(check.seen, key) != None {
+    if !sema_key_report_first(check.seen, diagnostic.code, Val(span), diagnostic.what) {
         return
     }
-    _ := name_intern(check.seen, key)
     check.diagnostics.push(diagnostic.copy())
 }
 
@@ -1088,7 +1088,7 @@ sema_genmod_expand_items: fn(items: [Item], nesting: SemaGenericModuleNesting, i
         if item == .ModuleAlias(alias) -> aliases.push(alias.copy())
     }
     if aliases.len() == 0 -> return None
-    silent := SemaGenericModuleCheck{module_identity: nesting.module_identity, diagnostics: [Diagnostic]{}, seen: name_table_sized(2)}
+    silent := SemaGenericModuleCheck{module_identity: nesting.module_identity, diagnostics: [Diagnostic]{}, seen: SemaKeyRows{}}
     if sema_genmod_report_cycles(items, silent) -> return None
     sources := [SemaGenericModuleSource]{}
     loop item in items {

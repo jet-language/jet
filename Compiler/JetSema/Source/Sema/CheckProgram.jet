@@ -200,7 +200,6 @@ sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [
     socket_target: wasip2 || target.contains("linux") || target.contains("android") || target.contains("apple") || target.contains("darwin") || target.contains("windows") || target.contains("freebsd") || target.contains("openbsd") || target.contains("netbsd")
     if socket_target && !wasip2 -> return true
     operations: if wasip2 -> sema_target_wasip2_unsupported_operations(used_core) else -> [String]{}
-    seen := name_table_sized(8)
     complete := true
     loop module_row_index in 0..<graph.modules.len() {
         // The surface is the one the program's own `use` names. Core's
@@ -209,6 +208,8 @@ sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [
         // `#Target`) and by the denial row of the target's `core.target` facts.
         if module_is_core(graph.modules[module_row_index].module_identity) -> next
         diagnostic_start: diagnostics.len()
+        // Each module's reports, once per (code, span, surface or operation).
+        seen := SemaKeyRows{}
         loop imported_index in 0..<graph.modules[module_row_index].imports.len() {
             target_identity: graph.modules[module_row_index].imports[imported_index].target_module_identity
             path := module_text(graph.module_table, target_identity)
@@ -223,18 +224,14 @@ sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [
                 .File(_, path_span) -> path_span
                 .Module(_, path_span) -> path_span
             }
-            key: "{graph.modules[module_row_index].module_identity.id}:{span.start}:{span.end}:E3304"
-            if !socket_target && name_find(seen, key) == None {
-                _ := name_intern(seen, key)
+            if !socket_target && sema_key_report_first(seen, "E3304", Val(span), "") {
                 diagnostics.push(sema_error("E3304", span, "`{surface}` is not available for target `{target}`.", "`{surface}` needs native sockets or WASI Preview 2 sockets, and this target provides neither runtime boundary. A `jet build` or `jet run` run reports this target-support diagnostic.", "Build for `wasm32-wasip2` or a supported native target, or remove the `{surface}` import."))
                 complete = false
             }
             if !wasip2 -> next
             unsupported_surface: surface == "core.net.tls" || surface == "core.net.ws" || surface == "core.http.client"
             if unsupported_surface {
-                operation_key: "{graph.modules[module_row_index].module_identity.id}:{span.start}:{span.end}:E3305:{surface}"
-                if name_find(seen, operation_key) == None {
-                    _ := name_intern(seen, operation_key)
+                if sema_key_report_first(seen, "E3305", Val(span), surface) {
                     diagnostics.push(sema_error("E3305", span, "`{surface}` is not available for target `{target}`.", "The selected target has no Prelude adapter for `{surface}`; WASI Preview 2 provides TCP/UDP sockets but not this operation. A `jet build` or `jet run` run reports this target-support diagnostic.", "Use a supported TCP/UDP operation, or build for a native target."))
                     complete = false
                 }
@@ -244,9 +241,7 @@ sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [
                 if separator < 0 || foundation_byte_text(operation.bytes(), 0, separator) != surface {
                     next
                 }
-                operation_key: "{graph.modules[module_row_index].module_identity.id}:{span.start}:{span.end}:E3305:{operation}"
-                if name_find(seen, operation_key) != None -> next
-                _ := name_intern(seen, operation_key)
+                if !sema_key_report_first(seen, "E3305", Val(span), operation) -> next
                 diagnostics.push(sema_error("E3305", span, "`{operation}` is not available for target `{target}`.", "The selected target has no Prelude adapter for `{operation}`; WASI Preview 2 provides TCP/UDP sockets but not this operation. A `jet build` or `jet run` run reports this target-support diagnostic.", "Use a supported TCP/UDP operation, or build for a native target."))
                 complete = false
             }

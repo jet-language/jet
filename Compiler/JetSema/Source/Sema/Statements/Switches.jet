@@ -841,16 +841,13 @@ sema_stmt_through_note_read: fn(scan: ^SemaStmtThroughScan, value: Expr) Never! 
 // its own arm; each finding from `from` on is kept once. The repeats leave in
 // place, from the back, so the kept findings are never copied.
 sema_stmt_through_dedupe: fn(diagnostics: ^[Diagnostic], from: Int) Never! {
-    seen := [String:Bool]{}
+    seen := SemaKeyRows{}
     repeated := [Int]{}
     loop (index, diagnostic) in diagnostics {
         if index < from -> next
-        key: if diagnostic.span == .Val(at) -> "{diagnostic.code}@{at.start}:{at.end}:{diagnostic.what}" else -> "{diagnostic.code}@:{diagnostic.what}"
-        if seen.get(key) != None {
+        if !sema_key_report_first(seen, diagnostic.code, diagnostic.span, diagnostic.what) {
             repeated.push(index)
-            next
         }
-        seen[key] = true
     }
     loop repeated.pop() == .Val(index) -> _ := diagnostics.remove(index, .Slot)
 }

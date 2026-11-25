@@ -660,13 +660,11 @@ sema_marker_module_check_range: fn(graph: SemaRegistrationGraph, applied: TAppli
         }
         markers: sema_marker_rules_collect_program(graph.modules[module_row_index].program)
         own: Val(sema_marker_module_rows(graph.modules[module_row_index].program.items))
-        seen := [String:Bool]{}
+        seen := SemaKeyRows{}
         unresolved := [Marker]{}
         source_declared := false
         loop marker in markers {
-            occurrence: sema_marker_rules_occurrence_key(marker)
-            if seen.get(occurrence) != None -> next
-            seen[occurrence] = true
+            if !sema_marker_rules_first_occurrence(seen, marker) -> next
             if marker.declaration_module != None -> source_declared = true
             if marker.declaration_module == None && sema_marker_rules_catalog_rule_index(catalog.applied_rules, marker.name) != None {
                 next
@@ -897,13 +895,11 @@ sema_marker_module_check_unbuilt_rules: fn(catalog: SemaScopeMembersMarkerRegist
         return
     }
     applications: sema_marker_rules_applications(program)
-    reported := [String:Bool]{}
+    reported := SemaKeyRows{}
     loop application in unbuilt {
         if application.marker.declaration_module != None -> next
         index: sema_marker_rules_builtin_index(catalog, application.marker) ?? next
-        key: sema_marker_rules_application_key(application)
-        if reported.get(key) != None -> next
-        reported[key] = true
+        if !sema_marker_rules_first_application(reported, application) -> next
         if application.site == .Val(site) {
             if !sema_marker_rules_fact_allows(catalog.applied_rules[index], application, applications) {
                 diagnostics.push(sema_marker_rules_applied_site_error(application.marker, catalog.applied_rules[index], site))
@@ -923,9 +919,9 @@ sema_marker_module_check_unbuilt_rules: fn(catalog: SemaScopeMembersMarkerRegist
 // internal fault, and a misplaced rule such as `#Job` on a method checked
 // clean.
 sema_marker_module_check_builtin_sites: fn(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: ^[Diagnostic]) {
-    reported := [String:Bool]{}
+    reported := SemaKeyRows{}
     loop application in sema_policy_unsupported_applications(program) {
-        reported[sema_marker_rules_application_key(application)] = true
+        _ := sema_marker_rules_first_application(reported, application)
     }
     applications: sema_marker_rules_applications(program)
     loop application in applications {
@@ -934,9 +930,7 @@ sema_marker_module_check_builtin_sites: fn(catalog: SemaScopeMembersMarkerRegist
         // (sema_marker_rules_validate_allow), not by its registry row.
         if application.marker.name == MARKER_ALLOW -> next
         index: sema_marker_rules_builtin_index(catalog, application.marker) ?? next
-        key: sema_marker_rules_application_key(application)
-        if reported.get(key) != None -> next
-        reported[key] = true
+        if !sema_marker_rules_first_application(reported, application) -> next
         if sema_marker_rules_fact_allows(catalog.applied_rules[index], application, applications) {
             next
         }

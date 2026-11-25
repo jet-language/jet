@@ -18,7 +18,7 @@ use jet_foundation.[
 // type parameters and no `validate` block whose stored fields all are.
 // `seen` are the structs being generated around this one; each call leaves
 // it as it found it.
-sema_property_param_ungeneratable: fn(graph: SemaRegistrationGraph, module_index: Int, ty: Type, seen: ^[String]) -> String? Never! {
+sema_property_param_ungeneratable: fn(graph: SemaRegistrationGraph, module_index: Int, ty: Type, seen: ^[Int]) -> String? Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> None
         .List(inner) -> sema_property_param_ungeneratable(graph, module_index, inner, seen)
@@ -30,9 +30,9 @@ sema_property_param_ungeneratable: fn(graph: SemaRegistrationGraph, module_index
 }
 
 // sema_property_param_ungeneratable for the type `ty` that names `name`.
-sema_property_struct_ungeneratable: fn(graph: SemaRegistrationGraph, module_index: Int, ty: Type, name: String, seen: ^[String]) -> String? Never! {
+sema_property_struct_ungeneratable: fn(graph: SemaRegistrationGraph, module_index: Int, ty: Type, name: String, seen: ^[Int]) -> String? Never! {
     row: sema_type_resolve_nominal_row_at(graph, ty, module_index) ?? return Val("`{name}` has no generator")
-    key: "{row.module_index}:{row.row}"
+    key: (row.module_index << 32) | row.row
     if seen.contains(key) -> return Val("`{name}` holds itself")
     if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
         if item == .Struct(definition) {
@@ -58,7 +58,7 @@ sema_property_struct_ungeneratable: fn(graph: SemaRegistrationGraph, module_inde
 sema_property_param_diagnostics: fn(graph: SemaRegistrationGraph, module_index: Int, test: TestDef) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     loop parameter in test.params {
-        seen := [String]{}
+        seen := [Int]{}
         reason: sema_property_param_ungeneratable(graph, module_index, parameter.ty, seen) ?? next
         diagnostics.push(
             sema_error(

@@ -140,7 +140,7 @@ sema_target_no_os_reach_check: fn(modules: [SemaGraphModuleResult], graph: SemaR
         parents[position] = -1
         reached.push(position)
     }
-    reported := [String]{}
+    reported := SemaKeyRows{}
     at := 0
     loop at < reached.len() {
         position: reached[at]
@@ -177,7 +177,7 @@ sema_target_position: fn(keys: NameTable, key: String) -> Int? Never! {
 // the program's own call that leads out of its code, once per such call. A
 // path that reaches the module straight from the program's own code was
 // refused in that body.
-sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, rows: [SemaTargetSlot], keys: NameTable, parents: [Int], position: Int, reported: ^[String], diagnostics: ^[Diagnostic]) Never! {
+sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, rows: [SemaTargetSlot], keys: NameTable, parents: [Int], position: Int, reported: ^SemaKeyRows, diagnostics: ^[Diagnostic]) Never! {
     back := [Int]{position}
     loop parents[back[back.len() - 1]] >= 0 { back.push(parents[back[back.len() - 1]]) }
     steps: loop at in 0..<back.len() -> back[back.len() - 1 - at]
@@ -202,11 +202,9 @@ sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: Sema
         span = call.span
         break
     }
-    at: "{caller.key}:{span.start}:{span.end}"
-    if reported.contains(at) {
+    if !sema_key_report_first(reported, caller.key, Val(span), "") {
         return
     }
-    reported.push(at)
     hint: sema_call_core_no_os_hint(target.module_name) ?? return
     short_name: foundation_byte_text(target.module_name.bytes(), target.module_name.rfind(".") + 1, target.module_name.count_bytes())
     found := [Diagnostic]{sema_error("E3301", span, "`{callee.name}` reaches `{short_name}.{target.name}`, which is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available, in Core and packages as in the program's own code.", hint)}

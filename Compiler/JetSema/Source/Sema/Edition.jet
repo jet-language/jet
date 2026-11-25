@@ -491,12 +491,10 @@ sema_lifecycle_edit: fn(payload: CoreMarkerApplication, span: Span) -> TextEdit?
 // `inline: true`, so `jet fix` migrates a call by `inline_edit`
 // (sema_lifecycle_inline_edit) and never by a rename; a use with no such
 // edit is edited by hand.
-sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden: Bool, inlined: Bool, inline_edit: TextEdit?, source: String, span: Span, edition: String, result: ^SemaLifecycleResult, seen: ^[String:Bool]) {
-    key: "{source}|{span.start}|{span.end}|{payload.member}"
-    if seen.get(key) != None {
+sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden: Bool, inlined: Bool, inline_edit: TextEdit?, source: String, span: Span, edition: String, result: ^SemaLifecycleResult, seen: ^SemaKeyRows) {
+    if !sema_key_report_first(seen, source, Val(span), payload.member) {
         return
     }
-    seen[key] = true
     // One language edition and no edition-gated behavior (7bef65ccd4): a
     // `since:` label never silences the warning. Only a named removal edition
     // that the package edition has reached turns use into E2002.
@@ -562,7 +560,7 @@ sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         }
     }
     renames: sema_lifecycle_renames(graph, payloads)
-    seen := [String:Bool]{}
+    seen := SemaKeyRows{}
     loop (index, checked) in modules {
         if index >= graph.modules.len() -> break
         graph_module: graph.modules[index]
