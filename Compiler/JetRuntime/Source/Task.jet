@@ -52,7 +52,7 @@ task_failure_new: fn(kind: I64, owned_reason: I64) -> I64 {
 }
 
 #Export(c) jet_rt_record_new_jet_task_failure_deadline_blown: fn() -> I64 {
-    task_failure_new(TASK_FAILURE_DEADLINE, I64{0})
+    task_failure_new(TASK_FAILURE_DEADLINE_BLOWN, I64{0})
 }
 
 #Export(c) jet_rt_record_new_jet_task_failure_panicked: fn(reason: I64) -> I64 {
@@ -86,7 +86,7 @@ task_failure_new: fn(kind: I64, owned_reason: I64) -> I64 {
 task_failure_render: fn(failure: I64, debug: Bool) -> I64 {
     kind: sync_load(wrapping(failure + TASK_FAILURE_TAG))
     result: jet_rt_string_builder_new()
-    if kind == TASK_FAILURE_CANCELED -> rt_text_push_word(result, I64{7234307559156244803}, I64{8}) else if kind == TASK_FAILURE_DEADLINE {
+    if kind == TASK_FAILURE_CANCELED -> rt_text_push_word(result, I64{7234307559156244803}, I64{8}) else if kind == TASK_FAILURE_DEADLINE_BLOWN {
         rt_text_push_word(result, I64{7308895159530382660}, I64{8})
         rt_text_push_word(result, I64{474450193474}, I64{5})
     } else {
