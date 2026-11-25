@@ -425,14 +425,13 @@ ir_scope_guard: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, executab
     guard
 }
 
-// `mem.Arena.new(capacity:)`, `mem.Bump.new(capacity:)`, `mem.Pool.new(slots:)`,
 // `mem.Fixed.new(size:)` and `mem.Fixed.over(buffer)`: the owned runtime
-// allocator handle (JetRuntime MemStorage.jet). A size argument crosses as
-// its native word. `Fixed.new` backs the allocator with `size` bytes of this
-// frame; `Fixed.over` with the written `[U8#N]` buffer's elements.
+// allocator handle (JetRuntime MemStorage.jet). `Fixed.new` backs the
+// allocator with `size` bytes of this frame; `Fixed.over` with the written
+// `[U8#N]` buffer's elements. Arena, Bump and Pool are core.mem declarations
+// whose `new` calls its jet.runtime.mem binding.
 ir_alloc_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, ctor: TAllocCtor, args: [BodyCallArg], span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    word_row: ir_word_row(m)
     if ctor == .Fixed(size) {
         pointer_row: ir_pointer_row(m)
         data: ir_temp(m, b, pointer_row)
@@ -440,47 +439,21 @@ ir_alloc_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, ctor: TAll
         length: ir_word_const(m, b, size)
         return ir_runtime(m, b, "jet_rt_mem_fixed_storage_over", [Int]{data, length}, row)
     }
-    if ctor == .FixedOver {
-        if args.len() != 1 -> return ir_fail_slot(b, span, "Fixed.over with {args.len()} arguments")
-        buffer_ty: ir_ty(m, p, b, args[0].value)
-        element_ty: if ir_untag(buffer_ty) == .FixedList(element, _) -> element else -> {
-            return ir_fail_slot(b, span, "Fixed.over buffer of type {ir_type_name(buffer_ty)}")
-        }
-        element_row: ir_value_type(m, p, element_ty) ?? return ir_type_fail(b, span, element_ty)
-        buffer: ir_expr(m, p, b, args[0].value)
-        if ir_failed(b) || buffer < 0 -> return -1
-        count: ir_list_length(m, b, buffer)
-        stride_bytes: ir_list_stride(m, element_row)
-        stride: ir_word_const(m, b, stride_bytes)
-        length: ir_temp(m, b, word_row)
-        ir_emit(b.f, IROp.Mul, length, count, stride, IR_OVERFLOW_WRAP, b.line)
-        data: ir_list_data(m, b, buffer)
-        return ir_runtime(m, b, "jet_rt_mem_fixed_storage_over", [Int]{data, length}, row)
+    if args.len() != 1 -> return ir_fail_slot(b, span, "Fixed.over with {args.len()} arguments")
+    buffer_ty: ir_ty(m, p, b, args[0].value)
+    element_ty: if ir_untag(buffer_ty) == .FixedList(element, _) -> element else -> {
+        return ir_fail_slot(b, span, "Fixed.over buffer of type {ir_type_name(buffer_ty)}")
     }
-    if args.len() > 1 {
-        return ir_fail_slot(b, span, "allocator constructor with {args.len()} arguments")
-    }
-    if args.len() == 0 {
-        symbol: if ctor == {
-            .Arena -> "jet_arena_new"
-            .Bump -> "jet_bump_new"
-            .Pool | .Fixed(_) | .FixedOver -> "jet_rt_mem_pool_storage_new"
-        }
-        return ir_runtime(m, b, symbol, [Int]{}, row)
-    }
-    size: ir_expr(m, p, b, args[0].value)
-    if ir_failed(b) || size < 0 -> return -1
-    native := size
-    if ir_kind_of(m, b, size) == .Int {
-        native = ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{size}, word_row)
-        ir_release(m, b, size)
-    }
-    symbol: if ctor == {
-        .Arena -> "jet_arena_with_capacity"
-        .Bump -> "jet_bump_with_capacity"
-        .Pool | .Fixed(_) | .FixedOver -> "jet_pool_with_slots"
-    }
-    ir_runtime(m, b, symbol, [Int]{native}, row)
+    element_row: ir_value_type(m, p, element_ty) ?? return ir_type_fail(b, span, element_ty)
+    buffer: ir_expr(m, p, b, args[0].value)
+    if ir_failed(b) || buffer < 0 -> return -1
+    count: ir_list_length(m, b, buffer)
+    stride_bytes: ir_list_stride(m, element_row)
+    stride: ir_word_const(m, b, stride_bytes)
+    length: ir_temp(m, b, ir_word_row(m))
+    ir_emit(b.f, IROp.Mul, length, count, stride, IR_OVERFLOW_WRAP, b.line)
+    data: ir_list_data(m, b, buffer)
+    ir_runtime(m, b, "jet_rt_mem_fixed_storage_over", [Int]{data, length}, row)
 }
 
 // `task.detach()`: the runtime takes the handle over and lets the task run

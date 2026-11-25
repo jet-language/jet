@@ -7420,9 +7420,9 @@ run: fn() {
 
 | Signature | Result | Description |
 |---|---|---|
-| `Arena.new()` / `Arena.new(capacity: Int)` | arena | Create a grow-only arena. |
-| `Bump.new(capacity: Int)` | allocator | Create a contiguous monotonic allocator. |
-| `Pool.new<T>(slots: Int)` | pool | Reuse fixed-size slots by alignment class. |
+| `Arena.new()` / `Arena.new(capacity: Int)` | arena | Create a grow-only arena; `capacity` defaults to 4096 bytes. |
+| `Bump.new()` / `Bump.new(capacity: Int)` | allocator | Create a contiguous monotonic allocator; `capacity` defaults to 65536 bytes. |
+| `Pool.new(slots: Int)` | pool | Reuse fixed-size slots by alignment class. |
 | `Fixed.new(size: Int)` | allocator | Create positive-comptime inline backing storage. |
 | `Fixed.over(bytes)` | allocator | Borrow one mutable byte buffer for the handle's scope. |
 | `allocator.alloc(value)` | view | Store a value and return a scope-bound view. |

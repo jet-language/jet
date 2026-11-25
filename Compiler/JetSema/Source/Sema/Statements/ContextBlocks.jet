@@ -57,7 +57,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             next
         }
         if field.name == "allocator" && sema_stmt_context_scratch(field.value, check) {
-            guards.push(TContextGuard{field: field.name, value: sema_tree_node(Type.Named{name: "Arena"}, TExprKind.HostCall{call: THostCall.ContextRead{field: "scratch"}}, field.span)})
+            guards.push(TContextGuard{field: field.name, value: sema_tree_node(Type.Named{name: SEMA_MEMORY_ARENA}, TExprKind.HostCall{call: THostCall.ContextRead{field: "scratch"}}, field.span)})
             next
         }
         checked: sema_check_expression(field.value, None, check) ?? {
@@ -147,11 +147,10 @@ sema_stmt_deadline_instant: fn(ty: Type) -> Bool Never! {
     false
 }
 
+// Whether `ty` is a core.mem allocator (sema_call_memory_allocator_name),
+// not a view of one.
 sema_stmt_context_allocator_type: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Named(name) -> name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed"
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-    }
+    ty == .Named(_) && sema_call_memory_allocator_name(ty) != None
 }
 
 // Whether `ty` names a type that implements core.mem's `Allocator`, as the

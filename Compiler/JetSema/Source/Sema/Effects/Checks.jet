@@ -3247,8 +3247,8 @@ sema_effect_builtin_may_have_effect: fn(op: TBuiltinOp) -> Bool Never! {
 // numeric operations (`1 / 3` as an exact `Fraction`, Decimal and math-type
 // arithmetic, numeric casts), the ambient `close(value)` / `drop(value)`
 // protocol sugar, and closure intrinsics (`scope.guard`, `on_commit`, task
-// spawn), whose lambda bodies the walk visits on their own, and allocator
-// constructors (`mem.Arena.new`), whose storage the memory walk accounts.
+// spawn), whose lambda bodies the walk visits on their own, and the
+// `mem.Fixed` constructors, which take frame or caller storage.
 // Their effects are recorded inline (`close`/`drop`/`scope.guard` record none)
 // and only opaque callees take the maximal row, so one with no recorded call
 // fact contributes no effect; it is not an unknown callee.
@@ -4274,26 +4274,12 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
             // method's effects are this function's (codegen calls it directly).
             sema_effect_record_close(nodes, facts, node_index, body_type(facts.interner, tree, value))
         }
-        .AllocNew(ctor, args) -> {
+        .AllocNew(_, _) -> {
             if !sema_effect_in_assume_det(nodes[node_index], node.span) && sema_effect_walk_record_call_node(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller) {
                 return true
             }
-            // A literal capacity is the proven bound.
-            allocator: if ctor == {
-                .Arena -> "Arena"
-                .Bump -> "Bump"
-                .Pool | .Fixed(_) | .FixedOver -> ""
-            }
-            if allocator != "" {
-                bound := Int?{None}
-                if args.len() > 0 && body_node(tree, args[0].value).kind == .IntLit(bytes, _) && bytes >= 0 {
-                    bound = Val(bytes)
-                }
-                sema_effect_push_memory_event(nodes, node_index, node.span, "`{allocator}.new` reserves bounded arena storage", "arena", bound)
-                sema_effect_push_memory_event(nodes, node_index, node.span, "`{allocator}.new` allocates from arena storage", "alloc", None)
-            }
         }
-        .StaticCall(owner, _, method, _, _) -> {
+        .StaticCall(owner, owner_type, method, _, args) -> {
             if !sema_effect_in_assume_det(nodes[node_index], node.span) && sema_effect_walk_record_call_node(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller) {
                 return true
             }
@@ -4301,6 +4287,18 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
             if owner == .Prelude(_, path, _) && path == "jet_std.JetShared" && method.name == "new" {
                 sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` allocates shared storage", "alloc", None)
                 sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` introduces reference-counted ownership", "rc", None)
+            }
+            // A static of an Arena or Bump that answers one (`mem.Arena.new`)
+            // reserves arena storage; a literal capacity is the proven bound.
+            result: body_type(facts.interner, tree, expression)
+            allocator: sema_call_memory_allocator_name(result) ?? ""
+            if (allocator == "Arena" || allocator == "Bump") && owner_type == .Val(owner_ty) && owner_ty == result {
+                bound := Int?{None}
+                if args.len() > 0 && body_node(tree, args[0].value).kind == .IntLit(bytes, _) && bytes >= 0 {
+                    bound = Val(bytes)
+                }
+                sema_effect_push_memory_event(nodes, node_index, node.span, "`{allocator}.{method.name}` reserves bounded arena storage", "arena", bound)
+                sema_effect_push_memory_event(nodes, node_index, node.span, "`{allocator}.{method.name}` allocates from arena storage", "alloc", None)
             }
         }
         .GlobalShared(_, _) -> {

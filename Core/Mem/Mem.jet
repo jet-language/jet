@@ -13,6 +13,7 @@ use {
     builtin: jet_builtins
     core: core
     mem: core.mem
+    rt: jet.runtime.mem
 }
 
 scope: module
@@ -24,8 +25,8 @@ AllocError: struct {
 }
 
 // Allocator and pointer values are compiler-owned nominal surfaces. Their
-// constructors and methods are lowered by the memory CoreLib; source keeps
-// only the canonical type arities, never a fake runtime state carrier.
+// methods are lowered by the memory CoreLib; source keeps only the canonical
+// type arities, never a fake runtime state carrier.
 // `Pool` is the slot allocator and takes no type argument; the generic
 // `Pool<T>` is the ambient store, a separate type. Each allocator owns its
 // storage, so it is `Close`: a copy would release that storage twice. Its
@@ -33,12 +34,19 @@ AllocError: struct {
 // close itself has nothing left to do. The storage belongs to the thread
 // that made it, so each allocator is `#Local`.
 #Local Arena: struct {
+    // An arena whose first block holds `capacity` bytes; it grows by further
+    // blocks as allocations need them.
+    new: fn(capacity: Int{4096}) -> Arena Never! { rt.arena(capacity) }
+
     impl Close {
         close: fn(^^self) {}
     }
 }
 
 #Local Bump: struct {
+    // A bump allocator whose first block holds `capacity` bytes.
+    new: fn(capacity: Int{65536}) -> Bump Never! { rt.bump(capacity) }
+
     impl Close {
         close: fn(^^self) {}
     }
@@ -51,6 +59,9 @@ AllocError: struct {
 }
 
 #Local Pool: struct {
+    // A slot allocator with `slots` slots, one allocation each.
+    new: fn(slots: Int) -> Pool Never! { rt.pool(slots) }
+
     impl Close {
         close: fn(^^self) {}
     }

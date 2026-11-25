@@ -422,16 +422,15 @@ ir_context_block: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, guards: [BodyCon
     ir_tx_leave_scopes(m, b, frame)
 }
 
-// Whether a guard value of type `ty` is a `mem.Arena`.
+// Whether a guard value of type `ty` is a `mem.Arena` (ir_allocator_family).
 ir_context_arena: fn(ty: Type) -> Bool Never! {
-    if ty == .Named(name) -> return name == "Arena"
-    false
+    ty == .Named(_) && ir_allocator_family(ty) == Val("Arena")
 }
 
-// Whether a guard value of type `ty` is a builtin allocator handle with no
-// carrier, the other names sema admits (sema_stmt_context_allocator_type).
+// Whether a guard value of type `ty` is another core.mem allocator handle,
+// one with no carrier, as sema admits (sema_stmt_context_allocator_type).
 ir_context_builtin: fn(ty: Type) -> Bool Never! {
-    if ty == .Named(name) -> return name == "Bump" || name == "Pool" || name == "Fixed"
+    if ty == .Named(_) && ir_allocator_family(ty) == .Val(family) -> return family != "Arena"
     false
 }
 

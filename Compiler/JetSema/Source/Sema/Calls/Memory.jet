@@ -2,6 +2,7 @@
 // access remains in Methods.jet; this file owns only allocation and projected
 // guard capabilities.
 use jet_foundation.[
+    IR_RUNTIME_HANDLES,
     BodyHandleOp,
     AST_NODE_GENERATED,
     AccessConvention,
@@ -24,6 +25,7 @@ use jet_foundation.[
     AST_EMPTY_CALL_ARG_FLAGS,
     expr_span,
     measure_literal_value,
+    ir_runtime_handle_row,
 ]
 
 // S58: an inert numeric address is a place operation, not a by-value
@@ -76,11 +78,21 @@ sema_call_memory_pin: fn(args: [CallArg], span: Span, expected: Type?, check: ^S
     sema_expr_expected_owned(pinned, expected, check.environment.*, check.program.*, check.diagnostics)
 }
 
+// The Core identity of core.mem's Arena: `context.scratch`, the task's own
+// arena, is a view of one.
+SEMA_MEMORY_ARENA: "<corelib>/core.mem.Arena"
+
 // The allocator family of `ty`, an allocator or an allocator view of one
-// (`context.scratch`, a view of the task's arena, answers the same methods).
+// (`context.scratch`, a view of the task's arena, answers the same methods):
+// the runtime type its handle row declares (`JetArena`, IR_RUNTIME_HANDLES)
+// without the runtime's prefix, bare or by Core identity, as the IR names it
+// (BuildRoutes.jet ir_allocator_family).
 sema_call_memory_allocator_name: fn(ty: Type) -> String? {
-    if ty == .Named(name) && (name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed") {
-        return Val(name)
+    if ty == .Named(name) {
+        row: ir_runtime_handle_row(name) ?? return None
+        family: IR_RUNTIME_HANDLES[row].runtime.removeprefix("Jet")
+        if family == "Arena" || family == "Bump" || family == "Pool" || family == "Fixed" -> return Val(family)
+        return None
     }
     if ty == .Tagged(marker, inner) && marker == (TagMarker.Internal{internal_tag: InternalTag.AllocatorView}) {
         return sema_call_memory_allocator_name(inner)
@@ -111,25 +123,10 @@ sema_call_memory_call_arg: fn(argument: CallArg, value: TExpr, borrow: Bool, mut
     }
 }
 
-sema_call_memory_static_arity: fn(name: String, method: String, args: [CallArg], span: Span, check: ^SemaBodyCheck) -> Bool {
-    valid := if {
-        name == "Pool" -> args.len() == 1
-        name == "Fixed" -> args.len() == 1
-        else -> args.len() <= 1
-    }
-    if valid -> return true
-    detail := if {
-        name == "Pool" -> "a pool needs its slot count"
-        name == "Fixed" -> "a fixed allocator needs one size or backing buffer"
-        else -> "this allocator accepts at most one optional capacity"
-    }
-    fix := if {
-        name == "Pool" -> "write `mem.Pool.new(slots: N)`"
-        name == "Fixed" && method == "over" -> "write `mem.Fixed.over(bytes)`"
-        name == "Fixed" -> "write `mem.Fixed.new(size: N)`"
-        else -> "write `mem.{name}.new()` or `mem.{name}.new(capacity: N)`"
-    }
-    check.diagnostics.push(sema_error("E0103", span, "`{name}.{method}` has the wrong number of arguments", detail, fix))
+sema_call_memory_static_arity: fn(method: String, args: [CallArg], span: Span, check: ^SemaBodyCheck) -> Bool {
+    if args.len() == 1 -> return true
+    fix := if method == "over" -> "write `mem.Fixed.over(bytes)`" else -> "write `mem.Fixed.new(size: N)`"
+    check.diagnostics.push(sema_error("E0103", span, "`Fixed.{method}` has the wrong number of arguments", "a fixed allocator needs one size or backing buffer", fix))
     sema_call_memory_discard_args(args, check)
     return false
 }
@@ -191,8 +188,9 @@ sema_call_memory_check_fixed_buffer: fn(argument: CallArg, value: TExpr, check: 
     return ownership.accepted && ownership.complete
 }
 
-// Handles `mem.{Arena,Bump,Pool,Fixed}.{new,over}` before normal receiver
-// checking, since the imported Core fields are constructor sentinels.
+// Handles `mem.Fixed.{new,over}`, `mem.address_of` and `mem.pin` before
+// normal receiver checking: each works on the caller's own storage. Arena,
+// Bump and Pool are Core declarations whose `new` is an ordinary call.
 sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     return if receiver == {
         .Ident(alias, alias_span, _) -> {
@@ -222,35 +220,30 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
             if sema_expr_core_import_module(check, alias) != Val("core.mem") {
                 return SemaMethodSpecialCheck{handled: false, value: None}
             }
-            if name != "Arena" && name != "Bump" && name != "Pool" && name != "Fixed" {
+            if name != "Fixed" {
                 return SemaMethodSpecialCheck{handled: false, value: None}
             }
-            if method != "new" && !(name == "Fixed" && method == "over") {
-                check.diagnostics.push(sema_error("E0102", span, "`{name}` has no method `{method}`", if name == "Fixed" -> "`Fixed` supports `new` and `over` constructors" else -> "allocator constructors use `new`", if name == "Fixed" -> "write `mem.Fixed.new(size: N)` or `mem.Fixed.over(bytes)`" else -> "write `mem.{name}.new()`"))
+            if method != "new" && method != "over" {
+                check.diagnostics.push(sema_error("E0102", span, "`Fixed` has no method `{method}`", "`Fixed` supports `new` and `over` constructors", "write `mem.Fixed.new(size: N)` or `mem.Fixed.over(bytes)`"))
                 sema_call_memory_discard_args(args, check)
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
-            if name == "Fixed" && !fixed_allowed {
+            if !fixed_allowed {
                 check.diagnostics.push(sema_error("E0103", span, "`Fixed.{method}` must directly initialize a lexical binding", "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration", "write `fixed: mem.Fixed.{method}(…)`"))
             }
-            if !sema_call_memory_static_arity(name, method, args, span, check) {
+            if !sema_call_memory_static_arity(method, args, span, check) {
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
 
-            constructor := if {
-                name == "Arena" -> TAllocCtor.Arena
-                name == "Bump" -> TAllocCtor.Bump
-                name == "Pool" -> TAllocCtor.Pool
-                else -> TAllocCtor.Fixed{size: 1}
-            }
+            constructor := TAllocCtor.Fixed{size: 1}
             values := [TExpr]{}
             index := 0
             loop index < args.len() {
                 argument := args[index]
-                required := if name == "Fixed" && method == "over" -> None else -> Val(Type.Int)
+                required := if method == "over" -> None else -> Val(Type.Int)
                 checked: sema_check_expression(argument.expr, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
                 if {
-                    name == "Fixed" && method == "new" -> {
+                    method == "new" -> {
                         size_value := sema_call_memory_compiletime_int(argument.expr, checked, check)
                         if size_value == None && sema_call_memory_reads_runtime_local(argument.expr, check.scopes) {
                             check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
@@ -288,11 +281,11 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
                         values.push(sema_expr_unbounded_integer_literal(size, argument.span))
                     }
                     else -> {
-                        if name == "Fixed" && method == "over" && !sema_call_memory_check_fixed_buffer(argument, checked, check) {
+                        if !sema_call_memory_check_fixed_buffer(argument, checked, check) {
                             return SemaMethodSpecialCheck{handled: true, value: None}
                         }
                         values.push(checked)
-                        if name == "Fixed" && method == "over" -> constructor = TAllocCtor.FixedOver
+                        constructor = TAllocCtor.FixedOver
                     }
                 }
                 index += 1
@@ -300,7 +293,7 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
             tree_args := [TCallArg]{}
             index = 0
             loop index < values.len() {
-                borrowed := name == "Fixed" && method == "over"
+                borrowed := method == "over"
                 tree_args.push(sema_call_memory_call_arg(args[index], values[index], borrowed, borrowed))
                 index += 1
             }

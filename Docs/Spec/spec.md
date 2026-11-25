@@ -3840,13 +3840,16 @@ while reading the View it gives is not. See
 ### Allocator families
 
 `core.mem` exposes `Arena`, `Bump`, `Pool`, and `Fixed`; constructing and using
-these allocators does not require `#Unsafe`. `Arena.new()` or
-`Arena.new(capacity: N)` grows aligned heterogeneous chunks; `Bump` places
-monotonically in one caller-capacity buffer; `Pool` owns a caller-bounded slot
-count and reuses compatible size/alignment classes after reset. Values are
-dropped in reverse allocation order before storage is reused. Each allocator
-type is declared `#Local`, so move plain owned data across a task or channel
-rather than moving the allocator itself.
+these allocators does not require `#Unsafe`. `Arena`, `Bump`, and `Pool` are
+ordinary `core.mem` declarations whose `new` reserves the runtime storage.
+`Arena.new()` or `Arena.new(capacity: N)` grows aligned heterogeneous chunks;
+`Bump` places monotonically in one caller-capacity buffer; `Pool` owns a
+caller-bounded slot count and reuses compatible size/alignment classes after
+reset. A negative capacity or slot count stops the program as an out-of-range
+index does. A literal capacity is the bound `!Mem.Alloc(above: N)` checks
+against. Values are dropped in reverse allocation order before storage is
+reused. Each allocator type is declared `#Local`, so move plain owned data
+across a task or channel rather than moving the allocator itself.
 
 `arena.reset()` retains backing storage for reuse. Terminal release uses the
 universal resource operation `close(allocator)`; `.free()` is not the
