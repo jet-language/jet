@@ -228,10 +228,12 @@ rl_rows: fn(source: String) -> [RLRow] Never! {
 }
 
 // The carrier of a Jet type as the route projects it: Word, Flag, Float,
-// Text, Unit, List, Option, Tuple, or Handle for any other named type.
+// Text, Unit, List, Option, Tuple, Callback for a function value (its
+// closure box, invoke and release words), or Handle for any other named type.
 // `Never` (an export that stops) is Unit, as JetIR ir_route_result_of has it.
 rl_carrier: fn(ty: String) -> String Never! {
     if ty == "" || ty == "Unit" || ty == "Never" -> return "Unit"
+    if ty.starts_with("fn(") -> return "Callback"
     if ty.ends_with("?") -> return "Option"
     if ty.starts_with("{{") -> return "Tuple"
     if ty.starts_with("[") -> return "List"
@@ -312,6 +314,8 @@ rl_shape: fn(declaration: String) -> RLShape? Never! {
         if carrier == "List" && !written {
             inputs.push("I64")
             inputs.push("I64")
+        } else if carrier == "Callback" {
+            loop _ in 0..<3 -> inputs.push("I64")
         } else { inputs.push(rl_width(carrier)) }
     }
     rest := text.slice(close + 1, text.len()).trim()
@@ -579,4 +583,10 @@ rl_taken_findings: fn(source: String, bindings: [RLBinding]) -> [String] Never! 
     // A Public binding's `^^` must stay in its interface row.
     public: "process: module {{\n    #Import(c) priv spec_parent_death: fn(spec: ^^ProcessSpec) -[Exec]> ProcessSpec = \"jet_process_spec_parent_death\"\n    #Import(c) priv spec_clear_env: fn(spec: ^^ProcessSpec) -> ProcessSpec = \"jet_process_spec_clear_env\"\n}}\n"
     assert_eq(rl_taken_findings(public, bindings).join("\n"), "jet.runtime.process.spec_clear_env takes `spec: ^^ProcessSpec`, which its interface row does not declare; the interface keeps a taken parameter's `^^`")
+}
+
+#Test("a callback parameter crosses its closure box, invoke and release words") {
+    shape: rl_shape("priv callback: fn(rate_hz: Int, frames_per_buffer: Int, callback: fn([Float]) -[]>) -> RealtimeStream") ?? panic("the guard can't read a callback parameter")
+    assert_eq(shape.inputs.join(", "), "I64, I64, I64, I64, I64")
+    assert_eq(shape.returned, "I64")
 }
