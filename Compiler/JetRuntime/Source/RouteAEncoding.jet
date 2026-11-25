@@ -59,7 +59,7 @@ rt_io_error_kind_name: fn(code: I64) -> I64 {
 encoding_cause_take: fn(kind: I64, present: Bool, code: I64, message: I64) -> I64 {
     result: jet_rt_alloc(ENCODING_CAUSE_BYTES, I64{8})
     encoding_store(wrapping(result + ENCODING_CAUSE_KIND), jet_rt_string_clone(kind))
-    encoding_store(wrapping(result + ENCODING_CAUSE_OS_PRESENT), if present -> I64{1} else -> I64{0})
+    encoding_store(wrapping(result + ENCODING_CAUSE_OS_CODE_PRESENT), if present -> I64{1} else -> I64{0})
     encoding_store(wrapping(result + ENCODING_CAUSE_OS_CODE), if present -> code else -> I64{0})
     encoding_store(wrapping(result + ENCODING_CAUSE_MESSAGE), message)
     result

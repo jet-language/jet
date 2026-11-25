@@ -126,9 +126,9 @@ time_glue_push_date: fn(target: I64, raw_year: I64, month: I64, day: I64) {
     d: jet_int_owned_to_i64(days)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     result: jet_rt_alloc(TIME_PERIOD_BYTES, I64{8})
-    time_glue_store(wrapping(result + TIME_PERIOD_YEARS), y)
-    time_glue_store(wrapping(result + TIME_PERIOD_MONTHS), m)
-    time_glue_store(wrapping(result + TIME_PERIOD_DAYS), d)
+    time_glue_store(wrapping(result + TIME_PERIOD_YEARS_VALUE), y)
+    time_glue_store(wrapping(result + TIME_PERIOD_MONTHS_VALUE), m)
+    time_glue_store(wrapping(result + TIME_PERIOD_DAYS_VALUE), d)
     result
 }
 
@@ -145,26 +145,26 @@ time_glue_push_date: fn(target: I64, raw_year: I64, month: I64, day: I64) {
 }
 
 #Export(c) jet_rt_record_get_jet_period_years: fn(value: I64) -> I64 {
-    time_glue_int(value, TIME_PERIOD_YEARS)
+    time_glue_int(value, TIME_PERIOD_YEARS_VALUE)
 }
 
 #Export(c) jet_rt_record_get_jet_period_months: fn(value: I64) -> I64 {
-    time_glue_int(value, TIME_PERIOD_MONTHS)
+    time_glue_int(value, TIME_PERIOD_MONTHS_VALUE)
 }
 
 #Export(c) jet_rt_record_get_jet_period_days: fn(value: I64) -> I64 {
-    time_glue_int(value, TIME_PERIOD_DAYS)
+    time_glue_int(value, TIME_PERIOD_DAYS_VALUE)
 }
 
 #Export(c) jet_rt_handle_show_jet_period: fn(value: I64) -> I64 {
     // Time619-620: P{years}Y{months}M{days}D, no normalization.
     target: jet_rt_string_builder_new()
     rt_text_push_word(target, I64{80}, I64{1})
-    rt_text_push_number(target, time_glue_word(wrapping(value + TIME_PERIOD_YEARS)))
+    rt_text_push_number(target, time_glue_word(wrapping(value + TIME_PERIOD_YEARS_VALUE)))
     rt_text_push_word(target, I64{89}, I64{1})
-    rt_text_push_number(target, time_glue_word(wrapping(value + TIME_PERIOD_MONTHS)))
+    rt_text_push_number(target, time_glue_word(wrapping(value + TIME_PERIOD_MONTHS_VALUE)))
     rt_text_push_word(target, I64{77}, I64{1})
-    rt_text_push_number(target, time_glue_word(wrapping(value + TIME_PERIOD_DAYS)))
+    rt_text_push_number(target, time_glue_word(wrapping(value + TIME_PERIOD_DAYS_VALUE)))
     rt_text_push_word(target, I64{68}, I64{1})
     jet_rt_string_builder_finish(target)
 }
@@ -207,7 +207,7 @@ time_glue_push_time: fn(target: I64, hour: I64, minute: I64, second: I64, nanos:
 
 #Export(c) jet_rt_handle_show_jet_local_time: fn(value: I64) -> I64 {
     target: jet_rt_string_builder_new()
-    time_glue_push_time(target, time_glue_word(wrapping(value + TIME_LOCAL_HOUR)), time_glue_word(wrapping(value + TIME_LOCAL_MINUTE)), time_glue_word(wrapping(value + TIME_LOCAL_SECOND)), time_glue_word(wrapping(value + TIME_LOCAL_NANOS)) & I64{4294967295})
+    time_glue_push_time(target, time_glue_word(wrapping(value + TIME_LOCAL_HOUR_VALUE)), time_glue_word(wrapping(value + TIME_LOCAL_MINUTE_VALUE)), time_glue_word(wrapping(value + TIME_LOCAL_SECOND_VALUE)), time_glue_word(wrapping(value + TIME_LOCAL_NANOS)) & I64{4294967295})
     jet_rt_string_builder_finish(target)
 }
 

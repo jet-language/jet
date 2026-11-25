@@ -28,7 +28,7 @@ net_optional_text_get: fn(value: I64, field: I64, some: I64) -> I64 {
     encoding_store(wrapping(result + NET_DETAIL_ADDRESS), net_optional_text_input(address))
     encoding_store(wrapping(result + NET_DETAIL_NAME), net_optional_text_input(name))
     encoding_store(wrapping(result + NET_DETAIL_MESSAGE), jet_rt_string_clone(message))
-    encoding_store(wrapping(result + NET_DETAIL_OS_PRESENT), if (os_code == I64{0}) -> I64{0} else -> I64{1})
+    encoding_store(wrapping(result + NET_DETAIL_OS_CODE_PRESENT), if (os_code == I64{0}) -> I64{0} else -> I64{1})
     encoding_store(wrapping(result + NET_DETAIL_OS_CODE), code)
     result
 }
@@ -39,7 +39,7 @@ net_optional_text_get: fn(value: I64, field: I64, some: I64) -> I64 {
     encoding_store(wrapping(result + NET_DETAIL_ADDRESS), net_optional_text_clone(encoding_word(wrapping(value + NET_DETAIL_ADDRESS))))
     encoding_store(wrapping(result + NET_DETAIL_NAME), net_optional_text_clone(encoding_word(wrapping(value + NET_DETAIL_NAME))))
     encoding_store(wrapping(result + NET_DETAIL_MESSAGE), jet_rt_string_clone(encoding_word(wrapping(value + NET_DETAIL_MESSAGE))))
-    encoding_store(wrapping(result + NET_DETAIL_OS_PRESENT), encoding_word(wrapping(value + NET_DETAIL_OS_PRESENT)))
+    encoding_store(wrapping(result + NET_DETAIL_OS_CODE_PRESENT), encoding_word(wrapping(value + NET_DETAIL_OS_CODE_PRESENT)))
     encoding_store(wrapping(result + NET_DETAIL_OS_CODE), encoding_word(wrapping(value + NET_DETAIL_OS_CODE)))
     result
 }
@@ -56,7 +56,7 @@ net_optional_text_get: fn(value: I64, field: I64, some: I64) -> I64 {
 }
 
 #Export(c) jet_rt_handle_eq_jet_net_error_detail: fn(left: I64, right: I64) -> Bool {
-    jet_rt_string_eq(encoding_word(wrapping(left + NET_DETAIL_OPERATION)), encoding_word(wrapping(right + NET_DETAIL_OPERATION))) && net_optional_text_eq(encoding_word(wrapping(left + NET_DETAIL_ADDRESS)), encoding_word(wrapping(right + NET_DETAIL_ADDRESS))) && net_optional_text_eq(encoding_word(wrapping(left + NET_DETAIL_NAME)), encoding_word(wrapping(right + NET_DETAIL_NAME))) && jet_rt_string_eq(encoding_word(wrapping(left + NET_DETAIL_MESSAGE)), encoding_word(wrapping(right + NET_DETAIL_MESSAGE))) && encoding_optional_eq(left, right, NET_DETAIL_OS_PRESENT, NET_DETAIL_OS_CODE)
+    jet_rt_string_eq(encoding_word(wrapping(left + NET_DETAIL_OPERATION)), encoding_word(wrapping(right + NET_DETAIL_OPERATION))) && net_optional_text_eq(encoding_word(wrapping(left + NET_DETAIL_ADDRESS)), encoding_word(wrapping(right + NET_DETAIL_ADDRESS))) && net_optional_text_eq(encoding_word(wrapping(left + NET_DETAIL_NAME)), encoding_word(wrapping(right + NET_DETAIL_NAME))) && jet_rt_string_eq(encoding_word(wrapping(left + NET_DETAIL_MESSAGE)), encoding_word(wrapping(right + NET_DETAIL_MESSAGE))) && encoding_optional_eq(left, right, NET_DETAIL_OS_CODE_PRESENT, NET_DETAIL_OS_CODE)
 }
 
 #Export(c) jet_rt_record_get_jet_net_error_detail_operation: fn(value: I64) -> I64 {
@@ -76,7 +76,7 @@ net_optional_text_get: fn(value: I64, field: I64, some: I64) -> I64 {
 }
 
 #Export(c) jet_rt_record_get_jet_net_error_detail_os_code: fn(value: I64, some: I64) -> I64 {
-    encoding_optional_get(value, NET_DETAIL_OS_PRESENT, NET_DETAIL_OS_CODE, some)
+    encoding_optional_get(value, NET_DETAIL_OS_CODE_PRESENT, NET_DETAIL_OS_CODE, some)
 }
 
 net_dns_new: fn(ordinal: I64, text: I64) -> I64 {

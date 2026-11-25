@@ -69,7 +69,7 @@ encoding_optional_eq: fn(left: I64, right: I64, present: I64, field: I64) -> Boo
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     result: jet_rt_alloc(ENCODING_CAUSE_BYTES, I64{8})
     encoding_store(wrapping(result + ENCODING_CAUSE_KIND), jet_rt_string_clone(kind))
-    encoding_store(wrapping(result + ENCODING_CAUSE_OS_PRESENT), if (os_code == I64{0}) -> I64{0} else -> I64{1})
+    encoding_store(wrapping(result + ENCODING_CAUSE_OS_CODE_PRESENT), if (os_code == I64{0}) -> I64{0} else -> I64{1})
     encoding_store(wrapping(result + ENCODING_CAUSE_OS_CODE), code)
     encoding_store(wrapping(result + ENCODING_CAUSE_MESSAGE), jet_rt_string_clone(message))
     result
@@ -78,7 +78,7 @@ encoding_optional_eq: fn(left: I64, right: I64, present: I64, field: I64) -> Boo
 #Export(c) jet_rt_handle_clone_encoding_cause: fn(value: I64) -> I64 {
     result: jet_rt_alloc(ENCODING_CAUSE_BYTES, I64{8})
     encoding_store(wrapping(result + ENCODING_CAUSE_KIND), jet_rt_string_clone(encoding_word(wrapping(value + ENCODING_CAUSE_KIND))))
-    encoding_store(wrapping(result + ENCODING_CAUSE_OS_PRESENT), encoding_word(wrapping(value + ENCODING_CAUSE_OS_PRESENT)))
+    encoding_store(wrapping(result + ENCODING_CAUSE_OS_CODE_PRESENT), encoding_word(wrapping(value + ENCODING_CAUSE_OS_CODE_PRESENT)))
     encoding_store(wrapping(result + ENCODING_CAUSE_OS_CODE), encoding_word(wrapping(value + ENCODING_CAUSE_OS_CODE)))
     encoding_store(wrapping(result + ENCODING_CAUSE_MESSAGE), jet_rt_string_clone(encoding_word(wrapping(value + ENCODING_CAUSE_MESSAGE))))
     result
@@ -94,7 +94,7 @@ encoding_optional_eq: fn(left: I64, right: I64, present: I64, field: I64) -> Boo
 }
 
 #Export(c) jet_rt_handle_eq_encoding_cause: fn(left: I64, right: I64) -> Bool {
-    jet_rt_string_eq(encoding_word(wrapping(left + ENCODING_CAUSE_KIND)), encoding_word(wrapping(right + ENCODING_CAUSE_KIND))) && encoding_optional_eq(left, right, ENCODING_CAUSE_OS_PRESENT, ENCODING_CAUSE_OS_CODE) && jet_rt_string_eq(encoding_word(wrapping(left + ENCODING_CAUSE_MESSAGE)), encoding_word(wrapping(right + ENCODING_CAUSE_MESSAGE)))
+    jet_rt_string_eq(encoding_word(wrapping(left + ENCODING_CAUSE_KIND)), encoding_word(wrapping(right + ENCODING_CAUSE_KIND))) && encoding_optional_eq(left, right, ENCODING_CAUSE_OS_CODE_PRESENT, ENCODING_CAUSE_OS_CODE) && jet_rt_string_eq(encoding_word(wrapping(left + ENCODING_CAUSE_MESSAGE)), encoding_word(wrapping(right + ENCODING_CAUSE_MESSAGE)))
 }
 
 #Export(c) jet_rt_record_get_encoding_cause_kind: fn(value: I64) -> I64 {
@@ -106,7 +106,7 @@ encoding_optional_eq: fn(left: I64, right: I64, present: I64, field: I64) -> Boo
 }
 
 #Export(c) jet_rt_record_get_encoding_cause_os_code: fn(value: I64, some: I64) -> I64 {
-    encoding_optional_get(value, ENCODING_CAUSE_OS_PRESENT, ENCODING_CAUSE_OS_CODE, some)
+    encoding_optional_get(value, ENCODING_CAUSE_OS_CODE_PRESENT, ENCODING_CAUSE_OS_CODE, some)
 }
 
 #Export(c) jet_rt_record_new_encoding_error: fn(format: I64, kind: I64, offset: I64, line: I64, column: I64, path: I64, reason: I64, cause: I64) -> I64 {
@@ -138,7 +138,7 @@ encoding_optional_eq: fn(left: I64, right: I64, present: I64, field: I64) -> Boo
     result: jet_rt_alloc(ENCODING_ERROR_BYTES, I64{8})
     encoding_store(wrapping(result + ENCODING_ERROR_FORMAT), format)
     encoding_store(wrapping(result + ENCODING_ERROR_KIND), kind)
-    encoding_store(wrapping(result + ENCODING_ERROR_OFFSET), raw_offset)
+    encoding_store(wrapping(result + ENCODING_ERROR_BYTE_OFFSET), raw_offset)
     encoding_store(wrapping(result + ENCODING_ERROR_LINE_PRESENT), if (line == I64{0}) -> I64{0} else -> I64{1})
     encoding_store(wrapping(result + ENCODING_ERROR_LINE), raw_line)
     encoding_store(wrapping(result + ENCODING_ERROR_COLUMN_PRESENT), if (column == I64{0}) -> I64{0} else -> I64{1})
@@ -180,7 +180,7 @@ encoding_optional_eq: fn(left: I64, right: I64, present: I64, field: I64) -> Boo
     if (encoding_word(wrapping(left + ENCODING_ERROR_KIND)) != encoding_word(wrapping(right + ENCODING_ERROR_KIND))) {
         return false
     }
-    if (encoding_word(wrapping(left + ENCODING_ERROR_OFFSET)) != encoding_word(wrapping(right + ENCODING_ERROR_OFFSET))) {
+    if (encoding_word(wrapping(left + ENCODING_ERROR_BYTE_OFFSET)) != encoding_word(wrapping(right + ENCODING_ERROR_BYTE_OFFSET))) {
         return false
     }
     if !encoding_optional_eq(left, right, ENCODING_ERROR_LINE_PRESENT, ENCODING_ERROR_LINE) {
@@ -210,7 +210,7 @@ encoding_optional_eq: fn(left: I64, right: I64, present: I64, field: I64) -> Boo
 }
 
 #Export(c) jet_rt_record_get_encoding_error_byte_offset: fn(value: I64) -> I64 {
-    jet_int_owned_from_i64(encoding_word(wrapping(value + ENCODING_ERROR_OFFSET)))
+    jet_int_owned_from_i64(encoding_word(wrapping(value + ENCODING_ERROR_BYTE_OFFSET)))
 }
 
 #Export(c) jet_rt_record_get_encoding_error_line: fn(value: I64, some: I64) -> I64 {
@@ -298,7 +298,7 @@ encoding_error_render_tail: fn(target: I64, offset: I64, line_present: I64, line
     encoding_kind_label(target, encoding_word(wrapping(value + ENCODING_ERROR_KIND)))
     encoding_error_render_tail(
         target,
-        encoding_word(wrapping(value + ENCODING_ERROR_OFFSET)),
+        encoding_word(wrapping(value + ENCODING_ERROR_BYTE_OFFSET)),
         encoding_word(wrapping(value + ENCODING_ERROR_LINE_PRESENT)),
         encoding_word(wrapping(value + ENCODING_ERROR_LINE)),
         encoding_word(wrapping(value + ENCODING_ERROR_COLUMN_PRESENT)),
