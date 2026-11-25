@@ -60,16 +60,14 @@ probe_axis_tools: fn(repo_dir: String, cwd: String, tools: Dyn, jet_bin: String)
     declared: items_at(tools, "")
     if declared.len() == 0 -> return Err("axis runner declares no tools")
     env_runner: files.join(repo_dir, "Tools/Agent/JetEnv.jet")
-    env := ProbeEnv{loaded: false, vars: [String:String]{}, error: ""}
-    probes := [Dyn]{}
+    ^env: ProbeEnv{loaded: false, vars: [String:String]{}, error: ""}
+    ^probes: [Dyn]{}
     loop tool in declared {
         if tool == Dyn.Text("jet") {
             probes.push(probe_jet_binary(jet_bin))
             next
         }
-        if !env.loaded {
-            env = load_probe_env(env_runner, cwd)
-        }
+        if !env.loaded -> env = load_probe_env(env_runner, cwd)
         probes.push(probe_axis_tool(env, cwd, tool))
     }
     Ok(probes)
@@ -77,9 +75,13 @@ probe_axis_tools: fn(repo_dir: String, cwd: String, tools: Dyn, jet_bin: String)
 
 load_probe_env: fn(env_runner: String, cwd: String) -[Exec, Time.Wait]> ProbeEnv Never! {
     receipt: process.cmd([env_runner, "env", "-0"]).cwd(cwd).timeout(30s).run() ?? return ProbeEnv{loaded: true, vars: [String:String]{}, error: "{err}"}
-    if receipt.timed_out -> return ProbeEnv{loaded: true, vars: [String:String]{}, error: "timeout after 30s"}
-    if receipt.code != 0 -> return ProbeEnv{loaded: true, vars: [String:String]{}, error: receipt.errors.trim()}
-    vars := [String:String]{}
+    if receipt.timed_out {
+        return ProbeEnv{loaded: true, vars: [String:String]{}, error: "timeout after 30s"}
+    }
+    if receipt.code != 0 {
+        return ProbeEnv{loaded: true, vars: [String:String]{}, error: receipt.errors.trim()}
+    }
+    ^vars: [String:String]{}
     loop line in receipt.output.split("\u{0}") {
         if line == "" -> next
         part: line.partition("=")
@@ -91,7 +93,7 @@ load_probe_env: fn(env_runner: String, cwd: String) -[Exec, Time.Wait]> ProbeEnv
 
 probe_axis_tool: fn(env: ProbeEnv, cwd: String, tool: Dyn) -> Dyn {
     name: js_text(tool)
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["tool"] = tool
     found: run_probe_command(env, cwd, ["sh", "-c", "command -v {shell_quoted(name)}"])
     output: found.stdout.trim()
@@ -138,7 +140,7 @@ probe_jet_binary: fn(jet_bin: String) -> Dyn {
     }
     if !stat.is_file -> return jet_probe("probe_failed", "Jet binary is not a file: {resolved}")
     bytes: files.read_bytes(resolved) ?? return jet_probe("probe_failed", "could not inspect Jet binary {resolved}: {err}")
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["tool"] = Dyn.Text("jet")
     out["status"] = Dyn.Text("available")
     out["resolved"] = Dyn.Text(resolved)
@@ -147,7 +149,7 @@ probe_jet_binary: fn(jet_bin: String) -> Dyn {
 }
 
 jet_probe: fn(status: String, reason: String) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["tool"] = Dyn.Text("jet")
     out["status"] = Dyn.Text(status.copy())
     out["reason"] = Dyn.Text(reason.copy())
@@ -159,7 +161,7 @@ jet_probe: fn(status: String, reason: String) -> Dyn {
 // seconds pass, 128 when a signal stopped it and 127 when it could not start.
 run_probe_command: fn(env: ProbeEnv, cwd: String, command: [String]) -> ToolRun {
     if env.error != "" -> return ToolRun{code: 127, stdout: "", stderr: env.error.copy()}
-    spec := process.cmd(command).cwd(cwd).timeout(10s)
+    ^spec: process.cmd(command).cwd(cwd).timeout(10s)
     loop (name, value) in env.vars -> spec = spec.env(name, value)
     receipt: spec.run() ?? return ToolRun{code: 127, stdout: "", stderr: "{err}"}
     if receipt.timed_out {

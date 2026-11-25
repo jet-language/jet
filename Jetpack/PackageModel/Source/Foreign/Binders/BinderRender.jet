@@ -10,7 +10,7 @@ use {
 // A C string-literal body: quote, backslash, and the common control escapes;
 // other bytes outside printable ASCII become three-digit octal escapes.
 pkg_binder_c_escape: fn(value: String) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop byte in value.bytes() {
         code: Int{byte}
         if code == {
@@ -34,7 +34,7 @@ pkg_binder_c_escape: fn(value: String) -> String Never! {
 // never rescanned, so a path that happens to spell a hole stays literal.
 pkg_binder_fill_template: fn(template: String, slots: [String:String]) -> String Never! {
     parts: template.split("@@").to_list()
-    out := [String]{}
+    ^out: [String]{}
     loop index in 0..<parts.len() {
         if index % 2 == 0 {
             out.push(parts[index])
@@ -48,7 +48,7 @@ pkg_binder_fill_template: fn(template: String, slots: [String:String]) -> String
 // The SHA-256 of the binder identity preimage: every part, NUL-separated
 // (`b"jet-<lang>-bind-v1\0" + source + b"\0" + ...`).
 pkg_binder_identity_digest: fn(parts: [String]) -> String Never! {
-    identity := [U8]{}
+    ^identity: [U8]{}
     loop index in 0..<parts.len() {
         if index > 0 -> identity.push(U8{0})
         loop byte in parts[index].bytes() -> identity.push(byte)

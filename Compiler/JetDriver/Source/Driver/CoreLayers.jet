@@ -28,7 +28,7 @@ jet_driver_check_core_layers: fn(request: JetDriverCompileRequest, source_units:
         return
     }
     // A private part's layer is its owner's.
-    owners := [String:String]{}
+    ^owners: [String:String]{}
     loop row in request.core_sources {
         if row.owner != "" -> owners[row.module_name] = row.owner
     }
@@ -41,7 +41,7 @@ jet_driver_check_core_layers: fn(request: JetDriverCompileRequest, source_units:
         from_layer: jet_driver_core_layer_of(request.core_layers, from).layer
         if from_layer < 0 -> next
         lexed: lex_generated(row.source().bytes())
-        names := [JetDriverCoreLayerName]{}
+        ^names: [JetDriverCoreLayerName]{}
         jet_driver_core_layer_names(lexed.tokens, lexed.tables, owners, names)
         loop name in names {
             to: jet_driver_core_layer_of(request.core_layers, name.module_name)
@@ -66,8 +66,8 @@ JetDriverCoreLayerSlot: struct {
 // Where `layers` puts `module_name`: the layer of the longest listed name it
 // equals or sits under.
 jet_driver_core_layer_of: fn(layers: [ModuleLayer], module_name: String) -> JetDriverCoreLayerSlot Never! {
-    found := JetDriverCoreLayerSlot{layer: -1, module_name: ""}
-    longest := -1
+    ^found: JetDriverCoreLayerSlot{layer: -1, module_name: ""}
+    ^longest: -1
     loop (index, layer) in layers {
         loop listed in layer.modules {
             size: listed.count_bytes()
@@ -85,7 +85,7 @@ jet_driver_core_layer_of: fn(layers: [ModuleLayer], module_name: String) -> JetD
 // each path of a `core.[a, b.c]` selection, and each private part `owners`
 // maps to its owner, with the names in interpolations.
 jet_driver_core_layer_names: fn(tokens: [Token], tables: TokenTables, owners: [String:String], names: ^[JetDriverCoreLayerName]) Never! {
-    index := 0
+    ^index: 0
     loop index < tokens.len() {
         token: tokens[index]
         if token.kind == TOKEN_IDENT && (index == 0 || (tokens[index - 1].kind != TOKEN_DOT && tokens[index - 1].kind != TOKEN_QUESTION_DOT)) {
@@ -120,8 +120,8 @@ jet_driver_core_layer_names: fn(tokens: [Token], tables: TokenTables, owners: [S
 // identifier.
 jet_driver_core_layer_path: fn(tokens: [Token], tables: TokenTables, start: Int, prefix: String, names: ^[JetDriverCoreLayerName]) -> Int Never! {
     head: token_decoded(tables, tokens[start])
-    path := if prefix == "" -> head.copy() else -> "{prefix}.{head}"
-    last := start
+    ^path: if prefix == "" -> head.copy() else -> "{prefix}.{head}"
+    ^last: start
     loop last + 2 < tokens.len() && tokens[last + 1].kind == TOKEN_DOT && tokens[last + 2].kind == TOKEN_IDENT {
         path = "{path}.{token_decoded(tables, tokens[last + 2])}"
         last += 2
@@ -134,8 +134,8 @@ jet_driver_core_layer_path: fn(tokens: [Token], tables: TokenTables, start: Int,
 // `tokens[start]`: each item at the selection's own depth that isn't an
 // alias (`name:`); the index after its `]`.
 jet_driver_core_layer_selection: fn(tokens: [Token], tables: TokenTables, start: Int, names: ^[JetDriverCoreLayerName]) -> Int Never! {
-    index := start
-    depth := 1
+    ^index: start
+    ^depth: 1
     loop index < tokens.len() && depth > 0 {
         kind: tokens[index].kind
         if {

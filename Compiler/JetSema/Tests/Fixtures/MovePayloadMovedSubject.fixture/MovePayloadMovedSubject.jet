@@ -12,13 +12,13 @@ Item: enum {
 }
 
 drain: fn(source: ^^[Item]) -> Int {
-    items := source.move()
-    marked := 0
-    out := [Item]{}
+    ^items: source.move()
+    ^marked: 0
+    ^out: [Item]{}
     loop items.len() > 0 {
-        item := items.pop() ?? panic("drain lost a row")
+        ^item: items.pop() ?? panic("drain lost a row")
         if item.move() == .Struct(source_definition) {
-            definition := source_definition.move()
+            ^definition: source_definition.move()
             if definition.name == "Err" {
                 definition.marked = true
                 marked += 1

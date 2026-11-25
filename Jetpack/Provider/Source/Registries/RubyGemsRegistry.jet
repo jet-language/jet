@@ -11,7 +11,7 @@ provider_rubygems_fetch: fn(authority: RegistryAuthority, scratch: String, name:
 // One compact-index `info/<name>` document: `version deps|attributes` lines,
 // every release pinned by its SHA-256 `checksum:` attribute.
 provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) -> [RegistryPackage] RegistryError! {
-    out := [RegistryPackage]{}
+    ^out: [RegistryPackage]{}
     lines: provider_lines(raw)
     loop raw_line in lines {
         line: raw_line.trim()
@@ -30,7 +30,7 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
         if !provider_script_safe_piece(version, "+_-.") {
             return Err(RegistryError.Reason("unsafe gem version `{version}`"))
         }
-        checksum := ""
+        ^checksum: ""
         attributes: halves.after.split(",").to_list()
         loop attribute in attributes {
             field: attribute.trim()
@@ -42,7 +42,7 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
         if !provider_registry_valid_hex(checksum, 64) {
             return Err(RegistryError.Reason("gem `{name}` {version} has no SHA-256 compact-index checksum"))
         }
-        dependencies := [RegistryDependency]{}
+        ^dependencies: [RegistryDependency]{}
         if raw_dependencies == {
             .Val(listed) -> {
                 items: listed.split(",").to_list()
@@ -104,7 +104,7 @@ provider_rubygems_install: fn(artifact: RegistryArtifact, out: String, scratch: 
 // `gem-home`, `gem-path`, and `ruby-lib` (every installed gem's `lib`,
 // joined with the host path separator), relative to the output.
 provider_rubygems_write_projection: fn(artifacts: [RegistryArtifact], out: String) -[FS, Env]> RegistryError! {
-    ruby_lib := [String]{}
+    ^ruby_lib: [String]{}
     loop artifact in artifacts {
         lib: "gems/{artifact.package.name}-{artifact.package.version}/lib"
         if files.is_dir(files.join(out, lib)) -> ruby_lib.push(lib)

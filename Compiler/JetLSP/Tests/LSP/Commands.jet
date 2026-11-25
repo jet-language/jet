@@ -31,10 +31,10 @@ Job: struct {
 
 // Each lens as `range title command arguments`.
 lsp_test_lens_rows: fn(result: Dyn) -> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop lens in lsp_test_rows(result) {
         command: lsp_test_field(lens, "command")
-        arguments := [String]{}
+        ^arguments: [String]{}
         loop argument in lsp_test_rows(lsp_test_field(command, "arguments")) {
             if argument == .Text(text) -> arguments.push("{text}")
         }
@@ -44,13 +44,16 @@ lsp_test_lens_rows: fn(result: Dyn) -> [String] Never! {
 }
 
 #Test("code lenses run the file on its run entry and its tests on each #Test") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_LENS_URI, LSP_TEST_LENS)
     result: lsp_test_result(server, "textDocument/codeLens", "{{{lsp_test_text_document(LSP_TEST_LENS_URI)}}}")
-    assert_eq(lsp_test_lens_rows(result), [String]{
-        "4:0-4:11 Run file jet.runFile {LSP_TEST_LENS_URI}",
-        "8:0-8:16 Run test jet.testFile {LSP_TEST_LENS_URI}",
-    })
+    assert_eq(
+        lsp_test_lens_rows(result),
+        [String]{
+            "4:0-4:11 Run file jet.runFile {LSP_TEST_LENS_URI}",
+            "8:0-8:16 Run test jet.testFile {LSP_TEST_LENS_URI}",
+        },
+    )
 }
 
 lsp_test_impact_params: fn(arguments: String) -> String Never! {
@@ -58,7 +61,7 @@ lsp_test_impact_params: fn(arguments: String) -> String Never! {
 }
 
 #Test("jet.impact reports a symbol's call sites, callers and callees over the checked index") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     uri: foundation_json_quote(LSP_TEST_MAIN_URI)
     result: lsp_test_result(server, "workspace/executeCommand", lsp_test_impact_params("[{uri},\"add\",2]"))
     assert_eq(lsp_test_text(result, "symbol"), "add")
@@ -78,7 +81,7 @@ lsp_test_impact_params: fn(arguments: String) -> String Never! {
 }
 
 #Test("executeCommand refuses an unknown command, malformed arguments and a closed document") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     uri: foundation_json_quote(LSP_TEST_MAIN_URI)
     assert_eq(lsp_test_error_code(server, "workspace/executeCommand", "{{\"command\":\"jet.unknown\",\"arguments\":[]}}"), -32602)
     assert_eq(lsp_test_error_code(server, "workspace/executeCommand", "{{}}"), -32602)
@@ -92,7 +95,7 @@ lsp_test_reasoning_params: fn(arguments: String) -> String Never! {
 }
 
 #Test("jet.reasoning answers the reasoning projection of the open document") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     uri: foundation_json_quote(LSP_TEST_MAIN_URI)
     result: lsp_test_result(server, "workspace/executeCommand", lsp_test_reasoning_params("[{uri},\"\",true]"))
     assert_eq(lsp_test_text(result, "kind"), "jet.reasoning/v1")
@@ -105,13 +108,15 @@ lsp_test_reasoning_params: fn(arguments: String) -> String Never! {
     lenses: lsp_test_rows(lsp_test_field(result, "lenses"))
     assert_eq(lenses.len(), 9)
     assert_eq(lsp_test_text(lenses[8], "name"), "relationships")
-    filed := 0
+    ^filed: 0
     loop lens in lenses -> filed += lsp_test_rows(lsp_test_field(lens, "records")).len()
     assert_eq(filed, records.len())
     subject: lsp_test_text(records[0], "subject")
     chosen: lsp_test_result(server, "workspace/executeCommand", lsp_test_reasoning_params("[{uri},{foundation_json_quote(subject)}]"))
     assert_eq(lsp_test_text(chosen, "selection"), subject)
-    loop record in lsp_test_rows(lsp_test_field(chosen, "records")) -> assert_eq(lsp_test_text(record, "subject"), subject)
+    loop record in lsp_test_rows(lsp_test_field(chosen, "records")) {
+        assert_eq(lsp_test_text(record, "subject"), subject)
+    }
     assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_reasoning_params("[]")), -32602)
     assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_reasoning_params("[\"file:///w/closed.jet\"]")), -32602)
 }

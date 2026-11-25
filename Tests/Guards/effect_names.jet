@@ -31,7 +31,7 @@ EffectNameList: struct {
 // top-level `Name: struct {` or `Name: enum {`, and each case line of an enum
 // before its first blank line or `impl`.
 effect_name_declared: fn(text: String, out: ^[String]) {
-    family := ""
+    ^family: ""
     loop line in text.lines() {
         if family != "" {
             word: line.trim()
@@ -53,7 +53,7 @@ effect_name_declared: fn(text: String, out: ^[String]) {
 }
 
 effect_name_vocabulary: fn() -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop path in EFFECT_NAME_SOURCES {
         text: effect_name_files.read(path) ?? panic("read the effect source {path}: {err}")
         effect_name_declared(text, names)
@@ -80,11 +80,11 @@ effect_name_shaped: fn(name: String) -> Bool {
 // string literals (an interpolation, an expression) before it closes.
 effect_name_list_at: fn(text: String, start: Int) -> [String]? {
     bytes: text.bytes()
-    members := [String]{}
-    at := start
+    ^members: [String]{}
+    ^at: start
     loop {
         if at >= bytes.len() || bytes[at] != 34 -> return None
-        end := at + 1
+        ^end: at + 1
         loop {
             if end >= bytes.len() -> return None
             if bytes[end] == 34 -> break
@@ -114,18 +114,18 @@ effect_name_list_at: fn(text: String, start: Int) -> [String]? {
 // declared effects.
 effect_name_lists_in: fn(path: String, text: String, vocabulary: [String], out: ^[EffectNameList]) {
     bytes: text.bytes()
-    line := 1
+    ^line: 1
     loop index in 0..<bytes.len() {
         if bytes[index] == 10 -> line += 1
         if bytes[index] != 91 && bytes[index] != 123 -> next
-        first := index + 1
+        ^first: index + 1
         loop {
             if first >= bytes.len() || (bytes[first] != 32 && bytes[first] != 10) -> break
             first += 1
         }
         members: effect_name_list_at(text, first) ?? next
-        declared := 0
-        shaped := true
+        ^declared: 0
+        ^shaped: true
         loop member in members {
             if !effect_name_shaped(member) -> shaped = false
             if vocabulary.contains(member) -> declared += 1
@@ -161,8 +161,8 @@ effect_name_scan: fn(path: String, vocabulary: [String], out: ^[EffectNameList])
 // `path:line: Name`, unless `not_effects` holds it as `path: Name`; and
 // each `not_effects` row no list holds any more, as `stale: <row>`.
 effect_name_strays: fn(lists: [EffectNameList], vocabulary: [String], not_effects: [String]) -> [String] {
-    strays := [String]{}
-    seen := [String]{}
+    ^strays: [String]{}
+    ^seen: [String]{}
     loop list in lists {
         loop member in list.members {
             if vocabulary.contains(member) -> next
@@ -184,7 +184,7 @@ effect_name_strays: fn(lists: [EffectNameList], vocabulary: [String], not_effect
     guards_enter_root()
     vocabulary: effect_name_vocabulary()
     assert(vocabulary.contains("Net") && vocabulary.contains("FS.Read") && vocabulary.contains("DB"), "the effect sources declare no Net, FS.Read or DB")
-    lists := [EffectNameList]{}
+    ^lists: [EffectNameList]{}
     loop root in EFFECT_NAME_ROOTS {
         assert(effect_name_files.is_dir(root), "the effect name root {root} must exist")
         effect_name_scan(root, vocabulary, lists)
@@ -195,10 +195,10 @@ effect_name_strays: fn(lists: [EffectNameList], vocabulary: [String], not_effect
 }
 
 #Test("the effect name scanner reads declarations and finds a stray in a list") {
-    declared := [String]{}
+    ^declared: [String]{}
     effect_name_declared("Net: struct {{\n    impl Effect {{}}\n}}\n\nFS: enum {{\n    Read,\n    Write,\n\n    impl Effect {{}}\n}}\n", declared)
     assert_eq(declared, [String]{"Net", "FS", "FS.Read", "FS.Write"})
-    lists := [EffectNameList]{}
+    ^lists: [EffectNameList]{}
     effect_name_lists_in("a.jet", "x: [\"Net\", \"FS.Read\", \"Disk\"]\ny: [String]{{\n    \"Net\",\n    \"FS\",\n}}\nz: [\"Net\", \"name\"]\nw: [\"Net\", \"Disk\"]\nv: [\"Net\", \"FS\", \"URL\", \"SQL\"]\n", declared, lists)
     assert_eq(lists.len(), 2)
     assert_eq(effect_name_strays(lists, declared, [String]{}), [String]{"a.jet:1: Disk"})
@@ -225,8 +225,8 @@ EffectListRow: struct {
 // `Name: struct {` or `Name: enum {` whose body names no `parent:` (a kind of
 // another effect is no root).
 effect_name_roots: fn(text: String, out: ^[String]) -[]> {
-    name := ""
-    kind := false
+    ^name: ""
+    ^kind: false
     loop line in text.lines() {
         if name == "" {
             if line.starts_with(" ") -> next
@@ -246,8 +246,8 @@ effect_name_roots: fn(text: String, out: ^[String]) -[]> {
 // The rows of the table headed EFFECT_LIST_HEADER in `text`; a row line that
 // does not start with a backquoted root is a row with no root.
 effect_list_rows: fn(text: String) -[]> [EffectListRow] {
-    rows := [EffectListRow]{}
-    inside := false
+    ^rows: [EffectListRow]{}
+    ^inside: false
     loop line in text.lines() {
         if !inside {
             if line == EFFECT_LIST_HEADER -> inside = true
@@ -269,8 +269,8 @@ effect_list_rows: fn(text: String) -[]> [EffectListRow] {
 // root, a row naming no declared root, a root named twice, a row that says
 // nothing, a declared root with no row, and rows out of the sources' order.
 effect_list_problems: fn(roots: [String], rows: [EffectListRow]) -[]> [String] {
-    problems := [String]{}
-    named := [String]{}
+    ^problems: [String]{}
+    ^named: [String]{}
     loop row in rows {
         if row.root == "" {
             problems.push("a row names no root: {row.covers}")
@@ -315,13 +315,13 @@ effect_list_homes: fn(path: String, out: ^[String]) -[FS.Read]> {
 
 #Test("effect_list_documents_every_root") {
     guards_enter_root()
-    roots := [String]{}
+    ^roots: [String]{}
     loop path in EFFECT_NAME_SOURCES {
         text: effect_name_files.read(path) ?? panic("read the effect source {path}: {err}")
         effect_name_roots(text, roots)
     }
     assert(roots.contains("Net") && roots.contains("Secret") && roots.contains("Meta") && !roots.contains("MetaCode"), "the effect sources declare no Net, Secret or Meta root, or MetaCode reads as a root; the root scanner is broken")
-    homes := [String]{}
+    ^homes: [String]{}
     effect_list_homes("Docs/Spec", homes)
     assert_eq(homes, [String]{EFFECT_LIST_HOME})
     text: effect_name_files.read(EFFECT_LIST_HOME) ?? panic("read {EFFECT_LIST_HOME}: {err}")
@@ -330,7 +330,7 @@ effect_list_homes: fn(path: String, out: ^[String]) -[FS.Read]> {
 }
 
 #Test("the effect list scanner reads roots and rows and finds each gap") {
-    roots := [String]{}
+    ^roots: [String]{}
     effect_name_roots("Net: struct {{\n    impl Effect {{}}\n}}\n\nFS: enum {{\n    Read,\n\n    impl Effect {{}}\n}}\n\nAudit: struct {{\n    impl Effect {{\n        parent: Net,\n    }}\n}}\n", roots)
     assert_eq(roots, [String]{"Net", "FS"})
     rows: effect_list_rows("x\n{EFFECT_LIST_HEADER}\n| --- | --- |\n| `FS` | files |\n| `Net` | |\n| `Disk` | disks |\n| plain | row |\n\n| `IO` | after |\n")

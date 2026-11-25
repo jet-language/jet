@@ -217,7 +217,7 @@ UINode: struct {
     // The tree as a body that takes the files dropped on it, whose handler
     // the app keeps under `files` (`app.drop_files`).
     __taking_files: fn(self, files: Int) -> UINode Never! {
-        result := self.copy()
+        ^result: self.copy()
         result.files = files
         result
     }
@@ -226,7 +226,7 @@ UINode: struct {
     // (`app.drop_files` in a web build): a drop of files on one of its
     // leaves clicks `handler`, a button whose handler reads them.
     __taking_web_files: fn(self, handler: UINode) -> UINode Never! {
-        result := self.copy()
+        ^result: self.copy()
         result.web_files = handler.click
         result
     }
@@ -237,7 +237,7 @@ UINode: struct {
     // whose handler picks the value up. `kind` is the value's kind: its menu
     // offers the bodies that take the same kind.
     __dragging_in_page: fn(self, pick: UINode, kind: Int, label: String) -> UINode Never! {
-        result := self.copy()
+        ^result: self.copy()
         result.web_drag = Val(UIWebMove{click: pick.click, kind: kind, label: label.copy()})
         result
     }
@@ -248,7 +248,7 @@ UINode: struct {
     // up, if any, and refuses the drop otherwise. `kind` is the kind of
     // value it takes.
     __taking_drops_in_page: fn(self, taker: UINode, kind: Int, label: String) -> UINode Never! {
-        result := self.copy()
+        ^result: self.copy()
         result.web_zone = Val(UIWebMove{click: taker.click, kind: kind, label: label.copy()})
         result
     }
@@ -269,7 +269,7 @@ UINode: struct {
     // The tree as a body with a context menu, which the app keeps under
     // `menu` (`app.context_menu`).
     __with_menu: fn(self, menu: Int) -> UINode Never! {
-        result := self.copy()
+        ^result: self.copy()
         result.menu = menu
         result
     }
@@ -279,7 +279,7 @@ UINode: struct {
     // chooses, which clicks it; text is one that shows but can't be chosen;
     // any other node is a separator.
     __with_web_menu: fn(self, entries: [UINode]) -> UINode Never! {
-        result := self.copy()
+        ^result: self.copy()
         result.entries = entries
         result
     }
@@ -294,7 +294,7 @@ UINode: struct {
     // The tree as a body a person drags the value the app keeps under
     // `drag` with (`app.draggable`).
     __dragging: fn(self, drag: Int) -> UINode Never! {
-        result := self.copy()
+        ^result: self.copy()
         result.drag = drag
         result
     }
@@ -302,7 +302,7 @@ UINode: struct {
     // The tree as a body that takes the values dropped on it, whose handler
     // the app keeps under `zone` (`app.drop_zone`).
     __taking_drops: fn(self, zone: Int) -> UINode Never! {
-        result := self.copy()
+        ^result: self.copy()
         result.zone = zone
         result
     }
@@ -376,8 +376,8 @@ node: fn(label: String, width: Float, height: Float) -> UINode Never! {
 }
 
 box: fn(children: [UINode]) -> UINode Never! {
-    width := Float{0.0}
-    height := Float{0.0}
+    ^width: Float{0.0}
+    ^height: Float{0.0}
     loop child in children {
         // f64::max ignores a NaN operand; do not let it poison the width.
         if child.width > width -> width = child.width
@@ -425,7 +425,7 @@ button: fn(display: String) -> UINode Never! {
 // the button here, through the ButtonClick role. `label` names it to
 // assistive tech.
 #Builtin.Role(.ButtonClick) priv __button_click: fn(display: String, shortcut: UIShortcut?, label: String?, click: Int) -> UINode Never! {
-    result := button(display)
+    ^result: button(display)
     result.shortcut = shortcut
     if label == .Val(name) {
         result.accessibility = Val(UIAccessibility{name: Val(name), description: None, states: [UIAccessibilityState]{}})
@@ -438,7 +438,7 @@ button: fn(display: String) -> UINode Never! {
 // `on_drop:` form is `text_input_drop`; the `on_change:` form, with or
 // without `on_drop:`, is `text_input_change`.
 text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
-    result := leaf(state, Float{state.chars().len()}, 1.0, Val(UIAriaRole.TextInput), UINodeKind.TextInput, None)
+    ^result: leaf(state, Float{state.chars().len()}, 1.0, Val(UIAriaRole.TextInput), UINodeKind.TextInput, None)
     result.ime = Val(ime)
     result
 }
@@ -449,7 +449,7 @@ text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
 // using core.ui loads its declaration: the handler's patterns read the
 // labeled case payloads, and the drop adapter builds the item from them.
 #Builtin.Role(.TextInputDrop) priv text_input_drop: fn(state: String, ime: UIIMEMode, drop: Int) -> UINode Never! {
-    result := text_input(state, ime)
+    ^result: text_input(state, ime)
     result.drop = drop
     result
 }
@@ -460,7 +460,7 @@ text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
 // slot `drop` (0 for none), then builds the input here. Typing in it runs
 // the change handler on the input's new text.
 #Builtin.Role(.TextInputChange) priv text_input_change: fn(state: String, ime: UIIMEMode, change: Int, drop: Int) -> UINode Never! {
-    result := text_input(state, ime)
+    ^result: text_input(state, ime)
     result.change = change
     result.drop = drop
     result
@@ -515,7 +515,7 @@ aria_role_label: fn() -> UIAriaRole Never! { UIAriaRole.Label }
 aria_role_text_input: fn() -> UIAriaRole Never! { UIAriaRole.TextInput }
 
 node_accessibility: fn(n: UINode, metadata: UIAccessibility) -> UINode Never! {
-    result := n.copy()
+    ^result: n.copy()
     result.accessibility = Val(metadata)
     result
 }
@@ -525,14 +525,14 @@ node_color: fn(label: String, width: Float, height: Float, color: Color) -> UINo
 }
 
 node_role: fn(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode Never! {
-    kind := UINodeKind.Custom
+    ^kind: UINodeKind.Custom
     if role == .Button -> kind = UINodeKind.Button
     if role == .TextInput -> kind = UINodeKind.TextInput
     leaf(label, width, height, Val(role), kind, None)
 }
 
 node_shortcut: fn(n: UINode, shortcut: UIShortcut) -> UINode Never! {
-    result := n.copy()
+    ^result: n.copy()
     result.shortcut = Val(shortcut)
     result
 }
@@ -642,21 +642,21 @@ NullBackend: struct {
 
     // Places the next paints in `frame`.
     layout: fn(self, _tree: UINode, frame: Rect) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         layout_state(guard.value, frame)
     }
 
     // Records a fill (the node's color, else #000000) for each leaf but a
     // text, then its text, and refocuses on the interactive nodes found.
     paint: fn(self, tree: UINode) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         paint_state(guard.value, tree)
     }
 
     // Clears the commands, then measures `tree` within `constraint` (80 x
     // 24 cells when absent), lays it out at the origin and paints it.
     mount: fn(self, tree: UINode, constraint: SizeConstraint?{None}) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         guard.value.commands = [String]{}
         mount_state(guard.value, tree, constraint)
     }
@@ -664,13 +664,13 @@ NullBackend: struct {
     // Tab moves the focus to the next node of the ring; an empty key and a
     // resize to no area are Ignored.
     on_event: fn(self, event: InputEvent) -> EventResult {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         dispatch(guard.value, event)
     }
 
     // Makes `nodes` the focus ring, focused on its first node.
     set_focus_group: fn(self, nodes: [UINode]) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         focus_ring(guard.value, nodes)
     }
 
@@ -698,34 +698,34 @@ TUIBackend: struct {
 
     // Places the next paints in `frame` and clears a grid of its whole cells.
     layout: fn(self, _tree: UINode, frame: Rect) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         layout_state(guard.value, frame)
     }
 
     // Blanks the grid and writes each leaf's label into it, from its
     // frame's top-left cell, then refocuses on the interactive nodes found.
     paint: fn(self, tree: UINode) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         paint_state(guard.value, tree)
     }
 
     // Measures `tree` within `constraint` (80 x 24 cells when absent), lays
     // it out at the origin and paints it.
     mount: fn(self, tree: UINode, constraint: SizeConstraint?{None}) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         mount_state(guard.value, tree, constraint)
     }
 
     // Tab moves the focus to the next node of the ring and a resize lays
     // the grid out again; an empty key and a resize to no area are Ignored.
     on_event: fn(self, event: InputEvent) -> EventResult {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         dispatch(guard.value, event)
     }
 
     // Makes `nodes` the focus ring, focused on its first node.
     set_focus_group: fn(self, nodes: [UINode]) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         focus_ring(guard.value, nodes)
     }
 
@@ -739,9 +739,9 @@ TUIBackend: struct {
     frame_lines: fn(self) -> [String] {
         guard: self.state.guard_read()
         state: guard.value
-        lines := [String]{}
+        ^lines: [String]{}
         loop row in 0..<state.rows {
-            line := [U8]{}
+            ^line: [U8]{}
             loop col in 0..<state.cols -> push_scalar(line, state.cells[row * state.cols + col])
             lines.push((String.from_bytes(line) ?? "").trim_end())
         }
@@ -1200,7 +1200,7 @@ Window: struct {
     __menu_address: fn(self, service: String, path: String) -[Net, Time]> Bool {
         guard: self.state.guard_read()
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             return wayland.set_menu_address(connection.value, service, path)
         }
         false
@@ -1229,10 +1229,10 @@ Window: struct {
     // display server without wp_cursor_shape_v1 keeps its own cursor for
     // every shape but `.Hidden`.
     set_cursor: fn(self, cursor: UICursor) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         guard.value.cursor = cursor
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             wayland.set_cursor(connection.value, cursor)
         }
     }
@@ -1244,9 +1244,9 @@ Window: struct {
     set_app_id: fn(self, app_id: String) UIError! {
         if app_id == "" -> return Err(UIError.Invalid("an app_id is not empty"))
         if has_nul(app_id) -> return Err(UIError.Invalid("an app_id has no NUL byte"))
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             wayland.set_app_id(connection.value, app_id)
         }
         Ok()
@@ -1267,9 +1267,9 @@ Window: struct {
                 return Err(UIError.Size("a {image.side}x{image.side} icon image needs {image.side * image.side * 4} bytes of RGBA, got {image.pixels.len()}"))
             }
         }
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             return wayland.set_icon(connection.value, icon)
         }
         Ok()
@@ -1281,7 +1281,7 @@ Window: struct {
     clipboard_text: fn(self) -[Env, Net, Time]> String UIError! {
         guard: self.state.guard_read()
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             return wayland.clipboard_text(connection.value)
         }
         Ok(guard.value.clipboard.copy())
@@ -1292,9 +1292,9 @@ Window: struct {
     // display server takes a copy only from the window with the keyboard
     // focus.
     set_clipboard_text: fn(self, text: String) -[Net, Time]> UIError! {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             return wayland.set_clipboard_text(connection.value, text)
         }
         guard.value.clipboard = text.copy()
@@ -1310,7 +1310,7 @@ Window: struct {
     set_text_input: fn(self, area: UIRect?) -[Net, Time]> UIError! {
         guard: self.state.guard_read()
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             return wayland.set_text_input(connection.value, area)
         }
         Ok()
@@ -1345,19 +1345,19 @@ Window: struct {
     // it back. A headless window takes each state at once and keeps its
     // size.
     set_maximized: fn(self, maximized: Bool) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         guard.value.maximized = maximized
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             wayland.set_maximized(connection.value, maximized)
         }
     }
 
     set_fullscreen: fn(self, fullscreen: Bool) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         guard.value.fullscreen = fullscreen
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             wayland.set_fullscreen(connection.value, fullscreen)
         }
     }
@@ -1365,7 +1365,7 @@ Window: struct {
     minimize: fn(self) {
         guard: self.state.guard_read()
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             wayland.minimize(connection.value)
         }
     }
@@ -1506,11 +1506,11 @@ FrameCursor: struct {
         // they all fell outside, so its frames keep coming); a display server
         // that fails then records the failure and ends the frames.
         next: fn(^self) -[Env, Net, Time]> Frame? {
-            guard := self.state.guard_edit()
+            ^guard: self.state.guard_edit()
             if guard.value.drawn && !guard.value.presented {
                 if guard.value.link == .Val(link) {
                     damage: if guard.value.damage.len() > 0 -> guard.value.damage.copy() else -> [UIRect]{UIRect{x: 0, y: 0, width: 1, height: 1}}
-                    connection := link.guard_edit()
+                    ^connection: link.guard_edit()
                     if wayland.present(connection.value, guard.value.canvas.pixels, damage) == .Err(error) {
                         guard.value.failure = Val(error)
                         guard.value.closed = true
@@ -1521,12 +1521,12 @@ FrameCursor: struct {
             guard.value.presented = false
             guard.value.damage.clear()
             if guard.value.closed -> return None
-            events := [UIEvent]{}
+            ^events: [UIEvent]{}
             index: guard.value.frames
-            time_ns := 0
-            delta_ns := 0
+            ^time_ns: 0
+            ^delta_ns: 0
             if guard.value.link == .Val(link) {
-                connection := link.guard_edit()
+                ^connection: link.guard_edit()
                 events = wayland.next_frame(connection.value)
                 guard.value.width = connection.value.width()
                 guard.value.height = connection.value.height()
@@ -1637,10 +1637,10 @@ Frame: struct {
         if pixels.len() != self.width * self.height * 4 {
             return Err(UIError.Size("frame {self.index} needs {self.width * self.height * 4} bytes for {self.width}x{self.height} RGBA, got {pixels.len()}"))
         }
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         guard.value.presented = true
         if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
+            ^connection: link.guard_edit()
             return wayland.present(connection.value, pixels, damage)
         }
         guard.value.checksums.push(checksum(pixels))
@@ -1751,14 +1751,14 @@ Frame: struct {
 
     // Fills the frame with `color`, alpha included, without blending.
     clear_background: fn(self, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.clear_background(guard.value.canvas, color)
         internal.mark(guard.value, UIRect{x: 0, y: 0, width: self.width, height: self.height})
     }
 
     draw_pixel: fn(self, x: Int, y: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_pixel(guard.value.canvas, x, y, color)
         internal.mark(guard.value, UIRect{x: x, y: y, width: 1, height: 1})
@@ -1766,7 +1766,7 @@ Frame: struct {
 
     // A line; both endpoints are drawn.
     draw_line: fn(self, start_x: Int, start_y: Int, end_x: Int, end_y: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_line(guard.value.canvas, start_x, start_y, end_x, end_y, color)
         internal.mark(guard.value, internal.spanning(start_x, start_y, end_x, end_y))
@@ -1775,7 +1775,7 @@ Frame: struct {
     // A filled circle with a whole-pixel radius; a radius below 1 draws
     // nothing.
     draw_circle: fn(self, center_x: Int, center_y: Int, radius: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_circle(guard.value.canvas, center_x, center_y, radius, color)
         internal.mark(guard.value, UIRect{x: center_x - radius - 1, y: center_y - radius - 1, width: 2 * radius + 3, height: 2 * radius + 3})
@@ -1783,7 +1783,7 @@ Frame: struct {
 
     // The pixels of draw_circle's disc that touch a pixel outside it.
     draw_circle_lines: fn(self, center_x: Int, center_y: Int, radius: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_circle_lines(guard.value.canvas, center_x, center_y, radius, color)
         internal.mark(guard.value, UIRect{x: center_x - radius - 1, y: center_y - radius - 1, width: 2 * radius + 3, height: 2 * radius + 3})
@@ -1792,7 +1792,7 @@ Frame: struct {
     // The pixels at whole offsets (dx, dy) from the center with
     // (dx * radius_v)^2 + (dy * radius_h)^2 <= (radius_h * radius_v)^2.
     draw_ellipse: fn(self, center_x: Int, center_y: Int, radius_h: Float, radius_v: Float, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_ellipse(guard.value.canvas, center_x, center_y, radius_h, radius_v, color)
         internal.mark(guard.value, internal.around(Float{center_x} - radius_h, Float{center_y} - radius_v, Float{center_x} + radius_h, Float{center_y} + radius_v))
@@ -1800,7 +1800,7 @@ Frame: struct {
 
     // The pixels of draw_ellipse's area that touch a pixel outside it.
     draw_ellipse_lines: fn(self, center_x: Int, center_y: Int, radius_h: Float, radius_v: Float, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_ellipse_lines(guard.value.canvas, center_x, center_y, radius_h, radius_v, color)
         internal.mark(guard.value, internal.around(Float{center_x} - radius_h, Float{center_y} - radius_v, Float{center_x} + radius_h, Float{center_y} + radius_v))
@@ -1811,7 +1811,7 @@ Frame: struct {
     // less), in `segments` pieces; too few for one per 90 degrees picks a
     // count from the outer radius.
     draw_ring: fn(self, center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_ring(guard.value.canvas, center, inner_radius, outer_radius, start_angle, end_angle, segments, color)
         internal.mark(guard.value, internal.around(center.x - outer_radius, center.y - outer_radius, center.x + outer_radius, center.y + outer_radius))
@@ -1819,21 +1819,21 @@ Frame: struct {
 
     // The pixels of draw_ring's area that touch a pixel outside it.
     draw_ring_lines: fn(self, center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_ring_lines(guard.value.canvas, center, inner_radius, outer_radius, start_angle, end_angle, segments, color)
         internal.mark(guard.value, internal.around(center.x - outer_radius, center.y - outer_radius, center.x + outer_radius, center.y + outer_radius))
     }
 
     draw_rectangle: fn(self, x: Int, y: Int, width: Int, height: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle(guard.value.canvas, x, y, width, height, color)
         internal.mark(guard.value, internal.solid(x, y, width, height))
     }
 
     draw_rectangle_rec: fn(self, rec: Rect, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_rec(guard.value.canvas, rec, color)
         internal.mark(guard.value, internal.around(rec.x, rec.y, rec.x + rec.width, rec.y + rec.height))
@@ -1841,7 +1841,7 @@ Frame: struct {
 
     // A one-pixel border inside the rectangle.
     draw_rectangle_lines: fn(self, x: Int, y: Int, width: Int, height: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_lines(guard.value.canvas, x, y, width, height, color)
         internal.mark(guard.value, internal.solid(x, y, width, height))
@@ -1849,7 +1849,7 @@ Frame: struct {
 
     // A border `line_thick` wide inside the rectangle.
     draw_rectangle_lines_ex: fn(self, rec: Rect, line_thick: Float, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_lines_ex(guard.value.canvas, rec, line_thick, color)
         internal.mark(guard.value, internal.around(rec.x, rec.y, rec.x + rec.width, rec.y + rec.height))
@@ -1857,7 +1857,7 @@ Frame: struct {
 
     // `top` along the top edge, `bottom` along the bottom edge.
     draw_rectangle_gradient_v: fn(self, x: Int, y: Int, width: Int, height: Int, top: Color, bottom: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_gradient_v(guard.value.canvas, x, y, width, height, top, bottom)
         internal.mark(guard.value, internal.solid(x, y, width, height))
@@ -1865,7 +1865,7 @@ Frame: struct {
 
     // `left` along the left edge, `right` along the right edge.
     draw_rectangle_gradient_h: fn(self, x: Int, y: Int, width: Int, height: Int, left: Color, right: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_gradient_h(guard.value.canvas, x, y, width, height, left, right)
         internal.mark(guard.value, internal.solid(x, y, width, height))
@@ -1873,7 +1873,7 @@ Frame: struct {
 
     // The corner colors run counterclockwise from the top left.
     draw_rectangle_gradient_ex: fn(self, rec: Rect, top_left: Color, bottom_left: Color, bottom_right: Color, top_right: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_gradient_ex(guard.value.canvas, rec, top_left, bottom_left, bottom_right, top_right)
         internal.mark(guard.value, internal.around(rec.x, rec.y, rec.x + rec.width, rec.y + rec.height))
@@ -1883,7 +1883,7 @@ Frame: struct {
     // segment count below 4 picks one from the radius, and a roundness at
     // or below 0 draws the plain rectangle.
     draw_rectangle_rounded: fn(self, rec: Rect, roundness: Float, segments: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_rounded(guard.value.canvas, rec, roundness, segments, color)
         internal.mark(guard.value, internal.around(rec.x, rec.y, rec.x + rec.width, rec.y + rec.height))
@@ -1891,7 +1891,7 @@ Frame: struct {
 
     // A one-pixel band just outside the rounded rectangle.
     draw_rectangle_rounded_lines: fn(self, rec: Rect, roundness: Float, segments: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_rounded_lines(guard.value.canvas, rec, roundness, segments, color)
         internal.mark(guard.value, internal.around(rec.x, rec.y, rec.x + rec.width, rec.y + rec.height))
@@ -1900,7 +1900,7 @@ Frame: struct {
     // A filled triangle on integer vertices, in either winding; a
     // degenerate one draws nothing.
     draw_triangle: fn(self, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_triangle(guard.value.canvas, x0, y0, x1, y1, x2, y2, color)
         internal.mark(guard.value, internal.spanning(internal.min_of(x0, internal.min_of(x1, x2)), internal.min_of(y0, internal.min_of(y1, y2)), internal.max_of(x0, internal.max_of(x1, x2)), internal.max_of(y0, internal.max_of(y1, y2))))
@@ -1909,7 +1909,7 @@ Frame: struct {
     // A regular polygon with its first vertex at `rotation` degrees;
     // fewer than 3 sides draw 3.
     draw_poly: fn(self, center: Point, sides: Int, radius: Float, rotation: Float, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_poly(guard.value.canvas, center, sides, radius, rotation, color)
         internal.mark(guard.value, internal.around(center.x - radius, center.y - radius, center.x + radius, center.y + radius))
@@ -1917,7 +1917,7 @@ Frame: struct {
 
     // The pixels of draw_poly's area that touch a pixel outside it.
     draw_poly_lines: fn(self, center: Point, sides: Int, radius: Float, rotation: Float, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_poly_lines(guard.value.canvas, center, sides, radius, rotation, color)
         internal.mark(guard.value, internal.around(center.x - radius, center.y - radius, center.x + radius, center.y + radius))
@@ -1928,7 +1928,7 @@ Frame: struct {
     // ascent below that, the line starting at `x`; "\n" starts a line one
     // line height lower. Each pixel blends the color by the glyph's coverage.
     draw_text: fn(self, text: String, x: Int, y: Int, size: Int, color: Color) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         inked: draw.draw_text(guard.value.canvas, guard.value.typeset, text, x, y, size, color)
         internal.mark(guard.value, inked)
@@ -1938,7 +1938,7 @@ Frame: struct {
     // top-left at (x, y), src-over; an unknown region or an atlas without
     // a texture draws nothing.
     draw_sprite: fn(self, atlas: TextureAtlas, name: String, x: Int, y: Int) {
-        guard := self.state.guard_edit()
+        ^guard: self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_sprite(guard.value.canvas, atlas.atlas, name, x, y)
         internal.mark(guard.value, draw.sprite_bounds(atlas.atlas, name, x, y))
@@ -1987,7 +1987,7 @@ priv internal: module {
 
     // FNV-1a, 32-bit.
     checksum: fn(bytes: [U8]) -> Int {
-        hash := 2166136261
+        ^hash: 2166136261
         loop b in bytes -> hash = ((hash ~ Int{b}) * 16777619) & 4294967295
         hash
     }
@@ -2001,7 +2001,7 @@ priv internal: module {
     }
 
     without_key: fn(keys: [Key], key: Key) -> [Key] {
-        kept := [Key]{}
+        ^kept: [Key]{}
         loop held in keys {
             if held != key -> kept.push(held.copy())
         }
@@ -2009,7 +2009,7 @@ priv internal: module {
     }
 
     without_button: fn(buttons: [UIPointerButton], button: UIPointerButton) -> [UIPointerButton] {
-        kept := [UIPointerButton]{}
+        ^kept: [UIPointerButton]{}
         loop held in buttons {
             if held != button -> kept.push(held.copy())
         }
@@ -2091,15 +2091,15 @@ priv internal: module {
             if state.rows == 0 -> reset_cells(state, frame.width, frame.height)
             loop index in 0..<state.cells.len() -> state.cells[index] = 32
         }
-        leaves := [UIPlaced]{}
+        ^leaves: [UIPlaced]{}
         placed_leaves(tree, frame, leaves)
         loop leaf in leaves -> paint_leaf(state, leaf.node, leaf.frame)
         if ui_rt.web_attached() {
-            records := [String]{}
+            ^records: [String]{}
             loop leaf in leaves { records.push(scene_record(leaf.node, leaf.frame, leaf.held)) }
             ui_rt.web_scene(records.join(""))
         }
-        found := [UINode]{}
+        ^found: [UINode]{}
         collect_focus(tree, found)
         if found.len() > 0 {
             state.focus = found
@@ -2126,7 +2126,7 @@ priv internal: module {
             web_zone: if node.web_zone == None -> outer.web_zone.copy() else -> node.web_zone.copy(),
         }
         if node.kind == .Box {
-            at := frame.y
+            ^at: frame.y
             loop child in node.children {
                 placed_under(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, held, leaves)
                 at += child.height
@@ -2156,7 +2156,7 @@ priv internal: module {
     // from the origin at its own size, each unit `frame.scale` pixels.
     draw_tree: fn(frame: Frame, tree: UINode) Never! {
         frame.clear_background(Color{r: 255, g: 255, b: 255, a: 255})
-        leaves := [UIPlaced]{}
+        ^leaves: [UIPlaced]{}
         placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
         ink: Color{r: 0, g: 0, b: 0, a: 255}
         size: pixel(16.0, frame.scale)
@@ -2182,7 +2182,7 @@ priv internal: module {
     // as a click's or a drop's handler changes what the app shows through
     // the app's own state.
     window_input: fn(tree: ^UINode, frame: Frame, event: UIEvent, focused: ^Int) -> Bool Never! {
-        leaves := [UIPlaced]{}
+        ^leaves: [UIPlaced]{}
         placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
         ring: focus_ring_of(leaves)
         if focused >= ring.len() -> focused = -1
@@ -2257,8 +2257,8 @@ priv internal: module {
     // the index of each button and text input, and of the first leaf of
     // each dragged body (`UINode.__dragging`) that is neither.
     focus_ring_of: fn(leaves: [UIPlaced]) -> [Int] Never! {
-        ring := [Int]{}
-        reached := [Int]{}
+        ^ring: [Int]{}
+        ^reached: [Int]{}
         loop index in 0..<leaves.len() {
             placed: leaves[index]
             role: placed.node.role
@@ -2274,7 +2274,7 @@ priv internal: module {
 
     // `UINode.__focused_text`.
     focused_input: fn(tree: UINode, focused: Int) -> String? Never! {
-        leaves := [UIPlaced]{}
+        ^leaves: [UIPlaced]{}
         placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
         ring: focus_ring_of(leaves)
         if focused < 0 || focused >= ring.len() -> return None
@@ -2285,7 +2285,7 @@ priv internal: module {
 
     // `UINode.__focused_drag`.
     focused_drag: fn(tree: UINode, focused: Int) -> Int Never! {
-        leaves := [UIPlaced]{}
+        ^leaves: [UIPlaced]{}
         placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
         ring: focus_ring_of(leaves)
         if focused < 0 || focused >= ring.len() -> return 0
@@ -2298,7 +2298,7 @@ priv internal: module {
     // `UINode.__set_focused_text`.
     set_focused_input: fn(tree: ^UINode, focused: Int, text: String) -> Bool Never! {
         if focused_input(tree, focused) == None -> return false
-        leaves := [UIPlaced]{}
+        ^leaves: [UIPlaced]{}
         placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
         ring: focus_ring_of(leaves)
         edited(tree, leaves, ring[focused], text)
@@ -2310,7 +2310,7 @@ priv internal: module {
     // on it: typing, Backspace and an edit menu's Cut all edit it so.
     edited: fn(tree: ^UINode, leaves: [UIPlaced], index: Int, text: String) Never! {
         change: leaves[index].node.change
-        seen := 0
+        ^seen: 0
         tree = retyped(tree, index, seen, text)
         if change != 0 -> ui_rt.change(change, text)
     }
@@ -2336,7 +2336,7 @@ priv internal: module {
             return 0
         }
         if node.kind == .Box {
-            at := frame.y
+            ^at: frame.y
             loop child in node.children {
                 inner: held_at(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, x, y, held)
                 if inner != 0 -> return inner
@@ -2356,7 +2356,7 @@ priv internal: module {
     zone_place: fn(node: UINode, frame: Rect, zone: Int) -> Rect? Never! {
         if node.zone == zone -> return Val(frame)
         if node.kind != .Box -> return None
-        at := frame.y
+        ^at: frame.y
         loop child in node.children {
             found: zone_place(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, zone)
             if found != None -> return found
@@ -2370,7 +2370,7 @@ priv internal: module {
     // at the width `text_input` gives it; a box is as wide as its widest
     // child, as `box` makes it.
     retyped: fn(node: UINode, target: Int, seen: ^Int, label: String) -> UINode Never! {
-        result := node.copy()
+        ^result: node.copy()
         if node.kind != .Box {
             if seen == target {
                 result.label = label.copy()
@@ -2391,7 +2391,7 @@ priv internal: module {
     // The modifier keys `frame` holds down, in a shortcut's bits: Control 1,
     // Alt 2, Shift 4, Meta (the Super key) 8.
     held_modifiers: fn(frame: Frame) -> Int Never! {
-        bits := 0
+        ^bits: 0
         if frame.is_key_down(.Control) -> bits += 1
         if frame.is_key_down(.Alt) -> bits += 2
         if frame.is_key_down(.Shift) -> bits += 4
@@ -2518,7 +2518,7 @@ priv internal: module {
     float_text: fn(value: Float) -> String Never! {
         shown: "{value}"
         raw: shown.bytes()
-        exponent_at := -1
+        ^exponent_at: -1
         loop (index, b) in raw {
             if b == (U8{101}) -> exponent_at = index
         }
@@ -2527,21 +2527,21 @@ priv internal: module {
             return shown
         }
         negative: raw[0] == U8{45}
-        digits := [U8]{}
-        point := -1
+        ^digits: [U8]{}
+        ^point: -1
         loop index in (if negative -> 1 else -> 0)..<exponent_at {
             if raw[index] == (U8{46}) -> point = digits.len() else -> digits.push(raw[index])
         }
         if point < 0 -> point = digits.len()
-        exponent := 0
-        below := false
+        ^exponent: 0
+        ^below: false
         loop index in (exponent_at + 1)..<raw.len() {
             if raw[index] == (U8{45}) -> below = true else {
                 exponent = exponent * 10 + Int{raw[index]} - 48
             }
         }
         place: if below -> point - exponent else -> point + exponent
-        out := [U8]{}
+        ^out: [U8]{}
         if negative -> out.push(U8{45})
         if place <= 0 {
             out.push(U8{48})
@@ -2586,7 +2586,7 @@ priv internal: module {
         taking: held.web_zone ?? UIWebMove{click: 0, kind: 0, label: ""}
         moves: "{moving.click}\t{moving.kind}\t{taking.click}\t{taking.kind}"
         role: scene_role(node)
-        record := "{scene_kind(node)}\t{node.click}\t{node.drop}\t{node.change}\t{held.files}\t{held.menu.len()}\t{moves}\t{place}\t{color}\t{role}\t{node.label.bytes().len()}\t{node.label}\n"
+        ^record: "{scene_kind(node)}\t{node.click}\t{node.drop}\t{node.change}\t{held.files}\t{held.menu.len()}\t{moves}\t{place}\t{color}\t{role}\t{node.label.bytes().len()}\t{node.label}\n"
         if role != "" {
             name: scene_name(node)
             record = "{record}{name.bytes().len()}\t{name}\n"
@@ -2644,7 +2644,7 @@ priv(package) html: module {
         painted: if tree.color == .Val(fill) -> " style=\"color:{fill.to_hex()}\"" else -> ""
         if tree.kind == {
             .Box -> {
-                parts := [String]{}
+                ^parts: [String]{}
                 loop child in tree.children -> parts.push(node(child))
                 "<div{named}{painted}>{parts.join("")}</div>"
             }
@@ -2721,11 +2721,11 @@ priv html_name: fn(tree: UINode) -> String Never! {
         [UIEvent]{.KeyDown(.Tab), .Drop{x: 1, y: 1, items: [UIDropItem]{.Text{value: "dropped"}}}},
     }
     window: headless(width: 40, height: 24, script: script) ?? panic("headless")
-    tree := box([text("Name"), text_input("ab", .Native), button("Go")])
-    focused := -1
-    seen := [String]{}
+    ^tree: box([text("Name"), text_input("ab", .Native), button("Go")])
+    ^focused: -1
+    ^seen: [String]{}
     loop frame in window.frames() {
-        changed := false
+        ^changed: false
         loop event in frame.events() {
             if tree.__input(frame, event, focused) -> changed = true
         }
@@ -2765,7 +2765,7 @@ priv html_name: fn(tree: UINode) -> String Never! {
     if internal.zone_place(board, over, 6) == .Val(_) -> assert(false)
     // The keyboard reaches the card through its first leaf that is not a
     // button, then its button.
-    leaves := [UIPlaced]{}
+    ^leaves: [UIPlaced]{}
     internal.placed_leaves(board, over, leaves)
     assert_eq(internal.focus_ring_of(leaves), [Int]{1, 2})
     assert_eq(internal.focused_drag(board, 0), 4)
@@ -2848,7 +2848,7 @@ priv html_name: fn(tree: UINode) -> String Never! {
         [UIEvent]{.KeyDown(.Up), .PointerDown(.Right), .Focus(false)},
     }
     window: headless(width: 8, height: 8, script: script) ?? panic("headless")
-    seen := [String]{}
+    ^seen: [String]{}
     loop frame in window.frames() {
         if frame.index > 3 -> break
         keys: "{frame.is_key_down(.Left)} {frame.is_key_pressed(.Left)} {frame.is_key_released(.Left)} {frame.is_key_up(.Up)}"
@@ -2878,7 +2878,7 @@ priv html_name: fn(tree: UINode) -> String Never! {
     assert(window.maximized() && window.fullscreen())
     window.set_maximized(false)
     assert(!window.maximized() && window.fullscreen())
-    seen := [UIEvent]{}
+    ^seen: [UIEvent]{}
     loop frame in window.frames() {
         loop event in frame.events() -> seen.push(event)
     }
@@ -2888,7 +2888,7 @@ priv html_name: fn(tree: UINode) -> String Never! {
 }
 
 #Test("images, collisions and text measure without a window") {
-    image := gen_image_checked(2, 1, 1, 1, Color{r: 1, g: 2, b: 3, a: 255}, Color{r: 4, g: 5, b: 6, a: 255})
+    ^image: gen_image_checked(2, 1, 1, 1, Color{r: 1, g: 2, b: 3, a: 255}, Color{r: 4, g: 5, b: 6, a: 255})
     image_flip_horizontal(image)
     assert(get_image_color(image, 0, 0) == Color{r: 4, g: 5, b: 6, a: 255})
     image_crop(image, rect(1.0, 0.0, 1.0, 1.0))
@@ -2903,7 +2903,7 @@ priv html_name: fn(tree: UINode) -> String Never! {
 }
 
 #Test("a frame's damage joins near rectangles and keeps far ones apart") {
-    rects := [UIRect]{}
+    ^rects: [UIRect]{}
     wayland.grow_damage(rects, UIRect{x: 0, y: 0, width: 10, height: 10})
     // 15 is within 8 of the first's right edge, 10: one rectangle.
     wayland.grow_damage(rects, UIRect{x: 15, y: 0, width: 5, height: 5})
@@ -2922,11 +2922,11 @@ priv html_name: fn(tree: UINode) -> String Never! {
     // least for its neighbor at 6300, and the two join as
     // (6300, 500, 101, 1), 99 past the next at 6200. Sixty-four rectangles
     // stay, covering 63 + 101 pixels.
-    apart := [UIRect]{}
+    ^apart: [UIRect]{}
     loop k in 0..<65 -> wayland.grow_damage(apart, UIRect{x: k * 100, y: 500, width: 1, height: 1})
     assert_eq(apart.len(), 64)
-    covered := 0
-    joined := 0
+    ^covered: 0
+    ^joined: 0
     loop r in apart {
         covered += r.width * r.height
         if r == UIRect{x: 6300, y: 500, width: 101, height: 1} -> joined += 1
@@ -2956,7 +2956,9 @@ priv html_name: fn(tree: UINode) -> String Never! {
 // ---- screen-local and saved state ----
 
 priv UI_SAVED_STORE: "ui-saved"
+
 priv UI_WEB_DEVICE_STORAGE: 23
+
 priv UI_SAVED_KEY_PREFIX: "jet:ui:saved:"
 
 priv UILocalBox: struct<T> {
@@ -2974,6 +2976,7 @@ priv UISavedCell: struct {
 }
 
 priv UI_SAVED_SCOPE: Shared{UISavedScope{scope: "screen", next_slot: 0, version: 0}}
+
 priv UI_SAVED_CELL: Shared{UISavedCell{bytes: [U8]{}}}
 
 /// Screen-local state created by `ui.local` or `ui.saved`. Reading `get()`
@@ -2995,9 +2998,7 @@ Local: struct<T> {
         ui_local_write<T>(self.slot, value.copy())
         if self.persisted {
             if self.encode_value == .Val(encoder) {
-                if encoder(value) == .Val(encoded) {
-                    ui_saved_store_set(self.key, encoded)
-                }
+                if encoder(value) == .Val(encoded) -> ui_saved_store_set(self.key, encoded)
             }
         }
         ui_saved_bump()
@@ -3005,7 +3006,7 @@ Local: struct<T> {
 }
 
 priv ui_local_write: fn<T>(slot: Shared<UILocalBox<T>>, value: T) Never! {
-    held := slot.guard_edit()
+    ^held: slot.guard_edit()
     held.value.value = value
 }
 
@@ -3021,11 +3022,9 @@ local: fn<T>(initial: T) -> Local<T> Never! {
 /// the current screen and its position (or an explicit `key:`).
 saved: fn<T: [Encode, Decode]>(initial: T, key: String?{None}) -> Local<T> Never! {
     slot_key: ui_saved_next_key(key)
-    loaded := initial
+    ^loaded: initial
     if ui_saved_store_get(slot_key) == .Val(raw) {
-        if json.decode<T>(raw) == .Ok(decoded) {
-            loaded = decoded
-        }
+        if json.decode<T>(raw) == .Ok(decoded) -> loaded = decoded
     }
     encoder: fn(value: T) -> String? {
         if json.to_string<T>(value) == {
@@ -3038,14 +3037,14 @@ saved: fn<T: [Encode, Decode]>(initial: T, key: String?{None}) -> Local<T> Never
 
 // Opens a screen render pass for `scope`, resetting positional slot numbering.
 saved_scope_begin: fn(scope: String) Never! {
-    held := UI_SAVED_SCOPE.guard_edit()
+    ^held: UI_SAVED_SCOPE.guard_edit()
     held.value.scope = scope.copy()
     held.value.next_slot = 0
 }
 
 // Ends the current screen render pass.
 saved_scope_end: fn() Never! {
-    held := UI_SAVED_SCOPE.guard_edit()
+    ^held: UI_SAVED_SCOPE.guard_edit()
     held.value.scope = "screen"
     held.value.next_slot = 0
 }
@@ -3073,7 +3072,7 @@ saved_clear: fn() Never! {
 }
 
 priv ui_saved_next_key: fn(explicit: String?) -> String Never! {
-    held := UI_SAVED_SCOPE.guard_edit()
+    ^held: UI_SAVED_SCOPE.guard_edit()
     scope: held.value.scope.copy()
     if explicit == .Val(name) -> return "{scope}:{name}"
     slot: held.value.next_slot
@@ -3082,7 +3081,7 @@ priv ui_saved_next_key: fn(explicit: String?) -> String Never! {
 }
 
 priv ui_saved_bump: fn() Never! {
-    held := UI_SAVED_SCOPE.guard_edit()
+    ^held: UI_SAVED_SCOPE.guard_edit()
     held.value.version += 1
 }
 
@@ -3098,7 +3097,9 @@ priv ui_saved_web_get: fn(key: String) -> String? Never! {
 }
 
 priv ui_saved_web_set: fn(key: String, value: String) Never! {
-    if ui_saved_web_ask("session", "set", key, value) != None -> return
+    if ui_saved_web_ask("session", "set", key, value) != None {
+        return
+    }
     _: ui_saved_web_ask("local", "set", key, value)
 }
 
@@ -3116,7 +3117,7 @@ priv ui_saved_bytes_replace: fn(expected: [U8], replacement: ^^[U8]) -> Bool Nev
     if rt_web.device_replace(UI_SAVED_STORE, expected, replacement) == .Val(replaced) {
         return replaced
     }
-    held := UI_SAVED_CELL.guard_edit()
+    ^held: UI_SAVED_CELL.guard_edit()
     if held.value.bytes != expected -> return false
     held.value.bytes = replacement.move()
     true
@@ -3147,10 +3148,12 @@ priv ui_saved_store_set: fn(key: String, encoded: String) Never! {
         .Linux | .MacOS | .Windows | .Wasm | .Freestanding -> {
             loop {
                 expected: ui_saved_bytes_load()
-                entries := ui_saved_decode_map(expected)
+                ^entries: ui_saved_decode_map(expected)
                 entries[key.copy()] = encoded.copy()
                 text: json.to_string<[String:String]>(entries) ?? return
-                if ui_saved_bytes_replace(expected, text.bytes()) -> return
+                if ui_saved_bytes_replace(expected, text.bytes()) {
+                    return
+                }
             }
         }
     }

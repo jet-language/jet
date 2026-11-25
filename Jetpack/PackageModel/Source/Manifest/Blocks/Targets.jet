@@ -125,8 +125,8 @@ PackageTargets: struct {
     }
 
     from_selections: fn(selections: [TargetProfileSelection]) -> PackageTargets TargetProfileError! {
-        by_name := [String:TargetProfileSelection]{}
-        profiles := [String]{}
+        ^by_name: [String:TargetProfileSelection]{}
+        ^profiles: [String]{}
         loop selection in selections {
             name: selection.name.trim()
             if name == "" -> return Err(TargetProfileError{detail: "target name must not be empty"})
@@ -157,7 +157,7 @@ PackageTargets: struct {
 
     // Selections in target-name order.
     iter: fn(self) -> [TargetProfileSelection] Never! {
-        out := [TargetProfileSelection]{}
+        ^out: [TargetProfileSelection]{}
         loop name in pkg_manifest_sorted(self.selections.keys().to_list()) {
             out.push(self.selections[name])
         }
@@ -172,7 +172,7 @@ PackageTargets: struct {
 }
 
 pkg_target_profile_entries: fn(body: String) -> [ManifestEntry] PackageParseError! {
-    entries := [ManifestEntry]{}
+    ^entries: [ManifestEntry]{}
     loop piece in pkg_top_level_lines_or_commas(body) {
         entry: piece.trim()
         if entry == "" -> next
@@ -188,15 +188,15 @@ pkg_parse_target_profiles: fn(body: String) -> PackageTargets PackageParseError!
     if entries.len() == 0 {
         return Err(PackageParseError.BadTargetField{name: "targets", detail: "the `targets` block must declare at least one target"})
     }
-    selections := [TargetProfileSelection]{}
+    ^selections: [TargetProfileSelection]{}
     loop entry in entries {
         name: pkg_unquote(entry.key)
         if name == "" {
             return Err(PackageParseError.BadTargetField{name: "targets", detail: "target names must not be empty"})
         }
         inner: (pkg_strip_wrapped(entry.value.trim(), "{{", "}}") ?? return Err(PackageParseError.BadTargetField{name: name, detail: "target selection must be a record containing only `profile`"})).trim()
-        profile := TargetProfileIdentity?{None}
-        seen := [String]{}
+        ^profile: TargetProfileIdentity?{None}
+        ^seen: [String]{}
         loop field in pkg_target_profile_entries(inner) {
             if seen.contains(field.key) {
                 return Err(PackageParseError.BadTargetField{name: name, detail: "target field `{field.key}` is declared more than once"})
@@ -221,7 +221,7 @@ pkg_parse_target_profiles: fn(body: String) -> PackageTargets PackageParseError!
 
 // Parse the body of `packages: { name: executable, lib: { targets: [...] } }`.
 pkg_parse_packages: fn(body: String) -> [PackageEntry] PackageParseError! {
-    packages := [PackageEntry]{}
+    ^packages: [PackageEntry]{}
     loop piece in pkg_top_level_commas(body) {
         entry: piece.trim()
         if entry == "" -> next
@@ -244,8 +244,8 @@ pkg_parse_packages: fn(body: String) -> [PackageEntry] PackageParseError! {
 }
 
 pkg_parse_target: fn(name: String, value: String) -> PackageTarget PackageParseError! {
-    keyword := value.trim()
-    block := String?{None}
+    ^keyword: value.trim()
+    ^block: String?{None}
     if value.split_once("{{") == {
         .Val(parts) -> {
             keyword = parts.before.trim()
@@ -275,7 +275,7 @@ pkg_parse_target: fn(name: String, value: String) -> PackageTarget PackageParseE
 }
 
 pkg_validate_target_block: fn(name: String, body: String) PackageParseError! {
-    seen := [String]{}
+    ^seen: [String]{}
     loop entry in pkg_key_value_entries(body) {
         if seen.contains(entry.key) {
             return Err(PackageParseError.BadTargetField{name: name, detail: "target field `{entry.key}` is declared more than once"})
@@ -288,8 +288,8 @@ pkg_validate_target_block: fn(name: String, body: String) PackageParseError! {
 }
 
 pkg_validate_plugin_block: fn(name: String, body: String) -> String? PackageParseError! {
-    export := String?{None}
-    seen := [String]{}
+    ^export: String?{None}
+    ^seen: [String]{}
     loop entry in pkg_key_value_entries(body) {
         if seen.contains(entry.key) {
             return Err(PackageParseError.BadTargetField{name: name, detail: "sandbox field `{entry.key}` is declared more than once"})
@@ -316,7 +316,7 @@ pkg_parse_package_entry_block: fn(name: String, body: String) -> [PackageTarget]
 
 pkg_parse_targets_list: fn(name: String, value: String) -> [PackageTarget] PackageParseError! {
     inner: pkg_strip_wrapped(value, "[", "]") ?? value
-    targets := [PackageTarget]{}
+    ^targets: [PackageTarget]{}
     loop piece in pkg_top_level_commas(inner) {
         entry: piece.trim()
         if entry == "" -> next

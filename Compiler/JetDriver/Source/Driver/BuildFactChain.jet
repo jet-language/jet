@@ -32,7 +32,7 @@ jet_driver_setting_writers: fn(load: JetDriverLoadResult, package: JetDriverPack
     name: jet_driver_setting_name(load, package, setting)
     key: "Build.Settings.{name}"
     no_site: Span{start: 0, end: 0}
-    writers := [JetDriverSettingWriter]{}
+    ^writers: [JetDriverSettingWriter]{}
     writers.push(jet_driver_setting_writer(key, setting.ty, setting.default, ContributionLayer.Declaration, SourceScope.Package, "{jet_driver_writer_label(load, package)}:settings.{setting.name} (default)", None, package.manifest_path ?? "", setting.span))
     if package.identity != load.package_identity {
         jet_driver_entry_setting_writers(load, package, setting, key, ContributionLayer.DependencyEntry, writers)
@@ -128,7 +128,7 @@ jet_driver_setting_target: fn(load: JetDriverLoadResult, name: String) -> JetDri
 }
 
 jet_driver_setting_writer: fn(key: String, ty: String, text: String, layer: ContributionLayer, scope: SourceScope, source: String, reason: String?, file: String, span: Span) -> JetDriverSettingWriter Never! {
-    contribution := FactContribution.new(key, jet_driver_setting_fact_value(ty, text), scope, layer, source)
+    ^contribution: FactContribution.new(key, jet_driver_setting_fact_value(ty, text), scope, layer, source)
     contribution.reason = reason
     JetDriverSettingWriter{contribution: contribution, text: text, file: file, span: span}
 }
@@ -151,7 +151,7 @@ jet_driver_setting_effective: fn(setting: JetDriverPackageSetting, writers: [Jet
 // the law refuses the chain, its last writer stands in (the refusal is
 // reported by jet_driver_setting_writer_diagnostics).
 jet_driver_setting_selected: fn(writers: [JetDriverSettingWriter]) -> Int Never! {
-    contributions := [FactContribution]{}
+    ^contributions: [FactContribution]{}
     loop writer in writers -> contributions.push(writer.contribution)
     jet_driver_contribution_selected(contributions) ?? writers.len() - 1
 }
@@ -159,7 +159,7 @@ jet_driver_setting_selected: fn(writers: [JetDriverSettingWriter]) -> Int Never!
 // The index in `contributions` of the one the contribution law selects, the
 // last when the law resolves no fact; None when the law refuses the chain.
 jet_driver_contribution_selected: fn(contributions: [FactContribution]) -> Int? Never! {
-    at := contributions.len() - 1
+    ^at: contributions.len() - 1
     if at < 0 -> return Val(at)
     if pkg_fact_resolve(FactKey.new(contributions[0].key), contributions) == {
         .Ok(resolved) -> {
@@ -186,13 +186,13 @@ jet_driver_contribution_selected: fn(contributions: [FactContribution]) -> Int? 
 // stay the same whatever profile or `--set` a run takes. A load that fails,
 // or a chain the law refuses, records none; the compile reports why.
 jet_driver_overridden_entry_writers: fn(request: JetDriverCompileRequest) -> [FactContribution] Never! {
-    overridden := [FactContribution]{}
+    ^overridden: [FactContribution]{}
     load: jet_driver_load_reach(request, false) ?? return overridden
     if !load.complete || jet_driver_has_errors(load.diagnostics) -> return overridden
     loop package in load.packages {
         if package.identity == load.package_identity -> next
         loop setting in package.settings {
-            contributions := [FactContribution]{}
+            ^contributions: [FactContribution]{}
             writers: jet_driver_setting_writers(load, package, setting, request)
             loop writer in writers.move() {
                 layer: writer.contribution.layer
@@ -241,7 +241,7 @@ jet_driver_setting_fact_value: fn(ty: String, text: String) -> FactValue Never! 
     if declared == "String" -> return FactValue.Text{value: jet_driver_setting_unquoted(raw, "\"")}
     if declared == "Char" {
         body: jet_driver_setting_unquoted(raw, "'")
-        chars := [Char]{}
+        ^chars: [Char]{}
         loop ch in body.chars() -> chars.push(ch)
         if chars.len() == 1 -> return FactValue.Char{value: chars[0]}
         return FactValue.Text{value: raw}
@@ -293,7 +293,7 @@ jet_driver_entry_package: fn(load: JetDriverLoadResult) -> Int? Never! {
 // disagree with no more explicit writer. Every compile checks every chain,
 // `--set` or not. Empty when every writer stands.
 jet_driver_setting_writer_diagnostics: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> [Diagnostic] Never! {
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop override in request.setting_overrides {
         if jet_driver_setting_target(load, override.name) != None -> next
         writer: "`--set {override.name}={override.value}`"
@@ -341,7 +341,7 @@ jet_driver_undeclared_setting_why: fn(load: JetDriverLoadResult, name: String, w
 // `fast`", or "no settings".
 jet_driver_setting_names_text: fn(settings: [JetDriverPackageSetting]) -> String Never! {
     if settings.len() == 0 -> return "no settings"
-    names := [String]{}
+    ^names: [String]{}
     loop setting in settings -> names.push("`{setting.name}`")
     names.join(", ")
 }
@@ -369,17 +369,19 @@ JetDriverBuildFactExplanation: struct {
 // build snapshot folds (jet_driver_build_facts), resolved through the
 // contribution law and recorded as the build-fact producer's derivation.
 jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String) -> JetDriverBuildFactExplanation {
-    load := jet_driver_load_reach(request, false)
+    ^load: jet_driver_load_reach(request, false)
     if !load.complete || jet_driver_has_errors(load.diagnostics) {
         return JetDriverBuildFactExplanation{derivation: None, diagnostics: load.diagnostics}
     }
     refusals: jet_driver_setting_writer_diagnostics(load, request)
-    if refusals.len() > 0 -> return JetDriverBuildFactExplanation{derivation: None, diagnostics: refusals}
-    diagnostics := [Diagnostic]{}
+    if refusals.len() > 0 {
+        return JetDriverBuildFactExplanation{derivation: None, diagnostics: refusals}
+    }
+    ^diagnostics: [Diagnostic]{}
     target: jet_driver_selected_target_machine(request, diagnostics) ?? return JetDriverBuildFactExplanation{derivation: None, diagnostics: diagnostics}
     facts: jet_driver_build_facts(load, request, target)
     package: jet_driver_entry_package(load)
-    contributions := [FactContribution]{}
+    ^contributions: [FactContribution]{}
     if key.starts_with("Build.Settings.") {
         name: key.removeprefix("Build.Settings.")
         if jet_driver_setting_target(load, name) == .Val(declared) {
@@ -392,7 +394,9 @@ jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String)
             undeclared: jet_driver_diagnostic_without_span("E0302", "`#build.settings.{name}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{name}: Type = default` to the package `settings: {{ … }}` block")
             return JetDriverBuildFactExplanation{derivation: None, diagnostics: [Diagnostic]{undeclared}}
         }
-    } else { contributions = jet_driver_fixed_fact_writers(key, facts, target, load, package, request) }
+    } else {
+        contributions = jet_driver_fixed_fact_writers(key, facts, target, load, package, request)
+    }
     if pkg_fact_resolve(FactKey.new(key), contributions) == {
         .Ok(resolved) -> {
             derivation: if resolved == .Val(fact) -> Val(jet_driver_build_fact_derivation(fact, request.profile, target.triple)) else -> None
@@ -451,7 +455,7 @@ jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, machine: T
         }
         "Build.OS" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.os}, "<target>")}
         "Build.Profile" -> {
-            writers := [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: JET_BUILD_DEFAULT_PROFILE}, "<default>")}
+            ^writers: [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: JET_BUILD_DEFAULT_PROFILE}, "<default>")}
             if facts.profile != JET_BUILD_DEFAULT_PROFILE {
                 writers.push(FactContribution.new(key, FactValue.Text{value: facts.profile}, SourceScope.Package, ContributionLayer.CommandLine, "command line:--profile={facts.profile}"))
             }

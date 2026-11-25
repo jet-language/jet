@@ -57,7 +57,7 @@ Replayed: struct {
 }
 
 without_ts: fn(line: String) -> String {
-    kept := [String]{}
+    ^kept: [String]{}
     loop piece in line.split(",") {
         if piece.starts_with("\"ts\":") {
             if piece.ends_with("}}") && kept.len() > 0 {
@@ -73,7 +73,7 @@ without_ts: fn(line: String) -> String {
 
 // A record's own fields as typed log fields; a redacted one stays redacted.
 record_fields: fn(row: Dyn) -> [LogField] {
-    fields := [LogField]{}
+    ^fields: [LogField]{}
     loop key in row.keys() {
         if RECORD_MEMBERS.contains(key) -> next
         if row[key] == {
@@ -97,18 +97,18 @@ record_fields: fn(row: Dyn) -> [LogField] {
 span_id: fn(index: Int) -> String { "{"0".repeat(15)}{index + 1}" }
 
 replay: fn(rows: [Dyn]) -> [Replayed] {
-    spans := [Replayed]{}
+    ^spans: [Replayed]{}
     loop (at, row) in rows {
-        names := [String]{}
+        ^names: [String]{}
         if row.get("spans") == .Val(.Array(items)) {
             loop item in items {
                 if item == .Text(name) -> names.push(name)
             }
         }
-        parent := ""
+        ^parent: ""
         loop depth in 0..<names.len() {
             path: if parent == "" -> names[depth] else -> "{parent}/{names[depth]}"
-            found := -1
+            ^found: -1
             loop (index, span) in spans {
                 if span.path == path -> found = index
             }
@@ -133,7 +133,7 @@ run: fn() {
     log.sample_every(1)
     log.set_trace_id("trace-42")
 
-    emitted := 0
+    ^emitted: 0
     request: log.span("request")
     log.info_fields("received", [log.field("route", "/login"), log.redact("password")])
     emitted += 1
@@ -157,7 +157,7 @@ run: fn() {
     log.flush()
 
     text: files.read(path) ?? panic("read trace")
-    records := 0
+    ^records: 0
     loop line in text.split("\n") {
         if line.len() == 0 -> next
         records += 1
@@ -167,9 +167,9 @@ run: fn() {
 
     rows: jsonl.parse(text) ?? panic("parse trace")
     replayed: replay(rows)
-    buffer := SpanBuffer{capacity: SPAN_BUFFER_CAPACITY, spans: [TraceSpan]{}, dropped: 0}
+    ^buffer: SpanBuffer{capacity: SPAN_BUFFER_CAPACITY, spans: [TraceSpan]{}, dropped: 0}
     loop (index, span) in replayed {
-        parent := ""
+        ^parent: ""
         loop (other, around) in replayed {
             if around.path == span.parent -> parent = span_id(other)
         }

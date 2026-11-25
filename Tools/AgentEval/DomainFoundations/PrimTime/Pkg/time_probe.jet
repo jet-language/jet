@@ -21,9 +21,9 @@ ExchangeCalendar: struct {
 }
 
 add_business_days: fn(cal: ExchangeCalendar, start: LocalDate, count: Int) -> LocalDate {
-    current := start
-    remaining := count
-    step := 1
+    ^current: start
+    ^remaining: count
+    ^step: 1
     if {
         count < 0 -> { step = -1 }
     }
@@ -48,10 +48,10 @@ DailySchedule: struct {
 }
 
 occurrences: fn(schedule: DailySchedule, start: LocalDate, days: Int) -> [ZonedDateTime] {
-    out := [ZonedDateTime]{}
+    ^out: [ZonedDateTime]{}
     local: time.zoned_local(start, time.time(schedule.hour, schedule.minute, 0), schedule.zone) ?? panic("schedule start")
-    current := local
-    i := 0
+    ^current: local
+    ^i: 0
     loop i < days {
         out.push(current.copy())
         current = current.add_period(time.period_days(1))
@@ -81,8 +81,8 @@ date_key: fn(date: LocalDate) -> Int {
 }
 
 normalize: fn(seconds: Int, nanoseconds: Int, scale: String) -> AstroTime {
-    s := seconds
-    n := nanoseconds
+    ^s: seconds
+    ^n: nanoseconds
     loop n >= 1_000_000_000 {
         n -= 1_000_000_000
         s += 1
@@ -128,7 +128,7 @@ leap_entries: fn() -> [LeapEntry] {
 }
 
 tai_minus_utc: fn(date: LocalDate) -> Int {
-    offset := 0
+    ^offset: 0
     entries: leap_entries()
     loop entry in entries {
         if date_key(date) >= entry.key -> offset = entry.offset_seconds
@@ -141,8 +141,8 @@ utc_to_tai: fn(dt: DateTime) -> AstroTime {
 }
 
 tai_to_utc: fn(value: AstroTime) -> DateTime {
-    offset := 0
-    i := 0
+    ^offset: 0
+    ^i: 0
     loop i < 3 {
         candidate: time.from_unix_seconds(value.seconds - offset)
         offset = tai_minus_utc(candidate.date())

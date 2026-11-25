@@ -27,19 +27,19 @@ BOARD: Shared{Board{tasks: 3, runs: 0}}
 my_tasks: fn(board: String) -[DB.Read]> String BoardError! {
     if board == "" -> return Err(BoardError.NoBoard)
     who: app.caller()
-    state := BOARD.guard_edit()
+    ^state: BOARD.guard_edit()
     state.value.runs += 1
     "{who} sees {state.value.tasks}"
 }
 
 runs: fn() -> Int {
-    state := BOARD.guard_edit()
+    ^state: BOARD.guard_edit()
     state.value.runs
 }
 
 // One write: a new task, and the invalidation a database write makes.
 add_task: fn() {
-    state := BOARD.guard_edit()
+    ^state: BOARD.guard_edit()
     state.value.tasks += 1
     app.invalidate(my_tasks, "crewboard")
 }
@@ -78,7 +78,7 @@ run: fn() {
     // Four callers each read after every write: 1200 re-runs are due, and
     // the server makes 1000 this second, then holds each binding's result.
     time.sleep(1100ms)
-    crew := [app.Live<String, BoardError>]{}
+    ^crew: [app.Live<String, BoardError>]{}
     loop account in ["ann", "ben", "cat", "dan"] -> crew.push(bind(account))
     loop binding in crew -> _: app.state(binding)
     before: runs()

@@ -13,8 +13,8 @@ Words: struct {
 
     impl Close {
         close: fn(^^self) {
-            p := self.p.move()
-            sum := U64{0}
+            ^p: self.p.move()
+            ^sum: U64{0}
             loop i in 0..<p.len() {
                 sum = wrapping(sum + p[i])
                 p[i] = U64{0}
@@ -25,13 +25,13 @@ Words: struct {
 }
 
 words: fn(name: String, n: Int, v: U64) -> Words {
-    p := [U64]{}
+    ^p: [U64]{}
     loop _ in 0..<n -> p.push(v)
     Words{name: name, p: p}
 }
 
 sub: fn(a: Words, b: Words, name: String) -> Words {
-    out := words(name, a.p.len(), U64{0})
+    ^out: words(name, a.p.len(), U64{0})
     loop i in 0..<a.p.len() -> out.p[i] = wrapping(a.p[i] - b.p[i])
     out
 }
@@ -40,8 +40,8 @@ held: fn(name: String, n: Int, v: U64) -> Words? { Val(words(name, n, v)) }
 
 // The ECDSA harness's reduction: `if x >= n { t: x - n; x = t }`.
 reduced: fn() -> U64 {
-    n := words("n", 300, U64{2})
-    x := words("x", 300, U64{7})
+    ^n: words("n", 300, U64{2})
+    ^x: words("x", 300, U64{7})
     if x.p[0] >= n.p[0] {
         t: sub(x, n, "t")
         x = t
@@ -52,7 +52,7 @@ reduced: fn() -> U64 {
 // An Option local's box ends at its reassignment too: a close after the
 // drop reads the freed box.
 boxed: fn() -> Int {
-    o := held("o", 6, U64{3})
+    ^o: held("o", 6, U64{3})
     o = Val(words("o2", 6, U64{4}))
     if o == {
         .Val(got) -> got.p.len()
@@ -62,13 +62,13 @@ boxed: fn() -> Int {
 
 run: fn() {
     first: reduced()
-    lists := [[U64]]{}
+    ^lists: [[U64]]{}
     loop k in 0..<8 {
-        w := [U64]{}
+        ^w: [U64]{}
         loop _ in 0..<300 -> w.push(U64{k})
         lists.push(w)
     }
-    total := U64{0}
+    ^total: U64{0}
     loop list in lists {
         loop v in list -> total = wrapping(total + v)
     }

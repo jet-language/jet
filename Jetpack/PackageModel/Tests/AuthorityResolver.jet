@@ -38,7 +38,7 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
     root: files.join(parent, "project")
     files.create_dir_all(root) ?? panic("mkdir")
     files.write(files.join(root, "run.jet"), "run: fn() {{}}\n") ?? panic("write")
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     opened: if AuthorityResolver.open_for_authority_walk(cache, root) == {
         .Ok(found) -> found
         .Err(error) -> panic("open for walk")
@@ -75,7 +75,7 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
     files.create_dir_all(root) ?? panic("mkdir")
     files.write(files.join(root, "workspace.jet"), "workspace: module {{}}\n") ?? panic("write")
     files.set_mode(root, 0o777) ?? panic("chmod 777")
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     walk: if AuthorityResolver.open_for_authority_walk(cache, root) == {
         .Ok(found) -> found
         .Err(error) -> panic("walk")
@@ -103,7 +103,7 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
     files.symlink(sibling, files.join(root, "linked-scratch")) ?? panic("symlink sibling")
     resolver: AuthorityResolver.open(root) ?? panic("open")
     found: resolver.discover_source_files() ?? panic("nested projects and linked directories are pruned")
-    relatives := [String]{}
+    ^relatives: [String]{}
     loop file in found -> relatives.push(file.relative)
     assert_eq(relatives, [String]{"main.jet"})
     files.remove_all(root) ?? panic("cleanup")
@@ -113,7 +113,7 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
 #Test("authority source walk rejects hostile depth") {
     root: pkg_test_authority_root("deep")
     files.create_dir_all(root) ?? panic("mkdir")
-    current := root
+    ^current: root
     loop index in 0..<(PKG_MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
         files.create_dir_all(current) ?? panic("mkdir level")

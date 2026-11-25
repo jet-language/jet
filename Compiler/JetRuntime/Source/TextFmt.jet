@@ -12,9 +12,9 @@ TEXT_FMT_BIG_BYTES: I64{328}
 // Exact Big32x40 (FloatShortest.jet) division by a small divisor, in place;
 // returns the remainder and trims the size to its nonzero limbs.
 text_fmt_big_divide: fn(value: I64, divisor: I64) -> I64 {
-    size := display_word(value)
-    remainder := I64{0}
-    at := size
+    ^size: display_word(value)
+    ^remainder: I64{0}
+    ^at: size
     loop at > (I64{0}) {
         at -= I64{1}
         current: (remainder << I64{32}) | float_big_limb(value, at)
@@ -29,8 +29,8 @@ text_fmt_big_divide: fn(value: I64, divisor: I64) -> I64 {
 
 // Exactly width decimal digits of 0 <= value < 10^width.
 text_fmt_push_padded: fn(target: I64, value: I64, width: I64) {
-    divisor := I64{1}
-    at := I64{1}
+    ^divisor: I64{1}
+    ^at: I64{1}
     loop at < width {
         divisor *= I64{10}
         at += I64{1}
@@ -44,7 +44,7 @@ text_fmt_push_padded: fn(target: I64, value: I64, width: I64) {
 // Decimal digits of a nonzero Big32x40 integer; consumes value.
 text_fmt_push_big: fn(target: I64, value: I64) {
     chunks: jet_rt_alloc(I64{320}, I64{8})
-    count := I64{0}
+    ^count: I64{0}
     loop display_word(value) > (I64{0}) {
         rt_text_store(wrapping(chunks + count * I64{8}), text_fmt_big_divide(value, I64{1000000000}))
         count += I64{1}
@@ -67,7 +67,7 @@ text_fmt_next_digit: fn(remainder: I64, bits: I64) -> I64 {
     high: if (shift == I64{0}) -> I64{0} else -> float_big_limb(remainder, word + I64{1}) << (I64{32} - shift)
     digit: (low | high) & I64{15}
     float_big_put(remainder, word, float_big_limb(remainder, word) & (I64{1} << shift) - I64{1})
-    at := word + I64{1}
+    ^at: word + I64{1}
     loop at < (I64{40}) {
         float_big_put(remainder, at, I64{0})
         at += I64{1}
@@ -82,13 +82,13 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
     fraction: bits & I64{4503599627370495}
     significand: if (exponent == I64{0}) -> fraction else -> fraction | I64{4503599627370496}
     power: if (exponent == I64{0}) -> I64{-1074} else -> exponent - I64{1075}
-    trailing := I64{0}
+    ^trailing: I64{0}
     if (significand != I64{0}) {
         loop trailing < (I64{52}) && ((significand >> trailing) & I64{1}) == (I64{0}) {
             trailing += I64{1}
         }
     }
-    exact := if (significand == I64{0}) -> I64{0} else -> -(power + trailing)
+    ^exact: if (significand == I64{0}) -> I64{0} else -> -(power + trailing)
     if (exact < I64{0}) { exact = I64{0} }
     rounding: exact > precision
     places: if rounding -> precision + I64{1} else -> exact
@@ -104,8 +104,8 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
         float_big_init(big, if (bits_after >= I64{53}) -> significand else -> significand & (I64{1} << bits_after) - I64{1})
     }
     if (places > I64{0} || (!rounding && precision > I64{0})) { rt_text_push_scalar(body, I64{46}) }
-    digit := I64{0}
-    at := I64{0}
+    ^digit: I64{0}
+    ^at: I64{0}
     loop at < places {
         digit = text_fmt_next_digit(big, -power)
         if (!rounding || at < precision) { rt_text_push_scalar(body, I64{48} + digit) }
@@ -120,7 +120,7 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
     if (precision == I64{0}) { rt_text_store(wrapping(body + I64{8}), rt_text_len(body) - I64{1}) }
     if (digit < I64{5}) { return body }
     data: rt_text_data(body)
-    index := rt_text_len(body)
+    ^index: rt_text_len(body)
     loop index > (I64{0}) {
         index -= I64{1}
         byte: rt_text_byte(wrapping(data + index))
@@ -152,10 +152,10 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
     // rounded: the magnitude bits of the rounded product, or -1 for the exact
     // expansion. 10^places is exact up to 22 places, so the product is off by
     // at most half an ulp, and `margin` (product * 2^-51) is at least an ulp.
-    rounded := I64{-1}
+    ^rounded: I64{-1}
     if (places <= I64{22}) {
-        scale := Float{1.0}
-        at := I64{0}
+        ^scale: Float{1.0}
+        ^at: I64{0}
         loop at < places {
             scale *= Float{10.0}
             at += I64{1}
@@ -169,7 +169,7 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
             if (Float{0.5} - fraction > margin) { rounded = rt_f64_bits(floor) }
         }
     }
-    body := I64{0}
+    ^body: I64{0}
     if (rounded >= I64{0}) {
         shift: (rounded >> I64{52}) - I64{1075}
         significand: (rounded & I64{4503599627370495}) | I64{4503599627370496}
@@ -211,7 +211,7 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
     data: rt_text_data(plain)
     length: rt_text_len(plain)
     start: if (length > I64{0} && rt_text_byte(data) == I64{45}) -> I64{1} else -> I64{0}
-    digits_end := start
+    ^digits_end: start
     loop digits_end < length {
         byte: rt_text_byte(wrapping(data + digits_end))
         if (byte < I64{48} || byte > I64{57}) { break }
@@ -220,7 +220,7 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
     if (digits_end - start <= I64{3}) { return plain }
     grouped: rt_text_builder_with_capacity(length + (digits_end - start) / I64{3})
     rt_text_append(grouped, data, start)
-    at := start
+    ^at: start
     loop at < digits_end {
         if (at > start && (digits_end - at) % I64{3} == I64{0}) {
             rt_text_push_scalar(grouped, I64{44})

@@ -1,15 +1,15 @@
 use cbor: core.encoding.cbor
 
 run: fn() {
-    options := cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false}
-    value := cbor.parse([130, 97, 120, 97, 121], options.copy()) ?? panic("definite parse")
-    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], options.copy()) ?? panic("indefinite parse")
+    ^options: cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false}
+    ^value: cbor.parse([130, 97, 120, 97, 121], options.copy()) ?? panic("definite parse")
+    ^indefinite: cbor.parse([159, 97, 120, 97, 121, 255], options.copy()) ?? panic("indefinite parse")
     if cbor.parse([130, 97, 120], options) == {
         .Ok(_) -> { panic("truncated array accepted") }
         .Err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
     }
 
-    roomy := cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false}
+    ^roomy: cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false}
     if cbor.parse([129, 130, 97, 120], roomy.copy()) == {
         .Ok(_) -> { panic("nested truncation accepted") }
         .Err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")

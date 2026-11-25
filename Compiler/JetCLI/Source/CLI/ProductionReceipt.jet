@@ -46,7 +46,7 @@ jet_cli_production_receipt_env: fn(cache: ^WorkspaceDeclarationCache, file: Stri
     entry: jet_cli_production_entry(source_file, root)
     source_digest: jet_cli_source_hash(cli_files.read_bytes(source_file) ?? [U8]{})
 
-    closure := "jet-production-closure-v1".bytes()
+    ^closure: "jet-production-closure-v1".bytes()
     closure.push(U8{0})
     jet_driver_run_receipt_frame(closure, entry.bytes())
     jet_driver_run_receipt_frame(closure, source_digest.bytes())
@@ -55,7 +55,7 @@ jet_cli_production_receipt_env: fn(cache: ^WorkspaceDeclarationCache, file: Stri
     jet_cli_production_project_input(closure, package, root, "lock")
     closure_digest: jet_cli_source_hash(closure)
 
-    inputs := "jet-production-inputs-v1".bytes()
+    ^inputs: "jet-production-inputs-v1".bytes()
     inputs.push(U8{0})
     loop argument in program_args -> jet_driver_run_receipt_frame(inputs, argument.bytes())
     input_digest: jet_cli_source_hash(inputs)
@@ -63,7 +63,7 @@ jet_cli_production_receipt_env: fn(cache: ^WorkspaceDeclarationCache, file: Stri
     count_digest: jet_cli_source_hash(count.bytes())
     target_digest: jet_cli_source_hash(JET_CLI_PRODUCTION_TARGET.bytes())
 
-    identity := "jet-production-failure-v1".bytes()
+    ^identity: "jet-production-failure-v1".bytes()
     identity.push(U8{0})
     jet_driver_run_receipt_frame(identity, entry.bytes())
     jet_driver_run_receipt_frame(identity, source_digest.bytes())
@@ -122,9 +122,9 @@ jet_cli_production_project_input: fn(closure: ^[U8], package: String?, root: Str
 // jet's environment rows with `vars` set over them.
 jet_cli_launch_env: fn(vars: [JetCLIEnvVar]) -> [String]? {
     if vars.len() == 0 -> return None
-    prefixes := [String]{}
+    ^prefixes: [String]{}
     loop variable in vars -> prefixes.push("{variable.name}=")
-    rows := [String]{}
+    ^rows: [String]{}
     loop row in x64_process_env() {
         overridden: loop prefix in prefixes {
             if row.starts_with(prefix) {

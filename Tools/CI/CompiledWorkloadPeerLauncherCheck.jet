@@ -157,7 +157,7 @@ missing_primitive: fn(layout: Layout, launcher: String) -[Env, Exec, Time.Wait]>
 }
 
 launch_args: fn(layout: Layout, launcher: String, cwd: String, network: String, command: [String]) -> [String] Never! {
-    argv := [String]{launcher.copy(), "--contract={CONTRACT}", "--task-id", "peer-launcher-self-test", "--root", layout.run_root.copy(), "--cwd", cwd.copy(), "--network", network.copy(), "--external-write", "disabled", "--host", "ambient", "--"}
+    ^argv: [String]{launcher.copy(), "--contract={CONTRACT}", "--task-id", "peer-launcher-self-test", "--root", layout.run_root.copy(), "--cwd", cwd.copy(), "--network", network.copy(), "--external-write", "disabled", "--host", "ambient", "--"}
     loop part in command -> argv.push(part.copy())
     argv
 }
@@ -217,15 +217,13 @@ jet_binary: fn() -[Env, FS]> String? Never! {
 // The confined tree sits in the scratch root of the dev tool roots
 // (Tools/Agent/roots.env), outside any tmpfs the sandbox mounts, so a write
 // that escapes it would land on the host.
-scratch_root: fn() -[Env, FS]> String Never! {
-    roots.value("JET_SCRATCH_ROOT")
-}
+scratch_root: fn() -[Env, FS]> String Never! { roots.value("JET_SCRATCH_ROOT") }
 
 // The checkout holding this script, or else the one around the working directory.
 repo_root: fn() -[Env, FS]> String Problem! {
     script: sys.executable()
     if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
-    dir := files.cwd() ?? return Err(problem("the working directory cannot be read: {err}"))
+    ^dir: files.cwd() ?? return Err(problem("the working directory cannot be read: {err}"))
     loop {
         if files.exists("{dir}{TOOL}") -> return dir
         if dir == "/" || dir == "" -> return Err(problem("run from inside the Jet checkout"))

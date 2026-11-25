@@ -67,7 +67,7 @@ perf_cites_shared: fn(earlier: I64, later: I64) -> I64 {
     first_callers: rt_text_word(wrapping(earlier + I64{16}))
     second_stack: rt_text_word(wrapping(later + I64{8}))
     second_callers: rt_text_word(wrapping(later + I64{16}))
-    shared := I64{0}
+    ^shared: I64{0}
     loop shared < wrapping(first_callers - I64{1}) && shared < wrapping(second_callers - I64{1}) && perf_cites_frame(first_stack, wrapping(wrapping(first_callers - I64{1}) - shared), first_callers) == perf_cites_frame(second_stack, wrapping(wrapping(second_callers - I64{1}) - shared), second_callers) {
         shared = wrapping(shared + I64{1})
     }
@@ -81,7 +81,7 @@ perf_cites_build: fn(test: I64, stack: I64, callers: I64) -> I64 {
     n: rt_text_word(wrapping(test + PERF_CITES_COUNT))
     record: rt_text_word(wrapping(test + PERF_CITES_RECORD))
     rt_text_store(record, wrapping(I64{4198400} + wrapping(n * I64{4})) | (wrapping(callers + PERF_SAMPLES_TIMED) << PERF_SAMPLES_ADDRESS_BITS))
-    k := I64{1}
+    ^k: I64{1}
     loop k < callers {
         rt_text_store(wrapping(record + wrapping(k * I64{8})), perf_cites_frame(stack, k, callers))
         k = wrapping(k + I64{1})
@@ -115,7 +115,7 @@ perf_cites_keep: fn(test: I64, stack: I64, callers: I64) {
 
 // Keeps `times` samples on `stack`.
 perf_cites_repeat: fn(test: I64, stack: I64, callers: I64, times: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < times {
         perf_cites_keep(test, stack, callers)
         at = wrapping(at + I64{1})
@@ -149,15 +149,15 @@ perf_cites_decode: fn(test: I64, from: I64, first: I64) -> I64 {
     perf_cites_require(observe_syscall(I64{17}, fd, bytes, length, from) == length, rt_static_text("perf cites: the file cannot be read back"))
     rows: rt_text_word(wrapping(test + PERF_CITES_ROWS))
     count: rt_text_word(wrapping(test + PERF_CITES_COUNT))
-    before := rt_text_word(wrapping(test + PERF_CITES_BEFORE))
-    now := rt_text_word(wrapping(test + PERF_CITES_NOW))
+    ^before: rt_text_word(wrapping(test + PERF_CITES_BEFORE))
+    ^now: rt_text_word(wrapping(test + PERF_CITES_NOW))
     // The file offset of the sample before's record, 0 for none; its call
     // sites, in `before`.
-    previous := I64{0}
-    depth_before := I64{0}
-    cites := I64{0}
-    at := I64{0}
-    n := first
+    ^previous: I64{0}
+    ^depth_before: I64{0}
+    ^cites: I64{0}
+    ^at: I64{0}
+    ^n: first
     loop at < length {
         perf_cites_require(n < count, rt_static_text("perf cites: the file holds more records than samples kept"))
         row: wrapping(rows + wrapping(wrapping(n * PERF_CITES_ROW_WORDS) * I64{8}))
@@ -175,9 +175,9 @@ perf_cites_decode: fn(test: I64, from: I64, first: I64) -> I64 {
         // side held both records.
         same: n > first && block == rt_text_word(wrapping(row + wrapping(I64{40} - wrapping(PERF_CITES_ROW_WORDS * I64{8}))))
         expected: if (same) -> perf_cites_shared(wrapping(row - wrapping(PERF_CITES_ROW_WORDS * I64{8})), row) else -> I64{0}
-        own := wrapping(wrapping(words - PERF_SAMPLES_TIMED) - I64{1})
+        ^own: wrapping(wrapping(words - PERF_SAMPLES_TIMED) - I64{1})
         last: if (own > I64{0}) -> rt_text_word(wrapping(record + wrapping(own * I64{8}))) else -> I64{0}
-        depth := own
+        ^depth: own
         if (last < I64{0}) {
             back: last & I64{4294967295}
             shared: (last >> PERF_SAMPLES_CITE_SHARED) & I64{65535}
@@ -187,7 +187,7 @@ perf_cites_decode: fn(test: I64, from: I64, first: I64) -> I64 {
             perf_cites_require(shared == expected, rt_static_text("perf cites: a cite shares other call sites than the sample before does"))
             own = wrapping(own - I64{1})
             depth = wrapping(own + shared)
-            index := I64{0}
+            ^index: I64{0}
             loop index < shared {
                 rt_text_store(wrapping(now + wrapping(wrapping(own + index) * I64{8})), rt_text_word(wrapping(before + wrapping(wrapping(wrapping(depth_before - shared) + index) * I64{8}))))
                 index = wrapping(index + I64{1})
@@ -200,7 +200,7 @@ perf_cites_decode: fn(test: I64, from: I64, first: I64) -> I64 {
         callers: rt_text_word(wrapping(row + I64{16}))
         perf_cites_require(wrapping(depth + I64{1}) == callers, rt_static_text("perf cites: a sample's stack has another depth"))
         stack: rt_text_word(wrapping(row + I64{8}))
-        k := I64{1}
+        ^k: I64{1}
         loop k < callers {
             perf_cites_require(rt_text_word(wrapping(now + wrapping(wrapping(k - I64{1}) * I64{8}))) == perf_cites_frame(stack, k, callers), rt_static_text("perf cites: a sample's call site is not its own"))
             k = wrapping(k + I64{1})
@@ -242,8 +242,8 @@ perf_cites_tests: fn() {
 
     // Repeated: one stack five times is one whole record and four cites,
     // each sharing all 4 call sites.
-    from := perf_cites_end(test)
-    first := rt_text_word(wrapping(test + PERF_CITES_COUNT))
+    ^from: perf_cites_end(test)
+    ^first: rt_text_word(wrapping(test + PERF_CITES_COUNT))
     perf_cites_repeat(test, I64{16}, I64{5}, I64{5})
     perf_cites_require(perf_cites_decode(test, from, first) == I64{4}, rt_static_text("perf cites: a repeated stack is not cited"))
 
@@ -263,7 +263,7 @@ perf_cites_tests: fn() {
     // branch, so each cites the outermost 4 of the one before.
     from = perf_cites_end(test)
     first = rt_text_word(wrapping(test + PERF_CITES_COUNT))
-    branch := I64{0}
+    ^branch: I64{0}
     loop branch < (I64{6}) {
         perf_cites_keep(test, wrapping(I64{112} + wrapping((branch % I64{2}) + I64{1})), I64{6})
         branch = wrapping(branch + I64{1})
@@ -275,7 +275,7 @@ perf_cites_tests: fn() {
     // with it.
     from = perf_cites_end(test)
     first = rt_text_word(wrapping(test + PERF_CITES_COUNT))
-    deep := I64{3}
+    ^deep: I64{3}
     loop deep <= (I64{28}) {
         perf_cites_keep(test, I64{128}, deep)
         deep = wrapping(deep + I64{1})
@@ -294,8 +294,8 @@ perf_cites_tests: fn() {
     first = rt_text_word(wrapping(test + PERF_CITES_COUNT))
     perf_cites_keep(test, I64{144}, I64{6})
     written: perf_cites_end(test)
-    crossed := false
-    tries := I64{0}
+    ^crossed: false
+    ^tries: I64{0}
     loop !crossed && tries < (I64{512}) {
         perf_cites_keep(test, I64{144}, I64{6})
         crossed = perf_cites_end(test) != written
@@ -309,10 +309,10 @@ perf_cites_tests: fn() {
     // of depth, other stacks and writes at random, each decoded exactly.
     from = perf_cites_end(test)
     first = rt_text_word(wrapping(test + PERF_CITES_COUNT))
-    state := I64{20261118}
-    stack := I64{160}
-    callers := I64{4}
-    kept := I64{0}
+    ^state: I64{20261118}
+    ^stack: I64{160}
+    ^callers: I64{4}
+    ^kept: I64{0}
     loop kept < (I64{300}) {
         state = wrapping(wrapping(state * I64{1103515245}) + I64{12345}) & I64{2147483647}
         choice: (state >> I64{8}) % I64{8}
@@ -331,7 +331,7 @@ perf_cites_tests: fn() {
     }
     perf_cites_require(perf_cites_decode(test, from, first) > I64{0}, rt_static_text("perf cites: no random stack is cited"))
 
-    _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+    ^_: observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
     jet_rt_free(rt_text_word(wrapping(test + PERF_CITES_NOW)), sites_bytes, I64{8})
     jet_rt_free(rt_text_word(wrapping(test + PERF_CITES_BEFORE)), sites_bytes, I64{8})
     jet_rt_free(rt_text_word(wrapping(test + PERF_CITES_RECORD)), PERF_CITES_RECORD_BYTES, I64{8})

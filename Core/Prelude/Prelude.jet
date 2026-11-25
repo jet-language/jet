@@ -9,8 +9,10 @@ package: {
     }
 }
 
-use core: core
-use builtin: jet_builtins
+use {
+    core: core
+    builtin: jet_builtins
+}
 
 // The number families: one generic definition per number
 // kind, over the compiler's storage, and only standard sizes. These names
@@ -35,14 +37,23 @@ IEEE: struct<exponent: Int, fraction: Int> {
 // that declares, imports or takes as a type parameter a name of its own
 // spelled like one keeps its own.
 I8: Signed<8>
+
 I16: Signed<16>
+
 I32: Signed<32>
+
 I64: Signed<64>
+
 U8: Unsigned<8>
+
 U16: Unsigned<16>
+
 U32: Unsigned<32>
+
 U64: Unsigned<64>
+
 F32: IEEE<8, 23>
+
 F64: IEEE<11, 52>
 
 // `keep` is the compiler's identity/use-site barrier. The other helpers,
@@ -80,7 +91,7 @@ not_bool: fn(value: Bool) -> Bool Never! {
 // `compare`, so Floats follow IEEE 754 totalOrder (-NaN < -inf < ... < -0.0 <
 // +0.0 < ... < +inf < NaN). Among equal values the first argument wins.
 min: fn<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
-    best := a
+    ^best: a
     if b.compare(best) == .Less -> best = b
     loop value in rest {
         if value.compare(best) == .Less -> best = value
@@ -89,7 +100,7 @@ min: fn<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
 }
 
 max: fn<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
-    best := a
+    ^best: a
     if b.compare(best) == .Greater -> best = b
     loop value in rest {
         if value.compare(best) == .Greater -> best = value

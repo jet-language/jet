@@ -16,7 +16,7 @@ time_glue_drop: fn(value: I64, bytes: I64) {
 }
 
 time_glue_equal: fn(left: I64, right: I64, bytes: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < bytes {
         if time_glue_word(wrapping(left + at)) != time_glue_word(wrapping(right + at)) {
             return false
@@ -34,12 +34,12 @@ time_glue_pad: fn(target: I64, value: I64, width: I64) {
     // Use the existing decimal digit counter and emitter. Zero-padding
     // includes a sign in the minimum width and inserts zeros AFTER that sign.
     length: display_integer_length(value) + (if (value < I64{0}) -> I64{1} else -> I64{0})
-    zeros := width - length
+    ^zeros: width - length
     if (zeros <= I64{0}) {
         rt_text_push_number(target, value)
         return
     }
-    number := value
+    ^number: value
     if (value < I64{0}) {
         rt_text_push_word(target, I64{45}, I64{1})
         // A negative number needing padding here has <19 magnitude digits;

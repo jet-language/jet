@@ -105,13 +105,13 @@ async_deadline_passed: fn() -> Bool {
 // scheduler's compensation.
 async_wait: fn(core: I64) {
     before: sync_load(wrapping(core + I64{144}))
-    deadline := I64{-1}
+    ^deadline: I64{-1}
     if jet_ctx_deadline_present() {
         remaining: jet_deadline_remaining_ms()
         if (remaining < I64{9000000000000}) { deadline = sync_deadline(remaining * I64{1000000}) }
     }
     async_unlock(core)
-    _ := sync_wait(core + I64{144}, before, deadline)
+    ^_: sync_wait(core + I64{144}, before, deadline)
     async_lock(core)
 }
 
@@ -184,10 +184,10 @@ async_observe_counts: fn(core: I64, entry: I64, lifecycle: I64) {
 // (`failures`, 0 for none).
 async_observe_terminal: fn(entry: I64, state: I64, failures: I64) {
     core: sync_load(wrapping(entry + I64{8}))
-    failure := rt_static_text("None")
+    ^failure: rt_static_text("None")
     if (failures != I64{0}) {
         failure = rt_static_text("Handler")
-        at := I64{0}
+        ^at: I64{0}
         loop at < event_word(failures) {
             if (event_words_get(failures, at) == DISPATCH_FAILURE_PANIC) {
                 failure = rt_static_text("Panic")
@@ -203,7 +203,7 @@ async_failures_free: fn(failures: I64, e_meta: I64) {
         return
     }
     length: event_word(failures)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         value: event_words_get(failures, at + I64{1})
         if (event_words_get(failures, at) == DISPATCH_FAILURE_HANDLER) {
@@ -216,7 +216,7 @@ async_failures_free: fn(failures: I64, e_meta: I64) {
 }
 
 async_failures_push: fn(failures: I64, kind: I64, value: I64) -> I64 {
-    vector := failures
+    ^vector: failures
     if (vector == I64{0}) {
         vector = jet_rt_alloc(I64{24}, I64{8})
         coll_zero(vector, I64{24})
@@ -227,7 +227,7 @@ async_failures_push: fn(failures: I64, kind: I64, value: I64) -> I64 {
 }
 
 #Export(c) jet_rt_handle_clone_jet_dispatch_report: fn(report: I64) -> I64 {
-    _ := sync_add(report, I64{1})
+    ^_: sync_add(report, I64{1})
     report
 }
 
@@ -274,7 +274,7 @@ async_failures_push: fn(failures: I64, kind: I64, value: I64) -> I64 {
     count: if (failures == I64{0}) -> I64{0} else -> event_word(failures) / I64{2}
     bytes: event_word(wrapping(layout + FAILURE_BYTES))
     data: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         kind: event_words_get(failures, at * I64{2})
         value: event_words_get(failures, at * I64{2} + I64{1})
@@ -314,7 +314,7 @@ async_failures_push: fn(failures: I64, kind: I64, value: I64) -> I64 {
     core
 }
 
-async_core_retain: fn(core: I64) { _ := sync_add(core, I64{1}) }
+async_core_retain: fn(core: I64) { ^_: sync_add(core, I64{1}) }
 
 // The last count frees the core: no entry or scope holds it any more, so
 // its queues are empty and only the listener rows remain.
@@ -325,7 +325,7 @@ async_core_release: fn(core: I64) {
     base: wrapping(core + I64{24})
     length: event_word(base)
     data: event_word(wrapping(base + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         event_listener_release(event_word(wrapping(data + at * I64{8})))
         at += I64{1}
@@ -339,7 +339,7 @@ async_core_release: fn(core: I64) {
 }
 
 #Export(c) jet_rt_handle_clone_jet_async_event: fn(core: I64) -> I64 {
-    _ := sync_add(wrapping(core + I64{8}), I64{1})
+    ^_: sync_add(wrapping(core + I64{8}), I64{1})
     async_core_retain(core)
     core
 }
@@ -355,7 +355,7 @@ async_core_release: fn(core: I64) {
 
 // ---- Entries ---------------------------------------------------------------
 
-async_entry_retain: fn(entry: I64) { _ := sync_add(entry, I64{1}) }
+async_entry_retain: fn(entry: I64) { ^_: sync_add(entry, I64{1}) }
 
 async_entry_release: fn(entry: I64) {
     if (sync_add(entry, I64{-1}) != I64{1}) {
@@ -378,11 +378,11 @@ async_entry_trace: fn(entry: I64, step: I64) {
 // Removes `entry` from the list at `base` and drops the list's count; the
 // caller holds its own count, so this is never the last.
 async_list_remove: fn(base: I64, entry: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < event_word(base) {
         if (event_words_get(base, at) == entry) {
             event_words_remove(base, at)
-            _ := sync_add(entry, I64{-1})
+            ^_: sync_add(entry, I64{-1})
             return
         }
         at += I64{1}
@@ -453,11 +453,11 @@ async_hard_cancel: fn(core: I64) {
 async_drain: fn(base: I64, accepted: Bool, state: I64) {
     length: event_word(base)
     data: event_word(wrapping(base + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         entry: event_word(wrapping(data + at * I64{8}))
         async_complete(entry, accepted, state)
-        _ := sync_add(entry, I64{-1})
+        ^_: sync_add(entry, I64{-1})
         at += I64{1}
     }
     event_store(base, I64{0})
@@ -471,8 +471,8 @@ async_drain: fn(base: I64, accepted: Bool, state: I64) {
 async_prune_listeners: fn(core: I64) {
     base: wrapping(core + I64{24})
     data: event_word(wrapping(base + I64{16}))
-    kept := I64{0}
-    at := I64{0}
+    ^kept: I64{0}
+    ^at: I64{0}
     loop at < event_word(base) {
         listener: event_word(wrapping(data + at * I64{8}))
         if event_sub_active(event_word(wrapping(listener + I64{32}))) {
@@ -595,7 +595,7 @@ async_count: fn(core: I64, offset: I64) -> I64 {
                 oldest: event_words_get(wrapping(core + I64{48}), I64{0})
                 event_words_remove(wrapping(core + I64{48}), I64{0})
                 async_complete(oldest, true, DISPATCH_DROPPED_OLDEST)
-                _ := sync_add(oldest, I64{-1})
+                ^_: sync_add(oldest, I64{-1})
             }
             async_enqueue(core, entry)
         }
@@ -691,8 +691,8 @@ async_snapshot: fn(core: I64, entry: I64) -> I64 {
     snapshot: jet_rt_alloc((length + I64{2}) * I64{8}, I64{8})
     event_store(wrapping(snapshot + I64{8}), length)
     rows: wrapping(snapshot + I64{16})
-    count := I64{0}
-    at := I64{0}
+    ^count: I64{0}
+    ^at: I64{0}
     loop at < length {
         listener: event_words_get(base, at)
         sub: event_word(wrapping(listener + I64{32}))
@@ -750,13 +750,13 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
     async_unlock(core)
     scratch: coll_slot_new(r_meta)
     lines: jet_rt_string_builder_new()
-    failures := I64{0}
-    state := DISPATCH_DELIVERED
-    delivered := I64{0}
+    ^failures: I64{0}
+    ^state: DISPATCH_DELIVERED
+    ^delivered: I64{0}
     // 0 ran to the end, else the stop kind that ended the run.
-    stop := I64{0}
+    ^stop: I64{0}
     count: event_snapshot_count(snapshot)
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         listener: event_snapshot_get(snapshot, at)
         once: event_word(wrapping(listener + I64{24})) != I64{0}
@@ -782,7 +782,7 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
                     if (kind == I64{1}) { scheduler_control_cancel_consume(control) }
                     stop = kind
                 } else {
-                    _ := scheduler_native_publish(record)
+                    ^_: scheduler_native_publish(record)
                     stop = kind
                 }
                 break
@@ -801,7 +801,7 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
                 if (policy == FAILURE_STOP_FIRST || policy == FAILURE_COLLECT || policy == FAILURE_LOG) {
                     async_handler_line(lines, at, rt_static_text("failed -> "))
                     if (policy == FAILURE_LOG) {
-                        _ := host_stdio_text_failure(rt_static_text("event handler failed"), true, true, false)
+                        ^_: host_stdio_text_failure(rt_static_text("event handler failed"), true, true, false)
                     } else {
                         failure: coll_slot_new(e_meta)
                         hook_value_clone(wrapping(boxed + I64{8}), failure, e_meta)
@@ -834,7 +834,7 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
     sync_store(wrapping(core + I64{96}), I64{0})
     sync_store(wrapping(core + I64{176}), I64{0})
     async_prune_listeners(core)
-    report := I64{0}
+    ^report: I64{0}
     if (stop == I64{0}) {
         async_finish(entry, true, state, delivered, text, failures, e_meta)
         report = jet_rt_handle_clone_jet_dispatch_report(sync_load(wrapping(entry + I64{40})))
@@ -848,7 +848,7 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
         }
     }
     // The queue's list count passes to the run, which ends here.
-    _ := sync_add(entry, I64{-1})
+    ^_: sync_add(entry, I64{-1})
     async_notify(core)
     async_unlock(core)
     scheduler_shield_leave_finished()

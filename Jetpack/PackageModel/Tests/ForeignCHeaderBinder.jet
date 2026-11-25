@@ -76,7 +76,7 @@ pkg_test_cbind_source_parses: fn(source: String) -> Bool Never! {
     assert_eq(base.descriptor_stamp, descriptor.stamp())
     assert(base.source.contains("jet-ffi-descriptor={descriptor.stamp()}"))
     assert(pkg_test_cbind_source_parses(base.source))
-    changed := descriptor
+    ^changed: descriptor
     changed.effect_root = "FFI.changed"
     rebound: pkg_cbind_generate_with_descriptor("int ping(int value);", "identity", changed) ?? panic("changed descriptor must bind")
     assert(base.descriptor_stamp != rebound.descriptor_stamp)
@@ -91,7 +91,7 @@ pkg_test_cbind_source_parses: fn(source: String) -> Bool Never! {
     assert(r.source.contains("sum: fn(items: ^[I32], n: Int) -> Int = \"sum\"\n"))
     // `void*` return and varargs stay skipped; a pointer paired with a scalar
     // count is a typed Jet slice at the generated boundary.
-    skipped := [String]{}
+    ^skipped: [String]{}
     loop entry in r.skipped -> skipped.push(entry.name)
     assert(skipped.contains("raw_alloc"))
     assert(skipped.contains("log_msg"))

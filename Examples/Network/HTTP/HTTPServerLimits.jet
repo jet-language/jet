@@ -20,7 +20,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         mux.serve_once(listener) ?? panic("serve")
     }
     smuggling: net.tcp_connect(addr) ?? panic("smuggling connect")
-    smuggling_request := "".bytes()
+    ^smuggling_request: "".bytes()
     loop line in
         ["POST / HTTP/1.1", "Host: local", "Content-Length: 4", "Transfer-Encoding: chunked", "", "0", ""] {
         loop byte in line.bytes() -> smuggling_request.push(byte)
@@ -32,7 +32,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     print(smuggling_response.starts_with("HTTP/1.1 400 Bad Request"))
     print(smuggling_response.contains("handler ran"))
     oversized: net.tcp_connect(addr) ?? panic("oversized connect")
-    oversized_request := "".bytes()
+    ^oversized_request: "".bytes()
     loop line in ["POST / HTTP/1.1", "Host: local", "Content-Length: 1048577", ""] {
         loop byte in line.bytes() -> oversized_request.push(byte)
         oversized_request.push(13)

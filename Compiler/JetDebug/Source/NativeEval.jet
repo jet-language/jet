@@ -177,7 +177,7 @@ native_eval_owned: fn(symbols: NativeFixSymbols, code: NativeCode) -> Bool Never
     main: native_fix_runtime_address(symbols, "main")
     start: native_fix_runtime_address(symbols, "jet_rt_main_owned_start")
     // `push rbx`, then a `call rel32` each.
-    at := main - code.address + 1
+    ^at: main - code.address + 1
     if main == 0 || start == 0 || at < 1 || at > code.bytes.len() || code.bytes[at - 1] != 0x53 {
         return false
     }
@@ -209,8 +209,8 @@ native_eval_is_name: fn(text: String) -> Bool Never! {
 // (NativeSession.eval_scope).
 native_eval_names: fn(text: String) -> [String] Never! {
     bytes: text.bytes()
-    names := [String]{}
-    at := 0
+    ^names: [String]{}
+    ^at: 0
     loop at < bytes.len() {
         start: at
         loop at < bytes.len() && native_eval_name_byte(bytes[at]) -> at += 1
@@ -393,7 +393,7 @@ native_eval_r11: fn(out: ^[U8], word: Int) Never! {
 native_eval_room_code: fn(room: Int) -> NativeEvalCode Never! {
     data: room + NATIVE_EVAL_ROOM_DATA
     xsave: room + NATIVE_EVAL_ROOM_XSAVE
-    code := [U8]{}
+    ^code: [U8]{}
     // xsave64 [r11]; state 1.
     native_eval_r11(code, xsave)
     native_place_emit(code, NATIVE_EVAL_ALL_STATE)
@@ -415,7 +415,7 @@ native_eval_room_code: fn(room: Int) -> NativeEvalCode Never! {
     // The tail: from state 1 on, xrstor64 [r11].
     tail: code.len()
     native_eval_r11(code, data)
-    saved := [U8]{}
+    ^saved: [U8]{}
     native_eval_r11(saved, xsave)
     native_place_emit(saved, NATIVE_EVAL_ALL_STATE)
     native_place_emit(saved, [Int]{0x49, 0x0f, 0xae, 0x2b})
@@ -448,11 +448,11 @@ native_eval_room_code: fn(room: Int) -> NativeEvalCode Never! {
 // `align` past 64 KiB has no room. It uses only rax, rcx, rdx, rsi, r8,
 // r9, r10 and r11, which a call may clobber.
 native_eval_take_code: fn(data: Int) -> [U8] Never! {
-    stub := [U8]{}
+    ^stub: [U8]{}
     native_eval_r11(stub, data)
     // rcx = cursor; size > end - cursor fails.
     native_place_emit(stub, [Int]{0x49, 0x8b, 0x0b, 0x49, 0x8b, 0x43, NATIVE_EVAL_END, 0x48, 0x29, 0xc8, 0x48, 0x39, 0xc7, 0x77, 0})
-    fails := [Int]{stub.len() - 1}
+    ^fails: [Int]{stub.len() - 1}
     // align > 0x10000 fails.
     native_place_emit(stub, [Int]{0x48, 0x81, 0xfe, 0, 0, 1, 0, 0x77, 0})
     fails.push(stub.len() - 1)
@@ -475,7 +475,7 @@ native_eval_take_code: fn(data: Int) -> [U8] Never! {
 // `data`: a payload of the arena is left be; any other is counted
 // (NATIVE_EVAL_KEPT) and left allocated.
 native_eval_give_code: fn(data: Int) -> [U8] Never! {
-    stub := [U8]{}
+    ^stub: [U8]{}
     native_eval_r11(stub, data)
     // pointer < base or pointer >= end is the program's.
     native_place_emit(stub, [Int]{0x49, 0x3b, 0x7b, NATIVE_EVAL_BASE, 0x72, 0})
@@ -498,7 +498,7 @@ native_eval_give_code: fn(data: Int) -> [U8] Never! {
 // or a pin of the cell: mov rax,rdx; mov rdx,rcx; mov r8,[rdi+64];
 // mov rdi,rsi; mov rsi,r8; jmp rax.
 native_eval_read_code: fn() -> [U8] Never! {
-    stub := [U8]{}
+    ^stub: [U8]{}
     native_place_emit(stub, [Int]{0x48, 0x89, 0xd0, 0x48, 0x89, 0xca, 0x4c, 0x8b, 0x47, 0x40, 0x48, 0x89, 0xf7, 0x4c, 0x89, 0xc6, 0xff, 0xe0})
     stub
 }
@@ -512,7 +512,7 @@ native_eval_read_code: fn() -> [U8] Never! {
 // test rdi,rdi; je ret; mov eax,[rdi]; cmp eax,1; jbe trap;
 // lock sub qword [rdi],1; ret; int3.
 native_eval_drop_code: fn() -> [U8] Never! {
-    stub := [U8]{}
+    ^stub: [U8]{}
     native_place_emit(stub, [Int]{0x48, 0x85, 0xff, 0x74, 0x0c, 0x8b, 0x07, 0x83, 0xf8, 0x01, 0x76, 0x06, 0xf0, 0x48, 0x83, 0x2f, 0x01, 0xc3, NATIVE_DEBUG_TRAP})
     stub
 }
@@ -527,7 +527,7 @@ NATIVE_EVAL_DROP_HELD: 18
 // jet_err_with_context_frame adds it, is the error as it was, with no
 // journey of the thread's to add the frame to: mov rax,rdi; ret.
 native_eval_guard_code: fn() -> [U8] Never! {
-    stub := [U8]{}
+    ^stub: [U8]{}
     native_place_emit(stub, [Int]{0x48, 0x89, 0xf8, 0xc3})
     stub
 }
@@ -539,7 +539,7 @@ native_eval_guard_code: fn() -> [U8] Never! {
 // NATIVE_EVAL_UNGUARD_HELD bytes in, which refuses the evaluation:
 // test dil,2; jnz trap; ret; int3.
 native_eval_unguard_code: fn() -> [U8] Never! {
-    stub := [U8]{}
+    ^stub: [U8]{}
     native_place_emit(stub, [Int]{0x40, 0xf6, 0xc7, 0x02, 0x75, 0x01, 0xc3, NATIVE_DEBUG_TRAP})
     stub
 }
@@ -555,7 +555,7 @@ NATIVE_EVAL_UNGUARD_HELD: 7
 // returns leaves no hop in the journey the thread keeps (or makes, on its
 // first error) for the program's own report: xor eax,eax; ret.
 native_eval_none_code: fn() -> [U8] Never! {
-    stub := [U8]{}
+    ^stub: [U8]{}
     native_place_emit(stub, [Int]{0x31, 0xc0, 0xc3})
     stub
 }
@@ -738,9 +738,9 @@ NATIVE_EVAL_UNIT_LOCKING: [String]{
 // the runtime's C exports `exports`; else the build stops naming the
 // strays.
 native_eval_exports_checked: fn(name: String, view: [String], exports: [String]) -> Int {
-    known := [String:Bool]{}
+    ^known: [String:Bool]{}
     loop export in exports -> known[export] = true
-    strays := ""
+    ^strays: ""
     loop entry in view {
         if !(known.get(entry) ?? false) -> strays = "{strays}, {entry}"
     }
@@ -755,7 +755,7 @@ native_eval_exports_checked: fn(name: String, view: [String], exports: [String])
 // NATIVE_EVAL_LOCKING and NATIVE_EVAL_UNIT_LOCKING, refused; an entry its
 // runtime doesn't have is left out.
 native_eval_locks: fn(symbols: NativeFixSymbols) -> [NativeEvalLock] Never! {
-    locks := [NativeEvalLock]{}
+    ^locks: [NativeEvalLock]{}
     loop (k, name) in NATIVE_EVAL_STAND_INS {
         address: native_fix_runtime_address(symbols, name)
         if address != 0 {
@@ -847,7 +847,7 @@ NATIVE_EVAL_TLS_SLOTS: 65536
 // written back the thread finds its TLS as it left it, and the
 // evaluation's blocks unreached.
 native_eval_tls: fn(trace: X64Trace, base: Int) -> [NativeCode] Never! {
-    kept := [NativeCode]{}
+    ^kept: [NativeCode]{}
     if base == 0 -> return kept
     tcb: native_debug_word(trace, base) ?? return kept
     if tcb == 0 -> return kept
@@ -906,7 +906,7 @@ NativeEvalRun: struct {
 // before.
 native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int], items: Int, code: NativeEval, plan: NativeFixPlan, base: Int, captures: [[U8]], typed: [Int], placed: [NativePlaced], locks: [NativeEvalLock], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> NativeEvalHere NativeEvalRefused! {
     entry: native_eval_offset(code, plan, code.entry) ?? return Err(native_eval_refused("the compiled expression has no entry"))
-    drop := 0
+    ^drop: 0
     if code.drop != "" {
         at: native_eval_offset(code, plan, code.drop) ?? return Err(native_eval_refused("the compiled expression has no drop for its result"))
         drop = base + at
@@ -916,8 +916,8 @@ native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int
     least: if code.result.size > 8 -> code.result.size else -> 8
     size: ((least + 7) >> 3) << 3
     cell: room + NATIVE_EVAL_ROOM_PASS
-    passed := loop _ in 0..<size -> U8{0}
-    arguments := [Int]{cell}
+    ^passed: loop _ in 0..<size -> U8{0}
+    ^arguments: [Int]{cell}
     loop bytes in captures {
         loop passed.len() % 16 != 0 -> passed.push(U8{0})
         arguments.push(cell + passed.len())
@@ -933,17 +933,17 @@ native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int
         return Err(native_eval_refused("its captures take more than the {NATIVE_EVAL_ROOM_ARENA - NATIVE_EVAL_ROOM_PASS} bytes an evaluation passes"))
     }
     ty: native_eval_type(image, typed, code.result.name)
-    view := 0
-    viewed_type := -1
+    ^view: 0
+    ^viewed_type: -1
     if ty == .Val(id) && items != 0 {
         view = native_debug_view_at(image, id) ?? 0
         viewed_type = id
     }
-    entered := native_eval_enter(trace, room, words, placed, locks, sites, probes, watched: watched) ?? return Err(err)
+    ^entered: native_eval_enter(trace, room, words, placed, locks, sites, probes, watched: watched) ?? return Err(err)
     // With a view, the result's drop waits until the view has run on it.
-    run := native_eval_start(image, trace, entered, NativeEvalCall{entry: base + entry, words: arguments, drop: if view != 0 -> 0 else -> drop, cell: cell, fresh: true}, passed, code.plan, base)
-    value := NativeEvalValue?{None}
-    unread := "couldn't read the expression's value"
+    ^run: native_eval_start(image, trace, entered, NativeEvalCall{entry: base + entry, words: arguments, drop: if view != 0 -> 0 else -> drop, cell: cell, fresh: true}, passed, code.plan, base)
+    ^value: NativeEvalValue?{None}
+    ^unread: "couldn't read the expression's value"
     if run.middle || (run.done && run.failure == "") {
         if native_eval_here_value(image, trace, code, typed, cell, size) == {
             .Ok(shown) -> { value = Val(shown) }
@@ -954,11 +954,11 @@ native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int
         run.middle = false
         native_eval_drive(image, trace, entered, code.plan, base, run)
     }
-    viewed := String?{None}
+    ^viewed: String?{None}
     if view != 0 && run.done && run.failure == "" {
         // The view borrows the result: the cell's bytes, or the bytes its
         // word addresses.
-        self_at := cell
+        ^self_at: cell
         if !code.result.inline && native_type_size(image, viewed_type) > 8 {
             self_at = native_number(x64_trace_read(trace, cell, 8) ?? [U8]{0, 0, 0, 0, 0, 0, 0, 0}, 0, 8, X64DebugEncoding.Signed)
         }
@@ -994,7 +994,7 @@ native_eval_here: fn(image: NativeImage, trace: X64Trace, room: Int, words: [Int
         stopped: if run.faulted && run.state >= 2 -> "{run.failure}; the program may keep values alive that the evaluation took references to and could not give back" else -> run.failure
         return Err(native_eval_refused("{stopped}{kept}"))
     }
-    shown := value ?? return Err(native_eval_refused("{unread}{kept}"))
+    ^shown: value ?? return Err(native_eval_refused("{unread}{kept}"))
     if viewed == .Val(text) -> shown.shown = text
     Ok(NativeEvalHere{value: shown, kept: entered.kept})
 }
@@ -1011,9 +1011,9 @@ native_eval_view_here: fn(image: NativeImage, trace: X64Trace, room: Int, words:
     if NATIVE_EVAL_ITEMS + value.len() > NATIVE_EVAL_ROOM_ARENA - NATIVE_EVAL_ROOM_PASS {
         return Ok({shown: None, kept: 0})
     }
-    entered := native_eval_enter(trace, room, words, placed, locks, sites, probes, watched: watched) ?? return Err(err)
+    ^entered: native_eval_enter(trace, room, words, placed, locks, sites, probes, watched: watched) ?? return Err(err)
     list: room + NATIVE_EVAL_ROOM_PASS
-    passed := loop _ in 0..<NATIVE_EVAL_ITEMS -> U8{0}
+    ^passed: loop _ in 0..<NATIVE_EVAL_ITEMS -> U8{0}
     loop byte in value -> passed.push(byte)
     looked: native_eval_view(image, trace, entered, view, ty, items, list, passed, list + NATIVE_EVAL_ITEMS, fresh: true)
     left: native_eval_leave(trace, words, entered)
@@ -1034,8 +1034,8 @@ native_eval_view_here: fn(image: NativeImage, trace: X64Trace, room: Int, words:
 // failed part way may keep values of the program's alive that it took
 // references to) or its items can't be read. `fresh` as NativeEvalCall's.
 native_eval_view: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalRoom, view: Int, ty: Int, items: Int, list: Int, passed: [U8], self_at: Int, fresh: Bool) -> {run: NativeEvalRun, shown: String?} Never! {
-    run := native_eval_start(image, trace, entered, NativeEvalCall{entry: view, words: [Int]{list, self_at}, drop: items, cell: list, fresh: fresh}, passed, None, 0)
-    shown := String?{None}
+    ^run: native_eval_start(image, trace, entered, NativeEvalCall{entry: view, words: [Int]{list, self_at}, drop: items, cell: list, fresh: fresh}, passed, None, 0)
+    ^shown: String?{None}
     if run.middle {
         shown = native_debug_view_shown(image, NativeMemory{trace: Val(trace), blocks: [NativeBlock]{}}, ty, list)
         run.middle = false
@@ -1056,7 +1056,7 @@ native_eval_view: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalRo
 // of the program's changes, whether the evaluation fails or not.
 native_eval_enter: fn(trace: X64Trace, room: Int, words: [Int], placed: [NativePlaced], locks: [NativeEvalLock], sites: [Int:Int], probes: [Int:Int], watched: Bool) -> NativeEvalRoom NativeEvalRefused! {
     saved: x64_trace_registers(trace) ?? return Err(native_eval_refused("couldn't read the program's registers"))
-    traps := [Int:Int]{}
+    ^traps: [Int:Int]{}
     loop (address, byte) in sites -> traps[address] = byte
     // A probe where a breakpoint traps replaced the breakpoint's trap byte.
     loop (address, byte) in probes {
@@ -1065,11 +1065,11 @@ native_eval_enter: fn(trace: X64Trace, room: Int, words: [Int], placed: [NativeP
     was: native_eval_swap(trace, words, native_eval_routed(room)) ?? return Err(native_eval_refused("couldn't route the program's allocations to the evaluation's heap"))
     // A placed condition's jump would run the condition in the call: the
     // program's own instructions go back while it runs.
-    lifted := [NativeCode]{}
+    ^lifted: [NativeCode]{}
     loop row in placed {
         if row.live && !native_eval_change(trace, lifted, row.address, row.bytes) {
-            loop back in lifted -> _ := x64_trace_write(trace, back.address, back.bytes)
-            _ := native_eval_swap(trace, words, was)
+            loop back in lifted -> ^_: x64_trace_write(trace, back.address, back.bytes)
+            ^_: native_eval_swap(trace, words, was)
             return Err(native_eval_refused("couldn't take a placed condition's jump out of the program's code"))
         }
     }
@@ -1077,10 +1077,10 @@ native_eval_enter: fn(trace: X64Trace, room: Int, words: [Int], placed: [NativeP
     // wait on, and an evaluation refused part way through taking one would
     // leave it taken: a locking entry jumps to the room's lockless code
     // (jmp rel32) or traps before it runs.
-    locking := [Int:String]{}
+    ^locking: [Int:String]{}
     loop lock in locks {
         rel: room + lock.route - (lock.address + 5)
-        bytes := [U8]{U8{NATIVE_DEBUG_TRAP}}
+        ^bytes: [U8]{U8{NATIVE_DEBUG_TRAP}}
         if {
             lock.route >= 0 && rel >= -2147483648 && rel < 2147483648 -> {
                 bytes = [U8]{U8{0xe9}}
@@ -1091,8 +1091,8 @@ native_eval_enter: fn(trace: X64Trace, room: Int, words: [Int], placed: [NativeP
         held: native_eval_held(lock.route)
         if held >= 0 -> locking[room + lock.route + held] = lock.name
         if !native_eval_change(trace, lifted, lock.address, bytes) {
-            loop back in lifted -> _ := x64_trace_write(trace, back.address, back.bytes)
-            _ := native_eval_swap(trace, words, was)
+            loop back in lifted -> ^_: x64_trace_write(trace, back.address, back.bytes)
+            ^_: native_eval_swap(trace, words, was)
             return Err(native_eval_refused("couldn't keep the evaluation from the program's locks: {lock.name} can't be changed"))
         }
     }
@@ -1118,14 +1118,14 @@ native_eval_change: fn(trace: X64Trace, lifted: ^[NativeCode], address: Int, byt
 // meanwhile sent again. Why the program can't go on ("" when it can): the
 // TLS, the words or the registers couldn't be put back.
 native_eval_leave: fn(trace: X64Trace, words: [Int], entered: NativeEvalRoom) -> String Never! {
-    loop back in entered.lifted -> _ := x64_trace_write(trace, back.address, back.bytes)
-    kept := true
+    loop back in entered.lifted -> ^_: x64_trace_write(trace, back.address, back.bytes)
+    ^kept: true
     loop back in entered.tls {
         if !x64_trace_write(trace, back.address, back.bytes) -> kept = false
     }
     unrouted: native_eval_swap(trace, words, entered.was) != None
     restored: x64_trace_set_registers(trace, entered.saved)
-    loop signal in entered.held -> _ := x64_trace_signal(trace, signal)
+    loop signal in entered.held -> ^_: x64_trace_signal(trace, signal)
     if !restored -> return "couldn't put back the program's registers"
     if !unrouted {
         return "couldn't put back the program's allocator words, so the program can't go on safely"
@@ -1157,11 +1157,11 @@ native_eval_routed: fn(room: Int) -> [Int] Never! {
 // the same place in `words`: the words as they were, or None when one
 // couldn't be read or written, with every word as it was.
 native_eval_swap: fn(trace: X64Trace, words: [Int], values: [Int]) -> [Int]? Never! {
-    was := [Int]{}
+    ^was: [Int]{}
     loop address in words -> was.push(native_debug_word(trace, address) ?? return None)
     loop (k, address) in words {
         if !x64_trace_write(trace, address, native_word_bytes(values[k])) {
-            loop j in 0..<k -> _ := x64_trace_write(trace, words[j], native_word_bytes(was[j]))
+            loop j in 0..<k -> ^_: x64_trace_write(trace, words[j], native_word_bytes(was[j]))
             return None
         }
     }
@@ -1175,13 +1175,13 @@ native_eval_swap: fn(trace: X64Trace, words: [Int], values: [Int]) -> [Int]? Nev
 // `base` place the evaluation's code, which names the runtime function a
 // trap of its own stands for (native_fix_absent_at).
 native_eval_start: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalRoom, call: NativeEvalCall, passed: [U8], plan: NativeFixPlan?, base: Int) -> NativeEvalRun Never! {
-    run := NativeEvalRun{done: true}
+    ^run: NativeEvalRun{done: true}
     room: entered.room
     arena: room + NATIVE_EVAL_ROOM_ARENA
     // A later call leaves the arena's next free byte as it is.
     first: if call.fresh -> NATIVE_EVAL_CURSOR else -> NATIVE_EVAL_END
     head: [Int]{arena, room + NATIVE_EVAL_ROOM_SIZE, arena, 0, 0, call.entry, call.drop, call.cell}
-    words := [U8]{}
+    ^words: [U8]{}
     loop k in (first >> 3)..<head.len() -> words.extend(native_word_bytes(head[k]))
     loop k in 0..<NATIVE_EVAL_WORDS {
         words.extend(native_word_bytes(if k < call.words.len() -> call.words[k] else -> 0))
@@ -1198,7 +1198,7 @@ native_eval_start: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalR
         run.failure = "couldn't write the evaluation's words in the program"
         return run
     }
-    registers := loop word in entered.saved -> word
+    ^registers: loop word in entered.saved -> word
     registers[X64_TRACE_RIP] = room
     registers[X64_TRACE_RSP] = entered.top
     registers[X64_TRACE_RAX] = 0
@@ -1247,7 +1247,7 @@ native_eval_drive: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalR
                 return
             }
             run.stopping = true
-            _ := x64_trace_stop(trace, trace.thread)
+            ^_: x64_trace_stop(trace, trace.thread)
         }
         status: waited ?? x64_trace_wait_for(trace, trace.thread)
         if status < 0 || status & 0xff != 0x7f || ((status >> 8) & 0xff == NATIVE_DEBUG_SIGTRAP && (status >> 16) == X64_TRACE_EVENT_EXIT) {
@@ -1256,13 +1256,13 @@ native_eval_drive: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalR
             return
         }
         signal: (status >> 8) & 0xff
-        registers := x64_trace_registers(trace) ?? {
+        ^registers: x64_trace_registers(trace) ?? {
             run.failure = "couldn't read the program's registers"
             return
         }
         pc: registers[X64_TRACE_RIP]
         trapped: signal == NATIVE_DEBUG_SIGTRAP
-        why := ""
+        ^why: ""
         if {
             trapped && run.exiting -> {
                 run.exiting = false
@@ -1311,7 +1311,7 @@ native_eval_drive: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalR
             }
             trapped && entered.watched -> {
                 // A watch's trap: the call wrote a watched place.
-                _ := x64_trace_set_debug_register(trace, 6, 0)
+                ^_: x64_trace_set_debug_register(trace, 6, 0)
                 next
             }
             trapped -> {
@@ -1323,7 +1323,7 @@ native_eval_drive: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalR
                 why = "the evaluation ran past its {NATIVE_EVAL_BUDGET_MS /% 1000} s budget, at {native_eval_place(image, pc)}"
             }
             NATIVE_EVAL_FAULTS.contains(signal) -> {
-                absent := String?{None}
+                ^absent: String?{None}
                 if plan == .Val(placed) -> absent = native_fix_absent_at(placed, base, pc)
                 why = absent ?? "the evaluation stopped with {native_debug_signal_name(signal)} at {native_eval_place(image, pc)}"
             }
@@ -1377,16 +1377,16 @@ native_eval_here_value: fn(image: NativeImage, trace: X64Trace, code: NativeEval
 // ran, else why the evaluation fails there. A `syscall` there is the
 // call's system call, which the step would make.
 native_eval_step_over: fn(image: NativeImage, trace: X64Trace, address: Int, original: Int, entered: ^NativeEvalRoom, run: ^NativeEvalRun) -> String Never! {
-    registers := x64_trace_registers(trace) ?? return "couldn't read the program's registers"
+    ^registers: x64_trace_registers(trace) ?? return "couldn't read the program's registers"
     if !x64_trace_write(trace, address, [U8]{U8{original}}) {
         return "couldn't step over a breakpoint at {native_eval_place(image, address)}"
     }
-    why := if native_eval_is_syscall(trace, address) -> "the evaluation made system call {registers[X64_TRACE_RAX]}, which an evaluation may not make, at {native_eval_place(image, address)}" else -> ""
+    ^why: if native_eval_is_syscall(trace, address) -> "the evaluation made system call {registers[X64_TRACE_RAX]}, which an evaluation may not make, at {native_eval_place(image, address)}" else -> ""
     registers[X64_TRACE_RIP] = address
     if why == "" && !x64_trace_set_registers(trace, registers) {
         why = "couldn't set the program's registers"
     }
-    stepped := false
+    ^stepped: false
     loop _ in 0..<8 {
         if why != "" || stepped -> break
         if !x64_trace_resume(trace, X64TraceResume.Step, 0) {
@@ -1411,7 +1411,7 @@ native_eval_step_over: fn(image: NativeImage, trace: X64Trace, address: Int, ori
     if why == "" && !stepped {
         why = "the evaluation couldn't step over a breakpoint at {native_eval_place(image, address)}"
     }
-    _ := x64_trace_write(trace, address, [U8]{U8{NATIVE_DEBUG_TRAP}})
+    ^_: x64_trace_write(trace, address, [U8]{U8{NATIVE_DEBUG_TRAP}})
     why
 }
 
@@ -1467,7 +1467,7 @@ NativeEvalReach: struct {
 
 // The NativeEvalReach of the image's code `codes`, read from its file.
 native_eval_reach: fn(codes: [NativeCode]) -> NativeEvalReach Never! {
-    text := NativeEvalReach{end: 0, syscall: 0}
+    ^text: NativeEvalReach{end: 0, syscall: 0}
     loop code in codes {
         end: code.address + code.bytes.len()
         if end > text.end -> text.end = end
@@ -1504,7 +1504,7 @@ native_eval_pages: fn(size: Int) -> Int Never! {
 // met, is sent again so the program still gets it.
 native_eval_map: fn(trace: X64Trace, syscall: Int, hint: Int, size: Int) -> Int NativeDebugError! {
     saved: x64_trace_registers(trace) ?? return Err(NativeDebugError{detail: "couldn't read the program's registers"})
-    injected := loop word in saved -> word
+    ^injected: loop word in saved -> word
     injected[X64_TRACE_RAX] = NATIVE_FIX_MMAP
     injected[X64_TRACE_RDI] = hint
     injected[X64_TRACE_RSI] = size
@@ -1515,9 +1515,9 @@ native_eval_map: fn(trace: X64Trace, syscall: Int, hint: Int, size: Int) -> Int 
     injected[X64_TRACE_RIP] = syscall
     // Not a syscall the kernel restarts: the thread may have stopped in one.
     injected[X64_TRACE_ORIG_RAX] = -1
-    pending := [Int]{}
-    mapped := 0
-    failure := ""
+    ^pending: [Int]{}
+    ^mapped: 0
+    ^failure: ""
     if !x64_trace_set_registers(trace, injected) -> failure = "couldn't set the program's registers"
     loop _ in 0..<64 {
         if failure != "" -> break
@@ -1539,7 +1539,7 @@ native_eval_map: fn(trace: X64Trace, syscall: Int, hint: Int, size: Int) -> Int 
         if signal != NATIVE_DEBUG_SIGSTOP -> pending.push(signal)
     }
     restored: x64_trace_set_registers(trace, saved)
-    loop signal in pending -> _ := x64_trace_signal(trace, signal)
+    loop signal in pending -> ^_: x64_trace_signal(trace, signal)
     if !restored {
         return Err(NativeDebugError{detail: "couldn't put back the program's registers"})
     }
@@ -1553,7 +1553,7 @@ native_eval_map: fn(trace: X64Trace, syscall: Int, hint: Int, size: Int) -> Int 
 native_eval_show: fn(image: NativeImage, memory: NativeMemory, result: NativeEvalPart, found: Int?, held: [U8]) -> NativeEvalValue? Never! {
     name: result.name
     word: native_number(held, 0, 8, X64DebugEncoding.Signed)
-    shown := String?{None}
+    ^shown: String?{None}
     if found == .Val(ty) {
         size: native_type_size(image, ty)
         shown = if !result.inline && size > 8 -> native_render(image, memory, ty, native_debug_bytes(memory, word, size) ?? return None, 0, 0) else -> native_render(image, memory, ty, held, 0, 0)
@@ -1592,7 +1592,7 @@ native_eval_type: fn(image: NativeImage, typed: [Int], name: String) -> Int? Nev
 // named types); None when the image has none.
 native_type_named: fn(image: NativeImage, name: String) -> Int? Never! {
     spelled: native_jet_spelling(name)
-    best := Int?{None}
+    ^best: Int?{None}
     loop (id, found) in image.types {
         if found.tag == NATIVE_TAG_POINTER || found.name == "" -> next
         if native_jet_spelling(found.name) != spelled -> next
@@ -1636,12 +1636,12 @@ native_log_text_shown: fn(bytes: [U8], at: Int, text: Int) -> String Never! {
     if length < 0 || text + NATIVE_PLACE_TEXT > bytes.len() {
         return "<a String the debugger can't show>"
     }
-    kept := if length < NATIVE_PLACE_TEXT -> length else -> NATIVE_PLACE_TEXT
+    ^kept: if length < NATIVE_PLACE_TEXT -> length else -> NATIVE_PLACE_TEXT
     // A cut inside a character moves back to its first byte: the last
     // lead byte kept (not 10xxxxxx) says how many bytes its character
     // takes.
     if kept < length {
-        lead := kept - 1
+        ^lead: kept - 1
         loop lead > 0 {
             byte: Int{bytes[text + lead]}
             if (byte & 0xc0) != 0x80 -> break
@@ -1665,10 +1665,10 @@ native_log_text_shown: fn(bytes: [U8], at: Int, text: Int) -> String Never! {
 // of the text; None when a part doesn't close.
 native_log_split: fn(message: String) -> {texts: [String], holes: [String]}? Never! {
     bytes: message.bytes()
-    texts := [String]{}
-    holes := [String]{}
-    text := [U8]{}
-    k := 0
+    ^texts: [String]{}
+    ^holes: [String]{}
+    ^text: [U8]{}
+    ^k: 0
     loop k < bytes.len() {
         byte: bytes[k]
         doubled: k + 1 < bytes.len() && bytes[k + 1] == byte
@@ -1682,8 +1682,8 @@ native_log_split: fn(message: String) -> {texts: [String], holes: [String]}? Nev
             k += 1
             next
         }
-        depth := 1
-        end := k + 1
+        ^depth: 1
+        ^end: k + 1
         loop end < bytes.len() && depth > 0 {
             if bytes[end] == 123 -> depth += 1
             if bytes[end] == 125 -> depth -= 1
@@ -1738,11 +1738,11 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
 }
 
 #Test("a String part shows the text its slot kept, cut at a whole character") {
-    slot := native_word_bytes(4)
+    ^slot: native_word_bytes(4)
     loop byte in "even".bytes() -> slot.push(byte)
     loop slot.len() < 8 + NATIVE_PLACE_TEXT -> slot.push(U8{0})
     assert_eq(native_log_text_shown(slot, 0, 8), "even")
-    long := native_word_bytes(NATIVE_PLACE_TEXT + 5)
+    ^long: native_word_bytes(NATIVE_PLACE_TEXT + 5)
     loop _ in 0..<NATIVE_PLACE_TEXT - 1 -> long.push(U8{97})
     // é is two bytes; the slot keeps only its first.
     long.extend("é".bytes()[0..<1])
@@ -1760,7 +1760,7 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
 }
 
 #Test("an image's main owns its program's run when its leading calls reach the owned start") {
-    symbols := NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
+    ^symbols: NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
     native_fix_symbol_add(symbols, "main", NativeFixSymbol{address: 0x1000, size: 32})
     // push rbx; two calls; the call to jet_rt_main_owned_start at 0x3000.
     owned: [U8]{0x53, 0xE8, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0, 0xE8, 0xF0, 0x1F, 0, 0, 0xC3}
@@ -1832,7 +1832,7 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
 
 #Test("an image's locking entries route its Shared reads, guards, drops and stop polls to the room and trap the rest") {
     assert_eq(NATIVE_EVAL_STAND_INS.len(), NATIVE_EVAL_STAND_IN_CODE.len())
-    symbols := NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
+    ^symbols: NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
     assert_eq(native_eval_locks(symbols).len(), 0)
     native_fix_symbol_add(symbols, "jet_rt_native_shared_read", NativeFixSymbol{address: 0x1000, size: 64})
     native_fix_symbol_add(symbols, "jet_rt_native_shared_drop", NativeFixSymbol{address: 0x1100, size: 64})
@@ -1864,7 +1864,7 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
 }
 
 #Test("an error's journey adds nothing while an evaluation runs, and a context frame keeps its error") {
-    symbols := NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
+    ^symbols: NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
     native_fix_symbol_add(symbols, "jet_journey_origin", NativeFixSymbol{address: 0x2000, size: 64})
     native_fix_symbol_add(symbols, "jet_err_with_context_frame", NativeFixSymbol{address: 0x2100, size: 64})
     locks: native_eval_locks(symbols)
@@ -1885,7 +1885,7 @@ native_log_shown: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
 
 #Test("the take's and the give's branches land on their ends") {
     stub: native_eval_take_code(0)
-    jumps := 0
+    ^jumps: 0
     loop at in 0..<stub.len() - 1 {
         if stub[at] != 0x77 -> next
         jumps += 1

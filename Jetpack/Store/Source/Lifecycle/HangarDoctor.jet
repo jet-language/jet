@@ -36,7 +36,7 @@ HangarDoctorReport: struct {
     }
 
     fixed_count: fn(self) -> Int Never! {
-        count := 0
+        ^count: 0
         loop finding in self.findings {
             if finding.fixed -> count += 1
         }
@@ -69,9 +69,9 @@ store_hangar_doctor: fn(verification: StoreVerification, roots: HangarRoots, rep
         return Ok(scan.report)
     }
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
-    scan := store_scan_hangar_doctor(verification, roots, true)
+    ^scan: store_scan_hangar_doctor(verification, roots, true)
     hangar: roots.hangar_dir()
-    requests := [String:NixOutputRequest]{}
+    ^requests: [String:NixOutputRequest]{}
     loop finding in scan.report.findings {
         if finding.repair == {
             .Refresh(path, digest) -> {
@@ -84,8 +84,8 @@ store_hangar_doctor: fn(verification: StoreVerification, roots: HangarRoots, rep
             .NoRepair | .Remove(_) -> {}
         }
     }
-    repair_errors := [String:String]{}
-    store_paths := requests.keys().to_list()
+    ^repair_errors: [String:String]{}
+    ^store_paths: requests.keys().to_list()
     store_paths.sort()
     loop store_path in store_paths {
         if store_admit_nix_closure_hangar_locked(verification, roots, [NixOutputRequest]{requests[store_path]}, offline) == {
@@ -93,7 +93,7 @@ store_hangar_doctor: fn(verification: StoreVerification, roots: HangarRoots, rep
             .Err(error) -> repair_errors[store_path] = error.message()
         }
     }
-    post := HangarDoctorReport.empty()
+    ^post: HangarDoctorReport.empty()
     loop index in 0..<scan.report.findings.len() {
         action: scan.report.findings[index].repair
         if action == {
@@ -146,7 +146,7 @@ store_hangar_doctor: fn(verification: StoreVerification, roots: HangarRoots, rep
 
 store_scan_hangar_doctor: fn(verification: StoreVerification, roots: HangarRoots, write_seals: Bool) -[FS, Env]> DoctorScan StoreError! {
     hangar: roots.hangar_dir()
-    scan := DoctorScan{report: HangarDoctorReport.empty(), repair_paths: [String:String]{}}
+    ^scan: DoctorScan{report: HangarDoctorReport.empty(), repair_paths: [String:String]{}}
     found: store_node_stat(hangar)
     root: found ?? return Ok(scan)
     if root.is_symlink || !root.is_dir {
@@ -179,7 +179,7 @@ store_doctor_finding_sort_key: fn(finding: HangarDoctorFinding) -> String Never!
 
 // Sorted listing of a directory.
 store_doctor_sorted_entries: fn(path: String) -[FS]> [DirEntry] StoreError! {
-    entries := files.list_dir(path)
+    ^entries: files.list_dir(path)
     entries.sort_by(fn(entry) { entry.name })
     Ok(entries)
 }
@@ -196,7 +196,7 @@ store_scan_doctor_objects: fn(verification: StoreVerification, hangar: String, r
     }
     entries: store_doctor_sorted_entries(objects)
     canonical_hangar: files.canonicalize(hangar) ?? hangar
-    cas_keys := [String]{}
+    ^cas_keys: [String]{}
     loop entry in entries {
         if entry.name.ends_with(STORE_PARTIAL_SUFFIX) -> next
         report.objects += 1
@@ -243,7 +243,7 @@ store_collect_doctor_cas_keys: fn(object: String, keys: ^[String]) -[FS, Env]> N
 // `{:08x}`.
 store_doctor_hex8: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     shifts: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
     loop shift in shifts -> out.push(digits[((value >> shift)) & 15])
     pkg_bytes_text(out, 0, out.len())
@@ -342,7 +342,7 @@ store_doctor_repair_paths: fn(entries: [StoreEntry], paths: ^[String:String]) Ne
             }
             .None -> {}
         }
-        keys := producer.facts.keys().to_list()
+        ^keys: producer.facts.keys().to_list()
         keys.sort()
         loop key in keys {
             if !key.starts_with("nix.output.") -> next
@@ -362,7 +362,7 @@ store_doctor_object_digest: fn(verification: StoreVerification, path: String, ha
 // The path relative to the Hangar with `/` separators.
 store_doctor_subject: fn(hangar: String, path: String) -> String Never! {
     relative: store_path_strip_prefix(path, hangar) ?? path
-    out := [U8]{}
+    ^out: [U8]{}
     raw: relative.bytes()
     loop byte in raw {
         if (Int{byte}) == 92 -> out.push(U8{47}) else -> out.push(byte)

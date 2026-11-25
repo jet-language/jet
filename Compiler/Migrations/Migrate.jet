@@ -100,18 +100,18 @@ migration_listing: fn(path: String, into: ^[String]) {
 
 run: fn() {
     args: process.args()
-    names := [String]{}
+    ^names: [String]{}
     loop known in migration_plans() -> names.push(known.name.copy())
     if args.len() == 0 || !names.contains(args[0]) {
         panic("usage: Migrate.jet -- <plan> [--write] [--against DIR] [--list FILE] [--source-list FILE] PATH...; plans: {names.join(", ")}")
     }
     plan: args[0]
-    write := false
-    paths := [String]{}
-    sources := [String]{}
+    ^write: false
+    ^paths: [String]{}
+    ^sources: [String]{}
     // The index of `--against`'s DIR in `args`, or -1.
-    against := -1
-    index := 1
+    ^against: -1
+    ^index: 1
     loop index < args.len() {
         arg: args[index]
         if {
@@ -137,7 +137,7 @@ run: fn() {
         if !paths.contains(source) -> paths.push(source.copy())
     }
     if against > 0 {
-        same := 0
+        ^same: 0
         loop path in paths {
             if migration_database(plan, path) {
                 if migration_database_same_meaning(plan, "{args[against]}/{path}", path) == .Val(why) {
@@ -159,11 +159,11 @@ run: fn() {
         if same < paths.len() -> process.exit(1)
         return
     }
-    total := 0
-    changed := 0
+    ^total: 0
+    ^changed: 0
     loop path in paths {
         database: migration_database(plan, path)
-        outcome := MigrationOutcome{text: "", rewritten: 0, skipped: [String]{}}
+        ^outcome: MigrationOutcome{text: "", rewritten: 0, skipped: [String]{}}
         if {
             database -> outcome = migration_database_rewrite(plan, path, write)
             else -> {

@@ -26,13 +26,13 @@ encode: fn(data: [U8]) -> String Never! {
 /// Decode the canonical padded RFC 4648 alphabet.
 decode: fn(text: String) -> [U8] Base32Error! {
     raw: text.bytes()
-    count := 0
-    padding := 0
-    pad_start := -1
-    last := -1
-    out := [U8]{}
-    buffer := 0
-    bits := 0
+    ^count: 0
+    ^padding: 0
+    ^pad_start: -1
+    ^last: -1
+    ^out: [U8]{}
+    ^buffer: 0
+    ^bits: 0
     loop i in 0..<raw.len() {
         n: Int{raw[i]}
         if n == 32 || n == 9 || n == 10 || n == 11 || n == 12 || n == 13 {
@@ -44,7 +44,7 @@ decode: fn(text: String) -> [U8] Base32Error! {
             next
         }
         if pad_start >= 0 -> return Err(decode_error(i, "padding may appear only at the end"))
-        value := -1
+        ^value: -1
         if n >= 65 && n <= 90 -> value = n - 65 else if n >= 50 && n <= 55 -> value = n - 50 + 26
         if value < 0 {
             digits: "0123456789ABCDEF".bytes()
@@ -101,7 +101,7 @@ b32hexencode: fn(data: [U8]) -> String Never! {
 
 b32hexdecode: fn(text: String) -> [U8] Base32Error! {
     standard: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".bytes()
-    canonical := [U8]{}
+    ^canonical: [U8]{}
     loop b in text.bytes() {
         n: Int{b}
         if n >= 48 && n <= 57 -> canonical.push(standard[n - 48]) else if n >= 65 && n <= 86 {
@@ -115,9 +115,9 @@ b32hexdecode: fn(text: String) -> [U8] Base32Error! {
 
 encode_alphabet: fn(data: [U8], alphabet: String) -> String Never! {
     chars: alphabet.bytes()
-    out := [U8]{}
-    buffer := 0
-    bits := 0
+    ^out: [U8]{}
+    ^buffer: 0
+    ^bits: 0
     loop b in data {
         buffer = (buffer << 8) | Int{b}
         bits += 8

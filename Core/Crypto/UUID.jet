@@ -23,7 +23,7 @@ UUIDError: struct {
 v4: fn() -[Rand]> String UUIDError! {
     raw: random.bytes(16) ?? return Err(UUIDError{reason: "secure random unavailable"})
     if raw.len() != 16 -> return Err(UUIDError{reason: "secure random returned invalid length"})
-    bytes := copy_bytes(raw)
+    ^bytes: copy_bytes(raw)
     bytes[6] = U8{(((Int{bytes[6]}) & 15)) | 64}
     bytes[8] = U8{(((Int{bytes[8]}) & 63)) | 128}
     value: format_uuid(bytes) ?? return Err(UUIDError{reason: "invalid UUID encoding"})
@@ -36,7 +36,7 @@ v7: fn(clock: Clock) -[Rand, Time]> String UUIDError! {
         return Err(UUIDError{reason: "UUID v7 timestamp is outside the 48-bit range"})
     }
     tail: random.bytes(10) ?? return Err(UUIDError{reason: "secure random unavailable"})
-    bytes := [U8]{
+    ^bytes: [U8]{
         wrapping(U8{timestamp >> 40}),
         wrapping(U8{timestamp >> 32}),
         wrapping(U8{timestamp >> 24}),
@@ -53,12 +53,12 @@ v7: fn(clock: Clock) -[Rand, Time]> String UUIDError! {
 
 v5: fn(namespace: String, name: String) -> String UUIDError! {
     ns: parse_uuid(namespace) ?? return Err(UUIDError{reason: "invalid UUID namespace"})
-    input := copy_bytes(ns)
+    ^input: copy_bytes(ns)
     loop b in name.bytes() -> input.push(b)
     digest_hex: crypto.sha1(input) ?? return Err(UUIDError{reason: "invalid UUID digest"})
     digest: hex_decode(digest_hex) ?? return Err(UUIDError{reason: "invalid UUID digest"})
     if digest.len() != 20 -> return Err(UUIDError{reason: "invalid UUID digest length"})
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop i in 0..<16 -> bytes.push(digest[i])
     bytes[6] = U8{(((Int{bytes[6]}) & 15)) | 80}
     bytes[8] = U8{(((Int{bytes[8]}) & 63)) | 128}
@@ -75,7 +75,7 @@ parse: fn(text: String) -> String UUIDError! {
 }
 
 copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in bytes -> out.push(b)
     out
 }
@@ -86,12 +86,12 @@ parse_uuid: fn(text: String) -> [U8]? {
     if raw[8] != (U8{45}) || raw[13] != (U8{45}) || raw[18] != (U8{45}) || raw[23] != (U8{45}) {
         return None
     }
-    digits := [U8]{}
+    ^digits: [U8]{}
     loop i in 0..<raw.len() {
         if raw[i] != (U8{45}) -> digits.push(raw[i])
     }
     if digits.len() != 32 -> return None
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<16 {
         hi: hex_value(digits[i * 2]) ?? return None
         lo: hex_value(digits[i * 2 + 1]) ?? return None
@@ -110,7 +110,7 @@ hex_value: fn(b: U8) -> Int? {
 
 format_uuid: fn(bytes: [U8]) -> String? {
     if bytes.len() != 16 -> return None
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<16 {
         if i == 4 || i == 6 || i == 8 || i == 10 -> out.push(U8{45})
         value: Int{bytes[i]}
@@ -128,7 +128,7 @@ hex_digit: fn(n: Int) -> U8 Never! {
 hex_decode: fn(text: String) -> [U8]? {
     raw: text.bytes()
     if raw.len() % 2 != 0 -> return None
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<raw.len(), 2 {
         hi: hex_value(raw[i]) ?? return None
         lo: hex_value(raw[i + 1]) ?? return None
@@ -138,7 +138,7 @@ hex_decode: fn(text: String) -> [U8]? {
 }
 
 #Test("UUID v7 keeps the manual Clock timestamp and RFC version and variant") {
-    clock := Clock.new(1250999896491)
+    ^clock: Clock.new(1250999896491)
     value: v7(clock) ?? panic("UUID v7")
     assert(value.starts_with("01234567-89ab-7"))
     bytes: parse_uuid(value) ?? panic("UUID encoding")

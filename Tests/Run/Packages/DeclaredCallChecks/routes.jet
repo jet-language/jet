@@ -1,8 +1,10 @@
 // A package's own route table and lease. Each carries the marker core.http's
 // router and core.time's expiring value carry, and the same method shapes,
 // so its calls are checked by the same Core-declared rules as theirs.
-use http: core.http
-use time: core.time
+use {
+    http: core.http
+    time: core.time
+}
 
 #HTTP.StaticRoutes
 Routes: struct {
@@ -10,7 +12,9 @@ Routes: struct {
 
     get: fn(self, pattern: String, label: String) -> String { "{self.name}: GET {pattern} {label}" }
 
-    custom: fn(self, method: String, pattern: String, label: String) -> String { "{self.name}: {method} {pattern} {label}" }
+    custom: fn(self, method: String, pattern: String, label: String) -> String {
+        "{self.name}: {method} {pattern} {label}"
+    }
 }
 
 #Time.ExpiryChecked

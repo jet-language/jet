@@ -98,7 +98,7 @@ sema_receipt_section_name: fn(definition: StructDef) -> String? Never! {
 // SHA-256 of the declared type name, a NUL, then `name:Type;` for each stored
 // field in declaration order.
 sema_receipt_schema_digest: fn(definition: StructDef) -> String Never! {
-    schema := [U8]{}
+    ^schema: [U8]{}
     schema.extend(definition.name.bytes())
     schema.push(U8{0})
     loop field in definition.fields {
@@ -133,12 +133,12 @@ sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [C
     }
     if args.len() != 1 {
         check.diagnostics.push(sema_error("E0103", span, "`receipt.attach` takes exactly one argument", "one typed value becomes one named receipt section", "write `receipt.attach(value)`"))
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+        loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     payload_span: expr_span(args[0].expr)
     check.scopes.ownership_call_depth += 1
-    checked := sema_check_expression(args[0].expr, None, check)
+    ^checked: sema_check_expression(args[0].expr, None, check)
     check.scopes.ownership_call_depth -= 1
     payload: checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
     payload_name: if payload.ty == {
@@ -151,7 +151,7 @@ sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [C
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     definition: sema_receipt_payload_struct(payload.ty, check)
-    section := String?{None}
+    ^section: String?{None}
     if definition == .Val(found) -> section = sema_receipt_section_name(found)
     if section == None {
         check.diagnostics.push(sema_error("E2411", payload_span, "type `{type_name(payload.ty)}` is not a `#Receipt` section", "receipt attachment accepts only declaration-owned typed sections", "add `#Receipt(\"name\")` and `#Codable` to the record"))

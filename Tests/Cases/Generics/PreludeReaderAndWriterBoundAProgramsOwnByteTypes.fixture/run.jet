@@ -8,13 +8,13 @@ Chunks: struct {
 
     impl Reader {
         read_bytes: fn(^self, limit: Int) -> [U8] IOError! {
-            out := [U8]{}
+            ^out: [U8]{}
             _: self.read_into(out, limit) ?? return Err(err)
             Ok(out)
         }
 
         read_into: fn(^self, buffer: ^[U8], limit: Int) -> Int IOError! {
-            count := 0
+            ^count: 0
             loop count < limit && self.at < self.data.len() {
                 buffer.push(self.data[self.at])
                 self.at += 1
@@ -40,7 +40,7 @@ Sink: struct {
 
 // Reads `source` to its end, `step` bytes at a time, into one buffer.
 drain: fn<R: Reader>(source: ^R, step: Int) -> [U8] IOError! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop {
         count: source.read_into(out, step)
         if count == 0 -> break
@@ -50,7 +50,7 @@ drain: fn<R: Reader>(source: ^R, step: Int) -> [U8] IOError! {
 
 // Copies `source` into `sink` in reads of three bytes; the count copied.
 pipe: fn<R: Reader, W: Writer>(source: ^R, sink: ^W) -> Int IOError! {
-    total := 0
+    ^total: 0
     loop {
         chunk: source.read_bytes(3)
         if chunk.len() == 0 -> break
@@ -72,17 +72,17 @@ Pull: struct<R: Reader> {
 }
 
 run: fn() {
-    first := Chunks{data: "hello".bytes(), at: 0}
+    ^first: Chunks{data: "hello".bytes(), at: 0}
     drained: drain(first, 2) ?? panic("drain")
     print("drained {drained.len()} {String.from_bytes(drained) ?? "?"}")
-    second := Chunks{data: "abcdefgh".bytes(), at: 0}
-    sink := Sink{bytes: [U8]{}, flushes: 0}
+    ^second: Chunks{data: "abcdefgh".bytes(), at: 0}
+    ^sink: Sink{bytes: [U8]{}, flushes: 0}
     copied: pipe(second, sink) ?? panic("pipe")
     print("copied {copied} {String.from_bytes(sink.bytes) ?? "?"}")
     sink.write_bytes("!".bytes()) ?? panic("write_bytes")
     sink.flush() ?? panic("flush")
     print("wrote {sink.bytes.len()} flushed {sink.flushes}")
-    pull := Pull{input: Chunks{data: "xyz".bytes(), at: 0}, buffer: [U8]{}}
+    ^pull: Pull{input: Chunks{data: "xyz".bytes(), at: 0}, buffer: [U8]{}}
     loop {
         got: pull.fill() ?? panic("fill")
         if got == 0 -> break

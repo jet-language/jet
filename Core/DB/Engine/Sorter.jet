@@ -35,9 +35,9 @@ VdbeSorter: struct {
 
 // sqlite3VdbeSorterInit: a sorter for a cursor whose KeyInfo is `info`.
 sorter_new: fn(info: record.KeyInfo, n_field: Int) -> VdbeSorter Never! {
-    key_info := info.copy()
+    ^key_info: info.copy()
     if n_field != 0 -> key_info.n_key_field = n_field
-    unpacked := record.unpacked_record_alloc(key_info)
+    ^unpacked: record.unpacked_record_alloc(key_info)
     unpacked.n_field = key_info.n_key_field
     VdbeSorter{key_info: key_info, records: [[U8]]{}, next: [Int]{}, head: -1, unpacked: unpacked, cmp_unpacked: None}
 }
@@ -60,18 +60,18 @@ sorter_write: fn(s: ^VdbeSorter, rec: [U8]) Never! {
 
 // vdbeSorterMerge: merge the sorted lists from p1 and p2; ties take p1.
 sorter_merge: fn(s: ^VdbeSorter, p1_in: Int, p2_in: Int) -> Int Never! {
-    p1 := p1_in
-    p2 := p2_in
-    first := -1
-    last := -1
-    cached := false
+    ^p1: p1_in
+    ^p2: p2_in
+    ^first: -1
+    ^last: -1
+    ^cached: false
     loop {
         if !cached {
             record.record_unpack(s.key_info, s.records[p2].len(), s.records[p2], s.unpacked)
             cached = true
         }
         res: record.record_compare(s.records[p1].len(), s.records[p1], 0, s.unpacked)
-        pick := p2
+        ^pick: p2
         if res <= 0 {
             pick = p1
             p1 = s.next[p1]
@@ -95,13 +95,13 @@ sorter_merge: fn(s: ^VdbeSorter, p1_in: Int, p2_in: Int) -> Int Never! {
 
 // vdbeSorterSort: sort the list from `head`.
 sorter_sort: fn(s: ^VdbeSorter) Never! {
-    slots := [Int]{}
+    ^slots: [Int]{}
     loop _ in 0..<64 -> slots.push(-1)
-    p := s.head
+    ^p: s.head
     loop p >= 0 {
         after: s.next[p]
         s.next[p] = -1
-        i := 0
+        ^i: 0
         loop slots[i] >= 0 {
             p = sorter_merge(s, p, slots[i])
             slots[i] = -1
@@ -138,15 +138,15 @@ sorter_key: fn(s: VdbeSorter) -> [U8] Never! { s.records[s.head] }
 // n_key_col fields of the current record; a current record with a NULL in
 // those fields is below `val`.
 sorter_compare: fn(s: ^VdbeSorter, cursor_info: record.KeyInfo, val: [U8], n_key_col: Int) -> Int Never! {
-    r2 := s.cmp_unpacked ?? {
-        fresh := record.unpacked_record_alloc(cursor_info)
+    ^r2: s.cmp_unpacked ?? {
+        ^fresh: record.unpacked_record_alloc(cursor_info)
         fresh.n_field = n_key_col
         fresh
     }
     key: s.records[s.head]
     record.record_unpack(cursor_info, key.len(), key, r2)
-    res := 0
-    null := false
+    ^res: 0
+    ^null: false
     loop i in 0..<n_key_col {
         if r2.mem[i].flags & base.MEM_NULL != 0 {
             null = true
@@ -160,14 +160,14 @@ sorter_compare: fn(s: ^VdbeSorter, cursor_info: record.KeyInfo, val: [U8], n_key
 
 #Test("the sorter orders by the key fields and keeps ties in insertion order") {
     info: record.KeyInfo{enc: base.UTF8, n_key_field: 1, n_all_field: 2, sort_flags: [Int]{0}, colls: [Int]{record.COLL_BINARY}}
-    s := sorter_new(info, 1)
+    ^s: sorter_new(info, 1)
     rows: [{k: Int, tag: Int}]{{k: 3, tag: 0}, {k: 1, tag: 1}, {k: 3, tag: 2}, {k: 2, tag: 3}, {k: 1, tag: 4}, {k: 3, tag: 5}}
     loop r in rows {
-        vals := [base.Mem]{base.mem_int(r.k), base.mem_int(r.tag)}
+        ^vals: [base.Mem]{base.mem_int(r.k), base.mem_int(r.tag)}
         sorter_write(s, record.make_record(vals, 4))
     }
     assert(!sorter_rewind(s))
-    tags := [Int]{}
+    ^tags: [Int]{}
     loop {
         cols: record.decode_record(sorter_key(s), base.UTF8) ?? panic("record")
         tags.push(cols[1].i)

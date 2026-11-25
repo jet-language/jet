@@ -17,9 +17,9 @@ S5SemanticToken: struct {
 s5_token_find: fn(text: String, marker: String, offset: Int) -> Int {
     bytes: text.bytes()
     pattern: marker.bytes()
-    index := offset
+    ^index: offset
     loop index + pattern.len() <= bytes.len() {
-        same := true
+        ^same: true
         loop part in 0..<pattern.len() {
             if bytes[index + part] != pattern[part] -> same = false
         }
@@ -32,7 +32,7 @@ s5_token_find: fn(text: String, marker: String, offset: Int) -> Int {
 s5_token_slice: fn(text: String, start: Int, end: Int) -> String {
     bytes: text.bytes()
     if start < 0 || end < start || end > bytes.len() -> return ""
-    selected := [U8]{}
+    ^selected: [U8]{}
     loop index in start..<end -> selected.push(bytes[index])
     String.from_bytes(selected) ?? ""
 }
@@ -40,10 +40,10 @@ s5_token_slice: fn(text: String, start: Int, end: Int) -> String {
 s5_token_u32: fn(text: String) -> Int? {
     bytes: text.bytes()
     if bytes.len() == 0 -> return None
-    index := 0
+    ^index: 0
     if (Int{bytes[0]}) == 43 -> index = 1
     if index == bytes.len() -> return None
-    value := 0
+    ^value: 0
     loop index < bytes.len() {
         digit: Int{bytes[index]} - 48
         if digit < 0 || digit > 9 -> return None
@@ -58,15 +58,15 @@ s5_token_decode: fn(source: String, response: String) -> [S5SemanticToken] {
     key: s5_token_find(response, "\"data\"", 0)
     first: s5_token_find(response, "[", key + 6) + 1
     last: s5_token_find(response, "]", first)
-    values := [Int]{}
+    ^values: [Int]{}
     loop field in s5_token_slice(response, first, last).split(",").to_list() {
         if s5_token_u32(field.trim()) == .Val(value) -> values.push(value)
     }
     lines: source.lines()
-    tokens := [S5SemanticToken]{}
-    line_index := 0
-    column := 0
-    offset := 0
+    ^tokens: [S5SemanticToken]{}
+    ^line_index: 0
+    ^column: 0
+    ^offset: 0
     loop offset + 5 <= values.len() {
         delta: values[offset]
         line_index += delta
@@ -80,7 +80,7 @@ s5_token_decode: fn(source: String, response: String) -> [S5SemanticToken] {
 }
 
 s5_token_count: fn(tokens: [S5SemanticToken], text: String, kind: Int) -> Int {
-    count := 0
+    ^count: 0
     loop token in tokens {
         if token.text == text && token.token_type == kind -> count += 1
     }
@@ -88,7 +88,7 @@ s5_token_count: fn(tokens: [S5SemanticToken], text: String, kind: Int) -> Int {
 }
 
 s5_token_kind_count: fn(tokens: [S5SemanticToken], kind: Int) -> Int {
-    count := 0
+    ^count: 0
     loop token in tokens {
         if token.token_type == kind -> count += 1
     }
@@ -120,7 +120,9 @@ s5_token_assertions: fn() {
     assert_eq(s5_token_count(tokens, "View", 1), 1)
     assert_eq(s5_token_count(tokens, "ViewMut", 1), 1)
     assert_eq(s5_token_count(tokens, "window", 4), 2)
-    if stage == "1" -> return
+    if stage == "1" {
+        return
+    }
     assert_eq(s5_token_count(tokens, "Int", 1), 7)
     assert_eq(s5_token_count(tokens, "String", 1), 2)
     assert_eq(s5_token_count(tokens, "while", 3), 2)

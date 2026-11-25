@@ -37,22 +37,22 @@ outcome_now: fn(shelf: Shelf) -> Int { if shelf.outcome == .Ok(clock) -> clock.n
 
 run: fn() {
     shelf: make_shelf()
-    copied := shelf.copy()
+    ^copied: shelf.copy()
     assert_eq(copied.timers[0].clock.advance(10), 10)
     assert_eq(copied.named["c"].clock.tick(10), 12)
     if copied.latest == .Val(timer) {
-        ticking := timer
+        ^ticking: timer
         assert_eq(ticking.clock.tick(10), 11)
     }
     if copied.outcome == .Ok(clock) {
-        ticking := clock
+        ^ticking: clock
         assert_eq(ticking.tick(10), 13)
     }
     print("{shelf.timers[0].clock.now()} {latest_now(shelf)} {shelf.named["c"].clock.now()} {outcome_now(shelf)}")
-    first := shelf.timers[0].copy()
+    ^first: shelf.timers[0].copy()
     assert_eq(first.clock.advance(4), 4)
     assert_eq(shelf.timers[0].clock.now(), 0)
-    fresh := make_shelf().copy()
+    ^fresh: make_shelf().copy()
     assert_eq(fresh.timers[0].clock.advance(5), 5)
     print("forked")
 }

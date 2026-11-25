@@ -4,7 +4,7 @@
 use jet_foundation.[Program]
 
 colon_test_items: fn(program: Program) -> [String] {
-    rows := [String]{}
+    ^rows: [String]{}
     loop item in program.items {
         row: if item == {
             .Const(value) -> "const {value.name}"
@@ -92,12 +92,12 @@ run: fn() {}
 }
 `,
     )
-    shape := ""
+    ^shape: ""
     loop item in program.items {
         if item == .Struct(value) {
-            fields := [String]{}
+            ^fields: [String]{}
             loop field in value.fields -> fields.push(field.name)
-            methods := [String]{}
+            ^methods: [String]{}
             loop method in value.methods -> methods.push(method.name)
             shape = "{fields.join(",")} / {methods.join(",")}"
         }
@@ -162,7 +162,7 @@ run: fn() { print(int_cache.size()) }
             break f
         }
     } ?? panic("run")
-    names := [String]{}
+    ^names: [String]{}
     loop statement in run.body {
         if statement == .Expr(outer_expr) && outer_expr == .Call(outer, _) && outer.args[0].expr == .Call(code, _) {
             items: code.args[0].flags.template_items ?? panic("template items")

@@ -225,7 +225,7 @@ jfmt_fmt_policy_entry: fn(f: ^JetFmt, declaration: PolicyDeclaration) {
 jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMarker? Never! {
     if stmt == {
         .Unsafe(audit, audit_expr, _, span) -> {
-            args := [JetFmtMarkerArgument]{}
+            ^args: [JetFmtMarkerArgument]{}
             if {
                 audit_expr == .Val(value) -> {
                     args.push(JetFmtMarkerArgument.Expr{label: None, value: value})
@@ -247,7 +247,7 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
             Val(JetFmtBlockMarker{name: "Unsafe", negated: false, args: args})
         }
         .Impure(reason, reason_expr, _, _) -> {
-            args := [JetFmtMarkerArgument]{}
+            ^args: [JetFmtMarkerArgument]{}
             if {
                 reason_expr == .Val(value) -> {
                     args.push(JetFmtMarkerArgument.Expr{label: None, value: value})
@@ -271,7 +271,7 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
             Val(JetFmtBlockMarker{name: "Policy", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Policy{declarations: declarations}}})
         }
         .AuthorityScope(caps, _, binding, _, _) -> {
-            values := [String]{}
+            ^values: [String]{}
             loop cap in caps -> values.push(cap.name)
             label: if binding == .Val(named) -> Val(named.name) else -> None
             Val(JetFmtBlockMarker{name: "FX", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Idents{label: label, values: values}}})
@@ -280,7 +280,7 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
         // (Parser Statements.jet parser_context_fields).
         .ContextBlock(fields, _, _) -> {
             deadline: fields.len() == 1 && fields[0].name == "deadline"
-            args := [JetFmtMarkerArgument]{}
+            ^args: [JetFmtMarkerArgument]{}
             loop field in fields {
                 args.push(JetFmtMarkerArgument.Expr{label: if deadline -> None else -> Val(field.name), value: field.value})
             }
@@ -290,7 +290,7 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
         // copy: `reason_expr` is a payload of read parameter `stmt`, which keeps the original; field `value` of the new JetFmtMarkerArgument.Expr owns this one
         .AssumeDet(_, reason_expr, _, _) -> Val(JetFmtBlockMarker{name: "Nondeterministic", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Expr{label: None, value: reason_expr.copy()}}})
         .Transact(name, _, _, _, _) -> {
-            args := [JetFmtMarkerArgument]{}
+            ^args: [JetFmtMarkerArgument]{}
             if name == .Val(handle) -> args.push(JetFmtMarkerArgument.Ident{value: handle})
             Val(JetFmtBlockMarker{name: "Transact", negated: false, args: args})
         }
@@ -315,7 +315,7 @@ jfmt_readiness_head_of: fn(expr: Expr) -> JetFmtReadinessHead? Never! {
 // decides; comment braces are trivia.
 jfmt_uses_classic_if_spelling: fn(bytes: [U8], if_span: Span, first_condition: Span) -> Bool Never! {
     if if_span.end > first_condition.start || first_condition.start > bytes.len() -> return false
-    index := if_span.end
+    ^index: if_span.end
     end: first_condition.start
     loop index < end {
         code: Int{bytes[index]}
@@ -328,7 +328,7 @@ jfmt_uses_classic_if_spelling: fn(bytes: [U8], if_span: Span, first_condition: S
             }
             code == 47 && next_code == 42 -> {
                 index += 2
-                depth := 1
+                ^depth: 1
                 loop index < end && depth > 0 {
                     here: Int{bytes[index]}
                     after: if index + 1 < end -> (Int{bytes[index + 1]}) else -> -1
@@ -354,7 +354,7 @@ jfmt_uses_classic_if_spelling: fn(bytes: [U8], if_span: Span, first_condition: S
 
 // `self.out.trim_end().ends_with('}')`.
 jfmt_out_trimmed_ends_with_close: fn(f: JetFmt) -> Bool Never! {
-    index := f.out.len() - 1
+    ^index: f.out.len() - 1
     loop index >= 0 && jfmt_is_ascii_space(f.out[index]) -> index -= 1
     index >= 0 && Int{f.out[index]} == 125
 }
@@ -365,7 +365,7 @@ jfmt_src_range_valid: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
 
 jfmt_fmt_statement_switch_attr: fn(f: ^JetFmt, marker: Marker, body: [Stmt]) {
     body_start: if body.len() > 0 -> jfmt_stmt_start(body[0]) else -> marker.span.end
-    body_is_block := false
+    ^body_is_block: false
     loop token in f.source_toks {
         if token.span.start < marker.span.end || token.span.start >= body_start -> next
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
@@ -484,9 +484,9 @@ jfmt_stmt_gap_next: fn(stmt: Stmt) -> Int Never! {
 // lines, each printed where it was written.
 jfmt_fmt_block_lines: fn(f: ^JetFmt, body: [Stmt], markers: [Marker]) {
     if f.simplify && markers.len() == 0 -> jfmt_note_inline_temporaries(f, body)
-    index := 0
-    marker_index := 0
-    previous_end := Int?{None}
+    ^index: 0
+    ^marker_index: 0
+    ^previous_end: Int?{None}
     loop index < body.len() || marker_index < markers.len() {
         if marker_index < markers.len() && (index >= body.len() || markers[marker_index].span.start < jfmt_stmt_start(body[index])) {
             marker: markers[marker_index]
@@ -547,7 +547,7 @@ jfmt_emit_block_close_comments: fn(f: ^JetFmt, first_start: Int, last_end: Int) 
     if !jfmt_src_range_valid(f, first_start, last_end) {
         return
     }
-    before := jfmt_first_token_at(f, first_start) - 1
+    ^before: jfmt_first_token_at(f, first_start) - 1
     loop before >= 0 && jfmt_close_comment_trivia(f.source_toks[before].kind) -> before -= 1
     if before < 0 || f.source_toks[before].kind != TOKEN_LBRACE {
         return
@@ -561,7 +561,7 @@ jfmt_emit_block_close_comments: fn(f: ^JetFmt, first_start: Int, last_end: Int) 
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < close {
         span: f.comments[f.comment_i].span.copy()
         text: f.comments[f.comment_i].text.copy()
-        previous := jfmt_first_token_at(f, span.start) - 1
+        ^previous: jfmt_first_token_at(f, span.start) - 1
         loop previous >= 0 && (f.source_toks[previous].span.start >= span.start || f.source_toks[previous].kind == TOKEN_SEMI) {
             previous -= 1
         }
@@ -595,14 +595,14 @@ jfmt_fenced_statement_for: fn(f: JetFmt, stmt: Stmt) -> FencedStatement? Never! 
 }
 
 jfmt_fmt_fenced_statement: fn(f: ^JetFmt, fact: FencedStatement) {
-    preserve_layout := false
+    ^preserve_layout: false
     loop comment in f.comments {
         if fact.span.start <= comment.span.start && comment.span.start < fact.span.end {
             preserve_layout = true
             break
         }
     }
-    cursor := fact.span.start
+    ^cursor: fact.span.start
     loop fence in fact.fences {
         jfmt_write_fence_fragment(f, cursor, fence.span.start, preserve_layout)
         jfmt_fmt_fenced_names(f, fence)
@@ -622,7 +622,7 @@ jfmt_fmt_fenced_names: fn(f: ^JetFmt, fence: FencedNames) {
     // point at the same `start..end` source span. Re-emit that range once.
     if fence.names.len() > 1 {
         first_span: fence.names[0].span
-        same := true
+        ^same: true
         loop entry in fence.names {
             if entry.span.start != first_span.start || entry.span.end != first_span.end {
                 same = false
@@ -646,7 +646,7 @@ jfmt_fmt_fenced_names: fn(f: ^JetFmt, fence: FencedNames) {
 
     // Expression entries store an empty display name;
     // emit their authored source slice instead.
-    names := [String]{}
+    ^names: [String]{}
     loop entry in fence.names {
         if entry.name.len() == 0 -> names.push(jfmt_src_text(f, entry.span.start, entry.span.end)) else {
             names.push(entry.name)
@@ -679,13 +679,13 @@ jfmt_write_fence_fragment: fn(f: ^JetFmt, start: Int, end: Int, preserve_layout:
         }
         return
     }
-    literal_spans := [Span]{}
+    ^literal_spans: [Span]{}
     loop token in f.source_toks {
         if token.span.start >= start && token.span.end <= end && (token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING || token.kind == TOKEN_CHAR) {
             literal_spans.push(token.span)
         }
     }
-    cursor := start
+    ^cursor: start
     loop span in literal_spans {
         if jfmt_src_range_valid(f, cursor, span.start) {
             fragment: jfmt_src_text(f, cursor, span.start)
@@ -707,8 +707,8 @@ jfmt_write_normalized_source_fragment: fn(f: ^JetFmt, fragment: String) {
     bytes: fragment.bytes()
     starts_with_space: bytes.len() > 0 && jfmt_is_ascii_space(bytes[0])
     ends_with_space: bytes.len() > 0 && jfmt_is_ascii_space(bytes[bytes.len() - 1])
-    words := [String]{}
-    word := [U8]{}
+    ^words: [String]{}
+    ^word: [U8]{}
     loop byte in bytes {
         if {
             jfmt_is_ascii_space(byte) -> {
@@ -725,7 +725,7 @@ jfmt_write_normalized_source_fragment: fn(f: ^JetFmt, fragment: String) {
         if starts_with_space -> jfmt_write(f, " ")
         return
     }
-    normalized := words.join(" ")
+    ^normalized: words.join(" ")
     if starts_with_space -> normalized = " {normalized}"
     if ends_with_space -> normalized = "{normalized} "
     jfmt_write(f, normalized)
@@ -735,7 +735,7 @@ jfmt_write_normalized_source_fragment: fn(f: ^JetFmt, fragment: String) {
 // and between, comment groups. A single boolean for the whole gap can move
 // a comment across a section boundary and attach it to the wrong phase.
 jfmt_emit_leading_statement_gap: fn(f: ^JetFmt, start: Int, end: Int) {
-    cursor := start
+    ^cursor: start
     loop f.comment_i < f.comments.len() {
         text: f.comments[f.comment_i].text.copy()
         span: f.comments[f.comment_i].span.copy()
@@ -762,8 +762,8 @@ jfmt_emit_leading_statement_gap: fn(f: ^JetFmt, start: Int, end: Int) {
 
 // Whether `src[start..end]` holds a blank line.
 jfmt_source_has_blank_line: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
-    saw_newline := false
-    only_space_since_newline := true
+    ^saw_newline: false
+    ^only_space_since_newline: true
     loop index in start..<end {
         byte: bytes[index]
         if {
@@ -809,7 +809,7 @@ jfmt_fmt_block_marker: fn(f: ^JetFmt, marker: JetFmtBlockMarker, source_start: I
         source: jfmt_source_list_span_after(f, source_start, JFMT_DELIM_PAREN)
         multiline: if source == .Val(list) -> jfmt_source_span_multiline(f, list.span) else -> false
         if multiline -> jfmt_newline(f)
-        first := true
+        ^first: true
         loop argument in marker.args {
             if argument == {
                 .Expr(label, value) -> {
@@ -889,7 +889,7 @@ jfmt_comptime_else_chain: fn(f: JetFmt, body: [Stmt]) -> Bool {
     if body.len() != 1 -> return false
     if body[0] == {
         .ComptimeIf(_, _, _, _, span, _) -> {
-            index := span.start - 1
+            ^index: span.start - 1
             if index >= f.src_bytes.len() -> return false
             loop index >= 0 && (f.src_bytes[index] == 32 || f.src_bytes[index] == 9 || f.src_bytes[index] == 10 || f.src_bytes[index] == 13) {
                 index -= 1
@@ -1006,7 +1006,9 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
                                     f.simplify && arms.len() > 1 -> {
                                         jfmt_fmt_guard_dispatch(f, arms, else_body, span)
                                     }
-                                    else -> { jfmt_fmt_classic_switch(f, arms, else_body, span.start) }
+                                    else -> {
+                                        jfmt_fmt_classic_switch(f, arms, else_body, span.start)
+                                    }
                                 }
                             }
                             else -> { jfmt_fmt_guard_dispatch(f, arms, else_body, span) }
@@ -1120,7 +1122,7 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
         // to `box.anchor` / `self.anchor`.
         .Layout(name, _, body, span) -> {
             jfmt_write(f, "{name}: Layout{{")
-            resugared := [Stmt]{}
+            ^resugared: [Stmt]{}
             loop statement in body -> resugared.push(jfmt_resugar_layout_stmt(name, statement))
             source: jfmt_source_list_span_after(f, span.start, JFMT_DELIM_BRACE)
             multiline: if source == .Val(list) -> jfmt_source_span_multiline(f, list.span) else -> false
@@ -1208,7 +1210,7 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
                     arg: args[index]
                     arg_span: expr_span(arg)
                     jfmt_comma_before(f, index, multiline, arg_span.start)
-                    single_field := false
+                    ^single_field: false
                     if arg == .TupleLit(fields, _, _, _) {
                         if fields.len() == 1 {
                             jfmt_write(f, fields[0].name)
@@ -1235,7 +1237,7 @@ jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
 
 // Whether the source `defer` at `span` opens a braced block.
 jfmt_defer_braced: fn(f: JetFmt, span: Span) -> Bool Never! {
-    index := span.start + 5
+    ^index: span.start + 5
     loop index < f.src_bytes.len() && (f.src_bytes[index] == 32 || f.src_bytes[index] == 9) {
         index += 1
     }
@@ -1244,9 +1246,9 @@ jfmt_defer_braced: fn(f: JetFmt, span: Span) -> Bool Never! {
 
 jfmt_fmt_for_stmt: fn(f: ^JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?) {
     header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, body, span, label)
-    if ast_loop_destructures(var, body) -> jfmt_fmt_effect_loop_body(f, body[1..<body.len()], header_end, arrow_body, header_end) else {
-        jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body, header_end)
-    }
+    if ast_loop_destructures(var, body) {
+        jfmt_fmt_effect_loop_body(f, body[1..<body.len()], header_end, arrow_body, header_end)
+    } else { jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body, header_end) }
 }
 
 // A template loop's body is template text, kept as written: a braced body
@@ -1257,7 +1259,9 @@ jfmt_fmt_template_loop_stmt: fn(f: ^JetFmt, stmt: Stmt) {
         header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, body, span, label)
         statements: if ast_loop_destructures(var, body) -> body[1..<body.len()] else -> body
         if {
-            arrow_body -> jfmt_fmt_effect_loop_body(f, statements, header_end, arrow_body, header_end)
+            arrow_body -> {
+                jfmt_fmt_effect_loop_body(f, statements, header_end, arrow_body, header_end)
+            }
             jfmt_source_span_multiline(f, Span{start: header_end, end: span.end}) -> {
                 jfmt_write(f, " {{")
                 jfmt_fmt_body_expanded(f, statements)
@@ -1330,7 +1334,7 @@ jfmt_fmt_for_head: fn(f: ^JetFmt, var: String, var_span: Span, var2: NamedSpan?,
     if bindingless -> jfmt_maybe_wrap_loop_clause(f, wrap) else {
         jfmt_loop_source_separator(f, first_clause_start, wrap)
     }
-    header_end := 0
+    ^header_end: 0
     if kind == {
         .Range(start, end, step, exclusive) -> {
             jfmt_fmt_expr(f, start, JFMT_PREC_OR_FALLBACK)
@@ -1476,9 +1480,9 @@ jfmt_fmt_dispatch: fn(f: ^JetFmt, subject: Expr, arms: [SwitchArm], else_body: [
 // table's closing `}` for the `if` at `start`; -1 when the header has no
 // hole.
 jfmt_hole_table_end: fn(f: JetFmt, start: Int) -> Int Never! {
-    index := jfmt_first_token_at(f, start) + 1
-    groups := 0
-    hole := false
+    ^index: jfmt_first_token_at(f, start) + 1
+    ^groups: 0
+    ^hole: false
     loop index < f.source_toks.len() {
         token: f.source_toks[index]
         if groups == 0 {
@@ -1502,7 +1506,7 @@ jfmt_hole_table_end: fn(f: JetFmt, start: Int) -> Int Never! {
 // before the first arm or `else`) and its closing `}` in the source tokens.
 jfmt_switch_written_on_one_line: fn(f: JetFmt, start: Int, arms: [SwitchArm]) -> Bool Never! {
     body_start: if arms.len() > 0 -> arms[0].span.start else -> jfmt_dispatch_else_start(f, start) ?? return false
-    open := -1
+    ^open: -1
     loop index in jfmt_first_token_at(f, start)..<f.source_toks.len() {
         token: f.source_toks[index]
         if token.span.start >= body_start -> break
@@ -1567,9 +1571,7 @@ jfmt_fmt_dispatch_else_lead: fn(f: ^JetFmt, arms: [SwitchArm], compact: Bool) {
                 jfmt_emit_leading_statement_gap(f, last.span.end, else_start)
             }
         }
-        jfmt_dispatch_else_start(f, 0) == .Val(else_start) -> {
-            jfmt_emit_leading(f, else_start)
-        }
+        jfmt_dispatch_else_start(f, 0) == .Val(else_start) -> { jfmt_emit_leading(f, else_start) }
     }
 }
 
@@ -1580,7 +1582,7 @@ jfmt_fmt_dispatch_else_trail: fn(f: ^JetFmt, arms: [SwitchArm], compact: Bool) {
         return
     }
     else_start: jfmt_dispatch_else_start(f, arms[arms.len() - 1].span.end) ?? return
-    else_arm := jfmt_table_else_arm(f, else_start)
+    ^else_arm: jfmt_table_else_arm(f, else_start)
     span: jfmt_table_arm_source(f, else_arm) ?? return
     jfmt_emit_trailing(f, span.end)
 }
@@ -1667,8 +1669,8 @@ jfmt_switch_was_classic_if: fn(f: JetFmt, arms: [SwitchArm], span: Span) -> Bool
 jfmt_consecutive_expr_int_range: fn(f: JetFmt, fence: FencedNames) -> NameRange? {
     if fence.names.len() < 2 -> return None
     if jfmt_span_has_comment(f, fence.span.start, fence.span.end) -> return None
-    values := [Int]{}
-    texts := [String]{}
+    ^values: [Int]{}
+    ^texts: [String]{}
     loop entry in fence.names {
         if entry.name.len() > 0 -> return None
         if !jfmt_src_range_valid(f, entry.span.start, entry.span.end) -> return None
@@ -1687,14 +1689,14 @@ jfmt_consecutive_expr_int_range: fn(f: JetFmt, fence: FencedNames) -> NameRange?
 // An optional sign, then one or more ASCII digits.
 jfmt_parse_decimal_i64: fn(text: String) -> Int? Never! {
     bytes: text.bytes()
-    index := 0
-    negative := false
+    ^index: 0
+    ^negative: false
     if bytes.len() > 0 && (Int{bytes[0]} == 43 || Int{bytes[0]} == 45) {
         negative = Int{bytes[0]} == 45
         index = 1
     }
     if index >= bytes.len() -> return None
-    value := 0
+    ^value: 0
     loop index < bytes.len() {
         code: Int{bytes[index]}
         if code < 48 || code > 57 -> return None
@@ -1741,7 +1743,7 @@ jfmt_fmt_classic_switch: fn(f: ^JetFmt, arms: [SwitchArm], else_body: [Stmt]?, s
 // braced block, the first `{` after that arm's condition (a call's span ends
 // at its name). -1 when that arm was written as an arrow.
 jfmt_classic_else_from: fn(f: JetFmt, last_cond_end: Int) -> Int Never! {
-    open := jfmt_first_token_at(f, last_cond_end)
+    ^open: jfmt_first_token_at(f, last_cond_end)
     loop open < f.source_toks.len() && f.source_toks[open].kind != TOKEN_LBRACE {
         if f.source_toks[open].kind == TOKEN_UNIFIED_ARROW -> return -1
         open += 1
@@ -1860,7 +1862,7 @@ jfmt_arm_body_is_written_exit: fn(f: JetFmt, body: [Stmt]) -> Bool {
     if body.len() != 1 || !jfmt_stmt_is_direct_exit(body[0]) -> return false
     start: jfmt_stmt_start(body[0])
     if start < 2 || start > f.src_bytes.len() -> return false
-    at := start - 1
+    ^at: start - 1
     loop at >= 0 {
         code: Int{f.src_bytes[at]}
         if code != 32 && code != 9 && code != 10 && code != 13 -> break
@@ -1933,7 +1935,7 @@ jfmt_arm_body_was_braceless: fn(f: JetFmt, body: [Stmt]) -> Bool {
     start: jfmt_stmt_start(body[0])
     if start < 0 || start > f.src_bytes.len() -> return false
     // The last `->` in `src[..start]`.
-    arrow := start - 2
+    ^arrow: start - 2
     loop arrow >= 0 && !(Int{f.src_bytes[arrow]} == 45 && Int{f.src_bytes[arrow + 1]} == 62) {
         arrow -= 1
     }
@@ -2016,8 +2018,8 @@ jfmt_switch_cond_slot: fn(op: BinOp, child: Expr, base: Int) -> Int Never! {
 // at its method name, so a generic `<T>` and an argument list may sit between.
 jfmt_dispatch_op_from_source: fn(f: JetFmt, subject: Expr) -> BinOp? Never! {
     start: expr_span(subject).end
-    depth := 0
-    pending := BinOp?{None}
+    ^depth: 0
+    ^pending: BinOp?{None}
     loop token in f.source_toks {
         if token.span.start < start || jfmt_is_comment_kind(token.kind) -> next
         kind: token.kind
@@ -2055,7 +2057,7 @@ jfmt_dispatch_token_op: fn(kind: Int) -> BinOp? Never! {
 // Infer the table's distributed comparison from subject-`table_op` leaves.
 // Prefers a consistent OP across pure distributed leaves; defaults to `==`.
 jfmt_dispatch_op: fn(f: JetFmt, subject: Expr, arms: [SwitchArm]) -> BinOp Never! {
-    found := BinOp?{None}
+    ^found: BinOp?{None}
     loop arm in arms -> jfmt_collect_dispatch_ops(f, subject, arm.cond, found)
     found ?? BinOp.Eq
 }
@@ -2294,7 +2296,7 @@ jfmt_fmt_bind_pattern: fn(f: ^JetFmt, pat: BindPattern, mutable: Bool) {
         // `{min, max}` destructures a record; `{ member: local, … }`
         // renames its members.
         .Tuple(elems, _) -> {
-            renamed := false
+            ^renamed: false
             loop elem in elems {
                 if elem.rename != None -> renamed = true
             }
@@ -2353,7 +2355,7 @@ jfmt_resugar_layout_stmt: fn(layout_name: String, stmt: Stmt) -> Stmt Never! {
         .Expr(e) -> Stmt.Expr{expr: jfmt_resugar_layout_expr(layout_name, e)}
         .DeferClose(close, span) -> Stmt.DeferClose{close: jfmt_resugar_layout_expr(layout_name, close), span: span}
         .Val(b) -> {
-            b2 := b
+            ^b2: b
             b2.init = jfmt_resugar_layout_expr(layout_name, b.init)
             Stmt.Val{binding: b2}
         }
@@ -2366,9 +2368,9 @@ jfmt_resugar_layout_stmt: fn(layout_name: String, stmt: Stmt) -> Stmt Never! {
 }
 
 jfmt_resugar_layout_args: fn(layout_name: String, args: [CallArg]) -> [CallArg] Never! {
-    out := [CallArg]{}
+    ^out: [CallArg]{}
     loop arg in args {
-        a2 := arg.copy()
+        ^a2: arg.copy()
         a2.expr = jfmt_resugar_layout_expr(layout_name, arg.expr)
         out.push(a2)
     }
@@ -2398,7 +2400,7 @@ jfmt_resugar_layout_expr: fn(layout_name: String, e: Expr) -> Expr Never! {
         .Field(base, field, span, node) -> Expr.Field{base: jfmt_resugar_layout_expr(layout_name, base), member: field, span: span, id: node}
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) -> Expr.MethodCall{receiver: jfmt_resugar_layout_expr(layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: jfmt_resugar_layout_args(layout_name, args), id: node}
         .Call(call, node) -> {
-            call2 := call
+            ^call2: call
             call2.args = jfmt_resugar_layout_args(layout_name, call.args)
             Expr.Call{call: call2, id: node}
         }

@@ -2,9 +2,9 @@
 // environment-secret redaction and the framed input/policy digest material.
 process_execution_sort_unique: fn(list: I64) {
     data: fd_word(list, I64{16})
-    i := I64{1}
+    ^i: I64{1}
     loop i < fd_word(list, I64{0}) {
-        j := i
+        ^j: i
         loop j > (I64{0}) {
             a: fd_word(data, (j - I64{1}) * I64{8})
             b: fd_word(data, j * I64{8})
@@ -15,8 +15,8 @@ process_execution_sort_unique: fn(list: I64) {
         }
         i += I64{1}
     }
-    read := I64{0}
-    write := I64{0}
+    ^read: I64{0}
+    ^write: I64{0}
     loop read < fd_word(list, I64{0}) {
         value: fd_word(data, read * I64{8})
         if (write != I64{0} && jet_rt_string_eq(value, fd_word(data, (write - I64{1}) * I64{8}))) {
@@ -32,7 +32,7 @@ process_execution_sort_unique: fn(list: I64) {
 
 process_execution_join: fn(list: I64) -> I64 {
     text: jet_rt_string_builder_new()
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(list, I64{0}) {
         if (at != I64{0}) { jet_rt_string_builder_push(text, rt_static_text("\n")) }
         jet_rt_string_builder_push(text, fd_word(fd_word(list, I64{16}), at * I64{8}))
@@ -46,7 +46,7 @@ process_execution_hash: fn(text: I64) -> I64 {
     jet_rt_native_sha256(rt_text_data(text), rt_text_len(text), scratch, wrapping(scratch + I64{32}))
     result: jet_rt_string_builder_new()
     digits: rt_static_text("0123456789abcdef")
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{32}) {
         byte: rt_text_byte(wrapping(scratch + at))
         rt_text_append(result, rt_text_data(digits) + (byte >> I64{4}), I64{1})
@@ -76,7 +76,7 @@ process_execution_input_material: fn(spec: I64) -> I64 {
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("jet-process-input-v1\n"))
     cmd: fd_word(spec, PROCESS_SPEC_CMD)
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(cmd, I64{0}) {
         word: fd_word(fd_word(cmd, I64{16}), at * I64{8})
         rt_text_push_number(text, rt_text_len(word))
@@ -122,7 +122,7 @@ process_execution_policy_material: fn(spec: I64) -> I64 {
     envkeys: data_sequence_new(I64{0}, I64{8})
     sets: fd_word(spec, PROCESS_SPEC_ENV_SET)
     removes: fd_word(spec, PROCESS_SPEC_ENV_REMOVE)
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(sets, I64{0}) + fd_word(removes, I64{0}) {
         setting: at < fd_word(sets, I64{0})
         key: if setting -> fd_word(fd_word(sets, I64{16}), at * I64{16}) else -> fd_word(fd_word(removes, I64{16}), (at - fd_word(sets, I64{0})) * I64{8})
@@ -192,7 +192,7 @@ process_execution_limits: fn(spec: I64) -> I64 {
     list: data_sequence_new(I64{6}, I64{8})
     process_text_list_push(list, rt_static_text("private-tmpfs-bytes=67108864"))
     keys: process_execution_limit_keys()
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{5}) {
         box: fd_word(spec, PROCESS_SPEC_TIMEOUT + at * I64{8})
         value: if (box == I64{0}) -> jet_rt_string_clone(rt_static_text("none")) else -> process_execution_decimal(fd_word(box, I64{0}))
@@ -238,7 +238,7 @@ process_execution_secrets: fn(spec: I64) -> I64 {
     secrets: data_sequence_new(I64{0}, I64{8})
     process_authority_secret_values(spec, secrets)
     sets: fd_word(spec, PROCESS_SPEC_ENV_SET)
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(sets, I64{0}) {
         row: wrapping(fd_word(sets, I64{16}) + at * I64{16})
         name: jet_text_ascii_lower(fd_word(row, I64{0}))
@@ -253,7 +253,7 @@ process_execution_secrets: fn(spec: I64) -> I64 {
     data: fd_word(secrets, I64{16})
     at = I64{1}
     loop at < fd_word(secrets, I64{0}) {
-        j := at
+        ^j: at
         loop j > (I64{0}) && rt_text_len(fd_word(data, j * I64{8})) > rt_text_len(fd_word(data, (j - I64{1}) * I64{8})) {
             value: fd_word(data, j * I64{8})
             fd_put(data, j * I64{8}, fd_word(data, (j - I64{1}) * I64{8}))
@@ -262,8 +262,8 @@ process_execution_secrets: fn(spec: I64) -> I64 {
         }
         at += I64{1}
     }
-    read := I64{0}
-    write := I64{0}
+    ^read: I64{0}
+    ^write: I64{0}
     loop read < fd_word(secrets, I64{0}) {
         value: fd_word(data, read * I64{8})
         if (write != I64{0} && jet_rt_string_eq(value, fd_word(data, (write - I64{1}) * I64{8}))) {
@@ -279,8 +279,8 @@ process_execution_secrets: fn(spec: I64) -> I64 {
 }
 
 process_execution_redact: fn(text: I64, secrets: I64) -> I64 {
-    result := jet_rt_string_clone(text)
-    at := I64{0}
+    ^result: jet_rt_string_clone(text)
+    ^at: I64{0}
     loop at < fd_word(secrets, I64{0}) {
         next: jet_string_replace(result, fd_word(fd_word(secrets, I64{16}), at * I64{8}), rt_static_text("<redacted>"))
         jet_rt_string_drop(result)
@@ -294,8 +294,8 @@ process_execution_redact: fn(text: I64, secrets: I64) -> I64 {
 process_execution_first_file: fn(candidates: I64) -> I64 {
     scratch: jet_rt_alloc(I64{176}, I64{8})
 
-    found := I64{0}
-    at := I64{0}
+    ^found: I64{0}
+    ^at: I64{0}
     loop at < fd_word(candidates, I64{0}) {
         candidate: fd_word(fd_word(candidates, I64{16}), at * I64{8})
         name: fd_c_path(candidate)
@@ -365,7 +365,7 @@ process_receipt_build: fn(spec: I64, pid: I64, code: I64, success: Bool, signal:
     own_secrets: process_execution_secrets(spec)
     argv: data_sequence_new(I64{0}, I64{8})
     cmd: fd_word(spec, PROCESS_SPEC_CMD)
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(cmd, I64{0}) {
         word: process_execution_redact(fd_word(fd_word(cmd, I64{16}), at * I64{8}), own_secrets)
         process_text_list_push(argv, word)
@@ -442,7 +442,7 @@ process_execution_receipt_text: fn(text: I64, mode: I64) -> I64 {
 process_execution_validate_text: fn(text: I64, label: I64, err: I64) -> Bool {
     length: rt_text_len(text)
     data: rt_text_data(text)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         width: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
         if (width < I64{0}) {
@@ -466,7 +466,7 @@ process_execution_validate_text: fn(text: I64, label: I64, err: I64) -> Bool {
                 jet_rt_string_builder_push(cause, rt_static_text(" bytes from index "))
                 rt_text_push_number(cause, at)
             }
-            _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(label), jet_rt_string_builder_finish(cause), err)
+            ^_: host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(label), jet_rt_string_builder_finish(cause), err)
             return false
         }
         at += width

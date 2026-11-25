@@ -2,7 +2,7 @@ use files: core.files
 
 // Lock descriptors this process holds open (fds whose target ends `.lk`).
 held: fn() -[FS]> Int {
-    count := 0
+    ^count: 0
     names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
     loop entry in names {
         target: files.read_link(entry.path) ?? ""
@@ -18,7 +18,7 @@ consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 // The test after `^^` runs only where the pattern matched: where `n` is
 // absent the parameter still owns the lock, which closes as this returns.
 pattern_and: fn(l: ^^FileLock, n: Int?) -[FS]> Int {
-    result := 0
+    ^result: 0
     if n == .Val(v) && consume_lock(l.move()) > v -> result = 1
     result
 }

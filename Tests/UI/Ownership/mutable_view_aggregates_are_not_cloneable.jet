@@ -3,12 +3,12 @@ Edit: struct {
 }
 
 edit: fn(values: ^[Int]) -[]> Edit {
-    selected: ^values[0..1]
+    selected: values[0..1].in_place()
     return Edit{values: selected}
 }
 
 run: fn() {
-    target := [1, 2]
+    ^target: [1, 2]
     borrowed: edit(target)
     duplicate: borrowed.copy()
     print(duplicate.values[0])

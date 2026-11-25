@@ -4,8 +4,8 @@ use time: core.time
 kit_steps_predicates: fn(text: String) -> [String]? {
     body: kit_steps_body(text)
     tokens: kit_steps_tokens(body) ?? return None
-    result := [String]{}
-    start := 0
+    ^result: [String]{}
+    ^start: 0
     loop token in tokens {
         if token.text != "&&" || kit_steps_byte_slice(body, token.start, token.end) != "&&" -> next
         part: kit_steps_byte_slice(body, start, token.start).trim().copy()
@@ -23,8 +23,8 @@ kit_steps_poll_step: fn(label: String, original: String) -> KitStep? {
     if label == "" || label.contains(" ") || label.contains("\t") -> return None
     body: kit_steps_body(original)
     tokens: kit_steps_tokens(body) ?? return None
-    until := -1
-    boundary := tokens.len()
+    ^until: -1
+    ^boundary: tokens.len()
     loop (index, token) in tokens {
         raw: kit_steps_byte_slice(body, token.start, token.end)
         if raw == "until" && until < 0 -> until = index
@@ -38,8 +38,8 @@ kit_steps_poll_step: fn(label: String, original: String) -> KitStep? {
     timeout: kit_steps_duration_ns(tokens[boundary + 1].text) ?? return None
     interval: kit_steps_duration_ns(tokens[boundary + 3].text) ?? return None
     predicates: kit_steps_predicates(kit_steps_byte_slice(body, tokens[until + 1].start, tokens[boundary - 1].end)) ?? return None
-    assertions := [KitAssertion]{}
-    exit := "0"
+    ^assertions: [KitAssertion]{}
+    ^exit: "0"
     reason: kit_steps_byte_slice(original, kit_steps_comment(original), original.count_bytes())
     loop predicate in predicates {
         colon: kit_steps_condition_colon(predicate) ?? return None
@@ -57,22 +57,22 @@ kit_steps_poll_step: fn(label: String, original: String) -> KitStep? {
         }
         assertions.push(assertion)
     }
-    argv := [String]{}
+    ^argv: [String]{}
     loop token in tokens.slice(0, until) -> argv.push(token.text)
     Val(KitStep{argv: argv, stdin: "", exit: exit, assertions: assertions, label: label, action: "poll", duration: timeout, instruction: "{interval}"})
 }
 
 kit_steps_poll: fn(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState, hooks: KitStepHooks) -> KitStepResult {
-    state := previous
-    attempt := step
+    ^state: previous
+    ^attempt: step
     attempt.action = ""
     state.replacements = kit_steps_replacements(step.replacements, context, state) ?? return kit_steps_action_error(state, "poll replacement token unavailable")
-    rules := context.plan.json_normalize
+    ^rules: context.plan.json_normalize
     loop rule in step.json_normalize -> rules.push(rule.copy())
     interval: Int.parse(step.instruction) ?? return kit_steps_action_error(state, "invalid polling interval")
     deadline: kit_steps_answer_deadline(context.env, step.duration)
     started: time.instant()
-    attempt_context := context
+    ^attempt_context: context
     attempt_context.bless.all = false
     attempt_context.bless.ids = []
     loop {

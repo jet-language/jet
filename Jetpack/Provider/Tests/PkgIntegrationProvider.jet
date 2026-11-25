@@ -18,7 +18,7 @@ provider_pkg_integration_report_error: fn(report: ProviderFactReport) -> Provide
 
 #Test("pkg integration provider_contract_covers_core_nix_path_github") {
     contracts: ProviderFamilyContract.built_in()
-    families := [ProviderFamily]{}
+    ^families: [ProviderFamily]{}
     loop contract in contracts -> families.push(contract.family)
     assert(families.contains(ProviderFamily.Core))
     assert(families.contains(ProviderFamily.Nix))
@@ -56,7 +56,7 @@ provider_pkg_integration_report_error: fn(report: ProviderFactReport) -> Provide
     assert(!report.is_lossless())
     error: provider_pkg_integration_report_error(report)
     assert(error.message.contains("lossy") || error.message.contains("exact"))
-    found := false
+    ^found: false
     loop loss in report.shared_facts_for("web@npm").losses {
         if loss.reason.contains("exact version") -> found = true
     }
@@ -178,7 +178,7 @@ provider_pkg_integration_report_error: fn(report: ProviderFactReport) -> Provide
     native: "{{\"name\":\"tool\",\"hash\":\"sha256-aa\",\"platforms\":[\"linux\"]}}"
     report: provider_normalize_document(ProviderFamily.Binary, native)
     assert(!report.is_lossless())
-    found := false
+    ^found: false
     loop loss in report.shared_facts().losses {
         if loss.reason.contains("exact version, revision, or digest") -> found = true
     }
@@ -223,14 +223,14 @@ provider_pkg_integration_report_error: fn(report: ProviderFactReport) -> Provide
 }
 
 #Test("pkg integration provider_fetch_allowed_offline_with_satisfied_lock") {
-    graph := AuthorityGraph.empty()
+    ^graph: AuthorityGraph.empty()
     graph.add_locked(ProviderObject{family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", signature: "", audit: [String]{}, sandbox_effects: [String]{}, build_effects: [String]{}})
     decision: graph.fetch_allowed(ProviderRequest{family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", offline: true})
     assert_eq(decision, FetchDecision.AllowedOfflineSatisfied)
 }
 
 #Test("pkg integration lock_satisfied_offline_verbs_do_not_touch_network") {
-    graph := AuthorityGraph.empty()
+    ^graph: AuthorityGraph.empty()
     graph.add_locked(ProviderObject{family: ProviderFamily.Npm, ref_key: "left-pad", exact_identity: "npm:left-pad@1.0.0", hash: "sha256-aa", platform: "any", signature: "", audit: [String]{}, sandbox_effects: [String]{}, build_effects: [String]{}})
     decision: graph.fetch_allowed(ProviderRequest{family: ProviderFamily.Npm, ref_key: "left-pad", exact_identity: "npm:left-pad@1.0.0", hash: "sha256-aa", platform: "any", offline: true})
     assert_eq(decision, FetchDecision.AllowedOfflineSatisfied)

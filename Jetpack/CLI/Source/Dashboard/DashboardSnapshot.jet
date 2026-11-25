@@ -150,7 +150,7 @@ cli_dashboard_send_result: fn(sender: Sender<DashboardLoadResult>, result: ^^Das
 // The background load task: one snapshot load, sent to its loader. The load
 // reads through `ledger`, a copy of the owner sharing its locked ledger.
 cli_dashboard_load_and_send: fn(sender: Sender<DashboardLoadResult>, ledger: ^^StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> {
-    verification := ledger
+    ^verification: ledger
     cli_dashboard_send_result(sender, cli_dashboard_load_snapshot(verification)).drop("a superseded load has no reader")
 }
 
@@ -295,7 +295,7 @@ DashboardOutput: struct {
 // Run the bare command. The TTY check stays here, at the dispatch seam, so
 // the non-interactive path can never emit an alternate-screen sequence.
 cli_run_dashboard: fn(verification: StoreVerification) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     stdout_tty: term.stdout().is_tty()
     choice: if stdout_tty -> ColorChoice.Auto else -> ColorChoice.Never
     theme: Theme.resolve_for(choice, stdout_tty)
@@ -306,12 +306,12 @@ cli_run_dashboard: fn(verification: StoreVerification) -[IO, FS, Env, Exec, Net,
     // Core has no raw-mode or signal API (#5935): keys arrive
     // cooked, and an interrupt ends the process before the screen guard runs.
     _screen: DashboardAlternateScreen.enter()
-    reader := DashboardKeyReader.terminal()
-    loader := DashboardLoader?{None}
-    frame := DashboardFrame.Loading
-    output := DashboardOutput.terminal()
-    factory := DashboardLoaderFactory.background()
-    clock := DashboardClock.system()
+    ^reader: DashboardKeyReader.terminal()
+    ^loader: DashboardLoader?{None}
+    ^frame: DashboardFrame.Loading
+    ^output: DashboardOutput.terminal()
+    ^factory: DashboardLoaderFactory.background()
+    ^clock: DashboardClock.system()
     cli_dashboard_run_loop(verification, reader, loader, frame, output, theme, factory, clock)
 }
 
@@ -320,8 +320,8 @@ cli_run_dashboard: fn(verification: StoreVerification) -[IO, FS, Env, Exec, Net,
 // exponentially up to 2 s; `r` restarts the load at once.
 cli_dashboard_run_loop: fn(verification: StoreVerification, reader: ^DashboardKeyReader, loader: ^DashboardLoader?, frame: ^DashboardFrame, output: ^DashboardOutput, theme: Theme, factory: ^DashboardLoaderFactory, clock: ^DashboardClock) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     output.draw(frame, theme)
-    retry_delay := DASHBOARD_RETRY_INITIAL_MS
-    next_retry := clock.now() + retry_delay
+    ^retry_delay: DASHBOARD_RETRY_INITIAL_MS
+    ^next_retry: clock.now() + retry_delay
     if loader == None -> loader = Val(factory.start(verification))
     loop {
         key: reader.read_key()
@@ -336,7 +336,7 @@ cli_dashboard_run_loop: fn(verification: StoreVerification, reader: ^DashboardKe
             loader = Val(factory.start(verification))
             next
         }
-        finished := DashboardLoadResult?{None}
+        ^finished: DashboardLoadResult?{None}
         if loader == .Val(pending) -> finished = pending.try_result()
         if finished == .Val(result) {
             loader = None
@@ -405,7 +405,7 @@ cli_dashboard_stale_snapshot: fn(frame: DashboardFrame) -> DashboardSnapshot? Ne
 // (which takes the exclusive Hangar lock and verifies every output tree).
 cli_dashboard_load_snapshot: fn(verification: StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoadResult Never! {
     // Each background refresh is its own discovery session; no cross-task memo.
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     roots: pkg_resolve_roots()
     lock_path: files.join(files.join(roots.root, ".locks"), "hangar.lock")
     state: env_lock_state(lock_path) ?? RuntimeLockState.Absent
@@ -425,11 +425,11 @@ cli_dashboard_collect_snapshot_from: fn(verification: StoreVerification, cache: 
     env_present: files.is_file(env_file)
     env_source: files.read(env_file) ?? ""
     typed: env_present && env_source != "" && envmodel_is_module_surface(env_source)
-    typed_plan := EnvPlan?{None}
+    ^typed_plan: EnvPlan?{None}
     if typed {
         if envmodel_evaluate_env(env_source, project_root) == .Ok(plan) -> typed_plan = Val(plan)
     }
-    env := EnvFile?{None}
+    ^env: EnvFile?{None}
     if !typed -> env = EnvFile.load(project_root)
     lock_path: pkg_lock_path(project_root)
     lock: pkg_lock_load(project_root)
@@ -440,9 +440,9 @@ cli_dashboard_collect_snapshot_from: fn(verification: StoreVerification, cache: 
     }
     active: (sys.get(JETPACK_ENV_MARKER) ?? "") == "1"
     active_refs: sys.get(JETPACK_REF_VAR) ?? ""
-    update_channels := 0
-    active_environment := String?{None}
-    declared_packages := Int?{None}
+    ^update_channels: 0
+    ^active_environment: String?{None}
+    ^declared_packages: Int?{None}
     if typed_plan == .Val(plan) {
         loop name in plan.table.declared_names() {
             if plan.table.channel_policy(name).moves() -> update_channels += 1
@@ -457,18 +457,18 @@ cli_dashboard_collect_snapshot_from: fn(verification: StoreVerification, cache: 
             if env == .Val(file) -> declared_packages = Val(file.packages.len())
         }
     }
-    entries := listed
+    ^entries: listed
     store_packages: entries.len()
     entries.sort_by(fn(left: StoreEntry, right: StoreEntry) { (cli_dashboard_activity_time(right) <=> cli_dashboard_activity_time(left)).then(left.id <=> right.id) })
     now: time.unix_seconds(time.now())
-    activity := [DashboardActivity]{}
+    ^activity: [DashboardActivity]{}
     loop entry in entries {
         if activity.len() >= DASHBOARD_MAX_RECENT_ACTIVITY -> break
         name: if entry.name == "" -> entry.id else -> entry.name
         activity.push(DashboardActivity{name: name, version: entry.version, when: cli_dashboard_age_label(cli_dashboard_activity_time(entry), now)})
     }
     doctor: DoctorReport.run(verification, project_root, false)
-    store_health := DoctorHealth.Healthy
+    ^store_health: DoctorHealth.Healthy
     loop check in doctor.checks {
         if check.name == "hangar" {
             store_health = check.health
@@ -518,6 +518,6 @@ cli_dashboard_age_label: fn(timestamp: Int, now: Int) -> String Never! {
 
 cli_dashboard_print_status_summary: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time, Time.Wait]> Never! {
     snapshot: cli_dashboard_collect_snapshot(verification, cache)
-    stdout_handle := term.stdout()
+    ^stdout_handle: term.stdout()
     stdout_handle.write(cli_dashboard_render_status_summary(snapshot, theme)).drop("a closed stdout cannot take the status summary")
 }

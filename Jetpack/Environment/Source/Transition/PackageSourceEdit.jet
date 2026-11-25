@@ -37,7 +37,7 @@ env_transition_error: fn(text: String) -> EnvironmentError Never! {
 
 // The first byte offset at or after `from` where `needle` starts, or -1.
 env_transition_find: fn(raw: [U8], needle: [U8], from: Int) -> Int Never! {
-    at := from
+    ^at: from
     loop at + needle.len() <= raw.len() {
         if pkg_bytes_starts_with(raw, at, needle) -> return at
         at += 1
@@ -46,7 +46,7 @@ env_transition_find: fn(raw: [U8], needle: [U8], from: Int) -> Int Never! {
 }
 
 env_transition_trim_semicolons: fn(text: String) -> String Never! {
-    out := text
+    ^out: text
     loop out.ends_with(";") -> out = out.removesuffix(";")
     out
 }
@@ -55,12 +55,12 @@ env_transition_trim_semicolons: fn(text: String) -> String Never! {
 // strings, comments, and brackets.
 env_transition_source_entries: fn(source: String) -> [TransitionSourceEntry] Never! {
     raw: source.bytes()
-    entries := [TransitionSourceEntry]{}
-    start := 0
-    depth := 0
-    quoted := false
-    escaped := false
-    line_comment := false
+    ^entries: [TransitionSourceEntry]{}
+    ^start: 0
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
+    ^line_comment: false
     loop index in 0..<raw.len() {
         byte: Int{raw[index]}
         if line_comment {
@@ -104,9 +104,9 @@ env_transition_source_entries: fn(source: String) -> [TransitionSourceEntry] Nev
 env_transition_source_field: fn(raw: String) -> String? Never! {
     text: env_transition_trim_semicolons(env_transition_strip_comments(raw).trim()).trim()
     bytes: text.bytes()
-    depth := 0
-    quoted := false
-    escaped := false
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
     loop index in 0..<bytes.len() {
         byte: Int{bytes[index]}
         if quoted {
@@ -145,7 +145,7 @@ TransitionFieldEntry: struct {
 }
 
 env_transition_required_field: fn(entries: [TransitionSourceEntry], field: String, path: String) -> TransitionFieldEntry EnvironmentError! {
-    matches := [TransitionSourceEntry]{}
+    ^matches: [TransitionSourceEntry]{}
     loop entry in entries {
         if entry.field == Val((field)) -> matches.push(entry.copy())
     }
@@ -160,7 +160,7 @@ env_transition_required_field: fn(entries: [TransitionSourceEntry], field: Strin
 // The one inline `name: Config{...}` entry and its record body.
 env_transition_required_inline_config: fn(entries: [TransitionSourceEntry], name: String, path: String) -> TransitionFieldEntry EnvironmentError! {
     key: "::{name}"
-    matches := [TransitionSourceEntry]{}
+    ^matches: [TransitionSourceEntry]{}
     loop entry in entries {
         if entry.field == Val((key)) -> matches.push(entry.copy())
     }
@@ -193,7 +193,7 @@ env_transition_require_output_declaration: fn(entries: [TransitionSourceEntry], 
         _: env_transition_field_value(matches[0].raw, name) ?? return Err(env_transition_error("outputs.{name} has no value in {path}"))
         return
     }
-    count := 0
+    ^count: 0
     loop entry in entries {
         if entry.field != Val(name) -> next
         value: env_transition_field_value(entry.raw, name) ?? next
@@ -228,9 +228,9 @@ env_transition_record_body: fn(value: String) -> String? Never! {
 }
 
 env_transition_matching_delimiter: fn(value: [U8], open: Int, left: Int, right: Int) -> Int? Never! {
-    depth := 0
-    quoted := false
-    escaped := false
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
     loop index in open..<value.len() {
         byte: Int{value[index]}
         if quoted {
@@ -249,7 +249,7 @@ env_transition_matching_delimiter: fn(value: [U8], open: Int, left: Int, right: 
 
 env_transition_record_names: fn(value: String, scope: String) -> [String] EnvironmentError! {
     body: env_transition_record_body(value) ?? return Err(env_transition_error("{scope} is not a record"))
-    names := [String]{}
+    ^names: [String]{}
     loop entry in env_transition_source_entries(body) {
         if entry.field == .Val(name) -> names.push(name)
     }
@@ -258,7 +258,7 @@ env_transition_record_names: fn(value: String, scope: String) -> [String] Enviro
 
 env_transition_remove_entry: fn(source: String, target: TransitionSourceEntry) -> String Never! {
     target_raw: target.raw.trim()
-    kept := [String]{}
+    ^kept: [String]{}
     loop entry in env_transition_source_entries(source) {
         raw: entry.raw.trim()
         if raw == target_raw || raw == "" -> next
@@ -272,7 +272,7 @@ env_transition_remove_entry: fn(source: String, target: TransitionSourceEntry) -
 env_transition_set_or_add_field: fn(source: String, field: String, value: String) -> String EnvironmentError! {
     entries: env_transition_source_entries(source)
     replacement: "{field}: {value.trim()}"
-    matches := [TransitionSourceEntry]{}
+    ^matches: [TransitionSourceEntry]{}
     loop entry in entries {
         if entry.field == Val((field)) -> matches.push(entry)
     }
@@ -281,7 +281,7 @@ env_transition_set_or_add_field: fn(source: String, field: String, value: String
     }
     if matches.len() == 1 {
         target: matches[0].raw.trim()
-        kept := [String]{}
+        ^kept: [String]{}
         loop entry in entries {
             raw: if entry.raw.trim() == target -> replacement else -> entry.raw.trim()
             if raw == "" -> next
@@ -303,7 +303,7 @@ env_transition_add_list_reference: fn(source: String, field: String, reference: 
         if entry.field != .Val(field) -> next
         value: env_transition_field_value(entry.raw, field) ?? ""
         if !value.trim_start().starts_with("[") -> return Err(env_transition_error(refusal))
-        inner := value.trim()
+        ^inner: value.trim()
         loop inner.starts_with("[") -> inner = inner.removeprefix("[")
         loop inner.ends_with("]") -> inner = inner.removesuffix("]")
         items: inner.trim()
@@ -355,7 +355,7 @@ env_transition_quote: fn(value: String) -> String Never! {
 }
 
 env_transition_validate_name: fn(name: String, role: String) EnvironmentError! {
-    bad := name == "" || name.starts_with(".") || name.contains("..")
+    ^bad: name == "" || name.starts_with(".") || name.contains("..")
     loop byte in name.bytes() {
         code: Int{byte}
         if !pkg_bytes_is_word(code) && code != 45 -> bad = true
@@ -366,10 +366,10 @@ env_transition_validate_name: fn(name: String, role: String) EnvironmentError! {
 // Drop `//` line comments outside strings, keeping each line ending.
 env_transition_strip_comments: fn(value: String) -> String Never! {
     raw: value.bytes()
-    output := [U8]{}
-    quoted := false
-    escaped := false
-    index := 0
+    ^output: [U8]{}
+    ^quoted: false
+    ^escaped: false
+    ^index: 0
     loop index < raw.len() {
         byte: raw[index]
         code: Int{byte}
@@ -401,12 +401,12 @@ env_transition_strip_comments: fn(value: String) -> String Never! {
 // positions stay stable while field scanning and delimiter matching see only
 // source tokens. Block comments nest, matching Jet's lexer boundary.
 env_transition_mask_comments: fn(value: String) -> String Never! {
-    bytes := value.bytes()
-    quoted := false
-    escaped := false
-    line_comment := false
-    block_depth := 0
-    index := 0
+    ^bytes: value.bytes()
+    ^quoted: false
+    ^escaped: false
+    ^line_comment: false
+    ^block_depth: 0
+    ^index: 0
     loop index < bytes.len() {
         code: Int{bytes[index]}
         next_code: pkg_bytes_code(bytes, index + 1)

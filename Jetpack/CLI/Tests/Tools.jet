@@ -17,7 +17,7 @@ cli_tools_test_tool: fn(name: String, reference: String, bin: String, member: St
 }
 
 cli_tools_test_generation_rows: fn(tools: [InstalledUserTool]) -> [ToolGenerationTool] {
-    rows := [ToolGenerationTool]{}
+    ^rows: [ToolGenerationTool]{}
     loop entry in tools {
         rows.push(
             ToolGenerationTool{
@@ -80,7 +80,7 @@ cli_tools_test_replace_first: fn(text: String, from: String, to: String) -> Stri
     corrupted: cli_tools_test_replace_first(metadata, "{{\n", "{{\n  \"unknown\": true,\n")
     assert(cli_parse_tool_generation_meta(corrupted, 1) == .Err(_))
 
-    right := tool
+    ^right: tool
     right.name = "right"
     right.reference = "./right"
     right.members = [String]{"right"}
@@ -109,7 +109,7 @@ cli_tools_test_replace_first: fn(text: String, from: String, to: String) -> Stri
     assert(formatted.contains("\"reference\":{cli_json_quote(reference)}"))
     assert_eq((ToolManifest.parse(formatted) ?? panic("formatted manifest parses")).format(), formatted)
 
-    installed := cli_tools_test_tool("omp", resolved, "omp", "omp")
+    ^installed: cli_tools_test_tool("omp", resolved, "omp", "omp")
     installed.version = "18.0.4"
     installed.source = "github"
     installed.output_hash = cli_tools_test_digest("f")

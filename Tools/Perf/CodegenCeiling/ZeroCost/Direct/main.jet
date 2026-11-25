@@ -19,7 +19,7 @@ PAGE_BYTES: 65536
 
 // Allocate, write, read and free: one block of 1 to 64 words per turn.
 churn: fn(n: Int) -> Int {
-    total := I64{0}
+    ^total: I64{0}
     loop i in 0..<n {
         count: 1 + (i & 63)
         #Unsafe("each index is checked against the block's `count` words, and the block is released once, at the end of the turn") {
@@ -43,11 +43,11 @@ churn: fn(n: Int) -> Int {
 
 // Resize: one word appended per turn, the block doubling when full.
 grow: fn(n: Int) -> Int {
-    total := I64{0}
+    ^total: I64{0}
     #Unsafe("each index is checked against the block's `count` words, and each block is released once") {
-        bytes := mem.alloc_raw(4 * 8, 8) ?? panic("no memory")
-        count := 4
-        used := 0
+        ^bytes: mem.alloc_raw(4 * 8, 8) ?? panic("no memory")
+        ^count: 4
+        ^used: 0
         #Allow(Jet.HiddenCopyInLoop, "a full block doubles, so `count` < 2 * `n`") loop i in 0..<n {
             if used == count {
                 fresh: mem.alloc_raw(count * 2 * 8, 8) ?? panic("no memory")
@@ -72,7 +72,7 @@ grow: fn(n: Int) -> Int {
 
 // Fill, compare, copy and read whole blocks.
 scan: fn(n: Int) -> Int {
-    total := I64{0}
+    ^total: I64{0}
     #Unsafe("both blocks hold WORDS words, each index is below WORDS, and each block is released once, at the end") {
         a_bytes: mem.alloc_raw(WORDS * 8, 8) ?? panic("no memory")
         b_bytes: mem.alloc_raw(WORDS * 8, 8) ?? panic("no memory")
@@ -84,7 +84,7 @@ scan: fn(n: Int) -> Int {
             at: pass & WORDS - 1
             if at < 0 || at >= WORDS -> panic("word {at} is outside {WORDS}")
             mem.volatile_write(a.offset(at), I64{-1})
-            same := true
+            ^same: true
             loop word in 0..<WORDS {
                 if a.offset(word).* != b.offset(word).* {
                     same = false
@@ -112,7 +112,7 @@ scan: fn(n: Int) -> Int {
 // The atomic word: add, load, compare-exchange and store.
 tally: fn(n: Int) -> Int {
     word: Atomic<I64>.new(0)
-    total := I64{0}
+    ^total: I64{0}
     loop _ in 0..<n {
         loop round in 0..<ROUNDS {
             total = wrapping(total + word.add(I64{round & 31}))
@@ -126,7 +126,7 @@ tally: fn(n: Int) -> Int {
 
 // Map, write, read and unmap fresh pages.
 pages: fn(n: Int) -> Int {
-    total := I64{0}
+    ^total: I64{0}
     loop i in 0..<n {
         region: mem.Region.reserve(PAGE_BYTES) ?? panic("no mapping")
         count: PAGE_BYTES /% 8
@@ -154,7 +154,7 @@ run: fn(args: Args) {
     work: [fn(Int) -> Int]{churn, grow, scan, tally, pages}
     loop index in 0..<work.len() -> print("{NAMES[index]} {work[index](args.n)}")
     count: if args.n > 0 -> args.n else -> 1
-    total := I64{0}
+    ^total: I64{0}
     #Unsafe("the block holds `count` words, each index is below `count`, and the block is released once, at the end") {
         bytes: mem.alloc_raw(count * 8, 8) ?? panic("no memory")
         words: bytes.cast<I64>()

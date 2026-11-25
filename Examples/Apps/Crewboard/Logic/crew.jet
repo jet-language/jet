@@ -14,7 +14,7 @@ Crew: struct {
     #App.SignedIn my_projects: fn(self) -> [ProjectCard] TaskError! {
         account: app.maybe_caller() ?? return Err(TaskError.SignedOut)
         who: "{account}"
-        cards := [ProjectCard]{}
+        ^cards: [ProjectCard]{}
         loop project in self.projects {
             if project.members.contains(who) {
                 cards.push(ProjectCard{id: project.id.copy(), name: project.name.copy(), open_tasks: self.open_tasks(project.id)})
@@ -36,7 +36,7 @@ Crew: struct {
         loop draft in batch.tasks {
             if draft.title.trim() == "" -> return Err(TaskError.Invalid("every task needs a title"))
         }
-        held := self.tasks.guard_edit()
+        ^held: self.tasks.guard_edit()
         loop draft in batch.tasks {
             id: "t{held.value.len() + 1}"
             held.value.push(Task{id: id, project: project.copy(), title: draft.title.copy(), notes: draft.notes.copy(), status: Status.Todo})
@@ -46,7 +46,7 @@ Crew: struct {
 
     // How many of the project's tasks are not done.
     open_tasks: fn(self, project: String) -> Int Never! {
-        open := 0
+        ^open: 0
         loop task in self.tasks.guard_read().value {
             if task.project == project && task.status != Status.Done -> open += 1
         }

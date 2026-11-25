@@ -3,18 +3,18 @@
 // return tag, data/length/error out words.
 fs_directory_row: fn(fd: I64, entry: I64, length: I64) -> I64 {
     kind: rt_text_byte(wrapping(entry + I64{18}))
-    directory := kind == I64{4}
+    ^directory: kind == I64{4}
     if (kind == I64{0}) {
-        probe := I64{0}
+        ^probe: I64{0}
         #Unsafe("getdents supplies a live terminated name; openat describes the entry without following links") {
             probe = host_syscall(I64{257}, fd, entry + I64{19}, I64{2752512}, I64{0}, I64{0}, I64{0})
         }
         if (probe >= I64{0}) {
             stat: jet_rt_alloc(I64{144}, I64{8})
-            status := I64{0}
+            ^status: I64{0}
             #Unsafe("the owned descriptor and full Linux stat buffer live through fstat and close") {
                 status = host_syscall(I64{5}, probe, stat, I64{0}, I64{0}, I64{0}, I64{0})
-                _ := host_syscall(I64{3}, probe, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                ^_: host_syscall(I64{3}, probe, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
             }
             directory = status >= I64{0} && (rt_text_word(wrapping(stat + I64{24}))) & I64{61440} == I64{16384}
             jet_rt_free(stat, I64{144}, I64{8})
@@ -22,7 +22,7 @@ fs_directory_row: fn(fd: I64, entry: I64, length: I64) -> I64 {
     }
     data: jet_rt_alloc((length + I64{1}) * RT_HOST_U8_STRIDE, I64{8})
     host_u8_put(data, I64{0}, if directory -> I64{1} else -> I64{0})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         host_u8_put(data, at + I64{1}, rt_text_byte(wrapping(wrapping(entry + I64{19}) + at)))
         at += I64{1}
@@ -39,22 +39,22 @@ fs_directory_row: fn(fd: I64, entry: I64, length: I64) -> I64 {
     jet_rt_string_drop(base)
     if (fd < I64{0}) { return I64{0} }
     scratch: jet_rt_alloc(I64{8192}, I64{8})
-    data := I64{0}
-    count := I64{0}
-    capacity := I64{0}
+    ^data: I64{0}
+    ^count: I64{0}
+    ^capacity: I64{0}
     loop {
-        got := I64{0}
+        ^got: I64{0}
         #Unsafe("an owned fresh directory descriptor and writable getdents64 buffer") {
             got = host_syscall(I64{217}, fd, scratch, I64{8192}, I64{0}, I64{0}, I64{0})
         }
         // The readdir loop treats a null entry as termination, including an
         // underlying read error; do not introduce a different error rail.
         if (got <= I64{0}) { break }
-        at := I64{0}
+        ^at: I64{0}
         loop at < got {
             entry: wrapping(scratch + at)
             record_length: (rt_text_word(wrapping(entry + I64{16}))) & I64{65535}
-            bytes := I64{0}
+            ^bytes: I64{0}
             loop rt_text_byte(wrapping(wrapping(entry + I64{19}) + bytes)) != (I64{0}) {
                 bytes += I64{1}
             }
@@ -80,12 +80,12 @@ fs_directory_row: fn(fd: I64, entry: I64, length: I64) -> I64 {
         }
     }
     #Unsafe("close the fresh stream descriptor once after reading") {
-        _ := host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        ^_: host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     jet_rt_free(scratch, I64{8192}, I64{8})
     // List result ABI publishes no capacity: return an exactly sized owner.
     if (count != capacity) {
-        exact := I64{0}
+        ^exact: I64{0}
         if (count != I64{0}) {
             exact = jet_rt_alloc(count * I64{24}, I64{8})
             coll_copy(data, exact, count * I64{24})

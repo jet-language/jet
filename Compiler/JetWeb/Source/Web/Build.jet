@@ -31,8 +31,8 @@ WebRuntime: struct {
 // (JetBackend Image/RuntimePack.jet): their hook would turn checked mode on
 // in every web program.
 web_runtime_partition: fn(m: IRModule, exports: [IRLibraryExport], data: [X64DataExport]) -> WebRuntime Never! {
-    rows := [String:Int]{}
-    hooks := [WebHook]{}
+    ^rows: [String:Int]{}
+    ^hooks: [WebHook]{}
     loop row in exports {
         if CHECKED_ALLOC_RUNTIME_EXPORTS.contains(row.symbol) -> next
         rows[row.symbol.copy()] = row.function
@@ -44,7 +44,7 @@ web_runtime_partition: fn(m: IRModule, exports: [IRLibraryExport], data: [X64Dat
         }
     }
     built: web_module(m, false, WebLayout{data_base: WEB_DATA_BASE, table_base: 0}, [String:String]{}, -1, web_host_functions(), rows, hooks)
-    lines := [String]{"layout\t{built.data_end}\t{built.slots}"}
+    ^lines: [String]{"layout\t{built.data_end}\t{built.slots}"}
     loop row in built.exports -> lines.push("export\t{row}")
     loop row in data {
         if row.data >= 0 && row.data < built.data_at.len() {
@@ -73,10 +73,10 @@ WebProgram: struct {
 // of the two (Host.jet web_manifest). The module's last section is
 // `sourceMappingURL`, naming WEB_SOURCE_MAP_FILE.
 web_program: fn(program: ^^IRModule, receipt: String) -> WebProgram Never! {
-    runtime_end := -1
-    runtime_slots := -1
-    armed := -1
-    runtime := [String:String]{}
+    ^runtime_end: -1
+    ^runtime_slots: -1
+    ^armed: -1
+    ^runtime: [String:String]{}
     loop line in receipt.split("\n").to_list() {
         fields: line.split("\t").to_list()
         if {
@@ -95,18 +95,18 @@ web_program: fn(program: ^^IRModule, receipt: String) -> WebProgram Never! {
     if runtime_end < 0 || runtime_slots < 0 {
         return WebProgram{bytes: [U8]{}, partitions: [String]{}, errors: [String]{"the runtime partition's receipt has no layout row"}, sources: [String]{}, lines: [Int]{}}
     }
-    m := program.move()
+    ^m: program.move()
     web_lower(m)
     base: web_align_up(runtime_end, 16)
     built: web_module(m, true, WebLayout{data_base: base, table_base: runtime_slots}, runtime, armed, web_host_functions(), [String:Int]{}, [WebHook]{})
     partitions: web_manifest_partitions(runtime_end, runtime_slots, base, built.data_end, built.slots)
-    sources := [String]{}
-    source_rows := [String:Int]{}
-    lines := [Int]{}
+    ^sources: [String]{}
+    ^source_rows: [String:Int]{}
+    ^lines: [Int]{}
     loop pair in 0..<(built.lines.len() /% 3) {
         file: m.functions[built.lines[3 * pair + 1]].source_file
         if file == "" -> next
-        source := source_rows.get(file) ?? -1
+        ^source: source_rows.get(file) ?? -1
         if source < 0 {
             source = sources.len()
             sources.push(file.copy())
@@ -116,8 +116,8 @@ web_program: fn(program: ^^IRModule, receipt: String) -> WebProgram Never! {
         lines.push(source)
         lines.push(built.lines[3 * pair + 2])
     }
-    bytes := built.bytes.move()
-    section := [U8]{}
+    ^bytes: built.bytes.move()
+    ^section: [U8]{}
     wat_put_name(section, "sourceMappingURL")
     wat_put_name(section, WEB_SOURCE_MAP_FILE)
     wat_put_section(bytes, WEB_SECTION_CUSTOM, section)
@@ -131,9 +131,9 @@ web_program: fn(program: ^^IRModule, receipt: String) -> WebProgram Never! {
 // is a byte offset, a source, a 0-based line and column 0, or only a byte
 // offset where code from a left-out source (or with no line) begins.
 web_source_map: fn(names: [String], contents: [String], lines: [Int]) -> String Never! {
-    kept := [Int]{}
-    sources := [String]{}
-    texts := [String]{}
+    ^kept: [Int]{}
+    ^sources: [String]{}
+    ^texts: [String]{}
     loop (k, name) in names {
         if name == "" {
             kept.push(-1)
@@ -143,11 +143,11 @@ web_source_map: fn(names: [String], contents: [String], lines: [Int]) -> String 
         sources.push("\"{foundation_json_escape(name)}\"")
         texts.push("\"{foundation_json_escape(contents[k])}\"")
     }
-    mappings := [U8]{}
-    at := 0
-    source := 0
-    line := 0
-    mapped := false
+    ^mappings: [U8]{}
+    ^at: 0
+    ^source: 0
+    ^line: 0
+    ^mapped: false
     loop pair in 0..<(lines.len() /% 3) {
         to: kept[lines[3 * pair + 1]]
         row: lines[3 * pair + 2] - 1
@@ -181,9 +181,9 @@ WEB_VLQ_DIGITS: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+
 // digit, low digits first, bit 5 set on every digit but the last.
 web_vlq: fn(out: ^[U8], value: Int) Never! {
     digits: WEB_VLQ_DIGITS.bytes()
-    rest := if value < 0 -> ((0 - value) << 1) + 1 else -> value << 1
+    ^rest: if value < 0 -> ((0 - value) << 1) + 1 else -> value << 1
     loop {
-        digit := rest & 31
+        ^digit: rest & 31
         rest >>= 5
         if rest > 0 -> digit += 32
         out.push(digits[digit])
@@ -195,12 +195,12 @@ web_vlq: fn(out: ^[U8], value: Int) Never! {
 // a program whose entry is `entry` there: relative to the entry's
 // directory, so the map names no host path.
 web_source_name: fn(source: String, entry: String) -> String Never! {
-    from := entry.split("/").to_list()
-    _ := from.pop()
+    ^from: entry.split("/").to_list()
+    ^_: from.pop()
     to: source.split("/").to_list()
-    common := 0
+    ^common: 0
     loop common < from.len() && common + 1 < to.len() && from[common] == to[common] -> common += 1
-    parts := [String]{}
+    ^parts: [String]{}
     loop _ in common..<from.len() -> parts.push("..")
     loop part in to[common..<to.len()] -> parts.push(part.copy())
     parts.join("/")

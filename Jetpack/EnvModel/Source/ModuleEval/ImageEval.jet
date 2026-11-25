@@ -65,10 +65,10 @@ EnvModelImageField: enum {
 // `key: value` entries whose values go through envmodel_evaluate_option_value,
 // as host override options do.
 envmodel_evaluate_system: fn(path: String, lit: SystemLit, src: String, scope: ModuleEvalScope, globals: [String:CtValue]) -> SystemPlan EnvModelEvalError! {
-    target := String?{None}
-    packages := [Pkg]{}
-    services := [ServicePlan]{}
-    options := [OptionPlan]{}
+    ^target: String?{None}
+    ^packages: [Pkg]{}
+    ^services: [ServicePlan]{}
+    ^options: [OptionPlan]{}
     source_bytes: src.bytes()
     readable: globals.keys().to_list()
     loop field in lit.fields {
@@ -107,7 +107,7 @@ envmodel_plan_system: fn(plan: ^EnvValueProgram, lit: SystemLit, globals: [Strin
 // The names an `options:` value may read: the module values and the
 // environment reads, as the computed globals hold them.
 envmodel_value_readable: fn(plan: EnvValueProgram, names: [String]) -> [String] Never! {
-    readable := names
+    ^readable: names
     loop name in plan.environment.keys() {
         if !readable.contains(name) -> readable.push(name)
     }
@@ -141,8 +141,8 @@ envmodel_plan_system_fields: fn(plan: ^EnvValueProgram, fields: [SystemField], s
 // U12: field-check one `Service` record (an open record with a required
 // `Bool` `enable`); every other field is kept as its rendered value.
 envmodel_evaluate_system_service: fn(entry: ServiceEntry, scope: ModuleEvalScope) -> ServicePlan EnvModelEvalError! {
-    enable := Bool?{None}
-    extra := [ServicePlanExtra]{}
+    ^enable: Bool?{None}
+    ^extra: [ServicePlanExtra]{}
     loop field in entry.fields {
         value: envmodel_value_of(field.value, scope)
         if field.name == SERVICE_FIELD_ENABLE {
@@ -211,22 +211,22 @@ envmodel_plan_image: fn(plan: ^EnvValueProgram, lit: ImageLit, globals: [String:
 // record (unlike the open `Service`). The fields' values are the ones the
 // compiler computed (envmodel_plan_image).
 envmodel_evaluate_image: fn(path: String, lit: ImageLit, scope: ModuleEvalScope) -> ImagePlan EnvModelEvalError! {
-    from_name := String?{None}
-    from_system := false
-    from_environment := false
-    from_span := lit.span
-    format := String?{None}
-    target := String?{None}
-    kind_word := String?{None}
-    kind_span := lit.span
-    expose := [Int]{}
-    env_vars := [ImageEnvVar]{}
-    image_files := [String]{}
-    base := String?{None}
-    services := [String]{}
-    health := String?{None}
-    entrypoint := String?{None}
-    user := Int?{None}
+    ^from_name: String?{None}
+    ^from_system: false
+    ^from_environment: false
+    ^from_span: lit.span
+    ^format: String?{None}
+    ^target: String?{None}
+    ^kind_word: String?{None}
+    ^kind_span: lit.span
+    ^expose: [Int]{}
+    ^env_vars: [ImageEnvVar]{}
+    ^image_files: [String]{}
+    ^base: String?{None}
+    ^services: [String]{}
+    ^health: String?{None}
+    ^entrypoint: String?{None}
+    ^user: Int?{None}
     loop field in lit.fields {
         if field.value == {
             .From(source, span) -> {
@@ -279,7 +279,7 @@ envmodel_evaluate_image: fn(path: String, lit: ImageLit, scope: ModuleEvalScope)
     from: from_name ?? return Err(envmodel_image_missing_from(lit.span))
     // `from: system.<name>` infers the `.Iso` disk-image tier; a package or
     // an environment infers `.Oci`. A written `kind:` must agree.
-    kind := if from_system -> ImageKind.Iso else -> ImageKind.OCI
+    ^kind: if from_system -> ImageKind.Iso else -> ImageKind.OCI
     if kind_word == {
         .Val(written) -> {
             if written == IMAGE_KIND_ISO {
@@ -341,7 +341,7 @@ envmodel_eval_names: fn(expr: Expr, field: String, scope: ModuleEvalScope, span:
             return Err(envmodel_image_field_shape(field, "a list of strings", span))
         }
     }
-    names := [String]{}
+    ^names: [String]{}
     loop item in items {
         if item == {
             .Str(text) -> { names.push(text) }
@@ -389,7 +389,7 @@ envmodel_eval_expose: fn(expr: Expr, scope: ModuleEvalScope, span: Span) -> [Int
             return Err(envmodel_image_field_shape(IMAGE_FIELD_EXPOSE, "a list of ports, e.g. `expose: [8080, 443]`", span))
         }
     }
-    ports := [Int]{}
+    ^ports: [Int]{}
     loop item in items {
         port: if item == {
             .Int(number) -> number
@@ -403,7 +403,7 @@ envmodel_eval_expose: fn(expr: Expr, scope: ModuleEvalScope, span: Span) -> [Int
         ports.push(port)
     }
     ports.sort()
-    unique := [Int]{}
+    ^unique: [Int]{}
     loop port in ports {
         if unique.len() == 0 || unique[unique.len() - 1] != port -> unique.push(port)
     }
@@ -419,7 +419,7 @@ envmodel_eval_env_vars: fn(expr: Expr, scope: ModuleEvalScope, span: Span) -> [I
             return Err(envmodel_image_field_shape(IMAGE_FIELD_ENV_VARS, "a map, e.g. `env_vars: [RUST_LOG: \"info\"]`", span))
         }
     }
-    out := [ImageEnvVar]{}
+    ^out: [ImageEnvVar]{}
     loop entry in entries {
         key: if entry.key == {
             .Str(text) -> text
@@ -448,7 +448,7 @@ envmodel_eval_files: fn(expr: Expr, scope: ModuleEvalScope, span: Span) -> [Stri
             return Err(envmodel_image_field_shape(IMAGE_FIELD_FILES, "a list of paths, e.g. `files: [\"config/app.toml\"]`", span))
         }
     }
-    out := [String]{}
+    ^out: [String]{}
     loop item in items {
         if item == {
             .Str(text) -> { out.push(text) }

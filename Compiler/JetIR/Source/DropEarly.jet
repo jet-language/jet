@@ -62,8 +62,8 @@ ir_drop_early: fn(m: ^IRModule, threads: CompilerThreads) Never! {
     trap: ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1
     turn: ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1
     count: m.functions.len()
-    weights := [Int]{}
-    total := 0
+    ^weights: [Int]{}
+    ^total: 0
     loop f in m.functions {
         weights.push(1 + f.op.len())
         total += 1 + f.op.len()
@@ -78,7 +78,7 @@ ir_drop_early: fn(m: ^IRModule, threads: CompilerThreads) Never! {
         return
     }
     bounds: compiler_threads_partition(weights, workers)
-    built := ir_drop_plan_ranges(m, bounds, poll, trap, turn, 0)
+    ^built: ir_drop_plan_ranges(m, bounds, poll, trap, turn, 0)
     loop part in built.move() {
         loop item in part.move() {
             m.functions[item.id].op = item.code.op.move()
@@ -97,10 +97,10 @@ IRDropBuilt: struct {
 }
 
 ir_drop_plan_range: fn(m: IRModule, start: Int, end: Int, poll: Int, trap: Int, turn: Int) -> [IRDropBuilt] Never! {
-    built := [IRDropBuilt]{}
+    ^built: [IRDropBuilt]{}
     loop id in start..<end {
         if m.functions[id].asm != None -> next
-        plan := ir_drop_plan(m, m.functions[id], poll, trap, turn)
+        ^plan: ir_drop_plan(m, m.functions[id], poll, trap, turn)
         if plan.slots.len() > 0 {
             built.push(IRDropBuilt{id: id, code: ir_drop_build_code(m.functions[id], plan)})
         }
@@ -109,7 +109,7 @@ ir_drop_plan_range: fn(m: IRModule, start: Int, end: Int, poll: Int, trap: Int, 
 }
 
 ir_drop_plan_ranges: fn(m: IRModule, bounds: [Int], poll: Int, trap: Int, turn: Int, at: Int) -> [[IRDropBuilt]] Never! {
-    done := [[IRDropBuilt]]{}
+    ^done: [[IRDropBuilt]]{}
     last: bounds.len() - 2
     if at > last -> return done
     if at == last {
@@ -127,9 +127,9 @@ ir_drop_plan_ranges: fn(m: IRModule, bounds: [Int], poll: Int, trap: Int, turn: 
 
 ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) -> IRDropPlan Never! {
     n: f.op.len()
-    plan := IRDropPlan{slots: [Int]{}, to: [Int]{}, lines: [Int]{}, kill: [Bool]{}}
+    ^plan: IRDropPlan{slots: [Int]{}, to: [Int]{}, lines: [Int]{}, kill: [Bool]{}}
     count: f.slot_type.len()
-    has_string_drop := false
+    ^has_string_drop: false
     loop at in 0..<n {
         if f.op[at] == .Drop {
             slot: f.a[at]
@@ -144,7 +144,7 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) ->
     }
     if !has_string_drop -> return plan
     // Per instruction: the If of the stop poll holding it, -1 for none.
-    stop := [Int]{}
+    ^stop: [Int]{}
     loop _ in 0..<n -> stop.push(-1)
     loop at in 0..<n {
         if f.op[at] != .If || stop[at] >= 0 || !ir_drop_stop_edge(m, f, at, poll, trap, turn) {
@@ -152,15 +152,15 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) ->
         }
         loop inner in at..<(f.c[at] + 1) -> stop[inner] = at
     }
-    eligible := [Bool]{}
-    dropped := [Bool]{}
+    ^eligible: [Bool]{}
+    ^dropped: [Bool]{}
     loop slot in 0..<count {
         type_row: f.slot_type[slot]
         eligible.push(m.types[type_row].kind == .String && m.types[type_row].drop != "")
         dropped.push(false)
     }
-    reads := [Int]{}
-    any := false
+    ^reads: [Int]{}
+    ^any: false
     loop at in 0..<n {
         if stop[at] >= 0 -> next
         if f.op[at] == .Drop {
@@ -179,7 +179,7 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) ->
     }
     if !any -> return plan
     // Per slot that may move, its references outside stop polls, in order.
-    refs := [[Int]]{}
+    ^refs: [[Int]]{}
     loop _ in 0..<count -> refs.push([Int]{})
     loop at in 0..<n {
         if stop[at] >= 0 -> next
@@ -194,9 +194,9 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) ->
     }
     // Per construct opener: whether the construct branches or returns
     // (outside its stop polls).
-    blocked := [Bool]{}
+    ^blocked: [Bool]{}
     loop _ in 0..<n -> blocked.push(false)
-    open := [Int]{}
+    ^open: [Int]{}
     loop at in 0..<n {
         if f.op[at] == {
             .Block | .Loop | .If -> { open.push(at) }
@@ -214,13 +214,13 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) ->
         if f.op[at] != .Drop || stop[at] >= 0 -> next
         slot: f.a[at]
         if slot < 0 || slot >= count || !eligible[slot] -> next
-        previous := -1
+        ^previous: -1
         loop reference in refs[slot] {
             if reference < at -> previous = reference
         }
         reached: ir_drop_target(f, stop, blocked, previous, at)
         // After the stop poll of the last reference, not between them.
-        to := reached
+        ^to: reached
         if to < at && f.op[to] == .Call && (f.a[to] == poll || f.a[to] == trap || f.a[to] == turn) && to + 1 < n && stop[to + 1] == to + 1 {
             to = f.c[to + 1] + 1
         }
@@ -298,7 +298,7 @@ ir_drop_word: fn(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
 // reference before it) that are not branches, returns or openers, and over
 // stop polls and constructs that neither branch nor hold `previous`.
 ir_drop_target: fn(f: IRFunction, stop: [Int], blocked: [Bool], previous: Int, at: Int) -> Int Never! {
-    back := at - 1
+    ^back: at - 1
     loop back > previous {
         if f.op[back] == {
             .End -> {
@@ -316,7 +316,7 @@ ir_drop_target: fn(f: IRFunction, stop: [Int], blocked: [Bool], previous: Int, a
 // Rewrites `f` by `plan`: each moved Drop goes before its new instruction,
 // and every instruction the plan kills goes.
 ir_drop_apply: fn(f: ^IRFunction, plan: IRDropPlan) Never! {
-    code := ir_drop_build_code(f, plan)
+    ^code: ir_drop_build_code(f, plan)
     f.op = code.op.move()
     f.dst = code.dst.move()
     f.a = code.a.move()
@@ -330,19 +330,19 @@ ir_drop_apply: fn(f: ^IRFunction, plan: IRDropPlan) Never! {
 ir_drop_build_code: fn(f: IRFunction, plan: IRDropPlan) -> IROptCode Never! {
     n: f.op.len()
     // Per instruction the moved Drops before it, chained.
-    head := [Int]{}
+    ^head: [Int]{}
     head.try_reserve(n) ?? ()
     loop _ in 0..<n -> head.push(-1)
-    chain := [Int]{}
+    ^chain: [Int]{}
     chain.try_reserve(plan.to.len()) ?? ()
     loop k in 0..<plan.to.len() {
         chain.push(head[plan.to[k]])
         head[plan.to[k]] = k
     }
-    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
-    open := [I64]{}
+    ^code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^open: [I64]{}
     loop at in 0..<n {
-        k := head[at]
+        ^k: head[at]
         loop k >= 0 {
             ir_opt_code_put(code, .Drop, -1, plan.slots[k], -1, -1, plan.lines[k])
             k = chain[k]
@@ -430,7 +430,7 @@ ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: 
     count: f.slot_type.len()
     s.has_moves = false
     s.frame_bytes = 0
-    has_string_drop := false
+    ^has_string_drop: false
     loop at in 0..<n {
         op: f.op[at]
         if op == .Drop {
@@ -438,11 +438,11 @@ ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: 
             if slot >= 0 && slot < count && fast.type_is_str_drop[f.slot_type[slot]] {
                 has_string_drop = true
             }
-        } else {
-            s.frame_bytes += ir_drop_frame_bytes(fast, f, at, op)
-        }
+        } else { s.frame_bytes += ir_drop_frame_bytes(fast, f, at, op) }
     }
-    if !has_string_drop -> return
+    if !has_string_drop {
+        return
+    }
     if s.stop.len() < n {
         s.stop.try_reserve(n) ?? ()
         s.blocked.try_reserve(n) ?? ()
@@ -482,12 +482,10 @@ ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: 
         s.last_ref[slot] = -1
     }
     if s.open.len() > 0 -> s.open.clear()
-    any := false
+    ^any: false
     loop at in 0..<n {
         op: f.op[at]
-        if op == .Block || op == .Loop || op == .If {
-            s.open.push(at)
-        } else if op == .End {
+        if op == .Block || op == .Loop || op == .If -> s.open.push(at) else if op == .End {
             _: s.open.pop()
         } else if op == .Br || op == .BrIf || op == .Return || op == .Unreachable {
             if s.stop[at] < 0 {
@@ -509,7 +507,9 @@ ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: 
             if !ir_drop_borrows_only(m, f, at) -> s.eligible[slot] = false
         }
     }
-    if !any -> return
+    if !any {
+        return
+    }
     if s.slots.len() > 0 -> s.slots.clear()
     if s.to.len() > 0 -> s.to.clear()
     if s.lines.len() > 0 -> s.lines.clear()
@@ -522,7 +522,7 @@ ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: 
             if slot >= 0 && slot < count && s.eligible[slot] {
                 previous: s.last_ref[slot]
                 reached: ir_drop_target(f, s.stop, s.blocked, previous, at)
-                to := reached
+                ^to: reached
                 if to < at && f.op[to] == .Call && (f.a[to] == poll || f.a[to] == trap || f.a[to] == turn) && to + 1 < n && s.stop[to + 1] == to + 1 {
                     to = f.c[to + 1] + 1
                 }
@@ -543,14 +543,18 @@ ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: 
         }
         ir_x64_reads_into(f, at, s.reads)
         loop slot in s.reads {
-            if slot >= 0 && slot < count && s.eligible[slot] && s.dropped[slot] -> s.last_ref[slot] = at
+            if slot >= 0 && slot < count && s.eligible[slot] && s.dropped[slot] {
+                s.last_ref[slot] = at
+            }
         }
         written: ir_x64_write(f, at)
         if written >= 0 && written < count && s.eligible[written] && s.dropped[written] {
             s.last_ref[written] = at
         }
     }
-    if s.slots.len() == 0 -> return
+    if s.slots.len() == 0 {
+        return
+    }
     s.has_moves = true
     loop i in 0..<n -> s.head[i] = -1
     loop k in 0..<s.to.len() {
@@ -561,29 +565,29 @@ ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: 
 }
 
 #Test("ir_drop_plan_into matches ir_drop_plan including multi-drop slots") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     str_row: ir_scalar_type_row(m, Type.String)
     m.types[str_row].drop = "jet_rt_string_drop"
     i64_row: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
-    f := ir_function_new("multi_drop", "test:drop.multi", "", "drop.jet", 1)
+    ^f: ir_function_new("multi_drop", "test:drop.multi", "", "drop.jet", 1)
     s0: ir_slot(f, str_row, IRSlotKind.Local, ir_intern_name(m, "s0"), 1)
     x: ir_slot(f, i64_row, IRSlotKind.Local, ir_intern_name(m, "x"), 2)
     t1: ir_slot(f, i64_row, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(f, IROp.ConstText, s0, 0, -1, -1, 1)
-    _ := ir_emit(f, IROp.Const, x, 1, -1, -1, 2)
-    _ := ir_emit(f, IROp.Add, t1, x, x, IR_OVERFLOW_WRAP, 3)
-    _ := ir_emit(f, IROp.Drop, -1, s0, -1, -1, 4)
-    _ := ir_emit(f, IROp.ConstText, s0, 0, -1, -1, 5)
-    _ := ir_emit(f, IROp.Add, x, t1, x, IR_OVERFLOW_WRAP, 6)
-    _ := ir_emit(f, IROp.Add, t1, x, x, IR_OVERFLOW_WRAP, 7)
-    _ := ir_emit(f, IROp.Drop, -1, s0, -1, -1, 8)
-    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 9)
-    flags := [Bool]{}
+    ^_: ir_emit(f, IROp.ConstText, s0, 0, -1, -1, 1)
+    ^_: ir_emit(f, IROp.Const, x, 1, -1, -1, 2)
+    ^_: ir_emit(f, IROp.Add, t1, x, x, IR_OVERFLOW_WRAP, 3)
+    ^_: ir_emit(f, IROp.Drop, -1, s0, -1, -1, 4)
+    ^_: ir_emit(f, IROp.ConstText, s0, 0, -1, -1, 5)
+    ^_: ir_emit(f, IROp.Add, x, t1, x, IR_OVERFLOW_WRAP, 6)
+    ^_: ir_emit(f, IROp.Add, t1, x, x, IR_OVERFLOW_WRAP, 7)
+    ^_: ir_emit(f, IROp.Drop, -1, s0, -1, -1, 8)
+    ^_: ir_emit(f, IROp.Return, -1, -1, -1, -1, 9)
+    ^flags: [Bool]{}
     loop t in m.types -> flags.push(t.kind == .String && t.drop != "")
     expected: ir_drop_plan(m, f, -1, -1, -1)
     fast: ir_x64_fast_module_new(m, false)
     assert_eq(fast.type_is_str_drop, flags)
-    scratch := ir_drop_scratch_new()
+    ^scratch: ir_drop_scratch_new()
     ir_drop_plan_into(scratch, m, fast, f, -1, -1, -1)
     assert(scratch.has_moves)
     assert_eq(scratch.slots, expected.slots)

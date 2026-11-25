@@ -33,7 +33,7 @@ run: fn() {
     // Each argument as an integer, 0 where it is not one: a NaN count makes
     // no entries or draws, and a NaN seed is 0 after `>>> 0`.
     numbers: args.map(fn(arg) { Int.parse(arg) ?? 0 })
-    files := [String:String]{}
+    ^files: [String:String]{}
     if (command.get(0) ?? "") == {
         "shapes" -> {
             print(shapes().map(fn(shape) { "{shape.name} {"{shape.kind:Debug}".lower()} {if shape.kind == .Stress -> "n" else -> "lines"} {shape.base}: {shape.dimension}" }).join("\n"))
@@ -53,7 +53,7 @@ run: fn() {
                 process.exit(1)
             }
             built: corpus(shape, numbers[1], numbers[2], args[3])
-            names := built.files.keys().map(fn(name) { name.copy() }).to_list()  // copy: the names are sorted apart from the map
+            ^names: built.files.keys().map(fn(name) { name.copy() }).to_list()  // copy: the names are sorted apart from the map
             names.sort()
             print("{"{built.kind:Debug}".lower()} diagnostics {built.diagnostics} code {built.code_lines} sha {built.source_sha256}")
             print("files {names.join(" ")}")
@@ -82,7 +82,7 @@ run: fn() {
             }
         }
         "digest" -> {
-            at := 0
+            ^at: 0
             loop at + 1 < args.len() {
                 files[args[at].copy()] = args[at + 1].copy()  // copy: the map owns its names and texts
                 at += 2
@@ -93,12 +93,12 @@ run: fn() {
         }
         "manifest" -> print(manifest(args[0]).removesuffix("\n"))
         "random" -> {
-            raw := seeded(numbers[0], .Scaled)
-            ints := seeded(numbers[0], .Scaled)
-            picks := seeded(numbers[0], .Scaled)
-            draws := [String]{}
-            sides := [String]{}
-            words := [String]{}
+            ^raw: seeded(numbers[0], .Scaled)
+            ^ints: seeded(numbers[0], .Scaled)
+            ^picks: seeded(numbers[0], .Scaled)
+            ^draws: [String]{}
+            ^sides: [String]{}
+            ^words: [String]{}
             loop _ in 0..<numbers[1] {
                 draws.push("{raw.next()}")
                 sides.push("{ints.int(1, 6)}")
@@ -109,10 +109,10 @@ run: fn() {
             print(words.join(" "))
         }
         "tree" -> {
-            entries := [String]{}
+            ^entries: [String]{}
             loop index in 0..<numbers[0] -> entries.push("entry_{index}")
             print("roots {consumer_tree(files, entries, args[1]).join(" ")}")
-            names := files.keys().map(fn(name) { name.copy() }).to_list()  // copy: the names are sorted apart from the map
+            ^names: files.keys().map(fn(name) { name.copy() }).to_list()  // copy: the names are sorted apart from the map
             names.sort()
             loop name in names -> print("{name} {files[name].split("\n").to_list().len()}")
             print("code {code_lines(files)} sha {source_digest(files)}")
@@ -123,10 +123,10 @@ run: fn() {
             print_files(files)
         }
         "pack" -> {
-            items := [[String]]{}
+            ^items: [[String]]{}
             // A NaN size is an empty item.
             loop (item, size) in args[1].split(",").to_list() {
-                item_lines := [String]{}
+                ^item_lines: [String]{}
                 loop line in 0..<(Int.parse(size) ?? 0) -> item_lines.push("item_{item}_{line}")
                 items.push(item_lines)
             }
@@ -147,7 +147,7 @@ run: fn() {
 // Each file's lines under its name, each after `|`, so a blank line or a final
 // newline shows. Every command that prints files writes at least one.
 print_files: fn(files: [String:String]) {
-    names := files.keys().map(fn(name) { name.copy() }).to_list()  // copy: the names are sorted apart from the map
+    ^names: files.keys().map(fn(name) { name.copy() }).to_list()  // copy: the names are sorted apart from the map
     names.sort()
     print(names.map(fn(name) { "== {name}\n{files[name].split("\n").map(fn(line) { "|{line}" }).join("\n")}" }).join("\n"))
 }

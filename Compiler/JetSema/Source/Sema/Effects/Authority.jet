@@ -212,7 +212,7 @@ sema_authority_block_escape: fn(statements: [Stmt], handle: String) -> Span? {
 sema_authority_switched_erased: fn(name: String) -> Bool Never! { name == "Off" }
 
 sema_authority_for_header_escape: fn(kind: ForKind, handle: String) -> Span? {
-    step := Expr?{None}
+    ^step: Expr?{None}
     if kind == {
         .Range(start, end, range_step, _) -> {
             found: sema_authority_exprs_escape([Expr]{start, end}, handle)
@@ -447,7 +447,7 @@ sema_authority_derived_binding: fn(init: Expr, name: String, handle: String, ali
 }
 
 sema_authority_derived_block: fn(statements: [Stmt], handle: String, aliases: [String]) -> Span? {
-    scoped := aliases
+    ^scoped: aliases
     loop statement in statements {
         found: sema_authority_derived_stmt(statement, handle, scoped)
         if found != None -> return found
@@ -485,7 +485,7 @@ sema_authority_derived_stmt: fn(statement: Stmt, handle: String, aliases: ^[Stri
             None
         }
         .CountedLoop(init, condition, _, body, _, _, _) -> {
-            scoped := aliases
+            ^scoped: aliases
             found: sema_authority_derived_binding(init.init, init.name, handle, scoped)
             if found != None -> return found
             in_cond: sema_authority_call_argument_escape(condition, handle, scoped)
@@ -520,11 +520,11 @@ sema_authority_handle_escape: fn(body: [Stmt], handle: String) -> Span? {
 // The valid caps of one `#FX(…)` head. A cap that does not parse or names the
 // deny-only `Panic` root is invalid; its diagnostic is reported elsewhere.
 sema_authority_region_caps: fn(caps: [NamedSpan]) -> [String] Never! {
-    result := [String]{}
+    ^result: [String]{}
     loop cap in caps {
         effect_name: sema_effect_parse_name(cap.name) ?? next
         if sema_effect_root(effect_name) == "Panic" -> next
-        _ := sema_effect_set_add(result, effect_name)
+        ^_: sema_effect_set_add(result, effect_name)
     }
     result
 }
@@ -543,7 +543,7 @@ sema_authority_region_caps_valid: fn(caps: [NamedSpan]) -> Bool Never! {
 // deep check against the effects that need no grant (E0713). A region with an
 // invalid cap is skipped: the cap diagnostic is the real problem to fix.
 sema_authority_fx_regions: fn(statements: [Stmt]) -> [SemaEffectFxRegion] {
-    regions := [SemaEffectFxRegion]{}
+    ^regions: [SemaEffectFxRegion]{}
     sema_authority_collect_fx_regions(statements, regions)
     regions
 }
@@ -553,7 +553,7 @@ sema_authority_fx_regions: fn(statements: [Stmt]) -> [SemaEffectFxRegion] {
 // and named after `function_name`; a region whose caps scope neither has
 // none, and its caps are checked only at compile time.
 sema_authority_scope_regions: fn(statements: [Stmt], function_name: String) -> [BodyEffectScopeRegion] {
-    frames := [BodyEffectScopeRegion]{}
+    ^frames: [BodyEffectScopeRegion]{}
     loop region in sema_authority_fx_regions(statements) {
         if region.deep -> next
         descriptor: effect_scope_descriptor("#FX block in {function_name}", "", false, Val(region.caps))
@@ -683,7 +683,7 @@ sema_authority_check_items: fn(items: [Item], diagnostics: ^[Diagnostic]) {
 // E0711 over every source module. Returns true when a diagnostic was
 // reported.
 sema_effect_check_authority_handles: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) -> Bool {
-    found := false
+    ^found: false
     loop source_module_index in 0..<graph.modules.len() {
         start: diagnostics.len()
         sema_authority_check_items(graph.modules[source_module_index].program.items, diagnostics)

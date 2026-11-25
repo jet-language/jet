@@ -67,14 +67,14 @@ CBindingPreparation: struct {
 // binder seam before a header is generated. Caller-supplied facts stay
 // authoritative; source markers only fill missing close mappings.
 pkg_cffi_admit_source_handle_overlays: fn(program: RustBridgeProgram, supplied: [String:HandleOverlay]) -> [String:HandleOverlay] Never! {
-    admitted := supplied
+    ^admitted: supplied
     loop program_module in program.modules {
         items: program_module.items
         loop item in items {
             if item == {
                 .CModule(c_module) -> {
                     if c_module.kind != CModuleKind.Extern -> next
-                    overlay := admitted.get(c_module.lib) ?? HandleOverlay.empty()
+                    ^overlay: admitted.get(c_module.lib) ?? HandleOverlay.empty()
                     functions: c_module.functions
                     loop function in functions {
                         close: function.close ?? next
@@ -97,7 +97,7 @@ pkg_cffi_admit_source_handle_overlays: fn(program: RustBridgeProgram, supplied: 
 pkg_cffi_marker_value: fn(source: String, marker: String) -> String? Never! {
     loop line in pkg_bridge_text_lines(source) {
         parts: line.split_once(marker) ?? next
-        value := parts.after.trim()
+        ^value: parts.after.trim()
         value = value.removeprefix(":").trim()
         if value == "" -> next
         loop value.starts_with("\"") -> value = value.removeprefix("\"")
@@ -166,7 +166,7 @@ pkg_cffi_marked_pointer_count: fn(source: String, pointer: String, count: String
 // `jet-ffi-*` adaptation markers.
 pkg_cffi_automatic_operation: fn(name: String, source: String) -> BindingOperation Never! {
     call: "{name}("
-    declaration := ""
+    ^declaration: ""
     loop raw in pkg_bridge_text_lines(source) {
         line: raw.trim()
         if line.contains(call) {
@@ -174,23 +174,23 @@ pkg_cffi_automatic_operation: fn(name: String, source: String) -> BindingOperati
             break
         }
     }
-    native_signature := declaration
+    ^native_signature: declaration
     loop native_signature.ends_with(";") -> native_signature = native_signature.removesuffix(";")
-    result_type := "Unit"
+    ^result_type: "Unit"
     if declaration.split_once(call) == .Val(parts) {
         result_type = pkg_cffi_automatic_result_type(parts.before)
     }
-    operation := BindingOperation.new(name, native_signature, result_type)
+    ^operation: BindingOperation.new(name, native_signature, result_type)
     if declaration.split_once(call) == .Val(parts) {
         if parts.after.split_once(")") == .Val(closing) {
-            parameters := [String]{}
+            ^parameters: [String]{}
             loop parameter in closing.before.split(",") -> parameters.push(parameter.trim())
-            pointer := String?{None}
-            count := String?{None}
+            ^pointer: String?{None}
+            ^count: String?{None}
             loop parameter in parameters {
                 if pointer == None && parameter.contains("*") {
                     if pkg_cffi_last_token(parameter) == .Val(token) {
-                        bare := token
+                        ^bare: token
                         loop bare.starts_with("*") -> bare = bare.removeprefix("*")
                         pointer = Val(bare)
                     }
@@ -224,10 +224,10 @@ pkg_cffi_automatic_operation: fn(name: String, source: String) -> BindingOperati
 // One `jet-ffi-obligation: name=…; basis=…; checker=…; assumptions=a|b`
 // marker recorded against the contract's header coverage.
 pkg_cffi_record_obligation_marker: fn(contract: ^ForeignBoundaryContract, line: String) ForeignBridgeError! {
-    obligation := String?{None}
-    basis := FFIEvidenceBasis.Unknown
-    checker := ""
-    assumptions := [String]{}
+    ^obligation: String?{None}
+    ^basis: FFIEvidenceBasis.Unknown
+    ^checker: ""
+    ^assumptions: [String]{}
     loop field in line.split(";") {
         parts: field.split_once("=") ?? next
         value: parts.after.trim()
@@ -255,7 +255,7 @@ pkg_cffi_record_obligation_marker: fn(contract: ^ForeignBoundaryContract, line: 
 // obligation evidence.
 pkg_cffi_annotated_contract: fn(contract: ForeignBoundaryContract, source: String, header: String) -[Env]> ForeignBoundaryContract ForeignBridgeError! {
     coverage: ForeignArtifactCoverage.new("{header}:sha256-{pkg_sha256_hex(source.bytes())}", pkg_bridge_foreign_host_target(), "jet-bindgen-v1").with_transitive_dependencies([String]{}).with_reachable_callbacks([String]{}).with_compiler_flags([String]{})
-    annotated := contract.with_artifact_coverage(coverage)
+    ^annotated: contract.with_artifact_coverage(coverage)
     loop line in pkg_bridge_text_lines(source) {
         parts: line.split_once("jet-ffi-obligation:") ?? next
         pkg_cffi_record_obligation_marker(annotated, parts.after.trim())
@@ -269,10 +269,10 @@ pkg_cffi_annotated_contract: fn(contract: ForeignBoundaryContract, source: Strin
 pkg_cffi_automatic_header_facade_from_result: fn(header_source: String, header_path: String, generated: CBindResult) -[Env]> String? ForeignBridgeError! {
     contract: pkg_cffi_annotated_contract(generated.boundary, header_source, header_path)
     inputs: BindingInputs.new(pkg_bridge_foreign_host_target(), "jet-bindgen-v1", "{header_path}:sha256-{pkg_sha256_hex(header_source.bytes())}").with_dependencies([String]{}).with_compiler_flags([String]{})
-    names := generated.bound
+    ^names: generated.bound
     names.sort()
-    facade := ""
-    planned := [String]{}
+    ^facade: ""
+    ^planned: [String]{}
     loop name in names {
         if planned.contains(name) -> next
         plan: BindingPlan.resolve(contract, pkg_cffi_automatic_operation(name, header_source), inputs, BindingShape.Automatic) ?? next
@@ -333,7 +333,7 @@ pkg_cffi_binding_plan_facade: fn(project_root: String, lib: String, header_sourc
             return Err(pkg_bridge_error("binding `{lib}` input artifact changed under its recorded plan; run `jet bind {lib} --update --preview`"))
         }
     }
-    boundary := pkg_cffi_line_value(lines, "boundary=")
+    ^boundary: pkg_cffi_line_value(lines, "boundary=")
     if boundary == .Val(value) {
         if value.trim() == "" -> boundary = None
     }
@@ -380,7 +380,7 @@ pkg_cffi_binding_policy_is_frozen: fn(project_root: String) -[FS]> Bool Never! {
 // The last `// jet-ffi-boundary=<digest>` marker's digest.
 pkg_cffi_binding_cache_boundary: fn(source: String) -> String? Never! {
     lines: pkg_bridge_text_lines(source)
-    index := lines.len() - 1
+    ^index: lines.len() - 1
     loop index >= 0 {
         line: lines[index]
         index -= 1
@@ -465,9 +465,9 @@ pkg_cffi_queue_load: fn(preparation: ^CBindingPreparation, source: String, path:
 // program brings in. The first header seen for a library wins. A cache path
 // already loaded by the program is not queued again; its facade still is.
 pkg_cffi_prepare_binding_caches: fn(project_root: String, imports: [CBindingImport], loaded_paths: [String], entry: String?, overlays: [String:HandleOverlay]) -[FS, Env, Exec, Time.Wait]> CBindingPreparation Never! {
-    preparation := CBindingPreparation{loads: [CBindingLoad]{}, metadata: CBindingMetadata.empty(), diagnostics: [Diagnostic]{}}
-    libs := [String]{}
-    headers := [String:String]{}
+    ^preparation: CBindingPreparation{loads: [CBindingLoad]{}, metadata: CBindingMetadata.empty(), diagnostics: [Diagnostic]{}}
+    ^libs: [String]{}
+    ^headers: [String:String]{}
     loop import in imports {
         if !libs.contains(import.lib) -> libs.push(import.lib)
         if import.header == .Val(header) {
@@ -524,7 +524,7 @@ pkg_cffi_read_header: fn(request: CBindingRequest) -[FS]> String? Never! {
 pkg_cffi_select_facade: fn(request: CBindingRequest, source: String, header_source: String?, expected_boundary: String?) -[FS, Env]> String? ForeignBridgeError! {
     recorded: pkg_cffi_binding_plan_facade(request.project_root, request.lib, header_source, expected_boundary, request.frozen)
     if recorded == .Val(facade) {
-        checked := source
+        ^checked: source
         pkg_cffi_append_binding_plan_facade(checked, facade)
         if source.contains("// jet-ffi-plan=") -> return Ok(None)
         return Ok(Val(facade))
@@ -550,7 +550,7 @@ pkg_cffi_prepare_loaded_cache: fn(request: CBindingRequest, cache_path: String, 
 // fresh one, with its sidecars and facade.
 pkg_cffi_prepare_cache: fn(request: CBindingRequest, cache_path: String, preparation: ^CBindingPreparation) -[FS, Env, Exec, Time.Wait]> Never! {
     lib: request.lib
-    header_source := String?{None}
+    ^header_source: String?{None}
     if request.header_path == .Val(header_path) {
         // A source header import authorizes only bindings derived from that
         // readable header; `use c.<lib>` is the explicit headerless mode.
@@ -562,7 +562,7 @@ pkg_cffi_prepare_cache: fn(request: CBindingRequest, cache_path: String, prepara
             }
         }
     }
-    need_rebind := false
+    ^need_rebind: false
     if files.is_file(cache_path) {
         if request.overlay_supplied {
             // The legacy `.hash` sidecar covers header bytes only.
@@ -587,8 +587,8 @@ pkg_cffi_prepare_cache: fn(request: CBindingRequest, cache_path: String, prepara
 }
 
 pkg_cffi_load_headerless_cache: fn(request: CBindingRequest, cache_path: String, preparation: ^CBindingPreparation) -[FS, Env]> Never! {
-    source := files.read(cache_path) ?? return
-    expected_boundary := String?{None}
+    ^source: files.read(cache_path) ?? return
+    ^expected_boundary: String?{None}
     if source.contains("// jet-ffi-plan=") {
         expected_boundary = pkg_cffi_binding_cache_boundary(source)
     }
@@ -623,15 +623,15 @@ pkg_cffi_generate_cache: fn(request: CBindingRequest, cache_path: String, header
         }
     }
     if result.handle_skipped.len() > 0 {
-        details := [String]{}
+        ^details: [String]{}
         loop skipped in result.handle_skipped {
             details.push("`{skipped.typedef_name}`: {skipped.reason}")
         }
         preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, "opaque handle bindings were unresolved: {details.join("; ")}"))
         return
     }
-    generated_source := result.source
-    automatic_facade := String?{None}
+    ^generated_source: result.source
+    ^automatic_facade: String?{None}
     if pkg_cffi_generated_facade(request, header_path, header, result, generated_source) == {
         .Ok(facade) -> { automatic_facade = facade }
         .Err(error) -> {
@@ -678,7 +678,7 @@ pkg_cffi_generated_facade: fn(request: CBindingRequest, header_path: String, hea
 // of the bind that produced the cache), then load it with its facade.
 pkg_cffi_load_fresh_cache: fn(request: CBindingRequest, cache_path: String, header_source: String?, preparation: ^CBindingPreparation) -[FS, Env, Exec, Time.Wait]> Never! {
     lib: request.lib
-    source := files.read(cache_path) ?? return
+    ^source: files.read(cache_path) ?? return
     if request.header_path == .Val(header_path) {
         if !files.is_file(pkg_cffi_sidecar(cache_path, "provenance")) {
             header_file: pkg_cffi_resolve_header_path(header_path, request.project_root)
@@ -688,7 +688,7 @@ pkg_cffi_load_fresh_cache: fn(request: CBindingRequest, cache_path: String, head
             }
         }
     }
-    automatic_facade := String?{None}
+    ^automatic_facade: String?{None}
     if pkg_cffi_fresh_cache_facade(request, source, header_source) == {
         .Ok(facade) -> { automatic_facade = facade }
         .Err(error) -> {

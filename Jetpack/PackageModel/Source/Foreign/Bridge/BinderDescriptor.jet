@@ -416,7 +416,7 @@ FOREIGN_SCALAR_COUNT: #run effect_vocabulary_enum_view_count("Foreign/Bridge/Bin
 
 // `[Int, Float]`: the Rust `Debug` spelling of a scalar list.
 pkg_foreign_scalar_list_debug: fn(scalars: [ForeignScalar]) -> String Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop scalar in scalars -> names.push(scalar.debug_name())
     "[{names.join(", ")}]"
 }
@@ -459,7 +459,7 @@ ForeignABIContract: struct {
 
     // `ForeignAbiContract::CXX`.
     cxx: fn() -> ForeignABIContract Never! {
-        contract := ForeignABIContract.c()
+        ^contract: ForeignABIContract.c()
         contract.calling_convention = ForeignCallingConvention.Cpp
         contract.layout = ForeignLayoutModel.OpaqueHandle
         contract.ownership = ForeignOwnershipModel.OwnedHandle
@@ -468,7 +468,7 @@ ForeignABIContract: struct {
 
     // `ForeignAbiContract::MESSAGE` (the adapter contract).
     message: fn() -> ForeignABIContract Never! {
-        contract := ForeignABIContract.c()
+        ^contract: ForeignABIContract.c()
         contract.version = FOREIGN_ADAPTER_CONTRACT_VERSION
         contract.calling_convention = ForeignCallingConvention.HostMessage
         contract.layout = ForeignLayoutModel.AdapterTyped
@@ -483,7 +483,7 @@ ForeignABIContract: struct {
 
     // `ForeignAbiContract::NATIVE`.
     native: fn() -> ForeignABIContract Never! {
-        contract := ForeignABIContract.message()
+        ^contract: ForeignABIContract.message()
         contract.calling_convention = ForeignCallingConvention.Rust
         contract.layout = ForeignLayoutModel.Native
         contract
@@ -603,7 +603,7 @@ BinderDescriptor: struct {
     abi_contract: fn(self) -> ForeignABIContract Never! { self.contract }
 
     capabilities_debug: fn(self) -> String Never! {
-        names := [String]{}
+        ^names: [String]{}
         loop capability in self.capabilities -> names.push(capability.debug_name())
         "[{names.join(", ")}]"
     }
@@ -802,7 +802,7 @@ FFILinkClosure: struct {
 
     new: fn(direct: [String], transitive: [String]) -> FFILinkClosure Never! {
         direct_rows: pkg_ffi_sorted_nonempty(direct)
-        transitive_rows := [String]{}
+        ^transitive_rows: [String]{}
         loop library in pkg_ffi_sorted_nonempty(transitive) {
             if !direct_rows.contains(library) -> transitive_rows.push(library)
         }
@@ -814,7 +814,7 @@ FFILinkClosure: struct {
     }
 
     libraries: fn(self) -> [String] Never! {
-        out := [String]{}
+        ^out: [String]{}
         loop library in self.direct -> out.push(library.copy())
         loop library in self.transitive -> out.push(library.copy())
         out
@@ -828,7 +828,7 @@ FFILinkClosure: struct {
 }
 
 pkg_ffi_sorted_nonempty: fn(values: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop value in values {
         if value == "" || out.contains(value) -> next
         out.push(value.copy())
@@ -946,7 +946,7 @@ FFIBoundaryFacts: struct {
                 }
             }
         }
-        names := [String]{}
+        ^names: [String]{}
         loop obligation in self.obligations {
             if obligation.name.trim() == "" || obligation.checker.trim() == "" || obligation.assumptions.len() == 0 || obligation.coverage_digest != self.artifact_coverage_digest {
                 return Err(ForeignBridgeError{message: "foreign boundary carrier has invalid `{obligation.name}` obligation"})

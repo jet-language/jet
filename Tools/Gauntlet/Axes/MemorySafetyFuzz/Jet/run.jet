@@ -4,24 +4,24 @@ run: fn() {
     bytes: files.read_bytes("fuzz-input.bin") ?? panic("fuzz input")
     if bytes.len() == 0 || bytes.len() % 64 != 0 -> panic("invalid fuzz corpus")
 
-    checksum := 0
-    semantic := 0
-    valid := 0
-    boundary := 0
-    oob := 0
-    use_after_free := 0
-    wrong_output := 0
-    position := 0
-    kind := 0
-    declared_length := 0
-    requested_index := 0
-    bounded_length := 0
-    payload_index := 0
-    value := 0
+    ^checksum: 0
+    ^semantic: 0
+    ^valid: 0
+    ^boundary: 0
+    ^oob: 0
+    ^use_after_free: 0
+    ^wrong_output: 0
+    ^position: 0
+    ^kind: 0
+    ^declared_length: 0
+    ^requested_index: 0
+    ^bounded_length: 0
+    ^payload_index: 0
+    ^value: 0
 
     loop byte in bytes {
         checksum += Int{U64{byte}}
-        record_offset := position % 64
+        ^record_offset: position % 64
         if record_offset == 0 {
             kind = Int{U64{byte}}
             payload_index = 0
@@ -47,7 +47,7 @@ run: fn() {
             if kind == 2 -> oob += 1
             if kind == 3 -> use_after_free += 1
             if kind == 4 -> wrong_output += 1
-            safe_index := if requested_index < 60 -> requested_index else -> 60
+            ^safe_index: if requested_index < 60 -> requested_index else -> 60
             semantic += value + ((kind + 1) * 257) + bounded_length + safe_index
         }
         position += 1

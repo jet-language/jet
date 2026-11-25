@@ -38,7 +38,7 @@ ran: fn(runs: Shared<[String:Int]>, name: String) -> Int {
 
 // Counts a run of the method `name`.
 counted: fn(runs: Shared<[String:Int]>, name: String) {
-    held := runs.guard_edit()
+    ^held: runs.guard_edit()
     held.value[name] = (held.value.get(name) ?? 0) + 1
 }
 
@@ -82,7 +82,7 @@ run: fn() {
     _: app.new("Board").cache<Bool>(.Public{max_age: 10min}).cache<Int>(.Public{max_age: 10min}).cache<String>(.Public{max_age: 10min})
     runs: Shared{[String:Int]{}}
     served: web.app().mount("/api", Board{runs: runs.copy()})
-    listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    ^listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr()
     serving: task {
         loop _ in 0..<8 { served.serve_once(listener) ?? panic("serve") }

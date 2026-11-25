@@ -50,8 +50,8 @@ run: fn() {
     dir: files.mkdtemp("jet-habits") ?? return refuse("no scratch directory: {err}")
     jet: process.env_nonempty("JET") ?? "jet"
     python: process.env_nonempty("PYTHON") ?? "python3.13"
-    fixed := 0
-    hinted := 0
+    ^fixed: 0
+    ^hinted: 0
     loop habit in cases {
         outcome: jet_outcome(jet, dir, habit)
         hint: python_hint(python, dir, habit)
@@ -61,7 +61,7 @@ run: fn() {
             print("{habit.name}\tjet: {outcome}\tpython: {if hint -> "did you mean" else -> "no hint"}")
         }
     }
-    _ := files.remove_all(dir)
+    ^_: files.remove_all(dir)
     print("habit corpus: {fixed} of {cases.len()} Jet cases carry fix_edits after which jet check passes; Python 3.13 says did-you-mean on {hinted} of {cases.len()}")
     if fixed < FIXED_FLOOR {
         return refuse("only {fixed} Jet cases are fixed, under the floor of {FIXED_FLOOR}")
@@ -78,7 +78,7 @@ repo_root: fn() -[Env, Exec, FS, IO]> String Never! {
     tool: "/Tools/Agent/HabitCorpus.jet"
     script: sys.executable()
     if script.ends_with(tool) -> return script.removesuffix(tool)
-    dir := files.cwd() ?? "/"
+    ^dir: files.cwd() ?? "/"
     loop {
         if files.exists("{dir}{tool}") -> return dir
         if dir == "/" || dir == "" {
@@ -91,11 +91,11 @@ repo_root: fn() -[Env, Exec, FS, IO]> String Never! {
 // The cases of the corpus `text`: `== name` opens a case, and `-- jet` and
 // `-- python` open its two sources. `#` lines outside a source are comments.
 habit_cases: fn(text: String) -> [HabitCase] Never! {
-    cases := [HabitCase]{}
-    name := ""
-    side := ""
-    jet := [String]{}
-    python := [String]{}
+    ^cases: [HabitCase]{}
+    ^name: ""
+    ^side: ""
+    ^jet: [String]{}
+    ^python: [String]{}
     loop line in text.split("\n") {
         if line.starts_with("== ") {
             if name != "" {
@@ -122,9 +122,9 @@ habit_cases: fn(text: String) -> [HabitCase] Never! {
 
 // A source's lines with the blank lines that separate cases dropped.
 habit_source: fn(lines: [String]) -> String Never! {
-    end := lines.len()
+    ^end: lines.len()
     loop end > 0 && lines[end - 1].trim() == "" -> end -= 1
-    kept := [String]{}
+    ^kept: [String]{}
     loop at in 0..<end -> kept.push(lines[at].copy())
     "{kept.join("\n")}\n"
 }
@@ -160,7 +160,7 @@ python_hint: fn(python: String, dir: String, habit: HabitCase) -[Env, Exec, FS, 
 // text as written.
 habit_edits: fn(output: String, file: String) -> [HabitEdit] Never! {
     tree: json.parse(output.trim()) ?? return [HabitEdit]{}
-    edits := [HabitEdit]{}
+    ^edits: [HabitEdit]{}
     loop report in items(field(tree, "reports")) {
         loop edit in items(field(report, "fix_edits")) {
             span: field(edit, "span")
@@ -175,7 +175,7 @@ habit_edits: fn(output: String, file: String) -> [HabitEdit] Never! {
 
 // Adds `edit` in last-first order unless it overlaps one already kept.
 insert_edit: fn(edits: ^[HabitEdit], edit: ^^HabitEdit) Never! {
-    at := 0
+    ^at: 0
     loop at < edits.len() && edits[at].start > edit.start -> at += 1
     if at > 0 && edit.end > edits[at - 1].start {
         return
@@ -187,7 +187,7 @@ insert_edit: fn(edits: ^[HabitEdit], edit: ^^HabitEdit) Never! {
 }
 
 apply_edits: fn(text: String, edits: [HabitEdit]) -> String Never! {
-    result := text.copy()
+    ^result: text.copy()
     loop edit in edits {
         bytes: result.bytes()
         if edit.start < 0 || edit.end > bytes.len() || edit.start > edit.end -> next

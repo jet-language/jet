@@ -51,7 +51,7 @@ state_of: fn(queue: JobQueue, id: String) -> String {
 }
 
 run: fn() {
-    queue := jobs.queue() ?? panic("queue")
+    ^queue: jobs.queue() ?? panic("queue")
     job: queue.enqueue(process, "order-7", key: "order-7") ?? panic("enqueue")
 
     first: (queue.claim("w1", 1) ?? panic("claim"))[0]

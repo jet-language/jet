@@ -66,15 +66,15 @@ numeric_form: fn(id: TypeId) -> String {
     }
     if id.kind == .Number(signed, float) {
         loop binding in id.generic_bindings {
-            if binding.name == "bits" -> return "signed={signed} bits={binding.size ?? 0} float={float}"
+            if binding.name == "bits" {
+                return "signed={signed} bits={binding.size ?? 0} float={float}"
+            }
         }
     }
     "none"
 }
 
-numeric: fn(info: TypeInfo) -> String {
-    numeric_form(info.identity)
-}
+numeric: fn(info: TypeInfo) -> String { numeric_form(info.identity) }
 
 CONSTANTS: #run constants(Square.reflect())
 

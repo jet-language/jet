@@ -66,9 +66,9 @@ cost_projection_request: fn(source: String) -> JetDriverCompileRequest {
 
 // The held compile state of a `jet check` of `source`, the only file.
 cost_projection_held: fn(source: String) -> JetDriverHeldState {
-    request := cost_projection_request(source)
+    ^request: cost_projection_request(source)
     request.hold_check_state = true
-    compiled := jet_driver_compile(request)
+    ^compiled: jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     compiled.held.move() ?? panic("a held check keeps its compile state")
 }
@@ -97,14 +97,14 @@ cost_projection_held: fn(source: String) -> JetDriverHeldState {
 }
 
 #Test("a captured cost report places its sites on their lines and lints the cost a loop repeats") {
-    request := cost_projection_request(cost_projection_source())
+    ^request: cost_projection_request(cost_projection_source())
     request.capture_cost_report = true
-    compiled := jet_driver_compile(request)
+    ^compiled: jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
     sites: loop site in report.sites -> "{site.function} {site.path}:{site.line} depth {site.loop_depth}"
     assert_eq(sites, [String]{"helper main.jet:1 depth 0", "measure main.jet:10 depth 0", "measure main.jet:6 depth 1", "measure main.jet:5 depth 1"})
-    lints := [String]{}
+    ^lints: [String]{}
     loop row in compiled.advice {
         if row.code == "L2510" -> lints.push(row.what)
     }
@@ -130,19 +130,19 @@ cost_projection_copy_source: fn() -> String {
 }
 
 #Test("an implicit copy a loop repeats is a cost site and an L2510 lint") {
-    request := cost_projection_request(cost_projection_copy_source())
+    ^request: cost_projection_request(cost_projection_copy_source())
     request.capture_cost_report = true
-    compiled := jet_driver_compile(request)
+    ^compiled: jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
-    copies := [String]{}
+    ^copies: [String]{}
     loop site in report.sites {
         if site.kind == .ImplicitCopy {
             copies.push("{site.function} {site.view} {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}")
         }
     }
     assert_eq(copies, [String]{"hold [Int] SemanticRemainder main.jet:5 depth 1"})
-    lints := [String]{}
+    ^lints: [String]{}
     loop row in compiled.advice {
         if row.code == "L2510" -> lints.push(row.what)
     }
@@ -169,9 +169,9 @@ cost_projection_counter_source: fn() -> String {
 }
 
 #Test("a range loop's counter stays on the packed Int rail; a counter no range bounds may spill") {
-    request := cost_projection_request(cost_projection_counter_source())
+    ^request: cost_projection_request(cost_projection_counter_source())
     request.capture_cost_report = true
-    compiled := jet_driver_compile(request)
+    ^compiled: jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
     sites: loop site in report.sites -> "{site.kind:Debug} {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}"
@@ -191,12 +191,12 @@ cost_projection_recursive_source: fn() -> String {
 }
 
 #Test("a stop poll is a cost site at each call on a cycle back to its caller, and none at a call outside it") {
-    request := cost_projection_request(cost_projection_recursive_source())
+    ^request: cost_projection_request(cost_projection_recursive_source())
     request.capture_cost_report = true
-    compiled := jet_driver_compile(request)
+    ^compiled: jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
-    polls := [String]{}
+    ^polls: [String]{}
     loop site in report.sites {
         if site.kind == TCostKind.StopPoll {
             polls.push("{site.function} {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}")
@@ -221,14 +221,14 @@ cost_projection_lines_source: fn() -> String {
 }
 
 #Test("the String copy `lines()` makes each loop turn is a view materialization site and an L2510 lint") {
-    request := cost_projection_request(cost_projection_lines_source())
+    ^request: cost_projection_request(cost_projection_lines_source())
     request.capture_cost_report = true
-    compiled := jet_driver_compile(request)
+    ^compiled: jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
     sites: loop site in report.sites -> "{site.kind:Debug} `{site.view}` {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}"
     assert_eq(sites, [String]{"OutcomeConstruction `` OptimizerRemoved main.jet:4 depth 1", "ViewMaterialization `String` SemanticRemainder main.jet:4 depth 1", "StopPoll `` SemanticRemainder main.jet:3 depth 1"})
-    lints := [String]{}
+    ^lints: [String]{}
     loop row in compiled.advice {
         if row.code == "L2510" -> lints.push(row.what)
     }
@@ -263,12 +263,12 @@ cost_projection_written_lines_source: fn() -> String {
 }
 
 #Test("the copies a written `lines()` makes in a loop are view materialization sites and L2510 lints but no L2511, while an implicit String copy in a loop stays an L2511") {
-    request := cost_projection_request(cost_projection_written_lines_source())
+    ^request: cost_projection_request(cost_projection_written_lines_source())
     request.capture_cost_report = true
-    captured := jet_driver_compile(request)
+    ^captured: jet_driver_compile(request)
     assert(captured.complete, "the fixture checks: {captured.diagnostics.map(fn(row) { row.what })}")
     report: captured.cost_report.move() ?? panic("a captured check keeps its cost report")
-    copies := [String]{}
+    ^copies: [String]{}
     loop site in report.sites {
         if site.kind == .ViewMaterialization || site.kind == .ImplicitCopy {
             copies.push("{site.kind:Debug} `{site.view}` {site.function} main.jet:{site.line} depth {site.loop_depth}")
@@ -285,7 +285,7 @@ cost_projection_written_lines_source: fn() -> String {
             "ImplicitCopy `String` tags main.jet:16 depth 1",
         },
     )
-    lints := [String]{}
+    ^lints: [String]{}
     loop row in captured.advice {
         if row.code == "L2510" && !row.what.starts_with("An exact Int") -> lints.push(row.what)
     }
@@ -299,9 +299,9 @@ cost_projection_written_lines_source: fn() -> String {
             "Implicitly copying a `String` inside a loop",
         },
     )
-    compiled := jet_driver_compile(cost_projection_request(cost_projection_written_lines_source()))
+    ^compiled: jet_driver_compile(cost_projection_request(cost_projection_written_lines_source()))
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
-    tidy := [String]{}
+    ^tidy: [String]{}
     loop row in compiled.diagnostics {
         if row.code == "L2511" -> tidy.push("{row.what} | {row.fix}")
     }
@@ -325,12 +325,12 @@ cost_projection_view_receiver_source: fn() -> String {
 }
 
 #Test("a view read as a scalar method's receiver is passed as the view; storing it copies") {
-    request := cost_projection_request(cost_projection_view_receiver_source())
+    ^request: cost_projection_request(cost_projection_view_receiver_source())
     request.capture_cost_report = true
-    compiled := jet_driver_compile(request)
+    ^compiled: jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
-    copies := [String]{}
+    ^copies: [String]{}
     loop site in report.sites {
         if site.kind == .ViewMaterialization || site.kind == .ImplicitCopy {
             copies.push("{site.kind:Debug} `{site.view}` {site.path}:{site.line} depth {site.loop_depth}")
@@ -392,10 +392,10 @@ cost_projection_hidden_copy_source: fn() -> String {
 }
 
 #Test("a plain check lists an L2511 tidy error for each allocating hidden copy a loop repeats, and none for a written, bitwise or shared-handle copy or one outside a loop") {
-    compiled := jet_driver_compile(cost_projection_request(cost_projection_hidden_copy_source()))
+    ^compiled: jet_driver_compile(cost_projection_request(cost_projection_hidden_copy_source()))
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     if compiled.cost_report == .Val(_) -> panic("a plain check keeps no cost report")
-    tidy := [String]{}
+    ^tidy: [String]{}
     loop row in compiled.diagnostics {
         if row.code == "L2511" -> tidy.push("{row.what} | {row.fix}")
         assert(row.code != "L2510", "a plain check lists no L2510 lint: {row.what}")
@@ -454,20 +454,20 @@ cost_projection_map_edit_source: fn() -> String {
 }
 
 #Test("a map edit is an L2511 tidy error only where its loop shares the map each turn") {
-    request := cost_projection_request(cost_projection_map_edit_source())
+    ^request: cost_projection_request(cost_projection_map_edit_source())
     request.capture_cost_report = true
-    captured := jet_driver_compile(request)
+    ^captured: jet_driver_compile(request)
     assert(captured.complete, "the fixture checks: {captured.diagnostics.map(fn(row) { row.what })}")
     report: captured.cost_report.move() ?? panic("a captured check keeps its cost report")
-    edits := [String]{}
+    ^edits: [String]{}
     loop site in report.sites {
         if site.kind == TCostKind.CollectionCopyOnWrite {
             edits.push("{site.function} main.jet:{site.line} shared {site.shared}")
         }
     }
     assert_eq(edits, [String]{"history main.jet:6 shared true", "tally main.jet:13 shared false", "after_snapshot main.jet:21 shared false", "mirrored main.jet:31 shared false"})
-    compiled := jet_driver_compile(cost_projection_request(cost_projection_map_edit_source()))
-    tidy := [String]{}
+    ^compiled: jet_driver_compile(cost_projection_request(cost_projection_map_edit_source()))
+    ^tidy: [String]{}
     loop row in compiled.diagnostics {
         if row.code == "L2511" -> tidy.push("{row.what} | {row.fix}")
     }
@@ -562,12 +562,12 @@ cost_projection_spill_source: fn() -> String {
 }
 
 #Test("only an Int product or left shift a loop carries from turn to turn and grows with no cap in its condition is marked growing, and a plain check lists each as an L2511 tidy error") {
-    request := cost_projection_request(cost_projection_spill_source())
+    ^request: cost_projection_request(cost_projection_spill_source())
     request.capture_cost_report = true
-    captured := jet_driver_compile(request)
+    ^captured: jet_driver_compile(request)
     assert(captured.complete, "the fixture checks: {captured.diagnostics.map(fn(row) { row.what })}")
     report: captured.cost_report.move() ?? panic("a captured check keeps its cost report")
-    spills := [String]{}
+    ^spills: [String]{}
     loop site in report.sites {
         if site.kind == TCostKind.ExactIntSpill && site.loop_depth > 0 {
             spills.push("{site.function} main.jet:{site.line} {site.state:Debug} grows {site.grows}")
@@ -593,8 +593,8 @@ cost_projection_spill_source: fn() -> String {
             "weigh main.jet:4 SemanticRemainder grows false",
         },
     )
-    compiled := jet_driver_compile(cost_projection_request(cost_projection_spill_source()))
-    tidy := [String]{}
+    ^compiled: jet_driver_compile(cost_projection_request(cost_projection_spill_source()))
+    ^tidy: [String]{}
     loop row in compiled.diagnostics {
         if row.code == "L2511" -> tidy.push("{row.what} | {row.fix}")
     }
@@ -652,12 +652,12 @@ cost_projection_wrapping_hash_source: fn() -> String {
 }
 
 #Test("an Int product a loop grows under wrapping or saturating is the exact product and marked growing; the same hash on U64 and a shift of a mixed Int are no spill site") {
-    request := cost_projection_request(cost_projection_wrapping_hash_source())
+    ^request: cost_projection_request(cost_projection_wrapping_hash_source())
     request.capture_cost_report = true
-    captured := jet_driver_compile(request)
+    ^captured: jet_driver_compile(request)
     assert(captured.complete, "the fixture checks: {captured.diagnostics.map(fn(row) { row.what })}")
     report: captured.cost_report.move() ?? panic("a captured check keeps its cost report")
-    spills := [String]{}
+    ^spills: [String]{}
     loop site in report.sites {
         if site.kind == TCostKind.ExactIntSpill && site.loop_depth > 0 {
             spills.push("{site.function} main.jet:{site.line} {site.state:Debug} grows {site.grows}")
@@ -674,8 +674,8 @@ cost_projection_wrapping_hash_source: fn() -> String {
             "polynomial main.jet:13 SemanticRemainder grows true",
         },
     )
-    compiled := jet_driver_compile(cost_projection_request(cost_projection_wrapping_hash_source()))
-    tidy := [String]{}
+    ^compiled: jet_driver_compile(cost_projection_request(cost_projection_wrapping_hash_source()))
+    ^tidy: [String]{}
     loop row in compiled.diagnostics {
         if row.code == "L2511" -> tidy.push("{row.what}")
     }

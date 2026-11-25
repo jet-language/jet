@@ -34,14 +34,14 @@ ToolLiveInstall: struct {
 cli_materialize_generation_bins: fn(verification: StoreVerification, generation_dir: String, tools: ^[InstalledUserTool], live: ^^ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> CLIError! {
     bin_dir: files.join(generation_dir, "bin")
     files.create_dir_all(bin_dir)
-    projected := [String]{}
-    held_live := live.move()
+    ^projected: [String]{}
+    ^held_live: live.move()
     loop index in 0..<tools.len() {
         tool: tools[index]
         if tool.bins.len() != tool.members.len() || tool.bins.len() == 0 {
             return Err(CLIError.Other("profile tool has mismatched bin/member pairs"))
         }
-        if ^held_live == .Val(install) {
+        if held_live.in_place() == .Val(install) {
             receipt: install.receipt
             if receipt.reference == tool.reference && receipt.output_hash == tool.output_hash && receipt.store_root == tool.store_root {
                 tools[index].member_digests = cli_tool_project_bins(bin_dir, tool, install.lease, projected)
@@ -50,7 +50,7 @@ cli_materialize_generation_bins: fn(verification: StoreVerification, generation_
         }
         roots: HangarRoots{root: tool.store_root, dev_mode: true}
         entry: cli_tool_store_entry(verification, roots, tool)
-        fallback := store_snapshot_lease(verification, roots, entry) ?? return Err(CLIError.Store(err))
+        ^fallback: store_snapshot_lease(verification, roots, entry) ?? return Err(CLIError.Store(err))
         if cli_tool_project_bins(bin_dir, tool, fallback, projected) == {
             .Ok(digests) -> {
                 fallback.release()
@@ -78,7 +78,7 @@ cli_tool_store_entry: fn(verification: StoreVerification, roots: HangarRoots, to
 // Project one tool's bin/member pairs through `lease`; the projection digests
 // in bin order.
 cli_tool_project_bins: fn(bin_dir: String, tool: InstalledUserTool, lease: ^CacheLease, projected: ^[String]) -[FS, Env, Rand]> [String] CLIError! {
-    digests := [String]{}
+    ^digests: [String]{}
     loop index in 0..<tool.bins.len() {
         bin: tool.bins[index]
         member: tool.members[index]
@@ -115,11 +115,11 @@ cli_validated_store_member: fn(verification: StoreVerification, tool: InstalledU
 // projection matches its recorded digest (and is executable on Unix).
 cli_validate_generation_bins: fn(verification: StoreVerification, generation: Int, tools: [InstalledUserTool]) -[FS, Env, Time]> CLIError! {
     bin_dir: files.join(files.join(cli_tool_generations_dir(), "{generation}"), "bin")
-    expected := [String]{}
+    ^expected: [String]{}
     loop tool in tools {
         loop bin in tool.bins -> expected.push(cli_physical_bin_name(bin))
     }
-    actual := [String]{}
+    ^actual: [String]{}
     loop entry in files.list_dir(bin_dir) -> actual.push(entry.name)
     if cli_sorted_unique(actual) != cli_sorted_unique(expected) {
         return Err(CLIError.Other("tool generation bin projection mismatch"))
@@ -210,11 +210,11 @@ cli_recover_projection_staging: fn() -[FS, Env]> CLIError! {
 
 // A metadata file of at most 1 MiB of UTF-8, read through one handle.
 cli_read_bounded: fn(path: String) -[FS]> String CLIError! {
-    reader := files.open(path)
+    ^reader: files.open(path)
     if reader.stat().size > TOOL_PROFILE_MAX_METADATA_BYTES {
         return Err(CLIError.Other("profile metadata exceeds byte bound"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(TOOL_PROFILE_MAX_METADATA_BYTES + 1 - bytes.len())
         if chunk.len() == 0 -> break
@@ -229,7 +229,7 @@ cli_read_bounded: fn(path: String) -[FS]> String CLIError! {
 
 // Exclusive create (never replace), write, and fsync.
 cli_write_synced: fn(path: String, bytes: [U8]) -[FS]> CLIError! {
-    writer := files.create(path, if_exists: CreateIfExists.Refuse)
+    ^writer: files.create(path, if_exists: CreateIfExists.Refuse)
     writer.write_bytes(bytes)
     writer.fsync()
 }

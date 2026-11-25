@@ -72,7 +72,7 @@ JetDriverDeclared: struct {
 
 // The `Declaration` payload of `row`.
 jet_driver_declaration_value: fn(row: JetDriverDeclared) -> TComptimeValue Never! {
-    calls := [TComptimeValue]{}
+    ^calls: [TComptimeValue]{}
     loop call in row.calls -> calls.push(TComptimeValue.String{value: call})
     values: [TComptimeValue]{
         TComptimeValue.String{value: row.name},
@@ -85,7 +85,7 @@ jet_driver_declaration_value: fn(row: JetDriverDeclared) -> TComptimeValue Never
 
 // The `Declaration` payloads of `rows`, in order.
 jet_driver_declaration_list: fn(rows: [JetDriverDeclared]) -> TComptimeValue Never! {
-    values := [TComptimeValue]{}
+    ^values: [TComptimeValue]{}
     loop row in rows -> values.push(jet_driver_declaration_value(row))
     TComptimeValue.List{values: values}
 }
@@ -94,7 +94,7 @@ jet_driver_declaration_list: fn(rows: [JetDriverDeclared]) -> TComptimeValue Nev
 // compiler does not supply, by its file's path and under its source name;
 // the entry module is parsed, not imported.
 jet_driver_load_events: fn(load: JetDriverLoadResult) -> [CompilerEventRecord] Never! {
-    order := [JetDriverEventOrder]{}
+    ^order: [JetDriverEventOrder]{}
     loop (index, loaded) in load.modules {
         if jet_driver_event_module_is_supplied(loaded.module_identity, loaded.package_identity) {
             next
@@ -102,7 +102,7 @@ jet_driver_load_events: fn(load: JetDriverLoadResult) -> [CompilerEventRecord] N
         order.push(JetDriverEventOrder{path: load.source_units[loaded.source_unit_index].relative_path, index: index})
     }
     jet_driver_event_order(order)
-    events := [CompilerEventRecord]{}
+    ^events: [CompilerEventRecord]{}
     loop row in order {
         events.push(compiler_event_record(COMPILER_EVENT_PARSED, [TComptimeValue]{TComptimeValue.String{value: row.path}, TComptimeValue.String{value: load.modules[row.index].module_name}}))
     }
@@ -120,22 +120,22 @@ jet_driver_load_events: fn(load: JetDriverLoadResult) -> [CompilerEventRecord] N
 // injected), by module path and declaration order, with the names of the
 // declarations it calls in first-call order.
 jet_driver_checked_events: fn(graph: SemaGraphResult, symbols: SymbolTable) -> [CompilerEventRecord] Never! {
-    order := [JetDriverEventOrder]{}
+    ^order: [JetDriverEventOrder]{}
     loop (index, graph_module) in graph.modules {
         if jet_driver_event_module_is_supplied(graph_module.module_identity, graph_module.package_identity) {
             next
         }
         order.push(JetDriverEventOrder{path: graph_module.module_path, index: index})
     }
-    declared := [JetDriverDeclared]{}
-    events := [CompilerEventRecord]{}
+    ^declared: [JetDriverDeclared]{}
+    ^events: [CompilerEventRecord]{}
     loop row in order {
         graph_module: graph.modules[row.index]
         // Each function's row of `declared`, by its key's id in `keys`; -1
         // at id 0, the empty key, which no function has.
         first: declared.len()
-        keys := name_table()
-        places := [Int]{-1}
+        ^keys: name_table()
+        ^places: [Int]{-1}
         loop function in graph_module.functions {
             if graph_module.injected_function_keys.contains(function.key) -> next
             id: name_index(name_intern(keys, function.key))
@@ -163,8 +163,8 @@ jet_driver_checked_events: fn(graph: SemaGraphResult, symbols: SymbolTable) -> [
 
 // The finished moment of the compile that ended in `result`.
 jet_driver_finished_event: fn(result: JetDriverCompileResult) -> CompilerEventRecord Never! {
-    errors := 0
-    warnings := 0
+    ^errors: 0
+    ^warnings: 0
     loop diagnostic in result.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> errors += 1
         if diagnostic.severity == DIAGNOSTIC_LINT -> warnings += 1
@@ -178,7 +178,7 @@ jet_driver_finished_event: fn(result: JetDriverCompileResult) -> CompilerEventRe
 // `core.compiler.Event`, in the fixed order above. The build runs before the
 // program is emitted, so the list ends at the settled round.
 jet_driver_stages: fn(load: JetDriverLoadResult, graph: SemaGraphResult, symbols: SymbolTable) -> [TComptimeValue] Never! {
-    stages := [TComptimeValue]{}
+    ^stages: [TComptimeValue]{}
     loaded: jet_driver_load_events(load)
     loop record in loaded.move() {
         stages.push(compiler_event_stage(record.name, record.data.move()))

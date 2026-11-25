@@ -64,7 +64,7 @@ is_ascii: fn(text: String) -> Bool Never! {
 scalar_count: fn(text: String) -> Int Never! { decode_scalars(text).len() }
 
 scalars: fn(text: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop cp in decode_scalars(text) -> out.push(encode_cp(cp))
     out
 }
@@ -100,14 +100,14 @@ sentences: fn(text: String) -> [String] Never! { split_sentences(text) }
 /// Unicode 17.0.0 scalar labels: `U+XXXX NAME`, with legacy control names.
 /// Scalars absent from the pinned name index are labeled `UNASSIGNED`.
 inspect: fn(text: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop cp in decode_scalars(text) -> out.push("{hex_cp(cp)} {unicode_name(cp)}")
     out
 }
 
 /// `"index:scalar"` pairs, index in bytes.
 char_indices: fn(text: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop pair in decode_indexed(text) -> out.push("{pair.index}:{encode_cp(pair.cp)}")
     out
 }
@@ -115,7 +115,7 @@ char_indices: fn(text: String) -> [String] Never! {
 display_width: fn(text: String) -> Int Never! {
     bytes: text.bytes()
     if __printable_ascii(bytes) -> return bytes.len()
-    total := 0
+    ^total: 0
     loop cluster in split_graphemes(text) {
         total += text_width.cluster_width(decode_scalars(cluster))
     }
@@ -138,7 +138,7 @@ word_views: fn(text: String) -> [String] Never! { words(text) }
 line_views: fn(text: String) -> [String] Never! { split_lines(text) }
 
 byte_views: fn(text: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop b in text_unicode_string.utf8_bytes(text) -> out.push("{b}")
     out
 }
@@ -147,7 +147,7 @@ is_alphabetic: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return false
     bytes: raw[0..<raw.len()]
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         byte: bytes[at]
         if byte >= (U8{128}) -> break
@@ -162,7 +162,7 @@ is_numeric: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return false
     bytes: raw[0..<raw.len()]
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         byte: bytes[at]
         if byte >= (U8{128}) -> break
@@ -221,7 +221,7 @@ is_punctuation: fn(text: String) -> Bool Never! {
 /// True iff any scalar is Unicode 17 Cc.
 /// Empty text is false. Scan UTF-8 bytes without per-scalar allocation.
 has_control: fn(value: String) -> Bool Never! {
-    after_c2 := false
+    ^after_c2: false
     loop b in value.bytes() {
         if b < (U8{32}) || b == (U8{127}) -> return true
         if after_c2 && b >= (U8{128}) && b <= (U8{159}) -> return true
@@ -234,7 +234,7 @@ trim: fn(text: String) -> String Never! { trim_end(trim_start(text)) }
 
 trim_start: fn(text: String) -> String Never! {
     pairs: decode_indexed(text)
-    i := 0
+    ^i: 0
     loop i < pairs.len() {
         if !is_space_cp(pairs[i].cp) -> break
         i += 1
@@ -245,8 +245,8 @@ trim_start: fn(text: String) -> String Never! {
 
 trim_end: fn(text: String) -> String Never! {
     pairs: decode_indexed(text)
-    end := text.bytes().len()
-    i := pairs.len() - 1
+    ^end: text.bytes().len()
+    ^i: pairs.len() - 1
     loop i >= 0 {
         if !is_space_cp(pairs[i].cp) {
             end = pairs[i].index + text_unicode_string.utf8_width_at(text.bytes(), pairs[i].index)
@@ -261,7 +261,7 @@ trim_end: fn(text: String) -> String Never! {
 /// its number, so every byte sequence decodes and none is lost, as node's
 /// `toString('latin1')` and Python's `decode("latin-1")` read bytes.
 decode_latin1: fn(bytes: [U8]) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in bytes {
         if byte < (U8{128}) -> out.push(byte) else {
             out.extend([U8]{U8{192 + Int{byte} /% 64}, U8{128 + Int{byte} %% 64}})
@@ -278,7 +278,7 @@ leading_int: fn(text: String) -> Int? Never! {
     raw: trim_start(text).bytes()
     negative: raw.len() > 0 && raw[0] == (U8{45})
     start: if negative || (raw.len() > 0 && raw[0] == (U8{43})) -> 1 else -> 0
-    end := start
+    ^end: start
     loop end < raw.len() && raw[end] >= (U8{48}) && raw[end] <= (U8{57}) -> end += 1
     if end == start -> return None
     digits: slice_bytes(raw, start, end)
@@ -335,13 +335,13 @@ ascii_space: fn(b: U8) -> Bool {
 }
 
 slice_bytes: fn(raw: [U8], start: Int, end: Int) -> String {
-    out := [U8]{}
-    lo := start
-    hi := end
+    ^out: [U8]{}
+    ^lo: start
+    ^hi: end
     if lo < 0 -> lo = 0
     if hi > raw.len() -> hi = raw.len()
     if hi < lo -> hi = lo
-    i := lo
+    ^i: lo
     loop {
         if i >= hi -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
@@ -374,14 +374,14 @@ pad_side: fn(text: String, width: Int, fill: String, left: Bool) -> String {
     extra: width - scalar_count(text)
     units: scalars(fill)
     if extra <= 0 || units.len() == 0 -> return text.copy()
-    added := [String]{}
-    i := 0
+    ^added: [String]{}
+    ^i: 0
     loop added.len() < extra {
         added.push(units[i])
         i = (i + 1) % units.len()
     }
-    prefix := ""
-    suffix := ""
+    ^prefix: ""
+    ^suffix: ""
     loop part in added {
         if left -> prefix = "{prefix}{part}" else -> suffix = "{suffix}{part}"
     }
@@ -391,8 +391,8 @@ pad_side: fn(text: String, width: Int, fill: String, left: Bool) -> String {
 split_limit: fn(text: String, sep: String, n: Int, from_right: Bool) -> [String] {
     if n <= 0 -> return [String]{}
     if n == 1 || text_unicode_string.utf8_bytes(sep).len() == 0 -> return [String]{text}
-    parts := [String]{}
-    rest := text
+    ^parts: [String]{}
+    ^rest: text
     loop {
         if parts.len() + 1 >= n {
             parts.push(rest)
@@ -419,7 +419,7 @@ find_sep: fn(text: String, sep: String, from_right: Bool) -> Int {
     if needle.len() == 0 || needle.len() > hay.len() -> return -1
     last: hay.len() - needle.len()
     if from_right {
-        i := last
+        ^i: last
         loop {
             if i < 0 -> return -1
             if match_at(hay, needle, i) -> return i
@@ -448,8 +448,8 @@ decode_scalars: fn(text: String) -> [Int] Never! { text_width.decode_scalars(tex
 
 decode_indexed: fn(text: String) -> [IndexedCp] Never! {
     raw: text_unicode_string.utf8_bytes(text)
-    out := [IndexedCp]{}
-    i := 0
+    ^out: [IndexedCp]{}
+    ^i: 0
     loop {
         if i >= raw.len() -> return out
         start: i
@@ -462,12 +462,12 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
             i += 1
             next
         }
-        cp := 0
+        ^cp: 0
         if width == 2 -> cp = (first) & 31
         if width == 3 -> cp = (first) & 15
         if width == 4 -> cp = (first) & 7
-        valid := true
-        k := 1
+        ^valid: true
+        ^k: 1
         loop k < width {
             byte: Int{raw[i + k]}
             if byte < 128 || byte >= 192 {
@@ -488,13 +488,13 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
 }
 
 encode_cp: fn(cp: Int) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     text_unicode_string.append_cp(out, cp)
     String.from_bytes(out) ?? ""
 }
 
 encode_cps: fn(cps: [Int]) -> String {
-    out := ""
+    ^out: ""
     loop cp in cps -> out = "{out}{encode_cp(cp)}"
     out
 }
@@ -503,7 +503,7 @@ encode_cps: fn(cps: [Int]) -> String {
 // Their stable-place windows stay inside the suffix scan and never escape.
 alphabetic_suffix: fn(bytes: View<U8>, offset: Int, table: [U8]) -> Bool Never! {
     window: table[0..<table.len()]
-    at := offset
+    ^at: offset
     loop at < bytes.len() {
         scalar: unicode_scalar_at(bytes, at)
         if !is_alpha_cp(scalar.cp, window) -> return false
@@ -514,7 +514,7 @@ alphabetic_suffix: fn(bytes: View<U8>, offset: Int, table: [U8]) -> Bool Never! 
 
 numeric_suffix: fn(bytes: View<U8>, offset: Int, table: [U8]) -> Bool Never! {
     window: table[0..<table.len()]
-    at := offset
+    ^at: offset
     loop at < bytes.len() {
         scalar: unicode_scalar_at(bytes, at)
         if !is_digit_cp(scalar.cp, window) -> return false
@@ -538,8 +538,8 @@ is_digit_cp: fn(cp: Int, table: View<U8>) -> Bool Never! {
 unicode_scalar_at: fn(raw: View<U8>, at: Int) -> {cp: Int, end: Int} Never! {
     first: Int{raw[at]}
     if first < 128 -> return {cp: first, end: at + 1}
-    width := 2
-    cp := first & 31
+    ^width: 2
+    ^cp: first & 31
     if first >= 240 {
         width = 4
         cp = first & 7
@@ -658,7 +658,7 @@ hangul_compose: fn(a: Int, b: Int) -> Int? {
 }
 
 decompose: fn(text: String, compat: Bool) -> [Int] {
-    raw := [Int]{}
+    ^raw: [Int]{}
     loop cp in decode_scalars(text) {
         pieces: decompose_cp(cp, compat)
         loop p in pieces -> raw.push(p)
@@ -739,9 +739,9 @@ decompose_cp: fn(cp: Int, compat: Bool) -> [Int] {
 }
 
 canon_order: fn(cps: [Int]) -> [Int] {
-    out := [Int]{}
+    ^out: [Int]{}
     loop c in cps -> out.push(c)
-    i := 1
+    ^i: 1
     loop {
         if i >= out.len() -> return out
         cc: combining_class(out[i])
@@ -761,9 +761,9 @@ canon_order: fn(cps: [Int]) -> [Int] {
 
 compose: fn(cps: [Int]) -> String {
     if cps.len() == 0 -> return ""
-    out := [Int]{}
-    starter := -1
-    last_class := -1
+    ^out: [Int]{}
+    ^starter: -1
+    ^last_class: -1
     loop cp in cps {
         cc: combining_class(cp)
         if starter >= 0 {
@@ -859,10 +859,10 @@ compose_pair: fn(a: Int, b: Int) -> Int? {
 split_graphemes: fn(text: String) -> [String] {
     cps: decode_scalars(text)
     if cps.len() == 0 -> return [String]{}
-    out := [String]{}
-    cluster := [Int]{cps[0]}
-    ri_run := if is_ri(cps[0]) -> 1 else -> 0
-    i := 1
+    ^out: [String]{}
+    ^cluster: [Int]{cps[0]}
+    ^ri_run: if is_ri(cps[0]) -> 1 else -> 0
+    ^i: 1
     loop {
         if i >= cps.len() {
             out.push(encode_cps(cluster))
@@ -870,7 +870,7 @@ split_graphemes: fn(text: String) -> [String] {
         }
         prev: cluster[cluster.len() - 1]
         cur: cps[i]
-        break_here := grapheme_break(prev, cur)
+        ^break_here: grapheme_break(prev, cur)
         // GB11 needs a pictographic Extend* prefix before the ZWJ.
         if prev == 0x200D && is_emoji(cur) -> break_here = !has_emoji_zwj_prefix(cluster)
         if is_ri(prev) && is_ri(cur) && ri_run % 2 == 0 -> break_here = true
@@ -906,7 +906,7 @@ grapheme_break: fn(prev: Int, cur: Int) -> Bool {
 }
 
 has_emoji_zwj_prefix: fn(cluster: [Int]) -> Bool {
-    i := cluster.len() - 2
+    ^i: cluster.len() - 2
     loop i >= 0 {
         cp: cluster[i]
         if cp == 0x200D -> return false
@@ -1014,8 +1014,8 @@ segment_uint: fn(table: View<U8>, at: Int) -> Int Never! {
 }
 
 segment_row: fn(table: View<U8>, cp: Int, stride: Int) -> Int Never! {
-    low := 0
-    high := (table.len() - 40) /% stride
+    ^low: 0
+    ^high: (table.len() - 40) /% stride
     loop low < high {
         mid: (low + high) /% 2
         row: 40 + mid * stride
@@ -1058,7 +1058,7 @@ is_midnum_q: fn(class: Int) -> Bool Never! {
 // WB4: ignore Extend/Format/ZWJ after any non-newline unit, retaining its
 // actual last scalar class for WB3c and WB3d. Ends are exclusive byte offsets.
 word_reduce: fn(pairs: [IndexedCp], byte_len: Int) -> [WordUnit] Never! {
-    units := [WordUnit]{}
+    ^units: [WordUnit]{}
     table: segment_tables.UNICODE_WORD_BREAK
     window: table[0..<table.len()]
     loop i in 0..<pairs.len() {
@@ -1121,12 +1121,12 @@ word_break_at: fn(units: [WordUnit], i: Int, pictographic: View<U8>) -> Bool Nev
 }
 
 word_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     if pairs.len() == 0 -> return out
     units: word_reduce(pairs, byte_len)
     pictographic: segment_tables.UNICODE_EXTENDED_PICTOGRAPHIC
     pictographic_window: pictographic[0..<pictographic.len()]
-    ri_run := 0
+    ^ri_run: 0
     loop i in 0..<units.len() {
         class: units[i].class
         ri_run = if class == WB_RI -> ri_run + 1 else -> 0
@@ -1146,11 +1146,11 @@ split_words: fn(text: String) -> [String] Never! {
     numeric: segment_tables.UNICODE_NUMERIC
     alphabetic_window: alphabetic[0..<alphabetic.len()]
     numeric_window: numeric[0..<numeric.len()]
-    out := [String]{}
-    start := 0
-    at := 0
+    ^out: [String]{}
+    ^start: 0
+    ^at: 0
     loop end in word_boundaries(pairs, raw.len()) {
-        keep := false
+        ^keep: false
         loop at < pairs.len() && pairs[at].index < end {
             if !keep {
                 keep = segment_contains(alphabetic_window, pairs[at].cp) || segment_contains(numeric_window, pairs[at].cp)
@@ -1173,7 +1173,7 @@ is_sentence_para: fn(class: Int) -> Bool Never! {
 }
 
 sentence_lower_follows: fn(units: [SentenceUnit], from: Int) -> Bool Never! {
-    k := from
+    ^k: from
     loop k < units.len() {
         class: units[k].class
         if class == SB_LOWER -> return true
@@ -1189,9 +1189,9 @@ sentence_lower_follows: fn(units: [SentenceUnit], from: Int) -> Bool Never! {
 // unless the SB8/SB8a/SB9/SB10 context suppresses it.
 sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
     n: units.len()
-    breaks := [Bool]{}
+    ^breaks: [Bool]{}
     loop _ in 1..<n -> breaks.push(false)
-    i := 0
+    ^i: 0
     loop i + 1 < n {
         current: units[i].class
         if current == SB_CR && units[i + 1].class == SB_LF {
@@ -1212,7 +1212,7 @@ sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
                 i += 1  // SB7
                 next
             }
-            j := i + 1
+            ^j: i + 1
             loop j < n && units[j].class == SB_CLOSE -> j += 1
             close_end: j
             loop j < n && units[j].class == SB_SP -> j += 1
@@ -1233,9 +1233,9 @@ sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
 }
 
 sentence_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     if pairs.len() == 0 -> return out
-    units := [SentenceUnit]{}
+    ^units: [SentenceUnit]{}
     table: segment_tables.UNICODE_SENTENCE_BREAK
     window: table[0..<table.len()]
     loop i in 0..<pairs.len() {
@@ -1261,8 +1261,8 @@ sentence_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
 
 split_sentences: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    out := [String]{}
-    start := 0
+    ^out: [String]{}
+    ^start: 0
     loop end in sentence_boundaries(decode_indexed(text), raw.len()) {
         sentence: slice_bytes(raw, start, end).trim()
         if sentence != "" -> out.push(sentence)
@@ -1274,9 +1274,9 @@ split_sentences: fn(text: String) -> [String] Never! {
 split_lines: fn(text: String) -> [String] {
     raw: text.bytes()
     if raw.len() == 0 -> return [String]{}
-    out := [String]{}
-    start := 0
-    i := 0
+    ^out: [String]{}
+    ^start: 0
+    ^i: 0
     loop i < raw.len() {
         if raw[i] == (U8{10}) || raw[i] == (U8{13}) {
             out.push(slice_bytes(raw, start, i))
@@ -1294,8 +1294,8 @@ split_lines: fn(text: String) -> [String] {
 hex_cp: fn(cp: Int) -> String {
     hex: "0123456789ABCDEF"
     hb: hex.bytes()
-    n := cp
-    digits := [U8]{}
+    ^n: cp
+    ^digits: [U8]{}
     if n == 0 -> digits.push(U8{48})
     loop {
         if n == 0 -> break
@@ -1307,8 +1307,8 @@ hex_cp: fn(cp: Int) -> String {
         if digits.len() >= 4 -> break
         digits.push(U8{48})
     }
-    out := [U8]{85, 43}  // U+
-    i := digits.len() - 1
+    ^out: [U8]{85, 43}  // U+
+    ^i: digits.len() - 1
     loop {
         if i < 0 -> return String.from_bytes(out) ?? ""
         out.push(digits[i])
@@ -1328,7 +1328,7 @@ unicode_name: fn(cp: Int) -> String Never! {
     index: asset[40..<pool_start]
     names: asset[pool_start..<asset.len()]
     span: text_tables.name_span(index, names, cp) ?? return "UNASSIGNED"
-    name := [U8]{}
+    ^name: [U8]{}
     loop at in span.start..<(span.start + span.length) -> name.push(names[at])
     String.from_bytes(name) ?? "UNASSIGNED"
 }
@@ -1352,10 +1352,10 @@ collate: fn(left: String, right: String) -> Ordering Never! {
 collation_key: fn(value: String) -> [U8] Never! {
     scalars: decode_scalars(text_normal.normalize(value, false, false))
     elements: collation_elements(scalars)
-    key := [U8]{}
+    ^key: [U8]{}
     loop level in 0..<3 {
         width: if level == 2 -> 1 else -> 2
-        at := level
+        ^at: level
         loop at < elements.len() {
             weight: elements[at]
             if weight != 0 -> push_collation_weight(key, weight, width)
@@ -1368,7 +1368,7 @@ collation_key: fn(value: String) -> [U8] Never! {
 }
 
 compare_collation_keys: fn(left: [U8], right: [U8]) -> Ordering Never! {
-    at := 0
+    ^at: 0
     loop at < left.len() && at < right.len() {
         if left[at] != right[at] {
             return if left[at] < right[at] -> Ordering.Less else -> Ordering.Greater
@@ -1406,18 +1406,18 @@ collation_elements: fn(scalars: [Int]) -> [Int] Never! {
     contractions: contractions_asset[40..<text_asset.uint(contractions_bytes, 28, 4)]
     ideographs: ideographs_asset[40..<text_asset.uint(ideographs_bytes, 28, 4)]
     ccc: ccc_asset[40..<text_asset.uint(ccc_bytes, 28, 4)]
-    out := [Int]{}
-    taken := [Bool]{}
+    ^out: [Int]{}
+    ^taken: [Bool]{}
     loop _scalar in scalars -> taken.push(false)
-    at := 0
+    ^at: 0
     loop at < scalars.len() {
         if taken[at] {
             at += 1
             next
         }
-        key := [Int]{scalars[at]}
-        row := -1
-        next_at := at + 1
+        ^key: [Int]{scalars[at]}
+        ^row: -1
+        ^next_at: at + 1
         loop next_at < scalars.len() && key.len() < 3 && !taken[next_at] {
             found: collation_contraction_row(contractions, key, scalars[next_at])
             if found < 0 -> break
@@ -1427,8 +1427,8 @@ collation_elements: fn(scalars: [Int]) -> [Int] Never! {
         }
         // S2.1.1-S2.1.3: a non-starter is unblocked when every skipped scalar
         // between it and the key has a lower combining class.
-        skipped_class := 0
-        probe := next_at
+        ^skipped_class: 0
+        ^probe: next_at
         loop probe < scalars.len() && key.len() < 3 {
             class: text_asset.range_tag(ccc, scalars[probe], 0)
             if class == 0 -> break
@@ -1455,8 +1455,8 @@ collation_elements: fn(scalars: [Int]) -> [Int] Never! {
 // The byte offset of the contraction row for `key` + `scalar`, or -1.
 collation_contraction_row: fn(contractions: View<U8>, key: [Int], scalar: Int) -> Int Never! {
     target: collation_rank(key, scalar)
-    low := 0
-    high := contractions.len() /% 13
+    ^low: 0
+    ^high: contractions.len() /% 13
     loop low < high {
         mid: (low + high) /% 2
         row: mid * 13
@@ -1473,8 +1473,8 @@ collation_contraction_row: fn(contractions: View<U8>, key: [Int], scalar: Int) -
 // Keys order as the generator sorted them: three 21-bit places, the first
 // scalar as is and later ones plus one, with zero past the key's end.
 collation_rank: fn(key: [Int], scalar: Int) -> Int Never! {
-    rank := 0
-    used := 0
+    ^rank: 0
+    ^used: 0
     loop part in key {
         rank = rank * 2097152 + (if used == 0 -> part else -> part + 1)
         used += 1
@@ -1486,7 +1486,7 @@ collation_rank: fn(key: [Int], scalar: Int) -> Int Never! {
 }
 
 collation_row_rank: fn(contractions: View<U8>, row: Int) -> Int Never! {
-    rank := text_asset.uint(contractions, row, 3)
+    ^rank: text_asset.uint(contractions, row, 3)
     loop place in 1..<3 {
         scalar: text_asset.uint(contractions, row + place * 3, 3)
         rank = rank * 2097152 + (if scalar == COLLATION_ABSENT -> 0 else -> scalar + 1)
@@ -1506,8 +1506,8 @@ collation_push_elements: fn(out: ^[Int], pool: View<U8>, first: Int, count: Int)
 // A single scalar's table elements, or its UTS #10 section 10.1.3 implicit
 // weights when the table does not list it.
 collation_single_elements: fn(out: ^[Int], singles: View<U8>, pool: View<U8>, ideographs: View<U8>, scalar: Int) Never! {
-    low := 0
-    high := singles.len() /% 7
+    ^low: 0
+    ^high: singles.len() /% 7
     loop low < high {
         mid: (low + high) /% 2
         row: mid * 7

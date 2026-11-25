@@ -7,12 +7,12 @@ use {
 }
 
 jet_driver_doc_gate_projection: fn(docs: ^[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
-    modules := [SemaGateModule]{}
+    ^modules: [SemaGateModule]{}
     loop doc in docs {
         index: doc.name_module_index
         if index < 0 || index >= graph.programs.len() || index >= registration.modules.len() -> next
         owner: registration.modules[index].package_identity
-        row := SemaGateModule{source: doc.path, program: graph.programs[index], package_identity: owner}
+        ^row: SemaGateModule{source: doc.path, program: graph.programs[index], package_identity: owner}
         loop package in packages {
             if package.identity == owner {
                 row.policy_path = Val(jet_driver_display_path(package.root_path, doc.physical_path))
@@ -56,25 +56,25 @@ jet_driver_gate_query: fn(request: JetDriverCompileRequest) -> JetDriverGateQuer
     if !source.complete {
         return JetDriverGateQueryResult{source: source, ledger: GateLedger{}, diagnostics: source.diagnostics, complete: false}
     }
-    modules := [SemaGateModule]{}
-    programs := [Program]{}
-    entry_index := -1
+    ^modules: [SemaGateModule]{}
+    ^programs: [Program]{}
+    ^entry_index: -1
     loop (index, module_row) in source.modules {
         if jet_driver_unit_is_core(load.source_units[load.modules[index].source_unit_index]) -> next
         if index == source.entry_module_index -> entry_index = modules.len()
-        row := SemaGateModule{source: module_row.path, program: module_row.program}
+        ^row: SemaGateModule{source: module_row.path, program: module_row.program}
         jet_driver_gate_module_policy(row, request, load.packages, module_row.package_identity, module_row.physical_path)
         modules.push(row)
         programs.push(module_row.program)
     }
     names: source.names ?? panic("completed load lost its canonical name facts")
-    ledger := sema_gate_ledger_collect(modules, names, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(programs))
+    ^ledger: sema_gate_ledger_collect(modules, names, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(programs))
     loop diagnostic in sema_gate_policy_diagnostics(ledger, modules, entry_index) {
         ledger.diagnostic_rows.push(diagnostic)
     }
-    diagnostics := source.diagnostics
+    ^diagnostics: source.diagnostics
     loop entry in ledger.diagnostic_rows {
-        path := entry.source
+        ^path: entry.source
         loop module_row in source.modules {
             if module_row.path == entry.source {
                 path = module_row.physical_path
@@ -120,30 +120,30 @@ jet_driver_gate_module_policy: fn(row: ^SemaGateModule, request: JetDriverCompil
 // items and script statements move into its row for the read and back after
 // it.
 jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: ^JetDriverLoadResult) Never! {
-    modules := [SemaGateModule]{}
-    owners := [Int]{}
-    unit_paths := [String:String]{}
+    ^modules: [SemaGateModule]{}
+    ^owners: [Int]{}
+    ^unit_paths: [String:String]{}
     loop index in 0..<load.modules.len() {
         unit_index: load.modules[index].source_unit_index
         if jet_driver_unit_is_core(load.source_units[unit_index]) -> next
         source: load.source_units[unit_index].path
-        physical := source.copy()
+        ^physical: source.copy()
         root_index: load.source_units[unit_index].root_index
         file_index: load.source_units[unit_index].file_index
-        unit := SemaUnitMap?{None}
+        ^unit: SemaUnitMap?{None}
         if load.source_units[unit_index].source_origin == SemaSourceOrigin.Snapshot && root_index >= 0 && file_index >= 0 {
             file: request.authorized_sources.roots[root_index].files[file_index]
             physical = file.path
             unit = sema_unsafe_unit_map(load.modules[index].package_identity, file.source)
         }
         unit_paths[physical] = source
-        program := ast_program()
+        ^program: ast_program()
         compiler_transfer_rows<Item>(program.items, load.modules[index].program.items)
         compiler_transfer_rows<Stmt>(program.script_body, load.modules[index].program.script_body)
         program.policy_declarations = load.modules[index].program.policy_declarations.copy()
         program.rule_facts = load.modules[index].program.rule_facts.copy()
         program.no_prelude = load.modules[index].program.no_prelude
-        row := SemaGateModule{source: physical, program: program.move()}
+        ^row: SemaGateModule{source: physical, program: program.move()}
         jet_driver_gate_module_policy(row, request, load.packages, load.modules[index].package_identity, physical)
         row.unit = unit.move()
         modules.push(row)

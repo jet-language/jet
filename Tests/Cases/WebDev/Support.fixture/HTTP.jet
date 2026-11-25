@@ -14,7 +14,7 @@ S5HTTPResponse: struct {
 s5_web_crlf: fn() -> String { "\r\n" }
 
 s5_web_bytes: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
-    selected := [U8]{}
+    ^selected: [U8]{}
     loop index in start..<end -> selected.push(bytes[index])
     selected
 }
@@ -39,9 +39,9 @@ s5_web_space_width: fn(bytes: [U8], index: Int) -> Int {
 
 s5_web_words: fn(text: String) -> [String] {
     bytes: text.bytes()
-    words := [String]{}
-    index := 0
-    start := -1
+    ^words: [String]{}
+    ^index: 0
+    ^start: -1
     loop index < bytes.len() {
         width: s5_web_space_width(bytes, index)
         if width > 0 {
@@ -58,9 +58,9 @@ s5_web_words: fn(text: String) -> [String] {
 }
 
 s5_web_find: fn(bytes: [U8], marker: [U8]) -> Int? {
-    index := 0
+    ^index: 0
     loop index + marker.len() <= bytes.len() {
-        found := true
+        ^found: true
         loop part in 0..<marker.len() {
             if bytes[index + part] != marker[part] -> found = false
         }
@@ -71,7 +71,7 @@ s5_web_find: fn(bytes: [U8], marker: [U8]) -> Int? {
 }
 
 s5_web_read_to_end: fn(stream: net.TCPStream) -> [U8]? {
-    output := [U8]{}
+    ^output: [U8]{}
     loop {
         part: stream.read_bytes(8192, deadline: 5s) ?? return None
         if part.len() == 0 -> return Val(output)
@@ -84,8 +84,8 @@ s5_web_ascii_equal: fn(left: String, right: String) -> Bool {
     b: right.bytes()
     if a.len() != b.len() -> return false
     loop index in 0..<a.len() {
-        x := Int{a[index]}
-        y := Int{b[index]}
+        ^x: Int{a[index]}
+        ^y: Int{b[index]}
         if x >= 65 && x <= 90 -> x += 32
         if y >= 65 && y <= 90 -> y += 32
         if x != y -> return false
@@ -96,10 +96,10 @@ s5_web_ascii_equal: fn(left: String, right: String) -> Bool {
 s5_web_u16: fn(text: String) -> Int? {
     bytes: text.bytes()
     if bytes.len() == 0 -> return None
-    index := 0
+    ^index: 0
     if (Int{bytes[0]}) == 43 -> index = 1
     if index == bytes.len() -> return None
-    value := 0
+    ^value: 0
     loop index < bytes.len() {
         digit: Int{bytes[index]} - 48
         if digit < 0 || digit > 9 -> return None
@@ -117,8 +117,8 @@ s5_web_response: fn(raw: [U8]) -> S5HTTPResponse? {
     first: header.lines().get(0) ?? return None
     words: s5_web_words(first)
     status: s5_web_u16(words.get(1) ?? return None) ?? return None
-    content_type := ""
-    seen := false
+    ^content_type: ""
+    ^seen: false
     loop line in header.lines() {
         bytes: line.bytes()
         if s5_web_find(bytes, [U8]{58}) == .Val(colon) {
@@ -165,7 +165,7 @@ s5_web_raw: fn(port: Int, request: [U8]) -> [U8]? {
 
 s5_web_raw_get: fn(target: String, headers: [String]) -> [U8] {
     crlf: s5_web_crlf()
-    request := "GET {target} HTTP/1.1{crlf}"
+    ^request: "GET {target} HTTP/1.1{crlf}"
     loop header in headers -> request = "{request}{header}{crlf}"
     "{request}{crlf}".bytes()
 }

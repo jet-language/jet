@@ -17,10 +17,10 @@ word: fn(bytes: [U8], at: Int) -> Int {
 }
 
 words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values {
-        rest := value
-        written := 0
+        ^rest: value
+        ^written: 0
         loop written < 4 {
             out.push(checked(U8{rest % 256}) ?? U8{0})
             rest /%= 256
@@ -31,7 +31,7 @@ words: fn(values: [Int]) -> [U8] {
 }
 
 read_exact: fn(stream: ^UnixStream, n: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop out.len() < n {
         chunk: net.unix_read_bytes(stream, n - out.len()) ?? return out
         if chunk.len() == 0 -> return out
@@ -42,14 +42,14 @@ read_exact: fn(stream: ^UnixStream, n: Int) -> [U8] {
 
 run: fn() {
     listener: net.unix_listen("/var/run/nscd/socket") ?? panic("listen on the nscd socket")
-    stream := net.unix_accept(listener) ?? panic("accept the query")
+    ^stream: net.unix_accept(listener) ?? panic("accept the query")
     header: read_exact(stream, 12)
-    asked := header.len() == 12 && word(header, 0) == NSCD_VERSION && word(header, 4) == GETINITGR
+    ^asked: header.len() == 12 && word(header, 0) == NSCD_VERSION && word(header, 4) == GETINITGR
     if asked {
         key: read_exact(stream, word(header, 8))
         expected: [U8]{97, 108, 105, 99, 101, 0}
         asked = key.len() == expected.len()
-        at := 0
+        ^at: 0
         loop asked && at < key.len() {
             asked = key[at] == expected[at]
             at += 1

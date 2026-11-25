@@ -81,12 +81,12 @@ foundation_try_tree_hash: fn(root: String) -[FS]> String TreeHashError! {
     }
     if root_stat.is_symlink -> return Err(TreeHashError.Symlink(root))
     if !root_stat.is_dir -> return Err(TreeHashError.Special(root))
-    entries := [TreeHashFile]{}
-    budget := TreeHashBudget{nodes: 0}
+    ^entries: [TreeHashFile]{}
+    ^budget: TreeHashBudget{nodes: 0}
     foundation_collect_tree_files(root, "", root, entries, 0, budget)
     entries.sort_by(fn(entry) { entry.relative })
-    hasher := StreamingSHA256.new()
-    total_bytes := 0
+    ^hasher: StreamingSHA256.new()
+    ^total_bytes: 0
     loop entry in entries {
         hasher.update(entry.relative.bytes())
         hasher.update([U8]{U8{0}})
@@ -153,7 +153,7 @@ foundation_same_file_identity: fn(left: Stat, right: Stat) -> Bool Never! {
 // Fold one regular file into the tree hash through a no-follow handle whose
 // identity matches the walk's observation before and after reading.
 foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: ^StreamingSHA256, total_bytes: ^Int) -[FS]> TreeHashError! {
-    reader := files.open(path, links: .Refuse) ?? return Err(TreeHashError.IO{path: path, detail: "{err}"})
+    ^reader: files.open(path, links: .Refuse) ?? return Err(TreeHashError.IO{path: path, detail: "{err}"})
     opened: if reader.stat() == {
         .Ok(stat) -> stat
         .Err(error) -> {
@@ -170,10 +170,10 @@ foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: ^Stre
     if next_total > MAX_TREE_TOTAL_BYTES {
         return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_TOTAL_BYTES})
     }
-    length := [U8]{}
+    ^length: [U8]{}
     loop shift in FOUNDATION_U64_SHIFTS -> length.push(U8{((opened.size >> shift)) & 255})
     hasher.update(length)
-    actual_length := 0
+    ^actual_length: 0
     loop {
         chunk: if reader.read_bytes(FOUNDATION_READ_CHUNK) == {
             .Ok(bytes) -> bytes
@@ -225,12 +225,12 @@ foundation_open_regular_nofollow: fn(path: String) -[FS]> FoundationNofollowFile
 // handle and bounded by MAX_TREE_FILE_BYTES. The file must keep its
 // identity and length while it is read.
 foundation_sha256_file_hex: fn(path: String) -[FS]> String IOError! {
-    opened := foundation_open_regular_nofollow(path)
+    ^opened: foundation_open_regular_nofollow(path)
     if opened.expected.size > MAX_TREE_FILE_BYTES {
         return Err(foundation_io_error(false, path, "file exceeds the tree hashing bound"))
     }
-    hasher := StreamingSHA256.new()
-    actual_length := 0
+    ^hasher: StreamingSHA256.new()
+    ^actual_length: 0
     loop {
         chunk: opened.handle.read_bytes(FOUNDATION_READ_CHUNK)
         if chunk.len() == 0 -> break
@@ -255,7 +255,7 @@ foundation_read_file_nofollow: fn(path: String, max_bytes: Int) -[FS]> [U8] IOEr
     if max_bytes > MAX_TREE_FILE_BYTES {
         return Err(foundation_io_error(false, path, "file read bound exceeds the tree hashing bound"))
     }
-    opened := foundation_open_regular_nofollow(path)
+    ^opened: foundation_open_regular_nofollow(path)
     bound_error: IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file exceeds its read bound")})
     if opened.expected.size > max_bytes -> return Err(bound_error)
     content: foundation_read_handle_bounded(opened.handle, max_bytes, bound_error)
@@ -272,7 +272,7 @@ foundation_read_file_nofollow: fn(path: String, max_bytes: Int) -[FS]> [U8] IOEr
 // InvalidData, held authorities retain InvalidInput (including the approved OCI
 // size-limit mapping).
 foundation_read_handle_bounded: fn(handle: ^FileReader, max_bytes: Int, bound_error: IOError) -[FS]> [U8] IOError! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         remaining: max_bytes - bytes.len()
         request: if remaining >= FOUNDATION_READ_CHUNK -> FOUNDATION_READ_CHUNK else -> remaining + 1
@@ -292,7 +292,7 @@ foundation_open_or_create_directory: fn(parent: Directory, name: String) -[FS]> 
             .NotFound(_) -> {}
             .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(err)
         }
-        created := true
+        ^created: true
         if parent.create_directory(name, mode: Val(448)) == {
             .Ok(_) -> {}
             .Err(error) -> {
@@ -377,7 +377,7 @@ foundation_write_file_nofollow_at_root: fn(root: String, relative: String, conte
     if components.len() == 0 {
         return Err(FoundationPublicationError{phase: .PreparePath, error: foundation_io_error(true, relative, "file authority publication path is empty")})
     }
-    directories := foundation_open_root_directories(root, policy.create_root) ?? return Err(FoundationPublicationError{phase: .OpenRoot, error: err})
+    ^directories: foundation_open_root_directories(root, policy.create_root) ?? return Err(FoundationPublicationError{phase: .OpenRoot, error: err})
     loop index in 0..<(components.len() - 1) {
         name: components[index]
         parent_index: directories.len() - 1
@@ -389,7 +389,7 @@ foundation_write_file_nofollow_at_root: fn(root: String, relative: String, conte
     leaf: directories.len() - 1
     final_name: components[components.len() - 1]
     // Preserve absence separately from an inspection failure.
-    expected_destination := FileID?{None}
+    ^expected_destination: FileID?{None}
     if foundation_inspect_destination(directories[leaf].handle, final_name, policy.destination_links) == {
         .Val(identity) -> { expected_destination = Val(identity) }
         .None -> {}
@@ -405,7 +405,7 @@ foundation_write_file_nofollow_at_root: fn(root: String, relative: String, conte
     loop attempt in 0..<128 {
         candidate: ".jet-lock-{pid}-{stamp}-{attempt}"
         // O_EXCL | O_NOFOLLOW, owner-only (0o600).
-        writer := directories[leaf].handle.create(candidate, if_exists: .Refuse, mode: Val(384)) ?? {
+        ^writer: directories[leaf].handle.create(candidate, if_exists: .Refuse, mode: Val(384)) ?? {
             if err == {
                 .AlreadyExists(_) -> {}
                 .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(FoundationPublicationError{phase: .CreateStage, error: err})
@@ -611,7 +611,7 @@ FoundationDirectoryAuthority: struct {
         child_path: files.join(self.directories[leaf].path, name)
         // The child holds its own chain: this authority keeps every
         // descriptor it holds, and each closes once.
-        directories := foundation_reopen_held_chain(self.directories)
+        ^directories: foundation_reopen_held_chain(self.directories)
         directories.push(FoundationPublicationDirectory{handle: handle, path: child_path, publication_parent: true})
         foundation_ensure_directories_current(directories)
         Ok(FoundationDirectoryAuthority{directories: directories})
@@ -639,11 +639,11 @@ FoundationDirectoryAuthority: struct {
     // Files are kept open through hashing; a rebound path cannot redirect bytes.
     tree_hash: fn(self, reject_hardlinks: Bool{false}) -[FS]> String IOError! {
         self.revalidate()
-        rows := [FoundationHeldTreeFile]{}
+        ^rows: [FoundationHeldTreeFile]{}
         foundation_collect_held_tree(self.directories[self.directories.len() - 1].handle, "", rows, 0, reject_hardlinks)
         rows.sort_by(fn(left: FoundationHeldTreeFile, right: FoundationHeldTreeFile) { left.relative <=> right.relative })
-        hasher := StreamingSHA256.new()
-        total := 0
+        ^hasher: StreamingSHA256.new()
+        ^total: 0
         // Indexed: each held reader advances, so the walk writes through the list.
         loop index in 0..<rows.len() {
             if rows[index].identity.size > MAX_TREE_FILE_BYTES || rows[index].identity.size > MAX_TREE_TOTAL_BYTES - total {
@@ -653,7 +653,7 @@ FoundationDirectoryAuthority: struct {
             hasher.update([U8]{0})
             length: loop shift in FOUNDATION_U64_SHIFTS -> U8{(rows[index].identity.size >> shift) & 255}
             hasher.update(length)
-            actual := 0
+            ^actual: 0
             loop {
                 chunk: rows[index].reader.read_bytes(FOUNDATION_READ_CHUNK)
                 if chunk.len() == 0 -> break
@@ -708,7 +708,7 @@ FoundationHeldTreeFile: struct {
 }
 
 foundation_held_tree_names: fn(directory: Directory) -[FS]> [String] IOError! {
-    out := [String]{}
+    ^out: [String]{}
     loop entry in directory.list() {
         if !entry.name_is_unicode {
             return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(entry.path), os_code: None, cause: Val("package tree contains a non-UTF-8 name")}))
@@ -772,7 +772,7 @@ foundation_copy_held_tree: fn(source: Directory, destination: Directory, relativ
             child_destination: destination.open_directory(name)
             foundation_copy_held_tree(child_source, child_destination, path, reject_hardlinks)
         } else if info.is_file {
-            reader := source.open(name)
+            ^reader: source.open(name)
             opened: reader.stat()
             if !opened.is_file {
                 return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
@@ -795,8 +795,8 @@ foundation_copy_held_tree: fn(source: Directory, destination: Directory, relativ
 }
 
 foundation_copy_held_reader: fn(reader: ^FileReader, destination: Directory, name: String) -[FS]> Int IOError! {
-    writer := destination.create(name, if_exists: .Refuse, mode: Val(384))
-    actual := 0
+    ^writer: destination.create(name, if_exists: .Refuse, mode: Val(384))
+    ^actual: 0
     loop {
         chunk: reader.read_bytes(FOUNDATION_READ_CHUNK)
         if chunk.len() == 0 -> break
@@ -818,7 +818,7 @@ foundation_copy_held_reader: fn(reader: ^FileReader, destination: Directory, nam
 // `create` makes missing ancestors (0700, held no-follow) as create_dir_all
 // would, never the final component.
 foundation_resolve_path_ancestors: fn(path: String, create: Bool{false}) -[FS, Env]> String IOError! {
-    trimmed := path.copy()
+    ^trimmed: path.copy()
     loop trimmed.len() > 1 && (trimmed.ends_with("/") || trimmed.ends_with("/.")) {
         trimmed = if trimmed.ends_with("/") -> trimmed.removesuffix("/") else -> trimmed.removesuffix("/.")
         if trimmed == "" -> trimmed = "/"
@@ -849,7 +849,7 @@ foundation_resolve_path_ancestors: fn(path: String, create: Bool{false}) -[FS, E
 // file.
 foundation_open_file_authority: fn(root: String, relative: String) -[FS, Env]> FoundationFileAuthority IOError! {
     components: foundation_normal_components(false, relative)
-    directories := foundation_open_root_directories(root)
+    ^directories: foundation_open_root_directories(root)
     if components.len() == 0 {
         return Err(foundation_io_error(false, relative, "file authority path is empty"))
     }
@@ -888,7 +888,7 @@ foundation_read_file_nofollow_at_root: fn(root: String, relative: String, max_by
     if max_bytes > MAX_TREE_FILE_BYTES {
         return Err(foundation_io_error(false, relative, "file read bound exceeds the tree hashing bound"))
     }
-    source := foundation_open_file_authority(root, relative)
+    ^source: foundation_open_file_authority(root, relative)
     source.read_bounded(max_bytes)
 }
 
@@ -921,7 +921,7 @@ foundation_stage_and_rename: fn(directories: [FoundationPublicationDirectory], p
         validate() ?? return Err(FoundationPublicationError{phase: .ValidateSource, error: err})
     }
     foundation_ensure_directories_current(directories) ?? return Err(FoundationPublicationError{phase: .ValidateAuthority, error: err})
-    destination := FileID?{None}
+    ^destination: FileID?{None}
     if foundation_inspect_destination(parent, final_name, policy.destination_links) == {
         .Val(identity) -> { destination = Val(identity) }
         .None -> {}
@@ -982,7 +982,7 @@ foundation_open_root_directories: fn(root: String, create: Bool{false}) -[FS, En
         }
     }
     absolute: files.absolute(root)
-    directories := [FoundationPublicationDirectory]{FoundationPublicationDirectory{handle: files.open_directory("/"), path: "/", publication_parent: false}}
+    ^directories: [FoundationPublicationDirectory]{FoundationPublicationDirectory{handle: files.open_directory("/"), path: "/", publication_parent: false}}
     loop part in absolute.split("/") {
         if part == "" || part == "." -> next
         parent_index: directories.len() - 1
@@ -999,7 +999,7 @@ foundation_open_root_directories: fn(root: String, create: Bool{false}) -[FS, En
 // `/`, as foundation_open_root_directories walks it) and must be the very
 // directory `held` holds, so a swapped path is refused rather than followed.
 foundation_reopen_held_chain: fn(held: [FoundationPublicationDirectory]) -[FS]> [FoundationPublicationDirectory] IOError! {
-    chain := [FoundationPublicationDirectory]{FoundationPublicationDirectory{handle: files.open_directory("/"), path: "/", publication_parent: held[0].publication_parent}}
+    ^chain: [FoundationPublicationDirectory]{FoundationPublicationDirectory{handle: files.open_directory("/"), path: "/", publication_parent: held[0].publication_parent}}
     loop index in 0..<held.len() {
         if index > 0 {
             reopened: chain[index - 1].handle.open_directory(files.basename(held[index].path))
@@ -1028,7 +1028,7 @@ foundation_normal_components: fn(write: Bool, relative: String) -> [String] IOEr
     if relative.starts_with("/") {
         return Err(foundation_io_error(write, relative, "file authority path must be relative and normalized"))
     }
-    components := [String]{}
+    ^components: [String]{}
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {

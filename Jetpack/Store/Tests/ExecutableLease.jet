@@ -73,7 +73,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
         assert(protocol.request(LeaseOperation.Acquire, lease_id, 1, scope, snapshot.path, case.package, case.version, case.reference, case.output, "", members) == .Err(_))
         // An authenticated sender still cannot publish malformed identity
         // fields by bypassing the local request constructor.
-        malformed := prepared.request
+        ^malformed: prepared.request
         malformed.package = case.package
         malformed.version = case.version
         malformed.reference = case.reference
@@ -113,8 +113,8 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     frame: protocol.encode_request(prepared.request) ?? panic("encode")
     receipt: protocol.accept_snapshot(frame, digest, snapshot) ?? panic("accept")
     protocol.validate_snapshot(receipt.lease_id, receipt.generation, receipt.owner_scope, snapshot, digest) ?? panic("validate")
-    tampered := frame
-    at := 0
+    ^tampered: frame
+    ^at: 0
     loop at < tampered.len() && tampered[at] != (U8{49}) -> at += 1
     tampered[at] = U8{50}
     assert(store_lease_test_is_err(protocol.accept_snapshot(tampered, digest, snapshot)))
@@ -130,10 +130,10 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     snapshot: store_lease_test_snapshot(root, "1-0-owner-scope", "one")
     global: env_acquire_lock(root, "hangar") ?? panic("hangar lock")
     prepared: protocol.prepare_snapshot(lease_id, scope, snapshot.path, "demo", "1", "demo@core#1", snapshot.digest, [LeaseMember]{store_lease_test_member("one")}) ?? panic("prepare under the hangar lock")
-    wrong_scope := prepared.request
+    ^wrong_scope: prepared.request
     wrong_scope.owner_scope = store_lease_owner_scope(store_lease_random_id(16) ?? panic("other id")) ?? panic("other scope")
     assert(protocol.encode_request(wrong_scope) == .Err(_))
-    wrong_key := prepared.request
+    ^wrong_key: prepared.request
     wrong_key.key_id = "0000000000000000"
     assert(protocol.encode_request(wrong_key) == .Err(_))
     close(prepared.owner_lock.move())

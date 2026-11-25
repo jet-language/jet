@@ -140,7 +140,7 @@ x64_asm_memory: fn(s: X64AsmState, text: String, size: String) -> X64AsmMemory? 
     if parts.len() > 2 -> return None
     base: x64_asm_reg(s, parts[0], true)
     if base < 0 -> return None
-    disp := 0
+    ^disp: 0
     if parts.len() == 2 -> disp = Int.parse(parts[1].trim()) ?? return None
     if !x64_fits_i32(disp) -> return None
     Val(X64AsmMemory{base: base, disp: disp})
@@ -229,16 +229,16 @@ x64_asm_line: fn(s: ^X64AsmState, line: String) -> String? Never! {
         return None
     }
     // Normalize horizontal whitespace, leaving the operand grammar strict.
-    tokens := [String]{}
+    ^tokens: [String]{}
     loop token in instruction.replace("\t", " ").split(" ") {
         if token != "" -> tokens.push(token)
     }
-    mnemonic := tokens[0]
+    ^mnemonic: tokens[0]
     // The line grammar's mnemonics are the shared list sema checks against.
     if !INLINE_ASSEMBLY_X64_MNEMONICS.contains(mnemonic) {
         return Val("unsupported mnemonic `{mnemonic}`")
     }
-    rest := tokens.slice(1, tokens.len()).join(" ")
+    ^rest: tokens.slice(1, tokens.len()).join(" ")
     if {
         mnemonic == "lock" -> {
             if {
@@ -260,9 +260,9 @@ x64_asm_line: fn(s: ^X64AsmState, line: String) -> String? Never! {
     operands: rest.split(",").to_list()
     first: operands[0].trim()
     second: if operands.len() == 2 -> operands[1].trim() else -> ""
-    written := -1
+    ^written: -1
     // The value `written` takes, as X64AsmState.values tracks it.
-    value := X64_ASM_UNKNOWN
+    ^value: X64_ASM_UNKNOWN
     if {
         (mnemonic == "push" || mnemonic == "pop") && first == "rbx" -> {
             // The one saved rbx word: `push rbx` before `cpuid`, `pop rbx`
@@ -284,7 +284,7 @@ x64_asm_line: fn(s: ^X64AsmState, line: String) -> String? Never! {
                     s.depth -= 1
                     s.rbx_saved = -1
                     s.rbx_dirty = false
-                    _ := s.stack.pop()
+                    ^_: s.stack.pop()
                 }
             }
         }
@@ -362,11 +362,14 @@ x64_asm_line: fn(s: ^X64AsmState, line: String) -> String? Never! {
             if rest != "" -> return Val("instruction takes no operands")
             x64_byte(s.code.bytes, 0x0f)
             x64_byte(s.code.bytes, 0xae)
-            x64_byte(s.code.bytes, if {
-                mnemonic == "lfence" -> 0xe8
-                mnemonic == "mfence" -> 0xf0
-                else -> 0xf8
-            })
+            x64_byte(
+                s.code.bytes,
+                if {
+                    mnemonic == "lfence" -> 0xe8
+                    mnemonic == "mfence" -> 0xf0
+                    else -> 0xf8
+                },
+            )
         }
         mnemonic == "xgetbv" -> {
             // ecx selects the extended control register; edx:eax receive it.
@@ -392,12 +395,15 @@ x64_asm_line: fn(s: ^X64AsmState, line: String) -> String? Never! {
             }
             x64_byte(s.code.bytes, 0xf3)
             if rest == "movsq" || rest == "stosq" -> x64_byte(s.code.bytes, 0x48)
-            x64_byte(s.code.bytes, if {
-                rest == "movsb" -> 0xa4
-                rest == "movsq" -> 0xa5
-                rest == "stosb" -> 0xaa
-                else -> 0xab
-            })
+            x64_byte(
+                s.code.bytes,
+                if {
+                    rest == "movsb" -> 0xa4
+                    rest == "movsq" -> 0xa5
+                    rest == "stosb" -> 0xaa
+                    else -> 0xab
+                },
+            )
             x64_asm_wrote(s, 1)
             if rest == "movsb" || rest == "movsq" -> x64_asm_wrote(s, 6)
             x64_asm_wrote(s, 7)
@@ -643,7 +649,7 @@ x64_asm_rail: fn(lines: [String], names: [String], rail: [String], operands: [St
     loop (i, name) in names {
         if name != operands[i] -> return false
     }
-    at := 0
+    ^at: 0
     loop raw in lines {
         line: raw.trim()
         if line == "" -> next
@@ -658,14 +664,14 @@ x64_asm_rail: fn(lines: [String], names: [String], rail: [String], operands: [St
 // and every other library, whose templates assemble only through the strict
 // line grammar.
 x64_assemble_template: fn(template: String, names: [String], returns: Bool, rails: Bool) -> X64AsmResult Never! {
-    regs := [Int]{}
+    ^regs: [Int]{}
     if names.len() > X64_ASM_INPUTS.len() {
         return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: more than seven operands")}
     }
     loop (i, _) in names -> regs.push(X64_ASM_INPUTS[i])
     lines: template.split("\n").to_list()
     if rails && !returns {
-        rail := [U8]{}
+        ^rail: [U8]{}
         if {
             x64_asm_rail(lines, names, X64_FIBER_SWITCH, [String]{"save", "target"}) -> {
                 loop byte in X64_FIBER_SWITCH_BYTES -> rail.push(byte)
@@ -681,13 +687,13 @@ x64_assemble_template: fn(template: String, names: [String], returns: Bool, rail
         }
         if rail.len() > 0 -> return X64AsmResult{code: rail, regs: regs, result: -1, error: None}
     }
-    s := X64AsmState{code: x64_code(), names: names, written: [Bool]{}, depth: 0, result: -1, rbx_saved: -1, rbx_dirty: false, values: [Int]{}, stack: [Int]{}, syscalls: [Int]{}}
+    ^s: X64AsmState{code: x64_code(), names: names, written: [Bool]{}, depth: 0, result: -1, rbx_saved: -1, rbx_dirty: false, values: [Int]{}, stack: [Int]{}, syscalls: [Int]{}}
     loop _ in 0..<16 {
         s.written.push(false)
         s.values.push(X64_ASM_UNKNOWN)
     }
     loop (index, _) in names -> s.values[X64_ASM_INPUTS[index]] = x64_asm_operand_value(index)
-    i := 0
+    ^i: 0
     loop i < lines.len() {
         raw: lines[i]
         if raw.trim() == "test rax, rax" {
@@ -720,7 +726,7 @@ x64_assemble_template: fn(template: String, names: [String], returns: Bool, rail
     if returns != (s.result >= 0) {
         return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: return anchor disagrees with the function signature")}
     }
-    quiet := names.len() <= 4
+    ^quiet: names.len() <= 4
     loop raw in lines {
         if x64_asm_names_r8_r9(raw) -> quiet = false
     }

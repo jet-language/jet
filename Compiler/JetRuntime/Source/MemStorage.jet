@@ -42,7 +42,7 @@ storage_word: fn(address: I64) -> I64 { rt_text_word(address) }
 storage_put: fn(address: I64, value: I64) { rt_text_store(address, value) }
 
 storage_zero: fn(address: I64, bytes: I64) {
-    offset := I64{0}
+    ^offset: I64{0}
     loop offset < bytes {
         storage_put(wrapping(address + offset), I64{0})
         offset += I64{8}
@@ -50,7 +50,7 @@ storage_zero: fn(address: I64, bytes: I64) {
 }
 
 storage_copy: fn(source: I64, target: I64, bytes: I64) {
-    offset := I64{0}
+    ^offset: I64{0}
     loop offset < bytes {
         storage_put(wrapping(target + offset), storage_word(wrapping(source + offset)))
         offset += I64{8}
@@ -112,7 +112,7 @@ storage_drop_at: fn(code: I64, pointer: I64) {
     // `code` is the Lower-generated address-based lazy.drop thunk for the
     // initialized value at `pointer`; its SysV result is Unit and discarded, and
     // no allocator lock is held.
-    _ := coll_call1(code, pointer)
+    ^_: coll_call1(code, pointer)
 }
 
 storage_record: fn(handle: I64, pointer: I64, bytes: I64, drop_fn: I64) {
@@ -133,7 +133,7 @@ storage_record: fn(handle: I64, pointer: I64, bytes: I64, drop_fn: I64) {
 
 storage_reset_entries: fn(handle: I64) {
     drops: wrapping(handle + I64{32})
-    count := storage_word(drops)
+    ^count: storage_word(drops)
     allocations: count
     data: storage_word(wrapping(drops + I64{16}))
     // The length is zero before any user destructor runs.
@@ -209,7 +209,7 @@ storage_block_reserve: fn(block: I64, offset: I64, bytes: I64) -> I64 {
     handle: jet_rt_alloc(ARENA_BYTES, I64{8})
     storage_zero(wrapping(handle + I64{24}), wrapping(ARENA_BYTES - I64{24}))
     data: jet_rt_alloc(I64{32}, I64{8})
-    _ := storage_block_init(data, first, I64{4096}, false)
+    ^_: storage_block_init(data, first, I64{4096}, false)
     storage_put(handle, I64{1})
     storage_put(wrapping(handle + I64{8}), I64{1})
     storage_put(wrapping(handle + I64{16}), data)
@@ -219,9 +219,9 @@ storage_block_reserve: fn(block: I64, offset: I64, bytes: I64) -> I64 {
 
 storage_arena_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, fallible: Bool) -> I64 {
     if fallible && jet_fault_should_fail_allocation() -> return I64{0}
-    current := storage_word(wrapping(handle + I64{24}))
+    ^current: storage_word(wrapping(handle + I64{24}))
     count: storage_word(handle)
-    data := storage_word(wrapping(handle + I64{16}))
+    ^data: storage_word(wrapping(handle + I64{16}))
     loop current < count {
         block: data + current * I64{32}
         offset: storage_block_offset(block, bytes, alignment)
@@ -268,7 +268,7 @@ storage_arena_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64,
     storage_reset_entries(handle)
     count: storage_word(handle)
     data: storage_word(wrapping(handle + I64{16}))
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         storage_put(wrapping(wrapping(data + index * I64{32}) + I64{24}), I64{0})
         index += I64{1}
@@ -284,7 +284,7 @@ storage_arena_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64,
     storage_arena_close()
     count: storage_word(handle)
     data: storage_word(wrapping(handle + I64{16}))
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         storage_block_drop(wrapping(data + index * I64{32}))
         index += I64{1}
@@ -303,7 +303,7 @@ storage_arena_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64,
     storage_arena_open()
     handle: jet_rt_alloc(I64{72}, I64{8})
     storage_zero(wrapping(handle + I64{32}), I64{40})
-    _ := storage_block_init(handle, first, I64{4096}, false)
+    ^_: storage_block_init(handle, first, I64{4096}, false)
     handle
 }
 
@@ -365,10 +365,10 @@ storage_pool_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
     required: if (bytes == I64{0}) -> I64{1} else -> bytes
     count: storage_word(handle)
     data: storage_word(wrapping(handle + I64{16}))
-    compatible := I64{-1}
-    empty := I64{-1}
-    vacant := I64{-1}
-    index := I64{0}
+    ^compatible: I64{-1}
+    ^empty: I64{-1}
+    ^vacant: I64{-1}
+    ^index: I64{0}
     loop index < count {
         slot: data + index * I64{40}
         if (storage_word(wrapping(slot + I64{32})) == I64{0}) {
@@ -420,7 +420,7 @@ storage_pool_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
     storage_reset_entries(handle)
     count: storage_word(handle)
     data: storage_word(wrapping(handle + I64{16}))
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         slot: wrapping(data + index * I64{40})
         storage_put(wrapping(slot + I64{24}), I64{0})
@@ -439,7 +439,7 @@ storage_pool_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
     storage_arena_close()
     count: storage_word(handle)
     data: storage_word(wrapping(handle + I64{16}))
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         storage_block_drop(wrapping(data + index * I64{40}))
         index += I64{1}
@@ -472,15 +472,15 @@ storage_fixed_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64,
     base: storage_word(handle)
     used: storage_word(wrapping(handle + I64{16}))
     boundary: storage_word(wrapping(handle + I64{24}))
-    value_offset := alignment  // Fixed ZST pointer = NonNull<T>.dangling().
-    end := used + I64{1}
+    ^value_offset: alignment  // Fixed ZST pointer = NonNull<T>.dangling().
+    ^end: used + I64{1}
     if (bytes != I64{0}) {
         address: base + used
         padding: (alignment - address % alignment) % alignment
         value_offset = used + padding
         end = storage_saturating_add(value_offset, bytes)
     }
-    metadata := I64{-1}
+    ^metadata: I64{-1}
     if (boundary >= I64{32}) {
         header_address: (base + boundary - I64{32}) & I64{-8}
         if (header_address >= base) { metadata = header_address - base }
@@ -517,7 +517,7 @@ storage_fixed_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64,
 
 #Export(c) jet_rt_mem_fixed_storage_reset: fn(handle: I64) {
     base: storage_word(handle)
-    at := storage_word(wrapping(handle + I64{32}))
+    ^at: storage_word(wrapping(handle + I64{32}))
     loop at != (I64{-1}) {
         header: wrapping(base + at)
         previous: storage_word(header)

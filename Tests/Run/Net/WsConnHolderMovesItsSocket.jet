@@ -42,7 +42,7 @@ run: fn() {
     wire: Wire{conn: ws.connect("ws://{addr}/live") ?? panic("connect")}
     held: adopt(wire)
     held.wire.conn.send_text("ping") ?? panic("client send")
-    reply := held.wire.conn.recv() ?? panic("client recv")
+    ^reply: held.wire.conn.recv() ?? panic("client recv")
     loop !reply.is_text() -> reply = held.wire.conn.recv() ?? panic("client recv")
     print(reply.text() ?? panic("reply text"))
     closed: held.wire.conn.recv() ?? panic("client close")

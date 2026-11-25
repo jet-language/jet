@@ -32,9 +32,7 @@ COMMAND: 16
 // claims its key from the provider first, so a browser page
 // cancels the default action of bound keys only.
 #Builtin.Needs("UI.Shortcuts") register: fn(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
-    if !rt.capability(4) {
-        return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
-    }
+    if !rt.capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
     if binding.action.len() == 0 {
         return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
     }
@@ -53,9 +51,7 @@ COMMAND: 16
 }
 
 #Builtin.Needs("UI.Shortcuts") dispatch: fn(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
-    if !rt.capability(4) {
-        return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
-    }
+    if !rt.capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
     Ok(dispatched(lookup(shortcut)))
 }
 
@@ -65,9 +61,7 @@ COMMAND: 16
 // exactly one of Control and Meta also matches a command binding. An empty
 // record is the provider's mark that its queue overflowed and dropped events.
 #Builtin.Needs("UI.Shortcuts") poll: fn() -[IO]> UIShortcutDispatch? UIHostError! {
-    if !rt.capability(4) {
-        return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
-    }
+    if !rt.capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
     raw: rt.event_pop(2) ?? return Ok(None)
     if raw.len() == 0 -> return Err(UIHostError.QueueFull{service: "Shortcuts"})
     fields: core.ui.host.provider_record_fields(raw) ?? return Err(shortcut_failure("a key event is not a provider record"))

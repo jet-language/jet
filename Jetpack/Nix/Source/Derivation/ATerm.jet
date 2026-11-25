@@ -55,9 +55,9 @@ NixDerivation: struct {
             return Err(NixError.DrvUnsupported("DrvWithVersion / dynamic-derivations (JP21 staged)"))
         }
         if !aterm.starts_with("Derive(") -> return Err(NixError.DrvParse("expected Derive("))
-        cursor := NixATermCursor{bytes: aterm.bytes(), position: "Derive(".bytes().len()}
+        ^cursor: NixATermCursor{bytes: aterm.bytes(), position: "Derive(".bytes().len()}
 
-        outputs := [String:NixDerivationOutput]{}
+        ^outputs: [String:NixDerivationOutput]{}
         if cursor.list_open() {
             loop {
                 cursor.consume("(")
@@ -75,7 +75,7 @@ NixDerivation: struct {
         }
         cursor.consume(",")
 
-        input_drvs := [NixInputDrv]{}
+        ^input_drvs: [NixInputDrv]{}
         if cursor.list_open() {
             loop {
                 cursor.consume("(")
@@ -98,7 +98,7 @@ NixDerivation: struct {
         cursor.consume(",")
         args: cursor.escaped_strings()
         cursor.consume(",")
-        env := [String:String]{}
+        ^env: [String:String]{}
         if cursor.list_open() {
             loop {
                 cursor.consume("(")
@@ -128,7 +128,7 @@ NixDerivation: struct {
 
     // Input sources plus input derivation paths, sorted and unique.
     references_for_drv_path: fn(self) -> [String] Never! {
-        references := self.input_srcs.copy()
+        ^references: self.input_srcs.copy()
         loop input in self.input_drvs -> references.push(input.path)
         nixeval_sorted_unique(references)
     }
@@ -137,13 +137,13 @@ NixDerivation: struct {
     // environment values; `actual_inputs` replaces the input derivations by
     // modulo-hash hex keys (the `hashDerivationModulo` serialization).
     unparse: fn(self, mask_outputs: Bool, actual_inputs: [String:[String]]?) -> String Never! {
-        outputs := [String]{}
+        ^outputs: [String]{}
         loop name in self.output_names() {
             output: self.outputs[name]
             path: if mask_outputs -> "" else -> output.path
             outputs.push("({nix_aterm_raw(name)},{nix_aterm_raw(path)},{nix_aterm_raw(output.method_algo)},{nix_aterm_raw(output.hash_hex)})")
         }
-        inputs := [String]{}
+        ^inputs: [String]{}
         if actual_inputs == {
             .Val(hashes) -> {
                 loop hash_hex in nixeval_sorted(hashes.keys().to_list()) {
@@ -156,11 +156,11 @@ NixDerivation: struct {
                 }
             }
         }
-        sources := [String]{}
+        ^sources: [String]{}
         loop source in self.input_srcs -> sources.push(nix_aterm_raw(source))
-        args := [String]{}
+        ^args: [String]{}
         loop arg in self.args -> args.push(nix_aterm_escaped(arg))
-        env := [String]{}
+        ^env: [String]{}
         loop key in nixeval_sorted(self.env.keys().to_list()) {
             value: if mask_outputs && self.outputs.get(key) != None -> "" else -> self.env[key]
             env.push("({nix_aterm_escaped(key)},{nix_aterm_escaped(value)})")
@@ -174,7 +174,7 @@ nix_aterm_raw: fn(text: String) -> String Never! { "\"{text}\"" }
 
 // Escaped ATerm string (Nix `printString`): `\\`, `\"`, `\n`, `\r`, `\t`.
 nix_aterm_escaped: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     nixeval_push_byte(out, 34)
     loop byte in text.bytes() {
         if (Int{byte}) == {
@@ -191,7 +191,7 @@ nix_aterm_escaped: fn(text: String) -> String Never! {
 }
 
 nix_aterm_input: fn(path: String, outputs: [String]) -> String Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop name in outputs -> names.push(nix_aterm_raw(name))
     "({nix_aterm_raw(path)},[{names.join(",")}])"
 }
@@ -237,7 +237,7 @@ NixATermCursor: struct {
 
     escaped_string: fn(^self) -> String NixError! {
         self.consume("\"")
-        out := [U8]{}
+        ^out: [U8]{}
         loop self.position < self.bytes.len() {
             scalar: self.bump() ?? return Err(NixError.DrvParse("unterminated escaped string"))
             if scalar == {
@@ -285,7 +285,7 @@ NixATermCursor: struct {
     }
 
     raw_strings: fn(^self) -> [String] NixError! {
-        items := [String]{}
+        ^items: [String]{}
         if self.list_open() {
             loop {
                 items.push(self.raw_string())
@@ -296,7 +296,7 @@ NixATermCursor: struct {
     }
 
     escaped_strings: fn(^self) -> [String] NixError! {
-        items := [String]{}
+        ^items: [String]{}
         if self.list_open() {
             loop {
                 items.push(self.escaped_string())

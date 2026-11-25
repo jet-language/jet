@@ -9,7 +9,7 @@ use {
 
 pkg_cpp_render_jet: fn(lib: String, surface: CppSurface) -> String Never! {
     abi: "jet_cpp_{lib}"
-    out := "// jet-ffi-descriptor={pkg_cpp_descriptor_stamp()}\n#Import c.{abi}: module {{\n    take_error: fn() -> Int = \"{abi}_take_error\"\n"
+    ^out: "// jet-ffi-descriptor={pkg_cpp_descriptor_stamp()}\n#Import c.{abi}: module {{\n    take_error: fn() -> Int = \"{abi}_take_error\"\n"
     loop class in surface.classes {
         name: pkg_cpp_snake(class.name)
         out = "{out}    {name}_new: fn({pkg_cpp_jet_params(class.ctor)}) -> Int = \"{abi}_{name}_new\"\n    {name}_close: fn(handle: Int) = \"{abi}_{name}_close\"\n"
@@ -46,13 +46,13 @@ pkg_cpp_descriptor_stamp: fn() -> String Never! {
 }
 
 pkg_cpp_jet_params: fn(params: [CppParam]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params -> parts.push("{param.name}: {param.kind.jet()}")
     parts.join(", ")
 }
 
 pkg_cpp_jet_args: fn(params: [CppParam]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params -> parts.push(param.name)
     parts.join(", ")
 }
@@ -61,7 +61,7 @@ pkg_cpp_jet_args: fn(params: [CppParam]) -> String Never! {
 // `catch(...)` around every foreign call.
 pkg_cpp_render_cpp: fn(header: String, lib: String, surface: CppSurface) -> String Never! {
     abi: "jet_cpp_{lib}"
-    out := "#include <array>\n#include <cstdint>\n#include <cstdlib>\n#include <exception>\n#include <mutex>\n#include \"{header}\"\nstatic thread_local int64_t jet_cpp_error;\nextern \"C\" int64_t {abi}_take_error(){{auto value=jet_cpp_error;jet_cpp_error=0;return value;}}\n"
+    ^out: "#include <array>\n#include <cstdint>\n#include <cstdlib>\n#include <exception>\n#include <mutex>\n#include \"{header}\"\nstatic thread_local int64_t jet_cpp_error;\nextern \"C\" int64_t {abi}_take_error(){{auto value=jet_cpp_error;jet_cpp_error=0;return value;}}\n"
     loop class in surface.classes {
         name: pkg_cpp_snake(class.name)
         cpp: class.cpp_name
@@ -85,7 +85,7 @@ pkg_cpp_render_cpp: fn(header: String, lib: String, surface: CppSurface) -> Stri
 // C parameters; a callback spells its declarator around the name.
 pkg_cpp_c_params: fn(params: [CppParam]) -> String Never! {
     if params.len() == 0 -> return "void"
-    parts := [String]{}
+    ^parts: [String]{}
     loop param in params {
         if param.kind == CppScalar.Callback -> parts.push("int64_t (*{param.name})(int64_t)") else {
             parts.push("{param.kind.c()} {param.name}")

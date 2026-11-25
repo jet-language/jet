@@ -255,7 +255,7 @@ IRBoxShape: struct {
 // members); None when one does not lay out.
 ir_box_shapes: fn(m: ^IRModule, p: IRProgram, row: Int) -> [IRBoxShape]? Never! {
     ty: ir_untag(ir_row_ty(m, p, row))
-    shapes := [IRBoxShape]{}
+    ^shapes: [IRBoxShape]{}
     if ty == .Option(inner) {
         inner_row: ir_value_type(m, p, inner) ?? return None
         shapes.push(IRBoxShape{selector: -1, members: ir_box_payload(m, inner_row, 0)})
@@ -282,7 +282,7 @@ ir_box_shapes: fn(m: ^IRModule, p: IRProgram, row: Int) -> [IRBoxShape]? Never! 
 }
 
 ir_box_payload: fn(m: IRModule, row: Int, offset: Int) -> [IRMember] Never! {
-    members := [IRMember]{}
+    ^members: [IRMember]{}
     if m.types[row].kind != .Unit -> members.push(IRMember{name: "value", offset: offset, ty: row})
     members
 }
@@ -290,7 +290,7 @@ ir_box_payload: fn(m: IRModule, row: Int, offset: Int) -> [IRMember] Never! {
 // The end of the last of `members`' bytes, by `m`'s rows (a boxed member, or
 // one without a row, is a word).
 ir_members_end: fn(m: IRModule, members: [IRMember]) -> Int Never! {
-    end := 0
+    ^end: 0
     loop member in members {
         size: if member.boxed || member.ty < 0 -> 8 else -> m.types[member.ty].size
         if member.offset + size > end -> end = member.offset + size
@@ -303,10 +303,10 @@ ir_members_end: fn(m: IRModule, members: [IRMember]) -> Int Never! {
 // build runs it once its functions are built and before their drop glue,
 // so a row it lays out gets its glue too.
 ir_debug_variants: fn(m: ^IRModule, p: IRProgram) Never! {
-    row := 0
+    ^row: 0
     loop row < m.types.len() {
         if m.debug_variants.get(row) == None {
-            found := ir_debug_variants_of(m, p, row)
+            ^found: ir_debug_variants_of(m, p, row)
             if found.variants.len() > 0 {
                 m.debug_variants[row] = m.variant_lists.len()
                 m.variant_lists.push(found.move())
@@ -324,7 +324,7 @@ ir_debug_variants_of: fn(m: ^IRModule, p: IRProgram, row: Int) -> IRDebugVariant
     ty: ir_untag(ir_row_ty(m, p, row))
     if ty == .Option(inner) {
         payload: ir_value_type(m, p, inner) ?? return none
-        members := [IRMember]{}
+        ^members: [IRMember]{}
         if m.types[payload].kind != .Unit {
             members.push(IRMember{name: "", offset: 0, ty: payload})
         }
@@ -339,10 +339,10 @@ ir_debug_variants_of: fn(m: ^IRModule, p: IRProgram, row: Int) -> IRDebugVariant
     }
     if ty == .Result(_, _) {
         if !ir_box_row(m, row) -> return none
-        shapes := ir_box_shapes(m, p, row) ?? return none
-        variants := [IRDebugVariant]{}
+        ^shapes: ir_box_shapes(m, p, row) ?? return none
+        ^variants: [IRDebugVariant]{}
         loop shape in shapes.move() {
-            members := shape.members.move()
+            ^members: shape.members.move()
             loop at in 0..<members.len() -> members[at].name = ""
             name: if shape.selector == 1 -> "Ok" else -> "Err"
             end: ir_members_end(m, members)
@@ -354,7 +354,7 @@ ir_debug_variants_of: fn(m: ^IRModule, p: IRProgram, row: Int) -> IRDebugVariant
     union: ty == .Union(_)
     owner: p.types[definition].name
     if p.types[definition].kind == .Enum(declared, _) {
-        variants := [IRDebugVariant]{}
+        ^variants: [IRDebugVariant]{}
         if m.types[row].kind == .Word {
             // A payload-free enum: its word is the variant index.
             loop (index, variant) in declared {
@@ -363,10 +363,10 @@ ir_debug_variants_of: fn(m: ^IRModule, p: IRProgram, row: Int) -> IRDebugVariant
             return IRDebugVariants{selector: IRDebugSelector.Word, variants: variants}
         }
         if !ir_box_row(m, row) -> return none
-        shapes := ir_box_shapes(m, p, row) ?? return none
-        index := 0
+        ^shapes: ir_box_shapes(m, p, row) ?? return none
+        ^index: 0
         loop shape in shapes.move() {
-            members := shape.members.move()
+            ^members: shape.members.move()
             // A union's member, or a variant's one unnamed payload, is
             // positional.
             positional: union || declared[index].payload == .Single(_)
@@ -422,9 +422,9 @@ ir_box_size_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, boxed:
         size: ir_box_bytes(m, p, row)
         return ir_word_const(m, b, size)
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop size in sizes {
-        rest := size
+        ^rest: size
         loop _ in 0..<8 {
             bytes.push(U8{rest & 255})
             rest = rest >> 8
@@ -499,10 +499,10 @@ ir_box_last_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, shap
     id: m.functions.len()
     m.functions.push(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
     ir_function_bind(m, helper_key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     loop shape in shapes {
-        dropped := false
+        ^dropped: false
         loop member in shape.members {
             if ir_box_member_drops(m, member) -> dropped = true
         }
@@ -541,7 +541,7 @@ ir_box_free: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, at: Int) Ne
 // Stores the last-owner routine `a` built as function `id`; a build that
 // failed reports to the caller's builder `b` and leaves no routine (-1).
 ir_last_helper_finish: fn(m: ^IRModule, b: ^IRBuilder, a: ^^IRBuilder, id: Int, helper_key: String) -> Int Never! {
-    built := a.move()
+    ^built: a.move()
     if built.error != "" {
         ir_emit(built.f, IROp.Unreachable, -1, -1, -1, -1, built.line)
         m.functions[id] = built.f.move()
@@ -575,7 +575,7 @@ ir_box_unique_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) ->
     id: m.functions.len()
     m.functions.push(ir_hashed_function("unique", helper_key, "jet_ir_box_unique_", "", 0))
     ir_function_bind(m, helper_key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     boxed: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "boxed"))
     a.f.result = row
     shapes: ir_box_shapes(m, p, row) ?? [IRBoxShape]{}
@@ -600,7 +600,7 @@ ir_box_unique_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) ->
         ir_emit(a.f, IROp.CopyBytes, -1, replica, boxed, ir_box_bytes(m, p, row), a.line)
     } else { _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{replica, boxed, bytes}, -1) }
     loop shape in shapes {
-        copied := false
+        ^copied: false
         loop member in shape.members {
             if member.boxed || ir_copy_needs(m, p, member.ty) -> copied = true
         }
@@ -694,7 +694,7 @@ ir_box_take: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, boxed: Int, offset: I
 // no longer holds the box.
 ir_box_hand_over: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, boxed: Int, payload: Int, row: Int, size: Int) -> Int Never! {
     kind: m.types[row].kind
-    taken := payload
+    ^taken: payload
     if kind == .Aggregate {
         taken = ir_temp(m, b, row)
         ir_emit(b.f, IROp.StackAddress, taken, m.types[row].size, 8, -1, b.line)
@@ -742,7 +742,7 @@ ir_clone_shares: fn(symbol: String) -> Bool Never! {
 // Builds the glue of every aggregate row whose drop names one and that has
 // none yet (rows a glue reaches add theirs in the same pass).
 ir_drop_glues: fn(m: ^IRModule, p: IRProgram) Never! {
-    row := 0
+    ^row: 0
     loop row < m.types.len() {
         drop: m.types[row].drop
         if drop != "" && drop == ir_drop_key(m, row) && ir_keyed_function(m, drop) == None {
@@ -762,7 +762,7 @@ ir_drop_glue: fn(m: ^IRModule, p: IRProgram, row: Int) Never! {
     id: m.functions.len()
     m.functions.push(ir_hashed_function("drop", key, "jet_ir_drop_", "", 0))
     ir_function_bind(m, key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     if ir_box_row(m, row) -> ir_box_drop_body(m, p, a, row, at) else if ir_trait_row(m, row) {
         ir_trait_drop_body(m, p, a, row, at)
@@ -845,7 +845,7 @@ ir_buffer_last_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, e
     id: m.functions.len()
     m.functions.push(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
     ir_function_bind(m, helper_key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     word_row: ir_word_row(m)
     data: ir_new_slot(a, word_row, IRSlotKind.Param, ir_intern_name(m, "data"))
     length: ir_new_slot(a, word_row, IRSlotKind.Param, ir_intern_name(m, "length"))
@@ -935,7 +935,7 @@ ir_unique_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int
     id: m.functions.len()
     m.functions.push(ir_hashed_function("unique", helper_key, "jet_ir_unique_", "", 0))
     ir_function_bind(m, helper_key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     header: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "header"))
     length: ir_load_word(m, a, header, 0)
     capacity: ir_load_word(m, a, header, 8)
@@ -961,7 +961,7 @@ ir_unique_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int
     word_row: ir_word_row(m)
     stride: ir_list_stride(m, entry)
     buffer_row: ir_alloc_row_of(m, p, word_row, row)
-    replica := -1
+    ^replica: -1
     if ir_map_row_hashed(m, p, row) {
         // A hashed Map's copy takes its index too: a frozen one gets a
         // fresh index (map.rebuild), a counted one a byte copy of its block.
@@ -1064,7 +1064,7 @@ ir_copy_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int N
     id: m.functions.len()
     m.functions.push(ir_hashed_function("copy", helper_key, "jet_ir_copy_", "", 0))
     ir_function_bind(m, helper_key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     ir_copy_fixup_body(m, p, a, row, at)
     if a.error != "" {
@@ -1198,7 +1198,7 @@ ir_close_holds_handle: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
 // members, buffer elements, an Option's payload, a Result's two sides and
 // every enum variant's payload members.
 ir_close_part_rows: fn(m: ^IRModule, p: IRProgram, row: Int) -> [Int] Never! {
-    parts := [Int]{}
+    ^parts: [Int]{}
     kind: m.types[row].kind
     ty: ir_untag(ir_row_ty(m, p, row))
     if kind == .Aggregate {
@@ -1241,10 +1241,10 @@ ir_close_part_rows: fn(m: ^IRModule, p: IRProgram, row: Int) -> [Int] Never! {
 ir_close_parts_reach: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if m.close_free.get(row) != None -> return false
     if ir_close_holds_handle(m, p, row) -> return true
-    seen := [Int:Bool]{}
+    ^seen: [Int:Bool]{}
     seen[row] = true
-    visited := [Int]{}
-    pending := ir_close_part_rows(m, p, row)
+    ^visited: [Int]{}
+    ^pending: ir_close_part_rows(m, p, row)
     loop pending.len() > 0 {
         part: pending.pop() ?? break
         if seen.get(part) != None -> next
@@ -1283,7 +1283,7 @@ ir_close_glue: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, members_o
     m.functions.push(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
     ir_function_bind(m, key, id)
     name_column_set(m.close_glue_keys, m.close_glue, key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     if method >= 0 {
         method_key: p.functions[method].key.copy()
@@ -1291,7 +1291,9 @@ ir_close_glue: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, members_o
         // A Close method of a generic type is built for this instance.
         args: if generic -> ir_row_args(m, p, row) else -> ir_owner_args(p, p.functions[method], ir_row_ty(m, p, row)) ?? [Type]{}
         callee: ir_function_id(m, p, method_key, args) ?? -1
-        if callee < 0 -> ir_fail(a, span, "the Close method of {ir_type_name(ir_row_ty(m, p, row))}") else {
+        if callee < 0 {
+            ir_fail(a, span, "the Close method of {ir_type_name(ir_row_ty(m, p, row))}")
+        } else {
             start: ir_args(a.f, [Int]{value})
             ir_emit(a.f, IROp.Call, -1, callee, start, 1, a.line)
         }
@@ -1414,9 +1416,9 @@ ir_close_parts: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, value: I
         discriminant: ir_enum_tag_of(m, b, value)
         loop index in 0..<count {
             members: ir_variant_members(m, p, definition, args, index) ?? next
-            glues := [Int]{}
-            handles := [Bool]{}
-            closing := false
+            ^glues: [Int]{}
+            ^handles: [Bool]{}
+            ^closing: false
             loop member in members {
                 handle: !member.boxed && ir_close_handle(m, member.ty)
                 glue: if handle -> -1 else -> ir_close_glue(m, p, b, member.ty, false, span)
@@ -1459,7 +1461,7 @@ ir_close_handle_member: fn(m: ^IRModule, b: ^IRBuilder, value: Int, member: IRMe
 // Ends the move-only handle in `item` (a part of a closing value) unless it
 // moved out: `parts` are its moves, by the bits of `armed`.
 ir_close_handle_drop: fn(m: ^IRModule, b: ^IRBuilder, item: Int, parts: [IRMovedPart], armed: Int) Never! {
-    moved := 0
+    ^moved: 0
     loop part in parts -> moved += ir_part_bit(part.bit)
     if moved != 0 {
         mask: ir_word_const(m, b, moved)
@@ -1474,7 +1476,7 @@ ir_close_handle_drop: fn(m: ^IRModule, b: ^IRBuilder, item: Int, parts: [IRMoved
 
 // The parts among `parts` under `step` from a value at `depth`.
 ir_parts_under: fn(parts: [IRMovedPart], depth: Int, step: IRPartStep) -> [IRMovedPart] Never! {
-    under := [IRMovedPart]{}
+    ^under: [IRMovedPart]{}
     loop part in parts {
         if part.path.len() > depth && ir_step_same(part.path[depth], step) {
             under.push(part.copy())
@@ -1497,8 +1499,8 @@ ir_part_bit: fn(bit: Int) -> Int Never! { 1 << bit }
 // turn.
 ir_close_partial: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, value: Int, armed: Int, parts: [IRMovedPart], depth: Int, members_only: Bool, span: Span) Never! {
     // The bits are distinct, so their sums are their unions.
-    exact := 0
-    below := 0
+    ^exact: 0
+    ^below: 0
     loop part in parts {
         if part.path.len() == depth -> exact += ir_part_bit(part.bit) else {
             below += ir_part_bit(part.bit)
@@ -1532,7 +1534,7 @@ ir_close_partial: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, value:
 // `armed` word (IRClose), only its members when `members_only`.
 ir_part_close_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, members_only: Bool, parts: [IRMovedPart]) -> Int Never! {
     span: Span{start: 0, end: 0}
-    key := "#close.parts<{ir_row_key(m, row)}|{members_only}"
+    ^key: "#close.parts<{ir_row_key(m, row)}|{members_only}"
     loop part in parts {
         key = "{key}|{part.bit}"
         loop step in part.path -> key = "{key}:{step.selector}/{step.offset}"
@@ -1549,7 +1551,7 @@ ir_part_close_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, me
     m.functions.push(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
     ir_function_bind(m, key, id)
     name_column_set(m.close_glue_keys, m.close_glue, key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     armed: ir_new_slot(a, ir_word_row(m), IRSlotKind.Param, ir_intern_name(m, "armed"))
     ir_close_partial(m, p, a, row, value, armed, parts, 0, members_only, span)
@@ -1572,7 +1574,7 @@ ir_resolve_part_closes: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder) Never! {
     loop index in 0..<b.part_closes.len() {
         call: b.part_closes[index]
         close: b.closes[ir_close_index(b, call.root)]
-        parts := [IRMovedPart]{}
+        ^parts: [IRMovedPart]{}
         loop part in b.moved {
             if part.root == call.root -> parts.push(part.copy())
         }
@@ -1731,7 +1733,7 @@ ir_note_lent: fn(b: ^IRBuilder, slot: Int, lent: Bool) -> Int Never! {
 
 // The latest b.places row of `slot`, -1 for none.
 ir_place_index: fn(b: IRBuilder, slot: Int) -> Int Never! {
-    index := b.places.len() - 1
+    ^index: b.places.len() - 1
     loop index >= 0 {
         if b.places[index].slot == slot -> return index
         index -= 1
@@ -1742,8 +1744,8 @@ ir_place_index: fn(b: IRBuilder, slot: Int) -> Int Never! {
 // The closing variable whose value the value in `slot` was read out of, and
 // the path to it (root -1: none).
 ir_place_path: fn(b: IRBuilder, slot: Int) -> IRPlacePath Never! {
-    steps := [IRPartStep]{}
-    at := slot
+    ^steps: [IRPartStep]{}
+    ^at: slot
     loop !ir_closes(b, at) {
         index: ir_place_index(b, at)
         if index < 0 || steps.len() > b.places.len() {
@@ -1752,8 +1754,8 @@ ir_place_path: fn(b: IRBuilder, slot: Int) -> IRPlacePath Never! {
         steps.push(b.places[index].step)
         at = b.places[index].parent
     }
-    path := [IRPartStep]{}
-    index := steps.len() - 1
+    ^path: [IRPartStep]{}
+    ^index: steps.len() - 1
     loop index >= 0 {
         path.push(steps[index])
         index -= 1
@@ -1778,7 +1780,7 @@ ir_path_starts: fn(path: [IRPartStep], prefix: [IRPartStep]) -> Bool Never! {
 // given one when it is the first move out of that part; -1 past
 // IR_CLOSE_PARTS.
 ir_moved_bit: fn(b: ^IRBuilder, root: Int, path: [IRPartStep]) -> Int Never! {
-    count := 0
+    ^count: 0
     loop part in b.moved {
         if part.root != root -> next
         count += 1
@@ -1794,7 +1796,7 @@ ir_moved_bit: fn(b: ^IRBuilder, root: Int, path: [IRPartStep]) -> Int Never! {
 
 // The latest b.closes row of the variable in `slot`, -1 for none.
 ir_close_index: fn(b: IRBuilder, slot: Int) -> Int Never! {
-    index := b.closes.len() - 1
+    ^index: b.closes.len() - 1
     loop index >= 0 {
         if b.closes[index].slot == slot -> return index
         index -= 1
@@ -1810,7 +1812,7 @@ ir_close_disarm: fn(b: ^IRBuilder, slot: Int) Never! {
     if slot < 0 || b.closes.len() == 0 {
         return
     }
-    whole := false
+    ^whole: false
     loop index in 0..<b.closes.len() {
         close: b.closes[index]
         if close.slot != slot -> next
@@ -1864,8 +1866,8 @@ ir_close_overwritten: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, m
     place: if b.closes.len() == 0 -> IRPlacePath{root: -1, path: [IRPartStep]{}} else -> ir_place_path(b, base)
     depth: place.path.len()
     step: IRPartStep{selector: -1, offset: member.offset}
-    parts := [IRMovedPart]{}
-    cleared := 0
+    ^parts: [IRMovedPart]{}
+    ^cleared: 0
     loop part in b.moved {
         if place.root < 0 || part.root != place.root || part.path.len() <= depth -> next
         if !ir_path_starts(part.path, place.path) || !ir_step_same(part.path[depth], step) -> next
@@ -1897,7 +1899,7 @@ ir_close_now: fn(b: ^IRBuilder, slot: Int) Never! {
     live: ir_new_slot(b, close.flag, IRSlotKind.Temp, -1)
     ir_emit(b.f, IROp.Ne, live, close.armed, zero, -1, b.line)
     ir_open_if(b.f, live, b.line)
-    moves := false
+    ^moves: false
     loop part in b.moved {
         if part.root == slot -> moves = true
     }
@@ -1926,7 +1928,7 @@ ir_close_defer: fn(b: ^IRBuilder, slot: Int) Never! {
         return
     }
     close: b.closes[at]
-    kept := [IRClose]{}
+    ^kept: [IRClose]{}
     loop index in 0..<b.closes.len() {
         if index != at -> kept.push(b.closes[index])
     }
@@ -1943,12 +1945,12 @@ ir_close_is_deferred: fn(b: IRBuilder, slot: Int) -> Bool Never! {
 // Runs the deferred closes of the variables among bindings[mark..], the
 // latest defer first.
 ir_close_deferred: fn(b: ^IRBuilder, mark: Int) Never! {
-    index := b.closes.len() - 1
+    ^index: b.closes.len() - 1
     loop index >= 0 {
         close: b.closes[index]
         index -= 1
         if !close.deferred -> next
-        bound := false
+        ^bound: false
         loop at in mark..<b.bindings.len() {
             if b.bindings[at].slot == close.slot && b.bindings[at].indirect < 0 && !ir_binding_is_alias(b, at) {
                 bound = true

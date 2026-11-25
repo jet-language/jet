@@ -10,14 +10,14 @@ Codec: struct {
         name: "msgpack",
 
         read: fn(bytes: [U8]) -> Dyn FormatError! {
-            reader := Reader{bytes: bytes, at: 0}
+            ^reader: Reader{bytes: bytes, at: 0}
             tree: reader.value() ?? return Err(err)
             if reader.at != bytes.len() -> return Err(fail("trailing bytes after the value"))
             Ok(tree)
         }
 
         write: fn(tree: Dyn) -> [U8] FormatError! {
-            out := [U8]{}
+            ^out: [U8]{}
             write_value(tree, out) ?? return Err(err)
             Ok(out)
         }
@@ -101,7 +101,7 @@ Reader: struct {
         if head == 192 -> return Ok(Dyn.Null)
         if head == 194 || head == 195 -> return Ok(Dyn.Bool(head == 195))
         if head == 211 {
-            number := 0
+            ^number: 0
             loop _ in 0..<8 -> number = (number << 8) | (self.byte() ?? return Err(err))
             // int 64 is two's complement.
             if number >= 1 << 63 -> number -= 1 << 64
@@ -115,12 +115,12 @@ Reader: struct {
             return Ok(Dyn.Text(text))
         }
         if head >= 144 && head < 160 {
-            items := [Dyn]{}
+            ^items: [Dyn]{}
             loop _ in 0..<(head - 144) -> items.push(self.value() ?? return Err(err))
             return Ok(Dyn.Array(items))
         }
         if head >= 128 && head < 144 {
-            entries := [{key: String, value: Dyn}]{}
+            ^entries: [{key: String, value: Dyn}]{}
             loop _ in 0..<(head - 128) {
                 key: self.value() ?? return Err(err)
                 if key == .Text(name) {

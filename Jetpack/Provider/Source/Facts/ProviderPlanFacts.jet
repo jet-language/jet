@@ -18,8 +18,8 @@ ProviderPlanFacts: struct {
 
     // The replay text (`encode`; the name is taken by the Encode derive).
     render: fn(self) -> String Never! {
-        lines := [String]{PROVIDER_PLAN_FACTS_HEADER}
-        keys := self.entries.keys().to_list()
+        ^lines: [String]{PROVIDER_PLAN_FACTS_HEADER}
+        ^keys: self.entries.keys().to_list()
         keys.sort()
         loop key in keys {
             lines.push("{provider_plan_hex(key)}\t{provider_plan_hex(self.entries[key])}")
@@ -34,7 +34,7 @@ ProviderPlanFacts: struct {
         if lines.len() == 0 || lines[0] != PROVIDER_PLAN_FACTS_HEADER {
             return Err(ProviderPlanFactsError.UnsupportedVersion)
         }
-        facts := [String:String]{}
+        ^facts: [String:String]{}
         loop index in 1..<lines.len() {
             fields: lines[index].split_once("\t") ?? return Err(ProviderPlanFactsError.TruncatedFact)
             key: provider_plan_unhex(fields.before)
@@ -75,7 +75,7 @@ ProviderPlanFactsError: enum {
 provider_lines: fn(raw: String) -> [String] Never! {
     segments: raw.split("\n").to_list()
     count: if raw.ends_with("\n") -> segments.len() - 1 else -> segments.len()
-    lines := [String]{}
+    ^lines: [String]{}
     loop index in 0..<count {
         segment: segments[index]
         bytes: segment.bytes()
@@ -92,7 +92,7 @@ provider_lines: fn(raw: String) -> [String] Never! {
 // Lowercase hex of the UTF-8 bytes.
 provider_plan_hex: fn(value: String) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in value.bytes() {
         code: Int{byte}
         out.push(digits[code >> 4])
@@ -104,8 +104,8 @@ provider_plan_hex: fn(value: String) -> String Never! {
 provider_plan_unhex: fn(value: String) -> String ProviderPlanFactsError! {
     raw: value.bytes()
     if raw.len() % 2 != 0 -> return Err(ProviderPlanFactsError.TruncatedField)
-    bytes := [U8]{}
-    index := 0
+    ^bytes: [U8]{}
+    ^index: 0
     loop index < raw.len() {
         high: provider_plan_nibble(Int{raw[index]})
         low: provider_plan_nibble(Int{raw[index + 1]})

@@ -22,7 +22,7 @@ Cypher: struct {
         Hole: Param,
 
         check: fn(text: String) -[]> CypherError! {
-            depth := 0
+            ^depth: 0
             loop byte in text.bytes() {
                 if byte == (U8{40}) || byte == (U8{91}) -> depth += 1
                 if byte == (U8{41}) || byte == (U8{93}) {
@@ -44,7 +44,7 @@ Cypher: struct {
         }
 
         build: fn(parts: [String], holes: [Param]) -[]> Cypher {
-            text := parts[0].copy()
+            ^text: parts[0].copy()
             loop index in 0..<holes.len() -> text = "{text}${index + 1}{parts[index + 1]}"
             Cypher{text: text, params: holes.copy()}
         }

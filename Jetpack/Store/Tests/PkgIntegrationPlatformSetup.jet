@@ -24,7 +24,7 @@ store_platform_setup: fn() {
     work: sys.get("JET_TEST_PLATFORM_SETUP") ?? return
     mode: sys.get("JET_TEST_PLATFORM_MODE") ?? panic("setup mode")
     roots: HangarRoots{root: files.join(work, "package-root"), dev_mode: false}
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     if mode == "stale" {
         object: store_platform_fixture_meta(verification, roots, "platform-stale", Val(1))
         files.write(files.join(work, "fixture-object"), object) ?? panic("publish stale object path")

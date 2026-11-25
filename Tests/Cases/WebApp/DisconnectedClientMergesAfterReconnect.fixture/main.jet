@@ -30,7 +30,7 @@ Notes: struct {
     runs: Shared<Int>,
 
     #App.Public publish: fn(self, doc: String) -> String NoteError! {
-        ran := self.runs.guard_edit()
+        ^ran: self.runs.guard_edit()
         ran.value += 1
         receipt: app.sync(doc, self.session)
         if receipt.starts_with("SyncError(") -> return Err(NoteError.Denied(receipt))
@@ -73,8 +73,8 @@ runs: fn(counter: Shared<Int>) -> Int {
 run: fn() {
     counter: Shared{0}
     service: Notes{session: "notes", runs: counter.copy()}
-    phone := Client{name: "phone", notes: app.remote(service.copy(), client: "phone"), local: crdt.list_new()}
-    desk := Client{name: "desk", notes: app.remote(service.copy(), client: "desk"), local: crdt.list_new()}
+    ^phone: Client{name: "phone", notes: app.remote(service.copy(), client: "phone"), local: crdt.list_new()}
+    ^desk: Client{name: "desk", notes: app.remote(service.copy(), client: "desk"), local: crdt.list_new()}
     write(phone, "draft")
     print("phone: {publish(phone)}")
     app.disconnect("phone")

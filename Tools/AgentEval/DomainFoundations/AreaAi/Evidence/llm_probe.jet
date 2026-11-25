@@ -28,7 +28,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         mux.serve_once(listener)
     }
     loop step in 0..<2 {
-        body := if {
+        ^body: if {
             step == 0 -> "{{\"model\":\"mock\",\"stream\":true,\"messages\":[{{\"role\":\"user\",\"content\":\"lookup\"}}]}}"
             else -> "{{\"model\":\"mock\",\"stream\":true,\"tool_result\":{{\"id\":\"call-1\",\"content\":\"ok\"}}}}"
         }

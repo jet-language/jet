@@ -12,7 +12,7 @@ env_lower: fn(byte: I64) -> I64 {
 // ASCII case-insensitive equality of two byte ranges (str.eq_ignore_ascii_case).
 env_fold_equal: fn(left: I64, left_length: I64, right: I64, right_length: I64) -> Bool {
     if (left_length != right_length) { return false }
-    at := I64{0}
+    ^at: I64{0}
     loop at < left_length {
         if (env_lower(rt_text_byte(wrapping(left + at))) != env_lower(rt_text_byte(wrapping(right + at)))) {
             return false
@@ -30,9 +30,9 @@ env_fold_text: fn(left: I64, right: I64) -> Bool {
 // (0 unchanged, 1 upper, 2 lower).
 env_copy: fn(data: I64, length: I64, mode: I64) -> I64 {
     target: rt_text_builder_with_capacity(length + I64{1})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
-        byte := rt_text_byte(wrapping(data + at))
+        ^byte: rt_text_byte(wrapping(data + at))
         if (mode == I64{1} && byte >= I64{97} && byte <= I64{122}) { byte -= I64{32} }
         if (mode == I64{2}) { byte = env_lower(byte) }
         rt_text_push_word(target, byte, I64{1})
@@ -52,7 +52,7 @@ env_trimmed: fn(data: I64, length: I64) -> I64 {
 }
 
 env_utf8: fn(data: I64, length: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         width: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
         if (width < I64{0}) { return false }
@@ -63,7 +63,7 @@ env_utf8: fn(data: I64, length: I64) -> Bool {
 
 env_contains: fn(text: I64, byte: I64) -> I64 {
     data: rt_text_data(text)
-    at := I64{0}
+    ^at: I64{0}
     loop at < rt_text_len(text) {
         if (rt_text_byte(wrapping(data + at)) == byte) { return at }
         at += I64{1}
@@ -79,7 +79,7 @@ env_name_valid: fn(name: I64) -> Bool {
 env_allowed: fn(allow: I64, name: I64) -> Bool {
     count: trap_word(allow)
     if (count == I64{0}) { return true }
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         if env_fold_text(trap_word(wrapping(trap_word(wrapping(allow + I64{16})) + at * I64{8})), name) {
             return true
@@ -103,10 +103,10 @@ env_dotenv_value: fn(value: I64) -> I64 {
             return result
         }
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at + (I64{1}) < length {
         if (rt_text_byte(wrapping(data + at)) == I64{32} && rt_text_byte(wrapping(wrapping(data + at) + I64{1})) == I64{35}) {
-            end := at
+            ^end: at
             loop end > (I64{0}) && numeric_is_trailing_space(data, end) {
                 end -= rt_text_width_before(data, end)
             }
@@ -121,7 +121,7 @@ env_dotenv_value: fn(value: I64) -> I64 {
 
 // Whether the scalar ending at byte `end` is White_Space (str.trim_end).
 numeric_is_trailing_space: fn(data: I64, end: I64) -> Bool {
-    start := end - I64{1}
+    ^start: end - I64{1}
     loop start > (I64{0}) && (rt_text_byte(wrapping(data + start)) & I64{192}) == (I64{128}) {
         start -= I64{1}
     }
@@ -129,7 +129,7 @@ numeric_is_trailing_space: fn(data: I64, end: I64) -> Bool {
 }
 
 rt_text_width_before: fn(data: I64, end: I64) -> I64 {
-    start := end - I64{1}
+    ^start: end - I64{1}
     loop start > (I64{0}) && (rt_text_byte(wrapping(data + start)) & I64{192}) == (I64{128}) {
         start -= I64{1}
     }
@@ -140,7 +140,7 @@ rt_text_width_before: fn(data: I64, end: I64) -> I64 {
 // name, value], all owned; a repeated key replaces its row.
 env_values_put: fn(values: I64, name: I64, value: I64) {
     key: env_copy(rt_text_data(name), rt_text_len(name), I64{1})
-    at := I64{0}
+    ^at: I64{0}
     loop at < trap_word(values) {
         row: csv_words_get(values, at)
         if jet_rt_string_eq(trap_word(row), key) {
@@ -165,10 +165,10 @@ env_values_put: fn(values: I64, name: I64, value: I64) {
 env_dotenv_load: fn(text: I64, allow: I64, values: I64) -> I64 {
     data: rt_text_data(text)
     length: rt_text_len(text)
-    start := I64{0}
-    index := I64{0}
+    ^start: I64{0}
+    ^index: I64{0}
     loop start < length {
-        end := start
+        ^end: start
         loop end < length && rt_text_byte(wrapping(data + end)) != (I64{10}) -> end += I64{1}
         next_start: end + I64{1}
         if (end > start && rt_text_byte(wrapping(wrapping(data + end) - I64{1})) == I64{13}) {
@@ -177,8 +177,8 @@ env_dotenv_load: fn(text: I64, allow: I64, values: I64) -> I64 {
         index += I64{1}
         line: env_trimmed(wrapping(data + start), end - start)
         start = next_start
-        line_data := rt_text_data(line)
-        line_length := rt_text_len(line)
+        ^line_data: rt_text_data(line)
+        ^line_length: rt_text_len(line)
         if (line_length == I64{0} || rt_text_byte(line_data) == I64{35}) {
             jet_rt_string_drop(line)
             next
@@ -187,7 +187,7 @@ env_dotenv_load: fn(text: I64, allow: I64, values: I64) -> I64 {
             line_data += I64{7}
             line_length -= I64{7}
         }
-        split := I64{0}
+        ^split: I64{0}
         loop split < line_length && rt_text_byte(wrapping(line_data + split)) != (I64{61}) {
             split += I64{1}
         }
@@ -217,7 +217,7 @@ env_process_load: fn(allow: I64, values: I64) {
     root: logical_environment_current()
     snapshot: csv_words_new()
     shared_acquire(root, false)
-    entry := rt_text_word(wrapping(root + I64{56}))
+    ^entry: rt_text_word(wrapping(root + I64{56}))
     loop entry != (I64{0}) {
         key: rt_text_word(wrapping(entry + I64{8}))
         key_length: rt_text_word(wrapping(entry + I64{16}))
@@ -230,7 +230,7 @@ env_process_load: fn(allow: I64, values: I64) {
         entry = rt_text_word(entry)
     }
     shared_release(root, false)
-    at := I64{0}
+    ^at: I64{0}
     loop at < trap_word(snapshot) {
         name: csv_words_get(snapshot, at)
         value: csv_words_get(snapshot, at + I64{1})
@@ -248,10 +248,10 @@ env_process_load: fn(allow: I64, values: I64) {
 // Rows in ascending key order (the BTreeMap iteration).
 env_values_sort: fn(values: I64) {
     data: trap_word(wrapping(values + I64{16}))
-    at := I64{1}
+    ^at: I64{1}
     loop at < trap_word(values) {
         row: trap_word(wrapping(data + at * I64{8}))
-        hole := at
+        ^hole: at
         loop hole > (I64{0}) && jet_rt_string_compare(trap_word(trap_word(wrapping(data + (hole - I64{1}) * I64{8}))), trap_word(row)) > (I64{0}) {
             trap_store(wrapping(data + hole * I64{8}), trap_word(wrapping(data + (hole - I64{1}) * I64{8})))
             hole -= I64{1}
@@ -262,7 +262,7 @@ env_values_sort: fn(values: I64) {
 }
 
 env_values_free: fn(values: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < trap_word(values) {
         row: csv_words_get(values, at)
         jet_rt_string_drop(trap_word(row))
@@ -277,8 +277,8 @@ env_values_free: fn(values: I64) {
 // The `__`-separated, ASCII-lowercased, non-empty segments of `rest`.
 env_segments: fn(data: I64, length: I64) -> I64 {
     segments: csv_words_new()
-    start := I64{0}
-    at := I64{0}
+    ^start: I64{0}
+    ^at: I64{0}
     loop at <= length {
         boundary: at == length || (at + I64{1} < length && rt_text_byte(wrapping(data + at)) == I64{95} && rt_text_byte(wrapping(wrapping(data + at) + I64{1})) == I64{95})
         if boundary {
@@ -300,11 +300,11 @@ env_segments: fn(data: I64, length: I64) -> I64 {
 env_renamed: fn(names: I64, name: I64, rest: I64, rest_length: I64) -> I64 {
     data: rt_text_data(names)
     length: rt_text_len(names)
-    start := I64{0}
+    ^start: I64{0}
     loop start < length {
-        end := start
+        ^end: start
         loop end < length && rt_text_byte(wrapping(data + end)) != (I64{10}) -> end += I64{1}
-        split := start
+        ^split: start
         loop split < end && rt_text_byte(wrapping(data + split)) != (I64{61}) -> split += I64{1}
         if (env_fold_equal(rt_text_data(name), rt_text_len(name), wrapping(data + start), split - start) || env_fold_equal(rest, rest_length, wrapping(data + start), split - start)) {
             return rt_text_copy(wrapping(wrapping(data + split) + I64{1}), end - split - I64{1})
@@ -322,7 +322,7 @@ env_tree_insert: fn(tree: I64, segments: I64, from: I64, value: I64) {
     last: from + I64{1} == trap_word(segments)
     length: dyn_word(wrapping(entries + DATA_SEQUENCE_LENGTH))
     data: dyn_word(wrapping(entries + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         slot: wrapping(data + at * DYN_ENTRY_BYTES)
         if env_fold_text(dyn_word(wrapping(slot + DYN_ENTRY_KEY)), segment) {
@@ -354,8 +354,8 @@ env_tree_insert: fn(tree: I64, segments: I64, from: I64, value: I64) {
 env_secret_path: fn(path: I64) -> Bool {
     data: rt_text_data(path)
     length: rt_text_len(path)
-    start := I64{0}
-    at := I64{0}
+    ^start: I64{0}
+    ^at: I64{0}
     loop at <= length {
         separator: at == length || rt_text_byte(wrapping(data + at)) == I64{46} || rt_text_byte(wrapping(data + at)) == I64{91} || rt_text_byte(wrapping(data + at)) == I64{93}
         if separator {
@@ -375,8 +375,8 @@ env_frame_error: fn(error: I64, origins: I64) {
     path: text_glue_word(wrapping(error + TEXT_FIELD_PATH))
     reason: text_glue_word(wrapping(error + TEXT_FIELD_REASON))
     target: jet_rt_string_builder_new()
-    origin := I64{-1}
-    at := I64{0}
+    ^origin: I64{-1}
+    ^at: I64{0}
     loop at < trap_word(origins) && origin < (I64{0}) {
         if env_fold_text(csv_words_get(origins, at + I64{1}), path) -> origin = at
         at += I64{2}
@@ -400,8 +400,8 @@ env_file_relative: fn(file: I64) -> Bool {
     data: rt_text_data(file)
     length: rt_text_len(file)
     if (length > I64{0} && rt_text_byte(data) == I64{47}) { return false }
-    start := I64{0}
-    at := I64{0}
+    ^start: I64{0}
+    ^at: I64{0}
     loop at <= length {
         if (at == length || rt_text_byte(wrapping(data + at)) == I64{47}) {
             if (at - start == I64{2} && rt_text_byte(wrapping(data + start)) == I64{46} && rt_text_byte(wrapping(wrapping(data + start) + I64{1})) == I64{46}) {
@@ -427,7 +427,7 @@ env_read_file: fn(file: I64, out: I64) -> I64 {
     }
     builder: jet_rt_string_builder_new()
     buffer: jet_rt_alloc(I64{8192}, I64{8})
-    failure := I64{0}
+    ^failure: I64{0}
     loop {
         count: host_call(I64{0}, fd, buffer, I64{8192})
         if (count == I64{-4}) { next }
@@ -438,7 +438,7 @@ env_read_file: fn(file: I64, out: I64) -> I64 {
         rt_text_append(builder, buffer, count)
     }
     jet_rt_free(buffer, I64{8192}, I64{8})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     text: jet_rt_string_builder_finish(builder)
     if (failure < I64{0}) {
         jet_rt_string_drop(text)
@@ -503,7 +503,7 @@ env_fail: fn(prefix: I64, middle: I64, suffix: I64, errors: I64, errors_len: I64
     tree: dyn_new(DYN_OBJECT, data_sequence_new(I64{0}, DYN_ENTRY_BYTES))
     origins: csv_words_new()
     plen: rt_text_len(prefix)
-    at := I64{0}
+    ^at: I64{0}
     loop at < trap_word(values) {
         row: csv_words_get(values, at)
         at += I64{1}
@@ -516,7 +516,7 @@ env_fail: fn(prefix: I64, middle: I64, suffix: I64, errors: I64, errors_len: I64
         }
         if !env_fold_equal(data, plen, rt_text_data(prefix), plen) -> next
         if (plen == length) { next }
-        segments := env_segments(wrapping(data + plen), length - plen)
+        ^segments: env_segments(wrapping(data + plen), length - plen)
         if (trap_word(segments) == I64{0}) {
             csv_words_free(segments)
             next
@@ -528,7 +528,7 @@ env_fail: fn(prefix: I64, middle: I64, suffix: I64, errors: I64, errors_len: I64
             csv_words_push(segments, key)
         }
         joined: jet_rt_string_builder_new()
-        index := I64{0}
+        ^index: I64{0}
         loop index < trap_word(segments) {
             if (index != I64{0}) { rt_text_push_word(joined, I64{46}, I64{1}) }
             jet_rt_string_builder_push(joined, csv_words_get(segments, index))
@@ -559,7 +559,7 @@ env_fail: fn(prefix: I64, middle: I64, suffix: I64, errors: I64, errors_len: I64
         csv_record_free(origins)
         return I64{1}
     }
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         env_frame_error(trap_word(wrapping(found + index * I64{8})), origins)
         index += I64{1}

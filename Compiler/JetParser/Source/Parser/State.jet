@@ -273,7 +273,7 @@ parser_synthetic_token: fn(kind: Int, span: Span) -> Token Never! { token_synthe
 // A synthetic token spelled `text`, interned in the state's names.
 parser_spelled_token: fn(state: ^JetParserState, kind: Int, span: Span, text: String) -> Token Never! {
     name: name_intern(state.tables[0].names, text)
-    token := token_synthetic(kind, span)
+    ^token: token_synthetic(kind, span)
     token.text = name
     token.decoded = name
     token
@@ -332,7 +332,7 @@ parser_text_reading: fn(state: JetParserState, token: Token, head: Bool) -> Toke
     if !head || token.literal < 0 -> return token.copy()
     row: state.tables[0].literals[token.literal].head
     if row < 0 -> return token.copy()
-    reading := token.copy()
+    ^reading: token.copy()
     reading.literal = row
     reading.decoded = state.tables[0].literals[token.literal].head_decoded
     reading
@@ -435,15 +435,13 @@ parser_current: fn(state: ^JetParserState) -> Token Never! {
     if state.pending_type_gt {
         return parser_synthetic_token(TOKEN_GT, Span{start: state.pending_type_gt_span.start + 1, end: state.pending_type_gt_span.end})
     }
-    pos := state.position
+    ^pos: state.position
     len: state.tokens.len()
     if pos < 0 || pos >= len {
         return parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
     }
-    kind := state.tokens[pos].kind
-    if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT {
-        return state.tokens[pos]
-    }
+    ^kind: state.tokens[pos].kind
+    if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT -> return state.tokens[pos]
     loop {
         pos += 1
         if pos >= len {
@@ -459,7 +457,7 @@ parser_current: fn(state: ^JetParserState) -> Token Never! {
 }
 
 parser_lookahead_forward: fn(state: JetParserState, start: Int, skip: Int) -> Token Never! {
-    remaining := skip
+    ^remaining: skip
     loop index in start..<state.tokens.len() {
         kind: state.tokens[index].kind
         if !parser_is_trivia(kind) {
@@ -471,7 +469,7 @@ parser_lookahead_forward: fn(state: JetParserState, start: Int, skip: Int) -> To
 }
 
 parser_lookahead: fn(state: ^JetParserState, offset: Int) -> Token Never! {
-    seek_offset := offset
+    ^seek_offset: offset
     if state.pending_type_gt {
         if seek_offset == 0 -> return parser_current(state)
         if seek_offset > 0 {
@@ -484,8 +482,8 @@ parser_lookahead: fn(state: ^JetParserState, offset: Int) -> Token Never! {
     }
     parser_skip_trivia(state)
     if seek_offset >= 0 -> return parser_lookahead_forward(state, state.position, seek_offset)
-    index := state.position - 1
-    remaining := -seek_offset
+    ^index: state.position - 1
+    ^remaining: -seek_offset
     loop index >= 0 {
         kind: state.tokens[index].kind
         if !parser_is_trivia(kind) {
@@ -502,7 +500,7 @@ parser_lookahead: fn(state: ^JetParserState, offset: Int) -> Token Never! {
 // decoded text, string parts). Same cursor effects as `parser_current` /
 // `parser_lookahead` (trivia skipped at the cursor) and the same kinds.
 parser_lookahead_kind_forward: fn(state: JetParserState, start: Int, skip: Int) -> Int Never! {
-    remaining := skip
+    ^remaining: skip
     loop index in start..<state.tokens.len() {
         kind: state.tokens[index].kind
         if !parser_is_trivia(kind) {
@@ -516,10 +514,10 @@ parser_lookahead_kind_forward: fn(state: JetParserState, start: Int, skip: Int) 
 parser_current_kind: fn(state: ^JetParserState) -> Int Never! {
     // Keep parser_current's split-token, trivia, and EOF cursor rules.
     if state.pending_type_gt -> return TOKEN_GT
-    pos := state.position
+    ^pos: state.position
     len: state.tokens.len()
     if pos < 0 || pos >= len -> return TOKEN_EOF
-    kind := state.tokens[pos].kind
+    ^kind: state.tokens[pos].kind
     if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT -> return kind
     loop {
         pos += 1
@@ -539,12 +537,10 @@ parser_kind_at: fn(state: ^JetParserState, offset: Int) -> Int Never! {
     if offset == 0 -> return parser_current_kind(state)
     if offset == 1 && !state.pending_type_gt {
         len: state.tokens.len()
-        pos := state.position
-        loop pos >= 0 && pos < len && parser_is_trivia(state.tokens[pos].kind) {
-            pos += 1
-        }
+        ^pos: state.position
+        loop pos >= 0 && pos < len && parser_is_trivia(state.tokens[pos].kind) -> pos += 1
         state.position = pos
-        idx := pos + 1
+        ^idx: pos + 1
         loop idx < len {
             kind: state.tokens[idx].kind
             if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT -> return kind
@@ -552,7 +548,7 @@ parser_kind_at: fn(state: ^JetParserState, offset: Int) -> Int Never! {
         }
         return TOKEN_EOF
     }
-    seek_offset := offset
+    ^seek_offset: offset
     if state.pending_type_gt {
         if seek_offset > 0 {
             return parser_lookahead_kind_forward(state, state.position, seek_offset - 1)
@@ -562,8 +558,8 @@ parser_kind_at: fn(state: ^JetParserState, offset: Int) -> Int Never! {
     }
     parser_skip_trivia(state)
     if seek_offset >= 0 -> return parser_lookahead_kind_forward(state, state.position, seek_offset)
-    index := state.position - 1
-    remaining := -seek_offset
+    ^index: state.position - 1
+    ^remaining: -seek_offset
     loop index >= 0 {
         kind: state.tokens[index].kind
         if !parser_is_trivia(kind) {
@@ -587,9 +583,7 @@ parser_bump: fn(state: ^JetParserState) -> Token Never! {
     }
     if token.kind == TOKEN_IDENT && state.tables.len() > 0 && state.tables[0].has_paste {
         if {
-            parser_glued_paste(state, token) -> {
-                parser_report_glued_paste(state, token)
-            }
+            parser_glued_paste(state, token) -> { parser_report_glued_paste(state, token) }
             state.derive_template_depth == 0 && parser_template_paste(state, token) -> {
                 parser_report_paste_outside_template(state, token)
             }
@@ -620,7 +614,7 @@ parser_glued_paste: fn(state: JetParserState, token: Token) -> Bool Never! {
     lo: token.span.start - state.source_offset
     hi: token.span.end - state.source_offset
     if lo < 0 || hi > source.len() -> return false
-    brace := lo
+    ^brace: lo
     loop brace < hi && source[brace] != (U8{123}) -> brace += 1
     if brace == hi -> return false
     text: parser_text(state, token)
@@ -652,10 +646,14 @@ parser_authored_semicolon_span: fn(state: ^JetParserState, span: Span) -> Bool N
 parser_report_explicit_semicolon: fn(state: ^JetParserState, at: Span, comma: Bool) Never! {
     span: Span{start: at.start, end: at.start + 1}
     loop reported in state.diagnostics {
-        if reported.code == "E0373" && reported.span == (Val(span)) -> return
+        if reported.code == "E0373" && reported.span == (Val(span)) {
+            return
+        }
     }
-    in_list := comma
-    if parser_innermost_open_delimiter(state) == .Val(open) -> in_list = in_list || open.kind == TOKEN_LPAREN || open.kind == TOKEN_LBRACKET
+    ^in_list: comma
+    if parser_innermost_open_delimiter(state) == .Val(open) {
+        in_list = in_list || open.kind == TOKEN_LPAREN || open.kind == TOKEN_LBRACKET
+    }
     edit: if in_list -> TextEdit{span: span, new_text: ","} else -> parser_deletion_edit(state, span)
     diagnostic: diagnostic_from_registry("E0373", Val(span), "A `;` can't stand here: it only separates statements and items", "A `;` means a line break between statements or items; inside a member list, an argument list, a type, a loop header or an interpolation hole it separates nothing.", "Write `,` between members or arguments, or remove the `;`.")
     state.diagnostics.push(diagnostic_with_edit(diagnostic, edit))
@@ -702,7 +700,7 @@ parser_add_error_code_edit: fn(state: ^JetParserState, code: String, span: Span,
 
 // An edit deleting `span` and the horizontal whitespace after it.
 parser_deletion_edit: fn(state: JetParserState, span: Span) -> TextEdit Never! {
-    end := span.end
+    ^end: span.end
     limit: parser_source_end_offset(state)
     loop end < limit {
         b: parser_source_byte(state, end)
@@ -721,9 +719,7 @@ parser_add_fatal_code: fn(state: ^JetParserState, code: String, span: Span, what
     }
     if code == "E0003" && parser_authored_semicolon_span(state, span) {
         parser_report_explicit_semicolon(state, span, false)
-    } else {
-        state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
-    }
+    } else { state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix)) }
     state.abort_mark = state.diagnostics.len()
     state.abort_position = state.position
 }
@@ -758,7 +754,7 @@ parser_recover_aborted_statement: fn(state: ^JetParserState, start: Int) Never! 
     }
     // Braces the statement opened before the error, such as a typed literal's
     // `HTML{` around a bad hole, close inside it; skip their closers too.
-    open := 0
+    ^open: 0
     loop index in start..<state.position {
         if index >= state.tokens.len() -> break
         kind: state.tokens[index].kind
@@ -782,7 +778,9 @@ parser_add_error_here: fn(state: ^JetParserState, what: String, why: String, fix
 parser_describe_token: fn(state: JetParserState, token: Token) -> String Never! {
     kind: token.kind
     if kind == TOKEN_EOF -> return "the end of the file"
-    if kind == TOKEN_SEMI -> return if token_is_authored_semicolon(token) -> "`;`" else -> "the end of the line"
+    if kind == TOKEN_SEMI {
+        return if token_is_authored_semicolon(token) -> "`;`" else -> "the end of the line"
+    }
     if kind == TOKEN_IDENT -> return "the name `{parser_text(state, token)}`"
     if kind == TOKEN_STRING -> return "a piece of quoted text"
     if kind == TOKEN_RAW_STRING -> return "a piece of raw text"
@@ -877,8 +875,8 @@ parser_closer_text: fn(kind: Int) -> String Never! {
 
 // The innermost bracket opened before the cursor and not yet closed.
 parser_innermost_open_delimiter: fn(state: JetParserState) -> Token? {
-    depth := 0
-    index := state.position - 1
+    ^depth: 0
+    ^index: state.position - 1
     loop index >= 0 {
         token: state.tokens[index]
         if {
@@ -895,7 +893,7 @@ parser_innermost_open_delimiter: fn(state: JetParserState) -> Token? {
 }
 
 parser_previous_end: fn(state: JetParserState) -> Int Never! {
-    index := state.position - 1
+    ^index: state.position - 1
     loop index >= 0 {
         token: state.tokens[index]
         if !parser_is_trivia(token.kind) && token.span.start != token.span.end {
@@ -956,8 +954,10 @@ parser_report_unclosed: fn(state: ^JetParserState, opener: Token, cutoff: String
 // before the first line back at the opener's indentation. Reports nothing
 // and returns false when every such `}` sits at its opener's indentation.
 parser_report_unclosed_by_indent: fn(state: ^JetParserState, open: Token) -> Bool {
-    if state.line_starts.len() == 0 || state.sources.len() == 0 || state.sources[0].len() == 0 -> return false
-    openers := [Int]{}
+    if state.line_starts.len() == 0 || state.sources.len() == 0 || state.sources[0].len() == 0 {
+        return false
+    }
+    ^openers: [Int]{}
     loop index in 0..<state.tokens.len() {
         token: state.tokens[index]
         if token.span.start < open.span.start || token.span.start == token.span.end -> next
@@ -984,7 +984,7 @@ parser_report_misindented_close: fn(state: ^JetParserState, opener: Token, close
     opener_line: parser_line_number_of(state, opener.span.start)
     close_line: parser_line_number_of(state, close.span.start)
     size: parser_source_end_offset(state)
-    insert_line := opener_line + 1
+    ^insert_line: opener_line + 1
     loop insert_line < close_line {
         local: insert_line - 1 - state.line_base
         if local < 0 || local >= state.line_starts.len() -> break
@@ -1010,7 +1010,7 @@ parser_report_misindented_close: fn(state: ^JetParserState, opener: Token, close
 // The keyword that opens a block at `offset` (`if`, `else`, `loop`, `match`),
 // or "" when the line opens with anything else.
 parser_line_head_keyword: fn(state: JetParserState, offset: Int) -> String Never! {
-    end := offset
+    ^end: offset
     limit: parser_source_end_offset(state)
     loop end < limit && parser_is_word_byte(parser_source_byte(state, end)) -> end += 1
     word: parser_source_slice(state, offset, end)
@@ -1024,8 +1024,8 @@ parser_is_word_byte: fn(byte: Int) -> Bool Never! {
 // Where the line holding `offset` starts.
 parser_line_start_of: fn(state: JetParserState, offset: Int) -> Int Never! {
     if state.line_starts.len() == 0 -> return 0
-    low := 0
-    high := state.line_starts.len()
+    ^low: 0
+    ^high: state.line_starts.len()
     loop low < high {
         mid: low + (high - low) /% 2
         if state.line_starts[mid] <= offset -> low = mid + 1 else -> high = mid
@@ -1036,8 +1036,8 @@ parser_line_start_of: fn(state: JetParserState, offset: Int) -> Int Never! {
 // The 1-based line holding `offset`.
 parser_line_number_of: fn(state: JetParserState, offset: Int) -> Int Never! {
     if state.line_starts.len() == 0 -> return 0
-    low := 0
-    high := state.line_starts.len()
+    ^low: 0
+    ^high: state.line_starts.len()
     loop low < high {
         mid: low + (high - low) /% 2
         if state.line_starts[mid] <= offset -> low = mid + 1 else -> high = mid
@@ -1048,7 +1048,7 @@ parser_line_number_of: fn(state: JetParserState, offset: Int) -> Int Never! {
 
 // The spaces and tabs that start the line beginning at `line_start`.
 parser_line_indent_width: fn(state: JetParserState, line_start: Int) -> Int Never! {
-    end := line_start
+    ^end: line_start
     limit: parser_source_end_offset(state)
     loop end < limit {
         b: parser_source_byte(state, end)
@@ -1086,7 +1086,9 @@ parser_authored_line_break: fn(state: JetParserState, start: Int, end: Int) -> B
     loop index in start..<end {
         if index >= 0 && index < state.tokens.len() {
             token: state.tokens[index]
-            if token.kind == TOKEN_SEMI && token.span.start == token.span.end && !token_is_authored_semicolon(token) -> return true
+            if token.kind == TOKEN_SEMI && token.span.start == token.span.end && !token_is_authored_semicolon(token) {
+                return true
+            }
         }
     }
     false
@@ -1139,14 +1141,16 @@ parser_else_arm_span: fn(state: JetParserState, table: Span, open_end: Int, last
         return ElseArmSpan{table: table, arm: arm, delete: delete, one_line: false, layout: None}
     }
     limit: parser_source_end_offset(state)
-    close := arm_end
+    ^close: arm_end
     loop close < limit && parser_is_space_byte(parser_source_byte(state, close)) -> close += 1
     if close >= limit || parser_source_byte(state, close) != 125 || parser_source_slice(state, open_end, else_start).contains("\n") {
         return ElseArmSpan{table: table, arm: arm, delete: delete, one_line: true, layout: None}
     }
-    line_start := open_end
-    loop line_start > state.source_offset && parser_source_byte(state, line_start - 1) != 10 -> line_start -= 1
-    indent_end := line_start
+    ^line_start: open_end
+    loop line_start > state.source_offset && parser_source_byte(state, line_start - 1) != 10 {
+        line_start -= 1
+    }
+    ^indent_end: line_start
     loop indent_end < limit {
         b: parser_source_byte(state, indent_end)
         if b != 32 && b != 9 -> break
@@ -1165,7 +1169,7 @@ parser_else_arm_span: fn(state: JetParserState, table: Span, open_end: Int, last
 // connectors (`if`, `else`, `->`); anything else, such as a comment, would be
 // dropped by the rebuilt table.
 parser_branch_gap_is_connector: fn(state: JetParserState, start: Int, end: Int) -> Bool Never! {
-    index := start
+    ^index: start
     loop index < end {
         if parser_is_space_byte(parser_source_byte(state, index)) {
             index += 1
@@ -1186,8 +1190,8 @@ parser_branch_gap_is_connector: fn(state: JetParserState, start: Int, end: Int) 
 parser_take_branch_piece: fn(state: JetParserState, piece: Span, cursor: Int, end: Int) -> Span? Never! {
     if piece.start < cursor || piece.end < piece.start || piece.end > end -> return None
     if !parser_branch_gap_is_connector(state, cursor, piece.start) -> return None
-    start := piece.start
-    stop := piece.end
+    ^start: piece.start
+    ^stop: piece.end
     loop start < stop && parser_is_space_byte(parser_source_byte(state, start)) -> start += 1
     loop stop > start && parser_is_space_byte(parser_source_byte(state, stop - 1)) -> stop -= 1
     Val(Span{start: start, end: stop})
@@ -1196,11 +1200,11 @@ parser_take_branch_piece: fn(state: JetParserState, piece: Span, cursor: Int, en
 // Re-indent every line after the first by one level, so a body moved from
 // statement level into a table arm keeps its relative layout.
 parser_indent_following_lines: fn(state: JetParserState, piece: Span, unit: String) -> String Never! {
-    out := ""
-    line_start := piece.start
-    first := true
+    ^out: ""
+    ^line_start: piece.start
+    ^first: true
     loop {
-        line_end := line_start
+        ^line_end: line_start
         loop line_end < piece.end && parser_source_byte(state, line_end) != 10 -> line_end += 1
         line: parser_source_slice(state, line_start, line_end)
         if {
@@ -1209,7 +1213,7 @@ parser_indent_following_lines: fn(state: JetParserState, piece: Span, unit: Stri
                 first = false
             }
             else -> {
-                blank := true
+                ^blank: true
                 loop index in line_start..<line_end {
                     if !parser_is_space_byte(parser_source_byte(state, index)) -> blank = false
                 }
@@ -1233,9 +1237,11 @@ parser_arm_table_edit: fn(state: JetParserState, if_span: Span, parts: [ParserBr
         return None
     }
     if parser_error_since(state, diag_mark) -> return None
-    line_start := start
-    loop line_start > state.source_offset && parser_source_byte(state, line_start - 1) != 10 -> line_start -= 1
-    indent_end := line_start
+    ^line_start: start
+    loop line_start > state.source_offset && parser_source_byte(state, line_start - 1) != 10 {
+        line_start -= 1
+    }
+    ^indent_end: line_start
     loop indent_end < start {
         b: parser_source_byte(state, indent_end)
         if b != 32 && b != 9 -> break
@@ -1243,11 +1249,11 @@ parser_arm_table_edit: fn(state: JetParserState, if_span: Span, parts: [ParserBr
     }
     indent: parser_source_slice(state, line_start, indent_end)
     unit: "    "
-    arms := ""
-    else_line := ""
-    else_seen := false
-    arm_count := 0
-    cursor := start + 2
+    ^arms: ""
+    ^else_line: ""
+    ^else_seen: false
+    ^arm_count: 0
+    ^cursor: start + 2
     loop part in parts {
         if else_seen -> return None
         if !part.is_else {
@@ -1258,7 +1264,7 @@ parser_arm_table_edit: fn(state: JetParserState, if_span: Span, parts: [ParserBr
             if cond.start == cond.end || body.start == body.end -> return None
             // A guard head that starts with `after` is a readiness timeout,
             // not a Boolean test.
-            word_end := cond.start
+            ^word_end: cond.start
             loop word_end < cond.end && parser_is_identifier_byte(parser_source_byte(state, word_end)) {
                 word_end += 1
             }
@@ -1309,17 +1315,17 @@ parser_prev_token_end: fn(state: JetParserState) -> Int Never! {
 // block span, `else` arm and statement rule it recorded.
 parser_rewind: fn(state: ^JetParserState, position: Int, diagnostics: Int, blocks: Int, else_arms: Int) {
     state.position = position
-    loop state.diagnostics.len() > diagnostics -> _ := state.diagnostics.pop()
-    loop state.block_spans.len() > blocks -> _ := state.block_spans.pop()
+    loop state.diagnostics.len() > diagnostics -> ^_: state.diagnostics.pop()
+    loop state.block_spans.len() > blocks -> ^_: state.block_spans.pop()
     // An abort raised inside the undone parse is undone with it.
     if state.abort_mark > diagnostics -> state.abort_mark = 0
-    loop state.else_arms.len() > else_arms -> _ := state.else_arms.pop()
+    loop state.else_arms.len() > else_arms -> ^_: state.else_arms.pop()
     // A rule recorded by the undone parse starts at or after the rewind
     // point; the reparse records it again.
     if position < state.tokens.len() {
         start: state.tokens[position].span.start
         loop state.statement_rules.len() > 0 && state.statement_rules[state.statement_rules.len() - 1].marker.span.start >= start {
-            _ := state.statement_rules.pop()
+            ^_: state.statement_rules.pop()
         }
     }
 }
@@ -1361,7 +1367,7 @@ parser_sync_top: fn(state: ^JetParserState) Never! {
 parser_sync_stmt: fn(state: ^JetParserState) Never! { parser_sync_stmt_from(state, 0) }
 
 parser_sync_stmt_from: fn(state: ^JetParserState, open: Int) Never! {
-    depth := open
+    ^depth: open
     loop {
         kind: parser_current_kind(state)
         if kind == TOKEN_EOF -> break

@@ -11,7 +11,7 @@ use files: core.files
 text: fn(bytes: [U8]) -> String { String.from_bytes(bytes) ?? panic("utf8") }
 
 write_sample: fn(path: String) -[FS, FS.Write, IO, Mem.Alloc]> {
-    writer := files.create(path) ?? panic("create")
+    ^writer: files.create(path) ?? panic("create")
     writer.write("abc") ?? panic("write")
     writer.write_all("defghij".bytes()) ?? panic("write_all")
     writer.flush() ?? panic("flush")
@@ -22,12 +22,12 @@ write_sample: fn(path: String) -[FS, FS.Write, IO, Mem.Alloc]> {
 }
 
 read_sample: fn(path: String) -[FS, FS.Read, IO, Mem.Alloc]> {
-    reader := files.open(path) ?? panic("open")
+    ^reader: files.open(path) ?? panic("open")
     info: reader.stat() ?? panic("reader.stat")
     head: reader.read(4) ?? panic("read")
     reader.seek(2) ?? panic("seek")
     parts: reader.chunks(3) ?? panic("chunks")
-    joined := ""
+    ^joined: ""
     loop i in 0..<parts.len() {
         if i > 0 -> joined = "{joined}|"
         joined = "{joined}{text(parts[i])}"

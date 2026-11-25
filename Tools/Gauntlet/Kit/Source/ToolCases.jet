@@ -56,7 +56,7 @@ ToolCase: struct {
 // repository `repo_dir` with the case's `env` added.
 run_tool_entry: fn(repo_dir: String, dir: String, entry: Dyn, jet_bin: String, work_dir: String, root: String) -[Env, Exec, FS, Time.Wait]> Dyn Err! {
     tool: if dyn_at(entry, "tool") == .Object(_) -> dyn_at(entry, "tool") else -> Dyn.object()
-    issues := [String]{}
+    ^issues: [String]{}
     loop field in ["original", "jet"] {
         path: text_or_empty(tool, field)
         if {
@@ -70,10 +70,10 @@ run_tool_entry: fn(repo_dir: String, dir: String, entry: Dyn, jet_bin: String, w
     listed: items_at(tool, "cases")
     if listed.len() == 0 -> issues.push("tool.cases is empty")
     entry_bytes: files.read_bytes(files.join(dir, "entry.json")) ?? return Err("{err}")
-    provenance := Dyn.object()
+    ^provenance: Dyn.object()
     provenance["entry_json_sha256"] = Dyn.Text(crypto.sha256(entry_bytes).hex())
     provenance["corpus_tree_sha256"] = Dyn.Text(tree_sha256(dir) ?? return Err("{err}"))
-    out := Dyn.object()
+    ^out: Dyn.object()
     put_present(out, "name", value_at(entry, "name"))
     out["original"] = dyn_at(tool, "original")
     out["jet"] = dyn_at(tool, "jet")
@@ -86,7 +86,7 @@ run_tool_entry: fn(repo_dir: String, dir: String, entry: Dyn, jet_bin: String, w
     }
     env_runner: files.join(repo_dir, "Tools/Agent/JetEnv.jet")
     fixtures: if dyn_at(tool, "fixtures") == .Text(path) -> path_joined(dir, path) else -> ""
-    inner := [EnvSetting]{}
+    ^inner: [EnvSetting]{}
     if jet_bin.contains("/") {
         named: files.resolve(jet_bin) ?? jet_bin.copy()
         inner.push(EnvSetting{name: "PATH", value: "{files.dirname(named)}:{sys.get("PATH") ?? ""}"})
@@ -96,8 +96,8 @@ run_tool_entry: fn(repo_dir: String, dir: String, entry: Dyn, jet_bin: String, w
     // a leading `--` included.
     programs: [tool_command(path_joined(root, text_or_empty(tool, "original"))), [jet_bin.copy(), path_joined(root, text_or_empty(tool, "jet")), "--"]]
     timeout_ms: tool_timeout_ms()
-    cases := [Dyn]{}
-    passed := true
+    ^cases: [Dyn]{}
+    ^passed: true
     loop index in 0..<listed.len() {
         item: listed[index]
         settings: if dyn_at(item, "env") == .Object(rows) -> rows.map(fn(row) { EnvSetting{name: row.key.copy(), value: js_text(row.value)} }) else -> [EnvSetting]{}
@@ -112,20 +112,20 @@ run_tool_entry: fn(repo_dir: String, dir: String, entry: Dyn, jet_bin: String, w
             check: text_or_empty(item, "check"),
             expected: expected ?? [U8]{},
         }
-        shown_env := Dyn.object()
+        ^shown_env: Dyn.object()
         loop setting in settings -> shown_env[setting.name] = Dyn.Text(setting.value.copy())
-        row := Dyn.object()
+        ^row: Dyn.object()
         row["case"] = Dyn.Int(index + 1)
         row["args"] = Dyn.Array(case.args.map(fn(arg) { Dyn.Text(arg.copy()) }))
         row["env"] = shown_env
         row["exit"] = Dyn.Int(case.exit)
         row["expected"] = expected_value
-        row_passed := true
+        ^row_passed: true
         loop side in 0..<2 {
             label: TOOL_SIDES[side]
             cwd: files.join(work_dir, "case-{index + 1}-{label}")
             reason: if expected == None -> "expected output `{expected_name}` does not exist" else -> run_side(env_runner, case, programs[side], dir, cwd, fixtures, jet_bin, timeout_ms)
-            verdict := Dyn.object()
+            ^verdict: Dyn.object()
             verdict["status"] = Dyn.Text(if reason == "" -> "pass" else -> "fail")
             if reason != "" {
                 verdict["reason"] = Dyn.Text(reason)
@@ -171,7 +171,7 @@ run_side: fn(env_runner: String, case: ToolCase, command: [String], dir: String,
 // runs a process: 124 with a timeout note once `timeout_ms` pass, 128 when
 // a signal stopped it and 127 when it could not start.
 run_tool_command: fn(env_runner: String, cwd: String, command: [String], env: [EnvSetting], timeout_ms: Int) -> ToolRun {
-    spec := process.cmd([env_runner].concat(command)).cwd(cwd).timeout(time.duration_ms(timeout_ms))
+    ^spec: process.cmd([env_runner].concat(command)).cwd(cwd).timeout(time.duration_ms(timeout_ms))
     loop setting in env -> spec = spec.env(setting.name, setting.value)
     receipt: spec.run() ?? return ToolRun{code: 127, stdout: "", stderr: "{err}"}
     if receipt.timed_out {
@@ -212,7 +212,7 @@ path_joined: fn(base: String, path: String) -> String {
 // Where `actual` first differs from `expected`, or "" when they are equal.
 byte_mismatch: fn(expected: [U8], actual: [U8]) -> String {
     limit: if expected.len() < actual.len() -> expected.len() else -> actual.len()
-    at := 0
+    ^at: 0
     loop at < limit && expected[at] == actual[at] -> at += 1
     if at == expected.len() && at == actual.len() -> return ""
     "byte {at}: expected {shown_bytes(expected, at)}, got {shown_bytes(actual, at)} (length {expected.len()}/{actual.len()})"
@@ -228,13 +228,13 @@ shown_bytes: fn(bytes: [U8], at: Int) -> String {
 // a zero byte, its bytes and a zero byte, in name order at each level; links
 // are left out and not followed.
 tree_sha256: fn(root: String) -[FS]> String IOError! {
-    hasher := crypto.Hasher.new()
+    ^hasher: crypto.Hasher.new()
     hash_tree(hasher, root, "")
     Ok(hasher.digest())
 }
 
 hash_tree: fn(hasher: ^crypto.Hasher, dir: String, relative: String) IOError! {
-    names := files.list_dir(dir).map(fn(item) { item.name.copy() })
+    ^names: files.list_dir(dir).map(fn(item) { item.name.copy() })
     names.sort()
     loop name in names {
         full: files.join(dir, name)
@@ -275,7 +275,7 @@ hash_tree: fn(hasher: ^crypto.Hasher, dir: String, relative: String) IOError! {
     files.create_dir_all(files.join(dir, "b")) ?? panic("{err}")
     files.write(files.join(dir, "b/x"), "x") ?? panic("{err}")
     files.write(files.join(dir, "a"), "a") ?? panic("{err}")
-    want := crypto.Hasher.new()
+    ^want: crypto.Hasher.new()
     loop part in ["a", "a", "b/x", "x"] {
         want.update(part.bytes())
         want.update([U8{0}])

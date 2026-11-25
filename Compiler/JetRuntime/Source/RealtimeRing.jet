@@ -32,7 +32,7 @@ realtime_ring_publish: fn(ring: I64, data: I64, length: I64, zeroed: Bool) -> Bo
     frames: sync_load(wrapping(ring + RT_RING_FRAMES))
     if (!zeroed && frames != length) { return false }
     slot: realtime_ring_slot(ring, sequence)
-    index := I64{0}
+    ^index: I64{0}
     loop index < frames {
         sync_store(wrapping(slot + index * I64{8}), if zeroed -> I64{0} else -> sync_load(wrapping(data + index * I64{8})))
         index += I64{1}
@@ -56,7 +56,7 @@ realtime_ring_publish: fn(ring: I64, data: I64, length: I64, zeroed: Bool) -> Bo
     frames: sync_load(wrapping(ring + RT_RING_FRAMES))
     slot: realtime_ring_slot(ring, sequence)
     data: jet_rt_alloc(frames * I64{8}, I64{8})
-    index := I64{0}
+    ^index: I64{0}
     loop index < frames {
         sync_store(wrapping(data + index * I64{8}), sync_load(wrapping(slot + index * I64{8})))
         index += I64{1}

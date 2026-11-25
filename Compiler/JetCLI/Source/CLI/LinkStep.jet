@@ -94,9 +94,9 @@ jet_cli_link_step: fn(file: String, options: BuildOptions, result: JetDriverComp
     at: jet_cli_entry_join(root, folder)
     cli_files.remove_all(at).drop("a folder that isn't there has nothing to clear; one that can't be cleared fails the create below")
     cli_files.create_dir_all(at) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't create `{at}` for the link inputs of `{name}`: {err}", jet_cli_why("E2105"), "make `{at}` writable", color)}
-    objects := [String]{}
-    libraries := [String]{}
-    taken := [String]{}
+    ^objects: [String]{}
+    ^libraries: [String]{}
+    ^taken: [String]{}
     loop index in 0..<names.len() {
         base: if index == 0 -> "{name}.o" else -> cli_files.basename(names[index])
         written: if taken.contains(base) -> "{index}-{base}" else -> base
@@ -133,7 +133,7 @@ jet_cli_post_link_steps: fn(file: String, options: BuildOptions, result: JetDriv
     at: jet_cli_entry_join(root, folder)
     cli_files.remove_all(at).drop("a folder that isn't there has nothing to clear; one that can't be cleared fails the create below")
     cli_files.create_dir_all(at) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't create `{at}` for the post-link steps of `{name}`: {err}", jet_cli_why("E2105"), "make `{at}` writable", color)}
-    path := "{folder}/{name}.0"
+    ^path: "{folder}/{name}.0"
     cli_files.rename(binary, jet_cli_entry_join(root, path)) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't move the linked `{name}` to `{path}` for its post-link steps: {err}", jet_cli_why("E2105"), "make `{at}` writable", color)}
     hooks: build_option_items(build_options_value(options, "post_link"))
     setting: build_option_place(options.values[build_option_index("post_link")])
@@ -179,7 +179,7 @@ jet_cli_link_step_own: fn(step: JetCLILinkStep, action: JetDriverBuildAction, op
     if action.outputs.len() != 1 || action.outputs[0] != step.output {
         return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, whose Jet link makes {action.outputs.len()} files, not `{step.output}` alone", None, "keep `outputs: [inputs.output]` on a `BuildAction` with no command")
     }
-    bytes := [[U8]]{}
+    ^bytes: [[U8]]{}
     loop input in action.inputs {
         if !build_session_path(input) {
             return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, whose Jet link reads `{input}`, outside the project", None, "name only the link inputs the hook was given or files inside the project, by relative paths")
@@ -205,7 +205,7 @@ jet_cli_link_step_run: fn(step: JetCLILinkStep, action: JetDriverBuildAction, ma
     if !action.outputs.contains(made) {
         return Val(jet_cli_link_step_failed(step, "{step.setting} names the {step.kind} `{step.hook}`, whose step `{action.name}` doesn't make `{made}`", None, "list `{step.makes}` in the `outputs` of the `BuildAction` the hook returns"))
     }
-    session := build_session_new(1, cli_files.basename(step.binary), "", BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}})
+    ^session: build_session_new(1, cli_files.basename(step.binary), "", BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}})
     declared: build_session_call(session, build_session_action, jet_driver_build_action_session_args(action), None, true, 0, 0)
     if declared == .Failure(error) {
         return Val(jet_cli_link_step_failed(step, "{step.setting} names the {step.kind} `{step.hook}`, whose step `{action.name}` is refused: {error.what}", None, error.fix))
@@ -218,7 +218,7 @@ jet_cli_link_step_run: fn(step: JetCLILinkStep, action: JetDriverBuildAction, ma
     execution: build_plan_execution(plan)
     action_timeout_ms: build_option_duration_ms(build_options_value(options, "action_timeout")) ?? panic("the resolved `action_timeout` is a checked duration")
     hermetic: jet_cli_build_hermetic_plan(execution, action_timeout_ms, jet_cli_build_last(step.root).kept) ?? return Val(JetCLIBuilt.Failed{output: jet_cli_ice("the {step.kind}'s plan does not lower to the executor's graph: {err.debug_text()}")})
-    workspace := OverlayPolicy.empty()
+    ^workspace: OverlayPolicy.empty()
     refused: jet_cli_build_workspace_policy(workspace, step.root)
     if refused.move() == .Val(what) {
         return Val(JetCLIBuilt.Failed{output: jet_cli_build_policy_refused(what, step.color)})
@@ -229,7 +229,7 @@ jet_cli_link_step_run: fn(step: JetCLILinkStep, action: JetDriverBuildAction, ma
     if granted.move() == {
         .Refused(output) -> Val(JetCLIBuilt.Failed{output: output})
         .Granted(grants, probes) -> {
-            ran := build_execute_actions(hermetic, steps, step.root, None, grants, probes, cli_sys.cpu_count(), None, None)
+            ^ran: build_execute_actions(hermetic, steps, step.root, None, grants, probes, cli_sys.cpu_count(), None, None)
             outcome: ran.pop() ?? panic("the executor answered no outcome for the {step.kind}")
             if outcome == .Err(error) {
                 if error == .Reported(report) {

@@ -48,7 +48,7 @@ precise_inexact_int: fn(message: I64) -> I64 {
 
 // native(): the Int argument must fit the host i64.
 precise_native_fits: fn(value: I64) -> Bool {
-    _ := jet_int_owned_to_i64(value)
+    ^_: jet_int_owned_to_i64(value)
     jet_scheduler_native_propagate() == I64{0}
 }
 
@@ -87,8 +87,8 @@ precise_signed: fn(magnitude: I64, negative: Bool) -> I64 {
 
 // CtBigInt.gcd over the magnitudes; gcd(0, d) is d.
 precise_gcd: fn(left: I64, right: I64) -> I64 {
-    a := precise_abs(left)
-    b := precise_abs(right)
+    ^a: precise_abs(left)
+    ^b: precise_abs(right)
     loop b != (I64{0}) {
         rest: precise_rem(a, b)
         jet_rt_int_drop(a)
@@ -122,8 +122,8 @@ fraction_make: fn(numerator: I64, denominator: I64) -> I64 {
         jet_rt_int_drop(numerator)
         return I64{0}
     }
-    top := numerator
-    bottom := denominator
+    ^top: numerator
+    ^bottom: denominator
     if int_negative(bottom) {
         flipped_top: precise_neg(top)
         flipped_bottom: precise_neg(bottom)
@@ -307,8 +307,8 @@ fraction_render: fn(value: I64) -> I64 {
 // CtDecimal.normalize over an owned coefficient: trailing fractional zeros
 // leave with the scale, and zero has scale 0.
 decimal_normalized: fn(coefficient: I64, scale: I64) -> I64 {
-    digits := coefficient
-    places := scale
+    ^digits: coefficient
+    ^places: scale
     loop places > (I64{0}) && digits != (I64{0}) {
         if (precise_rem(digits, I64{10}) != I64{0}) { break }
         next: precise_div(digits, I64{10})
@@ -322,7 +322,7 @@ decimal_normalized: fn(coefficient: I64, scale: I64) -> I64 {
 
 // The count of `factor` in an owned value; the remaining cofactor replaces it.
 decimal_strip_factor: fn(value: I64, factor: I64) -> I64 {
-    count := I64{0}
+    ^count: I64{0}
     loop {
         if (precise_rem(rt_text_word(value), factor) != I64{0}) { break }
         next: precise_div(rt_text_word(value), factor)
@@ -365,7 +365,7 @@ decimal_render: fn(value: I64) -> I64 {
     if (count <= scale) {
         rt_text_push_scalar(result, I64{48})
         rt_text_push_scalar(result, I64{46})
-        pad := scale - count
+        ^pad: scale - count
         loop pad > (I64{0}) {
             rt_text_push_scalar(result, I64{48})
             pad -= I64{1}
@@ -382,7 +382,7 @@ decimal_render: fn(value: I64) -> I64 {
 }
 
 decimal_digits_valid: fn(data: I64, from: I64, to: I64) -> Bool {
-    at := from
+    ^at: from
     loop at < to {
         byte: rt_text_byte(wrapping(data + at))
         if (byte < I64{48} || byte > I64{57}) { return false }
@@ -400,21 +400,21 @@ decimal_parse: fn(text: I64) -> I64 {
     end: numeric_trim_end(text, start)
     if (start >= end) { return I64{0} }
     data: rt_text_data(text)
-    at := start
-    negative := false
+    ^at: start
+    ^negative: false
     first: rt_text_byte(wrapping(data + at))
     if (first == I64{45} || first == I64{43}) {
         negative = first == I64{45}
         at += I64{1}
     }
-    stop := at
+    ^stop: at
     loop stop < end && rt_text_byte(wrapping(data + stop)) != (I64{101}) && rt_text_byte(wrapping(data + stop)) != (I64{69}) {
         stop += I64{1}
     }
-    exponent := I64{0}
+    ^exponent: I64{0}
     if (stop < end) {
-        cursor := stop + I64{1}
-        exponent_negative := false
+        ^cursor: stop + I64{1}
+        ^exponent_negative: false
         if (cursor < end && (rt_text_byte(wrapping(data + cursor)) == I64{45} || rt_text_byte(wrapping(data + cursor)) == I64{43})) {
             exponent_negative = rt_text_byte(wrapping(data + cursor)) == I64{45}
             cursor += I64{1}
@@ -428,7 +428,7 @@ decimal_parse: fn(text: I64) -> I64 {
         }
         if exponent_negative -> exponent = -exponent
     }
-    dot := at
+    ^dot: at
     loop dot < stop && rt_text_byte(wrapping(data + dot)) != (I64{46}) -> dot += I64{1}
     fraction_start: if (dot < stop) -> dot + I64{1} else -> stop
     whole_len: dot - at
@@ -495,7 +495,7 @@ decimal_integral: fn(value: I64, mode: I64) -> I64 {
     remainder: precise_rem(top, denominator)
     negative: int_negative(top)
     exact: remainder == I64{0}
-    result := I64{0}
+    ^result: I64{0}
     if (mode == I64{0}) {
         result = if (negative && !exact) -> jet_int_sub(quotient, I64{1}) else -> jet_rt_int_clone(quotient)
     } else if (mode == I64{1}) {
@@ -563,9 +563,9 @@ decimal_integral: fn(value: I64, mode: I64) -> I64 {
 // operand scale.
 #Export(c) jet_decimal_mul: fn(left: I64, right: I64) -> I64 {
     minimum: decimal_common_scale(left, right)
-    product := jet_int_mul(precise_top(left), precise_top(right))
+    ^product: jet_int_mul(precise_top(left), precise_top(right))
     if (product == I64{0}) { return precise_pair(product, minimum) }
-    scale := precise_bottom(left) + precise_bottom(right)
+    ^scale: precise_bottom(left) + precise_bottom(right)
     loop scale > minimum {
         if (precise_rem(product, I64{10}) != I64{0}) { break }
         next: precise_div(product, I64{10})

@@ -83,14 +83,14 @@ sema_name_add_reference: fn(facts: ^NameFacts, filter: ^SemaNameReferenceFilter,
         return
     }
     source_module: graph.modules[module_index]
-    declaration_name := symbol.name
+    ^declaration_name: symbol.name
     if owner_key != "" {
         if symbol_find(graph.symbols, owner_key) == .Val(owner) {
             owner_name: owner_names.get(sema_name_owner_index_key(module_index, owner))
             if owner_name == .Val(name) -> declaration_name = "{name}.{symbol.name}"
         }
     }
-    semantic_identity := String?{None}
+    ^semantic_identity: String?{None}
     if kind != "local" && kind != "param" {
         word: if {
             kind == "function" && owner_key != "" -> "method"
@@ -113,8 +113,8 @@ sema_name_owner_index_key: fn(module_index: Int, owner: SymbolID) -> Int Never! 
 // A later impl of the same owner key replaces an earlier row, as the ordered
 // nominal-then-impl search did.
 sema_name_owner_index: fn(graph: SemaRegistrationGraph) -> [Int:String] Never! {
-    names := [Int:String]{}
-    module_index := 0
+    ^names: [Int:String]{}
+    ^module_index: 0
     loop module_index < graph.modules.len() {
         graph_module: graph.modules[module_index]
         loop nominal in graph_module.nominals {
@@ -156,14 +156,14 @@ sema_name_symbol_row: fn(index: SemaNameSymbolIndex, id: SymbolID) -> Int Never!
 sema_name_first_in_module: fn(seen: ^[NameTable], module_index: Int, name: String) -> Bool Never! {
     loop seen.len() <= module_index -> seen.push(name_table_sized(16))
     if name_find(seen[module_index], name) != None -> return false
-    _ := name_intern(seen[module_index], name)
+    ^_: name_intern(seen[module_index], name)
     true
 }
 
 // Every declaration a call fact can name, keyed by symbol id. The first
 // declaration in graph order wins, as the ordered search did.
 sema_name_symbol_index: fn(graph: SemaRegistrationGraph) -> SemaNameSymbolIndex Never! {
-    index := SemaNameSymbolIndex{keys: [U32:Int]{}, declarations: [SemaNameResolvedDeclaration]{}}
+    ^index: SemaNameSymbolIndex{keys: [U32:Int]{}, declarations: [SemaNameResolvedDeclaration]{}}
     loop graph_module_index in 0..<graph.modules.len() {
         loop symbol_index in 0..<graph.modules[graph_module_index].symbols.len() {
             sema_name_index_symbol(
@@ -203,12 +203,12 @@ sema_name_symbol_index: fn(graph: SemaRegistrationGraph) -> SemaNameSymbolIndex 
 }
 
 sema_name_first_declarations: fn(rows: ^^[NameDeclaration]) -> [NameDeclaration] Never! {
-    owned_rows := rows.move()
-    seen := [NameTable]{}
-    kept := [NameDeclaration]{}
+    ^owned_rows: rows.move()
+    ^seen: [NameTable]{}
+    ^kept: [NameDeclaration]{}
     owned_rows.reverse()
     loop owned_rows.len() > 0 {
-        row := owned_rows.pop() ?? break
+        ^row: owned_rows.pop() ?? break
         if !sema_name_first_in_module(seen, row.module_index, row.name) -> next
         kept.push(row)
     }
@@ -216,12 +216,12 @@ sema_name_first_declarations: fn(rows: ^^[NameDeclaration]) -> [NameDeclaration]
 }
 
 sema_name_first_aliases: fn(rows: ^^[NameAlias]) -> [NameAlias] Never! {
-    owned_rows := rows.move()
-    seen := [NameTable]{}
-    kept := [NameAlias]{}
+    ^owned_rows: rows.move()
+    ^seen: [NameTable]{}
+    ^kept: [NameAlias]{}
     owned_rows.reverse()
     loop owned_rows.len() > 0 {
-        row := owned_rows.pop() ?? break
+        ^row: owned_rows.pop() ?? break
         if !sema_name_first_in_module(seen, row.module_index, row.name) -> next
         kept.push(row)
     }
@@ -250,7 +250,7 @@ SemaNameReferenceKeys: struct {
 SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS: 1024
 
 sema_name_reference_keys: fn() -> SemaNameReferenceKeys Never! {
-    slots := [Int]{}
+    ^slots: [Int]{}
     loop _ in 0..<SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS -> slots.push(0)
     SemaNameReferenceKeys{path: [Int]{}, kind: [Int]{}, start: [Int]{}, end: [Int]{}, identity: [Int]{}, member: [Int]{}, slots: slots, mask: SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS - 1}
 }
@@ -264,7 +264,7 @@ sema_name_reference_hash_mix: fn(hash: U64, part: Int) -> U64 Never! {
 
 // FNV-1a over the six key parts, as a slot index under `mask`.
 sema_name_reference_slot: fn(mask: Int, path: Int, kind: Int, start: Int, end: Int, identity: Int, member: Int) -> Int Never! {
-    hash := U64{0x811c9dc5}
+    ^hash: U64{0x811c9dc5}
     hash = sema_name_reference_hash_mix(hash, path)
     hash = sema_name_reference_hash_mix(hash, kind)
     hash = sema_name_reference_hash_mix(hash, start)
@@ -277,10 +277,10 @@ sema_name_reference_slot: fn(mask: Int, path: Int, kind: Int, start: Int, end: I
 sema_name_reference_keys_grow: fn(keys: ^SemaNameReferenceKeys) Never! {
     capacity: (keys.mask + 1) * 2
     mask: capacity - 1
-    slots := [Int]{}
+    ^slots: [Int]{}
     loop _ in 0..<capacity -> slots.push(0)
     loop row in 0..<keys.path.len() {
-        slot := sema_name_reference_slot(mask, keys.path[row], keys.kind[row], keys.start[row], keys.end[row], keys.identity[row], keys.member[row])
+        ^slot: sema_name_reference_slot(mask, keys.path[row], keys.kind[row], keys.start[row], keys.end[row], keys.identity[row], keys.member[row])
         loop slots[slot] != 0 -> slot = (slot + 1) & mask
         slots[slot] = row + 1
     }
@@ -290,7 +290,7 @@ sema_name_reference_keys_grow: fn(keys: ^SemaNameReferenceKeys) Never! {
 
 // Whether the key is already in `keys`, recording it when it is new.
 sema_name_reference_seen: fn(keys: ^SemaNameReferenceKeys, path: Int, kind: Int, start: Int, end: Int, identity: Int, member: Int) -> Bool Never! {
-    slot := sema_name_reference_slot(keys.mask, path, kind, start, end, identity, member)
+    ^slot: sema_name_reference_slot(keys.mask, path, kind, start, end, identity, member)
     loop keys.slots[slot] != 0 {
         row: keys.slots[slot] - 1
         if keys.path[row] == path && keys.kind[row] == kind && keys.start[row] == start && keys.end[row] == end && keys.identity[row] == identity && keys.member[row] == member {
@@ -315,13 +315,13 @@ sema_name_reference_seen: fn(keys: ^SemaNameReferenceKeys, path: Int, kind: Int,
 // interned in one table, so two rows have the same key exactly when their
 // ids, span bounds and identity ids agree.
 sema_name_first_references: fn(rows: [NameReference]) -> [NameReference] Never! {
-    parts := name_table()
-    seen := sema_name_reference_keys()
-    kept := [NameReference]{}
+    ^parts: name_table()
+    ^seen: sema_name_reference_keys()
+    ^kept: [NameReference]{}
     // A module's rows are contiguous, so the current path keeps its part id;
     // kinds and identities are interned row by row.
-    path_text := ""
-    path := -1
+    ^path_text: ""
+    ^path: -1
     loop row in rows {
         identity: if row.semantic_identity == {
             .Val(value) -> name_index(name_intern(parts, value)) + 1
@@ -355,31 +355,31 @@ sema_name_scoped: fn(prefix: String, name: String) -> String Never! {
 sema_name_scoped_path: fn(prefix: String, name: String) -> String Never! { "{prefix}.{name}" }
 
 sema_name_add_method: fn(facts: ^NameFacts, module_index: Int, owner_name: String, owner_path: String, function: Func) Never! {
-    name := sema_name_scoped(owner_name, function.name)
-    path := sema_name_scoped_path(owner_path, function.name)
-    visibility := sema_name_visibility_flags(function.is_pub, function.is_package_pub)
+    ^name: sema_name_scoped(owner_name, function.name)
+    ^path: sema_name_scoped_path(owner_path, function.name)
+    ^visibility: sema_name_visibility_flags(function.is_pub, function.is_package_pub)
     sema_name_add_declaration(facts, module_index, name, path, "method", function.name_span, visibility)
 }
 
 sema_name_add_item: fn(facts: ^NameFacts, module_index: Int, module_path: String, prefix: String, item: Item) Never! {
     if item == {
         .Func(function) -> {
-            name := sema_name_scoped(prefix, function.name)
-            path := sema_name_scoped_path(module_path, function.name)
-            visibility := sema_name_visibility_flags(function.is_pub, function.is_package_pub)
+            ^name: sema_name_scoped(prefix, function.name)
+            ^path: sema_name_scoped_path(module_path, function.name)
+            ^visibility: sema_name_visibility_flags(function.is_pub, function.is_package_pub)
             sema_name_add_declaration(facts, module_index, name, path, "function", function.name_span, visibility)
         }
         .Struct(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
-            visibility := sema_name_visibility_flags(definition.is_pub, definition.is_package_pub)
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
+            ^visibility: sema_name_visibility_flags(definition.is_pub, definition.is_package_pub)
             sema_name_add_declaration(facts, module_index, name, path, "type", definition.name_span, visibility)
             loop field in definition.fields {
                 sema_name_add_declaration(facts, module_index, "{name}.{field.name}", "{path}.{field.name}", "field", field.name_span, sema_name_visibility_flags(field.is_pub, field.is_package_pub))
             }
             if definition.state != None {
                 state: definition.state ?? StateDecl{is_pub: false, is_package_pub: false, type_name: "", type_name_span: definition.name_span, states: [NamedSpan]{}, span: definition.span}
-                state_visibility := sema_name_visibility_flags(state.is_pub, state.is_package_pub)
+                ^state_visibility: sema_name_visibility_flags(state.is_pub, state.is_package_pub)
                 loop value in state.states {
                     sema_name_add_declaration(facts, module_index, "{name}.State.{value.name}", "{path}.State.{value.name}", "state", value.span, state_visibility)
                 }
@@ -394,9 +394,9 @@ sema_name_add_item: fn(facts: ^NameFacts, module_index: Int, module_path: String
             }
         }
         .Enum(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
-            visibility := sema_name_visibility_flags(definition.is_pub, definition.is_package_pub)
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
+            ^visibility: sema_name_visibility_flags(definition.is_pub, definition.is_package_pub)
             sema_name_add_declaration(facts, module_index, name, path, "type", definition.name_span, visibility)
             loop variant in definition.variants {
                 sema_name_add_declaration(facts, module_index, "{name}.{variant.name}", "{path}.{variant.name}", "variant", variant.name_span, visibility)
@@ -411,33 +411,33 @@ sema_name_add_item: fn(facts: ^NameFacts, module_index: Int, module_path: String
             }
         }
         .Distinct(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
             sema_name_add_declaration(facts, module_index, name, path, "type", definition.name_span, sema_name_visibility_flags(definition.is_pub, definition.is_package_pub))
         }
         .TypeAlias(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
             sema_name_add_declaration(facts, module_index, name, path, "type", definition.name_span, sema_name_visibility_flags(definition.is_pub, definition.is_package_pub))
         }
         .UnitFamily(_) -> {}
         .Trait(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
-            visibility := sema_name_visibility_flags(definition.is_pub, definition.is_package_pub)
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
+            ^visibility: sema_name_visibility_flags(definition.is_pub, definition.is_package_pub)
             sema_name_add_declaration(facts, module_index, name, path, "trait", definition.name_span, visibility)
             loop method in definition.methods {
                 sema_name_add_declaration(facts, module_index, "{name}.{method.name}", "{path}.{method.name}", "method", method.name_span, visibility)
             }
         }
         .Tag(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
             sema_name_add_declaration(facts, module_index, name, path, "tag", definition.name_span, sema_name_visibility_flags(definition.is_pub, definition.is_package_pub))
         }
         .Impl(definition) -> {
-            owner := sema_name_scoped(prefix, definition.type_name)
-            owner_path := sema_name_scoped_path(module_path, definition.type_name)
+            ^owner: sema_name_scoped(prefix, definition.type_name)
+            ^owner_path: sema_name_scoped_path(module_path, definition.type_name)
             loop method in definition.methods {
                 sema_name_add_method(facts, module_index, owner, owner_path, method)
             }
@@ -446,28 +446,28 @@ sema_name_add_item: fn(facts: ^NameFacts, module_index: Int, module_path: String
             }
         }
         .Const(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
             sema_name_add_declaration(facts, module_index, name, path, "const", definition.name_span, NameVisibility.Private)
         }
         .ExternRust(block) -> {
             loop function in block.functions {
-                name := sema_name_scoped(prefix, function.name)
-                path := sema_name_scoped_path(module_path, function.name)
+                ^name: sema_name_scoped(prefix, function.name)
+                ^path: sema_name_scoped_path(module_path, function.name)
                 sema_name_add_declaration(facts, module_index, name, path, "extern", function.name_span, NameVisibility.Private)
             }
         }
         .CModule(c_module) -> {
             loop function in c_module.functions {
-                name := sema_name_scoped(prefix, function.name)
-                path := sema_name_scoped_path(module_path, function.name)
+                ^name: sema_name_scoped(prefix, function.name)
+                ^path: sema_name_scoped_path(module_path, function.name)
                 sema_name_add_declaration(facts, module_index, name, path, "extern", function.name_span, NameVisibility.Public)
             }
         }
         .CodeModule(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
-            kind := "file_module"
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
+            ^kind: "file_module"
             if definition.body != None -> kind = "module"
             sema_name_add_declaration(facts, module_index, name, path, kind, definition.name_span, sema_name_visibility_flags(definition.is_pub, definition.is_package_pub))
             if definition.body != None {
@@ -476,21 +476,21 @@ sema_name_add_item: fn(facts: ^NameFacts, module_index: Int, module_path: String
             }
         }
         .GenericModule(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
             sema_name_add_declaration(facts, module_index, name, path, "module", definition.name_span, sema_name_visibility_flags(definition.is_pub, definition.is_package_pub))
             loop nested in definition.body {
                 sema_name_add_item(facts, module_index, path, name, nested)
             }
         }
         .ModuleAlias(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
             sema_name_add_declaration(facts, module_index, name, path, "module", definition.name_span, sema_name_visibility_flags(definition.is_pub, definition.is_package_pub))
         }
         .ProtocolDecl(definition) -> {
-            name := sema_name_scoped(prefix, definition.name)
-            path := sema_name_scoped_path(module_path, definition.name)
+            ^name: sema_name_scoped(prefix, definition.name)
+            ^path: sema_name_scoped_path(module_path, definition.name)
             sema_name_add_declaration(facts, module_index, name, path, "protocol", definition.name_span, sema_name_visibility_flags(definition.is_pub, definition.is_package_pub))
         }
         .EffectDecl(_) | .Test(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -499,9 +499,9 @@ sema_name_add_item: fn(facts: ^NameFacts, module_index: Int, module_path: String
 
 sema_name_add_tree_declarations: fn(facts: ^NameFacts, module_index: Int, module_path: String, declarations: TDeclarationFacts) Never! {
     loop definition in declarations.type_defs {
-        name := definition.name
-        path := sema_name_scoped_path(module_path, name)
-        visibility := sema_name_visibility_flags(definition.public, definition.package_public)
+        ^name: definition.name
+        ^path: sema_name_scoped_path(module_path, name)
+        ^visibility: sema_name_visibility_flags(definition.public, definition.package_public)
         sema_name_add_declaration(facts, module_index, name, path, "type", definition.span, visibility)
         if definition.kind == {
             .Struct(fields, _) -> {
@@ -518,9 +518,9 @@ sema_name_add_tree_declarations: fn(facts: ^NameFacts, module_index: Int, module
         }
     }
     loop trait_definition in declarations.traits {
-        name := trait_definition.name
-        path := sema_name_scoped_path(module_path, name)
-        visibility := trait_definition.visibility
+        ^name: trait_definition.name
+        ^path: sema_name_scoped_path(module_path, name)
+        ^visibility: trait_definition.visibility
         sema_name_add_declaration(facts, module_index, name, path, "trait", trait_definition.span, visibility)
         loop method in trait_definition.methods {
             sema_name_add_declaration(facts, module_index, "{name}.{method.name}", "{path}.{method.name}", "method", method.span, visibility)
@@ -535,7 +535,7 @@ sema_name_add_alias: fn(facts: ^NameFacts, module_index: Int, name: String, targ
 // Parser/load projection: share declaration and display-path writers with the
 // checked projection, but never register types or inspect callable bodies.
 sema_name_loaded_facts: fn(modules: [NameModule], programs: [Program], aliases: [NameAlias], structure: [StructureFact]) -> NameFacts Never! {
-    facts := NameFacts{modules: modules, declarations: [], aliases: aliases, references: [], structure_facts: structure}
+    ^facts: NameFacts{modules: modules, declarations: [], aliases: aliases, references: [], structure_facts: structure}
     loop (index, program) in programs {
         loop item in program.items {
             sema_name_add_item(facts, index, modules[index].path, "", item)
@@ -554,11 +554,11 @@ sema_name_loaded_facts: fn(modules: [NameModule], programs: [Program], aliases: 
 // sema_name_join_facts drops anyway: the joined parts keep every row's first
 // occurrence at the place one part over every module keeps it.
 sema_name_part_facts: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], owner_names: [Int:String], symbol_index: SemaNameSymbolIndex, from: Int, to: Int) -> NameFacts Never! {
-    facts := sema_name_facts_empty()
-    module_indices := [Int]{}
-    filter := SemaNameReferenceFilter{parts: name_table(), seen: sema_name_reference_keys(), called: [Bool]{}}
+    ^facts: sema_name_facts_empty()
+    ^module_indices: [Int]{}
+    ^filter: SemaNameReferenceFilter{parts: name_table(), seen: sema_name_reference_keys(), called: [Bool]{}}
     loop _ in 0..<symbol_index.declarations.len() -> filter.called.push(false)
-    module_index := from
+    ^module_index: from
     loop module_index < to {
         source: graph.modules[module_index]
         checked: modules[module_index]
@@ -568,10 +568,10 @@ sema_name_part_facts: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
         }
         sema_name_add_display_paths(facts, module_index, source.module_path, source.program.items)
         loop import in source.imports {
-            target_index := sema_registration_cached_module_index(graph, import.target_module_identity, module_indices)
-            target_name := module_text(graph.module_table, import.target_module_identity)
+            ^target_index: sema_registration_cached_module_index(graph, import.target_module_identity, module_indices)
+            ^target_name: module_text(graph.module_table, import.target_module_identity)
             if target_index != None -> target_name = graph.modules[target_index ?? 0].module_name
-            target_alias := import.declaration.alias
+            ^target_alias: import.declaration.alias
             if import.declaration.kind == {
                 .File(path, _) -> { target_name = path }
                 .Module(name, _) -> { target_name = name }
@@ -605,7 +605,7 @@ sema_name_part_facts: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
 // The parts' facts joined in part order, the graph's output references after
 // them, and every row's first occurrence kept.
 sema_name_join_facts: fn(graph: SemaRegistrationGraph, owner_names: [Int:String], parts: ^[NameFacts], structure_facts: [StructureFact]) -> NameFacts Never! {
-    facts := sema_name_facts_empty()
+    ^facts: sema_name_facts_empty()
     loop graph_module_index in 0..<graph.modules.len() {
         namespace: if sema_registration_package_is_namespace(graph.modules[graph_module_index].package_identity) -> Val(graph.modules[graph_module_index].package_identity) else -> None
         facts.modules.push(NameModule{alias: graph.modules[graph_module_index].module_name, path: graph.modules[graph_module_index].module_path, package: graph.modules[graph_module_index].package_identity, namespace: namespace})
@@ -616,8 +616,8 @@ sema_name_join_facts: fn(graph: SemaRegistrationGraph, owner_names: [Int:String]
         compiler_transfer_rows<NameAlias>(facts.aliases, parts[part].aliases)
         compiler_transfer_rows<NameReference>(facts.references, parts[part].references)
     }
-    module_indices := [Int]{}
-    filter := SemaNameReferenceFilter{parts: name_table(), seen: sema_name_reference_keys(), called: [Bool]{}}
+    ^module_indices: [Int]{}
+    ^filter: SemaNameReferenceFilter{parts: name_table(), seen: sema_name_reference_keys(), called: [Bool]{}}
     loop reference_index in 0..<graph.output_name_references.len() {
         sema_name_add_reference(facts, filter, graph, owner_names, module_indices, graph.output_name_references[reference_index].span, graph.output_name_references[reference_index].symbol, sema_name_reference_kind_text(graph.output_name_references[reference_index].kind))
     }
@@ -647,32 +647,32 @@ SEMA_NAME_PARTS_PER_THREAD: 4
 // and the module results move into the threads' shared state and back; the
 // graph is returned.
 sema_name_build_facts_threads: fn(graph: ^^SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], structure_facts: [StructureFact], threads: CompilerThreads, names: ^NameFacts) -> SemaRegistrationGraph {
-    owned := graph.move()
-    owner_names := sema_name_owner_index(owned)
-    weights := [Int]{}
-    work := 0
+    ^owned: graph.move()
+    ^owner_names: sema_name_owner_index(owned)
+    ^weights: [Int]{}
+    ^work: 0
     loop module_index in 0..<owned.modules.len() {
         weight: 1 + owned.modules[module_index].program.items.len() + modules[module_index].name_references.len() + modules[module_index].call_facts.len()
         weights.push(weight)
         work += weight
     }
     workers: compiler_threads_admit(threads, weights.len(), work, SEMA_NAME_MIN_ROWS_PER_THREAD, 0, 0)
-    parts := [NameFacts]{}
+    ^parts: [NameFacts]{}
     if workers <= 1 {
         parts.push(sema_name_part_facts(owned, modules, owner_names, sema_name_symbol_index(owned), 0, owned.modules.len()))
         names = sema_name_join_facts(owned, owner_names, parts, structure_facts)
         return owned
     }
-    count := workers * SEMA_NAME_PARTS_PER_THREAD
+    ^count: workers * SEMA_NAME_PARTS_PER_THREAD
     if count > weights.len() -> count = weights.len()
     loop _ in 0..<count -> parts.push(sema_name_facts_empty())
     shared_state: Shared{SemaNameShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}, owner_names: [[Int:String]]{}, symbol_indexes: [SemaNameSymbolIndex]{}, bounds: compiler_threads_partition(weights, count)}}
-    symbol_index := sema_name_symbol_index(owned)
+    ^symbol_index: sema_name_symbol_index(owned)
     sema_name_shared_fill(shared_state, owned, modules, owner_names, symbol_index)
     queue: SemaNameQueue{next: 0}
     sema_name_part_builders(shared_state, queue, 0, workers, parts)
-    returned := sema_name_shared_take(shared_state, modules)
-    returned_owner_names := sema_name_shared_take_owner_names(shared_state)
+    ^returned: sema_name_shared_take(shared_state, modules)
+    ^returned_owner_names: sema_name_shared_take_owner_names(shared_state)
     names = sema_name_join_facts(returned, returned_owner_names, parts, structure_facts)
     returned
 }
@@ -728,9 +728,9 @@ sema_name_part_builders: fn(shared_state: Shared<SemaNameShared>, queue: SemaNam
     task.group sema_name_threads {
         head: task sema_name_parts_claimed(shared_state, queue)
         sema_name_part_builders(shared_state, queue, from + 1, workers, parts)
-        claimed := compiler_threads_joined(head)
+        ^claimed: compiler_threads_joined(head)
         loop claimed.len() > 0 {
-            done := claimed.pop() ?? break
+            ^done: claimed.pop() ?? break
             parts[done.part] = done.facts.move()
         }
     }
@@ -739,7 +739,7 @@ sema_name_part_builders: fn(shared_state: Shared<SemaNameShared>, queue: SemaNam
 // One thread: collects the parts it claims until none is left.
 sema_name_parts_claimed: fn(shared_state: Shared<SemaNameShared>, queue: SemaNameQueue) -> [SemaNamePart] {
     inputs: shared_state.guard_read()
-    claimed := [SemaNamePart]{}
+    ^claimed: [SemaNamePart]{}
     loop {
         part: queue.next.add(1)
         if part >= inputs.value.bounds.len() - 1 -> break
@@ -757,8 +757,8 @@ sema_name_parts_claimed: fn(shared_state: Shared<SemaNameShared>, queue: SemaNam
 // structure, so it gets no fact. An edge a package `boundaries` policy decided
 // keeps the loader's allowed fact instead, and the resolved-edge pass skips it.
 sema_name_structure_facts: fn(graph: SemaRegistrationGraph) -> [StructureFact] Never! {
-    facts := [StructureFact]{}
-    module_indices := [Int]{}
+    ^facts: [StructureFact]{}
+    ^module_indices: [Int]{}
     loop edge_index in 0..<graph.edges.len() {
         if module_is_core(graph.edges[edge_index].source_module_identity) -> next
         source_index: sema_registration_cached_module_index(graph, graph.edges[edge_index].source_module_identity, module_indices) ?? next
@@ -766,7 +766,7 @@ sema_name_structure_facts: fn(graph: SemaRegistrationGraph) -> [StructureFact] N
         source: graph.modules[source_index]
         target: graph.modules[target_index]
         span: graph.edges[edge_index].declaration.span
-        decided := -1
+        ^decided: -1
         loop (index, fact) in graph.boundary_facts {
             if fact.source == source.source_file && fact.span.start == span.start && fact.span.end == span.end {
                 decided = index

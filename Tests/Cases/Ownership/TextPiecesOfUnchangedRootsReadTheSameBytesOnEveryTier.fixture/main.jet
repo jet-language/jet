@@ -32,7 +32,7 @@ last_cut: fn(path: String) {
 
 // A piece handed on copies, so the map's keys outlive every line.
 index: fn(text: String) -> [String:Int] {
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     loop line in text.lines() {
         pair: line.split_once("=") ?? next
         key: pair.before.trim()
@@ -50,7 +50,7 @@ rows_by_tag: fn(rows: [Row]) {
 }
 
 appended: fn() {
-    buf := "alpha beta".copy()
+    ^buf: "alpha beta".copy()
     pair: buf.split_once(" ") ?? panic("no space")
     buf += " gamma"
     view: buf.after(" ")
@@ -62,13 +62,13 @@ appended: fn() {
 moved: fn() {
     owned: "up|down".copy()
     cut: owned.split_once("|") ?? panic("no bar")
-    sink := [String]{}
+    ^sink: [String]{}
     sink.push(owned)
     print("moved [{cut.before}] [{cut.after}] [{sink[0]}]")
 }
 
 kept: fn() {
-    keep := [String]{}
+    ^keep: [String]{}
     loop line in "a:1\nb:2\nc:3".lines() {
         pair: line.split_once(":") ?? next
         print("kept piece [{pair.before}] [{pair.after}]")
@@ -78,7 +78,7 @@ kept: fn() {
 }
 
 dropped: fn() {
-    text := "left|right".copy()
+    ^text: "left|right".copy()
     pair: text.split_once("|") ?? panic("no bar")
     text = "replaced"
     print("dropped [{pair.before}] [{pair.after}] [{text}]")

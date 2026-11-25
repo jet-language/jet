@@ -24,7 +24,7 @@ process_execution_invalid: fn(spec: I64, cause: I64, err: I64) -> I64 {
 }
 
 process_execution_has: fn(text: I64, byte: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < rt_text_len(text) {
         if (rt_text_byte(wrapping(rt_text_data(text) + at)) == byte) { return true }
         at += I64{1}
@@ -35,8 +35,8 @@ process_execution_has: fn(text: I64, byte: I64) -> Bool {
 process_execution_env_remove: fn(env: I64, key: I64) {
     data: fd_word(env, I64{16})
     length: fd_word(env, I64{0})
-    read := I64{0}
-    write := I64{0}
+    ^read: I64{0}
+    ^write: I64{0}
     loop read < length {
         row: wrapping(data + read * I64{16})
         if jet_rt_string_eq(fd_word(row, I64{0}), key) {
@@ -67,7 +67,7 @@ process_execution_environment: fn(spec: I64, err: I64) -> I64 {
         shared_acquire(root, false)
         // The logical environment holds each key once (logical_environment_append
         // drops an earlier match), so its rows move in as they are: no lookup.
-        entry := fd_word(root, I64{56})
+        ^entry: fd_word(root, I64{56})
         loop entry != (I64{0}) {
             row: data_sequence_reserve(env, I64{16})
             fd_put(row, I64{0}, rt_text_copy(fd_word(entry, I64{8}), fd_word(entry, I64{16})))
@@ -79,7 +79,7 @@ process_execution_environment: fn(spec: I64, err: I64) -> I64 {
     }
     sets: fd_word(spec, PROCESS_SPEC_ENV_SET)
     removes: fd_word(spec, PROCESS_SPEC_ENV_REMOVE)
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(sets, I64{0}) + fd_word(removes, I64{0}) {
         setting: at < fd_word(sets, I64{0})
         row: if setting -> fd_word(sets, I64{16}) + at * I64{16} else -> fd_word(removes, I64{16}) + (at - fd_word(sets, I64{0})) * I64{8}
@@ -91,7 +91,7 @@ process_execution_environment: fn(spec: I64, err: I64) -> I64 {
             kind: process_raw_box(if invalid_name -> { I64{0} } else -> { I64{1} })
             cause: jet_rt_handle_show_env_error(kind)
             encoding_enum_drop(kind)
-            _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_RESOLVE, key, I64{0}, cause, err)
+            ^_: compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_RESOLVE, key, I64{0}, cause, err)
             return I64{0}
         }
         if setting -> process_execution_env_set(env, key, value) else {
@@ -114,7 +114,7 @@ process_execution_inherited_path: fn() -> I64 {
 }
 
 process_execution_env_get: fn(env: I64, key: I64) -> I64 {
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(env, I64{0}) {
         row: wrapping(fd_word(env, I64{16}) + at * I64{16})
         if jet_rt_string_eq(fd_word(row, I64{0}), key) -> return fd_word(row, I64{8})
@@ -131,8 +131,8 @@ process_execution_candidates: fn(command: I64, path: I64) -> I64 {
         return list
     }
     search: if (path == I64{0}) -> rt_static_text("/bin:/usr/bin") else -> path
-    start := I64{0}
-    at := I64{0}
+    ^start: I64{0}
+    ^at: I64{0}
     loop at <= rt_text_len(search) {
         if (at == rt_text_len(search) || rt_text_byte(wrapping(rt_text_data(search) + at)) == I64{58}) {
             name: jet_rt_string_builder_new()
@@ -154,7 +154,7 @@ process_execution_candidates: fn(command: I64, path: I64) -> I64 {
 process_execution_nul_columns: fn(list: I64) -> I64 {
     length: fd_word(list, I64{0})
     columns: jet_rt_alloc((length + I64{1}) * I64{8}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         fd_put(columns, at * I64{8}, fd_c_path(fd_word(fd_word(list, I64{16}), at * I64{8})))
         at += I64{1}
@@ -164,7 +164,7 @@ process_execution_nul_columns: fn(list: I64) -> I64 {
 }
 
 process_execution_nul_drop: fn(columns: I64, list: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(list, I64{0}) {
         jet_rt_free(fd_word(columns, at * I64{8}), rt_text_len(fd_word(fd_word(list, I64{16}), at * I64{8})) + I64{1}, I64{1})
         at += I64{1}
@@ -179,7 +179,7 @@ process_execution_affinity_refusal: fn(cpus: I64) -> I64 {
     if (fd_word(cpus, I64{0}) == I64{0}) {
         return jet_rt_string_clone(rt_static_text("cpu_affinity needs at least one CPU"))
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(cpus, I64{0}) {
         cpu: fd_word(fd_word(cpus, I64{16}), at * I64{8})
         if (cpu < I64{0} || cpu >= PROCESS_CPU_SET_CPUS) {
@@ -206,7 +206,7 @@ process_execution_affinity_refusal: fn(cpus: I64) -> I64 {
 process_execution_affinity_mask: fn(cpus: I64) -> I64 {
     mask: jet_rt_alloc(PROCESS_CPU_SET_BYTES, I64{8})
     coll_zero(mask, PROCESS_CPU_SET_BYTES)
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(cpus, I64{0}) {
         cpu: fd_word(fd_word(cpus, I64{16}), at * I64{8})
         if (cpu >= I64{0} && cpu < PROCESS_CPU_SET_CPUS) {
@@ -227,9 +227,9 @@ process_execution_affinity_has: fn(mask: I64, cpu: I64) -> Bool {
 process_execution_affinity_text: fn(cpus: I64) -> I64 {
     mask: process_execution_affinity_mask(cpus)
     text: jet_rt_string_builder_new()
-    start := I64{-1}
-    wrote := false
-    cpu := I64{0}
+    ^start: I64{-1}
+    ^wrote: false
+    ^cpu: I64{0}
     loop cpu <= PROCESS_CPU_SET_CPUS {
         set: if (cpu == PROCESS_CPU_SET_CPUS) -> false else -> process_execution_affinity_has(mask, cpu)
         if (set && start < I64{0}) { start = cpu }
@@ -316,8 +316,8 @@ process_execution_pack: fn(spec: I64) -> I64 {
     )
     fd_put(mechanical, I64{72}, fd_word(spec, PROCESS_SPEC_STDOUT))
     fd_put(mechanical, I64{80}, fd_word(spec, PROCESS_SPEC_STDERR))
-    field := PROCESS_SPEC_TIMEOUT
-    target := I64{88}
+    ^field: PROCESS_SPEC_TIMEOUT
+    ^target: I64{88}
     loop field <= PROCESS_SPEC_OPEN_FILE_LIMIT {
         box: fd_word(spec, field)
         fd_put(mechanical, target, if (box == I64{0}) -> { I64{0} } else -> { I64{1} })
@@ -374,7 +374,7 @@ process_execution_relaunch: fn(cmd: I64) -> I64 {
     first: fd_word(fd_word(cmd, I64{16}), I64{0})
     length: host_startup_byte_length(loaded)
     if (rt_text_len(first) != length) { return I64{0} }
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(rt_text_data(first) + at)) != rt_text_byte(wrapping(loaded + at))) {
             return I64{0}
@@ -382,7 +382,7 @@ process_execution_relaunch: fn(cmd: I64) -> I64 {
         at += I64{1}
     }
     list: data_sequence_new(I64{0}, I64{8})
-    word := prefix
+    ^word: prefix
     loop {
         size: host_startup_byte_length(word)
         if (size == I64{0}) { break }
@@ -405,56 +405,56 @@ process_execution_relaunch: fn(cmd: I64) -> I64 {
 process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
     cmd: fd_word(spec, PROCESS_SPEC_CMD)
     if (fd_word(cmd, I64{0}) == I64{0}) {
-        _ := process_execution_invalid(spec, rt_static_text("process command needs at least one word"), err)
+        ^_: process_execution_invalid(spec, rt_static_text("process command needs at least one word"), err)
         return I64{0}
     }
     // A NUL byte would end the word or directory at exec, so it is refused
     // first, as invalid input.
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(cmd, I64{0}) {
         if process_execution_has(fd_word(fd_word(cmd, I64{16}), at * I64{8}), I64{0}) {
-            _ := process_execution_invalid(spec, rt_static_text("nul byte found in provided data"), err)
+            ^_: process_execution_invalid(spec, rt_static_text("nul byte found in provided data"), err)
             return I64{0}
         }
         at += I64{1}
     }
     cwd: fd_word(spec, PROCESS_SPEC_CWD)
     if (cwd != I64{0} && !process_execution_held_cwd(spec) && process_execution_has(cwd, I64{0})) {
-        _ := process_execution_invalid(spec, rt_static_text("nul byte found in provided data"), err)
+        ^_: process_execution_invalid(spec, rt_static_text("nul byte found in provided data"), err)
         return I64{0}
     }
     if (fd_word(spec, PROCESS_SPEC_TERMINAL) != I64{0} && fd_word(spec, PROCESS_SPEC_DETACHED) & I64{255} != I64{0}) {
-        _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("terminal sessions cannot be detached")), err)
+        ^_: process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("terminal sessions cannot be detached")), err)
         return I64{0}
     }
     cpus: fd_word(spec, PROCESS_SPEC_CPU_AFFINITY)
     if (cpus != I64{0}) {
         refusal: process_execution_affinity_refusal(cpus)
         if (refusal != I64{0}) {
-            _ := process_execution_invalid(spec, refusal, err)
+            ^_: process_execution_invalid(spec, refusal, err)
             jet_rt_string_drop(refusal)
             return I64{0}
         }
     }
     io_refusal: process_execution_io_priority_refusal(spec)
     if (io_refusal != I64{0}) {
-        _ := process_execution_invalid(spec, io_refusal, err)
+        ^_: process_execution_invalid(spec, io_refusal, err)
         jet_rt_string_drop(io_refusal)
         return I64{0}
     }
     scoped: fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE) != I64{0}
     if (scoped && fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE_BYTES) < I64{1}) {
-        _ := process_execution_invalid(spec, rt_static_text("memory_scope needs a cap of at least 1 byte"), err)
+        ^_: process_execution_invalid(spec, rt_static_text("memory_scope needs a cap of at least 1 byte"), err)
         return I64{0}
     }
     if (scoped && fd_word(spec, PROCESS_SPEC_DETACHED) & I64{255} != I64{0}) {
-        _ := process_execution_invalid(spec, rt_static_text("a detached process outlives its handle, and a memory_scope ends with it"), err)
+        ^_: process_execution_invalid(spec, rt_static_text("a detached process outlives its handle, and a memory_scope ends with it"), err)
         return I64{0}
     }
     // `.Stdout` names the child's stdout, so only stderr can take it.
     stdin: fd_word(spec, PROCESS_SPEC_STDIN)
     if (fd_word(spec, PROCESS_SPEC_STDOUT) == PROCESS_STREAM_STDOUT || (stdin != I64{0} && fd_word(stdin, I64{0}) == PROCESS_STREAM_STDOUT)) {
-        _ := process_execution_invalid(spec, rt_static_text("`.Stdout` is legal only on stderr: `.stdin(.Stdout)` and `.stdout(.Stdout)` name no stream"), err)
+        ^_: process_execution_invalid(spec, rt_static_text("`.Stdout` is legal only on stderr: `.stdin(.Stdout)` and `.stdout(.Stdout)` name no stream"), err)
         return I64{0}
     }
     env: process_execution_environment(spec, err)
@@ -493,13 +493,13 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
     )
     mechanical: process_execution_pack(spec)
     // The scope is made last, so only the spawn itself can fail after it.
-    scope := I64{0}
-    child := I64{0}
+    ^scope: I64{0}
+    ^child: I64{0}
     if scoped {
         scope = process_scope_open(fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE_BYTES), wrapping(facts + I64{64}), wrapping(facts + I64{72}))
         if (scope == I64{0}) {
             failed: fd_word(facts, I64{72})
-            _ := compiler_fs_errno(HOST_IO_OP_WRITE, failed, -fd_word(facts, I64{64}), err)
+            ^_: compiler_fs_errno(HOST_IO_OP_WRITE, failed, -fd_word(facts, I64{64}), err)
             jet_rt_string_drop(failed)
         } else {
             fd_put(mechanical, I64{240}, I64{1})
@@ -512,7 +512,7 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
         // errno through HostSpawn's CLOEXEC pipe; the kind follows that errno as
         // file I/O's does (ENOENT NotFound, EACCES PermissionDenied, ...).
         if (child == I64{0}) {
-            _ := compiler_fs_errno(HOST_IO_OP_RESOLVE, process_execution_resource(spec), fd_word(facts, I64{40}), err)
+            ^_: compiler_fs_errno(HOST_IO_OP_RESOLVE, process_execution_resource(spec), fd_word(facts, I64{40}), err)
         }
     }
     if (scope != I64{0}) {
@@ -538,7 +538,7 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
 process_execution_held_cwd: fn(spec: I64) -> Bool {
     dirs: fd_word(spec, PROCESS_SPEC_DIRECTORIES)
     if (dirs == I64{0}) { return false }
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(dirs, I64{0}) {
         if (fd_word(fd_word(dirs, I64{16}), at * I64{24} + I64{16}) != I64{0}) { return true }
         at += I64{1}

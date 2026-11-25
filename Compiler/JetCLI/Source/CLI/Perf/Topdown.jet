@@ -94,10 +94,10 @@ jet_cli_perf_topdown_section: fn(samples: String, sampled: JetCLIPerfSamples?, s
     path: "{samples}.topdown"
     words: perf_files.read_bytes(path) ?? [U8]{}
     perf_files.remove(path).drop("the session reads its topdown events once")
-    cores := [CanonicalJSON]{}
-    cpu := CanonicalJSON.Null
-    status := "unavailable"
-    reason := "the program recorded no topdown events, as a program that never started its observation does"
+    ^cores: [CanonicalJSON]{}
+    ^cpu: CanonicalJSON.Null
+    ^status: "unavailable"
+    ^reason: "the program recorded no topdown events, as a program that never started its observation does"
     if words.len() >= 40 {
         set: link_debug_addr(words, 0)
         vendor: link_debug_addr(words, 8)
@@ -128,7 +128,7 @@ jet_cli_perf_topdown_section: fn(samples: String, sampled: JetCLIPerfSamples?, s
             }
             else -> {
                 reason = "per line and function, each event's samples at its period, scaled by the time it ran over the time it was enabled; the run's split from its exact counts. A row with fewer than {JET_CLI_PERF_TOPDOWN_FLOOR} samples of slots is low confidence. Only the program's starting thread is counted"
-                refused := ""
+                ^refused: ""
                 loop core in jet_cli_perf_topdown_cores(set, name) {
                     built: jet_cli_perf_topdown_core(core, words, count, sampled)
                     if built.reason == "" -> status = "captured"
@@ -286,7 +286,7 @@ jet_cli_perf_topdown_split: fn(table: Int, events: [Int]) -> [Int]? Never! {
 
 // The split's fields and `extra`'s, sorted by key.
 jet_cli_perf_topdown_split_fields: fn(split: [Int], extra: ^^[CanonicalJSONField]) -> CanonicalJSON Never! {
-    fields := [CanonicalJSONField]{
+    ^fields: [CanonicalJSONField]{
         {key: "backend_bound", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_BACKEND]}")},
         {key: "bad_speculation", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_BAD]}")},
         {key: "branch_mispredicts", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_MISPREDICTS]}")},
@@ -313,11 +313,11 @@ jet_cli_perf_topdown_core: fn(core: JetCLIPerfTopdownCore, words: [U8], count: I
     names: jet_cli_perf_topdown_events(core.table)
     listed: names.len()
     counted: 40 + count * 32 + count * 24 <= words.len()
-    events := [CanonicalJSON]{}
-    periods := [Int]{}
-    scales := [Int]{}
-    totals := [Int]{}
-    refused := ""
+    ^events: [CanonicalJSON]{}
+    ^periods: [Int]{}
+    ^scales: [Int]{}
+    ^totals: [Int]{}
+    ^refused: ""
     loop (index, name) in names.move() {
         at: 40 + (core.first + index) * 32
         if at + 32 > words.len() {
@@ -339,7 +339,7 @@ jet_cli_perf_topdown_core: fn(core: JetCLIPerfTopdownCore, words: [U8], count: I
         // its count scales by the time it was enabled over that time, in
         // thousandths.
         scale: if running > 0 -> enabled * 1000 /% running else -> 0
-        taken := 0
+        ^taken: 0
         if sampled == .Val(found) {
             loop line in found.lines {
                 if line.own && core.first + index < line.topdown.len() {
@@ -372,17 +372,17 @@ jet_cli_perf_topdown_core: fn(core: JetCLIPerfTopdownCore, words: [U8], count: I
     run: if refused == "" -> jet_cli_perf_topdown_split(core.table, totals) else -> None
     if refused == "" && run == None -> refused = "the program's thread never ran on these cores"
     captured: refused == ""
-    lines := [CanonicalJSON]{}
-    functions := [CanonicalJSON]{}
-    run_value := CanonicalJSON.Null
+    ^lines: [CanonicalJSON]{}
+    ^functions: [CanonicalJSON]{}
+    ^run_value: CanonicalJSON.Null
     if run == .Val(whole) {
         run_value = jet_cli_perf_topdown_split_fields(whole, [CanonicalJSONField]{})
-        rows := [JetCLIPerfTopdownRow]{}
+        ^rows: [JetCLIPerfTopdownRow]{}
         if sampled == .Val(found) {
             loop line in found.lines {
                 if !line.own -> next
-                estimates := [Int]{}
-                held := false
+                ^estimates: [Int]{}
+                ^held: false
                 loop index in 0..<listed {
                     at: core.first + index
                     taken: if at < line.topdown.len() -> line.topdown[at] else -> 0
@@ -395,9 +395,9 @@ jet_cli_perf_topdown_core: fn(core: JetCLIPerfTopdownCore, words: [U8], count: I
                 rows.push(JetCLIPerfTopdownRow{function: line.name.copy(), line: line.line, events: estimates, samples: samples})  // copy: the samples keep their lines.
             }
         }
-        grouped := [JetCLIPerfTopdownRow]{}
+        ^grouped: [JetCLIPerfTopdownRow]{}
         loop row in rows {
-            found := -1
+            ^found: -1
             loop (index, group) in grouped {
                 if group.function == row.function {
                     found = index
@@ -438,21 +438,21 @@ jet_cli_perf_topdown_core: fn(core: JetCLIPerfTopdownCore, words: [U8], count: I
 // `slots`, the samples of its slots event and whether those are too few;
 // with its line for a line's row.
 jet_cli_perf_topdown_rows: fn(table: Int, rows: [JetCLIPerfTopdownRow], slots: Int) -> [CanonicalJSON] Never! {
-    splits := [[Int]]{}
-    kept := [Int]{}
+    ^splits: [[Int]]{}
+    ^kept: [Int]{}
     loop (index, row) in rows {
         if jet_cli_perf_topdown_split(table, row.events) == .Val(split) {
             splits.push(split)
             kept.push(index)
         }
     }
-    order := loop index in 0..<kept.len() -> index
+    ^order: loop index in 0..<kept.len() -> index
     order.sort_by(fn(left: Int, right: Int) { (splits[right][JET_CLI_PERF_TOPDOWN_SLOTS] <=> splits[left][JET_CLI_PERF_TOPDOWN_SLOTS]).then(rows[kept[left]].function <=> rows[kept[right]].function).then(rows[kept[left]].line <=> rows[kept[right]].line) })
-    out := [CanonicalJSON]{}
+    ^out: [CanonicalJSON]{}
     loop at in order {
         if out.len() >= JET_CLI_PERF_TOPDOWN_ROWS -> break
         held: kept[at]
-        extra := [CanonicalJSONField]{
+        ^extra: [CanonicalJSONField]{
             {key: "function", value: CanonicalJSON.String(rows[held].function.copy())},  // copy: the caller keeps its rows.
             {key: "low_confidence", value: CanonicalJSON.Bool(rows[held].samples < JET_CLI_PERF_TOPDOWN_FLOOR)},
             {key: "samples", value: CanonicalJSON.Integer("{rows[held].samples}")},
@@ -473,7 +473,7 @@ jet_cli_perf_topdown_rows: fn(table: Int, rows: [JetCLIPerfTopdownRow], slots: I
 // unavailable: <reason>`. Empty for a trace without the section.
 jet_cli_perf_topdown_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
-    out := [String]{}
+    ^out: [String]{}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
         if section.name != "topdown" -> next
@@ -487,7 +487,7 @@ jet_cli_perf_topdown_lines: fn(trace: CanonicalJSON) -> [String] Never! {
         fields: jettrace_object_view(section.value, "receipt topdown") ?? next
         at: jet_cli_perf_key(fields, "cores") ?? next
         cores: jettrace_array(fields[at].value, "receipt topdown.cores") ?? next
-        low := false
+        ^low: false
         loop core in cores {
             label: jet_cli_perf_member_text(core, "label") ?? "this CPU"
             if (jet_cli_perf_member_text(core, "status") ?? "") != "captured" {
@@ -541,7 +541,7 @@ jet_cli_perf_topdown_percents: fn(row: CanonicalJSON, keys: [String]) -> [String
 
 // `cells`, each right-aligned in 13 characters.
 jet_cli_perf_topdown_cells: fn(cells: [String]) -> String Never! {
-    out := ""
+    ^out: ""
     loop cell in cells {
         pad: if cell.len() < 13 -> 13 - cell.len() else -> 0
         out = "{out}{" ".repeat(pad)}{cell}"

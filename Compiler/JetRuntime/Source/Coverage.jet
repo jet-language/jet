@@ -13,7 +13,7 @@ COVERAGE_LINES: I64{1048576}
 
 COVERAGE_BITMAP_BYTES: I64{131072}
 
-coverage_root := I64{0}
+^coverage_root: I64{0}
 
 // runtime-init: 4 when coverage_root
 #Export(c) jet_rt_coverage_init: fn() {
@@ -54,8 +54,8 @@ coverage_append: fn(line: I64) {
     fd: host_call(I64{2}, name, COVERAGE_OPEN, I64{384})
     if (fd >= I64{0}) {
         // One write of a short record: O_APPEND keeps each process's records whole.
-        _ := receipt_section_write_all(fd, rt_text_data(record), rt_text_len(record))
-        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        ^_: receipt_section_write_all(fd, rt_text_data(record), rt_text_len(record))
+        ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     }
     fd_c_path_drop(name, path)
     jet_rt_string_drop(record)

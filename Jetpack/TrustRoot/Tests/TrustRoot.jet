@@ -51,7 +51,7 @@ trust_test_fixture: fn(version: Int, expires_unix: Int) -> TrustFixtureRoot {
 }
 
 trust_test_policy_at: fn(now: Int) -> TrustRootPolicy {
-    policy := TrustRootPolicy.default()
+    ^policy: TrustRootPolicy.default()
     policy.trusted_unix = Val(now)
     policy
 }
@@ -98,14 +98,14 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     assert(!crypto.constant_time_equal_bytes("tag".bytes(), "tampered".bytes()))
 
     signature: key.sign("message".bytes())
-    keyring := Keyring.empty()
+    ^keyring: Keyring.empty()
     keyring.insert(key)
     verified: if keyring.verify(key.key_id, "message".bytes(), signature) == {
         .Ok(_) -> true
         .Err(_) -> false
     }
     assert(verified, "an untampered signature verifies")
-    tampered := signature
+    ^tampered: signature
     tampered.sig_hex = trust_test_tamper(signature.sig_hex)
     rejected: if keyring.verify(key.key_id, "message".bytes(), tampered) == {
         .Ok(_) -> false
@@ -114,7 +114,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     assert(rejected, "a tampered signature is rejected")
 
     provenance: CacheProvenance{reference: "ref", source: "source", builder: "builder", action: "action", output: "output", platform: "platform", sandbox: "sandbox", policy: "policy"}
-    receipt := CacheReceipt.issue_with_witness("cache", "test-witness", provenance, 1, 100, 200, key) ?? panic("issue receipt")
+    ^receipt: CacheReceipt.issue_with_witness("cache", "test-witness", provenance, 1, 100, 200, key) ?? panic("issue receipt")
     receipt.signature.sig_hex = trust_test_tamper(receipt.signature.sig_hex)
     receipt_rejected: if receipt.verify(key, TrustedClock.Fixed(100)) == {
         .Ok(_) -> false
@@ -143,7 +143,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
 #Test("signature stripping rejected") {
     now: TRUST_TEST_NOW
     fixture: trust_test_fixture(1, now + 3600)
-    signed := trust_test_sign_root(fixture.root, [TrustKey]{fixture.keys[0], fixture.keys[1]})
+    ^signed: trust_test_sign_root(fixture.root, [TrustKey]{fixture.keys[0], fixture.keys[1]})
     signed.signatures = [TrustSignature]{}
     stripped: if TrustEngine.bootstrap(signed, fixture.keyring, TrustRootPolicy.default(), None, TrustedClock.Fixed(now), None) == {
         .Ok(_) -> false
@@ -159,7 +159,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     now: TRUST_TEST_NOW
     boot: trust_test_boot(now)
     new_fixture: trust_test_fixture(2, now + 7200)
-    new_root := new_fixture.root
+    ^new_root: new_fixture.root
     new_root.version = 2
     drill_ok: if boot.engine.recovery_drill_threshold_minus_one(new_root, [TrustKey]{boot.keys[0]}, TrustedClock.Fixed(now)) == {
         .Ok(_) -> true
@@ -167,7 +167,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     }
     assert(drill_ok, "the drill observes ThresholdUnmet")
     signed: trust_test_sign_root(new_root, [TrustKey]{boot.keys[0]})
-    drill := boot.engine.clone_for_drill()
+    ^drill: boot.engine.clone_for_drill()
     unmet: if drill.update_root(signed, TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
         .Err(error) -> if error == {
@@ -181,9 +181,9 @@ trust_test_tamper: fn(sig_hex: String) -> String {
 #Test("root rotation with threshold succeeds and rollback fails") {
     now: TRUST_TEST_NOW
     boot: trust_test_boot(now)
-    engine := boot.engine
+    ^engine: boot.engine
     new_fixture: trust_test_fixture(2, now + 7200)
-    new_root := new_fixture.root
+    ^new_root: new_fixture.root
     new_root.version = 2
     // Keep the current root key ids so the current threshold still verifies.
     new_root.roles = engine.root.roles
@@ -192,7 +192,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     signed: trust_test_sign_root(new_root, [TrustKey]{boot.keys[0], boot.keys[1]})
     engine.update_root(signed, TrustedClock.Fixed(now)) ?? panic("rotate root")
     assert_eq(engine.versions.get((MetadataRole.Root).label()), Val(2))
-    older := new_root
+    ^older: new_root
     older.version = 1
     signed_old: trust_test_sign_root(older, [TrustKey]{boot.keys[0], boot.keys[1]})
     rollback: if engine.update_root(signed_old, TrustedClock.Fixed(now)) == {
@@ -208,19 +208,19 @@ trust_test_tamper: fn(sig_hex: String) -> String {
 #Test("delegation path bounds and consistent snapshot") {
     now: TRUST_TEST_NOW
     boot: trust_test_boot(now)
-    engine := boot.engine
+    ^engine: boot.engine
     targets_key: boot.keys[3]
     snapshot_key: boot.keys[4]
     timestamp_key: boot.keys[5]
 
-    target_hashes := [String:String]{}
+    ^target_hashes: [String:String]{}
     target_hashes["sha256"] = crypto.sha256("blob".bytes()).hex()
-    target_map := [String:TargetMeta]{}
+    ^target_map: [String:TargetMeta]{}
     target_map["jetsrc/core"] = TargetMeta{length: 4, hashes: target_hashes, custom: [String:String]{}}
     targets: TargetsMetadata{version: 1, expires_unix: now + 3600, targets: target_map}
     signed_targets: trust_sign_targets(targets, [TrustKey]{targets_key}) ?? panic("sign targets")
     engine.verify_targets(signed_targets, Val("jetsrc/core"), TrustedClock.Fixed(now)) ?? panic("verify delegated targets")
-    denied_engine := engine.clone_for_drill()
+    ^denied_engine: engine.clone_for_drill()
     denied: if denied_engine.verify_targets(signed_targets, Val("evil/core"), TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
         .Err(error) -> if error == {
@@ -231,16 +231,16 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     assert(denied, "a path outside every delegation is DelegationDenied")
 
     targets_canonical: trust_canonical_targets(targets)
-    snapshot_hashes := [String:String]{}
+    ^snapshot_hashes: [String:String]{}
     snapshot_hashes["sha256"] = crypto.sha256(targets_canonical.bytes()).hex()
-    snapshot_meta := [String:SnapshotMetaEntry]{}
+    ^snapshot_meta: [String:SnapshotMetaEntry]{}
     snapshot_meta["targets"] = SnapshotMetaEntry{version: 1, length: targets_canonical.bytes().len(), hashes: snapshot_hashes}
     snapshot: SnapshotMetadata{version: 1, expires_unix: now + 3600, meta: snapshot_meta}
     signed_snapshot: trust_sign_snapshot(snapshot, [TrustKey]{snapshot_key}) ?? panic("sign snapshot")
     engine.verify_snapshot(signed_snapshot, targets_canonical, 1, TrustedClock.Fixed(now)) ?? panic("verify snapshot")
 
     snapshot_canonical: trust_canonical_snapshot(snapshot)
-    timestamp_hashes := [String:String]{}
+    ^timestamp_hashes: [String:String]{}
     timestamp_hashes["sha256"] = crypto.sha256(snapshot_canonical.bytes()).hex()
     timestamp: TimestampMetadata{version: 1, expires_unix: now + 3600, snapshot: SnapshotMetaEntry{version: 1, length: snapshot_canonical.bytes().len(), hashes: timestamp_hashes}}
     signed_timestamp: trust_sign_timestamp(timestamp, [TrustKey]{timestamp_key}) ?? panic("sign timestamp")
@@ -252,7 +252,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     fixture: trust_test_fixture(1, now + 3600)
     signed: trust_test_sign_root(fixture.root, [TrustKey]{fixture.keys[0], fixture.keys[1]})
 
-    skewed := trust_test_policy_at(now)
+    ^skewed: trust_test_policy_at(now)
     skewed.max_clock_skew_secs = 30
     bad_clock: if TrustEngine.bootstrap(signed, fixture.keyring, skewed, None, TrustedClock.Fixed(now + 120), None) == {
         .Ok(_) -> false
@@ -272,7 +272,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     }
     assert(expired, "a root past its expiry is Expired")
 
-    tiny := TrustRootPolicy.default()
+    ^tiny: TrustRootPolicy.default()
     tiny.max_metadata_bytes = 8
     too_large: if TrustEngine.bootstrap(signed, fixture.keyring, tiny, None, TrustedClock.Fixed(now), None) == {
         .Ok(_) -> false
@@ -287,7 +287,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
 #Test("hybrid publisher identities are distinct domains") {
     now: TRUST_TEST_NOW
     boot: trust_test_boot(now)
-    engine := boot.engine
+    ^engine: boot.engine
     engine.bind_identity(BoundIdentity.registry("jet-lang.dev")) ?? panic("bind registry")
     engine.bind_identity(BoundIdentity.cache_builder("ci-builder-1")) ?? panic("bind cache builder")
     engine.bind_identity(BoundIdentity.remote_executor("worker-a")) ?? panic("bind remote executor")
@@ -302,7 +302,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
         }
     }
     assert(mismatch, "a Sigstore proof cannot sit on a registry identity")
-    refreshed := engine.clone_for_drill()
+    ^refreshed: engine.clone_for_drill()
     refreshed.bind_identity(BoundIdentity.publisher("alice", sigstore)) ?? panic("rebind the same publisher name")
     kms: PublisherIdentity.KMSHSM{key_uri: "kms:projects/p/locations/l/keyRings/r/cryptoKeys/k", public_key_hex: "cc".repeat(32), key_id: "kms1"}
     kms.validate() ?? panic("a kms: key URI validates")

@@ -144,7 +144,7 @@ BitPacker: struct {
 // Fixed-Huffman deflate: an optional literal "x", then `matches` copies of
 // 258 bytes at distance 1, about 13 bits of input per 258 bytes of output.
 deflate_repeat: fn(literal: Bool, matches: Int) -> [U8] {
-    bits := BitPacker{out: [U8]{}, acc: 0, n: 0}
+    ^bits: BitPacker{out: [U8]{}, acc: 0, n: 0}
     bits.put(1, 1)
     bits.put(1, 2)
     if literal -> bits.code(168, 8)
@@ -173,8 +173,8 @@ push32: fn(out: ^[U8], n: Int) {
 
 // A stored ZIP with `count` empty entries named "x" (CRC-32 of [] is 0).
 zip_entries: fn(count: Int) -> [U8] {
-    local := [U8]{}
-    central := [U8]{}
+    ^local: [U8]{}
+    ^central: [U8]{}
     loop _ in 0..<count {
         offset: local.len()
         // Local header: version, flags, method, time, date, CRC, sizes, name.
@@ -193,7 +193,7 @@ zip_entries: fn(count: Int) -> [U8] {
         push32(central, offset)
         central.push(U8{120})
     }
-    out := local.copy()
+    ^out: local.copy()
     loop b in central -> out.push(b)
     push32(out, 0x06054b50)
     loop v in ([Int]{0, 0, (count) & 65535, (count) & 65535}) -> push16(out, v)
@@ -205,10 +205,10 @@ zip_entries: fn(count: Int) -> [U8] {
 
 // Replace every occurrence of `from` with `to` (same length).
 patch_all: fn(data: [U8], from: [U8], to: [U8]) -> [U8] {
-    out := data
-    i := 0
+    ^out: data
+    ^i: 0
     loop i + from.len() <= out.len() {
-        hit := true
+        ^hit: true
         loop k in 0..<from.len() {
             if out[i + k] != from[k] {
                 hit = false
@@ -225,8 +225,8 @@ patch_all: fn(data: [U8], from: [U8], to: [U8]) -> [U8] {
 
 // Recompute a ustar header checksum so a patched name reaches name checks.
 fix_tar_checksum: fn(data: [U8]) -> [U8] {
-    out := data
-    sum := 0
+    ^out: data
+    ^sum: 0
     loop k in 0..<512 {
         if k >= 148 && k < 156 -> sum += 32 else -> sum += (Int{out[k]})
     }
@@ -252,13 +252,13 @@ run: fn() {
     good_gz: gz.compress(hello) ?? panic("gzip compress")
     gzip_case("roundtrip", good_gz)
     gzip_case("truncated", good_gz[0..<(good_gz.len() - 5)])
-    bad_crc := good_gz.copy()
+    ^bad_crc: good_gz.copy()
     bad_crc[good_gz.len() - 8] = bad_crc[good_gz.len() - 8] ~ (U8{255})
     gzip_case("bad crc", bad_crc)
-    bad_isize := good_gz.copy()
+    ^bad_isize: good_gz.copy()
     bad_isize[good_gz.len() - 1] = U8{127}
     gzip_case("isize mismatch", bad_isize)
-    bad_payload := [U8]{31, 139, 8, 0, 0, 0, 0, 0, 0, 255}
+    ^bad_payload: [U8]{31, 139, 8, 0, 0, 0, 0, 0, 0, 255}
     loop b in deflate_repeat(false, 1) -> bad_payload.push(b)
     loop _ in 0..<8 -> bad_payload.push(U8{0})
     gzip_case("bad payload", bad_payload)
@@ -269,7 +269,7 @@ run: fn() {
     zstd_case("roundtrip", good_zs)
     zstd_case("truncated", good_zs[0..<(good_zs.len() - 3)])
     // FHD 0x24: single segment, 1-byte content size, content checksum.
-    checked := [U8]{40, 181, 47, 253, 36, 3, 25, 0, 0, 106, 101, 116}
+    ^checked: [U8]{40, 181, 47, 253, 36, 3, 25, 0, 0, 106, 101, 116}
     loop _ in 0..<4 -> checked.push(U8{0})
     zstd_case("bad checksum", checked)
     // `printf jet | zstd --check`: the reference tool's XXH64 content checksum.
@@ -284,10 +284,10 @@ run: fn() {
     good_zip: ar.create("entry.txt", hello) ?? panic("zip create")
     zip_case("roundtrip", good_zip)
     zip_case("truncated", good_zip[0..<(good_zip.len() - 10)])
-    bad_zip_crc := good_zip.copy()
+    ^bad_zip_crc: good_zip.copy()
     bad_zip_crc[14] = bad_zip_crc[14] ~ (U8{255})
     zip_case("bad crc", bad_zip_crc)
-    zip_bomb := good_zip.copy()
+    ^zip_bomb: good_zip.copy()
     loop k in 0..<4 -> zip_bomb[22 + k] = byte(0x04000001 >> (8 * k))
     zip_case("declared output bomb", zip_bomb)
     dotted: ar.create("..xevil", hello) ?? panic("zip create")
@@ -301,14 +301,14 @@ run: fn() {
     // and one entry over the 4,096-entry cap.
     good_tar: ar.tar_add([U8]{}, "entry.txt", hello) ?? panic("tar add")
     tar_case("roundtrip", good_tar, "entry.txt")
-    bad_tar_sum := good_tar.copy()
+    ^bad_tar_sum: good_tar.copy()
     bad_tar_sum[0] = U8{69}
     tar_case("bad checksum", bad_tar_sum, "entry.txt")
     tar_case("missing end", good_tar[0..<(good_tar.len() - 1024)], "entry.txt")
     tar_dotted: ar.tar_add([U8]{}, "xx/evil", hello) ?? panic("tar add")
     tar_case("../ name", fix_tar_checksum(patch_all(tar_dotted, "xx/evil".bytes(), "../evil".bytes())), "../evil")
     one: ar.tar_add([U8]{}, "e", [U8]{}) ?? panic("tar add")
-    many := [U8]{}
+    ^many: [U8]{}
     loop _ in 0..<4097 {
         loop k in 0..<512 -> many.push(one[k])
     }

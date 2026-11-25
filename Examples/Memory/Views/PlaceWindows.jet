@@ -11,7 +11,7 @@ Tile: struct {
 }
 
 run: fn() {
-    particles := [Particle]{
+    ^particles: [Particle]{
         {position: 10, velocity: 2},
         {position: 20, velocity: 3},
         {position: 30, velocity: 4},
@@ -24,8 +24,8 @@ run: fn() {
 
     forces: grid[0..2]
     middle_before: particles[1].copy()
-    left: ^particles[0]
-    right: ^particles[2]
+    left: particles[0].in_place()
+    right: particles[2].in_place()
     left.velocity += forces[0].force
     right.velocity += forces[2].force
     left.position += left.velocity

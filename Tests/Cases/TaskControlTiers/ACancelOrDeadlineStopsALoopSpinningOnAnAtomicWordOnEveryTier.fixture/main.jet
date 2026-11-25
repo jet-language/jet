@@ -50,11 +50,11 @@ run: fn() {
     timed_started: Atomic<I64>.new(0)
     task.group waiters {
         waiter: task {
-            marker := Marker{name: "the waiter's marker"}
+            ^marker: Marker{name: "the waiter's marker"}
             defer close(marker)
             wait_open(gate, started)
         }
-        tries := 0
+        ^tries: 0
         loop started.load() == 0 && tries < 2000 {
             time.sleep(1ms)
             tries += 1

@@ -10,7 +10,7 @@ show_write_before: fn(values: [Int]) {
 }
 
 mutate: fn(values: ^[Int]) {
-    write: ^values[0..2]
+    write: values[0..2].in_place()
     write[0] = 9
 }
 
@@ -35,7 +35,7 @@ show_singleton_after: fn(values: [Int]) {
 }
 
 run: fn() {
-    values := [1, 2, 3]
+    ^values: [1, 2, 3]
     show_read(values)
     show_write_before(values)
     show_singleton_before(values)

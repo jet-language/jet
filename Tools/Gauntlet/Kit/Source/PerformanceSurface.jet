@@ -191,7 +191,7 @@ is_custom_pair: fn(spec: Dyn) -> Bool {
 // The pair `spec` measures: the compound pair unless it is another row.
 pair_definition: fn(spec: Dyn) -> Dyn {
     if !is_custom_pair(spec) -> return compound_pair()
-    out := Dyn.object()
+    ^out: Dyn.object()
     loop field in PS_DEFINITION_FIELDS.concat(["inputs"]) {
         put_present(out, field, value_at(spec, field))
     }
@@ -203,7 +203,7 @@ nonempty_at: fn(tree: Dyn, path: String) -> Bool { (text_at(tree, path) ?? "").t
 // What a manifest row measured from itself lacks.
 definition_issues: fn(definition: Dyn) -> [String] {
     id: text_at(definition, "id") ?? "missing"
-    issues := [String]{}
+    ^issues: [String]{}
     loop field in PS_DEFINITION_FIELDS {
         if !nonempty_at(definition, field) -> issues.push("manifest pair {id} is missing {field}")
     }
@@ -222,7 +222,7 @@ sha_hex: fn(text: String) -> String { crypto.sha256(text).hex() }
 // value that is not an object.
 context_digest: fn(context: Dyn) -> Dyn {
     if !(context == .Object(_)) -> return Dyn.Null
-    base := Dyn.object()
+    ^base: Dyn.object()
     loop field in members(context) {
         if field.key != "context_sha256" -> base[field.key] = field.value
     }
@@ -235,13 +235,13 @@ environment_digest: fn(identity: Dyn) -> String {
 }
 
 measurement_context: fn(identity: Dyn, warmup_orders: [String], trial_orders: [String], definition: Dyn) -> Dyn {
-    sampling := Dyn{[String:Dyn]{"strategy": "balanced_seeded_fisher_yates", "warmups": PS_WARMUPS, "trials": PS_TRIALS, "warmup_seed": PS_SEED, "trial_seed": PS_SEED + 1}}
+    ^sampling: Dyn{[String:Dyn]{"strategy": "balanced_seeded_fisher_yates", "warmups": PS_WARMUPS, "trials": PS_TRIALS, "warmup_seed": PS_SEED, "trial_seed": PS_SEED + 1}}
     sampling["warmup_orders"] = texts(warmup_orders)
     sampling["trial_orders"] = texts(trial_orders)
     sampling["fresh_process_per_arm"] = true
     sampling["one_build_per_arm"] = true
     sampling["fresh_directory_per_sample"] = true
-    context := Dyn.object()
+    ^context: Dyn.object()
     context["inputs"] = object_or_empty(member(definition, "inputs"))
     context["tier"] = PS_TIER
     context["target"] = PS_TARGET
@@ -281,9 +281,9 @@ next_state: fn(state: Int) -> Int { (state * 1664525 + 1013904223) %% 4294967296
 // `count` order labels, half each, shuffled from the end by Fisher-Yates
 // with draws seeded by `seed`.
 balanced_order: fn(count: Int, seed: Int) -> [String] {
-    order := [String]{}
+    ^order: [String]{}
     loop index in 0..<count -> order.push(PS_ORDERS[if index < count /% 2 -> 0 else -> 1].copy())
-    state := seed
+    ^state: seed
     loop step in 1..<count {
         index: count - step
         state = next_state(state)
@@ -332,13 +332,13 @@ default_bootstrap: fn() -> BootstrapOptions {
 paired_bootstrap: fn(surface: [Float], plain: [Float], options: BootstrapOptions) -> Dyn Err! {
     resamples: int_at(options.resamples, "") ?? 0
     if resamples <= 0 -> return Err("paired bootstrap requires positive resamples")
-    state := (int_at(options.seed, "") ?? 0) %% 4294967296
+    ^state: (int_at(options.seed, "") ?? 0) %% 4294967296
     count: surface.len()
-    picked_surface := surface.copy()
-    picked_plain := plain.copy()
-    picked_difference := surface.copy()
-    ratios := [Float]{}
-    differences := [Float]{}
+    ^picked_surface: surface.copy()
+    ^picked_plain: plain.copy()
+    ^picked_difference: surface.copy()
+    ^ratios: [Float]{}
+    ^differences: [Float]{}
     loop _ in 0..<resamples {
         loop index in 0..<count {
             state = next_state(state)
@@ -350,11 +350,11 @@ paired_bootstrap: fn(surface: [Float], plain: [Float], options: BootstrapOptions
         ratios.push((stats.median_high(picked_surface) ?? 0.0) / (stats.median_high(picked_plain) ?? 0.0))
         differences.push(stats.median_high(picked_difference) ?? 0.0)
     }
-    ordered_ratios := ratios.copy()
+    ^ordered_ratios: ratios.copy()
     ordered_ratios.sort()
-    ordered_differences := differences.copy()
+    ^ordered_differences: differences.copy()
     ordered_differences.sort()
-    out := Dyn{
+    ^out: Dyn{
         [String:Dyn]{
             "method": "paired_index_bootstrap",
             "statistic": "median(surface_wall_time_ms) / median(plain_wall_time_ms)",
@@ -385,8 +385,8 @@ compute_statistics: fn(surface: [Float], plain: [Float], options: BootstrapOptio
     }
     surface_median: stats.median_high(surface) ?? 0.0
     plain_median: stats.median_high(plain) ?? 0.0
-    ratios := [Float]{}
-    differences := [Float]{}
+    ^ratios: [Float]{}
+    ^differences: [Float]{}
     loop index in 0..<surface.len() {
         ratios.push(surface[index] / plain[index])
         differences.push(surface[index] - plain[index])
@@ -399,7 +399,7 @@ floats: fn(values: [Float]) -> Dyn { Dyn.Array(values.map(fn(value) { Dyn.Float(
 
 // The statistics as a pair row holds them, without the bootstrap.
 statistics_tree: fn(found: SurfaceStatistics) -> Dyn {
-    out := Dyn{[String:Dyn]{"surface_median_ms": found.surface_median, "plain_median_ms": found.plain_median, "ratio": found.ratio}}
+    ^out: Dyn{[String:Dyn]{"surface_median_ms": found.surface_median, "plain_median_ms": found.plain_median, "ratio": found.ratio}}
     out["paired_ratios"] = floats(found.ratios)
     out["paired_differences_ms"] = floats(found.differences)
     out
@@ -529,7 +529,7 @@ sample_issues: fn(sample: Dyn, expected: String, location: String, out: ^[Surfac
 }
 
 sample_clean: fn(sample: Dyn, expected: String) -> Bool {
-    found := [SurfaceIssue]{}
+    ^found: [SurfaceIssue]{}
     sample_issues(sample, expected, "", found)
     found.len() == 0
 }
@@ -583,7 +583,7 @@ arm_issues: fn(surface: Dyn, plain: Dyn, pair: Dyn, context: Dyn, place: String,
 }
 
 count_label: fn(orders: [Dyn], label: String) -> Int {
-    count := 0
+    ^count: 0
     loop order in orders {
         if (text_at(order, "") ?? "") == label -> count += 1
     }
@@ -617,7 +617,7 @@ statistics_issues: fn(row: Dyn, found: SurfaceStatistics, out: ^[SurfaceIssue]) 
 // names (the compound pair when it is null), and its verdict.
 validate_performance_surface: fn(receipt: Dyn, spec: Dyn) -> Dyn {
     pair: pair_definition(spec)
-    issues := [SurfaceIssue]{}
+    ^issues: [SurfaceIssue]{}
     rows: items_at(receipt, "pairs")
     row: row_for(rows, dyn_at(pair, "id"))
     flag(issues, rows.len() != 1, "unpaired-row", "receipt must contain exactly one configured performance surface pair")
@@ -660,9 +660,9 @@ validate_performance_surface: fn(receipt: Dyn, spec: Dyn) -> Dyn {
     difference_vector: first_array([dyn_at(row, "paired_differences_ms"), dyn_at(row, "differences_ms")])
     flag(issues, surface_vector.len() != PS_TRIALS || plain_vector.len() != PS_TRIALS, "missing-sample", "raw surface/plain vectors do not contain all 100 samples")
     flag(issues, ratio_vector.len() != PS_TRIALS || difference_vector.len() != PS_TRIALS, "missing-sample", "paired ratio/difference vectors do not contain all 100 samples")
-    orders := [Dyn]{}
-    surface_times := [Float]{}
-    plain_times := [Float]{}
+    ^orders: [Dyn]{}
+    ^surface_times: [Float]{}
+    ^plain_times: [Float]{}
     loop index in 0..<PS_TRIALS {
         trial: trial_rows.get(index) ?? Dyn.Null
         if !(trial == .Object(_)) {
@@ -710,7 +710,7 @@ validate_performance_surface: fn(receipt: Dyn, spec: Dyn) -> Dyn {
         }
     }
 
-    statistics := SurfaceStatistics?{None}
+    ^statistics: SurfaceStatistics?{None}
     if surface_times.len() == PS_TRIALS && plain_times.len() == PS_TRIALS {
         options: BootstrapOptions{
             resamples: first_present([dyn_at(confidence, "resamples"), Dyn.Int(PS_RESAMPLES)]),
@@ -766,7 +766,7 @@ validate_performance_surface: fn(receipt: Dyn, spec: Dyn) -> Dyn {
         }
         else -> {}
     }
-    shown_statistics := Dyn.Null
+    ^shown_statistics: Dyn.Null
     if statistics == .Val(found) {
         shown_statistics = statistics_tree(found)
         shown_statistics["bootstrap"] = found.bootstrap.copy()
@@ -779,13 +779,13 @@ validate_performance_surface: fn(receipt: Dyn, spec: Dyn) -> Dyn {
 // it reached them.
 validation_tree: fn(receipt: Dyn, pair: Dyn, issues: [SurfaceIssue], verdict: String, row: Dyn, statistics: Dyn?) -> Dyn {
     valid: issues.len() == 0 && verdict == "win"
-    findings := [Dyn]{}
+    ^findings: [Dyn]{}
     loop issue in issues {
-        finding := Dyn{[String:Dyn]{"kind": Dyn.Text(issue.kind.copy()), "cell": dyn_at(pair, "id"), "metric": PS_METRIC}}
+        ^finding: Dyn{[String:Dyn]{"kind": Dyn.Text(issue.kind.copy()), "cell": dyn_at(pair, "id"), "metric": PS_METRIC}}
         finding["cause"] = Dyn.Text(issue.cause.copy())
         findings.push(finding)
     }
-    out := Dyn{[String:Dyn]{"schema": dyn_at(receipt, "schema"), "version": dyn_at(receipt, "version"), "status": if valid -> "pass" else -> "fail"}}
+    ^out: Dyn{[String:Dyn]{"schema": dyn_at(receipt, "schema"), "version": dyn_at(receipt, "version"), "status": if valid -> "pass" else -> "fail"}}
     out["valid"] = Dyn.Bool(valid)
     out["verdict"] = Dyn.Text(verdict.copy())
     out["findings"] = Dyn.Array(findings)
@@ -818,7 +818,7 @@ validate_manifest_pair: fn(spec: Dyn, evidence: Dyn, measurement: Dyn) -> [Strin
     pair: compound_pair()
     from_pair: fn(path: String) -> Bool { differs_at(spec, path, dyn_at(pair, path)) }
     contract: pair_measurement()
-    issues := [String]{}
+    ^issues: [String]{}
     if !(spec == .Object(_)) || from_pair("id") -> issues.push("manifest pair id is stale")
     if from_pair("surface") || from_pair("plain") -> issues.push("manifest pair labels are stale")
     if from_pair("surface_program") || from_pair("plain_program") {
@@ -839,7 +839,7 @@ validate_manifest_pair: fn(spec: Dyn, evidence: Dyn, measurement: Dyn) -> [Strin
     if texts_differ(evidence, "output_oracle", PS_ORACLE) {
         issues.push("manifest output oracle is stale")
     }
-    bound := true
+    ^bound: true
     loop field in
         ["tier", "target", "artifact_binding", "environment_binding", "sampling", "output_validation"] {
         if differs_at(measurement, field, dyn_at(contract, field)) -> bound = false
@@ -881,7 +881,7 @@ cpu_affinity: fn(repo_dir: String) -> {value: Dyn, source: Dyn} {
 artifact_identity: fn(repo_dir: String, path: String) -> Dyn {
     bytes: files.read_bytes(path) ?? return Dyn.Null
     modified: files.stat(path) ?? return Dyn.Null
-    out := Dyn{[String:Dyn]{"path": Dyn.Text(files.relative(path, repo_dir)), "sha256": Dyn.Text(crypto.sha256(bytes).hex()), "bytes": Dyn.Int(bytes.len())}}
+    ^out: Dyn{[String:Dyn]{"path": Dyn.Text(files.relative(path, repo_dir)), "sha256": Dyn.Text(crypto.sha256(bytes).hex()), "bytes": Dyn.Int(bytes.len())}}
     // Node's mtimeMs: whole seconds in milliseconds plus the nanoseconds.
     ns: modified.modified.to_unix_ns() ?? 0
     out["mtime_ms"] = Dyn.Float(Float.from_int(ns /% 1000000000) * 1000.0 + Float.from_int(ns %% 1000000000) / 1000000.0)
@@ -907,15 +907,15 @@ cpu_model: fn() -> Dyn {
 // The compiler artifact, revision, toolchain and host a measurement runs on.
 collect_identity: fn(repo_dir: String, artifact_path: String) -> Dyn {
     affinity: cpu_affinity(repo_dir)
-    toolchain := Dyn.object()
+    ^toolchain: Dyn.object()
     toolchain["rustc"] = command_text([process.env_get("RUSTC") ?? "rustc", "--version"], repo_dir)
     toolchain["cargo"] = command_text([process.env_get("CARGO") ?? "cargo", "--version"], repo_dir)
     toolchain["node"] = command_text(["node", "--version"], repo_dir)
-    host := Dyn{[String:Dyn]{"hostname": Dyn.Text(sys.hostname()), "platform": Dyn.Text(sys.name()), "release": Dyn.Text(sys.release()), "arch": Dyn.Text(node_arch()), "cpu_count": Dyn.Int(sys.cpu_count())}}
+    ^host: Dyn{[String:Dyn]{"hostname": Dyn.Text(sys.hostname()), "platform": Dyn.Text(sys.name()), "release": Dyn.Text(sys.release()), "arch": Dyn.Text(node_arch()), "cpu_count": Dyn.Int(sys.cpu_count())}}
     host["cpu_model"] = cpu_model()
     host["cpu_affinity"] = affinity.value
     host["cpu_affinity_source"] = affinity.source
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["artifact"] = artifact_identity(repo_dir, artifact_path)
     out["revision"] = command_text(["git", "rev-parse", "HEAD"], repo_dir)
     out["toolchain"] = toolchain
@@ -940,7 +940,7 @@ signal_or_null: fn(signal: Int?) -> Dyn {
 // into that directory's bin/. `executable` is null when the build fails;
 // its status and stderr say why.
 build_arm: fn(request: ArmBuild) -> Dyn {
-    out := Dyn{[String:Dyn]{"root": Dyn.Null, "executable": Dyn.Null, "executable_sha256": Dyn.Null, "source_sha256": Dyn.Text(sha_hex(request.source)), "status": Dyn.Null, "signal": Dyn.Null, "error_code": Dyn.Null, "stderr": ""}}
+    ^out: Dyn{[String:Dyn]{"root": Dyn.Null, "executable": Dyn.Null, "executable_sha256": Dyn.Null, "source_sha256": Dyn.Text(sha_hex(request.source)), "status": Dyn.Null, "signal": Dyn.Null, "error_code": Dyn.Null, "stderr": ""}}
     root: fresh_directory(request.scratch_root, "build-{request.label}") ?? return out
     out["root"] = Dyn.Text(root.copy())
     files.write(files.join(root, "main.jet"), request.source) ?? return out
@@ -965,7 +965,7 @@ build_arm: fn(request: ArmBuild) -> Dyn {
 // The members every sample of an arm shares: its label, program, and the
 // pair identity it is bound to.
 sample_head: fn(label: String, source: String, context: Dyn) -> Dyn {
-    out := Dyn{[String:Dyn]{"label": Dyn.Text(label.copy()), "source_file": "main.jet", "source_sha256": Dyn.Text(sha_hex(source))}}
+    ^out: Dyn{[String:Dyn]{"label": Dyn.Text(label.copy()), "source_file": "main.jet", "source_sha256": Dyn.Text(sha_hex(source))}}
     out["pair_context_sha256"] = dyn_at(context, "context_sha256")
     out["artifact_sha256"] = dyn_at(context, "artifact_sha256")
     out["environment_sha256"] = dyn_at(context, "environment_sha256")
@@ -978,16 +978,16 @@ sample_head: fn(label: String, source: String, context: Dyn) -> Dyn {
 // One sample: the arm's executable run as a fresh process in a fresh empty
 // directory, timed from spawn to exit.
 run_arm: fn(request: ArmRun) -> Dyn {
-    out := sample_head(request.label, request.source, request.context)
+    ^out: sample_head(request.label, request.source, request.context)
     out["output_oracle"] = first_present([dyn_at(request.context, "output_validation/oracle"), Dyn.Text(request.expected_output.copy())])
-    output := ""
-    errors := ""
-    code := Int?{None}
-    signal := Int?{None}
-    timed_out := false
-    error_code := Dyn.Null
-    elapsed := 0.0
-    entries := [Dyn]{}
+    ^output: ""
+    ^errors: ""
+    ^code: Int?{None}
+    ^signal: Int?{None}
+    ^timed_out: false
+    ^error_code: Dyn.Null
+    ^elapsed: 0.0
+    ^entries: [Dyn]{}
     if {
         fresh_directory(request.scratch_root, request.label) == .Val(root) -> {
             started: time.instant()
@@ -1034,7 +1034,7 @@ run_arm: fn(request: ArmRun) -> Dyn {
 
 // The sample of an arm that never ran.
 empty_sample: fn(label: String, source: String, context: Dyn) -> Dyn {
-    out := sample_head(label, source, context)
+    ^out: sample_head(label, source, context)
     out["output_oracle"] = first_present([dyn_at(context, "output_validation/oracle"), Dyn.Text(PS_ORACLE)])
     empty: Dyn.Text(sha_hex(""))
     rest: Dyn{[String:Dyn]{"wall_time_ms": Dyn.Null, "elapsed_ms": Dyn.Null, "status": Dyn.Null, "exit_code": Dyn.Null, "signal": Dyn.Null, "timed_out": false, "error_code": "preflight", "stdout": "", "stderr": "", "stdout_bytes_base64": "", "stderr_bytes_base64": "", "stdout_sha256": empty.copy(), "stderr_sha256": empty, "output_verified": false, "output_matches": false, "contaminated": false}}
@@ -1046,7 +1046,7 @@ empty_sample: fn(label: String, source: String, context: Dyn) -> Dyn {
 make_trial: fn(index: Int, order: String, surface: Dyn, plain: Dyn) -> Dyn {
     surface_time: sample_time(surface)
     plain_time: sample_time(plain)
-    out := Dyn{[String:Dyn]{"index": Dyn.Int(index), "order": Dyn.Text(order.copy()), "paired": true, "surface": surface, "plain": plain}}
+    ^out: Dyn{[String:Dyn]{"index": Dyn.Int(index), "order": Dyn.Text(order.copy()), "paired": true, "surface": surface, "plain": plain}}
     out["surface_wall_time_ms"] = float_or_null(surface_time)
     out["plain_wall_time_ms"] = float_or_null(plain_time)
     out["ratio"] = Dyn.Null
@@ -1069,12 +1069,12 @@ Sampled: struct {
 // The pair row of a measurement.
 pair_row: fn(pair: Dyn, identity: Dyn, context: Dyn, sampled: Sampled, statistics: SurfaceStatistics?, issues: [String]) -> Dyn {
     oracle: text_or_empty(pair, "expected_output")
-    surface_warmups := [Dyn]{}
-    plain_warmups := [Dyn]{}
-    surface_trials := [Dyn]{}
-    plain_trials := [Dyn]{}
-    ratios := [Dyn]{}
-    differences := [Dyn]{}
+    ^surface_warmups: [Dyn]{}
+    ^plain_warmups: [Dyn]{}
+    ^surface_trials: [Dyn]{}
+    ^plain_trials: [Dyn]{}
+    ^ratios: [Dyn]{}
+    ^differences: [Dyn]{}
     loop row in sampled.warmups {
         surface_warmups.push(float_or_null(sample_time(dyn_at(row, "surface"))))
         plain_warmups.push(float_or_null(sample_time(dyn_at(row, "plain"))))
@@ -1085,9 +1085,9 @@ pair_row: fn(pair: Dyn, identity: Dyn, context: Dyn, sampled: Sampled, statistic
         ratios.push(dyn_at(row, "ratio"))
         differences.push(dyn_at(row, "difference_ms"))
     }
-    surface_matches := true
-    plain_matches := true
-    clean := true
+    ^surface_matches: true
+    ^plain_matches: true
+    ^clean: true
     loop row in sampled.warmups.concat(sampled.trials) {
         surface: dyn_at(row, "surface")
         plain: dyn_at(row, "plain")
@@ -1099,7 +1099,7 @@ pair_row: fn(pair: Dyn, identity: Dyn, context: Dyn, sampled: Sampled, statistic
     confidence: if statistics == .Val(found) -> found.bootstrap.copy() else -> Dyn.Null
     ratio: if statistics == .Val(found) -> Val(found.ratio) else -> None
     verdict: classify_verdict(ratio, confidence)
-    out := Dyn.object()
+    ^out: Dyn.object()
     loop field in PS_ROW_FIELDS -> out[field.name] = dyn_at(pair, field.from)
     out["surface_source_sha256"] = Dyn.Text(sha_hex(text_or_empty(pair, "surface_source")))
     out["plain_source_sha256"] = Dyn.Text(sha_hex(text_or_empty(pair, "plain_source")))
@@ -1157,7 +1157,7 @@ measure_pair: fn(options: SurfaceOptions, build: fn(ArmBuild) -> Dyn, run: fn(Ar
     pair: pair_definition(options.pair)
     identity: options.identity
     compound: manifest_row(options.manifest, PS_PAIR_ID)
-    issues := if {
+    ^issues: if {
         is_custom_pair(options.pair) -> definition_issues(pair)
         options.manifest != Dyn.Null -> validate_manifest_pair(compound, dyn_at(options.manifest, "performance_surface_pairs/evidence"), dyn_at(options.manifest, "performance_surface_pairs/pair_measurement"))
         else -> [String]{}
@@ -1168,11 +1168,11 @@ measure_pair: fn(options: SurfaceOptions, build: fn(ArmBuild) -> Dyn, run: fn(Ar
         issues.push("toolchain identity is missing")
     }
     if !truthy_at(identity, "host/cpu_affinity") -> issues.push("CPU affinity is missing")
-    sampled := Sampled{warmup_orders: balanced_order(PS_WARMUPS, PS_SEED), trial_orders: balanced_order(PS_TRIALS, PS_SEED + 1), warmups: [], trials: []}
+    ^sampled: Sampled{warmup_orders: balanced_order(PS_WARMUPS, PS_SEED), trial_orders: balanced_order(PS_TRIALS, PS_SEED + 1), warmups: [], trials: []}
     context: measurement_context(identity, sampled.warmup_orders, sampled.trial_orders, pair)
     compiler: if truthy_at(identity, "artifact/path") -> files.normalize(files.join(options.repo_dir, text_or_empty(identity, "artifact/path"))) else -> options.artifact_path.copy()
     sources: [text_or_empty(pair, "surface_source"), text_or_empty(pair, "plain_source")]
-    builds := [Dyn]{}
+    ^builds: [Dyn]{}
     if issues.len() == 0 && files.exists(compiler) {
         loop arm in 0..<2 {
             built: build(ArmBuild{binary: compiler.copy(), source: sources[arm].copy(), scratch_root: scratch.copy(), label: PS_ARMS[arm].copy(), timeout_ms: options.timeout_ms})
@@ -1191,7 +1191,7 @@ measure_pair: fn(options: SurfaceOptions, build: fn(ArmBuild) -> Dyn, run: fn(Ar
         index: if warmup -> step else -> step - PS_WARMUPS
         order: if warmup -> sampled.warmup_orders[index] else -> sampled.trial_orders[index]
         first: if order == "surface_first" -> 0 else -> 1
-        samples := [Dyn.Null, Dyn.Null]
+        ^samples: [Dyn.Null, Dyn.Null]
         loop turn in 0..<2 {
             arm: (first + turn) %% 2
             label: "{if warmup -> "warmup" else -> "trial"}-{index}-{PS_ARMS[arm]}"
@@ -1199,7 +1199,7 @@ measure_pair: fn(options: SurfaceOptions, build: fn(ArmBuild) -> Dyn, run: fn(Ar
         }
         if {
             warmup -> {
-                row := Dyn{[String:Dyn]{"index": Dyn.Int(index), "order": Dyn.Text(order.copy())}}
+                ^row: Dyn{[String:Dyn]{"index": Dyn.Int(index), "order": Dyn.Text(order.copy())}}
                 row["surface"] = samples[0].copy()
                 row["plain"] = samples[1].copy()
                 sampled.warmups.push(row)
@@ -1210,8 +1210,8 @@ measure_pair: fn(options: SurfaceOptions, build: fn(ArmBuild) -> Dyn, run: fn(Ar
     loop built in builds {
         if text_at(built, "root") == .Val(root) -> files.remove_all(root) ?? ()
     }
-    surface_trials := [Float]{}
-    plain_trials := [Float]{}
+    ^surface_trials: [Float]{}
+    ^plain_trials: [Float]{}
     loop row in sampled.trials {
         if number_at(row, "surface_wall_time_ms") == .Val(time) && time > 0.0 {
             surface_trials.push(time)
@@ -1220,7 +1220,7 @@ measure_pair: fn(options: SurfaceOptions, build: fn(ArmBuild) -> Dyn, run: fn(Ar
             plain_trials.push(time)
         }
     }
-    statistics := SurfaceStatistics?{None}
+    ^statistics: SurfaceStatistics?{None}
     if surface_trials.len() == PS_TRIALS && plain_trials.len() == PS_TRIALS {
         if compute_statistics(surface_trials, plain_trials, default_bootstrap()) == {
             .Ok(found) -> { statistics = Val(found) }
@@ -1239,16 +1239,16 @@ measure_pair: fn(options: SurfaceOptions, build: fn(ArmBuild) -> Dyn, run: fn(Ar
     }
     row: pair_row(pair, identity, context, sampled, statistics, issues)
     verdict: text_or_empty(row, "verdict")
-    built := Dyn.object()
+    ^built: Dyn.object()
     loop arm in 0..<builds.len() {
-        shown := Dyn.object()
+        ^shown: Dyn.object()
         loop field in
             ["source_sha256", "executable_sha256", "status", "signal", "error_code", "stderr"] {
             put_present(shown, field, value_at(builds[arm], field))
         }
         built[PS_ARMS[arm].copy()] = shown
     }
-    receipt := Dyn{[String:Dyn]{"schema": PS_SCHEMA, "version": 1, "protocol": "paired-surface-v2"}}
+    ^receipt: Dyn{[String:Dyn]{"schema": PS_SCHEMA, "version": 1, "protocol": "paired-surface-v2"}}
     receipt["generated_command"] = Dyn.Text(options.generated_command.copy())
     receipt["generated_at"] = Dyn.Text(options.generated_at.copy())
     receipt["target"] = PS_TARGET
@@ -1271,7 +1271,7 @@ measure_pair: fn(options: SurfaceOptions, build: fn(ArmBuild) -> Dyn, run: fn(Ar
     receipt["trials"] = PS_TRIALS
     receipt["metric"] = PS_METRIC
     receipt["output_oracle"] = dyn_at(pair, "expected_output")
-    order := Dyn{[String:Dyn]{"strategy": "balanced_seeded_fisher_yates", "labels": texts(PS_ORDERS), "seed": PS_SEED, "warmup_seed": PS_SEED, "trial_seed": PS_SEED + 1}}
+    ^order: Dyn{[String:Dyn]{"strategy": "balanced_seeded_fisher_yates", "labels": texts(PS_ORDERS), "seed": PS_SEED, "warmup_seed": PS_SEED, "trial_seed": PS_SEED + 1}}
     order["warmups"] = texts(sampled.warmup_orders)
     order["trials"] = texts(sampled.trial_orders)
     receipt["order"] = order
@@ -1300,7 +1300,7 @@ unique_path: fn(candidate: String) -> String {
     if !files.exists(candidate) -> return candidate.copy()
     extension: files.suffix(candidate)
     stem: candidate.slice(0, candidate.len() - extension.len())
-    index := 1
+    ^index: 1
     loop files.exists("{stem}-{index}{extension}") -> index += 1
     "{stem}-{index}{extension}"
 }
@@ -1336,13 +1336,13 @@ preserve_prior: fn(canonical_path: String, generated_at: String, repo: String) -
 prepare_history: fn(canonical_path: String, generated_at: String, repo: String, default_links: [String]) -> History {
     preserved: preserve_prior(canonical_path, generated_at, repo)
     prior: preserved.prior
-    history := preserved.links
-    issue := preserved.issue
+    ^history: preserved.links
+    ^issue: preserved.issue
     linked: if dyn_at(prior, "historical_receipts") == .Array(_) -> texts_at(prior, "historical_receipts") else -> default_links
     loop link in linked.concat(default_links) {
         if !history.contains(link) -> history.push(link.copy())
     }
-    digests := Dyn.object()
+    ^digests: Dyn.object()
     loop link in history {
         if files.read_bytes(files.normalize(files.join(repo, link))) == {
             .Ok(bytes) -> { digests[link.copy()] = Dyn.Text(crypto.sha256(bytes).hex()) }
@@ -1366,8 +1366,8 @@ SurfaceArgs: struct {
 }
 
 parse_surface_args: fn(argv: [String]) -> SurfaceArgs Err! {
-    out := SurfaceArgs{help: false, artifact: None, scratch: None, output: None, canonical: None, timeout_ms: None, pair: None}
-    index := 0
+    ^out: SurfaceArgs{help: false, artifact: None, scratch: None, output: None, canonical: None, timeout_ms: None, pair: None}
+    ^index: 0
     loop index < argv.len() {
         arg: argv[index]
         if arg == "--help" || arg == "-h" {
@@ -1442,13 +1442,13 @@ performance_surface_main: fn(repo_dir: String, argv: [String]) -> Int Err! {
         prior_canonical_receipt: if history.links.get(0) == .Val(first) -> Dyn.Text(first) else -> Dyn.Null,
     }
     measured: measure_pair(options, build_arm, run_arm)
-    receipt := measured.receipt
+    ^receipt: measured.receipt
     if history.issue == .Val(issue) {
         // The receipt and its pair row share one preflight list.
         receipt["preflight_issues"] = Dyn.Array(items_at(receipt, "preflight_issues").concat([Dyn.Text(issue)]))
-        rows := [Dyn]{}
+        ^rows: [Dyn]{}
         loop row in items_at(receipt, "pairs") {
-            shared := row.copy()
+            ^shared: row.copy()
             shared["preflight_issues"] = Dyn.Array(items_at(row, "preflight_issues").concat([Dyn.Text(issue.copy())]))
             rows.push(shared)
         }
@@ -1470,13 +1470,15 @@ performance_surface_main: fn(repo_dir: String, argv: [String]) -> Int Err! {
 // hold that program's copy, which declares its own `run`.
 dev_tool_root: fn(repo_dir: String, name: String) -> String Err! {
     ran: process.cmd([process.env_nonempty("JET") ?? "jet", files.join(repo_dir, "Tools/Agent/Roots.jet"), name]).run() ?? return Err("Tools/Agent/Roots.jet cannot start: {err}")
-    if ran.code != 0 -> return Err("{name}: Tools/Agent/Roots.jet exited {ran.code}: {ran.errors.trim()}")
+    if ran.code != 0 {
+        return Err("{name}: Tools/Agent/Roots.jet exited {ran.code}: {ran.errors.trim()}")
+    }
     Ok(ran.output.trim().removeprefix("{name}="))
 }
 
 // This command line as the receipt records it: each word as JSON.
 command_line: fn() -> String {
-    words := [String]{}
+    ^words: [String]{}
     loop arg in process.args() -> words.push(json.stringify(Dyn.Text(arg.copy())))
     words.join(" ")
 }
@@ -1495,7 +1497,7 @@ command_line: fn() -> String {
 }
 
 #Test("a manifest's compound row holds when it states the pair and its contracts") {
-    pair := compound_pair()
+    ^pair: compound_pair()
     evidence: Dyn{[String:Dyn]{"target": PS_TARGET, "metric": PS_METRIC, "warmups": 10, "trials": 100, "output_oracle": PS_ORACLE}}
     assert_eq(validate_manifest_pair(pair, evidence, pair_measurement()), [String]{})
     pair["surface"] = "x"

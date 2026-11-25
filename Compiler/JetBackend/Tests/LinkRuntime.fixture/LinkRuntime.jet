@@ -41,8 +41,8 @@ lr_status: fn(args: [String]) -> Int {
         return 64
     }
     output: args[first]
-    names := [String]{}
-    bufs := [[U8]]{}
+    ^names: [String]{}
+    ^bufs: [[U8]]{}
     read_started: time.instant()
     loop index in first + 1..<args.len() {
         names.push(args[index])
@@ -90,7 +90,7 @@ lr_status: fn(args: [String]) -> Int {
 }
 
 lr_image_compare: fn(pack_path: String, image_path: String) -> Int {
-    pack := files.read_bytes(pack_path) ?? {
+    ^pack: files.read_bytes(pack_path) ?? {
         print("cannot read {pack_path}")
         return 66
     }
@@ -98,15 +98,15 @@ lr_image_compare: fn(pack_path: String, image_path: String) -> Int {
         print("cannot read {image_path}")
         return 66
     }
-    exports := [String]{}
-    p := link_context([[U8]]{pack.copy()}, LINK_RUN_BASE)
+    ^exports: [String]{}
+    ^p: link_context([[U8]]{pack.copy()}, LINK_RUN_BASE)
     link_load_inputs(p, [String]{pack_path})
     loop g in 0..<p.g_name.len() {
         if p.g_kind[g] == LINK_G_FILE && p.g_alias[g] < 0 && p.g_section[g] >= 0 {
             exports.push(p.g_name[g])
         }
     }
-    stub := link_synth()
+    ^stub: link_synth()
     link_synth_function(stub, "main")
     link_synth_code(stub, [Int]{0xc3})
     request: X64ResidentLinkRequest?{Val(X64ResidentLinkRequest{runtime_input: 0, callable_exports: exports})}
@@ -116,17 +116,17 @@ lr_image_compare: fn(pack_path: String, image_path: String) -> Int {
         loop error in linked.image.errors -> print("reference link: {error}")
         return 1
     }
-    c := link_context([[U8]]{[U8]{}, image.copy()}, LINK_RUN_BASE)
+    ^c: link_context([[U8]]{[U8]{}, image.copy()}, LINK_RUN_BASE)
     view: link_image_view(c, 1, 0, 0)
     if c.errors.len() > 0 {
         loop error in c.errors -> print("image: {error}")
         return 1
     }
     headers: LINK_EHDR_SIZE + LINK_PHDR_SIZE * view.phnum
-    header_bytes := 0
-    site_bytes := 0
-    gap_bytes := 0
-    unexplained := 0
+    ^header_bytes: 0
+    ^site_bytes: 0
+    ^gap_bytes: 0
+    ^unexplained: 0
     loop at in 0..<view.load_end {
         if at < reference.len() && reference[at] == image[at] -> next
         if at < headers {
@@ -135,7 +135,7 @@ lr_image_compare: fn(pack_path: String, image_path: String) -> Int {
         }
         // Padding between the image's segments is not loaded (the reference
         // has its stub `main` there).
-        loaded := false
+        ^loaded: false
         loop k in 0..<view.phnum {
             h: view.phoff + LINK_PHDR_SIZE * k
             offset: link_s64(c.bufs, 1, h + 8)
@@ -147,7 +147,7 @@ lr_image_compare: fn(pack_path: String, image_path: String) -> Int {
             gap_bytes += 1
             next
         }
-        site := false
+        ^site: false
         loop k in 0..<view.sites.len().div_euclid(3) {
             start: view.sites[3 * k] - view.base
             width: if view.sites[3 * k + 1] == LINK_R_64 -> 8 else -> 4

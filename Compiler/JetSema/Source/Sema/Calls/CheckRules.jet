@@ -53,11 +53,17 @@ use {
 
 // The columns a batch declares (SemaCallRuleColumns).
 SEMA_CALL_RULE_RULES_LOCAL: "__jet_rules"
+
 SEMA_CALL_RULE_WORDS_LOCAL: "__jet_call_words"
+
 SEMA_CALL_RULE_TEXTS_LOCAL: "__jet_call_texts"
+
 SEMA_CALL_RULE_TYPES_LOCAL: "__jet_call_types"
+
 SEMA_CALL_RULE_VALUES_LOCAL: "__jet_call_values"
+
 SEMA_CALL_RULE_FUNCTIONS_LOCAL: "__jet_call_functions"
+
 SEMA_CALL_RULE_WRITTEN_LOCAL: "__jet_call_written"
 
 // The compiler records a batch's check builds from its columns; only a
@@ -92,7 +98,7 @@ SemaCallRuleHearing: struct {
 // declared marker with a `check` resolves to. A builtin rule is bound to no
 // declaring module (sema_marker_module_bind_marker) and brings none.
 sema_call_rules: fn(graph: SemaRegistrationGraph, markers: [Marker], written_in: ModuleID) -> [SemaCallRule] {
-    rules := [SemaCallRule]{}
+    ^rules: [SemaCallRule]{}
     loop marker in markers {
         if marker.negated || marker.declaration_module == None -> next
         resolved: sema_marker_module_resolve_application(graph, written_in, marker)
@@ -121,8 +127,12 @@ sema_call_rules_of_type: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int)
     row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return [SemaCallRule]{}
     written_in: graph.modules[row.module_index].module_identity
     if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
-        if item == .Struct(definition) -> return sema_call_rules(graph, definition.type_markers, written_in)
-        if item == .Enum(definition) -> return sema_call_rules(graph, definition.type_markers, written_in)
+        if item == .Struct(definition) {
+            return sema_call_rules(graph, definition.type_markers, written_in)
+        }
+        if item == .Enum(definition) {
+            return sema_call_rules(graph, definition.type_markers, written_in)
+        }
     }
     [SemaCallRule]{}
 }
@@ -156,7 +166,7 @@ sema_call_rules_hear: fn(
     frame: Int,
     check: ^SemaBodyCheck,
 ) -> SemaCallRuleHearing {
-    hearing := SemaCallRuleHearing{from: check.context.comptime_body_sources.len()}
+    ^hearing: SemaCallRuleHearing{from: check.context.comptime_body_sources.len()}
     owner: sema_scope_function_owner_key(check.scopes)
     site_owner: if site == "" -> "{owner}" else -> "{owner}.{site}"
     table: if receiver == .Val(written) -> sema_rule_table(written, owner, check) else -> "{owner}"
@@ -164,10 +174,10 @@ sema_call_rules_hear: fn(
         check.context.rule_tables.calls_at.push(name_span.start)
         check.context.rule_tables.call_tables.push("{table}")
     }
-    end := name_span.end
+    ^end: name_span.end
     loop argument in args -> end = argument.span.end
     span: Span{start: name_span.start, end: end}
-    waiting := [Int]{}
+    ^waiting: [Int]{}
     loop index in 0..<rules.len() {
         if sema_comptime_body_value_find(check.context, check.environment.module_identity, site_owner, rules[index].span, name_span) == .Val(landed) {
             if sema_call_rule_rejects(landed.value, span, check.diagnostics) {
@@ -186,8 +196,10 @@ sema_call_rules_hear: fn(
     // Each waiting rule takes its own row, made for it, so none is copied:
     // a call most often has one rule.
     loop index in waiting {
-        if sema_comptime_body_source_row(check.context, check.environment.module_identity, site_owner, rules[index].span, name_span) != None -> next
-        call := sema_rule_call_value(graph, callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, source, keys, owner, check)
+        if sema_comptime_body_source_row(check.context, check.environment.module_identity, site_owner, rules[index].span, name_span) != None {
+            next
+        }
+        ^call: sema_rule_call_value(graph, callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, source, keys, owner, check)
         call.words[SEMA_CALL_RULE_PAIRED_WORD] = if rules[index].paired -> 1 else -> 0
         sema_call_rule_stage(check, owner, site_owner, rules[index], call, name_span)
     }
@@ -266,19 +278,19 @@ sema_rule_table: fn(receiver: Expr, owner: String, check: ^SemaBodyCheck) -> Str
     }
     if receiver == .Ident(name, span, _) && sema_scope_resolve_index(check.scopes, name) == .Val(binding) {
         key: check.scopes.bindings[binding].key
-        heard := false
+        ^heard: false
         loop written in check.context.rule_tables.heard {
             if sema_rule_binding_is(written, owner, key) -> heard = true
         }
         if !heard {
             check.context.rule_tables.heard.push(SemaRuleBinding{owner: owner, binding: key})
         }
-        joined := -1
+        ^joined: -1
         loop (index, written) in check.context.rule_tables.joined {
             if sema_rule_binding_is(written, owner, key) -> joined = index
         }
         base: if joined >= 0 -> "{check.context.rule_tables.joined_tables[joined]}" else -> "{owner}:{key}"
-        generation := 0
+        ^generation: 0
         loop (index, assigned) in check.context.rule_tables.assigned {
             if sema_rule_binding_is(assigned, owner, key) && check.context.rule_tables.assigned_at[index] < span.start {
                 generation += 1
@@ -334,15 +346,15 @@ sema_rule_table_assigned: fn(root: String, at: Span, check: ^SemaBodyCheck) Neve
 // a call finds an earlier call of its table written in its own block or one
 // around it, which always ran before it. The last is the call's own.
 sema_rule_table_keys: fn(table: String, written_in: Int, scopes: SemaScopeTable) -> [String] {
-    frames := [Int]{}
-    at := written_in
+    ^frames: [Int]{}
+    ^at: written_in
     loop at >= 0 {
         frames.push(at)
         at = scopes.frames[at].parent
     }
     frames.reverse()
-    keys := [String]{}
-    path := "{table}@"
+    ^keys: [String]{}
+    ^path: "{table}@"
     loop frame in frames {
         path = "{path}.{frame}"
         keys.push("{path}")
@@ -424,12 +436,12 @@ sema_rule_call_value: fn(
 ) -> SemaCallRuleHeard {
     file: sema_source_file_at(check.environment.source_segments, check.environment.source_file, check.environment.source_origin, span)
     caller: sema_rule_identity(graph, owner, check.context.rule_identities)
-    callee_identity := "{name}"
+    ^callee_identity: "{name}"
     if callee == .Val(id) {
         callee_key: sema_symbol_key(check.program.*, check.context, id)
         callee_identity = sema_rule_identity(graph, callee_key, check.context.rule_identities)
     }
-    heard := SemaCallRuleHeard{
+    ^heard: SemaCallRuleHeard{
         words: [Int]{0, 0, 1, 2, 3, span.start, span.end, 4, name_span.start, name_span.end, args.len(), 0, 0, 0},
         texts: [String]{caller, callee_identity, "{check.environment.module_name}", file, "{name}"},
         types: [TComptimeValue]{},
@@ -450,7 +462,7 @@ sema_rule_call_value: fn(
     }
     loop argument in args {
         heard_arg: sema_rule_literal(argument.expr) ?? sema_rule_heard_arg(argument.expr, check)
-        label := String?{None}
+        ^label: String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
         function: sema_rule_function_named(argument.expr, argument.span, check)
         sema_rule_call_arg(heard, label, heard_arg.ty, heard_arg.known, function, sema_rule_written(argument.expr, file), argument.span, graph, check.context.type_delta, check.environment.*)
@@ -489,14 +501,14 @@ sema_rule_identity: fn(graph: SemaRegistrationGraph, key: String, known: ^SemaRu
 // `Box<Int>`), its check where the prelude `Type` is expected, which makes
 // it that type's `Type` value.
 sema_rule_probe: fn(expression: Expr, check: ^SemaBodyCheck) -> TExpr? {
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_diagnostics: [Diagnostic]{}
     probed: sema_probe_expression(expression, None, check, probe_diagnostics)
     if probed != None || sema_module_no_prelude(check.environment.*, check.program.*) {
         return probed
     }
     if expression == .Ident(_, _, _) || expression == .TypeValue(_, _, _) {
         value_type: sema_expr_expected_type(Type.Named{name: sema_core_source_type_name(check.program.*, "core.prelude", "Type")}, check.environment.*, check.program.*)
-        type_diagnostics := [Diagnostic]{}
+        ^type_diagnostics: [Diagnostic]{}
         return sema_probe_expression(expression, Val(value_type), check, type_diagnostics)
     }
     None
@@ -518,9 +530,11 @@ sema_rule_literal: fn(expression: Expr) -> SemaRuleHeardArg? Never! {
     if expression == .Int(value, _, width, raw, _) && width == None {
         return Val(SemaRuleHeardArg{ty: Type.Int, known: Val(TComptimeValue.Int{value: sema_expr_exact_integer_literal(value, raw)})})
     }
-    if expression == .Bool(flag, _, _) -> return Val(SemaRuleHeardArg{ty: Type.Bool, known: Val(TComptimeValue.Bool{value: flag})})
+    if expression == .Bool(flag, _, _) {
+        return Val(SemaRuleHeardArg{ty: Type.Bool, known: Val(TComptimeValue.Bool{value: flag})})
+    }
     if expression == .Str(parts, _, _) {
-        text := ""
+        ^text: ""
         loop part in parts {
             if part == {
                 .Lit(piece) -> { text = "{text}{piece}" }
@@ -539,7 +553,7 @@ sema_rule_literal: fn(expression: Expr) -> SemaRuleHeardArg? Never! {
 sema_rule_heard_arg: fn(expression: Expr, check: ^SemaBodyCheck) -> SemaRuleHeardArg {
     probed: sema_rule_probe(expression, check)
     ty: if probed == .Val(checked) -> checked.ty else -> Type.Named{name: "_"}
-    known := if probed == .Val(checked) -> sema_rule_known(checked, check) else -> TComptimeValue?{None}
+    ^known: if probed == .Val(checked) -> sema_rule_known(checked, check) else -> TComptimeValue?{None}
     if known == None && probed == .Val(checked) && (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
         known = sema_rule_known_path(expression, check)
     }
@@ -556,7 +570,7 @@ sema_rule_function_named: fn(expression: Expr, span: Span, check: ^SemaBodyCheck
         local: sema_scope_resolve_index(check.scopes, name)
         resolved: if local == .Val(index) -> sema_scope_binding_symbol(check.environment.*, check.scopes, index) else -> sema_resolved_symbol(graph, sema_type_graph_lookup_symbol(graph, check.environment.module_identity, name) ?? return None)
         if resolved.kind != SymbolKind.Function -> return None
-        probe_diagnostics := [Diagnostic]{}
+        ^probe_diagnostics: [Diagnostic]{}
         info: sema_fact_function_info(resolved, graph, check.context.type_delta, None, span, probe_diagnostics) ?? return None
         return Val(sema_fact_declared_value(info))
     }
@@ -568,17 +582,17 @@ sema_rule_function_named: fn(expression: Expr, span: Span, check: ^SemaBodyCheck
 // FunctionInfo) and which spells the parts `parts` (sema_rule_written), to
 // `heard`; its type is the TypeId the one maker makes in `graph`.
 sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, known: TComptimeValue?, function: ^^TComptimeValue?, parts: ^^TComptimeValue?, span: Span, graph: SemaRegistrationGraph, types: ^[InternerDelta], environment: SemaScopeEnvironment) Never! {
-    labeled := 0
+    ^labeled: 0
     if label.move() == .Val(text) {
         heard.texts.push(text.move())
         labeled = heard.texts.len()
     }
-    named := 0
+    ^named: 0
     if function.move() == .Val(info) {
         heard.functions.push(info.move())
         named = heard.functions.len()
     }
-    value := 0
+    ^value: 0
     if known == .Val(computed) {
         dyn: sema_rule_value_dyn(graph, environment.module_row, ty, computed, 0)
         if dyn.move() == .Val(tree) {
@@ -586,7 +600,7 @@ sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, kn
             value = heard.values.len()
         }
     }
-    spelled := 0
+    ^spelled: 0
     if parts.move() == .Val(list) {
         heard.written.push(list.move())
         spelled = heard.written.len()
@@ -604,8 +618,8 @@ sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, kn
 // literal and a run-time value spell none.
 sema_rule_written: fn(expression: Expr, file: String) -> TComptimeValue? {
     if expression == .Str(parts, _, _) {
-        written := [TComptimeValue]{}
-        text := ""
+        ^written: [TComptimeValue]{}
+        ^text: ""
         loop part in parts {
             if part == {
                 .Lit(piece) -> { text = "{text}{piece}" }
@@ -616,14 +630,16 @@ sema_rule_written: fn(expression: Expr, file: String) -> TComptimeValue? {
                         text = ""
                     }
                     name: if inner == .Ident(hole, _, _) -> sema_comptime_reflection_some(TComptimeValue.String{value: "{hole}"}) else -> sema_comptime_reflection_none(Type.String)
-                    written.push(TComptimeValue.Enum{
-                        type_name: "CompilerWrittenPart",
-                        variant: "Hole",
-                        args: [TComptimeEnumArg]{
-                            TComptimeEnumArg{name: Val("name"), value: name},
-                            TComptimeEnumArg{name: Val("span"), value: sema_compiler_index_span(expr_source_span(inner), file)},
+                    written.push(
+                        TComptimeValue.Enum{
+                            type_name: "CompilerWrittenPart",
+                            variant: "Hole",
+                            args: [TComptimeEnumArg]{
+                                TComptimeEnumArg{name: Val("name"), value: name},
+                                TComptimeEnumArg{name: Val("span"), value: sema_compiler_index_span(expr_source_span(inner), file)},
+                            },
                         },
-                    })
+                    )
                 }
             }
         }
@@ -650,14 +666,14 @@ sema_rule_written_text: fn(text: String) -> TComptimeValue Never! {
 sema_rule_known: fn(value: TExpr, check: SemaBodyCheck) -> TComptimeValue? {
     if value.kind == .Flat(index) -> return sema_rule_known_row(index, check)
     if value.kind == .StructLit(fields) {
-        known := [TComptimeField]{}
+        ^known: [TComptimeField]{}
         loop field in fields {
             known.push(TComptimeField{name: "{field.field.name}", value: sema_rule_known(field.value, check) ?? return None})
         }
         return Val(TComptimeValue.Struct{type_name: "", fields: known})
     }
     if value.kind == .EnumLit(_, variant, payload) {
-        args := [TComptimeEnumArg]{}
+        ^args: [TComptimeEnumArg]{}
         if payload == .Named(_) -> return None
         if payload == .Positional(positional) {
             loop argument in positional {
@@ -690,7 +706,7 @@ sema_rule_known: fn(value: TExpr, check: SemaBodyCheck) -> TComptimeValue? {
 
 // sema_rule_known over the items of a list literal.
 sema_rule_known_list: fn(items: [TExpr], check: SemaBodyCheck) -> TComptimeValue? {
-    known := [TComptimeValue]{}
+    ^known: [TComptimeValue]{}
     loop item in items { known.push(sema_rule_known(item, check) ?? return None) }
     Val(TComptimeValue.List{values: known})
 }
@@ -698,7 +714,9 @@ sema_rule_known_list: fn(items: [TExpr], check: SemaBodyCheck) -> TComptimeValue
 // The negation of known number `value`; None for anything else.
 sema_rule_known_negation: fn(value: TComptimeValue) -> TComptimeValue? Never! {
     if value == .Int(number) -> return Val(TComptimeValue.Int{value: 0 - number})
-    if value == .Float(number, bits) -> return Val(TComptimeValue.Float{value: number * -1.0, bits: bits})
+    if value == .Float(number, bits) {
+        return Val(TComptimeValue.Float{value: number * -1.0, bits: bits})
+    }
     None
 }
 
@@ -720,14 +738,14 @@ sema_rule_known_row: fn(index: Int, check: SemaBodyCheck) -> TComptimeValue? {
         return Val(TComptimeValue.Char{value: code})
     }
     if check.context.arena.tree.nodes[row].kind == .StrLit(parts) {
-        text := ""
+        ^text: ""
         loop part in parts {
             if part == .Literal(literal) -> text = "{text}{literal}" else -> return None
         }
         return Val(TComptimeValue.String{value: text})
     }
     if check.context.arena.tree.nodes[row].kind == .StructLit(fields) {
-        known := [TComptimeField]{}
+        ^known: [TComptimeField]{}
         loop field in fields {
             known.push(TComptimeField{name: "{field.field.name}", value: sema_rule_known_row(field.value, check) ?? return None})
         }
@@ -806,7 +824,7 @@ sema_rule_known_written: fn(graph: SemaRegistrationGraph, module_index: Int, exp
         return sema_rule_known_written(graph, module_index, inner, depth + 1)
     }
     if expression == .Str(parts, _, _) {
-        text := ""
+        ^text: ""
         loop part in parts {
             if part == .Lit(literal) -> text = "{text}{literal}" else -> return None
         }
@@ -846,7 +864,7 @@ sema_rule_known_written: fn(graph: SemaRegistrationGraph, module_index: Int, exp
 sema_rule_known_path: fn(expression: Expr, check: ^SemaBodyCheck) -> TComptimeValue? {
     if expression == .TypedLit(_, body, _, _) {
         if body == .Value(value) {
-            probe_diagnostics := [Diagnostic]{}
+            ^probe_diagnostics: [Diagnostic]{}
             text: sema_probe_expression(value, Val(Type.String), check, probe_diagnostics) ?? return None
             return sema_rule_known_path_text(sema_rule_known(text, check) ?? return None)
         }
@@ -864,7 +882,7 @@ sema_rule_known_path_text: fn(text: TComptimeValue) -> TComptimeValue? Never! {
 
 // sema_rule_known_row over the items of a list literal's rows.
 sema_rule_known_rows: fn(items: [Int], check: SemaBodyCheck) -> TComptimeValue? {
-    known := [TComptimeValue]{}
+    ^known: [TComptimeValue]{}
     loop item in items { known.push(sema_rule_known_row(item, check) ?? return None) }
     Val(TComptimeValue.List{values: known})
 }
@@ -872,7 +890,7 @@ sema_rule_known_rows: fn(items: [Int], check: SemaBodyCheck) -> TComptimeValue? 
 // The enum case `variant` whose arena-row payload is `payload`, known when
 // its values are; None for a case with named fields.
 sema_rule_known_case: fn(variant: String, payload: BodyEnumPayload, check: SemaBodyCheck) -> TComptimeValue? {
-    args := [TComptimeEnumArg]{}
+    ^args: [TComptimeEnumArg]{}
     if payload == .Named(_) -> return None
     if payload == .Positional(positional) {
         loop argument in positional {
@@ -906,9 +924,11 @@ SEMA_CALL_RULE_F32_MAX: Float{340282346638528859811704183484516925440.0}
 sema_rule_value_dyn: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, value: TComptimeValue, depth: Int) -> TComptimeValue? {
     if depth > SEMA_CALL_RULE_VALUE_DEPTH -> return None
     // An Int the build holds in a word is its own Dyn payload: no fold.
-    if ty == Type.Int && value == .Int(small) && sema_comptime_fold_small_int(small) -> return Val(sema_rule_dyn("Int", TComptimeValue.Int{value: small}))
+    if ty == Type.Int && value == .Int(small) && sema_comptime_fold_small_int(small) {
+        return Val(sema_rule_dyn("Int", TComptimeValue.Int{value: small}))
+    }
     if ty == Type.Int || ty == .IntN(_, _) {
-        number := Int?{None}
+        ^number: Int?{None}
         if value == .Int(small) -> number = Val(small)
         if value == .BigInt(decimal) -> number = Val(Int.parse(decimal) ?? return None)
         exact: number ?? return None
@@ -918,22 +938,30 @@ sema_rule_value_dyn: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, val
     }
     if ty == Type.Float || ty == Type.Float32 {
         if value == .Float(number, _) {
-            if ty == Type.Float -> return Val(sema_rule_dyn("Float", TComptimeValue.Float{value: number, bits: 64}))
+            if ty == Type.Float {
+                return Val(sema_rule_dyn("Float", TComptimeValue.Float{value: number, bits: 64}))
+            }
             // An F32 holds the nearest binary32 value, which Encode widens;
             // a NaN or one past its range stops where it narrows.
-            if number.is_nan() || number > SEMA_CALL_RULE_F32_MAX || number < -SEMA_CALL_RULE_F32_MAX -> return None
+            if number.is_nan() || number > SEMA_CALL_RULE_F32_MAX || number < -SEMA_CALL_RULE_F32_MAX {
+                return None
+            }
             narrow: F32{number}
             return Val(sema_rule_dyn("Float", TComptimeValue.Float{value: Float{narrow}, bits: 64}))
         }
         return None
     }
     if ty == Type.Bool {
-        if value == .Bool(flag) -> return Val(sema_rule_dyn("Bool", TComptimeValue.Bool{value: flag}))
+        if value == .Bool(flag) {
+            return Val(sema_rule_dyn("Bool", TComptimeValue.Bool{value: flag}))
+        }
         return None
     }
     // The built-in Path handle has no Encode; it is heard as its text.
     if ty == Type.String || (sema_stream_handle_owner(ty) ?? "") == "Path" {
-        if value == .String(text) -> return Val(sema_rule_dyn("Text", TComptimeValue.String{value: text}))
+        if value == .String(text) {
+            return Val(sema_rule_dyn("Text", TComptimeValue.String{value: text}))
+        }
         return None
     }
     if ty == Type.Char {
@@ -943,13 +971,13 @@ sema_rule_value_dyn: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, val
         }
         return None
     }
-    element := Type?{None}
+    ^element: Type?{None}
     if ty == .List(inner) -> element = Val(inner)
     if ty == .FixedList(inner, _) -> element = Val(inner)
     if element == .Val(item_type) {
         if item_type == (Type.IntN{signed: false, bits: 8}) -> return None
         if value == .List(items) {
-            trees := [TComptimeValue]{}
+            ^trees: [TComptimeValue]{}
             loop item in items {
                 trees.push(sema_rule_value_dyn(graph, caller, item_type, item, depth + 1) ?? return None)
             }
@@ -963,14 +991,22 @@ sema_rule_value_dyn: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, val
         // The prelude's `Type` has no Encode; it is heard as its path's text.
         if graph.modules[row.module_index].module_name == "core.prelude" && graph.modules[row.module_index].nominals[row.row].symbol.name == "Type" {
             if value == .Struct(_, fields) && fields.len() == 1 {
-                if fields[0].value == .String(path) -> return Val(sema_rule_dyn("Text", TComptimeValue.String{value: path}))
+                if fields[0].value == .String(path) {
+                    return Val(sema_rule_dyn("Text", TComptimeValue.String{value: path}))
+                }
             }
             return None
         }
-        if !sema_rule_value_derives_encode(graph, row.module_index, graph.modules[row.module_index].nominals[row.row].symbol.name) -> return None
+        if !sema_rule_value_derives_encode(graph, row.module_index, graph.modules[row.module_index].nominals[row.row].symbol.name) {
+            return None
+        }
         if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
-            if item == .Struct(definition) -> return sema_rule_value_struct_dyn(graph, row.module_index, definition, value, depth)
-            if item == .Enum(definition) -> return sema_rule_value_enum_dyn(graph, row.module_index, definition, value, depth)
+            if item == .Struct(definition) {
+                return sema_rule_value_struct_dyn(graph, row.module_index, definition, value, depth)
+            }
+            if item == .Enum(definition) {
+                return sema_rule_value_enum_dyn(graph, row.module_index, definition, value, depth)
+            }
         }
     }
     None
@@ -993,11 +1029,11 @@ sema_rule_value_derives_encode: fn(graph: SemaRegistrationGraph, module_index: I
 sema_rule_value_struct_dyn: fn(graph: SemaRegistrationGraph, module_index: Int, definition: StructDef, value: TComptimeValue, depth: Int) -> TComptimeValue? {
     if definition.serde_markers.len() > 0 -> return None
     if value == .Struct(_, written) {
-        entries := [TComptimeValue]{}
+        ^entries: [TComptimeValue]{}
         loop field in definition.fields {
             if field.computed != None || sema_serde_items_drops(field, false) -> next
             if field.serde_markers.len() > 0 -> return None
-            found := -1
+            ^found: -1
             loop (index, candidate) in written {
                 if candidate.name == field.name -> found = index
             }
@@ -1013,13 +1049,17 @@ sema_rule_value_struct_dyn: fn(graph: SemaRegistrationGraph, module_index: Int, 
 // An enum value as its derived `encode()` writes it (sema_rule_value_dyn);
 // None for an enum or case with a codec option or a case with named fields.
 sema_rule_value_enum_dyn: fn(graph: SemaRegistrationGraph, module_index: Int, definition: EnumDef, value: TComptimeValue, depth: Int) -> TComptimeValue? {
-    if definition.serde_markers.len() > 0 || codable_tag_field(definition.type_markers) != None || codable_untagged(definition.type_markers) -> return None
+    if definition.serde_markers.len() > 0 || codable_tag_field(definition.type_markers) != None || codable_untagged(definition.type_markers) {
+        return None
+    }
     if value == .Enum(_, written, args) {
         loop variant in definition.variants {
             if variant.name != written -> next
             if variant.serde_markers.len() > 0 -> return None
             key: sema_serde_items_variant_key(variant, sema_checked_rename_case(definition.serde_markers))
-            if variant.payload == .Unit -> return Val(sema_rule_dyn("Text", TComptimeValue.String{value: key}))
+            if variant.payload == .Unit {
+                return Val(sema_rule_dyn("Text", TComptimeValue.String{value: key}))
+            }
             if variant.payload == .Single(payload, _) {
                 if args.len() != 1 -> return None
                 tree: sema_rule_value_dyn(graph, module_index, payload, args[0].value, depth + 1) ?? return None
@@ -1054,14 +1094,14 @@ sema_call_rule_rejects: fn(answer: TComptimeValue, fallback: Span, diagnostics: 
     if answer == .Present(inner) -> return sema_call_rule_rejects(inner, fallback, diagnostics)
     if answer == .Struct(type_name, fields) {
         if type_name != "CompilerRejection" -> return false
-        code := ""
-        tier := ""
-        what := ""
-        why := ""
-        fix := ""
-        label := ""
-        span := fallback
-        also := Span?{None}
+        ^code: ""
+        ^tier: ""
+        ^what: ""
+        ^why: ""
+        ^fix: ""
+        ^label: ""
+        ^span: fallback
+        ^also: Span?{None}
         loop field in fields {
             if field.name == "span" {
                 if sema_comptime_reflection_span_of(field.value) == .Val(at) -> span = at
@@ -1084,7 +1124,7 @@ sema_call_rule_rejects: fn(answer: TComptimeValue, fallback: Span, diagnostics: 
             }
         }
         if tier == "Report" -> return false
-        report := if diagnostic_registry_row(code) != None -> diagnostic_from_registry(code, Val(span), what, why, fix) else -> Diagnostic{severity: DIAGNOSTIC_ERROR, code: code, span: Val(span), what: diagnostic_sentence_case_line(what), why: diagnostic_sentence_case_line(why), fix: diagnostic_sentence_case_line(fix)}
+        ^report: if diagnostic_registry_row(code) != None -> diagnostic_from_registry(code, Val(span), what, why, fix) else -> Diagnostic{severity: DIAGNOSTIC_ERROR, code: code, span: Val(span), what: diagnostic_sentence_case_line(what), why: diagnostic_sentence_case_line(why), fix: diagnostic_sentence_case_line(fix)}
         rejected: tier == "Error" && also == None
         report.severity = if tier == "Error" -> DIAGNOSTIC_ERROR else -> DIAGNOSTIC_LINT
         if also == .Val(other) -> report = diagnostic_with_label(report.move(), other, label)
@@ -1122,12 +1162,14 @@ SemaCallRuleBatchSite: struct {
 // appended to `sources` as one item. Each site's marker value and call row
 // move into its batch's columns; the other sources stay as they are.
 sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: ^[SemaComptimeBodySource], pass: Int, sources: ^[SemaComptimeItemSource]) -> [SemaCallRuleBatch] {
-    batches := [SemaCallRuleBatch]{}
+    ^batches: [SemaCallRuleBatch]{}
     loop index in 0..<pending.len() {
         site: pending[index].rule ?? next
         // A run holds few rules, so a batch is found by a scan.
-        row := 0
-        loop row < batches.len() && (batches[row].module_identity != site.module_identity || batches[row].marker != site.marker) -> row += 1
+        ^row: 0
+        loop row < batches.len() && (batches[row].module_identity != site.module_identity || batches[row].marker != site.marker) {
+            row += 1
+        }
         if row == batches.len() {
             batches.push(SemaCallRuleBatch{module_identity: site.module_identity, marker: "{site.marker}", span: pending[index].span, key: "{site.module_identity.id}.rules.{site.marker}.{pass}", paired: site.call.words[SEMA_CALL_RULE_PAIRED_WORD] == 1, sites: [SemaCallRuleBatchSite]{}, rows: [Int]{}})
         }
@@ -1135,10 +1177,8 @@ sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: ^[SemaComptime
         batches[row].sites.push(SemaCallRuleBatchSite{module_identity: pending[index].module_identity, key: pending[index].key, destination_key: pending[index].destination_key, place: sema_comptime_body_source_place(pending[index])})
     }
     loop batch in batches {
-        columns := SemaCallRuleColumns{rules: [TComptimeValue]{}, words: [U8]{}, names: name_column_table(batch.rows.len()), types: [TComptimeValue]{}, values: [TComptimeValue]{}, functions: [TComptimeValue]{}, written: [TComptimeValue]{}}
-        loop row in batch.rows {
-            sema_call_rule_columns_add(columns, pending[row].rule.move())
-        }
+        ^columns: SemaCallRuleColumns{rules: [TComptimeValue]{}, words: [U8]{}, names: name_column_table(batch.rows.len()), types: [TComptimeValue]{}, values: [TComptimeValue]{}, functions: [TComptimeValue]{}, written: [TComptimeValue]{}}
+        loop row in batch.rows { sema_call_rule_columns_add(columns, pending[row].rule.move()) }
         sources.push(sema_call_rule_batch_source(graph, batch, pass, columns))
     }
     batches
@@ -1167,7 +1207,7 @@ SemaCallRuleColumns: struct {
 // Packs word `word`, which is never negative (an index, a count, a flag or
 // a source offset), as its seven-bit groups, low first.
 sema_call_rule_word_put: fn(out: ^[U8], word: Int) Never! {
-    rest := word
+    ^rest: word
     loop rest >= 128 {
         out.push(U8{(rest & 127) | 128})
         rest = rest >> 7
@@ -1188,11 +1228,17 @@ sema_call_rule_word_put: fn(out: ^[U8], word: Int) Never! {
 // span start and end, and written parts (0 when it spells none, else their
 // index plus one); its span's file is the call's.
 SEMA_CALL_RULE_COUNT_WORD: 10
+
 SEMA_CALL_RULE_HAS_RECEIVER_WORD: 11
+
 SEMA_CALL_RULE_SOURCE_WORD: 12
+
 SEMA_CALL_RULE_PAIRED_WORD: 13
+
 SEMA_CALL_RULE_RECEIVER_WORD: 14
+
 SEMA_CALL_RULE_ARGS_WORD: 21
+
 SEMA_CALL_RULE_ARG_WORDS: 7
 
 // The words that name a text: caller, callee, module, file and name.
@@ -1203,13 +1249,13 @@ SEMA_CALL_RULE_TEXT_WORDS: [Int]{1, 2, 3, 4, 7}
 // indices into the batch's.
 sema_call_rule_columns_add: fn(columns: ^SemaCallRuleColumns, staged: ^^SemaComptimeRuleSite?) Never! {
     site: staged.move() ?? return
-    rule := 0
+    ^rule: 0
     loop rule < columns.rules.len() && columns.rules[rule] != site.value -> rule += 1
     if rule == columns.rules.len() -> columns.rules.push(site.value.move())
-    call := site.call.move()
+    ^call: site.call.move()
     texts: loop text in call.texts -> name_index(name_intern(columns.names, text))
     // The call's types, popped (an owned move) from its last.
-    types := [Int]{}
+    ^types: [Int]{}
     loop call.types.len() > 0 {
         ty: call.types.pop() ?? break
         types.push(sema_call_rule_columns_type(columns, ty.move()))
@@ -1219,12 +1265,18 @@ sema_call_rule_columns_add: fn(columns: ^SemaCallRuleColumns, staged: ^^SemaComp
     columns.values.extend(call.values.move())
     columns.functions.extend(call.functions.move())
     columns.written.extend(call.written.move())
-    words := call.words.move()
+    ^words: call.words.move()
     words[0] = rule
     loop at in SEMA_CALL_RULE_TEXT_WORDS -> words[at] = texts[words[at]]
-    if words[SEMA_CALL_RULE_SOURCE_WORD] > 0 -> words[SEMA_CALL_RULE_SOURCE_WORD] = texts[words[SEMA_CALL_RULE_SOURCE_WORD] - 1] + 1
-    if words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] == 1 -> sema_call_rule_columns_arg(words, SEMA_CALL_RULE_RECEIVER_WORD, texts, types, offsets)
-    loop arg in 0..<words[SEMA_CALL_RULE_COUNT_WORD] -> sema_call_rule_columns_arg(words, SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * arg, texts, types, offsets)
+    if words[SEMA_CALL_RULE_SOURCE_WORD] > 0 {
+        words[SEMA_CALL_RULE_SOURCE_WORD] = texts[words[SEMA_CALL_RULE_SOURCE_WORD] - 1] + 1
+    }
+    if words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] == 1 {
+        sema_call_rule_columns_arg(words, SEMA_CALL_RULE_RECEIVER_WORD, texts, types, offsets)
+    }
+    loop arg in 0..<words[SEMA_CALL_RULE_COUNT_WORD] {
+        sema_call_rule_columns_arg(words, SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * arg, texts, types, offsets)
+    }
     keys: SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * words[SEMA_CALL_RULE_COUNT_WORD]
     loop key in keys + 1..<keys + 1 + words[keys] -> words[key] = texts[words[key]]
     loop word in words -> sema_call_rule_word_put(columns.words, word)
@@ -1262,8 +1314,10 @@ sema_call_rule_columns_type: fn(columns: ^SemaCallRuleColumns, ty: ^^TComptimeVa
 // A rule's batch item, in the rule's own module, holding the batch's
 // columns as prepared locals.
 sema_call_rule_batch_source: fn(graph: SemaRegistrationGraph, batch: SemaCallRuleBatch, pass: Int, columns: ^^SemaCallRuleColumns) -> SemaComptimeItemSource {
-    file := ""
-    if sema_registration_module_index(graph, batch.module_identity) == .Val(row) -> file = "{graph.modules[row].source_file}"
+    ^file: ""
+    if sema_registration_module_index(graph, batch.module_identity) == .Val(row) {
+        file = "{graph.modules[row].source_file}"
+    }
     marker: Type.Named{name: batch.marker}
     texts: TComptimeValue.List{values: loop text in columns.names.texts -> TComptimeValue.String{value: "{text}"}}
     SemaComptimeItemSource{
@@ -1367,29 +1421,29 @@ sema_call_rule_arg_text: fn(row: String, at: String) -> String Never! {
 // True when an answer is a rejection, which the recheck reports.
 sema_call_rule_batches_land: fn(batches: [SemaCallRuleBatch], values: ^[SemaComptimeItemValue]) -> Bool Never! {
     if batches.len() == 0 -> return false
-    rejected := false
-    landed := [Bool]{}
+    ^rejected: false
+    ^landed: [Bool]{}
     loop _ in batches -> landed.push(false)
     // Each row is popped (an owned move), so a batch's answers move into
     // its sites' rows; the kept rows are reversed back into their order.
-    kept := [SemaComptimeItemValue]{}
+    ^kept: [SemaComptimeItemValue]{}
     loop {
         row: values.pop() ?? break
-        batch := 0
+        ^batch: 0
         loop batch < batches.len() && batches[batch].key != row.key -> batch += 1
         if batch == batches.len() {
             kept.push(row)
             next
         }
-        answers := [TComptimeValue]{}
+        ^answers: [TComptimeValue]{}
         if row.value.move() == .List(list) -> answers = list.move()
         landed[batch] = true
         if sema_call_rule_batch_land(batches[batch], answers, kept) -> rejected = true
     }
     loop batch in 0..<batches.len() {
         if landed[batch] -> next
-        unanswered := [TComptimeValue]{}
-        _ := sema_call_rule_batch_land(batches[batch], unanswered, kept)
+        ^unanswered: [TComptimeValue]{}
+        ^_: sema_call_rule_batch_land(batches[batch], unanswered, kept)
     }
     kept.reverse()
     values = kept.move()
@@ -1401,8 +1455,8 @@ sema_call_rule_batches_land: fn(batches: [SemaCallRuleBatch], values: ^[SemaComp
 // answer or a failure is none).
 sema_call_rule_batch_land: fn(batch: SemaCallRuleBatch, answers: ^[TComptimeValue], values: ^[SemaComptimeItemValue]) -> Bool Never! {
     whole: answers.len() == batch.sites.len()
-    rejected := false
-    index := batch.sites.len()
+    ^rejected: false
+    ^index: batch.sites.len()
     loop index > 0 {
         index -= 1
         answer: if whole -> answers.pop() ?? TComptimeValue.Unit else -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: sema_call_rule_answer_type()}}

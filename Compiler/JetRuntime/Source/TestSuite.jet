@@ -5,11 +5,11 @@
 // Lower/Closures.jet:3-16,291-315: [refs0,code8,release16], called with box
 // first and inline pair output second. TLS uses the one dynamic-key mechanism,
 // with detach owning its state free.
-test_suite_key := I64{0}
+^test_suite_key: I64{0}
 
 // 1 once `test: fn` called `t.run()`: a later `t.<setting>(…)` plan line is
 // marked, and `jet test` refuses it (Registry/TestSettings.jet).
-test_suite_ran := I64{0}
+^test_suite_ran: I64{0}
 
 rt_test_suite_state_drop_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
@@ -32,7 +32,7 @@ rt_test_suite_state_drop_address: fn() -> I64 {
 test_suite_state: fn() -> I64 { jet_rt_tls_get(test_suite_key) }
 
 test_suite_state_ensure: fn() -> I64 {
-    state := test_suite_state()
+    ^state: test_suite_state()
     if (state == I64{0}) {
         state = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(state, I64{24})
@@ -92,7 +92,7 @@ test_suite_state_ensure: fn() -> I64 {
     // no extra heap workspace or pair-return convention is needed.
     // The pinned named-fn box code takes its box and writable inline 16B result
     // storage.
-    _ := coll_call_box_two(trap_word(wrapping(runner + I64{8})), runner, state)
+    ^_: coll_call_box_two(trap_word(wrapping(runner + I64{8})), runner, state)
     jet_int_owned_from_i64(trap_word(wrapping(state + I64{8})))
 }
 
@@ -114,7 +114,7 @@ test_suite_state_ensure: fn() -> I64 {
     }
     error: jet_rt_alloc(I64{8}, I64{8})
     trap_store(error, I64{0})
-    appended := I64{1}
+    ^appended: I64{1}
     if (test_suite_ran != I64{0}) {
         mark: jet_rt_alloc(I64{8}, I64{8})
         trap_store(mark, I64{0x21})

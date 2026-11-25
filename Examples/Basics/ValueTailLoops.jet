@@ -38,7 +38,7 @@ log_all: fn(log: ^[String], names: [String]) {
 }
 
 flatten: fn(batch: Batch) -> [Int] {
-    out := [Int]{}
+    ^out: [Int]{}
     if batch == {
         .One(value) -> { out.push(value) }
         .Many(values) -> {
@@ -73,7 +73,7 @@ run: fn() {
     print(kept_params(names).len())
     print(loop param in kept_params(names) -> param.name)
     print(above([Int]{1, 2, 3}, 1))
-    log := [String]{}
+    ^log: [String]{}
     log_all(log, names)
     print(log)
     print(flatten(Batch.Many{values: [Int]{7, 8}}))
@@ -127,7 +127,7 @@ write_checked: fn(writer: ^Writer, value: Shape) Never! {
 }
 
 unit_tail_dispatch_loops_lesson: fn() {
-    writer := Writer{bytes: [Int]{}}
+    ^writer: Writer{bytes: [Int]{}}
     write_shape(writer, Shape.Many{items: [Int]{2, 3}})
     write_shape(writer, Shape.Pairs{items: [Int]{4}})
     write_shape(writer, Shape.One{item: 5})

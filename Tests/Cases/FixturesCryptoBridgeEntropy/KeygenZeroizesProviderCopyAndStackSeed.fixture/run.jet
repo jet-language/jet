@@ -6,20 +6,20 @@ use {
 }
 
 filled: fn(value: Int, count: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<count -> out.push((U8{value}))
     out
 }
 
 cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in start..<end -> out.push(bytes[i])
     out
 }
 
 hex: fn(text: String) -> [U8] {
     raw: text.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<(raw.len() /% 2) {
         a: Int{raw[2 * i]}
         b: Int{raw[2 * i + 1]}
@@ -31,7 +31,7 @@ hex: fn(text: String) -> [U8] {
 }
 
 little: fn(bytes: [U8], at: Int, width: Int) -> Int {
-    out := 0
+    ^out: 0
     loop i in 0..<width -> out |= Int{bytes[at + i]} << (8 * i)
     out
 }
@@ -46,7 +46,7 @@ store_little: fn(bytes: ^[U8], at: Int, width: Int, value: Int) {
     #Unsafe("crypto expert: the test reads the generated seed to prove it is live and 32 bytes") {
         seed: expert.signing_key_bytes(signing)
         assert_eq(seed.len(), 32)
-        nonzero := false
+        ^nonzero: false
         loop byte in seed {
             if byte != (U8{0}) -> nonzero = true
         }

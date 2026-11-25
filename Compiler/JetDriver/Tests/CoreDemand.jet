@@ -25,7 +25,7 @@ jet_driver_test_codec_demand: fn(source: String) -> Bool {
 jet_driver_test_conversion_demand: fn(source: String) -> {receivers: [String], math: Bool} {
     parsed: jet_driver_parse_one(JetDriverParseJob.Source{text: source}, compiler_threads_single())
     assert(!jet_driver_has_errors(parsed.parsed.diagnostics), "demand fixture parses")
-    catalog := name_table()
+    ^catalog: name_table()
     math: jet_driver_unit_conversion(parsed.demand.conversion_receivers, catalog)
     {receivers: parsed.demand.conversion_receivers, math: math}
 }

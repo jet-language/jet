@@ -243,7 +243,7 @@ TypeFactShape: enum {
             .Opaque -> Dyn.Object(["kind": Dyn.Text("opaque")])
             .Scalar -> Dyn.Object(["kind": Dyn.Text("scalar")])
             .CodableRecord(fields) -> {
-                items := [Dyn]{}
+                ^items: [Dyn]{}
                 loop field in fields {
                     items.push(Dyn.Object(["name": Dyn.Text(field.name), "type_id": Dyn.Text(field.type_id)]))
                 }
@@ -271,7 +271,7 @@ TypeFactShape: enum {
             "codable_record" -> {
                 pkg_extension_require_keys(object, [String]{"kind", "fields"}, [String]{})
                 items: pkg_extension_array(object["fields"], "record fields")
-                fields := [TypeFieldFact]{}
+                ^fields: [TypeFieldFact]{}
                 loop item in items {
                     field: pkg_extension_object(item, "record field")
                     pkg_extension_require_keys(field, [String]{"name", "type_id"}, [String]{})
@@ -361,13 +361,13 @@ TypedSnapshot: struct {
     // identity for byte-stable replay.
     new_with_imports: fn(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [HostImportFact]) -> TypedSnapshot ExtensionProtocolError! {
         granted: pkg_extension_negotiate_abilities(EXTENSION_PROTOCOL_VERSION, abilities)
-        sorted_types := types
+        ^sorted_types: types
         sorted_types.sort_by(fn(fact) { fact.id })
-        sorted_symbols := symbols
+        ^sorted_symbols: symbols
         sorted_symbols.sort_by(fn(fact) { fact.id })
-        sorted_spans := spans
+        ^sorted_spans: spans
         sorted_spans.sort_by(fn(fact) { fact.id })
-        sorted_imports := host_imports
+        ^sorted_imports: host_imports
         sorted_imports.sort_by(fn(fact) { fact.id })
         pkg_extension_validate_interface_facts(sorted_types, sorted_symbols, sorted_spans, sorted_imports)
         Ok(
@@ -396,15 +396,15 @@ TypedSnapshot: struct {
         if self.trust != ExtensionTrustPolicy.Untrusted {
             return Err(ExtensionProtocolError.new("v1 trust policy admits only `untrusted` components"))
         }
-        abilities := [Dyn]{}
+        ^abilities: [Dyn]{}
         loop ability in self.abilities -> abilities.push(Dyn.Text(ability.as_str()))
-        imports := [Dyn]{}
+        ^imports: [Dyn]{}
         loop import in self.host_imports -> imports.push(pkg_extension_host_import_json(import))
-        spans := [Dyn]{}
+        ^spans: [Dyn]{}
         loop span in self.spans -> spans.push(span.to_json_tree())
-        symbols := [Dyn]{}
+        ^symbols: [Dyn]{}
         loop symbol in self.symbols -> symbols.push(symbol.to_json_tree())
-        types := [Dyn]{}
+        ^types: [Dyn]{}
         loop fact in self.types -> types.push(fact.to_json_tree())
         text: json.canonical(
             Dyn.Object(
@@ -453,13 +453,13 @@ TypedSnapshot: struct {
     }
 
     span_ids: fn(self) -> [String] Never! {
-        ids := [String]{}
+        ^ids: [String]{}
         loop span in self.spans -> ids.push(span.id)
         ids
     }
 
     type_ids: fn(self) -> [String] Never! {
-        ids := [String]{}
+        ^ids: [String]{}
         loop fact in self.types -> ids.push(fact.id)
         ids
     }
@@ -498,9 +498,9 @@ AnalyzeResponse: struct {
 
     // Protocol bytes, distinct from the automatically derived Dyn codec.
     encode_bytes: fn(self) -> [U8] ExtensionProtocolError! {
-        findings := [Dyn]{}
+        ^findings: [Dyn]{}
         loop finding in self.findings -> findings.push(finding.to_json_tree())
-        edits := [Dyn]{}
+        ^edits: [Dyn]{}
         loop edit in self.proposed_edits -> edits.push(edit.to_json_tree())
         text: json.canonical(
             Dyn.Object(
@@ -687,7 +687,7 @@ pkg_extension_negotiate_abilities: fn(protocol: Int, requested: [ExtensionAbilit
         return Err(ExtensionProtocolError.new("compiler-extension protocol mismatch: host={EXTENSION_PROTOCOL_VERSION}, guest={protocol}"))
     }
     allowed: ExtensionAbility.v1_defaults()
-    granted := [ExtensionAbility]{}
+    ^granted: [ExtensionAbility]{}
     loop ability in requested {
         if !allowed.contains(ability) {
             return Err(ExtensionProtocolError.new("ability `{ability.as_str()}` is not in the v1 allowlist"))
@@ -748,7 +748,7 @@ pkg_extension_require_keys: fn(object: [String:Dyn], required: [String], optiona
     loop key in required {
         if !object.has_key(key) -> return Err(ExtensionProtocolError.new("missing key `{key}`"))
     }
-    keys := object.keys().to_list()
+    ^keys: object.keys().to_list()
     keys.sort()
     loop key in keys {
         if !required.contains(key) && !optional.contains(key) {
@@ -778,7 +778,7 @@ pkg_extension_json_u64: fn(value: Dyn, name: String) -> Int ExtensionProtocolErr
 // Abilities sorted and deduplicated, then negotiated.
 pkg_extension_parse_abilities: fn(value: Dyn) -> [ExtensionAbility] ExtensionProtocolError! {
     items: pkg_extension_array(value, "abilities")
-    abilities := [ExtensionAbility]{}
+    ^abilities: [ExtensionAbility]{}
     loop item in items {
         name: pkg_extension_text(item)
         ability: ExtensionAbility.parse(name) ?? return Err(ExtensionProtocolError.new("unknown ability `{name}`"))
@@ -789,14 +789,14 @@ pkg_extension_parse_abilities: fn(value: Dyn) -> [ExtensionAbility] ExtensionPro
 
 pkg_extension_string_array: fn(value: Dyn, name: String) -> [String] ExtensionProtocolError! {
     items: pkg_extension_array(value, name)
-    out := [String]{}
+    ^out: [String]{}
     loop item in items -> out.push(pkg_extension_text(item))
     Ok(out)
 }
 
 pkg_extension_parse_types: fn(value: Dyn) -> [TypeFact] ExtensionProtocolError! {
     items: pkg_extension_array(value, "types")
-    out := [TypeFact]{}
+    ^out: [TypeFact]{}
     loop item in items {
         object: pkg_extension_object(item, "type")
         pkg_extension_require_keys(object, [String]{"id", "repr"}, [String]{"shape"})
@@ -827,7 +827,7 @@ pkg_extension_host_import_json: fn(import: HostImportFact) -> Dyn Never! {
 
 pkg_extension_parse_host_imports: fn(value: Dyn) -> [HostImportFact] ExtensionProtocolError! {
     items: pkg_extension_array(value, "host_imports")
-    out := [HostImportFact]{}
+    ^out: [HostImportFact]{}
     loop item in items {
         object: pkg_extension_object(item, "host import")
         pkg_extension_require_keys(object, [String]{"id", "operation", "parameter_type_ids", "required_right", "result_type_id"}, [String]{})
@@ -852,7 +852,7 @@ pkg_extension_parse_host_imports: fn(value: Dyn) -> [HostImportFact] ExtensionPr
 // The type, span, symbol, and host-import identities are unique and every
 // reference between them resolves; import rights are known Jet rights.
 pkg_extension_validate_interface_facts: fn(types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [HostImportFact]) ExtensionProtocolError! {
-    type_ids := [String]{}
+    ^type_ids: [String]{}
     loop fact in types {
         if fact.id == "" || type_ids.contains(fact.id) {
             return Err(ExtensionProtocolError.new("duplicate or empty type identity `{fact.id}`"))
@@ -864,7 +864,7 @@ pkg_extension_validate_interface_facts: fn(types: [TypeFact], symbols: [SymbolFa
             .Opaque -> {}
             .Scalar -> {}
             .CodableRecord(fields) -> {
-                names := [String]{}
+                ^names: [String]{}
                 loop field in fields {
                     if field.name == "" || names.contains(field.name) {
                         return Err(ExtensionProtocolError.new("type `{fact.id}` repeats or omits a record field name"))
@@ -885,14 +885,14 @@ pkg_extension_validate_interface_facts: fn(types: [TypeFact], symbols: [SymbolFa
             }
         }
     }
-    span_ids := [String]{}
+    ^span_ids: [String]{}
     loop span in spans {
         if span.id == "" || span_ids.contains(span.id) {
             return Err(ExtensionProtocolError.new("duplicate or empty span identity `{span.id}`"))
         }
         span_ids.push(span.id)
     }
-    symbol_ids := [String]{}
+    ^symbol_ids: [String]{}
     loop symbol in symbols {
         if symbol.id == "" || symbol_ids.contains(symbol.id) {
             return Err(ExtensionProtocolError.new("duplicate or empty symbol identity `{symbol.id}`"))
@@ -905,7 +905,7 @@ pkg_extension_validate_interface_facts: fn(types: [TypeFact], symbols: [SymbolFa
             return Err(ExtensionProtocolError.new("symbol `{symbol.id}` references unknown span `{symbol.span_id}`"))
         }
     }
-    import_ids := [String]{}
+    ^import_ids: [String]{}
     loop import in host_imports {
         if import.id == "" || import_ids.contains(import.id) {
             return Err(ExtensionProtocolError.new("duplicate or empty host-import identity `{import.id}`"))
@@ -914,7 +914,7 @@ pkg_extension_validate_interface_facts: fn(types: [TypeFact], symbols: [SymbolFa
         if authority_parse_right(import.required_right) == None {
             return Err(ExtensionProtocolError.new("host import `{import.id}` has unknown required right `{import.required_right}`"))
         }
-        payload := import.parameter_type_ids
+        ^payload: import.parameter_type_ids
         if import.result_type_id == {
             .Val(type_id) -> { payload.push(type_id.copy()) }
             .None -> {}
@@ -935,7 +935,7 @@ pkg_extension_require_type: fn(type_ids: [String], owner: String, type_id: Strin
 
 pkg_extension_parse_spans: fn(value: Dyn) -> [SpanFact] ExtensionProtocolError! {
     items: pkg_extension_array(value, "spans")
-    out := [SpanFact]{}
+    ^out: [SpanFact]{}
     loop item in items {
         object: pkg_extension_object(item, "span")
         pkg_extension_require_keys(object, [String]{"id", "file", "start", "end"}, [String]{})
@@ -953,7 +953,7 @@ pkg_extension_parse_spans: fn(value: Dyn) -> [SpanFact] ExtensionProtocolError! 
 
 pkg_extension_parse_symbols: fn(value: Dyn) -> [SymbolFact] ExtensionProtocolError! {
     items: pkg_extension_array(value, "symbols")
-    out := [SymbolFact]{}
+    ^out: [SymbolFact]{}
     loop item in items {
         object: pkg_extension_object(item, "symbol")
         pkg_extension_require_keys(object, [String]{"id", "name", "kind", "type_id", "span_id", "effects", "provenance"}, [String]{})
@@ -974,7 +974,7 @@ pkg_extension_parse_symbols: fn(value: Dyn) -> [SymbolFact] ExtensionProtocolErr
 
 pkg_extension_parse_findings: fn(value: Dyn) -> [ExtensionFinding] ExtensionProtocolError! {
     items: pkg_extension_array(value, "findings")
-    out := [ExtensionFinding]{}
+    ^out: [ExtensionFinding]{}
     loop item in items {
         object: pkg_extension_object(item, "finding")
         pkg_extension_require_keys(object, [String]{"rule", "span_id", "message", "severity"}, [String]{})
@@ -992,7 +992,7 @@ pkg_extension_parse_findings: fn(value: Dyn) -> [ExtensionFinding] ExtensionProt
 
 pkg_extension_parse_edits: fn(value: Dyn) -> [ExtensionProposedEdit] ExtensionProtocolError! {
     items: pkg_extension_array(value, "proposed_edits")
-    out := [ExtensionProposedEdit]{}
+    ^out: [ExtensionProposedEdit]{}
     loop item in items {
         object: pkg_extension_object(item, "proposed_edit")
         pkg_extension_require_keys(object, [String]{"span_id", "replacement", "rationale"}, [String]{})

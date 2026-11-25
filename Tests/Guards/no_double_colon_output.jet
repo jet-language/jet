@@ -52,7 +52,7 @@ dc_hex: fn(byte: Int) -> Bool {
 }
 
 dc_text: fn(bytes: [U8], start: Int, end: Int) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     loop at in start..<end -> out.push(bytes[at])
     String.from_bytes(out) ?? ""
 }
@@ -81,22 +81,22 @@ dc_digits: fn(bytes: [U8], start: Int, end: Int) -> Bool {
 // A case writes a newline as `\n`; its letter starts no word.
 dc_foreign: fn(bytes: [U8], at: Int) -> Bool {
     if dc_byte(bytes, at - 1) == 93 -> return true
-    start := at
+    ^start: at
     loop start > 0 && dc_word(dc_byte(bytes, start - 1)) && dc_byte(bytes, start - 2) != 92 {
         start -= 1
     }
-    end := at + 2
+    ^end: at + 2
     loop end < bytes.len() && dc_word(dc_byte(bytes, end)) -> end += 1
     if (start < at || end > at + 2) && dc_group(bytes, start, at) && dc_group(bytes, at + 2, end) {
         elided: start == at || end == at + 2
         neighbors: dc_byte(bytes, start - 1) == 58 || dc_byte(bytes, end) == 58 || dc_byte(bytes, end) == 37
         if elided || neighbors || dc_digits(bytes, at + 2, end) -> return true
     }
-    root := start
+    ^root: start
     loop root > 0 && (dc_word(dc_byte(bytes, root - 1)) || dc_byte(bytes, root - 1) == 58) {
         root -= 1
     }
-    first := root
+    ^first: root
     loop first < at && dc_byte(bytes, first) != 58 -> first += 1
     DC_RUST_ROOTS.contains(dc_text(bytes, root, first))
 }
@@ -108,7 +108,7 @@ dc_spells: fn(text: String) -> Bool {
         if trimmed.starts_with(command) -> return false
     }
     bytes: text.bytes()
-    at := 0
+    ^at: 0
     loop at + 1 < bytes.len() {
         if dc_byte(bytes, at) != 58 || dc_byte(bytes, at + 1) != 58 {
             at += 1
@@ -131,7 +131,7 @@ dc_spells: fn(text: String) -> Bool {
 // the first unescaped closing quote (a comment may quote text of its own).
 // A negated expectation (`!~`) expects text to be absent and spells none.
 dc_case_expected: fn(line: String) -> String? {
-    keyed := false
+    ^keyed: false
     loop key in DC_CASE_EXPECTATIONS {
         if line.starts_with(key) -> keyed = true
     }
@@ -139,7 +139,7 @@ dc_case_expected: fn(line: String) -> String? {
     quoted: line.partition("\"")
     if quoted.sep == "" -> return Val(line.partition(" # ").head)
     body: quoted.tail.bytes()
-    close := 0
+    ^close: 0
     loop close < body.len() && dc_byte(body, close) != 34 {
         if dc_byte(body, close) == 92 -> close += 1
         close += 1
@@ -177,7 +177,7 @@ dc_output_findings: fn(path: String, text: String, findings: ^[String]) {
 
 // The lines of a source that write `::`, comments left out.
 dc_source_count: fn(source: String) -> Int {
-    count := 0
+    ^count: 0
     loop line in source.lines() {
         if line.contains("::") && !line.trim().starts_with("//") -> count += 1
     }
@@ -187,8 +187,8 @@ dc_source_count: fn(source: String) -> Int {
 // The source census against the closed list: one line per file whose count
 // differs.
 dc_source_findings: fn(found: [String:Int]) -> [String] {
-    findings := [String]{}
-    allowed := [String:Int]{}
+    ^findings: [String]{}
+    ^allowed: [String:Int]{}
     loop row in DC_SOURCE_ALLOWED -> allowed[row.path] = row.count
     loop path in found.keys() {
         count: found[path]
@@ -211,8 +211,8 @@ dc_source_findings: fn(found: [String:Int]) -> [String] {
 
 #Test("no golden or case expects a `::` outside a foreign subject") {
     guards_enter_root()
-    findings := [String]{}
-    scanned := 0
+    ^findings: [String]{}
+    ^scanned: 0
     loop root in DC_OUTPUT_ROOTS {
         loop path in s2_syntax_paths(root) {
             if !dc_golden(path) && !path.ends_with(".case") -> next
@@ -229,7 +229,7 @@ dc_source_findings: fn(found: [String:Int]) -> [String] {
 
 #Test("JetCLI and JetSemIndex write `::` only on the closed list") {
     guards_enter_root()
-    found := [String:Int]{}
+    ^found: [String:Int]{}
     loop root in DC_SOURCE_ROOTS {
         loop path in s2_syntax_paths(root) {
             if !path.ends_with(".jet") -> next
@@ -260,7 +260,7 @@ dc_source_findings: fn(found: [String:Int]) -> [String] {
     assert(dc_case_expected("step: jet run main.jet") == None)
     assert(dc_golden("Tests/UI/Effects/x.stderr") && dc_golden("Tests/UI/dir/stderr") && dc_golden("Tests/CLI/help.txt"))
     assert(!dc_golden("Tests/Cases/fixture/notes.txt"))
-    found := [String:Int]{}
+    ^found: [String:Int]{}
     found["Compiler/JetCLI/Source/CLI/New.jet"] = 1
     found["Compiler/JetCLI/Source/CLI/Request.jet"] = 2
     findings: dc_source_findings(found)

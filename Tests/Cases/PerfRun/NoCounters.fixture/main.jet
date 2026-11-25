@@ -71,7 +71,7 @@ put: fn(bytes: ^[U8], value: Int, count: Int) {
 // The filter's instructions as the kernel lays struct sock_filter out: the
 // code in two bytes, each jump in one, the constant in four.
 filter_bytes: fn() -> [U8] {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop row in FILTER {
         put(bytes, row[0], 2)
         put(bytes, row[1], 1)
@@ -86,7 +86,7 @@ run: fn() -> Never {
     if command.len() == 0 -> panic("usage: main COMMAND [ARGUMENT...]")
     if c_prctl(SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 -> panic("prctl refused PR_SET_NO_NEW_PRIVS")
     bytes: filter_bytes()
-    installed := -1
+    ^installed: -1
     #Unsafe("the block holds the filter while seccomp copies it into the kernel, and is released once, after the call") {
         block: mem.alloc_raw(bytes.len(), 1) ?? panic("no memory for the filter")
         mem.list_copy<U8>(block, bytes, 0, bytes.len())

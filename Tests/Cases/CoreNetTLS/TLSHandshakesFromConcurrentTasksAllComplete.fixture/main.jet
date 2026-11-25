@@ -18,7 +18,7 @@ exchange: fn(addr: String, ca: String, index: Int) -> String {
     bounded: config.with_version_bounds(min: TLSVersion.TLS13, max: TLSVersion.TLS13) ?? panic("version policy {index}")
     tcp: net.tcp_connect(addr) ?? panic("connect loopback {index}")
     budget: 10s
-    secure := tls.client(tcp, server_name: "localhost", config: bounded, deadline: budget) ?? panic("TLS handshake {index}")
+    ^secure: tls.client(tcp, server_name: "localhost", config: bounded, deadline: budget) ?? panic("TLS handshake {index}")
     peer: secure.peer_identity()
     version: if tls.is_tls13(peer.tls_version) -> "TLS13" else -> "TLS12"
     crlf: "\r\n"
@@ -38,7 +38,7 @@ run: fn() {
     listener: mux.bind("127.0.0.1:0", tls: server.tls(cert, key)) ?? panic("bind TLS server")
     addr: listener.local_addr() ?? panic("server address")
     serving: task { listener.serve() ?? panic("serve TLS") }
-    clients := [Task<String>]{}
+    ^clients: [Task<String>]{}
     loop index in 0..<4 {
         at: addr.copy()
         roots: ca.copy()

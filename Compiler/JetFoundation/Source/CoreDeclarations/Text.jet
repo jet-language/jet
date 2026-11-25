@@ -26,7 +26,7 @@ core_decl_word: fn(code: Int) -> Bool Never! {
 
 // The comma-separated names of a list body, trimmed, empty ones dropped.
 core_decl_names: fn(list: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop name in list.split(",") {
         trimmed: name.trim()
         if trimmed != "" -> out.push(trimmed.copy())
@@ -74,14 +74,14 @@ core_decl_name_end: fn(bytes: [U8], start: Int) -> Int Never! {
     if start >= bytes.len() -> return start
     first: Int{bytes[start]}
     if !(core_decl_lower(first) || core_decl_upper(first) || first == 95) -> return start
-    end := start + 1
+    ^end: start + 1
     loop end < bytes.len() && core_decl_word(Int{bytes[end]}) -> end += 1
     end
 }
 
 // The first byte at or after `start` of `bytes` that is not whitespace.
 core_decl_skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
-    at := start
+    ^at: start
     loop at < bytes.len() && core_decl_space(Int{bytes[at]}) -> at += 1
     at
 }
@@ -89,7 +89,7 @@ core_decl_skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
 // The byte offset of the `"` that closes the string opened at byte `open`,
 // `\` escaping the byte after it, or -1 when it is not closed.
 core_decl_quote_end: fn(bytes: [U8], open: Int) -> Int Never! {
-    at := open + 1
+    ^at: open + 1
     loop at < bytes.len() {
         code: Int{bytes[at]}
         if code == 92 {
@@ -105,8 +105,8 @@ core_decl_quote_end: fn(bytes: [U8], open: Int) -> Int Never! {
 // A Core.rows line without its `//` comment (outside a quoted string), trimmed.
 core_decl_line: fn(raw: String) -> String Never! {
     bytes: raw.bytes()
-    quoted := false
-    escaped := false
+    ^quoted: false
+    ^escaped: false
     loop index in 0..<bytes.len() - 1 {
         code: Int{bytes[index]}
         if quoted {

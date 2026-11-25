@@ -38,7 +38,7 @@ kit_steps_f64_test: fn(actual: String, mode: String, value: String, op: String) 
 
 kit_steps_median_labels: fn(text: String, plan: KitPlan, before: Int) -> [String]? {
     if !text.starts_with("[") || !text.ends_with("]") -> return None
-    labels := [String]{}
+    ^labels: [String]{}
     loop raw in kit_steps_byte_slice(text, 1, text.count_bytes() - 1).split(",") {
         label: raw.trim().copy()
         if !kit_steps_known_label(plan, label, before) -> return None
@@ -62,16 +62,16 @@ kit_steps_median_assertion: fn(original: String, plan: KitPlan, before: Int) -> 
     factor: Int.parse(words[3]) ?? return None
     if factor < 0 -> return None
     right: kit_steps_median_labels(words[6], plan, before) ?? return None
-    labels := left
+    ^labels: left
     loop label in right -> labels.push(label)
     Val(KitAssertion{stream: "elapsed", path: "", mode: "median-ratio", value: words[3], alternatives: labels, extra: op})
 }
 
 kit_steps_median_value: fn(labels: [String], history: [KitCapturedStep]) -> Int? {
-    values := [Int]{}
+    ^values: [Int]{}
     loop label in labels {
-        found := false
-        index := history.len()
+        ^found: false
+        ^index: history.len()
         loop index > 0 {
             index -= 1
             receipt: history[index]
@@ -122,7 +122,7 @@ kit_steps_elapsed_unit: fn(text: String) -> Int {
 kit_steps_elapsed_absolute_test: fn(assertion: KitAssertion, history: [KitCapturedStep]) -> KitVerdict {
     unit: kit_steps_elapsed_unit(assertion.value)
     expected: (kit_steps_offset_ns(assertion.value) ?? return kit_expect_verdict("ERROR", "invalid elapsed duration")) /% unit
-    index := history.len()
+    ^index: history.len()
     loop index > 0 {
         index -= 1
         receipt: history[index]

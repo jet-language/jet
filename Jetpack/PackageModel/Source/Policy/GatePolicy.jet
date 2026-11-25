@@ -22,7 +22,7 @@ PackageGateError: struct {
     diagnostics: [Diagnostic],
 
     message: fn(self) -> String Never! {
-        messages := [String]{}
+        ^messages: [String]{}
         loop diagnostic in self.diagnostics -> messages.push(diagnostic.what)
         messages.join("; ")
     }
@@ -69,7 +69,7 @@ pkg_load_organization_gate_policy: fn() -[FS, Env]> PackageOrganizationPolicy Pa
             },
         },
     )
-    document := pkg_parse_organization_document(source) ?? return Err(
+    ^document: pkg_parse_organization_document(source) ?? return Err(
         PackageGateError{
             diagnostics: [Diagnostic]{
                 diagnostic_from_registry(
@@ -82,7 +82,7 @@ pkg_load_organization_gate_policy: fn() -[FS, Env]> PackageOrganizationPolicy Pa
             },
         },
     )
-    wrong_shape := document.declarations.len() == 0 && document.deny.len() == 0
+    ^wrong_shape: document.declarations.len() == 0 && document.deny.len() == 0
     loop declaration in document.declarations {
         if !policy_key_is_audited_gate(declaration.key) -> wrong_shape = true
     }
@@ -113,8 +113,8 @@ pkg_load_organization_gate_policy: fn() -[FS, Env]> PackageOrganizationPolicy Pa
 // an entry file whose Package it declares inline or inherits
 // (pkg_package_facts_for_entry).
 pkg_project_gate_declarations: fn(cache: ^WorkspaceDeclarationCache, root: String) -[FS, Env]> [PolicyDeclaration] PackageGateError! {
-    organization := pkg_load_organization_gate_policy()
-    declarations := organization.declarations.move()
+    ^organization: pkg_load_organization_gate_policy()
+    ^declarations: organization.declarations.move()
     loaded: if pkg_gate_package_facts(cache, root) == {
         .Ok(found) -> found
         .Err(error) -> {
@@ -123,7 +123,7 @@ pkg_project_gate_declarations: fn(cache: ^WorkspaceDeclarationCache, root: Strin
     }
     if loaded == .Val(facts) {
         loop declaration in facts.policy.declarations {
-            projected := declaration
+            ^projected: declaration
             projected.source = facts.origin
             declarations.push(projected)
         }
@@ -137,7 +137,7 @@ pkg_gate_package_facts: fn(cache: ^WorkspaceDeclarationCache, root: String) -[FS
 }
 
 pkg_check_project_gate: fn(root: String, key: PolicyKey, site: String) -[FS, Env]> PackageGateError! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     declarations: pkg_project_gate_declarations(cache, root)
     if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) {
         return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic}})
@@ -156,14 +156,14 @@ pkg_invocation_gate_key: fn(argument: String) -> PolicyKey? Never! {
 }
 
 pkg_check_invocation_flags: fn(root: String, args: [String]) -[FS, Env]> PackageGateError! {
-    gated := false
+    ^gated: false
     loop argument in args {
         if pkg_invocation_gate_key(argument) != None -> gated = true
     }
     if !gated -> return Ok()
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     declarations: pkg_project_gate_declarations(cache, root)
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop argument in args {
         key: pkg_invocation_gate_key(argument) ?? next
         site: "command line ({argument})"
@@ -189,7 +189,7 @@ pkg_is_forced_override: fn(package: PackageOverride) -> Bool Never! {
 
 // Refuse before process locking.
 pkg_check_workspace_overlay_gates: fn(cache: ^WorkspaceDeclarationCache, root: String, policy: OverlayPolicy) -[FS, Env]> PackageGateError! {
-    gated := false
+    ^gated: false
     loop overlay in policy.overlays {
         loop package in overlay.packages {
             if pkg_is_forced_override(package) -> gated = true
@@ -200,7 +200,7 @@ pkg_check_workspace_overlay_gates: fn(cache: ^WorkspaceDeclarationCache, root: S
     }
     if !gated -> return Ok()
     declarations: pkg_project_gate_declarations(cache, root)
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop overlay in policy.overlays {
         loop package in overlay.packages {
             if !pkg_is_forced_override(package) -> next

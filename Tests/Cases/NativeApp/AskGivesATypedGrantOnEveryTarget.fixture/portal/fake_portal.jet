@@ -36,26 +36,26 @@ LOCATION: [String]{
 run: fn() -[FS, Net, Time]> {
     listener: net.unix_listen("bus.sock") ?? panic("listen on bus.sock: {err}")
     files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
-    streams := [net.UnixStream]{}
+    ^streams: [net.UnixStream]{}
     loop conversation in ([[String]]{CAMERA, LOCATION}) {
-        stream := net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
+        ^stream: net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
         // The credentials byte and the AUTH line come before any answer.
-        said := [U8]{}
+        ^said: [U8]{}
         loop !ends_line(said) {
             got: net.unix_receive(stream, 4096) ?? panic("read the AUTH line: {err}")
             if got.bytes.len() == 0 -> break
             loop b in got.bytes -> said.push(b)
         }
-        answer := "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+        ^answer: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
         loop message in conversation {
             loop b in bytes_of(message) -> answer.push(b)
         }
         net.unix_write_all_bytes(stream, answer) ?? panic("answer the app: {err}")
         streams.push(stream.move())
     }
-    camera_asks := 0
+    ^camera_asks: 0
     loop i in 0..<streams.len() {
-        heard := [U8]{}
+        ^heard: [U8]{}
         loop {
             got: net.unix_receive(streams[i], 4096) ?? break
             if got.bytes.len() == 0 -> break
@@ -75,7 +75,7 @@ ends_line: fn(bytes: [U8]) -> Bool {
 // The bytes the lowercase hex text `hex` spells.
 bytes_of: fn(hex: String) -> [U8] {
     digits: hex.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<(digits.len() /% 2) {
         out.push(U8{nibble(Int{digits[2 * i]}) * 16 + nibble(Int{digits[2 * i + 1]})})
     }

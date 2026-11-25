@@ -29,31 +29,31 @@ run: fn() {
     doubled: window.map(fn(i) { i.severity * 2 })
     print("map-to-owned: {doubled.join(",")}")
     loop i in window -> print("iter: {i.severity}")
-    numbers := [1, 2, 3, 4]
+    ^numbers: [1, 2, 3, 4]
     read: numbers[2..3].copy()
     if true {
-        edit: ^numbers[0..1]
+        edit: numbers[0..1].in_place()
         edit[0] = 9
         edited: edit[0].copy()
         print("disjoint windows: {edited},{read[0]}")
     }
-    slots := [5, 6, 7]
+    ^slots: [5, 6, 7]
     if true {
-        first: ^slots[0]
+        first: slots[0].in_place()
         first = 8
     }
     if true {
-        last: ^slots[2]
+        last: slots[2].in_place()
         last = 9
     }
     print("disjoint indexes: {slots[0]},{slots[2]}")
-    counters := Counters{left: 1, right: 2}
+    ^counters: Counters{left: 1, right: 2}
     if true {
-        left: ^counters.left
+        left: counters.left.in_place()
         left = 3
     }
     if true {
-        right: ^counters.right
+        right: counters.right.in_place()
         right = 4
     }
     counters.left = 3

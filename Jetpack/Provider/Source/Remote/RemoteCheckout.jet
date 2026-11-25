@@ -105,15 +105,15 @@ provider_sparse_member_fetch_in: fn(remote: RemoteSource, want_package: String, 
     // `show` or the checkout touches them.
     listing: provider_git_output_in(tmp, [String]{"ls-tree", "-r", "--name-only", "FETCH_HEAD"}) ?? return SparseOutcome.SparseFailed
     member_dirs: provider_member_dirs_from_listing(listing)
-    target := ""
+    ^target: ""
     loop dir in member_dirs {
         if target == "" && provider_dir_basename(dir) == want_package -> target = dir
     }
     // Not a subtree member (single-package repo or another layout).
     if target == "" -> return SparseOutcome.NotMonorepo
-    wanted := [String]{target}
+    ^wanted: [String]{target}
     all_dirs: provider_all_tree_dirs(listing)
-    marker := String?{None}
+    ^marker: String?{None}
     marker_names: [String]{PACKAGE_FILE}
     loop name in marker_names {
         if marker == None {
@@ -124,7 +124,7 @@ provider_sparse_member_fetch_in: fn(remote: RemoteSource, want_package: String, 
         .Val(text) -> {
             if PackageFacts.parse(text, "{target}/package") == {
                 .Ok(facts) -> {
-                    names := facts.deps.keys().to_list()
+                    ^names: facts.deps.keys().to_list()
                     names.sort()
                     loop name in names {
                         if provider_classify_canonical_dep(name, facts.deps[name], target, member_dirs, all_dirs) == {
@@ -146,7 +146,7 @@ provider_sparse_member_fetch_in: fn(remote: RemoteSource, want_package: String, 
     if !provider_git_in(tmp, [String]{"sparse-checkout", "init", "--cone"}) {
         return SparseOutcome.SparseFailed
     }
-    set_args := [String]{"sparse-checkout", "set"}
+    ^set_args: [String]{"sparse-checkout", "set"}
     loop path in wanted -> set_args.push(path)
     if !provider_git_in(tmp, set_args) -> return SparseOutcome.SparseFailed
     if !provider_git_in(tmp, [String]{"checkout", "--quiet", "FETCH_HEAD"}) {
@@ -262,7 +262,7 @@ provider_cache_is_real_directory: fn(cache: String) -[FS]> Bool ProviderError! {
 // Open `path` one component at a time without following links, optionally
 // creating missing private directories. `..` components are refused.
 provider_open_held_directory: fn(path: String, create: Bool) -[FS]> Directory IOError! {
-    current := files.open_directory(if files.is_abs(path) -> "/" else -> ".")
+    ^current: files.open_directory(if files.is_abs(path) -> "/" else -> ".")
     loop part in files.split_slash(path) {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -427,7 +427,7 @@ provider_same_file_identity: fn(left: Stat, right: Stat) -> Bool Never! {
 
 // Read a whole opened file in bounded chunks.
 provider_read_all: fn(reader: ^FileReader) -[FS]> [U8] IOError! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(PROVIDER_READ_CHUNK_BYTES)
         if chunk.len() == 0 -> break
@@ -447,10 +447,10 @@ provider_tree_fingerprint: fn(root: String) -[FS]> String ProviderReason! {
 }
 
 provider_tree_fingerprint_held: fn(root: Directory) -[FS]> String ProviderReason! {
-    found := [{relative: String, bytes: [U8], mode: Int}]{}
+    ^found: [{relative: String, bytes: [U8], mode: Int}]{}
     provider_collect_fingerprint_files(root, "", found) ?? return Err(ProviderReason{message: "{err}"})
     found.sort_by(fn(file) { file.relative })
-    input := [U8]{}
+    ^input: [U8]{}
     loop file in found {
         loop byte in file.relative.bytes() -> input.push(byte)
         input.push(U8{0})
@@ -473,7 +473,7 @@ provider_collect_fingerprint_files: fn(directory: Directory, relative: String, o
             child: directory.open_directory(entry.name)
             provider_collect_fingerprint_files(child, child_relative, out)
         } else if info.is_file {
-            file := directory.open(entry.name)
+            ^file: directory.open(entry.name)
             before: file.stat()
             provider_reject_multiply_linked(before)
             bytes: provider_read_all(file)
@@ -523,7 +523,7 @@ provider_copy_tree_held: fn(source: Directory, destination: Directory) -[FS, Ran
 // then rename it over the destination. The source must stay the same file
 // object while it is copied; neither side may be multiply linked.
 provider_copy_held_file: fn(source: Directory, source_name: String, destination: Directory, destination_name: String) -[FS, Rand]> IOError! {
-    reader := source.open(source_name)
+    ^reader: source.open(source_name)
     before: reader.stat()
     provider_reject_multiply_linked(before)
     if destination.entry_stat(destination_name) == {
@@ -538,7 +538,7 @@ provider_copy_held_file: fn(source: Directory, source_name: String, destination:
         }
     }
     mode: (before.mode) & 0o7777
-    temporary := provider_create_temp_file_name(destination, mode)
+    ^temporary: provider_create_temp_file_name(destination, mode)
     if provider_fill_temp_file(reader, before, destination, temporary.name, temporary.writer, mode, destination_name) == {
         .Ok(_) -> {}
         .Err(error) -> {

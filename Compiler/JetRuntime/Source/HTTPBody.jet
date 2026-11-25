@@ -47,7 +47,7 @@ http_body_cas: fn(address: I64, expected: I64, desired: I64) -> I64 {
 
 http_body_zero: fn(size: I64) -> I64 {
     pointer: jet_rt_alloc(size, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < size {
         http_body_store(wrapping(pointer + at), I64{0})
         at = wrapping(at + I64{8})
@@ -62,7 +62,7 @@ http_body_lock: fn(body: I64) { sync_mutex_lock(wrapping(body + I64{8})) }
 http_body_unlock: fn(body: I64) { sync_mutex_unlock(wrapping(body + I64{8})) }
 
 http_body_retain: fn(body: I64) {
-    count := http_body_word(body)
+    ^count: http_body_word(body)
     loop {
         previous: http_body_cas(body, count, wrapping(count + I64{1}))
         if previous == count {
@@ -73,7 +73,7 @@ http_body_retain: fn(body: I64) {
 }
 
 http_body_unref: fn(pointer: I64) -> Bool {
-    count := http_body_word(pointer)
+    ^count: http_body_word(pointer)
     loop {
         previous: http_body_cas(pointer, count, wrapping(count - I64{1}))
         if previous == count -> return count == I64{1}
@@ -93,9 +93,9 @@ http_body_closure_drop: fn(closure: I64) {
     release: http_body_word(wrapping(closure + I64{16}))
     // The last closure reference calls its generated release(box), which drops
     // captures and frees the box.
-    _ := coll_call_box(release, closure)
+    ^_: coll_call_box(release, closure)
     // Cleanup must still finish if a captured finalizer delivers a stop.
-    _ := http_body_stopped()
+    ^_: http_body_stopped()
 }
 
 http_body_text_drop: fn(text: I64) { jet_rt_string_drop(text) }
@@ -198,7 +198,7 @@ http_body_close: fn(body: I64) -> I64 {
     if (closer == I64{0}) { return I64{0} }
     // The claimed closer code has the audited code(box) ABI, with no transition
     // lock held.
-    _ := coll_call_box(http_body_word(wrapping(closer + I64{8})), closer)
+    ^_: coll_call_box(http_body_word(wrapping(closer + I64{8})), closer)
     if http_body_stopped() -> I64{-5} else -> I64{0}
 }
 
@@ -287,9 +287,9 @@ http_body_list: fn(count: I64) -> I64 {
     if (http_body_word(wrapping(chunks + I64{16})) != I64{0}) { return I64{0} }
     body: http_body_word(chunks)
     kind: http_body_word(wrapping(body + I64{72}))
-    count := http_body_word(wrapping(chunks + I64{8}))
-    raw := I64{0}
-    cursor := I64{0}
+    ^count: http_body_word(wrapping(chunks + I64{8}))
+    ^raw: I64{0}
+    ^cursor: I64{0}
     if {
         (kind == I64{-1}) -> {
             if (http_body_word(wrapping(body + I64{120})) != I64{0}) {
@@ -310,7 +310,7 @@ http_body_list: fn(count: I64) -> I64 {
                 reader: http_body_word(wrapping(body + I64{32}))
                 // Reader code(box, descriptor) borrows exactly `count` writable
                 // U8 bytes; no body lock is held.
-                status := coll_call_box_two(http_body_word(wrapping(reader + I64{8})), reader, wrapping(chunks + I64{32}))
+                ^status: coll_call_box_two(http_body_word(wrapping(reader + I64{8})), reader, wrapping(chunks + I64{32}))
                 if http_body_stopped() {
                     jet_rt_http_body_error_drop(http_body_word(wrapping(chunks + I64{56})))
                     http_body_store(wrapping(chunks + I64{56}), I64{0})
@@ -356,9 +356,9 @@ http_body_list: fn(count: I64) -> I64 {
         (kind == I64{1}) -> wrapping(http_body_word(payload) + cursor)
         else -> wrapping(http_body_word(wrapping(payload + I64{16})) + wrapping(cursor * RT_HOST_U8_STRIDE))
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
-        byte := I64{0}
+        ^byte: I64{0}
         if {
             (kind == I64{-1} || kind == I64{1}) -> {
                 // The source holds `count` initialized UTF-8 or raw reader bytes.
@@ -380,7 +380,7 @@ http_body_list: fn(count: I64) -> I64 {
     // The initial allocation used min(max, original bounded length). Its size
     // is immutable even though descriptor capacity shrinks on later callbacks.
     if (raw != I64{0}) {
-        max := http_body_word(wrapping(chunks + I64{8}))
+        ^max: http_body_word(wrapping(chunks + I64{8}))
         if (http_body_word(wrapping(body + I64{120})) != I64{0}) {
             length: http_body_word(wrapping(body + I64{56}))
             if max > length -> max = length
@@ -388,7 +388,7 @@ http_body_list: fn(count: I64) -> I64 {
         jet_rt_free(raw, max, I64{1})
     }
     jet_rt_http_body_error_drop(http_body_word(wrapping(chunks + I64{56})))
-    stopped := I64{0}
+    ^stopped: I64{0}
     if (body != I64{0}) {
         stopped = http_body_close(body)
         dropped: jet_rt_http_body_drop(body)

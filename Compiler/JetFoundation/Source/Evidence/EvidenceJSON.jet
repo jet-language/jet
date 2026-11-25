@@ -20,7 +20,7 @@ evidence_completeness_json: fn(value: EvidenceCompleteness) -> String Never! {
 }
 
 evidence_attachments_json: fn(values: [EvidenceAttachment]) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop index in evidence_attachment_indices(values) {
         value: values[index]
         rows.push("{{\"name\":{foundation_json_quote(value.name)},\"value\":{foundation_json_quote(value.value)}}}")
@@ -29,7 +29,7 @@ evidence_attachments_json: fn(values: [EvidenceAttachment]) -> String Never! {
 }
 
 evidence_diagnostics_json: fn(values: [EvidenceDiagnostic]) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop index in evidence_diagnostic_indices(values) {
         value: values[index]
         source: if value.source == {
@@ -42,7 +42,7 @@ evidence_diagnostics_json: fn(values: [EvidenceDiagnostic]) -> String Never! {
 }
 
 evidence_chain_json: fn(values: [EvidenceChainLink]) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop index in evidence_chain_indices(values) {
         value: values[index]
         rows.push("{{\"evidence\":{foundation_json_quote(value.evidence_id)},\"relation\":{foundation_json_quote(value.relation)}}}")
@@ -60,8 +60,10 @@ evidence_record_json: fn(record: EvidenceRecord) -> String Never! {
 
 evidence_report_json: fn(report: EvidenceReport) -> String Never! {
     records: loop index in evidence_sorted_record_indices(report) -> evidence_record_json(report.records[index])
-    derivations := [String]{}
-    loop derivation in report.derivations.records -> derivations.push(derivation_record_json(derivation))
+    ^derivations: [String]{}
+    loop derivation in report.derivations.records {
+        derivations.push(derivation_record_json(derivation))
+    }
     schema: "{EVIDENCE_REPORT_SCHEMA}/v{report.schema_version}"
     "{{\"schema\":{foundation_json_quote(schema)},\"identity\":{{\"claim\":{foundation_json_quote(report.identity.claim_id)},\"evidence\":{foundation_json_quote(report.identity.evidence_id)},\"report\":{foundation_json_quote(report.identity.report_id)}}},\"producer\":{foundation_json_quote(evidence_producer_name(report.producer))},\"source\":{evidence_source_json(report.source)},\"build\":{evidence_build_json(report.build)},\"revision\":{evidence_revision_json(report.revision)},\"attachments\":{evidence_attachments_json(report.attachments)},\"diagnostics\":{evidence_diagnostics_json(report.diagnostics)},\"completeness\":{evidence_completeness_json(report.completeness)},\"derivations\":[{derivations.join(",")}],\"evidence\":[{records.join(",")}]}}"
 }

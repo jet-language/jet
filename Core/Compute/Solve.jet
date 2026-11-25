@@ -39,7 +39,7 @@ Solver: struct {
 }
 
 #Test("finite Solver retains seed and counts every checked requirement") {
-    solver := Solver.new(-17)
+    ^solver: Solver.new(-17)
     assert_eq(solver.seed, -17)
     assert_eq(solver.checked, 0)
     assert_eq(solver.failure_count(), 0)
@@ -50,7 +50,7 @@ Solver: struct {
     assert_eq(solver.checked, 3)
     assert_eq(solver.failure_count(), 2)
     assert_eq(solver.status(), "failed")
-    copied := solver.copy()
+    ^copied: solver.copy()
     copied.require(false)
     assert_eq(solver.failure_count(), 2)
     assert_eq(copied.failure_count(), 3)
@@ -86,7 +86,7 @@ dense: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     if tensor_profile(b) != profile -> return Err(ComputeError.Device)
     n: shape[0]
     if rhs_shape[0] != n -> return Err(ComputeError.Shape)
-    rhs_cols := 1
+    ^rhs_cols: 1
     if rhs_shape.len() == 2 -> rhs_cols = rhs_shape[1]
     factors: factorize(data, n, profile)
     solution: solve_factors(factors, n, rhs, rhs_cols, profile)
@@ -152,7 +152,7 @@ validate_rhs: fn(shape: [Int], data: [Float], profile: String) ComputeError! {
 
 checked_numel: fn(shape: [Int]) -> Int ComputeError! {
     if shape.len() == 0 -> return Err(ComputeError.Shape)
-    n := 1
+    ^n: 1
     loop dim in shape {
         if dim < 0 || dim > C_MAX_ELEMENTS -> return Err(ComputeError.Shape)
         if dim == 0 {
@@ -166,9 +166,9 @@ checked_numel: fn(shape: [Int]) -> Int ComputeError! {
 }
 
 factorize: fn(input: ^^[Float], n: Int, profile: String) -> Factorization ComputeError! {
-    factors := input
-    pivots := [Int]{}
-    matrix_scale := Float{0.0}
+    ^factors: input
+    ^pivots: [Int]{}
+    ^matrix_scale: Float{0.0}
     loop value in factors {
         magnitude: abs_f(value)
         if magnitude > matrix_scale -> matrix_scale = magnitude
@@ -176,8 +176,8 @@ factorize: fn(input: ^^[Float], n: Int, profile: String) -> Factorization Comput
     pivot_tolerance: Float{0.000000000000001}
     pivot_threshold: profile_round(matrix_scale * pivot_tolerance, profile) ?? return Err(ComputeError.Arithmetic)
     loop k in 0..<n {
-        pivot := k
-        best := abs_f(factors[k * n + k])
+        ^pivot: k
+        ^best: abs_f(factors[k * n + k])
         loop i in (k + 1)..<n {
             value: abs_f(factors[i * n + k])
             if value > best {
@@ -189,7 +189,7 @@ factorize: fn(input: ^^[Float], n: Int, profile: String) -> Factorization Comput
         pivots.push(pivot)
         if pivot != k {
             loop j in 0..<n {
-                tmp := factors[k * n + j]
+                ^tmp: factors[k * n + j]
                 factors[k * n + j] = factors[pivot * n + j]
                 factors[pivot * n + j] = tmp
             }
@@ -209,12 +209,12 @@ factorize: fn(input: ^^[Float], n: Int, profile: String) -> Factorization Comput
 // Apply the factorization's row swaps to the right-hand side, solve L*y = P*b
 // with L's unit diagonal, then U*x = y.
 solve_factors: fn(factors: Factorization, n: Int, rhs: [Float], rhs_cols: Int, profile: String) -> [Float] ComputeError! {
-    work := rhs.copy()
+    ^work: rhs.copy()
     loop k in 0..<factors.pivots.len() {
         pivot: factors.pivots[k]
         if pivot != k {
             loop j in 0..<rhs_cols {
-                tmp := work[k * rhs_cols + j]
+                ^tmp: work[k * rhs_cols + j]
                 work[k * rhs_cols + j] = work[pivot * rhs_cols + j]
                 work[pivot * rhs_cols + j] = tmp
             }
@@ -222,20 +222,20 @@ solve_factors: fn(factors: Factorization, n: Int, rhs: [Float], rhs_cols: Int, p
     }
     loop i in 0..<n {
         loop j in 0..<rhs_cols {
-            value := work[i * rhs_cols + j]
+            ^value: work[i * rhs_cols + j]
             loop k in 0..<i {
                 value = profile_round(value - factors.factors[i * n + k] * work[k * rhs_cols + j], profile) ?? return Err(ComputeError.Arithmetic)
             }
             work[i * rhs_cols + j] = value
         }
     }
-    i := n
+    ^i: n
     loop i > 0 {
         i -= 1
         diagonal: factors.factors[i * n + i]
         if abs_f(diagonal) <= factors.pivot_threshold -> return Err(ComputeError.Singular)
         loop j in 0..<rhs_cols {
-            value := work[i * rhs_cols + j]
+            ^value: work[i * rhs_cols + j]
             loop k in (i + 1)..<n {
                 value = profile_round(value - factors.factors[i * n + k] * work[k * rhs_cols + j], profile) ?? return Err(ComputeError.Arithmetic)
             }
@@ -255,18 +255,18 @@ tensor_profile: fn(tensor: Tensor) -> String ComputeError! {
 
 f32_round_value: fn(value: Float) -> Float ComputeError! {
     if value == (Float{0.0}) -> return value
-    negative := value < Float{0.0}
-    magnitude := value
+    ^negative: value < Float{0.0}
+    ^magnitude: value
     if negative -> magnitude = Float{0.0} - value
     parts: math.frexp(magnitude) ?? return Err(ComputeError.Arithmetic)
-    exponent := parts.exp - 1
-    scale := 23 - exponent
+    ^exponent: parts.exp - 1
+    ^scale: 23 - exponent
     if exponent < -126 -> scale = 149
     scaled: math.ldexp(magnitude, scale) ?? return Err(ComputeError.Arithmetic)
     lower: math.floor(scaled) ?? return Err(ComputeError.Arithmetic)
-    fraction := scaled - lower
-    rounded := lower
-    round_up := fraction > (Float{0.5})
+    ^fraction: scaled - lower
+    ^rounded: lower
+    ^round_up: fraction > (Float{0.5})
     if fraction == (Float{0.5}) {
         remainder: math.fmod(lower, (Float{2.0})) ?? return Err(ComputeError.Arithmetic)
         if remainder != (Float{0.0}) -> round_up = true

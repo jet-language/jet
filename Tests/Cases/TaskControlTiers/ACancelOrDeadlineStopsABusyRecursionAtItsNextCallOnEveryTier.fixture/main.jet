@@ -50,12 +50,12 @@ run: fn() {
     started: Atomic<Int>.try_new(0) ?? return
     task.group burners {
         burner: task {
-            marker := Marker{name: "the burner's marker"}
+            ^marker: Marker{name: "the burner's marker"}
             defer close(marker)
             started.store(1)
             burn(90)
         }
-        tries := 0
+        ^tries: 0
         loop started.load() == 0 && tries < 2000 {
             time.sleep(1ms)
             tries += 1

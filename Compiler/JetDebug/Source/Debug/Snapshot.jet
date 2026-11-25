@@ -42,7 +42,7 @@ DebugSnapshot: struct {
     }
 
     identity_digest: fn(self) -> String Never! {
-        key := debug_snapshot_frame_key(self)
+        ^key: debug_snapshot_frame_key(self)
         loop local in self.locals {
             key.push("|")
             key.push(local.name)
@@ -58,7 +58,7 @@ DebugSnapshot: struct {
 // The shared `function:line` + `|function:line` stack prefix, collected as
 // pieces and joined once.
 debug_snapshot_frame_key: fn(snapshot: DebugSnapshot) -> [String] Never! {
-    key := [String]{snapshot.function, ":", "{snapshot.line}"}
+    ^key: [String]{snapshot.function, ":", "{snapshot.line}"}
     loop frame in snapshot.call_stack {
         key.push("|")
         key.push(frame.function)
@@ -155,13 +155,13 @@ evaluate_snapshot: fn(snapshot: DebugSnapshot, expression: String) -> DebugEvalu
 // Stable name-ordered `name = value` dump.
 debug_render_snapshot_locals: fn(values: [ValueSnapshot]) -> String Never! {
     if values.len() == 0 -> return "{NATIVE_DEBUG_LOCALS_LABEL}  (none)"
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<values.len() -> order.push(index)
     // Equal names keep their published order.
     order.sort_by(fn(left: Int, right: Int) {
         if values[left].name != values[right].name -> values[left].name <=> values[right].name else -> left <=> right
     })
-    parts := [String]{}
+    ^parts: [String]{}
     loop index in order -> parts.push("{values[index].name} = {values[index].value}")
     body: parts.join("   ")
     "{NATIVE_DEBUG_LOCALS_LABEL}  {body}"
@@ -201,7 +201,7 @@ debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
                         return Err(debug_evaluation_error(unavailable))
                     }
                     // Core to_bits reinterprets the u64 pattern as i64; publish u64.
-                    bits := debug_snapshot_math.to_bits(number)
+                    ^bits: debug_snapshot_math.to_bits(number)
                     if bits < 0 -> bits += 18446744073709551616
                     return Ok(DebugValue.FloatBits{bits: bits})
                 }
@@ -273,8 +273,8 @@ debug_delimited: fn(bytes: [U8], open: Int, close: Int) -> Bool Never! {
 // opener has no closer), trim, then count depth-zero commas.
 debug_aggregate_length: fn(raw: String) -> Int Never! {
     bytes: raw.bytes()
-    start := 0
-    end := bytes.len()
+    ^start: 0
+    ^end: bytes.len()
     if bytes.len() > 0 {
         first: Int{bytes[0]}
         closer: if {
@@ -291,8 +291,8 @@ debug_aggregate_length: fn(raw: String) -> Int Never! {
     inner_text: String.from_bytes(bytes[start..<end]) ?? return 0
     inner: inner_text.trim()
     if inner == "" -> return 0
-    depth := 0
-    count := 1
+    ^depth: 0
+    ^count: 1
     loop byte in inner.bytes() {
         code: Int{byte}
         if {
@@ -318,8 +318,8 @@ debug_unquote_text: fn(raw: String) -> String Never! {
     if bytes.len() < 2 || (Int{bytes[0]}) != 34 || (Int{bytes[bytes.len() - 1]}) != 34 {
         return raw.copy()
     }
-    out := [U8]{}
-    escaped := false
+    ^out: [U8]{}
+    ^escaped: false
     loop index in 1..<(bytes.len() - 1) {
         code: Int{bytes[index]}
         if {

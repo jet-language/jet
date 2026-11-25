@@ -8,12 +8,12 @@ run: fn() {
     trace: files.read("trace.log") ?? panic("read original syscall trace")
     lines: trace.lines()
     marker: "/.nixos-comparison-devhost-gnome-"
-    mkdir := -1
-    first_input := -1
-    first_output := -1
-    protected := [Int]{}
-    insecure := false
-    collision := false
+    ^mkdir: -1
+    ^first_input: -1
+    ^first_output: -1
+    ^protected: [Int]{}
+    ^insecure: false
+    ^collision: false
     loop i in 0..<lines.len() {
         line: lines[i]
         if !line.contains(marker) -> next
@@ -37,7 +37,7 @@ run: fn() {
             protected.push(i)
         }
     }
-    numbers := [String]{}
+    ^numbers: [String]{}
     loop index in protected -> numbers.push("{index}")
     print("{{\"mkdir\":{mkdir},\"first_input\":{first_input},\"first_output\":{first_output},\"protected\":[{parse.join(numbers, ",")}],\"insecure\":{insecure},\"collision\":{collision}}}")
 }

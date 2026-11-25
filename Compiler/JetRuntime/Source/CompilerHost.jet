@@ -1,6 +1,6 @@
 // Compiler-private process receipt fact: bounded status history survives the
 // child owner, but is populated only by a successful wait.
-compiler_host_root := I64{0}
+^compiler_host_root: I64{0}
 
 // runtime-init: 4 when compiler_host_root
 #Export(c) jet_rt_compiler_host_init: fn() {
@@ -95,9 +95,9 @@ compiler_process_status_text: fn(status: I64) -> I64 {
     sync_mutex_lock(root)
     count: rt_text_word(wrapping(root + I64{16}))
     next_slot: rt_text_word(wrapping(root + I64{8}))
-    at := I64{0}
-    found := false
-    status := I64{0}
+    ^at: I64{0}
+    ^found: false
+    ^status: I64{0}
     loop at < count {
         slot: wrapping(wrapping(root + I64{24}) + ((next_slot + I64{63} - at) % I64{64}) * I64{16})
         if (rt_text_word(slot) == native) {
@@ -137,7 +137,7 @@ host_getauxval: fn(kind: I64) -> I64 {
     if (envp == I64{0}) { return host_getauxval_kernel(kind) }
     // Startup lends the start stack: the null-terminated envp array, then the
     // auxiliary vector's [type, value] pairs up to AT_NULL.
-    at := envp
+    ^at: envp
     loop {
         if (rt_text_word(at) == I64{0}) { break }
         at = wrapping(at + I64{8})
@@ -157,7 +157,7 @@ host_getauxval: fn(kind: I64) -> I64 {
 host_getauxval_kernel: fn(kind: I64) -> I64 {
     page: alloc_map_try(I64{4096})
     if (page == I64{0}) { return I64{0} }
-    found := I64{0}
+    ^found: I64{0}
     // "/proc/self/auxv\0", little-endian, at the start of the fresh private page.
     rt_text_store(page, I64{7310238724270485551})
     rt_text_store(wrapping(page + I64{8}), I64{33346492788860524})
@@ -165,8 +165,8 @@ host_getauxval_kernel: fn(kind: I64) -> I64 {
         fd: host_syscall(I64{257}, I64{-100}, page, I64{524288}, I64{0}, I64{0}, I64{0})
         if (fd >= I64{0}) {
             length: host_syscall(I64{0}, fd, wrapping(page + I64{16}), I64{4080}, I64{0}, I64{0}, I64{0})
-            _ := host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-            at := I64{16}
+            ^_: host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            ^at: I64{16}
             // The pair at `at` (from 16) is whole when at + 16 <= 16 + length.
             loop at <= length {
                 entry: rt_text_word(wrapping(page + at))
@@ -199,7 +199,7 @@ HOST_AT_IMAGE: I64{1246057474}
     }
     path: rt_static_text("/proc/self/exe")
     scratch: jet_rt_alloc(I64{32}, I64{8})
-    capacity := I64{256}
+    ^capacity: I64{256}
     loop {
         bytes: jet_rt_alloc(capacity, I64{8})
         count: jet_fs_readlink_raw(path, bytes, capacity, scratch)
@@ -248,7 +248,7 @@ host_image_part: fn(name: I64) -> I64 {
     label: host_image_part_label(name)
     if (table == I64{0} || length == I64{0}) { return I64{0} }
     mask: I64{4294967295}
-    index := I64{0}
+    ^index: I64{0}
     // AT_PHDR lends the program header table the kernel mapped, AT_PHNUM rows
     // of 56 bytes; a PT_NOTE row's p_vaddr and p_filesz bound its mapped
     // read-only notes, and a note is read only inside that bound.
@@ -267,7 +267,7 @@ host_image_part: fn(name: I64) -> I64 {
         }
         if (descriptor < label || wrapping(I64{16} + descriptor) > size) { next }
         if (rt_text_byte(wrapping(note + wrapping(I64{16} + length))) != I64{0}) { next }
-        at := I64{0}
+        ^at: I64{0}
         loop at < length && rt_text_byte(wrapping(note + wrapping(I64{16} + at))) == rt_text_byte(wrapping(data + at)) {
             at = wrapping(at + I64{1})
         }
@@ -305,10 +305,10 @@ host_image_part_length: fn(note: I64, name: I64) -> I64 {
     note: host_image_part(name)
     if (note == I64{0}) { return I64{0} }
     size: host_image_part_length(note, name)
-    begin := start
+    ^begin: start
     if (begin < I64{0}) { begin = I64{0} }
     if (begin > size) { begin = size }
-    taken := I64{0}
+    ^taken: I64{0}
     if (wanted > I64{0}) {
         taken = wrapping(size - begin)
         if (wanted < taken) { taken = wanted }
@@ -324,11 +324,11 @@ host_image_part_length: fn(note: I64, name: I64) -> I64 {
 // reports an unreachable directory as a non-absolute path, which getcwd(3)
 // refuses with ENOENT.
 #Export(c) jet_sys_current_dir_raw: fn(ok: I64, err: I64) -> I64 {
-    capacity := I64{512}
+    ^capacity: I64{512}
     loop {
         bytes: jet_rt_alloc(capacity, I64{8})
         result: host_call(I64{79}, bytes, capacity, I64{0})
-        failure := I64{0}
+        ^failure: I64{0}
         if (result > I64{0}) {
             if (rt_text_byte(bytes) == I64{47}) {
                 rt_text_store(ok, rt_text_lossy(bytes, result - I64{1}))

@@ -51,11 +51,11 @@ sema_fork_parts_row: fn(types: ^SemaForkParts, name: String) -> Int Never! {
 FORK_METHOD_NAME: "__fork"
 
 sema_fork_methods_expand: fn(items: ^[Item]) Never! {
-    types := SemaForkParts{}
+    ^types: SemaForkParts{}
     loop item in items {
         if item == {
             .Struct(definition) -> {
-                stored := [Type]{}
+                ^stored: [Type]{}
                 loop field in definition.fields {
                     if field.computed == None -> stored.push(field.ty.copy())
                 }
@@ -64,7 +64,7 @@ sema_fork_methods_expand: fn(items: ^[Item]) Never! {
                 types.params[row] = Val(sema_fork_methods_param_names(definition.type_params))
             }
             .Enum(definition) -> {
-                payloads := [Type]{}
+                ^payloads: [Type]{}
                 loop variant in definition.variants {
                     if variant.payload == {
                         .Unit -> {}
@@ -96,8 +96,8 @@ sema_fork_methods_expand: fn(items: ^[Item]) Never! {
                 if !sema_fork_methods_wanted(definition.name, definition.type_params, definition.methods, types) {
                     next
                 }
-                updated := definition.copy()
-                method := sema_fork_method(definition.name, definition.name_span)
+                ^updated: definition.copy()
+                ^method: sema_fork_method(definition.name, definition.name_span)
                 method.is_pub = definition.is_pub
                 method.is_package_pub = definition.is_package_pub
                 updated.methods.push(method)
@@ -107,8 +107,8 @@ sema_fork_methods_expand: fn(items: ^[Item]) Never! {
                 if !sema_fork_methods_wanted(definition.name, definition.type_params, definition.methods, types) {
                     next
                 }
-                updated := definition.copy()
-                method := sema_fork_method(definition.name, definition.name_span)
+                ^updated: definition.copy()
+                ^method: sema_fork_method(definition.name, definition.name_span)
                 method.is_pub = definition.is_pub
                 method.is_package_pub = definition.is_package_pub
                 updated.methods.push(method)
@@ -132,7 +132,7 @@ sema_fork_methods_wanted: fn(name: String, type_params: [TypeParam], methods: [F
     }
     id: name_find(types.names, name) ?? return false
     own: types.parts[name_index(id)] ?? return false
-    reached := name_table_sized(2)
+    ^reached: name_table_sized(2)
     loop part in own -> sema_fork_methods_names(part, [String]{}, types, reached)
     if name_find(reached, name) == None -> return false
     loop reached_id in 1..<name_count(reached) {
@@ -150,9 +150,7 @@ sema_fork_methods_names: fn(ty: Type, bound: [String], types: SemaForkParts, rea
     if ty == {
         .Named(name) -> { sema_fork_methods_name(name, bound, types, reached) }
         .Apply(name, args) -> {
-            loop argument in args {
-                sema_fork_methods_names(argument, bound, types, reached)
-            }
+            loop argument in args { sema_fork_methods_names(argument, bound, types, reached) }
             sema_fork_methods_name(name, bound, types, reached)
         }
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> {
@@ -180,7 +178,7 @@ sema_fork_methods_name: fn(name: String, bound: [String], types: SemaForkParts, 
     if bound.contains(name) || name_find(reached, name) != None {
         return
     }
-    _ := name_intern(reached, name)
+    ^_: name_intern(reached, name)
     id: name_find(types.names, name) ?? return
     row: name_index(id)
     own: types.parts[row] ?? return
@@ -195,7 +193,7 @@ sema_fork_methods_name: fn(name: String, bound: [String], types: SemaForkParts, 
 // makes it as visible as its type, so a copy anywhere the type is reached can
 // call it.
 sema_fork_method: fn(type_name: String, span: Span) -> Func Never! {
-    method := ast_func(FORK_METHOD_NAME, span, span)
+    ^method: ast_func(FORK_METHOD_NAME, span, span)
     method.params = [Param]{Param{convention: AccessConvention.Read, root: false, name: "self", name_span: span, public_label: None, zone: ParamZone.Either, ty: Type.Named{name: ""}, ty_span: span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None}}
     method.return_type = Val(Type.Result{ok: Type.Named{name: type_name.copy()}, err: Type.Named{name: "Never"}})
     method.return_type_span = Val(span)

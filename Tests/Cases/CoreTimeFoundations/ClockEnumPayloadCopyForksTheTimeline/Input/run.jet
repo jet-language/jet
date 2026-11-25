@@ -19,10 +19,10 @@ slot_now: fn(slot: Slot) -> Int {
 
 run: fn() {
     paused: Slot.Paused{clock: time.Clock.new(0), at: 1}
-    copied := paused.copy()
+    ^copied: paused.copy()
     if copied == {
         .Paused(clock, at) -> {
-            ticking := clock
+            ^ticking: clock
             assert_eq(ticking.advance(4), 4)
             assert_eq(at, 1)
         }
@@ -30,10 +30,10 @@ run: fn() {
     }
     assert_eq(slot_now(paused), 0)
     running: Slot.Running(time.Clock.new(2))
-    again := running.copy()
+    ^again: running.copy()
     if again == {
         .Running(clock) -> {
-            ticking := clock
+            ^ticking: clock
             assert_eq(ticking.tick(1), 3)
         }
         .Idle | .Paused(_, _) -> {}

@@ -36,7 +36,7 @@ channel_new: fn(bound: I64, kind: I64, delay_ms: I64) -> I64 {
     channel
 }
 
-channel_retain: fn(channel: I64) { _ := sync_add(wrapping(channel + I64{8}), I64{1}) }
+channel_retain: fn(channel: I64) { ^_: sync_add(wrapping(channel + I64{8}), I64{1}) }
 
 channel_release: fn(channel: I64) {
     if (sync_add(wrapping(channel + I64{8}), I64{-1}) != I64{1}) {
@@ -50,7 +50,7 @@ channel_release: fn(channel: I64) {
         jet_rt_session_shield_enter()
         length: sync_load(wrapping(channel + I64{16}))
         head: sync_load(wrapping(channel + I64{40}))
-        at := I64{0}
+        ^at: I64{0}
         loop at < length {
             coll_slot_drop(data + ((head + at) % capacity) * coll_size(meta), meta)
             at += I64{1}
@@ -78,12 +78,12 @@ CHANNEL_BYTES: I64{176}
 // ledger (channel_senders_escaped). Under the channel's mutex.
 CHANNEL_LEDGER_ROWS: I64{64}
 
-channel_senders_escaped := I64{0}
+^channel_senders_escaped: I64{0}
 
 channel_ledger_drop: fn(ledger: I64) {
     count: sync_load(ledger)
     rows: sync_load(wrapping(ledger + I64{24}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         scheduler_control_drop(sync_load(wrapping(rows + at * I64{16})))
         at += I64{1}
@@ -97,7 +97,7 @@ channel_ledger_drop: fn(ledger: I64) {
 channel_ledger_row: fn(ledger: I64, control: I64) -> I64 {
     count: sync_load(ledger)
     rows: sync_load(wrapping(ledger + I64{24}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         row: wrapping(rows + at * I64{16})
         if (sync_load(row) == control) { return row }
@@ -126,7 +126,7 @@ channel_ledger_add: fn(channel: I64, control: I64, delta: I64) -> I64 {
             grown: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
             rows: jet_rt_alloc(grown * I64{16}, I64{8})
             old: sync_load(wrapping(ledger + I64{24}))
-            at := I64{0}
+            ^at: I64{0}
             loop at < (count * I64{2}) {
                 sync_store(wrapping(rows + at * I64{8}), sync_load(wrapping(old + at * I64{8})))
                 at += I64{1}
@@ -211,9 +211,9 @@ channel_senders: fn(channel: I64, walk: I64, text: I64) -> I64 {
     senders: sync_load(wrapping(channel + I64{120}))
     count: sync_load(ledger)
     rows: sync_load(wrapping(ledger + I64{24}))
-    known := channel_senders_escaped == I64{0} && sync_load(wrapping(ledger + I64{16})) == I64{0} && senders > I64{0} && sync_load(wrapping(channel + I64{104})) == I64{0} && sync_load(wrapping(channel + I64{88})) == I64{0} && sync_load(wrapping(channel + I64{16})) == I64{0} && sync_load(wrapping(channel + I64{80})) == I64{0}
-    held := I64{0}
-    at := I64{0}
+    ^known: channel_senders_escaped == I64{0} && sync_load(wrapping(ledger + I64{16})) == I64{0} && senders > I64{0} && sync_load(wrapping(channel + I64{104})) == I64{0} && sync_load(wrapping(channel + I64{88})) == I64{0} && sync_load(wrapping(channel + I64{16})) == I64{0} && sync_load(wrapping(channel + I64{80})) == I64{0}
+    ^held: I64{0}
+    ^at: I64{0}
     loop known && at < count {
         control: sync_load(wrapping(rows + at * I64{16}))
         if (sync_load(wrapping(control + I64{208})) != I64{0} || sync_load(wrapping(control + I64{176})) == I64{0} || sync_load(wrapping(control + I64{184})) != I64{0}) {
@@ -244,7 +244,7 @@ channel_grow: fn(channel: I64, needed: I64) {
     if (needed <= capacity) {
         return
     }
-    grown := if (capacity == I64{0}) -> I64{4} else -> capacity
+    ^grown: if (capacity == I64{0}) -> I64{4} else -> capacity
     loop grown < needed -> grown *= I64{2}
     bound: sync_load(wrapping(channel + I64{48}))
     if (bound > I64{0} && grown > bound) { grown = bound }
@@ -254,7 +254,7 @@ channel_grow: fn(channel: I64, needed: I64) {
     data: sync_load(wrapping(channel + I64{32}))
     length: sync_load(wrapping(channel + I64{16}))
     head: sync_load(wrapping(channel + I64{40}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         coll_copy(wrapping(data + ((head + at) % capacity) * stride), wrapping(buffer + at * stride), coll_payload(meta))
         at += I64{1}
@@ -271,19 +271,19 @@ channel_wait_add: fn(channel: I64, node: I64, sending: Bool) {
     sync_store(node, sync_load(wrapping(channel + offset)))
     sync_store(wrapping(node + I64{16}), (sync_load(wrapping(node + I64{16})) & I64{2}) | I64{1})
     sync_store(wrapping(channel + offset), node)
-    _ := sync_add(wrapping(channel + count), I64{1})
+    ^_: sync_add(wrapping(channel + count), I64{1})
 }
 
 channel_wait_remove: fn(channel: I64, node: I64, sending: Bool) {
     if ((sync_load(wrapping(node + I64{16})) & I64{1}) == I64{0}) {
         return
     }
-    link := channel + (if sending -> I64{72} else -> I64{64})
+    ^link: channel + (if sending -> I64{72} else -> I64{64})
     loop sync_load(link) != (I64{0}) {
         if (sync_load(link) == node) {
             sync_store(link, sync_load(node))
             sync_store(wrapping(node + I64{16}), sync_load(wrapping(node + I64{16})) & I64{2})
-            _ := sync_add(wrapping(channel + (if sending -> I64{152} else -> I64{144})), I64{-1})
+            ^_: sync_add(wrapping(channel + (if sending -> I64{152} else -> I64{144})), I64{-1})
             return
         }
         link = sync_load(link)
@@ -298,16 +298,16 @@ channel_wake_one: fn(channel: I64, sending: Bool) {
     }
     sync_store(wrapping(channel + offset), sync_load(node))
     sync_store(wrapping(node + I64{16}), I64{2})
-    _ := sync_add(wrapping(channel + (if sending -> I64{152} else -> I64{144})), I64{-1})
+    ^_: sync_add(wrapping(channel + (if sending -> I64{152} else -> I64{144})), I64{-1})
     sync_park_wake(sync_load(wrapping(node + I64{8})))
 }
 
 channel_wake_all: fn(channel: I64, sending: Bool) {
     offset: if sending -> I64{72} else -> I64{64}
-    node := sync_load(wrapping(channel + offset))
+    ^node: sync_load(wrapping(channel + offset))
     sync_store(wrapping(channel + offset), I64{0})
     sync_store(wrapping(channel + (if sending -> I64{152} else -> I64{144})), I64{0})
-    ordered := I64{0}
+    ^ordered: I64{0}
     loop node != (I64{0}) {
         following: sync_load(node)
         sync_store(node, ordered)
@@ -375,10 +375,10 @@ channel_wait_new: fn(slot: I64) -> I64 {
 channel_receive: fn(channel: I64, out: I64) -> Bool {
     object: sync_load(wrapping(channel + I64{160}))
     ticket: replay_take(REPLAY_RECEIVE, object)
-    slot := I64{0}
-    node := I64{0}
-    reason := I64{0}
-    received := false
+    ^slot: I64{0}
+    ^node: I64{0}
+    ^reason: I64{0}
+    ^received: false
     control: scheduler_control_current()
     wait_cycle_note(control, WAIT_CYCLE_RECEIVE, channel)
     loop {
@@ -423,7 +423,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
 }
 
 #Export(c) jet_rt_native_channel: fn(bounded: I64, capacity: I64, tx: I64, rx: I64) {
-    bound := I64{-1}
+    ^bound: I64{-1}
     if ((bounded & I64{255}) != I64{0}) {
         bound = jet_int_owned_to_i64(capacity)
         if (jet_scheduler_native_propagate() != I64{0}) {
@@ -435,7 +435,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     }
     channel: channel_new(bound, I64{0}, I64{0})
     sync_store(wrapping(channel + I64{120}), I64{1})
-    _ := channel_ledger_add(channel, scheduler_control_current(), I64{1})
+    ^_: channel_ledger_add(channel, scheduler_control_current(), I64{1})
     channel_retain(channel)
     sync_store(tx, channel)
     sync_store(rx, channel)
@@ -447,10 +447,10 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
 #Export(c) jet_rt_native_sender_send: fn(channel: I64, slot: I64, meta: I64) -> I64 {
     object: sync_load(wrapping(channel + I64{160}))
     ticket: replay_take(REPLAY_SEND, object)
-    park := I64{0}
-    node := I64{0}
-    reason := I64{0}
-    accepted := I64{0}
+    ^park: I64{0}
+    ^node: I64{0}
+    ^reason: I64{0}
+    ^accepted: I64{0}
     loop {
         if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) {
             break
@@ -510,8 +510,8 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
 #Export(c) jet_rt_native_sender_clone: fn(channel: I64) -> I64 {
     channel_retain(channel)
     sync_mutex_lock(channel)
-    _ := sync_add(wrapping(channel + I64{120}), I64{1})
-    _ := channel_ledger_add(channel, scheduler_control_current(), I64{1})
+    ^_: sync_add(wrapping(channel + I64{120}), I64{1})
+    ^_: channel_ledger_add(channel, scheduler_control_current(), I64{1})
     channel_update(channel)
     sync_mutex_unlock(channel)
     channel
@@ -520,7 +520,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
 #Export(c) jet_rt_native_receiver_clone: fn(channel: I64) -> I64 {
     channel_retain(channel)
     sync_mutex_lock(channel)
-    _ := sync_add(wrapping(channel + I64{128}), I64{1})
+    ^_: sync_add(wrapping(channel + I64{128}), I64{1})
     channel_update(channel)
     sync_mutex_unlock(channel)
     channel
@@ -609,10 +609,10 @@ channel_word: fn(channel: I64, offset: I64) -> I64 {
     object: sync_load(wrapping(channel + I64{160}))
     ticket: replay_take(REPLAY_TRY_RECEIVE, object)
     sync_mutex_lock(channel)
-    result := I64{0}
+    ^result: I64{0}
     if (ticket != REPLAY_TRY_RECEIVE + REPLAY_FAILED && sync_load(wrapping(channel + I64{16})) != I64{0}) {
         result = coll_slot_new(meta)
-        _ := channel_pop_locked(channel, result)
+        ^_: channel_pop_locked(channel, result)
     }
     channel_update(channel)
     replay_log(if (result == I64{0}) -> REPLAY_TRY_RECEIVE + REPLAY_FAILED else -> REPLAY_TRY_RECEIVE, object)
@@ -640,10 +640,10 @@ channel_iter_pull: fn(channel: I64, out: I64) -> Bool { channel_receive(channel,
 // reservation keeps only physical state alive, not a logical sender endpoint.
 // Reservation16 {state0,active8}, released exactly once by commit/drop.
 channel_reserve_send: fn(channel: I64, meta: I64) -> I64 {
-    park := I64{0}
-    node := I64{0}
-    reason := I64{0}
-    reservation := I64{0}
+    ^park: I64{0}
+    ^node: I64{0}
+    ^reason: I64{0}
+    ^reservation: I64{0}
     loop {
         if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) {
             break
@@ -700,7 +700,7 @@ channel_reservation_drop: fn(reservation: I64) {
     sync_mutex_lock(channel)
     if (sync_load(wrapping(reservation + I64{8})) != I64{0}) {
         sync_store(wrapping(reservation + I64{8}), I64{0})
-        _ := sync_add(wrapping(channel + I64{80}), I64{-1})
+        ^_: sync_add(wrapping(channel + I64{80}), I64{-1})
         channel_wake_one(channel, true)
     }
     channel_update(channel)
@@ -718,7 +718,7 @@ channel_reservation_commit: fn(reservation: I64, slot: I64) -> Bool {
     ticket: replay_take(REPLAY_SEND, object)
     sync_mutex_lock(channel)
     accepted: sync_load(wrapping(channel + I64{88})) == I64{0} && sync_load(wrapping(channel + I64{128})) != I64{0}
-    _ := sync_add(wrapping(channel + I64{80}), I64{-1})
+    ^_: sync_add(wrapping(channel + I64{80}), I64{-1})
     sync_store(wrapping(reservation + I64{8}), I64{0})
     if {
         accepted -> {
@@ -743,14 +743,14 @@ channel_reservation_commit: fn(reservation: I64, slot: I64) -> Bool {
 // Probe priorities are exactly recvs in source order, expired timer arms in
 // source order, then all-closed (when there are no timer arms).
 channel_select_probe: fn(receivers: I64, count: I64, timer_data: I64, timer_count: I64, now: I64, arm: I64, value: I64) -> I64 {
-    closed := true
-    at := I64{0}
+    ^closed: true
+    ^at: I64{0}
     loop at < count {
         channel: sync_load(wrapping(receivers + at * I64{8}))
         sync_mutex_lock(channel)
         if (sync_load(wrapping(channel + I64{16})) != I64{0}) {
             payload: coll_slot_new(sync_load(wrapping(channel + I64{56})))
-            _ := channel_pop_locked(channel, payload)
+            ^_: channel_pop_locked(channel, payload)
             channel_update(channel)
             replay_log(REPLAY_SELECT, at)
             sync_mutex_unlock(channel)
@@ -786,13 +786,13 @@ channel_select_replayed: fn(receivers: I64, count: I64, arm: I64, value: I64) ->
     chosen: replay_recorded(I64{16})
     if (chosen == REPLAY_SELECT_NONE) { return I64{0} }
     if (chosen == REPLAY_SELECT_CLOSED) { return I64{2} }
-    payload := I64{0}
+    ^payload: I64{0}
     if (chosen < count) {
         channel: sync_load(wrapping(receivers + chosen * I64{8}))
         sync_mutex_lock(channel)
         if (sync_load(wrapping(channel + I64{16})) != I64{0}) {
             payload = coll_slot_new(sync_load(wrapping(channel + I64{56})))
-            _ := channel_pop_locked(channel, payload)
+            ^_: channel_pop_locked(channel, payload)
         }
         channel_update(channel)
         sync_mutex_unlock(channel)
@@ -808,7 +808,7 @@ channel_select_replayed: fn(receivers: I64, count: I64, arm: I64, value: I64) ->
 
 // Consumed select lists share one cleanup on stopped and completed paths.
 channel_select_drop_inputs: fn(receivers: I64, count: I64, capacity: I64, converted: I64, timer_count: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         jet_rt_native_receiver_drop(sync_load(wrapping(receivers + at * I64{8})))
         at += I64{1}
@@ -826,14 +826,14 @@ channel_select_drop_inputs: fn(receivers: I64, count: I64, capacity: I64, conver
     durations: sync_load(wrapping(timers + I64{16}))
     thread_zero(recvs, I64{24})
     thread_zero(timers, I64{24})
-    converted := I64{0}
+    ^converted: I64{0}
     if (timer_count != I64{0}) {
         converted = jet_rt_alloc(timer_count * I64{16}, I64{8})
         thread_zero(converted, timer_count * I64{16})
     }
     started: sync_now_ns()
-    at := I64{0}
-    stopped := false
+    ^at: I64{0}
+    ^stopped: false
     loop at < timer_count {
         raw: sync_load(wrapping(durations + at * I64{8}))
         nanoseconds: jet_int_owned_to_i64(raw)
@@ -860,11 +860,11 @@ channel_select_drop_inputs: fn(receivers: I64, count: I64, capacity: I64, conver
         return
     }
     if (timer_capacity != I64{0}) { jet_rt_free(durations, timer_capacity * I64{8}, I64{8}) }
-    park := I64{0}
-    registrations := I64{0}
+    ^park: I64{0}
+    ^registrations: I64{0}
     // Under `jet debug --replay` the select takes its recorded turn and arm.
     ticket: replay_take(REPLAY_SELECT, I64{0})
-    result := if (ticket >= I64{0}) -> channel_select_replayed(receivers, count, arm, value) else if (count == I64{0} && timer_count == I64{0}) -> I64{3} else -> channel_select_probe(receivers, count, converted, timer_count, started, arm, value)
+    ^result: if (ticket >= I64{0}) -> channel_select_replayed(receivers, count, arm, value) else if (count == I64{0} && timer_count == I64{0}) -> I64{3} else -> channel_select_probe(receivers, count, converted, timer_count, started, arm, value)
     if (result == I64{0} && (probing & I64{255}) == I64{0} && ticket < I64{0}) {
         park = sync_park_new()
         if (count != I64{0}) {

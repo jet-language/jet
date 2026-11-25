@@ -9,7 +9,7 @@ measured_bytes: fn(path: String, seen: ^[files.FileID]) -> Int {
         if id.device == metadata.id.device && id.inode == metadata.id.inode -> return 0
     }
     seen.push(metadata.id)
-    total := metadata.size_on_disk
+    ^total: metadata.size_on_disk
     if metadata.is_dir && !metadata.is_symlink {
         loop entry in files.list_dir(path) ?? panic("entries {path}") {
             total += measured_bytes(entry.path, seen)
@@ -19,8 +19,8 @@ measured_bytes: fn(path: String, seen: ^[files.FileID]) -> Int {
 }
 
 run: fn() {
-    seen := [files.FileID]{}
-    total := 0
+    ^seen: [files.FileID]{}
+    ^total: 0
     loop root in ["shared-cas", "jet-omp/hangar", "jet-omp2/hangar"] {
         total += measured_bytes(root, seen)
     }

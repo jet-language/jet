@@ -31,7 +31,7 @@ NixIndexError: enum {
 }
 
 peer_seed: fn() -> [U8] {
-    seed := [U8]{}
+    ^seed: [U8]{}
     loop _ in 0..<32 -> seed.push(U8{7})
     seed
 }
@@ -64,7 +64,7 @@ peer_nar_node: fn(out: ^[U8], path: String) {
     info: files.stat(path) ?? panic("fixture NAR stat")
     if info.is_dir {
         peer_nar_token(out, "directory".bytes())
-        entries := files.list_dir(path) ?? panic("fixture NAR directory")
+        ^entries: files.list_dir(path) ?? panic("fixture NAR directory")
         entries.sort_by(fn(entry) { entry.name })
         loop entry in entries {
             peer_nar_token(out, "entry".bytes())
@@ -98,7 +98,7 @@ peer_nar: fn(source: String, kind: String) -> [U8] {
     } else if kind == "lib" { peer_write(files.join(source, "lib/marker"), "library") } else {
         peer_write(files.join(source, "share/marker"), "runtime")
     }
-    out := [U8]{}
+    ^out: [U8]{}
     peer_nar_token(out, "nix-archive-1".bytes())
     peer_nar_node(out, source)
     files.remove_all(source) ?? panic("remove encoded NAR source")
@@ -107,10 +107,10 @@ peer_nar: fn(source: String, kind: String) -> [U8] {
 
 peer_nix_base32: fn(bytes: [U8]) -> String {
     alphabet: "0123456789abcdfghijklmnpqrsvwxyz".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<52 {
         bit: (51 - index) * 5
-        digit := 0
+        ^digit: 0
         loop offset in 0..<5 {
             target: bit + offset
             if target < 256 && (Int{bytes[target /% 8]}) & 1 << (target % 8) != 0 {
@@ -125,7 +125,7 @@ peer_nix_base32: fn(bytes: [U8]) -> String {
 peer_narinfo: fn(store_path: String, nar_name: String, nar: [U8], references: [String]) -> [U8] {
     digest: crypto.sha256(nar)
     hash: "sha256:{digest.hex()}"
-    names := [String]{}
+    ^names: [String]{}
     loop reference in references -> names.push(files.basename(reference))
     fingerprint: "1;{store_path};sha256:{peer_nix_base32(digest.bytes)};{nar.len()};{references.join(",")}"
     signature: peer_signature(fingerprint.bytes())
@@ -144,7 +144,7 @@ peer_routes: fn(endpoint: String, root: String, source: String) -> [String:[U8]]
     digest: crypto.sha256(compressed).hex()
     target: "/index/index-v1/{PEER_REVISION}/x86_64-linux/{digest}.json.zst"
     manifest: "{{\"schema\":1,\"channel\":\"nixpkgs-unstable\",\"generation\":1,\"issued_unix\":{released},\"expires_unix\":{expires},\"targets\":[{{\"revision\":\"{PEER_REVISION}\",\"system\":\"x86_64-linux\",\"url\":\"{endpoint}{target}\",\"signature_url\":\"{endpoint}{target}.sig.json\",\"sha256\":\"{digest}\",\"compressed_length\":{compressed.len()},\"decoded_length\":{decoded.bytes().len()},\"record_count\":1,\"index_signature_sha256\":\"{crypto.sha256(sidecar).hex()}\",\"discoverable\":true}}]}}"
-    routes := [String:[U8]]{}
+    ^routes: [String:[U8]]{}
     routes["/index/v1/nixpkgs-unstable/manifest.json"] = manifest.bytes()
     routes["/index/v1/nixpkgs-unstable/manifest.json.sig.json"] = peer_sidecar("jet-nixpkgs-channel-manifest-v1\n", manifest)
     routes[target] = compressed
@@ -174,9 +174,9 @@ peer_object_count: fn(counts: [String:Int], path: String, kind: String) -> Int {
 }
 
 peer_control: fn(port: String, path: String) {
-    stream := net.tcp_connect("127.0.0.1:{port}") ?? panic("connect fixture control")
+    ^stream: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect fixture control")
     net.tcp_write_text(stream, "GET /{path} HTTP/1.1{PEER_CRLF}Host: 127.0.0.1{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write fixture control")
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: net.tcp_read_bytes(stream, 16384) ?? panic("read fixture control")
         if chunk.len() == 0 -> break
@@ -209,11 +209,11 @@ run: fn() {
     // Publish READY only after the listener AND signed fixture config exist.
     peer_write("{ready}.tmp", "{port}")
     files.rename("{ready}.tmp", ready) ?? panic("publish fixture READY")
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     loop {
-        stream := net.tcp_accept(listener) ?? panic("accept Nix fixture request")
-        request := [U8]{}
-        first_line := false
+        ^stream: net.tcp_accept(listener) ?? panic("accept Nix fixture request")
+        ^request: [U8]{}
+        ^first_line: false
         loop !first_line {
             chunk: net.tcp_read_bytes(stream, 16384) ?? panic("read Nix fixture request")
             assert(chunk.len() > 0)

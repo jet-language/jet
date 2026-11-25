@@ -45,21 +45,21 @@ envmodel_output_error: fn(path: String, message: String) -> PackageOutputError N
 // Byte-ordered keys, so repeated reads project the same plan; arrays keep the
 // author's order.
 envmodel_sorted_output_keys: fn(outputs: [String:OutputFact]) -> [String] Never! {
-    keys := outputs.keys().to_list()
+    ^keys: outputs.keys().to_list()
     keys.sort()
     keys
 }
 
 envmodel_sorted_payload_keys: fn(fields: [String:OutputPayload]) -> [String] Never! {
-    keys := fields.keys().to_list()
+    ^keys: fields.keys().to_list()
     keys.sort()
     keys
 }
 
 // Lower every JetOS output of one Package.
 envmodel_project_package_outputs: fn(facts: PackageFacts) -> PackageOutputPlan PackageOutputError! {
-    systems := [SystemPlan]{}
-    system_names := [String]{}
+    ^systems: [SystemPlan]{}
+    ^system_names: [String]{}
     keys: envmodel_sorted_output_keys(facts.outputs)
     loop key in keys {
         output: facts.outputs[key]
@@ -74,9 +74,9 @@ envmodel_project_package_outputs: fn(facts: PackageFacts) -> PackageOutputPlan P
     }
     // Fleet deploy scripts are stored as fleet/deploy-{host}.sh, so host names
     // must be unique across the complete Package projection.
-    fleets := [FleetPlan]{}
-    fleet_names := [String]{}
-    host_paths := [String:String]{}
+    ^fleets: [FleetPlan]{}
+    ^fleet_names: [String]{}
+    ^host_paths: [String:String]{}
     loop key in keys {
         output: facts.outputs[key]
         if output.kind != OutputKind.Fleet -> next
@@ -152,7 +152,7 @@ envmodel_project_fleet: fn(path: String, output: OutputFact, systems: [String]) 
             return Err(envmodel_output_error(hosts_path, "is required"))
         }
     }
-    projected := [HostPlan]{}
+    ^projected: [HostPlan]{}
     loop host_name in envmodel_sorted_payload_keys(hosts) {
         host_path: "{path}.hosts.{host_name}"
         envmodel_validate_projection_name(host_path, host_name, "host")
@@ -180,8 +180,8 @@ envmodel_project_host: fn(path: String, name: String, value: OutputPayload) -> H
         .None -> fields.get(ENVMODEL_OUTPUT_FIELD_NAME)
     }
     system: envmodel_normalize_system_name(envmodel_output_text(named, "{path}.system"))
-    overrides := [{name: String, value: HostOverrideValue}]{}
-    provenance := [HostOverrideProvenance]{}
+    ^overrides: [{name: String, value: HostOverrideValue}]{}
+    ^provenance: [HostOverrideProvenance]{}
     loop field in envmodel_sorted_payload_keys(fields) {
         if field == ENVMODEL_HOST_FIELD_SYSTEM || field == ENVMODEL_OUTPUT_FIELD_NAME -> next
         field_value: fields[field]
@@ -204,7 +204,7 @@ envmodel_project_host: fn(path: String, name: String, value: OutputPayload) -> H
 }
 
 envmodel_project_packages: fn(value: OutputPayload?, path: String) -> [Pkg] PackageOutputError! {
-    packages := [Pkg]{}
+    ^packages: [Pkg]{}
     payload: value ?? return Ok(packages)
     items: if payload == {
         .Array(entries) -> entries
@@ -218,7 +218,7 @@ envmodel_project_packages: fn(value: OutputPayload?, path: String) -> [Pkg] Pack
         parts: raw.split("@").to_list()
         package: if {
             parts.len() > 1 -> {
-                head := [String]{}
+                ^head: [String]{}
                 loop part in 0..<parts.len() - 1 -> head.push(parts[part])
                 name: head.join("@").trim()
                 source: parts[parts.len() - 1].trim()
@@ -238,7 +238,7 @@ envmodel_project_packages: fn(value: OutputPayload?, path: String) -> [Pkg] Pack
 }
 
 envmodel_project_services: fn(value: OutputPayload?, path: String) -> [ServicePlan] PackageOutputError! {
-    projected := [ServicePlan]{}
+    ^projected: [ServicePlan]{}
     payload: value ?? return Ok(projected)
     services: if payload == {
         .Object(entries) -> entries
@@ -265,7 +265,7 @@ envmodel_project_services: fn(value: OutputPayload?, path: String) -> [ServicePl
                 return Err(envmodel_output_error("{service_path}.enable", "is required"))
             }
         }
-        extra := [ServicePlanExtra]{}
+        ^extra: [ServicePlanExtra]{}
         loop field in envmodel_sorted_payload_keys(fields) {
             if field != SERVICE_FIELD_ENABLE {
                 extra.push(ServicePlanExtra{key: field.copy(), value: envmodel_payload_display(fields[field])})
@@ -277,7 +277,7 @@ envmodel_project_services: fn(value: OutputPayload?, path: String) -> [ServicePl
 }
 
 envmodel_project_options: fn(value: OutputPayload?, path: String) -> [OptionPlan] PackageOutputError! {
-    options := [OptionPlan]{}
+    ^options: [OptionPlan]{}
     payload: value ?? return Ok(options)
     fields: if payload == {
         .Object(entries) -> entries
@@ -324,7 +324,7 @@ envmodel_normalize_system_name: fn(value: String) -> String Never! {
 // A projected name becomes a generation path component, so it may hold only
 // ASCII letters, digits, `_`, `-`, and `.`, and is never `.` or `..`.
 envmodel_validate_projection_name: fn(path: String, value: String, kind: String) PackageOutputError! {
-    safe := value != "" && value != "." && value != ".."
+    ^safe: value != "" && value != "." && value != ".."
     loop byte in value.bytes() {
         code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45 || code == 46) {

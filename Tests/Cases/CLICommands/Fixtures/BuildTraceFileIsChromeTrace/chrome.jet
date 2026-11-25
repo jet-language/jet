@@ -9,12 +9,12 @@ use {
 
 run: fn() {
     raw: files.read("trace.json") ?? panic("read the trace: {err}")
-    body := raw.trim_end()
+    ^body: raw.trim_end()
     if body.ends_with(",") -> body = body.slice(0, body.len() - 1)
     if !body.ends_with("]") -> body = "{body}]"
     events: json.parse(body) ?? panic("the trace is not a JSON array: {err}")
-    open := [String:Int]{}
-    spans := 0
+    ^open: [String:Int]{}
+    ^spans: 0
     loop index in 0..<events.len() {
         event: events[index]
         name: event["name"].text() ?? panic("event {index} has no name")

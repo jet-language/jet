@@ -36,8 +36,8 @@ response_result: fn(raw: [U8]) -> String Never! {
 run: fn() {
     crlf: "\r\n"
     loop size in [0, 3, 1048576, 1048577] {
-        request := "POST / HTTP/1.1{crlf}Host: example.test{crlf}Content-Length: {size}{crlf}{crlf}".bytes()
-        response := "HTTP/1.1 200 OK{crlf}Content-Length: {size}{crlf}{crlf}".bytes()
+        ^request: "POST / HTTP/1.1{crlf}Host: example.test{crlf}Content-Length: {size}{crlf}{crlf}".bytes()
+        ^response: "HTTP/1.1 200 OK{crlf}Content-Length: {size}{crlf}{crlf}".bytes()
         loop _ in 0..<size {
             request.push(U8{97})
             response.push(U8{97})

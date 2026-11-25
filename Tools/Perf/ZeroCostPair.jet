@@ -123,7 +123,7 @@ build: fn(root: String, jet: [String], arm: Int, level: String, dir: String) -> 
         source: files.read(files.join(root, "{PAIR}/{ARMS[arm]}/{file}")) ?? fail("{PAIR}/{ARMS[arm]}/{file}: {err}")
         files.write(files.join(dir, file), source) ?? fail("{dir}/{file}: {err}")
     }
-    argv := jet.copy()
+    ^argv: jet.copy()
     argv.extend([String]{"build", "--release", level, "main.jet"})
     built: process.cmd(argv).cwd(dir).run() ?? fail("{argv.join(" ")}: {err}")
     binary: files.join(dir, ".jet/build/main")
@@ -137,8 +137,8 @@ build: fn(root: String, jet: [String], arm: Int, level: String, dir: String) -> 
 // first stdout ns, peak KiB, user us, system us, exec errno) and its
 // `cycles` line (-1 when the counter could not open).
 run_of: fn(report: String) -> Run {
-    end := [String]{}
-    cycles := -1
+    ^end: [String]{}
+    ^cycles: -1
     loop line in report.split("\n") {
         fields: line.split(" ").to_list()
         if fields[0] == "cycles" && fields.len() == 2 -> cycles = Int.parse(fields[1]) ?? -1
@@ -162,11 +162,11 @@ timed: fn(launch: String, report: String, binary: String, n: String, expected: S
 // median(direct): a 32-bit linear congruential draw seeded with
 // BOOTSTRAP_SEED picks each resample's indices; the bounds are nearest ranks.
 metric: fn(kernel: [Int], direct: [Int]) -> Metric {
-    state := BOOTSTRAP_SEED
-    ratios := [Float]{}
+    ^state: BOOTSTRAP_SEED
+    ^ratios: [Float]{}
     loop _ in 0..<BOOTSTRAP_RESAMPLES {
-        picked_kernel := [Int]{}
-        picked_direct := [Int]{}
+        ^picked_kernel: [Int]{}
+        ^picked_direct: [Int]{}
         loop _ in 0..<kernel.len() {
             state = (state * 1664525 + 1013904223) %% 4294967296
             selected: state * kernel.len() /% 4294967296
@@ -196,8 +196,8 @@ level_of: fn(launch: String, scratch: String, kernel: String, direct: String, le
     report: files.join(scratch, "report")
     expected: process.cmd([String]{direct, "--n", n}).run() ?? fail("{direct}: {err}")
     if !expected.success -> fail("direct {level} --n {n} exited {expected.code}")
-    kernel_runs := [Run]{}
-    direct_runs := [Run]{}
+    ^kernel_runs: [Run]{}
+    ^direct_runs: [Run]{}
     loop trial in 0..<trials {
         if trial %% 2 == 0 -> kernel_runs.push(timed(launch, report, kernel, n, expected.output))
         direct_runs.push(timed(launch, report, direct, n, expected.output))
@@ -246,7 +246,7 @@ run: fn() {
     n: count(n_text, "--n")
     trials: count(argument(argv, "--trials", DEFAULT_TRIALS), "--trials")
     output: argument(argv, "--output", "")
-    check := jet.copy()
+    ^check: jet.copy()
     check.extend([String]{"Tools/Perf/CodegenCeiling.jet", "--zero-cost"})
     if given != "" -> check.extend([String]{"--jet", given})
     checked: process.cmd(check).cwd(root).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? fail("{check.join(" ")}: {err}")
@@ -254,8 +254,8 @@ run: fn() {
     scratch_dir: files.temp_dir("zero-cost-pair") ?? fail("cannot make a scratch directory: {err}")
     scratch: scratch_dir.path
     launch: launcher(root, scratch)
-    levels := [Level]{}
-    loss := false
+    ^levels: [Level]{}
+    ^loss: false
     loop level in LEVELS {
         kernel: build(root, jet, 0, level, files.join(scratch, "kernel{level}"))
         direct: build(root, jet, 1, level, files.join(scratch, "direct{level}"))

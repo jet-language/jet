@@ -73,7 +73,7 @@ core_declarations_error: fn(source: String) -[FS]> String Never! {
 // The text of every source `declared` names (its source rows and parts), as
 // the checkout has it.
 core_declarations_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] Never! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop row in declared.source_rows {
         if !paths.contains(row.path) -> paths.push(row.path.copy())
     }
@@ -125,7 +125,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 #Test("core_call_rows") {
     dispatchers: CORE_DECLARATIONS.dispatchers
     assert_eq(CORE_CALLS.len(), dispatchers.len())
-    core_keys := [String]{}
+    ^core_keys: [String]{}
     loop (index, row) in dispatchers {
         key: core_call_key(row.record)
         assert_eq(core_call_key(CORE_CALLS[index]), key)
@@ -138,7 +138,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 // borrow mask has one entry per required operand and its optional operands
 // come after them. The network routes are among the rows checked.
 #Test("every core row masks each required operand") {
-    network := 0
+    ^network: 0
     loop row in CORE_CALLS {
         key: core_call_key(row)
         assert(row.signature.borrow_mask.len() == row.signature.arity, "{key}: {row.signature.borrow_mask.len()} mask entries for arity {row.signature.arity}")
@@ -250,7 +250,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 #Test("dispatcher rows refuse an unowned source-owned row or a mismatched adapter and accept every constructor form") {
     constants: core_decl_syntax_constants(CORE_DECLARATIONS_SYNTAX_FILES) ?? panic("the Syntax constants did not read: {err.message}")
     unowned: core_decl_dispatcher([String]{"plain", "core.fake", "call"}, "CoreCallRecord.source_owned(\"core.fake\", \"call\", &[])", 9001, constants) ?? panic("the source-owned row was refused: {err.message}")
-    declared := CORE_DECLARATIONS.copy()
+    ^declared: CORE_DECLARATIONS.copy()
     declared.dispatchers.push(unowned)
     assert_eq(core_decl_problem(declared), "{CORE_DECLARATIONS_CORE_PATH}:9001: source-owned dispatcher row has no owning source_module: core.fake.call")
     assert(core_declarations_row_error("adapter", "core.web", "form", "sema_web_call(\"core.db\", \"form\", \"jet_web_forms_typed\", &[])", constants).contains("dispatcher row identity disagrees with emitted adapter"))
@@ -276,7 +276,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 #Test("public dispatcher rows must name a ledger module once") {
     none: CoreDeclTexts{}
     expression: "CoreCallRecord.new(\"core.nowhere\", \"probe\", \"jet_nowhere_probe\", true, &[true])"
-    declared := CORE_DECLARATIONS.copy()
+    ^declared: CORE_DECLARATIONS.copy()
     declared.dispatchers = [CoreDeclarationDispatcher]{core_declarations_stray("plain", "core.nowhere", "probe", expression, 9001)}
     assert_eq(core_decl_public_problem(declared, [String]{expression}, none) ?? panic("the stray row was refused: {err.message}"), "{CORE_DECLARATIONS_CORE_PATH}: public dispatcher row names a non-ledger module: core.nowhere.probe")
     declared.dispatchers.push(core_declarations_stray("plain", "core.nowhere", "probe", expression, 9002))
@@ -285,7 +285,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 }
 
 #Test("the effect roots are the build roots, the deny-only roots and four irreversible ones") {
-    roots := [EffectVocabularyRow]{}
+    ^roots: [EffectVocabularyRow]{}
     names: [String]{"Mem", "Panic", "Unsafe", "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI"}
     loop name in names {
         roots.push(EffectVocabularyRow{name: name, irreversible: name == "Net" || name == "FS" || name == "Exec" || name == "FFI", kernel: [String]{}})
@@ -301,7 +301,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 }
 
 #Test("list bodies, owned wrappers and source names read as the build reads them") {
-    constants := CoreDeclTexts{}
+    ^constants: CoreDeclTexts{}
     core_decl_text_put(constants, "TYPE_PTR", "Ptr")
     core_decl_text_put(constants, "MEM_COPY", "copy")
     body: core_decl_list_body("X: 1\nTIERS: [{{name: String, note: String}}]{{\n    {{name: TYPE_PTR, note: \"a {{ brace\"}},\n    {{name: Syntax.MEM_COPY}},\n    {{name: \"zero\"}},\n}}\n", "TIERS: ", "fixture") ?? panic("the list body was refused: {err.message}")

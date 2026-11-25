@@ -132,7 +132,7 @@ body_cost_integer_bounds: fn(table: Interner, tree: BodyTree, id: Int) -> TInteg
 }
 
 body_cost_integer_bounds_in: fn(table: Interner, tree: BodyTree, id: Int, node: BodyNode) -> TIntegerBounds? Never! {
-    bounds := TIntegerBounds?{None}
+    ^bounds: TIntegerBounds?{None}
     if {
         node.kind == .IntLit(value, _) -> bounds = Val(integer_bounds_exact(value))
         node.kind == .CtLit(value) -> {
@@ -163,7 +163,7 @@ body_cost_integer_bounds_in: fn(table: Interner, tree: BodyTree, id: Int, node: 
             }
         }
         node.kind == .OrFallback(value, fallback, _) -> {
-            success := TIntegerBounds?{None}
+            ^success: TIntegerBounds?{None}
             if body_cost_type_id(tree, value) == .Val(carrier) {
                 kind: type_kind(table, carrier)
                 if kind == TypeKind.Option || kind == TypeKind.Result {
@@ -214,7 +214,7 @@ body_cost_range_bounds: fn(table: Interner, tree: BodyTree, start: Int, end: Int
 // An exact Int operation's cost: removed when its operands and its result
 // all stay on the packed Int rail, else a possible spill to a bigint.
 checked_cost_int_fact: fn(operands: [TIntegerBounds?], result: TIntegerBounds?) -> TCostFact Never! {
-    removed := result != None
+    ^removed: result != None
     if result == .Val(bounds) && !checked_cost_fits_inline(bounds) -> removed = false
     loop operand in operands {
         if {
@@ -262,8 +262,10 @@ body_cost_fact: fn(table: Interner, tree: BodyTree, node: BodyNode) -> TCostFact
             node.kind == .Unary(op, operand) -> {
                 if op == TUnaryOp.Neg {
                     inner: body_cost_integer_bounds(table, tree, operand)
-                    result := TIntegerBounds?{None}
-                    if inner == .Val(bounds) -> result = checked_cost_bounded(-bounds.hi, -bounds.lo)
+                    ^result: TIntegerBounds?{None}
+                    if inner == .Val(bounds) {
+                        result = checked_cost_bounded(-bounds.hi, -bounds.lo)
+                    }
                     return Val(checked_cost_int_fact([TIntegerBounds?]{inner}, result))
                 }
             }
@@ -293,7 +295,7 @@ body_cost_fact: fn(table: Interner, tree: BodyTree, node: BodyNode) -> TCostFact
 body_cost_int_operation_fact: fn(table: Interner, tree: BodyTree, op: BinOp, left: Int, right: Int) -> TCostFact Never! {
     lhs: body_cost_integer_bounds(table, tree, left)
     rhs: body_cost_integer_bounds(table, tree, right)
-    result := TIntegerBounds?{None}
+    ^result: TIntegerBounds?{None}
     if lhs == .Val(first) && rhs == .Val(second) {
         result = checked_cost_combine_bounds(op, first, second)
     }

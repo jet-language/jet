@@ -46,9 +46,9 @@ jet_cli_jobs_metadata_registry: fn(projection: JetDriverCheckedProjectionResult)
     // updates Struct.default_ct, never Func/Job metadata. No Program is forged.
     // The jobs listed are the projection's job rows, the list E1294 names
     // (jet_driver_job_rows); the items carry their metadata.
-    declared := [String:Bool]{}
+    ^declared: [String:Bool]{}
     loop row in projection.job_rows -> declared[row.name] = true
-    items := [Item]{}
+    ^items: [Item]{}
     loop item in projection.compile.doc_modules[entry].items {
         if item == .Func(function) {
             if function.is_job && declared.get(function.name) != None -> items.push(item.copy())
@@ -95,9 +95,9 @@ jet_cli_job_metadata_cache: fn(cache: JobCachePolicy) -> String Never! {
 // The limits in lexical name order; a later entry of one name replaces an
 // earlier one.
 jet_cli_job_metadata_limits: fn(limits: [StringMapEntry]) -> [StringMapEntry] Never! {
-    values := [String:String]{}
+    ^values: [String:String]{}
     loop entry in limits -> values[entry.key] = entry.value
-    names := values.keys().to_list()
+    ^names: values.keys().to_list()
     names.sort()
     loop name in names -> StringMapEntry{key: name.copy(), value: values[name]}
 }
@@ -134,7 +134,7 @@ jet_cli_jobs_metadata_json: fn(registry: JobRegistry) -> String Never! {
 // A job's listing detail: its typed arguments, documentation, schedule, and
 // each policy that differs from the default (`parallel` 1 is the default).
 jet_cli_job_metadata_detail: fn(job: JobFact) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     arguments: loop argument in job.arguments -> argument.display()
     if arguments.len() > 0 -> parts.push("({arguments.join(", ")})")
     if job.doc == .Val(doc) {
@@ -166,11 +166,11 @@ jet_cli_job_metadata_detail: fn(job: JobFact) -> String Never! {
 // `[scope]` and its detail.
 jet_cli_jobs_text: fn(registry: JobRegistry) -> String Never! {
     if registry.jobs().len() == 0 -> return "No jobs declared.\n"
-    width := 0
+    ^width: 0
     loop job in registry.jobs() {
         if job.name.len() > width -> width = job.name.len()
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop job in registry.jobs() {
         detail: jet_cli_job_metadata_detail(job)
         suffix: if detail == "" -> "" else -> " {detail}"

@@ -21,8 +21,8 @@
 // it can: the first thing it, or a function it calls, does inline that the
 // program would see.
 ir_eval_place_refusal: fn(m: IRModule, row: Int) -> String Never! {
-    seen := [Int:Bool]{}
-    pending := [Int]{row}
+    ^seen: [Int:Bool]{}
+    ^pending: [Int]{row}
     loop pending.len() > 0 {
         id: pending.pop() ?? -1
         if id < 0 || id >= m.functions.len() || seen.has_key(id) -> next
@@ -58,9 +58,7 @@ ir_eval_place_refusal: fn(m: IRModule, row: Int) -> String Never! {
                         // A drop routine the module builds (a List's, a
                         // box's) is placed and called as a function is.
                         if f.op[at] == .Drop && ty.drop != "" {
-                            if ir_keyed_function(m, ty.drop) == .Val(glue) {
-                                pending.push(glue)
-                            }
+                            if ir_keyed_function(m, ty.drop) == .Val(glue) -> pending.push(glue)
                         }
                     }
                 }
@@ -86,14 +84,14 @@ IR_EVAL_PLACE_ALLOCS: [String]{"jet_rt_alloc", "jet_rt_alloc_value"}
 // it at a write that isn't.
 ir_eval_place_own: fn(m: IRModule, f: IRFunction, text: Bool) -> [Bool] Never! {
     count: f.slot_type.len()
-    own := loop _ in 0..<count -> false
+    ^own: loop _ in 0..<count -> false
     loop at in 0..<f.op.len() {
         if f.dst[at] >= 0 && f.dst[at] < count -> own[f.dst[at]] = true
     }
     loop slot in 0..<count {
         if slot < f.slot_kind.len() && f.slot_kind[slot] == IRSlotKind.Param -> own[slot] = false
     }
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
         loop at in 0..<f.op.len() {

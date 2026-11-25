@@ -10,7 +10,7 @@ twice: fn(f: fn(Int)) {
 }
 
 run: fn() {
-    count := 0
+    ^count: 0
     bump: fn(n: Int) {
         count += n
     }
@@ -18,7 +18,7 @@ run: fn() {
     bump(3)
     print("bound {count}")
 
-    total := 0
+    ^total: 0
     twice(
         fn(n: Int) {
             total += n
@@ -26,7 +26,7 @@ run: fn() {
     )
     print("argument {total}")
 
-    base := 10
+    ^base: 10
     snapshot: fn() -> Int { base }
     kept: [snapshot]
     base = 20
@@ -43,7 +43,7 @@ Box: struct {
 // is 11: a call after the owner writes 22 would read that old copy, so the
 // checker refuses it (E0204) and `read` is called before the write.
 closure_capture_snapshot_lesson: fn() {
-    count := 10
+    ^count: 10
     next: fn() -> Int {
         count += 1
         count
@@ -52,13 +52,13 @@ closure_capture_snapshot_lesson: fn() {
     print(next())
     print(count)
 
-    boxed := Box{value: 11}
+    ^boxed: Box{value: 11}
     read: fn() -> Int { boxed.value }
     print(read())
     boxed.value = 22
     print(boxed.value)
 
-    x := 2
+    ^x: 2
     outer: fn(y: Int) -> Int {
         inner: fn(z: Int) -> Int { x + y + z }
         inner(4)

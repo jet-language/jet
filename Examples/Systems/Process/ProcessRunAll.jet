@@ -49,7 +49,7 @@ run: fn() -[Exec, IO, FS, Env, Time.Wait]> {
     marks: "{dir}/marks"
     files.create_dir_all(marks) ?? panic("marks dir")
     counted: loop _ in 0..<6 -> process.cmd(["sh", "-c", "touch {marks}/$$; ls {marks} | wc -l; sleep 0.2; rm {marks}/$$"])
-    most := 0
+    ^most: 0
     loop result in process.run_all(counted, 2) ?? panic("run_all failed") {
         receipt: result ?? panic("count job failed")
         seen: receipt.output.trim().to_int() ?? panic("count")

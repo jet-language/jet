@@ -79,7 +79,7 @@ NixEvaluator: struct {
 
     root_frame: fn(^self, base_path: String) -> Int Never! {
         self.fuel.push(0)
-        bindings := [String:Int]{}
+        ^bindings: [String:Int]{}
         bindings["pkgs"] = self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
         bindings["legacyPackages"] = self.value_thunk(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
         bindings["system"] = self.value_thunk(NixEvalValue.Str(self.system))
@@ -98,8 +98,8 @@ NixEvaluator: struct {
     }
 
     force: fn(^self, thunk: Int) -> NixEvalValue NixEvalError! {
-        expression := 0
-        frame := 0
+        ^expression: 0
+        ^frame: 0
         if self.thunks[thunk] == {
             .Evaluated(value) -> return Ok(value.copy())
             .Failed(reason) -> return Err(NixEvalError.Invalid(reason.copy()))
@@ -131,14 +131,14 @@ NixEvaluator: struct {
     }
 
     lookup: fn(^self, frame: Int, name: String) -> Int NixEvalError! {
-        index := frame
+        ^index: frame
         loop index >= 0 {
             if self.frames[index].bindings.get(name) == {
                 .Val(binding) -> return Ok(binding)
                 .None -> {}
             }
             scopes: self.frames[index].scopes.copy()
-            position := scopes.len() - 1
+            ^position: scopes.len() - 1
             loop position >= 0 {
                 scope: self.force(scopes[position])
                 found: self.try_select(scope, name)
@@ -183,7 +183,7 @@ NixEvaluator: struct {
                 self.force(binding)
             }
             .AttrSet(entries) -> {
-                fields := [String:Int]{}
+                ^fields: [String:Int]{}
                 loop entry in entries {
                     if fields.get(entry.name) != None {
                         return Err(NixEvalError.Invalid("duplicate attribute `{entry.name}`"))
@@ -193,7 +193,7 @@ NixEvaluator: struct {
                 NixEvalValue.AttrSet(fields)
             }
             .List(values) -> {
-                items := [Int]{}
+                ^items: [Int]{}
                 loop value in values -> items.push(self.expression_thunk(value, frame))
                 NixEvalValue.List(items)
             }
@@ -245,8 +245,8 @@ NixEvaluator: struct {
     }
 
     evaluate_string_context: fn(^self, parts: [NixEvalStringPart], frame: Int, depth: Int) -> NixEvalValue NixEvalError! {
-        value := [U8]{}
-        contexts := [String]{}
+        ^value: [U8]{}
+        ^contexts: [String]{}
         loop part in parts {
             text: if part == {
                 .Literal(literal) -> NixEvalText{value: literal, contexts: [String]{}}
@@ -276,8 +276,8 @@ NixEvaluator: struct {
     }
 
     apply_lambda: fn(^self, lambda: Int, closure: Int, argument: Int) -> NixEvalValue NixEvalError! {
-        pattern := NixEvalPattern.Name("")
-        body := 0
+        ^pattern: NixEvalPattern.Name("")
+        ^body: 0
         node: self.exprs[lambda].copy()
         if node == {
             .Lambda(lambda_pattern, lambda_body) -> {
@@ -363,7 +363,7 @@ NixEvaluator: struct {
             }
             .Partial(operation, arguments) -> {
                 self.force(argument)
-                collected := arguments
+                ^collected: arguments
                 collected.push(argument)
                 self.apply_partial(operation, collected)
             }
@@ -408,7 +408,7 @@ NixEvaluator: struct {
             .None -> {}
         }
         prefix: "{field}.".bytes()
-        nested := [String:Int]{}
+        ^nested: [String:Int]{}
         loop entry in fields {
             key: entry.key.bytes()
             if nixeval_matches_at(key, prefix, 0) {
@@ -501,11 +501,11 @@ NixEvaluator: struct {
         self.active_imports.push(active_path)
         if self.import_source(path) == {
             .Ok(value) -> {
-                _ := self.active_imports.pop()
+                ^_: self.active_imports.pop()
                 return Ok(value)
             }
             .Err(error) -> {
-                _ := self.active_imports.pop()
+                ^_: self.active_imports.pop()
                 return Err(error)
             }
         }
@@ -538,11 +538,11 @@ NixEvaluator: struct {
         self.active_flakes.push(reference.copy())
         if self.external_flake_source(reference) == {
             .Ok(value) -> {
-                _ := self.active_flakes.pop()
+                ^_: self.active_flakes.pop()
                 return Ok(value)
             }
             .Err(error) -> {
-                _ := self.active_flakes.pop()
+                ^_: self.active_flakes.pop()
                 return Err(error)
             }
         }
@@ -581,7 +581,7 @@ NixEvaluator: struct {
     }
 
     flake_arguments: fn(^self) -> NixEvalValue Never! {
-        fields := [String:Int]{}
+        ^fields: [String:Int]{}
         fields["self"] = self.value_thunk(NixEvalValue.AttrSet([String:Int]{}))
         package_names: [String]{"nixpkgs", "legacyPackages", "pkgs"}
         loop name in package_names {
@@ -627,7 +627,7 @@ NixEvaluator: struct {
 
     apply_overlays: fn(^self, base: NixEvalPackageSet, overlays: [Int]) -> NixEvalValue NixEvalError! {
         final_table: self.new_overlay(self.overlay_fields(base))
-        current := NixEvalValue.Packages(base)
+        ^current: NixEvalValue.Packages(base)
         loop overlay in overlays {
             function: self.force(overlay)
             current = self.overlay_step(base.prefix, final_table, function, current)
@@ -643,7 +643,7 @@ NixEvaluator: struct {
             }
             .AttrSet(fields) -> {
                 additions: nixeval_attribute_set(right, "attribute set")
-                merged := fields
+                ^merged: fields
                 loop entry in additions -> merged[entry.key] = entry.value
                 return Ok(NixEvalValue.AttrSet(merged))
             }
@@ -694,7 +694,7 @@ nixeval_resolve_path_literal: fn(raw: String, base: String) -> String NixEvalErr
     if nixeval_contains_byte(raw, 58) {
         return Err(NixEvalError.Unsupported("URI paths require explicit fetch authority"))
     }
-    components := [String]{}
+    ^components: [String]{}
     loop component in base.split("/") {
         if component != "" -> components.push(component)
     }
@@ -705,7 +705,7 @@ nixeval_resolve_path_literal: fn(raw: String, base: String) -> String NixEvalErr
                 if components.len() == 0 {
                     return Err(NixEvalError.Unsupported("path escapes the flake project-root authority"))
                 }
-                _ := components.pop()
+                ^_: components.pop()
             }
             else -> components.push(component)
         }

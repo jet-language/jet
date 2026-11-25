@@ -92,7 +92,7 @@ err_text: fn(v: ^conn.Vdbe, i: Int) -> [U8] Never! {
 // accumulator register (-1 for a scalar function). The collating sequence
 // is that of the OP_CollSeq before the op (sqlite3GetFuncCollSeq).
 func_begin: fn(v: ^conn.Vdbe, f: conn.FuncDef, pc: Int, out: Int, arg: Int, argc: Int, agg: Int) Never! {
-    c := conn.func_context_new()
+    ^c: conn.func_context_new()
     c.out = out
     c.impl_id = f.impl_id
     c.user_data = f.user_data
@@ -118,7 +118,7 @@ op_destroy: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
         v.error_action = ast.OE_ABORT
         return vc.fail(r, base.LOCKED)
     }
-    moved := 0
+    ^moved: 0
     rc: btree.btree_drop_table(db.btrees[db.dbs[r.p3].bt], r.p1, moved)
     v.mem[o].flags = MEM_INT
     v.mem[o].i = moved
@@ -134,7 +134,7 @@ op_destroy: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
 // P2, counting them as changes when P3 is set (and into register P3 when
 // it is positive).
 op_clear: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
-    n := 0
+    ^n: 0
     rc: btree.btree_clear_table(db.btrees[db.dbs[r.p2].bt], r.p1, n)
     if r.p3 != 0 {
         v.n_change += n
@@ -148,7 +148,7 @@ op_clear: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
 op_reset_sorter: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     if v.csr[ci].cur_type == conn.CURTYPE_SORTER {
-        s := vc.sorter_take(v, ci)
+        ^s: vc.sorter_take(v, ci)
         sorter.sorter_reset(s)
         vc.sorter_put(v, ci, s)
         return GO_NEXT
@@ -163,7 +163,7 @@ op_reset_sorter: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
 op_create_btree: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
-    pgno := 0
+    ^pgno: 0
     rc: btree.btree_create_table(db.btrees[db.dbs[r.p1].bt], pgno, r.p3)
     if rc != base.OK -> return vc.fail(r, rc)
     v.mem[o].i = pgno
@@ -175,7 +175,7 @@ op_create_btree: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
 op_sql_exec: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     sql: run.p4_text(v, r.pc) ?? [U8]{}
     db.n_sql_exec += 1
-    msg := [U8]?{None}
+    ^msg: [U8]?{None}
     rc: h.sql_exec(db, sql, r.p1 != 0, msg)
     db.n_sql_exec -= 1
     if msg != None || rc != base.OK {
@@ -190,8 +190,8 @@ op_sql_exec: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> I
 // that match the WHERE clause P4; with no P4, reread the whole schema
 // (sqlite3InitOne with flags P5).
 op_parse_schema: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
-    msg := [U8]?{None}
-    rc := base.OK
+    ^msg: [U8]?{None}
+    ^rc: base.OK
     if run.p4_text(v, r.pc) == .Val(where) -> rc = h.parse_schema(db, r.p1, where, msg) else {
         conn.schema_clear(db, db.dbs[r.p1].schema)
         db.m_db_flags = clear_bits(db.m_db_flags, conn.DBFLAG_SCHEMA_KNOWN_OK)
@@ -230,14 +230,14 @@ op_drop_object: fn(db: ^conn.Conn, v: conn.Vdbe, r: Run) -> Int Never! {
 // of errors; register P1 gets the report (NULL when all is well) and P3
 // what is left of the count.
 op_integrity_ck: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
-    roots := [Int]{}
+    ^roots: [Int]{}
     if v.ops[r.pc].p4 == .IntArray(ai) {
         loop j in 1..<1 + r.p2 -> roots.push(ai[j])
     }
     e: v.mem_base + r.p3
     o: v.mem_base + r.p1
-    n_err := 0
-    z := String?{None}
+    ^n_err: 0
+    ^z: String?{None}
     rc: btree.btree_integrity_check(db.btrees[db.dbs[r.p5].bt], roots, v.mem[e].i + 1, n_err, z)
     run.reg_null(v, o)
     if n_err != 0 {
@@ -262,12 +262,12 @@ is_rowset: fn(v: conn.Vdbe, i: Int) -> Bool Never! {
 rowset_of: fn(v: ^conn.Vdbe, i: Int) -> Int Never! {
     if is_rowset(v, i) -> return v.mem[i].i
     run.release_dyn(v, i)
-    k := 0
+    ^k: 0
     if v.rowset_free.pop() == .Val(s) -> k = s else {
         v.rowsets.push(rowset.rowset_new())
         k = v.rowsets.len() - 1
     }
-    m := base.mem_init(MEM_BLOB | conn.MEM_DYN)
+    ^m: base.mem_init(MEM_BLOB | conn.MEM_DYN)
     m.subtype = conn.DYN_ROWSET
     m.i = k
     v.mem[i] = m
@@ -445,7 +445,7 @@ op_function: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> I
     run.release_dyn(v, o)
     mem.set_type_flag(v.mem[o], MEM_NULL)
     h.func_call(db, v, aux.FN_SFUNC)
-    rc := base.OK
+    ^rc: base.OK
     if v.fctx.is_error != 0 {
         if v.fctx.is_error > 0 {
             e: err_text(v, o)
@@ -479,7 +479,7 @@ op_agg_step1: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> 
     argc: p4_argc(v, r.pc)
     func_begin(v, f, r.pc, o, v.mem_base + r.p2, argc, v.mem_base + r.p3)
     h.func_call(db, v, if r.p1 != 0 -> aux.FN_INVERSE else -> aux.FN_STEP)
-    rc := base.OK
+    ^rc: base.OK
     if v.fctx.is_error != 0 {
         if v.fctx.is_error > 0 {
             e: err_text(v, o)
@@ -505,7 +505,7 @@ op_agg_step1: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> 
 op_agg_final: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     f: p4_func(v, r.pc) ?? return vc.fail(r, base.INTERNAL)
     acc: v.mem_base + r.p1
-    res := acc
+    ^res: acc
     if r.p3 != 0 {
         res = v.mem_base + r.p3
         run.reg_null(v, res)
@@ -513,7 +513,7 @@ op_agg_final: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> 
         h.func_call(db, v, aux.FN_VALUE)
     } else {
         o: v.mem.len()
-        t := base.mem_null()
+        ^t: base.mem_null()
         t.enc = db.enc
         v.mem.push(t)
         func_begin(v, f, r.pc, o, 0, 0, acc)
@@ -539,9 +539,9 @@ op_agg_final: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> 
 // in mode P2; registers P3.. get busy (0 or 1), the frames in the log and
 // the frames checkpointed (-1 when unknown).
 op_checkpoint: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
-    busy := 0
-    n_log := -1
-    n_ckpt := -1
+    ^busy: 0
+    ^n_log: -1
+    ^n_ckpt: -1
     rc: conn.checkpoint(db, r.p1, r.p2, n_log, n_ckpt)
     if rc != base.OK {
         if rc != base.BUSY -> return vc.fail(r, rc)
@@ -565,13 +565,13 @@ op_journal_mode: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     run.out2(v, o)
     bt: db.dbs[r.p1].bt
     e_old: pager.pager_get_journal_mode(db.btrees[bt].pager)
-    e_new := r.p3
+    ^e_new: r.p3
     if e_new == pager.JOURNALMODE_QUERY -> e_new = e_old
     if !pager.pager_ok_to_change_journal_mode(db.btrees[bt].pager) -> e_new = e_old
     if e_new == pager.JOURNALMODE_WAL && (pager.pager_filename(db.btrees[bt].pager) == "" || !pager.pager_wal_supported(db.btrees[bt].pager)) {
         e_new = e_old
     }
-    rc := base.OK
+    ^rc: base.OK
     if e_new != e_old && (e_old == pager.JOURNALMODE_WAL || e_new == pager.JOURNALMODE_WAL) {
         if !db.auto_commit || db.n_vdbe_read > 1 {
             way: if e_new == pager.JOURNALMODE_WAL -> "into" else -> "out of"
@@ -599,9 +599,9 @@ op_journal_mode: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
 // OP_Vacuum: vacuum database P1, into the file named by register P2 when
 // P2 is set.
 op_vacuum: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
-    into := base.Mem?{None}
+    ^into: base.Mem?{None}
     if r.p2 != 0 -> into = Val(v.mem[v.mem_base + r.p2].copy())
-    msg := [U8]?{None}
+    ^msg: [U8]?{None}
     rc: h.run_vacuum(db, r.p1, into, msg)
     if msg == .Val(e) -> v.err_msg = Val(e)
     if rc != base.OK -> return vc.fail(r, rc)
@@ -652,9 +652,9 @@ op_vbegin: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int
 // OP_VCreate: create the virtual table named by register P2 in database
 // P1 (xCreate).
 op_vcreate: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
-    m := v.mem[v.mem_base + r.p2].copy()
-    rc := base.OK
-    msg := [U8]?{None}
+    ^m: v.mem[v.mem_base + r.p2].copy()
+    ^rc: base.OK
+    ^msg: [U8]?{None}
     if mem.value_text(m, base.UTF8) -> rc = h.vtab_call_create(db, r.p1, m.z, msg)
     if msg == .Val(e) -> v.err_msg = Val(e)
     if rc != base.OK -> return vc.fail(r, rc)
@@ -674,7 +674,7 @@ op_vdestroy: fn<H: Host>(h: ^H, db: ^conn.Conn, v: conn.Vdbe, r: ^Run) -[DB]> In
 op_vopen: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     vt: p4_vtab(v, r.pc)
     if vt < 0 || db.vtables[vt].vtab < 0 -> return vc.fail(r, base.LOCKED)
-    cursor := -1
+    ^cursor: -1
     rc: h.vtab_open(db, vt, cursor)
     aux.vtab_import_errmsg<H>(h, db, v, vt)
     if rc != base.OK -> return vc.fail(r, rc)
@@ -695,7 +695,7 @@ op_vcheck: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int
     vt: db.tables[tab].vtab
     if vt < 0 -> return GO_NEXT
     conn.vtab_lock(db, vt)
-    msg := [U8]?{None}
+    ^msg: [U8]?{None}
     schema: db.dbs[r.p1].name.copy()
     name: db.tables[tab].name.copy()
     rc: h.vtab_integrity(db, vt, schema, name, r.p3, msg)
@@ -713,7 +713,7 @@ op_vcheck: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int
 op_vinit_in: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
-    m := base.mem_init(MEM_NULL | conn.MEM_DYN | MEM_SUBTYPE)
+    ^m: base.mem_init(MEM_NULL | conn.MEM_DYN | MEM_SUBTYPE)
     m.subtype = conn.DYN_POINTER
     m.z = "ValueList".bytes()
     m.i = r.pc
@@ -751,7 +751,7 @@ op_vcolumn: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> In
         run.reg_null(v, dest)
         return GO_NEXT
     }
-    c := conn.func_context_new()
+    ^c: conn.func_context_new()
     c.out = dest
     c.func_flags = conn.FUNC_RESULT_SUBTYPE
     c.i_op = r.pc
@@ -763,7 +763,7 @@ op_vcolumn: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> In
         v.mem[dest].i = 0
     } else { mem.set_type_flag(v.mem[dest], MEM_NULL) }
     vt: v.csr[ci].vtab
-    rc := h.vtab_column(db, v, v.csr[ci].vtab_cursor, r.p2)
+    ^rc: h.vtab_column(db, v, v.csr[ci].vtab_cursor, r.p2)
     aux.vtab_import_errmsg<H>(h, db, v, vt)
     if v.fctx.is_error > 0 {
         e: err_text(v, dest)
@@ -813,8 +813,8 @@ op_vupdate: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> In
     if vt < 0 || db.vtables[vt].vtab < 0 -> return vc.fail(r, base.LOCKED)
     on_conflict: db.vtab_on_conflict
     db.vtab_on_conflict = r.p5
-    rowid := 0
-    rc := h.vtab_update(db, v, vt, v.mem_base + r.p3, r.p2, rowid)
+    ^rowid: 0
+    ^rc: h.vtab_update(db, v, vt, v.mem_base + r.p3, r.p2, rowid)
     db.vtab_on_conflict = on_conflict
     aux.vtab_import_errmsg<H>(h, db, v, vt)
     if rc == base.OK && r.p1 != 0 -> db.last_rowid = rowid
@@ -844,7 +844,7 @@ op_max_pgcnt: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: Run) -> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
     bt: db.dbs[r.p1].bt
-    new_max := 0
+    ^new_max: 0
     if r.p3 != 0 {
         new_max = btree.btree_last_page(db.btrees[bt])
         if new_max < r.p3 -> new_max = r.p3
@@ -915,7 +915,7 @@ op_init: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: Run) -[DB]> Int Ne
     if db.m_trace & conn.TRACE_STMT != 0 && v.min_write_file_format != 254 {
         z: run.p4_text(v, r.pc) ?? v.sql.copy()
         if z.len() > 0 {
-            text := if db.n_vdbe_exec > 1 -> "-- ".bytes() else -> [U8]{}
+            ^text: if db.n_vdbe_exec > 1 -> "-- ".bytes() else -> [U8]{}
             aux.append_bytes(text, z)
             h.trace(db, v, conn.TRACE_STMT, text)
         }
@@ -933,21 +933,21 @@ op_init: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: Run) -[DB]> Int Ne
 }
 
 #Test("RowSets drain in order and probes see earlier batches") {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     loop _ in 0..<4 -> v.mem.push(base.mem_null())
     v.ops.push(test_op(opc.OP_ROW_SET_TEST, conn.P4.Int32(1)))
     v.ops.push(test_op(opc.OP_ROW_SET_TEST, conn.P4.Int32(2)))
     v.mem[2] = base.mem_int(7)
-    r := test_run(v, 0, 1, 0, 2)
+    ^r: test_run(v, 0, 1, 0, 2)
     assert_eq(op_row_set_test(v, r), GO_NEXT)
     assert(is_rowset(v, 1))
-    r2 := test_run(v, 1, 1, 0, 2)
+    ^r2: test_run(v, 1, 1, 0, 2)
     assert_eq(op_row_set_test(v, r2), GO_JUMP)
-    add := test_run(v, 0, 0, 2, 0)
+    ^add: test_run(v, 0, 0, 2, 0)
     assert_eq(op_row_set_add(v, add), GO_NEXT)
     v.mem[2] = base.mem_int(3)
     assert_eq(op_row_set_add(v, add), GO_NEXT)
-    rd := test_run(v, 0, 0, 0, 3)
+    ^rd: test_run(v, 0, 0, 0, 3)
     assert_eq(op_row_set_read(v, rd), GO_NEXT_CHECK)
     assert_eq(v.mem[3].i, 3)
     assert_eq(op_row_set_read(v, rd), GO_NEXT_CHECK)
@@ -957,37 +957,37 @@ op_init: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: Run) -[DB]> Int Ne
 }
 
 #Test("limits and counters count as vdbe.c counts them") {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     loop _ in 0..<4 -> v.mem.push(base.mem_int(0))
     v.ops.push(test_op(opc.OP_OFFSET_LIMIT, conn.P4.NotUsed))
     v.mem[1] = base.mem_int(10)
     v.mem[3] = base.mem_int(5)
-    r := test_run(v, 0, 1, 2, 3)
+    ^r: test_run(v, 0, 1, 2, 3)
     assert_eq(op_offset_limit(v, r), GO_NEXT)
     assert_eq(v.mem[2].i, 15)
     v.mem[1] = base.mem_int(base.I64_MAX)
     _: op_offset_limit(v, r)
     assert_eq(v.mem[2].i, -1)
     v.mem[1] = base.mem_int(2)
-    pos := test_run(v, 0, 1, 0, 1)
+    ^pos: test_run(v, 0, 1, 0, 1)
     assert_eq(op_if_pos(v, pos), GO_JUMP)
     assert_eq(v.mem[1].i, 1)
-    dz := test_run(v, 0, 1, 0, 0)
+    ^dz: test_run(v, 0, 1, 0, 0)
     assert_eq(op_decr_jump_zero(v, dz), GO_JUMP)
     assert_eq(op_if_not_zero(v, dz), GO_NEXT)
     v.mem[2] = base.mem_text("9".bytes(), base.UTF8)
-    mx := test_run(v, 0, 1, 2, 0)
+    ^mx: test_run(v, 0, 1, 2, 0)
     assert_eq(op_mem_max(v, mx), GO_NEXT)
     assert_eq(v.mem[1].i, 9)
 }
 
 #Test("a Bloom filter finds what was added") {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     v.mem.push(base.mem_null())
     v.mem.push(base.mem_blob([U8]{0, 0, 0, 0, 0, 0, 0, 0}))
     v.mem.push(base.mem_int(42))
     v.ops.push(test_op(opc.OP_FILTER_ADD, conn.P4.Int32(1)))
-    r := test_run(v, 0, 1, 0, 2)
+    ^r: test_run(v, 0, 1, 0, 2)
     assert_eq(op_filter(v, r), GO_JUMP)
     assert_eq(op_filter_add(v, r), GO_NEXT)
     assert_eq(op_filter(v, r), GO_NEXT)
@@ -995,38 +995,38 @@ op_init: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: Run) -[DB]> Int Ne
 }
 
 #Test("subtypes travel between registers") {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     v.mem.push(base.mem_int(74))
     v.mem.push(base.mem_text("x".bytes(), base.UTF8))
     v.ops.push(test_op(opc.OP_SET_SUBTYPE, conn.P4.NotUsed))
     v.ops.push(test_op(opc.OP_GET_SUBTYPE, conn.P4.NotUsed))
     v.ops.push(test_op(opc.OP_CLR_SUBTYPE, conn.P4.NotUsed))
-    set := test_run(v, 0, 0, 1, 0)
+    ^set: test_run(v, 0, 0, 1, 0)
     _: op_subtype(v, set)
     assert(v.mem[1].flags & MEM_SUBTYPE != 0 && v.mem[1].subtype == 74)
-    get := test_run(v, 1, 1, 0, 0)
+    ^get: test_run(v, 1, 1, 0, 0)
     _: op_subtype(v, get)
     assert_eq(v.mem[0].i, 74)
-    clr := test_run(v, 2, 1, 0, 0)
+    ^clr: test_run(v, 2, 1, 0, 0)
     _: op_subtype(v, clr)
     assert(v.mem[1].flags & MEM_SUBTYPE == 0)
 }
 
 #Test("a trigger program runs on registers of its own and reads its caller's") {
-    db := conn.conn_new()
-    v := conn.vdbe_new()
+    ^db: conn.conn_new()
+    ^v: conn.vdbe_new()
     v.n_mem = 3
     loop _ in 0..<3 -> v.mem.push(base.mem_null())
     v.mem[2] = base.mem_int(11)
     sub: conn.SubProgram{ops: [conn.VdbeOp]{test_op(opc.OP_PARAM, conn.P4.NotUsed), test_op(opc.OP_HALT, conn.P4.NotUsed)}, n_mem: 2, n_csr: 0, token: 5}
     v.programs.push(sub)
-    prog := test_op(opc.OP_PROGRAM, conn.P4.Program(0))
+    ^prog: test_op(opc.OP_PROGRAM, conn.P4.Program(0))
     prog.p1 = 1
     v.ops.push(prog.copy())
-    r := test_run(v, 0, 1, 0, 0)
+    ^r: test_run(v, 0, 1, 0, 0)
     assert_eq(op_program(db, v, r), GO_NEXT_CHECK)
     assert(r.pc == -1 && v.frames.len() == 1 && v.mem_base == 3 && v.mem.len() == 6 && v.ops.len() == 2)
-    pr := test_run(v, 0, 1, 1, 0)
+    ^pr: test_run(v, 0, 1, 1, 0)
     assert_eq(op_param(v, pr), GO_NEXT)
     assert_eq(v.mem[4].i, 11)
     v.ops[0] = prog

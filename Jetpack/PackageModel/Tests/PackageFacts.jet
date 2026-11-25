@@ -127,7 +127,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) -[FS]> Nev
 
 #Test("config composition does not publish paths before success") {
     dir: pkg_facts_test_dir("config-transaction")
-    facts := PackageFacts.parse_uncomposed("name: \"demo\"\nconfigs: [first, second]\n", files.join(dir, "package.jet")) ?? panic("parses")
+    ^facts: PackageFacts.parse_uncomposed("name: \"demo\"\nconfigs: [first, second]\n", files.join(dir, "package.jet")) ?? panic("parses")
     pkg_facts_test_write(dir, "first.jet", "first: Config{{ version: \"1\" }}\n")
     pkg_facts_test_write(dir, "second.jet", "second: Config{{ version: \"2\" }}\n")
     if facts.compose_configs(dir) == {
@@ -187,7 +187,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) -[FS]> Nev
     assert_eq(facts.version, Val("selected"))
     assert(facts.field_provenance("version").contains(files.join(dir, "one.jet")))
     resolver: AuthorityResolver.open(dir) ?? panic("resolver")
-    names := [String]{}
+    ^names: [String]{}
     loop file in facts.source_files_checked(resolver) ?? panic("source files") {
         names.push(pkg_path_file_name(file.path))
     }
@@ -214,7 +214,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) -[FS]> Nev
 }
 
 #Test("scalar config conflict names both sources and does not mutate") {
-    facts := PackageFacts.parse_uncomposed("name: \"demo\"\n", "package.jet") ?? panic("parses")
+    ^facts: PackageFacts.parse_uncomposed("name: \"demo\"\n", "package.jet") ?? panic("parses")
     first: ConfigFacts.parse("Config{{ version: \"1\" }}", "configs/one.jet") ?? panic("first")
     second: ConfigFacts.parse("Config{{ version: \"2\" }}", "configs/two.jet") ?? panic("second")
     if facts.compose([ConfigFacts]{first, second}) == {
@@ -228,7 +228,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) -[FS]> Nev
 }
 
 #Test("equal scalar config contributors keep ordered provenance") {
-    facts := PackageFacts.parse_uncomposed("name: \"demo\"\n", "package.jet") ?? panic("parses")
+    ^facts: PackageFacts.parse_uncomposed("name: \"demo\"\n", "package.jet") ?? panic("parses")
     first: ConfigFacts.parse("Config{{ version: \"1\" }}", "configs/one.jet") ?? panic("first")
     second: ConfigFacts.parse("Config{{ version: \"1\" }}", "configs/two.jet") ?? panic("second")
     facts.compose([ConfigFacts]{first, second}) ?? panic("equal facts compose")

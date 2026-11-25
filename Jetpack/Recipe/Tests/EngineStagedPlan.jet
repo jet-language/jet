@@ -15,7 +15,7 @@ engine_staged_action: fn(name: String, digest: String) -> StagedPlanAction {
 }
 
 engine_staged_step: fn(name: String, tool: String, output: String) -> PlanFragmentAction {
-    emitted := PlanFragmentAction.new(name, tool)
+    ^emitted: PlanFragmentAction.new(name, tool)
     emitted.inputs = [String]{"manifest"}
     emitted.outputs = [String]{output}
     emitted.effects = [BuildEffect]{BuildEffect.Exec}
@@ -28,7 +28,7 @@ engine_staged_fragment: fn(tool: String, output: String) -> BuildPlanFragment {
 }
 
 engine_staged_compile: fn(with_args: Bool) -> BuildPlanFragment {
-    emitted := PlanFragmentAction.new("compile", "planner")
+    ^emitted: PlanFragmentAction.new("compile", "planner")
     if with_args {
         emitted.args = [String]{"--stable"}
         emitted.env = [String:String]{"STAGED_INPUT": "manifest"}
@@ -48,13 +48,13 @@ engine_staged_error: fn(action: StagedPlanAction, context: StagedPlanContext, to
 }
 
 engine_staged_reading_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
-    view := sandbox
+    ^view: sandbox
     assert_eq(view.read_input("manifest") ?? panic("declared input"), engine_staged_input())
     Ok(engine_staged_compile(true))
 }
 
 engine_staged_denied_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
-    view := sandbox
+    ^view: sandbox
     assert(view.read_store("private/store") == .Err(_))
     assert(view.resolve_package("unlocked") == .Err(_))
     view.read_input("not-declared")
@@ -62,9 +62,9 @@ engine_staged_denied_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragmen
 }
 
 engine_staged_cycle_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
-    cycle_a := engine_staged_step("a", "planner", "a.out")
+    ^cycle_a: engine_staged_step("a", "planner", "a.out")
     cycle_a.dependencies = [String]{"b"}
-    cycle_b := engine_staged_step("b", "planner", "b.out")
+    ^cycle_b: engine_staged_step("b", "planner", "b.out")
     cycle_b.dependencies = [String]{"a"}
     Ok(BuildPlanFragment{actions: [PlanFragmentAction]{cycle_a, cycle_b}})
 }
@@ -78,13 +78,13 @@ engine_staged_missing_tool_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlan
 }
 
 engine_staged_effect_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
-    step := engine_staged_step("step", "planner", "effect.out")
+    ^step: engine_staged_step("step", "planner", "effect.out")
     step.effects = [BuildEffect]{BuildEffect.FS}
     Ok(BuildPlanFragment{actions: [PlanFragmentAction]{step}})
 }
 
 engine_staged_platform_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
-    step := engine_staged_step("step", "planner", "platform.out")
+    ^step: engine_staged_step("step", "planner", "platform.out")
     step.platform = "other-platform"
     Ok(BuildPlanFragment{actions: [PlanFragmentAction]{step}})
 }
@@ -138,9 +138,9 @@ engine_staged_canceled_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFrag
     assert(files.is_file(files.join(first.artifact_dir, "plan.fingerprint")))
     plan: recipe_lower_staged_plan_action(action, engine_staged_compile(false), tools) ?? panic("lower")
     assert_eq(plan.actions.len(), 2)
-    has_input := false
-    has_output := false
-    has_planner_label := false
+    ^has_input: false
+    ^has_output: false
+    ^has_planner_label: false
     loop item in plan.actions {
         if item.inputs.contains("manifest") -> has_input = true
         if item.outputs.contains("result.bin") -> has_output = true
@@ -154,7 +154,7 @@ engine_staged_canceled_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFrag
     assert(has_input)
     assert(has_output)
     assert(has_planner_label)
-    reordered := action
+    ^reordered: action
     reordered.authority.tools = [String]{"planner-alt", "planner"}
     reordered.authority.effects = [BuildEffect]{BuildEffect.FS, BuildEffect.Exec}
     reordered_plan: recipe_lower_staged_plan_action(reordered, engine_staged_compile(false), tools) ?? panic("reordered")

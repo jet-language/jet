@@ -21,7 +21,7 @@
 // The recorder's log descriptor; -1 when nothing records, and
 // TEST_READS_UNRESOLVED from a main's registration until its first use looks
 // JET_TEST_READS_PATH up in the startup envp, so startup never scans it.
-test_reads_fd := I64{-1}
+^test_reads_fd: I64{-1}
 
 TEST_READS_UNRESOLVED: I64{-2}
 
@@ -35,9 +35,7 @@ rt_test_reads_arm: fn(envp: I64, main: Bool) {
     old: test_reads_fd
     armed: if main -> TEST_READS_UNRESOLVED else -> rt_test_reads_open_log(envp)
     // close(2) of the recorder's own descriptor.
-    if (old >= I64{0}) {
-        _ := os_close_i64(old)
-    }
+    if (old >= I64{0}) { ^_: os_close_i64(old) }
     #Unsafe("runs during single-threaded startup before any other thread exists") {
         test_reads_fd = armed
     }
@@ -48,7 +46,7 @@ rt_test_reads_open_log: fn(envp: I64) -> I64 {
     name: env_name_jet_test_reads_path()
     path: host_envp_value(envp, rt_text_data(name), rt_text_len(name))
     if (path == I64{0}) { return I64{-1} }
-    fd := I64{-1}
+    ^fd: I64{-1}
     // O_WRONLY|O_APPEND|O_CLOEXEC: never a read, so never recorded.
     fd = os_open_i64(path, I64{525313}, I64{0})
     if (fd >= I64{0}) -> fd else -> I64{-1}
@@ -102,9 +100,9 @@ rt_test_reads_path: fn(kind: I64, directory: I64, name: I64) {
     // (/proc/self/fd/<n>) or the working directory, each at most PATH_MAX.
     buffer: jet_rt_alloc(wrapping(length + I64{4100}), I64{1})
     trap_put(buffer, kind)
-    at := I64{1}
+    ^at: I64{1}
     if (rt_text_byte(name) != I64{47}) {
-        base := I64{-1}
+        ^base: I64{-1}
         if (directory == I64{-100}) {
             base = os_getcwd_i64(wrapping(buffer + I64{1}), I64{4096})
             // getcwd counts the NUL it wrote.
@@ -133,15 +131,15 @@ rt_test_reads_fd_link: fn(directory: I64) -> I64 {
     link: jet_rt_alloc(I64{32}, I64{1})
     prefix: rt_static_text("/proc/self/fd/")
     test_copy_bytes(link, rt_text_data(prefix), rt_text_len(prefix))
-    digits := I64{1}
-    rest := directory / I64{10}
+    ^digits: I64{1}
+    ^rest: directory / I64{10}
     loop rest > (I64{0}) {
         digits += I64{1}
         rest /= I64{10}
     }
     end: wrapping(rt_text_len(prefix) + digits)
-    value := directory
-    at := end
+    ^value: directory
+    ^at: end
     loop at > (rt_text_len(prefix)) {
         at -= I64{1}
         trap_put(wrapping(link + at), I64{48} + value % I64{10})
@@ -168,6 +166,4 @@ rt_test_reads_text: fn(kind: I64, name: I64) {
 
 // One O_APPEND write per record. A record the file did not take whole leaves
 // the run unkeyable: `jet test` stores no results for a malformed log.
-rt_test_reads_write: fn(data: I64, length: I64) {
-    _ := os_write_i64(test_reads_fd, data, length)
-}
+rt_test_reads_write: fn(data: I64, length: I64) { ^_: os_write_i64(test_reads_fd, data, length) }

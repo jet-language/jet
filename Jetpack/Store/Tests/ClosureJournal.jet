@@ -23,7 +23,7 @@ store_test_nix_projection_record: fn(id: String, output_name: String, digest: St
     plan: ProviderPlanFacts.from_facts([String:String]{"nix.drv_path": drv, "nix.reference": reference, "nix.output.{output_name}": output_path}) ?? panic("plan facts must build")
     producer: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:{drv}", "policy=test\nplatform=test", [String:String]{"nix.drv_path": drv, "nix.output.{output_name}": output_path}) ?? panic("producer must build")
     // The alias may be `out` itself, which a map literal holding both keys refuses.
-    outputs := [String:String]{"out": digest}
+    ^outputs: [String:String]{"out": digest}
     outputs[output_name] = digest
     ClosureRecord{
         id: id,
@@ -39,17 +39,17 @@ store_test_nix_projection_record: fn(id: String, output_name: String, digest: St
 #Test("store canonical action merges multi-output alias projections and rejects conflicting bytes") {
     out: store_test_nix_projection_record("alias-out", "out", "sha256-out", "pkg@nixpkgs")
     dev: store_test_nix_projection_record("alias-dev", "dev", "sha256-dev", "pkg.dev@stable")
-    objects := [ClosureObject]{}
+    ^objects: [ClosureObject]{}
     digests: [String]{"sha256-out", "sha256-dev"}
     loop digest in digests {
         objects.push(ClosureObject{digest: digest, path: "/nix/store/{digest}", external: true})
     }
-    graph := ClosureGraph.empty()
+    ^graph: ClosureGraph.empty()
     store_apply_entry(graph, ClosureJournalEntry{kind: ClosureJournalKind.Delta, objects: objects, records: [ClosureRecord]{out, dev}, deleted_records: [String]{}}) ?? panic("delta must apply")
     assert(graph.action_outputs("sha256-same-action") == [String:String]{"dev": "sha256-dev", "out": "sha256-out"})
 
     conflict: store_test_nix_projection_record("alias-dev-conflict", "dev", "sha256-other-dev", "other:pkg.dev")
-    actions := [String:CanonicalActionRecord]{}
+    ^actions: [String:CanonicalActionRecord]{}
     loop record in graph.sorted_records() {
         store_merge_action_record(actions, record) ?? panic("existing records must merge")
     }
@@ -95,12 +95,12 @@ store_test_nix_projection_record: fn(id: String, output_name: String, digest: St
 }
 
 #Test("store graph validation rejects external and relation inconsistency") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: HangarRoots{root: files.join(sys.temp_dir(), "jet-closure-integrity-{process.current_pid()}"), dev_mode: true}
     digest: "sha256-primary"
     object: ClosureObject{digest: digest, path: files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), digest), external: true}
     record: ClosureRecord{id: "record", primary: digest, action_key: "sha256-action", outputs: [String:String]{"out": digest}, references: [String]{}, producer_record: "", package_meta: ""}
-    graph := ClosureGraph{objects: [String:ClosureObject]{digest: object}, records: [String:ClosureRecord]{"record": record}, deleted_records: [String]{}}
+    ^graph: ClosureGraph{objects: [String:ClosureObject]{digest: object}, records: [String:ClosureRecord]{"record": record}, deleted_records: [String]{}}
     if store_validate_graph(verification, roots, graph) == {
         .Ok(_) -> { panic("wrong external marker must be refused") }
         .Err(error) -> assert(error.message().contains("invalid external marker"))

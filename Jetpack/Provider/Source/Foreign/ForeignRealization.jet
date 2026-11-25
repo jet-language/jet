@@ -24,8 +24,8 @@ ForeignRealization: struct {
 // Realize and project every foreign dependency without publishing the project
 // lock. Fetch commits the complete graph and semantic records in one write.
 provider_realize_foreign_dependencies: fn(verification: StoreVerification, roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
-    realized := [ForeignRealization]{}
-    names := manifest.dependencies.keys().to_list()
+    ^realized: [ForeignRealization]{}
+    ^names: manifest.dependencies.keys().to_list()
     names.sort()
     loop name in names {
         if manifest.dependencies[name] == {
@@ -115,7 +115,7 @@ provider_foreign_artifact_root: fn(project_root: String, spec: ProviderRef, ctx:
 
 // `<name>-<target>` with every non-ASCII-alphanumeric character as `_`.
 provider_safe_ref_name: fn(name: String, reference: String) -> String Never! {
-    out := "{name}-"
+    ^out: "{name}-"
     loop scalar in reference.chars() {
         text: "{scalar}"
         raw: text.bytes()
@@ -158,7 +158,7 @@ provider_require_regular_file: fn(path: String, label: String) -[FS]> ProviderEr
 // descriptor stamp.
 provider_require_descriptor_stamp: fn(path: String, expected: String) -[FS]> ProviderError! {
     source: files.read(path) ?? return Err(ProviderError.ForeignProjection("could not read generated foreign binding {path}: {err}"))
-    actual := String?{None}
+    ^actual: String?{None}
     loop line in source.split("\n") {
         if actual == None && line.starts_with("// jet-ffi-descriptor=") {
             actual = Val(line.removeprefix("// jet-ffi-descriptor="))
@@ -216,7 +216,7 @@ provider_write_verified_file: fn(destination: String, bytes: [U8]) -[FS, Env]> P
 }
 
 provider_write_synced: fn(writer: ^^FileWriter, bytes: [U8]) -[FS]> IOError! {
-    held := writer
+    ^held: writer
     held.write_bytes(bytes)
     held.fsync()
     close(held)

@@ -77,13 +77,13 @@ fake_put: fn(out: ^[U8], value: Int) {
 }
 
 fake_words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values -> fake_put(out, value)
     out
 }
 
 fake_text: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: text.bytes()
     fake_put(out, bytes.len() + 1)
     loop b in bytes -> out.push(b)
@@ -124,7 +124,7 @@ fake_version: fn(interface: String) -> Int {
 // A configure of the window's size, activated.
 fake_configure: fn(f: ^Fake) {
     f.serial += 1
-    args := fake_words([Int]{WIDTH, HEIGHT, 4})
+    ^args: fake_words([Int]{WIDTH, HEIGHT, 4})
     fake_put(args, 4)
     toplevel: f.toplevel
     xdg_surface: f.xdg_surface
@@ -163,10 +163,10 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
-        names := 0
+        ^names: 0
         loop interface in GLOBALS {
             names += 1
-            args := fake_words([Int]{names})
+            ^args: fake_words([Int]{names})
             loop b in fake_text(interface) -> args.push(b)
             fake_put(args, fake_version(interface))
             fake_event(f, registry, 0, args)
@@ -239,7 +239,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) {
 }
 
 fake_dispatch: fn(f: ^Fake) {
-    at := 0
+    ^at: 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
         word: fake_u32(f.inbox, at + 4)
@@ -258,7 +258,7 @@ fake_dispatch: fn(f: ^Fake) {
 
 fake_serve: fn(listener: net.UnixListener) -[Net, Time]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept: {err}")
-    f := Fake{
+    ^f: Fake{
         stream: stream,
         inbox: [U8]{},
         out: [U8]{},
@@ -283,7 +283,7 @@ fake_serve: fn(listener: net.UnixListener) -[Net, Time]> Fake {
         closing: false,
         failures: [String]{},
     }
-    quiet := 0
+    ^quiet: 0
     loop quiet < 40 {
         ready: net.unix_wait(f.stream, 50000000) ?? {
             f.failures.push("wait failed: {err}")
@@ -364,7 +364,7 @@ animate: fn(frame: ui.Frame, n: Int) {
 }
 
 percentile: fn(samples: [Int], p: Int) -> Int {
-    sorted := samples.copy()
+    ^sorted: samples.copy()
     sorted.sort()
     if sorted.len() == 0 -> return 0
     sorted[low(sorted.len() * p /% 100, sorted.len() - 1)]
@@ -377,19 +377,19 @@ client: fn() -[Env, IO, Net, Time]> {
         print("open failed: {err}")
         return
     }
-    draws := [Int]{}
-    intervals := [Int]{}
-    last := -1
-    n := 0
-    width := 0
-    height := 0
+    ^draws: [Int]{}
+    ^intervals: [Int]{}
+    ^last: -1
+    ^n: 0
+    ^width: 0
+    ^height: 0
     loop frame in window.frames() {
         started: time.start()
         if last >= 0 && n > WARM_UP && intervals.len() < MEASURED {
             intervals.push(started.start_ns - last)
         }
         last = started.start_ns
-        closed := false
+        ^closed: false
         loop event in frame.events() {
             if event == .Close -> closed = true
         }

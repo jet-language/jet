@@ -85,7 +85,7 @@ sema_comparability_definition: fn(environment: SemaScopeEnvironment, program: Se
     }
     row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
     // Its diagnostics are the program check's to report.
-    ignored := [Diagnostic]{}
+    ^ignored: [Diagnostic]{}
     sema_checked_type_def(graph, program.boxed_edges, graph.modules[row.module_index], None, graph.modules[row.module_index].nominals[row.row], ignored)
 }
 
@@ -100,7 +100,7 @@ sema_comparability_implements: fn(environment: SemaScopeEnvironment, program: Se
         if sema_derive_builtin_supports(sema_serde_named_leaf(carrier), trait_name) -> return true
     }
     graph: program.registration_graph
-    bound := sema_type_bound_satisfied_at(graph, ty, trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
+    ^bound: sema_type_bound_satisfied_at(graph, ty, trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
     if bound -> return true
     name: sema_type_graph_base_name(ty) ?? return false
     resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
@@ -130,7 +130,7 @@ sema_comparability_implements: fn(environment: SemaScopeEnvironment, program: Se
         if !sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).equatable {
             return false
         }
-        visited := [[Bool]]{}
+        ^visited: [[Bool]]{}
         return !sema_comparability_auto_blocked(graph, resolved.target_module_identity, item, "Equatable", visited)
     }
     false
@@ -199,7 +199,9 @@ sema_comparability_auto_blocked_type: fn(graph: SemaRegistrationGraph, module_id
         // (sema_comparability_equatable_arguments).
         .Apply(name, args) -> {
             if trait_name == "Equatable" -> return false
-            if sema_comparability_auto_blocked_named(graph, module_identity, ty, name, trait_name, visited) -> return true
+            if sema_comparability_auto_blocked_named(graph, module_identity, ty, name, trait_name, visited) {
+                return true
+            }
             loop argument in args {
                 if sema_comparability_auto_blocked_type(graph, module_identity, argument, trait_name, visited) {
                     return true
@@ -280,7 +282,7 @@ sema_comparability_struct_or_enum: fn(item: Item) -> Bool Never! {
 // (`trait_name`) of `item`, declared in `module_identity`: an auto-derive
 // holds only when every field qualifies.
 sema_comparability_rendering_blocked: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item, trait_name: String) -> Bool Never! {
-    visited := [[Bool]]{}
+    ^visited: [[Bool]]{}
     sema_comparability_auto_blocked(graph, module_identity, item, trait_name, visited)
 }
 
@@ -310,9 +312,13 @@ sema_comparability_core_handle_unrendered: fn(graph: SemaRegistrationGraph, modu
         if handle.debug -> return false
     } else {
         if handle.display || handle.show -> return false
-        if sema_type_bound_satisfied(graph, ty, "Display", module_identity) == (Val(true)) -> return false
+        if sema_type_bound_satisfied(graph, ty, "Display", module_identity) == (Val(true)) {
+            return false
+        }
     }
-    if sema_call_reflection_core_shown(name) || sema_derive_builtin_supports(leaf, trait_name) -> return false
+    if sema_call_reflection_core_shown(name) || sema_derive_builtin_supports(leaf, trait_name) {
+        return false
+    }
     sema_type_bound_satisfied(graph, ty, trait_name, module_identity) != (Val(true))
 }
 
@@ -328,7 +334,9 @@ sema_comparability_core_declaration_unrendered: fn(graph: SemaRegistrationGraph,
 // (`<corelib>/core.files.FileReader` for `FileReader`).
 sema_comparability_core_handle_row: fn(name: String) -> Int? Never! {
     loop row in 0..<IR_RUNTIME_HANDLES.len() {
-        if IR_RUNTIME_HANDLES[row].jet_name.starts_with("<corelib>/") && symbol_key_leaf(IR_RUNTIME_HANDLES[row].jet_name) == name -> return Val(row)
+        if IR_RUNTIME_HANDLES[row].jet_name.starts_with("<corelib>/") && symbol_key_leaf(IR_RUNTIME_HANDLES[row].jet_name) == name {
+            return Val(row)
+        }
     }
     None
 }
@@ -365,7 +373,7 @@ sema_comparability_native_ordering: fn(environment: SemaScopeEnvironment, progra
             true
         }
         .Named(name) -> {
-            leaf := sema_serde_named_leaf(name)
+            ^leaf: sema_serde_named_leaf(name)
             if leaf == "U8" || leaf == "Ordering" -> return true
             definition: sema_comparability_definition(environment, program, module_identity, name) ?? return false
             if definition.generic_params.len() > 0 -> return false
@@ -374,7 +382,7 @@ sema_comparability_native_ordering: fn(environment: SemaScopeEnvironment, progra
             }
             if definition.kind == {
                 .Alias(target) -> {
-                    nested := [String]{}
+                    ^nested: [String]{}
                     loop alias in aliases -> nested.push(alias.copy())
                     nested.push(definition.key)
                     sema_comparability_native_ordering(environment, program, definition.module_identity, target, nested, query)
@@ -402,14 +410,14 @@ sema_comparability_structural: fn(environment: SemaScopeEnvironment, program: Se
             true
         }
         .Named(name) -> {
-            leaf := sema_serde_named_leaf(name)
+            ^leaf: sema_serde_named_leaf(name)
             if leaf == "U8" || leaf == "Ordering" || sema_comparability_encoding_value(leaf) {
                 return true
             }
             sema_comparability_named_fields(environment, program, module_identity, name, query)
         }
         .Apply(name, args) -> {
-            leaf := sema_serde_named_leaf(name)
+            ^leaf: sema_serde_named_leaf(name)
             if leaf == "KeyRef" -> return true
             if sema_comparability_sealed_crypto_plan(leaf) -> return false
             loop arg in args {
@@ -459,7 +467,7 @@ sema_comparability_ordering_selected: fn(program: SemaProgramTables, module_iden
 // Distinct and alias declarations wrap a comparable base only
 // struct fields and enum payloads can block comparison.
 sema_comparability_definition_incomparable_field: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, definition: TTypeDef, query: ^SemaComparabilityQuery) -> String? {
-    owner := definition.module_identity
+    ^owner: definition.module_identity
     if definition.kind == {
         .Struct(fields, _) -> {
             loop field in fields {
@@ -501,7 +509,7 @@ sema_comparability_incomparable_field: fn(check: SemaBodyCheck, module_identity:
         }
         .Option(inner) -> sema_comparability_incomparable_field(check, module_identity, inner, query)
         .Result(ok, err) -> {
-            found := sema_comparability_incomparable_field(check, module_identity, ok, query)
+            ^found: sema_comparability_incomparable_field(check, module_identity, ok, query)
             if found != None -> return found
             sema_comparability_incomparable_field(check, module_identity, err, query)
         }
@@ -511,13 +519,13 @@ sema_comparability_incomparable_field: fn(check: SemaBodyCheck, module_identity:
 
 // Structural ordering only.
 sema_types_comparable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> Bool Never! {
-    query := sema_comparability_query()
+    ^query: sema_comparability_query()
     sema_comparability_structural(environment, program, environment.module_identity, ty, query)
 }
 
 // The first field (or `payload`) that blocks comparing values of `ty`.
 sema_incomparable_field: fn(check: SemaBodyCheck, ty: Type) -> String? {
-    query := sema_comparability_query()
+    ^query: sema_comparability_query()
     sema_comparability_incomparable_field(check, check.environment.module_identity, ty, query)
 }
 
@@ -596,7 +604,7 @@ sema_type_equatable: fn(environment: SemaScopeEnvironment, program: SemaProgramT
         .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> sema_type_equatable(environment, program, inner)
         .Result(ok, err) | .Map(ok, _, err) -> sema_type_equatable(environment, program, ok) && sema_type_equatable(environment, program, err)
         .Named(name) -> {
-            leaf := sema_serde_named_leaf(name)
+            ^leaf: sema_serde_named_leaf(name)
             if leaf == "U8" || leaf == "Ordering" || sema_comparability_encoding_value(leaf) || sema_comparability_data_equatable_value(leaf) {
                 return true
             }
@@ -608,7 +616,7 @@ sema_type_equatable: fn(environment: SemaScopeEnvironment, program: SemaProgramT
             sema_comparability_implements(environment, program, ty, "Equatable")
         }
         .Apply(name, args) -> {
-            leaf := sema_serde_named_leaf(name)
+            ^leaf: sema_serde_named_leaf(name)
             if leaf == "KeyRef" -> return true
             // An `ID<T>` is a plain index and generation that
             // never touches `T`, so ids compare whatever `T` is.
@@ -664,10 +672,10 @@ sema_comparability_scalar_operand: fn(ty: Type) -> Bool Never! {
 // without a registered operator hook. Mismatched operand types stay with the
 // scalar path's mismatch diagnostics.
 sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, check: ^SemaBodyCheck) -> SemaComparabilityBinary {
-    skipped := SemaComparabilityBinary{handled: false, value: None}
-    rejected := SemaComparabilityBinary{handled: true, value: None}
-    equality := op == BinOp.Eq || op == BinOp.Ne
-    ordering := op == BinOp.Compare || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge
+    ^skipped: SemaComparabilityBinary{handled: false, value: None}
+    ^rejected: SemaComparabilityBinary{handled: true, value: None}
+    ^equality: op == BinOp.Eq || op == BinOp.Ne
+    ^ordering: op == BinOp.Compare || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge
     if !equality && !ordering -> return skipped
     // A declared type names a nominal by its canonical `module.Name` while a
     // literal keeps the written `Name`; the operands compare by the identity
@@ -675,13 +683,13 @@ sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
     if !type_identity_equal(sema_expr_expected_type(lhs.ty, check.environment.*, check.program.*), sema_expr_expected_type(rhs.ty, check.environment.*, check.program.*)) || sema_comparability_scalar_operand(lhs.ty) {
         return skipped
     }
-    shown := type_name(lhs.ty)
-    label := "`{sema_expr_binary_name(op)}`"
+    ^shown: type_name(lhs.ty)
+    ^label: "`{sema_expr_binary_name(op)}`"
     if equality {
         if lhs.ty == Type.Bool || lhs.ty == Type.String || lhs.ty == Type.Char -> return skipped
         if !sema_type_equatable(check.environment.*, check.program.*, lhs.ty) {
-            field := sema_incomparable_field(check, lhs.ty)
-            field_name := field ?? ""
+            ^field: sema_incomparable_field(check, lhs.ty)
+            ^field_name: field ?? ""
             if {
                 sema_call_reflection_secret_bearing(lhs.ty) -> {
                     check.diagnostics.push(sema_error("E0312", span, "secret-bearing `{sema_call_reflection_leaf_name(shown)}` values cannot use {label}", "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison", "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values"))
@@ -701,7 +709,7 @@ sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
         check.diagnostics.push(sema_error("E0109", span, "{label} can't compare or combine {shown} and {type_name(rhs.ty)}", "{label} is not defined for {shown}", "use an operation supported by {shown}, or call a named method"))
         return rejected
     }
-    result_ty := if op == BinOp.Compare -> Type.Named{name: "Ordering"} else -> Type.Bool
+    ^result_ty: if op == BinOp.Compare -> Type.Named{name: "Ordering"} else -> Type.Bool
     SemaComparabilityBinary{handled: true, value: Val(sema_tree_node(result_ty, TExprKind.Binary{op: op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
 }
 
@@ -710,7 +718,7 @@ sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
 // without payloads, or a distinct type whose base qualifies. A nominal reached
 // again while it is still being decided lies on a cycle and answers false.
 sema_type_map_key_eligible: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> Bool Never! {
-    query := sema_comparability_query()
+    ^query: sema_comparability_query()
     sema_comparability_map_key(environment, program, environment.module_identity, ty, query)
 }
 
@@ -719,7 +727,7 @@ sema_type_map_key_eligible: fn(environment: SemaScopeEnvironment, program: SemaP
 sema_type_check_declared_map_keys: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, span: Span, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if ty == {
         .Map(key, key_span, value) -> {
-            valid := sema_type_check_declared_map_keys(environment, program, key, span, diagnostics)
+            ^valid: sema_type_check_declared_map_keys(environment, program, key, span, diagnostics)
             if !sema_type_check_declared_map_keys(environment, program, value, span, diagnostics) {
                 valid = false
             }
@@ -731,14 +739,14 @@ sema_type_check_declared_map_keys: fn(environment: SemaScopeEnvironment, program
         }
         .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> sema_type_check_declared_map_keys(environment, program, inner, span, diagnostics)
         .Result(ok, err) -> {
-            valid := sema_type_check_declared_map_keys(environment, program, ok, span, diagnostics)
+            ^valid: sema_type_check_declared_map_keys(environment, program, ok, span, diagnostics)
             if !sema_type_check_declared_map_keys(environment, program, err, span, diagnostics) {
                 valid = false
             }
             valid
         }
         .Apply(_, members) | .Union(members) -> {
-            valid := true
+            ^valid: true
             loop member in members {
                 if !sema_type_check_declared_map_keys(environment, program, member, span, diagnostics) {
                     valid = false
@@ -747,7 +755,7 @@ sema_type_check_declared_map_keys: fn(environment: SemaScopeEnvironment, program
             valid
         }
         .Fn(params, ret, _, _, _, _) -> {
-            valid := true
+            ^valid: true
             loop param in params {
                 if !sema_type_check_declared_map_keys(environment, program, param, span, diagnostics) {
                     valid = false
@@ -759,7 +767,7 @@ sema_type_check_declared_map_keys: fn(environment: SemaScopeEnvironment, program
             valid
         }
         .Tuple(fields) -> {
-            valid := true
+            ^valid: true
             loop field in fields {
                 if !sema_type_check_declared_map_keys(environment, program, field.ty, span, diagnostics) {
                     valid = false
@@ -790,7 +798,7 @@ sema_comparability_map_key: fn(environment: SemaScopeEnvironment, program: SemaP
             definition: sema_comparability_definition(environment, program, module_identity, name) ?? return false
             if query.visited.get(definition.key) == .Val(answer) -> return answer
             query.visited[definition.key] = false
-            eligible := sema_comparability_definition_map_key(environment, program, definition, query)
+            ^eligible: sema_comparability_definition_map_key(environment, program, definition, query)
             query.visited[definition.key] = eligible
             eligible
         }
@@ -946,8 +954,8 @@ sema_type_map_key_refusal: fn(environment: SemaScopeEnvironment, program: SemaPr
 // KeyBy (sema_key_by_migration), when there is one.
 sema_key_by_migrated: fn(error: ^^Diagnostic, program: SemaProgramTables, written: SemaWrittenOrder) -> Diagnostic {
     graph: program.registration_graph
-    migration := sema_key_by_migration(graph, written) ?? return error
-    migrated := diagnostic_registry_with_edit_grade(error, migration.edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+    ^migration: sema_key_by_migration(graph, written) ?? return error
+    ^migrated: diagnostic_registry_with_edit_grade(error, migration.edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
     migrated.fix_calls = migration.calls.move()
     migrated
 }
@@ -968,7 +976,7 @@ sema_comparability_written_order_of: fn(environment: SemaScopeEnvironment, progr
 // hashable fields. A nominal still being decided answers false, and a finished
 // one reuses its answer.
 sema_type_hashable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> Bool Never! {
-    query := sema_comparability_query()
+    ^query: sema_comparability_query()
     sema_comparability_hashable(environment, program, environment.module_identity, ty, query)
 }
 
@@ -998,23 +1006,23 @@ sema_comparability_hashable: fn(environment: SemaScopeEnvironment, program: Sema
             definition: sema_comparability_definition(environment, program, module_identity, name) ?? return false
             if query.visited.get(definition.key) == .Val(answer) -> return answer
             query.visited[definition.key] = false
-            eligible := sema_comparability_definition_hashable(environment, program, definition, ty, [SemaInferenceBinding]{}, query)
+            ^eligible: sema_comparability_definition_hashable(environment, program, definition, ty, [SemaInferenceBinding]{}, query)
             query.visited[definition.key] = eligible
             eligible
         }
         .Apply(name, args) -> {
-            leaf := sema_serde_named_leaf(name)
+            ^leaf: sema_serde_named_leaf(name)
             if leaf == "ID" -> return sema_type_equatable(environment, program, ty)
             if leaf == "Task" || leaf == "Sender" || leaf == "Receiver" || leaf == "SharedGuard" || leaf == "Pool" || leaf == "Set" {
                 return false
             }
             definition: sema_comparability_definition(environment, program, module_identity, name) ?? return false
             if definition.generic_params.len() != args.len() -> return false
-            key := "<{type_name(ty)}>"
+            ^key: "<{type_name(ty)}>"
             if query.visited.get(key) == .Val(answer) -> return answer
             query.visited[key] = false
             bindings: loop (index, param) in definition.generic_params -> SemaInferenceBinding{name: param.name, ty: args[index], source: "hashable owner"}
-            eligible := sema_comparability_definition_hashable(environment, program, definition, ty, bindings, query)
+            ^eligible: sema_comparability_definition_hashable(environment, program, definition, ty, bindings, query)
             query.visited[key] = eligible
             eligible
         }
@@ -1023,7 +1031,7 @@ sema_comparability_hashable: fn(environment: SemaScopeEnvironment, program: Sema
 }
 
 sema_comparability_definition_hashable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, definition: TTypeDef, ty: Type, bindings: [SemaInferenceBinding], query: ^SemaComparabilityQuery) -> Bool Never! {
-    owner := definition.module_identity
+    ^owner: definition.module_identity
     if sema_comparability_key_type(program, definition) == .Val(key) {
         return sema_comparability_hashable(environment, program, owner, key, query)
     }

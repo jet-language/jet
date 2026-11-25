@@ -72,12 +72,12 @@ Stores: struct {
 STORE: Shared{Stores{store: None}}
 
 open_store: fn(store: db.Store) {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     stores.value.store = Val(store.copy())
 }
 
 opened: fn() -> db.Store {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     store: stores.value.store ?? panic("the store is open")
     store.copy()
 }
@@ -120,7 +120,7 @@ uploaded: fn(addr: String, session: String) -> String HTTPError! {
 // GETs `path` under `session` ("" sends none), as its status, the headers
 // a download is read by, and its body.
 fetched: fn(addr: String, path: String, session: String) -> String HTTPError! {
-    fields := http.headers()
+    ^fields: http.headers()
     if session != "" -> fields = http.headers_set(fields, "authorization", "Bearer {session}")
     answer: http.send_request(http.request_with(.Get, "http://{addr}{path}", fields, http.body_empty()))
     if answer.status != 200 -> return Ok("{answer.status}")

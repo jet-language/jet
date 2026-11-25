@@ -30,8 +30,8 @@ use jet_foundation.[
 // two observations hold must be the same record. Times are from the first
 // record's start.
 jet_cli_perf_games_capture: fn(capture: ^JetCLIPerfCapture, observations: [JetCLIPerfObservation], path: String) JetCLIReadError! {
-    records := [Int:JetLiveGameRecord]{}
-    sequences := [Int]{}
+    ^records: [Int:JetLiveGameRecord]{}
+    ^sequences: [Int]{}
     loop observed in observations {
         live: observed.live
         first: observations[0].live
@@ -53,25 +53,25 @@ jet_cli_perf_games_capture: fn(capture: ^JetCLIPerfCapture, observations: [JetCL
         return
     }
     sequences.sort_by(fn(left: Int, right: Int) { left <=> right })
-    origin := records[sequences[0]].start_ns
+    ^origin: records[sequences[0]].start_ns
     loop sequence in sequences {
         if records[sequence].start_ns < origin -> origin = records[sequence].start_ns
     }
-    owned := ""
+    ^owned: ""
     loop source in capture.source_identity {
         if source.path == path -> owned = "sha256:{source.sha256}"
     }
     identity: observations[0].live
-    bodies := [JetDevtoolsEventBody]{}
-    pending := [Int]{}
-    retired := 0
-    previous := 0
-    partial := 0
-    orphaned := 0
-    unnamed := 0
-    frames := 0
-    draws := 0
-    truncated := false
+    ^bodies: [JetDevtoolsEventBody]{}
+    ^pending: [Int]{}
+    ^retired: 0
+    ^previous: 0
+    ^partial: 0
+    ^orphaned: 0
+    ^unnamed: 0
+    ^frames: 0
+    ^draws: 0
+    ^truncated: false
     loop sequence in sequences {
         retired += sequence - previous - 1
         previous = sequence
@@ -80,7 +80,7 @@ jet_cli_perf_games_capture: fn(capture: ^JetCLIPerfCapture, observations: [JetCL
             pending.push(sequence)
             next
         }
-        attached := [Int]{}
+        ^attached: [Int]{}
         loop waiting in pending {
             if records[waiting].frame_index == record.frame_index -> attached.push(waiting) else {
                 orphaned += 1
@@ -93,7 +93,7 @@ jet_cli_perf_games_capture: fn(capture: ^JetCLIPerfCapture, observations: [JetCL
             next
         }
         frames += 1
-        slowest := 0
+        ^slowest: 0
         loop waiting in attached {
             callback: records[waiting]
             if callback.function == None {

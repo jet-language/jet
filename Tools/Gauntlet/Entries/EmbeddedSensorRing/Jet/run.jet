@@ -4,8 +4,8 @@ Args: struct {
 }
 
 crc16: fn(word: Int) -> Int {
-    crc := 65535
-    value := word
+    ^crc: 65535
+    ^value: word
     loop _ in 0..<16 {
         top: crc /% 32768
         incoming: value % 2
@@ -19,8 +19,8 @@ crc16: fn(word: Int) -> Int {
 signed_div8: fn(value: Int) -> Int { if value >= 0 -> value /% 8 else -> -((-value) /% 8) }
 
 run: fn(args: Args) {
-    ring := [Int#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-    control_reg := 4095
+    ^ring: [Int#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ^control_reg: 4095
     <:
         write_index,
         running_sum,
@@ -39,7 +39,7 @@ run: fn(args: Args) {
         raw: (tick * 73 + 19) % 4096
         frame: (raw * 17 + tick * 31 + 7) % 65536
         expected_crc: crc16(frame)
-        received_crc := expected_crc
+        ^received_crc: expected_crc
         if tick % 127 == 0 -> received_crc = (expected_crc + 1) % 65536
         watchdog += 1
 
@@ -51,7 +51,7 @@ run: fn(args: Args) {
             }
             else -> {
                 sample: (raw * 3 + 11) % 4096
-                old := ring[write_index]
+                ^old: ring[write_index]
                 ring[write_index] = sample
                 write_index = (write_index + 1) % 16
                 running_sum += sample - old
@@ -59,7 +59,7 @@ run: fn(args: Args) {
                 error: 2048 - mean
                 integrator += error
                 integrator = clamp(integrator, -8192, 8192)
-                command := error * 4 + signed_div8(integrator)
+                ^command: error * 4 + signed_div8(integrator)
                 command = clamp(command, -4095, 4095)
                 actuator = command
                 accepted += 1
@@ -75,7 +75,7 @@ run: fn(args: Args) {
         }
     }
 
-    ring_checksum := 0
+    ^ring_checksum: 0
     loop sample in ring -> ring_checksum = (ring_checksum * 131 + sample) % 1000000007
     print("ticks {args.ticks}\naccepted {accepted} rejected {rejected}\nwatchdog_resets {watchdog_resets} faults {faults}\nactuator {actuator}\nmmio_checksum {mmio_checksum}\nring_checksum {ring_checksum}")
 }

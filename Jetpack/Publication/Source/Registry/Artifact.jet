@@ -140,8 +140,8 @@ publication_publish_snapshot: fn(repo: String, held: FoundationDirectoryAuthorit
     pending_existed: files.stat(pending) == .Ok(_)
     stage: package.private_child("artifact")
     stage_name: files.basename(stage.path())
-    published := false
-    failure := IOError?{None}
+    ^published: false
+    ^failure: IOError?{None}
     if publication_publish_stage(repo, source, name, version, actual, stage, snapshot) == .Err(stage_error) {
         failure = Val(stage_error)
     } else if package.rename(stage_name, version) == .Err(rename_error) {

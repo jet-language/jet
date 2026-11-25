@@ -8,7 +8,7 @@ sentry_test_require: fn(ok: Bool) {
 
 sentry_test_reset: fn() {
     sentry_test_require(sync_load(sentry_root + I64{88}) == I64{0})
-    at := I64{40}
+    ^at: I64{40}
     loop at <= (I64{88}) {
         header: sentry_root + at
         capacity: sync_load(header + I64{8})
@@ -47,15 +47,15 @@ sentry_test_report_exit: fn() {
     operation: services_msg_sentry_read()
     obligation: services_msg_sentry_valid_ptr()
     gate: sentry_gate_name()
-    fault := I64{1}
+    ^fault: I64{1}
     loop fault <= (I64{4}) {
         detail: sentry_detail(fault, I64{4097}, I64{8})
         report: sentry_report(fault, operation, obligation, I64{0}, false, gate, detail, I64{0})
         jet_rt_string_drop(detail)
         data: rt_text_data(report)
         length: rt_text_len(report)
-        at := I64{0}
-        exits := I64{0}
+        ^at: I64{0}
+        ^exits: I64{0}
         loop at + (I64{9}) <= length {
             if ((at == I64{0} || trap_byte(data + at - I64{1}) == I64{10}) && trap_byte(data + at) == I64{101} && trap_byte(data + at + I64{1}) == I64{120} && trap_byte(data + at + I64{2}) == I64{105} && trap_byte(data + at + I64{3}) == I64{116} && trap_byte(data + at + I64{4}) == I64{58} && trap_byte(data + at + I64{5}) == I64{32}) {
                 status: ((trap_byte(data + at + I64{6}) - I64{48}) * I64{10} + trap_byte(data + at + I64{7}) - I64{48})
@@ -99,7 +99,7 @@ sentry_test_report_exit: fn() {
     // stack_registration_is_live_only_inside_its_frame
     sentry_test_reset()
     sync_store(value, I64{7})
-    frame := jet_rt_sentry_frame_enter()
+    ^frame: jet_rt_sentry_frame_enter()
     sentry_test_gate(save)
     sentry_test_report_exit()
     jet_rt_sentry_register_stack_allocation(value, I64{8})
@@ -144,10 +144,10 @@ sentry_test_report_exit: fn() {
     sentry_test_reset()
     sync_store(value, I64{23})
     sentry_test_gate(save)
-    round := I64{0}
+    ^round: I64{0}
     loop round < (I64{10000}) {
         frame = jet_rt_sentry_frame_enter()
-        repeat := I64{0}
+        ^repeat: I64{0}
         loop repeat < (I64{4}) {
             jet_rt_sentry_register_stack_allocation(value, I64{8})
             repeat += I64{1}
@@ -210,7 +210,7 @@ sentry_test_report_exit: fn() {
     jet_rt_sentry_register_stack_allocation(value, I64{8})
     jet_rt_sentry_frame_leave(frame)
     if (stop != I64{0}) {
-        _ := jet_rt_sentry_read(value, I64{8}, I64{8}, I64{0})
+        ^_: jet_rt_sentry_read(value, I64{8}, I64{8}, I64{0})
         sentry_test_require(false)
     } else { sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{4}) }
     sentry_test_leave(save)

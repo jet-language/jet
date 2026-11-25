@@ -13,7 +13,7 @@ host_record_names: fn(ty: Type) -> [String] {
     if ty == .List(element) -> return host_record_names(element)
     if ty == .Option(inner) -> return host_record_names(inner)
     if ty == .Result(ok, err) {
-        names := host_record_names(ok)
+        ^names: host_record_names(ok)
         loop name in host_record_names(err) -> names.push(name)
         return names
     }
@@ -23,16 +23,16 @@ host_record_names: fn(ty: Type) -> [String] {
 #Test("host_value_fields_reach_only_lowerable_records") {
     // Only a record typed by the rows alone can lack a declaration; other
     // names (declared structs, enums, builtins) lower from their source.
-    row_owners := [String:Bool]{}
+    ^row_owners: [String:Bool]{}
     loop row in CORE_RECORD_FIELD_ROWS -> row_owners[row.owner] = true
     core: ir_compiler_owned_core_fields()
-    pending := [String]{}
+    ^pending: [String]{}
     loop row in CORE_RECORD_FIELD_ROWS {
         if ir_host_value_name(row.owner) -> pending.push(row.owner)
     }
-    seen := [String:Bool]{}
-    unlowered := [String]{}
-    next_owner := 0
+    ^seen: [String:Bool]{}
+    ^unlowered: [String]{}
+    ^next_owner: 0
     loop next_owner < pending.len() {
         owner: pending[next_owner]
         next_owner += 1

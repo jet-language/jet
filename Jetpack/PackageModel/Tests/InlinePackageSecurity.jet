@@ -13,7 +13,7 @@ use jet_pkg_model.[InlinePackageBlock, PackageFacts, pkg_binder_slice, pkg_extra
 // The scan succeeds and the carrier may be absent. A single `??` would consume
 // both the Result and the Option rail, so absence must stay observable here.
 pkg_test_scan_inline_package: fn(source: String) -> InlinePackageBlock? Never! {
-    scanned := InlinePackageBlock?{None}
+    ^scanned: InlinePackageBlock?{None}
     if pkg_extract_inline_package(source) == {
         .Ok(found) -> { scanned = found }
         .Err(error) -> panic("inline Package scan failed: {error.message()}")
@@ -74,7 +74,7 @@ pkg_test_scan_inline_package: fn(source: String) -> InlinePackageBlock? Never! {
 // Interpolated suffixes compare values, never bind string-pattern holes or
 // admit an unrelated Config stem.
 #Test("declared config filenames compare exact suffix and preserve provenance") {
-    facts := PackageFacts.parse("name: \"demo\"\nconfigs: [dev, \"release.jet\"]\n", "inline-config-paths") ?? panic("package fields parse")
+    ^facts: PackageFacts.parse("name: \"demo\"\nconfigs: [dev, \"release.jet\"]\n", "inline-config-paths") ?? panic("package fields parse")
     facts.resolved_config_paths = [String]{"profiles/check", "profiles/.local", "profiles/edge."}
     assert_eq(facts.field_provenance("configs"), [String]{"inline-config-paths"})
     assert(facts.is_config_file("dev"))

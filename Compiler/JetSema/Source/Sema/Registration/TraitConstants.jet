@@ -36,7 +36,7 @@ SemaTraitConstantFound: struct {
 // Every constant of the traits the type whose nominal is `owner_row` and
 // resolved name `owner` implements, with the value its implementation gives.
 sema_trait_constants_of_type: fn(graph: SemaRegistrationGraph, owner_row: SemaRegistrationRowRef, owner: String) -> [SemaTraitConstantFound] Never! {
-    found := [SemaTraitConstantFound]{}
+    ^found: [SemaTraitConstantFound]{}
     sema_trait_constant_collect_impls(graph, owner_row, owner, None, found)
     found
 }
@@ -77,7 +77,7 @@ sema_trait_constants_check_trait: fn(graph: SemaRegistrationGraph, module_identi
 // of the wrong type (E0934) or not known at compile time (E0935), a constant
 // the trait doesn't declare (E0936) and one given twice (E0937).
 sema_trait_constants_check_impl: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, trait_name: String?, owner: String, constants: [ImplConstValue], type_span: Span, diagnostics: ^[Diagnostic]) -> [TTraitConstantValue] Never! {
-    checked := [TTraitConstantValue]{}
+    ^checked: [TTraitConstantValue]{}
     loop (index, constant) in constants {
         loop earlier in 0..<index {
             if constants[earlier].name == constant.name {
@@ -97,7 +97,7 @@ sema_trait_constants_check_impl: fn(graph: SemaRegistrationGraph, module_identit
     trait_module: graph.modules[row.module_index].module_identity
     declared: sema_trait_constants_declared(graph, row)
     loop constant in constants {
-        known := false
+        ^known: false
         loop declaration in declared {
             if declaration.name == constant.name {
                 known = true
@@ -110,7 +110,7 @@ sema_trait_constants_check_impl: fn(graph: SemaRegistrationGraph, module_identit
     }
     loop declaration in declared {
         ty: sema_checked_qualify_type(graph, declaration.ty, trait_module)
-        given := -1
+        ^given: -1
         loop (index, constant) in constants {
             if constant.name == declaration.name {
                 given = index
@@ -199,7 +199,7 @@ sema_trait_constant_literal: fn(expr: Expr) -> TComptimeValue? Never! {
             return Val(TComptimeValue.Char{value: code})
         }
         .Str(parts, _, _) -> {
-            text := ""
+            ^text: ""
             loop part in parts {
                 if part == .Lit(piece) -> text = "{text}{piece}" else -> return None
             }
@@ -305,7 +305,7 @@ sema_trait_constant_eval_list: fn(graph: SemaRegistrationGraph, expr: Expr, ty: 
 
 // Each of `values` as a value of `element`, the list of them.
 sema_trait_constant_eval_elements: fn(graph: SemaRegistrationGraph, values: [Expr], element: Type, module_identity: ModuleID, type_module: ModuleID) -> SemaTraitConstantEval Never! {
-    checked := [TComptimeValue]{}
+    ^checked: [TComptimeValue]{}
     loop item in values {
         result: sema_trait_constant_eval(graph, item, element, module_identity, type_module)
         if result == .Value(value) -> checked.push(value.copy()) else -> return result
@@ -321,7 +321,7 @@ sema_trait_constant_enum_variants: fn(graph: SemaRegistrationGraph, type_module:
     if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Enum {
         return None
     }
-    names := [String]{}
+    ^names: [String]{}
     loop variant in graph.modules[row.module_index].nominals[row.row].variants {
         if variant.payload == .Unit -> names.push(variant.symbol.name.copy())
     }
@@ -347,7 +347,7 @@ sema_trait_constant_record: fn(graph: SemaRegistrationGraph, type_module: Module
 // field the value leaves out takes the default its declaration writes.
 sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, name: String, record: SemaTraitConstantRecord, module_identity: ModuleID) -> SemaTraitConstantEval Never! {
     expected_type: Type.Named{name: name.copy()}
-    written := [ExprField]{}
+    ^written: [ExprField]{}
     if expr == {
         .StructLit(type_name, type_args, _, _, fields, _, _, _) -> {
             if type_args.len() > 0 -> return SemaTraitConstantEval.WrongType
@@ -371,7 +371,7 @@ sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, na
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> return sema_trait_constant_other(expr)
     }
     loop field in written {
-        known := false
+        ^known: false
         loop declared in record.definition.fields {
             if declared.name == field.name && declared.computed == None {
                 known = true
@@ -380,18 +380,18 @@ sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, na
         }
         if !known -> return SemaTraitConstantEval.WrongType
     }
-    values := [TComptimeField]{}
+    ^values: [TComptimeField]{}
     loop declared in record.definition.fields {
         if declared.computed != None -> next
         field_type: sema_checked_qualify_type(graph, declared.ty, record.module_identity)
-        given := Expr?{None}
+        ^given: Expr?{None}
         loop field in written {
             if field.name == declared.name {
                 given = Val(field.value)
                 break
             }
         }
-        result := SemaTraitConstantEval.WrongType
+        ^result: SemaTraitConstantEval.WrongType
         if given == .Val(value) {
             result = sema_trait_constant_eval(graph, value, field_type, module_identity, record.module_identity)
         } else if declared.default == .Val(default_value) {
@@ -435,8 +435,8 @@ sema_trait_constant_rewrite: fn(name: String, receiver: Expr, method: String, ar
         return None
     }
     if method != "rewrite" || !sema_trait_constant_is_syntax(receiver) -> return None
-    callee := String?{None}
-    replacement := String?{None}
+    ^callee: String?{None}
+    ^replacement: String?{None}
     loop arg in args {
         label: arg.label ?? return None
         if arg.spread -> return None
@@ -524,8 +524,8 @@ sema_trait_constant_names_generic: fn(environment: SemaScopeEnvironment, type_na
 
 sema_expression_trait_constant_in: fn(graph: SemaRegistrationGraph, type_name: String, member: String, member_span: Span, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     unhandled: SemaMethodSpecialCheck{handled: false, value: None}
-    found := [SemaTraitConstantFound]{}
-    generic := false
+    ^found: [SemaTraitConstantFound]{}
+    ^generic: false
     loop parameter in check.environment.generic_params {
         if parameter.name != type_name -> next
         generic = true
@@ -641,9 +641,9 @@ sema_trait_constant_collect: fn(graph: SemaRegistrationGraph, row: SemaRegistrat
     loop declaration in sema_trait_constants_declared(graph, row) {
         if member == .Val(wanted) && declaration.name != wanted -> next
         ty: sema_checked_qualify_type(graph, declaration.ty, trait_module)
-        value := TComptimeValue?{None}
+        ^value: TComptimeValue?{None}
         if constants == .Val(written) {
-            given := false
+            ^given: false
             loop constant in written {
                 if constant.name == declaration.name {
                     given = true

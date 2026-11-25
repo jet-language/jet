@@ -246,7 +246,8 @@ priv BrowserScope: struct {
     closed: Bool,
 }
 
-#Local Browser: struct {
+#Local
+Browser: struct {
     __state: Shared<BrowserState>,
 
     abilities: fn(self) -> BrowserAbilities Never! {
@@ -372,7 +373,8 @@ priv BrowserScope: struct {
     }
 }
 
-#Local BrowserContext: struct {
+#Local
+BrowserContext: struct {
     __browser: Browser,
     __scope: Shared<BrowserScope>,
 
@@ -396,7 +398,8 @@ priv BrowserScope: struct {
     }
 }
 
-#Local BrowserPage: struct {
+#Local
+BrowserPage: struct {
     __browser: Browser,
     __context: Shared<BrowserScope>,
     __scope: Shared<BrowserScope>,
@@ -448,11 +451,11 @@ priv BrowserScope: struct {
         page_live(self)
         result: browser_command(self.__browser, "browsingContext.getTree", obj([{key: "root", value: Dyn.Text(scope_id(self.__scope))}]))
         contexts: browser_get(result, "contexts") ?? return Err(BrowserError{kind: "protocol"})
-        ids := [String]{}
+        ^ids: [String]{}
         if contexts == .Array(nodes) {
             loop node in nodes -> collect_frame_ids(node, ids)
         } else { return Err(BrowserError{kind: "protocol"}) }
-        out := [BrowserFrame]{}
+        ^out: [BrowserFrame]{}
         loop id in ids -> out.push(page_frame(self, id))
         Ok(out)
     }
@@ -562,7 +565,8 @@ priv BrowserScope: struct {
 }
 
 // A browsing-context frame (main or child). Listing frames never closes them.
-#Local BrowserFrame: struct {
+#Local
+BrowserFrame: struct {
     __browser: Browser,
     __context: Shared<BrowserScope>,
     __page: Shared<BrowserScope>,
@@ -583,7 +587,8 @@ priv BrowserScope: struct {
 }
 
 // A semantic BiDi locator: `accessibility`, `css`, or `innerText`.
-#Local BrowserLocator: struct {
+#Local
+BrowserLocator: struct {
     __browser: Browser,
     __context: Shared<BrowserScope>,
     __page: Shared<BrowserScope>,
@@ -675,7 +680,8 @@ priv BrowserScope: struct {
     }
 }
 
-#Local BrowserIntercept: struct {
+#Local
+BrowserIntercept: struct {
     __browser: Browser,
     __scope: Shared<BrowserScope>,
 
@@ -694,7 +700,8 @@ priv BrowserScope: struct {
 // A page's CDP handle (`page.protocol("cdp")`) sends through that page's CDP
 // session and takes only that session's events; a browser's handle has empty
 // page and session ids.
-#Local BrowserProtocol: struct {
+#Local
+BrowserProtocol: struct {
     __browser: Browser,
     __kind: String,
     __context: Shared<BrowserScope>,
@@ -717,7 +724,7 @@ priv BrowserScope: struct {
         }
         if !cdp_method_ok(method) -> return Err(BrowserError{kind: "protocol"})
         page_session: protocol_session(self)
-        request := [{key: String, value: Dyn}]{{key: "method", value: Dyn.Text(method.copy())}, {key: "params", value: params}}
+        ^request: [{key: String, value: Dyn}]{{key: "method", value: Dyn.Text(method.copy())}, {key: "params", value: params}}
         if page_session == .Val(session) -> request.push({key: "session", value: Dyn.Text(session)})
         result: browser_command(self.__browser, "goog:cdp.sendCommand", obj(request))
         Ok(json.dumps(result) ?? return Err(BrowserError{kind: "protocol"}))
@@ -732,7 +739,7 @@ priv BrowserScope: struct {
             return Err(BrowserError{kind: "unsupported protocol"})
         }
         if !cdp_method_ok(event) -> return Err(BrowserError{kind: "protocol"})
-        request := [{key: String, value: Dyn}]{{key: "events", value: Dyn.Array([Dyn]{Dyn.Text("goog:cdp.{event}")})}}
+        ^request: [{key: String, value: Dyn}]{{key: "events", value: Dyn.Array([Dyn]{Dyn.Text("goog:cdp.{event}")})}}
         if protocol_session(self) != None {
             request.push({key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(scope_id(self.__page))})})
         }
@@ -954,7 +961,7 @@ BrowserTestServer: struct {
     }
 
     stop: fn(self) -[Exec, Time.Wait]> Never! {
-        guard := self.__state.guard_edit()
+        ^guard: self.__state.guard_edit()
         if guard.value.child == .Val(child) {
             // A child that already exited cannot be signaled; wait still reaps it.
             child.kill() ?? ()
@@ -1040,7 +1047,7 @@ launch: fn(engine: String) -[Exec, FS, IO, Net, Time, Time.Wait]> Browser Browse
         return Err(BrowserError{kind: "transport"})
     }
     port_file: "{dir}/WebDriverBiDiServer.json"
-    held := BrowserEngine{child: child, profile: dir, session_url: ""}
+    ^held: BrowserEngine{child: child, profile: dir, session_url: ""}
     port: launched_bidi_port(held, port_file, 60000)
     browser: connect_profile("ws://127.0.0.1:{port}/session", p, BrowserTimeout{milliseconds: 30000})
     browser_own_engine(browser, held)
@@ -1060,8 +1067,8 @@ priv launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net,
         files.remove_all(dir).drop("a failed launch leaves no profile")
         return Err(BrowserError{kind: "transport"})
     }
-    held := BrowserEngine{child: child, profile: dir, session_url: ""}
-    port := 0
+    ^held: BrowserEngine{child: child, profile: dir, session_url: ""}
+    ^port: 0
     loop line in held.child.stdout.lines() {
         pair: parse.split_once(line, "started successfully on port ")
         if pair.found {
@@ -1242,24 +1249,24 @@ browser_timeout_ms: fn(browser: Browser) -> Int Never! {
 }
 
 browser_mark_started: fn(browser: Browser) Never! {
-    guard := browser.__state.guard_edit()
+    ^guard: browser.__state.guard_edit()
     guard.value.session_started = true
 }
 
 // Closing ends the session; a launched engine stops with it.
 browser_mark_closed: fn(browser: Browser) Never! {
-    guard := browser.__state.guard_edit()
+    ^guard: browser.__state.guard_edit()
     guard.value.closed = true
     guard.value.engine = None
 }
 
 priv browser_own_engine: fn(browser: Browser, engine: ^^BrowserEngine) Never! {
-    guard := browser.__state.guard_edit()
+    ^guard: browser.__state.guard_edit()
     guard.value.engine = Val(engine)
 }
 
 browser_set_cdp: fn(browser: Browser, cdp: Bool) Never! {
-    guard := browser.__state.guard_edit()
+    ^guard: browser.__state.guard_edit()
     guard.value.cdp = cdp
 }
 
@@ -1269,15 +1276,15 @@ browser_trace_push: fn(browser: Browser, entry: String) Never! {
     if size > C_TRACE_LIMIT_BYTES {
         return
     }
-    guard := browser.__state.guard_edit()
-    drop := 0
-    total := guard.value.trace_bytes
+    ^guard: browser.__state.guard_edit()
+    ^drop: 0
+    ^total: guard.value.trace_bytes
     loop drop < guard.value.trace.len() && total + size > C_TRACE_LIMIT_BYTES {
         total -= guard.value.trace[drop].len()
         drop += 1
     }
     if drop > 0 {
-        kept := [String]{}
+        ^kept: [String]{}
         loop index in drop..<guard.value.trace.len() -> kept.push(guard.value.trace[index])
         guard.value.trace = kept
     }
@@ -1286,19 +1293,19 @@ browser_trace_push: fn(browser: Browser, entry: String) Never! {
 }
 
 browser_pop_event: fn(browser: Browser) -> BrowserEvent? Never! {
-    guard := browser.__state.guard_edit()
+    ^guard: browser.__state.guard_edit()
     if guard.value.events.len() == 0 -> return None
     first: guard.value.events[0]
-    rest := [BrowserEvent]{}
+    ^rest: [BrowserEvent]{}
     loop index in 1..<guard.value.events.len() -> rest.push(guard.value.events[index])
     guard.value.events = rest
     Val(first)
 }
 
 browser_queue_event: fn(browser: Browser, event: BrowserEvent) Never! {
-    guard := browser.__state.guard_edit()
+    ^guard: browser.__state.guard_edit()
     if guard.value.events.len() == C_EVENT_LIMIT {
-        rest := [BrowserEvent]{}
+        ^rest: [BrowserEvent]{}
         loop index in 1..<guard.value.events.len() -> rest.push(guard.value.events[index])
         guard.value.events = rest
     }
@@ -1308,14 +1315,14 @@ browser_queue_event: fn(browser: Browser, event: BrowserEvent) Never! {
 // The first queued event of CDP session `session`; every other event stays
 // queued in order.
 priv browser_pop_session_event: fn(browser: Browser, session: String) -> BrowserEvent? Never! {
-    guard := browser.__state.guard_edit()
-    found := -1
+    ^guard: browser.__state.guard_edit()
+    ^found: -1
     loop index in 0..<guard.value.events.len() {
         if found < 0 && guard.value.events[index].__session == session -> found = index
     }
     if found < 0 -> return None
     taken: guard.value.events[found]
-    rest := [BrowserEvent]{}
+    ^rest: [BrowserEvent]{}
     loop index in 0..<guard.value.events.len() {
         if index != found -> rest.push(guard.value.events[index])
     }
@@ -1336,7 +1343,7 @@ browser_check_command: fn(browser: Browser, method: String) BrowserError! {
 }
 
 browser_next_id: fn(browser: Browser) -> Int Never! {
-    guard := browser.__state.guard_edit()
+    ^guard: browser.__state.guard_edit()
     id: guard.value.next_id
     guard.value.next_id = id + 1
     id
@@ -1418,10 +1425,10 @@ browser_capture_event: fn(browser: Browser, value: Dyn) -> Bool BrowserError! {
 }
 
 event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
-    out := BrowserEvent{method: method, request_id: "", request_method: "", url_hash: "", is_blocked: false, status_code: 0, download_id: "", suggested_filename_hash: "", frame_line: -1, frame_column: -1, frame_function_hash: "", source_map_url_hash: "", __session: ""}
+    ^out: BrowserEvent{method: method, request_id: "", request_method: "", url_hash: "", is_blocked: false, status_code: 0, download_id: "", suggested_filename_hash: "", frame_line: -1, frame_column: -1, frame_function_hash: "", source_map_url_hash: "", __session: ""}
     params: browser_get(value, "params") ?? return out
     out.is_blocked = browser_true_field(params, "isBlocked")
-    url := String?{None}
+    ^url: String?{None}
     if browser_get(params, "request") == .Val(request) {
         out.request_id = browser_text(request, "request") ?? ""
         out.request_method = browser_text(request, "method") ?? ""
@@ -1444,7 +1451,7 @@ event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
 // `Debugger.paused`, and the URL and source-map URL of a
 // `Debugger.scriptParsed`. Nothing else of the payload is kept.
 priv cdp_event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
-    out := BrowserEvent{method: method.remove_prefix("goog:cdp."), request_id: "", request_method: "", url_hash: "", is_blocked: false, status_code: 0, download_id: "", suggested_filename_hash: "", frame_line: -1, frame_column: -1, frame_function_hash: "", source_map_url_hash: "", __session: ""}
+    ^out: BrowserEvent{method: method.remove_prefix("goog:cdp."), request_id: "", request_method: "", url_hash: "", is_blocked: false, status_code: 0, download_id: "", suggested_filename_hash: "", frame_line: -1, frame_column: -1, frame_function_hash: "", source_map_url_hash: "", __session: ""}
     outer: browser_get(value, "params") ?? return out
     out.__session = browser_text(outer, "session") ?? ""
     params: browser_get(outer, "params") ?? return out
@@ -1602,10 +1609,10 @@ fact_hash: fn(value: String) -> String Never! { bytes_fact_hash(value.bytes()) }
 
 // fact_hash over raw bytes, for a page payload such as a screenshot.
 priv bytes_fact_hash: fn(value: [U8]) -> String Never! {
-    hash := U64{14695981039346656037}
+    ^hash: U64{14695981039346656037}
     loop byte in value -> hash = wrapping((hash ~ U64{byte}) * U64{1099511628211})
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<16 {
         nibble: Int{(hash >> (60 - index * 4)) & U64{15}}
         out.push(digits[nibble])
@@ -1634,7 +1641,7 @@ digit_text: fn(value: String) -> Bool Never! {
 // Redacted traces hold only `connect`, `event:<hash>`, and
 // `send|recv|error:<id>:<hash>` entries within the 8 KiB bound.
 trace_redacted: fn(entries: [String]) -> Bool Never! {
-    total := 0
+    ^total: 0
     loop entry in entries -> total += entry.len()
     if total > C_TRACE_LIMIT_BYTES -> return false
     loop entry in entries {
@@ -1659,7 +1666,7 @@ ascii_alnum: fn(b: U8) -> Bool Never! { ascii_alpha(b) || (b >= 48 && b <= 57) }
 // becomes a second spelling of a lowercase BiDi module path.
 cdp_method_ok: fn(method: String) -> Bool Never! {
     raw: method.bytes()
-    dot := -1
+    ^dot: -1
     loop index in 0..<raw.len() {
         if raw[index] == (U8{58}) -> return false
         if raw[index] == (U8{46}) {
@@ -1692,12 +1699,12 @@ scope_closed: fn(scope: Shared<BrowserScope>) -> Bool Never! {
 }
 
 scope_close: fn(scope: Shared<BrowserScope>) Never! {
-    guard := scope.guard_edit()
+    ^guard: scope.guard_edit()
     guard.value.closed = true
 }
 
 priv scope_set_id: fn(scope: Shared<BrowserScope>, id: String) Never! {
-    guard := scope.guard_edit()
+    ^guard: scope.guard_edit()
     guard.value.id = id
 }
 
@@ -1811,24 +1818,24 @@ navigation_url: fn(url: String) -[Env]> String Never! {
 
 trim_byte_end: fn(value: String, byte: U8) -> String Never! {
     raw: value.bytes()
-    end := raw.len()
+    ^end: raw.len()
     loop end > 0 && raw[end - 1] == byte -> end -= 1
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<end -> out.push(raw[index])
     String.from_bytes(out) ?? ""
 }
 
 trim_byte_start: fn(value: String, byte: U8) -> String Never! {
     raw: value.bytes()
-    start := 0
+    ^start: 0
     loop start < raw.len() && raw[start] == byte -> start += 1
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in start..<raw.len() -> out.push(raw[index])
     String.from_bytes(out) ?? ""
 }
 
 css_attr_equals: fn(attr: String, value: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in value.bytes() {
         if b == (U8{92}) || b == (U8{34}) -> out.push(U8{92})
         out.push(b)
@@ -1843,7 +1850,7 @@ page_locator: fn(page: BrowserPage, kind: String, role: String, name: String, va
 
 locator_wire: fn(locator: BrowserLocator) -> Dyn BrowserError! {
     if locator.__kind == "accessibility" {
-        value := [{key: String, value: Dyn}]{}
+        ^value: [{key: String, value: Dyn}]{}
         if locator.__role.len() > 0 {
             value.push({key: "role", value: Dyn.Text(locator.__role.copy())})
         }
@@ -1888,7 +1895,7 @@ locator_query: fn(locator: BrowserLocator, timeout_ms: Int) -[Net, Time]> String
 locator_pointer: fn(locator: BrowserLocator, shared_id: String, down_up: Bool) -[Net, Time]> BrowserError! {
     element: obj([{key: "sharedId", value: Dyn.Text(shared_id.copy())}])
     origin: obj([{key: "type", value: Dyn.Text("element")}, {key: "element", value: element}])
-    actions := [Dyn]{obj([{key: "type", value: Dyn.Text("pointerMove")}, {key: "x", value: Dyn.Int(0)}, {key: "y", value: Dyn.Int(0)}, {key: "origin", value: origin}])}
+    ^actions: [Dyn]{obj([{key: "type", value: Dyn.Text("pointerMove")}, {key: "x", value: Dyn.Int(0)}, {key: "y", value: Dyn.Int(0)}, {key: "origin", value: origin}])}
     if down_up {
         actions.push(obj([{key: "type", value: Dyn.Text("pointerDown")}, {key: "button", value: Dyn.Int(0)}]))
         actions.push(obj([{key: "type", value: Dyn.Text("pointerUp")}, {key: "button", value: Dyn.Int(0)}]))
@@ -1908,7 +1915,7 @@ selected: fn(config: BrowserTestConfig, name: String) -> Bool Never! {
     // ASCII-whitespace-separated glob pattern may match the name.
     if config.filter.trim().len() == 0 -> return true
     value: name.bytes()
-    pattern := [U8]{}
+    ^pattern: [U8]{}
     loop b in config.filter.bytes() {
         n: Int{b}
         if n == 44 || n == 32 || n == 9 || n == 10 || n == 12 || n == 13 {
@@ -1921,10 +1928,10 @@ selected: fn(config: BrowserTestConfig, name: String) -> Bool Never! {
 
 glob_match: fn(pattern: [U8], value: [U8]) -> Bool Never! {
     // `*` matches any run and `?` any one byte.
-    p := 0
-    v := 0
-    star := -1
-    star_value := 0
+    ^p: 0
+    ^v: 0
+    ^star: -1
+    ^star_value: 0
     loop v < value.len() {
         if p < pattern.len() && (pattern[p] == value[v] || pattern[p] == (U8{63})) {
             p += 1
@@ -1995,7 +2002,7 @@ fixture_page: fn(fixture: BrowserTestFixture) -> BrowserPage Never! { fixture.__
 // `config.retries` more times. The test's source position is the call's. A
 // test the filter doesn't select runs nothing.
 run_case: fn(config: BrowserTestConfig, test: String, body: fn(BrowserPage) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserError!, at: SourceLocation{#caller}) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserTestCase Never! {
-    case := BrowserTestCase{name: test.copy(), selected: selected(config, test), attempts: [BrowserTestAttempt]{}}
+    ^case: BrowserTestCase{name: test.copy(), selected: selected(config, test), attempts: [BrowserTestAttempt]{}}
     if !case.selected -> return case
     source: BrowserTestSource{path: at.file.copy(), line: source_position(at.line), column: source_position(at.column)}
     loop engine in config.engines {
@@ -2013,7 +2020,7 @@ run_case: fn(config: BrowserTestConfig, test: String, body: fn(BrowserPage) -[En
 // the attempt records, what it recorded.
 priv run_attempt: fn(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source: BrowserTestSource, body: fn(BrowserPage) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserError!) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserTestAttempt Never! {
     started: time.instant()
-    out := BrowserTestAttempt{test: test.copy(), engine: engine.copy(), attempt: attempt, passed: false, expected_failure: false, duration_ms: 0, source: source.copy(), actions: [BrowserTestAction]{}, snapshots: [BrowserTestSnapshot]{}, events: [BrowserTestEventFact]{}, artifacts: [BrowserTestArtifact]{}, trace: [String]{}, error: ""}
+    ^out: BrowserTestAttempt{test: test.copy(), engine: engine.copy(), attempt: attempt, passed: false, expected_failure: false, duration_ms: 0, source: source.copy(), actions: [BrowserTestAction]{}, snapshots: [BrowserTestSnapshot]{}, events: [BrowserTestEventFact]{}, artifacts: [BrowserTestArtifact]{}, trace: [String]{}, error: ""}
     fixture: begin_named(config, test, engine, attempt, source.path, source.line, source.column) ?? {
         out.error = "{err}"
         out.duration_ms = started.elapsed_millis()
@@ -2067,12 +2074,12 @@ priv record_attempt: fn(config: BrowserTestConfig, fixture: BrowserTestFixture, 
 // protocol method and marked by how it ended: "ok", "error", or "sent" when
 // no reply came. A method outside the bidi-2024.11 table keeps its hash.
 priv trace_actions: fn(trace: [String]) -> [BrowserTestAction] Never! {
-    actions := [BrowserTestAction]{}
+    ^actions: [BrowserTestAction]{}
     loop entry in trace {
         parts: parse.split(entry, ":")
         if parts.len() != 3 || parts[0] != "send" -> next
         sequence: parse.parse_int(parts[1]) ?? next
-        fact := "sent"
+        ^fact: "sent"
         loop reply in trace {
             if reply == "recv:{parts[1]}:{parts[2]}" -> fact = "ok" else if reply == "error:{parts[1]}:{parts[2]}" {
                 fact = "error"
@@ -2118,11 +2125,11 @@ generate_source: fn(name: String, body: String, base_url: String) -> String Brow
     if name.len() == 0 || name.len() > C_MAX_SOURCE_NAME || body.len() > C_MAX_SOURCE_BYTES || base_url.len() > C_MAX_SOURCE_BYTES {
         return Err(BrowserError{kind: "protocol"})
     }
-    url := base_url
+    ^url: base_url
     if url.len() == 0 -> url = "/"
-    test_name := source_name(name)
+    ^test_name: source_name(name)
     escaped: esc_source(url)
-    out := "// generated browser test\n{test_name}: fn() {{\n    _: \"{escaped}\"\n    {body}\n}}\n"
+    ^out: "// generated browser test\n{test_name}: fn() {{\n    _: \"{escaped}\"\n    {body}\n}}\n"
     if out.len() > C_MAX_SOURCE_BYTES -> return Err(BrowserError{kind: "protocol"})
     Ok(out)
 }
@@ -2133,7 +2140,7 @@ report_new: fn(config: BrowserTestConfig) -> BrowserTestReport Never! {
 
 report_add_case: fn(report: BrowserTestReport, case: BrowserTestCase) -> BrowserTestReport Never! {
     // Append, then order the cases by name.
-    out := report
+    ^out: report
     out.cases.push(case.copy())
     out.cases.sort_by(fn(left: BrowserTestCase, right: BrowserTestCase) { left.name <=> right.name })
     out
@@ -2149,9 +2156,9 @@ report_exit_code: fn(report: BrowserTestReport) -> Int Never! {
 }
 
 report_summary: fn(report: BrowserTestReport) -> String Never! {
-    passed := 0
-    failed := 0
-    skipped := 0
+    ^passed: 0
+    ^failed: 0
+    ^skipped: 0
     loop case in report.cases {
         if !case.selected -> skipped += 1 else if case_passed(case) -> passed += 1 else {
             failed += 1
@@ -2164,7 +2171,7 @@ report_summary: fn(report: BrowserTestReport) -> String Never! {
 // every engine whose last attempt failed, and a selected case that ran no
 // attempt. Empty when the run passed.
 report_failures: fn(report: BrowserTestReport) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop case in report.cases {
         if !case.selected -> next
         if case.attempts.len() == 0 {
@@ -2185,7 +2192,7 @@ priv case_passed: fn(case: BrowserTestCase) -> Bool Never! {
 
 // Each engine's last attempt that failed, in attempt order.
 priv engine_failures: fn(case: BrowserTestCase) -> [BrowserTestAttempt] Never! {
-    failed := [BrowserTestAttempt]{}
+    ^failed: [BrowserTestAttempt]{}
     loop at in 0..<case.attempts.len() {
         attempt: case.attempts[at]
         last: at + 1 == case.attempts.len() || case.attempts[at + 1].engine != attempt.engine
@@ -2199,23 +2206,23 @@ report_source_value: fn(source: BrowserTestSource) -> Dyn Never! {
 }
 
 report_attempt_value: fn(attempt: BrowserTestAttempt) -> Dyn Never! {
-    actions := [Dyn]{}
+    ^actions: [Dyn]{}
     loop action in attempt.actions {
         actions.push(obj([{key: "sequence", value: Dyn.Int(action.sequence)}, {key: "kind", value: Dyn.Text(action.kind)}, {key: "fact", value: Dyn.Text(action.fact)}, {key: "source", value: report_source_value(attempt.source)}]))
     }
-    snapshots := [Dyn]{}
+    ^snapshots: [Dyn]{}
     loop snapshot in attempt.snapshots {
         snapshots.push(obj([{key: "kind", value: Dyn.Text(snapshot.kind)}, {key: "hash", value: Dyn.Text(snapshot.hash)}, {key: "bytes", value: Dyn.Int(snapshot.bytes)}, {key: "path", value: Dyn.Text(snapshot.path)}, {key: "source", value: report_source_value(snapshot.source)}]))
     }
-    events := [Dyn]{}
+    ^events: [Dyn]{}
     loop event in attempt.events {
         events.push(obj([{key: "kind", value: Dyn.Text(event.kind)}, {key: "requestIdHash", value: Dyn.Text(event.request_id_hash)}, {key: "requestMethod", value: Dyn.Text(event.request_method)}, {key: "urlHash", value: Dyn.Text(event.url_hash)}, {key: "statusCode", value: Dyn.Int(event.status_code)}, {key: "isBlocked", value: Dyn.Bool(event.is_blocked)}]))
     }
-    artifacts := [Dyn]{}
+    ^artifacts: [Dyn]{}
     loop artifact in attempt.artifacts {
         artifacts.push(obj([{key: "name", value: Dyn.Text(artifact.name)}, {key: "path", value: Dyn.Text(artifact.path)}, {key: "mime", value: Dyn.Text(artifact.mime)}, {key: "bytes", value: Dyn.Int(artifact.bytes)}, {key: "hash", value: Dyn.Text(artifact.hash)}, {key: "source", value: report_source_value(artifact.source)}]))
     }
-    trace := [Dyn]{}
+    ^trace: [Dyn]{}
     loop entry in attempt.trace -> trace.push(Dyn.Text(entry))
     error: if attempt.error.len() == 0 -> Dyn.Null else -> Dyn.Text(attempt.error.copy())
     obj(
@@ -2239,9 +2246,9 @@ report_attempt_value: fn(attempt: BrowserTestAttempt) -> Dyn Never! {
 
 // The `jet.browser.test/v1` document, pretty-rendered with keys in schema order.
 report_json: fn(report: BrowserTestReport) -> String Never! {
-    cases := [Dyn]{}
+    ^cases: [Dyn]{}
     loop case in report.cases {
-        attempts := [Dyn]{}
+        ^attempts: [Dyn]{}
         loop attempt in case.attempts -> attempts.push(report_attempt_value(attempt))
         cases.push(obj([{key: "name", value: Dyn.Text(case.name)}, {key: "selected", value: Dyn.Bool(case.selected)}, {key: "attempts", value: Dyn.Array(attempts)}]))
     }
@@ -2262,7 +2269,7 @@ report_json: fn(report: BrowserTestReport) -> String Never! {
 }
 
 report_text: fn(report: BrowserTestReport) -> String Never! {
-    lines := [String]{"Browser tests: {report_summary(report)}\n"}
+    ^lines: [String]{"Browser tests: {report_summary(report)}\n"}
     loop case in report.cases {
         if !case.selected {
             lines.push("SKIP {case.name}\n")
@@ -2295,9 +2302,9 @@ report_text: fn(report: BrowserTestReport) -> String Never! {
 // escaped so the data block cannot close its script element.
 report_html: fn(report: BrowserTestReport) -> String Never! {
     raw: report_json(report).bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     push_str(out, C_REPORT_HTML_HEAD)
-    index := 0
+    ^index: 0
     loop index < raw.len() {
         b: raw[index]
         line_separator: b == (U8{226}) && index + 2 < raw.len() && raw[index + 1] == (U8{128}) && (raw[index + 2] == (U8{168}) || raw[index + 2] == (U8{169}))
@@ -2356,15 +2363,15 @@ priv write_report_bytes: fn(path: String, bytes: [U8]) -[FS]> BrowserError! {
 // command and wait for its port. A server that never listens is stopped.
 server_start: fn(config: BrowserTestConfig) -[Exec, Net, Time, Time.Wait]> BrowserTestServer BrowserError! {
     if config.server_url.len() == 0 -> return Err(BrowserError{kind: "transport"})
-    reusable := false
+    ^reusable: false
     if config.server_reuse && server_wait_ready(config.server_url, 100) == .Ok(_) -> reusable = true
     server: BrowserTestServer{__url: config.server_url, __state: Shared{BrowserServerState{child: None, logs: ""}}}
     if reusable -> return Ok(server)
     if config.server_command.len() > 0 {
-        spec := process.cmd(config.server_command).stdout(.Capture).stderr(.Capture)
+        ^spec: process.cmd(config.server_command).stdout(.Capture).stderr(.Capture)
         if config.server_cwd.len() > 0 -> spec = spec.cwd(config.server_cwd)
         child: spec.spawn() ?? return Err(BrowserError{kind: "transport"})
-        guard := server.__state.guard_edit()
+        ^guard: server.__state.guard_edit()
         guard.value.child = Val(child)
     }
     if server_wait_ready(config.server_url, config.timeout.milliseconds) == .Err(error) {
@@ -2403,10 +2410,10 @@ server_host_port: fn(url: String) -> {host: String, port: Int}? Never! {
 bounded_text: fn(value: String, limit: Int) -> String Never! {
     raw: value.bytes()
     if raw.len() <= limit -> return value.copy()
-    end := limit
+    ^end: limit
     // Keep whole UTF-8 sequences: back up over continuation bytes.
     loop end > 0 && raw[end] >= 128 && raw[end] < 192 -> end -= 1
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<end -> out.push(raw[index])
     String.from_bytes(out) ?? ""
 }
@@ -2428,10 +2435,10 @@ push_str: fn(out: ^[U8], s: String) Never! {
 
 source_name: fn(text: String) -> String Never! {
     raw: text.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<raw.len() {
         n: raw[i]
-        ok := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
+        ^ok: (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
         if ok {
             if i == 0 && n >= 48 && n <= 57 -> out.push(U8{95})
             out.push(n)
@@ -2443,7 +2450,7 @@ source_name: fn(text: String) -> String Never! {
 
 esc_source: fn(text: String) -> String Never! {
     raw: text.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in raw {
         if b == (U8{92}) || b == (U8{34}) {
             out.push(U8{92})
@@ -2631,7 +2638,7 @@ C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElemen
 
 #Test("run_case runs each engine in order, retries a failed attempt, and skips a test the filter leaves out") {
     root: files.temp_dir("jet-browser-run-") ?? panic("a temporary project root: {err}")
-    config := config_from_snapshot(root.path, [{name: [U8], value: [U8]}]{}) ?? panic("the default config: {err}")
+    ^config: config_from_snapshot(root.path, [{name: [U8], value: [U8]}]{}) ?? panic("the default config: {err}")
     // Engines no lock can pin fail before any browser starts.
     config.engines = [String]{"lynx", "mosaic"}
     config.retries = 1
@@ -2662,10 +2669,10 @@ parse_i64: fn(value: String) -> Int? Never! {
     raw: value.bytes()
     if raw.len() == 0 -> return None
     negative: raw[0] == (U8{45})
-    i := if negative || raw[0] == (U8{43}) -> 1 else -> 0
+    ^i: if negative || raw[0] == (U8{43}) -> 1 else -> 0
     if i == raw.len() -> return None
     limit: if negative -> -9223372036854775808 else -> -9223372036854775807
-    n := 0
+    ^n: 0
     loop i < raw.len() {
         d: Int{raw[i]} - 48
         if d < 0 || d > 9 -> return None
@@ -2722,8 +2729,8 @@ ascii_space: fn(value: U8) -> Bool Never! {
 }
 
 test_engines: fn(raw: String) -> [String] BrowserError! {
-    requested := [String]{}
-    token := [U8]{}
+    ^requested: [String]{}
+    ^token: [U8]{}
     bytes: raw.bytes()
     loop i in 0..<(bytes.len() + 1) {
         separator: i == bytes.len() || bytes[i] == (U8{44}) || ascii_space(bytes[i])
@@ -2739,7 +2746,7 @@ test_engines: fn(raw: String) -> [String] BrowserError! {
         }
         requested.push(value)
     }
-    engines := [String]{}
+    ^engines: [String]{}
     loop engine in ([String]{"chromium", "firefox", "webkit"}) {
         loop value in requested {
             if value == engine {
@@ -2753,9 +2760,9 @@ test_engines: fn(raw: String) -> [String] BrowserError! {
 }
 
 split_command: fn(raw: String) -> [String] Never! {
-    command := [String]{}
-    value := [U8]{}
-    quote := U8{0}
+    ^command: [String]{}
+    ^value: [U8]{}
+    ^quote: U8{0}
     loop b in raw.bytes() {
         if quote != (U8{0}) {
             if b == quote -> quote = U8{0} else { value.push(b) }
@@ -2813,9 +2820,9 @@ config_from_snapshot: fn(root: String, env: [{name: [U8], value: [U8]}]) -[FS]> 
 }
 
 parse_locked: fn(raw: String, engine: String) -> BrowserLocked BrowserError! {
-    current := BrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: "", driver: "", driver_size: 0}
-    in_browser := false
-    found := BrowserLocked?{None}
+    ^current: BrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: "", driver: "", driver_size: 0}
+    ^in_browser: false
+    ^found: BrowserLocked?{None}
     loop raw_line in parse.split(raw, "\n") {
         line: text.trim(raw_line)
         bytes: line.bytes()
@@ -2857,11 +2864,11 @@ parse_locked: fn(raw: String, engine: String) -> BrowserLocked BrowserError! {
 
 strip_quotes: fn(raw: String) -> String Never! {
     bytes: raw.bytes()
-    start := 0
-    end := bytes.len()
+    ^start: 0
+    ^end: bytes.len()
     loop start < end && bytes[start] == (U8{34}) -> start += 1
     loop end > start && bytes[end - 1] == (U8{34}) -> end -= 1
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in start..<end -> out.push(bytes[i])
     String.from_bytes(out) ?? ""
 }

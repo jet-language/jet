@@ -4,7 +4,7 @@
 // Compiler/ after stage 2; no worktree dependency is registered in Bootstrap.
 
 jetos_shell_single_quote: fn(value: String) -> String Never! {
-    parts := [String]{"'"}
+    ^parts: [String]{"'"}
     loop scalar in value.chars() {
         text: "{scalar}"
         parts.push(if text == "'" -> "'\\''" else -> text)
@@ -43,7 +43,7 @@ jetos_resolved_option: fn(system: SystemPlan, key: String) -> JetOSResolvedOptio
         .Val(value) -> jetos_parse_i64(value) ?? jetos_tier_priority(tier)
         .None -> jetos_tier_priority(tier)
     }
-    contenders := [JetOSOptionContender]{}
+    ^contenders: [JetOSOptionContender]{}
     loop index in 0..<system.options.len() {
         option: system.options[index]
         if option.key == key {
@@ -132,7 +132,7 @@ jetos_option_doc: fn(key: String) -> String Never! {
 }
 
 jetos_prefixed_options: fn(system: SystemPlan, prefix: String) -> [{key: String, value: String}] Never! {
-    rows := [{key: String, value: String}]{}
+    ^rows: [{key: String, value: String}]{}
     loop option in system.options {
         if option.key.starts_with(prefix) {
             rows.push({key: option.key.removeprefix(prefix), value: jetos_clean_value(option.value)})
@@ -143,7 +143,7 @@ jetos_prefixed_options: fn(system: SystemPlan, prefix: String) -> [{key: String,
 
 // `{"key": .., "value": ..}` rows in declaration order.
 jetos_option_rows_dyn: fn(rows: [{key: String, value: String}]) -> Dyn Never! {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop row in rows {
         items.push(Dyn.Object(["key": Dyn.Text(row.key.copy()), "value": Dyn.Text(row.value.copy())]))
     }
@@ -160,7 +160,7 @@ jetos_boot_profile: fn(system: SystemPlan) -> JetOSBootProfile Never! {
         .None -> "CachyOS"
     }
     init: jetos_option_value(system, [String]{"init.path"}) ?? "/sbin/init"
-    modules := [String]{}
+    ^modules: [String]{}
     if jetos_option_value(system, [String]{"boot.initrd.modules"}) == .Val(value) {
         modules = jetos_parse_list_items(value)
     }
@@ -170,7 +170,7 @@ jetos_boot_profile: fn(system: SystemPlan) -> JetOSBootProfile Never! {
 
 jetos_collect_names: fn(system: SystemPlan, namespace: String) -> [String] Never! {
     prefix: "{namespace}."
-    names := [String]{}
+    ^names: [String]{}
     loop option in system.options {
         if !option.key.starts_with(prefix) -> next
         rest: option.key.removeprefix(prefix)
@@ -183,7 +183,7 @@ jetos_collect_names: fn(system: SystemPlan, namespace: String) -> [String] Never
 }
 
 jetos_user_names: fn(system: SystemPlan) -> [String] Never! {
-    names := jetos_collect_names(system, "users")
+    ^names: jetos_collect_names(system, "users")
     loop name in jetos_collect_names(system, "user") {
         if !names.contains(name) -> names.push(name)
     }
@@ -209,7 +209,7 @@ jetos_render_user_profile_json: fn(system: SystemPlan, user: String) -> String N
 }
 
 jetos_render_user_profile_json_parts: fn(user: String, home: String, shell: String, packages: [String], services: [String], file_rows: [{key: String, value: String}]) -> String Never! {
-    file_items := [Dyn]{}
+    ^file_items: [Dyn]{}
     loop row in file_rows {
         file_items.push(Dyn.Object(["path": Dyn.Text(row.key.copy()), "source": Dyn.Text(row.value.copy())]))
     }
@@ -233,11 +233,11 @@ jetos_render_user_profile_json_parts: fn(user: String, home: String, shell: Stri
 // Quotes toggle literally (even escaped quotes); brackets are stripped only
 // as a matching outer pair. Commas inside quotes stay in one item.
 jetos_parse_list_items: fn(value: String) -> [String] Never! {
-    trimmed := value.trim()  // #4303: temporary owned String allocation; revert with view emitter fix.
+    ^trimmed: value.trim()  // #4303: temporary owned String allocation; revert with view emitter fix.
     inner: if trimmed.starts_with("[") && trimmed.ends_with("]") && trimmed.len() >= 2 -> trimmed.removeprefix("[").removesuffix("]") else -> value
-    items := [String]{}
-    current := [String]{}
-    in_quotes := false
+    ^items: [String]{}
+    ^current: [String]{}
+    ^in_quotes: false
     loop scalar in inner.chars() {
         text: "{scalar}"
         if text == "\"" {
@@ -271,7 +271,7 @@ jetos_service_extra: fn(service: ServicePlan, keys: [String]) -> String? Never! 
 }
 
 jetos_clean_value: fn(value: String) -> String Never! {
-    trimmed := value.trim()  // #4303: temporary owned String allocation; revert with view emitter fix.
+    ^trimmed: value.trim()  // #4303: temporary owned String allocation; revert with view emitter fix.
     if trimmed.len() >= 2 && trimmed.starts_with("\"") && trimmed.ends_with("\"") {
         return trimmed.removeprefix("\"").removesuffix("\"")
     }
@@ -279,7 +279,7 @@ jetos_clean_value: fn(value: String) -> String Never! {
 }
 
 jetos_clean_symbol: fn(value: String) -> String Never! {
-    trimmed := jetos_clean_value(value).trim()
+    ^trimmed: jetos_clean_value(value).trim()
     loop trimmed.starts_with(".") -> trimmed = trimmed.removeprefix(".")
     trimmed.removeprefix("users.")
 }
@@ -292,7 +292,7 @@ jetos_ascii_alphanumeric: fn(text: String) -> Bool Never! {
 }
 
 jetos_safe_filename: fn(value: String) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop scalar in value.chars() {
         text: "{scalar}"
         parts.push(if jetos_ascii_alphanumeric(text) || text == "-" || text == "_" -> text else -> "-")
@@ -301,7 +301,7 @@ jetos_safe_filename: fn(value: String) -> String Never! {
 }
 
 jetos_safe_identifier: fn(value: String) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop scalar in value.chars() {
         text: "{scalar}"
         parts.push(if jetos_ascii_alphanumeric(text) || text == "_" -> text else -> "_")
@@ -328,7 +328,7 @@ jetos_clean_bool_json: fn(value: String) -> String Never! {
 jetos_render_proof: fn(system: SystemPlan, realized: [JetOSRealizedPackage], plan: EnvPlan) -> String Never! {
     risks: jetos_risk_classes(system)
     risk: if risks.len() == 0 -> "low" else -> risks.join(", ")
-    parts := [String]{"jetos proof for {system.name}\n", "target: {system.target}\n", "risk: {risk}\n", "plan: pass\n", "packages:\n"}
+    ^parts: [String]{"jetos proof for {system.name}\n", "target: {system.target}\n", "risk: {risk}\n", "plan: pass\n", "packages:\n"}
     loop package in realized -> parts.push("  {package.entry.reference} -> {package.entry.out}\n")
     parts.push("options:\n")
     loop option in system.options -> parts.push("  {option.key} = {option.value}\n")
@@ -346,7 +346,7 @@ jetos_render_proof: fn(system: SystemPlan, realized: [JetOSRealizedPackage], pla
 }
 
 jetos_risk_classes: fn(system: SystemPlan) -> [String] Never! {
-    risks := [String]{}
+    ^risks: [String]{}
     loop option in system.options {
         key: option.key
         if key.starts_with("filesystem.") && !risks.contains("filesystem") {

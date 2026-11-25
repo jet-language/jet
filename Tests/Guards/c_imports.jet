@@ -43,7 +43,7 @@ ci_declares: fn(line: String) -> Bool Never! {
 }
 
 ci_count: fn(source: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop line in source.lines() {
         if ci_declares(line) -> count += 1
     }
@@ -56,7 +56,7 @@ ci_walk: fn(path: String, out: ^[String]) {
         return
     }
     loop child in (ci_files.list_dir(path) ?? panic("list {path}: {err}")) {
-        skipped := false
+        ^skipped: false
         loop name in CI_SKIPPED {
             if child.name == name -> skipped = true
         }
@@ -66,8 +66,8 @@ ci_walk: fn(path: String, out: ^[String]) {
 
 // The census against the closed list: one line per file whose count differs.
 ci_findings: fn(found: [String:Int]) -> [String] Never! {
-    findings := [String]{}
-    allowed := [String:Int]{}
+    ^findings: [String]{}
+    ^allowed: [String:Int]{}
     loop row in CI_ALLOWED -> allowed[row.path] = row.count
     loop path in found.keys() {
         count: found[path]
@@ -90,10 +90,10 @@ ci_findings: fn(found: [String:Int]) -> [String] Never! {
 
 #Test("C imports stay on the closed list") {
     guards_enter_root()
-    sources := [String]{}
+    ^sources: [String]{}
     loop root in CI_ROOTS -> ci_walk(root, sources)
     assert(sources.len() > 1000, "the census found only {sources.len()} Jet sources")
-    found := [String:Int]{}
+    ^found: [String:Int]{}
     loop path in sources {
         if path.starts_with(CI_RUNTIME_BINDINGS) -> next
         count: ci_count(ci_files.read(path) ?? panic("read {path}: {err}"))
@@ -105,7 +105,7 @@ ci_findings: fn(found: [String:Int]) -> [String] Never! {
 #Test("the census counts declarations, not mentions") {
     source: "#Import(c) a: fn() = \"a\"\n    #Import c.z: module {{\n// #Import(c) in a comment\ntext: \"#FFI(c) in a string\"\n#FFI(c) b: fn() {{}}\n#[Import(c), Unsafe(\"audited\")]\n#[Unsafe(\"audited\"), FFI(c)]\n#[Unsafe(\"audited\"), FFI(cpp)]\n"
     assert_eq(ci_count(source), 5)
-    found := [String:Int]{}
+    ^found: [String:Int]{}
     found["Compiler/New.jet"] = 1
     found["Tools/AgentEval/FFIAssurance/Jet/run.jet"] = 2
     findings: ci_findings(found)

@@ -9,13 +9,16 @@ use {
 // A TypeId of row `handle` in the compile's own table, with every declared
 // member present.
 fact_declared_type_id: fn(handle: Int) -> TComptimeValue {
-    TComptimeValue.Struct{type_name: "TypeId", fields: [TComptimeField]{
-        TComptimeField{name: "identity", value: TComptimeValue.String{value: "geo.Point"}},
-        TComptimeField{name: "name", value: TComptimeValue.String{value: "Point"}},
-        TComptimeField{name: "generic_bindings", value: TComptimeValue.List{values: [TComptimeValue]{}}},
-        TComptimeField{name: "handle", value: TComptimeValue.Int{value: handle}},
-        TComptimeField{name: "table", value: TComptimeValue.Int{value: 0}},
-    }}
+    TComptimeValue.Struct{
+        type_name: "TypeId",
+        fields: [TComptimeField]{
+            TComptimeField{name: "identity", value: TComptimeValue.String{value: "geo.Point"}},
+            TComptimeField{name: "name", value: TComptimeValue.String{value: "Point"}},
+            TComptimeField{name: "generic_bindings", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+            TComptimeField{name: "handle", value: TComptimeValue.Int{value: handle}},
+            TComptimeField{name: "table", value: TComptimeValue.Int{value: 0}},
+        },
+    }
 }
 
 #Test("a folded TypeId keeps the handle and table it is read back by") {
@@ -25,15 +28,20 @@ fact_declared_type_id: fn(handle: Int) -> TComptimeValue {
 }
 
 #Test("a TypeId nested in a folded record keeps its handle") {
-    field: TComptimeValue.Struct{type_name: "LayoutField", fields: [TComptimeField]{
-        TComptimeField{name: "name", value: TComptimeValue.String{value: "x"}},
-        TComptimeField{name: "type", value: fact_declared_type_id(41)},
-    }}
+    field: TComptimeValue.Struct{
+        type_name: "LayoutField",
+        fields: [TComptimeField]{
+            TComptimeField{name: "name", value: TComptimeValue.String{value: "x"}},
+            TComptimeField{name: "type", value: fact_declared_type_id(41)},
+        },
+    }
     folded: sema_fact_declared_value(TComptimeValue.List{values: [TComptimeValue]{field}})
-    kept := -1
+    ^kept: -1
     if folded == .List(values) && values.len() == 1 && values[0] == .Struct(_, fields) {
         loop member in fields {
-            if member.name == "type" && comptime_type_id_row(member.value) == .Val(row) -> kept = Int{row.id}
+            if member.name == "type" && comptime_type_id_row(member.value) == .Val(row) {
+                kept = Int{row.id}
+            }
         }
     }
     assert_eq(kept, 41)

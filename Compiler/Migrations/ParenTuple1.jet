@@ -37,9 +37,9 @@ paren_tuple1_file: fn(path: String, text: String, source: Bool) -> MigrationOutc
 paren_tuple1_source: fn(path: String, text: String) -> MigrationOutcome {
     bytes: text.bytes()
     lexed: lex_generated(bytes)
-    edits := [LambdaShapeEdit]{}
-    skipped := [String]{}
-    rewritten := paren_tuple1_scan(path, bytes, lexed.tables, lexed.tokens, false, edits, skipped)
+    ^edits: [LambdaShapeEdit]{}
+    ^skipped: [String]{}
+    ^rewritten: paren_tuple1_scan(path, bytes, lexed.tables, lexed.tokens, false, edits, skipped)
     loop token in lexed.tokens {
         if token.kind != TOKEN_RAW_STRING && token.kind != TOKEN_STRING -> next
         if paren_tuple1_quoted(path, bytes, token, skipped) == .Val(quoted_edit) {
@@ -70,7 +70,7 @@ paren_tuple1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: ^[Stri
     if !raw.contains("(") -> return None
     quote: paren_tuple1_quote_width(bytes, token)
     inner: paren_tuple1_quoted_text(bytes, token) ?? return None
-    outcome := paren_tuple1_source("{path}:{lambda_shape1_line(bytes, token.span.start)}", inner)
+    ^outcome: paren_tuple1_source("{path}:{lambda_shape1_line(bytes, token.span.start)}", inner)
     if outcome.rewritten == 0 -> return None
     parsed: parse_generated_source(outcome.text.bytes())
     if parsed.program.items.len() == 0 || parsed.diagnostics.any(fn(d) { d.code.starts_with("E") }) {
@@ -112,7 +112,7 @@ paren_tuple1_quoted_text: fn(bytes: [U8], token: Token) -> String? {
 // `->` or `-[`, the retired arrow lambda's parameters, is reported too.
 paren_tuple1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Token], hole: Bool, edits: ^[LambdaShapeEdit], skipped: ^[String]) -> Int {
     tokens: lexer_without_comments(raw)
-    rewritten := 0
+    ^rewritten: 0
     loop index in 0..<tokens.len() {
         token: tokens[index]
         if token.literal >= 0 {
@@ -151,7 +151,7 @@ paren_tuple1_record: fn(tokens: [Token], index: Int) -> Bool {
     if index > 0 && tokens[index - 1].kind != TOKEN_SEMI && tokens[index - 1].kind != TOKEN_LBRACE {
         return false
     }
-    at := index + 1
+    ^at: index + 1
     loop {
         if at + 1 >= tokens.len() || tokens[at].kind != TOKEN_IDENT -> return false
         if tokens[at + 1].kind == TOKEN_RPAREN -> break
@@ -181,11 +181,11 @@ paren_tuple1_list_head: fn(tokens: [Token], index: Int) -> Bool {
 // the prose stay as written.
 paren_tuple1_markdown: fn(path: String, text: String) -> MigrationOutcome {
     bytes: text.bytes()
-    edits := [LambdaShapeEdit]{}
-    skipped := [String]{}
-    rewritten := 0
+    ^edits: [LambdaShapeEdit]{}
+    ^skipped: [String]{}
+    ^rewritten: 0
     loop fence in paren_tuple1_fences(bytes) {
-        outcome := paren_tuple1_source("{path}:{fence.line}", lambda_shape1_text(bytes, fence.start, fence.end))
+        ^outcome: paren_tuple1_source("{path}:{fence.line}", lambda_shape1_text(bytes, fence.start, fence.end))
         skipped.extend(outcome.skipped.move())
         if outcome.rewritten > 0 {
             rewritten += outcome.rewritten
@@ -209,15 +209,15 @@ ParenTupleFence: struct {
 }
 
 paren_tuple1_fences: fn(bytes: [U8]) -> [ParenTupleFence] {
-    fences := [ParenTupleFence]{}
-    line_start := 0
-    line_number := 1
+    ^fences: [ParenTupleFence]{}
+    ^line_start: 0
+    ^line_number: 1
     // The first byte inside the open fence, or -1 outside every fence.
-    fence_start := -1
-    fence_line := 0
-    jet_fence := false
+    ^fence_start: -1
+    ^fence_line: 0
+    ^jet_fence: false
     loop line_start <= bytes.len() {
-        line_end := line_start
+        ^line_end: line_start
         loop line_end < bytes.len() && bytes[line_end] != 10 -> line_end += 1
         trimmed: lambda_shape1_text(bytes, line_start, line_end).trim()
         if {
@@ -267,10 +267,10 @@ paren_tuple1_same_as_planned: fn(path: String, planned: String, after: String, s
     old_fences: paren_tuple1_fences(old)
     new_fences: paren_tuple1_fences(new)
     if old_fences.len() != new_fences.len() -> return Val("the ```jet fences differ in number")
-    old_prose := ""
-    new_prose := ""
-    old_at := 0
-    new_at := 0
+    ^old_prose: ""
+    ^new_prose: ""
+    ^old_at: 0
+    ^new_at: 0
     loop index in 0..<old_fences.len() {
         was: old_fences[index]
         now: new_fences[index]
@@ -297,7 +297,7 @@ paren_tuple1_same_source: fn(before: String, after: String) -> String? {
     old_strings: paren_tuple1_strings(lex_generated(old).tokens)
     new_strings: paren_tuple1_strings(lex_generated(new).tokens)
     if old_strings.len() != new_strings.len() -> return Val("the string literals differ in number")
-    edits := [LambdaShapeEdit]{}
+    ^edits: [LambdaShapeEdit]{}
     loop index in 0..<new_strings.len() {
         was: old_strings[index]
         now: new_strings[index]

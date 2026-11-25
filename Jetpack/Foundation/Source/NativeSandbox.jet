@@ -155,12 +155,12 @@ foundation_native_sandbox_status: fn() -[FS, Env, Exec, Time.Wait]> NativeSandbo
 //      that runs build actions fetches it first (foundation_native_sandbox_prepare).
 // Unsupported names why each one failed. Nothing ever runs unsandboxed.
 foundation_linux_bwrap: fn() -[FS, Env, Exec, Time.Wait]> String NativeSandboxError! {
-    host := "bubblewrap (`bwrap`) is not available on PATH"
+    ^host: "bubblewrap (`bwrap`) is not available on PATH"
     if foundation_sandbox_program("bwrap") == .Val(path) {
         failed: foundation_linux_bwrap_probe(path, false) ?? return Ok(path)
         host = "the `bwrap` on PATH (`{path}`) failed its probe: {failed}"
     }
-    pinned := ""
+    ^pinned: ""
     if foundation_pinned_bwrap() == {
         .Ok(path) -> {
             failed: foundation_linux_bwrap_probe(path, true) ?? return Ok(path)
@@ -176,8 +176,8 @@ foundation_linux_bwrap: fn() -[FS, Env, Exec, Time.Wait]> String NativeSandboxEr
 // so it runs itself (`bwrap --version`, from its read-only Hangar directory)
 // and needs no shell on the host.
 foundation_linux_bwrap_probe: fn(bwrap: String, pinned: Bool) -[FS, Env, Exec, Time.Wait]> String? Never! {
-    mounts := [NativeSandboxMount]{}
-    command := [String]{}
+    ^mounts: [NativeSandboxMount]{}
+    ^command: [String]{}
     if pinned {
         mounts.push(NativeSandboxMount{source: files.dirname(bwrap), destination: "/jet-bwrap"})
         command = [String]{"/jet-bwrap/{NATIVE_SANDBOX_BWRAP_NAME}", "--version"}
@@ -185,7 +185,7 @@ foundation_linux_bwrap_probe: fn(bwrap: String, pinned: Bool) -[FS, Env, Exec, T
         shell: foundation_sandbox_program("sh") ?? return Val("no immutable shell probe is available")
         command = [String]{shell, "-c", "exit 0"}
     }
-    argv := foundation_linux_sandbox_argv(bwrap, None, None, [String:String]{}, false, false, false, mounts, None)
+    ^argv: foundation_linux_sandbox_argv(bwrap, None, None, [String:String]{}, false, false, false, mounts, None)
     loop part in command -> argv.push(part)
     receipt: process.cmd(argv).env_clear().stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS)).run() ?? return Val("bubblewrap backend probe failed: {err}")
     if receipt.timed_out {
@@ -308,7 +308,7 @@ foundation_install_pinned_bwrap: fn(bytes: [U8], asset: NativeSandboxBwrapAsset,
 // from the release this jet came from (the RELEASE file beside it). A
 // `file://` URL is read where it lies, so it also works offline.
 foundation_fetch_pinned_bwrap: fn(asset: NativeSandboxBwrapAsset) -[FS, Env, IO, Net, Time.Wait]> NativeSandboxError! {
-    url := sys.get(NATIVE_SANDBOX_BWRAP_URL_ENV) ?? ""
+    ^url: sys.get(NATIVE_SANDBOX_BWRAP_URL_ENV) ?? ""
     if url == "" {
         release: foundation_jet_release_name() ?? {
             return Err(NativeSandboxError.Unsupported("this jet does not name the release it came from, so `{asset.file}` cannot be downloaded; put it beside jet or set `{NATIVE_SANDBOX_BWRAP_URL_ENV}` to its URL"))
@@ -420,16 +420,16 @@ foundation_native_sandbox_command: fn(executable: String, args: [String], source
         return Err(NativeSandboxError.Unsupported("test sandbox override prevents child execution"))
     }
     // Linux resolves (and so probes) its Bubblewrap once for the action.
-    bwrap := ""
+    ^bwrap: ""
     if sys.is_linux() -> bwrap = foundation_linux_bwrap() ?? return Err(err) else {
         status: foundation_macos_sandbox_status()
         if !status.available -> return Err(NativeSandboxError.Unsupported(status.reason))
     }
     program: foundation_sandbox_executable(executable) ?? return Err(err)
-    passed := [String]{}
+    ^passed: [String]{}
     loop path in programs -> passed.push(foundation_sandbox_executable(path) ?? return Err(err))
     source: foundation_sandbox_real_directory(source_dir)
-    output := String?{None}
+    ^output: String?{None}
     if output_dir == {
         .Val(path) -> { output = Val(foundation_sandbox_real_directory(path)) }
         .None -> {}
@@ -439,7 +439,7 @@ foundation_native_sandbox_command: fn(executable: String, args: [String], source
     // The source is always readable, and writable only as the private tree.
     source_writable: !output_is_separate
 
-    spec := if sys.is_linux() -> foundation_linux_sandbox_spec(bwrap, source, output, env, share_network, source_writable, checked_mounts, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, passed, args)
+    ^spec: if sys.is_linux() -> foundation_linux_sandbox_spec(bwrap, source, output, env, share_network, source_writable, checked_mounts, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, passed, args)
     if timeout == .Val(limit) -> spec = spec.timeout(limit)
     mechanism: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
     Ok(NativeSandboxCommand{spec: spec.stdout(.Capture).stderr(.Capture).output_limit(NATIVE_SANDBOX_MAX_OUTPUT_BYTES), timeout: timeout, mechanism: mechanism, policy: foundation_native_sandbox_policy(output_is_separate, share_network)})
@@ -475,7 +475,7 @@ foundation_native_sandbox_finish: fn(command: NativeSandboxCommand, receipt: Pro
 
 // `bwrap` is the Bubblewrap foundation_linux_bwrap resolved for the action.
 foundation_linux_sandbox_spec: fn(bwrap: String, source: String, output: String?, env: [String:String], share_network: Bool, source_writable: Bool, mounts: [NativeSandboxMount], program: String, args: [String]) -[FS, Env, Exec]> ProcessSpec NativeSandboxError! {
-    argv := foundation_linux_sandbox_argv(bwrap, Val(source), output, env, share_network, true, source_writable, mounts, Val(files.basename(program)))
+    ^argv: foundation_linux_sandbox_argv(bwrap, Val(source), output, env, share_network, true, source_writable, mounts, Val(files.basename(program)))
     argv.push(foundation_mounted_executable_path(program, mounts))
     loop arg in args -> argv.push(arg.copy())
     Ok(process.cmd(argv).env_clear())
@@ -487,9 +487,9 @@ foundation_macos_sandbox_spec: fn(source: String, output: String?, env: [String:
     profile: foundation_seatbelt_profile(program, programs, source, output, share_network, true, source_writable, mounts)
     // The profile is passed inline: a temporary `-f` profile could be
     // replaced between spawn and Seatbelt reading it.
-    argv := [String]{NATIVE_SANDBOX_MACOS_EXEC, "-p", profile, program}
+    ^argv: [String]{NATIVE_SANDBOX_MACOS_EXEC, "-p", profile, program}
     loop arg in args -> argv.push(arg.copy())
-    spec := process.cmd(argv).env_clear().cwd(source)
+    ^spec: process.cmd(argv).env_clear().cwd(source)
     if output == {
         .Val(path) -> { spec = spec.env(ENV_JET_BUILD_OUTPUT, path) }
         .None -> {}
@@ -501,7 +501,7 @@ foundation_macos_sandbox_spec: fn(source: String, output: String?, env: [String:
 // The Bubblewrap argument vector up to and including the `--` that ends
 // options; the caller appends the executable and its arguments.
 foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String?, env: [String:String], share_network: Bool, source_readable: Bool, source_writable: Bool, mounts: [NativeSandboxMount], argv0: String?) -> [String] Never! {
-    argv := [String]{
+    ^argv: [String]{
         bwrap,
         "--die-with-parent",
         "--new-session",
@@ -584,8 +584,8 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
     loop mount in mounts {
         // Create every parent directory (and the final directory for a
         // directory mount), then bind the source over it.
-        destination := ""
-        parts := [String]{}
+        ^destination: ""
+        ^parts: [String]{}
         loop segment in mount.destination.split("/") {
             if segment != "" -> parts.push(segment)
         }
@@ -622,15 +622,15 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
 // it is passed, each of which it may run and read as it does `executable`.
 foundation_seatbelt_profile: fn(executable: String, programs: [String], source: String, output: String?, share_network: Bool, source_readable: Bool, source_writable: Bool, mounts: [NativeSandboxMount]) -> String NativeSandboxError! {
     program: foundation_sbpl_path(executable)
-    passed := [String]{}
+    ^passed: [String]{}
     loop path in programs -> passed.push("  (literal \"{foundation_sbpl_path(path)}\")")
     source_path: foundation_sbpl_path(source)
-    output_path := String?{None}
+    ^output_path: String?{None}
     if output == {
         .Val(path) -> { output_path = Val(foundation_sbpl_path(path)) }
         .None -> {}
     }
-    lines := [String]{"(version 1)", "(deny default)", "(import \"system.sb\")", "(allow process-fork)", "(allow process-exec", "  (literal \"{program}\")"}
+    ^lines: [String]{"(version 1)", "(deny default)", "(import \"system.sb\")", "(allow process-fork)", "(allow process-exec", "  (literal \"{program}\")"}
     loop line in passed -> lines.push(line)
     loop mount in mounts -> lines.push("  (subpath \"{foundation_sbpl_path(mount.source)}\")")
     lines.push(")")
@@ -650,7 +650,7 @@ foundation_seatbelt_profile: fn(executable: String, programs: [String], source: 
             lines.push("  (subpath \"{foundation_sbpl_path(mount.destination)}\")")
         }
     }
-    profile := "{lines.join("\n")}\n)"
+    ^profile: "{lines.join("\n")}\n)"
     if output_path == {
         .Val(path) -> { profile = "{profile}(allow file-write* (subpath \"{path}\"))\n" }
         .None -> {
@@ -682,7 +682,7 @@ foundation_sandbox_real_directory: fn(path: String) -[FS, Env]> String NativeSan
 // The canonical path of `program`: a path with a separator directly, else the
 // first regular file of that name on PATH.
 foundation_sandbox_program: fn(program: String) -[FS, Env]> String? Never! {
-    candidate := program
+    ^candidate: program
     if !program.contains("/") -> candidate = files.which(program) ?? return None
     if !files.is_file(candidate) -> return None
     canonical: files.canonicalize(candidate) ?? return None
@@ -691,7 +691,7 @@ foundation_sandbox_program: fn(program: String) -[FS, Env]> String? Never! {
 
 // Environment names in sorted key order.
 foundation_sandbox_sorted_names: fn(env: [String:String]) -> [String] Never! {
-    names := env.keys().to_list()
+    ^names: env.keys().to_list()
     names.sort()
     names
 }
@@ -710,7 +710,7 @@ foundation_sandbox_has_control: fn(text: String) -> Bool Never! {
 // Each mount source must be a real directory or regular file (canonicalized,
 // never a symlink); each destination an absolute, normalized path other than `/`.
 foundation_validate_read_only_mounts: fn(mounts: [NativeSandboxMount]) -[FS, Env]> [NativeSandboxMount] NativeSandboxError! {
-    checked := [NativeSandboxMount]{}
+    ^checked: [NativeSandboxMount]{}
     loop mount in mounts {
         info: files.stat(mount.source) ?? return Err(NativeSandboxError.Unsupported("sandbox mount source `{mount.source}` is unavailable: {err}"))
         if info.is_symlink || (!info.is_dir && !info.is_file) {
@@ -727,7 +727,7 @@ foundation_validate_read_only_mounts: fn(mounts: [NativeSandboxMount]) -[FS, Env
 
 foundation_is_normalized_mount_destination: fn(destination: String) -> Bool Never! {
     if !destination.starts_with("/") -> return false
-    has_component := false
+    ^has_component: false
     segments: destination.split("/").to_list()
     loop segment in segments {
         if segment == "." || segment == ".." -> return false
@@ -739,14 +739,14 @@ foundation_is_normalized_mount_destination: fn(destination: String) -> Bool Neve
 // Linux runs the executable at its path inside the mount whose relative
 // remainder is deepest (the last such mount on ties), else at its host path.
 foundation_mounted_executable_path: fn(executable: String, mounts: [NativeSandboxMount]) -> String Never! {
-    best := String?{None}
-    best_depth := -1
+    ^best: String?{None}
+    ^best_depth: -1
     loop mount in mounts {
         if !foundation_paths.is_relative_to(foundation_paths.of(executable), foundation_paths.of(mount.source)) {
             next
         }
         relative: files.relative(executable, mount.source)
-        depth := 0
+        ^depth: 0
         segments: relative.split("/").to_list()
         loop segment in segments {
             if segment != "" && segment != "." -> depth += 1

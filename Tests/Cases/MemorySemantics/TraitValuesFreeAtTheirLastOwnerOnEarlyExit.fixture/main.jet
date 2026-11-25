@@ -41,7 +41,7 @@ maybe: fn(s: Shared<Context>, n: Int) -> Sink? {
 
 looped: fn(s: Shared<Context>, stop: Int) -> Int {
     outer: make(s, 100)
-    total := 0
+    ^total: 0
     loop i in 0..<10 {
         k: make(s, i)
         if i == stop -> return total + k.peek() + outer.peek()
@@ -65,7 +65,7 @@ checked: fn(s: Shared<Context>, n: Int) -> Int Reject! {
 }
 
 run: fn() {
-    s := Shared{Context{_id: 1}}
+    ^s: Shared{Context{_id: 1}}
     print("looped {looped(s, 3)} {looped(s, 20)}")
     print("looped dropped {s.strong_count()}")
     print("fallback {fallback(s, 1)} {fallback(s, 2)}")

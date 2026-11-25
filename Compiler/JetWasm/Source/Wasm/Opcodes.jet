@@ -367,8 +367,8 @@ WasmOpTable: struct {
 
     new: fn() -> WasmOpTable Never! {
         rows: wasm_op_rows()
-        by_op := [Int:Int]{}
-        by_name := [String:Int]{}
+        ^by_op: [Int:Int]{}
+        ^by_name: [String:Int]{}
         loop index in 0..<rows.len() {
             row: rows[index]
             by_op[row.op] = index
@@ -400,8 +400,8 @@ wasm_sig_type: fn(letter: Int) -> Int Never! {
 
 // The params (before ':') or results (after it) of a fixed signature.
 wasm_sig_side: fn(sig: String, results: Bool) -> [Int] Never! {
-    out := [Int]{}
-    after := false
+    ^out: [Int]{}
+    ^after: false
     loop byte in sig.bytes() {
         code: Int{byte}
         if code == 0x3a {

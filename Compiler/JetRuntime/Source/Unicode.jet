@@ -13,9 +13,9 @@
 // table_digits), so a four-digit field read as a little-endian word orders
 // as its value does.
 unicode_table_field: fn(address: I64, digits: I64) -> I64 Never! {
-    value := I64{0}
-    scale := I64{1}
-    at := I64{0}
+    ^value: I64{0}
+    ^scale: I64{1}
+    ^at: I64{0}
     loop at < digits {
         byte: rt_text_byte(wrapping(address + at))
         digit: if (byte < I64{92}) -> wrapping(byte - I64{35}) else -> wrapping(byte - I64{36})
@@ -34,10 +34,10 @@ unicode_table_dense: fn(ascii: I64, cp: I64, digits: I64) -> I64 Never! {
 // `key` (0 to 2^24 - 1) as its four digit bytes, low digit first, in one
 // little-endian word.
 unicode_table_code: fn(key: I64) -> I64 Never! {
-    code := I64{0}
-    rest := key
-    scale := I64{1}
-    at := I64{0}
+    ^code: I64{0}
+    ^rest: key
+    ^scale: I64{1}
+    ^at: I64{0}
     loop at < (I64{4}) {
         digit: rest & I64{63}
         byte: if (digit < I64{57}) -> wrapping(digit + I64{35}) else -> wrapping(digit + I64{36})
@@ -56,8 +56,8 @@ unicode_table_find: fn(table: I64, count: I64, key_digits: I64, value_digits: I6
     if (key < I64{0}) { return I64{-1} }
     data: rt_text_data(table)
     stride: wrapping(wrapping(key_digits * I64{2}) + value_digits)
-    low := I64{0}
-    high := count
+    ^low: I64{0}
+    ^high: count
     if (key_digits == I64{4}) {
         if (key >= I64{16777216}) { return I64{-1} }
         code: unicode_table_code(key)
@@ -118,7 +118,7 @@ unicode_append_mapping: fn(builder: I64, mapping: I64) {
 // is maintained by the streaming caller. No scalar vector, suffix copy, or
 // per-scalar allocation is necessary.
 unicode_final_sigma_after: fn(data: I64, length: I64, start: I64) -> Bool {
-    at := start
+    ^at: start
     loop at < length {
         address: wrapping(data + at)
         cp: rt_text_decode(address)
@@ -132,8 +132,8 @@ unicode_final_sigma_after: fn(data: I64, length: I64, start: I64) -> Bool {
 // state starts uncased at start, exactly like lowering that suffix alone; the
 // successor search still reads to length (the suffix's own end).
 unicode_lower_append: fn(builder: I64, data: I64, start: I64, length: I64) {
-    at := start
-    before_cased := false
+    ^at: start
+    ^before_cased: false
     loop at < length {
         address: wrapping(data + at)
         cp: rt_text_decode(address)
@@ -162,8 +162,8 @@ unicode_ascii_upper: fn(byte: I64) -> Bool { byte >= I64{65} && byte <= I64{90} 
 // its own lowercase and is shared, not copied. -1 when a byte is not ASCII.
 unicode_ascii_lower: fn(value: I64, data: I64, length: I64) -> I64 {
     words: wrapping(length - (length & I64{7}))
-    upper := false
-    at := I64{0}
+    ^upper: false
+    ^at: I64{0}
     loop at < words {
         word: rt_text_word(wrapping(data + at))
         if (word & I64{-9187201950435737472} != I64{0}) { return I64{-1} }
@@ -208,7 +208,7 @@ unicode_ascii_lower: fn(value: I64, data: I64, length: I64) -> I64 {
     data: rt_text_data(value)
     length: rt_text_len(value)
     builder: rt_text_builder_with_capacity(length)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         address: wrapping(data + at)
         unicode_append_mapping(builder, unicode_upper_mapping(rt_text_decode(address)))
@@ -224,8 +224,8 @@ unicode_ascii_lower: fn(value: I64, data: I64, length: I64) -> I64 {
 
 unicode_scalar_offset: fn(value: I64, byte: I64) -> I64 {
     data: rt_text_data(value)
-    at := I64{0}
-    count := I64{0}
+    ^at: I64{0}
+    ^count: I64{0}
     loop at < byte {
         at = wrapping(at + rt_text_width(wrapping(data + at)))
         count = wrapping(count + I64{1})
@@ -260,8 +260,8 @@ unicode_index: fn(value: I64, needle: I64, some: I64, last: Bool) -> I64 {
 #Export(c) jet_unicode_count: fn(value: I64, needle: I64) -> I64 {
     size: rt_text_len(needle)
     if (size == I64{0}) { return I64{0} }
-    from := I64{0}
-    count := I64{0}
+    ^from: I64{0}
+    ^count: I64{0}
     loop {
         at: rt_text_find(value, needle, from, false)
         if (at < I64{0}) { break }

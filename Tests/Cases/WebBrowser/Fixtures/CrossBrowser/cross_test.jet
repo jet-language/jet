@@ -10,7 +10,7 @@ use browser: core.browser
     server: browser.server_start(config) ?? panic("the app is not serving {config.server_url()}: {err}")
     url: server.url()
     banner_url: url.copy()
-    report := browser.report_new(config)
+    ^report: browser.report_new(config)
     greeting: browser.run_case(config, "greeting", fn(page: BrowserPage) -[Env, Net, Time, Time.Wait]> BrowserError! {
         page.goto(url)
         page.get_by_css("#greeting").wait(browser.timeout(10000))

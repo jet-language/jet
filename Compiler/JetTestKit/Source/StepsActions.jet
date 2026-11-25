@@ -29,11 +29,11 @@ kit_steps_snapshot_path: fn(snapshots: String, fixture: String, name: String) ->
 }
 
 kit_steps_inventory: fn(directory: String, root: String) -> [KitInventoryItem] Err! {
-    result := [KitInventoryItem]{}
+    ^result: [KitInventoryItem]{}
     entries: files.list_dir(directory) ?? return Err("inventory directory: {err}")
     loop entry in entries {
         info: files.stat(entry.path) ?? return Err("inventory stat: {err}")
-        digest := ""
+        ^digest: ""
         if info.is_file {
             bytes: files.read_bytes(entry.path) ?? return Err("inventory read: {err}")
             digest = crypto.sha256(bytes).hex()
@@ -69,7 +69,7 @@ kit_steps_inventory_equal: fn(left: [KitInventoryItem], right: [KitInventoryItem
 }
 
 kit_steps_action: fn(step: KitStep, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
-    state := previous
+    ^state: previous
     if step.action == "assert" {
         return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
     }
@@ -85,7 +85,7 @@ kit_steps_action: fn(step: KitStep, context: KitStepCtx, previous: KitStepState)
     }
     if step.action == "capture" {
         if step.argv[1] == "+=" {
-            words := step.argv
+            ^words: step.argv
             words[1] = "="
             captured: kit_steps_capture_value(words, context, state)
             if captured.verdict.status != "PASS" {
@@ -95,7 +95,7 @@ kit_steps_action: fn(step: KitStep, context: KitStepCtx, previous: KitStepState)
                 .Text(text) -> text
                 .Bytes(_) | .Numbers(_) | .Tree(_) | .Absent -> ""
             }
-            found := false
+            ^found: false
             loop index in 0..<state.captures.len() {
                 if state.captures[index].name == words[0] {
                     prefix: kit_steps_captured_subject(words[0], state.captures) ?? return kit_steps_action_error(state, "accumulating capture is not text")
@@ -143,7 +143,7 @@ kit_steps_action: fn(step: KitStep, context: KitStepCtx, previous: KitStepState)
         path: kit_steps_work_path(step.argv[0], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "inventory directory escapes work")
         items: kit_steps_inventory(path, path) ?? return kit_steps_action_error(state, "{err}")
         if step.label != "" -> state.inventories.push(KitInventory{label: step.label, items: items}) else {
-            found := false
+            ^found: false
             loop saved in state.inventories {
                 if saved.label == step.argv[2] {
                     found = true
@@ -175,7 +175,7 @@ kit_steps_action: fn(step: KitStep, context: KitStepCtx, previous: KitStepState)
 }
 
 kit_steps_finish: fn(state: KitStepState, verdict: KitVerdict) -> KitOutcome {
-    errors := [String]{}
+    ^errors: [String]{}
     loop pending in state.children {
         if pending.joined -> next
         exited: pending.child.exited() ?? {

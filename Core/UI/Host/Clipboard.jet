@@ -10,21 +10,17 @@ use {
 // the clipboard text the page last observed (a paste, copy or cut, or its own
 // write_text); a browser lends the live clipboard only to a user gesture.
 #Builtin.Needs("UI.Clipboard") read_text: fn() -[IO]> UIClipboardText UIHostError! {
-    if !rt.capability(1) {
-        return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
-    }
+    if !rt.capability(1) -> return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
     text: rt.clipboard_get() ?? return Err(UIHostError.HostFailure{service: "Clipboard", message: "no clipboard text has been observed yet: the host has seen no paste, copy, cut or write"})
     Ok(UIClipboardText{text: text, selection: None})
 }
 
 #Builtin.Needs("UI.Clipboard") write_text: fn(text: String) -[IO]> UIClipboardWrite UIHostError! {
-    if !rt.capability(1) {
-        return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
-    }
+    if !rt.capability(1) -> return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
     if !rt.clipboard_set(text) {
         return Err(UIHostError.HostFailure{service: "Clipboard", message: "the provider could not write the clipboard"})
     }
-    characters := 0
+    ^characters: 0
     loop byte in text.bytes() {
         if (Int{byte}) & 192 != 128 -> characters += 1
     }
@@ -33,4 +29,6 @@ use {
 
 #Builtin.Needs("UI.Clipboard") clear: fn() -[IO]> UIClipboardWrite UIHostError! { write_text("") }
 
-#Builtin.Needs("UI.Clipboard") is_empty: fn() -[IO]> Bool UIHostError! { read_text().text.len() == 0 }
+#Builtin.Needs("UI.Clipboard") is_empty: fn() -[IO]> Bool UIHostError! {
+    read_text().text.len() == 0
+}

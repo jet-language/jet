@@ -17,14 +17,14 @@ register: fn(n: Int) -[DB]> Bool {
 }
 
 run: fn() {
-    workers := [Task<Bool>]{}
+    ^workers: [Task<Bool>]{}
     loop n in 0..<8 { workers.push(task register(n)) }
-    registered := 0
+    ^registered: 0
     loop worker in workers {
         if worker.join() ?? panic("register task failed") -> registered += 1
     }
     print("registered {registered}")
-    logins := 0
+    ^logins: 0
     loop n in 0..<8 {
         session: auth.password_login("user{n}@example.com", "argon2id:{n}", 1000, 60) ?? next
         if auth.session_user(session) == ("user{n}@example.com") -> logins += 1

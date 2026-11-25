@@ -42,11 +42,11 @@ JetCLIDoctestFile: struct {
 jet_cli_doctest_file: fn(path: String, shown: String, source: String) -> JetCLIDoctestFile Never! {
     tests: jet_cli_doc_discover_doctests(JetCLIDocUnit{path: shown, source: source})
     lines: source.split("\n").to_list()
-    items := [String]{}
+    ^items: [String]{}
     loop test in tests -> items.push(jet_cli_doctest_item(lines, test.line))
-    names := [String]{}
+    ^names: [String]{}
     loop index in 0..<items.len() {
-        ordinal := 1
+        ^ordinal: 1
         loop before in 0..<index {
             if items[before] == items[index] -> ordinal += 1
         }
@@ -60,7 +60,7 @@ jet_cli_doctest_file: fn(path: String, shown: String, source: String) -> JetCLID
 // declares `name: ...`, as `Outer.name` when it is a member of the unindented
 // `Outer: ...` it sits in; empty when the run documents no named item.
 jet_cli_doctest_item: fn(lines: [String], fence_line: Int) -> String Never! {
-    at := fence_line
+    ^at: fence_line
     loop at < lines.len() && lines[at].trim().starts_with(DOC_COMMENT_PREFIX) -> at += 1
     loop at < lines.len() && lines[at].trim().starts_with("#") && !lines[at].trim().contains(" ") {
         at += 1
@@ -68,7 +68,7 @@ jet_cli_doctest_item: fn(lines: [String], fence_line: Int) -> String Never! {
     if at >= lines.len() -> return ""
     inner: jet_cli_doctest_declared(lines[at])
     if inner == "" || !(lines[at].starts_with(" ") || lines[at].starts_with("\t")) -> return inner
-    above := fence_line - 2
+    ^above: fence_line - 2
     loop above >= 0 {
         line: lines[above]
         if line.trim() != "" && !line.starts_with(" ") && !line.starts_with("\t") && !line.starts_with("/") {
@@ -95,7 +95,7 @@ jet_cli_doctest_declared: fn(line: String) -> String Never! {
 // the entry alone when `package` is false), each file's claims laid over its
 // bytes in `snapshot`.
 jet_cli_doctest_overlay: fn(snapshot: ^JetDriverAuthorizedSourceSnapshot, package: Bool) -> [JetCLIDoctestFile] Never! {
-    found := [JetCLIDoctestFile]{}
+    ^found: [JetCLIDoctestFile]{}
     if snapshot.roots.len() == 0 -> return found
     loop file in snapshot.roots[0].files {
         if !package && file.path != snapshot.entry_path -> next
@@ -120,8 +120,8 @@ jet_cli_doctest_quote: fn(text: String) -> String Never! {
 // The source `jet test` compiles for `doctests`: its original source with one
 // claim per doctest after its last line.
 jet_cli_doctest_source: fn(doctests: JetCLIDoctestFile) -> String Never! {
-    out := if doctests.source.ends_with("\n") -> doctests.source else -> "{doctests.source}\n"
-    position := 0
+    ^out: if doctests.source.ends_with("\n") -> doctests.source else -> "{doctests.source}\n"
+    ^position: 0
     loop test in doctests.tests {
         out = "{out}\n#Test(\"{jet_cli_doctest_quote(doctests.names[position])}\") {{\n"
         position += 1
@@ -136,7 +136,7 @@ jet_cli_doctest_source: fn(doctests: JetCLIDoctestFile) -> String Never! {
 }
 
 jet_cli_doctest_named: fn(doctests: JetCLIDoctestFile, name: String) -> JetCLIDocTest? Never! {
-    position := 0
+    ^position: 0
     loop test in doctests.tests {
         if doctests.names[position] == name -> return Val(test)
         position += 1
@@ -146,7 +146,7 @@ jet_cli_doctest_named: fn(doctests: JetCLIDoctestFile, name: String) -> JetCLIDo
 
 // The doctest claims of `tests` (`jet test --docs`).
 jet_cli_doctest_claims: fn(tests: [JetNativeTestCase], doctests: [JetCLIDoctestFile]) -> [JetNativeTestCase] Never! {
-    claims := [JetNativeTestCase]{}
+    ^claims: [JetNativeTestCase]{}
     loop test in tests {
         loop doctest_file in doctests {
             if jet_cli_doctest_named(doctest_file, test.name) != None {
@@ -161,13 +161,13 @@ jet_cli_doctest_claims: fn(tests: [JetNativeTestCase], doctests: [JetCLIDoctestF
 // The byte span of 1-based `line` in `source`, without its line break.
 jet_cli_doctest_line_span: fn(source: String, line: Int) -> Span Never! {
     bytes: source.bytes()
-    start := 0
-    current := 1
+    ^start: 0
+    ^current: 1
     loop current < line && start < bytes.len() {
         if bytes[start] == (U8{10}) -> current += 1
         start += 1
     }
-    end := start
+    ^end: start
     loop end < bytes.len() && bytes[end] != (U8{10}) && bytes[end] != (U8{13}) -> end += 1
     Span{start: start, end: end}
 }
@@ -178,10 +178,10 @@ jet_cli_doctest_line_span: fn(source: String, line: Int) -> Span Never! {
 // unless `update` records the rewrite of a one-line rendering in `rewrites`
 // instead.
 jet_cli_doctest_settle: fn(wire: String, doctests: JetCLIDoctestFile, test: JetCLIDocTest, color: Bool, update: Bool, rewrites: ^[JetCLIDocExpectation], mismatches: ^[JetCLITestStop]) -> String Err! {
-    parts := jet_cli_native_test_wire_parts(wire)
+    ^parts: jet_cli_native_test_wire_parts(wire)
     pieces: parts.stdout.split(JET_CLI_DOCTEST_OPEN).to_list()
-    output := pieces[0]
-    actuals := [String]{}
+    ^output: pieces[0]
+    ^actuals: [String]{}
     loop index in 1..<pieces.len() {
         framed: pieces[index].split(JET_CLI_DOCTEST_CLOSE).to_list()
         if framed.len() < 2 {
@@ -190,13 +190,13 @@ jet_cli_doctest_settle: fn(wire: String, doctests: JetCLIDoctestFile, test: JetC
             next
         }
         actuals.push(framed[0])
-        rest := framed[1]
+        ^rest: framed[1]
         loop at in 2..<framed.len() -> rest = "{rest}{JET_CLI_DOCTEST_CLOSE}{framed[at]}"
         output = "{output}{rest}"
     }
     row: diagnostic_registry_row("E2901") ?? return Err("the doctest mismatch diagnostic is registered")
-    diagnostics := [Diagnostic]{}
-    position := 0
+    ^diagnostics: [Diagnostic]{}
+    ^position: 0
     loop expectation in test.expectations {
         if expectation.expression == "" -> next
         // A claim that stopped before this line already failed with its stop.
@@ -222,7 +222,7 @@ jet_cli_doctest_settle: fn(wire: String, doctests: JetCLIDoctestFile, test: JetC
 
 // `source` with each rewrite's `// =>` claim set to its rendering.
 jet_cli_doctest_rewrite: fn(source: String, rewrites: [JetCLIDocExpectation]) -> String Never! {
-    lines := source.split("\n").to_list()
+    ^lines: source.split("\n").to_list()
     loop rewrite in rewrites {
         index: rewrite.line - 1
         if index < 0 || index >= lines.len() -> next
@@ -254,8 +254,8 @@ jet_cli_doctest_rewrite: fn(source: String, rewrites: [JetCLIDocExpectation]) ->
     doctests: jet_cli_doctest_file("/work/a.jet", "a.jet", source)
     stdout: "setup\n{JET_CLI_DOCTEST_OPEN}4{JET_CLI_DOCTEST_CLOSE}"
     wire: jet_cli_native_test_wire(JetNativeTestWire{flags: 1, name: "doctest 1 of a.jet", stdout: stdout, stderr: ""})
-    rewrites := [JetCLIDocExpectation]{}
-    mismatches := [JetCLITestStop]{}
+    ^rewrites: [JetCLIDocExpectation]{}
+    ^mismatches: [JetCLITestStop]{}
     settled: jet_cli_doctest_settle(wire, doctests, doctests.tests[0], false, false, rewrites, mismatches) ?? panic("a well-formed wire settles")
     parts: jet_cli_native_test_wire_parts(settled) ?? panic("a settled wire parses")
     assert_eq(parts.flags, 0)

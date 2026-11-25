@@ -38,16 +38,16 @@ image_test_build: fn(spec: OCIBuildSpec, prefix: String) -> OCIBuiltImage {
 
 #Test("tar header checksum is valid ustar") {
     tar: image_test_tar([LayerFile]{image_test_bin("usr/local/bin/app", "x")})
-    header := tar[0..<512]
+    ^header: tar[0..<512]
     // Recompute the checksum the way a real reader does: the checksum field
     // counts as ASCII spaces, and the sum must equal the encoded octal value.
-    encoded := 0
+    ^encoded: 0
     loop index in 148..<154 {
         code: Int{header[index]}
         if code == 0 || code == 32 -> break
         encoded = encoded * 8 + (code - 48)
     }
-    recomputed := 0
+    ^recomputed: 0
     loop index in 0..<512 {
         recomputed += if index >= 148 && index < 156 -> 32 else -> (Int{header[index]})
     }
@@ -57,7 +57,7 @@ image_test_build: fn(spec: OCIBuildSpec, prefix: String) -> OCIBuiltImage {
 // I5: the same spec built twice into different directories yields identical
 // blobs and the same manifest digest.
 #Test("build is reproducible across separate builds") {
-    spec := image_test_spec([LayerFile]{image_test_bin("usr/local/bin/app", "the binary")})
+    ^spec: image_test_spec([LayerFile]{image_test_bin("usr/local/bin/app", "the binary")})
     spec.env = [ImageEnvVar]{ImageEnvVar{key: "RUST_LOG", value: "info"}}
     spec.expose = [Int]{8080}
     a: image_test_build(spec, "jet-oci-test-a-")
@@ -95,11 +95,11 @@ image_test_build: fn(spec: OCIBuildSpec, prefix: String) -> OCIBuiltImage {
     root: image_test_dir("jet-oci-test-base-")
     base_dir: files.join(root, "base-arm64")
     output_dir: files.join(root, "mismatch")
-    base := OCIBuildSpec.defaults()
+    ^base: OCIBuildSpec.defaults()
     base.files = [LayerFile]{image_test_bin("bin/sh", "base")}
     base.platform = "linux.arm64"
     _: image_build(base, base_dir, "base") ?? panic("build base")
-    image := OCIBuildSpec.defaults()
+    ^image: OCIBuildSpec.defaults()
     image.files = [LayerFile]{image_test_bin("bin/app", "image")}
     image.platform = "linux.x64"
     if image_build_with_base(image, output_dir, "image", Val(base_dir)) == {

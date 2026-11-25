@@ -28,21 +28,17 @@ jet_cli_derivation_entry: fn(query: String, file: String?) -[FS, Env]> String? N
         if !jet_cli_derivation_name(pieces[0]) -> return None
         if pieces.len() == 2 && !jet_cli_derivation_offset(pieces[1]) -> return None
     }
-    entry := ""
+    ^entry: ""
     if {
-        file == .Val(named) -> {
-            entry = jet_cli_inspect_absolute(named)
-        }
+        file == .Val(named) -> { entry = jet_cli_inspect_absolute(named) }
         else -> {
-            notices := [String]{}
+            ^notices: [String]{}
             cwd: cli_files.cwd() ?? return None
             if {
                 jet_cli_find_project_entry(cwd, "explain", false, notices) == .Entry(found) -> {
                     entry = found.path
                 }
-                else -> {
-                    return None
-                }
+                else -> { return None }
             }
         }
     }
@@ -82,11 +78,13 @@ jet_cli_derivation_offset: fn(text: String) -> Bool Never! {
 // definition whose claim names the declaration path (`method:main.Shape.area`).
 jet_cli_derivation_subject: fn(store: DerivationStore, query: String) -> String? Never! {
     if derivation_store_subject(store, query).len() > 0 -> return Val(query)
-    callbacks := [Int]{}
-    definitions := [Int]{}
+    ^callbacks: [Int]{}
+    ^definitions: [Int]{}
     loop (row, record) in store.records {
         if record.subject.starts_with("{query}@") -> callbacks.push(row)
-        if record.rule == "checked-definition" && record.claim.after(":") == query -> definitions.push(row)
+        if record.rule == "checked-definition" && record.claim.after(":") == query {
+            definitions.push(row)
+        }
     }
     rows: if definitions.len() > 0 -> definitions else -> callbacks
     if rows.len() == 0 -> return None
@@ -106,13 +104,13 @@ jet_cli_derivation_name_of: fn(record: DerivationRecord) -> String Never! {
 
 // The subjects of module `module_name` closest to `query`, nearest first.
 jet_cli_derivation_closest: fn(store: DerivationStore, module_name: String, query: String) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop record in store.records {
         name: jet_cli_derivation_name_of(record)
         if name.starts_with("{module_name}.") && !names.contains(name) -> names.push(name)
     }
     names.sort_by(fn(left: String, right: String) { (jet_cli_edit_distance(query, left) <=> jet_cli_edit_distance(query, right)).then(left <=> right) })
-    closest := [String]{}
+    ^closest: [String]{}
     loop name in names.move() {
         if closest.len() == JET_CLI_DERIVATION_CLOSEST -> break
         closest.push(name)
@@ -138,12 +136,14 @@ jet_cli_explain_derivation_report: fn(result: JetDriverCompileResult, query: Str
 // and its premises, a record a premise names nested four columns under it.
 jet_cli_explain_derivation_chain: fn(store: DerivationStore, subject: String, query: String, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
     steps: derivation_store_chain(store, subject)
-    what := ""
+    ^what: ""
     loop step in steps {
         indent: " ".repeat(step.depth * 4)
         if what != "" -> what = "{what}\n"
         what = "{what}{indent}{step.record.claim}\n{indent}  Known by {derivation_record_line(step.record)}\n{indent}  Subject: {step.record.subject}"
-        if step.record.premises.len() > 0 -> what = "{what}\n{indent}  Premises: {step.record.premises.join(", ")}"
+        if step.record.premises.len() > 0 {
+            what = "{what}\n{indent}  Premises: {step.record.premises.join(", ")}"
+        }
     }
     meaning: steps[0].record.claim
     explanation: DiagnosticExplanation{code: query, stage: "derivation relation", meaning: meaning, what: Val(what), why: None, fix: None, example: None}

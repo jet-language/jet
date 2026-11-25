@@ -2,13 +2,13 @@ use json: core.encoding.json
 
 kit_steps_json_row_expand: fn(text: String, name: String, row: Dyn?, preview: Bool) -> String Err! {
     prefix: "{{{name}."
-    rest := text
-    result := ""
+    ^rest: text
+    ^result: ""
     loop {
         start: kit_steps_byte_index(rest, prefix) ?? break
         end: kit_steps_byte_index(kit_steps_byte_slice(rest, start, rest.count_bytes()), "}}") ?? return Err("JSON bound row path missing")
         path: "$.{kit_steps_byte_slice(rest, start + prefix.count_bytes(), start + end)}"
-        replacement := "0"
+        ^replacement: "0"
         if !preview {
             source: row ?? return Err("JSON bound row path missing")
             selected: kit_steps_json_select(source, kit_steps_json_path(path) ?? return Err("JSON bound row path missing"), 0) ?? return Err("JSON bound row path missing")
@@ -23,7 +23,7 @@ kit_steps_json_row_expand: fn(text: String, name: String, row: Dyn?, preview: Bo
 
 kit_steps_json_rows: fn(text: String, assertion: KitAssertion) -> String? {
     selected: kit_steps_json_values(text, assertion.json_mode, assertion.json_path) ?? return Val("JSON each selection failed")
-    rows := [Dyn]{}
+    ^rows: [Dyn]{}
     loop value in selected {
         if value == {
             .Array(items) -> {
@@ -35,9 +35,9 @@ kit_steps_json_rows: fn(text: String, assertion: KitAssertion) -> String? {
         }
     }
     loop row in rows {
-        body := assertion.value
+        ^body: assertion.value
         root: "{{{assertion.extra}}}"
-        source := text
+        ^source: text
         if body.starts_with(root) {
             body = "${kit_steps_byte_slice(body, root.count_bytes(), body.count_bytes())}"
             source = json.to_string(row) ?? return Val("JSON bound row encode: {err}")

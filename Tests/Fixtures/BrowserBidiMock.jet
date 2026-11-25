@@ -49,9 +49,9 @@ fail: fn(message: String) -> Never { process.fail(1, "browser_bidi_mock: {messag
 // The first index at or after `from` where `needle` starts, or -1.
 index_of: fn(hay: [U8], needle: [U8], from: Int) -> Int {
     last: hay.len() - needle.len()
-    start := from
+    ^start: from
     loop start <= last {
-        matched := true
+        ^matched: true
         loop k in 0..<needle.len() {
             if hay[start + k] != needle[k] {
                 matched = false
@@ -74,8 +74,8 @@ sub: fn(raw: [U8], start: Int, end: Int) -> String {
 replace_all: fn(text: String, old: String, new: String) -> String {
     raw: text.bytes()
     pattern: old.bytes()
-    out := ""
-    start := 0
+    ^out: ""
+    ^start: 0
     loop {
         at: index_of(raw, pattern, start)
         if at < 0 -> break
@@ -86,7 +86,7 @@ replace_all: fn(text: String, old: String, new: String) -> String {
 }
 
 ascii_lower: fn(text: String) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
@@ -97,8 +97,8 @@ ascii_lower: fn(text: String) -> String {
 // The bytes a lowercase hex digest spells.
 hex_bytes: fn(digest: String) -> [U8] {
     digits: digest.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index + 1 < digits.len() {
         out.push(U8{hex_value(digits[index]) * 16 + hex_value(digits[index + 1])})
         index += 2
@@ -133,7 +133,7 @@ field: fn(text: String, name: String) -> String {
         close: index_of(raw, "\"".bytes(), start + 1)
         return sub(raw, start + 1, if close < 0 -> raw.len() - 1 else -> close)
     }
-    end := start
+    ^end: start
     loop end < raw.len() && (Int{raw[end]}) >= 48 && (Int{raw[end]}) <= 57 -> end += 1
     sub(raw, start, end)
 }
@@ -244,8 +244,8 @@ accept: fn(peer: ^Peer) {
     end: index_of(peer.buffer, terminator, 0) + 4
     request: sub(peer.buffer, 0, end)
     peer.buffer = peer.buffer[end..<peer.buffer.len()].copy()
-    key := ""
-    found := false
+    ^key: ""
+    ^found: false
     loop line in request.split("\r\n").to_list() {
         raw: line.bytes()
         colon: index_of(raw, ":".bytes(), 0)
@@ -266,7 +266,7 @@ read: fn(peer: ^Peer) -> String {
     if (Int{head[0]}) & 15 != 1 -> fail("expected text frame")
     if (Int{head[1]}) & 128 == 0 -> fail("client frame must be masked")
     short: (Int{head[1]}) & 127
-    len := short
+    ^len: short
     if short == 126 {
         wide: take_bytes(peer, 2)
         len = Int{wide[0]} * 256 + Int{wide[1]}
@@ -276,7 +276,7 @@ read: fn(peer: ^Peer) -> String {
         loop b in take_bytes(peer, 8) -> len = len * 256 + (Int{b})
     }
     mask: take_bytes(peer, 4)
-    payload := take_bytes(peer, len)
+    ^payload: take_bytes(peer, len)
     loop i in 0..<payload.len() -> payload[i] = payload[i] ~ mask[i % 4]
     String.from_bytes(payload) ?? fail("text frame is not UTF-8")
 }
@@ -284,7 +284,7 @@ read: fn(peer: ^Peer) -> String {
 // Port of write_text_frame.
 write: fn(peer: Peer, message: String) {
     bytes: message.bytes()
-    frame := [U8]{U8{0x81}}
+    ^frame: [U8]{U8{0x81}}
     if bytes.len() <= 125 -> frame.push(U8{bytes.len()}) else {
         if bytes.len() > 65535 -> fail("mock response too large")
         frame.push(U8{126})
@@ -331,7 +331,7 @@ resolve: fn(reply: Dyn, request: String, n: Int) -> Dyn {
 // `{id}` names the request id and `{n}` the occurrence in results and frames. require/forbid are the
 // request assertions the Rust server made before replying.
 run_script: fn(peer: ^Peer, spec: Dyn) {
-    seen := [String:Int]{}
+    ^seen: [String:Int]{}
     stop: child(spec, "stop")
     loop _ in 0..<count(child(spec, "max")) {
         request: read(peer)
@@ -390,7 +390,7 @@ run_malformed_session: fn(peer: ^Peer) {
 // Port of run_event_storm.
 run_event_storm: fn(peer: ^Peer) {
     results: [READY, "{{\"sessionId\":\"storm\",\"capabilities\":{{}}}}", READY, "{{}}"]
-    filler := ""
+    ^filler: ""
     loop _ in 0..<4000 -> filler = "{filler}x"
     loop command in 0..<4 {
         request: read(peer)
@@ -465,7 +465,7 @@ run: fn() {
         _: remaining(started)
         fail("accept: {err}")
     }
-    peer := Peer{stream: stream, buffer: [U8]{}, ended: false, started: started}
+    ^peer: Peer{stream: stream, buffer: [U8]{}, ended: false, started: started}
     accept(peer)
     if mode == {
         "script" -> run_script(peer, spec)

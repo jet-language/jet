@@ -10,22 +10,22 @@ use core.process
 run: fn() {
     args: process.args()
     count: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 4194304 else -> 4194304
-    data := [Int]{}
+    ^data: [Int]{}
     loop index in 0..<count { data.push(index) }
-    lines := 0
+    ^lines: 0
     loop _ in 0..<4 {
         loop start in 0..<8 {
-            at := start
+            ^at: start
             loop at < count {
                 lines += data[at]
                 at += 8
             }
         }
     }
-    pages := 0
+    ^pages: 0
     loop _ in 0..<4 {
         loop start in 0..<520 {
-            at := start
+            ^at: start
             loop at < count {
                 pages += data[at]
                 at += 520
@@ -35,10 +35,10 @@ run: fn() {
     // Four times the array, 128 MiB by default: each hop's address comes
     // from a linear congruential step no prefetcher predicts, so most hops
     // miss the LLC.
-    table := [Int]{}
+    ^table: [Int]{}
     loop index in 0..<count * 4 { table.push(index) }
-    hops := 0
-    spot := 0
+    ^hops: 0
+    ^spot: 0
     loop _ in 0..<count {
         spot = (spot * 1103515245 + 12345) % (count * 4)
         hops += table[spot]

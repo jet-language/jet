@@ -23,7 +23,7 @@ DiscoveryError: enum {
 pkg_discover_module_in: fn(root: String, name: String) -[FS, Env]> String DiscoveryError! {
     resolver: AuthorityResolver.open(root) ?? return Err(DiscoveryError.NotFound{name: name})
     listed: resolver.discover_source_files() ?? return Err(DiscoveryError.NotFound{name: name})
-    matches := [String]{}
+    ^matches: [String]{}
     loop file in listed {
         file_name: pkg_path_file_name(file.relative)
         if file_name == PACKAGE_FILE -> next
@@ -44,7 +44,7 @@ pkg_discover_module_in: fn(root: String, name: String) -[FS, Env]> String Discov
         }
         else -> {
             prefix: "{resolver.root}/"
-            relative := [String]{}
+            ^relative: [String]{}
             loop path in matches {
                 relative.push(if path.starts_with(prefix) -> path.removeprefix(prefix) else -> path)
             }
@@ -74,7 +74,7 @@ pkg_discover_jobs_in: fn(root: String) -[FS, Env]> JobRegistry JobDiscoveryError
             return Err(JobDiscoveryError{message: error.message()})
         }
     }
-    job_items := [Item]{}
+    ^job_items: [Item]{}
     loop file in listed {
         file_name: pkg_path_file_name(file.relative)
         if file_name == PACKAGE_FILE -> next
@@ -115,7 +115,7 @@ pkg_discover_jobs_in: fn(root: String) -[FS, Env]> JobRegistry JobDiscoveryError
 
 // The headline of each diagnostic, one per line.
 pkg_diagnostic_headlines: fn(diagnostics: [Diagnostic]) -> String Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop diagnostic in diagnostics {
         lines.push(diagnostic_headline(diagnostic.code, diagnostic.what))
     }
@@ -128,7 +128,7 @@ pkg_file_declares_module: fn(input: String, name: String) -> Bool Never! {
     bytes: pkg_strip_comments(input).bytes()
     keyword: KW_MODULE.bytes()
     wanted: name.bytes()
-    depth := 0
+    ^depth: 0
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if code == 123 {

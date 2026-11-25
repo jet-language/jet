@@ -107,9 +107,9 @@ pkg_cffi_rustc_link_args_for_target: fn(cffi: CFFI, project_root: String, target
 
 // Link arguments using an optional entry source for an inline package.
 pkg_cffi_rustc_link_args_for_target_with_entry: fn(cffi: CFFI, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> [String] CFFIError! {
-    args := [String]{}
-    diagnostics := [Diagnostic]{}
-    direct := cffi.link_closure.direct
+    ^args: [String]{}
+    ^diagnostics: [Diagnostic]{}
+    ^direct: cffi.link_closure.direct
     if direct.len() == 0 {
         loop linked in cffi.libs -> direct.push(linked.lib)
     }
@@ -215,7 +215,7 @@ pkg_cffi_recorded_runtime_dir: fn(dir: String, actual: String, kind: String, run
 pkg_cffi_runtime_link: fn(dir: String, archive: String, actual: String, kind: String, runtime: String, links: [String]) -[FS, Env]> LinkFlags? Never! {
     runtime_dir: pkg_cffi_recorded_runtime_dir(dir, actual, kind, runtime) ?? return None
     if !files.is_file(archive) -> return None
-    flags := LinkFlags.empty()
+    ^flags: LinkFlags.empty()
     flags.lib_dirs = [String]{dir, runtime_dir}
     flags.link_names = links
     flags.rpath_dirs = [String]{runtime_dir}
@@ -225,7 +225,7 @@ pkg_cffi_runtime_link: fn(dir: String, archive: String, actual: String, kind: St
 // A generated static archive plus fixed system libraries.
 pkg_cffi_archive_link: fn(dir: String, archive: String, links: [String]) -[FS]> LinkFlags? Never! {
     if !files.is_file(archive) -> return None
-    flags := LinkFlags.empty()
+    ^flags: LinkFlags.empty()
     flags.lib_dirs = [String]{dir}
     flags.link_names = links
     Val(flags)
@@ -267,7 +267,7 @@ pkg_cffi_pascal_link: fn(lib: String, dir: String, archive: String) -[FS, Env]> 
     }
     runtime: files.join(dir, "lib{lib}_runtime{suffix}")
     if !files.is_file(archive) || !files.is_file(runtime) -> return None
-    flags := LinkFlags.empty()
+    ^flags: LinkFlags.empty()
     flags.lib_dirs = [String]{dir}
     flags.link_names = [String]{"static={lib}", "dylib={lib}_runtime", "pthread", "dl", "m"}
     flags.rpath_dirs = [String]{dir}
@@ -288,7 +288,7 @@ pkg_cffi_cpp_link: fn(lib: String, actual: String, dir: String, archive: String,
     if !files.is_file(archive) -> return None
     record: files.read(files.join(dir, "{actual}.link")) ?? return None
     lines: pkg_bridge_text_lines(record)
-    bound_target := String?{None}
+    ^bound_target: String?{None}
     loop line in lines {
         if line.starts_with("target\t") {
             value: line.removeprefix("target\t")
@@ -297,11 +297,11 @@ pkg_cffi_cpp_link: fn(lib: String, actual: String, dir: String, archive: String,
         } else if line.starts_with("target") { return None }
     }
     if bound_target != Val(target) -> return None
-    flags := LinkFlags.empty()
+    ^flags: LinkFlags.empty()
     flags.lib_dirs = [String]{dir}
     flags.link_names = [String]{"static={lib}"}
     runtime: pkg_ffi_cxx_runtime_for_target(target)
-    has_runtime := false
+    ^has_runtime: false
     loop line in lines {
         if line.starts_with("L\t") {
             value: line.removeprefix("L\t")
@@ -375,13 +375,13 @@ pkg_cffi_clib_link: fn(lib: String, target: String, project_root: String) -[FS, 
     if target == SYSTEM_LIB_TARGET {
         if pkg_cffi_pkg_config_link(lib) == .Found(flags) -> return Ok(flags)
         if CFFI_ALWAYS_LINKED_LIBC.contains(lib) {
-            flags := LinkFlags.empty()
+            ^flags: LinkFlags.empty()
             flags.link_names = [String]{lib}
             return Ok(flags)
         }
         return pkg_cffi_provision_from_nixpkgs(lib, lib, project_root)
     }
-    flags := LinkFlags.empty()
+    ^flags: LinkFlags.empty()
     flags.include_dirs = [String]{target}
     flags.lib_dirs = [String]{target}
     flags.link_names = [String]{lib}
@@ -391,13 +391,13 @@ pkg_cffi_clib_link: fn(lib: String, target: String, project_root: String) -[FS, 
 // Realize `nixpkgs#<attr>` and link from its store path. The store path is
 // cached at `<root>/.jet/clinks/<lib>`; a stale or missing cache re-realizes.
 pkg_cffi_provision_from_nixpkgs: fn(lib: String, attr: String, project_root: String) -[FS, Env, Exec, Time.Wait]> LinkFlags CFFIError! {
-    store := pkg_cffi_cached_store_path(lib, project_root) ?? ""
+    ^store: pkg_cffi_cached_store_path(lib, project_root) ?? ""
     if store == "" {
         store = pkg_cffi_realize_nixpkgs(attr) ?? return Err(pkg_cffi_error(pkg_cffi_e3210(lib, attr, err.message)))
         pkg_cffi_write_cached_store_path(lib, store, project_root)
     }
     lib_dir: "{store}/lib"
-    flags := LinkFlags.empty()
+    ^flags: LinkFlags.empty()
     flags.include_dirs = [String]{"{store}/include"}
     flags.lib_dirs = [String]{lib_dir}
     flags.link_names = [String]{lib}
@@ -464,7 +464,7 @@ pkg_cffi_pkg_config_link: fn(lib: String) -[Exec, Time.Wait]> PkgConfigOutcome N
 // Parse a pkg-config flag line into link flags; a line without `-l` links
 // the library by its own name.
 pkg_cffi_parse_pkg_config: fn(text: String, lib: String) -> LinkFlags Never! {
-    flags := LinkFlags.empty()
+    ^flags: LinkFlags.empty()
     loop token in pkg_cffi_whitespace_tokens(text) {
         if {
             token.starts_with("-I") -> { flags.include_dirs.push(token.removeprefix("-I")) }
@@ -480,8 +480,8 @@ pkg_cffi_parse_pkg_config: fn(text: String, lib: String) -> LinkFlags Never! {
 // `str::split_whitespace`: non-empty runs between ASCII/Unicode spaces.
 pkg_cffi_whitespace_tokens: fn(text: String) -> [String] Never! {
     bytes: text.bytes()
-    tokens := [String]{}
-    cursor := 0
+    ^tokens: [String]{}
+    ^cursor: 0
     loop cursor < bytes.len() {
         cursor = pkg_bytes_skip_space(bytes, cursor)
         if cursor >= bytes.len() -> break

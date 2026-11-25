@@ -80,7 +80,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 }
 
 #Test("preset resolution is parent first and deduplicated") {
-    set := PresetSet{}
+    ^set: PresetSet{}
     set.insert(PresetSpec{name: "base", packages: [String]{"git@nixpkgs"}}) ?? panic("insert base")
     set.insert(PresetSpec{name: "dev", extends: [String]{"base"}, packages: [String]{"git@nixpkgs", "rustc@nixpkgs"}}) ?? panic("insert dev")
     resolved: set.resolve("dev") ?? panic("dev resolves")
@@ -89,7 +89,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 }
 
 #Test("ambient hostname presets merge before user presets") {
-    set := PresetSet{}
+    ^set: PresetSet{}
     set.insert(PresetSpec{name: "host", hostname: Val("build-01"), packages: [String]{"git@nixpkgs"}, variables: [String:String]{"HOST_MODE": "host"}}) ?? panic("insert host")
     set.insert(PresetSpec{name: "sam", user: Val("sam"), packages: [String]{"ripgrep@nixpkgs"}, variables: [String:String]{"USER_MODE": "user"}}) ?? panic("insert sam")
     selected: set.auto_select_many("build-01", "sam")
@@ -103,7 +103,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 }
 
 #Test("ambient preset variable conflicts are rejected") {
-    set := PresetSet{}
+    ^set: PresetSet{}
     set.insert(PresetSpec{name: "host", hostname: Val("build-01"), variables: [String:String]{"MODE": "host"}}) ?? panic("insert host")
     set.insert(PresetSpec{name: "sam", user: Val("sam"), variables: [String:String]{"MODE": "user"}}) ?? panic("insert sam")
     selected: set.auto_select_many("build-01", "sam")
@@ -112,7 +112,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 }
 
 #Test("ambient user precedes default and default is last resort") {
-    set := PresetSet{}
+    ^set: PresetSet{}
     set.insert(PresetSpec{name: "default", packages: [String]{"default@nixpkgs"}}) ?? panic("insert default")
     set.insert(PresetSpec{name: "sam", user: Val("sam"), packages: [String]{"user@nixpkgs"}}) ?? panic("insert sam")
     assert_eq(set.auto_select_many("other", "sam"), [String]{"sam"})
@@ -120,7 +120,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 }
 
 #Test("preset cycles are rejected") {
-    set := PresetSet{}
+    ^set: PresetSet{}
     set.insert(PresetSpec{name: "a", extends: [String]{"b"}}) ?? panic("insert a")
     set.insert(PresetSpec{name: "b", extends: [String]{"a"}}) ?? panic("insert b")
     cycle: if envmodel_test_preset_error(set, [String]{"a"}) == {
@@ -131,7 +131,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 }
 
 #Test("package profile resolver handles its full depth budget iteratively") {
-    set := PackageProfileSet{}
+    ^set: PackageProfileSet{}
     loop index in 0..<ENVMODEL_MAX_RESOLVER_NODES {
         extends: if index > 0 -> [String]{"profile-{index - 1}"} else -> [String]{}
         set.insert_checked(PackageProfileSpec{name: "profile-{index}", extends: extends}) ?? panic("the resolver budget must admit its declared limit")
@@ -164,7 +164,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
         assert(pack.license != "", "{name} has no license fact")
         assert_eq(pack.required_tools.len(), pack.commands.len())
     }
-    selections := [LanguageSpec]{}
+    ^selections: [LanguageSpec]{}
     loop name in catalog.names() -> selections.push(LanguageSpec{name: name, enable: true})
     expansion: catalog.expand(selections) ?? panic("every catalog language expands")
     assert_eq(expansion.applied.len(), 58)
@@ -195,7 +195,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 }
 
 #Test("catalog accepts a valid contribution and rejects duplicate names") {
-    catalog := LanguagePackCatalog.builtin()
+    ^catalog: LanguagePackCatalog.builtin()
     catalog.register(
         LanguagePack{
             name: "JetExperimental",
@@ -228,7 +228,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 }
 
 #Test("catalog contribution projects every declared fact and fingerprints it") {
-    catalog := LanguagePackCatalog.empty()
+    ^catalog: LanguagePackCatalog.empty()
     pack: LanguagePack{
         name: "Contributed",
         packages: [String]{"compiler@nixpkgs"},
@@ -254,13 +254,13 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
     assert_eq(projection.missing_tools.len(), 0)
     assert(projection.included.contains("compiler-tools@nixpkgs"))
     assert(expansion.fingerprint().contains(original_fingerprint))
-    changed := catalog.get("Contributed") ?? panic("the contribution is registered")
+    ^changed: catalog.get("Contributed") ?? panic("the contribution is registered")
     changed.variables["COMPILER_MODE"] = "fast"
     assert(changed.fingerprint() != original_fingerprint)
 }
 
 #Test("catalog rejects conflicting contributed variables and commands") {
-    catalog := LanguagePackCatalog.empty()
+    ^catalog: LanguagePackCatalog.empty()
     variable_rows: [[String]]{[String]{"First", "strict", "compiler"}, [String]{"Second", "fast", "other-compiler"}}
     loop row in variable_rows {
         catalog.register(
@@ -279,7 +279,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
     error: envmodel_test_fact_error(catalog.expand_names([String]{"First", "Second"}))
     assert(error.contains("conflicts with existing variable"), error)
 
-    commands := LanguagePackCatalog.empty()
+    ^commands: LanguagePackCatalog.empty()
     command_rows: [[String]]{[String]{"One", "compiler"}, [String]{"Two", "other-compiler"}}
     loop row in command_rows {
         commands.register(
@@ -299,7 +299,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 }
 
 #Test("language pack rejects unsupported platform and missing tool facts") {
-    catalog := LanguagePackCatalog.empty()
+    ^catalog: LanguagePackCatalog.empty()
     catalog.register(
         LanguagePack{
             name: "Narrow",
@@ -316,7 +316,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 
     // A catalog admits only validated packs, so a required tool without a
     // command mapping is refused at registration.
-    missing := LanguagePackCatalog.empty()
+    ^missing: LanguagePackCatalog.empty()
     missing_error: envmodel_test_register_error(
         missing,
         LanguagePack{
@@ -332,7 +332,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
     assert(missing_error.contains("required tool 'missing' has no command mapping"), missing_error)
     assert_eq(missing.names().len(), 0)
 
-    unlicensed := LanguagePackCatalog.empty()
+    ^unlicensed: LanguagePackCatalog.empty()
     unlicensed_error: envmodel_test_register_error(
         unlicensed,
         LanguagePack{
@@ -346,7 +346,7 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
     )
     assert(unlicensed_error.contains("must declare a license"), unlicensed_error)
 
-    malformed := LanguagePackCatalog.empty()
+    ^malformed: LanguagePackCatalog.empty()
     invalid_venv: envmodel_test_register_error(
         malformed,
         LanguagePack{
@@ -404,8 +404,8 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
     }
     selections: envmodel_languages_from_value(value) ?? panic("typed language map reads")
     assert_eq(selections.len(), 2)
-    rust := LanguageSpec{}
-    python := LanguageSpec{}
+    ^rust: LanguageSpec{}
+    ^python: LanguageSpec{}
     loop selection in selections {
         if selection.name == "rust" -> rust = selection
         if selection.name == "python" -> python = selection
@@ -481,12 +481,12 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
 }
 
 #Test("git hooks path is typed project relative and fingerprinted") {
-    lifecycle := EnvironmentLifecycle{}
+    ^lifecycle: EnvironmentLifecycle{}
     applied: envmodel_lifecycle_from_field(lifecycle, ENV_FIELD_GIT_HOOKS_PATH, CtValue.Str{value: "scripts/githooks"}) ?? panic("git hooks path reads")
     assert(applied)
     assert_eq(lifecycle.git_hooks_path, Val("scripts/githooks"))
     assert(lifecycle.fingerprint().contains("git-hooks-path\tscripts/githooks\n"))
-    outside := EnvironmentLifecycle{}
+    ^outside: EnvironmentLifecycle{}
     rejected: if envmodel_lifecycle_from_field(outside, ENV_FIELD_GIT_HOOKS_PATH, CtValue.Str{value: "../outside"}) == {
         .Ok(_) -> false
         .Err(_) -> true

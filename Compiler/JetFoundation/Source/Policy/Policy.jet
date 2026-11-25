@@ -263,7 +263,7 @@ policy_declaration_site: fn(declaration: PolicyDeclaration, sources: [PolicySour
 // The resolution as `key = value` followed by every declaration of its chain,
 // the last one effective and the earlier ones shadowed.
 policy_explain: fn(resolution: EffectivePolicy, sources: [PolicySourceText]) -> String Never! {
-    out := "{policy_key_name(resolution.key)} = {policy_value_display(resolution.value)}"
+    ^out: "{policy_key_name(resolution.key)} = {policy_value_display(resolution.value)}"
     loop (index, declaration) in resolution.provenance {
         status: if index + 1 == resolution.provenance.len() -> "effective" else -> "shadowed"
         out = "{out}\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {policy_declaration_site(declaration, sources)}"
@@ -362,7 +362,7 @@ policy_span_debug_text: fn(span: Span) -> String Never! {
 // shadowed or tightened declaration stays in the provenance chain.
 policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> EffectivePolicy? PolicyError! {
     // A stable sort by scope rank: written order within a rung.
-    ordered := [PolicyDeclaration]{}
+    ^ordered: [PolicyDeclaration]{}
     loop scope in POLICY_ALL_SCOPES {
         loop declaration in declarations {
             if declaration.key == key && declaration.scope == scope {
@@ -373,8 +373,8 @@ policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effecti
     // A key with no rule is allowed at no scope, so its first declaration is
     // refused (ProhibitedScope).
     registry: policy_rule(key) ?? PolicyRule{key: key, scopes: [PolicyScope]{}, combine: PolicyCombine.Tighten}
-    chain := [PolicyDeclaration]{}
-    effective := PolicyValue?{None}
+    ^chain: [PolicyDeclaration]{}
+    ^effective: PolicyValue?{None}
     loop declaration in ordered {
         if !registry.scopes.contains(declaration.scope) {
             return Err(PolicyError.ProhibitedScope{key: key, scope: declaration.scope, span: declaration.span})
@@ -384,7 +384,7 @@ policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effecti
                 return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: previous.span, second: declaration.span, outer_site: previous})
             }
         }
-        next := declaration.value
+        ^next: declaration.value
         if effective == .Val(outer) {
             widens: policy_widens(key, outer, declaration.value)
             if registry.combine == PolicyCombine.Tighten && widens {

@@ -40,13 +40,13 @@ jet_cli_perf_line_costs_none: fn() -> JetCLIPerfLineCosts Never! {
 // checked source first: one `jet explain --cost` run on it gives the sites
 // of the whole program, each named by its path from the package root.
 jet_cli_perf_line_costs: fn(trace: CanonicalJSON) -[FS, Env, Exec, Time]> JetCLIPerfLineCosts Never! {
-    found := jet_cli_perf_line_costs_none()
+    ^found: jet_cli_perf_line_costs_none()
     sources: jet_cli_perf_rows(trace, "source_identity") ?? return found
     exe: perf_sys.executable()
     if exe == "" -> return found
     // Each source on disk as the trace recorded it, by its canonical path,
     // as the trace names it.
-    named := [String:String]{}
+    ^named: [String:String]{}
     loop source in sources {
         path: jet_cli_perf_member_text(source, "path") ?? next
         digest: jet_cli_perf_member_text(source, "sha256") ?? next
@@ -76,7 +76,7 @@ jet_cli_perf_line_costs: fn(trace: CanonicalJSON) -[FS, Env, Exec, Time]> JetCLI
     }
     // A whole program's sites run past the default item bound; the report is
     // already in memory, so its own size bounds it.
-    limits := EncodingLimits.safe()
+    ^limits: EncodingLimits.safe()
     if ran.output.count_bytes() > limits.max_item_bytes {
         limits.max_item_bytes = ran.output.count_bytes()
     }
@@ -87,7 +87,7 @@ jet_cli_perf_line_costs: fn(trace: CanonicalJSON) -[FS, Env, Exec, Time]> JetCLI
     sites: jet_cli_perf_optional(report, "sites") ?? return found
     if sites == .Array(items) {
         // Each site path's source, "" for one the trace doesn't name.
-        resolved := [String:String]{}
+        ^resolved: [String:String]{}
         loop site in items {
             place: jet_cli_perf_site_text(site, "path") ?? next
             if !resolved.has_key(place) {
@@ -103,7 +103,7 @@ jet_cli_perf_line_costs: fn(trace: CanonicalJSON) -[FS, Env, Exec, Time]> JetCLI
             state: jet_cli_perf_site_text(site, "state") ?? next
             view: jet_cli_perf_site_text(site, "view") ?? ""
             repeated: jet_cli_perf_optional(site, "repeats") ?? next
-            repeats := false
+            ^repeats: false
             if repeated == .Bool(flag) -> repeats = flag
             copied: if view == "" -> "" else -> " of `{view}`"
             turns: if repeats -> ", repeats every loop turn" else -> ""
@@ -120,7 +120,7 @@ jet_cli_perf_line_costs: fn(trace: CanonicalJSON) -[FS, Env, Exec, Time]> JetCLI
 jet_cli_perf_site_source: fn(place: String, entry: String, named: [String:String]) -[FS]> String Never! {
     if place == "" -> return ""
     if !place.starts_with("/") {
-        dir := entry
+        ^dir: entry
         loop {
             slash: dir.rpartition("/")
             if slash.head == "" -> break
@@ -148,11 +148,11 @@ jet_cli_perf_site_text: fn(site: Dyn, key: String) -> String? Never! {
 // depth 1, repeats every loop turn)`); empty when the line has none.
 jet_cli_perf_line_cost_text: fn(costs: JetCLIPerfLineCosts, path: String, line: Int) -> String Never! {
     // Each distinct fact's first cost, and how many costs it stands for.
-    firsts := [Int]{}
-    counts := [Int]{}
+    ^firsts: [Int]{}
+    ^counts: [Int]{}
     loop (index, cost) in costs.costs {
         if cost.line != line || cost.path != path -> next
-        found := -1
+        ^found: -1
         loop (place, first) in firsts {
             known: costs.costs[first]
             if known.kind == cost.kind && known.detail == cost.detail {
@@ -167,7 +167,7 @@ jet_cli_perf_line_cost_text: fn(costs: JetCLIPerfLineCosts, path: String, line: 
         firsts.push(index)
         counts.push(1)
     }
-    text := ""
+    ^text: ""
     loop (place, first) in firsts {
         cost: costs.costs[first]
         times: if counts[place] > 1 -> " ×{counts[place]}" else -> ""

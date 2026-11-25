@@ -138,7 +138,7 @@ pkg_java_bind: fn(source_path: String, source: String, lib: String, cache: Strin
     cc_identity: pkg_bridge_tool_identity("cc")
     ar_identity: pkg_bridge_tool_identity("ar")
     language: JAVA_MODULE_ROOT
-    builder := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    ^builder: ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
     builder.field("language", language.bytes())
     builder.field("binder_schema", "jet-java-bind-v1".bytes())
     builder.field("library", lib.bytes())
@@ -176,7 +176,7 @@ pkg_java_bind: fn(source_path: String, source: String, lib: String, cache: Strin
     archive_digest: pkg_bridge_sha_file(archive) ?? return Err(pkg_binder_scalar_bridge_error(err))
     artifacts: [{name: String, digest: String}]{{name: files.basename(archive), digest: archive_digest}}
     provenance: pkg_bridge_render_provenance(identity, fields, artifacts) ?? return Err(pkg_binder_scalar_bridge_error(err))
-    bound := [String]{}
+    ^bound: [String]{}
     loop method in surface.methods -> bound.push(method.name)
     bound.push("new")
     Ok(JavaBindResult{source: pkg_java_render_jet(lib, surface), bound: bound, archive: archive, jvm_dir: jvm_dir, provenance: provenance})
@@ -194,16 +194,16 @@ pkg_java_file_stem: fn(path: String) -> String Never! {
 // public signature line followed by its `descriptor:` line.
 pkg_java_parse_javap: fn(class: String, text: String) -> JavaSurface ForeignBindError! {
     lines: pkg_binder_lines(text)
-    ctor := [JavaScalar]{}
-    has_ctor := false
-    methods := [JavaMethod]{}
-    names := [String]{}
+    ^ctor: [JavaScalar]{}
+    ^has_ctor: false
+    ^methods: [JavaMethod]{}
+    ^names: [String]{}
     pairs: lines.len() - 1
     loop index in 0..<pairs {
         sig: lines[index].trim()
         desc: lines[index + 1].trim()
         if !sig.starts_with("public ") || !desc.starts_with("descriptor:") -> next
-        stripped := desc
+        ^stripped: desc
         loop stripped.starts_with("descriptor:") -> stripped = stripped.removeprefix("descriptor:")
         descriptor: stripped.trim()
         if sig.contains(" {class}(") || sig.starts_with("public {class}(") {
@@ -250,7 +250,7 @@ pkg_java_descriptor_types: fn(value: String) -> JavaDescriptorTypes ForeignBindE
     }
     unsupported: "unsupported JVM descriptor `{value}`; use long/double/void"
     raw: value.bytes()
-    params := [JavaScalar]{}
+    ^params: [JavaScalar]{}
     loop index in 1..<close {
         if (Int{raw[index]}) == {
             74 -> params.push(JavaScalar.Int)
@@ -270,14 +270,14 @@ pkg_java_descriptor_types: fn(value: String) -> JavaDescriptorTypes ForeignBindE
 
 // `arg0: Int, arg1: Float`.
 pkg_java_params_jet: fn(params: [JavaScalar]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop index in 0..<params.len() -> parts.push("arg{index}: {params[index].jet()}")
     parts.join(", ")
 }
 
 // `arg0, arg1`.
 pkg_java_args: fn(count: Int) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop index in 0..<count -> parts.push("arg{index}")
     parts.join(", ")
 }
@@ -285,7 +285,7 @@ pkg_java_args: fn(count: Int) -> String Never! {
 pkg_java_render_jet: fn(lib: String, surface: JavaSurface) -> String Never! {
     abi: "jet_java_{lib}"
     ctor_params: pkg_java_params_jet(surface.ctor)
-    out := [String]{"#Import c.{abi}: module {{\n    new: fn({ctor_params}) Int = \"{abi}_new\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
+    ^out: [String]{"#Import c.{abi}: module {{\n    new: fn({ctor_params}) Int = \"{abi}_new\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
     loop method in surface.methods {
         receiver: pkg_java_receiver(method, "handle: Int")
         result: if method.result == JavaScalar.Void -> "" else -> " {method.result.jet()}"
@@ -318,7 +318,7 @@ pkg_java_receiver: fn(method: JavaMethod, receiver: String) -> String Never! {
 pkg_java_render_c: fn(lib: String, surface: JavaSurface, classes: String) -> String Never! {
     abi: "jet_java_{lib}"
     class: pkg_java_c_escape(surface.class)
-    out := [String]{pkg_binder_fill_template(PKG_JAVA_BRIDGE_C, [String:String]{"abi": abi, "classes": pkg_java_c_escape(classes)})}
+    ^out: [String]{pkg_binder_fill_template(PKG_JAVA_BRIDGE_C, [String:String]{"abi": abi, "classes": pkg_java_c_escape(classes)})}
     ctor_descriptor: pkg_java_descriptor(surface.ctor, JavaScalar.Void)
     out.push("int64_t {abi}_new({pkg_java_params_c(surface.ctor)}){{last_error=0;JNIEnv*e=env();if(!e)return 0;jclass c=(*e)->FindClass(e,\"{class}\");if(!c){{fail(e);return 0;}}jmethodID m=(*e)->GetMethodID(e,c,\"<init>\",\"{ctor_descriptor}\");if(!m){{fail(e);return 0;}}{pkg_java_emit_jvalues(surface.ctor)}jobject local=(*e)->NewObjectA(e,c,m,a);if(!local||(*e)->ExceptionCheck(e)){{fail(e);return 0;}}jobject global=(*e)->NewGlobalRef(e,local);(*e)->DeleteLocalRef(e,local);if(!global){{fail(e);return 0;}}pthread_mutex_lock(&lock);for(int i=0;i<1024;i++){{if(!handles[i]){{handles[i]=global;pthread_mutex_unlock(&lock);return i+1;}}}}pthread_mutex_unlock(&lock);(*e)->DeleteGlobalRef(e,global);fail(e);return 0;}}\n")
     loop method in surface.methods {
@@ -341,7 +341,7 @@ pkg_java_render_c: fn(lib: String, surface: JavaSurface, classes: String) -> Str
 
 // `int64_t arg0,double arg1`.
 pkg_java_params_c: fn(params: [JavaScalar]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop index in 0..<params.len() -> parts.push("{params[index].c()} arg{index}")
     parts.join(",")
 }
@@ -349,13 +349,13 @@ pkg_java_params_c: fn(params: [JavaScalar]) -> String Never! {
 // `jvalue a[N];a[0].j=arg0;...` with at least one slot.
 pkg_java_emit_jvalues: fn(params: [JavaScalar]) -> String Never! {
     slots: if params.len() > 1 -> params.len() else -> 1
-    out := [String]{"jvalue a[{slots}];"}
+    ^out: [String]{"jvalue a[{slots}];"}
     loop index in 0..<params.len() -> out.push("a[{index}].{params[index].jni_field()}=arg{index};")
     out.join("")
 }
 
 pkg_java_descriptor: fn(params: [JavaScalar], result: JavaScalar) -> String Never! {
-    out := [String]{"("}
+    ^out: [String]{"("}
     loop scalar in params -> out.push(scalar.descriptor())
     out.push(")")
     out.push(result.descriptor())

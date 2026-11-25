@@ -75,7 +75,7 @@ bit_sigils1_file: fn(path: String, text: String, source: Bool) -> MigrationOutco
 
 // A Jet source, rewritten unless it parsed cleanly and the result does not.
 bit_sigils1_source: fn(path: String, text: String) -> MigrationOutcome {
-    outcome := bit_sigils1_jet(path, text)
+    ^outcome: bit_sigils1_jet(path, text)
     if outcome.rewritten == 0 || lambda_shape1_errors(text) > 0 -> return outcome
     after_errors: lambda_shape1_errors(outcome.text)
     if after_errors > 0 {
@@ -92,7 +92,7 @@ bit_sigils1_jet: fn(path: String, text: String) -> MigrationOutcome {
     }
     bytes: text.bytes()
     lexed: lex_generated(bytes)
-    scan := BitSigilsScan{bytes: bytes, streams: [[Token]]{}, sites: [BitSigilsSite]{}, quoted: [BitSigilsQuoted]{}, rewritten: 0, skipped: [String]{}}
+    ^scan: BitSigilsScan{bytes: bytes, streams: [[Token]]{}, sites: [BitSigilsSite]{}, quoted: [BitSigilsQuoted]{}, rewritten: 0, skipped: [String]{}}
     bit_sigils1_collect(path, scan, lexed.tables, lexed.tokens)
     if scan.rewritten == 0 {
         return MigrationOutcome{text: text, rewritten: 0, skipped: scan.skipped.move()}
@@ -126,7 +126,7 @@ bit_sigils1_binding: fn(op: String) -> Int {
 bit_sigils1_collect: fn(path: String, scan: ^BitSigilsScan, tables: TokenTables, raw: [Token]) {
     tokens: lexer_without_comments(raw)
     stream: scan.streams.len()
-    holes := [Int]{}
+    ^holes: [Int]{}
     loop index in 0..<tokens.len() {
         token: tokens[index]
         if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
@@ -156,7 +156,7 @@ bit_sigils1_collect: fn(path: String, scan: ^BitSigilsScan, tables: TokenTables,
             next
         }
         target: if op == "" -> -1 else -> bit_sigils1_update_target(scan.bytes, tokens, first, index - 1, close)
-        site := BitSigilsSite{stream: stream, first: first, dot: index - 1, close: close, op: op, start: tokens[first].span.start, end: tokens[close].span.end, target_end: -1}
+        ^site: BitSigilsSite{stream: stream, first: first, dot: index - 1, close: close, op: op, start: tokens[first].span.start, end: tokens[close].span.end, target_end: -1}
         if target >= 0 {
             site.start = tokens[target].span.start
             site.target_end = tokens[first - 2].span.end
@@ -182,7 +182,7 @@ bit_sigils1_one_argument: fn(tokens: [Token], from: Int, close: Int) -> Bool {
     if from < last && tokens[from].kind == TOKEN_IDENT && tokens[from + 1].kind == TOKEN_COLON {
         return false
     }
-    depth := 0
+    ^depth: 0
     loop index in from..<(last + 1) {
         kind: tokens[index].kind
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
@@ -202,10 +202,10 @@ bit_sigils1_argument_last: fn(tokens: [Token], close: Int) -> Int {
 // the chain of names, literals, calls, indexes, typed literals, fields and
 // `?` steps that ends right before the `.`.
 bit_sigils1_receiver: fn(tokens: [Token], dot: Int) -> Int {
-    at := dot - 1
+    ^at: dot - 1
     loop at >= 0 {
         kind: tokens[at].kind
-        start := at
+        ^start: at
         if {
             kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> {
                 open: bit_sigils1_opener(tokens, at)
@@ -246,8 +246,8 @@ bit_sigils1_opener: fn(tokens: [Token], close: Int) -> Int {
         closer == TOKEN_RBRACKET -> TOKEN_LBRACKET
         else -> TOKEN_LBRACE
     }
-    depth := 0
-    index := close
+    ^depth: 0
+    ^index: close
     loop index >= 0 {
         kind: tokens[index].kind
         if kind == closer -> depth += 1
@@ -275,7 +275,7 @@ bit_sigils1_update_target: fn(bytes: [U8], tokens: [Token], first: Int, dot: Int
     if close + 1 < tokens.len() && tokens[close + 1].kind != TOKEN_SEMI && tokens[close + 1].kind != TOKEN_RBRACE {
         return -1
     }
-    target := first - 2
+    ^target: first - 2
     loop target > 0 && !bit_sigils1_statement_start(tokens[target - 1].kind) -> target -= 1
     loop index in target..<(first - 1) {
         if tokens[index].kind == TOKEN_LBRACKET -> return -1
@@ -334,13 +334,13 @@ bit_sigils1_string: fn(place: String, contents: String, raw_string: Bool) -> Mig
 // The bytes from `lo` to `hi` with each outermost call and quoted string in
 // them rewritten.
 bit_sigils1_render: fn(scan: BitSigilsScan, lo: Int, hi: Int) -> String {
-    out := [String]{}
-    cursor := lo
+    ^out: [String]{}
+    ^cursor: lo
     loop {
-        site := -1
-        quoted := -1
-        start := hi
-        end := hi
+        ^site: -1
+        ^quoted: -1
+        ^start: hi
+        ^end: hi
         loop index in 0..<scan.sites.len() {
             candidate: scan.sites[index]
             if candidate.start < cursor || candidate.end > hi -> next
@@ -393,7 +393,7 @@ bit_sigils1_site: fn(scan: BitSigilsScan, index: Int, wrap: Bool) -> String {
         return if wrap -> "({complement})" else -> complement
     }
     argument_start: bit_sigils1_token(scan, site.stream, site.dot + 3).span.start
-    last := site.close - 1
+    ^last: site.close - 1
     if bit_sigils1_token(scan, site.stream, last).kind == TOKEN_COMMA -> last -= 1
     argument_end: bit_sigils1_token(scan, site.stream, last).span.end
     update: site.target_end >= 0
@@ -448,7 +448,7 @@ bit_sigils1_operand: fn(scan: BitSigilsScan, lo: Int, hi: Int, binding: Int, rig
 // call's own parentheses do not survive, so the search goes on past them.
 bit_sigils1_in_header: fn(scan: BitSigilsScan, stream: Int, index: Int) -> Bool {
     tokens: scan.streams[stream]
-    at := index - 1
+    ^at: index - 1
     loop at >= 0 {
         kind: tokens[at].kind
         if {
@@ -482,7 +482,7 @@ bit_sigils1_opened: fn(scan: BitSigilsScan, stream: Int, open: Int) -> Int {
 // Whether `text` holds a `{` outside any `(…)` or `[…]`.
 bit_sigils1_braced: fn(text: String) -> Bool {
     lexed: lex_generated(text.bytes())
-    depth := 0
+    ^depth: 0
     loop token in lexer_without_comments(lexed.tokens) {
         kind: token.kind
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
@@ -538,8 +538,8 @@ bit_sigils1_loosest: fn(text: String) -> Int {
     lexed: lex_generated(text.bytes())
     if lexed.diagnostics.len() > 0 -> return 0
     tokens: lexer_without_comments(lexed.tokens)
-    loosest := BIT_SIGILS_PREFIX
-    depth := 0
+    ^loosest: BIT_SIGILS_PREFIX
+    ^depth: 0
     loop index in 0..<tokens.len() {
         token: tokens[index]
         kind: token.kind
@@ -565,23 +565,23 @@ bit_sigils1_spans: fn(path: String, text: String) -> MigrationOutcome {
         return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
     }
     bytes: text.bytes()
-    out := [String]{}
-    skipped := [String]{}
-    rewritten := 0
-    cursor := 0
-    index := 0
+    ^out: [String]{}
+    ^skipped: [String]{}
+    ^rewritten: 0
+    ^cursor: 0
+    ^index: 0
     loop index < bytes.len() {
         if bytes[index] != 96 {
             index += 1
             next
         }
-        run := index
+        ^run: index
         loop run < bytes.len() && bytes[run] == 96 -> run += 1
         if run - index != 1 {
             index = run
             next
         }
-        close := index + 1
+        ^close: index + 1
         loop close < bytes.len() && bytes[close] != 96 && bytes[close] != 10 -> close += 1
         if close >= bytes.len() || bytes[close] != 96 {
             index = close
@@ -609,17 +609,17 @@ bit_sigils1_markdown: fn(path: String, text: String) -> MigrationOutcome {
         return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
     }
     bytes: text.bytes()
-    out := [String]{}
-    skipped := [String]{}
-    rewritten := 0
-    cursor := 0
-    start := 0
-    line := 1
+    ^out: [String]{}
+    ^skipped: [String]{}
+    ^rewritten: 0
+    ^cursor: 0
+    ^start: 0
+    ^line: 1
     // The first byte of the open ```jet fence's body; -1 outside a fence and
     // -2 inside any other fence.
-    fence := -1
+    ^fence: -1
     loop start < bytes.len() {
-        end := start
+        ^end: start
         loop end < bytes.len() && bytes[end] != 10 -> end += 1
         trimmed: lambda_shape1_text(bytes, start, end).trim()
         if {

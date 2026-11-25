@@ -39,7 +39,7 @@ use {
 
 // The non-codec projections: `#Rename`'s parameters beyond its shared `name`.
 jet_cli_shape_named_projections: fn() -> [String] Never! {
-    named := [String]{}
+    ^named: [String]{}
     loop parameter in RENAME_PARAMETERS {
         if parameter != "name" -> named.push(parameter)
     }
@@ -49,7 +49,7 @@ jet_cli_shape_named_projections: fn() -> [String] Never! {
 // `ShapeProjectionKind.ALL`, in order: Core's codec formats, then the
 // non-codec projections.
 jet_cli_shape_projections: fn() -> [String] Never! {
-    projections := [String]{}
+    ^projections: [String]{}
     loop format in CORE_FORMAT_NAMES -> projections.push(format)
     loop projection in jet_cli_shape_named_projections() -> projections.push(projection)
     projections
@@ -218,10 +218,10 @@ jet_cli_shape_marker_string: fn(tables: ASTTables, marker: Marker, label: String
 // arguments are nodes of `tables`.
 jet_cli_shape_field_names: fn(tables: ASTTables, structure: StructDef, field: Field) -> TShapeFieldNames Never! {
     rename: jet_cli_shape_marker(field.serde_markers, "Rename")
-    shared := String?{None}
+    ^shared: String?{None}
     if rename == .Val(marker) -> shared = jet_cli_shape_marker_string(tables, marker, None)
     text: shared ?? sema_checked_wire_case(sema_checked_rename_case(structure.serde_markers), field.name)
-    names := TShapeFieldNames{text: text, formats: [TShapeFormatName]{}, args: text.replace("_", "-"), env: jet_cli_shape_env_name(text), db: None, layout: None}
+    ^names: TShapeFieldNames{text: text, formats: [TShapeFormatName]{}, args: text.replace("_", "-"), env: jet_cli_shape_env_name(text), db: None, layout: None}
     if rename == .Val(marker) {
         // Each label beyond `#Rename`'s parameters keys a codec format.
         loop label in marker.arg_labels {
@@ -253,7 +253,7 @@ jet_cli_shape_name_for: fn(names: TShapeFieldNames, projection: String) -> Strin
 
 // `shape_env_name`: `-` to `_`, then ASCII uppercase.
 jet_cli_shape_env_name: fn(source: String) -> String Never! {
-    bytes := source.replace("-", "_").bytes()
+    ^bytes: source.replace("-", "_").bytes()
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if code >= 97 && code <= 122 -> bytes[index] = U8{code - 32}
@@ -272,8 +272,8 @@ jet_cli_shape_bad_name: fn(name: String) -> Bool Never! {
 
 // `ShapeFieldNames.validate`: the first invalid slot, in order.
 jet_cli_shape_bad_slot: fn(names: TShapeFieldNames) -> String? Never! {
-    slots := [String?]{Val(names.text)}
-    labels := [String]{"text"}
+    ^slots: [String?]{Val(names.text)}
+    ^labels: [String]{"text"}
     loop entry in names.formats {
         slots.push(Val(entry.name))
         labels.push(entry.format)
@@ -292,7 +292,7 @@ jet_cli_shape_bad_slot: fn(names: TShapeFieldNames) -> String? Never! {
 // `shape_fact_from_struct`, with the checks of `ShapeFact.new` and
 // `with_layout` a declared record can fail.
 jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) -> JetCLIShapeBuild Never! {
-    fields := [JetCLIShapeField]{}
+    ^fields: [JetCLIShapeField]{}
     loop (order, field) in structure.fields {
         ty: jet_cli_shape_type(source, field.ty)
         default: if field.default_ct == .Val(value) -> jet_cli_shape_default(value) else -> None
@@ -300,7 +300,7 @@ jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) 
         skip: field.computed != None || sema_serde_items_skips(field)
         fields.push(JetCLIShapeField{name: field.name, ty: ty.copy(), order: order, names: jet_cli_shape_field_names(tables, structure, field), encoding: jet_cli_shape_encoding(ty), default: default, skip: skip, short: short})
     }
-    seen := [String]{}
+    ^seen: [String]{}
     loop field in fields {
         if jet_cli_shape_bad_name(field.name) {
             return JetCLIShapeBuild.Invalid{error: "invalid shape field name {field.name}"}
@@ -324,7 +324,7 @@ jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) 
         seen.push(field.name)
     }
     loop projection in jet_cli_shape_projections() {
-        names := [String]{}
+        ^names: [String]{}
         loop field in fields {
             if field.skip -> next
             name: jet_cli_shape_name_for(field.names, projection)
@@ -334,8 +334,8 @@ jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) 
             names.push(name)
         }
     }
-    layout := "default"
-    alignment := Int?{None}
+    ^layout: "default"
+    ^alignment: Int?{None}
     if structure.layout == .Val(declared) {
         if declared == {
             .C -> { layout = "c" }
@@ -355,7 +355,7 @@ jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) 
 // The codec formats a field's names report: Core's, in order, then each other
 // format its `#Rename` labels.
 jet_cli_shape_format_labels: fn(names: TShapeFieldNames) -> [String] Never! {
-    labels := [String]{}
+    ^labels: [String]{}
     loop format in CORE_FORMAT_NAMES -> labels.push(format)
     loop entry in names.formats {
         if !labels.contains(entry.format) -> labels.push(entry.format)
@@ -364,8 +364,8 @@ jet_cli_shape_format_labels: fn(names: TShapeFieldNames) -> [String] Never! {
 }
 
 jet_cli_shape_names_value: fn(names: TShapeFieldNames) -> JetCLIStatusValue Never! {
-    ignored := [String]{}
-    rows := [JetCLIStatusField]{jet_cli_status_field("text", jet_cli_status_text(names.text))}
+    ^ignored: [String]{}
+    ^rows: [JetCLIStatusField]{jet_cli_status_field("text", jet_cli_status_text(names.text))}
     loop format in jet_cli_shape_format_labels(names) {
         key: names.format_key(format)
         absent: key == None
@@ -384,7 +384,7 @@ jet_cli_shape_names_value: fn(names: TShapeFieldNames) -> JetCLIStatusValue Neve
 
 // The projected fields: unskipped, in order; only `args` carries `short`.
 jet_cli_shape_projection_value: fn(fact: JetCLIShapeFact, projection: String) -> JetCLIStatusValue Never! {
-    rows := [JetCLIStatusValue]{}
+    ^rows: [JetCLIStatusValue]{}
     loop field in fact.fields {
         if field.skip -> next
         short: if projection == "args" -> field.short else -> String?{None}
@@ -480,13 +480,13 @@ jet_cli_shape_fact_value: fn(fact: JetCLIShapeFact) -> JetCLIStatusValue Never! 
 jet_cli_shape_name_text: fn(value: String?) -> String Never! { value ?? "ignored" }
 
 jet_cli_shape_fact_text: fn(fact: JetCLIShapeFact) -> String Never! {
-    out := "Shape {fact.source}.{fact.type_name} (encoding=Object, layout={fact.layout})\n  Dimensions: Known {{ rank: 1, width: {fact.fields.len()} }}\n"
-    projected := 0
+    ^out: "Shape {fact.source}.{fact.type_name} (encoding=Object, layout={fact.layout})\n  Dimensions: Known {{ rank: 1, width: {fact.fields.len()} }}\n"
+    ^projected: 0
     loop field in fact.fields {
         if !field.skip -> projected += 1
         out = "{out}  Field {field.name}: {jet_cli_shape_type_label(field.ty)} (order={field.order}, encoding={field.encoding}, skipped={field.skip})\n"
         names: field.names
-        formats := ""
+        ^formats: ""
         loop format in jet_cli_shape_format_labels(names) {
             formats = "{formats} {format}={jet_cli_shape_name_text(names.format_key(format))}"
         }
@@ -510,7 +510,7 @@ JetCLIShapeLayout: struct {
 
 // The layout rows of the checked modules, by source, then type name.
 jet_cli_shape_layouts: fn(modules: [JetDriverDocModule]) -> [JetCLIShapeLayout] Never! {
-    rows := [JetCLIShapeLayout]{}
+    ^rows: [JetCLIShapeLayout]{}
     loop checked in modules {
         loop row in checked.layout_facts {
             target: jet_driver_layout_record_text(row.value, "target") ?? "unknown"
@@ -525,7 +525,7 @@ jet_cli_shape_layouts: fn(modules: [JetDriverDocModule]) -> [JetCLIShapeLayout] 
 // A layout row as JSON. A layout is a fact of this target and this compiler,
 // never a promise: `promised` is always false.
 jet_cli_shape_layout_value: fn(layout: JetCLIShapeLayout, compiler: String) -> JetCLIStatusValue Never! {
-    fields := [JetCLIStatusField]{
+    ^fields: [JetCLIStatusField]{
         jet_cli_status_field("source", jet_cli_status_text(layout.source)),
         jet_cli_status_field("type", jet_cli_status_text(layout.type_name)),
         jet_cli_status_field("target", jet_cli_status_text(layout.target)),
@@ -547,7 +547,7 @@ jet_cli_shape_layout_value: fn(layout: JetCLIShapeLayout, compiler: String) -> J
             jet_cli_status_field("size", jet_cli_status_int(member.size)),
         },
     )
-    dominant := JetCLIStatusValue.Null
+    ^dominant: JetCLIStatusValue.Null
     if jet_driver_layout_dominant(summary) == .Val(found) {
         dominant = jet_cli_status_object(
             [JetCLIStatusField]{
@@ -572,7 +572,7 @@ jet_cli_shape_layout_value: fn(layout: JetCLIShapeLayout, compiler: String) -> J
 // A layout row as one human line, naming the target and the compiler whose
 // fact it is and that it is not promised.
 jet_cli_shape_layout_text: fn(layout: JetCLIShapeLayout, compiler: String) -> String Never! {
-    facts := "byte facts unknown"
+    ^facts: "byte facts unknown"
     if layout.summary == .Val(summary) {
         facts = jet_driver_layout_line(summary)
         if jet_driver_layout_dominant(summary) == .Val(found) {
@@ -584,7 +584,7 @@ jet_cli_shape_layout_text: fn(layout: JetCLIShapeLayout, compiler: String) -> St
 
 // `run_shapes`: module display identity, then type name.
 jet_cli_inspect_shapes: fn(modules: [JetDriverDocModule], json: Bool, color: Bool) -> JetDriverVerbOutput Never! {
-    facts := [JetCLIShapeFact]{}
+    ^facts: [JetCLIShapeFact]{}
     loop checked in modules {
         source: checked.path
         loop item in checked.items {
@@ -613,7 +613,7 @@ jet_cli_inspect_shapes: fn(modules: [JetDriverDocModule], json: Bool, color: Boo
         layout_values: loop layout in layouts -> jet_cli_shape_layout_value(layout, compiler)
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.shapes", true, [JetCLIStatusField]{jet_cli_status_field("shapes", jet_cli_status_array(values)), jet_cli_status_field("layouts", jet_cli_status_array(layout_values))})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    out := if facts.len() == 0 -> "No shape facts declared.\n" else -> ""
+    ^out: if facts.len() == 0 -> "No shape facts declared.\n" else -> ""
     loop fact in facts -> out = "{out}{jet_cli_shape_fact_text(fact)}"
     loop layout in layouts -> out = "{out}{jet_cli_shape_layout_text(layout, compiler)}"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}

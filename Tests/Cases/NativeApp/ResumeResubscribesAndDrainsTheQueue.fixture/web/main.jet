@@ -66,7 +66,7 @@ run: fn() {
     app.LIFECYCLE.on(listening, fn(heard: app.LifecycleEvent) {
         if heard.reason == .Closing -> print("queued {app.pending()}, board: {board()}")
     })
-    held := LISTENING.guard_edit()
+    ^held: LISTENING.guard_edit()
     held.value._scope = Val(listening)
     print(if graph.launch() -> "launched" else -> "not launched")
 }

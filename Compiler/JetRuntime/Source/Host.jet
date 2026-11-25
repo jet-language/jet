@@ -6,7 +6,7 @@
 // ioctl scratch @32, HOST_STDOUT_BYTES stdout bytes @128, then the number
 // formatting workspace (HOST_FORMAT_SCRATCH). The mapping is process-lifetime
 // runtime metadata.
-host_root := I64{0}
+^host_root: I64{0}
 
 // The stdout buffer's bytes: a file or pipe is written 64 KiB at a time, a
 // terminal at each LF (host_stdout_write).
@@ -30,7 +30,7 @@ HOST_ROOT_BYTES: I64{69632}
     // exists.
     root: alloc_map(HOST_ROOT_BYTES, HOST_ROOT_BYTES)
     // TCGETS identifies the stream once; any failure means non-terminal.
-    tty := I64{0}
+    ^tty: I64{0}
     #Unsafe("TCGETS writes its termios into the fresh mapping's scratch at 32 and retains no pointer") {
         tty = host_syscall(I64{16}, I64{1}, I64{21505}, wrapping(root + I64{32}), I64{0}, I64{0}, I64{0})
     }
@@ -60,7 +60,7 @@ host_unlock: fn() { sync_mutex_unlock(host_root) }
 HOST_WRITE_ZERO: I64{-4096}
 
 host_write_all: fn(fd: I64, bytes: I64, length: I64) -> I64 {
-    at := I64{0}
+    ^at: I64{0}
     #Unsafe("the caller lends length readable bytes for the complete synchronous write") {
         loop at < length {
             count: host_syscall(I64{1}, fd, wrapping(bytes + at), wrapping(length - at), I64{0}, I64{0}, I64{0})
@@ -79,7 +79,7 @@ host_write_all: fn(fd: I64, bytes: I64, length: I64) -> I64 {
 // counted and timed as HostProcess.jet host_syscall counts its calls.
 host_write_line: fn(fd: I64, bytes: I64, length: I64) -> I64 {
     #Unsafe("the caller lends length readable bytes; writev borrows its own LF until return") {
-        at := I64{0}
+        ^at: I64{0}
         loop at <= length {
             table: perf_system
             row: if (table == I64{0}) -> I64{0} else -> perf_syscall_row(table, I64{20})
@@ -122,7 +122,7 @@ host_cpuid: fn(leaf: I64, subleaf: I64, register: I64) -> I64 {
 // from the kernel and shows, and stderr leaves the program's pending stdout
 // bytes in the buffer: an evaluation's print never joins the program's
 // output.
-host_stdout_direct := I64{0}
+^host_stdout_direct: I64{0}
 
 // Caller holds the lock. Preserve unwritten bytes after a failed/short flush,
 // so a subsequent explicit flush has the same pending suffix, not duplicates.
@@ -130,8 +130,8 @@ host_stdout_flush_locked: fn() -> I64 {
     #Unsafe("the output lock exclusively owns the initialized buffer and length; write borrows its pending bytes") {
         length: rt_text_word(wrapping(host_root + I64{8}))
         bytes: wrapping(host_root + I64{128})
-        at := I64{0}
-        failure := I64{0}
+        ^at: I64{0}
+        ^failure: I64{0}
         loop at < length {
             count: host_syscall(I64{1}, I64{1}, wrapping(bytes + at), wrapping(length - at), I64{0}, I64{0}, I64{0})
             if (count == I64{-4}) { next }
@@ -143,7 +143,7 @@ host_stdout_flush_locked: fn() -> I64 {
         }
         remaining: wrapping(length - at)
         if (at != I64{0}) {
-            index := I64{0}
+            ^index: I64{0}
             loop index < remaining {
                 rt_text_put(wrapping(bytes + index), rt_text_byte(wrapping(wrapping(bytes + at) + index)))
                 index = wrapping(index + I64{1})
@@ -166,7 +166,7 @@ host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
     ticket: replay_take(REPLAY_PRINT, I64{0})
     replay_output_check(ticket, REPLAY_PRINT, bytes, length, line)
     sole: sync_sole_enter(host_root)
-    failure := host_stdout_put_locked(bytes, length)
+    ^failure: host_stdout_put_locked(bytes, length)
     if (failure == I64{0} && line) { failure = host_stdout_line_end_locked() }
     if (failure == I64{0} && flush) { failure = host_stdout_flush_locked() }
     replay_output_log(REPLAY_PRINT, bytes, length, line)
@@ -180,15 +180,15 @@ host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
 // written out, and on a terminal so is each run that ends in an LF (line
 // buffering). 0, or the failure of the write that dropped the rest.
 host_stdout_put_locked: fn(bytes: I64, length: I64) -> I64 {
-    failure := I64{0}
-    index := I64{0}
-    pending := rt_text_word(wrapping(host_root + I64{8}))
+    ^failure: I64{0}
+    ^index: I64{0}
+    ^pending: rt_text_word(wrapping(host_root + I64{8}))
     tty: rt_text_word(wrapping(host_root + I64{16})) != I64{0}
     loop index < length {
         room: wrapping(HOST_STDOUT_BYTES - pending)
         left: wrapping(length - index)
-        run := if (left < room) -> left else -> room
-        ends_line := false
+        ^run: if (left < room) -> left else -> room
+        ^ends_line: false
         if (tty && run > I64{0}) {
             lf: rt_line_run(wrapping(bytes + index), run)
             ends_line = rt_text_byte(wrapping(bytes + index + lf - I64{1})) == I64{10}
@@ -211,8 +211,8 @@ host_stdout_put_locked: fn(bytes: I64, length: I64) -> I64 {
 // Caller holds the output lock: print's LF. A full buffer is written out
 // first, and the LF flushes on a terminal or when it fills the buffer.
 host_stdout_line_end_locked: fn() -> I64 {
-    failure := I64{0}
-    pending := rt_text_word(wrapping(host_root + I64{8}))
+    ^failure: I64{0}
+    ^pending: rt_text_word(wrapping(host_root + I64{8}))
     if (pending == HOST_STDOUT_BYTES) {
         failure = host_stdout_flush_locked()
         if (failure != I64{0}) { return failure }
@@ -232,7 +232,7 @@ host_stdout_line_end_locked: fn() -> I64 {
 // 0 when that write failed and the bytes are dropped.
 // host_stdout_commit_locked then publishes them.
 host_stdout_reserve_locked: fn(count: I64) -> I64 {
-    pending := rt_text_word(wrapping(host_root + I64{8}))
+    ^pending: rt_text_word(wrapping(host_root + I64{8}))
     if (wrapping(pending + count) > HOST_STDOUT_BYTES) {
         if (host_stdout_flush_locked() != I64{0}) { return I64{0} }
         pending = rt_text_word(wrapping(host_root + I64{8}))
@@ -253,7 +253,7 @@ host_stderr_write: fn(bytes: I64, length: I64) -> I64 {
     replay_output_check(ticket, REPLAY_EPRINT, bytes, length, false)
     host_lock()
     // An stdout failure must not suppress the requested stderr report.
-    if (host_stdout_direct == I64{0}) { _ := host_stdout_flush_locked() }
+    if (host_stdout_direct == I64{0}) { ^_: host_stdout_flush_locked() }
     failure: host_write_all(I64{2}, bytes, length)
     replay_output_log(REPLAY_EPRINT, bytes, length, false)
     host_unlock()
@@ -265,7 +265,7 @@ host_stderr_line: fn(bytes: I64, length: I64) -> I64 {
     ticket: replay_take(REPLAY_EPRINT, I64{0})
     replay_output_check(ticket, REPLAY_EPRINT, bytes, length, true)
     host_lock()
-    if (host_stdout_direct == I64{0}) { _ := host_stdout_flush_locked() }
+    if (host_stdout_direct == I64{0}) { ^_: host_stdout_flush_locked() }
     failure: host_write_line(I64{2}, bytes, length)
     replay_output_log(REPLAY_EPRINT, bytes, length, true)
     host_unlock()
@@ -303,7 +303,7 @@ host_is_tty: fn(fd: I64) -> Bool {
         return
     }
     host_lock()
-    _ := host_stdout_flush_locked()
+    ^_: host_stdout_flush_locked()
     host_unlock()
 }
 
@@ -316,7 +316,7 @@ host_fork_hold: fn() {
         return
     }
     sync_thread_lock(host_root)
-    _ := host_stdout_flush_locked()
+    ^_: host_stdout_flush_locked()
 }
 
 // The parent unlocks. The child, whose only thread is the forking one,
@@ -337,13 +337,13 @@ host_stdout_flush_fault: fn() {
     if !sync_mutex_try_lock(host_root) {
         return
     }
-    _ := host_stdout_flush_locked()
+    ^_: host_stdout_flush_locked()
     host_unlock()
 }
 
 // TestCapture.jet jet_rt_test_capture_print_hook once a thread holds test
 // state, else 0: a program that never runs a test prints straight through.
-host_print_capture_code := I64{0}
+^host_print_capture_code: I64{0}
 
 host_print_capture_install: fn(code: I64) {
     #Unsafe("an idempotent install: every writer stores the same code address") {
@@ -361,7 +361,7 @@ host_print_capture_install: fn(code: I64) {
     }
     // `value` is a borrowed E4 JetCText header; stdout copies its bytes before
     // returning.
-    _ := host_stdout_write(rt_text_word(value), rt_text_word(wrapping(value + I64{8})), true, flush != U8{0})
+    ^_: host_stdout_write(rt_text_word(value), rt_text_word(wrapping(value + I64{8})), true, flush != U8{0})
 }
 
 // The text sink of the stdout buffer itself (Text.jet rt_sink_append): a
@@ -391,11 +391,15 @@ HOST_STDOUT_SINK: I64{1}
 // printed and dropped, unless building it failed (its stop pending).
 #Export(c) jet_term_stdout_line_end: fn(sink: I64, flush: U8) {
     if (sink != HOST_STDOUT_SINK) {
-        if (sink == I64{0}) { return }
+        if (sink == I64{0}) {
+            return
+        }
         if (scheduler_stop_pending() == I64{0}) { jet_term_write_stdout_line(sink, flush) }
         jet_rt_string_drop(sink)
         return
     }
-    if (host_stdout_line_end_locked() == I64{0} && flush != U8{0}) { _ := host_stdout_flush_locked() }
+    if (host_stdout_line_end_locked() == I64{0} && flush != U8{0}) {
+        ^_: host_stdout_flush_locked()
+    }
     sync_sole_exit(host_root, rt_text_word(wrapping(host_root + I64{24})) != I64{0})
 }

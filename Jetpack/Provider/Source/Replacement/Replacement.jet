@@ -77,7 +77,7 @@ ReplacementCandidate: struct {
         foreign: self.foreign_identity.ref_string()
         native: self.native_identity.ref_string()
         identity: LockIdentity{kind: LockRecordKind.ReplacementOverlay, key: "{foreign}@{platform}", exact: native.copy(), hash: self.proof_digest, platform: platform}
-        rationale := LockRationale.empty()
+        ^rationale: LockRationale.empty()
         rationale.owner_package = owner_package
         rationale.reason = "native replacement overlay with passed compatibility proof"
         rationale.source_ref = foreign.copy()
@@ -88,7 +88,7 @@ ReplacementCandidate: struct {
         rationale.signature = self.proof_digest
         rationale.cache_provenance = "compatibility proof inputs"
         rationale.update_command = "policy.replacements"
-        record := SemanticRecord.new(identity, rationale)
+        ^record: SemanticRecord.new(identity, rationale)
         record.future_fields["replacement-foreign"] = foreign
         record.future_fields["replacement-native"] = native
         record.future_fields["replacement-proof-digest"] = self.proof_digest
@@ -110,13 +110,13 @@ PublicSymbol: struct {
     }
 
     with_effects: fn(self, effects: [String]) -> PublicSymbol Never! {
-        out := self
+        ^out: self
         out.effects = effects
         out
     }
 
     with_errors: fn(self, errors: [String]) -> PublicSymbol Never! {
-        out := self
+        ^out: self
         out.errors = errors
         out
     }
@@ -137,7 +137,7 @@ GoldenFixture: struct {
 
     // Digest of every observed output.
     fingerprint: fn(self) -> String Never! {
-        parts := [String]{self.stdout, self.stderr, "{self.exit_code}"}
+        ^parts: [String]{self.stdout, self.stderr, "{self.exit_code}"}
         loop file in self.files -> parts.push("{file.path}={file.content}")
         loop side_effect in self.side_effects -> parts.push("effect={side_effect}")
         provider_replacement_digest(parts)
@@ -160,17 +160,17 @@ CompatibilitySurface: struct {
     // availability, then every foreign public symbol by signature, effects,
     // and errors, then every foreign golden fixture.
     prove_against: fn(self, foreign: CompatibilitySurface, platform: String) -> ProofReport Never! {
-        failures := [ProofFailure]{}
+        ^failures: [ProofFailure]{}
         if foreign.platforms.len() > 0 && !foreign.platforms.contains(platform) {
             failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: platform.copy(), expected: foreign.platforms.join(","), found: "foreign surface unavailable"})
         }
         if self.platforms.len() > 0 && !self.platforms.contains(platform) {
             failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: platform.copy(), expected: self.platforms.join(","), found: "native surface unavailable"})
         }
-        covered := [String]{}
+        ^covered: [String]{}
         foreign_symbols: provider_replacement_by_name(foreign.public_symbols)
         native_symbols: provider_replacement_by_name(self.public_symbols)
-        foreign_names := foreign_symbols.keys().to_list()
+        ^foreign_names: foreign_symbols.keys().to_list()
         foreign_names.sort()
         loop name in foreign_names {
             expected: foreign_symbols[name]
@@ -251,7 +251,7 @@ ProofReport: struct {
     // The candidate this proof yields; missing public symbols become its
     // unsupported symbols.
     candidate: fn(self, license: String, platforms: [String]) -> ReplacementCandidate Never! {
-        unsupported := [String]{}
+        ^unsupported: [String]{}
         loop failure in self.failures {
             if failure.kind == ProofFailureKind.MissingPublicSymbol {
                 unsupported.push(failure.name)
@@ -379,7 +379,7 @@ ImporterProgressFact: struct {
 
 // Symbols by name; a later symbol with the same name wins.
 provider_replacement_by_name: fn(symbols: [PublicSymbol]) -> [String:PublicSymbol] Never! {
-    out := [String:PublicSymbol]{}
+    ^out: [String:PublicSymbol]{}
     loop symbol in symbols {
         name: symbol.name.copy()
         out[name] = symbol
@@ -388,7 +388,7 @@ provider_replacement_by_name: fn(symbols: [PublicSymbol]) -> [String:PublicSymbo
 }
 
 provider_replacement_goldens_by_name: fn(goldens: [GoldenFixture]) -> [String:GoldenFixture] Never! {
-    out := [String:GoldenFixture]{}
+    ^out: [String:GoldenFixture]{}
     loop golden in goldens {
         name: golden.name.copy()
         out[name] = golden
@@ -398,7 +398,7 @@ provider_replacement_goldens_by_name: fn(goldens: [GoldenFixture]) -> [String:Go
 
 // The values sorted without repeats.
 provider_replacement_sorted_set: fn(values: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop value in values {
         if !out.contains(value) -> out.push(value.copy())
     }
@@ -409,7 +409,7 @@ provider_replacement_sorted_set: fn(values: [String]) -> [String] Never! {
 // Every fact the proof read, sorted: identities, platform, symbols,
 // examples, and golden fixture fingerprints of both surfaces.
 provider_replacement_proof_inputs: fn(foreign: CompatibilitySurface, native: CompatibilitySurface, platform: String) -> [String] Never! {
-    inputs := [String]{"foreign={foreign.identity.ref_string()}", "native={native.identity.ref_string()}", "platform={platform}"}
+    ^inputs: [String]{"foreign={foreign.identity.ref_string()}", "native={native.identity.ref_string()}", "platform={platform}"}
     surfaces: [CompatibilitySurface]{foreign, native}
     loop surface in surfaces {
         loop symbol in surface.public_symbols {
@@ -429,7 +429,7 @@ provider_replacement_proof_inputs: fn(foreign: CompatibilitySurface, native: Com
 // `proof-fnv64-<16 hex>`: FNV-1a 64 over each part's bytes followed by LF.
 provider_replacement_digest: fn(parts: [String]) -> String Never! {
     prime: U64{0x100000001b3}
-    hash := U64{0xcbf29ce484222325}
+    ^hash: U64{0xcbf29ce484222325}
     loop part in parts {
         loop byte in part.bytes() {
             hash = (hash) ~ U64{byte}
@@ -439,8 +439,8 @@ provider_replacement_digest: fn(parts: [String]) -> String Never! {
         hash = wrapping(hash * prime)
     }
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
-    shift := 60
+    ^out: [U8]{}
+    ^shift: 60
     loop shift >= 0 {
         out.push(digits[Int{((hash >> shift)) & U64{15}}])
         shift -= 4

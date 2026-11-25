@@ -34,15 +34,15 @@ require_redirect: fn(request: HTTPRequest) {
 }
 
 check_redirect_limits: fn() {
-    listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    ^listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     base: "http://{address}"
     { sender: stop_tx, receiver: stop_rx }: channel<Int>()
     peer: task {
-        requests := [String]{}
+        ^requests: [String]{}
         // Exact original stop-atomic nonblocking observer, no finite26 cap.
         loop stop_rx.try_receive() == None {
-            stream := if listener.accept(deadline: 0s) == {
+            ^stream: if listener.accept(deadline: 0s) == {
                 .Ok(stream) -> stream
                 .Err(error) -> if error == {
                     .Timeout(_) -> {
@@ -88,7 +88,7 @@ check_redirect_limits: fn() {
     stop_tx.send(1)
     requests: peer.join() ?? panic("peer")
     assert_eq(requests.len(), 26, "invalid redirect limit reached transport or redirect boundary behavior changed")
-    expected := [String]{"/redirect", "/redirect", "/target", "/redirect"}
+    ^expected: [String]{"/redirect", "/redirect", "/target", "/redirect"}
     loop step in 0..10 -> expected.push("/within/{step}")
     loop step in 0..10 -> expected.push("/over/{step}")
     assert_eq(requests, expected, "redirect boundaries sent an unexpected request sequence")

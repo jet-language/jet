@@ -12,7 +12,7 @@ HyperLogLog: struct {
     }
 
     new: fn() -> HyperLogLog Never! {
-        registers := [U8]{}
+        ^registers: [U8]{}
         loop _ in 0..<256 -> registers.push(U8{0})
         HyperLogLog{registers: registers}
     }
@@ -26,13 +26,13 @@ HyperLogLog: struct {
     }
 
     count: fn(self) -> Int Never! {
-        empty := 0
+        ^empty: 0
         loop register in self.registers {
             if register == (U8{0}) -> empty += 1
         }
         width: Float{256.0}
         if empty > 0 -> return rounded_count(width * math.ln(width / Float{empty}))
-        sum := Float{0.0}
+        ^sum: Float{0.0}
         loop register in self.registers -> sum += math.from_bits((1023 - Int{register}) << 52)
         alpha: Float{0.7213} / (Float{1.0} + Float{1.079} / width)
         rounded_count(alpha * width * width / sum)
@@ -47,10 +47,10 @@ rounded_count: fn(estimate: Float) -> Int Never! {
 }
 
 #Test("HLL preserves shipped distinct counts and independent clones") {
-    hll := new()
+    ^hll: new()
     assert_eq(hll.count(), 0)
     hll.add("apple")
-    clone := hll.copy()
+    ^clone: hll.copy()
     clone.add("banana")
     clone.add("cherry")
     clone.add("apple")

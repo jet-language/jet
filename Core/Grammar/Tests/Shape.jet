@@ -23,7 +23,7 @@ faults_of: fn(text: String) -> [GrammarFault] Never! {
 
 /// A field as it would be declared.
 show_field: fn(plan: GrammarPlan, field: GrammarField) -> String Never! {
-    base := "String"
+    ^base: "String"
     if field.kind == .Flag -> base = "Bool"
     loop shape in plan.shapes {
         if field.kind == .Rule && shape.rule == field.rule -> base = shape.name.copy()
@@ -34,7 +34,7 @@ show_field: fn(plan: GrammarPlan, field: GrammarField) -> String Never! {
 }
 
 show_fields: fn(plan: GrammarPlan, fields: [GrammarField]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop field in fields -> parts.push(show_field(plan, field))
     "{{{parts.join(", ")}}}"
 }
@@ -43,9 +43,9 @@ show_fields: fn(plan: GrammarPlan, fields: [GrammarField]) -> String Never! {
 /// `Name = A(Rule) | B{fields} | C` for an enum.
 show: fn(plan: GrammarPlan, shape: GrammarShape) -> String Never! {
     if !shape.is_enum -> return "{shape.name}{show_fields(plan, shape.fields)}"
-    cases := [String]{}
+    ^cases: [String]{}
     loop case in shape.cases {
-        text := case.name.copy()
+        ^text: case.name.copy()
         loop wrapped in plan.shapes {
             if wrapped.rule == case.wraps -> text = "{case.name}({wrapped.name})"
         }
@@ -57,7 +57,7 @@ show: fn(plan: GrammarPlan, shape: GrammarShape) -> String Never! {
 
 shapes_of: fn(text: String) -> [String] Never! {
     plan: plan_of(text)
-    shown := [String]{}
+    ^shown: [String]{}
     loop shape in plan.shapes -> shown.push(show(plan, shape))
     shown
 }
@@ -85,14 +85,17 @@ only_fault: fn(text: String) -> GrammarFault Never! {
         "WS      : [ \\t]+ -> skip ;",
         "COMMENT : [;#] [^\\r\\n]* -> skip ;",
     }
-    assert_eq(shapes_of(grammar.join("\n")), [String]{
-        "Ini{{lines: [Line]}}",
-        "Line = Section(Section) | Entry(Entry) | Blank(Blank)",
-        "Section{{name: String}}",
-        "Entry{{name: String, value: Value?}}",
-        "Blank{{}}",
-        "Value = Quoted{{text: String}} | Bare{{text: String}}",
-    })
+    assert_eq(
+        shapes_of(grammar.join("\n")),
+        [String]{
+            "Ini{{lines: [Line]}}",
+            "Line = Section(Section) | Entry(Entry) | Blank(Blank)",
+            "Section{{name: String}}",
+            "Entry{{name: String, value: Value?}}",
+            "Blank{{}}",
+            "Value = Quoted{{text: String}} | Bare{{text: String}}",
+        },
+    )
 }
 
 #Test("an operator rule's written alternatives are its cases") {

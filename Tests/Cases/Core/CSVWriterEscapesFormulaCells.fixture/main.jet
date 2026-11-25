@@ -23,13 +23,13 @@ run: fn() {
     print(csv.write_dict(dicts, formulas: .Keep).replace("\n", "|"))
 
     output: files.create("out.csv") ?? panic("create")
-    writer := csv.writer(output) ?? panic("writer")
+    ^writer: csv.writer(output) ?? panic("writer")
     writer.write(["=1+1", "-7", "=\"q\",x", "ok"]) ?? panic("record")
     writer.finish() ?? panic("finish")
     print((files.read("out.csv") ?? panic("read")).trim())
 
     kept_output: files.create("kept.csv") ?? panic("create kept")
-    kept := csv.writer(kept_output, formulas: .Keep) ?? panic("kept writer")
+    ^kept: csv.writer(kept_output, formulas: .Keep) ?? panic("kept writer")
     kept.write(["=1+1", "ok"]) ?? panic("kept record")
     kept.finish() ?? panic("kept finish")
     print((files.read("kept.csv") ?? panic("read kept")).trim())

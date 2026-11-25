@@ -55,7 +55,7 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
     if sema_comptime_reads_pending_local(check, reference_start) -> return false
     // A prepared local reads as its value, so a local left in the checked
     // condition is known only at run time.
-    runtime_local := false
+    ^runtime_local: false
     sema_stmt_reads_runtime_local(condition, check.context.arena.tree, runtime_local)
     if runtime_local {
         check.diagnostics.push(sema_error("E0989", cond_span, "this `#if` condition can't be known at compile time", "a `#if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments", "prepare the value first: `flag: #run {{ … }}`, then write `#if flag {{ … }}`"))
@@ -69,7 +69,7 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
     if params.len() > 0 {
         return sema_stmt_check_generic_prep_if(cond, condition.ty, params, cond_span, then_body, else_body, span, return_type, check, loop_depth, output)
     }
-    value := sema_expr_comptime_value(condition, check.context)
+    ^value: sema_expr_comptime_value(condition, check.context)
     if value == None -> value = sema_fact_constant_path_value(condition, check.context)
     if value == None {
         // A condition known here runs nothing; one computed while building
@@ -80,18 +80,18 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
         }
         staged: sema_comptime_body_value_find(check.context, check.environment.module_identity, sema_scope_function_owner_key(check.scopes), cond_span, span)
         if staged == .Val(body_value) -> value = Val(body_value.value) else {
-            _ := sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "#if", cond, condition.ty, cond_span, span)
+            ^_: sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "#if", cond, condition.ty, cond_span, span)
             return false
         }
     }
     known: value ?? return false
-    selected := false
+    ^selected: false
     if known == .Bool(flag) -> selected = flag else {
         check.diagnostics.push(sema_stmt_prep_if_not_bool(cond_span))
         return false
     }
     owner: "prep-if@{span.start}"
-    nested := SemaStatementResult{value: [TStmt]{}, complete: true}
+    ^nested: SemaStatementResult{value: [TStmt]{}, complete: true}
     if selected {
         nested = sema_stmt_check_block(then_body, return_type, check, owner, loop_depth)
         if else_body == .Val(dropped) {
@@ -168,7 +168,7 @@ sema_stmt_check_comptime_block: fn(body: [Stmt], span: Span, check: ^SemaBodyChe
     checked_block: checked ?? return false
     if sema_stmt_comptime_site_refused(check, fact_start) -> return false
     if sema_comptime_reads_pending_local(check, reference_start) -> return false
-    _ := sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "comptime block", block, checked_block.ty, span, span)
+    ^_: sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "comptime block", block, checked_block.ty, span, span)
     false
 }
 
@@ -204,9 +204,9 @@ sema_stmt_check_dropped_prep_arm: fn(body: [Stmt], return_type: Type?, check: ^S
     scope_mark: sema_scope_mark(check.scopes)
     context_mark: sema_check_context_mark(check.context)
     fork: sema_ownership_fork(check.state)
-    arm_diagnostics := [Diagnostic]{}
+    ^arm_diagnostics: [Diagnostic]{}
     sema_body_check_swap_diagnostics(check, arm_diagnostics)
-    _ := sema_stmt_check_block(body, return_type, check, "{owner}.dropped", loop_depth)
+    ^_: sema_stmt_check_block(body, return_type, check, "{owner}.dropped", loop_depth)
     sema_body_check_swap_diagnostics(check, arm_diagnostics)
     sema_ownership_fork_rollback(check.state, fork)
     sema_ownership_fork_close(check.state, fork)
@@ -222,7 +222,7 @@ sema_stmt_check_dropped_prep_arm: fn(body: [Stmt], return_type: Type?, check: ^S
 // `#run` on a type table or type test changes nothing: it is checked
 // as the plain form (sema_stmt_check_switch).
 sema_stmt_check_prep_type_table: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
-    table := sema_stmt_check_switch(subject, arms, else_body, span, return_type, check, loop_depth)
+    ^table: sema_stmt_check_switch(subject, arms, else_body, span, return_type, check, loop_depth)
     loop statement in table.value -> output.push(statement)
     table.complete
 }
@@ -253,7 +253,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         check.diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `#if … == {{ … }}` dispatch branches on `#build.target.os`", "`#build.target.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `#if #build.target.os == {{ .Linux -> … }}` with an arm for every OS, or use a plain runtime `if` for a value that isn't known at compile time"))
         return false
     }
-    active := ""
+    ^active: ""
     // Snapshot: a lone program's check has no build facts to fold on.
     if check.program.registration_graph.mode == .Snapshot {
         sema_check_unsupported(check.context, "the `#if #build.target.os` dispatch at offset {span.start} has no build facts to fold on")
@@ -261,12 +261,12 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
     }
     active = check.program.registration_graph.build_facts.os
     oses: loop os in TARGET_OS_ALL -> target_os_name(os)
-    seen := [String]{}
-    selects := [Bool]{}
-    valid := true
+    ^seen: [String]{}
+    ^selects: [Bool]{}
+    ^valid: true
     loop arm in arms {
-        heads := [String]{}
-        fresh := sema_stmt_os_dispatch_heads(arm.cond, heads)
+        ^heads: [String]{}
+        ^fresh: sema_stmt_os_dispatch_heads(arm.cond, heads)
         loop head in heads {
             if !oses.contains(head) || seen.contains(head) -> fresh = false
             seen.push(head)
@@ -279,7 +279,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         selects.push(heads.contains(active))
     }
     if !valid -> return false
-    missing := [String]{}
+    ^missing: [String]{}
     loop os in oses {
         if !seen.contains(os) -> missing.push(os)
     }
@@ -303,8 +303,8 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         return true
     }
     // The nested chain below arm 0; each condition is whether the arm names `active`.
-    tail := else_body
-    index := arms.len()
+    ^tail: else_body
+    ^index: arms.len()
     loop index > 1 {
         index -= 1
         arm: arms[index]
@@ -367,8 +367,8 @@ sema_stmt_setting_arm_matches: fn(cond: Expr, value: TComptimeValue) -> Bool? Ne
 // dispatch does. Over an enum setting the table is over a closed set, so an
 // `else` is E0641 (#6281); a Bool, number or text setting keeps its `else`.
 sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
-    matched := [Bool]{}
-    valid := true
+    ^matched: [Bool]{}
+    ^valid: true
     loop arm in arms {
         if sema_stmt_setting_arm_matches(arm.cond, value) == .Val(flag) -> matched.push(flag) else {
             check.diagnostics.push(sema_error("E0302", arm.span, "this arm doesn't name a value of the setting `{key}`", "a `#build.settings.{key}` dispatch compares each arm head with the setting's value for this build", "write each arm head as a literal or `.Variant` of the setting's declared type"))
@@ -384,8 +384,8 @@ sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [Sw
         output.push(TStmt.Inline{body: nested.value, span: span})
         return true
     }
-    tail := else_body
-    index := arms.len()
+    ^tail: else_body
+    ^index: arms.len()
     loop index > 1 {
         index -= 1
         arm: arms[index]
@@ -398,7 +398,7 @@ sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [Sw
 
 // E0641: the variants of an enum setting that a dispatch's `else` stands for.
 sema_stmt_setting_switch_closed_else: fn(value: TComptimeValue, arms: [SwitchArm], span: Span, check: ^SemaBodyCheck) {
-    type_name := ""
+    ^type_name: ""
     if value == .Enum(held_type, _, _) -> type_name = held_type
     if type_name == "" {
         return
@@ -408,11 +408,11 @@ sema_stmt_setting_switch_closed_else: fn(value: TComptimeValue, arms: [SwitchArm
         return
     }
     else_arm: sema_coverage_else_arm_at(check.environment.*, span.start) ?? return
-    named := [String]{}
+    ^named: [String]{}
     loop arm in arms {
         if sema_stmt_setting_arm_variant(arm.cond) == .Val(variant) -> named.push(variant)
     }
-    patterns := [String]{}
+    ^patterns: [String]{}
     loop name in sema_coverage_missing(ty, named, check) {
         patterns.push(sema_coverage_case_pattern(ty, name, check) ?? ".{name}")
     }

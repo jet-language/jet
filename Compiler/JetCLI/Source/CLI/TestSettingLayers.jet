@@ -155,8 +155,8 @@ jet_cli_test_parent_word: fn(argument: String) -> Bool Never! {
 // `jet_argv`'s words for a child `jet test`, without the `--profile` choice
 // and the settings the parent keeps; words after `--` stay as written.
 jet_cli_test_child_words: fn(jet_argv: [String]) -> [String] Never! {
-    words := [String]{"test"}
-    index := 1
+    ^words: [String]{"test"}
+    ^index: 1
     loop index < jet_argv.len() {
         argument: jet_argv[index]
         if argument == "--" {
@@ -177,7 +177,7 @@ jet_cli_test_child_words: fn(jet_argv: [String]) -> [String] Never! {
 
 // The settings a child inherits: all but those the parent keeps.
 jet_cli_test_child_settings: fn(settings: [TestSetting]) -> [TestSetting] Never! {
-    kept := [TestSetting]{}
+    ^kept: [TestSetting]{}
     loop setting in settings {
         if !JET_CLI_TEST_PARENT_SETTINGS.contains(setting.name) -> kept.push(setting.copy())  // copy: the decided list stays whole for the parent.
     }
@@ -188,8 +188,8 @@ jet_cli_test_child_settings: fn(settings: [TestSetting]) -> [TestSetting] Never!
 // here (several levels run once each), replaced by `level`'s flag (`-O2`;
 // "" adds none).
 jet_cli_test_build_argv: fn(jet_argv: [String], level: String) -> [String] Never! {
-    argv := [String]{}
-    passthrough := false
+    ^argv: [String]{}
+    ^passthrough: false
     loop argument in jet_argv {
         if argument == "--" && !passthrough {
             passthrough = true
@@ -216,12 +216,12 @@ jet_cli_test_settings_fan_out: fn(jet_argv: [String], settings: [TestSetting], q
     words: jet_cli_test_child_words(jet_argv)
     inherited: test_settings_lines(jet_cli_test_child_settings(settings))
     picked: if levels.len() == 0 -> [String]{""} else -> levels
-    names := [String]{}
-    tiers := [String]{}
-    member_args := [[String]]{}
-    envs := [[String]]{}
+    ^names: [String]{}
+    ^tiers: [String]{}
+    ^member_args: [[String]]{}
+    ^envs: [[String]]{}
     loop level in picked {
-        args := words.copy()  // copy: each level run starts from the same words.
+        ^args: words.copy()  // copy: each level run starts from the same words.
         if level != "" -> args.push(build_option_level_flag(level))
         names.push(if levels.len() > 1 -> "optimize {level}" else -> "compiler {compiler}")
         tiers.push(if levels.len() > 1 -> "{TEST_SUITE_TESTS} at optimize {level}" else -> TEST_SUITE_TESTS)
@@ -237,9 +237,9 @@ jet_cli_test_settings_fan_out: fn(jet_argv: [String], settings: [TestSetting], q
 // its end), and with a `scratch` directory the file it hands its evidence
 // report to, `<scratch>/<index>.bin`.
 jet_cli_test_runs_envs: fn(envs: [[String]], count: Int, scratch: String) -> [[String]] Never! {
-    rows := [[String]]{}
+    ^rows: [[String]]{}
     loop index in 0..<count {
-        row := if index < envs.len() -> envs[index].copy() else -> [String]{}  // copy: each child task owns its environment row.
+        ^row: if index < envs.len() -> envs[index].copy() else -> [String]{}  // copy: each child task owns its environment row.
         if scratch != "" {
             row.push(EVIDENCE_REPORT_ENV)
             row.push(jet_cli_rooted_join(scratch, "{index}.bin"))
@@ -254,8 +254,8 @@ jet_cli_test_runs_envs: fn(envs: [[String]], count: Int, scratch: String) -> [[S
 // run's rows at its `tiers` entry, `jet` the compiler that ran them. The
 // problems, one line each; "" when there are none.
 jet_cli_test_runs_results_write: fn(path: String, scratch: String, names: [String], tiers: [String], jet: String) -[FS, Env]> String Never! {
-    results := [KitCaseResult]{}
-    problems := ""
+    ^results: [KitCaseResult]{}
+    ^problems: ""
     loop (index, tier) in tiers {
         report_path: jet_cli_rooted_join(scratch, "{index}.bin")
         // The child stopped before its tests ran; its own stderr says why.
@@ -283,9 +283,9 @@ jet_cli_test_runs_results_write: fn(path: String, scratch: String, names: [Strin
 // `tests` run, `jet prove`). A child that wrote none adds none. The problems,
 // one line each; "" when there are none.
 jet_cli_test_runs_report_write: fn(path: String, scratch: String, names: [String]) -[FS, Env]> String Never! {
-    records := [EvidenceRecord]{}
-    derivations := [DerivationRecord]{}
-    problems := ""
+    ^records: [EvidenceRecord]{}
+    ^derivations: [DerivationRecord]{}
+    ^problems: ""
     loop (index, name) in names {
         report_path: jet_cli_rooted_join(scratch, "{index}.bin")
         // The child stopped before its tests ran; its own stderr says why.
@@ -360,7 +360,7 @@ jet_cli_test_record_status: fn(outcome: EvidenceOutcome, expected: Bool) -> Stri
 // A run's evidence records as `results` rows of `suite`, each claim's row at
 // `tier` (the run that made it).
 jet_cli_test_record_results: fn(records: [EvidenceRecord], suite: String, tier: String) -> [KitCaseResult] Never! {
-    results := [KitCaseResult]{}
+    ^results: [KitCaseResult]{}
     loop record in records {
         status: jet_cli_test_record_status(record.outcome, record.expectation == EvidenceExpectation.ExpectedFailure)
         // copy: the rows outlive the records and the caller's names.

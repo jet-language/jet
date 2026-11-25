@@ -114,15 +114,15 @@ sema_flow_restore: fn<P: SemaFlowPlane>(walk: ^SemaFlowWalk<P>, facts: SemaFlowF
 
 // A `return` or `panic`: nothing after it runs on this path, and it meets
 // no join.
-sema_flow_end: fn<P: SemaFlowPlane>(walk: ^SemaFlowWalk<P>) Never! {
-    walk.ended = true
-}
+sema_flow_end: fn<P: SemaFlowPlane>(walk: ^SemaFlowWalk<P>) Never! { walk.ended = true }
 
 // A `break` or `continue` leaves the body: its store meets the paths that
 // leave the innermost loop, and nothing after it in the block runs on this
 // path.
 sema_flow_leave_loop: fn<P: SemaFlowPlane>(walk: ^SemaFlowWalk<P>) Never! {
-    if !walk.ended && walk.exits.len() > 0 -> walk.exits[walk.exits.len() - 1].push(walk.current.copy())
+    if !walk.ended && walk.exits.len() > 0 {
+        walk.exits[walk.exits.len() - 1].push(walk.current.copy())
+    }
     walk.ended = true
 }
 
@@ -134,8 +134,8 @@ sema_flow_reach: fn<P: SemaFlowPlane>(walk: SemaFlowWalk<P>, paths: ^[SemaFlowFa
 // The store where a path holding `left` meets one holding `right`: each
 // binding either holds is joined by the plane.
 sema_flow_join: fn<P: SemaFlowPlane>(plane: P, left: SemaFlowFacts, right: SemaFlowFacts, splits: ^[SemaFlowSplit]) -> SemaFlowFacts Never! {
-    out := sema_flow_facts(left.plane)
-    count := left.facts.len()
+    ^out: sema_flow_facts(left.plane)
+    ^count: left.facts.len()
     if right.facts.len() > count -> count = right.facts.len()
     loop binding in 1..<count {
         one: sema_flow_fact(left, binding)
@@ -150,9 +150,9 @@ sema_flow_join: fn<P: SemaFlowPlane>(plane: P, left: SemaFlowFacts, right: SemaF
 // The one branch-merge rule: the paths that fall through meet, in order.
 // When none falls through, the walk after them has left its block.
 sema_flow_meet: fn<P: SemaFlowPlane>(walk: ^SemaFlowWalk<P>, paths: ^^[SemaFlowFacts], splits: ^[SemaFlowSplit]) Never! {
-    pending := paths.move()
+    ^pending: paths.move()
     pending.reverse()
-    merged := pending.pop() ?? {
+    ^merged: pending.pop() ?? {
         walk.ended = true
         return
     }
@@ -174,7 +174,7 @@ sema_flow_loop_enter: fn<P: SemaFlowPlane>(walk: ^SemaFlowWalk<P>) -> SemaFlowLo
 // The one loop rule: the zero-turn path meets the one-turn path and every
 // path that left the body with `break` or `continue`.
 sema_flow_loop_leave: fn<P: SemaFlowPlane>(walk: ^SemaFlowWalk<P>, entered: ^^SemaFlowLoop, splits: ^[SemaFlowSplit]) Never! {
-    paths := [SemaFlowFacts]{entered.before.move()}
+    ^paths: [SemaFlowFacts]{entered.before.move()}
     sema_flow_reach(walk, paths)
     left: walk.exits.pop() ?? [SemaFlowFacts]{}
     loop exit in left.move() -> paths.push(exit)
@@ -185,7 +185,7 @@ sema_flow_loop_leave: fn<P: SemaFlowPlane>(walk: ^SemaFlowWalk<P>, entered: ^^Se
 // sema_flow_reach) meet; a table without `else` (`has_else` false) also has
 // the path that skips every arm, from `before`, unless it is `exhaustive`.
 sema_flow_arms_meet: fn<P: SemaFlowPlane>(walk: ^SemaFlowWalk<P>, before: ^^SemaFlowFacts, paths: ^^[SemaFlowFacts], has_else: Bool, exhaustive: Bool, splits: ^[SemaFlowSplit]) Never! {
-    met := paths.move()
+    ^met: paths.move()
     if !has_else && !exhaustive -> met.push(before.move())
     sema_flow_meet(walk, met, splits)
 }

@@ -282,7 +282,7 @@ x509_get_alg: fn(data: [U8], p: ^Int, end: Int) -> {alg: asn1.ASN1Buf, params: a
 // absent or NULL parameters.
 x509_get_hash_alg: fn(data: [U8], alg: asn1.ASN1Buf) -> hashes.Md X509Error! {
     if alg.tag_id != X509_SEQUENCE -> return Err(.InvalidAlg(Val(.UnexpectedTag)))
-    p := alg.p
+    ^p: alg.p
     end: alg.p + alg.len
     if p >= end -> return Err(.InvalidAlg(Val(.OutOfData)))
     len: asn1.get_tag(data, p, end, asn1.ASN1_OID) ?? return Err(.InvalidAlg(Val(err)))
@@ -302,9 +302,9 @@ x509_explicit: fn(n: Int) -> Int Never! { asn1.ASN1_CONTEXT_SPECIFIC | asn1.ASN1
 /// RSASSA-PSS-params (RFC 4055), each field defaulted when absent; the
 /// trailerField, when present, must be 1 (mbedtls_x509_get_rsassa_pss_params).
 x509_get_rsassa_pss_params: fn(data: [U8], params: asn1.ASN1Buf) -> X509PssParams X509Error! {
-    out := X509PssParams{md: .SHA1, mgf1_md: .SHA1, salt_len: 20}
+    ^out: X509PssParams{md: .SHA1, mgf1_md: .SHA1, salt_len: 20}
     if params.tag_id != X509_SEQUENCE -> return Err(.InvalidAlg(Val(.UnexpectedTag)))
-    p := params.p
+    ^p: params.p
     end: params.p + params.len
     if p == end -> return Ok(out)
     // hashAlgorithm [0]: an AlgorithmIdentifier without parameters.
@@ -390,12 +390,12 @@ x509_get_attr_type_value: fn(data: [U8], p: ^Int, end: Int) -> asn1.NamedData X5
 /// but the last marked next_merged (mbedtls_x509_get_name). The name must
 /// end at `end`.
 x509_get_name: fn(data: [U8], p: ^Int, end: Int) -> [asn1.NamedData] X509Error! {
-    names := [asn1.NamedData]{}
+    ^names: [asn1.NamedData]{}
     loop {
         set_len: asn1.get_tag(data, p, end, X509_SET) ?? return Err(.InvalidName(Val(err)))
         end_set: p + set_len
         loop {
-            entry := x509_get_attr_type_value(data, p, end_set)
+            ^entry: x509_get_attr_type_value(data, p, end_set)
             last: p == end_set
             entry.next_merged = !last
             names.push(entry)
@@ -530,13 +530,13 @@ x509_push_hex2: fn(out: ^[U8], b: Int) {
 }
 
 x509_hex_text: fn(value: Int, width: Int) -> [U8] Never! {
-    digits := [U8]{}
-    v := value
+    ^digits: [U8]{}
+    ^v: value
     loop v > 0 || digits.len() < width {
         digits.push(x509_hex_digit(v & 15))
         v = v >> 4
     }
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<digits.len() -> out.push(digits[digits.len() - 1 - i])
     out
 }
@@ -569,14 +569,14 @@ x509_hex_value: fn(c: Int) -> Int Never! {
 // must fit MBEDTLS_X509_MAX_DN_NAME_SIZE with its NUL.
 x509_dn_value: fn(entry: asn1.NamedData, print_hex: Bool) -> [U8] X509Error! {
     limit: X509_MAX_DN_NAME_SIZE - 1
-    s := [U8]{}
+    ^s: [U8]{}
     if print_hex {
         s.push(X509_HASH_SIGN)
-        head := cipher.zero_bytes(6)
-        at := head.len()
-        n := asn1.write_len(head, at, 0, entry.val.len()) ?? return Err(.FatalError)
+        ^head: cipher.zero_bytes(6)
+        ^at: head.len()
+        ^n: asn1.write_len(head, at, 0, entry.val.len()) ?? return Err(.FatalError)
         n += asn1.write_tag(head, at, 0, entry.val_tag) ?? return Err(.FatalError)
-        encoded := cipher.bytes_of(head, at, n)
+        ^encoded: cipher.bytes_of(head, at, n)
         encoded.extend(entry.val)
         loop c in encoded {
             if s.len() + 1 >= limit -> return Err(.BufferTooSmall)
@@ -611,12 +611,12 @@ x509_dn_value: fn(entry: asn1.NamedData, print_hex: Bool) -> [U8] X509Error! {
 /// the attributes of one multi-valued RDN joined by " + "
 /// (mbedtls_x509_dn_gets).
 x509_dn_gets: fn(dn: [asn1.NamedData]) -> [U8] X509Error! {
-    out := [U8]{}
-    merge := false
+    ^out: [U8]{}
+    ^merge: false
     loop i in 0..<dn.len() {
         entry: dn[i]
         if i > 0 -> out.extend((if merge -> " + " else -> ", ").bytes())
-        print_hex := entry.val_tag != asn1.ASN1_UTF8_STRING && entry.val_tag != asn1.ASN1_PRINTABLE_STRING && entry.val_tag != asn1.ASN1_IA5_STRING
+        ^print_hex: entry.val_tag != asn1.ASN1_UTF8_STRING && entry.val_tag != asn1.ASN1_PRINTABLE_STRING && entry.val_tag != asn1.ASN1_IA5_STRING
         if oids.attr_short_name(entry.oid, x509_oid_item(entry.oid)) == {
             .Ok(short_name) -> { out.extend("{short_name}=".bytes()) }
             .Err(_) -> {
@@ -639,14 +639,14 @@ x509_dn_gets: fn(dn: [asn1.NamedData]) -> [U8] X509Error! {
 /// `next_merged` joins to it; dn.len() after the last
 /// (mbedtls_x509_dn_get_next).
 x509_dn_get_next: fn(dn: [asn1.NamedData], at: Int) -> Int Never! {
-    i := at
+    ^i: at
     loop dn[i].next_merged && i + 1 < dn.len() -> i += 1
     i + 1
 }
 
 // Two decimal digits, or four for a year.
 x509_pad: fn(n: Int, width: Int) -> String Never! {
-    text := "{n}"
+    ^text: "{n}"
     loop text.len() < width -> text = "0{text}"
     text
 }
@@ -659,7 +659,7 @@ x509_time_text: fn(t: X509Time) -> String Never! {
 /// A serial number as colon-separated hex, a leading zero byte dropped and
 /// anything past 32 bytes cut to 28 and "...." (mbedtls_x509_serial_gets).
 x509_serial_gets: fn(data: [U8], serial: asn1.ASN1Buf) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     nr: if serial.len <= 32 -> serial.len else -> 28
     loop i in 0..<nr {
         b: Int{data[serial.p + i]}
@@ -690,7 +690,7 @@ x509_md_name: fn(md: hashes.Md?) -> String Never! {
 /// " (SHA256, MGF1-SHA256, 0x20)" after an RSASSA-PSS one
 /// (mbedtls_x509_sig_alg_gets).
 x509_sig_alg_gets: fn(data: [U8], sig_oid: asn1.ASN1Buf, alg: X509SigAlg) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     if oids.sig_alg(data, sig_oid) == {
         .Ok(got) -> { out.extend(got.description.bytes()) }
         .Err(_) -> out.extend("???".bytes())
@@ -737,9 +737,9 @@ x509_get_other_name: fn(data: [U8], san: asn1.ASN1Buf) -> SanOtherName X509Error
     if san.tag_id & (asn1.ASN1_TAG_CLASS_MASK | asn1.ASN1_TAG_VALUE_MASK) != asn1.ASN1_CONTEXT_SPECIFIC | X509_SAN_OTHER_NAME {
         return Err(.BadInput)
     }
-    p := san.p
+    ^p: san.p
     end: san.p + san.len
-    len := asn1.get_tag(data, p, end, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
+    ^len: asn1.get_tag(data, p, end, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
     type_id: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
     if !oids.is(oids.OID_ON_HW_MODULE_NAME, data, type_id) -> return Err(.FeatureUnavailable(None))
     p += len
@@ -779,7 +779,7 @@ x509_parse_subject_alt_name: fn(data: [U8], san: asn1.ASN1Buf) -> SubjectAltName
         }
         X509_SAN_RFC822_NAME -> Ok(.Rfc822Name(san))
         X509_SAN_DIRECTORY_NAME -> {
-            p := san.p
+            ^p: san.p
             name_len: asn1.get_tag(data, p, san.p + san.len, X509_SEQUENCE) ?? return Err(.Asn1(err))
             names: x509_get_name(data, p, p + name_len)
             Ok(.DirectoryName(names))
@@ -791,7 +791,7 @@ x509_parse_subject_alt_name: fn(data: [U8], san: asn1.ASN1Buf) -> SubjectAltName
 /// The GeneralNames from the cursor to `end`, each context-specific and
 /// readable or of a type mbedtls skips (mbedtls_x509_get_subject_alt_name_ext).
 x509_get_subject_alt_name_ext: fn(data: [U8], p: ^Int, end: Int) -> [asn1.ASN1Buf] X509Error! {
-    names := [asn1.ASN1Buf]{}
+    ^names: [asn1.ASN1Buf]{}
     loop p < end {
         tag_id: Int{data[p]}
         p += 1
@@ -834,7 +834,7 @@ x509_get_ns_cert_type: fn(data: [U8], p: ^Int, end: Int) -> Int X509Error! {
 /// read (mbedtls_x509_get_key_usage).
 x509_get_key_usage: fn(data: [U8], p: ^Int, end: Int) -> Int X509Error! {
     bs: asn1.get_bitstring(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
-    usage := 0
+    ^usage: 0
     loop i in 0..<bs.len {
         if i >= 4 -> break
         usage |= Int{data[bs.p + i]} << (8 * i)
@@ -904,7 +904,7 @@ x509_info_one_san: fn(out: ^[U8], data: [U8], san: SubjectAltName, prefix: Strin
 
 // The comma-separated names of the flags set in `bits`.
 x509_info_flags: fn(out: ^[U8], bits: Int, flags: [Int], names: [String]) {
-    sep := ""
+    ^sep: ""
     loop i in 0..<flags.len() {
         if bits & flags[i] != 0 {
             out.extend("{sep}{names[i]}".bytes())

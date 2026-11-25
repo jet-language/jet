@@ -365,7 +365,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
     }
     base: wrapping(pg_word(memory) + start)
     byte: value & I64{255}
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         rt_text_put(wrapping(base + at), byte)
         at += I64{1}
@@ -421,7 +421,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
         return I64{-1}
     }
     data: pg_word(table)
-    at := size
+    ^at: size
     loop at < wanted {
         pg_store(wrapping(data + at * I64{8}), value)
         at += I64{1}
@@ -457,7 +457,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
         _: pg_trap_at(instance, I64{10}, fid, offset)
         return
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         pg_store(wrapping(pg_word(table) + (start + at) * I64{8}), value)
         at += I64{1}
@@ -518,8 +518,8 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 // ---- numeric helpers -------------------------------------------------------------
 
 #Export(c) jet_plugin_clz: fn(value: I64, width: I64) -> I64 {
-    count := I64{0}
-    bit := width - I64{1}
+    ^count: I64{0}
+    ^bit: width - I64{1}
     loop bit >= (I64{0}) && (value >> bit) & (I64{1}) == (I64{0}) {
         count += I64{1}
         bit -= I64{1}
@@ -528,14 +528,14 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 }
 
 #Export(c) jet_plugin_ctz: fn(value: I64, width: I64) -> I64 {
-    count := I64{0}
+    ^count: I64{0}
     loop count < width && (value >> count) & (I64{1}) == (I64{0}) -> count += I64{1}
     count
 }
 
 #Export(c) jet_plugin_popcnt: fn(value: I64, width: I64) -> I64 {
-    count := I64{0}
-    bit := I64{0}
+    ^count: I64{0}
+    ^bit: I64{0}
     loop bit < width {
         count += (value >> bit) & I64{1}
         bit += I64{1}
@@ -561,11 +561,11 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
     // signed 64, 2^64 for unsigned 64), where signed negatives may reach -2&&(limit).
     limit: if wide -> (if unsigned -> I64{64} else -> I64{63}) else -> (if unsigned -> I64{32} else -> I64{31})
     power: exponent - I64{1023}
-    overflow := exponent == I64{2047} || power >= limit
+    ^overflow: exponent == I64{2047} || power >= limit
     if (negative && !unsigned && power == limit && fraction == I64{0} && exponent != I64{2047}) {
         overflow = false
     }
-    magnitude := I64{0}
+    ^magnitude: I64{0}
     if (!overflow && power >= I64{0}) {
         mantissa: fraction | I64{4503599627370496}
         magnitude = if (power >= I64{52}) -> mantissa << (power - I64{52}) else -> mantissa >> (I64{52} - power)
@@ -589,9 +589,9 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
 pg_round_magnitude: fn(magnitude: I64, digits: I64) -> Float {
     if (magnitude >= I64{0} && magnitude < (I64{1} << digits)) { return Float{magnitude} }
     // `shift` drops the bits below the kept `digits`: a set top bit is bit 63.
-    shift := if (magnitude < I64{0}) -> I64{64} - digits else -> I64{1}
+    ^shift: if (magnitude < I64{0}) -> I64{64} - digits else -> I64{1}
     loop magnitude >= (I64{0}) && (magnitude >> (digits + shift)) != (I64{0}) -> shift += I64{1}
-    kept := (magnitude >> shift) & I64{9223372036854775807} >> (shift - I64{1})
+    ^kept: (magnitude >> shift) & I64{9223372036854775807} >> (shift - I64{1})
     rest: magnitude & (I64{1} << shift) - I64{1}
     half: I64{1} << (shift - I64{1})
     if (rest > half || (rest == half && kept & I64{1} != I64{0})) { kept += I64{1} }
@@ -639,7 +639,7 @@ pg_round_magnitude: fn(magnitude: I64, digits: I64) -> Float {
     if (value != value) { return value }
     low: jet_std_math_floor(value)
     diff: value - low
-    result := low
+    ^result: low
     if (diff > Float{0.5}) { result = low + Float{1.0} } else if (diff == Float{0.5}) {
         half: low * Float{0.5}
         if (jet_std_math_floor(half) != half) { result = low + Float{1.0} }
@@ -662,8 +662,8 @@ pg_starts: fn(text: I64, data: I64, length: I64) -> Bool {
 pg_holds_family: fn(wire: I64, family: I64) -> Bool {
     data: rt_text_data(wire)
     length: rt_text_len(wire)
-    start := I64{0}
-    at := I64{0}
+    ^start: I64{0}
+    ^at: I64{0}
     loop at <= length {
         if (at == length || rt_text_byte(wrapping(data + at)) == I64{10}) {
             if (at > start) {
@@ -692,8 +692,8 @@ pg_relative: fn(path: I64, root: I64, error: I64) -> I64 {
         }
     } else {
         // Reject `..` components in a relative path.
-        at := I64{0}
-        start := I64{0}
+        ^at: I64{0}
+        ^start: I64{0}
         loop at <= length {
             if (at == length || rt_text_byte(wrapping(data + at)) == I64{47}) {
                 if (at - start == I64{2} && rt_text_byte(wrapping(data + start)) == I64{46} && rt_text_byte(wrapping(wrapping(data + start) + I64{1})) == I64{46}) {
@@ -709,14 +709,14 @@ pg_relative: fn(path: I64, root: I64, error: I64) -> I64 {
     root_data: rt_text_data(root)
     any: (root_len == I64{4} && rt_text_equal_bytes(root_data, rt_text_data(rt_static_text("repo")), I64{4})) || (root_len == I64{1} && rt_text_byte(root_data) == I64{46})
     if any -> return rt_text_copy(data, length)
-    trimmed := root_len
+    ^trimmed: root_len
     loop trimmed > (I64{1}) && rt_text_byte(wrapping(wrapping(root_data + trimmed) - I64{1})) == (I64{47}) {
         trimmed -= I64{1}
     }
     if (length <= trimmed || !rt_text_equal_bytes(data, root_data, trimmed) || rt_text_byte(wrapping(data + trimmed)) != I64{47}) {
         return I64{0}
     }
-    rest := trimmed + I64{1}
+    ^rest: trimmed + I64{1}
     loop rest < length && rt_text_byte(wrapping(data + rest)) == (I64{47}) -> rest += I64{1}
     if (rest == length) {
         pg_store(error, jet_rt_string_clone(rt_static_text("plugin path names the FS.Read root, not a file")))
@@ -784,7 +784,7 @@ PG_RESOLVE_BENEATH_NO_SYMLINKS: I64{12}
 pg_cpath: fn(path: I64) -> I64 {
     length: rt_text_len(path)
     data: rt_text_data(path)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(data + at)) == I64{0}) { return I64{0} }
         at += I64{1}
@@ -797,13 +797,13 @@ pg_cpath: fn(path: I64) -> I64 {
 
 // close(2); not retried, since Linux releases the descriptor even on EINTR.
 pg_close: fn(fd: I64) {
-    if (fd >= I64{0}) { _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) }
+    if (fd >= I64{0}) { ^_: trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) }
 }
 
 // openat(2) of the root directory (following symlinks, as the root right
 // names it), retrying EINTR.
 pg_open_dir: fn(path: I64) -> I64 {
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop fd == (I64{-4}) {
         fd = trap_syscall(I64{257}, I64{-100}, path, PG_O_DIRECTORY | PG_O_CLOEXEC, I64{0}, I64{0}, I64{0})
     }
@@ -832,7 +832,7 @@ pg_read_below: fn(root: I64, relative: I64, error: I64) -> I64 {
     }
     scratch: jet_rt_alloc(I64{32}, I64{8})
     dir: pg_open_dir(root_path)
-    file := dir
+    ^file: dir
     if (dir >= I64{0}) {
         file = pg_open_beneath(dir, name, scratch)
         pg_close(dir)
@@ -862,10 +862,10 @@ pg_scoped_read: fn(path: I64, wire: I64, family: I64, error: I64) -> I64 {
     prefix: jet_rt_string_builder_new()
     jet_rt_string_builder_push(prefix, family)
     jet_rt_string_builder_push(prefix, rt_static_text("(\""))
-    saw := false
-    last := I64{0}
-    start := I64{0}
-    at := I64{0}
+    ^saw: false
+    ^last: I64{0}
+    ^start: I64{0}
+    ^at: I64{0}
     loop at <= length {
         if (at == length || rt_text_byte(wrapping(data + at)) == I64{10}) {
             right: rt_text_copy(wrapping(data + start), at - start)
@@ -948,18 +948,18 @@ pg_scoped_read: fn(path: I64, wire: I64, family: I64, error: I64) -> I64 {
 
 pg_leaf_right: fn(name: I64) -> I64 {
     data: rt_text_data(name)
-    end := rt_text_len(name)
+    ^end: rt_text_len(name)
     loop end > (I64{0}) && pg_separator(rt_text_byte(wrapping(wrapping(data + end) - I64{1}))) {
         end -= I64{1}
     }
-    start := end
+    ^start: end
     loop start > (I64{0}) && !pg_separator(rt_text_byte(wrapping(wrapping(data + start) - I64{1}))) {
         start -= I64{1}
     }
     raw_leaf: rt_text_copy(wrapping(data + start), end - start)
     leaf: rt_text_ascii(raw_leaf, false)
     jet_rt_string_drop(raw_leaf)
-    right := I64{0}
+    ^right: I64{0}
     if (pg_is(leaf, rt_static_text("read")) || pg_is(leaf, rt_static_text("read_bytes")) || pg_is(leaf, rt_static_text("readbytes"))) {
         right = rt_static_text("FS.Read")
     } else if (pg_is(leaf, rt_static_text("write")) || pg_is(leaf, rt_static_text("write_bytes")) || pg_is(leaf, rt_static_text("writebytes"))) {
@@ -987,13 +987,13 @@ pg_preflight: fn(plugin: I64, desc: I64, path: I64) -> I64 {
     needs: pg_desc_text(desc, I64{23})
     count: pg_desc(desc, I64{9})
     records: wrapping(desc + pg_desc(desc, I64{10}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         record: wrapping(records + at * I64{64})
         name: pg_text(wrapping(desc + pg_word(record)), pg_word(wrapping(record + I64{8})))
         right: pg_leaf_right(name)
         detail: jet_rt_string_builder_new()
-        kind := I64{-1}
+        ^kind: I64{-1}
         if (right == I64{0}) {
             jet_rt_string_builder_push(detail, rt_static_text("plugin import `"))
             jet_rt_string_builder_push(detail, name)
@@ -1050,7 +1050,7 @@ pg_instantiate: fn(plugin: I64, desc: I64, path: I64) -> I64 {
     elems: pg_desc(desc, I64{19})
     pg_store(wrapping(instance + PG_INST_ELEM_DROPPED), jet_rt_alloc(elems + I64{8}, I64{8}))
     coll_zero(pg_word(wrapping(instance + PG_INST_ELEM_DROPPED)), elems + I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < memories {
         record: desc + pg_desc(desc, I64{12}) + at * I64{16}
         memory: pg_memory(instance, at)
@@ -1291,7 +1291,7 @@ pg_limits_refusal: fn(fuel: I64, memory_bytes: I64, table_elements: I64, timeout
     if (instance != I64{0}) {
         desc: pg_word(wrapping(instance + PG_INST_DESC))
         memories: pg_desc(desc, I64{11})
-        at := I64{0}
+        ^at: I64{0}
         loop at < memories {
             pg_munmap(pg_word(pg_memory(instance, at)), pg_memory_reserve(plugin))
             at += I64{1}
@@ -1337,7 +1337,7 @@ pg_push_arg: fn(plugin: I64, kind: I64, value: I64) {
 pg_clear_args: fn(plugin: I64) {
     count: pg_word(wrapping(plugin + PG_PLUGIN_ARGS))
     data: pg_word(wrapping(plugin + PG_PLUGIN_ARG_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         entry: wrapping(data + at * PG_ARG_BYTES)
         if (pg_word(entry) == I64{3}) { jet_rt_string_drop(pg_word(wrapping(entry + I64{8}))) }
@@ -1413,13 +1413,13 @@ pg_find_export: fn(desc: I64, name: I64) -> I64 {
     records: wrapping(desc + pg_desc(desc, I64{8}))
     length: rt_text_len(name)
     data: rt_text_data(name)
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         record: wrapping(records + at * PG_EXPORT_BYTES)
         if (pg_word(wrapping(record + I64{8})) == length) {
             text: wrapping(desc + pg_word(record))
-            same := true
-            index := I64{0}
+            ^same: true
+            ^index: I64{0}
             loop same && index < length {
                 byte: rt_text_byte(wrapping(text + index))
                 folded: if (byte == I64{45}) -> I64{95} else -> byte
@@ -1435,7 +1435,7 @@ pg_find_export: fn(desc: I64, name: I64) -> I64 {
 
 // The PluginError for the trap recorded in `instance`.
 pg_trap_failure: fn(instance: I64, kind: I64, name: I64, call: Bool) -> I64 {
-    message := pg_word(wrapping(instance + PG_INST_MESSAGE))
+    ^message: pg_word(wrapping(instance + PG_INST_MESSAGE))
     pg_store(wrapping(instance + PG_INST_MESSAGE), I64{0})
     if (message == I64{0}) {
         message = jet_rt_string_clone(rt_static_text("host/runtime failed while executing the guest"))
@@ -1450,7 +1450,7 @@ pg_trap_failure: fn(instance: I64, kind: I64, name: I64, call: Bool) -> I64 {
     count: if keep -> pg_word(wrapping(instance + PG_INST_FRAME_COUNT)) else -> I64{0}
     frames: jet_rt_record_seq_list_rec_plugin_frame_new(count)
     desc: pg_word(wrapping(instance + PG_INST_DESC))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         slot: wrapping(pg_word(wrapping(instance + PG_INST_FRAMES)) + at * I64{16})
         record: wrapping(wrapping(desc + pg_desc(desc, I64{22})) + pg_word(slot) * I64{40})
@@ -1517,8 +1517,8 @@ pg_invoke_loaded: fn(plugin: I64, name: I64, want: I64, error: I64) -> I64 {
     }
     types: wrapping(desc + pg_word(wrapping(record + I64{32})))
     args: pg_word(wrapping(plugin + PG_PLUGIN_ARG_DATA))
-    flat := I64{0}
-    at := I64{0}
+    ^flat: I64{0}
+    ^at: I64{0}
     loop at < count {
         entry: args + at * PG_ARG_BYTES
         code: pg_word(wrapping(types + at * I64{8}))
@@ -1572,7 +1572,7 @@ pg_invoke_loaded: fn(plugin: I64, name: I64, want: I64, error: I64) -> I64 {
         }
         at += I64{1}
     }
-    slot := I64{0}
+    ^slot: I64{0}
     at = I64{0}
     loop at < count {
         entry: args + at * PG_ARG_BYTES
@@ -1592,7 +1592,7 @@ pg_invoke_loaded: fn(plugin: I64, name: I64, want: I64, error: I64) -> I64 {
         return pg_call_trapped(plugin, name, error)
     }
     raw: pg_word(area)
-    value := pg_lift_flat(result_code, raw)
+    ^value: pg_lift_flat(result_code, raw)
     if (result_code == PG_VALUE_STRING || result_code == PG_VALUE_TUPLE) {
         if (result_code == PG_VALUE_STRING) {
             length: pg_text_result_length(instance, pg_word(wrapping(record + I64{64})), raw & PG_U32)
@@ -1733,9 +1733,9 @@ pg_field_align: fn(code: I64) -> I64 {
 pg_lift_fields: fn(instance: I64, record: I64, desc: I64, raw: I64) -> I64 {
     count: pg_word(wrapping(record + I64{80}))
     codes: wrapping(desc + pg_word(wrapping(record + I64{88})))
-    flat := I64{0}
-    align := I64{1}
-    at := I64{0}
+    ^flat: I64{0}
+    ^align: I64{1}
+    ^at: I64{0}
     loop at < count {
         code: pg_word(wrapping(codes + at * I64{8}))
         flat += if (code == PG_VALUE_STRING) -> I64{2} else -> I64{1}
@@ -1758,7 +1758,7 @@ pg_lift_fields: fn(instance: I64, record: I64, desc: I64, raw: I64) -> I64 {
     memory: pg_memory(instance, memory_index)
     size: pg_word(wrapping(memory + I64{8}))
     base: pg_word(memory)
-    offset := I64{0}
+    ^offset: I64{0}
     at = I64{0}
     loop at < count {
         code: pg_word(wrapping(codes + at * I64{8}))
@@ -1767,7 +1767,7 @@ pg_lift_fields: fn(instance: I64, record: I64, desc: I64, raw: I64) -> I64 {
         width: if (code == PG_VALUE_STRING) -> I64{8} else -> field_align
         start: area + offset
         target: wrapping(buffer + at * I64{8})
-        fits := pg_in_bounds(start, width, size)
+        ^fits: pg_in_bounds(start, width, size)
         if (fits && code == PG_VALUE_STRING) {
             text: pg_lift_text(instance, memory_index, start)
             fits = text != I64{0}
@@ -1792,7 +1792,7 @@ pg_lift_fields: fn(instance: I64, record: I64, desc: I64, raw: I64) -> I64 {
 pg_drop_fields: fn(record: I64, desc: I64, buffer: I64, lifted: I64) {
     count: pg_word(wrapping(record + I64{80}))
     codes: wrapping(desc + pg_word(wrapping(record + I64{88})))
-    at := I64{0}
+    ^at: I64{0}
     loop at < lifted {
         if (pg_word(wrapping(codes + at * I64{8})) == PG_VALUE_STRING) {
             jet_rt_string_drop(pg_word(wrapping(buffer + at * I64{8})))
@@ -1865,7 +1865,7 @@ pg_int_u64: fn(raw: I64) -> I64 {
 // PluginError at `out` and 0. `count` is the host's field count.
 #Export(c) jet_plugin_call_words: fn(plugin: I64, name: I64, out: I64, count: I64) -> I64 {
     slot: jet_rt_alloc(I64{8}, I64{8})
-    status := pg_invoke(plugin, name, I64{4}, slot)
+    ^status: pg_invoke(plugin, name, I64{4}, slot)
     if (status != I64{0}) {
         desc: pg_word(wrapping(plugin + PG_PLUGIN_DESC))
         record: pg_find_export(desc, name)
@@ -1877,7 +1877,7 @@ pg_int_u64: fn(raw: I64) -> I64 {
             status = I64{0}
         } else {
             codes: wrapping(desc + pg_word(wrapping(record + I64{88})))
-            at := I64{0}
+            ^at: I64{0}
             loop at < count {
                 code: pg_word(wrapping(codes + at * I64{8}))
                 raw: pg_word(wrapping(buffer + at * I64{8}))

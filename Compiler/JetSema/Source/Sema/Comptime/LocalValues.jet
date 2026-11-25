@@ -224,7 +224,7 @@ sema_comptime_local_value_ahead_destination: fn(function_key: String, source_spa
 // site's own check, under the key of a value computed ahead, so the
 // landing of the body that holds the site builds no program for it.
 sema_comptime_local_value_ahead_site: fn(site: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {
-    source := sema_comptime_body_item_source(site)
+    ^source: sema_comptime_body_item_source(site)
     source.key = sema_comptime_local_value_ahead_key(site.module_identity, site.function_key, site.span, site.site_span)
     source.destination_key = sema_comptime_local_value_ahead_destination(site.function_key, site.span, site.site_span)
     source.ahead = true
@@ -245,7 +245,7 @@ SEMA_COMPTIME_LOCAL_VALUE_AHEAD: ".local-value-ahead."
 // read; a local that a policy, `#Impure` or `#Unsafe` block, or a lambda
 // holds is not staged.
 sema_comptime_local_value_ahead_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
-    sources := [SemaComptimeItemSource]{}
+    ^sources: [SemaComptimeItemSource]{}
     if graph.check_tests && !graph.every_core_body -> return sources
     if module_is_core(source_module.module_identity) || sema_core_prelude_module(source_module.package_identity, source_module.module_identity, source_module.module_name) {
         return sources
@@ -310,7 +310,7 @@ sema_comptime_local_value_ahead_stmts: fn(sources: ^[SemaComptimeItemSource], so
                 if binding.mutable || binding.name == "_" || binding.pattern != None || binding.ty != None || binding.is_comptime || binding.ct != None || binding.uninit || binding.arena_view || binding.string_view || binding.reactive_upgrade || binding.markers.len() > 0 || binding.meta != None {
                     next
                 }
-                scan := SemaComptimeLocalValueAheadScan{calls: false, readable: true}
+                ^scan: SemaComptimeLocalValueAheadScan{calls: false, readable: true}
                 sema_comptime_local_value_ahead_expr(binding.init, function, function_body, scan)
                 if !scan.calls || !scan.readable -> next
                 source_span: expr_span(binding.init)
@@ -368,11 +368,15 @@ sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, function_bo
     }
     if expr == {
         .Ident(name, _, _) -> {
-            if sema_comptime_local_value_ahead_binds(function, function_body, name) -> scan.readable = false
+            if sema_comptime_local_value_ahead_binds(function, function_body, name) {
+                scan.readable = false
+            }
         }
         .Call(call, _) -> {
             scan.calls = true
-            if sema_comptime_local_value_ahead_binds(function, function_body, call.name) -> scan.readable = false
+            if sema_comptime_local_value_ahead_binds(function, function_body, call.name) {
+                scan.readable = false
+            }
             loop argument in call.args {
                 sema_comptime_local_value_ahead_expr(argument.expr, function, function_body, scan)
             }
@@ -403,7 +407,9 @@ sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, function_bo
                         sema_comptime_local_value_ahead_expr(entry.value, function, function_body, scan)
                     }
                 }
-                .Value(value) -> sema_comptime_local_value_ahead_expr(value, function, function_body, scan)
+                .Value(value) -> {
+                    sema_comptime_local_value_ahead_expr(value, function, function_body, scan)
+                }
                 .ByteText(_) | .Empty -> {}
             }
         }
@@ -415,7 +421,9 @@ sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, function_bo
             }
         }
         .ListLit(items, _, _) | .CompareChain(items, _, _, _, _) -> {
-            loop item in items -> sema_comptime_local_value_ahead_expr(item, function, function_body, scan)
+            loop item in items {
+                sema_comptime_local_value_ahead_expr(item, function, function_body, scan)
+            }
         }
         .Unary(_, inner, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Copy(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) -> {
             sema_comptime_local_value_ahead_expr(inner, function, function_body, scan)
@@ -446,7 +454,9 @@ sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, function_bo
                     .Positional(value) -> {
                         sema_comptime_local_value_ahead_expr(value, function, function_body, scan)
                     }
-                    .Named(_, value) -> sema_comptime_local_value_ahead_expr(value, function, function_body, scan)
+                    .Named(_, value) -> {
+                        sema_comptime_local_value_ahead_expr(value, function, function_body, scan)
+                    }
                 }
             }
         }
@@ -467,8 +477,8 @@ SemaComptimeLocalValuesAhead: struct {
 }
 
 sema_comptime_local_values_ahead: fn(values: [SemaComptimeItemValue], pending: [SemaComptimeBodySource]) -> SemaComptimeLocalValuesAhead {
-    ahead := SemaComptimeLocalValuesAhead{values: [SemaComptimeItemValue]{}, covered: [Bool]{}}
-    computed := [Int]{}
+    ^ahead: SemaComptimeLocalValuesAhead{values: [SemaComptimeItemValue]{}, covered: [Bool]{}}
+    ^computed: [Int]{}
     loop index in 0..<values.len() {
         if values[index].kind == SemaComptimeItemKind.BodyExpression && values[index].destination_key.contains(SEMA_COMPTIME_LOCAL_VALUE_AHEAD) {
             computed.push(index)
@@ -478,7 +488,7 @@ sema_comptime_local_values_ahead: fn(values: [SemaComptimeItemValue], pending: [
         ahead.covered.push(false)
         if computed.len() == 0 || !source.local_value || source.local_binding -> next
         key: sema_comptime_local_value_ahead_key(source.module_identity, source.function_key, source.span, source.site_span)
-        row := -1
+        ^row: -1
         loop index in computed {
             if values[index].key == key {
                 row = index

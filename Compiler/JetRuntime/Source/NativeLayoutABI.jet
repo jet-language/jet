@@ -9,7 +9,7 @@ LAYOUT_INNER_BYTES: I64{152}
 
 LAYOUT_EPS: Float{0.0000001}
 
-layout_registry_root := I64{0}
+^layout_registry_root: I64{0}
 
 // Thread-confined native Layout storage lends each initialized aligned word it
 // reads and owns each it writes. RawWords.jet performs the access.
@@ -43,7 +43,7 @@ layout_inner_retain: fn(inner: I64) { layout_put(inner, layout_word(inner) + I64
 
 layout_conflicts_clear: fn(inner: I64) {
     header: wrapping(inner + I64{112})
-    at := I64{0}
+    ^at: I64{0}
     loop at < layout_word(header) {
         jet_rt_string_drop(layout_word(wrapping(layout_word(wrapping(header + I64{16})) + at * I64{8})))
         at += I64{1}
@@ -60,7 +60,7 @@ layout_inner_release: fn(inner: I64) {
     }
     jet_rt_string_drop(layout_word(wrapping(inner + I64{8})))
     variables: wrapping(inner + I64{16})
-    at := I64{0}
+    ^at: I64{0}
     loop at < layout_word(variables) {
         slot: wrapping(layout_word(wrapping(variables + I64{16})) + at * I64{24})
         jet_rt_string_drop(layout_word(slot))
@@ -104,7 +104,7 @@ rt_layout_registry_drop_address: fn() -> I64 {
 
 layout_registry: fn() -> I64 {
     key: jet_rt_tls_shared_key(layout_registry_root, I64{0})
-    shared := jet_rt_tls_get(key)
+    ^shared: jet_rt_tls_get(key)
     if (shared == I64{0}) {
         shared = jet_rt_native_shared_new(wrapping(layout_registry_root + I64{8}), wrapping(layout_registry_root + I64{32}), rt_layout_registry_drop_address())
         jet_rt_tls_set(key, shared)
@@ -113,7 +113,7 @@ layout_registry: fn() -> I64 {
 }
 
 #Export(c) jet_rt_layout_registry_drop: fn(slot: I64) -> I64 {
-    at := I64{0}
+    ^at: I64{0}
     loop at < layout_word(slot) {
         layout_inner_release(layout_word(wrapping(layout_word(wrapping(slot + I64{16})) + at * I64{8})))
         at += I64{1}

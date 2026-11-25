@@ -15,7 +15,7 @@ NameLedger: struct {
 
 name_facts_leaf: fn(name: String) -> String Never! {
     bytes: name.bytes()
-    start := bytes.len()
+    ^start: bytes.len()
     loop start > 0 && bytes[start - 1] != 46 -> start -= 1
     foundation_byte_text(bytes, start, bytes.len())
 }
@@ -34,7 +34,7 @@ DottedPathSplit: struct {
 // `alias`; a name two modules share is ambiguous.
 dotted_path_split: fn(path: String, modules: [NameModule]) -> DottedPathSplit Never! {
     bytes: path.bytes()
-    cut := bytes.len()
+    ^cut: bytes.len()
     loop cut > 0 {
         named: dotted_path_named(path.slice(0..<cut), modules)
         if named > 0 -> return DottedPathSplit{cut: cut, named: named}
@@ -46,7 +46,7 @@ dotted_path_split: fn(path: String, modules: [NameModule]) -> DottedPathSplit Ne
 
 // How many of `modules` are named `name`.
 dotted_path_named: fn(name: String, modules: [NameModule]) -> Int Never! {
-    named := 0
+    ^named: 0
     loop row in modules {
         if row.alias == name -> named += 1
     }
@@ -61,8 +61,8 @@ DOTTED_PATH_SHOWN: 3
 // in graph order.
 dotted_path_unresolved: fn(path: String, modules: [NameModule], package: String, split: DottedPathSplit) -> Diagnostic Never! {
     start: if split.named > 1 -> "`{path.slice(0..<split.cut)}`, the name of more than one module of this program" else -> "no module of this program"
-    shown := [String]{}
-    more := 0
+    ^shown: [String]{}
+    ^more: 0
     loop row in modules {
         if row.package != package || dotted_path_named(row.alias, modules) != 1 -> next
         if shown.len() == DOTTED_PATH_SHOWN -> more += 1 else -> shown.push("`{row.alias}`")
@@ -84,10 +84,10 @@ dotted_path_unresolved: fn(path: String, modules: [NameModule], package: String,
 // order would cost time quadratic in the rows. A repeated key keeps its last
 // row, as a fill in row order does.
 name_ledger_from_facts: fn(facts: ^^NameFacts) -> NameLedger Never! {
-    ledger := NameLedger{facts: facts.move(), declarations: [{module_index: Int, name: String}:Int]{}, aliases: [{module_index: Int, name: String}:Int]{}, declaration_names: [String:[Int]]{}, alias_names: [String:[Int]]{}, display_paths: [{module_index: Int, path: String}:String]{}}
-    modules := [Int]{}
-    names := [String]{}
-    leaves := [String]{}
+    ^ledger: NameLedger{facts: facts.move(), declarations: [{module_index: Int, name: String}:Int]{}, aliases: [{module_index: Int, name: String}:Int]{}, declaration_names: [String:[Int]]{}, alias_names: [String:[Int]]{}, display_paths: [{module_index: Int, path: String}:String]{}}
+    ^modules: [Int]{}
+    ^names: [String]{}
+    ^leaves: [String]{}
     loop row in ledger.facts.declarations {
         modules.push(row.module_index)
         names.push(row.name)
@@ -123,7 +123,7 @@ name_ledger_from_facts: fn(facts: ^^NameFacts) -> NameLedger Never! {
 
 // The rows ordered by (module, name), equal keys in row order.
 name_rows_by_key: fn(modules: [Int], names: [String]) -> [Int] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<names.len() -> order.push(index)
     order.sort_by(fn(a: Int, b: Int) { (modules[a] <=> modules[b]).then(names[a] <=> names[b]).then(a <=> b) })
     order
@@ -131,15 +131,15 @@ name_rows_by_key: fn(modules: [Int], names: [String]) -> [Int] Never! {
 
 // Each leaf's row positions, ascending, filled in leaf order.
 name_leaf_positions: fn(leaves: [String]) -> [String:[Int]] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<leaves.len() -> order.push(index)
     order.sort_by(fn(a: Int, b: Int) { (leaves[a] <=> leaves[b]).then(a <=> b) })
-    positions := [String:[Int]]{}
-    start := 0
+    ^positions: [String:[Int]]{}
+    ^start: 0
     loop start < order.len() {
         leaf: leaves[order[start]]
-        rows := [Int]{}
-        end := start
+        ^rows: [Int]{}
+        ^end: start
         loop end < order.len() && leaves[order[end]] == leaf {
             rows.push(order[end])
             end += 1
@@ -179,7 +179,7 @@ name_ledger_visible: fn(ledger: NameLedger, from: Int, module_index: Int, name: 
     source: ledger.facts.modules[from]
     target: ledger.facts.modules[module_index]
     if source.namespace != None && source.namespace == target.namespace -> return true
-    visibility := NameVisibility?{None}
+    ^visibility: NameVisibility?{None}
     if name_ledger_declaration(ledger, module_index, name) == .Val(row) {
         visibility = Val(row.visibility)
     }
@@ -197,9 +197,9 @@ name_ledger_display_declaration_path: fn(ledger: NameLedger, module_index: Int, 
 
 name_ledger_display_path: fn(ledger: NameLedger, from: Int, name: String, resolved_module: Int?) -> String? Never! {
     leaf: name_facts_leaf(name)
-    least := String?{None}
-    ambiguous := false
-    projected := false
+    ^least: String?{None}
+    ^ambiguous: false
+    ^projected: false
     loop index in (ledger.declaration_names.get(leaf) ?? [Int]{}) {
         row: ledger.facts.declarations[index]
         if !name_ledger_visible(ledger, from, row.module_index, leaf) -> next
@@ -218,7 +218,7 @@ name_ledger_display_path: fn(ledger: NameLedger, from: Int, name: String, resolv
     loop index in (ledger.alias_names.get(leaf) ?? [Int]{}) {
         alias: ledger.facts.aliases[index]
         if !name_ledger_visible(ledger, from, alias.module_index, leaf) -> next
-        path := String?{None}
+        ^path: String?{None}
         if alias.target_module == .Val(target) {
             path = name_ledger_display_declaration_path(ledger, target, name_facts_leaf(alias.target))
         }
@@ -232,7 +232,7 @@ name_ledger_display_path: fn(ledger: NameLedger, from: Int, name: String, resolv
             else -> { least = Val(candidate) }
         }
     }
-    resolved := String?{None}
+    ^resolved: String?{None}
     if resolved_module == .Val(target) {
         resolved = name_ledger_display_declaration_path(ledger, target, leaf)
     }
@@ -247,7 +247,7 @@ name_ledger_display_path: fn(ledger: NameLedger, from: Int, name: String, resolv
 
 name_ledger_display_path_at: fn(ledger: NameLedger, module_index: Int, span: Span, name: String, owner: String?, resolved_module: Int?) -> String? Never! {
     key: if owner == .Val(value) -> "{value}.{name}" else -> name
-    declaration := name_ledger_declaration(ledger, module_index, key)
+    ^declaration: name_ledger_declaration(ledger, module_index, key)
     if declaration == .Val(row) && row.span != span -> declaration = None
     if declaration == None {
         loop row in ledger.facts.declarations {
@@ -257,7 +257,7 @@ name_ledger_display_path_at: fn(ledger: NameLedger, module_index: Int, span: Spa
             }
         }
     }
-    canonical := String?{None}
+    ^canonical: String?{None}
     if declaration == .Val(row) {
         canonical = name_ledger_display_declaration_path(ledger, module_index, row.name)
     }

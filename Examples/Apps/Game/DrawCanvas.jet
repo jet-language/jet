@@ -21,7 +21,7 @@ use {
 run: fn() {
     window: ui.headless(width: 64, height: 48, script: [[ui.UIEvent]]{[ui.UIEvent]{}, [ui.UIEvent]{}}) ?? panic("a 64x48 window")
     text: "Hi!\nJet"
-    width := 0
+    ^width: 0
     loop frame in window.frames() {
         if frame.index > 1 -> break
         if frame.index == 0 {
@@ -40,10 +40,10 @@ run: fn() {
     shapes: files.read_bytes("Frame.pam") ?? panic("read Frame.pam: {err}")
     with_text: window.load_image_from_screen().pixels()
     header: shapes.len() - with_text.len()
-    left := 64
-    right := -1
-    top := 48
-    bottom := -1
+    ^left: 64
+    ^right: -1
+    ^top: 48
+    ^bottom: -1
     loop at in 0..<with_text.len() {
         if with_text[at] == shapes[header + at] -> next
         x: at /% 4 %% 64
@@ -58,7 +58,7 @@ run: fn() {
 
 // An image as a PAM file (P7, RGB_ALPHA).
 save_pam: fn(image: ui.Image, path: String) {
-    bytes := "P7\nWIDTH {image.width()}\nHEIGHT {image.height()}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n".bytes()
+    ^bytes: "P7\nWIDTH {image.width()}\nHEIGHT {image.height()}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n".bytes()
     bytes.extend(image.pixels())
     files.write_bytes(path, bytes) ?? panic("write {path}: {err}")
 }

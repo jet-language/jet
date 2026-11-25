@@ -136,12 +136,12 @@ sema_compiler_enum_variants: fn(enum_name: String) -> [String]? {
 // of that name is in scope (the compiler's own sources declare a `ParamZone`).
 // The registered compiler-owned `Ordering`/`RemoveBy` nominals keep this menu.
 sema_fact_enum_menu: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String]? {
-    name := ""
+    ^name: ""
     if sema_expr_unwrap_tag(ty) == {
         .Named(value) -> name = value
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
-    found := sema_fact_enum_variants(name)
+    ^found: sema_fact_enum_variants(name)
     if found == None -> found = sema_compiler_enum_variants(name)
     variants: found ?? return None
     graph: program.registration_graph
@@ -162,9 +162,9 @@ sema_fact_enum_unknown_variant: fn(owner: String, variant: String, variants: [St
 // The one nearest candidate within two edits, never the refused name itself,
 // and none when two candidates tie.
 sema_suggest_field: fn(name: String, candidates: [String]) -> String? {
-    best := ""
-    best_distance := 3
-    ambiguous := false
+    ^best: ""
+    ^best_distance: 3
+    ^ambiguous: false
     loop candidate in candidates {
         distance: sema_taint_edit_distance(name, candidate)
         if distance == 0 || distance > 2 -> next
@@ -204,7 +204,7 @@ sema_enum_unit_payload: fn(display_type_name: String, variant: String, span: Spa
 sema_fact_enum_pattern: fn(subject_ty: Type, variant: String, slots: [PatSlot], leading_dot: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaPatternValidation? {
     variants: sema_fact_enum_menu(subject_ty, environment, program) ?? return None
     shape: TPatternShape.Variant{variant: variant, bindings: [TPatternBinding]{}, leading_dot: leading_dot, span: span}
-    complete := true
+    ^complete: true
     compiler_enum: sema_fact_enum_variants(type_name(subject_ty)) == None
     if !variants.contains(variant) {
         // A compiler-owned runtime enum (`Ordering`, `RemoveBy`) reports like
@@ -219,7 +219,7 @@ sema_fact_enum_pattern: fn(subject_ty: Type, variant: String, slots: [PatSlot], 
     }
     // A runtime compiler enum tests against its registered compiler-owned
     // nominal, so codegen lowers the test like any declared enum's.
-    enum_type := SymbolID?{None}
+    ^enum_type: SymbolID?{None}
     if compiler_enum {
         graph: program.registration_graph
         if sema_registration_compiler_builtin_row(graph, type_name(sema_expr_unwrap_tag(subject_ty))) == .Val(owner) {
@@ -680,7 +680,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
 
 // The type of `$fact` read over an aggregate reflection record.
 sema_fact_reflected_type: fn(base: Type, read: FactRead) -> Type? {
-    owner := ""
+    ^owner: ""
     if base == {
         .Named(name) -> owner = name
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
@@ -717,7 +717,7 @@ sema_fact_struct_field: fn(value: TComptimeValue, name: String) -> TComptimeValu
 
 sema_fact_value_detail: fn(value: TComptimeValue, read: FactRead) -> TComptimeValue? {
     kind: sema_fact_struct_field(value, "kind") ?? return None
-    kind_name := ""
+    ^kind_name: ""
     if kind == {
         .Enum(_, variant, _) -> kind_name = variant
         .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> return None
@@ -759,7 +759,7 @@ sema_fact_reflected_field: fn(value: TComptimeValue, member: String) -> TComptim
 }
 
 sema_fact_reflected_read: fn(value: TComptimeValue, read: FactRead) -> TComptimeValue? {
-    owner := ""
+    ^owner: ""
     if value == {
         .Struct(type_name, _) -> owner = type_name
         .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> return None
@@ -805,7 +805,7 @@ sema_fact_constant_path: fn(value: TExpr, context: SemaCheckContext) -> Bool Nev
 // keeps a field reference with no nominal owner; codegen folds the prepared
 // constant path to its value.
 sema_fact_reflection_field: fn(base: TExpr, member: String, span: Span, context: SemaCheckContext) -> TExpr? {
-    owner_name := ""
+    ^owner_name: ""
     if base.ty == {
         .Named(name) -> owner_name = name
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
@@ -892,12 +892,12 @@ sema_fact_build_setting_invalid: fn(setting: SemaBuildSetting, detail: String, s
 // decoded. Unquoted text is kept as written.
 sema_fact_build_setting_unquote: fn(raw: String) -> String Never! {
     text: raw.trim()
-    body := text
+    ^body: text
     if text.count_bytes() >= 2 && text.starts_with("\"") && text.ends_with("\"") {
         body = text.slice(1, text.len() - 1)
     }
-    out := ""
-    escaped := false
+    ^out: ""
+    ^escaped: false
     loop ch in body.chars() {
         if escaped {
             if ch == {
@@ -935,17 +935,17 @@ sema_fact_build_setting_literal: fn(ty: String, text: String) -> TComptimeValue?
         return Val(TComptimeValue.String{value: sema_fact_build_setting_unquote(raw)})
     }
     if declared == "Char" {
-        body := raw
+        ^body: raw
         if raw.count_bytes() >= 2 && raw.starts_with("'") && raw.ends_with("'") {
             body = sema_fact_build_setting_unquote(raw.slice(1, raw.len() - 1))
         }
         code: sema_checked_const_char(body) ?? -1
-        count := 0
+        ^count: 0
         loop _ in body.chars() -> count += 1
         if code < 0 || count != 1 -> return None
         return Val(TComptimeValue.Char{value: code})
     }
-    variant := raw
+    ^variant: raw
     if raw.starts_with(".") -> variant = raw.slice(1, raw.len()).trim()
     Val(TComptimeValue.Enum{type_name: declared, variant: variant, args: [TComptimeEnumArg]{}})
 }
@@ -974,7 +974,7 @@ sema_fact_build_setting_value: fn(setting: SemaBuildSetting, span: Span, environ
         }
         return Val(SemaFactReadValue{ty: scalar, value: value})
     }
-    variant := raw
+    ^variant: raw
     if raw.starts_with(".") -> variant = raw.slice(1, raw.len()).trim()
     graph: program.registration_graph
     row: sema_type_resolve_nominal_row(graph, Type.Named{name: ty}, environment.module_identity) ?? {
@@ -1052,7 +1052,7 @@ sema_fact_build_read: fn(base: Expr, member: String, span: Span, expected: Type?
 // records and lists stay one compile-time literal.
 sema_fact_prepared_expr: fn(value: TComptimeValue, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext) -> TExpr? {
     if value == .Int(number) {
-        width := TIntegerWidth?{None}
+        ^width: TIntegerWidth?{None}
         if sema_expr_numeric_base(ty) == .IntN(signed, bits) {
             width = Val(TIntegerWidth{signed: signed, bits: bits})
         }
@@ -1089,7 +1089,7 @@ sema_fact_constant_path_value: fn(value: TExpr, context: SemaCheckContext) -> TC
         }
         .Index(receiver, index, _, _, _, _) -> {
             base: sema_fact_constant_path_value(receiver, context) ?? return None
-            position := -1
+            ^position: -1
             if index.kind == .IntLit(number, _) -> position = number
             if base == .List(values) {
                 if position >= 0 && position < values.len() -> return Val(values[position])
@@ -1114,10 +1114,10 @@ sema_fact_optional_string: fn(value: String?) -> TComptimeValue Never! {
 }
 
 sema_fact_unit_scale_provenance: fn(value: UnitScaleProvenance) -> TComptimeValue Never! {
-    kind := "Rational"
-    detail := String?{None}
-    source := String?{None}
-    uncertainty := String?{None}
+    ^kind: "Rational"
+    ^detail: String?{None}
+    ^source: String?{None}
+    ^uncertainty: String?{None}
     if value == {
         .Rational -> {}
         .SymbolicPi(numerator, denominator) -> {
@@ -1256,16 +1256,16 @@ SemaInstanceConstants: struct {
 // every instance the program builds. Each TypeId they hold is a row of the
 // compilation's interner in `graph`, which takes the rows they add.
 sema_fact_instance_constants: fn(graph: ^SemaRegistrationGraph, modules: [SemaGraphModuleResult], reflections: [SemaTypeReflection], values: [SemaComptimeItemValue], diagnostics: ^[Diagnostic]) -> SemaInstanceConstants {
-    rows := [TConstantDef]{}
-    sources := [SemaComptimeBodySource]{}
-    types := [InternerDelta]{}
+    ^rows: [TConstantDef]{}
+    ^sources: [SemaComptimeBodySource]{}
+    ^types: [InternerDelta]{}
     // The value each reflection's site took at its instance, once the
     // instance's copy has landed, by reflection.
-    known := [Bool?]{}
+    ^known: [Bool?]{}
     loop reflection in reflections -> known.push(sema_fact_site_holds(modules, values, reflection))
     // Whether each reflection counts: the first of its key whose guards all
     // hold.
-    taken := [Bool]{}
+    ^taken: [Bool]{}
     loop reflection in reflections {
         counts: !sema_fact_key_taken(reflection.key, reflections, taken) && sema_fact_guards_hold(reflection.guards, reflections, known)
         taken.push(counts)
@@ -1292,8 +1292,8 @@ sema_fact_instance_constants: fn(graph: ^SemaRegistrationGraph, modules: [SemaGr
         if args.len() != reflection.params.len() -> next
         // Each type has a TypeId; a type with no TypeInfo record binds none,
         // and a `T.reflect()` the copy's code reads over it is E0302 there.
-        ids := [TComptimeValue]{}
-        infos := [TComptimeValue?]{}
+        ^ids: [TComptimeValue]{}
+        ^infos: [TComptimeValue?]{}
         loop arg in args {
             ids.push(sema_comptime_reflection_type_id(graph, types, caller, arg))
             infos.push(if sema_fact_type_info_of(graph, types, arg, reflection.module_identity) == .Val(info) -> Val(sema_fact_declared_value(info)) else -> None)
@@ -1304,7 +1304,9 @@ sema_fact_instance_constants: fn(graph: ^SemaRegistrationGraph, modules: [SemaGr
     if remap.types.len() > 0 {
         loop index in 0..<rows.len() -> comptime_value_remap_types(rows[index].value, remap)
         loop index in 0..<sources.len() {
-            loop local in 0..<sources[index].prepared.len() -> comptime_value_remap_types(sources[index].prepared[local].value, remap)
+            loop local in 0..<sources[index].prepared.len() {
+                comptime_value_remap_types(sources[index].prepared[local].value, remap)
+            }
         }
     }
     SemaInstanceConstants{rows: rows, sources: sources}
@@ -1315,7 +1317,9 @@ sema_fact_instance_constants: fn(graph: ^SemaRegistrationGraph, modules: [SemaGr
 sema_fact_landed_value: fn(values: [SemaComptimeItemValue], module_identity: ModuleID, key: String) -> Int? Never! {
     loop back in 0..<values.len() {
         index: values.len() - 1 - back
-        if values[index].kind == SemaComptimeItemKind.BodyExpression && values[index].module_identity.id == module_identity.id && values[index].key == key -> return Val(index)
+        if values[index].kind == SemaComptimeItemKind.BodyExpression && values[index].module_identity.id == module_identity.id && values[index].key == key {
+            return Val(index)
+        }
     }
     None
 }
@@ -1364,6 +1368,7 @@ sema_fact_key_taken: fn(key: String, reflections: [SemaTypeReflection], taken: [
     }
     false
 }
+
 // The generic site of `modules` whose key is `key`.
 sema_fact_generic_site: fn(modules: [SemaGraphModuleResult], key: String) -> SemaComptimeBodySource? {
     loop module_result in modules {
@@ -1382,7 +1387,7 @@ sema_fact_no_type_info_error: fn(span: Span, param: String, shown: String) -> Di
 
 // Reports `diagnostic`, located in the source of module `module_identity`.
 sema_fact_report_located: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, diagnostic: Diagnostic, diagnostics: ^[Diagnostic]) {
-    located := [Diagnostic]{diagnostic}
+    ^located: [Diagnostic]{diagnostic}
     if sema_registration_module_index(graph, module_identity) == .Val(index) {
         sema_attach_diagnostic_source_locations(located, 0, graph.modules[index].source_segments)
     }
@@ -1398,10 +1403,10 @@ sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph, types:
     index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
     registered_module: graph.modules[index]
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
-    registry := SemaScopeMembersMarkerRegistry?{None}
+    ^registry: SemaScopeMembersMarkerRegistry?{None}
     loop registered in registered_module.functions {
         if registered.symbol.id != symbol.id -> next
-        bindings := [SemaInferenceBinding]{}
+        ^bindings: [SemaInferenceBinding]{}
         if args == .Val(written) {
             declared: registered.declaration.type_params.len()
             if written.len() != declared {
@@ -1434,7 +1439,7 @@ sema_fact_declared_value: fn(value: TComptimeValue) -> TComptimeValue Never! {
                     break true
                 }
             } ?? false
-            kept := [TComptimeField]{}
+            ^kept: [TComptimeField]{}
             loop field in fields {
                 if declared && core_record_field(type_name, field.name) == None && !sema_fact_answered_member(type_name, field.name) {
                     next
@@ -1463,7 +1468,7 @@ sema_fact_answered_member: fn(type_name: String, field: String) -> Bool Never! {
 
 sema_fact_state_infos: fn(definition: StructDef, symbol: Symbol, check: SemaBodyCheck) -> TComptimeValue? {
     if definition.state == None -> return None
-    graph_fact := SemaStateGraphFact?{None}
+    ^graph_fact: SemaStateGraphFact?{None}
     graph: check.program.registration_graph
     module_index: sema_registration_module_index(graph, symbol.module_identity)
     if module_index == .Val(index) {
@@ -1657,7 +1662,7 @@ sema_fact_uses_check: fn(name: String, symbol: Symbol?, span: Span, expected: Ty
         return sema_fact_read_failed()
     }
     target: SemaFactUsesTarget{module_identity: resolved.declaring_module_identity, marker: marker, field: sema_casing_snake_words(marker.name)}
-    uses := [TComptimeValue]{}
+    ^uses: [TComptimeValue]{}
     loop module_index in 0..<graph.modules.len() {
         if !sema_fact_uses_in_items(graph, module_index, graph.modules[module_index].program.items, "", target, uses, span, check.diagnostics) {
             return sema_fact_read_failed()
@@ -1795,11 +1800,11 @@ sema_fact_uses_at: fn(graph: SemaRegistrationGraph, module_index: Int, markers: 
         }
         receiver: sema_user_rule_receiver(declaration, marker)
         bound: if receiver == .Struct(_, bound_fields) -> bound_fields.len() else -> 0
-        expected_count := 0
+        ^expected_count: 0
         loop param in declaration.params {
             if !param.name.starts_with("$") -> expected_count += 1
         }
-        record := TComptimeValue?{None}
+        ^record: TComptimeValue?{None}
         if bound == expected_count -> record = sema_checked_comptime(receiver)
         value: record ?? {
             diagnostics.push(sema_error("E0302", span, "`{target.marker.name}.reflect().uses` has no compile-time value for the use at `{path}`", "each Use record holds the marker's value at its site, so every argument written there is known at compile time", "write a literal argument to `#{marker.name}` at `{path}`"))
@@ -1841,12 +1846,12 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
     }
     if base == .Ident(name, _, _) {
         index: sema_scope_resolve_index(check.scopes, name)
-        symbol := Symbol?{None}
+        ^symbol: Symbol?{None}
         if index == .Val(binding_index) {
             symbol = Val(sema_scope_binding_symbol(check.environment.*, check.scopes, binding_index))
         }
-        is_local := false
-        is_constant := false
+        ^is_local: false
+        ^is_constant: false
         if symbol == .Val(found) {
             is_local = found.kind == SymbolKind.Local || found.kind == SymbolKind.Parameter
             is_constant = found.kind == SymbolKind.Constant
@@ -1864,7 +1869,7 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
                 return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_named("SendabilityInfo"), TExprKind.CtLit{value: value}, span), expected, check.environment.*, check.program.*, check.diagnostics)}
             }
             if read == FactRead.Movedness {
-                moved := false
+                ^moved: false
                 place: sema_ownership_place_from_expr_inner(base, check.scopes)
                 if place == .Val(found) {
                     moved = sema_ownership_place_moved(check.state, found) != None
@@ -1874,7 +1879,7 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
             }
             if read == FactRead.Origin {
                 binding_index: index ?? return sema_fact_read_failed()
-                origin := check.scopes.bindings[binding_index].origin
+                ^origin: check.scopes.bindings[binding_index].origin
                 place: sema_ownership_place_from_expr_inner(base, check.scopes)
                 if place == .Val(found) && sema_ownership_place_moved(check.state, found) != None {
                     origin = None
@@ -1891,7 +1896,9 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
             return sema_fact_uses_check(name, symbol, span, expected, check)
         }
         if symbol == None {
-            if sema_fact_type_param_read(read, name, span, expected, check) == .Val(answered) -> return answered
+            if sema_fact_type_param_read(read, name, span, expected, check) == .Val(answered) {
+                return answered
+            }
         }
         if !is_constant {
             resolved: sema_fact_subject_value(read, name, symbol, check) ?? {
@@ -1965,7 +1972,7 @@ sema_fact_enum_values: fn(base: Expr, span: Span, expected: Type?, check: ^SemaB
             check.diagnostics.push(sema_error("E0949", at, "`{written}` is generic, so its cases have no one type to list", "`.values` lists each case as a value of one enum type, and a generic enum is a family of types", "list the values of the specialization you need yourself"))
             return sema_fact_read_failed()
         }
-        elements := [Expr]{}
+        ^elements: [Expr]{}
         loop variant in shape.variants {
             if !(variant.payload == .Unit) {
                 check.diagnostics.push(sema_error("E0949", at, "`{written}.{variant.name}` carries a payload, so `{written}` has no list of case values", "`.values` lists every case once as a value, and a case with a payload is no value until its data is given", "remove the payload from `{variant.name}`, or list the values you need yourself"))
@@ -1987,8 +1994,8 @@ sema_fact_enum_values_not_enum: fn(written: String, at: Span) -> Diagnostic {
 // `Owner.Group.Leaf` as source: `owner` is the type as the program wrote it
 // (`Kind` or `types.Kind`), `path` the case's declared path.
 sema_fact_enum_value_path: fn(owner: String, path: String, span: Span) -> Expr Never! {
-    value := Expr.Ident{name: "", span: span, id: AST_NODE_GENERATED}
-    first := true
+    ^value: Expr.Ident{name: "", span: span, id: AST_NODE_GENERATED}
+    ^first: true
     loop segment in "{owner}.{path}".split(".") {
         value = if {
             first -> Expr.Ident{name: segment, span: span, id: AST_NODE_GENERATED}

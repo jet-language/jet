@@ -106,31 +106,31 @@ lp_temp: fn(f: ^IRFunction, ty: Int) -> Int { ir_slot(f, ty, IRSlotKind.Temp, -1
 
 lp_const: fn(f: ^IRFunction, ty: Int, value: Int) -> Int {
     slot: lp_temp(f, ty)
-    _ := ir_emit(f, IROp.Const, slot, value, -1, -1, 0)
+    ^_: ir_emit(f, IROp.Const, slot, value, -1, -1, 0)
     slot
 }
 
-lp_return: fn(f: ^IRFunction, slot: Int) { _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0) }
+lp_return: fn(f: ^IRFunction, slot: Int) { ^_: ir_emit(f, IROp.Return, -1, slot, -1, -1, 0) }
 
 // A module with `twice(n: Int) -> Int` (function 0), `release(g: Guard)`
 // (function 1, Guard's drop) and a `run` that is valid but for the bug
 // planted for `plant` ("" for none).
 lp_module: fn(plant: String) -> IRModule {
-    m := ir_module_new()
+    ^m: ir_module_new()
     t: lp_types(m)
-    twice := lp_fn("twice")
+    ^twice: lp_fn("twice")
     n: ir_slot(twice, t.int, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     twice.param_count = 1
     twice.result = t.int
     sum: lp_temp(twice, t.int)
-    _ := ir_emit(twice, IROp.Add, sum, n, n, IR_OVERFLOW_TRAP, 1)
+    ^_: ir_emit(twice, IROp.Add, sum, n, n, IR_OVERFLOW_TRAP, 1)
     lp_return(twice, sum)
-    _ := lp_add(m, twice)
-    release := lp_fn("release")
-    _ := ir_slot(release, t.guard, IRSlotKind.Param, ir_intern_name(m, "g"), 1)
+    ^_: lp_add(m, twice)
+    ^release: lp_fn("release")
+    ^_: ir_slot(release, t.guard, IRSlotKind.Param, ir_intern_name(m, "g"), 1)
     lp_return(release, -1)
-    _ := lp_add(m, release)
-    f := lp_fn("run")
+    ^_: lp_add(m, release)
+    ^f: lp_fn("run")
     lp_plant(plant, m, t, f)
     m.entry = lp_add(m, f)
     m
@@ -144,12 +144,12 @@ lp_valid: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     six: lp_temp(f, t.int)
     call_args: ir_args(f, [Int]{three})
-    _ := ir_emit(f, IROp.Call, six, 0, call_args, 1, 1)
+    ^_: ir_emit(f, IROp.Call, six, 0, call_args, 1, 1)
     flag: lp_temp(f, t.bool)
-    _ := ir_emit(f, IROp.Lt, flag, three, six, -1, 1)
-    _ := ir_open(f, IROp.Block, 1)
-    _ := ir_emit(f, IROp.BrIf, -1, flag, 0, -1, 1)
-    _ := ir_open_if(f, flag, 1)
+    ^_: ir_emit(f, IROp.Lt, flag, three, six, -1, 1)
+    ^_: ir_open(f, IROp.Block, 1)
+    ^_: ir_emit(f, IROp.BrIf, -1, flag, 0, -1, 1)
+    ^_: ir_open_if(f, flag, 1)
     otherwise: ir_emit(f, IROp.Else, -1, -1, -1, -1, 1)
     opener: f.open[f.open.len() - 1]
     f.b[opener] = otherwise
@@ -157,79 +157,79 @@ lp_valid: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     ir_end(f, 1)
     text: ir_slot(f, t.string, IRSlotKind.Temp, -1, 0)
     show_args: ir_args(f, [Int]{six})
-    _ := ir_emit(f, IROp.CallRuntime, text, ir_intern_name(m, "jet_rt_int_to_string"), show_args, 1, 1)
+    ^_: ir_emit(f, IROp.CallRuntime, text, ir_intern_name(m, "jet_rt_int_to_string"), show_args, 1, 1)
     flush: lp_const(f, t.bool, 1)
     line_args: ir_args(f, [Int]{text, flush})
-    _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_term_write_stdout_line"), line_args, 2, 1)
-    _ := ir_emit(f, IROp.Drop, -1, text, -1, -1, 1)
+    ^_: ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_term_write_stdout_line"), line_args, 2, 1)
+    ^_: ir_emit(f, IROp.Drop, -1, text, -1, -1, 1)
     label: lp_temp(f, t.string)
-    _ := ir_emit(f, IROp.ConstText, label, ir_intern_text(m, "héllo, 世界 🙂"), -1, -1, 1)
+    ^_: ir_emit(f, IROp.ConstText, label, ir_intern_text(m, "héllo, 世界 🙂"), -1, -1, 1)
     big: lp_temp(f, t.int)
-    _ := ir_emit(f, IROp.ConstBigInt, big, ir_intern_name(m, "-123456789012345678901234567890"), -1, -1, 1)
+    ^_: ir_emit(f, IROp.ConstBigInt, big, ir_intern_name(m, "-123456789012345678901234567890"), -1, -1, 1)
     wide: lp_temp(f, t.bool)
-    _ := ir_emit(f, IROp.IntBig, wide, big, 31, -1, 1)
+    ^_: ir_emit(f, IROp.IntBig, wide, big, 31, -1, 1)
     pair: lp_temp(f, t.pair)
-    _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
-    _ := ir_emit(f, IROp.Store, -1, pair, 8, six, 1)
-    _ := ir_emit(f, IROp.Store, -1, pair, 0, wide, 1)
+    ^_: ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
+    ^_: ir_emit(f, IROp.Store, -1, pair, 8, six, 1)
+    ^_: ir_emit(f, IROp.Store, -1, pair, 0, wide, 1)
     second: lp_temp(f, t.int)
-    _ := ir_emit(f, IROp.Load, second, pair, 8, -1, 1)
+    ^_: ir_emit(f, IROp.Load, second, pair, 8, -1, 1)
     twin: lp_temp(f, t.pair)
-    _ := ir_emit(f, IROp.StackAddress, twin, 24, 8, -1, 1)
-    _ := ir_emit(f, IROp.CopyBytes, -1, twin, pair, 16, 1)
+    ^_: ir_emit(f, IROp.StackAddress, twin, 24, 8, -1, 1)
+    ^_: ir_emit(f, IROp.CopyBytes, -1, twin, pair, 16, 1)
     end: lp_temp(f, t.pointer)
-    _ := ir_emit(f, IROp.Offset, end, pair, 16, -1, 1)
+    ^_: ir_emit(f, IROp.Offset, end, pair, 16, -1, 1)
     far: lp_temp(f, t.int)
-    _ := ir_emit(f, IROp.Load, far, end, 4096, -1, 1)
+    ^_: ir_emit(f, IROp.Load, far, end, 4096, -1, 1)
     box: lp_temp(f, t.pointer)
-    _ := ir_emit(f, IROp.FunctionAddress, box, 0, -1, -1, 1)
+    ^_: ir_emit(f, IROp.FunctionAddress, box, 0, -1, -1, 1)
     code: lp_temp(f, t.code)
-    _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
+    ^_: ir_emit(f, IROp.Load, code, box, 8, -1, 1)
     twelve: lp_temp(f, t.int)
     indirect_args: ir_args(f, [Int]{box, six})
-    _ := ir_emit(f, IROp.CallIndirect, twelve, code, indirect_args, 2, 1)
+    ^_: ir_emit(f, IROp.CallIndirect, twelve, code, indirect_args, 2, 1)
     guard: lp_temp(f, t.guard)
-    _ := ir_emit(f, IROp.Drop, -1, guard, -1, -1, 1)
+    ^_: ir_emit(f, IROp.Drop, -1, guard, -1, -1, 1)
     handle: lp_temp(f, t.owned)
-    _ := ir_emit(f, IROp.Close, -1, handle, ir_intern_name(m, "jet_handle_close"), -1, 1)
+    ^_: ir_emit(f, IROp.Close, -1, handle, ir_intern_name(m, "jet_handle_close"), -1, 1)
     key: lp_fixed(f, t)
     one: lp_const(f, t.word, 1)
     low: lp_temp(f, t.word)
-    _ := ir_emit(f, IROp.BitAnd, low, key, one, IR_OVERFLOW_WRAP, 1)
+    ^_: ir_emit(f, IROp.BitAnd, low, key, one, IR_OVERFLOW_WRAP, 1)
     zero: lp_const(f, t.word, 0)
     mask: lp_temp(f, t.word)
-    _ := ir_emit(f, IROp.Sub, mask, zero, low, IR_OVERFLOW_WRAP, 1)
+    ^_: ir_emit(f, IROp.Sub, mask, zero, low, IR_OVERFLOW_WRAP, 1)
     picked: lp_temp(f, t.word)
-    _ := ir_emit(f, IROp.Shl, picked, mask, one, IR_OVERFLOW_WRAP, 1)
+    ^_: ir_emit(f, IROp.Shl, picked, mask, one, IR_OVERFLOW_WRAP, 1)
     lp_return(f, -1)
 }
 
 lp_slot_range: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     sum: lp_temp(f, t.int)
-    _ := ir_emit(f, IROp.Add, sum, sum, 99, IR_OVERFLOW_TRAP, 1)
+    ^_: ir_emit(f, IROp.Add, sum, sum, 99, IR_OVERFLOW_TRAP, 1)
     lp_return(f, -1)
 }
 
 lp_dst_range: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
-    _ := ir_emit(f, IROp.Const, 77, 1, -1, -1, 1)
+    ^_: ir_emit(f, IROp.Const, 77, 1, -1, -1, 1)
     lp_return(f, -1)
 }
 
 lp_name_range: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     none: ir_args(f, [Int]{})
-    _ := ir_emit(f, IROp.CallRuntime, -1, 500, none, 0, 1)
+    ^_: ir_emit(f, IROp.CallRuntime, -1, 500, none, 0, 1)
     lp_return(f, -1)
 }
 
 lp_kind: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
-    _ := ir_open_if(f, three, 1)
+    ^_: ir_open_if(f, three, 1)
     ir_end(f, 1)
     lp_return(f, -1)
 }
 
 lp_imm: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
-    _ := lp_const(f, t.bool, 2)
+    ^_: lp_const(f, t.bool, 2)
     lp_return(f, -1)
 }
 
@@ -237,28 +237,28 @@ lp_layout: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     half: lp_temp(f, t.float)
     sum: lp_temp(f, t.int)
-    _ := ir_emit(f, IROp.Add, sum, three, half, IR_OVERFLOW_TRAP, 1)
+    ^_: ir_emit(f, IROp.Add, sum, three, half, IR_OVERFLOW_TRAP, 1)
     lp_return(f, -1)
 }
 
 lp_convert: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     word: lp_temp(f, t.word)
     other: lp_temp(f, t.word)
-    _ := ir_emit(f, IROp.Convert, other, word, -1, -1, 1)
+    ^_: ir_emit(f, IROp.Convert, other, word, -1, -1, 1)
     lp_return(f, -1)
 }
 
 lp_clone: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     handle: lp_temp(f, t.owned)
     second: lp_temp(f, t.owned)
-    _ := ir_emit(f, IROp.Copy, second, handle, -1, -1, 1)
+    ^_: ir_emit(f, IROp.Copy, second, handle, -1, -1, 1)
     lp_return(f, -1)
 }
 
 lp_arity: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     six: lp_temp(f, t.int)
     none: ir_args(f, [Int]{})
-    _ := ir_emit(f, IROp.Call, six, 0, none, 0, 1)
+    ^_: ir_emit(f, IROp.Call, six, 0, none, 0, 1)
     lp_return(f, -1)
 }
 
@@ -266,7 +266,7 @@ lp_arg: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     half: lp_temp(f, t.float)
     six: lp_temp(f, t.int)
     call_args: ir_args(f, [Int]{half})
-    _ := ir_emit(f, IROp.Call, six, 0, call_args, 1, 1)
+    ^_: ir_emit(f, IROp.Call, six, 0, call_args, 1, 1)
     lp_return(f, -1)
 }
 
@@ -274,7 +274,7 @@ lp_result: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     flag: lp_temp(f, t.bool)
     call_args: ir_args(f, [Int]{three})
-    _ := ir_emit(f, IROp.Call, flag, 0, call_args, 1, 1)
+    ^_: ir_emit(f, IROp.Call, flag, 0, call_args, 1, 1)
     lp_return(f, -1)
 }
 
@@ -286,7 +286,7 @@ lp_marked: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     six: lp_temp(f, t.int)
     call_args: ir_args(f, [Int]{three})
-    _ := ir_emit(f, IROp.Call, six, 0, call_args, 1, 1)
+    ^_: ir_emit(f, IROp.Call, six, 0, call_args, 1, 1)
     lp_return(f, -1)
 }
 
@@ -295,19 +295,19 @@ lp_marked: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
 lp_route: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     tty: lp_temp(f, t.bool)
     none: ir_args(f, [Int]{})
-    _ := ir_emit(f, IROp.CallRuntime, tty, ir_intern_name(m, "jet_std_io_stdout_is_tty"), none, 0, 1)
+    ^_: ir_emit(f, IROp.CallRuntime, tty, ir_intern_name(m, "jet_std_io_stdout_is_tty"), none, 0, 1)
     lp_return(f, -1)
 }
 
 lp_nesting: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
-    _ := ir_emit(f, IROp.Block, -1, 2, -1, -1, 1)
+    ^_: ir_emit(f, IROp.Block, -1, 2, -1, -1, 1)
     lp_return(f, -1)
-    _ := ir_emit(f, IROp.End, -1, 1, -1, -1, 1)
+    ^_: ir_emit(f, IROp.End, -1, 1, -1, -1, 1)
 }
 
 lp_depth: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
-    _ := ir_open(f, IROp.Block, 1)
-    _ := ir_emit(f, IROp.Br, -1, 3, -1, -1, 1)
+    ^_: ir_open(f, IROp.Block, 1)
+    ^_: ir_emit(f, IROp.Br, -1, 3, -1, -1, 1)
     ir_end(f, 1)
     lp_return(f, -1)
 }
@@ -318,15 +318,15 @@ lp_return_value: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
 }
 
 lp_arena: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
-    _ := ir_slot(f, 4000, IRSlotKind.Temp, -1, 0)
+    ^_: ir_slot(f, 4000, IRSlotKind.Temp, -1, 0)
     lp_return(f, -1)
 }
 
 // The rows a renumbering of the slots must carry along: a slot column cut
 // short, a split naming a slot past the body's and a bind row of one word.
 lp_site_short: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
-    _ := lp_const(f, t.int, 3)
-    _ := f.slot_site.pop()
+    ^_: lp_const(f, t.int, 3)
+    ^_: f.slot_site.pop()
     lp_return(f, -1)
 }
 
@@ -344,20 +344,20 @@ lp_bind_half: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
 }
 
 lp_type_kind: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
-    _ := ir_intern_type(m, "Wrong", IRType{ty: TYPE_ID_INT, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""})
+    ^_: ir_intern_type(m, "Wrong", IRType{ty: TYPE_ID_INT, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""})
     lp_return(f, -1)
 }
 
 lp_type_layout: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     narrow_tid: ir_module_intern_tid(m, Type.IntN{signed: false, bits: 24})
-    _ := ir_intern_type(m, "U24", IRType{ty: narrow_tid, kind: IRTypeKind.Word, size: 3, align: 1, class: IRClass.Integer, signed: false, bits: 24, drop: ""})
+    ^_: ir_intern_type(m, "U24", IRType{ty: narrow_tid, kind: IRTypeKind.Word, size: 3, align: 1, class: IRClass.Integer, signed: false, bits: 24, drop: ""})
     lp_return(f, -1)
 }
 
 // ConstBigInt's name row must spell a decimal integer.
 lp_big_text: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     big: lp_temp(f, t.int)
-    _ := ir_emit(f, IROp.ConstBigInt, big, ir_intern_name(m, "12x"), -1, -1, 1)
+    ^_: ir_emit(f, IROp.ConstBigInt, big, ir_intern_name(m, "12x"), -1, -1, 1)
     lp_return(f, -1)
 }
 
@@ -366,7 +366,7 @@ lp_bad_text: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     row: m.data.len()
     m.data.push([U8]{U8{192}, U8{128}})
     label: lp_temp(f, t.string)
-    _ := ir_emit(f, IROp.ConstText, label, row, -1, -1, 1)
+    ^_: ir_emit(f, IROp.ConstText, label, row, -1, -1, 1)
     lp_return(f, -1)
 }
 
@@ -376,16 +376,16 @@ lp_object_text: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     m.data.push([U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}})
     m.data_relocs[row] = [IRDataReloc]{}
     label: lp_temp(f, t.string)
-    _ := ir_emit(f, IROp.ConstText, label, row, -1, -1, 1)
+    ^_: ir_emit(f, IROp.ConstText, label, row, -1, -1, 1)
     lp_return(f, -1)
 }
 
 // A Load past a 16-byte pair's end.
 lp_load_past: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     pair: lp_temp(f, t.pair)
-    _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
+    ^_: ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
     value: lp_temp(f, t.int)
-    _ := ir_emit(f, IROp.Load, value, pair, 12, -1, 1)
+    ^_: ir_emit(f, IROp.Load, value, pair, 12, -1, 1)
     lp_return(f, -1)
 }
 
@@ -393,39 +393,39 @@ lp_load_past: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
 lp_store_far: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     base: lp_temp(f, t.pointer)
     value: lp_const(f, t.int, 3)
-    _ := ir_emit(f, IROp.Store, -1, base, 4294967296, value, 1)
+    ^_: ir_emit(f, IROp.Store, -1, base, 4294967296, value, 1)
     lp_return(f, -1)
 }
 
 // A CopyBytes of 32 bytes into a 16-byte pair.
 lp_copy_past: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     pair: lp_temp(f, t.pair)
-    _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
+    ^_: ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
     source: lp_temp(f, t.pointer)
-    _ := ir_emit(f, IROp.CopyBytes, -1, pair, source, 32, 1)
+    ^_: ir_emit(f, IROp.CopyBytes, -1, pair, source, 32, 1)
     lp_return(f, -1)
 }
 
 // Frame storage of 8 bytes for a 16-byte pair.
 lp_frame_short: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     pair: lp_temp(f, t.pair)
-    _ := ir_emit(f, IROp.StackAddress, pair, 8, 8, -1, 1)
+    ^_: ir_emit(f, IROp.StackAddress, pair, 8, 8, -1, 1)
     lp_return(f, -1)
 }
 
 // A pair viewed at 8 inside a 16-byte pair: its last 8 bytes are past the end.
 lp_view_past: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     pair: lp_temp(f, t.pair)
-    _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
+    ^_: ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
     view: lp_temp(f, t.pair)
-    _ := ir_emit(f, IROp.Offset, view, pair, 8, -1, 1)
+    ^_: ir_emit(f, IROp.Offset, view, pair, 8, -1, 1)
     lp_return(f, -1)
 }
 
 // A function's address in a 32-bit word.
 lp_narrow_address: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     address: lp_temp(f, t.narrow)
-    _ := ir_emit(f, IROp.FunctionAddress, address, 0, -1, -1, 1)
+    ^_: ir_emit(f, IROp.FunctionAddress, address, 0, -1, -1, 1)
     lp_return(f, -1)
 }
 
@@ -434,14 +434,14 @@ lp_drop_routine: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     doubled_tid: ir_module_intern_tid(m, Type.Named{name: "Doubled"})
     wrong: ir_intern_type(m, "Doubled", IRType{ty: doubled_tid, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "test:lint.jet.twice"})
     slot: lp_temp(f, wrong)
-    _ := ir_emit(f, IROp.Drop, -1, slot, -1, -1, 1)
+    ^_: ir_emit(f, IROp.Drop, -1, slot, -1, -1, 1)
     lp_return(f, -1)
 }
 
 // A Close of a Float, which lives in no general register.
 lp_close_float: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     half: lp_temp(f, t.float)
-    _ := ir_emit(f, IROp.Close, -1, half, ir_intern_name(m, "jet_handle_close"), -1, 1)
+    ^_: ir_emit(f, IROp.Close, -1, half, ir_intern_name(m, "jet_handle_close"), -1, 1)
     lp_return(f, -1)
 }
 
@@ -449,10 +449,10 @@ lp_close_float: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
 lp_indirect_arity: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     box: lp_temp(f, t.pointer)
     code: lp_temp(f, t.code)
-    _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
+    ^_: ir_emit(f, IROp.Load, code, box, 8, -1, 1)
     result: lp_temp(f, t.int)
     indirect_args: ir_args(f, [Int]{box})
-    _ := ir_emit(f, IROp.CallIndirect, result, code, indirect_args, 1, 1)
+    ^_: ir_emit(f, IROp.CallIndirect, result, code, indirect_args, 1, 1)
     lp_return(f, -1)
 }
 
@@ -460,11 +460,11 @@ lp_indirect_arity: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
 lp_indirect_arg: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     box: lp_temp(f, t.pointer)
     code: lp_temp(f, t.code)
-    _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
+    ^_: ir_emit(f, IROp.Load, code, box, 8, -1, 1)
     half: lp_temp(f, t.float)
     result: lp_temp(f, t.int)
     indirect_args: ir_args(f, [Int]{box, half})
-    _ := ir_emit(f, IROp.CallIndirect, result, code, indirect_args, 2, 1)
+    ^_: ir_emit(f, IROp.CallIndirect, result, code, indirect_args, 2, 1)
     lp_return(f, -1)
 }
 
@@ -472,11 +472,11 @@ lp_indirect_arg: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
 lp_indirect_result: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     box: lp_temp(f, t.pointer)
     code: lp_temp(f, t.code)
-    _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
+    ^_: ir_emit(f, IROp.Load, code, box, 8, -1, 1)
     three: lp_const(f, t.int, 3)
     flag: lp_temp(f, t.bool)
     indirect_args: ir_args(f, [Int]{box, three})
-    _ := ir_emit(f, IROp.CallIndirect, flag, code, indirect_args, 2, 1)
+    ^_: ir_emit(f, IROp.CallIndirect, flag, code, indirect_args, 2, 1)
     lp_return(f, -1)
 }
 
@@ -484,7 +484,7 @@ lp_indirect_result: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
 lp_int_big_width: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     wide: lp_temp(f, t.bool)
-    _ := ir_emit(f, IROp.IntBig, wide, three, 64, -1, 1)
+    ^_: ir_emit(f, IROp.IntBig, wide, three, 64, -1, 1)
     lp_return(f, -1)
 }
 
@@ -493,7 +493,7 @@ lp_fixed: fn(f: ^IRFunction, t: LPTypes) -> Int {
     marked: lp_temp(f, t.word)
     f.slot_fixed[marked] = true
     key: lp_temp(f, t.word)
-    _ := ir_emit(f, IROp.Copy, key, marked, -1, -1, 1)
+    ^_: ir_emit(f, IROp.Copy, key, marked, -1, -1, 1)
     key
 }
 
@@ -502,8 +502,8 @@ lp_fixed_branch: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     key: lp_fixed(f, t)
     zero: lp_const(f, t.word, 0)
     flag: lp_temp(f, t.bool)
-    _ := ir_emit(f, IROp.Eq, flag, key, zero, -1, 1)
-    _ := ir_open_if(f, flag, 1)
+    ^_: ir_emit(f, IROp.Eq, flag, key, zero, -1, 1)
+    ^_: ir_open_if(f, flag, 1)
     ir_end(f, 1)
     lp_return(f, -1)
 }
@@ -513,7 +513,7 @@ lp_fixed_divide: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     key: lp_fixed(f, t)
     seven: lp_const(f, t.word, 7)
     quotient: lp_temp(f, t.word)
-    _ := ir_emit(f, IROp.Div, quotient, seven, key, IR_OVERFLOW_WRAP, 1)
+    ^_: ir_emit(f, IROp.Div, quotient, seven, key, IR_OVERFLOW_WRAP, 1)
     lp_return(f, -1)
 }
 
@@ -521,7 +521,7 @@ lp_fixed_shift: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     key: lp_fixed(f, t)
     seven: lp_const(f, t.word, 7)
     shifted: lp_temp(f, t.word)
-    _ := ir_emit(f, IROp.Shr, shifted, seven, key, IR_OVERFLOW_WRAP, 1)
+    ^_: ir_emit(f, IROp.Shr, shifted, seven, key, IR_OVERFLOW_WRAP, 1)
     lp_return(f, -1)
 }
 
@@ -529,7 +529,7 @@ lp_fixed_trap: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     key: lp_fixed(f, t)
     seven: lp_const(f, t.word, 7)
     sum: lp_temp(f, t.word)
-    _ := ir_emit(f, IROp.Add, sum, seven, key, IR_OVERFLOW_TRAP, 1)
+    ^_: ir_emit(f, IROp.Add, sum, seven, key, IR_OVERFLOW_TRAP, 1)
     lp_return(f, -1)
 }
 
@@ -643,7 +643,7 @@ lp_only: fn(findings: [IRLintFinding], rule: String) -> Bool {
 
 // The rows of the module planted with `plant`, linted as after the build.
 lp_lint: fn(plant: String) -> [IRLintFinding] {
-    m := lp_module(plant)
+    ^m: lp_module(plant)
     ir_lint_module(m, "ir.build", compiler_threads_single())
 }
 
@@ -658,7 +658,7 @@ lp_core_failures: fn(core: [IRLintFinding]) -> Int {
 }
 
 lp_status: fn() -> Int {
-    failures := 0
+    ^failures: 0
     loop (code, row) in IR_LINT_OPS {
         if ir_op_code(row.op) != code {
             print("FAIL table: row {code} is {row.op}")
@@ -679,10 +679,10 @@ lp_status: fn() -> Int {
     }
     // A pass that breaks a function is named in its rows: the check
     // ir_opt_function runs after each pass, here after a planted "simplify".
-    m := lp_module("")
+    ^m: lp_module("")
     context: ir_lint_context(m)
-    report := ir_opt_report(2)
-    broken := m.functions[m.entry].copy()
+    ^report: ir_opt_report(2)
+    ^broken: m.functions[m.entry].copy()
     broken.dst[0] = 99
     clean: ir_opt_lint(m, context, m.functions[m.entry], "inline", report)
     caught: !ir_opt_lint(m, context, broken, "simplify", report)
@@ -716,7 +716,7 @@ lp_route_gaps: fn(path: String) -> Int {
     exports: loop line in text.split("\n") -> line.trim().copy()
     gaps: ir_lint_route_gaps(exports)
     print(ir_lint_text(gaps))
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     loop gap in gaps -> counts[gap.rule.copy()] = (counts.get(gap.rule) ?? 0) + 1
     loop (rule, count) in counts -> print("{rule}\t{count}")
     0

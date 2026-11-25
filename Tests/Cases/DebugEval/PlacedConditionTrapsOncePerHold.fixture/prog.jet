@@ -6,7 +6,7 @@ check: fn(n: Int) -> Int {
 }
 
 sum_to: fn(n: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in 0..<n -> total += check(i)
     total
 }
@@ -16,7 +16,7 @@ run: fn() -[IO, Time]> {
     first: task { sum_to(20000) }
     second: task { sum_to(20000) }
     print("two tasks {first.join() ?? 0} {second.join() ?? 0}")
-    fresh := 0
+    ^fresh: 0
     loop _ in 0..<200 {
         late: task { sum_to(100) }
         fresh += late.join() ?? 0

@@ -3,7 +3,7 @@
 // retain injected until schedule cleanup. FaultSchedule extends this same TLS
 // owner with effect selectors; both rails share failNth and injected. State56
 // starts [failNth,count,active,injected].
-fault_allocation_key := I64{0}
+^fault_allocation_key: I64{0}
 
 rt_fault_allocation_drop_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
@@ -83,5 +83,5 @@ fault_allocation_should_fail: fn() -> Bool {
         return
     }
     jet_rt_tls_set(fault_allocation_key, I64{0})
-    _ := jet_rt_fault_allocation_drop(I64{0}, state)
+    ^_: jet_rt_fault_allocation_drop(I64{0}, state)
 }

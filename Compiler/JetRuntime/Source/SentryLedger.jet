@@ -8,8 +8,8 @@ sentry_ledger_stat: fn(path: I64, scratch: I64) -> I64 {
 sentry_ledger_parent: fn(path: I64, scratch: I64) -> Bool {
     length: rt_text_len(path)
     data: rt_text_data(path)
-    end := I64{-1}
-    at := I64{0}
+    ^end: I64{-1}
+    ^at: I64{0}
     loop at < length {
         if (trap_byte(wrapping(data + at)) == I64{47}) { end = at }
         at += I64{1}
@@ -20,7 +20,7 @@ sentry_ledger_parent: fn(path: I64, scratch: I64) -> Bool {
     coll_copy(data, parent, parent_len)
     trap_put(wrapping(parent + parent_len), I64{0})
     status: sentry_ledger_stat(parent, scratch)
-    valid := false
+    ^valid: false
     if {
         (status == I64{0}) -> {
             valid = ((sync_load(wrapping(scratch + I64{24}))) & I64{61440}) == I64{16384}
@@ -58,7 +58,7 @@ sentry_ledger_parent: fn(path: I64, scratch: I64) -> Bool {
 sentry_ledger_write: fn(path: I64, row: I64) {
     length: rt_text_len(path)
     data: rt_text_data(path)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (trap_byte(wrapping(data + at)) == I64{0}) {
             return
@@ -70,7 +70,7 @@ sentry_ledger_write: fn(path: I64, row: I64) {
     trap_put(wrapping(name + length), I64{0})
     scratch: jet_rt_alloc(I64{144}, I64{8})
     sync_mutex_lock(sentry_root)
-    allowed := rt_text_len(row) <= I64{4194304} && sentry_ledger_parent(path, scratch)
+    ^allowed: rt_text_len(row) <= I64{4194304} && sentry_ledger_parent(path, scratch)
     if allowed {
         status: sentry_ledger_stat(name, scratch)
         if {
@@ -83,7 +83,7 @@ sentry_ledger_write: fn(path: I64, row: I64) {
     if allowed {
         fd: trap_syscall(I64{2}, name, I64{525377}, I64{384}, I64{0}, I64{0}, I64{0})
         if (fd >= I64{0}) {
-            used := I64{0}
+            ^used: I64{0}
             count: rt_text_len(row)
             loop used < count {
                 written: trap_syscall(I64{1}, fd, rt_text_data(row) + used, count - used, I64{0}, I64{0}, I64{0})
@@ -91,7 +91,7 @@ sentry_ledger_write: fn(path: I64, row: I64) {
                 if (written <= I64{0}) { break }
                 used += written
             }
-            _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            ^_: trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
     }
     sync_mutex_unlock(sentry_root)
@@ -101,7 +101,7 @@ sentry_ledger_write: fn(path: I64, row: I64) {
 
 sentry_ledger: fn(fault: I64, gate: I64, detail: I64) {
     name: services_msg_ledger_key()
-    path := rt_env_get(name)
+    ^path: rt_env_get(name)
     jet_rt_string_drop(name)
     if (path == I64{0} || rt_text_len(path) == I64{0}) {
         jet_rt_string_drop(path)

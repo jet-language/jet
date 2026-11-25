@@ -20,7 +20,7 @@ use {
     envmodel_test_write_package(dir, "packages/ranker", "name: \"ranker\"\n")
     envmodel_test_write_package(dir, "", "name: \"root\"\nmembers: [\"packages/hello\", \"packages/ranker\"]\n")
     files.write(files.join(dir, "workspace.jet"), "workspace: module {{ members: 1 }}\n") ?? panic("stale workspace source")
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     plan: envmodel_workspace_load(cache, dir) ?? panic("membership load")
     assert_eq(envmodel_test_member_names(plan), [String]{"hello", "ranker"})
     source: files.read(files.join(dir, "package.jet")) ?? panic("manifest bytes")
@@ -37,15 +37,15 @@ use {
     dir: files.join(root, "Examples/Modules/Packages/Monorepo")
     source: files.read(files.join(dir, "workspace.jet")) ?? panic("committed workspace source")
     plan: envmodel_workspace_evaluate(source, dir) ?? panic("committed workspace evaluation")
-    names := envmodel_test_member_names(plan)
+    ^names: envmodel_test_member_names(plan)
     names.sort()
     assert_eq(names, [String]{"hello", "ranker"})
-    members := [WorkspaceMember]{}
-    ranker_path := String?{None}
+    ^members: [WorkspaceMember]{}
+    ^ranker_path: String?{None}
     loop member in plan.members {
         members.push(WorkspaceMember{name: member.name, path: member.path})
         if member.name == "ranker" {
-            path := member.path
+            ^path: member.path
             loop path.starts_with("./") -> path = path.removeprefix("./")
             ranker_path = Val(path)
         }
@@ -73,13 +73,13 @@ use {
 
 #Test("discovery_probe_skips_deep_non_workspace_jet_without_stack_overflow") {
     dir: envmodel_test_workspace_dir("ws-deep-probe")
-    deep := "run: fn() {{\n    x: "
+    ^deep: "run: fn() {{\n    x: "
     loop _ in 0..<400 -> deep = "{deep}(() => "
     deep = "{deep}1"
     loop _ in 0..<400 -> deep = "{deep})"
     deep = "{deep}\n}}\n"
     files.write(files.join(dir, "noise.jet"), deep) ?? panic("deep noise")
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     assert(envmodel_test_load_is_none(cache, dir))
     files.remove_all(dir) ?? panic("scratch cleanup")
 }

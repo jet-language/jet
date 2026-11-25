@@ -29,7 +29,7 @@ RingBuffer: struct {
 }
 
 fold_digest: fn(digest: Int, step: Int, code: Int, value: Int, head: Int, tail: Int, count: Int) -> Int {
-    value_part := value % 1000003
+    ^value_part: value % 1000003
     if value_part < 0 -> value_part += 1000003
     return (digest * 131 + step * 17 + code * 257 + value_part * 3 + head * 5 + tail * 7 + count * 11) % 1000003
 }
@@ -50,20 +50,20 @@ WorkloadArgs: struct {
 
 run: fn(args: WorkloadArgs) {
     raw: fs.read(args.input) ?? panic("read input")
-    ring := RingBuffer{slots: [Int#4]{0, 0, 0, 0}, head: 0, tail: 0, count: 0}
-    step := 0
-    accepted_enqueues := 0
-    accepted_dequeues := 0
-    rejects := 0
-    digest := 17
+    ^ring: RingBuffer{slots: [Int#4]{0, 0, 0, 0}, head: 0, tail: 0, count: 0}
+    ^step: 0
+    ^accepted_enqueues: 0
+    ^accepted_dequeues: 0
+    ^rejects: 0
+    ^digest: 17
     print("capacity=4")
 
     loop line in raw.lines() {
         if line == "" || line.starts_with("#") -> next
         step += 1
-        field_count := 0
-        first := ""
-        second := ""
+        ^field_count: 0
+        ^first: ""
+        ^second: ""
         loop field in line.split("|") {
             if field_count == 0 -> first = field.copy()
             if field_count == 1 -> second = field.copy()

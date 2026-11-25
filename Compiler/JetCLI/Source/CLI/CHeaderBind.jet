@@ -126,7 +126,7 @@ jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: ^[String:HandleOverla
         if item == {
             .CModule(c_module) -> {
                 if c_module.kind != CModuleKind.Extern -> next
-                overlay := overlays.get(c_module.lib) ?? HandleOverlay.empty()
+                ^overlay: overlays.get(c_module.lib) ?? HandleOverlay.empty()
                 loop function in c_module.functions {
                     close: function.close ?? next
                     returned: function.return_type ?? next
@@ -219,8 +219,8 @@ jet_cli_c_bind_reach: fn(path: String, modules: ^[String]) Never! {
 // source is parsed only when it names a `.h"` path or an `#Import` overlay;
 // a source that does not parse adds nothing, and the compile reports it.
 jet_cli_c_bind_inputs: fn(files: [JetDriverAuthorizedSourceFile], entry_path: String, package: Bool) -> JetCLICBindInputs Never! {
-    inputs := JetCLICBindInputs{headers: [JetCLICHeaderImport]{}, overlays: [String:HandleOverlay]{}}
-    modules := [String]{}
+    ^inputs: JetCLICBindInputs{headers: [JetCLICHeaderImport]{}, overlays: [String:HandleOverlay]{}}
+    ^modules: [String]{}
     if package {
         loop file in files {
             if !file.source.contains(".h\"") && !file.source.contains("#Import") -> next
@@ -231,7 +231,7 @@ jet_cli_c_bind_inputs: fn(files: [JetDriverAuthorizedSourceFile], entry_path: St
     loop file in files {
         if file.path == entry_path -> modules.push(file.relative_path.copy())
     }
-    index := 0
+    ^index: 0
     loop index < modules.len() {
         relative: modules[index].copy()
         index += 1
@@ -322,7 +322,7 @@ jet_cli_c_bind_write_refused: fn(header: String, lib: String, why: String, color
 // handle without its close contract cannot cross the C boundary safely.
 jet_cli_c_bind_unresolved: fn(bound: CBindFiles) -> String? Never! {
     if bound.handle_skipped.len() == 0 -> return None
-    details := [String]{}
+    ^details: [String]{}
     loop entry in bound.handle_skipped -> details.push("`{entry.typedef_name}`: {entry.reason}")
     Val("opaque handle bindings were unresolved: {details.join("; ")}.")
 }
@@ -350,11 +350,11 @@ jet_cli_c_bind_current: fn(root: String, lib: String, header_text: String) -[FS,
 // with its sidecars beside it.
 jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
     header: args[0]
-    lib := String?{None}
-    overlay_path := String?{None}
-    output := String?{None}
-    links := [String]{}
-    index := 1
+    ^lib: String?{None}
+    ^overlay_path: String?{None}
+    ^output: String?{None}
+    ^links: [String]{}
+    ^index: 1
     loop index < args.len() {
         argument: args[index]
         if argument != "--pkg" && argument != "--overlay" && argument != "--link" && argument != "-o" && argument != "--out" {
@@ -377,7 +377,7 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
         return jet_cli_c_bind_argument_error("E2104", "`{library}` is not a C library name", color)
     }
     header_text: cli_files.read(header) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), jet_cli_c_bind_unreadable(jet_cli_io_error_text(err)), jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
-    overlays := [String:HandleOverlay]{}
+    ^overlays: [String:HandleOverlay]{}
     if overlay_path == .Val(path) {
         overlay_text: cli_files.read(path) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "the overlay `{path}` could not be read ({err}).", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
         parsed: parse_source(overlay_text.bytes())
@@ -388,7 +388,7 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
         }
         jet_cli_c_bind_admit_overlays(parsed.program.items, overlays)
     }
-    overlay := overlays.get(library) ?? HandleOverlay.empty()
+    ^overlay: overlays.get(library) ?? HandleOverlay.empty()
     loop link in links -> overlay = overlay.with_link(link)
     bound: pkg_cbind_bind_files(header_text, library, overlay) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "{err.message}.", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
     if jet_cli_c_bind_unresolved(bound) == .Val(why) {
@@ -425,13 +425,13 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
 jet_cli_c_bind_done: fn(header: String, shown: String, bound: CBindFiles) -> JetCLIPlan Never! {
     count: bound.bound.len()
     plural: if count == 1 -> "" else -> "s"
-    notes := [String]{}
+    ^notes: [String]{}
     loop entry in bound.skipped -> notes.push("Note: skipped `{entry.name}`: {entry.reason}\n")
     jet_cli_done("Bound {count} C function{plural} from {header} → {shown}\n", notes.join(""), JET_DRIVER_EXIT_OK)
 }
 
 jet_cli_c_bind_argument_error: fn(code: String, what: String, color: Bool) -> JetCLIPlan Never! {
-    output := jet_cli_report_output("", code, what, jet_cli_why(code), "run `jet inspect bind --help` for the accepted flags", color, JET_DRIVER_EXIT_USAGE)
+    ^output: jet_cli_report_output("", code, what, jet_cli_why(code), "run `jet inspect bind --help` for the accepted flags", color, JET_DRIVER_EXIT_USAGE)
     output.stderr = "{output.stderr}{jet_cli_c_bind_usage()}"
     JetCLIPlan.Done{output: output}
 }

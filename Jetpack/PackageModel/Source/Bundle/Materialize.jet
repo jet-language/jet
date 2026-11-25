@@ -124,7 +124,7 @@ pkg_bundle_native_hooks: fn(plan: BundlePlan, phase: SigningPhase, source: Strin
     loop hook in plan.signing_hooks {
         if hook.phase != phase -> next
         loop expected in hook.inputs {
-            found := false
+            ^found: false
             loop input in plan.inputs {
                 if input.path == expected.path && input.digest == expected.digest -> found = true
             }
@@ -153,7 +153,7 @@ pkg_bundle_native_signing: fn(run: BundleSigningRun) -> BundleSigningFact? Bundl
     if !run.verified {
         return Err(BundleMaterializeError{reason: "signing hooks were requested but no successful verify-phase hook ran"})
     }
-    identities := run.identities
+    ^identities: run.identities
     identities.sort()
     separator: String.from_bytes([U8]{U8{0}}) ?? panic("NUL is UTF-8")
     identity: if identities.len() == 1 -> identities[0] else -> pkg_sha256_hex(identities.join(separator).bytes())
@@ -163,7 +163,7 @@ pkg_bundle_native_signing: fn(run: BundleSigningRun) -> BundleSigningFact? Bundl
 
 // Exact Component::Normal/CurDir policy, including stripped macOS app root.
 pkg_bundle_native_relative: fn(plan: BundlePlan, file: BundleFile, strip: Bool) -> String BundleMaterializeError! {
-    raw := file.path.replace("\\", "/")
+    ^raw: file.path.replace("\\", "/")
     if strip {
         root: "{plan.metadata.identifier}.app/"
         if !raw.starts_with(root) {
@@ -174,7 +174,7 @@ pkg_bundle_native_relative: fn(plan: BundlePlan, file: BundleFile, strip: Bool) 
     if files.is_abs(raw) {
         return Err(BundleMaterializeError{reason: "package path `{file.path}` escapes its staging root"})
     }
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in raw.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -189,7 +189,7 @@ pkg_bundle_native_relative: fn(plan: BundlePlan, file: BundleFile, strip: Bool) 
 }
 
 pkg_bundle_native_tree: fn(plan: BundlePlan, stage: String, strip: Bool) -[FS, Env]> BundleMaterializeError! {
-    seen := [String]{}
+    ^seen: [String]{}
     loop file in plan.files {
         relative: pkg_bundle_native_relative(plan, file, strip)
         if seen.contains(relative) {
@@ -210,16 +210,16 @@ pkg_bundle_native_tree: fn(plan: BundlePlan, stage: String, strip: Bool) -[FS, E
 pkg_bundle_native_builtin: fn(plan: BundlePlan, compiler_version: String) -[FS, Env]> BundleNativeFacts BundleMaterializeError! {
     executable: pkg_bundle_native_regular(sys.executable())
     tool_identity: pkg_bundle_native_hash(executable)
-    paths := [String]{}
+    ^paths: [String]{}
     loop file in plan.files -> paths.push(pkg_bundle_native_relative(plan, file, true))
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<paths.len() -> order.push(index)
     // The comparator owns its own key list: a non-escaping lambda consumes the locals it captures.
     keys: paths.copy()
     order.sort_by(fn(left: Int, right: Int) { keys[left] <=> keys[right] })
-    digest := "jet-package-materialized-v1".bytes()
+    ^digest: "jet-package-materialized-v1".bytes()
     digest.push(U8{0})
-    total := 0
+    ^total: 0
     loop index in order {
         file: plan.files[index]
         pkg_bundle_frame(digest, paths[index].bytes())
@@ -310,10 +310,10 @@ pkg_bundle_native_materialize: fn(plan: BundlePlan, output: String, parent: Stri
     }
     pkg_bundle_native_tree(plan, stage, mac)
     writable: if linux -> output_stage else -> parent
-    signing := BundleSigningRun{requested: plan.signing_hooks.len() > 0, verified: false, programs: [String]{}, identities: [String]{}}
+    ^signing: BundleSigningRun{requested: plan.signing_hooks.len() > 0, verified: false, programs: [String]{}, identities: [String]{}}
     if mac {
         pkg_bundle_native_hooks(plan, SigningPhase.PreSign, stage, writable, signing)
-        facts := pkg_bundle_native_builtin(plan, compiler_version)
+        ^facts: pkg_bundle_native_builtin(plan, compiler_version)
         pkg_bundle_native_hooks(plan, SigningPhase.PostSign, stage, writable, signing)
         pkg_bundle_native_hooks(plan, SigningPhase.Verify, stage, writable, signing)
         facts.signing = pkg_bundle_native_signing(signing)
@@ -349,7 +349,7 @@ pkg_bundle_native_materialize: fn(plan: BundlePlan, output: String, parent: Stri
         files.set_mode(artifact, 493) ?? return Err(BundleMaterializeError{reason: "could not set package mode on `{artifact}`: {err}"})
     }
     // AppImage facts precede post-sign hooks; MSIX hashes after hooks.
-    digest := if linux -> pkg_bundle_native_hash(artifact) else -> ""
+    ^digest: if linux -> pkg_bundle_native_hash(artifact) else -> ""
     pkg_bundle_native_hooks(plan, SigningPhase.PostSign, stage, writable, signing)
     pkg_bundle_native_hooks(plan, SigningPhase.Verify, stage, writable, signing)
     if !linux -> digest = pkg_bundle_native_hash(artifact)

@@ -68,16 +68,16 @@ jet_cli_expand_memory: fn(modules: [JetDriverDocModule], _index: SemIndex) -> [J
         }
     } ?? return [JetCLIExpandFact]{}
     permit: storage.guard_read()
-    projections := [{fact: String, root: String}:Int]{}
+    ^projections: [{fact: String, root: String}:Int]{}
     loop (position, row) in permit.value.projections {
         projections[{fact: row.fact, root: row.root}] = position
     }
-    facts := [JetCLIExpandFact]{}
+    ^facts: [JetCLIExpandFact]{}
     loop declaration in permit.value.declarations {
         loop root in declaration.roots {
             projection: if projections.get({fact: declaration.fact, root: root}) == .Val(position) -> Val(permit.value.projections[position].projection) else -> SemaMemoryProjection?{None}
             status: jet_cli_expand_memory_status(projection)
-            fields := [JetCLIStatusField]{
+            ^fields: [JetCLIStatusField]{
                 jet_cli_status_field("fact", jet_cli_status_text(declaration.fact)),
                 jet_cli_status_field("root", jet_cli_status_text(root)),
                 jet_cli_status_field("source", jet_cli_status_text(declaration.source)),
@@ -142,12 +142,12 @@ jet_cli_expand_layout_bytes: fn(layout: TComptimeValue) -> JetCLIStatusValue Nev
 }
 
 jet_cli_expand_layout_text: fn(layout: TComptimeValue) -> String Never! {
-    header_parts := [String]{}
+    ^header_parts: [String]{}
     loop name in
         ([String]{"kind", "size", "alignment", "stride", "requested_alignment", "effective_alignment", "target", "guarantee", "source"}) {
         header_parts.push("{name}={jet_cli_expand_checked_display(jet_cli_expand_checked_field(layout, name))}")
     }
-    fields := [String]{}
+    ^fields: [String]{}
     if jet_cli_expand_checked_field(layout, "fields") == .Val(.List(values)) {
         loop field in values {
             name: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "name"))
@@ -168,7 +168,7 @@ jet_cli_expand_layout_text: fn(layout: TComptimeValue) -> String Never! {
 }
 
 jet_cli_expand_layout: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
-    facts := [JetCLIExpandFact]{}
+    ^facts: [JetCLIExpandFact]{}
     loop unit in modules {
         loop row in unit.layout_facts {
             line: diagnostic_line_at(unit.source, row.span.start)
@@ -209,7 +209,7 @@ jet_cli_expand_origin_receiver: fn(source: String, span: Span) -> String Never! 
 }
 
 jet_cli_expand_origin: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
-    facts := [JetCLIExpandFact]{}
+    ^facts: [JetCLIExpandFact]{}
     fact_type: type_name(Type.Option{inner: Type.Named{name: "OriginInfo"}})
     loop unit in modules {
         loop function in unit.functions {
@@ -237,7 +237,7 @@ jet_cli_expand_origin: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] N
 
 // The text of a `reflect.of` name argument: a literal String node.
 jet_cli_expand_reflect_text: fn(tree: BodyTree, id: Int) -> String Never! {
-    text := ""
+    ^text: ""
     if body_node(tree, id).kind == .StrLit(parts) {
         loop part in parts {
             if part == .Literal(piece) -> text = "{text}{piece}"
@@ -250,7 +250,7 @@ jet_cli_expand_reflect_text: fn(tree: BodyTree, id: Int) -> String Never! {
 // out (sema_call_reflection_names): its type name and path, then a count of
 // declared types and each one's checked key, type name and path.
 jet_cli_expand_reflect_names_end: fn(tree: BodyTree, args: [Int], names: Int) -> Int Never! {
-    count := 0
+    ^count: 0
     if names + 2 < args.len() {
         if body_node(tree, args[names + 2]).kind == .IntLit(value, _) -> count = value
     }
@@ -264,13 +264,13 @@ jet_cli_expand_reflect_names_end: fn(tree: BodyTree, args: [Int], names: Int) ->
 // JSON, and the argument index after it.
 jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> {text: String, fields: JetCLIStatusValue, cases: JetCLIStatusValue, next: Int} Never! {
     fields: jet_cli_expand_reflect_fields(tree, args, at)
-    count := 0
+    ^count: 0
     if fields.next < args.len() {
         if body_node(tree, args[fields.next]).kind == .IntLit(value, _) -> count = value
     }
-    next := fields.next + 1
-    texts := [String]{}
-    values := [JetCLIStatusValue]{}
+    ^next: fields.next + 1
+    ^texts: [String]{}
+    ^values: [JetCLIStatusValue]{}
     loop _ in 0..<count {
         if next + 2 >= args.len() -> break
         name: jet_cli_expand_reflect_text(tree, args[next])
@@ -287,7 +287,7 @@ jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> {text:
         )
         next = payload.next
     }
-    text := fields.text
+    ^text: fields.text
     if texts.len() != 0 {
         cases_text: "[{texts.join(", ")}]"
         text = if text == "" -> cases_text else -> "{text} {cases_text}"
@@ -298,13 +298,13 @@ jet_cli_expand_reflect_level: fn(tree: BodyTree, args: [Int], at: Int) -> {text:
 // A field list of one level, read from the arguments at `at`: a count, then
 // each field's name and names followed by its own level.
 jet_cli_expand_reflect_fields: fn(tree: BodyTree, args: [Int], at: Int) -> {text: String, value: JetCLIStatusValue, next: Int} Never! {
-    count := 0
+    ^count: 0
     if at < args.len() {
         if body_node(tree, args[at]).kind == .IntLit(value, _) -> count = value
     }
-    next := at + 1
-    texts := [String]{}
-    values := [JetCLIStatusValue]{}
+    ^next: at + 1
+    ^texts: [String]{}
+    ^values: [JetCLIStatusValue]{}
     loop _ in 0..<count {
         if next + 3 >= args.len() -> break
         name: jet_cli_expand_reflect_text(tree, args[next])
@@ -335,7 +335,7 @@ jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, tree: BodyTree, id: In
     if node.kind == .CoreCall(record, args, span, _, _, _) {
         if record.module_name == "core.reflect" && record.member == "of" && args.len() >= 5 {
             path: jet_cli_expand_reflect_text(tree, args[2])
-            known := false
+            ^known: false
             loop fact in facts {
                 if fact.source == unit.path && fact.offset == span.start && fact.name == path {
                     known = true
@@ -365,7 +365,7 @@ jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, tree: BodyTree, id: In
 }
 
 jet_cli_expand_reflect: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
-    facts := [JetCLIExpandFact]{}
+    ^facts: [JetCLIExpandFact]{}
     loop unit in modules {
         loop function in unit.functions {
             loop statement in function.body {

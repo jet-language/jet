@@ -67,7 +67,7 @@ rt_age_label_byte: fn(label: I64, i: I64) -> I64 {
 rt_age_derive: fn(ikm: I64, ikm_len: I64, salt: I64, salt_len: I64, label: I64, output: I64, scratch: I64) {
     info: wrapping(scratch + I64{744})
     count: if (label == I64{2}) -> I64{28} else if (label == I64{0}) -> I64{6} else -> I64{7}
-    i := I64{0}
+    ^i: I64{0}
     loop i < count {
         rt_text_put(wrapping(info + i), rt_age_label_byte(label, i))
         i += I64{1}
@@ -78,7 +78,7 @@ rt_age_derive: fn(ikm: I64, ikm_len: I64, salt: I64, salt_len: I64, label: I64, 
 
 rt_age_stream_nonce: fn(counter: I64, last: Bool, nonce: I64) {
     rt_crypto_wipe(nonce, I64{3})
-    i := I64{3}
+    ^i: I64{3}
     loop {
         if (i >= I64{11}) { break }
         rt_text_put(wrapping(nonce + i), (counter >> ((I64{10} - i) * I64{8})) & I64{255})
@@ -88,7 +88,7 @@ rt_age_stream_nonce: fn(counter: I64, last: Bool, nonce: I64) {
 }
 
 rt_age_line_end: fn(input: I64, length: I64, at: I64) -> I64 {
-    end := at
+    ^end: at
     loop end < length {
         if (rt_text_byte(wrapping(input + end)) == I64{10}) { return end }
         end += I64{1}
@@ -99,12 +99,12 @@ rt_age_line_end: fn(input: I64, length: I64, at: I64) -> I64 {
 // Canonical bodies end in a short line. age0.10.1's existing reader also
 // accepts beta-era grease with a full final line or no body; match that seed.
 rt_age_body_end: fn(input: I64, length: I64, start: I64) -> I64 {
-    at := start
+    ^at: start
     loop at < length {
         if (rt_text_byte(wrapping(input + at)) == I64{45}) { return at }
         end: rt_age_line_end(input, length, at)
         if (end < I64{0} || end - at > I64{64} || (end - at) % I64{4} == I64{1}) { return I64{-1} }
-        i := at
+        ^i: at
         loop i < end {
             if (rt_age_b64_value(rt_text_byte(wrapping(input + i))) < I64{0}) { return I64{-1} }
             i += I64{1}
@@ -126,14 +126,14 @@ rt_age_body_end: fn(input: I64, length: I64, start: I64) -> I64 {
 // Return footer offset (points at ---) or -1, after validating every stanza.
 rt_age_header_scan: fn(input: I64, length: I64) -> I64 {
     if (length < I64{22}) { return I64{-1} }
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{22}) { break }
         if (rt_text_byte(wrapping(input + i)) != rt_age_magic_byte(i)) { return I64{-1} }
         i += I64{1}
     }
-    at := I64{22}
-    stanzas := I64{0}
+    ^at: I64{22}
+    ^stanzas: I64{0}
     loop at < length {
         end: rt_age_line_end(input, length, at)
         if (end < I64{0}) { return I64{-1} }
@@ -144,7 +144,7 @@ rt_age_header_scan: fn(input: I64, length: I64) -> I64 {
         if (end - at < I64{4} || rt_text_byte(wrapping(input + at)) != I64{45} || rt_text_byte(wrapping(wrapping(input + at) + I64{1})) != I64{62} || rt_text_byte(wrapping(wrapping(input + at) + I64{2})) != I64{32}) {
             return I64{-1}
         }
-        token := false
+        ^token: false
         i = at + I64{3}
         loop i < end {
             c: rt_text_byte(wrapping(input + i))
@@ -168,8 +168,8 @@ rt_age_header_scan: fn(input: I64, length: I64) -> I64 {
 // Unwrap an X25519 stanza; malformed matching types are fatal (-1), others0.
 // A valid but nonmatching stanza returns0. All stanzas are scanned beforeMAC.
 rt_age_unwrap: fn(identity: I64, own_public: I64, input: I64, at: I64, line_end: I64, body_end: I64, file_key: I64, scratch: I64) -> I64 {
-    i := I64{0}
-    xline := true
+    ^i: I64{0}
+    ^xline: true
     loop {
         if (i >= I64{9}) { break }
         if (at + i >= line_end || rt_text_byte(wrapping(wrapping(input + at) + i)) != rt_age_xline_byte(i)) {
@@ -215,8 +215,8 @@ rt_age_open: fn(identity: I64, input: I64, length: I64, output: I64, capacity: I
     auth_tag: wrapping(scratch + I64{1824})
     payload_key: wrapping(scratch + I64{1856})
     rt_crypto_x25519_public(identity, own_public, scratch)
-    at := I64{22}
-    found := false
+    ^at: I64{22}
+    ^found: false
     loop at < footer {
         line_end: rt_age_line_end(input, length, at)
         body_end: rt_age_body_end(input, length, line_end + I64{1})
@@ -261,11 +261,11 @@ rt_age_open: fn(identity: I64, input: I64, length: I64, output: I64, capacity: I
     }
     rt_age_derive(file_key, I64{16}, wrapping(wrapping(input + footer) + I64{48}), I64{16}, I64{1}, payload_key, scratch)
     nonce: wrapping(scratch + I64{1760})
-    emitted := I64{0}
-    counter := I64{0}
+    ^emitted: I64{0}
+    ^counter: I64{0}
     at = payload
     loop at < length {
-        count := I64{65552}
+        ^count: I64{65552}
         if (length - at < count) { count = length - at }
         rt_age_stream_nonce(counter, at + count == length, nonce)
         if (!rt_crypto_aead_open(payload_key, nonce, I64{1}, I64{0}, wrapping(input + at), count, wrapping(output + emitted), scratch)) {
@@ -298,7 +298,7 @@ rt_age_seal: fn(recipients: I64, recipient_count: I64, ephemeral_scalars: I64, f
     }
     cipher_len: header_len + I64{16} + plain_len + chunks * I64{16}
     if (capacity < cipher_len) { return I64{-1} }
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{22}) { break }
         rt_text_put(wrapping(output + i), rt_age_magic_byte(i))
@@ -310,8 +310,8 @@ rt_age_seal: fn(recipients: I64, recipient_count: I64, ephemeral_scalars: I64, f
     wrap_key: wrapping(scratch + I64{1728})
     nonce: wrapping(scratch + I64{1760})
     wrapped: wrapping(scratch + I64{1776})
-    at := I64{22}
-    recipient := I64{0}
+    ^at: I64{22}
+    ^recipient: I64{0}
     loop recipient < recipient_count {
         scalar: wrapping(ephemeral_scalars + recipient * I64{32})
         public: wrapping(recipients + recipient * I64{32})
@@ -355,10 +355,10 @@ rt_age_seal: fn(recipients: I64, recipient_count: I64, ephemeral_scalars: I64, f
     at += I64{16}
     payload_key: wrapping(scratch + I64{1856})
     rt_age_derive(file_key, I64{16}, file_nonce, I64{16}, I64{1}, payload_key, scratch)
-    position := I64{0}
-    counter := I64{0}
+    ^position: I64{0}
+    ^counter: I64{0}
     loop {
-        count := I64{65536}
+        ^count: I64{65536}
         if (plain_len - position < count) { count = plain_len - position }
         last: position + count == plain_len
         rt_age_stream_nonce(counter, last, nonce)

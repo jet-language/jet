@@ -24,10 +24,10 @@ type_of: fn(k: Int) -> Ty? {
 }
 
 element_names: fn(count: Int) -> [String]? {
-    out := [String]{}
+    ^out: [String]{}
     loop index in 0..<count {
         ty: type_of(index) ?? return None
-        inner := if ty.kind == {
+        ^inner: if ty.kind == {
             .List(value) | .Fixed(value, _) -> value
             .Plain -> {
                 return None
@@ -39,7 +39,7 @@ element_names: fn(count: Int) -> [String]? {
 }
 
 name_lengths: fn(tys: [Ty], positions: [Int]) -> Int {
-    total := 0
+    ^total: 0
     loop position in positions {
         if tys[position].kind == {
             .List(value) | .Fixed(value, _) -> { total += value.name.len() }
@@ -50,7 +50,7 @@ name_lengths: fn(tys: [Ty], positions: [Int]) -> Int {
 }
 
 walked_names: fn(tys: [Ty]) -> String {
-    out := ""
+    ^out: ""
     loop ty in tys {
         if ty.kind == {
             .List(value) | .Fixed(value, _) -> { out = "{out}{value.name};" }

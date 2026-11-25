@@ -40,21 +40,21 @@ Full: struct {
 }
 
 run: fn() EncodingError! {
-    lines := Tap{name: "jsonl", held: [U8]{}}
-    log := jsonl.writer(lines) ?? return
+    ^lines: Tap{name: "jsonl", held: [U8]{}}
+    ^log: jsonl.writer(lines) ?? return
     log.write(Dyn.Text("alpha")) ?? return
     log.flush() ?? return
     log.write(Dyn.Int(2)) ?? return
     log.write(Dyn.Null) ?? return
     log.finish() ?? return
-    table := Tap{name: "csv", held: [U8]{}}
-    rows := csv.writer(table) ?? return
+    ^table: Tap{name: "csv", held: [U8]{}}
+    ^rows: csv.writer(table) ?? return
     rows.write(["a", "b,c"]) ?? return
     rows.flush() ?? return
     rows.write(["=1", "d"]) ?? return
     rows.finish() ?? return
-    disk := Full{device: "disk", flushes: 0}
-    broken := csv.writer(disk) ?? return
+    ^disk: Full{device: "disk", flushes: 0}
+    ^broken: csv.writer(disk) ?? return
     if broken.write(["x"]) == {
         .Ok(_) -> { print("wrote to a full sink") }
         .Err(error) -> {

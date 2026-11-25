@@ -21,18 +21,18 @@ SchemaSnapshot: struct {
     fields: [SnapshotField],
 
     write: fn(self) -> String Never! {
-        fragments := [String]{"schema_version = {self.schema_version}\ntype = {self.type_name}\npublished_version = {self.published_version}\n"}
+        ^fragments: [String]{"schema_version = {self.schema_version}\ntype = {self.type_name}\npublished_version = {self.published_version}\n"}
         if self.squashed_before == .Val(before) -> fragments.push("squashed_before = {before}\n")
         loop field in self.fields -> fragments.push("field {field.name}: {field.ty}\n")
         fragments.join("")
     }
 
     parse: fn(raw: String) -> SchemaSnapshot SchemaSnapshotError! {
-        schema_version := U32?{None}
-        name := String?{None}
-        published := String?{None}
-        before := String?{None}
-        fields := [SnapshotField]{}
+        ^schema_version: U32?{None}
+        ^name: String?{None}
+        ^published: String?{None}
+        ^before: String?{None}
+        ^fields: [SnapshotField]{}
         loop untrimmed in raw.split("\n") {
             line: untrimmed.trim()
             if line == "" -> next
@@ -40,8 +40,8 @@ SchemaSnapshot: struct {
                 line.starts_with("schema_version = ") -> {
                     rest: line.after("schema_version = ")
                     bytes: rest.bytes()
-                    index := if rest.starts_with("+") -> 1 else -> 0
-                    number := 0
+                    ^index: if rest.starts_with("+") -> 1 else -> 0
+                    ^number: 0
                     if index == bytes.len() {
                         return Err(SchemaSnapshotError{message: "invalid schema_version: {rest}"})
                     }

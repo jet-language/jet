@@ -23,23 +23,22 @@ ir_strength_worth: fn(stride: Int, step: Int) -> Bool Never! {
 ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     count: f.op.len()
     if count < 6 -> return 0
-    has_loop := false
-    has_mul := false
+    ^has_loop: false
+    ^has_mul: false
     loop at in 0..<count {
         op: f.op[at]
-        if op == .Loop -> has_loop = true
-        else if op == .Mul -> has_mul = true
+        if op == .Loop -> has_loop = true else if op == .Mul -> has_mul = true
         if has_loop && has_mul -> break
     }
     if !has_loop || !has_mul -> return 0
 
     slots: f.slot_type.len()
-    writes := loop _ in 0..<slots -> 0
-    write_at := loop _ in 0..<slots -> -1
-    const_val := loop _ in 0..<slots -> 0
-    is_const := loop _ in 0..<slots -> false
-    dropped := loop _ in 0..<slots -> false
-    read_count := loop _ in 0..<slots -> 0
+    ^writes: loop _ in 0..<slots -> 0
+    ^write_at: loop _ in 0..<slots -> -1
+    ^const_val: loop _ in 0..<slots -> 0
+    ^is_const: loop _ in 0..<slots -> false
+    ^dropped: loop _ in 0..<slots -> false
+    ^read_count: loop _ in 0..<slots -> 0
     loop at in 0..<count {
         w: ir_x64_write(f, at)
         if w >= 0 {
@@ -86,20 +85,20 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     // - post_ops[step_at]: instructions to insert right after `step_at`
     // - kill[at]: drop original Mul (and fused Add)
     // - replace_slot[old]: substitute `old` reads with `new` slot
-    kill := loop _ in 0..<count -> false
-    replace_slot := loop _ in 0..<slots -> -1
-    pre_at := [Int]{}
-    pre_code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
-    post_at := [Int]{}
-    post_code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
-    reduced := 0
+    ^kill: loop _ in 0..<count -> false
+    ^replace_slot: loop _ in 0..<slots -> -1
+    ^pre_at: [Int]{}
+    ^pre_code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^post_at: [Int]{}
+    ^post_code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^reduced: 0
 
     // Process innermost loops only (loops that contain no nested Loop).
     loop loop_at in 0..<count {
         if f.op[loop_at] != .Loop -> next
         loop_end: f.a[loop_at]
         if loop_end <= loop_at + 2 || loop_end >= count -> next
-        has_inner := false
+        ^has_inner: false
         loop k in (loop_at + 1)..<loop_end {
             if f.op[k] == .Loop {
                 has_inner = true
@@ -109,10 +108,10 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
         if has_inner -> next
 
         // Count writes inside this loop per slot, and record top-level mask.
-        loop_writes := loop _ in 0..<slots -> 0
-        loop_write_at := loop _ in 0..<slots -> -1
-        top_level := loop _ in 0..<(loop_end - loop_at) -> false
-        if_depth := 0
+        ^loop_writes: loop _ in 0..<slots -> 0
+        ^loop_write_at: loop _ in 0..<slots -> -1
+        ^top_level: loop _ in 0..<(loop_end - loop_at) -> false
+        ^if_depth: 0
         loop k in (loop_at + 1)..<loop_end {
             op: f.op[k]
             w: ir_x64_write(f, k)
@@ -134,8 +133,8 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
         }
 
         // Identify single-write constant-stepped 64-bit word induction variables.
-        iv_step := loop _ in 0..<slots -> 0
-        iv_at := loop _ in 0..<slots -> -1
+        ^iv_step: loop _ in 0..<slots -> 0
+        ^iv_at: loop _ in 0..<slots -> -1
         loop s in 0..<slots {
             if loop_writes[s] != 1 || dropped[s] -> next
             st: loop_write_at[s]
@@ -145,11 +144,9 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
             op: f.op[st]
             if (op != .Add && op != .Sub) || f.c[st] != IR_OVERFLOW_WRAP -> next
             if f.dst[st] != s -> next
-            step := 0
+            ^step: 0
             if op == .Add {
-                if f.a[st] == s && f.b[st] >= 0 && is_const[f.b[st]] {
-                    step = const_val[f.b[st]]
-                } else if f.b[st] == s && f.a[st] >= 0 && is_const[f.a[st]] {
+                if f.a[st] == s && f.b[st] >= 0 && is_const[f.b[st]] -> step = const_val[f.b[st]] else if f.b[st] == s && f.a[st] >= 0 && is_const[f.a[st]] {
                     step = const_val[f.a[st]]
                 }
             } else if f.a[st] == s && f.b[st] >= 0 && is_const[f.b[st]] {
@@ -169,8 +166,8 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
             scaled_row: f.slot_type[scaled]
             if m.types[scaled_row].kind != .Word || m.types[scaled_row].bits != 64 -> next
 
-            idx := -1
-            stride := 0
+            ^idx: -1
+            ^stride: 0
             a: f.a[mul_at]
             b: f.b[mul_at]
             if a >= 0 && b >= 0 {
@@ -189,8 +186,8 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
 
             // Check if `scaled` is used ONLY by one top-level `addr = Add(base, scaled)`
             // with loop-invariant `base` before `step_at`.
-            add_at := -1
-            base := -1
+            ^add_at: -1
+            ^base: -1
             if read_count[scaled] == 1 {
                 loop k in (mul_at + 1)..<step_at {
                     if !top_level[k - loop_at] || kill[k] -> next
@@ -208,9 +205,9 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
                 }
             }
 
-            target_old := scaled
-            target_ty := f.slot_type[scaled]
-            use_base := -1
+            ^target_old: scaled
+            ^target_ty: f.slot_type[scaled]
+            ^use_base: -1
             if add_at >= 0 {
                 addr: f.dst[add_at]
                 addr_row: f.slot_type[addr]
@@ -218,17 +215,15 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
                     target_old = addr
                     target_ty = addr_row
                     use_base = base
-                } else {
-                    add_at = -1
-                }
+                } else { add_at = -1 }
             }
             if replace_slot[target_old] >= 0 -> next
 
             // Verify every read of `target_old` lies inside `(mul_at..step_at)` so
             // stepping the new IV right after `step_at` never alters any read.
             def_pos: if add_at >= 0 -> add_at else -> mul_at
-            reads := [Int]{}
-            reads_safe := true
+            ^reads: [Int]{}
+            ^reads_safe: true
             loop k in 0..<count {
                 if k > def_pos && k < step_at -> next
                 ir_x64_reads_into(f, k, reads)
@@ -244,7 +239,7 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
             // keeping both `base` and `ptr` live simultaneously across the loop
             // (which happens if `base` is still read after `loop_end`).
             if use_base >= 0 {
-                base_escapes := false
+                ^base_escapes: false
                 loop k in (loop_end + 1)..<count {
                     ir_x64_reads_into(f, k, reads)
                     if f.op[k] == .If || f.op[k] == .BrIf -> reads.push(f.a[k])
@@ -258,8 +253,8 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
 
             // Check whether `idx` is provably initialized to 0 before the loop
             // by scanning straight-line backward from `loop_at - 1`.
-            idx_zero := false
-            back := loop_at - 1
+            ^idx_zero: false
+            ^back: loop_at - 1
             loop back >= 0 {
                 bop: f.op[back]
                 if bop == .End || bop == .Else || bop == .If || bop == .Loop -> break
@@ -320,18 +315,18 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
 
     // Rebuild `f` inserting preheader ops before `loop_at`, post-step ops after
     // `step_at`, dropping killed ops, and rewriting reads of replaced slots.
-    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
-    pre_rows := [Int:[Int]]{}
+    ^code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^pre_rows: [Int:[Int]]{}
     loop pi in 0..<pre_at.len() {
         pos: pre_at[pi]
-        list := pre_rows.get(pos) ?? [Int]{}
+        ^list: pre_rows.get(pos) ?? [Int]{}
         list.push(pi)
         pre_rows[pos] = list.move()
     }
-    post_rows := [Int:[Int]]{}
+    ^post_rows: [Int:[Int]]{}
     loop pi in 0..<post_at.len() {
         pos: post_at[pi]
-        list := post_rows.get(pos) ?? [Int]{}
+        ^list: post_rows.get(pos) ?? [Int]{}
         list.push(pi)
         post_rows[pos] = list.move()
     }
@@ -345,9 +340,9 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
         if !kill[at] {
             op: f.op[at]
             dst: f.dst[at]
-            a := f.a[at]
-            b := f.b[at]
-            c := f.c[at]
+            ^a: f.a[at]
+            ^b: f.b[at]
+            ^c: f.c[at]
             // Rewrite slot operands via `replace_slot`.
             if op == .Call || op == .CallRuntime || op == .CallIndirect {
                 start: b
@@ -390,10 +385,10 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
 }
 
 #Test("Strength reduction replaces base + i * 24 inside a counted loop with ptr += 24") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     flag: ir_scalar_type_row(m, Type.Bool)
-    g := ir_function_new("stride24", "test:strength.jet.stride24", "", "strength.jet", 1)
+    ^g: ir_function_new("stride24", "test:strength.jet.stride24", "", "strength.jet", 1)
     base: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "base"), 1)
     n: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     g.result = word
@@ -405,32 +400,32 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     scaled: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     addr: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     val: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, total, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, c1, 1, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, c24, 24, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, cond, i, n, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, cond, 1, -1, 3)
-    _ := ir_emit(g, IROp.Mul, scaled, i, c24, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Add, addr, base, scaled, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Load, val, addr, 0, -1, 4)
-    _ := ir_emit(g, IROp.Add, total, total, val, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Add, i, i, c1, IR_OVERFLOW_WRAP, 5)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Const, total, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, c1, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, c24, 24, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, cond, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, cond, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Mul, scaled, i, c24, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Add, addr, base, scaled, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Load, val, addr, 0, -1, 4)
+    ^_: ir_emit(g, IROp.Add, total, total, val, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Add, i, i, c1, IR_OVERFLOW_WRAP, 5)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
     ir_end(g, 5)
     ir_end(g, 5)
-    _ := ir_emit(g, IROp.Return, -1, total, -1, -1, 6)
+    ^_: ir_emit(g, IROp.Return, -1, total, -1, -1, 6)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     f: m.functions[0]
-    muls := 0
+    ^muls: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .Mul -> muls += 1
     }

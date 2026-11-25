@@ -55,21 +55,21 @@ PROTO_KEYWORDS: #run { [String]{
 } }
 
 pkg_data_bind_proto: fn(input: String, root_name: String?) -> SchemaBuilder DataBindError! {
-    parser := ProtoParser.new(input)
+    ^parser: ProtoParser.new(input)
     schema: parser.parse()
     messages: schema.messages
-    enum_names := [String]{}
+    ^enum_names: [String]{}
     loop item in schema.enums {
         if !enum_names.contains(item.source_name) -> enum_names.push(item.source_name)
     }
     enum_names.sort()
-    builder := SchemaBuilder.new()
+    ^builder: SchemaBuilder.new()
     use_root: messages.len() == 1
-    source_names := [String:String]{}
-    leaf_names := [String:String]{}
-    ambiguous_leaves := [String]{}
-    enum_leaf_names := [String:String]{}
-    ambiguous_enum_leaves := [String]{}
+    ^source_names: [String:String]{}
+    ^leaf_names: [String:String]{}
+    ^ambiguous_leaves: [String]{}
+    ^enum_leaf_names: [String:String]{}
+    ^ambiguous_enum_leaves: [String]{}
     loop enum_name in enum_names {
         leaf: pkg_data_proto_leaf(enum_name)
         if enum_leaf_names.get(leaf) != None -> ambiguous_enum_leaves.push(leaf.copy())
@@ -85,9 +85,9 @@ pkg_data_bind_proto: fn(input: String, root_name: String?) -> SchemaBuilder Data
         leaf_names[leaf] = record.name
     }
     loop index in 0..<messages.len() {
-        fields := [FieldSeed]{}
+        ^fields: [FieldSeed]{}
         loop field in messages[index].fields {
-            base := BoundType.Dynamic
+            ^base: BoundType.Dynamic
             if pkg_data_proto_scalar(field.type_name) == {
                 .Val(scalar) -> { base = pkg_data_bound_scalar(scalar) }
                 .None -> {
@@ -118,7 +118,7 @@ pkg_data_proto_leaf: fn(name: String) -> String Never! {
 
 // A type name without its leading `.` qualifiers.
 pkg_data_proto_trim_dots: fn(name: String) -> String Never! {
-    out := name
+    ^out: name
     loop out.starts_with(".") -> out = out.removeprefix(".")
     out
 }
@@ -135,8 +135,8 @@ ProtoToken: enum {
 // with C-style escapes, and punctuation; comments are skipped.
 pkg_data_lex_proto: fn(input: String) -> [ProtoToken] DataBindError! {
     chars: pkg_data_scalars(input)
-    tokens := [ProtoToken]{}
-    index := 0
+    ^tokens: [ProtoToken]{}
+    ^index: 0
     loop index < chars.len() {
         ch: chars[index]
         if pkg_data_is_ascii_whitespace(ch) {
@@ -219,8 +219,8 @@ pkg_data_lex_proto: fn(input: String) -> [ProtoToken] DataBindError! {
 // after the closing quote.
 pkg_data_lex_proto_string: fn(chars: [String], open: Int) -> {value: String, next_index: Int} DataBindError! {
     quote: chars[open]
-    index := open + 1
-    value := [String]{}
+    ^index: open + 1
+    ^value: [String]{}
     loop index < chars.len() {
         current: chars[index]
         if current == quote -> return Ok({next_index: index + 1, value: value.join("")})
@@ -230,7 +230,7 @@ pkg_data_lex_proto_string: fn(chars: [String], open: Int) -> {value: String, nex
                 return Err(DataBindError{message: "proto string ends after an escape"})
             }
             escaped: chars[index]
-            decoded := ""
+            ^decoded: ""
             if escaped == {
                 "a" -> decoded = pkg_data_scalar_of(7)
                 "b" -> decoded = pkg_data_scalar_of(8)
@@ -254,7 +254,7 @@ pkg_data_lex_proto_string: fn(chars: [String], open: Int) -> {value: String, nex
                 }
                 "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" -> {
                     start: index
-                    end := index + 1
+                    ^end: index + 1
                     loop end < chars.len() && end < start + 3 && pkg_data_proto_is_octal(chars[end]) {
                         end += 1
                     }
@@ -288,7 +288,7 @@ pkg_data_proto_is_octal: fn(scalar: String) -> Bool Never! {
 }
 
 pkg_data_proto_octal: fn(digits: String) -> Int Never! {
-    total := 0
+    ^total: 0
     loop byte in digits.bytes() -> total = total * 8 + (Int{byte} - 48)
     total
 }
@@ -299,7 +299,7 @@ pkg_data_parse_proto_integer_literal: fn(value: String) -> Int? Never! {
         hex_digits: if value.starts_with("0x") -> value.removeprefix("0x") else -> value.removeprefix("0X")
         raw: hex_digits.bytes()
         if raw.len() == 0 -> return None
-        total := 0
+        ^total: 0
         loop byte in raw {
             code: Int{byte}
             digit: if {
@@ -419,7 +419,7 @@ ProtoParser: struct {
     lex_error: String?,
 
     new: fn(input: String) -> ProtoParser Never! {
-        parser := ProtoParser{
+        ^parser: ProtoParser{
             tokens: [ProtoToken]{},
             pos: 0,
             messages: [ProtoMessage]{},
@@ -492,7 +492,7 @@ ProtoParser: struct {
     // `[.]segment(.segment)*`; a keyword segment is allowed only when it is
     // a scalar type name.
     parse_type_name: fn(^self) -> String DataBindError! {
-        name := ""
+        ^name: ""
         if self.symbol_at(0, ".") {
             name = "."
             self.pos += 1
@@ -518,7 +518,7 @@ ProtoParser: struct {
         if !pkg_data_is_proto_identifier(first) {
             return Err(DataBindError{message: "proto name {first} is invalid"})
         }
-        name := first
+        ^name: first
         loop self.symbol_at(0, ".") {
             self.pos += 1
             segment: self.take_word(what)
@@ -535,7 +535,7 @@ ProtoParser: struct {
         if !self.symbol_at(0, "(") -> return self.parse_qualified_name("an option name")
         self.pos += 1
         qualified: self.parse_qualified_name("an option name")
-        name := "({qualified})"
+        ^name: "({qualified})"
         self.expect_symbol(")", "the end of a custom option name")
         loop self.symbol_at(0, ".") {
             self.pos += 1
@@ -651,13 +651,13 @@ ProtoParser: struct {
     }
 
     parse_integer: fn(^self, what: String, signed: Bool) -> Int DataBindError! {
-        sign := 1
+        ^sign: 1
         if signed && (self.symbol_at(0, "+") || self.symbol_at(0, "-")) {
             if self.symbol_at(0, "-") -> sign = -1
             self.pos += 1
         }
         token: self.token_at(0) ?? return Err(DataBindError{message: "proto expected {what}"})
-        number := ""
+        ^number: ""
         if token == {
             .Number(text) -> number = text
             .Word(_) | .StringLiteral(_) | .Symbol(_) -> return Err(DataBindError{message: "proto expected {what}"})
@@ -672,9 +672,9 @@ ProtoParser: struct {
 
     parse_reserved: fn(^self, signed: Bool, maximum: Int) -> ProtoReserved DataBindError! {
         _: self.take_word("reserved")
-        reserved := ProtoReserved.empty()
+        ^reserved: ProtoReserved.empty()
         loop {
-            literal := String?{None}
+            ^literal: String?{None}
             if self.token_at(0) == {
                 .Val(token) -> {
                     if token == {
@@ -697,7 +697,7 @@ ProtoParser: struct {
                 }
                 .None -> {
                     start: self.parse_integer("a reserved number", signed)
-                    end := start
+                    ^end: start
                     if self.is_word(0, "to") {
                         self.pos += 1
                         if self.is_word(0, "max") {
@@ -736,7 +736,7 @@ ProtoParser: struct {
         _: self.take_word("extensions")
         loop {
             start: self.parse_integer("an extension number", false)
-            end := start
+            ^end: start
             if self.is_word(0, "to") {
                 self.pos += 1
                 if self.is_word(0, "max") {
@@ -761,8 +761,8 @@ ProtoParser: struct {
 
     parse_field: fn(^self) -> ProtoField DataBindError! {
         label: pkg_ascii_lower(self.word_at(0) ?? "")
-        repeated := false
-        optional := false
+        ^repeated: false
+        ^optional: false
         if label == {
             "repeated" -> {
                 self.pos += 1
@@ -783,7 +783,7 @@ ProtoParser: struct {
         }
         self.expect_symbol("=", "an equals sign")
         token: self.token_at(0) ?? return Err(DataBindError{message: "proto field number is missing"})
-        literal := ""
+        ^literal: ""
         if token == {
             .Number(text) -> literal = text
             .Word(_) | .StringLiteral(_) | .Symbol(_) -> return Err(DataBindError{message: "proto field number is missing"})
@@ -841,11 +841,11 @@ ProtoParser: struct {
         source_name: self.full_name(parent, short_name)
         self.declare_message(source_name)
         self.expect_symbol("{{", "a message block")
-        fields := [ProtoField]{}
-        field_names := [String]{}
-        field_numbers := [Int]{}
-        nested_names := [String]{}
-        reserved := ProtoReserved.empty()
+        ^fields: [ProtoField]{}
+        ^field_names: [String]{}
+        ^field_numbers: [Int]{}
+        ^nested_names: [String]{}
+        ^reserved: ProtoReserved.empty()
         loop self.pos < self.tokens.len() {
             if self.symbol_at(0, "}}") {
                 self.pos += 1
@@ -928,11 +928,11 @@ ProtoParser: struct {
         source_name: self.full_name(parent, short_name)
         self.declare_enum(source_name)
         self.expect_symbol("{{", "an enum block")
-        names := [String]{}
-        numbers := [Int]{}
-        reserved := ProtoReserved.empty()
-        allow_alias := false
-        values := [{name: String, number: Int}]{}
+        ^names: [String]{}
+        ^numbers: [Int]{}
+        ^reserved: ProtoReserved.empty()
+        ^allow_alias: false
+        ^values: [{name: String, number: Int}]{}
         loop self.pos < self.tokens.len() {
             if self.symbol_at(0, "}}") {
                 self.pos += 1

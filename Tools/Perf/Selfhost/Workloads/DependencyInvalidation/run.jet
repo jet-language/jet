@@ -5,10 +5,10 @@ Module: struct {
 }
 
 invalidated: fn(modules: [Module], changed: Int) -> [Int] {
-    dirty := [Int]{changed}
+    ^dirty: [Int]{changed}
     loop entry in modules {
         if !dirty.contains(entry.id) {
-            depends_on_dirty := false
+            ^depends_on_dirty: false
             loop dependency in entry.deps {
                 if dirty.contains(dependency) -> depends_on_dirty = true
             }

@@ -11,7 +11,7 @@ Resource: struct {
         close: fn(^^self) {
             print("close {self.name}: entered")
             self.entered.send(1)
-            _ := self.resume.receive() ?? panic("the resume channel closed")
+            ^_: self.resume.receive() ?? panic("the resume channel closed")
             print("close {self.name}: finished")
         }
     }
@@ -32,7 +32,7 @@ failure_label: fn(error: TaskFailure) -> String {
 }
 
 scoped: fn(entered: Sender<Int>, resume: Receiver<Int>) {
-    resource := Resource{name: "worker", entered: entered, resume: resume}
+    ^resource: Resource{name: "worker", entered: entered, resume: resume}
     defer close(resource)
     print("body")
 }
@@ -45,7 +45,7 @@ run: fn() {
         tasks.yield_now()
         print("cancellation was not delivered")
     }
-    _ := entered.receive() ?? panic("the worker never entered its cleanup")
+    ^_: entered.receive() ?? panic("the worker never entered its cleanup")
     worker.cancel()
     resume_sender.send(1)
     if worker.join() == {

@@ -5,7 +5,7 @@ use {
 }
 
 wh_expect: fn(usage: String) Never! {
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     if sema_web_host_check_core_usage("wasm.browser", [String]{usage}, diagnostics) {
         panic("host API admitted on browser: {usage}")
     }
@@ -48,16 +48,16 @@ run: fn() {
     }
     if sema_web_host_unsupported_core_apis() != names -> panic("Web host refusal inventory differs")
     loop name in names -> wh_expect(name)
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     if sema_web_host_check_core_usage("wasm.browser", names, diagnostics) {
         panic("aggregate host closure admitted")
     }
     if diagnostics.len() != 16 -> panic("aggregate host closure lost diagnostics")
-    native_diagnostics := [Diagnostic]{}
+    ^native_diagnostics: [Diagnostic]{}
     if !sema_web_host_check_core_usage("native", names, native_diagnostics) || native_diagnostics.len() != 0 {
         panic("native host APIs refused")
     }
-    supported_diagnostics := [Diagnostic]{}
+    ^supported_diagnostics: [Diagnostic]{}
     if !sema_web_host_check_core_usage("wasm.browser", [String]{"core.prelude.identity_int"}, supported_diagnostics) || supported_diagnostics.len() != 0 {
         panic("pure Core API refused")
     }

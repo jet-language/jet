@@ -264,7 +264,7 @@ sema_ownership_last_use_statements: fn(statements: [Stmt], name: String) -> Bool
 // last reading statement of each body is computed once per name and reused,
 // instead of rewalking every remaining statement on each query.
 sema_ownership_name_live_after: fn(name: String, check: ^SemaBodyCheck) -> Bool {
-    frame_index := check.context.lambda_statement_tails.len() - 1
+    ^frame_index: check.context.lambda_statement_tails.len() - 1
     loop frame_index >= 0 {
         body_id: check.context.lambda_statement_tails[frame_index].body_id
         if sema_ownership_tail_last_read(check.tail_store, body_id, name) >= check.context.lambda_statement_tails[frame_index].start_index {
@@ -280,7 +280,7 @@ sema_ownership_tail_last_read: fn(tail_store: ^SemaStatementTailStore, body_id: 
         return tail_store.bodies[body_id].last_reads[name_index(known)]
     }
     // The body is read in place: binding it would copy the whole body.
-    index := tail_store.bodies[body_id].statements.len() - 1
+    ^index: tail_store.bodies[body_id].statements.len() - 1
     loop index >= 0 {
         if sema_ownership_last_use_statement(tail_store.bodies[body_id].statements[index], name) {
             break
@@ -288,7 +288,7 @@ sema_ownership_tail_last_read: fn(tail_store: ^SemaStatementTailStore, body_id: 
         index -= 1
     }
     // A new id is the next row of `last_reads`.
-    _ := name_intern(tail_store.bodies[body_id].read_names, name)
+    ^_: name_intern(tail_store.bodies[body_id].read_names, name)
     tail_store.bodies[body_id].last_reads.push(index)
     index
 }

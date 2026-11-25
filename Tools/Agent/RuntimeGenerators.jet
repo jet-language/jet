@@ -66,8 +66,8 @@ runtime_generators_main: fn(args: [String]) -[Exec, FS, IO]> String GeneratorErr
     if args.len() > 0 && args[0] == "lifecycle" -> return unit_lifecycle_list(args)
     if args.len() == 1 && args[0] == "exports" -> return runtime_export_files()
     if args.len() > 0 && args[0] == "fault-report" -> return fault_report_main(args)
-    check := false
-    defects_only := false
+    ^check: false
+    ^defects_only: false
     loop arg in args {
         if {
             arg == "--check" -> check = true
@@ -78,7 +78,7 @@ runtime_generators_main: fn(args: [String]) -[Exec, FS, IO]> String GeneratorErr
     registry: files.read(REGISTRY_PATH) ?? return Err(generator_fail("cannot read {REGISTRY_PATH}: {err}"))
     routes: files.read(ROUTES_PATH) ?? return Err(generator_fail("cannot read {ROUTES_PATH}: {err}"))
     debug: files.read(DEBUG_PATH) ?? return Err(generator_fail("cannot read {DEBUG_PATH}: {err}"))
-    problems := [String]{}
+    ^problems: [String]{}
     if render_trap_messages(registry, routes, debug) == {
         .Ok(trap) -> {
             source_current: output_current(TRAP_TARGET_PATH, trap.source) ?? return Err(err)
@@ -101,7 +101,7 @@ runtime_generators_main: fn(args: [String]) -[Exec, FS, IO]> String GeneratorErr
         if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
         return Ok("")
     }
-    outputs := [GeneratedFile]{}
+    ^outputs: [GeneratedFile]{}
     if render_scheduler_messages(registry) == {
         .Ok(text) -> { outputs.push(GeneratedFile{path: SCHEDULER_TARGET_PATH, text: text}) }
         .Err(error) -> problems.push(error.message)
@@ -179,8 +179,8 @@ runtime_generators_main: fn(args: [String]) -[Exec, FS, IO]> String GeneratorErr
 // the source text on stdin.
 unit_lifecycle_list: fn(args: [String]) -[FS, IO]> String GeneratorError! {
     if args.len() < 2 -> return Err(generator_fail(USAGE))
-    problems := [String]{}
-    sources := [RuntimeSource]{}
+    ^problems: [String]{}
+    ^sources: [RuntimeSource]{}
     loop at in 1..<args.len() {
         path: args[at]
         if path == "-" {
@@ -204,7 +204,7 @@ unit_lifecycle_list: fn(args: [String]) -[FS, IO]> String GeneratorError! {
 // sources.list order.
 runtime_export_files: fn() -[FS]> String GeneratorError! {
     sources: read_runtime_sources() ?? return Err(err)
-    rows := [String]{}
+    ^rows: [String]{}
     loop export in placed_exports(sources) ?? return Err(err) {
         rows.push("{export.name}\t{export.path}")
     }
@@ -262,7 +262,7 @@ byte_tail: fn(text: String, start: Int) -> String Never! { byte_slice(text, star
 // signed literal preserves all eight bytes: only the eighth byte carries the
 // sign, with weight 2^56.
 packed_word: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
-    word := 0
+    ^word: 0
     loop index in start..<end {
         byte: Int{bytes[index]}
         weight: 1 << (8 * (index - start))
@@ -275,8 +275,8 @@ packed_word: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
 
 text_words: fn(text: String) -> [TextWord] Never! {
     bytes: text.bytes()
-    words := [TextWord]{}
-    at := 0
+    ^words: [TextWord]{}
+    ^at: 0
     loop at < bytes.len() {
         end: if at + 8 < bytes.len() -> at + 8 else -> bytes.len()
         words.push(TextWord{offset: at, value: packed_word(bytes, at, end), count: end - at})
@@ -313,8 +313,8 @@ QuotedLiteral: struct {
 quoted_literal: fn(text: String) -> QuotedLiteral? Never! {
     bytes: text.bytes()
     if bytes.len() == 0 || (Int{bytes[0]}) != 34 -> return None
-    out := [U8]{}
-    index := 1
+    ^out: [U8]{}
+    ^index: 1
     loop index < bytes.len() {
         code: Int{bytes[index]}
         if code == 34 {
@@ -349,7 +349,7 @@ registry_row: fn(registry: String, code: String) -> String GeneratorError! {
         return Err(generator_fail("missing runtime row {code}"))
     }
     rest: byte_tail(registry, start + byte_len(marker))
-    end := byte_len(rest)
+    ^end: byte_len(rest)
     next_named: rest.find("DiagnosticRegistryRow{{")
     if next_named >= 0 && next_named < end -> end = next_named
     next_plain: rest.find("\n    {{\n        code:")
@@ -452,7 +452,7 @@ static_text: fn(text: String) -> String GeneratorError! {
 // Owned E4 text: a sized text object whose data is copied from one static
 // text, or whose data words are stored in place.
 owned_text_function: fn(name: String, text: String) -> String GeneratorError! {
-    out := "\n{name}: fn() -> I64 {{\n    text: scheduler_text_new(I64{{{byte_len(text)}}})\n    data: sync_load(text)\n"
+    ^out: "\n{name}: fn() -> I64 {{\n    text: scheduler_text_new(I64{{{byte_len(text)}}})\n    data: sync_load(text)\n"
     if static_text_worthy(text) {
         literal: static_text(text) ?? return Err(err)
         out = "{out}    coll_copy(rt_text_data({literal}), data, I64{{{byte_len(text)}}})\n"
@@ -466,7 +466,7 @@ owned_text_function: fn(name: String, text: String) -> String GeneratorError! {
 
 // Words appended to a text builder or written to a descriptor by `sink`.
 word_writes: fn(target: String, sink: String, text: String) -> String Never! {
-    out := ""
+    ^out: ""
     loop word in text_words(text) {
         out = "{out}    {sink}({target}, I64{{{word.value}}}, I64{{{word.count}}})\n"
     }
@@ -522,7 +522,7 @@ render_scheduler_messages: fn(registry: String) -> String GeneratorError! {
     name: registry_field(registry, "E3003", "name") ?? return Err(err)
     head: "Error: {name}: {byte_slice(what, 0, at)}"
     tail: "{byte_tail(what, at + byte_len(hole))}\n Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/{name}"
-    source := "// Generated by Tools/Agent/RuntimeGenerators.jet; UTF-8 E4 literals.\n{COMMITTED_NOTE}\n"
+    ^source: "// Generated by Tools/Agent/RuntimeGenerators.jet; UTF-8 E4 literals.\n{COMMITTED_NOTE}\n"
     loop literal in scheduler_literals(head, tail) {
         function: owned_text_function("scheduler_msg_{literal.name}", literal.text) ?? return Err(err)
         source = "{source}{function}"
@@ -555,7 +555,7 @@ observe_literals: fn() -> [MessageLiteral] Never! {
 }
 
 render_observe_messages: fn() -> String GeneratorError! {
-    source := "// Generated by Tools/Agent/RuntimeGenerators.jet; direct E4 builder fragments.\n{COMMITTED_NOTE}\n"
+    ^source: "// Generated by Tools/Agent/RuntimeGenerators.jet; direct E4 builder fragments.\n{COMMITTED_NOTE}\n"
     loop literal in observe_literals() {
         body: builder_writes("target", literal.text) ?? return Err(err)
         source = "{source}\n{fmt_block("", "observe_msg_{literal.name}: fn(target: I64)", body)}"
@@ -626,7 +626,7 @@ test_scope_literals: fn() -> [MessageLiteral] Never! {
 
 // A stop code's bytes as one little-endian word.
 code_word: fn(code: String) -> Int Never! {
-    word := 0
+    ^word: 0
     code_bytes: code.bytes()
     loop at in 0..<code_bytes.len() -> word += Int{code_bytes[at]} << (8 * at)
     word
@@ -637,9 +637,9 @@ code_word: fn(code: String) -> Int Never! {
 // as it was recorded.
 test_scope_name_appender: fn(registry: String) -> String GeneratorError! {
     coded: loop stop in coded_stop_rows() -> stop.code
-    source := ""
-    branches := ""
-    seen := [String]{}
+    ^source: ""
+    ^branches: ""
+    ^seen: [String]{}
     loop (index, segment) in registry.split("\n        code: \"").to_list() {
         if index == 0 -> next
         code: byte_slice(segment, 0, segment.find("\""))
@@ -659,7 +659,7 @@ test_scope_name_appender: fn(registry: String) -> String GeneratorError! {
 }
 
 render_test_messages: fn(registry: String) -> String GeneratorError! {
-    source := "// Generated by Tools/Agent/RuntimeGenerators.jet; do not hand-edit.\n{COMMITTED_NOTE}\n// Little-endian UTF-8 stack writes never construct a String or exact Int.\n\n"
+    ^source: "// Generated by Tools/Agent/RuntimeGenerators.jet; do not hand-edit.\n{COMMITTED_NOTE}\n// Little-endian UTF-8 stack writes never construct a String or exact Int.\n\n"
     loop literal in test_literals() {
         if static_text_worthy(literal.text) {
             text: static_text(literal.text) ?? return Err(err)
@@ -759,9 +759,9 @@ services_literals: fn(names: [String]) -> [MessageLiteral] Never! {
 
 render_services_messages: fn(registry: String) -> String GeneratorError! {
     sentries: ["R0801", "R0802", "R0803"]
-    names := [String]{}
+    ^names: [String]{}
     loop code in sentries -> names.push(registry_field(registry, code, "name") ?? return Err(err))
-    literals := services_literals(names)
+    ^literals: services_literals(names)
     loop (index, code) in sentries {
         // A fault's first line is its heading: the row's label and name, then
         // its What.
@@ -772,7 +772,7 @@ render_services_messages: fn(registry: String) -> String GeneratorError! {
             literals.push(MessageLiteral{name: "sentry_{code.lower()}_{field}", text: shown})
         }
     }
-    source := "// Generated by Tools/Agent/RuntimeGenerators.jet; owned E4 literals.\n{COMMITTED_NOTE}\n"
+    ^source: "// Generated by Tools/Agent/RuntimeGenerators.jet; owned E4 literals.\n{COMMITTED_NOTE}\n"
     loop literal in literals {
         function: owned_text_function("services_msg_{literal.name}", literal.text) ?? return Err(err)
         source = "{source}{function}"
@@ -830,8 +830,8 @@ emit: fn(name: String, text: String, sink: String) -> String GeneratorError! {
         build_function: fmt_block("", owned_name, "    jet_rt_string_builder_push(builder, {name}_text())\n")
         return Ok("{text_function}\n{write_function}\n{build_function}")
     }
-    out := ""
-    owned := ""
+    ^out: ""
+    ^owned: ""
     loop word in text_words(text) {
         out = "{out}    {sink}(I64{{{word.value}}}, I64{{{word.count}}})\n"
         if sink == "trap_write_word" {
@@ -851,8 +851,8 @@ debug_intervals: fn(debug: String) -> [Int] GeneratorError! {
     if open < 0 -> return Err(generator_fail("missing Rust Debug scalar interval table"))
     rest: byte_slice(debug, open + byte_len("[Int]{{"), byte_len(debug))
     // The body runs to the first `}` followed by optional space and `}`.
-    body_end := -1
-    search := 0
+    ^body_end: -1
+    ^search: 0
     loop {
         close: byte_slice(rest, search, byte_len(rest)).find("}}")
         if close < 0 -> break
@@ -865,8 +865,8 @@ debug_intervals: fn(debug: String) -> [Int] GeneratorError! {
         search = at + 1
     }
     if body_end < 0 -> return Err(generator_fail("missing Rust Debug scalar interval table"))
-    values := [Int]{}
-    current := -1
+    ^values: [Int]{}
+    ^current: -1
     loop byte in byte_slice(rest, 0, body_end).bytes() {
         code: Int{byte}
         if code >= 48 && code <= 57 {
@@ -915,7 +915,7 @@ coded_stop_rows: fn() -> [CodedStop] Never! {
 }
 
 render_trap_messages: fn(registry: String, routes: String, debug: String) -> TrapOutputs GeneratorError! {
-    source := "// Generated by Tools/Agent/RuntimeGenerators.jet; do not hand-edit.\n{COMMITTED_NOTE}\n// Process-static texts and little-endian UTF-8 word constants. No heap String,\n// allocation, mutable global, or numeric runtime is reached while writing these rows.\n\n"
+    ^source: "// Generated by Tools/Agent/RuntimeGenerators.jet; do not hand-edit.\n{COMMITTED_NOTE}\n// Process-static texts and little-endian UTF-8 word constants. No heap String,\n// allocation, mutable global, or numeric runtime is reached while writing these rows.\n\n"
     loop code in ["E3001", "E3010", "E3011", "E0128"] {
         name: registry_field(registry, code, "name") ?? return Err(err)
         why: registry_field(registry, code, "why") ?? return Err(err)
@@ -959,10 +959,10 @@ render_trap_messages: fn(registry: String, routes: String, debug: String) -> Tra
         }
     }
     coded_stops: coded_stop_rows()
-    registered := [String]{}
-    branches := ""
-    heads := ""
-    exits := ""
+    ^registered: [String]{}
+    ^branches: ""
+    ^heads: ""
+    ^exits: ""
     loop (index, stop) in coded_stops {
         code: stop.code
         if byte_len(code) != 5 || !code.starts_with("E") {
@@ -1061,13 +1061,13 @@ render_trap_messages: fn(registry: String, routes: String, debug: String) -> Tra
     values: debug_intervals(debug) ?? return Err(err)
     source = "{source}\n// Canonical Text/RustDebug.jet intervals, retyped to machine words.\n"
     source = "{source}TRAP_DEBUG_RANGE_COUNT: #run {{ I64{{{values.len() /% 2}}} }}\n\n"
-    words := [String]{}
+    ^words: [String]{}
     loop value in values -> words.push("    I64{{{value}}},\n")
     source = "{source}TRAP_DEBUG_RANGES: #run {{ [I64]{{\n{words.join("")}}} }}\n"
     // Both projections use the same canonical facts. Scoped private generation
     // validates the frozen ordinary bytes first; default generation remains the
     // canonical producer for both projections after the frozen gate is lifted.
-    defects := "// Generated by Tools/Agent/RuntimeGenerators.jet; do not hand-edit.\n{COMMITTED_NOTE}\n// NO-TLS host-defect rows: raw stack-word writes only; no capture,\n// String carrier, allocation, callback, mutable global, or numeric runtime.\n\n"
+    ^defects: "// Generated by Tools/Agent/RuntimeGenerators.jet; do not hand-edit.\n{COMMITTED_NOTE}\n// NO-TLS host-defect rows: raw stack-word writes only; no capture,\n// String carrier, allocation, callback, mutable global, or numeric runtime.\n\n"
     defect_head: emit("trap_defect_unreachable_head", "internal error: entered unreachable code: ", "trap_write_word_raw") ?? return Err(err)
     defect_newline: emit("trap_defect_newline", "\n", "trap_write_word_raw") ?? return Err(err)
     defects = "{defects}{defect_head}\n{defect_newline}"
@@ -1101,8 +1101,8 @@ trap_messages_plan: fn(check: Bool, defects_only: Bool, source_current: Bool, de
 
 // The (word, count) lines of generated function `name` written through `sink`.
 emitted_words: fn(source: String, name: String, sink: String) -> [String] Never! {
-    words := [String]{}
-    inside := false
+    ^words: [String]{}
+    ^inside: false
     header: "{name}: fn() {{"
     loop line in source.split("\n") {
         // A body of one statement stays on the head's line.
@@ -1217,7 +1217,7 @@ bytes_at: fn(bytes: [U8], at: Int, word: String) -> Bool Never! {
 }
 
 skip_spaces: fn(bytes: [U8], at: Int) -> Int Never! {
-    end := at
+    ^end: at
     loop end < bytes.len() && is_space_byte(Int{bytes[end]}) -> end += 1
     end
 }
@@ -1233,8 +1233,8 @@ ExportHead: struct {
 }
 
 export_head: fn(source: String, bytes: [U8], start: Int) -> ExportHead? Never! {
-    at := start + byte_len(EXPORT_MARK)
-    spaced := skip_spaces(bytes, at)
+    ^at: start + byte_len(EXPORT_MARK)
+    ^spaced: skip_spaces(bytes, at)
     if spaced == at -> return None
     at = spaced
     if bytes_at(bytes, at, "pub") && is_space_byte(code_at(bytes, at + 3)) {
@@ -1270,7 +1270,7 @@ LifecycleHook: struct {
 }
 
 lifecycle_hook: fn(line: String) -> LifecycleHook? Never! {
-    kind := ""
+    ^kind: ""
     if line.starts_with("// runtime-init: ") -> kind = "init" else if line.starts_with("// runtime-fini: ") {
         kind = "fini"
     } else { return None }
@@ -1322,9 +1322,9 @@ masked_word_parameters: fn() -> [MaskedParameter] Never! {
 // its last `)`.
 signature_parameters: fn(signature: String) -> [String] Never! {
     bytes: signature.bytes()
-    close := bytes.len() - 1
+    ^close: bytes.len() - 1
     loop close > 0 && (Int{bytes[close]}) != 41 -> close -= 1
-    items := [String]{}
+    ^items: [String]{}
     if close <= 0 -> return items
     loop item in byte_slice(signature, 1, close).split(",") {
         trimmed: item.trim()
@@ -1337,7 +1337,7 @@ signature_parameters: fn(signature: String) -> [String] Never! {
 i64_parameter_name: fn(item: String) -> String Never! {
     bytes: item.bytes()
     if bytes.len() == 0 || !is_name_start_byte(Int{bytes[0]}) -> return ""
-    at := 0
+    ^at: 0
     loop at < bytes.len() && is_name_byte(Int{bytes[at]}) -> at += 1
     name: byte_slice(item, 0, at)
     at = skip_spaces(bytes, at)
@@ -1354,8 +1354,8 @@ has_mask: fn(code: [U8], from: Int, to: Int, name: String, mask: Int) -> Bool Ne
     loop start in from..<to {
         if start > from && is_name_byte(Int{code[start - 1]}) -> next
         if !bytes_at(code, start, name) -> next
-        at := start + byte_len(name)
-        matched := true
+        ^at: start + byte_len(name)
+        ^matched: true
         loop word in words {
             at = skip_spaces(code, at)
             if at + byte_len(word) > to || !bytes_at(code, at, word) {
@@ -1373,8 +1373,8 @@ has_mask: fn(code: [U8], from: Int, to: Int, name: String, mask: Int) -> Bool Ne
 // parameter must be masked in the export's body (comments and literals are not
 // evidence).
 masked_parameter_problems: fn(source: String, head: ExportHead, path: String) -> [String] Never! {
-    problems := [String]{}
-    rows := [MaskedParameter]{}
+    ^problems: [String]{}
+    ^rows: [MaskedParameter]{}
     loop row in masked_word_parameters() {
         if row.symbol == head.name -> rows.push(row)
     }
@@ -1407,17 +1407,17 @@ masked_parameter_problems: fn(source: String, head: ExportHead, path: String) ->
 // marked on the line above it.
 runtime_exports: fn(source: String, path: String) -> ParsedExports Never! {
     bytes: source.bytes()
-    exports := [RuntimeExport]{}
-    problems := [String]{}
-    previous_line := -1
-    line_start := 0
+    ^exports: [RuntimeExport]{}
+    ^problems: [String]{}
+    ^previous_line: -1
+    ^line_start: 0
     loop line_start <= bytes.len() {
-        line_end := line_start
+        ^line_end: line_start
         loop line_end < bytes.len() && (Int{bytes[line_end]}) != 10 -> line_end += 1
         if bytes_at(bytes, line_start, EXPORT_MARK) {
             if export_head(source, bytes, line_start) == {
                 .Val(head) -> {
-                    lifecycle := ""
+                    ^lifecycle: ""
                     if previous_line >= 0 {
                         if lifecycle_hook(byte_slice(source, previous_line, line_start - 1)) == {
                             .Val(hook) -> {
@@ -1457,9 +1457,9 @@ PlacedExport: struct {
 // Every #Export(c) function of `sources`, in source order; a duplicate, a bad
 // declaration and an empty set are refused, every one at once.
 placed_exports: fn(sources: [RuntimeSource]) -> [PlacedExport] GeneratorError! {
-    problems := [String]{}
-    names := [String]{}
-    placed := [PlacedExport]{}
+    ^problems: [String]{}
+    ^names: [String]{}
+    ^placed: [PlacedExport]{}
     loop source in sources {
         parsed: runtime_exports(source.text, source.path)
         loop problem in parsed.problems -> problems.push(problem)
@@ -1481,12 +1481,12 @@ placed_exports: fn(sources: [RuntimeSource]) -> [PlacedExport] GeneratorError! {
 // [guards]` row per hook, in symbol order.
 lifecycle_list: fn(sources: [RuntimeSource]) -> String GeneratorError! {
     placed: placed_exports(sources) ?? return Err(err)
-    rows := [String]{}
+    ^rows: [String]{}
     loop export in placed {
         if export.lifecycle != "" -> rows.push("{export.name} {export.lifecycle}")
     }
     rows.sort()
-    lines := [String]{
+    ^lines: [String]{
         "# Runtime object lifecycle hooks: <#Export(c) symbol> init|fini <priority 0..65535> [<guard storage>,...].",
         "# Lower init priorities run first (.init_array); fini rows run at exit (.fini_array).",
         "# A guarded hook runs exactly when the program links one of its guard module storages.",
@@ -1503,12 +1503,12 @@ lifecycle_list: fn(sources: [RuntimeSource]) -> String GeneratorError! {
 read_runtime_sources: fn() -[FS]> [RuntimeSource] GeneratorError! {
     listing: files.read(RUNTIME_SOURCES_PATH) ?? return Err(generator_fail("cannot read {RUNTIME_SOURCES_PATH}: {err}"))
     listed: files.list_dir(RUNTIME_SOURCE_DIRECTORY) ?? return Err(generator_fail("cannot list {RUNTIME_SOURCE_DIRECTORY}: {err}"))
-    names := [String]{}
+    ^names: [String]{}
     loop entry in listed {
         if entry.name.ends_with(".jet") -> names.push(entry.name)
     }
-    sources := [RuntimeSource]{}
-    problems := unlisted_runtime_sources(listing, names)
+    ^sources: [RuntimeSource]{}
+    ^problems: unlisted_runtime_sources(listing, names)
     loop raw in listing.split("\n") {
         path: raw.trim()
         if path == "" || path.starts_with("#") -> next
@@ -1526,11 +1526,11 @@ read_runtime_sources: fn() -[FS]> [RuntimeSource] GeneratorError! {
 // The runtime source files (Source/*.jet names) no sources.list line names, as
 // one problem each in name order.
 unlisted_runtime_sources: fn(listing: String, names: [String]) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop raw in listing.split("\n") -> lines.push(raw.trim())
-    sorted := names.copy()
+    ^sorted: names.copy()
     sorted.sort()
-    problems := [String]{}
+    ^problems: [String]{}
     loop name in sorted {
         path: "{RUNTIME_SOURCE_DIRECTORY}/{name}"
         if !lines.contains(path) {
@@ -1582,7 +1582,7 @@ render_lifecycle_list: fn() -[FS]> String GeneratorError! {
 // The quoted names after each `marker` in `text`.
 quoted_after: fn(text: String, marker: String) -> [String] Never! {
     pieces: text.split(marker).to_list()
-    names := [String]{}
+    ^names: [String]{}
     loop at in 1..<pieces.len() -> names.push(pieces[at].partition("\"").head.copy())
     names
 }
@@ -1600,7 +1600,7 @@ quoted_after: fn(text: String, marker: String) -> [String] Never! {
     layouts_path: "Compiler/JetFoundation/Source/Registry/RuntimeLayouts.jet"
     layouts: files.read(layouts_path) ?? panic("{layouts_path} did not read: {err}")
     schemas: quoted_after(layouts, "IRRecordSchema{{jet_name: \"")
-    found := [String]{}
+    ^found: [String]{}
     loop line in routes.lines() {
         symbols: quoted_after(line, "IRRoute{{symbol: \"")
         if symbols.len() != 1 -> next
@@ -1649,7 +1649,7 @@ quoted_after: fn(text: String, marker: String) -> [String] Never! {
         "jet_std_fs_list_dir_raw",
         "jet_text_pattern_match",
     }
-    expected := [String]{}
+    ^expected: [String]{}
     loop symbol in reviewed {
         if routes.contains("IRRoute{{symbol: \"{symbol}\"") -> expected.push(symbol.copy())  // copy: `reviewed` keeps its rows
     }
@@ -1714,7 +1714,7 @@ hex_digit_value: fn(code: Int) -> Int Never! {
 parse_hex: fn(text: String) -> Int? Never! {
     bytes: text.bytes()
     if bytes.len() == 0 -> return None
-    value := 0
+    ^value: 0
     loop byte in bytes {
         digit: hex_digit_value(Int{byte})
         if digit < 0 -> return None
@@ -1726,8 +1726,8 @@ parse_hex: fn(text: String) -> Int? Never! {
 upper_hex: fn(value: Int) -> String Never! {
     digits: "0123456789ABCDEF"
     if value == 0 -> return "0"
-    out := ""
-    rest := value
+    ^out: ""
+    ^rest: value
     loop rest > 0 {
         digit: rest % 16
         out = "{byte_slice(digits, digit, digit + 1)}{out}"
@@ -1763,7 +1763,7 @@ field_after: fn(text: String, separator: String) -> String? Never! {
 
 // `lo..hi ; Alphabetic # …` rows of DerivedCoreProperties.txt.
 alphabetic_ranges: fn(derived: String) -> [TextRange] GeneratorError! {
-    rows := [TextRange]{}
+    ^rows: [TextRange]{}
     loop raw in derived.split("\n") {
         data: field_before(raw, "#")
         rest: field_after(data, ";") ?? next
@@ -1783,9 +1783,9 @@ is_numeric_category: fn(category: String) -> Bool Never! {
 
 // Nd/Nl/No scalars of UnicodeData.txt, with `<…, First>`/`<…, Last>` pairs as ranges.
 numeric_ranges: fn(data: String) -> [TextRange] GeneratorError! {
-    rows := [TextRange]{}
-    pending_lo := -1
-    pending_category := ""
+    ^rows: [TextRange]{}
+    ^pending_lo: -1
+    ^pending_category: ""
     loop raw in data.split("\n") {
         if raw == "" -> next
         after_code: field_after(raw, ";") ?? return Err(generator_fail("malformed UCD row: {raw}"))
@@ -1815,9 +1815,9 @@ numeric_ranges: fn(data: String) -> [TextRange] GeneratorError! {
 // Sorted by start (stable), overlapping or adjacent ranges merged, and the
 // serialization checked against the frozen hash.
 merged_ranges: fn(name: String, input: [TextRange], frozen: String) -> [TextRange] GeneratorError! {
-    sorted := input
+    ^sorted: input
     sorted.sort_by(fn(left: TextRange, right: TextRange) { left.lo <=> right.lo })
-    rows := [TextRange]{}
+    ^rows: [TextRange]{}
     loop range in sorted {
         if range.lo > range.hi || range.hi > MAX_SCALAR {
             return Err(generator_fail("invalid UCD range {name}"))
@@ -1827,7 +1827,7 @@ merged_ranges: fn(name: String, input: [TextRange], frozen: String) -> [TextRang
             if range.hi > rows[last].hi -> rows[last] = TextRange{lo: rows[last].lo, hi: range.hi}
         } else { rows.push(range) }
     }
-    serialized := [String]{}
+    ^serialized: [String]{}
     loop range in rows -> serialized.push("(0x{upper_hex(range.lo)},0x{upper_hex(range.hi)})")
     digest: crypto.sha256(serialized.join(",").bytes()).hex()
     if digest != frozen -> return Err(generator_fail("frozen range parity mismatch: {name}"))
@@ -1842,7 +1842,7 @@ range_digit: fn(digit: Int) -> U8 Never! { U8{if digit < 57 -> 35 + digit else -
 // The ranges as unicode_table_find records: lo and hi as four six-bit digits
 // each, low digit first.
 range_records: fn(rows: [TextRange]) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop row in rows {
         loop value in ([Int]{row.lo, row.hi}) {
             loop at in 0..<4 -> out.push(range_digit((value >> (6 * at)) & 63))
@@ -1853,9 +1853,9 @@ range_records: fn(rows: [TextRange]) -> String Never! {
 
 // The dense ASCII block: one digit per scalar below 128, 1 inside a range.
 range_ascii: fn(rows: [TextRange]) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop cp in 0..<128 {
-        inside := 0
+        ^inside: 0
         loop row in rows {
             if row.lo <= cp && cp <= row.hi -> inside = 1
         }
@@ -1935,20 +1935,20 @@ blank_range: fn(source: [U8], code: ^[U8], start: Int, end: Int) {
 // spaces. Inside an interpolation the scan stops after its closing brace and
 // returns that offset.
 mask_scan: fn(source: [U8], code: ^[U8], start: Int, interpolation: Bool) -> Int GeneratorError! {
-    at := start
-    braces := 0
+    ^at: start
+    ^braces: 0
     length: source.len()
     loop at < length {
         byte: Int{source[at]}
         if byte == 47 && code_at(source, at + 1) == 47 {
-            end := at
+            ^end: at
             loop end < length && (Int{source[end]}) != 10 -> end += 1
             blank_range(source, code, at, end)
             at = end
         } else if byte == 47 && code_at(source, at + 1) == 42 {
             begin: at
             at += 2
-            depth := 1
+            ^depth: 1
             loop at < length && depth > 0 {
                 if code_at(source, at) == 47 && code_at(source, at + 1) == 42 {
                     depth += 1
@@ -1966,7 +1966,7 @@ mask_scan: fn(source: [U8], code: ^[U8], start: Int, interpolation: Bool) -> Int
             begin: at
             loop at < length && (Int{source[at]}) == 96 -> at += 1
             opening: at - begin
-            closed := false
+            ^closed: false
             loop at < length && !closed {
                 if (Int{source[at]}) != 96 -> at += 1 else {
                     run: at
@@ -1979,7 +1979,7 @@ mask_scan: fn(source: [U8], code: ^[U8], start: Int, interpolation: Bool) -> Int
         } else if byte == 34 || byte == 39 {
             triple: byte == 34 && code_at(source, at + 1) == 34 && code_at(source, at + 2) == 34
             delimiter_len: if triple -> 3 else -> 1
-            literal := at
+            ^literal: at
             at += delimiter_len
             loop at < length && !(code_at(source, at) == byte && (!triple || (code_at(source, at + 1) == 34 && code_at(source, at + 2) == 34))) {
                 current: Int{source[at]}
@@ -2014,7 +2014,7 @@ mask_scan: fn(source: [U8], code: ^[U8], start: Int, interpolation: Bool) -> Int
 // `source` with every comment and literal text replaced by spaces, offsets kept.
 code_only: fn(source: String) -> String GeneratorError! {
     bytes: source.bytes()
-    code := source.bytes()
+    ^code: source.bytes()
     mask_scan(bytes, code, 0, false) ?? return Err(err)
     Ok(String.from_bytes_lossy(code))
 }
@@ -2022,8 +2022,8 @@ code_only: fn(source: String) -> String GeneratorError! {
 // The index of the byte that closes the group opened just before `from`
 // (`open`/`close` nesting), searching below `limit`; -1 when unclosed.
 group_end: fn(code: [U8], from: Int, limit: Int, open: Int, close: Int) -> Int Never! {
-    at := from
-    depth := 1
+    ^at: from
+    ^depth: 1
     loop at < limit && depth > 0 {
         current: Int{code[at]}
         if current == open -> depth += 1 else if current == close -> depth -= 1
@@ -2036,8 +2036,8 @@ group_end: fn(code: [U8], from: Int, limit: Int, open: Int, close: Int) -> Int N
 // Every #Export(c) symbol of `sources`, sorted: the runtime's C export
 // table. Every unreadable source and repeated export is reported at once.
 runtime_c_export_names: fn(sources: [RuntimeSource]) -> [String] GeneratorError! {
-    problems := [String]{}
-    names := [String]{}
+    ^problems: [String]{}
+    ^names: [String]{}
     loop source in sources {
         if code_only(source.text) == {
             .Ok(text) -> {
@@ -2058,7 +2058,7 @@ runtime_c_export_names: fn(sources: [RuntimeSource]) -> [String] GeneratorError!
 }
 
 render_c_exports: fn(exports: [String]) -> String Never! {
-    lines := [String]{
+    ^lines: [String]{
         "// Generated by Tools/Agent/RuntimeGenerators.jet; do not edit.",
         COMMITTED_NOTE,
         "// Every #Export(c) function of JetRuntime/Source/*.jet: the runtime's C export table.",
@@ -2072,13 +2072,13 @@ render_c_exports: fn(exports: [String]) -> String Never! {
 }
 
 read_c_exports: fn() -[FS]> String GeneratorError! {
-    names := [String]{}
+    ^names: [String]{}
     listed: files.list_dir(RUNTIME_SOURCE_DIRECTORY) ?? return Err(generator_fail("cannot list {RUNTIME_SOURCE_DIRECTORY}: {err}"))
     loop entry in listed {
         if entry.name.ends_with(".jet") -> names.push(entry.name)
     }
     names.sort()
-    sources := [RuntimeSource]{}
+    ^sources: [RuntimeSource]{}
     loop name in names {
         text: files.read("{RUNTIME_SOURCE_DIRECTORY}/{name}") ?? return Err(generator_fail("cannot read {RUNTIME_SOURCE_DIRECTORY}/{name}: {err}"))
         sources.push(RuntimeSource{path: name, text: text})
@@ -2146,9 +2146,9 @@ is_decimal: fn(text: String) -> Bool Never! {
 
 // The whitespace-separated words of `line`.
 line_words: fn(line: String) -> [String] Never! {
-    words := [String]{}
+    ^words: [String]{}
     bytes: line.bytes()
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         at = skip_spaces(bytes, at)
         if at >= bytes.len() -> break
@@ -2160,7 +2160,7 @@ line_words: fn(line: String) -> [String] Never! {
 }
 
 errno_definitions: fn(header: String) -> [ErrnoDefinition] Never! {
-    rows := [ErrnoDefinition]{}
+    ^rows: [ErrnoDefinition]{}
     loop line in header.split("\n") {
         words: line_words(line)
         if words.len() != 3 || words[0] != "#define" || !words[1].starts_with("E") || !is_word(words[1]) || !is_word(words[2]) {
@@ -2174,8 +2174,8 @@ errno_definitions: fn(header: String) -> [ErrnoDefinition] Never! {
 
 // The number an errno name resolves to through its #define chain.
 errno_number: fn(definitions: [ErrnoDefinition], name: String) -> Int GeneratorError! {
-    current := name
-    chain := [String]{}
+    ^current: name
+    ^chain: [String]{}
     loop {
         if is_decimal(current) {
             if Int.parse(current) == {
@@ -2185,7 +2185,7 @@ errno_number: fn(definitions: [ErrnoDefinition], name: String) -> Int GeneratorE
         }
         if chain.contains(current) -> return Err(generator_fail("unresolved errno {name}"))
         chain.push(current.copy())
-        found := ""
+        ^found: ""
         loop definition in definitions {
             if definition.name == current {
                 found = definition.value
@@ -2199,8 +2199,8 @@ errno_number: fn(definitions: [ErrnoDefinition], name: String) -> Int GeneratorE
 
 // strerror.h `E(NAME, "text")` rows, in order.
 errno_messages: fn(table: String, definitions: [ErrnoDefinition]) -> [ErrnoMessage] GeneratorError! {
-    messages := [ErrnoMessage]{}
-    problems := [String]{}
+    ^messages: [ErrnoMessage]{}
+    ^problems: [String]{}
     loop line in table.split("\n") {
         if !line.starts_with("E(") -> next
         rest: byte_tail(line, 2)
@@ -2218,7 +2218,7 @@ errno_messages: fn(table: String, definitions: [ErrnoDefinition]) -> [ErrnoMessa
         }
     }
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
-    numbers := [Int]{}
+    ^numbers: [Int]{}
     loop message in messages {
         if numbers.contains(message.number) {
             return Err(generator_fail("invalid strerror source entries"))
@@ -2234,7 +2234,7 @@ errno_messages: fn(table: String, definitions: [ErrnoDefinition]) -> [ErrnoMessa
 // The leading run of word characters of `text`.
 leading_name: fn(text: String) -> String Never! {
     bytes: text.bytes()
-    end := 0
+    ^end: 0
     loop end < bytes.len() && is_name_byte(Int{bytes[end]}) -> end += 1
     byte_slice(text, 0, end)
 }
@@ -2249,11 +2249,11 @@ errno_word_rows: fn(text: String, indent: String, rows: ^[String]) {
 // order, so a lookup costs a short scan instead of a branch and a push per
 // message.
 render_host_errors: fn(messages: [ErrnoMessage]) -> String GeneratorError! {
-    highest := 0
+    ^highest: 0
     loop message in messages {
         if message.number > highest -> highest = message.number
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop lines.len() <= highest -> lines.push("")
     loop message in messages {
         loop byte in message.text.bytes() {
@@ -2264,9 +2264,9 @@ render_host_errors: fn(messages: [ErrnoMessage]) -> String GeneratorError! {
         }
         lines[message.number] = message.text
     }
-    table := ""
+    ^table: ""
     loop line in lines -> table = "{table}{line}\\n"
-    rows := [String]{
+    ^rows: [String]{
         "// Generated by Tools/Agent/RuntimeGenerators.jet from pinned musl 1.2.5 assets.",
         COMMITTED_NOTE,
         "// Source hashes and MIT attribution: Assets/MuslErrno1_2_5/manifest.json + COPYRIGHT.",
@@ -2338,7 +2338,7 @@ read_host_errors: fn() -[FS]> String GeneratorError! {
     if dyn_text(version) != "musl-1.2.5" || dyn_text(license) != "MIT" {
         return Err(generator_fail("invalid errno source manifest"))
     }
-    problems := [String]{}
+    ^problems: [String]{}
     assets: [String]{"strerror.h", "errno.h", "COPYRIGHT"}
     loop name in assets {
         path: "{MUSL_ASSETS_DIRECTORY}/{name}"
@@ -2404,7 +2404,7 @@ HostCarrierTable: struct {
 // the payload `rows` and the Core.rows `cases`. A missing or repeated variant,
 // or a family listed in both, is a broken registry.
 enum_variants: fn(rows: String, cases: String, name: String) -> [String] GeneratorError! {
-    values := quoted_after(rows, "CoreEnumPayloadRow{{enum_name: \"{name}\", variant: \"")
+    ^values: quoted_after(rows, "CoreEnumPayloadRow{{enum_name: \"{name}\", variant: \"")
     listed: cases.split(" {name}:plain(").to_list()
     if listed.len() > 2 || (listed.len() == 2 && values.len() > 0) {
         return Err(generator_fail("missing/duplicate {name} enum rows"))
@@ -2429,7 +2429,7 @@ constant_case: fn(name: String) -> String Never! { runtime_abi_atom(name).to_upp
 // runtime_abi_atom projects it for Lower: `HTTPClient` is `http_client`.
 runtime_abi_atom: fn(name: String) -> String Never! {
     bytes: name.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if code == 46 || code == 95 {
@@ -2479,8 +2479,8 @@ host_texts: fn() -> [MessageLiteral] Never! {
 
 render_host_carriers: fn(rows: String, cases: String) -> String GeneratorError! {
     kinds: enum_variants(rows, cases, "IOError") ?? return Err(err)
-    tables := [HostCarrierTable]{HostCarrierTable{prefix: "HOST_IO_KIND", values: kinds}}
-    problems := [String]{}
+    ^tables: [HostCarrierTable]{HostCarrierTable{prefix: "HOST_IO_KIND", values: kinds}}
+    ^problems: [String]{}
     names: [String]{"IOOperation", "ProcessResourceLimit", "ProcessStreamMode", "TerminalMode"}
     prefixes: [String]{"HOST_IO_OP", "HOST_PROCESS_LIMIT", "HOST_PROCESS_STREAM", "HOST_TERMINAL_MODE"}
     loop at in 0..<names.len() {
@@ -2490,13 +2490,13 @@ render_host_carriers: fn(rows: String, cases: String) -> String GeneratorError! 
         }
     }
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
-    lines := [String]{
+    ^lines: [String]{
         "// Generated by Tools/Agent/RuntimeGenerators.jet from {HOST_CARRIER_ROWS_PATH} and {HOST_CARRIER_CASES_PATH}.",
         COMMITTED_NOTE,
         "// C carrier tags are Core ordinals, not an independent runtime enum.",
         "// Refusals use the shared trap boundary: Root captures the full registered report.",
     }
-    constants := [String]{}
+    ^constants: [String]{}
     loop table in tables {
         loop index in 0..<table.values.len() {
             constants.push("{table.prefix}_{constant_case(table.values[index])}: I64{{{index}}}")
@@ -2567,7 +2567,7 @@ HOST_CARRIER_CASES_FIXTURE: "module jet_builtins exports {{ ProcessResourceLimit
     assert(!text.contains("io_error_resource_limit"))
     assert(text.contains("\nhost_record_index_refused: fn() {{\n    host_refused(rt_static_text(\"record variant index out of range\"))\n}}\n"))
     assert(text.contains("host_stdout_name: fn() -> I64 {{\n    text: jet_rt_string_builder_new()\n    rt_text_push_word(text, I64{{128047728850035}}, I64{{6}})\n"))
-    seen := [String]{}
+    ^seen: [String]{}
     loop line in text.split("\n") {
         if !line.contains(": fn(") || line.starts_with("#") || line.starts_with(" ") -> next
         name: line.partition(":").head.copy()
@@ -2639,7 +2639,7 @@ dyn_kind_rows: fn(source: String) -> [DynKind] GeneratorError! {
     if close < 0 {
         return Err(generator_fail("{DYN_KIND_SOURCE_PATH}: the __dyn_kind table is not closed"))
     }
-    rows := [DynKind]{}
+    ^rows: [DynKind]{}
     loop line in byte_slice(body, 0, close).split("\n") {
         arm: line.trim().copy()
         arrow: arm.find(" -> ")
@@ -2688,7 +2688,7 @@ dyn_kind_runtime_tag: fn(variant: String) -> String? Never! {
 // dyn_kind_name: a tag test per arm; the last arm's word answers every
 // other tag.
 render_dyn_kind_runtime: fn(rows: [DynKind]) -> String GeneratorError! {
-    lines := [String]{DYN_KIND_BEGIN, "// dyn_kind: the diagnostic name of a runtime tree's kind.", "dyn_kind_name: fn(kind: I64) -> I64 {{"}
+    ^lines: [String]{DYN_KIND_BEGIN, "// dyn_kind: the diagnostic name of a runtime tree's kind.", "dyn_kind_name: fn(kind: I64) -> I64 {{"}
     loop at in 0..<rows.len() {
         row: rows[at]
         constant: dyn_kind_runtime_tag(row.variant) ?? return Err(generator_fail("Dyn variant {row.variant} has no runtime tree tag"))
@@ -2773,7 +2773,7 @@ fault_report_sources: fn() -> [FaultReportSource] Never! {
 
 // The little-endian unsigned field of `count` bytes (at most 8) at `at`.
 le_field: fn(bytes: [U8], at: Int, count: Int) -> Int Never! {
-    value := 0
+    ^value: 0
     loop index in at..<at + count -> value += Int{bytes[index]} << (8 * (index - at))
     value
 }
@@ -2790,12 +2790,12 @@ fault_report_text: fn(path: String, object: [U8]) -> [U8] GeneratorError! {
         return Err(generator_fail("{path}: the object's section headers are truncated"))
     }
     names_at: le_field(object, shoff + le_field(object, 62, 2) * shentsize + 24, 8)
-    text := [U8]{}
-    found := false
+    ^text: [U8]{}
+    ^found: false
     loop index in 0..<shnum {
         header: shoff + index * shentsize
         name_at: names_at + le_field(object, header, 4)
-        name_end := name_at
+        ^name_end: name_at
         loop name_end < object.len() && (Int{object[name_end]}) != 0 -> name_end += 1
         name: String.from_bytes_lossy(object[name_at..<name_end])
         offset: le_field(object, header + 24, 8)
@@ -2822,7 +2822,7 @@ fault_report_text: fn(path: String, object: [U8]) -> [U8] GeneratorError! {
 // The table `name` of `bytes`, one per line as `jet fmt` writes a list too
 // long for one line.
 render_fault_report_table: fn(report: FaultReportSource, bytes: [U8]) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop byte in bytes -> rows.push("    {Int{byte}},\n")
     "\n{report.doc}\n{report.name}: [U8]{{\n{rows.join("")}}}\n"
 }
@@ -2844,8 +2844,8 @@ fault_report_main: fn(args: [String]) -[Exec, FS]> String GeneratorError! {
 
 render_fault_reports: fn() -[Exec, FS]> String GeneratorError! {
     scratch: files.mkdtemp("fault-report") ?? return Err(generator_fail("a scratch directory cannot be made: {err}"))
-    source := "// Generated by Tools/Agent/RuntimeGenerators.jet from\n// Compiler/JetRuntime/Assets/FaultReport/; do not hand-edit.\n{COMMITTED_NOTE}\n// The native fault reports' x86-64 code and texts: each a whole C\n// function, which the static linker writes as the runtime's\n// jet_rt_fault_report (Image/StaticLink.jet link_fault_report). Its\n// source documents how the bytes run.\n"
-    problems := [String]{}
+    ^source: "// Generated by Tools/Agent/RuntimeGenerators.jet from\n// Compiler/JetRuntime/Assets/FaultReport/; do not hand-edit.\n{COMMITTED_NOTE}\n// The native fault reports' x86-64 code and texts: each a whole C\n// function, which the static linker writes as the runtime's\n// jet_rt_fault_report (Image/StaticLink.jet link_fault_report). Its\n// source documents how the bytes run.\n"
+    ^problems: [String]{}
     loop report in fault_report_sources() {
         object: files.join(scratch, "report.o")
         assembled: process.cmd([String]{"as", "--64", "-o", object.copy(), report.path}).run() ?? {
@@ -2928,8 +2928,8 @@ ExitCode: struct {
 // The `EXIT_NAME: N` rows of the exit-code table, each with the comment
 // lines directly above it.
 exit_code_rows: fn(source: String) -> [ExitCode] GeneratorError! {
-    rows := [ExitCode]{}
-    doc := [String]{}
+    ^rows: [ExitCode]{}
+    ^doc: [String]{}
     loop line in source.split("\n") {
         if line.starts_with("// ") {
             doc.push(byte_tail(line, 3))
@@ -2957,8 +2957,8 @@ exit_code_rows: fn(source: String) -> [ExitCode] GeneratorError! {
 // apart as `jet fmt` writes them; with `parted`, a blank line parts the last
 // row from the end line too, which `jet fmt` writes when more follows it.
 render_exit_codes: fn(rows: [ExitCode], prefix: String, word: Bool, parted: Bool) -> String Never! {
-    lines := [String]{EXIT_CODES_BEGIN}
-    first := true
+    ^lines: [String]{EXIT_CODES_BEGIN}
+    ^first: true
     loop row in rows {
         if !first -> lines.push("")
         first = false
@@ -2974,7 +2974,7 @@ render_exit_codes: fn(rows: [ExitCode], prefix: String, word: Bool, parted: Bool
 // The release policy's table of the rows, between its generated region's
 // two lines: the code, the name without `EXIT_`, and the comment as one line.
 render_exit_code_table: fn(rows: [ExitCode]) -> String Never! {
-    lines := [String]{EXIT_CODES_DOC_BEGIN, "| Code | Name | Meaning |", "|---:|---|---|"}
+    ^lines: [String]{EXIT_CODES_DOC_BEGIN, "| Code | Name | Meaning |", "|---:|---|---|"}
     loop row in rows {
         lines.push("| {row.value} | `{byte_tail(row.name, 5)}` | {row.doc.join(" ")} |")
     }
@@ -3008,7 +3008,7 @@ read_exit_codes: fn() -[FS]> [GeneratedFile] GeneratorError! {
 names_exit: fn(text: String, code: Bool) -> Bool Never! {
     lower: text.lower()
     bytes: lower.bytes()
-    start := 0
+    ^start: 0
     loop at in 0..<(bytes.len() + 1) {
         if at < bytes.len() && is_name_byte(Int{bytes[at]}) && (Int{bytes[at]}) != 95 -> next
         word: byte_slice(lower, start, at)
@@ -3021,8 +3021,8 @@ names_exit: fn(text: String, code: Bool) -> Bool Never! {
 // The offset of the innermost `(` still open at the end of `text`, or -1.
 open_paren: fn(text: String) -> Int Never! {
     bytes: text.bytes()
-    depth := 0
-    at := bytes.len()
+    ^depth: 0
+    ^at: bytes.len()
     loop at > 0 {
         at -= 1
         byte: Int{bytes[at]}
@@ -3038,7 +3038,7 @@ open_paren: fn(text: String) -> Int Never! {
 // operand of a comparison that ends it.
 left_operand: fn(text: String) -> String Never! {
     bytes: text.bytes()
-    at := bytes.len()
+    ^at: bytes.len()
     loop at > 0 {
         byte: Int{bytes[at - 1]}
         if byte == 40 || byte == 44 || byte == 123 -> return byte_tail(text, at)
@@ -3077,7 +3077,7 @@ exit_position: fn(line: String, start: Int, end: Int) -> Bool Never! {
     open: open_paren(before)
     if open < 0 -> return false
     bytes: before.bytes()
-    callee := open
+    ^callee: open
     loop callee > 0 && (is_name_byte(Int{bytes[callee - 1]}) || Int{bytes[callee - 1]} == 46) {
         callee -= 1
     }
@@ -3090,21 +3090,21 @@ exit_position: fn(line: String, start: Int, end: Int) -> Bool Never! {
 exit_literal_problems: fn(path: String, source: String) -> [String] GeneratorError! {
     code: code_only(source) ?? return Err(generator_fail("{path}: {err.message}"))
     originals: source.split("\n").to_list()
-    problems := [String]{}
-    generated := false
+    ^problems: [String]{}
+    ^generated: false
     loop (index, line) in code.split("\n").to_list() {
         original: if index < originals.len() -> originals[index] else -> ""
         if original == EXIT_CODES_BEGIN -> generated = true
         if original == EXIT_CODES_END -> generated = false
         if generated -> next
         bytes: line.bytes()
-        at := 0
+        ^at: 0
         loop at < bytes.len() {
             if !is_digit_byte(Int{bytes[at]}) || (at > 0 && (is_name_byte(Int{bytes[at - 1]}) || Int{bytes[at - 1]} == 46)) {
                 at += 1
                 next
             }
-            end := at
+            ^end: at
             loop end < bytes.len() && is_digit_byte(Int{bytes[end]}) -> end += 1
             number: byte_slice(line, at, end)
             following: code_at(bytes, end)
@@ -3139,9 +3139,9 @@ exit_guard_files: fn(directory: String, found: ^[String]) -[FS]> GeneratorError!
 
 // Every bare 70 or 101 in an exit position of the guarded trees.
 exit_guard: fn() -[FS]> [String] GeneratorError! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop root in EXIT_GUARD_ROOTS -> exit_guard_files(root, paths) ?? return Err(err)
-    problems := [String]{}
+    ^problems: [String]{}
     loop path in paths {
         source: files.read(path) ?? return Err(generator_fail("cannot read {path}: {err}"))
         loop problem in exit_literal_problems(path, source) ?? return Err(err) {
@@ -3204,7 +3204,7 @@ grant_text_field: fn(row: String, key: String) -> String? Never! {
     if at < 0 -> return None
     bytes: row.bytes()
     start: at + byte_len(key) + 3
-    end := start
+    ^end: start
     loop end < bytes.len() && (Int{bytes[end]}) != 34 {
         if (Int{bytes[end]}) == 92 -> end += 2 else -> end += 1
     }
@@ -3226,9 +3226,9 @@ unsupported_grant_row: fn(row: String) -> GeneratorError Never! {
 // The AUTHORITY_PROCESS_GRANTS rows of `source`, one per line. Exactly one
 // row grants a program, a bare root, and at least one is a workspace right.
 process_grant_rows: fn(source: String) -> [ProcessGrant] GeneratorError! {
-    rows := [ProcessGrant]{}
-    inside := false
-    closed := false
+    ^rows: [ProcessGrant]{}
+    ^inside: false
+    ^closed: false
     loop line in source.split("\n") {
         trimmed: line.trim()
         if !inside {
@@ -3256,7 +3256,7 @@ process_grant_rows: fn(source: String) -> [ProcessGrant] GeneratorError! {
     if !closed || rows.len() == 0 {
         return Err(generator_fail("{PROCESS_GRANTS_SOURCE_PATH} has no AUTHORITY_PROCESS_GRANTS rows"))
     }
-    programs := 0
+    ^programs: 0
     loop row in rows {
         if row.program -> programs += 1
     }
@@ -3273,10 +3273,10 @@ process_grant_rows: fn(source: String) -> [ProcessGrant] GeneratorError! {
 // comment, a blank line apart.
 render_process_grants: fn(rows: [ProcessGrant]) -> String Never! {
     head: "// Generated by Tools/Agent/RuntimeGenerators.jet from {PROCESS_GRANTS_SOURCE_PATH}; do not edit.\n{COMMITTED_NOTE}\n// The grants the native process boundary can enforce (AUTHORITY_PROCESS_GRANTS)."
-    items := [String]{}
-    checks := [String]{}
-    workspace := [String]{}
-    program := ""
+    ^items: [String]{}
+    ^checks: [String]{}
+    ^workspace: [String]{}
+    ^program: ""
     loop row in rows {
         shown: row.right.replace("\\\"", "\"")
         items.push("// `{shown}`\n{fmt_block("", "process_grant_{row.name}: fn() -> I64", "    rt_static_text(\"{row.right}\")\n").trim_end()}")
@@ -3292,7 +3292,7 @@ render_process_grants: fn(rows: [ProcessGrant]) -> String Never! {
     checks.push("(process_grant_names_program(right) && rt_text_len(right) > PROCESS_GRANT_PROGRAM_FRAME)")
     items.push("// Whether the native process boundary can enforce `right`.\nprocess_grant_enforceable: fn(right: I64) -> Bool {{\n    {checks.join(" || ")}\n}}")
     items.push("// How many rights `Authority.workspace()` holds, and the one at `index`, in\n// row order.\nPROCESS_GRANT_WORKSPACE_COUNT: I64{{{workspace.len()}}}")
-    choose := ""
+    ^choose: ""
     loop (index, accessor) in workspace {
         if index + 1 < workspace.len() {
             choose = "{choose}{fmt_block("    ", "if (index == I64{{{index}}})", "        return {accessor}\n")}"

@@ -9,9 +9,9 @@ use {
 
 jobs_metadata_function: fn(name: String, internal: Bool) -> Func Never! {
     span: Span{start: 0, end: 0}
-    function := ast_func(name, span, span)
+    ^function: ast_func(name, span, span)
     function.is_job = true
-    metadata := ast_job_metadata()
+    ^metadata: ast_job_metadata()
     metadata.scope = if internal -> .Internal else -> .Ship
     metadata.after = [String]{"pre"}
     metadata.inputs = [String]{"src"}
@@ -45,7 +45,7 @@ jobs_metadata_actual_entry: fn() {
         entry_root_identity: identity,
         entry_path: "{root}/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, None, JetDriverCompileMode.Program)
+    ^request: jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, None, JetDriverCompileMode.Program)
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     projection: jet_driver_checked_projection(request)
     seen: (loop diagnostic in projection.compile.diagnostics -> "{diagnostic.code}: {diagnostic.what}").join("; ")
@@ -75,14 +75,14 @@ jobs_metadata_actual_entry: fn() {
     assert_eq(jet_cli_jobs_metadata_json(empty), empty_line)
     assert_eq(jet_cli_jobs_text(empty), "No jobs declared.\n")
     span: Span{start: 0, end: 0}
-    limits_only := ast_func("limits", span, span)
+    ^limits_only: ast_func("limits", span, span)
     limits_only.is_job = true
-    policy_only := ast_job_metadata()
+    ^policy_only: ast_job_metadata()
     policy_only.limits = [StringMapEntry]{StringMapEntry{key: "a", value: "1"}}
     limits_only.job_metadata = Val(policy_only)
     limited: JobRegistry.from_items([Item]{Item.Func{value: limits_only}})
     assert_eq(jet_cli_job_metadata_detail(limited.jobs()[0]), "(limits a=1)")
-    bare := ast_func("bare", span, span)
+    ^bare: ast_func("bare", span, span)
     bare.is_job = true
     assert_eq(jet_cli_jobs_text(JobRegistry.from_items([Item]{Item.Func{value: bare}})), "bare  [dev]\n")
     jobs_metadata_actual_entry()

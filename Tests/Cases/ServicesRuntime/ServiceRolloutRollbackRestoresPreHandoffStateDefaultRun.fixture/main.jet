@@ -6,9 +6,9 @@ use {
 worker: fn() {}
 
 run: fn() {
-    temp := testing.temp_dir("rollout-rollback")
+    ^temp: testing.temp_dir("rollout-rollback")
     path: Path.from(temp).join("events.log").to_string()
-    tree := service.tree("rollback")
+    ^tree: service.tree("rollback")
     store: service.state_store(path) ?? panic("store")
     tree.set_state_event_log(store, "events", 1, "reversible") ?? panic("state")
     endpoint: tree.worker("api", worker, capacity: 1) ?? panic("worker")

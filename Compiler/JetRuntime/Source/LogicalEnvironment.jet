@@ -11,7 +11,7 @@
 // once is @80 (process default only). The cell uses @56=head and @64=tail.
 // Each owned entry is [next, compact key bytes, key length, compact value
 // bytes, value length].
-logical_env_root := I64{0}
+^logical_env_root: I64{0}
 
 LOGICAL_ENVIRONMENT_BYTES: I64{88}
 
@@ -23,7 +23,7 @@ logical_environment_copy: fn(bytes: I64, length: I64) -> I64 {
 }
 
 logical_environment_find: fn(root: I64, bytes: I64, length: I64) -> I64 {
-    entry := rt_text_word(wrapping(root + I64{56}))
+    ^entry: rt_text_word(wrapping(root + I64{56}))
     loop entry != (I64{0}) {
         if (rt_text_word(wrapping(entry + I64{16})) == length && rt_text_equal_bytes(rt_text_word(wrapping(entry + I64{8})), bytes, length)) {
             return entry
@@ -40,8 +40,8 @@ logical_environment_entry_free: fn(entry: I64) {
 }
 
 logical_environment_remove: fn(root: I64, entry: I64) {
-    previous := I64{0}
-    current := rt_text_word(wrapping(root + I64{56}))
+    ^previous: I64{0}
+    ^current: rt_text_word(wrapping(root + I64{56}))
     loop current != entry {
         previous = current
         current = rt_text_word(current)
@@ -75,7 +75,7 @@ logical_environment_append: fn(root: I64, key: I64, key_length: I64, value: I64,
 
 // Appends every startup pair to `root`, in startup order.
 logical_environment_fill: fn(root: I64) {
-    index := I64{0}
+    ^index: I64{0}
     loop index < host_env_length {
         row: wrapping(host_env_rows + index * I64{24})
         key: rt_text_word(row)
@@ -104,7 +104,7 @@ logical_environment_new: fn() -> I64 {
 
 // Frees a cell from logical_environment_new and every entry in it.
 logical_environment_drop: fn(root: I64) {
-    entry := rt_text_word(wrapping(root + I64{56}))
+    ^entry: rt_text_word(wrapping(root + I64{56}))
     loop entry != (I64{0}) {
         next_entry: rt_text_word(entry)
         logical_environment_entry_free(entry)
@@ -153,8 +153,8 @@ logical_environment_startup_row: fn(bytes: I64, length: I64) -> I64 {
     if (logical_env_root == I64{0} || world_current() != I64{0}) { return I64{-1} }
     host_environment_require()
     if (sync_load(wrapping(logical_env_root + I64{80})) != I64{0}) { return I64{-1} }
-    found := I64{0}
-    index := I64{0}
+    ^found: I64{0}
+    ^index: I64{0}
     loop index < host_env_length {
         row: wrapping(host_env_rows + index * I64{24})
         if (rt_text_word(wrapping(row + I64{8})) == length && rt_text_equal_bytes(rt_text_word(row), bytes, length)) {
@@ -172,7 +172,7 @@ logical_environment_startup_value: fn(row: I64) -> I64 {
 
 // A String of `length` bytes at `bytes` when they are valid UTF-8, else 0.
 logical_environment_text: fn(bytes: I64, length: I64) -> I64 {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         width: rt_text_valid_width(wrapping(bytes + at), length - at, I64{1})
         if (width < I64{0}) { return I64{0} }
@@ -194,7 +194,7 @@ logical_environment_text: fn(bytes: I64, length: I64) -> I64 {
     root: logical_environment_current()
     shared_acquire(root, false)
     entry: logical_environment_find(root, rt_text_data(key), rt_text_len(key))
-    result := I64{0}
+    ^result: I64{0}
     if (entry != I64{0}) {
         result = logical_environment_text(rt_text_word(wrapping(entry + I64{24})), rt_text_word(wrapping(entry + I64{32})))
     }
@@ -220,7 +220,7 @@ logical_environment_text: fn(bytes: I64, length: I64) -> I64 {
     root: logical_environment_current()
     shared_acquire(root, false)
     entry: logical_environment_find(root, rt_text_data(key), rt_text_len(key))
-    present := I64{0}
+    ^present: I64{0}
     if (entry != I64{0}) {
         length: rt_text_word(wrapping(entry + I64{32}))
         rt_text_store(data_out, logical_environment_copy(rt_text_word(wrapping(entry + I64{24})), length))
@@ -234,7 +234,7 @@ logical_environment_text: fn(bytes: I64, length: I64) -> I64 {
 logical_environment_valid_name: fn(name: I64) -> Bool {
     length: rt_text_len(name)
     if (length == I64{0}) { return false }
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(rt_text_data(name) + at))
         if (byte == I64{0} || byte == I64{61}) { return false }
@@ -246,7 +246,7 @@ logical_environment_valid_name: fn(name: I64) -> Bool {
 // Status: 0 success, -1 InvalidName, -2 InvalidValue; no OS environment write.
 #Export(c) jet_rt_logical_env_set: fn(key: I64, value: I64) -> I64 {
     if !(logical_environment_valid_name(key)) -> return I64{-1}
-    at := I64{0}
+    ^at: I64{0}
     loop at < rt_text_len(value) {
         if (rt_text_byte(wrapping(rt_text_data(value) + at)) == I64{0}) { return I64{-2} }
         at = wrapping(at + I64{1})
@@ -264,7 +264,7 @@ logical_environment_valid_name: fn(name: I64) -> Bool {
     root: logical_environment_current()
     shared_acquire(root, true)
     entry: logical_environment_find(root, rt_text_data(key), rt_text_len(key))
-    removed := I64{0}
+    ^removed: I64{0}
     if (entry != I64{0}) {
         logical_environment_remove(root, entry)
         removed = I64{1}

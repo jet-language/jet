@@ -20,13 +20,13 @@ state_name: fn(delivery: ^^Delivery) -> String {
 }
 
 run: fn() {
-    temp := testing.temp_dir("durable-lifecycle-matrix")
+    ^temp: testing.temp_dir("durable-lifecycle-matrix")
     delivery_path: Path.from(temp).join("state.log.delivery").to_string()
     state_path: Path.from(temp).join("state.log").to_string()
     retention: Duration.seconds(3600) ?? panic("retention")
-    runtime := service.runtime(delivery_path, retention: retention)
+    ^runtime: service.runtime(delivery_path, retention: retention)
 
-    tree := service.tree("lifecycle-matrix")
+    ^tree: service.tree("lifecycle-matrix")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state: service.state_store(state_path) ?? panic("state store")
     tree.set_state_event_log(state, "lifecycle-events", 1, "reversible") ?? panic("state")
@@ -56,7 +56,7 @@ run: fn() {
     retained_receipt: (retained.copy()).receipt() ?? panic("retained receipt")
     retained_text: "{retained_receipt}"
     retained_events: (retained.copy()).events() ?? panic("retained events")
-    retention_kept := retained_text.contains("retention_until=-1") == false
+    ^retention_kept: retained_text.contains("retention_until=-1") == false
     retained_state: state_name(retained)
     print("retention:{retention_kept}:{retained_events.len()}:{retained_state}")
 
@@ -67,7 +67,7 @@ run: fn() {
     retry_receipt: (retry.copy()).receipt() ?? panic("retry receipt")
     retry_text: "{retry_receipt}"
     retry_events: (retry.copy()).events() ?? panic("retry events")
-    retried := retry_text.contains("attempts=1")
+    ^retried: retry_text.contains("attempts=1")
     retry_state: state_name(retry.copy())
     print("retry_state:{retry_state}:{retried}:{retry_events.len()}")
     retry_second: tree.receive(endpoint) ?? panic("retry second")
@@ -87,7 +87,7 @@ run: fn() {
     dead_state: state_name(dead)
     print("dead:{dead_state}")
 
-    short_runtime := service.runtime(delivery_path, retention: Duration.milliseconds(1) ?? panic("short retention"))
+    ^short_runtime: service.runtime(delivery_path, retention: Duration.milliseconds(1) ?? panic("short retention"))
     expiring: short_runtime.send(endpoint, "expire", key: "expire") ?? panic("expire source")
     time.sleep(Duration.milliseconds(10) ?? panic("sleep"))
     expiry_events: (expiring.copy()).events() ?? panic("expiry events")
@@ -116,7 +116,7 @@ run: fn() {
     recovered_state_done: state_name(recovered_copy)
     print("partition_done:{recovered_state_done}:{recovered_events.len()}")
 
-    foreign := service.tree("foreign")
+    ^foreign: service.tree("foreign")
     foreign_endpoint: foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")
     foreign.start() ?? panic("foreign start")
     if tree.send_durable(foreign_endpoint, "revoked", key: "revoked") == {

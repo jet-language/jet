@@ -162,7 +162,7 @@ sema_link_check_creation: fn(call: Call, expected: Type?, check: ^SemaBodyCheck)
         }
         // Record a read access on the owner place so conflicting writes/growth
         // trigger the existing static exclusivity checks (E0204/E0212).
-        _ := sema_ownership_check_use(check.state, operand, check.scopes, check.diagnostics)
+        ^_: sema_ownership_check_use(check.state, operand, check.scopes, check.diagnostics)
         if plan.lifetime == SemaLinkLifetime.Brief {
             borrowed: sema_tree_node(link_ty, TExprKind.Borrow{place: checked, access: AccessConvention.Read}, span)
             return sema_expr_expected(borrowed, expected, check.environment.*, check.program.*, check.diagnostics)
@@ -197,7 +197,7 @@ sema_link_check_same: fn(receiver_value: TExpr, inner_ty: Type, args: [CallArg],
 
 #Test("live link classification enforces lifetime, task-crossing sharing, local pin, and container item rules") {
     span: Span{start: 0, end: 1}
-    diags := [Diagnostic]{}
+    ^diags: [Diagnostic]{}
     brief: sema_link_classify(true, false, false, None, true, span, diags)
     assert(brief.lifetime == SemaLinkLifetime.Brief)
     assert(brief.sharing == SemaLinkSharing.Local)
@@ -227,14 +227,14 @@ sema_link_check_same: fn(receiver_value: TExpr, inner_ty: Type, args: [CallArg],
     idx_fn.body[0] == .Val(idx_bind) ?? panic("expected binding")
     idx_bind.init == .Call(link_call, _) ?? panic("expected link call")
     idx_expr: link_call.args[0].expr
-    item_diags := [Diagnostic]{}
+    ^item_diags: [Diagnostic]{}
     assert(sema_link_check_container_item(idx_expr, Type.List{element: Type.Named{name: "Node"}}, false, span, item_diags))
     assert(item_diags.is_empty())
     assert(!sema_link_check_container_item(idx_expr, Type.List{element: Type.Named{name: "Node"}}, true, span, item_diags))
     assert_eq(item_diags.len(), 1)
     assert_eq(item_diags[0].code, "E0212")
     assert(item_diags[0].fix.contains("[@Node]"))
-    ok_diags := [Diagnostic]{}
+    ^ok_diags: [Diagnostic]{}
     assert(sema_link_check_container_item(idx_expr, Type.List{element: foundation_link_type(Type.Named{name: "Node"})}, true, span, ok_diags))
     assert(ok_diags.is_empty())
 }
@@ -296,7 +296,7 @@ bad_write_method: fn(p: @Player) {
         panic("parse bad failed: {parsed_bad.diagnostics[0].code}: {parsed_bad.diagnostics[0].what}")
     }
     checked_bad: check_program(parsed_bad.program, "test", "test.jet", [SemaSourceSegment]{})
-    e0205 := 0
+    ^e0205: 0
     loop diag in checked_bad.diagnostics {
         if diag.code == "E0205" -> e0205 += 1
     }

@@ -51,7 +51,7 @@ pkg_r_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, E
     pkg_binder_write(worker_file, worker_source, "could not write R worker")
     worker: pkg_binder_canonicalize(worker_file, "could not resolve the R worker")
     abi: "jet_r_{lib}"
-    wrappers := [String]{}
+    ^wrappers: [String]{}
     loop name in functions {
         wrappers.push(pkg_worker_invoke_wrapper(abi, name, "invoke", name))
         wrappers.push(pkg_worker_invoke_wrapper(abi, "{name}_table", "invoke", "__jet_table__{name}"))
@@ -60,7 +60,7 @@ pkg_r_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, E
     bridge: pkg_worker_render_supervisor_c_with_temp(abi, rscript, worker, script, wrappers.join(""), "\"--vanilla\",worker_path,script_path", Val(PKG_R_PLOT_TEMP_PREFIX))
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write R process bridge")
     digest: pkg_binder_identity_digest([String]{"jet-r-bind-v1", source, script, rscript, worker_source})
-    provenance := "schema=jet-r-bind-v1\nsha256={digest}\nrscript={rscript}\nscript={script}\nworker={worker}\nworkers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"
+    ^provenance: "schema=jet-r-bind-v1\nsha256={digest}\nrscript={rscript}\nscript={script}\nworker={worker}\nworkers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"
     pkg_binder_append_artifact_boundary(provenance, language, "R", lib, script, archive, "Rscript={rscript};{pkg_binder_cc_ar_identity()}")
     result: ForeignBindResult{source: pkg_r_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
@@ -71,7 +71,7 @@ pkg_r_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, E
 // with a generated `_table` or `_plot` binding.
 pkg_r_parse_function_names: fn(bytes: [U8]) -> [String] ForeignBindError! {
     text: String.from_bytes(bytes) ?? return Err(ForeignBindError.Source("R returned non-UTF-8 function metadata"))
-    out := [String]{}
+    ^out: [String]{}
     loop line in pkg_binder_lines(text) {
         if line.starts_with("E\tARG\t") {
             return Err(ForeignBindError.Source("R function `{line.removeprefix("E\tARG\t")}` must take one required positional argument"))
@@ -110,14 +110,14 @@ pkg_r_parse_function_names: fn(bytes: [U8]) -> [String] ForeignBindError! {
 }
 
 pkg_r_render_worker: fn(functions: [String]) -> String Never! {
-    allowed := [String]{}
+    ^allowed: [String]{}
     loop name in functions -> allowed.push("  {name} = TRUE")
     pkg_binder_fill_template(PKG_R_WORKER, [String:String]{"allowed": allowed.join(",\n"), "svg_runtime": PKG_R_SVG_RUNTIME})
 }
 
 pkg_r_render_jet: fn(lib: String, functions: [String]) -> String Never! {
     abi: "jet_r_{lib}"
-    out := [String]{"#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    cancel: fn(handle: Int) = \"{abi}_cancel\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
+    ^out: [String]{"#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    cancel: fn(handle: Int) = \"{abi}_cancel\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
     loop name in functions {
         out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
         out.push("    {name}_table: fn(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_table\"\n")

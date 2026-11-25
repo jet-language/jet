@@ -22,7 +22,7 @@ Task: struct {
 
 show: fn(tasks: db.Table<Int, Task>) -[DB.Read]> String {
     rows: (tasks.query() ?? return "unreadable").collect() ?? return "uncollected"
-    out := [String]{}
+    ^out: [String]{}
     loop task in rows {
         mark: if task.done -> " (done)" else -> ""
         out.push("{task.id}:{task.title}{mark}")

@@ -82,7 +82,7 @@ timer_start: fn(kind: I64, delay: I64, value: I64, meta: I64, worker: I64) -> I6
         scheduler_start_failed()
         return channel
     }
-    _ := thread_detach(handle)
+    ^_: thread_detach(handle)
     channel
 }
 
@@ -111,7 +111,7 @@ timer_worker_leave: fn(job: I64, save: I64) {
     delay: sync_load(wrapping(job + I64{8}))
     meta: timer_meta()
     slot: jet_rt_alloc(I64{8}, I64{8})
-    tick := I64{1}
+    ^tick: I64{1}
     loop {
         jet_scheduler_sleep_ms(delay)
         sync_store(slot, jet_int_owned_from_i64(tick))

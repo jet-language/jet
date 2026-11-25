@@ -16,7 +16,7 @@ use {
 run: fn() {
     port: sys.get("KEEP_ALIVE_PORT") ?? panic("missing KEEP_ALIVE_PORT")
     deadline: time.instant() + 120s
-    connected := net.TCPStream?{None}
+    ^connected: net.TCPStream?{None}
     loop {
         if net.tcp_connect("127.0.0.1:{port}") == {
             .Ok(stream) -> {
@@ -29,14 +29,14 @@ run: fn() {
             }
         }
     }
-    stream := connected ?? panic("connected stream")
+    ^stream: connected ?? panic("connected stream")
     crlf: "\r\n"
     request: "GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: keep-alive{crlf}{crlf}"
     stream.write_bytes(request.bytes()) ?? panic("request write")
     // A server that kept the connection open would leave this read waiting
     // until its 5 s deadline.
-    bytes := [U8]{}
-    closed := false
+    ^bytes: [U8]{}
+    ^closed: false
     loop {
         if stream.read_bytes(8192, deadline: time.duration_ms(5000)) == {
             .Ok(part) -> {
@@ -50,7 +50,7 @@ run: fn() {
         }
     }
     response: String.from_bytes(bytes) ?? panic("response UTF-8")
-    status_line := true
+    ^status_line: true
     loop line in response.split(crlf) {
         if status_line {
             print(line)

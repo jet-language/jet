@@ -1,5 +1,5 @@
 tail_mut: fn(window: ViewMut<U8>, start: Int) -> ViewMut<U8> from window {
-    tail: ^window[start..<window.len()]
+    tail: window[start..<window.len()].in_place()
     tail
 }
 
@@ -8,10 +8,10 @@ fill: fn(window: ViewMut<U8>) {
 }
 
 run: fn() {
-    data := [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
+    ^data: [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
     start: 1
     end: data.len()
-    edit: ^data[start..<end]
+    edit: data[start..<end].in_place()
     rest: tail_mut(edit, 1)
     inner: tail_mut(rest, 1)
     fill(inner)

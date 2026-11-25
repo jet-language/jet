@@ -13,7 +13,7 @@ jet_cli_data_bind_usage: fn(format: String) -> String Never! {
 
 jet_cli_data_bind_argument_error: fn(format: String, code: String, what: String, color: Bool) -> JetCLIPlan Never! {
     shared: jet_cli_diagnostic_copy(code)
-    output := jet_cli_report_output("", code, what, shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
+    ^output: jet_cli_report_output("", code, what, shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
     output.stderr = "{output.stderr}{jet_cli_data_bind_usage(format)}"
     JetCLIPlan.Done{output: output}
 }
@@ -56,9 +56,9 @@ jet_cli_data_bind_prepare: fn(format: String, args: [String], color: Bool) -[FS]
         return JetCLIDataBindPreparation.Done{plan: jet_cli_done("", jet_cli_data_bind_usage(format), JET_DRIVER_EXIT_OK)}
     }
     input_path: args[0]
-    root_type := String?{None}
-    output := String?{None}
-    index := 1
+    ^root_type: String?{None}
+    ^output: String?{None}
+    ^index: 1
     loop index < args.len() {
         argument: args[index]
         if {
@@ -91,13 +91,13 @@ jet_cli_data_bind_finish: fn(job: JetCLIDataBindJob, selected_root: String) -[FS
     output: job.output
     root_type: job.root_type
     color: job.color
-    output_path := output ?? ""
+    ^output_path: output ?? ""
     if output == .None {
         stem: binding_files.stem(input_path.replace("\\", "/"))
         safe: foundation_generated_snake_name(stem, "schema")
         output_path = jet_cli_entry_join(selected_root, ".jet/bindings/{safe}.jet")
     }
-    command := [String]{"jet", "inspect", "bind", format, input_path}
+    ^command: [String]{"jet", "inspect", "bind", format, input_path}
     if root_type == .Val(name) {
         command.push("--type")
         command.push(name.copy())

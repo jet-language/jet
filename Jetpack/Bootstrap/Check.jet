@@ -129,8 +129,8 @@ Options: struct {
 }
 
 parse_options: fn(args: [String]) -> Options {
-    options := Options{areas: "", own: "", closure: false, each: false, deps_from_head: false, syntax: false, hosted: false}
-    at := 0
+    ^options: Options{areas: "", own: "", closure: false, each: false, deps_from_head: false, syntax: false, hosted: false}
+    ^at: 0
     loop at < args.len() {
         word: args[at]
         if {
@@ -214,7 +214,7 @@ prove: fn(repo: String, state: String, jet: String, options: Options) -> Int {
 
     if options.deps_from_head && options.own == "" -> fail(64, "--deps-from-head needs --area")
     scratch: "{state}/{worker_name}-{root_tag(absolute_root, areas, options.own, if options.deps_from_head -> "1" else -> "0")}"
-    child := Child{names: [String]{}, values: [String]{}, unset: [String]{}}
+    ^child: Child{names: [String]{}, values: [String]{}, unset: [String]{}}
     set(child, "JETPACK_BOOTSTRAP_SOURCE_ROOT", absolute_root)
     set(child, "JETPACK_BOOTSTRAP_SCRATCH", scratch)
     set(child, "JETPACK_WORKER", worker_name)
@@ -269,7 +269,7 @@ area_closure: fn(repo: String, state: String, source: String, jet: String, area:
 }
 
 receipt_head: fn(proof: Proof, worker: String, areas: String, options: Options, source_root: String) -> String {
-    selection := ""
+    ^selection: ""
     if {
         options.own != "" -> {
             selection = " --area {options.own}{if options.deps_from_head -> " --deps-from-head" else -> ""}"
@@ -279,7 +279,7 @@ receipt_head: fn(proof: Proof, worker: String, areas: String, options: Options, 
     }
     head_text: git_head(source_root)
     modified: files.stat(proof.jet) ?? fail(1, "cannot stat {proof.jet}: {err}")
-    lines := [String]{}
+    ^lines: [String]{}
     lines.push("entry-command: JETPACK_WORKER={worker} JET={proof.jet} {proof.jet} {SELF}{if options.hosted -> " --hosted" else -> ""}{selection}")
     lines.push("worker: {worker}")
     lines.push("areas: {if areas == "" -> "all" else -> areas}")
@@ -309,7 +309,7 @@ unit_record: fn(proof: Proof, mode: String) {
 
 // `argv` with the proof's environment, in `cwd`.
 child_spec: fn(child: Child, argv: [String], cwd: String) -> ProcessSpec {
-    spec := process.cmd(argv).cwd(cwd).output_limit(OUTPUT_LIMIT)
+    ^spec: process.cmd(argv).cwd(cwd).output_limit(OUTPUT_LIMIT)
     loop at in 0..<child.names.len() -> spec = spec.env(child.names[at], child.values[at])
     loop name in child.unset -> spec = spec.env_remove(name)
     spec
@@ -317,7 +317,7 @@ child_spec: fn(child: Child, argv: [String], cwd: String) -> ProcessSpec {
 
 // Assemble.jet with `words`, in the proof's scratch directory (never the checkout).
 assembler: fn(proof: Proof, words: [String]) -> ProcessSpec {
-    argv := [String]{proof.jet, "{proof.repo}/{ASSEMBLER}"}
+    ^argv: [String]{proof.jet, "{proof.repo}/{ASSEMBLER}"}
     argv.extend(words.copy())  // copy: the words are the caller's
     child_spec(proof.child, argv, proof.scratch)
 }
@@ -373,8 +373,8 @@ prove_syntax: fn(proof: Proof) -> Int {
     parse_json: "{proof.scratch}/syntax.parse.json"
     parse_err: "{proof.scratch}/syntax.parse.err"
     log: "{proof.scratch}/syntax.log"
-    probe := ""
-    probe_status := 0
+    ^probe: ""
+    ^probe_status: 0
     results: process.run_all([ProcessSpec]{child_spec(proof.child, argv, "{proof.scratch}/check/project").memory_scope(3 * GIB)}, 1) ?? fail(1, "the parser could not run: {err}")
     if results[0] == {
         .Ok(ran) -> {
@@ -402,7 +402,7 @@ prove_syntax: fn(proof: Proof) -> Int {
 prove_check: fn(proof: Proof, state: String) -> Int {
     memory: process.env_get("JETPACK_CHECK_MEM") ?? "6G"
     secs: int_or(process.env_get("JETPACK_CHECK_SECS") ?? "", 1200)
-    held := check_slot(state)
+    ^held: check_slot(state)
     status: bounded(proof, "check", memory, secs, "{proof.scratch}/check/project", [String]{proof.jet, "check", "--keep-going", "src/jetpack.jet"})
     held.clear()
     // Per-file error summary mapped back to source paths (advisory type check).
@@ -424,7 +424,7 @@ prove_check: fn(proof: Proof, state: String) -> Int {
 // taken, wait on the shared wait lock, then look again.
 check_slot: fn(state: String) -> [FileLock] {
     slots: int_or(process.env_get("JETPACK_CHECK_SLOTS") ?? "", 2)
-    held := [FileLock]{}
+    ^held: [FileLock]{}
     loop held.len() == 0 {
         loop slot in 1..<slots + 1 {
             lock: files.try_lock("{state}/slots/check-{slot}") ?? next
@@ -432,7 +432,7 @@ check_slot: fn(state: String) -> [FileLock] {
             break
         }
         if held.len() > 0 -> break
-        waiting := [FileLock]{}
+        ^waiting: [FileLock]{}
         waiting.push(files.lock("{state}/slots/check-wait") ?? fail(1, "cannot lock {state}/slots/check-wait: {err}"))
         time.sleep(5s)
         waiting.clear()
@@ -452,7 +452,7 @@ mem_available_mb: fn() -> Int {
 
 wait_for_memory: fn() {
     floor: int_or(process.env_get("JETPACK_MIN_FREE_MB") ?? "", 16000)
-    waited := 0
+    ^waited: 0
     loop mem_available_mb() < floor {
         if waited >= 600 {
             fail(75, "MemAvailable stayed below {floor} MiB for 10 minutes; refusing to start")
@@ -474,14 +474,14 @@ bounded: fn(proof: Proof, label: String, memory: String, secs: Int, workdir: Str
         fail(64, "{label}: memory cap {memory} is not a size like 6G, 512M or a byte count")
     }
     wait_for_memory()
-    quoted := [String]{}
+    ^quoted: [String]{}
     loop word in argv -> quoted.push(shell_quote(word))
     note(proof, "{label}-command: {quoted.join(" ")}\n")
     spec: child_spec(proof.child, argv, workdir).timeout(time.duration_seconds(secs)).memory_scope(cap)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? fail(1, "{label} could not run: {err}")
-    status := 127
-    peak := ""
-    text := ""
+    ^status: 127
+    ^peak: ""
+    ^text: ""
     if results[0] == {
         .Ok(ran) -> {
             status = status_of(ran)
@@ -543,19 +543,19 @@ each_area: fn(repo: String, state: String, jet: String) -> Int {
         term.eprint(held.errors.removesuffix("\n"))
         return status_of(held)
     }
-    areas := [String]{}
+    ^areas: [String]{}
     loop line in listed.output.split("\n") {
         if line.trim() != "" -> areas.push(line.trim())
     }
-    specs := [ProcessSpec]{}
+    ^specs: [ProcessSpec]{}
     loop area in areas {
         specs.push(process.cmd([String]{jet, "{repo}/{SELF}", "--area", area}).cwd(state).env("JETPACK_WORKER", "{base}-each-{area}").env("JETPACK_BOOTSTRAP_SOURCE_ROOT", source).output_limit(OUTPUT_LIMIT))
     }
     results: process.run_all(specs, if parallel < 1 -> 1 else -> parallel) ?? fail(1, "the areas could not run: {err}")
-    rows := [String]{}
+    ^rows: [String]{}
     loop at in 0..<areas.len() {
         log: "{state}/{base}-each-{areas[at]}.log"
-        status := 0
+        ^status: 0
         if results[at] == {
             .Ok(ran) -> {
                 status = status_of(ran)
@@ -571,7 +571,7 @@ each_area: fn(repo: String, state: String, jet: String) -> Int {
     ordered: sorted(rows)
     summary: "{state}/{base}-each.summary"
     files.write(summary, if ordered.len() == 0 -> "" else -> "{ordered.join("\n")}\n") ?? fail(1, "cannot write {summary}: {err}")
-    failed := 0
+    ^failed: 0
     loop row in ordered {
         split: row.rpartition(" ")
         verdict: if split.tail == "0" -> "OK" else -> "FAILED exit {split.tail}"
@@ -630,7 +630,7 @@ locate_syntax_file: fn(map_path: String, probe: String, known_path: String) -> S
 // JSON with the safe limits but no byte ceiling: the unit's map and the
 // parser's output for the whole unit run past the safe 16 MiB.
 parse_whole: fn(text: String) -> Dyn EncodingError! {
-    limits := EncodingLimits.safe()
+    ^limits: EncodingLimits.safe()
     limits.max_item_bytes = if text.count_bytes() > 0 -> text.count_bytes() else -> 1
     json.parse_with_limits(text, limits)
 }
@@ -644,7 +644,7 @@ locate_check: fn(map: Dyn, log: String) -> String {
     head: regex.compile("^Error: ([^: ]+): (.*)$") ?? panic("error pattern: {err}")
     arrow: regex.compile("-->\\s+(\\S+?):(\\d+):(\\d+)") ?? panic("location pattern: {err}")
     lines: log.split("\n").to_list()
-    found := [Located]{}
+    ^found: [Located]{}
     loop index in 0..<lines.len() {
         error: head.match(lines[index]) ?? next
         stop: if index + 4 < lines.len() -> index + 4 else -> lines.len()
@@ -666,8 +666,8 @@ locate_check: fn(map: Dyn, log: String) -> String {
 // defect blocks (`known`) are listed apart, not counted.
 locate_syntax: fn(map: Dyn, parsed: Dyn, known: [String:String]) -> String {
     segments: source_segments(map)
-    found := [Located]{}
-    hits := [String]{}
+    ^found: [Located]{}
+    ^hits: [String]{}
     diagnostics: field(field(field(parsed, "compiler"), "value"), "diagnostics")
     if diagnostics == .Array(rows) {
         loop row in rows {
@@ -690,12 +690,12 @@ locate_syntax: fn(map: Dyn, parsed: Dyn, known: [String:String]) -> String {
 // `path:line:col: CODE message` per error, the per-file counts (most first,
 // ties in first-seen order), the known defects, then `total errors: N`.
 render: fn(found: [Located], hits: [String]) -> String {
-    out := [String]{}
-    paths := [String]{}
-    counts := [Int]{}
+    ^out: [String]{}
+    ^paths: [String]{}
+    ^counts: [Int]{}
     loop error in found {
         out.push("{error.place.path}:{error.place.line}:{error.place.column}: {error.code} {error.message}")
-        seen := false
+        ^seen: false
         loop at in 0..<paths.len() {
             if paths[at] == error.place.path {
                 counts[at] = counts[at] + 1
@@ -711,10 +711,10 @@ render: fn(found: [Located], hits: [String]) -> String {
     if paths.len() > 0 {
         out.push("errors per file:")
         // A stable selection: the first-seen file of the highest remaining count.
-        taken := [Bool]{}
+        ^taken: [Bool]{}
         loop _ in paths -> taken.push(false)
         loop _ in paths {
-            best := -1
+            ^best: -1
             loop at in 0..<paths.len() {
                 if !taken[at] && (best < 0 || counts[at] > counts[best]) -> best = at
             }
@@ -732,7 +732,7 @@ render: fn(found: [Located], hits: [String]) -> String {
 // known-syntax-defects.list: `path:line  #card ...` per blocked line.
 known_defects: fn(text: String) -> [String:String] {
     entry: regex.compile("^(\\S+:\\d+)\\s+(#\\d+)") ?? panic("defect pattern: {err}")
-    known := [String:String]{}
+    ^known: [String:String]{}
     loop raw in text.split("\n") {
         found: entry.match(raw.trim()) ?? next
         known[found.group(1) ?? ""] = found.group(2) ?? ""
@@ -754,7 +754,7 @@ from_byte: fn(segments: [Segment], byte: Int) -> Place? {
     loop segment in segments {
         if byte < segment.start || byte >= segment.end || segment.line_starts.len() == 0 -> next
         local: byte - segment.start
-        line := 0
+        ^line: 0
         loop line + 1 < segment.line_starts.len() && segment.line_starts[line + 1] <= local {
             line += 1
         }
@@ -764,7 +764,7 @@ from_byte: fn(segments: [Segment], byte: Int) -> Place? {
 }
 
 file_spans: fn(map: Dyn) -> [FileSpan] {
-    out := [FileSpan]{}
+    ^out: [FileSpan]{}
     if field(map, "files") == .Array(items) {
         loop item in items {
             path: if field(item, "path") == .Text(text) -> text.copy() else -> ""  // copy: the map is dropped
@@ -775,12 +775,12 @@ file_spans: fn(map: Dyn) -> [FileSpan] {
 }
 
 source_segments: fn(map: Dyn) -> [Segment] {
-    out := [Segment]{}
+    ^out: [Segment]{}
     if field(map, "source_segments") == .Array(items) {
         loop item in items {
             path: if field(item, "source_file") == .Text(text) -> text.copy() else -> ""  // copy: the map is dropped
             generated: field(item, "generated")
-            starts := [Int]{}
+            ^starts: [Int]{}
             if field(item, "line_starts") == .Array(values) {
                 loop value in values -> starts.push(dyn_int(value) ?? 0)
             }
@@ -810,7 +810,7 @@ dyn_int: fn(value: Dyn) -> Int? {
 // The `errors per file:` line and the 200 lines after it.
 errors_section: fn(text: String) -> [String] {
     lines: text.removesuffix("\n").split("\n").to_list()
-    start := -1
+    ^start: -1
     loop at in 0..<lines.len() {
         if lines[at] == "errors per file:" {
             start = at
@@ -827,7 +827,7 @@ errors_section: fn(text: String) -> [String] {
 // (`*`: all), the proved area and the HEAD-deps flag (`1` or `0`),
 // NUL-separated.
 root_tag: fn(source_root: String, areas: String, own: String, head_flag: String) -> String {
-    input := [U8]{}
+    ^input: [U8]{}
     input.extend(source_root.bytes())
     input.push(U8{0})
     input.extend((if areas == "" -> "*" else -> areas).bytes())
@@ -840,7 +840,7 @@ root_tag: fn(source_root: String, areas: String, own: String, head_flag: String)
 
 // `text` split at commas, each part trimmed, empty parts dropped, sorted.
 sorted_areas: fn(text: String) -> String {
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in text.split(",") {
         name: part.trim()
         if name != "" -> parts.push(name)
@@ -849,13 +849,13 @@ sorted_areas: fn(text: String) -> String {
 }
 
 sorted: fn(items: [String]) -> [String] {
-    out := items.copy()
+    ^out: items.copy()
     out.sort_by(fn(left: String, right: String) { compare_bytes(left.bytes(), right.bytes()) })
     out
 }
 
 compare_bytes: fn(left: [U8], right: [U8]) -> Ordering {
-    at := 0
+    ^at: 0
     loop at < left.len() && at < right.len() {
         if left[at] != right[at] {
             return if left[at] < right[at] -> Ordering.Less else -> Ordering.Greater
@@ -872,7 +872,7 @@ compare_bytes: fn(left: [U8], right: [U8]) -> Ordering {
 // One shell word for the receipt: bare when every byte is safe, else quoted.
 shell_quote: fn(word: String) -> String {
     if word == "" -> return "''"
-    safe := true
+    ^safe: true
     loop b in word.bytes() {
         code: Int{b}
         letter: (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57)
@@ -894,7 +894,7 @@ plain_name: fn(name: String) -> Bool {
 
 int_or: fn(text: String, fallback: Int) -> Int {
     if text == "" -> return fallback
-    value := 0
+    ^value: 0
     loop b in text.bytes() {
         code: Int{b}
         if code < 48 || code > 57 -> return fallback
@@ -904,13 +904,13 @@ int_or: fn(text: String, fallback: Int) -> Int {
 }
 
 pad_left: fn(text: String, width: Int) -> String {
-    out := ""
+    ^out: ""
     loop _ in text.len()..<width -> out = "{out} "
     "{out}{text}"
 }
 
 pad_right: fn(text: String, width: Int) -> String {
-    out := text.copy()
+    ^out: text.copy()
     loop _ in text.len()..<width -> out = "{out} "
     out
 }
@@ -918,11 +918,11 @@ pad_right: fn(text: String, width: Int) -> String {
 // `path` against `base`: an absolute `path` stands alone; `.` and `..` resolve.
 resolve_path: fn(base: String, path: String) -> String {
     whole: if path.starts_with("/") -> path else -> "{base}/{path}"
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in whole.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
-            if parts.len() > 0 -> _ := parts.pop()
+            if parts.len() > 0 -> ^_: parts.pop()
             next
         }
         parts.push(part.copy())  // copy: the path text is dropped

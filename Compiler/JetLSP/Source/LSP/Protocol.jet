@@ -104,7 +104,7 @@ lsp_error_response: fn(id: Dyn, code: Int, message: String) -> String Never! {
 // The server's log is standard error; standard output carries only protocol
 // messages.
 lsp_write_log: fn(message: String) -[IO, Time.Wait]> IOError! {
-    stderr := lsp_protocol_term.stderr()
+    ^stderr: lsp_protocol_term.stderr()
     stderr.write_line("[jet-lsp] {message}") ?? return Err(err)
     stderr.flush() ?? return Err(err)
 }

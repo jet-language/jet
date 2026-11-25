@@ -12,7 +12,7 @@ point_key: fn(p: Point, seen: ^String) -> Int Err! {
 }
 
 names: fn(points: [Point]) -> String Never! {
-    out := ""
+    ^out: ""
     loop p in points -> out += p.name
     out
 }
@@ -20,17 +20,17 @@ names: fn(points: [Point]) -> String Never! {
 unit: fn() {}
 
 run: fn() {
-    points := [Point{x: 3, name: "c"}, Point{x: 1, name: "a"}, Point{x: 2, name: "b"}]
-    seen := ""
+    ^points: [Point{x: 3, name: "c"}, Point{x: 1, name: "a"}, Point{x: 2, name: "b"}]
+    ^seen: ""
     points.sort_by(fn(p: Point) { point_key(p, seen) }) ?? {
         print("unexpected {err.code}")
         unit()
     }
     print("{names(points)} after {seen}")
 
-    stopped := [Point{x: 5, name: "e"}, Point{x: -1, name: "z"}, Point{x: 4, name: "d"}]
-    tried := ""
-    recovered := false
+    ^stopped: [Point{x: 5, name: "e"}, Point{x: -1, name: "z"}, Point{x: 4, name: "d"}]
+    ^tried: ""
+    ^recovered: false
     stopped.sort_by(fn(p: Point) { point_key(p, tried) }) ?? {
         print("{err.code}:{err.message}")
         recovered = true

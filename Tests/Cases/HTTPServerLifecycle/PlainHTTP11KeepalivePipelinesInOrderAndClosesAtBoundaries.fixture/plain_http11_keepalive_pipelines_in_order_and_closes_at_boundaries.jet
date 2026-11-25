@@ -17,10 +17,10 @@ use {
 s6_pipeline_crlf: fn() -> String { "\r\n" }
 
 s6_pipeline_exchange: fn(addr: String, request: String) -> String {
-    stream := net.tcp_connect(addr) ?? panic("connect")
+    ^stream: net.tcp_connect(addr) ?? panic("connect")
     stream.write_bytes(request.bytes()) ?? panic("request write")
     net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request write")
-    parts := [String]{}
+    ^parts: [String]{}
     loop {
         part: stream.read(8192) ?? panic("response read")
         if part == "" -> break
@@ -75,7 +75,7 @@ s6_pipeline_exchange: fn(addr: String, request: String) -> String {
 s6_response: fn(addr: String, request: String) -> TCPStream {
     stream: net.tcp_connect(addr) ?? panic("connect")
     stream.write_bytes(request.bytes()) ?? panic("request write")
-    response := ""
+    ^response: ""
     loop {
         part: stream.read(8192) ?? panic("response read")
         if part == "" -> break
@@ -88,7 +88,7 @@ s6_response: fn(addr: String, request: String) -> TCPStream {
 // Writes `chunk` until a write fails: the bytes written before then.
 s6_send_until_cut: fn(stream: TCPStream, chunk: [U8], pause: Duration) -> Int {
     clock: time.start()
-    sent := 0
+    ^sent: 0
     loop {
         failed: if stream.write_bytes(chunk) == {
             .Ok(_) -> false
@@ -123,7 +123,7 @@ s6_send_until_cut: fn(stream: TCPStream, chunk: [U8], pause: Duration) -> Int {
     // As fast as it can: the byte bound cuts it long before the time bound
     // would, so far less than a second of loopback writes gets through.
     fast: s6_response(addr, request)
-    chunk := [U8]{}
+    ^chunk: [U8]{}
     loop _ in 0..<65536 -> chunk.push(120)
     sent: s6_send_until_cut(fast, chunk, 0ms)
     assert(sent < 64 * 1024 * 1024, "the server read {sent} bytes past its byte bound")

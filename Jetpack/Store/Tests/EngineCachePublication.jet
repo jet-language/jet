@@ -40,7 +40,7 @@ engine_cache_clear_negative: fn(mirror: String) {
     roots: HangarRoots{root: root, dev_mode: false}
     files.write(files.join(source, "payload"), "cache bytes\n") ?? panic("payload")
     if sys.is_unix() -> files.symlink("payload", files.join(source, "alias")) ?? panic("alias")
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     entry: engine_cache_ingest(verification, roots, "cache-demo", "./cache-demo", source, engine_cache_identity("cache"), [String]{}, "cache test")
     store_bind_cache(roots, "public", [String]{blocked, mirror}, None, None, true) ?? panic("cache binding")
     published: store_publish_cache_entry(verification, roots, entry.id, "public") ?? panic("publish")
@@ -90,9 +90,9 @@ engine_cache_clear_negative: fn(mirror: String) {
     files.remove(info) ?? panic("remove info")
     nar_partial: files.join(mirror, "nar/{entry.envelope.output_hash}.partial")
     info_partial: files.join(mirror, "{entry.envelope.output_hash}-{entry.id}.partial")
-    nar_cut := 1
+    ^nar_cut: 1
     if nar_bytes.len() > 2 -> nar_cut = nar_bytes.len() /% 2
-    info_cut := 1
+    ^info_cut: 1
     if info_bytes.len() > 2 -> info_cut = info_bytes.len() /% 2
     files.write_bytes(nar_partial, nar_bytes[0..<nar_cut]) ?? panic("nar partial")
     files.write_bytes(info_partial, info_bytes[0..<info_cut]) ?? panic("info partial")
@@ -105,7 +105,7 @@ engine_cache_clear_negative: fn(mirror: String) {
     key_bytes: files.read_bytes(key_path) ?? panic("key")
     key: TrustKey.from_secret(key_bytes) ?? panic("decode key")
     info_text: String.from_bytes(info_bytes) ?? panic("UTF-8 info")
-    unsigned := [String]{}
+    ^unsigned: [String]{}
     loop line in info_text.lines() {
         if !line.starts_with("Sig: ") -> unsigned.push(line.copy())
     }
@@ -114,20 +114,20 @@ engine_cache_clear_negative: fn(mirror: String) {
     engine_cache_substitute_rejected(verification, roots, entry.id, files.join(root, "unsigned-rejected/out"))
     engine_cache_clear_negative(mirror)
     files.write_bytes(info, info_bytes) ?? panic("restore info")
-    mismatched := NarInfo.parse(info_text) ?? panic("mismatched info")
+    ^mismatched: NarInfo.parse(info_text) ?? panic("mismatched info")
     mismatched.deriver = Val("/jet/derivations/{store_test_repeat("f", 64)}")
     files.write(info, (mismatched.signed(key) ?? panic("mismatch signature")).to_text() ?? panic("mismatch text")) ?? panic("mismatch write")
     assert(store_verify_cache_transfer(verification, roots, entry.id, "public") == .Err(_))
     engine_cache_substitute_rejected(verification, roots, entry.id, files.join(root, "mismatched-rejected/out"))
     engine_cache_clear_negative(mirror)
-    replayed := NarInfo.parse(info_text) ?? panic("replay info")
+    ^replayed: NarInfo.parse(info_text) ?? panic("replay info")
     replayed.store_path = "/jet/hangar/{entry.envelope.output_hash}-replayed"
     files.write(info, (replayed.signed(key) ?? panic("replay signature")).to_text() ?? panic("replay text")) ?? panic("replay write")
     assert(store_verify_cache_transfer(verification, roots, entry.id, "public") == .Err(_))
     engine_cache_clear_negative(mirror)
     files.write_bytes(info, info_bytes) ?? panic("restore info")
     malicious_nar: "this is not a NAR".bytes()
-    malicious := NarInfo.parse(info_text) ?? panic("malicious info")
+    ^malicious: NarInfo.parse(info_text) ?? panic("malicious info")
     malicious.file_size = malicious_nar.len()
     malicious.nar_size = malicious_nar.len()
     malicious.nar_hash = store_nar_digest(malicious_nar)
@@ -141,7 +141,7 @@ engine_cache_clear_negative: fn(mirror: String) {
     files.write(nar, "corrupted cache bytes") ?? panic("corrupt nar")
     assert(store_verify_cache_transfer(verification, roots, entry.id, "public") == .Err(_))
     engine_cache_substitute_rejected(verification, roots, entry.id, files.join(root, "corrupt-rejected/out"))
-    changed_key := [U8]{}
+    ^changed_key: [U8]{}
     loop _ in 0..<32 -> changed_key.push(U8{127})
     files.write_bytes(key_path, changed_key) ?? panic("changed key")
     assert(engine_cache_verify_error(verification, roots, entry.id).contains("cache key for `public` changed"))
@@ -174,7 +174,7 @@ engine_cache_clear_negative: fn(mirror: String) {
     mirror: files.tmpdir("engine-repro-mirror-") ?? panic("mirror")
     files.write(files.join(first_source, "payload"), "first bytes\n") ?? panic("first payload")
     files.write(files.join(second_source, "payload"), "second bytes\n") ?? panic("second payload")
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     identity: engine_cache_identity("repro")
     first: engine_cache_ingest(verification, roots, "reproducible-action", "reproducibility:action", first_source, identity, [String]{}, "builder:first")
     request: IngestRequest{name: "reproducible-action", version: "1", reference: "reproducibility:action", cache_identity: identity, references: [String]{}, outputs: [String:String]{"out": second_source}, signature: "", provenance: "builder:second", platform_artifact_kind: ""}
@@ -186,7 +186,7 @@ engine_cache_clear_negative: fn(mirror: String) {
         }
     }
     reports: files.list_dir(files.join(roots.root, "private/unreproducible")) ?? panic("reports")
-    report_path := String?{None}
+    ^report_path: String?{None}
     loop entry in reports {
         if files.suffix(entry.path) == ".json" {
             report_path = Val(entry.path)
@@ -212,8 +212,8 @@ engine_cache_clear_negative: fn(mirror: String) {
 #Test("package_explain_matches_failed_provider_reference_target") {
     root: files.tmpdir("engine-explain-failed-") ?? panic("root")
     roots: HangarRoots{root: root, dev_mode: false}
-    verification := StoreVerification.new()
-    attempt := BuildAttempt.new("left-pad", "left-pad@npm#version=2.0.17", "npm", "sha256-recipe", "sha256-source")
+    ^verification: StoreVerification.new()
+    ^attempt: BuildAttempt.new("left-pad", "left-pad@npm#version=2.0.17", "npm", "sha256-recipe", "sha256-source")
     attempt.push_step(StepLog{index: 1, total: 1, name: "fetch", command: "fetch left-pad", cwd: root, status: "failed", stdout: "", stderr: "network unavailable"})
     attempt.persist(roots.hangar_dir()) ?? panic("persist")
     explanation: if store_explain_package(verification, roots, "left-pad@npm#version=2.0.17", ExplainLens.Rebuild) == {

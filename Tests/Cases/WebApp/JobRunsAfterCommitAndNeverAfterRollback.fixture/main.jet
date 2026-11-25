@@ -50,7 +50,7 @@ Board: struct {
 
     // Writes note `id`; its first run fails.
     #App.Job(retries: 3) notify: fn(self, id: Int, text: String) -> Int BoardError! {
-        run := self.runs.guard_edit()
+        ^run: self.runs.guard_edit()
         run.value += 1
         if run.value == 1 -> return Err(BoardError.Failed("the first run fails"))
         _: notes_in(self.store).put(Note{id: id, text: text}) ?? return Err(BoardError.Failed(err.message()))

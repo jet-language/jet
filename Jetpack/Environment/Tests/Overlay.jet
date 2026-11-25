@@ -13,7 +13,7 @@ env_overlay_test_root: fn(label: String) -[FS]> String {
 // Stage one patch against a held source root and commit it.
 env_overlay_test_apply: fn(source_root: String, patch_text: String) -[FS, Env, Rand]> [PatchApplication] OverlayError! {
     source: OverlayAuthority.open(source_root, "source root")
-    stage := OverlayStage.new()
+    ^stage: OverlayStage.new()
     applications: env_overlay_apply_unified_patch_staged(source, patch_text, stage)
     env_overlay_commit_staged(source, stage, fn(path: String) -[FS]> {})
     Ok(applications)
@@ -24,7 +24,7 @@ env_overlay_test_apply: fn(source_root: String, patch_text: String) -[FS, Env, R
     env_overlay_test_write(files.join(root, "root.txt"), "one\n")
     env_overlay_test_write(files.join(root, "child/file.txt"), "two\n")
     authority: OverlayAuthority.open(root, "source root") ?? panic("hold root")
-    stage := OverlayStage.new()
+    ^stage: OverlayStage.new()
     env_overlay_apply_unified_patch_staged(authority, "--- a/root.txt\n+++ b/root.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/child/file.txt\n+++ b/child/file.txt\n@@ -1 +1 @@\n-two\n+TWO\n", stage) ?? panic("stage")
     assert(stage.entries["root.txt"].parent.handle == None)
     assert(stage.entries["child/file.txt"].parent.handle == .Val(_))
@@ -150,7 +150,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     files.create_dir_all(files.join(workspace, "patches")) ?? panic("patches dir")
     files.hard_link(files.join(outside, "change.patch"), files.join(workspace, "patches/change.patch")) ?? panic("hard link")
     env_overlay_test_write(files.join(source, "file.txt"), "one\n")
-    package := PackageOverride.new("pkg")
+    ^package: PackageOverride.new("pkg")
     package.patches = [String]{"patches/change.patch"}
     if env_apply_overlay_patches(workspace, source, package) == {
         .Ok(_) -> { panic("a hard-linked patch must be refused") }
@@ -193,10 +193,10 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     env_overlay_test_write(files.join(source, "file.txt"), "one\n")
     workspace_authority: OverlayAuthority.open(workspace, "workspace root") ?? panic("hold the workspace")
     patch_parent: workspace_authority.resolver.checked_directory("patches") ?? panic("hold patches")
-    patch_file := workspace_authority.resolver.directory_handle(patch_parent).open("change.patch") ?? panic("open the patch")
+    ^patch_file: workspace_authority.resolver.directory_handle(patch_parent).open("change.patch") ?? panic("open the patch")
     files.rename(files.join(workspace, "patches"), moved) ?? panic("move patches")
     files.symlink(outside, files.join(workspace, "patches")) ?? panic("plant the symlink")
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: patch_file.read_bytes(65536) ?? panic("read the patch")
         if chunk.len() == 0 -> break
@@ -221,7 +221,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     env_overlay_test_write(files.join(outside, "sentinel"), "keep\n")
     env_overlay_test_write(files.join(source, "tree/file.txt"), "one\n")
     authority: OverlayAuthority.open(source, "source root") ?? panic("hold the source")
-    stage := OverlayStage.new()
+    ^stage: OverlayStage.new()
     env_overlay_apply_unified_patch_staged(authority, "--- a/tree/file.txt\n+++ b/tree/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n", stage) ?? panic("stage")
     files.remove(files.join(source, "tree/file.txt")) ?? panic("remove target")
     files.symlink(files.join(outside, "sentinel"), files.join(source, "tree/file.txt")) ?? panic("plant the symlink")
@@ -245,7 +245,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     env_overlay_test_write(files.join(outside, "sentinel"), "keep")
     env_overlay_test_write(files.join(source, "tree/file.txt"), "one\n")
     authority: OverlayAuthority.open(source, "source root") ?? panic("hold the source")
-    stage := OverlayStage.new()
+    ^stage: OverlayStage.new()
     env_overlay_apply_unified_patch_staged(authority, "--- a/tree/file.txt\n+++ b/tree/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n", stage) ?? panic("stage")
     files.rename(files.join(source, "tree"), moved) ?? panic("move tree")
     files.symlink(outside, files.join(source, "tree")) ?? panic("plant the symlink")
@@ -268,7 +268,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     env_overlay_test_write(files.join(source, "tree/one.txt"), "one\n")
     env_overlay_test_write(files.join(source, "tree/two.txt"), "two\n")
     authority: OverlayAuthority.open(source, "source root") ?? panic("hold the source")
-    stage := OverlayStage.new()
+    ^stage: OverlayStage.new()
     env_overlay_apply_unified_patch_staged(authority, "--- a/tree/one.txt\n+++ b/tree/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/tree/two.txt\n+++ b/tree/two.txt\n@@ -1 +1 @@\n-two\n+TWO\n", stage) ?? panic("stage")
     files.rename(files.join(source, "tree"), moved) ?? panic("move tree")
     files.symlink(outside, files.join(source, "tree")) ?? panic("plant the symlink")

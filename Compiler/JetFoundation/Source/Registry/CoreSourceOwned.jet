@@ -19,11 +19,11 @@ CoreSourceOwnedRow: struct {
 CORE_SOURCE_OWNED_ROWS: #run core_source_owned_rows(CORE_DECLARATIONS)
 
 core_source_owned_rows: fn(declared: CoreDeclarations) -> [CoreSourceOwnedRow] Never! {
-    rows := [CoreSourceOwnedRow]{}
+    ^rows: [CoreSourceOwnedRow]{}
     loop group in ([[CoreDeclarationSource]]{declared.source_rows, declared.parts, declared.runtime}) {
         loop row in group {
             owner: core_declarations_module(declared.modules, row.module_name)
-            types := [String]{}
+            ^types: [String]{}
             if owner == .Val(found) {
                 loop leaf in found.types -> types.push(leaf.name.copy())
             }

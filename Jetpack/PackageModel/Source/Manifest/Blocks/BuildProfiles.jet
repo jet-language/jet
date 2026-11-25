@@ -101,9 +101,9 @@ pkg_block_record_body: fn(value: String, field: String) -> String PackageParseEr
 
 pkg_parse_dev: fn(value: String) -> DevPolicy PackageParseError! {
     body: pkg_block_record_body(value, "dev")
-    policy := DevPolicy.default()
-    seen_swap := false
-    seen_records := false
+    ^policy: DevPolicy.default()
+    ^seen_swap: false
+    ^seen_records: false
     loop entry in pkg_key_value_entries(body) {
         if entry.key == {
             "swap" -> {
@@ -134,9 +134,9 @@ pkg_parse_dev: fn(value: String) -> DevPolicy PackageParseError! {
 
 pkg_parse_dev_records: fn(value: String) -> DevRecordsPolicy PackageParseError! {
     body: pkg_block_record_body(value, "dev.records")
-    policy := DevRecordsPolicy.default()
-    seen_capture := false
-    seen_budget := false
+    ^policy: DevRecordsPolicy.default()
+    ^seen_capture: false
+    ^seen_budget: false
     loop entry in pkg_key_value_entries(body) {
         if entry.key == {
             "capture" -> {
@@ -168,8 +168,8 @@ pkg_parse_dev_records: fn(value: String) -> DevRecordsPolicy PackageParseError! 
 
 pkg_parse_dev_records_budget: fn(value: String) -> DevRecordsBudget PackageParseError! {
     body: pkg_block_record_body(value, "dev.records.budget")
-    budget := DevRecordsBudget.default()
-    seen_size := false
+    ^budget: DevRecordsBudget.default()
+    ^seen_size: false
     loop entry in pkg_key_value_entries(body) {
         if entry.key != "size" {
             return Err(PackageParseError.Composition("dev.records.budget has unknown field `{entry.key}` (allowed: size)"))
@@ -187,8 +187,8 @@ pkg_parse_dev_records_budget: fn(value: String) -> DevRecordsBudget PackageParse
 // suffix, checked in that order.
 pkg_parse_dev_record_bytes: fn(value: String) -> Int PackageParseError! {
     compact: pkg_ascii_lower(pkg_unquote(value)).trim()
-    digits := compact
-    multiplier := 1
+    ^digits: compact
+    ^multiplier: 1
     suffixes: [String]{"bytes", "gib", "gb", "mib", "mb", "kib", "kb", "b"}
     loop suffix in suffixes {
         if compact.ends_with(suffix) {
@@ -214,8 +214,8 @@ pkg_parse_dev_record_bytes: fn(value: String) -> Int PackageParseError! {
 
 // Parse every named profile of a `build: { … }` body (`allow` is skipped).
 pkg_parse_build: fn(body: String) -> [BuildProfileDef] PackageParseError! {
-    profiles := [BuildProfileDef]{}
-    seen := [String]{}
+    ^profiles: [BuildProfileDef]{}
+    ^seen: [String]{}
     loop entry in pkg_key_value_entries(body) {
         name: entry.key
         if seen.contains(name) {
@@ -229,7 +229,7 @@ pkg_parse_build: fn(body: String) -> [BuildProfileDef] PackageParseError! {
 }
 
 pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef PackageParseError! {
-    inner_block := String?{None}
+    ^inner_block: String?{None}
     if value.starts_with(BUILD_CTOR) {
         rest: pkg_trim_start_matches(value.removeprefix(BUILD_CTOR), ".").trim()
         if pkg_strip_wrapped(rest, "{{", "}}") == .Val(inner) -> inner_block = Val(inner.trim())
@@ -240,8 +240,8 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
         return Err(PackageParseError.Composition("build profile `{name}` needs a `Build.{{ optimize: O0|O1|O2, … }}` value"))
     }
     inner: inner_block ?? ""
-    optimize_value := String?{None}
-    profile := BuildProfileDef{
+    ^optimize_value: String?{None}
+    ^profile: BuildProfileDef{
         name: name,
         optimize: None,
         debug_info: false,
@@ -252,7 +252,7 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
         game_development_stripping: None,
         game_cook_mode: None,
     }
-    seen_fields := [String]{}
+    ^seen_fields: [String]{}
     loop field in pkg_key_value_entries(inner) {
         key: field.key
         if seen_fields.contains(key) {
@@ -331,7 +331,7 @@ pkg_build_option_value: fn(row: BuildOptionRow, written: String) -> String? {
     if !build_option_listed(row) -> return Val(pkg_unquote(written))
     hooks: row.kind == BuildOptionKind.Hooks
     body: pkg_strip_wrapped(written.trim(), "[", "]") ?? return None
-    items := [String]{}
+    ^items: [String]{}
     loop piece in pkg_top_level_commas(body) {
         item: piece.trim()
         if item == "" -> next
@@ -343,8 +343,8 @@ pkg_build_option_value: fn(row: BuildOptionRow, written: String) -> String? {
 
 // `build: { allow: #(FS, Exec) }`.
 pkg_parse_build_allow: fn(body: String) -> [String] PackageParseError! {
-    allow := [String]{}
-    seen_allow := false
+    ^allow: [String]{}
+    ^seen_allow: false
     loop entry in pkg_key_value_entries(body) {
         if entry.key != BUILD_FIELD_ALLOW -> next
         if seen_allow {

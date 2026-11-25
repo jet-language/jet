@@ -54,7 +54,7 @@ use {
 // `function`, only the functions of that name (top-level or methods).
 jet_cli_emit_ast_program: fn(program: Program, function: String?) -> [JetCLIEmitNode] Never! {
     tables: program.tables
-    nodes := [JetCLIEmitNode]{}
+    ^nodes: [JetCLIEmitNode]{}
     if function == .Val(name) {
         loop item in program.items -> jet_cli_emit_ast_find_functions(tables, item, name, nodes)
         return nodes
@@ -148,7 +148,7 @@ jet_cli_emit_ast_return: fn(ty: Type?) -> String Never! {
 }
 
 jet_cli_emit_ast_func: fn(tables: ASTTables, value: Func) -> JetCLIEmitNode Never! {
-    children := [JetCLIEmitNode]{}
+    ^children: [JetCLIEmitNode]{}
     loop param in value.params {
         if param.default == .Val(default) {
             children.push(jet_cli_emit_node("default", "default {param.name}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, default)}))
@@ -176,9 +176,9 @@ jet_cli_emit_ast_item: fn(tables: ASTTables, item: Item) -> JetCLIEmitNode Never
     if item == {
         .Func(value) -> jet_cli_emit_ast_func(tables, value)
         .Struct(value) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             loop field in value.fields {
-                inner := [JetCLIEmitNode]{}
+                ^inner: [JetCLIEmitNode]{}
                 if field.computed == .Val(computed) {
                     inner.push(jet_cli_emit_node("computed", "computed", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, computed)}))
                 }
@@ -191,7 +191,7 @@ jet_cli_emit_ast_item: fn(tables: ASTTables, item: Item) -> JetCLIEmitNode Never
             jet_cli_emit_node("struct", "{value.name}{jet_cli_emit_ast_type_params(value.type_params)}: struct", children)
         }
         .Enum(value) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             loop variant in value.variants {
                 payload: if variant.payload == {
                     .Unit -> ""
@@ -213,7 +213,7 @@ jet_cli_emit_ast_item: fn(tables: ASTTables, item: Item) -> JetCLIEmitNode Never
             jet_cli_emit_node("unit-family", "units {value.family}", children)
         }
         .Trait(value) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             loop method in value.methods {
                 text: "{method.name}: fn({jet_cli_emit_ast_params(method.params)}){jet_cli_emit_ast_return(method.return_type)}"
                 if {
@@ -233,7 +233,7 @@ jet_cli_emit_ast_item: fn(tables: ASTTables, item: Item) -> JetCLIEmitNode Never
         // An effect name a struct or enum declares in its `impl Effect` block.
         .EffectDecl(value) -> jet_cli_emit_leaf("effect", value.name)
         .Impl(value) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             jet_cli_emit_ast_methods(tables, value.methods, children)
             head: if value.trait_name == .Val(trait_name) -> "impl {trait_name} for {value.type_name}" else -> "impl {value.type_name}"
             jet_cli_emit_node("impl", head, children)
@@ -287,7 +287,7 @@ jet_cli_emit_ast_label: fn(label: NamedSpan?) -> String Never! {
 jet_cli_emit_ast_binding: fn(tables: ASTTables, binding: Binding) -> JetCLIEmitNode Never! {
     mutable: if binding.mutable -> "mut " else -> ""
     typed: if binding.ty == .Val(ty) -> ": {type_name(ty)}" else -> ""
-    children := [JetCLIEmitNode]{}
+    ^children: [JetCLIEmitNode]{}
     if binding.pattern == .Val(pattern) {
         children.push(jet_cli_emit_ast_bind_pattern(tables, pattern))
     }
@@ -324,7 +324,7 @@ jet_cli_emit_ast_lvalue: fn(tables: ASTTables, target: LValue) -> JetCLIEmitNode
 
 jet_cli_emit_ast_arms: fn(tables: ASTTables, arms: [SwitchArm], else_body: [StmtNode]?, children: ^[JetCLIEmitNode]) Never! {
     loop arm in arms {
-        arm_children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, arm.cond)}
+        ^arm_children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, arm.cond)}
         arm_children.push(jet_cli_emit_ast_body(tables, "body", "then", arm.body))
         children.push(jet_cli_emit_node("arm", "arm", arm_children))
     }
@@ -348,10 +348,10 @@ jet_cli_emit_ast_stmt: fn(tables: ASTTables, statement: StmtNode) -> JetCLIEmitN
         .While(cond, body, _, _, label) -> jet_cli_emit_node("while", "while{jet_cli_emit_ast_label(label)}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, cond), jet_cli_emit_ast_body(tables, "body", "do", body)})
         .For(var, _, var2, kind, body, _, _, label, _) -> {
             names: if var2 == .Val(second) -> "{var}, {second.name}" else -> var
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             if kind == {
                 .Range(start, end, step, exclusive) -> {
-                    range_children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, start), jet_cli_emit_ast_expr(tables, end)}
+                    ^range_children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, start), jet_cli_emit_ast_expr(tables, end)}
                     if step == .Val(value) {
                         range_children.push(jet_cli_emit_node("step", "step", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, value)}))
                     }
@@ -368,7 +368,7 @@ jet_cli_emit_ast_stmt: fn(tables: ASTTables, statement: StmtNode) -> JetCLIEmitN
             jet_cli_emit_node("for", "for{jet_cli_emit_ast_label(label)} {names} in", children)
         }
         .Switch(subject, arms, else_body, _) -> {
-            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, subject)}
+            ^children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, subject)}
             jet_cli_emit_ast_arms(tables, arms, else_body, children)
             jet_cli_emit_node("switch", "switch", children)
         }
@@ -380,7 +380,7 @@ jet_cli_emit_ast_stmt: fn(tables: ASTTables, statement: StmtNode) -> JetCLIEmitN
         .ContinueLabel(name, _) -> jet_cli_emit_leaf("continue", "next {name}")
         .Loop(body, _, _, label) -> jet_cli_emit_ast_body(tables, "loop", "loop{jet_cli_emit_ast_label(label)}", body)
         .CountedLoop(init, cond, step, body, _, _, label) -> {
-            children := [JetCLIEmitNode]{jet_cli_emit_ast_binding(tables, init), jet_cli_emit_ast_expr(tables, cond)}
+            ^children: [JetCLIEmitNode]{jet_cli_emit_ast_binding(tables, init), jet_cli_emit_ast_expr(tables, cond)}
             if step == .Val(value) {
                 children.push(jet_cli_emit_node("step", "step", [JetCLIEmitNode]{jet_cli_emit_ast_stmt(tables, value)}))
             }
@@ -395,7 +395,7 @@ jet_cli_emit_ast_stmt: fn(tables: ASTTables, statement: StmtNode) -> JetCLIEmitN
         .Region(name, _, body, _) -> jet_cli_emit_ast_body(tables, "region", "region {name}", body)
         .Policy(declarations, body, _) -> jet_cli_emit_ast_body(tables, "policy", "policy ({declarations.len()} declarations)", body)
         .TaskGroup(name, _, args, body, _) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             if args.limit == .Val(value) {
                 children.push(jet_cli_emit_node("limit", "limit", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, value)}))
             }
@@ -412,20 +412,20 @@ jet_cli_emit_ast_stmt: fn(tables: ASTTables, statement: StmtNode) -> JetCLIEmitN
             jet_cli_emit_ast_body(tables, "authority", "authority [{names.join(", ")}]{bound}", body)
         }
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
-            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, cond), jet_cli_emit_ast_body(tables, "body", "then", then_body)}
+            ^children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, cond), jet_cli_emit_ast_body(tables, "body", "then", then_body)}
             if else_body == .Val(body) {
                 children.push(jet_cli_emit_ast_body(tables, "else", "else", body))
             }
             jet_cli_emit_node("comptime-if", "#if", children)
         }
         .ComptimeSwitch(subject, arms, else_body, _) -> {
-            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, subject)}
+            ^children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, subject)}
             jet_cli_emit_ast_arms(tables, arms, else_body, children)
             jet_cli_emit_node("comptime-switch", "#if match", children)
         }
         .ComptimeBlock(body, _, _) -> jet_cli_emit_ast_body(tables, "comptime-block", "#run", body)
         .ContextBlock(fields, body, _) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             loop field in fields {
                 children.push(jet_cli_emit_node("context-field", "{field.name}:", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, field.value)}))
             }
@@ -438,7 +438,7 @@ jet_cli_emit_ast_stmt: fn(tables: ASTTables, statement: StmtNode) -> JetCLIEmitN
         .Yield(value, _) -> jet_cli_emit_node("yield", "yield", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, value)})
         .ScopeMember(name, _, args, _, body, _, _, _) -> {
             children: loop arg in args -> jet_cli_emit_ast_expr(tables, arg)
-            node := jet_cli_emit_node("scope-member", ".{name}", children)
+            ^node: jet_cli_emit_node("scope-member", ".{name}", children)
             loop inner in body -> node.children.push(jet_cli_emit_ast_stmt(tables, inner))
             node
         }
@@ -452,14 +452,16 @@ jet_cli_emit_ast_stmt: fn(tables: ASTTables, statement: StmtNode) -> JetCLIEmitN
 jet_cli_emit_ast_format: fn(format: StrSelector?) -> String Never! {
     selector: format ?? return ""
     if selector.args.len() == 0 -> return ":{selector.name}"
-    args := [String]{}
+    ^args: [String]{}
     loop arg in selector.args {
-        args.push(if arg == {
-            .Number(value) -> "{value}"
-            .Text(value) -> jet_cli_debug_quote(value)
-            .Word(name) -> name
-            .Computed -> "_"
-        })
+        args.push(
+            if arg == {
+                .Number(value) -> "{value}"
+                .Text(value) -> jet_cli_debug_quote(value)
+                .Word(name) -> name
+                .Computed -> "_"
+            },
+        )
     }
     ":{selector.name}({args.join(", ")})"
 }
@@ -517,20 +519,20 @@ jet_cli_emit_ast_expr: fn(tables: ASTTables, expression: ExprNode) -> JetCLIEmit
         }
         .Spread(value, _, _) -> jet_cli_emit_ast_unary(tables, "Spread", "spread", value)
         .MapLit(entries, _, _) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             jet_cli_emit_ast_pairs(tables, entries, children)
             jet_cli_emit_node("MapLit", "map", children)
         }
         .Index(base, index, _, _, _) -> jet_cli_emit_node("Index", "index", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, base), jet_cli_emit_ast_expr(tables, index)})
         .Slice(base, start, end, range, _, _) -> {
-            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, base), jet_cli_emit_ast_expr(tables, start), jet_cli_emit_ast_expr(tables, end)}
+            ^children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, base), jet_cli_emit_ast_expr(tables, start), jet_cli_emit_ast_expr(tables, end)}
             if range == .Val(value) -> children.push(jet_cli_emit_ast_expr(tables, value))
             jet_cli_emit_node("Slice", "slice", children)
         }
         .Range(start, end, exclusive, _, _) -> jet_cli_emit_node("Range", if exclusive -> "range ..<" else -> "range ..", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, start), jet_cli_emit_ast_expr(tables, end)})
         .Ident(name, _, _) -> if pipe_value_is_name(name) -> jet_cli_emit_leaf("PipeValue", "pipe value <>") else -> jet_cli_emit_leaf("Ident", "ident {name}")
         .Call(call, _) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             jet_cli_emit_ast_args(tables, call.args, children)
             jet_cli_emit_node("Call", "call {call.name}{jet_cli_emit_ast_type_args(call.type_args)}", children)
         }
@@ -548,23 +550,23 @@ jet_cli_emit_ast_expr: fn(tables: ASTTables, expression: ExprNode) -> JetCLIEmit
         .Field(base, member, _, _) -> jet_cli_emit_ast_unary(tables, "Field", "field .{member}", base)
         .OptField(base, member, _, _, _, _) -> jet_cli_emit_ast_unary(tables, "OptField", "field ?.{member}", base)
         .MethodCall(receiver, method, _, _, type_args, args, _) -> {
-            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, receiver)}
+            ^children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, receiver)}
             jet_cli_emit_ast_args(tables, args, children)
             jet_cli_emit_node("MethodCall", "method .{method}{jet_cli_emit_ast_type_args(type_args)}", children)
         }
         .OptMethodCall(receiver, method, _, type_args, args, _, _) -> {
-            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, receiver)}
+            ^children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, receiver)}
             jet_cli_emit_ast_args(tables, args, children)
             jet_cli_emit_node("OptMethodCall", "method ?.{method}{jet_cli_emit_ast_type_args(type_args)}", children)
         }
         .StructLit(owner, type_args, _, _, fields, _, _, _) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             jet_cli_emit_ast_fields(tables, fields, children)
             jet_cli_emit_node("StructLit", "struct {owner}{jet_cli_emit_ast_type_args(type_args)}", children)
         }
         .TypedLit(head, body, _, _) -> {
             written: if head == .Val(ty) -> " {type_name(ty)}" else -> ""
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             if body == {
                 .Fields(fields) -> { jet_cli_emit_ast_fields(tables, fields, children) }
                 .Elements(elements) -> {
@@ -582,7 +584,7 @@ jet_cli_emit_ast_expr: fn(tables: ASTTables, expression: ExprNode) -> JetCLIEmit
             jet_cli_emit_node("TypedLit", "literal{written}", children)
         }
         .EnumLit(owner, variant, _, args, _, _, _) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             loop arg in args {
                 if arg == {
                     .Positional(value) -> { children.push(jet_cli_emit_ast_expr(tables, value)) }
@@ -602,7 +604,7 @@ jet_cli_emit_ast_expr: fn(tables: ASTTables, expression: ExprNode) -> JetCLIEmit
         .Ok(value, _, _) -> jet_cli_emit_ast_unary(tables, "Ok", "ok", value)
         .Err(value, _, _) -> jet_cli_emit_ast_unary(tables, "Err", "err", value)
         .Try(value, _, _, context, _) -> {
-            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, value)}
+            ^children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, value)}
             if context == .Val(note) {
                 children.push(jet_cli_emit_node("context", "context", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, note)}))
             }
@@ -610,9 +612,9 @@ jet_cli_emit_ast_expr: fn(tables: ASTTables, expression: ExprNode) -> JetCLIEmit
         }
         .OrFallback(value, fallback, _, _, _) -> jet_cli_emit_node("OrFallback", "or else", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, value), jet_cli_emit_ast_fallback(tables, fallback)})
         .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
-            then_node := jet_cli_emit_ast_body(tables, "then", "then", then_body)
+            ^then_node: jet_cli_emit_ast_body(tables, "then", "then", then_body)
             then_node.children.push(jet_cli_emit_ast_expr(tables, then_value))
-            else_node := jet_cli_emit_ast_body(tables, "else", "else", else_body)
+            ^else_node: jet_cli_emit_ast_body(tables, "else", "else", else_body)
             else_node.children.push(jet_cli_emit_ast_expr(tables, else_value))
             jet_cli_emit_node("If", "if", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, cond), then_node, else_node})
         }
@@ -625,7 +627,7 @@ jet_cli_emit_ast_expr: fn(tables: ASTTables, expression: ExprNode) -> JetCLIEmit
             jet_cli_emit_node("Lambda", "lambda ({params.join(", ")})", jet_cli_emit_ast_lambda_body(tables, lambda.body))
         }
         .CallValue(callee, args, _, _) -> {
-            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, callee)}
+            ^children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, callee)}
             jet_cli_emit_ast_args(tables, args, children)
             jet_cli_emit_node("CallValue", "call value", children)
         }
@@ -634,7 +636,7 @@ jet_cli_emit_ast_expr: fn(tables: ASTTables, expression: ExprNode) -> JetCLIEmit
         .TypeValue(ty, _, _) -> jet_cli_emit_leaf("TypeValue", "type {type_name(ty)}")
         .Paren(value, _, _) -> jet_cli_emit_ast_unary(tables, "Paren", "paren", value)
         .Pipe(head, steps, _, _) -> {
-            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, head)}
+            ^children: [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, head)}
             loop step in steps {
                 children.push(jet_cli_emit_node("step", "step", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, step.value)}))
             }
@@ -696,13 +698,13 @@ jet_cli_emit_ast_fallback: fn(tables: ASTTables, fallback: OrFallback) -> JetCLI
     if fallback == {
         .Value(value) -> jet_cli_emit_ast_unary(tables, "fallback", "fallback", value)
         .Block(body, value, _) -> {
-            node := jet_cli_emit_ast_body(tables, "fallback", "fallback block", body)
+            ^node: jet_cli_emit_ast_body(tables, "fallback", "fallback block", body)
             if value == .Val(tail) -> node.children.push(jet_cli_emit_ast_expr(tables, tail))
             node
         }
         .Return(value, _) -> jet_cli_emit_ast_optional(tables, "fallback", "fallback return", value)
         .Panic(_, args) -> {
-            children := [JetCLIEmitNode]{}
+            ^children: [JetCLIEmitNode]{}
             jet_cli_emit_ast_args(tables, args, children)
             jet_cli_emit_node("fallback", "fallback panic", children)
         }

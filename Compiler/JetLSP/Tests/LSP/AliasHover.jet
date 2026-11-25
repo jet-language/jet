@@ -26,8 +26,8 @@ LSPAliasHoverChecker: struct {
     impl LSPChecker {
         check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
             plain: LSPFixtureChecker{}
-            checked := plain.check(entry, overlays)
-            slot := 0
+            ^checked: plain.check(entry, overlays)
+            ^slot: 0
             loop slot < checked.modules.len() {
                 if checked.modules[slot].path == entry {
                     checked.modules[slot].alias_shown[26] = "`Grid<Int>` (which is [[Int]])"
@@ -60,7 +60,7 @@ lsp_alias_hover_text: fn(server: ^LSPServer, line: Int, character: Int) -> Strin
 }
 
 #Test("hover names a generic alias parameter as written, then its one expansion") {
-    server := lsp_server(LSPAliasHoverChecker{})
+    ^server: lsp_server(LSPAliasHoverChecker{})
     lsp_test_open(server, LSP_ALIAS_HOVER_URI, LSP_ALIAS_HOVER_SOURCE)
     grid: lsp_alias_hover_text(server, 2, 10)
     assert(grid.contains("grid: Grid<Int>"), "the parameter's type as its source spells it")

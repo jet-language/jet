@@ -1,8 +1,8 @@
 // Read-only observations of canonical native kernels, never alternate locks.
 #Export(c) jet_rt_sync_fixture_condition_count: fn(condition: I64) -> I64 {
     sync_mutex_lock(condition + I64{8})
-    node := sync_load(condition + I64{16})
-    count := I64{0}
+    ^node: sync_load(condition + I64{16})
+    ^count: I64{0}
     loop node != (I64{0}) {
         count += I64{1}
         node = sync_load(node)

@@ -12,7 +12,7 @@ use {
 
 // The `.jet` files under `directory`, relative to `root`.
 jet_files: fn(directory: String, root: String) -[FS]> [String] {
-    found := [String]{}
+    ^found: [String]{}
     loop item in files.list_dir(directory) ?? panic("`{directory}` cannot be listed: {err}") {
         path: files.join(directory, item.name)
         if {
@@ -26,10 +26,10 @@ jet_files: fn(directory: String, root: String) -[FS]> [String] {
 // Prints each written file and returns the package digest: each file's name
 // and bytes, by name.
 written: fn(directory: String) -[FS, IO]> String {
-    names := jet_files(directory, directory)
+    ^names: jet_files(directory, directory)
     names.sort()
     print("files written: {names.len()}")
-    data := [U8]{}
+    ^data: [U8]{}
     loop name in names {
         text: files.read_bytes(files.join(directory, name)) ?? panic("`{name}` cannot be read: {err}")
         print("  {name} {text.len()} bytes sha256 {crypto.sha256(text).hex()}")
@@ -45,8 +45,8 @@ run: fn() {
     here: files.cwd() ?? panic("no working directory: {err}")
     printed: files.read(process.args()[0]) ?? panic("no output file: {err}")
     line: json.parse(printed) ?? panic("the output is not JSON: {err}")
-    directory := ""
-    claimed := ""
+    ^directory: ""
+    ^claimed: ""
     if line == .Object(fields) {
         loop field in fields {
             if field.key == "entry" && field.value == .Text(path) {

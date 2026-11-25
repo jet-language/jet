@@ -15,7 +15,7 @@ use {
 
 reject_json: fn(path: Path, canonical: Bool, text: String) (EncodingError | IOError)! {
     output: files.create(path)
-    writer := json.writer(output, canonical: canonical)
+    ^writer: json.writer(output, canonical: canonical)
     if writer.write(encoding.DataEvent.Number(text)) == {
         .Ok(_) -> { panic("JSON writer accepted Number") }
         .Err(first) -> {
@@ -31,7 +31,7 @@ reject_json: fn(path: Path, canonical: Bool, text: String) (EncodingError | IOEr
 
 reject_cbor: fn(path: Path, text: String) (EncodingError | IOError)! {
     output: files.create(path)
-    writer := cbor.writer(output)
+    ^writer: cbor.writer(output)
     if writer.write(encoding.DataEvent.Number(text)) == {
         .Ok(_) -> { panic("CBOR writer accepted Number") }
         .Err(error) -> {

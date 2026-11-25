@@ -19,15 +19,15 @@ numeric_widen_stop: fn(target_f32: Bool, file: I64, line: I64) {
     // bits, so the check below accepts it and Float{raw} is exact.
     magnitude: if (signed && raw < I64{0}) -> wrapping(I64{0} - raw) else -> raw
     if (magnitude >= I64{0} && magnitude < (I64{1} << precision)) { return Float{raw} }
-    significant := I64{0}
-    trailing := I64{0}
-    remaining := magnitude
+    ^significant: I64{0}
+    ^trailing: I64{0}
+    ^remaining: magnitude
     loop remaining != (I64{0}) {
         significant += I64{1}
         remaining = (remaining >> I64{1}) & I64{9223372036854775807}
     }
     remaining = magnitude
-    trailing_more := remaining != I64{0} && (remaining & I64{1}) == I64{0}
+    ^trailing_more: remaining != I64{0} && (remaining & I64{1}) == I64{0}
     loop trailing_more {
         trailing += I64{1}
         remaining = (remaining >> I64{1}) & I64{9223372036854775807}
@@ -68,9 +68,9 @@ numeric_bit_set: fn(word: I64, at: I64) -> Bool { ((word >> at) & I64{1}) != I64
     }
     if (op >= I64{4}) {
         magnitude: if (value < I64{0}) -> wrapping(I64{0} - value) else -> value
-        ones := I64{0}
-        length := I64{0}
-        at := I64{0}
+        ^ones: I64{0}
+        ^length: I64{0}
+        ^at: I64{0}
         loop at < (I64{64}) {
             if numeric_bit_set(magnitude, at) {
                 ones += I64{1}
@@ -80,8 +80,8 @@ numeric_bit_set: fn(word: I64, at: I64) -> Bool { ((word >> at) & I64{1}) != I64
         }
         return if (op == I64{4}) -> ones else -> length
     }
-    ones := I64{0}
-    at := I64{0}
+    ^ones: I64{0}
+    ^at: I64{0}
     loop at < bits {
         if numeric_bit_set(value, at) -> ones += I64{1}
         at += I64{1}
@@ -89,7 +89,7 @@ numeric_bit_set: fn(word: I64, at: I64) -> Bool { ((word >> at) & I64{1}) != I64
     if (op == I64{0}) { return ones }
     if (op == I64{1}) { return bits - ones }
     if (op == I64{2}) {
-        leading := I64{0}
+        ^leading: I64{0}
         at = bits - I64{1}
         loop at >= (I64{0}) && !numeric_bit_set(value, at) {
             leading += I64{1}
@@ -97,7 +97,7 @@ numeric_bit_set: fn(word: I64, at: I64) -> Bool { ((word >> at) & I64{1}) != I64
         }
         return leading
     }
-    trailing := I64{0}
+    ^trailing: I64{0}
     loop trailing < bits && !numeric_bit_set(value, trailing) -> trailing += I64{1}
     trailing
 }
@@ -113,8 +113,8 @@ numeric_bit_set: fn(word: I64, at: I64) -> Bool { ((word >> at) & I64{1}) != I64
         return jet_numeric_bit_count(int_word(value), operation, width)
     }
     node: int_copy(value, I64{0})
-    ones := I64{0}
-    length := I64{0}
+    ^ones: I64{0}
+    ^length: I64{0}
     loop !(int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0}) {
         ones += int_div_small(node, I64{2})
         length += I64{1}

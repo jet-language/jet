@@ -64,7 +64,7 @@ listed: fn() {
 }
 
 optional: fn(take_inner: Bool, id: Int) {
-    held := Val(Secret{id: id, token: "owned"})
+    ^held: Val(Secret{id: id, token: "owned"})
     if {
         take_inner -> {
             taken: held.move() ?? return
@@ -75,7 +75,7 @@ optional: fn(take_inner: Bool, id: Int) {
 }
 
 replaced: fn() {
-    held := Wrapper<Secret>{value: Secret{id: 6, token: "owned"}}
+    ^held: Wrapper<Secret>{value: Secret{id: 6, token: "owned"}}
     taken: held.value.move()
     held.value = Secret{id: 7, token: "owned"}
     print("replace {taken.id} {held.value.id}")

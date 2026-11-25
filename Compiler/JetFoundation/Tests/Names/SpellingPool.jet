@@ -4,23 +4,23 @@
 use jet_foundation.[NameTable, name_count, name_intern, name_pool_adopt, name_pool_fold, name_table]
 
 spelling_pool_table: fn(words: [String]) -> NameTable {
-    table := name_table()
-    loop word in words -> _ := name_intern(table, word)
+    ^table: name_table()
+    loop word in words -> ^_: name_intern(table, word)
     table
 }
 
 #Test("a source table takes its Strings from the pool and keeps its ids") {
-    shared := name_table()
-    first := spelling_pool_table([String]{"alpha", "beta", "alpha"})
-    own := name_table()
+    ^shared: name_table()
+    ^first: spelling_pool_table([String]{"alpha", "beta", "alpha"})
+    ^own: name_table()
     name_pool_adopt(first, shared, own)
     assert_eq(first.texts, [String]{"", "alpha", "beta"})
     // Every table starts with the empty spelling; `own` met the other two.
     assert_eq(name_count(own), 3)
     name_pool_fold(shared, own)
     assert_eq(shared.texts, [String]{"", "alpha", "beta"})
-    second := spelling_pool_table([String]{"gamma", "beta"})
-    later := name_table()
+    ^second: spelling_pool_table([String]{"gamma", "beta"})
+    ^later: name_table()
     name_pool_adopt(second, shared, later)
     assert_eq(second.texts, [String]{"", "gamma", "beta"})
     assert_eq(later.texts, [String]{"", "gamma"})
@@ -29,11 +29,11 @@ spelling_pool_table: fn(words: [String]) -> NameTable {
 }
 
 #Test("two threads' first spellings fold into the pool once each") {
-    shared := name_table()
-    left := name_table()
-    right := name_table()
-    one := spelling_pool_table([String]{"walk", "run"})
-    two := spelling_pool_table([String]{"run", "jump"})
+    ^shared: name_table()
+    ^left: name_table()
+    ^right: name_table()
+    ^one: spelling_pool_table([String]{"walk", "run"})
+    ^two: spelling_pool_table([String]{"run", "jump"})
     name_pool_adopt(one, shared, left)
     name_pool_adopt(two, shared, right)
     name_pool_fold(shared, left)

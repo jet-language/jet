@@ -49,7 +49,7 @@ render: fn(key: Key) -> String {
 }
 
 words: fn(line: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop word in line.split(" ") {
         if word != "" -> out.push(word)
     }
@@ -57,14 +57,14 @@ words: fn(line: String) -> [String] {
 }
 
 number: fn(word: String) -> Int {
-    value := 0
+    ^value: 0
     loop b in word.bytes() -> value = value * 10 + (Int{b}) - 48
     value
 }
 
 // The script's commands without comments and blank lines.
 commands: fn(script: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop raw in script.split("\n") {
         line: raw.partition("#").head.trim()
         if line != "" -> out.push(line)
@@ -75,7 +75,7 @@ commands: fn(script: String) -> [String] {
 // The repeats a rate R, delay D schedule has made after each hold, and
 // between the first and the last hold.
 timing: fn(repeat: xkb.Repeat, line: String, held: [Int]) -> String {
-    due := [String]{}
+    ^due: [String]{}
     loop ms in held -> due.push("{repeat.due(ms)}")
     "{line}: {due.join(" ")}, between {repeat.between(held[0], held[held.len() - 1])}"
 }
@@ -84,11 +84,11 @@ timing: fn(repeat: xkb.Repeat, line: String, held: [Int]) -> String {
 // keysym each listed key produces now.
 state: fn(km: xkb.Keymap, w: [String]) -> String {
     names: [String]{"Shift", "Lock", "Control", "Mod1", "Mod2", "Mod3", "Mod4", "Mod5", "Alt", "Meta", "NumLock", "LevelThree", "LevelFive", "Super", "Hyper", "ScrollLock"}
-    on := [String]{}
+    ^on: [String]{}
     loop name in names {
         if km.active(name) -> on.push(name.copy())
     }
-    syms := [String]{}
+    ^syms: [String]{}
     loop i in 1..<w.len() {
         code: number(w[i])
         syms.push("{code}={km.keysym_name(km.keysym(code))}")
@@ -108,13 +108,13 @@ play: fn(km: ^xkb.Keymap, line: String, out: ^[String]) {
         return
     }
     if w[0] == "repeat" {
-        held := [Int]{}
+        ^held: [Int]{}
         loop i in 3..<w.len() -> held.push(number(w[i]))
         out.push(timing(xkb.Repeat{rate: number(w[1]), delay: number(w[2])}, line, held))
         return
     }
     if w[0] == "repeats" {
-        off := [String]{}
+        ^off: [String]{}
         loop code in km.codes() {
             if code <= 255 && !km.repeats(code) -> off.push("{code}")
         }
@@ -122,7 +122,7 @@ play: fn(km: ^xkb.Keymap, line: String, out: ^[String]) {
         out.push("repeats off: {listed}")
         return
     }
-    codes := [Int]{}
+    ^codes: [Int]{}
     if w[0] == "sweep" {
         loop code in km.codes() {
             if code <= 255 -> codes.push(code)
@@ -148,8 +148,8 @@ run: fn() {
         return
     }
     lines: commands(script)
-    out := [String]{}
-    at := 0
+    ^out: [String]{}
+    ^at: 0
     loop at < lines.len() {
         w: words(lines[at])
         if w[0] != "keymap" {
@@ -161,7 +161,7 @@ run: fn() {
             print("cannot read {w[1]}: {err}")
             return
         }
-        km := xkb.keymap(bytes) ?? {
+        ^km: xkb.keymap(bytes) ?? {
             print("{w[1]}: {err:Debug}")
             return
         }

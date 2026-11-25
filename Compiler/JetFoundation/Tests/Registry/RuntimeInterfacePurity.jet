@@ -187,15 +187,15 @@ runtime_binding_name: fn(row: RuntimeInterfaceRow) -> String Never! {
 }
 
 #Test("every jet.runtime binding with no effect row is on the reviewed pure list or run-time only") {
-    reviewed := [String]{}
-    violations := [String]{}
+    ^reviewed: [String]{}
+    ^violations: [String]{}
     loop group in runtime_pure_groups() {
         loop member in group.members {
             if reviewed.contains(member) -> violations.push("`{member}` is listed twice")
             reviewed.push(member.copy())
         }
     }
-    bound := [String]{}
+    ^bound: [String]{}
     loop row in RUNTIME_INTERFACE_ROWS {
         name: runtime_binding_name(row)
         bound.push(name.copy())
@@ -248,7 +248,7 @@ runtime_binding_name: fn(row: RuntimeInterfaceRow) -> String Never! {
         "ui.save_file",
     }
     loop name in running {
-        found := false
+        ^found: false
         loop row in RUNTIME_INTERFACE_ROWS {
             if runtime_binding_name(row) != name -> next
             found = true
@@ -266,7 +266,7 @@ runtime_binding_name: fn(row: RuntimeInterfaceRow) -> String Never! {
         RuntimeReadRow{name: "testing.suite_run", row: "-[IO]>"},
     }
     loop want in expected {
-        found := false
+        ^found: false
         loop row in RUNTIME_INTERFACE_ROWS {
             if runtime_binding_name(row) != want.name -> next
             found = true

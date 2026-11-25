@@ -50,7 +50,7 @@ store_nix_checked_add: fn(left: Int, right: Int, overflow: String) -> Int NixCac
 
 // The first `limit` queued paths, removed from the queue, in sorted order.
 store_nix_take_wave: fn(queue: ^Rank<String>, limit: Int) -> [String] Never! {
-    wave := [String]{}
+    ^wave: [String]{}
     loop wave.len() < limit {
         store_path: queue.first() ?? break
         queue.remove(store_path)
@@ -64,24 +64,24 @@ store_nix_take_wave: fn(queue: ^Rank<String>, limit: Int) -> [String] Never! {
 // deterministic.
 store_plan_nix_downloads: fn(verification: StoreVerification, roots: HangarRoots, store_paths: [String], offline: Bool, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> NixDownloadPlan NixCacheError! {
     endpoint: NixCacheEndpoint.from_roots(roots)
-    store_dir := "/nix/store"
-    cache_info_loaded := offline
+    ^store_dir: "/nix/store"
+    ^cache_info_loaded: offline
     existing_entries: store_nix_entries_by_store_path(store_list_checked(verification, roots) ?? return Err(store_nix_store_error(err)))
-    queue := Rank<String>.new()
+    ^queue: Rank<String>.new()
     loop store_path in store_paths {
         store_nix_validate_store_path(store_path, store_dir)
         queue.add(store_path.copy())
     }
-    scheduled := queue.copy()
-    checked := 0
-    plan := NixDownloadPlan.empty()
-    planned := [String:FetchedInfo]{}
+    ^scheduled: queue.copy()
+    ^checked: 0
+    ^plan: NixDownloadPlan.empty()
+    ^planned: [String:FetchedInfo]{}
     store_nix_progress_phase(progress, "Planning")
     store_nix_progress_objects(progress, 0, scheduled.len())
 
     loop queue.len() > 0 {
         wave: store_nix_take_wave(queue, STORE_NIX_MAX_PARALLEL_METADATA_FETCHES)
-        pending := [String]{}
+        ^pending: [String]{}
         loop store_path in wave {
             if store_nix_existing_object(verification, roots, existing_entries, store_path, store_dir) == {
                 .Val(existing) -> {
@@ -114,8 +114,8 @@ store_plan_nix_downloads: fn(verification: StoreVerification, roots: HangarRoots
 
         // Successful lookups are handled in path order before the first
         // failure.
-        fetched := [String:FetchedInfo]{}
-        first_error := NixCacheError?{None}
+        ^fetched: [String:FetchedInfo]{}
+        ^first_error: NixCacheError?{None}
         loop store_path in pending {
             lookup: if endpoint.narinfo(store_path, store_dir) == {
                 .Ok(found) -> found
@@ -133,7 +133,7 @@ store_plan_nix_downloads: fn(verification: StoreVerification, roots: HangarRoots
                 }
             }
         }
-        names := fetched.keys().to_list()
+        ^names: fetched.keys().to_list()
         names.sort()
         loop store_path in names {
             info: fetched[store_path]
@@ -180,7 +180,7 @@ store_nix_planned_key: fn(roots: HangarRoots, endpoint: NixCacheEndpoint) -> Str
 
 store_nix_remember_planned_narinfos: fn(verification: StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint, infos: [String:FetchedInfo]) Never! {
     state: verification.state
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.planned_narinfos[store_nix_planned_key(roots, endpoint)] = infos
 }
 
@@ -196,7 +196,7 @@ store_nix_planned_narinfos: fn(verification: StoreVerification, roots: HangarRoo
 // Schedule every reference reachable through planned narinfos up front, so
 // admission opens the planned dependency frontier without refetching it.
 store_nix_expand_planned_closure: fn(queue: ^Rank<String>, scheduled: ^Rank<String>, infos: [String:FetchedInfo], store_dir: String) NixCacheError! {
-    frontier := queue.to_list()
+    ^frontier: queue.to_list()
     loop frontier.len() > 0 {
         store_path: frontier.pop() ?? break
         info: infos.get(store_path) ?? next

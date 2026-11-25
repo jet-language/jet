@@ -65,12 +65,12 @@ run_compile_throughput_adapter: fn(axis: Dyn, run: AxisRun) -[FS, Exec]> Compile
     programs: items_at(receipt, "programs")
     arm_count: items_at(axis, "arms").len()
     complete: receipt != Dyn.Null && programs.len() == items_at(axis, "programs").len() && programs.all(fn(program) { items_at(program, "arms").len() == arm_count && items_at(program, "arms").all(fn(arm) { member(arm, "summary") != None }) })
-    metrics := Dyn.object()
+    ^metrics: Dyn.object()
     loop program in programs {
         loop arm in items_at(program, "arms") {
             summary: member(arm, "summary") ?? next
             // A reading the summary holds as null stays null; one it lacks is left out.
-            readings := Dyn.object()
+            ^readings: Dyn.object()
             put_present(readings, "clean_build_wall_ns", value_at(summary, "wall_ns"))
             put_present(readings, "peak_rss_bytes", value_at(summary, "peak_rss_bytes"))
             metrics["{text_or_empty(program, "id")}.{text_or_empty(arm, "id")}"] = readings

@@ -17,7 +17,7 @@ crash_writer: fn(path: Path) {
     print("crash_writer_ready")
     // A piped stdout is written only when its buffer fills or the process stops.
     // Flush, so the parent sees the line while this waits.
-    out := term.stdout()
+    ^out: term.stdout()
     out.flush() ?? panic("crash writer flush")
     time.sleep(30s)
     append_record(path, "event|3|late").drop("the writer is killed before this append")
@@ -28,7 +28,7 @@ recover_after_sigkill: fn(path: Path) -> Recovery {
         .stdout(.Stream)
         .stderr(.Capture)
         .spawn() ?? panic("crash writer spawn")
-    ready := false
+    ^ready: false
     loop line in child.stdout.lines() {
         if line.trim() == "crash_writer_ready" {
             ready = true

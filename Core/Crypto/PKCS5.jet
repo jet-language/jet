@@ -87,7 +87,7 @@ parse_pbkdf2_params: fn(data: [U8], params: asn1.ASN1Buf) -> PBKDF2Params PBEErr
     if params.tag_id != asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE {
         return Err(.InvalidFormat(Val(.UnexpectedTag)))
     }
-    p := params.p
+    ^p: params.p
     end: params.p + params.len
     salt_len: asn1.get_tag(data, p, end, asn1.ASN1_OCTET_STRING) ?? return Err(.InvalidFormat(Val(err)))
     salt: cipher.bytes_of(data, p, salt_len)
@@ -114,7 +114,7 @@ pbkdf2_hmac: fn(md: hashes.Md, password: [U8], salt: [U8], iterations: Int, key_
     if iterations < 0 || iterations > 0xFFFFFFFF || key_len < 0 || key_len > 0xFFFFFFFF {
         return Err(.BadInput)
     }
-    rounds := iterations
+    ^rounds: iterations
     if rounds == 0 -> rounds = 1
     Ok(hashes.pbkdf2(md, password, salt, rounds, key_len))
 }
@@ -126,7 +126,7 @@ pbes2: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperation, pa
     if params.tag_id != asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE {
         return Err(.InvalidFormat(Val(.UnexpectedTag)))
     }
-    p := params.p
+    ^p: params.p
     end: params.p + params.len
     kdf: asn1.get_alg(data, p, end) ?? return Err(.InvalidFormat(Val(err)))
     // PBKDF2 is the only key derivation.
@@ -138,8 +138,8 @@ pbes2: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperation, pa
         return Err(.InvalidFormat(None))
     }
     iv: cipher.bytes_of(data, enc.params.p, enc.params.len)
-    key := pbkdf2_hmac(kdf_params.md, password, kdf_params.salt, kdf_params.iterations, info.key_bits /% 8)
-    ctx := layer.cipher_setup(info)
+    ^key: pbkdf2_hmac(kdf_params.md, password, kdf_params.salt, kdf_params.iterations, info.key_bits /% 8)
+    ^ctx: layer.cipher_setup(info)
     if layer.cipher_setkey(ctx, key, operation) == {
         .Ok(_) -> { core.crypto.wipe(key) }
         .Err(e) -> {

@@ -1,11 +1,9 @@
-use {
-    files: core.files
-}
+use files: core.files
 
 // `close(writer)` runs the writer's Close, then its drop flushes and closes
 // the file once.
 write_closed: fn(path: String) -> String {
-    writer := files.create(path.copy()) ?? return "create failed"
+    ^writer: files.create(path.copy()) ?? return "create failed"
     _written: writer.write_line("one")
     close(writer)
     (files.read(path) ?? "<none>").trim().copy()
@@ -13,7 +11,7 @@ write_closed: fn(path: String) -> String {
 
 // The scope's end runs the same Close and drop.
 write_dropped: fn(path: String) -> String {
-    writer := files.create(path.copy()) ?? return "create failed"
+    ^writer: files.create(path.copy()) ?? return "create failed"
     _written: writer.write_line("two")
     "written"
 }

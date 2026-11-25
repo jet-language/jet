@@ -44,7 +44,7 @@ jetc_fd_valid: fn(fd: I64) -> Bool { fd >= I64{0} && fd <= I64{2147483647} }
 jetc_open_path: fn(path: I64, flags: I64, mode: I64) -> I64 {
     if walk_has_nul(rt_text_data(path), rt_text_len(path)) -> return I64{-5}
     name: fd_c_path(path)
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, flags, mode)
     fd_c_path_drop(name, path)
     fd
@@ -173,7 +173,7 @@ jetc_stat_new: fn(status: I64, errno: I64) -> I64 {
     native_fd: jet_int_owned_to_i64(fd)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if !jetc_fd_valid(native_fd) -> return jetc_raw_new(I64{-1}, I64{9})
-    status := I64{-4}
+    ^status: I64{-4}
     loop status == (I64{-4}) -> status = host_call(I64{74}, native_fd, I64{0}, I64{0})
     jetc_result(status)
 }
@@ -204,7 +204,7 @@ jetc_stat_new: fn(status: I64, errno: I64) -> I64 {
     native_fd: jet_int_owned_to_i64(fd)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if !jetc_fd_valid(native_fd) -> return jetc_raw_new(I64{-1}, I64{9})
-    _ := host_call(I64{3}, native_fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, native_fd, I64{0}, I64{0})
     jetc_raw_new(I64{0}, I64{0})
 }
 

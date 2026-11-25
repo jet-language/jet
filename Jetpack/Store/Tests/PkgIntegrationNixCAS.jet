@@ -30,7 +30,7 @@ S3CASReader: struct {
 
     number: fn(^self, size: Int) -> Int {
         bytes: self.take_bytes(size)
-        value := 0
+        ^value: 0
         loop i in 0..<size -> value |= Int{bytes[i]} << (8 * i)
         value
     }
@@ -43,7 +43,7 @@ S3CASReader: struct {
     output: fn(^self) -> S3CASOutput {
         root_mode: self.number(4)
         count: self.number(4)
-        nodes := [S3CASNode]{}
+        ^nodes: [S3CASNode]{}
         loop _ in 0..<count {
             kind: (self.take_bytes(1))[0]
             path: self.field()
@@ -70,7 +70,7 @@ s3cas_field: fn(out: ^[U8], bytes: [U8]) {
 }
 
 s3cas_magic: fn() -> [U8] {
-    bytes := "jet-hangar-archive-v1".bytes()
+    ^bytes: "jet-hangar-archive-v1".bytes()
     bytes.push(U8{0})
     bytes
 }
@@ -78,16 +78,16 @@ s3cas_magic: fn() -> [U8] {
 s3cas_digest: fn(bytes: [U8]) -> String { "sha256-{s3cas_crypto.sha256(bytes).hex()}" }
 
 s3cas_repeat: fn(value: String, count: Int) -> String {
-    out := ""
+    ^out: ""
     loop _ in 0..<count -> out = "{out}{value}"
     out
 }
 
 s3cas_read_output: fn(bytes: [U8], expected: String) -> S3CASOutput {
-    reader := S3CASReader{bytes: bytes, at: s3cas_magic().len()}
+    ^reader: S3CASReader{bytes: bytes, at: s3cas_magic().len()}
     _: reader.field()
     count: reader.number(4)
-    result := S3CASOutput?{None}
+    ^result: S3CASOutput?{None}
     loop _ in 0..<count {
         _: reader.field()
         digest: reader.field()
@@ -99,7 +99,7 @@ s3cas_read_output: fn(bytes: [U8], expected: String) -> S3CASOutput {
 }
 
 s3cas_encode: fn(output: String, source: S3CASOutput, platform: String, revision: String, cache_key: String) -> [U8] {
-    canonical := [U8]{}
+    ^canonical: [U8]{}
     s3cas_number(canonical, source.root_mode, 4)
     loop node in source.nodes {
         canonical.push(node.kind)
@@ -109,7 +109,7 @@ s3cas_encode: fn(output: String, source: S3CASOutput, platform: String, revision
         s3cas_add(canonical, node.bytes)
     }
     member_hash: s3cas_digest(canonical)
-    out := s3cas_magic()
+    ^out: s3cas_magic()
     s3cas_field(out, output.bytes())
     s3cas_number(out, 1, 4)
     s3cas_field(out, output.bytes())
@@ -145,12 +145,12 @@ s3cas_replace_link: fn(bytes: [U8], old: [U8], replacement: [U8]) -> [U8] {
     assert_eq(old.len(), replacement.len())
     magic: s3cas_magic()
     assert_eq(bytes[0..<magic.len()], magic)
-    reader := S3CASReader{bytes: bytes, at: magic.len()}
+    ^reader: S3CASReader{bytes: bytes, at: magic.len()}
     _: reader.field()
     count: reader.number(4)
     assert(count == 1, "fixture must contain one output object")
-    digest := [U8]{}
-    found := S3CASOutput?{None}
+    ^digest: [U8]{}
+    ^found: S3CASOutput?{None}
     loop _ in 0..<count {
         _: reader.field()
         object_digest: reader.field()
@@ -176,8 +176,8 @@ s3cas_replace_link: fn(bytes: [U8], old: [U8], replacement: [U8]) -> [U8] {
     }
     assert(digest.len() > 0, "fixture must carry an output object")
     assert_eq(digest, manifest)
-    output := found ?? panic("fixture must carry an output object")
-    matches := 0
+    ^output: found ?? panic("fixture must carry an output object")
+    ^matches: 0
     loop i in 0..<output.nodes.len() {
         if output.nodes[i].kind == (U8{2}) && output.nodes[i].bytes == old {
             output.nodes[i].bytes = replacement
@@ -199,9 +199,9 @@ s3cas_find: fn(bytes: [U8], old: [U8], start: Int) -> Int {
 s3cas_replace_all: fn(bytes: [U8], old: [U8], replacement: [U8]) -> {bytes: [U8], count: Int} {
     assert(old.len() > 0)
     assert_eq(old.len(), replacement.len())
-    out := [U8]{}
-    cursor := 0
-    count := 0
+    ^out: [U8]{}
+    ^cursor: 0
+    ^count: 0
     loop {
         at: s3cas_find(bytes, old, cursor)
         if at < 0 -> break
@@ -253,7 +253,7 @@ s3cas_ctx: fn(roots: HangarRoots, project: String) -> ProviderCtx {
     if sys.family() != "unix" {
         return
     }
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: s3cas_roots("nix-cas-source-root")
     source: files.tmpdir("nix-cas-source") ?? panic("source")
     absolute_target: "/nix/store/jet-closure-target"
@@ -295,7 +295,7 @@ s3cas_ctx: fn(roots: HangarRoots, project: String) -> ProviderCtx {
     assert_eq(imported.digests, [String]{new_output})
     link: files.join(files.join(files.join(destination.hangar_dir(), "objects"), new_output), "link")
     assert_eq(files.read_link(link) ?? panic("imported link"), absolute_target)
-    closure := s3cas_closure(new_output)
+    ^closure: s3cas_closure(new_output)
     closure.project_cas_bundle = bundle_digest
     pkg_lock_record_nix_realization(project, "link-fixture", "1.0.0", "link-fixture@jetpack", new_output, closure, s3cas_envelope(new_output, platform)) ?? panic("lock")
     spec: RefSpec.classify("link-fixture@jetpack") ?? panic("classify")
@@ -303,10 +303,10 @@ s3cas_ctx: fn(roots: HangarRoots, project: String) -> ProviderCtx {
     first: store_realize_verified(verification, destination, s3cas_ctx(destination, project), RealizeRequest.Package{spec: spec, table: table}) ?? panic("replay")
     nix_entry: first.metadata()
     warm: store_realize_verified(verification, destination, s3cas_ctx(destination, project), RealizeRequest.Package{spec: spec, table: table}) ?? panic("warm replay")
-    expected := nix_entry
+    ^expected: nix_entry
     expected.realized_at = 0
     expected.last_used_at = 0
-    warm_entry := warm.metadata()
+    ^warm_entry: warm.metadata()
     warm_entry.realized_at = 0
     warm_entry.last_used_at = 0
     assert(warm_entry == expected, "warm replay changed lock identity")
@@ -317,11 +317,11 @@ s3cas_ctx: fn(roots: HangarRoots, project: String) -> ProviderCtx {
     files.copy(files.join(bundle_dir, bundle_digest), files.join(copied_bundle, bundle_digest)) ?? panic("copy bundle")
     copied_roots: s3cas_roots("nix-cas-copied-destination")
     copied: store_realize_verified(verification, copied_roots, s3cas_ctx(copied_roots, copied_project), RealizeRequest.Package{spec: spec, table: table}) ?? panic("copied replay")
-    copied_identity := copied.metadata()
+    ^copied_identity: copied.metadata()
     copied_identity.out = ""
     copied_identity.bin = ""
     copied_identity.rlib = ""
-    expected_identity := expected
+    ^expected_identity: expected
     expected_identity.out = ""
     expected_identity.bin = ""
     expected_identity.rlib = ""
@@ -340,9 +340,9 @@ s3cas_ctx: fn(roots: HangarRoots, project: String) -> ProviderCtx {
         .Err(error) -> assert(error.message().contains("archive link target is absolute"))
     }
     escape: "../{s3cas_repeat("x", relative_target.len() - 3)}".bytes()
-    control := relative_target.bytes()
+    ^control: relative_target.bytes()
     control[relative_target.len() /% 2] = U8{1}
-    backslash := relative_target.bytes()
+    ^backslash: relative_target.bytes()
     backslash[relative_target.len() /% 2] = U8{92}
     targets: [{label: String, target: [U8], message: String}]{{label: "escape", target: escape, message: "archive link target escapes its output root"}, {label: "control", target: control, message: "archive link target is not portable"}, {label: "backslash", target: backslash, message: "archive link target is not portable"}}
     loop hostile in targets {

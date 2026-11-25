@@ -107,15 +107,15 @@ catalog_json: fn() -> String Never! {
     if node_catalog_problem(descriptors) == .Val(problem) {
         panic("invalid Canvas node catalog: {problem}")
     }
-    rows := [String]{}
+    ^rows: [String]{}
     loop descriptor in descriptors -> rows.push(descriptor_json(descriptor))
     "[{rows.join(",")}]"
 }
 
 // The first catalog invariant `descriptors` breaks, or None.
 node_catalog_problem: fn(descriptors: [NodeDescriptor]) -> String? Never! {
-    ids := [String:Bool]{}
-    identities := [String:Bool]{}
+    ^ids: [String:Bool]{}
+    ^identities: [String:Bool]{}
     loop descriptor in descriptors {
         if descriptor.id == "" || ids.has_key(descriptor.id) {
             return Val("missing or duplicate id `{descriptor.id}`")

@@ -63,8 +63,8 @@ hit_at: fn(expression: Expr) -> Int Never! {
 // (jet_driver_mask_inline_package in Compiler/JetDriver). Blank it the same
 // way, keeping every newline so diagnostics keep their lines.
 mask_inline_package: fn(text: String) -> String Never! {
-    bytes := text.bytes()
-    at := 0
+    ^bytes: text.bytes()
+    ^at: 0
     loop at < bytes.len() {
         byte: bytes[at]
         if byte == (U8{32}) || byte == (U8{9}) || byte == (U8{10}) || byte == (U8{13}) {
@@ -82,15 +82,15 @@ mask_inline_package: fn(text: String) -> String Never! {
     loop index in 0..<word.len() {
         if bytes[at + index] != word[index] -> return text.copy()
     }
-    open := at + word.len()
+    ^open: at + word.len()
     loop open < bytes.len() && (bytes[open] == (U8{32}) || bytes[open] == (U8{9})) -> open += 1
     if open < bytes.len() && bytes[open] == (U8{58}) -> open += 1
     loop open < bytes.len() && (bytes[open] == (U8{32}) || bytes[open] == (U8{9})) -> open += 1
     if open >= bytes.len() || bytes[open] != (U8{123}) -> return text.copy()
-    depth := 0
-    quoted := false
-    end := -1
-    index := open
+    ^depth: 0
+    ^quoted: false
+    ^end: -1
+    ^index: open
     loop index < bytes.len() && end < 0 {
         byte: bytes[index]
         if {
@@ -114,7 +114,7 @@ mask_inline_package: fn(text: String) -> String Never! {
 }
 
 offset_line: fn(text: String, offset: Int) -> Int Never! {
-    line := 1
+    ^line: 1
     loop (index, byte) in text.bytes() {
         if index >= offset -> break
         if byte == (U8{10}) -> line += 1
@@ -146,7 +146,7 @@ is_observer: fn(name: String) -> Bool Never! {
 }
 
 observes: fn(tables: ASTTables, body: [StmtNode]) -> Bool Never! {
-    names := [String]{}
+    ^names: [String]{}
     ast_visit_body(tables, body, fn(expression: ExprNode) { note_call_name(tables, names, expression) }, true)
     loop name in names {
         if is_observer(name) -> return true
@@ -166,7 +166,7 @@ note_call_name: fn(tables: ASTTables, names: ^[String], expression: ExprNode) Ne
 }
 
 with_frame: fn(chain: [String], frame: String) -> [String] Never! {
-    out := chain.copy()
+    ^out: chain.copy()
     out.push(frame.copy())
     out
 }
@@ -236,7 +236,7 @@ walk_expr: fn(tables: ASTTables, expression: ExprNode, chain: [String], walk: Wa
     view: ast_expr(tables, expression)
     if probe_matches(tables, view, walk.probe) {
         at: hit_at(view)
-        known := false
+        ^known: false
         loop old in hits {
             if at >= 0 && old.at == at -> known = true
         }
@@ -452,7 +452,7 @@ walk_statement: fn(tables: ASTTables, statement: StmtNode, chain: [String], walk
             walk_body(tables, body, block, walk, hits)
         }
         .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
-            observed := false
+            ^observed: false
             loop arm in arms {
                 if observes(tables, arm.body) -> observed = true
             }
@@ -485,7 +485,7 @@ walk_statement: fn(tables: ASTTables, statement: StmtNode, chain: [String], walk
 }
 
 scan: fn(program: Program, probe: Probe) -> [Hit] Never! {
-    hits := [Hit]{}
+    ^hits: [Hit]{}
     loop item in program.items {
         if item == .Func(function) {
             walk_body(program.tables, function.body, [String]{}, Walk{probe: probe.copy(), later: false, function: function.name.copy()}, hits)
@@ -497,9 +497,9 @@ scan: fn(program: Program, probe: Probe) -> [Hit] Never! {
 // Read a chain from the match outward, collecting the first follow-up
 // operation, until something ends the value's life.
 read_chain: fn(chain: [String]) -> Reading Never! {
-    follow := ""
-    propagated := false
-    index := chain.len() - 1
+    ^follow: ""
+    ^propagated: false
+    ^index: chain.len() - 1
     loop index >= 0 {
         frame: chain[index].partition(":")
         kind: frame.head
@@ -564,7 +564,7 @@ trace: fn(program: Program, name: String, follow: String, result_class: String, 
 }
 
 module_probes: fn(program: Program, module_name: String, member: String) -> [Probe] Never! {
-    probes := [Probe]{}
+    ^probes: [Probe]{}
     loop decl in program.imports {
         if decl.kind == {
             .Module(name, _) -> {
@@ -589,13 +589,13 @@ module_probes: fn(program: Program, module_name: String, member: String) -> [Pro
 }
 
 inspect_witness: fn(key: String, text: String, module_name: String, member: String, result_class: String) -> WitnessCheck Never! {
-    errors := [String]{}
+    ^errors: [String]{}
     marker: "// core-conformance: {key}"
     lines: text.split("\n").to_list()
     if lines.len() == 0 || lines[0].trim_end() != marker {
         errors.push("first line must be `{marker}`")
     }
-    markers := 0
+    ^markers: 0
     loop line in lines {
         if line.trim() == marker -> markers += 1
     }
@@ -621,9 +621,9 @@ inspect_witness: fn(key: String, text: String, module_name: String, member: Stri
         return WitnessCheck{sink: None, errors: errors}
     }
     hit: hits[0]
-    run_unit := false
-    run_found := false
-    run_calls := [String]{}
+    ^run_unit: false
+    ^run_found: false
+    ^run_calls: [String]{}
     loop item in program.items {
         if item == .Func(function) {
             if function.name == "run" {
@@ -638,7 +638,7 @@ inspect_witness: fn(key: String, text: String, module_name: String, member: Stri
         return WitnessCheck{sink: None, errors: errors}
     }
     if hit.function != "run" {
-        reached := false
+        ^reached: false
         loop name in run_calls {
             if name == hit.function -> reached = true
         }
@@ -664,9 +664,9 @@ inspect_witness: fn(key: String, text: String, module_name: String, member: Stri
 // Name the sink for one hit, or say why there is none. A result returned
 // from a helper is judged again at the helper's single call site.
 judge: fn(program: Program, hit: Hit, result_class: String, depth: Int) -> WitnessCheck Never! {
-    errors := [String]{}
+    ^errors: [String]{}
     reading: read_chain(hit.chain)
-    sink := Sink?{None}
+    ^sink: Sink?{None}
     if reading.end == {
         "observed" -> {
             if {

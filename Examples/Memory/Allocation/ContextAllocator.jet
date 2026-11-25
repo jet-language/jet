@@ -36,10 +36,10 @@ Counter: struct {
 
 run: fn() {
     region: mem.Region.reserve(1 << 20) ?? panic("reserve")
-    counter := Counter{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
-    count := 0
+    ^counter: Counter{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
+    ^count: 0
     #Context(allocator: counter) {
-        squares := [Int]{}
+        ^squares: [Int]{}
         loop i in 0..<100 -> squares.push(i * i)
         count = squares.len()
         print("{count} squares, the last {squares[count - 1]}")

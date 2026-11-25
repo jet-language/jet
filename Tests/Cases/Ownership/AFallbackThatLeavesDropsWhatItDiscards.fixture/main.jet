@@ -50,7 +50,7 @@ error_or_return: fn(text: String) -> String {
 }
 
 parse_or_break: fn(texts: [String]) -> Int {
-    total := 0
+    ^total: 0
     loop text in texts {
         value: Int.parse(text) ?? break
         total += value
@@ -59,7 +59,7 @@ parse_or_break: fn(texts: [String]) -> Int {
 }
 
 parse_or_next: fn(texts: [String]) -> Int {
-    total := 0
+    ^total: 0
     loop text in texts {
         value: Int.parse(text) ?? next
         total += value
@@ -86,9 +86,9 @@ found_or_return: fn(step: Int) -> Int {
 
 run: fn() {
     // Warm the allocator's classes before the first reading.
-    total := (parse_or_return("max") ?? 0) + (read_or_return(MISSING) ?? 0) + error_or_return("max").len()
+    ^total: (parse_or_return("max") ?? 0) + (read_or_return(MISSING) ?? 0) + error_or_return("max").len()
     total += parse_or_break([String]{"max", "1"}) + parse_or_next([String]{"max", "2"}) + absent_or_return(1) + found_or_return(1)
-    before := census("VmRSS:")
+    ^before: census("VmRSS:")
     loop step in 0..<STEPS -> total += parse_or_return("max") ?? 0
     print("?? return None after a parse failure: flat {flat(before)}")
     before = census("VmRSS:")

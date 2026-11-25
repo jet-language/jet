@@ -16,7 +16,7 @@ Lease: struct {
 
 // The opened regular files, in the order given.
 open_snapshots: fn(paths: [String]) -> [Snapshot] {
-    out := [Snapshot]{}
+    ^out: [Snapshot]{}
     loop path in paths {
         file: files.open(path) ?? panic("open {path}")
         info: file.stat()
@@ -28,7 +28,7 @@ open_snapshots: fn(paths: [String]) -> [Snapshot] {
 
 // Reads the list by value first, as the lease's wrapper setup does.
 count_present: fn(snapshots: [Snapshot]) -> Int {
-    count := 0
+    ^count: 0
     loop snapshot in snapshots {
         if snapshot.file != None -> count += 1
     }
@@ -40,13 +40,13 @@ count_present: fn(snapshots: [Snapshot]) -> Int {
 // used through method calls. Each line: whether every byte was read, and
 // the first byte.
 contents: fn(snapshots: ^[Snapshot]) -> [String] IOError! {
-    out := [String]{}
+    ^out: [String]{}
     loop index in 0..<snapshots.len() {
         relative: snapshots[index].relative
         if snapshots[index].file == None -> panic("`{relative}` lost its handle")
-        if ^snapshots[index].file == .Val(input) {
+        if snapshots[index].file.in_place() == .Val(input) {
             input.seek(0)
-            bytes := [U8]{}
+            ^bytes: [U8]{}
             loop {
                 chunk: input.read_bytes(7)
                 if chunk.len() == 0 -> break
@@ -59,7 +59,7 @@ contents: fn(snapshots: ^[Snapshot]) -> [String] IOError! {
 }
 
 run: fn() {
-    snapshots := open_snapshots([String]{"main.jet", "package.jet", "data.txt"})
+    ^snapshots: open_snapshots([String]{"main.jet", "package.jet", "data.txt"})
     present: count_present(snapshots)
     loop round in 0..<2 {
         lines: contents(snapshots) ?? panic("contents: {err}")

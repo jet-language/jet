@@ -386,8 +386,8 @@ pk_decrypt_fixed: fn<R: RNG>(ctx: ^PKContext, input: [U8], len: Int, rng: ^R) ->
 /// pk_decrypt_fixed through an RSA-alt key's own decrypt function: its
 /// failure or a message of another length is `bad`, with zeros.
 pk_alt_decrypt_fixed: fn(decrypt: fn([U8], Int) -[]> [U8] PKError!, input: [U8], len: Int) -> rsa.V15Fixed Never! {
-    fixed := cipher.zero_bytes(len)
-    bad := ctime.ct_true()
+    ^fixed: cipher.zero_bytes(len)
+    ^bad: ctime.ct_true()
     if decrypt(input, len) == {
         .Ok(out) -> {
             bad = ctime.size_ne(out.len(), len)
@@ -436,7 +436,7 @@ rsa_alt_check_pair: fn(public: ^PKContext, prv: PKContext) PKError! {
     if pk_get_bitlen(prv) != rsa.rsa_get_bitlen(public.rsa) {
         return Err(.RSA(.KeyCheckFailed(None)))
     }
-    hash := [U8]{}
+    ^hash: [U8]{}
     loop _ in 0..<32 -> hash.push(U8{0x2a})
     sig: rsa_alt_sign_wrap(prv, None, hash, rsa.MPI_MAX_SIZE)
     if rsa_verify_wrap(public.rsa, None, hash, sig) == {
@@ -495,7 +495,7 @@ pk_ecc_set_pubkey_from_prv: fn<R: RNG>(ctx: ^PKContext, rng: ^R) PKError! {
 }
 
 #Test("A context is nothing until set up once, and each type does its own operations") {
-    ctx := pk_new()
+    ^ctx: pk_new()
     assert(!pk_can_do(ctx, .RSA) && pk_get_bitlen(ctx) == 0 && pk_get_name(ctx) == "invalid PK" && pk_get_type(ctx) == None)
     assert(pk_setup(ctx, None) == .Err(.BadInput))
     assert(pk_setup(ctx, pk_info_from_type(.RSAAlt)) == .Err(.BadInput))

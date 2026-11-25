@@ -20,7 +20,7 @@ checked_wrap: fn(acc: String, item: String) -> String ReduceError! {
 }
 
 checked_tree: fn(items: [String], seed: String) -> String ReduceError! {
-    acc := seed
+    ^acc: seed
     loop item in items -> acc = checked_wrap(acc, item)
     Ok(acc)
 }
@@ -59,7 +59,7 @@ run: fn() {
 
     // (f) para_fold: each chunk keeps its first index, merge brackets the
     // pair. 200 items make chunks 0, 64, 128, 192.
-    indices := [Int]{}
+    ^indices: [Int]{}
     loop i in 0..200 -> indices.push(i)
     grouping: indices.para_fold(fn() { "" }, fn(acc: String, n: Int) { if acc == "" -> "{n}" else -> acc }, fn(left: String, right: String) { "[{left}|{right}]" })
     print("para_fold: {grouping}")

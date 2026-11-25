@@ -19,7 +19,7 @@ KIT_WALL_GUARD: 10
 // The corpus ids `options` selects of `all_ids`. A `cases` file names only
 // corpus ids, unless others_selected lets it name the run's other tests too.
 kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection {
-    requested := [String]{}
+    ^requested: [String]{}
     listed: options.cases != ""
     if listed {
         text: files.read(options.cases) ?? return KitSelection{ids: [], error: "read cases file: {err}"}
@@ -36,7 +36,7 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
             requested.push(id)
         }
     }
-    seen := [String]{}
+    ^seen: [String]{}
     loop id in options.bless.ids {
         if kit_expect_named(seen, id) {
             return KitSelection{ids: [], error: "duplicate bless ID: {id}"}
@@ -46,7 +46,7 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
         }
         seen.push(id.copy())
     }
-    selected := [String]{}
+    ^selected: [String]{}
     loop (index, id) in all_ids {
         if listed && !kit_expect_named(requested, id) -> next
         if options.bless.ids.len() > 0 && !kit_expect_named(options.bless.ids, id) -> next
@@ -62,7 +62,7 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
 // a #Test whose row id `<run>: <test>` holds it; every run without a filter.
 // `tests[i]` names the #Tests of the run `ids[i]`.
 kit_exec_select_runs: fn(ids: [String], tests: [[String]], filter: String) -> [Int] {
-    selected := [Int]{}
+    ^selected: [Int]{}
     loop (index, id) in ids {
         if filter == "" || id.contains(filter) || tests[index].any(fn(test) { "{id}: {test}".contains(filter) }) {
             selected.push(index)
@@ -109,7 +109,7 @@ KIT_STACK_BYTES: 8388608
 // recurses shallowly, needs no more.
 kit_exec_stack_limit: fn() -> String? {
     limit: sys.stack_limit() ?? return Val("{err}")
-    soft := KIT_STACK_BYTES
+    ^soft: KIT_STACK_BYTES
     if limit.hard == .Val(most) {
         if most < soft -> soft = most
     }
@@ -169,7 +169,7 @@ kit_exec_toolchain_root: fn(root: String) -> String? {
     if sys.get(ENV_JET_TOOLCHAIN_ROOT) == .Val(set) && set != "" -> return Val(set)
     loop start in [files.cwd() ?? "", root] {
         if start == "" -> next
-        current := files.canonicalize(start) ?? next
+        ^current: files.canonicalize(start) ?? next
         loop {
             if files.is_dir(files.join(current, "Core")) && files.is_dir(files.join(current, "Compiler/Prelude")) {
                 return Val(current)
@@ -202,9 +202,9 @@ kit_exec_path: fn(env: KitEnv, scratch: String) -> String? {
 // `path` without the tools `hidden`: each directory that holds one of them is
 // replaced by a mirror under `scratch` that links every other entry of it.
 kit_exec_path_without: fn(path: String, hidden: [String], scratch: String) -> String {
-    kept := [String]{}
+    ^kept: [String]{}
     loop (index, directory) in path.split(":").to_list() {
-        holds := false
+        ^holds: false
         loop name in hidden {
             if files.exists(files.join(directory, name)) -> holds = true
         }
@@ -280,7 +280,7 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
 // streamed, not text-captured: a child may write any bytes, so the kit reads
 // them as bytes and its receipt text is lossy instead of a failed wait.
 kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
-    spec := process.cmd(argv).cwd(cwd).stdout(.Stream).stderr(.Stream).stdin(.Stream).timeout(env.timeout)
+    ^spec: process.cmd(argv).cwd(cwd).stdout(.Stream).stderr(.Stream).stdin(.Stream).timeout(env.timeout)
     if env.env_clear -> spec = spec.env_clear() else {
         spec = spec.env_remove(ENV_JET_COMPILER_EXTENSION).env_remove(ENV_JET_COMPILER_IDENTITY)
         loop variable in KIT_CONTROL_VARIABLES -> spec = spec.env_remove(variable)
@@ -436,10 +436,10 @@ kit_exec_invoke_terminal: fn(env: KitEnv, argv: [String], cwd: String, scratch: 
 
 // Events by time; events at the same time keep their line order.
 kit_exec_terminal_order: fn(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
-    ordered := [KitTerminalEvent]{}
+    ^ordered: [KitTerminalEvent]{}
     loop event in events {
         ordered.push(event.copy())
-        position := ordered.len() - 1
+        ^position: ordered.len() - 1
         loop position > 0 && ordered[position - 1].at > ordered[position].at {
             earlier: ordered[position - 1]
             ordered[position - 1] = ordered[position]
@@ -455,7 +455,7 @@ kit_exec_terminal_order: fn(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
 kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: [U8], overlay: [KitEnvVar], terminal: KitTerminal?, signal_child: Int{0}) -> KitRun {
     if kit_exec_prepare(env, cwd, scratch, overlay) == .Val(stopped) -> return stopped
     started: time.instant()
-    spec := kit_exec_spec(env, argv, cwd, scratch, overlay)
+    ^spec: kit_exec_spec(env, argv, cwd, scratch, overlay)
     if terminal == .Val(shape) {
         spec = spec.terminal(TerminalPolicy{size: TerminalSize{cols: shape.cols, rows: shape.rows}, mode: .Cooked})
     }
@@ -463,10 +463,10 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     // A row's files on a memory-backed scratch are memory it holds: the guard
     // counts them beside the child's resident memory.
     files_in_memory: if env.scratch_memory -> scratch.copy() else -> ""
-    watched := KitResident{pid: if env.resident_limit > 0 -> child.id() else -> 0, limit: env.resident_limit, tree: env.resident_tree, due: 0, killed: false, peak: 0, scratch: files_in_memory, scratch_due: 0, scratch_bytes: 0}
+    ^watched: KitResident{pid: if env.resident_limit > 0 -> child.id() else -> 0, limit: env.resident_limit, tree: env.resident_tree, due: 0, killed: false, peak: 0, scratch: files_in_memory, scratch_due: 0, scratch_bytes: 0}
     cpu_limit: if env.cpu_limit == .Val(limit) -> limit.ns else -> 0
-    spent := KitCPU{pid: if cpu_limit > 0 -> child.id() else -> 0, limit: cpu_limit, due: 0, used: 0, killed: false}
-    input_error := kit_exec_feed(child, stdin, "stdin")
+    ^spent: KitCPU{pid: if cpu_limit > 0 -> child.id() else -> 0, limit: cpu_limit, due: 0, used: 0, killed: false}
+    ^input_error: kit_exec_feed(child, stdin, "stdin")
     if terminal == {
         .Val(shape) -> {
             eof: String.from_bytes([U8{4}]) ?? panic("EOF character")
@@ -500,9 +500,9 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     signal_error: if signal_child > 0 -> kit_exec_signal_child(child, watched, spent, started, signal_child, env.timeout.ns) else -> ""
     kit_exec_wait(child, watched, spent, started, -1)
     // Every output byte, read before the wait detaches the readers.
-    output := [U8]{}
-    errors := [U8]{}
-    read_error := kit_exec_read_stdout(child.stdout, output)
+    ^output: [U8]{}
+    ^errors: [U8]{}
+    ^read_error: kit_exec_read_stdout(child.stdout, output)
     errors_read: kit_exec_read_stderr(child.stderr, errors)
     if read_error == "" -> read_error = errors_read
     receipt: child.wait() ?? return kit_exec_failed("wait: {err}")
@@ -512,11 +512,11 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     // scratch, the files the row holds once it is done.
     if env.peak == .Val(cell) {
         held: watched.peak + if files_in_memory == "" -> 0 else -> kit_exec_tree_bytes(files_in_memory)
-        permit := cell.guard_edit()
+        ^permit: cell.guard_edit()
         if held > permit.value.bytes -> permit.value.bytes = held
     }
     errors_text: kit_exec_redact(kit_steps_utf8_lossy(errors), overlay)
-    run := kit_exec_receipt(receipt, started.elapsed().ns, input_error)
+    ^run: kit_exec_receipt(receipt, started.elapsed().ns, input_error)
     run.stdout = kit_exec_redact(kit_steps_utf8_lossy(output), overlay)
     run.stderr = errors_text
     run.stdout_bytes = Val(output)
@@ -562,17 +562,17 @@ kit_exec_read_stderr: fn(stream: ProcessStderrStream, bytes: ^[U8]) -> String {
 // holds one of the parts Core's process receipt treats as secret, ASCII
 // case-insensitive.
 kit_exec_redact: fn(text: String, overlay: [KitEnvVar]) -> String {
-    secrets := [String]{}
+    ^secrets: [String]{}
     loop variable in overlay {
         value: variable.value ?? next
         name: variable.name.to_ascii_lower()
-        secret := false
+        ^secret: false
         loop marker in ([String]{"secret", "token", "password", "passwd", "credential", "key"}) {
             if name.contains(marker) -> secret = true
         }
         if !secret || value == "" -> next
         secrets.push(value.copy())
-        position := secrets.len() - 1
+        ^position: secrets.len() - 1
         loop position > 0 && secrets[position - 1].count_bytes() < secrets[position].count_bytes() {
             longer: secrets[position]
             secrets[position] = secrets[position - 1]
@@ -580,7 +580,7 @@ kit_exec_redact: fn(text: String, overlay: [KitEnvVar]) -> String {
             position -= 1
         }
     }
-    redacted := text
+    ^redacted: text
     loop secret in secrets -> redacted = redacted.replace(secret, "<redacted>")
     redacted
 }
@@ -591,7 +591,7 @@ kit_exec_redact: fn(text: String, overlay: [KitEnvVar]) -> String {
 // need a second scheduler worker beside this waiting one: a pool whose
 // workers all wait on watchers that never get a worker stops.
 kit_exec_wait: fn(child: ProcessChild, watched: ^KitResident, spent: ^KitCPU, started: time.Instant, until: Int) {
-    pause := 1
+    ^pause: 1
     loop {
         at: started.elapsed().ns
         if until >= 0 && at >= until {
@@ -615,7 +615,7 @@ kit_exec_wait: fn(child: ProcessChild, watched: ^KitResident, spent: ^KitCPU, st
 // passed, so the wait that follows ends.
 kit_exec_signal_child: fn(child: ProcessChild, watched: ^KitResident, spent: ^KitCPU, started: time.Instant, signal: Int, deadline: Int) -> String {
     pid: child.id()
-    pause := 1
+    ^pause: 1
     loop {
         if kit_exec_running_child(pid) == .Val(target) {
             #Unsafe("the testkit signals the child of its own step child, as the row's `@signal_child` asks") {
@@ -627,7 +627,7 @@ kit_exec_signal_child: fn(child: ProcessChild, watched: ^KitResident, spent: ^Ki
         if exited -> return "@signal_child: the step's process ended before a child of it ran"
         at: started.elapsed().ns
         if at >= deadline {
-            pids := [Int]{}
+            ^pids: [Int]{}
             _: kit_exec_tree_resident(pid, true, pids)
             _: kit_exec_stop_tree(pid, pids)
             return "@signal_child: no child of the step's process ran within {deadline / 1000000} ms"
@@ -701,7 +701,7 @@ kit_exec_watch_cpu: fn(spent: ^KitCPU, at: Int) Never! {
     if spent.used <= spent.limit {
         return
     }
-    pids := [Int]{}
+    ^pids: [Int]{}
     _: kit_exec_tree_resident(spent.pid, true, pids)
     if !kit_exec_stop_tree(spent.pid, pids) {
         return
@@ -758,7 +758,7 @@ kit_exec_watch_resident: fn(watched: ^KitResident, at: Int) Never! {
         watched.scratch_due = at + 1000000000
         watched.scratch_bytes = kit_exec_tree_bytes(watched.scratch)
     }
-    pids := [Int]{}
+    ^pids: [Int]{}
     used: kit_exec_tree_resident(watched.pid, watched.tree, pids)
     if pids.len() == 0 {
         return
@@ -777,7 +777,7 @@ kit_exec_watch_resident: fn(watched: ^KitResident, at: Int) Never! {
 // gone.
 kit_exec_tree_bytes: fn(path: String) -> Int {
     entries: files.list_dir(path) ?? return 0
-    total := 0
+    ^total: 0
     loop entry in entries {
         info: files.stat(entry.path) ?? next
         if info.is_symlink -> next
@@ -791,8 +791,8 @@ kit_exec_tree_bytes: fn(path: String) -> Int {
 // (/proc/self/mounts). False when the table can't be read.
 kit_exec_memory_backed: fn(path: String) -> Bool {
     mounts: files.read("/proc/self/mounts") ?? return false
-    best := -1
-    memory := false
+    ^best: -1
+    ^memory: false
     loop line in mounts.split("\n") {
         fields: line.split(" ").to_list()
         if fields.len() < 3 -> next
@@ -809,9 +809,9 @@ kit_exec_memory_backed: fn(path: String) -> Bool {
 // (`/proc/<pid>/task/<tid>/children`); `pids` lists every process counted,
 // none when `pid` itself is gone.
 kit_exec_tree_resident: fn(pid: Int, tree: Bool, pids: ^[Int]) -> Int Never! {
-    used := 0
-    queue := [Int]{pid}
-    at := 0
+    ^used: 0
+    ^queue: [Int]{pid}
+    ^at: 0
     loop at < queue.len() {
         current: queue[at]
         at += 1
@@ -851,9 +851,9 @@ kit_exec_kib_field: fn(text: String, field: String) -> Int {
 // and drives the machine into swap.
 kit_exec_available_memory: fn() -> Int {
     meminfo: files.read("/proc/meminfo") ?? return 0
-    available := kit_exec_host_room(kit_exec_kib_field(meminfo, "MemAvailable:"), kit_exec_kib_field(meminfo, "MemTotal:"))
+    ^available: kit_exec_host_room(kit_exec_kib_field(meminfo, "MemAvailable:"), kit_exec_kib_field(meminfo, "MemTotal:"))
     membership: files.read("/proc/self/cgroup") ?? return available
-    prefix := ""
+    ^prefix: ""
     loop part in kit_exec_cgroup_path(membership).split("/") {
         if part == "" -> next
         prefix = "{prefix}/{part}"
@@ -880,7 +880,7 @@ kit_exec_cgroup_value: fn(text: String) -> Int { Int.parse(text.trim().copy()) ?
 // limit and a 0 `available` is unknown; a full cgroup leaves one byte, so the pool runs one.
 kit_exec_room: fn(available: Int, limit: Int, current: Int) -> Int {
     if limit <= 0 -> return available
-    room := limit - current
+    ^room: limit - current
     if room < 1 -> room = 1
     if available <= 0 || room < available -> return room
     available
@@ -891,7 +891,7 @@ kit_exec_room: fn(available: Int, limit: Int, current: Int) -> Int {
 // no room past the headroom leaves one byte, so the pool runs one entry.
 kit_exec_host_room: fn(available: Int, total: Int) -> Int {
     if available <= 0 -> return 0
-    headroom := total /% 10
+    ^headroom: total /% 10
     if headroom < 1073741824 -> headroom = 1073741824
     if available - headroom < 1 -> return 1
     available - headroom

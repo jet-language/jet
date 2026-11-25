@@ -5,24 +5,24 @@
 // its runtime run.
 
 adler: fn(values: [Int]) -> Int {
-    low := 1
-    high := 0
+    ^low: 1
+    ^high: 0
     loop value in values {
         low = (low + value) % 65521
         high = (high + low) % 65521
     }
     // Fold the two halves the way the real checksum packs them, then mix
     // once more so a reordered input moves every digit of the result.
-    packed := high * 65536 + low
-    mixed := packed
+    ^packed: high * 65536 + low
+    ^mixed: packed
     loop round in 0..<3 -> mixed = (mixed * 31 + round + values.len()) % 1000000007
     mixed
 }
 
 fletcher: fn(values: [Int]) -> Int {
-    first := 0
-    second := 0
-    block := 0
+    ^first: 0
+    ^second: 0
+    ^block: 0
     loop value in values {
         first = (first + value) % 255
         second = (second + first) % 255
@@ -40,10 +40,10 @@ fletcher: fn(values: [Int]) -> Int {
 
 run_lengths: fn(values: [Int]) -> Int {
     if values.len() == 0 -> return 0
-    runs := 1
-    longest := 1
-    current := 1
-    encoded := 0
+    ^runs: 1
+    ^longest: 1
+    ^current: 1
+    ^encoded: 0
     loop index in 1..<values.len() {
         if values[index] % 7 == values[index - 1] % 7 {
             current += 1
@@ -59,24 +59,24 @@ run_lengths: fn(values: [Int]) -> Int {
 }
 
 sorted_weight: fn(values: [Int]) -> Int {
-    sorted := [Int]{}
+    ^sorted: [Int]{}
     loop value in values {
         // Insertion: shift every larger value one place right.
         sorted.push(value)
-        position := sorted.len() - 1
+        ^position: sorted.len() - 1
         loop position > 0 && sorted[position - 1] > value {
             sorted[position] = sorted[position - 1]
             position -= 1
         }
         sorted[position] = value
     }
-    total := 0
+    ^total: 0
     loop (index, value) in sorted -> total = (total + (index + 1) * value) % 1000000007
     total
 }
 
 histogram_score: fn(values: [Int]) -> Int {
-    buckets := [Int]{}
+    ^buckets: [Int]{}
     loop _ in 0..<16 -> buckets.push(0)
     loop value in values {
         bucket: value % 16
@@ -84,8 +84,8 @@ histogram_score: fn(values: [Int]) -> Int {
     }
     // A cheap spread score: squares reward a lopsided histogram, and the
     // number of empty buckets is folded in as the high digits.
-    score := 0
-    empty := 0
+    ^score: 0
+    ^empty: 0
     loop count in buckets {
         score += count * count
         if count == 0 -> empty += 1
@@ -94,11 +94,11 @@ histogram_score: fn(values: [Int]) -> Int {
 }
 
 best_span: fn(values: [Int]) -> Int {
-    best := 0
-    running := 0
-    start := 0
-    best_start := 0
-    best_end := 0
+    ^best: 0
+    ^running: 0
+    ^start: 0
+    ^best_start: 0
+    ^best_end: 0
     loop (index, value) in values {
         // Center each value so the span sums can turn negative.
         centered: value - 125
@@ -116,8 +116,8 @@ best_span: fn(values: [Int]) -> Int {
 }
 
 gcd: fn(left: Int, right: Int) -> Int {
-    a := left
-    b := right
+    ^a: left
+    ^b: right
     loop b != 0 {
         rest: a % b
         a = b
@@ -127,8 +127,8 @@ gcd: fn(left: Int, right: Int) -> Int {
 }
 
 divisor_chain: fn(values: [Int]) -> Int {
-    common := 0
-    lcm := 1
+    ^common: 0
+    ^lcm: 1
     loop value in values {
         if value == 0 -> next
         common = gcd(common, value)
@@ -141,10 +141,10 @@ divisor_chain: fn(values: [Int]) -> Int {
 }
 
 reversed_digits: fn(values: [Int]) -> Int {
-    total := 0
+    ^total: 0
     loop value in values {
-        rest := value
-        reversed := 0
+        ^rest: value
+        ^reversed: 0
         loop rest > 0 {
             reversed = reversed * 10 + rest % 10
             rest = rest /% 10
@@ -158,8 +158,8 @@ reversed_digits: fn(values: [Int]) -> Int {
 }
 
 xor_fold: fn(values: [Int]) -> Int {
-    folded := 0
-    rotated := 0
+    ^folded: 0
+    ^rotated: 0
     loop (index, value) in values {
         folded ~= value * (index + 1)
         // A rotation by the index keeps equal values at different places
@@ -171,9 +171,9 @@ xor_fold: fn(values: [Int]) -> Int {
 }
 
 poly_hash: fn(values: [Int]) -> Int {
-    forward := 0
-    backward := 0
-    power := 1
+    ^forward: 0
+    ^backward: 0
+    ^power: 1
     loop value in values {
         forward = (forward * 257 + value + 1) % 998244353
         backward = (backward + (value + 1) * power) % 998244353
@@ -186,11 +186,11 @@ poly_hash: fn(values: [Int]) -> Int {
 
 widest_gap: fn(values: [Int]) -> Int {
     if values.len() < 2 -> return 0
-    widest := 0
-    narrowest := 1000000
-    rises := 0
+    ^widest: 0
+    ^narrowest: 1000000
+    ^rises: 0
     loop index in 1..<values.len() {
-        gap := values[index] - values[index - 1]
+        ^gap: values[index] - values[index - 1]
         if gap > 0 -> rises += 1
         if gap < 0 -> gap = 0 - gap
         if gap > widest -> widest = gap
@@ -200,7 +200,7 @@ widest_gap: fn(values: [Int]) -> Int {
 }
 
 inversions: fn(values: [Int]) -> Int {
-    count := 0
+    ^count: 0
     loop left in 0..<values.len() {
         loop right in left + 1..<values.len() {
             // Only pairs a quarter of the range apart count, so close
@@ -208,7 +208,7 @@ inversions: fn(values: [Int]) -> Int {
             if values[left] > values[right] + 60 -> count += 1
         }
     }
-    equal := 0
+    ^equal: 0
     loop index in 1..<values.len() {
         if values[index] == values[index - 1] -> equal += 1
     }
@@ -216,11 +216,11 @@ inversions: fn(values: [Int]) -> Int {
 }
 
 parity_bits: fn(values: [Int]) -> Int {
-    odd_parity := 0
-    total_bits := 0
+    ^odd_parity: 0
+    ^total_bits: 0
     loop value in values {
-        bits := 0
-        rest := value
+        ^bits: 0
+        ^rest: value
         loop rest > 0 {
             bits += rest % 2
             rest = rest /% 2
@@ -233,11 +233,11 @@ parity_bits: fn(values: [Int]) -> Int {
 
 window_peaks: fn(values: [Int]) -> Int {
     width: 5
-    total := 0
-    peaks := 0
+    ^total: 0
+    ^peaks: 0
     loop start in 0..<values.len() {
         if start + width > values.len() -> break
-        top := values[start]
+        ^top: values[start]
         loop offset in 1..<width {
             if values[start + offset] > top -> top = values[start + offset]
         }
@@ -249,25 +249,25 @@ window_peaks: fn(values: [Int]) -> Int {
 }
 
 digit_spread: fn(values: [Int]) -> Int {
-    counts := [Int]{}
+    ^counts: [Int]{}
     loop _ in 0..<10 -> counts.push(0)
     loop value in values {
-        rest := value
+        ^rest: value
         loop rest > 0 {
             digit: rest % 10
             counts[digit] = counts[digit] + 1
             rest = rest /% 10
         }
     }
-    spread := 0
+    ^spread: 0
     loop (digit, count) in counts -> spread = (spread * 7 + count * (digit + 1)) % 1000000007
     spread
 }
 
 step_walk: fn(values: [Int]) -> Int {
-    position := 0
-    visits := 0
-    seen := [Int]{}
+    ^position: 0
+    ^visits: 0
+    ^seen: [Int]{}
     loop _ in 0..<values.len() -> seen.push(0)
     // Jump by each visited value until a slot repeats or the walk has
     // taken as many steps as there are values.
@@ -281,7 +281,7 @@ step_walk: fn(values: [Int]) -> Int {
 }
 
 triangle_mix: fn(values: [Int]) -> Int {
-    total := 0
+    ^total: 0
     loop (index, value) in values {
         // Weigh each value by the triangle number of its place, so the
         // result tells a shifted input from the original.
@@ -292,10 +292,10 @@ triangle_mix: fn(values: [Int]) -> Int {
 }
 
 square_steps: fn(values: [Int]) -> Int {
-    squares := 0
-    near := 0
+    ^squares: 0
+    ^near: 0
     loop value in values {
-        root := 0
+        ^root: 0
         loop root * root + 2 * root + 1 <= value -> root += 1
         // Exact squares count apart from values one away from a square.
         if root * root == value -> squares += 1 else if (root + 1) * (root + 1) == value + 1 {
@@ -306,10 +306,10 @@ square_steps: fn(values: [Int]) -> Int {
 }
 
 even_odd_split: fn(values: [Int]) -> Int {
-    evens := 0
-    odds := 0
-    swaps := 0
-    last_even := false
+    ^evens: 0
+    ^odds: 0
+    ^swaps: 0
+    ^last_even: false
     loop (index, value) in values {
         even: value % 2 == 0
         if even -> evens += value else -> odds += value
@@ -321,9 +321,9 @@ even_odd_split: fn(values: [Int]) -> Int {
 }
 
 digest: fn(count: Int) -> Int {
-    data := [Int]{}
+    ^data: [Int]{}
     loop index in 0..<count -> data.push((index * 37 + 11) % 251)
-    total := adler(data)
+    ^total: adler(data)
     total = (total * 31 + fletcher(data)) % 1000000007
     total = (total * 31 + run_lengths(data)) % 1000000007
     total = (total * 31 + sorted_weight(data)) % 1000000007

@@ -73,7 +73,7 @@ jet_cli_perf_follow_stopped: fn(stop: Shared<JetCLIPerfFollowStop>) -> Bool {
 }
 
 jet_cli_perf_follow_stop: fn(stop: Shared<JetCLIPerfFollowStop>) {
-    permit := stop.guard_edit()
+    ^permit: stop.guard_edit()
     permit.value.stopped = true
 }
 
@@ -158,12 +158,12 @@ jet_cli_perf_attach_follow: fn(pid: Int, home: String, source: String, quiet: Bo
     if !quiet {
         jet_cli_perf_follow_say("Following {pid} {source}; zones on while this runs; Ctrl-C stops\n")
     }
-    follow := JetCLIPerfFollow{pid: pid, source: source, link: "", opened: 0, slots: [JetCLIPerfFollowSlot]{}, rows: [U8]{}, unkept: 0, lost: 0, turns: false, spans_at: 0}
-    out := follow_term.stdout()
-    looked := follow_time.instant()
-    renewed := follow_time.instant()
-    turned := follow_time.instant()
-    ended := ""
+    ^follow: JetCLIPerfFollow{pid: pid, source: source, link: "", opened: 0, slots: [JetCLIPerfFollowSlot]{}, rows: [U8]{}, unkept: 0, lost: 0, turns: false, spans_at: 0}
+    ^out: follow_term.stdout()
+    ^looked: follow_time.instant()
+    ^renewed: follow_time.instant()
+    ^turned: follow_time.instant()
+    ^ended: ""
     loop !jet_cli_perf_follow_stopped(stop) {
         if follow.link == "" && !follow.turns {
             jet_cli_perf_follow_link(follow, home)
@@ -172,8 +172,8 @@ jet_cli_perf_attach_follow: fn(pid: Int, home: String, source: String, quiet: Bo
                 jet_cli_perf_follow_say("Process {pid} keeps no live file, as it has no memory file system for one, so this follow shows each 100 ms turn\n")
             }
         }
-        text := ""
-        end := JET_CLI_PERF_LIVE_RUNNING
+        ^text: ""
+        ^end: JET_CLI_PERF_LIVE_RUNNING
         if {
             follow.link != "" -> {
                 polled: jet_cli_perf_follow_poll(follow) ?? {
@@ -211,7 +211,7 @@ jet_cli_perf_attach_follow: fn(pid: Int, home: String, source: String, quiet: Bo
             if jet_cli_perf_follow_gone(pid) {
                 // The last of the live file first: a killed program's
                 // buffers keep what it wrote.
-                killed := false
+                ^killed: false
                 if follow.link != "" {
                     last: jet_cli_perf_follow_poll(follow) ?? {
                         jet_cli_perf_follow_leave(follow, lease)
@@ -235,7 +235,7 @@ jet_cli_perf_attach_follow: fn(pid: Int, home: String, source: String, quiet: Bo
     // Read live, the trace holds the rows the follower read. In turns the
     // program's spans file holds them, the last turn's too, while the
     // program runs; once it ended, the rows the follower read.
-    taken := JetCLIPerfZonesTaken?{None}
+    ^taken: JetCLIPerfZonesTaken?{None}
     if jet_cli_perf_attach_zones_read(pid, home, source, follow.rows.move(), !follow.turns) == {
         .Ok(found) -> taken = found
         .Err(failure) -> return Err(failure)
@@ -254,7 +254,7 @@ jet_cli_perf_follow_leave: fn(follow: JetCLIPerfFollow, lease: String) -[FS]> {
 
 // `text` on stderr now, not at the follow's end.
 jet_cli_perf_follow_say: fn(text: String) -[IO]> {
-    notes := follow_term.stderr()
+    ^notes: follow_term.stderr()
     notes.write(text).drop("a follow's notes on stderr only explain its lines")
     notes.flush().drop("a follow's notes on stderr only explain its lines")
 }
@@ -317,7 +317,7 @@ jet_cli_perf_follow_poll: fn(follow: ^JetCLIPerfFollow) -[FS.Read]> JetCLIPerfFo
         return Ok(JetCLIPerfFollowPolled{text: "", end: JET_CLI_PERF_LIVE_RUNNING})
     }
     layout: [Int]{JET_CLI_PERF_LIVE_HEADS_AT, JET_CLI_PERF_LIVE_LINE, JET_CLI_PERF_LIVE_SLOTS_AT, JET_CLI_PERF_LIVE_SLOT, JET_CLI_PERF_LIVE_ZONES}
-    fits := link_debug_addr(header, 0) == JET_CLI_PERF_LIVE_MAGIC && link_debug_addr(header, 8) == JET_CLI_PERF_LIVE_VERSION && link_debug_addr(header, 16) == JET_CLI_PERF_LIVE_SLOTS
+    ^fits: link_debug_addr(header, 0) == JET_CLI_PERF_LIVE_MAGIC && link_debug_addr(header, 8) == JET_CLI_PERF_LIVE_VERSION && link_debug_addr(header, 16) == JET_CLI_PERF_LIVE_SLOTS
     loop (index, word) in layout {
         if link_debug_addr(header, 152 + index * 8) != word -> fits = false
     }
@@ -329,11 +329,11 @@ jet_cli_perf_follow_poll: fn(follow: ^JetCLIPerfFollow) -[FS.Read]> JetCLIPerfFo
     if follow.opened <= 0 && opened > 0 -> follow.opened = opened
     pair: 72 + (link_debug_addr(header, 64) & 1) * 32
     clock: JetCLIPerfFollowClock{tsc: link_debug_addr(header, pair), tsc_base: link_debug_addr(header, pair + 8), ns_base: link_debug_addr(header, pair + 16), scale: link_debug_addr(header, pair + 24)}
-    claimed := link_debug_addr(header, 24)
+    ^claimed: link_debug_addr(header, 24)
     if claimed > JET_CLI_PERF_LIVE_SLOTS -> claimed = JET_CLI_PERF_LIVE_SLOTS
     if claimed <= 0 -> return Ok(JetCLIPerfFollowPolled{text: "", end: end})
     lines: follow_files.read_at(follow.link, JET_CLI_PERF_LIVE_HEADS_AT, claimed * JET_CLI_PERF_LIVE_LINE) ?? return Ok(JetCLIPerfFollowPolled{text: "", end: end})
-    text := ""
+    ^text: ""
     loop index in 0..<claimed {
         line: index * JET_CLI_PERF_LIVE_LINE
         if line + JET_CLI_PERF_LIVE_LINE > lines.len() -> break
@@ -351,7 +351,7 @@ jet_cli_perf_follow_poll: fn(follow: ^JetCLIPerfFollow) -[FS.Read]> JetCLIPerfFo
 // Slot `index`'s new records, from the follower's position to `head`, its
 // buffer's tail `tail` as the poll read it.
 jet_cli_perf_follow_slot: fn(follow: ^JetCLIPerfFollow, index: Int, head: Int, tail: Int, thread: Int, clock: JetCLIPerfFollowClock) -[FS.Read]> String {
-    slot := follow.slots[index]
+    ^slot: follow.slots[index]
     if slot.at < tail -> slot.at = tail
     // A head behind the follower, or further ahead than the buffer holds,
     // is no head the writer stored.
@@ -364,7 +364,7 @@ jet_cli_perf_follow_slot: fn(follow: ^JetCLIPerfFollow, index: Int, head: Int, t
     offset: slot.at % JET_CLI_PERF_LIVE_ZONES
     count: head - slot.at
     first: if offset + count > JET_CLI_PERF_LIVE_ZONES -> JET_CLI_PERF_LIVE_ZONES - offset else -> count
-    chunk := follow_files.read_at(follow.link, base + offset, first) ?? return ""
+    ^chunk: follow_files.read_at(follow.link, base + offset, first) ?? return ""
     if first < count {
         chunk.extend(follow_files.read_at(follow.link, base, count - first) ?? return "")
     }
@@ -373,8 +373,8 @@ jet_cli_perf_follow_slot: fn(follow: ^JetCLIPerfFollow, index: Int, head: Int, t
     after: follow_files.read_at(follow.link, JET_CLI_PERF_LIVE_HEADS_AT + index * JET_CLI_PERF_LIVE_LINE + 8, 8) ?? return ""
     if after.len() < 8 -> return ""
     kept: link_debug_addr(after, 0)
-    text := ""
-    at := slot.at
+    ^text: ""
+    ^at: slot.at
     loop at < head {
         if at < kept {
             at = kept
@@ -473,7 +473,7 @@ jet_cli_perf_follow_timed: fn(kind: Int, start: Int, end: Int) -> JetCLIPerfFoll
 // (jet_cli_perf_log_spans_read), within JET_CLI_PERF_FOLLOW_ROWS_MOST,
 // and its line, as `jet perf view`'s timeline shows it.
 jet_cli_perf_follow_row: fn(follow: ^JetCLIPerfFollow, kind: Int, edges: JetCLIPerfFollowEdges, task: Int, name: ^^[U8], text: ^^String) -> String Never! {
-    row := [U8]{}
+    ^row: [U8]{}
     loop word in ([Int]{edges.start, edges.end, task, name.len() | (kind << 32)}) {
         loop shift in 0..<8 -> row.push(U8{(word >> (shift * 8)) & 255})
     }
@@ -507,13 +507,13 @@ jet_cli_perf_follow_line: fn(follow: ^JetCLIPerfFollow, kind: Int, edges: JetCLI
 // program's name can't move the terminal's cursor.
 jet_cli_perf_follow_shown: fn(name: ^^String) -> String Never! {
     bytes: name.bytes()
-    plain := true
+    ^plain: true
     loop byte in bytes {
         if byte < (U8{32}) || byte == (U8{127}) -> plain = false
     }
     if plain -> return name.move()
     digits: "0123456789abcdef".bytes()
-    shown := [U8]{}
+    ^shown: [U8]{}
     loop byte in bytes {
         if {
             byte < (U8{32}) || byte == (U8{127}) -> {
@@ -537,8 +537,8 @@ jet_cli_perf_follow_turn: fn(follow: ^JetCLIPerfFollow, path: String) -[FS.Read]
         follow.rows = [U8]{}
     }
     bytes: follow_files.read_at(path, follow.spans_at, facts.size - follow.spans_at) ?? return ""
-    text := ""
-    at := 0
+    ^text: ""
+    ^at: 0
     loop at + 32 <= bytes.len() {
         start: link_debug_addr(bytes, at)
         end: link_debug_addr(bytes, at + 8)

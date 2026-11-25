@@ -62,8 +62,8 @@ decode_response: fn(raw: String, code: Int) -> Dyn RError! {
     if code == 3 -> return Err(RError.Canceled)
     if code == 5 -> return Err(RError.Limit)
     if code != 0 -> return Err(RError.Protocol)
-    response := json.parse(raw) ?? return Err(RError.Protocol)
-    succeeded := (response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
+    ^response: json.parse(raw) ?? return Err(RError.Protocol)
+    ^succeeded: (response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err(RError.CommandFailed)
     return Ok(response.field("value") ?? Dyn.Null)
 }
@@ -77,14 +77,14 @@ transform: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {
 transform_table: fn<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
     raw: abi.transform_table(session.value, json.to_string(rows.copy()) ?? return Err(RError.Protocol), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
 }
 
 transform_plot: fn(session: Session, input: Dyn, deadline_ms: Int) -> String RError! {
     raw: abi.transform_plot(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))
 }
 
@@ -97,14 +97,14 @@ double_values: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError!
 double_values_table: fn<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
     raw: abi.double_values_table(session.value, json.to_string(rows.copy()) ?? return Err(RError.Protocol), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
 }
 
 double_values_plot: fn(session: Session, input: Dyn, deadline_ms: Int) -> String RError! {
     raw: abi.double_values_plot(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))
 }
 
@@ -117,14 +117,14 @@ scale_table: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {
 scale_table_table: fn<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
     raw: abi.scale_table_table(session.value, json.to_string(rows.copy()) ?? return Err(RError.Protocol), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
 }
 
 scale_table_plot: fn(session: Session, input: Dyn, deadline_ms: Int) -> String RError! {
     raw: abi.scale_table_plot(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))
 }
 
@@ -137,14 +137,14 @@ plot_scores: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {
 plot_scores_table: fn<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
     raw: abi.plot_scores_table(session.value, json.to_string(rows.copy()) ?? return Err(RError.Protocol), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
 }
 
 plot_scores_plot: fn(session: Session, input: Dyn, deadline_ms: Int) -> String RError! {
     raw: abi.plot_scores_plot(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))
 }
 
@@ -157,14 +157,14 @@ fail_call: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {
 fail_call_table: fn<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
     raw: abi.fail_call_table(session.value, json.to_string(rows.copy()) ?? return Err(RError.Protocol), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value) ?? return Err(RError.Protocol)) ?? return Err(RError.Protocol))
 }
 
 fail_call_plot: fn(session: Session, input: Dyn, deadline_ms: Int) -> String RError! {
     raw: abi.fail_call_plot(session.value, json.to_string(input) ?? return Err(RError.Protocol), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))
 }
 
@@ -177,13 +177,13 @@ sleep_call: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {
 sleep_call_table: fn<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {
     raw: abi.sleep_call_table(session.value, json.to_string(rows.copy()), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol))
 }
 
 sleep_call_plot: fn(session: Session, input: Dyn, deadline_ms: Int) -> String RError! {
     raw: abi.sleep_call_plot(session.value, json.to_string(input), deadline_ms)
     code: abi.take_error()
-    value := decode_response(raw, code)
+    ^value: decode_response(raw, code)
     return Ok(value.text() ?? return Err(RError.Protocol))
 }

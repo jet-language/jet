@@ -110,7 +110,7 @@ envmodel_test_host_groups: fn(source: String, vmtests: Bool) -[Env, Exec, FS]> [
     base: envmodel_test_base_dir()
     _: envmodel_evaluate_env(source, base) ?? panic("the host environment evaluates")
     modules: envmodel_evaluate_source(source, base) ?? panic("the host source evaluates")
-    groups := [FleetPlan]{}
+    ^groups: [FleetPlan]{}
     loop evaluated in modules {
         captured: if vmtests -> evaluated.vmtests else -> evaluated.fleets
         loop group in captured -> groups.push(group)

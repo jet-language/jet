@@ -26,7 +26,7 @@ build_time_guard_ident_byte: fn(byte: Int) -> Bool {
 // The leading name of a top-level line, `name` in `name: …`, or "".
 build_time_guard_item_name: fn(line: String) -> String {
     bytes: line.bytes()
-    end := 0
+    ^end: 0
     loop end < bytes.len() && build_time_guard_ident_byte(Int{bytes[end]}) -> end += 1
     colon: end > 0 && end < bytes.len() && Int{bytes[end]} == 58
     if !colon -> return ""
@@ -38,14 +38,12 @@ build_time_guard_item_name: fn(line: String) -> String {
 // opens an item; an indented, blank, closing, comment or marker line stays in
 // the item above it.
 build_time_guard_contexts: fn(text: String) -> [String] {
-    contexts := [String]{}
-    current := "use"
+    ^contexts: [String]{}
+    ^current: "use"
     loop line in text.split("\n") {
         opens: line != "" && !line.starts_with(" ") && !line.starts_with("\t") && !line.starts_with("}}") && !line.starts_with(")") && !line.starts_with("]") && !line.starts_with("//")
         if opens {
-            if line.starts_with("#Test(") {
-                current = "test"
-            } else if line.starts_with("use ") || line.starts_with("use{{") {
+            if line.starts_with("#Test(") -> current = "test" else if line.starts_with("use ") || line.starts_with("use{{") {
                 current = "use"
             } else if !line.starts_with("#") {
                 name: build_time_guard_item_name(line)
@@ -64,7 +62,7 @@ build_time_guard_names: fn(line: String, name: String) -> Bool {
     if !line.contains(name) || line.trim_start().starts_with("//") -> return false
     raw: line.bytes()
     width: name.count_bytes()
-    offset := 0
+    ^offset: 0
     loop {
         index: build_time_guard_find(line, name, offset)
         if index < 0 -> return false
@@ -81,10 +79,10 @@ build_time_guard_find: fn(text: String, needle: String, start: Int) -> Int {
     hay: text.bytes()
     want: needle.bytes()
     if want.len() == 0 -> return -1
-    at := start
+    ^at: start
     loop at + want.len() <= hay.len() {
         if hay[at] == want[0] {
-            k := 1
+            ^k: 1
             loop k < want.len() && hay[at + k] == want[k] -> k += 1
             if k == want.len() -> return at
         }
@@ -96,13 +94,19 @@ build_time_guard_find: fn(text: String, needle: String, start: Int) -> Int {
 // Every `.jet` file under `path`.
 build_time_guard_collect: fn(path: String, sources: ^[BuildTimeGuardSource]) {
     kind: build_time_guard_files.stat(path) ?? return
-    if kind.is_symlink -> return
+    if kind.is_symlink {
+        return
+    }
     if !kind.is_dir {
-        if path.ends_with(".jet") -> sources.push(BuildTimeGuardSource{path: path.copy(), text: build_time_guard_files.read(path) ?? panic("read {path}: {err}")})
+        if path.ends_with(".jet") {
+            sources.push(BuildTimeGuardSource{path: path.copy(), text: build_time_guard_files.read(path) ?? panic("read {path}: {err}")})
+        }
         return
     }
     loop child in (build_time_guard_files.list_dir(path) ?? panic("list {path}: {err}")) {
-        if child.name.starts_with(".") || child.name == "target" || child.name == "build" || child.name == "node_modules" -> next
+        if child.name.starts_with(".") || child.name == "target" || child.name == "build" || child.name == "node_modules" {
+            next
+        }
         build_time_guard_collect("{path}/{child.name}", sources)
     }
 }
@@ -110,14 +114,14 @@ build_time_guard_collect: fn(path: String, sources: ^[BuildTimeGuardSource]) {
 // The references to the helper and its callers, followed back through
 // `sources`, that come from run-time code; `reached` collects the callers.
 build_time_guard_problems: fn(sources: [BuildTimeGuardSource], reached: ^[String]) -> [String] {
-    problems := [String]{}
-    queue := [String]{BUILD_TIME_GUARD_HELPER}
-    seen := [String]{BUILD_TIME_GUARD_HELPER}
-    at := 0
+    ^problems: [String]{}
+    ^queue: [String]{BUILD_TIME_GUARD_HELPER}
+    ^seen: [String]{BUILD_TIME_GUARD_HELPER}
+    ^at: 0
     loop at < queue.len() {
         name: queue[at].copy()
         at += 1
-        named := false
+        ^named: false
         loop source in sources {
             if !source.text.contains(name) -> next
             tested: source.path.contains("/Tests/")
@@ -129,7 +133,9 @@ build_time_guard_problems: fn(sources: [BuildTimeGuardSource], reached: ^[String
                 context: contexts[index]
                 if context == ("fn:{name}") -> next
                 named = true
-                if tested || context == "test" || context == "use" || context.starts_with("run:") -> next
+                if tested || context == "test" || context == "use" || context.starts_with("run:") {
+                    next
+                }
                 if context.starts_with("fn:") {
                     caller: context.slice(3, context.len())
                     if !seen.contains(caller) {
@@ -151,9 +157,9 @@ build_time_guard_problems: fn(sources: [BuildTimeGuardSource], reached: ^[String
 
 #Test("only `#run` initializers and tests reach build_time_refused") {
     guards_enter_root()
-    sources := [BuildTimeGuardSource]{}
+    ^sources: [BuildTimeGuardSource]{}
     build_time_guard_collect(BUILD_TIME_GUARD_ROOT, sources)
-    reached := [String]{}
+    ^reached: [String]{}
     problems: build_time_guard_problems(sources, reached)
     assert(reached.len() > 0, "no function calls {BUILD_TIME_GUARD_HELPER}, so the guard checks nothing")
     assert_eq(problems.join("\n"), "")
@@ -166,14 +172,14 @@ BUILD_TIME_GUARD_SAMPLE: "use x.[build_time_refused]\n\nrows: fn(text: String) -
         BuildTimeGuardSource{path: "Compiler/A/Source/A.jet", text: BUILD_TIME_GUARD_SAMPLE},
         BuildTimeGuardSource{path: "Compiler/A/Tests/A.jet", text: "t: fn() {{ helper() }}\n"},
     }
-    reached := [String]{}
+    ^reached: [String]{}
     assert_eq(build_time_guard_problems(sources, reached).join("\n"), "")
     assert_eq(reached, [String]{"rows", "helper"})
     late: [BuildTimeGuardSource]{
         BuildTimeGuardSource{path: "Compiler/A/Source/A.jet", text: BUILD_TIME_GUARD_SAMPLE},
         BuildTimeGuardSource{path: "Compiler/B/Source/B.jet", text: "Late: struct {{\n    n: Int,\n}}\n\nrun_late: fn() -> Int {{ helper() }}\n\nimpl Late {{\n    m: fn(self) -> Int {{ rows(\"e\") }}\n}}\n"},
     }
-    reached_late := [String]{}
+    ^reached_late: [String]{}
     assert_eq(build_time_guard_problems(late, reached_late).join("\n"), "Compiler/B/Source/B.jet:8: `rows` reaches build_time_refused, but run-time code (other:impl Late {{) names it; only `#run` initializers and tests may reach it\n`run_late` reaches build_time_refused, but nothing names it, so it may be an entry point; only `#run` initializers and tests may reach it")
     assert_eq(reached_late, [String]{"rows", "helper", "run_late"})
 }

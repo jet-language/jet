@@ -90,7 +90,7 @@ Measured: struct {
 read_measured: fn(path: String) -> Measured {
     words: (files.read(path) ?? panic("cannot read {path}")).trim().split("\n").to_list()[0].split(" ").to_list()
     if words.len() != 9 -> panic("{path} holds no nine numbers")
-    numbers := [Int]{}
+    ^numbers: [Int]{}
     loop word in words -> numbers.push(Int.parse(word) ?? panic("{path} holds `{word}`, no number"))
     Measured{narrow: [Int]{numbers[0], numbers[1], numbers[2]}, wide: [Int]{numbers[3], numbers[4], numbers[5]}, wait: numbers[6], high_mhz: numbers[7], low_mhz: numbers[8]}
 }
@@ -104,7 +104,7 @@ ROUND_PARTS: 6
 read_parts: fn(path: String) -> [Int] {
     lines: (files.read(path) ?? return [Int]{}).trim().split("\n").to_list()
     if lines.len() < 2 -> return [Int]{}
-    numbers := [Int]{}
+    ^numbers: [Int]{}
     loop word in lines[1].split(" ").to_list() -> numbers.push(Int.parse(word) ?? return [Int]{})
     if numbers.len() != 3 * ROUND_PARTS -> return [Int]{}
     numbers
@@ -120,7 +120,7 @@ micros: fn(ns: Int) -> String {
 // The median of `values`; -1 when it is empty.
 median: fn(values: [Int]) -> Int {
     if values.len() == 0 -> return -1
-    sorted := values.copy()
+    ^sorted: values.copy()
     sorted.sort()
     sorted[sorted.len() /% 2]
 }
@@ -156,20 +156,20 @@ take_round: fn(group: [[Int]], kinds: [Int], parts: ^[[Int]]) -> Bool {
     if ordinal < 0 || ordinal >= kinds.len() || kinds[ordinal] > 2 -> return false
     at: kinds[ordinal] * LENS_PARTS
     // The narrow task is the one whose body none of the others shares.
-    narrow := -1
+    ^narrow: -1
     loop index in 0..<4 {
-        shared := 0
+        ^shared: 0
         loop other in 0..<4 {
             if other != index && group[other][0] == group[index][0] -> shared += 1
         }
         if shared == 0 -> narrow = index
     }
     if narrow < 0 -> return false
-    first := group[0][1]
-    last := group[0][1] + group[0][2]
-    delay_from := group[0][9]
-    delay_to := group[0][10]
-    cores := [Int]{}
+    ^first: group[0][1]
+    ^last: group[0][1] + group[0][2]
+    ^delay_from: group[0][9]
+    ^delay_to: group[0][10]
+    ^cores: [Int]{}
     loop row in group {
         first = min(first, row[1])
         last = max(last, row[1] + row[2])
@@ -219,7 +219,7 @@ report_lens: fn(tier: String, trace: String) {
         return
     }
     section: sections[1]
-    kinds := [Int]{}
+    ^kinds: [Int]{}
     listed: section.split("\"experiments\":[").to_list()
     if listed.len() > 1 {
         loop piece in listed[1].split("],\"kept_most\"").to_list()[0].split(",").to_list() {
@@ -231,11 +231,11 @@ report_lens: fn(tier: String, trace: String) {
             }
         }
     }
-    rows := [[Int]]{}
+    ^rows: [[Int]]{}
     tabled: section.split("\"rows\":[[").to_list()
     if tabled.len() > 1 {
         loop text in tabled[1].split("]],\"seen\"").to_list()[0].split("],[").to_list() {
-            row := [Int]{}
+            ^row: [Int]{}
             loop word in text.split(",").to_list() {
                 row.push(Int.parse(word) ?? panic("a causal_tasks row holds `{word}`, no number"))
             }
@@ -246,13 +246,13 @@ report_lens: fn(tier: String, trace: String) {
         }
     }
     rows.sort_by(fn(left: [Int], right: [Int]) { left[1] <=> right[1] })
-    parts := loop _part in 0..<3 * LENS_PARTS -> [Int]{}
-    groups := 0
-    kept := 0
-    index := 0
+    ^parts: loop _part in 0..<3 * LENS_PARTS -> [Int]{}
+    ^groups: 0
+    ^kept: 0
+    ^index: 0
     loop index < rows.len() {
-        end := rows[index][1] + rows[index][2]
-        after := index + 1
+        ^end: rows[index][1] + rows[index][2]
+        ^after: index + 1
         loop after < rows.len() && rows[after][1] < end {
             end = max(end, rows[after][1] + rows[after][2])
             after += 1
@@ -263,7 +263,7 @@ report_lens: fn(tier: String, trace: String) {
     }
     seen: number_after(section, "\"seen\":") ?? -1
     most: number_after(section, "\"kept_most\":") ?? -1
-    baselines := 0
+    ^baselines: 0
     loop kind in kinds {
         if kind == 0 -> baselines += 1
     }
@@ -291,8 +291,8 @@ check_bound: fn(function: String, gain: Int) -> String {
 // The integer square root of `value`, rounded up; 0 below 1.
 isqrt_up: fn(value: Int) -> Int {
     if value <= 0 -> return 0
-    root := value
-    next := (root + 1) /% 2
+    ^root: value
+    ^next: (root + 1) /% 2
     loop next < root {
         root = next
         next = (root + value /% root) /% 2
@@ -364,7 +364,7 @@ check_line: fn(lines: String, function: String, measured: [Int]) -> LineCheck {
         low: number_after(line, "\"low_tenths\":") ?? panic("no low_tenths in {line}")
         gain: number_after(line, "\"gain_tenths\":") ?? panic("no gain_tenths in {line}")
         high: number_after(line, "\"high_tenths\":") ?? panic("no high_tenths in {line}")
-        wrong := [String]{}
+        ^wrong: [String]{}
         if high - low > WIDEST {
             wrong.push("the {function} line is ranked with an interval of {low} to {high}, wider than the lens ranks")
         }
@@ -393,7 +393,7 @@ Comparison: struct {
 // lens: no truth. Else the lens claimed a gain no control can check,
 // which fails.
 file_control: fn(verdict: ^Comparison, claims: [LineCheck], what: String, loose: String?) {
-    claimless := [String]{}
+    ^claimless: [String]{}
     loop line in claims {
         if line.low <= 0 && line.high >= 0 {
             claimless.push("the {line.function} line, {line.low} to {line.high}")
@@ -420,12 +420,12 @@ said_measured: fn(function: String, measured: [Int]) -> String {
 // the other line's measured interval, and the narrow line's interval, when
 // it is ranked, moved to a gain of 0.
 check_controls: fn(narrow: LineCheck, wide: LineCheck, narrow_measured: [Int], wide_measured: [Int]) -> Comparison {
-    verdict := Comparison{wrong: [String]{}, unclaimed: [String]{}, untrue: [String]{}}
-    swapped := narrow.ranked || wide.ranked
+    ^verdict: Comparison{wrong: [String]{}, unclaimed: [String]{}, untrue: [String]{}}
+    ^swapped: narrow.ranked || wide.ranked
     if narrow.ranked && !meets(narrow.low, narrow.high, wide_measured) -> swapped = false
     if wide.ranked && !meets(wide.low, wide.high, narrow_measured) -> swapped = false
     if swapped {
-        claims := [LineCheck]{}
+        ^claims: [LineCheck]{}
         if narrow.ranked -> claims.push(narrow.copy())
         if wide.ranked -> claims.push(wide.copy())
         loose: (narrow.ranked && holds(wide_measured, narrow.gain)) || (wide.ranked && holds(narrow_measured, wide.gain))
@@ -456,7 +456,7 @@ Compared: struct {
 compare: fn(lines: String, narrow_measured: [Int], wide_measured: [Int]) -> Compared {
     narrow: check_line(lines, "narrow", narrow_measured)
     wide: check_line(lines, "wide", wide_measured)
-    verdict := check_controls(narrow, wide, narrow_measured, wide_measured)
+    ^verdict: check_controls(narrow, wide, narrow_measured, wide_measured)
     loop problem in narrow.wrong -> verdict.wrong.push(problem)
     loop problem in wide.wrong -> verdict.wrong.push(problem)
     if !narrow.ranked && !wide.ranked {
@@ -526,7 +526,7 @@ record_path: fn(tier: String, trace: String, outcome: String) {
     print(line)
     eprint(line)
     log: sys.get("JET_CAUSAL_CASE_PATHS") ?? return
-    writer := files.append(log) ?? panic("cannot open {log}: {err}")
+    ^writer: files.append(log) ?? panic("cannot open {log}: {err}")
     writer.write_bytes("{line}\n".bytes()) ?? panic("cannot write {log}: {err}")
     writer.flush() ?? panic("cannot write {log}: {err}")
 }
@@ -614,7 +614,7 @@ run: fn() {
         return
     }
     bounds: [String]{check_bound("narrow", first.narrow[1]), check_bound("narrow", last.narrow[1]), check_bound("wide", first.wide[1]), check_bound("wide", last.wide[1])}
-    wrong := [String]{}
+    ^wrong: [String]{}
     loop problem in bounds {
         if problem != "" -> wrong.push(problem)
     }

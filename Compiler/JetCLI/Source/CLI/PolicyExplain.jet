@@ -12,7 +12,7 @@ JetCLIMarkerSite: struct {
 
 jet_cli_explain_marker_site: fn(site: String) -> JetCLIMarkerSite JetCLIReadError! {
     bytes: site.bytes()
-    cut := bytes.len()
+    ^cut: bytes.len()
     loop cut > 0 {
         cut -= 1
         if (bytes[cut] == U8{58}) {
@@ -54,7 +54,7 @@ jet_cli_explain_policy_lookup: fn(key: PolicyKey, declarations: [PolicyDeclarati
 jet_cli_explain_marker_offset: fn(source: String, line: U64) -> Int Never! {
     // A user `--line 0` names no line after the first; `line - 1` on U64 would trap.
     if (line <= U64{1}) { return 0 }
-    remaining := line - U64{1}
+    ^remaining: line - U64{1}
     loop (index, byte) in source.bytes() {
         if (byte != U8{10}) { next }
         remaining -= U64{1}
@@ -65,11 +65,11 @@ jet_cli_explain_marker_offset: fn(source: String, line: U64) -> Int Never! {
 
 jet_cli_explain_loaded_policy: fn(key: PolicyKey, loaded: JetDriverSourceQueryResult, site: String?, line: U64?, color: Bool, json: Bool) -> JetCLIPlan Never! {
     if !loaded.complete {
-        stderr := ""
+        ^stderr: ""
         loop diagnostic in loaded.diagnostics -> stderr = "{stderr}{diagnostic.what}\n"
         return jet_cli_done("", stderr, JET_DRIVER_EXIT_USER_ERROR)
     }
-    declarations := [PolicyDeclaration]{}
+    ^declarations: [PolicyDeclaration]{}
     if {
         line == .Val(number) -> {
             // Marker-site selection intentionally sees only the entry module.
@@ -93,7 +93,7 @@ jet_cli_explain_loaded_policy: fn(key: PolicyKey, loaded: JetDriverSourceQueryRe
             }
         }
     }
-    sources := [PolicySourceText]{}
+    ^sources: [PolicySourceText]{}
     loop source_module in loaded.modules {
         named: loop declaration in declarations {
             if declaration.source == source_module.path {

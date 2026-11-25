@@ -77,20 +77,20 @@ ArtifactStoreConfig: struct {
     }
 
     with_cap_bytes: fn(self, cap_bytes: Int) -> ArtifactStoreConfig Never! {
-        updated := self
+        ^updated: self
         updated.cap_bytes_value = Val(cap_bytes)
         updated
     }
 
     with_reserve_bytes: fn(self, reserve_bytes: Int) -> ArtifactStoreConfig Never! {
-        updated := self
+        ^updated: self
         updated.reserve_bytes_value = reserve_bytes
         updated
     }
 
     // Set the maximum time to wait for a live lock owner.
     with_lock_wait: fn(self, lock_wait: Duration) -> ArtifactStoreConfig Never! {
-        updated := self
+        ^updated: self
         updated.lock_wait_value = lock_wait
         updated
     }
@@ -153,11 +153,11 @@ store_artifact_size_units: fn() -> [StoreArtifactSizeUnit] Never! {
 // Parse a byte size such as `4G`, `512MiB`, or a bare byte count.
 store_artifact_parse_size: fn(value: String) -> Int ArtifactStoreError! {
     // #4303: Main-approved host-emitter binding workaround; restore :: with the emitter fix.
-    trimmed := value.trim()
+    ^trimmed: value.trim()
     if trimmed == "" -> return Err(ArtifactStoreError.Config("size cannot be empty"))
     upper: store_artifact_ascii_upper(trimmed)
-    number := upper
-    multiplier := 1
+    ^number: upper
+    ^multiplier: 1
     loop unit in store_artifact_size_units() {
         if upper.ends_with(unit.suffix) {
             raw: upper.bytes()
@@ -167,7 +167,7 @@ store_artifact_parse_size: fn(value: String) -> Int ArtifactStoreError! {
         }
     }
     // #4303: Main-approved host-emitter binding workaround; restore :: with the emitter fix.
-    digits := number.trim()
+    ^digits: number.trim()
     if digits == "" || !store_artifact_all_digits(digits) {
         return Err(ArtifactStoreError.Config("invalid byte size `{trimmed}`"))
     }
@@ -195,7 +195,7 @@ store_artifact_all_digits: fn(value: String) -> Bool Never! {
 // ASCII-only uppercase (`str::to_ascii_uppercase`); other scalars unchanged.
 store_artifact_ascii_upper: fn(value: String) -> String Never! {
     raw: value.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in raw {
         code: Int{byte}
         out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)

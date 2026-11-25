@@ -86,7 +86,7 @@ option: fn(args: [String], name: String) -> String? {
 }
 
 path_parts: fn(path: String) -> [String] {
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in path.split("/").to_list() {
         if part != "" -> parts.push(part.copy())
     }
@@ -94,7 +94,7 @@ path_parts: fn(path: String) -> [String] {
 }
 
 serve_one: fn(root: ServeRoot, listener: TCPListener) {
-    stream := net.tcp_accept(listener) ?? return
+    ^stream: net.tcp_accept(listener) ?? return
     reply: if request_target(stream) == {
         .Val(target) -> answer(root, target)
         None -> refused(400)
@@ -105,7 +105,7 @@ serve_one: fn(root: ServeRoot, listener: TCPListener) {
 
 // The request target of the first request line, once the whole head arrived.
 request_target: fn(stream: ^TCPStream) -> String? {
-    head := [U8]{}
+    ^head: [U8]{}
     loop head.len() < C_MAX_HEAD_BYTES {
         // A silent client is given up on after 5 s.
         chunk: stream.read_bytes(4096, deadline: 5s) ?? return None
@@ -171,7 +171,7 @@ safe_parts: fn(root_parts: [String], target: String) -> [String]? {
         if letter && bytes.len() > start + 1 && bytes[start + 1] == (U8{58}) -> return None
     }
     relative: if decoded == "/" -> "/index.html" else -> decoded.copy()
-    resolved := root_parts.copy()
+    ^resolved: root_parts.copy()
     loop part in ".{relative}".split("/").to_list() {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -184,7 +184,7 @@ safe_parts: fn(root_parts: [String], target: String) -> [String]? {
     loop index in 0..<root_parts.len() {
         if resolved[index] != root_parts[index] -> return None
     }
-    inside := [String]{}
+    ^inside: [String]{}
     loop index in root_parts.len()..<resolved.len() -> inside.push(resolved[index].copy())
     Val(inside)
 }
@@ -240,8 +240,8 @@ open_failed: fn(candidate: String) -> Opened {
 
 file_reply: fn(file: ^^HeldFile, served: String) -> Reply {
     if !file.stat.is_file || file.stat.links != 1 -> return refused(400)
-    held := file
-    body := [U8]{}
+    ^held: file
+    ^body: [U8]{}
     loop {
         chunk: held.reader.read_bytes(C_READ_BYTES) ?? return refused(404)
         if chunk.len() == 0 -> break

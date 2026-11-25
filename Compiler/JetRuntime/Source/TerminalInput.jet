@@ -12,7 +12,7 @@
 // out before it waits for more input, a prompt on a terminal and a filter's
 // lines on a pipe alike, while a pipe-to-pipe copy still writes stdout once
 // per buffer.
-terminal_input_root := I64{0}
+^terminal_input_root: I64{0}
 
 TERM_INPUT_CAPACITY: I64{65536}
 
@@ -46,7 +46,7 @@ term_input_consume: fn(count: I64) {
 // stdout's line split. Eight bytes a step: a word holds an LF exactly when
 // its xor with 0x0A..0A has a zero byte (the SWAR zero-byte test).
 rt_line_run: fn(start: I64, count: I64) -> I64 {
-    at := I64{0}
+    ^at: I64{0}
     words: count - count % I64{8}
     loop at < words {
         word: rt_text_word(wrapping(start + at)) ~ I64{723401728380766730}
@@ -68,7 +68,7 @@ rt_line_run: fn(start: I64, count: I64) -> I64 {
 // (std's stdin handle_ebadf).
 term_input_fill: fn(retry: Bool, ebadf_eof: Bool) -> I64 {
     root: terminal_input_root
-    buffer := rt_text_word(wrapping(root + I64{8}))
+    ^buffer: rt_text_word(wrapping(root + I64{8}))
     if (buffer == I64{0}) {
         buffer = jet_rt_alloc(TERM_INPUT_CAPACITY, I64{8})
         rt_text_store(wrapping(root + I64{8}), buffer)
@@ -109,7 +109,7 @@ term_input_take: fn(into: I64, capacity: I64) -> I64 {
         return
     }
     value: jet_rt_string_builder_new()
-    failure := I64{0}
+    ^failure: I64{0}
     sync_mutex_lock(terminal_input_root)
     loop {
         buffered: term_input_buffered()

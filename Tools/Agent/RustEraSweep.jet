@@ -122,7 +122,7 @@ git_lines: fn(argv: [String]) -[Exec, IO, Time.Wait]> [String] SweepError! {
     if receipt.code != 0 {
         return Err(SweepError{message: "{argv.join(" ")} failed ({receipt.code}): {receipt.errors}"})
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in receipt.output.split("\n") {
         if line != "" -> lines.push(line.copy())
     }
@@ -150,8 +150,8 @@ closes_strings: fn(prefix: String) -> Bool Never! {
 // The byte offset of a line's comment: the first `//` that starts the line or
 // follows whitespace outside a string literal; -1 when there is none.
 comment_start: fn(line: String) -> Int Never! {
-    prefix := ""
-    first := true
+    ^prefix: ""
+    ^first: true
     loop part in line.split("//") {
         if !first {
             starts: prefix.trim() == "" || prefix.ends_with(" ") || prefix.ends_with("\t")
@@ -187,7 +187,7 @@ capitalized: fn(text: String) -> String Never! {
 
 // `edit` applied to the text outside code spans.
 outside_spans: fn(text: String, edit: fn(String) -> String Never!) -> String Never! {
-    parts := text.split("`").to_list()
+    ^parts: text.split("`").to_list()
     loop index in 0..<parts.len() {
         if index % 2 == 0 -> parts[index] = edit(parts[index])
     }
@@ -212,9 +212,13 @@ lead_replacement: fn(start: String, codes: String, next: String) -> String Never
 // clause when the rest stands alone, else only its error codes, else nothing.
 paren_replacement: fn(space: String, text: String) -> String Never! {
     inner: rust_clauses_cut(rust_leads_cut(text)).trim()
-    if inner != "" && !NAMES_RUST_EXACT.is_match(inner) && !text.trim().starts_with("Rust") -> return "{space}({paren_text(inner)})"
-    if inner != "" && !NAMES_RUST_EXACT.is_match(inner) -> return "{space}({lowered_first(paren_text(inner))})"
-    kept := [String]{}
+    if inner != "" && !NAMES_RUST_EXACT.is_match(inner) && !text.trim().starts_with("Rust") {
+        return "{space}({paren_text(inner)})"
+    }
+    if inner != "" && !NAMES_RUST_EXACT.is_match(inner) {
+        return "{space}({lowered_first(paren_text(inner))})"
+    }
+    ^kept: [String]{}
     loop part in PAREN_PART.split(text) {
         if !NAMES_RUST_EXACT.is_match(part) -> kept.push(part.trim())
     }
@@ -234,21 +238,25 @@ rust_clauses_cut: fn(text: String) -> String Never! {
 // A parenthetical's kept text, without a leading `:`, `,` or `;` that a cut
 // clause left behind.
 paren_text: fn(text: String) -> String Never! {
-    if text.starts_with(":") || text.starts_with(",") || text.starts_with(";") -> return cut(text, 1, text.count_bytes()).trim()
+    if text.starts_with(":") || text.starts_with(",") || text.starts_with(";") {
+        return cut(text, 1, text.count_bytes()).trim()
+    }
     text.copy()
 }
 
 // `text` with a recapitalized first word lowered again.
 lowered_first: fn(text: String) -> String Never! {
     head: text.bytes()
-    if head.len() < 2 || head[0] < 65 || head[0] > 90 || head[1] < 97 || head[1] > 122 || text.starts_with("Jet") -> return text.copy()
+    if head.len() < 2 || head[0] < 65 || head[0] > 90 || head[1] < 97 || head[1] > 122 || text.starts_with("Jet") {
+        return text.copy()
+    }
     "{cut(text, 0, 1).lower()}{cut(text, 1, text.count_bytes())}"
 }
 
 // `text` without its provenance leads ("Rust `name`:" at a sentence start).
 rust_leads_cut: fn(text: String) -> String Never! {
-    out := text.copy()
-    rounds := 0
+    ^out: text.copy()
+    ^rounds: 0
     loop rounds < 4 && LEAD.is_match(out) {
         out = LEAD.replace_all_with(out, fn(found) { lead_replacement(found.group(1) ?? "", kept_codes(found.group(2) ?? ""), found.group(3) ?? "") })
         rounds += 1
@@ -264,13 +272,15 @@ rust_leads_cut: fn(text: String) -> String Never! {
 // The mechanical rewrite of one paragraph of comment text; "" deletes it.
 rewrite: fn(text: String) -> String Never! {
     if PURE.is_match(text.trim()) || NO_TWIN.is_match(text.trim()) -> return ""
-    out := PAREN.replace_all_with(text, fn(found) { paren_replacement(found.group(1) ?? "", found.group(2) ?? "") })
+    ^out: PAREN.replace_all_with(text, fn(found) { paren_replacement(found.group(1) ?? "", found.group(2) ?? "") })
     out = rust_clauses_cut(rust_leads_cut(out))
     out = outside_spans(out, fn(part) { SPACE_BEFORE_MARK.replace(part, "$1") })
     out = outside_spans(out, fn(part) { COLON_AFTER_STOP.replace_all_with(part, fn(found) { "{found.group(1) ?? ""} {(found.group(2) ?? "").upper()}" }) })
     out = outside_spans(out, fn(part) { SPACES.replace(part, " ") })
     out = out.trim()
-    if out.starts_with(":") || out.starts_with(",") || out.starts_with(";") -> out = capitalized(cut(out, 1, out.count_bytes()).trim())
+    if out.starts_with(":") || out.starts_with(",") || out.starts_with(";") {
+        out = capitalized(cut(out, 1, out.count_bytes()).trim())
+    }
     out = CODES_LEAD.replace(out, "$1:")
     out = SPANS_LEAD.replace(out, "$1:")
     outside_spans(out, fn(part) { COMMA_AFTER_MARK.replace(part, "$1") })
@@ -278,8 +288,8 @@ rewrite: fn(text: String) -> String Never! {
 
 // `text` wrapped greedily to `width` columns; a code span is never split.
 wrap: fn(text: String, width: Int) -> [String] Never! {
-    words := [String]{}
-    open := false
+    ^words: [String]{}
+    ^open: false
     loop piece in text.split(" ") {
         if piece == "" && !open -> next
         ticks: piece.split("`").len() - 1
@@ -292,8 +302,8 @@ wrap: fn(text: String, width: Int) -> [String] Never! {
         words.push(piece.copy())
         if ticks % 2 == 1 -> open = true
     }
-    lines := [String]{}
-    line := ""
+    ^lines: [String]{}
+    ^line: ""
     loop word in words {
         if line != "" && line.count_bytes() + 1 + word.count_bytes() <= width {
             line = "{line} {word}"
@@ -317,7 +327,7 @@ in_block: fn(lines: [String], at: Int, indent: String, marker: String) -> Bool N
 // Rust and verbatim otherwise; false when it needs a person: its lines are
 // indented, or it still names Rust after the rewrite.
 sweep_paragraph: fn(paragraph: [String], lead: String, width: Int, rewritten: ^[String]) -> Bool Never! {
-    joined := ""
+    ^joined: ""
     loop part in paragraph {
         joined = if joined == "" -> part.trim() else -> "{joined} {part.trim()}"
     }
@@ -329,7 +339,9 @@ sweep_paragraph: fn(paragraph: [String], lead: String, width: Int, rewritten: ^[
         if !part.starts_with(" ") || part.starts_with("  ") -> return false
     }
     replaced: rewrite(joined)
-    if NAMES_RUST.is_match(replaced.lower()) || (replaced != "" && !WORD.is_match(replaced)) -> return false
+    if NAMES_RUST.is_match(replaced.lower()) || (replaced != "" && !WORD.is_match(replaced)) {
+        return false
+    }
     loop wrapped in wrap(replaced, width) -> rewritten.push("{lead} {wrapped}")
     true
 }
@@ -340,20 +352,20 @@ sweep_block: fn(path: String, lines: [String], at: Int, done: ^[Bool], swept: ^S
     indent: cut(lines[at], 0, cs)
     marker_found: COMMENT_MARKER.match(cut(lines[at], cs, lines[at].count_bytes())) ?? return
     marker: marker_found.group(1) ?? "//"
-    first := at
+    ^first: at
     loop in_block(lines, first - 1, indent, marker) -> first -= 1
-    last := at
+    ^last: at
     loop in_block(lines, last + 1, indent, marker) -> last += 1
-    widest := 80
+    ^widest: 80
     loop index in first..<(last + 1) {
         done[index] = true
         if lines[index].count_bytes() > widest -> widest = lines[index].count_bytes()
     }
     width: widest - indent.count_bytes() - marker.count_bytes() - 1
     lead: "{indent}{marker}"
-    rewritten := [String]{}
-    paragraph := [String]{}
-    bad := false
+    ^rewritten: [String]{}
+    ^paragraph: [String]{}
+    ^bad: false
     loop index in first..<(last + 2) {
         text: if index <= last -> cut(lines[index], lead.count_bytes(), lines[index].count_bytes()) else -> ""
         if index <= last && text.trim() != "" {
@@ -370,27 +382,33 @@ sweep_block: fn(path: String, lines: [String], at: Int, done: ^[Bool], swept: ^S
         if index <= last -> rewritten.push(lead.copy())
     }
     if bad {
-        block := [String]{"{path}:{first + 1}-{last + 1}:"}
+        ^block: [String]{"{path}:{first + 1}-{last + 1}:"}
         loop index in first..<(last + 1) -> block.push(lines[index].copy())
         swept.residue.push(block.join("\n"))
         return
     }
     // Collapse doubled, leading and trailing empty comment lines.
-    collapsed := [String]{}
+    ^collapsed: [String]{}
     loop row in rewritten {
         empty: row.trim() == marker
-        if empty && (collapsed.len() == 0 || collapsed[collapsed.len() - 1].trim() == marker) -> next
+        if empty && (collapsed.len() == 0 || collapsed[collapsed.len() - 1].trim() == marker) {
+            next
+        }
         collapsed.push(row.copy())
     }
-    loop collapsed.len() > 0 && collapsed[collapsed.len() - 1].trim() == marker -> collapsed.pop().drop("a trailing empty comment line")
-    unchanged := collapsed.len() == last - first + 1
+    loop collapsed.len() > 0 && collapsed[collapsed.len() - 1].trim() == marker {
+        collapsed.pop().drop("a trailing empty comment line")
+    }
+    ^unchanged: collapsed.len() == last - first + 1
     if unchanged {
         loop index in 0..<collapsed.len() {
             if collapsed[index] != lines[first + index] -> unchanged = false
         }
     }
-    if unchanged -> return
-    end := last + 1
+    if unchanged {
+        return
+    }
+    ^end: last + 1
     if collapsed.len() == 0 && first > 0 && lines[first - 1].trim() == "" && last + 1 < lines.len() && lines[last + 1].trim() == "" {
         end = last + 2
     }
@@ -415,8 +433,8 @@ sweep_trailing: fn(path: String, lines: [String], at: Int, swept: ^SweepFile) Ne
 // The rewrites and the residue of one file, from the 1-based lines whose
 // comment names Rust.
 sweep_file: fn(path: String, lines: [String], hits: [Int]) -> SweepFile Never! {
-    swept := SweepFile{hunks: [SweepHunk]{}, residue: [String]{}}
-    done := [Bool]{}
+    ^swept: SweepFile{hunks: [SweepHunk]{}, residue: [String]{}}
+    ^done: [Bool]{}
     loop _ in 0..<lines.len() -> done.push(false)
     loop hit in hits {
         at: hit - 1
@@ -434,8 +452,8 @@ sweep_file: fn(path: String, lines: [String], hits: [Int]) -> SweepFile Never! {
 
 // `lines` with every hunk applied; hunks are in ascending, disjoint order.
 apply_hunks: fn(lines: [String], hunks: [SweepHunk]) -> [String] Never! {
-    out := [String]{}
-    next_line := 1
+    ^out: [String]{}
+    ^next_line: 1
     loop hunk in hunks {
         loop next_line < hunk.start {
             out.push(lines[next_line - 1].copy())
@@ -453,9 +471,9 @@ apply_hunks: fn(lines: [String], hunks: [SweepHunk]) -> [String] Never! {
 
 // Each source file's 1-based lines whose comment names Rust.
 naming_hits: fn() -[Exec, IO, Time.Wait]> [String:[Int]] SweepError! {
-    argv := [String]{"git", "grep", "-n", "-I", "-i", "-w", "-e", "rust", "--"}
+    ^argv: [String]{"git", "grep", "-n", "-I", "-i", "-w", "-e", "rust", "--"}
     loop root in SWEEP_ROOTS -> argv.push(root)
-    hits := [String:[Int]]{}
+    ^hits: [String:[Int]]{}
     loop row in git_lines(argv) ?? return Err(err) {
         location: row.partition(":")
         rest: location.tail.partition(":")
@@ -463,7 +481,7 @@ naming_hits: fn() -[Exec, IO, Time.Wait]> [String:[Int]] SweepError! {
         cs: comment_start(rest.tail)
         if cs < 0 || !names_rust(location.head, cut(rest.tail, cs, rest.tail.count_bytes())) -> next
         number: Int.parse(rest.head) ?? next
-        rows := hits.get(location.head) ?? [Int]{}
+        ^rows: hits.get(location.head) ?? [Int]{}
         rows.push(number)
         hits[location.head] = rows
     }
@@ -472,11 +490,11 @@ naming_hits: fn() -[Exec, IO, Time.Wait]> [String:[Int]] SweepError! {
 
 sweep_main: fn(write: Bool) -[Exec, FS, IO, Time.Wait]> Int SweepError! {
     hits: naming_hits() ?? return Err(err)
-    paths := hits.keys().to_list()
+    ^paths: hits.keys().to_list()
     paths.sort()
-    rewritten := 0
-    changed := 0
-    residue := 0
+    ^rewritten: 0
+    ^changed: 0
+    ^residue: 0
     loop path in paths {
         text: files.read(path) ?? return Err(SweepError{message: "cannot read {path}: {err}"})
         lines: text.split("\n").to_list()

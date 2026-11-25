@@ -1,10 +1,12 @@
 Retain: trait {
     saved: fn(self) -> Bool,
-    evictable: fn(self) -> Bool { !self.saved() }
+    evictable: fn(self) -> Bool {
+        !self.saved()
+    }
 }
 
 count_evictable: fn<I: Retain>(items: [I]) -> Int {
-    count := 0
+    ^count: 0
     loop item in items {
         if item.evictable() -> count += 1
     }

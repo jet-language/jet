@@ -33,7 +33,7 @@ expr_source_end: fn(tables: ASTTables, expr: ExprNode) -> Int {
 // parentheses the initializer leaves open.
 binding_source_span: fn(tables: ASTTables, src: String, binding: Binding) -> Span {
     bytes: src.bytes()
-    init_end := expr_source_end(tables, binding.init)
+    ^init_end: expr_source_end(tables, binding.init)
     loop init_end < bytes.len() && is_space_byte(Int{bytes[init_end]}) -> init_end += 1
     if init_end < bytes.len() && bytes[init_end] == 40 -> init_end += 1
     init_span: span_through_closing_parens(src, Span{start: ast_expr_span(tables, binding.init).start, end: init_end})
@@ -42,7 +42,7 @@ binding_source_span: fn(tables: ASTTables, src: String, binding: Binding) -> Spa
 
 binding_init_span: fn(tables: ASTTables, src: String, binding: Binding) -> Span {
     end: expr_source_end(tables, binding.init)
-    start := if binding.sigil_span == .Val(sigil) -> sigil.end else -> ast_expr_span(tables, binding.init).start
+    ^start: if binding.sigil_span == .Val(sigil) -> sigil.end else -> ast_expr_span(tables, binding.init).start
     bytes: src.bytes()
     loop start < end && start < bytes.len() && is_space_byte(Int{bytes[start]}) -> start += 1
     Span{start: start, end: end}
@@ -96,7 +96,7 @@ project_value_node: fn(g: ^GraphBuilder, index: SemIndex, src: String, expr: Exp
             key: getter_key(index, name, span)
             if g.getter_pins.get(key) == .Val(pin) -> return Val(pin)
             base_node_id: "{g.graph_id}:value:get:{canvas_ident_fragment(name)}"
-            node_id := base_node_id
+            ^node_id: base_node_id
             loop node in g.nodes {
                 if node.id == base_node_id && node.span != span {
                     node_id = "{base_node_id}:{span.start}-{span.end}"
@@ -153,7 +153,7 @@ method_is_pure: fn(index: SemIndex, span: Span) -> Bool Never! {
 // The name with each character outside ASCII letters, digits and `_` spelled
 // as one `_`.
 canvas_ident_fragment: fn(name: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in name.bytes() {
         // A UTF-8 continuation byte belongs to the character its lead byte began.
         if b >= 128 && b < 192 -> next
@@ -203,7 +203,7 @@ project_expr_node: fn(g: ^GraphBuilder, index: SemIndex, src: String, expr: Expr
             node_id: "{g.graph_id}:expr:{ordinal}:method:{method}"
             variant_like: starts_uppercase(method)
             archetype: if variant_like || method_is_pure(index, method_span) -> "function_pure" else -> "function_exec"
-            affordances := [String]{"insert_call", "source_jump"}
+            ^affordances: [String]{"insert_call", "source_jump"}
             if ((method == "image" || method == "sound") && game_assets_receiver(g.tables, receiver)) || method == "component" {
                 affordances.push("edit_game_selection")
             }

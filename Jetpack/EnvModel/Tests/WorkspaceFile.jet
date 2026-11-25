@@ -53,13 +53,13 @@ envmodel_test_load_is_none: fn(cache: ^WorkspaceDeclarationCache, dir: String) -
 }
 
 envmodel_test_member_names: fn(plan: WorkspacePlan) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop member in plan.members -> names.push(member.name)
     names
 }
 
 envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
-    paths := [String]{}
+    ^paths: [String]{}
     loop member in plan.members -> paths.push(member.path)
     paths
 }
@@ -235,8 +235,8 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
     plan: envmodel_workspace_evaluate("workspace: module {{ members: find(\"./packages\") }}\n", tmp) ?? panic("should succeed")
     assert_eq(envmodel_test_member_names(plan), [String]{"hello", "ranker"})
     paths: envmodel_test_member_paths(plan)
-    has_hello := false
-    has_ranker := false
+    ^has_hello: false
+    ^has_ranker: false
     loop path in paths {
         if path.contains("hello") -> has_hello = true
         if path.contains("ranker") -> has_ranker = true
@@ -260,7 +260,7 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
 }
 
 #Test("workspace metadata must be regular and not symlinked") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     if sys.family() == "windows" {
         return
     }
@@ -295,7 +295,7 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
 // authority, while only `workspace.jet` provides the member index.
 
 #Test("workspace module discovered in arbitrary filename") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     dir: envmodel_test_workspace_dir("ws-arbitrary")
     files.write(files.join(dir, "repo-index.jet"), "workspace: module {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("authority source")
     assert(envmodel_test_load_is_none(cache, dir), "authority metadata is not the index")
@@ -305,7 +305,7 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
 }
 
 #Test("malformed arbitrary workspace declaration is not absent") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     dir: envmodel_test_workspace_dir("ws-arbitrary-malformed")
     files.write(files.join(dir, "repo-index.jet"), "workspace: module {{ members: [ }}\n") ?? panic("malformed declaration")
     failed: if envmodel_workspace_load(cache, dir) == {
@@ -316,14 +316,14 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
 }
 
 #Test("workspace module discovered in pkg jet") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     dir: envmodel_test_workspace_dir("ws-in-pkg")
     files.write(files.join(dir, PAYLOAD_FILE), "workspace: module {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("payload source")
     assert(envmodel_test_load_is_none(cache, dir), "authority metadata is not the index")
 }
 
 #Test("workspace jet and discovered file are e1239") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     dir: envmodel_test_workspace_dir("ws-canonical-wins")
     envmodel_test_write_package(dir, "packages/hello", "name: \"hello\"\n")
     files.write(files.join(dir, WORKSPACE_FILE), "workspace: module {{ members: find(\"./packages\") }}\n") ?? panic("workspace source")
@@ -336,7 +336,7 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
 }
 
 #Test("two discovered workspace declarations are e1239") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     dir: envmodel_test_workspace_dir("ws-ambiguous")
     files.write(files.join(dir, "a.jet"), "workspace: module {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("first declaration")
     files.write(files.join(dir, "b.jet"), "workspace: module {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("second declaration")
@@ -346,7 +346,7 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
 }
 
 #Test("no workspace anywhere is none") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     dir: envmodel_test_workspace_dir("ws-none")
     files.write(files.join(dir, "env.jet"), "env.dev: module {{ }}\n") ?? panic("env source")
     assert(envmodel_test_load_is_none(cache, dir))

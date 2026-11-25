@@ -19,19 +19,19 @@ BOARD: Shared{Board{tasks: 3, runs: 0}}
 // The task count of one board, counting its own runs.
 open_tasks: fn(board: String) -[DB.Read]> Int BoardError! {
     if board == "" -> return Err(BoardError.NoBoard)
-    state := BOARD.guard_edit()
+    ^state: BOARD.guard_edit()
     state.value.runs += 1
     if board == "crewboard" -> state.value.tasks else -> 0
 }
 
 runs: fn() -> Int {
-    state := BOARD.guard_edit()
+    ^state: BOARD.guard_edit()
     state.value.runs
 }
 
 // One write: a new task, and the invalidation a database write makes.
 add_task: fn() {
-    state := BOARD.guard_edit()
+    ^state: BOARD.guard_edit()
     state.value.tasks += 1
     app.invalidate(open_tasks, "crewboard")
 }
@@ -51,7 +51,7 @@ run: fn() {
     print("first read: {shown(app.state(board))}, runs {runs()}")
     // A burst of writes between two reads costs one re-run, whoever reads.
     loop _ in 0..<500 -> add_task()
-    last := ""
+    ^last: ""
     loop _ in 0..<3 -> last = shown(app.state(app.live(open_tasks, "crewboard")))
     print("500 writes, then three subscribers: {last}, runs {runs()}")
     // A write before every read: the server re-runs 1000 bindings in this

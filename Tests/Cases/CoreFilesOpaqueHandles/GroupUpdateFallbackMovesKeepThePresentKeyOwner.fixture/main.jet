@@ -2,7 +2,7 @@ use files: core.files
 
 // Lock descriptors this process holds open (fds whose target ends `.lk`).
 held: fn() -[FS]> Int {
-    count := 0
+    ^count: 0
     names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
     loop entry in names {
         target: files.read_link(entry.path) ?? ""
@@ -21,10 +21,10 @@ consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 // is present, the parameter still owns the lock, which closes as this
 // returns.
 group_update: fn(l: ^^FileLock, seeded: Bool) -[FS]> Int {
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     if seeded -> counts["k"] = 10
     key: "k"
-    total := counts.get(key) ?? consume_lock(l.move())
+    ^total: counts.get(key) ?? consume_lock(l.move())
     total += 1
     seen: total + held()
     counts[key] = total

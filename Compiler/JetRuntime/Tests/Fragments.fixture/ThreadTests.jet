@@ -5,7 +5,7 @@ thread_test_require: fn(ok: Bool) {
     if ok {
         return
     }
-    _ := os_exit_group_i64(I64{1})
+    ^_: os_exit_group_i64(I64{1})
     loop {
 
     }
@@ -31,7 +31,7 @@ thread_test_require: fn(ok: Bool) {
 }
 
 thread_test_identity: fn() {
-    tid := I64{0}
+    ^tid: I64{0}
     tid = os_gettid_i64()
     thread_test_require(sync_load(thread_base() + I64{8}) == tid)
 }
@@ -39,7 +39,7 @@ thread_test_identity: fn() {
 #Export(c) jet_rt_thread_fixture_parent: fn() -> I64 { thread_base() }
 
 #Export(c) jet_rt_thread_fixture_inherited_base: fn(scratch: I64, expected: I64) {
-    status := I64{0}
+    ^status: I64{0}
     status = os_arch_prctl_i64(I64{4100}, scratch)
     thread_test_require(status == I64{0} && sync_load(scratch) == expected)
 }
@@ -74,11 +74,11 @@ thread_test_identity: fn() {
         sync_once_complete(pair + I64{32})
     }
     thread_test_require(sync_load(pair + I64{40}) == I64{73})
-    round := I64{0}
+    ^round: I64{0}
     loop round < (I64{1000000}) {
         sync_mutex_lock(pair)
         thread_test_require(!sync_mutex_try_lock(pair))
-        loop sync_load(pair + I64{16}) != id -> _ := sync_cond_wait(pair + I64{8}, pair, I64{-1})
+        loop sync_load(pair + I64{16}) != id -> ^_: sync_cond_wait(pair + I64{8}, pair, I64{-1})
         sync_store(pair + I64{24}, sync_load(pair + I64{24}) + I64{1})
         sync_store(pair + I64{16}, I64{1} - id)
         sync_cond_notify_one(pair + I64{8})
@@ -92,7 +92,7 @@ thread_test_identity: fn() {
 #Export(c) jet_rt_thread_fixture_park_worker: fn(state: I64) -> I64 {
     parker: sync_load(state)
     notifier: sync_load(state + I64{8})
-    round := I64{0}
+    ^round: I64{0}
     loop round < (I64{100000}) {
         sync_park(parker, I64{-1})
         // The acknowledgment is a second ParkSlot, so repeated notifications
@@ -105,13 +105,13 @@ thread_test_identity: fn() {
 
 #Export(c) jet_rt_thread_fixture_clone_worker: fn(state: I64) -> I64 {
     // A raw clone inherits GS and FS, but its bootstrap ignored the old base.
-    _ := jet_rt_thread_fixture_attached_child(sync_load(state + I64{8}))
+    ^_: jet_rt_thread_fixture_attached_child(sync_load(state + I64{8}))
     key: sync_load(state)
     jet_rt_tls_set(key, state)
     thread_test_require(jet_rt_tls_get(key) == state)
     sync_store(state + I64{8}, thread_base())
     sync_store(state + I64{16}, sync_load(thread_base() + I64{8}))
-    _ := os_rt_sigprocmask_i64(I64{0}, I64{0}, state + I64{24}, I64{8})
+    ^_: os_rt_sigprocmask_i64(I64{0}, I64{0}, state + I64{24}, I64{8})
     I64{41}
 }
 
@@ -127,7 +127,7 @@ thread_test_closure: fn(code: I64, label: I64) -> I64 {
 thread_test_pairs: fn(entry: I64, destructor: I64) {
     first: jet_rt_tls_key_new(thread_test_closure(destructor, I64{1}))
     second: jet_rt_tls_key_new(thread_test_closure(destructor, I64{2}))
-    threads := I64{2}
+    ^threads: I64{2}
     loop threads <= (I64{64}) {
         pairs: threads /% I64{2}
         states: jet_rt_alloc(pairs * I64{48}, I64{8})
@@ -135,7 +135,7 @@ thread_test_pairs: fn(entry: I64, destructor: I64) {
         handles: jet_rt_alloc(threads * I64{8}, I64{8})
         thread_zero(states, pairs * I64{48})
         thread_zero(descriptors, threads * I64{56})
-        index := I64{0}
+        ^index: I64{0}
         loop index < threads {
             descriptor: descriptors + index * I64{56}
             sync_store(descriptor, states + (index /% I64{2}) * I64{48})
@@ -192,12 +192,10 @@ thread_test_parks: fn(entry: I64, detached: Bool) {
     handle: thread_spawn(entry, state)
     thread_test_require(handle > I64{0})
     if detached -> thread_test_require(thread_detach(handle) == I64{0})
-    round := I64{0}
+    ^round: I64{0}
     loop round < (I64{100000}) {
         sync_park_wake(parker)
-        if (round % I64{2} == I64{0}) {
-            _ := os_sched_yield_i64()
-        }
+        if (round % I64{2} == I64{0}) { ^_: os_sched_yield_i64() }
         sync_park(notifier, I64{-1})
         round += I64{1}
     }
@@ -232,7 +230,7 @@ thread_test_clone: fn(entry: I64) {
     thread_test_require(thread_base() == parent && jet_rt_tls_get(key) == I64{0})
     // The child ran its entry under the spawner's signal mask.
     own: jet_rt_alloc(I64{8}, I64{8})
-    _ := os_rt_sigprocmask_i64(I64{0}, I64{0}, own, I64{8})
+    ^_: os_rt_sigprocmask_i64(I64{0}, I64{0}, own, I64{8})
     thread_test_require(sync_load(own) == sync_load(state + I64{24}))
     jet_rt_free(own, I64{8}, I64{8})
     jet_rt_free(state, I64{40}, I64{8})
@@ -275,12 +273,12 @@ thread_test_registry_check: fn(slots: I64, count: I64) {
     live: wrapping(thread_tls_registry + I64{64})
     length: sync_load(live)
     data: sync_load(wrapping(live + I64{16}))
-    fakes := I64{0}
-    at := I64{0}
+    ^fakes: I64{0}
+    ^at: I64{0}
     loop at < length {
         tcb: sync_load(wrapping(data + (at + I64{1}) * I64{8}))
         thread_test_require(sync_load(wrapping(tcb + THREAD_TCB_ROW)) == at)
-        slot := I64{0}
+        ^slot: I64{0}
         loop slot < count {
             if (sync_load(wrapping(slots + slot * I64{8})) == tcb) { fakes += I64{1} }
             slot += I64{1}
@@ -288,7 +286,7 @@ thread_test_registry_check: fn(slots: I64, count: I64) {
         at += I64{2}
     }
     sync_mutex_unlock(thread_tls_registry)
-    expected := I64{0}
+    ^expected: I64{0}
     at = I64{0}
     loop at < count {
         if (sync_load(wrapping(slots + at * I64{8})) != I64{0}) { expected += I64{1} }
@@ -304,7 +302,7 @@ thread_test_registry_rows: fn() {
     count: I64{256}
     slots: jet_rt_alloc(count * I64{8}, I64{8})
     thread_zero(slots, count * I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         tcb: jet_rt_alloc(I64{128}, I64{64})
         thread_zero(tcb, I64{128})
@@ -316,8 +314,8 @@ thread_test_registry_rows: fn() {
         at += I64{1}
     }
     thread_test_registry_check(slots, count)
-    seed := I64{12345}
-    steps := I64{0}
+    ^seed: I64{12345}
+    ^steps: I64{0}
     loop steps < (I64{4096}) {
         seed = (seed * I64{1103515245} + I64{12345}) & I64{2147483647}
         pick: (seed >> I64{8}) % count
@@ -365,7 +363,7 @@ thread_test_registry_rows: fn() {
     thread_test_inherited(sync_load(callbacks + I64{48}))
     thread_test_registry_rows()
     #Unsafe("heap-free fixture success line is one eight-byte write") {
-        _ := os_write_word_i64(I64{1}, I64{2932874797083764}, I64{7})
+        ^_: os_write_word_i64(I64{1}, I64{2932874797083764}, I64{7})
     }
     I64{0}
 }

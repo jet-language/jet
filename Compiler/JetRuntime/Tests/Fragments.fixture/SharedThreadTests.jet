@@ -8,7 +8,7 @@
 }
 
 #Export(c) jet_rt_shared_tls_fixture_site_worker: fn(site: I64) -> I64 {
-    loop sync_load(site + I64{8}) == (I64{0}) -> _ := sync_wait(site + I64{8}, I64{0}, I64{-1})
+    loop sync_load(site + I64{8}) == (I64{0}) -> ^_: sync_wait(site + I64{8}, I64{0}, I64{-1})
     jet_rt_tls_shared_key(site, I64{1})
 }
 
@@ -27,7 +27,7 @@
     thread_zero(site, I64{16})
     before: sync_load(thread_tls_registry + I64{8})
     handles: jet_rt_alloc(I64{512}, I64{8})
-    worker := I64{0}
+    ^worker: I64{0}
     loop worker < (I64{64}) {
         handle: thread_spawn(site_worker, site)
         thread_test_require(handle > I64{0})
@@ -47,7 +47,7 @@
     jet_rt_free(handles, I64{512}, I64{8})
     key: jet_rt_tls_shared_key(site, I64{1})
     thread_test_require(key == before + I64{1})
-    repeat := I64{0}
+    ^repeat: I64{0}
     loop repeat < (I64{10000}) {
         thread_test_require(jet_rt_tls_shared_key(site, I64{1}) == key)
         repeat += I64{1}

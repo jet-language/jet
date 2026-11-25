@@ -97,7 +97,7 @@ read_tree: fn(path: String) -[FS]> Dyn Never! {
 object: fn(entries: [String:Dyn]) -> Dyn Never! { Dyn.Object(entries.copy()) }
 
 seed_bytes: fn(byte: Int) -> [U8] Never! {
-    seed := [U8]{}
+    ^seed: [U8]{}
     loop _ in 0..<32 -> seed.push(U8{byte})
     seed
 }
@@ -210,7 +210,7 @@ publish: fn(fixture: Fixture, dry_run: Bool{false}) -[FS, Env, Exec, Time, Time.
 }
 
 problem_lines: fn(problems: [Problem]) -> String Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop found in problems -> lines.push("[{found.class}] {found.text}")
     lines.join("\n")
 }
@@ -230,7 +230,7 @@ expect: fn(outcome: Outcome, verdict: String, class: String, part: String) -[FS]
     }
     audit: read_tree(outcome.audit)
     assert_eq(text_field(audit, "verdict"), verdict)
-    kept := [Problem]{}
+    ^kept: [Problem]{}
     loop item in array_field(audit, "problems") {
         kept.push(problem(text_field(item, "class"), text_field(item, "text")))
     }
@@ -246,7 +246,7 @@ expect_clean: fn(outcome: Outcome, verdict: String) -[FS]> Never! {
 
 gh_log: fn(fixture: Fixture) -[FS]> [String] Never! {
     text: files.read(files.join(fixture.scratch, "gh/gh.log")) ?? return [String]{}
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in text.split("\n").to_list() {
         if line != "" -> lines.push(line.copy())
     }
@@ -254,7 +254,7 @@ gh_log: fn(fixture: Fixture) -[FS]> [String] Never! {
 }
 
 released: fn(fixture: Fixture, name: String) -> Fixture Never! {
-    out := fixture.copy()
+    ^out: fixture.copy()
     out.remote.released.push(name.copy())
     out
 }
@@ -267,7 +267,7 @@ shipped_sha: fn(record: Dyn, path: String) -> String Never! {
 }
 
 texts: fn(items: [Dyn]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop item in items {
         if item == .Text(value) -> out.push(value.copy())
     }
@@ -296,7 +296,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     assert_eq(text_field(field(toolchain, "fixed_point"), "s3"), identity)
     assert_eq(shipped_sha(record, "jet"), sha)
     assert_eq(shipped_sha(record, "jet-runtime/native.key"), sha256_hex("runtime-key-1\n".bytes()))
-    staged := [String]{}
+    ^staged: [String]{}
     loop item in array_field(field(record, "artifacts"), "release") {
         staged.push(text_field(item, "path"))
         assert_eq(text_field(item, "sha256"), sha256_hex(files.read_bytes(files.join(files.join(dir, STAGE_DIR), text_field(item, "path"))) ?? panic("staged {err}")))
@@ -363,14 +363,14 @@ texts: fn(items: [Dyn]) -> [String] Never! {
         fixture: new_fixture("mismatch-{edit}")
         expect_clean(candidate(fixture), "CANDIDATE")
         dir: fixture.dir
-        section := ""
+        ^section: ""
         if {
             edit == "commit" -> {
                 put(files.join(dir, "COMMIT"), "{OTHER_COMMIT}\n")
                 section = "`source.commit`"
             }
             edit == "receipt" -> {
-                rows := passing_rows()
+                ^rows: passing_rows()
                 rows.push(scope_row("Tests/UI", "PASS"))
                 put(files.join(dir, "receipts/001-verify-full.json"), files.read(files.join(runner(fixture.scratch, "ev-edit", dir, 0, 1, "PASS", rows), "verify-full.json")) ?? panic("edited receipt {err}"))
                 section = "`tests`"
@@ -408,21 +408,21 @@ texts: fn(items: [Dyn]) -> [String] Never! {
 // c20: each failure blocks the release and keeps its evidence.
 
 #Test("a missing runner blocks the candidate: an unreported shard or a runner that never wrote its receipt") {
-    fixture := new_fixture("runner")
+    ^fixture: new_fixture("runner")
     fixture.evidence = [String]{runner(fixture.scratch, "ev-half", fixture.dir, 0, 2, "PASS", passing_rows())}
     outcome: candidate(fixture)
     expect(outcome, "BLOCKED", MISSING_RUNNER, "shard 2 of 2 for {TARGET}")
     assert(!files.exists(files.join(fixture.dir, CANDIDATE_FILE)))
-    absent := new_fixture("runner-absent")
+    ^absent: new_fixture("runner-absent")
     absent.evidence.push(files.join(absent.scratch, "never-ran"))
     expect(candidate(absent), "BLOCKED", MISSING_RUNNER, "never reported")
-    none := new_fixture("runner-none")
+    ^none: new_fixture("runner-none")
     none.evidence = [String]{}
     expect(candidate(none), "BLOCKED", MISSING_RUNNER, "--evidence")
 }
 
 #Test("a check that passed in one run and failed in another blocks as flaky") {
-    fixture := new_fixture("flaky")
+    ^fixture: new_fixture("flaky")
     fixture.evidence.push(runner(fixture.scratch, "ev-rerun", fixture.dir, 0, 1, "FAIL", [Dyn]{scope_row("gates", "PASS"), scope_row("Tests/golden", "FAIL")}))
     outcome: candidate(fixture)
     expect(outcome, "BLOCKED", FLAKY, "Tests/golden on {TARGET} was PASS in one run and FAIL")
@@ -437,7 +437,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
         {label: "empty", rows: [Dyn]{}, part: "the gate ran nothing"},
     }
     loop item in cases {
-        fixture := new_fixture("skip-{item.label}")
+        ^fixture: new_fixture("skip-{item.label}")
         fixture.evidence = [String]{runner(fixture.scratch, "ev-skip", fixture.dir, 0, 1, "PASS", item.rows)}
         outcome: candidate(fixture)
         expect(outcome, "BLOCKED", SKIPPED, item.part)
@@ -451,7 +451,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
         {label: "word", jet: "#!/bin/sh\necho built on Fixture-Secret-Host\n"},
     }
     loop leak in leaks {
-        fixture := new_fixture("leak-{leak.label}")
+        ^fixture: new_fixture("leak-{leak.label}")
         make_build(fixture.dir, leak.jet)
         fixture.evidence = [String]{runner(fixture.scratch, "ev-leak", fixture.dir, 0, 1, "PASS", passing_rows())}
         outcome: candidate(fixture)
@@ -465,11 +465,11 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     put_json(files.join(runtime.dir, "jet-runtime/provenance.json"), object([String:Dyn]{"compilerSha256": Dyn.Text("6".repeat(64))}))
     write_sums(runtime.dir)
     expect(candidate(runtime), "BLOCKED", STALE, "packed by jet {"6".repeat(64)}")
-    receipt := new_fixture("stale-receipt")
+    ^receipt: new_fixture("stale-receipt")
     path: files.join(receipt.evidence[0], "verify-full.json")
     put(path, (files.read(path) ?? panic("receipt {err}")).replace(COMMIT, OTHER_COMMIT))
     expect(candidate(receipt), "BLOCKED", STALE, "is pinned to {OTHER_COMMIT}")
-    sums := new_fixture("stale-sums")
+    ^sums: new_fixture("stale-sums")
     put(files.join(sums.dir, "jet-runtime/native.key"), "runtime-key-2\n")
     expect(candidate(sums), "BLOCKED", STALE, "SHA256SUMS does not match")
     rebuilt: new_fixture("stale-jet")
@@ -487,7 +487,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
 part_image: fn(name: String, payload: [U8]) -> [U8] Never! {
     label: name.bytes()
     descriptor: (label.len() + 8) /% 8 * 8
-    image := [U8]{}
+    ^image: [U8]{}
     loop _ in 0..<120 + 16 + descriptor -> image.push(U8{0})
     put_le(image, 32, 64, 8)
     put_le(image, 56, 1, 2)
@@ -509,7 +509,7 @@ put_le: fn(bytes: ^[U8], at: Int, value: Int, count: Int) Never! {
 
 #Test("a jet's identity digest is the sha256 of its bytes with its identity part zeroed") {
     identity: "jet@a0.0.26#{"5".repeat(64)}"
-    zeros := [U8]{}
+    ^zeros: [U8]{}
     loop _ in 0..<identity.len() -> zeros.push(U8{0})
     carried: part_image(IDENTITY_PART, identity.bytes())
     assert_eq(image_part_text(carried, IDENTITY_PART), identity)
@@ -522,18 +522,18 @@ put_le: fn(bytes: ^[U8], at: Int, value: Int, count: Int) Never! {
 }
 
 #Test("a signing failure blocks: no key, a key pair that does not match, a record signed by another key") {
-    missing := new_fixture("sign-missing")
+    ^missing: new_fixture("sign-missing")
     missing.signer.seed_path = files.join(missing.scratch, "keys/absent.ed25519")
     expect(candidate(missing), "BLOCKED", SIGNING, "signing with")
     assert(!files.exists(files.join(missing.dir, CANDIDATE_FILE)))
     assert(!files.exists(files.join(missing.dir, SIGNATURE_FILE)))
-    pair := new_fixture("sign-pair")
+    ^pair: new_fixture("sign-pair")
     pair.signer.public_key = public_of(seed_bytes(8))
     expect(candidate(pair), "BLOCKED", SIGNING, "the key pair does not match")
-    unkeyed := new_fixture("sign-unkeyed")
+    ^unkeyed: new_fixture("sign-unkeyed")
     unkeyed.signer.public_key = ""
     expect(candidate(unkeyed), "BLOCKED", SIGNING, "jet registry keygen")
-    other := new_fixture("sign-other")
+    ^other: new_fixture("sign-other")
     expect_clean(candidate(other), "CANDIDATE")
     other.signer.public_key = public_of(seed_bytes(8))
     expect(publish(other, dry_run: true), "BLOCKED", SIGNING, "not the trusted key")
@@ -553,7 +553,7 @@ put_le: fn(bytes: ^[U8], at: Int, value: Int, count: Int) Never! {
     first: files.read_bytes(staged) ?? panic("archive {err}")
     assert_eq(repack_problems(archive.dir, staged, 90).len(), 0)
     assert_eq(files.read_bytes(files.join(archive.dir, "audit/090-repack/jet-a0.0.26-{TARGET}.tar.gz")) ?? panic("repack {err}"), first)
-    changed := first.copy()
+    ^changed: first.copy()
     changed.push(U8{0})
     files.write_bytes(staged, changed) ?? panic("rewrite {err}")
     repacked: repack_problems(archive.dir, staged, 91)
@@ -593,7 +593,7 @@ put_le: fn(bytes: ^[U8], at: Int, value: Int, count: Int) Never! {
     expect_clean(publish(complete), "PUBLISHED")
     expect_clean(publish(released(complete, "a0.0.26")), "PUBLISHED")
     calls: gh_log(complete)
-    creates := 0
+    ^creates: 0
     loop call in calls {
         if call.starts_with("release create") -> creates += 1
     }
@@ -650,7 +650,7 @@ put_le: fn(bytes: ^[U8], at: Int, value: Int, count: Int) Never! {
     assert(has_problem(found, ADMISSION, "scope is filtered: io, not full"))
     assert(has_problem(found, ADMISSION, "admitted jet@a0.0.26#b, not {identity}"))
     assert(has_problem(found, ADMISSION, "name or commit is missing"))
-    release := read_release("/nonexistent")
+    ^release: read_release("/nonexistent")
     release.kind = "admitted"
     release.commit = "c".repeat(40)
     remote: Remote{slug: "example/jet", origin_tags: [Tag]{Tag{name: "a0.0.26", commit: "d".repeat(40)}}, local_tags: [String]{}, released: [String]{}, on_origin_dev: false, tree: TREE, problems: [Problem]{}}
@@ -679,26 +679,26 @@ kit_row: fn(id: String, tier: String, status: String) -> SuiteRow Never! {
 }
 
 lost_ids: fn(compared: Compared) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop found in compared.lost -> out.push("{found.id} {found.now}")
     out
 }
 
 row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop found in rows -> out.push(found.id.copy())
     out
 }
 
 flaky_ids: fn(compared: Compared) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop found in compared.flaky -> out.push("{found.id} {found.was} then {found.now}")
     out
 }
 
 #Test("the C toolchain pack hash the release checks is the one jet embeds") {
     rows: pinned_assets(files.read(files.join(repo_root(), CC_PACK_SOURCE)) ?? panic("read {CC_PACK_SOURCE}: {err}"), CC_PACK_TABLE)
-    host := PinnedAsset?{None}
+    ^host: PinnedAsset?{None}
     loop found in rows {
         if found.platform == "linux-x64" -> host = Val(found.copy())
     }
@@ -714,7 +714,7 @@ flaky_ids: fn(compared: Compared) -> [String] Never! {
 
 #Test("the sandbox's bubblewrap hash the release checks is the one jet embeds") {
     rows: pinned_assets(files.read(files.join(repo_root(), BWRAP_SOURCE)) ?? panic("read {BWRAP_SOURCE}: {err}"), BWRAP_TABLE)
-    host := PinnedAsset?{None}
+    ^host: PinnedAsset?{None}
     loop found in rows {
         if found.arch == "x86_64" -> host = Val(found.copy())
     }
@@ -765,7 +765,7 @@ flaky_ids: fn(compared: Compared) -> [String] Never! {
     put(files.join(repo, "run"), "#!/bin/sh\n")
     files.set_mode(files.join(repo, "run"), 493) ?? panic("chmod: {err}")
     files.symlink("sub/a.txt", files.join(repo, "link")) ?? panic("symlink: {err}")
-    git_args := [String]{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"}
+    ^git_args: [String]{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"}
     assert_eq(git_in(repo, [String]{"init", "--quiet"}).rc, 0)
     assert_eq(git_in(repo, [String]{"add", "--all"}).rc, 0)
     git_args.extend([String]{"commit", "--quiet", "-m", "fixture"})
@@ -805,14 +805,14 @@ flaky_ids: fn(compared: Compared) -> [String] Never! {
         "GIT_ALTERNATE_OBJECT_DIRECTORIES": files.join(decoy, "objects"),
     }
     assert_eq(GIT_REPOSITORY_VARS.len(), redirect.len())
-    saved := [String:String?]{}
+    ^saved: [String:String?]{}
     loop name in GIT_REPOSITORY_VARS {
         saved[name] = sys.get(name)
         sys.set(name, redirect[name])
     }
     repo: files.join(dir, "repo")
     put(files.join(repo, "a.txt"), "one\n")
-    git_args := [String]{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"}
+    ^git_args: [String]{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"}
     git_args.extend([String]{"commit", "--quiet", "-m", "fixture"})
     inited: git_in(repo, [String]{"init", "--quiet"}).rc
     added: git_in(repo, [String]{"add", "--all"}).rc
@@ -982,13 +982,13 @@ CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ];
     work_root: files.mkdtemp("jet-release-preflight-work-") ?? panic("scratch: {err}")
     pre: Pre{errors: [String]{}, root: seeds.copy(), state: work_root.copy(), seeds: seeds.copy(), work_root: work_root.copy(), sha: COMMIT, release: release.copy(), baseline: column.copy(), native: [String]{"golden", "ui", "cases", "registries"}, dispositions: [Disposition]{}, admission: Admission{admitted: true, text: ""}}
     // A release tree with Core: the column's compiler passes and the run goes on.
-    whole := new_ctx(parse_admit_args([String]{COMMIT}), pre, files.join(work_root, "whole"))
+    ^whole: new_ctx(parse_admit_args([String]{COMMIT}), pre, files.join(work_root, "whole"))
     put(files.join(whole.release_tree, "Core/Core.jet"), "\n")
     assert_eq(gate_preflight(whole), None)
     assert_eq((loop found in whole.rows -> "{found.check} {found.status}"), [String]{"preflight:release PASS"})
     // The same compiler on a tree it can't read Core from: refused before any stage.
     work: files.join(work_root, "broken")
-    broken := new_ctx(parse_admit_args([String]{COMMIT}), pre, work)
+    ^broken: new_ctx(parse_admit_args([String]{COMMIT}), pre, work)
     files.create_dir_all(broken.release_tree) ?? panic("tree: {err}")
     refused: gate_preflight(broken) ?? panic("a compiler that can't read its tree's Core passed preflight")
     assert(refused.starts_with("the release column's compiler {column.jet} ({column.identity}) cannot check a one-line program against the Core of its tree {COMMIT.slice(0..<10)} (rc=1)"))
@@ -1362,7 +1362,7 @@ row_file_verdict: fn(text: String) -> String Never! {
 // An ELF image with no code whose one named section is a `.gnu_debuglink`
 // naming `name` with the CRC-32 `crc`, as the compiler build leaves jet.
 linked_image: fn(name: String, crc: Int) -> [U8] Never! {
-    names := [U8]{U8{0}}
+    ^names: [U8]{U8{0}}
     names.extend(".shstrtab".bytes())
     names.push(U8{0})
     names.extend(".gnu_debuglink".bytes())
@@ -1371,7 +1371,7 @@ linked_image: fn(name: String, crc: Int) -> [U8] Never! {
     link_at: names_at + names.len()
     link_size: (name.len() + 4) /% 4 * 4 + 4
     headers_at: (link_at + link_size + 7) /% 8 * 8
-    image := [U8]{}
+    ^image: [U8]{}
     loop _ in 0..<headers_at + 3 * 64 -> image.push(U8{0})
     loop (index, byte) in ([U8]{U8{0x7f}, U8{0x45}, U8{0x4c}, U8{0x46}, U8{2}, U8{1}, U8{1}}) {
         image[index] = byte

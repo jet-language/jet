@@ -38,8 +38,8 @@ ir_timing_marked: fn(f: IRFunction) -> Bool Never! {
 // The fixed slots of `f`: the marked ones and, to a fixed point, each one a
 // data instruction writes from a fixed operand (ir_timing_flows).
 ir_timing_fixed: fn(f: IRFunction) -> [Bool] Never! {
-    fixed := f.slot_fixed.copy()
-    grew := true
+    ^fixed: f.slot_fixed.copy()
+    ^grew: true
     loop grew {
         grew = false
         loop at in 0..<f.op.len() {
@@ -116,7 +116,7 @@ ir_timing_x64_row: fn(m: IRModule, f: IRFunction, at: Int) -> String Never! {
 // through a fixed register.
 ir_timing_x64_check: fn(m: IRModule, f: IRFunction, log: [X64EmitRow], errors: ^[String]) Never! {
     fixed: ir_timing_fixed(f)
-    reads := [Int]{}
+    ^reads: [Int]{}
     loop at in 0..<f.op.len() {
         ir_x64_reads_into(f, at, reads)
         if !ir_timing_any(fixed, reads) -> next
@@ -187,24 +187,24 @@ ir_timing_finding: fn(f: IRFunction, at: Int, message: String) -> String Never! 
 // mix(key, data) = (key ^ data) + data, wrapping, with `key` fixed.
 ir_timing_test_function: fn(m: ^IRModule, op: IROp, overflow: Int) -> IRFunction Never! {
     word: ir_scalar_type_row(m, Type.IntN{signed: false, bits: 64})
-    f := ir_function_new("mix", "test:timing.jet.mix", "", "timing.jet", 1)
+    ^f: ir_function_new("mix", "test:timing.jet.mix", "", "timing.jet", 1)
     key: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "key"), 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     f.result = word
     mixed: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
     sum: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
     f.slot_fixed[key] = true
-    _ := ir_emit(f, op, mixed, key, data, overflow, 2)
-    _ := ir_emit(f, IROp.Add, sum, mixed, data, IR_OVERFLOW_WRAP, 3)
-    _ := ir_emit(f, IROp.Return, -1, sum, -1, -1, 3)
+    ^_: ir_emit(f, op, mixed, key, data, overflow, 2)
+    ^_: ir_emit(f, IROp.Add, sum, mixed, data, IR_OVERFLOW_WRAP, 3)
+    ^_: ir_emit(f, IROp.Return, -1, sum, -1, -1, 3)
     f
 }
 
 ir_timing_test_errors: fn(op: IROp, overflow: Int) -> [String] Never! {
-    m := ir_module_new()
+    ^m: ir_module_new()
     f: ir_timing_test_function(m, op, overflow)
     m.functions.push(f)
-    compiled := ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    ^compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
     compiled.errors.move()
 }
 

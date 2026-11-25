@@ -102,7 +102,7 @@ parser_spelled_table: fn(raw: [U8], start: Int) -[]> Bool Never! {
     if start < 0 || start + 2 > raw.len() || raw[start] != (U8{105}) || raw[start + 1] != (U8{102}) {
         return false
     }
-    at := start + 2
+    ^at: start + 2
     loop at < raw.len() && parser_tail_space(raw[at]) -> at += 1
     at < raw.len() && raw[at] == (U8{123})
 }
@@ -151,7 +151,7 @@ parser_else_arm_tail: fn(table: Stmt, fallback: Stmt) -[]> ParserValueTail? Neve
             if else_body != None || arms.len() == 0 || parser_is_subjectless_guard(subject, span) {
                 return None
             }
-            returns := [ParserArmReturn]{}
+            ^returns: [ParserArmReturn]{}
             loop arm in arms {
                 if parser_readiness_arm(arm.cond) || arm.body.len() != 1 -> return None
                 if arm.body[0] == .Return(arm_value, return_span) {
@@ -188,8 +188,8 @@ parser_final_return_edit: fn(keyword: Int, value: Int) -[]> TextEdit Never! {
 // hold the parts in order.
 parser_else_arm_edit: fn(raw: [U8], table: Span, returns: [ParserArmReturn], fallback: Int, default: Span) -[]> TextEdit? Never! {
     // The cuts run in source order; inserts[i] replaces cuts[i].
-    cuts := [Span]{}
-    inserts := [String]{}
+    ^cuts: [Span]{}
+    ^inserts: [String]{}
     loop arm in returns {
         cuts.push(parser_return_keyword(raw, arm.keyword) ?? return None)
         inserts.push("")
@@ -201,7 +201,7 @@ parser_else_arm_edit: fn(raw: [U8], table: Span, returns: [ParserArmReturn], fal
     inserts.push("{prefix}else -> {default_text}")
     cuts.push(parser_return_keyword(raw, fallback) ?? return None)
     inserts.push("")
-    end := default.end
+    ^end: default.end
     cuts.push(Span{start: default.start, end: default.end})
     inserts.push("")
     // The fallback's `;` goes too, so no stray terminator follows the table.
@@ -210,8 +210,8 @@ parser_else_arm_edit: fn(raw: [U8], table: Span, returns: [ParserArmReturn], fal
         cuts.push(Span{start: semicolon, end: end})
         inserts.push("")
     }
-    text := ""
-    at := table.start
+    ^text: ""
+    ^at: table.start
     loop index in 0..<cuts.len() {
         cut: cuts[index]
         if cut.start < at || cut.end > end || cut.start > cut.end -> return None
@@ -240,8 +240,8 @@ parser_return_keyword: fn(raw: [U8], start: Int) -[]> Span? Never! {
 // The offset of the `}` that closes the first brace opened at or after
 // `start`, past comments, strings and character literals.
 parser_table_close: fn(raw: [U8], start: Int) -[]> Int? Never! {
-    depth := 0
-    at := start
+    ^depth: 0
+    ^at: start
     loop at < raw.len() {
         byte: raw[at]
         next_byte: if at + 1 < raw.len() -> raw[at + 1] else -> (U8{0})
@@ -267,7 +267,7 @@ parser_table_close: fn(raw: [U8], start: Int) -[]> Int? Never! {
 // The offset of a `;` that follows `from` past spaces and comments, None
 // when anything else comes first.
 parser_authored_semicolon: fn(raw: [U8], from: Int) -[]> Int? Never! {
-    at := if from < raw.len() -> from else -> raw.len()
+    ^at: if from < raw.len() -> from else -> raw.len()
     loop at < raw.len() {
         byte: raw[at]
         next_byte: if at + 1 < raw.len() -> raw[at + 1] else -> (U8{0})
@@ -284,14 +284,14 @@ parser_authored_semicolon: fn(raw: [U8], from: Int) -[]> Int? Never! {
 
 // The offset of the newline that ends a `//` comment whose text starts at `at`.
 parser_line_comment_end: fn(raw: [U8], at: Int) -[]> Int Never! {
-    end := at
+    ^end: at
     loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
     end
 }
 
 // The offset just past the `*/` that ends a `/*` comment whose text starts at `at`.
 parser_block_comment_end: fn(raw: [U8], at: Int) -[]> Int Never! {
-    end := at
+    ^end: at
     loop end + 1 < raw.len() && !(raw[end] == (U8{42}) && raw[end + 1] == (U8{47})) -> end += 1
     if end + 2 < raw.len() -> end + 2 else -> raw.len()
 }
@@ -300,7 +300,7 @@ parser_block_comment_end: fn(raw: [U8], at: Int) -[]> Int Never! {
 // `"""` block ends at the next `"""`; a plain string skips its escapes.
 parser_string_end: fn(raw: [U8], at: Int) -[]> Int Never! {
     triple: at + 2 < raw.len() && raw[at + 1] == (U8{34}) && raw[at + 2] == (U8{34})
-    end := if triple -> at + 3 else -> at + 1
+    ^end: if triple -> at + 3 else -> at + 1
     loop end < raw.len() {
         if triple && end + 2 < raw.len() && raw[end] == (U8{34}) && raw[end + 1] == (U8{34}) && raw[end + 2] == (U8{34}) {
             return end + 3
@@ -314,7 +314,7 @@ parser_string_end: fn(raw: [U8], at: Int) -[]> Int Never! {
 // The offset just past the `'` that closes a character literal whose text
 // starts at `at`.
 parser_char_end: fn(raw: [U8], at: Int) -[]> Int Never! {
-    end := at
+    ^end: at
     loop end < raw.len() {
         if raw[end] == (U8{39}) -> return end + 1
         end += if raw[end] == (U8{92}) -> 2 else -> 1

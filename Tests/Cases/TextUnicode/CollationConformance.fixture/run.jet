@@ -26,7 +26,7 @@ collation_scalar: fn(out: ^[U8], cp: Int) Never! {
 }
 
 collation_key_order: fn(left: [U8], right: [U8]) -> Ordering Never! {
-    at := 0
+    ^at: 0
     loop at < left.len() && at < right.len() {
         if left[at] != right[at] -> return left[at] <=> right[at]
         at += 1
@@ -36,18 +36,18 @@ collation_key_order: fn(left: [U8], right: [U8]) -> Ordering Never! {
 
 run: fn() {
     source: collation_files.read("CollationTest.txt") ?? panic("missing CollationTest_CLDR_NON_IGNORABLE_SHORT.txt")
-    previous := [U8]{}
-    previous_value := ""
-    checked := 0
-    surrogates := 0
-    out_of_order := 0
-    equal := 0
-    disagreements := 0
+    ^previous: [U8]{}
+    ^previous_value: ""
+    ^checked: 0
+    ^surrogates: 0
+    ^out_of_order: 0
+    ^equal: 0
+    ^disagreements: 0
     loop raw in source.lines() {
         line: raw.partition("#").head.trim()
         if line == "" -> next
-        bytes := [U8]{}
-        surrogate := false
+        ^bytes: [U8]{}
+        ^surrogate: false
         loop word in line.split(" ") {
             if word == "" -> next
             cp: collation_parse.parse_int_base(word, 16) ?? panic("bad code point `{word}`")

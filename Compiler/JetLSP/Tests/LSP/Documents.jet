@@ -22,7 +22,7 @@ lsp_test_doc_text: fn(state: LSPDiagnosticState, uri: String) -> String Never! {
 }
 
 #Test("didOpen stores the document under its path") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     doc: server.diagnostic_state.docs.get(LSP_TEST_MAIN_URI) ?? panic("main is open")
     assert_eq(doc.path, "/w/main.jet")
     assert_eq(doc.version, 1)
@@ -33,7 +33,7 @@ lsp_test_doc_text: fn(state: LSPDiagnosticState, uri: String) -> String Never! {
 }
 
 #Test("a document opened in another language is not kept or checked") {
-    state := lsp_diagnostic_state()
+    ^state: lsp_diagnostic_state()
     html: lsp_test_json("{{\"textDocument\":{{\"uri\":\"file:///w/panel.html\",\"languageId\":\"html\",\"version\":1,\"text\":\"<p>🙂</p>\"}}}}")
     assert_eq(lsp_update_document(state, Val(html), is_open: true), None)
     assert(!state.docs.has_key("file:///w/panel.html"), "the html document is not kept")
@@ -43,7 +43,7 @@ lsp_test_doc_text: fn(state: LSPDiagnosticState, uri: String) -> String Never! {
 }
 
 #Test("didChange applies its edits in order and advances the version") {
-    state := lsp_diagnostic_state()
+    ^state: lsp_diagnostic_state()
     uri: "file:///w/a.jet"
     open: lsp_test_json("{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":1,\"text\":\"hello world\"}}}}")
     assert_eq(lsp_update_document(state, Val(open), is_open: true), Val(uri))
@@ -56,10 +56,10 @@ lsp_test_doc_text: fn(state: LSPDiagnosticState, uri: String) -> String Never! {
 }
 
 #Test("a rejected didChange leaves the document and version intact") {
-    state := lsp_diagnostic_state()
+    ^state: lsp_diagnostic_state()
     uri: "file:///w/a.jet"
     open: lsp_test_json("{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":4,\"text\":\"abc\"}}}}")
-    _ := lsp_update_document(state, Val(open), is_open: true)
+    ^_: lsp_update_document(state, Val(open), is_open: true)
     // A stale version, a wrong rangeLength, a range past the document, and a
     // rangeLength with no range are each refused whole.
     assert_eq(lsp_test_change(state, uri, 4, "[{{\"text\":\"x\"}}]"), None)
@@ -78,16 +78,16 @@ lsp_test_doc_text: fn(state: LSPDiagnosticState, uri: String) -> String Never! {
 }
 
 #Test("draining the dirty set adds the open documents that read a dirty one") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, "file:///w/main.jet", "use helper: \"./helper\"\n")
     lsp_test_open(server, "file:///w/helper.jet", "double: fn(x: Int) -> Int {{ x * 2 }}\n")
     lsp_test_open(server, "file:///w/other.jet", "")
     server.diagnostic_state.checked_modules["file:///w/main.jet"] = [String]{"/w/main.jet", "./w/helper.jet"}
     server.diagnostic_state.checked_modules["file:///w/other.jet"] = [String]{"/w/other.jet"}
-    _ := lsp_test_change(server.diagnostic_state, "file:///w/helper.jet", 2, "[{{\"text\":\"double: fn(x: Int) -> Int {{ x + x }}\\n\"}}]")
+    ^_: lsp_test_change(server.diagnostic_state, "file:///w/helper.jet", 2, "[{{\"text\":\"double: fn(x: Int) -> Int {{ x + x }}\\n\"}}]")
     assert_eq(lsp_dirty_documents(server.diagnostic_state), [String]{"file:///w/helper.jet"})
     server.diagnostic_state.checked_modules["file:///w/main.jet"] = [String]{"/w/main.jet", "/w/helper.jet"}
-    _ := lsp_test_change(server.diagnostic_state, "file:///w/helper.jet", 3, "[]")
+    ^_: lsp_test_change(server.diagnostic_state, "file:///w/helper.jet", 3, "[]")
     assert_eq(lsp_dirty_documents(server.diagnostic_state), [String]{"file:///w/helper.jet", "file:///w/main.jet"})
     assert_eq(lsp_dirty_documents(server.diagnostic_state), [String]{})
 }
@@ -101,13 +101,13 @@ lsp_test_doc_text: fn(state: LSPDiagnosticState, uri: String) -> String Never! {
 LSP_TEST_BROKEN: "run: fn() {{\n    x: (\n}}\n"
 
 #Test("a publication carries the document's diagnostics, version and reports") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     uri: "file:///w/broken.jet"
     lsp_test_open(server, uri, LSP_TEST_BROKEN)
     doc: server.diagnostic_state.docs.get(uri) ?? panic("open")
-    checked := server.check(doc)
+    ^checked: server.check(doc)
     assert(checked.diagnostics.len() > 0, "the broken fixture has parse diagnostics")
-    targets := [String:Bool]{}
+    ^targets: [String:Bool]{}
     groups: lsp_diagnostic_groups(server.diagnostic_state, uri, checked, targets)
     assert_eq(groups.len(), 1)
     indices: groups[uri]
@@ -115,7 +115,7 @@ LSP_TEST_BROKEN: "run: fn() {{\n    x: (\n}}\n"
     assert(targets.has_key(uri), "the root is a target")
     // A host that renders reports hands each published diagnostic its own
     // as `data`.
-    reports := [String]{}
+    ^reports: [String]{}
     loop diagnostic in checked.diagnostics -> reports.push("{{\"code\":\"{diagnostic.code}\"}}")
     checked.reports = reports.move()
     message: lsp_test_json(lsp_document_group_json(server.diagnostic_state, uri, checked, indices))
@@ -134,14 +134,14 @@ LSP_TEST_BROKEN: "run: fn() {{\n    x: (\n}}\n"
 }
 
 #Test("a target the previous publication wrote is cleared once no longer reported") {
-    server := lsp_test_main_server()
+    ^server: lsp_test_main_server()
     doc: server.diagnostic_state.docs.get(LSP_TEST_MAIN_URI) ?? panic("open")
     checked: server.check(doc)
     assert_eq(checked.diagnostics.len(), 0)
-    previous := [String:Bool]{}
+    ^previous: [String:Bool]{}
     previous["file:///w/gone.jet"] = true
     server.diagnostic_state.diagnostic_targets[LSP_TEST_MAIN_URI] = previous
-    targets := [String:Bool]{}
+    ^targets: [String:Bool]{}
     groups: lsp_diagnostic_groups(server.diagnostic_state, LSP_TEST_MAIN_URI, checked, targets)
     assert_eq(groups.len(), 2)
     assert_eq(groups["file:///w/gone.jet"].len(), 0)
@@ -152,8 +152,8 @@ LSP_TEST_BROKEN: "run: fn() {{\n    x: (\n}}\n"
 }
 
 #Test("a pulled report carries the document's diagnostics, and an unchanged one only its id") {
-    server := lsp_test_server()
-    _ := lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"textDocument\":{{\"diagnostic\":{{}}}}}}}}")
+    ^server: lsp_test_server()
+    ^_: lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"textDocument\":{{\"diagnostic\":{{}}}}}}}}")
     assert(server.pull_diagnostics, "a client that pulls diagnostics is not pushed them")
     uri: "file:///w/broken.jet"
     lsp_test_open(server, uri, LSP_TEST_BROKEN)

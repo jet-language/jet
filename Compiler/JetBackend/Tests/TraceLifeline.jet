@@ -13,7 +13,7 @@ lifeline_trace: fn() -> X64Trace {
 }
 
 #Test("a trace started on a carrier outlives the carrier, and ends when its lifeline closes") {
-    trace := X64Trace{pid: -1, scratch: 0, failure: ""}
+    ^trace: X64Trace{pid: -1, scratch: 0, failure: ""}
     task.group lifeline_start {
         started: task lifeline_trace()
         trace = started.join() ?? panic("the trace's task failed: {err}")

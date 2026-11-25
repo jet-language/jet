@@ -5,10 +5,10 @@ Box: struct {
 consume: fn(b: ^^Box) -> Int { b.n }
 
 run: fn() {
-    owned := Box{n: 3}
+    ^owned: Box{n: 3}
     task.group g {
         child: task ^^owned {
-            first := consume(owned)
+            ^first: consume(owned)
             owned.n
         }
         print(child.join() ?? panic("child failed"))

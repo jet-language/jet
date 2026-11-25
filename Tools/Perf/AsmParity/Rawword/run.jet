@@ -28,8 +28,8 @@ next: fn(state: Int) -> Int { (state * 1103515245 + 12345) & 2147483647 }
 // The operations: per operation one draw gives the two indexes (bits 0-12
 // and 13-25) and the step (bits 26-30).
 operations: fn() -> [Op] {
-    ops := [Op]{}
-    state := 12345
+    ^ops: [Op]{}
+    ^state: 12345
     loop _ in 0..<OPS {
         state = next(state)
         ops.push(Op{from: U32{state & WORDS - 1}, to: U32{(state >> 13) & WORDS - 1}, step: I64{(state >> 26) & 31}})
@@ -40,7 +40,7 @@ operations: fn() -> [Op] {
 run: fn(args: Args) {
     passes: if args.n > 0 -> args.n else -> 1
     ops: operations()
-    total := I64{0}
+    ^total: I64{0}
     #Unsafe("the block holds WORDS words, every index is below WORDS, and the block is freed once after the passes") {
         block: mem.alloc_raw(WORDS * 8, 4096) ?? panic("no memory")
         words: block.cast<I64>()

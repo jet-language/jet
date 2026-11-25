@@ -75,13 +75,13 @@ run: fn() {
     scratch: files.temp_dir("jet-timer") ?? refuse("cannot make the timer's scratch directory: {err}")
     launch: launcher(scratch.path)
     report: files.join(scratch.path, "report")
-    wall_ns := 0
-    first_ns := Int?{None}
-    peak_kb := 0
-    cycles := Int?{Val(0)}
-    exit_code := 0
-    steps := [Times]{}
-    error := String?{None}
+    ^wall_ns: 0
+    ^first_ns: Int?{None}
+    ^peak_kb: 0
+    ^cycles: Int?{Val(0)}
+    ^exit_code: 0
+    ^steps: [Times]{}
+    ^error: String?{None}
     loop words in commands {
         command: words.decode<[String]>()
         step: run_child(launch, report, command.copy()) ?? return Err("{err}")
@@ -149,7 +149,7 @@ launcher: fn(scratch: String) -> String {
 // Runs `command` through the launcher with its stdout drained through a
 // pipe, stdin and stderr inherited.
 run_child: fn(launch: String, report: String, command: [String]) -> Launched IOError! {
-    argv := [String]{launch, report}
+    ^argv: [String]{launch, report}
     loop word in command { argv.push(word.copy()) }
     child: process.cmd(argv).stdin(.Inherit).stdout(.Stream).stderr(.Inherit).spawn()
     loop _ in child.stdout.chunks(65536) {
@@ -165,8 +165,8 @@ run_child: fn(launch: String, report: String, command: [String]) -> Launched IOE
 // KiB, user and system time, and exec errno, and its `cycles` line's count
 // (-1 or no line for none). None without an end line.
 launched_of: fn(text: String) -> Launched? {
-    end := [String]{}
-    counted := -1
+    ^end: [String]{}
+    ^counted: -1
     loop line in text.split("\n") {
         fields: line.split(" ").to_list()
         if fields[0] == "end" -> end = fields

@@ -25,10 +25,10 @@ JetCLICoverageFunction: struct {
 // and methods, none synthetic, none a #Test or an output check
 // (`harnessed`, checked keys), and not `run`.
 jet_cli_coverage_functions: fn(file: String, functions: [FnBody], tests: [TTestFact], harnessed: [String]) -> [JetCLICoverageFunction] Never! {
-    excluded := name_table_sized(functions.len())
-    loop test in tests -> _ := name_intern(excluded, test.function.key)
-    loop key in harnessed -> _ := name_intern(excluded, key)
-    out := [JetCLICoverageFunction]{}
+    ^excluded: name_table_sized(functions.len())
+    loop test in tests -> ^_: name_intern(excluded, test.function.key)
+    loop key in harnessed -> ^_: name_intern(excluded, key)
+    ^out: [JetCLICoverageFunction]{}
     loop function in functions {
         if function.synthetic || function.source_file != file || function.name == "run" || name_find(excluded, function.key) != None {
             next
@@ -39,7 +39,7 @@ jet_cli_coverage_functions: fn(file: String, functions: [FnBody], tests: [TTestF
             .TraitMethod(_, _, owner, _, _) -> "{jet_cli_coverage_owner(owner)}.{function.name}"
         }
         // A generic function's instances share its key.
-        _ := name_intern(excluded, function.key)
+        ^_: name_intern(excluded, function.key)
         out.push(JetCLICoverageFunction{key: function.key.copy(), name: name, line: function.line})
     }
     out.sort_by(fn(left: JetCLICoverageFunction, right: JetCLICoverageFunction) { (left.line <=> right.line).then(left.name <=> right.name) })
@@ -55,7 +55,7 @@ jet_cli_coverage_owner: fn(owner: Type) -> String Never! {
 
 // The probes the harness builds: each coverable function's line by key.
 jet_cli_coverage_probes: fn(functions: [JetCLICoverageFunction]) -> IRCoverage Never! {
-    probes := ir_coverage()
+    ^probes: ir_coverage()
     loop function in functions -> ir_coverage_put(probes, function.key, function.line)
     probes
 }
@@ -63,7 +63,7 @@ jet_cli_coverage_probes: fn(functions: [JetCLICoverageFunction]) -> IRCoverage N
 // The lines the run's processes entered, read from `path`, which is then
 // removed.
 jet_cli_coverage_hits: fn(path: String) -[FS]> [Int:Bool] Never! {
-    hits := [Int:Bool]{}
+    ^hits: [Int:Bool]{}
     text: cli_files.read(path) ?? ""
     cli_files.remove(path).drop("the hit file is one run's; a leftover is harmless")
     loop record in text.lines() {
@@ -79,8 +79,8 @@ jet_cli_coverage_hits: fn(path: String) -[FS]> [Int:Bool] Never! {
 // rounded half to even.
 jet_cli_coverage_text: fn(file: String, functions: [JetCLICoverageFunction], hits: [Int:Bool]) -> String Never! {
     if functions.len() == 0 -> return "\nCoverage: no functions to measure\n"
-    out := "\nCoverage for {file}\n"
-    covered := 0
+    ^out: "\nCoverage for {file}\n"
+    ^covered: 0
     loop function in functions {
         hit: hits.get(function.line) != None
         if hit -> covered += 1
@@ -89,7 +89,7 @@ jet_cli_coverage_text: fn(file: String, functions: [JetCLICoverageFunction], hit
     }
     total: functions.len()
     scaled: covered * 100
-    percent := scaled /% total
+    ^percent: scaled /% total
     twice: (scaled % total) * 2
     if twice > total || (twice == total && percent % 2 == 1) -> percent += 1
     "{out}  {covered}/{total} functions covered ({percent}%)\n"

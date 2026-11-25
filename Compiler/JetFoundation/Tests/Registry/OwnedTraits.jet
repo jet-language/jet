@@ -19,7 +19,7 @@ owned_traits_known: fn(name: String) -> Bool Never! {
 
 // The owned trait and family names one source line quotes, in order, each once.
 owned_traits_quoted: fn(line: String) -> [String] Never! {
-    found := [String]{}
+    ^found: [String]{}
     parts: line.split("\"").to_list()
     loop index in 0..<parts.len() {
         if index % 2 == 0 -> next
@@ -31,12 +31,12 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
 }
 
 #Test("owned trait rows name each trait, hook, role and method once") {
-    violations := [String]{}
-    names := [String]{}
-    hooks := [String]{}
-    roles := [String]{}
+    ^violations: [String]{}
+    ^names: [String]{}
+    ^hooks: [String]{}
+    ^roles: [String]{}
     loop owned in OWNED_TRAITS {
-        hooked := false
+        ^hooked: false
         if names.contains(owned.name) -> violations.push("`{owned.name}` has two rows")
         names.push(owned.name)
         if owned.role != "" {
@@ -62,7 +62,7 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
                 }
             }
             .Methods(methods, _, shares) -> {
-                seen := [String]{}
+                ^seen: [String]{}
                 loop method in methods {
                     if seen.contains(method.name) {
                         violations.push("`{owned.name}` declares `{method.name}` twice")
@@ -88,14 +88,18 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
 // Every role the operator grammar and the index hooks read is filled by one
 // owned trait, so `+` and `[ ]` reach a declaration, never a name.
 #Test("each operator and index role is filled by an owned trait") {
-    violations := [String]{}
+    ^violations: [String]{}
     loop row in OWNED_OPERATOR_ROLES {
-        if owned_trait_for_role(row.role) == .Val(owned) && owned.contract == .Operator(_, _) -> next
+        if owned_trait_for_role(row.role) == .Val(owned) && owned.contract == .Operator(_, _) {
+            next
+        }
         violations.push("`{row.symbol}` reads the role `{row.role}`, which no operator trait fills")
     }
     index_roles: [String]{OWNED_ROLE_INDEX, OWNED_ROLE_INDEX_MUT}
     loop role in index_roles {
-        if owned_role_method(role) == None -> violations.push("no methods trait with one method fills the index role `{role}`")
+        if owned_role_method(role) == None {
+            violations.push("no methods trait with one method fills the index role `{role}`")
+        }
     }
     assert_eq(violations.join("\n"), "")
     assert_eq(owned_operator_role("!="), "Equal")
@@ -133,7 +137,7 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
 }
 
 #Test("no compiler source lists the owned trait names outside OWNED_TRAITS") {
-    violations := [String]{}
+    ^violations: [String]{}
     loop item in owned_traits_files.walk("Compiler", None) {
         entry: item ?? panic("walk Compiler: {err}")
         if entry.is_dir || !entry.path.ends_with(".jet") -> next
@@ -156,7 +160,7 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
 // of the table's derive or bundle markers (`#Close(close)` is the foreign
 // handle's Close, not a derive).
 #Test("no syntax constant spells an owned trait or its markers") {
-    violations := [String]{}
+    ^violations: [String]{}
     loop item in owned_traits_files.walk(OWNED_TRAITS_SYNTAX, None) {
         entry: item ?? panic("walk {OWNED_TRAITS_SYNTAX}: {err}")
         if entry.is_dir || !entry.path.ends_with(".jet") -> next
@@ -195,7 +199,7 @@ owned_traits_declared: fn(line: String) -> String? Never! {
 // distinct type (`#Numeric`), or is `#Close(close)`, which gives a foreign
 // handle its Close. Any other marker of a Prelude or Core trait's name fails.
 #Test("no marker shares a name with a trait it does not apply") {
-    traits := [String]{}
+    ^traits: [String]{}
     loop root in OWNED_TRAITS_DECLARING {
         loop item in owned_traits_files.walk(root, None) {
             entry: item ?? panic("walk {root}: {err}")
@@ -207,7 +211,7 @@ owned_traits_declared: fn(line: String) -> String? Never! {
             }
         }
     }
-    violations := [String]{}
+    ^violations: [String]{}
     loop rule in registration_marker_rules() {
         if !traits.contains(rule.name) -> next
         if owned_trait(rule.name) != None && (owned_trait_auto_derive_marker(rule.name) || owned_trait_bundle(rule.name) || rule.name == "Close") {

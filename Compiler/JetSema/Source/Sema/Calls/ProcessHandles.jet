@@ -39,7 +39,7 @@ sema_process_io_result: fn(ok: Type) -> Type Never! {
 }
 
 sema_process_infer_args: fn(args: [CallArg], check: ^SemaBodyCheck) Never! {
-    loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+    loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
 }
 
 sema_process_wrong_arity: fn(method: String, expected: Int, actual: Int, span: Span, diagnostics: ^[Diagnostic]) {
@@ -48,7 +48,7 @@ sema_process_wrong_arity: fn(method: String, expected: Int, actual: Int, span: S
 
 sema_process_check_args: fn(args: [CallArg], required: [Type], check: ^SemaBodyCheck) -> [TExpr]? {
     if args.len() != required.len() -> return None
-    values := [TExpr]{}
+    ^values: [TExpr]{}
     loop index in 0..<args.len() {
         value: sema_check_expression(args[index].expr, Val(required[index]), check) ?? return None
         values.push(value)
@@ -65,7 +65,7 @@ sema_process_handle_receiver_name: fn(ty: Type) -> String Never! {
 }
 
 sema_process_method_params: fn(args: [CallArg], required: [Type], moving: [Bool]) -> [SemaCallParam] Never! {
-    params := [SemaCallParam]{}
+    ^params: [SemaCallParam]{}
     loop index in 0..<args.len() {
         param_type: if index < required.len() -> Val(required[index]) else -> None
         convention: if index < moving.len() && moving[index] -> AccessConvention.Move else -> AccessConvention.Read
@@ -86,9 +86,9 @@ sema_process_method_params: fn(args: [CallArg], required: [Type], moving: [Bool]
 }
 
 sema_process_check_method_ownership: fn(receiver: Expr, method: String, args: [CallArg], required: [Type], moving: [Bool], receiver_access: AccessConvention, span: Span, check: ^SemaBodyCheck) -> Bool {
-    updated_args := args
-    params := sema_process_method_params(updated_args, required, moving)
-    ownership := sema_ownership_check_method_call(check, method, receiver, receiver_access, params, updated_args, span)
+    ^updated_args: args
+    ^params: sema_process_method_params(updated_args, required, moving)
+    ^ownership: sema_ownership_check_method_call(check, method, receiver, receiver_access, params, updated_args, span)
     ownership.accepted && ownership.complete
 }
 
@@ -104,9 +104,9 @@ sema_process_failure_carrier: fn(result: Type) -> TFailureCarrier Never! {
 }
 
 sema_process_record_intrinsic: fn(result: Type, effect_name: String, api: String, span: Span, check: ^SemaBodyCheck) -> Bool Never! {
-    effects := [EffectRowEntry]{}
+    ^effects: [EffectRowEntry]{}
     if effect_name != "" -> effects.push(EffectRowEntry{name: effect_name, span: span})
-    facts := SemaCallFacts{
+    ^facts: SemaCallFacts{
         return_type: result,
         failure_carrier: sema_process_failure_carrier(result),
         effect_bound: Val(effects),
@@ -120,11 +120,11 @@ sema_process_finish: fn(receiver: TExpr, operation: BodyHandleOp, args: [TExpr],
     if !sema_process_record_intrinsic(result, effect_name, api, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    ^value: sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     // A call checker's finish: under the dispatcher's success view a
     // `ProcessReceipt IOError!` result meets a `ProcessReceipt` expectation by
     // its success side, and the call root then propagates the failure.
-    checked := sema_expression_call_expected(value, expected, check)
+    ^checked: sema_expression_call_expected(value, expected, check)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
@@ -136,7 +136,7 @@ sema_process_spec_known_method: fn(method: String) -> Bool Never! {
 }
 
 sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics: ^[Diagnostic]) -> Type? {
-    spec := sema_process_named("ProcessSpec")
+    ^spec: sema_process_named("ProcessSpec")
     if method == {
         "cwd" | "env_remove" | "stdin" | "stdout" | "stderr" -> {
             if argc == 1 -> return Val(spec)
@@ -238,7 +238,7 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     // Each method is the ordinary Core source body that fills its
     // jet_builtins role (sema_process_spec_role; `abilities` reports the
     // checked TerminalFact set), so every tier runs the same Jet code.
-    call_args := [TExpr]{receiver_value}
+    ^call_args: [TExpr]{receiver_value}
     loop argument in values -> call_args.push(argument)
     sema_process_source_call(sema_process_spec_role(method, args.len()), "ProcessSpec.{method}", "", call_args, result, span, expected, check)
 }
@@ -289,7 +289,7 @@ sema_process_source_call: fn(role: String, api: String, effect_name: String, arg
         return rejected
     }
     callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return rejected
-    call_args := [TCallArg]{}
+    ^call_args: [TCallArg]{}
     loop argument in args -> call_args.push(sema_value_method_source_arg(argument))
     value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: call_args}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
@@ -327,7 +327,7 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
     slot_value: sema_expr_expected_owned(slot_checked, Val(slot_type), check.environment.*, check.program.*, check.diagnostics) ?? return rejected
     // The handle moves into the spec exactly as at any `^^` parameter: a
     // named handle is taken out of its place, so its scope no longer closes it.
-    taken := sema_call_marked_move_place(args[0].expr, handle_value)
+    ^taken: sema_call_marked_move_place(args[0].expr, handle_value)
     if taken && sema_ownership_binding_for_expr(check.state, args[0].expr, check.scopes) == .Val(root) {
         taken = !sema_ownership_binding_is_borrowed_param(root)
     }
@@ -345,9 +345,9 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
         return rejected
     }
     callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return rejected
-    handle_arg := sema_value_method_source_arg(stored)
+    ^handle_arg: sema_value_method_source_arg(stored)
     handle_arg.widen_to_union = sema_call_widen_union(handle_type, stored.ty)
-    value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value), handle_arg, sema_value_method_source_arg(slot_value)}}, span)
+    ^value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value), handle_arg, sema_value_method_source_arg(slot_value)}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
 }
 
@@ -402,7 +402,7 @@ sema_process_terminal_method: fn(receiver: Expr, receiver_value: TExpr, method: 
         sema_process_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    required := [Type]{sema_process_named("TerminalSize")}
+    ^required: [Type]{sema_process_named("TerminalSize")}
     values: sema_process_check_args(args, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_process_check_method_ownership(receiver, "TerminalSession.resize", args, required, [Bool]{}, AccessConvention.Read, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -452,7 +452,7 @@ sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
 // `write_bytes`.
 sema_process_byte_write: fn(args: [CallArg], check: ^SemaBodyCheck) -> Bool {
     if args[0].label != None -> return false
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_diagnostics: [Diagnostic]{}
     probed: sema_probe_expression(args[0].expr, None, check, probe_diagnostics) ?? return false
     offered: sema_expr_unwrap_tag(probed.ty)
     if offered != (Type.List{element: Type.IntN{signed: false, bits: 8}}) -> return false
@@ -470,8 +470,8 @@ sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         sema_process_infer_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    stream_name := sema_process_handle_receiver_name(receiver_value.ty)
-    api := "{stream_name}.{method}"
+    ^stream_name: sema_process_handle_receiver_name(receiver_value.ty)
+    ^api: "{stream_name}.{method}"
     required: if required_arity == 1 -> [Type]{Type.Int} else -> [Type]{}
     values: sema_process_check_args(args, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_process_check_method_ownership(receiver, api, args, required, [Bool]{}, AccessConvention.Read, span, check) {

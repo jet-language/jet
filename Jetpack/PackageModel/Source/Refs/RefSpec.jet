@@ -254,7 +254,7 @@ ProviderFamily: enum {
 
     // Every family once, in provider-row order.
     all: fn() -> [ProviderFamily] Never! {
-        families := [ProviderFamily]{}
+        ^families: [ProviderFamily]{}
         loop row in PROVIDER_ROWS {
             family: row.family ?? next
             if !families.contains(family) -> families.push(family.copy())
@@ -330,7 +330,7 @@ SourceTable: struct {
 
     // Build from declarations; a repeated name keeps its last declaration.
     from_decls: fn(decls: [NamedSourceDecl]) -> SourceTable Never! {
-        table := SourceTable.empty()
+        ^table: SourceTable.empty()
         loop decl in decls {
             table.named[decl.name] = SourceTableEntry{upstream: decl.upstream, via: decl.via, policy: ChannelPolicy.for_upstream(decl.upstream), raw: decl.upstream}
         }
@@ -373,14 +373,14 @@ SourceTable: struct {
 
     // Declared names, sorted; used to make "unknown source" errors helpful.
     declared_names: fn(self) -> [String] Never! {
-        names := self.named.keys().to_list()
+        ^names: self.named.keys().to_list()
         names.sort()
         names
     }
 
     // Declared source records, sorted by name.
     declarations: fn(self) -> [NamedSourceDecl] Never! {
-        out := [NamedSourceDecl]{}
+        ^out: [NamedSourceDecl]{}
         loop name in self.declared_names() {
             entry: self.named[name]
             out.push(NamedSourceDecl{name: name, upstream: entry.upstream, via: entry.via})
@@ -400,7 +400,7 @@ SourceTable: struct {
     // U19: folded into the trust gate's env-definition hash, so re-pointing a
     // named source counts as a change and re-prompts.
     trust_lines: fn(self) -> [String] Never! {
-        out := [String]{}
+        ^out: [String]{}
         loop decl in self.declarations() {
             out.push("{decl.name}={decl.upstream}@{decl.via.identity()}")
         }
@@ -578,7 +578,7 @@ WorkspaceIndex: struct {
     // `./` and trailing `/` trimmed) so a query and a stored path compare
     // byte-for-byte regardless of how each was spelled.
     from_members: fn(members: [WorkspaceMember]) -> WorkspaceIndex Never! {
-        normalized := [WorkspaceMember]{}
+        ^normalized: [WorkspaceMember]{}
         loop member in members {
             normalized.push(WorkspaceMember{name: member.name, path: pkg_normalize_member_path(member.path)})
         }
@@ -591,7 +591,7 @@ WorkspaceIndex: struct {
     // Labels for did-you-mean suggestions in the same address space as the
     // query: bare names for bare refs, normalized paths for path refs.
     candidate_labels: fn(self, path_form: Bool) -> [String] Never! {
-        out := [String]{}
+        ^out: [String]{}
         loop member in self.members { out.push(if path_form -> member.path else -> member.name) }
         out
     }
@@ -599,7 +599,7 @@ WorkspaceIndex: struct {
     // Member paths whose normalized path equals the path-form query.
     by_path: fn(self, query: String) -> [String] Never! {
         wanted: pkg_normalize_member_path(query)
-        out := [String]{}
+        ^out: [String]{}
         loop member in self.members {
             if member.path == wanted -> out.push(member.path)
         }
@@ -608,7 +608,7 @@ WorkspaceIndex: struct {
 
     // Member paths whose name equals the bare-form query.
     by_name: fn(self, query: String) -> [String] Never! {
-        out := [String]{}
+        ^out: [String]{}
         loop member in self.members {
             if member.name == query -> out.push(member.path)
         }
@@ -634,7 +634,7 @@ WorkspaceIndex: struct {
 // Normalize a workspace member path: trim a leading `./` and any trailing `/`,
 // and collapse `\` to `/` so Windows-spelled paths compare equal to POSIX ones.
 pkg_normalize_member_path: fn(path: String) -> String Never! {
-    out := path.trim().replace("\\", "/")
+    ^out: path.trim().replace("\\", "/")
     if out.starts_with("./") -> out = out.removeprefix("./")
     loop out.ends_with("/") -> out = out.removesuffix("/")
     out
@@ -696,12 +696,12 @@ pkg_ref_split_selector: fn(text: String) -> {source: String, selector: String?, 
 // Up to three closest labels to `query` by edit distance, for a did-you-mean
 // list. Ties order by label; the list is deterministic.
 pkg_ref_nearest: fn(query: String, labels: [String]) -> [String] Never! {
-    scored := [{distance: Int, label: String}]{}
+    ^scored: [{distance: Int, label: String}]{}
     loop label in labels -> scored.push({distance: pkg_edit_distance(query, label), label: label})
     // Two stable passes order by (distance, label).
     scored.sort_by(fn(entry) { entry.label })
     scored.sort_by(fn(entry) { entry.distance })
-    out := [String]{}
+    ^out: [String]{}
     query_len: query.bytes().len()
     loop entry in scored {
         if out.len() == 3 -> break
@@ -714,15 +714,15 @@ pkg_ref_nearest: fn(query: String, labels: [String]) -> [String] Never! {
 
 // Classic Levenshtein distance over Unicode scalars.
 pkg_edit_distance: fn(a: String, b: String) -> Int Never! {
-    left := [String]{}
+    ^left: [String]{}
     loop scalar in a.chars() -> left.push("{scalar}")
-    right := [String]{}
+    ^right: [String]{}
     loop scalar in b.chars() -> right.push("{scalar}")
     // One row of the classic DP; `diagonal` holds the previous row's value
     // one column to the left.
-    row := [Int]{}
+    ^row: [Int]{}
     loop j in 0..<(right.len() + 1) -> row.push(j)
-    diagonal := 0
+    ^diagonal: 0
     loop i in 1..<(left.len() + 1) {
         diagonal = row[0].copy()
         row[0] = i

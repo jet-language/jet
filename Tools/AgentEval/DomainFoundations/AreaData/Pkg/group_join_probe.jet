@@ -26,7 +26,7 @@ Joined: struct {
 }
 
 join_summaries: fn(rows: [Summary], owners: [Owner]) -> [Joined] {
-    out := [Joined]{}
+    ^out: [Joined]{}
     loop row in rows {
         loop owner in owners {
             if row.team == owner.team {
@@ -44,7 +44,7 @@ run: fn() {
         .group_by(fn(row) { row.team })
         .mean(fn(row) { row.value })
         .collect() ?? panic("groups")
-    summaries := [Summary]{}
+    ^summaries: [Summary]{}
     loop group in groups { summaries.push(Summary{team: group.key, mean: group.value}) }
     owners: [Owner]{{team: "A", owner: "Ada"}, {team: "B", owner: "Grace"}}
     joined: join_summaries(summaries, owners)

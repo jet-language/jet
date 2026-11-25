@@ -49,7 +49,7 @@ lsp_view: fn(server: LSPServer, params: Dyn?) -> LSPView? {
 lsp_view_of: fn(server: LSPServer, uri: String) -> LSPView? {
     doc: server.diagnostic_state.docs.get(uri) ?? return None
     checked: server.published.get(uri) ?? server.check(doc)
-    module_path := String?{None}
+    ^module_path: String?{None}
     if lsp_checked_module_at(checked, doc.path) == .Val(index) {
         if checked.modules[index].source == doc.text {
             module_path = Val(checked.modules[index].path)
@@ -146,8 +146,8 @@ lsp_target_at: fn(view: LSPView, offset: Int) -> LSPTarget? Never! {
     index: view.checked.index ?? return None
     module_path: view.module_path ?? return None
     bytes: view.doc.text.bytes()
-    best := LSPTarget?{None}
-    width := -1
+    ^best: LSPTarget?{None}
+    ^width: -1
     loop reference in index.references {
         if reference.module_path != module_path || !lsp_span_holds(reference.span, offset) -> next
         anchor: reference.target ?? next
@@ -172,8 +172,8 @@ lsp_target_at: fn(view: LSPView, offset: Int) -> LSPTarget? Never! {
 // Every checked occurrence of the declaration: its name when `declaration`,
 // then each reference to it, each once.
 lsp_occurrences: fn(index: SemIndex, target: LSPTarget, declaration: Bool{false}) -> [SemRef] Never! {
-    found := [SemRef]{}
-    seen := [String:Bool]{}
+    ^found: [SemRef]{}
+    ^seen: [String:Bool]{}
     if declaration {
         if lsp_definition_at(index, target) == .Val(def) {
             seen["{def.module_path}:{def.def_span.start}"] = true
@@ -212,21 +212,25 @@ LSPOpenOccurrences: struct {
 // A module that imports the declaring one is checked from its own document,
 // so a search from the declaration reaches it only through that check.
 lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, declaration: Bool{false}, tolerated: String{""}) -> LSPOpenOccurrences {
-    found := LSPOpenOccurrences{placed: [LSPPlaced]{}, errors: 0}
-    seen := [String:Bool]{}
+    ^found: LSPOpenOccurrences{placed: [LSPPlaced]{}, errors: 0}
+    ^seen: [String:Bool]{}
     _: lsp_place_occurrences(view.checked, target, seen, found, declaration: declaration)
     declaring: view.checked.modules[lsp_module_index(view.checked, target.module_path) ?? return found]
     if declaring.physical_path == "" -> return found
-    uris := server.published.keys().to_list()
+    ^uris: server.published.keys().to_list()
     uris.sort()
     loop uri in uris {
         if uri == view.uri -> next
         checked: server.published[uri]
         loop module_ref in checked.modules {
-            if !lsp_source_paths_equal(module_ref.physical_path, declaring.physical_path) || module_ref.source != declaring.source -> next
+            if !lsp_source_paths_equal(module_ref.physical_path, declaring.physical_path) || module_ref.source != declaring.source {
+                next
+            }
             if lsp_place_occurrences(checked, LSPTarget{module_path: module_ref.path, span: target.span}, seen, found, declaration: declaration) {
                 loop diagnostic in checked.diagnostics {
-                    if diagnostic.code != tolerated && !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) -> found.errors += 1
+                    if diagnostic.code != tolerated && !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) {
+                        found.errors += 1
+                    }
                 }
             }
             break
@@ -241,7 +245,7 @@ lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, de
 // the file and are left out.
 lsp_place_occurrences: fn(checked: LSPChecked, target: LSPTarget, seen: ^[String:Bool], found: ^LSPOpenOccurrences, declaration: Bool{false}) -> Bool {
     index: checked.index ?? return false
-    placed := false
+    ^placed: false
     loop occurrence in lsp_occurrences(index, target, declaration: declaration) {
         module_ref: checked.modules[lsp_module_index(checked, occurrence.module_path) ?? next]
         if module_ref.physical_path == "" -> next

@@ -91,10 +91,10 @@ Taken: struct {
 // The Jet string literal `text` opens with (its opening quote already gone),
 // or None when it never closes.
 take_literal: fn(text: String) -> Taken? Never! {
-    literal := [U8]{}
-    rest := [U8]{}
-    escaped := false
-    closed := false
+    ^literal: [U8]{}
+    ^rest: [U8]{}
+    ^escaped: false
+    ^closed: false
     loop byte in text.bytes() {
         if closed {
             rest.push(byte)
@@ -129,7 +129,7 @@ after_field: fn(line: String, field: String) -> String? Never! {
 
 // The row on `line`, or None when it does not spell one in the registry's shape.
 read_row: fn(line: String) -> EnvironmentRow? Never! {
-    rest := after_field(line, ROW_OPEN) ?? return None
+    ^rest: after_field(line, ROW_OPEN) ?? return None
     name: take_literal(rest) ?? return None
     rest = after_field(name.rest, SECTION_FIELD) ?? return None
     section: rest.partition(",").head
@@ -150,7 +150,7 @@ read_sections: fn(registry: String) -> [String] EnvironmentRowsError! {
     if opened.sep == "" {
         return Err(rows_fail("{REGISTRY_PATH} declares no JetEnvironmentSection enum"))
     }
-    sections := [String]{}
+    ^sections: [String]{}
     loop word in opened.tail.partition("\n}}").head.replace(",", " ").replace("\n", " ").split(" ") {
         if word != "" -> sections.push(word.copy())
     }
@@ -166,7 +166,7 @@ read_rows: fn(registry: String, sections: [String]) -> [EnvironmentRow] Environm
     if opened.sep == "" {
         return Err(rows_fail("{REGISTRY_PATH} declares no JET_ENVIRONMENT_VARIABLES list"))
     }
-    rows := [EnvironmentRow]{}
+    ^rows: [EnvironmentRow]{}
     loop line in opened.tail.lines() {
         if line == "}}" -> return Ok(rows)
         row: read_row(line) ?? return Err(rows_fail("{REGISTRY_PATH}: `{line}` is not a one-line row"))
@@ -184,7 +184,7 @@ read_control_variables: fn(controls: String) -> [String] EnvironmentRowsError! {
     if opened.sep == "" {
         return Err(rows_fail("{CONTROLS_PATH} declares no JET_CLI_CONTROLS list"))
     }
-    variables := [String]{}
+    ^variables: [String]{}
     loop line in opened.tail.lines() {
         if line == CONTROLS_CLOSE -> return Ok(variables)
         field: line.partition(VARIABLE_FIELD)
@@ -208,7 +208,7 @@ block_close: fn(section: String) -> String Never! {
 // The table of `section`'s rows.
 render_table: fn(rows: [EnvironmentRow], section: String) -> String Never! {
     internal: section == "Internal"
-    table := if internal -> "| Variable | Read by | Purpose |\n| --- | --- | --- |\n" else -> "| Variable | Accepted value | Effect |\n| --- | --- | --- |\n"
+    ^table: if internal -> "| Variable | Read by | Purpose |\n| --- | --- | --- |\n" else -> "| Variable | Accepted value | Effect |\n| --- | --- | --- |\n"
     loop row in rows {
         if row.section != section -> next
         middle: if internal -> "`{row.reader}`" else -> row.value
@@ -221,7 +221,7 @@ render_table: fn(rows: [EnvironmentRow], section: String) -> String Never! {
 render_page: fn(registry: String, page: String) -> String EnvironmentRowsError! {
     sections: read_sections(registry) ?? return Err(err)
     rows: read_rows(registry, sections) ?? return Err(err)
-    out := page.copy()
+    ^out: page.copy()
     loop section in sections {
         open: block_open(section)
         close: block_close(section)
@@ -259,14 +259,14 @@ runtime_accessor: fn(row: EnvironmentRow) -> String Never! {
 render_constants: fn(registry: String, header: String) -> String EnvironmentRowsError! {
     sections: read_sections(registry) ?? return Err(err)
     rows: read_rows(registry, sections) ?? return Err(err)
-    constants := [String]{}
+    ^constants: [String]{}
     loop row in rows -> constants.push(foundation_constant(row))
     Ok("{header}\n{constants.join("\n")}")
 }
 
 // The kit's constant file: the constants, then KIT_CONTROL_VARIABLES from `controls`.
 render_kit: fn(registry: String, controls: String) -> String EnvironmentRowsError! {
-    out := render_constants(registry, KIT_HEADER) ?? return Err(err)
+    ^out: render_constants(registry, KIT_HEADER) ?? return Err(err)
     out = "{out}\n{KIT_CONTROLS_HEADER}KIT_CONTROL_VARIABLES: [String]{{\n"
     loop variable in read_control_variables(controls) ?? return Err(err) {
         out = "{out}    \"{variable}\",\n"
@@ -278,7 +278,7 @@ render_kit: fn(registry: String, controls: String) -> String EnvironmentRowsErro
 render_runtime: fn(registry: String) -> String EnvironmentRowsError! {
     sections: read_sections(registry) ?? return Err(err)
     rows: read_rows(registry, sections) ?? return Err(err)
-    out := RUNTIME_HEADER.copy()
+    ^out: RUNTIME_HEADER.copy()
     loop row in rows -> out = "{out}\n{runtime_accessor(row)}"
     Ok(out)
 }
@@ -296,11 +296,11 @@ environment_rows_main: fn(args: [String]) -[FS]> String EnvironmentRowsError! {
     controls: read_text(CONTROLS_PATH) ?? return Err(err)
     page: read_text(PAGE_PATH) ?? return Err(err)
     // A missing generated file is written fresh, as a stale one is.
-    foundation := ""
+    ^foundation: ""
     if files.is_file(FOUNDATION_PATH) -> foundation = read_text(FOUNDATION_PATH) ?? return Err(err)
-    kit := ""
+    ^kit: ""
     if files.is_file(KIT_PATH) -> kit = read_text(KIT_PATH) ?? return Err(err)
-    runtime := ""
+    ^runtime: ""
     if files.is_file(RUNTIME_PATH) -> runtime = read_text(RUNTIME_PATH) ?? return Err(err)
     outputs: [{path: String, current: String, generated: String}]{
         {path: PAGE_PATH, current: page, generated: render_page(registry, page) ?? return Err(err)},
@@ -308,7 +308,7 @@ environment_rows_main: fn(args: [String]) -[FS]> String EnvironmentRowsError! {
         {path: KIT_PATH, current: kit, generated: render_kit(registry, controls) ?? return Err(err)},
         {path: RUNTIME_PATH, current: runtime, generated: render_runtime(registry) ?? return Err(err)},
     }
-    stale := [String]{}
+    ^stale: [String]{}
     loop output in outputs {
         if output.current == output.generated -> next
         stale.push(output.path.copy())
@@ -328,7 +328,7 @@ run: fn() { print(environment_rows_main(process.args()) ?? process.fail(1, err.m
 MINIMAL_REGISTRY: "// rows\nJetEnvironmentSection: enum {{\n    User, Maintainer, Internal,\n}}\n\nJET_ENVIRONMENT_VARIABLES: [JetEnvironmentVariable]{{\n    {{name: \"JET_A\", section: JetEnvironmentSection.User, reader: \"a.jet\", value: \"`1`\", meaning: \"Says \\\"a\\\" in `{{{{a}}}}`.\"}},\n    {{name: \"JET_B_*\", section: JetEnvironmentSection.Internal, reader: \"b.jet\", value: \"\", meaning: \"Hands b on.\"}},\n}}\n"
 
 minimal_page: fn() -> String Never! {
-    blocks := "# Page\n"
+    ^blocks: "# Page\n"
     loop section in read_sections(MINIMAL_REGISTRY) ?? panic(err.message) {
         blocks = "{blocks}\n{block_open(section)}\nstale\n{block_close(section)}\n"
     }

@@ -38,7 +38,7 @@ ast_comptime_value_json: fn(value: CtValue) -> String comptime_encoding.Encoding
             "[{parts.join(",")}]"
         }
         .List(values) -> {
-            parts := [String]{}
+            ^parts: [String]{}
             loop item in values {
                 encoded: ast_comptime_value_json(item) ?? return Err(err)
                 parts.push(encoded)
@@ -46,7 +46,7 @@ ast_comptime_value_json: fn(value: CtValue) -> String comptime_encoding.Encoding
             "[{parts.join(",")}]"
         }
         .Map(entries) -> {
-            parts := [String]{}
+            ^parts: [String]{}
             loop entry in entries {
                 key: if {
                     entry.key == .Str(text) -> text
@@ -60,7 +60,7 @@ ast_comptime_value_json: fn(value: CtValue) -> String comptime_encoding.Encoding
             "{{{parts.join(",")}}}"
         }
         .Struct(_, fields) -> {
-            parts := [String]{}
+            ^parts: [String]{}
             loop field in fields {
                 if ast_comptime_memo_storage_name(field.name) -> next
                 encoded: ast_comptime_value_json(field.value) ?? return Err(err)
@@ -70,15 +70,17 @@ ast_comptime_value_json: fn(value: CtValue) -> String comptime_encoding.Encoding
         }
         .Enum(_, variant, args) -> {
             if args.len() == 0 -> return Ok(foundation_json_quote(variant))
-            labeled := true
+            ^labeled: true
             loop argument in args {
                 if argument.label == None -> labeled = false
             }
-            parts := [String]{}
+            ^parts: [String]{}
             loop argument in args {
                 encoded: ast_comptime_value_json(argument.value) ?? return Err(err)
                 if {
-                    labeled && argument.label == .Val(label) -> parts.push("{foundation_json_quote(label)}:{encoded}")
+                    labeled && argument.label == .Val(label) -> {
+                        parts.push("{foundation_json_quote(label)}:{encoded}")
+                    }
                     else -> parts.push(encoded)
                 }
             }

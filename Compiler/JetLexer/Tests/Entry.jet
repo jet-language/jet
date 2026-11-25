@@ -58,7 +58,7 @@ lexer_test_literal: fn(lexed: Lexed, token: Token) -> TokenLiteral Never! {
 
 // Each string's plain reading.
 lexer_test_strings: fn(lexed: Lexed) -> [[StringPart]] Never! {
-    strings := [[StringPart]]{}
+    ^strings: [[StringPart]]{}
     loop token in lexed.tokens {
         if token.kind == TOKEN_STRING -> strings.push(lexer_test_literal(lexed, token).string_parts)
     }
@@ -68,7 +68,7 @@ lexer_test_strings: fn(lexed: Lexed) -> [[StringPart]] Never! {
 // Each string's typed-head reading where a typed head may take it, else its
 // plain reading.
 lexer_test_head_strings: fn(lexed: Lexed) -> [[StringPart]] Never! {
-    strings := [[StringPart]]{}
+    ^strings: [[StringPart]]{}
     loop token in lexed.tokens {
         if token.kind != TOKEN_STRING -> next
         literal: lexer_test_literal(lexed, token)
@@ -80,7 +80,7 @@ lexer_test_head_strings: fn(lexed: Lexed) -> [[StringPart]] Never! {
 // The lexer's diagnostics and those each string's plain reading reports once
 // the parser picks it.
 lexer_test_reported: fn(lexed: Lexed) -> [Diagnostic] Never! {
-    reported := lexed.diagnostics.copy()
+    ^reported: lexed.diagnostics.copy()
     loop token in lexed.tokens {
         if token.kind == TOKEN_STRING {
             literal: lexer_test_literal(lexed, token)
@@ -164,7 +164,7 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
 #Test("each_reading_defers_its_own_diagnostics") {
     lexed: lexer_test_raw(`x: Regex{"\d+"}`)
     assert(lexed.diagnostics.is_empty())
-    found := false
+    ^found: false
     loop token in lexed.tokens {
         if token.kind != TOKEN_STRING -> next
         literal: lexer_test_literal(lexed, token)
@@ -183,7 +183,7 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
 // diagnostics it kept.
 #Test("a_deferred_reading_reports_in_source_order") {
     lexed: lexer_test_raw(`x: Regex{"\d { } \q"}`)
-    found := false
+    ^found: false
     loop token in lexed.tokens {
         if token.kind != TOKEN_STRING -> next
         literal: lexer_test_literal(lexed, token)
@@ -205,7 +205,7 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
     lexed: lexer_test_raw(source)
     assert(lexed.diagnostics.is_empty())
     assert_eq(lexer_test_first_head_string(source), `a\{b`)
-    found := false
+    ^found: false
     loop token in lexed.tokens {
         if token.kind != TOKEN_STRING -> next
         literal: lexer_test_literal(lexed, token)
@@ -234,7 +234,7 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
 
 #Test("plain_string_still_rejects_unknown_escapes") {
     lexed: lexer_test_raw(`"C:\path"`)
-    found := false
+    ^found: false
     loop diagnostic in lexed.diagnostics {
         if diagnostic.what.contains("isn't an escape") -> found = true
     }
@@ -244,13 +244,13 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
 #Test("escaped_apostrophe_is_one_char_not_a_string_escape") {
     lexed: lexer_test_raw(`'\''`)
     assert(lexed.diagnostics.is_empty())
-    found := false
+    ^found: false
     loop token in lexed.tokens {
         if token.kind == TOKEN_CHAR && lexer_test_name(lexed, token.decoded) == "'" -> found = true
     }
     assert(found)
     quoted: lexer_test_raw(`"\'"`)
-    rejected := false
+    ^rejected: false
     loop diagnostic in quoted.diagnostics {
         if diagnostic.what.contains("isn't an escape") -> rejected = true
     }
@@ -260,7 +260,7 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
 // Whether `lexed` reports an E0001 at exactly `start..<end`, from the lexer
 // or from either reading of a string.
 lexer_test_escape_error_at: fn(lexed: Lexed, start: Int, end: Int) -> Bool Never! {
-    reported := lexer_test_reported(lexed)
+    ^reported: lexer_test_reported(lexed)
     loop token in lexed.tokens {
         if token.kind != TOKEN_STRING -> next
         literal: lexer_test_literal(lexed, token)
@@ -285,7 +285,7 @@ lexer_test_escape_error_at: fn(lexed: Lexed, start: Int, end: Int) -> Bool Never
     assert_eq(lexer_test_first_string("x: \"\"\"\n\\u{{E9}}\n\"\"\""), String.from_bytes([U8]{195, 169}) ?? panic("UTF-8 text"))
     lexed: lexer_test_raw(`c: '\u{1F600}'`)
     assert(lexed.diagnostics.is_empty())
-    found := false
+    ^found: false
     loop token in lexed.tokens {
         if token.kind == TOKEN_CHAR && lexer_test_name(lexed, token.decoded) == (String.from_bytes([U8]{240, 159, 152, 128}) ?? "") {
             found = true
@@ -392,7 +392,7 @@ add: fn(a: Int, b: Int) -> Int {
 }`
     lexed: lexer_test_raw(source)
     assert(lexed.diagnostics.is_empty())
-    found := false
+    ^found: false
     loop parts in lexer_test_strings(lexed) {
         if parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && lexer_test_name(lexed, parts[0].text).contains("-> return") {
             found = true
@@ -438,7 +438,7 @@ multiline: Path.{"""
 
 #Test("typed_head_lookbehind_preserves_comments_incomplete_and_byte_heads") {
     prefix_count: 128
-    source := ""
+    ^source: ""
     loop index in 0..<prefix_count -> source = "{source}prefix{index}: \"prefix\"; "
     tail: `
 ordinary: "\n"
@@ -496,7 +496,7 @@ byte_fixed: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block 
 #Test("fence_digraphs_are_longest_match_beside_comparisons_and_generics") {
     lexed: lexer_test_raw("<: a :> x < y x <= y x <=> y x > y Set<Int> a::b c:=d e:f")
     assert(lexed.diagnostics.is_empty())
-    kinds := [Int]{}
+    ^kinds: [Int]{}
     loop token in lexed.tokens {
         if token.kind != TOKEN_IDENT && token.kind != TOKEN_EOF -> kinds.push(token.kind)
     }
@@ -504,7 +504,7 @@ byte_fixed: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block 
 }
 
 #Test("payload_golden_whitespace_exponents_and_shifted_spans") {
-    raw := [U8]{9, 11, 12, 13, 10, 32, 32}
+    ^raw: [U8]{9, 11, 12, 13, 10, 32, 32}
     loop byte in `1_2.5e-1 1.25e+1 3.5E-1 3.25E+1 "prefix {1.25e-2} suffix"`.bytes() {
         raw.push(byte)
     }

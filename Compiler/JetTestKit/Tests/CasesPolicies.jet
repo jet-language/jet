@@ -144,7 +144,7 @@ use {
     root: cases_test_root("version-normalization")
     kit_exec_write(files.join(root, "Tests/Cases/group/version.out"), "jet VERSION\nWelcome to Jet! (VERSION) 9.8.7\n")
     cases_test_source(root, "version", "normalize: version\nstep: jet -c 'echo \"jet a0.0.43-dev+29517f5447\"; echo \"Welcome to Jet! (a0.0.43) 9.8.7\"'\nstdout: = version.out\n")
-    context := cases_test_context(root, files.join(root, "scratch"))
+    ^context: cases_test_context(root, files.join(root, "scratch"))
     context.env.version = "a0.0.43"
     context.env.version_display = "a0.0.43-dev+29517f5447"
     assert_eq(kit_cases_run(cases_test_entry("version"), context)[0].verdict.status, "PASS")
@@ -254,9 +254,9 @@ use {
 // (Tests/Cases/AgentWorkloads), fails an adapter that writes 2000000 bytes.
 #Test("process output limit fails closed") {
     started: time.instant()
-    child := process.cmd(["/bin/sh", "-c", "yes x"]).stdout(.Capture).stderr(.Capture).timeout(120s).output_limit(1048576).spawn() ?? panic("spawn: {err}")
+    ^child: process.cmd(["/bin/sh", "-c", "yes x"]).stdout(.Capture).stderr(.Capture).timeout(120s).output_limit(1048576).spawn() ?? panic("spawn: {err}")
     child.stdin.close()
-    failure := ""
+    ^failure: ""
     if child.wait() == {
         .Err(error) -> { failure = "{error}" }
         .Ok(_) -> panic("output limit did not stop the process")

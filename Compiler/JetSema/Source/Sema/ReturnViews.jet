@@ -54,7 +54,7 @@ sema_function_view_projection_equal: fn(left: ViewSourceProjection, right: ViewS
 
 sema_function_view_slot_equal: fn(left: [String], right: [String]) -> Bool Never! {
     if left.len() != right.len() -> return false
-    index := 0
+    ^index: 0
     loop index < left.len() {
         if left[index] != right[index] -> return false
         index += 1
@@ -66,7 +66,7 @@ sema_function_view_source_within: fn(declared: ViewSourcePath, inferred: ViewSou
     if !sema_function_view_source_equal(declared.source, inferred.source) || declared.projections.len() > inferred.projections.len() {
         return false
     }
-    index := 0
+    ^index: 0
     loop index < declared.projections.len() {
         if !sema_function_view_projection_equal(declared.projections[index], inferred.projections[index]) {
             return false
@@ -89,7 +89,7 @@ sema_function_view_contract_for_slot: fn(map: ViewProvenanceMap, slot: [String])
 }
 
 sema_function_return_view_provenance: fn(func: Func, inferred: ViewProvenanceMap?, diagnostics: ^[Diagnostic], complete: ^Bool) -> ViewProvenanceMap? {
-    declared_option := func.declared_return_view_provenance
+    ^declared_option: func.declared_return_view_provenance
     // copy: the provenance is a new owned Option. Without a declared map it equals `inferred`, the
     // caller's inferred map (a read parameter), which the caller keeps.
     if declared_option == None -> return inferred.copy()
@@ -98,7 +98,7 @@ sema_function_return_view_provenance: fn(func: Func, inferred: ViewProvenanceMap
         inferred_map: inferred
         span: func.return_type_span ?? func.name_span
         loop inferred_entry in inferred_map.entries {
-            declared_entry := sema_function_view_contract_for_slot(declared, inferred_entry.slot)
+            ^declared_entry: sema_function_view_contract_for_slot(declared, inferred_entry.slot)
             if declared_entry == None {
                 diagnostics.push(sema_error("E2305", span, "returned view escapes its declared `from` clause", "every return path's owners must stay inside the sources named after `from`", "widen the `from` clause, or stop returning a view from that owner"))
                 complete = false
@@ -106,7 +106,7 @@ sema_function_return_view_provenance: fn(func: Func, inferred: ViewProvenanceMap
             }
             allowed: declared_entry ?? ViewProvenance{sources: [ViewSourcePath]{}, mutable: false}
             loop inferred_source in inferred_entry.value.sources {
-                source_allowed := false
+                ^source_allowed: false
                 loop declared_source in allowed.sources {
                     if sema_function_view_source_within(declared_source, inferred_source) {
                         source_allowed = true
@@ -118,10 +118,10 @@ sema_function_return_view_provenance: fn(func: Func, inferred: ViewProvenanceMap
                 }
             }
         }
-        published := [ViewProvenanceEntry]{}
+        ^published: [ViewProvenanceEntry]{}
         loop inferred_entry in inferred_map.entries {
-            allowed := sema_function_view_contract_for_slot(declared, inferred_entry.slot)
-            sources := inferred_entry.value.sources
+            ^allowed: sema_function_view_contract_for_slot(declared, inferred_entry.slot)
+            ^sources: inferred_entry.value.sources
             if allowed != None {
                 allowed_value: allowed ?? ViewProvenance{sources: [ViewSourcePath]{}, mutable: false}
                 sources = allowed_value.sources
@@ -130,7 +130,7 @@ sema_function_return_view_provenance: fn(func: Func, inferred: ViewProvenanceMap
         }
         loop declared_entry in declared.entries {
             if declared_entry.slot.len() == 0 -> next
-            duplicate := false
+            ^duplicate: false
             loop published_entry in published {
                 if sema_function_view_slot_equal(published_entry.slot, declared_entry.slot) {
                     duplicate = true
@@ -139,11 +139,11 @@ sema_function_return_view_provenance: fn(func: Func, inferred: ViewProvenanceMap
             if !duplicate -> published.push(declared_entry)
         }
         if published.len() == 0 {
-            any_write := false
+            ^any_write: false
             loop inferred_entry in inferred_map.entries {
                 if inferred_entry.value.mutable -> any_write = true
             }
-            merged := [ViewProvenanceEntry]{}
+            ^merged: [ViewProvenanceEntry]{}
             loop declared_entry in declared.entries {
                 if {
                     declared_entry.slot.len() == 0 -> {
@@ -171,7 +171,7 @@ sema_function_view_maps_equal: fn(left: ViewProvenanceMap?, right: ViewProvenanc
     right_map: right
     if left_map.entries.len() != right_map.entries.len() -> return false
     loop left_entry in left_map.entries {
-        right_entry := ViewProvenanceEntry?{None}
+        ^right_entry: ViewProvenanceEntry?{None}
         loop candidate in right_map.entries {
             if sema_function_view_slot_equal(left_entry.slot, candidate.slot) {
                 right_entry = Val(candidate)
@@ -183,7 +183,7 @@ sema_function_view_maps_equal: fn(left: ViewProvenanceMap?, right: ViewProvenanc
             return false
         }
         loop left_source in left_entry.value.sources {
-            found := false
+            ^found: false
             loop right_source in candidate.value.sources {
                 if sema_function_view_source_path_equal(left_source, right_source) -> found = true
             }
@@ -231,7 +231,7 @@ sema_function_publish_return_views: fn(scopes: ^SemaScopeTable, rows: ^[U32:Int]
     binding: scopes.bindings[index]
     if binding.symbol.ty == .Val(type_value) {
         if type_value == .Fn(params, ret, effect_bound, param_contract, metadata, existing) {
-            next_map := Val(provenance)
+            ^next_map: Val(provenance)
             if sema_function_view_maps_equal(existing, next_map) -> return false
             scopes.bindings[index].symbol.ty = Val(Type.Fn{params: params, ret: ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: metadata, return_view_provenance: next_map})
             return true
@@ -311,13 +311,13 @@ sema_check_struct_contains_view: fn(graph: SemaRegistrationGraph, module_identit
 // cursors. Equal names retain declaration order, exactly as the canonical
 // stable merge. `names` gets each job's function name, in job order.
 sema_check_view_summary_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, names: ^[String]) -> [Int] {
-    jobs := [Int]{}
+    ^jobs: [Int]{}
     graph: program.registration_graph
     loop item_index in 0..<graph.modules[module_index].program.items.len() {
         if graph.modules[module_index].program.items[item_index] == .Func(func) {
             if func.inline_foreign != None || sema_function_is_guest_import(func) -> next
             return_type: func.return_type ?? next
-            seen := [U32:Bool]{}
+            ^seen: [U32:Bool]{}
             if sema_check_type_contains_view(graph, graph.modules[module_index].module_identity, return_type, seen) {
                 jobs.push(item_index)
                 names.push(func.name)
@@ -333,18 +333,18 @@ sema_check_sort_view_summary_jobs: fn(jobs: ^[Int], names: [String]) Never! {
     if count < 2 {
         return
     }
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<count -> order.push(index)
-    merged := order
-    width := 1
+    ^merged: order
+    ^width: 1
     loop width < count {
-        start := 0
+        ^start: 0
         loop start < count {
             middle: if start + width < count -> start + width else -> count
             end: if start + 2 * width < count -> start + 2 * width else -> count
-            left := start
-            right := middle
-            out := start
+            ^left: start
+            ^right: middle
+            ^out: start
             loop out < end {
                 if left < middle && (right >= end || names[order[left]] <= names[order[right]]) {
                     merged[out] = order[left]
@@ -371,8 +371,8 @@ sema_check_sort_view_summary_jobs: fn(jobs: ^[Int], names: [String]) Never! {
 // their run order (sema_check_sort_view_summary_jobs). Both read only the
 // graph.
 sema_check_sorted_view_summary_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int) -> [Int] {
-    names := [String]{}
-    jobs := sema_check_view_summary_jobs(environment, program, module_index, names)
+    ^names: [String]{}
+    ^jobs: sema_check_view_summary_jobs(environment, program, module_index, names)
     sema_check_sort_view_summary_jobs(jobs, names)
     jobs
 }
@@ -400,20 +400,24 @@ sema_check_view_summaries: fn(environment: ^SemaScopeEnvironment, program: SemaP
     summary_jobs: if view_jobs == .Val(found) -> found.copy() else -> sema_check_sorted_view_summary_jobs(environment, program, module_index)
     method_jobs: sema_check_view_summary_method_jobs(program, module_index)
     job_count: summary_jobs.len() + method_jobs.len()
-    summary_functions_checked := 0
-    return_view_rows := [U32:Int]{}
-    previous_round := [ViewProvenanceMap?]{}
-    summary_round := 0
+    ^summary_functions_checked: 0
+    ^return_view_rows: [U32:Int]{}
+    ^previous_round: [ViewProvenanceMap?]{}
+    ^summary_round: 0
     loop job_count > 0 && summary_round <= job_count {
-        round := [ViewProvenanceMap?]{}
+        ^round: [ViewProvenanceMap?]{}
         loop item_index in summary_jobs {
             round.push(sema_check_view_summary_function(program.registration_graph, item_index, module_index, memory_plan, environment, program, scopes, host_hooks, comptime_functions, comptime_rows, return_view_rows, summary_functions_checked))
         }
         graph: program.registration_graph
         loop job in method_jobs {
             if job.kind == {
-                .Nominal -> round.push(sema_check_view_summary_method(job, graph.modules[module_index].nominals[job.owner].methods[job.method_index].declaration, module_index, memory_plan, environment, program, scopes, host_hooks))
-                .Impl -> round.push(sema_check_view_summary_method(job, graph.modules[module_index].impls[job.owner].methods[job.method_index].declaration, module_index, memory_plan, environment, program, scopes, host_hooks))
+                .Nominal -> {
+                    round.push(sema_check_view_summary_method(job, graph.modules[module_index].nominals[job.owner].methods[job.method_index].declaration, module_index, memory_plan, environment, program, scopes, host_hooks))
+                }
+                .Impl -> {
+                    round.push(sema_check_view_summary_method(job, graph.modules[module_index].impls[job.owner].methods[job.method_index].declaration, module_index, memory_plan, environment, program, scopes, host_hooks))
+                }
             }
         }
         if summary_round > 0 && sema_check_view_rounds_equal(previous_round, round) -> break
@@ -437,23 +441,23 @@ sema_check_view_summary_function: fn(graph: SemaRegistrationGraph, item_index: I
     if graph.modules[module_index].program.items[item_index] == .Func(declaration) {
         job: SemaBodyJob.TopLevel{item_index: item_index}
         owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
-        cached := sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))
+        ^cached: sema_comptime_find_checked_function(comptime_functions, comptime_rows, environment.module_identity, sema_program_symbol_key(program, owner_id))
         if cached == .Val(checked_function) {
             if checked_function.function == .Val(function) {
-                _ := sema_function_publish_return_views(scopes, return_view_rows, function, owner_id)
+                ^_: sema_function_publish_return_views(scopes, return_view_rows, function, owner_id)
                 return function.return_view_provenance
             }
             return None
         }
-        summary_diagnostics := [Diagnostic]{}
-        summary_calls := [SemaCallSiteFact]{}
-        summary_comptime_requests := [SemaComptimeRequest]{}
-        summary_name_references := [SemaNameReferenceFact]{}
+        ^summary_diagnostics: [Diagnostic]{}
+        ^summary_calls: [SemaCallSiteFact]{}
+        ^summary_comptime_requests: [SemaComptimeRequest]{}
+        ^summary_name_references: [SemaNameReferenceFact]{}
         memory_position: sema_check_registered_memory_position(job, declaration, module_index, memory_plan, environment, program)
         summary_functions_checked += 1
-        checked := sema_function_check_registered(job, declaration, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, summary_diagnostics, summary_calls, summary_comptime_requests, summary_name_references)
+        ^checked: sema_function_check_registered(job, declaration, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, summary_diagnostics, summary_calls, summary_comptime_requests, summary_name_references)
         if checked.value == .Val(function) {
-            _ := sema_function_publish_return_views(scopes, return_view_rows, function, owner_id)
+            ^_: sema_function_publish_return_views(scopes, return_view_rows, function, owner_id)
             return function.return_view_provenance
         }
     }
@@ -465,8 +469,8 @@ sema_check_view_summary_function: fn(graph: SemaRegistrationGraph, item_index: I
 // the summary from `scopes.method_return_views`.
 sema_check_view_summary_method_jobs: fn(program: SemaProgramTables, module_index: Int) -> [SemaMethodJob] {
     graph: program.registration_graph
-    jobs := [SemaMethodJob]{}
-    scanned := 0
+    ^jobs: [SemaMethodJob]{}
+    ^scanned: 0
     loop job in sema_check_method_jobs(graph, graph.modules[module_index], scanned, false) {
         selected: if job.kind == {
             .Nominal -> sema_check_view_summary_method_selected(graph, module_index, graph.modules[module_index].nominals[job.owner].methods[job.method_index].declaration)
@@ -482,7 +486,7 @@ sema_check_view_summary_method_selected: fn(graph: SemaRegistrationGraph, module
         return false
     }
     return_type: declaration.return_type ?? return false
-    seen := [U32:Bool]{}
+    ^seen: [U32:Bool]{}
     sema_check_type_contains_view(graph, graph.modules[module_index].module_identity, return_type, seen)
 }
 
@@ -503,14 +507,14 @@ sema_check_view_summary_method: fn(method: SemaMethodJob, declaration: Func, mod
     // copy: `previous_location` restores scopes.location_function after the check overwrites it.
     previous_location: scopes.location_function.copy()
     sema_function_check_registered_location(declaration, memory_plan, input.memory_position, scopes)
-    summary_diagnostics := [Diagnostic]{}
-    summary_calls := [SemaCallSiteFact]{}
-    summary_comptime_requests := [SemaComptimeRequest]{}
-    summary_name_references := [SemaNameReferenceFact]{}
-    checked := sema_function_check_registered(job, declaration, module_index, memory_plan, input.memory_position, owner_id, input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, summary_diagnostics, summary_calls, summary_comptime_requests, summary_name_references)
+    ^summary_diagnostics: [Diagnostic]{}
+    ^summary_calls: [SemaCallSiteFact]{}
+    ^summary_comptime_requests: [SemaComptimeRequest]{}
+    ^summary_name_references: [SemaNameReferenceFact]{}
+    ^checked: sema_function_check_registered(job, declaration, module_index, memory_plan, input.memory_position, owner_id, input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, summary_diagnostics, summary_calls, summary_comptime_requests, summary_name_references)
     scopes.location_function = previous_location
     environment.generic_params = base_generic_params.move()
-    provenance := ViewProvenanceMap?{None}
+    ^provenance: ViewProvenanceMap?{None}
     if checked.value == .Val(function) -> provenance = function.return_view_provenance
     if provenance == .Val(map) -> scopes.method_return_views[owner_id.id] = map
     provenance

@@ -16,8 +16,8 @@ OrderID: distinct Int
 build: fn(b: Build) {
     rows: compiler.query(compiler.FactSource.Program{program: b.program}, compiler.FactKind.Marker) ?? panic("the program store refused: {err}")
     revision: b.program.revision()
-    text := ""
-    same := true
+    ^text: ""
+    ^same: true
     loop row in rows {
         if row == .Program(fact) {
             text = "{text}[{fact.name}  {fact.subject}  {fact.identity}  item {fact.scope.item}]"

@@ -54,7 +54,7 @@ sys_groups: fn(size: I64, list: I64) -> I64 {
     length: native + I64{1}
     data: jet_rt_alloc(length * I64{8}, I64{8})
     trap_store(data, jet_int_owned_from_i64(count))
-    at := I64{0}
+    ^at: I64{0}
     loop at < native {
         trap_store(wrapping(data + (at + I64{1}) * I64{8}), jet_int_owned_from_i64(net_load_uint(wrapping(gids + at * I64{4}), I64{4})))
         at += I64{1}
@@ -116,15 +116,15 @@ SYS_NSCD_GROUPS_MAX: I64{65536}
 
 sys_close: fn(fd: I64) {
     #Unsafe("close(2) releases a descriptor this route opened") {
-        _ := host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        ^_: host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 // fread(at, size, 1): the bytes read before end of file, or -errno.
 sys_read_full: fn(fd: I64, at: I64, size: I64) -> I64 {
-    got := I64{0}
+    ^got: I64{0}
     loop got < size {
-        count := I64{0}
+        ^count: I64{0}
         #Unsafe("read(2) fills at most the caller's remaining owned bytes") {
             count = host_syscall(I64{0}, fd, wrapping(at + got), size - got, I64{0}, I64{0}, I64{0})
         }
@@ -144,9 +144,9 @@ sys_read_full: fn(fd: I64, at: I64, size: I64) -> I64 {
 sys_nscd_initgroups: fn(user: I64, length: I64, found: I64) -> I64 {
     net_put(found, I64{0}, I64{0})
     net_put(found, I64{8}, I64{0})
-    swapped := false
+    ^swapped: false
     loop {
-        fd := I64{0}
+        ^fd: I64{0}
         #Unsafe("socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC) retains no memory") {
             fd = host_syscall(I64{41}, I64{1}, I64{524289}, I64{0}, I64{0}, I64{0}, I64{0})
         }
@@ -162,7 +162,7 @@ sys_nscd_initgroups: fn(user: I64, length: I64, found: I64) -> I64 {
         net_store_uint(address, I64{2}, I64{1})
         path: rt_static_text("/var/run/nscd/socket")
         rt_text_bytes_copy(wrapping(address + I64{2}), rt_text_data(path), rt_text_len(path))
-        status := I64{0}
+        ^status: I64{0}
         #Unsafe("connect(2) reads the owned 23-byte address") {
             status = host_syscall(I64{42}, fd, address, I64{23}, I64{0}, I64{0}, I64{0})
         }
@@ -224,7 +224,7 @@ sys_nscd_initgroups: fn(user: I64, length: I64, found: I64) -> I64 {
 
 // C strchr over a NUL-terminated byte run: the first `c`, or 0.
 sys_strchr: fn(at: I64, c: I64) -> I64 {
-    p := at
+    ^p: at
     loop {
         b: rt_text_byte(p)
         if (b == c) { return p }
@@ -234,7 +234,7 @@ sys_strchr: fn(at: I64, c: I64) -> I64 {
 }
 
 sys_streq: fn(a: I64, b: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop {
         x: rt_text_byte(wrapping(a + at))
         if (x != rt_text_byte(wrapping(b + at))) { return false }
@@ -250,9 +250,9 @@ sys_streq: fn(a: I64, b: I64) -> Bool {
 // /etc/group reader writes, which stays musl's errno for initgroups.
 sys_grouplist: fn(user: I64, length: I64, gid: I64, list: I64, look: I64) -> I64 {
     net_store_uint(list, I64{4}, gid)
-    n := I64{1}
+    ^n: I64{1}
     found: jet_rt_alloc(I64{16}, I64{8})
-    status := sys_nscd_initgroups(user, length, found)
+    ^status: sys_nscd_initgroups(user, length, found)
     nscd: net_word(found, I64{0})
     nscd_count: net_word(found, I64{8})
     jet_rt_free(found, I64{16}, I64{8})
@@ -267,7 +267,7 @@ sys_grouplist: fn(user: I64, length: I64, gid: I64, list: I64, look: I64) -> I64
         if (status >= I64{0}) { n = status }
     }
     if (status >= I64{0}) {
-        at := I64{0}
+        ^at: I64{0}
         loop at < nscd_count {
             group: net_load_uint(wrapping(nscd + at * I64{4}), I64{4})
             at += I64{1}
@@ -287,14 +287,14 @@ sys_grouplist: fn(user: I64, length: I64, gid: I64, list: I64, look: I64) -> I64
 // does (src/passwd/getgrent_a.c): the new n, or -errno for a read error.
 // Entries of nscd's answer equal to a group's gid become `gid`.
 sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd: I64, nscd_count: I64, start: I64) -> I64 {
-    n := start
-    capacity := I64{256}
-    line := jet_rt_alloc(capacity, I64{1})
-    status := I64{0}
+    ^n: start
+    ^capacity: I64{256}
+    ^line: jet_rt_alloc(capacity, I64{1})
+    ^status: I64{0}
     loop {
         // getline: through the newline, NUL-terminated; none at end of file.
-        l := I64{0}
-        ended := false
+        ^l: I64{0}
+        ^ended: false
         loop {
             c: lk_getc(look, reader)
             if (c < I64{0}) {
@@ -323,8 +323,8 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
         if (first == I64{0}) { next }
         second: sys_strchr(wrapping(first + I64{1}), I64{58})
         if (second == I64{0}) { next }
-        s := wrapping(second + I64{1})
-        group := I64{0}
+        ^s: wrapping(second + I64{1})
+        ^group: I64{0}
         loop {
             digit: rt_text_byte(s) - I64{48}
             if (digit < I64{0} || digit > I64{9}) { break }
@@ -332,7 +332,7 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
             s = wrapping(s + I64{1})
         }
         if (rt_text_byte(s) != I64{58}) { next }
-        at := I64{0}
+        ^at: I64{0}
         loop at < nscd_count {
             entry: wrapping(nscd + at * I64{4})
             if (net_load_uint(entry, I64{4}) == group) { net_store_uint(entry, I64{4}, gid) }
@@ -340,10 +340,10 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
         }
         // Members split at each comma; as in musl, the byte after a comma
         // is never itself taken as a separator.
-        member := wrapping(s + I64{1})
-        matched := false
+        ^member: wrapping(s + I64{1})
+        ^matched: false
         if (rt_text_byte(member) != I64{0}) {
-            p := member
+            ^p: member
             loop rt_text_byte(p) != (I64{0}) {
                 if (rt_text_byte(p) == I64{44}) {
                     rt_text_put(p, I64{0})
@@ -442,7 +442,7 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     param: jet_rt_alloc(I64{8}, I64{8})
     thread_zero(param, I64{8})
     kind: host_call(I64{145}, native, I64{0}, I64{0})
-    result := kind
+    ^result: kind
     if (result >= I64{0}) { result = host_call(I64{143}, native, param, I64{0}) }
     // `param` owns an initialized struct sched_param; the caller lends the
     // tuple's Bool byte and three Int words.
@@ -505,7 +505,7 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     clock: if (native == I64{0}) -> I64{2} else -> wrapping(wrapping(I64{0} - native - I64{1}) * I64{8} + I64{2})
     span: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(span, I64{16})
-    result := host_call(I64{228}, clock, span, I64{0})
+    ^result: host_call(I64{228}, clock, span, I64{0})
     if (result == I64{-22} && native != I64{0}) { result = I64{-3} }
     nanos: trap_word(span) * I64{1000000000} + trap_word(wrapping(span + I64{8}))
     jet_rt_free(span, I64{16}, I64{8})
@@ -620,7 +620,7 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
     trap_store(wrapping(times + I64{16}), modified)
     trap_store(wrapping(times + I64{24}), I64{0})
     name: fd_c_path(path)
-    result := I64{0}
+    ^result: I64{0}
     #Unsafe("utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call") {
         result = host_syscall(I64{280}, I64{-100}, name, times, I64{0}, I64{0}, I64{0})
     }
@@ -652,7 +652,7 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
 // chdir and io.Error's Display of the errno.
 #Export(c) jet_sys_set_current_dir_raw: fn(path: I64, error: I64) -> I64 {
     length: rt_text_len(path)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) {
             rt_text_store(error, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
@@ -709,7 +709,7 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
     host_arguments_require()
     length: rt_text_len(name)
     if (length == I64{0}) { return I64{0} }
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(rt_text_data(name) + at))
         if (byte == I64{0} || byte == I64{61}) { return I64{0} }

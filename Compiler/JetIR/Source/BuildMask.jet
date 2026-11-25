@@ -108,7 +108,7 @@ ir_masked_branch: fn(p: IRProgram, b: IRBuilder, span: Span) -> Bool Never! {
 // The Bool an arm of a masked branch runs under: `test` (`!test` when
 // `negate`) and-ed with the enclosing mask.
 ir_mask_arm: fn(m: IRModule, b: ^IRBuilder, test: Int, negate: Bool) -> Int Never! {
-    value := test
+    ^value: test
     if negate {
         value = ir_temp_like(m, b, test)
         ir_emit(b.f, IROp.Not, value, test, -1, -1, b.line)
@@ -129,7 +129,7 @@ ir_mask_select: fn(m: IRModule, b: ^IRBuilder, test: Int, chosen: Int, other: In
     if b.f.slot_type[chosen] != b.f.slot_type[other] {
         return ir_fail_slot(b, span, "a masked branch selects between two types")
     }
-    mask := test
+    ^mask: test
     if kind == .Word {
         bit: ir_copy_word(m, b, test, b.f.slot_type[other])
         one: ir_const_like(m, b, other, 1)
@@ -183,8 +183,8 @@ ir_masked_if_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, condition: Bod
     test: ir_mask_test(m, p, b, condition, span)
     if ir_failed(b) -> return -1
     unit: ir_unit_type(ty) || ir_never_type(ty)
-    chosen := -1
-    other := -1
+    ^chosen: -1
+    ^other: -1
     if !unit {
         row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
         chosen = ir_temp(m, b, row)
@@ -217,7 +217,7 @@ ir_masked_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: BodyPlace
     if ir_failed(b) {
         return
     }
-    result := right
+    ^result: right
     if op == .Val(binary) {
         left_ty: ir_row_ty(m, p, b.f.slot_type[current])
         right_ty: ir_ty(m, p, b, value)
@@ -252,7 +252,7 @@ ir_masked_exits: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody)
     // The body the builder reads (ir_body_stmt, ir_masked_branch): an early
     // return is the last statement of a masked `if`'s arm.
     tree: ir_builder_body(p, b.row)[0].tree
-    found := false
+    ^found: false
     loop statement in tree.stmts {
         if statement == .If(_, then_body, _, _, span) {
             if then_body.len() > 0 && ir_masked_branch(p, b, span) {

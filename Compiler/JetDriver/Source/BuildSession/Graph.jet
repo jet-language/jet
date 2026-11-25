@@ -29,28 +29,28 @@ build_session_append_int: fn(values: ^[Int], value: Int) Never! {
 }
 
 build_session_cycle: fn(edges: [[Int]], names: [String]) -> [String]? Never! {
-    colors := [Int]{}
+    ^colors: [Int]{}
     loop _ in edges -> colors.push(0)
     loop root in 0..<edges.len() {
         if colors[root] != 0 -> next
-        stack := [Int]{root}
-        positions := [Int]{0}
+        ^stack: [Int]{root}
+        ^positions: [Int]{0}
         colors[root] = 1
         loop stack.len() > 0 {
             last: stack.len() - 1
             node: stack[last].copy()
             if positions[last] >= edges[node].len() {
                 colors[node] = 2
-                _ := stack.pop()
-                _ := positions.pop()
+                ^_: stack.pop()
+                ^_: positions.pop()
                 next
             }
             child: edges[node][positions[last]]
             positions[last] = positions[last] + 1
             if colors[child] == 2 -> next
             if colors[child] == 1 {
-                chain := [String]{}
-                adding := false
+                ^chain: [String]{}
+                ^adding: false
                 loop current in stack {
                     if current == child -> adding = true
                     if adding -> chain.push(names[current])
@@ -67,8 +67,8 @@ build_session_cycle: fn(edges: [[Int]], names: [String]) -> [String]? Never! {
 }
 
 build_session_target_actions: fn(state: BuildSessionState, id: Int, selected: ^[Int]) Never! {
-    pending := [Int]{id}
-    seen := [Int]{}
+    ^pending: [Int]{id}
+    ^seen: [Int]{}
     loop pending.len() > 0 {
         current: pending.pop() ?? break
         if build_session_contains_int(seen, current) -> next
@@ -79,16 +79,16 @@ build_session_target_actions: fn(state: BuildSessionState, id: Int, selected: ^[
 }
 
 build_session_prerequisites: fn(state: BuildSessionState) -> [[Int]] Never! {
-    edges := [[Int]]{}
+    ^edges: [[Int]]{}
     loop _ in state.actions -> edges.push([Int]{})
     loop target in state.targets {
-        dependencies := [Int]{}
+        ^dependencies: [Int]{}
         loop dep in target.deps -> build_session_target_actions(state, dep, dependencies)
         loop action in target.actions {
             loop dep in dependencies -> build_session_append_int(edges[action], dep)
         }
     }
-    owners := [String:Int]{}
+    ^owners: [String:Int]{}
     loop (id, action) in state.actions {
         loop output in action.outputs -> owners[output] = id
     }
@@ -107,10 +107,10 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
     if default < -1 || default >= state.targets.len() {
         return Val(build_session_error_diag(state, BuildSessionError.UnknownTarget{id: default}))
     }
-    target_edges := [[Int]]{}
-    target_names := [String]{}
-    action_names := [String]{}
-    owners := [String:Int]{}
+    ^target_edges: [[Int]]{}
+    ^target_names: [String]{}
+    ^action_names: [String]{}
+    ^owners: [String:Int]{}
     loop target in state.targets {
         loop id in target.actions {
             if id < 0 || id >= state.actions.len() {
@@ -130,7 +130,7 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
         // A step leaves only its declared outputs, so a step with none is
         // reported at its own `b.run` call.
         if action.outputs.len() == 0 {
-            diagnostic := build_session_error_diag(state, BuildSessionError.StepWithoutOutputs{value: action.name})
+            ^diagnostic: build_session_error_diag(state, BuildSessionError.StepWithoutOutputs{value: action.name})
             diagnostic.start = action.start
             diagnostic.end = action.end
             return Val(diagnostic)
@@ -159,7 +159,7 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
     // so a target that compiles one, or a step that reads one, that nothing
     // makes has no producer, even when an earlier build left a file there.
     loop target in state.targets {
-        paths := target.sources
+        ^paths: target.sources
         loop path in target.inputs -> paths.push(path.copy())
         loop path in paths {
             if build_session_unproduced(state, owners, path) {
@@ -182,7 +182,7 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
     }
     if build_session_cycle(build_session_prerequisites(state), action_names) == .Val(nodes) {
         // Reported at the `b.run` call of the step the chain starts from.
-        diagnostic := build_session_error_diag(state, BuildSessionError.ActionDependencyCycle{nodes: nodes})
+        ^diagnostic: build_session_error_diag(state, BuildSessionError.ActionDependencyCycle{nodes: nodes})
         loop action in state.actions {
             if nodes.len() == 0 || action.name != nodes[0] -> next
             diagnostic.start = action.start
@@ -212,12 +212,12 @@ build_session_missing_producer: fn(path: String, user: String, start: Int, end: 
 }
 
 build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
-    targets := [BuildGraphTarget]{}
-    actions := [BuildGraphAction]{}
-    keys := [BuildGraphActionKey]{}
-    file_rows := [String:BuildGraphFile]{}
+    ^targets: [BuildGraphTarget]{}
+    ^actions: [BuildGraphAction]{}
+    ^keys: [BuildGraphActionKey]{}
+    ^file_rows: [String:BuildGraphFile]{}
     loop (id, target) in state.targets {
-        paths := target.sources
+        ^paths: target.sources
         loop path in target.inputs -> paths.push(path.copy())
         loop path in target.outputs -> paths.push(path.copy())
         targets.push(BuildGraphTarget{id: id, name: target.name, kind: build_key_target_kind(target.kind), deps: target.deps, actions: target.actions, files: paths, plugin: target.plugin})
@@ -228,22 +228,22 @@ build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
         actions.push(BuildGraphAction{id: id, name: action.name, kind: "generic", inputs: action.inputs, outputs: action.outputs, target: target, caps: loop flag in action.caps -> build_session_cap_name(flag), pools: [String]{"cpu"}, plugin: None, compiler_owned: false, key: key, cache_hit: None})
         keys.push(BuildGraphActionKey{action: action.name, key: key})
         loop output in action.outputs {
-            row := file_rows.get(output) ?? BuildGraphFile{path: output, owner: None, consumers: [Int]{}, targets: [Int]{}}
+            ^row: file_rows.get(output) ?? BuildGraphFile{path: output, owner: None, consumers: [Int]{}, targets: [Int]{}}
             row.owner = Val(id)
             file_rows[output] = row.move()
         }
         loop input in action.inputs {
-            row := file_rows.get(input) ?? BuildGraphFile{path: input, owner: None, consumers: [Int]{}, targets: [Int]{}}
+            ^row: file_rows.get(input) ?? BuildGraphFile{path: input, owner: None, consumers: [Int]{}, targets: [Int]{}}
             row.consumers.push(id)
             file_rows[input] = row.move()
         }
     }
     loop (id, target) in state.targets {
-        paths := target.sources
+        ^paths: target.sources
         loop path in target.inputs -> paths.push(path.copy())
         loop path in target.outputs -> paths.push(path.copy())
         loop path in paths {
-            row := file_rows.get(path) ?? BuildGraphFile{path: path, owner: None, consumers: [Int]{}, targets: [Int]{}}
+            ^row: file_rows.get(path) ?? BuildGraphFile{path: path, owner: None, consumers: [Int]{}, targets: [Int]{}}
             row.targets.push(id)
             file_rows[path] = row.move()
         }
@@ -252,18 +252,18 @@ build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
             // `action_id` is one of this target's own actions, so the owner
             // search finds this target if no earlier one; the skip never runs.
             owner: build_session_action_target(state, action_id) ?? next
-            action_paths := action.inputs
+            ^action_paths: action.inputs
             loop path in action.outputs -> action_paths.push(path.copy())
             loop path in action_paths {
-                row := file_rows.get(path) ?? BuildGraphFile{path: path, owner: None, consumers: [Int]{}, targets: [Int]{}}
+                ^row: file_rows.get(path) ?? BuildGraphFile{path: path, owner: None, consumers: [Int]{}, targets: [Int]{}}
                 build_session_append_int(row.targets, owner)
                 file_rows[path] = row.move()
             }
         }
     }
-    paths := file_rows.keys().collect()
+    ^paths: file_rows.keys().collect()
     paths.sort()
-    files := [BuildGraphFile]{}
+    ^files: [BuildGraphFile]{}
     // `paths` are the keys of `file_rows` itself; the skip never runs.
     loop path in paths -> files.push(file_rows.get(path) ?? next)
     BuildGraph{targets: targets.move(), actions: actions.move(), action_keys: keys.move(), cache_hits: [BuildGraphAction]{}, files: files.move(), affected_files: [BuildGraphFile]{}, nodes: state.nodes}
@@ -282,8 +282,8 @@ build_session_graph: fn(session: BuildSession, returned: BuildSessionValue) -> B
 }
 
 build_session_finish: fn(session: ^BuildSession, returned: BuildSessionValue) -> BuildSessionFinish Never! {
-    permit := session.storage.guard_edit()
-    state := ^permit.value
+    ^permit: session.storage.guard_edit()
+    state: permit.value.in_place()
     if !state.active {
         return {plan: None, diagnostics: [BuildSessionDiagnostic]{build_session_diag(state, "build context expired")}}
     }
@@ -324,11 +324,11 @@ BuildPlanSelection: struct {
 
 build_plan_selection: fn(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
     permit: plan.storage.guard_read()
-    order := [Int]{}
-    visiting := [Int]{}
-    pending := [Int]{}
+    ^order: [Int]{}
+    ^visiting: [Int]{}
+    ^pending: [Int]{}
     if plan.default >= 0 -> pending.push(plan.default) else {
-        index := permit.value.targets.len() - 1
+        ^index: permit.value.targets.len() - 1
         loop index >= 0 {
             pending.push(index)
             index -= 1
@@ -351,9 +351,9 @@ build_plan_selection: fn(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
             if !build_session_contains_int(order, dependency) -> pending.push(dependency)
         }
     }
-    executables := [BuildPlanExecutable]{}
-    libraries := [BuildPlanExecutable]{}
-    unsupported := [String]{}
+    ^executables: [BuildPlanExecutable]{}
+    ^libraries: [BuildPlanExecutable]{}
+    ^unsupported: [String]{}
     loop index in order {
         target: permit.value.targets[index]
         if target.kind == "executable" && target.sources.len() > 0 {
@@ -393,7 +393,7 @@ build_plan_execution: fn(plan: BuildSessionPlan) -> BuildPlanExecution Never! {
 // writes them all for inspection), in path order.
 build_plan_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
     permit: plan.storage.guard_read()
-    generated := permit.value.generated.copy()
+    ^generated: permit.value.generated.copy()
     generated.sort_by(fn(left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) { if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path })
     generated
 }
@@ -412,10 +412,10 @@ build_plan_findings: fn(plan: BuildSessionPlan) -> [BuildSessionFinding] Never! 
 
 build_plan_selected_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
     permit: plan.storage.guard_read()
-    selected_targets := [Int]{}
-    selected_actions := [Int]{}
-    paths := [String]{}
-    pending := [Int]{}
+    ^selected_targets: [Int]{}
+    ^selected_actions: [Int]{}
+    ^paths: [String]{}
+    ^pending: [Int]{}
     if plan.default >= 0 -> pending.push(plan.default) else {
         loop index in 0..<permit.value.targets.len() -> pending.push(index)
     }
@@ -432,7 +432,7 @@ build_plan_selected_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGenera
         loop dependency in permit.value.targets[current].deps -> pending.push(dependency)
     }
     prerequisites: build_session_prerequisites(permit.value)
-    cursor := 0
+    ^cursor: 0
     loop cursor < selected_actions.len() {
         current: selected_actions[cursor].copy()
         cursor += 1
@@ -449,7 +449,7 @@ build_plan_selected_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGenera
             build_session_append_unique(paths, input)
         }
     }
-    generated := [BuildSessionGeneratedModule]{}
+    ^generated: [BuildSessionGeneratedModule]{}
     loop generated_row in permit.value.generated {
         if permit.value.targets.len() == 0 || build_session_contains_string(paths, generated_row.path) {
             generated.push(generated_row)

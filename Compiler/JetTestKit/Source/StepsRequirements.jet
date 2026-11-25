@@ -34,7 +34,7 @@ kit_steps_host_value: fn(kind: String) -> String {
 // The names `kind` may choose from.
 kit_steps_host_known: fn(kind: String) -> [String] {
     prefix: "{kind} "
-    known := [String]{}
+    ^known: [String]{}
     loop row in KIT_HOST_NAMES {
         if row.starts_with(prefix) {
             known.push(kit_steps_byte_slice(row, prefix.count_bytes(), row.count_bytes()))
@@ -59,7 +59,7 @@ kit_steps_host_unknown: fn(kind: String, choices: String) -> String {
 kit_steps_host_matches: fn(actual: String, choices: String) -> Bool {
     negative: choices.starts_with("!")
     names: if negative -> kit_steps_byte_slice(choices, 1, choices.count_bytes()) else -> choices
-    matched := false
+    ^matched: false
     loop name in names.split("|") {
         if name == actual -> matched = true
     }
@@ -81,8 +81,8 @@ kit_steps_probe: fn(text: String, env: KitEnv, work: String, scratch: String) ->
     body: kit_steps_byte_slice(text, 0, kit_steps_comment(text))
     tokens: kit_steps_tokens(body) ?? return false
     if tokens.len() == 0 -> return false
-    argv := [String]{}
-    boundary := tokens.len()
+    ^argv: [String]{}
+    ^boundary: tokens.len()
     loop (index, token) in tokens {
         if token.text == "json" || token.text == "stdout:" {
             boundary = index
@@ -113,7 +113,7 @@ kit_steps_probe: fn(text: String, env: KitEnv, work: String, scratch: String) ->
 kit_steps_probes_all: fn(text: String, env: KitEnv, work: String, scratch: String) -> Bool {
     // Separators must be unquoted standalone tokens; quoted shell source is opaque.
     tokens: kit_steps_tokens(text) ?? return false
-    start := 0
+    ^start: 0
     loop token in tokens {
         if token.text == "+" && kit_steps_byte_slice(text, token.start, token.end) == "+" {
             if !kit_steps_probe(kit_steps_byte_slice(text, start, token.start).trim().copy(), env, work, scratch) {
@@ -127,7 +127,7 @@ kit_steps_probes_all: fn(text: String, env: KitEnv, work: String, scratch: Strin
 
 kit_steps_capability_any: fn(text: String, probes: Bool, env: KitEnv, work: String, scratch: String) -> Bool {
     tokens: kit_steps_tokens(text) ?? return false
-    start := 0
+    ^start: 0
     loop token in tokens {
         if token.text == "|" && kit_steps_byte_slice(text, token.start, token.end) == "|" {
             alternative: kit_steps_byte_slice(text, start, token.start).trim().copy()

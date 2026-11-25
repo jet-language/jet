@@ -28,7 +28,7 @@ type_char: fn(value: Input, ch: String) -> Input {
 }
 
 input_view: fn(value: Input) -> UINode {
-    shown := value.value.copy()
+    ^shown: value.value.copy()
     if value.value == "" -> shown = value.placeholder.copy()
     return ui.node_role("[{shown}]", 20.0, 1.0, ui.aria_role_text_input())
 }
@@ -48,7 +48,7 @@ container: fn(children: [UINode]) -> UINode { ui.box(children) }
 
 paint_form: fn(name: Label, input_value: Input, save: Button) {
     tree: container([label_view(name), input_view(input_value), button_view(save)])
-    backend := ui.null_backend()
+    ^backend: ui.null_backend()
     size: backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
     backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
     backend.paint(tree)
@@ -56,8 +56,8 @@ paint_form: fn(name: Label, input_value: Input, save: Button) {
 
 run: fn() {
     name: label("Name:")
-    name_input := input("type here…")
-    save := button("Save")
+    ^name_input: input("type here…")
+    ^save: button("Save")
     paint_form(name, name_input, save)
     print("Name:")
     print("[type here…]")

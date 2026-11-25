@@ -134,7 +134,7 @@ EnvironmentIntegration: struct {
     losses: [String]{[String]{}},
 
     fingerprint: fn(self) -> String Never! {
-        lines := [String]{"jet-environment-integration-v1\nkind={self.kind.as_str()}\nname={self.name}\npreset={self.preset}\n"}
+        ^lines: [String]{"jet-environment-integration-v1\nkind={self.kind.as_str()}\nname={self.name}\npreset={self.preset}\n"}
         loop key in envmodel_sorted_keys(self.options) {
             lines.push("option={key}={self.options[key]}\n")
         }
@@ -190,7 +190,7 @@ IntegrationFactProjection: struct {
     losses: [String]{[String]{}},
 
     fingerprint: fn(self) -> String Never! {
-        lines := [String]{}
+        ^lines: [String]{}
         loop fact in self.task_facts {
             lines.push("task-fact={fact.integration.as_str()}\t{fact.name}\t{fact.packages.join(",")}\t{fact.secrets.join(",")}\t{fact.providers.join(",")}\t{fact.host_checks.join(",")}\t{fact.grants.join(",")}\n")
         }

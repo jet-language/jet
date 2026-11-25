@@ -63,8 +63,8 @@ words: fn(out: ^[String], seed: Int) {
 churn: fn(rounds: Int, by_assign: Bool) -> Int {
     files.write("/proc/self/clear_refs", "5") ?? panic("reset the peak resident set")
     start: status_kb("VmRSS:")
-    xs := [String]{}
-    total := 0
+    ^xs: [String]{}
+    ^total: 0
     loop round in 0..<rounds {
         loop k in 0..<8 -> xs.push("item {round} of a churned list, number {k}")
         total += xs.len()
@@ -75,7 +75,7 @@ churn: fn(rounds: Int, by_assign: Bool) -> Int {
 }
 
 run: fn() {
-    names := [String]{}
+    ^names: [String]{}
     loop i in 0..<3 {
         words(names, i)
         print(names.join(","))
@@ -88,19 +88,19 @@ run: fn() {
     words(names, 5)
     print("{shared.join(",")} | {names.join(",")}")
     // An owned local, emptied and refilled.
-    local := [Int]{1, 2, 3}
+    ^local: [Int]{1, 2, 3}
     local = [Int]{}
     print(local.len())
     local.push(7)
     print(local)
     // A literal List, emptied.
-    fixed := [Int]{4, 5}
+    ^fixed: [Int]{4, 5}
     held: fixed
     fixed = [Int]{}
     fixed.push(6)
     print("{held} {fixed}")
     // Fields, emptied and refilled.
-    b := Buffers{text: "old", items: [Int]{9, 9}}
+    ^b: Buffers{text: "old", items: [Int]{9, 9}}
     old: b.items
     b.text = ""
     b.items = [Int]{}
@@ -108,7 +108,7 @@ run: fn() {
     b.items.push(1)
     print("{b.text} {b.items} {old}")
     // The second fill reuses the first fill's buffer.
-    out := [Int]{}
+    ^out: [Int]{}
     fill(out)
     print(out.len())
     files.write("/proc/self/clear_refs", "5") ?? panic("reset the peak resident set")
@@ -120,7 +120,7 @@ run: fn() {
         panic("list refill: peak grew {grown} kB, more than an eighth of a fill of {SIZE} bytes")
     }
     print("list refill: the buffer was reused")
-    into := Buffers{text: "", items: [Int]{}}
+    ^into: Buffers{text: "", items: [Int]{}}
     chunk: "t".repeat(CHUNK)
     fill_fields(into, chunk)
     print("{into.text.len()} {into.items.len()}")

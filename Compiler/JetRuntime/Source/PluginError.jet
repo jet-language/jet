@@ -65,7 +65,7 @@ plugin_fault_debug: fn(target: I64, fault: I64) {
     frames: dyn_word(wrapping(fault + PLUGIN_FAULT_FRAMES))
     length: dyn_word(wrapping(frames + DATA_SEQUENCE_LENGTH))
     data: dyn_word(wrapping(frames + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (at != I64{0}) { rt_text_push_word(target, I64{8236}, I64{2}) }
         plugin_frame_debug(target, wrapping(data + at * PLUGIN_FRAME_BYTES))

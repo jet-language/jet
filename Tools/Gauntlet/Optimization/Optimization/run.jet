@@ -139,10 +139,10 @@ locate: fn() -[Env]> Paths {
 // from the current directory. `--runs` is checked and otherwise unused, as
 // in the original.
 parse_options: fn(argv: [String], paths: Paths) -[Env, Exec.Exit, FS, IO, Time.Wait]> Options Err! {
-    options := Options{mode: "plan", manifest: paths.default_manifest.copy(), output: None, raw: None, scratch: None, jet_bin: None, timeout_ms: TIMEOUT_MS}
-    runs := String?{None}
-    timeout := String?{None}
-    at := 0
+    ^options: Options{mode: "plan", manifest: paths.default_manifest.copy(), output: None, raw: None, scratch: None, jet_bin: None, timeout_ms: TIMEOUT_MS}
+    ^runs: String?{None}
+    ^timeout: String?{None}
+    ^at: 0
     loop at < argv.len() {
         arg: argv[at]
         at += 1
@@ -237,8 +237,8 @@ load_context: fn(paths: Paths, manifest_path: String) -[FS]> Context Err! {
         }
     }
     hashes: {manifest: file_sha256(manifest_path), harness: file_sha256(paths.harness)}
-    ids := [String]{}
-    families := [Family]{}
+    ^ids: [String]{}
+    ^families: [Family]{}
     loop record in records {
         id: text_at(record, "id") ?? ""
         if !(record == .Object(_) || record == .Array(_)) || id == "" {
@@ -273,7 +273,7 @@ load_family: fn(root: String, record: Dyn, id: String, hashes: {manifest: Dyn, h
     if variants.len() != VARIANT_IDS.len() || !all_distinct(variants.map(fn(variant) { dyn_at(variant, "id") })) {
         return Err("{id}: all five variants are required")
     }
-    checked := [Variant]{}
+    ^checked: [Variant]{}
     loop variant in variants -> checked.push(load_variant(root, record, id, variant))
     input_path: fixture_path(root, record, dyn_at(record, "input"), "{id}.input")
     expected_path: fixture_path(root, record, dyn_at(record, "expected"), "{id}.expected")
@@ -289,7 +289,7 @@ load_family: fn(root: String, record: Dyn, id: String, hashes: {manifest: Dyn, h
         }
     }
     peers: texts_at(record, "required_peers")
-    peer_paths := [{language: String, path: String}]{}
+    ^peer_paths: [{language: String, path: String}]{}
     loop language in peers {
         peer_paths.push({language: language.copy(), path: fixture_path(root, record, sources.get(language) ?? Dyn.Null, "{id}.peer_sources.{language}")})
     }
@@ -297,14 +297,14 @@ load_family: fn(root: String, record: Dyn, id: String, hashes: {manifest: Dyn, h
         return Err("{id}: input, expected, and all required peer fixtures are required")
     }
     input: files.read(input_path) ?? return Err("{id}: input is not JSON: {err}")
-    _ := parse_json(input) ?? return Err("{id}: input is not JSON: {err}")
+    ^_: parse_json(input) ?? return Err("{id}: input is not JSON: {err}")
 
     input_sha256: file_sha256(input_path)
     expected_sha256: file_sha256(expected_path)
-    peer_sha256 := Dyn.object()
+    ^peer_sha256: Dyn.object()
     loop peer in peer_paths -> peer_sha256[peer.language] = file_sha256(peer.path)
     loop index in 0..<checked.len() {
-        identity := Dyn{[String:Dyn]{"manifest_sha256": hashes.manifest.copy(), "family": Dyn.Text(id.copy()), "variant": Dyn.Text(checked[index].id.copy()), "source_sha256": file_sha256(checked[index].source_path), "input_sha256": input_sha256.copy(), "expected_sha256": expected_sha256.copy()}}
+        ^identity: Dyn{[String:Dyn]{"manifest_sha256": hashes.manifest.copy(), "family": Dyn.Text(id.copy()), "variant": Dyn.Text(checked[index].id.copy()), "source_sha256": file_sha256(checked[index].source_path), "input_sha256": input_sha256.copy(), "expected_sha256": expected_sha256.copy()}}
         put_present(identity, "peer_sha256", peer_sha256.get("python"))
         identity["peer_sha256_by_language"] = peer_sha256.copy()
         identity["compiler_sha256"] = Dyn.Null
@@ -339,7 +339,7 @@ load_variant: fn(root: String, family: Dyn, family_id: String, record: Dyn) -[FS
 // A variant's record before any run: what it is, where its source is, its
 // identity and its owner's open choice.
 variant_record: fn(root: String, family: Family, variant: Variant) -> Dyn {
-    out := Dyn{[String:Dyn]{"family": Dyn.Text(family.id.copy()), "variant": Dyn.Text(variant.id.copy()), "classification": Dyn.Text(variant.classification.copy())}}
+    ^out: Dyn{[String:Dyn]{"family": Dyn.Text(family.id.copy()), "variant": Dyn.Text(variant.id.copy()), "classification": Dyn.Text(variant.classification.copy())}}
     put_present(out, "role", value_at(variant.record, "role"))
     out["source"] = Dyn.Text(files.relative(variant.source_path, root))
     out["identity"] = variant.identity.copy()
@@ -353,16 +353,16 @@ variant_record: fn(root: String, family: Family, variant: Variant) -> Dyn {
 }
 
 plan: fn(context: Context) -> Dyn {
-    out := Dyn{[String:Dyn]{"schema": "jet.optimization-plan.v1", "status": "authored_unexecuted", "card": dyn_at(context.manifest, "card"), "manifest_sha256": context.manifest_sha256.copy(), "harness_sha256": context.harness_sha256.copy()}}
+    ^out: Dyn{[String:Dyn]{"schema": "jet.optimization-plan.v1", "status": "authored_unexecuted", "card": dyn_at(context.manifest, "card"), "manifest_sha256": context.manifest_sha256.copy(), "harness_sha256": context.harness_sha256.copy()}}
     put_present(out, "bounded_execution", value_at(context.manifest, "execution"))
-    planned := [Dyn]{}
+    ^planned: [Dyn]{}
     loop family in context.families {
-        entry := Dyn{[String:Dyn]{"id": Dyn.Text(family.id.copy())}}
+        ^entry: Dyn{[String:Dyn]{"id": Dyn.Text(family.id.copy())}}
         loop field in
             ["title", "owner_card", "production_owner", "required_peers", "machine_domain", "premises", "falsifier", "observations", "rule_record"] {
             put_present(entry, field, value_at(family.record, field))
         }
-        variants := [Dyn]{}
+        ^variants: [Dyn]{}
         loop variant in family.variants {
             variants.push(variant_record(context.paths.root, family, variant))
         }
@@ -390,7 +390,7 @@ default_jet_binary: fn() -[Env, FS]> String? {
 // The host and the compiler `jet_bin` names (else the admitted one).
 target_identity: fn(jet_bin: String?) -[Env, FS]> Dyn {
     compiler: if jet_bin == .Val(path) -> Val(path) else -> default_jet_binary()
-    out := Dyn{[String:Dyn]{"platform": Dyn.Text(sys.name()), "arch": Dyn.Text(node_arch())}}
+    ^out: Dyn{[String:Dyn]{"platform": Dyn.Text(sys.name()), "arch": Dyn.Text(node_arch())}}
     out["target"] = if process.env_get("JET_TARGET") == .Val(target) -> Dyn.Text(target) else -> Dyn.Null
     out["compiler_path"] = if compiler == .Val(path) -> Dyn.Text(path.copy()) else -> Dyn.Null
     out["compiler_sha256"] = if compiler == .Val(path) -> file_sha256(path) else -> Dyn.Null
@@ -406,7 +406,7 @@ toolchain_identity: fn(root: String) -[Env, Exec, Time.Wait]> Dyn {
 // its status (ok, failed or timeout), exit code, signal, error and output.
 run_process: fn(command: String, args: [String], cwd: String, timeout_ms: Int) -[Exec, Time, Time.Wait]> Dyn {
     argv: [command.copy()].concat(args)
-    out := Dyn{[String:Dyn]{"command": Dyn.Array(argv.map(fn(item) { Dyn.Text(item.copy()) })), "cwd": Dyn.Text(cwd.copy())}}
+    ^out: Dyn{[String:Dyn]{"command": Dyn.Array(argv.map(fn(item) { Dyn.Text(item.copy()) })), "cwd": Dyn.Text(cwd.copy())}}
     found: process.cmd(argv).cwd(cwd).timeout(time.duration_ms(timeout_ms)).run() ?? {
         out["status"] = "failed"
         out["exit_code"] = Dyn.Null
@@ -441,7 +441,7 @@ parse_record: fn(stdout: String) -> Dyn {
     if trimmed == "" -> return Dyn.Null
     if json.parse(trimmed) == .Ok(record) -> return record
     lines: trimmed.lines()
-    at := lines.len()
+    ^at: lines.len()
     loop at > 0 {
         at -= 1
         if json.parse(lines[at]) == .Ok(record) -> return record
@@ -452,7 +452,7 @@ parse_record: fn(stdout: String) -> Dyn {
 // The variant `identity` bound to the compiler, host and toolchain it ran
 // with and the status of its run.
 identity_with_execution: fn(identity: Dyn, execution: Dyn, target: Dyn, tools: Dyn) -> Dyn {
-    out := identity.copy()
+    ^out: identity.copy()
     out["compiler_sha256"] = dyn_at(target, "compiler_sha256")
     out["target_identity"] = target.copy()
     out["toolchain_identity"] = tools.copy()
@@ -464,21 +464,21 @@ identity_with_execution: fn(identity: Dyn, execution: Dyn, target: Dyn, tools: D
 // a micro entry of the family's matrix cell, its authoring pending.
 harness_entry: fn(family: Family, variant: Variant, entry_dir: String) -> Dyn {
     languages: ["jet"].concat(family.required_peers)
-    authoring := Dyn.object()
+    ^authoring: Dyn.object()
     loop language in languages {
         notes: if language == "jet" -> "Authored optimization fixture; execution is pending." else -> "Matched required peer fixture; execution is pending."
         authoring[language] = Dyn{[String:Dyn]{"author": "optimization-experiment", "turns": 0, "retries": 0, "diagnosticsHit": Dyn.Array([]), "notes": notes}}
     }
-    applicability := Dyn.object()
+    ^applicability: Dyn.object()
     loop peer in INTERPRETED_PEERS {
         evidence: "Harness invokes {peer.command} directly."
         compile: Dyn{[String:Dyn]{"status": "not_applicable", "basis": "no_compile_phase", "reason": Dyn.Text("{peer.language} has no entry-local compile phase."), "evidence": Dyn.Text(evidence.copy())}}
         artifact: Dyn{[String:Dyn]{"status": "not_applicable", "basis": "no_compile_phase", "reason": Dyn.Text("{peer.language} has no entry-local executable artifact."), "evidence": Dyn.Text(evidence)}}
         applicability[peer.language] = Dyn{[String:Dyn]{"cold_build_seconds": compile.copy(), "warm_build_seconds": compile, "binary_bytes": artifact}}
     }
-    spec := Dyn{[String:Dyn]{"behavior": Dyn.Text("{text_at(family.record, "title") ?? "undefined"}: {text_at(variant.record, "role") ?? "undefined"}"), "args": Dyn.Array([]), "fixtureGen": Dyn.Null, "expected": "expected.out"}}
-    experiment := Dyn{[String:Dyn]{"card": "#2951", "family": Dyn.Text(family.id.copy()), "variant": Dyn.Text(variant.id.copy()), "owner_card": Dyn.Text(family.owner_card.copy()), "source_identity": variant.identity.copy(), "required_peers": dyn_at(family.record, "required_peers"), "staging_root": Dyn.Text(entry_dir.copy())}}
-    out := Dyn{[String:Dyn]{"name": Dyn.Text("{family.id}--{variant.id}"), "tier": "micro", "cells": Dyn.Array([dyn_at(family.record, "matrix_cell")]), "mode": member(family.record, "mode") ?? Dyn.Text("batch"), "perf": true}}
+    ^spec: Dyn{[String:Dyn]{"behavior": Dyn.Text("{text_at(family.record, "title") ?? "undefined"}: {text_at(variant.record, "role") ?? "undefined"}"), "args": Dyn.Array([]), "fixtureGen": Dyn.Null, "expected": "expected.out"}}
+    ^experiment: Dyn{[String:Dyn]{"card": "#2951", "family": Dyn.Text(family.id.copy()), "variant": Dyn.Text(variant.id.copy()), "owner_card": Dyn.Text(family.owner_card.copy()), "source_identity": variant.identity.copy(), "required_peers": dyn_at(family.record, "required_peers"), "staging_root": Dyn.Text(entry_dir.copy())}}
+    ^out: Dyn{[String:Dyn]{"name": Dyn.Text("{family.id}--{variant.id}"), "tier": "micro", "cells": Dyn.Array([dyn_at(family.record, "matrix_cell")]), "mode": member(family.record, "mode") ?? Dyn.Text("batch"), "perf": true}}
     out["languages"] = Dyn.Array(languages.map(fn(language) { Dyn.Text(language.copy()) }))
     out["spec"] = spec
     out["metric_applicability"] = applicability
@@ -535,14 +535,14 @@ execute: fn(context: Context, options: Options) -[Env, Exec, FS, Time, Time.Wait
     target: target_identity(options.jet_bin)
     tools: toolchain_identity(root)
     compiler: text_at(target, "compiler_path") ?? "jet"
-    variants := [Dyn]{}
+    ^variants: [Dyn]{}
     loop family in context.families {
         expected: files.read_bytes(family.expected_path) ?? return Err("{err}")
         loop variant in family.variants {
-            inspected := run_process(runner, ["full", compiler.copy(), "inspect", "compiler", "check", variant.source_path], root, options.timeout_ms)
-            direct := run_process(runner, ["full", compiler.copy(), "run", variant.source_path], root, options.timeout_ms)
+            ^inspected: run_process(runner, ["full", compiler.copy(), "inspect", "compiler", "check", variant.source_path], root, options.timeout_ms)
+            ^direct: run_process(runner, ["full", compiler.copy(), "run", variant.source_path], root, options.timeout_ms)
             output: text_or_empty(direct, "stdout").bytes()
-            record := variant_record(root, family, variant)
+            ^record: variant_record(root, family, variant)
             record["identity"] = identity_with_execution(variant.identity, direct, target, tools)
             record["status"] = dyn_at(direct, "status")
             inspected["record"] = parse_record(text_or_empty(inspected, "stdout"))
@@ -555,16 +555,16 @@ execute: fn(context: Context, options: Options) -[Env, Exec, FS, Time, Time.Wait
         }
     }
     entries: stage_entries(context, scratch)
-    harness_args := ["full", "node", context.paths.harness.copy(), "--entries-dir", entries]
+    ^harness_args: ["full", "node", context.paths.harness.copy(), "--entries-dir", entries]
     if text_at(target, "compiler_path") == .Val(path) -> harness_args.extend(["--jet-bin", path])
     harness: run_process(runner, harness_args, root, options.timeout_ms)
     result_path: results_path(text_or_empty(harness, "stdout"))
     named: result_path ?? ""
-    gauntlet := Dyn{[String:Dyn]{"process": harness}}
+    ^gauntlet: Dyn{[String:Dyn]{"process": harness}}
     gauntlet["result_path"] = if result_path == .Val(path) -> Dyn.Text(path.copy()) else -> Dyn.Null
     gauntlet["result_sha256"] = if named != "" -> file_sha256(named) else -> Dyn.Null
     gauntlet["report"] = if named != "" && files.exists(named) -> read_json(named) else -> Dyn.Null
-    raw := Dyn{[String:Dyn]{"schema": "jet.optimization-raw.v1", "status": "executed", "generated": Dyn.Text(time.now_utc().format(ISO_FORMAT)), "card": dyn_at(context.manifest, "card"), "manifest_sha256": context.manifest_sha256.copy(), "harness_sha256": context.harness_sha256.copy()}}
+    ^raw: Dyn{[String:Dyn]{"schema": "jet.optimization-raw.v1", "status": "executed", "generated": Dyn.Text(time.now_utc().format(ISO_FORMAT)), "card": dyn_at(context.manifest, "card"), "manifest_sha256": context.manifest_sha256.copy(), "harness_sha256": context.harness_sha256.copy()}}
     raw["target_identity"] = target
     raw["toolchain_identity"] = tools
     raw["timeout_ms"] = Dyn.Int(options.timeout_ms)
@@ -612,7 +612,7 @@ classify_variant: fn(family: Family, variant: Variant, raw: Dyn) -> Dyn {
     raw_variant: found ?? Dyn.Null
     direct: dyn_at(raw_variant, "direct_run")
     inspected: inspect_status(dyn_at(raw_variant, "inspect/record"))
-    out := Dyn{[String:Dyn]{"family": Dyn.Text(family.id.copy()), "variant": Dyn.Text(variant.id.copy()), "owner_card": Dyn.Text(family.owner_card.copy()), "expected_classification": Dyn.Text(variant.classification.copy()), "observed_classification": "unverified", "legality": "unverified", "profitability": "unverified", "selected": false, "reason": "required raw evidence is unavailable"}}
+    ^out: Dyn{[String:Dyn]{"family": Dyn.Text(family.id.copy()), "variant": Dyn.Text(variant.id.copy()), "owner_card": Dyn.Text(family.owner_card.copy()), "expected_classification": Dyn.Text(variant.classification.copy()), "observed_classification": "unverified", "legality": "unverified", "profitability": "unverified", "selected": false, "reason": "required raw evidence is unavailable"}}
     out["identity"] = member(raw_variant, "identity") ?? variant.identity.copy()
     out["direct_run"] = direct.copy()
     out["inspect_status"] = Dyn.Text(inspected.copy())
@@ -641,8 +641,8 @@ classify_variant: fn(family: Family, variant: Variant, raw: Dyn) -> Dyn {
     control_entry: "{family.id}--control"
     candidate: row_for(report, entry, "jet")
     control: row_for(report, control_entry, "jet")
-    peer_rows := Dyn.object()
-    peer_ready := true
+    ^peer_rows: Dyn.object()
+    ^peer_ready: true
     loop language in family.required_peers {
         row: row_for(report, entry, language).row
         if text_at(row, "status") != Val("ok") -> peer_ready = false
@@ -651,7 +651,7 @@ classify_variant: fn(family: Family, variant: Variant, raw: Dyn) -> Dyn {
     ready: harness_ready(report, entry, family.required_peers) && harness_ready(report, control_entry, family.required_peers)
     candidate_runtime: number_at(candidate.row, "metrics/runtime_wall_seconds")
     control_runtime: number_at(control.row, "metrics/runtime_wall_seconds")
-    harness := Dyn{[String:Dyn]{"candidate_entry": Dyn.Text(entry.copy()), "control_entry": Dyn.Text(control_entry.copy()), "candidate_row": candidate.row.copy(), "peer_rows": peer_rows, "candidate_comparison": candidate.comparison.copy()}}
+    ^harness: Dyn{[String:Dyn]{"candidate_entry": Dyn.Text(entry.copy()), "control_entry": Dyn.Text(control_entry.copy()), "candidate_row": candidate.row.copy(), "peer_rows": peer_rows, "candidate_comparison": candidate.comparison.copy()}}
     harness["runtime_wall_seconds"] = Dyn{[String:Dyn]{"candidate": member(candidate.row, "metrics/runtime_wall_seconds") ?? Dyn.Null, "control": member(control.row, "metrics/runtime_wall_seconds") ?? Dyn.Null}}
     harness["required_tiers_ready"] = Dyn.Bool(ready)
     harness["required_peers"] = dyn_at(family.record, "required_peers")
@@ -684,13 +684,13 @@ report: fn(context: Context, raw: Dyn) -> Dyn Err! {
     if dyn_at(raw, "manifest_sha256") != context.manifest_sha256 {
         return Err("raw record does not match the current manifest")
     }
-    families := [Dyn]{}
-    unverified := [Dyn]{}
-    owners := [Dyn]{}
+    ^families: [Dyn]{}
+    ^unverified: [Dyn]{}
+    ^owners: [Dyn]{}
     loop family in context.families {
-        variants := [Dyn]{}
+        ^variants: [Dyn]{}
         loop variant in family.variants -> variants.push(classify_variant(family, variant, raw))
-        rejected := [Dyn]{}
+        ^rejected: [Dyn]{}
         loop variant in variants {
             observed: text_or_empty(variant, "observed_classification")
             if observed == "invalid_fast" || observed == "legal_slow" {
@@ -701,13 +701,13 @@ report: fn(context: Context, raw: Dyn) -> Dyn Err! {
             }
         }
         selected: variants.find(fn(variant) { text_at(variant, "observed_classification") == Val("legal_measured_improvement") })
-        rule := dyn_at(family.record, "rule_record")
+        ^rule: dyn_at(family.record, "rule_record")
         rule["observed_selected"] = if selected == .Val(variant) -> dyn_at(variant, "variant") else -> Dyn.Null
         rule["selected"] = false
         rule["rejected"] = Dyn.Array(rejected)
         rule["decision"] = Dyn.Text(if selected == None -> "no-adoption" else -> "owner-choice-required")
         rule["owner_card"] = Dyn.Text(family.owner_card.copy())
-        entry := Dyn{[String:Dyn]{"id": Dyn.Text(family.id.copy())}}
+        ^entry: Dyn{[String:Dyn]{"id": Dyn.Text(family.id.copy())}}
         loop field in
             ["title", "owner_card", "production_owner", "observations", "premises", "falsifier"] {
             put_present(entry, field, value_at(family.record, field))
@@ -717,7 +717,7 @@ report: fn(context: Context, raw: Dyn) -> Dyn Err! {
         families.push(entry)
         owners.push(Dyn{[String:Dyn]{"family": Dyn.Text(family.id.copy()), "card": Dyn.Text(family.owner_card.copy())}})
     }
-    out := Dyn{[String:Dyn]{"schema": "jet.optimization-report.v1", "status": Dyn.Text(if unverified.len() == 0 -> "complete_evidence_pending_owner_choice" else -> "unverified"), "card": dyn_at(context.manifest, "card"), "manifest_sha256": context.manifest_sha256.copy()}}
+    ^out: Dyn{[String:Dyn]{"schema": "jet.optimization-report.v1", "status": Dyn.Text(if unverified.len() == 0 -> "complete_evidence_pending_owner_choice" else -> "unverified"), "card": dyn_at(context.manifest, "card"), "manifest_sha256": context.manifest_sha256.copy()}}
     out["raw_sha256"] = Dyn.Text(crypto.sha256(json.stringify(raw)).hex())
     out["harness_sha256"] = context.harness_sha256.copy()
     out["target_identity"] = member(raw, "target_identity") ?? Dyn.Null

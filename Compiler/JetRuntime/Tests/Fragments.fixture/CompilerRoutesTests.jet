@@ -39,17 +39,17 @@ compiler_routes_bytes_drop: fn(data: I64, length: I64) {
     if (jet_files_read_bytes_os(path, output, len, error) != I64{1} || rt_text_word(len) != I64{3}) {
         return I64{7}
     }
-    data := rt_text_word(output)
+    ^data: rt_text_word(output)
     if (host_u8_get(data, I64{0}) != I64{0} || host_u8_get(data, I64{1}) != I64{255} || host_u8_get(data, I64{2}) != I64{10}) {
         return I64{8}
     }
     compiler_routes_bytes_drop(data, I64{3})
     if (jet_std_files_open_reader_nonblocking(path, output, error) != I64{1}) { return I64{9} }
-    reader := rt_text_word(output)
+    ^reader: rt_text_word(output)
     if (jet_std_file_reader_stat(reader, output, len, error) != I64{1} || rt_text_word(len) != I64{13}) {
         return I64{10}
     }
-    row := rt_text_word(output)
+    ^row: rt_text_word(output)
     if (rt_text_word(row) != I64{0} || rt_text_word(row + I64{8}) != I64{3}) { return I64{11} }
     jet_rt_free(row, I64{104}, I64{8})
     jet_fs_unlink_raw(path, false, os_error)
@@ -159,10 +159,10 @@ compiler_routes_bytes_drop: fn(data: I64, length: I64) {
     compiler_process_record_exit_status(I64{10000001}, I64{15})
     compiler_process_record_exit_status(I64{10000001}, I64{1792})
     if (jet_process_exit_status_raw(I64{10000001}, slot) != I64{1}) { return I64{1} }
-    value := rt_text_word(slot)
+    ^value: rt_text_word(slot)
     if !jet_rt_string_eq(value, rt_static_text("exit status: 7")) -> return I64{2}
     jet_rt_string_drop(value)
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{64}) {
         compiler_process_record_exit_status(I64{20000000} + at, I64{0})
         at += I64{1}

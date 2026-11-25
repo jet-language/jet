@@ -108,7 +108,7 @@ declaration_effects: fn(declaration: String) -> [String] Never! {
     opened: declaration.partition("-[")
     if opened.sep == "" -> return [String]{}
     row: opened.tail.partition("]>").head
-    effects := [String]{}
+    ^effects: [String]{}
     loop entry in row.split(",") {
         name: entry.strip()
         if name != "" -> effects.push(name.copy())
@@ -118,7 +118,7 @@ declaration_effects: fn(declaration: String) -> [String] Never! {
 }
 
 interface_members: fn(text: String) -> [InterfaceMember] Never! {
-    members := [InterfaceMember]{}
+    ^members: [InterfaceMember]{}
     loop line in text.split("\n") {
         if !line.contains("RuntimeInterfaceRow{{module_name:") -> next
         module_name: quoted_field(line, "module_name") ?? next
@@ -133,7 +133,7 @@ interface_members: fn(text: String) -> [InterfaceMember] Never! {
 // The `calls` of `jet inspect structure --core --json`'s `core` object: each
 // CORE_CALLS record's module, member, effects and Prelude symbol.
 core_leaves: fn(core: Dyn) -> [CoreLeaf] Never! {
-    leaves := [CoreLeaf]{}
+    ^leaves: [CoreLeaf]{}
     calls: core.get("calls") ?? Dyn.Null
     if calls == .Array(records) {
         loop record in records {
@@ -154,7 +154,7 @@ core_leaves: fn(core: Dyn) -> [CoreLeaf] Never! {
 
 // The texts of a JSON array, else none.
 text_list: fn(value: Dyn?) -> [String] Never! {
-    texts := [String]{}
+    ^texts: [String]{}
     if value == .Val(found) {
         if found == .Array(items) {
             loop item in items {
@@ -167,7 +167,7 @@ text_list: fn(value: Dyn?) -> [String] Never! {
 
 // `core.M __X` for each `dispatcher_row <kind> core.M __X | …` line.
 dispatcher_keys: fn(text: String) -> [String] Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     loop line in text.split("\n") {
         if !line.starts_with("dispatcher_row ") -> next
         words: line.partition(" | ").head.split(" ").to_list()
@@ -179,7 +179,7 @@ dispatcher_keys: fn(text: String) -> [String] Never! {
 // The effects sema gives a call of the record (Effects/Checks.jet
 // sema_effect_record_core_row), sorted; else none.
 leaf_effects: fn(leaf: CoreLeaf) -> [String] Never! {
-    effects := leaf.effects.copy()
+    ^effects: leaf.effects.copy()
     effects.sort()
     effects
 }
@@ -196,8 +196,8 @@ Report: struct {
 
 // Every difference between the interface and the Core leaves it replaces.
 differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [String]) -> Report Never! {
-    found := [String]{}
-    joined := 0
+    ^found: [String]{}
+    ^joined: 0
     loop member in members {
         key: "core.{member.module_name.remove_prefix("jet.runtime.")} __{member.member}"
         parts: key.partition(" ")
@@ -205,7 +205,7 @@ differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [Str
         leaf_name: parts.tail
         where: "{member.module_name}.{member.member} ({member.symbol})"
         has_row: dispatched.contains(key)
-        matched := CoreLeaf?{None}
+        ^matched: CoreLeaf?{None}
         loop leaf in leaves {
             if leaf.module_name == core_module && leaf.member == leaf_name {
                 matched = Val(leaf.copy())
@@ -233,21 +233,21 @@ differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [Str
 // Every runtime symbol whose members declare different rows without a listed
 // rule, and every listed symbol whose members agree or that no member binds.
 split_differences: fn(members: [InterfaceMember], splits: [RowSplit]) -> [String] Never! {
-    found := [String]{}
-    symbols := [String]{}
+    ^found: [String]{}
+    ^symbols: [String]{}
     loop member in members {
         if !symbols.contains(member.symbol) -> symbols.push(member.symbol.copy())
     }
     loop symbol in symbols {
-        rows := [String]{}
-        bound := [String]{}
+        ^rows: [String]{}
+        ^bound: [String]{}
         loop member in members {
             if member.symbol != symbol -> next
             row: row_text(member.effects)
             if !rows.contains(row) -> rows.push(row.copy())
             bound.push("{member.module_name}.{member.member} {row}")
         }
-        listed := false
+        ^listed: false
         loop split in splits {
             if split.symbol == symbol {
                 listed = true
@@ -305,7 +305,7 @@ runtime_effect_rows_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wai
     if members.len() == 0 -> return Err(RowsError{message: "{INTERFACE} has no interface member"})
     report: differences(members, leaves, dispatched)
     splits: row_splits()
-    found := report.differences.copy()
+    ^found: report.differences.copy()
     loop line in split_differences(members, splits) -> found.push(line.copy())
     if found.len() == 0 {
         print("runtime-effect-rows: ok ({members.len()} interface functions, {report.joined} joined to a Core leaf, 0 differences)")

@@ -61,7 +61,7 @@ ArtifactRecordKind: enum {
 
     // The action handle of `key` under this kind: SHA-256 of `schema \0 key`.
     action: fn(self, key: String) -> ActionHandle Never! {
-        framed := self.schema().bytes()
+        ^framed: self.schema().bytes()
         framed.push(U8{0})
         framed.extend(key.bytes())
         ActionHandle.from_bytes(framed)
@@ -131,7 +131,7 @@ impl ArtifactStore {
         if !kind.is_action() {
             return
         }
-        actions := [ActionHandle]{}
+        ^actions: [ActionHandle]{}
         loop key in keys -> actions.push(kind.action(key))
         self.touch_actions(actions)
     }
@@ -142,7 +142,7 @@ impl ArtifactStore {
         if !kind.is_action() {
             return Err(ArtifactStoreError.Config("{kind.schema()} records are content addressed; publish them one by one"))
         }
-        actions := [ArtifactActionPublication]{}
+        ^actions: [ArtifactActionPublication]{}
         loop record in records {
             if record_open_schema(record.bytes, kind.schema()).problem == None {
                 actions.push(ArtifactActionPublication{action: kind.action(record.key), bytes: record.bytes})

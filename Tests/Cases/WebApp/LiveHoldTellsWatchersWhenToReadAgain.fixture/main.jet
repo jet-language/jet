@@ -22,7 +22,7 @@ TASKS: Shared{Tasks{count: 1, busy: true}}
 // One run's read of the tasks. While the table is busy, another request
 // commits a new task right after every read, as a writer loop does.
 read_tasks: fn() -> Tasks {
-    tasks := TASKS.guard_edit()
+    ^tasks: TASKS.guard_edit()
     read: tasks.value.copy()
     if read.busy -> tasks.value.count += 1
     read
@@ -48,7 +48,7 @@ shown: fn(state: Loadable<Int, CountError>) -> String {
 }
 
 stop_writes: fn() {
-    tasks := TASKS.guard_edit()
+    ^tasks: TASKS.guard_edit()
     tasks.value.busy = false
 }
 
@@ -85,8 +85,8 @@ Received: struct {
 
 read_once: fn(device: WsConn) -> Received {
     device.send_text("read") ?? panic("send")
-    out := [String]{}
-    hold := Int?{None}
+    ^out: [String]{}
+    ^hold: Int?{None}
     loop {
         message: device.recv() ?? panic("device recv")
         if !message.is_text() -> next

@@ -6,7 +6,7 @@
 numeric_trim_start: fn(text: I64) -> I64 {
     data: rt_text_data(text)
     length: rt_text_len(text)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
         if (byte > I64{32} && byte < I64{127}) { break }
@@ -18,9 +18,9 @@ numeric_trim_start: fn(text: I64) -> I64 {
 
 numeric_trim_end: fn(text: I64, start: I64) -> I64 {
     data: rt_text_data(text)
-    end := rt_text_len(text)
+    ^end: rt_text_len(text)
     loop end > start {
-        at := end - I64{1}
+        ^at: end - I64{1}
         byte: rt_text_byte(wrapping(data + at))
         if (byte > I64{32} && byte < I64{127}) { break }
         loop at > start && (rt_text_byte(wrapping(data + at)) & I64{192}) == (I64{128}) {
@@ -100,19 +100,17 @@ numeric_int_parse: fn(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) -
         len: rt_text_len(text)
         if (len > I64{0} && len <= I64{19}) {
             data: rt_text_data(text)
-            at := I64{0}
-            neg := false
+            ^at: I64{0}
+            ^neg: false
             first: rt_text_byte(data)
             if (first == I64{45}) {
                 neg = true
                 at = I64{1}
-            } else if (first == I64{43}) {
-                at = I64{1}
-            }
+            } else if (first == I64{43}) { at = I64{1} }
             digits: len - at
             if (digits > I64{0} && digits <= I64{18}) {
-                small := I64{0}
-                valid := true
+                ^small: I64{0}
+                ^valid: true
                 loop at < len {
                     d: rt_text_byte(wrapping(data + at)) - I64{48}
                     if (d < I64{0} || d > I64{9}) {
@@ -132,8 +130,8 @@ numeric_int_parse: fn(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) -
     start: numeric_trim_start(text)
     end: numeric_trim_end(text, start)
     data: rt_text_data(text)
-    at := start
-    negative := false
+    ^at: start
+    ^negative: false
     if (at < end) {
         sign: rt_text_byte(wrapping(data + at))
         if (sign == I64{43} || sign == I64{45}) {
@@ -156,8 +154,8 @@ numeric_int_parse: fn(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) -
         at += I64{1}
     }
     at = digits
-    small := I64{0}
-    node := I64{0}
+    ^small: I64{0}
+    ^node: I64{0}
     // log_36(1e9)>5, so this capacity bounds every accepted base. Inline
     // inputs allocate nothing; widening creates exactly one limb workspace.
     capacity: (end - digits) /% I64{5} + I64{1}
@@ -202,14 +200,14 @@ numeric_int_parse: fn(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) -
     // int_copy owns only a private magnitude, no clone/hazard-domain owner.
     small_carrier: int_inline(value)
     node: if small_carrier -> I64{0} else -> int_copy(value, I64{0})
-    small := if small_carrier -> (if (value < I64{0}) -> -value else -> value) else -> I64{0}
+    ^small: if small_carrier -> (if (value < I64{0}) -> -value else -> value) else -> I64{0}
     capacity: int_len(value) * I64{30} + I64{1}
     result: rt_text_builder_with_capacity(capacity)
     data: rt_text_data(result)
-    length := I64{0}
-    more := if small_carrier -> small != I64{0} else -> !(int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0})
+    ^length: I64{0}
+    ^more: if small_carrier -> small != I64{0} else -> !(int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0})
     loop more {
-        digit := I64{0}
+        ^digit: I64{0}
         if small_carrier {
             digit = small % base
             small = small /% base
@@ -230,8 +228,8 @@ numeric_int_parse: fn(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) -
         rt_text_put(wrapping(data + length), I64{45})
         length += I64{1}
     }
-    left := I64{0}
-    right := length - I64{1}
+    ^left: I64{0}
+    ^right: length - I64{1}
     loop left < right {
         byte: rt_text_byte(wrapping(data + left))
         rt_text_put(wrapping(data + left), rt_text_byte(wrapping(data + right)))

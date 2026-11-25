@@ -59,7 +59,7 @@ NativeReleaseProvider: struct {
     }
 
     plan_downloads: fn(self, verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
-        plan := DownloadPlan.empty()
+        ^plan: DownloadPlan.empty()
         loop spec in specs {
             if provider_cc_toolchain_is_reference(spec) {
                 plan.extend(provider_cc_toolchain_plan_downloads(verification, [RefSpec]{spec}, ctx))
@@ -226,7 +226,7 @@ provider_native_publish_catalog: fn(spec: RefSpec, recipe: NixNativeRecipe, ctx:
             return Err(RegistryError.Reason("could not publish native package output: {error}"))
         }
     }
-    envelope := Envelope.for_output(out_dir, spec.raw, NATIVE_CATALOG_RECIPE_ID)
+    ^envelope: Envelope.for_output(out_dir, spec.raw, NATIVE_CATALOG_RECIPE_ID)
     lock_digest: provider_project_lock_digest(ctx.project_dir)
     plan_facts: [String:String]{
         "action.kind": "native-catalog-prebuilt",
@@ -300,7 +300,7 @@ provider_native_release_facts: fn(spec: RefSpec, table: SourceTable, ctx: Provid
     if split.base != NATIVE_UPSTREAM {
         return Err(RegistryError.Reason("source `{NATIVE_SOURCE_NAME}` is pinned to `{split.base}`, expected `{NATIVE_UPSTREAM}`"))
     }
-    requested_tag := if selector == {
+    ^requested_tag: if selector == {
         .Val(text) -> provider_native_exact_tag(text)
         .None -> None
     }
@@ -434,7 +434,7 @@ provider_native_fetch_release_metadata: fn(requested: String?) -[Env, Net, Time.
     }
     assets_value: object.get("assets") ?? return Err(RegistryError.Reason("GitHub release metadata has no assets"))
     assets: pkg_json_array(assets_value) ?? return Err(RegistryError.Reason("GitHub release assets: {PKG_JSON_NOT_ARRAY}"))
-    found := [String:Dyn]?{None}
+    ^found: [String:Dyn]?{None}
     loop asset in assets {
         asset_object: pkg_json_object(asset) ?? next
         name: provider_native_json_text(asset_object, "name") ?? next
@@ -452,7 +452,7 @@ provider_native_fetch_release_metadata: fn(requested: String?) -[Env, Net, Time.
         .Val(value) -> pkg_json_text(value) ?? ""
         .None -> ""
     }
-    digest := published.removeprefix("sha256:")
+    ^digest: published.removeprefix("sha256:")
     if digest == "" {
         fallback: provider_native_static_facts(release_tag) ?? return Err(RegistryError.Reason("GitHub release asset has no published SHA-256 digest"))
         digest = fallback.sha256
@@ -556,8 +556,8 @@ provider_native_fetch_remote_artifact: fn(url: String, destination: String, labe
         }
         .None -> {}
     }
-    output := files.create(destination, if_exists: .Refuse) ?? return Err(RegistryError.Reason("could not create {label} staging file: {err}"))
-    total := 0
+    ^output: files.create(destination, if_exists: .Refuse) ?? return Err(RegistryError.Reason("could not create {label} staging file: {err}"))
+    ^total: 0
     loop part in response.body().chunks(PROVIDER_READ_CHUNK) {
         chunk: part ?? return Err(RegistryError.Reason("could not read {label}: {err}"))
         total += chunk.len()
@@ -590,8 +590,8 @@ provider_native_copy_bounded_file: fn(source: String, destination: String) -[FS]
     if stat.size > NATIVE_MAX_ARTIFACT_BYTES {
         return Err(RegistryError.Provider(provider_native_error("fixture artifact exceeds its size bound")))
     }
-    input := files.open(source) ?? return Err(RegistryError.Provider(provider_native_error("could not open fixture artifact: {err}")))
-    output := files.create(destination, if_exists: .Refuse) ?? return Err(RegistryError.Provider(provider_native_error("could not create fixture staging file: {err}")))
+    ^input: files.open(source) ?? return Err(RegistryError.Provider(provider_native_error("could not open fixture artifact: {err}")))
+    ^output: files.create(destination, if_exists: .Refuse) ?? return Err(RegistryError.Provider(provider_native_error("could not create fixture staging file: {err}")))
     loop {
         chunk: input.read_bytes(PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Provider(provider_native_error("could not copy fixture artifact: {err}")))
         if chunk.len() == 0 -> break
@@ -613,7 +613,7 @@ provider_native_fetch_bounded_bytes: fn(url: String, limit: Int, label: String) 
         }
         .None -> {}
     }
-    out := [U8]{}
+    ^out: [U8]{}
     loop part in response.body().chunks(PROVIDER_READ_CHUNK) {
         chunk: part ?? return Err(RegistryError.Reason("could not read {label}: {err}"))
         loop byte in chunk -> out.push(byte)

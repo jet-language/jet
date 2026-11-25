@@ -10,8 +10,8 @@ Probe: struct {
 // kind a run doesn't hold.
 build: fn(b: Build) {
     receipt: compiler.receipt("run.receipt") ?? panic("the run store refused: {err}")
-    text := ""
-    count := 0
+    ^text: ""
+    ^count: 0
     kinds: [compiler.FactKind]{compiler.FactKind.Claim, compiler.FactKind.Section, compiler.FactKind.Consumed, compiler.FactKind.Produced}
     loop kind in kinds {
         rows: compiler.query(compiler.FactSource.Run{receipt: receipt.copy()}, kind) ?? panic("the run store refused: {err}")

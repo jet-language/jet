@@ -81,14 +81,14 @@ store_nix_test_open_directory: fn(output: ^[U8]) Never! {
 }
 
 store_nix_test_nar_start: fn() -> [U8] Never! {
-    output := [U8]{}
+    ^output: [U8]{}
     store_nix_test_put_text(output, "nix-archive-1")
     output
 }
 
 // A directory NAR whose entries are empty regular files named `names`.
 store_nix_test_nar_with_directory_entries: fn(names: [[U8]]) -> [U8] Never! {
-    output := store_nix_test_nar_start()
+    ^output: store_nix_test_nar_start()
     store_nix_test_open_directory(output)
     loop name in names {
         store_nix_test_open_entry(output, name)
@@ -100,14 +100,14 @@ store_nix_test_nar_with_directory_entries: fn(names: [[U8]]) -> [U8] Never! {
 }
 
 store_nix_test_nar_with_regular_root: fn(contents: [U8]) -> [U8] Never! {
-    output := store_nix_test_nar_start()
+    ^output: store_nix_test_nar_start()
     store_nix_test_put_regular(output, contents, false)
     output
 }
 
 // `lib/link -> target` inside a directory root.
 store_nix_test_nar_with_nested_symlink: fn(target: [U8]) -> [U8] Never! {
-    output := store_nix_test_nar_start()
+    ^output: store_nix_test_nar_start()
     store_nix_test_open_directory(output)
     store_nix_test_open_entry(output, "lib".bytes())
     store_nix_test_open_directory(output)
@@ -121,14 +121,14 @@ store_nix_test_nar_with_nested_symlink: fn(target: [U8]) -> [U8] Never! {
 }
 
 store_nix_test_nar_with_symlink_root: fn(target: String) -> [U8] Never! {
-    output := store_nix_test_nar_start()
+    ^output: store_nix_test_nar_start()
     store_nix_test_put_symlink(output, target.bytes())
     output
 }
 
 // `text` with one NUL byte between `before` and `after`.
 store_nix_test_bytes_with_nul: fn(before: String, after: String) -> [U8] Never! {
-    bytes := before.bytes()
+    ^bytes: before.bytes()
     bytes.push(U8{0})
     bytes.extend(after.bytes())
     bytes
@@ -201,7 +201,7 @@ store_nix_test_object: fn(admitted: AdmittedNixClosure, store_path: String) -> A
 store_nix_test_single_failure: fn(verification: StoreVerification, label: String, store_path: String, narinfo: [U8], object: [U8], trusted_seed: [U8], expected: NixCacheErrorKind) -> NixCacheError Never! {
     root: store_nix_test_unique_dir(label)
     narinfo_text: String.from_bytes(narinfo) ?? panic("narinfo text")
-    routes := [String:[U8]]{
+    ^routes: [String:[U8]]{
         "/nix-cache-info": store_nix_test_cache_info(),
         "/{store_nix_test_hash_key(store_path)}.narinfo": narinfo,
     }
@@ -304,15 +304,15 @@ NixTestProgress: struct {
 #Test("store nix cache streams nar bytes through hashing zstd and the nar decoder") {
     root: store_nix_test_unique_dir("stream")
     files.create_dir_all(files.join(root, "bin")) ?? panic("bin directory")
-    payload := [U8]{}
+    ^payload: [U8]{}
     loop _ in 0..<(128 * 1024) -> payload.push(U8{120})
     files.write_bytes(files.join(root, "bin/payload"), payload) ?? panic("payload")
     encoded: store_write_nar(root) ?? panic("write nar")
     nar: encoded.bytes
     expected: encoded.stats
     assert(expected.bytes > 64 * 1024)
-    hasher := crypto.Hasher.new()
-    start := 0
+    ^hasher: crypto.Hasher.new()
+    ^start: 0
     loop start < nar.len() {
         end: if start + 73 < nar.len() -> start + 73 else -> nar.len()
         hasher.update(nar.slice(start, end))
@@ -330,7 +330,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache recurses and admits closure atomically") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: store_nix_test_unique_dir("closure")
     source_root: files.join(root, "source")
     files.create_dir_all(files.join(source_root, "root")) ?? panic("root source")
@@ -345,7 +345,7 @@ NixTestProgress: struct {
     root_info: store_nix_test_signed_zstd_narinfo(root_path, "root.nar.zst", root_nar, [String]{leaf_path}, STORE_NIX_TEST_KEY_ID, seed)
     leaf_info: store_nix_test_signed_narinfo(leaf_path, "leaf.nar", leaf_nar, [String]{}, STORE_NIX_TEST_KEY_ID, seed)
     root_compressed: store_nix_test_encode_zstd(root_nar)
-    routes := [String:[U8]]{
+    ^routes: [String:[U8]]{
         "/nix-cache-info": store_nix_test_cache_info(),
         "/00000000000000000000000000000000.narinfo": root_info,
         "/nar/root.nar.zst": root_compressed,
@@ -371,7 +371,7 @@ NixTestProgress: struct {
     assert_eq(plan.repaired, 0)
     assert_eq(plan.download_bytes, root_compressed.len() + leaf_nar.len())
     assert_eq(plan.disk_bytes, root_nar.len() + leaf_nar.len())
-    payload_routes := [String:[U8]]{}
+    ^payload_routes: [String:[U8]]{}
     loop route in routes {
         if route.key == "/nix-cache-info" || route.key.starts_with("/nar/") {
             payload_routes[route.key] = route.value
@@ -388,8 +388,8 @@ NixTestProgress: struct {
     assert_eq(store_nix_test_object(admitted, root_path).direct_reference_digests.len(), 1)
     loop object in admitted.objects -> assert(files.is_dir(object.value.hangar_path))
     assert_eq(store_list(verification, roots).len(), 2)
-    entry := store_test_find_entry(store_list_checked(verification, roots) ?? panic("listing"), root_path)
-    producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    ^entry: store_test_find_entry(store_list_checked(verification, roots) ?? panic("listing"), root_path)
+    ^producer: ProducerRecord.decode(entry.producer_record) ?? panic("producer")
     loop fact in provider_nix_build_facts_record() -> producer.facts[fact.key] = fact.value
     entry.producer_record = producer.encode()
     lease: store_snapshot_lease(verification, roots, entry) ?? panic("lease")
@@ -403,7 +403,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache admits a self-referencing object without a self edge") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: store_nix_test_unique_dir("self-reference")
     source: files.join(root, "source")
     files.create_dir_all(source) ?? panic("source dir")
@@ -412,7 +412,7 @@ NixTestProgress: struct {
     store_path: "/nix/store/22222222222222222222222222222222-self"
     seed: store_nix_test_seed(7)
     info: store_nix_test_signed_narinfo(store_path, "self.nar", nar, [String]{store_path}, STORE_NIX_TEST_KEY_ID, seed)
-    routes := [String:[U8]]{
+    ^routes: [String:[U8]]{
         "/nix-cache-info": store_nix_test_cache_info(),
         "/22222222222222222222222222222222.narinfo": info,
         "/nar/self.nar": nar,
@@ -422,14 +422,14 @@ NixTestProgress: struct {
     admitted: store_admit_nix_closure(verification, roots, store_nix_test_request("out", store_path), false) ?? panic("admit self-referencing object: {err.message()}")
     assert_eq(admitted.objects.len(), 1)
     assert_eq(store_nix_test_object(admitted, store_path).direct_reference_digests.len(), 0)
-    entry := store_test_find_entry(store_list_checked(verification, roots) ?? panic("listing"), store_path)
+    ^entry: store_test_find_entry(store_list_checked(verification, roots) ?? panic("listing"), store_path)
     assert_eq(entry.references.len(), 0)
     server.stop()
     store_nix_test_remove_dir(root)
 }
 
 #Test("store nix cache shared transitive object admits twice and stores once") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: store_nix_test_unique_dir("shared-closure")
     source_root: files.join(root, "source")
     labels: [String]{"first", "second", "shared"}
@@ -464,8 +464,8 @@ NixTestProgress: struct {
     assert_eq(second.objects.len(), 2)
     assert_eq(store_nix_test_object(second, shared_path).hangar_digest, shared_digest)
 
-    second_entry := store_test_find_entry(store_list_checked(verification, roots) ?? panic("listing"), second_path)
-    producer := ProducerRecord.decode(second_entry.producer_record) ?? panic("producer")
+    ^second_entry: store_test_find_entry(store_list_checked(verification, roots) ?? panic("listing"), second_path)
+    ^producer: ProducerRecord.decode(second_entry.producer_record) ?? panic("producer")
     producer.facts["nix.output.bin"] = shared_path
     second_entry.producer_record = producer.encode()
     second_entry.named_outputs["bin"] = shared_digest
@@ -478,7 +478,7 @@ NixTestProgress: struct {
     assert_eq(graph.objects.len(), 3)
     objects_dir: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
     assert_eq((graph.objects.get(shared_digest) ?? panic("shared object")).path, files.join(objects_dir, shared_digest))
-    matching := 0
+    ^matching: 0
     loop entry in files.list_dir(objects_dir) ?? panic("objects") {
         if entry.name == shared_digest -> matching += 1
     }
@@ -488,7 +488,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache pinned repair rejects replacement proof before publication") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     store_path: "/nix/store/66666666666666666666666666666666-pinned"
     original_nar: store_nix_test_nar_with_directory_entries([[U8]]{"original".bytes()})
     replacement_nar: store_nix_test_nar_with_directory_entries([[U8]]{"replacement".bytes()})
@@ -536,7 +536,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache planning skips narinfo for a fully admitted closure") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     store_path: "/nix/store/44444444444444444444444444444444-planned"
     nar: store_nix_test_nar_with_directory_entries([[U8]]{})
     cache: store_nix_test_single_object_cache("planning-admitted", store_path, "planned.nar", nar, store_nix_test_seed(13))
@@ -555,7 +555,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache admits case colliding posix names with stable digest") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     store_path: "/nix/store/55555555555555555555555555555555-case-collisions"
     nar: store_nix_test_nar_with_directory_entries([[U8]]{"A".bytes(), "a".bytes()})
     cache: store_nix_test_single_object_cache("case-collisions", store_path, "case-collisions.nar", nar, store_nix_test_seed(14))
@@ -572,7 +572,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache admits backslash component names") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     store_path: "/nix/store/aaaaaaaabbbbbbbbccccccccdddddddd-backslash-name"
     name: "dev-disk-by\\x2duuid-test.device"
     nar: store_nix_test_nar_with_directory_entries([[U8]]{name.bytes()})
@@ -616,7 +616,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache admits sibling store relative symlink and host escape") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     seed: store_nix_test_seed(15)
     targets: [{label: String, store_path: String, target: String}]{
         {label: "sibling-link", store_path: "/nix/store/66666666666666666666666666666666-sibling-link", target: "../../77777777777777777777777777777777-sibling/bin/tool"},
@@ -648,14 +648,14 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache admits reregisters and reuses file root") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     store_path: "/nix/store/99999999999999999999999999999999-file-root"
     nar: store_nix_test_nar_with_regular_root("source archive bytes".bytes())
     cache: store_nix_test_single_object_cache("file-root", store_path, "file-root.nar", nar, store_nix_test_seed(16))
     first: store_nix_test_admit(verification, cache.roots, "out", store_path)
     object: store_nix_test_object(first, store_path)
     assert((files.stat(object.hangar_path) ?? panic("object")).is_file)
-    file_root_bin := String?{None}
+    ^file_root_bin: String?{None}
     loop entry in store_list_checked(verification, cache.roots) ?? panic("listing") {
         if entry.name == "file-root" -> file_root_bin = Val(entry.bin)
     }
@@ -669,7 +669,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache memoizes verified digest until root replacement") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: store_nix_test_unique_dir("digest-memo")
     hangar: files.join(root, "hangar")
     objects: files.join(hangar, "objects")
@@ -697,7 +697,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache admits and reuses a symlink root") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     store_path: "/nix/store/22222222222222222222222222222222-symlink-root"
     target: "/nix/store/cccccccccccccccccccccccccccccccc-target"
     nar: store_nix_test_nar_with_symlink_root(target)
@@ -718,7 +718,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache replaces a corrupt existing object") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     store_path: "/nix/store/33333333333333333333333333333333-corruptible"
     nar: store_nix_test_nar_with_directory_entries([[U8]]{})
     cache: store_nix_test_single_object_cache("self-heal", store_path, "corruptible.nar", nar, store_nix_test_seed(12))
@@ -736,7 +736,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache sweeps dead stages but keeps current pid stages") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: store_nix_test_unique_dir("stage-sweep")
     roots: HangarRoots.at(files.join(root, "jetpack"))
     stage_parent: files.join(roots.hangar_dir(), "stage")
@@ -747,7 +747,7 @@ NixTestProgress: struct {
     unrelated: files.join(stage_parent, "nix-cache-not-a-pid-1")
     files.create_dir_all(unrelated) ?? panic("unrelated stage")
 
-    transaction := NixAdmission.new(verification, roots, None, false) ?? panic("admission transaction")
+    ^transaction: NixAdmission.new(verification, roots, None, false) ?? panic("admission transaction")
     assert(!files.lexists(files.join(stage_parent, "nix-cache-999999999-1")))
     assert(files.lexists(current))
     assert(files.lexists(unrelated))
@@ -756,7 +756,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache reads canonical directories symlinks and executables") {
-    nar := store_nix_test_nar_start()
+    ^nar: store_nix_test_nar_start()
     store_nix_test_open_directory(nar)
     store_nix_test_open_entry(nar, "bin".bytes())
     store_nix_test_put_regular(nar, "tool".bytes(), true)
@@ -791,7 +791,7 @@ NixTestProgress: struct {
 
 #Test("store nix cache removes a readonly partial stream tree") {
     valid_nar: store_nix_test_nar_with_directory_entries([[U8]]{"payload".bytes()})
-    nar := valid_nar
+    ^nar: valid_nar
     nar.extend("trailing".bytes())
     destination: store_nix_test_unique_dir("readonly-partial-stream")
     store_nix_test_remove_dir(destination)
@@ -822,7 +822,7 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache registration reports the failed cas condition") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: store_nix_test_unique_dir("registration-condition")
     roots: HangarRoots.at(files.join(root, "jetpack"))
     digest: "sha256-{store_test_repeat("a", 64)}"
@@ -860,20 +860,20 @@ NixTestProgress: struct {
 }
 
 #Test("store nix cache negative inputs fail closed") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     store_path: "/nix/store/22222222222222222222222222222222-negative"
     seed: store_nix_test_seed(9)
     wrong_seed: store_nix_test_seed(10)
     key_id: STORE_NIX_TEST_KEY_ID
     valid_nar: store_nix_test_nar_with_directory_entries([[U8]]{})
-    invalid_magic_nar := [U8]{U8{9}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}}
+    ^invalid_magic_nar: [U8]{U8{9}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}}
     invalid_magic_nar.extend("not-a-nar".bytes())
     loop _ in 0..<7 -> invalid_magic_nar.push(U8{0})
 
     _: store_nix_test_single_failure(verification, "wrong-key", store_path, store_nix_test_signed_narinfo(store_path, "negative.nar", valid_nar, [String]{}, key_id, seed), valid_nar, wrong_seed, NixCacheErrorKind.Signature)
 
     zstd_info: store_nix_test_signed_zstd_narinfo(store_path, "negative.nar.zst", valid_nar, [String]{}, key_id, seed)
-    corrupted := store_nix_test_encode_zstd(valid_nar)
+    ^corrupted: store_nix_test_encode_zstd(valid_nar)
     corrupted[0] = U8{(Int{corrupted[0]}) ~ 1}
     _: store_nix_test_single_failure(verification, "compressed-corruption", store_path, zstd_info, corrupted, seed, NixCacheErrorKind.CompressedCorruption)
 

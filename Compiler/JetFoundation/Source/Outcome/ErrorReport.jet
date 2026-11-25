@@ -81,19 +81,19 @@ JetErrorReport: struct {
             .Val(value) -> foundation_json_quote(value)
             .None -> "null"
         }
-        causes := [String]{}
+        ^causes: [String]{}
         loop cause in self.causes -> causes.push(cause.to_json())
         cause: if {
             causes.len() == 0 -> "null"
             causes.len() == 1 -> causes[0]
             else -> "[{causes.join(",")}]"
         }
-        fields := [String]{"\"schema\":\"jet.err/v1\"", "\"message\":{foundation_json_quote(self.message)}", "\"code\":{code}", "\"cause\":{cause}"}
+        ^fields: [String]{"\"schema\":\"jet.err/v1\"", "\"message\":{foundation_json_quote(self.message)}", "\"code\":{code}", "\"cause\":{cause}"}
         if self.typed_identity == .Val(identity) {
             fields.push("\"typed_identity\":{foundation_json_quote(identity)}")
         }
         if self.context_frames.len() > 0 {
-            frames := [String]{}
+            ^frames: [String]{}
             loop frame in self.context_frames {
                 frames.push("{{\"text\":{foundation_json_quote(frame.text)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line}}}")
             }
@@ -101,7 +101,7 @@ JetErrorReport: struct {
         }
         if self.origin == .Val(origin) -> fields.push("\"origin\":{jet_error_journey_json(origin)}")
         if self.source_journey.len() > 0 {
-            frames := [String]{}
+            ^frames: [String]{}
             loop frame in self.source_journey -> frames.push(jet_error_journey_json(frame))
             fields.push("\"source_journey\":[{frames.join(",")}]")
         }
@@ -117,7 +117,7 @@ JetErrorReport: struct {
     // containers, no byte ceiling, its refusal messages), then the typed
     // decode, then the canonical round trip.
     from_json: fn(text: String) -> JetErrorReport JetErrorReportError! {
-        limits := EncodingLimits.safe()
+        ^limits: EncodingLimits.safe()
         limits.max_depth = JET_ERROR_REPORT_JSON_DEPTH
         limits.max_item_bytes = if text.bytes().len() > 0 -> text.bytes().len() else -> 1
         value: if error_report_json.parse_with_limits(text, limits) == {
@@ -243,7 +243,7 @@ jet_error_report_from_json: fn(value: Dyn) -> JetErrorReport JetErrorReportError
         .Null -> None
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Val(jet_error_json_text(code_value, "code"))
     }
-    causes := [JetErrorReport]{}
+    ^causes: [JetErrorReport]{}
     if jet_error_json_field(fields, "cause") == {
         .Null -> {}
         .Object(_) -> causes.push(jet_error_report_from_json(jet_error_json_field(fields, "cause")))
@@ -289,7 +289,7 @@ jet_error_json_encode_value: fn(value: Dyn) -> String Never! {
         .Bytes(_) -> foundation_json_quote(value.to_text() ?? "")
         .DateTime(_) -> foundation_json_quote(value.to_text() ?? "")
         .Array(values) -> {
-            encoded := [String]{}
+            ^encoded: [String]{}
             loop child in values -> encoded.push(jet_error_json_encode_value(child))
             "[{encoded.join(",")}]"
         }

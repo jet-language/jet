@@ -111,7 +111,7 @@ MCPVersionPolicy: enum {
             .Stable -> [MCPRevision]{MCPRevision.Stable20251125}
             .Exact(revision) -> [MCPRevision]{revision}
             .StableAnd(extra) -> {
-                supported := [MCPRevision]{MCPRevision.Stable20251125}
+                ^supported: [MCPRevision]{MCPRevision.Stable20251125}
                 loop revision in extra {
                     if !supported.contains(revision) -> supported.push(revision.copy())
                 }
@@ -194,7 +194,7 @@ MCPPolicy: struct {
                 return Err(MCPNegotiationError.PeerVersionTooLong(MCP_MAX_REVISION_BYTES))
             }
         }
-        peer_revisions := [MCPRevision]{}
+        ^peer_revisions: [MCPRevision]{}
         loop version in peer_versions {
             if MCPRevision.parse(version) == {
                 .Val(revision) -> { peer_revisions.push(revision) }
@@ -207,7 +207,7 @@ MCPPolicy: struct {
                 return Ok(MCPNegotiatedProtocol{revision: revision, codec: revision.codec(), lifecycle: revision.lifecycle_profile()})
             }
         }
-        peer_has_preview := false
+        ^peer_has_preview: false
         loop revision in peer_revisions {
             if revision.is_preview() -> peer_has_preview = true
         }
@@ -222,7 +222,7 @@ MCPPolicy: struct {
             }
             .Stable | .StableAnd(_) -> {}
         }
-        redacted := [String]{}
+        ^redacted: [String]{}
         loop version in peer_versions {
             if MCPRevision.parse(version) == {
                 .Val(revision) -> { redacted.push(revision.as_str()) }
@@ -389,7 +389,7 @@ MCPAuditFacts: struct {
 
     // Stable, secret-free key/value fields.
     as_map: fn(self) -> [String:String] Never! {
-        facts := [String:String]{}
+        ^facts: [String:String]{}
         facts["mcp.role"] = self.role.name()
         facts["mcp.lifecycle"] = self.lifecycle.name()
         if self.negotiated_revision == {

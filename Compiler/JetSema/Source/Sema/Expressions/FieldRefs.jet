@@ -56,7 +56,9 @@ sema_field_ref_name: fn(name: String) -> Bool Never! {
 // argument is an ordinary value of the parameter's type.
 sema_field_ref_selector: fn(expr: Expr) -> Bool Never! {
     if sema_expr_is_bare_member_chain(expr) -> return true
-    if expr == .EnumLit(type_name, _, _, _, leading_dot, _, _) -> return leading_dot && type_name == ""
+    if expr == .EnumLit(type_name, _, _, _, leading_dot, _, _) {
+        return leading_dot && type_name == ""
+    }
     false
 }
 
@@ -71,7 +73,9 @@ sema_field_ref_probe: fn(expr: Expr, ref_type: Type, environment: SemaScopeEnvir
 // `FieldRef<M, field_ty>` from a resolved `FieldRef<M, T>`; None for any
 // type that is not applied.
 sema_field_ref_value_type: fn(ref_type: Type, field_ty: Type) -> Type? Never! {
-    if ref_type == .Apply(name, args) -> return Val(Type.Apply{name: name, args: [Type]{args[0].copy(), field_ty}})
+    if ref_type == .Apply(name, args) {
+        return Val(Type.Apply{name: name, args: [Type]{args[0].copy(), field_ty}})
+    }
     None
 }
 
@@ -110,8 +114,12 @@ sema_field_ref_field: fn(expr: Expr, ref_type: Type, environment: SemaScopeEnvir
             diagnostics.push(sema_error("E-SUBJECT-CALL", span, "`{chain}` reads the loop's item `it` here, not a field of `{type_name(model)}`", "inside a loop with no binding a bare `.name` is `it{chain}`, a value of the item, before any expected type makes it a field reference", "name the loop's binding (`loop item in …`) so `{chain}` names the field, or write the item's field as `it{chain}`"))
             return None
         }
-        if model == .Named(name) -> return sema_field_ref_owner_field(expr, model, name, [Type]{}, chain, span, environment, program, scopes, context, diagnostics)
-        if model == .Apply(name, args) -> return sema_field_ref_owner_field(expr, model, name, args, chain, span, environment, program, scopes, context, diagnostics)
+        if model == .Named(name) {
+            return sema_field_ref_owner_field(expr, model, name, [Type]{}, chain, span, environment, program, scopes, context, diagnostics)
+        }
+        if model == .Apply(name, args) {
+            return sema_field_ref_owner_field(expr, model, name, args, chain, span, environment, program, scopes, context, diagnostics)
+        }
         diagnostics.push(sema_field_ref_no_struct(chain, model, span))
     }
     None
@@ -147,10 +155,12 @@ sema_field_ref_owner_field: fn(
     shown: owner_symbol.name
     sees_private: sema_expr_sees_private_fields(context)
     // The rows of the stored fields visible at the selector.
-    visible := [Int]{}
+    ^visible: [Int]{}
     loop (row, field) in struct_def.fields {
         if field.computed != None -> next
-        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, span, sees_private, environment, program) -> next
+        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, span, sees_private, environment, program) {
+            next
+        }
         visible.push(row)
     }
     if expr == .Field(base, member, _, _) && sema_expr_is_bare_subject(base) {
@@ -183,9 +193,9 @@ sema_field_ref_owner_field: fn(
 // sema_suggest_field picks it: within two edits, never `name` itself, and
 // none when two tie.
 sema_field_ref_nearest: fn(name: String, fields: [Field], visible: [Int]) -> Int? Never! {
-    best := -1
-    best_distance := 3
-    ambiguous := false
+    ^best: -1
+    ^best_distance: 3
+    ^ambiguous: false
     loop row in visible {
         distance: sema_taint_edit_distance(name, fields[row].name)
         if distance == 0 || distance > 2 -> next
@@ -195,7 +205,9 @@ sema_field_ref_nearest: fn(name: String, fields: [Field], visible: [Int]) -> Int
                 best_distance = distance
                 ambiguous = false
             }
-            distance == best_distance && fields[best].name != fields[row].name -> { ambiguous = true }
+            distance == best_distance && fields[best].name != fields[row].name -> {
+                ambiguous = true
+            }
         }
     }
     if best < 0 || ambiguous -> None else -> Val(best)
@@ -214,7 +226,7 @@ sema_field_ref_refused: fn(expr: Expr, chain: String, shown: String, fields: [Fi
     if expr == .EnumLit(_, variant, _, payload, _, _, _) {
         lower: variant.lower()
         written: if payload.len() > 0 -> "`.{variant}(…)`" else -> "`.{variant}`"
-        named := false
+        ^named: false
         loop row in visible {
             if fields[row].name == lower -> named = true
         }
@@ -242,7 +254,7 @@ sema_field_ref_value: fn(value_type: Type, name: String, span: Span, check: ^Sem
                     if field.name != "name" || field.computed != None -> next
                     text: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, span)
                     fact: sema_expression_struct_field_fact(field, owner, names, ref_args, check.environment.*, check.program.*, check.context)
-                    reference := sema_expression_field_ref(fact.symbol, Val(owner.id), fact.field_ty)
+                    ^reference: sema_expression_field_ref(fact.symbol, Val(owner.id), fact.field_ty)
                     reference.boxed = fact.boxed
                     return Val(sema_tree_node(value_type, TExprKind.StructLit{fields: [TStructFieldValue]{TStructFieldValue{field: reference, value: text, boxed: fact.boxed}}}, span))
                 }

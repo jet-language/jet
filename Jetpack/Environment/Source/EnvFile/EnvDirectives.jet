@@ -69,7 +69,7 @@ EnvFile: struct {
 
     // The named-source resolution table for this env.
     source_table: fn(self) -> SourceTable Never! {
-        decls := [NamedSourceDecl]{}
+        ^decls: [NamedSourceDecl]{}
         loop source in self.named {
             via: if source.via == {
                 .Val(name) -> ProviderKind.parse(name)
@@ -81,7 +81,7 @@ EnvFile: struct {
             }
             decls.push(NamedSourceDecl{name: source.name, upstream: upstream, via: via})
         }
-        table := SourceTable.from_decls(decls)
+        ^table: SourceTable.from_decls(decls)
         loop source in self.named {
             if ProviderRef.classify(source.upstream) == .Ok(provider_ref) {
                 table.set_channel_metadata(source.name, provider_ref.policy, provider_ref.raw)
@@ -100,7 +100,7 @@ EnvFile: struct {
 
     // The canonical refs this env declares.
     refs: fn(self) -> [String] Never! {
-        out := [String]{}
+        ^out: [String]{}
         loop package in self.packages -> out.push(self.entry_ref(package))
         out
     }
@@ -108,7 +108,7 @@ EnvFile: struct {
     // The canonical `env.jet` text for this environment.
     render: fn(self) -> String Never! {
         prompt: env_file_quote_jet_string(self.prompt_label())
-        lines := [String]{}
+        ^lines: [String]{}
         loop source in self.named {
             line: if source.via == {
                 .Val(via) -> "        pkg.source({env_file_quote_jet_string(source.name)}, {env_file_quote_jet_string(source.upstream)}, {env_file_quote_jet_string(via)})"
@@ -119,7 +119,7 @@ EnvFile: struct {
         if self.default_source == .Val(default) {
             lines.push("        pkg.source({env_file_quote_jet_string(env_file_published_source(default))})")
         }
-        quoted := [String]{}
+        ^quoted: [String]{}
         loop package in self.packages -> quoted.push(env_file_quote_jet_string(package))
         lines.push("        pkg.packages([{quoted.join(", ")}])")
         lines.push("        pkg.prompt({prompt})")
@@ -139,7 +139,7 @@ EnvFile: struct {
     // unrecognized is ignored. Every `pkg.source` is read: one argument sets
     // the default source, two or three declare a named source.
     parse: fn(text: String) -> EnvFile Never! {
-        file := EnvFile.empty()
+        ^file: EnvFile.empty()
         loop call in env_file_all_call_args(text, PACK_DIRECTIVE_SOURCE) {
             args: env_file_quoted_strings(call)
             if args.len() == {
@@ -161,7 +161,7 @@ EnvFile: struct {
     // Add a package (from a classified ref) to the env file in `dir`,
     // creating the file if absent. Idempotent.
     add: fn(dir: String, spec: RefSpec) -[FS]> EnvFile EnvironmentError! {
-        file := EnvFile.load(dir) ?? EnvFile.empty()
+        ^file: EnvFile.load(dir) ?? EnvFile.empty()
         // A built-in ref with no default yet becomes the default source.
         if file.default_source == None && RefSource.is_builtin(spec.source.label()) {
             file.default_source = Val(env_file_published_source(spec.source.label()))
@@ -178,10 +178,10 @@ EnvFile: struct {
     // Remove a package from the env file in `dir`. Matches on the resolved
     // ref, so it works whether the entry was stored bare or with its source.
     remove: fn(dir: String, spec: RefSpec) -[FS]> {file: EnvFile, removed: Bool} EnvironmentError! {
-        file := EnvFile.load(dir) ?? EnvFile.empty()
+        ^file: EnvFile.load(dir) ?? EnvFile.empty()
         target: "{spec.package}{REF_PROVIDER_AT}{spec.source.label()}"
         before: file.packages.len()
-        keep := [String]{}
+        ^keep: [String]{}
         loop entry in file.packages {
             if file.entry_ref(entry) != target -> keep.push(entry)
         }
@@ -213,7 +213,7 @@ env_file_published_source: fn(source: String) -> String Never! {
 // Quote a value as a plain Jet string literal. Jet strings double braces
 // because single braces start interpolation.
 env_file_quote_jet_string: fn(value: String) -> String Never! {
-    out := [String]{"\""}
+    ^out: [String]{"\""}
     loop scalar in value.chars() {
         text: "{scalar}"
         if text == {

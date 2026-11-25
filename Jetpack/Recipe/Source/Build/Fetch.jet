@@ -193,8 +193,8 @@ recipe_credential_field_key: fn(raw: String) -> Bool Never! {
 // the same value, undecodable escapes stay literal.
 recipe_percent_decode_ascii: fn(value: String) -> String Never! {
     bytes: value.bytes()
-    decoded := [U8]{}
-    index := 0
+    ^decoded: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         if (Int{bytes[index]}) == 37 && index + 2 < bytes.len() {
             high: recipe_hex_value(Int{bytes[index + 1]})
@@ -235,7 +235,7 @@ recipe_hex_value: fn(code: Int) -> Int Never! {
 // the inherited environment and maps `JET_BUILD_OUTPUT` to the private output
 // mount; this map carries only declared deterministic values, in key order.
 recipe_build_env: fn() -> [String:String] Never! {
-    env := [String:String]{}
+    ^env: [String:String]{}
     env[ENV_JET_PROFILE] = "default"
     env["SOURCE_DATE_EPOCH"] = "0"
     env

@@ -70,7 +70,7 @@ rsp_list: fn(store: String) -[FS, Time.Wait]> [JetDriverRunReceipt] {
 
 // The count of listed receipts whose inputs still match.
 rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
-    current := 0
+    ^current: 0
     loop receipt in rsp_list(store) {
         if rsp_current(store, receipt.claim) -> current += 1
     }
@@ -130,7 +130,7 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
     rsp_write(generated, "generated-v1\n")
 
     argv: [String]{"check", "packages/app/src/main.jet"}
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     inputs: jet_cli_comparison_input_paths(cache, source) ?? panic("input paths: {err.message}")
     loop expected in ([String]{workspace, package_manifest, workspace_lock, package_lock, generated}) {
         assert(inputs.contains(expected), "explicit check omitted authority input {expected}: {inputs.join(", ")}")
@@ -164,8 +164,8 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
     store: "{root}/store"
     args: [String]{"act"}
     kinds: [String]{"test", "golden", "budget", "api"}
-    claims := [JetDriverRunReceiptClaim]{}
-    magic := "jet-receipt-v2".bytes()
+    ^claims: [JetDriverRunReceiptClaim]{}
+    ^magic: "jet-receipt-v2".bytes()
     magic.push(U8{0})
 
     loop kind in kinds {

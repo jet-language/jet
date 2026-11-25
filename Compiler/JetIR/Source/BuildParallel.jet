@@ -17,7 +17,7 @@ IRParaSignature: struct {
 
 ir_para_signature: fn(ty: Type) -> IRParaSignature? Never! {
     if ir_untag(ty) == .Fn(params, _, _, _, _, _) {
-        result := ir_callback_result(ty) ?? return None
+        ^result: ir_callback_result(ty) ?? return None
         return Val(IRParaSignature{params: params.copy(), result: result.move()})
     }
     None
@@ -34,7 +34,7 @@ ir_para_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, role: String, ty: 
     id: m.functions.len()
     m.functions.push(ir_hashed_function("para.{role}", key, "jet_ir_para_{role}_", "", 0))
     ir_function_bind(m, key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     if role == "map" -> ir_para_map_body(m, p, a, ty, span) else {
         ir_para_fold_body(m, p, a, ty, span)
     }
@@ -298,23 +298,23 @@ ir_closure_parallel: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, lis
     }
     // A fallible predicate's call is the Result of the selection.
     fallible: ir_untag(ty) == .Result(_, _)
-    selection_ty := ty.copy()
+    ^selection_ty: ty.copy()
     if ir_untag(ty) == .Result(ok, _) -> selection_ty = ok.copy()
     if !fallible && out_row != bool_row {
         return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} through {ir_type_name(callback_ty)}")
     }
     selection_row: ir_value_type(m, p, selection_ty) ?? return ir_type_fail(b, span, selection_ty)
     partition: operation == .ParaPartition
-    result := -1
-    true_list := -1
-    false_list := -1
+    ^result: -1
+    ^true_list: -1
+    ^false_list: -1
     if partition {
         fields: if ir_untag(selection_ty) == .Tuple(tuple_fields) -> tuple_fields else -> {
             return ir_type_fail(b, span, selection_ty)
         }
         members: ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, selection_ty)
-        false_offset := -1
-        true_offset := -1
+        ^false_offset: -1
+        ^true_offset: -1
         loop member in members {
             if member.name == "false_" -> false_offset = member.offset
             if member.name == "true_" -> true_offset = member.offset
@@ -368,7 +368,7 @@ IRParaSelection: struct {
 // is dropped, so no partial result escapes. Every box and the slot buffer
 // are freed.
 ir_para_select_settle: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, item_ty: Type, selection: IRParaSelection, list: Int, element: Int, output: Int, length: Int, bytes: Int, span: Span) -> Int Never! {
-    err_ty := Type.Int
+    ^err_ty: Type.Int
     if ir_untag(item_ty) == .Result(ok, err) {
         if ir_untag(ok) != Type.Bool {
             return ir_fail_slot(b, span, "parallel selection to {ir_type_name(ty)} through a callback making {ir_type_name(item_ty)}")
@@ -439,8 +439,8 @@ ir_para_select_settle: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, i
 // built so far, and every later payload ends, so no partial result escapes.
 // Every box and the slot buffer are freed.
 ir_para_map_settle: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, list_ty: Type, item_ty: Type, output: Int, length: Int, bytes: Int, span: Span) -> Int Never! {
-    ok_ty := Type.Int
-    err_ty := Type.Int
+    ^ok_ty: Type.Int
+    ^err_ty: Type.Int
     if ir_untag(item_ty) == .Result(ok, err) {
         ok_ty = ok
         err_ty = err
@@ -524,7 +524,7 @@ ir_para_fold_try: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, acc_ty
     seed_ty: ir_row_ty(m, p, b.f.slot_type[seed])
     step_ty: ir_row_ty(m, p, b.f.slot_type[step])
     merge_ty: ir_row_ty(m, p, b.f.slot_type[merge])
-    fields := [TypeTupleField]{TypeTupleField{name: "seed", ty: seed_ty.copy()}, TypeTupleField{name: "step", ty: step_ty}, TypeTupleField{name: "result", ty: ty.copy()}}
+    ^fields: [TypeTupleField]{TypeTupleField{name: "seed", ty: seed_ty.copy()}, TypeTupleField{name: "step", ty: step_ty}, TypeTupleField{name: "result", ty: ty.copy()}}
     id: ir_para_helper(m, p, b, "fold", Type.Tuple{fields: fields}, span)
     if id < 0 -> return -1
     chunk_fold: ir_lazy_address(m, b, id)
@@ -627,7 +627,7 @@ ir_para_fold: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, length: In
     seed: operands[0]
     step: operands[1]
     merge: operands[2]
-    fields := [TypeTupleField]{TypeTupleField{name: "seed", ty: ir_row_ty(m, p, b.f.slot_type[seed])}, TypeTupleField{name: "step", ty: ir_row_ty(m, p, b.f.slot_type[step])}}
+    ^fields: [TypeTupleField]{TypeTupleField{name: "seed", ty: ir_row_ty(m, p, b.f.slot_type[seed])}, TypeTupleField{name: "step", ty: ir_row_ty(m, p, b.f.slot_type[step])}}
     id: ir_para_helper(m, p, b, "fold", Type.Tuple{fields: fields}, span)
     if id < 0 -> return -1
     chunk_fold: ir_lazy_address(m, b, id)

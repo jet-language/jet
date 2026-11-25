@@ -48,7 +48,7 @@ pkg_source_store_path: fn(name: String, version: String, fingerprint: String) -[
 }
 
 pkg_source_store_component: fn(value: String) PackageSourceStoreError! {
-    invalid := value == "" || value == "." || value == ".." || value.contains("/") || value.contains("\\") || value.contains(":")
+    ^invalid: value == "" || value == "." || value == ".." || value.contains("/") || value.contains("\\") || value.contains(":")
     // Unicode C0/C1 controls, exactly char::is_control in the reference.
     bytes: value.bytes()
     loop index in 0..<bytes.len() {
@@ -243,7 +243,7 @@ pkg_source_store_view_into_project: fn(store_entry: String, view_root: String) -
     parent_path: if files.dirname(view_root) == "" -> "." else -> files.dirname(view_root)
     view_name: files.basename(view_root)
     parent: foundation_open_directory_authority(parent_path, true) ?? return Err(pkg_source_store_io("creating dependency view parent", parent_path, err))
-    stale := false
+    ^stale: false
     if parent.child(view_name) == {
         .Ok(existing) -> {
             if existing.tree_hash(reject_hardlinks: true) == {

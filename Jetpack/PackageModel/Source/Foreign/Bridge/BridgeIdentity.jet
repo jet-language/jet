@@ -32,7 +32,7 @@ ForeignIdentityBuilder: struct {
 
     // Start an identity record with its schema as the first field.
     new: fn(schema: String) -> ForeignIdentityBuilder Never! {
-        identity := ForeignIdentityBuilder{bytes: [U8]{}}
+        ^identity: ForeignIdentityBuilder{bytes: [U8]{}}
         identity.field("schema", schema.bytes())
         identity
     }
@@ -89,7 +89,7 @@ ForeignBoundaryIdentity: struct {
 
     // Stable digest used by receipts and generated source comments.
     digest: fn(self) -> String Never! {
-        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+        ^identity: ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
         identity.field("source", self.source.bytes())
         identity.field("overlay", self.overlay.bytes())
         identity.field("generator", self.generator.bytes())
@@ -125,25 +125,25 @@ ForeignArtifactCoverage: struct {
     }
 
     with_transitive_dependencies: fn(self, dependencies: [String]) -> ForeignArtifactCoverage Never! {
-        out := self
+        ^out: self
         out.transitive_dependencies = Val(pkg_bridge_sorted_strings(dependencies))
         out
     }
 
     with_reachable_callbacks: fn(self, callbacks: [String]) -> ForeignArtifactCoverage Never! {
-        out := self
+        ^out: self
         out.reachable_callbacks = Val(pkg_bridge_sorted_strings(callbacks))
         out
     }
 
     with_compiler_flags: fn(self, flags: [String]) -> ForeignArtifactCoverage Never! {
-        out := self
+        ^out: self
         out.compiler_flags = Val(pkg_bridge_sorted_strings(flags))
         out
     }
 
     digest: fn(self) -> String Never! {
-        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+        ^identity: ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
         identity.field("loaded-artifact", self.loaded_artifact.bytes())
         identity.field("transitive-dependencies", pkg_bridge_stable_optional_strings(self.transitive_dependencies).bytes())
         identity.field("reachable-callbacks", pkg_bridge_stable_optional_strings(self.reachable_callbacks).bytes())
@@ -191,7 +191,7 @@ ForeignObligationEvidence: struct {
 
 // Non-blank values, sorted and deduplicated.
 pkg_bridge_sorted_strings: fn(values: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop value in values {
         if value.trim() == "" || out.contains(value) -> next
         out.push(value.copy())

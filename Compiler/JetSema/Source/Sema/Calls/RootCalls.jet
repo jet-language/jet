@@ -69,11 +69,11 @@ sema_root_call_named: fn(method: String, check: SemaBodyCheck) -> Bool {
 // The imported `#Root` functions named `method`, one per imported module in
 // alias order; with `receiver`, only those accepting `(receiver type)`.
 sema_root_call_imported: fn(method: String, receiver: Type?, check: SemaBodyCheck) -> [SemaRootCallTarget] {
-    targets := [SemaRootCallTarget]{}
+    ^targets: [SemaRootCallTarget]{}
     graph: check.program.registration_graph
     if !graph.root_functions -> return targets
     module_index: sema_scope_caller_index(check.environment.*, graph) ?? return targets
-    aliases := [String]{}
+    ^aliases: [String]{}
     loop import_row in graph.modules[module_index].imports {
         loop binding in import_row.bindings {
             if binding.symbol.kind != SymbolKind.Import || binding.declaration_position != None {
@@ -83,7 +83,7 @@ sema_root_call_imported: fn(method: String, receiver: Type?, check: SemaBodyChec
         }
     }
     aliases.sort()
-    seen := [String]{}
+    ^seen: [String]{}
     loop alias in aliases {
         imported: sema_call_source_import_target(check.environment.*, check.program.*, alias) ?? next
         if seen.contains(imported.module_identity) -> next
@@ -115,7 +115,7 @@ sema_root_call_owner_declares: fn(receiver_type: Type, method: String, method_sp
     if sema_registration_source_impl_owners(graph, receiver_name) == None && sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(receiver_name)).len() == 0 {
         return false
     }
-    probe := [Diagnostic]{}
+    ^probe: [Diagnostic]{}
     sema_expr_registration_method_candidates(graph, check.environment.module_identity, receiver_type, method, [Type]{}, [Type]{}, method_span, check.environment.*, check.program.*, probe).len() > 0
 }
 
@@ -124,10 +124,10 @@ sema_root_call_owner_declares: fn(receiver_type: Type, method: String, method_sp
 sema_root_call_try: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     unhandled: SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_root_call_named(method, check) -> return unhandled
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_diagnostics: [Diagnostic]{}
     probed: sema_probe_expression(receiver, None, check, probe_diagnostics) ?? return unhandled
     receiver_type: sema_call_resolved_type(probed.ty, check.environment.*, check.program.*)
-    candidates := [SemaRootCallTarget]{}
+    ^candidates: [SemaRootCallTarget]{}
     local: sema_root_call_local(method, receiver_type, check)
     if local -> candidates.push(SemaRootCallTarget{alias: None, shown: method})
     if method == "print" && !local && sema_call_gate_is_unshadowed(method, check.scopes) && sema_call_ambient_printable(receiver_type, check.environment.*, check.program.*) {
@@ -140,16 +140,16 @@ sema_root_call_try: fn(receiver: Expr, method: String, method_span: Span, type_a
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     if sema_root_call_owner_declares(receiver_type, method, method_span, check) {
         check.diagnostics.push(sema_error("E0105", method_span, "dot call `.{method}()` conflicts with a method on `{type_name(receiver_type)}`", "a `#Root` function cannot silently compete with a real instance method", "rename the `#Root` function or call it as `{method}(value, …)`"))
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+        loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
         return failed
     }
     if candidates.len() > 1 {
         names: loop candidate in candidates -> candidate.shown
         check.diagnostics.push(sema_error("E0105", method_span, "dot call `.{method}()` is ambiguous", "more than one imported `#Root` function accepts this receiver: {names.join(", ")}", "call one function explicitly: `{method}(value, …)`"))
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+        loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
         return failed
     }
-    call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: method_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
+    ^call_args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: method_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     loop argument in args -> call_args.push(argument.copy())
     call: Call{name: method, name_span: method_span, type_args: type_args, args: call_args}
     rewritten: if candidates[0].alias == .Val(alias) -> Expr.MethodCall{receiver: Expr.Ident{name: alias, span: method_span, id: AST_NODE_GENERATED}, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: call_args, id: AST_NODE_GENERATED} else -> Expr.Call{call: call, id: AST_NODE_GENERATED}

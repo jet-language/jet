@@ -57,7 +57,7 @@ jet_cli_script_dependency_fetch: fn(file: String, source: String, color: Bool, j
     }
     if inline == .Val(_) -> return None
     program: jet_cli_parsed_program(source) ?? return None
-    missing := false
+    ^missing: false
     batteries: jet_cli_batteries_dir(entry_path)
     loop dep in pkg_inline_deps_collect(program) {
         if !pkg_inline_deps_valid_package_name(dep.name) || pkg_inline_deps_numeric_version(dep.selector) == None {
@@ -137,7 +137,7 @@ jet_cli_script_dependency_roots: fn(roots: ^[JetDriverAuthorizedSourceRoot], ent
             return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidSelector, color))
         }
         local_root: cli_files.join(script_dir, ".jet/inline-deps")
-        authority := if jet_cli_script_dependency_authority(local_root, dep.name) == {
+        ^authority: if jet_cli_script_dependency_authority(local_root, dep.name) == {
             .Val(held) -> Val(held)
             .None -> None
             .Err(error) -> {
@@ -165,14 +165,14 @@ jet_cli_script_dependency_roots: fn(roots: ^[JetDriverAuthorizedSourceRoot], ent
             return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "source root changed while held"}), color))
         }
         root_identity: jet_cli_identity_key("directory", stat)
-        found := false
+        ^found: false
         loop root in roots {
             if root.identity == root_identity -> found = true
         }
         if !found {
-            files := [JetDriverAuthorizedSourceFile]{}
-            directories := [AppAuthorizedDirectory]{}
-            budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
+            ^files: [JetDriverAuthorizedSourceFile]{}
+            ^directories: [AppAuthorizedDirectory]{}
+            ^budget: JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
             if jet_cli_walk_sources(canonical, "", 0, files, directories, true, budget) == .Val(problem) {
                 return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: problem}), color))
             }

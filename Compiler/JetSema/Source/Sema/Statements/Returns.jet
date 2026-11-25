@@ -32,8 +32,8 @@ sema_stmt_return_required_type: fn(return_type: Type?) -> Type Never! {
 }
 
 sema_stmt_return_success_type: fn(return_type: Type?) -> Type Never! {
-    required := sema_stmt_return_required_type(return_type)
-    normalized := sema_expr_unwrap_tag(required)
+    ^required: sema_stmt_return_required_type(return_type)
+    ^normalized: sema_expr_unwrap_tag(required)
     if normalized == {
         .Result(ok, _) -> return ok
         .Option(value) -> return value
@@ -42,7 +42,7 @@ sema_stmt_return_success_type: fn(return_type: Type?) -> Type Never! {
 }
 
 sema_stmt_return_is_carrier: fn(return_type: Type?) -> Bool Never! {
-    normalized := sema_expr_unwrap_tag(sema_stmt_return_required_type(return_type))
+    ^normalized: sema_expr_unwrap_tag(sema_stmt_return_required_type(return_type))
     if normalized == {
         .Result(_, _) | .Option(_) -> return true
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
@@ -84,8 +84,8 @@ sema_stmt_return_known_type: fn(value: Expr, environment: SemaScopeEnvironment, 
 }
 
 sema_stmt_return_types_are_carriers: fn(actual: Type, required: Type) -> Bool Never! {
-    normalized_actual := sema_expr_unwrap_tag(actual)
-    normalized_required := sema_expr_unwrap_tag(required)
+    ^normalized_actual: sema_expr_unwrap_tag(actual)
+    ^normalized_required: sema_expr_unwrap_tag(required)
     if normalized_required == {
         .Result(_, _) -> {
             if normalized_actual == {
@@ -106,8 +106,8 @@ sema_stmt_return_types_are_carriers: fn(actual: Type, required: Type) -> Bool Ne
 
 sema_stmt_return_expr_is_carrier: fn(value: Expr, return_type: Type?, check: SemaBodyCheck) -> Bool {
     if !sema_stmt_return_is_carrier(return_type) -> return false
-    required := sema_stmt_return_required_type(return_type)
-    normalized := sema_expr_unwrap_tag(required)
+    ^required: sema_stmt_return_required_type(return_type)
+    ^normalized: sema_expr_unwrap_tag(required)
     if value == {
         .Paren(inner, _, _) | .Tainted(inner, _, _, _) | .Copy(inner, _, _) -> return sema_stmt_return_expr_is_carrier(inner, return_type, check)
         // A value `if` is checked against the whole return type. A `T?` slot
@@ -287,14 +287,14 @@ sema_stmt_check_return_value: fn(value: Expr, return_type: Type?, check: ^SemaBo
 // one a `defer close` takes at scope exit) closes after the call returns, so
 // the call keeps its frame; name each one.
 sema_stmt_lint_blocked_tail_call: fn(span: Span, check: ^SemaBodyCheck) Never! {
-    frames := [Int]{}
-    frame := check.scopes.current
+    ^frames: [Int]{}
+    ^frame: check.scopes.current
     loop frame > 0 && frame < check.scopes.frames.len() {
         frames.push(frame)
         if check.scopes.frames[frame].owner.starts_with("lambda@") -> break
         frame = check.scopes.frames[frame].parent
     }
-    named := [SymbolID]{}
+    ^named: [SymbolID]{}
     loop binding in check.scopes.bindings {
         if !frames.contains(binding.frame) || named.contains(binding.symbol.id) || binding.symbol.id == check.state.close_receiver_id {
             next
@@ -303,8 +303,8 @@ sema_stmt_lint_blocked_tail_call: fn(span: Span, check: ^SemaBodyCheck) Never! {
         if !owned -> next
         if binding.symbol.ty == .Val(ty) {
             if !sema_ownership_type_owns_close(ty, check) -> next
-            deferred := false
-            moved := false
+            ^deferred: false
+            ^moved: false
             loop entry in check.state.moved {
                 if entry.place.root_id != binding.symbol.id || entry.place.projections.len() != 0 {
                     next
@@ -343,8 +343,8 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, check: ^Sema
             declared: return_type ?? return None
             success: if declared == .Result(ok, _) -> ok else -> declared
             access: sema_stmt_view_access(success) ?? AccessConvention.Read
-            provenance := check.context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
-            _ := sema_ownership_record_view_returns(check.state, [SemaOwnershipPlace]{}, access, [String]{}, check.context.return_view_receiver_key, check.context.return_view_parameter_keys, check.scopes, provenance, expr_span(value), check.diagnostics)
+            ^provenance: check.context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+            ^_: sema_ownership_record_view_returns(check.state, [SemaOwnershipPlace]{}, access, [String]{}, check.context.return_view_receiver_key, check.context.return_view_parameter_keys, check.scopes, provenance, expr_span(value), check.diagnostics)
             check.context.return_view_provenance = Val(provenance)
         }
         return None
@@ -372,7 +372,7 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, check: ^Sema
     // lifted into the success rail like any plain success value, so the payload
     // never materializes the view.
     if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_return_type_is_result(return_type) {
-        payload := Expr?{None}
+        ^payload: Expr?{None}
         // copy: `ok_value` is a payload of read parameter `value`, which keeps the original; the local `payload` owns this one
         if value == .Ok(ok_value, _, _) -> payload = Val(ok_value.copy())
         if value == .Call(ok_call, _) {
@@ -403,14 +403,14 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, check: ^Sema
     if return_type != None && sema_contains_expiring_secret_loan(checked.ty) {
         check.diagnostics.push(sema_error("E0201", expr_span(value), "an ExpiringSecret loan cannot be returned", "the callback parameter is valid only while `.with` is running", "return a non-secret result computed from the loan"))
     }
-    value_is_ident := if value == {
+    ^value_is_ident: if value == {
         .Ident(_, _, _) -> true
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
     // Classify the value, not the enclosing Result/Option rail. The failure
     // solver also wraps an infallible view return in `View<str> Never!`.
     returned_success: sema_stmt_return_success_type(Val(checked.ty))
-    string_view_return := sema_stmt_string_view_type(returned_success) && (value_is_ident || sema_string_view_call_sources(value, check.scopes, check.state).len() > 0)
+    ^string_view_return: sema_stmt_string_view_type(returned_success) && (value_is_ident || sema_string_view_call_sources(value, check.scopes, check.state).len() > 0)
     materialized_string_view: sema_string_view_owning_read(value, returned_success, check.scopes)
     // An owning materialization returns new storage, not the source window's
     // provenance. A view return must instead prove its original owner. An
@@ -421,8 +421,8 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, check: ^Sema
     // one-value window over that map value (sema_expr_check_ident), bare or
     // lifted into the success rail; it proves its owner as the window it is.
     one_value_window: sema_stmt_is_one_value_window(checked)
-    recorded_value := value
-    recorded_ty := checked.ty
+    ^recorded_value: value
+    ^recorded_ty: checked.ty
     if sema_stmt_return_success_is_view(return_type) && checked.ty == .Result(ok_ty, _) {
         if value == .Ok(ok_value, _, _) {
             recorded_value = ok_value
@@ -433,14 +433,14 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, check: ^Sema
             if sema_stmt_view_access(known) != None -> recorded_ty = ok_ty
         }
     }
-    failure_exit := false
+    ^failure_exit: false
     if sema_stmt_return_success_is_view(return_type) {
         if value == .Err(_, _, _) -> failure_exit = true
         if value == .Call(err_call, _) {
             if err_call.name == "Err" && err_call.args.len() == 1 -> failure_exit = true
         }
     }
-    view_valid := materialized_string_view || failure_exit || if string_view_return -> sema_string_view_record_return(value, check) else -> sema_stmt_record_return_views(recorded_value, recorded_ty, check.scopes, check.state, check.context, check.diagnostics)
+    ^view_valid: materialized_string_view || failure_exit || if string_view_return -> sema_string_view_record_return(value, check) else -> sema_stmt_record_return_views(recorded_value, recorded_ty, check.scopes, check.state, check.context, check.diagnostics)
     // A named `View<T>` boundary reads every bare place through a window, so
     // only other returns are audited.
     if return_type != None && !sema_stmt_return_is_view_boundary(return_type) {
@@ -462,15 +462,15 @@ sema_stmt_never_contract_returns_err: fn(value: Expr, returned: Expr, check: ^Se
         return sema_stmt_never_contract_returns_err(inner, returned, check)
     }
     contract: check.scopes.return_type ?? return false
-    denied := false
+    ^denied: false
     // A success slot that holds the default error (`-> Err Never!`, `Err?`)
     // takes `Err(…)` as its value, not as a failure.
     if sema_expr_unwrap_tag(contract) == .Result(success, error) {
         denied = sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) && sema_expr_expected_assignable(success, Type.Named{name: "Err"}, check.environment.*, check.program.*) != (Val(true))
     }
     if !denied -> return false
-    found := false
-    failure := ""
+    ^found: false
+    ^failure: ""
     if value == .Err(payload, _, _) {
         found = true
         failure = sema_stmt_denied_err_failure(payload, check)
@@ -502,7 +502,7 @@ sema_stmt_never_contract_returns_err: fn(value: Expr, returned: Expr, check: ^Se
 // else the payload's error type; empty when the payload's type needs the
 // contract to infer (`Err(.Empty)`).
 sema_stmt_denied_err_failure: fn(payload: Expr, check: ^SemaBodyCheck) -> String {
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_diagnostics: [Diagnostic]{}
     probed: sema_probe_expression(payload, None, check, probe_diagnostics) ?? return ""
     if sema_expr_unwrap_tag(probed.ty) == Type.String -> return "Err"
     sema_failure_conversion_leaf(probed.ty)
@@ -593,7 +593,7 @@ sema_stmt_value_return_mismatch: fn(value: Expr, return_type: Type?, diagnostic_
     value_span: expr_span(value)
     mismatch_index: sema_value_mismatch_index(check.diagnostics, diagnostic_start, value_span) ?? return
     // The value's own type, inferred without the return type as a target.
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_diagnostics: [Diagnostic]{}
     offered: sema_probe_expression(value, None, check, probe_diagnostics) ?? return
     check.diagnostics[mismatch_index] = sema_return_value_mismatch(sema_stmt_return_owner(check.context), sema_stmt_return_required_type(return_type), check.context.return_alias, offered.ty, value_span)
 }
@@ -623,7 +623,7 @@ sema_stmt_return_probed_carrier: fn(value: Expr, return_type: Type?, check: ^Sem
     } else if !sema_stmt_return_probe_shape(value, sema_expr_unwrap_tag(required) == .Option(_)) {
         return false
     }
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_diagnostics: [Diagnostic]{}
     probed: sema_probe_expression(value, None, check, probe_diagnostics) ?? return false
     sema_stmt_return_types_are_carriers(probed.ty, required)
 }
@@ -649,7 +649,7 @@ sema_stmt_return_probe_shape: fn(value: Expr, optional_slot: Bool) -> Bool Never
 }
 
 sema_stmt_check_return_value_typed: fn(value: Expr, return_type: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    required := sema_stmt_return_required_type(return_type)
+    ^required: sema_stmt_return_required_type(return_type)
     if sema_stmt_return_if_mixes_carrier(value, return_type, check) {
         lifted: sema_stmt_return_lift_if_arms(value, return_type, check)
         table: sema_check_expression(lifted, Val(required), check) ?? return None
@@ -671,7 +671,7 @@ sema_stmt_check_return_value_typed: fn(value: Expr, return_type: Type?, check: ^
         return sema_stmt_check_return_payload(value, required, widened_call, check)
     }
     payload: sema_stmt_check_return_payload(value, success, widened_call, check) ?? return None
-    normalized := sema_expr_unwrap_tag(required)
+    ^normalized: sema_expr_unwrap_tag(required)
     if normalized == {
         .Result(_, _) -> return Val(sema_tree_node(required, TExprKind.Ok{value: payload}, expr_span(value)))
         .Option(_) -> return Val(sema_tree_node(required, TExprKind.Present{value: payload}, expr_span(value)))
@@ -685,9 +685,9 @@ sema_stmt_check_return_value_typed: fn(value: Expr, return_type: Type?, check: ^
 // the slot as the call's inference target. The call's own success type.
 sema_stmt_return_call_widening: fn(value: Expr, success: Type, check: ^SemaBodyCheck) -> Type? {
     if !sema_expr_is_numeric(success) || !sema_stmt_return_call_shape(value) -> return None
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_diagnostics: [Diagnostic]{}
     probe: sema_probe_expression(value, None, check, probe_diagnostics) ?? return None
-    own := probe.ty
+    ^own: probe.ty
     unwrapped: sema_expr_unwrap_tag(probe.ty)
     if unwrapped == .Result(ok, _) -> own = ok
     if !sema_expr_is_numeric(own) || type_identity_equal(own, success) -> return None
@@ -703,7 +703,7 @@ sema_stmt_return_call_widening: fn(value: Expr, success: Type, check: ^SemaBodyC
 // widened call (`sema_stmt_return_call_widening`) is checked on its own success
 // type.
 sema_stmt_check_return_payload: fn(value: Expr, success: Type, call_type: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    known := sema_stmt_return_numeric_source(value, check)
+    ^known: sema_stmt_return_numeric_source(value, check)
     // copy: `call_type` is the caller's read parameter, which keeps its value
     if call_type == .Val(own) -> known = Val(own.copy())
     if known == .Val(source) && sema_expr_is_numeric(success) && !type_identity_equal(source, success) && sema_expr_numeric_widening_to(source, success) != None {
@@ -759,7 +759,7 @@ sema_stmt_return_numeric_source: fn(value: Expr, check: SemaBodyCheck) -> Type? 
 
 sema_stmt_return_allows_empty: fn(return_type: Type?) -> Bool Never! {
     if return_type == None -> return true
-    normalized := sema_expr_unwrap_tag(sema_stmt_return_required_type(return_type))
+    ^normalized: sema_expr_unwrap_tag(sema_stmt_return_required_type(return_type))
     if normalized == {
         .Option(_) -> return false
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
@@ -810,7 +810,7 @@ sema_stmt_type_is_fallible: fn(ty: Type) -> Bool Never! {
 // A propagated call or method call: the checked form of a fallible call whose
 // failure propagates, explicitly (`?`) or implicitly.
 sema_stmt_is_propagated_call: fn(init: TExpr) -> Bool Never! {
-    value := init
+    ^value: init
     if init.kind == {
         .Try(inner, _, _) -> value = inner
         .TryWithContext(inner, _, _, _, _, _) -> value = inner
@@ -857,7 +857,7 @@ sema_stmt_discard_args_effectful: fn(args: [TCallArg]) -> Bool Never! {
 // fallback` tail is reported from its value's span, so a method call points
 // at its method, as a bare one does.
 sema_stmt_lost_tail_diagnostic: fn(function: String, value_type: String, tail: Expr) -> Diagnostic {
-    span := expr_span(tail)
+    ^span: expr_span(tail)
     if tail == .OrFallback(value, _, _, _, _) {
         span = Span{start: expr_span(value).start, end: span.end}
     }
@@ -876,7 +876,7 @@ sema_stmt_check_stored_lambda_result: fn(binding: Binding, init: TExpr, diagnost
             return
         }
         value_type: type_name(success)
-        tail := Expr?{None}
+        ^tail: Expr?{None}
         if lambda.body == {
             .Expr(value) -> { tail = Val(value) }
             .Block(statements) -> {
@@ -904,7 +904,7 @@ SemaStmtDiscardedCall: struct {
 }
 
 sema_stmt_discarded_call: fn(checked: TExpr) -> SemaStmtDiscardedCall? Never! {
-    inner := checked
+    ^inner: checked
     if checked.kind == {
         .Try(value, _, _) -> inner = value
         .TryWithContext(value, _, _, _, _, _) -> inner = value
@@ -937,7 +937,7 @@ sema_stmt_mark_discarded_result: fn(check: ^SemaBodyCheck, checked: TExpr, fact_
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
     }
     wanted: callee ?? return
-    index := check.context.call_facts.len() - 1
+    ^index: check.context.call_facts.len() - 1
     loop index >= fact_start {
         if check.context.call_facts[index].callee == .Val(fact_callee) {
             if fact_callee == wanted {
@@ -960,13 +960,13 @@ sema_stmt_mark_discarded_result: fn(check: ^SemaBodyCheck, checked: TExpr, fact_
 // closing `None` of a marker's `check` rule after an unconditional `reject`
 // is the rule's `CompilerRejection?`.
 sema_stmt_check_dead_value_tail: fn(tail: Expr, return_type: Type?, check: ^SemaBodyCheck) -> Bool {
-    expected := Type?{None}
-    candidates := [Type?]{return_type}
+    ^expected: Type?{None}
+    ^candidates: [Type?]{return_type}
     if sema_stmt_return_is_carrier(return_type) {
         candidates.push(Val(sema_stmt_return_success_type(return_type)))
     }
     loop candidate in candidates {
-        probe_diagnostics := [Diagnostic]{}
+        ^probe_diagnostics: [Diagnostic]{}
         probed: sema_probe_expression(tail, candidate, check, probe_diagnostics)
         if probed != None && !sema_has_error_since(probe_diagnostics, 0) {
             expected = candidate

@@ -7,7 +7,7 @@
 LIMB: 1000000000
 
 number: fn(top: Int, fill: Int, length: Int, negative: Bool) -> Int {
-    value := top
+    ^value: top
     loop i in 1..<length {
         value = value * LIMB + (if i % 3 == 0 -> 0 else -> (fill + i * 7919) % LIMB)
     }
@@ -17,7 +17,7 @@ number: fn(top: Int, fill: Int, length: Int, negative: Bool) -> Int {
 run: fn() {
     tops: [Int]{1, 2, 999999999, 123456789}
     fills: [Int]{0, 999999999}
-    values := [Int]{3, -7, 4611686018427387903, -4611686018427387904}
+    ^values: [Int]{3, -7, 4611686018427387903, -4611686018427387904}
     loop length in 1..<9 {
         loop top in tops {
             loop fill in fills {
@@ -25,9 +25,9 @@ run: fn() {
             }
         }
     }
-    checked := 0
-    wrong := 0
-    digest := 0
+    ^checked: 0
+    ^wrong: 0
+    ^digest: 0
     loop a in values {
         loop b in values {
             p: a * b
@@ -45,7 +45,7 @@ run: fn() {
     print(number(999999999, 999999999, 8, false) * number(999999999, 999999999, 5, true))
     print(number(1, 0, 7, false) * 999999999)
     print(-1000000000 * number(2, 0, 4, false))
-    two := 1
+    ^two: 1
     #Allow(Jet.HiddenCopyInLoop, "doubling past the rail on purpose") loop _ in 0..<1074 -> two *= 2
     print(two)
 }

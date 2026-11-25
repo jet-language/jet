@@ -45,7 +45,7 @@ authority_is_deny_only: fn(right: String) -> Bool Never! {
 // The roots an application may grant: every root Prelude/Effects.jet declares
 // but the deny-only ones, in vocabulary order.
 authority_grantable_roots: fn() -> [String] Never! {
-    roots := [String]{}
+    ^roots: [String]{}
     loop root in EFFECT_VOCABULARY_ROOTS {
         if !authority_is_deny_only(root) -> roots.push(root)
     }
@@ -84,9 +84,9 @@ AuthorityVerdict: enum {
 
 // A rights set: sorted with duplicates removed.
 authority_holds: fn(rights: [String]) -> [String] Never! {
-    sorted := rights
+    ^sorted: rights
     sorted.sort()
-    out := [String]{}
+    ^out: [String]{}
     loop right in sorted {
         if out.contains(right) -> next
         out.push(right)
@@ -104,7 +104,7 @@ authority_root: fn(right: String) -> String Never! {
 
 // ASCII-only lowercase, for the case-insensitive root table.
 authority_ascii_lower: fn(value: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in value.bytes() {
         code: Int{byte}
         out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
@@ -131,7 +131,7 @@ authority_parse_right: fn(right: String) -> String? Never! {
     split: effect_scope_split(trimmed)
     root: authority_parse_root(split.base) ?? return None
     if root == AUTHORITY_PANIC_ROOT && trimmed != AUTHORITY_PANIC_ROOT -> return None
-    canonical := root.copy()
+    ^canonical: root.copy()
     raw: split.base.bytes()
     loop index in 0..<raw.len() {
         if (Int{raw[index]}) == 46 {
@@ -212,10 +212,10 @@ authority_expert_answer: fn(held: [String], denied: Bool, right: String) -> Auth
 authority_expert_left_out: fn(bound: String) -> [String] Never! {
     if authority_expert(bound) -> return [String]{}
     canonical: effect_scope_base(authority_parse_right(bound) ?? bound.trim())
-    out := [String]{}
+    ^out: [String]{}
     loop row in EFFECT_VOCABULARY_ROWS {
         if !row.expert || !row.name.starts_with("{canonical}.") -> next
-        topmost := true
+        ^topmost: true
         loop above in out {
             if row.name.starts_with("{above}.") -> topmost = false
         }
@@ -226,7 +226,7 @@ authority_expert_left_out: fn(bound: String) -> [String] Never! {
 
 // Rights in `used` not covered by any held right.
 authority_uncovered: fn(used: [String], held: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop right in used {
         if !authority_covers_any(held, right) -> out.push(right.copy())
     }
@@ -252,7 +252,7 @@ CanonicalAuthority: struct {
     // Unknown spellings are retained for the caller's diagnostic; policy
     // checks still fail closed because no known hold covers them.
     from_rights: fn(rights: [String]) -> CanonicalAuthority Never! {
-        holds := [String]{}
+        ^holds: [String]{}
         loop right in rights -> holds.push(authority_parse_right(right) ?? right)
         CanonicalAuthority{holds: authority_holds(holds)}
     }
@@ -323,7 +323,7 @@ authority_effect_action: fn(right: String) -> String Never! {
 // The canonical spellings of `names`, dropping unknown ones; a package
 // effect root (authority_package_effect) keeps its written spelling.
 authority_parse_rights: fn(names: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop name in names {
         if authority_package_effect(name) {
             out.push(name.trim())

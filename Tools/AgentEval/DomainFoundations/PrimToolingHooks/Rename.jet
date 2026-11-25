@@ -24,8 +24,8 @@ identifier_spans: fn(report: String) -> [Span] Err! {
     compiler: facts.get("compiler") ?? return Err("lex report has no compiler facts")
     value: compiler.get("value") ?? return Err("lex report has no value")
     tokens: value.get("tokens") ?? return Err("lex report has no tokens")
-    spans := [Span]{}
-    index := 0
+    ^spans: [Span]{}
+    ^index: 0
     loop {
         token: tokens.at(index) ?? break
         index += 1
@@ -42,10 +42,10 @@ identifier_spans: fn(report: String) -> [Span] Err! {
 
 occurrences: fn(bytes: [U8], needle: String) -> Int Never! {
     pattern: needle.bytes()
-    count := 0
-    at := 0
+    ^count: 0
+    ^at: 0
     loop at + pattern.len() <= bytes.len() {
-        matched := true
+        ^matched: true
         loop index in 0..<pattern.len() {
             if bytes[at + index] != pattern[index] {
                 matched = false
@@ -69,8 +69,8 @@ rename_probe: fn() -[Env, Exec, FS, Time.Wait]> String Err! {
     lexed: process.cmd([String]{jet.copy(), "inspect", "compiler", "lex", source_path.copy()}).cwd(root).run() ?? return Err("cannot start {jet}: {err}")
     if lexed.code != 0 -> return Err(lexed.errors)
     spans: identifier_spans(lexed.output) ?? return Err(err)
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop span in spans {
         if span.start < at || span.end > raw.len() || span.end < span.start {
             return Err("token span {span.start}..{span.end} is outside the source")

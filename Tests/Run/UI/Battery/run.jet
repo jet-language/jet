@@ -23,17 +23,17 @@ run: fn() {
     recovery_path: "{root}/recovery.txt"
     seed: "Meeting notes — café\nBring résumé and naïve examples.\nالعربية हिन्दी é 👨‍👩‍👦\n"
 
-    state := battery.new_editor("{seed}", "Meeting")
+    ^state: battery.new_editor("{seed}", "Meeting")
     fs.write(note_path, battery.persisted_body(state)) ?? panic("write Unicode note")
     fs.write(session_path, battery.persisted_session(state)) ?? panic("write session settings")
     fs.write(recovery_path, battery.persisted_body(state)) ?? panic("write recovery snapshot")
 
-    draft := reactive.signal(battery.body_of(state))
-    selected := reactive.signal(0)
-    theme := reactive.signal(battery.theme_of(state))
-    settings_open := reactive.signal(battery.settings_open_of(state))
-    saved := reactive.signal(false)
-    save_requested := reactive.signal(false)
+    ^draft: reactive.signal(battery.body_of(state))
+    ^selected: reactive.signal(0)
+    ^theme: reactive.signal(battery.theme_of(state))
+    ^settings_open: reactive.signal(battery.settings_open_of(state))
+    ^saved: reactive.signal(false)
+    ^save_requested: reactive.signal(false)
     status: reactive.derived(fn() { if saved.get() -> "saved" else -> "dirty" })
 
     tui_backend: ui.tui_backend()
@@ -85,7 +85,7 @@ run: fn() {
     _start: battery.selection_start(battery.body_of(state), normalized_selection)
     _end: battery.selection_end(battery.body_of(state), normalized_selection)
 
-    composing := battery.start_composition(state)
+    ^composing: battery.start_composition(state)
     composing = battery.update_composition(composing, "preview")
     _canceled_composition: battery.cancel_composition(composing)
 

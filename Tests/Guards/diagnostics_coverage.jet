@@ -79,7 +79,7 @@ dc_walk: fn(directory: String, out: ^[String]) {
 // under `crates/`). Like the Rust gate, only the implementation language is
 // scanned, not the shipped JavaScript or C runtime support.
 dc_source_paths: fn() -> [String] {
-    paths := [String]{}
+    ^paths: [String]{}
     loop root in ["Compiler", "Jetpack", "Core"] -> dc_walk(root, paths)
     paths.sort()
     paths
@@ -103,7 +103,7 @@ dc_is_code: fn(code: String) -> Bool {
 // generated census classifies them (Tools/Agent/DiagnosticCensus.jet scans the
 // sources; LaneCheck refuses a stale census).
 dc_emitted_codes: fn() -> [String] {
-    codes := [String]{}
+    ^codes: [String]{}
     loop line in dc_read("Tests/diagnostics_census.tsv").split("\n") {
         if line == "" || line.starts_with("#") -> next
         columns: line.split("\t").to_list()
@@ -123,10 +123,10 @@ DcRow: struct {
 // Compiler/Prelude/Diagnostics.jet whose `impl Diagnostic` block names its
 // `code` and, unless it is active, its `status` is the row named `Jet.X`.
 dc_registered_rows: fn() -> [DcRow] {
-    rows := [DcRow]{}
-    name := ""
-    code := ""
-    status := ""
+    ^rows: [DcRow]{}
+    ^name: ""
+    ^code: ""
+    ^status: ""
     loop line in dc_read("Compiler/Prelude/Diagnostics.jet").split("\n") {
         if !line.starts_with(" ") && line.ends_with(": struct {{") {
             name = "Jet.{dc_slice(line, 0, line.count_bytes() - 10)}"
@@ -158,7 +158,7 @@ dc_contains_any: fn(text: String, needles: [String]) -> Bool {
 
 // every user-facing rendered snapshot
 dc_snapshot_texts: fn() -> [{path: String, text: String}] {
-    out := [{path: String, text: String}]{}
+    ^out: [{path: String, text: String}]{}
     loop directory in
         ["Tests/UI", "Tests/UILint", "Tests/Cases/UILintStyle", "Tests/Fixtures/JetpackDiagnostics", "Tests/Fixtures/ModuleEvalDiagnostics"] {
         if !dc_files.exists(directory) -> next
@@ -185,7 +185,7 @@ dc_snapshot_texts: fn() -> [{path: String, text: String}] {
 // row's name (`Jet.UnknownName`) or a code no row names; ID runs to the next
 // `: ` and holds no space.
 dc_report_codes: fn(text: String) -> [String] {
-    codes := [String]{}
+    ^codes: [String]{}
     loop line in text.split("\n") {
         loop prefix in ["Error: ", "Warning: ", "Stop: ", "Lint: "] {
             if !line.starts_with(prefix) -> next
@@ -206,7 +206,7 @@ dc_report_codes: fn(text: String) -> [String] {
 #Test("every_emitted_code_has_typed_row") {
     guards_enter_root()
     registered: dc_registered_codes()
-    missing := [String]{}
+    ^missing: [String]{}
     loop code in dc_emitted_codes() {
         if !dc_has(registered, code) -> missing.push(code)
     }
@@ -220,21 +220,21 @@ dc_report_codes: fn(text: String) -> [String] {
 // (its row was retired, reserved or deleted) is a missing baseline entry; an
 // unimplemented row the list does not name is unexpected. "" when they agree.
 dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [String]) -> String {
-    now_emitted := [String]{}
-    missing := [String]{}
+    ^now_emitted: [String]{}
+    ^missing: [String]{}
     loop code in listed {
         if dc_has(emitted, code) -> dc_add(now_emitted, code) else if !dc_has(unimplemented, code) {
             dc_add(missing, code)
         }
     }
-    unexpected := [String]{}
+    ^unexpected: [String]{}
     loop code in unimplemented {
         if !dc_has(listed, code) -> dc_add(unexpected, code)
     }
     now_emitted.sort()
     missing.sort()
     unexpected.sort()
-    failures := [String]{}
+    ^failures: [String]{}
     if now_emitted.len() > 0 {
         failures.push("DC_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  {now_emitted.join("\n  ")}")
     }
@@ -260,13 +260,13 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
     rows: dc_registered_rows()
     registered: rows.map(fn(row) { row.code })
     assert(dc_has(registered, "E0033"), "E0033 is a retired reservation and must remain in the typed rows")
-    e0745 := ""
+    ^e0745: ""
     loop row in rows {
         if row.code == "E0745" -> e0745 = row.status
     }
     assert(e0745 == "retired", "E0745 is a retired reservation and must remain in the typed rows")
     emitted: dc_emitted_codes()
-    unimplemented := [String]{}
+    ^unimplemented: [String]{}
     loop row in rows {
         if row.status != "reserved" && row.status != "retired" && !dc_has(emitted, row.code) {
             dc_add(unimplemented, row.code)
@@ -280,7 +280,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 #Test("coverage_baseline_rejects_removal_addition_and_substitution") {
     guards_enter_root()
     baseline: [String]{"E2101", "E3001"}
-    emitted := [String]{}
+    ^emitted: [String]{}
     assert_eq(dc_baseline_failure(baseline, ["E2101"], emitted), "DC_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001")
     assert_eq(dc_baseline_failure(["E2101"], ["E2101", "E3001"], emitted), "Codes registered in the typed rows but never emitted; stage each in DC_SPEC_AHEAD_OF_IMPL with its card:\n  E3001")
     assert_eq(dc_baseline_failure(baseline, ["E2101", "E4000"], emitted), "DC_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001\nCodes registered in the typed rows but never emitted; stage each in DC_SPEC_AHEAD_OF_IMPL with its card:\n  E4000")
@@ -292,7 +292,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 // diagnostics, neither at a raise site nor as a rendered report opener.
 #Test("i2_rustc_codes_do_not_leak_as_jet_diagnostics") {
     guards_enter_root()
-    failures := [String]{}
+    ^failures: [String]{}
     loop path in dc_source_paths() {
         text: dc_read(path)
         if !dc_contains_any(text, DC_RUSTC_CODES) -> next
@@ -319,7 +319,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 // rejection by design.
 #Test("diagnostic_snapshots_do_not_leak_runtime_or_backend_voice") {
     guards_enter_root()
-    failures := [String]{}
+    ^failures: [String]{}
     loop snapshot in dc_snapshot_texts() {
         loop needle in
             ["thread 'main' panicked", "panicked at", "stack backtrace:", "target/debug", ".rs:", "rustc rejected generated code"] {
@@ -336,7 +336,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 // raw byte offsets, and the lexer's synthetic terminator never render.
 #Test("diagnostic_snapshots_never_render_placeholders_offsets_or_synthetic_terminators") {
     guards_enter_root()
-    failures := [String]{}
+    ^failures: [String]{}
     loop snapshot in dc_snapshot_texts() {
         loop needle in ["the earlier consuming operation", "source bytes", "found `;`"] {
             if snapshot.text.contains(needle) {
@@ -350,7 +350,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 // `panic("E` followed by a digit: a raw panic carrying a Jet error code, not a
 // word such as `panic("EOF")`.
 dc_raw_code_panic: fn(line: String) -> Bool {
-    rest := line
+    ^rest: line
     loop {
         at: rest.index("panic(\"E") ?? return false
         after: dc_slice(rest, at + 8, rest.count_bytes())
@@ -365,12 +365,12 @@ dc_raw_code_panic: fn(line: String) -> Bool {
 // The Rust gate scanned the Rust Prelude; its replacement is Jet source.
 #Test("runtime_user_error_codes_use_jet_panic_voice") {
     guards_enter_root()
-    paths := [String]{}
+    ^paths: [String]{}
     dc_walk("Compiler/Prelude", paths)
     dc_walk("Compiler/JetRuntime", paths)
     dc_walk("Core", paths)
     assert(paths.len() > 10, "the runtime library sources must be readable")
-    failures := [String]{}
+    ^failures: [String]{}
     loop path in paths {
         text: dc_read(path)
         if !text.contains("panic(\"E") -> next
@@ -385,7 +385,7 @@ dc_raw_code_panic: fn(line: String) -> Bool {
 
 // Jet test fixture.
 dc_marker_literal_offenders: fn(sources: [{path: String, text: String}], names: [String]) -> [String] {
-    offenders := [String]{}
+    ^offenders: [String]{}
     loop source in sources {
         loop (index, line) in source.text.split("\n").to_list() {
             code: line.split("//").to_list()[0]
@@ -404,7 +404,7 @@ dc_marker_literal_offenders: fn(sources: [{path: String, text: String}], names: 
 
 // The active marker structs, read from the one marker declaration source.
 dc_marker_names: fn() -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop line in dc_read("Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet").split("\n") {
         if line.starts_with(" ") || !line.contains(": struct") -> next
         colon: line.index(": struct") ?? line.count_bytes()
@@ -420,13 +420,13 @@ dc_marker_names: fn() -> [String] {
 #Test("marker_name_literals_stay_in_the_registry") {
     guards_enter_root()
     names: dc_marker_names()
-    paths := [String]{}
+    ^paths: [String]{}
     loop directory in
         ["Compiler/JetLexer/Source", "Compiler/JetParser/Source", "Compiler/JetSema/Source"] {
         dc_walk(directory, paths)
     }
     assert(paths.len() > 10, "the compiler front-end sources must be readable")
-    sources := [{path: String, text: String}]{}
+    ^sources: [{path: String, text: String}]{}
     loop path in paths -> sources.push({path: path, text: dc_read(path)})
     assert_eq(dc_marker_literal_offenders(sources, names).join("\n"), "")
     seeded: dc_marker_literal_offenders([{path: String, text: String}]{{path: "synthetic.jet", text: "if marker_name == \"Inline\" {{}}"}}, ["Inline"])

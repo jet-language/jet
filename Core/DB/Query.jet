@@ -27,18 +27,18 @@ use {
 // all-row schema. Only WHERE, ORDER BY and LIMIT select typed rows here; a
 // projection or grouping changes the row shape.
 #Builtin.Role(.ListQuery) priv __query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
-    trees := [Dyn]{}
+    ^trees: [Dyn]{}
     loop row in rows -> trees.push(row.encode())
     spec: query_sql_spec(sql) ?? return Err(query_field_error("{err}"))
     core.db.sql.__validate_query_fields(spec, query_sql_fields(trees), "analytics query") ?? return Err(query_field_error("{err}"))
-    reshapes := spec.group_by.len() != 0 || spec.projection.len() != 1 || spec.projection[0] != sql_kernel.JetSQLSelectItem.Wildcard
+    ^reshapes: spec.group_by.len() != 0 || spec.projection.len() != 1 || spec.projection[0] != sql_kernel.JetSQLSelectItem.Wildcard
     loop item in spec.projection {
         if item == .Aggregate(_, _, _) -> reshapes = true
     }
     if reshapes {
         return Err(query_field_error("SQL projection/grouping changes the row shape; use the Dyn query result"))
     }
-    selected := [T]{}
+    ^selected: [T]{}
     loop index in query_sql_select(trees, spec) -> selected.push(rows[index].copy())
     Ok(core.data.query_make<T>([String]{"scan", "sql"}, false, DataLimits.safe(), fn() { Ok(selected.copy()) }))
 }
@@ -58,8 +58,8 @@ priv query_field_error: fn(message: String) -> [FieldError] Never! {
 // The checked carrier binds after parsing, so a value cannot become query
 // syntax; the kernel has one scalar WHERE slot.
 priv query_sql_spec: fn(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
-    spec := sql_kernel.parse_sql_query(sql.text) ?? return Err("{err}")
-    placeholder := false
+    ^spec: sql_kernel.parse_sql_query(sql.text) ?? return Err("{err}")
+    ^placeholder: false
     if spec.filter == .Val(filter) -> placeholder = filter.value == "?"
     if sql.values.len() == 0 {
         if placeholder -> return Err("analytics query WHERE binding is missing")
@@ -86,7 +86,7 @@ priv query_sql_spec: fn(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
 // The all-row schema's field names: every object key of every row, and `$`
 // for a row that is not an object.
 priv query_sql_fields: fn(trees: [Dyn]) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop tree in trees {
         if tree == .Object(_) {
             loop entry in encoding_stream.object_entries(tree) -> names.push(entry.key.copy())
@@ -116,7 +116,7 @@ priv query_sql_cell: fn(tree: Dyn, field: String) -> String? Never! {
 // WHERE keeps rows whose cell compares true, ORDER BY sorts the kept
 // positions, and LIMIT keeps a prefix.
 priv query_sql_select: fn(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] Never! {
-    selected := [Int]{}
+    ^selected: [Int]{}
     loop index in 0..<trees.len() {
         if spec.filter == .Val(filter) {
             cell: query_sql_cell(trees[index], filter.field) ?? next
@@ -125,16 +125,16 @@ priv query_sql_select: fn(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] N
         selected.push(index)
     }
     if spec.order == .Val(order) {
-        keys := [String]{}
+        ^keys: [String]{}
         loop index in selected -> keys.push(query_sql_cell(trees[index], order.field) ?? "")
-        ordered := [Int]{}
+        ^ordered: [Int]{}
         loop position in core.data.query_merge_order(keys, true, order.descending) {
             ordered.push(selected[position])
         }
         selected = ordered
     }
     if spec.limit == .Val(limit) {
-        kept := [Int]{}
+        ^kept: [Int]{}
         loop index in selected {
             if (checked(U64{kept.len()}) ?? U64{0}) >= limit -> break
             kept.push(index)

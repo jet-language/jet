@@ -20,7 +20,7 @@ Buffer: struct {
 }
 
 run: fn() {
-    buf := Buffer{data: "hello", size: 1}
+    ^buf: Buffer{data: "hello", size: 1}
     print(buf.peek())  // plain read
     buf.describe()  // plain self, read
     buf.append(" world")  // &self write
@@ -47,7 +47,7 @@ bump: fn(c: ^Counter, by: Int) { c.value += by }
 value_of: fn(c: Counter) -> Int { c.value }
 
 infer_capability_lesson: fn() {
-    c := Counter{value: 0}
+    ^c: Counter{value: 0}
     bump(c, 5)
     bump(c, 3)
     print(value_of(c))
@@ -62,7 +62,7 @@ Player: struct {
 hurt: fn(p: ^Player) { p.damage(5) }
 
 infer_receiver_lesson: fn() {
-    x := Player{hp: 100}
+    ^x: Player{hp: 100}
     hurt(x)
     print(x.hp)
 }

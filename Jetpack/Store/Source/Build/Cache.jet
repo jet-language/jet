@@ -148,9 +148,9 @@ ActionResultRecord: struct {
 // Inputs are hashed on parallel tasks (one per core) and checked in declared
 // order so errors stay deterministic.
 build_snapshot_declared_inputs: fn(base: String, action: HermeticBuildAction, *, bounded: Bool{true}) -[FS, Env]> [ActionInputCapture] BuildIOError! {
-    inputs := [ActionInputCapture]{}
-    failure := BuildIOError?{None}
-    total := 0
+    ^inputs: [ActionInputCapture]{}
+    ^failure: BuildIOError?{None}
+    ^total: 0
     file_limit: if bounded -> BUILD_MAX_ACTION_FILE_BYTES else -> BUILD_NO_BYTE_LIMIT
     task.group snapshots(limit: sys.cpu_count()) {
         reads: loop input in action.inputs -> task build_snapshot_input(base, input, file_limit)
@@ -208,7 +208,7 @@ build_owner_executable: fn(path: String) -[FS]> Bool BuildIOError! {
 // `.jet` and `.git` folders and what a `.gitignore` excludes are skipped.
 // The folder is bound into the work tree, so no byte is copied.
 build_snapshot_folders: fn(stamps: ^StampTable, base: String, action: HermeticBuildAction) -[FS, Env]> [ActionInputSnapshot] BuildIOError! {
-    snapshots := [ActionInputSnapshot]{}
+    ^snapshots: [ActionInputSnapshot]{}
     loop folder in action.folders {
         root: build_folder_source(base, folder) ?? return Err(err)
         if !files.is_dir(root) {
@@ -256,8 +256,8 @@ build_folder_skipped: fn(relative: String) -> Bool Never! {
 }
 
 build_capture_declared_outputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, key: String, outcome: ActionOutcome, status: ActionCacheStatus) -[FS, Env, Exec, Time, Rand]> ActionResultRecord BuildIOError! {
-    outputs := [ActionOutputRecord]{}
-    total := 0
+    ^outputs: [ActionOutputRecord]{}
+    ^total: 0
     loop output in action.outputs {
         path: build_resolve_under(base, output)
         bytes: build_secure_read_file(base, path, build_read_budget(total))
@@ -281,7 +281,7 @@ build_read_budget: fn(used: Int) -> Int Never! {
 // it is; when one holds bytes no build wrote (build_output_write), nothing is
 // restored and its path is returned.
 build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, record: ActionResultRecord) -[FS, Env, Exec, Time, Rand]> String? BuildIOError! {
-    matches := record.outputs.len() == action.outputs.len()
+    ^matches: record.outputs.len() == action.outputs.len()
     if matches {
         loop index in 0..<record.outputs.len() {
             if record.outputs[index].path != action.outputs[index] -> matches = false
@@ -290,9 +290,9 @@ build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, 
     if !matches {
         return Err(BuildIOError.new(.InvalidData, "cached output record does not exactly match action declarations"))
     }
-    writes := [BuildOutputWrite]{}
+    ^writes: [BuildOutputWrite]{}
     loop output in record.outputs {
-        write := BuildOutputWrite.Write
+        ^write: BuildOutputWrite.Write
         if build_kept_output(action, output.path) == .Val(kept) {
             write = build_output_write(base, kept, output.digest)
         }
@@ -363,7 +363,7 @@ build_relative_components: fn(base: String, path: String, escape: String) -> [St
         return Err(BuildIOError.new(.InvalidInput, escape))
     }
     relative: files.relative(path, base)
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in relative.split("/") {
         if part == "" || part == "." || part == ".." -> next
         parts.push(part)
@@ -391,7 +391,7 @@ build_stream_file_digest: fn(base: String, path: String, limit: Int, *, shown: S
     directory: build_held_parent(base, parts) ?? return Err(err)
     name: parts[parts.len() - 1]
     entry: build_regular_entry(directory, name, limit, shown: label) ?? return Err(err)
-    reader := files.open_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
+    ^reader: files.open_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
     info: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file {
         return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
@@ -402,8 +402,8 @@ build_stream_file_digest: fn(base: String, path: String, limit: Int, *, shown: S
     if limit >= 0 && info.size > limit {
         return Err(BuildIOError.new(.InvalidData, "cache entry `{label}` ({info.size} bytes) exceeds its byte limit ({limit} bytes)"))
     }
-    hasher := crypto.Hasher.new()
-    total := 0
+    ^hasher: crypto.Hasher.new()
+    ^total: 0
     loop {
         want: build_chunk_size(total, limit)
         if want <= 0 -> break
@@ -421,8 +421,8 @@ build_stream_file_digest: fn(base: String, path: String, limit: Int, *, shown: S
 
 // Stream-hash a host file `path` without holding its bytes in memory.
 build_stream_host_digest: fn(path: String) -[FS]> ContentDigest BuildIOError! {
-    reader := files.open(path) ?? return Err(BuildIOError.from(err))
-    hasher := crypto.Hasher.new()
+    ^reader: files.open(path) ?? return Err(BuildIOError.from(err))
+    ^hasher: crypto.Hasher.new()
     loop {
         chunk: reader.read_bytes(BUILD_READ_CHUNK_BYTES) ?? return Err(BuildIOError.from(err))
         if chunk.len() == 0 -> break
@@ -446,7 +446,7 @@ build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] B
     directory: build_held_parent(base, parts) ?? return Err(err)
     name: parts[parts.len() - 1]
     entry: build_regular_entry(directory, name, limit, shown: path) ?? return Err(err)
-    reader := files.open_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
+    ^reader: files.open_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
     info: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file {
         return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
@@ -457,7 +457,7 @@ build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] B
     if limit >= 0 && info.size > limit {
         return Err(BuildIOError.new(.InvalidData, "cache entry `{path}` ({info.size} bytes) exceeds its byte limit ({limit} bytes)"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop limit < 0 || bytes.len() <= limit {
         want: build_chunk_size(bytes.len(), limit)
         if want <= 0 -> break
@@ -474,7 +474,7 @@ build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] B
 // The held real directory holding the last of `parts` below `base`: `base`
 // and every parent component opened without following a link.
 build_held_parent: fn(base: String, parts: [String]) -[FS]> files.Directory BuildIOError! {
-    directory := files.open_directory(base) ?? return Err(BuildIOError.from(err))
+    ^directory: files.open_directory(base) ?? return Err(BuildIOError.from(err))
     loop index in 0..<parts.len() - 1 {
         directory = directory.open_directory(parts[index]) ?? return Err(BuildIOError.from(err))
     }
@@ -554,7 +554,7 @@ build_atomic_stream_copy: fn(work: String, from: String, base: String, path: Str
     source_name: source_parts[source_parts.len() - 1]
     label: if shown != "" -> shown else -> from
     entry: build_regular_entry(source_dir, source_name, limit, shown: label) ?? return Err(err)
-    reader := files.open_nonblocking(files.join(source_dir.path, source_name)) ?? return Err(BuildIOError.from(err))
+    ^reader: files.open_nonblocking(files.join(source_dir.path, source_name)) ?? return Err(BuildIOError.from(err))
     info: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file {
         return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
@@ -576,8 +576,8 @@ build_atomic_stream_copy: fn(work: String, from: String, base: String, path: Str
         temp_name: ".jet-restore-{build_hex_encode(random_bytes)}"
         if directory.create(temp_name, if_exists: .Refuse, mode: Val(if executable -> 0o755 else -> 0o600)) == {
             .Ok(created) -> {
-                writer := created
-                total := 0
+                ^writer: created
+                ^total: 0
                 loop {
                     want: build_chunk_size(total, limit)
                     if want <= 0 -> break
@@ -623,7 +623,7 @@ build_atomic_stream_copy: fn(work: String, from: String, base: String, path: Str
 // The held real directory holding the last of `parts` below `base`, every
 // parent walked without following a link and created (0755) when missing.
 build_output_parent: fn(base: String, parts: [String]) -[FS]> files.Directory BuildIOError! {
-    directory := files.open_directory(base) ?? return Err(BuildIOError.from(err))
+    ^directory: files.open_directory(base) ?? return Err(BuildIOError.from(err))
     loop index in 0..<parts.len() - 1 {
         part: parts[index]
         if directory.open_directory(part) == {
@@ -658,7 +658,7 @@ build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, execut
         temp_name: ".jet-restore-{build_hex_encode(random_bytes)}"
         if directory.create(temp_name, if_exists: .Refuse, mode: Val(if executable -> 0o755 else -> 0o600)) == {
             .Ok(created) -> {
-                writer := created
+                ^writer: created
                 writer.write_bytes(bytes) ?? return Err(BuildIOError.from(err))
                 writer.fsync() ?? return Err(BuildIOError.from(err))
                 close(writer)
@@ -680,7 +680,7 @@ build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, execut
 // Create a directory tree without ever following an existing link; `..` is
 // refused.
 build_ensure_real_directory: fn(path: String) -[FS]> BuildIOError! {
-    current := if path.starts_with("/") -> "/" else -> ""
+    ^current: if path.starts_with("/") -> "/" else -> ""
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -721,7 +721,7 @@ build_ensure_real_directory_step: fn(current: String, symlink: String, not_direc
 build_prepare_output_destination: fn(root: String, output: String) -[FS]> BuildIOError! {
     parent: files.dirname(output)
     parts: build_relative_components(root, if parent == "" -> root else -> parent, "build output parent escapes project root")
-    current := root
+    ^current: root
     loop part in parts {
         current = files.join(current, part)
         build_ensure_real_directory_step(current, "build output parent `{current}` is a symlink", "build output parent `{current}` is not a directory", "build output parent `{current}` is not a real directory")
@@ -736,7 +736,7 @@ build_prepare_output_destination: fn(root: String, output: String) -[FS]> BuildI
 
 build_hex_encode: fn(bytes: [U8]) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in bytes {
         value: Int{byte}
         out.push(digits[value >> 4])
@@ -748,8 +748,8 @@ build_hex_encode: fn(bytes: [U8]) -> String Never! {
 build_hex_decode: fn(value: String) -> [U8] BuildIOError! {
     raw: value.bytes()
     if raw.len() % 2 != 0 -> return Err(BuildIOError.new(.InvalidData, "hex field has odd length"))
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < raw.len() {
         high: build_hex_digit(raw[index]) ?? return Err(BuildIOError.new(.InvalidData, "hex field contains a non-hex digit"))
         low: build_hex_digit(raw[index + 1]) ?? return Err(BuildIOError.new(.InvalidData, "hex field contains a non-hex digit"))
@@ -814,7 +814,7 @@ build_parse_u64: fn(text: String) -> Int? Never! {
 }
 
 build_write_action_record: fn(store: BuildArtifactStoreHandle, key: String, record: ActionResultRecord) -[FS, Env, Exec, Time, Rand]> BuildIOError! {
-    text := "{record.key}\noutcome={build_encode_outcome(record.outcome)}\n"
+    ^text: "{record.key}\noutcome={build_encode_outcome(record.outcome)}\n"
     if record.failure_report == .Val(report) {
         wire: build_report_to_json(report)
         text = "{text}failure={build_hex_encode(wire.bytes())}\n"
@@ -843,9 +843,9 @@ build_read_action_record: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
     if lines.len() == 0 || lines[0] != key {
         return Err(BuildIOError.new(.InvalidData, "action record key does not match its cache path"))
     }
-    outcome := ActionOutcome?{None}
-    failure_report := DiagnosticBuildError?{None}
-    outputs := [ActionOutputRecord]{}
+    ^outcome: ActionOutcome?{None}
+    ^failure_report: DiagnosticBuildError?{None}
+    ^outputs: [ActionOutputRecord]{}
     loop index in 1..<lines.len() {
         line: lines[index]
         if line.starts_with("outcome=") {
@@ -892,7 +892,7 @@ build_read_action_record: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
 
 // Split on `\n`, drop one trailing empty line and a `\r` before each `\n`.
 build_record_lines: fn(text: String) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in text.split("\n") {
         raw: line.bytes()
         // A CR (13) before the LF belongs to the line ending.
@@ -900,7 +900,7 @@ build_record_lines: fn(text: String) -> [String] Never! {
             lines.push(String.from_bytes(raw.slice(0, raw.len() - 1)) ?? line)
         } else { lines.push(line) }
     }
-    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()
+    if lines.len() > 0 && lines[lines.len() - 1] == "" -> ^_: lines.pop()
     lines
 }
 
@@ -957,7 +957,7 @@ build_record_cache_event: fn(action: String, key: String, status: ActionCacheSta
     if parent != "" {
         files.create_dir_all(parent).drop("cache observation evidence is best-effort")
     }
-    writer := files.append(path, links: .Refuse) ?? return
+    ^writer: files.append(path, links: .Refuse) ?? return
     writer.write_bytes(payload.bytes()).drop("cache observation evidence is best-effort")
     writer.flush().drop("cache observation evidence is best-effort")
 }
@@ -980,12 +980,12 @@ build_report_tree: fn(report: DiagnosticBuildError) -> Dyn BuildIOError! {
         0 -> Dyn.Null
         1 -> build_report_tree(report.causes[0])
         else -> {
-            causes := [Dyn]{}
+            ^causes: [Dyn]{}
             loop item in report.causes -> causes.push(build_report_tree(item))
             Dyn.Array(causes)
         }
     }
-    fields := [{key: String, value: Dyn}]{
+    ^fields: [{key: String, value: Dyn}]{
         {key: "schema", value: Dyn.Text("jet.err/v1")},
         {key: "message", value: Dyn.Text(report.message.copy())},
         {key: "code", value: code},
@@ -995,21 +995,21 @@ build_report_tree: fn(report: DiagnosticBuildError) -> Dyn BuildIOError! {
         fields.push({key: "typed_identity", value: Dyn.Text(identity)})
     }
     if report.context_frames.len() > 0 {
-        frames := [Dyn]{}
+        ^frames: [Dyn]{}
         loop frame in report.context_frames {
             frames.push(Dyn.Object(["text": Dyn.Text(frame.text), "file": Dyn.Text(frame.file), "line": Dyn.Int(frame.line)]))
         }
         fields.push({key: "context_frames", value: Dyn.Array(frames)})
     }
     if report.conversion_history.len() > 0 {
-        conversions := [Dyn]{}
+        ^conversions: [Dyn]{}
         loop conversion in report.conversion_history {
             conversions.push(Dyn.Object(["source": Dyn.Text(conversion.source), "target": Dyn.Text(conversion.target)]))
         }
         fields.push({key: "conversion_history", value: Dyn.Array(conversions)})
     }
     if report.details == .Val(details) {
-        detail_fields := [{key: String, value: Dyn}]{}
+        ^detail_fields: [{key: String, value: Dyn}]{}
         loop field in details.fields {
             value: json.parse(field.value) ?? return Err(build_report_invalid("error report field `{field.name}` is not JSON: {err.reason}"))
             detail_fields.push({key: field.name, value: value})
@@ -1070,7 +1070,7 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Val(build_report_text(code_value, "code"))
     }
     cause_value: build_report_field(fields, "cause")
-    causes := [DiagnosticBuildError]{}
+    ^causes: [DiagnosticBuildError]{}
     if cause_value == {
         .Null -> {}
         .Object(_) -> causes.push(build_report_from_tree(cause_value))
@@ -1079,11 +1079,11 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
         }
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return Err(build_report_invalid("error report cause is not null, an object, or an array"))
     }
-    typed_identity := String?{None}
+    ^typed_identity: String?{None}
     if fields.get("typed_identity") == .Val(identity) {
         typed_identity = Val(build_report_text(identity, "typed_identity"))
     }
-    context_frames := [DiagnosticErrorContextFrame]{}
+    ^context_frames: [DiagnosticErrorContextFrame]{}
     if fields.get("context_frames") == .Val(raw) {
         items: pkg_json_array(raw) ?? return Err(build_report_invalid("error report context_frames is not an array"))
         loop item in items {
@@ -1102,7 +1102,7 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
     if fields.has_key("origin") || fields.has_key("source_journey") {
         return Err(build_report_invalid("error report is not canonical"))
     }
-    conversion_history := [DiagnosticErrorConversion]{}
+    ^conversion_history: [DiagnosticErrorConversion]{}
     if fields.get("conversion_history") == .Val(raw) {
         items: pkg_json_array(raw) ?? return Err(build_report_invalid("error report conversion_history is not an array"))
         loop item in items {
@@ -1115,7 +1115,7 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
             )
         }
     }
-    details := DiagnosticErrorDetails?{None}
+    ^details: DiagnosticErrorDetails?{None}
     if fields.get("details") == .Val(raw) {
         detail: build_report_object(raw, "details")
         values: build_report_field(detail, "fields")
@@ -1127,7 +1127,7 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
         }
         detail_fields: loop pair in pairs -> DiagnosticErrorField{name: pair.key, value: pkg_json_render(pair.value)}
         span_value: build_report_field(detail, "source_span")
-        source_span := DiagnosticErrorSpan?{None}
+        ^source_span: DiagnosticErrorSpan?{None}
         if span_value != .Null {
             span: build_report_object(span_value, "source span")
             source_span = Val(DiagnosticErrorSpan{start: build_report_u32(build_report_field(span, "start"), "span start"), end: build_report_u32(build_report_field(span, "end"), "span end")})
@@ -1144,14 +1144,14 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
 build_report_render: fn(report: DiagnosticBuildError) -> String Never! {
     row: diagnostic_registry_row("E3015") ?? panic("registered entry error row is missing")
     message: build_terminal_text(report.message)
-    diagnostic := diagnostic_from_registry("E3015", None, row.what.replace("{{msg}}", message), row.why.replace("{{msg}}", message), row.fix.replace("{{msg}}", message))
+    ^diagnostic: diagnostic_from_registry("E3015", None, row.what.replace("{{msg}}", message), row.why.replace("{{msg}}", message), row.fix.replace("{{msg}}", message))
     rows: build_report_render_rows(report, 0)
     if rows != "" -> diagnostic.detail = Val(rows)
     diagnostic_render(diagnostic, "", "", false)
 }
 
 build_report_render_rows: fn(report: DiagnosticBuildError, depth: Int) -> String Never! {
-    out := ""
+    ^out: ""
     if depth == 0 {
         if report.code == .Val(code) -> out = "{out}error code: {build_terminal_text(code)}\n"
         if report.typed_identity == .Val(identity) {
@@ -1192,7 +1192,7 @@ build_report_render_rows: fn(report: DiagnosticBuildError, depth: Int) -> String
 }
 
 build_indent: fn(depth: Int) -> String Never! {
-    out := ""
+    ^out: ""
     loop _ in 0..<depth -> out = "{out}  "
     out
 }
@@ -1200,7 +1200,7 @@ build_indent: fn(depth: Int) -> String Never! {
 // `\n`, `\r`, `\t` short escapes; every other control scalar and U+2028/U+2029
 // as `\u{xxxx}`.
 build_terminal_text: fn(value: String) -> String Never! {
-    out := ""
+    ^out: ""
     loop scalar in value.chars() {
         text: "{scalar}"
         code: build_scalar_code(text)
@@ -1230,8 +1230,8 @@ build_scalar_code: fn(text: String) -> Int Never! {
 // Lowercase hex, at least four digits.
 build_hex4: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef"
-    out := ""
-    rest := value
+    ^out: ""
+    ^rest: value
     loop rest > 0 {
         out = "{digits.slice(rest % 16, rest % 16 + 1)}{out}"
         rest = rest /% 16

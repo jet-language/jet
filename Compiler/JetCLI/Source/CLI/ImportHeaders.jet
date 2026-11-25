@@ -76,9 +76,9 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
     prefix: jet_cli_import_byte_slice(bytes, 0, open).trim().copy()
     suffix: jet_cli_import_byte_slice(bytes, close + 1, bytes.len()).trim().copy()
     arrow: (language == "ts" || language == "js") && line.contains("=>")
-    name := ""
-    result_text := ""
-    require_static := false
+    ^name: ""
+    ^result_text: ""
+    ^require_static: false
     if {
         language == "java" || language == "csharp" -> {
             tokens: jet_cli_import_words(prefix)
@@ -207,7 +207,7 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
     }
     params: jet_cli_import_parse_foreign_params(language, jet_cli_import_byte_slice(bytes, open + 1, close))
     result: if result_text.is_empty() -> "()" else -> jet_cli_import_map_foreign_type(language, result_text)
-    expression_body := String?{None}
+    ^expression_body: String?{None}
     if {
         arrow -> {
             if jet_cli_import_find_bytes(suffix.bytes(), "=>", false) == .Val(marker) {
@@ -234,7 +234,7 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
 jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [{name: String, ty: String}] JetCLIImportTextError! {
     if raw.trim().is_empty() -> return Ok([])
     if language == "go" -> return Ok(jet_cli_import_parse_go_params(raw))
-    output := [{name: String, ty: String}]{}
+    ^output: [{name: String, ty: String}]{}
     loop raw_part in jet_cli_import_split_commas(raw) {
         part: raw_part.trim().copy()
         if part.contains("...") || part.contains("?") || part.contains("=") {
@@ -264,7 +264,7 @@ jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [{name
                             return Err(jet_cli_import_text_error("Java/C# parameters must use one scalar type and one name"))
                         }
                         name: tokens[tokens.len() - 1].copy()
-                        unsafe_parameter := !jet_cli_import_identifier(name)
+                        ^unsafe_parameter: !jet_cli_import_identifier(name)
                         loop at in 0..<tokens.len() - 1 {
                             if tokens[at] == "ref" || tokens[at] == "out" || tokens[at] == "in" {
                                 unsafe_parameter = true
@@ -284,10 +284,10 @@ jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [{name
 
 // Grouped names drain once, duplicate lookup is hash-backed.
 jet_cli_import_parse_go_params: fn(raw: String) -> [{name: String, ty: String}] JetCLIImportTextError! {
-    pending := [String]{}
-    params := [{name: String, ty: String}]{}
+    ^pending: [String]{}
+    ^params: [{name: String, ty: String}]{}
     // #4366: Set.add has no Bool result. Membership only, never iterated.
-    names := [String:Bool]{}
+    ^names: [String:Bool]{}
     loop part in jet_cli_import_split_commas(raw) {
         tokens: jet_cli_import_words(part)
         if {
@@ -319,7 +319,7 @@ jet_cli_import_parse_go_params: fn(raw: String) -> [{name: String, ty: String}] 
 
 // Map a foreign type; qualification stripping applies in every language.
 jet_cli_import_map_foreign_type: fn(language: String, raw: String) -> String JetCLIImportTextError! {
-    ty := jet_cli_import_trim_suffix(raw.trim().copy(), ";")
+    ^ty: jet_cli_import_trim_suffix(raw.trim().copy(), ";")
     if ty.starts_with("java.lang.") {
         ty = jet_cli_import_byte_slice(ty.bytes(), 10, ty.bytes().len())
     }

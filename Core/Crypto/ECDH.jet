@@ -87,7 +87,7 @@ ecdh_make_params: fn<R: RNG>(ctx: ^ECDHContext, blen: Int, rng: ^R) -> [U8] ecp.
     pair: ecdh_gen_public(ctx.grp, rng)
     ctx.d = pair.d.move()
     ctx.q = pair.q.move()
-    out := ecp.tls_write_group(ctx.grp, blen)
+    ^out: ecp.tls_write_group(ctx.grp, blen)
     pt: ecp.tls_write_point(ctx.grp, ctx.q, ctx.point_format, blen - out.len())
     loop b in pt -> out.push(b)
     Ok(out)

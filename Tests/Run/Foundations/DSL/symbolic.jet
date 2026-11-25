@@ -46,9 +46,9 @@ parse: fn(source: String) -> Expr? {
     tokens: source.trim().split(" ").to_list()
     if tokens.len() == 0 -> return None
 
-    code := [Node]{}
-    operators := [String]{}
-    expect_value := true
+    ^code: [Node]{}
+    ^operators: [String]{}
+    ^expect_value: true
     loop token in tokens {
         if token == "" -> next
 
@@ -66,7 +66,7 @@ parse: fn(source: String) -> Expr? {
             expect_value = true
         } else if token == ")" {
             if expect_value -> return None
-            found_open := false
+            ^found_open: false
             loop operators.len() > 0 {
                 popped: operators.pop() ?? return None
                 if popped == "(" {
@@ -116,7 +116,7 @@ is_one: fn(expr: Expr) -> Bool {
 }
 
 append_binary: fn(left: Expr, right: Expr, operator: Node) -> Expr {
-    code := [Node]{}
+    ^code: [Node]{}
     code.extend(left.code.copy())
     code.extend(right.code.copy())
     code.push(operator.copy())
@@ -124,7 +124,7 @@ append_binary: fn(left: Expr, right: Expr, operator: Node) -> Expr {
 }
 
 negate: fn(expr: Expr) -> Expr {
-    code := [Node]{}
+    ^code: [Node]{}
     code.extend(expr.code.copy())
     code.push(Node.Neg)
     return Expr{code: code}
@@ -137,7 +137,7 @@ subtract: fn(left: Expr, right: Expr) -> Expr { return append_binary(left, right
 multiply: fn(left: Expr, right: Expr) -> Expr { return append_binary(left, right, Node.Mul) }
 
 simplify: fn(expr: Expr) -> Expr {
-    stack := [Expr]{}
+    ^stack: [Expr]{}
     loop token in expr.code {
         if token == {
             .Const(value) -> { stack.push(atom(Node.Const(value))) }
@@ -190,8 +190,8 @@ simplify: fn(expr: Expr) -> Expr {
 }
 
 differentiate: fn(expr: Expr, variable: String) -> Expr {
-    expressions := [Expr]{}
-    derivatives := [Expr]{}
+    ^expressions: [Expr]{}
+    ^derivatives: [Expr]{}
     loop token in expr.code {
         if token == {
             .Const(value) -> {
@@ -243,7 +243,7 @@ differentiate: fn(expr: Expr, variable: String) -> Expr {
 }
 
 evaluate: fn(expr: Expr, environment: [String:Float]) -> Float? {
-    stack := [Float]{}
+    ^stack: [Float]{}
     loop token in expr.code {
         if token == {
             .Const(value) -> { stack.push(value) }
@@ -277,7 +277,7 @@ evaluate: fn(expr: Expr, environment: [String:Float]) -> Float? {
 }
 
 show: fn(expr: Expr) -> String {
-    stack := [String]{}
+    ^stack: [String]{}
     loop token in expr.code {
         if token == {
             .Const(value) -> { stack.push("{value}") }

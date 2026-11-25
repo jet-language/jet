@@ -35,7 +35,7 @@ impl NixEvaluator {
                 if self.is_direct_shell(root) -> return Ok(root)
             }
         }
-        output_path := [String]{}
+        ^output_path: [String]{}
         loop segment in output.split(".") {
             if segment == "" {
                 return Err(NixEvalError.Invalid("devShell output selector must be a non-empty attribute path"))
@@ -43,7 +43,7 @@ impl NixEvaluator {
             output_path.push(segment)
         }
         loop prefix in nixeval_shell_output_prefixes(self.system) {
-            path := [String]{}
+            ^path: [String]{}
             loop segment in prefix -> path.push(segment)
             loop segment in output_path -> path.push(segment)
             if self.resolve_path(root, path) == {
@@ -94,7 +94,7 @@ impl NixEvaluator {
     }
 
     resolve_path: fn(^self, start: NixEvalValue, path: [String]) -> NixEvalValue NixEvalError! {
-        value := start
+        ^value: start
         loop field in path {
             if value.is_function() -> value = self.apply_flake_arguments(value)
             selected: self.select(value, field)
@@ -106,8 +106,8 @@ impl NixEvaluator {
     project_shell: fn(^self, shell: NixEvalValue) -> NixEvalDevShell NixEvalError! {
         fields: shell.attr_fields() ?? return Err(NixEvalError.Unsupported("devShell output must be an attribute set, got {shell.type_name()}"))
         shell_fields: nixeval_sorted(fields.keys().to_list())
-        packages := [String]{}
-        cross_packages := [String]{}
+        ^packages: [String]{}
+        ^cross_packages: [String]{}
         loop field in nixeval_shell_package_fields() {
             found: self.try_select(shell, field)
             binding: found ?? next
@@ -124,7 +124,7 @@ impl NixEvaluator {
                 }
             }
         }
-        unsupported := [String]{}
+        ^unsupported: [String]{}
         loop field in shell_fields {
             head: field.split(".").to_list()[0]
             if head == {

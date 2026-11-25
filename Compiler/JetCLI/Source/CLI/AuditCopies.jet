@@ -51,7 +51,7 @@ JetCLIAuditModules: struct {
 // around the working directory, and a directory resolves to its stock entry as
 // `jet lint` resolves one.
 jet_cli_audit_entry_plan: fn(subject: JetCLIAuditSubject, words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    target := ""
+    ^target: ""
     loop word in words {
         if target == "" && !word.starts_with("-") -> target = word
     }
@@ -59,8 +59,8 @@ jet_cli_audit_entry_plan: fn(subject: JetCLIAuditSubject, words: [String], color
         cwd: cli_files.cwd() ?? "."
         target = jet_cli_manifest_root(cwd) ?? cwd
     }
-    file := target
-    notice := ""
+    ^file: target
+    ^notice: ""
     if cli_files.is_dir(target) {
         if jet_cli_resolve_source_path("audit", target, color, [String]{}) == {
             .File(path, _, written) -> {
@@ -83,7 +83,7 @@ jet_cli_audit_entry_plan: fn(subject: JetCLIAuditSubject, words: [String], color
 jet_cli_audit_copies: fn(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     entry: jet_cli_audit_entry_modules(file, source, color, json)
     if entry.refusal == .Val(refusal) -> return refusal
-    sites := jet_cli_audit_copy_sites(file, entry.modules, color)
+    ^sites: jet_cli_audit_copy_sites(file, entry.modules, color)
     sites.sort_by(fn(left: JetCLICopySite, right: JetCLICopySite) { (left.path <=> right.path).then(left.start <=> right.start) })
     if json {
         rows: loop site in sites -> jet_cli_status_object(
@@ -98,7 +98,7 @@ jet_cli_audit_copies: fn(file: String, source: String, color: Bool, json: Bool) 
         )
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("audit.copies", true, [JetCLIStatusField]{jet_cli_status_field("copies", jet_cli_status_array(rows))})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    lines := "Implicit read-view copies: {sites.len()}\n"
+    ^lines: "Implicit read-view copies: {sites.len()}\n"
     loop site in sites {
         lines = "{lines}  {site.path}:{site.line}:{site.column}  span={site.start}..{site.end}  size=dynamic  kind=implicit\n"
     }
@@ -108,7 +108,7 @@ jet_cli_audit_copies: fn(file: String, source: String, color: Bool, json: Bool) 
 // The first compile: the entry must check clean, and its source root's
 // ordinary `.jet` modules are the ones the audit lays its policy over.
 jet_cli_audit_entry_modules: fn(file: String, source: String, color: Bool, json: Bool) -> JetCLIAuditModules {
-    modules := [JetDriverAuthorizedSourceFile]{}
+    ^modules: [JetDriverAuthorizedSourceFile]{}
     if jet_cli_compile_file(file, color, None, JetDriverCompileMode.Check) == {
         .Refused(refusal) -> return JetCLIAuditModules{modules: modules, refusal: Val(refusal)}
         .Compiled(result, snapshot) -> {
@@ -139,15 +139,15 @@ jet_cli_audit_entry_modules: fn(file: String, source: String, color: Bool, json:
 jet_cli_audit_copy_sites: fn(file: String, modules: [JetDriverAuthorizedSourceFile], color: Bool) -> [JetCLICopySite] {
     shift: JET_CLI_FMT_EXPLICIT_COPIES_POLICY.len()
     overlays: loop member in modules -> JetDriverSourceDocument{path: member.path, source: "{JET_CLI_FMT_EXPLICIT_COPIES_POLICY}{member.source}"}
-    sites := [JetCLICopySite]{}
+    ^sites: [JetCLICopySite]{}
     if jet_cli_compile_overlays(file, file, overlays, color, None, JetDriverCompileMode.Check, None) == .Compiled(result, snapshot) {
         loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
             owner: diagnostic.origin ?? next
             edit: diagnostic.edit ?? next
             if edit.new_text != ".copy()" || edit.span.start != edit.span.end -> next
             span: diagnostic.span ?? next
-            source := ""
-            found := false
+            ^source: ""
+            ^found: false
             loop member in modules {
                 if member.path == owner.path {
                     source = member.source
@@ -158,7 +158,7 @@ jet_cli_audit_copy_sites: fn(file: String, modules: [JetDriverAuthorizedSourceFi
             start: span.start - shift
             end: span.end - shift
             if start < 0 || end < start || end > source.len() -> next
-            duplicate := false
+            ^duplicate: false
             loop site in sites {
                 if site.path == owner.path && site.start == start -> duplicate = true
             }
@@ -174,8 +174,8 @@ jet_cli_audit_copy_sites: fn(file: String, modules: [JetDriverAuthorizedSourceFi
 // every character that starts before it on that line.
 jet_cli_audit_line_column: fn(source: String, offset: Int) -> [Int] Never! {
     bytes: source.bytes()
-    line := 1
-    column := 1
+    ^line: 1
+    ^column: 1
     loop index in 0..<offset {
         byte: bytes[index]
         if {

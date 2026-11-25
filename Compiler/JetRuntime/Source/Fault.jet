@@ -49,13 +49,13 @@ rt_fault_print: fn(_signal: I64, _info: I64, _context: I64, _backtrace: I64, _im
 
 // The main thread's alternate stack (fault_stack_start); its word 24 is the
 // claim of the one report a process prints.
-fault_main_stack := I64{0}
+^fault_main_stack: I64{0}
 
 // The `backtrace` build option of the running image (0 full, 1 brief, 2 off;
 // JetIR IRBacktrace): what a report prints after its first line. Full lists
 // the frames; brief only the faulting frame (a stack overflow names its
 // innermost Jet function either way); off no frame.
-fault_backtrace := I64{0}
+^fault_backtrace: I64{0}
 
 // The image's entry passes a `brief` or `off` backtrace before it runs
 // anything else (JetIR ir_entry_function).
@@ -95,7 +95,7 @@ fault_start: fn() {
 // at a second thread's fault before the first's report is written.
 fault_action: fn(signal: I64, handler: I64) {
     #Unsafe("rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature") {
-        _ := os_syscall_stack4_i64(I64{13}, signal, handler, I64{1275068420}, I64{0}, I64{0}, I64{8})
+        ^_: os_syscall_stack4_i64(I64{13}, signal, handler, I64{1275068420}, I64{0}, I64{0}, I64{8})
     }
 }
 
@@ -106,7 +106,7 @@ fault_action: fn(signal: I64, handler: I64) {
 fault_stack_start: fn() -> I64 {
     stack: alloc_map_try(I64{262144})
     if (stack == I64{0}) { return I64{0} }
-    status := I64{0}
+    ^status: I64{0}
     #Unsafe("stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)") {
         os_store_i64(stack, stack)
         os_store_i64(wrapping(stack + I64{8}), I64{0})
@@ -129,7 +129,7 @@ priv fault_stack_end: fn(stack: I64) {
     }
     #Unsafe("stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words") {
         os_store_i64(wrapping(stack + I64{8}), I64{2})
-        _ := host_syscall(I64{131}, stack, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        ^_: host_syscall(I64{131}, stack, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     alloc_unmap(stack, I64{262144})
 }
@@ -149,7 +149,7 @@ priv fault_stack_end: fn(stack: I64) {
         holder: sync_cas(wrapping(fault_main_stack + I64{24}), I64{0}, me)
         if (holder == me) { fault_raise(signal) }
         if (holder != I64{0}) {
-            loop -> _ := trap_syscall(I64{34}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            loop -> ^_: trap_syscall(I64{34}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
     }
     // No Secret outlives the process in its memory or its core (#5478),
@@ -162,7 +162,7 @@ priv fault_stack_end: fn(stack: I64) {
     // an observer (Main.jet main_observe_exit_code), takes the fault's
     // context in place of a stop's 1.
     observe: main_observe_exit_code
-    if (observe != I64{0}) { _ := coll_call1(observe, context) }
+    if (observe != I64{0}) { ^_: coll_call1(observe, context) }
     if (status == EXIT_RUNTIME_PANIC) { trap_defect_exit(EXIT_RUNTIME_PANIC) }
     fault_raise(signal)
     I64{0}
@@ -175,10 +175,10 @@ priv fault_stack_end: fn(stack: I64) {
 // own calls are not counted.
 fault_raise: fn(signal: I64) {
     #Unsafe("rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread") {
-        _ := os_syscall_stack4_i64(I64{13}, signal, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
+        ^_: os_syscall_stack4_i64(I64{13}, signal, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
         process: os_getpid_i64()
         thread: os_gettid_i64()
-        _ := os_tgkill_i64(process, thread, signal)
+        ^_: os_tgkill_i64(process, thread, signal)
     }
     trap_defect_exit(wrapping(I64{128} + signal))
 }
@@ -205,7 +205,7 @@ fault_raise: fn(signal: I64) {
 // on the way add no line, because the table doesn't hold them.
 trace_text: fn() -> I64 {
     lines: trace_lines_new()
-    _ := trace_walk(lines, false)
+    ^_: trace_walk(lines, false)
     trace_lines_text(lines)
 }
 
@@ -230,7 +230,7 @@ trace_walk: fn(lines: I64, with_function: Bool) -> Bool {
     // caller. The stub, path and image pages are untracked: the runtime
     // alone reads them.
     stub: alloc_map_try(I64{4096})
-    frame := I64{0}
+    ^frame: I64{0}
     #Unsafe("stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call") {
         os_store_i64(stub, I64{3286796616})
         if (os_mprotect_i64(stub, I64{4096}, I64{5}) == I64{0}) {
@@ -248,8 +248,8 @@ trace_walk: fn(lines: I64, with_function: Bool) -> Bool {
 // (HOST_AT_IMAGE), else /proc/self/exe mapped read-only for the call.
 trace_image: fn(lines: I64, frame: I64, address: I64, with_function: Bool) -> Bool {
     loaded: host_getauxval(HOST_AT_IMAGE)
-    image := loaded
-    length := I64{0}
+    ^image: loaded
+    ^length: I64{0}
     if (image == I64{0}) {
         path: alloc_map_try(I64{4096})
         if (path == I64{0}) { return false }
@@ -267,7 +267,7 @@ trace_image: fn(lines: I64, frame: I64, address: I64, with_function: Bool) -> Bo
                         length = size
                     }
                 }
-                _ := host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                ^_: host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
             }
         }
         trace_unmap(path, I64{4096})
@@ -283,7 +283,7 @@ trace_image: fn(lines: I64, frame: I64, address: I64, with_function: Bool) -> Bo
 // the image's table holds no such function. 0 when no text could be made.
 trace_address_text: fn(address: I64) -> I64 {
     lines: trace_lines_new()
-    _ := trace_image(lines, I64{0}, address, true)
+    ^_: trace_image(lines, I64{0}, address, true)
     trace_lines_text(lines)
 }
 
@@ -317,7 +317,7 @@ trace_lines_reserve: fn(lines: I64, length: I64) -> I64 {
     used: trap_word(wrapping(lines + I64{8}))
     size: trap_word(wrapping(lines + I64{16}))
     if (length <= wrapping(size - used)) { return wrapping(data + used) }
-    grown := if (size == I64{0}) -> I64{4096} else -> size
+    ^grown: if (size == I64{0}) -> I64{4096} else -> size
     loop grown > (I64{0}) && wrapping(grown - used) < length -> grown = wrapping(grown * I64{2})
     if (grown <= I64{0}) { return I64{0} }
     bigger: alloc_map_try(grown)
@@ -357,8 +357,8 @@ trace_lines_byte: fn(lines: I64, byte: I64) {
 // a value below 0 (a malformed table's) is written as 0.
 trace_lines_number: fn(lines: I64, value: I64) {
     number: if (value < I64{0}) -> I64{0} else -> value
-    digits := I64{1}
-    rest := number /% I64{10}
+    ^digits: I64{1}
+    ^rest: number /% I64{10}
     loop rest != (I64{0}) {
         digits = wrapping(digits + I64{1})
         rest = rest /% I64{10}
@@ -367,7 +367,7 @@ trace_lines_number: fn(lines: I64, value: I64) {
     if (target == I64{0}) {
         return
     }
-    at := digits
+    ^at: digits
     rest = number
     loop at > (I64{0}) {
         at = wrapping(at - I64{1})
@@ -381,7 +381,7 @@ trace_lines_number: fn(lines: I64, value: I64) {
 // of the executable or the text form's lines.
 trace_unmap: fn(address: I64, bytes: I64) {
     #Unsafe("the trace made this mapping and holds no pointer into it past this call") {
-        _ := os_unmap_untracked_i64(address, bytes)
+        ^_: os_unmap_untracked_i64(address, bytes)
     }
 }
 
@@ -407,7 +407,7 @@ trace_host: fn(lines: I64, with_function: Bool) -> I64 {
     if (page == I64{0}) { return I64{0} }
     written: jet_rt_host_frames(page, bytes)
     kept: if (written > bytes) -> bytes else -> written
-    found := I64{0}
+    ^found: I64{0}
     if (kept > I64{0}) {
         if (lines != I64{0}) { trace_lines_append(lines, page, kept) } else if trace_host_user(page, kept, with_function) {
             found = I64{1}
@@ -421,7 +421,7 @@ trace_host: fn(lines: I64, with_function: Bool) -> I64 {
 // not Core's, written as its `-->` line (Trap.jet trap_user_frame).
 trace_host_user: fn(at: I64, length: I64, with_function: Bool) -> Bool {
     end: wrapping(at + length)
-    cursor := at
+    ^cursor: at
     loop cursor < end {
         name_len: trace_field_len(cursor, end, I64{9})
         file: wrapping(wrapping(cursor + name_len) + I64{1})
@@ -439,7 +439,7 @@ trace_host_user: fn(at: I64, length: I64, with_function: Bool) -> Bool {
 // The length of the field at `at` that byte `stop` ends; it ends at `end`
 // at the latest.
 trace_field_len: fn(at: I64, end: I64, stop: I64) -> I64 {
-    length := I64{0}
+    ^length: I64{0}
     loop wrapping(at + length) < end && trace_u8(wrapping(at + length)) != stop {
         length = wrapping(length + I64{1})
     }
@@ -449,8 +449,8 @@ trace_field_len: fn(at: I64, end: I64, stop: I64) -> I64 {
 // The decimal number of the `length` digits at `at`, up to the first byte
 // that is no digit.
 trace_decimal: fn(at: I64, length: I64) -> I64 {
-    value := I64{0}
-    index := I64{0}
+    ^value: I64{0}
+    ^index: I64{0}
     loop index < length {
         digit: wrapping(trace_u8(wrapping(at + index)) - I64{48})
         if (digit < I64{0} || digit > I64{9}) { return value }
@@ -468,8 +468,8 @@ trace_decimal: fn(at: I64, length: I64) -> I64 {
 // writes the chain for `jet crash` instead (trace_release_callers) and
 // returns false.
 priv trace_frames: fn(lines: I64, image: I64, bias: I64, start: I64, target: I64, with_function: Bool) -> Bool {
-    table := I64{0}
-    table_end := I64{0}
+    ^table: I64{0}
+    ^table_end: I64{0}
     #Unsafe("image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table") {
         offset: os_load_i64(wrapping(image + I64{40}))
         entry: trace_u16(wrapping(image + I64{58}))
@@ -478,7 +478,7 @@ priv trace_frames: fn(lines: I64, image: I64, bias: I64, start: I64, target: I64
         if (offset > I64{0} && names_index < count) {
             sections: wrapping(image + offset)
             names: wrapping(image + os_load_i64(wrapping(wrapping(sections + wrapping(names_index * entry)) + I64{24})))
-            index := I64{0}
+            ^index: I64{0}
             loop index < count {
                 section: wrapping(sections + wrapping(index * entry))
                 name: wrapping(names + trace_u32(section))
@@ -501,10 +501,10 @@ priv trace_frames: fn(lines: I64, image: I64, bias: I64, start: I64, target: I64
     if (start == I64{0}) {
         return trace_frame(lines, table, table_end, wrapping(target - bias), with_function)
     }
-    frame := start
-    steps := I64{0}
+    ^frame: start
+    ^steps: I64{0}
     loop frame != (I64{0}) && frame & (I64{7}) == (I64{0}) && steps < (I64{4096}) {
-        address := I64{0}
+        ^address: I64{0}
         #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack") {
             address = os_load_i64(wrapping(frame + I64{8}))
         }
@@ -534,7 +534,7 @@ priv trace_release_callers: fn(image: I64, bias: I64, start: I64, with_function:
         return
     }
     trap_write_static(rt_static_text("Build "))
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{20}) {
         trace_hex(trace_u32_big(wrapping(id + at)), I64{8})
         at = wrapping(at + I64{4})
@@ -543,17 +543,17 @@ priv trace_release_callers: fn(image: I64, bias: I64, start: I64, with_function:
     if with_function -> trap_write_static(rt_static_text("Callers with function:\n")) else {
         trap_write_static(rt_static_text("Callers:\n"))
     }
-    frame := start
-    steps := I64{0}
+    ^frame: start
+    ^steps: I64{0}
     loop frame != (I64{0}) && frame & (I64{7}) == (I64{0}) && steps < (I64{64}) {
-        address := I64{0}
+        ^address: I64{0}
         #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack") {
             address = os_load_i64(wrapping(frame + I64{8}))
         }
         if (address != I64{0}) {
             linked: wrapping(address - bias)
             trap_write_static(rt_static_text("  0x"))
-            digits := I64{1}
+            ^digits: I64{1}
             loop digits < (I64{16}) && (linked >> wrapping(digits * I64{4})) != (I64{0}) {
                 digits = wrapping(digits + I64{1})
             }
@@ -574,11 +574,11 @@ trace_build_id: fn(image: I64) -> I64 {
     headers: wrapping(image + trace_u64(wrapping(image + I64{32})))
     entry: trace_u16(wrapping(image + I64{54}))
     count: trace_u16(wrapping(image + I64{56}))
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         header: wrapping(headers + wrapping(index * entry))
         if (trace_u32(header) == I64{4}) {
-            note := wrapping(image + trace_u64(wrapping(header + I64{8})))
+            ^note: wrapping(image + trace_u64(wrapping(header + I64{8})))
             end: wrapping(note + trace_u64(wrapping(header + I64{32})))
             loop wrapping(note + I64{12}) <= end {
                 name_size: trace_u32(note)
@@ -600,11 +600,11 @@ trace_build_id: fn(image: I64) -> I64 {
 // significant first, eight to a write; no heap. Its shifts stay below 64 by
 // mask, so none can stop the walk that writes them.
 trace_hex: fn(value: I64, digits: I64) {
-    left := digits
+    ^left: digits
     loop left > (I64{0}) {
         count: if (left > I64{8}) -> I64{8} else -> left
-        word := I64{0}
-        k := I64{0}
+        ^word: I64{0}
+        ^k: I64{0}
         loop k < count {
             nibble: (value >> (wrapping(wrapping(wrapping(left - k) - I64{1}) * I64{4}) & I64{63})) & I64{15}
             glyph: if (nibble < I64{10}) -> wrapping(nibble + I64{48}) else -> wrapping(nibble + I64{87})
@@ -624,7 +624,7 @@ trace_hex: fn(value: I64, digits: I64) {
 // function holds pc. The runtime's block (trace_runtime_block) holds no
 // program frame: its functions are routines, as in report.S.
 priv trace_frame: fn(lines: I64, table: I64, table_end: I64, pc: I64, with_function: Bool) -> Bool {
-    block := table
+    ^block: table
     loop wrapping(block + I64{20}) <= table_end {
         end: wrapping(wrapping(block + I64{4}) + trace_u32(block))
         if (end < wrapping(block + I64{20}) || end > table_end) { return false }
@@ -634,12 +634,12 @@ priv trace_frame: fn(lines: I64, table: I64, table_end: I64, pc: I64, with_funct
             block = end
             next
         }
-        low := I64{0}
+        ^low: I64{0}
         #Unsafe("block + 12 is inside this block, which lies in the read-only table") {
             low = os_load_i64(wrapping(block + I64{12}))
         }
-        cursor := wrapping(block + I64{20})
-        left := count
+        ^cursor: wrapping(block + I64{20})
+        ^left: count
         loop left > (I64{0}) && cursor < end {
             low = wrapping(low + trace_sleb(cursor))
             cursor = trace_leb_end(cursor)
@@ -703,11 +703,11 @@ trace_statement_line: fn(rows: I64, rows_end: I64, low: I64, high: I64, pc: I64)
 
 // trace_line, its call rows only with `calls`.
 priv trace_rows_line: fn(rows: I64, rows_end: I64, low: I64, high: I64, pc: I64, calls: Bool) -> I64 {
-    at := rows
-    address := low
-    line := I64{1}
-    previous := I64{-1}
-    previous_line := I64{0}
+    ^at: rows
+    ^address: low
+    ^line: I64{1}
+    ^previous: I64{-1}
+    ^previous_line: I64{0}
     loop at < rows_end {
         advance: trace_uleb(at)
         address = wrapping(address + (advance >> I64{1}))
@@ -728,7 +728,7 @@ priv trace_rows_line: fn(rows: I64, rows_end: I64, low: I64, high: I64, pc: I64,
 // The length of the NUL-terminated string at `at`; it ends at `end` at the
 // latest.
 trace_cstr_len: fn(at: I64, end: I64) -> I64 {
-    length := I64{0}
+    ^length: I64{0}
     loop wrapping(at + length) < end && trace_u8(wrapping(at + length)) != (I64{0}) {
         length = wrapping(length + I64{1})
     }
@@ -736,7 +736,7 @@ trace_cstr_len: fn(at: I64, end: I64) -> I64 {
 }
 
 priv trace_u8: fn(at: I64) -> I64 {
-    byte := I64{0}
+    ^byte: I64{0}
     #Unsafe("at lies in a mapping the trace reads: the executable's read-only ELF header, program or section table, notes or location table, or the page the host's frames were written to") {
         byte = os_load_u8(at)
     }
@@ -757,9 +757,9 @@ trace_u32_big: fn(at: I64) -> I64 {
 
 // The unsigned LEB128 at `at`.
 trace_uleb: fn(at: I64) -> I64 {
-    value := I64{0}
-    shift := I64{0}
-    cursor := at
+    ^value: I64{0}
+    ^shift: I64{0}
+    ^cursor: at
     loop shift < (I64{70}) {
         byte: trace_u8(cursor)
         if (shift < I64{63}) { value |= (byte & I64{127}) << shift }
@@ -772,9 +772,9 @@ trace_uleb: fn(at: I64) -> I64 {
 
 // The signed LEB128 at `at`.
 trace_sleb: fn(at: I64) -> I64 {
-    value := I64{0}
-    shift := I64{0}
-    cursor := at
+    ^value: I64{0}
+    ^shift: I64{0}
+    ^cursor: at
     loop shift < (I64{70}) {
         byte: trace_u8(cursor)
         if (shift < I64{63}) { value |= (byte & I64{127}) << shift }
@@ -792,7 +792,7 @@ trace_sleb: fn(at: I64) -> I64 {
 
 // The address past the LEB128 at `at`.
 trace_leb_end: fn(at: I64) -> I64 {
-    cursor := at
+    ^cursor: at
     loop trace_u8(cursor) >= (I64{128}) -> cursor = wrapping(cursor + I64{1})
     wrapping(cursor + I64{1})
 }

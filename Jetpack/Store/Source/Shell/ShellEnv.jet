@@ -30,7 +30,7 @@ env_shell_push_unique: fn(seen: ^[String:Bool], parts: ^[String], dir: String) N
 
 // The leased variable names in sorted order.
 env_shell_lease_var_names: fn(vars: [String:LeaseText]) -> [String] Never! {
-    names := vars.keys().to_list()
+    ^names: vars.keys().to_list()
     names.sort()
     names
 }
@@ -67,7 +67,7 @@ ShellEnv: struct {
     // first-seen order.
     composed_path: fn(self, base_path: String) -[Env]> LeaseText Never! {
         separator: env_shell_path_separator()
-        parts := [LeaseText]{}
+        ^parts: [LeaseText]{}
         loop lease in self.cache_leases {
             bin: lease.child_bin_dir() ?? next
             parts.push(bin)
@@ -84,8 +84,8 @@ ShellEnv: struct {
     // itself, without any leased directory.
     host_path: fn(self, base_path: String) -[Env]> String Never! {
         separator: env_shell_path_separator()
-        seen := [String:Bool]{}
-        parts := [String]{}
+        ^seen: [String:Bool]{}
+        ^parts: [String]{}
         loop dir in self.bin_dirs -> env_shell_push_unique(seen, parts, dir)
         loop dir in base_path.split(separator) {
             if dir == "" -> next
@@ -107,8 +107,8 @@ ShellEnv: struct {
     // replaced by sealed canonical Hangar bin directories; a lease without
     // one makes the whole PATH unavailable.
     composed_path_for_parent: fn(self, base_path: String) -[FS, Env, Rand]> String? Never! {
-        seen := [String:Bool]{}
-        parts := [String]{}
+        ^seen: [String:Bool]{}
+        ^parts: [String]{}
         loop lease in self.cache_leases {
             if lease.child_bin_dir() == None -> next
             parent_bin: lease.parent_shell_bin_dir() ?? return None
@@ -127,9 +127,9 @@ ShellEnv: struct {
     // directory named by its sealed canonical Hangar object; None when a
     // leased variable has no durable root.
     parent_vars: fn(self) -[FS, Env, Rand]> [String:String]? Never! {
-        out := self.vars
+        ^out: self.vars
         if self.lease_vars.len() == 0 -> return Val(out)
-        roots := [Int:String]{}
+        ^roots: [Int:String]{}
         loop lease in self.cache_leases {
             durable: lease.durable_roots() ?? return None
             loop fd in durable.keys().to_list() -> roots[fd] = durable[fd]
@@ -163,7 +163,7 @@ ShellEnv: struct {
     // be rendered before its spec exists. The spec still binds each one
     // itself; a lease that lost a handle fails there.
     planned_binding: fn(self) -> LeaseBinding Never! {
-        binding := LeaseBinding.empty()
+        ^binding: LeaseBinding.empty()
         loop lease in self.cache_leases -> lease.plan_binding(binding)
         binding
     }
@@ -173,8 +173,8 @@ ShellEnv: struct {
     // leased variables for exactly the descriptors this spec carries. The
     // only place leased text becomes a child's environment.
     apply_to_base: fn(^self, spec: ProcessSpec, base_path: String) -[FS, Exec, Env]> ProcessSpec StoreError! {
-        out := spec
-        binding := LeaseBinding.empty()
+        ^out: spec
+        ^binding: LeaseBinding.empty()
         loop index in 0..<self.cache_leases.len() {
             out = self.cache_leases[index].keep_open_for(out, binding) ?? return Err(StoreError.Other(err.message()))
         }
@@ -245,7 +245,7 @@ ShellEnv: struct {
         program: cmd_args[0]
         rest: cmd_args[1..<cmd_args.len()]
         caller_dir: env_shell_command_lookup_directory(cwd)
-        stable_program := LeaseText?{None}
+        ^stable_program: LeaseText?{None}
         loop lease in self.cache_leases {
             if lease.executable_for_command_at(program, caller_dir) == {
                 .Ok(found) -> {
@@ -277,7 +277,7 @@ ShellEnv: struct {
         }
         scratch: launch.scratch
         defer close(scratch)
-        spec := launch.spec
+        ^spec: launch.spec
         if cwd == .Val(directory) -> spec = spec.cwd(directory)
         spec = if self.apply_in_mode(spec, options.clean) == {
             .Ok(ready) -> ready
@@ -334,8 +334,8 @@ ShellEnv: struct {
                 return 126
             }
         }
-        scratch := launch.scratch.move()
-        spec := launch.spec
+        ^scratch: launch.scratch.move()
+        ^spec: launch.spec
         spec = if self.apply_in_mode(spec, clean) == {
             .Ok(ready) -> ready
             .Err(error) -> {

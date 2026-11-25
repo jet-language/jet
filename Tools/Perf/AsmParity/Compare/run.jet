@@ -25,17 +25,17 @@ run: fn(args: Args) {
     // 12 up) and a second whether the pair differs (its top bit) and where
     // (the low 30 bits, scaled to the size). The generator's low bits repeat
     // too soon to pick a class.
-    lefts := [[U8]]{}
-    rights := [[U8]]{}
-    state := 12345
+    ^lefts: [[U8]]{}
+    ^rights: [[U8]]{}
+    ^state: 12345
     loop _ in 0..<PAIRS {
         state = next(state)
         class: (state >> 28) & 7
         bits: if class < 5 -> class + 3 else if class == 5 -> 9 else if class == 6 -> 11 else -> 14
         size: 1 + ((state >> 12) & (1 << bits) - 1)
         state = next(state)
-        left := [U8]{}
-        right := [U8]{}
+        ^left: [U8]{}
+        ^right: [U8]{}
         loop at in 0..<size {
             left.push(byte_at(at))
             right.push(byte_at(at))
@@ -47,7 +47,7 @@ run: fn(args: Args) {
         lefts.push(left)
         rights.push(right)
     }
-    total := 0
+    ^total: 0
     loop pass in 0..<passes {
         flip: pass & PAIRS - 1
         rights[flip][0] = rights[flip][0] ~ U8{1}

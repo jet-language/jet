@@ -27,7 +27,7 @@ kit_steps_machine_has: fn(fields: Dyn, key: String) -> Bool {
 kit_steps_machine_control: fn(text: String) -> Bool {
     // Control = Unicode Cc (C0, DEL, C1).
     bytes: text.bytes()
-    index := 0
+    ^index: 0
     loop index < bytes.len() {
         scalar: kit_steps_scalar(bytes, index)
         if scalar.value < 32 || (scalar.value >= 127 && scalar.value <= 159) -> return true
@@ -145,7 +145,7 @@ kit_steps_machine_line: fn(text: String) -> String Err! {
 }
 
 kit_steps_machine_output: fn(text: String, expected: [String]) -> String? {
-    records := [String]{}
+    ^records: [String]{}
     loop (index, line) in kit_steps_rust_lines(text) {
         if line.trim() == "" -> next
         record: kit_steps_machine_line(line) ?? return Val("machine record {index + 1}: {err}")

@@ -59,12 +59,12 @@ JetCLIPerfCode: struct {
 // samples. None when no sampled program counter is in a function.
 jet_cli_perf_instructions_section: fn(elf: [U8], level: Int, sampled: JetCLIPerfSamples) -> TraceReceiptSection? Never! {
     // The counters the run captured, by their index of TRACE_COUNTERS.
-    captured := [Int]{}
+    ^captured: [Int]{}
     loop (index, period) in sampled.periods {
         if period > (U64{0}) -> captured.push(index)
     }
-    found := [JetCLIPerfCode]{}
-    at := [Int:Int]{}
+    ^found: [JetCLIPerfCode]{}
+    ^at: [Int:Int]{}
     loop named in sampled.pcs {
         index: jet_cli_perf_code_entry(found, at, sampled.table, sampled.functions, named.pc, captured.len()) ?? next
         events: loop counter in captured -> named.events[counter]
@@ -79,20 +79,20 @@ jet_cli_perf_instructions_section: fn(elf: [U8], level: Int, sampled: JetCLIPerf
     }
     symbols: jet_cli_perf_code_symbols(sampled.table, sampled.functions)
     codes: native_elf_codes(elf, ".text")
-    functions := [CanonicalJSON]{}
-    bytes := 0
-    kept := 0
-    cut := 0
+    ^functions: [CanonicalJSON]{}
+    ^bytes: 0
+    ^kept: 0
+    ^cut: 0
     loop code in found {
         size: code.high - code.low
         held: if bytes + size <= JET_CLI_PERF_CODE_CAP -> jet_cli_perf_code_bytes(codes, code.low, size) else -> None
-        lines := [CanonicalJSON]{}
-        names := [CanonicalJSON]{}
-        hex := ""
+        ^lines: [CanonicalJSON]{}
+        ^names: [CanonicalJSON]{}
+        ^hex: ""
         if {
             held == .Val(text) -> {
-                last := 0
-                reached := [Int:Bool]{}
+                ^last: 0
+                ^reached: [Int:Bool]{}
                 loop row in x64_listing(text, code.low, sampled.table, code.function, symbols, [Int:String]{}) {
                     if row.line > 0 && row.line != last {
                         lines.push(jet_cli_perf_code_line(row.offset, row.line))
@@ -109,7 +109,7 @@ jet_cli_perf_instructions_section: fn(elf: [U8], level: Int, sampled: JetCLIPerf
             }
             else -> {
                 if code.function >= 0 {
-                    last := 0
+                    ^last: 0
                     loop row in code.rows {
                         line: x64_jetline_line(sampled.table, sampled.table.functions[code.function], row.pc) ?? 0
                         if line > 0 && line != last {
@@ -132,7 +132,7 @@ jet_cli_perf_instructions_section: fn(elf: [U8], level: Int, sampled: JetCLIPerf
         // subprogram: each run's function, the line of the call it stands
         // for and its code [offset, offset + size), a nested run after the
         // run it is nested in.
-        inlined := [CanonicalJSON]{}
+        ^inlined: [CanonicalJSON]{}
         if code.function >= 0 && sampled.inlines.functions.get(code.low) == .Val(facts) {
             loop run in facts.inlined {
                 if run.low < code.low || run.high > code.high || run.high <= run.low -> next
@@ -194,7 +194,7 @@ jet_cli_perf_code_entry: fn(found: ^[JetCLIPerfCode], at: ^[Int:Int], table: X64
     if function < 0 && symbol < 0 -> return None
     low: if function >= 0 -> table.functions[function].low else -> functions[symbol].start
     if at.get(low) == .Val(index) -> return Val(index)
-    events := [U64]{}
+    ^events: [U64]{}
     loop _ in 0..<width -> events.push(U64{0})
     at[low] = found.len()
     if {
@@ -210,7 +210,7 @@ jet_cli_perf_code_entry: fn(found: ^[JetCLIPerfCode], at: ^[Int:Int], table: X64
 
 // A function's counter events, all counters together.
 jet_cli_perf_code_events: fn(code: JetCLIPerfCode) -> U64 Never! {
-    total := U64{0}
+    ^total: U64{0}
     loop count in code.events -> total += count
     total
 }
@@ -219,8 +219,8 @@ jet_cli_perf_code_events: fn(code: JetCLIPerfCode) -> U64 Never! {
 // line table's functions, then each sized `.symtab` function at another
 // start (a runtime routine, a linked C function).
 jet_cli_perf_code_symbols: fn(table: X64Jetline, functions: [X64ImageFunction]) -> [X64ListingSymbol] Never! {
-    symbols := [X64ListingSymbol]{}
-    starts := [Int:Bool]{}
+    ^symbols: [X64ListingSymbol]{}
+    ^starts: [Int:Bool]{}
     loop function in table.functions {
         symbols.push(X64ListingSymbol{address: function.low, size: function.high - function.low, name: "{function.name}"})
         starts[function.low] = true
@@ -332,7 +332,7 @@ jet_cli_perf_instructions_read: fn(trace: CanonicalJSON) -> JetCLIPerfInstructio
     counters_at: jet_cli_perf_key(fields, "counters") ?? return None
     functions_at: jet_cli_perf_key(fields, "functions") ?? return None
     samples_at: jet_cli_perf_key(fields, "samples") ?? return None
-    read := JetCLIPerfInstructions{counters: [String]{}, samples: jet_cli_perf_number(fields[samples_at].value), functions: [JetCLIPerfListed]{}}
+    ^read: JetCLIPerfInstructions{counters: [String]{}, samples: jet_cli_perf_number(fields[samples_at].value), functions: [JetCLIPerfListed]{}}
     counters: jettrace_array(fields[counters_at].value, "instructions.counters") ?? return None
     loop name in counters {
         if name == .String(text) -> read.counters.push("{text}")
@@ -372,23 +372,23 @@ jet_cli_perf_listed_read: fn(item: CanonicalJSON) -> JetCLIPerfListed? Never! {
     names_at: jet_cli_perf_key(fields, "names") ?? return None
     inlined_at: jet_cli_perf_key(fields, "inlined") ?? return None
     rows_at: jet_cli_perf_key(fields, "instructions") ?? return None
-    lines := [X64LineRow]{}
+    ^lines: [X64LineRow]{}
     line_items: jettrace_array(fields[lines_at].value, "instructions.lines") ?? return None
     loop row in line_items {
         lines.push(X64LineRow{at: jet_cli_perf_member_number(row, "offset") ?? 0, line: jet_cli_perf_member_number(row, "line") ?? 0})
     }
-    names := [X64ListingSymbol]{}
+    ^names: [X64ListingSymbol]{}
     name_items: jettrace_array(fields[names_at].value, "instructions.names") ?? return None
     loop row in name_items {
         names.push(X64ListingSymbol{address: jet_cli_perf_member_number(row, "address") ?? 0, size: 0, name: jet_cli_perf_member_text(row, "name") ?? ""})
     }
     names.sort_by(fn(left: X64ListingSymbol, right: X64ListingSymbol) { (left.address <=> right.address).then(left.name <=> right.name) })
-    inlined := [JetCLIPerfInlinedRun]{}
+    ^inlined: [JetCLIPerfInlinedRun]{}
     run_items: jettrace_array(fields[inlined_at].value, "instructions.inlined") ?? return None
     loop run in run_items {
         inlined.push(JetCLIPerfInlinedRun{name: jet_cli_perf_member_text(run, "name") ?? "", call_line: jet_cli_perf_member_number(run, "call_line") ?? 0, offset: jet_cli_perf_member_number(run, "offset") ?? 0, size: jet_cli_perf_member_number(run, "size") ?? 0})
     }
-    rows := [JetCLIPerfListedRow]{}
+    ^rows: [JetCLIPerfListedRow]{}
     row_items: jettrace_array(fields[rows_at].value, "instructions.instructions") ?? return None
     loop row in row_items {
         row_fields: jettrace_object_view(row, "instruction") ?? return None
@@ -419,12 +419,12 @@ jet_cli_perf_listed_read: fn(item: CanonicalJSON) -> JetCLIPerfListed? Never! {
 // rows and names (x64_listing), else each sampled one, its line from the
 // rows.
 jet_cli_perf_listed_instructions: fn(listed: JetCLIPerfListed, line: Int, run: Int) -> [JetCLIPerfListedInstruction] Never! {
-    sampled := [Int:Int]{}
+    ^sampled: [Int:Int]{}
     loop (index, row) in listed.rows -> sampled[row.offset] = index
-    shown := [JetCLIPerfListedInstruction]{}
+    ^shown: [JetCLIPerfListedInstruction]{}
     if listed.cut {
         loop row in listed.rows {
-            held := 0
+            ^held: 0
             loop place in listed.lines {
                 if place.at <= row.offset -> held = place.line
             }
@@ -433,7 +433,7 @@ jet_cli_perf_listed_instructions: fn(listed: JetCLIPerfListed, line: Int, run: I
         }
         return shown
     }
-    table := [U8]{}
+    ^table: [U8]{}
     x64_jetline_rows(table, listed.lines)
     end: table.len()
     high: listed.address + listed.size
@@ -467,7 +467,7 @@ jet_cli_perf_in_run: fn(listed: JetCLIPerfListed, run: Int, offset: Int) -> Bool
 // The innermost inlined run of `listed` holding offset `offset`, the
 // smallest one (a nested run after the run it is nested in); -1 for none.
 jet_cli_perf_innermost: fn(listed: JetCLIPerfListed, offset: Int) -> Int Never! {
-    found := -1
+    ^found: -1
     loop (index, run) in listed.inlined {
         if offset < run.offset || offset >= run.offset + run.size -> next
         if found < 0 || run.size <= listed.inlined[found].size -> found = index
@@ -488,7 +488,7 @@ jet_cli_perf_named_at: fn(listed: JetCLIPerfListed, offset: Int) -> String Never
 // when it comes first), else the function itself.
 jet_cli_perf_run_holder: fn(listed: JetCLIPerfListed, run: Int) -> String Never! {
     inner: listed.inlined[run]
-    found := -1
+    ^found: -1
     loop (index, outer) in listed.inlined {
         if index == run || outer.offset > inner.offset || outer.offset + outer.size < inner.offset + inner.size {
             next
@@ -508,7 +508,7 @@ JetCLIPerfCounted: struct {
 }
 
 jet_cli_perf_run_counted: fn(listed: JetCLIPerfListed, run: Int) -> JetCLIPerfCounted Never! {
-    counted := JetCLIPerfCounted{samples: if run < 0 -> listed.samples else -> 0, events: [Int]{}}
+    ^counted: JetCLIPerfCounted{samples: if run < 0 -> listed.samples else -> 0, events: [Int]{}}
     loop count in listed.events -> counted.events.push(if run < 0 -> count else -> 0)
     if run < 0 -> return counted
     loop row in listed.rows {
@@ -632,7 +632,7 @@ jet_cli_perf_instructions_view: fn(trace: CanonicalJSON, path: String, wanted: S
     if mode == "html" {
         return JetDriverVerbOutput{stdout: jet_cli_perf_instructions_html(trace_id(trace) ?? "unknown", lines), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    out := ""
+    ^out: ""
     loop line in lines -> out = "{out}{line}\n"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
@@ -642,7 +642,7 @@ jet_cli_perf_instructions_view: fn(trace: CanonicalJSON, path: String, wanted: S
 // NAME each function and each inlined run so named whole, FILE:LINE that
 // line's instructions of each function sampled there.
 jet_cli_perf_instructions_shown: fn(read: JetCLIPerfInstructions, wanted: String) -> [JetCLIPerfShown] Never! {
-    shown := [JetCLIPerfShown]{}
+    ^shown: [JetCLIPerfShown]{}
     if wanted == "" {
         if read.functions.len() == 0 -> return shown
         hottest: jet_cli_perf_instructions_hottest(read)
@@ -681,10 +681,10 @@ JetCLIPerfPlace: struct {
 // function when none has any. At -O2 a hot loop inlined into its caller is
 // the run, not the caller that holds it.
 jet_cli_perf_instructions_hottest: fn(read: JetCLIPerfInstructions) -> JetCLIPerfPlace Never! {
-    best := JetCLIPerfPlace{index: 0, run: -1}
-    most := 0
+    ^best: JetCLIPerfPlace{index: 0, run: -1}
+    ^most: 0
     loop (index, listed) in read.functions {
-        own := [Int:Int]{}
+        ^own: [Int:Int]{}
         loop row in listed.rows {
             at: jet_cli_perf_innermost(listed, row.offset)
             own[at] = (own.get(at) ?? 0) + row.samples
@@ -706,7 +706,7 @@ jet_cli_perf_instructions_hottest: fn(read: JetCLIPerfInstructions) -> JetCLIPer
 // How to name what a trace's instructions hold, for a function or line it
 // has no samples of: up to 5 of its functions.
 jet_cli_perf_instructions_miss: fn(read: JetCLIPerfInstructions) -> String Never! {
-    named := [String]{}
+    ^named: [String]{}
     loop listed in read.functions {
         if named.len() < 5 -> named.push("`{listed.symbol}`")
     }
@@ -722,7 +722,7 @@ jet_cli_perf_instructions_miss: fn(read: JetCLIPerfInstructions) -> String Never
 // `  fib.jet:7 fib samples=2590 share=86%`, and a row per instruction,
 // `  33.1%   +14   call   0x401a30 <fib>`.
 jet_cli_perf_instructions_lines: fn(read: JetCLIPerfInstructions, shown: [JetCLIPerfShown], sampler: JetCLIPerfSamplerNamed?) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop (order, view) in shown {
         listed: read.functions[view.index]
         whole: jet_cli_perf_run_counted(listed, view.run)
@@ -740,13 +740,13 @@ jet_cli_perf_instructions_lines: fn(read: JetCLIPerfInstructions, shown: [JetCLI
         }
         // Each line's samples in the function or run, by the function whose
         // code they are and the line.
-        totals := [String:Int]{}
+        ^totals: [String:Int]{}
         loop row in jet_cli_perf_listed_instructions(listed, 0, view.run) {
             key: "{jet_cli_perf_named_at(listed, row.offset)}:{row.line}"
             totals[key] = (totals.get(key) ?? 0) + row.samples
         }
         file: if listed.file == "" -> "" else -> inst_files.basename(listed.file)
-        current := ""
+        ^current: ""
         loop row in view.rows {
             named: jet_cli_perf_named_at(listed, row.offset)
             key: "{named}:{row.line}"
@@ -755,7 +755,7 @@ jet_cli_perf_instructions_lines: fn(read: JetCLIPerfInstructions, shown: [JetCLI
                 lines.push("  {file}:{row.line} {named} samples={total} share={jet_cli_perf_percent(total, whole.samples)}")
             }
             current = key
-            shares := jet_cli_perf_right(if row.samples > 0 -> jet_cli_perf_tenths(row.samples, whole.samples) else -> "", 7)
+            ^shares: jet_cli_perf_right(if row.samples > 0 -> jet_cli_perf_tenths(row.samples, whole.samples) else -> "", 7)
             loop (counter, count) in row.events {
                 events: if counter < whole.events.len() -> whole.events[counter] else -> 0
                 shares = "{shares}{jet_cli_perf_right(if count > 0 -> jet_cli_perf_tenths(count, events) else -> "", 7)}"
@@ -773,7 +773,7 @@ jet_cli_perf_instructions_lines: fn(read: JetCLIPerfInstructions, shown: [JetCLI
 // inlined into (`holder`), the line of the call (`call_line`) and the
 // function whose code holds it (`within`), each null for a function.
 jet_cli_perf_instructions_json: fn(id: String, read: JetCLIPerfInstructions, shown: [JetCLIPerfShown], sampler: JetCLIPerfSamplerNamed?) -> CanonicalJSON Never! {
-    functions := [CanonicalJSON]{}
+    ^functions: [CanonicalJSON]{}
     loop view in shown {
         listed: read.functions[view.index]
         whole: jet_cli_perf_run_counted(listed, view.run)

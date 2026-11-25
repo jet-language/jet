@@ -14,7 +14,7 @@ kit_steps_json_normalizer: fn(value: String) -> KitJSONNormalization? {
 }
 
 kit_steps_json_space: fn(bytes: [U8], start: Int) -> Int {
-    i := start
+    ^i: start
     loop i < bytes.len() {
         byte: Int{bytes[i]}
         if byte != 32 && byte != 9 && byte != 10 && byte != 13 -> break
@@ -27,9 +27,9 @@ kit_steps_json_space: fn(bytes: [U8], start: Int) -> Int {
 // It never decodes values, accepts syntax, or re-renders surrounding bytes.
 kit_steps_json_span_end: fn(bytes: [U8], start: Int) -> Int {
     first: Int{bytes[start]}
-    quoted := first == 34
-    containers := if first == 91 || first == 123 -> 1 else -> 0
-    i := if quoted || containers > 0 -> start + 1 else -> start
+    ^quoted: first == 34
+    ^containers: if first == 91 || first == 123 -> 1 else -> 0
+    ^i: if quoted || containers > 0 -> start + 1 else -> start
     loop i < bytes.len() {
         byte: Int{bytes[i]}
         if quoted {
@@ -74,7 +74,7 @@ kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth:
     if tree == {
         .Object(_) -> {
             if !part.starts_with(".") -> return Val("JSON normalization selected a non-array")
-            position := kit_steps_json_space(bytes, start + 1)
+            ^position: kit_steps_json_space(bytes, start + 1)
             loop position < bytes.len() && bytes[position] != (U8{125}) {
                 key_end: kit_steps_json_span_end(bytes, position)
                 key_text: String.from_bytes(bytes.slice(position, key_end)) ?? return Val("JSON normalization key decode failed")
@@ -102,7 +102,7 @@ kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth:
             if items.len() == 0 || wanted >= items.len() {
                 return Val("JSON normalization array selection is empty or missing")
             }
-            position := kit_steps_json_space(bytes, start + 1)
+            ^position: kit_steps_json_space(bytes, start + 1)
             loop (index, item) in items {
                 if wanted == -1 || index == wanted {
                     error: kit_steps_json_collect_spans(bytes, item, parts, depth + 1, position, kind, normalizer, spans)
@@ -119,7 +119,7 @@ kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth:
 }
 
 kit_steps_json_normalize: fn(text: String, stream: String, rules: [KitJSONNormalization]) -> KitJSONResult {
-    applies := false
+    ^applies: false
     loop rule in rules {
         if rule.stream == stream -> applies = true
     }
@@ -134,7 +134,7 @@ kit_steps_json_normalize_lines: fn(text: String, stream: String, rules: [KitJSON
     if !text.contains("\n") {
         return KitJSONResult{text: "", error: "JSON normalization parse: {error}"}
     }
-    pieces := [String]{}
+    ^pieces: [String]{}
     loop line in text.split("\n") {
         if line.trim() == "" {
             pieces.push(line.copy())
@@ -150,7 +150,7 @@ kit_steps_json_normalize_lines: fn(text: String, stream: String, rules: [KitJSON
 
 kit_steps_json_normalize_document: fn(text: String, tree: Dyn, stream: String, rules: [KitJSONNormalization]) -> KitJSONResult {
     bytes: text.bytes()
-    spans := [KitJSONSpan]{}
+    ^spans: [KitJSONSpan]{}
     start: kit_steps_json_space(bytes, 0)
     loop (index, rule) in rules {
         if rule.stream != stream -> next
@@ -162,8 +162,8 @@ kit_steps_json_normalize_document: fn(text: String, tree: Dyn, stream: String, r
         }
     }
     spans.sort_by(fn(span) { span.start })
-    pieces := [String]{}
-    position := 0
+    ^pieces: [String]{}
+    ^position: 0
     loop span in spans {
         // An outer selected container already replaces any selected child.
         if span.start < position -> next

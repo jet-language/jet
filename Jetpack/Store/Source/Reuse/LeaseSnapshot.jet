@@ -159,9 +159,9 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
             },
         )
     }
-    sealed_digest := entry.envelope.output_hash
+    ^sealed_digest: entry.envelope.output_hash
     if !direct_cas {
-        hardlinks := [String:String]{}
+        ^hardlinks: [String:String]{}
         store_copy_snapshot_node(entry.out, snapshot_root, hardlinks)
         digest: pkg_try_output_hash_of(snapshot_root) ?? return Err(StoreError.Other(err.message()))
         if digest != entry.envelope.output_hash {
@@ -178,14 +178,14 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
         .None -> store_nix_store_projection_for_entry(verification, roots, entry, snapshot_root)
     }
     if direct_cas -> store_reuse_validate_direct_projection_seals(verification, roots, projections)
-    output_sources := [LeaseOutputSource]{LeaseOutputSource{output_root: entry.out, source: snapshot_root}}
-    seen_digests := [String]{entry.envelope.output_hash}
+    ^output_sources: [LeaseOutputSource]{LeaseOutputSource{output_root: entry.out, source: snapshot_root}}
+    ^seen_digests: [String]{entry.envelope.output_hash}
     output_names: store_sorted_keys(entry.named_outputs)
     loop name in output_names {
         digest: entry.named_outputs[name]
         if seen_digests.contains(digest) -> next
         seen_digests.push(digest.copy())
-        source := ""
+        ^source: ""
         loop projection in projections {
             if source == "" && projection.digest == digest -> source = projection.source
         }
@@ -195,7 +195,7 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
         output_sources.push(LeaseOutputSource{output_root: store_reuse_object_path(roots, digest), source: source})
     }
     opened: store_reuse_open_nix_projection_sources(projections)
-    leased_output_roots := [LeasedOutputRoot]{}
+    ^leased_output_roots: [LeasedOutputRoot]{}
     loop output in output_sources {
         if store_reuse_same_path(output.source, snapshot_root) {
             if sys.family() == "windows" {
@@ -222,10 +222,10 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
             }
         }
     }
-    bin_output_root := String?{None}
-    bin_output_index := Int?{None}
-    bin_relative := String?{None}
-    projected_bin_root := String?{None}
+    ^bin_output_root: String?{None}
+    ^bin_output_index: Int?{None}
+    ^bin_relative: String?{None}
+    ^projected_bin_root: String?{None}
     if entry.bin != "" {
         loop index in 0..<output_sources.len() {
             if bin_output_root != None -> break
@@ -240,16 +240,16 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
             }
         }
     }
-    executables := store_reuse_open_snapshot_executables(projected_bin_root ?? snapshot_root, bin_relative)
+    ^executables: store_reuse_open_snapshot_executables(projected_bin_root ?? snapshot_root, bin_relative)
     bin_root_fd: if bin_output_index == {
         .Val(index) -> leased_output_roots[index].child_fd
         .None -> None
     }
     wrappers: if direct_cas -> ExecWrappers?{None} else -> store_reuse_create_exec_wrappers(lease_snapshot_root, executables, bin_root_fd, bin_relative ?? "")
-    protocol_lease_id := ""
-    protocol_generation := 0
-    protocol_owner_scope := ""
-    protocol_owner_lock := RuntimeLock?{None}
+    ^protocol_lease_id: ""
+    ^protocol_generation: 0
+    ^protocol_owner_scope: ""
+    ^protocol_owner_lock: RuntimeLock?{None}
     if !direct_cas {
         protocol: ExecutableLeaseProtocol.open(roots.root)
         protocol_lease_id = protocol.new_lease_id()
@@ -261,7 +261,7 @@ store_reuse_build_lease: fn(verification: StoreVerification, roots: HangarRoots,
         protocol_generation = receipt.generation
         protocol_owner_lock = Val(prepared.owner_lock.move())
     }
-    wrapper_dir := LeasedDirectory?{None}
+    ^wrapper_dir: LeasedDirectory?{None}
     if wrappers == {
         .Val(found) -> { wrapper_dir = Val(found.directory.move()) }
         .None -> {}
@@ -314,7 +314,7 @@ store_reuse_binding_index: fn(bindings: [NixProjectionBinding], source: String) 
 store_reuse_open_snapshot_executables: fn(snapshot_root: String, bin: String?) -> [SnapshotFile] StoreError! {
     relative: bin ?? return Ok([SnapshotFile]{})
     path: files.join(snapshot_root, relative)
-    out := [SnapshotFile]{}
+    ^out: [SnapshotFile]{}
     if !files.is_dir(path) -> return Ok(out)
     entries: files.list_dir(path)
     loop entry in entries {
@@ -329,15 +329,15 @@ store_reuse_open_snapshot_executables: fn(snapshot_root: String, bin: String?) -
 // The digest of every executable, read through its opened handle in place:
 // the lease keeps these handles open.
 store_reuse_executable_lease_members: fn(executables: ^[SnapshotFile]) -> [LeaseMember] StoreError! {
-    members := [LeaseMember]{}
+    ^members: [LeaseMember]{}
     loop index in 0..<executables.len() {
         relative: executables[index].relative
         if executables[index].file == None {
             return Err(StoreError.Other("lease executable `{relative}` lost its handle"))
         }
-        if ^executables[index].file == .Val(input) {
+        if executables[index].file.in_place() == .Val(input) {
             input.seek(0)
-            hasher := StreamingSHA256.new()
+            ^hasher: StreamingSHA256.new()
             loop {
                 chunk: input.read_bytes(65536)
                 if chunk.len() == 0 -> break
@@ -378,7 +378,7 @@ store_reuse_create_exec_wrappers: fn(snapshot_root: String, executables: [Snapsh
     mount: store_reuse_find_system_tool("mount")
     shell: store_reuse_find_system_tool("sh")
     argv: [String]{unshare, "--user", "--map-root-user", "--mount", "--propagation", "private", shell, "-c", STORE_LEASE_KEEPER_SCRIPT, "jetpack-lease-keeper", mount, mountpoint}
-    child := process.cmd(argv).stdin(.Stream).stdout(.Stream).stderr(.Stream).spawn()
+    ^child: process.cmd(argv).stdin(.Stream).stdout(.Stream).stderr(.Stream).spawn()
     ready: store_reuse_keeper_line(child)
     if ready.trim() != "ready" {
         return Err(store_reuse_wrapper_keeper_error(child, "creating private executable mount"))
@@ -408,7 +408,7 @@ store_reuse_keeper_line: fn(child: ProcessChild) -> String Never! {
 
 // The keeper's stderr names the failure.
 store_reuse_wrapper_keeper_error: fn(child: ^^ProcessChild, action: String) -> StoreError Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in child.stderr.lines() -> lines.push(line)
     if child.wait() == {
         .Err(_) -> {}

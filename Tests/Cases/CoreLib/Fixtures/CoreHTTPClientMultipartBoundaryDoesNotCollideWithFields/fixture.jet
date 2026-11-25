@@ -21,8 +21,8 @@ multipart_test: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     peer: task {
-        stream := net.tcp_accept(listener) ?? panic("accept")
-        request := [U8]{}
+        ^stream: net.tcp_accept(listener) ?? panic("accept")
+        ^request: [U8]{}
         loop {
             chunk: stream.read_bytes(4096, deadline: 5s) ?? panic("read request")
             assert(chunk.len() != 0, "multipart request ended before body")
@@ -52,7 +52,7 @@ multipart_test: fn() {
     assert(request_parts.found, "headers/body separator")
     headers: request_parts.head
     body: request_parts.tail
-    boundary := ""
+    ^boundary: ""
     prefix: "content-type: multipart/form-data; boundary="
     loop line in headers.lines() {
         if line.starts_with(prefix) {

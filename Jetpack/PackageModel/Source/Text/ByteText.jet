@@ -59,7 +59,7 @@ pkg_bytes_space_width: fn(raw: [U8], at: Int) -> Int Never! {
 
 // The first offset at or after `at` that does not start a White_Space scalar.
 pkg_bytes_skip_space: fn(raw: [U8], at: Int) -> Int Never! {
-    cursor := at
+    ^cursor: at
     loop {
         width: pkg_bytes_space_width(raw, cursor)
         if width == 0 -> return cursor
@@ -100,7 +100,7 @@ pkg_text_has_control: fn(value: String) -> Bool Never! {
 // ASCII-only lowercase (`str::to_ascii_lowercase`); other scalars unchanged.
 pkg_ascii_lower: fn(value: String) -> String Never! {
     raw: value.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in raw {
         code: Int{byte}
         out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)

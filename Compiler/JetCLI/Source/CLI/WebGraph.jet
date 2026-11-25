@@ -210,7 +210,7 @@ jet_cli_web_const_text: fn(tables: ASTTables, args: [CallArg], index: Int) -> St
 
 jet_cli_web_literal: fn(tables: ASTTables, expression: ExprNode) -> String? {
     if ast_expr(tables, expression) == .Str(parts, _, _) {
-        text := ""
+        ^text: ""
         loop part in parts {
             if part == .Lit(value) -> text = "{text}{value}" else -> return None
         }
@@ -326,12 +326,12 @@ jet_cli_web_island_identity: fn(path: String, handler: String) -> String {
 jet_cli_web_pending_boundary_id: fn(path: String, handler: String) -> String {
     bytes: jet_cli_web_identity_key("pending-boundary", path, handler).bytes()
     digest: sha256_bytes(bytes[0..<bytes.len()])
-    number := [Int]{}
+    ^number: [Int]{}
     loop index in 0..<8 -> number.push(Int{digest[index]})
-    digits := ""
-    more := true
+    ^digits: ""
+    ^more: true
     loop more {
-        remainder := 0
+        ^remainder: 0
         more = false
         loop index in 0..<number.len() {
             current: remainder * 256 + number[index]
@@ -356,7 +356,7 @@ jet_cli_web_same_precedence: fn(left: String, right: String) -> Bool {
 }
 
 jet_cli_web_new_route: fn(path: String, handler: String, render: String, override_mode: String?, provenance: String, span: Span) -> JetCLIWebRoute {
-    route := JetCLIWebRoute{path: path, handler: handler, route_identity: jet_cli_web_route_identity(path, handler), precedence: jet_cli_web_precedence_name(path), render: render, provenance: provenance, span: span}
+    ^route: JetCLIWebRoute{path: path, handler: handler, route_identity: jet_cli_web_route_identity(path, handler), precedence: jet_cli_web_precedence_name(path), render: render, provenance: provenance, span: span}
     if override_mode == .Val(mode) {
         route.mode = mode
         route.reason = [String]{"explicit render mode `{mode}`"}
@@ -394,7 +394,7 @@ jet_cli_web_collect_functions: fn(items: [Item], out: ^[Func]) {
 }
 
 jet_cli_web_user_functions: fn(modules: [JetDriverDocModule]) -> [Func] {
-    functions := [Func]{}
+    ^functions: [Func]{}
     loop doc_module in modules {
         if doc_module.alias == "" -> jet_cli_web_collect_functions(doc_module.items, functions)
     }
@@ -418,7 +418,7 @@ JetCLIWebFunction: struct {
 jet_cli_web_module_function: fn(modules: [JetDriverDocModule], name: String) -> JetCLIWebFunction? {
     loop doc_module in modules {
         if doc_module.alias != "" -> next
-        declared := [Func]{}
+        ^declared: [Func]{}
         jet_cli_web_collect_functions(doc_module.items, declared)
         if jet_cli_web_function(declared, name) == .Val(function) {
             return Val(JetCLIWebFunction{tables: doc_module.tables, function: function})
@@ -523,11 +523,11 @@ jet_cli_web_resumable: fn(ty: Type, named: [String]) -> Bool {
 // The wire contract of a server function named `name`.
 jet_cli_web_contract: fn(function: Func?) -> JetCLIWebContract {
     known: function ?? return JetCLIWebContract{input: "", output: "", error: "", effects: [String]{}, middleware: [String]{}}
-    params := [String]{}
+    ^params: [String]{}
     loop parameter in known.params {
         if parameter.name != "self" -> params.push("{parameter.name}:{type_name(parameter.ty)}")
     }
-    input := "Unit"
+    ^input: "Unit"
     if {
         params.len() == 1 -> {
             loop parameter in known.params {
@@ -536,8 +536,8 @@ jet_cli_web_contract: fn(function: Func?) -> JetCLIWebContract {
         }
         params.len() > 1 -> { input = "({params.join(",")})" }
     }
-    output := ""
-    error := ""
+    ^output: ""
+    ^error: ""
     if failure_contract_of_function(known.return_type, known.return_type_span) == {
         .Default(success, failure) | .Explicit(success, failure) | .Inferred(success, failure) -> {
             output = type_name(success)
@@ -556,7 +556,7 @@ jet_cli_web_contract: fn(function: Func?) -> JetCLIWebContract {
             error = type_name(target)
         }
     }
-    effects := [String]{}
+    ^effects: [String]{}
     if known.declared_effects == .Val(entries) {
         loop entry in entries -> effects.push(entry.name)
     }
@@ -566,7 +566,7 @@ jet_cli_web_contract: fn(function: Func?) -> JetCLIWebContract {
 // The solved effect row of `name`: the entry module's own function first, then
 // any user module's; a function sema did not summarize keeps its declared row.
 jet_cli_web_function_effects: fn(modules: [JetDriverDocModule], entry_identity: String, function: Func) -> [String] {
-    identities := [String:String]{}
+    ^identities: [String:String]{}
     loop doc_module in modules -> identities[doc_module.module_identity] = ""
     loop pass in 0..<2 {
         loop doc_module in modules {
@@ -578,7 +578,7 @@ jet_cli_web_function_effects: fn(modules: [JetDriverDocModule], entry_identity: 
             }
         }
     }
-    effects := [String]{}
+    ^effects: [String]{}
     if function.declared_effects == .Val(entries) {
         loop entry in entries -> effects.push(entry.name)
     }
@@ -624,7 +624,7 @@ jet_cli_web_verb: fn(method: String) -> String? {
 }
 
 jet_cli_web_trim_slashes: fn(text: String) -> String {
-    trimmed := text.copy()
+    ^trimmed: text.copy()
     loop {
         if !trimmed.ends_with("/") -> break
         trimmed = trimmed.slice(0, trimmed.len() - 1)
@@ -707,7 +707,7 @@ jet_cli_web_apply: fn(tables: ASTTables, method: String, args: [CallArg], span: 
         return
     }
     if method == "action" || method == "form" || method == "data" || method == "loader" {
-        name := jet_cli_web_const_text(tables, args, 0) ?? method
+        ^name: jet_cli_web_const_text(tables, args, 0) ?? method
         if method == "loader" {
             name = jet_cli_web_handler(tables, args, 0) ?? jet_cli_web_const_text(tables, args, 0) ?? method
         }
@@ -737,13 +737,13 @@ jet_cli_web_apply: fn(tables: ASTTables, method: String, args: [CallArg], span: 
         if jet_cli_web_struct_mount(tables, args, functions) == .Val(mounted) {
             prefix: if args.len() == 2 -> jet_cli_web_const_text(tables, args, 0) ?? "<dynamic>" else -> ""
             target: if mounted == "" -> "<value>" else -> mounted
-            row := jet_cli_web_row("", jet_cli_web_trim_slashes(prefix), target, "marked", span)
+            ^row: jet_cli_web_row("", jet_cli_web_trim_slashes(prefix), target, "marked", span)
             row.mounted = mounted
             walk.graph.table.push(row)
             return
         }
-        effects := [String]{}
-        security := [String]{}
+        ^effects: [String]{}
+        ^security: [String]{}
         if jet_cli_web_const_text(tables, args, 2) == .Val(row) -> effects.push(row)
         if jet_cli_web_const_text(tables, args, 3) == .Val(rule) -> security.push(rule)
         prefix: jet_cli_web_const_text(tables, args, 0) ?? "/"
@@ -839,7 +839,7 @@ jet_cli_web_variant_name: fn(tables: ASTTables, element: ExprNode) -> String? {
 // The variant names a literal list of enum values spells.
 jet_cli_web_variant_names: fn(tables: ASTTables, expression: ExprNode) -> [String]? {
     elements: jet_cli_web_list_elements(tables, expression) ?? return None
-    names := [String]{}
+    ^names: [String]{}
     loop element in elements {
         name: jet_cli_web_variant_name(tables, element) ?? return None
         names.push(name)
@@ -849,7 +849,7 @@ jet_cli_web_variant_names: fn(tables: ASTTables, expression: ExprNode) -> [Strin
 
 jet_cli_web_int_list: fn(tables: ASTTables, expression: ExprNode) -> [Int]? {
     elements: jet_cli_web_list_elements(tables, expression) ?? return None
-    numbers := [Int]{}
+    ^numbers: [Int]{}
     loop element in elements {
         number: jet_cli_web_const_int(tables, element) ?? return None
         numbers.push(number)
@@ -924,7 +924,7 @@ jet_cli_web_expand_roots: fn(walk: ^JetCLIWebWalk, roots: [AppRouteRoot]) {
                 stem: if file.path.ends_with(".jet") -> file.path.slice(0, file.path.len() - 4) else -> file.path
                 handler: stem.replace("/", "_").replace("\\", "_").replace("[", "_").replace("]", "_")
                 jet_cli_web_record_route(walk, jet_cli_web_new_route(address.path, handler, render.copy(), override_mode.copy(), "{given.root}/{file.path}", given.span))
-                row := jet_cli_web_row("GET", address.path, "page", "page", Span{start: 0, end: 0})
+                ^row: jet_cli_web_row("GET", address.path, "page", "page", Span{start: 0, end: 0})
                 row.file = "{given.root}/{file.path}"
                 walk.graph.table.push(row)
             }
@@ -940,7 +940,7 @@ jet_cli_web_marker_route: fn(tables: ASTTables, marker: Marker) -> [String]? {
     parts: marker.name.split(".").to_list()
     if parts.len() < 2 -> return None
     verb: parts[parts.len() - 1].lower()
-    texts := [String]{}
+    ^texts: [String]{}
     loop argument in marker.args {
         if argument == .Expr(value) -> texts.push(jet_cli_web_literal(tables, value) ?? "<dynamic>")
     }
@@ -955,13 +955,13 @@ jet_cli_web_marker_route: fn(tables: ASTTables, marker: Marker) -> [String]? {
 // `mount(value)`: each marked method of the value's struct is one row under
 // the mount prefix, in the struct's method order, written where it is marked.
 jet_cli_web_expand_mounts: fn(modules: [JetDriverDocModule], table: ^[JetCLIWebRow]) {
-    expanded := [JetCLIWebRow]{}
+    ^expanded: [JetCLIWebRow]{}
     loop row in table {
         if row.form != "marked" || row.mounted == "" {
             expanded.push(row.copy())
             next
         }
-        found := false
+        ^found: false
         loop doc_module in modules {
             if doc_module.alias != "" -> next
             definition: jet_cli_web_find_struct(doc_module.items, row.mounted) ?? next
@@ -969,7 +969,7 @@ jet_cli_web_expand_mounts: fn(modules: [JetDriverDocModule], table: ^[JetCLIWebR
             loop method in definition.methods {
                 loop marker in method.markers {
                     route: jet_cli_web_marker_route(doc_module.tables, marker) ?? next
-                    marked := jet_cli_web_row(route[0], "{row.address}{route[1]}", "{row.mounted}.{method.name}", "marked", marker.span)
+                    ^marked: jet_cli_web_row(route[0], "{row.address}{route[1]}", "{row.mounted}.{method.name}", "marked", marker.span)
                     marked.file = doc_module.path
                     expanded.push(marked)
                 }
@@ -1017,7 +1017,7 @@ jet_cli_web_route_function: fn(modules: [JetDriverDocModule], route: JetCLIWebRo
     if jet_cli_web_module_function(modules, route.handler) == .Val(found) -> return Val(found)
     loop doc_module in modules {
         if doc_module.alias != "" || !doc_module.path.ends_with(route.provenance) -> next
-        page := [Func]{}
+        ^page: [Func]{}
         jet_cli_web_collect_functions(doc_module.items, page)
         function: jet_cli_web_function(page, "page") ?? return None
         return Val(JetCLIWebFunction{tables: doc_module.tables, function: function})
@@ -1029,7 +1029,7 @@ jet_cli_web_route_function: fn(modules: [JetDriverDocModule], route: JetCLIWebRo
 // fields under the JSON codec) or a `search`/`query` input.
 jet_cli_web_route_inputs: fn(modules: [JetDriverDocModule], handler: JetCLIWebFunction, route: ^JetCLIWebRoute) {
     function: handler.function
-    used := [Int]{}
+    ^used: [Int]{}
     loop part in sema_app_route_parts(route.path) {
         if part.kind == 0 -> next
         loop (index, parameter) in function.params {
@@ -1041,14 +1041,14 @@ jet_cli_web_route_inputs: fn(modules: [JetDriverDocModule], handler: JetCLIWebFu
     }
     loop (index, parameter) in function.params {
         if used.contains(index) || parameter.name == "data" -> next
-        record := JetCLIWebRecord?{None}
+        ^record: JetCLIWebRecord?{None}
         if jet_cli_web_named(parameter.ty) == .Val(name) {
             record = jet_cli_web_struct(modules, name)
         }
         if record == None && parameter.name != "search" && parameter.name != "query" -> next
         if {
             record == .Val(found) -> {
-                fields := [JetCLIWebField]{}
+                ^fields: [JetCLIWebField]{}
                 loop field in found.definition.fields {
                     if field.computed != None -> next
                     fields.push(jet_cli_web_route_field(found.tables, field.name, field.ty, field.default, !jet_cli_web_is_option(field.ty) && field.default == None))
@@ -1068,7 +1068,7 @@ jet_cli_web_route_contracts: fn(modules: [JetDriverDocModule], functions: [Func]
     loop index in 0..<graph.routes.len() {
         path: graph.routes[index].path
         handler: graph.routes[index].handler
-        loader_index := -1
+        ^loader_index: -1
         loop (action_index, action) in graph.actions {
             if (action.kind == "loader" || action.kind == "data") && jet_cli_web_action_matches(path, handler, action) {
                 loader_index = action_index
@@ -1076,7 +1076,7 @@ jet_cli_web_route_contracts: fn(modules: [JetDriverDocModule], functions: [Func]
         }
         if loader_index >= 0 {
             action: graph.actions[loader_index]
-            data_type := if action.contract.output == "" -> "Unit" else -> action.contract.output
+            ^data_type: if action.contract.output == "" -> "Unit" else -> action.contract.output
             if jet_cli_web_function(functions, action.handler) == .Val(loader) && loader.return_type == .Val(returned) {
                 data_type = if returned == .Result(ok, _) -> type_name(ok) else -> type_name(returned)
             }
@@ -1096,7 +1096,7 @@ jet_cli_web_sort_routes: fn(routes: ^[JetCLIWebRoute]) {
 jet_cli_web_effect_root: fn(effect_name: String) -> String { effect_name.split(".").to_list()[0] }
 
 jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: String, functions: [Func], serializable: [String], graph: ^JetCLIWebGraph) {
-    policy_cache := String?{None}
+    ^policy_cache: String?{None}
     loop policy in graph.cache {
         if jet_cli_web_cache_parse(policy) == .Val(cache) -> policy_cache = Val(cache)
     }
@@ -1104,16 +1104,16 @@ jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: Stri
         path: graph.routes[index].path
         handler: graph.routes[index].handler
         handler_fn: jet_cli_web_function(functions, handler)
-        effects := [String]{}
-        captures_from := [Func]{}
+        ^effects: [String]{}
+        ^captures_from: [Func]{}
         if handler_fn == .Val(function) {
             loop row in jet_cli_web_function_effects(modules, entry_identity, function) {
                 effects.push(row)
             }
             captures_from.push(function.copy())
         }
-        loader := String?{None}
-        form := String?{None}
+        ^loader: String?{None}
+        ^form: String?{None}
         loop action in graph.actions {
             if !jet_cli_web_action_matches(path, handler, action) -> next
             is_form: action.kind == "form" || action.kind == "action"
@@ -1127,8 +1127,8 @@ jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: Stri
             }
         }
         effects = semindex_sorted_unique(effects)
-        browser := false
-        runtime := false
+        ^browser: false
+        ^runtime: false
         loop row in effects {
             root: jet_cli_web_effect_root(row)
             if root == "Browser" -> browser = true
@@ -1136,7 +1136,7 @@ jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: Stri
                 runtime = true
             }
         }
-        reactive := false
+        ^reactive: false
         if handler_fn == .Val(function) {
             if function.web_marker == .Val(marker) && marker == WebPartitionMarker.JS {
                 browser = true
@@ -1153,7 +1153,7 @@ jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: Stri
         }
         override_mode: graph.routes[index].override_mode
         mode: override_mode ?? derived
-        reason := [String]{}
+        ^reason: [String]{}
         if override_mode == .Val(explicit) -> reason.push("explicit render mode `{explicit}`") else {
             if browser -> reason.push("handler `{handler}` reaches Browser")
             if reactive -> reason.push("handler `{handler}` is reactive")
@@ -1171,10 +1171,10 @@ jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: Stri
         }
         island_mode: mode == "server+island" || mode == "client"
         if interactive || island_mode {
-            captures := [JetCLIWebCapture]{}
+            ^captures: [JetCLIWebCapture]{}
             loop function in captures_from {
                 loop parameter in function.params {
-                    known := false
+                    ^known: false
                     loop capture in captures {
                         if capture.name == parameter.name -> known = true
                     }
@@ -1184,7 +1184,7 @@ jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: Stri
                 }
             }
             captures.sort_by(fn(left: JetCLIWebCapture, right: JetCLIWebCapture) { left.name <=> right.name })
-            all := true
+            ^all: true
             loop capture in captures {
                 if !capture.serializable -> all = false
             }
@@ -1273,7 +1273,7 @@ jet_cli_web_form_model: fn(tables: ASTTables, expression: ExprNode) -> String? {
 }
 
 jet_cli_web_form_label: fn(name: String) -> String {
-    words := [String]{}
+    ^words: [String]{}
     loop part in name.split("_") {
         if part == "" -> next
         words.push("{part.slice(0, 1).upper()}{part.slice(1, part.len())}")
@@ -1284,7 +1284,7 @@ jet_cli_web_form_label: fn(name: String) -> String {
 // A `form(model, action)` call read over the AST `tables` of its module.
 jet_cli_web_form: fn(tables: ASTTables, modules: [JetDriverDocModule], functions: [Func], call_args: [CallArg], source: String) -> JetCLIWebForm? {
     if call_args.len() != 2 -> return None
-    action_index := 1
+    ^action_index: 1
     loop (index, argument) in call_args {
         if argument.label == .Val(given) && given.name == "action" {
             action_index = index
@@ -1295,12 +1295,12 @@ jet_cli_web_form: fn(tables: ASTTables, modules: [JetDriverDocModule], functions
     action: jet_cli_web_const_text(tables, call_args, action_index) ?? jet_cli_web_handler(tables, call_args, action_index) ?? return None
     if model == "" || action == "" -> return None
     record: jet_cli_web_struct(modules, model) ?? return None
-    fields := [JetCLIWebFormField]{}
+    ^fields: [JetCLIWebFormField]{}
     loop field in record.definition.fields {
         if field.computed != None -> next
         base: if field.ty == .Option(inner) -> inner else -> field.ty
-        ty := type_name(base)
-        control := "Text"
+        ^ty: type_name(base)
+        ^control: "Text"
         if base == {
             .Int | .IntN(_, _) -> {
                 ty = "Int"
@@ -1324,8 +1324,8 @@ jet_cli_web_form: fn(tables: ASTTables, modules: [JetDriverDocModule], functions
 
 jet_cli_web_query: fn(tables: ASTTables, expression: ExprNode, source: String) -> JetCLIWebQuery? {
     found: jet_cli_web_namespace_call(tables, expression, "query") ?? return None
-    key := ""
-    footprint := ""
+    ^key: ""
+    ^footprint: ""
     if {
         found.kind == "load" -> {
             key = jet_cli_web_const_text(tables, found.args, 0) ?? ""
@@ -1344,7 +1344,7 @@ jet_cli_web_store: fn(tables: ASTTables, expression: ExprNode, source: String) -
     found: jet_cli_web_namespace_call(tables, expression, "store") ?? return None
     name: jet_cli_web_const_text(tables, found.args, 0) ?? return None
     if name.trim() == "" -> return None
-    limit := "default"
+    ^limit: "default"
     if found.kind == "with_history" {
         limit = "<dynamic>"
         if found.args.len() > 2 && jet_cli_web_const_int(tables, found.args[2].expr) == .Val(count) {
@@ -1389,17 +1389,17 @@ jet_cli_web_note_use: fn(tables: ASTTables, uses: ^JetCLIWebUses, node: ExprNode
 // Each user module's functions are walked over that module's AST tables, in
 // jet_cli_web_user_functions order.
 jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], graph: ^JetCLIWebGraph) {
-    uses := JetCLIWebUses{queries: [JetCLIWebQuery]{}, stores: [JetCLIWebStore]{}, forms: [JetCLIWebForm]{}, images: [JetCLIWebImage]{}}
+    ^uses: JetCLIWebUses{queries: [JetCLIWebQuery]{}, stores: [JetCLIWebStore]{}, forms: [JetCLIWebForm]{}, images: [JetCLIWebImage]{}}
     loop doc_module in modules {
         if doc_module.alias != "" -> next
-        module_functions := [Func]{}
+        ^module_functions: [Func]{}
         jet_cli_web_collect_functions(doc_module.items, module_functions)
         loop function in module_functions {
             ast_visit_body(doc_module.tables, function.body, fn(expression: ExprNode) { jet_cli_web_note_use(doc_module.tables, uses, expression, modules, functions, function.name) }, true)
         }
     }
-    queries := uses.queries
-    stores := uses.stores
+    ^queries: uses.queries
+    ^stores: uses.stores
     forms: uses.forms
     queries.sort_by(fn(left: JetCLIWebQuery, right: JetCLIWebQuery) { (left.key <=> right.key).then(left.footprint <=> right.footprint).then(left.source <=> right.source).then(left.kind <=> right.kind) })
     loop fact in queries {
@@ -1418,9 +1418,9 @@ jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], g
         graph.stores.push(fact)
     }
     // One fact per (model, action, function); the first call site wins.
-    kept := [JetCLIWebForm]{}
+    ^kept: [JetCLIWebForm]{}
     loop fact in forms {
-        seen := false
+        ^seen: false
         loop earlier in kept {
             if earlier.model == fact.model && earlier.action == fact.action && earlier.provenance == fact.provenance {
                 seen = true
@@ -1431,7 +1431,7 @@ jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], g
     kept.sort_by(fn(left: JetCLIWebForm, right: JetCLIWebForm) { (left.model <=> right.model).then(left.action <=> right.action).then(left.provenance <=> right.provenance) })
     graph.forms = kept
     // One node per (source, function).
-    images := uses.images
+    ^images: uses.images
     images.sort_by(fn(left: JetCLIWebImage, right: JetCLIWebImage) { (left.source <=> right.source).then(left.provenance <=> right.provenance) })
     loop fact in images {
         last: graph.images.len() - 1
@@ -1445,14 +1445,14 @@ jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], g
 // The application graph of the checked entry, or None when the entry has no
 // app `run: fn`.
 jet_cli_web_graph: fn(modules: [JetDriverDocModule], entry_identity: String) -> JetCLIWebGraph? {
-    entry_index := -1
+    ^entry_index: -1
     loop (index, doc_module) in modules {
         if doc_module.module_identity == entry_identity -> entry_index = index
     }
     if entry_index < 0 -> return None
     entry: modules[entry_index]
     functions: jet_cli_web_user_functions(modules)
-    walk := JetCLIWebWalk{graph: JetCLIWebGraph{entry: entry.path}}
+    ^walk: JetCLIWebWalk{graph: JetCLIWebGraph{entry: entry.path}}
     if {
         app_entry_run_fn(entry.items) == .Val(run) -> {
             jet_cli_web_walk_run(entry.tables, run, walk, functions)
@@ -1460,7 +1460,7 @@ jet_cli_web_graph: fn(modules: [JetDriverDocModule], entry_identity: String) -> 
         else -> {
             // A `run: fn` written without its `App` return is an app entry when its
             // chain starts at `app()`.
-            entry_functions := [Func]{}
+            ^entry_functions: [Func]{}
             jet_cli_web_collect_functions(entry.items, entry_functions)
             run: jet_cli_web_function(entry_functions, "run") ?? return None
             jet_cli_web_walk_run(entry.tables, run, walk, functions)
@@ -1469,10 +1469,10 @@ jet_cli_web_graph: fn(modules: [JetDriverDocModule], entry_identity: String) -> 
     }
     jet_cli_web_expand_roots(walk, entry.app_route_roots)
     jet_cli_web_expand_mounts(modules, walk.graph.table)
-    graph := walk.graph
+    ^graph: walk.graph
     jet_cli_web_route_contracts(modules, functions, graph)
     jet_cli_web_sort_routes(graph.routes)
-    serializable := [String]{}
+    ^serializable: [String]{}
     loop doc_module in modules {
         if doc_module.alias == "" {
             jet_cli_web_collect_serializable(doc_module.items, serializable)
@@ -1502,7 +1502,7 @@ jet_cli_web_field_value: fn(field: JetCLIWebField) -> JetCLIStatusValue {
 }
 
 jet_cli_web_route_value: fn(route: JetCLIWebRoute) -> JetCLIStatusValue {
-    loader := JetCLIStatusValue.Null
+    ^loader: JetCLIStatusValue.Null
     if route.loader == .Val(given) {
         loader = jet_cli_status_object(
             [JetCLIStatusField]{
@@ -1514,9 +1514,9 @@ jet_cli_web_route_value: fn(route: JetCLIWebRoute) -> JetCLIStatusValue {
             },
         )
     }
-    pending := JetCLIStatusValue.Null
+    ^pending: JetCLIStatusValue.Null
     if route.pending_boundary_id == .Val(id) -> pending = JetCLIStatusValue.Float{text: id}
-    island := JetCLIStatusValue.Null
+    ^island: JetCLIStatusValue.Null
     if route.island == .Val(given) {
         captures: loop capture in given.captures -> jet_cli_status_object(
             [JetCLIStatusField]{
@@ -1597,7 +1597,7 @@ jet_cli_web_contract_fields: fn(name: String, contract: JetCLIWebContract) -> [J
 }
 
 jet_cli_web_action_value: fn(action: JetCLIWebAction) -> JetCLIStatusValue {
-    fields := [JetCLIStatusField]{
+    ^fields: [JetCLIStatusField]{
         jet_cli_web_text("name", action.name),
         jet_cli_web_text("handler", action.handler),
         jet_cli_web_text("kind", action.kind),
@@ -1610,7 +1610,7 @@ jet_cli_web_action_value: fn(action: JetCLIWebAction) -> JetCLIStatusValue {
 }
 
 jet_cli_web_form_value: fn(form: JetCLIWebForm) -> JetCLIStatusValue {
-    fields := [JetCLIStatusField]{
+    ^fields: [JetCLIStatusField]{
         jet_cli_web_text("name", form.model),
         jet_cli_web_text("model", form.model),
         jet_cli_web_text("action", form.action),
@@ -1719,15 +1719,15 @@ jet_cli_web_graph_value: fn(graph: JetCLIWebGraph) -> JetCLIStatusValue {
 }
 
 jet_cli_web_image_settings_value: fn(settings: JetCLIWebImageSettings) -> JetCLIStatusValue {
-    formats := JetCLIStatusValue.Null
+    ^formats: JetCLIStatusValue.Null
     if settings.formats == .Val(names) -> formats = jet_cli_status_texts(names)
-    widths := JetCLIStatusValue.Null
+    ^widths: JetCLIStatusValue.Null
     if settings.widths == .Val(numbers) {
         widths = jet_cli_status_array(loop width in numbers -> jet_cli_status_int(width))
     }
-    quality := JetCLIStatusValue.Null
+    ^quality: JetCLIStatusValue.Null
     if settings.quality == .Val(number) -> quality = jet_cli_status_int(number)
-    enabled := JetCLIStatusValue.Null
+    ^enabled: JetCLIStatusValue.Null
     if settings.enabled == .Val(flag) -> enabled = jet_cli_status_bool(flag)
     jet_cli_status_object(
         [JetCLIStatusField]{
@@ -1761,16 +1761,16 @@ jet_cli_web_route_line: fn(route: JetCLIWebRoute) -> String {
 
 // Every text line of the graph, in report order.
 jet_cli_web_lines: fn(graph: JetCLIWebGraph) -> [String] {
-    lines := [String]{"web application graph — {graph.entry}", "hydration: {graph.hydration} (shared IR: true)"}
+    ^lines: [String]{"web application graph — {graph.entry}", "hydration: {graph.hydration} (shared IR: true)"}
     loop route in graph.routes {
         lines.push(jet_cli_web_route_line(route))
-        loader := ""
+        ^loader: ""
         if route.loader == .Val(given) {
             loader = " loader={given.handler} data={given.data_type} preload={given.preload} cache={given.cache_identity}"
         }
         lines.push("    route-contract: identity={route.route_identity} precedence={route.precedence} path=[{jet_cli_web_fields_text(route.path_params)}] search=[{jet_cli_web_fields_text(route.search_params)}] codec={route.search_codec}{loader} boundaries=pending:{route.pending ?? "-"} not_found:{route.not_found ?? "-"} error:{route.error ?? "-"}")
         reason: if route.reason.len() == 0 -> "unspecified" else -> route.reason.join("; ")
-        facts := "    render-facts: mode={route.mode} reason={reason} effects=[{route.effects.join(",")}] cache={route.cache}"
+        ^facts: "    render-facts: mode={route.mode} reason={reason} effects=[{route.effects.join(",")}] cache={route.cache}"
         if route.pending_boundary_id == .Val(id) -> facts = "{facts} pending_boundary_id={id}"
         if route.island == .Val(given) {
             facts = "{facts} island={given.identity} hydration=immediate"
@@ -1815,12 +1815,12 @@ jet_cli_web_lines: fn(graph: JetCLIWebGraph) -> [String] {
 jet_cli_web_graph_report: fn(result: JetDriverCompileResult, json: Bool) -> JetDriverVerbOutput {
     graph: jet_cli_web_graph(result.doc_modules, result.entry_module_identity)
     if json {
-        value := JetCLIStatusValue.Null
+        ^value: JetCLIStatusValue.Null
         if graph == .Val(found) -> value = jet_cli_web_graph_value(found)
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.web", true, [JetCLIStatusField]{jet_cli_status_field("web_app", value)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     found: graph ?? return JetDriverVerbOutput{stdout: "(none)\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    out := ""
+    ^out: ""
     loop line in jet_cli_web_lines(found) -> out = "{out}{line}\n"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
@@ -1852,17 +1852,17 @@ jet_cli_web_routes_report: fn(result: JetDriverCompileResult, json: Bool) -> Jet
         )
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.routes", true, [JetCLIStatusField]{jet_cli_web_text("entry", jet_cli_web_relative(base, found.entry)), jet_cli_status_field("routes", jet_cli_status_array(rows))})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    verb_width := 0
-    address_width := 0
-    target_width := 0
-    form_width := 0
+    ^verb_width: 0
+    ^address_width: 0
+    ^target_width: 0
+    ^form_width: 0
     loop row in found.table {
         if row.verb.len() > verb_width -> verb_width = row.verb.len()
         if row.address.len() > address_width -> address_width = row.address.len()
         if row.target.len() > target_width -> target_width = row.target.len()
         if row.form.len() > form_width -> form_width = row.form.len()
     }
-    out := "Route Table — {jet_cli_web_relative(base, found.entry)}\n"
+    ^out: "Route Table — {jet_cli_web_relative(base, found.entry)}\n"
     loop (index, row) in found.table {
         out = "{out}  {jet_cli_pad(row.verb, verb_width)}  {jet_cli_pad(row.address, address_width)}  {jet_cli_pad(row.target, target_width)}  {jet_cli_pad(row.form, form_width)}  {sites[index]}\n"
     }
@@ -1894,9 +1894,9 @@ jet_cli_web_row_path: fn(modules: [JetDriverDocModule], file: String) -> String 
 // The line a row is written at; a convention page row is its `page` function.
 jet_cli_web_row_line: fn(modules: [JetDriverDocModule], file: String, row: JetCLIWebRow) -> Int {
     index: jet_cli_web_row_module(modules, file) ?? return 1
-    start := row.span.start
+    ^start: row.span.start
     if row.file != "" && row.form == "page" {
-        functions := [Func]{}
+        ^functions: [Func]{}
         jet_cli_web_collect_functions(modules[index].items, functions)
         if jet_cli_web_function(functions, "page") == .Val(page) -> start = page.name_span.start
     }
@@ -1904,7 +1904,7 @@ jet_cli_web_row_line: fn(modules: [JetDriverDocModule], file: String, row: JetCL
 }
 
 jet_cli_web_located: fn(name: String, value: JetCLIStatusValue, span: Span, entry: String, source: String?) -> [JetCLIStatusField] {
-    fields := [JetCLIStatusField]{jet_cli_status_field(name, value), jet_cli_web_text("source", entry), jet_cli_status_field("span", jet_cli_expand_span(span, source))}
+    ^fields: [JetCLIStatusField]{jet_cli_status_field(name, value), jet_cli_web_text("source", entry), jet_cli_status_field("span", jet_cli_expand_span(span, source))}
     if source == .Val(text) {
         fields.push(jet_cli_status_field("line", jet_cli_status_int(diagnostic_line_at(text, span.start))))
         fields.push(jet_cli_status_field("column", jet_cli_status_int(diagnostic_column_at(text, span.start))))
@@ -1922,21 +1922,21 @@ jet_cli_expand_web: fn(modules: [JetDriverDocModule], entry_identity: String, js
     }
     source: jet_cli_expand_source(modules, graph.entry)
     routes: loop route in graph.routes -> {
-        fields := [JetCLIStatusField]{jet_cli_web_text("path", route.path), jet_cli_web_text("handler", route.handler), jet_cli_web_text("render", route.render)}
+        ^fields: [JetCLIStatusField]{jet_cli_web_text("path", route.path), jet_cli_web_text("handler", route.handler), jet_cli_web_text("render", route.render)}
         loop field in jet_cli_web_located("provenance", jet_cli_status_text(route.provenance), route.span, graph.entry, source) {
             fields.push(field)
         }
         jet_cli_status_object(fields)
     }
     actions: loop action in graph.actions -> {
-        fields := [JetCLIStatusField]{jet_cli_web_text("name", action.name), jet_cli_web_text("handler", action.handler), jet_cli_web_text("kind", action.kind)}
+        ^fields: [JetCLIStatusField]{jet_cli_web_text("name", action.name), jet_cli_web_text("handler", action.handler), jet_cli_web_text("kind", action.kind)}
         loop field in jet_cli_web_located("provenance", jet_cli_status_text(action.provenance), action.span, graph.entry, source) {
             fields.push(field)
         }
         jet_cli_status_object(fields)
     }
     mounts: loop mount in graph.mounts -> {
-        fields := [JetCLIStatusField]{jet_cli_web_text("prefix", mount.prefix), jet_cli_web_text("handler", mount.handler), jet_cli_status_field("effects", jet_cli_status_texts(mount.effects)), jet_cli_status_field("security", jet_cli_status_texts(mount.security))}
+        ^fields: [JetCLIStatusField]{jet_cli_web_text("prefix", mount.prefix), jet_cli_web_text("handler", mount.handler), jet_cli_status_field("effects", jet_cli_status_texts(mount.effects)), jet_cli_status_field("security", jet_cli_status_texts(mount.security))}
         loop field in jet_cli_web_located("provenance", jet_cli_status_text(mount.provenance), mount.span, graph.entry, source) {
             fields.push(field)
         }

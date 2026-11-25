@@ -16,24 +16,24 @@ use {
 // watches.
 compiler_hook_runtime_dir: fn() -> String {
     jet: hook_sys.get("JET") ?? (hook_process.which("jet") ?? panic("set JET to the compiler under test"))
-    parts := jet.split("/").to_list()
-    _ := parts.pop()
+    ^parts: jet.split("/").to_list()
+    ^_: parts.pop()
     "{parts.join("/")}/jet-runtime"
 }
 
 compiler_hook_errors: fn(file: String) -> [String] {
-    prepared := jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, false, None, JetDriverCompileMode.Program)
+    ^prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, false, None, JetDriverCompileMode.Program)
     native: if prepared.move() == {
         .Refused(refusal) -> {
             return [String]{refusal.stderr}
         }
         .Prepared(request, snapshot) -> {
-            selected := request
+            ^selected: request
             selected.eval_config.native = Val(jet_cli_native_session_at(compiler_hook_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
             JetCLIPrepared.Prepared{request: selected, snapshot: snapshot}
         }
     }
-    errors := [String]{}
+    ^errors: [String]{}
     checked: jet_cli_compile_prepared(native, None, None)
     if checked == {
         .Refused(refusal) -> { errors.push(refusal.stderr) }

@@ -72,7 +72,7 @@ jet_cli_perf_optional: fn(value: Dyn, key: String) -> Dyn? Never! {
 
 jet_cli_perf_object: fn(value: Dyn, required: [String], optional: [String], label: String) JetCLIReadError! {
     if value == .Object(fields) {
-        seen := [String:Bool]{}
+        ^seen: [String:Bool]{}
         loop field in fields {
             if seen.has_key(field.key) || (!required.contains(field.key) && !optional.contains(field.key)) {
                 return Err(jet_cli_read_error("{label} has duplicate or unsafe fields"))
@@ -126,7 +126,7 @@ jet_cli_perf_read_private: fn(path: String, limit: Int) -[FS.Read, Env, Time.Wai
     if !entry.is_file || entry.is_symlink {
         return Err(jet_cli_read_error("observation is not a regular file"))
     }
-    reader := perf_files.open(path, links: .Refuse) ?? return Err(jet_cli_read_error("cannot securely open observation `{path}`"))
+    ^reader: perf_files.open(path, links: .Refuse) ?? return Err(jet_cli_read_error("cannot securely open observation `{path}`"))
     before: reader.stat() ?? return Err(jet_cli_read_error("cannot inspect observation `{path}`"))
     if before.id != entry.id {
         return Err(jet_cli_read_error("observation changed before its secure open"))
@@ -140,7 +140,7 @@ jet_cli_perf_read_private: fn(path: String, limit: Int) -[FS.Read, Env, Time.Wai
     if before.owner != Val(perf_sys.getuid()) {
         return Err(jet_cli_read_error("observation belongs to another user"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(jet_cli_table_min(65536, limit + 1 - bytes.len())) ?? return Err(jet_cli_read_error("cannot read observation `{path}`"))
         if chunk.len() == 0 -> break
@@ -160,7 +160,7 @@ jet_cli_perf_process_stat: fn(pid: Int) -[FS.Read, Time.Wait]> String JetCLIRead
     if pid <= 0 || pid > 4294967295 {
         return Err(jet_cli_read_error("process id must be a nonzero u32"))
     }
-    reader := perf_files.open("/proc/{pid}/stat") ?? return Err(jet_cli_read_error("cannot verify process {pid} identity"))
+    ^reader: perf_files.open("/proc/{pid}/stat") ?? return Err(jet_cli_read_error("cannot verify process {pid} identity"))
     raw: reader.read_bytes(65537) ?? return Err(jet_cli_read_error("cannot read process identity"))
     if raw.len() > 65536 -> return Err(jet_cli_read_error("process identity exceeds its bound"))
     Ok(String.from_bytes(raw) ?? return Err(jet_cli_read_error("process identity is not UTF-8")))
@@ -196,7 +196,7 @@ jet_cli_perf_live_read: fn(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfLive JetCL
     stat: jet_cli_perf_process_stat(pid)
     path: perf_files.join(perf_sys.temp_dir(), "jet-observe-{pid}.json")
     bytes: jet_cli_perf_read_private(path, 1048576)
-    live := jet_live_decode(bytes) ?? return Err(jet_cli_read_error(err.message))
+    ^live: jet_live_decode(bytes) ?? return Err(jet_cli_read_error(err.message))
     if live.pid != pid {
         return Err(jet_cli_read_error("live snapshot does not belong to process {pid}"))
     }
@@ -222,7 +222,7 @@ jet_cli_perf_live_read: fn(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfLive JetCL
 jet_cli_perf_live_read_reaped: fn(pid: Int, stat: String, cpu_ns: Int?) -[FS.Read, Env, Time.Wait]> JetCLIPerfLive JetCLIReadError! {
     path: perf_files.join(perf_sys.temp_dir(), "jet-observe-{pid}.json")
     bytes: jet_cli_perf_read_private(path, 1048576)
-    live := jet_live_decode(bytes) ?? return Err(jet_cli_read_error(err.message))
+    ^live: jet_live_decode(bytes) ?? return Err(jet_cli_read_error(err.message))
     if live.pid != pid {
         return Err(jet_cli_read_error("live snapshot does not belong to process {pid}"))
     }

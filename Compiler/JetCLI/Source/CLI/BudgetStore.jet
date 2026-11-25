@@ -56,8 +56,8 @@ jet_cli_budget_plan_update: fn(root: String, baseline: String, report: Canonical
         return Err(jet_cli_budget_failure("baseline is absent; bootstrap with an explicit reason"))
     }
     jet_cli_budget_store_eligible(root, baseline, report, measurements, kind, current, accepted_at) ?? return Err(err)
-    prior_manifest := String?{None}
-    prior_head := String?{None}
+    ^prior_manifest: String?{None}
+    ^prior_head: String?{None}
     if !absent {
         prior_manifest = Val(jet_cli_budget_store_text(current, "manifest_id", "manifest_id") ?? return Err(err))
         prior_head = Val(jet_cli_budget_store_head(current) ?? return Err(err))
@@ -77,8 +77,8 @@ jet_cli_budget_apply_update: fn(root: String, plan: JetCLIBudgetUpdatePlan, repo
     // One lock over the whole store serializes every baseline's update.
     _owner: locks.lock("budget baseline") ?? return Err(jet_cli_budget_failure(err.message))
     current: jet_cli_budget_store_read_manifest(root, plan.baseline) ?? return Err(err)
-    manifest_id := String?{None}
-    head := String?{None}
+    ^manifest_id: String?{None}
+    ^head: String?{None}
     if current != .Null {
         manifest_id = Val(jet_cli_budget_store_text(current, "manifest_id", "manifest_id") ?? return Err(err))
         head = Val(jet_cli_budget_store_head(current) ?? return Err(err))
@@ -126,7 +126,7 @@ jet_cli_budget_store_evidence_check: fn(measurements: [CanonicalJSON], kind: Jet
     if measurements.len() == 0 {
         return Err(jet_cli_budget_failure("update report has no measurements"))
     }
-    regressed := false
+    ^regressed: false
     loop measurement in measurements {
         evidence: jet_cli_budget_store_evidence(measurement) ?? return Err(err)
         if kind == {
@@ -162,7 +162,7 @@ jet_cli_budget_store_evidence_check: fn(measurements: [CanonicalJSON], kind: Jet
 jet_cli_budget_store_eligible: fn(root: String, baseline: String, report: CanonicalJSON, measurements: [CanonicalJSON], kind: JetCLIBudgetUpdateKind, current: CanonicalJSON, at: String) JetCLIBudgetFailure! {
     content: jet_cli_budget_store_get(report, "content") ?? return Err(jet_cli_budget_failure("report content is absent"))
     bootstrap: jet_cli_budget_store_is_bootstrap(kind)
-    seen := [String]{}
+    ^seen: [String]{}
     loop candidate in measurements {
         budget_id: jet_cli_budget_store_text(candidate, "budget_id", "budget_id") ?? return Err(err)
         if seen.contains(budget_id) {
@@ -220,7 +220,7 @@ jet_cli_budget_store_generation: fn(root: String, manifest: CanonicalJSON, conte
     objects: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "baselines", "objects"}, false) ?? return Err(jet_cli_budget_failure(err.message))
     generations: jet_cli_budget_store_generations(manifest) ?? return Err(err)
     budget_id: jet_cli_budget_store_text(candidate, "budget_id", "budget_id") ?? return Err(err)
-    index := generations.len()
+    ^index: generations.len()
     loop index > 0 {
         index -= 1
         generation: generations[index]
@@ -304,10 +304,10 @@ jet_cli_budget_store_stale_after: fn(measurement: CanonicalJSON) -> Int JetCLIBu
 // The next manifest: the current generations and one new audited
 // generation whose CAS links name the current manifest and head.
 jet_cli_budget_store_next_manifest: fn(current: CanonicalJSON, plan: JetCLIBudgetUpdatePlan) -> CanonicalJSON JetCLIBudgetFailure! {
-    kind_name := "pass"
-    reason := CanonicalJSON.Null
-    bootstrap := false
-    accept_regression := false
+    ^kind_name: "pass"
+    ^reason: CanonicalJSON.Null
+    ^bootstrap: false
+    ^accept_regression: false
     if plan.kind == {
         .Pass -> {}
         .Bootstrap(text) -> {
@@ -346,9 +346,9 @@ jet_cli_budget_store_next_manifest: fn(current: CanonicalJSON, plan: JetCLIBudge
             CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(plan.report_id.copy())},
         },
     )
-    audit_fields := jet_cli_budget_fields(body)
+    ^audit_fields: jet_cli_budget_fields(body)
     audit_fields.push(CanonicalJSONField{key: "audit_id", value: CanonicalJSON.String(perf_stable_id(body))})
-    generations := [CanonicalJSON]{}
+    ^generations: [CanonicalJSON]{}
     if current != .Null {
         generations = jet_cli_budget_store_generations(current) ?? return Err(err)
     }
@@ -401,7 +401,7 @@ jet_cli_budget_store_read_manifest: fn(root: String, baseline: String) -> Canoni
 // The directory of a baseline's manifest: `ci/linux` lives at
 // `names/ci/linux.json`.
 jet_cli_budget_store_manifest_dir: fn(baseline: String) -> [String] Never! {
-    parts := [String]{".jet", "perf", "baselines", "names"}
+    ^parts: [String]{".jet", "perf", "baselines", "names"}
     segments: baseline.split("/").to_list()
     loop index in 0..<(segments.len() - 1) -> parts.push(segments[index].copy())  // copy: the split keeps its segments.
     parts
@@ -429,8 +429,8 @@ jet_cli_budget_store_verify_manifest: fn(bytes: [U8], expected_name: String) -> 
     }
     generations: jet_cli_budget_store_array(content, "generations", "generations") ?? return Err(err)
     if generations.len() == 0 -> return Err(jet_cli_budget_failure("manifest has no generations"))
-    prior_accepted := ""
-    prefix := [CanonicalJSON]{}
+    ^prior_accepted: ""
+    ^prefix: [CanonicalJSON]{}
     loop (index, generation) in generations {
         jet_cli_budget_store_exact(generation, "generation", [String]{"audit", "report_id"}) ?? return Err(err)
         report: jet_cli_budget_store_text(generation, "report_id", "generation.report_id") ?? return Err(err)
@@ -452,7 +452,7 @@ jet_cli_budget_store_verify_manifest: fn(bytes: [U8], expected_name: String) -> 
         accept: jet_cli_budget_store_bool(flags, "accept_regression", "flags.accept_regression") ?? return Err(err)
         kind: jet_cli_budget_store_text(audit, "kind", "audit.kind") ?? return Err(err)
         reason: jet_cli_budget_store_nullable(audit, "reason", "audit.reason") ?? return Err(err)
-        agrees := kind == "pass" && !bootstrap && !accept && reason == .Null
+        ^agrees: kind == "pass" && !bootstrap && !accept && reason == .Null
         if reason == .String(text) {
             if (kind == "bootstrap" && bootstrap && !accept) || (kind == "exception" && !bootstrap && accept) {
                 jet_cli_budget_store_reason(text) ?? return Err(err)
@@ -480,7 +480,7 @@ jet_cli_budget_store_verify_manifest: fn(bytes: [U8], expected_name: String) -> 
                         CanonicalJSONField{key: "name", value: CanonicalJSON.String(expected_name.copy())},  // copy: every generation names the baseline.
                     },
                 )
-                chained := false
+                ^chained: false
                 if prior_state == .String(state_link) {
                     if prior_head == .String(head_link) {
                         chained = state_link == perf_stable_id(prefix_content) && head_link == expected_head
@@ -492,7 +492,7 @@ jet_cli_budget_store_verify_manifest: fn(bytes: [U8], expected_name: String) -> 
             }
         }
         audit_id: jet_cli_budget_store_text(audit, "audit_id", "audit_id") ?? return Err(err)
-        body := [CanonicalJSONField]{}
+        ^body: [CanonicalJSONField]{}
         audit_fields: jet_cli_budget_fields(audit)
         loop field in audit_fields.move() {
             if field.key != "audit_id" -> body.push(field)
@@ -530,7 +530,7 @@ jet_cli_budget_store_measurements: fn(report: CanonicalJSON) -> [CanonicalJSON] 
 // measurement of `budget_id` in `content`.
 jet_cli_budget_store_measurement: fn(content: CanonicalJSON, budget_id: String) -> CanonicalJSON? Never! {
     rows: jet_cli_budget_store_array(content, "measurements", "measurements") ?? return None
-    found := CanonicalJSON?{None}
+    ^found: CanonicalJSON?{None}
     loop row in rows.move() {
         id: jet_cli_budget_store_text(row, "budget_id", "budget_id") ?? return None
         if id == budget_id {
@@ -594,7 +594,7 @@ jet_cli_budget_store_seconds: fn(value: String) -> Int JetCLIBudgetFailure! {
 }
 
 jet_cli_budget_store_digits: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
-    value := 0
+    ^value: 0
     loop index in start..<end -> value = value * 10 + (Int{bytes[index]}) - 48
     value
 }
@@ -633,7 +633,7 @@ jet_cli_budget_store_get: fn(value: CanonicalJSON, key: String) -> CanonicalJSON
 jet_cli_budget_store_exact: fn(value: CanonicalJSON, name: String, keys: [String]) JetCLIBudgetFailure! {
     if value == .Object(fields) {
         if fields.len() == keys.len() {
-            exact := true
+            ^exact: true
             loop field in fields {
                 if !keys.contains(field.key) -> exact = false
             }

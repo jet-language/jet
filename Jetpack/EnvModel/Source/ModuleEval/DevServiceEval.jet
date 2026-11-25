@@ -120,8 +120,8 @@ envmodel_plan_dev_service: fn(plan: ^EnvValueProgram, entry: ServiceEntry, globa
 // U12: evaluate one `name: { … }` entry from an `env.<name>` role-module's
 // `services:` map into a `DevServicePlan`.
 envmodel_evaluate_dev_service: fn(entry: ServiceEntry, scope: ModuleEvalScope) -> DevServicePlan EnvModelEvalError! {
-    plan := DevServicePlan{name: entry.name}
-    enable := Bool?{None}
+    ^plan: DevServicePlan{name: entry.name}
+    ^enable: Bool?{None}
     loop field in entry.fields {
         kind: DevServiceField.parse(field.name)
         if kind == DevServiceField.Ready {
@@ -248,7 +248,7 @@ envmodel_ready_probe_call: fn(value: Expr) -> {call: Call, kind: ReadyProbeKind}
 // The typed readiness probe `call` of `kind` spells, from its computed
 // arguments.
 envmodel_ready_probe_from: fn(call: Call, kind: ReadyProbeKind, scope: ModuleEvalScope) -> ReadyProbe EnvModelEvalError! {
-    values := [CtValue]{}
+    ^values: [CtValue]{}
     loop arg in call.args -> values.push(envmodel_value_of(arg.expr, scope))
     probe: if kind == {
         .Exec -> {
@@ -257,7 +257,7 @@ envmodel_ready_probe_from: fn(call: Call, kind: ReadyProbeKind, scope: ModuleEva
         }
         .HTTP -> {
             url: envmodel_probe_string_at(values, 0) ?? return Err(envmodel_probe_error("typed HTTP readiness needs a URL", "ServiceProbe.http carries a URL and an optional status", "write ready: .http(\"http://127.0.0.1:8080/health\", 200)", call.name_span))
-            status := Int?{None}
+            ^status: Int?{None}
             if values.len() > 1 {
                 code: envmodel_probe_port_at(values, 1) ?? return Err(envmodel_probe_error("typed HTTP readiness status must be an integer", "ServiceProbe.http accepts an optional HTTP status code", "write ready: .http(\"http://127.0.0.1:8080/health\", 200)", call.name_span))
                 status = Val(code)
@@ -318,7 +318,7 @@ envmodel_ports_from: fn(value: CtValue) -> [Int]? Never! {
             return None
         }
     }
-    ports := [Int]{}
+    ^ports: [Int]{}
     loop item in items {
         if item == {
             .Int(number) -> { ports.push(number) }
@@ -343,7 +343,7 @@ envmodel_strings_from: fn(value: CtValue) -> [String]? Never! {
             return None
         }
     }
-    strings := [String]{}
+    ^strings: [String]{}
     loop item in items {
         if item == {
             .Str(text) -> { strings.push(text) }
@@ -399,11 +399,11 @@ envmodel_shutdown_from: fn(value: CtValue) -> ShutdownPolicy? Never! {
 // `max`/`backoff` payload of a restart policy: labeled in any order, or
 // positional as `(max, backoff)`; each at most once.
 envmodel_restart_args: fn(args: [CtEnumArg]) -> {max: Int, backoff_ms: Int, exponential: Bool}? Never! {
-    max := 3
-    backoff_ms := 250
-    exponential := false
-    saw_max := false
-    saw_backoff := false
+    ^max: 3
+    ^backoff_ms: 250
+    ^exponential: false
+    ^saw_max: false
+    ^saw_backoff: false
     loop arg in args {
         label: envmodel_named_payload_field(arg.label)
         wants_max: if label == {

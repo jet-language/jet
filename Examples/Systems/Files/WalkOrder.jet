@@ -20,13 +20,13 @@ run: fn() {
     files: [String]{"a-c", "a.txt", "a/b/z", "a/y", "ab/x", "b/c/d/e", "b/c.txt", "c"}
     loop file in files { fs.write(Path.from(root).join(file), file) ?? panic("write {file}") }
     entries: fs.walk(root, None).list() ?? panic("walk")
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in entries {
         kind: if entry.is_dir -> " dir" else -> ""
         print("{entry.relative} {entry.depth}{kind}")
         paths.push(entry.path)
     }
-    sorted := paths.copy()
+    ^sorted: paths.copy()
     sorted.sort()
     print("in path order: {paths == sorted}")
 }

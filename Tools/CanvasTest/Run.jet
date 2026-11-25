@@ -140,7 +140,7 @@ scenario_mode: fn(args: [String]) {
     server: process.cmd([String]{jet, "dev", entry, "--canvas"}).cwd(scratch.path)
         .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
         .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
-    canvas_url := ""
+    ^canvas_url: ""
     loop line in server.stdout.lines() {
         if line.starts_with("Canvas: http") {
             canvas_url = line.slice(8..<line.len()).trim()
@@ -194,7 +194,7 @@ run_scenario: fn(c: Ctx) Failure! {
 driver_lifecycle: fn(args: [String]) {
     count: if args.len() > 0 -> Int.parse(args[0]) ?? 0 else -> 4
     if count < 1 -> usage("driver-lifecycle COUNT must be a positive number")
-    drivers := [Driver]{}
+    ^drivers: [Driver]{}
     loop _ in 0..<count {
         d: driver_launch("chromium") ?? fail(err.message)
         drivers.push(d)
@@ -266,10 +266,10 @@ native_lifecycle: fn() {
     // would never end it. Holding SIGINT here makes it a caught signal,
     // which exec resets to the default in the child.
     interrupts: process.signals([process.ProcessSignal]{.Int}) ?? fail("cannot take SIGINT: {err}")
-    server := process.cmd([String]{jet, "dev", source, "--canvas"})
+    ^server: process.cmd([String]{jet, "dev", source, "--canvas"})
         .env("JET_CANVAS_BROWSER", missing_browser).env("TMPDIR", tmpdir)
         .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
-    canvas_url := ""
+    ^canvas_url: ""
     loop line in server.stdout.lines() {
         if line.starts_with("Canvas: http") {
             canvas_url = line.slice(8..<line.len()).trim()
@@ -281,7 +281,7 @@ native_lifecycle: fn() {
         server.wait().drop("the receipt is not needed")
         fail("jet dev exited before printing its Canvas URL")
     }
-    launch_reported := false
+    ^launch_reported: false
     loop line in server.stderr.lines() {
         if line.contains("Canvas browser launch failed") {
             launch_reported = true
@@ -312,10 +312,10 @@ native_serve: fn() {
     jet: process.env_get("JET_BIN") ?? usage("JET_BIN is required")
     source: process.env_get("JET_SOURCE") ?? "Examples/Tooling/CanvasBlueprintDemo.jet"
     // A browser that cannot start: the probe drives the routes itself.
-    server := process.cmd([String]{jet, "dev", source, "--canvas"})
+    ^server: process.cmd([String]{jet, "dev", source, "--canvas"})
         .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
         .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
-    canvas_url := ""
+    ^canvas_url: ""
     loop line in server.stdout.lines() {
         if line.starts_with("Canvas: http") {
             canvas_url = line.slice(8..<line.len()).trim()
@@ -367,7 +367,7 @@ serve_routes: fn(canvas_url: String) Failure! {
     if text(at(graph, "canvas.session.id")) != session_id {
         return Err(fail_with("the graph report must carry the resident session {session_id}"))
     }
-    titles := [String]{}
+    ^titles: [String]{}
     loop item in items(at(graph, "canvas.graphs")) -> titles.push(text(at(item, "title")))
     if titles.join(",") != "helper,square,summarize,run" {
         return Err(fail_with("the graph must project helper, square, summarize and run, not {titles.join(",")}"))
@@ -401,10 +401,10 @@ native_edit: fn() {
     scratch: files.temp_dir("canvas-edit") ?? fail("cannot make a scratch folder: {err}")
     entry: "{scratch.path}/main.jet"
     files.write(entry, original) ?? fail("cannot write {entry}: {err}")
-    server := process.cmd([String]{jet, "dev", entry, "--canvas"})
+    ^server: process.cmd([String]{jet, "dev", entry, "--canvas"})
         .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
         .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
-    canvas_url := ""
+    ^canvas_url: ""
     loop line in server.stdout.lines() {
         if line.starts_with("Canvas: http") {
             canvas_url = line.slice(8..<line.len()).trim()
@@ -445,7 +445,7 @@ edit_transactions: fn(canvas_url: String, entry: String, original: String) Failu
     }
     session_reply: canvas_get(dev_url(canvas_url, "/__jet_canvas/session"), token)
     start: text(at(json.parse(session_reply.body) ?? Dyn.Null, "session.source_revision"))
-    listed := ""
+    ^listed: ""
     loop file in items(at(project, "canvas.files")) {
         if text(at(file, "path")) == "main.jet" && text(at(file, "kind")) == "source" {
             listed = text(at(file, "revision"))
@@ -480,7 +480,7 @@ edit_transactions: fn(canvas_url: String, entry: String, original: String) Failu
     }
     after: text(at(replaced.tree, "canvas.revision"))
     graph_reply: canvas_get(dev_url(canvas_url, "/canvas/graph"), token)
-    titles := [String]{}
+    ^titles: [String]{}
     loop item in items(at(json.parse(graph_reply.body) ?? Dyn.Null, "canvas.graphs")) {
         titles.push(text(at(item, "title")))
     }
@@ -502,7 +502,7 @@ edit_transactions: fn(canvas_url: String, entry: String, original: String) Failu
     }
 
     history: at(unknown.tree, "canvas.session.history")
-    receipts := [String]{}
+    ^receipts: [String]{}
     loop receipt in items(at(history, "receipts")) {
         receipts.push("{text(at(receipt, "kind"))}:{text(at(receipt, "status"))}")
     }
@@ -534,7 +534,7 @@ native_history: fn() {
     server: process.cmd([String]{jet, "dev", entry, "--canvas"})
         .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
         .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
-    canvas_url := ""
+    ^canvas_url: ""
     loop line in server.stdout.lines() {
         if line.starts_with("Canvas: http") {
             canvas_url = line.slice(8..<line.len()).trim()
@@ -608,7 +608,7 @@ history_transactions: fn(canvas_url: String, entry: String, original: String) Fa
         return Err(fail_with("a refused stale edit must leave the undone entry as written"))
     }
 
-    receipts := [String]{}
+    ^receipts: [String]{}
     loop receipt in items(at(stale.tree, "canvas.session.history.receipts")) {
         receipts.push("{text(at(receipt, "client"))} {text(at(receipt, "kind"))} {text(at(receipt, "status"))} {text(at(receipt, "before"))} -> {text(at(receipt, "after"))}")
     }
@@ -633,10 +633,10 @@ native_debug_panels: fn() {
     scratch: files.temp_dir("canvas-panels") ?? fail("cannot make a scratch folder: {err}")
     entry: "{scratch.path}/main.jet"
     files.write(entry, original) ?? fail("cannot write {entry}: {err}")
-    server := process.cmd([String]{jet, "dev", entry, "--canvas"})
+    ^server: process.cmd([String]{jet, "dev", entry, "--canvas"})
         .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
         .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
-    canvas_url := ""
+    ^canvas_url: ""
     loop line in server.stdout.lines() {
         if line.starts_with("Canvas: http") {
             canvas_url = line.slice(8..<line.len()).trim()
@@ -682,7 +682,7 @@ debug_panels: fn(jet: String, dir: String, canvas_url: String, original: String)
     }
     // The line of `total: square(limit)`, the breakpoint.
     lines: original.split("\n").to_list()
-    stop_line := 0
+    ^stop_line: 0
     loop (index, line) in lines {
         if line.trim() == "total: square(limit)" -> stop_line = index + 1
     }
@@ -709,36 +709,36 @@ debug_panels: fn(jet: String, dir: String, canvas_url: String, original: String)
         return Err(fail_with("continue must stop at the breakpoint on line {stop_line}: HTTP {started.status} {short_text(started.body, 800)}"))
     }
     first: int(at(overlay, "source.first_line"))
-    shown := [String]{}
+    ^shown: [String]{}
     loop line in items(at(overlay, "source.lines")) -> shown.push(text(line))
     if first < 1 || first > stop_line || stop_line - first >= shown.len() || shown[stop_line - first].trim() != "total: square(limit)" {
         return Err(fail_with("the overlay must carry the source around line {stop_line}: {js(at(overlay, "source"))}"))
     }
-    stack := [String]{}
+    ^stack: [String]{}
     loop frame in items(at(overlay, "call_stack")) -> stack.push(text(frame))
     if stack.len() < 2 || !stack[0].contains("summarize()") || !stack[1].contains("run()") {
         return Err(fail_with("the call stack must be summarize then run: {stack.join(" | ")}"))
     }
-    locals := [String]{}
+    ^locals: [String]{}
     loop local in items(at(overlay, "locals")) {
         locals.push("{text(at(local, "name"))}={text(at(local, "value"))}")
     }
-    watched := [String]{}
+    ^watched: [String]{}
     loop watch in items(at(overlay, "watches")) {
         watched.push("{text(at(watch, "name"))}={text(at(watch, "value"))}")
     }
     if !locals.contains("limit=4") || watched.join(",") != "limit=4" {
         return Err(fail_with("the locals and the watch must show limit=4, not locals {locals.join(",")} watches {watched.join(",")}"))
     }
-    tasks := [String]{}
+    ^tasks: [String]{}
     loop task in items(at(overlay, "tasks")) -> tasks.push(text(task))
     if tasks.len() == 0 || !tasks[0].contains(" 1  ") {
         return Err(fail_with("the tasks panel must list task 1, the program's main task, first: {tasks.join(" | ")}"))
     }
     // `disas` of the stop's line lists its machine code, the pc's row
     // marked as the console marks it.
-    console := [String]{}
-    marked := false
+    ^console: [String]{}
+    ^marked: false
     loop line in items(at(overlay, "trace")) {
         said: text(line)
         if said.ends_with("<- here") -> marked = true
@@ -772,7 +772,7 @@ debug_panels: fn(jet: String, dir: String, canvas_url: String, original: String)
     if profiled.status != 200 || text(at(profiled.tree, "canvas.protocol")) != "jet.canvas.profile" {
         return Err(fail_with("a profile request must profile the entry: HTTP {profiled.status} {short_text(profiled.body, 800)}"))
     }
-    lanes := [String]{}
+    ^lanes: [String]{}
     loop lane in items(at(profiled.tree, "canvas.lanes")) -> lanes.push(text(at(lane, "name")))
     if lanes.join(",") != "spans,zones,waits,io" || !text(at(profiled.tree, "canvas.trace")).ends_with(".jettrace") || text(at(profiled.tree, "canvas.trace_id")) == "" {
         return Err(fail_with("the profile must name its trace and draw the spans, zones, waits and io lanes: {short_text(profiled.body, 800)}"))
@@ -804,7 +804,7 @@ debug_panels: fn(jet: String, dir: String, canvas_url: String, original: String)
     }
     reduced: canvas_post(profile_url, token, profile_request(revision, Val("{dir}/spans.jettrace"), None, None, 2))
     lane: at(reduced.tree, "canvas.lanes.1")
-    covered := 0
+    ^covered: 0
     loop mark in items(at(lane, "marks")) -> covered += int(at(mark, "count"))
     if reduced.status != 200 || items(at(lane, "marks")).len() > 2 || covered != 4 || !truthy(at(lane, "reduced")) {
         return Err(fail_with("a width of 2 must reduce the four spans to at most two marks that count all four: {short_text(reduced.body, 800)}"))
@@ -828,7 +828,7 @@ CANVAS_PANELS_SPANS: "use log: core.log\n\nwork: fn(n: Int) -[Log]> Int {{\n    
 
 // The labels of the zones lane of a profile answer.
 zone_labels: fn(tree: Dyn) -> [String] {
-    labels := [String]{}
+    ^labels: [String]{}
     loop mark in items(at(tree, "canvas.lanes.1.marks")) -> labels.push(text(at(mark, "label")))
     labels
 }
@@ -849,10 +849,10 @@ native_debug_replay: fn(args: [String]) {
     if !recorded.success {
         fail("jet run --record=canvas main.jet failed: {recorded.output}{recorded.errors}")
     }
-    server := process.cmd([String]{jet, "dev", entry, "--canvas"})
+    ^server: process.cmd([String]{jet, "dev", entry, "--canvas"})
         .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
         .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
-    canvas_url := ""
+    ^canvas_url: ""
     loop line in server.stdout.lines() {
         if line.starts_with("Canvas: http") {
             canvas_url = line.slice(8..<line.len()).trim()
@@ -879,10 +879,10 @@ native_debug_replay: fn(args: [String]) {
     if observed.success -> fail("jet run --observe crash.jet must stop at its panic")
     dumps: files.list_dir("{dump_dir.path}/.jet/dumps", matching: "*.jetdump") ?? fail("the observed stop must write a dump: {err}\n{observed.errors}")
     if dumps.len() != 1 -> fail("one observed stop must write one dump, not {dumps.len()}")
-    dumped := process.cmd([String]{jet, "dev", crash_entry, "--canvas"})
+    ^dumped: process.cmd([String]{jet, "dev", crash_entry, "--canvas"})
         .env("JET_CANVAS_BROWSER", "/definitely/missing/canvas-browser")
         .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
-    dump_url := ""
+    ^dump_url: ""
     loop line in dumped.stdout.lines() {
         if line.starts_with("Canvas: http") {
             dump_url = line.slice(8..<line.len()).trim()
@@ -917,7 +917,7 @@ debug_replay: fn(canvas_url: String) Failure! {
     if replayed.status != 200 || int(at(overlay, "active_line")) != 21 || text(at(replayed.tree, "canvas.session.tier")) != "native-recorded" {
         return Err(fail_with("a native-recorded session must stop at the breakpoint on line 21: HTTP {replayed.status} {short_text(replayed.body, 800)}"))
     }
-    said := [String]{}
+    ^said: [String]{}
     loop line in items(at(overlay, "trace")) -> said.push(text(line))
     if !said.join("\n").contains("total = 2, set at main.jet:21 in run()") {
         return Err(fail_with("`why total` must name line 21's write of 2: {said.join(" | ")}"))
@@ -963,17 +963,17 @@ debug_dump: fn(canvas_url: String, dump: String) Failure! {
     if !locals.contains("count=3") || !locals.contains("total=21") || !locals.contains("key=<redacted>") || read.contains("hunter2") {
         return Err(fail_with("the dump's locals must be count=3 and total=21 with the Secret redacted: {locals.join(",")}"))
     }
-    stack := [String]{}
+    ^stack: [String]{}
     loop frame in items(at(overlay, "call_stack")) -> stack.push(text(frame))
     if stack.len() < 2 || !stack[0].contains("check()") || !stack[1].contains("run()") {
         return Err(fail_with("the dump's call stack must be check then run: {stack.join(" | ")}"))
     }
-    tasks := [String]{}
+    ^tasks: [String]{}
     loop task in items(at(overlay, "tasks")) -> tasks.push(text(task))
     if !tasks.join("\n").contains("* task 1  stopped  in check() at crash.jet:9") {
         return Err(fail_with("the tasks panel must list the stopping task: {tasks.join(" | ")}"))
     }
-    said := [String]{}
+    ^said: [String]{}
     loop line in items(at(overlay, "trace")) -> said.push(text(line))
     if !said.join("\n").contains("A dump doesn't run") {
         return Err(fail_with("`continue` on a dump must answer that it doesn't run: {said.join(" | ")}"))
@@ -997,7 +997,7 @@ canvas_revision: fn(canvas_url: String, token: String) -> String Failure! {
 
 // The overlay's locals as `name=value`.
 locals_of: fn(overlay: Dyn) -> [String] {
-    locals := [String]{}
+    ^locals: [String]{}
     loop local in items(at(overlay, "locals")) {
         locals.push("{text(at(local, "name"))}={text(at(local, "value"))}")
     }
@@ -1007,14 +1007,14 @@ locals_of: fn(overlay: Dyn) -> [String] {
 // A schema 1 Canvas debug request of `source_id` at `revision`: its text
 // members `texts`, line breakpoints and commands.
 debug_request: fn(revision: String, source_id: String, texts: [{key: String, value: String}], breakpoints: [Int], commands: [String]) -> String {
-    fields := [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "source_id", value: Dyn.Text(source_id.copy())}}
+    ^fields: [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "source_id", value: Dyn.Text(source_id.copy())}}
     loop member in texts {
         fields.push({key: member.key.copy(), value: Dyn.Text(member.value.copy())})
     }
-    lines := [Dyn]{}
+    ^lines: [Dyn]{}
     loop line in breakpoints -> lines.push(Dyn.Int(line))
     fields.push({key: "breakpoints", value: Dyn.Array(lines)})
-    said := [Dyn]{}
+    ^said: [Dyn]{}
     loop command in commands -> said.push(Dyn.Text(command.copy()))
     fields.push({key: "commands", value: Dyn.Array(said)})
     js(obj(fields))
@@ -1024,7 +1024,7 @@ debug_request: fn(revision: String, source_id: String, texts: [{key: String, val
 // profiled, or `trace` over `from`..`to`, at most `width` marks a lane,
 // with the instructions of the function or line `instructions` names.
 profile_request: fn(revision: String, trace: String?, from: Int?, to: Int?, width: Int, instructions: String?{None}) -> String {
-    fields := [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "source_id", value: Dyn.Text("main.jet")}, {key: "width", value: Dyn.Int(width)}}
+    ^fields: [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "source_id", value: Dyn.Text("main.jet")}, {key: "width", value: Dyn.Int(width)}}
     if trace == .Val(path) -> fields.push({key: "trace", value: Dyn.Text(path.copy())})
     if from == .Val(value) -> fields.push({key: "from_ns", value: Dyn.Int(value)})
     if to == .Val(value) -> fields.push({key: "to_ns", value: Dyn.Int(value)})
@@ -1036,7 +1036,7 @@ profile_request: fn(revision: String, trace: String?, from: Int?, to: Int?, widt
 // surface `client`, with `source` when given. An `undo` restores `source`
 // exactly, as the Canvas page's undo does.
 edit_request: fn(op: String, revision: String, source: String?, client: String{"native-edit"}, undo: Bool{false}) -> String {
-    fields := [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "op", value: Dyn.Text(op.copy())}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "client_id", value: Dyn.Text("{client}")}}
+    ^fields: [{key: String, value: Dyn}]{{key: "schema_version", value: Dyn.Int(1)}, {key: "op", value: Dyn.Text(op.copy())}, {key: "revision", value: Dyn.Text(revision.copy())}, {key: "client_id", value: Dyn.Text("{client}")}}
     if undo -> fields.push({key: "undo_restore", value: Dyn.Bool(true)})
     if source == .Val(text) -> fields.push({key: "source", value: Dyn.Text(text.copy())})
     js(obj(fields))
@@ -1093,7 +1093,7 @@ visit_canvas: fn(canvas_url: String) -> String Failure! {
     d: driver_launch("chromium")
     driver_navigate(d, canvas_url)
     w: deadline(15000)
-    loaded := false
+    ^loaded: false
     loop alive(w) && !loaded {
         page: driver_eval(d, "({{ readyState: document.readyState, title: document.title }})")
         loaded = text(at(page, "readyState")) == "complete" && text(at(page, "title")) == "Jet Canvas"
@@ -1105,7 +1105,7 @@ visit_canvas: fn(canvas_url: String) -> String Failure! {
     }
     body: authorized_get(dev_url(canvas_url, "/__jet_canvas/session"))
     driver_close(d)
-    session := at(body, "session")
+    ^session: at(body, "session")
     if is_null(session) -> session = at(body, "canvas.session")
     id: text(at(session, "id"))
     if id == "" {
@@ -1150,7 +1150,7 @@ authorized_get: fn(url: String) -> Dyn Failure! {
 
 wait_status: fn(url: String) -> Dyn Failure! {
     w: deadline(10000)
-    last := ""
+    ^last: ""
     loop alive(w) {
         if authorized_get(url) == {
             .Ok(tree) -> return Ok(tree)

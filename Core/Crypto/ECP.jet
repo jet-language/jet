@@ -169,7 +169,7 @@ curve_info: fn(id: GroupID) -> CurveInfo? Never! {
 
 /// Every supported curve's info, in preference order (mbedtls_ecp_curve_list).
 curve_list: fn() -> [CurveInfo] Never! {
-    out := [CurveInfo]{}
+    ^out: [CurveInfo]{}
     loop id in curve_ids() {
         info: curve_info(id) ?? panic("Every listed curve has info")
         out.push(info)
@@ -354,14 +354,14 @@ NoRNG: struct {
 
 /// The limbs of a static constant up to its top non-zero limb.
 used_words: fn(a: [U64]) -> Int Never! {
-    n := a.len()
+    ^n: a.len()
     loop n > 0 && a[n - 1] == (U64{0}) -> n -= 1
     n
 }
 
 /// a in exactly `n` limbs.
 padded: fn(a: [U64], n: Int) -> [U64] Never! {
-    out := cipher.words(n)
+    ^out: cipher.words(n)
     m: if a.len() < n -> a.len() else -> n
     bn.copy_limbs(out, a, m)
     out
@@ -375,18 +375,18 @@ field_new: fn(kind: FieldKind, prime: [U64], a: [U64], a_kind: Int) -> Field Ecp
         mm: bn.core_montmul_init(p)
         r2: bn.core_get_mont_r2_unsafe(bn.Mpi{s: 1, p: p.copy()})
         rr: padded(r2.p, n)
-        t := cipher.words(2 * n + 1)
-        r3 := cipher.words(n)
+        ^t: cipher.words(2 * n + 1)
+        ^r3: cipher.words(n)
         bn.core_montmul(r3, rr, rr, n, p, n, mm, t)
-        unit := cipher.words(n)
+        ^unit: cipher.words(n)
         unit[0] = U64{1}
-        one := cipher.words(n)
+        ^one: cipher.words(n)
         bn.core_montmul(one, unit, rr, n, p, n, mm, t)
-        am := cipher.words(n)
+        ^am: cipher.words(n)
         bn.core_montmul(am, padded(a, n), rr, n, p, n, mm, t)
         return Ok(Field{kind: kind, n: n, p: p, mm: mm, rr: rr, r3: r3, one: one, a: am, a_kind: a_kind})
     }
-    one := cipher.words(n)
+    ^one: cipher.words(n)
     one[0] = U64{1}
     Ok(Field{kind: kind, n: n, p: p, mm: U64{0}, rr: [U64]{}, r3: [U64]{}, one: one, a: padded(a, n), a_kind: a_kind})
 }
@@ -401,11 +401,11 @@ sw_group: fn(id: GroupID, kind: FieldKind, p: [U64], a: [U64], b: [U64], gx: [U6
         else -> A_GENERAL
     }
     f: field_new(kind, p, a, a_kind)
-    t := cipher.words(table.len())
+    ^t: cipher.words(table.len())
     bn.copy_limbs(t, table, table.len())
     if kind == .Mont {
-        w := fe_work(f.n)
-        e := cipher.words(f.n)
+        ^w: fe_work(f.n)
+        ^e: cipher.words(f.n)
         loop k in 0..<(table.len() /% f.n) {
             fe_load(e, t, k, f.n)
             fe_to_mont_in(f, w, e)
@@ -437,7 +437,7 @@ sw_group: fn(id: GroupID, kind: FieldKind, p: [U64], a: [U64], b: [U64], gx: [U6
 
 /// A Montgomery group (ecp_use_curve25519, ecp_use_curve448).
 mx_group: fn(id: GroupID, kind: FieldKind, p: [U64], n: [U64], a24: Int, gx: Int, nbits: Int) -> EcpGroup EcpError! {
-    a24w := cipher.words(1)
+    ^a24w: cipher.words(1)
     a24w[0] = U64{a24}
     f: field_new(kind, p, a24w, A_GENERAL)
     pm: bn.Mpi{s: 1, p: p.copy()}
@@ -504,7 +504,7 @@ group_type: fn(grp: EcpGroup) -> CurveType Never! { curve_type(grp.id) }
 
 /// x += v over `limbs` limbs; the carry out.
 #Overflow(.Wrapping) add_word_in: fn(x: ^[U64], limbs: Int, v: U64) -> U64 Never! {
-    c := v
+    ^c: v
     loop i in 0..<limbs {
         t: x[i] + c
         c = bn.ct_lt(t, c)
@@ -515,7 +515,7 @@ group_type: fn(grp: EcpGroup) -> CurveType Never! { curve_type(grp.id) }
 
 /// x += b over `limbs` limbs; the carry out.
 #Overflow(.Wrapping) add_in: fn(x: ^[U64], b: [U64], limbs: Int) -> U64 Never! {
-    c := U64{0}
+    ^c: U64{0}
     loop i in 0..<limbs {
         t: x[i] + c
         c = bn.ct_lt(t, c)
@@ -528,7 +528,7 @@ group_type: fn(grp: EcpGroup) -> CurveType Never! { curve_type(grp.id) }
 
 /// x -= b over `limbs` limbs; the borrow out.
 #Overflow(.Wrapping) sub_in: fn(x: ^[U64], b: [U64], limbs: Int) -> U64 Never! {
-    c := U64{0}
+    ^c: U64{0}
     loop i in 0..<limbs {
         z: bn.ct_lt(x[i], c)
         t: x[i] - c
@@ -540,8 +540,8 @@ group_type: fn(grp: EcpGroup) -> CurveType Never! { curve_type(grp.id) }
 
 /// mbedtls_ecp_mod_p192_raw: 2^192 = 2^64 + 1 mod p.
 #Overflow(.Wrapping) raw_p192: fn(x: ^[U64]) Never! {
-    c := U64{0}
-    v := x[3]
+    ^c: U64{0}
+    ^v: x[3]
     c = add_limb(x, 0, v, c)
     v = x[5]
     c = add_limb(x, 0, v, c)
@@ -592,8 +592,8 @@ carry32: fn(cur: I64) -> I64 Never! { cur >> 32 }
 /// is left over, which no input below p^2 produces. The accumulator is a
 /// fixed word (it stays within 2^40 of zero), so no step tests the value.
 #Overflow(.Wrapping) chunk_reduce: fn(x: ^[U64], x_limbs: Int, ops: [Int], fix: [Int], top: Int, rounds: Int) -> Bool Never! {
-    i := 0
-    cur := ld32(x, 0)
+    ^i: 0
+    ^cur: ld32(x, 0)
     loop k in 0..<ops.len() {
         o: ops[k]
         if {
@@ -802,7 +802,7 @@ P384_FIX: [Int]{1, -1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0}
 /// mbedtls_ecp_mod_p255_raw: 2^256 = 38 mod p. s is 4 limbs of scratch.
 #Overflow(.Wrapping) raw_p255: fn(x: ^[U64], s: ^[U64]) Never! {
     loop i in 0..<4 -> s[i] = x[4 + i]
-    carry := bn.core_mla(x, 0, 4, s, 4, U64{38})
+    ^carry: bn.core_mla(x, 0, 4, s, 4, U64{38})
     loop i in 4..<8 -> x[i] = U64{0}
     carry = (carry << 1) + (x[3] >> 63)
     carry *= U64{19}
@@ -901,8 +901,8 @@ mod_p_raw: fn(id: GroupID, x: ^[U64], x_limbs: Int) EcpError! {
     bits: kind_bits(kind)
     if bits == 0 -> return Err(.FeatureUnavailable)
     if x_limbs != 2 * ((bits + 63) /% 64) || x.len() < x_limbs -> return Err(.BadInput)
-    m := cipher.words(10)
-    q := cipher.words(10)
+    ^m: cipher.words(10)
+    ^q: cipher.words(10)
     if !raw_reduce(kind, x, m, q) -> return Err(.BadInput)
 }
 
@@ -939,10 +939,10 @@ modp: fn(grp: EcpGroup, x: bn.Mpi) -> bn.Mpi EcpError! {
     if (x.s < 0 && bn.cmp_int(x, 0) != 0) || bn.bitlen(x) > 2 * grp.pbits -> return Err(.BadInput)
     width: 2 * ((grp.pbits + 63) /% 64)
     len: if x.p.len() > width -> x.p.len() else -> width
-    y := cipher.words(len)
+    ^y: cipher.words(len)
     bn.copy_limbs(y, x.p, x.p.len())
-    m := cipher.words(10)
-    q := cipher.words(10)
+    ^m: cipher.words(10)
+    ^q: cipher.words(10)
     if !raw_reduce(kind, y, m, q) -> return Err(.BadInput)
     c: sub_in(y, grp.p.p, grp.p.p.len())
     _: bn.core_add_if(y, grp.p.p, grp.p.p.len(), c)
@@ -970,7 +970,7 @@ mul_mod: fn(grp: EcpGroup, a: bn.Mpi, b: bn.Mpi) -> bn.Mpi EcpError! {
 
 /// x^3 + a x + b mod p, as x (x^2 + a) + b (ecp_sw_rhs).
 sw_rhs: fn(grp: EcpGroup, x: bn.Mpi) -> bn.Mpi EcpError! {
-    rhs := mul_mod(grp, x, x)
+    ^rhs: mul_mod(grp, x, x)
     if {
         grp.f.a_kind == A_MINUS_3 -> {
             t: bn.sub_int(rhs, 3)
@@ -996,10 +996,10 @@ sw_rhs: fn(grp: EcpGroup, x: bn.Mpi) -> bn.Mpi EcpError! {
 derive_y: fn(grp: EcpGroup, x: bn.Mpi, parity: Int) -> bn.Mpi EcpError! {
     if bn.get_bit(grp.p, 0) != 1 || bn.get_bit(grp.p, 1) != 1 -> return Err(.FeatureUnavailable)
     w: sw_rhs(grp, x)
-    e := bn.add_int(grp.p, 1)
+    ^e: bn.add_int(grp.p, 1)
     bn.shift_r(e, 2)
-    rr := bn.mpi()
-    y := bn.exp_mod(w, e, grp.p, rr)
+    ^rr: bn.mpi()
+    ^y: bn.exp_mod(w, e, grp.p, rr)
     if bn.get_bit(y, 0) != parity {
         t: bn.sub_mpi(grp.p, y)
         bn.set_mpi(y, t)
@@ -1160,7 +1160,7 @@ fe_is_zero: fn(f: Field, x: [U64]) -> Bool Never! { bn.core_check_zero_ct(x, f.n
 
 /// Whether a = b.
 fe_eq: fn(f: Field, a: [U64], b: [U64]) -> Bool Never! {
-    diff := U64{0}
+    ^diff: U64{0}
     loop i in 0..<f.n -> diff |= a[i] ~ b[i]
     diff == (U64{0})
 }
@@ -1195,10 +1195,10 @@ fe_from_mpi: fn(f: Field, w: ^FeWork, d: ^[U64], x: bn.Mpi) Never! {
 
 /// The number a field element stands for.
 fe_to_mpi: fn(f: Field, w: ^FeWork, a: [U64]) -> bn.Mpi Never! {
-    out := cipher.words(f.n)
+    ^out: cipher.words(f.n)
     bn.copy_limbs(out, a, f.n)
     if f.kind == .Mont {
-        unit := cipher.words(f.n)
+        ^unit: cipher.words(f.n)
         unit[0] = U64{1}
         bn.core_montmul(out, a, unit, f.n, f.p, f.n, f.mm, w.wide)
     }
@@ -1254,7 +1254,7 @@ jac_from_point: fn(f: Field, w: ^FeWork, r: ^JacPoint, pt: Point) Never! {
 /// The point r stands for; r must be normalized (Z = 1) or infinity. Z is
 /// read with no test of it: 1 when it is not zero.
 jac_to_point: fn(f: Field, w: ^FeWork, r: JacPoint) -> Point Never! {
-    z := cipher.words(1)
+    ^z: cipher.words(1)
     z[0] = bn.core_check_zero_ct(r.z, f.n)
     Point{x: fe_to_mpi(f, w, r.x), y: fe_to_mpi(f, w, r.y), z: bn.Mpi{s: 1, p: z}}
 }
@@ -1379,8 +1379,8 @@ jac_add_affine: fn(f: Field, w: ^FeWork, t: ^FeTmp, r: ^JacPoint, qx: [U64], qy:
     fe_mul_in(f, w, t.t1, qy)
     fe_sub_in(f, t.t0, r.x)
     fe_sub_in(f, t.t1, r.y)
-    same_x := U64{0}
-    same_y := U64{0}
+    ^same_x: U64{0}
+    ^same_y: U64{0}
     if complete {
         same_x = bn.core_check_zero_ct(t.t0, f.n) ~ U64{1}
         same_y = bn.core_check_zero_ct(t.t1, f.n) ~ U64{1}
@@ -1446,7 +1446,7 @@ jac_normalize: fn(f: Field, w: ^FeWork, t: ^FeTmp, r: ^JacPoint) Never! {
 /// Randomize r's Jacobian coordinates with a random l in [2, p): (l^2 X,
 /// l^3 Y, l Z) (ecp_randomize_jac).
 jac_randomize: fn<R: RNG>(f: Field, w: ^FeWork, r: ^JacPoint, rng: ^R) EcpError! {
-    l := cipher.words(f.n)
+    ^l: cipher.words(f.n)
     bn.core_random(l, U64{2}, f.p, f.n, rng) ?? return Err(random_error(err))
     fe_to_mont_in(f, w, l)
     fe_mul_in(f, w, r.z, l)
@@ -1465,10 +1465,10 @@ jac_normalize_many: fn(f: Field, w: ^FeWork, t: ^FeTmp, jx: ^[U64], jy: ^[U64], 
     if m == 0 {
         return
     }
-    c := cipher.words(m * n)
-    u := cipher.words(n)
-    z := cipher.words(n)
-    cc := cipher.words(n)
+    ^c: cipher.words(m * n)
+    ^u: cipher.words(n)
+    ^z: cipher.words(n)
+    ^cc: cipher.words(n)
     // c[i] = Z_0 ... Z_i
     fe_load(z, jz, idx[0], n)
     fe_store(c, 0, z, n)
@@ -1481,7 +1481,7 @@ jac_normalize_many: fn(f: Field, w: ^FeWork, t: ^FeTmp, jx: ^[U64], jy: ^[U64], 
     // u = (Z_0 ... Z_m-1)^-1
     fe_load(cc, c, m - 1, n)
     fe_inv(f, w, u, cc)
-    i := m - 1
+    ^i: m - 1
     loop i >= 0 {
         // zi = Z_i^-1, and u becomes (Z_0 ... Z_i-1)^-1.
         if {
@@ -1535,13 +1535,13 @@ jac_store: fn(jx: ^[U64], jy: ^[U64], jz: ^[U64], k: Int, r: JacPoint, n: Int) N
 comb_precompute: fn(f: Field, w: ^FeWork, t: ^FeTmp, px: [U64], py: [U64], wnd: Int, d: Int) -> [U64] Never! {
     n: f.n
     ts: 1 << (wnd - 1)
-    jx := cipher.words(ts * n)
-    jy := cipher.words(ts * n)
-    jz := cipher.words(ts * n)
+    ^jx: cipher.words(ts * n)
+    ^jy: cipher.words(ts * n)
+    ^jz: cipher.words(ts * n)
     fe_store(jx, 0, px, n)
     fe_store(jy, 0, py, n)
     fe_store(jz, 0, f.one, n)
-    cur := jac_new(n)
+    ^cur: jac_new(n)
     // T[2^l] = 2^(d l) P
     loop j in 0..<(d * (wnd - 1)) {
         i: 1 << (j /% d)
@@ -1549,18 +1549,18 @@ comb_precompute: fn(f: Field, w: ^FeWork, t: ^FeTmp, px: [U64], py: [U64], wnd: 
         jac_double(f, w, t, cur)
         jac_store(jx, jy, jz, i, cur, n)
     }
-    pow2 := [Int]{}
-    k := 1
+    ^pow2: [Int]{}
+    ^k: 1
     loop k < ts {
         pow2.push(k)
         k <<= 1
     }
     jac_normalize_many(f, w, t, jx, jy, jz, pow2)
     // T[i + j] = T[i] + T[j] for i a power of two and j < i
-    q := jac_new(n)
-    i := 1
+    ^q: jac_new(n)
+    ^i: 1
     loop i < ts {
-        j := i
+        ^j: i
         loop j > 0 {
             j -= 1
             jac_load(cur, jx, jy, jz, j, n)
@@ -1570,11 +1570,11 @@ comb_precompute: fn(f: Field, w: ^FeWork, t: ^FeTmp, px: [U64], py: [U64], wnd: 
         }
         i <<= 1
     }
-    rest := [Int]{}
+    ^rest: [Int]{}
     loop k2 in 1..<ts -> rest.push(k2)
     jac_normalize_many(f, w, t, jx, jy, jz, rest)
-    table := cipher.words(ts * 2 * n)
-    e := cipher.words(n)
+    ^table: cipher.words(ts * 2 * n)
+    ^e: cipher.words(n)
     loop k3 in 0..<ts {
         fe_load(e, jx, k3, n)
         fe_store(table, 2 * k3, e, n)
@@ -1609,11 +1609,11 @@ comb_select: fn(f: Field, w: ^FeWork, table: [U64], ts: Int, i: #Secret U64, rx:
 /// The comb digits of an odd m: d + 1 signed digits of `wnd` bits each,
 /// the sign in bit 7 (ecp_comb_recode_core).
 #Overflow(.Wrapping) comb_recode_core: fn(d: Int, wnd: Int, m: bn.Mpi) -> [U64] Never! {
-    x := cipher.words(d + 1)
+    ^x: cipher.words(d + 1)
     loop i in 0..<d {
         loop j in 0..<wnd -> x[i] = x[i] | bn.limb_bit(m, i + d * j) << j
     }
-    c := U64{0}
+    ^c: U64{0}
     loop i in 1..<(d + 1) {
         // Add the carry and update it.
         cc: x[i] & c
@@ -1636,15 +1636,15 @@ comb_recode_scalar: fn(grp: EcpGroup, m: bn.Mpi, d: Int, wnd: Int) -> {k: [U64],
     if bn.get_bit(grp.n, 0) != 1 -> return Err(.BadInput)
     parity: bn.limb_bit(m, 0) ~ U64{1}
     limbs: grp.n.p.len()
-    mm := cipher.words(limbs)
+    ^mm: cipher.words(limbs)
     loop i in 0..<limbs {
         if i < m.p.len() -> mm[i] = m.p[i]
     }
-    nm := cipher.words(limbs)
+    ^nm: cipher.words(limbs)
     _: bn.core_sub(nm, grp.n.p, mm, limbs)
     bn.core_cond_assign(mm, nm, limbs, parity)
     cipher.wipe_words(nm)
-    chosen := bn.Mpi{s: 1, p: mm.copy()}
+    ^chosen: bn.Mpi{s: 1, p: mm.copy()}
     cipher.wipe_words(mm)
     k: comb_recode_core(d, wnd, chosen)
     cipher.wipe_words(chosen.p)
@@ -1657,13 +1657,13 @@ comb_recode_scalar: fn(grp: EcpGroup, m: bn.Mpi, d: Int, wnd: Int) -> {k: [U64],
 /// keeps untaken; the last runs complete. The result counts the times the
 /// branch ran: 0 for every m in [1, N).
 comb_core: fn<R: RNG>(f: Field, w: ^FeWork, t: ^FeTmp, r: ^JacPoint, table: [U64], ts: Int, k: [#Secret U64], d: Int, rng: ^R, blind: Bool{true}) -> Int EcpError! {
-    txi := jac_new(f.n)
-    spare := jac_new(f.n)
+    ^txi: jac_new(f.n)
+    ^spare: jac_new(f.n)
     comb_select(f, w, table, ts, k[d], r.x, r.y)
     bn.copy_limbs(r.z, f.one, f.n)
     if blind -> jac_randomize(f, w, r, rng)
-    meets := 0
-    i := d
+    ^meets: 0
+    ^i: d
     loop i > 0 {
         i -= 1
         jac_double(f, w, t, r)
@@ -1679,7 +1679,7 @@ comb_core: fn<R: RNG>(f: Field, w: ^FeWork, t: ^FeTmp, r: ^JacPoint, table: [U64
 /// table with a window one wider; any other point builds its table. With
 /// `blind` the start point is randomized from rng.
 mul_comb: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: ^R, blind: Bool{true}) -> Point EcpError! {
-    meets := 0
+    ^meets: 0
     mul_comb_counted(grp, m, pt, rng, meets, blind: blind)
 }
 
@@ -1689,30 +1689,30 @@ mul_comb_counted: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: ^R, meets
     f: grp.f
     n: f.n
     p_eq_g: bn.cmp_mpi(pt.y, grp.g.y) == 0 && bn.cmp_mpi(pt.x, grp.g.x) == 0
-    wnd := if grp.nbits >= 384 -> 5 else -> 4
+    ^wnd: if grp.nbits >= 384 -> 5 else -> 4
     if p_eq_g -> wnd += 1
     if !p_eq_g && wnd > ECP_WINDOW_SIZE -> wnd = ECP_WINDOW_SIZE
     if wnd >= grp.nbits -> wnd = 2
     ts: 1 << (wnd - 1)
     d: (grp.nbits + wnd - 1) /% wnd
-    w := fe_work(n)
-    t := fe_tmp(n)
-    rec := comb_recode_scalar(grp, m, d, wnd)
-    r := jac_new(n)
-    ran := 0
+    ^w: fe_work(n)
+    ^t: fe_tmp(n)
+    ^rec: comb_recode_scalar(grp, m, d, wnd)
+    ^r: jac_new(n)
+    ^ran: 0
     if {
         p_eq_g && grp.t_size == ts -> {
             ran = comb_core(f, w, t, r, grp.t, ts, rec.k, d, rng, blind: blind) ?? return Err(comb_failed(r, t, w, rec.k, err))
         }
         else -> {
             // The table of the public point P, built with its own scratch.
-            pw := fe_work(n)
-            ptmp := fe_tmp(n)
-            px := cipher.words(n)
-            py := cipher.words(n)
+            ^pw: fe_work(n)
+            ^ptmp: fe_tmp(n)
+            ^px: cipher.words(n)
+            ^py: cipher.words(n)
             fe_from_mpi(f, pw, px, pt.x)
             fe_from_mpi(f, pw, py, pt.y)
-            table := comb_precompute(f, pw, ptmp, px, py, wnd, d)
+            ^table: comb_precompute(f, pw, ptmp, px, py, wnd, d)
             ran = comb_core(f, w, t, r, table, ts, rec.k, d, rng, blind: blind) ?? {
                 cipher.wipe_words(table)
                 return Err(comb_failed(r, t, w, rec.k, err))
@@ -1773,25 +1773,25 @@ mxz_double_add: fn(f: Field, w: ^FeWork, t: ^FeTmp, rx: ^[U64], rz: ^[U64], sx: 
 mul_mxz: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: ^R) -> Point EcpError! {
     f: grp.f
     n: f.n
-    w := fe_work(n)
-    t := fe_tmp(n)
-    xr := bn.copy_mpi(pt.x)
+    ^w: fe_work(n)
+    ^t: fe_tmp(n)
+    ^xr: bn.copy_mpi(pt.x)
     mod_fix(grp, xr)
-    px := cipher.words(n)
+    ^px: cipher.words(n)
     fe_from_mpi(f, w, px, xr)
-    rx := cipher.words(n)
-    rz := cipher.words(n)
+    ^rx: cipher.words(n)
+    ^rz: cipher.words(n)
     rx[0] = U64{1}
-    sx := px.copy()
-    sz := cipher.words(n)
+    ^sx: px.copy()
+    ^sz: cipher.words(n)
     sz[0] = U64{1}
     // Randomize RP's coordinates (ecp_randomize_mxz).
-    l := cipher.words(n)
+    ^l: cipher.words(n)
     bn.core_random(l, U64{2}, f.p, n, rng) ?? return Err(random_error(err))
     fe_mul_in(f, w, sx, l)
     fe_mul_in(f, w, sz, l)
     cipher.wipe_words(l)
-    i := grp.nbits + 1
+    ^i: grp.nbits + 1
     loop i > 0 {
         i -= 1
         b: bn.limb_bit(m, i)
@@ -1842,7 +1842,7 @@ ecp_mul: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: ^R) -> Point EcpEr
 mul_shortcuts: fn(grp: EcpGroup, m: bn.Mpi, pt: Point) -> Point EcpError! {
     if bn.cmp_int(m, 0) == 0 {
         check_pubkey(grp, pt)
-        out := point_new()
+        ^out: point_new()
         set_zero(out)
         return Ok(out)
     }
@@ -1852,14 +1852,14 @@ mul_shortcuts: fn(grp: EcpGroup, m: bn.Mpi, pt: Point) -> Point EcpError! {
     }
     if bn.cmp_int(m, -1) == 0 {
         check_pubkey(grp, pt)
-        out := point_copy(pt)
+        ^out: point_copy(pt)
         if bn.cmp_int(out.y, 0) != 0 {
             t: bn.sub_mpi(grp.p, out.y)
             bn.set_mpi(out.y, t)
         }
         return Ok(out)
     }
-    rng := NoRNG{}
+    ^rng: NoRNG{}
     mul_internal(grp, m, pt, rng, blind: false)
 }
 
@@ -1870,10 +1870,10 @@ ecp_muladd: fn(grp: EcpGroup, m: bn.Mpi, pt: Point, n: bn.Mpi, q: Point) -> Poin
     mp: mul_shortcuts(grp, m, pt)
     nq: mul_shortcuts(grp, n, q)
     f: grp.f
-    w := fe_work(f.n)
-    t := fe_tmp(f.n)
-    r := jac_new(f.n)
-    s := jac_new(f.n)
+    ^w: fe_work(f.n)
+    ^t: fe_tmp(f.n)
+    ^r: jac_new(f.n)
+    ^s: jac_new(f.n)
     jac_from_point(f, w, r, mp)
     jac_from_point(f, w, s, nq)
     if !jac_add_mixed(f, w, t, r, s) -> return Err(.BadInput)
@@ -1888,7 +1888,7 @@ ecp_muladd: fn(grp: EcpGroup, m: bn.Mpi, pt: Point, n: bn.Mpi, q: Point) -> Poin
 /// Whether X is one of the x25519 points of small order, or 0, 1 or p - 1
 /// (ecp_check_bad_points_mx).
 bad_point_mx: fn(grp: EcpGroup, x: bn.Mpi) -> Bool EcpError! {
-    xm := bn.copy_mpi(x)
+    ^xm: bn.copy_mpi(x)
     loop bn.cmp_mpi(xm, grp.p) >= 0 {
         t: bn.sub_mpi(xm, grp.p)
         bn.set_mpi(xm, t)
@@ -1940,15 +1940,15 @@ privkey_valid: fn(grp: EcpGroup, d: bn.Mpi) -> Bool Never! {
     if group_type(grp) == .Montgomery {
         // Bits 0 and 1 (and 2 for Curve25519) clear, bit nbits the top one.
         top: grp.nbits
-        bad := bn.limb_bit(d, 0) | bn.limb_bit(d, 1) | bn.limb_bit(d, top) ~ U64{1} | bn.core_bits_above(d.p, top)
+        ^bad: bn.limb_bit(d, 0) | bn.limb_bit(d, 1) | bn.limb_bit(d, top) ~ U64{1} | bn.core_bits_above(d.p, top)
         if top == 254 -> bad |= bn.limb_bit(d, 2)
         return bad == U64{0}
     }
     // 1 <= d < N: d's low limbs against N's, and d's limbs above N's zero.
     if d.s < 0 -> return false
     limbs: grp.n.p.len()
-    low := cipher.words(limbs)
-    high := U64{0}
+    ^low: cipher.words(limbs)
+    ^high: U64{0}
     loop i in 0..<d.p.len() {
         if i < limbs -> low[i] = d.p[i] else -> high |= d.p[i]
     }
@@ -1961,7 +1961,7 @@ privkey_valid: fn(grp: EcpGroup, d: bn.Mpi) -> Bool Never! {
 /// (mbedtls_ecp_gen_privkey_mx).
 gen_privkey_mx: fn<R: RNG>(high_bit: Int, rng: ^R) -> bn.Mpi EcpError! {
     n_bytes: high_bit /% 8 + 1
-    d := bn.fill_random(n_bytes, rng)
+    ^d: bn.fill_random(n_bytes, rng)
     bn.shift_r(d, 8 * n_bytes - high_bit - 1)
     bn.set_bit(d, high_bit, 1)
     bn.set_bit(d, 0, 0)
@@ -2133,7 +2133,7 @@ point_write_binary: fn(grp: EcpGroup, pt: Point, format: PointFormat, buflen: In
             }
             if format == .Uncompressed {
                 if buflen < 2 * plen + 1 -> return Err(.BufferTooSmall)
-                out := [U8]{U8{4}}
+                ^out: [U8]{U8{4}}
                 xs: bn.write_binary(pt.x, plen)
                 ys: bn.write_binary(pt.y, plen)
                 out.extend(xs)
@@ -2141,7 +2141,7 @@ point_write_binary: fn(grp: EcpGroup, pt: Point, format: PointFormat, buflen: In
                 return Ok(out)
             }
             if buflen < plen + 1 -> return Err(.BufferTooSmall)
-            out := [U8]{U8{2 + bn.get_bit(pt.y, 0)}}
+            ^out: [U8]{U8{2 + bn.get_bit(pt.y, 0)}}
             xs: bn.write_binary(pt.x, plen)
             out.extend(xs)
             Ok(out)
@@ -2161,14 +2161,14 @@ point_read_binary: fn(grp: EcpGroup, buf: [U8]) -> Point EcpError! {
     if group_type(grp) == {
         .Montgomery -> {
             if plen != ilen -> return Err(.BadInput)
-            x := bn.read_binary_le(buf)
+            ^x: bn.read_binary_le(buf)
             if grp.id == .Curve25519 -> bn.set_bit(x, plen * 8 - 1, 0)
             Ok(Point{x: x, y: bn.mpi(), z: bn.from_int(1)})
         }
         .ShortWeierstrass -> {
             if buf[0] == (U8{0}) {
                 if ilen != 1 -> return Err(.BadInput)
-                out := point_new()
+                ^out: point_new()
                 set_zero(out)
                 return Ok(out)
             }
@@ -2204,7 +2204,7 @@ tls_read_point: fn(grp: EcpGroup, buf: [U8]) -> {pt: Point, used: Int} EcpError!
 tls_write_point: fn(grp: EcpGroup, pt: Point, format: PointFormat, blen: Int) -> [U8] EcpError! {
     if blen < 1 -> return Err(.BadInput)
     body: point_write_binary(grp, pt, format, blen - 1)
-    out := [U8]{U8{body.len()}}
+    ^out: [U8]{U8{body.len()}}
     out.extend(body)
     Ok(out)
 }

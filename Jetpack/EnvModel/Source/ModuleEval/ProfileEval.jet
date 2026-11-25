@@ -63,7 +63,7 @@ envmodel_evaluate_package_profile_expr: fn(name: String, value: Expr, src: Strin
             if type_name != "" && type_name != TYPE_PROFILE {
                 return Err(envmodel_wrong_namespace_type(TYPE_PROFILE, type_name, expr_span(value)))
             }
-            named := [NamedExpr]{}
+            ^named: [NamedExpr]{}
             loop field in fields {
                 named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
             }
@@ -74,7 +74,7 @@ envmodel_evaluate_package_profile_expr: fn(name: String, value: Expr, src: Strin
 }
 
 envmodel_evaluate_package_profile_fields: fn(name: String, fields: [NamedExpr], src: String, scope: ModuleEvalScope, module_name: String) -> PackageProfileSpec EnvModelEvalError! {
-    seen := [String]{}
+    ^seen: [String]{}
     loop field in fields {
         if ProfileField.parse(field.name) == None {
             return Err(envmodel_error("E1333", "package generation `{name}` has unknown field `{field.name}`", "a source-backed package generation has only `extends`, `packages`, and `collisions` facts", "remove the field or move user/environment settings into a declared `user.<name>` generation", Val(field.name_span)))
@@ -84,9 +84,9 @@ envmodel_evaluate_package_profile_fields: fn(name: String, fields: [NamedExpr], 
         }
         seen.push(field.name)
     }
-    packages := [String]{}
-    extends := [String]{}
-    collisions := [String:String]{}
+    ^packages: [String]{}
+    ^extends: [String]{}
+    ^collisions: [String:String]{}
     loop field in fields {
         if field.name != PROFILE_FIELD_PACKAGES -> next
         extracted: envmodel_extract_packages(field.value, src)
@@ -132,8 +132,8 @@ envmodel_package_profile_collisions_source: fn(src: String, name: String, span: 
     if values.len() == 0 || values.len() % 2 != 0 {
         return Err(envmodel_invalid_collisions(name, span))
     }
-    out := [String:String]{}
-    index := 0
+    ^out: [String:String]{}
+    ^index: 0
     loop index + 1 < values.len() {
         path: values[index]
         provider: values[index + 1]
@@ -152,16 +152,16 @@ envmodel_package_profile_collisions_source: fn(src: String, name: String, span: 
 // Every double-quoted string in `fragment`, decoded; empty when a string is
 // left unterminated.
 envmodel_quoted_collision_values: fn(fragment: String) -> [String] Never! {
-    values := [String]{}
+    ^values: [String]{}
     characters: fragment.chars()
-    index := 0
+    ^index: 0
     loop index < characters.len() {
         character: characters[index]
         index += 1
         if character != '"' -> next
-        value := ""
-        escaped := false
-        closed := false
+        ^value: ""
+        ^escaped: false
+        ^closed: false
         loop index < characters.len() {
             next_character: characters[index]
             index += 1

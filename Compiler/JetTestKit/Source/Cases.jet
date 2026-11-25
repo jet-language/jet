@@ -3,7 +3,7 @@ use files: core.files
 // A case is a public-CLI scenario, not a program entry. Descend through
 // groups and fixture directories alike; only .case files are entries.
 kit_cases_collect: fn(root: String, directory: String) -> [KitEntry] {
-    entries := [KitEntry]{}
+    ^entries: [KitEntry]{}
     if !files.exists(files.join(root, directory)) -> return entries
     children: files.list_dir(files.join(root, directory)) ?? panic("discover cases {directory}: {err}")
     loop child in children {
@@ -19,7 +19,7 @@ kit_cases_collect: fn(root: String, directory: String) -> [KitEntry] {
 }
 
 kit_cases_discover: fn(context: KitCtx) -> [KitEntry] {
-    entries := [KitEntry]{}
+    ^entries: [KitEntry]{}
     loop corpus in context.options.cases_corpora {
         loop entry in kit_cases_collect(context.root, corpus) -> entries.push(entry)
     }
@@ -43,7 +43,7 @@ kit_cases_run: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     // token expansion, process policy, assertions and snapshot blessing.
     // CLI scenarios run once, independent of the golden tier selection.
     annotation: kit_cases_known_failure(entry, context.known, source)
-    env := context.env
+    ^env: context.env
     if annotation != "" -> env.answer_limit = KIT_KNOWN_ANSWER_LIMIT
     env.jet_alone = kit_cases_jet_alone(entry.path)
     steps: kit_steps_context(
@@ -99,7 +99,7 @@ kit_cases_known_failure: fn(entry: KitEntry, known: [String:String], source: Str
 // none), read once per run: each row ID maps to "<card> <reason>". The first
 // row for an ID wins.
 kit_known_load: fn(path: String) -> [String:String] {
-    known := [String:String]{}
+    ^known: [String:String]{}
     if path == "" -> return known
     ledger: kit_exec_optional(path) ?? return known
     loop raw in ledger.split("\n") {
@@ -123,7 +123,7 @@ kit_known_ledger: fn(known: [String:String], path: String) -> String {
 }
 
 kit_cases_known_verdict: fn(outcome: KitOutcome, annotation: String) -> KitOutcome {
-    result := outcome
+    ^result: outcome
     if annotation == "" -> return result
     if kit_cases_owned_failure(result.verdict) || kit_cases_owned_refusal(result.verdict, annotation) {
         result.verdict.status = "KNOWN-FAILING"

@@ -74,7 +74,7 @@ jet_cli_rights_normalize: fn(rights: [String]) -> [String] Never! {
 
 // `expand_leaves`: each right with every known leaf it covers.
 jet_cli_rights_expand: fn(rights: [String]) -> [String] Never! {
-    expanded := [String]{}
+    ^expanded: [String]{}
     loop right in rights {
         canonical: jet_cli_parse_right(right) ?? right.trim()
         expanded.push(canonical.copy())
@@ -86,7 +86,7 @@ jet_cli_rights_expand: fn(rights: [String]) -> [String] Never! {
 }
 
 jet_cli_rights_row: fn(kind: String, allow: [String]?, deny: [String], provenance: JetCLIRightsProvenance) -> JetCLIRightsRow Never! {
-    normalized := [String]?{None}
+    ^normalized: [String]?{None}
     if allow == .Val(rights) -> normalized = Val(jet_cli_rights_normalize(rights))
     JetCLIRightsRow{kind: kind, allow: normalized, deny: jet_cli_rights_normalize(deny), provenance: provenance}
 }
@@ -105,11 +105,11 @@ jet_cli_rights_decide: fn(row: JetCLIRightsRow, right: String) -> String Never! 
 // `RightsRow.walk`: every reached right the row does not allow, in set order,
 // each with its denial chain.
 jet_cli_rights_walk: fn(row: JetCLIRightsRow, effects: [String], call_chain: [String], scope_chain: [JetCLIScopeFrame]) -> [JetCLIRightsDenial] Never! {
-    denials := [JetCLIRightsDenial]{}
+    ^denials: [JetCLIRightsDenial]{}
     loop right in effects {
         verdict: jet_cli_rights_decide(row, right)
         if verdict == "allowed" -> next
-        nearest := JetCLIScopeFrame?{None}
+        ^nearest: JetCLIScopeFrame?{None}
         loop index in 0..<scope_chain.len() {
             frame: scope_chain[scope_chain.len() - 1 - index]
             if jet_cli_covers_any(frame.grants, right) {
@@ -124,7 +124,7 @@ jet_cli_rights_walk: fn(row: JetCLIRightsRow, effects: [String], call_chain: [St
 
 // `RightsWalk.verdict`: any denial wins over a missing right.
 jet_cli_rights_verdict: fn(denials: [JetCLIRightsDenial]) -> String Never! {
-    missing := false
+    ^missing: false
     loop denial in denials {
         if denial.verdict == "denied" -> return "denied"
         if denial.verdict == "missing" -> missing = true
@@ -201,7 +201,7 @@ jet_cli_rights_collect: fn(items: [Item], alias: String, namespace: String, sour
 
 // `run_rights` `declared_row`.
 jet_cli_rights_declared: fn(view: JetCLICallableView) -> JetCLIRightsRow Never! {
-    reason := "inferred callable declaration"
+    ^reason: "inferred callable declaration"
     if view.declared_effects != None -> reason = "declared effect row"
     if view.is_replayable -> reason = "replayable declaration"
     if view.is_pure -> reason = "pure declaration"
@@ -215,8 +215,8 @@ jet_cli_rights_declared: fn(view: JetCLICallableView) -> JetCLIRightsRow Never! 
         return jet_cli_rights_row("replayable", None, [String]{"Time", "Rand", "Net", "IO"}, provenance)
     }
     if view.declared_effects == .Val(effects) {
-        allow := [String]{}
-        deny := [String]{}
+        ^allow: [String]{}
+        ^deny: [String]{}
         loop name in effects {
             if name.starts_with("!") -> deny.push(name.slice(1..<name.len())) else {
                 allow.push(name.copy())
@@ -233,10 +233,10 @@ jet_cli_rights_declared: fn(view: JetCLICallableView) -> JetCLIRightsRow Never! 
 // beginner floor, else the application default; `required`
 // is the entry's solved effect row.
 jet_cli_rights_authority: fn(result: JetDriverCompileResult) -> JetCLIAuthority Never! {
-    authority := jet_cli_application_authority(result, None)
+    ^authority: jet_cli_application_authority(result, None)
     policy: result.authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, inline_package: false, allow: None, deny: None}
     if policy.manifest_path == .Val(manifest) {
-        granted := [String]{}
+        ^granted: [String]{}
         loop right in AUTHORITY_AMBIENT_BASIC_EFFECTS -> granted.push(right)
         loop right in jet_cli_policy_effects(policy.allow ?? [String]{}) -> granted.push(right)
         authority.granted = jet_cli_sorted_set(granted)
@@ -308,10 +308,10 @@ jet_cli_rights_selected: fn(doc_module: JetDriverDocModule, target: String) -[FS
 
 // Sort by key, then span, and keep the first callable of each key.
 jet_cli_rights_sorted: fn(views: [JetCLICallableView]) -> [JetCLICallableView] Never! {
-    sorted := views
+    ^sorted: views
     loop index in 1..<sorted.len() {
         value: sorted[index]
-        position := index
+        ^position: index
         loop position > 0 {
             previous: sorted[position - 1]
             before: previous.key > value.key || (previous.key == value.key && (previous.span.start > value.span.start || (previous.span.start == value.span.start && previous.span.end > value.span.end)))
@@ -321,7 +321,7 @@ jet_cli_rights_sorted: fn(views: [JetCLICallableView]) -> [JetCLICallableView] N
         }
         sorted[position] = value
     }
-    unique := [JetCLICallableView]{}
+    ^unique: [JetCLICallableView]{}
     loop view in sorted {
         if unique.len() > 0 && unique[unique.len() - 1].key == view.key -> next
         unique.push(view)
@@ -333,7 +333,7 @@ jet_cli_rights_sorted: fn(views: [JetCLICallableView]) -> [JetCLICallableView] N
 // `target` the entry the scope resolved.
 jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target: String, json: Bool) -[FS]> JetDriverVerbOutput {
     modules: result.doc_modules
-    views := [JetCLICallableView]{}
+    ^views: [JetCLICallableView]{}
     loop doc_module in modules {
         if !project && !jet_cli_rights_selected(doc_module, target) -> next
         jet_cli_rights_collect(doc_module.items, semindex_module_alias(doc_module), "", doc_module.path, views)
@@ -344,22 +344,22 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
     application: jet_cli_rights_authority(result)
     scope_chain: [JetCLIScopeFrame]{JetCLIScopeFrame{scope: "package", name: application.authority, grants: jet_cli_rights_normalize(application.granted), provenance: JetCLIRightsProvenance{source: application.authority, reason: "selected application authority"}}}
     scope_name: if project -> "project" else -> "explicit-file"
-    text := "Rights\nScope: {scope_name}\nTarget: {target}\nEvidence: checked_static\nRuntime observation: not_run\nProvenance scope: checked_semantic_index\n"
+    ^text: "Rights\nScope: {scope_name}\nTarget: {target}\nEvidence: checked_static\nRuntime observation: not_run\nProvenance scope: checked_semantic_index\n"
     text = "{text}Authority: {application.authority}\nGranted: {jet_cli_rights_text(application.granted)}\nDenied: {jet_cli_rights_text(application.denied)}\nAuthority facts:\n"
-    facts := [JetCLIStatusValue]{}
+    ^facts: [JetCLIStatusValue]{}
     loop declaration in EFFECT_VOCABULARY_ROWS {
         marker: if declaration.irreversible -> " (irreversible)" else -> ""
         text = "{text}  {declaration.name}{marker}\n"
         facts.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(declaration.name)), jet_cli_status_field("irreversible", jet_cli_status_bool(declaration.irreversible))}))
     }
-    values := [JetCLIStatusValue]{}
+    ^values: [JetCLIStatusValue]{}
     loop view in callables {
         declared: jet_cli_rights_declared(view)
         summary: semindex_summary(summaries, view.key)
-        inferred_effects := [String]{}
-        direct := [String]{}
-        callees := [String]{}
-        maximal := false
+        ^inferred_effects: [String]{}
+        ^direct: [String]{}
+        ^callees: [String]{}
+        ^maximal: false
         if summary == .Val(found) {
             inferred_effects = found.solved
             direct = found.direct
@@ -374,7 +374,7 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
         inferred: jet_cli_rights_invocation(inferred_effects, [String]{}, JetCLIRightsProvenance{source: view.key, reason: "sema inferred effect facts"})
         // SemIndex `effect_of(key).provenance.first().call_path`, else the
         // callable alone.
-        call_chain := [String]{view.key}
+        ^call_chain: [String]{view.key}
         if summary == .Val(found) {
             loop effect_name in found.solved {
                 witness: semindex_witness(witnesses, summaries, view.key, effect_name) ?? next
@@ -387,11 +387,11 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
         text = "{text}Callable: {view.key} @ {view.source}:{view.span.start}-{view.span.end}\n  Declared row: {jet_cli_rights_row_text(declared)}\n  Inferred row: {jet_cli_rights_row_text(inferred)}\n"
         text = "{text}  Inferred effects: {jet_cli_rights_text(inferred_effects)}\n  Verdict: {verdict}\n"
         if denials.len() == 0 -> text = "{text}  Denials: none\n"
-        denial_values := [JetCLIStatusValue]{}
+        ^denial_values: [JetCLIStatusValue]{}
         loop denial in denials {
             via: if denial.call_chain.len() == 0 -> "none" else -> denial.call_chain.join(" -> ")
             text = "{text}  Denial: {denial.right} ({denial.verdict}) via {via}\n"
-            spans := [JetCLIStatusValue]{}
+            ^spans: [JetCLIStatusValue]{}
             if summary == .Val(found) {
                 if found.solved.contains(denial.right) {
                     if semindex_witness(witnesses, summaries, view.key, denial.right) == .Val(witness) {

@@ -61,8 +61,8 @@ hex_to_int: fn(c: Int) -> Int Never! {
 
 // sqlite3HexToBlob: the bytes spelled by pairs of hexadecimal digits.
 hex_to_blob: fn(z: [U8]) -> [U8] Never! {
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i + 1 < z.len() {
         out.push(U8{(hex_to_int(Int{z[i]}) << 4) | hex_to_int(Int{z[i + 1]})})
         i += 2
@@ -80,8 +80,8 @@ dequote: fn(z: [U8]) -> [U8] Never! {
     q0: Int{z[0]}
     if !is_quote(q0) -> return z.copy()
     quote: if q0 == 91 -> 93 else -> q0
-    out := [U8]{}
-    i := 1
+    ^out: [U8]{}
+    ^i: 1
     loop i < z.len() {
         c: Int{z[i]}
         if c == quote {
@@ -100,7 +100,7 @@ dequote: fn(z: [U8]) -> [U8] Never! {
 
 // sqlite3StrICmp: compare as NUL-terminated strings, folding ASCII case.
 str_icmp: fn(x: [U8], y: [U8]) -> Int Never! {
-    i := 0
+    ^i: 0
     loop {
         c: sql_byte(x, i)
         d: sql_byte(y, i)
@@ -127,8 +127,8 @@ str_icmp_opt: fn(x: [U8]?, y: [U8]?) -> Int Never! {
 
 // sqlite3_strnicmp: str_icmp over at most `n` bytes.
 str_nicmp: fn(x: [U8], y: [U8], n: Int) -> Int Never! {
-    i := 0
-    left := n
+    ^i: 0
+    ^left: n
     loop left > 0 && sql_byte(x, i) != 0 && lower_byte(sql_byte(x, i)) == lower_byte(sql_byte(y, i)) {
         i += 1
         left -= 1
@@ -139,7 +139,7 @@ str_nicmp: fn(x: [U8], y: [U8], n: Int) -> Int Never! {
 
 // strcmp over NUL-terminated strings.
 str_cmp: fn(x: [U8], y: [U8]) -> Int Never! {
-    i := 0
+    ^i: 0
     loop {
         c: sql_byte(x, i)
         d: sql_byte(y, i)
@@ -152,7 +152,7 @@ str_cmp: fn(x: [U8], y: [U8]) -> Int Never! {
 
 // sqlite3StrIHash: an 8-bit case-insensitive hash.
 str_ihash: fn(z: [U8]) -> Int Never! {
-    h := 0
+    ^h: 0
     loop b in z {
         c: Int{b}
         if c == 0 -> break
@@ -248,8 +248,8 @@ Varint: struct {
 get_varint: fn(buf: [U8], at: Int) -> Varint Never! {
     first: Int{buf[at]}
     if first < 128 -> return Varint{value: first, len: 1}
-    value := first & 127
-    i := 1
+    ^value: first & 127
+    ^i: 1
     loop i < 8 {
         b: Int{buf[at + i]}
         value = (value << 7) | b & 127
@@ -294,8 +294,8 @@ put_varint: fn(out: ^[U8], value: Int) Never! {
     v: as_u64(value)
     if v >= 72057594037927936 {
         // Nine bytes: eight groups of seven bits, then the low eight bits.
-        high := v >> 8
-        groups := [U8]{}
+        ^high: v >> 8
+        ^groups: [U8]{}
         loop _i in 0..<8 {
             groups.push(U8{high & 127})
             high >>= 7
@@ -393,8 +393,8 @@ UTFChar: struct {
 // than `term`. Overlong 7-bit forms, surrogates and U+FFFE/U+FFFF read as
 // U+FFFD; a stray continuation byte reads as itself.
 utf8_read: fn(z: [U8], at: Int, term: Int) -> UTFChar Never! {
-    c := Int{z[at]}
-    i := at + 1
+    ^c: Int{z[at]}
+    ^i: at + 1
     if c >= 192 {
         c = UTF8_TRANS1[c - 192]
         loop i < term && (Int{z[i]}) & 192 == 128 {
@@ -409,8 +409,8 @@ utf8_read: fn(z: [U8], at: Int, term: Int) -> UTFChar Never! {
 // sqlite3Utf8ReadLimited: the character at z[at] from at most min(n, 4)
 // bytes, with no validity checks.
 utf8_read_limited: fn(z: [U8], at: Int, n_in: Int) -> UTFChar Never! {
-    c := Int{z[at]}
-    i := 1
+    ^c: Int{z[at]}
+    ^i: 1
     if c >= 192 {
         c = UTF8_TRANS1[c - 192]
         n: if n_in > 4 -> 4 else -> n_in
@@ -476,10 +476,10 @@ write_utf16: fn(out: ^[U8], c: Int, enc: Int) Never! {
 // surrogate combines with the next unit whatever it is, as in a build
 // without SQLITE_REPLACE_INVALID_UTF.
 translate: fn(z: [U8], from: Int, to: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     if from != base.UTF8 && to != base.UTF8 {
         n: z.len() - (z.len() & 1)
-        i := 0
+        ^i: 0
         loop i < n {
             out.push(z[i + 1])
             out.push(z[i])
@@ -489,7 +489,7 @@ translate: fn(z: [U8], from: Int, to: Int) -> [U8] Never! {
         return out
     }
     if from == base.UTF8 {
-        at := 0
+        ^at: 0
         loop at < z.len() {
             ch: utf8_read(z, at, z.len())
             write_utf16(out, ch.c, to)
@@ -498,9 +498,9 @@ translate: fn(z: [U8], from: Int, to: Int) -> [U8] Never! {
         return out
     }
     term: z.len() - (z.len() & 1)
-    at := 0
+    ^at: 0
     loop at < term {
-        c := utf16_unit(z, at, from)
+        ^c: utf16_unit(z, at, from)
         at += 2
         if c >= 55296 && c < 57344 && at < term {
             c2: utf16_unit(z, at, from)
@@ -522,8 +522,8 @@ utf16_unit: fn(z: [U8], at: Int, enc: Int) -> Int Never! {
 // when n < 0), stopping at a 0x00 byte.
 utf8_char_len: fn(z: [U8], n: Int) -> Int Never! {
     term: if n >= 0 && n < z.len() -> n else -> z.len()
-    r := 0
-    i := 0
+    ^r: 0
+    ^i: 0
     loop i < term && z[i] != (U8{0}) {
         // SQLITE_SKIP_UTF8.
         lead: Int{z[i]}
@@ -540,8 +540,8 @@ utf8_char_len: fn(z: [U8], n: Int) -> Int Never! {
 // text z of encoding `enc`.
 utf16_byte_len: fn(z: [U8], n: Int, enc: Int) -> Int Never! {
     hi: if enc == base.UTF16LE -> 1 else -> 0
-    at := hi
-    k := 0
+    ^at: hi
+    ^k: 0
     loop k < n {
         c: sql_byte(z, at)
         at += 2
@@ -573,8 +573,8 @@ TWO_53: 9007199254740992
 
 // The number of significant bits of a non-negative integer.
 bit_len: fn(v: Int) -> Int Never! {
-    n := 0
-    x := v
+    ^n: 0
+    ^x: v
     loop x >= 4294967296 {
         x >>= 32
         n += 32
@@ -599,8 +599,8 @@ shift_round: fn(p: Int, sh: Int) -> Int Never! {
 // The extended value nearest p * 2^e2 (p > 0).
 ext_norm: fn(p: Int, e2: Int) -> Ext Never! {
     sh: bit_len(p) - 64
-    m := shift_round(p, sh)
-    e := e2 + sh + 63
+    ^m: shift_round(p, sh)
+    ^e: e2 + sh + 63
     if m >= TWO_64 {
         m >>= 1
         e += 1
@@ -648,8 +648,8 @@ ext_cmp: fn(x: Ext, y: Ext) -> Int Never! {
 ext_to_float: fn(x: Ext) -> Float Never! {
     if x.mant == 0 -> return 0.0
     if x.exp >= -1022 {
-        m := shift_round(x.mant, 11)
-        e := x.exp
+        ^m: shift_round(x.mant, 11)
+        ^e: x.exp
         if m >= TWO_53 {
             m >>= 1
             e += 1
@@ -721,16 +721,16 @@ zb: fn(z: [U8], at: Int) -> Int Never! { Int{z[at]} }
 // sqlite3AtoF: the REAL a text of encoding `enc` spells. Leading and trailing
 // whitespace is ignored; a prefix that is a number still sets the value.
 atof: fn(z: [U8], enc: Int) -> AtoF Never! {
-    length := z.len()
+    ^length: z.len()
     if length == 0 -> return AtoF{value: 0.0, kind: 0}
-    incr := 1
-    at := 0
-    end := length
-    etype := 1
+    ^incr: 1
+    ^at: 0
+    ^end: length
+    ^etype: 1
     if enc != base.UTF8 {
         incr = 2
         length -= length & 1
-        i := 3 - enc
+        ^i: 3 - enc
         loop i < length && z[i] == (U8{0}) -> i += 2
         if i < length -> etype = -100
         end = i ~ 1
@@ -738,19 +738,19 @@ atof: fn(z: [U8], enc: Int) -> AtoF Never! {
     }
     loop at < end && is_space(zb(z, at)) -> at += incr
     if at >= end -> return AtoF{value: 0.0, kind: 0}
-    sign := 1
+    ^sign: 1
     if zb(z, at) == 45 {
         sign = -1
         at += incr
     } else if zb(z, at) == 43 { at += incr }
     // sign * s * 10^(esign * e + d); the C version's gotos to do_atof_calc
     // all happen at the end of the text, where every later step is a no-op.
-    s := 0
-    d := 0
-    esign := 1
-    e := 0
-    evalid := true
-    ndigit := 0
+    ^s: 0
+    ^d: 0
+    ^esign: 1
+    ^e: 0
+    ^evalid: true
+    ^ndigit: 0
     loop at < end && is_digit(zb(z, at)) {
         s = s * 10 + (zb(z, at) - 48)
         at += incr
@@ -791,7 +791,7 @@ atof: fn(z: [U8], enc: Int) -> AtoF Never! {
         }
     }
     loop at < end && is_space(zb(z, at)) -> at += incr
-    value := Float{0}
+    ^value: Float{0}
     if s == 0 -> value = if sign < 0 -> -0.0 else -> 0.0 else {
         e = e * esign + d
         loop e > 0 && s < 1844674407370955161 {
@@ -802,7 +802,7 @@ atof: fn(z: [U8], enc: Int) -> AtoF Never! {
             s = s /% 10
             e += 1
         }
-        r := ext_from_int(s)
+        ^r: ext_from_int(s)
         if e > 0 {
             loop e >= 100 {
                 e -= 100
@@ -850,8 +850,8 @@ AtoI: struct {
 // differ.
 compare2pow63: fn(z: [U8], at: Int, incr: Int) -> Int Never! {
     pow63: "922337203685477580".bytes()
-    c := 0
-    i := 0
+    ^c: 0
+    ^i: 0
     loop c == 0 && i < 18 {
         c = (zb(z, at + i * incr) - Int{pow63[i]}) * 10
         i += 1
@@ -863,22 +863,22 @@ compare2pow63: fn(z: [U8], at: Int, incr: Int) -> Int Never! {
 // sqlite3Atoi64: the 64-bit integer a decimal text of encoding `enc` spells.
 // Hexadecimal is not accepted.
 atoi64: fn(z: [U8], enc: Int) -> AtoI Never! {
-    length := z.len()
-    incr := 1
-    at := 0
-    end := length
-    non_num := false
+    ^length: z.len()
+    ^incr: 1
+    ^at: 0
+    ^end: length
+    ^non_num: false
     if enc != base.UTF8 {
         incr = 2
         length -= length & 1
-        i := 3 - enc
+        ^i: 3 - enc
         loop i < length && z[i] == (U8{0}) -> i += 2
         non_num = i < length
         end = i ~ 1
         at = enc & 1
     }
     loop at < end && is_space(zb(z, at)) -> at += incr
-    neg := false
+    ^neg: false
     if at < end {
         if zb(z, at) == 45 {
             neg = true
@@ -889,19 +889,19 @@ atoi64: fn(z: [U8], enc: Int) -> AtoI Never! {
     loop at < end && zb(z, at) == 48 -> at += incr
     // More than 20 digits always overflow, so C's wrapped u64 is never used
     // past them; stop accumulating there.
-    u := 0
-    i := 0
+    ^u: 0
+    ^i: 0
     loop at + i < end {
         c: zb(z, at + i)
         if c < 48 || c > 57 -> break
         if i < 20 * incr -> u = u * 10 + c - 48
         i += incr
     }
-    value := if neg -> -u else -> u
+    ^value: if neg -> -u else -> u
     if u > base.I64_MAX -> value = if neg -> base.I64_MIN else -> base.I64_MAX
-    rc := 0
+    ^rc: 0
     if i == 0 && start == at -> rc = -1 else if non_num -> rc = 1 else if at + i < end {
-        jj := i
+        ^jj: i
         loop at + jj < end {
             if !is_space(zb(z, at + jj)) {
                 rc = 1
@@ -929,10 +929,10 @@ atoi64_ok: fn(z: [U8], enc: Int) -> Int? Never! {
 // (the whole text, as the C version sees a NUL-terminated string).
 dec_or_hex_to_i64: fn(z: [U8]) -> AtoI Never! {
     if sql_byte(z, 0) == 48 && (sql_byte(z, 1) == 120 || sql_byte(z, 1) == 88) {
-        u := 0
-        i := 2
+        ^u: 0
+        ^i: 2
         loop sql_byte(z, i) == 48 -> i += 1
-        k := i
+        ^k: i
         loop is_xdigit(sql_byte(z, k)) {
             u = (u * 16 + hex_to_int(sql_byte(z, k))) & TWO_64 - 1
             k += 1
@@ -943,7 +943,7 @@ dec_or_hex_to_i64: fn(z: [U8]) -> AtoI Never! {
         return AtoI{value: v, rc: 0}
     }
     // strspn(z, "+- \n\t0123456789"), plus the byte after it when present.
-    n := 0
+    ^n: 0
     loop n < z.len() {
         c: Int{z[n]}
         if !(is_digit(c) || c == 43 || c == 45 || c == 32 || c == 10 || c == 9) -> break
@@ -957,8 +957,8 @@ dec_or_hex_to_i64: fn(z: [U8]) -> AtoI Never! {
 // a signed 32-bit integer, else None. Reading stops at the first byte that
 // is not part of the number, as in C.
 get_int32: fn(z: [U8]) -> Int? Never! {
-    i := 0
-    neg := false
+    ^i: 0
+    ^neg: false
     c0: sql_byte(z, 0)
     if c0 == 45 {
         neg = true
@@ -966,8 +966,8 @@ get_int32: fn(z: [U8]) -> Int? Never! {
     } else if c0 == 43 { i = 1 } else if c0 == 48 && (sql_byte(z, 1) == 120 || sql_byte(z, 1) == 88) && is_xdigit(sql_byte(z, 2)) {
         i = 2
         loop sql_byte(z, i) == 48 -> i += 1
-        u := 0
-        k := 0
+        ^u: 0
+        ^k: 0
         loop k < 8 && is_xdigit(sql_byte(z, i + k)) {
             u = u * 16 + hex_to_int(sql_byte(z, i + k))
             k += 1
@@ -977,8 +977,8 @@ get_int32: fn(z: [U8]) -> Int? Never! {
     }
     if !is_digit(sql_byte(z, i)) -> return None
     loop sql_byte(z, i) == 48 -> i += 1
-    v := 0
-    k := 0
+    ^v: 0
+    ^k: 0
     loop k < 11 {
         c: sql_byte(z, i + k) - 48
         if c < 0 || c > 9 -> break
@@ -995,8 +995,8 @@ atoi: fn(z: [U8]) -> Int Never! { get_int32(z) ?? 0 }
 
 // sqlite3GetUInt32: a decimal text, all of it, that fits 32 unsigned bits.
 get_uint32: fn(z: [U8]) -> Int? Never! {
-    v := 0
-    i := 0
+    ^v: 0
+    ^i: 0
     loop is_digit(sql_byte(z, i)) {
         v = v * 10 + sql_byte(z, i) - 48
         if v > 4294967296 -> return None
@@ -1024,8 +1024,8 @@ FpDecode: struct {
 // digits when positive, to -round digits after the point when negative, and
 // to at most mx_round digits.
 fp_decode: fn(r_in: Float, round_in: Int, mx_round: Int) -> FpDecode Never! {
-    p := FpDecode{sign: 43, is_special: 0, n: 0, i_dp: 0, z: [U8]{}}
-    r := r_in
+    ^p: FpDecode{sign: 43, is_special: 0, n: 0, i_dp: 0, z: [U8]{}}
+    ^r: r_in
     if r < 0.0 {
         p.sign = 45
         r = -r
@@ -1041,8 +1041,8 @@ fp_decode: fn(r_in: Float, round_in: Int, mx_round: Int) -> FpDecode Never! {
         return p
     }
     // Scale r into [1.0e+17, 1.0e+19) in extended precision.
-    exp := 0
-    rr := ext_from_float(r)
+    ^exp: 0
+    ^rr: ext_from_float(r)
     if ext_cmp(rr, ext_e19()) >= 0 {
         loop ext_cmp(rr, ext_e119()) >= 0 {
             exp += 100
@@ -1070,11 +1070,11 @@ fp_decode: fn(r_in: Float, round_in: Int, mx_round: Int) -> FpDecode Never! {
             rr = ext_mul(rr, ext_p1())
         }
     }
-    v := ext_trunc(rr)
+    ^v: ext_trunc(rr)
     // The digits fill zBuf[24] from the right.
-    buf := [U8]{}
+    ^buf: [U8]{}
     loop _k in 0..<24 -> buf.push(U8{48})
-    i := 23
+    ^i: 23
     loop v > 0 {
         buf[i] = U8{v % 10 + 48}
         i -= 1
@@ -1082,7 +1082,7 @@ fp_decode: fn(r_in: Float, round_in: Int, mx_round: Int) -> FpDecode Never! {
     }
     p.n = 23 - i
     p.i_dp = p.n + exp
-    iround := round_in
+    ^iround: round_in
     if iround < 0 {
         iround = p.i_dp - iround
         if iround == 0 && (Int{buf[i + 1]}) >= 53 {
@@ -1098,7 +1098,7 @@ fp_decode: fn(r_in: Float, round_in: Int, mx_round: Int) -> FpDecode Never! {
         if iround > mx_round -> iround = mx_round
         p.n = iround
         if (Int{buf[zat + iround]}) >= 53 {
-            j := iround - 1
+            ^j: iround - 1
             loop {
                 buf[zat + j] = U8{Int{buf[zat + j]} + 1}
                 if (Int{buf[zat + j]}) <= 57 -> break
@@ -1141,8 +1141,8 @@ log_est_add: fn(a: Int, b: Int) -> Int Never! {
 
 // sqlite3LogEst: the LogEst of an unsigned 64-bit integer.
 log_est: fn(x_in: Int) -> Int Never! {
-    x := x_in
-    y := 40
+    ^x: x_in
+    ^y: 40
     if x < 8 {
         if x < 2 -> return 0
         loop x < 8 {
@@ -1167,7 +1167,7 @@ log_est_from_double: fn(x: Float) -> Int Never! {
 
 // sqlite3LogEstToInt.
 log_est_to_int: fn(x_in: Int) -> Int Never! {
-    n := c_rem(x_in, 10)
+    ^n: c_rem(x_in, 10)
     x: c_div(x_in, 10)
     if n >= 5 -> n -= 2 else if n >= 1 -> n -= 1
     if x > 60 -> return base.I64_MAX
@@ -1224,7 +1224,7 @@ log_est_to_int: fn(x_in: Int) -> Int Never! {
 #Test("varints round-trip at every length boundary") {
     samples: [Int]{0, 1, 127, 128, 16383, 16384, 2097151, 2097152, 268435455, 268435456, 34359738367, 34359738368, 4398046511103, 4398046511104, 562949953421311, 562949953421312, 72057594037927935, 72057594037927936, 9223372036854775807, -1, -9223372036854775808, -128}
     loop n in samples {
-        out := [U8]{}
+        ^out: [U8]{}
         put_varint(out, n)
         assert_eq(out.len(), varint_len(n))
         got: get_varint(out, 0)
@@ -1234,10 +1234,10 @@ log_est_to_int: fn(x_in: Int) -> Int Never! {
 }
 
 #Test("varint encodings match the file-format examples") {
-    out := [U8]{}
+    ^out: [U8]{}
     put_varint(out, 128)
     assert_eq(out, [U8]{129, 0})
-    nine := [U8]{}
+    ^nine: [U8]{}
     put_varint(nine, -1)
     assert_eq(nine, [U8]{255, 255, 255, 255, 255, 255, 255, 255, 255})
 }

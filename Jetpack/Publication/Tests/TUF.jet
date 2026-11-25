@@ -64,7 +64,7 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("publication tuf safe field append has no partial mutation") {
-    output := [String]{"prefix\n"}
+    ^output: [String]{"prefix\n"}
     assert(publication_tuf_append_line(output, "key", "a=b"))
     assert_eq(output.join(""), "prefix\nkey=a=b\n")
     carriage: String.from_bytes([U8]{97, 13, 98}) ?? panic("CR fixture")
@@ -89,7 +89,7 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
 
 #Test("publication tuf sparse referrers follow entries not map insertion order") {
     entries: [PublicationIndexEntry]{publication_tuf_test_entry("p", "2", false), publication_tuf_test_entry("p", "1", false)}
-    referrers := [String:String]{}
+    ^referrers: [String:String]{}
     referrers["1"] = "sha256-a"
     referrers["2"] = "sha256-b"
     unsigned: publication_tuf_sparse_unsigned("p", entries, referrers, "root", "aa")
@@ -129,16 +129,16 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("publication tuf sparse entries sort lexically and refuse duplicates and other names") {
-    entries := [PublicationIndexEntry]{publication_tuf_test_entry("p", "2", false), publication_tuf_test_entry("p", "10", false)}
+    ^entries: [PublicationIndexEntry]{publication_tuf_test_entry("p", "2", false), publication_tuf_test_entry("p", "10", false)}
     publication_tuf_validate_entries("p", entries) ?? panic("valid entries")
     assert_eq(entries[0].version, "10")
     entries.push(publication_tuf_test_entry("p", "10", true))
     if publication_tuf_validate_entries("p", entries) == .Ok(_) {
         panic("duplicate version accepted")
     }
-    other := [PublicationIndexEntry]{publication_tuf_test_entry("q", "1", false)}
+    ^other: [PublicationIndexEntry]{publication_tuf_test_entry("q", "1", false)}
     if publication_tuf_validate_entries("p", other) == .Ok(_) -> panic("another package accepted")
-    empty := [PublicationIndexEntry]{}
+    ^empty: [PublicationIndexEntry]{}
     if publication_tuf_validate_entries("", empty) == .Ok(_) -> panic("empty name accepted")
 }
 
@@ -197,9 +197,9 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
 #Test("publication tuf log publish yank migrate and immutable chain refusals") {
     entry: publication_tuf_test_entry("p", "1", false)
     first: publication_tuf_next_log_record([PublicationLogRecord]{}, "publish", entry) ?? panic("publish record")
-    records := [PublicationLogRecord]{first}
+    ^records: [PublicationLogRecord]{first}
     publication_tuf_validate_log(records) ?? panic("valid publish")
-    yanked := entry.copy()
+    ^yanked: entry.copy()
     yanked.yanked = true
     second: publication_tuf_next_log_record(records, "yank", yanked) ?? panic("yank record")
     records.push(second)
@@ -213,7 +213,7 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
             assert("{error}".contains("registry transparency log reuses or changes an immutable package version"))
         }
     }
-    changed := entry.copy()
+    ^changed: entry.copy()
     changed.content_hash = "sha256-other"
     mutation: publication_tuf_next_log_record([PublicationLogRecord]{first}, "yank", changed) ?? panic("mutation record")
     if publication_tuf_validate_log([PublicationLogRecord]{first, mutation}) == .Ok(_) {
@@ -225,7 +225,7 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
     }
     migrate: publication_tuf_next_log_record([PublicationLogRecord]{}, "migrate", yanked) ?? panic("migration may begin with yanked history")
     publication_tuf_validate_log([PublicationLogRecord]{migrate}) ?? panic("valid historical migration")
-    forged := first.copy()
+    ^forged: first.copy()
     forged.leaf = "sha256-forged"
     if publication_tuf_validate_log([PublicationLogRecord]{forged}) == .Ok(_) {
         panic("forged leaf accepted")
@@ -256,7 +256,7 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
         .Ok(_) -> { panic("u64 overflow accepted") }
         .Err(error) -> assert("{error}".contains("registry transparency log sequence is invalid"))
     }
-    edge := last.copy()
+    ^edge: last.copy()
     edge.sequence = 18446744073709551614
     record: publication_tuf_next_log_record([PublicationLogRecord]{edge}, "publish", publication_tuf_test_entry("p", "2", false)) ?? panic("max sequence is representable")
     assert_eq(record.sequence, Int{18446744073709551615})
@@ -345,11 +345,11 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
 
 #Test("publication tuf actual 4MiB and 64MiB read bounds are inclusive") {
     root: publication_tuf_test_root("exact-bounds")
-    chunk := [U8]{}
+    ^chunk: [U8]{}
     loop _ in 0..<65536 -> chunk.push(U8{97})
     loop limit in ([Int]{PUBLICATION_TUF_MAX_METADATA_BYTES, PUBLICATION_TUF_MAX_LOG_BYTES}) {
         path: files.join(root, "bounded-{limit}")
-        writer := files.create(path, if_exists: .Refuse, links: .Refuse) ?? panic("bounded fixture")
+        ^writer: files.create(path, if_exists: .Refuse, links: .Refuse) ?? panic("bounded fixture")
         loop _ in 0..<(limit /% chunk.len()) {
             writer.write_bytes(chunk) ?? panic("write bound fixture")
         }
@@ -357,7 +357,7 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
         close(writer)
         text: publication_tuf_read_bounded(root, path, limit, "registry metadata exceeds its size limit") ?? panic("inclusive exact bound")
         assert_eq(text.bytes().len(), limit)
-        extra := files.append(path) ?? panic("append excess byte")
+        ^extra: files.append(path) ?? panic("append excess byte")
         extra.write_bytes([U8]{97}) ?? panic("append excess")
         close(extra)
         if publication_tuf_read_bounded(root, path, limit, "registry metadata exceeds its size limit") == {

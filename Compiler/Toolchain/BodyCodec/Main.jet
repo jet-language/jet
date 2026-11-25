@@ -170,7 +170,7 @@ word_scalar: fn(piece: String) -> Bool Never! {
 read_shapes: fn(out: ^CodecOut, dir: String, target: CodecTarget) -[FS]> BodyCodecError! {
     imported: target.package != "" && dir != target.own_dir
     entries: files.walk_files(dir).list() ?? return Err(codec_fail("cannot list {dir}: {err}"))
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in entries.move() {
         if entry.relative.ends_with(".jet") -> paths.push(entry.relative.move())
     }
@@ -210,7 +210,7 @@ empty_shape: fn() -> CodecShape Never! {
 }
 
 add_struct: fn(out: ^CodecOut, def: ^^StructDef) Never! {
-    shape := empty_shape()
+    ^shape: empty_shape()
     shape.generic = def.type_params.len() > 0
     loop field in def.fields.move() {
         if field.computed != None -> next
@@ -220,11 +220,11 @@ add_struct: fn(out: ^CodecOut, def: ^^StructDef) Never! {
 }
 
 add_enum: fn(out: ^CodecOut, def: ^^EnumDef) Never! {
-    shape := empty_shape()
+    ^shape: empty_shape()
     shape.is_enum = true
     shape.generic = def.type_params.len() > 0
     loop variant in def.variants.move() {
-        row := CodecVariant{name: variant.name.move(), unit: false, single: false, fields: [CodecField]{}}
+        ^row: CodecVariant{name: variant.name.move(), unit: false, single: false, fields: [CodecField]{}}
         if variant.payload.move() == {
             .Unit -> { row.unit = true }
             .Single(ty, _) -> {
@@ -243,7 +243,7 @@ add_enum: fn(out: ^CodecOut, def: ^^EnumDef) Never! {
 }
 
 add_alias: fn(out: ^CodecOut, def: ^^TypeAliasDef) Never! {
-    shape := empty_shape()
+    ^shape: empty_shape()
     shape.generic = def.type_params.len() > 0 || def.choices.len() > 0
     shape.alias = Val(def.target.move())
     add_shape(out, def.name.move(), shape.move())
@@ -343,7 +343,7 @@ reach_named: fn(out: ^CodecOut, name: String, at: String) BodyCodecError! {
     out.reached.push("{name}")
     position: out.index.get(name) ?? return Err(codec_fail("{at}: no struct or enum {name}"))
     // Each field's type, resolved in place, and kept to reach next.
-    types := [Type]{}
+    ^types: [Type]{}
     loop index in 0..<out.shapes[position].fields.len() {
         where: "{name}.{out.shapes[position].fields[index].name}"
         types.push(resolved(out, out.shapes[position].fields[index].ty, where) ?? return Err(err))
@@ -391,14 +391,14 @@ settle: fn(out: ^CodecOut) BodyCodecError! {
         shape: out.shapes[position]
         out.shapes[position].empty = !shape.is_enum
     }
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
         loop name in out.reached {
             position: out.index.get(name) ?? return Err(codec_fail("no struct or enum {name}"))
             shape: out.shapes[position]
             if !shape.is_enum && shape.empty {
-                all_empty := true
+                ^all_empty: true
                 loop field in shape.fields {
                     if !type_empty(out, field.ty) -> all_empty = false
                 }
@@ -473,7 +473,7 @@ write_container: fn(out: ^CodecOut, ty: Type) Never! {
 write_list: fn(out: ^CodecOut, name: String, text: String, element: Type) Never! {
     write_container(out, element)
     least: if type_empty(out, element) -> 0 else -> 1
-    lines := [String]{}
+    ^lines: [String]{}
     lines.push("body_codec_put_{name}: fn(out: ^BodyCodecOut, values: {text}) Never! {{")
     lines.push("    body_codec_put_count(out, values.len())")
     lines.push("    loop value in values -> {put_call(element, "value")}")
@@ -491,7 +491,7 @@ write_list: fn(out: ^CodecOut, name: String, text: String, element: Type) Never!
 // The put and get functions of the option type `text` of `inner`.
 write_option: fn(out: ^CodecOut, name: String, text: String, inner: Type) Never! {
     write_container(out, inner)
-    lines := [String]{}
+    ^lines: [String]{}
     lines.push("body_codec_put_{name}: fn(out: ^BodyCodecOut, value: {text}) Never! {{")
     lines.push("    if value == .Val(inner) {{")
     lines.push("        body_codec_put_bool(out, true)")
@@ -512,7 +512,7 @@ write_option: fn(out: ^CodecOut, name: String, text: String, inner: Type) Never!
 write_map: fn(out: ^CodecOut, name: String, text: String, key: Type, value: Type) Never! {
     write_container(out, key)
     write_container(out, value)
-    lines := [String]{}
+    ^lines: [String]{}
     lines.push("body_codec_put_{name}: fn(out: ^BodyCodecOut, values: {text}) Never! {{")
     lines.push("    body_codec_put_count(out, values.len())")
     lines.push("    loop (key, value) in values {{")
@@ -537,7 +537,7 @@ write_map: fn(out: ^CodecOut, name: String, text: String, key: Type, value: Type
 // `shape`.
 write_struct: fn(out: ^CodecOut, name: String, shape: CodecShape) Never! {
     function: name.lower()
-    lines := [String]{}
+    ^lines: [String]{}
     if shape.fields.len() == 0 {
         // Each unused parameter keeps a name of its own: two parameters
         // may not publish one label (E0770), `_` included.
@@ -552,7 +552,7 @@ write_struct: fn(out: ^CodecOut, name: String, shape: CodecShape) Never! {
     lines.push("}}")
     lines.push("")
     lines.push("body_codec_get_{function}: fn(bytes: [U8], input: ^BodyCodecIn) -> {name} Never! {{")
-    built := [String]{}
+    ^built: [String]{}
     loop (index, field) in shape.fields {
         lines.push("    f{index}: {get_call(field.ty)}")
         built.push("{field.name}: f{index}")
@@ -566,8 +566,8 @@ write_struct: fn(out: ^CodecOut, name: String, shape: CodecShape) Never! {
 // fields, as the lines of a match arm `indent` deep.
 variant_read: fn(name: String, variant: CodecVariant, indent: String) -> [String] Never! {
     if variant.unit -> return [String]{"{name}.{variant.name}"}
-    lines := [String]{"{{"}
-    built := [String]{}
+    ^lines: [String]{"{{"}
+    ^built: [String]{}
     loop (index, field) in variant.fields {
         lines.push("{indent}    f{index}: {get_call(field.ty)}")
         built.push(if variant.single -> "f{index}" else -> "{field.name}: f{index}")
@@ -583,7 +583,7 @@ variant_read: fn(name: String, variant: CodecVariant, indent: String) -> [String
 // shape's fallback variant.
 write_enum: fn(out: ^CodecOut, name: String, shape: CodecShape) Never! {
     function: name.lower()
-    lines := [String]{}
+    ^lines: [String]{}
     lines.push("body_codec_put_{function}: fn(out: ^BodyCodecOut, value: {name}) Never! {{")
     lines.push("    if value == {{")
     loop (index, variant) in shape.variants {
@@ -650,7 +650,7 @@ SYNTAX_HEADER: "// The syntax codec, generated by Compiler/Toolchain/BodyCodec; 
 PACKET_HEADER: "// The checked-body packet codec, generated by Compiler/Toolchain/BodyCodec;\n// do not edit. Regenerate it from the checkout root with\n// `{WRITE_COMMAND}`.\n// It stays committed: the seed builds the compiler from the checkout, and\n// `jet check` reads it before any build step runs.\n// Each struct and enum a function check's packet (SemaParallelBody) holds,\n// besides those of the body (JetFoundation Facts/BodyCodec.jet) and of a\n// parsed program (Facts/SyntaxCodec.jet), has a put, which writes its fields\n// in declaration order (an enum its variant's position first), and a get,\n// which reads them back in that order. The hand-written halves are in\n// JetFoundation Facts/BodyCodecRows.jet.\n"
 
 render: fn(target: CodecTarget) -[FS]> String BodyCodecError! {
-    out := CodecOut{shapes: [CodecShape]{}, index: [String:Int]{}, hand: [String:Bool]{}, imported: [String:Bool]{}, reached: [String]{}, seen: [String:Bool]{}, written: [String:Bool]{}, blocks: [String]{}}
+    ^out: CodecOut{shapes: [CodecShape]{}, index: [String:Int]{}, hand: [String:Bool]{}, imported: [String:Bool]{}, reached: [String]{}, seen: [String:Bool]{}, written: [String:Bool]{}, blocks: [String]{}}
     importing: target.package != ""
     loop path in target.hand_files -> read_hand(out, path, target) ?? return Err(err)
     loop dir in target.shape_dirs -> read_shapes(out, dir, target) ?? return Err(err)
@@ -672,11 +672,11 @@ render: fn(target: CodecTarget) -[FS]> String BodyCodecError! {
 // `named`, sorted, or "" when there are none. A name after a `.` is a field
 // or variant, not one.
 imports_of: fn(out: CodecOut, package: String, text: String, named: [String]) -> String Never! {
-    names := [String:Bool]{}
+    ^names: [String:Bool]{}
     loop name in named -> names[name] = true
-    word := ""
-    after_dot := false
-    previous := ""
+    ^word: ""
+    ^after_dot: false
+    ^previous: ""
     loop scalar in "{text} ".chars() {
         piece: "{scalar}"
         if word_scalar(piece) {
@@ -690,7 +690,7 @@ imports_of: fn(out: CodecOut, package: String, text: String, named: [String]) ->
         previous = piece
     }
     if names.len() == 0 -> return ""
-    used := [String]{}
+    ^used: [String]{}
     loop (name, _) in names -> used.push("{name}")
     used.sort()
     "use {package}.[{used.join(", ")}]\n\n"
@@ -709,7 +709,7 @@ body_codec_main: fn(args: [String]) -[FS]> String BodyCodecError! {
     if args.len() > 1 || (mode != "--check" && mode != "--write") {
         return Err(codec_fail("usage: jet Compiler/Toolchain/BodyCodec/Main.jet [--check|--write]"))
     }
-    reports := [String]{}
+    ^reports: [String]{}
     loop target in codec_targets() {
         generated: render(target) ?? return Err(err)
         current: if files.exists(target.output) -> files.read(target.output) ?? return Err(codec_fail("cannot read {target.output}: {err}")) else -> ""

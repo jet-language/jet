@@ -71,10 +71,10 @@ seed_fixture: fn(root: String) {
 search: fn(root: String, pattern: String) -> [SearchHit] {
     regex: re.compile(pattern) ?? panic("cli search regex")
     entries: fs.walk_files(root, ignore: ".gitignore").list() ?? panic("cli search walk")
-    hits := [SearchHit]{}
+    ^hits: [SearchHit]{}
     loop entry in entries {
         text: fs.read(entry.path) ?? panic("cli search read")
-        line_no := 0
+        ^line_no: 0
         loop line in text.lines() {
             line_no += 1
             if regex.is_match(line) {
@@ -111,7 +111,7 @@ process_demo: fn(pattern: String) -> String {
     producer: process.cmd(["printf", "keep-one\nskip\nkeep-two\n"])
         .stdout(.Stream)
         .spawn() ?? panic("cli producer")
-    matches := [String]{}
+    ^matches: [String]{}
     loop line in producer.stdout.lines() {
         if line.contains(pattern) -> matches.push(line.trim())
     }
@@ -141,7 +141,7 @@ process_demo: fn(pattern: String) -> String {
         .stderr(.Capture)
         .run() ?? panic("cli failed receipt")
 
-    expected := matches.join("\n")
+    ^expected: matches.join("\n")
     if matches.len() > 0 -> expected += "\n"
     return "argv={argv.output.trim()} stream={matches.join("|")} producer={produced.success} eof={consumed.output == expected} consumer={consumed.output.trim()} pipeline={piped.output.trim()} bounded={bounded.output.len() <= 64} exit={failed.code} success={failed.success}"
 }

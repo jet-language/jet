@@ -14,7 +14,7 @@ use {
     loop idiom in SEMA_METHOD_IDIOMS {
         assert(idiom.witness.contains(idiom.spelling), "the witness for `{idiom.foreign}` on {idiom.receiver} does not write `{idiom.spelling}`")
         assert(idiom.rename == "" || idiom.spelling.contains("{idiom.rename}("), "the spelling for `{idiom.foreign}` on {idiom.receiver} does not call its rename `{idiom.rename}`")
-        request := seams_request(idiom.witness, JetDriverCompileMode.Program)
+        ^request: seams_request(idiom.witness, JetDriverCompileMode.Program)
         request.core_sources = idiom_core_rows()
         result: jet_driver_compile(request)
         problems: loop diagnostic in result.diagnostics -> "{diagnostic.code}: {diagnostic.what}"
@@ -25,7 +25,7 @@ use {
 // Every built-in Core unit, read from the tree, with the runtime interface
 // units that ride with Core.
 idiom_core_rows: fn() -> [JetDriverCoreSource] {
-    rows := [JetDriverCoreSource]{}
+    ^rows: [JetDriverCoreSource]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         text: idiom_files.read(row.path) ?? panic("cannot read {row.path}: {err}")
         rows.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text(text)})

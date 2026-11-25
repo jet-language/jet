@@ -9,7 +9,7 @@ Ticket: struct {
 }
 
 run: fn() {
-    count := 0
+    ^count: 0
     bump: fn(n: Int) {
         count += n
     }
@@ -17,13 +17,13 @@ run: fn() {
     bump(3)
     print("borrowed write lands on the owner: {count}")
 
-    base := 10
+    ^base: 10
     read_base: fn() -> Int { base }
     kept: [read_base]
     base = 20
     print("stored copy taken when made: {kept[0]()}, owner now {base}")
 
-    words := ["a", "b"]
+    ^words: ["a", "b"]
     word_count: fn() -> Int { words.len() }
     stored: [word_count]
     words.push("c")
@@ -39,7 +39,7 @@ run: fn() {
     tick()
     print("stored lambda writes its own copy: {tick()}")
 
-    values := [1, 2, 3]
+    ^values: [1, 2, 3]
     fill(values)
     print("write parameter written inside the call: {values.len()}")
     sized: count_of(values)
@@ -49,7 +49,7 @@ run: fn() {
 
 // The lambda outlives this call, so it owns `n`; each call writes that copy.
 counter: fn() -> fn() -> Int {
-    n := 0
+    ^n: 0
     fn() {
         n += 1
         n

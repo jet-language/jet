@@ -220,7 +220,7 @@ jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
     parts: core_path_parts(usage)
     module_name: parts.module_name
     helper: parts.member
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     loop row in jet_ring_dependency_rows() {
         if row.module_name == module_name {
             loop dependency in row.dependencies -> jet_ring_insert_string(dependencies, dependency)
@@ -234,7 +234,7 @@ jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
     if !jet_ring_is_namespace_only(module_name) {
         module_parts: module_name.split(".").to_list()
         if module_parts.len() > 1 {
-            parent_parts := [String]{}
+            ^parent_parts: [String]{}
             loop index in 0..<module_parts.len() - 1 -> parent_parts.push(module_parts[index])
             parent: parent_parts.join(".")
             if parent.starts_with("core") -> jet_ring_insert_string(dependencies, parent)
@@ -244,7 +244,7 @@ jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
 }
 
 jet_ring_insert_string: fn(rows: ^[String], value: String) Never! {
-    index := 0
+    ^index: 0
     loop index < rows.len() {
         if rows[index] == value {
             return
@@ -253,7 +253,7 @@ jet_ring_insert_string: fn(rows: ^[String], value: String) Never! {
         index += 1
     }
     rows.push(value.copy())
-    cursor := rows.len() - 1
+    ^cursor: rows.len() - 1
     loop cursor > index {
         rows[cursor] = rows[cursor - 1]
         cursor -= 1
@@ -263,17 +263,17 @@ jet_ring_insert_string: fn(rows: ^[String], value: String) Never! {
 
 // Stable scalar-position ordering, using the same key comparison as publication.
 jet_ring_closure_order: fn(rows: [JetRingLayerFact]) -> [Int] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<rows.len() -> order.push(index)
-    width := 1
+    ^width: 1
     loop width < order.len() {
-        merged := [Int]{}
-        start := 0
+        ^merged: [Int]{}
+        ^start: 0
         loop start < order.len() {
             middle: if start + width < order.len() -> start + width else -> order.len()
             end: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
-            left := start
-            right := middle
+            ^left: start
+            ^right: middle
             loop left < middle || right < end {
                 if {
                     right >= end || (left < middle && !(rows[order[right]].key < rows[order[left]].key)) -> {
@@ -295,17 +295,17 @@ jet_ring_closure_order: fn(rows: [JetRingLayerFact]) -> [Int] Never! {
 }
 
 jet_ring_classify_prelude_closure: fn(roots: [String]) -> [JetRingLayerFact] Never! {
-    pending := [String]{}
-    pending_keys := [String:Bool]{}
-    classified := [String:Bool]{}
+    ^pending: [String]{}
+    ^pending_keys: [String:Bool]{}
+    ^classified: [String:Bool]{}
     loop root in roots {
         if !jet_ring_is_closure_marker(root) && !(pending_keys.get(root) ?? false) {
             pending.push(root.copy())
             pending_keys[root] = true
         }
     }
-    closure := [JetRingLayerFact]{}
-    cursor := 0
+    ^closure: [JetRingLayerFact]{}
+    ^cursor: 0
     loop cursor < pending.len() {
         current: pending[cursor]
         cursor += 1
@@ -329,7 +329,7 @@ jet_ring_prelude_closure_layer: fn(roots: [String]) -> RuntimeLayer Never! {
 
 // The highest layer among classified closure rows.
 jet_ring_closure_rows_layer: fn(rows: [JetRingLayerFact]) -> RuntimeLayer Never! {
-    layer := RuntimeLayer.Core
+    ^layer: RuntimeLayer.Core
     loop row in rows {
         if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(layer) -> layer = row.layer
     }

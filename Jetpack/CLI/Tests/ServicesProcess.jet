@@ -35,7 +35,7 @@ use {
 #Test("services up refuses an untrusted dev services project without a terminal") {
     claim: ServicesClaim.new("untrusted")
     claim.write_untrusted_project("fixture: {{ run: [\"sh\", \"-c\", \"echo fixture-started; sleep 30\"] }}", "run: fn() {{}}\n")
-    child := claim.jetpack_in(claim.project, [String]{"services", "up", "--no-color"}, cli_test_no_env()).stdin(.Stream).spawn() ?? panic("spawn services up")
+    ^child: claim.jetpack_in(claim.project, [String]{"services", "up", "--no-color"}, cli_test_no_env()).stdin(.Stream).spawn() ?? panic("spawn services up")
     child.stdin.close()
     out: child.wait() ?? panic("wait for services up")
     assert_eq(out.code, 2)
@@ -172,7 +172,7 @@ use {
     cli_test_wait_for_file_lines(child_file, 1)
     child_pid: Int.parse((files.read(child_file) ?? panic("read child pid")).trim()) ?? panic("child pid is an integer")
     pid_text: files.read(files.join(claim.service_dir("fixture"), "pid")) ?? panic("read service pid")
-    service_pid := -1
+    ^service_pid: -1
     loop line in pid_text.lines() {
         if line.starts_with("pid=") && service_pid < 0 {
             service_pid = Int.parse(line.removeprefix("pid=")) ?? -1

@@ -36,7 +36,7 @@ WALK_NORMAL: I64{4}
 
 walk_panic: fn(message: I64) { jet_rt_panic_message(rt_text_data(message), rt_text_len(message)) }
 
-walk_root := I64{0}
+^walk_root: I64{0}
 
 // runtime-init: 4 when walk_root
 #Export(c) jet_rt_walk8_init: fn() {
@@ -54,12 +54,12 @@ walk_root := I64{0}
 walk_enter: fn(key: I64) -> I64 {
     root: walk_root
     sync_mutex_lock(root)
-    node := rt_text_word(wrapping(root + I64{16}))
+    ^node: rt_text_word(wrapping(root + I64{16}))
     loop node != (I64{0}) && rt_text_word(wrapping(node + I64{8})) != key {
         node = rt_text_word(node)
     }
     context: if (node == I64{0}) -> I64{0} else -> rt_text_word(wrapping(node + I64{16}))
-    if (context != I64{0}) { _ := sync_add(wrapping(context + I64{56}), I64{1}) }
+    if (context != I64{0}) { ^_: sync_add(wrapping(context + I64{56}), I64{1}) }
     sync_mutex_unlock(root)
     if (context == I64{0}) {
         walk_panic(rt_static_text("live walk context"))
@@ -74,7 +74,7 @@ walk_release: fn(context: I64) {
         return
     }
     count: rt_text_word(wrapping(context + I64{40}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         walk_slot_clear(walk_slot(context, at))
         at += I64{1}
@@ -102,7 +102,7 @@ walk_bytes_new: fn(data: I64, length: I64) -> I64 {
 }
 
 walk_has_nul: fn(data: I64, length: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(data + at)) == I64{0}) { return true }
         at += I64{1}
@@ -184,7 +184,7 @@ walk_stream_close: fn(stream: I64) {
     if (stream == I64{0}) {
         return
     }
-    _ := host_call(I64{3}, rt_text_word(stream), I64{0}, I64{0})
+    ^_: host_call(I64{3}, rt_text_word(stream), I64{0}, I64{0})
     jet_rt_free(rt_text_word(wrapping(stream + I64{8})), FILES_DIRENT_BYTES, I64{8})
     jet_rt_free(stream, WALK_STREAM_BYTES, I64{8})
 }
@@ -212,7 +212,7 @@ walk_join: fn(data: I64, length: I64, name: I64, name_length: I64, output: I64) 
 // and other "." parts are skipped.
 walk_components: fn(data: I64, length: I64) -> I64 {
     parts: files_words_new()
-    at := I64{0}
+    ^at: I64{0}
     if (length > I64{0} && rt_text_byte(data) == I64{47}) {
         files_words_push(parts, WALK_ROOT)
         files_words_push(parts, I64{0})
@@ -225,7 +225,7 @@ walk_components: fn(data: I64, length: I64) -> I64 {
         at = I64{1}
     }
     loop at < length {
-        end := at
+        ^end: at
         loop end < length && rt_text_byte(wrapping(data + end)) != (I64{47}) -> end += I64{1}
         size: end - at
         dot: size >= I64{1} && rt_text_byte(wrapping(data + at)) == I64{46}
@@ -252,7 +252,7 @@ walk_component_word: fn(parts: I64, index: I64, field: I64) -> I64 {
 
 walk_bytes_compare: fn(left: I64, left_length: I64, right: I64, right_length: I64) -> I64 {
     length: if (left_length < right_length) -> left_length else -> right_length
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         a: rt_text_byte(wrapping(left + at))
         b: rt_text_byte(wrapping(right + at))
@@ -297,8 +297,8 @@ walk_relative: fn(child: I64, child_length: I64, root: I64, root_length: I64) ->
     root_parts: walk_components(root, root_length)
     child_count: walk_component_count(child_parts)
     root_count: walk_component_count(root_parts)
-    matched := root_count <= child_count
-    at := I64{0}
+    ^matched: root_count <= child_count
+    ^at: I64{0}
     loop matched && at < root_count {
         matched = walk_component_compare(child, child_parts, at, root, root_parts, at) == I64{0}
         at += I64{1}
@@ -314,7 +314,7 @@ walk_relative: fn(child: I64, child_length: I64, root: I64, root_length: I64) ->
 // One parse_next_component_back step over data[before..end): the part's
 // start and the end left after it (the separator is consumed).
 walk_back_start: fn(data: I64, before: I64, end: I64) -> I64 {
-    sep := end - I64{1}
+    ^sep: end - I64{1}
     loop sep >= before && rt_text_byte(wrapping(data + sep)) != (I64{47}) -> sep -= I64{1}
     if (sep < before) -> before else -> sep + I64{1}
 }
@@ -337,8 +337,8 @@ walk_parent_length: fn(data: I64, length: I64) -> I64 {
     has_root: length > I64{0} && rt_text_byte(data) == I64{47}
     current: !has_root && length > I64{0} && rt_text_byte(data) == I64{46} && (length == I64{1} || rt_text_byte(wrapping(data + I64{1})) == I64{47})
     before: if (has_root || current) -> I64{1} else -> I64{0}
-    end := length
-    found := false
+    ^end: length
+    ^found: false
     loop !found && end > before {
         found = walk_back_real(data, before, end)
         end = walk_back_rest(data, before, end)
@@ -404,7 +404,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     rt_text_store(wrapping(context + I64{48}), I64{0})
     sync_store(wrapping(context + I64{56}), I64{1})
     rt_text_store(wrapping(context + I64{64}), I64{0})
-    _ := walk_slot_push(context, walk_bytes_new(rt_text_data(root), length), length)
+    ^_: walk_slot_push(context, walk_bytes_new(rt_text_data(root), length), length)
     node: jet_rt_alloc(I64{24}, I64{8})
     root_table: walk_root
     sync_mutex_lock(root_table)
@@ -424,8 +424,8 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     key: int_saturated(key_int)
     root: walk_root
     sync_mutex_lock(root)
-    link := root + I64{16}
-    context := I64{0}
+    ^link: root + I64{16}
+    ^context: I64{0}
     loop rt_text_word(link) != (I64{0}) {
         node: rt_text_word(link)
         if (rt_text_word(wrapping(node + I64{8})) == key) {
@@ -447,7 +447,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     context: walk_enter(key)
     if (context == I64{0}) { return I64{0} }
     if !walk_live(context, slot) -> return I64{0}
-    result := slot
+    ^result: slot
     if (walk_slot_length(context, slot) == I64{0}) {
         dot: jet_rt_alloc(I64{2}, I64{1})
         rt_text_put(dot, I64{46})
@@ -467,7 +467,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     if !walk_live(context, slot) -> return I64{0}
     data: walk_slot_data(context, slot)
     keys: files_words_new()
-    length := walk_slot_length(context, slot)
+    ^length: walk_slot_length(context, slot)
     loop length >= (I64{0}) {
         if (length > I64{0}) {
             files_words_push(keys, walk_slot_push(context, walk_bytes_new(data, length), length))
@@ -490,8 +490,8 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
         return
     }
     data: walk_slot_data(context, slot)
-    failure := WALK_NUL
-    mode := I64{0}
+    ^failure: WALK_NUL
+    ^mode: I64{0}
     if !walk_has_nul(data, walk_slot_length(context, slot)) {
         mode = files_lstat_c(data)
         failure = if (mode < I64{0}) -> mode else -> I64{0}
@@ -550,16 +550,16 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 // std.fs.read: open O_RDONLY|O_CLOEXEC and read to the end, EINTR retried.
 // Returns 0 with the bytes/length/capacity in `output`, or -errno.
 walk_read_file: fn(name: I64, output: I64) -> I64 {
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop {
         fd = host_call(I64{2}, name, I64{524288}, I64{0})
         if (fd != I64{-4}) { break }
     }
     if (fd < I64{0}) { return fd }
-    capacity := I64{8192}
-    bytes := jet_rt_alloc(capacity, I64{1})
-    used := I64{0}
-    failure := I64{0}
+    ^capacity: I64{8192}
+    ^bytes: jet_rt_alloc(capacity, I64{1})
+    ^used: I64{0}
+    ^failure: I64{0}
     loop {
         if (used == capacity) {
             grown: capacity * I64{2}
@@ -577,7 +577,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
         }
         used += count
     }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if (failure < I64{0}) {
         jet_rt_free(bytes, capacity, I64{1})
         return failure
@@ -611,7 +611,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
     scratch: jet_rt_alloc(I64{24}, I64{8})
     path_length: walk_join(data, length, rt_text_data(filename), rt_text_len(filename), scratch)
     path: rt_text_word(scratch)
-    failure := I64{0}
+    ^failure: I64{0}
     if walk_has_nul(path, path_length) -> failure = WALK_NUL else {
         mode: files_lstat_c(path)
         if (mode < I64{0}) {
@@ -622,7 +622,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
                 text: rt_text_lossy(rt_text_word(scratch), rt_text_word(wrapping(scratch + I64{8})))
                 jet_rt_free(rt_text_word(scratch), rt_text_word(wrapping(scratch + I64{16})), I64{1})
                 base: walk_relative(data, length, rt_text_word(wrapping(context + I64{8})), rt_text_word(wrapping(context + I64{16})))
-                at := I64{0}
+                ^at: I64{0}
                 loop at < rt_text_len(base) {
                     if (rt_text_byte(wrapping(rt_text_data(base) + at)) == I64{92}) {
                         rt_text_put(wrapping(rt_text_data(base) + at), I64{47})
@@ -689,7 +689,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
         return
     }
     data: walk_slot_data(context, slot)
-    failure := WALK_NUL
+    ^failure: WALK_NUL
     if !walk_has_nul(data, walk_slot_length(context, slot)) {
         fd: host_call(I64{2}, data, FILES_O_DIRECTORY_CLOEXEC, I64{0})
         failure = if (fd < I64{0}) -> fd else -> I64{0}
@@ -781,7 +781,7 @@ walk_stream_next: fn(stream: I64) -> I64 {
     child_path: rt_text_word(scratch)
     jet_rt_free(scratch, I64{8}, I64{8})
     entry_type: rt_text_byte(wrapping(record + I64{18}))
-    mode := if {
+    ^mode: if {
         (entry_type == I64{4}) -> I64{16384}
         (entry_type == I64{8}) -> I64{32768}
         (entry_type == I64{1} || entry_type == I64{2} || entry_type == I64{6} || entry_type == I64{10} || entry_type == I64{12}) -> I64{0}
@@ -794,7 +794,7 @@ walk_stream_next: fn(stream: I64) -> I64 {
     ignore: rt_text_word(wrapping(context + I64{24}))
     matches_ignore: ignore != I64{0} && rt_text_len(ignore) == name_length && rt_text_equal_bytes(rt_text_data(ignore), name, name_length)
     directory_entry: bits == I64{16384}
-    index := I64{0}
+    ^index: I64{0}
     if directory_entry -> index = walk_slot_push(context, child_path, child_length) else {
         jet_rt_free(child_path, child_length + I64{1}, I64{1})
     }
@@ -822,8 +822,8 @@ path_walk_valid: fn(data: I64, length: I64) -> Bool {
         return valid
     }
     if walk_has_nul(data, length) -> return false
-    mode := I64{0}
-    cut := length
+    ^mode: I64{0}
+    ^cut: length
     loop cut >= (I64{0}) {
         if (cut > I64{0}) {
             prefix: walk_bytes_new(data, cut)
@@ -841,8 +841,8 @@ path_walk_valid: fn(data: I64, length: I64) -> Bool {
 // set; false, freeing them, when the directory was already walked.
 path_walk_visit: fn(seen: I64, sizes: I64, bytes: I64, length: I64) -> Bool {
     count: rt_text_word(wrapping(seen + I64{8}))
-    low := I64{0}
-    high := count
+    ^low: I64{0}
+    ^high: count
     loop low < high {
         middle: (low + high) / I64{2}
         order: walk_bytes_compare(rt_text_word(wrapping(rt_text_word(seen) + middle * I64{8})), rt_text_word(wrapping(rt_text_word(sizes) + middle * I64{8})), bytes, length)
@@ -854,7 +854,7 @@ path_walk_visit: fn(seen: I64, sizes: I64, bytes: I64, length: I64) -> Bool {
     }
     files_words_push(seen, bytes)
     files_words_push(sizes, length)
-    at := count
+    ^at: count
     loop at > low {
         rt_text_store(wrapping(rt_text_word(seen) + at * I64{8}), rt_text_word(wrapping(rt_text_word(seen) + (at - I64{1}) * I64{8})))
         rt_text_store(wrapping(rt_text_word(sizes) + at * I64{8}), rt_text_word(wrapping(rt_text_word(sizes) + (at - I64{1}) * I64{8})))
@@ -911,7 +911,7 @@ path_walk_canonical: fn(data: I64, size: I64) -> I64 {
         directory_length: rt_text_word(wrapping(rt_text_word(stack_sizes) + top * I64{8}))
         rt_text_store(wrapping(stack + I64{8}), top)
         rt_text_store(wrapping(stack_sizes + I64{8}), top)
-        fd := I64{-1}
+        ^fd: I64{-1}
         if path_walk_valid(directory, directory_length) {
             canonical: path_walk_canonical(directory, size)
             if (canonical != I64{0} && path_walk_visit(seen, seen_sizes, canonical, rt_text_word(size))) {
@@ -921,7 +921,7 @@ path_walk_canonical: fn(data: I64, size: I64) -> I64 {
         loop fd >= (I64{0}) {
             count: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
             if (count <= I64{0}) { break }
-            at := I64{0}
+            ^at: I64{0}
             loop at < count {
                 record: wrapping(buffer + at)
                 at += rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})
@@ -933,7 +933,7 @@ path_walk_canonical: fn(data: I64, size: I64) -> I64 {
                 files_words_push(results, path_route_from_text(shown))
                 jet_rt_string_drop(shown)
                 entry_type: rt_text_byte(wrapping(record + I64{18}))
-                is_directory := entry_type == I64{4}
+                ^is_directory: entry_type == I64{4}
                 if (entry_type == I64{0}) {
                     mode: files_lstat_c(child)
                     is_directory = mode >= I64{0} && mode & I64{61440} == I64{16384}
@@ -944,10 +944,10 @@ path_walk_canonical: fn(data: I64, size: I64) -> I64 {
                 } else { jet_rt_free(child, child_length + I64{1}, I64{1}) }
             }
         }
-        if (fd >= I64{0}) { _ := host_call(I64{3}, fd, I64{0}, I64{0}) }
+        if (fd >= I64{0}) { ^_: host_call(I64{3}, fd, I64{0}, I64{0}) }
         jet_rt_free(directory, directory_length + I64{1}, I64{1})
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < rt_text_word(wrapping(seen + I64{8})) {
         jet_rt_free(rt_text_word(wrapping(rt_text_word(seen) + at * I64{8})), rt_text_word(wrapping(rt_text_word(seen_sizes) + at * I64{8})) + I64{1}, I64{1})
         at += I64{1}

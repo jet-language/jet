@@ -48,7 +48,7 @@ pkg_lock_ensure_build_stamp: fn(project_root: String, lock: ^LockFile) -[Exec, T
 }
 
 pkg_lock_capture_build_stamp: fn(project_root: String) -[Exec, Time, Time.Wait]> BuildStamp {
-    stamp := BuildStamp.default()
+    ^stamp: BuildStamp.default()
     stamp.at = pkg_lock_timestamp_now()
     revision: pkg_lock_git_output(project_root, [String]{"rev-parse", "HEAD"}) ?? return stamp
     status: pkg_lock_git_output(project_root, [String]{"status", "--porcelain", "--untracked-files=all"}) ?? ""
@@ -59,7 +59,7 @@ pkg_lock_capture_build_stamp: fn(project_root: String) -[Exec, Time, Time.Wait]>
 
 // Trimmed stdout of `git -C <root> <args>` when it succeeds.
 pkg_lock_git_output: fn(project_root: String, args: [String]) -[Exec, Time.Wait]> String? {
-    argv := [String]{"git", "-C", project_root}
+    ^argv: [String]{"git", "-C", project_root}
     loop arg in args -> argv.push(arg.copy())
     spec: process.cmd(argv).stdout(.Capture).stderr(.Capture)
     receipt: process.run_spec(spec) ?? return None
@@ -77,7 +77,7 @@ pkg_lock_timestamp_now: fn() -[Time]> String {
 
 // `value` in decimal, zero-padded to `width` digits.
 pkg_lock_pad: fn(value: Int, width: Int) -> String Never! {
-    text := "{value}"
+    ^text: "{value}"
     loop text.bytes().len() < width -> text = "0{text}"
     text
 }

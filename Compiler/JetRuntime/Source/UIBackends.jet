@@ -7,11 +7,11 @@
 // A web build's page attaches before its module runs; from then on each
 // paint hands over its scene (core.ui's scene records), which the host takes
 // once per paint.
-ui_web_attached := I64{0}
+^ui_web_attached: I64{0}
 
-ui_web_scene := I64{0}
+^ui_web_scene: I64{0}
 
-ui_web_scene_fresh := I64{0}
+^ui_web_scene_fresh: I64{0}
 
 #Export(c) jet_ui_web_attach: fn() {
     #Unsafe("a web page's module runs on one thread") { ui_web_attached = I64{1} }
@@ -56,9 +56,9 @@ ui_web_scene_fresh := I64{0}
 // is one word vector (len0 cap8 data16, Events.jet event_words_*): the click
 // slots, which keep any callback closure (a button's click handler, a text
 // input's change handler), and the drop slots of text inputs.
-ui_click_slots := I64{0}
+^ui_click_slots: I64{0}
 
-ui_drop_slots := I64{0}
+^ui_drop_slots: I64{0}
 
 ui_slots_new: fn() -> I64 {
     base: jet_rt_alloc(I64{24}, I64{8})
@@ -122,16 +122,16 @@ ui_slots_push: fn(base: I64, env: I64, invoke: I64, release: I64) -> I64 {
     if (!known) {
         return
     }
-    _ := coll_call2(invoke, env, I64{0})
+    ^_: coll_call2(invoke, env, I64{0})
 }
 
 // The UTF-8 text a web host hands over, the item it is dropping or what a
 // text input now holds: the host writes it into the bytes
 // jet_ui_web_text_buffer returns, then jet_ui_web_drop or
 // jet_ui_web_change takes them.
-ui_web_text_bytes := I64{0}
+^ui_web_text_bytes: I64{0}
 
-ui_web_text_length := I64{0}
+^ui_web_text_length: I64{0}
 
 #Export(c) jet_ui_web_text_buffer: fn(length: I64) -> I64 {
     bytes: jet_rt_alloc(wrapping(length + I64{1}), I64{1})
@@ -192,7 +192,7 @@ ui_drop_run: fn(id: I64, kind: I64, text: I64) {
         jet_rt_string_drop(text)
         return
     }
-    _ := coll_call3(invoke, env, kind, text)
+    ^_: coll_call3(invoke, env, kind, text)
 }
 
 // A web host's input in a text input: what the input holds now, the text in
@@ -229,7 +229,7 @@ ui_change_run: fn(id: I64, text: I64) {
     if (known) {
         lent: jet_rt_alloc(I64{8}, I64{8})
         ui_carrier_store(lent, text)
-        _ := coll_call3(invoke, env, lent, I64{0})
+        ^_: coll_call3(invoke, env, lent, I64{0})
         jet_rt_free(lent, I64{8}, I64{8})
     }
     jet_rt_string_drop(text)

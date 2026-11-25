@@ -181,7 +181,7 @@ jet_cli_entry_join: fn(root: String, relative: String) -> String Never! {
 
 // The last path component.
 jet_cli_file_name: fn(path: String) -> String Never! {
-    parts := path.split("/").to_list()
+    ^parts: path.split("/").to_list()
     parts.pop() ?? path
 }
 
@@ -199,7 +199,7 @@ jet_cli_entry_not_ported: fn(command: String, shape: String, color: Bool) -> Jet
 
 // The tokens of `source` without comments.
 jet_cli_significant_tokens: fn(tokens: [Token]) -> [Token] Never! {
-    kept := [Token]{}
+    ^kept: [Token]{}
     loop token in tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
         kept.push(token.copy())
@@ -213,7 +213,7 @@ jet_cli_is_manifest_string: fn(kind: Int) -> Bool Never! {
 
 // The index of the bracket closing the one at `open` (any of `{[(`), or -1.
 jet_cli_matching_close: fn(tokens: [Token], open: Int) -> Int Never! {
-    depth := 0
+    ^depth: 0
     loop index in open..<tokens.len() {
         kind: tokens[index].kind
         if kind == TOKEN_LBRACE || kind == TOKEN_LBRACKET || kind == TOKEN_LPAREN -> depth += 1
@@ -228,7 +228,7 @@ jet_cli_matching_close: fn(tokens: [Token], open: Int) -> Int Never! {
 // A `members:` value: `["./a", "./b"]`, `find("./dir")`, or a list mixing
 // both. `None` when the value is any other (computed) expression.
 jet_cli_member_refs: fn(tokens: [Token], tables: TokenTables, value: Int) -> [JetCLIMemberRef]? Never! {
-    refs := [JetCLIMemberRef]{}
+    ^refs: [JetCLIMemberRef]{}
     if value >= tokens.len() -> return None
     if tokens[value].kind == TOKEN_IDENT {
         found: jet_cli_find_member_ref(tokens, tables, value) ?? return None
@@ -238,7 +238,7 @@ jet_cli_member_refs: fn(tokens: [Token], tables: TokenTables, value: Int) -> [Je
     if tokens[value].kind != TOKEN_LBRACKET -> return None
     close: jet_cli_matching_close(tokens, value)
     if close < 0 -> return None
-    index := value + 1
+    ^index: value + 1
     loop index < close {
         token: tokens[index]
         if {
@@ -288,8 +288,8 @@ jet_cli_output_field: fn(tokens: [Token], tables: TokenTables, open: Int, close:
 
 // `outputs: { app: .Executable{ entry: app.run }, lib: .Library{} }`.
 jet_cli_outputs: fn(tokens: [Token], tables: TokenTables, open: Int, close: Int) -> [JetCLIOutputFact] Never! {
-    outputs := [JetCLIOutputFact]{}
-    index := open + 1
+    ^outputs: [JetCLIOutputFact]{}
+    ^index: open + 1
     loop index < close {
         if tokens[index].kind != TOKEN_IDENT || index + 2 >= close || tokens[index + 1].kind != TOKEN_COLON {
             index += 1
@@ -303,8 +303,8 @@ jet_cli_outputs: fn(tokens: [Token], tables: TokenTables, open: Int, close: Int)
         }
         name: token_decoded(tables, tokens[index])
         kind: token_decoded(tables, tokens[kind_index])
-        entry := String?{None}
-        artifact := String?{None}
+        ^entry: String?{None}
+        ^artifact: String?{None}
         index = kind_index + 1
         if index < close && tokens[index].kind == TOKEN_LBRACE {
             body_close: jet_cli_matching_close(tokens, index)
@@ -325,8 +325,8 @@ jet_cli_outputs: fn(tokens: [Token], tables: TokenTables, open: Int, close: Int)
 // another nested value (`settings: { ... }`) is skipped; PackageModel reads
 // and checks the whole block when the compile loads it.
 jet_cli_build_profiles: fn(tokens: [Token], tables: TokenTables, open: Int, close: Int) -> [JetCLIBuildProfile] Never! {
-    profiles := [JetCLIBuildProfile]{}
-    index := open + 1
+    ^profiles: [JetCLIBuildProfile]{}
+    ^index: open + 1
     loop index < close {
         if tokens[index].kind != TOKEN_IDENT || index + 3 >= close || tokens[index + 1].kind != TOKEN_COLON || tokens[index + 2].kind != TOKEN_IDENT || token_decoded(tables, tokens[index + 2]) != "Build" || tokens[index + 3].kind != TOKEN_LBRACE {
             if tokens[index].kind == TOKEN_LBRACE || tokens[index].kind == TOKEN_LBRACKET || tokens[index].kind == TOKEN_LPAREN {
@@ -341,16 +341,16 @@ jet_cli_build_profiles: fn(tokens: [Token], tables: TokenTables, open: Int, clos
         body: index + 3
         body_close: jet_cli_matching_close(tokens, body)
         if body_close < 0 || body_close > close -> break
-        fields := [JetCLIProfileField]{}
-        field := body + 1
+        ^fields: [JetCLIProfileField]{}
+        ^field: body + 1
         loop field < body_close {
             if tokens[field].kind == TOKEN_IDENT && field + 2 < body_close && tokens[field + 1].kind == TOKEN_COLON && tokens[field + 2].kind == TOKEN_LBRACKET {
                 list_close: jet_cli_matching_close(tokens, field + 2)
                 if list_close < 0 || list_close > body_close -> break
-                items := [String]{}
-                strings := true
-                paths := true
-                at := field + 3
+                ^items: [String]{}
+                ^strings: true
+                ^paths: true
+                ^at: field + 3
                 loop at < list_close {
                     kind: tokens[at].kind
                     if {
@@ -390,7 +390,7 @@ jet_cli_build_profiles: fn(tokens: [Token], tables: TokenTables, open: Int, clos
             }
             if tokens[field].kind == TOKEN_IDENT && field + 2 < body_close && tokens[field + 1].kind == TOKEN_COLON && (tokens[field + 2].kind == TOKEN_IDENT || tokens[field + 2].kind == TOKEN_TRUE || tokens[field + 2].kind == TOKEN_FALSE || tokens[field + 2].kind == TOKEN_UNIT_NUMBER || jet_cli_is_manifest_string(tokens[field + 2].kind)) {
                 kind: tokens[field + 2].kind
-                end := field + 3
+                ^end: field + 3
                 value: if {
                     kind == TOKEN_TRUE -> "true"
                     kind == TOKEN_FALSE -> "false"
@@ -419,8 +419,8 @@ jet_cli_build_profiles: fn(tokens: [Token], tables: TokenTables, open: Int, clos
 // The dotted name that starts at the word `at` (`tools.relink`, or one
 // word), before `close`: its text and the index past it.
 jet_cli_manifest_path: fn(tokens: [Token], tables: TokenTables, at: Int, close: Int) -> {text: String, end: Int} Never! {
-    text := token_decoded(tables, tokens[at])
-    end := at + 1
+    ^text: token_decoded(tables, tokens[at])
+    ^end: at + 1
     loop end + 1 < close && tokens[end].kind == TOKEN_DOT && tokens[end + 1].kind == TOKEN_IDENT {
         text = "{text}.{token_decoded(tables, tokens[end + 1])}"
         end += 2
@@ -439,11 +439,11 @@ jet_cli_hooks_field: fn(name: String) -> Bool Never! {
 // reader cannot follow stays empty; the compile reports the manifest's own
 // shape errors.
 jet_cli_manifest_facts: fn(source: String, origin: String) -> JetCLIManifest Never! {
-    facts := JetCLIManifest{name: "", origin: origin, members: [JetCLIMemberRef]{}, outputs: [JetCLIOutputFact]{}, default_run: None, profiles: [JetCLIBuildProfile]{}}
+    ^facts: JetCLIManifest{name: "", origin: origin, members: [JetCLIMemberRef]{}, outputs: [JetCLIOutputFact]{}, default_run: None, profiles: [JetCLIBuildProfile]{}}
     lexed: lex_config(source.bytes())
     tokens: jet_cli_significant_tokens(lexed.tokens)
-    depth := 0
-    index := 0
+    ^depth: 0
+    ^index: 0
     loop index < tokens.len() {
         token: tokens[index]
         if token.kind == TOKEN_EOF -> break
@@ -462,7 +462,7 @@ jet_cli_manifest_facts: fn(source: String, origin: String) -> JetCLIManifest Nev
             next
         }
         field: token_decoded(lexed.tables, token)
-        value := index + 2
+        ^value: index + 2
         if field == {
             "name" -> {
                 if jet_cli_is_manifest_string(tokens[value].kind) {
@@ -573,7 +573,7 @@ jet_cli_build_entry_lines: fn(source: String) -> [Int] Never! {
     bytes: source.bytes()
     lexed: lex(bytes)
     tokens: jet_cli_significant_tokens(lexed.tokens)
-    starts := [Int]{}
+    ^starts: [Int]{}
     loop index in jet_cli_top_level_function_heads(tokens, lexed.tables, "build") {
         open: index + 3
         if open + 4 >= tokens.len() || tokens[open].kind != TOKEN_LPAREN || tokens[open + 1].kind != TOKEN_IDENT || tokens[open + 2].kind != TOKEN_COLON {
@@ -589,8 +589,8 @@ jet_cli_build_entry_lines: fn(source: String) -> [Int] Never! {
 // The index of each `<wanted>: fn` head in `tokens` at brace depth 0 and not
 // after a `.`.
 jet_cli_top_level_function_heads: fn(tokens: [Token], tables: TokenTables, wanted: String) -> [Int] Never! {
-    heads := [Int]{}
-    depth := 0
+    ^heads: [Int]{}
+    ^depth: 0
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1
@@ -606,9 +606,9 @@ jet_cli_top_level_function_heads: fn(tokens: [Token], tables: TokenTables, wante
 
 // The 1-based line of each byte offset in `starts` (ascending) of `bytes`.
 jet_cli_offset_lines: fn(bytes: [U8], starts: [Int]) -> [Int] Never! {
-    lines := [Int]{}
-    line := 1
-    at := 0
+    ^lines: [Int]{}
+    ^line: 1
+    ^at: 0
     loop start in starts {
         loop {
             if at >= start || at >= bytes.len() -> break
@@ -631,7 +631,7 @@ jet_cli_parsed_program: fn(source: String) -> Program? Never! {
 
 // How many top-level functions named `wanted` a program declares.
 jet_cli_function_count: fn(program: Program, wanted: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop item in program.items {
         if item == .Func(function) {
             if function.name == wanted -> count += 1
@@ -642,8 +642,8 @@ jet_cli_function_count: fn(program: Program, wanted: String) -> Int Never! {
 
 // `discover_source_files` under `root`, or the problem that stopped the walk.
 jet_cli_discover_sources: fn(root: String, files: ^[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
-    unretained := [AppAuthorizedDirectory]{}
-    budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
+    ^unretained: [AppAuthorizedDirectory]{}
+    ^budget: JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
     jet_cli_walk_sources(root, "", 0, files, unretained, false, budget)
 }
 
@@ -651,7 +651,7 @@ jet_cli_discover_sources: fn(root: String, files: ^[JetDriverAuthorizedSourceFil
 // manifest, environment, config, and workspace files and without a root or
 // `src/` retired `main.jet`.
 jet_cli_package_sources: fn(root: String, files: ^[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
-    discovered := [JetDriverAuthorizedSourceFile]{}
+    ^discovered: [JetDriverAuthorizedSourceFile]{}
     if jet_cli_discover_sources(root, discovered) == .Val(problem) -> return Val(problem)
     loop file in discovered {
         name: jet_cli_file_name(file.relative_path)
@@ -705,10 +705,10 @@ jet_cli_output_entry_file: fn(root: String, output: JetCLIOutputFact) -[FS]> Jet
         }
         return None
     }
-    files := [JetDriverAuthorizedSourceFile]{}
+    ^files: [JetDriverAuthorizedSourceFile]{}
     if jet_cli_package_sources(root, files) != None -> return None
     if parts.len() == 1 {
-        found := [String]{}
+        ^found: [String]{}
         loop file in files {
             declared: jet_cli_top_level_function_lines(file.source, parts[0]).len()
             loop _index in 0..<declared -> found.push(file.path)
@@ -718,13 +718,13 @@ jet_cli_output_entry_file: fn(root: String, output: JetCLIOutputFact) -[FS]> Jet
     }
     // `entry: file.callable` names the one member file whose stem is `file`,
     // declaring exactly one top-level `callable`. Every source must parse.
-    programs := [Program]{}
+    ^programs: [Program]{}
     loop file in files {
         block: jet_driver_inline_package(file.source)
         if block.error != None -> return None
         programs.push(jet_cli_parsed_program(jet_driver_mask_inline_package(file.source, block)) ?? return None)
     }
-    selected := -1
+    ^selected: -1
     loop (index, file) in files {
         if jet_cli_file_name(file.relative_path) == JET_CLI_PACKAGE_FILE -> next
         if jet_cli_stem(file.relative_path) != parts[0] -> next
@@ -746,13 +746,13 @@ jet_cli_resolve_run_entry: fn(root: String, manifest: JetCLIManifest?, _notices:
         return JetCLIStockEntry.Found{entry: JetCLIEntry{path: path, callable: Val("run")}}
     }
     facts: manifest ?? return JetCLIStockEntry.Absent
-    compatible := [String]{}
+    ^compatible: [String]{}
     loop output in facts.outputs {
         if jet_cli_runnable_kind(output.kind) -> compatible.push(output.name)
     }
     if compatible.len() == 0 -> return JetCLIStockEntry.Absent
     compatible.sort()
-    selected := ""
+    ^selected: ""
     if {
         compatible.len() == 1 -> selected = compatible[0]
         facts.default_run == .Val(chosen) -> selected = chosen
@@ -784,12 +784,12 @@ jet_cli_is_ident_byte: fn(byte: U8) -> Bool Never! {
 jet_cli_source_may_declare_run: fn(source: String) -> Bool Never! {
     bytes: source.bytes()
     len: bytes.len()
-    at := 0
+    ^at: 0
     loop at + 3 < len {
         if bytes[at] == (U8{114}) && bytes[at + 1] == (U8{117}) && bytes[at + 2] == (U8{110}) {
             before_ok: at == 0 || !jet_cli_is_ident_byte(bytes[at - 1])
             if before_ok {
-                next_at := at + 3
+                ^next_at: at + 3
                 loop next_at < len && (bytes[next_at] == (U8{32}) || bytes[next_at] == (U8{9})) {
                     next_at += 1
                 }
@@ -804,7 +804,7 @@ jet_cli_source_may_declare_run: fn(source: String) -> Bool Never! {
 // `package_run_member`: the first discovered source (not `package.jet`) that
 // parses cleanly and declares a top-level `run: fn`.
 jet_cli_package_run_member: fn(root: String) -[FS]> String? Never! {
-    files := [JetDriverAuthorizedSourceFile]{}
+    ^files: [JetDriverAuthorizedSourceFile]{}
     if jet_cli_discover_sources(root, files) != None -> return None
     loop file in files {
         if jet_cli_file_name(file.relative_path) == JET_CLI_PACKAGE_FILE -> next
@@ -828,7 +828,7 @@ jet_cli_find_project_entry: fn(root_path: String, command: String, color: Bool, 
 // workspace member checked through its dependents).
 jet_cli_find_project_entry_at: fn(root_path: String, command: String, color: Bool, notices: ^[String], run_member: Bool, first_source: Bool{true}) -[FS, Env]> JetCLIEntryFound Never! {
     root: cli_files.realpath(root_path) ?? root_path
-    package := JetCLIManifest?{None}
+    ^package: JetCLIManifest?{None}
     if jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) != None {
         package = jet_cli_root_manifest(root)
     }
@@ -870,7 +870,7 @@ jet_cli_find_project_entry_at: fn(root_path: String, command: String, color: Boo
                 return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: member, callable: None}}
             }
             if first_source {
-                files := [JetDriverAuthorizedSourceFile]{}
+                ^files: [JetDriverAuthorizedSourceFile]{}
                 if jet_cli_package_sources(root, files) == .None && files.len() > 0 {
                     return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: files[0].path, callable: None}}
                 }
@@ -896,13 +896,13 @@ jet_cli_command_role_file: fn(command: String) -> String? Never! {
 jet_cli_command_override: fn(root_path: String, command: String, color: Bool) -[FS, Env]> JetCLIEntryFound Never! {
     role: jet_cli_command_role_file(command) ?? return JetCLIEntryFound.Absent
     root: cli_files.realpath(root_path) ?? root_path
-    files := [JetDriverAuthorizedSourceFile]{}
+    ^files: [JetDriverAuthorizedSourceFile]{}
     if jet_cli_package_sources(root, files) == .Val(problem) {
         return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2105", problem, "command resolution uses the checked package source tree", "repair the package source and run the command again", color, JET_DRIVER_EXIT_USER_ERROR)}
     }
-    role_files := [JetDriverAuthorizedSourceFile]{}
-    root_files := [JetDriverAuthorizedSourceFile]{}
-    src_files := [JetDriverAuthorizedSourceFile]{}
+    ^role_files: [JetDriverAuthorizedSourceFile]{}
+    ^root_files: [JetDriverAuthorizedSourceFile]{}
+    ^src_files: [JetDriverAuthorizedSourceFile]{}
     loop file in files {
         parent: jet_cli_relative_parent(file.relative_path)
         name: jet_cli_file_name(file.relative_path)
@@ -914,8 +914,8 @@ jet_cli_command_override: fn(root_path: String, command: String, color: Bool) -[
             else -> {}
         }
     }
-    paths := [String]{}
-    locations := [String]{}
+    ^paths: [String]{}
+    ^locations: [String]{}
     loop file in role_files -> jet_cli_command_override_lines(file, command, paths, locations)
     loop file in root_files -> jet_cli_command_override_lines(file, command, paths, locations)
     if paths.len() == 0 {
@@ -923,7 +923,7 @@ jet_cli_command_override: fn(root_path: String, command: String, color: Bool) -[
     }
     if paths.len() == 0 -> return JetCLIEntryFound.Absent
     if paths.len() > 1 {
-        listed := locations[0].copy()
+        ^listed: locations[0].copy()
         loop index in 1..<locations.len() {
             separator: if index == locations.len() - 1 -> " and " else -> ", "
             listed = "{listed}{separator}{locations[index]}"
@@ -963,7 +963,7 @@ jet_cli_find_command_entry: fn(root: String, command: String, use_override: Bool
 jet_cli_declares_workspace_module: fn(source: String) -> Bool Never! {
     lexed: lex(source.bytes())
     tokens: jet_cli_significant_tokens(lexed.tokens)
-    depth := 0
+    ^depth: 0
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1
@@ -985,7 +985,7 @@ jet_cli_declares_web_target: fn(source: String) -> Bool Never! {
     if !source.contains("Target") -> return false
     lexed: lex(source.bytes())
     tokens: jet_cli_significant_tokens(lexed.tokens)
-    depth := 0
+    ^depth: 0
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1
@@ -1031,7 +1031,7 @@ jet_cli_declares_workspace_members: fn(source: String) -> Bool Never! {
 
 // The E1239 report for two declaring sources.
 jet_cli_ambiguous_workspace: fn(paths: [String], color: Bool) -> JetCLIPlan Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop path in paths -> names.push(jet_cli_file_name(path))
     jet_cli_fail("E1239", "`workspace: module` is declared in more than one file: `{names.join("`, `")}`", "the workspace authority is discovered by declaration, so exactly one file may declare `workspace: module {{ … }}`", "keep one declaration and delete the others", color, JET_DRIVER_EXIT_USER_ERROR)
 }
@@ -1065,11 +1065,11 @@ jet_cli_workspace_source: fn(dir: String, color: Bool) -[FS]> JetCLIWorkspaceSou
             return JetCLIWorkspaceSource.Index{path: manifest_path}
         }
     }
-    names := cli_files.listdir(dir) ?? return JetCLIWorkspaceSource.Absent
+    ^names: cli_files.listdir(dir) ?? return JetCLIWorkspaceSource.Absent
     names.sort()
-    canonical := String?{None}
-    authorities := [String]{}
-    malformed_canonical := false
+    ^canonical: String?{None}
+    ^authorities: [String]{}
+    ^malformed_canonical: false
     loop name in names {
         if !name.ends_with(".jet") -> next
         path: jet_cli_checked_file(dir, name) ?? next
@@ -1093,7 +1093,7 @@ jet_cli_workspace_source: fn(dir: String, color: Bool) -[FS]> JetCLIWorkspaceSou
     }
     if canonical == .Val(index) {
         if authorities.len() == 0 -> return JetCLIWorkspaceSource.Index{path: index}
-        paths := [String]{index}
+        ^paths: [String]{index}
         loop path in authorities -> paths.push(path)
         return JetCLIWorkspaceSource.Failed{plan: jet_cli_ambiguous_workspace(paths, color)}
     }
@@ -1109,7 +1109,7 @@ jet_cli_workspace_source: fn(dir: String, color: Bool) -[FS]> JetCLIWorkspaceSou
 jet_cli_workspace_module_members: fn(source: String) -> [JetCLIMemberRef]? Never! {
     lexed: lex(source.bytes())
     tokens: jet_cli_significant_tokens(lexed.tokens)
-    depth := 0
+    ^depth: 0
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1
@@ -1119,7 +1119,7 @@ jet_cli_workspace_module_members: fn(source: String) -> [JetCLIMemberRef]? Never
         }
         close: jet_cli_matching_close(tokens, index + 3)
         if close < 0 -> return None
-        inner := 0
+        ^inner: 0
         loop field in index + 4..<close {
             field_kind: tokens[field].kind
             if field_kind == TOKEN_LBRACE || field_kind == TOKEN_LBRACKET || field_kind == TOKEN_LPAREN {
@@ -1140,14 +1140,14 @@ jet_cli_workspace_module_members: fn(source: String) -> [JetCLIMemberRef]? Never
 // One `find("./dir")` scan: the immediate subdirectories holding `package.jet`,
 // root-relative and sorted.
 jet_cli_find_member_dirs: fn(root: String, raw: String) -[FS]> [String]? Never! {
-    relative := raw
+    ^relative: raw
     if relative.starts_with("./") -> relative = relative.slice(2..<relative.len())
     if raw == "" || raw.starts_with("/") || raw.split("/").to_list().contains("..") -> return None
     scan: jet_cli_entry_join(root, relative)
     if cli_files.is_symlink(scan) || !cli_files.is_dir(scan) -> return None
-    names := cli_files.listdir(scan) ?? return None
+    ^names: cli_files.listdir(scan) ?? return None
     names.sort()
-    found := [String]{}
+    ^found: [String]{}
     loop name in names {
         child: jet_cli_entry_join(scan, name)
         if cli_files.is_symlink(child) || !cli_files.is_dir(child) -> next
@@ -1163,7 +1163,7 @@ jet_cli_find_member_dirs: fn(root: String, raw: String) -[FS]> [String]? Never! 
 // computed expressions are not ported yet.
 jet_cli_workspace_members: fn(root: String, index_path: String, command: String, color: Bool) -[FS, Env]> JetCLIWorkspacePlan Never! {
     source: cli_files.read(index_path) ?? return JetCLIWorkspacePlan.Refused{plan: jet_cli_entry_not_ported(command, "unreadable workspace index", color)}
-    refs := [JetCLIMemberRef]{}
+    ^refs: [JetCLIMemberRef]{}
     if {
         jet_cli_file_name(index_path) == JET_CLI_PACKAGE_FILE -> {
             refs = jet_cli_manifest_facts(source, index_path).members
@@ -1175,7 +1175,7 @@ jet_cli_workspace_members: fn(root: String, index_path: String, command: String,
             }
         }
     }
-    paths := [String]{}
+    ^paths: [String]{}
     loop member in refs {
         if !member.find {
             paths.push(member.path)
@@ -1184,8 +1184,8 @@ jet_cli_workspace_members: fn(root: String, index_path: String, command: String,
         found: jet_cli_find_member_dirs(root, member.path) ?? return JetCLIWorkspacePlan.Refused{plan: jet_cli_entry_not_ported(command, "workspace whose `find` directory is missing", color)}
         loop path in found -> paths.push(path)
     }
-    members := [JetCLIWorkspaceMember]{}
-    seen := [String]{}
+    ^members: [JetCLIWorkspaceMember]{}
+    ^seen: [String]{}
     loop path in paths {
         if path == "" || path.starts_with("/") || path.split("/").to_list().contains("..") {
             return JetCLIWorkspacePlan.Refused{plan: jet_cli_entry_not_ported(command, "workspace member outside the workspace root", color)}
@@ -1226,7 +1226,7 @@ jet_cli_looks_like_workspace_lock: fn(raw: String) -> Bool Never! {
 // stops the walk (its own `package.jet` is the root); the nearest `package.jet`
 // is the manifest root; an inline-Package stock entry wins.
 jet_cli_find_package_root: fn(start: String, color: Bool) -[FS, Env]> JetCLIRootFound Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     if jet_cli_find_package_root_checked(cache, start) == {
         .Ok(found) -> {
             if found == .Val(root) -> return JetCLIRootFound.Root{path: root}
@@ -1241,7 +1241,7 @@ jet_cli_find_package_root: fn(start: String, color: Bool) -[FS, Env]> JetCLIRoot
 // The scan already wrote the member's notices.
 jet_cli_workspace_member_entry: fn(member_root: String, scanned: JetCLIEntry, from_stock: Bool, command: String, color: Bool) -[FS, Env]> JetCLIEntryFound Never! {
     if !from_stock -> return JetCLIEntryFound.Entry{entry: scanned}
-    written := [String]{}
+    ^written: [String]{}
     if jet_cli_find_project_entry_at(member_root, command, color, written, true) == .Entry(entry) {
         if cli_files.is_file(entry.path) -> return JetCLIEntryFound.Entry{entry: entry}
     }
@@ -1267,12 +1267,12 @@ JetCLIWorkspaceRunnableFound: enum {
 // whether it can run needs only that it has an entry file; a selected
 // member's entry is resolved in full (jet_cli_workspace_member_entry).
 jet_cli_workspace_runnable: fn(root: String, members: [JetCLIWorkspaceMember], command: String, use_override: Bool, color: Bool, notices: ^[String]) -[FS, Env]> JetCLIWorkspaceRunnableFound Never! {
-    runnable := [JetCLIWorkspaceMember]{}
-    entries := [JetCLIEntry]{}
-    stocks := [Bool]{}
+    ^runnable: [JetCLIWorkspaceMember]{}
+    ^entries: [JetCLIEntry]{}
+    ^stocks: [Bool]{}
     loop member in members {
         member_root: jet_cli_entry_join(root, member.path)
-        stock := JetCLIEntry?{None}
+        ^stock: JetCLIEntry?{None}
         if jet_cli_find_project_entry_at(member_root, command, color, notices, false) == {
             .Entry(entry) -> {
                 if cli_files.is_file(entry.path) -> stock = Val(entry)
@@ -1280,8 +1280,8 @@ jet_cli_workspace_runnable: fn(root: String, members: [JetCLIWorkspaceMember], c
             .Refused(plan_refused) -> return JetCLIWorkspaceRunnableFound.Refused{plan: plan_refused}
             .Absent -> {}
         }
-        entry := stock
-        from_stock := true
+        ^entry: stock
+        ^from_stock: true
         if use_override {
             if jet_cli_command_override(member_root, command, color) == {
                 .Entry(found) -> {
@@ -1319,12 +1319,12 @@ jet_cli_resolve_bare_entry: fn(command: String, cwd: String, member_flag: String
         }
     }
     if source == .Index(index_path) {
-        members_plan := [JetCLIWorkspaceMember]{}
+        ^members_plan: [JetCLIWorkspaceMember]{}
         if jet_cli_workspace_members(root, index_path, command, color) == {
             .Refused(refusal) -> return JetCLIEntryFound.Refused{plan: refusal}
             .Members(members) -> members_plan = members
         }
-        found := JetCLIWorkspaceRunnable{members: [JetCLIWorkspaceMember]{}, entries: [JetCLIEntry]{}, stocks: [Bool]{}}
+        ^found: JetCLIWorkspaceRunnable{members: [JetCLIWorkspaceMember]{}, entries: [JetCLIEntry]{}, stocks: [Bool]{}}
         if jet_cli_workspace_runnable(root, members_plan, command, use_override, color, notices) == {
             .Refused(refusal) -> return JetCLIEntryFound.Refused{plan: refusal}
             .Found(scanned) -> found = scanned
@@ -1338,7 +1338,7 @@ jet_cli_resolve_bare_entry: fn(command: String, cwd: String, member_flag: String
                     return jet_cli_workspace_member_entry(jet_cli_entry_join(root, member.path), entries[index], stocks[index], command, color)
                 }
             }
-            names := [String]{}
+            ^names: [String]{}
             loop member in members_plan -> names.push(member.name)
             return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2104", "no workspace member named `{want}`", jet_cli_why("E2104"), "pick one of: {names.join(", ")}", color, JET_DRIVER_EXIT_USAGE)}
         }
@@ -1346,7 +1346,7 @@ jet_cli_resolve_bare_entry: fn(command: String, cwd: String, member_flag: String
             return jet_cli_workspace_member_entry(jet_cli_entry_join(root, runnable[0].path), entries[0], stocks[0], command, color)
         }
         if runnable.len() >= 2 {
-            names := [String]{}
+            ^names: [String]{}
             loop member in runnable -> names.push(member.name)
             return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2104", "`jet {command}` is ambiguous — {names.len()} workspace members can run", "this workspace declares multiple runnable members: {names.join(", ")}", "pick one with `jet {command} -p <member>`, or run its file directly", color, JET_DRIVER_EXIT_USAGE)}
         }
@@ -1369,22 +1369,22 @@ jet_cli_workspace_check_entries: fn(dir: String, color: Bool, notices: ^[String]
     root: cli_files.realpath(dir) ?? return JetCLIWorkspaceCheck.Absent
     source: jet_cli_workspace_source(root, color)
     if source == .Failed(plan) -> return JetCLIWorkspaceCheck.Refused{plan: plan}
-    index_path := ""
+    ^index_path: ""
     if source == {
         .Index(path) -> index_path = path
         .Absent | .Authority(_) | .Failed(_) -> return JetCLIWorkspaceCheck.Absent
     }
-    members := [JetCLIWorkspaceMember]{}
+    ^members: [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_members(root, index_path, "check", color) == {
         .Refused(refusal) -> return JetCLIWorkspaceCheck.Refused{plan: refusal}
         .Members(found) -> members = found
     }
-    directories := [String]{}
+    ^directories: [String]{}
     loop member in members {
         member_root: jet_cli_entry_join(root, member.path)
         directories.push(cli_files.realpath(member_root) ?? member_root)
     }
-    depended := [String]{}
+    ^depended: [String]{}
     loop directory in directories {
         manifest_path: jet_cli_checked_file(directory, JET_CLI_PACKAGE_FILE) ?? next
         manifest: pkg_manifest_parse(manifest_path, cli_files.read(manifest_path) ?? "") ?? next
@@ -1395,8 +1395,8 @@ jet_cli_workspace_check_entries: fn(dir: String, color: Bool, notices: ^[String]
             }
         }
     }
-    entries := [String]{}
-    found := false
+    ^entries: [String]{}
+    ^found: false
     loop directory in directories {
         if depended.contains(directory) -> next
         if jet_cli_find_project_entry_at(directory, "check", color, notices, true, first_source: true) == {
@@ -1438,26 +1438,26 @@ JetCLIWorkspaceTest: enum {
 
 jet_cli_workspace_fan_out_members: fn(dir: String, command: String, argv: [String], use_override: Bool, color: Bool, notices: ^[String]) -[FS, Env]> JetCLIWorkspaceTest Never! {
     root: cli_files.realpath(dir) ?? return JetCLIWorkspaceTest.Absent
-    index_path := ""
+    ^index_path: ""
     if jet_cli_workspace_source(root, color) == {
         .Index(path) -> index_path = path
         .Absent | .Authority(_) | .Failed(_) -> return JetCLIWorkspaceTest.Absent
     }
-    members := [JetCLIWorkspaceMember]{}
+    ^members: [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_members(root, index_path, command, color) == {
         .Refused(refusal) -> return JetCLIWorkspaceTest.Refused{plan: refusal}
         .Members(found) -> members = found
     }
-    runnable := [JetCLIWorkspaceMember]{}
+    ^runnable: [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_runnable(root, members, command, use_override, color, notices) == {
         .Refused(refusal) -> return JetCLIWorkspaceTest.Refused{plan: refusal}
         .Found(scanned) -> runnable = scanned.members
     }
-    picks := [Int]{}
-    picked := false
+    ^picks: [Int]{}
+    ^picked: false
     loop (index, item) in argv {
         if item == "--" -> break
-        refusal := JetCLIPlan?{None}
+        ^refusal: JetCLIPlan?{None}
         if {
             item.starts_with("-p=") -> {
                 refusal = jet_cli_workspace_pick(runnable, item.slice(3..<item.len()), command, color, picks)
@@ -1471,9 +1471,9 @@ jet_cli_workspace_fan_out_members: fn(dir: String, command: String, argv: [Strin
         picked = true
     }
     if !picked && runnable.len() < 2 -> return JetCLIWorkspaceTest.Absent
-    names := [String]{}
-    directories := [String]{}
-    at := 0
+    ^names: [String]{}
+    ^directories: [String]{}
+    ^at: 0
     loop member in runnable {
         if !picked || picks.contains(at) {
             names.push(member.name)
@@ -1493,7 +1493,7 @@ jet_cli_workspace_pick: fn(runnable: [JetCLIWorkspaceMember], want: String, comm
             return None
         }
     }
-    hint := "pick one of:"
+    ^hint: "pick one of:"
     loop (at, member) in runnable {
         hint = if at == 0 -> "{hint} {member.name}" else -> "{hint}, {member.name}"
     }
@@ -1511,7 +1511,7 @@ jet_cli_missing_bare_entry: fn(command: String, _cwd: String, color: Bool) -[FS,
 // `resolve_command_target` for a directory `raw`: the shared bare rule when it
 // yields a real file, else `resolve_source_path`'s project entry.
 jet_cli_resolve_directory_target: fn(command: String, raw: String, member_flag: String?, use_override: Bool, color: Bool) -[FS, Env]> JetCLITarget Never! {
-    notices := [String]{}
+    ^notices: [String]{}
     resolved: jet_cli_resolve_bare_entry(command, raw, member_flag, use_override, color, notices)
     if resolved == {
         .Entry(entry) -> {
@@ -1530,9 +1530,9 @@ jet_cli_resolve_directory_target: fn(command: String, raw: String, member_flag: 
 // caller; no package at all is E2105. `notices` are the stderr notices written
 // so far.
 jet_cli_resolve_source_path: fn(command: String, raw: String, color: Bool, notices: [String]) -[FS, Env]> JetCLITarget Never! {
-    written := notices
+    ^written: notices
     root: cli_files.realpath(raw) ?? raw
-    entry := ""
+    ^entry: ""
     found_entry: jet_cli_find_project_entry(root, command, color, written)
     if found_entry == {
         .Entry(found) -> { entry = found.path }
@@ -1567,7 +1567,7 @@ jet_cli_with_notices: fn(notices: [String], plan: ^^JetCLIPlan) -> JetCLIPlan Ne
 // so the members are parsed here.
 jet_cli_package_is_library_only: fn(entry: String, compiled: JetDriverCompileResult) -[FS, Env]> Bool Never! {
     folder: jet_cli_parent(entry) ?? "."
-    root := ""
+    ^root: ""
     if jet_cli_find_package_root(folder, false) == {
         .Root(found) -> root = found
         .Absent | .Refused(_) -> return false
@@ -1597,13 +1597,13 @@ jet_cli_entry_lacks_callable: fn(source: String, callable: String) -> Bool Never
 // `run`.
 jet_cli_project_entry_callable: fn(file: String) -[FS, Env]> String Never! {
     folder: jet_cli_parent(file) ?? "."
-    root := ""
+    ^root: ""
     if jet_cli_find_package_root(folder, false) == {
         .Root(found) -> root = found
         .Absent | .Refused(_) -> return "run"
     }
     facts: jet_cli_root_manifest(root) ?? return "run"
-    notices := [String]{}
+    ^notices: [String]{}
     if jet_cli_resolve_run_entry(root, Val(facts), notices) == .Found(entry) {
         if entry.path == file -> return entry.callable ?? "run"
     }
@@ -1621,7 +1621,7 @@ jet_cli_missing_project_context: fn(file: String, source: String) -[FS, Env]> Di
     masked: jet_driver_mask_inline_package(source, block)
     lexed: lex(masked.bytes())
     if lexed.diagnostics.len() > 0 -> return None
-    span := Span?{None}
+    ^span: Span?{None}
     if jet_cli_parsed_program(masked) == .Val(program) {
         loop declaration in program.imports {
             if declaration.kind == {
@@ -1652,7 +1652,7 @@ jet_cli_missing_project_context: fn(file: String, source: String) -[FS, Env]> Di
         .Root(_) -> return None
         .Absent | .Refused(_) -> {}
     }
-    dir := cli_files.realpath(parent) ?? parent
+    ^dir: cli_files.realpath(parent) ?? parent
     loop {
         if jet_cli_workspace_source(dir, false) == {
             .Index(_) | .Authority(_) -> return None

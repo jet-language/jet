@@ -118,7 +118,7 @@ AdmissionTransaction: struct {
     // surface and is swept by the Nix adapter.
     recover_unlocked: fn(roots: HangarRoots) -> Int StoreError! {
         hangar: roots.hangar_dir()
-        swept := store_recover_seals(hangar)
+        ^swept: store_recover_seals(hangar)
         swept += store_sweep_abandoned_directory(files.join(hangar, STORE_STAGE_DIR), "Hangar admission staging")
         objects: files.join(hangar, STORE_OBJECTS_DIR)
         metadata: if files.stat(objects) == {
@@ -161,7 +161,7 @@ AdmissionTransaction: struct {
         if self.committed {
             return Err(StoreError.Other("Hangar admission transaction already committed"))
         }
-        registered := false
+        ^registered: false
         if self.commit_steps(entries, extra_receipts, excluded, mode, fresh_action_key) == {
             .Ok(value) -> { registered = value }
             .Err(error) -> {
@@ -174,7 +174,7 @@ AdmissionTransaction: struct {
     }
 
     commit_steps: fn(^self, entries: ^[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
-        verification := self.verification.copy()
+        ^verification: self.verification.copy()
         self.publish_objects(excluded)
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
         receipts_dir: files.join(self.roots.hangar_dir(), STORE_RECEIPTS_DIR)
@@ -184,7 +184,7 @@ AdmissionTransaction: struct {
             }
         }
         loop index in 0..<entries.len() {
-            entry := entries[index]
+            ^entry: entries[index]
             wrote: store_prepare_entry_receipt_with_status(self.roots, entry)
             entries[index] = entry.copy()
             if wrote -> self.receipts.push(files.join(receipts_dir, entry.receipt))
@@ -213,7 +213,7 @@ AdmissionTransaction: struct {
         self.publish_objects(excluded)
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
         objects_dir: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
-        destinations := [String]{}
+        ^destinations: [String]{}
         loop object in self.objects -> destinations.push(files.join(objects_dir, object.digest))
         self.committed = true
         self.finish()
@@ -221,12 +221,12 @@ AdmissionTransaction: struct {
     }
 
     publish_objects: fn(^self, excluded: String?) StoreError! {
-        verification := self.verification.copy()
+        ^verification: self.verification.copy()
         objects_dir: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         store_ensure_real_directory(objects_dir, "Hangar object pool")
-        incoming := 0
-        already_counted := 0
-        counted := [String:Bool]{}
+        ^incoming: 0
+        ^already_counted: 0
+        ^counted: [String:Bool]{}
         loop object in self.objects {
             if object.repair_corrupt {
                 store_invalidate_verified_digest(verification, files.join(objects_dir, object.digest))
@@ -259,7 +259,7 @@ AdmissionTransaction: struct {
     }
 
     object_is_verified: fn(self, destination: String, object: AdmissionObject) -> Bool StoreError! {
-        verification := self.verification.copy()
+        ^verification: self.verification.copy()
         if files.stat(destination) == {
             .Ok(_) -> {
                 actual: store_verified_output_hash_persistent(verification, destination, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs) ?? return Ok(false)
@@ -283,7 +283,7 @@ AdmissionTransaction: struct {
     }
 
     publish_object: fn(^self, index: Int) StoreError! {
-        verification := self.verification.copy()
+        ^verification: self.verification.copy()
         object: self.objects[index]
         objects_dir: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         destination: files.join(objects_dir, object.digest)
@@ -429,11 +429,11 @@ AdmissionTransaction: struct {
 
     // Undo every publication step in reverse order.
     rollback: fn(^self) Never! {
-        verification := self.verification.copy()
+        ^verification: self.verification.copy()
         if self.committed {
             return
         }
-        index := self.published.len() - 1
+        ^index: self.published.len() - 1
         loop index >= 0 {
             store_transaction_undo(verification, self.roots.hangar_dir(), self.published[index])
             index -= 1
@@ -501,7 +501,7 @@ store_transaction_undo: fn(verification: StoreVerification, hangar: String, publ
 
 // Exclusive-create the receipt partial, make it durable, and publish it.
 store_transaction_publish_receipt: fn(partial: String, path: String, receipts: String, receipt: AdmissionReceipt) -> Bool StoreError! {
-    file := files.create(partial, if_exists: .Refuse)
+    ^file: files.create(partial, if_exists: .Refuse)
     file.write_bytes(receipt.bytes)
     file.fsync()
     files.rename(partial, path) ?? {
@@ -558,7 +558,7 @@ store_sweep_abandoned_directory: fn(path: String, label: String) -> Int StoreErr
     if metadata.is_symlink || !metadata.is_dir {
         return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before recovery"))
     }
-    swept := 0
+    ^swept: 0
     loop entry in files.list_dir(path) {
         node: files.stat(entry.path)
         if {

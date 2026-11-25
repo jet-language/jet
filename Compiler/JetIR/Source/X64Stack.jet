@@ -10,11 +10,11 @@
 // Runtime targets) are not counted; each bound names the runtime symbols it
 // reaches.
 use jet_backend.[
-        X64Reloc,
-        X64_RELOC_FUNCTION,
-        X64_RELOC_RUNTIME,
-        x64_reloc_symbol,
-    ]
+    X64Reloc,
+    X64_RELOC_FUNCTION,
+    X64_RELOC_RUNTIME,
+    x64_reloc_symbol,
+]
 
 IRX64StackBound: struct {
     // The entry's function row.
@@ -61,7 +61,7 @@ IR_X64_STACK_CEILING: 72057594037927936
 // The entry rows: the module's entry, then the roots its build kept
 // (IRModule.kept).
 ir_x64_stack_entries: fn(compiled: IRX64Result) -> [Int] Never! {
-    rows := [Int]{}
+    ^rows: [Int]{}
     count: compiled.functions.len()
     entry: compiled.program.entry
     if entry >= 0 && entry < count -> rows.push(entry)
@@ -73,7 +73,7 @@ ir_x64_stack_entries: fn(compiled: IRX64Result) -> [Int] Never! {
 
 // The worst-case stack bound of every entry (ir_x64_stack_entries).
 ir_x64_stack_bounds: fn(compiled: IRX64Result) -> [IRX64StackBound] Never! {
-    walk := IRX64StackWalk{state: [Int]{}, deep: [Int]{}, next: [Int]{}, open: [String]{}, order: [Int]{}, low: [Int]{}, pending: [Int]{}, visited: 0, part: [Int]{}, segment: [Int]{}}
+    ^walk: IRX64StackWalk{state: [Int]{}, deep: [Int]{}, next: [Int]{}, open: [String]{}, order: [Int]{}, low: [Int]{}, pending: [Int]{}, visited: 0, part: [Int]{}, segment: [Int]{}}
     loop _ in compiled.functions {
         walk.state.push(0)
         walk.deep.push(0)
@@ -84,12 +84,12 @@ ir_x64_stack_bounds: fn(compiled: IRX64Result) -> [IRX64StackBound] Never! {
         walk.part.push(-1)
         walk.segment.push(-2)
     }
-    bounds := [IRX64StackBound]{}
+    ^bounds: [IRX64StackBound]{}
     loop entry in ir_x64_stack_entries(compiled) {
         if walk.state[entry] == 0 -> ir_x64_stack_visit(walk, compiled, entry)
-        path := [String]{}
-        seen := [Int:Bool]{}
-        row := entry
+        ^path: [String]{}
+        ^seen: [Int:Bool]{}
+        ^row: entry
         loop row >= 0 {
             // A generated entry function is no Jet function: the chain names
             // the entry it runs, its next step.
@@ -139,9 +139,9 @@ ir_x64_stack_visit: fn(walk: ^IRX64StackWalk, compiled: IRX64Result, row: Int) N
 // Settles the part `root` was visited first in: every row visited after it
 // that is still pending.
 ir_x64_stack_settle: fn(walk: ^IRX64StackWalk, compiled: IRX64Result, root: Int) Never! {
-    members := [Int]{}
+    ^members: [Int]{}
     loop {
-        member := walk.pending.pop() ?? {
+        ^member: walk.pending.pop() ?? {
             break
         }
         walk.part[member] = root
@@ -152,7 +152,7 @@ ir_x64_stack_settle: fn(walk: ^IRX64StackWalk, compiled: IRX64Result, root: Int)
     // A member that calls through a function value, or calls an unbounded
     // row outside the part, leaves the whole part unbounded: each member
     // reaches it.
-    open := -1
+    ^open: -1
     loop member in members {
         if walk.open[member] != "" {
             open = member
@@ -177,8 +177,8 @@ ir_x64_stack_settle: fn(walk: ^IRX64StackWalk, compiled: IRX64Result, root: Int)
         }
         return
     }
-    outside := 0
-    cyclic := false
+    ^outside: 0
+    ^cyclic: false
     loop member in members {
         loop reloc in compiled.functions[member].relocs {
             callee: ir_x64_stack_callee(walk, reloc)
@@ -197,8 +197,8 @@ ir_x64_stack_settle: fn(walk: ^IRX64StackWalk, compiled: IRX64Result, root: Int)
         walk.deep[root] = compiled.debug[root].stack + outside
         return
     }
-    depths := 0
-    widest := 0
+    ^depths: 0
+    ^widest: 0
     loop member in members {
         depths = ir_x64_stack_saturate(depths + compiled.program.functions[member].max_depth)
         if walk.segment[member] == -2 {
@@ -230,9 +230,9 @@ ir_x64_stack_settle: fn(walk: ^IRX64StackWalk, compiled: IRX64Result, root: Int)
 ir_x64_stack_segment: fn(walk: ^IRX64StackWalk, compiled: IRX64Result, root: Int, row: Int) -> Int Never! {
     walk.segment[row] = -3
     outside: walk.next[row]
-    deepest := 0
-    step := -1
-    marked := -1
+    ^deepest: 0
+    ^step: -1
+    ^marked: -1
     loop reloc in compiled.functions[row].relocs {
         callee: ir_x64_stack_callee(walk, reloc)
         if callee < 0 || walk.part[callee] != root -> next
@@ -271,12 +271,12 @@ ir_x64_stack_times: fn(count: Int, bytes: Int) -> Int Never! {
 
 // The runtime symbols the functions `entry` reaches call, sorted.
 ir_x64_stack_runtime: fn(compiled: IRX64Result, entry: Int) -> [String] Never! {
-    reached := [Int:Bool]{}
-    pending := [Int]{entry}
-    names := [String]{}
+    ^reached: [Int:Bool]{}
+    ^pending: [Int]{entry}
+    ^names: [String]{}
     reached[entry] = true
     loop pending.len() > 0 {
-        row := pending.pop() ?? {
+        ^row: pending.pop() ?? {
             break
         }
         loop reloc in compiled.functions[row].relocs {

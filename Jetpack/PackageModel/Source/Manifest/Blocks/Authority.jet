@@ -146,8 +146,8 @@ pkg_authority_effect_list: fn(field: String, value: String) -> [String] PackageP
 
 // Parse the body of `authority: { … }`.
 pkg_parse_authority: fn(body: String) -> AuthorityBlock PackageParseError! {
-    authority := AuthorityBlock.default()
-    seen := [String]{}
+    ^authority: AuthorityBlock.default()
+    ^seen: [String]{}
     loop entry in pkg_authority_entries(body) {
         if seen.contains(entry.key) {
             return Err(pkg_authority_bad("authority.{entry.key} is declared more than once"))
@@ -183,8 +183,8 @@ pkg_parse_authority_value: fn(value: String) -> AuthorityBlock PackageParseError
 }
 
 pkg_parse_authority_trust_body: fn(body: String) -> TrustPolicy PackageParseError! {
-    policy := TrustPolicy{default: None, ci_prompt: None, services: [ServiceTrust]{}, require: None}
-    seen := [String]{}
+    ^policy: TrustPolicy{default: None, ci_prompt: None, services: [ServiceTrust]{}, require: None}
+    ^seen: [String]{}
     loop entry in pkg_authority_entries(body) {
         if seen.contains(entry.key) {
             return Err(pkg_authority_bad("authority.trust.{entry.key} is declared more than once"))
@@ -222,8 +222,8 @@ pkg_parse_authority_trust_body: fn(body: String) -> TrustPolicy PackageParseErro
 }
 
 pkg_parse_provider_authority_body: fn(providers: String) -> [ProviderAuthority] PackageParseError! {
-    out := [ProviderAuthority]{}
-    seen_providers := [String]{}
+    ^out: [ProviderAuthority]{}
+    ^seen_providers: [String]{}
     loop entry in pkg_authority_entries(providers) {
         provider: pkg_unquote(entry.key)
         if seen_providers.contains(provider) {
@@ -231,10 +231,10 @@ pkg_parse_provider_authority_body: fn(providers: String) -> [ProviderAuthority] 
         }
         seen_providers.push(provider.copy())
         body: pkg_authority_object_body(entry.value, "providers.{provider}")
-        registry := String?{None}
-        allow := [String]{}
-        deny := [String]{}
-        seen_fields := [String]{}
+        ^registry: String?{None}
+        ^allow: [String]{}
+        ^deny: [String]{}
+        ^seen_fields: [String]{}
         loop field in pkg_authority_entries(body) {
             if seen_fields.contains(field.key) {
                 return Err(pkg_authority_bad("authority.providers.{provider}.{field.key} is declared more than once"))
@@ -276,8 +276,8 @@ pkg_braced_record_body: fn(input: String) -> String? Never! {
 
 pkg_parse_ci_trust_prompt: fn(value: String) -> TrustDecision PackageParseError! {
     body: pkg_braced_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.ci` must be `{{ prompt: allow|prompt|deny }}`"))
-    prompt := TrustDecision?{None}
-    seen := [String]{}
+    ^prompt: TrustDecision?{None}
+    ^seen: [String]{}
     loop entry in pkg_key_value_entries(body) {
         if seen.contains(entry.key) {
             return Err(PackageParseError.Composition("authority.trust.ci.{entry.key} is declared more than once"))
@@ -294,8 +294,8 @@ pkg_parse_ci_trust_prompt: fn(value: String) -> TrustDecision PackageParseError!
 
 pkg_parse_service_trust: fn(value: String) -> [ServiceTrust] PackageParseError! {
     body: pkg_braced_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.services` must be `{{ name: allow|prompt|deny }}`"))
-    services := [ServiceTrust]{}
-    seen := [String]{}
+    ^services: [ServiceTrust]{}
+    ^seen: [String]{}
     loop entry in pkg_key_value_entries(body) {
         name: pkg_unquote(entry.key)
         if seen.contains(name) {
@@ -319,8 +319,8 @@ pkg_parse_trust_decision: fn(value: String) -> TrustDecision PackageParseError! 
 
 // `grants: { "dep": [DB, Net] }`.
 pkg_parse_grants: fn(body: String) -> [PackageGrant] PackageParseError! {
-    out := [PackageGrant]{}
-    seen := [String]{}
+    ^out: [PackageGrant]{}
+    ^seen: [String]{}
     loop entry in pkg_key_value_entries(body) {
         dep: pkg_unquote(entry.key)
         if seen.contains(dep) {

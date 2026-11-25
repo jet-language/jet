@@ -33,7 +33,8 @@ AllocError: struct {
 // runtime handle's drop releases the storage once the close has run, so the
 // close itself has nothing left to do. The storage belongs to the thread
 // that made it, so each allocator is `#Local`.
-#Local Arena: struct {
+#Local
+Arena: struct {
     // An arena whose first block holds `capacity` bytes; it grows by further
     // blocks as allocations need them.
     new: fn(capacity: Int{4096}) -> Arena Never! { rt.arena(capacity) }
@@ -43,7 +44,8 @@ AllocError: struct {
     }
 }
 
-#Local Bump: struct {
+#Local
+Bump: struct {
     // A bump allocator whose first block holds `capacity` bytes.
     new: fn(capacity: Int{65536}) -> Bump Never! { rt.bump(capacity) }
 
@@ -52,13 +54,15 @@ AllocError: struct {
     }
 }
 
-#Local Fixed: struct {
+#Local
+Fixed: struct {
     impl Close {
         close: fn(^^self) {}
     }
 }
 
-#Local Pool: struct {
+#Local
+Pool: struct {
     // A slot allocator with `slots` slots, one allocation each.
     new: fn(slots: Int) -> Pool Never! { rt.pool(slots) }
 
@@ -163,7 +167,9 @@ priv __view_from_raw: fn<T, O>(owner: O, pointer: *T, count: Int) -> View<T> Nev
 // eight-byte values), else an ordinary store. For a large output written
 // once and not read again soon. The writes are ordered before the next
 // call and the function's return.
-#Builtin.Role(.InlineStreamStore) stream_store: fn<T>(dst: ^T, value: T) Never! { core.mem.stream_store<T>(dst, value) }
+#Builtin.Role(.InlineStreamStore) stream_store: fn<T>(dst: ^T, value: T) Never! {
+    core.mem.stream_store<T>(dst, value)
+}
 
 // The raw List layout operations Core's encoding and crypto storage measure
 // and grow its Lists with: T's List stride in bytes, a List's capacity, and
@@ -178,7 +184,9 @@ priv __view_from_raw: fn<T, O>(owner: O, pointer: *T, count: Int) -> View<T> Nev
 // operation.
 #Builtin.Role(.InlineTypeSize) priv __type_size: fn<T>() -> Int Never! { __type_size<T>() }
 
-#Builtin.Role(.InlineListCapacity) priv __list_capacity: fn<T>(values: [T]) -> Int Never! { __list_capacity<T>(values) }
+#Builtin.Role(.InlineListCapacity) priv __list_capacity: fn<T>(values: [T]) -> Int Never! {
+    __list_capacity<T>(values)
+}
 
 #Builtin.Role(.InlineListReserveExact) priv __list_reserve_exact: fn<T>(values: ^[T], additional: Int) -> Bool Never! {
     __list_reserve_exact<T>(values, additional)
@@ -222,7 +230,7 @@ Region: struct {
     /// or a system refusal, is an AllocError.
     reserve: fn(bytes: Int) -> Region AllocError! {
         if bytes <= 0 -> return Err(AllocError{requested_bytes: bytes, allocator: "Region"})
-        address := 0
+        ^address: 0
         #Unsafe("the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close") {
             address = __region_reserve(bytes)
             if address != 0 -> mapped(address, bytes)
@@ -332,15 +340,15 @@ Allocator: trait {
 // The closure's type has no failure: the runtime takes its result as a bare
 // Int, and `-> Int Never!` here would make it a failure-carrying result.
 #Builtin.Role(.AllocatorHandler) priv __allocator_handler: fn<A: Allocator>(allocator: A) -> fn(Int, Int, Int) -> Int {
-    address := 0
+    ^address: 0
     #Unsafe("the allocator is a place the `#Context(allocator:)` block keeps in place until it ends") {
         address = mem.address_of(allocator)
     }
     fn(op: Int, x: Int, y: Int) {
-        answer := 0
+        ^answer: 0
         #Unsafe("the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else") {
             #Policy(sentries: .Off) {
-                held := mem.Ptr<A>.from_addr(address)
+                ^held: mem.Ptr<A>.from_addr(address)
                 if op == 0 {
                     block: held.*.allocate(x, y) ?? return 0
                     answer = block.address()
@@ -360,11 +368,17 @@ Allocator: trait {
 // most the block can grow to (0 for a user allocator's block, which only
 // that allocator can resize). Compiler intrinsics as the region operations
 // above are.
-#Builtin.Role(.InlineContextTake) priv __context_take: fn(size: Int, align: Int) -> Int Never! { __context_take(size, align) }
+#Builtin.Role(.InlineContextTake) priv __context_take: fn(size: Int, align: Int) -> Int Never! {
+    __context_take(size, align)
+}
 
-#Builtin.Role(.InlineContextGive) priv __context_give: fn(address: Int, size: Int) Never! { __context_give(address, size) }
+#Builtin.Role(.InlineContextGive) priv __context_give: fn(address: Int, size: Int) Never! {
+    __context_give(address, size)
+}
 
-#Builtin.Role(.InlineContextRoom) priv __context_room: fn(address: Int) -> Int Never! { __context_room(address) }
+#Builtin.Role(.InlineContextRoom) priv __context_room: fn(address: Int) -> Int Never! {
+    __context_room(address)
+}
 
 // The allocator behind `context.allocator`. It holds no state: each call
 // goes to whichever allocator is current then, the innermost
@@ -395,4 +409,6 @@ priv __ContextAllocator: struct {
 
 // `context.allocator`'s value (JetSema Places.jet
 // sema_expression_context_allocator).
-#Builtin.Role(.ContextAllocator) priv __context_allocator: fn() -> Allocator Never! { __ContextAllocator{} }
+#Builtin.Role(.ContextAllocator) priv __context_allocator: fn() -> Allocator Never! {
+    __ContextAllocator{}
+}

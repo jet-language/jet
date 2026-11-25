@@ -34,7 +34,7 @@ BoardView: struct {
 
 // A task's title; it reads the tasks table.
 task_title: fn(id: String) -[DB.Read]> String TaskError! {
-    store := STORE.guard_edit()
+    ^store: STORE.guard_edit()
     store.value.title_runs += 1
     scope: store.value.tasks ?? return Err(TaskError.Unopened)
     rows: scope.query(SQL{"SELECT title FROM tasks WHERE id = {id}"}) ?? return Err(TaskError.Read)
@@ -44,7 +44,7 @@ task_title: fn(id: String) -[DB.Read]> String TaskError! {
 
 // How many tasks there are; it reads the tasks table too.
 task_count: fn() -[DB.Read]> Int TaskError! {
-    store := STORE.guard_edit()
+    ^store: STORE.guard_edit()
     store.value.count_runs += 1
     scope: store.value.tasks ?? return Err(TaskError.Unopened)
     rows: scope.query(SQL{"SELECT id FROM tasks"}) ?? return Err(TaskError.Read)
@@ -68,7 +68,7 @@ counted: fn(state: Loadable<Int, TaskError>) -> String Never! {
 }
 
 shows: fn(page: String) -> String Never! {
-    store := STORE.guard_edit()
+    ^store: STORE.guard_edit()
     store.value.page = page.copy()
     page.copy()
 }
@@ -103,7 +103,7 @@ add_task: fn(scope: db.DBScope, id: String, title: String) {
 }
 
 remember: fn(tasks: db.DBScope) {
-    store := STORE.guard_edit()
+    ^store: STORE.guard_edit()
     store.value.tasks = Val(tasks.copy())
 }
 

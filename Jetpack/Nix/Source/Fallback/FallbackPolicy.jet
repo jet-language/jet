@@ -71,7 +71,7 @@ NixFallbackPolicyReceipt: struct {
 
     // Receipt facts retained with the producer record, key-ordered.
     facts: fn(self) -> [String:String] Never! {
-        facts := [String:String]{}
+        ^facts: [String:String]{}
         facts["nix.fallback.policy.schema"] = NIX_FALLBACK_RECEIPT_SCHEMA
         facts["nix.fallback.policy.mode"] = self.mode.label()
         facts["nix.fallback.policy.allowed"] = "{self.allowed}"
@@ -157,7 +157,7 @@ nix_fallback_run: fn(project: String, source_name: String, revision: String, sys
     // The lock stores the exact revision as provenance; Nix's flake CLI uses
     // the same immutable revision in the path component before the attr.
     input: "github:NixOS/nixpkgs/{identity.nixpkgs_revision}#{identity.attrpath()}"
-    spec := process.cmd([String]{identity.executable, "build", "--json", "--no-link", "--no-write-lock-file", "--system", identity.system, input})
+    ^spec: process.cmd([String]{identity.executable, "build", "--json", "--no-link", "--no-write-lock-file", "--system", identity.system, input})
     loop name in NIX_FALLBACK_SCRUBBED_ENV -> spec = spec.env_remove(name)
     receipt: spec.stdout(.Capture).stderr(.Capture).run() ?? return Err(NixError.Fallback("could not invoke the bound Nix executable: {err}"))
     if receipt.output.bytes().len() > NIX_FALLBACK_MAX_STDOUT_BYTES {
@@ -168,7 +168,7 @@ nix_fallback_run: fn(project: String, source_name: String, revision: String, sys
         return Err(NixError.Fallback("local Nix fallback failed with status exit status: {receipt.code}; {stderr}"))
     }
 
-    facts := policy.facts()
+    ^facts: policy.facts()
     facts["nix.fallback.provenance"] = identity.provenance()
     facts["nix.fallback.executable"] = identity.executable
     facts["nix.fallback.executable.sha256"] = identity.executable_sha256
@@ -186,7 +186,7 @@ nix_fallback_run: fn(project: String, source_name: String, revision: String, sys
 nix_fallback_locked_source_name: fn(project: String, preferred: String, revision: String) -[FS]> String NixError! {
     expected: "{NIX_LOCKED_NIXPKGS_PREFIX}{revision}"
     lock: pkg_lock_load(project) ?? return Err(NixError.Fallback("project lock is unavailable for local Nix fallback"))
-    candidates := [String]{preferred}
+    ^candidates: [String]{preferred}
     if preferred != REF_SOURCE_NIXPKGS -> candidates.push(REF_SOURCE_NIXPKGS)
     loop name in candidates {
         loop channel in lock.source_channels {
@@ -213,7 +213,7 @@ nix_fallback_discover_executable: fn() -[FS, Env]> String NixError! {
 nix_truncate_utf8: fn(text: String, limit: Int) -> String Never! {
     raw: text.bytes()
     if raw.len() <= limit -> return text.copy()
-    end := limit
+    ^end: limit
     loop end > 0 && ((Int{raw[end]}) & 192) == 128 -> end -= 1
     pkg_bytes_text(raw, 0, end)
 }

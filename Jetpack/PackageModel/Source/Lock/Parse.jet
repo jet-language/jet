@@ -68,10 +68,10 @@ pkg_lock_parse: fn(raw: String) -> LockFile LockError! {
     if raw.bytes().len() > PKG_MAX_LOCK_BYTES {
         return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
     }
-    parser := LockParser.new()
+    ^parser: LockParser.new()
     lines: raw.split("\n").to_list()
     loop index in 0..<lines.len() {
-        line_text := lines[index]
+        ^line_text: lines[index]
         if line_text.ends_with(pkg_lock_carriage_return()) {
             line_text = line_text.removesuffix(pkg_lock_carriage_return())
         }
@@ -258,7 +258,7 @@ LockParser: struct {
     }
 
     assign_build_stamp: fn(^self, key: String, value: String) LockError! {
-        stamp := self.build_stamp ?? BuildStamp.default()
+        ^stamp: self.build_stamp ?? BuildStamp.default()
         if key == {
             "git" -> stamp.git = Val(pkg_lock_unescape(value))
             "dirty" -> {
@@ -349,7 +349,7 @@ LockParser: struct {
         policy: pkg_lock_build_workspace_overlay_policy(self.overlays, self.overlay_packages, self.build_grants, self.policy_allow_unfree, self.policy_build_deny)
         version: self.version ?? return Err(LockError.Invalid("lock is missing top-level `version`"))
         if version != PKG_LOCK_VERSION -> return Err(LockError.UnsupportedVersion("{version}"))
-        lock := LockFile{
+        ^lock: LockFile{
             version: version,
             packages: self.packages,
             root_dependencies: self.root_dependencies,
@@ -541,7 +541,7 @@ PartialWorkspaceOverlayPackage: struct {
     finish: fn(self) -> PartialWorkspaceOverlayPackage LockError! {
         overlay: pkg_lock_nonempty(self.overlay) ?? return Err(LockError.Invalid("workspace overlay package is missing `overlay`"))
         package: pkg_lock_nonempty(self.package) ?? return Err(LockError.Invalid("workspace overlay package is missing `package`"))
-        finished := self
+        ^finished: self
         finished.overlay = Val(overlay)
         finished.package = Val(package)
         Ok(finished)
@@ -569,8 +569,8 @@ PartialWorkspaceBuildGrant: struct {
 // Assemble the workspace overlay policy from its finished lock tables,
 // rejecting duplicate or dangling identities.
 pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay], packages: [PartialWorkspaceOverlayPackage], grants: [PartialWorkspaceBuildGrant], allow_unfree: [String], build_deny: [String]) -> OverlayPolicy LockError! {
-    policy := OverlayPolicy{overlays: [OverlaySet]{}, allow_unfree: allow_unfree, build_deny: build_deny, build_grants: [BuildGrant]{}}
-    overlay_names := [String]{}
+    ^policy: OverlayPolicy{overlays: [OverlaySet]{}, allow_unfree: allow_unfree, build_deny: build_deny, build_grants: [BuildGrant]{}}
+    ^overlay_names: [String]{}
     loop overlay in overlays {
         name: overlay.name ?? return Err(LockError.Invalid("workspace overlay is missing `name`"))
         if overlay_names.contains(name) {
@@ -592,7 +592,7 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
         }
         policy.build_grants.push(BuildGrant{subject: package, effects: grant.effects})
     }
-    package_keys := [String]{}
+    ^package_keys: [String]{}
     loop package in packages {
         overlay_name: package.overlay ?? return Err(LockError.Invalid("workspace overlay package is missing `overlay`"))
         package_name: package.package ?? return Err(LockError.Invalid("workspace overlay package is missing `package`"))
@@ -601,14 +601,14 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
             return Err(LockError.Invalid("duplicate workspace overlay package `{package_key}`"))
         }
         package_keys.push(package_key)
-        target := -1
+        ^target: -1
         loop index in 0..<policy.overlays.len() {
             if target < 0 && policy.overlays[index].name == overlay_name -> target = index
         }
         if target < 0 {
             return Err(LockError.Invalid("workspace overlay package names unknown overlay `{overlay_name}`"))
         }
-        field_priorities := [String:Int]{}
+        ^field_priorities: [String:Int]{}
         loop fact in package.field_priorities {
             split: fact.split_once("=") ?? return Err(LockError.Invalid("invalid workspace overlay field priority `{fact}`"))
             if field_priorities.get(split.before) != None {
@@ -617,19 +617,19 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
             priority: pkg_overlay_parse_i32(split.after) ?? return Err(LockError.Invalid("invalid workspace overlay field priority `{fact}`"))
             field_priorities[split.before] = priority
         }
-        env := [OverrideEnv]{}
+        ^env: [OverrideEnv]{}
         loop fact in package.env {
             split: fact.split_once("=") ?? return Err(LockError.Invalid("invalid workspace overlay environment fact `{fact}`"))
             env.push(OverrideEnv{key: split.before, value: split.after})
         }
-        env_keys := [String]{}
+        ^env_keys: [String]{}
         loop fact in env {
             if env_keys.contains(fact.key) {
                 return Err(LockError.Invalid("duplicate workspace overlay environment fact `{fact.key}`"))
             }
             env_keys.push(fact.key)
         }
-        overlay := policy.overlays[target]
+        ^overlay: policy.overlays[target]
         overlay.packages.push(
             PackageOverride{
                 package: package_name,
@@ -695,7 +695,7 @@ PartialPackage: struct {
                 self.receipt = if receipt == "" -> None else -> Val(receipt)
             }
             "provenance-transparency" | "provenance-publisher" | "provenance-build" -> {
-                provenance := self.provenance ?? DependencyProvenance.empty()
+                ^provenance: self.provenance ?? DependencyProvenance.empty()
                 text: pkg_lock_unescape(value)
                 if key == {
                     "provenance-transparency" -> provenance.transparency = Val(text)
@@ -708,7 +708,7 @@ PartialPackage: struct {
                 // (A4): any envelope key marks the package as
                 // realized (the envelope becomes present).
                 if pkg_lock_is_envelope_key(key) {
-                    envelope := self.envelope ?? LockEnvelope.empty()
+                    ^envelope: self.envelope ?? LockEnvelope.empty()
                     pkg_lock_assign_envelope(envelope, key, value)
                     self.envelope = Val(envelope)
                 }
@@ -717,7 +717,7 @@ PartialPackage: struct {
     }
 
     assign_nix_closure: fn(^self, key: String, value: String) LockError! {
-        closure := self.nix_closure ?? PartialNixClosure{}
+        ^closure: self.nix_closure ?? PartialNixClosure{}
         if key == {
             "nix-channel" -> closure.channel = Val(pkg_lock_unescape(value))
             "nix-revision" -> closure.revision = Val(pkg_lock_unescape(value))
@@ -1048,7 +1048,7 @@ pkg_lock_parse_locked: fn(input: String) -> LockedRevision Never! {
 
 // The inside of an inline table: every leading `{` and trailing `}` removed.
 pkg_lock_inline_body: fn(input: String) -> String Never! {
-    text := input.trim()
+    ^text: input.trim()
     loop text.starts_with("{{") -> text = text.removeprefix("{{")
     loop text.ends_with("}}") -> text = text.removesuffix("}}")
     text.trim()
@@ -1061,10 +1061,10 @@ pkg_lock_carriage_return: fn() -> String Never! { "\r" }
 // part that starts with `key` but has no `=` after it ends the search.
 pkg_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
     raw: inline.bytes()
-    parts := [String]{}
-    start := 0
-    quoted := false
-    escaped := false
+    ^parts: [String]{}
+    ^start: 0
+    ^quoted: false
+    ^escaped: false
     loop index in 0..<raw.len() {
         code: Int{raw[index]}
         if {
@@ -1102,13 +1102,13 @@ pkg_lock_parse_string_array: fn(input: String) -> [String] LockError! {
     inner: pkg_bytes_text(raw_all, 1, raw_all.len() - 1)
     if inner.trim() == "" -> return Ok([String]{})
     raw: inner.bytes()
-    values := [String]{}
-    current := [U8]{}
-    quoted := false
-    escaped := false
-    item_started := false
-    item_quoted := false
-    index := 0
+    ^values: [String]{}
+    ^current: [U8]{}
+    ^quoted: false
+    ^escaped: false
+    ^item_started: false
+    ^item_quoted: false
+    ^index: 0
     loop index < raw.len() {
         byte: raw[index]
         code: Int{byte}
@@ -1171,14 +1171,14 @@ pkg_lock_array_item: fn(bytes: [U8], quoted: Bool) -> String Never! {
 // quotes are removed only when both are present.
 pkg_lock_unescape: fn(input: String) -> String Never! {
     trimmed: input.trim()
-    text := trimmed
+    ^text: trimmed
     if trimmed.starts_with("\"") {
         inner: trimmed.removeprefix("\"")
         if inner.ends_with("\"") -> text = inner.removesuffix("\"")
     }
     raw: text.bytes()
-    out := [U8]{}
-    escaped := false
+    ^out: [U8]{}
+    ^escaped: false
     loop byte in raw {
         code: Int{byte}
         if {
@@ -1203,7 +1203,7 @@ pkg_lock_unescape: fn(input: String) -> String Never! {
 
 // `value` with every leading and trailing `"` removed.
 pkg_lock_trim_quotes: fn(value: String) -> String Never! {
-    text := value
+    ^text: value
     loop text.starts_with("\"") -> text = text.removeprefix("\"")
     loop text.ends_with("\"") -> text = text.removesuffix("\"")
     text
@@ -1211,11 +1211,11 @@ pkg_lock_trim_quotes: fn(value: String) -> String Never! {
 
 // A decimal unsigned integer (optional leading `+`) no larger than `max`.
 pkg_lock_parse_unsigned: fn(text: String, max: Int) -> Int? Never! {
-    digits := text
+    ^digits: text
     if digits.starts_with("+") -> digits = digits.removeprefix("+")
     raw: digits.bytes()
     if raw.len() == 0 -> return None
-    value := 0
+    ^value: 0
     loop byte in raw {
         code: Int{byte}
         if code < 48 || code > 57 -> return None

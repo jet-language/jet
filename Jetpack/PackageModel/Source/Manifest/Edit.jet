@@ -28,7 +28,7 @@ pkg_add_authority_hold: fn(raw: String, input: String) -> String Never! {
     right: input.trim()
     if right == "" -> return raw.copy()
     lines: pkg_binder_lines(raw)
-    authority_line := -1
+    ^authority_line: -1
     loop index in 0..<lines.len() {
         if lines[index].trim_start().starts_with("authority:") {
             authority_line = index
@@ -38,7 +38,7 @@ pkg_add_authority_hold: fn(raw: String, input: String) -> String Never! {
     if authority_line < 0 -> return pkg_edit_append_authority_hold(raw, right)
     authority: pkg_edit_block_line_range(lines, "authority") ?? return raw
     authority_inline: pkg_edit_inline_block_bounds(lines[authority_line], "authority")
-    allow_line := -1
+    ^allow_line: -1
     if authority_inline != None -> allow_line = authority_line else {
         loop index in authority.start..<authority.end {
             if lines[index].trim_start().starts_with("allow:") {
@@ -47,7 +47,7 @@ pkg_add_authority_hold: fn(raw: String, input: String) -> String Never! {
             }
         }
     }
-    out := lines
+    ^out: lines
     if allow_line >= 0 {
         if pkg_edit_add_to_inline_list(out[allow_line], "allow", right) == .Val(updated) {
             out[allow_line] = updated
@@ -63,7 +63,7 @@ pkg_add_authority_hold: fn(raw: String, input: String) -> String Never! {
 }
 
 pkg_edit_append_authority_hold: fn(raw: String, right: String) -> String Never! {
-    out := pkg_binder_lines(raw)
+    ^out: pkg_binder_lines(raw)
     if raw != "" && !raw.ends_with("\n") -> out.push("")
     out.push("authority: {{")
     out.push("    allow: [{right}],")
@@ -79,7 +79,7 @@ pkg_edit_restore_newline: fn(raw: String, out: [String]) -> String Never! {
 
 // `lines` with `value` inserted before index `at` (`Vec::insert`).
 pkg_edit_insert_line: fn(lines: [String], at: Int, value: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop index in 0..<lines.len() {
         if index == at -> out.push(value.copy())
         out.push(lines[index])
@@ -149,8 +149,8 @@ pkg_edit_block_line_range: fn(lines: [String], key: String) -> EditSpan? Never! 
 
 pkg_edit_block_line_range_between: fn(lines: [String], key: String, range_start: Int, range_end: Int) -> EditSpan? Never! {
     header: "{key}:"
-    start := -1
-    depth := 0
+    ^start: -1
+    ^depth: 0
     loop index in range_start..<range_end {
         line: lines[index]
         if start < 0 {
@@ -179,8 +179,8 @@ pkg_edit_brace_delta: fn(line: String) -> Int Never! {
 // block at the end of the file when it does not exist yet.
 pkg_edit_insert_or_replace_in_block: fn(raw: String, key: String, name: String, new_line: String) -> String Never! {
     lines: pkg_binder_lines(raw)
-    out := lines
-    empty_inline := -1
+    ^out: lines
+    ^empty_inline: -1
     loop index in 0..<lines.len() {
         if pkg_edit_is_empty_inline_block(lines[index], key) {
             empty_inline = index
@@ -192,7 +192,7 @@ pkg_edit_insert_or_replace_in_block: fn(raw: String, key: String, name: String, 
         out = pkg_edit_insert_line(out, empty_inline + 1, new_line)
         out = pkg_edit_insert_line(out, empty_inline + 2, "}}")
     } else if pkg_edit_block_line_range(lines, key) == .Val(block) {
-        existing := -1
+        ^existing: -1
         loop index in block.start..<block.end {
             if lines[index].trim_start().split_once(":") == .Val(parts) {
                 if parts.before.trim() == name {
@@ -231,7 +231,7 @@ pkg_edit_leading_whitespace: fn(line: String) -> String Never! {
 pkg_edit_remove_from_block: fn(raw: String, key: String, name: String) -> String Never! {
     lines: pkg_binder_lines(raw)
     block: pkg_edit_block_line_range(lines, key) ?? return raw
-    out := [String]{}
+    ^out: [String]{}
     loop index in 0..<lines.len() {
         line: lines[index]
         if index >= block.start && index < block.end {

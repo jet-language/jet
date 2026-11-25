@@ -7,7 +7,7 @@ use jet_backend.[link_read_archive, link_synth, link_synth_code, link_synth_func
 // An object defining each of `names` as a function that returns, the first
 // of them calling `called`, which the object does not define.
 archive_object: fn(names: [String], called: String) -> [U8] Never! {
-    s := link_synth()
+    ^s: link_synth()
     loop (k, name) in names {
         link_synth_function(s, name)
         if k == 0 {
@@ -37,7 +37,7 @@ archive_object: fn(names: [String], called: String) -> [U8] Never! {
             }
         }
     }
-    indexed := [String]{}
+    ^indexed: [String]{}
     loop (k, symbol) in read.symbol_names -> indexed.push("{symbol}@{read.symbol_members[k]}")
     assert(indexed.join(",") == "alpha@0,beta@0,gamma@1", "the index names each defined symbol's member: {indexed.join(",")}")
 }

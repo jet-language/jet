@@ -27,7 +27,7 @@ kit_steps_exe_suffix: fn() -> String {
 
 // The host-dependent file-name suffix tokens: `{sys:dll-suffix}` and `{sys:exe-suffix}`.
 kit_steps_sys_expand: fn(text: String) -> String {
-    expanded := text
+    ^expanded: text
     if expanded.contains("{{sys:dll-suffix}}") {
         expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
     }
@@ -52,7 +52,7 @@ kit_steps_host_triple: fn() -> String {
 }
 
 kit_steps_runtime_expand: fn(text: String, context: KitStepCtx, state: KitStepState) -> String? {
-    expanded := kit_steps_expand(text, context.env, context.work, context.scratch, state.built)
+    ^expanded: kit_steps_expand(text, context.env, context.work, context.scratch, state.built)
     // Inner loop bindings shadow outer ones: the newest binding of a name wins.
     count: state.bindings.len()
     loop offset in 0..<count {
@@ -81,8 +81,8 @@ kit_steps_runtime_expand: fn(text: String, context: KitStepCtx, state: KitStepSt
         }
     }
     if expanded.contains("{{cap:") -> return None
-    rest := expanded
-    result := ""
+    ^rest: expanded
+    ^result: ""
     loop {
         start: kit_steps_byte_index(rest, "{{tool:") ?? break
         after: start + 6
@@ -95,13 +95,13 @@ kit_steps_runtime_expand: fn(text: String, context: KitStepCtx, state: KitStepSt
 }
 
 kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitStepState) -> KitStep? {
-    step := original
-    conditional_env := false
+    ^step: original
+    ^conditional_env: false
     loop variable in original.environment {
         if variable.conditions.len() > 0 -> conditional_env = true
     }
     if conditional_env {
-        selected := [KitEnvVar]{}
+        ^selected: [KitEnvVar]{}
         loop variable in original.environment {
             if kit_steps_conditions(variable.conditions, context, state) {
                 selected.push(variable.copy())
@@ -113,7 +113,7 @@ kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitSte
     }
     step.replacements = context.plan.replacements
     loop rule in original.replacements -> step.replacements.push(rule.copy())
-    argv := [String]{}
+    ^argv: [String]{}
     loop word in original.argv {
         argv.push(kit_steps_runtime_expand(word, context, state) ?? return None)
     }
@@ -145,7 +145,7 @@ kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitSte
                 step.stdout_target = pending.step.stdout_target
                 step.stderr_target = pending.step.stderr_target
                 if original.replacements.len() == 0 -> step.replacements = pending.step.replacements
-                rules := pending.step.json_normalize
+                ^rules: pending.step.json_normalize
                 loop rule in step.json_normalize -> rules.push(rule)
                 step.json_normalize = rules
             }
@@ -156,7 +156,7 @@ kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitSte
 
 // Expands the subject paths of assertions against the captures known so far.
 kit_steps_resolve_assertions: fn(original: [KitAssertion], context: KitStepCtx, state: KitStepState) -> [KitAssertion]? {
-    assertions := original
+    ^assertions: original
     loop i in 0..<assertions.len() {
         // NonZ assertion conditions are selected after the command. Leave its
         // PID untouched only on unsupported hosts so the checker can refuse
@@ -172,7 +172,7 @@ kit_steps_resolve_assertions: fn(original: [KitAssertion], context: KitStepCtx, 
 }
 
 kit_steps_replacements: fn(original: [KitReplacement], context: KitStepCtx, state: KitStepState) -> [KitReplacement]? {
-    rules := [KitReplacement]{}
+    ^rules: [KitReplacement]{}
     loop rule in original {
         from: if rule.literal_from -> rule.from else -> kit_steps_runtime_expand(rule.from, context, state) ?? return None
         if from == "" -> return None
@@ -182,9 +182,9 @@ kit_steps_replacements: fn(original: [KitReplacement], context: KitStepCtx, stat
 }
 
 kit_steps_replace: fn(text: String, rules: [KitReplacement], context: KitStepCtx, state: KitStepState, normalized: Bool, source_name: String) -> String {
-    result := text
+    ^result: text
     loop rule in rules {
-        from := rule.from
+        ^from: rule.from
         to: rule.to
         if normalized && !rule.literal_from {
             from = kit_steps_normalize(from, context.env, context.work, context.scratch, context.plan.normalize, state.built, source_name)
@@ -195,8 +195,8 @@ kit_steps_replace: fn(text: String, rules: [KitReplacement], context: KitStepCtx
 }
 
 kit_steps_free_port_names: fn(text: String) -> [String]? {
-    names := [String]{}
-    rest := text
+    ^names: [String]{}
+    ^rest: text
     loop {
         start: kit_steps_byte_index(rest, "{{free-port:") ?? break
         after: start + 11
@@ -214,7 +214,7 @@ kit_steps_free_port_names: fn(text: String) -> [String]? {
 // Every free-port name the case uses: the ones its lines name, then the ones in the template files its
 // `write` and `send` steps expand, which the parser never reads.
 kit_steps_case_port_names: fn(context: KitStepCtx) -> [String] {
-    names := context.plan.free_ports
+    ^names: context.plan.free_ports
     loop step in context.plan.steps {
         if step.literal_input -> next
         template: if step.action == "write" && step.argv.len() == 3 -> step.argv[2] else if step.action == "send" && step.argv.len() == 1 -> step.argv[0] else -> ""
@@ -255,7 +255,7 @@ kit_steps_free_ports: fn(context: KitStepCtx, count: Int, ports: ^[Int], locks: 
             first: kit_exec_first_line(result.stderr)
             return Val(kit_expect_verdict("ERROR", "free-port probe failed (exit {result.code}): {if first == "" -> "no stderr" else -> first}"))
         }
-        drawn := [Int]{}
+        ^drawn: [Int]{}
         loop line in result.stdout.trim().split("\n") {
             port: Int.parse(line.copy()) ?? return Val(kit_expect_verdict("ERROR", "free-port probe printed a line that is not a port"))
             if port < 1 || port > 65535 {
@@ -266,7 +266,7 @@ kit_steps_free_ports: fn(context: KitStepCtx, count: Int, ports: ^[Int], locks: 
         if drawn.len() != count {
             return Val(kit_expect_verdict("ERROR", "free-port probe printed {drawn.len()} ports for {count} names"))
         }
-        held := false
+        ^held: false
         loop port in drawn {
             if files.try_lock(kit_steps_host_port_path(port)) == {
                 .Val(lock) -> locks.push(lock)

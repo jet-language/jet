@@ -127,10 +127,10 @@ usage: fn(message: String) -[Exec, IO]> Never {
 
 // The arguments; `--help` is a refusal without a message.
 parse_args: fn(argv: [String]) -> Options Refusal! {
-    trace := String?{None}
-    top := 30
-    as_json := false
-    index := 0
+    ^trace: String?{None}
+    ^top: 30
+    ^as_json: false
+    ^index: 0
     loop index < argv.len() {
         arg: argv[index]
         if arg == "--top" {
@@ -158,9 +158,9 @@ events_from: fn(text: String) -> [Event] [FieldError]! {
 // Closed spans: each `E` closes the innermost open `B` of its kind on its
 // lane, dropping the ones opened after it.
 closed_spans: fn(events: [Event]) -[Exec, IO]> [Span] {
-    lanes := [Dyn]{}
-    open := [[Open]]{}
-    spans := [Span]{}
+    ^lanes: [Dyn]{}
+    ^open: [[Open]]{}
+    ^spans: [Span]{}
     loop event in events {
         if !["B", "E"].contains(event.ph) -> next
         lane: lanes.index_of(event.tid) ?? {
@@ -173,7 +173,7 @@ closed_spans: fn(events: [Event]) -[Exec, IO]> [Span] {
             open[lane].push(Open{kind: kind, label: event.name, args: event.args, ts: event.ts})
             next
         }
-        at := open[lane].len() - 1
+        ^at: open[lane].len() - 1
         loop at >= 0 && open[lane][at].kind != kind -> at -= 1
         if at < 0 -> next
         begin: open[lane][at].copy()  // copy: the span outlives the dropped stack
@@ -205,12 +205,12 @@ add: fn(table: ^[Row], at: ^[String:Int], key: String, step: Int, wall: Float, c
 }
 
 summarize: fn(spans: [Span]) -> Summary {
-    kinds := [Kind]{}
-    kind_at := [String:Int]{}
-    by_file := [Row]{}
-    file_at := [String:Int]{}
-    by_item := [Row]{}
-    item_at := [String:Int]{}
+    ^kinds: [Kind]{}
+    ^kind_at: [String:Int]{}
+    ^by_file: [Row]{}
+    ^file_at: [String:Int]{}
+    ^by_item: [Row]{}
+    ^item_at: [String:Int]{}
     loop span in spans {
         if !span.kind.starts_with("comptime.") -> next
         k: kind_at.get(span.kind) ?? {
@@ -254,7 +254,7 @@ print_table: fn(title: String, rows: [Row], top: Int) {
 }
 
 row_json: fn(row: Row) -> Dyn {
-    fields := [{key: String, value: Dyn}]{{key: "key", value: Dyn.Text(row.key.copy())}, {key: "count", value: Dyn.Int(row.count)}, {key: "wall", value: Dyn.Float(row.wall)}, {key: "cpu", value: Dyn.Float(row.cpu)}}
+    ^fields: [{key: String, value: Dyn}]{{key: "key", value: Dyn.Text(row.key.copy())}, {key: "count", value: Dyn.Int(row.count)}, {key: "wall", value: Dyn.Float(row.wall)}, {key: "cpu", value: Dyn.Float(row.cpu)}}
     loop (i, step) in STEPS -> fields.push({key: step.copy(), value: Dyn.Float(row.steps[i])})
     Dyn.Object(fields)
 }

@@ -129,12 +129,12 @@ run: fn() -> Never Err! {
     root: files.normalize("{sys.executable()}/../../../..")
     argv: process.args()
     tmp: process.env_get_or("TMPDIR", "/tmp")
-    args := [String:String]{
+    ^args: [String:String]{
         "jet": "",
         "work": files.join(tmp, "jet-core-sources"),
         "out": "",
     }
-    i := 0
+    ^i: 0
     loop i < argv.len() {
         key: argv[i].remove_prefix("--")
         if !args.has_key(key) || i + 1 >= argv.len() {
@@ -156,17 +156,17 @@ run: fn() -> Never Err! {
         Probe{name: "out-of-tree", cwd: hello, entry: "hello.jet", shown: "jet run hello.jet", stdout: "hello\n"},
         Probe{name: "checkout", cwd: root, entry: "Examples/Basics/Hello.jet", shown: "jet run Examples/Basics/Hello.jet", stdout: "hello, world\n"},
     }
-    traced := [Traced]{}
+    ^traced: [Traced]{}
     loop probe in probes {
         ran: trace(jet, work, probe)
         term.eprint("{probe.name}: {ran.calls} file calls, {ran.on_tree.len()} on the tree")
         traced.push(ran)
     }
-    lines := [String]{"# Core source receipt", ""}
+    ^lines: [String]{"# Core source receipt", ""}
     lines.extend(compiler_lines(jet))
     lines.push("Each run had an empty JET_STORE_DIR and XDG_CACHE_HOME, no JET_TOOLCHAIN_ROOT or JET_SEED, and NO_COLOR=1, under `jet perf attach --lens=syscalls`, every thread and child traced. File calls are its calls that name a path or read a directory (getdents64); a call on the tree names a path holding `/Core/` or `/Compiler/Prelude/`. Produced by `jet Tools/Perf/CoreStrace/run.jet`.")
     lines.extend([String]{"", "| Run | Command | File calls | On the tree | Verdict |", "|---|---|---:|---:|---|"})
-    failed := false
+    ^failed: false
     loop (index, probe) in probes {
         ran: traced[index]
         verdict: if ran.on_tree.len() == 0 -> "PASS" else -> "FAIL"
@@ -210,10 +210,10 @@ trace: fn(jet: String, work: String, probe: Probe) -> Traced Err! {
         return Err("{probe.name}: jet perf view failed (exit {viewed.code}): {viewed.errors.trim()}")
     }
     files.write(files.join(dir, "calls.txt"), viewed.output)
-    calls := 0
-    on_tree := [String]{}
-    counts := [Int]{0, 0, 0}
-    errors := [Int]{0, 0, 0}
+    ^calls: 0
+    ^on_tree: [String]{}
+    ^counts: [Int]{0, 0, 0}
+    ^errors: [Int]{0, 0, 0}
     loop line in viewed.output.split("\n") {
         name: call_name(line) ?? next
         if !FILE_CALLS.contains(name) -> next
@@ -225,7 +225,7 @@ trace: fn(jet: String, work: String, probe: Probe) -> Traced Err! {
             if line.contains(") = -1 ") -> errors[index] = errors[index] + 1
         }
     }
-    counted := [String]{}
+    ^counted: [String]{}
     loop (index, name) in COUNTED_CALLS {
         counted.push("| {name} | {counts[index]} | {errors[index]} |")
     }
@@ -251,7 +251,7 @@ spawn: fn(jet: String, dir: String, probe: Probe, tracer: [String]) Err! {
     cache: files.join(dir, "cache")
     files.create_dir_all(store)
     files.create_dir_all(cache)
-    argv := tracer
+    ^argv: tracer
     argv.extend([String]{jet, "run", probe.entry})
     spec: process.cmd(argv).cwd(probe.cwd).env_remove("JET_TOOLCHAIN_ROOT").env_remove("JET_SEED").env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache).env("NO_COLOR", "1")
     receipt: spec.timeout(time.duration_seconds(TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT).run()

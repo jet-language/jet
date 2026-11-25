@@ -12,7 +12,7 @@ HabitIdiomEdit: struct {
 // without an edit (a later read of the undeclared name) is left to the
 // recheck.
 habit_idiom_fixed: fn(source: String) -> String {
-    edits := [HabitIdiomEdit]{}
+    ^edits: [HabitIdiomEdit]{}
     loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
         if diagnostic.severity != 1 -> next
         if diagnostic.edit == .Val(first) {
@@ -23,11 +23,11 @@ habit_idiom_fixed: fn(source: String) -> String {
         }
     }
     assert(edits.len() > 0, "no edit for: {source}")
-    used := [Bool]{}
+    ^used: [Bool]{}
     loop _ in 0..<edits.len() -> used.push(false)
-    fixed := "{source}"
+    ^fixed: "{source}"
     loop _ in 0..<edits.len() {
-        best := -1
+        ^best: -1
         loop index in 0..<edits.len() {
             if !used[index] && (best < 0 || edits[index].start > edits[best].start) -> best = index
         }

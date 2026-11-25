@@ -77,12 +77,12 @@ Stores: struct {
 STORE: Shared{Stores{store: None}}
 
 remember: fn(store: db.Store) {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     stores.value.store = Val(store.copy())
 }
 
 opened: fn() -> db.Store {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     store: stores.value.store ?? panic("the store is open")
     store.copy()
 }
@@ -100,7 +100,7 @@ viewers: fn(id: Int) -[DB.Read]> String ViewError! {
         .None -> return Err(ViewError.NotFound)
         .Err(_) -> return Err(ViewError.Unreadable)
     }
-    names := [String]{}
+    ^names: [String]{}
     loop account in app.presence(TaskView{id: id}) -> names.push("{account}")
     Ok("[{names.join(", ")}]")
 }
@@ -154,7 +154,7 @@ run: fn() {
     print("ben leaves the project: {left(MemberKey{project: 1, account: auth.AccountID.from_string("ben")})}")
     print("ben's next read: {shown(app.state(ben))}")
     print("ann sees {shown(app.state(ann))}")
-    present := [String]{}
+    ^present: [String]{}
     loop account in app.as_system(fn() { app.presence(TaskView{id: 1}) }) {
         present.push("{account}")
     }

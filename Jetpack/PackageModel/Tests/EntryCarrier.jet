@@ -52,7 +52,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("conventional and inline entry carriers have identical composed facts") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("composed-parity")
     body: "name: \"inline-parity\"\nversion: \"1.2.3\"\njet: \">=a0.0.43\"\nedition: \"2026\"\ndescription: \"one source of package facts\"\nlicense: \"MIT\"\nrepository: \"https://example.test/inline-parity\"\ndeps: {{ dep: ./deps/dep }}\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\nauthority: {{ allow: [IO] }}\npolicy: {{ unsafe: .Deny }}\ndev: Config{{ services: {{ db: {{}} }} }}\n"
     entry_names: [String]{"inline", "extracted"}
@@ -84,7 +84,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("inline arbitrary entry composes Config relative to its own directory") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("arbitrary-inline")
     pkg_entry_test_write(root, "nested/launch.jet", "package: {{ name: \"launch\", configs: [dev] }}\nrun: fn() {{}}\n")
     pkg_entry_test_write(root, "nested/renamed.jet", "dev: Config{{ version: \"selected\" }}\n")
@@ -96,7 +96,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("nonstock nested entry inherits parent stock inline Package") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("parent-inline")
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"parent\", configs: [dev] }}\nrun: fn() {{}}\n")
     pkg_entry_test_write(root, "dev.jet", "dev: Config{{ version: \"parent-config\" }}\n")
@@ -116,7 +116,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("stock src run carrier is found after plain root run entry") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("src-stock")
     pkg_entry_test_write(root, "run.jet", "run: fn() {{}}\n")
     pkg_entry_test_write(root, "src/run.jet", "package: {{ name: \"src-inline\" }}\nrun: fn() {{}}\n")
@@ -127,7 +127,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("stock root run inline carrier precedes src run inline carrier") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("stock-order")
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"root\" }}\nrun: fn() {{}}\n")
     pkg_entry_test_write(root, "src/run.jet", "package: {{ name: \"src\" }}\nrun: fn() {{}}\n")
@@ -140,7 +140,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("entry and root without a Package return absence") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("absent")
     pkg_entry_test_write(root, "run.jet", "run: fn() {{}}\n")
     assert(
@@ -165,7 +165,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("own inline manifest conflict retains block span and exact message") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("own-conflict")
     source: "// header\npackage: {{ name: \"inline\" }}\nrun: fn() {{}}\n"
     pkg_entry_test_write(root, "run.jet", source)
@@ -188,7 +188,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("inline manifest conflict applies to every entry and retains stock span") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("other-conflict")
     source: "// stock header\npackage: {{ name: \"inline\" }}\nrun: fn() {{}}\n"
     pkg_entry_test_write(root, "run.jet", source)
@@ -205,7 +205,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("nested conventional manifest stops outer inline discovery") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("nested-manifest")
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"outer\" }}\nrun: fn() {{}}\n")
     pkg_entry_test_write(root, "inner/package.jet", "name: \"inner\"\n")
@@ -221,7 +221,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("malformed inline body retains byte span and E1362 details") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("malformed-body")
     source: "// π header\npackage: {{ version: \"1\" }}\nrun: fn() {{}}\n"
     pkg_entry_test_write(root, "run.jet", source)
@@ -243,7 +243,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("malformed file backed Config fails inline completion without mutation") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("malformed-config")
     source: "package: {{ name: \"demo\", configs: [bad] }}\nrun: fn() {{}}\n"
     config: "bad: Config{{ members: [\"child\"] }}\n"
@@ -262,7 +262,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("inline invalid default fails only after Config composition") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("bad-default")
     source: "package: {{ name: \"demo\", configs: [dev], defaults: {{ run: missing }} }}\nrun: fn() {{}}\n"
     pkg_entry_test_write(root, "run.jet", source)
@@ -274,7 +274,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("both carriers validate guarantees after composing dependencies") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("guarantees")
     body: "name: \"demo\"\npolicy: {{ contain: [missing] }}\n"
     pkg_entry_test_write(root, "inline/run.jet", "package: {{\n{body}}}\nrun: fn() {{}}\n")
@@ -290,7 +290,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("inline and conventional carriers validate flat members") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("members")
     body: "name: \"root\"\nmembers: [\"child\"]\n"
     entry_carriers: [String]{"inline", "conventional"}
@@ -315,7 +315,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 
 // Retain the original input.
 #Test("inline Config path escape fails before state mutation") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("path-escape")
     source: "package: {{\nname: \"escape\"\nconfigs: [\"../outside-config.jet\"]\n}}\nrun: fn() {{}}\n"
     pkg_entry_test_write(root, "child/run.jet", source)
@@ -331,7 +331,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("duplicate inline Package rejects before changing source") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("duplicate")
     source: "package: {{ name: \"first\" }}\nrun: fn() {{}}\npackage: {{ name: \"second\" }}\n"
     pkg_entry_test_write(root, "run.jet", source)
@@ -341,7 +341,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("unbalanced stock inline carrier cannot disappear into manifest fallback") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("unbalanced")
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"broken\"\nrun: fn() {{}}\n")
     pkg_entry_test_write(root, "other.jet", "run: fn() {{}}\n")
@@ -351,7 +351,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 
 // Filename-independent workspace declaration boundaries.
 #Test("declaration resolved workspace stops both outer carrier walks") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("declared-boundary")
     pkg_entry_test_write(root, "package.jet", "name: \"outer\"\n")
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"outer-inline\" }}\nrun: fn() {{}}\n")
@@ -380,7 +380,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("ambiguous inner workspace cannot expose outer Package") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("ambiguous-boundary")
     pkg_entry_test_write(root, "package.jet", "name: \"outer\"\nversion: \"0.1.0\"\n")
     workspace_names: [String]{"a", "b"}
@@ -394,7 +394,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("malformed canonical workspace stops outer package discovery") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("malformed-boundary")
     pkg_entry_test_write(root, "package.jet", "name: \"outer\"\n")
     pkg_entry_test_write(root, "child/workspace.jet", "ordinary: fn() {{}}\n")
@@ -404,7 +404,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("one climb reports the inline carrier and the manifest above it") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("one-climb")
     pkg_entry_test_write(root, "app/package.jet", "name: \"app\"\n")
     pkg_entry_test_write(root, "app/tool/run.jet", "package: {{ name: \"tool\" }}\nrun: fn() {{}}\n")
@@ -429,7 +429,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
     if !sys.is_unix() {
         return
     }
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("shared-package")
     pkg_entry_test_write(root, "package.jet", "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {{ allow: [IO], needs: [UI.Clipboard] }}\n")
     pkg_entry_test_write(root, "run.jet", "run: fn() {{}}\n")
@@ -452,7 +452,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
     if !sys.is_unix() {
         return
     }
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("linked-carriers")
     pkg_entry_test_write(root, "target.txt", "package: {{ name: \"linked\" }}\nrun: fn() {{}}\n")
     files.symlink(files.join(root, "target.txt"), files.join(root, "run.jet")) ?? panic("link entry")
@@ -469,7 +469,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
     if !sys.is_unix() {
         return
     }
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("linked-config")
     source: "package: {{ name: \"symlink\", configs: [\"config.jet\"] }}\nrun: fn() {{}}\n"
     pkg_entry_test_write(root, "run.jet", source)
@@ -487,7 +487,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
     if !sys.is_unix() {
         return
     }
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("unreadable")
     pkg_entry_test_write(root, "run.jet", "run: fn() {{}}\n")
     path: files.join(root, "run.jet")
@@ -506,7 +506,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
     if !sys.is_linux() {
         return
     }
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("missing-native-detail")
     path: files.join(root, "missing.jet")
     diagnostic: pkg_entry_test_failure(cache, path)
@@ -521,7 +521,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 // E1331 keeps Core's read-decode cause; the E1334 authority detail of the
 // checked carrier separately locates the bad byte.
 #Test("invalid UTF8 entry retains exact E1331 read detail") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("utf8-native-detail")
     path: files.join(root, "run.jet")
     files.write_bytes(path, [U8]{U8{255}}) ?? panic("write invalid UTF8")
@@ -534,7 +534,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("missing inline member cannot be silently dropped") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("missing-member")
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"root\", members: [\"absent\"] }}\nrun: fn() {{}}\n")
     assert_eq(pkg_entry_test_failure(cache, files.join(root, "run.jet")).code, "E1362")
@@ -542,7 +542,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("duplicate inline member names are refused rather than merged") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("duplicate-member")
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"root\", members: [\"one\", \"two\"] }}\nrun: fn() {{}}\n")
     member_names: [String]{"one", "two"}
@@ -570,7 +570,7 @@ pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[F
 }
 
 #Test("entry carrier discovery reuses one workspace declaration cache") {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("cache-session")
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"cached\" }}\nrun: fn() {{}}\n")
     // A `workspace` before `:` makes the probe lex this source rather than skip it.

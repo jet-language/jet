@@ -5,7 +5,7 @@ use files: core.files
 // distribution `name` itself when MetaCPAN has no module record).
 provider_cpan_fetch: fn(authority: RegistryAuthority, scratch: String, name: String) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
     repository: authority.registry()
-    distribution := name
+    ^distribution: name
     if authority.text("{repository}/v1/module/{provider_script_url_piece(name)}", scratch) == {
         .Ok(raw) -> {
             if pkg_json_parse_protocol(raw) == {
@@ -36,7 +36,7 @@ provider_cpan_parse_search: fn(repository: String, distribution: String, raw: St
     hits: provider_script_json_get(value, "hits") ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {err.message()}"))
     inner: provider_script_json_get(hits, "hits") ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {err.message()}"))
     releases: pkg_json_array(inner) ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {PKG_JSON_NOT_ARRAY}"))
-    out := [RegistryPackage]{}
+    ^out: [RegistryPackage]{}
     loop hit in releases {
         release: provider_script_json_get(hit, "_source") ?? return Err(RegistryError.Reason("invalid MetaCPAN release hit: {err.message()}"))
         out.push(provider_cpan_parse_release(repository, release))
@@ -57,7 +57,7 @@ provider_cpan_parse_release: fn(repository: String, value: Dyn) -> RegistryPacka
     if !provider_script_registry(ProviderFamily.Cpan).valid_name(package_name) || !provider_script_safe_piece(version, "+_-.") || !provider_registry_valid_hex(checksum, 64) {
         return Err(RegistryError.Reason("MetaCPAN release identity is unsafe or unhashed"))
     }
-    dependencies := [RegistryDependency]{}
+    ^dependencies: [RegistryDependency]{}
     if provider_script_json_field(value, "dependency") == {
         .Val(listed) -> {
             items: pkg_json_array(listed) ?? [Dyn]{}
@@ -70,7 +70,7 @@ provider_cpan_parse_release: fn(repository: String, value: Dyn) -> RegistryPacka
                 if !provider_script_registry(ProviderFamily.Cpan).valid_name(dependency_name) {
                     return Err(RegistryError.Reason("unsafe CPAN dependency `{dependency_name}`"))
                 }
-                minimum := "0"
+                ^minimum: "0"
                 if provider_script_json_field(item, "version") == {
                     .Val(written) -> {
                         text: pkg_json_text(written) ?? ""

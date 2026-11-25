@@ -36,19 +36,19 @@ run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
         half: listener.accept() ?? panic("accept")
         _half_request: half.read(8192) ?? panic("request")
         half.write_bytes("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nfirst".bytes()) ?? panic("write")
-        _ := go.receive() ?? panic("go")
+        ^_: go.receive() ?? panic("go")
         half.write_bytes("-last".bytes()) ?? panic("write")
         // A body that stalls after three of its ten bytes.
         stalled: listener.accept() ?? panic("accept")
         _stalled_request: stalled.read(8192) ?? panic("request")
         stalled.write_bytes("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc".bytes()) ?? panic("write")
-        _ := done.receive() ?? panic("done")
+        ^_: done.receive() ?? panic("done")
     }
     addr: address.receive() ?? panic("address")
     sized: http.get("http://{addr}/sized") ?? panic("sized")
     print("sized: {sized.text() ?? panic("sized text")}")
     chunked: http.get("http://{addr}/chunked") ?? panic("chunked")
-    pieces := [String]{}
+    ^pieces: [String]{}
     loop piece in chunked.body().chunks(4) {
         raw: piece ?? panic("piece")
         pieces.push(String.from_bytes(raw) ?? "?")
@@ -57,7 +57,7 @@ run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
     to_end: http.get("http://{addr}/end") ?? panic("end")
     print("to the end: {to_end.body().text(64) ?? panic("end text")}")
     half: http_client.request("GET", "http://{addr}/half").read_timeout(5000).send() ?? panic("half")
-    seen := [String]{}
+    ^seen: [String]{}
     loop piece in half.body().chunks(5) {
         raw: piece ?? panic("half piece")
         seen.push(String.from_bytes(raw) ?? "?")

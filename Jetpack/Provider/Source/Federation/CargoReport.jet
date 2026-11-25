@@ -16,17 +16,17 @@ impl ProviderFactReport {
     // retained as a typed fact.
     cargo_document: fn(document: String) -> ProviderFactReport Never! {
         assignments: provider_toml_assignments(document)
-        package_values := [TOMLAssignment]{}
+        ^package_values: [TOMLAssignment]{}
         loop entry in assignments {
             if !entry.array_table && entry.section == "package" -> package_values.push(entry)
         }
-        facts := MetadataFacts.empty(ProviderFamily.Cargo, provider_first_toml_value(package_values, "name") ?? "")
+        ^facts: MetadataFacts.empty(ProviderFamily.Cargo, provider_first_toml_value(package_values, "name") ?? "")
         facts.version = provider_first_toml_value(package_values, "version") ?? ""
         facts.license = provider_first_toml_value(package_values, "license") ?? ""
-        conflicts := [String]{}
+        ^conflicts: [String]{}
         identity_keys: [String]{"name", "version", "license"}
         loop key in identity_keys {
-            values := [String]{}
+            ^values: [String]{}
             loop entry in package_values {
                 if entry.key == key -> values.push(entry.value)
             }
@@ -34,13 +34,13 @@ impl ProviderFactReport {
                 conflicts.push("Cargo package declares conflicting `{key}` values")
             }
         }
-        losses := [String]{}
+        ^losses: [String]{}
         loop entry in package_values {
             if identity_keys.contains(entry.key) && !provider_toml_string_value(entry.value) {
                 losses.push("Cargo package field `{entry.key}` must be a TOML string")
             }
         }
-        native_values := [String:String]{}
+        ^native_values: [String:String]{}
         loop index in 0..<assignments.len() {
             entry: assignments[index]
             native_key: if entry.array_table -> "provider.cargo.native.lock.{entry.section}.{index}.{entry.key}" else -> "provider.cargo.native.manifest.{entry.section}.{entry.key}"
@@ -101,7 +101,7 @@ impl ProviderFactReport {
         facts.build_dependencies = provider_sorted_unique(facts.build_dependencies)
         facts.platforms = provider_sorted_unique(facts.platforms)
         lock_records: provider_cargo_lock_records(assignments)
-        has_package_name := false
+        ^has_package_name: false
         loop entry in package_values {
             if entry.key == "name" -> has_package_name = true
         }
@@ -114,7 +114,7 @@ impl ProviderFactReport {
             else -> {
                 facts.name = "cargo-lock"
                 facts.version = "set"
-                names := [String]{}
+                ^names: [String]{}
                 loop record in lock_records {
                     if record.get("name") == {
                         .Val(value) -> { names.push(provider_toml_value_text(value)) }
@@ -179,7 +179,7 @@ impl ProviderFactReport {
             }
         }
         facts.source_identity = "cargo:{facts.name}@{facts.version}"
-        report := ProviderFactReport.with_identity(facts)
+        ^report: ProviderFactReport.with_identity(facts)
         loop loss in losses -> report.losses.push(loss)
         loop conflict in conflicts -> report.conflicts.push(conflict)
         report.retaining("toml", document)
@@ -216,9 +216,9 @@ CargoDependencyKind: enum {
 // lock's leading `version = 4` is not read as a key of the manifest's last
 // table (a `[dev-dependencies]` entry, say).
 provider_toml_assignments: fn(document: String) -> [TOMLAssignment] Never! {
-    section := ""
-    array_table := false
-    assignments := [TOMLAssignment]{}
+    ^section: ""
+    ^array_table: false
+    ^assignments: [TOMLAssignment]{}
     loop raw_line in provider_lines(document) {
         line: raw_line.trim()
         if line == "Cargo.toml:" || line == "Cargo.lock:" {
@@ -264,8 +264,8 @@ provider_toml_value_text: fn(raw: String) -> String Never! {
 // backslash escapes the next character.
 provider_toml_value_without_comment: fn(value: String) -> String Never! {
     bytes: value.bytes()
-    quote := 0
-    escaped := false
+    ^quote: 0
+    ^escaped: false
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if {
@@ -326,8 +326,8 @@ provider_cargo_target_platform: fn(section: String) -> String Never! {
 
 // One record per `[[package]]` entry; a repeated `name` starts the next.
 provider_cargo_lock_records: fn(assignments: [TOMLAssignment]) -> [[String:String]] Never! {
-    records := [[String:String]]{}
-    current := [String:String]{}
+    ^records: [[String:String]]{}
+    ^current: [String:String]{}
     loop entry in assignments {
         if !entry.array_table || entry.section != "package" -> next
         if entry.key == "name" && current.has_key("name") {

@@ -72,7 +72,7 @@ pkg_test_record: fn(value: String, ctor: String, site: String) -> String Package
 
 // Every profile of a `test: { … }` body, in declaration order.
 pkg_parse_test_profiles: fn(body: String) -> [TestProfileDef] PackageParseError! {
-    profiles := [TestProfileDef]{}
+    ^profiles: [TestProfileDef]{}
     loop entry in pkg_key_value_entries(body) {
         repeated: entry.key.copy()
         if profiles.any(fn(profile) { profile.name == repeated }) {
@@ -86,8 +86,8 @@ pkg_parse_test_profiles: fn(body: String) -> [TestProfileDef] PackageParseError!
 pkg_parse_test_profile: fn(name: String, value: String) -> TestProfileDef PackageParseError! {
     site: "test profile `{name}`"
     source: "profile `{name}`"
-    profile := TestProfileDef{name: name, suites: [String]{}}
-    seen := [String]{}
+    ^profile: TestProfileDef{name: name, suites: [String]{}}
+    ^seen: [String]{}
     loop field in pkg_key_value_entries(pkg_test_record(value, TEST_PROFILE_CTOR, site)) {
         if seen.contains(field.key) {
             return Err(PackageParseError.Composition("{site} declares `{field.key}` more than once"))
@@ -121,7 +121,7 @@ pkg_parse_test_profile: fn(name: String, value: String) -> TestProfileDef Packag
 
 // The fields a `TestProfile{ … }` takes: its own, then each ported setting row.
 pkg_test_profile_fields: fn() -> String Never! {
-    names := [String]{"suites", "baseline"}
+    ^names: [String]{"suites", "baseline"}
     loop row in JET_TEST_SETTINGS {
         if row.ported -> names.push(row.name.copy())
     }
@@ -134,7 +134,7 @@ pkg_test_names: fn(value: String, site: String) -> [String] PackageParseError! {
     if !text.starts_with("[") || !text.ends_with("]") {
         return Err(PackageParseError.Composition("{site} needs a list such as `[tests]`"))
     }
-    names := [String]{}
+    ^names: [String]{}
     loop name in pkg_parse_list(text) {
         if names.contains(name) {
             return Err(PackageParseError.Composition("{site} lists `{name}` more than once"))
@@ -149,7 +149,7 @@ pkg_test_names: fn(value: String, site: String) -> [String] PackageParseError! {
 
 // Every suite of a `suites: { … }` body, in declaration order.
 pkg_parse_test_suites: fn(body: String) -> [TestSuiteDef] PackageParseError! {
-    suites := [TestSuiteDef]{}
+    ^suites: [TestSuiteDef]{}
     loop entry in pkg_key_value_entries(body) {
         site: "test suite `{entry.key}`"
         if entry.key == TEST_SUITE_TESTS {
@@ -159,7 +159,7 @@ pkg_parse_test_suites: fn(body: String) -> [TestSuiteDef] PackageParseError! {
         if suites.any(fn(suite) { suite.name == repeated }) {
             return Err(PackageParseError.Composition("{site} is declared more than once"))
         }
-        found := TestSuiteDef?{None}
+        ^found: TestSuiteDef?{None}
         loop field in pkg_key_value_entries(pkg_test_record(entry.value, TEST_SUITE_CTOR, site)) {
             kind: pkg_test_suite_kind(field.key) ?? return Err(PackageParseError.Composition("{site} has an unknown field `{field.key}` (allowed: golden_corpus, ui_corpus, cases_corpus)"))
             if found != None {
@@ -204,7 +204,7 @@ impl PackageFacts {
     // shares a name with `tests` or a `suites:` entry, or a profile names a
     // suite neither declares.
     test_suites_refusal: fn(self, code_suites: [String]) -> String? Never! {
-        known := [String]{TEST_SUITE_TESTS}
+        ^known: [String]{TEST_SUITE_TESTS}
         loop suite in self.test_suites -> known.push(suite.name)
         loop code in code_suites {
             if known.contains(code) {
@@ -245,7 +245,7 @@ impl PackageFacts {
 // (E0635), so the tokens hold every one without running code.
 pkg_test_code_suites: fn(source: String) -> [String] Never! {
     lexed: lex(source.bytes())
-    names := [String]{}
+    ^names: [String]{}
     if lexed.tokens.len() < 4 -> return names
     loop index in 1..<lexed.tokens.len() {
         if index + 2 >= lexed.tokens.len() -> break
@@ -267,7 +267,7 @@ pkg_test_code_suites: fn(source: String) -> [String] Never! {
 pkg_test_sets_settings: fn(source: String) -> Bool Never! {
     lexed: lex(source.bytes())
     tokens: lexed.tokens
-    params := [String]{}
+    ^params: [String]{}
     loop index in 0..<tokens.len() {
         if index + 2 >= tokens.len() -> break
         if tokens[index].kind != TOKEN_IDENT || tokens[index + 1].kind != TOKEN_COLON || tokens[index + 2].kind != TOKEN_IDENT {

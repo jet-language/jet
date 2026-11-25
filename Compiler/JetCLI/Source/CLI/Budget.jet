@@ -55,7 +55,7 @@ jet_cli_budget_plan: fn(raw: [String], color: Bool) -> JetCLIPlan Never! {
     cwd: cli_sys.current_dir() ?? return JetCLIPlan.Done{output: jet_cli_budget_tool_failure(options, "cannot resolve current workspace: {jet_cli_io_error_text(err)}", color)}
     source_root: jet_cli_manifest_root(cwd) ?? cwd
     root: cli_files.realpath(source_root) ?? source_root
-    notices := [String]{}
+    ^notices: [String]{}
     entry: if jet_cli_find_project_entry(root, "budget", color, notices) == {
         .Entry(found) -> found.path.copy()
         .Absent -> ""
@@ -81,9 +81,9 @@ jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIUsageError!
             return Err(jet_cli_usage_error("E2104", "`jet budget` needs `check` or `update`"))
         }
     }
-    out := JetCLIBudgetOptions{command: command, baseline: None, bootstrap: false, accept_regression: false, reason: None, yes: false, json: false, verbose: false, quiet: false, annotations: "auto"}
-    seen := [String]{}
-    index := 2
+    ^out: JetCLIBudgetOptions{command: command, baseline: None, bootstrap: false, accept_regression: false, reason: None, yes: false, json: false, verbose: false, quiet: false, annotations: "auto"}
+    ^seen: [String]{}
+    ^index: 2
     loop index < raw.len() {
         flag: raw[index]
         key: if flag == "-y" -> "--yes" else -> flag.copy()
@@ -106,9 +106,7 @@ jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIUsageError!
                 }
                 if {
                     flag == "--baseline" -> out.baseline = Val(value.copy())
-                    flag == "--reason" -> {
-                        out.reason = Val(value.copy())
-                    }
+                    flag == "--reason" -> { out.reason = Val(value.copy()) }
                     else -> {
                         if value != "auto" && value != "none" && value != "github" {
                             return Err(jet_cli_usage_error("E2104", "`--annotations` accepts auto, none, or github"))
@@ -159,11 +157,11 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
                 return jet_cli_budget_compiler_failure(options, entry, diagnostics, color)
             }
             if projection.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-            active := [JetDriverBudgetSpec]{}
+            ^active: [JetDriverBudgetSpec]{}
             loop row in projection.budget_specs {
                 if jet_cli_budget_applies(row.spec, profile) -> active.push(row.copy())  // copy: the projection keeps its specs.
             }
-            sources := [JetCLIBudgetSource]{}
+            ^sources: [JetCLIBudgetSource]{}
             prefix: jet_cli_entry_join(root, "")
             loop held in snapshot.roots {
                 // The measured members are the program modules; a manifest is
@@ -189,7 +187,7 @@ jet_cli_budget_applies: fn(spec: BudgetSpec, profile: String) -> Bool Never! {
 // `word` with its first ASCII letter upper-cased: the spelling a budget's
 // applicability writes a profile or target variant in (`Dev`, `Native`).
 jet_cli_budget_title: fn(word: String) -> String Never! {
-    bytes := word.bytes()
+    ^bytes: word.bytes()
     if bytes.len() > 0 && bytes[0] >= 97 && bytes[0] <= 122 -> bytes[0] = bytes[0] - 32
     // copy: an unchanged word when its bytes are not text.
     String.from_bytes(bytes) ?? word.copy()
@@ -213,7 +211,7 @@ jet_cli_budget_axis_applies: fn(axis: BudgetAxis, current: String, title: String
 // Sema admits only the closed provider set, so every provider here is one
 // `jet budget` knows. `profile` is the measured compile's.
 jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: String, active: [JetDriverBudgetSpec], facts: JetDriverBudgetFacts, sources: [JetCLIBudgetSource], measured_start: String, profile: String, color: Bool) -> JetDriverVerbOutput {
-    ordered := active
+    ^ordered: active
     ordered = loop fresh in ordered -> fresh
     ordered.sort_by(fn(left: JetDriverBudgetSpec, right: JetDriverBudgetSpec) { left.spec.name <=> right.spec.name })
     toolchain: jet_cli_budget_toolchain(entry) ?? return jet_cli_budget_tool_failure(options, err.message, color)
@@ -222,11 +220,11 @@ jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: Stri
             jet_cli_budget_compile_workload(root, row.spec, profile) ?? return jet_cli_budget_tool_failure(options, err.message, color)
         }
     }
-    services := [JetCLIBudgetService]{}
+    ^services: [JetCLIBudgetService]{}
     loop row in ordered {
         if sema_budget_provider_kind(row.spec.provider) != "ServiceProbe" -> next
         name: sema_budget_provider_identity(row.spec.provider) ?? ""
-        collected := false
+        ^collected: false
         loop service in services {
             if service.name == name -> collected = true
         }
@@ -234,7 +232,7 @@ jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: Stri
         service: jet_cli_budget_service(root, name) ?? return jet_cli_budget_tool_failure(options, err.message, color)
         services.push(service)
     }
-    sized := false
+    ^sized: false
     loop row in ordered {
         kind: sema_budget_provider_kind(row.spec.provider)
         metric: sema_budget_provider_kind(row.spec.metric)
@@ -253,7 +251,7 @@ jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: Stri
             return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: it compares against baseline `{baseline}`, and baseline history is not built", jet_cli_why("E2104"), "compare the budget with `Absolute`, or measure it with a `jet` that has baseline history", color, JET_DRIVER_EXIT_USAGE)
         }
     }
-    artifact := JetCLIBudgetArtifact?{None}
+    ^artifact: JetCLIBudgetArtifact?{None}
     if sized {
         built_artifact: jet_cli_budget_build_artifact(root, entry) ?? return jet_cli_budget_tool_failure(options, err.message, color)
         artifact = Val(built_artifact)
@@ -292,7 +290,7 @@ jet_cli_budget_compile_workload: fn(root: String, spec: BudgetSpec, profile: Str
             return Err(jet_cli_budget_failure("compile workload patch path is not project-relative"))
         }
         segments: patch.split("/").to_list()
-        parts := [String]{}
+        ^parts: [String]{}
         loop index in 0..<segments.len() - 1 { parts.push(segments[index]) }
         name: segments[segments.len() - 1]
         present: JetCLIRootedDirectory.present(root, parts) ?? return Err(jet_cli_budget_failure("compile workload patch is unavailable: {err.message}"))
@@ -357,12 +355,12 @@ jet_cli_budget_update: fn(options: JetCLIBudgetOptions, root: String, built: Jet
         return jet_cli_budget_json(options, built, report_path, planned, options.yes, JET_DRIVER_EXIT_OK)
     }
     old: plan.prior_head_report_id ?? "none"
-    stderr := "{if created -> "+" else -> "~"} report {built.report_id}\n~ baseline {baseline} {old} -> {built.report_id}\n"
+    ^stderr: "{if created -> "+" else -> "~"} report {built.report_id}\n~ baseline {baseline} {old} -> {built.report_id}\n"
     interactive: budget_term.stdin().is_tty()
-    apply := options.yes
+    ^apply: options.yes
     if !apply && interactive {
         // The plan precedes the prompt on the terminal.
-        console := budget_term.stderr()
+        ^console: budget_term.stderr()
         console.write(stderr).drop("budget plan")
         stderr = ""
         apply = jet_cli_budget_confirm()
@@ -384,9 +382,9 @@ jet_cli_budget_update: fn(options: JetCLIBudgetOptions, root: String, built: Jet
 
 // The terminal confirmation: `y` or `yes`, in any case, applies.
 jet_cli_budget_confirm: fn() -> Bool {
-    console := budget_term.stderr()
+    ^console: budget_term.stderr()
     console.write("Apply? [y/N] ").drop("budget prompt")
-    input := budget_term.stdin()
+    ^input: budget_term.stdin()
     answer: input.read_line() ?? ""
     word: sema_budget_ascii_lower(answer.trim())
     word == "y" || word == "yes"
@@ -438,7 +436,7 @@ jet_cli_budget_accept: fn(root: String, plan: JetCLIBudgetUpdatePlan, built: Jet
 // The report subject: the measured member sources, sorted, the built
 // artifact (Null when no budget sizes one), the profile, and the target.
 jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured_start: String, measured_end: String, profile: String, artifact: CanonicalJSON) -> CanonicalJSON {
-    ordered := sources
+    ^ordered: sources
     ordered = loop fresh in ordered -> fresh
     ordered.sort_by(fn(left: JetCLIBudgetSource, right: JetCLIBudgetSource) { if left.path == right.path -> left.sha256 <=> right.sha256 else -> left.path <=> right.path })
     members: loop source in ordered -> perf_report_object_new(
@@ -477,7 +475,7 @@ jet_cli_budget_toolchain: fn(entry: String) -> CanonicalJSON JetCLIBudgetFailure
         CanonicalJSONField{key: "stdlib_id", value: CanonicalJSON.String(stdlib)},
     }
     digest: perf_stable_id(perf_report_object_new(fields.copy()))
-    with_digest := fields
+    ^with_digest: fields
     with_digest.push(CanonicalJSONField{key: "digest", value: CanonicalJSON.String(digest)})
     Ok(perf_report_object_new(with_digest))
 }
@@ -486,7 +484,7 @@ jet_cli_budget_toolchain: fn(entry: String) -> CanonicalJSON JetCLIBudgetFailure
 // built into jet), each path and its bytes framed, hashed together; None
 // when a source can't be read.
 jet_cli_budget_stdlib_id: fn(entry: String) -> String? {
-    framed := [U8]{}
+    ^framed: [U8]{}
     if {
         jet_cli_named_toolchain(entry) == .Val(toolchain) -> {
             core_rows: jet_cli_toolchain_core_rows(toolchain) ?? return None

@@ -50,7 +50,7 @@ hex_value: fn(b: U8) -> Int {
 
 // The 16-digit hex word at `at`, as the signed Int math.from_bits takes.
 word_at: fn(raw: [U8], at: Int) -> Int {
-    n := 0
+    ^n: 0
     loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
     if n > 9223372036854775807 -> n -= 18446744073709551616
     n
@@ -58,8 +58,8 @@ word_at: fn(raw: [U8], at: Int) -> Int {
 
 hex_word: fn(word: Int) -> String {
     digits: "0123456789abcdef".bytes()
-    n := if word < 0 -> word + 18446744073709551616 else -> word
-    out := [U8]{}
+    ^n: if word < 0 -> word + 18446744073709551616 else -> word
+    ^out: [U8]{}
     loop _ in 0..<16 {
         out.push(digits[n %% 16])
         n = n /% 16
@@ -116,7 +116,7 @@ evaluate: fn(name: String, w: [Int]) -> [Int] {
         return [Int]{math.to_bits(parts.rem), parts.quo}
     }
     if name == "scalbn" -> return [Int]{math.to_bits(math.ldexp(math.from_bits(w[0]), w[1]))}
-    arguments := [Float]{}
+    ^arguments: [Float]{}
     loop word in w -> arguments.push(math.from_bits(word))
     [Int]{math.to_bits(value(name, arguments))}
 }
@@ -141,11 +141,11 @@ marks_mpfr: fn(raw: [U8], at: Int) -> Bool {
 
 check: fn(name: String, corpus: String, exact_nan: Bool) {
     raw: corpus.bytes()
-    at := 0
-    rows := 0
-    wrong := 0
-    against_mpfr := 0
-    mpfr := false
+    ^at: 0
+    ^rows: 0
+    ^wrong: 0
+    ^against_mpfr: 0
+    ^mpfr: false
     count: arity(name)
     loop at < raw.len() {
         if raw[at] == (U8{35}) {
@@ -154,8 +154,8 @@ check: fn(name: String, corpus: String, exact_nan: Bool) {
             at += 1
             next
         }
-        arguments := [Int]{}
-        want := [Int]{}
+        ^arguments: [Int]{}
+        ^want: [Int]{}
         loop {
             word: word_at(raw, at)
             if arguments.len() < count -> arguments.push(word) else -> want.push(word)
@@ -167,7 +167,7 @@ check: fn(name: String, corpus: String, exact_nan: Bool) {
         source: if mpfr -> "mpfr" else -> "musl"
         if mpfr -> against_mpfr += 1
         mpfr = false
-        same := got.len() == want.len()
+        ^same: got.len() == want.len()
         loop i in 0..<want.len() {
             if same && got[i] != want[i] && (exact_nan || !is_nan_word(got[i]) || !is_nan_word(want[i])) {
                 same = false
@@ -176,11 +176,11 @@ check: fn(name: String, corpus: String, exact_nan: Bool) {
         if !same {
             wrong += 1
             if wrong <= 3 {
-                shown := [String]{}
+                ^shown: [String]{}
                 loop word in arguments -> shown.push(hex_word(word))
-                gotten := [String]{}
+                ^gotten: [String]{}
                 loop word in got -> gotten.push(hex_word(word))
-                wanted := [String]{}
+                ^wanted: [String]{}
                 loop word in want -> wanted.push(hex_word(word))
                 print("{name}({shown.join(", ")}) = {gotten.join(" ")}, {source} {wanted.join(" ")}")
             }

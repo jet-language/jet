@@ -9,24 +9,24 @@ Sprite: struct {
 }
 
 ramp: fn(count: Int, step: Int) -> [U8] {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop index in 0..<count -> bytes.push(U8{index * step})
     bytes
 }
 
 with_byte: fn(bytes: [U8], at: Int, value: U8) -> [U8] {
-    changed := [U8]{}
+    ^changed: [U8]{}
     loop (index, byte) in bytes -> changed.push(if index == at -> value else -> byte)
     changed
 }
 
-frame := ramp(6, 40)
+^frame: ramp(6, 40)
 
-names := [String]{"imp", "demon"}
+^names: [String]{"imp", "demon"}
 
-scores := [String:Int]{"imp": 1, "demon": 3}
+^scores: [String:Int]{"imp": 1, "demon": 3}
 
-player := Sprite{pixels: ramp(3, 100), name: "marine"}
+^player: Sprite{pixels: ramp(3, 100), name: "marine"}
 
 paint: fn(at: Int, value: U8) {
     #Unsafe("one task writes the frame") { frame = with_byte(frame, at, value) }

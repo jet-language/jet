@@ -12,7 +12,7 @@ ScanInput: struct {
 }
 
 count_lines: fn(input: ScanInput) -> Int {
-    total := 0
+    ^total: 0
     loop line in input.rows -> total += line.count(input.needle)
     total
 }
@@ -20,11 +20,11 @@ count_lines: fn(input: ScanInput) -> Int {
 run: fn(args: Args) {
     root: args.root
     needle: args.needle.copy()
-    paths := (files.walk_files(root).list() ?? panic("walk failed")).filter(fn(entry) { entry.path.ends_with(".txt") }).map(fn(entry) { entry.path })
+    ^paths: (files.walk_files(root).list() ?? panic("walk failed")).filter(fn(entry) { entry.path.ends_with(".txt") }).map(fn(entry) { entry.path })
     inputs: paths.map(fn(path) { ScanInput{rows: (files.read(path) ?? panic("read failed")).lines(), needle: needle} })
     counts: inputs.para_map(fn(input: ScanInput) { count_lines(input) })
-    matched := 0
-    total := 0
+    ^matched: 0
+    ^total: 0
     loop index in 0..<paths.len() {
         path: paths[index]
         count: counts[index]

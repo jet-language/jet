@@ -33,7 +33,7 @@ run: fn() {
 `
 
 lsp_test_stage_server: fn(app: String) -> LSPServer Never! {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, LSP_TEST_TOOLS_URI, LSP_TEST_TOOLS)
     lsp_test_open(server, LSP_TEST_APP_URI, app)
     server
@@ -42,10 +42,10 @@ lsp_test_stage_server: fn(app: String) -> LSPServer Never! {
 // Each semantic token as `line:character+length=type`.
 lsp_test_stage_tokens: fn(result: Dyn) -> [String] Never! {
     data: lsp_test_token_data(result)
-    tokens := [String]{}
-    line := 0
-    character := 0
-    at := 0
+    ^tokens: [String]{}
+    ^line: 0
+    ^character: 0
+    ^at: 0
     loop at + 4 < data.len() {
         if data[at] > 0 -> character = 0
         line += data[at]
@@ -58,7 +58,7 @@ lsp_test_stage_tokens: fn(result: Dyn) -> [String] Never! {
 
 lsp_test_stage_hints: fn(server: ^LSPServer) -> [String] {
     range: "\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":5,\"character\":0}}}}"
-    hints := [String]{}
+    ^hints: [String]{}
     loop row in lsp_test_rows(lsp_test_result(server, "textDocument/inlayHint", "{{{lsp_test_text_document(LSP_TEST_APP_URI)},{range}}}")) {
         position: lsp_test_field(row, "position")
         hints.push("{lsp_test_int(position, "line")}:{lsp_test_int(position, "character")}{lsp_test_text(row, "label")}")
@@ -67,7 +67,7 @@ lsp_test_stage_hints: fn(server: ^LSPServer) -> [String] {
 }
 
 #Test("a package marker block gets its hooks' completion, tokens and hints") {
-    server := lsp_test_stage_server(LSP_TEST_APP)
+    ^server: lsp_test_stage_server(LSP_TEST_APP)
     labels: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_APP_URI, 3, 19)))
     assert(labels.contains("SELECT=1"), "the completion hook's item is offered in the block")
     outside: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_APP_URI, 2, 0)))
@@ -78,13 +78,13 @@ lsp_test_stage_hints: fn(server: ^LSPServer) -> [String] {
 }
 
 #Test("a marker block reaches no hook of a package its document does not import") {
-    server := lsp_test_stage_server(LSP_TEST_APP.replace("use tools", "use other"))
+    ^server: lsp_test_stage_server(LSP_TEST_APP.replace("use tools", "use other"))
     labels: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_APP_URI, 3, 19)))
     assert(!labels.contains("SELECT=1"), "no hook of an unimported package runs")
     assert_eq(lsp_test_stage_hints(server), [String]{})
 }
 
 #Test("a qualified marker block reaches only the package its qualifier names") {
-    server := lsp_test_stage_server(LSP_TEST_APP.replace("#Tools.Query", "#Other.Query"))
+    ^server: lsp_test_stage_server(LSP_TEST_APP.replace("#Tools.Query", "#Other.Query"))
     assert_eq(lsp_test_stage_hints(server), [String]{})
 }

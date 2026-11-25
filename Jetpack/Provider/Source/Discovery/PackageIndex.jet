@@ -61,7 +61,7 @@ PackageIndexEntry: struct {
             if !self.platforms.contains(platform) -> self.platforms.push(platform.copy())
         }
         loop option in other.options {
-            known := false
+            ^known: false
             loop existing in self.options {
                 if existing.name == option.name -> known = true
             }
@@ -80,7 +80,7 @@ PackageIndex: struct {
 
     // Merge into an existing record of the same source and name, else add.
     add_package: fn(^self, record: PackageIndexEntry) Never! {
-        found := false
+        ^found: false
         loop index in 0..<self.packages.len() {
             if !found && self.packages[index].source == record.source && self.packages[index].name == record.name {
                 self.packages[index].merge_from(record)
@@ -95,7 +95,7 @@ PackageIndex: struct {
     // then documentation; ties by source and name.
     search: fn(self, query: String) -> [PackageIndexEntry] Never! {
         q: pkg_ascii_lower(query)
-        scored := [{score: Int, record: PackageIndexEntry}]{}
+        ^scored: [{score: Int, record: PackageIndexEntry}]{}
         loop record in self.packages {
             score: env_discovery_score(record, q) ?? next
             scored.push({score: score, record: record})
@@ -104,7 +104,7 @@ PackageIndex: struct {
         scored.sort_by(fn(item) { item.record.name })
         scored.sort_by(fn(item) { item.record.source })
         scored.sort_by(fn(item) { item.score })
-        found := [PackageIndexEntry]{}
+        ^found: [PackageIndexEntry]{}
         loop item in scored -> found.push(item.record)
         found
     }
@@ -113,7 +113,7 @@ PackageIndex: struct {
     // `source:name`, a bare name, or an exact reference).
     info: fn(self, query: String) -> PackageIndexEntry? Never! {
         split: env_discovery_split_query(query)
-        matches := [PackageIndexEntry]{}
+        ^matches: [PackageIndexEntry]{}
         loop record in self.packages {
             matched: if split.source == {
                 .Val(source) -> record.source == source && record.name == split.name
@@ -127,7 +127,7 @@ PackageIndex: struct {
 
     // Names of `source` packages starting with `prefix`, sorted and unique.
     package_completions: fn(self, source: String, prefix: String) -> [String] Never! {
-        out := [String]{}
+        ^out: [String]{}
         loop record in self.packages {
             if record.source == source && record.name.starts_with(prefix) -> out.push(record.name)
         }
@@ -137,8 +137,8 @@ PackageIndex: struct {
     // The closest package (edit distance at most 3, then display ref).
     nearest: fn(self, query: String) -> String? Never! {
         name: env_discovery_split_query(query).name
-        best := String?{None}
-        best_distance := 0
+        ^best: String?{None}
+        ^best_distance: 0
         loop record in self.packages {
             distance: pkg_edit_distance(name, record.name)
             if distance > 3 -> next
@@ -161,7 +161,7 @@ env_discovery_score: fn(record: PackageIndexEntry, q: String) -> Int? Never! {
     name: pkg_ascii_lower(record.name)
     display: pkg_ascii_lower(record.display_ref())
     docs: pkg_ascii_lower(record.docs)
-    option := false
+    ^option: false
     loop field in record.options {
         if pkg_ascii_lower(field.name).contains(q) || pkg_ascii_lower(field.default).contains(q) || pkg_ascii_lower(field.docs).contains(q) {
             option = true
@@ -186,7 +186,7 @@ env_discovery_load: fn(project_dir: String) -[FS]> PackageIndex? ProviderReason!
     path: env_discovery_index_path(project_dir)
     if !files.exists(path) -> return Ok(None)
     text: files.read(path) ?? return Err(ProviderReason{message: "{err}"})
-    index := PackageIndex.empty()
+    ^index: PackageIndex.empty()
     lines: text.split("\n").to_list()
     loop number in 0..<lines.len() {
         line: lines[number].trim()
@@ -207,7 +207,7 @@ env_discovery_write: fn(project_dir: String, index: PackageIndex) -[FS, Env, Tim
     path: env_discovery_index_path(project_dir)
     _project_lock: env_runtime_project_lock(project_dir, "discovery-index") ?? return Err(ProviderReason{message: "{err}"})
     files.create_dir_all(files.dirname(path)) ?? return Err(ProviderReason{message: "{err}"})
-    out := ""
+    ^out: ""
     loop record in index.packages -> out = "{out}{env_discovery_record_to_json(record)}\n"
     files.write(path, out) ?? return Err(ProviderReason{message: "{err}"})
 }
@@ -236,9 +236,9 @@ env_discovery_merge_refs: fn(index: ^PackageIndex, refs: [RefSpec], fixtures: St
 env_discovery_merge_store_entries: fn(index: ^PackageIndex, store_entries: [StoreEntry]) Never! {
     loop entry in store_entries {
         canonical: pkg_canonical_locked_ref(entry.reference)
-        source := ""
-        name := ""
-        reference := ""
+        ^source: ""
+        ^name: ""
+        ^reference: ""
         if canonical.cut_last(REF_PROVIDER_AT) == {
             .Val(halves) -> {
                 source_with_selector: halves.after
@@ -336,7 +336,7 @@ env_discovery_service_option_fields: fn() -> [PackageOptionField] Never! {
 }
 
 env_discovery_search_json: fn(records: [PackageIndexEntry]) -> String Never! {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop record in records -> items.push(env_discovery_record_tree(record))
     pkg_json_render(Dyn.Object(["packages": Dyn.Array(items)]))
 }
@@ -404,12 +404,12 @@ env_discovery_provider_output_path: fn(text: String) -> String? Never! {
 // A version from a store path basename: after the Nix hash, else after a
 // short fixture hash, else the whole basename.
 env_discovery_store_path_version: fn(out: String, name: String) -> String Never! {
-    trimmed := out
+    ^trimmed: out
     loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
     base: trimmed.cut_last("/")?.after ?? trimmed
     raw: base.bytes()
     if raw.len() >= PROVIDER_NIX_HASH_LEN {
-        rest := pkg_bytes_text(raw, PROVIDER_NIX_HASH_LEN, raw.len())
+        ^rest: pkg_bytes_text(raw, PROVIDER_NIX_HASH_LEN, raw.len())
         if rest.starts_with("-") -> rest = rest.removeprefix("-")
         if env_discovery_version_after_name(rest, name) == {
             .Val(version) -> return version
@@ -431,7 +431,7 @@ env_discovery_store_path_version: fn(out: String, name: String) -> String Never!
 
 env_discovery_version_after_name: fn(rest: String, name: String) -> String? Never! {
     if !rest.starts_with("{name}-") -> return None
-    version := rest.removeprefix("{name}-")
+    ^version: rest.removeprefix("{name}-")
     loop suffix in PROVIDER_NIX_OUTPUT_SUFFIXES {
         if version.ends_with(suffix) {
             version = version.removesuffix(suffix)
@@ -461,7 +461,7 @@ env_discovery_split_query: fn(query: String) -> {source: String?, name: String} 
 }
 
 env_discovery_record_tree: fn(record: PackageIndexEntry) -> Dyn Never! {
-    options := [Dyn]{}
+    ^options: [Dyn]{}
     loop option in record.options {
         options.push(Dyn.Object(["name": Dyn.Text(option.name), "default": Dyn.Text(option.default), "docs": Dyn.Text(option.docs)]))
     }
@@ -516,7 +516,7 @@ env_discovery_optional_text: fn(object: [String:Dyn], key: String, fallback: Str
 
 env_discovery_string_array: fn(value: Dyn?) -> [String] Never! {
     items: pkg_json_array(value ?? Dyn.Null) ?? return [String]{}
-    out := [String]{}
+    ^out: [String]{}
     loop item in items {
         if pkg_json_text(item) == {
             .Val(text) -> { out.push(text) }
@@ -528,7 +528,7 @@ env_discovery_string_array: fn(value: Dyn?) -> [String] Never! {
 
 env_discovery_option_array: fn(value: Dyn?) -> [PackageOptionField] Never! {
     items: pkg_json_array(value ?? Dyn.Null) ?? return [PackageOptionField]{}
-    out := [PackageOptionField]{}
+    ^out: [PackageOptionField]{}
     loop item in items {
         object: pkg_json_object(item) ?? next
         name: env_discovery_required_text(object, "name") ?? next

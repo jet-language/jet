@@ -29,10 +29,10 @@ trust_nix_is_name_byte: fn(code: Int) -> Bool Never! {
 // Drop `#` line comments outside double-quoted strings; the newline stays.
 trust_nix_strip_comments: fn(text: String) -> String Never! {
     raw: text.bytes()
-    out := [U8]{}
-    quoted := false
-    escaped := false
-    index := 0
+    ^out: [U8]{}
+    ^quoted: false
+    ^escaped: false
+    ^index: 0
     loop index < raw.len() {
         byte: raw[index]
         code: Int{byte}
@@ -67,8 +67,8 @@ trust_nix_strip_comments: fn(text: String) -> String Never! {
 // The offset just past the string whose opening quote is at `start`, or
 // the end of `raw` when it never closes.
 trust_nix_skip_quoted: fn(raw: [U8], start: Int) -> Int Never! {
-    escaped := false
-    index := start + 1
+    ^escaped: false
+    ^index: start + 1
     loop index < raw.len() {
         code: Int{raw[index]}
         if {
@@ -86,8 +86,8 @@ trust_nix_skip_quoted: fn(raw: [U8], start: Int) -> Int Never! {
 // quoted strings, or -1.
 trust_nix_matching: fn(raw: [U8], open: Int, opener: Int, closer: Int) -> Int Never! {
     if pkg_bytes_code(raw, open) != opener -> return -1
-    depth := 0
-    index := open
+    ^depth: 0
+    ^index: open
     loop index < raw.len() {
         code: Int{raw[index]}
         if {
@@ -114,8 +114,8 @@ trust_nix_quoted_rhs: fn(value: String) -> String? Never! {
     raw: value.bytes()
     start: pkg_bytes_skip_space(raw, 0)
     if pkg_bytes_code(raw, start) != TRUST_QUOTE -> return None
-    out := [U8]{}
-    escaped := false
+    ^out: [U8]{}
+    ^escaped: false
     loop index in (start + 1)..<raw.len() {
         byte: raw[index]
         code: Int{byte}
@@ -135,7 +135,7 @@ trust_nix_quoted_rhs: fn(value: String) -> String? Never! {
 // The end of the Nix name run starting at `start`, with the quirk that a run
 // which is empty extends to the end of the text.
 trust_nix_path_end: fn(raw: [U8], start: Int) -> Int Never! {
-    index := start
+    ^index: start
     loop index < raw.len() && trust_nix_is_name_byte(Int{raw[index]}) -> index += 1
     if index == start -> return raw.len()
     index
@@ -144,7 +144,7 @@ trust_nix_path_end: fn(raw: [U8], start: Int) -> Int Never! {
 // Every `url`/`follows` input declaration in dotted or record form, sorted
 // and unique.
 trust_nix_input_assignments: fn(text: String) -> [FlakeAssignment] Never! {
-    found := [FlakeAssignment]{}
+    ^found: [FlakeAssignment]{}
     loop assignment in trust_nix_assignments_after(text, "inputs.") {
         if assignment.field == "url" || assignment.field == "follows" -> found.push(assignment)
     }
@@ -154,7 +154,7 @@ trust_nix_input_assignments: fn(text: String) -> [FlakeAssignment] Never! {
     found.sort_by(fn(assignment) { assignment.value })
     found.sort_by(fn(assignment) { assignment.field })
     found.sort_by(fn(assignment) { assignment.path })
-    unique := [FlakeAssignment]{}
+    ^unique: [FlakeAssignment]{}
     loop assignment in found {
         if unique.len() > 0 && unique[unique.len() - 1] == assignment -> next
         unique.push(assignment)
@@ -166,8 +166,8 @@ trust_nix_input_assignments: fn(text: String) -> [FlakeAssignment] Never! {
 trust_nix_input_record_assignments: fn(text: String) -> [FlakeAssignment] Never! {
     raw: text.bytes()
     keyword: "inputs".bytes()
-    found := [FlakeAssignment]{}
-    cursor := 0
+    ^found: [FlakeAssignment]{}
+    ^cursor: 0
     loop {
         start: trust_text_find(raw, keyword, cursor)
         if start < 0 -> break
@@ -196,8 +196,8 @@ trust_nix_input_record_assignments: fn(text: String) -> [FlakeAssignment] Never!
 // dotted path.
 trust_nix_block_assignments: fn(text: String, parent: String) -> [FlakeAssignment] Never! {
     raw: text.bytes()
-    found := [FlakeAssignment]{}
-    cursor := 0
+    ^found: [FlakeAssignment]{}
+    ^cursor: 0
     loop cursor < raw.len() {
         code: Int{raw[cursor]}
         if code == TRUST_QUOTE {
@@ -211,7 +211,7 @@ trust_nix_block_assignments: fn(text: String, parent: String) -> [FlakeAssignmen
         start: cursor.copy()
         loop cursor < raw.len() && trust_nix_is_name_byte(Int{raw[cursor]}) -> cursor += 1
         local: pkg_bytes_text(raw, start, cursor)
-        after := trust_text_skip_ascii_space(raw, cursor)
+        ^after: trust_text_skip_ascii_space(raw, cursor)
         if pkg_bytes_code(raw, after) != TRUST_EQUALS -> next
         after = trust_text_skip_ascii_space(raw, after + 1)
         path: if parent == "" -> local else -> "{parent}.{local}"
@@ -237,8 +237,8 @@ trust_nix_block_assignments: fn(text: String, parent: String) -> [FlakeAssignmen
 trust_nix_assignments_after: fn(text: String, prefix: String) -> [FlakeAssignment] Never! {
     raw: text.bytes()
     needle: prefix.bytes()
-    found := [FlakeAssignment]{}
-    cursor := 0
+    ^found: [FlakeAssignment]{}
+    ^cursor: 0
     loop {
         start: trust_text_find(raw, needle, cursor)
         if start < 0 -> break
@@ -256,14 +256,14 @@ trust_nix_assignments_after: fn(text: String, prefix: String) -> [FlakeAssignmen
 
 // Every output declaration, sorted and unique.
 trust_nix_output_assignments: fn(text: String) -> [FlakeOutputAssignment] Never! {
-    found := [FlakeOutputAssignment]{}
+    ^found: [FlakeOutputAssignment]{}
     loop prefix in TRUST_FLAKE_OUTPUT_PREFIXES {
         kind: prefix.removesuffix(".")
         loop path in trust_nix_assignment_paths(text, prefix) {
             parts: trust_text_split(path, TRUST_DOT)
             if {
                 parts.len() > 1 -> {
-                    attribute := [String]{}
+                    ^attribute: [String]{}
                     loop index in 1..<parts.len() -> attribute.push(parts[index])
                     found.push(FlakeOutputAssignment{prefix: kind.copy(), system: parts[0], attribute: attribute.join(".")})
                 }
@@ -276,7 +276,7 @@ trust_nix_output_assignments: fn(text: String) -> [FlakeOutputAssignment] Never!
     found.sort_by(fn(assignment) { assignment.attribute })
     found.sort_by(fn(assignment) { assignment.system })
     found.sort_by(fn(assignment) { assignment.prefix })
-    unique := [FlakeOutputAssignment]{}
+    ^unique: [FlakeOutputAssignment]{}
     loop assignment in found {
         if unique.len() > 0 && unique[unique.len() - 1] == assignment -> next
         unique.push(assignment)
@@ -288,8 +288,8 @@ trust_nix_output_assignments: fn(text: String) -> [FlakeOutputAssignment] Never!
 trust_nix_assignment_paths: fn(text: String, prefix: String) -> [String] Never! {
     raw: text.bytes()
     needle: prefix.bytes()
-    found := [String]{}
-    cursor := 0
+    ^found: [String]{}
+    ^cursor: 0
     loop {
         start: trust_text_find(raw, needle, cursor)
         if start < 0 -> break
@@ -313,7 +313,7 @@ trust_nix_assignment_paths: fn(text: String, prefix: String) -> [String] Never! 
 }
 
 trust_nix_trim_trailing_dots: fn(text: String) -> String Never! {
-    trimmed := text.copy()
+    ^trimmed: text.copy()
     loop trimmed.ends_with(".") -> trimmed = trimmed.removesuffix(".")
     trimmed
 }
@@ -322,8 +322,8 @@ trust_nix_trim_trailing_dots: fn(text: String) -> String Never! {
 trust_nix_list_assignment_values: fn(text: String, name: String) -> [String] Never! {
     raw: text.bytes()
     needle: name.bytes()
-    values := [String]{}
-    cursor := 0
+    ^values: [String]{}
+    ^cursor: 0
     loop {
         start: trust_text_find(raw, needle, cursor)
         if start < 0 -> break
@@ -357,8 +357,8 @@ trust_nix_is_relative_module_path: fn(value: String) -> Bool Never! {
 // loses its last byte, as the reference slice does.
 trust_nix_quoted_values: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    values := [String]{}
-    cursor := 0
+    ^values: [String]{}
+    ^cursor: 0
     loop cursor < raw.len() {
         start: trust_text_find_byte(raw, TRUST_QUOTE, cursor)
         if start < 0 -> break

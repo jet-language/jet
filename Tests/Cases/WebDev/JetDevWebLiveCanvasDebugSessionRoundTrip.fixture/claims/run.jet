@@ -9,7 +9,7 @@ s5_canvas_token: fn() -> String {
     marker: "session=".bytes()
     bytes: text.bytes()
     start: (s5_web_find(bytes, marker) ?? panic("session parameter")) + marker.len()
-    end := start
+    ^end: start
     loop end < bytes.len() {
         byte: Int{bytes[end]}
         if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) {
@@ -38,7 +38,7 @@ s5_canvas_field: fn(body: String, field: String) -> String {
     marker: "\"{field}\":\"".bytes()
     bytes: body.bytes()
     start: (s5_web_find(bytes, marker) ?? panic("json field")) + marker.len()
-    end := start
+    ^end: start
     loop end < bytes.len() && (Int{bytes[end]}) != 34 -> end += 1
     assert(end < bytes.len(), "field terminator")
     String.from_bytes_lossy(s5_web_bytes(bytes, start, end))

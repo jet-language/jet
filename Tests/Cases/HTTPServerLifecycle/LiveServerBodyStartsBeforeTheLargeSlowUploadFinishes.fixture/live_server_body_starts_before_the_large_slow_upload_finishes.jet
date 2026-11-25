@@ -12,8 +12,8 @@ use {
     { sender: first_tx, receiver: first_rx }: channel<Int>()
     mux.post("/slow", fn(req: HTTPRequest) {
         chunks: req.body().chunks(4096)
-        total := 0
-        first := true
+        ^total: 0
+        ^first: true
         loop packet in chunks {
             chunk: packet ?? panic("body chunk")
             if first {
@@ -30,7 +30,7 @@ use {
     client: net.tcp_connect(addr) ?? panic("connect")
     crlf: "\r\n"
     client.write_bytes("POST /slow HTTP/1.1{crlf}Host: local{crlf}Content-Length: {length}{crlf}Connection: close{crlf}{crlf}".bytes()) ?? panic("headers write")
-    chunk := [U8]{}
+    ^chunk: [U8]{}
     loop _ in 0..<4096 -> chunk.push(7)
     client.write_bytes(chunk) ?? panic("first write")
     if {
@@ -38,7 +38,7 @@ use {
         after 2s -> panic("handler must pull before the upload finishes")
     }
     loop _ in 1..<(length /% 4096) -> client.write_bytes(chunk) ?? panic("remaining write")
-    parts := [String]{}
+    ^parts: [String]{}
     loop {
         part: client.read(8192) ?? panic("response read")
         if part == "" -> break

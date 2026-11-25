@@ -342,9 +342,9 @@ resolve_in: fn(base: String, path: String) -> String Never! {
 }
 
 options: fn(argv: [String], here: String) -[Env, FS]> Options Err! {
-    given := [String:String]{"--out": files.resolve(".asm-parity"), "--runs": "{MIN_RUNS}", "--cpu": "8", "--modes": "default,release", "--perf": "perf", "--best": "5"}
-    gate := false
-    index := 0
+    ^given: [String:String]{"--out": files.resolve(".asm-parity"), "--runs": "{MIN_RUNS}", "--cpu": "8", "--modes": "default,release", "--perf": "perf", "--best": "5"}
+    ^gate: false
+    ^index: 0
     loop index < argv.len() {
         arg: argv[index]
         index += 1
@@ -437,7 +437,7 @@ HEX: "0123456789abcdef"
 parse_hex: fn(text: String) -> Int Err! {
     clean: text.removeprefix("0x").removeprefix("0X").to_lower()
     if clean == "" -> return Err("invalid hex integer: {text}")
-    value := 0
+    ^value: 0
     loop i in 0..<clean.len() {
         digit: HEX.find(clean.slice(i, i + 1))
         if digit < 0 -> return Err("invalid hex integer: {text}")
@@ -447,7 +447,7 @@ parse_hex: fn(text: String) -> Int Err! {
 }
 
 split_ws: fn(text: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop piece in text.replace("\t", " ").split(" ") {
         if piece != "" -> out.push(piece.copy())
     }
@@ -461,9 +461,11 @@ side_text: fn(side: Dyn, key: String) -> String Err! {
 
 side_routines: fn(side: Dyn) -> [String] Err! {
     if side.get("routines") == .Val(.Array(items)) {
-        out := [String]{}
+        ^out: [String]{}
         loop item in items {
-            if item == .Text(text) -> out.push(text.copy()) else -> return Err("kernel.routines entry is not a string")
+            if item == .Text(text) -> out.push(text.copy()) else {
+                return Err("kernel.routines entry is not a string")
+            }
         }
         return Ok(out)
     }
@@ -479,14 +481,14 @@ side_data: fn(side: Dyn) -> Int Never! {
 // routines, plus every byte the DWARF decoded line table gives a source line
 // of `source` containing `use`, plus `data`.
 code_bytes_of: fn(side: Dyn, object: String, root: String) -[Exec, FS, Time.Wait]> Int Err! {
-    symbols := [String:Int]{}
+    ^symbols: [String:Int]{}
     loop line in must(["nm", "-S", object], ".").output.lines() {
         fields: split_ws(line.trim())
         if fields.len() == 4 {
             if parse_hex(fields[1]) == .Ok(size) -> symbols[fields[3]] = size
         }
     }
-    bytes := side_data(side)
+    ^bytes: side_data(side)
     loop name in side_routines(side) {
         size: symbols.get(name) ?? return Err("{object} has no symbol {name}")
         bytes += size
@@ -494,13 +496,13 @@ code_bytes_of: fn(side: Dyn, object: String, root: String) -[Exec, FS, Time.Wait
     source: side_text(side, "source")
     marker: side_text(side, "use")
     lines: files.read(files.join(root, source)).split("\n").to_list()
-    uses := [Int:Bool]{}
+    ^uses: [Int:Bool]{}
     loop (i, text) in lines {
         if text.contains(marker) -> uses[i + 1] = true
     }
     if uses.len() == 0 -> return Err("{source} has no line with {marker}")
-    open := -1
-    sites := 0
+    ^open: -1
+    ^sites: 0
     loop line in must(["objdump", "--dwarf=decodedline", object], ".").output.lines() {
         if line == "" || line.starts_with(" ") || line.starts_with("\t") -> next
         fields: split_ws(line)
@@ -518,9 +520,7 @@ code_bytes_of: fn(side: Dyn, object: String, root: String) -[Exec, FS, Time.Wait
         if line_col != "-" && base == source && uses.has_key(line_num) {
             open = at
             sites += 1
-        } else {
-            open = -1
-        }
+        } else { open = -1 }
     }
     if sites == 0 -> return Err("{object}'s line table has no row of {source} at a {marker} line")
     Ok(bytes)
@@ -574,7 +574,7 @@ prepare: fn(o: Options, s: Setup) -[Exec, FS, Time.Wait]> Err! {
 // steps' concatenated, and the first failing step ends the run.
 output: fn(o: Options, exe: String, s: Setup) -[Exec, FS, Time.Wait]> Output Err! {
     prepare(o, s)
-    stdout := ""
+    ^stdout: ""
     loop args in s.plan {
         receipt: process.cmd([exe].concat(args)).cwd(s.cwd).output_limit(OUTPUT_LIMIT).run()
         stdout = "{stdout}{receipt.output}"
@@ -586,7 +586,7 @@ output: fn(o: Options, exe: String, s: Setup) -[Exec, FS, Time.Wait]> Output Err
 }
 
 outputs: fn(o: Options, variants: [Variant], s: Setup) -[Exec, FS, Time.Wait]> [Output] Err! {
-    outs := [Output]{}
+    ^outs: [Output]{}
     loop variant in variants -> outs.push(output(o, variant.exe, s))
     Ok(outs)
 }
@@ -603,11 +603,11 @@ output_text: fn(out: Output, expect: String?) -> String Never! {
 // One run's user-mode cycles and instructions, summed over its steps.
 sample: fn(o: Options, exe: String, s: Setup) -[Exec, FS, Time.Wait]> Counts Err! {
     prepare(o, s)
-    total := Counts{cycles: 0, instructions: 0}
+    ^total: Counts{cycles: 0, instructions: 0}
     loop args in s.plan {
         receipt: process.cmd(["taskset", "-c", o.cpu, o.perf, "stat", "-x,", "-e", "cycles:u,instructions:u", exe].concat(args)).cwd(s.cwd).output_limit(OUTPUT_LIMIT).run()
         // perf stat -x, writes one `count,unit,event,...` line per event.
-        counted := [String:String]{}
+        ^counted: [String:String]{}
         loop line in receipt.errors.lines() {
             fields: line.split(",").to_list()
             if fields.len() > 2 -> counted[fields[2]] = fields[0]
@@ -626,7 +626,7 @@ perf_count: fn(counted: [String:String], event: String, errors: String) -> Int E
 // `runs` rounds over the variants, each round one run of every variant in
 // turn; per variant the median cycles and instructions and the cycles' range.
 measure: fn(o: Options, variants: [Variant], s: Setup) -[Exec, FS, Time.Wait]> [Pace] Err! {
-    taken := variants.map(fn(_) { [Counts]{} })
+    ^taken: variants.map(fn(_) { [Counts]{} })
     loop _ in 0..<o.runs {
         loop (k, variant) in variants -> taken[k].push(sample(o, variant.exe, s))
     }
@@ -634,7 +634,7 @@ measure: fn(o: Options, variants: [Variant], s: Setup) -[Exec, FS, Time.Wait]> [
 }
 
 pace: fn(counts: [Counts]) -> Pace Never! {
-    cycles := counts.map(fn(count) { Float.from_int(count.cycles) })
+    ^cycles: counts.map(fn(count) { Float.from_int(count.cycles) })
     cycles.sort()
     Pace{
         cycles: stats.median(cycles) ?? 0.0,
@@ -679,7 +679,7 @@ stop_server: fn(server: ProcessChild?) -[Exec, Time.Wait]> {
 // is the one those workloads use.
 scriptbench_issues: fn(all: [Bench], here: String) -[FS]> [String] Err! {
     manifest: json.decode<Manifest>(files.read(files.join_all([here, "..", "Scriptbench", "manifest.json"])))
-    issues := [String]{}
+    ^issues: [String]{}
     loop cell in all {
         loop id in cell.scriptbench {
             wanted: id.copy()  // copy: the lookup's lambda takes its own
@@ -746,11 +746,11 @@ row_cells: fn(row: Row) -> [String] Never! {
 
 // The gate: every selected cell's reference and Jet binaries compared.
 parity: fn(o: Options, all: [Bench]) -[Exec, FS, IO, Net, Time, Time.Wait]> Int Err! {
-    rows := [Row]{}
+    ^rows: [Row]{}
     loop cell in all.filter(fn(cell) { selected(o, cell) }) {
         s: setup(o, cell)
         cell_dir: cell.dir ?? cell.name
-        variants := [Variant]{Variant{label: "asm", exe: assemble(o.here, files.join_all([o.here, cell_dir, "ref.S"]), s.dir, "ref")}}
+        ^variants: [Variant]{Variant{label: "asm", exe: assemble(o.here, files.join_all([o.here, cell_dir, "ref.S"]), s.dir, "ref")}}
         loop mode in o.modes {
             variants.push(Variant{label: "jet-{mode}", exe: build_jet(o, o.jet, cell, mode, s.dir, "jet")})
         }
@@ -811,7 +811,7 @@ parity: fn(o: Options, all: [Bench]) -[Exec, FS, IO, Net, Time, Time.Wait]> Int 
 // nonzero exit code.
 timed: fn(o: Options, launcher: String, exe: String, s: Setup) -[Exec, FS, Time.Wait]> Timed Err! {
     prepare(o, s)
-    total := Timed{ns: 0, rss: 0, code: 0}
+    ^total: Timed{ns: 0, rss: 0, code: 0}
     loop args in s.plan {
         fields: must(["taskset", "-c", o.cpu, "python3", "-c", TIMED, launcher, exe].concat(args), s.cwd).output.trim().split(" ").to_list()
         total.ns += integer(fields[0], "the launcher gave no time")
@@ -827,7 +827,7 @@ timed: fn(o: Options, launcher: String, exe: String, s: Setup) -[Exec, FS, Time.
 stripped: fn(exe: String) -[FS]> Int Err! {
     // e_phoff, e_phentsize and e_phnum.
     head: binary.unpack("<32xQ14xHH", files.read_at(exe, 0, 58))
-    end := head[0] + head[1] * head[2]
+    ^end: head[0] + head[1] * head[2]
     // Each program header's p_type, p_offset and p_filesz.
     loop header in binary.iter_unpack("<I4xQ16xQ{head[1] - 40}x", files.read_at(exe, head[0], head[1] * head[2])) {
         if header[0] == 1 -> end = max(end, header[1] + header[2])
@@ -862,7 +862,7 @@ gains_of: fn(row: GainRow, label: String) -> Measured Never! {
 // One cell in one mode: its variants built, checked and timed.
 gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launcher: String) -[Exec, FS, IO, Net, Time, Time.Wait]> GainRow Err! {
     s: setup(o, cell)
-    variants := [Variant]{}
+    ^variants: [Variant]{}
     cell_dir: cell.dir ?? cell.name
     reference: files.join_all([o.here, cell_dir, "ref.S"])
     if files.exists(reference) {
@@ -880,7 +880,7 @@ gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launc
     outs: outputs(o, variants, s)
     // Each round runs every variant once, back to back; odd rounds reverse
     // the order, so no variant always runs first.
-    runs := variants.map(fn(_) { [Timed]{} })
+    ^runs: variants.map(fn(_) { [Timed]{} })
     n: variants.len()
     loop round in 0..<o.best {
         loop j in 0..<n {
@@ -888,8 +888,8 @@ gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launc
             runs[k].push(timed(o, launcher, variants[k].exe, s))
         }
     }
-    wrong := [String]{}
-    measured := [{label: String, gains: Measured}]{}
+    ^wrong: [String]{}
+    ^measured: [{label: String, gains: Measured}]{}
     loop (k, variant) in variants {
         if output_text(outs[k], s.expect) != "same" || runs[k].any(fn(run) { run.code != 0 }) {
             wrong.push(variant.label)
@@ -903,7 +903,7 @@ gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launc
 
 // A gains row: its cell's fields, then each variant's gains under its label.
 gain_json: fn(row: GainRow) -> Dyn Never! {
-    fields := [{key: String, value: Dyn}]{{key: "mode", value: row.mode.encode()}, {key: "cell", value: row.cell.encode()}, {key: "args", value: row.args.encode()}, {key: "wrong", value: row.wrong.encode()}}
+    ^fields: [{key: String, value: Dyn}]{{key: "mode", value: row.mode.encode()}, {key: "cell", value: row.cell.encode()}, {key: "args", value: row.args.encode()}, {key: "wrong", value: row.wrong.encode()}}
     loop variant in row.variants {
         fields.push({key: variant.label.copy(), value: variant.gains.encode()})  // copy: the report owns its keys
     }
@@ -969,7 +969,7 @@ gains_table: fn(rows: [GainRow], mode: String, older: String?) -> [String] Never
     head: ["program"].concat(if older != None -> ["older ms", "base vs older"] else -> [String]{}).concat(["base ms", "candidate ms", "change", "control ms", "control vs base", "ceiling ms", "candidate / ceiling", "base RSS KiB", "candidate RSS KiB", "change", "ceiling RSS KiB", "base bytes", "candidate bytes", "change", "ceiling bytes", "output"])
     // The program and output columns align left, every number right.
     rule: [" --- "].concat(head.slice(1, head.len() - 1).map(fn(_) { " ---: " })).concat([" --- "])
-    lines := [String]{"## {mode}", "", markdown_row(head), "|{rule.join("|")}|"}
+    ^lines: [String]{"## {mode}", "", markdown_row(head), "|{rule.join("|")}|"}
     loop row in rows -> lines.push(markdown_row(gain_cells(row, older)))
     lines.push(markdown_row(["**total**"].concat(total_cells(rows, older))))
     lines.push(markdown_row(["**geometric mean**"].concat(mean_cells(rows, older))))
@@ -985,7 +985,7 @@ gains: fn(o: Options, all: [Bench], candidate: String) -[Exec, FS, IO, Net, Time
     older: o.older.map(fn(path) { [Compiler{label: "older", path: path}] }) ?? [Compiler]{}
     compilers: older.concat([Compiler]{{label: "base", path: o.jet}, {label: "candidate", path: candidate}})
     launcher: assemble(o.here, files.join(o.here, "launch.S"), o.out, "launch")
-    results := [GainRow]{}
+    ^results: [GainRow]{}
     loop mode in o.modes {
         loop cell in cells {
             row: gain_row(o, mode, cell, compilers, launcher)
@@ -996,7 +996,7 @@ gains: fn(o: Options, all: [Bench], candidate: String) -[Exec, FS, IO, Net, Time
             results.push(row)
         }
     }
-    named := [{key: String, value: Dyn}]{}
+    ^named: [{key: String, value: Dyn}]{}
     loop compiler in compilers {
         named.push({key: compiler.label.copy(), value: compiler.path.encode()})  // copy: the report owns its keys
     }
@@ -1009,7 +1009,7 @@ gains: fn(o: Options, all: [Bench], candidate: String) -[Exec, FS, IO, Net, Time
     }
     files.write(files.join(o.out, "gains.json"), "{json.stringify(report, 2)}\n")
     older_text: o.older.map(fn(path) { " Older: `{path}`." }) ?? ""
-    lines := [String]{"# Codegen gains: base against candidate (#6414)", "", "Base: `{o.jet}`. Candidate: `{candidate}`.{older_text}", "Wall time is the best of {o.best} runs, taken in rounds of every variant back to back (odd rounds in reverse order) on CPU {o.cpu}. Control is the base binary measured again as its own variant: its change against base is the noise floor, and a candidate change inside it is not a gain. RSS is the largest peak (ru_maxrss) of those runs; Linux counts it in per-CPU batches, so a peak under a few hundred KiB can read 0. Bytes are the stripped size (file bytes the PT_LOAD segments map). Ceiling is the hand-written assembly reference (AsmParity cells only). Change is candidate against base; negative is better.", ""}
+    ^lines: [String]{"# Codegen gains: base against candidate (#6414)", "", "Base: `{o.jet}`. Candidate: `{candidate}`.{older_text}", "Wall time is the best of {o.best} runs, taken in rounds of every variant back to back (odd rounds in reverse order) on CPU {o.cpu}. Control is the base binary measured again as its own variant: its change against base is the noise floor, and a candidate change inside it is not a gain. RSS is the largest peak (ru_maxrss) of those runs; Linux counts it in per-CPU batches, so a peak under a few hundred KiB can read 0. Bytes are the stripped size (file bytes the PT_LOAD segments map). Ceiling is the hand-written assembly reference (AsmParity cells only). Change is candidate against base; negative is better.", ""}
     loop mode in o.modes {
         wanted: mode.copy()  // copy: the filter's lambda takes its own
         lines.extend(gains_table(results.filter(fn(row) { row.mode == wanted }), mode, o.older))

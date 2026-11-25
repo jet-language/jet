@@ -298,7 +298,7 @@ perf_test_policy: fn(count: Int, lower: Int, upper: Int) -> PerfMeasurementPolic
 }
 
 #Test("SHA stream rejection sampling empty population and resample") {
-    stream := perf_sha_stream_new("e", "c", [String]{}, 0)
+    ^stream: perf_sha_stream_new("e", "c", [String]{}, 0)
     if perf_sha_stream_index(stream, 0) == {
         .Ok(_) -> { panic("sampled empty population") }
         .Err(error) -> assert_eq(error.message, "cannot sample an empty population")
@@ -351,11 +351,11 @@ perf_test_policy: fn(count: Int, lower: Int, upper: Int) -> PerfMeasurementPolic
 
 #Test("SHA stream words match independently hashed big endian blocks") {
     // Node crypto SHA-256 oracle: domain+NUL+'e'+'c'+u64be(0)+u64be(block).
-    stream := perf_sha_stream_new("e", "c", [String]{}, 0)
+    ^stream: perf_sha_stream_new("e", "c", [String]{}, 0)
     expected: [Int]{12507569605881836145, 14331031805886600008, 3714902919731574179, 5608889793735127795, 18171700607084649799, 17766548609054757150, 1282493087975744721, 1148283196894625442}
     loop word in expected -> assert_eq(perf_sha_stream_word(stream), word)
     assert_eq(stream.block, 2)
-    salted := perf_sha_stream_new("e", "c", [String]{"k1", "k2"}, 7)
+    ^salted: perf_sha_stream_new("e", "c", [String]{"k1", "k2"}, 7)
     assert_eq(perf_sha_stream_word(salted), 16819815628960581258)
 }
 

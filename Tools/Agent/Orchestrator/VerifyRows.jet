@@ -44,7 +44,7 @@ run: fn() {
     worktree: roots.all()["JET_DEV_WORKTREE"]
     specs: rows.map(fn(row) { Sh{"{jet} test Compiler --profile {row[1]} --filter {row[2]}"}.spec().cwd(worktree).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(CPUS) })
     results: process.run_all(specs, 6)
-    lines := loop at in 0..<rows.len() -> row_line(rows[at], results[at], "{out}/{rows[at][0]}.{rows[at][1]}.{rows[at][2]}.out")
+    ^lines: loop at in 0..<rows.len() -> row_line(rows[at], results[at], "{out}/{rows[at][0]}.{rows[at][1]}.{rows[at][2]}.out")
     lines.sort_by(fn(a, b) { a.compare_version(b) })
     loop line in lines -> print(line)
 }

@@ -67,9 +67,9 @@ run: fn() {
 }
 
 parse: fn(args: [String]) -> Request Err! {
-    shell := "default"
-    norust := false
-    at := 0
+    ^shell: "default"
+    ^norust: false
+    ^at: 0
     if at < args.len() && args[at] == "full" {
         shell = "full"
         at += 1
@@ -97,7 +97,7 @@ launch: fn(request: Request) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
         term.eprint("JetEnv: {err.message}")
         return 1
     }
-    vars := environment(shell_vars, repo, jet)
+    ^vars: environment(shell_vars, repo, jet)
     if scratch_on_tmp(scratch_values(vars)) == .Val(why) {
         term.eprint(why)
         return 64
@@ -112,9 +112,9 @@ launch: fn(request: Request) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
         }
         vars["PATH"] = path
     }
-    command := request.command.copy()
+    ^command: request.command.copy()
     if command[0] == "jet" && jet != "" -> command[0] = jet.copy()
-    spec := process.cmd(command).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    ^spec: process.cmd(command).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     loop (name, value) in vars -> spec = spec.env(name, value)
     receipt: spec.run() ?? {
         term.eprint("JetEnv: {command[0]} could not start: {err}")
@@ -128,7 +128,7 @@ launch: fn(request: Request) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
 repo_root: fn() -[Env, FS]> String Never! {
     script: sys.executable()
     if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
-    dir := files.cwd() ?? return ""
+    ^dir: files.cwd() ?? return ""
     loop {
         if files.exists("{dir}{TOOL}") -> return dir
         if dir == "/" || dir == "" -> return ""
@@ -148,7 +148,7 @@ compiler: fn(repo: String) -[Env, FS]> String Never! {
 
 // The scratch variables the command sees: `vars` over the caller's.
 scratch_values: fn(vars: [String:String]) -[Env]> [String:String] Never! {
-    out := [String:String]{}
+    ^out: [String:String]{}
     loop name in SCRATCH_VARS {
         value: vars.get(name) ?? sys.get(name) ?? ""
         if value != "" -> out[name.copy()] = value.copy()
@@ -171,7 +171,7 @@ scratch_on_tmp: fn(values: [String:String]) -[FS]> String? Never! {
 // The exported variables of the flake's `shell` dev shell, from its cached
 // profile; a missing profile is built first, once, under a lock.
 dev_shell: fn(repo: String, shell: String) -[Env, Exec, FS, IO, Time.Wait]> [String:String] Err! {
-    nix_bytes := [U8]{}
+    ^nix_bytes: [U8]{}
     loop name in FLAKE_FILES {
         bytes: files.read_bytes(files.join(repo, name)) ?? return Err("cannot read {repo}/{name}: {err}")
         nix_bytes.extend(crypto.sha256(bytes).hex().bytes())
@@ -214,7 +214,7 @@ build_profile: fn(repo: String, cache: String, key: String, shell: String, profi
 // (`{"variables": {NAME: {"type": T, "value": V}}}`).
 exported: fn(text: String) -> [String:String] Err! {
     tree: json.parse(text) ?? return Err("not JSON: {err}")
-    out := [String:String]{}
+    ^out: [String:String]{}
     if field(tree, "variables") == .Object(variables) {
         loop entry in variables {
             if field(entry.value, "type") == .Text(kind) && kind == "exported" && field(entry.value, "value") == .Text(value) {
@@ -237,7 +237,7 @@ field: fn(tree: Dyn, name: String) -> Dyn Never! {
 
 // The variables the command gets on top of the caller's environment.
 environment: fn(shell: [String:String], repo: String, jet: String) -[Env]> [String:String] Never! {
-    out := [String:String]{}
+    ^out: [String:String]{}
     loop (name, value) in shell {
         if NIX_IGNORED.contains(name) -> next
         if NIX_PREPENDED.contains(name) {
@@ -255,9 +255,9 @@ environment: fn(shell: [String:String], repo: String, jet: String) -[Env]> [Stri
 
 // `path` without every directory that holds cargo, rustc or rustup.
 without_rust: fn(path: String) -[FS]> String Never! {
-    kept := [String]{}
+    ^kept: [String]{}
     loop dir in path.split(":") {
-        holds := false
+        ^holds: false
         loop tool in RUST_TOOLS {
             if files.is_file(files.join(dir, tool)) -> holds = true
         }

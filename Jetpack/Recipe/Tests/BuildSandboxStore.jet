@@ -28,7 +28,7 @@ recipe_sandbox_store_ctx: fn(roots: HangarRoots) -> ProviderCtx {
     table: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "mine", upstream: "path:{repo}", via: ProviderKind.Core}})
     spec: RefSpec.classify_in("escape@mine", table) ?? panic("classify")
     roots: HangarRoots.at(files.join(base, "root"))
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     previous: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "unavailable")
     refusal: if store_realize_verified(verification, roots, recipe_sandbox_store_ctx(roots), RealizeRequest.Package{spec: spec, table: table}) == {
@@ -64,7 +64,7 @@ recipe_sandbox_store_ctx: fn(roots: HangarRoots) -> ProviderCtx {
     spec: RefSpec.classify_in("private@mine", table) ?? panic("classify")
     roots: HangarRoots.at(files.join(base, "root"))
     store_bind_cache(roots, "public", [String]{mirror}, None, None, true) ?? panic("bind cache")
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     realized: store_realize_verified(verification, roots, recipe_sandbox_store_ctx(roots), RealizeRequest.Package{spec: spec, table: table}) ?? panic("native Core Cargo build should produce a private lease")
     assert_eq(realized.source_state(), SourceState.Built)
     assert_eq(realized.consumption_status(), ConsumptionStatus.Consumable)

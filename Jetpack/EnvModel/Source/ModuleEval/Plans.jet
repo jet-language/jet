@@ -52,12 +52,12 @@ SecretSpec: struct {
         declaration: if self.declaration == {
             .Stored -> "stored"
             .Compose(_, from) -> {
-                sorted := from
+                ^sorted: from
                 sorted.sort()
                 "compose:{sorted.join(",")}"
             }
         }
-        allowed := self.allowed_environments
+        ^allowed: self.allowed_environments
         allowed.sort()
         rotation: if self.rotation == {
             .Unset -> "none"
@@ -520,7 +520,7 @@ EnvironmentFacts: struct {
 
 // The keys of a string map in byte order.
 envmodel_sorted_keys_of: fn(values: [String:String]) -> [String] Never! {
-    keys := values.keys().to_list()
+    ^keys: values.keys().to_list()
     keys.sort()
     keys
 }

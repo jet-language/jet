@@ -7,7 +7,9 @@ caret_marks_stable: fn(name: String, caret: String) Never! {
     formatted: jet_format_source(caret, false)
     if !formatted.ok -> panic("caret marks: {name}: the caret source does not format")
     again: jet_format_source(formatted.text, false)
-    if !again.ok || again.text != formatted.text -> panic("caret marks: {name}: fmt is not stable:\n{again.text}")
+    if !again.ok || again.text != formatted.text {
+        panic("caret marks: {name}: fmt is not stable:\n{again.text}")
+    }
 }
 
 caret_marks_same: fn(name: String, caret: String) Never! {

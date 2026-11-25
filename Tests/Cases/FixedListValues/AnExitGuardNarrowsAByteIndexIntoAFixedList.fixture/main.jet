@@ -2,7 +2,7 @@
 // value at or past the list's length, the index can only be 0..3, so the
 // fixed-size list index checks.
 tally: fn(frames: [U8]) -> [U64#4]? {
-    channels := [U64#4]{0, 0, 0, 0}
+    ^channels: [U64#4]{0, 0, 0, 0}
     loop raw in frames {
         channel: Int{raw}
         if channel >= channels.len() -> return None
@@ -14,7 +14,7 @@ tally: fn(frames: [U8]) -> [U64#4]? {
 // The mirrored and `||` forms narrow the same way; a guard that exits on
 // `next` narrows the rest of the loop body.
 lanes: fn(frames: [U8]) -> Int {
-    lane_hits := [Int#3]{0, 0, 0}
+    ^lane_hits: [Int#3]{0, 0, 0}
     loop raw in frames {
         lane: Int{raw} - 1
         if lane < 0 || 3 <= lane -> next

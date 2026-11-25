@@ -28,7 +28,7 @@ LanguagePack: struct {
     // policy, not presentation: variables and commands must invalidate trust
     // even when its package list is unchanged.
     fingerprint: fn(self) -> String Never! {
-        lines := [String]{"jet-language-pack-v1\n", "name={self.name}\n"}
+        ^lines: [String]{"jet-language-pack-v1\n", "name={self.name}\n"}
         envmodel_push_labeled(lines, "package", self.packages)
         envmodel_push_labeled(lines, "venv-package", self.venv_packages)
         loop name in envmodel_sorted_keys(self.variables) {
@@ -140,7 +140,7 @@ LanguageExpansion: struct {
     projections: [LanguageProjection]{[LanguageProjection]{}},
 
     fingerprint: fn(self) -> String Never! {
-        lines := [String]{"jet-language-expansion-v1\n"}
+        ^lines: [String]{"jet-language-expansion-v1\n"}
         loop selection in self.selections -> lines.push("selection={selection.fingerprint()}\n")
         loop pack in self.packs -> lines.push("pack={pack.fingerprint()}")
         envmodel_push_labeled(lines, "expanded-package", self.packages)
@@ -166,7 +166,7 @@ LanguagePackCatalog: struct {
     empty: fn() -> LanguagePackCatalog Never! { LanguagePackCatalog{} }
 
     builtin: fn() -> LanguagePackCatalog Never! {
-        catalog := LanguagePackCatalog{}
+        ^catalog: LanguagePackCatalog{}
         loop pack in envmodel_core_language_packs() {
             if catalog.register(pack) == .Err(_) -> panic("built-in language pack names are unique")
         }
@@ -208,7 +208,7 @@ LanguagePackCatalog: struct {
     // Stable catalog identity disclosed by `jet env info`; changing a pack's
     // packages or host variables changes this fingerprint.
     fingerprint: fn(self) -> String Never! {
-        lines := [String]{"jet-language-catalog-v1\n"}
+        ^lines: [String]{"jet-language-catalog-v1\n"}
         loop name in envmodel_sorted_keys(self.packs) {
             lines.push("{self.packs[name].fingerprint()}\n")
         }
@@ -223,12 +223,12 @@ LanguagePackCatalog: struct {
     // parameter here makes unsupported-host behavior testable without
     // pretending the host is something it is not.
     expand_for_platform: fn(self, selections: [LanguageSpec], platform: String) -> LanguageExpansion EnvironmentFactError! {
-        expansion := LanguageExpansion{}
+        ^expansion: LanguageExpansion{}
         loop selection in selections {
             pack: self.get(selection.name) ?? return Err(EnvironmentFactError.new("language pack '{selection.name}' is not in the catalog"))
-            normalized := selection.copy()
+            ^normalized: selection.copy()
             normalized.name = pack.name
-            duplicate := false
+            ^duplicate: false
             loop existing in expansion.selections {
                 if existing.key() == normalized.key() {
                     if !existing.same_selection(normalized) {
@@ -240,14 +240,14 @@ LanguagePackCatalog: struct {
             }
             if duplicate -> next
             expansion.selections.push(normalized.copy())
-            projection := LanguageProjection{selection: normalized, pack: pack, host: pack.host, platform: platform, license: pack.license}
+            ^projection: LanguageProjection{selection: normalized, pack: pack, host: pack.host, platform: platform, license: pack.license}
             if selection.enable && pack.license.trim() == "" {
                 return Err(EnvironmentFactError.new("language pack `{pack.name}` has no license fact"))
             }
             if selection.enable && pack.platforms.len() > 0 && !pack.platforms.contains(platform) {
                 return Err(EnvironmentFactError.new("language pack `{pack.name}` does not support host platform `{platform}`"))
             }
-            missing_tools := [String]{}
+            ^missing_tools: [String]{}
             loop tool in pack.required_tools {
                 if pack.commands.get(tool) == None -> missing_tools.push(tool)
             }
@@ -307,7 +307,7 @@ LanguagePackCatalog: struct {
     }
 
     expand_names: fn(self, names: [String]) -[Env]> LanguageExpansion EnvironmentFactError! {
-        selections := [LanguageSpec]{}
+        ^selections: [LanguageSpec]{}
         loop name in names -> selections.push(LanguageSpec{name: name, enable: true})
         self.expand(selections)
     }
@@ -316,7 +316,7 @@ LanguagePackCatalog: struct {
 // The case- and punctuation-insensitive identity of a language name: its
 // ASCII letters and digits, lowercased.
 envmodel_language_key: fn(name: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in name.bytes() {
         if pkg_bytes_is_word(Int{byte}) && (Int{byte}) != 95 -> out.push(byte)
     }
@@ -396,14 +396,14 @@ LanguageCatalogRow: struct {
     license: String,
 
     pack: fn(self) -> LanguagePack Never! {
-        commands := [String:String]{}
+        ^commands: [String:String]{}
         loop tool in self.tools -> commands[tool] = tool
         LanguagePack{name: self.name, packages: self.packages, commands: commands, host: "native", platforms: ENVMODEL_LANGUAGE_PLATFORMS, license: self.license, required_tools: self.tools}
     }
 }
 
 envmodel_extended_language_names: fn() -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop row in envmodel_extended_language_rows() -> names.push(row.name)
     names
 }

@@ -47,8 +47,8 @@ pkg_octave_bind: fn(path: String, source: String, lib: String, cache: String) -[
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
     functions: pkg_octave_parse_functions(source)
-    tool := "octave-cli"
-    octave := ""
+    ^tool: "octave-cli"
+    ^octave: ""
     if pkg_binder_resolved_tool_path("octave-cli") == {
         .Val(found) -> { octave = found }
         .None -> {
@@ -67,14 +67,14 @@ pkg_octave_bind: fn(path: String, source: String, lib: String, cache: String) -[
     pkg_binder_write(worker_file, worker_source, "could not write Octave worker")
     worker: pkg_binder_canonicalize(worker_file, "could not resolve the Octave worker")
     abi: "jet_octave_{lib}"
-    wrappers := [String]{}
+    ^wrappers: [String]{}
     loop function in functions {
         wrappers.push(pkg_worker_invoke_wrapper(abi, function, "invoke", function))
     }
     bridge: pkg_worker_render_supervisor_c(abi, octave, worker, script, wrappers.join(""), "\"--quiet\",\"--no-gui\",\"--no-window-system\",\"--no-init-file\",worker_path")
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write Octave process bridge")
     digest: pkg_binder_identity_digest([String]{"jet-octave-bind-v1", source, script, octave, worker_source})
-    provenance := "schema=jet-octave-bind-v1\nsha256={digest}\noctave={octave}\nscript={script}\nworker={worker}\ntransport=json\norder=column-major\nshape=rank-2\nmax_sessions=32\n"
+    ^provenance: "schema=jet-octave-bind-v1\nsha256={digest}\noctave={octave}\nscript={script}\nworker={worker}\ntransport=json\norder=column-major\nshape=rank-2\nmax_sessions=32\n"
     pkg_binder_append_artifact_boundary(provenance, language, "Octave", lib, script, archive, "{tool}={octave};{pkg_binder_cc_ar_identity()}")
     result: ForeignBindResult{source: pkg_octave_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
@@ -91,7 +91,7 @@ pkg_octave_has_m_extension: fn(path: String) -> Bool Never! {
 // Source-only discovery of `output = name(input)` functions; comments after
 // `%` are ignored.
 pkg_octave_parse_functions: fn(source: String) -> [String] ForeignBindError! {
-    functions := [String]{}
+    ^functions: [String]{}
     loop raw_line in pkg_binder_lines(source) {
         line: raw_line.split("%").to_list()[0].trim()
         if !line.starts_with("function") -> next
@@ -111,7 +111,7 @@ pkg_octave_parse_functions: fn(source: String) -> [String] ForeignBindError! {
         if equal < 0 {
             return Err(ForeignBindError.Source("Octave functions must declare one matrix output with `name = function(input)`"))
         }
-        output := pkg_binder_slice(head, 0, equal).trim()
+        ^output: pkg_binder_slice(head, 0, equal).trim()
         if output.starts_with("[") {
             inner: output.removeprefix("[")
             if !inner.ends_with("]") {
@@ -148,14 +148,14 @@ pkg_octave_parse_functions: fn(source: String) -> [String] ForeignBindError! {
 pkg_octave_string: fn(value: String) -> String Never! { "'{value.replace("'", "''")}'" }
 
 pkg_octave_render_worker: fn(script: String, functions: [String]) -> String Never! {
-    allowed := [String]{}
+    ^allowed: [String]{}
     loop function in functions -> allowed.push("'{function.replace("'", "''")}'")
     PKG_OCTAVE_WORKER.replace("__JET_SCRIPT__", pkg_octave_string(script)).replace("__JET_ALLOWED__", allowed.join(", "))
 }
 
 pkg_octave_render_jet: fn(lib: String, functions: [String]) -> String Never! {
     abi: "jet_octave_{lib}"
-    out := [String]{pkg_binder_fill_template(PKG_OCTAVE_JET_HEAD, [String:String]{"abi": abi})}
+    ^out: [String]{pkg_binder_fill_template(PKG_OCTAVE_JET_HEAD, [String:String]{"abi": abi})}
     loop function in functions {
         out.push("    {function}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function}\"\n")
     }

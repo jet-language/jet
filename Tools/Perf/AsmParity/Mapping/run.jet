@@ -12,9 +12,9 @@ BYTES: 65536
 
 run: fn(args: Args) {
     passes: if args.n > 0 -> args.n else -> 1
-    total := 0
+    ^total: 0
     loop _ in 0..<passes {
-        region := mem.Region.reserve(BYTES) ?? panic("no region")  // the mapping
+        ^region: mem.Region.reserve(BYTES) ?? panic("no region")  // the mapping
         total += region.size()
         close(region)  // the mapping
     }

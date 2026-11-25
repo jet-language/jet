@@ -20,7 +20,7 @@ use {
 /// binding name of the rule a parse starts from; "" lets every parser rule
 /// start one. `imports` are the grammars `import Name ;` may name.
 analyze: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarPlan GrammarFaults! {
-    work := resolve(text, start, imports)
+    ^work: resolve(text, start, imports)
     if work.faults.len() > 0 -> return Err(grammar_faults(work.faults))
     split_operators(work)
     mark_parents(work)

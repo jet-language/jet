@@ -87,9 +87,9 @@ jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, jso
         return jet_cli_fail("E2104", "`jet explain effects` explains one site", jet_cli_why("E2104"), fix, color, JET_DRIVER_EXIT_USAGE)
     }
     caps: jet_cli_has(jet_argv, "--caps")
-    target := ""
+    ^target: ""
     if args.len() == 3 -> target = args[2]
-    line := 0
+    ^line: 0
     colon: jet_cli_effects_line_colon(target)
     if colon >= 0 {
         written_line: target.slice((colon + 1)..<target.len())
@@ -100,12 +100,12 @@ jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, jso
         line = Int.parse(written_line) ?? 0
         target = site.file
     }
-    file := ""
-    notice := ""
+    ^file: ""
+    ^notice: ""
     if {
         target == "" -> {
             directory: cli_files.cwd() ?? "."
-            notices := [String]{}
+            ^notices: [String]{}
             if jet_cli_resolve_bare_entry("run", directory, jet_cli_option_value(jet_argv, "-p"), false, color, notices) == {
                 .Entry(entry) -> {
                     file = entry.path
@@ -126,7 +126,9 @@ jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, jso
         }
         else -> {
             file = target
-            if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
+            if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") {
+                file = "{target}.jet"
+            }
         }
     }
     source: cli_files.read(file) ?? return jet_cli_report_done(notice, "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
@@ -139,11 +141,11 @@ jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, jso
     // A named file inside a package is explained as the package's entry loads
     // it, so the caps written where its module is declared are in force. A
     // `#!` script is its own program wherever it lives.
-    site := ""
-    entry_file := file
+    ^site: ""
+    ^entry_file: file
     if target != "" && !cli_files.is_dir(target) && !source.starts_with("#!") {
         if jet_cli_manifest_root(jet_cli_parent(jet_cli_inspect_absolute(file)) ?? ".") == .Val(root) {
-            notices := [String]{}
+            ^notices: [String]{}
             if jet_cli_resolve_bare_entry("run", root, None, false, color, notices) == .Entry(entry) {
                 site = jet_cli_inspect_absolute(file)
                 entry_file = entry.path
@@ -153,9 +155,9 @@ jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, jso
     }
     // `--caps` lists the caps under this path: the project root with no
     // target, else the named directory or file.
-    subject := String?{None}
+    ^subject: String?{None}
     if caps {
-        scope := file
+        ^scope: file
         if target == "" {
             here: cli_files.cwd() ?? "."
             scope = jet_cli_manifest_root(here) ?? here
@@ -169,7 +171,7 @@ jet_cli_explain_effects: fn(jet_argv: [String], args: [String], color: Bool, jso
 // The index of the `:` before a trailing run of digits, else -1.
 jet_cli_effects_line_colon: fn(target: String) -> Int Never! {
     bytes: target.bytes()
-    index := bytes.len()
+    ^index: bytes.len()
     loop index > 0 {
         byte: bytes[index - 1]
         if byte == (U8{58}) {
@@ -185,7 +187,7 @@ jet_cli_effects_line_colon: fn(target: String) -> Int Never! {
 // Lines in `source`; a final newline ends the last line rather than starting one.
 jet_cli_effects_line_count: fn(source: String) -> Int Never! {
     bytes: source.bytes()
-    count := 0
+    ^count: 0
     loop byte in bytes {
         if byte == (U8{10}) -> count += 1
     }
@@ -196,8 +198,8 @@ jet_cli_effects_line_count: fn(source: String) -> Int Never! {
 // The offset of the first non-blank byte on 1-based `line`, or -1 past the end.
 jet_cli_effects_line_offset: fn(source: String, line: Int) -> Int Never! {
     bytes: source.bytes()
-    current := 1
-    index := 0
+    ^current: 1
+    ^index: 0
     loop current < line && index < bytes.len() {
         if bytes[index] == (U8{10}) -> current += 1
         index += 1
@@ -306,10 +308,10 @@ jet_cli_effects_note_expr: fn(tables: ASTTables, scopes: ^[JetCLIEffectsScope], 
 
 // Innermost first: a later start, then a shorter span.
 jet_cli_effects_scopes_sorted: fn(scopes: [JetCLIEffectsScope]) -> [JetCLIEffectsScope] Never! {
-    sorted := scopes
+    ^sorted: scopes
     loop index in 1..<sorted.len() {
         value: sorted[index]
-        position := index
+        ^position: index
         loop position > 0 {
             previous: sorted[position - 1]
             outer: previous.span.start < value.span.start || (previous.span.start == value.span.start && previous.span.end > value.span.end)
@@ -356,7 +358,7 @@ jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offs
                 jet_cli_effects_take(found, "{alias}.{namespace}{function.name}", function, caps, offset)
             }
             .Impl(definition) -> {
-                typed := jet_cli_effects_with_cap(caps, jet_cli_effects_type_cap(items, definition.type_name), "type")
+                ^typed: jet_cli_effects_with_cap(caps, jet_cli_effects_type_cap(items, definition.type_name), "type")
                 if definition.trait_name == .Val(trait_name) {
                     typed = jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, trait_name), "trait")
                 }
@@ -390,7 +392,7 @@ jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offs
             }
             .CodeModule(nested) -> {
                 if nested.body == .Val(body) && jet_cli_effects_holds(nested.span, offset) {
-                    inner := caps.copy()
+                    ^inner: caps.copy()
                     if nested.cap == .Val(cap) -> inner.push(cap.copy())
                     if found.function == None -> found.caps = inner.copy()
                     jet_cli_effects_locate(body, alias, "{namespace}{nested.name}__", offset, inner, found)
@@ -401,7 +403,7 @@ jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offs
                 // to file-level functions, found above) holds its own cap.
                 if jet_cli_effects_holds(nested.span, offset) {
                     // copy: the nested caps extend the caller's, which stay its own.
-                    inner := caps.copy()
+                    ^inner: caps.copy()
                     // copy: the template keeps its cap.
                     if nested.cap == .Val(cap) -> inner.push(cap.copy())
                     // copy: the site keeps the caps; the walk goes on with `inner`.
@@ -417,7 +419,7 @@ jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offs
 // `caps` with a type or trait cap innermost, on the `scope` rung, when one
 // is written.
 jet_cli_effects_with_cap: fn(caps: [ModuleCap], cap: ModuleCap?, scope: String) -> [ModuleCap] Never! {
-    typed := caps.copy()
+    ^typed: caps.copy()
     if cap == .Val(value) {
         typed.push(ModuleCap{owner: value.owner.copy(), scope: scope, entries: value.entries.copy(), span: value.span})
     }
@@ -491,7 +493,7 @@ jet_cli_effects_package_rung: fn(policy: JetDriverAuthorityPolicy?) -[FS]> JetCL
     none: JetCLIEffectsRung{rung: "package", text: "(none written)", written: false, site: ""}
     written: policy ?? return none
     manifest: written.manifest_path ?? return none
-    rows := [String]{}
+    ^rows: [String]{}
     if written.allow == .Val(allow) -> rows.push("allow: [{allow.join(", ")}]")
     if written.deny == .Val(deny) -> rows.push("deny: [{deny.join(", ")}]")
     if rows.len() == 0 -> return none
@@ -534,10 +536,10 @@ jet_cli_effects_source_key: fn(key: String) -> String Never! {
 }
 
 jet_cli_effects_reaches_sorted: fn(reaches: [JetCLIEffectsReach]) -> [JetCLIEffectsReach] Never! {
-    sorted := reaches
+    ^sorted: reaches
     loop index in 1..<sorted.len() {
         value: sorted[index]
-        position := index
+        ^position: index
         loop position > 0 && sorted[position - 1].name > value.name {
             sorted[position] = sorted[position - 1]
             position -= 1
@@ -553,8 +555,8 @@ jet_cli_effects_function_reaches: fn(doc_module: JetDriverDocModule, key: String
     summary: semindex_summary(summaries, key) ?? return
     effects: if summary.solved.len() > 0 -> summary.solved else -> summary.direct
     loop name in effects {
-        chain := [String]{key}
-        site := ""
+        ^chain: [String]{key}
+        ^site: ""
         if semindex_witness(witnesses, summaries, key, name) == .Val(witness) {
             if witness.path.len() > 0 -> chain = witness.path
             if witness.spans.len() > 0 && witness.spans[0].end > 0 {
@@ -582,7 +584,7 @@ jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, 
     loop edge in edges {
         callee: jet_cli_effects_raw_summary(summaries, edge.name) ?? next
         loop name in callee.solved {
-            chain := [String]{owner}
+            ^chain: [String]{owner}
             if {
                 semindex_witness(witnesses, summaries, callee.key, name) == .Val(witness) && witness.path.len() > 0 -> {
                     loop part in witness.path -> chain.push(part.copy())
@@ -598,7 +600,7 @@ jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, 
 // and calls the checker recorded inside `span`.
 jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, span: Span, summaries: [SemSummary], witnesses: SemWitnesses, reaches: ^[JetCLIEffectsReach]) {
     summary: semindex_summary(summaries, key) ?? return
-    direct := [EffectRowEntry]{}
+    ^direct: [EffectRowEntry]{}
     loop function in doc_module.functions {
         if function.key != summary.raw_key -> next
         loop entry in function.effects.direct_spans {
@@ -607,7 +609,7 @@ jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, sp
             }
         }
     }
-    edges := [EffectRowEntry]{}
+    ^edges: [EffectRowEntry]{}
     loop fact in doc_module.call_facts {
         if fact.caller_key != summary.raw_key -> next
         if fact.span.start < span.start || fact.span.end > span.end -> next
@@ -676,7 +678,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     modules: result.doc_modules
     if job.subject == .Val(scope) -> return jet_cli_effects_caps_report(modules, scope, job.json)
     target: if job.site != "" -> job.site else -> job.file
-    selected := -1
+    ^selected: -1
     loop (index, doc_module) in modules {
         if selected < 0 && jet_cli_rights_selected(doc_module, target) -> selected = index
     }
@@ -687,9 +689,9 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     alias: semindex_module_alias(doc_module)
     summaries: semindex_summaries(modules)
     witnesses: semindex_witnesses(summaries, modules)
-    offset := -1
+    ^offset: -1
     if job.line > 0 -> offset = jet_cli_effects_line_offset(doc_module.source, job.line)
-    found := JetCLIEffectsSite{key: "", function: None, caps: [ModuleCap]{}}
+    ^found: JetCLIEffectsSite{key: "", function: None, caps: [ModuleCap]{}}
     if {
         offset >= 0 -> {
             jet_cli_effects_locate(doc_module.items, alias, "", offset, [ModuleCap]{}, found)
@@ -704,14 +706,14 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
             }
         }
     }
-    rungs := [JetCLIEffectsRung]{}
-    reaches := [JetCLIEffectsReach]{}
+    ^rungs: [JetCLIEffectsRung]{}
+    ^reaches: [JetCLIEffectsReach]{}
     site: if job.line > 0 -> "{doc_module.path}:{job.line}" else -> doc_module.path
-    header := "Effects at {site}, nearest first"
+    ^header: "Effects at {site}, nearest first"
     if {
         found.function == .Val(function) -> {
             header = "Effects at {site}, in `{jet_cli_effects_source_name(function.name)}`, nearest first"
-            scopes := [JetCLIEffectsScope]{}
+            ^scopes: [JetCLIEffectsScope]{}
             if offset >= 0 {
                 jet_cli_effects_body_scopes(doc_module.tables, function.body, offset, scopes)
                 ast_visit_body(doc_module.tables, function.body, fn(inner: ExprNode) { jet_cli_effects_note_expr(doc_module.tables, scopes, inner, offset) }, true)
@@ -742,7 +744,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         }
         else -> {
             // A line outside every function: what the module's functions reach.
-            views := [JetCLICallableView]{}
+            ^views: [JetCLICallableView]{}
             jet_cli_rights_collect(doc_module.items, alias, "", doc_module.path, views)
             loop view in jet_cli_rights_sorted(views) {
                 jet_cli_effects_function_reaches(doc_module, view.key, summaries, witnesses, reaches)
@@ -751,8 +753,8 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     }
     // The trait and type rungs come before the module rungs; the file-head
     // cap is a module rung, written at the head of the file.
-    type_rungs := [JetCLIEffectsRung]{}
-    cap_rungs := [JetCLIEffectsRung]{}
+    ^type_rungs: [JetCLIEffectsRung]{}
+    ^cap_rungs: [JetCLIEffectsRung]{}
     loop index in 0..<found.caps.len() {
         cap: found.caps[found.caps.len() - 1 - index]
         rung: JetCLIEffectsRung{rung: cap.scope, text: jet_cli_effects_cap_text(cap.entries), written: true, site: jet_cli_effects_site(doc_module, cap.span.start)}
@@ -762,7 +764,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         cap_rungs.push(JetCLIEffectsRung{rung: "module", text: jet_cli_effects_cap_text(head.entries), written: true, site: jet_cli_effects_site(doc_module, head.span.start)})
     }
     jet_cli_effects_file_caps(modules, selected, 0, cap_rungs)
-    type_written := false
+    ^type_written: false
     loop rung in type_rungs {
         if rung.rung == "type" -> type_written = true
     }
@@ -785,7 +787,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         }
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("explain.effects", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    width := 0
+    ^width: 0
     loop rung in rungs {
         if rung.site != "" && rung.text.len() + 2 > width -> width = rung.text.len() + 2
     }
@@ -883,7 +885,7 @@ jet_cli_effects_collect_caps: fn(doc_module: JetDriverDocModule, items: [Item], 
 // module under `scope` (a canonical file or directory path), sorted by path,
 // then line.
 jet_cli_effects_caps_report: fn(modules: [JetDriverDocModule], scope: String, json: Bool) -[FS]> JetDriverVerbOutput Never! {
-    rows := [JetCLIEffectsCapRow]{}
+    ^rows: [JetCLIEffectsCapRow]{}
     loop doc_module in modules {
         path: cli_files.realpath(doc_module.physical_path) ?? doc_module.physical_path
         if path != scope && !path.starts_with("{scope}/") -> next
@@ -894,7 +896,7 @@ jet_cli_effects_caps_report: fn(modules: [JetDriverDocModule], scope: String, js
     }
     loop index in 1..<rows.len() {
         value: rows[index]
-        position := index
+        ^position: index
         loop position > 0 {
             previous: rows[position - 1]
             after: previous.file > value.file || (previous.file == value.file && previous.line > value.line)

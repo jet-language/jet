@@ -25,14 +25,14 @@ Board: struct {
     // Records note `id`.
     #App.Job note: fn(self, id: Int, text: String) -> Int BoardError! {
         if id < 0 -> return Err(BoardError.Failed("no note has a negative id"))
-        seen := self.seen.guard_edit()
+        ^seen: self.seen.guard_edit()
         seen.value.push("note {id}: {text}")
         Ok(id)
     }
 
     // Records a tick.
     #App.Job tick: fn(self) -> Int {
-        seen := self.seen.guard_edit()
+        ^seen: self.seen.guard_edit()
         seen.value.push("tick")
         seen.value.len()
     }
@@ -58,7 +58,7 @@ run: fn() {
     }
     kept: seen.guard_read()
     // The two jobs run on tasks of their own, in either order.
-    lines := kept.value.copy()
+    ^lines: kept.value.copy()
     lines.sort()
     loop line in lines -> print(line)
 }

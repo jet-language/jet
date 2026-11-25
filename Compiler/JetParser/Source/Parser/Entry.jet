@@ -217,11 +217,11 @@ parse_config_with_source: fn(lexed: ^^Lexed, source: [U8]) -> ParseResult {
 // (parser_join_derive_visibility), once the whole file is read: a chunked
 // parse sees the type or trait and the block in different chunks.
 parser_join_effect_impls: fn(input: ^^ParseResult) -> ParseResult {
-    result := input.move()
+    ^result: input.move()
     derives: parser_derives_written(result.program.items)
     effects: parser_effect_impls_outside(result.program.items)
     if !derives && !effects -> return result
-    items := result.program.items.move()
+    ^items: result.program.items.move()
     if derives -> parser_join_derive_visibility(items)
     if effects -> parser_attach_effect_impls(items, result.diagnostics)
     result.program.items = items.move()
@@ -233,7 +233,7 @@ parser_join_effect_impls: fn(input: ^^ParseResult) -> ParseResult {
 // nothing, so it stays infallible for the `Never!` callers of the parse
 // entry points above.
 parser_parse_lexed_lines: fn(input: ^^Lexed, source: [U8], line_starts: [Int], allow_environment_reads: Bool) -> ParseResult {
-    lexed := input.move()
+    ^lexed: input.move()
     source_end: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
     tokens: lexed.tokens.move()
     lexed.tokens = [Token]{}
@@ -246,14 +246,14 @@ parser_parse_lexed_lines: fn(input: ^^Lexed, source: [U8], line_starts: [Int], a
 // `ColonDeclarations`, validation, parsing, and post-passes, and falls back
 // to one-thread parsing on fences, whole-file directives, or parse errors.
 parser_parse_source_lines_threads: fn(source: [U8], allow_reserved_identifiers: Bool, threads: CompilerThreads) -> ParseResult {
-    lexed_chunks := lex_chunks_threads(source, false, allow_reserved_identifiers, threads)
+    ^lexed_chunks: lex_chunks_threads(source, false, allow_reserved_identifiers, threads)
     chunk_count: lexed_chunks.chunks.len()
     if chunk_count == 0 {
         return if allow_reserved_identifiers -> parse_generated_layout(source) else -> parse_source_layout(source)
     }
     if chunk_count == 1 && lexed_chunks.chunks.pop() == .Val(popped) {
-        only := popped
-        diagnostics := only.diagnostics.move()
+        ^only: popped
+        ^diagnostics: only.diagnostics.move()
         compiler_transfer_rows<Diagnostic>(diagnostics, only.bidi_diagnostics)
         compiler_transfer_rows<Diagnostic>(diagnostics, only.terminator_diagnostics)
         return parser_parse_lexed_lines(Lexed{tokens: only.tokens.move(), tables: only.tables.move(), diagnostics: diagnostics.move()}, source, only.line_starts.move(), false)
@@ -261,7 +261,7 @@ parser_parse_source_lines_threads: fn(source: [U8], allow_reserved_identifiers: 
     if lexed_chunks.has_fences {
         return if allow_reserved_identifiers -> parse_generated_layout(source) else -> parse_source_layout(source)
     }
-    total_tokens := 0
+    ^total_tokens: 0
     loop chunk in lexed_chunks.chunks -> total_tokens += chunk.tokens.len()
     workers: compiler_threads_admit(threads, total_tokens, total_tokens, PARSER_CHUNK_MIN_TOKENS, (source.len() /% 16 + 1) * PARSER_CHUNK_SCRATCH_PER_SOURCE_BYTE, 0)
     if workers <= 1 {
@@ -269,15 +269,15 @@ parser_parse_source_lines_threads: fn(source: [U8], allow_reserved_identifiers: 
     }
     last_chunk: lexed_chunks.chunks[chunk_count - 1]
     source_end: if last_chunk.tokens.len() > 0 -> last_chunk.tokens[last_chunk.tokens.len() - 1].span.start else -> source.len()
-    lexer_diagnostics := [Diagnostic]{}
-    bidi_diagnostics := [Diagnostic]{}
-    terminator_diagnostics := [Diagnostic]{}
-    slots := [Shared<ParserChunkSlot>]{}
+    ^lexer_diagnostics: [Diagnostic]{}
+    ^bidi_diagnostics: [Diagnostic]{}
+    ^terminator_diagnostics: [Diagnostic]{}
+    ^slots: [Shared<ParserChunkSlot>]{}
     slots.try_reserve(chunk_count) ?? ()
-    line_base := 0
-    index := 0
+    ^line_base: 0
+    ^index: 0
     loop raw_chunk in lexed_chunks.chunks.move() {
-        chunk := raw_chunk.move()
+        ^chunk: raw_chunk.move()
         compiler_transfer_rows<Diagnostic>(lexer_diagnostics, chunk.diagnostics)
         compiler_transfer_rows<Diagnostic>(bidi_diagnostics, chunk.bidi_diagnostics)
         compiler_transfer_rows<Diagnostic>(terminator_diagnostics, chunk.terminator_diagnostics)
@@ -290,7 +290,7 @@ parser_parse_source_lines_threads: fn(source: [U8], allow_reserved_identifiers: 
     }
     compiler_transfer_rows<Diagnostic>(lexer_diagnostics, bidi_diagnostics)
     compiler_transfer_rows<Diagnostic>(lexer_diagnostics, terminator_diagnostics)
-    _ := parser_prepare_direct_slots(source, slots, 0)
+    ^_: parser_prepare_direct_slots(source, slots, 0)
     outcome: parser_finish_prepared_slots(slots, source, source_end, false, lexer_diagnostics, [FencedStatement]{})
     if outcome.ok -> return outcome.result.move()
     if allow_reserved_identifiers -> parse_generated_layout(source) else -> parse_source_layout(source)
@@ -321,7 +321,7 @@ parser_parse_lexed_lines_threads: fn(input: ^^Lexed, source: [U8], line_starts: 
 // Runs that fit the workers are the chunk bounds as they are.
 parser_parse_runs_threads: fn(input: ^^[Token], tables_input: ^^TokenTables, lexer_diagnostics: ^^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], runs: [Int], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
     tokens: input.move()
-    tables := tables_input.move()
+    ^tables: tables_input.move()
     diagnostics: lexer_diagnostics.move()
     count: tokens.len()
     workers: compiler_threads_admit(threads, count, count, PARSER_CHUNK_MIN_TOKENS, (source.len() /% 16 + 1) * PARSER_CHUNK_SCRATCH_PER_SOURCE_BYTE, 0)
@@ -339,21 +339,21 @@ parser_parse_runs_threads: fn(input: ^^[Token], tables_input: ^^TokenTables, lex
 // tokens.len()]`, each on a run start).
 parser_parse_run_chunks: fn(input: ^^[Token], tables_input: ^^TokenTables, lexer_diagnostics: ^^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], bounds: [Int], threads: CompilerThreads, allow_environment_reads: Bool{false}) -> ParseResult {
     tokens: input.move()
-    tables := tables_input.move()
+    ^tables: tables_input.move()
     diagnostics: lexer_diagnostics.move()
     if bounds.len() <= 2 {
         return parser_parse_tokens_threads(tokens.move(), tables.move(), diagnostics.move(), source_end, line_starts, source, allow_environment_reads, threads)
     }
     byte_bounds: parser_chunk_byte_bounds(tokens, bounds, source)
     chunk_count: bounds.len() - 1
-    slots := [Shared<ParserChunkSlot>]{}
+    ^slots: [Shared<ParserChunkSlot>]{}
     slots.try_reserve(chunk_count) ?? ()
     loop chunk in 0..<chunk_count {
         line_lo: if line_starts.len() > 0 -> parser_line_starts_lower_bound(line_starts, byte_bounds[chunk]) else -> 0
         line_hi: if line_starts.len() > 0 -> if chunk + 1 == chunk_count -> line_starts.len() else -> parser_line_starts_lower_bound(line_starts, byte_bounds[chunk + 1]) else -> 0
         slots.push(Shared{ParserChunkSlot{index: chunk, is_last: chunk + 1 == chunk_count, tok_start: bounds[chunk], tok_end: bounds[chunk + 1], byte_start: byte_bounds[chunk], byte_end: byte_bounds[chunk + 1], line_idx_start: line_lo, line_idx_end: line_hi, needs_colon: true, prepared: [ParserChunkPrepared]{}, chosen_heads: [Int]{}, outputs: [ParserChunkOutput]{}}})
     }
-    _ := parser_prepare_sliced_slots(tokens, tables, source, line_starts, true, slots, 0)
+    ^_: parser_prepare_sliced_slots(tokens, tables, source, line_starts, true, slots, 0)
     outcome: parser_finish_prepared_slots(slots, source, source_end, allow_environment_reads, diagnostics, [FencedStatement]{})
     if outcome.ok -> return outcome.result.move()
     if outcome.fences {
@@ -366,7 +366,7 @@ parser_parse_run_chunks: fn(input: ^^[Token], tables_input: ^^TokenTables, lexer
 // The one-run route: colon declarations and whole-file fence expansion first,
 // then chunked parsing when `parser_chunk_bounds` admits multiple chunks.
 parser_parse_tokens_threads: fn(input: ^^[Token], tables_input: ^^TokenTables, lexer_diagnostics: ^^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
-    tables := tables_input.move()
+    ^tables: tables_input.move()
     prepared: parser_prepare_tokens(input, tables)
     parser_parse_expansion_threads(prepared, tables, lexer_diagnostics, source_end, line_starts, source, allow_environment_reads, threads)
 }
@@ -384,10 +384,10 @@ parser_parse_expansion_threads: fn(input: ^^ParserFenceExpansion, tables_input: 
 
 parser_line_starts: fn(source: [U8]) -> [Int] Never! {
     count: source.len()
-    starts := [Int]{}
+    ^starts: [Int]{}
     if count > 0 -> starts.try_reserve(count /% 32 + 2) ?? ()
     starts.push(0)
-    index := 0
+    ^index: 0
     loop index + 4 <= count {
         if source[index] == (U8{10}) -> starts.push(index + 1)
         if source[index + 1] == (U8{10}) -> starts.push(index + 2)
@@ -410,7 +410,7 @@ parse_tokens: fn(tokens: [Token], tables: TokenTables) -> ParseResult {
         }
         else -> 0
     }
-    owned_tables := tables.copy()
+    ^owned_tables: tables.copy()
     prepared: parser_prepare_tokens(tokens.copy(), owned_tables)
     parser_join_effect_impls(parser_parse_prepared(prepared, [Diagnostic]{}, source_end, [Int]{}, [U8]{}, false, owned_tables))
 }
@@ -418,20 +418,20 @@ parse_tokens: fn(tokens: [Token], tables: TokenTables) -> ParseResult {
 // Fence expansion runs before parsing. A fence error stops the
 // parse like any token-level rejection: no partially expanded AST is built.
 parser_parse_prepared: fn(input: ^^ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, tables: ^^TokenTables) -> ParseResult {
-    prepared := input.move()
-    leading := lexer_diagnostics
+    ^prepared: input.move()
+    ^leading: lexer_diagnostics
     if prepared.diagnostics.len() > 0 {
-        diagnostics := leading.move()
+        ^diagnostics: leading.move()
         loop diagnostic in prepared.diagnostics -> diagnostics.push(diagnostic)
         return ParseResult{program: ast_program(), diagnostics: diagnostics}
     }
     tokens: prepared.tokens.move()
     prepared.tokens = [Token]{}
     word_ids: parser_word_ids_for(tables)
-    state := JetParserState{tokens: tokens.move(), tables: [TokenTables]{tables.move()}, position: 0, diagnostics: leading.move(), source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads, words: word_ids}
+    ^state: JetParserState{tokens: tokens.move(), tables: [TokenTables]{tables.move()}, position: 0, diagnostics: leading.move(), source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads, words: word_ids}
     state.marker_scopes = parser_marker_scopes(state.tokens, state.tables[0])
     state.bound_size_rows = parser_bound_size_rows(state.tokens, state.tables[0])
-    program := parser_parse_program(state)
+    ^program: parser_parse_program(state)
     program.has_scope_member = state.has_scope_member
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
@@ -549,7 +549,7 @@ parser_chunk_head_at: fn(tokens: [Token], index: Int, to: Int) -> Bool Never! {
         return true
     }
     if kind == TOKEN_IDENT || kind == TOKEN_CARET {
-        after := index + 1
+        ^after: index + 1
         if kind == TOKEN_CARET {
             if after >= to || tokens[after].kind != TOKEN_IDENT -> return false
             after += 1
@@ -581,7 +581,7 @@ parser_chunk_bounds: fn(tokens: [Token], tables: TokenTables, source: [U8], thre
 // `#FX` sets `program.file_cap` only and is merged on chunk join (falling back
 // if duplicate `#FX` file caps appear across chunks).
 parser_chunk_file_rules: fn(tables: TokenTables) -> [Int] Never! {
-    file_rules := [Int]{}
+    ^file_rules: [Int]{}
     file_rule_names: [String]{MARKER_NO_PRELUDE, MARKER_HTML, MARKER_TARGET}
     loop rule in file_rule_names {
         if name_find(tables.names, rule) == .Val(name) -> file_rules.push(name_index(name))
@@ -603,25 +603,27 @@ ParserChunkScan: struct {
 // has at a range that starts the stream or starts an item run (depth 0,
 // no `#` marker ahead, no marker list open).
 parser_chunk_scan: fn(tokens: [Token], file_rules: [Int], from: Int, to: Int) -> ParserChunkScan Never! {
-    candidates := [Int]{}
-    fences := false
-    depth := 0
+    ^candidates: [Int]{}
+    ^fences: false
+    ^depth: 0
     // The previous code token's kind (-1 at the start).
-    previous := -1
+    ^previous: -1
     // The last code token was a `}` that closed a depth-0 group.
-    closed_item := false
+    ^closed_item: false
     // A line terminator followed that `}`.
-    terminated := false
+    ^terminated: false
     // A top-level `#` whose marker name is still ahead.
-    hash_ahead := false
+    ^hash_ahead: false
     // Inside a top-level `#[ … ]` marker list.
-    marker_list := false
+    ^marker_list: false
     loop index in from..<to {
         kind: tokens[index].kind
         if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> next
         if kind == TOKEN_FENCE_OPEN || kind == TOKEN_FENCE_CLOSE -> fences = true
         if kind == TOKEN_SEMI {
-            if tokens[index].span.start < tokens[index].span.end -> return ParserChunkScan{whole: true, fences: fences, closed_item: false, candidates: [Int]{}}
+            if tokens[index].span.start < tokens[index].span.end {
+                return ParserChunkScan{whole: true, fences: fences, closed_item: false, candidates: [Int]{}}
+            }
             if closed_item -> terminated = true
             previous = kind
             next
@@ -631,7 +633,9 @@ parser_chunk_scan: fn(tokens: [Token], file_rules: [Int], from: Int, to: Int) ->
                 return ParserChunkScan{whole: true, fences: fences, closed_item: false, candidates: [Int]{}}
             }
         }
-        if terminated && depth == 0 && parser_chunk_head_at(tokens, index, to) -> candidates.push(index)
+        if terminated && depth == 0 && parser_chunk_head_at(tokens, index, to) {
+            candidates.push(index)
+        }
         terminated = false
         closed_item = false
         if {
@@ -645,7 +649,9 @@ parser_chunk_scan: fn(tokens: [Token], file_rules: [Int], from: Int, to: Int) ->
             kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
             kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> {
                 depth -= 1
-                if depth < 0 -> return ParserChunkScan{whole: true, fences: fences, closed_item: false, candidates: [Int]{}}
+                if depth < 0 {
+                    return ParserChunkScan{whole: true, fences: fences, closed_item: false, candidates: [Int]{}}
+                }
                 if depth == 0 {
                     marker_list = false
                     if kind == TOKEN_RBRACE -> closed_item = true
@@ -654,7 +660,9 @@ parser_chunk_scan: fn(tokens: [Token], file_rules: [Int], from: Int, to: Int) ->
         }
         previous = kind
     }
-    if depth != 0 -> return ParserChunkScan{whole: true, fences: fences, closed_item: false, candidates: [Int]{}}
+    if depth != 0 {
+        return ParserChunkScan{whole: true, fences: fences, closed_item: false, candidates: [Int]{}}
+    }
     ParserChunkScan{whole: false, fences: fences, closed_item: closed_item, candidates: candidates.move()}
 }
 
@@ -662,8 +670,8 @@ parser_chunk_scan: fn(tokens: [Token], file_rules: [Int], from: Int, to: Int) ->
 // first candidate at or past each equal share of the tokens.
 parser_chunk_bounds_of: fn(candidates: [Int], count: Int, workers: Int) -> [Int] Never! {
     if candidates.len() == 0 -> return [Int]{0, count}
-    bounds := [Int]{0}
-    candidate := 0
+    ^bounds: [Int]{0}
+    ^candidate: 0
     loop share in 1..<workers {
         target: share * count /% workers
         loop candidate < candidates.len() && candidates[candidate] < target -> candidate += 1
@@ -680,8 +688,8 @@ parser_chunk_bounds_of: fn(candidates: [Int], count: Int, workers: Int) -> [Int]
 parser_group_run_bounds: fn(runs: [Int], workers: Int) -> [Int] Never! {
     run_count: runs.len() - 1
     count: runs[runs.len() - 1]
-    bounds := [Int]{0}
-    run := 1
+    ^bounds: [Int]{0}
+    ^run: 1
     loop share in 1..<workers {
         target: share * count /% workers
         loop run < run_count && runs[run] < target -> run += 1
@@ -711,11 +719,11 @@ parser_chunk_remap_literal: fn(old_row: Int, old_tables: TokenTables, new_tables
     head: if literal.head >= 0 -> parser_chunk_remap_literal(literal.head, old_tables, new_tables, name_map) else -> -1
     head_decoded: parser_chunk_remap_name(literal.head_decoded, old_tables.names, new_tables.names, name_map)
     suffix: parser_chunk_remap_name(literal.suffix, old_tables.names, new_tables.names, name_map)
-    parts := [StringPart]{}
+    ^parts: [StringPart]{}
     if literal.string_parts.len() > 0 {
         parts.try_reserve(literal.string_parts.len()) ?? ()
         loop part in literal.string_parts {
-            nested := [Token]{}
+            ^nested: [Token]{}
             if part.tokens.len() > 0 {
                 nested.try_reserve(part.tokens.len()) ?? ()
                 loop tok in part.tokens {
@@ -737,13 +745,13 @@ parser_chunk_remap_literal: fn(old_row: Int, old_tables: TokenTables, new_tables
 // slice, so 16 workers copy `1×` literals and only their own unique names.
 parser_slice_chunk_tokens_and_tables: fn(tokens: [Token], tok_start: Int, tok_end: Int, old_tables: TokenTables) -> {tokens: [Token], tables: TokenTables} Never! {
     count: tok_end - tok_start
-    local_tokens := [Token]{}
+    ^local_tokens: [Token]{}
     if count > 0 -> local_tokens.try_reserve(count) ?? ()
-    local_tables := token_tables()
+    ^local_tables: token_tables()
     local_tables.has_fences = old_tables.has_fences
     local_tables.has_paste = old_tables.has_paste
     total_names: name_count(old_tables.names)
-    name_map := [Int]{}
+    ^name_map: [Int]{}
     name_map.try_reserve(total_names) ?? ()
     loop _ in 0..<total_names -> name_map.push(-1)
     if total_names > 0 -> name_map[0] = 0
@@ -761,18 +769,18 @@ parser_slice_chunk_tokens_and_tables: fn(tokens: [Token], tok_start: Int, tok_en
 // covering the token chunks `bounds`, so chunk source slices partition
 // `source` with `1×` total bytes copied across all workers.
 parser_chunk_byte_bounds: fn(tokens: [Token], bounds: [Int], source: [U8]) -> [Int] Never! {
-    byte_bounds := [Int]{0}
+    ^byte_bounds: [Int]{0}
     source_len: source.len()
     chunk_count: bounds.len() - 1
     loop chunk in 1..<chunk_count {
         tok_start: bounds[chunk]
-        cut := byte_bounds[byte_bounds.len() - 1]
+        ^cut: byte_bounds[byte_bounds.len() - 1]
         // Find the previous chunk's last non-synthetic token and advance past
         // its trailing `[ \t\r]*\n`.
-        prev := tok_start - 1
+        ^prev: tok_start - 1
         loop prev >= 0 && tokens[prev].span.start == tokens[prev].span.end -> prev -= 1
         if prev >= 0 {
-            at := tokens[prev].span.end
+            ^at: tokens[prev].span.end
             loop at < source_len && (source[at] == (U8{32}) || source[at] == (U8{9}) || source[at] == (U8{13})) {
                 at += 1
             }
@@ -781,13 +789,17 @@ parser_chunk_byte_bounds: fn(tokens: [Token], bounds: [Int], source: [U8]) -> [I
         }
         // Clamp to the line start of the first real token in this chunk so no
         // token in chunk `chunk` ever sits before `byte_bounds[chunk]`.
-        first := tok_start
-        loop first < bounds[chunk + 1] && tokens[first].span.start == tokens[first].span.end -> first += 1
+        ^first: tok_start
+        loop first < bounds[chunk + 1] && tokens[first].span.start == tokens[first].span.end {
+            first += 1
+        }
         if first < bounds[chunk + 1] {
             first_start: tokens[first].span.start
             if first_start < cut {
                 cut = first_start
-                loop cut > byte_bounds[byte_bounds.len() - 1] && source[cut - 1] != (U8{10}) -> cut -= 1
+                loop cut > byte_bounds[byte_bounds.len() - 1] && source[cut - 1] != (U8{10}) {
+                    cut -= 1
+                }
             }
         }
         if cut > source_len -> cut = source_len
@@ -799,8 +811,8 @@ parser_chunk_byte_bounds: fn(tokens: [Token], bounds: [Int], source: [U8]) -> [I
 
 // First index in `line_starts` whose value is `>= offset` (lower bound).
 parser_line_starts_lower_bound: fn(line_starts: [Int], offset: Int) -> Int Never! {
-    low := 0
-    high := line_starts.len()
+    ^low: 0
+    ^high: line_starts.len()
     loop low < high {
         mid: low + (high - low) /% 2
         if line_starts[mid] < offset -> low = mid + 1 else -> high = mid
@@ -813,12 +825,12 @@ parser_line_starts_lower_bound: fn(line_starts: [Int], offset: Int) -> Int Never
 // `TOKEN_SEMI` followed by a valid `parser_chunk_head_at` token (Guardrail #1).
 parser_chunk_validate_tokens: fn(tokens: [Token], tables: TokenTables, is_first: Bool, is_last: Bool, expect_leading_semi: Bool) -> {whole: Bool, fences: Bool} Never! {
     count: tokens.len()
-    scan_from := 0
+    ^scan_from: 0
     if {
         !is_first && expect_leading_semi -> {
-            semi := 0
+            ^semi: 0
             loop semi < count && tokens[semi].kind == TOKEN_LINE_COMMENT -> semi += 1
-            head := semi + 1
+            ^head: semi + 1
             loop head < count && parser_is_trivia(tokens[head].kind) -> head += 1
             if head >= count || tokens[semi].kind != TOKEN_SEMI || tokens[semi].span.start < tokens[semi].span.end || !parser_chunk_head_at(tokens, head, count) {
                 return {whole: true, fences: tables.has_fences}
@@ -826,7 +838,7 @@ parser_chunk_validate_tokens: fn(tokens: [Token], tables: TokenTables, is_first:
             scan_from = head
         }
         !is_first -> {
-            head := 0
+            ^head: 0
             loop head < count && parser_is_trivia(tokens[head].kind) -> head += 1
             if head >= count || !parser_chunk_head_at(tokens, head, count) {
                 return {whole: true, fences: tables.has_fences}
@@ -836,7 +848,9 @@ parser_chunk_validate_tokens: fn(tokens: [Token], tables: TokenTables, is_first:
     }
     scan: parser_chunk_scan(tokens, parser_chunk_file_rules(tables), scan_from, count)
     if scan.whole -> return {whole: true, fences: scan.fences || tables.has_fences}
-    if !is_last && !scan.closed_item -> return {whole: true, fences: scan.fences || tables.has_fences}
+    if !is_last && !scan.closed_item {
+        return {whole: true, fences: scan.fences || tables.has_fences}
+    }
     {whole: false, fences: scan.fences || tables.has_fences}
 }
 
@@ -845,9 +859,9 @@ parser_chunk_validate_tokens: fn(tokens: [Token], tables: TokenTables, is_first:
 // read-borrowed whole-file inputs, runs local `ColonDeclarations`, validates
 // boundaries/rules, and collects chunk-local `ParserMarkerScope`s.
 parser_prepare_sliced_slot: fn(tokens: [Token], tables: TokenTables, source: [U8], line_starts: [Int], expect_leading_semi: Bool, slot: Shared<ParserChunkSlot>) -> Int {
-    permit := slot.guard_edit()
+    ^permit: slot.guard_edit()
     sliced: parser_slice_chunk_tokens_and_tables(tokens, permit.value.tok_start, permit.value.tok_end, tables)
-    chunk_tokens := sliced.tokens.move()
+    ^chunk_tokens: sliced.tokens.move()
     chunk_tables: sliced.tables.move()
     chunk_source: if source.len() > 0 && permit.value.byte_end > permit.value.byte_start -> source.slice(permit.value.byte_start, permit.value.byte_end) else -> [U8]{}
     chunk_lines: if line_starts.len() > 0 && permit.value.line_idx_end > permit.value.line_idx_start -> line_starts.slice(permit.value.line_idx_start, permit.value.line_idx_end) else -> [Int]{}
@@ -860,8 +874,10 @@ parser_prepare_sliced_slot: fn(tokens: [Token], tables: TokenTables, source: [U8
 }
 
 parser_prepare_sliced_slots: fn(tokens: [Token], tables: TokenTables, source: [U8], line_starts: [Int], expect_leading_semi: Bool, slots: [Shared<ParserChunkSlot>], from: Int) -> Int {
-    if from >= slots.len() - 1 -> return parser_prepare_sliced_slot(tokens, tables, source, line_starts, expect_leading_semi, slots[from])
-    prepared := 0
+    if from >= slots.len() - 1 {
+        return parser_prepare_sliced_slot(tokens, tables, source, line_starts, expect_leading_semi, slots[from])
+    }
+    ^prepared: 0
     task.group parser_prepare_slice_threads {
         head: task parser_prepare_sliced_slot(tokens, tables, source, line_starts, expect_leading_semi, slots[from])
         prepared = parser_prepare_sliced_slots(tokens, tables, source, line_starts, expect_leading_semi, slots, from + 1)
@@ -875,9 +891,9 @@ parser_prepare_sliced_slots: fn(tokens: [Token], tables: TokenTables, source: [U
 // slices only its own chunk of `source`, runs local `ColonDeclarations`,
 // validates boundaries/rules, and collects chunk-local `ParserMarkerScope`s.
 parser_prepare_direct_slot: fn(source: [U8], slot: Shared<ParserChunkSlot>) -> Int {
-    permit := slot.guard_edit()
+    ^permit: slot.guard_edit()
     data: compiler_threads_taken(permit.value.prepared)
-    chunk_tokens := data.tokens.move()
+    ^chunk_tokens: data.tokens.move()
     chunk_tables: data.tables.move()
     chunk_source: if source.len() > 0 && permit.value.byte_end > permit.value.byte_start -> source.slice(permit.value.byte_start, permit.value.byte_end) else -> [U8]{}
     colon: parser_colon_declarations_local(chunk_tokens, chunk_tables)
@@ -890,7 +906,7 @@ parser_prepare_direct_slot: fn(source: [U8], slot: Shared<ParserChunkSlot>) -> I
 
 parser_prepare_direct_slots: fn(source: [U8], slots: [Shared<ParserChunkSlot>], from: Int) -> Int {
     if from >= slots.len() - 1 -> return parser_prepare_direct_slot(source, slots[from])
-    prepared := 0
+    ^prepared: 0
     task.group parser_prepare_direct_threads {
         head: task parser_prepare_direct_slot(source, slots[from])
         prepared = parser_prepare_direct_slots(source, slots, from + 1)
@@ -904,7 +920,7 @@ parser_prepare_direct_slots: fn(source: [U8], slots: [Shared<ParserChunkSlot>], 
 // `import_spans`, collects qualified marker heads (`#Qual.` / `#[..., Qual.`),
 // and detects low-level-tier syntax (`*x`, `p.*`, `uninit`, `Ptr`, `FFI(asm)`).
 parser_chunk_scan_imports: fn(tokens: [Token], tables: TokenTables, imports: [ImportDecl], items: [Item]) -> ParserChunkImportScan Never! {
-    import_spans := [Span]{}
+    ^import_spans: [Span]{}
     loop declaration in imports -> import_spans.push(declaration.span)
     loop item in items {
         if item == .CodeModule(definition) {
@@ -913,19 +929,19 @@ parser_chunk_scan_imports: fn(tokens: [Token], tables: TokenTables, imports: [Im
     }
     indexed_spans: if import_spans.len() > 0 -> parser_import_span_index(import_spans) else -> [Span]{}
     has_spans: indexed_spans.len() > 0
-    ident_seen := [Bool]{}
+    ^ident_seen: [Bool]{}
     total_names: name_count(tables.names)
     ident_seen.try_reserve(total_names) ?? ()
     loop _ in 0..<total_names -> ident_seen.push(false)
-    marker_qualifiers := [String]{}
+    ^marker_qualifiers: [String]{}
     uninit_id: if name_find(tables.names, "uninit") == .Val(id) -> name_index(id) else -> -1
     ptr_id: if name_find(tables.names, "Ptr") == .Val(id) -> name_index(id) else -> -1
     asm_id: if name_find(tables.names, "asm") == .Val(id) -> name_index(id) else -> -1
     ffi_id: if name_find(tables.names, "FFI") == .Val(id) -> name_index(id) else -> -1
     has_asm_ffi: asm_id >= 0 && ffi_id >= 0
     has_ll_idents: uninit_id >= 0 || ptr_id >= 0 || has_asm_ffi
-    low_level := false
-    depth := 0
+    ^low_level: false
+    ^depth: 0
     count: tokens.len()
     loop index in 0..<count {
         token: tokens[index]
@@ -956,9 +972,7 @@ parser_chunk_scan_imports: fn(tokens: [Token], tables: TokenTables, imports: [Im
                 }
                 if !low_level && has_ll_idents {
                     if {
-                        id == uninit_id || id == ptr_id -> {
-                            low_level = true
-                        }
+                        id == uninit_id || id == ptr_id -> { low_level = true }
                         has_asm_ffi && id == asm_id && index >= 2 && tokens[index - 1].kind == TOKEN_LPAREN && tokens[index - 2].kind == TOKEN_IDENT && name_index(tokens[index - 2].decoded) == ffi_id -> {
                             low_level = true
                         }
@@ -967,9 +981,7 @@ parser_chunk_scan_imports: fn(tokens: [Token], tables: TokenTables, imports: [Im
             }
             !low_level && kind == TOKEN_STAR -> {
                 if {
-                    index == 0 -> {
-                        low_level = true
-                    }
+                    index == 0 -> { low_level = true }
                     else -> {
                         before: tokens[index - 1].kind
                         value_end: before == TOKEN_IDENT || before == TOKEN_RAW_STRING || before == TOKEN_STRING || before == TOKEN_INT || before == TOKEN_FLOAT || before == TOKEN_UNIT_NUMBER || before == TOKEN_CHAR || before == TOKEN_TRUE || before == TOKEN_FALSE || before == TOKEN_SELF || before == TOKEN_RPAREN || before == TOKEN_RBRACKET || before == TOKEN_RBRACE
@@ -1013,19 +1025,19 @@ parser_chunk_scan_interp_idents: fn(tokens: [Token], tables: TokenTables, indexe
 // the chunk with its compact `TokenTables`, chunk `source` slice, and chunk
 // `line_starts` slice, and runs all chunk-local post-passes on this thread.
 parser_parse_slot_part: fn(marker_scopes: [ParserMarkerScope], source_end: Int, allow_environment_reads: Bool, slot: Shared<ParserChunkSlot>) -> Int {
-    permit := slot.guard_edit()
+    ^permit: slot.guard_edit()
     data: compiler_threads_taken(permit.value.prepared)
-    chosen := [Int]{}
+    ^chosen: [Int]{}
     compiler_transfer_rows<Int>(chosen, permit.value.chosen_heads)
     chunk_tokens: if chosen.len() > 0 -> parser_colon_insert_module_heads(data.tokens.move(), chosen) else -> data.tokens.move()
     word_ids: parser_word_ids_for(data.tables)
-    state := JetParserState{tokens: chunk_tokens.move(), tables: [TokenTables]{data.tables.move()}, position: 0, diagnostics: [Diagnostic]{}, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: data.line_starts.move(), sources: [[U8]]{data.source.move()}, source_offset: data.source_offset, line_base: data.line_base, allow_environment_reads: allow_environment_reads, words: word_ids}
+    ^state: JetParserState{tokens: chunk_tokens.move(), tables: [TokenTables]{data.tables.move()}, position: 0, diagnostics: [Diagnostic]{}, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: data.line_starts.move(), sources: [[U8]]{data.source.move()}, source_offset: data.source_offset, line_base: data.line_base, allow_environment_reads: allow_environment_reads, words: word_ids}
     if marker_scopes.len() > 0 -> state.marker_scopes = marker_scopes.copy()
     program: parser_parse_program(state)
     debug_sites: parser_debug_trace_sites_at(state.tokens, state.tables[0], state.sources[0], state.source_offset)
     import_scan: parser_chunk_scan_imports(state.tokens, state.tables[0], program.imports, program.items)
     has_reexport: parser_has_reexport_candidate(program.items)
-    state_sites := [StateMarkerSite]{}
+    ^state_sites: [StateMarkerSite]{}
     parser_state_marker_sites(program.items, state_sites)
     kept_tables: state.tables.move()
     permit.value.outputs.push(ParserChunkOutput{program: program.move(), diagnostics: state.diagnostics.move(), block_spans: state.block_spans.move(), else_arms: state.else_arms.move(), block_policy_declarations: state.block_policy_declarations.move(), statement_rules: state.statement_rules.move(), has_scope_member: state.has_scope_member, debug_sites: debug_sites.move(), import_scan: import_scan.move(), has_reexport: has_reexport, state_marker_sites: state_sites.move(), tables: kept_tables.move()})
@@ -1033,8 +1045,10 @@ parser_parse_slot_part: fn(marker_scopes: [ParserMarkerScope], source_end: Int, 
 }
 
 parser_parse_slot_parts: fn(marker_scopes: [ParserMarkerScope], source_end: Int, allow_environment_reads: Bool, slots: [Shared<ParserChunkSlot>], from: Int) -> Int {
-    if from >= slots.len() - 1 -> return parser_parse_slot_part(marker_scopes, source_end, allow_environment_reads, slots[from])
-    parsed := 0
+    if from >= slots.len() - 1 {
+        return parser_parse_slot_part(marker_scopes, source_end, allow_environment_reads, slots[from])
+    }
+    ^parsed: 0
     task.group parser_chunk_threads {
         head: task parser_parse_slot_part(marker_scopes, source_end, allow_environment_reads, slots[from])
         parsed = parser_parse_slot_parts(marker_scopes, source_end, allow_environment_reads, slots, from + 1)
@@ -1045,24 +1059,24 @@ parser_parse_slot_parts: fn(marker_scopes: [ParserMarkerScope], source_end: Int,
 
 // Reduces `used_import_names` across chunk summaries in O(candidates * chunks).
 parser_reduce_used_import_names: fn(imports: [ImportDecl], items: [Item], outputs: [ParserChunkOutput]) -> [String] Never! {
-    candidates := [String]{}
-    used := [String]{}
+    ^candidates: [String]{}
+    ^used: [String]{}
     // The chunks' import scans already left import spans out.
-    spans := [Span]{}
+    ^spans: [Span]{}
     parser_import_roots(imports, items, used, candidates, spans)
     if candidates.len() == 0 {
         used.sort()
         return used
     }
-    used_set := name_table_sized(32)
-    loop name in used -> _ := name_intern(used_set, name)
-    any_low_level := false
+    ^used_set: name_table_sized(32)
+    loop name in used -> ^_: name_intern(used_set, name)
+    ^any_low_level: false
     loop idx in 0..<outputs.len() {
         if outputs[idx].import_scan.low_level_tier -> any_low_level = true
     }
     loop candidate in candidates.move() {
         if name_find(used_set, candidate) != None -> next
-        found := false
+        ^found: false
         loop idx in 0..<outputs.len() {
             if outputs[idx].tables.len() == 0 -> next
             if name_find(outputs[idx].tables[0].names, candidate) == .Val(id) {
@@ -1085,13 +1099,11 @@ parser_reduce_used_import_names: fn(imports: [ImportDecl], items: [Item], output
             }
         }
         if found {
-            _ := name_intern(used_set, candidate)
+            ^_: name_intern(used_set, candidate)
             used.push(candidate)
         }
     }
-    if any_low_level {
-        parser_collect_core_mem_gate_names(imports, used)
-    }
+    if any_low_level -> parser_collect_core_mem_gate_names(imports, used)
     used.sort()
     used
 }
@@ -1104,12 +1116,12 @@ parser_reduce_used_import_names: fn(imports: [ImportDecl], items: [Item], output
 parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8], source_end: Int, allow_environment_reads: Bool, lexer_diagnostics: [Diagnostic], fenced_input: ^^[FencedStatement]) -> ParserChunksOutcome {
     fenced_statements: fenced_input.move()
     chunk_count: slots.len()
-    whole := false
-    fences := false
-    any_candidates := false
-    marker_scopes := [ParserMarkerScope]{}
+    ^whole: false
+    ^fences: false
+    ^any_candidates: false
+    ^marker_scopes: [ParserMarkerScope]{}
     loop chunk in 0..<chunk_count {
-        permit := slots[chunk].guard_edit()
+        ^permit: slots[chunk].guard_edit()
         if permit.value.prepared[0].whole -> whole = true
         if permit.value.prepared[0].fences -> fences = true
         if permit.value.prepared[0].colon.candidates.len() > 0 -> any_candidates = true
@@ -1125,9 +1137,9 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
         }
     }
     if any_candidates {
-        named_candidates := [ParserColonNamedCandidate]{}
-        declared_modules := [String]{}
-        declared_others := [String]{}
+        ^named_candidates: [ParserColonNamedCandidate]{}
+        ^declared_modules: [String]{}
+        ^declared_others: [String]{}
         loop chunk in 0..<chunk_count {
             reads: slots[chunk].guard_read()
             data: reads.value.prepared[0]
@@ -1142,28 +1154,28 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
                 named_candidates.push(ParserColonNamedCandidate{chunk: chunk, head: cand.head, name: name_text(names, Name{id: U32{cand.name}}), target: name_text(names, Name{id: U32{cand.target}}), typed: cand.typed, snake: cand.snake})
             }
         }
-        chosen_by_chunk := parser_colon_resolve_named_instances(chunk_count, named_candidates, declared_modules, declared_others)
+        ^chosen_by_chunk: parser_colon_resolve_named_instances(chunk_count, named_candidates, declared_modules, declared_others)
         loop chunk in 0..<chunk_count {
             if chosen_by_chunk[chunk].len() > 0 {
-                permit := slots[chunk].guard_edit()
+                ^permit: slots[chunk].guard_edit()
                 compiler_transfer_rows<Int>(permit.value.chosen_heads, chosen_by_chunk[chunk])
             }
         }
     }
-    _ := parser_parse_slot_parts(marker_scopes, source_end, allow_environment_reads, slots, 0)
-    outputs := [ParserChunkOutput]{}
+    ^_: parser_parse_slot_parts(marker_scopes, source_end, allow_environment_reads, slots, 0)
+    ^outputs: [ParserChunkOutput]{}
     outputs.try_reserve(chunk_count) ?? ()
-    failed := false
-    total_imports := 0
-    total_items := 0
-    total_blocks := 0
-    total_elses := 0
-    total_debug := 0
-    file_cap := ModuleCap?{None}
-    any_reexport := false
+    ^failed: false
+    ^total_imports: 0
+    ^total_items: 0
+    ^total_blocks: 0
+    ^total_elses: 0
+    ^total_debug: 0
+    ^file_cap: ModuleCap?{None}
+    ^any_reexport: false
     loop slot in slots {
         permit: slot.guard_edit()
-        output := compiler_threads_taken(permit.value.outputs)
+        ^output: compiler_threads_taken(permit.value.outputs)
         loop diagnostic in output.diagnostics {
             if diagnostic.severity == DIAGNOSTIC_ERROR -> failed = true
         }
@@ -1183,22 +1195,22 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
     if failed {
         return ParserChunksOutcome{ok: false, fences: false, result: parser_chunks_unjoined(fenced_statements.move())}
     }
-    program := ast_program()
+    ^program: ast_program()
     program.file_cap = file_cap.move()
     program.has_scope_member = false
     if total_imports > 0 -> program.imports.try_reserve(total_imports) ?? ()
     if total_items > 0 -> program.items.try_reserve(total_items) ?? ()
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop diagnostic in lexer_diagnostics -> diagnostics.push(diagnostic.copy())
-    block_spans := [Span]{}
+    ^block_spans: [Span]{}
     if total_blocks > 0 -> block_spans.try_reserve(total_blocks) ?? ()
-    else_arms := [ElseArmSpan]{}
+    ^else_arms: [ElseArmSpan]{}
     if total_elses > 0 -> else_arms.try_reserve(total_elses) ?? ()
-    block_policy_declarations := [PolicyDeclaration]{}
-    statement_rules := [AppliedRuleApplication]{}
-    debug_sites := [DebugTraceSite]{}
+    ^block_policy_declarations: [PolicyDeclaration]{}
+    ^statement_rules: [AppliedRuleApplication]{}
+    ^debug_sites: [DebugTraceSite]{}
     if total_debug > 0 -> debug_sites.try_reserve(total_debug) ?? ()
-    state_marker_sites := [StateMarkerSite]{}
+    ^state_marker_sites: [StateMarkerSite]{}
     loop index in 0..<outputs.len() {
         if outputs[index].has_scope_member -> program.has_scope_member = true
         compiler_transfer_rows<ImportDecl>(program.imports, outputs[index].program.imports)
@@ -1237,7 +1249,7 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
 // The result of chunks that didn't join: no program, only the fenced
 // statements given back to the caller's one-thread parse.
 parser_chunks_unjoined: fn(fenced: ^^[FencedStatement]) -> ParseResult {
-    program := ast_program()
+    ^program: ast_program()
     program.fenced_statements = fenced.move()
     ParseResult{program: program.move(), diagnostics: [Diagnostic]{}}
 }
@@ -1246,19 +1258,19 @@ parser_chunks_unjoined: fn(fenced: ^^[FencedStatement]) -> ParseResult {
 // thread per chunk with compact per-chunk `TokenTables` and `source` slices,
 // and joins the chunk programs in chunk order.
 parser_parse_chunked: fn(input: ^^ParserFenceExpansion, bounds: [Int], lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, tables: ^^TokenTables) -> ParseResult {
-    prepared := input.move()
+    ^prepared: input.move()
     tokens: prepared.tokens.move()
     owned_tables: tables.move()
     byte_bounds: parser_chunk_byte_bounds(tokens, bounds, source)
     chunk_count: bounds.len() - 1
-    slots := [Shared<ParserChunkSlot>]{}
+    ^slots: [Shared<ParserChunkSlot>]{}
     slots.try_reserve(chunk_count) ?? ()
     loop chunk in 0..<chunk_count {
         line_lo: if line_starts.len() > 0 -> parser_line_starts_lower_bound(line_starts, byte_bounds[chunk]) else -> 0
         line_hi: if line_starts.len() > 0 -> if chunk + 1 == chunk_count -> line_starts.len() else -> parser_line_starts_lower_bound(line_starts, byte_bounds[chunk + 1]) else -> 0
         slots.push(Shared{ParserChunkSlot{index: chunk, is_last: chunk + 1 == chunk_count, tok_start: bounds[chunk], tok_end: bounds[chunk + 1], byte_start: byte_bounds[chunk], byte_end: byte_bounds[chunk + 1], line_idx_start: line_lo, line_idx_end: line_hi, needs_colon: false, prepared: [ParserChunkPrepared]{}, chosen_heads: [Int]{}, outputs: [ParserChunkOutput]{}}})
     }
-    _ := parser_prepare_sliced_slots(tokens, owned_tables, source, line_starts, false, slots, 0)
+    ^_: parser_prepare_sliced_slots(tokens, owned_tables, source, line_starts, false, slots, 0)
     outcome: parser_finish_prepared_slots(slots, source, source_end, allow_environment_reads, lexer_diagnostics, prepared.fenced_statements.move())
     if outcome.ok -> return outcome.result.move()
     // Recovery after an error skips to the next plausible item, which can
@@ -1274,8 +1286,8 @@ parser_parse_chunked: fn(input: ^^ParserFenceExpansion, bounds: [Int], lexer_dia
 parser_import_roots: fn(imports: [ImportDecl], items: [Item], used: ^[String], candidates: ^[String], spans: ^[Span]) Never! {
     // The module roots read so far, by id in a table of their own (a root
     // may be a dotted path no token spells): `rooted[id]` once `used` has it.
-    roots := name_table_sized(16)
-    rooted := [Bool]{}
+    ^roots: name_table_sized(16)
+    ^rooted: [Bool]{}
     loop declaration in imports {
         spans.push(declaration.span)
         if declaration.kind == {
@@ -1309,9 +1321,9 @@ parser_import_roots: fn(imports: [ImportDecl], items: [Item], used: ^[String], c
 // `name: module` is the file import the loader binds for it. None (Jet-only
 // pass)
 parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [ImportDecl], program_items: [Item]) -> [String] Never! {
-    candidates := [String]{}
-    used := [String]{}
-    import_spans := [Span]{}
+    ^candidates: [String]{}
+    ^used: [String]{}
+    ^import_spans: [Span]{}
     parser_import_roots(imports, program_items, used, candidates, import_spans)
     if candidates.len() == 0 {
         used.sort()
@@ -1319,8 +1331,8 @@ parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [Imp
     }
     indexed_spans: parser_import_span_index(import_spans)
     // Per name id: whether the name is a candidate, and whether it is used.
-    candidate_ids := [Bool]{}
-    used_ids := [Bool]{}
+    ^candidate_ids: [Bool]{}
+    ^used_ids: [Bool]{}
     loop _ in 0..<name_count(tables.names) {
         candidate_ids.push(false)
         used_ids.push(false)
@@ -1407,8 +1419,8 @@ parser_low_level_tier_spelled: fn(tokens: [Token], tables: TokenTables) -> Bool 
 // after `[` or `,` at the top of a `#[ … ]` list, when a `.` follows it. None
 // (Jet-only pass)
 parser_collect_marker_import_names: fn(tokens: [Token], tables: TokenTables, candidates: [String], used: ^[String]) Never! {
-    aliases := [String]{}
-    spellings := [String]{}
+    ^aliases: [String]{}
+    ^spellings: [String]{}
     loop candidate in candidates {
         spelled: sema_casing_marker_qualifier(candidate)
         if spelled != candidate {
@@ -1419,7 +1431,7 @@ parser_collect_marker_import_names: fn(tokens: [Token], tables: TokenTables, can
     if aliases.len() == 0 {
         return
     }
-    depth := 0
+    ^depth: 0
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if {
@@ -1447,17 +1459,17 @@ parser_collect_marker_import_names: fn(tokens: [Token], tables: TokenTables, can
 }
 
 parser_import_span_index: fn(spans: [Span]) -> [Span] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<spans.len() -> order.push(index)
-    width := 1
+    ^width: 1
     loop width < order.len() {
-        merged := [Int]{}
-        start := 0
+        ^merged: [Int]{}
+        ^start: 0
         loop start < order.len() {
             middle: if start + width < order.len() -> start + width else -> order.len()
             end: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
-            left := start
-            right := middle
+            ^left: start
+            ^right: middle
             loop left < middle || right < end {
                 if {
                     right >= end || (left < middle && spans[order[left]].start <= spans[order[right]].start) -> {
@@ -1475,7 +1487,7 @@ parser_import_span_index: fn(spans: [Span]) -> [Span] Never! {
         order = merged
         width *= 2
     }
-    indexed := [Span]{}
+    ^indexed: [Span]{}
     loop position in order {
         span: spans[position]
         // Prefix maximum ends preserve containment even for overlapping spans.
@@ -1486,8 +1498,8 @@ parser_import_span_index: fn(spans: [Span]) -> [Span] Never! {
 }
 
 parser_inside_import_span: fn(indexed_spans: [Span], span: Span) -> Bool Never! {
-    low := 0
-    high := indexed_spans.len()
+    ^low: 0
+    ^high: indexed_spans.len()
     loop low < high {
         middle: low + (high - low) /% 2
         if indexed_spans[middle].start <= span.start -> low = middle + 1 else -> high = middle
@@ -1541,7 +1553,7 @@ parser_debug_trace_sites: fn(tokens: [Token], tables: TokenTables, source: [U8])
 // at `source_offset` (one parser chunk). Emitted `DebugTraceSite` offsets stay
 // global byte offsets.
 parser_debug_trace_sites_at: fn(tokens: [Token], tables: TokenTables, source: [U8], source_offset: Int) -> [DebugTraceSite] Never! {
-    sites := [DebugTraceSite]{}
+    ^sites: [DebugTraceSite]{}
     if source.len() == 0 -> return sites
     debug: name_find(tables.names, "debug") ?? return sites
     parser_collect_debug_trace_sites_at(tokens, tables, debug, source, source_offset, sites)
@@ -1549,7 +1561,7 @@ parser_debug_trace_sites_at: fn(tokens: [Token], tables: TokenTables, source: [U
 }
 
 parser_collect_debug_trace_sites_at: fn(tokens: [Token], tables: TokenTables, debug: Name, source: [U8], source_offset: Int, sites: ^[DebugTraceSite]) Never! {
-    has_call := false
+    ^has_call: false
     count: tokens.len()
     loop index in 0..<count {
         token: tokens[index]
@@ -1564,10 +1576,12 @@ parser_collect_debug_trace_sites_at: fn(tokens: [Token], tables: TokenTables, de
             has_call = true
         }
     }
-    if !has_call -> return
-    closes := [Int]{}
+    if !has_call {
+        return
+    }
+    ^closes: [Int]{}
     closes.try_reserve(count) ?? ()
-    opens := [Int]{}
+    ^opens: [Int]{}
     loop index in 0..<count {
         closes.push(-1)
         if tokens[index].kind == TOKEN_LPAREN -> opens.push(index)
@@ -1585,7 +1599,7 @@ parser_collect_debug_trace_sites_at: fn(tokens: [Token], tables: TokenTables, de
         open: index + 1
         close: closes[open]
         if close < 0 -> next
-        last := close - 1
+        ^last: close - 1
         if last > open && tokens[last].kind == TOKEN_COMMA -> last -= 1
         if last <= open -> next
         start: tokens[open + 1].span.start
@@ -1604,8 +1618,8 @@ parser_collect_debug_trace_sites_at: fn(tokens: [Token], tables: TokenTables, de
 // operand is a name or literal with its member steps, calls, indexes and
 // bodies.
 parser_debug_argument_compound: fn(tokens: [Token], first: Int, last: Int) -> Bool Never! {
-    depth := 0
-    operand := false
+    ^depth: 0
+    ^operand: false
     loop index in first..<last + 1 {
         kind: tokens[index].kind
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE {
@@ -1674,7 +1688,7 @@ parser_debug_line_between_at: fn(source: [U8], source_offset: Int, start: Int, e
 }
 
 parser_parse_program: fn(state: ^JetParserState) -> Program {
-    program := ast_program()
+    ^program: ast_program()
     loop parser_current_kind(state) != TOKEN_EOF {
         parser_skip_semicolons(state)
         if parser_current_kind(state) == TOKEN_EOF -> break
@@ -1705,14 +1719,12 @@ parser_parse_program: fn(state: ^JetParserState) -> Program {
                 item: parser_parse_persist_binding(state)
                 if {
                     parser_error_since(state, errors_before) -> parser_sync_top(state)
-                    item == .Val(value) -> {
-                        program.items.push(value)
-                    }
+                    item == .Val(value) -> { program.items.push(value) }
                     else -> { parser_sync_top(state) }
                 }
             }
             parser_marked_module_binding_ahead(state) -> {
-                markers := [Marker]{}
+                ^markers: [Marker]{}
                 loop parser_current_kind(state) == TOKEN_HASH {
                     markers.push(parser_parse_marker(state))
                     // A marker on its own line still marks the binding below.
@@ -1726,7 +1738,7 @@ parser_parse_program: fn(state: ^JetParserState) -> Program {
                 if {
                     parser_error_since(state, errors_before) -> parser_sync_top(state)
                     definition_option == .Val(definition) -> {
-                        declared := definition.copy()
+                        ^declared: definition.copy()
                         loop marker in markers {
                             declared.markers.push(marker.copy())
                             state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(start), site: Val(RuleSite.Declaration)})
@@ -1811,7 +1823,7 @@ parser_parse_program: fn(state: ^JetParserState) -> Program {
 // the defining module. Retain an unattached head for that ordinary replay.
 parser_unattached_marker_at_end: fn(state: ^JetParserState) -> Bool Never! {
     if parser_current_kind(state) != TOKEN_HASH -> return false
-    offset := 1
+    ^offset: 1
     if parser_kind_at(state, offset) == TOKEN_BANG -> offset += 1
     if parser_kind_at(state, offset) != TOKEN_IDENT -> return false
     offset += 1
@@ -1819,7 +1831,7 @@ parser_unattached_marker_at_end: fn(state: ^JetParserState) -> Bool Never! {
         offset += 2
     }
     if parser_kind_at(state, offset) == TOKEN_LPAREN {
-        depth := 1
+        ^depth: 1
         offset += 1
         loop depth > 0 {
             kind: parser_kind_at(state, offset)
@@ -1837,7 +1849,7 @@ parser_unattached_marker_at_end: fn(state: ^JetParserState) -> Bool Never! {
 // (relative to the cursor), or -1 when none starts there.
 parser_marker_head_end: fn(state: ^JetParserState, start: Int) -> Int Never! {
     if parser_kind_at(state, start) != TOKEN_HASH -> return -1
-    offset := start + 1
+    ^offset: start + 1
     if parser_kind_at(state, offset) == TOKEN_BANG -> offset += 1
     if parser_kind_at(state, offset) != TOKEN_IDENT -> return -1
     offset += 1
@@ -1845,7 +1857,7 @@ parser_marker_head_end: fn(state: ^JetParserState, start: Int) -> Int Never! {
         offset += 2
     }
     if parser_kind_at(state, offset) == TOKEN_LPAREN {
-        depth := 1
+        ^depth: 1
         offset += 1
         loop depth > 0 {
             kind: parser_kind_at(state, offset)
@@ -1865,9 +1877,9 @@ parser_marker_head_end: fn(state: ^JetParserState, start: Int) -> Int Never! {
 // carries them as its own markers (a `#ContextKey request_id: 0` is a key by
 // its marker).
 parser_marked_module_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
-    offset := parser_marker_head_end(state, 0)
+    ^offset: parser_marker_head_end(state, 0)
     if offset < 0 -> return false
-    head_end := offset
+    ^head_end: offset
     loop parser_kind_at(state, offset) == TOKEN_SEMI -> offset += 1
     loop parser_kind_at(state, offset) == TOKEN_HASH {
         offset = parser_marker_head_end(state, offset)
@@ -1884,7 +1896,9 @@ parser_marked_module_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if bytes.len() == 0 || !((bytes[0] >= 97 && bytes[0] <= 122) || bytes[0] == 95) -> return false
     // Markers on lines of their own above a function or another item take
     // the item route, which attaches them the same way.
-    if offset == head_end || (offset == head_end + 1 && parser_kind_at(state, head_end) == TOKEN_CARET) -> return true
+    if offset == head_end || (offset == head_end + 1 && parser_kind_at(state, head_end) == TOKEN_CARET) {
+        return true
+    }
     value: parser_kind_at(state, offset + 2)
     !parser_is_item_keyword(value) && !parser_prep_verb_ahead(state, offset + 2, TOKEN_KW_FN)
 }
@@ -1916,7 +1930,7 @@ parser_file_cap_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_kind_at(state, 1) != TOKEN_IDENT || parser_value_at(state, 1) != MARKER_FX {
         return false
     }
-    offset := parser_marker_head_end(state, 0)
+    ^offset: parser_marker_head_end(state, 0)
     if offset < 0 -> return false
     loop parser_kind_at(state, offset) == TOKEN_SEMI -> offset += 1
     parser_kind_at(state, offset) == TOKEN_KW_USE
@@ -1931,7 +1945,7 @@ parser_parse_file_cap: fn(state: ^JetParserState, program: ^Program) {
         parser_report_repeated_file_marker(state, MARKER_FX, marker.span)
         return
     }
-    cap := parser_module_fx_cap(state, marker, "") ?? return
+    ^cap: parser_module_fx_cap(state, marker, "") ?? return
     cap.scope = "file"
     program.file_cap = Val(cap)
 }
@@ -1950,8 +1964,8 @@ parser_is_file_rule: fn(name: String) -> Bool Never! {
 // it heads a type, or every entry is a partition `#Target` that the function
 // below can take (`#[Target(JS)] fn`).
 parser_file_marker_group_ahead: fn(state: ^JetParserState) -> Bool Never! {
-    offset := 2
-    every_entry_fits_function := true
+    ^offset: 2
+    ^every_entry_fits_function: true
     loop {
         if parser_kind_at(state, offset) == TOKEN_BANG -> offset += 1
         name: parser_lookahead(state, offset)
@@ -1963,7 +1977,7 @@ parser_file_marker_group_ahead: fn(state: ^JetParserState) -> Bool Never! {
         }
         offset += 1
         if parser_kind_at(state, offset) == TOKEN_LPAREN {
-            depth := 0
+            ^depth: 0
             loop {
                 kind: parser_kind_at(state, offset)
                 if kind == TOKEN_EOF -> return false
@@ -1995,10 +2009,10 @@ parser_file_marker_group_ahead: fn(state: ^JetParserState) -> Bool Never! {
 // a marker on the next item. `name_offset` is the offset of the `Target` name.
 parser_target_selects_file_web_at: fn(state: ^JetParserState, name_offset: Int) -> Bool Never! {
     if parser_kind_at(state, name_offset + 1) != TOKEN_LPAREN -> return false
-    previous := ""
-    last := ""
-    count := 0
-    offset := name_offset + 2
+    ^previous: ""
+    ^last: ""
+    ^count: 0
+    ^offset: name_offset + 2
     loop {
         token: parser_lookahead(state, offset)
         if token.kind == TOKEN_RPAREN -> break
@@ -2018,11 +2032,11 @@ parser_target_selects_file_web_at: fn(state: ^JetParserState, name_offset: Int) 
 // with `module` after it on the same line heads that module
 // (`heads_module`); one that ends its line stays on the file.
 parser_parse_file_directive: fn(state: ^JetParserState, program: ^Program) {
-    markers := [Marker]{}
-    chunks := 0
-    bracket_chunks := 0
-    heads_module := false
-    sequence := parser_current(state).span
+    ^markers: [Marker]{}
+    ^chunks: 0
+    ^bracket_chunks: 0
+    ^heads_module: false
+    ^sequence: parser_current(state).span
     loop parser_file_directive_ahead(state) && !parser_aborting(state) {
         if {
             parser_kind_at(state, 1) == TOKEN_LBRACKET -> {
@@ -2191,7 +2205,7 @@ parser_is_item_keyword: fn(kind: Int) -> Bool Never! {
 // compile time is always the explicit `NAME: #run value`.
 parser_constant_name: fn(name: String) -> Bool Never! {
     if name == "" || name.starts_with("@") || name.starts_with("$") -> return false
-    has_upper := false
+    ^has_upper: false
     loop byte in name.bytes() {
         if byte >= (U8{97}) && byte <= (U8{122}) -> return false
         if byte >= (U8{65}) && byte <= (U8{90}) -> has_upper = true
@@ -2245,7 +2259,7 @@ parser_hash_leads_to_item: fn(state: ^JetParserState) -> Bool Never! {
 
 // The marker run ahead heads a function (`fn`, `#run fn`) or a `module`.
 parser_hash_leads_to_function_or_module: fn(state: ^JetParserState) -> Bool Never! {
-    offset := parser_hash_item_offset(state)
+    ^offset: parser_hash_item_offset(state)
     if offset < 0 -> return false
     if parser_kind_at(state, offset) == TOKEN_KW_PRIV -> offset += 1
     kind: parser_kind_at(state, offset)
@@ -2255,7 +2269,7 @@ parser_hash_leads_to_function_or_module: fn(state: ^JetParserState) -> Bool Neve
 // The offset of the item after the marker run at the cursor (newline
 // terminators skipped), or -1 when a marker in the run is malformed.
 parser_hash_item_offset: fn(state: ^JetParserState) -> Int Never! {
-    offset := 0
+    ^offset: 0
     loop {
         loop parser_kind_at(state, offset) == TOKEN_SEMI -> offset += 1
         if parser_item_declaration_ahead_at(state, offset) -> return offset
@@ -2263,7 +2277,7 @@ parser_hash_item_offset: fn(state: ^JetParserState) -> Int Never! {
         offset += 1
         if parser_kind_at(state, offset) == TOKEN_LBRACKET {
             offset += 1
-            nesting := 1
+            ^nesting: 1
             loop nesting > 0 && parser_kind_at(state, offset) != TOKEN_EOF {
                 kind: parser_kind_at(state, offset)
                 if kind == {
@@ -2282,7 +2296,7 @@ parser_hash_item_offset: fn(state: ^JetParserState) -> Int Never! {
             offset += 2
         }
         if parser_kind_at(state, offset) == TOKEN_LPAREN {
-            nesting := 1
+            ^nesting: 1
             offset += 1
             loop nesting > 0 && parser_kind_at(state, offset) != TOKEN_EOF {
                 kind: parser_kind_at(state, offset)

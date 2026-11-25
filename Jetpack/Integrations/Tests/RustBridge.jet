@@ -52,7 +52,7 @@ pkg_ffi_test_entry: fn(jet_name: String, rust_path: String, params: [{convention
 }
 
 pkg_ffi_test_asm_entry: fn() -> ExternEntry Never! {
-    entry := pkg_ffi_test_entry("add_one", "", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "`#FFI(asm) add_one: fn`")
+    ^entry: pkg_ffi_test_entry("add_one", "", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "`#FFI(asm) add_one: fn`")
     contract: InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Register{name: "rax"}), clobbers: [String]{}}
     entry.inline = Val(InlineEntry{lang: "asm", source: "mov rax, {{value}}; -> return", param_names: [String]{"value"}, asm_contract: Val(contract)})
     entry
@@ -75,8 +75,8 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("inline asm uses checked output and discarded clobber operands") {
-    entry := pkg_ffi_test_asm_entry()
-    inline := entry.inline ?? panic("asm entry")
+    ^entry: pkg_ffi_test_asm_entry()
+    ^inline: entry.inline ?? panic("asm entry")
     inline.source = "add {{value}}, 1 ; -> return\n; clobbers rbx, rbx"
     inline.asm_contract = Val(InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Parameter{index: 0}), clobbers: [String]{"rbx"}})
     entry.inline = Val(inline)
@@ -99,9 +99,9 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 
 #Test("over budget asm push rail keeps early clobbers with one memory carrier") {
     names: [String]{"address", "a", "b", "c", "d", "e"}
-    params := [{convention: AccessConvention, ty: Type}]{}
+    ^params: [{convention: AccessConvention, ty: Type}]{}
     loop _ in names -> params.push({convention: AccessConvention.Read, ty: Type.Int})
-    entry := pkg_ffi_test_entry("call5", "", params, names, Val(Type.Int), "audited word call")
+    ^entry: pkg_ffi_test_entry("call5", "", params, names, Val(Type.Int), "audited word call")
     contract: InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Register{name: "rax"}), clobbers: [String]{"rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}}
     source: "push {{address}}\npush {{a}}\npush {{b}}\npush {{c}}\npush {{d}}\npush {{e}}\npop r8\npop rcx\npop rdx\npop rsi\npop rdi\npop r11\ncall r11\nmov rax, rax ; -> return"
     inline: InlineEntry{lang: "asm", source: source, param_names: names, asm_contract: Val(contract)}
@@ -125,16 +125,16 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 
 #Test("inline asm contract changes invalidate bridge identity") {
     original: pkg_ffi_test_asm_entry()
-    changed := original
-    changed_inline := changed.inline ?? panic("asm entry")
+    ^changed: original
+    ^changed_inline: changed.inline ?? panic("asm entry")
     changed_inline.source = "{changed_inline.source} ; body"
     changed.inline = Val(changed_inline)
     x86: "x86_64-unknown-linux-gnu"
     assert(pkg_ffi_test_key([ExternEntry]{original}, x86, None) != pkg_ffi_test_key([ExternEntry]{changed}, x86, None))
     assert(pkg_ffi_test_key([ExternEntry]{original}, x86, None) != pkg_ffi_test_key([ExternEntry]{original}, "aarch64-unknown-linux-gnu", None))
-    changed_contract := original
-    contract_inline := changed_contract.inline ?? panic("asm entry")
-    contract := contract_inline.asm_contract ?? panic("asm contract")
+    ^changed_contract: original
+    ^contract_inline: changed_contract.inline ?? panic("asm entry")
+    ^contract: contract_inline.asm_contract ?? panic("asm contract")
     contract.clobbers.push("rbx")
     contract_inline.asm_contract = Val(contract)
     changed_contract.inline = Val(contract_inline)
@@ -142,8 +142,8 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("inline asm requires an explicit return destination") {
-    entry := pkg_ffi_test_asm_entry()
-    inline := entry.inline ?? panic("asm entry")
+    ^entry: pkg_ffi_test_asm_entry()
+    ^inline: entry.inline ?? panic("asm entry")
     inline.source = "rdtsc ; -> return"
     inline.asm_contract = None
     entry.inline = Val(inline)
@@ -203,7 +203,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
     files.write(files.join(target, "bridge.sha256"), "{FFI_BRIDGE_ARTIFACTS_SCHEMA}\n{digest} libbridge.rlib\n") ?? panic("write manifest")
     tampered: "tampered bridge artifact"
     files.write(artifact, tampered) ?? panic("tamper")
-    deps := [String:String]{}
+    ^deps: [String:String]{}
     deps["base64"] = "0.22"
     diagnostic: pkg_ffi_bridge_artifact_integrity_diagnostic(target, "bridge", deps, [String]{artifact}) ?? panic("a tampered artifact must be reported")
     assert_eq(diagnostic.code, "E2604")
@@ -234,7 +234,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("generated com bridge carries the com descriptor stamp") {
-    entry := pkg_ffi_test_entry("open", "jet_com_office_open", [{convention: AccessConvention, ty: Type}]{}, [String]{}, Val(Type.Int), "`open` in COM module `jet_com_office`")
+    ^entry: pkg_ffi_test_entry("open", "jet_com_office_open", [{convention: AccessConvention, ty: Type}]{}, [String]{}, Val(Type.Int), "`open` in COM module `jet_com_office`")
     entry.c_abi = true
     entry.c_module = true
     source: pkg_ffi_test_wrapper_lib([ExternEntry]{entry})
@@ -268,13 +268,13 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
     assert(source.contains("ffi_host_fault(); 1"))
     assert(source.contains("out.ptr"))
     assert(!source.contains("from_utf8_unchecked"))
-    capability_entry := value_entry
+    ^capability_entry: value_entry
     capability_entry.params = [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.String}}
     assert(pkg_ffi_emit_cabi_trampoline(capability_entry, [String]{}, CRecordDefinitions.empty()) == None)
 }
 
 #Test("inline capability wrapper keeps exclusive pointer shape") {
-    entry := pkg_ffi_test_entry("edit", "", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.Int}}, [String]{"value"}, None, "#FFI(c) edit")
+    ^entry: pkg_ffi_test_entry("edit", "", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.Int}}, [String]{"value"}, None, "#FFI(c) edit")
     inline: InlineEntry{lang: "c", source: "void edit(int64_t* value) {{ *value += 1; }}", param_names: [String]{"value"}, asm_contract: None}
     entry.inline = Val(inline)
     wrapper: pkg_ffi_emit_inline_wrapper_fn(entry, inline)
@@ -324,31 +324,31 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("inline native toolchain keys the bridge") {
-    entry := pkg_ffi_test_entry("probe", "", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "`#FFI(c) probe: fn`")
+    ^entry: pkg_ffi_test_entry("probe", "", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "`#FFI(c) probe: fn`")
     entry.inline = Val(InlineEntry{lang: "c", source: "int64_t probe(int64_t value) {{ return value; }}", param_names: [String]{"value"}, asm_contract: None})
-    cpp_entry := entry
+    ^cpp_entry: entry
     cpp_entry.jet_name = "cpp_probe"
-    cpp_inline := cpp_entry.inline ?? panic("inline entry")
+    ^cpp_inline: cpp_entry.inline ?? panic("inline entry")
     cpp_inline.lang = "cpp"
     cpp_entry.inline = Val(cpp_inline)
     entries: [ExternEntry]{entry, cpp_entry}
-    toolchain := InlineNativeToolchain{
+    ^toolchain: InlineNativeToolchain{
         target: "aarch64-apple-darwin",
         cc: Val(NativeTool{path: "/audited/clang", identity: "/audited/clang\nfake clang 1", target_arg: Val("--target=aarch64-apple-darwin")}),
         cxx: Val(NativeTool{path: "/audited/clang++", identity: "/audited/clang++\nfake clang 1", target_arg: Val("--target=aarch64-apple-darwin")}),
         ar: NativeTool{path: "/audited/llvm-ar", identity: "/audited/llvm-ar\nfake ar 1", target_arg: None},
     }
     first: pkg_ffi_test_key(entries, toolchain.target, Val(toolchain))
-    changed_tool := toolchain
+    ^changed_tool: toolchain
     changed_tool.ar.identity = "{changed_tool.ar.identity}\nfake ar 2"
     assert(first != pkg_ffi_test_key(entries, changed_tool.target, Val(changed_tool)))
-    changed_target := toolchain
+    ^changed_target: toolchain
     changed_target.target = "aarch64-unknown-linux-gnu"
     assert(first != pkg_ffi_test_key(entries, changed_target.target, Val(changed_target)))
 }
 
 #Test("c wrapper escapes native symbol as link name") {
-    entry := pkg_ffi_test_entry("host_add", "host-add$raw", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "`#Import(c) host_add: fn`")
+    ^entry: pkg_ffi_test_entry("host_add", "host-add$raw", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "`#Import(c) host_add: fn`")
     entry.wrapper_name = "jet_ffi_guest___jet_mod__host_add"
     entry.c_abi = true
     entry.c_module = true
@@ -360,7 +360,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("c handle cabi uses native pointer for checked nominal type") {
-    entry := pkg_ffi_test_entry("gzclose", "gzclose", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Move, ty: Type.Named{name: "GzFile"}}}, [String]{"file"}, None, "generated zlib close")
+    ^entry: pkg_ffi_test_entry("gzclose", "gzclose", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Move, ty: Type.Named{name: "GzFile"}}}, [String]{"file"}, None, "generated zlib close")
     entry.c_abi = true
     entry.generated = true
     entry.c_module = true
@@ -372,7 +372,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 
 #Test("c handle cabi preserves writable pointee abi") {
     params: [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.Named{name: "HbFont"}}, {convention: AccessConvention.Read, ty: Type.Int}, {convention: AccessConvention.Read, ty: Type.Int}}
-    entry := pkg_ffi_test_entry("hb_font_set_scale", "hb_font_set_scale", params, [String]{"font", "x_scale", "y_scale"}, None, "generated harfbuzz scale")
+    ^entry: pkg_ffi_test_entry("hb_font_set_scale", "hb_font_set_scale", params, [String]{"font", "x_scale", "y_scale"}, None, "generated harfbuzz scale")
     entry.c_abi = true
     entry.generated = true
     entry.c_module = true
@@ -382,7 +382,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 }
 
 #Test("cabi trampoline emits mutable scalar and string pointer abi") {
-    scalar := pkg_ffi_test_entry("out_scalar", "out_scalar", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.Int}}, [String]{"value"}, None, "portable scalar write fixture")
+    ^scalar: pkg_ffi_test_entry("out_scalar", "out_scalar", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.Int}}, [String]{"value"}, None, "portable scalar write fixture")
     scalar.c_abi = true
     scalar.generated = true
     scalar.c_module = true
@@ -400,7 +400,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
         {ty: Type.Quantity{base: Type.Float, dimension: Dimension{axes: [DimensionAxis]{}}}, native: "f64"},
     }
     loop index in 0..<cases.len() {
-        entry := scalar
+        ^entry: scalar
         entry.jet_name = "out_scalar_{index}"
         entry.rust_path = entry.jet_name
         entry.wrapper_name = "jet_ffi_{entry.jet_name}"
@@ -410,10 +410,10 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
     }
     generated: pkg_ffi_test_wrapper_lib([ExternEntry]{scalar})
     assert(generated.contains("jet_ffi_out_scalar_cabi"))
-    nominal := scalar
+    ^nominal: scalar
     nominal.params = [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Named{name: "Nominal"}}}
     assert(pkg_ffi_emit_cabi_trampoline(nominal, [String]{}, CRecordDefinitions.empty()) == None)
-    string_entry := pkg_ffi_test_entry("out_string", "out_string", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.String}}, [String]{"value"}, None, "portable string write fixture")
+    ^string_entry: pkg_ffi_test_entry("out_string", "out_string", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Write, ty: Type.String}}, [String]{"value"}, None, "portable string write fixture")
     string_entry.c_abi = true
     string_entry.generated = true
     string_entry.c_module = true

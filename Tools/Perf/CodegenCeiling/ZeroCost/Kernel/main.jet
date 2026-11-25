@@ -17,10 +17,10 @@ PAGE_BYTES: 65536
 
 // Allocate, write, read and free: one block of 1 to 64 words per turn.
 churn: fn(n: Int) -> Int {
-    total := I64{0}
+    ^total: I64{0}
     loop i in 0..<n {
         count: 1 + (i & 63)
-        words := Words.claim(count) ?? panic("no memory")
+        ^words: Words.claim(count) ?? panic("no memory")
         words.set(0, I64{i})
         words.set(count - 1, I64{count})
         total = wrapping(total + words.get(0) + words.get(count - 1))
@@ -31,14 +31,14 @@ churn: fn(n: Int) -> Int {
 
 // Resize: one word appended per turn, the block doubling when full.
 grow: fn(n: Int) -> Int {
-    words := Words.claim(4) ?? panic("no memory")
-    used := 0
+    ^words: Words.claim(4) ?? panic("no memory")
+    ^used: 0
     loop i in 0..<n {
         if used == words.len() && !words.grow() -> panic("no memory")
         words.set(used, I64{i})
         used += 1
     }
-    total := I64{0}
+    ^total: I64{0}
     loop at in 0..<used -> total = wrapping(total + words.get(at))
     close(words)
     Int{total}
@@ -46,10 +46,10 @@ grow: fn(n: Int) -> Int {
 
 // Fill, compare, copy and read whole blocks.
 scan: fn(n: Int) -> Int {
-    a := Words.claim(WORDS) ?? panic("no memory")
-    b := Words.claim(WORDS) ?? panic("no memory")
+    ^a: Words.claim(WORDS) ?? panic("no memory")
+    ^b: Words.claim(WORDS) ?? panic("no memory")
     b.set_all(I64{0})
-    total := I64{0}
+    ^total: I64{0}
     loop pass in 0..<n {
         a.set_all(I64{pass})
         a.set(pass & WORDS - 1, I64{-1})
@@ -67,7 +67,7 @@ scan: fn(n: Int) -> Int {
 // The atomic word: add, load, compare-exchange and store.
 tally: fn(n: Int) -> Int {
     word: Ticks.start()
-    total := I64{0}
+    ^total: I64{0}
     loop _ in 0..<n {
         loop round in 0..<ROUNDS {
             total = wrapping(total + word.bump(I64{round & 31}))
@@ -81,9 +81,9 @@ tally: fn(n: Int) -> Int {
 
 // Map, write, read and unmap fresh pages.
 pages: fn(n: Int) -> Int {
-    total := I64{0}
+    ^total: I64{0}
     loop i in 0..<n {
-        mapping := Pages.map(PAGE_BYTES) ?? panic("no mapping")
+        ^mapping: Pages.map(PAGE_BYTES) ?? panic("no mapping")
         last: mapping.len() - 1
         mapping.set(i & last, I64{i})
         mapping.set(last, I64{last})
@@ -99,9 +99,9 @@ run: fn(args: Args) {
     work: [fn(Int) -> Int]{churn, grow, scan, tally, pages}
     loop index in 0..<work.len() -> print("{NAMES[index]} {work[index](args.n)}")
     count: if args.n > 0 -> args.n else -> 1
-    words := Words.claim(count) ?? panic("no memory")
+    ^words: Words.claim(count) ?? panic("no memory")
     words.set_all(I64{3})
-    total := I64{0}
+    ^total: I64{0}
     values: words.view()
     loop at in 0..<values.len() -> total = wrapping(total + values[at])
     print("run {total}")

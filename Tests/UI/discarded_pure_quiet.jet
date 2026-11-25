@@ -57,7 +57,7 @@ run: fn() {
     quiet_unit()
     audited_unit()
     // The same infallible Unit carrier remains harmless in a lambda body.
-    each := fn() { quiet_unit() }
+    ^each: fn() { quiet_unit() }
     each()
     // A callback argument brings its own effects to this call site.
     apply(
@@ -70,7 +70,7 @@ run: fn() {
     // A generic callee's effects come from the trait bound it dispatches.
     measure(Square{side: 2})
     // Writing through `^` changes the caller's value, so the call is not pure.
-    count := 0
+    ^count: 0
     bump(count)
     print(count)
     // A failure from the callee still propagates out of `run`.

@@ -10,17 +10,17 @@ semindex_doc_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
 // a trailing newline.
 semindex_doc_lines: fn(text: String) -> [String] Never! {
     bytes: text.bytes()
-    lines := [String]{}
-    start := 0
+    ^lines: [String]{}
+    ^start: 0
     loop index in 0..<bytes.len() {
         if bytes[index] != (U8{10}) -> next
-        end := index
+        ^end: index
         if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
         lines.push(semindex_doc_text(bytes, start, end))
         start = index + 1
     }
     if start < bytes.len() {
-        end := bytes.len()
+        ^end: bytes.len()
         if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
         lines.push(semindex_doc_text(bytes, start, end))
     }

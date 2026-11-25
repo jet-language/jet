@@ -137,7 +137,7 @@ data_error: fn(kind: DataErrorKind, message: String, operation: String) -> DataE
 }
 
 data_error_text: fn(error: DataError) -> String Never! {
-    text := "{data_error_kind_text(error.kind)} {error.operation}"
+    ^text: "{data_error_kind_text(error.kind)} {error.operation}"
     if error.row == .Val(row) -> text = "{text}, row {row}"
     if error.column == .Val(column) -> text = "{text}, column {column}"
     if error.index == .Val(index) -> text = "{text}, index {index}"
@@ -443,7 +443,7 @@ Query: struct<T> {
     limit: fn(self, count: Int) -> Query<T> Never! {
         most: if self.__take == .Val(held) && held < count -> held else -> count
         live: query_live_derived<T, T>(self, fn(entries: [WatchEntry<T>]) {
-            out := [WatchEntry<T>]{}
+            ^out: [WatchEntry<T>]{}
             loop entry in entries {
                 if out.len() >= most -> break
                 out.push(entry.copy())
@@ -473,8 +473,8 @@ Query: struct<T> {
                         if groups.len() > self.__limits.max_groups {
                             return Err(data_error(DataErrorKind.Limit, "max_groups {self.__limits.max_groups} exceeded", "query.count_by"))
                         }
-                        out := [Int:Int]{}
-                        parsed := true
+                        ^out: [Int:Int]{}
+                        ^parsed: true
                         loop entry in groups {
                             if Int.parse(entry.key) == .Ok(number) -> out[number] = entry.count else {
                                 parsed = false
@@ -489,7 +489,7 @@ Query: struct<T> {
         }
         rows: self.collect() ?? return Err(err)
         limits: self.__limits.copy()
-        out := [Int:Int]{}
+        ^out: [Int:Int]{}
         loop row in rows {
             group_key: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.count_by"))
             if out.get(group_key) == .Val(held) -> out[group_key] = held + 1 else {
@@ -510,7 +510,7 @@ Query: struct<T> {
                         if groups.len() > self.__limits.max_groups {
                             return Err(data_error(DataErrorKind.Limit, "max_groups {self.__limits.max_groups} exceeded", "query.count_by"))
                         }
-                        out := [String:Int]{}
+                        ^out: [String:Int]{}
                         loop entry in groups -> out[entry.key.copy()] = entry.count
                         return Ok(out)
                     }
@@ -520,7 +520,7 @@ Query: struct<T> {
         }
         rows: self.collect() ?? return Err(err)
         limits: self.__limits.copy()
-        out := [String:Int]{}
+        ^out: [String:Int]{}
         loop row in rows {
             group_key: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.count_by"))
             if out.get(group_key) == .Val(held) -> out[group_key] = held + 1 else {
@@ -541,8 +541,8 @@ Query: struct<T> {
                         if groups.len() > self.__limits.max_groups {
                             return Err(data_error(DataErrorKind.Limit, "max_groups {self.__limits.max_groups} exceeded", "query.count_by"))
                         }
-                        out := [Bool:Int]{}
-                        parsed := true
+                        ^out: [Bool:Int]{}
+                        ^parsed: true
                         loop entry in groups {
                             if entry.key == "1" || entry.key == "true" -> out[true] = entry.count else if entry.key == "0" || entry.key == "false" {
                                 out[false] = entry.count
@@ -559,7 +559,7 @@ Query: struct<T> {
         }
         rows: self.collect() ?? return Err(err)
         limits: self.__limits.copy()
-        out := [Bool:Int]{}
+        ^out: [Bool:Int]{}
         loop row in rows {
             group_key: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.count_by"))
             if out.get(group_key) == .Val(held) -> out[group_key] = held + 1 else {
@@ -1063,7 +1063,7 @@ track: fn<T, K: Comparable>(rows: [T], key: ^^fn(T) -> K) -> DataTracked<T, K> D
     if rows.len() > limit {
         return Err(data_error(DataErrorKind.Limit, "{rows.len()} rows exceed max_output_rows {limit}", "data.track"))
     }
-    table := TrackedTable<T, K>{
+    ^table: TrackedTable<T, K>{
         rows: [T]{},
         keys: [K]{},
         by_key: [Int]{},
@@ -1079,7 +1079,9 @@ track: fn<T, K: Comparable>(rows: [T], key: ^^fn(T) -> K) -> DataTracked<T, K> D
     loop row in rows {
         value: table.key(row.copy()) ?? return Err(err)
         found: group_find<K>(table.keys, table.by_key, value)
-        if found >= 0 -> return Err(data_error(DataErrorKind.DuplicateKey, "two rows have the same key", "data.track"))
+        if found >= 0 {
+            return Err(data_error(DataErrorKind.DuplicateKey, "two rows have the same key", "data.track"))
+        }
         group_add<K>(table.keys, table.by_key, found, value)
         table.rows.push(row.copy())
         table.orders.push(table.next_order)
@@ -1089,10 +1091,12 @@ track: fn<T, K: Comparable>(rows: [T], key: ^^fn(T) -> K) -> DataTracked<T, K> D
 }
 
 priv tracked_insert: fn<T, K: Comparable>(tracked: DataTracked<T, K>, row: T) DataError! {
-    table := tracked.__table.guard_edit()
+    ^table: tracked.__table.guard_edit()
     key: table.value.key(row.copy()) ?? return Err(err)
     found: group_find<K>(table.value.keys, table.value.by_key, key)
-    if found >= 0 -> return Err(data_error(DataErrorKind.DuplicateKey, "the key is already tracked", "tracked.insert"))
+    if found >= 0 {
+        return Err(data_error(DataErrorKind.DuplicateKey, "the key is already tracked", "tracked.insert"))
+    }
     limit: DataLimits.safe().max_output_rows
     if table.value.rows.len() >= limit {
         return Err(data_error(DataErrorKind.Limit, "the tracked rows would exceed max_output_rows {limit}", "tracked.insert"))
@@ -1107,9 +1111,11 @@ priv tracked_insert: fn<T, K: Comparable>(tracked: DataTracked<T, K>, row: T) Da
 }
 
 priv tracked_replace: fn<T, K: Comparable>(tracked: DataTracked<T, K>, key: K, row: T) DataError! {
-    table := tracked.__table.guard_edit()
+    ^table: tracked.__table.guard_edit()
     found: group_find<K>(table.value.keys, table.value.by_key, key)
-    if found < 0 -> return Err(data_error(DataErrorKind.MissingKey, "the key is not tracked", "tracked.replace"))
+    if found < 0 {
+        return Err(data_error(DataErrorKind.MissingKey, "the key is not tracked", "tracked.replace"))
+    }
     own: table.value.key(row.copy()) ?? return Err(err)
     if (own <=> key) != Ordering.Equal {
         return Err(data_error(DataErrorKind.InvalidValue, "the row's key differs from the key it replaces", "tracked.replace"))
@@ -1120,16 +1126,20 @@ priv tracked_replace: fn<T, K: Comparable>(tracked: DataTracked<T, K>, key: K, r
 }
 
 priv tracked_remove: fn<T, K: Comparable>(tracked: DataTracked<T, K>, key: K) DataError! {
-    table := tracked.__table.guard_edit()
+    ^table: tracked.__table.guard_edit()
     found: group_find<K>(table.value.keys, table.value.by_key, key)
-    if found < 0 -> return Err(data_error(DataErrorKind.MissingKey, "the key is not tracked", "tracked.remove"))
+    if found < 0 {
+        return Err(data_error(DataErrorKind.MissingKey, "the key is not tracked", "tracked.remove"))
+    }
     order: table.value.orders[found]
     _: table.value.rows.remove(found, .Slot)
     _: table.value.keys.remove(found, .Slot)
     _: table.value.orders.remove(found, .Slot)
-    by_key := [Int]{}
+    ^by_key: [Int]{}
     loop position in table.value.by_key {
-        if position < found -> by_key.push(position) else if position > found -> by_key.push(position - 1)
+        if position < found -> by_key.push(position) else if position > found {
+            by_key.push(position - 1)
+        }
     }
     table.value.by_key = by_key
     tracked_log<T, K>(table.value, order, None)
@@ -1144,7 +1154,7 @@ priv tracked_log: fn<T, K>(table: ^TrackedTable<T, K>, order: Int, row: T?) Neve
     limit: DataLimits.safe().max_output_rows
     count: table.changes.len()
     if count >= limit {
-        kept := [TrackedChange<T>]{}
+        ^kept: [TrackedChange<T>]{}
         loop index in (count /% 2)..<count -> kept.push(table.changes[index].copy())
         table.changes = kept
     }
@@ -1159,14 +1169,14 @@ priv tracked_changes: fn<T, K>(table: Shared<TrackedTable<T, K>>, since: Int) ->
         return Err(data_error(DataErrorKind.StaleRevision, "the watched revision is newer than the tracked rows", "query.watch"))
     }
     count: held.value.changes.len()
-    low := 0
-    high := count
+    ^low: 0
+    ^high: count
     loop low < high {
         middle: low + (high - low) /% 2
         if held.value.changes[middle].revision <= since -> low = middle + 1 else -> high = middle
     }
     complete: since == revision || (low < count && held.value.changes[low].revision == since + 1)
-    changes := [TrackedChange<T>]{}
+    ^changes: [TrackedChange<T>]{}
     if complete {
         loop index in low..<count -> changes.push(held.value.changes[index].copy())
     }
@@ -1187,13 +1197,13 @@ priv query_narrowing_grouped: fn<T>(steps: [String], one_shot: Bool, limits: Dat
 
 // `query` maintained by watches as `live` says (QueryLive).
 priv query_live: fn<T>(query: ^^Query<T>, live: ^^Shared<QueryLive<T>>?) -> Query<T> Never! {
-    out := query.move()
+    ^out: query.move()
     out.__live = live.move()
     out
 }
 
 priv query_steps: fn(steps: [String], step: String) -> [String] Never! {
-    out := steps.copy()
+    ^out: steps.copy()
     out.push(step.copy())
     out
 }
@@ -1208,7 +1218,7 @@ priv query_rows: fn<T>(query: Query<T>) -> [T] DataError! { query_read<T>(query,
 // choose.
 priv query_read: fn<T>(query: Query<T>, condition: String, values: [String]) -> [T] DataError! {
     if query.__one_shot {
-        state := query.__state.guard_edit()
+        ^state: query.__state.guard_edit()
         if state.value.consumed {
             return Err(data_error(DataErrorKind.State, "query has already been collected", "query.collect"))
         }
@@ -1217,7 +1227,7 @@ priv query_read: fn<T>(query: Query<T>, condition: String, values: [String]) -> 
     cell: query.__cell.guard_read()
     most: query.__take ?? return cell.value.run(condition, values)
     rows: cell.value.run("", [String]{}) ?? return Err(err)
-    out := [T]{}
+    ^out: [T]{}
     loop row in rows {
         if out.len() >= most -> break
         out.push(row.copy())
@@ -1233,7 +1243,7 @@ priv query_count_by_sql: fn<T>(query: Query<T>, column: String, condition: Strin
     cell: query.__cell.guard_read()
     counter: cell.value.count_by ?? return Ok(None)
     if query.__one_shot {
-        state := query.__state.guard_edit()
+        ^state: query.__state.guard_edit()
         if state.value.consumed {
             return Err(data_error(DataErrorKind.State, "query has already been collected", "query.count_by"))
         }
@@ -1261,11 +1271,11 @@ query: fn<T>(rows: [T]) -> Query<T> Never! {
         .None -> DataLimits.safe()
     }
     query_make<T>([String]{"stream"}, true, limits.copy(), fn() {
-        reader := source.copy()
+        ^reader: source.copy()
         if reader.canceled {
             return Err(data_error(DataErrorKind.State, "stream was canceled", "data.stream"))
         }
-        out := [T]{}
+        ^out: [T]{}
         loop {
             if __stream_pull<T>(reader) == {
                 .Ok(item) -> {
@@ -1303,7 +1313,7 @@ priv __stream_pull: fn<T>(stream: ^DataStream<T>) -> T? DataError! {
     }
     if stream.__source == {
         .Val(source) -> {
-            cell := source.guard_edit()
+            ^cell: source.guard_edit()
             if cell.value.ahead_index < cell.value.ahead.len() {
                 value: cell.value.ahead[cell.value.ahead_index].copy()
                 cell.value.ahead_index += 1
@@ -1340,7 +1350,7 @@ priv __stream_collect: fn<T>(stream: ^DataStream<T>) -> [T] DataError! {
         .Val(source) -> source.guard_read().value.limits.max_output_rows
         .None -> -1
     }
-    out := [T]{}
+    ^out: [T]{}
     loop {
         item: __stream_pull<T>(stream)
         row: item ?? return Ok(out)
@@ -1348,7 +1358,7 @@ priv __stream_collect: fn<T>(stream: ^DataStream<T>) -> [T] DataError! {
             failure: data_error(DataErrorKind.Limit, "max_output_rows {limit} exceeded", "collect")
             if stream.__source == {
                 .Val(source) -> {
-                    cell := source.guard_edit()
+                    ^cell: source.guard_edit()
                     cell.value.terminal = Val(failure.copy())
                 }
                 .None -> {}
@@ -1365,12 +1375,12 @@ priv __stream_collect: fn<T>(stream: ^DataStream<T>) -> [T] DataError! {
 priv __stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
     if stream.canceled -> return 0
     start: if stream.index < 0 -> 0 else -> stream.index
-    remaining := stream.items.len() - start
+    ^remaining: stream.items.len() - start
     if remaining < 0 -> remaining = 0
     if stream.__source == {
         .Val(source) -> {
-            cell := source.guard_edit()
-            reading := !cell.value.done
+            ^cell: source.guard_edit()
+            ^reading: !cell.value.done
             if cell.value.terminal == {
                 .Val(_) -> { reading = false }
                 .None -> {}
@@ -1439,12 +1449,14 @@ KeyedStream: struct<K: Equatable, T> {
         width_ns: width.ns
         lateness_ns: watermark.ns
         if width_ns <= 0 -> panic("stream window duration must be positive, got {width_ns}ns")
-        if lateness_ns < 0 -> panic("stream allowed lateness must be nonnegative, got {lateness_ns}ns")
-        keys := [K]{}
-        pending := [PendingWindow<T>]{}
-        mark := 0
-        has_mark := false
-        stream := self.events.move()
+        if lateness_ns < 0 {
+            panic("stream allowed lateness must be nonnegative, got {lateness_ns}ns")
+        }
+        ^keys: [K]{}
+        ^pending: [PendingWindow<T>]{}
+        ^mark: 0
+        ^has_mark: false
+        ^stream: self.events.move()
         loop keyed in stream {
             event_ns: stream_event_ns(keyed.event.event_time)
             // `.Drop` is the one late-event disposition: a late event joins no window.
@@ -1455,7 +1467,7 @@ KeyedStream: struct<K: Equatable, T> {
                 has_mark = true
             }
             if !was_late {
-                key_index := keys.len()
+                ^key_index: keys.len()
                 loop (index, known) in keys {
                     if known == keyed.key {
                         key_index = index
@@ -1464,8 +1476,8 @@ KeyedStream: struct<K: Equatable, T> {
                 }
                 if key_index == keys.len() -> keys.push(keyed.key)
                 start_ns: event_ns /% width_ns * width_ns
-                position := pending.len()
-                joined := false
+                ^position: pending.len()
+                ^joined: false
                 loop (index, open) in pending {
                     if open.key_index == key_index && open.start_ns == start_ns {
                         position = index
@@ -1543,8 +1555,8 @@ priv stream_event_ns: fn(at: DateTime) -> Int Never! {
 }
 
 priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], width_ns: Int, watermark_ns: Int, flush: Bool) -> [Window<K, T>] Never! {
-    ready := [Window<K, T>]{}
-    kept := [PendingWindow<T>]{}
+    ^ready: [Window<K, T>]{}
+    ^kept: [PendingWindow<T>]{}
     loop open in pending {
         if flush || open.start_ns + width_ns <= watermark_ns {
             ready.push(Window<K, T>{key: keys[open.key_index], start: time.from_unix_nanoseconds(open.start_ns), end: time.from_unix_nanoseconds(open.start_ns + width_ns), events: open.events})
@@ -1585,15 +1597,17 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
 // not write it so, and then `values` is unused (QueryCell). They come before
 // the predicate, which may take the locals they read.
 #Builtin.Role(.QueryFilter) priv __query_filter: fn<T>(query: Query<T>, condition: String, values: [String], predicate: ^^fn(T) -> Bool) -> Query<T> Never! {
-    keep: Shared{QueryKeyCell<T, Bool>{key: fn(row: T) {
-        kept: predicate(row) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
-        Ok(kept)
-    }}}
+    keep: Shared{QueryKeyCell<T, Bool>{
+        key: fn(row: T) {
+            kept: predicate(row) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
+            Ok(kept)
+        },
+    }}
     batch_keep: keep.copy()
     derive_keep: keep.copy()
     live: query_live_step<T>(query, WatchStep<T>{keep: Val(keep), key: None}, fn(entries: [WatchEntry<T>]) {
         held: derive_keep.guard_read()
-        out := [WatchEntry<T>]{}
+        ^out: [WatchEntry<T>]{}
         loop entry in entries {
             kept: held.value.key(entry.value.copy()) ?? return Err(err)
             if kept -> out.push(entry.copy())
@@ -1605,7 +1619,7 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
         filter_condition: condition.copy()
         filter_values: values.copy()
         Val(fn(column: String, outer: String, bound: [String]) -[DB.Read]> [{key: String, count: Int}]? DataError! {
-            joined := filter_values.copy()
+            ^joined: filter_values.copy()
             joined.extend(bound.copy())
             narrowed: if outer == "" -> filter_condition.copy() else -> "({filter_condition}) AND ({outer})"
             query_count_by_sql<T>(source, column, narrowed, joined)
@@ -1616,12 +1630,12 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
         false,
         query.__limits.copy(),
         fn(outer: String, bound: [String]) {
-            joined := if condition == "" -> [String]{} else -> values.copy()
+            ^joined: if condition == "" -> [String]{} else -> values.copy()
             joined.extend(bound.copy())
             narrowed: if condition == "" -> outer.copy() else if outer == "" -> condition.copy() else -> "({condition}) AND ({outer})"
             rows: query_read<T>(query, narrowed, joined) ?? return Err(err)
             held: batch_keep.guard_read()
-            out := [T]{}
+            ^out: [T]{}
             loop row in rows {
                 kept: held.value.key(row.copy()) ?? return Err(err)
                 if kept -> out.push(row.copy())
@@ -1635,10 +1649,12 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
 
 // A stable sort by the String key, bounded by `max_sort_rows`.
 #Builtin.Role(.QuerySortBy) priv __query_sort_by: fn<T>(query: Query<T>, key: ^^fn(T) -> String) -> Query<T> Never! {
-    key_cell: Shared{QueryKeyCell<T, String>{key: fn(row: T) {
-        text: key(row) ?? return Err(data_error(DataErrorKind.State, "sort key callback failed", "query.sort_by"))
-        Ok(text)
-    }}}
+    key_cell: Shared{QueryKeyCell<T, String>{
+        key: fn(row: T) {
+            text: key(row) ?? return Err(data_error(DataErrorKind.State, "sort key callback failed", "query.sort_by"))
+            Ok(text)
+        },
+    }}
     batch_key: key_cell.copy()
     derive_key: key_cell.copy()
     derive_limits: query.__limits.copy()
@@ -1647,12 +1663,12 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
             return Err(data_error(DataErrorKind.Limit, "max_sort_rows {derive_limits.max_sort_rows} exceeded", "query.sort_by"))
         }
         held: derive_key.guard_read()
-        keys := [String]{}
+        ^keys: [String]{}
         loop entry in entries {
             text: held.value.key(entry.value.copy()) ?? return Err(err)
             keys.push(text)
         }
-        out := [WatchEntry<T>]{}
+        ^out: [WatchEntry<T>]{}
         loop index in query_merge_order(keys, false, false) -> out.push(entries[index].copy())
         Ok(out)
     })
@@ -1663,12 +1679,12 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
             return Err(data_error(DataErrorKind.Limit, "max_sort_rows {limits.max_sort_rows} exceeded", "query.sort_by"))
         }
         held: batch_key.guard_read()
-        keys := [String]{}
+        ^keys: [String]{}
         loop row in rows {
             text: held.value.key(row.copy()) ?? return Err(err)
             keys.push(text)
         }
-        out := [T]{}
+        ^out: [T]{}
         loop index in query_merge_order(keys, false, false) -> out.push(rows[index].copy())
         Ok(out)
     })
@@ -1681,10 +1697,10 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
 // position, and reverses that whole order when descending.
 priv query_order_before: fn(keys: [String], left: Int, right: Int, sql_order: Bool, descending: Bool) -> Bool Never! {
     if !sql_order -> return keys[left] <= keys[right]
-    order := 0
+    ^order: 0
     left_number: query_number(keys[left])
     right_number: query_number(keys[right])
-    numeric := false
+    ^numeric: false
     if left_number == .Val(a) {
         if right_number == .Val(b) {
             numeric = true
@@ -1706,21 +1722,21 @@ priv query_number: fn(text: String) -> Float? Never! { Val(Float.parse(text) ?? 
 // A bottom-up merge sort of the key positions.
 priv query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) -> [Int] Never! {
     count: keys.len()
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<count -> order.push(index)
-    width := 1
+    ^width: 1
     loop width < count {
-        merged := [Int]{}
-        start := 0
+        ^merged: [Int]{}
+        ^start: 0
         loop start < count {
-            middle := start + width
+            ^middle: start + width
             if middle > count -> middle = count
-            end := start + width * 2
+            ^end: start + width * 2
             if end > count -> end = count
-            left := start
-            right := middle
+            ^left: start
+            ^right: middle
             loop left < middle || right < end {
-                take_left := right >= end
+                ^take_left: right >= end
                 if !take_left && left < middle {
                     take_left = query_order_before(keys, order[left], order[right], sql_order, descending)
                 }
@@ -1741,14 +1757,16 @@ priv query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) ->
 }
 
 #Builtin.Role(.QueryMap) priv __query_map: fn<T, U>(query: Query<T>, mapper: ^^fn(T) -> U) -> Query<U> Never! {
-    map_cell: Shared{QueryKeyCell<T, U>{key: fn(row: T) {
-        value: mapper(row) ?? return Err(data_error(DataErrorKind.State, "map callback failed", "query.map"))
-        Ok(value)
-    }}}
+    map_cell: Shared{QueryKeyCell<T, U>{
+        key: fn(row: T) {
+            value: mapper(row) ?? return Err(data_error(DataErrorKind.State, "map callback failed", "query.map"))
+            Ok(value)
+        },
+    }}
     derive_map: map_cell.copy()
     live: query_live_derived<T, U>(query, fn(entries: [WatchEntry<T>]) {
         held: derive_map.guard_read()
-        out := [WatchEntry<U>]{}
+        ^out: [WatchEntry<U>]{}
         loop entry in entries {
             value: held.value.key(entry.value.copy()) ?? return Err(err)
             out.push(WatchEntry<U>{order: entry.order, keys: [String]{}, value: value})
@@ -1758,7 +1776,7 @@ priv query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) ->
     mapped: query_make<U>(query_steps(query.__steps, "map"), true, query.__limits.copy(), fn() {
         rows: query_rows<T>(query) ?? return Err(err)
         held: map_cell.guard_read()
-        out := [U]{}
+        ^out: [U]{}
         loop row in rows {
             value: held.value.key(row.copy()) ?? return Err(err)
             out.push(value)
@@ -1773,15 +1791,17 @@ priv query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V, max
     step: if maximum -> "max" else -> "min"
     operation: "query.{step}"
     key_operation: operation.copy()
-    key_cell: Shared{QueryKeyCell<T, V>{key: fn(row: T) {
-        found: key(row) ?? return Err(data_error(DataErrorKind.State, "extreme key callback failed", key_operation))
-        Ok(found)
-    }}}
+    key_cell: Shared{QueryKeyCell<T, V>{
+        key: fn(row: T) {
+            found: key(row) ?? return Err(data_error(DataErrorKind.State, "extreme key callback failed", key_operation))
+            Ok(found)
+        },
+    }}
     derive_key: key_cell.copy()
     derive_operation: operation.copy()
     live: query_live_derived<T, V>(query, fn(entries: [WatchEntry<T>]) {
         held: derive_key.guard_read()
-        candidates := [V]{}
+        ^candidates: [V]{}
         loop entry in entries {
             candidate: held.value.key(entry.value.copy()) ?? return Err(err)
             candidates.push(candidate)
@@ -1792,7 +1812,7 @@ priv query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V, max
     extreme: query_make<V>(query_steps(query.__steps, step), true, query.__limits.copy(), fn() {
         rows: query_rows<T>(query) ?? return Err(err)
         held: key_cell.guard_read()
-        candidates := [V]{}
+        ^candidates: [V]{}
         loop row in rows {
             candidate: held.value.key(row.copy()) ?? return Err(err)
             candidates.push(candidate)
@@ -1807,7 +1827,7 @@ priv query_extreme_pick: fn<V: Comparable>(candidates: [V], maximum: Bool, opera
     if candidates.len() == 0 {
         return Err(data_error(DataErrorKind.Empty, "empty query has no extreme", operation))
     }
-    selected := 0
+    ^selected: 0
     loop index in 1..<candidates.len() {
         replace: if maximum -> candidates[index] > candidates[selected] else -> candidates[index] < candidates[selected]
         if replace -> selected = index
@@ -1826,11 +1846,13 @@ priv query_extreme_pick: fn<V: Comparable>(candidates: [V], maximum: Bool, opera
 #Builtin.Role(.QueryInnerJoin) priv __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
     left_cell: query_join_cell<T>(left_key, "left", "inner_join")
     right_cell: query_join_cell<U>(right_key, "right", "inner_join")
-    join: Shared{WatchJoin<T, U, DataJoin<T, U>>{run: fn(left_rows: [T], right_rows: [U]) {
-        left_keys: query_join_keys<T>(left_rows, left_cell) ?? return Err(err)
-        right_keys: query_join_keys<U>(right_rows, right_cell) ?? return Err(err)
-        inner_join_keyed<T, U>(left_rows, right_rows, left_keys, right_keys)
-    }}}
+    join: Shared{WatchJoin<T, U, DataJoin<T, U>>{
+        run: fn(left_rows: [T], right_rows: [U]) {
+            left_keys: query_join_keys<T>(left_rows, left_cell) ?? return Err(err)
+            right_keys: query_join_keys<U>(right_rows, right_cell) ?? return Err(err)
+            inner_join_keyed<T, U>(left_rows, right_rows, left_keys, right_keys)
+        },
+    }}
     left_side: left.copy()
     right_side: right.copy()
     query_join<T, U, DataJoin<T, U>>(left, right, join, "inner_join", fn() { query_rows<T>(left_side) }, fn() { query_rows<U>(right_side) })
@@ -1839,11 +1861,13 @@ priv query_extreme_pick: fn<V: Comparable>(candidates: [V], maximum: Bool, opera
 #Builtin.Role(.QueryLeftJoin) priv __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
     left_cell: query_join_cell<T>(left_key, "left", "left_join")
     right_cell: query_join_cell<U>(right_key, "right", "left_join")
-    join: Shared{WatchJoin<T, U, DataJoin<T, U?>>{run: fn(left_rows: [T], right_rows: [U]) {
-        left_keys: query_join_keys<T>(left_rows, left_cell) ?? return Err(err)
-        right_keys: query_join_keys<U>(right_rows, right_cell) ?? return Err(err)
-        left_join_keyed<T, U>(left_rows, right_rows, left_keys, right_keys)
-    }}}
+    join: Shared{WatchJoin<T, U, DataJoin<T, U?>>{
+        run: fn(left_rows: [T], right_rows: [U]) {
+            left_keys: query_join_keys<T>(left_rows, left_cell) ?? return Err(err)
+            right_keys: query_join_keys<U>(right_rows, right_cell) ?? return Err(err)
+            left_join_keyed<T, U>(left_rows, right_rows, left_keys, right_keys)
+        },
+    }}
     left_side: left.copy()
     right_side: right.copy()
     query_join<T, U, DataJoin<T, U?>>(left, right, join, "left_join", fn() { query_rows<T>(left_side) }, fn() { query_rows<U>(right_side) })
@@ -1867,25 +1891,36 @@ priv query_join: fn<T, U, O>(left: Query<T>, right: Query<U>, join: Shared<Watch
     right_query: right.copy()
     left_static: Shared{QueryRowsCell<T>{read: fn() { left_read() }}}
     right_static: Shared{QueryRowsCell<U>{read: fn() { right_read() }}}
-    query_live<O>(joined, Val(Shared{QueryLive<O>{reader: None, steps: [WatchStep<O>]{}, derived: Val(Shared{WatchFactory<O>{make: fn() {
-        left_source: query_watch_source<T>(left_query) ?? watch_static<T>(left_static)
-        right_source: query_watch_source<U>(right_query) ?? watch_static<U>(right_static)
-        Val(watch_join<T, U, O>(left_source, right_source, join))
-    }}})}}))
+    query_live<O>(
+        joined,
+        Val(Shared{QueryLive<O>{
+            reader: None,
+            steps: [WatchStep<O>]{},
+            derived: Val(Shared{WatchFactory<O>{
+                make: fn() {
+                    left_source: query_watch_source<T>(left_query) ?? watch_static<T>(left_static)
+                    right_source: query_watch_source<U>(right_query) ?? watch_static<U>(right_static)
+                    Val(watch_join<T, U, O>(left_source, right_source, join))
+                },
+            }}),
+        }}),
+    )
 }
 
 // A join key callback; a key that fails is the query's Decode error, since
 // a query fails only with DataError.
 priv query_join_cell: fn<T>(key: ^^fn(T) -> String, side: String, api: String) -> Shared<QueryKeyCell<T, String>> Never! {
-    Shared{QueryKeyCell<T, String>{key: fn(row: T) {
-        found: key(row) ?? return Err(data_error(DataErrorKind.Decode, "{side} join key failed", api))
-        Ok(found)
-    }}}
+    Shared{QueryKeyCell<T, String>{
+        key: fn(row: T) {
+            found: key(row) ?? return Err(data_error(DataErrorKind.Decode, "{side} join key failed", api))
+            Ok(found)
+        },
+    }}
 }
 
 priv query_join_keys: fn<T>(rows: [T], key: Shared<QueryKeyCell<T, String>>) -> [String] DataError! {
     held: key.guard_read()
-    keys := [String]{}
+    ^keys: [String]{}
     loop row in rows {
         found: held.value.key(row.copy()) ?? return Err(err)
         keys.push(found)
@@ -1915,8 +1950,8 @@ priv group_steps: fn<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [St
 // binary search: the key's position in `keys`, else -1 - the slot in `order`
 // where a new group's position goes (group_add).
 priv group_find: fn<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never! {
-    low := 0
-    high := order.len()
+    ^low: 0
+    ^high: order.len()
     loop low < high {
         middle: low + (high - low) /% 2
         compared: keys[order[middle]] <=> key
@@ -1932,7 +1967,7 @@ priv group_add: fn<K>(keys: ^[K], order: ^[Int], found: Int, key: K) Never! {
 }
 
 priv group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] Never! {
-    out := groups
+    ^out: groups
     out.sort_by(fn(left: Group<K, V>, right: Group<K, V>) { left.key <=> right.key })
     out
 }
@@ -1944,9 +1979,9 @@ priv group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] 
         rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
-        keys := [K]{}
-        order := [Int]{}
-        counts := [Int]{}
+        ^keys: [K]{}
+        ^order: [Int]{}
+        ^counts: [Int]{}
         loop row in rows {
             group_key: cell.value.key(row.copy()) ?? return Err(err)
             found: group_find<K>(keys, order, group_key)
@@ -1958,7 +1993,7 @@ priv group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] 
                 counts.push(1)
             }
         }
-        out := [Group<K, Int>]{}
+        ^out: [Group<K, Int>]{}
         loop index in 0..<keys.len() {
             out.push(Group<K, Int>{key: keys[index].copy(), value: counts[index]})
         }
@@ -1972,14 +2007,18 @@ priv group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] 
 // of a maintained sum: "recomputed" for a float sum, whose groups a watch
 // adds up again whenever one of their rows changes.
 priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> V, add: ^^fn(V, V) -> V, mode: String) -> Query<Group<K, V>> Never! {
-    value_cell: Shared{QueryKeyCell<T, V>{key: fn(row: T) {
-        found: value(row) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.sum"))
-        Ok(found)
-    }}}
-    add_cell: Shared{QueryAddCell<V>{add: fn(left: V, right: V) {
-        total: add(left, right) ?? return Err(data_error(DataErrorKind.Overflow, "group sum overflowed", "query.group_by.sum"))
-        Ok(total)
-    }}}
+    value_cell: Shared{QueryKeyCell<T, V>{
+        key: fn(row: T) {
+            found: value(row) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.sum"))
+            Ok(found)
+        },
+    }}
+    add_cell: Shared{QueryAddCell<V>{
+        add: fn(left: V, right: V) {
+            total: add(left, right) ?? return Err(data_error(DataErrorKind.Overflow, "group sum overflowed", "query.group_by.sum"))
+            Ok(total)
+        },
+    }}
     batch_value: value_cell.copy()
     batch_add: add_cell.copy()
     live: group_live<T, K, V>(grouped, value_cell, fn(values: [V]) { group_total<V>(values, add_cell) }, "query.group_by.sum", mode)
@@ -1989,9 +2028,9 @@ priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value
         cell: grouped.__key.guard_read()
         values: batch_value.guard_read()
         adder: batch_add.guard_read()
-        keys := [K]{}
-        order := [Int]{}
-        totals := [V]{}
+        ^keys: [K]{}
+        ^order: [Int]{}
+        ^totals: [V]{}
         loop row in rows {
             group_key: cell.value.key(row.copy()) ?? return Err(err)
             group_value: values.value.key(row.copy()) ?? return Err(err)
@@ -2010,7 +2049,7 @@ priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value
         if keys.len() > limits.max_output_rows {
             return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.group_by.sum"))
         }
-        out := [Group<K, V>]{}
+        ^out: [Group<K, V>]{}
         loop index in 0..<keys.len() {
             out.push(Group<K, V>{key: keys[index].copy(), value: totals[index].copy()})
         }
@@ -2021,9 +2060,11 @@ priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value
 
 // A group's values added in order, as the batch sum adds them.
 priv group_total: fn<V>(values: [V], add: Shared<QueryAddCell<V>>) -> V DataError! {
-    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "an empty group has no sum", "query.group_by.sum"))
+    if values.len() == 0 {
+        return Err(data_error(DataErrorKind.Empty, "an empty group has no sum", "query.group_by.sum"))
+    }
     held: add.guard_read()
-    total := values[0].copy()
+    ^total: values[0].copy()
     loop index in 1..<values.len() {
         next_total: held.value.add(total, values[index].copy()) ?? return Err(err)
         total = next_total
@@ -2076,29 +2117,39 @@ priv group_total: fn<V>(values: [V], add: Shared<QueryAddCell<V>>) -> V DataErro
 }
 
 #Builtin.Role(.GroupMean) priv __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
-    value_cell: Shared{QueryKeyCell<T, Float>{key: fn(row: T) {
-        found: value(row) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.mean"))
-        if nonfinite(found) {
-            return Err(data_error(DataErrorKind.NonFinite, "group values must be finite", "query.group_by.mean"))
-        }
-        Ok(found)
-    }}}
+    value_cell: Shared{QueryKeyCell<T, Float>{
+        key: fn(row: T) {
+            found: value(row) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.mean"))
+            if nonfinite(found) {
+                return Err(data_error(DataErrorKind.NonFinite, "group values must be finite", "query.group_by.mean"))
+            }
+            Ok(found)
+        },
+    }}
     batch_value: value_cell.copy()
-    live: group_live<T, K, Float>(grouped, value_cell, fn(values: [Float]) {
-        if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "an empty group has no mean", "query.group_by.mean"))
-        total := values[0]
-        loop index in 1..<values.len() -> total = total + values[index]
-        Ok(total / Float{values.len()})
-    }, "query.group_by.mean", "recomputed")
+    live: group_live<T, K, Float>(
+        grouped,
+        value_cell,
+        fn(values: [Float]) {
+            if values.len() == 0 {
+                return Err(data_error(DataErrorKind.Empty, "an empty group has no mean", "query.group_by.mean"))
+            }
+            ^total: values[0]
+            loop index in 1..<values.len() -> total += values[index]
+            Ok(total / Float{values.len()})
+        },
+        "query.group_by.mean",
+        "recomputed",
+    )
     averaged: query_make<Group<K, Float>>(group_steps<T, K>(grouped, "mean"), true, grouped.__query.__limits.copy(), fn() {
         rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
         values: batch_value.guard_read()
-        keys := [K]{}
-        order := [Int]{}
-        totals := [Float]{}
-        counts := [Int]{}
+        ^keys: [K]{}
+        ^order: [Int]{}
+        ^totals: [Float]{}
+        ^counts: [Int]{}
         loop row in rows {
             group_key: cell.value.key(row.copy()) ?? return Err(err)
             group_value: values.value.key(row.copy()) ?? return Err(err)
@@ -2115,7 +2166,7 @@ priv group_total: fn<V>(values: [V], add: Shared<QueryAddCell<V>>) -> V DataErro
                 counts.push(1)
             }
         }
-        out := [Group<K, Float>]{}
+        ^out: [Group<K, Float>]{}
         loop index in 0..<keys.len() {
             out.push(Group<K, Float>{key: keys[index].copy(), value: totals[index] / Float{counts[index]}})
         }
@@ -2137,10 +2188,16 @@ priv query_live_derived: fn<S, T>(query: Query<S>, derive: ^^fn([WatchEntry<S>])
     if !query_maintained<S>(query) -> return None
     source: query.copy()
     cell: Shared{WatchDerive<S, T>{run: derive.move()}}
-    Val(Shared{QueryLive<T>{reader: None, steps: [WatchStep<T>]{}, derived: Val(Shared{WatchFactory<T>{make: fn() {
-        inner: query_watch_source<S>(source) ?? return None
-        Val(watch_derived<S, T>(inner, cell))
-    }}})}})
+    Val(Shared{QueryLive<T>{
+        reader: None,
+        steps: [WatchStep<T>]{},
+        derived: Val(Shared{WatchFactory<T>{
+            make: fn() {
+                inner: query_watch_source<S>(source) ?? return None
+                Val(watch_derived<S, T>(inner, cell))
+            },
+        }}),
+    }})
 }
 
 // The `__live` of a filter or sort after `query`: one more step over the
@@ -2150,7 +2207,7 @@ priv query_live_step: fn<T>(query: Query<T>, step: WatchStep<T>, derive: ^^fn([W
     cell: query.__live.copy() ?? return None
     live: cell.guard_read()
     reader: live.value.reader.copy() ?? return query_live_derived<T, T>(query, derive)
-    steps := live.value.steps.copy()
+    ^steps: live.value.steps.copy()
     steps.push(step.copy())
     Val(Shared{QueryLive<T>{reader: Val(reader), steps: steps, derived: None}})
 }
@@ -2185,10 +2242,14 @@ priv watch_tracked: fn<T>(reader: Shared<TrackedReader<T>>, steps: [WatchStep<T>
         initial: fn() { watch_tracked_read<T>(initial_reader, initial_steps, initial_limits, false) },
         refresh: fn(revision: Int, prior: [WatchEntry<T>]) {
             delta: reader.guard_read().value.changes(revision) ?? return Err(err)
-            if delta.revision == revision -> return Ok(watch_unchanged<T>(revision, "incremental", delta.retained_rows))
-            if !delta.complete -> return watch_tracked_read<T>(reader, refresh_steps, refresh_limits, true)
+            if delta.revision == revision {
+                return Ok(watch_unchanged<T>(revision, "incremental", delta.retained_rows))
+            }
+            if !delta.complete {
+                return watch_tracked_read<T>(reader, refresh_steps, refresh_limits, true)
+            }
             watch_sort_limit<T>(refresh_steps, delta.retained_rows, refresh_limits) ?? return Err(err)
-            entries := prior.copy()
+            ^entries: prior.copy()
             loop change in delta.changes {
                 watch_apply<T>(entries, refresh_steps, change) ?? return Err(err)
             }
@@ -2200,9 +2261,9 @@ priv watch_tracked: fn<T>(reader: Shared<TrackedReader<T>>, steps: [WatchStep<T>
 priv watch_tracked_read: fn<T>(reader: Shared<TrackedReader<T>>, steps: [WatchStep<T>], limits: DataLimits, recomputed: Bool) -> WatchView<T> DataError! {
     snapshot: reader.guard_read().value.snapshot()
     watch_sort_limit<T>(steps, snapshot.rows.len(), limits) ?? return Err(err)
-    entries := [WatchEntry<T>]{}
+    ^entries: [WatchEntry<T>]{}
     loop index in 0..<snapshot.rows.len() {
-        keys := [String]{}
+        ^keys: [String]{}
         kept: watch_place<T>(steps, snapshot.rows[index], keys) ?? return Err(err)
         if !kept -> next
         entries.push(WatchEntry<T>{order: snapshot.orders[index], keys: keys, value: snapshot.rows[index].copy()})
@@ -2252,14 +2313,14 @@ priv watch_before: fn<T>(left: WatchEntry<T>, right: WatchEntry<T>) -> Bool Neve
 // Entries in stamp order put in watch_before order: one stable sort per
 // sort key, the first sort's first.
 priv watch_sorted: fn<T>(entries: ^^[WatchEntry<T>]) -> [WatchEntry<T>] Never! {
-    out := entries.move()
+    ^out: entries.move()
     if out.len() == 0 -> return out
     sorts: out[0].keys.len()
     loop step in 0..<sorts {
         at: sorts - 1 - step
-        keys := [String]{}
+        ^keys: [String]{}
         loop entry in out -> keys.push(entry.keys[at].copy())
-        sorted := [WatchEntry<T>]{}
+        ^sorted: [WatchEntry<T>]{}
         loop index in query_merge_order(keys, false, false) -> sorted.push(out[index].copy())
         out = sorted
     }
@@ -2267,8 +2328,8 @@ priv watch_sorted: fn<T>(entries: ^^[WatchEntry<T>]) -> [WatchEntry<T>] Never! {
 }
 
 priv watch_insert: fn<T>(entries: ^[WatchEntry<T>], entry: ^^WatchEntry<T>) Never! {
-    low := 0
-    high := entries.len()
+    ^low: 0
+    ^high: entries.len()
     loop low < high {
         middle: low + (high - low) /% 2
         if watch_before<T>(entry, entries[middle]) -> high = middle else -> low = middle + 1
@@ -2285,7 +2346,7 @@ priv watch_apply: fn<T>(entries: ^[WatchEntry<T>], steps: [WatchStep<T>], change
         }
     }
     row: change.row.copy() ?? return Ok()
-    keys := [String]{}
+    ^keys: [String]{}
     kept: watch_place<T>(steps, row, keys) ?? return Err(err)
     if !kept -> return Ok()
     watch_insert<T>(entries, WatchEntry<T>{order: change.order, keys: keys, value: row})
@@ -2310,7 +2371,9 @@ priv watch_derived: fn<S, T>(inner: ^^WatchSource<S>, derive: Shared<WatchDerive
         },
         refresh: fn(revision: Int, _prior: [WatchEntry<T>]) {
             view: watch_derived_refresh<S>(source, base, revision) ?? return Err(err)
-            if !view.changed -> return Ok(watch_unchanged<T>(view.revision, view.mode, view.retained_rows))
+            if !view.changed {
+                return Ok(watch_unchanged<T>(view.revision, view.mode, view.retained_rows))
+            }
             watch_derive<S, T>(view, derive, base)
         },
     }
@@ -2331,10 +2394,20 @@ priv watch_derive: fn<S, T>(view: ^^WatchView<S>, derive: Shared<WatchDerive<S, 
     retained_rows: view.retained_rows
     target: base.copy()
     inner: view.move()
-    Ok(WatchView<T>{entries: entries, revision: revision, mode: mode, recomputed: recomputed, changed: true, retained_rows: retained_rows, commit: fn() {
-        inner.commit()
-        target.guard_edit().value = inner.entries.copy()
-    }})
+    Ok(
+        WatchView<T>{
+            entries: entries,
+            revision: revision,
+            mode: mode,
+            recomputed: recomputed,
+            changed: true,
+            retained_rows: retained_rows,
+            commit: fn() {
+                inner.commit()
+                target.guard_edit().value = inner.entries.copy()
+            },
+        },
+    )
 }
 
 priv WatchPair: struct<T, U> {
@@ -2387,7 +2460,7 @@ priv watch_join_refresh: fn<T, U, O>(sources: Shared<WatchPair<T, U>>, state: Sh
 // The join of both sides' results at `revision`; an unchanged side joins
 // with the result `prior` holds for it.
 priv watch_join_view: fn<T, U, O>(left: ^^WatchView<T>, right: ^^WatchView<U>, prior: WatchJoinState<T, U>, join: Shared<WatchJoin<T, U, O>>, state: Shared<WatchJoinState<T, U>>, revision: Int) -> WatchView<O> DataError! {
-    next := prior.copy()
+    ^next: prior.copy()
     if left.changed {
         next.left = left.entries.copy()
         next.left_revision = left.revision
@@ -2397,24 +2470,36 @@ priv watch_join_view: fn<T, U, O>(left: ^^WatchView<T>, right: ^^WatchView<U>, p
         next.right_revision = right.revision
     }
     next.revision = revision
-    left_rows := [T]{}
+    ^left_rows: [T]{}
     loop entry in next.left -> left_rows.push(entry.value.copy())
-    right_rows := [U]{}
+    ^right_rows: [U]{}
     loop entry in next.right -> right_rows.push(entry.value.copy())
     rows: join.guard_read().value.run(left_rows, right_rows) ?? return Err(err)
-    entries := [WatchEntry<O>]{}
-    loop index in 0..<rows.len() -> entries.push(WatchEntry<O>{order: index, keys: [String]{}, value: rows[index].copy()})
+    ^entries: [WatchEntry<O>]{}
+    loop index in 0..<rows.len() {
+        entries.push(WatchEntry<O>{order: index, keys: [String]{}, value: rows[index].copy()})
+    }
     mode: watch_join_mode(left.mode, right.mode)
     recomputed: left.recomputed || right.recomputed
     retained_rows: left.retained_rows + right.retained_rows
     target: state.copy()
     left_view: left.move()
     right_view: right.move()
-    Ok(WatchView<O>{entries: entries, revision: revision, mode: mode, recomputed: recomputed, changed: true, retained_rows: retained_rows, commit: fn() {
-        left_view.commit()
-        right_view.commit()
-        target.guard_edit().value = next.copy()
-    }})
+    Ok(
+        WatchView<O>{
+            entries: entries,
+            revision: revision,
+            mode: mode,
+            recomputed: recomputed,
+            changed: true,
+            retained_rows: retained_rows,
+            commit: fn() {
+                left_view.commit()
+                right_view.commit()
+                target.guard_edit().value = next.copy()
+            },
+        },
+    )
 }
 
 priv watch_join_mode: fn(left: String, right: String) -> String Never! {
@@ -2430,11 +2515,17 @@ priv watch_static: fn<T>(source: Shared<QueryRowsCell<T>>) -> WatchSource<T> Nev
     WatchSource<T>{
         initial: fn() {
             rows: reader.guard_read().value.read() ?? return Err(err)
-            entries := [WatchEntry<T>]{}
-            loop index in 0..<rows.len() -> entries.push(WatchEntry<T>{order: index, keys: [String]{}, value: rows[index].copy()})
+            ^entries: [WatchEntry<T>]{}
+            loop index in 0..<rows.len() {
+                entries.push(WatchEntry<T>{order: index, keys: [String]{}, value: rows[index].copy()})
+            }
             total: rows.len()
             target: initial_count.copy()
-            Ok(WatchView<T>{entries: entries, revision: 0, mode: "incremental", recomputed: false, changed: true, retained_rows: total, commit: fn() { target.guard_edit().value = total }})
+            Ok(
+                WatchView<T>{entries: entries, revision: 0, mode: "incremental", recomputed: false, changed: true, retained_rows: total, commit: fn() {
+                    target.guard_edit().value = total
+                }},
+            )
         },
         refresh: fn(_revision: Int, _prior: [WatchEntry<T>]) { Ok(watch_unchanged<T>(0, "incremental", count.guard_read().value)) },
     }
@@ -2492,13 +2583,15 @@ priv watch_group: fn<T, K: Comparable, V>(plan: GroupWatchPlan<T, K, V>) -> Watc
 priv watch_group_read: fn<T, K: Comparable, V>(plan: GroupWatchPlan<T, K, V>, state: Shared<GroupWatchState<K, V>>, recomputed: Bool) -> WatchView<Group<K, V>> DataError! {
     snapshot: plan.reader.guard_read().value.snapshot()
     watch_sort_limit<T>(plan.steps, snapshot.rows.len(), plan.limits) ?? return Err(err)
-    groups := GroupWatchState<K, V>{revision: snapshot.revision, keys: [K]{}, members: [[WatchEntry<V>]]{}, values: [V]{}, group_of: [Int:K]{}}
-    touched := [K]{}
+    ^groups: GroupWatchState<K, V>{revision: snapshot.revision, keys: [K]{}, members: [[WatchEntry<V>]]{}, values: [V]{}, group_of: [Int:K]{}}
+    ^touched: [K]{}
     loop index in 0..<snapshot.rows.len() {
         group_watch_add<T, K, V>(groups, touched, plan, snapshot.orders[index], snapshot.rows[index], true) ?? return Err(err)
     }
     loop index in 0..<groups.members.len() {
-        if groups.members[index][0].keys.len() > 0 -> groups.members[index] = watch_sorted<V>(groups.members[index].copy())
+        if groups.members[index][0].keys.len() > 0 {
+            groups.members[index] = watch_sorted<V>(groups.members[index].copy())
+        }
     }
     mode: if recomputed -> "recomputed" else -> plan.mode.copy()
     watch_group_view<T, K, V>(groups, touched, plan, state, mode, recomputed, snapshot.rows.len())
@@ -2507,11 +2600,13 @@ priv watch_group_read: fn<T, K: Comparable, V>(plan: GroupWatchPlan<T, K, V>, st
 priv watch_group_refresh: fn<T, K: Comparable, V>(plan: GroupWatchPlan<T, K, V>, state: Shared<GroupWatchState<K, V>>) -> WatchView<Group<K, V>> DataError! {
     held: state.guard_read()
     delta: plan.reader.guard_read().value.changes(held.value.revision) ?? return Err(err)
-    if delta.revision == held.value.revision -> return Ok(watch_unchanged<Group<K, V>>(delta.revision, plan.mode, delta.retained_rows))
+    if delta.revision == held.value.revision {
+        return Ok(watch_unchanged<Group<K, V>>(delta.revision, plan.mode, delta.retained_rows))
+    }
     if !delta.complete -> return watch_group_read<T, K, V>(plan, state, true)
     watch_sort_limit<T>(plan.steps, delta.retained_rows, plan.limits) ?? return Err(err)
-    groups := held.value.copy()
-    touched := [K]{}
+    ^groups: held.value.copy()
+    ^touched: [K]{}
     loop change in delta.changes {
         group_watch_remove<K, V>(groups, touched, change.order)
         row: change.row.copy() ?? next
@@ -2525,13 +2620,13 @@ priv watch_group_refresh: fn<T, K: Comparable, V>(plan: GroupWatchPlan<T, K, V>,
 // none, unless the plan's filters drop it. `append` adds it last, as a read
 // of every row in stamp order does before it sorts the groups.
 priv group_watch_add: fn<T, K: Comparable, V>(groups: ^GroupWatchState<K, V>, touched: ^[K], plan: GroupWatchPlan<T, K, V>, order: Int, row: T, append: Bool) DataError! {
-    keys := [String]{}
+    ^keys: [String]{}
     kept: watch_place<T>(plan.steps, row, keys) ?? return Err(err)
     if !kept -> return Ok()
     group_key: plan.key.guard_read().value.key(row.copy()) ?? return Err(err)
     member: plan.value.guard_read().value.key(row.copy()) ?? return Err(err)
     found: group_watch_find<K>(groups.keys, group_key)
-    index := found
+    ^index: found
     if found < 0 {
         if groups.keys.len() >= plan.limits.max_groups {
             return Err(data_error(DataErrorKind.Limit, "max_groups {plan.limits.max_groups} exceeded", plan.operation))
@@ -2542,7 +2637,9 @@ priv group_watch_add: fn<T, K: Comparable, V>(groups: ^GroupWatchState<K, V>, to
         groups.values.insert(index, member.copy())
     }
     entry: WatchEntry<V>{order: order, keys: keys, value: member}
-    if append -> groups.members[index].push(entry) else -> watch_insert<V>(groups.members[index], entry)
+    if append -> groups.members[index].push(entry) else {
+        watch_insert<V>(groups.members[index], entry)
+    }
     groups.group_of[order] = group_key.copy()
     touched.push(group_key)
     Ok()
@@ -2553,7 +2650,9 @@ priv group_watch_remove: fn<K: Comparable, V>(groups: ^GroupWatchState<K, V>, to
     group_key: groups.group_of.get(order) ?? return
     _: groups.group_of.remove(order)
     index: group_watch_find<K>(groups.keys, group_key)
-    if index < 0 -> return
+    if index < 0 {
+        return
+    }
     loop at in 0..<groups.members[index].len() {
         if groups.members[index][at].order == order {
             _: groups.members[index].remove(at, .Slot)
@@ -2568,8 +2667,8 @@ priv group_watch_remove: fn<K: Comparable, V>(groups: ^GroupWatchState<K, V>, to
 
 // The position of `key` in ascending `keys`, else -1 - where it goes.
 priv group_watch_find: fn<K: Comparable>(keys: [K], key: K) -> Int Never! {
-    low := 0
-    high := keys.len()
+    ^low: 0
+    ^high: keys.len()
     loop low < high {
         middle: low + (high - low) /% 2
         compared: keys[middle] <=> key
@@ -2582,8 +2681,8 @@ priv group_watch_find: fn<K: Comparable>(keys: [K], key: K) -> Int Never! {
 // Reduces the `touched` groups again and gives every group, with a commit
 // that publishes `groups` as the source's state.
 priv watch_group_view: fn<T, K: Comparable, V>(reduced: ^^GroupWatchState<K, V>, touched: [K], plan: GroupWatchPlan<T, K, V>, state: Shared<GroupWatchState<K, V>>, mode: String, recomputed: Bool, retained_rows: Int) -> WatchView<Group<K, V>> DataError! {
-    groups := reduced.move()
-    marked := [Bool]{}
+    ^groups: reduced.move()
+    ^marked: [Bool]{}
     loop _ in 0..<groups.keys.len() -> marked.push(false)
     loop group_key in touched {
         index: group_watch_find<K>(groups.keys, group_key)
@@ -2592,20 +2691,24 @@ priv watch_group_view: fn<T, K: Comparable, V>(reduced: ^^GroupWatchState<K, V>,
     aggregate: plan.aggregate.guard_read()
     loop index in 0..<groups.keys.len() {
         if marked[index] {
-            values := [V]{}
+            ^values: [V]{}
             loop member in groups.members[index] -> values.push(member.value.copy())
             total: aggregate.value.key(values) ?? return Err(err)
             groups.values[index] = total
         }
     }
-    entries := [WatchEntry<Group<K, V>>]{}
+    ^entries: [WatchEntry<Group<K, V>>]{}
     loop index in 0..<groups.keys.len() {
         entries.push(WatchEntry<Group<K, V>>{order: index, keys: [String]{}, value: Group<K, V>{key: groups.keys[index].copy(), value: groups.values[index].copy()}})
     }
     revision: groups.revision
     target: state.copy()
     published: groups.move()
-    Ok(WatchView<Group<K, V>>{entries: entries, revision: revision, mode: mode.copy(), recomputed: recomputed, changed: true, retained_rows: retained_rows, commit: fn() { target.guard_edit().value = published.copy() }})
+    Ok(
+        WatchView<Group<K, V>>{entries: entries, revision: revision, mode: mode.copy(), recomputed: recomputed, changed: true, retained_rows: retained_rows, commit: fn() {
+            target.guard_edit().value = published.copy()
+        }},
+    )
 }
 
 // `query.watch()` (DataWatch): a query with no maintained source is
@@ -2643,15 +2746,19 @@ priv watch_get: fn<T>(watch: DataWatch<T>) -> [T] DataError! {
         watch_fail<T>(watch, publications, "{err}")
         return Err(err)
     }
-    if !view.changed && !dirty -> return Ok(watch_values<T>(watch.__state.guard_read().value.entries))
+    if !view.changed && !dirty {
+        return Ok(watch_values<T>(watch.__state.guard_read().value.entries))
+    }
     limit: watch.__state.guard_read().value.max_output_rows
     if view.changed && view.entries.len() > limit {
         failed: data_error(DataErrorKind.Limit, "maintained result exceeds max_output_rows", "watch.get")
         watch_fail<T>(watch, publications, "{failed}")
         return Err(failed)
     }
-    state := watch.__state.guard_edit()
-    if state.value.canceled -> return Err(data_error(DataErrorKind.State, "the watch was canceled before publication", "watch.get"))
+    ^state: watch.__state.guard_edit()
+    if state.value.canceled {
+        return Err(data_error(DataErrorKind.State, "the watch was canceled before publication", "watch.get"))
+    }
     if state.value.publications != publications {
         return Err(data_error(DataErrorKind.StaleRevision, "the watch changed before publication", "watch.get"))
     }
@@ -2671,7 +2778,9 @@ priv watch_get: fn<T>(watch: DataWatch<T>) -> [T] DataError! {
 // canceled watch has none.
 priv watch_refresh: fn<T>(watch: DataWatch<T>) -> WatchView<T> DataError! {
     held: watch.__state.guard_read()
-    if held.value.canceled -> return Err(data_error(DataErrorKind.State, "the watch was canceled", "watch.get"))
+    if held.value.canceled {
+        return Err(data_error(DataErrorKind.State, "the watch was canceled", "watch.get"))
+    }
     watch.__source.guard_read().value.refresh(held.value.revision, held.value.entries)
 }
 
@@ -2679,15 +2788,17 @@ priv watch_refresh: fn<T>(watch: DataWatch<T>) -> WatchView<T> DataError! {
 // the watch dirty with the error, unless the watch changed since the refresh
 // began.
 priv watch_fail: fn<T>(watch: DataWatch<T>, publications: Int, error: String) Never! {
-    state := watch.__state.guard_edit()
-    if state.value.canceled || state.value.publications != publications -> return
+    ^state: watch.__state.guard_edit()
+    if state.value.canceled || state.value.publications != publications {
+        return
+    }
     state.value.dirty = true
     state.value.error = error.copy()
     state.value.publications += 1
 }
 
 priv watch_values: fn<T>(entries: [WatchEntry<T>]) -> [T] Never! {
-    out := [T]{}
+    ^out: [T]{}
     loop entry in entries -> out.push(entry.value.copy())
     out
 }
@@ -2714,7 +2825,7 @@ priv watch_status: fn<T>(watch: DataWatch<T>) -> DataWatchStatus Never! {
 
 // Ends the watch: a later `get` fails, and its generation moves on.
 priv watch_cancel: fn<T>(watch: DataWatch<T>) Never! {
-    state := watch.__state.guard_edit()
+    ^state: watch.__state.guard_edit()
     state.value.generation += 1
     state.value.dirty = true
     state.value.canceled = true
@@ -2728,11 +2839,10 @@ priv watch_cancel: fn<T>(watch: DataWatch<T>) Never! {
 // other row is one `value` column of the row's type. Column types drop module
 // qualifiers, and a `?` type is a nullable column. A call whose `rows` are
 // not a list is refused where they are written (SchemaRows).
-#SchemaRows
-schema: fn<T>(_rows: [T]) -> [DataColumn] Never! {
+#SchemaRows schema: fn<T>(_rows: [T]) -> [DataColumn] Never! {
     #if schema_record(TypeId{T}) {
         fields: #run T.reflect().fields
-        columns := [DataColumn]{}
+        ^columns: [DataColumn]{}
         loop field in fields -> columns.push(schema_column(field.name, field.type.name))
         return columns
     }
@@ -2749,14 +2859,10 @@ priv schema_record: fn(id: TypeId) -> Bool Never! {
     false
 }
 
-priv schema_same: fn(id: TypeId, other: TypeId) -> Bool Never! {
-    id.identity == other.identity
-}
+priv schema_same: fn(id: TypeId, other: TypeId) -> Bool Never! { id.identity == other.identity }
 
 // The name a column shows for type `id`.
-priv schema_type_name: fn(id: TypeId) -> String Never! {
-    id.name
-}
+priv schema_type_name: fn(id: TypeId) -> String Never! { id.name }
 
 // The column named `name` whose type is `type`, shown without module
 // qualifiers.
@@ -2769,8 +2875,8 @@ priv schema_column: fn(name: String, type: String) -> DataColumn Never! {
 // `[geo.Point]` reads `[Point]`. A word that starts with a letter and runs
 // into `.` is a qualifier; a number's `.` stays.
 priv schema_unqualified: fn(name: String) -> String Never! {
-    out := [U8]{}
-    word := [U8]{}
+    ^out: [U8]{}
+    ^word: [U8]{}
     loop byte in name.bytes() {
         if schema_word_byte(byte) {
             word.push(byte)
@@ -2801,7 +2907,9 @@ priv SchemaRows: struct {
         sites: [.Function],
 
         check: fn(self, call: CompilerCall) {
-            if call.args.len() != 1 || call.args[0].type.kind == .List || call.args[0].type.name == "_" -> return None
+            if call.args.len() != 1 || call.args[0].type.kind == .List || call.args[0].type.name == "_" {
+                return None
+            }
             reject(SchemaNeedsRows{shown: schema_shown(call.args[0].type.name)}, at: call.args[0])
         }
     }
@@ -2815,7 +2923,9 @@ priv SchemaNeedsRows: struct {
 
         what: fn(self) -> String { "`data.schema` needs a typed row list, not {self.shown}" }
 
-        why: fn(self) -> String { "core.data schema reads column names and types from ordinary rows" }
+        why: fn(self) -> String {
+            "core.data schema reads column names and types from ordinary rows"
+        }
 
         fix: fn(self) -> String { "pass a `[T]` value" }
     }
@@ -2839,10 +2949,10 @@ priv schema_shown: fn(name: String) -> String Never! {
 // name differ in identity.
 priv column_identity: fn(name: String, type_name: String) -> String Never! {
     key: "{name.bytes().len()}:{name}:{type_name}"
-    hash := U64{14695981039346656037}
+    ^hash: U64{14695981039346656037}
     loop byte in key.bytes() -> hash = wrapping((hash ~ U64{byte}) * U64{1099511628211})
     digits: "0123456789abcdef".bytes()
-    out := "column-".bytes()
+    ^out: "column-".bytes()
     loop index in 0..<16 {
         shift: checked(U64{60 - index * 4}) ?? U64{0}
         out.push(digits[Int{(hash >> shift) & U64{15}}])
@@ -2899,7 +3009,7 @@ priv __query_test_sales: fn() -> [QueryTestSale] Never! {
 #Test("a filter written as SQL narrows its source's read, and its predicate still decides each row") {
     asked: Shared{[String]{}}
     source: __query_narrowed<QueryTestSale>("table", fn(condition: String, values: [String]) {
-        seen := asked.guard_edit()
+        ^seen: asked.guard_edit()
         seen.value.push("{condition} {values.join(",")}")
         Ok(__query_test_sales())
     })
@@ -2929,7 +3039,7 @@ priv __query_test_sales: fn() -> [QueryTestSale] Never! {
     assert_eq((__query_collect<QueryTestSale>(first.limit(5)) ?? panic("a wider limit after a limit")).len(), 2)
     asked: Shared{[String]{}}
     source: __query_narrowed<QueryTestSale>("table", fn(condition: String, values: [String]) {
-        seen := asked.guard_edit()
+        ^seen: asked.guard_edit()
         seen.value.push("{condition} {values.join(",")}")
         Ok(__query_test_sales())
     })
@@ -2942,7 +3052,7 @@ priv __query_test_sales: fn() -> [QueryTestSale] Never! {
 }
 
 priv __watch_test_items: fn(rows: [QueryTestSale]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop row in rows -> out.push("{row.item}:{row.cents}")
     out
 }
@@ -2977,8 +3087,12 @@ priv __watch_test_items: fn(rows: [QueryTestSale]) -> [String] Never! {
     assert_eq(changed.recomputations, 0)
     assert_eq(changed.retained_rows, 4)
     assert_eq(__watch_test_items(__query_collect<QueryTestSale>(sorted) ?? panic("the batch query still collects")), [String]{"aaa:125", "bits:99", "core:90"})
-    if tracked_insert<QueryTestSale, Int>(tracked, QueryTestSale{item: "again", cents: 99}) == .Ok(_) -> panic("a tracked key is unique")
-    if query_watch<QueryTestSale>(query<QueryTestSale>(__query_test_sales())) == .Ok(_) -> panic("only tracked rows are maintained")
+    if tracked_insert<QueryTestSale, Int>(tracked, QueryTestSale{item: "again", cents: 99}) == .Ok(_) {
+        panic("a tracked key is unique")
+    }
+    if query_watch<QueryTestSale>(query<QueryTestSale>(__query_test_sales())) == .Ok(_) {
+        panic("only tracked rows are maintained")
+    }
 }
 
 #Test("derived, grouped and joined watches follow tracked changes, a failed get keeps the published rows, and a canceled watch fails") {
@@ -3033,7 +3147,9 @@ priv __watch_test_items: fn(rows: [QueryTestSale]) -> [String] Never! {
     assert_eq(canceled.generation, 2)
     assert_eq(canceled.invalidation_cause, "canceled")
     if watch_get<Int>(doubled) == .Ok(_) -> panic("a canceled watch fails")
-    if query_watch<Int>(__query_map<QueryTestSale, Int>(labels, fn(sale) { sale.cents })) == .Ok(_) -> panic("a map over plain rows is not maintained")
+    if query_watch<Int>(__query_map<QueryTestSale, Int>(labels, fn(sale) { sale.cents })) == .Ok(_) {
+        panic("a map over plain rows is not maintained")
+    }
 }
 
 #Test("schema columns keep their order, nullability and column identity") {
@@ -3071,7 +3187,7 @@ url: fn<T>(href: String, format: String, authority: String, limits: DataLimits) 
 /// `core.files.data.read` reads the file, its rows come from
 /// `core.data.loader.stream_as<Row, F>`.
 file_as: fn<T, F: Format>(path: String, limits: DataLimits) -> DataLoader<T> DataError! {
-    loader := make_loader<T>(DataLoaderKind.File, path, "", [String]{}, "json", "local", limits) ?? return Err(err)
+    ^loader: make_loader<T>(DataLoaderKind.File, path, "", [String]{}, "json", "local", limits) ?? return Err(err)
     loader.format = None
     loader.codec = Val(F.name)
     Ok(loader)
@@ -3079,7 +3195,7 @@ file_as: fn<T, F: Format>(path: String, limits: DataLimits) -> DataLoader<T> Dat
 
 /// A URL loader whose payload the `Format` `F` reads; see `file_as`.
 url_as: fn<T, F: Format>(href: String, authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
-    loader := make_loader<T>(DataLoaderKind.URL, href, "", [String]{}, "json", authority, limits) ?? return Err(err)
+    ^loader: make_loader<T>(DataLoaderKind.URL, href, "", [String]{}, "json", authority, limits) ?? return Err(err)
     loader.format = None
     loader.codec = Val(F.name)
     Ok(loader)
@@ -3090,10 +3206,10 @@ database: fn<T>(query: String, parameters: [String], authority: String, limits: 
 }
 
 value: fn<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
-    payload := [U8]{}
+    ^payload: [U8]{}
     data_loader_render(payload, value.encode())
     data_loader_check_payload(limits, payload.len(), "data.value") ?? return Err(err)
-    loader := make_loader<T>(DataLoaderKind.Value, "value", "", [String]{}, "json", "local", limits) ?? return Err(err)
+    ^loader: make_loader<T>(DataLoaderKind.Value, "value", "", [String]{}, "json", "local", limits) ?? return Err(err)
     loader.payload = Val(payload)
     Ok(loader)
 }
@@ -3219,9 +3335,9 @@ snapshot: fn<T: [Encode, Decode]>(loader: ^DataLoader<T>) -[FS, Net, DB]> DataSn
             return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.Decode, "data.loader", reasons.join("; "))))
         }
     }
-    canonical := [U8]{}
+    ^canonical: [U8]{}
     data_loader_render(canonical, value.encode())
-    schema := data_loader_schema(tree, format)
+    ^schema: data_loader_schema(tree, format)
     schema.identity = data_loader_digest(schema.identity.bytes())
     provenance_source: loader.source.copy()
     provenance_authority: loader.authority.copy()
@@ -3230,7 +3346,7 @@ snapshot: fn<T: [Encode, Decode]>(loader: ^DataLoader<T>) -[FS, Net, DB]> DataSn
     // PreludeDataFlow::commit_snapshot
     data_loader_check_payload(loader.limits, canonical.len(), "data.snapshot") ?? return Err(data_loader_fail<T>(loader, err))
     content_id: data_loader_digest(canonical)
-    source_material := ""
+    ^source_material: ""
     source_material = data_loader_identity_part(source_material, data_loader_kind_text(loader.source.kind))
     source_material = data_loader_identity_part(source_material, loader.source.locator)
     source_material = data_loader_identity_part(source_material, loader.source.member)
@@ -3240,7 +3356,7 @@ snapshot: fn<T: [Encode, Decode]>(loader: ^DataLoader<T>) -[FS, Net, DB]> DataSn
     source_material = data_loader_identity_part(source_material, loader.authority.scope)
     source_material = data_loader_identity_part(source_material, loader.authority.revision)
     source_id: data_loader_digest(source_material.bytes())
-    snapshot_material := ""
+    ^snapshot_material: ""
     snapshot_material = data_loader_identity_part(snapshot_material, source_id)
     snapshot_material = data_loader_identity_part(snapshot_material, content_id)
     snapshot_material = data_loader_identity_part(snapshot_material, schema.identity)
@@ -3274,19 +3390,19 @@ describe: fn(values: [Float]) -> DataSummary DataError! {
     if values.len() == 0 {
         return Err(data_error(DataErrorKind.Empty, "describe of empty data is undefined", "describe"))
     }
-    total := Float{0.0}
+    ^total: Float{0.0}
     if compensated_sum(values, "describe") == {
         .Ok(value) -> total = value
         .Err(error) -> return Err(error)
     }
-    mean_value := total / Float{values.len()}
+    ^mean_value: total / Float{values.len()}
     if nonfinite(mean_value) {
         return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "describe"))
     }
     // The sum has proved every value finite, so the extrema take one pass and
     // the median selects without validating again.
-    minimum := values[0]
-    maximum := values[0]
+    ^minimum: values[0]
+    ^maximum: values[0]
     loop value in values {
         if value < minimum -> minimum = value
         if value > maximum -> maximum = value
@@ -3295,12 +3411,12 @@ describe: fn(values: [Float]) -> DataSummary DataError! {
         return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
     }
     middle: finite_quantile(values, Float{0.5}) ?? return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
-    spread := Float{0.0}
+    ^spread: Float{0.0}
     if variance(values) == {
         .Ok(value) -> spread = value
         .Err(error) -> return Err(error)
     }
-    deviation := math.sqrt(spread)
+    ^deviation: math.sqrt(spread)
     if nonfinite(deviation) {
         return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing standard deviation", "describe"))
     }
@@ -3324,13 +3440,13 @@ mean: fn(values: [Float]) -> Float DataError! {
     if values.len() == 0 {
         return Err(data_error(DataErrorKind.Empty, "mean of empty data is undefined", "mean"))
     }
-    total := Float{0.0}
+    ^total: Float{0.0}
     // The checked mean reports its summation failures as `sum`.
     if compensated_sum(values, "sum") == {
         .Ok(value) -> total = value
         .Err(error) -> return Err(error)
     }
-    mean_value := total / Float{values.len()}
+    ^mean_value: total / Float{values.len()}
     if nonfinite(mean_value) {
         return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "mean"))
     }
@@ -3345,7 +3461,7 @@ min: fn(values: [Float]) -> Float DataError! {
     if nonfinite(first) {
         return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
     }
-    out := first
+    ^out: first
     loop value in values {
         if nonfinite(value) {
             return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
@@ -3363,7 +3479,7 @@ max: fn(values: [Float]) -> Float DataError! {
     if nonfinite(first) {
         return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
     }
-    out := first
+    ^out: first
     loop value in values {
         if nonfinite(value) {
             return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
@@ -3377,24 +3493,24 @@ variance: fn(values: [Float]) -> Float DataError! {
     if values.len() == 0 {
         return Err(data_error(DataErrorKind.Empty, "variance of empty data is undefined", "variance"))
     }
-    mean_value := Float{0.0}
-    m2 := Float{0.0}
-    n := Float{0.0}
+    ^mean_value: Float{0.0}
+    ^m2: Float{0.0}
+    ^n: Float{0.0}
     loop value in values {
         if nonfinite(value) {
             return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "variance"))
         }
         n += Float{1.0}
-        delta := value - mean_value
+        ^delta: value - mean_value
         mean_value += delta / n
-        delta2 := value - mean_value
+        ^delta2: value - mean_value
         m2 += delta * delta2
         if nonfinite(mean_value) || nonfinite(m2) {
             return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing variance", "variance"))
         }
     }
     if m2 < (Float{0.0}) -> m2 = Float{0.0}
-    result := m2 / n
+    ^result: m2 / n
     if nonfinite(result) {
         return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing variance", "variance"))
     }
@@ -3402,12 +3518,12 @@ variance: fn(values: [Float]) -> Float DataError! {
 }
 
 stddev: fn(values: [Float]) -> Float DataError! {
-    value := Float{0.0}
+    ^value: Float{0.0}
     if variance(values) == {
         .Ok(result) -> value = result
         .Err(error) -> return Err(error)
     }
-    result := math.sqrt(value)
+    ^result: math.sqrt(value)
     if nonfinite(result) {
         return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing standard deviation", "stddev"))
     }
@@ -3421,7 +3537,7 @@ quantile: fn(values: [Float], q: Float) -> Float DataError! {
     if values.len() == 0 {
         return Err(data_error(DataErrorKind.Empty, "quantile of empty data is undefined", "quantile"))
     }
-    limits := DataLimits.safe()
+    ^limits: DataLimits.safe()
     if values.len() > limits.max_sort_rows {
         return Err(data_error(DataErrorKind.Limit, "max_sort_rows exceeded", "quantile"))
     }
@@ -3437,7 +3553,7 @@ rolling_mean: fn(values: [Float], window: Int) -> [Float] DataError! {
     if window < 1 {
         return Err(data_error(DataErrorKind.InvalidArgument, "rolling width must be positive", "rolling_mean"))
     }
-    limits := DataLimits.safe()
+    ^limits: DataLimits.safe()
     if values.len() > limits.max_output_rows {
         return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "rolling_mean"))
     }
@@ -3446,17 +3562,17 @@ rolling_mean: fn(values: [Float], window: Int) -> [Float] DataError! {
             return Err(data_error_at(DataErrorKind.NonFinite, "numeric input must be finite", "rolling_mean", index))
         }
     }
-    out := [Float]{}
+    ^out: [Float]{}
     loop i in 0..<values.len() {
-        start := 0
+        ^start: 0
         if window < i + 1 -> start = i - window + 1
-        total := Float{0.0}
+        ^total: Float{0.0}
         if compensated_sum_range(values, start, i + 1, "rolling_mean") == {
             .Ok(value) -> total = value
             .Err(error) -> return Err(error)
         }
-        n := i + 1 - start
-        mean_value := total / Float{n}
+        ^n: i + 1 - start
+        ^mean_value: total / Float{n}
         if nonfinite(mean_value) {
             return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing rolling mean", "rolling_mean"))
         }
@@ -3468,9 +3584,9 @@ rolling_mean: fn(values: [Float], window: Int) -> [Float] DataError! {
 // The rows of `left` and `right` whose keys are equal, paired. A key that
 // fails fails the join with that failure, unchanged.
 inner_join: fn<T, U, E>(left: [T], right: [U], left_key: fn(T) -> String E!, right_key: fn(U) -> String E!) -> [DataJoin<T, U>] (DataError | E)! {
-    left_keys := [String]{}
+    ^left_keys: [String]{}
     loop row in left -> left_keys.push(left_key(row))
-    right_keys := [String]{}
+    ^right_keys: [String]{}
     loop row in right -> right_keys.push(right_key(row))
     joined: inner_join_keyed<T, U>(left, right, left_keys, right_keys)
     Ok(joined)
@@ -3478,19 +3594,19 @@ inner_join: fn<T, U, E>(left: [T], right: [U], left_key: fn(T) -> String E!, rig
 
 // inner_join over the keys each row already gave.
 priv inner_join_keyed: fn<T, U>(left: [T], right: [U], left_keys: [String], right_keys: [String]) -> [DataJoin<T, U>] DataError! {
-    limits := DataLimits.safe()
+    ^limits: DataLimits.safe()
     // The output cardinality is known from per-key counts before any row is
     // built, so a limit breach costs O(left + right) rather than one push per
     // row up to max_join_rows.
     right_index: join_index(right_keys)
-    total := 0
+    ^total: 0
     loop key in left_keys {
         total += join_match_count(right_index, key)
         if total > limits.max_join_rows {
             return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "inner_join"))
         }
     }
-    out := [DataJoin<T, U>]{}
+    ^out: [DataJoin<T, U>]{}
     loop left_index in 0..<left.len() {
         position: right_index.positions.get(left_keys[left_index]) ?? next
         loop right_index_at in right_index.rows[position] {
@@ -3506,9 +3622,9 @@ priv inner_join_keyed: fn<T, U>(left: [T], right: [U], left_keys: [String], righ
 // inner_join that keeps each left row without a match, paired with None. A
 // key that fails fails the join with that failure, unchanged.
 left_join: fn<T, U, E>(left: [T], right: [U], left_key: fn(T) -> String E!, right_key: fn(U) -> String E!) -> [DataJoin<T, U?>] (DataError | E)! {
-    left_keys := [String]{}
+    ^left_keys: [String]{}
     loop row in left -> left_keys.push(left_key(row))
-    right_keys := [String]{}
+    ^right_keys: [String]{}
     loop row in right -> right_keys.push(right_key(row))
     joined: left_join_keyed<T, U>(left, right, left_keys, right_keys)
     Ok(joined)
@@ -3516,19 +3632,19 @@ left_join: fn<T, U, E>(left: [T], right: [U], left_key: fn(T) -> String E!, righ
 
 // left_join over the keys each row already gave.
 priv left_join_keyed: fn<T, U>(left: [T], right: [U], left_keys: [String], right_keys: [String]) -> [DataJoin<T, U?>] DataError! {
-    limits := DataLimits.safe()
+    ^limits: DataLimits.safe()
     // Every left row yields at least one output row; see inner_join.
     right_index: join_index(right_keys)
-    total := 0
+    ^total: 0
     loop key in left_keys {
-        matches := join_match_count(right_index, key)
+        ^matches: join_match_count(right_index, key)
         if matches == 0 -> matches = 1
         total += matches
         if total > limits.max_join_rows {
             return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "left_join"))
         }
     }
-    out := [DataJoin<T, U?>]{}
+    ^out: [DataJoin<T, U?>]{}
     loop left_index in 0..<left.len() {
         position: right_index.positions.get(left_keys[left_index]) ?? -1
         if position < 0 {
@@ -3553,10 +3669,10 @@ priv DataJoinIndex: struct {
 }
 
 join_index: fn(keys: [String]) -> DataJoinIndex Never! {
-    positions := [String:Int]{}
-    rows := [[Int]]{}
+    ^positions: [String:Int]{}
+    ^rows: [[Int]]{}
     loop at in 0..<keys.len() {
-        position := 0
+        ^position: 0
         if positions.get(keys[at]) == .Val(found) -> position = found else {
             position = rows.len()
             positions[keys[at].copy()] = position
@@ -3575,17 +3691,17 @@ join_match_count: fn(index: DataJoinIndex, key: String) -> Int Never! {
 // Sums `value_fn` over the rows of each (row key, column key) cell. A
 // callback that fails fails the pivot with that failure, unchanged.
 pivot_sum: fn<T, E>(rows: [T], row_key: fn(T) -> String E!, column_key: fn(T) -> String E!, value_fn: fn(T) -> Float E!) -> [DataPivotCell] (DataError | E)! {
-    limits := DataLimits.safe()
-    cells := [DataPivotCell]{}
+    ^limits: DataLimits.safe()
+    ^cells: [DataPivotCell]{}
     loop index in 0..<rows.len() {
-        row := rows[index]
+        ^row: rows[index]
         row_name: row_key(row)
         column_name: column_key(row)
         amount: value_fn(row)
         if nonfinite(amount) {
             return Err(data_error_at(DataErrorKind.NonFinite, "pivot values must be finite", "pivot_sum", index))
         }
-        found := -1
+        ^found: -1
         loop cell_index in 0..<cells.len() {
             if text_compare(cells[cell_index].row_key, row_name) == 0 && text_compare(cells[cell_index].column_key, column_name) == 0 {
                 found = cell_index
@@ -3599,7 +3715,7 @@ pivot_sum: fn<T, E>(rows: [T], row_key: fn(T) -> String E!, column_key: fn(T) ->
             cells.push(DataPivotCell{row_key: row_name, column_key: column_name, count: 1, sum: amount.copy(), mean: amount})
             next
         }
-        cell := cells[found]
+        ^cell: cells[found]
         cell.count += 1
         cell.sum += amount
         if nonfinite(cell.sum) {
@@ -3611,7 +3727,7 @@ pivot_sum: fn<T, E>(rows: [T], row_key: fn(T) -> String E!, column_key: fn(T) ->
         return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "pivot_sum"))
     }
     loop index in 0..<cells.len() {
-        cell := cells[index]
+        ^cell: cells[index]
         cell.mean = cell.sum / Float{cell.count}
         if nonfinite(cell.mean) {
             return Err(data_error(DataErrorKind.Overflow, "finite overflow while pivoting", "pivot_sum"))
@@ -3662,11 +3778,11 @@ render: fn<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotR
 // the count.
 bar_text: fn(groups: [Group<String, Int>]) -> String DataError! {
     _: validate_bar_counts(groups, "bar_text")
-    out := ""
+    ^out: ""
     loop index in 0..<groups.len() {
         group: groups[index]
         width: if group.value > 40 -> 40 else -> group.value
-        bar := ""
+        ^bar: ""
         loop _ in 0..<width -> bar = "{bar}#"
         if index > 0 -> out = "{out}\n"
         out = "{out}{group.key} | {bar} {group.value}"
@@ -3679,11 +3795,11 @@ bar_text: fn(groups: [Group<String, Int>]) -> String DataError! {
 bar_svg: fn(groups: [Group<String, Int>]) -> String DataError! {
     _: validate_bar_counts(groups, "bar_svg")
     height: 24 + 24 * groups.len()
-    maximum := 1
+    ^maximum: 1
     loop group in groups {
         if group.value > maximum -> maximum = group.value
     }
-    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"{height}\" viewBox=\"0 0 320 {height}\"><rect width=\"320\" height=\"100%\" fill=\"white\"/>"
+    ^out: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"{height}\" viewBox=\"0 0 320 {height}\"><rect width=\"320\" height=\"100%\" fill=\"white\"/>"
     loop index in 0..<groups.len() {
         group: groups[index]
         y: 18 + index * 24
@@ -3706,8 +3822,8 @@ validate_bar_counts: fn(groups: [Group<String, Int>], operation: String) DataErr
 
 line_text: fn(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
     _: validate_line_options(options, "line_text")
-    labels := [String]{}
-    values := [Float]{}
+    ^labels: [String]{}
+    ^values: [Float]{}
     loop index in 0..<groups.len() {
         group: groups[index]
         if nonfinite(group.value) {
@@ -3721,8 +3837,8 @@ line_text: fn(groups: [Group<String, Float>], options: DataLineOptions) -> Strin
 
 line_svg: fn(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
     _: validate_line_options(options, "line_svg")
-    labels := [String]{}
-    values := [Float]{}
+    ^labels: [String]{}
+    ^values: [Float]{}
     loop index in 0..<groups.len() {
         group: groups[index]
         if nonfinite(group.value) {
@@ -3759,9 +3875,9 @@ make_loader: fn<T>(kind: DataLoaderKind, locator: String, member: String, parame
         return Err(data_error(DataErrorKind.InvalidArgument, "loader authority is invalid", "data.loader"))
     }
     format: parse_format(format_name) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data format", "data.loader"))
-    source := DataSourceIdentity{kind: kind, locator: public_locator(kind, locator), member: member, parameters: public_parameters(parameters)}
-    authority := DataAuthority{scope: authority_name.copy(), revision: ""}
-    status := DataLoaderStatus{
+    ^source: DataSourceIdentity{kind: kind, locator: public_locator(kind, locator), member: member, parameters: public_parameters(parameters)}
+    ^authority: DataAuthority{scope: authority_name.copy(), revision: ""}
+    ^status: DataLoaderStatus{
         identity: "",
         freshness: DataFreshness.Pending,
         invalidated_by: .NoCause,
@@ -3788,13 +3904,13 @@ make_loader: fn<T>(kind: DataLoaderKind, locator: String, member: String, parame
 }
 
 public_parameters: fn(values: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop value in values -> out.push(public_parameter(value))
     out
 }
 
 public_parameter: fn(value: String) -> String Never! {
-    normalized := trim(value)
+    ^normalized: trim(value)
     if normalized.len() == 0 -> return ""
     parts: normalized.split("=").to_list()
     if parts.len() < 2 -> return "value-{sha256(normalized.bytes()).hex()}"
@@ -3803,8 +3919,8 @@ public_parameter: fn(value: String) -> String Never! {
     parameter_value: parts[1]
     upper_key: upper(key)
     upper_value: upper(parameter_value)
-    sensitive_key := upper_key.contains("PASSWORD") || upper_key.contains("PASSWD") || upper_key.contains("PWD") || upper_key.contains("SECRET") || upper_key.contains("TOKEN") || upper_key.contains("CREDENTIAL") || upper_key.contains("AUTH") || upper_key.contains("API_KEY") || upper_key.contains("APIKEY") || upper_key.contains("ACCESS_KEY") || upper_key.contains("ACCESS-TOKEN") || upper_key.contains("SIGNATURE") || upper_key.contains("COOKIE") || upper_key.contains("SESSION") || upper_key.contains("PRIVATE_KEY") || upper_key.contains("PRIVATE-KEY") || upper_key.contains("BEARER")
-    sensitive_value := upper_value.starts_with("BEARER ") || upper_value.starts_with("BASIC ") || upper_value.starts_with("-----BEGIN") || upper_value.starts_with("PASSWORD=") || upper_value.starts_with("SECRET=") || upper_value.starts_with("TOKEN=") || upper_value.starts_with("CREDENTIAL=") || upper_value.starts_with("AUTHORIZATION=")
+    ^sensitive_key: upper_key.contains("PASSWORD") || upper_key.contains("PASSWD") || upper_key.contains("PWD") || upper_key.contains("SECRET") || upper_key.contains("TOKEN") || upper_key.contains("CREDENTIAL") || upper_key.contains("AUTH") || upper_key.contains("API_KEY") || upper_key.contains("APIKEY") || upper_key.contains("ACCESS_KEY") || upper_key.contains("ACCESS-TOKEN") || upper_key.contains("SIGNATURE") || upper_key.contains("COOKIE") || upper_key.contains("SESSION") || upper_key.contains("PRIVATE_KEY") || upper_key.contains("PRIVATE-KEY") || upper_key.contains("BEARER")
+    ^sensitive_value: upper_value.starts_with("BEARER ") || upper_value.starts_with("BASIC ") || upper_value.starts_with("-----BEGIN") || upper_value.starts_with("PASSWORD=") || upper_value.starts_with("SECRET=") || upper_value.starts_with("TOKEN=") || upper_value.starts_with("CREDENTIAL=") || upper_value.starts_with("AUTHORIZATION=")
     if sensitive_key || sensitive_value -> return "{key}=<redacted>"
     normalized
 }
@@ -3815,7 +3931,7 @@ public_locator: fn(kind: DataLoaderKind, locator: String) -> String Never! {
     fragment_parts: locator.split("#").to_list()
     without_fragment: fragment_parts[0]
     query_parts: without_fragment.split("?").to_list()
-    base := query_parts[0]
+    ^base: query_parts[0]
     scheme_parts: base.split("://").to_list()
     if scheme_parts.len() > 1 {
         path_parts: scheme_parts[1].split("/").to_list()
@@ -3825,7 +3941,7 @@ public_locator: fn(kind: DataLoaderKind, locator: String) -> String Never! {
         loop i in 1..<path_parts.len() -> base = "{base}/{path_parts[i]}"
     }
     if query_parts.len() == 1 -> return base
-    public_query := [String]{}
+    ^public_query: [String]{}
     loop parameter in query_parts[1].split("&") -> public_query.push(public_parameter(parameter))
     "{base}?{public_query.join("&")}"
 }
@@ -3847,7 +3963,7 @@ valid_public_text: fn(text: String, allow_empty: Bool) -> Bool Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return allow_empty
     if raw.len() > 4096 -> return false
-    has_nonspace := false
+    ^has_nonspace: false
     loop byte in raw {
         if byte < (U8{32}) || byte == (U8{127}) -> return false
         if byte != (U8{32}) -> has_nonspace = true
@@ -3856,7 +3972,7 @@ valid_public_text: fn(text: String, allow_empty: Bool) -> Bool Never! {
 }
 
 valid_authority: fn(text: String) -> Bool Never! {
-    normalized := upper(text)
+    ^normalized: upper(text)
     if normalized.starts_with("BEARER ") || normalized.starts_with("BASIC ") -> return false
     if normalized.starts_with("PASSWORD=") || normalized.starts_with("SECRET=") || normalized.starts_with("TOKEN=") || normalized.starts_with("CREDENTIAL=") || normalized.starts_with("AUTHORIZATION=") {
         return false
@@ -3868,7 +3984,7 @@ valid_authority: fn(text: String) -> Bool Never! {
 }
 
 parse_format: fn(name: String) -> DataFormat? Never! {
-    normalized := upper(name)
+    ^normalized: upper(name)
     if normalized == {
         "CSV" -> Val(DataFormat.CSV)
         "JSON" -> Val(DataFormat.JSON)
@@ -3892,14 +4008,14 @@ compensated_sum: fn(values: [Float], operation: String) -> Float DataError! {
 }
 
 compensated_sum_range: fn(values: [Float], start: Int, end: Int, operation: String) -> Float DataError! {
-    total := Float{0.0}
-    correction := Float{0.0}
+    ^total: Float{0.0}
+    ^correction: Float{0.0}
     loop index in start..<end {
         value: values[index]
         if nonfinite(value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "numeric input must be finite", operation, index))
         }
-        next_total := total + value
+        ^next_total: total + value
         // The lost low part is formed before it joins the running correction.
         if math.fabs(total) >= math.fabs(value) -> correction += ((total - next_total) + value) else {
             correction += ((value - next_total) + total)
@@ -3909,7 +4025,7 @@ compensated_sum_range: fn(values: [Float], start: Int, end: Int, operation: Stri
             return Err(data_error(DataErrorKind.Overflow, "finite overflow while summing", operation))
         }
     }
-    result := total + correction
+    ^result: total + correction
     if nonfinite(result) {
         return Err(data_error(DataErrorKind.Overflow, "finite overflow while summing", operation))
     }
@@ -3918,10 +4034,10 @@ compensated_sum_range: fn(values: [Float], start: Int, end: Int, operation: Stri
 
 sort_pivot_cells: fn(cells: ^[DataPivotCell]) Never! {
     loop i in 1..<cells.len() {
-        j := i
+        ^j: i
         loop j > 0 {
             if !pivot_before(cells[j], cells[j - 1]) -> break
-            current := cells[j]
+            ^current: cells[j]
             cells[j] = cells[j - 1]
             cells[j - 1] = current
             j -= 1
@@ -3930,7 +4046,7 @@ sort_pivot_cells: fn(cells: ^[DataPivotCell]) Never! {
 }
 
 pivot_before: fn(left: DataPivotCell, right: DataPivotCell) -> Bool Never! {
-    row_order := text_compare(left.row_key, right.row_key)
+    ^row_order: text_compare(left.row_key, right.row_key)
     if row_order < 0 -> return true
     if row_order > 0 -> return false
     text_compare(left.column_key, right.column_key) < 0
@@ -3939,7 +4055,7 @@ pivot_before: fn(left: DataPivotCell, right: DataPivotCell) -> Bool Never! {
 text_compare: fn(left: String, right: String) -> Int Never! {
     a: left.bytes()
     b: right.bytes()
-    n := a.len()
+    ^n: a.len()
     if b.len() < n -> n = b.len()
     loop i in 0..<n {
         if a[i] < b[i] -> return -1
@@ -3951,8 +4067,8 @@ text_compare: fn(left: String, right: String) -> Int Never! {
 }
 
 snapshot_from_rows: fn<T>(rows: [T]) -> DataSnapshot<[T]> Never! {
-    source := DataSourceIdentity{kind: DataLoaderKind.Value, locator: "rows", member: "", parameters: [String]{}}
-    authority := DataAuthority{scope: "local", revision: ""}
+    ^source: DataSourceIdentity{kind: DataLoaderKind.Value, locator: "rows", member: "", parameters: [String]{}}
+    ^authority: DataAuthority{scope: "local", revision: ""}
     return DataSnapshot<[T]>{
         value: rows,
         identity: DataSnapshotIdentity{id: "rows", source: "rows", content: "", schema: "", format: DataFormat.JSON},
@@ -3973,18 +4089,18 @@ priv quantile_select: module {
     finite_quantile: fn(values: [Float], q: Float) -> Float DataError! {
         pos: q * Float{values.len() - 1}
         lo: checked(Int{math.trunc(pos)}) ?? panic("quantile position must be finite")
-        hi := lo
+        ^hi: lo
         if (Float{lo}) < pos -> hi = lo + 1
         if hi >= values.len() -> hi = values.len() - 1
         frac: pos - Float{lo}
         if ascending(values) -> return interpolated(values[lo], values[hi], frac)
-        work := [Float]{}
+        ^work: [Float]{}
         loop value in values -> work.push(value)
         low: select_rank(work, 0, work.len(), lo)
         if lo == hi -> return Ok(normalize_zero(low))
         // Selection leaves every value after rank `lo` at or above it, so the
         // next rank is their minimum.
-        high := work[hi]
+        ^high: work[hi]
         loop index in hi..<work.len() {
             if work[index] < high -> high = work[index]
         }
@@ -4015,8 +4131,8 @@ priv quantile_select: module {
     // to -0.0 and 0.0, which the callers normalize. On return every value after
     // `rank` in the range is at or above the answer.
     select_rank: fn(values: ^[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
-        start := lo
-        end := hi
+        ^start: lo
+        ^end: hi
         loop {
             if end - start <= 5 {
                 sort_float_range(values, start, end)
@@ -4024,9 +4140,9 @@ priv quantile_select: module {
             }
             pivot: median_of_medians(values, start, end)
             // [start, less) < pivot, [less, more) == pivot, [more, end) > pivot.
-            less := start
-            index := start
-            more := end
+            ^less: start
+            ^index: start
+            ^more: end
             loop index < more {
                 value: values[index]
                 if value < pivot {
@@ -4047,10 +4163,10 @@ priv quantile_select: module {
     // Gathers the median of each group of five at the front of the range and
     // selects the median of those medians.
     median_of_medians: fn(values: ^[Float], lo: Int, hi: Int) -> Float Never! {
-        count := 0
-        start := lo
+        ^count: 0
+        ^start: lo
         loop start < hi {
-            end := start + 5
+            ^end: start + 5
             if end > hi -> end = hi
             sort_float_range(values, start, end)
             middle: start + (end - start - 1) /% 2
@@ -4066,7 +4182,7 @@ priv quantile_select: module {
     // Insertion sort of a range of at most five values.
     sort_float_range: fn(values: ^[Float], lo: Int, hi: Int) Never! {
         loop i in lo + 1..<hi {
-            j := i
+            ^j: i
             loop j > lo {
                 if !(values[j] < values[j - 1]) -> break
                 current: values[j]
@@ -4079,25 +4195,25 @@ priv quantile_select: module {
 }
 
 #Test("rank selection matches the sorted order at every rank") {
-    cases := [[Float]]{
+    ^cases: [[Float]]{
         [Float]{3.0},
         [Float]{2.0, 1.0},
         [Float]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0},
         [Float]{13.0, 12.0, 11.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0},
         [Float]{4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0},
     }
-    mixed := [Float]{}
-    seed := 7
+    ^mixed: [Float]{}
+    ^seed: 7
     loop index in 0..<61 {
         seed = (seed * 1103515245 + 12345 + index) %% 2147483648
         mixed.push(Float{seed %% 17} - Float{8.0})
     }
     cases.push(mixed)
     loop values in cases {
-        sorted := values.copy()
+        ^sorted: values.copy()
         sorted.sort()
         loop rank in 0..<values.len() {
-            work := values.copy()
+            ^work: values.copy()
             assert_eq(select_rank(work, 0, work.len(), rank), sorted[rank])
         }
     }
@@ -4123,7 +4239,7 @@ priv rank_order: module {
     // (0 <= rank < len).
     rank_select_prototype: fn<T, E>(values: View<T>, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
         if rank < 0 || rank >= values.len() -> panic("rank {rank} is outside 0..<{values.len()}")
-        order := [Int]{}
+        ^order: [Int]{}
         loop index in 0..<values.len() -> order.push(index)
         rank_select_range<T, E>(values, order, 0, order.len(), rank, before)
     }
@@ -4132,8 +4248,8 @@ priv rank_order: module {
     // range name values that are not after the answer, and the indices after it
     // name values that are not before it (the partition law).
     rank_select_range: fn<T, E>(values: View<T>, order: ^[Int], lo: Int, hi: Int, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
-        start := lo
-        end := hi
+        ^start: lo
+        ^end: hi
         loop {
             if end - start <= 5 {
                 rank_sort_small<T, E>(values, order, start, end, before)
@@ -4141,9 +4257,9 @@ priv rank_order: module {
             }
             pivot: rank_pivot<T, E>(values, order, start, end, before)
             // [start, less) before pivot, [less, more) equivalent, [more, end) after.
-            less := start
-            index := start
-            more := end
+            ^less: start
+            ^index: start
+            ^more: end
             loop index < more {
                 current: order[index]
                 if {
@@ -4172,10 +4288,10 @@ priv rank_order: module {
     // Gathers the median of each group of five at the front of the range and
     // answers the input index of the median of those medians.
     rank_pivot: fn<T, E>(values: View<T>, order: ^[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) -> Int E! {
-        count := 0
-        start := lo
+        ^count: 0
+        ^start: lo
         loop start < hi {
-            end := start + 5
+            ^end: start + 5
             if end > hi -> end = hi
             rank_sort_small<T, E>(values, order, start, end, before)
             middle: start + (end - start - 1) /% 2
@@ -4191,7 +4307,7 @@ priv rank_order: module {
     // Insertion sort of at most five indices by their values.
     rank_sort_small: fn<T, E>(values: View<T>, order: ^[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) E! {
         loop i in lo + 1..<hi {
-            j := i
+            ^j: i
             loop j > lo {
                 if !before(values[order[j]], values[order[j - 1]]) -> break
                 current: order[j]
@@ -4203,8 +4319,8 @@ priv rank_order: module {
     }
 
     rank_test_values: fn(count: Int, seed: Int) -> [Int] Never! {
-        out := [Int]{}
-        state := seed
+        ^out: [Int]{}
+        ^state: seed
         loop index in 0..<count {
             state = (state * 1103515245 + 12345 + index) %% 2147483648
             out.push(state %% 97)
@@ -4230,9 +4346,9 @@ priv rank_order: module {
 
 #Test("rank_select_prototype") {
     // Boundaries and every rank of short, sorted, reversed, equal and mixed inputs.
-    cases := [[Int]]{[Int]{7}, [Int]{2, 1}, [Int]{5, 5, 5, 5, 5, 5, 5}}
-    ascending := [Int]{}
-    descending := [Int]{}
+    ^cases: [[Int]]{[Int]{7}, [Int]{2, 1}, [Int]{5, 5, 5, 5, 5, 5, 5}}
+    ^ascending: [Int]{}
+    ^descending: [Int]{}
     loop index in 0..<23 {
         ascending.push(index)
         descending.push(22 - index)
@@ -4241,12 +4357,12 @@ priv rank_order: module {
     cases.push(descending.copy())
     cases.push(rank_test_values(41, 3))
     loop values in cases {
-        sorted := values.copy()
+        ^sorted: values.copy()
         sorted.sort()
         view: values[0..<values.len()]
         loop rank in 0..<values.len() {
-            calls := 0
-            order := [Int]{}
+            ^calls: 0
+            ^order: [Int]{}
             loop index in 0..<values.len() -> order.push(index)
             found: rank_select_range<Int, Never>(view, order, 0, order.len(), rank, fn(a: Int, b: Int) { rank_test_before(a, b, calls) })
             assert_eq(values[found], sorted[rank])
@@ -4268,14 +4384,14 @@ priv rank_order: module {
         view: values[0..<values.len()]
         ranks: [Int]{0, values.len() /% 2, values.len() - 1}
         loop rank in ranks {
-            calls := 0
+            ^calls: 0
             _: rank_select_prototype<Int, Never>(view, rank, fn(a: Int, b: Int) { rank_test_before(a, b, calls) })
             assert(calls <= 40 * values.len())
         }
     }
-    same := [Int]{}
+    ^same: [Int]{}
     loop index in 0..<2000 -> same.push(4)
-    same_calls := 0
+    ^same_calls: 0
     _: rank_select_prototype<Int, Never>(same[0..<same.len()], 1000, fn(a: Int, b: Int) { rank_test_before(a, b, same_calls) })
     assert(same_calls <= 40 * same.len())
 
@@ -4284,7 +4400,7 @@ priv rank_order: module {
     mixed: rank_test_values(300, 5)
     stops: [Int]{1, 2, 17, 250}
     loop stop in stops {
-        calls := 0
+        ^calls: 0
         if rank_select_prototype<Int, DataError>(mixed[0..<mixed.len()], 150, fn(a: Int, b: Int) { rank_test_refusing(a, b, calls, stop) }) == {
             .Ok(_) -> { assert(false) }
             .Err(error) -> assert_eq(error.reason, "comparison {stop} refused")
@@ -4297,7 +4413,7 @@ priv rank_order: module {
     before_words: words.copy()
     loop rank in 0..<words.len() {
         found: rank_select_prototype<String, Never>(words[0..<words.len()], rank, fn(a: String, b: String) { rank_test_text_before(a, b) })
-        smaller := 0
+        ^smaller: 0
         loop word in words {
             if text_compare(word, words[found]) < 0 -> smaller += 1
         }
@@ -4310,20 +4426,20 @@ render_bar_text: fn(labels: [String], values: [Float]) -> String Never! {
     bounds: value_bounds(values)
     minimum: bounds.min
     maximum: bounds.max
-    baseline := scale_between(Float{0.0}, minimum, maximum, 20)
-    out := ""
+    ^baseline: scale_between(Float{0.0}, minimum, maximum, 20)
+    ^out: ""
     loop i in 0..<labels.len() {
-        v := values[i]
-        bar := ""
+        ^v: values[i]
+        ^bar: ""
         if v >= (Float{0.0}) {
-            width := 0
+            ^width: 0
             if maximum > (Float{0.0}) {
                 width = scale_between(v, Float{0.0}, maximum, 20 - baseline)
             }
             loop _ in 0..<baseline -> bar = "{bar} "
             loop _ in 0..<width -> bar = "{bar}#"
         } else {
-            width := 0
+            ^width: 0
             if minimum < (Float{0.0}) -> width = scale_between(v, minimum, Float{0.0}, baseline)
             loop _ in 0..<width -> bar = "{bar}<"
         }
@@ -4336,16 +4452,16 @@ render_bar_svg: fn(labels: [String], values: [Float]) -> String Never! {
     bounds: value_bounds(values)
     minimum: bounds.min
     maximum: bounds.max
-    baseline := 100
+    ^baseline: 100
     if maximum > minimum -> baseline = scale_between(Float{0.0}, minimum, maximum, 200)
-    w := 320
-    h := 24 * labels.len() + 16
-    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
+    ^w: 320
+    ^h: 24 * labels.len() + 16
+    ^out: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
     loop i in 0..<labels.len() {
-        v := values[i]
-        y := 8 + i * 24
-        x := 80 + baseline
-        bw := 0
+        ^v: values[i]
+        ^y: 8 + i * 24
+        ^x: 80 + baseline
+        ^bw: 0
         if v >= (Float{0.0}) {
             if maximum > (Float{0.0}) -> bw = scale_between(v, Float{0.0}, maximum, 200 - baseline)
         } else {
@@ -4359,19 +4475,19 @@ render_bar_svg: fn(labels: [String], values: [Float]) -> String Never! {
 }
 
 render_line_text: fn(labels: [String], values: [Float]) -> String Never! {
-    out := ""
+    ^out: ""
     loop i in 0..<labels.len() -> out = "{out}{labels[i]}={values[i]}\n"
     out
 }
 
 render_line_svg: fn(labels: [String], values: [Float]) -> String Never! {
     n: labels.len()
-    w := 320
-    h := 120
+    ^w: 320
+    ^h: 120
     bounds: value_bounds(values)
-    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\"><polyline fill=\"none\" stroke=\"#4a90d9\" points=\""
+    ^out: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\"><polyline fill=\"none\" stroke=\"#4a90d9\" points=\""
     loop i in 0..<n {
-        x := 8
+        ^x: 8
         if n > 1 -> x = i * (w - 16) /% (n - 1) + 8
         y: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
         if i > 0 -> out = "{out} "
@@ -4382,12 +4498,12 @@ render_line_svg: fn(labels: [String], values: [Float]) -> String Never! {
 
 render_point_svg: fn(labels: [String], values: [Float]) -> String Never! {
     n: labels.len()
-    w := 320
-    h := 120
+    ^w: 320
+    ^h: 120
     bounds: value_bounds(values)
-    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
+    ^out: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
     loop i in 0..<n {
-        x := 8
+        ^x: 8
         if n > 1 -> x = i * (w - 16) /% (n - 1) + 8
         y: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
         out = "{out}<circle cx=\"{x}\" cy=\"{y}\" r=\"3\" fill=\"#4a90d9\"/>"
@@ -4397,8 +4513,8 @@ render_point_svg: fn(labels: [String], values: [Float]) -> String Never! {
 }
 
 value_bounds: fn(values: [Float]) -> {min: Float, max: Float} Never! {
-    minimum := Float{0.0}
-    maximum := Float{0.0}
+    ^minimum: Float{0.0}
+    ^maximum: Float{0.0}
     loop value in values {
         if value < minimum -> minimum = value
         if value > maximum -> maximum = value
@@ -4412,7 +4528,7 @@ value_bounds: fn(values: [Float]) -> {min: Float, max: Float} Never! {
 
 scale_between: fn(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int Never! {
     if extent <= 0 || maximum <= minimum -> return 0
-    ratio := (value - minimum) / (maximum - minimum)
+    ^ratio: (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
     if ratio >= (Float{1.0}) -> return extent
     checked(Int{math.trunc(ratio * Float{extent})}) ?? panic("plot coordinate must be finite")
@@ -4435,16 +4551,16 @@ validate_line_options: fn(options: DataLineOptions, operation: String) DataError
 }
 
 normalize_plot_plan: fn(plan: JetDataPlotPlan) -> JetDataPlotPlan DataError! {
-    values := [Float]{}
+    ^values: [Float]{}
     loop i in 0..<plan.labels.len() {
-        value := Float{0.0}
+        ^value: Float{0.0}
         if i < plan.values.len() -> value = plan.values[i]
         if nonfinite(value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "plot", i))
         }
         values.push(value)
     }
-    height := 24 * plan.labels.len() + 16
+    ^height: 24 * plan.labels.len() + 16
     if plan.mark == JetDataPlotMark.Line || plan.mark == JetDataPlotMark.Point -> height = 120
     if height < 16 -> height = 16
     Ok(
@@ -4476,7 +4592,7 @@ plot_inspection_text: fn(plan: JetDataPlotPlan, rows: Int) -> String Never! {
 render_plot_text: fn(plan: JetDataPlotPlan) -> String Never! {
     if plan.mark == JetDataPlotMark.Line -> return render_line_text(plan.labels, plan.values)
     if plan.mark == JetDataPlotMark.Point {
-        out := ""
+        ^out: ""
         loop i in 0..<plan.labels.len() -> out = "{out}{plan.labels[i]}: {plan.values[i]}\n"
         return out
     }
@@ -4492,20 +4608,20 @@ render_plot_svg: fn(plan: JetDataPlotPlan) -> String Never! {
 // Points print with six decimals and SVG coordinates with three; -0.0 prints
 // as 0.
 render_line_options_text: fn(labels: [String], values: [Float], options: DataLineOptions) -> String Never! {
-    points := ""
+    ^points: ""
     loop i in 0..<values.len() {
         if i > 0 -> points = "{points} -> "
         points = "{points}{normalize_zero(values[i]):Fixed(6)}"
     }
-    label_text := ""
+    ^label_text: ""
     loop i in 0..<labels.len() {
         if i > 0 -> label_text = "{label_text} | "
         label_text = "{label_text}{labels[i]}"
     }
-    out := ""
+    ^out: ""
     if options.title.len() > 0 -> out = "{out}{options.title}\n"
     out = "{out}{options.x_label}: {label_text}\n{options.y_label}: {points}\n"
-    markers := "off"
+    ^markers: "off"
     if options.markers -> markers = "on"
     out = "{out}line: style={options.style} color={options.color} markers={markers}"
     if options.reference != None {
@@ -4520,8 +4636,8 @@ render_line_options_text: fn(labels: [String], values: [Float], options: DataLin
 // and the reference line; a flat range widens by one on each side.
 render_line_options_svg: fn(labels: [String], values: [Float], options: DataLineOptions) -> String Never! {
     n: labels.len()
-    minimum := Float{0.0}
-    maximum := Float{1.0}
+    ^minimum: Float{0.0}
+    ^maximum: Float{1.0}
     if values.len() > 0 {
         minimum = values[0]
         maximum = values[0]
@@ -4544,19 +4660,19 @@ render_line_options_svg: fn(labels: [String], values: [Float], options: DataLine
         maximum += Float{1.0}
     }
     color: xml_escape(options.color)
-    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"640\" height=\"360\" viewBox=\"0 0 640 360\"><title>{xml_escape(options.title)}</title><rect width=\"640\" height=\"360\" fill=\"white\"/>"
+    ^out: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"640\" height=\"360\" viewBox=\"0 0 640 360\"><title>{xml_escape(options.title)}</title><rect width=\"640\" height=\"360\" fill=\"white\"/>"
     out = "{out}<line x1=\"64\" y1=\"44\" x2=\"64\" y2=\"308\" stroke=\"#333\"/><line x1=\"64\" y1=\"308\" x2=\"616\" y2=\"308\" stroke=\"#333\"/>"
     if options.reference != None {
         reference: options.reference ?? Float{0.0}
         y: line_plot_y(reference, minimum, maximum)
         out = "{out}<line x1=\"64\" y1=\"{y:Fixed(3)}\" x2=\"616\" y2=\"{y:Fixed(3)}\" stroke=\"#888\" stroke-dasharray=\"4 4\"/>"
     }
-    points := ""
+    ^points: ""
     loop i in 0..<n {
         if i > 0 -> points = "{points} "
         points = "{points}{line_plot_x(i, n):Fixed(3)},{line_plot_y(values[i], minimum, maximum):Fixed(3)}"
     }
-    dash := ""
+    ^dash: ""
     if options.style == "dashed" -> dash = " stroke-dasharray=\"8 5\""
     if options.style == "dotted" -> dash = " stroke-dasharray=\"2 5\""
     out = "{out}<polyline fill=\"none\" stroke=\"{color}\" stroke-width=\"2\"{dash} points=\"{points}\"/>"
@@ -4587,10 +4703,10 @@ line_plot_y: fn(value: Float, minimum: Float, maximum: Float) -> Float Never! {
 }
 
 xml_escape: fn(text: String) -> String Never! {
-    out := ""
-    chunk := [U8]{}
+    ^out: ""
+    ^chunk: [U8]{}
     loop byte in text.bytes() {
-        entity := ""
+        ^entity: ""
         if byte == (U8{38}) -> entity = "&amp;" else if byte == (U8{60}) -> entity = "&lt;" else if byte == (U8{62}) {
             entity = "&gt;"
         } else if byte == (U8{34}) { entity = "&quot;" } else if byte == (U8{39}) {
@@ -4609,8 +4725,8 @@ xml_escape: fn(text: String) -> String Never! {
 
 trim: fn(text: String) -> String Never! {
     raw: text.bytes()
-    s := 0
-    e := raw.len()
+    ^s: 0
+    ^e: raw.len()
     loop s < e {
         n: raw[s]
         if n == 32 || n == 9 || n == 10 || n == 13 -> s += 1 else { break }
@@ -4625,7 +4741,7 @@ trim: fn(text: String) -> String Never! {
 }
 
 upper: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         n: b
         if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
@@ -4651,7 +4767,7 @@ data_loader_put_control: fn(out: ^[U8], value: Int) Never! {
 
 data_loader_quote: fn(out: ^[U8], text: String) Never! {
     out.push(U8{34})
-    index := 0
+    ^index: 0
     loop index < text.count_bytes() {
         byte: encoding_stream.byte_at(text, index)
         n: Int{byte}
@@ -4703,7 +4819,7 @@ data_loader_render: fn(out: ^[U8], tree: encoding.Dyn) Never! {
         }
         .Object(_) -> {
             // Sort the owned entries directly; the comparator captures no tree.
-            entries := encoding_stream.object_entries(tree)
+            ^entries: encoding_stream.object_entries(tree)
             entries.sort_by(fn(left: {key: String, value: Dyn}, right: {key: String, value: Dyn}) { left.key <=> right.key })
             out.push(U8{123})
             loop (position, entry) in entries {
@@ -4740,7 +4856,7 @@ data_loader_check_payload: fn(limits: DataLimits, bytes: Int, operation: String)
 data_loader_bounded_text: fn(value: String) -> String Never! {
     raw: value.bytes()
     if raw.len() <= 1024 -> return value.copy()
-    end := 1024 - 14
+    ^end: 1024 - 14
     loop end > 0 && raw[end] >= (U8{128}) && raw[end] < (U8{192}) -> end -= 1
     prefix: if end == 0 -> "" else -> String.from_bytes(raw[0..(end - 1)]) ?? ""
     "{prefix}...<truncated>"
@@ -4768,7 +4884,7 @@ data_loader_public_text_error: fn(label: String) -> DataError Never! {
 // `fail`: the loader status records the failure; a non-value loader releases
 // its pending payload.
 data_loader_fail: fn<T>(loader: ^DataLoader<T>, error: DataError) -> DataError Never! {
-    cleanup := "payload-released"
+    ^cleanup: "payload-released"
     if loader.source.kind == DataLoaderKind.Value -> cleanup = "retained" else {
         loader.payload = None
     }
@@ -4884,7 +5000,7 @@ data_loader_tree: fn(payload: [U8], format: DataFormat, limits: DataLimits) -> D
         return Err(data_loader_error(DataErrorKind.Bridge, "data.loader", "Arrow IPC has a separate provider boundary; Parquet is the registered reader"))
     }
     text: String.from_bytes(payload) ?? return Err(data_loader_error(DataErrorKind.Decode, "data.loader", "payload is not UTF-8"))
-    tree := Dyn.Null
+    ^tree: Dyn.Null
     if format == DataFormat.JSON {
         if json_codec.parse(text) == {
             .Ok(value) -> tree = value
@@ -4943,7 +5059,7 @@ data_loader_csv_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
             }
         }
     }
-    values := [Dyn]{}
+    ^values: [Dyn]{}
     loop row in 1..<records.len() {
         fields: records[row].fields
         if values.len() >= limits.max_output_rows {
@@ -4952,7 +5068,7 @@ data_loader_csv_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
         if fields.len() != header.len() {
             return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "CSV row has {fields.len()} fields; header has {header.len()}"))
         }
-        entries := [{key: String, value: Dyn}]{}
+        ^entries: [{key: String, value: Dyn}]{}
         loop column in 0..<header.len() {
             entries.push({key: header[column].copy(), value: Dyn.Text(fields[column].copy())})
         }
@@ -4963,7 +5079,7 @@ data_loader_csv_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
 
 // One JSON value per non-blank line.
 data_loader_jsonl_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
-    values := [Dyn]{}
+    ^values: [Dyn]{}
     loop (index, raw_line) in text.split("\n").to_list() {
         line: trim(raw_line)
         if line.len() == 0 -> next
@@ -4983,7 +5099,7 @@ data_loader_jsonl_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
 // nullable; Int and Float share `float`, other conflicts widen to `Any`.
 // The identity is the length-delimited format and column facts.
 data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
-    fields := [{name: String, type_name: String, nullable: Bool}]{}
+    ^fields: [{name: String, type_name: String, nullable: Bool}]{}
     if tree == {
         .Object(_) -> {
             loop entry in encoding_stream.object_entries(tree) {
@@ -4991,7 +5107,7 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
             }
         }
         .Array(values) -> {
-            rows_seen := 0
+            ^rows_seen: 0
             loop value in values {
                 if value == .Object(_) {
                     entries: encoding_stream.object_entries(value)
@@ -4999,7 +5115,7 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
                         data_schema_absorb(fields, entry.key, entry.value, rows_seen > 0 || entry.value == .Null)
                     }
                     loop index in 0..<fields.len() {
-                        present := false
+                        ^present: false
                         loop entry in entries {
                             if entry.key == fields[index].name -> present = true
                         }
@@ -5017,8 +5133,8 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
     }
     fields.sort_by(fn(left: {name: String, type_name: String, nullable: Bool}, right: {name: String, type_name: String, nullable: Bool}) { left.name <=> right.name })
     format_name: data_format_text(format)
-    identity := data_loader_identity_part("", format_name)
-    columns := [DataColumn]{}
+    ^identity: data_loader_identity_part("", format_name)
+    ^columns: [DataColumn]{}
     loop (order, field) in fields {
         column: DataColumn{id: "column-{order}-{field.name}", name: field.name.copy(), type_name: field.type_name.copy(), nullable: field.nullable}
         identity = data_loader_identity_part(identity, column.id)
@@ -5118,7 +5234,7 @@ DataLoaderPortRecord: struct {
     assert(!loader.canceled)
     assert(!loader.offline)
 
-    limits := DataLimits.safe()
+    ^limits: DataLimits.safe()
     limits.encoding.max_item_bytes = 1
     limits.encoding.buffer_bytes = 1
     if value<String>("x", limits) == {
@@ -5133,7 +5249,7 @@ DataLoaderPortRecord: struct {
 
 #Test("value canonical strings retain native C0 and C1 control escaping") {
     text: encoding_stream.text_from_bytes([U8]{8, 127, 194, 128, 194, 159, 9}) ?? panic("control text")
-    out := [U8]{}
+    ^out: [U8]{}
     data_loader_quote(out, text)
     assert_eq(out, [U8]{34, 92, 117, 48, 48, 48, 56, 92, 117, 48, 48, 55, 102, 92, 117, 48, 48, 56, 48, 92, 117, 48, 48, 57, 102, 92, 116, 34})
 }

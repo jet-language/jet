@@ -19,7 +19,7 @@ GzipFileError: enum {
 /// `GzipFileError.Unsupported`, never an empty buffer.
 compress: fn(data: [U8]) -> [U8] GzipFileError! {
     if data.len() > 67108864 -> return Err(GzipFileError.Unsupported)
-    out := [U8]{}
+    ^out: [U8]{}
     out.push(U8{31})
     out.push(U8{139})
     out.push(U8{8})
@@ -45,8 +45,8 @@ decompress: fn(data: [U8]) -> [U8] GzipFileError! {
     }
     flags: u8_int(data[3])
     if ((flags) & 224) != 0 -> return Err(GzipFileError.Malformed)
-    trailer := data.len() - 8
-    i := 10
+    ^trailer: data.len() - 8
+    ^i: 10
     if ((flags) & 4) != 0 {
         if i + 2 > trailer -> return Err(GzipFileError.Malformed)
         xlen: (u8_int(data[i])) | (u8_int(data[i + 1]) << 8)
@@ -55,7 +55,7 @@ decompress: fn(data: [U8]) -> [U8] GzipFileError! {
         i += xlen
     }
     if ((flags) & 8) != 0 {
-        terminated := false
+        ^terminated: false
         loop i < trailer {
             if data[i] == (U8{0}) {
                 i += 1
@@ -67,7 +67,7 @@ decompress: fn(data: [U8]) -> [U8] GzipFileError! {
         if !terminated -> return Err(GzipFileError.Malformed)
     }
     if ((flags) & 16) != 0 {
-        terminated := false
+        ^terminated: false
         loop i < trailer {
             if data[i] == (U8{0}) {
                 i += 1
@@ -90,9 +90,9 @@ decompress: fn(data: [U8]) -> [U8] GzipFileError! {
     // ISIZE is only the size modulo 2^32, so it cannot bound memory. The
     // inflater enforces the 64 MiB decoded-output cap itself; the trailer is
     // checked after decoding, so a truncated member reports `Malformed`.
-    payload := [U8]{}
+    ^payload: [U8]{}
     loop k in i..<trailer -> payload.push(data[k])
-    body := if core.archive.inflate(payload) == {
+    ^body: if core.archive.inflate(payload) == {
         .Ok(value) -> value
         .Err(error) -> {
             if error == ArchiveError.Unsupported -> return Err(GzipFileError.Unsupported)
@@ -112,9 +112,9 @@ is_gzip: fn(data: [U8]) -> Bool Never! {
 
 isize: fn(data: [U8]) -> Int Never! {
     if data.len() < 8 -> return 0
-    n := 0
-    i := data.len() - 4
-    k := 0
+    ^n: 0
+    ^i: data.len() - 4
+    ^k: 0
     loop k < 4 {
         n = (n) | (u8_int(data[i + k]) << (k * 8))
         k += 1
@@ -157,7 +157,7 @@ decompress_file: fn(src: String, dst: String) -> Bool GzipFileError! {
 }
 
 slice_u8: fn(data: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in start..<end -> out.push(data[i])
     out
 }

@@ -39,7 +39,7 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
 }
 
 #Test("stable mcp peer negotiates and completes the session lifecycle") {
-    peer := MCPPeer.server(MCPPolicy.stable())
+    ^peer: MCPPeer.server(MCPPolicy.stable())
     selected: peer.negotiate([String]{MCP_PREVIEW_REVISION, MCP_STABLE_REVISION}) ?? panic("stable negotiation")
     assert_eq(selected.revision, MCPRevision.Stable20251125)
     assert_eq(peer.state(), MCPLifecycleState.Negotiated)
@@ -55,7 +55,7 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
 }
 
 #Test("mcp stateless preview revision refuses session initialize") {
-    preview := MCPPeer.server(MCPPolicy.stable_and([MCPRevision]{MCPRevision.Preview20260728}))
+    ^preview: MCPPeer.server(MCPPolicy.stable_and([MCPRevision]{MCPRevision.Preview20260728}))
     _: preview.negotiate([String]{MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
     server_info: MCPImplementation.new("server", "1") ?? panic("server identity")
     if preview.initialize(MCPInitializeParams.new(MCPRevision.Preview20260728, MCPCapabilities.empty(), None), server_info, MCPCapabilities.empty()) == {
@@ -70,7 +70,7 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
     codec: MCPCodec.Stable20251125
     encoded: codec.encode_message(request, MCPLimits.defaults()) ?? panic("encode")
     assert_eq(codec.decode_message(encoded, MCPLimits.defaults()) ?? panic("decode"), request)
-    tiny := MCPLimits.defaults()
+    ^tiny: MCPLimits.defaults()
     tiny.max_message_bytes = 1
     if codec.encode_message(request, tiny) == {
         .Ok(_) -> { panic("one byte cannot hold a request") }
@@ -81,7 +81,7 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
 #Test("mcp codec rejects invalid limits and malformed json") {
     request: pkg_test_mcp_list_request(1, Dyn.Object([String:Dyn]{}))
     codec: MCPCodec.Stable20251125
-    zero := MCPLimits.defaults()
+    ^zero: MCPLimits.defaults()
     zero.max_message_bytes = 0
     if codec.encode_message(request, zero) == {
         .Ok(_) -> { panic("a zero byte limit is invalid") }
@@ -98,7 +98,7 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
     request: pkg_test_mcp_list_request(2, nested)
     codec: MCPCodec.Stable20251125
     encoded: codec.encode_message(request, MCPLimits.defaults()) ?? panic("encode")
-    shallow := MCPLimits.defaults()
+    ^shallow: MCPLimits.defaults()
     shallow.max_schema_depth = 1
     if codec.decode_message(encoded, shallow) == {
         .Ok(_) -> { panic("depth two exceeds a bound of one") }
@@ -107,12 +107,12 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
 }
 
 #Test("mcp preview requires explicit opt in and uses the stateless profile") {
-    stable := MCPPeer.server(MCPPolicy.stable())
+    ^stable: MCPPeer.server(MCPPolicy.stable())
     if stable.negotiate([String]{MCP_PREVIEW_REVISION}) == {
         .Ok(_) -> { panic("preview must need opt-in") }
         .Err(error) -> assert_eq(error, MCPNegotiationError.PreviewRequiresOptIn)
     }
-    preview := MCPPeer.server(MCPPolicy.stable_and([MCPRevision]{MCPRevision.Preview20260728}))
+    ^preview: MCPPeer.server(MCPPolicy.stable_and([MCPRevision]{MCPRevision.Preview20260728}))
     selected: preview.negotiate([String]{MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
     assert_eq(selected.lifecycle, MCPLifecycleProfile.Stateless)
     assert_eq(preview.state(), MCPLifecycleState.Ready)
@@ -123,7 +123,7 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
 }
 
 #Test("mcp rejects unknown revisions and lifecycle before negotiation") {
-    peer := MCPPeer.server(MCPPolicy.stable())
+    ^peer: MCPPeer.server(MCPPolicy.stable())
     if peer.negotiate([String]{"2099-01-01"}) == {
         .Ok(_) -> { panic("unknown revision must not negotiate") }
         .Err(error) -> {

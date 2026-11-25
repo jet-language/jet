@@ -21,7 +21,7 @@ use {
 }
 
 #Test("store closure registration serializes concurrent writers") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     loop index in 0..<8 {
         writer_roots: HangarRoots{root: roots.root, dev_mode: true}
@@ -32,7 +32,7 @@ use {
 }
 
 #Test("store closure journal compacts without changing graph") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     loop index in 0..<70 {
         _: store_test_ingest_fixture(verification, roots, "compact-{index}", [String:String]{"out": "compact-bytes-{index}"}, [String]{})
@@ -43,9 +43,9 @@ use {
 }
 
 #Test("store closure readers are serialized with registration and compaction") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
-    previous := 0
+    ^previous: 0
     loop index in 0..<70 {
         _: store_test_ingest_fixture(verification, roots, "reader-compact-{index}", [String:String]{"out": "reader-compact-bytes-{index}"}, [String]{})
         count: (store_closure_graph(verification, roots) ?? panic("graph")).records.len()
@@ -57,7 +57,7 @@ use {
 }
 
 #Test("store cas pool hardlink preserves cache verification and rejects outside peers") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     // Two distinct object digests that share an identical file payload.
     sources: [String:String]{"cas-c": "c-only", "cas-d": "d-only"}
@@ -113,7 +113,7 @@ use {
 }
 
 #Test("store cas pool optimizer reseals an object whose seal held before sharing") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     hangar: roots.hangar_dir()
     source: files.join(roots.root, "reseal-src")
@@ -136,7 +136,7 @@ use {
     assert((files.stat(payload) ?? panic("stat")).links >= 2)
     // A fresh owner has no memo, so it re-walks the tuples: the seal now
     // names the shared link.
-    fresh := StoreVerification.new()
+    ^fresh: StoreVerification.new()
     resealed: store_check_seal(fresh, out, hangar) ?? panic("check")
     assert(resealed == Val((digest)))
     store_test_drop_roots(roots)
@@ -156,7 +156,7 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
     files.create_dir_all(outside) ?? panic("outside")
     files.write(files.join(outside, "live"), "must survive") ?? panic("live")
     files.symlink(outside, files.join(hangar, "objects")) ?? panic("objects link")
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     if store_optimize_cas_pool(verification, roots) == {
         .Ok(_) -> { panic("a symlinked object pool must be refused") }
         .Err(error) -> assert(error.message().contains("object pool"))
@@ -167,7 +167,7 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
 }
 
 #Test("store cleanup unlinks orphaned object symlink without following target") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     objects: files.join(roots.hangar_dir(), "objects")
     outside: files.join(roots.root, "symlink-target")
@@ -188,7 +188,7 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
 }
 
 #Test("store cleanup protects named outputs from canonical gc") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     _: store_test_ingest_fixture(verification, roots, "named-output-gc", [String:String]{"out": "primary", "dev": "secondary"}, [String]{})
     orphaned: store_collect_orphaned_canonical_objects(verification, roots, LiveRoots.empty(), [String]{}) ?? panic("collect")
@@ -197,7 +197,7 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
 }
 
 #Test("store cleanup quarantines projection with proven missing output") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     entry: store_test_ingest_fixture(verification, roots, "missing-output", [String:String]{"out": "bytes"}, [String]{}).entry
     store_make_tree_writable_for_removal(entry.out) ?? panic("chmod")
@@ -211,7 +211,7 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
 }
 
 #Test("store clean plan rejects symlinked build scratch without following it") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     hangar: roots.hangar_dir()
     outside: files.join(roots.root, "scratch-outside")
@@ -228,7 +228,7 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
 }
 
 #Test("store ingest rejects semantic xattr without platform artifact kind") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     if !sys.is_linux() {
         return
     }
@@ -249,7 +249,7 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
 }
 
 #Test("store ingest keeps semantic xattr with platform artifact kind") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     if !sys.is_linux() {
         return
     }
@@ -260,7 +260,7 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
     files.write(file, "xattr-bytes") ?? panic("payload")
     files.set_extended_attribute(source, "user.jet.directory", "directory".bytes()) ?? panic("set dir xattr")
     files.set_extended_attribute(file, "user.jet.test", "keep".bytes()) ?? panic("set xattr")
-    request := store_test_path_request("xattr-ok", "path:xattr-ok", [String:String]{"out": source}, "")
+    ^request: store_test_path_request("xattr-ok", "path:xattr-ok", [String:String]{"out": source}, "")
     request.platform_artifact_kind = "macos-app"
     ingested: store_ingest_tree(verification, roots, request) ?? panic("ingest")
     first_hash: ingested.entry.envelope.output_hash
@@ -269,14 +269,14 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
     assert((pkg_list_xattr_names(files.join(ingested.entry.out, "payload")) ?? panic("list")).contains("user.jet.test"))
     assert((pkg_list_xattr_names(ingested.entry.out) ?? panic("list")).contains("user.jet.directory"))
     files.set_extended_attribute(source, "user.jet.directory", "changed".bytes()) ?? panic("change xattr")
-    hook := EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
+    ^hook: EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
     changed_hash: pkg_try_output_hash_of_with_policy(source, true, hook) ?? panic("rehash")
     assert(first_hash != changed_hash)
     store_test_drop_roots(roots)
 }
 
 #Test("store ingest rejects semantic directory xattr without platform kind") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     if !sys.is_linux() {
         return
     }
@@ -294,7 +294,7 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
 }
 
 #Test("store ingest symlink xattr is nofollow rejected digested and copied") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     if !sys.is_macos() {
         return
     }
@@ -306,13 +306,13 @@ store_test_validate_hit: fn(verification: StoreVerification, roots: HangarRoots,
     files.set_extended_attribute(files.join(source, "link"), "user.jet.symlink", "first".bytes()) ?? panic("set xattr")
     plain: store_test_path_request("xattr-symlink", "path:xattr-symlink", [String:String]{"out": source}, "")
     assert(store_ingest_tree(verification, roots, plain) == .Err(_))
-    kinded := plain
+    ^kinded: plain
     kinded.platform_artifact_kind = "macos-tree"
     ingested: store_ingest_tree(verification, roots, kinded) ?? panic("ingest")
     assert((pkg_list_xattr_names(files.join(ingested.entry.out, "link")) ?? panic("list")).contains("user.jet.symlink"))
     first: ingested.entry.envelope.output_hash
     files.set_extended_attribute(files.join(source, "link"), "user.jet.symlink", "second".bytes()) ?? panic("change xattr")
-    hook := EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
+    ^hook: EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
     second: pkg_try_output_hash_of_with_policy(source, true, hook) ?? panic("rehash")
     assert(first != second)
     store_test_drop_roots(roots)

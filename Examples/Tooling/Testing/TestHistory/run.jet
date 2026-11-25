@@ -51,10 +51,10 @@ booking_operation: fn(
 ) -> testing.HistoryOperation {
     task_id: testing.TaskID{value: index % 2}
     event: testing.EventID{value: index + 1}
-    arguments := [testing.HistoryValue]{}
-    created_handles := [testing.HandleID]{}
-    consumed_handles := [testing.HandleID]{}
-    preconditions := [testing.HistoryPrecondition]{}
+    ^arguments: [testing.HistoryValue]{}
+    ^created_handles: [testing.HandleID]{}
+    ^consumed_handles: [testing.HandleID]{}
+    ^preconditions: [testing.HistoryPrecondition]{}
 
     // `x != None`
     // refines a direct parameter to its payload in the true branch.
@@ -125,7 +125,7 @@ booking_schedule: fn(index: Int, name: String) -> testing.HistoryScheduleChoice 
 booking_key: fn(handle: testing.HandleID) -> String { "{handle.value}" }
 
 booking_public_state: fn(states: [String:String]) -> Dyn {
-    values := [String:Dyn]{}
+    ^values: [String:Dyn]{}
     loop (key, state) in states -> values[key] = Dyn.Text(state)
     Dyn.Object(values)
 }
@@ -133,7 +133,7 @@ booking_public_state: fn(states: [String:String]) -> Dyn {
 // Independent reference transition table.  It consumes typed commands only;
 // it never calls the production implementation or shares its defect logic.
 booking_model: fn(commands: [BookingCommand]) -> Dyn {
-    states := [String:String]{}
+    ^states: [String:String]{}
     loop command in commands {
         if command == {
             .Reserve(creates) -> { states[booking_key(creates)] = "active" }
@@ -154,7 +154,7 @@ booking_model: fn(commands: [BookingCommand]) -> Dyn {
 // Candidate implementation with one deliberate observable defect: a retry
 // after timeout forgets to release the timed-out handle.
 booking_actual_bug: fn(commands: [BookingCommand]) -> Dyn {
-    states := [String:String]{}
+    ^states: [String:String]{}
     loop command in commands {
         if command == {
             .Reserve(creates) -> { states[booking_key(creates)] = "active" }
@@ -174,7 +174,7 @@ booking_actual_bug: fn(commands: [BookingCommand]) -> Dyn {
 
 // Correct production implementation kept separate from the reference model.
 booking_actual_correct: fn(commands: [BookingCommand]) -> Dyn {
-    states := [String:String]{}
+    ^states: [String:String]{}
     loop command in commands {
         if command == {
             .Reserve(creates) -> { states[booking_key(creates)] = "active" }
@@ -261,8 +261,8 @@ booking_has_task_event: fn(
     task_id: testing.TaskID,
     event: testing.EventID,
 ) -> Bool {
-    task_seen := false
-    event_seen := false
+    ^task_seen: false
+    ^event_seen: false
     loop precondition in operation.preconditions {
         if precondition == {
             .TaskCompleted(found) -> {
@@ -288,9 +288,9 @@ booking_valid: fn(candidate: testing.TypedHistoryCase<BookingCommand>) -> Bool {
         return false
     }
 
-    states := [testing.HandleID:String]{}
-    known := [testing.HandleID:Bool]{}
-    created_count := 0
+    ^states: [testing.HandleID:String]{}
+    ^known: [testing.HandleID:Bool]{}
+    ^created_count: 0
     loop position in 0..<operation_count {
         index: position
         operation: candidate.case.operations[position]
@@ -364,7 +364,7 @@ booking_rebuild: fn(
     case: testing.HistoryCase,
 ) -> testing.TypedHistoryCase<BookingCommand>? {
     if case.operations.len() == 0 -> return None
-    commands := [BookingCommand]{}
+    ^commands: [BookingCommand]{}
     loop operation in case.operations {
         command: booking_command_for(operation) ?? return None
         commands.push(command)
@@ -385,12 +385,12 @@ booking_generate: fn(
     if max_steps < 3 -> return None
     case_seed: rng.next_u64()
     step_count: 3 + rng.below(max_steps - 2)
-    operations := [testing.HistoryOperation]{}
-    schedule := [testing.HistoryScheduleChoice]{}
-    commands := [BookingCommand]{}
-    active := [testing.HandleID]{}
-    terminal := [BookingTerminal]{}
-    next_id := 1
+    ^operations: [testing.HistoryOperation]{}
+    ^schedule: [testing.HistoryScheduleChoice]{}
+    ^commands: [BookingCommand]{}
+    ^active: [testing.HandleID]{}
+    ^terminal: [BookingTerminal]{}
+    ^next_id: 1
 
     first: testing.HandleID{value: next_id}
     next_id += 1
@@ -565,7 +565,7 @@ booking_concrete_strategy: fn() -> testing.HistoryStrategy<BookingCommand> {
 }
 
 counter_model: fn(commands: [CounterCommand]) -> Dyn {
-    value := 0
+    ^value: 0
     loop command in commands {
         if command == {
             .Add(delta) -> { value += delta }
@@ -576,7 +576,7 @@ counter_model: fn(commands: [CounterCommand]) -> Dyn {
 }
 
 counter_actual: fn(commands: [CounterCommand]) -> Dyn {
-    value := 0
+    ^value: 0
     loop command in commands {
         if command == {
             .Add(delta) -> { value += delta }

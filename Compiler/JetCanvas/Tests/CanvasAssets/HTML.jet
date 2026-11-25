@@ -15,14 +15,14 @@ CanvasHTMLTestScript: struct {
 
 // The `<script>` and `<script src="...">` elements of `html`, in order.
 canvas_html_test_scripts: fn(html: String) -> [CanvasHTMLTestScript] {
-    scripts := [CanvasHTMLTestScript]{}
-    rest := html.copy()
+    ^scripts: [CanvasHTMLTestScript]{}
+    ^rest: html.copy()
     loop {
         opening: rest.partition("<script")
         if opening.sep == "" -> break
         after: opening.tail
-        src := String?{None}
-        attributes := ""
+        ^src: String?{None}
+        ^attributes: ""
         if after.starts_with(">") -> attributes = after.removeprefix(">") else {
             spaced: after.trim_start()
             if spaced.len() == after.len() || !spaced.starts_with("src=\"") {
@@ -61,7 +61,7 @@ canvas_html_test_evaluate: fn(node: String, scenario: String, index: Int, script
     receipt: child.wait() ?? panic("Canvas bootstrap JS evaluation failed to finish")
     if !receipt.success -> panic("Canvas bootstrap {scenario}: {receipt.errors}")
     pairs: canvas_html_test_json.parse(receipt.output) ?? panic("Canvas bootstrap {scenario}: the engine printed no JSON: {receipt.output}")
-    writes := [{name: String, value: String}]{}
+    ^writes: [{name: String, value: String}]{}
     if pairs == {
         .Array(items) -> {
             loop item in items {
@@ -97,10 +97,10 @@ canvas_html_test_bootstrap: fn(scenario: String, html: String, base: String, src
     node: kit_require_tool("node") ?? return
     scripts: canvas_html_test_scripts(html)
     assert(scripts.len() == 2, "Canvas bootstrap {scenario}: one bootstrap and one app entry must be emitted, not {scripts.len()}")
-    expected := [{name: String, value: String}]{{name: "__JET_CANVAS_BASE__", value: base}}
+    ^expected: [{name: String, value: String}]{{name: "__JET_CANVAS_BASE__", value: base}}
     loop route in routes -> expected.push({name: route.name, value: route.value})
-    installed := [{name: String, value: String}]{}
-    loaded := [String]{}
+    ^installed: [{name: String, value: String}]{}
+    ^loaded: [String]{}
     loop index in 0..<scripts.len() {
         script: scripts[index]
         if script.src == {

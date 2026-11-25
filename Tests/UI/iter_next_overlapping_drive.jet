@@ -2,8 +2,8 @@
 // pulling from the same source inside the body is an overlapping mutable drive.
 // The checker rejects it before any backend runs.
 run: fn() {
-    items := [1, 2, 3].lazy()
-    loop x in ^items {
+    ^items: [1, 2, 3].lazy()
+    loop x in items.in_place() {
         pulled: items.next()
         print(x)
         print(pulled)

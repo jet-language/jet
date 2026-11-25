@@ -1,7 +1,6 @@
 use core.mem
 
-#Allow(Jet.WriteMarkNeverWritten, "the ported shape lends the caller's place, whose address the body reads")
-read: fn(value: ^Int) -> Int {
+#Allow(Jet.WriteMarkNeverWritten, "the ported shape lends the caller's place, whose address the body reads") read: fn(value: ^Int) -> Int {
     cell: value
     #Unsafe("the borrowed value is live in the caller") {
         addr: mem.address_of(cell)
@@ -13,6 +12,6 @@ read: fn(value: ^Int) -> Int {
 }
 
 run: fn() {
-    value := 23
+    ^value: 23
     print(read(value))
 }

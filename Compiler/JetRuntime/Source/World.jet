@@ -31,7 +31,7 @@ world_current: fn() -> I64 { jet_rt_world_current() }
 
 #Export(c) jet_rt_world_clone: fn(world: I64) -> I64 {
     world_require(world)
-    _ := sync_add(world, I64{1})
+    ^_: sync_add(world, I64{1})
     world
 }
 
@@ -39,7 +39,7 @@ world_current: fn() -> I64 { jet_rt_world_current() }
 // first use. The World mutex serializes creation; the cell has its own lock.
 world_environment: fn(world: I64) -> I64 {
     sync_mutex_lock(wrapping(world + I64{8}))
-    root := sync_load(wrapping(world + I64{128}))
+    ^root: sync_load(wrapping(world + I64{128}))
     if (root == I64{0}) {
         root = logical_environment_new()
         sync_store(wrapping(world + I64{128}), root)
@@ -113,8 +113,8 @@ world_unsigned_before: fn(a: I64, b: I64) -> Bool {
 
 world_decimal: fn(data: I64, value: I64) -> I64 {
     // Divide unsigned bits by ten without exact-Int allocation.
-    number := value
-    count := I64{0}
+    ^number: value
+    ^count: I64{0}
     loop {
         half: (number >> I64{1}) & I64{9223372036854775807}
         quotient: half /% I64{5}
@@ -124,8 +124,8 @@ world_decimal: fn(data: I64, value: I64) -> I64 {
         number = quotient
         if (number == I64{0}) { break }
     }
-    left := I64{0}
-    right := count - I64{1}
+    ^left: I64{0}
+    ^right: count - I64{1}
     loop left < right {
         byte: trap_byte(wrapping(data + left))
         trap_put(wrapping(data + left), trap_byte(wrapping(data + right)))
@@ -142,7 +142,7 @@ world_event: fn(world: I64, prefix: I64, first: I64, second: I64, numbers: I64) 
     text: scheduler_text_new(length + I64{41})
     data: sync_load(text)
     coll_copy(sync_load(prefix), data, length)
-    used := length
+    ^used: length
     if (numbers > I64{0}) { used += world_decimal(wrapping(data + used), first) }
     if (numbers > I64{1}) {
         trap_put(wrapping(data + used), I64{58})
@@ -175,7 +175,7 @@ world_increment: fn(address: I64) {
     }
     timers: wrapping(world + I64{80})
     data: sync_load(wrapping(timers + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < sync_load(timers) {
         sync_park_drop(sync_load(wrapping(data + (at + I64{2}) * I64{8})))
         at += I64{3}
@@ -219,7 +219,7 @@ world_scope_enter: fn(world: I64, save: I64, task_scope: Bool) {
 }
 
 world_scope_leave: fn(save: I64) {
-    _ := rt_time_monotonic_provider_set(sync_load(wrapping(save + I64{8})))
+    ^_: rt_time_monotonic_provider_set(sync_load(wrapping(save + I64{8})))
     base: thread_base()
     sync_store(wrapping(base + I64{104}), sync_load(save))
     sync_store(wrapping(base + I64{112}), sync_load(wrapping(save + I64{16})))
@@ -258,7 +258,7 @@ world_timer_remove: fn(world: I64, index: I64) -> I64 {
 world_timer_find: fn(world: I64, slot: I64) -> I64 {
     header: wrapping(world + I64{80})
     data: sync_load(wrapping(header + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < sync_load(header) {
         if (sync_load(wrapping(data + (at + I64{2}) * I64{8})) == slot) { return at }
         at += I64{3}
@@ -344,13 +344,13 @@ world_wait: fn(world: I64, accept_timer: Bool) {
     world_require(world)
     sync_mutex_lock(wrapping(world + I64{8}))
     budget: sync_load(wrapping(world + I64{72}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < budget {
         if (sync_load(wrapping(world + I64{64})) == I64{0} || (accept_timer && sync_load(wrapping(world + I64{80})) != I64{0})) {
             sync_mutex_unlock(wrapping(world + I64{8}))
             return
         }
-        _ := sync_cond_wait(wrapping(world + I64{16}), wrapping(world + I64{8}), sync_deadline(I64{50000}))
+        ^_: sync_cond_wait(wrapping(world + I64{16}), wrapping(world + I64{8}), sync_deadline(I64{50000}))
         at += I64{1}
     }
     ready: sync_load(wrapping(world + I64{64})) == I64{0}
@@ -389,8 +389,8 @@ world_wait: fn(world: I64, accept_timer: Bool) {
         sync_mutex_lock(wrapping(world + I64{8}))
         header: wrapping(world + I64{80})
         data: sync_load(wrapping(header + I64{16}))
-        best := I64{-1}
-        at := I64{0}
+        ^best: I64{-1}
+        ^at: I64{0}
         loop at < sync_load(header) {
             deadline: sync_load(wrapping(data + at * I64{8}))
             if (deadline <= target) {
@@ -431,15 +431,15 @@ world_wait: fn(world: I64, accept_timer: Bool) {
     header: wrapping(world + I64{104})
     data: sync_load(wrapping(header + I64{16}))
     count: sync_load(header)
-    length := if (count == I64{0}) -> I64{0} else -> count - I64{1}
-    at := I64{0}
+    ^length: if (count == I64{0}) -> I64{0} else -> count - I64{1}
+    ^at: I64{0}
     loop at < count {
         length += sync_load(wrapping(sync_load(wrapping(data + at * I64{8})) + I64{8}))
         at += I64{1}
     }
     text: scheduler_text_new(length)
     target: sync_load(text)
-    used := I64{0}
+    ^used: I64{0}
     at = I64{0}
     loop at < count {
         if (at != I64{0}) {
@@ -460,7 +460,7 @@ world_wait: fn(world: I64, accept_timer: Bool) {
     world: world_current()
     if (world == I64{0}) { return false }
     sync_mutex_lock(wrapping(world + I64{8}))
-    value := sync_load(wrapping(world + I64{40}))
+    ^value: sync_load(wrapping(world + I64{40}))
     value ~= (value << I64{7})
     value ~= ((value >> I64{9}) & I64{36028797018963967})
     value = wrapping(value * I64{-7046029254386353131})
@@ -503,7 +503,7 @@ world_wait: fn(world: I64, accept_timer: Bool) {
 #Export(c) jet_testing_world_run: fn(env: I64, invoke: I64, release: I64) {
     if (world_current() != I64{0}) {
         scheduler_fatal(services_msg_world_nested())
-        _ := coll_call1(release, env)
+        ^_: coll_call1(release, env)
         return
     }
     world: jet_rt_world_new()
@@ -517,19 +517,19 @@ world_wait: fn(world: I64, accept_timer: Bool) {
     lent: jet_rt_alloc(I64{8}, I64{8})
     out: jet_rt_alloc(I64{8}, I64{8})
     sync_store(lent, world)
-    _ := coll_call3(invoke, env, lent, out)
+    ^_: coll_call3(invoke, env, lent, out)
     jet_rt_free(out, I64{8}, I64{8})
     jet_rt_free(lent, I64{8}, I64{8})
     if (jet_scheduler_native_propagate() == I64{0}) {
         jet_world_wait_idle(world)
         jet_rt_world_ensure_closed(world)
     }
-    _ := rt_time_monotonic_provider_set(provider)
+    ^_: rt_time_monotonic_provider_set(provider)
     sync_store(wrapping(base + I64{104}), I64{0})
     sync_store(wrapping(base + I64{112}), flags)
     sync_store(wrapping(base + I64{120}), slot)
     jet_rt_world_drop(world)
-    _ := coll_call1(release, env)
+    ^_: coll_call1(release, env)
 }
 
 // A World's own cell for each Core store that keeps its state as bytes
@@ -543,7 +543,7 @@ world_wait: fn(world: I64, accept_timer: Bool) {
 // The entry for `store`, created empty on first use. The caller holds the
 // World mutex.
 world_store_entry: fn(world: I64, store: I64) -> I64 {
-    entry := sync_load(wrapping(world + I64{136}))
+    ^entry: sync_load(wrapping(world + I64{136}))
     loop entry != (I64{0}) {
         if jet_rt_string_eq(sync_load(wrapping(entry + I64{8})), store) -> return entry
         entry = sync_load(entry)
@@ -557,7 +557,7 @@ world_store_entry: fn(world: I64, store: I64) -> I64 {
 }
 
 world_stores_drop: fn(first: I64) {
-    entry := first
+    ^entry: first
     loop entry != (I64{0}) {
         next_entry: sync_load(entry)
         jet_rt_string_drop(sync_load(wrapping(entry + I64{8})))
@@ -605,8 +605,8 @@ store_entry_swap: fn(entry: I64, expected: I64, expected_length: I64, next: I64,
     new_length: if (next_length < I64{0} || next == I64{0}) -> I64{0} else -> next_length
     data: sync_load(wrapping(entry + I64{16}))
     length: sync_load(wrapping(entry + I64{24}))
-    same := length == old_length
-    at := I64{0}
+    ^same: length == old_length
+    ^at: I64{0}
     loop same && at < length {
         same = rt_text_byte(wrapping(data + at)) == host_u8_get(expected, at)
         at += I64{1}
@@ -641,11 +641,11 @@ store_entry_swap: fn(entry: I64, expected: I64, expected_length: I64, next: I64,
 // files take the replaces in the order they happened.
 
 // <data>/<package>, owned; 0 with no store.
-device_directory := I64{0}
+^device_directory: I64{0}
 
-device_mutex := I64{0}
+^device_mutex: I64{0}
 
-device_first := I64{0}
+^device_first: I64{0}
 
 // The entry function's package name, owned.
 #Export(c) jet_rt_entry_package_set: fn(package: I64) {
@@ -696,7 +696,7 @@ device_store_path: fn(store: I64, temporary: Bool) -> I64 {
 // The entry for `store`, holding its file's bytes from its first use (empty
 // when there is no file or it can't be read). The caller holds device_mutex.
 device_store_entry: fn(store: I64) -> I64 {
-    entry := device_first
+    ^entry: device_first
     loop entry != (I64{0}) {
         if jet_rt_string_eq(sync_load(wrapping(entry + I64{8})), store) -> return entry
         entry = sync_load(entry)
@@ -737,11 +737,11 @@ device_store_write: fn(store: I64, data: I64, length: I64) {
     temporary: device_store_path(store, true)
     error: jet_rt_alloc(I64{8}, I64{8})
     sync_store(error, I64{0})
-    written := jet_files_create_dirs_os(device_directory, error) == I64{1}
+    ^written: jet_files_create_dirs_os(device_directory, error) == I64{1}
     written = written && jet_files_write_bytes_os(temporary, data, length, error) == I64{1}
     written = written && jet_std_fs_fsync_raw(temporary, error) == I64{1}
     written = written && jet_files_atomic_rename_raw(temporary, target, error) == I64{1}
-    if written -> _ := jet_std_fs_fsync_raw(device_directory, error)
+    if written -> ^_: jet_std_fs_fsync_raw(device_directory, error)
     jet_rt_handle_drop_io_error(sync_load(error))
     jet_rt_free(error, I64{8}, I64{8})
     jet_rt_string_drop(temporary)

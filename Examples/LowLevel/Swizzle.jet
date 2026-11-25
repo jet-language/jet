@@ -13,18 +13,18 @@ run: fn() {
     print(rgb.to_array())  // [1.0, 0.5, 0.2]
     rev: Vec4{col.wzyx}
     print(rev.to_array())  // [1.0, 0.2, 0.5, 1.0]
-    pos := Vec3(10.0, 20.0, 30.0)
+    ^pos: Vec3(10.0, 20.0, 30.0)
     pos.xy = Vec2(0.0, 0.0)
     print(pos.to_array())  // [0.0, 0.0, 30.0]
     lanes: F32x4(1.0, 2.0, 3.0, 4.0)
     print(lanes.x)  // 1.0
     pair: Vec2{lanes.xy}
     print(pair.to_array())  // [1.0, 2.0]
-    d := F64x2(5.0, 6.0)
+    ^d: F64x2(5.0, 6.0)
     d.yx = F64x2(7.0, 8.0)
     print(d.to_array())  // [8.0, 7.0]
     // A fixed array of one to four slots: reads are fixed arrays.
-    a := [Int#4]{1, 2, 3, 4}
+    ^a: [Int#4]{1, 2, 3, 4}
     print(a.x)  // 1
     print(a.wzyx)  // [4, 3, 2, 1]
     print(a.xxyy)  // [1, 1, 2, 2]
@@ -40,14 +40,14 @@ run: fn() {
     print(Vec3{color.bgr}.to_array())  // [0.2, 0.5, 1.0]
     print(color.a)  // 1.0
     // Integer and wider lane types: several lanes read as a fixed array.
-    ints := I32x4.new(1, 2, 3, 4)
+    ^ints: I32x4.new(1, 2, 3, 4)
     print(ints.w)  // 4
     print(ints.zyx)  // [3, 2, 1]
     ints.xw = ints.wx
     print(ints.to_array())  // [4, 2, 3, 1]
     wide: F32x8.splat(F32{1.5})
     print(wide.xy)  // [1.5, 1.5]
-    bytes := U8x16.splat(U8{7})
+    ^bytes: U8x16.splat(U8{7})
     bytes.z = U8{9}
     print(bytes.xyz)  // [7, 7, 9]
 }

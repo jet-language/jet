@@ -27,11 +27,11 @@ impl ProviderFactReport {
         project_artifact: provider_xml_direct_child_values(document, "project", "artifactId")
         project_version: provider_xml_direct_child_values(document, "project", "version")
         parent_blocks: provider_xml_blocks(document, "parent")
-        group := project_group.get(0) ?? ""
+        ^group: project_group.get(0) ?? ""
         if project_group.len() == 0 && parent_blocks.len() > 0 {
             group = provider_xml_tag(parent_blocks[0], "groupId") ?? ""
         }
-        facts := MetadataFacts.empty(ProviderFamily.Maven, project_artifact.get(0) ?? "")
+        ^facts: MetadataFacts.empty(ProviderFamily.Maven, project_artifact.get(0) ?? "")
         facts.version = project_version.get(0) ?? ""
         license_blocks: provider_xml_blocks(document, "license")
         loop block in license_blocks {
@@ -71,8 +71,8 @@ impl ProviderFactReport {
                 }
             }
         }
-        losses := [String]{}
-        conflicts := [String]{}
+        ^losses: [String]{}
+        ^conflicts: [String]{}
         coordinates: [{field: String, values: [String]}]{{field: "groupId", values: project_group}, {field: "artifactId", values: project_artifact}, {field: "version", values: project_version}}
         loop coordinate in coordinates {
             distinct: provider_distinct_values(coordinate.values)
@@ -88,7 +88,7 @@ impl ProviderFactReport {
         if group != "" && !provider_maven_exact_value(group) {
             losses.push("Maven project groupId `{group}` is not an exact identity")
         }
-        dependency_versions := [String:String]{}
+        ^dependency_versions: [String:String]{}
         dependency_blocks: provider_xml_blocks(document, "dependency")
         loop index in 0..<dependency_blocks.len() {
             block: dependency_blocks[index]
@@ -217,7 +217,7 @@ impl ProviderFactReport {
         facts.dev_dependencies = provider_sorted_unique(facts.dev_dependencies)
         facts.build_dependencies = provider_sorted_unique(facts.build_dependencies)
         facts.platforms = provider_sorted_unique(facts.platforms)
-        report := ProviderFactReport.with_identity(facts)
+        ^report: ProviderFactReport.with_identity(facts)
         loop loss in losses -> report.losses.push(loss)
         loop conflict in conflicts -> report.conflicts.push(conflict)
         report.retaining("xml", document)
@@ -238,9 +238,9 @@ provider_maven_exact_value: fn(raw: String) -> Bool Never! {
 // Why the POM is outside the XML subset this provider normalizes, or None.
 provider_maven_xml_loss: fn(document: String) -> String? Never! {
     bytes: document.bytes()
-    stack := [String]{}
-    cursor := 0
-    root_seen := false
+    ^stack: [String]{}
+    ^cursor: 0
+    ^root_seen: false
     loop cursor < bytes.len() {
         start: provider_find(bytes, "<".bytes(), cursor, bytes.len())
         if start < 0 {
@@ -333,7 +333,7 @@ provider_maven_xml_loss: fn(document: String) -> String? Never! {
 }
 
 provider_without_last: fn(values: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop index in 0..<(values.len() - 1) -> out.push(values[index])
     out
 }
@@ -341,7 +341,7 @@ provider_without_last: fn(values: [String]) -> [String] Never! {
 // The first offset in `from..<to` where `needle` starts and ends before
 // `to`, or -1.
 provider_find: fn(bytes: [U8], needle: [U8], from: Int, to: Int) -> Int Never! {
-    at := from
+    ^at: from
     loop at + needle.len() <= to {
         if pkg_bytes_starts_with(bytes, at, needle) -> return at
         at += 1
@@ -352,7 +352,7 @@ provider_find: fn(bytes: [U8], needle: [U8], from: Int, to: Int) -> Int Never! {
 // The offset of the `>` closing the tag that starts at `start`, skipping
 // quoted attribute values, or -1 before `to`.
 provider_xml_opening_end: fn(bytes: [U8], start: Int, to: Int) -> Int Never! {
-    quote := 0
+    ^quote: 0
     loop index in start..<to {
         code: Int{bytes[index]}
         if {
@@ -367,10 +367,10 @@ provider_xml_opening_end: fn(bytes: [U8], start: Int, to: Int) -> Int Never! {
 
 // The element name of an opening or closing tag.
 provider_xml_opening_name: fn(opening: String) -> String Never! {
-    rest := opening.removeprefix("<")
+    ^rest: opening.removeprefix("<")
     loop rest.starts_with("/") -> rest = rest.removeprefix("/")
     bytes: rest.bytes()
-    end := 0
+    ^end: 0
     loop end < bytes.len() && pkg_bytes_space_width(bytes, end) == 0 && (Int{bytes[end]}) != 62 && (Int{bytes[end]}) != 47 {
         end += 1
     }
@@ -381,8 +381,8 @@ provider_xml_opening_name: fn(opening: String) -> String Never! {
 provider_xml_openings: fn(document: String, element: String) -> [XMLOpening] Never! {
     bytes: document.bytes()
     needle: "<{element}".bytes()
-    openings := [XMLOpening]{}
-    cursor := 0
+    ^openings: [XMLOpening]{}
+    ^cursor: 0
     loop cursor < bytes.len() {
         start: provider_find(bytes, needle, cursor, bytes.len())
         if start < 0 -> break
@@ -404,7 +404,7 @@ provider_xml_openings: fn(document: String, element: String) -> [XMLOpening] Nev
 provider_xml_blocks: fn(document: String, element: String) -> [String] Never! {
     bytes: document.bytes()
     closing: "</{element}>".bytes()
-    blocks := [String]{}
+    ^blocks: [String]{}
     loop opening in provider_xml_openings(document, element) {
         if opening.text.trim_end().ends_with("/>") -> next
         close: provider_find(bytes, closing, opening.end + 1, bytes.len())
@@ -419,7 +419,7 @@ provider_xml_blocks: fn(document: String, element: String) -> [String] Never! {
 provider_xml_tag_values: fn(document: String, element: String) -> [String] Never! {
     bytes: document.bytes()
     closing: "</{element}>".bytes()
-    values := [String]{}
+    ^values: [String]{}
     loop opening in provider_xml_openings(document, element) {
         if opening.text.trim_end().ends_with("/>") -> next
         close: provider_find(bytes, closing, opening.end + 1, bytes.len())
@@ -443,9 +443,9 @@ provider_xml_direct_child_values: fn(document: String, parent: String, child: St
     body_end: provider_find(bytes, "</{parent}>".bytes(), body_start, bytes.len())
     if body_end < 0 -> return [String]{}
     child_closing: "</{child}>".bytes()
-    values := [String]{}
-    depth := 0
-    cursor := body_start
+    ^values: [String]{}
+    ^depth: 0
+    ^cursor: body_start
     loop cursor < body_end {
         start: provider_find(bytes, "<".bytes(), cursor, body_end)
         if start < 0 -> break
@@ -498,7 +498,7 @@ provider_xml_attribute: fn(opening: String, key: String) -> String? Never! {
     quotes: [String]{"\"", "'"}
     loop quote in quotes {
         marker: "{key}={quote}".bytes()
-        cursor := 0
+        ^cursor: 0
         loop cursor < bytes.len() {
             start: provider_find(bytes, marker, cursor, bytes.len())
             if start < 0 -> break

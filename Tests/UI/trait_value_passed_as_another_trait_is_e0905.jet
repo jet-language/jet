@@ -2,15 +2,15 @@
 // where `Back` is expected is refused (E0905), as an argument and as a list
 // item, though the one type inside it implements both.
 Shown: trait {
-    show: fn(self) -> String
+    show: fn(self) -> String,
 }
 
 Back: trait {
-    back: fn(self) -> String
+    back: fn(self) -> String,
 }
 
 Point: struct {
-    x: Int
+    x: Int,
 }
 
 impl Point.Shown {
@@ -21,13 +21,9 @@ impl Point.Back {
     back: fn(self) -> String { "back {self.x}" }
 }
 
-take_back: fn(value: Back) -> String {
-    value.back()
-}
+take_back: fn(value: Back) -> String { value.back() }
 
-pass: fn(value: Shown) -> String {
-    take_back(value)
-}
+pass: fn(value: Shown) -> String { take_back(value) }
 
 run: fn() {
     print(pass(Point{x: 3}))

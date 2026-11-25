@@ -54,11 +54,11 @@ publication_gate_summary: fn(status: PublicationGateStatus) -> String Never! {
 }
 
 publication_parse_gate_status: fn(summary: String) -> PublicationGateStatus? Never! {
-    signature := PublicationGateState?{None}
-    audit := PublicationGateState?{None}
-    name := PublicationGateState?{None}
-    liveness := PublicationGateState?{None}
-    review := PublicationGateState?{None}
+    ^signature: PublicationGateState?{None}
+    ^audit: PublicationGateState?{None}
+    ^name: PublicationGateState?{None}
+    ^liveness: PublicationGateState?{None}
+    ^review: PublicationGateState?{None}
     loop field in summary.split(";") {
         pair: field.split_once("=") ?? return None
         state: publication_parse_gate(pair.after) ?? return None
@@ -90,7 +90,7 @@ publication_parse_gate_status: fn(summary: String) -> PublicationGateStatus? Nev
 }
 
 publication_blocked_reasons: fn(status: PublicationGateStatus) -> [String] Never! {
-    reasons := [String]{}
+    ^reasons: [String]{}
     if status.signature != .Passed -> reasons.push("#935 live signature chain")
     if status.audit != .Passed -> reasons.push("#431 advisory audit")
     if status.name != .Passed -> reasons.push("#1912 name policy")
@@ -109,10 +109,10 @@ publication_require_takeover_review: fn(repo: String, package: String, version: 
 publication_require_review: fn(repo: String, package: String, version: String, takeover: Bool) -[FS]> PublicationDiagnosticError! {
     path: files.join(files.join(files.join(repo, "reviews"), package), "{version}.review")
     text: files.read(path) ?? return Err(publication_review_error(package, version, path, takeover))
-    package_field := String?{None}
-    version_field := String?{None}
-    reviewer := String?{None}
-    decision := String?{None}
+    ^package_field: String?{None}
+    ^version_field: String?{None}
+    ^reviewer: String?{None}
+    ^decision: String?{None}
     lines: text.lines()
     if lines.len() == 0 || lines[0] != "jet-registry-core-review-v1" {
         return Err(publication_review_error(package, version, path, takeover))

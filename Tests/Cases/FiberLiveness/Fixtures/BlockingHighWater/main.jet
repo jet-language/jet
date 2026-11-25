@@ -30,7 +30,7 @@ threads: fn() -[FS]> Int {
 }
 
 blocker: fn() -[FS, Time.Wait]> Int {
-    high := 0
+    ^high: 0
     loop _ in 0..<WAITS {
         time.sleep(1ms)
         now: threads()
@@ -40,9 +40,9 @@ blocker: fn() -[FS, Time.Wait]> Int {
 }
 
 run: fn() {
-    handles := [Task<Int>]{}
+    ^handles: [Task<Int>]{}
     loop _ in 0..<TASKS -> handles.push(task blocker())
-    high := 0
+    ^high: 0
     loop handle in handles {
         seen: handle.join() ?? -1
         if seen > high -> high = seen

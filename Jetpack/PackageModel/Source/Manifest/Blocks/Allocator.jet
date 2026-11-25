@@ -24,8 +24,8 @@ pkg_parse_program_allocator: fn(value: String) -> AllocatorPolicy PackageParseEr
 }
 
 pkg_parse_allocator_bytes: fn(value: String) -> Int PackageParseError! {
-    digits := value
-    multiplier := 1
+    ^digits: value
+    ^multiplier: 1
     if value.cut_last(".") == {
         .Val(parts) -> {
             digits = parts.before
@@ -57,7 +57,7 @@ pkg_parse_u64: fn(text: String) -> Int? Never! {
     raw: text.bytes()
     start: if raw.len() > 0 && (Int{raw[0]}) == 43 -> 1 else -> 0
     if start >= raw.len() -> return None
-    value := 0
+    ^value: 0
     loop index in start..<raw.len() {
         digit: Int{raw[index]} - 48
         if digit < 0 || digit > 9 -> return None
@@ -73,7 +73,7 @@ pkg_parse_i64: fn(text: String) -> Int? Never! {
     raw: text.bytes()
     if raw.len() == 0 || (Int{raw[0]}) != 45 -> return pkg_parse_u64(text)
     if raw.len() == 1 -> return None
-    magnitude := 0
+    ^magnitude: 0
     loop index in 1..<raw.len() {
         digit: Int{raw[index]} - 48
         if digit < 0 || digit > 9 -> return None
@@ -86,8 +86,8 @@ pkg_parse_i64: fn(text: String) -> Int? Never! {
 // The text with every Unicode whitespace scalar removed.
 pkg_without_whitespace: fn(value: String) -> String Never! {
     raw: value.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < raw.len() {
         width: pkg_bytes_space_width(raw, index)
         if width > 0 {

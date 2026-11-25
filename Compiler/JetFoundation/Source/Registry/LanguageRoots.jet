@@ -12,9 +12,9 @@ CORE_LANGUAGE_ROOTS: #run trait_impl_strings(embed_file("toolchain:Core/Prelude/
 trait_impl_strings: fn(text: String, trait_name: String, constant: String) -> [String] {
     opener: "impl {trait_name} {{"
     prefix: "{constant}: \""
-    values := [String]{}
-    open := false
-    found := false
+    ^values: [String]{}
+    ^open: false
+    ^found: false
     loop line in text.split("\n").to_list() {
         trimmed: line.trim()
         if {
@@ -27,7 +27,9 @@ trait_impl_strings: fn(text: String, trait_name: String, constant: String) -> [S
                 found = true
             }
             open && trimmed == "}}" -> {
-                if !found -> build_time_refused("an `impl {trait_name}` block has no `{constant}: \"…\",` line")
+                if !found {
+                    build_time_refused("an `impl {trait_name}` block has no `{constant}: \"…\",` line")
+                }
                 open = false
             }
             else -> {}

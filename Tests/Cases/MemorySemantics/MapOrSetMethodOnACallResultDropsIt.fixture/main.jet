@@ -27,13 +27,13 @@ status_kb: fn(field: String) -> Int {
 }
 
 make_names: fn(n: Int) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop i in 0..<n -> names.push("key {i}")
     names
 }
 
 make_map: fn(n: Int) -> [String:Int] {
-    map := [String:Int]{}
+    ^map: [String:Int]{}
     loop i in 0..<n -> map["key {i}"] = i
     map
 }
@@ -60,7 +60,7 @@ map_keys_bound: fn() -> Int {
 
 // A loop over the keys.
 map_keys_walked: fn() -> Int {
-    total := 0
+    ^total: 0
     loop key in make_map(16).keys() -> total += key.len()
     total
 }
@@ -79,13 +79,13 @@ set_has: fn() -> Int {
 
 // The members walked as a List.
 set_walked: fn() -> Int {
-    total := 0
+    ^total: 0
     loop key in make_set(16).to_list() -> total += key.len()
     total
 }
 
 measure: fn(name: String, scenario: fn() -> Int) {
-    total := scenario()
+    ^total: scenario()
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario()
     grown: status_kb("VmRSS:") - start

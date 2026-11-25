@@ -28,7 +28,7 @@ dump: fn(name: String, face: font.Face) {
     em: Float{face.units_per_em()}
     metrics: face.metrics(em)
     print("face {name} glyphs {face.glyph_count()} upem {face.units_per_em()} ascent {units(metrics.ascent)} descent {units(metrics.descent)} gap {units(metrics.line_gap)}")
-    mapped := [Int]{}
+    ^mapped: [Int]{}
     loop scalar in 0..<65536 {
         id: face.glyph(scalar)
         if id == 0 -> next
@@ -37,17 +37,17 @@ dump: fn(name: String, face: font.Face) {
     }
     loop id in 0..<face.glyph_count() {
         outline: face.outline(id)
-        hash := 7
-        count := 0
-        xmin := 0
-        ymin := 0
-        xmax := 0
-        ymax := 0
+        ^hash: 7
+        ^count: 0
+        ^xmin: 0
+        ^ymin: 0
+        ^xmax: 0
+        ^ymax: 0
         loop contour in outline.contours {
             count += contour.len()
             hash = (hash * 31 + count - 1 + 65536) % 1000000007
         }
-        first := true
+        ^first: true
         loop contour in outline.contours {
             loop point in contour {
                 hash = (hash * 31 + point.x + 65536) % 1000000007
@@ -62,7 +62,7 @@ dump: fn(name: String, face: font.Face) {
         }
         print("glyph {id} contours {outline.contours.len()} points {count} bbox {xmin} {ymin} {xmax} {ymax} hash {hash}")
     }
-    pairs := [Int]{}
+    ^pairs: [Int]{}
     loop scalar in mapped {
         if (scalar >= 32 && scalar < 127) || (scalar >= 192 && scalar < 256) -> pairs.push(scalar)
     }
@@ -82,8 +82,8 @@ dump: fn(name: String, face: font.Face) {
     loop sample in SAMPLES {
         run: face.layout(sample, em)
         print("shape {sample}")
-        parts := [String]{}
-        pen := 0
+        ^parts: [String]{}
+        ^pen: 0
         loop glyph in run.glyphs {
             advance: units(glyph.advance)
             parts.push("{glyph.id}:{glyph.cluster}:{advance}:{units(glyph.x) - pen}:{-units(glyph.y)}")

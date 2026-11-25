@@ -333,14 +333,14 @@ PackageVariant: struct {
     }
 
     with_role: fn(self, role: VariantRole) -> PackageVariant Never! {
-        out := self
+        ^out: self
         out.role = role
         out
     }
 
     // Changing the OS resets libc and ABI to that OS's defaults.
     with_os: fn(self, os: VariantOS) -> PackageVariant Never! {
-        out := self
+        ^out: self
         out.libc = VariantLibc.default_for(os)
         out.abi = VariantABI.default_for(os)
         out.os = os
@@ -348,37 +348,37 @@ PackageVariant: struct {
     }
 
     with_arch: fn(self, arch: VariantArch) -> PackageVariant Never! {
-        out := self
+        ^out: self
         out.arch = arch
         out
     }
 
     with_libc: fn(self, libc: VariantLibc) -> PackageVariant Never! {
-        out := self
+        ^out: self
         out.libc = libc
         out
     }
 
     with_linkage: fn(self, linkage: VariantLinkage) -> PackageVariant Never! {
-        out := self
+        ^out: self
         out.linkage = linkage
         out
     }
 
     with_abi: fn(self, abi: VariantABI) -> PackageVariant Never! {
-        out := self
+        ^out: self
         out.abi = abi
         out
     }
 
     with_artifact: fn(self, artifact: ArtifactKind) -> PackageVariant Never! {
-        out := self
+        ^out: self
         out.artifact = artifact
         out
     }
 
     with_feature: fn(self, feature: String) -> PackageVariant Never! {
-        out := self
+        ^out: self
         out.add_feature(feature)
         out
     }
@@ -433,9 +433,9 @@ PackageVariant: struct {
     // ones; exactly one winner. A tie is Ambiguous and names the first axis
     // that separates the first two survivors.
     select: fn(self, candidates: [VariantCandidate], maps: [VariantMapEntry]) -> VariantCandidate VariantSelectError! {
-        mapped := [PackageVariant]{}
+        ^mapped: [PackageVariant]{}
         loop candidate in candidates -> mapped.push(candidate.mapped_variant(maps))
-        pool := [Int]{}
+        ^pool: [Int]{}
         loop index in 0..<mapped.len() {
             if mapped[index].matches_exact(self) -> pool.push(index)
         }
@@ -448,7 +448,7 @@ PackageVariant: struct {
             return Err(VariantSelectError.NoMatch{need: self, candidate_count: candidates.len()})
         }
         if pool.len() == 1 -> return Ok(candidates[pool[0]])
-        labels := [String]{}
+        ^labels: [String]{}
         loop index in pool -> labels.push(candidates[index].label)
         labels.sort()
         first: mapped[pool[0]]
@@ -463,7 +463,7 @@ PackageVariant: struct {
     // as a selected variant identity. The missing identity keys, in
     // declaration order.
     missing_lock_domains: fn(declared: [PackageVariant], locked_identities: [String]) -> [String] Never! {
-        missing := [String]{}
+        ^missing: [String]{}
         loop variant in declared {
             key: variant.identity_key()
             if !locked_identities.contains(key) -> missing.push(key)
@@ -484,7 +484,7 @@ VariantCandidate: struct {
     }
 
     with_provider_fact: fn(self, key: String, value: String) -> VariantCandidate Never! {
-        out := self
+        ^out: self
         out.provider_facts[key] = value
         out
     }
@@ -494,7 +494,7 @@ VariantCandidate: struct {
     // takes it too, and any other value applies only when the fact equals
     // it. Unparseable values and unknown axes leave the variant unchanged.
     mapped_variant: fn(self, maps: [VariantMapEntry]) -> PackageVariant Never! {
-        variant := self.variant
+        ^variant: self.variant
         loop entry in maps {
             fact: self.provider_facts.get(entry.provider_key) ?? next
             if entry.value != "" && entry.value != "*" && fact != entry.value -> next

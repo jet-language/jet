@@ -86,21 +86,21 @@ pkg_bridge_append_capability_lines: fn(text: ^String, root: String) ForeignBridg
 // Binders use this when their result object carries the record to a CLI
 // writer; `pkg_bridge_write_provenance` uses the same formatter on disk.
 pkg_bridge_render_provenance: fn(identity: String, fields: [{name: String, value: String}], artifacts: [{name: String, digest: String}]) -[Env]> String ForeignBridgeError! {
-    text := "schema={FOREIGN_BRIDGE_PROVENANCE_SCHEMA}\nidentity={identity}\n"
-    has_boundary_fields := false
+    ^text: "schema={FOREIGN_BRIDGE_PROVENANCE_SCHEMA}\nidentity={identity}\n"
+    ^has_boundary_fields: false
     loop field in fields {
         if field.name.starts_with("boundary-") -> has_boundary_fields = true
     }
     // The binder of the record's `language` root, unless the record already
     // carries its boundary rows.
-    descriptor := BinderDescriptor?{None}
+    ^descriptor: BinderDescriptor?{None}
     if pkg_bridge_field_value(fields, "language") == .Val(root) {
         descriptor = pkg_binder_descriptor(root)
     }
     if has_boundary_fields -> descriptor = None
     loop field in fields -> pkg_bridge_append_line(text, field.name, field.value)
     if descriptor == .Val(boundary_descriptor) {
-        abi_library := String?{None}
+        ^abi_library: String?{None}
         if pkg_bridge_field_value(fields, "abi") == .Val(abi) {
             if abi.starts_with("jet_") {
                 if abi.removeprefix("jet_").split_once("_") == .Val(parts) {
@@ -109,7 +109,7 @@ pkg_bridge_render_provenance: fn(identity: String, fields: [{name: String, value
             }
         }
         library: pkg_bridge_field_value(fields, "library") ?? (pkg_bridge_field_value(fields, "lib") ?? (abi_library ?? "not-recorded"))
-        artifact_rows := [String]{}
+        ^artifact_rows: [String]{}
         loop artifact in artifacts -> artifact_rows.push("{artifact.name}:sha256-{artifact.digest}")
         loaded_artifact: artifact_rows.join("|")
         source: pkg_bridge_field_value(fields, "source") ?? (pkg_bridge_field_value(fields, "source_path") ?? (pkg_bridge_field_value(fields, "type-library") ?? "not-recorded"))
@@ -179,9 +179,9 @@ ForeignProvenanceText: struct {
 
 pkg_bridge_parse_provenance: fn(path: String) -[FS]> ForeignProvenanceText ForeignBridgeError! {
     text: bridge_core_files.read(path) ?? return Err(pkg_bridge_error("could not read {path}: {err}"))
-    schema := String?{None}
-    identity := String?{None}
-    fields := [String:[String]]{}
+    ^schema: String?{None}
+    ^identity: String?{None}
+    ^fields: [String:[String]]{}
     loop line in pkg_bridge_text_lines(text) {
         parts: line.split_once("=") ?? return Err(pkg_bridge_error("malformed bridge provenance line in {path}"))
         if parts.before == "" || parts.after == "" {
@@ -201,7 +201,7 @@ pkg_bridge_parse_provenance: fn(path: String) -[FS]> ForeignProvenanceText Forei
                 identity = Val(parts.after)
             }
             else -> {
-                values := fields.get(parts.before) ?? [String]{}
+                ^values: fields.get(parts.before) ?? [String]{}
                 values.push(parts.after)
                 fields[parts.before] = values
             }
@@ -215,9 +215,9 @@ pkg_bridge_parse_provenance: fn(path: String) -[FS]> ForeignProvenanceText Forei
 // empty tail after a final newline.
 pkg_bridge_text_lines: fn(text: String) -> [String] Never! {
     carriage_return: "\r"
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in text.split("\n") -> lines.push(line.removesuffix(carriage_return))
-    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()
+    if lines.len() > 0 && lines[lines.len() - 1] == "" -> ^_: lines.pop()
     lines
 }
 
@@ -249,10 +249,10 @@ pkg_bridge_read_boundary_provenance: fn(path: String) -[FS]> ForeignProvenance F
 // in the declared search paths. Missing candidates remain records, so adding
 // or replacing a local archive changes the identity.
 pkg_bridge_local_archive_inputs: fn(library_dirs: [String], libraries: [String]) -[FS, Env]> [ArchiveInput] Never! {
-    inputs := [ArchiveInput]{}
+    ^inputs: [ArchiveInput]{}
     if library_dirs.len() == 0 -> return inputs
     loop library in libraries {
-        found := String?{None}
+        ^found: String?{None}
         loop directory in library_dirs {
             if found != None -> break
             loop suffix in FOREIGN_BRIDGE_LOCAL_ARCHIVE_SUFFIXES {
@@ -314,10 +314,10 @@ pkg_bridge_tool_path: fn(tool: String) -[FS, Env]> String? Never! {
 pkg_bridge_tool_identity: fn(tool: String) -[FS, Env, Exec, Time.Wait]> String Never! {
     found: pkg_bridge_tool_path(tool) ?? return "missing"
     path: bridge_core_files.canonicalize(found) ?? found
-    version := "unavailable"
+    ^version: "unavailable"
     if bridge_core_process.cmd([String]{path, "--version"}).run() == .Ok(receipt) {
         if receipt.success {
-            rows := [String]{}
+            ^rows: [String]{}
             loop line in pkg_bridge_text_lines("{receipt.output}{receipt.errors}") {
                 trimmed: line.trim()
                 if trimmed != "" -> rows.push(trimmed.copy())

@@ -165,13 +165,13 @@ canonical_options: fn(value: XMLCanonical) -> xml.CanonicalOptions Never! {
 }
 
 field_error: fn(error: XMLError) -> [FieldError] Never! {
-    location := " at byte {error.byte_offset ?? 0}"
+    ^location: " at byte {error.byte_offset ?? 0}"
     if error.line == .Val(line) {
         if error.column == .Val(column) -> location = "{location} (line {line}, column {column})" else {
             location = "{location} (line {line})"
         }
     } else if error.column == .Val(column) { location = "{location} (column {column})" }
-    path := error.path
+    ^path: error.path
     if path == "$" -> path = "" else if path.starts_with("$.") -> path = path.slice(2, path.len()) else if path.starts_with("$") {
         path = path.slice(1, path.len())
     }

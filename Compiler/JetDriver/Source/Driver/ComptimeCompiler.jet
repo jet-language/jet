@@ -146,7 +146,7 @@ jet_driver_compiler_source_path: fn(root: String) -> String Never! {
 // read of the disk.
 jet_driver_compiler_source_snapshot: fn(root: String, source: String, held: ^^[JetDriverAuthorizedSourceFile]) -> JetDriverAuthorizedSourceSnapshot {
     path: jet_driver_compiler_source_path(root)
-    files := [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_DRIVER_COMPILER_SOURCE_FILE, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, source: source}}
+    ^files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_DRIVER_COMPILER_SOURCE_FILE, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, source: source}}
     files.extend(held.move())
     JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, allow_hardlinks: false, files: files, foreign_cache_files: []}},
@@ -159,7 +159,7 @@ jet_driver_compiler_source_snapshot: fn(root: String, source: String, held: ^^[J
 // compiles beside its own: the query is a lone file, so it joins no package
 // manifest, and no held file takes its name.
 jet_driver_entry_root_sources: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [JetDriverAuthorizedSourceFile] Never! {
-    held := [JetDriverAuthorizedSourceFile]{}
+    ^held: [JetDriverAuthorizedSourceFile]{}
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
         loop file in root.files {
@@ -206,7 +206,7 @@ jet_driver_compiler_query_lost: fn(query: String, span: Span) -> JetEvalBuildRep
 // digest of its rows.
 jet_driver_compiler_schema: fn() -> TComptimeValue Never! {
     rows: schema_fact_rows()
-    facts := [TComptimeValue]{}
+    ^facts: [TComptimeValue]{}
     loop row in rows {
         scope: loop place in row.scope -> jet_eval_compiler_services_string(place)
         facts.push(
@@ -243,7 +243,7 @@ jet_driver_compiler_schema: fn() -> TComptimeValue Never! {
 // are `Invalid`, with the reader's refusal as their diagnostic.
 jet_driver_compiler_receipt: fn(path: String, root: String, span: Span) -[FS, Env]> TComptimeValue Never! {
     resolver: AuthorityResolver.open(root) ?? return jet_driver_compiler_receipt_denied(root, err, span)
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     if resolver.checked_file(path) == {
         .Ok(file) -> { bytes = file.bytes }
         .Err(error) -> {
@@ -346,7 +346,7 @@ jet_driver_compiler_links: fn(links: [JetDriverRecordLink]) -> TComptimeValue Ne
 // whose load stops before checking keeps its syntax and diagnostics, with no
 // effects or semantic index (no-bundle path).
 jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerContext>, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply Never! {
-    source := String?{None}
+    ^source: String?{None}
     if args.len() == 1 && args[0] == .Struct(_, fields) {
         loop field in fields {
             if field.name == "source" && field.value == .String(text) -> source = Val(text)
@@ -356,7 +356,7 @@ jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerCon
     parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(text)) ?? return jet_driver_compiler_query_lost("check", span)
     permit: context.guard_read()
     // copy: the check takes the facts whole; the host keeps its own for the next query.
-    facts := permit.value.facts.copy()
+    ^facts: permit.value.facts.copy()
     request: JetDriverCompileRequest{
         authorized_sources: jet_driver_compiler_source_snapshot(permit.value.root, text, facts.sources.move()),
         canonical_effects: facts.canonical_effects.move(),

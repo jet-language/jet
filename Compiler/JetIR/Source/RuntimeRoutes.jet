@@ -8,7 +8,7 @@ use jet_foundation.[IRRuntimeHandle, IR_GENERATED_RECORDS, IR_NATIVE_PROVIDER_HA
 // The runtime ABI atom projection; nominal identities stay unchanged.
 runtime_abi_atom: fn(name: String) -> String Never! {
     bytes: name.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if code == 46 || code == 95 {
@@ -25,9 +25,7 @@ runtime_abi_atom: fn(name: String) -> String Never! {
         }
         out.push(U8{if upper -> code + 32 else -> code})
     }
-    if out.len() > 0 && out[out.len() - 1] == (U8{95}) {
-        _: out.pop()
-    }
+    if out.len() > 0 && out[out.len() - 1] == (U8{95}) -> _: out.pop()
     // Valid UTF-8: `name`'s own bytes, with ASCII letters lowercased and `_` inserted or substituted only at ASCII bytes, so the lossy decode keeps every byte.
     String.from_bytes_lossy(out)
 }
@@ -1311,9 +1309,9 @@ ir_runtime_handle_spelling_at: fn(name: String) -> Int? Never! {
 IR_RUNTIME_HANDLE_SPELLING_ROWS: #run ir_runtime_handle_spelling_rows(IR_RUNTIME_HANDLES, IR_NATIVE_PROVIDER_HANDLES)
 
 ir_runtime_handle_spelling_rows: fn(runtime_rows: [IRRuntimeHandle], native_rows: [IRRuntimeHandle]) -> [Int] Never! {
-    rows := [Int]{}
+    ^rows: [Int]{}
     loop own in 0..<(runtime_rows.len() + native_rows.len()) {
-        first := own
+        ^first: own
         loop (other, row) in runtime_rows {
             if ir_handle_spelling_row_before(runtime_rows, native_rows, own, first, row) {
                 first = other
@@ -1536,7 +1534,7 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: ^[String]) Never! {
 }
 
 #Test("every generated record row is read by a runtime handle, a route or another row") {
-    readers := [String]{}
+    ^readers: [String]{}
     loop handle in IR_RUNTIME_HANDLES -> readers.push(handle.runtime.copy())
     loop handle in IR_NATIVE_PROVIDER_HANDLES -> readers.push(handle.runtime.copy())
     loop route in IR_RUNTIME_ROUTES {
@@ -1561,7 +1559,7 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: ^[String]) Never! {
             }
         }
     }
-    unread := [String]{}
+    ^unread: [String]{}
     loop row in IR_GENERATED_RECORDS {
         if !readers.contains(row.jet_name) -> unread.push(row.jet_name.copy())
     }
@@ -1573,7 +1571,7 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: ^[String]) Never! {
 // error and record type alike (EncodingCause, EncodingError, XMLError, the
 // math and time handles): the key's row is the declaration's only route.
 #Test("a Core identity's runtime handle is the runtime's exported one") {
-    unexported := [String]{}
+    ^unexported: [String]{}
     loop row in IR_RUNTIME_HANDLES {
         if !row.jet_name.contains(".") -> next
         parts: row.jet_name.split(".").to_list()

@@ -31,14 +31,14 @@ status_of: fn(path: String) -> Int Never! {
 // sent.
 send: fn(addr: String, request_line: String) -> String {
     wire: net.tcp_connect(addr) ?? panic("connect failed")
-    request := "".bytes()
+    ^request: "".bytes()
     loop line in [request_line, "Host: local", "Connection: close", ""] {
         loop byte in line.bytes() -> request.push(byte)
         request.push(13)
         request.push(10)
     }
     wire.write_bytes(request) ?? panic("request failed")
-    raw := ""
+    ^raw: ""
     loop _ in 0..32 {
         chunk: wire.read(8192) ?? panic("response failed")
         if chunk == "" -> break

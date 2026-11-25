@@ -107,7 +107,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
 }
 
 #Test("publication policy valid_spdx_and_mapped_source_emit_receipt") {
-    policy := PackagePolicy.default()
+    ^policy: PackagePolicy.default()
     policy.licenses = Val([String]{"MIT", "Apache-2.0"})
     policy.source_maps = [PolicySourceMap]{PolicySourceMap{pattern: "Acme.*", sources: [String]{"internal"}}}
     receipt: publication_policy_test_receipt(publication_authorize_package_candidate(policy, "Acme.Widget", "1.2.3", Val("MIT OR Apache-2.0"), "internal"))
@@ -123,7 +123,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
         .Ok(_) -> { panic("invalid SPDX accepted") }
         .Err(_) -> {}
     }
-    policy := PackagePolicy.default()
+    ^policy: PackagePolicy.default()
     policy.licenses = Val([String]{"MIT"})
     policy.source_maps = [PolicySourceMap]{PolicySourceMap{pattern: "widget", sources: [String]{"internal"}}}
     error: publication_policy_test_error(publication_authorize_package_candidate(policy, "widget", "1.0.0", Val("MIT"), "public"))
@@ -132,7 +132,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
 }
 
 #Test("publication policy license error and allow list precedence") {
-    policy := PackagePolicy.default()
+    ^policy: PackagePolicy.default()
     loop license in ([String?]{None, Val(""), Val(" \t\n")}) {
         error: publication_policy_test_error(publication_authorize_package_candidate(policy, "x", "1", license, "local"))
         assert_eq(error.detail, "`x#1` has no SPDX license expression")
@@ -171,7 +171,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     assert_eq(publication_matching_source_rule(rules, "other"), Val(0))
     assert(!publication_pattern_matches("Acme.*.X", "Acme.Z.X"))
     assert(publication_pattern_matches("é*", "éclair"))
-    policy := PackagePolicy.default()
+    ^policy: PackagePolicy.default()
     policy.source_maps = [PolicySourceMap]{PolicySourceMap{pattern: "x", sources: [String]{"private"}}}
     error: publication_policy_test_error(publication_authorize_package_candidate(policy, "y", "2", Val("MIT"), "public"))
     assert_eq(error.detail, "`y#2` has no source mapping for authority `public`")
@@ -191,7 +191,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     assert_eq(publication_active_source_exception_at(exceptions, "x", "1", 102), None)
     assert_eq(publication_active_source_exception_at(exceptions, "x", "2", 99), None)
     assert_eq(publication_active_source_exception_at(exceptions, "xx", "1", 99), None)
-    policy := PackagePolicy.default()
+    ^policy: PackagePolicy.default()
     policy.exceptions = [PackagePolicyException]{PackagePolicyException{id: "review", scope: "x#1", reason: "approved", expires_at: 9223372036854775807}}
     receipt: publication_policy_test_receipt(publication_authorize_package_candidate(policy, "x", "1", Val("MIT"), "local"))
     assert_eq(receipt.exception, Val("id=review;scope=x#1;reason=approved;expires=9223372036854775807"))
@@ -199,7 +199,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
 }
 
 #Test("publication policy fingerprint exact Rust debug canonical bytes") {
-    policy := PackagePolicy.default()
+    ^policy: PackagePolicy.default()
     assert_eq(publication_policy_fingerprint_text(policy), "licenses=None;sources=[];exceptions=[]")
     assert_eq(publication_policy_fingerprint(policy), "sha256-9377e0e5898ebd8719e877a6cbb4270ecf897bf4e517567ad95b1dd6a31dcef0")
     policy.licenses = Val([String]{"MIT", "Apache-2.0"})
@@ -208,7 +208,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     canonical: "licenses=Some([\"Apache-2.0\", \"MIT\"]);sources=[(\"a\", [\"local\"]), (\"z*\", [\"internal\", \"public\"])];exceptions=[PackagePolicyException {{ id: \"a\", scope: \"a#1\", reason: \"reviewed\", expires_at: 7 }}, PackagePolicyException {{ id: \"b\", scope: \"z#2\", reason: \"quoted \\\"reason\\\"\", expires_at: 9 }}]"
     assert_eq(publication_policy_fingerprint_text(policy), canonical)
     assert_eq(publication_policy_fingerprint(policy), "sha256-8c6bc618f50d5c5cf2c4432a8139f5b841a711b5c3de070ea76eb0da5f2c45cc")
-    reordered := policy.copy()
+    ^reordered: policy.copy()
     reordered.licenses = Val([String]{"Apache-2.0", "MIT"})
     reordered.source_maps = [PolicySourceMap]{PolicySourceMap{pattern: "a", sources: [String]{"local"}}, PolicySourceMap{pattern: "z*", sources: [String]{"internal", "public"}}}
     reordered.exceptions = [PackagePolicyException]{policy.exceptions[1], policy.exceptions[0]}
@@ -217,7 +217,7 @@ publication_policy_test_error: fn(result: PublicationPackagePolicyReceipt Public
     assert_eq(publication_policy_fingerprint(reordered), publication_policy_fingerprint(policy))
     reordered.licenses = Val([String]{"MIT"})
     assert(publication_policy_fingerprint(reordered) != publication_policy_fingerprint(policy))
-    duplicates := PackagePolicy.default()
+    ^duplicates: PackagePolicy.default()
     duplicates.licenses = Val([String]{"MIT", "MIT"})
     assert_eq(publication_policy_fingerprint_text(duplicates), "licenses=Some([\"MIT\", \"MIT\"]);sources=[];exceptions=[]")
     duplicates.licenses = Val([String]{})
@@ -277,9 +277,9 @@ publication_policy_test_resign: fn(feed: ^PublicationAdvisoryFeed, seed: [U8]) P
     files.remove_all(root).drop("stale fixture may be absent")
     jet_dir: files.join(root, ".jet")
     files.create_dir_all(jet_dir) ?? panic("create fixture")
-    seed := [U8]{}
+    ^seed: [U8]{}
     loop _ in 0..<32 -> seed.push(U8{17})
-    feed := publication_advisory_test_signed_feed(seed) ?? panic("sign feed")
+    ^feed: publication_advisory_test_signed_feed(seed) ?? panic("sign feed")
     feed.expires_at = PUBLICATION_U64_MAX
     publication_policy_test_resign(feed, seed) ?? panic("resign feed")
     lock: publication_advisory_test_lock("widget", "1.0.0", LockSource.Root)

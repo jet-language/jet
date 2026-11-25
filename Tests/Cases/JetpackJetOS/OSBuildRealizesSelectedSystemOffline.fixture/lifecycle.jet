@@ -27,7 +27,7 @@ digit: fn(byte: U8) -> Int {
 decode: fn(value: String) -> String {
     assert(value.bytes().len() % 2 == 0, "invalid lifecycle hex")
     bytes: value.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<(bytes.len() /% 2) {
         out.push(U8{digit(bytes[i * 2]) * 16 + digit(bytes[i * 2 + 1])})
     }
@@ -45,12 +45,12 @@ run: fn() {
     args: process.args()
     assert(args.len() == 1)
     journal: files.join(args[0], "hangar/lifecycle-db/journal")
-    names := files.listdir(journal) ?? panic("read lifecycle journal")
+    ^names: files.listdir(journal) ?? panic("read lifecycle journal")
     names.sort()
-    roots := [RootProof]{}
+    ^roots: [RootProof]{}
     loop name in names {
         raw: files.read(files.join(journal, name)) ?? panic("read journal bytes")
-        current := -1
+        ^current: -1
         loop line in raw.lines() {
             fields: text.split(line, "\t")
             if fields.len() == 7 && fields[0] == "prepare" {
@@ -76,13 +76,13 @@ run: fn() {
             }
         }
     }
-    ids := [String]{}
+    ^ids: [String]{}
     loop root in roots -> ids.push(root.id)
     ids.sort()
-    observed := [Dyn]{}
+    ^observed: [Dyn]{}
     loop id in ids {
         root: roots[root_index(roots, id)]
-        targets := [Dyn]{}
+        ^targets: [Dyn]{}
         loop target in root.targets -> targets.push(Dyn.Text(target))
         observed.push(Dyn.Object([String:Dyn]{"kind": Dyn.Text(root.kind), "id": Dyn.Text(root.id), "producer": Dyn.Text(root.producer), "witness": Dyn.Text(root.witness), "targets": Dyn.Array(targets), "phase": Dyn.Text(root.phase)}))
     }

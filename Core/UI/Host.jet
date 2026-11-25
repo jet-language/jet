@@ -177,7 +177,7 @@ UIShortcutDispatch: enum {
 
 capabilities: fn() -> UICapabilityFacts Never! {
     all: [UICapability]{.FileDialog, .Clipboard, .IME, .DragDrop, .Shortcuts, .Accessibility}
-    facts := [UICapabilityFact]{}
+    ^facts: [UICapabilityFact]{}
     loop (code, capability) in all {
         facts.push(UICapabilityFact{capability: capability, available: provider_capability(code)})
     }
@@ -207,11 +207,11 @@ save_request: fn(grant: UIFSGrant) -> UIFileDialogRequest Never! {
 // The fields of a provider record, or None when it is malformed.
 provider_record_fields: fn(record: String) -> [String]? Never! {
     raw: record.bytes()
-    fields := [String]{}
-    at := 0
+    ^fields: [String]{}
+    ^at: 0
     loop at < raw.len() {
-        length := 0
-        digits := 0
+        ^length: 0
+        ^digits: 0
         loop {
             if at >= raw.len() -> return None
             n: Int{raw[at]}
@@ -232,7 +232,7 @@ provider_record_fields: fn(record: String) -> [String]? Never! {
 priv internal: module {
     // The provider record of `fields`.
     provider_record: fn(fields: [String]) -> String Never! {
-        out := ""
+        ^out: ""
         loop field in fields -> out = "{out}{field.bytes().len()}:{field}"
         out
     }
@@ -264,7 +264,7 @@ priv internal: module {
         if !rt.capability(0) {
             return Err(UIHostError.CapabilityUnavailable{capability: "FileDialog"})
         }
-        wire := [String]{request.title.copy(), request.grant.root.copy(), if request.allow_multiple -> "1" else -> "0"}
+        ^wire: [String]{request.title.copy(), request.grant.root.copy(), if request.allow_multiple -> "1" else -> "0"}
         loop filter in request.filters {
             loop extension in filter.extensions -> wire.push(extension.copy())
         }
@@ -287,7 +287,7 @@ priv internal: module {
         if !request.allow_multiple && items.len() > 2 {
             return Err(UIHostError.InvalidRequest("a single-selection dialog returned multiple files"))
         }
-        files := [UIGrantedPath]{}
+        ^files: [UIGrantedPath]{}
         loop index in 1..<items.len() {
             files.push(granted_path(request.grant, items[index], access))
         }
@@ -336,10 +336,10 @@ fs_grant: fn(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
     }
     platform: if files_rt.path_windows() -> host_path.PathPlatform.Windows else -> host_path.PathPlatform.Unix
     input: host_path.from_text(path, platform)
-    normalized := host_path.from_text("", platform)
-    cursor := host_path.components(input)
-    rooted := false
-    normal_depth := 0
+    ^normalized: host_path.from_text("", platform)
+    ^cursor: host_path.components(input)
+    ^rooted: false
+    ^normal_depth: 0
     loop {
         part: host_path.next(input, cursor) ?? break
         if part.kind == .Prefix {

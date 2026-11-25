@@ -18,7 +18,7 @@ CanvasBounds: struct {
 json_str: fn(value: String) -> String Never! { foundation_json_quote(value) }
 
 json_strs: fn(values: [String]) -> String Never! {
-    quoted := [String]{}
+    ^quoted: [String]{}
     loop value in values -> quoted.push(json_str(value))
     quoted.join(",")
 }
@@ -32,10 +32,10 @@ span_json: fn(span: Span) -> String Never! { "{{\"start\":{span.start},\"end\":{
 
 // `x,y,w,h` (optionally parenthesized) as four integers, or None.
 parse_bounds: fn(text: String) -> CanvasBounds? Never! {
-    inner := text.trim()
+    ^inner: text.trim()
     if inner.starts_with("(") -> inner = inner.remove_prefix("(")
     if inner.ends_with(")") -> inner = inner.remove_suffix(")")
-    numbers := [Int]{}
+    ^numbers: [Int]{}
     loop part in inner.split(",") {
         number: part.trim().to_int() ?? return None
         numbers.push(number)
@@ -53,7 +53,7 @@ attr_string: fn(text: String, key: String) -> String? Never! {
         return Val(parsed.value)
     }
     bytes: rest.bytes()
-    end := 0
+    ^end: 0
     loop end < bytes.len() && !is_space_byte(Int{bytes[end]}) -> end += 1
     Val(foundation_byte_text(bytes, 0, end))
 }
@@ -79,8 +79,8 @@ attr_bounds: fn(text: String, key: String) -> CanvasBounds? Never! {
 parse_json_string: fn(text: String) -> JSONText? Never! {
     bytes: text.bytes()
     if bytes.len() == 0 || (Int{bytes[0]}) != 34 -> return None
-    out := [U8]{}
-    escaped := false
+    ^out: [U8]{}
+    ^escaped: false
     loop i in 1..<bytes.len() {
         byte: Int{bytes[i]}
         if escaped {

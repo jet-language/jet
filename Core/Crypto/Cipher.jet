@@ -39,11 +39,11 @@ AESKey: struct {
 
     impl Close {
         close: fn(^^self) {
-            sk := self.sk.move()
+            ^sk: self.sk.move()
             loop i in 0..<sk.len() -> sk[i] = U64{0}
-            rk := self.rk.move()
+            ^rk: self.rk.move()
             core.crypto.wipe(rk)
-            dk := self.dk.move()
+            ^dk: self.dk.move()
             core.crypto.wipe(dk)
         }
     }
@@ -98,14 +98,14 @@ XTS_DEC: 10
 // Exact-capacity buffers. Secret-bearing buffers are never grown
 // geometrically, which could leave freed copies behind.
 words: fn(count: Int) -> [U64] Never! {
-    w := [U64]{}
+    ^w: [U64]{}
     if !mem.__list_reserve_exact<U64>(w, count) -> panic("cipher workspace allocation failed")
     loop _ in 0..<count -> w.push(U64{0})
     w
 }
 
 zero_bytes: fn(count: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     reserve(out, count)
     loop _ in 0..<count -> out.push(U8{0})
     out
@@ -118,7 +118,7 @@ reserve: fn(out: ^[U8], count: Int) Never! {
 
 /// `count` bytes of `src` from `off`, in a buffer of exactly that size.
 bytes_of: fn(src: [U8], off: Int, count: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     reserve(out, count)
     loop i in 0..<count -> out.push(src[off + i])
     out
@@ -468,7 +468,7 @@ encrypt_planes: fn(k: AESKey, q: ^[U64]) Never! {
 /// FIPS 197 section 5.3 InvCipher on the four blocks in q.
 decrypt_planes: fn(k: AESKey, q: ^[U64]) Never! {
     add_round_key(q, k.sk, k.rounds)
-    round := k.rounds - 1
+    ^round: k.rounds - 1
     loop round > 0 {
         inv_shift_rows(q)
         inv_sbox(q)
@@ -583,13 +583,13 @@ aes_key: fn(key: [#Secret U8], decrypt: Bool) -> AESKey? Never! {
 aes_expand: fn(key: [#Secret U8], rounds: Int, decrypt: Bool) -> AESKey Never! {
     nk: key.len() /% 4
     total: (rounds + 1) * 4
-    q := words(8)
-    w := words(total)
+    ^q: words(8)
+    ^w: words(total)
     loop i in 0..<nk -> w[i] = le32(key, 4 * i)
-    rcon := U64{1}
-    j := 0
+    ^rcon: U64{1}
+    ^j: 0
     loop i in nk..<total {
-        tmp := w[i - 1]
+        ^tmp: w[i - 1]
         if j == 0 {
             // RotWord on a little-endian word, SubWord, then Rcon.
             tmp = ((tmp << 24) | tmp >> 8) & U64{0xffffffff}
@@ -600,8 +600,8 @@ aes_expand: fn(key: [#Secret U8], rounds: Int, decrypt: Bool) -> AESKey Never! {
         j += 1
         if j == nk -> j = 0
     }
-    sk := words((rounds + 1) * 8)
-    rk := zero_bytes(total * 4)
+    ^sk: words((rounds + 1) * 8)
+    ^rk: zero_bytes(total * 4)
     loop i in 0..<total -> put_word(rk, 4 * i, w[i])
     loop round in 0..<rounds + 1 {
         interleave_in(q, 0, rk, 16 * round)
@@ -614,7 +614,7 @@ aes_expand: fn(key: [#Secret U8], rounds: Int, decrypt: Bool) -> AESKey Never! {
         ortho(q)
         loop i in 0..<8 -> sk[8 * round + i] = q[i]
     }
-    dk := [U8]{}
+    ^dk: [U8]{}
     if decrypt {
         dk = zero_bytes(total * 4)
         loop i in 0..<16 {
@@ -638,7 +638,7 @@ xor_into: fn(dst: ^[U8], at: Int, a: [U8], a_off: Int, b: [U8], b_off: Int, coun
 /// Add one to the 16-byte counter as a big-endian integer of its last
 /// `width` bytes (16 for CTR, 4 for CTR32). The counter is public.
 increment: fn(ctr: ^[U8], width: Int) Never! {
-    carry := U64{1}
+    ^carry: U64{1}
     loop i in 0..<width {
         n: U64{ctr[15 - i]} + carry
         ctr[15 - i] = low_byte(n)
@@ -650,8 +650,8 @@ increment: fn(ctr: ^[U8], width: Int) Never! {
 /// 5.2): a one-bit left shift with x^128 = x^7 + x^2 + x + 1, without a
 /// branch on the secret carry.
 #Overflow(.Wrapping) xts_double: fn(t: ^[U8]) Never! {
-    a := U64{0}
-    b := U64{0}
+    ^a: U64{0}
+    ^b: U64{0}
     loop i in 0..<8 {
         a |= U64{t[i]} << (8 * i)
         b |= U64{t[8 + i]} << (8 * i)
@@ -686,10 +686,10 @@ blocks_portable: fn(k: AESKey, op: Int, iv: ^[U8], src: [#Secret U8], off: Int, 
     }
     base: out.len()
     loop _ in 0..<count * 16 -> out.push(U8{0})
-    q := words(8)
-    buf := zero_bytes(64)
-    pad := zero_bytes(64)
-    done := 0
+    ^q: words(8)
+    ^buf: zero_bytes(64)
+    ^pad: zero_bytes(64)
+    ^done: 0
     if op == ECB_ENC || op == ECB_DEC {
         loop done < count {
             n: if count - done < 4 -> count - done else -> 4
@@ -721,7 +721,7 @@ blocks_portable: fn(k: AESKey, op: Int, iv: ^[U8], src: [#Secret U8], off: Int, 
             done += n
         }
     } else if op == XTS_ENC || op == XTS_DEC {
-        tweaked := zero_bytes(64)
+        ^tweaked: zero_bytes(64)
         loop done < count {
             n: if count - done < 4 -> count - done else -> 4
             at: off + 16 * done
@@ -766,7 +766,7 @@ blocks_portable: fn(k: AESKey, op: Int, iv: ^[U8], src: [#Secret U8], off: Int, 
 
 /// One block of `src` at `off` encrypted into out[at..<at + 16], in place.
 encrypt_block: fn(k: AESKey, src: [U8], off: Int, out: ^[U8], at: Int) Never! {
-    one := [U8]{}
+    ^one: [U8]{}
     blocks(k, ECB_ENC, zero_bytes(16), src, off, 1, one)
     loop i in 0..<16 -> out[at + i] = one[i]
     core.crypto.wipe(one)
@@ -774,7 +774,7 @@ encrypt_block: fn(k: AESKey, src: [U8], off: Int, out: ^[U8], at: Int) Never! {
 
 /// The 16-byte block `b` replaced by its encryption.
 encrypt_in_place: fn(k: AESKey, b: ^[U8]) Never! {
-    one := [U8]{}
+    ^one: [U8]{}
     blocks(k, ECB_ENC, zero_bytes(16), b, 0, 1, one)
     loop i in 0..<16 -> b[i] = one[i]
     core.crypto.wipe(one)
@@ -818,8 +818,8 @@ cbc: fn(k: AESKey, decrypt: Bool, iv: ^[U8], src: [U8], off: Int, len: Int, out:
 /// the new offset is returned (mbedtls_aes_crypt_ctr). As there, `stream`
 /// ends holding the last keystream block used.
 ctr: fn(k: AESKey, offset: Int, counter: ^[U8], stream: ^[U8], src: [U8], off: Int, len: Int, out: ^[U8]) -> Int Never! {
-    n := offset
-    at := off
+    ^n: offset
+    ^at: off
     end: off + len
     reserve(out, len)
     loop n != 0 && at < end {
@@ -849,8 +849,8 @@ ctr: fn(k: AESKey, offset: Int, counter: ^[U8], stream: ^[U8], src: [U8], off: I
 /// CFB128 over `len` bytes; `offset` bytes of the current block are used.
 /// Returns the new offset (mbedtls_aes_crypt_cfb128).
 cfb128: fn(k: AESKey, decrypt: Bool, offset: Int, iv: ^[U8], src: [U8], off: Int, len: Int, out: ^[U8]) -> Int Never! {
-    n := offset
-    at := off
+    ^n: offset
+    ^at: off
     end: off + len
     reserve(out, len)
     loop n != 0 && at < end {
@@ -879,7 +879,7 @@ cfb128: fn(k: AESKey, decrypt: Bool, offset: Int, iv: ^[U8], src: [U8], off: Int
 /// CFB8 over `len` bytes: one block encryption per byte
 /// (mbedtls_aes_crypt_cfb8).
 cfb8: fn(k: AESKey, decrypt: Bool, iv: ^[U8], src: [U8], off: Int, len: Int, out: ^[U8]) Never! {
-    ks := zero_bytes(16)
+    ^ks: zero_bytes(16)
     reserve(out, len)
     loop i in 0..<len {
         encrypt_block(k, iv, 0, ks, 0)
@@ -894,8 +894,8 @@ cfb8: fn(k: AESKey, decrypt: Bool, iv: ^[U8], src: [U8], off: Int, len: Int, out
 
 /// OFB over `len` bytes; returns the new offset (mbedtls_aes_crypt_ofb).
 ofb: fn(k: AESKey, offset: Int, iv: ^[U8], src: [U8], off: Int, len: Int, out: ^[U8]) -> Int Never! {
-    n := offset
-    at := off
+    ^n: offset
+    ^at: off
     end: off + len
     reserve(out, len)
     loop n != 0 && at < end {
@@ -931,8 +931,8 @@ XTSKey: struct {
 xts_key: fn(key: [#Secret U8], decrypt: Bool) -> XTSKey? Never! {
     if key.len() != 32 && key.len() != 64 -> return None
     half: key.len() /% 2
-    data_half := bytes_of(key, 0, half)
-    tweak_half := bytes_of(key, half, half)
+    ^data_half: bytes_of(key, 0, half)
+    ^tweak_half: bytes_of(key, half, half)
     rounds: aes_rounds(half) ?? return None
     crypt: aes_expand(data_half, rounds, decrypt)
     tweak: aes_expand(tweak_half, rounds, false)
@@ -946,9 +946,9 @@ xts_key: fn(key: [#Secret U8], decrypt: Bool) -> XTSKey? Never! {
 /// 5.3.2 and 5.4.2). False, appending nothing, for any other length.
 xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: Int, out: ^[U8]) -> Bool Never! {
     if len < 16 || len > 16777216 -> return false
-    full := len /% 16
+    ^full: len /% 16
     leftover: len %% 16
-    tweak := zero_bytes(16)
+    ^tweak: zero_bytes(16)
     encrypt_block(xk.tweak, data_unit, 0, tweak, 0)
     op: if decrypt -> XTS_DEC else -> XTS_ENC
     base: out.len()
@@ -961,7 +961,7 @@ xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: In
         core.crypto.wipe(tweak)
         return true
     }
-    steal := tweak.copy()
+    ^steal: tweak.copy()
     if decrypt {
         xts_double(tweak)
         blocks(xk.crypt, op, tweak, src, off + 16 * full, 1, out)
@@ -969,13 +969,13 @@ xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: In
     // out's last whole block gives the partial block its leading bytes and
     // the stolen block its tail.
     last: base + 16 * (len /% 16 - 1)
-    tail := zero_bytes(16)
+    ^tail: zero_bytes(16)
     loop i in 0..<leftover {
         tail[i] = src[off + 16 * (len /% 16) + i] ~ steal[i]
         out.push(out[last + i])
     }
     loop i in leftover..<16 -> tail[i] = out[last + i] ~ steal[i]
-    one := [U8]{}
+    ^one: [U8]{}
     blocks(xk.crypt, if decrypt -> ECB_DEC else -> ECB_ENC, zero_bytes(16), tail, 0, 1, one)
     loop i in 0..<16 -> out[last + i] = one[i] ~ steal[i]
     core.crypto.wipe(one)
@@ -999,23 +999,23 @@ xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: In
 
 /// The AES-CMAC of `msg` (SP 800-38B section 6.2), 16 bytes.
 cmac: fn(k: AESKey, msg: [U8]) -> [U8] Never! {
-    sub := zero_bytes(16)
+    ^sub: zero_bytes(16)
     encrypt_in_place(k, sub)
     cmac_double(sub)
-    n := (msg.len() + 15) /% 16
-    complete := n > 0 && msg.len() %% 16 == 0
+    ^n: (msg.len() + 15) /% 16
+    ^complete: n > 0 && msg.len() %% 16 == 0
     if n == 0 -> n = 1
     // K1 for a complete last block, else K2 and the 10* padding.
     if !complete -> cmac_double(sub)
-    last := zero_bytes(16)
+    ^last: zero_bytes(16)
     start: 16 * (n - 1)
     loop i in 0..<16 {
         at: start + i
         m: if at < msg.len() -> msg[at] else if at == msg.len() -> U8{0x80} else -> U8{0}
         last[i] = m ~ sub[i]
     }
-    x := zero_bytes(16)
-    chain := [U8]{}
+    ^x: zero_bytes(16)
+    ^chain: [U8]{}
     blocks(k, CBC_ENC, x, msg, 0, n - 1, chain)
     blocks(k, CBC_ENC, x, last, 0, 1, chain)
     core.crypto.wipe(chain)
@@ -1027,7 +1027,7 @@ cmac: fn(k: AESKey, msg: [U8]) -> [U8] Never! {
 /// AES-CMAC-PRF-128 (RFC 4615 section 3): a key that is not 16 bytes is
 /// first reduced to AES-CMAC(0^128, key).
 cmac_prf_128: fn(key: [U8], msg: [U8]) -> [U8] Never! {
-    derived := if key.len() == 16 -> key.copy() else -> {
+    ^derived: if key.len() == 16 -> key.copy() else -> {
         zero_key: aes_key(zero_bytes(16), false) ?? panic("AES-128 key")
         cmac(zero_key, key)
     }
@@ -1059,9 +1059,9 @@ KWP_ICV2: [U8]{0xa6, 0x59, 0x59, 0xa6}
 /// in place: 6n rounds of A || R_i encrypted, then A ^= t.
 kw_w: fn(k: AESKey, buf: ^[U8]) Never! {
     n: buf.len() /% 8 - 1
-    block := zero_bytes(16)
-    one := zero_bytes(16)
-    t := 1
+    ^block: zero_bytes(16)
+    ^one: zero_bytes(16)
+    ^t: 1
     loop _ in 0..<6 {
         loop i in 1..<n + 1 {
             loop b in 0..<8 {
@@ -1083,11 +1083,11 @@ kw_w: fn(k: AESKey, buf: ^[U8]) Never! {
 /// W^-1 (SP 800-38F section 6.1, algorithm 2) in place.
 kw_w_inverse: fn(k: AESKey, buf: ^[U8]) Never! {
     n: buf.len() /% 8 - 1
-    block := zero_bytes(16)
-    one := [U8]{}
-    t := 6 * n
+    ^block: zero_bytes(16)
+    ^one: [U8]{}
+    ^t: 6 * n
     loop _ in 0..<6 {
-        i := n
+        ^i: n
         loop i >= 1 {
             loop b in 0..<8 {
                 block[b] = buf[b] ~ low_byte(U64{t} >> (56 - 8 * b))
@@ -1117,7 +1117,7 @@ kw_wrap: fn(k: AESKey, padded: Bool, plain: [U8]) -> [U8] CipherError! {
         if len < 16 || len %% 8 != 0 || len > 0x1ffffffffffffff8 -> return Err(.Input)
     }
     pad: if padded -> (8 - len %% 8) %% 8 else -> 0
-    buf := zero_bytes(8 + len + pad)
+    ^buf: zero_bytes(8 + len + pad)
     if padded {
         loop i in 0..<4 -> buf[i] = KWP_ICV2[i]
         loop i in 0..<4 -> buf[4 + i] = low_byte(U64{len} >> (24 - 8 * i))
@@ -1127,7 +1127,7 @@ kw_wrap: fn(k: AESKey, padded: Bool, plain: [U8]) -> [U8] CipherError! {
     loop i in 0..<len -> buf[8 + i] = plain[i]
     if padded && len <= 8 {
         // A single semiblock is one AES block (section 6.3, step 2).
-        out := [U8]{}
+        ^out: [U8]{}
         ecb(k, false, buf, 0, 1, out)
         core.crypto.wipe(buf)
         return Ok(out)
@@ -1146,16 +1146,16 @@ kw_unwrap: fn(k: AESKey, padded: Bool, wrapped: [U8]) -> [U8] CipherError! {
     } else {
         if len < 24 || len > 0x200000000000000 || len %% 8 != 0 -> return Err(.Input)
     }
-    buf := [U8]{}
+    ^buf: [U8]{}
     if padded && len == 16 -> ecb(k, true, wrapped, 0, 1, buf) else {
         buf = bytes_of(wrapped, 0, len)
         kw_w_inverse(k, buf)
     }
-    diff := U64{0}
-    plen := U64{len - 8}
+    ^diff: U64{0}
+    ^plen: U64{len - 8}
     if padded {
         loop i in 0..<4 -> diff |= U64{buf[i] ~ KWP_ICV2[i]}
-        mli := U64{0}
+        ^mli: U64{0}
         loop i in 0..<4 -> mli = (mli << 8) | U64{buf[4 + i]}
         // The padding is len - 8 - MLI bytes: 0 to 7, and all zero. An MLI
         // past len - 8 fails, and is capped there, without a branch.
@@ -1178,7 +1178,7 @@ kw_unwrap: fn(k: AESKey, padded: Bool, wrapped: [U8]) -> [U8] CipherError! {
         core.crypto.wipe(buf)
         return Err(.Auth)
     }
-    out := bytes_of(buf, 8, kw_unwrapped_len(plen))
+    ^out: bytes_of(buf, 8, kw_unwrapped_len(plen))
     core.crypto.wipe(buf)
     Ok(out)
 }
@@ -1259,7 +1259,7 @@ CBCPaddingCheck: struct {
         .Unpadded -> CBCPaddingCheck{data_len: total, bad: U64{0}}
         .PKCS7 | .ZerosAndLen -> {
             n: U64{input[off + len - 1]}
-            bad := ct_gt(n, total) | ~ct_nonzero(n)
+            ^bad: ct_gt(n, total) | ~ct_nonzero(n)
             pad_idx: total - n
             want: if mode == .PKCS7 -> n else -> U64{0}
             checked: if mode == .PKCS7 -> len else -> len - 1
@@ -1270,10 +1270,10 @@ CBCPaddingCheck: struct {
             CBCPaddingCheck{data_len: pad_idx &~ bad, bad: bad}
         }
         .OneAndZeros -> {
-            in_padding := ~U64{0}
-            bad := ~U64{0}
-            at := U64{0}
-            i := len - 1
+            ^in_padding: ~U64{0}
+            ^bad: ~U64{0}
+            ^at: U64{0}
+            ^i: len - 1
             loop i >= 0 {
                 b: U64{input[off + i]}
                 nonzero: ct_nonzero(b)
@@ -1286,9 +1286,9 @@ CBCPaddingCheck: struct {
             CBCPaddingCheck{data_len: at &~ bad, bad: bad}
         }
         .Zeros -> {
-            done := U64{0}
-            at := U64{0}
-            i := len
+            ^done: U64{0}
+            ^at: U64{0}
+            ^i: len
             loop i > 0 {
                 was: done
                 done |= ct_nonzero(U64{input[off + i - 1]})
@@ -1317,10 +1317,10 @@ CBCPaddingCheck: struct {
     }
     loop (i, key) in keys {
         k: aes_key(key, true) ?? panic("AES key")
-        sealed := [U8]{}
+        ^sealed: [U8]{}
         ecb(k, false, plain, 0, 1, sealed)
         assert(sealed == expected[i])
-        opened := [U8]{}
+        ^opened: [U8]{}
         ecb(k, true, sealed, 0, 1, opened)
         assert(opened == plain)
     }
@@ -1332,21 +1332,21 @@ CBCPaddingCheck: struct {
     plain: [U8]{0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a, 0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c, 0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51, 0x30, 0xc8, 0x1c, 0x46, 0xa3, 0x5c, 0xe4, 0x11, 0xe5, 0xfb, 0xc1, 0x19, 0x1a, 0x0a, 0x52, 0xef, 0xf6, 0x9f, 0x24, 0x45, 0xdf, 0x4f, 0x9b, 0x17, 0xad, 0x2b, 0x41, 0x7b, 0xe6, 0x6c, 0x37, 0x10}
     k: aes_key(key, true) ?? panic("AES key")
     iv: [U8]{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f}
-    chain := iv.copy()
-    sealed := [U8]{}
+    ^chain: iv.copy()
+    ^sealed: [U8]{}
     assert(cbc(k, false, chain, plain, 0, 64, sealed))
     assert(sealed == [U8]{0x76, 0x49, 0xab, 0xac, 0x81, 0x19, 0xb2, 0x46, 0xce, 0xe9, 0x8e, 0x9b, 0x12, 0xe9, 0x19, 0x7d, 0x50, 0x86, 0xcb, 0x9b, 0x50, 0x72, 0x19, 0xee, 0x95, 0xdb, 0x11, 0x3a, 0x91, 0x76, 0x78, 0xb2, 0x73, 0xbe, 0xd6, 0xb8, 0xe3, 0xc1, 0x74, 0x3b, 0x71, 0x16, 0xe6, 0x9e, 0x22, 0x22, 0x95, 0x16, 0x3f, 0xf1, 0xca, 0xa1, 0x68, 0x1f, 0xac, 0x09, 0x12, 0x0e, 0xca, 0x30, 0x75, 0x86, 0xe1, 0xa7})
     chain = iv.copy()
-    opened := [U8]{}
+    ^opened: [U8]{}
     assert(cbc(k, true, chain, sealed, 0, 64, opened))
     assert(opened == plain)
-    counter := [U8]{0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff}
-    stream := zero_bytes(16)
-    streamed := [U8]{}
+    ^counter: [U8]{0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff}
+    ^stream: zero_bytes(16)
+    ^streamed: [U8]{}
     assert(ctr(k, 0, counter, stream, plain, 0, 64, streamed) == 0)
     assert(streamed == [U8]{0x87, 0x4d, 0x61, 0x91, 0xb6, 0x20, 0xe3, 0x26, 0x1b, 0xef, 0x68, 0x64, 0x99, 0x0d, 0xb6, 0xce, 0x98, 0x06, 0xf6, 0x6b, 0x79, 0x70, 0xfd, 0xff, 0x86, 0x17, 0x18, 0x7b, 0xb9, 0xff, 0xfd, 0xff, 0x5a, 0xe4, 0xdf, 0x3e, 0xdb, 0xd5, 0xd3, 0x5e, 0x5b, 0x4f, 0x09, 0x02, 0x0d, 0xb0, 0x3e, 0xab, 0x1e, 0x03, 0x1d, 0xda, 0x2f, 0xbe, 0x03, 0xd1, 0x79, 0x21, 0x70, 0xa0, 0xf3, 0x00, 0x9c, 0xee})
     chain = iv.copy()
-    fed := [U8]{}
+    ^fed: [U8]{}
     assert(ofb(k, 0, chain, plain, 0, 64, fed) == 0)
     assert(fed == [U8]{0x3b, 0x3f, 0xd9, 0x2e, 0xb7, 0x2d, 0xad, 0x20, 0x33, 0x34, 0x49, 0xf8, 0xe8, 0x3c, 0xfb, 0x4a, 0x77, 0x89, 0x50, 0x8d, 0x16, 0x91, 0x8f, 0x03, 0xf5, 0x3c, 0x52, 0xda, 0xc5, 0x4e, 0xd8, 0x25, 0x97, 0x40, 0x05, 0x1e, 0x9c, 0x5f, 0xec, 0xf6, 0x43, 0x44, 0xf7, 0xa8, 0x22, 0x60, 0xed, 0xcc, 0x30, 0x4c, 0x65, 0x28, 0xf6, 0x59, 0xc7, 0x78, 0x66, 0xa5, 0x10, 0xd9, 0xc1, 0xd6, 0xae, 0x5e})
 }
@@ -1362,7 +1362,7 @@ CBCPaddingCheck: struct {
     wrapped: kw_wrap(wrap_key, false, data) ?? panic("wrap")
     assert(wrapped == [U8]{0x1f, 0xa6, 0x8b, 0x0a, 0x81, 0x12, 0xb4, 0x47, 0xae, 0xf3, 0x4b, 0xd8, 0xfb, 0x5a, 0x7b, 0x82, 0x9d, 0x3e, 0x86, 0x23, 0x71, 0xd2, 0xcf, 0xe5})
     assert((kw_unwrap(wrap_key, false, wrapped) ?? panic("unwrap")) == data)
-    forged := wrapped.copy()
+    ^forged: wrapped.copy()
     forged[3] = forged[3] ~ U8{1}
     refused: if kw_unwrap(wrap_key, false, forged) == {
         .Ok(_) -> false
@@ -1372,20 +1372,20 @@ CBCPaddingCheck: struct {
 }
 
 #Test("The AES host leaf agrees with the bitsliced rounds on every operation, key size, block count and offset") {
-    src := [U8]{}
+    ^src: [U8]{}
     loop i in 0..<160 -> src.push(U8{(i * 37 + 11) %% 256})
     loop size in ([Int]{16, 24, 32}) {
-        key := [U8]{}
+        ^key: [U8]{}
         loop i in 0..<size -> key.push(U8{(i * 13 + 5) %% 256})
         k: aes_key(key, true) ?? panic("AES key")
         loop op in ECB_ENC..<XTS_DEC + 1 {
             loop count in 1..<10 {
                 loop off in ([Int]{0, 3}) {
                     // A non-empty `out` checks that both append after it.
-                    fast := [U8]{0xee}
-                    slow := [U8]{0xee}
-                    fast_iv := bytes_of(src, 144, 16)
-                    slow_iv := bytes_of(src, 144, 16)
+                    ^fast: [U8]{0xee}
+                    ^slow: [U8]{0xee}
+                    ^fast_iv: bytes_of(src, 144, 16)
+                    ^slow_iv: bytes_of(src, 144, 16)
                     blocks(k, op, fast_iv, src, off, count, fast)
                     blocks_portable(k, op, slow_iv, src, off, count, slow)
                     assert(fast == slow)

@@ -34,7 +34,7 @@ fail: fn(message: String) -> Never { process.fail(1, message) }
 // path.resolve against the working directory.
 resolve: fn(cwd: String, path: String) -> String {
     full: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in full.split("/").to_list() {
         if part == ".." {
             if parts.len() > 0 -> _: parts.pop()
@@ -47,7 +47,7 @@ resolve: fn(cwd: String, path: String) -> String {
 // space-separated code points, then `;`.
 data_rows: fn(text: String) -> Int {
     row: re.compile("^[0-9A-F]+( [0-9A-F]+)*;") ?? fail("row pattern: {err}")
-    count := 0
+    ^count: 0
     loop line in text.split("\n") {
         if row.is_match(line) -> count += 1
     }
@@ -56,8 +56,8 @@ data_rows: fn(text: String) -> Int {
 
 load_policy: fn(root: String) -> Policy {
     text: files.read("{root}/{POLICY}") ?? fail("cannot read {POLICY}: {err}")
-    flags := [String]{}
-    removed := [String]{}
+    ^flags: [String]{}
+    ^removed: [String]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         line: lines[index]
@@ -77,7 +77,7 @@ load_policy: fn(root: String) -> Policy {
 // Tools/Packaging/NativeCCompiler.jet runs it.
 native_cc: fn(policy: Policy, args: [String]) -> ProcessSpec {
     removed: policy.removed
-    spec := process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)
+    ^spec: process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)
     if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) {
         words: re.split(Regex{"\s+"}, enabled)
         kept: loop word in words if word != "" && !removed.contains(word) -> word
@@ -104,7 +104,7 @@ run: fn() {
     }
     out: resolve(root, args[0])
     files.create_dir_all(out) ?? fail("cannot create {out}: {err}")
-    kat := "{root}/{KAT}"
+    ^kat: "{root}/{KAT}"
     bytes: files.read_bytes(kat) ?? fail("cannot read {KAT}: {err}")
     if crypto.sha256(bytes.copy()).hex() != KAT_SHA256 {
         fail("NormalizationTest17 checksum mismatch")
@@ -112,8 +112,8 @@ run: fn() {
     if data_rows(String.from_bytes_lossy(bytes)) != KAT_ROWS {
         fail("NormalizationTest17 row count mismatch")
     }
-    binary := "{out}/native-nfc"
-    cc_args := [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "{root}/{HERE}/NativeTextNormalizeWitness.c"}
+    ^binary: "{out}/native-nfc"
+    ^cc_args: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "{root}/{HERE}/NativeTextNormalizeWitness.c"}
     loop input in args[1..<args.len()] {
         cc_args.push(if input.starts_with("-") -> input.copy() else -> resolve(root, input))
     }

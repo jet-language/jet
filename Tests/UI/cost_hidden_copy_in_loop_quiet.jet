@@ -23,7 +23,7 @@ Holder: struct {
 }
 
 widths: fn(lines: [String]) -> Int {
-    total := 0
+    ^total: 0
     loop line in lines {
         trimmed: line.trim()
         if trimmed.len() > total -> total = trimmed.len()
@@ -32,7 +32,7 @@ widths: fn(lines: [String]) -> Int {
 }
 
 keep_trimmed: fn(lines: [String]) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop line in lines {
         trimmed: line.trim()
         out.push(trimmed.copy())
@@ -42,7 +42,7 @@ keep_trimmed: fn(lines: [String]) -> [String] {
 
 tags: fn(turns: Int) -> [Tag] {
     label: "turn"
-    out := [Tag]{}
+    ^out: [Tag]{}
     loop turn in 0..<turns { out.push(Tag{name: label.copy(), turn: turn}) }
     out
 }
@@ -50,9 +50,9 @@ tags: fn(turns: Int) -> [Tag] {
 holders: fn(turns: Int) -> [Holder] {
     cell: Shared{Box{n: 1}}
     extent: Extent{start: 0, end: 1}
-    out := [Holder]{}
+    ^out: [Holder]{}
     loop turn in 0..<turns {
-        held := extent
+        ^held: extent
         held.end = turn
         out.push(Holder{cell: Val(cell), extent: held})
     }

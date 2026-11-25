@@ -108,8 +108,8 @@ jet_cli_publish_plan: fn(jet_argv: [String], color: Bool, quiet: Bool) -> JetCLI
 
 // `jet registry yank <version> [--message <reason>]`; a missing version is E2606.
 jet_cli_yank_plan: fn(jet_argv: [String], color: Bool) -> JetCLIPlan Never! {
-    words := [String]{}
-    skip_next := false
+    ^words: [String]{}
+    ^skip_next: false
     loop argument in jet_argv {
         if skip_next {
             skip_next = false
@@ -149,7 +149,7 @@ jet_cli_publish_missing: fn(error: IOError) -> Bool Never! {
 jet_cli_publish_dirty_files: fn(root: String) -[Env, Exec, Time.Wait]> [String] Never! {
     status: publish_process.cmd([String]{"git", "status", "--porcelain"}).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return [String]{}
     if !status.success -> return [String]{}
-    dirty := [String]{}
+    ^dirty: [String]{}
     loop line in status.output.lines() {
         if line.trim() != "" -> dirty.push(line)
     }
@@ -200,7 +200,7 @@ jet_cli_publish_hashes: fn(root: String, name: String) -[FS, Env]> {content_hash
 
 // Runs this `jet` with `args` in `root`; None when it could not start.
 jet_cli_publish_self: fn(root: String, args: [String]) -[Env, Exec, Time.Wait]> {success: Bool, code: Int, stdout: String, stderr: String}? Never! {
-    argv := [String]{publish_sys.executable()}
+    ^argv: [String]{publish_sys.executable()}
     loop arg in args -> argv.push(arg.copy())
     ran: publish_process.cmd(argv).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return None
     Val({success: ran.success, code: ran.code, stdout: ran.output, stderr: ran.errors})
@@ -214,14 +214,14 @@ jet_cli_publish_drop_checkout: fn(log: ^JetCLIPublishLog, checkout: PublicationP
 }
 
 jet_cli_publish_checkout_failed: fn(log: JetCLIPublishLog, checkout: PublicationPublishCheckout, diagnostic: Diagnostic) -[FS]> JetDriverVerbOutput Never! {
-    failed := log
+    ^failed: log
     jet_cli_publish_drop_checkout(failed, checkout)
     failed.render(diagnostic)
     failed.finish(JET_DRIVER_EXIT_USER_ERROR)
 }
 
 jet_cli_publish_checkout_error: fn(log: JetCLIPublishLog, checkout: PublicationPublishCheckout, code: String, what: String) -[FS]> JetDriverVerbOutput Never! {
-    failed := log
+    ^failed: log
     jet_cli_publish_drop_checkout(failed, checkout)
     failed.error(code, what)
     failed.finish(JET_DRIVER_EXIT_USER_ERROR)
@@ -229,7 +229,7 @@ jet_cli_publish_checkout_error: fn(log: JetCLIPublishLog, checkout: PublicationP
 
 jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> JetDriverVerbOutput {
     root: jet_cli_publish_root() ?? return jet_cli_publish_no_root("publish")
-    log := JetCLIPublishLog{stdout: "", stderr: "", color: color}
+    ^log: JetCLIPublishLog{stdout: "", stderr: "", color: color}
     manifest: if pkg_manifest_load(root) == {
         .Ok(found) -> found ?? return jet_cli_publish_no_root("publish")
         .Err(error) -> {
@@ -268,8 +268,8 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
     // E1292 and key creation happen before progress, cloning or mutation;
     // an existing key and `--no-sign` never generate one.
     registry: publication_resolve_publish_registry()
-    generated_seed := ""
-    generated_public := ""
+    ^generated_seed: ""
+    ^generated_public: ""
     if !no_sign && !publication_key_exists(registry.name) {
         if publication_keygen(registry.name, false) == {
             .Ok(key) -> {
@@ -299,14 +299,14 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
 
     if !quiet -> log.out("Publishing `{name}` v{version} ...")
     if !quiet -> log.out("[1/3] Checking build ...")
-    notices := [String]{}
-    entry := ""
+    ^notices: [String]{}
+    ^entry: ""
     if jet_cli_find_project_entry(root, "publish", color, notices) == {
         .Entry(found) -> entry = found.path
         .Refused(plan) -> return jet_cli_publish_refusal(plan, color)
         .Absent -> {}
     }
-    build_ok := false
+    ^build_ok: false
     if {
         entry != "" && publish_files.is_file(entry) -> {
             if jet_cli_publish_self(root, [String]{"check", entry}) == {
@@ -337,7 +337,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
 
     // Gate step 2: the project's real test command, before any registry mutation.
     if !quiet -> log.out("[2/3] Checking tests ...")
-    tests_ok := false
+    ^tests_ok: false
     if {
         entry == "" || !publish_files.is_file(entry) -> {
             log.err("  Tests: failed — no project entry `{if entry == "" -> root else -> entry}` was found\n")
@@ -420,7 +420,9 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
             breaking: publication_diff_public_api(publication_api_snapshot_items(snapshot), api)
             if {
                 breaking.len() == 0 -> {
-                    if !quiet -> log.out("  Semver: OK — public API compatible with v{baseline.version}")
+                    if !quiet {
+                        log.out("  Semver: OK — public API compatible with v{baseline.version}")
+                    }
                 }
                 publication_release_may_break(before, release) -> {
                     if !quiet {
@@ -476,8 +478,8 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
 
     // c146: sign the content hash. The public key is TOFU-pinned into the
     // index on the first version and repeated only for a reviewed takeover.
-    public_key := ""
-    signature := ""
+    ^public_key: ""
+    ^signature: ""
     if {
         no_sign -> {
             if !quiet -> log.out("  Signing: skipped (--no-sign); tier-B checksum still applies.")
@@ -497,7 +499,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
         }
     }
 
-    gate_status := publication_core_reviewed()
+    ^gate_status: publication_core_reviewed()
     if registry.tier == {
         .Core -> {
             if publication_require_core_review(repo, name, version) == .Err(error) {
@@ -517,7 +519,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
 
     artifact: publication_artifact_path(repo, name, version) ?? return jet_cli_publish_checkout_error(log, checkout, "E2105", "invalid registry artifact path: {err}")
     index: publication_index_entry_path(repo, name) ?? return jet_cli_publish_checkout_error(log, checkout, "E2105", "invalid registry index path: {err}")
-    paths := [String]{artifact, index}
+    ^paths: [String]{artifact, index}
     if publication_publish_artifact(repo, root, name, version, hashes.content_hash) == .Err(error) {
         return jet_cli_publish_checkout_failed(log, checkout, publication_e2607("registry source artifact", "{error}"))
     }
@@ -587,7 +589,7 @@ jet_cli_publish_public_api: fn(root: String, entry: String, package: String, col
             package_root: publish_files.realpath(root) ?? root
             managed: publish_files.join(package_root, ".jet")
             entry_path: publish_files.realpath(entry) ?? entry
-            rows := [PublicAPIItem]{}
+            ^rows: [PublicAPIItem]{}
             loop doc in result.doc_modules {
                 path: publish_files.realpath(doc.physical_path) ?? doc.physical_path
                 if !path.starts_with("{package_root}/") || path.starts_with("{managed}/") -> next
@@ -606,7 +608,7 @@ jet_cli_publish_public_api: fn(root: String, entry: String, package: String, col
 // A yank flips the version's `yanked` flag in place; the line
 // stays, so the version stays reserved but leaves new resolution.
 jet_cli_yank: fn(version: String, message: String?, color: Bool) -[FS, Env, Exec, Net, Time, Time.Wait]> JetDriverVerbOutput Never! {
-    log := JetCLIPublishLog{stdout: "", stderr: "", color: color}
+    ^log: JetCLIPublishLog{stdout: "", stderr: "", color: color}
     if publication_parse_semver(version) == None {
         log.error("E2104", "`{version}` is not a valid SemVer version (expected major.minor.patch)")
         return log.finish(JET_DRIVER_EXIT_USER_ERROR)
@@ -648,7 +650,7 @@ jet_cli_yank: fn(version: String, message: String?, color: Bool) -[FS, Env, Exec
     }
     index: publication_index_entry_path(repo, name) ?? return jet_cli_publish_checkout_error(log, checkout, "E2105", "invalid registry index path: {err}")
     metadata: publication_refresh_registry_metadata(repo, registry.name) ?? return jet_cli_publish_checkout_failed(log, checkout, err.diagnostic)
-    paths := [String]{index}
+    ^paths: [String]{index}
     loop path in metadata.paths -> paths.push(path)
     if publication_push_index(registry, repo, "yank {name} {version}", paths, Val(yanked)) == .Err(error) {
         return jet_cli_publish_checkout_failed(log, checkout, error.diagnostic)

@@ -5,7 +5,7 @@ kv_put: fn(path: Path, key: String, value: String) -> Bool {
 kv_delete: fn(path: Path, key: String) -> Bool { return append_record(path, "del|{key}") }
 
 kv_replay: fn(path: Path) -> [String:String] {
-    state := [String:String]{}
+    ^state: [String:String]{}
     records: read_records(path)
     loop record in records {
         parts: record.split("|").to_list()
@@ -26,7 +26,7 @@ kv_get: fn(path: Path, key: String) -> String? {
 
 kv_compact: fn(path: Path) -> Bool {
     state: kv_replay(path)
-    compacted := [String]{}
+    ^compacted: [String]{}
     loop (key, value) in state -> compacted.push("put|{key}|{value}")
     return compact_records(path, compacted)
 }

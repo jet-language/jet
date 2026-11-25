@@ -5,13 +5,13 @@ Pair: struct {
 
 map_left: fn(handle: Shared<Pair>) {
     guard: handle.guard_edit()
-    mapped := guard.map(fn(value) { value.left })
+    ^mapped: guard.map(fn(value) { value.left })
     mapped.value += 10
 }
 
 split_pair: fn(handle: Shared<Pair>) {
     guard: handle.guard_edit()
-    { first: left, second: right } := guard.split(
+    { first: ^left, second: ^right }: guard.split(
         fn(value) { value.left },
         fn(value) { value.right },
     )
@@ -20,11 +20,11 @@ split_pair: fn(handle: Shared<Pair>) {
 }
 
 run: fn() {
-    mapped := Shared{Pair{left: 1, right: 2}}
+    ^mapped: Shared{Pair{left: 1, right: 2}}
     map_left(mapped)
     print(mapped.left + mapped.right)
 
-    split := Shared{Pair{left: 3, right: 4}}
+    ^split: Shared{Pair{left: 3, right: 4}}
     split_pair(split)
     print(split.left + split.right)
 }

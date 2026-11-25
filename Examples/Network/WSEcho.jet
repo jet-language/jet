@@ -45,7 +45,9 @@ run: fn() (HTTPError | RangeError | TaskFailure | WsError)! {
     sent: [U8]{1, 2, 3}
     client.send_bytes(sent) ?? panic("send bytes")
     echoed: client.recv() ?? panic("receive bytes")
-    if !echoed.is_binary() || (echoed.bytes() ?? panic("echoed bytes")) != sent -> panic("the binary echo differs")
+    if !echoed.is_binary() || (echoed.bytes() ?? panic("echoed bytes")) != sent {
+        panic("the binary echo differs")
+    }
     client.close(1000, "") ?? panic("close")
     grace: 100ms
     server.shutdown(grace) ?? panic("shutdown")

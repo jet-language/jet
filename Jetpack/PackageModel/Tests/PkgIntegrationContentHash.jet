@@ -6,7 +6,7 @@ use {
 
 #Test("pkg integration lock_file_content_hash_roundtrip") {
     package: LockedPackage{name: "foo", version: "1.0.0", source: .Path("../foo"), fingerprint: "sha256-cccc", content_hash: Val("sha256-deadbeef"), layer: Val(RuntimeLayer.Core), inferred_layer: Val(RuntimeLayer.Std)}
-    lock := LockFile.empty()
+    ^lock: LockFile.empty()
     lock.packages = [LockedPackage]{package}
     lock.root_dependencies = [String]{"foo"}
     lock.workspace_members = [LockedWorkspaceMember]{LockedWorkspaceMember{name: "hello", path: "packages/hello", source_digest: "no-workspace-source", canonical_path: "/workspace/packages/hello", package_digest: "sha256-package"}}

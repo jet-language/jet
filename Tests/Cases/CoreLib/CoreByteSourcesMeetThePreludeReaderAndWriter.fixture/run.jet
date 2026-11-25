@@ -8,7 +8,7 @@ use {
 
 // Reads `source` to its end, `step` bytes at a time, into one buffer.
 drain: fn<R: Reader>(source: ^R, step: Int) -> [U8] IOError! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop {
         count: source.read_into(out, step) ?? return Err(err)
         if count == 0 -> break
@@ -18,7 +18,7 @@ drain: fn<R: Reader>(source: ^R, step: Int) -> [U8] IOError! {
 
 // Copies `source` into `sink` in reads of `step` bytes; the count written.
 pipe: fn<R: Reader, W: Writer>(source: ^R, sink: ^W, step: Int) -> Int IOError! {
-    total := 0
+    ^total: 0
     loop {
         chunk: source.read_bytes(step) ?? return Err(err)
         if chunk.len() == 0 -> break
@@ -35,39 +35,39 @@ text: fn(bytes: [U8]) -> String { String.from_bytes(bytes) ?? "<not UTF-8>" }
 // six bytes, then up to three more appended to a buffer.
 cursor_parts: fn(cursor: ^term.Reader) -> String IOError! {
     head: cursor.read_bytes(6) ?? return Err(err)
-    rest := [U8]{}
+    ^rest: [U8]{}
     count: cursor.read_into(rest, 3) ?? return Err(err)
     Ok("{text(head)}|{count} {text(rest)}")
 }
 
 run: fn() {
     files.write("in.txt", "a file of bytes") ?? panic("write in.txt")
-    reader := files.open("in.txt") ?? panic("open in.txt")
+    ^reader: files.open("in.txt") ?? panic("open in.txt")
     print("file {text(drain(reader, 4) ?? panic("drain file"))}")
 
-    source := files.open("in.txt") ?? panic("open in.txt again")
-    sink := files.create("out.txt") ?? panic("create out.txt")
+    ^source: files.open("in.txt") ?? panic("open in.txt again")
+    ^sink: files.create("out.txt") ?? panic("create out.txt")
     copied: pipe(source, sink, 5) ?? panic("pipe file")
     sink.write_bytes("!".bytes()) ?? panic("write_bytes")
     sink.write_bytes(".".bytes()) ?? panic("write_bytes again")
     sink.flush() ?? panic("flush")
     print("copied {copied} {files.read("out.txt") ?? "<unread>"}")
 
-    cursor := Reader.over("cursor bytes".bytes())
+    ^cursor: Reader.over("cursor bytes".bytes())
     head: cursor.read_bytes(6) ?? panic("cursor read")
     print("cursor {text(head)}|{text(drain(cursor, 4) ?? panic("drain cursor"))}|{cursor.remaining()}")
-    refused := "accepted"
+    ^refused: "accepted"
     if cursor.read_bytes(0) == {
         .Err(_) -> { refused = "refused" }
         .Ok(_) -> {}
     }
     print("cursor zero limit {refused}")
-    parts := Reader.over("direct bytes".bytes())
+    ^parts: Reader.over("direct bytes".bytes())
     print("cursor parts {cursor_parts(parts) ?? panic("cursor parts")}")
 
-    input := term.stdin()
+    ^input: term.stdin()
     first: input.read_bytes(5) ?? panic("read stdin")
-    next_bytes := [U8]{}
+    ^next_bytes: [U8]{}
     count: input.read_into(next_bytes, 9) ?? panic("read_into stdin")
     print("stdin {text(first)}|{count} {text(next_bytes)}|{text(drain(input, 3) ?? panic("drain stdin")).trim_end()}")
 }

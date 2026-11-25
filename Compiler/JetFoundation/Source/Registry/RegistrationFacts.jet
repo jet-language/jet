@@ -51,7 +51,7 @@ REGISTRATION_TABLE: #run registration_read(MARKER_SOURCE, FACT_SOURCE)
 // `facts`, each in source order. A fact gate that names a marker must name
 // one of the marker rows read first.
 registration_read: fn(markers: String, facts: String) -> RegistrationTable Never! {
-    table := RegistrationTable{kinds: [RegistrationKind]{}, payloads: [Int]{}, markers: marker_source_read(markers), facts: [RegistrationFactRow]{}}
+    ^table: RegistrationTable{kinds: [RegistrationKind]{}, payloads: [Int]{}, markers: marker_source_read(markers), facts: [RegistrationFactRow]{}}
     table.facts = fact_source_read(facts, table.markers)
     loop index in 0..<table.markers.len() {
         table.kinds.push(RegistrationKind.Marker)

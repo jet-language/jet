@@ -19,21 +19,21 @@ s3_guard_retired_marker_forms: fn() {
     checked_tail: "_text_head_decl"
     checked_text_node: "{checked_head}{checked_tail}"
     frozen: "dogfood/tower/tests/parity/fixtures"
-    pending := [String]{""}
-    offenders := [String]{}
+    ^pending: [String]{""}
+    ^offenders: [String]{}
     loop {
         relative_dir: pending.pop() ?? break
-        directory := "."
+        ^directory: "."
         if relative_dir != "" -> directory = "./{relative_dir}"
         entries: s3_marker_files.list_dir(directory) ?? next
         loop entry in entries {
-            relative := entry.name.copy()
+            ^relative: entry.name.copy()
             if relative_dir != "" -> relative = "{relative_dir}/{entry.name}"
             if relative == frozen || relative.starts_with("{frozen}/") -> next
             metadata: s3_marker_files.stat(entry.path) ?? next
             if metadata.is_symlink -> next
             if metadata.is_dir {
-                skip := false
+                ^skip: false
                 loop name in ignored {
                     if entry.name == name -> skip = true
                 }
@@ -44,13 +44,13 @@ s3_guard_retired_marker_forms: fn() {
                 next
             }
             if !metadata.is_file -> next
-            skip := false
+            ^skip: false
             loop path in allowed {
                 if relative == path -> skip = true
             }
             if skip || guards_dated_evidence(relative) -> next
             source: s3_marker_files.read(entry.path) ?? next
-            line_number := 0
+            ^line_number: 0
             jet_source: relative.ends_with(".jet")
             loop line in source.lines() {
                 line_number += 1

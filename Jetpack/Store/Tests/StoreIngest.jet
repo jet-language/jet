@@ -41,7 +41,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
 }
 
 #Test("store ingest atomic dedupes same bytes and records referrers") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     sources: [String:String]{"src-a": "same-bytes", "src-b": "same-bytes", "src-c": "different"}
     loop source in sources {
@@ -64,7 +64,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
 }
 
 #Test("store ingest missing output is typed atomic and retryable") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     source: files.join(roots.root, "late-ingest-output")
     request: store_test_ingest_request("late-ingest", "path:late-ingest", source, [String]{}, "")
@@ -95,7 +95,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
 // a non-directory Hangar root keeps its exact InvalidData message and E1315
 // diagnostic, and nothing is staged.
 #Test("store ingest lifts hangar store failures to typed io diagnostics") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     source: files.join(roots.root, "hangar-file-source")
     files.create_dir_all(source) ?? panic("fixture dir")
@@ -172,7 +172,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
 }
 
 #Test("store ingest child replaced after copy is typed atomic and retryable") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     source: files.join(roots.root, "racing-tree")
     replaced: files.join(source, "replaced-after-copy")
@@ -184,7 +184,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
     request: store_test_ingest_request("child-race", "path:child-race", source, [String]{}, "")
     // An escaping closure owns copies of what it captures, so the race is
     // observed through the filesystem rather than a captured flag.
-    fired := false
+    ^fired: false
     hook: fn(copied: String) -[FS]> {
         if copied == replaced && !fired {
             fired = true
@@ -214,7 +214,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
 }
 
 #Test("store ingest retry after object publish seals before metadata") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     first: store_test_ingest_fixture(verification, roots, "retry-crash", [String:String]{"out": "retry"}, [String]{})
     object: first.entry.out
@@ -231,7 +231,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
 }
 
 #Test("store ingest rejects path law reserved name") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     source: files.join(roots.root, "src-bad")
     files.create_dir_all(source) ?? panic("fixture dir")
@@ -247,7 +247,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
 }
 
 #Test("store ingest rejects output names that escape staging") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     aliases: [String]{"../escaped-output", "..\\escaped-output", ".", "out/", "out//", "out/.", "out/./", "out\\", "out\\."}
     loop alias in aliases {
         roots: store_test_temp_roots()
@@ -255,7 +255,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
         files.create_dir_all(source) ?? panic("fixture dir")
         files.write(files.join(source, "payload"), "bytes") ?? panic("fixture payload")
         escaped: files.join(roots.root, "escaped-output")
-        request := store_test_ingest_request("bad-output-name", "path:bad-output-name", source, [String]{}, "")
+        ^request: store_test_ingest_request("bad-output-name", "path:bad-output-name", source, [String]{}, "")
         request.outputs[alias] = source
         if store_ingest_tree(verification, roots, request) == {
             .Ok(_) -> { panic("output alias `{alias}` must be refused") }
@@ -271,11 +271,11 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
 }
 
 #Test("store locked nix cas replay is cold and warm stable") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     source_roots: store_test_temp_roots()
     source_project: files.join(source_roots.root, "project")
     files.create_dir_all(source_project) ?? panic("project dir")
-    source := store_test_ingest_fixture(verification, source_roots, "locked-nix", [String:String]{"out": "portable"}, [String]{}).entry
+    ^source: store_test_ingest_fixture(verification, source_roots, "locked-nix", [String:String]{"out": "portable"}, [String]{}).entry
     assert(store_remove_closure_record(verification, source_roots, source.id) ?? panic("remove record"))
     revision: store_test_repeat("a", 40)
     signed_manifest: store_test_repeat("b", 64)
@@ -284,7 +284,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
     upstream_proof: "sha256-{store_test_repeat("e", 64)}"
     cache_key: store_test_repeat("f", 64)
     system: pkg_host_platform()
-    producer := ProducerRecord.decode(source.producer_record) ?? panic("producer")
+    ^producer: ProducerRecord.decode(source.producer_record) ?? panic("producer")
     producer.provider = "nix"
     producer.immutable_source = "nix-source-locked-nix"
     producer.source_digest = source.envelope.output_hash
@@ -331,7 +331,7 @@ store_test_assert_nothing_published: fn(verification: StoreVerification, roots: 
     second: store_record_locked_nix(verification, imported_roots, "locked-nix", "1", "locked-nix@nixpkgs", envelope, closure, imported.digests, "lock-digest") ?? panic("second replay")
     assert_eq(first.id, second.id)
     assert_eq(first.envelope.output_hash, second.envelope.output_hash)
-    count := 0
+    ^count: 0
     loop entry in store_list_checked(verification, imported_roots) ?? panic("listing") {
         if entry.reference == "locked-nix@nixpkgs" -> count += 1
     }
@@ -355,7 +355,7 @@ store_test_assert_unrepaired: fn(report: HangarDoctorReport) Never! {
 }
 
 #Test("store hangar doctor preserves malformed cas lock namespace") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     cas: files.join(roots.hangar_dir(), "cas")
     files.create_dir_all(cas) ?? panic("cas dir")

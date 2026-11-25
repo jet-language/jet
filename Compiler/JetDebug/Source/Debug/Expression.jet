@@ -73,9 +73,9 @@ DebugPlace: struct {
 // no place.
 debug_place: fn(text: String) -> DebugPlace DebugEvaluationError! {
     parsed: debug_parse_expression(text) ?? return Err(err)
-    node := parsed.root
-    index := ""
-    literal := -1
+    ^node: parsed.root
+    ^index: ""
+    ^literal: -1
     if ast_expr(parsed.tables, parsed.root) == .Index(base, item, _, _, _) {
         node = base
         // The place before the index is a local or a field path, which has
@@ -83,7 +83,7 @@ debug_place: fn(text: String) -> DebugPlace DebugEvaluationError! {
         index = "{text.rpartition("]").head.after("[").trim()}"
         literal = if ast_expr(parsed.tables, item) == .Int(position, _, _, _, _) -> position else -> -1
     }
-    fields := [String]{}
+    ^fields: [String]{}
     root: debug_place_fields(parsed.tables, node, fields) ?? return Err(debug_evaluation_error("`{text.trim()}` names no place; a place is a local or a field path under one, with an index at its end or none, as `order.lines[i + 1]`"))
     Ok(DebugPlace{root: root, fields: fields, index: index, literal: literal})
 }

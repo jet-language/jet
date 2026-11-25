@@ -4,7 +4,7 @@ label: fn(n: Int) -> String { return "#{n}" }
 
 run: fn() {
     // The common loop: each step appends to the text it already owns.
-    csv := ""
+    ^csv: ""
     loop i in 0..<5 -> csv = "{csv}{i * i},"
     print(csv)
 
@@ -15,18 +15,18 @@ run: fn() {
     print(csv)
 
     // Literal-only and call parts append the same way.
-    path := "root"
+    ^path: "root"
     path = "{path}/"
     path = "{path}{label(7)}/{label(8)}"
     print(path)
 
     // A rest that reads the text itself sees the text before this step.
-    echo := "ab"
+    ^echo: "ab"
     echo = "{echo}-{echo.count_bytes()}-{echo}"
     print(echo)
 
     // Many steps: linear growth, the same text a builder would join.
-    big := ""
+    ^big: ""
     loop i in 0..<20000 -> big = "{big}{i % 10}"
     print("bytes {big.count_bytes()} tail {big.slice(19990, 20000)}")
 }

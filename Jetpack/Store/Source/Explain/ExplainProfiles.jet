@@ -11,7 +11,7 @@ use {
 // The nearest `<project>/.jet/profiles` directory above the working
 // directory. A linked or unreadable profile state is a loss.
 store_explain_nearest_profile_generations: fn(reports: ^[ExplainReport]) -> String? Never! {
-    current := sys.current_dir() ?? return None
+    ^current: sys.current_dir() ?? return None
     loop {
         profiles: files.join(pkg_managed_dir(current), "profiles")
         if files.stat(profiles) == {
@@ -37,7 +37,7 @@ store_explain_nearest_profile_generations: fn(reports: ^[ExplainReport]) -> Stri
 
 store_explain_profile_provider_facts: fn(entry: StoreEntry, reports: ^[ExplainReport]) -> [ExplainProfile] Never! {
     generations_root: store_explain_nearest_profile_generations(reports) ?? return [ExplainProfile]{}
-    profiles := [ExplainProfile]{}
+    ^profiles: [ExplainProfile]{}
     profile_dirs: files.list_dir(generations_root) ?? {
         reports.push(ExplainReport.loss("profile provider facts are unavailable: could not read {generations_root}"))
         return profiles
@@ -161,9 +161,9 @@ store_explain_json_text: fn(object: [String:Dyn], field: String) -> String? Neve
 
 // Stable sort by (profile, generation).
 store_explain_sorted_profiles: fn(profiles: [ExplainProfile]) -> [ExplainProfile] Never! {
-    sorted := [ExplainProfile]{}
+    ^sorted: [ExplainProfile]{}
     loop profile in profiles {
-        at := sorted.len()
+        ^at: sorted.len()
         loop at > 0 && (profile.profile < sorted[at - 1].profile || (profile.profile == sorted[at - 1].profile && profile.generation < sorted[at - 1].generation)) {
             at -= 1
         }

@@ -25,7 +25,7 @@ jet_driver_build_check_nodes: fn(request: JetDriverCompileRequest, load: JetDriv
     if !checked.complete -> return None
     root: jet_driver_entry_root_path(request.authorized_sources)
     if root == "" -> return None
-    checks := [BuildGraphNode]{}
+    ^checks: [BuildGraphNode]{}
     loop checked_module in checked.modules {
         if checked_module.module_identity == effect_identity -> next
         unit_index: loop loaded in load.modules {
@@ -36,13 +36,13 @@ jet_driver_build_check_nodes: fn(request: JetDriverCompileRequest, load: JetDriv
         if unit_index < 0 || unit_index >= load.source_units.len() -> return None
         unit: load.source_units[unit_index]
         if jet_driver_unit_is_core(unit) -> next
-        subject := ""
-        digest := ""
+        ^subject: ""
+        ^digest: ""
         // A module a `Compiler` value made is checked under the authority and
         // consent the build froze when `build` returned: a change to either
         // is a new node identity, as a change to its bytes is. The node sorts
         // its inputs by name.
-        unit_inputs := [BuildGraphInputDigest]{}
+        ^unit_inputs: [BuildGraphInputDigest]{}
         if unit.source_origin == SemaSourceOrigin.Snapshot {
             digest = sha256_hex(jet_driver_source_unit_text(request, unit) ?? return None)
             subject = jet_driver_build_source_subject(request, root, unit) ?? return None
@@ -81,7 +81,7 @@ jet_driver_build_check_nodes: fn(request: JetDriverCompileRequest, load: JetDriv
 // The `check` node of the module `subject` names: its bytes' `digest`
 // beside its other `inputs`.
 jet_driver_build_check_node: fn(subject: ^^String, digest: ^^String, owned_inputs: ^^[BuildGraphInputDigest]) -> BuildGraphNode Never! {
-    inputs := owned_inputs.move()
+    ^inputs: owned_inputs.move()
     // copy: build_session_compiler_node stores `subject` as the node's subject, and the node's
     // input digest needs its own copy of the same text for `name`. Both live in one node.
     inputs.push({name: subject.copy(), digest: digest.move()})
@@ -107,7 +107,7 @@ jet_driver_build_source_subject: fn(request: JetDriverCompileRequest, root: Stri
 jet_driver_build_load_checks: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult) -> [BuildGraphNode]? Never! {
     root: jet_driver_entry_root_path(request.authorized_sources)
     if root == "" -> return None
-    checks := [BuildGraphNode]{}
+    ^checks: [BuildGraphNode]{}
     loop loaded in load.modules {
         if loaded.source_unit_index < 0 || loaded.source_unit_index >= load.source_units.len() {
             return None
@@ -126,10 +126,10 @@ jet_driver_build_load_checks: fn(request: JetDriverCompileRequest, load: JetDriv
 // build file never names, and the packages only it imports), sorted by
 // subject as jet_driver_build_check_nodes sorts them.
 jet_driver_build_bundle_checks: fn(owned_staged: ^^[BuildGraphNode], owned_loaded: ^^[BuildGraphNode]) -> [BuildGraphNode] Never! {
-    checks := owned_staged.move()
+    ^checks: owned_staged.move()
     // The staged subjects by name id, and whether a staged node has each.
-    subjects := name_table()
-    staged := [Bool]{false}
+    ^subjects: name_table()
+    ^staged: [Bool]{false}
     loop node in checks {
         id: name_index(name_intern(subjects, node.subject))
         if id == staged.len() -> staged.push(true) else -> staged[id] = true
@@ -148,14 +148,14 @@ jet_driver_build_bundle_checks: fn(owned_staged: ^^[BuildGraphNode], owned_loade
 // build outputs (the entry file's stem when it names none), each compile
 // node over every check node.
 jet_driver_build_output_nodes: fn(request: JetDriverCompileRequest, owned_checks: ^^[BuildGraphNode]) -> [BuildGraphNode] Never! {
-    checks := owned_checks.move()
-    outputs := [String]{}
+    ^checks: owned_checks.move()
+    ^outputs: [String]{}
     loop name in request.build_output_names -> build_session_append_unique(outputs, name)
     if outputs.len() == 0 {
         parts: request.authorized_sources.entry_path.split("/").to_list()
-        components := parts[parts.len() - 1].split(".").to_list()
+        ^components: parts[parts.len() - 1].split(".").to_list()
         if components.len() > 1 && !(components.len() == 2 && components[0] == "") {
-            _ := components.pop()
+            ^_: components.pop()
         }
         output: components.join(".")
         outputs.push(if output == "" -> { "program" } else -> { output.move() })
@@ -164,8 +164,8 @@ jet_driver_build_output_nodes: fn(request: JetDriverCompileRequest, owned_checks
     // copy: `checks` keeps every check node (it is the returned graph), so each compile node's
     // input digest needs its own key text.
     inputs: loop node in checks -> BuildGraphInputDigest{name: "check:{node.subject}", digest: node.key.copy()}
-    compiles := [BuildGraphNode]{}
-    links := [BuildGraphNode]{}
+    ^compiles: [BuildGraphNode]{}
+    ^links: [BuildGraphNode]{}
     loop output in outputs {
         compiled: build_session_compiler_node("compile", output, inputs)
         // copy: `compiled` keeps its key when it moves into `compiles`, and the link node's input
@@ -197,25 +197,25 @@ JetDriverOutputOptions: struct {
 jet_driver_build_nodes_under_options: fn(owned_nodes: ^^[BuildGraphNode], outputs: [JetDriverOutputOptions], otherwise: String) -> [BuildGraphNode] Never! {
     // Each output name's last row of `outputs`, by name id (-1 at id 0, the
     // empty name).
-    names := name_table_sized(outputs.len() * 2 + 2)
-    rows := [Int]{-1}
+    ^names: name_table_sized(outputs.len() * 2 + 2)
+    ^rows: [Int]{-1}
     loop (row, options) in outputs {
         id: name_index(name_intern(names, options.output))
         if id == rows.len() -> rows.push(row) else -> rows[id] = row
     }
-    nodes := [BuildGraphNode]{}
-    links := [BuildGraphNode]{}
+    ^nodes: [BuildGraphNode]{}
+    ^links: [BuildGraphNode]{}
     loop node in owned_nodes.move() {
         if node.kind == "link" -> next
         if node.kind != "compile" {
             nodes.push(node)
             next
         }
-        identity := otherwise
+        ^identity: otherwise
         if name_find(names, node.subject) == .Val(found) && rows[name_index(found)] >= 0 {
             identity = outputs[rows[name_index(found)]].identity
         }
-        inputs := node.input_digests
+        ^inputs: node.input_digests
         if identity != "" {
             inputs.push(BuildGraphInputDigest{name: "options:{identity}", digest: sha256_hex(identity)})
         }
@@ -248,7 +248,7 @@ JetDriverBuildSettingNodes: struct {
 
 jet_driver_build_nodes_under_settings: fn(owned_nodes: ^^[BuildGraphNode], request: JetDriverCompileRequest) -> JetDriverBuildSettingNodes Never! {
     nodes: owned_nodes.move()
-    settings := [JetDriverBuildPackageSettings]{}
+    ^settings: [JetDriverBuildPackageSettings]{}
     load: jet_driver_load_reach(request, false) ?? return {nodes: nodes.move(), settings: settings.move()}
     root: jet_driver_entry_root_path(request.authorized_sources)
     if !load.complete || jet_driver_has_errors(load.diagnostics) || root == "" {
@@ -259,23 +259,23 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: ^^[BuildGraphNode], reque
     // subject (-1 at id 0, the empty subject), for its check node: its
     // package's row of setting inputs, and where its host reads sit (its
     // package's row in `settings`, then its row of that package's sources).
-    package_writers := [[[JetDriverBuildSettingWriter]]]{}
-    package_sources := [[JetDriverBuildHostSource]]{}
-    package_inputs := [[BuildGraphInputDigest]]{}
-    subjects := name_table_sized(load.source_units.len() * 2 + 2)
-    owners := [Int]{-1}
-    host_packages := [Int]{-1}
-    host_sources := [Int]{-1}
+    ^package_writers: [[[JetDriverBuildSettingWriter]]]{}
+    ^package_sources: [[JetDriverBuildHostSource]]{}
+    ^package_inputs: [[BuildGraphInputDigest]]{}
+    ^subjects: name_table_sized(load.source_units.len() * 2 + 2)
+    ^owners: [Int]{-1}
+    ^host_packages: [Int]{-1}
+    ^host_sources: [Int]{-1}
     // The modules each source unit loaded as.
-    unit_modules := [[Int]]{}
+    ^unit_modules: [[Int]]{}
     loop _ in load.source_units -> unit_modules.push([Int]{})
     loop (index, module_row) in load.modules {
         at: module_row.source_unit_index
         if at >= 0 && at < unit_modules.len() -> unit_modules[at].push(index)
     }
     loop (package_index, package) in load.packages {
-        inputs := [BuildGraphInputDigest]{}
-        setting_writers := [[JetDriverBuildSettingWriter]]{}
+        ^inputs: [BuildGraphInputDigest]{}
+        ^setting_writers: [[JetDriverBuildSettingWriter]]{}
         loop setting in package.settings {
             writers: jet_driver_setting_writers(load, package, setting, request)
             at: jet_driver_setting_selected(writers)
@@ -285,7 +285,7 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: ^^[BuildGraphNode], reque
                 name: jet_driver_setting_name(load, package, setting)
                 inputs.push(BuildGraphInputDigest{name: "setting:{name}={value}", digest: sha256_hex("{name}={value}")})
             }
-            rows := [JetDriverBuildSettingWriter]{}
+            ^rows: [JetDriverBuildSettingWriter]{}
             loop (index, writer) in writers.move() {
                 state: if index == at -> "effective" else -> "shadowed"
                 rows.push(JetDriverBuildSettingWriter{layer: writer.contribution.layer.name(), source: writer.contribution.source.move(), value: writer.text.move(), state: state})
@@ -294,13 +294,13 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: ^^[BuildGraphNode], reque
         }
         package_writers.push(setting_writers.move())
         owner: if inputs.len() == 0 -> -1 else -> package_inputs.len()
-        sources := [JetDriverBuildHostSource]{}
+        ^sources: [JetDriverBuildHostSource]{}
         loop (unit_index, unit) in load.source_units {
             if unit.package_identity != package.identity || unit.source_origin != SemaSourceOrigin.Snapshot || jet_driver_unit_is_core(unit) {
                 next
             }
             subject: jet_driver_build_source_subject(request, root, unit) ?? next
-            reads := [JetDriverBuildHostRead]{}
+            ^reads: [JetDriverBuildHostRead]{}
             source: jet_driver_source_unit_text(request, unit) ?? ""
             if source.contains("#build.host.") {
                 text: diagnostic_source_text(source)
@@ -337,9 +337,9 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: ^^[BuildGraphNode], reque
     package_writers.reverse()
     package_sources.reverse()
     loop package in load.packages.move() {
-        writers := package_writers.pop() ?? break
+        ^writers: package_writers.pop() ?? break
         writers.reverse()
-        rows := [JetDriverBuildSetting]{}
+        ^rows: [JetDriverBuildSetting]{}
         loop setting in package.settings.move() {
             rows.push(JetDriverBuildSetting{name: setting.name.move(), writers: writers.pop() ?? break})
         }
@@ -349,19 +349,19 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: ^^[BuildGraphNode], reque
     // The row in `keyed` of each rekeyed node, by a pass-local id of the
     // input name its dependents give it (`check:<subject>`,
     // `compile:<output>`; -1 at id 0, the empty name).
-    names := name_table_sized(nodes.len() * 2 + 2)
-    rekeyed_rows := [Int]{-1}
-    keyed := [BuildGraphNode]{}
+    ^names: name_table_sized(nodes.len() * 2 + 2)
+    ^rekeyed_rows: [Int]{-1}
+    ^keyed: [BuildGraphNode]{}
     loop node in nodes.move() {
-        owner := -1
-        host := -1
-        host_source := -1
+        ^owner: -1
+        ^host: -1
+        ^host_source: -1
         if node.kind == "check" && name_find(subjects, node.subject) == .Val(found) {
             owner = owners[name_index(found)]
             host = host_packages[name_index(found)]
             host_source = host_sources[name_index(found)]
         }
-        changed := owner >= 0 || host >= 0
+        ^changed: owner >= 0 || host >= 0
         loop input in node.input_digests {
             if name_find(names, input.name) != None -> changed = true
         }
@@ -369,7 +369,7 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: ^^[BuildGraphNode], reque
             keyed.push(node)
             next
         }
-        digests := node.input_digests.move()
+        ^digests: node.input_digests.move()
         if owner >= 0 {
             loop input in package_inputs[owner] -> digests.push(input.copy())
         }
@@ -377,11 +377,13 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: ^^[BuildGraphNode], reque
         if host >= 0 {
             loop read in settings[host].host_sources[host_source].reads {
                 name: "host:{read.fact}={read.value}"
-                known := false
+                ^known: false
                 loop input in digests {
                     if input.name == name -> known = true
                 }
-                if !known -> digests.push(BuildGraphInputDigest{name: name, digest: sha256_hex("{read.fact}={read.value}")})
+                if !known {
+                    digests.push(BuildGraphInputDigest{name: name, digest: sha256_hex("{read.fact}={read.value}")})
+                }
             }
         }
         loop index in 0..<digests.len() {
@@ -401,7 +403,7 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: ^^[BuildGraphNode], reque
 
 jet_driver_build_selected_output_names: fn(plan: BuildSessionPlan) -> [String] Never! {
     permit: plan.storage.guard_read()
-    outputs := [String]{}
+    ^outputs: [String]{}
     loop (index, target) in permit.value.targets {
         if plan.default >= 0 && index != plan.default -> next
         loop output in target.outputs -> build_session_append_unique(outputs, output)
@@ -411,7 +413,7 @@ jet_driver_build_selected_output_names: fn(plan: BuildSessionPlan) -> [String] N
 }
 
 jet_driver_build_install_nodes: fn(plan: BuildSessionPlan, nodes: ^^[BuildGraphNode]) Never! {
-    permit := plan.storage.guard_edit()
+    ^permit: plan.storage.guard_edit()
     permit.value.nodes = nodes.move()
 }
 
@@ -478,14 +480,14 @@ jet_driver_build_rule_report: fn(error: BuildSessionDiagnostic) -> Diagnostic Ne
 // it would have generated. Otherwise `ran` is also the answer's build
 // reports (`build_reports_from`).
 jet_driver_build_query_failed: fn(request: ^^JetDriverCompileRequest, errors: ^^[Diagnostic], ran: ^^[Diagnostic], staged: Bool) -> JetDriverBuildQueryResponse Never! {
-    reports := errors.move()
+    ^reports: errors.move()
     from: if staged -> -1 else -> reports.len()
-    at := if staged -> 0 else -> reports.len()
+    ^at: if staged -> 0 else -> reports.len()
     loop error in ran.move() {
         reports.insert(at, error)
         at += 1
     }
-    failed := jet_driver_build_query_empty(request, reports, false, None)
+    ^failed: jet_driver_build_query_empty(request, reports, false, None)
     failed.query.build_reports_from = from
     failed
 }
@@ -503,12 +505,12 @@ jet_driver_build_query_stopped: fn(request: ^^JetDriverCompileRequest, errors: ^
     if problem == None && staged && (refused || jet_driver_build_cut_short(ran)) {
         return jet_driver_build_query_failed(request, errors, ran, true)
     }
-    reports := errors.move()
+    ^reports: errors.move()
     from: if problem == None && !staged -> reports.len() else -> -1
     if problem != None || !staged {
         loop error in ran.move() -> reports.push(error)
     }
-    stopped := jet_driver_build_query_empty(request, reports, false, problem)
+    ^stopped: jet_driver_build_query_empty(request, reports, false, problem)
     stopped.query.build_reports_from = from
     stopped
 }
@@ -549,7 +551,7 @@ jet_driver_build_load_aside: fn(threads: CompilerThreads, load: ^^JetDriverLoadR
 // findings and failures beside its check (JetCLI InspectBuild.jet
 // jet_cli_generated_request).
 jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope: ^JetDriverBuildQueryScope, generated_only: Bool{false}) -> JetDriverBuildQueryResponse {
-    request := owned_request.move()
+    ^request: owned_request.move()
     // The plan reads the entry package's modules (its `build: fn`) and
     // manifest facts, so Core loads as the program reaches it, with no name
     // ledger (jet_driver_source_query loads every Core declaration for one).
@@ -575,16 +577,16 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
         return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, Val("loaded build query has no exact entry module"))
     }
     package: sources.modules[sources.entry_module_index].package_identity
-    selected := String?{None}
-    selected_site := ""
-    span := Span{start: 0, end: 0}
+    ^selected: String?{None}
+    ^selected_site: ""
+    ^span: Span{start: 0, end: 0}
     loop loaded_module in sources.modules {
         if loaded_module.package_identity != package -> next
         loop item in loaded_module.program.items {
             if item == .Func(function) && jet_driver_item_is_build_entry(item) {
                 site: jet_driver_build_entry_site(loaded_module.path, loaded_module.source, function.span.start)
                 if selected != None {
-                    errors := sources.diagnostics.move()
+                    ^errors: sources.diagnostics.move()
                     errors.push(jet_driver_diagnostic_at_source("E3520", Val(function.name_span), loaded_module.path, 0, "Two build entries for one package: {selected_site} and {site}.", "One package has one build authority, so policy and provenance have one auditable home.", "Keep one `build: fn` and remove every other entry."))
                     return jet_driver_build_query_empty(request, errors, false, None)
                 }
@@ -605,7 +607,7 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
         // A program that marks a function `#Perf.Profiled` is checked with
         // the modules Core's handler generated for it
         // (jet_driver_build_profiled).
-        profiled := JetDriverBuildProfiled{generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: None}
+        ^profiled: JetDriverBuildProfiled{generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: None}
         if profiled_marked {
             profiled = jet_driver_build_profiled(request, scope, sources, package)
             if profiled.problem != None || jet_driver_has_errors(profiled.diagnostics) {
@@ -618,18 +620,18 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
         loop generated_row in profiled.generated.move() {
             request.generated_modules.push(generated_row)
         }
-        demand_core := request.doc_core_on_demand
+        ^demand_core: request.doc_core_on_demand
         request.doc_core_on_demand = true
         checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, true)
         request.doc_core_on_demand = demand_core
-        generated := [JetDriverGeneratedModule]{}
+        ^generated: [JetDriverGeneratedModule]{}
         loop request.generated_modules.len() > original_generated_count {
             row: request.generated_modules.pop() ?? break
             generated.push(row)
         }
         generated.reverse()
         complete: checked.complete && checked.internal_problem == None && !jet_driver_has_errors(checked.diagnostics)
-        result := jet_driver_build_query_empty(request, checked.diagnostics.move(), complete, checked.internal_problem.move())
+        ^result: jet_driver_build_query_empty(request, checked.diagnostics.move(), complete, checked.internal_problem.move())
         result.query.generated = generated.move()
         if !complete {
             result.query.generated_source_files = checked.generated_source_files.move()
@@ -659,8 +661,8 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     // compiles still check every member.
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.stage")
     request.build_entry_reach = true
-    selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, true, None)
-    errors := [Diagnostic]{}
+    ^selection: jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, true, None)
+    ^errors: [Diagnostic]{}
     staged_failed: selection.compile.internal_problem == None && jet_driver_has_errors(selection.compile.diagnostics)
     if staged_failed {
         errors = selection.compile.diagnostics.move()
@@ -668,10 +670,10 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     }
     request.build_entry_reach = false
     jet_driver_trace_step_end(request.trace_sink, "build.plan.stage", if staged_failed -> 2 else -> 1)
-    compiled := selection.compile.move()
+    ^compiled: selection.compile.move()
     staged_checks: jet_driver_build_check_rows(compiled.build_nodes.move())
     // The build's own reports (jet_driver_build_query_stopped).
-    ran := [Diagnostic]{}
+    ^ran: [Diagnostic]{}
     if staged_failed {
         // The trapped compile's reports restate the staged ones.
         if compiled.internal_problem != None || compiled.build_program == None || selection.inputs == None {
@@ -686,19 +688,19 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     program: compiled.build_program.move() ?? return jet_driver_build_query_empty(request, errors, false, Val("checked build invocation lost its ProgramInfo"))
     inputs: selection.inputs.move() ?? return jet_driver_build_query_empty(request, errors, false, Val("checked build invocation lost its checked functions"))
     session_id: jet_driver_build_next_session_id(scope) ?? return jet_driver_build_query_empty(request, errors, false, Val("build invocation identity space exhausted"))
-    session := build_session_new(session_id, jet_driver_build_session_package(package, path), request.host_facts.compiler_identity ?? "", scope.policy)
+    ^session: build_session_new(session_id, jet_driver_build_session_package(package, path), request.host_facts.compiler_identity ?? "", scope.policy)
     build_session_set_args(session, request.build_args)
     build_session_set_jet_source(session, request.host_facts.compiler_source ?? "")
     build_session_set_dependencies(session, sources.dependency_roots)
     build_session_set_identity(session, package)
     // A view no body reads (jet_eval_compiler_services_program_unread) comes
     // with no table: its TypeIds' rows are the empty table's.
-    types := compiled.build_types.move() ?? jet_eval_compiler_services_type_table_empty()
+    ^types: compiled.build_types.move() ?? jet_eval_compiler_services_type_table_empty()
     build_session_set_types(session, types)
     jet_driver_build_set_source(session, sources.modules, path)
     config: jet_driver_build_run_config(request, session, sources.host_held, path)
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.run")
-    run := jet_driver_invocation_run(inputs, [TComptimeValue]{jet_driver_build_context_value(session_id, program)}, config, span)
+    ^run: jet_driver_invocation_run(inputs, [TComptimeValue]{jet_driver_build_context_value(session_id, program)}, config, span)
     jet_driver_trace_step_end(request.trace_sink, "build.plan.run", 1)
     evaluated: run.result.move() ?? {
         build_session_abort(session)
@@ -742,7 +744,7 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     // final checked bundle below and every target compile of the plan
     // (the response's `generated`) load them beside the package's sources.
     selected_generated: build_plan_selected_generated(plan)
-    generated := [JetDriverGeneratedModule]{}
+    ^generated: [JetDriverGeneratedModule]{}
     loop generated_row in selected_generated {
         row: jet_driver_build_generated_row(generated_row, package, sources.modules) ?? {
             function: generated_row.rewrites ?? ""
@@ -751,14 +753,14 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
         }
         generated.push(row)
     }
-    tidy := [Diagnostic]{}
+    ^tidy: [Diagnostic]{}
     jet_driver_build_findings(request.authorized_sources, build_plan_findings(plan), ran, tidy)
     if jet_driver_has_errors(ran) {
         checked: jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules)
         return jet_driver_build_query_failed(request, errors, ran, staged_failed || checked)
     }
     if generated_only {
-        only := jet_driver_build_query_empty(request, [Diagnostic]{}, true, None)
+        ^only: jet_driver_build_query_empty(request, [Diagnostic]{}, true, None)
         only.query.generated = generated.move()
         only.query.tidy = tidy.move()
         return only
@@ -811,7 +813,7 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     }
     // As above: the plan reads the user modules' diagnostics and build nodes
     // alone, so Core bodies are checked on demand.
-    demand_core := request.doc_core_on_demand
+    ^demand_core: request.doc_core_on_demand
     request.doc_core_on_demand = true
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.check")
     checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, true)
@@ -825,7 +827,7 @@ jet_driver_query_build_plan: fn(owned_request: ^^JetDriverCompileRequest, scope:
     loop error in checked.diagnostics -> errors.push(error)
     if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) {
         jet_driver_build_generated_notes(errors, package, selected_generated)
-        failed := jet_driver_build_query_empty(request, errors, false, checked.internal_problem.move())
+        ^failed: jet_driver_build_query_empty(request, errors, false, checked.internal_problem.move())
         failed.query.generated_source_files = checked.generated_source_files.move()
         return failed
     }
@@ -847,7 +849,7 @@ jet_driver_build_query_planned: fn(request: ^^JetDriverCompileRequest, plan: ^^B
 // when it took them.
 jet_driver_build_check_rows: fn(owned: ^^[BuildGraphNode]?) -> [BuildGraphNode]? Never! {
     nodes: owned.move() ?? return None
-    checks := [BuildGraphNode]{}
+    ^checks: [BuildGraphNode]{}
     loop node in nodes {
         if node.kind == "check" -> checks.push(node)
     }
@@ -864,7 +866,7 @@ jet_driver_build_findings: fn(snapshot: JetDriverAuthorizedSourceSnapshot, findi
     loop finding in findings {
         if finding.tier == "Report" -> next
         place: Span{start: finding.at_start, end: finding.at_end}
-        report := if diagnostic_registry_row(finding.code) != None -> diagnostic_from_registry(finding.code, Val(place), finding.what, finding.why, finding.fix) else -> Diagnostic{severity: DIAGNOSTIC_ERROR, code: finding.code.copy(), span: Val(place), what: diagnostic_sentence_case_line(finding.what), why: diagnostic_sentence_case_line(finding.why), fix: diagnostic_sentence_case_line(finding.fix)}
+        ^report: if diagnostic_registry_row(finding.code) != None -> diagnostic_from_registry(finding.code, Val(place), finding.what, finding.why, finding.fix) else -> Diagnostic{severity: DIAGNOSTIC_ERROR, code: finding.code.copy(), span: Val(place), what: diagnostic_sentence_case_line(finding.what), why: diagnostic_sentence_case_line(finding.why), fix: diagnostic_sentence_case_line(finding.fix)}
         if jet_driver_build_finding_rewrite(snapshot, finding) == .Val(edit) {
             report.edit = Val(edit)
             report.applicability = Val(DiagnosticFixApplicability.Suggested)
@@ -887,7 +889,7 @@ jet_driver_build_finding_rewrite: fn(snapshot: JetDriverAuthorizedSourceSnapshot
         loop file in root.files {
             if file.path != physical -> next
             bytes: file.source.bytes()
-            end := finding.at_start
+            ^end: finding.at_start
             loop end < finding.at_end && end < bytes.len() {
                 byte: bytes[end]
                 named: (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95 || byte == 46
@@ -910,7 +912,7 @@ jet_driver_build_finding_rewrite: fn(snapshot: JetDriverAuthorizedSourceSnapshot
 jet_driver_build_generated_notes: fn(diagnostics: ^[Diagnostic], package: String, rows: [BuildSessionGeneratedModule]) Never! {
     loop index in 0..<diagnostics.len() {
         if diagnostics[index].detail != None -> next
-        note := String?{None}
+        ^note: String?{None}
         loop row in rows {
             if diagnostics[index].source_path != Val(jet_driver_generated_module_path(row.package ?? package, row.path)) {
                 next
@@ -943,9 +945,9 @@ jet_driver_build_promise_reports: fn(request: ^JetDriverCompileRequest, errors: 
         return false
     }
     if generated_only || build_session_promised(session).len() == 0 -> return false
-    demand_core := request.doc_core_on_demand
+    ^demand_core: request.doc_core_on_demand
     request.doc_core_on_demand = true
-    checked := jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, false)
+    ^checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, false)
     request.doc_core_on_demand = demand_core
     if checked.internal_problem != None || !jet_driver_has_errors(checked.diagnostics) {
         return false
@@ -988,9 +990,7 @@ jet_driver_build_set_source: fn(session: BuildSession, modules: [JetDriverSource
     loop loaded in modules {
         if loaded.physical_path == build_path {
             build_session_set_source(session, loaded.path, loaded.source)
-        } else {
-            build_session_add_source(session, loaded.path, loaded.source)
-        }
+        } else { build_session_add_source(session, loaded.path, loaded.source) }
     }
 }
 
@@ -1057,10 +1057,10 @@ jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: St
                 bytes: module_row.source.bytes()
                 open: jet_driver_function_body_open(bytes, declared.name_span.end, declared.span.end) ?? return None
                 head: String.from_bytes(bytes[declared.span.start..<open]) ?? return None
-                lines := row.source.split("\n").to_list()
+                ^lines: row.source.split("\n").to_list()
                 loop lines.len() > 0 && lines[lines.len() - 1].trim() == "" -> _: lines.pop()
                 paste: "#{{{function}.body}}"
-                text := ""
+                ^text: ""
                 loop import in module_row.program.imports {
                     if import.is_pub || import.is_package_pub || import.kind == .File(_, _) -> next
                     start: (import.comptime_span ?? import.span).start
@@ -1091,21 +1091,21 @@ jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: St
 // `end - 1`: without the blank lines around them, and dedented by their
 // common indentation.
 jet_driver_function_body_lines: fn(bytes: [U8], open: Int, end: Int) -> [String] Never! {
-    starts := [Int]{}
-    stops := [Int]{}
-    at := open + 1
+    ^starts: [Int]{}
+    ^stops: [Int]{}
+    ^at: open + 1
     loop at <= end - 1 {
-        stop := at
+        ^stop: at
         loop stop < end - 1 && bytes[stop] != 10 -> stop += 1
         starts.push(at)
         stops.push(stop)
         at = stop + 1
     }
-    indent := -1
-    first := -1
-    last := -1
+    ^indent: -1
+    ^first: -1
+    ^last: -1
     loop index in 0..<starts.len() {
-        width := 0
+        ^width: 0
         loop starts[index] + width < stops[index] && (bytes[starts[index] + width] == 32 || bytes[starts[index] + width] == 9) {
             width += 1
         }
@@ -1114,7 +1114,7 @@ jet_driver_function_body_lines: fn(bytes: [U8], open: Int, end: Int) -> [String]
         if first < 0 -> first = index
         last = index
     }
-    lines := [String]{}
+    ^lines: [String]{}
     if first < 0 -> return lines
     loop index in first..<(last + 1) {
         if starts[index] + indent >= stops[index] {
@@ -1132,9 +1132,9 @@ jet_driver_function_body_lines: fn(bytes: [U8], open: Int, end: Int) -> [String]
 // `end - 1`. None for a declaration that ends in no braced body.
 jet_driver_function_body_open: fn(bytes: [U8], after: Int, end: Int) -> Int? Never! {
     if end <= after || end > bytes.len() || bytes[end - 1] != 125 -> return None
-    depth := 0
-    quoted := false
-    at := after
+    ^depth: 0
+    ^quoted: false
+    ^at: after
     loop at < end - 1 {
         byte: bytes[at]
         if quoted {
@@ -1159,7 +1159,7 @@ jet_driver_function_body_open: fn(bytes: [U8], after: Int, end: Int) -> Int? Nev
 // file outside any manifest (a source-root package), the file's stem.
 jet_driver_build_session_package: fn(package: String, entry_path: String) -> String Never! {
     if !package.starts_with("source-root:") -> return package.copy()
-    parts := entry_path.split("/").to_list()
+    ^parts: entry_path.split("/").to_list()
     file_name: parts.pop() ?? entry_path
     file_name.removesuffix(".jet")
 }
@@ -1252,9 +1252,9 @@ jet_driver_build_profiled_value: fn(session: ^BuildSession, operation: fn(^Build
 // still builds as one with no `build: fn`, with the modules the handler
 // generated loaded beside its sources.
 jet_driver_build_profiled: fn(request: ^JetDriverCompileRequest, scope: ^JetDriverBuildQueryScope, sources: JetDriverSourceQueryResult, package: String) -> JetDriverBuildProfiled {
-    stopped := JetDriverBuildProfiled{generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: None}
-    root_index := -1
-    file_index := -1
+    ^stopped: JetDriverBuildProfiled{generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: None}
+    ^root_index: -1
+    ^file_index: -1
     loop (index, root) in request.authorized_sources.roots {
         loop (at, file) in root.files {
             if file.path == request.authorized_sources.entry_path {
@@ -1273,7 +1273,7 @@ jet_driver_build_profiled: fn(request: ^JetDriverCompileRequest, scope: ^JetDriv
     // spelled `compiler`: a compile snapshots the program view a `Compiler`
     // value carries only when a source outside Core spells `program` or
     // `compiler` (JetDriverLoadResult.spells_program).
-    entry_file := request.authorized_sources.roots[root_index].files.remove(file_index, .Slot) ?? {
+    ^entry_file: request.authorized_sources.roots[root_index].files.remove(file_index, .Slot) ?? {
         stopped.problem = Val("the `#Perf.Profiled` build lost its entry file")
         return stopped
     }
@@ -1295,10 +1295,10 @@ jet_driver_build_profiled: fn(request: ^JetDriverCompileRequest, scope: ^JetDriv
     inputs: selection.inputs.move() ?? return {generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: Val("the checked `#Perf.Profiled` invocation lost its checked functions")}
     session_id: jet_driver_build_next_session_id(scope) ?? return {generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: Val("build invocation identity space exhausted")}
     session_package: jet_driver_build_session_package(package, request.authorized_sources.entry_path)
-    session := build_session_new(session_id, session_package, request.host_facts.compiler_identity ?? "", scope.policy)
+    ^session: build_session_new(session_id, session_package, request.host_facts.compiler_identity ?? "", scope.policy)
     build_session_set_dependencies(session, sources.dependency_roots)
     build_session_set_identity(session, package)
-    types := compiled.build_types.move() ?? jet_eval_compiler_services_type_table_empty()
+    ^types: compiled.build_types.move() ?? jet_eval_compiler_services_type_table_empty()
     build_session_set_types(session, types)
     entry: jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), request.authorized_sources.entry_path)
     sources_value: BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: entry}}}
@@ -1306,7 +1306,7 @@ jet_driver_build_profiled: fn(request: ^JetDriverCompileRequest, scope: ^JetDriv
     handle: jet_driver_build_profiled_value(session, build_session_compiler, [BuildSessionValue]{target}) ?? return {generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: Val("the `#Perf.Profiled` build refused its `Compiler` value")}
     // Each dependency once: its modules are adjacent rows (`last`), and the
     // session keeps a name it already allows once.
-    last := -1
+    ^last: -1
     loop (at, loaded) in sources.modules {
         if loaded.package_identity == package || (last >= 0 && sources.modules[last].package_identity == loaded.package_identity) {
             next
@@ -1365,7 +1365,7 @@ jet_driver_build_profiled_handle: fn(handle: BuildSessionValue) -> BuildSessionV
 // `embed_bytes` and `net.fetch` read beside it, and the file reads are
 // recorded in the request's comptime input log, as in any comptime code.
 priv jet_driver_build_run_config: fn(request: JetDriverCompileRequest, session: BuildSession, host_held: Bool, path: String) -> JetEvalConfig {
-    config := jet_eval_runtime_config(request.eval_config)
+    ^config: jet_eval_runtime_config(request.eval_config)
     config.host_held = host_held
     // copy: the evaluator's build adapter gets a session and the request's input handles of its
     // own. The build keeps `session` to abort or finish it, and `request` is returned in every
@@ -1380,7 +1380,7 @@ priv jet_driver_build_run_config: fn(request: JetDriverCompileRequest, session: 
 jet_driver_load_has_build: fn(load: JetDriverLoadResult) -> Bool Never! {
     if !load.complete -> return false
     // The entry module's row of `load.modules`.
-    entry := -1
+    ^entry: -1
     loop (at, loaded_module) in load.modules {
         if loaded_module.module_identity == load.entry_module_identity -> entry = at
     }
@@ -1405,7 +1405,7 @@ jet_driver_preloaded_put: fn(request: ^JetDriverCompileRequest, load: ^^JetDrive
 
 jet_driver_preloaded_take: fn(preloaded: ^[JetDriverPreloaded], use_driven: Bool) -> JetDriverLoadResult? Never! {
     if preloaded.len() == 0 || preloaded[0].use_driven != use_driven -> return None
-    entry := preloaded.pop() ?? return None
+    ^entry: preloaded.pop() ?? return None
     Val(entry.load.move())
 }
 
@@ -1418,7 +1418,7 @@ jet_driver_entry_build_probe: fn(request: ^JetDriverCompileRequest) -> JetDriver
     if !may_build && !may_profiled -> return JetDriverBuildProbe{has_build: false, profiled: false}
     use_driven: !request.every_core_body && request.core_tests == ""
     if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
-    load := jet_driver_load_reach(request, use_driven)
+    ^load: jet_driver_load_reach(request, use_driven)
     if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
     has_build: may_build && jet_driver_load_has_build(load)
     profiled: may_profiled && load.complete && jet_driver_load_marks_profiled(load)
@@ -1478,7 +1478,9 @@ jet_driver_entry_package_may_have_build: fn(request: JetDriverCompileRequest) ->
 jet_driver_sources_may_generate: fn(request: JetDriverCompileRequest) -> Bool Never! {
     loop root in request.authorized_sources.roots {
         loop file in root.files {
-            if file.source.contains(".generate(") || file.source.contains(".compiler(") -> return true
+            if file.source.contains(".generate(") || file.source.contains(".compiler(") {
+                return true
+            }
         }
     }
     false
@@ -1499,7 +1501,7 @@ jet_driver_item_is_build_entry: fn(item: Item) -> Bool Never! {
 
 // `path:line` of the byte offset `at` in `source`.
 jet_driver_build_entry_site: fn(path: String, source: String, at: Int) -> String Never! {
-    line := 1
+    ^line: 1
     loop (index, byte) in source.bytes() {
         if index >= at -> break
         if byte == 10 -> line += 1

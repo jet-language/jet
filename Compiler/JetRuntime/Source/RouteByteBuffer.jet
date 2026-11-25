@@ -25,7 +25,7 @@ byte_buffer_set_position: fn(buffer: I64, position: I64) {
 byte_buffer_of: fn(data: I64, length: I64, capacity: I64) -> I64 {
     sequence: data_sequence_new(if capacity < length -> length else -> capacity, RT_HOST_U8_STRIDE)
     target: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         host_u8_put(target, at, host_u8_get(data, at))
         at += I64{1}
@@ -63,7 +63,7 @@ byte_buffer_reserve: fn(buffer: I64, extra: I64) -> I64 {
         return I64{0}
     }
     needed: length + extra
-    grown := if (capacity < I64{8}) -> I64{8} else -> capacity
+    ^grown: if (capacity < I64{8}) -> I64{8} else -> capacity
     loop grown < needed -> grown = if (grown > limit /% I64{2}) -> limit else -> grown * I64{2}
     data: jet_rt_alloc(grown * RT_HOST_U8_STRIDE, I64{8})
     coll_copy(old, data, length * RT_HOST_U8_STRIDE)
@@ -85,7 +85,7 @@ byte_buffer_put_word: fn(buffer: I64, bits: I64, width: I64, little: Bool) {
     if (target == I64{0}) {
         return
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < width {
         shift: if little -> at * I64{8} else -> (width - I64{1} - at) * I64{8}
         host_u8_put(target, at, (bits >> shift) & I64{255})
@@ -102,7 +102,7 @@ byte_buffer_put_bytes: fn(buffer: I64, data: I64, length: I64) {
     if (target == I64{0}) {
         return
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         host_u8_put(target, at, host_u8_get(data, at))
         at += I64{1}
@@ -157,7 +157,7 @@ byte_buffer_list: fn(data: I64, length: I64, output: I64) -> I64 {
         return I64{0}
     }
     bytes: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         host_u8_put(bytes, at, host_u8_get(data, at))
         at += I64{1}
@@ -197,8 +197,8 @@ byte_buffer_title: fn(text: I64) -> I64 {
     data: rt_text_data(text)
     length: rt_text_len(text)
     result: rt_text_builder_with_capacity(length)
-    start := true
-    at := I64{0}
+    ^start: true
+    ^at: I64{0}
     loop at < length {
         step: rt_text_width(wrapping(data + at))
         cp: rt_text_decode(wrapping(data + at))
@@ -254,7 +254,7 @@ byte_buffer_order: fn(left: I64, right: I64) -> I64 {
     common: if left_len < right_len -> left_len else -> right_len
     left_data: byte_buffer_data(left)
     right_data: byte_buffer_data(right)
-    at := I64{0}
+    ^at: I64{0}
     loop at < common {
         a: host_u8_get(left_data, at)
         z: host_u8_get(right_data, at)
@@ -320,7 +320,7 @@ byte_buffer_assign: fn(target: I64, source: I64) {
 #Export(c) jet_byte_buffer_is_ascii: fn(buffer: I64) -> Bool {
     data: byte_buffer_data(buffer)
     length: byte_buffer_len(buffer)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (host_u8_get(data, at) >= I64{128}) { return false }
         at += I64{1}
@@ -443,7 +443,7 @@ byte_buffer_assign: fn(target: I64, source: I64) {
     data: rt_text_data(text)
     length: rt_text_len(text)
     width: rt_text_len(separator)
-    count := I64{0}
+    ^count: I64{0}
     if (width == I64{0}) {
         count = jet_char_len(text) + I64{2}
         words: byte_buffer_text_words(count, output)
@@ -452,8 +452,8 @@ byte_buffer_assign: fn(target: I64, source: I64) {
             return I64{0}
         }
         dyn_store(words, rt_text_copy(I64{1}, I64{0}))
-        index := I64{1}
-        at := I64{0}
+        ^index: I64{1}
+        ^at: I64{0}
         loop at < length {
             step: rt_text_width(wrapping(data + at))
             dyn_store(wrapping(words + index * I64{8}), rt_text_slice(text, at, at + step))
@@ -465,7 +465,7 @@ byte_buffer_assign: fn(target: I64, source: I64) {
         return count
     }
     count = I64{1}
-    at := I64{0}
+    ^at: I64{0}
     loop at <= length {
         found: rt_text_find(text, separator, at, false)
         if (found < I64{0}) { break }
@@ -477,7 +477,7 @@ byte_buffer_assign: fn(target: I64, source: I64) {
         jet_rt_string_drop(text)
         return I64{0}
     }
-    index := I64{0}
+    ^index: I64{0}
     at = I64{0}
     loop index + (I64{1}) < count {
         found: rt_text_find(text, separator, at, false)
@@ -494,7 +494,7 @@ byte_buffer_assign: fn(target: I64, source: I64) {
 #Export(c) jet_byte_buffer_join: fn(buffer: I64, parts: I64, count: I64) -> I64 {
     separator: byte_buffer_text(buffer)
     result: jet_rt_string_builder_new()
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         if (at != I64{0}) {
             rt_text_append(result, rt_text_data(separator), rt_text_len(separator))
@@ -518,11 +518,11 @@ byte_buffer_assign: fn(target: I64, source: I64) {
     data: byte_buffer_data(buffer)
     length: byte_buffer_len(buffer)
     needle: byte_buffer_data(separator)
-    found := I64{-1}
-    at := I64{0}
+    ^found: I64{-1}
+    ^at: I64{0}
     loop found < (I64{0}) && at + width <= length {
-        matched := true
-        offset := I64{0}
+        ^matched: true
+        ^offset: I64{0}
         loop matched && offset < width {
             if (host_u8_get(data, at + offset) != host_u8_get(needle, offset)) { matched = false }
             offset += I64{1}
@@ -575,15 +575,15 @@ byte_buffer_assign: fn(target: I64, source: I64) {
     }
     first: rt_text_byte(data)
     negative: first == I64{45}
-    at := if (first == I64{43} || negative) -> I64{1} else -> I64{0}
+    ^at: if (first == I64{43} || negative) -> I64{1} else -> I64{0}
     if (at == length) {
         jet_rt_string_drop(text)
         dyn_store(err, rt_static_text("invalid digit found in string"))
         return I64{0}
     }
     // Accumulate toward the negative side so I64.MIN parses.
-    value := I64{0}
-    overflow := false
+    ^value: I64{0}
+    ^overflow: false
     loop at < length {
         digit: rt_text_byte(wrapping(data + at)) - I64{48}
         if (digit < I64{0} || digit > I64{9}) {

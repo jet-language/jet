@@ -25,10 +25,10 @@ use {
 jet_cli_perf_export: fn(args: [String], color: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
     usage: "run `jet perf export <path{extension}> [--json|--pprof|--otel|--chrome|--emit-profile-map] [--out <path>]`"
-    path := String?{None}
-    mode := "json"
+    ^path: String?{None}
+    ^mode: "json"
     // The argument after `--out` is its path.
-    out_at := -1
+    ^out_at: -1
     loop (index, arg) in args {
         if index == out_at -> next
         if arg == {
@@ -109,7 +109,7 @@ jet_cli_perf_integer_field: fn(key: String, value: Int) -> CanonicalJSONField Ne
 // A projection object: `kind`, `loss`, `schema`, `trace_id` and `version`
 // around `fields`, in canonical key order.
 jet_cli_perf_projection: fn(trace: CanonicalJSON, kind: String, loss: String, fields: [CanonicalJSONField]) -> CanonicalJSON Never! {
-    all := fields
+    ^all: fields
     all.push(jet_cli_perf_string_field("kind", kind))
     all.push(jet_cli_perf_string_field("loss", loss))
     all.push(jet_cli_perf_string_field("schema", TRACE_SCHEMA))
@@ -128,11 +128,11 @@ jet_cli_perf_rows_copy: fn(trace: CanonicalJSON, key: String, out: ^[CanonicalJS
 
 // `export_profile_map_projection`.
 jet_cli_perf_profile_map: fn(trace: CanonicalJSON) -> CanonicalJSON Never! {
-    symbols := [CanonicalJSON]{}
-    maps := [CanonicalJSON]{}
+    ^symbols: [CanonicalJSON]{}
+    ^maps: [CanonicalJSON]{}
     jet_cli_perf_rows_copy(trace, "source_identity", symbols)
     jet_cli_perf_rows_copy(trace, "source_maps", maps)
-    profile := CanonicalJSON.Null
+    ^profile: CanonicalJSON.Null
     if jet_cli_perf_content(trace) == .Ok(content) {
         // copy: the verified trace keeps its profile; the projection owns its own.
         if jet_cli_perf_key(content, "profile") == .Val(at) -> profile = content[at].value.copy()
@@ -151,7 +151,7 @@ jet_cli_perf_profile_map: fn(trace: CanonicalJSON) -> CanonicalJSON Never! {
 
 // `export_chrome_projection`: Trace Event Format `X` events on named lanes.
 jet_cli_perf_chrome: fn(trace: CanonicalJSON) -> CanonicalJSON Never! {
-    events := [CanonicalJSON]{}
+    ^events: [CanonicalJSON]{}
     events.push(
         CanonicalJSON.Object(
             [CanonicalJSONField]{
@@ -247,7 +247,7 @@ jet_cli_perf_chrome_event: fn(events: ^[CanonicalJSON], item: CanonicalJSON, sta
     symbol: jettrace_object_view(fields[at].value, "symbol") ?? return
     path: jet_cli_perf_field_text(symbol, "path") ?? return
     function: jet_cli_perf_field_text(symbol, "name") ?? return
-    args := [CanonicalJSONField]{
+    ^args: [CanonicalJSONField]{
         jet_cli_perf_string_field("file", path),
         jet_cli_perf_string_field("location", "{path}:{function}"),
         jet_cli_perf_string_field("symbol", function),

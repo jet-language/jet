@@ -41,19 +41,19 @@ use {
 // The function exports of the Component in `bytes` (binary or text).
 jet_plugin_component_exports: fn(bytes: ^^[U8]) -> [ComponentExportFact] WasmError! {
     c: wasm_load_component(bytes)
-    exports := [ComponentExportFact]{}
+    ^exports: [ComponentExportFact]{}
     loop export in c.exports {
         if export.sort != WASM_SORT_FUNC -> next
         func: c.func_type(export.index) ?? next
-        unsupported := ""
-        params := [ComponentExportParam]{}
+        ^unsupported: ""
+        ^params: [ComponentExportParam]{}
         loop (k, ty) in func.types {
             label: if k < func.names.len() -> func.names[k] else -> "arg{k + 1}"
             params.push(ComponentExportParam{name: label.replace("-", "_"), ty: plug_interface_type(c, ty)})
             if unsupported == "" -> unsupported = plug_interface_gap(c, ty)
         }
-        result := Type?{None}
-        result_order := [String]{}
+        ^result: Type?{None}
+        ^result_order: [String]{}
         if func.ok != WASM_CT_NONE {
             tuple: plug_interface_result_tuple(c, func.ok)
             if tuple == .Val(fields) -> result_order = loop field in fields -> field.name
@@ -72,7 +72,7 @@ plug_interface_result_tuple: fn(c: WasmComponent, ty: Int) -> [TypeTupleField]? 
     if ty < 0 -> return None
     resolved: c.resolve_type(ty) ?? return None
     if resolved.kind != WASM_CT_TUPLE || resolved.types.len() == 0 -> return None
-    fields := [TypeTupleField]{}
+    ^fields: [TypeTupleField]{}
     loop (index, item) in resolved.types {
         member: plug_interface_type(c, item)
         if member != Type.Bool && member != Type.Int && member != Type.Float && member != Type.String {
@@ -87,7 +87,7 @@ plug_interface_result_tuple: fn(c: WasmComponent, ty: Int) -> [TypeTupleField]? 
 // a type index). A type with no Jet spelling is named by its Component kind;
 // plug_interface_gap reports it.
 plug_interface_type: fn(c: WasmComponent, ty: Int) -> Type Never! {
-    code := ty
+    ^code: ty
     if code >= 0 {
         resolved: c.resolve_type(code) ?? return Type.Named{name: plug_interface_gap(c, ty)}
         if resolved.kind == WASM_CT_LIST {

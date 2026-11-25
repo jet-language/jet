@@ -34,7 +34,7 @@ sema_web_host_unsupported_core_apis: fn() -> [String] Never! {
 sema_web_host_check_core_usage: fn(target_name: String, used_core: [String], diagnostics: ^[Diagnostic]) -> Bool Never! {
     if target_name != "wasm.browser" -> return true
     unsupported: sema_web_host_unsupported_core_apis()
-    complete := true
+    ^complete: true
     loop usage in used_core {
         if !unsupported.contains(usage) -> next
         operation: usage.replace(".", ".")
@@ -70,7 +70,7 @@ sema_target_socket_surface: fn(path: String) -> String? Never! {
 }
 
 sema_target_wasip2_unsupported_operations: fn(used_core: [String]) -> [String] Never! {
-    operations := [String]{}
+    ^operations: [String]{}
     loop usage in used_core {
         separator: usage.rfind(".")
         if separator < 0 -> next
@@ -97,7 +97,7 @@ sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [
     socket_target: wasip2 || target.contains("linux") || target.contains("android") || target.contains("apple") || target.contains("darwin") || target.contains("windows") || target.contains("freebsd") || target.contains("openbsd") || target.contains("netbsd")
     if socket_target && !wasip2 -> return true
     operations: if wasip2 -> sema_target_wasip2_unsupported_operations(used_core) else -> [String]{}
-    complete := true
+    ^complete: true
     loop module_row_index in 0..<graph.modules.len() {
         // The surface is the one the program's own `use` names. Core's
         // imports are its implementation: which of that code a target reaches
@@ -106,10 +106,10 @@ sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [
         if module_is_core(graph.modules[module_row_index].module_identity) -> next
         diagnostic_start: diagnostics.len()
         // Each module's reports, once per (code, span, surface or operation).
-        seen := SemaKeyRows{}
+        ^seen: SemaKeyRows{}
         loop imported_index in 0..<graph.modules[module_row_index].imports.len() {
             target_identity: graph.modules[module_row_index].imports[imported_index].target_module_identity
-            path := module_text(graph.module_table, target_identity)
+            ^path: module_text(graph.module_table, target_identity)
             if sema_registration_module_index(graph, target_identity) == .Val(index) {
                 path = graph.modules[index].module_name
             }

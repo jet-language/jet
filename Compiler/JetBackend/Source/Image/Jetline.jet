@@ -62,7 +62,7 @@ x64_jetline_read: fn(elf: [U8]) -> X64Jetline? Never! {
         offset: link_debug_addr(elf, header + 24)
         length: link_debug_addr(elf, header + 32)
         if offset < 0 || length < 0 || offset + length > elf.len() -> return None
-        table := elf[offset..<offset + length]
+        ^table: elf[offset..<offset + length]
         return Val(x64_jetline_parse(table))
     }
     None
@@ -71,18 +71,18 @@ x64_jetline_read: fn(elf: [U8]) -> X64Jetline? Never! {
 // The functions of the linked blocks in `table`; a block or record that
 // runs past its end ends the read.
 x64_jetline_parse: fn(table: ^^[U8]) -> X64Jetline Never! {
-    functions := [X64JetlineFunction]{}
-    ascending := true
-    reached := 0
-    at := 0
+    ^functions: [X64JetlineFunction]{}
+    ^ascending: true
+    ^reached: 0
+    ^at: 0
     loop at + 20 <= table.len() {
         end: at + 4 + link_debug_le(table, at, 4)
         if end < at + 20 || end > table.len() -> break
         count: link_debug_le(table, at + 4, 4)
         strings: at + link_debug_le(table, at + 8, 4)
         dir: x64_jetline_text(table, strings)
-        address := link_debug_addr(table, at + 12)
-        cursor := at + 20
+        ^address: link_debug_addr(table, at + 12)
+        ^cursor: at + 20
         loop _ in 0..<count {
             if cursor >= end -> break
             low: address + x64_jetline_sleb(table, cursor)
@@ -120,7 +120,7 @@ x64_jetline_parse: fn(table: ^^[U8]) -> X64Jetline Never! {
 // profile reads them all.
 x64_jetline_program: fn(lines: ^^X64Jetline) -> X64Jetline Never! {
     owned: lines.move()
-    kept := [X64JetlineFunction]{}
+    ^kept: [X64JetlineFunction]{}
     loop function in owned.functions.move() {
         if function.dir != X64_JETLINE_RUNTIME_DIRECTORY -> kept.push(function)
     }
@@ -133,8 +133,8 @@ x64_jetline_program: fn(lines: ^^X64Jetline) -> X64Jetline Never! {
 x64_jetline_find: fn(lines: X64Jetline, pc: Int) -> Int Never! {
     if lines.ascending {
         // The first function starting past `pc`.
-        low := 0
-        high := lines.functions.len()
+        ^low: 0
+        ^high: lines.functions.len()
         loop low < high {
             middle: (low + high) >> 1
             if {
@@ -154,8 +154,8 @@ x64_jetline_find: fn(lines: X64Jetline, pc: Int) -> Int Never! {
 // Each row of `rows` with a source line, in the table's coding (above),
 // onto `out`; the rows are offsets from the function's start.
 x64_jetline_rows: fn(out: ^[U8], rows: [X64LineRow]) Never! {
-    at := 0
-    line := 1
+    ^at: 0
+    ^line: 1
     loop row in rows {
         if row.line <= 0 -> next
         dwarf_uleb(out, if row.call -> 2 * (row.at - at) + 1 else -> 2 * (row.at - at))
@@ -194,10 +194,10 @@ x64_jetline_place: fn(lines: X64Jetline, function: X64JetlineFunction, pc: Int) 
 // The last row (a call row only with `calls`) at or before `pc` in
 // `function` whose code reaches it.
 x64_jetline_row: fn(lines: X64Jetline, function: X64JetlineFunction, pc: Int, calls: Bool{false}) -> X64LineRow? Never! {
-    at := function.rows
-    row := X64LineRow{at: function.low, line: 1}
+    ^at: function.rows
+    ^row: X64LineRow{at: function.low, line: 1}
     // The row before `row` that holds code, its start -1 before the first.
-    held := X64LineRow{at: -1, line: 0}
+    ^held: X64LineRow{at: -1, line: 0}
     loop at < function.rows_end {
         x64_jetline_next(lines.table, at, row)
         if row.call && !calls -> next
@@ -211,8 +211,8 @@ x64_jetline_row: fn(lines: X64Jetline, function: X64JetlineFunction, pc: Int, ca
 // The sleb at `at` (advanced past it); 0 when it runs out. Every bit of a
 // 64-bit value is kept: an absent inline Option's discriminant is 2^62.
 x64_jetline_sleb: fn(bytes: [U8], at: ^Int) -> Int Never! {
-    value := 0
-    shift := 0
+    ^value: 0
+    ^shift: 0
     loop at < bytes.len() {
         byte: Int{bytes[at]}
         at += 1
@@ -244,11 +244,11 @@ x64_jetline_text: fn(bytes: [U8], at: Int) -> String Never! {
 // sample in its own code outside the source, as a compiler-emitted
 // helper's.
 x64_jetline_entry_runs: fn(functions: [X64JetlineFunction]) -> [Int] Never! {
-    runs := [Int]{}
+    ^runs: [Int]{}
     // An image holds a generated entry per program it links, so each
     // scans the functions once.
     loop entry in functions {
-        found := -1
+        ^found: -1
         if entry.name == "entry" {
             loop (index, function) in functions {
                 if function.name != "entry" && function.decl == entry.decl && function.file == entry.file && function.dir == entry.dir {
@@ -270,7 +270,7 @@ x64_jetline_entry_runs: fn(functions: [X64JetlineFunction]) -> [Int] Never! {
         X64LineRow{at: 9, line: 6, call: true},
         X64LineRow{at: 12, line: 8},
     }
-    table := [U8]{}
+    ^table: [U8]{}
     x64_jetline_rows(table, rows)
     // uleb(2 * advance + call), a call row's column, then the line's sleb.
     assert_eq(table, [U8]{0, 4, 8, 1, 1, 9, 1, 11, 0, 0x7f, 6, 2})
@@ -290,9 +290,9 @@ x64_jetline_entry_runs: fn(functions: [X64JetlineFunction]) -> [Int] Never! {
     assert(back.call && back.line == 6 && back.column == 0)
     after: x64_jetline_place(lines, lines.functions[0], 0x100c) ?? panic("the last row")
     assert(!after.call && after.line == 8 && after.column == 0)
-    seen := 0
-    at := 0
-    row := X64LineRow{at: 0x1000, line: 1}
+    ^seen: 0
+    ^at: 0
+    ^row: X64LineRow{at: 0x1000, line: 1}
     loop at < size {
         x64_jetline_next(lines.table, at, row)
         seen += 1

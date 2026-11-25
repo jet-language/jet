@@ -15,9 +15,7 @@
 // strings, so the result is bit-for-bit identical for every input.
 use jet_foundation.[Type, compiler_threads_single]
 
-ir_builder_route: fn(m: IRModule, name: String) -> Int Never! {
-    ir_interned_name(m, name) ?? -2
-}
+ir_builder_route: fn(m: IRModule, name: String) -> Int Never! { ir_interned_name(m, name) ?? -2 }
 
 // Rewrites non-escaping string-builder -> jet_char_len chains in `f`.
 // Returns the number of string builders eliminated.
@@ -33,8 +31,8 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     if rt_char_len < 0 -> return 0
 
     // Fast check: does `f` contain both a builder creation and a jet_char_len call?
-    has_builder := false
-    has_char_len := false
+    ^has_builder: false
+    ^has_char_len: false
     loop at in 0..<count {
         if f.op[at] == .CallRuntime {
             sym: f.a[at]
@@ -48,12 +46,12 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     rt_push: ir_builder_route(m, "jet_rt_string_builder_push")
 
     slots: f.slot_type.len()
-    writes := loop _ in 0..<slots -> 0
-    write_at := loop _ in 0..<slots -> -1
-    read_count := loop _ in 0..<slots -> 0
-    drop_count := loop _ in 0..<slots -> 0
-    drop_at := loop _ in 0..<slots -> -1
-    reads := [Int]{}
+    ^writes: loop _ in 0..<slots -> 0
+    ^write_at: loop _ in 0..<slots -> -1
+    ^read_count: loop _ in 0..<slots -> 0
+    ^drop_count: loop _ in 0..<slots -> 0
+    ^drop_at: loop _ in 0..<slots -> -1
+    ^reads: [Int]{}
     loop at in 0..<count {
         w: ir_x64_write(f, at)
         if w >= 0 {
@@ -79,11 +77,11 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     // - kill[at]: replace instruction with Nop
     // - replace_push_slot[at]: >= 0 means replace `push(b, str)` with `slot = jet_char_len(str)`
     // - replace_len_const[at]: >= 0 means at `jet_char_len(s)` emit sum of const + push slots
-    kill := loop _ in 0..<count -> false
-    push_dest := loop _ in 0..<count -> -1
-    len_const := loop _ in 0..<count -> -1
-    len_parts := [Int:[Int]]{}
-    eliminated := 0
+    ^kill: loop _ in 0..<count -> false
+    ^push_dest: loop _ in 0..<count -> -1
+    ^len_const: loop _ in 0..<count -> -1
+    ^len_parts: [Int:[Int]]{}
+    ^eliminated: 0
 
     loop create_at in 0..<count {
         if f.op[create_at] != .CallRuntime || (f.a[create_at] != rt_new && f.a[create_at] != rt_val) || f.c[create_at] != 0 {
@@ -94,13 +92,13 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
 
         // Scan straight-line forward in the same region for all uses of `builder`
         // until `finish(builder)`.
-        pushes := [Int]{}
-        static_pushes := [Int]{}
-        static_scalars := 0
-        finish_at := -1
-        builder_uses := 0
-        valid := true
-        k := create_at + 1
+        ^pushes: [Int]{}
+        ^static_pushes: [Int]{}
+        ^static_scalars: 0
+        ^finish_at: -1
+        ^builder_uses: 0
+        ^valid: true
+        ^k: create_at + 1
         loop k < count {
             op: f.op[k]
             if ir_opt_structural(op) {
@@ -131,7 +129,7 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
                     if blen == m.data[row].len() {
                         static_scalars += ir_opt_text_scalars(m.data[row])
                     } else {
-                        slice := [U8]{}
+                        ^slice: [U8]{}
                         loop bi in 0..<blen -> slice.push(m.data[row][bi])
                         static_scalars += ir_opt_text_scalars(slice)
                     }
@@ -169,8 +167,8 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
         str_slot: f.dst[finish_at]
         if writes[str_slot] != 1 || read_count[str_slot] != 1 || drop_count[str_slot] > 1 -> next
 
-        len_at := -1
-        j := finish_at + 1
+        ^len_at: -1
+        ^j: finish_at + 1
         loop j < count {
             op: f.op[j]
             if ir_opt_structural(op) -> break
@@ -189,11 +187,11 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
         // the Drop if `drop_count == 1` and there's no structural jump between
         // finish_at and drop_at; actually if `s` is never created, ANY single
         // Drop of `s` after finish_at must be killed too — check straight-line!).
-        s_drop := -1
+        ^s_drop: -1
         if drop_count[str_slot] == 1 {
             d_at: drop_at[str_slot]
             if d_at <= len_at -> next
-            straight := true
+            ^straight: true
             loop m_at in (len_at + 1)..<d_at {
                 if ir_opt_structural(f.op[m_at]) {
                     straight = false
@@ -206,7 +204,7 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
 
         // Everything verified! Allocate fresh temp slots of `len_dst`'s type for
         // each dynamic push's `jet_char_len(str_i)`.
-        part_slots := [Int]{}
+        ^part_slots: [Int]{}
         loop p_at in pushes {
             tmp: ir_slot(f, f.slot_type[len_dst], IRSlotKind.Temp, -1, 0)
             push_dest[p_at] = tmp
@@ -224,7 +222,7 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     if eliminated == 0 -> return 0
 
     // Rebuild `f` with the rewritten instructions.
-    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     loop at in 0..<count {
         if kill[at] -> next
         if push_dest[at] >= 0 {
@@ -245,7 +243,7 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
             if parts.len() == 0 -> ir_opt_code_put(code, IROp.Const, len_dst, base_c, -1, -1, line) else if parts.len() == 1 && base_c == 0 {
                 ir_opt_code_put(code, IROp.Move, len_dst, parts[0], -1, -1, line)
             } else {
-                acc := parts[0]
+                ^acc: parts[0]
                 if base_c > 0 {
                     c_slot: ir_slot(f, ty_row, IRSlotKind.Temp, -1, 0)
                     ir_opt_code_put(code, IROp.Const, c_slot, base_c, -1, -1, line)
@@ -279,7 +277,7 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
 }
 
 #Test("Builder pass eliminates non-escaping string formatting whose only read is jet_char_len") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     ptr: ir_pointer_row(m)
     word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
@@ -291,7 +289,7 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     rt_len: ir_intern_name(m, "jet_char_len")
     row_lt: ir_intern_text(m, "<")
     row_gt: ir_intern_text(m, ">")
-    g := ir_function_new("wrap_len", "test:builder.jet.wrap_len", "", "builder.jet", 1)
+    ^g: ir_function_new("wrap_len", "test:builder.jet.wrap_len", "", "builder.jet", 1)
     w: ir_slot(g, text, IRSlotKind.Param, ir_intern_name(m, "w"), 1)
     g.result = exact
     b: ir_slot(g, ptr, IRSlotKind.Temp, -1, 0)
@@ -302,33 +300,33 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     s: ir_slot(g, text, IRSlotKind.Temp, -1, 0)
     n: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     a0: ir_args(g, [Int]{})
-    _ := ir_emit(g, IROp.CallRuntime, b, rt_val, a0, 0, 2)
-    _ := ir_emit(g, IROp.DataAddress, da1, row_lt, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, c1, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.CallRuntime, b, rt_val, a0, 0, 2)
+    ^_: ir_emit(g, IROp.DataAddress, da1, row_lt, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, c1, 1, -1, -1, 2)
     a1: ir_args(g, [Int]{b, da1, c1})
-    _ := ir_emit(g, IROp.CallRuntime, -1, rt_ps, a1, 3, 2)
+    ^_: ir_emit(g, IROp.CallRuntime, -1, rt_ps, a1, 3, 2)
     a2: ir_args(g, [Int]{b, w})
-    _ := ir_emit(g, IROp.CallRuntime, -1, rt_p, a2, 2, 2)
-    _ := ir_emit(g, IROp.DataAddress, da2, row_gt, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, c2, 1, -1, -1, 2)
+    ^_: ir_emit(g, IROp.CallRuntime, -1, rt_p, a2, 2, 2)
+    ^_: ir_emit(g, IROp.DataAddress, da2, row_gt, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, c2, 1, -1, -1, 2)
     a3: ir_args(g, [Int]{b, da2, c2})
-    _ := ir_emit(g, IROp.CallRuntime, -1, rt_ps, a3, 3, 2)
+    ^_: ir_emit(g, IROp.CallRuntime, -1, rt_ps, a3, 3, 2)
     a4: ir_args(g, [Int]{b})
-    _ := ir_emit(g, IROp.CallRuntime, s, rt_fin, a4, 1, 2)
+    ^_: ir_emit(g, IROp.CallRuntime, s, rt_fin, a4, 1, 2)
     a5: ir_args(g, [Int]{s})
-    _ := ir_emit(g, IROp.CallRuntime, n, rt_len, a5, 1, 3)
-    _ := ir_emit(g, IROp.Drop, -1, s, -1, -1, 3)
-    _ := ir_emit(g, IROp.Return, -1, n, -1, -1, 4)
+    ^_: ir_emit(g, IROp.CallRuntime, n, rt_len, a5, 1, 3)
+    ^_: ir_emit(g, IROp.Drop, -1, s, -1, -1, 3)
+    ^_: ir_emit(g, IROp.Return, -1, n, -1, -1, 4)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     f: m.functions[0]
-    builders := 0
-    lens := 0
+    ^builders: 0
+    ^lens: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .CallRuntime {
             if f.a[at] == rt_val || f.a[at] == rt_fin -> builders += 1

@@ -14,10 +14,10 @@ s5_pty_marker: fn() -> String { String.from_bytes([U8]{27, 91, 51, 114}) ?? pani
 s5_pty_count: fn(text: String) -> Int {
     bytes: text.bytes()
     marker: s5_pty_marker().bytes()
-    count := 0
-    index := 0
+    ^count: 0
+    ^index: 0
     loop index + marker.len() <= bytes.len() {
-        same := true
+        ^same: true
         loop part in 0..<marker.len() {
             if bytes[index + part] != marker[part] -> same = false
         }
@@ -31,7 +31,7 @@ s5_pty_count: fn(text: String) -> Int {
 
 s5_pty_context: fn() -> S5PTYContext {
     started: time.start()
-    transcript := ""
+    ^transcript: ""
     loop {
         transcript = s5_pty_text()
         if transcript.contains("Canvas: http://") -> break
@@ -45,7 +45,7 @@ s5_pty_context: fn() -> S5PTYContext {
             port: s5_web_u16(authority.split(":").get(1) ?? panic("Canvas URL port")) ?? panic("Canvas u16")
             token_tail: line.split("session=").get(1) ?? panic("Canvas session")
             bytes: token_tail.bytes()
-            end := 0
+            ^end: 0
             loop end < bytes.len() {
                 byte: Int{bytes[end]}
                 if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) {

@@ -563,7 +563,7 @@ nixeval_test_map_authority: fn(files: [String:String], label: String) -> NixEval
 }
 
 nixeval_test_string_map: fn(document: NixEvalJSON, index: Int) -> [String:String] {
-    values := [String:String]{}
+    ^values: [String:String]{}
     loop entry in nixeval_test_object(document, index) {
         values[entry.key] = nixeval_test_string(document, entry.value)
     }
@@ -571,7 +571,7 @@ nixeval_test_string_map: fn(document: NixEvalJSON, index: Int) -> [String:String
 }
 
 nixeval_test_repeat: fn(text: String, count: Int) -> String {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop _ in 0..<count -> nixeval_push_text(bytes, text)
     String.from_bytes(bytes) ?? panic("repeated text is UTF-8")
 }
@@ -588,7 +588,7 @@ nixeval_test_breadth_variant: fn(source: String, seed: Int) -> String {
 }
 
 nixeval_test_seeds: fn(document: NixEvalJSON, root: [String:Int]) -> [Int] {
-    seeds := [Int]{}
+    ^seeds: [Int]{}
     loop seed in nixeval_test_array(document, nixeval_test_get(root, "fuzz_seeds")) {
         seeds.push(nixeval_test_integer(document, seed))
     }
@@ -633,7 +633,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
 }
 
 #Test("nixeval native devshell bounds lazy thunk chains") {
-    source := [U8]{}
+    ^source: [U8]{}
     nixeval_push_text(source, "let ")
     loop index in 0..<300 {
         next_index: index + 1
@@ -727,7 +727,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
 }
 
 #Test("nixeval native devshell imports bounded relative sources") {
-    files := [String:String]{}
+    ^files: [String:String]{}
     files["sub/shell.nix"] = `{ pkgs }: pkgs.mkShell { packages = [ "${pkgs.fd}" ]; buildInputs = import ../inputs.nix pkgs; }`
     files["inputs.nix"] = "pkgs: [ (builtins.toString pkgs.ripgrep) ]"
     authority: nixeval_test_map_authority(files, "missing test import")
@@ -779,7 +779,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         value_case: nixeval_test_object(document, value_index)
         source: nixeval_test_text(document, value_case, "source")
         system: nixeval_test_text(document, value_case, "system")
-        output := "default"
+        ^output: "default"
         if value_case.get("output") == {
             .Val(output_index) -> { output = document.string(output_index) ?? "default" }
             .None -> {}
@@ -833,7 +833,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         unsupported: nixeval_test_strings(document, nixeval_test_get(value, "jet_unsupported"))
         nix_value: nixeval_test_object(document, nixeval_test_get(value, "nix_value"))
         assert_eq(nixeval_test_strings(document, nixeval_test_get(nix_value, "packages")), packages)
-        output := "default"
+        ^output: "default"
         if value.get("output") == {
             .Val(output_index) -> { output = document.string(output_index) ?? "default" }
             .None -> {}
@@ -956,7 +956,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
     path_error: nixeval_test_derivation_error(`builtins.derivation { name = "bad"; system = "x86_64-linux"; builder = "/bin/sh"; src = "${pkgs.fd}"; }`, "x86_64-linux")
     assert(nixeval_test_unsupported(path_error).contains("canonical store-path context"))
     evaluated: nixeval_test_derivation(`builtins.derivation { name = "many"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "dev" ]; }`, "x86_64-linux")
-    names := [String]{}
+    ^names: [String]{}
     loop output in evaluated.outputs -> names.push(output.name)
     assert_eq(names, [String]{"out", "dev"})
     assert_eq(evaluated.env.get("dev"), Val(""))
@@ -985,7 +985,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         assert_eq(evaluated.builder, nixeval_test_text(document, expected, "builder"))
         assert_eq(evaluated.args, nixeval_test_strings(document, nixeval_test_get(expected, "args")))
         assert_eq(evaluated.input_sources, nixeval_test_strings(document, nixeval_test_get(expected, "input_sources")))
-        expected_outputs := [Int]{}
+        ^expected_outputs: [Int]{}
         if expected.get("outputs") == {
             .Val(outputs) -> { expected_outputs = nixeval_test_array(document, outputs) }
             .None -> expected_outputs.push(nixeval_test_get(expected, "output"))
@@ -1109,7 +1109,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         expected_unsupported: nixeval_test_strings(document, nixeval_test_get(value, "jet_unsupported"))
         nix_value: nixeval_test_object(document, nixeval_test_get(value, "nix_value"))
         assert_eq(nixeval_test_strings(document, nixeval_test_get(nix_value, "packages")), expected_packages)
-        nix_cross_packages := [String]{}
+        ^nix_cross_packages: [String]{}
         if nix_value.get("cross_packages") == {
             .Val(cross_index) -> {
                 nix_cross_packages = nixeval_test_strings(document, cross_index)

@@ -224,7 +224,9 @@ impl IEEE.FixedFormat {
 }
 
 impl IEEE.GroupedFormat {
-    grouped: fn(self, digits: Int) -> String Never! { group_decimal(float_fixed(Float{self}, digits)) }
+    grouped: fn(self, digits: Int) -> String Never! {
+        group_decimal(float_fixed(Float{self}, digits))
+    }
 }
 
 impl IEEE.SciFormat {
@@ -291,15 +293,15 @@ sci: fn(n: Float, frac: Int) -> String Never! {
     sign: if bits < 0 -> "-" else -> ""
     if n == 0.0 -> return "{scaled_decimal(0, precision)}e0"
     binary_exponent: (bits >> 52) & 2047
-    numerator := bits & 4503599627370495
-    shift := -1074
+    ^numerator: bits & 4503599627370495
+    ^shift: -1074
     if binary_exponent != 0 {
         numerator += 4503599627370496
         shift = binary_exponent - 1075
     }
-    denominator := 1
+    ^denominator: 1
     if shift >= 0 -> numerator = numerator << shift else -> denominator = denominator << -shift
-    exponent := 0
+    ^exponent: 0
     loop numerator >= denominator * 10 {
         denominator *= 10
         exponent += 1
@@ -308,14 +310,14 @@ sci: fn(n: Float, frac: Int) -> String Never! {
         numerator *= 10
         exponent -= 1
     }
-    scale := 1
-    i := 0
+    ^scale: 1
+    ^i: 0
     loop i < precision {
         scale *= 10
         i += 1
     }
     numerator *= scale
-    rounded := round_ratio_half_away(numerator, denominator)
+    ^rounded: round_ratio_half_away(numerator, denominator)
     if rounded == scale * 10 {
         rounded = scale
         exponent += 1
@@ -334,7 +336,7 @@ scaled_decimal: fn(n: Int, precision: Int) -> String Never! {
 // Exact positive rational rounding, half away from zero, shared by the
 // scientific and fixed formats.
 round_ratio_half_away: fn(numerator: Int, denominator: Int) -> Int Never! {
-    rounded := numerator /% denominator
+    ^rounded: numerator /% denominator
     remainder: numerator % denominator
     if remainder * 2 >= denominator -> rounded += 1
     rounded
@@ -362,13 +364,13 @@ pretty_fragment: fn(value: String, indent: Int) -> String Never! {
     if open == (U8{91}) && (trimmed_body == ":" || trimmed_body.lower() == "redacted") {
         return text
     }
-    out := if prefix == "" -> open_text else -> "{prefix} {open_text}"
-    items := [String]{}
-    stack := [U8]{}
-    quoted := false
-    escaped := false
-    start := 0
-    i := 0
+    ^out: if prefix == "" -> open_text else -> "{prefix} {open_text}"
+    ^items: [String]{}
+    ^stack: [U8]{}
+    ^quoted: false
+    ^escaped: false
+    ^start: 0
+    ^i: 0
     body_raw: body.bytes()
     loop i < body_raw.len() {
         ch: body_raw[i]
@@ -402,10 +404,10 @@ structure_close: fn(open: U8) -> U8? Never! {
 }
 
 first_structure: fn(value: String) -> Int? Never! {
-    quoted := false
-    escaped := false
+    ^quoted: false
+    ^escaped: false
     raw: value.bytes()
-    i := 0
+    ^i: 0
     loop i < raw.len() {
         ch: raw[i]
         if quoted {
@@ -421,12 +423,12 @@ first_structure: fn(value: String) -> Int? Never! {
 }
 
 matching_close: fn(value: String, open: U8, close: U8) -> Int? Never! {
-    stack := [U8]{close}
-    quoted := false
-    escaped := false
-    seen_start := false
+    ^stack: [U8]{close}
+    ^quoted: false
+    ^escaped: false
+    ^seen_start: false
     raw: value.bytes()
-    i := 0
+    ^i: 0
     loop i < raw.len() {
         ch: raw[i]
         if !seen_start {
@@ -456,8 +458,8 @@ bytes: fn(n: Int) -> String Never! {
     sign: if n < 0 -> "-" else -> ""
     units: ["B", "KB", "MB", "GB", "TB", "PB", "EB"]
     size: abs_int(n)
-    scale := 1
-    unit := 0
+    ^scale: 1
+    ^unit: 0
     loop unit + 1 < units.len() && size /% scale >= 1000 {
         scale *= 1000
         unit += 1
@@ -477,8 +479,8 @@ bytes: fn(n: Int) -> String Never! {
 
 /// `n` is milliseconds. Composite output is bounded to three non-zero units.
 duration: fn(n: Int) -> String Never! {
-    sign := ""
-    rest := n
+    ^sign: ""
+    ^rest: n
     if rest < 0 {
         sign = "-"
         rest = -rest
@@ -491,7 +493,7 @@ duration: fn(n: Int) -> String Never! {
     minutes: rest /% 60000
     rest %%= 60000
     seconds: rest /% 1000
-    parts := [String]{}
+    ^parts: [String]{}
     if days > 0 -> parts.push("{days}d")
     if hours > 0 -> parts.push("{hours}h")
     if minutes > 0 -> parts.push("{minutes}m")
@@ -514,8 +516,8 @@ priv __radix_signed_width: fn(n: Int, base: Int, width: Int) -> String Never! {
 
 radix: fn(n: Int, base: Int) -> String Never! {
     if n == 0 -> return "0"
-    digits := [U8]{}
-    x := n
+    ^digits: [U8]{}
+    ^x: n
     loop x > 0 {
         d: x % base
         if d < 10 -> digits.push(U8{48 + d}) else -> digits.push(U8{87 + d})
@@ -540,7 +542,7 @@ float_fixed: fn(n: Float, frac: Int) -> String Never! {
     if precision <= 22 {
         // 10^precision is exact, so the product is off by at most half an
         // ulp, and `margin` (product * 2^-51) is at least an ulp.
-        scale := Float{1.0}
+        ^scale: Float{1.0}
         loop _ in 0..<precision -> scale *= 10.0
         product: if n < 0.0 -> -(n * scale) else -> n * scale
         if product < 4503599627370496.0 {
@@ -557,15 +559,15 @@ float_fixed: fn(n: Float, frac: Int) -> String Never! {
     }
     bits: math.to_bits(n)
     binary_exponent: (bits >> 52) & 2047
-    numerator := bits & 4503599627370495
-    shift := -1074
+    ^numerator: bits & 4503599627370495
+    ^shift: -1074
     if binary_exponent != 0 {
         numerator += 4503599627370496
         shift = binary_exponent - 1075
     }
-    denominator := 1
+    ^denominator: 1
     if shift >= 0 -> numerator = numerator << shift else -> denominator = denominator << -shift
-    i := 0
+    ^i: 0
     loop i < precision {
         numerator *= 10
         i += 1
@@ -589,7 +591,7 @@ group_decimal: fn(text: String) -> String Never! {
 
 grouped_digits: fn(text: String) -> String Never! {
     raw: text.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<raw.len() {
         if i > 0 && (raw.len() - i) % 3 == 0 -> out.push(U8{44})
         out.push(raw[i])
@@ -611,8 +613,8 @@ pad_mode: fn(text: String, width: Int, fill: String, mode: Int) -> String Never!
 }
 
 pad_fill: fn(units: [String], need: Int) -> String Never! {
-    out := ""
-    i := 0
+    ^out: ""
+    ^i: 0
     loop i < need {
         out = "{out}{units[i % units.len()]}"
         i += 1
@@ -621,8 +623,8 @@ pad_fill: fn(units: [String], need: Int) -> String Never! {
 }
 
 spaces: fn(n: Int) -> String {
-    out := ""
-    i := 0
+    ^out: ""
+    ^i: 0
     loop i < n {
         out = "{out} "
         i += 1
@@ -632,8 +634,8 @@ spaces: fn(n: Int) -> String {
 
 slice: fn(text: String, start: Int, end: Int) -> String Never! {
     units: unicode.scalars(text)
-    out := ""
-    i := start
+    ^out: ""
+    ^i: start
     loop i < end && i < units.len() {
         if i >= 0 -> out = "{out}{units[i]}"
         i += 1
@@ -642,8 +644,8 @@ slice: fn(text: String, start: Int, end: Int) -> String Never! {
 }
 
 slice_b: fn(raw: [U8], start: Int, end: Int) -> [U8] {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return out
         out.push(raw[i])

@@ -37,7 +37,7 @@ apply: fn(action: RuleAction, facts: ^[String:Int], key: String) -> String {
 }
 
 fire: fn(facts: ^[String:Int], rules: [Rule]) -> [String] {
-    events := [String]{}
+    ^events: [String]{}
     loop rule in rules {
         value: facts.get(rule.fact.copy()) ?? 0
         if !matches(rule.condition.copy(), value) -> events.push("{rule.name}:skip") else {
@@ -48,7 +48,7 @@ fire: fn(facts: ^[String:Int], rules: [Rule]) -> [String] {
 }
 
 sample: fn() -> [String] {
-    facts := [String:Int]{"score": 7}
+    ^facts: [String:Int]{"score": 7}
     rules: [Rule]{
         {name: "bonus", fact: "score", condition: RuleCondition.AtLeast(5), action: RuleAction.Add(3)},
         {name: "cap", fact: "score", condition: RuleCondition.AtLeast(20), action: RuleAction.Set(20)},

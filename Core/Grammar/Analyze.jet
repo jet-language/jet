@@ -35,9 +35,9 @@ GrammarWork: struct {
 /// the names. The faults it finds are in the result's `faults`.
 resolve: fn(text: String, start: String, imports: [GrammarSource]) -> GrammarWork GrammarFaults! {
     tree: read_notation(text)
-    work := GrammarWork{tree: tree, start: -1, faults: [GrammarFault]{}, owner: [Int]{}, parent: [Int]{}, nullable: [Bool]{}, operators: [GrammarOperatorRule]{}, operator_of: [Int]{}, tokens: [GrammarToken]{}, first: [[Int]]{}, follow: [[Int]]{}, decisions: [GrammarDecision]{}, steps: 0}
+    ^work: GrammarWork{tree: tree, start: -1, faults: [GrammarFault]{}, owner: [Int]{}, parent: [Int]{}, nullable: [Bool]{}, operators: [GrammarOperatorRule]{}, operator_of: [Int]{}, tokens: [GrammarToken]{}, first: [[Int]]{}, follow: [[Int]]{}, decisions: [GrammarDecision]{}, steps: 0}
     check_rule_names(work)
-    seen := [String]{}
+    ^seen: [String]{}
     wanted: work.tree.imports.copy()
     merge_imports(work, wanted, imports, seen, -1)
     mark_owners(work)
@@ -84,23 +84,21 @@ is_caps: fn(name: String) -> Bool Never! {
 
 /// `name` in snake_case: `selectStmt` is `select_stmt`.
 snake_name: fn(name: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop (i, b) in name.bytes() {
         c: Int{b}
         if is_upper(c) {
             last: if out.len() > 0 -> Int{out[out.len() - 1]} else -> 95
             if i > 0 && last != 95 -> out.push(U8{95})
             out.push(U8{c + 32})
-        } else {
-            out.push(b)
-        }
+        } else { out.push(b) }
     }
     String.from_bytes(out) ?? name.copy()
 }
 
 /// `name` in ALL_CAPS.
 caps_name: fn(name: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in name.bytes() {
         c: Int{b}
         if is_lower(c) -> out.push(U8{c - 32}) else -> out.push(b)
@@ -110,8 +108,8 @@ caps_name: fn(name: String) -> String Never! {
 
 /// A rule's type name: `key_value` is `KeyValue`.
 pascal_name: fn(name: String) -> String Never! {
-    out := [U8]{}
-    upper := true
+    ^out: [U8]{}
+    ^upper: true
     loop b in name.bytes() {
         c: Int{b}
         if c == 95 {
@@ -126,7 +124,7 @@ pascal_name: fn(name: String) -> String Never! {
 
 /// `name` without `_` and in lowercase: `SQLStmt` and `sql_stmt` agree.
 folded_name: fn(name: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in name.bytes() {
         c: Int{b}
         if c == 95 -> next
@@ -136,7 +134,7 @@ folded_name: fn(name: String) -> String Never! {
 }
 
 check_rule_names: fn(work: ^GrammarWork) Never! {
-    names := [String:Int]{}
+    ^names: [String:Int]{}
     loop (i, rule) in work.tree.rules {
         name: rule.name
         if name == "EOF" || name == "HOLE" {
@@ -167,7 +165,7 @@ merge_imports: fn(work: ^GrammarWork, wanted: [GrammarImport], sources: [Grammar
         name: wanted_import.name
         if seen.contains(name) -> next
         seen.push(name.copy())
-        found := -1
+        ^found: -1
         loop (i, source) in sources {
             if source.name == name && found < 0 -> found = i
         }
@@ -180,7 +178,9 @@ merge_imports: fn(work: ^GrammarWork, wanted: [GrammarImport], sources: [Grammar
                 merge_rules(work, sub, name, at)
                 merge_imports(work, sub.imports, sources, seen, at)
             }
-            .Err(_) -> work.faults.push(grammar_fault(.UndefinedRule, at, "the imported grammar `{name}` has faults of its own", "Fix `{name}` first"))
+            .Err(_) -> {
+                work.faults.push(grammar_fault(.UndefinedRule, at, "the imported grammar `{name}` has faults of its own", "Fix `{name}` first"))
+            }
         }
     }
 }
@@ -189,18 +189,20 @@ merge_rules: fn(work: ^GrammarWork, sub: RuleTree, source: String, at: Int) Neve
     base: work.tree.nodes.len()
     class_base: work.tree.classes.len()
     loop node in sub.nodes {
-        children := [Int]{}
+        ^children: [Int]{}
         loop child in node.children -> children.push(child + base)
         class: if node.class >= 0 -> node.class + class_base else -> -1
         work.tree.nodes.push(GrammarNode{kind: node.kind, at: at, text: node.text.copy(), children: children, label: node.label.copy(), append: node.append, fold: node.fold, lazy: node.lazy, right: node.right, class: class, rule: -1, token: -1})
     }
     loop k in 0..<sub.classes.len() -> work.tree.classes.push(sub.classes[k])
     loop rule in sub.rules {
-        defined := false
+        ^defined: false
         loop known in work.tree.rules {
             if known.name == rule.name -> defined = true
         }
-        if !defined -> work.tree.rules.push(GrammarRule{name: rule.name.copy(), kind: rule.kind, skip: rule.skip, body: rule.body + base, at: at, source: source.copy()})
+        if !defined {
+            work.tree.rules.push(GrammarRule{name: rule.name.copy(), kind: rule.kind, skip: rule.skip, body: rule.body + base, at: at, source: source.copy()})
+        }
     }
 }
 
@@ -219,7 +221,7 @@ mark_owner: fn(work: ^GrammarWork, node: Int, rule: Int) Never! {
 }
 
 bind: fn(work: ^GrammarWork) Never! {
-    names := [String:Int]{}
+    ^names: [String:Int]{}
     loop (i, rule) in work.tree.rules {
         if (names.get(rule.name) ?? -1) < 0 -> _: names.add(rule.name.copy(), i)
     }
@@ -246,11 +248,11 @@ bind: fn(work: ^GrammarWork) Never! {
 /// `# Name` on every alternative of a parser rule or on none, each name
 /// once in a rule, in PascalCase, and only on a rule's own alternatives.
 check_alternatives: fn(work: ^GrammarWork) Never! {
-    own := [Bool]{}
+    ^own: [Bool]{}
     loop _ in 0..<work.tree.nodes.len() -> own.push(false)
     loop rule in work.tree.rules {
         alts: work.tree.nodes[rule.body].children
-        named := 0
+        ^named: 0
         loop alt in alts {
             own[alt] = true
             if work.tree.nodes[alt].text != "" -> named += 1
@@ -263,7 +265,7 @@ check_alternatives: fn(work: ^GrammarWork) Never! {
                 }
             }
         }
-        names := [String]{}
+        ^names: [String]{}
         loop alt in alts {
             name: work.tree.nodes[alt].text
             if name == "" -> next
@@ -311,7 +313,7 @@ start_rule: fn(work: ^GrammarWork, start: String) -> Int Never! {
     loop (i, rule) in work.tree.rules {
         if rule.kind == .Parser && folded_name(rule.name) == folded -> return i
     }
-    fix := "Name the binding for the rule a parse starts from, as `Expr` names `expr`"
+    ^fix: "Name the binding for the rule a parse starts from, as `Expr` names `expr`"
     loop rule in work.tree.rules {
         if rule.kind == .Parser {
             fix = "Name the binding for the rule a parse starts from, as `{pascal_name(rule.name)}` names `{rule.name}`"
@@ -339,8 +341,8 @@ split_operators: fn(work: ^GrammarWork) Never! {
         rule: work.tree.rules[r]
         if rule.kind != .Parser -> next
         alts: work.tree.nodes[rule.body].children
-        leads := 0
-        operands := 0
+        ^leads: 0
+        ^operands: 0
         loop alt in alts {
             kids: work.tree.nodes[alt].children
             lead: kids.len() >= 2 && is_self(work, kids[0], r)
@@ -351,17 +353,19 @@ split_operators: fn(work: ^GrammarWork) Never! {
         if leads == 0 -> next
         // Without an operand the rule still splits, so the fault is not
         // reported again as a cycle.
-        if operands == 0 -> work.faults.push(grammar_fault(.LeftRecursive, rule.at, "every alternative of `{rule.name}` starts or ends with `{rule.name}`, so it has no operand", "Add an alternative that parses an operand, such as a number or `'(' {rule.name} ')'`"))
+        if operands == 0 {
+            work.faults.push(grammar_fault(.LeftRecursive, rule.at, "every alternative of `{rule.name}` starts or ends with `{rule.name}`, so it has no operand", "Add an alternative that parses an operand, such as a number or `'(' {rule.name} ')'`"))
+        }
         primary: new_node(work, .Choice, rule.at)
         tails: new_node(work, .Choice, rule.at)
-        ops := [GrammarOperator]{}
+        ^ops: [GrammarOperator]{}
         loop (i, alt) in alts {
             kids: work.tree.nodes[alt].children
             level: alts.len() - i
             right: work.tree.nodes[alt].right
             lead: kids.len() >= 2 && is_self(work, kids[0], r)
             trail: kids.len() >= 2 && is_self(work, kids[kids.len() - 1], r)
-            levels := [Int]{}
+            ^levels: [Int]{}
             loop _ in kids -> levels.push(-1)
             if lead {
                 tail: new_node(work, .Alt, work.tree.nodes[alt].at)
@@ -371,7 +375,9 @@ split_operators: fn(work: ^GrammarWork) Never! {
                 ops.push(GrammarOperator{alt: alt, tail: tail, kind: kind, level: level, right: right, operands: levels})
             } else {
                 work.tree.nodes[primary].children.push(alt)
-                if trail -> ops.push(GrammarOperator{alt: alt, tail: -1, kind: .Prefix, level: level, right: right, operands: levels})
+                if trail {
+                    ops.push(GrammarOperator{alt: alt, tail: -1, kind: .Prefix, level: level, right: right, operands: levels})
+                }
             }
         }
         repeat: new_node(work, .Star, rule.at)
@@ -412,7 +418,7 @@ mark_parent: fn(work: ^GrammarWork, node: Int) Never! {
 mark_nullable: fn(work: ^GrammarWork) Never! {
     work.nullable = [Bool]{}
     loop _ in 0..<work.tree.nodes.len() -> work.nullable.push(false)
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
         loop n in 0..<work.tree.nodes.len() {
@@ -449,13 +455,17 @@ node_nullable: fn(work: GrammarWork, n: Int) -> Bool Never! {
 leading_rules: fn(work: GrammarWork, node: Int, out: ^[Int]) Never! {
     n: work.tree.nodes[node]
     if n.kind == .Ref {
-        if n.rule >= 0 && work.tree.rules[n.rule].kind == .Parser && !out.contains(n.rule) -> out.push(n.rule)
+        if n.rule >= 0 && work.tree.rules[n.rule].kind == .Parser && !out.contains(n.rule) {
+            out.push(n.rule)
+        }
         return
     }
     if n.kind == .Alt {
         loop child in n.children {
             leading_rules(work, child, out)
-            if !work.nullable[child] -> return
+            if !work.nullable[child] {
+                return
+            }
         }
         return
     }
@@ -489,8 +499,10 @@ Components: struct {
                 self.low[v] = self.index[w]
             }
         }
-        if self.low[v] != self.index[v] -> return
-        component := [Int]{}
+        if self.low[v] != self.index[v] {
+            return
+        }
+        ^component: [Int]{}
         loop {
             w: self.stack[self.stack.len() - 1]
             _: self.stack.pop()
@@ -506,13 +518,13 @@ Components: struct {
 /// cycle, at its first rule, with the path `a -> b -> a`.
 report_left_recursion: fn(work: ^GrammarWork) Never! {
     count: work.tree.rules.len()
-    edges := [[Int]]{}
+    ^edges: [[Int]]{}
     loop r in 0..<count {
-        out := [Int]{}
+        ^out: [Int]{}
         if work.tree.rules[r].kind == .Parser -> leading_rules(work, work.tree.rules[r].body, out)
         edges.push(out)
     }
-    graph := Components{edges: edges, index: [Int]{}, low: [Int]{}, on_stack: [Bool]{}, stack: [Int]{}, next_index: 0, found: [[Int]]{}}
+    ^graph: Components{edges: edges, index: [Int]{}, low: [Int]{}, on_stack: [Bool]{}, stack: [Int]{}, next_index: 0, found: [[Int]]{}}
     loop _ in 0..<count {
         graph.index.push(-1)
         graph.low.push(0)
@@ -522,13 +534,13 @@ report_left_recursion: fn(work: ^GrammarWork) Never! {
         if graph.index[r] < 0 -> graph.visit(r)
     }
     loop component in graph.found {
-        first := component[0]
+        ^first: component[0]
         loop r in component {
             if r < first -> first = r
         }
         if component.len() == 1 && !graph.edges[first].contains(first) -> next
         path: cycle_path(graph.edges, component, first)
-        names := [String]{}
+        ^names: [String]{}
         loop r in path -> names.push(work.tree.rules[r].name.copy())
         rule: work.tree.rules[first]
         fix: if component.len() == 1 -> "Write `{rule.name}` in the operator form: an alternative may start with `{rule.name}` itself, as in `{rule.name} : {rule.name} '+' {rule.name} | NUMBER ;`, with nothing before it" else -> "Factor the shared start out of these rules, or merge them into one rule in the operator form"
@@ -540,15 +552,15 @@ report_left_recursion: fn(work: ^GrammarWork) Never! {
 /// The shortest path from `first` back to itself inside `component`, as
 /// rule indexes starting and ending with `first`.
 cycle_path: fn(edges: [[Int]], component: [Int], first: Int) -> [Int] Never! {
-    before := [Int:Int]{}
-    queue := [Int]{}
+    ^before: [Int:Int]{}
+    ^queue: [Int]{}
     loop w in edges[first] {
         if component.contains(w) && (before.get(w) ?? -2) == -2 {
             _: before.add(w, first)
             queue.push(w)
         }
     }
-    at := 0
+    ^at: 0
     loop at < queue.len() {
         v: queue[at]
         at += 1
@@ -560,14 +572,14 @@ cycle_path: fn(edges: [[Int]], component: [Int], first: Int) -> [Int] Never! {
             }
         }
     }
-    back := [Int]{first}
-    v := before.get(first) ?? first
+    ^back: [Int]{first}
+    ^v: before.get(first) ?? first
     loop v != first && back.len() <= component.len() {
         back.push(v)
         v = before.get(v) ?? first
     }
     back.push(first)
-    path := [Int]{}
+    ^path: [Int]{}
     loop k in 0..<back.len() -> path.push(back[back.len() - 1 - k])
     path
 }

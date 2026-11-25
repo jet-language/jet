@@ -47,8 +47,8 @@ decode_response: fn(raw: String, code: Int) -> Dyn RubyError! {
     if code == 3 -> return Err(RubyError.Canceled)
     if code == 5 -> return Err(RubyError.Limit)
     if code != 0 -> return Err(RubyError.Protocol)
-    response := json.parse(raw) ?? return Err(RubyError.Protocol)
-    succeeded := (response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
+    ^response: json.parse(raw) ?? return Err(RubyError.Protocol)
+    ^succeeded: (response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err(RubyError.CommandFailed)
     return Ok(response.field("value") ?? Dyn.Null)
 }

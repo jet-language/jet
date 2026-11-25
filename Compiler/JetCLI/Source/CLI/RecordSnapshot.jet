@@ -28,11 +28,11 @@ jet_cli_record_visit_cycle: fn(key: String, graph: [String:[String]], state: ^[S
 }
 
 jet_cli_record_snapshot_validate: fn(entries: [JetCLIRecordIndexEntry], budget: U64{268435456}) JetCLIReadError! {
-    keys := [String:Bool]{}
-    graph := [String:[String]]{}
-    total := U64{0}
-    total_links := 0
-    previous := U64?{None}
+    ^keys: [String:Bool]{}
+    ^graph: [String:[String]]{}
+    ^total: U64{0}
+    ^total_links: 0
+    ^previous: U64?{None}
     loop entry in entries {
         jet_cli_record_entry_validate(entry)
         if previous == .Val(sequence) && entry.recorded_sequence <= sequence {
@@ -51,7 +51,7 @@ jet_cli_record_snapshot_validate: fn(entries: [JetCLIRecordIndexEntry], budget: 
             total += entry.size
         }
         total_links += entry.consumed.len() + entry.produced.len()
-        edges := [String]{}
+        ^edges: [String]{}
         loop link in entry.consumed -> edges.push(jet_cli_record_key(link.kind, link.artifact_id))
         loop link in entry.produced -> edges.push(jet_cli_record_key(link.kind, link.artifact_id))
         graph[key] = edges
@@ -74,12 +74,12 @@ jet_cli_record_snapshot_validate: fn(entries: [JetCLIRecordIndexEntry], budget: 
     }
     // copy: `entries` stays with the caller (a read parameter: no move out of
     // it, E0201) and the sorted rows own their own.
-    ordered := entries.copy()
+    ^ordered: entries.copy()
     // The comparator is a closure, not the named function. A compiler that
     // predates the named-comparator fix in JetIR's sort route frees a named
     // comparator's Ordering carrier twice, and this CLI may be built by one.
     ordered.sort_by(fn(left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) { jet_cli_record_entry_order(left, right) })
-    state := [String:Int]{}
+    ^state: [String:Int]{}
     loop entry in ordered {
         if jet_cli_record_visit_cycle(jet_cli_record_key(entry.kind, entry.artifact_id), graph, state) {
             return Err(jet_cli_read_error("record links contain a cycle at `{entry.kind}/{entry.artifact_id}`"))
@@ -92,7 +92,7 @@ jet_cli_record_snapshot_parse: fn(bytes: [U8], budget: U64{268435456}) -> [JetCL
         return Err(jet_cli_read_error("record index exceeds the 256 MiB limit"))
     }
     text: String.from_bytes(bytes) ?? return Err(jet_cli_read_error("record index is not valid UTF-8"))
-    entries := [JetCLIRecordIndexEntry]{}
+    ^entries: [JetCLIRecordIndexEntry]{}
     loop (index, line) in text.split("\n").to_list() {
         if line.trim() == "" -> next
         raw: line.bytes()
@@ -109,7 +109,7 @@ jet_cli_record_snapshot_parse: fn(bytes: [U8], budget: U64{268435456}) -> [JetCL
 }
 
 jet_cli_record_snapshot_query: fn(entries: [JetCLIRecordIndexEntry], authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
-    visible := [String:Bool]{}
+    ^visible: [String:Bool]{}
     if !authenticated {
         loop entry in entries {
             if entry.capture != "sensitive" {
@@ -117,13 +117,13 @@ jet_cli_record_snapshot_query: fn(entries: [JetCLIRecordIndexEntry], authenticat
             }
         }
     }
-    rows := [JetCLIRecordIndexEntry]{}
+    ^rows: [JetCLIRecordIndexEntry]{}
     loop entry in entries {
         if !authenticated && entry.capture == "sensitive" -> next
-        row := entry.copy()
+        ^row: entry.copy()
         if !authenticated {
-            consumed := [JetDriverRecordLink]{}
-            produced := [JetDriverRecordLink]{}
+            ^consumed: [JetDriverRecordLink]{}
+            ^produced: [JetDriverRecordLink]{}
             loop link in entry.consumed {
                 if visible.get(jet_cli_record_key(link.kind, link.artifact_id)) != None {
                     consumed.push(link.copy())
@@ -145,7 +145,7 @@ jet_cli_record_snapshot_query: fn(entries: [JetCLIRecordIndexEntry], authenticat
 }
 
 jet_cli_record_next_sequence: fn(entries: [JetCLIRecordIndexEntry]) -> U64 JetCLIReadError! {
-    largest := U64{0}
+    ^largest: U64{0}
     loop entry in entries {
         if entry.recorded_sequence > largest -> largest = entry.recorded_sequence
     }

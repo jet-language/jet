@@ -41,13 +41,13 @@ COMPARISON_RECORD_ORACLE: `{"contamination":null,"discarded_cases":0,"first_diff
         panic("secret name components")
     }
     argv: jet_cli_receipt_argv_identity([String]{"test-compare", "--apiToken2=hidden", "--password", "hidden", "corpus.json"})
-    expected := [U8]{}
+    ^expected: [U8]{}
     loop arg in
         ([String]{"test-compare", "--apiToken2=<redacted>", "--password", "<redacted>", "corpus.json"}) {
         jet_driver_run_receipt_frame(expected, arg.bytes())
     }
     if argv != expected -> panic("receipt argv redaction framing")
-    members := [JetDriverRunReceiptInput]{}
+    ^members: [JetDriverRunReceiptInput]{}
     jet_cli_receipt_canonical_member(JetDriverRunReceiptInput{path: "/project/.jet/generated/cache.bin", digest: id}, "/project", members) ?? panic("generated exclusion")
     if members.len() != 0 -> panic("generated inputs excluded from canonical target identity")
     jet_cli_receipt_canonical_member(JetDriverRunReceiptInput{path: "/project/corpus.json", digest: id}, "/project", members) ?? panic("relative member")

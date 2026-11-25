@@ -58,7 +58,7 @@ mrc_spelling: fn(rule: TAppliedRule, menus: [TAppliedRuleArgumentMenu]) -> Strin
     if rule.name == "Test" -> return "#Test(\"coverage\")"
     if !mrc_arguments_required(rule) -> return "#{rule.name}"
     if rule.name == "UnitFamily" -> return "#UnitFamily(Length, dimension)"
-    args := [String]{}
+    ^args: [String]{}
     loop param in rule.signature.params {
         if param.default_source == None {
             args.push(mrc_placeholder(param.kind, param.source_type, menus))
@@ -160,7 +160,7 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
     lexed: if generated -> lex_generated(source.bytes()) else -> lex(source.bytes())
     if !lexed.diagnostics.is_empty() -> return mrc_render(lexed.diagnostics)
     parsed: if generated -> parse_generated_source(source.bytes()) else -> parse_source(source.bytes())
-    rejected := [String]{}
+    ^rejected: [String]{}
     loop diagnostic in parsed.diagnostics {
         if diagnostic.code == "E0927" || diagnostic.code == "E0355" {
             rejected.push("{diagnostic.code}: {diagnostic.what}")
@@ -175,11 +175,11 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
 #Test("every_active_row_is_reachable_at_a_declared_site") {
     catalog: mrc_catalog()
     assert(catalog.rows.len() > 20, "the marker catalog must hold the active rows")
-    ghosts := [String]{}
+    ^ghosts: [String]{}
     loop rule in catalog.rows {
         if !mrc_row_is_active(rule) -> next
         marker: mrc_spelling(rule, catalog.argument_menus)
-        renderable := [String]{}
+        ^renderable: [String]{}
         loop site in rule.sites {
             if mrc_site_is_source_renderable(site) -> renderable.push(site)
         }
@@ -187,8 +187,8 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
             ghosts.push("#{rule.name} declares only interior sites {rule.sites.join(", ")}, so no source can reach it")
             next
         }
-        rejections := [String]{}
-        reached := false
+        ^rejections: [String]{}
+        ^reached: false
         loop site in renderable {
             source: mrc_program_at(marker, rule, site) ?? next
             rejected: mrc_rejected_the_marker(source)
@@ -213,13 +213,13 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
 // fail to parse).
 #Test("every_active_row_walks_parse_validate_format_highlight_reflect") {
     catalog: mrc_catalog()
-    registry := SemaScopeMembersMarkerRegistry{applied_rules: catalog.rows, argument_menus: catalog.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, format_names: CORE_FORMAT_NAMES}
+    ^registry: SemaScopeMembersMarkerRegistry{applied_rules: catalog.rows, argument_menus: catalog.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, format_names: CORE_FORMAT_NAMES}
     assert(sema_scope_members_registry_add_applied_catalog(registry, catalog), "the applied catalog must register once")
-    failures := [String]{}
+    ^failures: [String]{}
     loop rule in catalog.rows {
         if !mrc_row_is_active(rule) -> next
         marker: mrc_spelling(rule, catalog.argument_menus)
-        found := String?{None}
+        ^found: String?{None}
         loop site in rule.sites {
             if !mrc_site_is_source_renderable(site) -> next
             source: mrc_program_at(marker, rule, site) ?? next
@@ -257,7 +257,7 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
 #Test("every_active_row_name_is_marker_name_case") {
     catalog: mrc_catalog()
     assert(catalog.rows.len() > 20, "the marker catalog must hold the active rows")
-    wrong := [String]{}
+    ^wrong: [String]{}
     loop rule in catalog.rows {
         if !sema_casing_has_case(rule.name, SemaNameCase.Pascal) -> wrong.push("#{rule.name}")
     }

@@ -25,11 +25,11 @@ http_probe: fn(port: Int, probe: Dyn, timeout_ms: Int) -[Net, Time, Time.Wait]> 
     started: time.instant()
     method: or_text(member(probe, "method"), "GET")
     path: if truthy_at(probe, "path") -> js_text(dyn_at(probe, "path")) else -> "/"
-    request := client.request(method, "http://127.0.0.1:{port}{path}").timeout(timeout_ms).redirects(0)
+    ^request: client.request(method, "http://127.0.0.1:{port}{path}").timeout(timeout_ms).redirects(0)
     if value_at(probe, "body") == .Val(sent) -> request = request.body(js_text(sent))
     answer: request.send() ?? return failed_probe(probe_error(err, port, started, timeout_ms), started)
     body: answer.text() ?? return failed_probe(probe_error(err, port, started, timeout_ms), started)
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["ok"] = Dyn.Bool(true)
     out["status"] = Dyn.Int(answer.status())
     out["headers"] = node_headers(answer.headers.fields)
@@ -56,7 +56,7 @@ probe_matches: fn(probe: Dyn, result: Dyn, protocol: Dyn) -> Bool {
 // named in any case, a content type compared as a media type.
 expected_headers_match: fn(expected: Dyn, actual: Dyn) -> Bool {
     if !is_header_map(expected) || !(actual == .Object(_)) -> return false
-    lowered := Dyn.object()
+    ^lowered: Dyn.object()
     loop header in members(actual) -> lowered[header.key.lower()] = header.value
     members(expected).all(fn(header) { header_matches(header.key, js_text(header.value), dyn_at(lowered, header.key.lower())) })
 }
@@ -76,7 +76,7 @@ normalized_header_value: fn(name: String, value: String) -> String {
     trimmed: value.trim()
     if name.lower() != "content-type" -> return trimmed
     parts: trimmed.split(";").to_list()
-    parameters := parts.slice(1, parts.len()).map(fn(part) { normalized_parameter(part) })
+    ^parameters: parts.slice(1, parts.len()).map(fn(part) { normalized_parameter(part) })
     parameters.sort()
     [parts[0].trim().lower()].concat(parameters).join(";")
 }
@@ -91,7 +91,7 @@ normalized_parameter: fn(part: String) -> String {
 
 // The probe's answer when the request failed.
 failed_probe: fn(error: String, started: time.Instant) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["ok"] = Dyn.Bool(false)
     out["error"] = Dyn.Text(error.copy())
     out["latencyMs"] = latency(started)
@@ -119,7 +119,7 @@ latency: fn(started: time.Instant) -> Dyn {
 // joined by `; `, a repeat of a single-valued header dropped and any other
 // repeat joined by `, `.
 node_headers: fn(fields: [http.Header]) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     loop field in fields {
         name: field.name.lower()
         seen: dyn_at(out, name)
@@ -147,11 +147,11 @@ node_headers: fn(fields: [http.Header]) -> Dyn {
 line_probe: fn(port: Int, probe: Dyn, timeout_ms: Int) -[Net, Time, Time.Wait]> Dyn {
     started: time.instant()
     address: net.socket_addr_parse("127.0.0.1:{port}") ?? return failed_probe("{err}", started)
-    stream := connect_within(address, timeout_ms) ?? return failed_probe(line_error(started, timeout_ms, "connect ECONNREFUSED 127.0.0.1:{port}"), started)
+    ^stream: connect_within(address, timeout_ms) ?? return failed_probe(line_error(started, timeout_ms, "connect ECONNREFUSED 127.0.0.1:{port}"), started)
     sent: if dyn_at(probe, "send") == .Null -> "" else -> js_text(dyn_at(probe, "send"))
     net.tcp_write_text(stream, sent) ?? return closed_probe(stream, failed_probe("{err}", started))
     net.tcp_shutdown(stream, NetShutdown.Write) ?? return closed_probe(stream, failed_probe("{err}", started))
-    body := [U8]{}
+    ^body: [U8]{}
     loop {
         remaining: timeout_ms - started.elapsed_millis()
         if remaining <= 0 {
@@ -180,7 +180,7 @@ line_error: fn(started: time.Instant, timeout_ms: Int, error: String) -> String 
 
 // The line probe's answer `body`.
 answered_line: fn(body: ^^String, started: time.Instant) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["ok"] = Dyn.Bool(true)
     out["body"] = Dyn.Text(body)
     out["latencyMs"] = latency(started)
@@ -222,7 +222,7 @@ probe_mismatch: fn(probe: Dyn, result: Dyn, protocol: String) -> String {
 header_mismatch: fn(probe: Dyn, result: Dyn) -> String {
     expected: dyn_at(probe, "expectHeaders")
     if !is_header_map(expected) -> return "missing expected response headers"
-    lowered := Dyn.object()
+    ^lowered: Dyn.object()
     if dyn_at(result, "headers") == .Object(_) {
         loop header in members(dyn_at(result, "headers")) {
             lowered[header.key.lower()] = header.value

@@ -215,7 +215,7 @@ env_config: fn(mode: String, root: String, cwd: String) -> Config Err! {
     worker: process.env_get("JETPACK_WORKER") ?? "lead"
     if !is_plain_name(worker) -> return Err("JETPACK_WORKER must be a plain name")
     selection: if areas == .Val(names) -> sorted(names).join(",") else -> "*"
-    tag_input := [U8]{}
+    ^tag_input: [U8]{}
     tag_input.extend(root.bytes())
     tag_input.push(U8{0})
     tag_input.extend(selection.bytes())
@@ -291,18 +291,18 @@ Embeds: struct {
 // the compiler's library member files (Tools/Agent/CompilerPackages.jet
 // sources), for the compiler-slice check.
 assemble: fn(config: Config, members: [String]) -> Assembled Err! {
-    embeds := Embeds{copies: [String]{}, targets: [String:String]{}}
+    ^embeds: Embeds{copies: [String]{}, targets: [String:String]{}}
     registered: read_manifest(config, "sources.list", embeds)
     drift: slice_drift(config.root, members)
     if drift.len() > 0 {
-        listed := [String]{}
+        ^listed: [String]{}
         loop problem in drift -> listed.push("  {problem}")
         return Err("the Jetpack compiler slice drifted from the compiler's packages:\n{listed.join("\n")}")
     }
     tests: read_manifest(config, "tests.list", embeds)
     if config.areas == .Val(selected) {
         listing: files.read("{config.root}/Jetpack/Bootstrap/sources.list") ?? return Err("cannot read Jetpack/Bootstrap/sources.list: {err}")
-        known := [String:Bool]{}
+        ^known: [String:Bool]{}
         loop line in split_lines(listing) {
             if section_header(line.trim()) == .Val(header) -> known[header.name] = true
         }
@@ -312,7 +312,7 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
             }
         }
     }
-    seen := [String:Bool]{}
+    ^seen: [String:Bool]{}
     loop entry in registered {
         if seen.get(entry.path) ?? false {
             return Err("{entry.place}: duplicate source {entry.path}")
@@ -341,8 +341,8 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
     // complete: its dependency areas may hold another writer's unlisted work
     // in progress, which is left out of the unit and noted, never a reason to
     // fail this proof.
-    blocking := [String]{}
-    skipped := 0
+    ^blocking: [String]{}
+    ^skipped: 0
     loop found in inventory(config.root, config.areas) {
         if seen.get(found.path) ?? false -> next
         if config.own == .Val(own) && found.area != own {
@@ -352,7 +352,7 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
         blocking.push(found.path.copy())  // copy: the inventory row is dropped
     }
     if blocking.len() > 0 {
-        listed := [String]{}
+        ^listed: [String]{}
         loop path in sorted(blocking) -> listed.push("  {path}")
         return Err("Jetpack sources are not listed in Jetpack/Bootstrap/sources.list or tests.list; add them in explicit order:\n{listed.join("\n")}")
     }
@@ -368,8 +368,8 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
         }
     }
     // The unit: the implementation files, then the selected tests.
-    units := registered
-    test_paths := [String:Bool]{}
+    ^units: registered
+    ^test_paths: [String:Bool]{}
     if config.mode != "hosted" {
         loop entry in tests {
             own_ok: if config.own == .Val(own) -> entry.section == own else -> true
@@ -399,13 +399,13 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
     // there each struct and enum declaration of a file the unit doesn't
     // judge carries its member-liveness allowance (allow_members): lines
     // still match, and only that line's columns shift.
-    seen_imports := [String:Bool]{}
-    seen_members := [String:Bool]{}
-    claims := [Claim]{}
-    claim_seen := [String:Bool]{}
-    output := [U8]{}
-    next_line := 1
-    mapped := [Mapped]{}
+    ^seen_imports: [String:Bool]{}
+    ^seen_members: [String:Bool]{}
+    ^claims: [Claim]{}
+    ^claim_seen: [String:Bool]{}
+    ^output: [U8]{}
+    ^next_line: 1
+    ^mapped: [Mapped]{}
     loop entry in units {
         append(output, "// [jet-bootstrap source: {entry.path}]\n")
         next_line += 1
@@ -421,8 +421,8 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
         body_bytes: body.len()
         start_byte: output.len()
         start_line: next_line
-        newlines := 0
-        line_starts := [Int]{0}
+        ^newlines: 0
+        ^line_starts: [Int]{0}
         loop (index, byte) in body {
             if byte == (U8{10}) {
                 newlines += 1
@@ -512,10 +512,10 @@ append: fn(out: ^[U8], text: String) { out.extend(text.bytes()) }
 
 // The source map: schema jet-bootstrap-source-map/v2.
 source_map: fn(config: Config, mapped: [Mapped], embeds: Embeds, claims: [Claim]) -> Dyn {
-    segments := [Dyn]{}
-    file_rows := [Dyn]{}
+    ^segments: [Dyn]{}
+    ^file_rows: [Dyn]{}
     loop row in mapped {
-        starts := [Dyn]{}
+        ^starts: [Dyn]{}
         loop start in row.line_starts -> starts.push(Dyn.Int(start))
         segments.push(
             Dyn.Object(
@@ -542,7 +542,7 @@ source_map: fn(config: Config, mapped: [Mapped], embeds: Embeds, claims: [Claim]
             ),
         )
     }
-    embedded := [Dyn]{}
+    ^embedded: [Dyn]{}
     loop staged in embeds.copies {
         target: embeds.targets.get(staged) ?? ""
         embedded.push(
@@ -554,8 +554,8 @@ source_map: fn(config: Config, mapped: [Mapped], embeds: Embeds, claims: [Claim]
             ),
         )
     }
-    names := [Dyn]{}
-    sections := [Dyn]{}
+    ^names: [Dyn]{}
+    ^sections: [Dyn]{}
     loop claim in claims {
         names.push(Dyn.Text(claim.name.copy()))  // copy: the claim list is borrowed
         sections.push(Dyn.Text(claim.section.copy()))  // copy: the claim list is borrowed
@@ -586,7 +586,7 @@ Inventoried: struct {
 // Every `.jet` file (but package.jet) under Jetpack/<Area>/Source and Tests of
 // each area folder but Bootstrap, of the `areas` given (None: every one).
 inventory: fn(root: String, areas: [String]?) -> [Inventoried] {
-    out := [Inventoried]{}
+    ^out: [Inventoried]{}
     listed: files.list_dir("{root}/Jetpack") ?? return out
     loop area in listed {
         if !area.is_dir || area.name == "Bootstrap" -> next
@@ -604,8 +604,8 @@ inventory: fn(root: String, areas: [String]?) -> [Inventoried] {
 // every area's inventory that neither MANIFESTS names, then each listed path
 // that is not a file, at its line.
 listed_problems: fn(root: String) -> [String] Err! {
-    seen := [String:Bool]{}
-    problems := [String]{}
+    ^seen: [String:Bool]{}
+    ^problems: [String]{}
     loop name in MANIFESTS {
         label: "Jetpack/Bootstrap/{name}"
         text: files.read("{root}/{label}") ?? return Err("cannot read {label}: {err}")
@@ -618,7 +618,7 @@ listed_problems: fn(root: String) -> [String] Err! {
             }
         }
     }
-    unlisted := [String]{}
+    ^unlisted: [String]{}
     loop found in inventory(root, None) {
         if !(seen.get(found.path) ?? false) {
             unlisted.push("{found.path} is in neither {MANIFESTS.join(" nor ")}; add it in explicit order")
@@ -631,8 +631,8 @@ listed_problems: fn(root: String) -> [String] Err! {
 // The `.jet` files under `directory` (repository-relative), depth first in
 // name order.
 jet_files_under: fn(root: String, directory: String) -> [String] {
-    out := [String]{}
-    listed := files.list_dir("{root}/{directory}") ?? return out
+    ^out: [String]{}
+    ^listed: files.list_dir("{root}/{directory}") ?? return out
     listed.sort_by(fn(left: DirEntry, right: DirEntry) { compare_bytes(left.name.bytes(), right.name.bytes()) })
     loop entry in listed {
         path: "{directory}/{entry.name}"
@@ -648,7 +648,7 @@ jet_files_under: fn(root: String, directory: String) -> [String] {
 }
 
 compare_bytes: fn(left: [U8], right: [U8]) -> Ordering {
-    at := 0
+    ^at: 0
     loop at < left.len() && at < right.len() {
         if left[at] != right[at] {
             return if left[at] < right[at] -> Ordering.Less else -> Ordering.Greater
@@ -667,7 +667,7 @@ compare_ints: fn(left: Int, right: Int) -> Ordering {
 }
 
 sorted: fn(items: [String]) -> [String] {
-    out := items.copy()
+    ^out: items.copy()
     out.sort_by(fn(left: String, right: String) { compare_bytes(left.bytes(), right.bytes()) })
     out
 }
@@ -688,7 +688,7 @@ has_section: fn(entries: [Entry], section: String) -> Bool {
 
 // `text` split at commas, each part trimmed, empty parts and repeats dropped.
 comma_list: fn(text: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop part in text.split(",") {
         name: part.trim()
         if name != "" && !has(out, name) -> out.push(name)
@@ -714,7 +714,7 @@ is_test_path: fn(path: String) -> Bool {
 
 // The lines of `text`, each without its `\r\n` or `\n`.
 split_lines: fn(text: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop line in text.split("\n") -> out.push(line.removesuffix("\r"))
     out
 }
@@ -749,9 +749,9 @@ merged_manifest: fn(config: Config, working: String, name: String) -> String Err
     own: config.own ?? ""
     head_bytes: head_file(config.root, "Jetpack/Bootstrap/{name}") ?? return Err(err.message)
     head_text: String.from_bytes(head_bytes) ?? ""
-    head_sections := [String:[String]]{}
-    current := ""
-    inside := false
+    ^head_sections: [String:[String]]{}
+    ^current: ""
+    ^inside: false
     loop line in split_lines(head_text) {
         if section_header(line.trim()) == .Val(header) {
             current = header.name
@@ -759,11 +759,11 @@ merged_manifest: fn(config: Config, working: String, name: String) -> String Err
             next
         }
         if !inside -> next
-        rows := head_sections.get(current) ?? [String]{}
+        ^rows: head_sections.get(current) ?? [String]{}
         rows.push(line)
         head_sections[current] = rows
     }
-    out := [String]{}
+    ^out: [String]{}
     current = ""
     inside = false
     owned: config.own != None
@@ -795,14 +795,14 @@ read_manifest: fn(config: Config, name: String, embeds: ^Embeds) -> [Entry] Err!
     label: "Jetpack/Bootstrap/{name}"
     working: files.read("{config.root}/{label}") ?? return Err("cannot read {label}: {err}")
     text: merged_manifest(config, working, name) ?? return Err(err.message)
-    entries := [Entry]{}
-    misplaced := [String]{}
+    ^entries: [Entry]{}
+    ^misplaced: [String]{}
     // Section headers look like `# == PackageModel ==`; the name is the text
     // before any `(`. An area that spans several Jetpack folders names them:
     // `# == Engine (folders: Store, Trust) ==`.
-    section := ""
-    in_section := false
-    folders := [String]{}
+    ^section: ""
+    ^in_section: false
+    ^folders: [String]{}
     loop (index, raw) in split_lines(text) {
         source_path: raw.trim()
         if section_header(source_path) == .Val(header) {
@@ -866,8 +866,8 @@ jetpack_area: fn(path: String) -> String {
 // and `find("toolchain:…")` do, and jet refuses a name that leaves it (E0957).
 rebase_embeds: fn(root: String, text: String, source_path: String, place: String, embeds: ^Embeds) -> String Err! {
     raw: text.bytes()
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < raw.len() {
         if !starts_at(raw, at, "embed_file(\"") {
             out.push(raw[at])
@@ -875,7 +875,7 @@ rebase_embeds: fn(root: String, text: String, source_path: String, place: String
             next
         }
         open: at + 12
-        end := open
+        ^end: open
         loop end < raw.len() && raw[end] != (U8{34}) && raw[end] != (U8{92}) && raw[end] != (U8{123}) && raw[end] != (U8{125}) {
             end += 1
         }
@@ -975,7 +975,7 @@ copy_tree: fn(from: String, to: String) Err! {
 claim_name: fn(line: String) -> String? {
     raw: line.bytes()
     if !starts_at(raw, 0, "#Test(\"") -> return None
-    end := 7
+    ^end: 7
     loop end < raw.len() && raw[end] != (U8{34}) && raw[end] != (U8{92}) && raw[end] != (U8{123}) && raw[end] != (U8{125}) {
         end += 1
     }
@@ -990,7 +990,7 @@ claim_name: fn(line: String) -> String? {
 // escapes) so the source map's claim ledger names exactly what `jet test`
 // prints.
 render_tests: fn(text: String, path: String, section: String, claims: ^[Claim], seen: ^[String:Bool]) Err! {
-    count := 0
+    ^count: 0
     loop (index, line) in text.split("\n").to_list() {
         if claim_name(line) == .Val(name) {
             count += 1
@@ -1038,12 +1038,12 @@ relative_to: fn(root: String, path: String) -> String {
 
 normalize_join: fn(directory: String, path: String) -> String {
     whole: if path.starts_with("/") -> path else -> "{directory}/{path}"
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in whole.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
             if parts.len() == 0 -> return ""
-            _ := parts.pop()
+            ^_: parts.pop()
             next
         }
         parts.push(part)
@@ -1063,8 +1063,8 @@ AreaGraph: struct {
     // The area and its transitive dependencies, bottom-up.
     closure: fn(self, area: String) -> [String] Err! {
         if self.deps.get(area) == None -> return Err("unknown area {area}")
-        seen := [String:Bool]{}
-        pending := [String]{area.copy()}  // copy: the walk owns its queue
+        ^seen: [String:Bool]{}
+        ^pending: [String]{area.copy()}  // copy: the walk owns its queue
         loop pending.len() > 0 {
             name: pending.pop() ?? ""
             if seen.get(name) ?? false -> next
@@ -1072,7 +1072,7 @@ AreaGraph: struct {
             direct: self.deps.get(name) ?? [String]{}
             loop dep in direct -> pending.push(dep)
         }
-        out := [String]{}
+        ^out: [String]{}
         loop name in self.order {
             if seen.get(name) ?? false -> out.push(name.copy())  // copy: the order stays the graph's
         }
@@ -1088,9 +1088,9 @@ Sections: struct {
 
 manifest_sections: fn(root: String, file: String) -> Sections Err! {
     text: files.read("{root}/Jetpack/Bootstrap/{file}") ?? return Err("cannot read Jetpack/Bootstrap/{file}: {err}")
-    found := Sections{names: [String]{}, paths: [String:[String]]{}}
-    current := ""
-    inside := false
+    ^found: Sections{names: [String]{}, paths: [String:[String]]{}}
+    ^current: ""
+    ^inside: false
     loop raw in split_lines(text) {
         line: raw.trim()
         if section_header(line) == .Val(header) {
@@ -1101,7 +1101,7 @@ manifest_sections: fn(root: String, file: String) -> Sections Err! {
             next
         }
         if !inside || line == "" || line.starts_with("#") -> next
-        rows := found.paths.get(current) ?? [String]{}
+        ^rows: found.paths.get(current) ?? [String]{}
         rows.push(line)
         found.paths[current.copy()] = rows  // copy: later lines file under it
     }
@@ -1110,8 +1110,8 @@ manifest_sections: fn(root: String, file: String) -> Sections Err! {
 
 area_graph: fn(root: String) -> AreaGraph Err! {
     text: files.read("{root}/Jetpack/Bootstrap/areas.list") ?? return Err("cannot read Jetpack/Bootstrap/areas.list: {err}")
-    order := [String]{}
-    deps := [String:[String]]{}
+    ^order: [String]{}
+    ^deps: [String:[String]]{}
     loop (index, raw) in split_lines(text) {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
@@ -1121,7 +1121,7 @@ area_graph: fn(root: String) -> AreaGraph Err! {
         }
         area: parts.head.trim()
         if deps.get(area) != None -> return Err("areas.list:{index + 1}: duplicate area {area}")
-        direct := [String]{}
+        ^direct: [String]{}
         loop piece in parts.tail.split(",") {
             dep: piece.trim()
             if dep == "" -> next
@@ -1166,7 +1166,7 @@ areas_command: fn(root: String, args: [String]) -> String Err! {
         }
         "sources" -> {
             if args.len() != 2 -> return Err("sources needs an area")
-            listed := [String]{}
+            ^listed: [String]{}
             loop area in graph.closure(args[1]) ?? return Err(err.message) {
                 listed.extend(graph.sources.get(area) ?? [String]{})
             }
@@ -1178,7 +1178,7 @@ areas_command: fn(root: String, args: [String]) -> String Err! {
             }
             // Only areas with Jetpack sources are checkable units; reused
             // Compiler sections are dependencies.
-            populated := [String]{}
+            ^populated: [String]{}
             loop area in graph.order {
                 paths: graph.sources.get(area) ?? [String]{}
                 if paths.any(fn(path) { path.starts_with("Jetpack/") }) {
@@ -1209,7 +1209,7 @@ compiler_members: fn(root: String, repo: String) -> [String] Err! {
 // The member paths of `NAME<TAB>DIRECTORY<TAB>FILE` rows, without each
 // package's run.jet, under Compiler/.
 member_rows: fn(text: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop row in text.split("\n") {
         if row == "" -> next
         fields: row.split("\t").to_list()
@@ -1228,7 +1228,7 @@ slice_problems: fn(root: String, repo: String) -> [String] Err! {
 
 // The non-blank, non-comment lines of `text`, trimmed.
 listed_paths: fn(text: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop raw in split_lines(text) {
         line: raw.trim()
         if line != "" && !line.starts_with("#") -> out.push(line)
@@ -1258,17 +1258,17 @@ SourceCache: struct {
 
 // The slice's drift problems, in report order.
 slice_drift: fn(root: String, members: [String]) -> [String] {
-    cache := SourceCache{root: root, texts: [String:String]{}}
+    ^cache: SourceCache{root: root, texts: [String:String]{}}
     sources: files.read("{root}/Jetpack/Bootstrap/sources.list") ?? ""
     tests: files.read("{root}/Jetpack/Bootstrap/tests.list") ?? ""
-    jetpack_list := listed_paths(sources)
+    ^jetpack_list: listed_paths(sources)
     jetpack_list.extend(listed_paths(tests))
-    member_set := [String:Bool]{}
+    ^member_set: [String:Bool]{}
     loop path in members -> member_set[path] = true
-    slice := [String]{}
-    listed_set := [String:Bool]{}
-    slice_packages := [String:Bool]{}
-    problems := [String]{}
+    ^slice: [String]{}
+    ^listed_set: [String:Bool]{}
+    ^slice_packages: [String:Bool]{}
+    ^problems: [String]{}
     loop path in jetpack_list {
         if !path.starts_with("Compiler/") -> next
         slice.push(path.copy())  // copy: the unit list keeps it
@@ -1282,13 +1282,13 @@ slice_drift: fn(root: String, members: [String]) -> [String] {
     }
     // Names declared by the unit itself, and the unlisted compiler files that
     // alone declare a name.
-    unit_declared := [String:Bool]{}
+    ^unit_declared: [String:Bool]{}
     loop path in jetpack_list {
         loop name in declared(cache.code_of(path)) -> unit_declared[name] = true
     }
-    owner_paths := [String]{}
-    owner_fns := [Bool]{}
-    owner_at := [String:Int]{}
+    ^owner_paths: [String]{}
+    ^owner_fns: [Bool]{}
+    ^owner_at: [String:Int]{}
     loop path in members {
         loop row in declarations(cache.code_of(path)) {
             if owner_at.get(row.name) != None {
@@ -1300,10 +1300,10 @@ slice_drift: fn(root: String, members: [String]) -> [String] {
             owner_fns.push(row.is_fn)
         }
     }
-    missing_order := [String]{}
-    missing := [String:[String]]{}
-    queue := jetpack_list.copy()
-    at := 0
+    ^missing_order: [String]{}
+    ^missing: [String:[String]]{}
+    ^queue: jetpack_list.copy()
+    ^at: 0
     loop at < queue.len() {
         path: queue[at].copy()  // copy: the queue grows below
         at += 1
@@ -1327,18 +1327,18 @@ slice_drift: fn(root: String, members: [String]) -> [String] {
                     unit_declared[declared_name] = true
                 }
             }
-            rows := missing.get(owner) ?? [String]{}
+            ^rows: missing.get(owner) ?? [String]{}
             line: "{name} (used by {path})"
             if !has(rows, line) -> rows.push(line)
             missing[owner] = rows
         }
     }
-    member_index := [String:Int]{}
+    ^member_index: [String:Int]{}
     loop (index, path) in members -> member_index[path] = index
     missing_order.sort_by(fn(left: String, right: String) { compare_ints(member_index.get(left) ?? 0, member_index.get(right) ?? 0) })
     loop owner in missing_order {
         rows: missing.get(owner) ?? [String]{}
-        shown := [String]{}
+        ^shown: [String]{}
         loop index in 0..<rows.len() {
             if index < 3 -> shown.push(rows[index].copy())  // copy: the row list stays whole
         }
@@ -1357,8 +1357,8 @@ package_of: fn(path: String) -> String {
 // name a dependency (literal_end).
 code: fn(text: String) -> String {
     raw: text.bytes()
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < raw.len() {
         end: literal_end(raw, at)
         if {
@@ -1382,7 +1382,7 @@ literal_end: fn(raw: [U8], at: Int) -> Int {
     }
     if raw[at] == (U8{96}) {
         count: run_of(raw, at, U8{96})
-        close := at + count
+        ^close: at + count
         loop close < raw.len() && (raw[close] != (U8{96}) || run_of(raw, close, U8{96}) != count) {
             close += if raw[close] == (U8{96}) -> run_of(raw, close, U8{96}) else -> 1
         }
@@ -1393,7 +1393,7 @@ literal_end: fn(raw: [U8], at: Int) -> Int {
         return if end < 0 -> raw.len() else -> end + 3
     }
     if raw[at] == (U8{34}) {
-        end := at + 1
+        ^end: at + 1
         loop end < raw.len() && raw[end] != (U8{34}) && raw[end] != (U8{10}) {
             end += if raw[end] == (U8{92}) -> 2 else -> 1
         }
@@ -1405,14 +1405,14 @@ literal_end: fn(raw: [U8], at: Int) -> Int {
 
 // The length of the run of `mark` bytes at `from`.
 run_of: fn(raw: [U8], from: Int, mark: U8) -> Int {
-    end := from
+    ^end: from
     loop end < raw.len() && raw[end] == mark -> end += 1
     end - from
 }
 
 // The offset of the first `needle` in `raw` at or after `from`, -1 when none.
 find_text: fn(raw: [U8], from: Int, needle: String) -> Int {
-    at := from
+    ^at: from
     loop at < raw.len() {
         if starts_at(raw, at, needle) -> return at
         at += 1
@@ -1425,9 +1425,9 @@ find_text: fn(raw: [U8], from: Int, needle: String) -> Int {
 // `NAME:` (not `:=`).
 declarations: fn(source: String) -> [Declaration] {
     raw: source.bytes()
-    out := [Declaration]{}
-    resume := 0
-    at := 0
+    ^out: [Declaration]{}
+    ^resume: 0
+    ^at: 0
     loop at < raw.len() {
         if at < resume || (at > 0 && raw[at - 1] != (U8{10})) {
             at += 1
@@ -1461,11 +1461,11 @@ declaration_at: fn(raw: [U8], at: Int) -> DeclarationAt {
     if plain.end > 0 -> return plain
     // `NAME` then blanks then `:` not followed by `=`.
     if at >= raw.len() || !is_upper(raw[at]) -> return none
-    end := at + 1
+    ^end: at + 1
     loop end < raw.len() && (is_upper(raw[end]) || is_digit(raw[end]) || raw[end] == (U8{95})) {
         end += 1
     }
-    colon := end
+    ^colon: end
     loop colon < raw.len() && is_space(raw[colon]) -> colon += 1
     if colon >= raw.len() || raw[colon] != (U8{58}) -> return none
     if colon + 1 < raw.len() && raw[colon + 1] == (U8{61}) -> return none
@@ -1475,7 +1475,7 @@ declaration_at: fn(raw: [U8], at: Int) -> DeclarationAt {
 // The offset after `pub` and its blanks at `at`, `at` when none.
 pub_end: fn(raw: [U8], at: Int) -> Int {
     if !starts_at(raw, at, "pub") -> return at
-    end := at + 3
+    ^end: at + 3
     loop end < raw.len() && is_space(raw[end]) -> end += 1
     if end == at + 3 -> at else -> end
 }
@@ -1485,10 +1485,10 @@ kind_declaration: fn(raw: [U8], at: Int) -> DeclarationAt {
     none: DeclarationAt{name: "", is_fn: false, end: 0}
     name_end: ident_end(raw, at)
     if name_end == at -> return none
-    colon := name_end
+    ^colon: name_end
     loop colon < raw.len() && is_space(raw[colon]) -> colon += 1
     if colon >= raw.len() || raw[colon] != (U8{58}) -> return none
-    kind_at := colon + 1
+    ^kind_at: colon + 1
     loop kind_at < raw.len() && is_space(raw[kind_at]) -> kind_at += 1
     kinds: [String]{"fn", "struct", "enum", "trait", "type"}
     loop kind in kinds {
@@ -1503,9 +1503,9 @@ kind_declaration: fn(raw: [U8], at: Int) -> DeclarationAt {
 // An enum's variants: the names that open its body's top-level entries.
 variants: fn(source: String) -> [String] {
     raw: source.bytes()
-    names := [String]{}
-    resume := 0
-    at := 0
+    ^names: [String]{}
+    ^resume: 0
+    ^at: 0
     loop at < raw.len() {
         if at < resume || (at > 0 && raw[at - 1] != (U8{10})) {
             at += 1
@@ -1541,16 +1541,16 @@ enum_body_from: fn(raw: [U8], at: Int) -> EnumBody {
     none: EnumBody{start: 0, end: 0}
     name_end: ident_end(raw, at)
     if name_end == at || name_end >= raw.len() || raw[name_end] != (U8{58}) -> return none
-    kind := name_end + 1
+    ^kind: name_end + 1
     loop kind < raw.len() && is_space(raw[kind]) -> kind += 1
     if !starts_at(raw, kind, "enum") || (kind + 4 < raw.len() && is_ident_byte(raw[kind + 4])) {
         return none
     }
-    open := kind + 4
+    ^open: kind + 4
     loop open < raw.len() && raw[open] != (U8{123}) && raw[open] != (U8{10}) -> open += 1
     if open + 1 >= raw.len() || raw[open] != (U8{123}) || raw[open + 1] != (U8{10}) -> return none
     start: open + 2
-    close := start
+    ^close: start
     loop close < raw.len() {
         if raw[close] == (U8{125}) && (close == 0 || raw[close - 1] == (U8{10})) {
             return EnumBody{start: start, end: close}
@@ -1562,13 +1562,13 @@ enum_body_from: fn(raw: [U8], at: Int) -> EnumBody {
 
 // The variant names of the enum body `raw[start..<end]` onto `names`.
 variant_names: fn(raw: [U8], start: Int, end: Int, names: ^[String]) {
-    depth := 0
-    entry := true
-    at := start
+    ^depth: 0
+    ^entry: true
+    ^at: start
     loop at < end {
         byte: raw[at]
         if is_ident_start(byte) {
-            word_end := at + 1
+            ^word_end: at + 1
             loop word_end < end && is_ident_byte(raw[word_end]) -> word_end += 1
             if entry && depth == 0 {
                 if is_upper(byte) -> names.push(text_of(raw, at, word_end))
@@ -1587,7 +1587,7 @@ variant_names: fn(raw: [U8], start: Int, end: Int, names: ^[String]) {
 // The names a unit file (code only) declares: its top-level declarations and
 // its enums' variants.
 declared: fn(source: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop row in declarations(source) -> out.push(row.name)
     out.extend(variants(source))
     out
@@ -1602,16 +1602,16 @@ Referenced: struct {
 
 referenced: fn(source: String) -> Referenced {
     raw: source.bytes()
-    names := [String]{}
-    seen := [String:Bool]{}
-    called := [String:Bool]{}
-    at := 0
+    ^names: [String]{}
+    ^seen: [String:Bool]{}
+    ^called: [String:Bool]{}
+    ^at: 0
     loop at < raw.len() {
         if !is_ident_byte(raw[at]) {
             at += 1
             next
         }
-        end := at + 1
+        ^end: at + 1
         loop end < raw.len() && is_ident_byte(raw[end]) -> end += 1
         if is_ident_start(raw[at]) {
             name: text_of(raw, at, end)
@@ -1619,7 +1619,7 @@ referenced: fn(source: String) -> Referenced {
                 seen[name.copy()] = true  // copy: the name list keeps it
                 names.push(name.copy())  // copy: the call check reads it
             }
-            paren := end
+            ^paren: end
             loop paren < raw.len() && is_space(raw[paren]) -> paren += 1
             if paren < raw.len() && raw[paren] == (U8{40}) -> called[name] = true
         }
@@ -1654,7 +1654,7 @@ is_ident_byte: fn(byte: U8) -> Bool { is_ident_start(byte) || is_digit(byte) }
 // The end of the identifier starting at `at` of `raw` (`at` when none does).
 ident_end: fn(raw: [U8], at: Int) -> Int {
     if at >= raw.len() || !is_ident_start(raw[at]) -> return at
-    end := at + 1
+    ^end: at + 1
     loop end < raw.len() && is_ident_byte(raw[end]) -> end += 1
     end
 }
@@ -1675,7 +1675,7 @@ starts_at: fn(raw: [U8], at: Int, prefix: String) -> Bool {
 
 // The offset of the first `byte` of `raw` at or after `from`, -1 when none.
 find_byte: fn(raw: [U8], from: Int, byte: U8) -> Int {
-    at := from
+    ^at: from
     loop at < raw.len() {
         if raw[at] == byte -> return at
         at += 1
@@ -1692,7 +1692,7 @@ next_line_at: fn(raw: [U8], at: Int) -> Int {
 // `text` with every character but a newline turned to spaces, one space per
 // UTF-16 unit.
 blank: fn(text: String) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     blank_into(out, text.bytes(), 0, text.bytes().len())
     String.from_bytes(out) ?? ""
 }
@@ -1727,7 +1727,7 @@ package_import_end: fn(raw: [U8], at: Int, names: [String]) -> Int {
             close: find_byte(raw, after + 1, U8{93})
             return if close < 0 -> -1 else -> close + 1
         }
-        end := ident_end(raw, after)
+        ^end: ident_end(raw, after)
         if end == after -> return -1
         loop end < raw.len() && (raw[end] == (U8{32}) || raw[end] == (U8{9})) -> end += 1
         if end < raw.len() && raw[end] != (U8{10}) -> return -1
@@ -1738,8 +1738,8 @@ package_import_end: fn(raw: [U8], at: Int, names: [String]) -> Int {
 
 blank_package_imports: fn(text: String, names: [String]) -> String {
     raw: text.bytes()
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < raw.len() {
         end: package_import_end(raw, at, names)
         start: if end >= 0 -> end else -> at
@@ -1762,7 +1762,7 @@ CoreGroup: struct {
 
 core_group: fn(raw: [U8], at: Int) -> CoreGroup? {
     if !starts_at(raw, at, "use core") -> return None
-    cursor := at + 8
+    ^cursor: at + 8
     loop cursor + 1 < raw.len() && raw[cursor] == (U8{46}) && is_ident_start(raw[cursor + 1]) {
         cursor = ident_end(raw, cursor + 1)
     }
@@ -1776,10 +1776,10 @@ core_group: fn(raw: [U8], at: Int) -> CoreGroup? {
 // surviving token at its offset; forms this does not recognize stay as written.
 blank_repeated_members: fn(text: String, seen: ^[String:Bool]) -> String {
     raw: text.bytes()
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < raw.len() {
-        start := at
+        ^start: at
         if core_group(raw, at) == .Val(group) {
             path: text_of(raw, at + 4, group.module_end)
             whole: text_of(raw, at, group.end)
@@ -1796,7 +1796,7 @@ blank_repeated_members: fn(text: String, seen: ^[String:Bool]) -> String {
 
 member_imports: fn(whole: String, path: String, members: String, seen: ^[String:Bool]) -> String {
     parts: members.split(",").to_list()
-    bindings := [String]{}
+    ^bindings: [String]{}
     loop part in parts {
         name: part.trim()
         if name == "" {
@@ -1806,8 +1806,8 @@ member_imports: fn(whole: String, path: String, members: String, seen: ^[String:
         if ident_end(name.bytes(), 0) != name.bytes().len() -> return whole.copy()  // copy: an unrecognized form stays as written
         bindings.push(name)
     }
-    removed := false
-    kept := [Bool]{}
+    ^removed: false
+    ^kept: [Bool]{}
     loop binding in bindings {
         if binding == "" {
             kept.push(false)
@@ -1823,12 +1823,12 @@ member_imports: fn(whole: String, path: String, members: String, seen: ^[String:
         kept.push(true)
     }
     if !removed -> return whole.copy()  // copy: nothing repeated, the import stays as written
-    last := -1
+    ^last: -1
     loop index in 0..<kept.len() {
         if kept[index] -> last = index
     }
     if last < 0 -> return blank(whole)
-    rewritten := ""
+    ^rewritten: ""
     loop index in 0..<parts.len() {
         piece: if kept[index] -> parts[index] else -> blank(parts[index])
         separator: if {
@@ -1845,7 +1845,7 @@ member_imports: fn(whole: String, path: String, members: String, seen: ^[String:
 is_core_import_line: fn(line: String) -> Bool {
     raw: line.bytes()
     if !starts_at(raw, 0, "use ") -> return false
-    at := 4
+    ^at: 4
     alias: ident_end(raw, 4)
     if alias > 4 && starts_at(raw, alias, ": ") && starts_at(raw, alias + 2, "core.") {
         at = alias + 2
@@ -1856,7 +1856,7 @@ is_core_import_line: fn(line: String) -> Bool {
 
 // A Core import line repeated from an earlier file (or line) is blanked.
 blank_repeated_imports: fn(text: String, seen: ^[String:Bool]) -> String {
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in text.split("\n") {
         if is_core_import_line(line) {
             key: line.trim_end()
@@ -1876,10 +1876,10 @@ blank_repeated_imports: fn(text: String, seen: ^[String:Bool]) -> String {
 // row's last four columns of indentation become `use `. Line-based import
 // scans then see the single-line form.
 unblock_uses: fn(text: String) -> String {
-    lines := text.split("\n").to_list()
-    indent := ""
-    open := false
-    depth := 0
+    ^lines: text.split("\n").to_list()
+    ^indent: ""
+    ^open: false
+    ^depth: 0
     loop at in 0..<lines.len() {
         line: lines[at]
         if !open {
@@ -1930,9 +1930,9 @@ ENUM_ALLOW: "Allow(Jet.UnbuiltCase, \"judged by its own package's check\")"
 
 allow_members: fn(text: String) -> String {
     raw: text.bytes()
-    out := [U8]{}
-    copied := 0
-    at := 0
+    ^out: [U8]{}
+    ^copied: 0
+    ^at: 0
     loop at < raw.len() {
         if at == 0 || raw[at - 1] == (U8{10}) {
             allow: member_allow(raw, at)
@@ -1975,7 +1975,7 @@ marker_with: fn(line: String, allow: String) -> String {
 
 // The offset where the line holding offset `at` starts.
 line_start: fn(raw: [U8], at: Int) -> Int {
-    start := at
+    ^start: at
     loop start > 0 && raw[start - 1] != (U8{10}) -> start -= 1
     start
 }
@@ -1983,7 +1983,7 @@ line_start: fn(raw: [U8], at: Int) -> Int {
 // The offset after `priv` and its blanks at `at`, `at` when none.
 priv_end: fn(raw: [U8], at: Int) -> Int {
     if !starts_at(raw, at, "priv") -> return at
-    end := at + 4
+    ^end: at + 4
     loop end < raw.len() && is_space(raw[end]) -> end += 1
     if end == at + 4 -> at else -> end
 }
@@ -2036,7 +2036,7 @@ map_field: fn(tree: Dyn, name: String) -> Dyn {
 
 // The texts of the array `key` of `tree`, or each element's `path` text.
 map_texts: fn(tree: Dyn, key: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     if map_field(tree, key) == .Array(items) {
         loop item in items {
             if item == .Text(text) -> out.push(text.copy())  // copy: the tree is dropped
@@ -2069,7 +2069,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
         assert(!source.contains("run: fn()"))
         assert_eq(files.read("{root}/scratch/{mode}/Compiler/package.jet") ?? panic("{err}"), TOOLCHAIN_WORKSPACE)
     }
-    _ := assemble(fixture_config(root, "aot", Val("Engine"), Val([String]{"Engine"})), [String]{}) ?? panic(err.message)
+    ^_: assemble(fixture_config(root, "aot", Val("Engine"), Val([String]{"Engine"})), [String]{}) ?? panic(err.message)
     assert_eq(map_texts(read_map(root, "aot"), "test_areas").join(","), "Engine")
     if assemble(fixture_config(root, "aot", None, Val([String]{"CLI"})), [String]{}) == {
         .Err(error) -> { assert(error.message.contains("JETPACK_BOOTSTRAP_TEST_AREAS names CLI")) }
@@ -2082,11 +2082,11 @@ read_map: fn(root: String, mode: String) -> Dyn {
     root: area_fixture()
     put(root, "Jetpack/Foundation/Source/Fixture.jet", "FoundationFixture: struct {{\n    tag: Int,\n}}\n")
     put(root, "Jetpack/Store/Source/Fixture.jet", "StoreFixture: struct {{\n    size: Int,\n}}\n")
-    _ := assemble(fixture_config(root, "check", Val("Engine"), None), [String]{}) ?? panic(err.message)
+    ^_: assemble(fixture_config(root, "check", Val("Engine"), None), [String]{}) ?? panic(err.message)
     source: files.read("{root}/scratch/check/project/src/jetpack.jet") ?? panic("{err}")
     assert(source.contains("\n#{STRUCT_ALLOW} FoundationFixture: struct"))
     assert(source.contains("\nStoreFixture: struct"))
-    _ := assemble(fixture_config(root, "check", None, None), [String]{}) ?? panic(err.message)
+    ^_: assemble(fixture_config(root, "check", None, None), [String]{}) ?? panic(err.message)
     whole: files.read("{root}/scratch/check/project/src/jetpack.jet") ?? panic("{err}")
     assert(!whole.contains(STRUCT_ALLOW))
     files.remove_all(root) ?? ()
@@ -2101,7 +2101,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
         FIXTURE_MANIFEST.replace("{store}\n", "{store}\nTools/packaging/other.jet\n"),
         FIXTURE_MANIFEST.replace("{store}\n# == CLI ==\n", "{store}\n{cli}\n# == CLI ==\n"),
     }
-    refusals := [String]{}
+    ^refusals: [String]{}
     loop manifest in manifests {
         put(root, "Jetpack/Bootstrap/sources.list", manifest)
         if assemble(fixture_config(root, "check", None, None), [String]{}) == .Err(error) {
@@ -2172,7 +2172,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
     assert_eq(project_removal_refusal(link, [String]{}) ?? "", "it is a link, not a directory an assembly made")
     // A project an assembly made is replaced whole.
     replaced: Config{mode: "check", root: root.copy(), areas: None, own: None, test_sections: None, deps_from_head: false, scratch: "{base}/made"}
-    _ := assemble(replaced, [String]{}) ?? panic(err.message)
+    ^_: assemble(replaced, [String]{}) ?? panic(err.message)
     assert(files.is_file("{made}/src/jetpack.jet"))
     assert(!files.exists("{made}/.jet/build/stale"))
     assert(files.is_file("{root}/Jetpack/Bootstrap/sources.list"))
@@ -2202,7 +2202,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
 
 #Test("embeds are rebased onto staged copies inside the project and toolchain names stay") {
     root: "/repo"
-    embeds := Embeds{copies: [String]{}, targets: [String:String]{}}
+    ^embeds: Embeds{copies: [String]{}, targets: [String:String]{}}
     text: rebase_embeds(root, "a: embed_file(\"data/x.txt\")\nb: embed_file(\"../y.bin\")\n", "Jetpack/Env/Source/A.jet", "sources.list:1", embeds) ?? panic(err.message)
     assert_eq(text, "a: embed_file(\"embedded/Jetpack/Env/Source/data/x.txt.embed\")\nb: embed_file(\"embedded/Jetpack/Env/y.bin.embed\")\n")
     assert_eq(embeds.copies.join(","), "embedded/Jetpack/Env/Source/data/x.txt.embed,embedded/Jetpack/Env/y.bin.embed")
@@ -2295,8 +2295,8 @@ compiler_fixture: fn(items: String) -> String {
 }
 
 #Test("package imports and repeated Core imports blank in place") {
-    seen_imports := [String:Bool]{}
-    seen_members := [String:Bool]{}
+    ^seen_imports: [String:Bool]{}
+    ^seen_members: [String:Bool]{}
     first: blank_repeated_imports(blank_repeated_members(blank_package_imports(unblock_uses("use files: core.files\nuse core.text.[Text, Rune]\n"), PACKAGE_NAMES), seen_members), seen_imports)
     second: blank_repeated_imports(blank_repeated_members(blank_package_imports(unblock_uses("use jet_foundation.[found]\nuse jetpack_nix_eval.Row  \nuse {{\n    core.text.[Rune, Glyph]\n    files: core.files\n}}\n"), PACKAGE_NAMES), seen_members), seen_imports)
     assert_eq(first, "use files: core.files\nuse core.text.[Text, Rune]\n")

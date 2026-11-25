@@ -137,7 +137,7 @@ bytes_match_at: fn(raw: [U8], at: Int, needle: [U8]) -> Bool {
 }
 
 byte_text: fn(raw: [U8], start: Int, end: Int) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in start..<end -> out.push(raw[i])
     String.from_bytes(out) ?? panic("a split at a matched UTF-8 needle stays on scalar boundaries")
 }
@@ -191,9 +191,9 @@ strip_affix: fn(text: String, affix: String, front: Bool) -> String {
 expandtabs: fn(receiver: String, tabsize: Int) -> String {
     raw: string_unicode.utf8_bytes(receiver)
     width: if tabsize < 0 -> 0 else -> tabsize
-    out := [U8]{}
-    column := 0
-    at := 0
+    ^out: [U8]{}
+    ^column: 0
+    ^at: 0
     loop at < raw.len() {
         b: raw[at]
         step: string_unicode.utf8_width_at(raw, at)
@@ -242,7 +242,7 @@ center: fn(receiver: String, width: Int, fill: String) -> String {
 compare: fn(receiver: String, other: String) -> Int {
     a: string_unicode.utf8_bytes(receiver)
     b: string_unicode.utf8_bytes(other)
-    n := a.len()
+    ^n: a.len()
     if b.len() < n -> n = b.len()
     loop i in 0..<n {
         if a[i] < b[i] -> return -1
@@ -256,10 +256,10 @@ compare: fn(receiver: String, other: String) -> Int {
 // `chars().rev()`; whole scalars, never split bytes.
 reverse: fn(receiver: String) -> String {
     raw: string_unicode.utf8_bytes(receiver)
-    out := [U8]{}
-    end := raw.len()
+    ^out: [U8]{}
+    ^end: raw.len()
     loop end > 0 {
-        start := end - 1
+        ^start: end - 1
         loop start > 0 && (raw[start] & U8{192}) == (U8{128}) -> start -= 1
         loop i in start..<end -> out.push(raw[i])
         end = start
@@ -270,13 +270,13 @@ reverse: fn(receiver: String) -> String {
 // Width counts scalars; a leading `+`/`-` stays in front.
 zfill: fn(receiver: String, width: Int) -> String {
     raw: string_unicode.utf8_bytes(receiver)
-    length := 0
+    ^length: 0
     loop b in raw {
         if (b & U8{192}) != (U8{128}) -> length += 1
     }
     if width <= length -> return receiver.copy()
-    out := [U8]{}
-    body := 0
+    ^out: [U8]{}
+    ^body: 0
     if raw.len() > 0 && (raw[0] == (U8{43}) || raw[0] == (U8{45})) {
         out.push(raw[0])
         body = 1

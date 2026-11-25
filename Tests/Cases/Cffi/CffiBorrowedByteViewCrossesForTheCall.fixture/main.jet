@@ -11,7 +11,7 @@ use {
 run: fn() {
     bytes: [U8]{0, 1, 2, 0}
     #Unsafe("the block holds the four bytes for the whole call, C keeps no pointer to it, and it is released once") {
-        block := mem.alloc_raw(bytes.len(), 1) ?? panic("no memory")
+        ^block: mem.alloc_raw(bytes.len(), 1) ?? panic("no memory")
         mem.list_copy<U8>(block, bytes, 0, bytes.len())
         print(reader.inspect_bytes(block, U32{bytes.len()}))
         mem.free_raw(block)

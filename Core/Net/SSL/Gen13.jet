@@ -114,7 +114,7 @@ ssl_tls13_fetch_handshake_msg: fn<R: RNG>(ssl: ^ssldefs.SSLContext, hs_type: Int
 /// in_buf[buf..<end], None when there are none or it is not among them
 /// (mbedtls_ssl_tls13_is_supported_versions_ext_present_in_exts).
 ssl_tls13_is_supported_versions_ext_present_in_exts: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> SSLExtData? ssldefs.SSLError! {
-    p := buf
+    ^p: buf
     if p == end -> return Ok(None)
     ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
     extensions_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
@@ -161,7 +161,7 @@ ssl_tls13_check_received_extension: fn(ssl: ^ssldefs.SSLContext, hs_msg_type: In
 /// of the side `from`, a 0 separator and the transcript hash
 /// (ssl_tls13_create_verify_structure).
 ssl_tls13_create_verify_structure: fn(transcript_hash: [U8], from: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<64 -> out.push(U8{0x20})
     context: if from == ssldefs.SSL_IS_CLIENT -> "TLS 1.3, client CertificateVerify" else -> "TLS 1.3, server CertificateVerify"
     out.extend(context.bytes())
@@ -199,14 +199,14 @@ ssl_tls13_key_fits: fn(key: pk.PKContext, algorithm: Int, kind: oids.PKType) -> 
 // which mbedtls 3.6 lets through when offered for certificates), and suit
 // the key.
 ssl_tls13_parse_certificate_verify: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int, verify_buffer: [U8]) ssldefs.SSLError! {
-    p := buf
+    ^p: buf
     ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
     algorithm: ssldefs.ssl_get_u16(ssl.in_buf, p)
     p += 2
     if !ssltls.ssl_sig_alg_is_offered(ssl, algorithm) || !ssltls.ssl_tls13_sig_alg_for_cert_verify_is_supported(algorithm) {
         return Err(ssl_tls13_certificate_verify_failed(ssl))
     }
-    parts := if ssltls.ssl_get_pk_type_and_md_alg_from_sig_alg(algorithm) == {
+    ^parts: if ssltls.ssl_get_pk_type_and_md_alg_from_sig_alg(algorithm) == {
         .Ok(found) -> found
         .Err(_) -> {
             return Err(ssl_tls13_certificate_verify_failed(ssl))
@@ -241,7 +241,7 @@ ssl_tls13_process_certificate_verify: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: 
     body: ssl_tls13_fetch_handshake_msg(ssl, ssldefs.SSL_HS_CERTIFICATE_VERIFY, rng) ?? return Err(err)
     // The transcript hash is taken before the message joins it.
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
-    transcript := if ssltls.ssl_get_handshake_transcript(ssl, cs.mac) == {
+    ^transcript: if ssltls.ssl_get_handshake_transcript(ssl, cs.mac) == {
         .Ok(t) -> t
         .Err(e) -> {
             sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_INTERNAL_ERROR, .InternalError)
@@ -294,14 +294,14 @@ ssl_tls13_write_certificate_verify_body: fn<R: RNG>(ssl: ^ssldefs.SSLContext, bu
     p: buf
     // The algorithm identifier and the signature length.
     ssltls.ssl_chk_buf(p, end, 4) ?? return Err(err)
-    chosen := ssldefs.TLS1_3_SIG_NONE
-    signature := [U8]{}
+    ^chosen: ssldefs.TLS1_3_SIG_NONE
+    ^signature: [U8]{}
     received: ssl.handshake.received_sig_algs.copy()
     loop sig_alg in received {
         if !ssltls.ssl_sig_alg_is_offered(ssl, sig_alg) -> next
         if !ssltls.ssl_tls13_sig_alg_for_cert_verify_is_supported(sig_alg) -> next
         if !ssl_tls13_own_key_matches_sig_alg(ssl, sig_alg) -> next
-        parts := if ssltls.ssl_get_pk_type_and_md_alg_from_sig_alg(sig_alg) == {
+        ^parts: if ssltls.ssl_get_pk_type_and_md_alg_from_sig_alg(sig_alg) == {
             .Ok(found) -> found
             .Err(_) -> {
                 return Err(.InternalError)
@@ -348,7 +348,7 @@ ssl_tls13_write_certificate_verify: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R
 /// ones a Certificate allows. The negotiated session's chain, from a
 /// session that failed to resume, is dropped.
 ssl_tls13_parse_certificate: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> [x509crt.X509Crt]? ssldefs.SSLError! {
-    p := buf
+    ^p: buf
     ssltls.ssl_chk_buf_read(ssl, p, end, 4) ?? return Err(err)
     certificate_request_context_len: ssldefs.ssl_u8(ssl.in_buf, p)
     certificate_list_len: ssldefs.ssl_get_u24(ssl.in_buf, p + 1)
@@ -365,7 +365,7 @@ ssl_tls13_parse_certificate: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ->
         }
         return Ok(None)
     }
-    chain := [x509crt.X509Crt]{}
+    ^chain: [x509crt.X509Crt]{}
     ssltls.ssl_chk_buf_read(ssl, p, end, certificate_list_len) ?? return Err(err)
     certificate_list_end: p + certificate_list_len
     loop p < certificate_list_end {
@@ -431,7 +431,7 @@ ssl_tls13_parse_certificate: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ->
 // the mode (RFC 8446 4.4.2).
 ssl_tls13_validate_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, chain: ^[x509crt.X509Crt]?, rng: ^R) ssldefs.SSLError! {
     authmode: if ssl.handshake.sni_authmode != ssldefs.SSL_VERIFY_UNSET -> ssl.handshake.sni_authmode else -> ssl.conf.authmode
-    if ^chain == {
+    if chain.in_place() == {
         .Val(c) -> { ssltls.ssl_verify_certificate(ssl, authmode, c, None, rng) ?? return Err(err) }
         None -> {
             if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER {
@@ -453,7 +453,7 @@ ssl_tls13_validate_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, chain: ^[x5
 /// keeps the chain, verified or not (mbedtls_ssl_tls13_process_certificate).
 ssl_tls13_process_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     body: ssl_tls13_fetch_handshake_msg(ssl, ssldefs.SSL_HS_CERTIFICATE, rng) ?? return Err(err)
-    chain := ssl_tls13_parse_certificate(ssl, body.buf, body.buf + body.len)
+    ^chain: ssl_tls13_parse_certificate(ssl, body.buf, body.buf + body.len)
     sn: ssl.session_negotiate
     if ssl_tls13_validate_certificate(ssl, chain, rng) == {
         .Ok(_) -> { ssl.spool[sn].peer_cert = chain }
@@ -472,7 +472,7 @@ ssl_tls13_write_certificate_body: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: In
     ders: ssltls.ssl_own_cert_der(ssl) ?? [[U8]]{}
     context: ssl.handshake.certificate_request_context.copy()
     context_len: context.len()
-    p := buf
+    ^p: buf
     ssltls.ssl_chk_buf(p, end, context_len + 1) ?? return Err(err)
     ssl.out_buf[p] = ssldefs.ssl_byte(context_len)
     p += 1
@@ -578,7 +578,7 @@ ssl_reset_transcript_for_hrr: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     hash: ssltls.ssl_get_handshake_transcript(ssl, cs.mac) ?? return Err(err)
     hash_len: hash.len()
-    hash_transcript := [U8]{ssldefs.ssl_byte(ssldefs.SSL_HS_MESSAGE_HASH), U8{0}, U8{0}, ssldefs.ssl_byte(hash_len)}
+    ^hash_transcript: [U8]{ssldefs.ssl_byte(ssldefs.SSL_HS_MESSAGE_HASH), U8{0}, U8{0}, ssldefs.ssl_byte(hash_len)}
     hash_transcript.extend(hash)
     ssltls.ssl_reset_checksum(ssl)
     ssltls.ssl_update_checksum(ssl.handshake, hash_transcript, 0, hash_len + 4)
@@ -590,7 +590,7 @@ ssl_reset_transcript_for_hrr: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
 /// Keep the peer's key share, the KeyShareEntry key_exchange field at
 /// in_buf[buf..<buf + buf_len] (mbedtls_ssl_tls13_read_public_xxdhe_share).
 ssl_tls13_read_public_xxdhe_share: fn(ssl: ^ssldefs.SSLContext, buf: Int, buf_len: Int) ssldefs.SSLError! {
-    p := buf
+    ^p: buf
     end: buf + buf_len
     ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
     peerkey_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
@@ -620,7 +620,7 @@ ssl_tls13_generate_and_write_xxdh_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLCont
     buf_size: end - buf
     grp_id: ssltls.ssl_get_ecp_group_id_from_tls_id(named_group)
     if grp_id != ecp.GroupID.Unknown {
-        ctx := ecdh.ecdh_new()
+        ^ctx: ecdh.ecdh_new()
         ecdh.ecdh_setup(ctx, grp_id) ?? return Err(keys13.ssl_tls13_psa_ecp_error(err))
         if buf_size < (ctx.grp.pbits + 7) /% 8 -> return Err(.BufferTooSmall)
         pair: ecp.gen_keypair(ctx.grp, rng) ?? return Err(keys13.ssl_tls13_psa_ecp_error(err))
@@ -634,13 +634,13 @@ ssl_tls13_generate_and_write_xxdh_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLCont
     prime: ssl_tls13_ffdhe_prime(named_group) ?? return Err(.HandshakeFailure)
     plen: prime.len()
     if buf_size < plen -> return Err(.BufferTooSmall)
-    ctx := dhm.dhm_new()
+    ^ctx: dhm.dhm_new()
     ctx.p = bn.read_binary(prime) ?? return Err(keys13.ssl_tls13_psa_mpi_error(err))
     ctx.g = bn.from_int(2)
     // A draw from [3, p - 1], less one.
     drawn: bn.random(3, ctx.p, rng) ?? return Err(keys13.ssl_tls13_psa_mpi_error(err))
     ctx.x = bn.sub_int(drawn, 1) ?? return Err(keys13.ssl_tls13_psa_mpi_error(err))
-    rr := bn.mpi()
+    ^rr: bn.mpi()
     ctx.gx = bn.exp_mod(ctx.g, ctx.x, ctx.p, rr) ?? return Err(keys13.ssl_tls13_psa_mpi_error(err))
     own_pubkey: bn.write_binary(ctx.gx, plen) ?? return Err(keys13.ssl_tls13_psa_mpi_error(err))
     ssldefs.ssl_copy_into(ssl.out_buf, buf, own_pubkey, 0, plen)

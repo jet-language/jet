@@ -39,7 +39,7 @@ pkg_parse_boundary_pattern: fn(field: String, raw: String) -> String PackagePars
 
 // Parse the body of `boundaries: { deny: [ … ] }`.
 pkg_parse_boundaries: fn(body: String) -> [ImportBoundary] PackageParseError! {
-    deny := String?{None}
+    ^deny: String?{None}
     loop entry in pkg_key_value_entries(body) {
         if entry.key != "deny" {
             return Err(PackageParseError.Composition("unknown `boundaries` field `{entry.key}`"))
@@ -51,13 +51,13 @@ pkg_parse_boundaries: fn(body: String) -> [ImportBoundary] PackageParseError! {
     }
     value: deny ?? return Ok([ImportBoundary]{})
     list: pkg_strip_wrapped(value.trim(), "[", "]") ?? return Err(PackageParseError.Composition("`boundaries.deny` must be a list of edge records"))
-    boundaries := [ImportBoundary]{}
+    ^boundaries: [ImportBoundary]{}
     loop piece in pkg_top_level_commas(list) {
         entry: piece.trim()
         if entry == "" -> next
         record: pkg_strip_wrapped(entry.copy(), "{{", "}}") ?? return Err(PackageParseError.Composition("each `boundaries.deny` entry must be an edge record"))
-        from := String?{None}
-        to := String?{None}
+        ^from: String?{None}
+        ^to: String?{None}
         loop field in pkg_key_value_entries(record) {
             if field.key == {
                 "from" -> {

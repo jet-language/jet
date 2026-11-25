@@ -1,6 +1,4 @@
-
-#Layout(c)
-TargetPointer: struct {
+#Layout(c) TargetPointer: struct {
     pointer: *Int,
 
     // A `#run fn` is compile-time code, so its body reads the layout fact.
@@ -9,8 +7,9 @@ TargetPointer: struct {
         layout.size ?? panic("target pointer layout is missing")
     }
 }
+
 POINTER_BYTES: #run TargetPointer.pointer_bytes()
+
 INLINE_BYTES: #run { TargetPointer.reflect().layout.size ?? 0 }
-run: fn() {
-    print(POINTER_BYTES == INLINE_BYTES)
-}
+
+run: fn() { print(POINTER_BYTES == INLINE_BYTES) }

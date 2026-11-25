@@ -156,7 +156,7 @@ run: fn() -> Never Err! {
 // the run.
 bench: fn(root: String) -> [Row] Err! {
     temp: files.temp_dir("jet-stream-bench-")
-    results := [Row]{}
+    ^results: [Row]{}
     loop size in SIZES {
         loop case in CASES {
             results.push(row(root, files.join(temp.path, "{case}-{size}.jet"), case, size))
@@ -226,7 +226,7 @@ repr_escape: fn(character: String) -> String Never! {
 // waited for, and its trimmed output, which must be the case's expected
 // output.
 jet_worker: fn(root: String, case: String, size: Int, source: String) -> JetRow Err! {
-    argv := ["python3", "-c", JET_MEASURE]
+    ^argv: ["python3", "-c", JET_MEASURE]
     argv.extend(jet_command())
     argv.extend(["run", source])
     receipt: process.cmd(argv).cwd(root).run()

@@ -37,14 +37,14 @@ jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> J
         .Failed(plan) -> return plan
         .Absent | .Authority(_) -> {}
     }
-    files := [JetDriverAuthorizedSourceFile]{}
+    ^files: [JetDriverAuthorizedSourceFile]{}
     if jet_cli_discover_sources(root, files) == .Val(problem) {
         return jet_cli_fail("E1334", "couldn't discover source files authority `{root}`", problem, "restore access to the authority metadata and try again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    explicit := [String]{}
-    declarations := [JetCLIProjectPart]{}
-    sources := [String]{}
-    names := [String]{}
+    ^explicit: [String]{}
+    ^declarations: [JetCLIProjectPart]{}
+    ^sources: [String]{}
+    ^names: [String]{}
     loop file in files {
         filename: jet_cli_file_name(file.relative_path)
         if filename == "package.jet" || filename == "pkg.jet" || (jet_cli_relative_parent(file.relative_path) == "" && JET_CLI_COMMAND_ROLE_FILES.contains(filename)) {
@@ -91,17 +91,17 @@ jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> J
         }
     }
     names.sort()
-    part_values := [JetCLIStatusValue]{}
-    conflict_values := [JetCLIStatusValue]{}
-    output := ""
-    diagnostics := [Diagnostic]{}
-    declared_paths := [String]{}
+    ^part_values: [JetCLIStatusValue]{}
+    ^conflict_values: [JetCLIStatusValue]{}
+    ^output: ""
+    ^diagnostics: [Diagnostic]{}
+    ^declared_paths: [String]{}
     loop declaration in declarations {
         if !declared_paths.contains(declaration.path) -> declared_paths.push(declaration.path)
     }
     loop name in names {
-        paths := [String]{}
-        module_paths := [String]{}
+        ^paths: [String]{}
+        ^module_paths: [String]{}
         loop declaration in declarations {
             if declaration.name != name -> next
             paths.push(declaration.path)
@@ -153,13 +153,13 @@ jet_cli_project_parts: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> J
 // members, in index order: each is a package whose own `jet project parts`
 // lists its modules. A member is never skipped.
 jet_cli_project_parts_members: fn(root: String, index_path: String, skipped_only: Bool, color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    members := [JetCLIWorkspaceMember]{}
+    ^members: [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_members(root, index_path, "project parts", color) == {
         .Refused(plan) -> return plan
         .Members(found) -> members = found
     }
-    part_values := [JetCLIStatusValue]{}
-    output := ""
+    ^part_values: [JetCLIStatusValue]{}
+    ^output: ""
     if !skipped_only {
         loop member in members {
             part_values.push(jet_cli_project_part_value(member.name, member.path, "member"))

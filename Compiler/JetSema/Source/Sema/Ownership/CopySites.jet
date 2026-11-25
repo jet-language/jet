@@ -167,12 +167,12 @@ sema_copy_site_check_owned_walk: fn(value: TExpr, check: ^SemaBodyCheck, walk: S
         } else { check.diagnostics.push(diagnostic) }
         return false
     }
-    forwarding := walk
+    ^forwarding: walk
     forwarding.forwarded = true
     if value.kind == {
         .Present(inner) | .Ok(inner) | .Err(inner) | .TraitBox(inner, _) -> sema_copy_site_check_owned_walk(inner, check, walk)
         .Move(inner) -> {
-            taking := walk
+            ^taking: walk
             taking.taken = true
             sema_copy_site_check_owned_walk(inner, check, taking)
         }
@@ -588,7 +588,7 @@ sema_copy_site_check_borrowed_binding: fn(binding: Binding, check: ^SemaBodyChec
 // borrowed resource in it is refused as in any owning position (E0201).
 sema_copy_site_check_borrowed_return: fn(value: Expr, check: ^SemaBodyCheck) {
     if sema_copy_site_carrier_payload(value) != None {
-        _ := sema_copy_site_refuse_borrowed_copy(value, "the returned value", check)
+        ^_: sema_copy_site_refuse_borrowed_copy(value, "the returned value", check)
         return
     }
     site: sema_copy_site_borrowed_param(value, check.scopes) ?? return

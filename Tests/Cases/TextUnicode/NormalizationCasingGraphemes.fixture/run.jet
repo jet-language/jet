@@ -6,7 +6,7 @@ use {
 
 s3_unicode_scalar: fn(cp: Int) -> String Never! {
     if cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) -> return ""
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     if cp < 128 -> bytes.push(U8{cp}) else if cp < 2048 {
         bytes.push(U8{(cp >> 6) | 192})
         bytes.push(U8{cp & 63 | 128})
@@ -25,8 +25,8 @@ s3_unicode_scalar: fn(cp: Int) -> String Never! {
 
 // Reuses Core.text.wrap's Unicode splitter and the public Core.text primitives.
 s3_unicode_split_ws: fn(text: String) -> [String] Never! {
-    out := [String]{}
-    current := ""
+    ^out: [String]{}
+    ^current: ""
     loop scalar in s3_unicode_text.scalars(text) {
         if s3_unicode_text.is_whitespace(scalar) {
             if current.bytes().len() > 0 {
@@ -41,7 +41,7 @@ s3_unicode_split_ws: fn(text: String) -> [String] Never! {
 
 // Original cps(): invalid hex/scalars are filtered out.
 s3_unicode_cps: fn(field: String) -> String Never! {
-    out := ""
+    ^out: ""
     loop token in s3_unicode_split_ws(field) {
         cp: s3_unicode_parse.parse_int_base(token, 16) ?? next
         scalar: s3_unicode_scalar(cp)
@@ -57,10 +57,10 @@ S3UnicodeBreak: struct {
 
 // Original parse_break(): malformed hex/scalar => None; empty => None.
 s3_unicode_break: fn(line: String) -> S3UnicodeBreak? Never! {
-    full := ""
-    current := ""
-    segments := [String]{}
-    any := false
+    ^full: ""
+    ^current: ""
+    ^segments: [String]{}
+    ^any: false
     loop token in s3_unicode_split_ws(line) {
         if token == "÷" {
             if current != "" {
@@ -90,7 +90,7 @@ s3_unicode_clean: fn(raw: String) -> String Never! {
 // Port . Only include!/rustc machinery retires
 s3_full_unicode_corpora: fn() {
     normalization: s3_unicode_files.read("data/NormalizationTest.txt") ?? panic("missing normalization corpus")
-    normalization_lines := 0
+    ^normalization_lines: 0
     loop raw in normalization.lines() {
         line: s3_unicode_clean(raw)
         if line == "" || line.starts_with("@") -> next
@@ -119,7 +119,7 @@ s3_full_unicode_corpora: fn() {
         normalization_lines += 1
     }
     folding: s3_unicode_files.read("data/ucd/CaseFolding.txt") ?? panic("missing folding corpus")
-    fold_lines := 0
+    ^fold_lines: 0
     loop raw in folding.lines() {
         line: s3_unicode_clean(raw)
         if line == "" -> next
@@ -130,8 +130,8 @@ s3_full_unicode_corpora: fn() {
         assert_eq(s3_unicode_text.casefold(s3_unicode_cps(fields[0])), s3_unicode_cps(fields[2].trim().copy()))
         fold_lines += 1
     }
-    lower := [Int:String]{}
-    upper := [Int:String]{}
+    ^lower: [Int:String]{}
+    ^upper: [Int:String]{}
     unicode_data: s3_unicode_files.read("data/ucd/UnicodeData.txt") ?? panic("missing UnicodeData")
     loop raw in unicode_data.lines() {
         fields: s3_unicode_parse.split(raw, ";")
@@ -151,7 +151,7 @@ s3_full_unicode_corpora: fn() {
         lower[cp] = s3_unicode_cps(fields[1].trim().copy())
         upper[cp] = s3_unicode_cps(fields[3].trim().copy())
     }
-    casing_scalars := 0
+    ^casing_scalars: 0
     loop cp in 0..<0x110000 {
         input: s3_unicode_scalar(cp)
         if input == "" -> next
@@ -161,7 +161,7 @@ s3_full_unicode_corpora: fn() {
     }
     assert_eq(s3_unicode_text.lower("ΟΣ"), "ος")
     grapheme_data: s3_unicode_files.read("data/GraphemeBreakTest.txt") ?? panic("missing grapheme corpus")
-    grapheme := 0
+    ^grapheme: 0
     loop raw in grapheme_data.lines() {
         parsed: s3_unicode_break(s3_unicode_clean(raw)) ?? next
         assert(s3_unicode_text.graphemes(parsed.full) == parsed.segments, "break mismatch: {raw}")

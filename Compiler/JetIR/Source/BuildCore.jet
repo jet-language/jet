@@ -162,12 +162,12 @@ IR_DEBUG_CELL_PREFIX: "jet_debug_cell_"
 // debugger's evaluation, built apart from the image, addresses the cells
 // the program runs by them (ir_debug_cells_bind).
 ir_debug_cell_exports: fn(m: IRModule) -> [X64DataExport] Never! {
-    named := [X64DataExport]{}
+    ^named: [X64DataExport]{}
     // The symbols the cells make, each export's symbol id, and how many
     // cells make each symbol, by id (id 0, the empty name, none).
-    symbols := name_table_sized(64)
-    ids := [Int]{}
-    counts := [Int]{0}
+    ^symbols: name_table_sized(64)
+    ^ids: [Int]{}
+    ^counts: [Int]{0}
     loop cell in name_column_sorted(m.constant_rows_keys, m.constant_rows) {
         if cell.local < 0 || !ir_core_cell_key(cell.key) || m.core_cells.get(cell.local) != None {
             next
@@ -179,8 +179,8 @@ ir_debug_cell_exports: fn(m: IRModule) -> [X64DataExport] Never! {
         ids.push(id)
         named.push(X64DataExport{data: cell.local, symbol: symbol})
     }
-    kept := [X64DataExport]{}
-    at := 0
+    ^kept: [X64DataExport]{}
+    ^at: 0
     loop export in named.move() {
         if counts[ids[at]] == 1 -> kept.push(export)
         at += 1
@@ -202,7 +202,7 @@ ir_debug_cells_bind: fn(m: ^IRModule) Never! {
 // tell apart two texts that make the same identifier.
 ir_core_symbol_in: fn(prefix: String, text: String) -> String Never! {
     raw: text.bytes()
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop byte in prefix.bytes() -> bytes.push(byte)
     loop byte in raw {
         alphanumeric: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
@@ -235,7 +235,7 @@ ir_core_layout: fn(layout: IRExportLayout) -> String Never! {
 // (ir_core_package), and every function they reach, on up to `threads`
 // threads; the other inputs as ir_build_program's.
 ir_build_core_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, type_defs: ^^[TTypeDef], impls: ^^[TImplDef], sources: ^^IRSourceTexts, constants: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], entry_module: ModuleID, lowered: [String], threads: CompilerThreads) -> IRCoreLibrary Never! {
-    p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
+    ^p: ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
     p.quiet_points = ir_core_quiet_points(p)
     p.sentries = true
     p.user_values = true
@@ -252,7 +252,7 @@ ir_build_core_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^Sy
 // a public point dispatches through the point's cell, which it exports and
 // the program binds (ir_core_cells_bind), and the two share its handlers.
 ir_core_quiet_points: fn(p: IRProgram) -[]> [Int:Bool] {
-    kept := [Int:Bool]{}
+    ^kept: [Int:Bool]{}
     loop (row, _) in p.quiet_points {
         if p.constant_defs[row].visibility != .Public -> kept[row] = true
     }
@@ -265,11 +265,11 @@ ir_core_quiet_points: fn(p: IRProgram) -[]> [Int:Bool] {
 // or `_`. Any other module (Core/App's `app`, the root `core`, a Prelude
 // module) is named up to its first `.` or `_` as well.
 ir_core_package: fn(module_name: String) -> String Never! {
-    start := 0
+    ^start: 0
     if module_name.starts_with("core.") -> start = 5
     if module_name.starts_with("__core_") -> start = 7
     bytes: module_name.bytes()
-    end := start
+    ^end: start
     loop end < bytes.len() && bytes[end] != (U8{46}) && bytes[end] != (U8{95}) -> end += 1
     foundation_byte_text(bytes, start, end)
 }
@@ -284,18 +284,18 @@ ir_core_package: fn(module_name: String) -> String Never! {
 // rounds end. A failure in a function no root is (one a root reaches)
 // fails the library.
 ir_core_library_from: fn(program: ^^IRProgram, entry_module: ModuleID, lowered: [String], skipped: ^^[IRBuildFailure], threads: CompilerThreads) -> IRCoreLibrary Never! {
-    p := program.move()
+    ^p: program.move()
     // By the first row of each key (ir_function_row): the skipped roots,
     // then the ones this round builds.
-    left_out := (loop _ in 0..<p.functions.len() -> false)
+    ^left_out: (loop _ in 0..<p.functions.len() -> false)
     loop failure in skipped {
         if ir_function_row(p, failure.key) == .Val(row) -> left_out[row] = true
     }
-    roots := [IRWaveJob]{}
-    keys := [String]{}
+    ^roots: [IRWaveJob]{}
+    ^keys: [String]{}
     // The facts lines of the keys that are not roots, each on its first row.
-    facts := [String]{}
-    rooted := (loop _ in 0..<p.functions.len() -> false)
+    ^facts: [String]{}
+    ^rooted: (loop _ in 0..<p.functions.len() -> false)
     loop row in 0..<p.functions.len() {
         function: p.functions[row]
         if function.module_identity == entry_module -> next
@@ -315,10 +315,10 @@ ir_core_library_from: fn(program: ^^IRProgram, entry_module: ModuleID, lowered: 
         keys.push(function.key.copy())
         rooted[first] = true
     }
-    kept := ir_build_waves_kept(p, roots, false, threads, None)
-    built := kept.result.move()
+    ^kept: ir_build_waves_kept(p, roots, false, threads, None)
+    ^built: kept.result.move()
     if built.failures.len() > 0 {
-        reached := false
+        ^reached: false
         loop failure in built.failures {
             row: ir_function_row(kept.program, failure.key) ?? -1
             if row < 0 || !rooted[row] {
@@ -329,18 +329,18 @@ ir_core_library_from: fn(program: ^^IRProgram, entry_module: ModuleID, lowered: 
         if reached {
             return IRCoreLibrary{program: built.program.move(), failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, rows: [IRCoreExport]{}, skipped: skipped.move(), facts: [String]{}}
         }
-        more := skipped.move()
+        ^more: skipped.move()
         compiler_transfer_rows<IRBuildFailure>(more, built.failures)
         kept.program.interner = built.program.interner.pop() ?? panic("the Core build's module lost the program's interner")
         return ir_core_library_from(kept.program.move(), entry_module, lowered, more, threads)
     }
-    m := built.program.move()
+    ^m: built.program.move()
     callers: ir_core_callers(m)
     open: ir_core_open(m, callers)
     values: ir_core_function_values(m, callers)
-    exports := [IRLibraryExport]{}
-    rows := [IRCoreExport]{}
-    errors := [String]{}
+    ^exports: [IRLibraryExport]{}
+    ^rows: [IRCoreExport]{}
+    ^errors: [String]{}
     loop key in keys {
         id: name_column_get(m.function_rows_keys, m.function_rows, key) ?? {
             errors.push("Core function {key} was rooted but not built")
@@ -358,7 +358,7 @@ ir_core_library_from: fn(program: ^^IRProgram, entry_module: ModuleID, lowered: 
         exports.push(IRLibraryExport{function: id, symbol: symbol, init_priority: -1, fini_priority: -1, guards: [Int]{}})
         rows.push(IRCoreExport{symbol: symbol, key: key, signature: ir_core_signature(m, id)})
     }
-    data := [X64DataExport]{}
+    ^data: [X64DataExport]{}
     loop cell in name_column_sorted(m.constant_rows_keys, m.constant_rows) {
         if cell.local < 0 || !ir_core_cell_key(cell.key) -> next
         symbol: ir_core_cell_symbol(cell.key)
@@ -374,7 +374,7 @@ ir_core_library_from: fn(program: ^^IRProgram, entry_module: ModuleID, lowered: 
     // A key on two rows is rooted once per row, with one reason: one line.
     facts.sort()
     facts.reverse()
-    unique := [String]{}
+    ^unique: [String]{}
     loop facts.len() > 0 {
         line: facts.pop() ?? break
         if unique.len() > 0 && unique[unique.len() - 1] == line -> next
@@ -386,7 +386,7 @@ ir_core_library_from: fn(program: ^^IRProgram, entry_module: ModuleID, lowered: 
 // The Core export list (`<prefix>.exports`, JetCLI CoreLibrary.jet): one
 // `symbol<TAB>key<TAB>signature` line per row, sorted by symbol.
 ir_core_exports_text: fn(rows: [IRCoreExport]) -> String Never! {
-    lines := loop row in rows -> "{row.symbol}\t{row.key}\t{row.signature}"
+    ^lines: loop row in rows -> "{row.symbol}\t{row.key}\t{row.signature}"
     lines.join("\n")
 }
 
@@ -405,14 +405,14 @@ ir_core_facts_text: fn(facts: [String]) -> String Never! { facts.join("\n") }
 // IR_CORE_EXCLUSIONS row. A pack whose lists disagree would bind a program
 // to code its facts don't describe.
 ir_core_facts_disagree: fn(facts: String, exports: String) -> [String] Never! {
-    problems := [String]{}
-    exported := [String]{}
+    ^problems: [String]{}
+    ^exported: [String]{}
     loop line in exports.split("\n") {
         columns: line.split("\t").to_list()
         if columns.len() == 3 && columns[2] != IR_CORE_DATA -> exported.push(columns[1])
     }
     exported.sort()
-    listed := [String]{}
+    ^listed: [String]{}
     loop line in facts.split("\n") {
         if line == "" -> next
         columns: line.split("\t").to_list()
@@ -431,8 +431,8 @@ ir_core_facts_disagree: fn(facts: String, exports: String) -> [String] Never! {
         listed.push(columns[0])
     }
     listed.sort()
-    at := 0
-    on := 0
+    ^at: 0
+    ^on: 0
     loop at < exported.len() || on < listed.len() {
         if on >= listed.len() || (at < exported.len() && exported[at] < listed[on]) {
             problems.push("the Core export {exported[at]} has no facts row")
@@ -454,11 +454,11 @@ ir_core_facts_disagree: fn(facts: String, exports: String) -> [String] Never! {
 // take its address, or drop through it (a type's drop glue).
 ir_core_callers: fn(m: IRModule) -> [[Int]] Never! {
     count: m.functions.len()
-    callers := [[Int]]{}
+    ^callers: [[Int]]{}
     loop _ in 0..<count -> callers.push([Int]{})
     loop (id, f) in m.functions {
         loop (at, op) in f.op {
-            callee := -1
+            ^callee: -1
             if op == .Call || op == .FunctionAddress -> callee = f.a[at]
             if op == .Drop && f.a[at] >= 0 && f.a[at] < f.slot_type.len() {
                 glue: m.types[f.slot_type[f.a[at]]].drop
@@ -473,12 +473,12 @@ ir_core_callers: fn(m: IRModule) -> [[Int]] Never! {
 // `seeds`, joined by every function that reaches one along `callers`
 // (ir_core_callers).
 ir_core_spread: fn(callers: [[Int]], seeds: ^^[Bool]) -> [Bool] Never! {
-    reached := seeds.move()
-    work := [Int]{}
+    ^reached: seeds.move()
+    ^work: [Int]{}
     loop (id, seed) in reached {
         if seed -> work.push(id)
     }
-    head := 0
+    ^head: 0
     loop head < work.len() {
         id: work[head]
         head += 1
@@ -499,9 +499,9 @@ ir_core_spread: fn(callers: [[Int]], seeds: ^^[Bool]) -> [Bool] Never! {
 // a program's trait values can reach it, whose implementations the library
 // lacks.
 ir_core_open: fn(m: IRModule, callers: [[Int]]) -> [Bool] Never! {
-    holds := [Bool]{}
+    ^holds: [Bool]{}
     loop f in m.functions {
-        held := false
+        ^held: false
         loop row in f.slot_type {
             if row >= 0 && row < m.types.len() && (ir_trait_row(m, row) || ir_untag(ir_module_row_ty(m, row)) == .TraitObject(_)) {
                 held = true
@@ -541,17 +541,17 @@ IRCoreImageRow: struct {
 // search over its lines in place; None when no row names it.
 ir_core_image_row: fn(exports: [U8], symbol: String) -> IRCoreImageRow? Never! {
     wanted: symbol.bytes()
-    low := 0
-    high := exports.len()
+    ^low: 0
+    ^high: exports.len()
     // The found row's bounds: its first tab and its end.
-    tab := -1
-    end := -1
+    ^tab: -1
+    ^end: -1
     loop low < high && tab < 0 {
-        start := low + (high - low).div_euclid(2)
+        ^start: low + (high - low).div_euclid(2)
         loop start > low && exports[start - 1] != (U8{10}) -> start -= 1
-        line_end := start
+        ^line_end: start
         loop line_end < high && exports[line_end] != (U8{10}) -> line_end += 1
-        first := start
+        ^first: start
         loop first < line_end && exports[first] != (U8{9}) -> first += 1
         order: ir_core_image_order(exports, start, first, wanted)
         if {
@@ -564,7 +564,7 @@ ir_core_image_row: fn(exports: [U8], symbol: String) -> IRCoreImageRow? Never! {
         }
     }
     if tab < 0 -> return None
-    second := tab + 1
+    ^second: tab + 1
     loop second < end && exports[second] != (U8{9}) -> second += 1
     if second >= end -> return None
     key: String.from_bytes(exports[(tab + 1)..<second]) ?? return None
@@ -574,7 +574,7 @@ ir_core_image_row: fn(exports: [U8], symbol: String) -> IRCoreImageRow? Never! {
 
 // The byte order of exports[start..<end] against `wanted`: -1, 0 or 1.
 ir_core_image_order: fn(exports: [U8], start: Int, end: Int, wanted: [U8]) -> Int Never! {
-    at := 0
+    ^at: 0
     loop start + at < end && at < wanted.len() {
         if exports[start + at] != wanted[at] {
             return if exports[start + at] < wanted[at] -> -1 else -> 1
@@ -625,7 +625,7 @@ ir_core_bound: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, row: Int, type_args:
 ir_core_call_signature: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, row: Int, slots: [Int], span: Span) -> String Never! {
     words: loop slot in slots -> ir_core_layout(ir_export_layout(m.types[b.f.slot_type[slot]]))
     returned: ir_call_return(p, b, row, [Type]{}, span)
-    result := "void"
+    ^result: "void"
     if !ir_unit_type(returned) {
         result_row: ir_value_type(m, p, returned) ?? return ""
         if m.types[result_row].kind != .Unit {
@@ -695,7 +695,7 @@ ir_core_cells_bind: fn(m: ^IRModule, image: IRCoreImage) Never! {
 }
 
 #Test("a debuggable image names its own writable cells, and an evaluation binds them by those names") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     name_column_set(m.constant_rows_keys, m.constant_rows, "storage:app.count", 0)
     name_column_set(m.constant_rows_keys, m.constant_rows, "storage:app.level", 1)
     name_column_set(m.constant_rows_keys, m.constant_rows, "const:app.limit", 2)
@@ -714,7 +714,7 @@ ir_core_cells_bind: fn(m: ^IRModule, image: IRCoreImage) Never! {
 
 #Test("a bound program finds each Core export row by its symbol in the sorted list") {
     keys: [String]{"<corelib>/core.text.split", "<corelib>/core.text.join", "<corelib>/core.math.abs", "<corelib>/core.files.read"}
-    rows := loop key in keys -> IRCoreExport{symbol: ir_core_symbol(key), key: key.copy(), signature: "(8/8/Integer)->8/8/Integer"}
+    ^rows: loop key in keys -> IRCoreExport{symbol: ir_core_symbol(key), key: key.copy(), signature: "(8/8/Integer)->8/8/Integer"}
     cell: "storage:<corelib>/core.log.level"
     rows.push(IRCoreExport{symbol: ir_core_cell_symbol(cell), key: cell, signature: IR_CORE_DATA})
     rows.sort_by(fn(left: IRCoreExport, right: IRCoreExport) { left.symbol <=> right.symbol })
@@ -731,8 +731,8 @@ ir_core_cells_bind: fn(m: ^IRModule, image: IRCoreImage) Never! {
 }
 
 #Test("the Core facts list agrees with the export list only row for row") {
-    keys := [String]{"<corelib>/core.text.split", "<corelib>/core.text.join", "<corelib>/core.math.abs"}
-    rows := [IRCoreExport]{}
+    ^keys: [String]{"<corelib>/core.text.split", "<corelib>/core.text.join", "<corelib>/core.math.abs"}
+    ^rows: [IRCoreExport]{}
     loop keys.len() > 0 {
         key: keys.pop() ?? break
         rows.push(IRCoreExport{symbol: ir_core_symbol(key), key: key, signature: "(8/8/Integer)->8/8/Integer"})

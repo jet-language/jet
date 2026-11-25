@@ -96,9 +96,9 @@ stop_door_word_byte: fn(byte: U8) -> Bool {
 stop_door_line_calls: fn(line: String, out: ^[String]) {
     bytes: line.bytes()
     count: bytes.len()
-    at := 0
-    start := -1
-    quoted := false
+    ^at: 0
+    ^start: -1
+    ^quoted: false
     loop at < count {
         byte: bytes[at]
         if quoted {
@@ -145,7 +145,7 @@ stop_door_reach: fn(name: String, calls: [String:[String]], ends: [String], exem
     if memo.get(name) == .Val(known) -> return known.copy()
     called: calls.get(name) ?? return ""
     memo[name] = ""
-    result := ""
+    ^result: ""
     loop callee in called {
         if callee == "trap_stop" -> break
         found: stop_door_reach(callee, calls, ends, exempt, memo)
@@ -160,22 +160,24 @@ stop_door_reach: fn(name: String, calls: [String:[String]], ends: [String], exem
 
 #Test("every_runtime_stop_serves_comptime_through_trap_stop") {
     guards_enter_root()
-    calls := [String:[String]]{}
-    exported := [{name: String, file: String}]{}
-    readers := [String]{}
-    files := [String]{}
+    ^calls: [String:[String]]{}
+    ^exported: [{name: String, file: String}]{}
+    ^readers: [String]{}
+    ^files: [String]{}
     loop child in
         (stop_door_files.list_dir(STOP_DOOR_RUNTIME) ?? panic("list {STOP_DOOR_RUNTIME}: {err}")) {
         if !child.is_dir && child.name.ends_with(".jet") -> files.push(child.name.copy())
     }
     files.sort()
     loop file in files {
-        current := ""
-        body := [String]{}
+        ^current: ""
+        ^body: [String]{}
         loop line in (stop_door_files.read("{STOP_DOOR_RUNTIME}/{file}") ?? panic("read {file}: {err}")).split("\n") {
             declared: stop_door_declared(line.copy())
             bytes: line.bytes()
-            top: bytes.len() > 0 && (stop_door_word_byte(bytes[0]) || bytes[0] == (U8{35}))
+            // A file-scope line opens with a name, a `#` marker or the `^` of a
+            // changeable name.
+            top: bytes.len() > 0 && (stop_door_word_byte(bytes[0]) || bytes[0] == (U8{35}) || bytes[0] == (U8{94}))
             if top {
                 if current != "" -> calls[current] = body.copy()
                 current = declared.copy()
@@ -198,8 +200,8 @@ stop_door_reach: fn(name: String, calls: [String:[String]], ends: [String], exem
     assert(exported.len() > 500, "the runtime's exported routines must be readable")
     ends: stop_door_ends()
     exempt: stop_door_exempt()
-    memo := [String:String]{}
-    ungated := [String]{}
+    ^memo: [String:String]{}
+    ^ungated: [String]{}
     loop routine in exported {
         if stop_door_has(ends, routine.name) -> next
         path: stop_door_reach(routine.name, calls, ends, exempt, memo)

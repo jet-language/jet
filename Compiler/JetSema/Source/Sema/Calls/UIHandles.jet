@@ -23,7 +23,7 @@ use jet_foundation.[
 sema_ui_handle_unit: fn() -> Type Never! { Type.Named{name: "Unit"} }
 
 sema_ui_handle_infer_args: fn(args: [CallArg], check: ^SemaBodyCheck) -> [TExpr] Never! {
-    values := [TExpr]{}
+    ^values: [TExpr]{}
     loop arg in args {
         if sema_check_expression(arg.expr, None, check) == .Val(value) -> values.push(value)
     }
@@ -31,9 +31,9 @@ sema_ui_handle_infer_args: fn(args: [CallArg], check: ^SemaBodyCheck) -> [TExpr]
 }
 
 sema_ui_handle_call_fact: fn(check: ^SemaBodyCheck, api: String, span: Span, result_type: Type, effect_name: String) -> Bool Never! {
-    effects := [EffectRowEntry]{}
+    ^effects: [EffectRowEntry]{}
     if effect_name != "" -> effects.push(EffectRowEntry{name: effect_name, span: span})
-    facts := SemaCallFacts{
+    ^facts: SemaCallFacts{
         return_type: result_type,
         failure_carrier: sema_call_failure_carrier(Val(result_type)),
         effect_bound: Val(effects),
@@ -46,7 +46,7 @@ sema_ui_handle_call_fact: fn(check: ^SemaBodyCheck, api: String, span: Span, res
 sema_ui_handle_literal_string: fn(expr: Expr) -> String? {
     return if expr == {
         .Str(parts, _, _) -> {
-            value := ""
+            ^value: ""
             loop part in parts {
                 if part == {
                     .Lit(text) -> { value += text }
@@ -101,7 +101,7 @@ sema_call_core_ui_focus_group_lint: fn(args: [CallArg], span: Span, check: ^Sema
     }
     if args[0].expr == {
         .ListLit(items, _, _) -> {
-            labels := [String]{}
+            ^labels: [String]{}
             loop item in items {
                 if item == {
                     .MethodCall(receiver, method, _, _, _, call_args, _) -> {
@@ -114,7 +114,7 @@ sema_call_core_ui_focus_group_lint: fn(args: [CallArg], span: Span, check: ^Sema
                         if sema_ui_handle_interactive_role(call_args[3].expr, check) == None -> next
                         label: sema_ui_handle_literal_string(call_args[0].expr) ?? next
                         if label == "" -> next
-                        duplicate := false
+                        ^duplicate: false
                         loop existing in labels {
                             if existing == label {
                                 duplicate = true
@@ -155,7 +155,7 @@ sema_ui_handle_stored_callback: fn(kind: String, argument: CallArg, params: [Typ
         return None
     }
     if actual_arity != params.len() {
-        _ := sema_expression_lambda_host_callback_stored(argument.expr, None, false, check)
+        ^_: sema_expression_lambda_host_callback_stored(argument.expr, None, false, check)
         check.diagnostics.push(sema_error("E2911", argument.span, "`{kind}` needs a {params.len()}-parameter lambda, got {actual_arity}", "the callback parameters must match the UI event", "use a callback with {params.len()} parameter(s)"))
         return None
     }
@@ -173,8 +173,8 @@ sema_ui_handle_callback_param: fn(name: String, label: String, ty: Type, span: S
 // The callback is an ordinary `() -> { … }` argument; an
 // unlabeled lambda after the positional params fills the callback slot.
 sema_ui_handle_bind_callback_args: fn(member: String, args: [CallArg], span: Span, callback_label: String, params: [SemaCallParam], diagnostics: ^[Diagnostic]) -> [CallArg]? {
-    normalized := args
-    positional := 0
+    ^normalized: args
+    ^positional: 0
     loop param in params {
         if param.zone == .PositionalOnly -> positional += 1
     }
@@ -182,7 +182,7 @@ sema_ui_handle_bind_callback_args: fn(member: String, args: [CallArg], span: Spa
     if last >= positional && normalized[last].label == None && normalized[last].expr == .Lambda(_, _) {
         normalized[last].label = Val(CallLabel{name: callback_label, span: normalized[last].span})
     }
-    _ := sema_call_bind_args("core.ui.{member}", params, normalized, span, diagnostics) ?? return None
+    ^_: sema_call_bind_args("core.ui.{member}", params, normalized, span, diagnostics) ?? return None
     Val(normalized)
 }
 
@@ -209,7 +209,7 @@ sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, check: ^
         value: sema_call_core_source("core.ui", "button", [TExpr]{label}, Type.Named{name: "UINode"}, false, span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
-    params := [SemaCallParam]{
+    ^params: [SemaCallParam]{
         sema_ui_handle_callback_param("display", "display", Type.String, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
         sema_ui_handle_callback_param("shortcut", "shortcut", Type.Option{inner: Type.Named{name: "UIShortcut"}}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
         sema_ui_handle_callback_param("label", "label", Type.Option{inner: Type.String}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
@@ -217,23 +217,25 @@ sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, check: ^
     }
     bound: sema_ui_handle_bind_callback_args("button", args, span, "on_click", params, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if bound.len() != 4 {
-        _ := sema_ui_handle_infer_args(bound, check)
+        ^_: sema_ui_handle_infer_args(bound, check)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if sema_expression_absent_none(bound[3].expr) {
         check.diagnostics.push(sema_error("E2910", span, "`button` with a shortcut or label needs its click lambda", "the shortcut and accessible label belong to the click form, whose handler is the `fn() {{ … }}` argument after them", "write `ui.button(\"Save\", shortcut: …, fn() {{ save() }})`"))
         // Check only the written arguments: the bound row's absent defaults
         // would report a follow-on untyped `None`.
-        _ := sema_ui_handle_infer_args(args, check)
+        ^_: sema_ui_handle_infer_args(args, check)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     label: sema_ui_handle_typed_arg(bound[0], Type.String, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     shortcut: sema_ui_handle_optional_arg(bound[1], Type.Named{name: "UIShortcut"}, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     accessible_label: sema_ui_handle_optional_arg(bound[2], Type.String, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     callback: sema_ui_handle_stored_callback("button on_click", bound[3], [Type]{}, span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    result_type := Type.Named{name: "UINode"}
-    click := sema_tree_node(Type.Int, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIClickSlot{executable: callback}}, span)
-    if sema_call_core_module_identity(check.environment.*, check.program.*, "core.ui") == None -> return SemaDirectSpecialCheck{handled: true, value: None}
+    ^result_type: Type.Named{name: "UINode"}
+    ^click: sema_tree_node(Type.Int, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIClickSlot{executable: callback}}, span)
+    if sema_call_core_module_identity(check.environment.*, check.program.*, "core.ui") == None {
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
     value: sema_call_core_role_source("ButtonClick", [TExpr]{label, shortcut, accessible_label, click}, result_type, span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     checked: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_call_fact(check, "core.ui.button", span, result_type, "Browser") {
@@ -259,7 +261,7 @@ sema_ui_handle_text_input: fn(args: [CallArg], span: Span, expected: Type?, chec
     }
     bound: sema_ui_handle_bind_callback_args("text_input", args, span, "on_drop", params, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if bound.len() != 4 {
-        _ := sema_ui_handle_infer_args(bound, check)
+        ^_: sema_ui_handle_infer_args(bound, check)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     state_value: sema_ui_handle_typed_arg(bound[0], Type.String, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
@@ -271,13 +273,13 @@ sema_ui_handle_text_input: fn(args: [CallArg], span: Span, expected: Type?, chec
         value: sema_call_core_source("core.ui", "text_input", [TExpr]{state_value, ime_value}, result_type, false, span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
-    drop_slot := sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+    ^drop_slot: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
     if !on_drop_absent {
         callback: sema_ui_handle_stored_callback("text_input on_drop", bound[2], [Type]{Type.Named{name: "UIDropItem"}}, span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         drop_slot = sema_tree_node(Type.Int, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIDropSlot{executable: callback}}, span)
     }
-    role := SEMA_CORE_ROLE_TEXT_INPUT_DROP
-    slots := [TExpr]{state_value, ime_value}
+    ^role: SEMA_CORE_ROLE_TEXT_INPUT_DROP
+    ^slots: [TExpr]{state_value, ime_value}
     if on_change_absent -> slots.push(drop_slot) else {
         callback: sema_ui_handle_stored_callback("text_input on_change", bound[3], [Type]{Type.String}, span, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         slots.push(sema_tree_node(Type.Int, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIClickSlot{executable: callback}}, span))
@@ -303,16 +305,16 @@ sema_ui_handle_text_input: fn(args: [CallArg], span: Span, expected: Type?, chec
 sema_ui_handle_reactive_render: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     if args.len() != 1 {
         check.diagnostics.push(sema_wrong_core_arity("reactive_render", 1, args.len(), span))
-        _ := sema_ui_handle_infer_args(args, check)
+        ^_: sema_ui_handle_infer_args(args, check)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if !sema_call_core_check_type_args("core.ui", "reactive_render", 0, false, type_args, span, check.diagnostics) {
-        _ := sema_ui_handle_infer_args(args, check)
+        ^_: sema_ui_handle_infer_args(args, check)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     result_type: sema_ui_handle_unit()
     callback: sema_reactive_check_retained_lambda("reactive_render", args[0], Val(result_type), None, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    value := sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIReactiveRender{executable: callback}}, span)
+    ^value: sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIReactiveRender{executable: callback}}, span)
     checked: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_call_fact(check, "core.ui.reactive_render", span, result_type, "Browser") {
         return SemaDirectSpecialCheck{handled: true, value: None}
@@ -325,10 +327,10 @@ sema_ui_handle_reactive_render: fn(args: [CallArg], type_args: [Type], span: Spa
 sema_ui_handle_mount: fn(args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     if args.len() != 2 && args.len() != 3 {
         check.diagnostics.push(sema_wrong_core_arity("mount", 2, args.len(), span))
-        _ := sema_ui_handle_infer_args(args, check)
+        ^_: sema_ui_handle_infer_args(args, check)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    rest := [CallArg]{}
+    ^rest: [CallArg]{}
     loop index in 1..<args.len() -> rest.push(args[index].copy())
     call: Expr.MethodCall{receiver: args[0].expr.copy(), method: "mount", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: rest, id: AST_NODE_GENERATED}
     SemaDirectSpecialCheck{handled: true, value: sema_check_expression(call, expected, check)}
@@ -365,7 +367,7 @@ sema_ui_asset_text: fn(text: String, path: String, resolved: String) -> String N
 // The path written as string literal parts, as the driver reads it.
 sema_ui_asset_literal: fn(expression: Expr) -> String? Never! {
     if expression == .Str(parts, _, _) {
-        text := ""
+        ^text: ""
         loop part in parts {
             if part == .Lit(value) -> text = "{text}{value}" else -> return None
         }

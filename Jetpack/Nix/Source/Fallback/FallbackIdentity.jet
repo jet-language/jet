@@ -77,7 +77,7 @@ NixFallbackIdentity: struct {
     // Decode and revalidate the exact identity persisted in a lock or receipt.
     from_provenance: fn(value: String) -[FS, Env]> NixFallbackIdentity NixError! {
         tree: json.parse(value) ?? return Err(NixError.Fallback("invalid Nix fallback provenance: {err}"))
-        fields := [String:Dyn]{}
+        ^fields: [String:Dyn]{}
         if tree == {
             .Object(entries) -> {
                 loop pair in entries -> fields[pair.key] = pair.value
@@ -129,7 +129,7 @@ NixFallbackIdentity: struct {
 
     // Machine-readable provenance stored with a Jetpack import and its lock.
     provenance: fn(self) -> String Never! {
-        attrs := [Dyn]{}
+        ^attrs: [Dyn]{}
         loop segment in self.attr -> attrs.push(Dyn.Text(segment))
         pkg_json_render(
             Dyn.Object(
@@ -203,7 +203,7 @@ nix_fallback_project_binding: fn(project: String, source_name: String) -[FS]> {l
         return Err(NixError.Fallback("project lock `{lock_path}` is not a regular file"))
     }
     raw: files.read(lock_path) ?? return Err(NixError.Fallback("could not read project lock `{lock_path}`: {err}"))
-    lock := pkg_lock_parse(raw) ?? return Err(NixError.Fallback("could not parse project lock: {err.message()}"))
+    ^lock: pkg_lock_parse(raw) ?? return Err(NixError.Fallback("could not parse project lock: {err.message()}"))
     exact: nix_fallback_locked_exact(lock, source_name) ?? return Err(NixError.Fallback("project lock has no exact source channel `{source_name}`"))
     revision: nix_fallback_revision_from_locked_input(exact)
     loop index in 0..<lock.packages.len() -> lock.packages[index].receipt = None
@@ -251,12 +251,12 @@ nix_fallback_tree_text: fn(value: Dyn) -> String NixError! {
 
 nix_fallback_provenance_attr: fn(fields: [String:Dyn]) -> [String] NixError! {
     value: fields.get("attr") ?? return Err(NixError.Fallback("Nix fallback provenance is missing `attr`"))
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     if value == {
         .Array(values) -> items = values
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(NixError.Fallback("expected a Dyn array"))
     }
-    attr := [String]{}
+    ^attr: [String]{}
     loop item in items -> attr.push(nix_fallback_tree_text(item))
     Ok(attr)
 }

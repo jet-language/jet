@@ -180,7 +180,7 @@ extensionless: fn(path: String) -> Bool Never! {
 // "" when `first_line` is not a `#!` line.
 shebang_interpreter: fn(first_line: String) -> String Never! {
     if !first_line.starts_with("#!") -> return ""
-    words := [String]{}
+    ^words: [String]{}
     loop word in first_line.slice(2, first_line.len()).trim().split(" ").to_list() {
         if word.trim() != "" -> words.push(word.trim())
     }
@@ -228,11 +228,11 @@ class_of: fn(repo: String, path: String) -[FS]> FileClass Never! {
 // of the JavaScript file `path`, as paths in the checkout; none for another
 // file.
 js_imports: fn(repo: String, path: String) -[FS]> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     if !path.ends_with(".mjs") && !path.ends_with(".js") -> return out
     text: files.read(files.join(repo, path)) ?? return out
     dir: files.dirname(path)
-    statement := ""
+    ^statement: ""
     loop line in text.lines() {
         trimmed: line.trim()
         if statement == "" && !trimmed.starts_with("import ") {
@@ -258,7 +258,7 @@ js_imports: fn(repo: String, path: String) -[FS]> [String] Never! {
 
 // The names of the directories in `repo`/`root`, in name order.
 subdirectories: fn(repo: String, root: String, found: ^Entries) -[FS]> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     if !files.is_dir(files.join(repo, root)) -> return names
     listed: files.list_dir(files.join(repo, root)) ?? {
         found.problems.push("{root} cannot be listed: {err}")
@@ -275,7 +275,7 @@ subdirectories: fn(repo: String, root: String, found: ^Entries) -[FS]> [String] 
 // `repo`/ENTRIES_ROOT, in name order, and the links between the in-scope
 // tool scripts of `paths` (the checkout's files).
 read_entries: fn(repo: String, paths: [String]) -[FS]> Entries Never! {
-    found := Entries{pairings: [Pairing]{}, links: [Link]{}, problems: [String]{}}
+    ^found: Entries{pairings: [Pairing]{}, links: [Link]{}, problems: [String]{}}
     loop name in subdirectories(repo, ENTRIES_ROOT, found) {
         text: files.read(files.join(repo, "{ENTRIES_ROOT}/{name}/entry.json")) ?? next
         tree: json.parse(text) ?? next
@@ -300,7 +300,7 @@ tool_entry: fn(repo: String, name: String, tree: Dyn, found: ^Entries) -[FS]> ()
     if !in_scope(original) && !in_scope(twin) {
         return
     }
-    problems := [String]{}
+    ^problems: [String]{}
     if text_field(tree, "name") != name -> problems.push("its `name` is not `{name}`")
     original_class: class_of(repo, original)
     if {
@@ -326,7 +326,7 @@ tool_entry: fn(repo: String, name: String, tree: Dyn, found: ^Entries) -[FS]> ()
     if cases.len() == 0 -> problems.push("it has no `tool.cases` parity check")
     loop index in 0..<cases.len() {
         case: cases[index]
-        args_listed := false
+        ^args_listed: false
         if field(case, "args") == .Array(listed) -> args_listed = listed.len() >= 0
         if !args_listed -> problems.push("case {index + 1} has no `args` array")
         expected: text_field(case, "expected")
@@ -381,7 +381,7 @@ covering: fn(repo: String, entries: Entries, path: String) -[FS]> Coverage Never
 
 // The in-scope tool scripts that import `path` directly.
 importers_of: fn(entries: Entries, path: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop link in entries.links {
         if link.to == path && !out.contains(link.from) -> out.push(link.from.copy())
     }
@@ -395,8 +395,8 @@ importers_of: fn(entries: Entries, path: String) -> [String] Never! {
 // The entries are the pairs of the paired importers; each importer left
 // unreached is missing.
 importer_coverage: fn(entries: Entries, path: String) -> Coverage Never! {
-    closure := importers_of(entries, path)
-    at := 0
+    ^closure: importers_of(entries, path)
+    ^at: 0
     loop at < closure.len() {
         current: closure[at].copy()
         at += 1
@@ -404,20 +404,20 @@ importer_coverage: fn(entries: Entries, path: String) -> Coverage Never! {
             if importer != path && !closure.contains(importer) -> closure.push(importer.copy())
         }
     }
-    names := [String]{}
-    reached := [String]{}
+    ^names: [String]{}
+    ^reached: [String]{}
     loop importer in closure {
         pair: pair_of(entries, importer) ?? next
         reached.push(importer.copy())
         if !names.contains(pair.entry) -> names.push(pair.entry.copy())
     }
-    grown := true
+    ^grown: true
     loop grown {
         grown = false
         loop importer in closure {
             if reached.contains(importer) -> next
             above: importers_of(entries, importer)
-            ready := above.len() > 0
+            ^ready: above.len() > 0
             loop name in above {
                 if !reached.contains(name) -> ready = false
             }
@@ -427,7 +427,7 @@ importer_coverage: fn(entries: Entries, path: String) -> Coverage Never! {
         }
     }
     names.sort()
-    missing := [String]{}
+    ^missing: [String]{}
     loop importer in closure {
         if !reached.contains(importer) -> missing.push(importer.copy())
     }
@@ -437,8 +437,8 @@ importer_coverage: fn(entries: Entries, path: String) -> Coverage Never! {
 // The entries of the scripts the test script `path` imports, in name
 // order, and each import that is neither paired nor covered.
 test_coverage: fn(repo: String, entries: Entries, path: String) -[FS]> Coverage Never! {
-    names := [String]{}
-    missing := [String]{}
+    ^names: [String]{}
+    ^missing: [String]{}
     loop taken in js_imports(repo, path) {
         own: if pair_of(entries, taken) == .Val(pair) -> Coverage{entries: [String]{pair.entry.copy()}, missing: [String]{}} else -> importer_coverage(entries, taken)
         if !covered(own) {
@@ -456,7 +456,7 @@ test_coverage: fn(repo: String, entries: Entries, path: String) -[FS]> Coverage 
 // The refusal for each added path that is an in-scope script neither
 // paired nor covered, then every incomplete in-scope tool entry.
 refusals: fn(repo: String, added: [String], entries: Entries) -[FS]> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop path in added {
         if class_of(repo, path) != .Script || pair_of(entries, path) != None -> next
         coverage: covering(repo, entries, path)
@@ -479,13 +479,13 @@ GitScope: enum {
 }
 
 git_lines: fn(repo: String, args: [String], scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
-    argv := [String]{"git", "-c", "core.quotepath=off"}
+    ^argv: [String]{"git", "-c", "core.quotepath=off"}
     argv.extend(args.copy())
     receipt: git_command(repo, argv, scope).output_limit(268435456).run() ?? return Err(pairing_fail("git cannot start: {err}"))
     if receipt.code != 0 || receipt.signal != None {
         return Err(pairing_fail("{argv.join(" ")} failed ({receipt.code}): {receipt.errors.trim()}"))
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in receipt.output.lines() {
         if line != "" -> lines.push(line.copy())
     }
@@ -506,7 +506,7 @@ git_command: fn(repo: String, argv: [String], scope: GitScope) -> process.Proces
 added_files: fn(repo: String, base: String, scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
     added: git_lines(repo, [String]{"diff", "--name-only", "--find-renames", "--diff-filter=A", base, "--"}, scope) ?? return Err(err)
     untracked: git_lines(repo, [String]{"ls-files", "--others", "--exclude-standard"}, scope) ?? return Err(err)
-    out := added.copy()
+    ^out: added.copy()
     loop path in untracked {
         if !out.contains(path) -> out.push(path.copy())
     }
@@ -519,7 +519,7 @@ added_files: fn(repo: String, base: String, scope: GitScope) -[Exec, Time.Wait]>
 changed_files: fn(repo: String, base: String, scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
     changed: git_lines(repo, [String]{"diff", "--name-only", "--no-renames", base, "--"}, scope) ?? return Err(err)
     untracked: git_lines(repo, [String]{"ls-files", "--others", "--exclude-standard"}, scope) ?? return Err(err)
-    out := changed.copy()
+    ^out: changed.copy()
     loop path in untracked {
         if !out.contains(path) -> out.push(path.copy())
     }
@@ -530,7 +530,7 @@ changed_files: fn(repo: String, base: String, scope: GitScope) -[Exec, Time.Wait
 // The tool entries `changed` touches whose original sits in the entry's own
 // directory: the entries that switched over to their Jet twin.
 switched_entries: fn(entries: Entries, changed: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop known in entries.pairings {
         dir: "{ENTRIES_ROOT}/{known.pair.entry}/"
         if !known.path.starts_with(dir) || out.contains(known.pair.entry) -> next
@@ -545,7 +545,7 @@ switched_entries: fn(entries: Entries, changed: [String]) -> [String] Never! {
 // loses as JUDGE reports them.
 judge_refusals: fn(repo: String, names: [String]) -[Env, Exec, Time.Wait]> [String] Never! {
     jet: process.env_get("JET") ?? "jet"
-    out := [String]{}
+    ^out: [String]{}
     loop name in names {
         command: "{JUDGE} --entry {name}"
         receipt: process.cmd([String]{jet.copy(), files.join(repo, JUDGE), "--repo", repo.copy(), "--entry", name.copy()}).cwd(repo).output_limit(268435456).run() ?? {
@@ -553,7 +553,7 @@ judge_refusals: fn(repo: String, names: [String]) -[Env, Exec, Time.Wait]> [Stri
             next
         }
         if receipt.code == 0 && receipt.signal == None -> next
-        lost := [String]{}
+        ^lost: [String]{}
         loop line in receipt.output.lines() {
             cells: line.split("\t").to_list()
             if cells.len() == 4 && cells[0] == name && cells[1] != "verdict" && cells[2] == "FAIL" {
@@ -569,14 +569,14 @@ judge_refusals: fn(repo: String, names: [String]) -[Env, Exec, Time.Wait]> [Stri
 // Every file of the checkout, tracked or untracked and not ignored.
 checkout_files: fn(repo: String, scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
     listed: git_lines(repo, [String]{"ls-files", "--cached", "--others", "--exclude-standard"}, scope) ?? return Err(err)
-    out := listed.copy()
+    ^out: listed.copy()
     out.sort()
     Ok(out)
 }
 
 // The census rows: every script in another language, its class and pair.
 census_rows: fn(repo: String, paths: [String], entries: Entries) -[FS]> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop path in paths {
         if !files.is_file(files.join(repo, path)) -> next
         class: class_of(repo, path)
@@ -604,9 +604,9 @@ census_rows: fn(repo: String, paths: [String], entries: Entries) -[FS]> [String]
 CENSUS_CLASSES: [String]{"paired", "covered", "unpaired", "out of scope"}
 
 census_counts: fn(rows: [String]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop name in CENSUS_CLASSES {
-        count := 0
+        ^count: 0
         loop row in rows {
             if row.partition("\t").tail.partition("\t").head == name -> count += 1
         }
@@ -643,7 +643,7 @@ run: fn() {
     added: added_files(repo, base, .Caller) ?? process.fail(64, err.message)
     changed: changed_files(repo, base, .Caller) ?? process.fail(64, err.message)
     entries: read_entries(repo, checkout_files(repo, .Caller) ?? process.fail(64, err.message))
-    refused := refusals(repo, added, entries)
+    ^refused: refusals(repo, added, entries)
     refused.extend(judge_refusals(repo, switched_entries(entries, changed)))
     if refused.len() == 0 {
         print("script pairing: ok ({added.len()} added file(s))")

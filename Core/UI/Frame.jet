@@ -272,7 +272,7 @@ spot: fn(x: Float, y: Float, width: Int, height: Int, look: FrameLook) -> FrameS
             return FrameSpot.Outside
         }
         corner: Float{CORNER_GRIP}
-        edge := 0
+        ^edge: 0
         if x < 0.0 -> edge += EDGE_LEFT else if x >= w -> edge += EDGE_RIGHT
         if y < 0.0 -> edge += EDGE_TOP else if y >= h -> edge += EDGE_BOTTOM
         if edge == EDGE_LEFT || edge == EDGE_RIGHT {
@@ -352,7 +352,7 @@ button_box: fn(k: Int, width: Int, scale120: Int, look: FrameLook) -> UIRect {
 // back, wrapping. From `Nothing` it enters at the first, or going back at
 // the last.
 next_control: fn(current: FrameButton, step: Int) -> FrameButton {
-    at := if step < 0 -> 2 else -> 0
+    ^at: if step < 0 -> 2 else -> 0
     if current != .Nothing {
         at = 2 - button_index(current) + step
         if at > 2 -> at -= 3
@@ -391,7 +391,7 @@ draw_kit: fn(look: FrameLook, scale120: Int) -> Kit {
     box_height: px(KIT_BOX_HEIGHT, scale120)
     width: box_width + 2 * margin
     height: box_height + 2 * margin
-    pixels := transparent(width * height)
+    ^pixels: transparent(width * height)
     x0: Float{margin}
     y0: Float{margin}
     x1: Float{margin + box_width}
@@ -434,12 +434,12 @@ kit_row: fn(kit: Kit, y: Int, width: Int, height: Int, x0: Int, x1: Int) -> KitR
     right_from: max_int(width - (kit.box_width - half), half)
     left_end: min_int(x1, half)
     right_start: max_int(x0, right_from)
-    left := [U8]{}
+    ^left: [U8]{}
     if left_end > x0 {
         at: kit_offset(kit, x0, y, width, height)
         left = kit.pixels[at..<(at + (left_end - x0) * 4)].copy()
     }
-    right := [U8]{}
+    ^right: [U8]{}
     if x1 > right_start {
         at: kit_offset(kit, right_start, y, width, height)
         right = kit.pixels[at..<(at + (x1 - right_start) * 4)].copy()
@@ -458,7 +458,7 @@ corner_side: fn(scale120: Int) -> Int { Int{math.ceil(Float{RADIUS * scale120} /
 bottom_left_cover: fn(scale120: Int) -> [U8] {
     r: Float{RADIUS * scale120} / 120.0
     side: corner_side(scale120)
-    out := [U8]{}
+    ^out: [U8]{}
     loop row in 0..<side {
         loop col in 0..<side {
             // The squircle's center is r in from the left and up from the
@@ -484,7 +484,7 @@ header: fn(p: ^Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
     slot: kit(p, look, scale120)
     // Opaque header, except the rounded corners' squares, which start as
     // the ring beside them.
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop row in 0..<height {
         loop col in 0..<width {
             if row < side && (col < side || col >= width - side) {
@@ -535,8 +535,8 @@ header: fn(p: ^Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
         y0: Float{square.y}
         x1: Float{square.x + square.width}
         y1: Float{square.y + square.height}
-        fill := if held -> colors.button_press else if lit -> colors.button_hover else -> colors.button_idle
-        glyph := if lit -> colors.glyph_hover else -> ink
+        ^fill: if held -> colors.button_press else if lit -> colors.button_hover else -> colors.button_idle
+        ^glyph: if lit -> colors.glyph_hover else -> ink
         if lit && which == .Close {
             fill = if held -> colors.close_press else -> colors.close_hover
             glyph = WHITE
@@ -567,18 +567,18 @@ fit_title: fn(p: Painter, title: String, size: Float, room: Float) -> String {
     if title_width(p.face, "…", size) > room -> return ""
     parts: text.graphemes(title)
     // prefixes[k] is the first k graphemes.
-    prefixes := [String]{""}
+    ^prefixes: [String]{""}
     loop part in parts -> prefixes.push("{prefixes[prefixes.len() - 1]}{part}")
     // The most graphemes that fit before the ellipsis: widths grow with
     // the prefix, so a binary search finds it.
-    low := 0
-    high := parts.len()
+    ^low: 0
+    ^high: parts.len()
     loop low < high {
         mid: (low + high + 1) /% 2
         if title_width(p.face, "{prefixes[mid]}…", size) <= room -> low = mid else -> high = mid - 1
     }
     // Back to the last word's end inside that, if there is one.
-    cut := low
+    ^cut: low
     loop at in 1..<(low + 1) {
         k: low + 1 - at
         if k < parts.len() && text.is_whitespace(parts[k]) && !text.is_whitespace(parts[k - 1]) {
@@ -655,7 +655,7 @@ box_lines: fn(pixels: ^[U8], width: Int, height: Int, x: Int, y: Int, side: Int,
 
 // `count` transparent pixels.
 transparent: fn(count: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<(count * 4) -> out.push(U8{0})
     out
 }
@@ -674,7 +674,7 @@ mask_at: fn(col: Int, row: Int, width: Int, height: Int, coverage: [U8]) -> font
 cover_byte: fn(cover: Float) -> U8 { U8{math.round(clamp01(cover) * 255.0)} }
 
 rect_mask: fn(col: Int, row: Int, width: Int, height: Int) -> font.GlyphMask {
-    coverage := [U8]{}
+    ^coverage: [U8]{}
     loop _ in 0..<(width * height) -> coverage.push(U8{255})
     mask_at(col, row, width, height, coverage)
 }
@@ -708,7 +708,7 @@ box_mask: fn(x0: Float, y0: Float, x1: Float, y1: Float, top: Float, bottom: Flo
     row0: floor_int(y0)
     cols: ceil_int(x1) - col0
     rows: ceil_int(y1) - row0
-    coverage := [U8]{}
+    ^coverage: [U8]{}
     loop row in 0..<rows {
         loop col in 0..<cols {
             d: box_distance(Float{col0 + col} + 0.5, Float{row0 + row} + 0.5, x0, y0, x1, y1, top, bottom)
@@ -725,7 +725,7 @@ ring_mask: fn(x0: Float, y0: Float, x1: Float, y1: Float, r: Float, line: Float)
     row0: floor_int(y0 - line) - 1
     cols: ceil_int(x1 + line) + 1 - col0
     rows: ceil_int(y1 + line) + 1 - row0
-    coverage := [U8]{}
+    ^coverage: [U8]{}
     loop row in 0..<rows {
         loop col in 0..<cols {
             d: box_distance(Float{col0 + col} + 0.5, Float{row0 + row} + 0.5, x0, y0, x1, y1, r, r)
@@ -740,7 +740,7 @@ ring_mask: fn(x0: Float, y0: Float, x1: Float, y1: Float, r: Float, line: Float)
 // column 0, else the top-right's.
 corner_mask: fn(col: Int, side: Int, r: Float) -> font.GlyphMask {
     right: col > 0
-    coverage := [U8]{}
+    ^coverage: [U8]{}
     loop row in 0..<side {
         loop k in 0..<side {
             // Distance in from the corner's own edges.
@@ -758,7 +758,7 @@ corner_mask: fn(col: Int, side: Int, r: Float) -> font.GlyphMask {
 // `sigma` pixels, over the whole `width` x `height` canvas, left out
 // under the box itself.
 shadow_mask: fn(width: Int, height: Int, x0: Float, y0: Float, x1: Float, y1: Float, r: Float, drop: Float, sigma: Float) -> font.GlyphMask {
-    coverage := [U8]{}
+    ^coverage: [U8]{}
     spread: sigma * 1.41421356
     loop row in 0..<height {
         loop col in 0..<width {
@@ -782,7 +782,7 @@ disc_mask: fn(cx: Float, cy: Float, r: Float, line: Float) -> font.GlyphMask {
     row0: floor_int(cy - r - 1.0)
     cols: ceil_int(cx + r + 1.0) - col0
     rows: ceil_int(cy + r + 1.0) - row0
-    coverage := [U8]{}
+    ^coverage: [U8]{}
     loop row in 0..<rows {
         loop col in 0..<cols {
             dx: Float{col0 + col} + 0.5 - cx
@@ -805,7 +805,7 @@ segment_mask: fn(ax: Float, ay: Float, bx: Float, by: Float, width: Float) -> fo
     bax: bx - ax
     bay: by - ay
     len2: fmax(bax * bax + bay * bay, 0.0001)
-    coverage := [U8]{}
+    ^coverage: [U8]{}
     loop row in 0..<rows {
         loop col in 0..<cols {
             pax: Float{col0 + col} + 0.5 - ax
@@ -822,10 +822,10 @@ segment_mask: fn(ax: Float, ay: Float, bx: Float, by: Float, width: Float) -> fo
 // The filled polygon through the points (xs[k], ys[k]), any simple one:
 // its signed distance is the nearest edge's, negative inside.
 polygon_mask: fn(xs: [Float], ys: [Float]) -> font.GlyphMask {
-    left := xs[0]
-    right := xs[0]
-    top := ys[0]
-    bottom := ys[0]
+    ^left: xs[0]
+    ^right: xs[0]
+    ^top: ys[0]
+    ^bottom: ys[0]
     loop k in 1..<xs.len() {
         left = fmin(left, xs[k])
         right = fmax(right, xs[k])
@@ -836,7 +836,7 @@ polygon_mask: fn(xs: [Float], ys: [Float]) -> font.GlyphMask {
     row0: floor_int(top) - 1
     cols: ceil_int(right) + 1 - col0
     rows: ceil_int(bottom) + 1 - row0
-    coverage := [U8]{}
+    ^coverage: [U8]{}
     loop row in 0..<rows {
         loop col in 0..<cols {
             d: polygon_distance(Float{col0 + col} + 0.5, Float{row0 + row} + 0.5, xs, ys)
@@ -847,9 +847,9 @@ polygon_mask: fn(xs: [Float], ys: [Float]) -> font.GlyphMask {
 }
 
 polygon_distance: fn(x: Float, y: Float, xs: [Float], ys: [Float]) -> Float {
-    nearest := (x - xs[0]) * (x - xs[0]) + (y - ys[0]) * (y - ys[0])
-    inside := false
-    j := xs.len() - 1
+    ^nearest: (x - xs[0]) * (x - xs[0]) + (y - ys[0]) * (y - ys[0])
+    ^inside: false
+    ^j: xs.len() - 1
     loop i in 0..<xs.len() {
         ex: xs[j] - xs[i]
         ey: ys[j] - ys[i]
@@ -874,7 +874,7 @@ polygon_distance: fn(x: Float, y: Float, xs: [Float], ys: [Float]) -> Float {
 // units. A window that names no icon of its own shows it in the taskbar.
 app_icon: fn(side: Int) -> [U8] {
     s: Float{side} / 64.0
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop _ in 0..<(side * side) {
         pixels.push(U8{0x0D})
         pixels.push(U8{0x0B})
@@ -887,7 +887,7 @@ app_icon: fn(side: Int) -> [U8] {
     // Painted opaque, the premultiplied B, G, R are straight; the rounded
     // square's coverage becomes the alpha.
     shape: box_mask(0.0, 0.0, Float{side}, Float{side}, 12.0 * s, 12.0 * s, 0.0)
-    out := [U8]{}
+    ^out: [U8]{}
     loop at in 0..<(side * side) {
         i: at * 4
         out.push(pixels[i + 2])
@@ -924,7 +924,7 @@ with_alpha: fn(color: Int, alpha: Int) -> Int { (color & 16777215) + (alpha << 2
 // sRGB bytes as the header's buttons are seen.
 over: fn(top: Int, bottom: Int) -> Int {
     a: alpha_of(top)
-    out := 0xFF000000
+    ^out: 0xFF000000
     shifts: [Int]{0, 8, 16}
     loop shift in shifts {
         t: (top >> shift) & 255
@@ -961,10 +961,10 @@ plain_look: fn(title: String) -> FrameLook {
 // header `bar` whose green byte is at least `rise` above `base`; width 0
 // when there are none.
 ink_box: fn(bar: [U8], width: Int, area: UIRect, base: Int, rise: Int) -> UIRect {
-    x0 := area.x + area.width
-    y0 := area.y + area.height
-    x1 := area.x
-    y1 := area.y
+    ^x0: area.x + area.width
+    ^y0: area.y + area.height
+    ^x1: area.x
+    ^y1: area.y
     loop row in area.y..<(area.y + area.height) {
         loop col in area.x..<(area.x + area.width) {
             if (Int{bar[(row * width + col) * 4 + 1]}) - base >= rise {
@@ -982,10 +982,10 @@ ink_box: fn(bar: [U8], width: Int, area: UIRect, base: Int, rise: Int) -> UIRect
 // The bounding box of the pixels in `area` where the headers `a` and `b`
 // differ.
 changed_box: fn(a: [U8], b: [U8], width: Int, area: UIRect) -> UIRect {
-    x0 := area.x + area.width
-    y0 := area.y + area.height
-    x1 := area.x
-    y1 := area.y
+    ^x0: area.x + area.width
+    ^y0: area.y + area.height
+    ^x1: area.x
+    ^y1: area.y
     loop row in area.y..<(area.y + area.height) {
         loop col in area.x..<(area.x + area.width) {
             at: (row * width + col) * 4
@@ -1005,7 +1005,7 @@ changed_box: fn(a: [U8], b: [U8], width: Int, area: UIRect) -> UIRect {
 // hold over `base`, in whole pixels: blend mixes the sRGB bytes linearly,
 // so each pixel's share of the way from `base` to `ink` is its coverage.
 ink_cover: fn(bar: [U8], width: Int, area: UIRect, base: Int, ink: Int) -> Float {
-    total := Float{0.0}
+    ^total: Float{0.0}
     loop row in area.y..<(area.y + area.height) {
         loop col in area.x..<(area.x + area.width) {
             g: Int{bar[(row * width + col) * 4 + 1]}
@@ -1077,7 +1077,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     assert_eq(spot(399.0, 303.0, 400, 300, look), FrameSpot.Edge(EDGE_BOTTOM + EDGE_RIGHT))
     assert_eq(spot(-20.0, 150.0, 400, 300, look), FrameSpot.Outside)
     // A maximized or tiled window has no grips outside it.
-    tiled := plain_look("")
+    ^tiled: plain_look("")
     tiled.square = true
     assert_eq(spot(-3.0, 150.0, 400, 300, tiled), FrameSpot.Outside)
     assert_eq(spot(200.0, -1.0, 400, 300, tiled), FrameSpot.Outside)
@@ -1099,7 +1099,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     // For a finger every region is 46 units wide and the header high, at
     // the smallest window too, where the minimize region leaves the title
     // its first 38 units (176 - 3 * 46).
-    finger := plain_look("")
+    ^finger: plain_look("")
     finger.coarse = true
     touch_offsets: [Float]{-22.0, 21.5}
     touch_rows: [Float]{0.0, 33.5}
@@ -1131,7 +1131,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     assert_eq(kit_index(499, 500, 26), 25)
     assert_eq(kit_index(-5, 500, 26), -5)
     assert_eq(kit_index(510, 500, 26), 36)
-    p := painter()
+    ^p: painter()
     look: plain_look("")
     slot: kit(p, look, 120)
     ring: p.kits[slot]
@@ -1155,7 +1155,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
 }
 
 #Test("every fractional scale sizes the frame in whole pixels") {
-    p := painter()
+    ^p: painter()
     look: plain_look("Notes")
     scales: [Int]{120, 150, 180, 210, 240, 300}
     loop scale in scales {
@@ -1180,8 +1180,8 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
 }
 
 #Test("the header is opaque but for its rounded corners, and draws alike every time") {
-    p := painter()
-    look := plain_look("A window with a long title")
+    ^p: painter()
+    ^look: plain_look("A window with a long title")
     look.hover = FrameButton.Close
     bar: header(p, look, 300, 120)
     assert_eq(bar.len(), 300 * 34 * 4)
@@ -1200,14 +1200,14 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     // A hovered maximize button is a quiet square one step above Jet
     // black, 0x1D1D21 as B, G, R, A: the square runs from 246 to 264 and
     // its glyph from 250 to 260, so pixel (247, 17) is the fill alone.
-    quiet := plain_look("")
+    ^quiet: plain_look("")
     quiet.hover = FrameButton.Maximize
     soft: header(p, quiet, 300, 120)
     lit: (17 * 300 + 247) * 4
     assert_eq([U8]{soft[lit], soft[lit + 1], soft[lit + 2], soft[lit + 3]}, [U8]{U8{0x21}, U8{0x1D}, U8{0x1D}, U8{255}})
     // Nothing moves: the same look draws the same bytes.
     assert_eq(header(p, look, 300, 120), bar)
-    flat := plain_look("")
+    ^flat: plain_look("")
     flat.active = false
     flat.square = true
     flat.maximized = true
@@ -1225,7 +1225,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     // When the desktop prefers light, the header is 0xF4F4F6, a hovered
     // maximize square is 0xE8E8EC, close still turns Jet red, and the
     // shadow ring is the light theme's own kit.
-    light := plain_look("")
+    ^light: plain_look("")
     light.dark = false
     pale: header(p, light, 300, 120)
     assert_eq([U8]{pale[bare], pale[bare + 1], pale[bare + 2], pale[bare + 3]}, [U8]{U8{0xF6}, U8{0xF4}, U8{0xF4}, U8{255}})
@@ -1241,7 +1241,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
 }
 
 #Test("titles are cut at graphemes, at a word end when one fits") {
-    p := painter()
+    ^p: painter()
     size: Float{13.0}
     width: fn(s: String) { title_width(p.face, s, size) }
     assert_eq(fit_title(p, "short", size, 1000.0), "short")
@@ -1286,10 +1286,10 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     assert_eq(title_left(200.0, 10.0, 110.0, 100.0), Float{10.0})
     // The header draws it there: its first inked column is the centered
     // title's.
-    p := painter()
+    ^p: painter()
     bar: header(p, plain_look("Notes"), 400, 120)
     advance: title_width(p.face, "Notes", Float{13.0})
-    first := -1
+    ^first: -1
     loop col in 10..<310 {
         loop row in 6..<28 {
             // Blue byte of B, G, R, A: the header's is 0x0D, the ink's 0xA4.
@@ -1315,9 +1315,9 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     // On a 300-unit window the close square runs from 274 to 292 across, 9
     // units each way from its center at 283; the ring runs from 11 to 12.5
     // out, so pixel (294, 17), 11 to 12 out, is on it.
-    p := painter()
+    ^p: painter()
     plain: header(p, look, 300, 120)
-    focused := plain_look("")
+    ^focused: plain_look("")
     focused.focus = FrameButton.Close
     ringed: header(p, focused, 300, 120)
     on_ring: (17 * 300 + 294) * 4
@@ -1331,7 +1331,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
 }
 
 #Test("the buttons are centered in the header and their glyphs in their squares, in whole pixels at every scale") {
-    p := painter()
+    ^p: painter()
     // By hand from `px` at each scale: the inset (8 units), the square's
     // side (the header, 34 units, less the inset twice), the step (28
     // units), the glyph box (10 units, which already has the square's
@@ -1351,9 +1351,9 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
         height: px(HEADER, scale)
         rest: header(p, plain_look(""), width, scale)
         end: UIRect{x: width - px(110, scale), y: 0, width: px(110, scale), height: height}
-        squares := [UIRect]{}
+        ^squares: [UIRect]{}
         loop k in 0..<3 {
-            hovered := plain_look("")
+            ^hovered: plain_look("")
             hovered.hover = button_of(k)
             lit: header(p, hovered, width, scale)
             // The soft square is where hovering changed the header.
@@ -1379,7 +1379,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
         assert_eq(width - squares[0].x - squares[0].width, insets[at])
         assert_eq([Int]{squares[0].x - squares[1].x, squares[1].x - squares[2].x}, [Int]{steps[at], steps[at]})
         // The restore glyph fills the same box, centered alike.
-        restored := plain_look("")
+        ^restored: plain_look("")
         restored.maximized = true
         two: ink_box(header(p, restored, width, scale), width, squares[1], 0x0B, 24)
         assert_eq([Int]{two.width, two.height}, [Int]{glyphs[at], glyphs[at]})

@@ -73,7 +73,7 @@ jet_cli_color_request: fn(value: [U8]) -> ColorChoice JetCLIOutputProfileError! 
 // A Cc control, not the diagnostic terminal-escape policy: U+2028 and U+2029
 // are not controls here. No scalar String/list is created.
 jet_cli_output_term_control: fn(term: [U8]) -> Bool Never! {
-    index := 0
+    ^index: 0
     loop index < term.len() {
         scalar: foundation_read_bytes_scalar_at(term, index)
         code: scalar.codepoint
@@ -84,7 +84,7 @@ jet_cli_output_term_control: fn(term: [U8]) -> Bool Never! {
 }
 
 jet_cli_output_profile: fn(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCLIOutputProfileError! {
-    dumb := false
+    ^dumb: false
     if facts.term == .Val(term) {
         // copy: `term` is a payload view of `facts.term` (owner: `facts`, a read parameter: no move
         // out of it, E0201); the error value owns its own text.

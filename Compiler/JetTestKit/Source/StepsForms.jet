@@ -42,7 +42,7 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
     tokens: kit_steps_tokens(body) ?? return None
     words: tokens.slice(offset, tokens.len())
     mode: words[0].text
-    assertion := KitAssertion{stream: stream, path: path, mode: mode, value: "", transform: transform}
+    ^assertion: KitAssertion{stream: stream, path: path, mode: mode, value: "", transform: transform}
     partial: !kit_expect_named(["numeric-lines", "lines", "machine-output"], mode) || !(body.contains("[") && body.contains("="))
     if partial && !kit_steps_reason(original) -> return None
     if mode == "is-i64" || mode == "is-u32" {
@@ -81,7 +81,7 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
         return Val(assertion)
     }
     if mode == "count-lines" {
-        at := 1
+        ^at: 1
         if words.len() > at && kit_expect_named(["trim", "trim_start", "trim_end"], words[at].text) {
             assertion.alternatives = [words[at].text]
             at += 1
@@ -163,7 +163,7 @@ kit_steps_i64: fn(text: String) -> Bool {
     loop byte in bytes.slice(start, bytes.len()) {
         if byte < (U8{48}) || byte > (U8{57}) -> return false
     }
-    first := start
+    ^first: start
     loop first < bytes.len() && bytes[first] == (U8{48}) -> first += 1
     digits: bytes.len() - first
     if digits < 19 -> return true
@@ -178,7 +178,7 @@ kit_steps_i64: fn(text: String) -> Bool {
 }
 
 kit_steps_float_lines: fn(text: String) -> [Float]? {
-    result := [Float]{}
+    ^result: [Float]{}
     loop line in kit_steps_rust_lines(text) {
         result.push(Float.parse(line.trim().copy()) ?? return None)
     }
@@ -188,9 +188,9 @@ kit_steps_float_lines: fn(text: String) -> [Float]? {
 kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String, extra: String, context: KitStepCtx, state: KitStepState) -> KitVerdict? {
     mode: assertion.mode
     if !kit_steps_batch_form(mode) && mode != "lines-array" -> return None
-    matches := false
+    ^matches: false
     // What a failed count compared: its operator, bound and actual count.
-    compared := ""
+    ^compared: ""
     if mode == "delta" {
         left: Int.parse(actual) ?? return Val(kit_expect_verdict("FAIL", "delta subject is not an integer"))
         right: Int.parse(value) ?? return Val(kit_expect_verdict("FAIL", "delta reference is not an integer"))
@@ -212,7 +212,7 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
         matches = kit_steps_rust_lines(actual) == (kit_steps_string_array(value) ?? return Val(kit_expect_verdict("ERROR", "invalid expected line list")))
     } else if mode == "numeric-lines" {
         left: kit_steps_float_lines(actual) ?? return Val(kit_expect_verdict("FAIL", "non-numeric line"))
-        right := [Float]{}
+        ^right: [Float]{}
         if extra == "==" {
             previous: kit_steps_history_stream(value, assertion.stream, state.history, false) ?? return Val(kit_expect_verdict("ERROR", "numeric-lines label missing"))
             right = kit_steps_float_lines(previous) ?? return Val(kit_expect_verdict("FAIL", "prior non-numeric line"))
@@ -231,7 +231,7 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
         matches = left == right
     } else if mode == "sorted-lines" {
         expected: files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, value)) ?? return Val(kit_expect_verdict("ERROR", "sorted-lines snapshot: {err}"))
-        lines := kit_steps_rust_lines(actual)
+        ^lines: kit_steps_rust_lines(actual)
         lines.sort()
         matches = lines == kit_steps_rust_lines(expected)
     } else if mode == "$=" {
@@ -259,7 +259,7 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
             }
         }
     } else if mode == "count-lines" {
-        count := 0
+        ^count: 0
         line_transform: if assertion.alternatives.len() == 2 -> assertion.alternatives[0] else -> ""
         loop line in kit_steps_rust_lines(actual) {
             transformed: kit_steps_transform(line, line_transform) ?? return Val(kit_expect_verdict("FAIL", "line transform failed"))
@@ -272,7 +272,7 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
     } else if mode == "each-line" {
         matches = true
         loop line in kit_steps_rust_lines(actual) {
-            matched := false
+            ^matched: false
             if extra == "hex" {
                 if !kit_steps_hex_valid(line) {
                     return Val(kit_expect_verdict("FAIL", "line is not even-length hexadecimal"))
@@ -284,7 +284,7 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
             if !matched -> matches = false
         }
     } else if mode == "unique-after" {
-        seen := [String]{}
+        ^seen: [String]{}
         matches = true
         loop line in kit_steps_rust_lines(actual) {
             at: kit_steps_byte_index(line, value) ?? return Val(kit_expect_verdict("FAIL", "line lacks unique-after marker"))
@@ -293,7 +293,7 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
             seen.push(suffix)
         }
     } else if mode == "word" || mode == "has-line" || mode == "any-line" {
-        expected := [String]{}
+        ^expected: [String]{}
         if mode == "any-line" {
             expected = kit_steps_string_array(value) ?? return Val(kit_expect_verdict("ERROR", "invalid word prefix"))
         }
@@ -306,7 +306,7 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
             }
         }
     } else if mode == "in-order-of" {
-        previous := -1
+        ^previous: -1
         matches = true
         loop line in kit_steps_rust_lines(value) {
             at: kit_steps_byte_index(actual, line) ?? return Val(kit_expect_verdict("FAIL", "ordered line missing"))

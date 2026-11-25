@@ -104,13 +104,13 @@ STACK_BUDGET_LEAST: I64{1073741824}
 STACK_SEGMENT_BRIDGE: I64{7666661893975862049}
 
 // The budget jet_rt_thread_init measures once; 0 before.
-stack_budget := I64{0}
+^stack_budget: I64{0}
 
 // Measures the total stack budget: the first thread's start, before any
 // other thread exists.
 stack_budget_init: fn() {
     soft: thread_rlimit_soft(I64{3})
-    total := if (soft < I64{0} || soft > THREAD_STACK_MAXIMUM) -> THREAD_STACK_MAXIMUM else -> soft
+    ^total: if (soft < I64{0} || soft > THREAD_STACK_MAXIMUM) -> THREAD_STACK_MAXIMUM else -> soft
     if (total < STACK_BUDGET_LEAST) { total = STACK_BUDGET_LEAST }
     #Unsafe("runtime-init runs before any other thread exists") {
         stack_budget = thread_stack_capped(total)
@@ -203,11 +203,11 @@ stack_segment_back: fn(tcb: I64, record: I64, reach: I64) {
     // At most one STACK_SEGMENT_POPULATE below the frontier, ending on a
     // 2 MiB boundary (rounded up, so never more), unless the frame reaches
     // further: then down to the boundary below its reach.
-    target := wrapping(wrapping(frontier - STACK_SEGMENT_POPULATE) + wrapping(STACK_SEGMENT_HUGE_PAGE - I64{1})) & wrapping(I64{0} - STACK_SEGMENT_HUGE_PAGE)
+    ^target: wrapping(wrapping(frontier - STACK_SEGMENT_POPULATE) + wrapping(STACK_SEGMENT_HUGE_PAGE - I64{1})) & wrapping(I64{0} - STACK_SEGMENT_HUGE_PAGE)
     if (reach < target) { target = reach & wrapping(I64{0} - STACK_SEGMENT_HUGE_PAGE) }
     if (target < low) { target = low }
     if (target < frontier) {
-        _ := os_madvise_i64(target, wrapping(frontier - target), I64{23})
+        ^_: os_madvise_i64(target, wrapping(frontier - target), I64{23})
         sync_store(wrapping(record + I64{32}), target)
     }
     sync_store(wrapping(tcb + STACK_TCB_LIMIT), wrapping(sync_load(wrapping(record + I64{32})) + STACK_SEGMENT_RED))
@@ -248,7 +248,7 @@ stack_segment_take: fn(tcb: I64, need: I64) -> I64 {
         stack_segment_unmap(tcb, spare)
     }
     running: sync_load(wrapping(tcb + STACK_TCB_SEGMENT))
-    bytes := STACK_SEGMENT_FIRST
+    ^bytes: STACK_SEGMENT_FIRST
     if (running != I64{0}) {
         bytes = wrapping(wrapping(sync_load(wrapping(running + I64{24})) - THREAD_GUARD_BYTES) * I64{2})
     }
@@ -257,7 +257,7 @@ stack_segment_take: fn(tcb: I64, need: I64) -> I64 {
     room: sync_load(wrapping(tcb + STACK_TCB_ROOM)) & I64{-4096}
     if (wrapping(bytes + THREAD_GUARD_BYTES) > room) { bytes = wrapping(room - THREAD_GUARD_BYTES) }
     if (bytes < least) { return I64{0} }
-    mapping := stack_segment_map(bytes)
+    ^mapping: stack_segment_map(bytes)
     if (mapping < I64{0} && bytes > least) {
         bytes = least
         mapping = stack_segment_map(bytes)
@@ -283,7 +283,7 @@ stack_segment_map: fn(bytes: I64) -> I64 {
         if (mapping < I64{0}) { return mapping }
         protect: os_mprotect_i64(mapping, THREAD_GUARD_BYTES, I64{0})
         if (protect != I64{0}) {
-            _ := os_unmap_untracked_i64(mapping, total)
+            ^_: os_unmap_untracked_i64(mapping, total)
             return protect
         }
         return mapping
@@ -297,7 +297,7 @@ stack_segment_unmap: fn(tcb: I64, record: I64) {
     total: sync_load(wrapping(record + I64{24}))
     sync_store(wrapping(tcb + STACK_TCB_ROOM), wrapping(sync_load(wrapping(tcb + STACK_TCB_ROOM)) + total))
     #Unsafe("no frame runs on a returned segment and nothing else holds its address") {
-        _ := os_unmap_untracked_i64(mapping, total)
+        ^_: os_unmap_untracked_i64(mapping, total)
     }
 }
 

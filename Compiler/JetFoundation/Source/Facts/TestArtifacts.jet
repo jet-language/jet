@@ -67,7 +67,7 @@ TTestLawVisitor: struct {
                 }
             }
             .MethodCall(receiver, method, method_span, _, _, _, _) -> {
-                expected := false
+                ^expected: false
                 if ast_expr(tables, receiver) == .Call(inner, _) {
                     if inner.name == "expect" {
                         expected = true
@@ -123,7 +123,7 @@ checked_test_expected_fail: fn(tables: ASTTables, test: TestDef) -> Bool Never! 
 checked_test_faults: fn(tables: ASTTables, test: TestDef) -> [String] Never! {
     if test.faults_expr == .Val(expression) {
         if ast_expr(tables, expression) == .ListLit(elements, _, _) {
-            faults := [String]{}
+            ^faults: [String]{}
             loop element in elements {
                 if checked_test_fault_path(tables, element) == .Val(path) -> faults.push(path)
             }
@@ -149,12 +149,12 @@ checked_test_fault_path: fn(tables: ASTTables, expression: ExprNode) -> String? 
 // to `after` when no `(` follows; "" when the span isn't in `source`.
 checked_test_call_text: fn(source: [U8], start: Int, after: Int) -> String Never! {
     if start < 0 || after < start || after > source.len() -> return ""
-    at := after
+    ^at: after
     loop at < source.len() && source[at] == (U8{32}) -> at += 1
-    end := after
+    ^end: after
     if at < source.len() && source[at] == (U8{40}) {
-        depth := 0
-        quote := U8{0}
+        ^depth: 0
+        ^quote: U8{0}
         loop at < source.len() {
             byte: source[at]
             at += 1
@@ -167,9 +167,7 @@ checked_test_call_text: fn(source: [U8], start: Int, after: Int) -> String Never
             }
             if {
                 byte == (U8{34}) || byte == (U8{96}) -> quote = byte
-                byte == (U8{40}) -> {
-                    depth += 1
-                }
+                byte == (U8{40}) -> { depth += 1 }
                 byte == (U8{41}) -> {
                     depth -= 1
                     if depth == 0 {
@@ -186,7 +184,7 @@ checked_test_call_text: fn(source: [U8], start: Int, after: Int) -> String Never
 // A `#Pre(cond, msg)` marker's text, from its `#` at `start` in `source`.
 checked_test_marker_text: fn(source: [U8], start: Int) -> String Never! {
     if start < 0 || start >= source.len() -> return ""
-    at := start
+    ^at: start
     if source[at] == (U8{35}) -> at += 1
     loop at < source.len() && checked_test_name_byte(source[at]) -> at += 1
     checked_test_call_text(source, start, at)
@@ -201,11 +199,11 @@ checked_test_name_byte: fn(byte: U8) -> Bool Never! {
 // `source` text and AST `tables`.
 checked_test_law: fn(tables: ASTTables, test: TestDef, source: String) -> TTestLawFact Never! {
     bytes: source.bytes()
-    precondition := [String]{}
+    ^precondition: [String]{}
     loop clause in test.pre -> precondition.push(checked_test_marker_text(bytes, clause.span.start))
-    partitions := [String]{}
+    ^partitions: [String]{}
     loop parameter in test.params -> partitions.push("{parameter.name}: {type_name(parameter.ty)}")
-    visitor := TTestLawVisitor{source: bytes, relation: [String]{}, surfaces: [String]{}}
+    ^visitor: TTestLawVisitor{source: bytes, relation: [String]{}, surfaces: [String]{}}
     loop statement in test.body {
         ast_visit_statement(tables, statement, fn(expression: ExprNode) { visitor.visit(tables, expression) }, false)
     }
@@ -217,8 +215,8 @@ checked_test_law: fn(tables: ASTTables, test: TestDef, source: String) -> TTestL
 // text is `module_text`, whose source text is `source` and whose AST tables
 // are `tables`.
 checked_test_artifact_fact: fn(tables: ASTTables, module_identity: ModuleID, module_text: String, test: TestDef, source: String) -> TTestFact Never! {
-    parameters := [TTestParamFact]{}
-    index := 0
+    ^parameters: [TTestParamFact]{}
+    ^index: 0
     loop parameter in test.params {
         parameters.push(
             TTestParamFact{

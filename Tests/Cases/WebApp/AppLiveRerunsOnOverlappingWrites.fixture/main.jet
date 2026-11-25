@@ -26,18 +26,18 @@ STORE: Shared{Store{tasks: None, notes: None, task_runs: 0, note_runs: 0}}
 // reads the tasks table and nothing else.
 task_titles: fn(board: String) -[DB.Read]> [String] BoardError! {
     if board == "" -> return Err(BoardError.NoBoard)
-    store := STORE.guard_edit()
+    ^store: STORE.guard_edit()
     store.value.task_runs += 1
     scope: store.value.tasks ?? return Err(BoardError.Unopened)
     rows: scope.query(SQL{"SELECT title FROM tasks WHERE board = {board} ORDER BY title"}) ?? return Err(BoardError.Read)
-    titles := [String]{}
+    ^titles: [String]{}
     loop row in rows -> titles.push(db.row_text(row, "title") ?? "?")
     titles
 }
 
 // How many notes there are; it reads only the notes table.
 note_count: fn() -[DB.Read]> Int BoardError! {
-    store := STORE.guard_edit()
+    ^store: STORE.guard_edit()
     store.value.note_runs += 1
     scope: store.value.notes ?? return Err(BoardError.Unopened)
     rows: scope.query(SQL{"SELECT body FROM notes"}) ?? return Err(BoardError.Read)
@@ -80,7 +80,7 @@ add_note: fn(scope: db.DBScope, body: String) {
 }
 
 remember: fn(tasks: db.DBScope, notes: db.DBScope) {
-    store := STORE.guard_edit()
+    ^store: STORE.guard_edit()
     store.value.tasks = Val(tasks.copy())
     store.value.notes = Val(notes.copy())
 }

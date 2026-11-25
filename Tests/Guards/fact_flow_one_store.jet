@@ -34,7 +34,9 @@ ffs_field: fn(line: String) -[]> Bool {
     if name.len() == rest.len() || name.len() == 0 -> return false
     loop byte in name.bytes() {
         code: Int{byte}
-        if !(code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> return false
+        if !(code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) {
+            return false
+        }
     }
     // A method of the struct (`name: fn(...)`) is no field.
     !rest.starts_with("{name}: fn")
@@ -44,8 +46,8 @@ ffs_field: fn(line: String) -[]> Bool {
 // `path:line: why`.
 ffs_check_struct: fn(path: String, line: Int, name: String, body: [String], out: ^[String]) -[]> {
     home: path == FFS_HOME
-    fields := [String]{}
-    plane := false
+    ^fields: [String]{}
+    ^plane: false
     loop text in body {
         if text.trim() == "impl SemaFlowPlane {{" -> plane = true
         if ffs_field(text) -> fields.push(text.trim())
@@ -56,8 +58,8 @@ ffs_check_struct: fn(path: String, line: Int, name: String, body: [String], out:
     if !home && (name.ends_with("BindingFact") || name.ends_with("BindingFacts")) && !FFS_PROVER_ROWS.contains(name) {
         out.push("{path}:{line}: {name} is a private per-binding fact row; keep the facts in SemaFlowFacts")
     }
-    ended := false
-    exits := false
+    ^ended: false
+    ^exits: false
     loop field in fields {
         if field.starts_with("ended: Bool") -> ended = true
         if field.starts_with("exits: [") -> exits = true
@@ -69,7 +71,9 @@ ffs_check_struct: fn(path: String, line: Int, name: String, body: [String], out:
 
 // Every refusal under `path`. Symbolic links and hidden entries are skipped.
 ffs_scan: fn(path: String, out: ^[String]) -[FS]> {
-    if ffs_files.is_symlink(path) -> return
+    if ffs_files.is_symlink(path) {
+        return
+    }
     if ffs_files.is_dir(path) {
         loop child in (ffs_files.list_dir(path) ?? panic("list {path}: {err}")) {
             if child.name.starts_with(".") -> next
@@ -77,10 +81,12 @@ ffs_scan: fn(path: String, out: ^[String]) -[FS]> {
         }
         return
     }
-    if !path.ends_with(".jet") -> return
+    if !path.ends_with(".jet") {
+        return
+    }
     text: ffs_files.read(path) ?? return
     lines: text.lines()
-    index := 0
+    ^index: 0
     loop index < lines.len() {
         name: ffs_struct_name(lines[index])
         if name == "" {
@@ -88,7 +94,7 @@ ffs_scan: fn(path: String, out: ^[String]) -[FS]> {
             next
         }
         start: index
-        body := [String]{}
+        ^body: [String]{}
         index += 1
         loop index < lines.len() && lines[index] != "}}" {
             body.push(lines[index])
@@ -102,12 +108,12 @@ ffs_scan: fn(path: String, out: ^[String]) -[FS]> {
     guards_enter_root()
     home: ffs_files.read(FFS_HOME) ?? panic("read {FFS_HOME}: {err}")
     assert(home.lines().contains(FFS_STORE), "{FFS_HOME} must hold the one flow-fact store")
-    found := [String]{}
+    ^found: [String]{}
     ffs_scan(FFS_ROOT, found)
     assert_eq(found.join("\n"), "")
 
     // The matcher refuses each shape it names.
-    shapes := [String]{}
+    ^shapes: [String]{}
     ffs_check_struct("x.jet", 1, "SemaXPlane", [String]{"    rows: [Int],", "    impl SemaFlowPlane {{", "        flow_join: fn(self) {{}}", "    }}"}, shapes)
     ffs_check_struct("x.jet", 2, "SemaXBindingFact", [String]{"    name: String,"}, shapes)
     ffs_check_struct("x.jet", 3, "SemaXWalk", [String]{"    ended: Bool,", "    exits: [Int],"}, shapes)

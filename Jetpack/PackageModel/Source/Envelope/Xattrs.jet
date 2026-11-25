@@ -38,7 +38,7 @@ pkg_list_xattr_names: fn(path: String) -[FS]> [String] EnvelopeError! {
 
 // The semantic (non-excluded) xattr names on `path`, sorted.
 pkg_semantic_xattr_names: fn(path: String) -[FS]> [String] EnvelopeError! {
-    semantic := [String]{}
+    ^semantic: [String]{}
     loop name in pkg_list_xattr_names(path) {
         if !pkg_is_excluded_xattr(name) -> semantic.push(name)
     }
@@ -53,7 +53,7 @@ pkg_semantic_xattr_rejection: fn(path: String, names: [String]) -> EnvelopeError
 // Reject semantic xattrs unless an explicit platform artifact kind allows
 // them. Excluded security/quarantine names are ignored.
 pkg_check_xattrs: fn(path: String, allow_semantic_xattrs: Bool) -[FS]> EnvelopeError! {
-    names := [String]{}
+    ^names: [String]{}
     loop name in pkg_list_xattr_names(path) {
         if !pkg_is_excluded_xattr(name) -> names.push(name)
     }

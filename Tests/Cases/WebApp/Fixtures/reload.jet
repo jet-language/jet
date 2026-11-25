@@ -19,12 +19,12 @@ reload_env: fn(name: String) -> String { sys.get(name) ?? panic("missing {name}"
 // One GET of `/__jet/reload`: the response text, or None while nothing
 // listens on the port.
 reload_ask: fn(port: String) -> String? {
-    stream := net.tcp_connect("127.0.0.1:{port}") ?? return None
+    ^stream: net.tcp_connect("127.0.0.1:{port}") ?? return None
     crlf: "\r\n"
     request: "GET /__jet/reload HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
     stream.write_bytes(request.bytes()) ?? return None
     net.tcp_shutdown(stream, NetShutdown.Write) ?? return None
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         part: stream.read_bytes(8192, deadline: 5s) ?? return None
         if part.len() == 0 -> break
@@ -46,7 +46,7 @@ run: fn() {
     app: reload_env("S6_WEB_RELOAD_APP")
     output: reload_env("S6_WEB_RESPONSE")
     deadline: time.instant() + 60s
-    first := ""
+    ^first: ""
     loop first == "" {
         if reload_ask(port) == .Val(response) -> first = response.copy()
         if first == "" {
@@ -56,7 +56,7 @@ run: fn() {
     }
     boot: reload_boot(first)
     files.append_all(app, "\n") ?? panic("append source newline")
-    later := ""
+    ^later: ""
     loop later == "" {
         if reload_ask(port) == .Val(response) {
             next_boot: reload_boot(response)

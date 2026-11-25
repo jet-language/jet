@@ -16,7 +16,7 @@ use unicode: core.text
 escape: fn(text: String) -> String Never! { escape_quote(text, true) }
 
 escape_quote: fn(text: String, quote: Bool) -> String Never! {
-    out := ""
+    ^out: ""
     loop ch in unicode.scalars(text) {
         if ch == "&" -> out = "{out}&amp;" else if ch == "<" -> out = "{out}&lt;" else if ch == ">" {
             out = "{out}&gt;"
@@ -29,15 +29,15 @@ escape_quote: fn(text: String, quote: Bool) -> String Never! {
 
 unescape: fn(text: String) -> String Never! {
     raw: text.bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < raw.len() {
         if raw[i] != (U8{38}) {
             out.push(raw[i])
             i += 1
             next
         }
-        semi := i + 1
+        ^semi: i + 1
         loop semi < raw.len() && semi - i <= 32 {
             if raw[semi] == (U8{59}) -> break
             semi += 1
@@ -60,15 +60,15 @@ unescape: fn(text: String) -> String Never! {
 
 strip_tags: fn(text: String) -> String Never! {
     raw: text.bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < raw.len() {
         if raw[i] != (U8{60}) {
             out.push(raw[i])
             i += 1
             next
         }
-        close := i + 1
+        ^close: i + 1
         loop close < raw.len() && raw[close] != (U8{62}) -> close += 1
         if close >= raw.len() {
             out.push(raw[i])
@@ -126,10 +126,10 @@ HTML: struct {
         }
 
         build: fn(parts: [String], holes: [String]) -[]> HTML {
-            markup := parts[0].copy()
-            state := html_state_after(HTML_TEXT, parts[0])
+            ^markup: parts[0].copy()
+            ^state: html_state_after(HTML_TEXT, parts[0])
             loop index in 0..<holes.len() {
-                hole := holes[index].copy()
+                ^hole: holes[index].copy()
                 if state == HTML_DOUBLE_VALUE || state == HTML_SINGLE_VALUE {
                     hole = html_value_hole(hole, false)
                 } else if state == HTML_AFTER_EQUALS || state == HTML_UNQUOTED_VALUE {
@@ -161,7 +161,7 @@ HTML_SINGLE_VALUE: 5
 
 // The markup state after `text`, read from `state`.
 priv html_state_after: fn(state: Int, text: String) -> Int Never! {
-    at := state
+    ^at: state
     loop byte in text.bytes() {
         b: Int{byte}
         if at == HTML_TEXT {
@@ -188,10 +188,10 @@ priv html_space: fn(b: Int) -> Bool Never! { b == 32 || b == 9 || b == 10 || b =
 // so the hole stays inside the one value. An `^` is left as it is: a text
 // hole's was already escaped, and an HTML hole's starts an entity.
 priv html_value_hole: fn(hole: String, unquoted: Bool) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in hole.bytes() {
         b: Int{byte}
-        entity := ""
+        ^entity: ""
         if b == 34 -> entity = "&quot;" else if b == 39 -> entity = "&#x27;" else if b == 60 {
             entity = "&lt;"
         } else if b == 62 { entity = "&gt;" } else if unquoted && (html_space(b) || b == 61 || b == 96) {
@@ -219,16 +219,16 @@ entity: fn(name: String) -> String {
     if name == "hellip" -> return "…"
     raw: name.bytes()
     if raw.len() < 2 || raw[0] != (U8{35}) -> return ""
-    n := 0
-    i := 1
-    base := 10
+    ^n: 0
+    ^i: 1
+    ^base: 10
     if raw[1] == (U8{120}) || raw[1] == (U8{88}) {
         base = 16
         i = 2
     }
     if i >= raw.len() -> return ""
     loop i < raw.len() {
-        digit := if base == 16 -> hex_val(raw[i]) else -> decimal_val(raw[i])
+        ^digit: if base == 16 -> hex_val(raw[i]) else -> decimal_val(raw[i])
         d: digit ?? return ""
         // Saturate outside the scalar range, but still validate every digit.
         if n > (1114111 - d) /% base -> n = 1114112 else -> n = n * base + d
@@ -239,7 +239,7 @@ entity: fn(name: String) -> String {
 
 scalar: fn(n: Int) -> String {
     if n == 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> return "�"
-    out := [U8]{}
+    ^out: [U8]{}
     if n < 128 -> out.push(U8{n}) else if n < 2048 {
         out.push(U8{(192) | (n >> 6)})
         out.push(U8{(128) | ((n) & 63)})
@@ -271,8 +271,8 @@ hex_val: fn(b: U8) -> Int? {
 }
 
 slice_b: fn(raw: [U8], start: Int, end: Int) -> [U8] {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return out
         out.push(raw[i])

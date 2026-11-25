@@ -13,7 +13,7 @@ use {
 // check admitted, each on its own file. An impl whose head carries a parse
 // error is left to that error (rule f); the file's other impls are checked.
 jet_cli_style_diagnostics: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [Diagnostic] Never! {
-    found := [Diagnostic]{}
+    ^found: [Diagnostic]{}
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
         loop file in root.files {
@@ -43,7 +43,7 @@ jet_cli_fix_style: fn(before: String) -> JetCLIFixApply Never! {
     bytes: before.bytes()
     // Each declared type, and where the line of its closing `}` starts when
     // the brace stands alone on it (-1 when it does not).
-    closes := [String:Int]{}
+    ^closes: [String:Int]{}
     loop item in parsed.program.items {
         if item == {
             .Struct(value) -> { closes[value.name] = jet_cli_style_close_line(bytes, value.span) }
@@ -51,18 +51,18 @@ jet_cli_fix_style: fn(before: String) -> JetCLIFixApply Never! {
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    edits := [TextEdit]{}
-    moved := [String:String]{}
-    order := [String]{}
-    deferred := 0
+    ^edits: [TextEdit]{}
+    ^moved: [String:String]{}
+    ^order: [String]{}
+    ^deferred: 0
     // Where the last lifted impl's bytes end; the next one takes no line
     // before that.
-    floor := 0
+    ^floor: 0
     loop item in parsed.program.items {
         if item == .Impl(value) {
             at: closes.get(value.type_name) ?? next
             if parser_impl_placement_exception(value) != None -> next
-            lifted := JetCLIStyleLift?{None}
+            ^lifted: JetCLIStyleLift?{None}
             if at >= 0 -> lifted = jet_cli_style_lift(bytes, value, floor)
             if {
                 lifted == .Val(block) -> {
@@ -117,7 +117,7 @@ jet_cli_style_lift: fn(bytes: [U8], value: ImplDef, floor: Int) -> JetCLIStyleLi
     after: jet_cli_style_line_end(bytes, value.span.end)
     if !jet_cli_style_blank_or_comment(bytes, value.span.end, after) -> return None
     // The comment and marker lines written right above it.
-    start := head
+    ^start: head
     loop start > floor {
         above: jet_cli_style_line_start(bytes, start - 1)
         text: jet_cli_style_text(bytes, above, start).trim().copy()
@@ -125,7 +125,7 @@ jet_cli_style_lift: fn(bytes: [U8], value: ImplDef, floor: Int) -> JetCLIStyleLi
         start = above
     }
     leading: jet_cli_style_text(bytes, start, head)
-    body := ""
+    ^body: ""
     if {
         value.trait_name == None -> {
             // Inherent: the members, at the indentation they already have.
@@ -152,7 +152,7 @@ jet_cli_style_lift: fn(bytes: [U8], value: ImplDef, floor: Int) -> JetCLIStyleLi
         }
         else -> { return None }
     }
-    end := after
+    ^end: after
     // One blank line beside the impl goes with it: the one after, else the
     // one before.
     if {
@@ -175,21 +175,21 @@ jet_cli_style_indent: fn(text: String) -> String Never! {
 
 // Where the line holding `at` starts.
 jet_cli_style_line_start: fn(bytes: [U8], at: Int) -> Int Never! {
-    start := at
+    ^start: at
     loop start > 0 && bytes[start - 1] != 10 -> start -= 1
     start
 }
 
 // The start of the line after the one holding `at` (or the end of the file).
 jet_cli_style_line_end: fn(bytes: [U8], at: Int) -> Int Never! {
-    end := at
+    ^end: at
     loop end < bytes.len() && bytes[end] != 10 -> end += 1
     if end < bytes.len() -> end + 1 else -> end
 }
 
 // The first `byte` at or after `at` on its line, or -1.
 jet_cli_style_find: fn(bytes: [U8], at: Int, byte: U8) -> Int Never! {
-    index := at
+    ^index: at
     loop index < bytes.len() && bytes[index] != 10 {
         if bytes[index] == byte -> return index
         index += 1

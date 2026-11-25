@@ -67,7 +67,7 @@ JetcBytes: struct {
 
     impl Close {
         close: fn(^^self) {
-            bytes := self.bytes.move()
+            ^bytes: self.bytes.move()
             core.crypto.wipe(bytes)
         }
     }
@@ -85,8 +85,8 @@ seal: fn(recipients: [X25519PublicKey], source: Path, destination: Path) -[FS, R
     if metadata.len < 0 || metadata.len > jetc.MAX_PLAIN -> return Err(.SourceIO)
     stage: jetc_stage(parent)
     jetc_cancel_checkpoint()
-    hash := hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
-    length := 0
+    ^hash: hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
+    ^length: 0
     loop {
         jetc_cancel_checkpoint()
         part: jetc_read(input, jetc.CHUNK, "seal-source-read", .SourceIO)
@@ -121,9 +121,9 @@ open: fn(identity: X25519SecretKey, source: Path, destination: Path) -[FS]> File
     fixed: jetc_read_exact(input, 20, "open-input-read", .OpenFailed)
     header_size: jetc.header_length(fixed.bytes, metadata.len)
     header: jetc_read_exact(input, header_size, "open-input-read", .OpenFailed)
-    reader := jetc.reader(identity, fixed.bytes, header.bytes, metadata.len)
+    ^reader: jetc.reader(identity, fixed.bytes, header.bytes, metadata.len)
     parent: jetc_parent(destination.to_string())
-    output := jetc_temp(parent, "jetc-open")
+    ^output: jetc_temp(parent, "jetc-open")
     jetc_cancel_checkpoint()
     loop reader.remaining > 0 {
         jetc_cancel_checkpoint()
@@ -148,7 +148,7 @@ migrate_v1: fn(key: [U8], source: Path, recipients: [X25519PublicKey], destinati
     input: jetc_source(source.to_string(), .SourceIO)
     total: jetc_stat(input, .SourceIO).len
     if total > 1073741858 -> return Err(.OpenFailed)
-    data := JetcBytes{bytes: [U8]{}}
+    ^data: JetcBytes{bytes: [U8]{}}
     loop {
         jetc_cancel_checkpoint()
         part: jetc_read(input, jetc.CHUNK, "migrate-v1-read-io", .SourceIO)
@@ -157,7 +157,7 @@ migrate_v1: fn(key: [U8], source: Path, recipients: [X25519PublicKey], destinati
         loop byte in part.bytes -> data.bytes.push(byte)
     }
     if data.bytes.len() != total -> return Err(.SourceIO)
-    plain := JetcBytes{bytes: [U8]{}}
+    ^plain: JetcBytes{bytes: [U8]{}}
     #Unsafe("the expert API explicitly authorizes authenticated legacy-v1 migration") {
         plain.bytes = core.crypto.expert.open_v1(key, data.bytes) ?? return Err(.OpenFailed)
     }
@@ -169,7 +169,7 @@ migrate_v1: fn(key: [U8], source: Path, recipients: [X25519PublicKey], destinati
     jetc_sync(stage.file, "migrate-stage-fsync")
     metadata: jetc_stat(stage.file, .DestinationIO)
     jetc_seek(stage.file, .DestinationIO)
-    hash := hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
+    ^hash: hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
     hashes.hash_update_with(hashes.SHA256Hash{}, hash, plain.bytes)
     expected: hashes.hash_finish_with(hashes.SHA256Hash{}, hash)
     jetc_seal_stage(canonical, parent, stage, plain.bytes.len(), expected, metadata, true)
@@ -199,7 +199,7 @@ jetc_stat: fn(file: JetcFd, error: FileCryptoError) -> JetcStat FileCryptoError!
 }
 
 jetc_walk_directory: fn(path: String) -> JetcFd FileCryptoError! {
-    current := jetc_fd(rt.jetc_open_directory(if path.starts_with("/") -> "/" else -> "."), .DestinationIO)
+    ^current: jetc_fd(rt.jetc_open_directory(if path.starts_with("/") -> "/" else -> "."), .DestinationIO)
     loop name in path.split("/") {
         if name == "" || name == "." -> next
         if name == ".." -> return Err(.DestinationIO)
@@ -220,7 +220,7 @@ jetc_parent: fn(destination: String) -> JetcParent FileCryptoError! {
     path: if parent_text == "" -> "." else -> parent_text
     opened: rt.jetc_open_directory(path)
     linux: opened.linux
-    directory := jetc_fd(opened, .DestinationIO)
+    ^directory: jetc_fd(opened, .DestinationIO)
     if linux {
         checked: jetc_walk_directory(path)
         close(directory)
@@ -270,7 +270,7 @@ jetc_temp: fn(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
 }
 
 jetc_stage: fn(parent: JetcParent) -> JetcTemp FileCryptoError! {
-    stage := jetc_temp(parent, "jetc-stage")
+    ^stage: jetc_temp(parent, "jetc-stage")
     if stage.path == .Val(path) {
         rt.remove_raw(path) ?? return Err(.DestinationIO)
         stage.path = None
@@ -300,7 +300,7 @@ jetc_read: fn(file: JetcFd, count: Int, name: String, error: FileCryptoError) ->
 
 jetc_read_exact: fn(file: JetcFd, count: Int, name: String, error: FileCryptoError) -> JetcBytes FileCryptoError! {
     if count == 0 -> return Ok(JetcBytes{bytes: [U8]{}})
-    out := jetc_read(file, jetc_min(count, jetc.CHUNK), name, error)
+    ^out: jetc_read(file, jetc_min(count, jetc.CHUNK), name, error)
     if out.bytes.len() == 0 -> return Err(error)
     loop out.bytes.len() < count {
         part: jetc_read(file, jetc_min(count - out.bytes.len(), jetc.CHUNK), name, error)
@@ -315,7 +315,7 @@ jetc_write: fn(file: JetcFd, bytes: [U8], name: String) FileCryptoError! {
 }
 
 jetc_write_span: fn(file: JetcFd, bytes: [U8], start: Int, end: Int, name: String) FileCryptoError! {
-    offset := start
+    ^offset: start
     loop offset < end {
         if rt.fault_should_fail("{name}.interrupted") -> next
         jetc_io_fault(name, .DestinationIO)
@@ -344,8 +344,8 @@ jetc_sync: fn(file: JetcFd, name: String) FileCryptoError! {
 }
 
 jetc_digest: fn(file: JetcFd, expected_length: Int, name: String) -> [U8] FileCryptoError! {
-    hash := hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
-    length := 0
+    ^hash: hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
+    ^length: 0
     loop {
         jetc_cancel_checkpoint()
         part: jetc_read(file, jetc.CHUNK, name, .SourceIO)
@@ -416,14 +416,14 @@ jetc_seal_stage: fn(
     file_key: Secret.from_bytes(jetc_random(32))
     ephemeral: Secret.from_bytes(jetc_random(32))
     nonce_prefix: jetc_random(16)
-    writer := jetc.writer(recipients, length, file_id, file_key, ephemeral, nonce_prefix)
+    ^writer: jetc.writer(recipients, length, file_id, file_key, ephemeral, nonce_prefix)
     jetc_cancel_checkpoint()
-    output := jetc_temp(parent, "jetc-output")
+    ^output: jetc_temp(parent, "jetc-output")
     operation: if verify -> "migrate" else -> "seal"
     jetc_write_span(output.file, writer.prefix, 0, 20, "{operation}-output-write")
     jetc_write_span(output.file, writer.prefix, 20, writer.prefix.len(), "{operation}-output-write")
     jetc_seek(stage.file, .SourceIO)
-    hash := hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
+    ^hash: hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
     loop !writer.final {
         jetc_cancel_checkpoint()
         count: jetc_min(writer.remaining, jetc.CHUNK)
@@ -485,7 +485,7 @@ jetc_verify_output: fn(input: JetcFd, writer: ^^jetc.Writer, length: Int) FileCr
     // Exact equality also verifies every original recipient stanza, ephemeral
     // key and header tag, without retaining writer ephemeral private material.
     if !constant_time_equal_bytes(prefix.bytes, writer.prefix) -> return Err(.OpenFailed)
-    reader := jetc.ChunkReader{
+    ^reader: jetc.ChunkReader{
         header_hash: writer.header_hash,
         key: writer.key.move(),
         nonce_prefix: writer.nonce_prefix,
@@ -516,7 +516,7 @@ jetc_verify_output: fn(input: JetcFd, writer: ^^jetc.Writer, length: Int) FileCr
         opened: Path.from(join(root, "opened"))
         failed: Path.from(join(root, "failed"))
         source.write_atomic([U8]{0, 1, 2}) ?? panic("source")
-        key_bytes := [U8]{}
+        ^key_bytes: [U8]{}
         loop _ in 0..<32 -> key_bytes.push(U8{7})
         identity: X25519SecretKey{bytes: key_bytes}
         recipient: x25519_public(identity) ?? panic("identity")
@@ -539,7 +539,7 @@ jetc_verify_output: fn(input: JetcFd, writer: ^^jetc.Writer, length: Int) FileCr
                 },
             )
             assert((core.files.read_bytes(opened.to_string()) ?? panic("read existing output")) == ([U8]{9, 8, 7}))
-            corrupt := before.copy()
+            ^corrupt: before.copy()
             corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1] ~ U8{1}
             sealed.write_atomic(corrupt) ?? panic("tamper")
             assert(

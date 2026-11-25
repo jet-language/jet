@@ -505,20 +505,20 @@ jet_cli_perf_samples_read: fn(path: String, words: [U8], source: String, counter
     // An image without a symbol table names no sample outside Jet functions.
     functions: x64_image_functions(image).functions
     facts: native_image_read(image) ?? return None
-    inlines := JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: facts.abstracts}
+    ^inlines: JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: facts.abstracts}
     loop function in facts.functions {
         if function.inlined.len() > 0 -> inlines.functions[function.low] = function
     }
     owned: jet_cli_perf_samples_owned(facts.lines, source)
     files: jet_cli_perf_samples_files(facts.lines, source)
-    periods := [U64]{}
+    ^periods: [U64]{}
     loop counter in counters -> periods.push(counter.period ?? U64{0})
     // The type DIE each typed allocating call allocates for, by its call
     // site, the byte before its return address, as a heap site record's
     // stack names it (PerfSamples.jet perf_samples_heap_key); and each such
     // type spelled as Jet writes it.
-    allocs := [Int:Int]{}
-    names := [Int:String]{}
+    ^allocs: [Int:Int]{}
+    ^names: [Int:String]{}
     loop (pc, ty) in facts.allocs {
         if facts.types.get(ty) == .Val(named) && named.name != "" {
             allocs[pc - 1] = ty
@@ -526,7 +526,7 @@ jet_cli_perf_samples_read: fn(path: String, words: [U8], source: String, counter
         }
     }
     objects: jet_cli_perf_heap_objects(image)
-    sampled := jet_cli_perf_samples_count(facts.lines, functions, inlines, owned, periods, allocs, names, words, jet_cli_perf_code_low(image), files: files.at, window: window)
+    ^sampled: jet_cli_perf_samples_count(facts.lines, functions, inlines, owned, periods, allocs, names, words, jet_cli_perf_code_low(image), files: files.at, window: window)
     sampled.sampler = sampler
     jet_cli_perf_samples_sources(sampled, files.paths)
     jet_cli_perf_system_read(sampled, owned, threads, calls)
@@ -569,13 +569,13 @@ jet_cli_perf_samples_records: fn(path: String) -[FS]> [U8] JetCLIReadError! {
 // unavailable with errno 0: the program never opened it. The file is
 // removed once read.
 jet_cli_perf_counters_read: fn(samples: String?) -[FS]> [TraceCounter] Never! {
-    words := [U8]{}
+    ^words: [U8]{}
     if samples == .Val(file) {
         path: "{file}.counters"
         words = perf_files.read_bytes(path) ?? [U8]{}
         perf_files.remove(path).drop("the session reads its counters once")
     }
-    counters := [TraceCounter]{}
+    ^counters: [TraceCounter]{}
     loop (index, name) in TRACE_COUNTERS {
         at: index * 16
         period: if at + 16 <= words.len() -> link_debug_addr(words, at) else -> 0
@@ -646,7 +646,7 @@ jet_cli_perf_pc_name: fn(source: Int) -> String Never! {
 // errno; perf_event_paranoid; and the period, with its unit. Null for none.
 jet_cli_perf_pc_json: fn(sampler: JetCLIPerfSampler?) -> CanonicalJSON Never! {
     used: sampler ?? return CanonicalJSON.Null
-    refused := [CanonicalJSON]{}
+    ^refused: [CanonicalJSON]{}
     loop (index, errno) in ([Int]{used.ibs, used.pebs, used.task}) {
         if errno != 0 {
             refused.push(CanonicalJSON.Object([CanonicalJSONField]{{key: "errno", value: CanonicalJSON.Integer("{errno}")}, {key: "source", value: CanonicalJSON.String(jet_cli_perf_pc_name(index + 1))}}))
@@ -730,30 +730,30 @@ jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_s
     if sampled.sampler == .Val(used) && used.source == 3 && used.period > 0 && sampled.ends.len() > 0 {
         period: used.period
         low: (1 << JET_CLI_PERF_ADDRESS_BITS) - 1
-        nominal := 0
-        ns := 0
+        ^nominal: 0
+        ^ns: 0
         loop (_, end) in sampled.ends {
             nominal += end /% period
             ns += end
         }
-        counts := sampled.counts
+        ^counts: sampled.counts
         counts.sort()
-        throttles := sampled.throttles
+        ^throttles: sampled.throttles
         throttles.sort_by(fn(left: JetCLIPerfThrottle, right: JetCLIPerfThrottle) { (left.serial <=> right.serial).then(left.at_ns <=> right.at_ns) })
-        kernel := 0
-        throttled := 0
-        took := [Int:Bool]{}
-        serial := 0
+        ^kernel: 0
+        ^throttled: 0
+        ^took: [Int:Bool]{}
+        ^serial: 0
         // The ends the sampler's timer reached to its latest sample, and
         // that sample's count and time (-1 for none).
-        reached := 0
-        last := 0
-        since := 0
+        ^reached: 0
+        ^last: 0
+        ^since: 0
         // Whether the kernel throttled the sampler at its latest sample,
         // and the first throttle record past that sample.
-        held := false
-        next := 0
-        index := 0
+        ^held: false
+        ^next: 0
+        ^index: 0
         loop index <= counts.len() {
             word: if index < counts.len() -> counts[index] else -> 0
             owner: (word >> JET_CLI_PERF_ADDRESS_BITS) & 65535
@@ -762,7 +762,7 @@ jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_s
                     ended: if sampled.ends.has_key(serial) -> sampled.ends[serial] /% period else -> 0
                     if {
                         ended > reached -> {
-                            resumed := false
+                            ^resumed: false
                             loop next < throttles.len() && throttles[next].serial == serial {
                                 if !throttles[next].on -> resumed = true
                                 next += 1
@@ -798,7 +798,7 @@ jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_s
             at: sampled.count_times.get(word) ?? -1
             // The throttle records to this sample: whether the kernel
             // restarted the sampler since the previous one.
-            resumed := false
+            ^resumed: false
             loop at >= 0 && next < throttles.len() && throttles[next].serial == serial && throttles[next].at_ns <= at {
                 if !throttles[next].on -> resumed = true
                 held = throttles[next].on
@@ -850,13 +850,13 @@ jet_cli_perf_per_ms: fn(count: U64, ns: U64) -> String Never! {
 // Whether each function of `table` is in the file `source`; none is when
 // `source` does not resolve.
 jet_cli_perf_samples_owned: fn(table: X64Jetline, source: String) -[FS]> [Bool] Never! {
-    owned := [Bool]{}
+    ^owned: [Bool]{}
     real: perf_files.realpath(source) ?? ""
-    files := [String:Bool]{}
+    ^files: [String:Bool]{}
     loop function in table.functions {
         file: perf_files.join(function.dir, function.file)
         if !files.has_key(file) {
-            matched := false
+            ^matched: false
             if real != "" && perf_files.realpath(file) == .Ok(resolved) {
                 matched = resolved == real
             }
@@ -873,14 +873,14 @@ jet_cli_perf_samples_owned: fn(table: X64Jetline, source: String) -[FS]> [Bool] 
 // lines are `owned`), and for a function whose file does not resolve, as
 // none of the toolchain's library does.
 jet_cli_perf_samples_files: fn(table: X64Jetline, source: String) -[FS]> JetCLIPerfFiles Never! {
-    files := JetCLIPerfFiles{at: [Int]{}, paths: [String]{}}
+    ^files: JetCLIPerfFiles{at: [Int]{}, paths: [String]{}}
     real: perf_files.realpath(source) ?? ""
     here: perf_files.realpath(".") ?? ""
-    named := [String:Int]{}
+    ^named: [String:Int]{}
     loop function in table.functions {
         file: perf_files.join(function.dir, function.file)
         if !named.has_key(file) {
-            at := -1
+            ^at: -1
             if function.file.ends_with(".jet") && perf_files.realpath(file) == .Ok(resolved) && resolved != real {
                 at = files.paths.len()
                 files.paths.push(if here != "" -> resolved.removeprefix("{here}/") else -> resolved)
@@ -896,7 +896,7 @@ jet_cli_perf_samples_files: fn(table: X64Jetline, source: String) -[FS]> JetCLIP
 // that a line of `sampled` is in, for the rows of its lines
 // (JetCLIPerfProgramSource).
 jet_cli_perf_samples_sources: fn(sampled: ^JetCLIPerfSamples, paths: ^^[String]) -[FS]> Never! {
-    wanted := (loop _ in paths -> false)
+    ^wanted: (loop _ in paths -> false)
     loop line in sampled.lines {
         if line.file >= 0 -> wanted[line.file] = true
     }
@@ -912,8 +912,8 @@ jet_cli_perf_samples_sources: fn(sampled: ^JetCLIPerfSamples, paths: ^^[String])
 // Each line's end column of `text`, the first line's first, as
 // jet_cli_perf_line_end gives them.
 jet_cli_perf_line_ends: fn(text: String) -> [U64] Never! {
-    ends := [U64]{}
-    column := U64{1}
+    ^ends: [U64]{}
+    ^column: U64{1}
     loop byte in text.bytes() {
         if byte == (U8{10}) {
             ends.push(column)
@@ -1024,7 +1024,7 @@ jet_cli_perf_cite: fn(words: [U8], at: Int) -> JetCLIPerfCite Never! {
 // jet_cli_perf_samples_records refuses a file whose cite shares more than
 // `before` holds; here such a cite shares all of `before`.
 jet_cli_perf_sites: fn(words: [U8], at: Int, callers: Int, before: [Int]) -> [Int] Never! {
-    sites := [Int]{}
+    ^sites: [Int]{}
     loop k in 1..<callers {
         if at + k * 8 + 8 > words.len() -> break
         cite: jet_cli_perf_cite(words, at + k * 8)
@@ -1044,13 +1044,13 @@ jet_cli_perf_sites: fn(words: [U8], at: Int, callers: Int, before: [Int]) -> [In
 // (JET_CLI_PERF_WRITE_WORDS), and shares JET_CLI_PERF_CITE_LEAST or more of
 // that sample's call sites, at most all of them.
 jet_cli_perf_cites_corrupt: fn(words: [U8]) -> String? Never! {
-    before := -1
-    before_sites := 0
-    at := 0
+    ^before: -1
+    ^before_sites: 0
+    ^at: 0
     loop at + 8 <= words.len() {
         head: jet_cli_perf_head(words, at)
         if !head.tallied && head.kind == 0 && head.size > JET_CLI_PERF_TIMED && at + head.size * 8 <= words.len() {
-            sites := head.size - JET_CLI_PERF_TIMED - 1
+            ^sites: head.size - JET_CLI_PERF_TIMED - 1
             if sites > 0 {
                 cite: jet_cli_perf_cite(words, at + sites * 8)
                 if cite.cited {
@@ -1155,7 +1155,7 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
     table: link_debug_addr(image, 32)
     entry: (link_debug_addr(image, 48) >> 48) & 65535
     count: link_debug_addr(image, 56) & 65535
-    low := 0
+    ^low: 0
     loop index in 0..<count {
         header: table + index * entry
         if header < 0 || header + 48 > image.len() -> break
@@ -1207,27 +1207,27 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
 // within it, each standing for its interval, and its row, not a clock
 // record, gives what sampling cost and the records lost.
 jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFunction], inlines: ^^JetCLIPerfInlines, owned: [Bool], periods: ^^[U64], allocs: [Int:Int], names: [Int:String], words: [U8], code_low: Int, files: ^^[Int]{[Int]{}}, window: JetCLIPerfZonesWindow?{None}) -> JetCLIPerfSamples Never! {
-    sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, allocated: [JetCLIPerfAllocSite]{}, periods: periods, spawns: [JetCLIPerfSpawn]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, idle: [Int]{}, timed: [JetCLIPerfTimed]{}, files: files, entries: x64_jetline_entry_runs(table.functions)}
+    ^sampled: JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, allocated: [JetCLIPerfAllocSite]{}, periods: periods, spawns: [JetCLIPerfSpawn]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, idle: [Int]{}, timed: [JetCLIPerfTimed]{}, files: files, entries: x64_jetline_entry_runs(table.functions)}
     // One key per function, line, ownership and source.
-    places := [String:Int]{}
+    ^places: [String:Int]{}
     // Each address's entries in `lines`, innermost first, by twice the
     // address, plus one for a return address; none outside every Jet
     // function.
-    resolved := [Int:[Int]]{}
+    ^resolved: [Int:[Int]]{}
     // Each program counter's function in `functions`, -1 in none.
-    native_at := [Int:Int]{}
+    ^native_at: [Int:Int]{}
     // Each image function's entry in `natives`.
-    natives := [Int:Int]{}
+    ^natives: [Int:Int]{}
     // The sample each line's inclusive time last counted.
-    counted := [Int:Int]{}
+    ^counted: [Int:Int]{}
     // Each heap snapshot's entry in `heaps`, by its number.
-    heaps := [Int:Int]{}
+    ^heaps: [Int:Int]{}
     // The call sites of the latest CPU-time sample, innermost first, of
     // which the next one's cite shares the outermost (JET_CLI_PERF_CITE_BIT).
-    stack := [Int]{}
+    ^stack: [Int]{}
     mask: (1 << JET_CLI_PERF_ADDRESS_BITS) - 1
-    sample := 0
-    at := 0
+    ^sample: 0
+    ^at: 0
     loop at + 8 <= words.len() {
         opened: jet_cli_perf_head(words, at)
         tallied: opened.tallied
@@ -1260,7 +1260,7 @@ jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFuncti
                     }
                 } ?? -1
                 type_name: names.get(held) ?? ""
-                found := -1
+                ^found: -1
                 loop (place, site) in sampled.allocated {
                     if site.line == line && site.name == name && site.type_name == type_name {
                         found = place
@@ -1380,8 +1380,8 @@ jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFuncti
                         if checked(U64{link_debug_addr(words, at + 24)}) == .Val(delivery) {
                             // The alloc lens's count, which only the first
                             // exit writes.
-                            count := checked(U64{link_debug_addr(words, at + 32)}) ?? U64{0}
-                            spent := checked(U64{link_debug_addr(words, at + 40)}) ?? U64{0}
+                            ^count: checked(U64{link_debug_addr(words, at + 32)}) ?? U64{0}
+                            ^spent: checked(U64{link_debug_addr(words, at + 40)}) ?? U64{0}
                             if count == (U64{0}) && sampled.cost == .Val(earlier) {
                                 count = earlier.alloc_count
                                 spent = earlier.alloc_ns
@@ -1422,7 +1422,7 @@ jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFuncti
                         // body's address as its index among the bodies placed.
                         if record == JET_CLI_PERF_CAUSAL_ROW_WORDS {
                             body: link_debug_addr(words, at + 8)
-                            index := sampled.tasks.places.len()
+                            ^index: sampled.tasks.places.len()
                             if sampled.tasks.bodies.get(body) == .Val(known) -> index = known else {
                                 place: jet_cli_perf_causal_place(sampled, owned, body)
                                 sampled.tasks.bodies[body] = index
@@ -1479,7 +1479,7 @@ jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFuncti
                     sampled.heaps[index].groups.push(held)
                     blocks: checked(U64{link_debug_addr(words, at + 8)}) ?? U64{0}
                     bytes: checked(U64{link_debug_addr(words, at + 16)}) ?? U64{0}
-                    found := -1
+                    ^found: -1
                     loop (place, site) in sampled.heaps[index].sites {
                         if site.line == line && site.name == name && site.type_name == type_name {
                             found = place
@@ -1509,7 +1509,7 @@ jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFuncti
                         sampled.heaps[index].live.push(JetCLIPerfHeapBlock{address: address, size: link_debug_addr(words, at + 16), group: link_debug_addr(words, at + 24), refs: [JetCLIPerfHeapRef]{}})
                     }
                     last: sampled.heaps[index].live.len() - 1
-                    pair := 4
+                    ^pair: 4
                     loop pair + 1 < record {
                         sampled.heaps[index].live[last].refs.push(JetCLIPerfHeapRef{offset: link_debug_addr(words, at + pair * 8), target: link_debug_addr(words, at + pair * 8 + 8)})
                         pair += 2
@@ -1530,14 +1530,14 @@ jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFuncti
                     holds: link_debug_addr(words, at + 8)
                     if {
                         holds == JET_CLI_PERF_ROOT_FRAMES -> {
-                            word := 2
+                            ^word: 2
                             loop word + 2 < record {
                                 sampled.heaps[index].frames.push(JetCLIPerfHeapFrame{pc: link_debug_addr(words, at + word * 8), base: link_debug_addr(words, at + word * 8 + 8), low: link_debug_addr(words, at + word * 8 + 16)})
                                 word += 3
                             }
                         }
                         else -> {
-                            word := 2
+                            ^word: 2
                             loop word + 1 < record {
                                 sampled.heaps[index].roots.push(JetCLIPerfHeapRoot{address: link_debug_addr(words, at + word * 8), target: link_debug_addr(words, at + word * 8 + 8), data: holds == JET_CLI_PERF_ROOT_DATA})
                                 word += 2
@@ -1611,7 +1611,7 @@ jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFuncti
         sampled.signals += U64{1}
         sampled_at: jet_cli_perf_pc_entry(sampled, pc)
         sampled.pcs[sampled_at].samples += U64{1}
-        chain := jet_cli_perf_samples_chain(sampled, places, resolved, owned, pc, false)
+        ^chain: jet_cli_perf_samples_chain(sampled, places, resolved, owned, pc, false)
         if chain.len() == 0 {
             if !native_at.has_key(pc) {
                 native_at[pc] = x64_image_function_find(sampled.functions, pc)
@@ -1643,7 +1643,7 @@ jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFuncti
             if depth == 1 -> sampled.stackless += U64{1}
         }
         // The innermost line of the checked source on the sample's stack.
-        own := -1
+        ^own: -1
         loop k in 0..<depth {
             held: if k == 0 -> chain else -> jet_cli_perf_samples_chain(sampled, places, resolved, owned, stack[k - 1], true)
             if own < 0 -> own = jet_cli_perf_samples_own(sampled, held)
@@ -1701,7 +1701,7 @@ jet_cli_perf_helper_count: fn(lines: ^[JetCLIPerfSampledLine], place: Int, helpe
 // samples or events when it has none.
 jet_cli_perf_pc_entry: fn(sampled: ^JetCLIPerfSamples, pc: Int) -> Int Never! {
     if sampled.pc_at.get(pc) == .Val(found) -> return found
-    events := [U64]{}
+    ^events: [U64]{}
     loop _ in sampled.periods -> events.push(U64{0})
     sampled.pc_at[pc] = sampled.pcs.len()
     sampled.pcs.push(JetCLIPerfPc{pc: pc, samples: U64{0}, events: events})
@@ -1731,12 +1731,12 @@ jet_cli_perf_line_counted: fn(line: JetCLIPerfSampledLine, counter: Int) -> U64 
 jet_cli_perf_samples_chain: fn(sampled: ^JetCLIPerfSamples, places: ^[String:Int], resolved: ^[Int:[Int]], owned: [Bool], address: Int, caller: Bool) -> [Int] Never! {
     key: if caller -> address * 2 + 1 else -> address * 2
     if resolved.has_key(key) -> return resolved[key]
-    chain := [Int]{}
+    ^chain: [Int]{}
     loop frame in jet_cli_perf_samples_frames(sampled, owned, address, caller) {
         name: "{frame.name}\n{frame.line}\n{frame.own}\n{frame.file}"
         if !places.has_key(name) {
             places[name] = sampled.lines.len()
-            events := [U64]{}
+            ^events: [U64]{}
             loop _ in sampled.periods -> events.push(U64{0})
             sampled.lines.push(JetCLIPerfSampledLine{name: frame.name, line: frame.line, count: U64{0}, inclusive: U64{0}, allocations: U64{0}, events: events, topdown: [Int]{}, own: frame.own, file: frame.file})
         }
@@ -1760,14 +1760,14 @@ jet_cli_perf_samples_chain: fn(sampled: ^JetCLIPerfSamples, places: ^[String:Int
 // before it, as the debugger's frames are (JetDebug Native.jet
 // native_lookup), at the line of its call row when it has one.
 jet_cli_perf_samples_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], address: Int, caller: Bool) -> [JetCLIPerfFrame] Never! {
-    frames := [JetCLIPerfFrame]{}
+    ^frames: [JetCLIPerfFrame]{}
     lookup: if caller -> address - 1 else -> address
     found: if lookup < 0 -> -1 else -> x64_jetline_find(sampled.table, lookup)
     if found < 0 -> return frames
     function: sampled.table.functions[found]
     own: found < owned.len() && owned[found]
     file: if found < sampled.files.len() -> sampled.files[found] else -> -1
-    line := function.decl
+    ^line: function.decl
     if {
         caller && x64_jetline_place(sampled.table, function, lookup) == .Val(row) -> line = row.line
         !caller && x64_jetline_line(sampled.table, function, lookup) == .Val(at) -> line = at
@@ -1775,7 +1775,7 @@ jet_cli_perf_samples_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], addre
     }
     // The file of `line` agrees with the function's: unknown outside
     // inlined code, where the table's line is the function's own.
-    same := true
+    ^same: true
     if sampled.inlines.functions.get(function.low) == .Val(facts) {
         loop (index, site) in native_inline_chain(facts, lookup) {
             run: facts.inlined[site]
@@ -1832,11 +1832,11 @@ jet_cli_perf_samples_stack_line: fn(sampled: JetCLIPerfSamples, owned: [Bool], w
 // words `from` up to `record`, innermost first, as a trace row's stack
 // frames. Each call site's frames move out of its lookup.
 jet_cli_perf_samples_stack_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], words: [U8], at: Int, from: Int, record: Int) -> [TraceStackFrame] Never! {
-    frames := [TraceStackFrame]{}
+    ^frames: [TraceStackFrame]{}
     loop k in from..<record {
         word: at + k * 8
         if word + 8 > words.len() -> break
-        site := jet_cli_perf_samples_frames(sampled, owned, link_debug_addr(words, word), true)
+        ^site: jet_cli_perf_samples_frames(sampled, owned, link_debug_addr(words, word), true)
         site.reverse()
         loop site.len() > 0 {
             frame: site.pop() ?? break
@@ -1867,14 +1867,14 @@ jet_cli_perf_system_read: fn(sampled: ^JetCLIPerfSamples, owned: [Bool], threads
         claimed: link_debug_addr(threads, 8)
         if claimed > 0 -> sampled.threads_claimed = U64{claimed}
         plumbing: [String]{"perf_samples_stack", "perf_threads_spawn", "thread_spawn", "thread_libc_spawn"}
-        at := 16
+        ^at: 16
         loop width >= 8 && at + width * 8 <= threads.len() {
             tid: link_debug_addr(threads, at)
             if tid > 0 {
                 entry: link_debug_addr(threads, at + 8)
-                name := "main"
+                ^name: "main"
                 if entry > 0 {
-                    named := jet_cli_perf_system_frames(sampled, owned, entry, false)
+                    ^named: jet_cli_perf_system_frames(sampled, owned, entry, false)
                     name = if named.pop() == .Val(outer) -> outer.name.move() else -> "code at {entry}"
                 }
                 stack_bytes: link_debug_addr(threads, at + 16)
@@ -1903,7 +1903,7 @@ jet_cli_perf_system_read: fn(sampled: ^JetCLIPerfSamples, owned: [Bool], threads
         lost: link_debug_addr(calls, 16)
         if lost > 0 -> sampled.syscalls_lost = U64{lost}
         plumbing: [String]{"perf_syscall_key", "perf_syscall_row", "host_syscall", "host_call", "host_call4", "host_call5", "trap_syscall"}
-        at := 24
+        ^at: 24
         loop width >= 4 && at + width * 8 <= calls.len() {
             count: link_debug_addr(calls, at + 8)
             if count > 0 {
@@ -1929,13 +1929,13 @@ jet_cli_perf_system_read: fn(sampled: ^JetCLIPerfSamples, owned: [Bool], threads
 // jet_cli_perf_bare_name): the runtime's own frames between the table's
 // write and its caller.
 jet_cli_perf_system_stack: fn(sampled: JetCLIPerfSamples, owned: [Bool], words: [U8], at: Int, count: Int, plumbing: [String]) -> [JetCLIPerfSite] Never! {
-    stack := [JetCLIPerfSite]{}
+    ^stack: [JetCLIPerfSite]{}
     loop k in 0..<count {
         word: at + k * 8
         if word + 8 > words.len() -> break
         address: link_debug_addr(words, word)
         if address <= 0 -> break
-        site := jet_cli_perf_system_frames(sampled, owned, address, true)
+        ^site: jet_cli_perf_system_frames(sampled, owned, address, true)
         site.reverse()
         loop site.len() > 0 {
             frame: site.pop() ?? break
@@ -1952,7 +1952,7 @@ jet_cli_perf_system_stack: fn(sampled: JetCLIPerfSamples, owned: [Bool], words: 
 // which the prelinked runtime image keeps symbols for but no line table.
 // None outside both.
 jet_cli_perf_system_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], address: Int, caller: Bool) -> [JetCLIPerfFrame] Never! {
-    frames := jet_cli_perf_samples_frames(sampled, owned, address, caller)
+    ^frames: jet_cli_perf_samples_frames(sampled, owned, address, caller)
     if frames.len() > 0 -> return frames
     symbol: x64_image_function_find(sampled.functions, if caller -> address - 1 else -> address)
     if symbol >= 0 {
@@ -1963,9 +1963,7 @@ jet_cli_perf_system_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool], addres
 
 // A function's name less its module path, as the runtime's sources write
 // it: `spawn_pipe` for the symbol `unit.spawn_pipe`.
-jet_cli_perf_bare_name: fn(name: String) -> String Never! {
-    name.rpartition(".").tail
-}
+jet_cli_perf_bare_name: fn(name: String) -> String Never! { name.rpartition(".").tail }
 
 // The trace's `threads` receipt section (type `JetPerfThreads`): how many
 // threads claimed a row of the runtime's table (`claimed`), and each it
@@ -1977,7 +1975,7 @@ jet_cli_perf_bare_name: fn(name: String) -> String Never! {
 // (jet_cli_perf_sites_json). None when the run kept no table.
 jet_cli_perf_threads_section: fn(threads: ^^[JetCLIPerfThread], claimed: U64) -> TraceReceiptSection? Never! {
     if threads.len() == 0 -> return None
-    rows := [CanonicalJSON]{}
+    ^rows: [CanonicalJSON]{}
     loop thread in threads.move() {
         off: if thread.alive_ns > thread.cpu_ns -> thread.alive_ns - thread.cpu_ns else -> U64{0}
         rows.push(
@@ -2012,7 +2010,7 @@ jet_cli_perf_threads_section: fn(threads: ^^[JetCLIPerfThread], claimed: U64) ->
 // (jet_cli_perf_sites_json). None when the run kept no table.
 jet_cli_perf_syscalls_section: fn(calls: ^^[JetCLIPerfSyscall], lost: U64) -> TraceReceiptSection? Never! {
     if calls.len() == 0 -> return None
-    rows := [CanonicalJSON]{}
+    ^rows: [CanonicalJSON]{}
     loop call in calls.move() {
         rows.push(
             CanonicalJSON.Object(
@@ -2059,7 +2057,7 @@ jet_cli_perf_records_section: fn(lost: U64, reason: String) -> TraceReceiptSecti
 // its `source_at` entry, JetCLIPerfSamples) has no row, as it has no
 // profile row. None when no sample landed in a helper.
 jet_cli_perf_helpers_section: fn(source: String, lines: [JetCLIPerfSampledLine], functions: [X64ImageFunction], sources: [JetCLIPerfProgramSource], source_at: [Int]) -> TraceReceiptSection? Never! {
-    found := [JetCLIPerfLineHelper]{}
+    ^found: [JetCLIPerfLineHelper]{}
     loop place in lines {
         if place.helpers.len() == 0 -> next
         other: if place.own || place.file < 0 || place.file >= source_at.len() -> -1 else -> source_at[place.file]
@@ -2067,7 +2065,7 @@ jet_cli_perf_helpers_section: fn(source: String, lines: [JetCLIPerfSampledLine],
         path: if place.own -> "{source}" else -> "{sources[other].identity.path}"
         loop held in place.helpers {
             helper: jet_cli_perf_helper_name(functions[held.function].name)
-            at := -1
+            ^at: -1
             loop index in 0..<found.len() {
                 if found[index].line == place.line && found[index].helper == helper && found[index].function == place.name && found[index].path == path {
                     at = index
@@ -2083,7 +2081,7 @@ jet_cli_perf_helpers_section: fn(source: String, lines: [JetCLIPerfSampledLine],
     }
     if found.len() == 0 -> return None
     found.sort_by(fn(left: JetCLIPerfLineHelper, right: JetCLIPerfLineHelper) { (right.samples <=> left.samples).then(left.path <=> right.path).then(left.line <=> right.line).then(left.function <=> right.function).then(left.helper <=> right.helper) })
-    rows := [CanonicalJSON]{}
+    ^rows: [CanonicalJSON]{}
     loop row in found.move() {
         rows.push(
             CanonicalJSON.Object(
@@ -2140,12 +2138,12 @@ jet_cli_perf_sites_json: fn(sites: ^^[JetCLIPerfSite]) -> CanonicalJSON Never! {
 // should give (jet_cli_perf_nominal); and, when the runtime recorded it,
 // what sampling cost as its overhead. None when no sample landed in them.
 jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSamples, wall: JetCLIPerfRunPlace?{None}, wall_samples: U64{0}) -> TraceProfile? Never! {
-    rows := [TraceProfileRow]{}
-    elsewhere := sampled.outside
+    ^rows: [TraceProfileRow]{}
+    ^elsewhere: sampled.outside
     loop place in sampled.lines {
         // The line's other source of the program, -1 for none.
         other: if place.own || place.file < 0 || place.file >= sampled.source_at.len() -> -1 else -> sampled.source_at[place.file]
-        end := U64?{None}
+        ^end: U64?{None}
         if {
             place.own -> end = jet_cli_perf_line_end(source.text, place.line)
             other >= 0 && place.line >= 1 && place.line <= sampled.sources[other].ends.len() -> {
@@ -2193,7 +2191,7 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     // whose time goes to library code does; with no CPU-time samples, a row
     // holds only its counters' events under the memory lens alone and only
     // its allocations under the alloc lens alone.
-    held := false
+    ^held: false
     loop row in rows {
         if row.sample_count > (U64{0}) || (row.inclusive_count ?? U64{0}) > (U64{0}) || (row.allocation_count ?? U64{0}) > (U64{0}) || (row.l1d_miss_count ?? U64{0}) > (U64{0}) || (row.llc_miss_count ?? U64{0}) > (U64{0}) || (row.dtlb_miss_count ?? U64{0}) > (U64{0}) || (row.page_fault_count ?? U64{0}) > (U64{0}) {
             held = true
@@ -2201,7 +2199,7 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
         }
     }
     if !held -> return None
-    walled := ""
+    ^walled: ""
     if walls && wall == .Val(run) {
         row: jet_cli_perf_run_row(run, "wall", wall_samples)
         walled = "; the wall row is the run's {row.sample_count} observations of `run`, which do not separate the functions it calls"
@@ -2209,7 +2207,7 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     }
     status: if truncated -> "truncated" else -> "captured"
     coverage: if elsewhere == (U64{0}) -> "complete" else -> "partial"
-    named := [String]{}
+    ^named: [String]{}
     loop native in sampled.natives {
         if named.len() >= 8 -> break
         named.push("{sampled.functions[native.function].name} {native.count}")
@@ -2231,7 +2229,7 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     alone: if sampled.periods.len() == 0 && sampled.sited -> "the alloc lens alone: each row holds its allocations" else -> "the memory lens alone: each row holds its counters' events"
     cut: if sampled.cost == .Val(cost) && cost.cut > (U64{0}) && sampled.sampler == .Val(used) -> "; {cost.cut} samples' stacks were cut at the {used.depth} callchain entries the kernel writes (perf_event_max_stack), so their outermost callers are missing" else -> ""
     reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under {alone}{natives}{sites}{fold.note}{windowed}{walled}" else -> "{timed}{fold.note}{taken}{natives}{helpers}{stackless}{cut}{nominal}{windowed}{sites}{walled}"
-    profile := TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{TRACE_PROFILE_ROW_LIMIT}, rows_truncated: truncated, overhead_ns: None, overhead_runtime_ns: None, overhead_kernel_ns: None, overhead_status: "not_measured", overhead_reason: "the runtime recorded no sampling cost", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
+    ^profile: TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{TRACE_PROFILE_ROW_LIMIT}, rows_truncated: truncated, overhead_ns: None, overhead_runtime_ns: None, overhead_kernel_ns: None, overhead_status: "not_measured", overhead_reason: "the runtime recorded no sampling cost", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
     if sampled.cost == .Val(cost) {
         // Each signal pays the kernel's delivery and return besides the
         // handler's own time. A sample the kernel wrote to a ring took no
@@ -2278,19 +2276,19 @@ JetCLIPerfFold: struct {
 // it are dropped, their samples counted.
 jet_cli_perf_profile_fold: fn(rows: [TraceProfileRow], limit: Int{TRACE_PROFILE_ROW_LIMIT}) -> JetCLIPerfFold Never! {
     if rows.len() <= limit -> return JetCLIPerfFold{rows: rows, note: "", dropped: U64{0}}
-    by_function := true
-    keep := jet_cli_perf_profile_kept(rows, true, limit)
+    ^by_function: true
+    ^keep: jet_cli_perf_profile_kept(rows, true, limit)
     if keep < 0 {
         by_function = false
         keep = jet_cli_perf_profile_kept(rows, false, limit)
     }
     if keep < 0 -> keep = 0
-    folded := [TraceProfileRow]{}
+    ^folded: [TraceProfileRow]{}
     // Each folded row's place in `folded` by its key, and the functions of
     // each, by "path\nname", when they fold by source.
-    places := [String:Int]{}
-    functions := [Int]{}
-    seen := [String:Bool]{}
+    ^places: [String:Int]{}
+    ^functions: [Int]{}
+    ^seen: [String:Bool]{}
     loop at in keep..<rows.len() {
         row: rows[at]
         key: jet_cli_perf_profile_fold_key(row, by_function)
@@ -2298,7 +2296,7 @@ jet_cli_perf_profile_fold: fn(rows: [TraceProfileRow], limit: Int{TRACE_PROFILE_
         if !places.has_key(key) {
             seen[named] = true
             places[key] = folded.len()
-            first := row
+            ^first: row
             first.inclusive_count = None
             folded.push(first)
             functions.push(1)
@@ -2309,7 +2307,7 @@ jet_cli_perf_profile_fold: fn(rows: [TraceProfileRow], limit: Int{TRACE_PROFILE_
             seen[named] = true
             functions[index] = functions[index] + 1
         }
-        into := folded[index]
+        ^into: folded[index]
         into.sample_count += row.sample_count
         into.sample_weight += row.sample_weight
         into.allocation_count = jet_cli_perf_count_sum(into.allocation_count, row.allocation_count)
@@ -2326,15 +2324,15 @@ jet_cli_perf_profile_fold: fn(rows: [TraceProfileRow], limit: Int{TRACE_PROFILE_
         }
         folded[index] = into
     }
-    out := [TraceProfileRow]{}
+    ^out: [TraceProfileRow]{}
     loop at in 0..<keep -> out.push(rows[at])
-    dropped := U64{0}
+    ^dropped: U64{0}
     loop (index, row) in folded {
         if out.len() >= limit {
             dropped += row.sample_count
             next
         }
-        named := row
+        ^named: row
         if functions[index] > 1 -> named.symbol.name = "{functions[index]} functions"
         out.push(named)
     }
@@ -2347,8 +2345,8 @@ jet_cli_perf_profile_fold: fn(rows: [TraceProfileRow], limit: Int{TRACE_PROFILE_
 // when the rest fold by function (`by_function`) or by source into `limit`
 // rows; -1 when the folded rows alone pass it.
 jet_cli_perf_profile_kept: fn(rows: [TraceProfileRow], by_function: Bool, limit: Int) -> Int Never! {
-    groups := [String:Bool]{}
-    keep := limit
+    ^groups: [String:Bool]{}
+    ^keep: limit
     loop at in keep..<rows.len() {
         groups[jet_cli_perf_profile_fold_key(rows[at], by_function)] = true
     }
@@ -2393,7 +2391,7 @@ jet_cli_perf_line_events: fn(sampled: JetCLIPerfSamples, place: JetCLIPerfSample
 // reason how each counter's samples count and why each one it lacks is
 // unavailable.
 jet_cli_perf_counters_profile: fn(profile: ^TraceProfile, counters: ^^[TraceCounter]) Never! {
-    notes := [String]{}
+    ^notes: [String]{}
     loop counter in counters {
         if {
             counter.period == .Val(period) -> {
@@ -2420,8 +2418,8 @@ jet_cli_perf_counter_refusal: fn(errno: U64) -> String Never! {
 // (columns count characters from 1); None past its last line.
 jet_cli_perf_line_end: fn(text: String, line: Int) -> U64? Never! {
     if line < 1 -> return None
-    at := 1
-    column := U64{1}
+    ^at: 1
+    ^column: U64{1}
     loop byte in text.bytes() {
         if at != line {
             if byte == (U8{10}) -> at += 1
@@ -2440,14 +2438,14 @@ JetCLIPerfSource: struct {
 }
 
 jet_cli_perf_source: fn(path: String, text: String) -> JetCLIPerfSource Never! {
-    identity := SourceIdentity{path: path, sha256: sha256_hex(text), symbols: [{name: String, kind: String}]{}}
+    ^identity: SourceIdentity{path: path, sha256: sha256_hex(text), symbols: [{name: String, kind: String}]{}}
     block: jet_driver_inline_package(text)
     if block.error != None {
         return JetCLIPerfSource{identity: identity, run_span: None, text: text}
     }
     masked: jet_driver_mask_inline_package(text, block)
     program: jet_cli_parsed_program(masked) ?? return JetCLIPerfSource{identity: identity, run_span: None, text: text}
-    run_span := Span?{None}
+    ^run_span: Span?{None}
     loop item in program.items {
         if item == .Func(function) {
             identity.symbols.push({name: function.name, kind: "fn"})
@@ -2465,8 +2463,8 @@ jet_cli_perf_source_position: fn(text: String, offset: Int) -> {line: U64, colum
     if offset < bytes.len() && bytes[offset] >= (U8{128}) && bytes[offset] < (U8{192}) {
         return Err(jet_cli_read_error("parser source span splits a UTF-8 scalar"))
     }
-    line := U64{1}
-    column := U64{1}
+    ^line: U64{1}
+    ^column: U64{1}
     loop index in 0..<offset {
         byte: bytes[index]
         if {
@@ -2512,7 +2510,7 @@ jet_cli_perf_run_row: fn(place: JetCLIPerfRunPlace, clock: String, count: U64) -
 // profile keeps it after its CPU rows (jet_cli_perf_samples_profile).
 jet_cli_perf_source_profile: fn(source: JetCLIPerfSource, wall_samples: U64, cpu_samples: U64, truncated: Bool) -> TraceProfile JetCLIReadError! {
     place: jet_cli_perf_run_place(source) ?? return Ok(trace_profile_unsupported("checked source attribution requires a parseable top-level `run` function"))
-    rows := [TraceProfileRow]{}
+    ^rows: [TraceProfileRow]{}
     if cpu_samples > (U64{0}) -> rows.push(jet_cli_perf_run_row(place, "cpu", cpu_samples))
     if wall_samples > (U64{0}) -> rows.push(jet_cli_perf_run_row(place, "wall", wall_samples))
     limited: truncated || wall_samples > U64{4096} || cpu_samples > U64{4096}
@@ -2557,23 +2555,23 @@ jet_cli_perf_window: fn(profile: ^TraceProfile, window: JetCLIPerfRuntimeWindow)
 jet_cli_perf_log_spans_read: fn(capture: ^JetCLIPerfCapture, path: String, source: String, origin_ns: Int, timed: [JetCLIPerfTimed]) -[FS]> Never! {
     bytes: perf_files.read_bytes(path) ?? [U8]{}
     perf_files.remove(path).drop("the session reads its log spans once")
-    zones := [JetCLIPerfZoneTotal]{}
+    ^zones: [JetCLIPerfZoneTotal]{}
     // Each zone name's entry in `zones`, and each plot's in `plots`.
-    zoned := [String:Int]{}
-    frames := [Int]{}
-    plots := [JetCLIPerfPlotTotal]{}
-    plot_at := [String:Int]{}
+    ^zoned: [String:Int]{}
+    ^frames: [Int]{}
+    ^plots: [JetCLIPerfPlotTotal]{}
+    ^plot_at: [String:Int]{}
     // The zone rows of `capture` that hold samples.
-    sampled := [JetCLIPerfZoneSampled]{}
-    refused := ""
-    cut := ""
+    ^sampled: [JetCLIPerfZoneSampled]{}
+    ^refused: ""
+    ^cut: ""
     // The rows the bound dropped: log spans, zones, frame marks and plotted
     // values, empty without a JET_CLI_PERF_ZONE_DROPPED row.
-    dropped := [Int]{}
+    ^dropped: [Int]{}
     // The start and end of each task's phase, by its runtime id.
-    opened := [U64:Int]{}
-    closed := [U64:Int]{}
-    at := 0
+    ^opened: [U64:Int]{}
+    ^closed: [U64:Int]{}
+    ^at: 0
     loop at + 32 <= bytes.len() {
         start: link_debug_addr(bytes, at)
         end: link_debug_addr(bytes, at + 8)
@@ -2615,8 +2613,8 @@ jet_cli_perf_log_spans_read: fn(capture: ^JetCLIPerfCapture, path: String, sourc
             }
         }
         // The zone's samples, and the line most of them were on.
-        held := 0
-        hottest := 0
+        ^held: 0
+        ^hottest: 0
         if kind == JET_CLI_PERF_ZONE_ZONE {
             if !zoned.has_key(name) {
                 zoned[name] = zones.len()
@@ -2626,7 +2624,7 @@ jet_cli_perf_log_spans_read: fn(capture: ^JetCLIPerfCapture, path: String, sourc
             zones[index].count += 1
             zones[index].total += end - start
             if end - start > zones[index].longest -> zones[index].longest = end - start
-            tally := [Int:Int]{}
+            ^tally: [Int:Int]{}
             loop sample in jet_cli_perf_timed_first(timed, start)..<timed.len() {
                 if timed[sample].at_ns >= end -> break
                 if timed[sample].task != task -> next
@@ -2647,7 +2645,7 @@ jet_cli_perf_log_spans_read: fn(capture: ^JetCLIPerfCapture, path: String, sourc
                 plot_at[name] = plots.len()
                 plots.push(JetCLIPerfPlotTotal{name: "{name}", count: 0, last: ""})
             }
-            plot := plots[plot_at[name]]
+            ^plot: plots[plot_at[name]]
             plot.count += 1
             plot.last = "{perf_math.from_bits(end)}"
             plots[plot_at[name]] = plot
@@ -2683,8 +2681,8 @@ jet_cli_perf_log_spans_read: fn(capture: ^JetCLIPerfCapture, path: String, sourc
 // The first sample of `timed`, in time order, at or after `start`;
 // `timed.len()` for none.
 jet_cli_perf_timed_first: fn(timed: [JetCLIPerfTimed], start: Int) -> Int Never! {
-    low := 0
-    high := timed.len()
+    ^low: 0
+    ^high: timed.len()
     loop low < high {
         middle: low + (high - low) /% 2
         if timed[middle].at_ns < start -> low = middle + 1 else -> high = middle
@@ -2718,19 +2716,19 @@ JetCLIPerfZoneSampled: struct {
 // when the run gave no counts). `jet perf view` shows them
 // (jet_cli_perf_zone_lines, jet_cli_perf_timeline).
 jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plots: [JetCLIPerfPlotTotal], sampled: [JetCLIPerfZoneSampled], source: String, refused: String, cut: String, dropped: [Int]) -> TraceReceiptSection Never! {
-    widest := 0
+    ^widest: 0
     loop at in 1..<frames.len() {
         if frames[at] - frames[at - 1] > widest -> widest = frames[at] - frames[at - 1]
     }
     mean: if frames.len() > 1 -> (frames[frames.len() - 1] - frames[0]).div_euclid(frames.len() - 1) else -> 0
-    zone_rows := [CanonicalJSON]{}
+    ^zone_rows: [CanonicalJSON]{}
     loop zone in zones {
-        ranked := [JetCLIPerfZoneLine]{}
+        ^ranked: [JetCLIPerfZoneLine]{}
         loop line in zone.lines.keys() {
             ranked.push(JetCLIPerfZoneLine{line: line, samples: zone.lines[line]})
         }
         ranked.sort_by(fn(left: JetCLIPerfZoneLine, right: JetCLIPerfZoneLine) { (right.samples <=> left.samples).then(left.line <=> right.line) })
-        hot := [CanonicalJSON]{}
+        ^hot: [CanonicalJSON]{}
         loop held in ranked {
             if hot.len() >= JET_CLI_PERF_ZONE_LINES -> break
             hot.push(CanonicalJSON.Object([CanonicalJSONField]{{key: "line", value: CanonicalJSON.Integer("{held.line}")}, {key: "samples", value: CanonicalJSON.Integer("{held.samples}")}}))
@@ -2748,7 +2746,7 @@ jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plot
             ),
         )
     }
-    sampled_rows := [CanonicalJSON]{}
+    ^sampled_rows: [CanonicalJSON]{}
     loop row in sampled {
         sampled_rows.push(
             CanonicalJSON.Object(
@@ -2762,7 +2760,7 @@ jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plot
             ),
         )
     }
-    plot_rows := [CanonicalJSON]{}
+    ^plot_rows: [CanonicalJSON]{}
     loop plot in plots {
         plot_rows.push(
             CanonicalJSON.Object(
@@ -2774,7 +2772,7 @@ jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plot
             ),
         )
     }
-    fields := [CanonicalJSONField]{}
+    ^fields: [CanonicalJSONField]{}
     if cut != "" {
         fields.push(CanonicalJSONField{key: "cut", value: CanonicalJSON.String("{cut}")})
     }
@@ -2851,8 +2849,8 @@ JET_CLI_PERF_ZONE_DROPPED: 7
 // lost (PerfSamples.jet perf_flight_window_close). None when it holds none,
 // or only one with no interval.
 jet_cli_perf_spans_window: fn(bytes: [U8]) -> JetCLIPerfZonesWindow? Never! {
-    found := JetCLIPerfZonesWindow?{None}
-    at := 0
+    ^found: JetCLIPerfZonesWindow?{None}
+    ^at: 0
     loop at + 32 <= bytes.len() {
         shape: link_debug_addr(bytes, at + 24)
         length: shape & 4294967295
@@ -2900,7 +2898,7 @@ jet_cli_perf_waits_read: fn(capture: ^JetCLIPerfCapture, waits: ^^[JetCLIPerfWai
     // Each spawned task's line by its runtime id, and its row when no
     // observation gave it one; a spawner's spawn came before its own.
     admitted: jet_cli_perf_tasks_admitted(capture.task_ids, TRACE_TASK_ROW_LIMIT - U64{capture.tasks.len()}, spawns, samples)
-    lines := [U64:U64]{}
+    ^lines: [U64:U64]{}
     loop spawn in spawns {
         if spawn.line == .Val(line) -> lines[spawn.task] = line
         if capture.task_ids.has_key(spawn.task) || !capture.task_ids.has_key(spawn.parent) -> next
@@ -2913,10 +2911,10 @@ jet_cli_perf_waits_read: fn(capture: ^JetCLIPerfCapture, waits: ^^[JetCLIPerfWai
         capture.task_ids[spawn.task] = id
     }
     // Each slot's wakes by their place in `wakes`, earliest first.
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<wakes.len() -> order.push(index)
     order.sort_by(fn(left: Int, right: Int) { wakes[left].at_ns <=> wakes[right].at_ns })
-    slots := [Int:[Int]]{}
+    ^slots: [Int:[Int]]{}
     loop index in order {
         slot: wakes[index].slot
         if !slots.has_key(slot) -> slots[slot] = [Int]{}
@@ -2926,10 +2924,10 @@ jet_cli_perf_waits_read: fn(capture: ^JetCLIPerfCapture, waits: ^^[JetCLIPerfWai
     // `waits`.
     causes: loop wait in waits -> jet_cli_perf_socket_cause(transfers, wait)
     // The end of each task's last wait on each slot, by "slot/task".
-    ends := [String:Int]{}
-    pending := waits
+    ^ends: [String:Int]{}
+    ^pending: waits
     pending.reverse()
-    place := -1
+    ^place: -1
     loop pending.len() > 0 {
         wait: pending.pop() ?? break
         place += 1
@@ -2942,9 +2940,9 @@ jet_cli_perf_waits_read: fn(capture: ^JetCLIPerfCapture, waits: ^^[JetCLIPerfWai
             capture.policy.span_rows_truncated = true
             break
         }
-        waker := "timeout"
-        waker_task_id := U64?{None}
-        waker_line := U64?{None}
+        ^waker: "timeout"
+        ^waker_task_id: U64?{None}
+        ^waker_line: U64?{None}
         found: if slots.has_key(wait.slot) -> jet_cli_perf_wait_waker(wakes, slots[wait.slot], floor, wait.end_ns) else -> -1
         if found >= 0 {
             wake: wakes[found]
@@ -2967,8 +2965,8 @@ jet_cli_perf_waits_read: fn(capture: ^JetCLIPerfCapture, waits: ^^[JetCLIPerfWai
                 waker_line = cause.line
             }
         }
-        awaited := U64?{None}
-        spawn_line := U64?{None}
+        ^awaited: U64?{None}
+        ^spawn_line: U64?{None}
         if wait.class == JET_CLI_PERF_OBJECT_TASK && capture.task_ids.has_key(wait.id) {
             awaited = Val(capture.task_ids[wait.id])
             if lines.has_key(wait.id) -> spawn_line = Val(lines[wait.id])
@@ -2985,7 +2983,7 @@ jet_cli_perf_waits_read: fn(capture: ^JetCLIPerfCapture, waits: ^^[JetCLIPerfWai
 // The CPU-time samples of `timed` each task took, by its runtime id; the
 // samples outside every task count for none.
 jet_cli_perf_task_samples: fn(timed: [JetCLIPerfTimed]) -> [U64:U64] Never! {
-    counts := [U64:U64]{}
+    ^counts: [U64:U64]{}
     loop sample in timed {
         if sample.task <= 0 -> next
         task: U64{sample.task}
@@ -3001,28 +2999,28 @@ jet_cli_perf_task_samples: fn(timed: [JetCLIPerfTimed]) -> [U64:U64] Never! {
 // no row yet, while they fit. A task none of whose spawners has a row gets
 // none.
 jet_cli_perf_tasks_admitted: fn(rowed: [U64:U64], room: U64, spawns: [JetCLIPerfSpawn], samples: [U64:U64]) -> [U64:Bool] Never! {
-    parents := [U64:U64]{}
-    fresh := [U64]{}
+    ^parents: [U64:U64]{}
+    ^fresh: [U64]{}
     loop spawn in spawns {
         if rowed.has_key(spawn.task) || parents.has_key(spawn.task) -> next
         parents[spawn.task] = spawn.parent
         fresh.push(spawn.task)
     }
-    admitted := [U64:Bool]{}
+    ^admitted: [U64:Bool]{}
     if (U64{fresh.len()}) <= room {
         loop task in fresh -> admitted[task] = true
         return admitted
     }
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<fresh.len() -> order.push(index)
     order.sort_by(fn(left: Int, right: Int) { ((samples.get(fresh[right]) ?? U64{0}) <=> (samples.get(fresh[left]) ?? U64{0})).then(left <=> right) })
-    taken := U64{0}
+    ^taken: U64{0}
     loop index in order {
         if taken == room -> break
         // The task and its spawners up to one with a row.
-        chain := [U64]{}
-        rooted := true
-        at := fresh[index]
+        ^chain: [U64]{}
+        ^rooted: true
+        ^at: fresh[index]
         loop !rowed.has_key(at) && !admitted.has_key(at) {
             if !parents.has_key(at) {
                 rooted = false
@@ -3065,14 +3063,14 @@ JetCLIPerfTaskPhase: struct {
 jet_cli_perf_tasks_section: fn(rowed: [U64:U64], named: [U64:String], spawns: [JetCLIPerfSpawn], samples: [U64:U64]) -> TraceReceiptSection? Never! {
     // Each task's phase by its runtime id; a spawner's spawn came before
     // its own.
-    phase := [U64:String]{}
+    ^phase: [U64:String]{}
     loop task in rowed.keys() -> phase[task] = named.get(task) ?? ""
     loop spawn in spawns {
         phase[spawn.task] = named.get(spawn.task) ?? phase.get(spawn.parent) ?? ""
     }
     if phase.len() == 0 -> return None
-    totals := [JetCLIPerfTaskPhase]{}
-    at := [String:Int]{}
+    ^totals: [JetCLIPerfTaskPhase]{}
+    ^at: [String:Int]{}
     loop task in phase.keys() {
         name: phase[task]
         if !at.has_key(name) {
@@ -3088,12 +3086,12 @@ jet_cli_perf_tasks_section: fn(rowed: [U64:U64], named: [U64:String], spawns: [J
             totals[index].folded_samples += took
         }
     }
-    unattributed := U64{0}
+    ^unattributed: U64{0}
     loop task in samples.keys() {
         if !phase.has_key(task) -> unattributed += samples[task]
     }
     totals.sort_by(fn(left: JetCLIPerfTaskPhase, right: JetCLIPerfTaskPhase) { (right.samples <=> left.samples).then(left.name <=> right.name) })
-    phases := [CanonicalJSON]{}
+    ^phases: [CanonicalJSON]{}
     loop total in totals {
         phases.push(
             CanonicalJSON.Object(
@@ -3153,9 +3151,9 @@ jet_cli_perf_socket_cause: fn(transfers: [JetCLIPerfIO], wait: JetCLIPerfWait) -
     }
     floor: wait.start_ns - JET_CLI_PERF_WAKE_LEAD_NS
     lead: if listener -> JET_CLI_PERF_WAKE_LEAD_NS else -> 0
-    found := JetCLIPerfCause?{None}
+    ^found: JetCLIPerfCause?{None}
     // The monotonic clock counts from boot, so every act begins after 0.
-    begun := 0
+    ^begun: 0
     loop transfer in transfers {
         if transfer.class != JET_CLI_PERF_TARGET_SOCKET || transfer.task == (U64{0}) || transfer.task == wait.task {
             next
@@ -3193,7 +3191,7 @@ jet_cli_perf_socket_reaches: fn(address: String, bound: String) -> Bool Never! {
 // functions and lines of `source` on its stack. Each transfer's target and
 // stack move into its row.
 jet_cli_perf_io_read: fn(capture: ^JetCLIPerfCapture, transfers: ^^[JetCLIPerfIO], source: String, origin_ns: Int) Never! {
-    pending := transfers
+    ^pending: transfers
     pending.reverse()
     loop pending.len() > 0 {
         transfer: pending.pop() ?? break
@@ -3240,7 +3238,7 @@ jet_cli_perf_io_target: fn(class: Int, bytes: [U8]) -> String Never! {
         name: String.from_bytes(loop k in 3..<bytes.len() -> bytes[k]) ?? ""
         return if name.len() == 0 -> "socket" else -> "@{name}"
     }
-    end := 2
+    ^end: 2
     loop end < bytes.len() && bytes[end] != (U8{0}) -> end += 1
     String.from_bytes(loop k in 2..<end -> bytes[k]) ?? "socket"
 }
@@ -3253,8 +3251,8 @@ JET_CLI_PERF_WAKE_LEAD_NS: 1000000
 // The last of `wakes` that `order` lists, earliest first, at or before `end`
 // and not before `floor`, by its place in `wakes`; -1 for none.
 jet_cli_perf_wait_waker: fn(wakes: [JetCLIPerfWake], order: [Int], floor: Int, end: Int) -> Int Never! {
-    low := 0
-    high := order.len()
+    ^low: 0
+    ^high: order.len()
     loop low < high {
         middle: (low + high) /% 2
         if wakes[order[middle]].at_ns <= end -> low = middle + 1 else -> high = middle

@@ -49,7 +49,7 @@ shelve: fn(w: String) Err! {
 stock: fn(words: [String]) Err! { words.lazy().each(shelve) }
 
 #Test("Iter each sees every item in order") {
-    seen := [Int]{}
+    ^seen: [Int]{}
     values: [3, 1, 4]
     values.lazy().map(fn(n: Int) { n * 2 }).each(
         fn(n: Int) {
@@ -103,7 +103,7 @@ stock: fn(words: [String]) Err! { words.lazy().each(shelve) }
 }
 
 #Test("Iter indexed numbers the items from zero") {
-    labels := [String]{}
+    ^labels: [String]{}
     loop pair in ["a", "b", "c"].lazy().indexed() -> labels.push("{pair.idx}{pair.item}")
     assert_eq(labels, ["0a", "1b", "2c"])
 }
@@ -111,7 +111,7 @@ stock: fn(words: [String]) Err! { words.lazy().each(shelve) }
 #Test("a failing Iter each stops pulling") {
     // 100 /% 0 would trap: the walk ends at the failure before it.
     numbers: [4, 2, 0]
-    stopped := false
+    ^stopped: false
     if check_all(numbers.lazy().map(fn(n: Int) { 100 /% n })) == .Err(_) -> stopped = true
     assert(stopped)
 }

@@ -42,8 +42,8 @@ JetCLIRootedDirectory: struct {
         if !root.starts_with("/") {
             return Err(jet_cli_read_error("store root must be absolute: {root}"))
         }
-        handle := jet_cli_rooted_open_root(root)
-        path := root
+        ^handle: jet_cli_rooted_open_root(root)
+        ^path: root
         loop part in parts {
             jet_cli_rooted_validate_name(part)
             shown: jet_cli_rooted_join(path, part)
@@ -89,7 +89,7 @@ JetCLIRootedDirectory: struct {
     // `open` for a per-machine cache store: the same held walk, publications
     // without flushes.
     open_cache: fn(root: String, parts: [String], create: Bool) -[FS]> JetCLIRootedDirectory JetCLIReadError! {
-        held := JetCLIRootedDirectory.open(root, parts, create) ?? return Err(err)
+        ^held: JetCLIRootedDirectory.open(root, parts, create) ?? return Err(err)
         held.durable = false
         Ok(held)
     }
@@ -100,8 +100,8 @@ JetCLIRootedDirectory: struct {
         if !root.starts_with("/") {
             return Err(jet_cli_read_error("store root must be absolute: {root}"))
         }
-        handle := jet_cli_rooted_open_root(root)
-        path := root
+        ^handle: jet_cli_rooted_open_root(root)
+        ^path: root
         loop part in parts {
             jet_cli_rooted_validate_name(part)
             shown: jet_cli_rooted_join(path, part)
@@ -135,12 +135,12 @@ JetCLIRootedDirectory: struct {
             return Err(jet_cli_read_error("`{shown}` is not a regular file"))
         }
         if info.size > limit -> return Err(jet_cli_read_error("`{shown}` exceeds {limit} bytes"))
-        reader := self.handle.open(name) ?? return Err(jet_cli_read_error("could not open `{shown}`: {jet_cli_io_error_text(err)}"))
+        ^reader: self.handle.open(name) ?? return Err(jet_cli_read_error("could not open `{shown}`: {jet_cli_io_error_text(err)}"))
         opened: reader.stat() ?? return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(err)}"))
         if !opened.is_file || opened.id != info.id {
             return Err(jet_cli_read_error("`{shown}` changed while it was read"))
         }
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         loop {
             chunk: reader.read_bytes(JET_CLI_ROOTED_READ_CHUNK) ?? return Err(jet_cli_read_error("could not read `{shown}`: {jet_cli_io_error_text(err)}"))
             if chunk.len() == 0 -> break
@@ -160,7 +160,7 @@ JetCLIRootedDirectory: struct {
     // A link or a non-file entry is reported as such, never followed.
     list: fn(self) -[FS]> [JetCLIRootedEntry] JetCLIReadError! {
         entries: self.handle.list() ?? return Err(jet_cli_read_error("could not list `{self.path}`: {jet_cli_io_error_text(err)}"))
-        rows := [JetCLIRootedEntry]{}
+        ^rows: [JetCLIRootedEntry]{}
         loop entry in entries {
             if !entry.name_is_unicode -> next
             info: self.handle.entry_stat(entry.name) ?? {
@@ -179,7 +179,7 @@ JetCLIRootedDirectory: struct {
     // behind to steal. Callers bind the owner to a local with `??`; it holds
     // the lock until that local leaves scope.
     lock: fn(self, what: String) -[FS, Time]> cli_files.AdvisoryLock JetCLIReadError! {
-        attempt := 0
+        ^attempt: 0
         loop {
             // Bind the owner through `??`: returning it out of a match on the
             // temporary result drops (releases) the lock on the way out.
@@ -205,10 +205,10 @@ JetCLIRootedDirectory: struct {
     stage: fn(self, name: String, bytes: [U8], mode: Int?) -[FS, Env, Time.Wait]> String JetCLIReadError! {
         jet_cli_rooted_validate_name(name)
         pid: cli_process.current_pid()
-        attempt := 0
+        ^attempt: 0
         loop {
             temp: ".{name}.{pid}.{attempt}"
-            writer := self.handle.create(temp, if_exists: .Refuse) ?? {
+            ^writer: self.handle.create(temp, if_exists: .Refuse) ?? {
                 if err == .AlreadyExists(_) && attempt + 1 < JET_CLI_ROOTED_STAGE_ATTEMPTS {
                     attempt += 1
                     next
@@ -388,8 +388,8 @@ JetCLIRootedDirectory: struct {
                 }
             }
         }
-        held := self.handle.open_directory(first) ?? return Err(jet_cli_read_error("could not hold directory: {jet_cli_io_error_text(err)}"))
-        path := jet_cli_rooted_join(self.path, first)
+        ^held: self.handle.open_directory(first) ?? return Err(jet_cli_read_error("could not hold directory: {jet_cli_io_error_text(err)}"))
+        ^path: jet_cli_rooted_join(self.path, first)
         loop index in 1..<parts.len() {
             part: parts[index]
             if create && held.entry_stat(part) == .Err(error) {
@@ -456,8 +456,8 @@ jet_cli_rooted_open_root: fn(root: String) -[FS]> cli_files.Directory JetCLIRead
     if !root.starts_with("/") {
         return Err(jet_cli_read_error("store root must be absolute: {root}"))
     }
-    held := cli_files.open_directory("/") ?? return Err(jet_cli_read_error("could not open store root `/`: {jet_cli_io_error_text(err)}"))
-    path := ""
+    ^held: cli_files.open_directory("/") ?? return Err(jet_cli_read_error("could not open store root `/`: {jet_cli_io_error_text(err)}"))
+    ^path: ""
     loop part in root.split("/") {
         if part == "" -> next
         jet_cli_rooted_validate_name(part)

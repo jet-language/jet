@@ -38,7 +38,7 @@ task_group_handle: fn(state: I64, owner: Bool) -> I64 {
     handle
 }
 
-task_group_retain: fn(group: I64) { _ := sync_add(group, I64{1}) }
+task_group_retain: fn(group: I64) { ^_: sync_add(group, I64{1}) }
 
 task_group_unref: fn(group: I64) {
     if (sync_add(group, I64{-1}) != I64{1}) {
@@ -76,7 +76,7 @@ task_group_unlist: fn(group: I64) {
         return
     }
     sync_mutex_lock(wrapping(control + I64{72}))
-    link := wrapping(control + I64{128})
+    ^link: wrapping(control + I64{128})
     loop sync_load(link) != (I64{0}) {
         current: sync_load(link)
         if current == group {
@@ -105,7 +105,7 @@ task_group_cancel_children: fn(group: I64) {
     header: wrapping(group + I64{48})
     count: sync_load(header)
     data: sync_load(wrapping(header + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         child: sync_load(wrapping(data + at * I64{8}))
         if (sync_load(wrapping(child + I64{152})) == I64{0}) {
@@ -139,7 +139,7 @@ task_cancel_once: fn(child: I64) {
 task_groups_cancel_open: fn(control: I64) {
     groups: task_words_new()
     sync_mutex_lock(wrapping(control + I64{72}))
-    group := sync_load(wrapping(control + I64{128}))
+    ^group: sync_load(wrapping(control + I64{128}))
     loop group != (I64{0}) {
         task_group_retain(group)
         scheduler_words_push(groups, group)
@@ -147,7 +147,7 @@ task_groups_cancel_open: fn(control: I64) {
     }
     sync_mutex_unlock(wrapping(control + I64{72}))
     words: sync_load(wrapping(groups + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < sync_load(groups) {
         listed: sync_load(wrapping(words + at * I64{8}))
         task_group_cancel_children(listed)
@@ -175,7 +175,7 @@ task_group_admit: fn(group: I64) -> I64 {
     node: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(node, I64{32})
     sync_store(wrapping(node + I64{8}), slot)
-    permit := I64{0}
+    ^permit: I64{0}
     loop {
         sync_mutex_lock(wrapping(group + I64{8}))
         if (sync_load(wrapping(group + I64{16})) != I64{0}) {
@@ -192,7 +192,7 @@ task_group_admit: fn(group: I64) -> I64 {
         sync_store(node, sync_load(wrapping(group + I64{40})))
         sync_store(wrapping(group + I64{40}), node)
         sync_mutex_unlock(wrapping(group + I64{8}))
-        status := scheduler_deadline_check(kind)
+        ^status: scheduler_deadline_check(kind)
         if (status == I64{0} && !scheduler_shielded() && scheduler_task_canceled()) {
             scheduler_deliver_cancel()
             status = jet_scheduler_native_status()
@@ -210,7 +210,7 @@ task_group_admit: fn(group: I64) -> I64 {
 }
 
 task_group_waiters_wake: fn(group: I64) {
-    node := sync_load(wrapping(group + I64{40}))
+    ^node: sync_load(wrapping(group + I64{40}))
     loop node != (I64{0}) {
         sync_park_wake(sync_load(wrapping(node + I64{8})))
         node = sync_load(node)
@@ -246,7 +246,7 @@ task_group_close: fn(group: I64) {
     // The children stay listed while they drain, so a cancel that reaches the
     // opener meanwhile still finds them.
     header: wrapping(group + I64{48})
-    at := I64{0}
+    ^at: I64{0}
     loop {
         sync_mutex_lock(wrapping(group + I64{8}))
         if (at >= sync_load(header)) { break }
@@ -310,7 +310,7 @@ task_selection_wait_check: fn(kind: I64) -> I64 {
 }
 
 task_selection_drain: fn(handles: I64, count: I64, cancel: Bool) {
-    at := I64{0}
+    ^at: I64{0}
     if cancel {
         loop at < count {
             child: sync_load(wrapping(handles + at * I64{8}))
@@ -340,17 +340,17 @@ task_result_failed: fn(child: I64, flatten: Bool) -> Bool {
 task_selection: fn(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
     if (count == I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
     wait_kind: scheduler_msg_selection()
-    first_error := I64{-1}
+    ^first_error: I64{-1}
     loop {
         if (task_selection_wait_check(wait_kind) != I64{0}) {
             task_selection_drain(handles, count, true)
             jet_rt_string_drop(wait_kind)
             return I64{-1}
         }
-        earliest := I64{-1}
-        pending := false
-        successes := I64{0}
-        at := I64{0}
+        ^earliest: I64{-1}
+        ^pending: false
+        ^successes: I64{0}
+        ^at: I64{0}
         loop at < count {
             child: sync_load(wrapping(handles + at * I64{8}))
             if {
@@ -369,7 +369,7 @@ task_selection: fn(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
             }
             at += I64{1}
         }
-        winner := I64{-1}
+        ^winner: I64{-1}
         if {
             (kind == I64{0}) -> {
                 if {
@@ -405,7 +405,7 @@ task_group_handles: fn(list: I64, spawn: Bool, meta: I64, invoke: I64, release: 
     thread_zero(list, I64{24})
     if spawn {
         label: scheduler_text_new(I64{0})
-        at := I64{0}
+        ^at: I64{0}
         loop at < sync_load(header) {
             address: wrapping(sync_load(wrapping(header + I64{16})) + at * I64{8})
             env: sync_load(address)
@@ -422,7 +422,7 @@ task_group_handles: fn(list: I64, spawn: Bool, meta: I64, invoke: I64, release: 
     count: sync_load(handles)
     data: sync_load(wrapping(handles + I64{16}))
     winner: task_selection(data, count, kind, (flatten & I64{255}) != I64{0})
-    success := I64{0}
+    ^success: I64{0}
     if (winner >= I64{0}) {
         chosen: sync_load(wrapping(data + winner * I64{8}))
         if {
@@ -435,7 +435,7 @@ task_group_handles: fn(list: I64, spawn: Bool, meta: I64, invoke: I64, release: 
                 element_meta: sync_load(wrapping(ok_meta + I64{56}))
                 values: coll_list_new()
                 slot: coll_slot_new(element_meta)
-                at := I64{0}
+                ^at: I64{0}
                 success = I64{1}
                 loop at < count {
                     child: sync_load(wrapping(data + at * I64{8}))
@@ -467,7 +467,7 @@ task_group_handles: fn(list: I64, spawn: Bool, meta: I64, invoke: I64, release: 
     owned_handles: jet_rt_alloc(count * I64{8}, I64{8})
     coll_copy(handles, owned_handles, count * I64{8})
     winner: task_selection(owned_handles, count, I64{0}, (flatten & I64{255}) != I64{0})
-    success := I64{0}
+    ^success: I64{0}
     if (winner >= I64{0}) {
         chosen: sync_load(wrapping(owned_handles + winner * I64{8}))
         if {
@@ -481,7 +481,7 @@ task_group_handles: fn(list: I64, spawn: Bool, meta: I64, invoke: I64, release: 
                 // failure drops preceding values instead of exposing partial out.
                 prepared: jet_rt_alloc(count * I64{16}, I64{8})
                 thread_zero(prepared, count * I64{16})
-                at := I64{0}
+                ^at: I64{0}
                 success = I64{1}
                 loop at < count {
                     child: sync_load(wrapping(owned_handles + at * I64{8}))
@@ -504,7 +504,7 @@ task_group_handles: fn(list: I64, spawn: Bool, meta: I64, invoke: I64, release: 
                     at += I64{1}
                 }
                 task_selection_drain(owned_handles, count, success == I64{0})
-                index := I64{0}
+                ^index: I64{0}
                 loop index < at {
                     meta: sync_load(wrapping(prepared + index * I64{16}))
                     slot: sync_load(wrapping(wrapping(prepared + index * I64{16}) + I64{8}))

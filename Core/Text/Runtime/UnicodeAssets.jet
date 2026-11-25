@@ -8,7 +8,7 @@
 
 uint: fn(bytes: View<U8>, at: Int, width: Int) -> Int Never! {
     assert(at >= 0 && width >= 1 && width <= 4 && at + width <= bytes.len())
-    value := 0
+    ^value: 0
     loop i in 0..<width -> value |= (Int{bytes[at + i]} << (i * 8))
     value
 }
@@ -48,8 +48,8 @@ pool: fn(asset: [U8], kind: Int, stride: Int) -> View<U8> from asset {
 // Shared range/tag lookup.
 range_row: fn(table: View<U8>, cp: Int, stride: Int) -> Int? {
     if cp < 0 || cp > 1114111 || stride < 6 || table.len() % stride != 0 -> return None
-    low := 0
-    high := table.len() /% stride
+    ^low: 0
+    ^high: table.len() /% stride
     loop low < high {
         mid: (low + high) /% 2
         row: mid * stride
@@ -91,8 +91,8 @@ asset_tag: fn(asset: [U8], cp: Int, fallback: Int) -> Int Never! {
 // borrowed from the independent scalar-pool asset.
 mapping_row: fn(index: View<U8>, cp: Int, stride: Int) -> Int? {
     if cp < 0 || cp > 1114111 || stride < 3 || index.len() % stride != 0 -> return None
-    low := 0
-    high := index.len() /% stride
+    ^low: 0
+    ^high: index.len() /% stride
     loop low < high {
         mid: (low + high) /% 2
         row: mid * stride

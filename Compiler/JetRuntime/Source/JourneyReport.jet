@@ -1,8 +1,8 @@
 // Pure renderer over canonical Journey32/Hop56; width0 means no column budget.
 // Unicode scalars count as columns, not bytes.
 journey_digits: fn(number: I64) -> I64 {
-    value := number
-    count := I64{1}
+    ^value: number
+    ^count: I64{1}
     loop value >= (I64{10}) {
         value = value /% I64{10}
         count += I64{1}
@@ -15,7 +15,7 @@ journey_label_columns: fn(index: I64) -> I64 {
 }
 
 journey_fixed_columns: fn(hop: I64, index: I64, note: Bool) -> I64 {
-    cols := I64{2} + journey_label_columns(index) + I64{1} + jet_char_len(rt_text_word(wrapping(hop + HOP_FUNCTION))) + I64{2} + I64{1} + journey_digits(rt_text_word(wrapping(hop + HOP_LINE))) + I64{1}
+    ^cols: I64{2} + journey_label_columns(index) + I64{1} + jet_char_len(rt_text_word(wrapping(hop + HOP_FUNCTION))) + I64{2} + I64{1} + journey_digits(rt_text_word(wrapping(hop + HOP_LINE))) + I64{1}
     count: rt_text_word(wrapping(hop + HOP_COUNT))
     if (count > I64{1}) { cols += I64{2} + journey_digits(count) }
     text: rt_text_word(wrapping(hop + HOP_NOTE))
@@ -48,9 +48,9 @@ journey_path_start: fn(file: I64, budget: I64) -> {offset: I64, ellipsis: Bool} 
     if jet_char_len(file) <= budget -> return {offset: I64{0}, ellipsis: false}
     data: rt_text_data(file)
     length: rt_text_len(file)
-    start := I64{0}
-    at := I64{0}
-    remaining := jet_char_len(file)
+    ^start: I64{0}
+    ^at: I64{0}
+    ^remaining: jet_char_len(file)
     loop at < length {
         scalar: rt_text_decode(wrapping(data + at))
         at += rt_text_width(wrapping(data + at))
@@ -69,8 +69,8 @@ journey_hop_line: fn(out: I64, hop: I64, index: I64, width: I64, budget: I64, co
     // Count the retained suffix without allocating it just to measure it.
     ptr: wrapping(rt_text_data(file) + start.offset)
     length: rt_text_len(file) - start.offset
-    at := I64{0}
-    path_columns := if start.ellipsis -> I64{2} else -> I64{0}
+    ^at: I64{0}
+    ^path_columns: if start.ellipsis -> I64{2} else -> I64{0}
     loop at < length {
         at += rt_text_width(wrapping(ptr + at))
         path_columns += I64{1}
@@ -79,8 +79,8 @@ journey_hop_line: fn(out: I64, hop: I64, index: I64, width: I64, budget: I64, co
     note_columns: jet_char_len(note)
     identity: journey_fixed_columns(hop, index, false) + path_columns
     full: journey_fixed_columns(hop, index, true) + path_columns
-    shown := note_columns
-    truncated := false
+    ^shown: note_columns
+    ^truncated: false
     if (width != I64{0} && full > width) {
         shown = if (width > identity + I64{4}) -> width - identity - I64{4} else -> I64{0}
         truncated = shown != I64{0}
@@ -109,8 +109,8 @@ journey_hop_line: fn(out: I64, hop: I64, index: I64, width: I64, budget: I64, co
         rt_text_push_scalar(out, I64{32})
         rt_text_push_scalar(out, I64{8212})
         rt_text_push_scalar(out, I64{32})
-        note_at := I64{0}
-        chars := I64{0}
+        ^note_at: I64{0}
+        ^chars: I64{0}
         note_data: rt_text_data(note)
         loop chars < shown {
             note_at += rt_text_width(wrapping(note_data + note_at))
@@ -136,8 +136,8 @@ journey_source_line: fn(out: I64, hop: I64, width: I64, color: Bool) {
     data: rt_text_data(source)
     if (width != I64{0} && jet_char_len(source) + I64{6} > width) {
         shown: if (width > I64{7}) -> width - I64{7} else -> I64{0}
-        at := I64{0}
-        chars := I64{0}
+        ^at: I64{0}
+        ^chars: I64{0}
         loop chars < shown {
             at += rt_text_width(wrapping(data + at))
             chars += I64{1}
@@ -154,9 +154,9 @@ journey_source_line: fn(out: I64, hop: I64, width: I64, color: Bool) {
     origin: rt_text_word(wrapping(journey + JOURNEY_ORIGIN))
     count: rt_text_word(wrapping(journey + JOURNEY_HOPS))
     data: rt_text_word(wrapping(wrapping(journey + JOURNEY_HOPS) + I64{16}))
-    widest := if (origin == I64{0}) -> I64{0} else -> journey_fixed_columns(origin, I64{0}, true)
-    total := I64{0}
-    row := I64{0}
+    ^widest: if (origin == I64{0}) -> I64{0} else -> journey_fixed_columns(origin, I64{0}, true)
+    ^total: I64{0}
+    ^row: I64{0}
     loop row < count {
         hop: rt_text_word(wrapping(data + row * I64{8}))
         fixed: journey_fixed_columns(hop, row + I64{1}, true)

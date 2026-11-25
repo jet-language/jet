@@ -105,7 +105,7 @@ X64_COMPTIME_REPLY_FD: 4
 
 // One frame: `kind` and up to seven operands.
 x64_comptime_frame: fn(kind: Int, operands: [Int]) -> [U8] Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     x64_comptime_put_word(bytes, kind)
     loop index in 0..<7 {
         x64_comptime_put_word(bytes, if index < operands.len() -> operands[index] else -> 0)
@@ -114,7 +114,7 @@ x64_comptime_frame: fn(kind: Int, operands: [Int]) -> [U8] Never! {
 }
 
 x64_comptime_put_word: fn(bytes: ^[U8], value: Int) Never! {
-    bits := if value < 0 -> value + 18446744073709551616 else -> value
+    ^bits: if value < 0 -> value + 18446744073709551616 else -> value
     loop _ in 0..<8 {
         bytes.push(U8{bits & 255})
         bits = bits >> 8
@@ -123,8 +123,8 @@ x64_comptime_put_word: fn(bytes: ^[U8], value: Int) Never! {
 
 // The signed word of the eight bytes at `at`.
 x64_comptime_word: fn(bytes: [U8], at: Int) -> Int Never! {
-    value := 0
-    index := 7
+    ^value: 0
+    ^index: 7
     loop index >= 0 {
         value = value * 256 + Int{bytes[at + index]}
         index -= 1
@@ -134,8 +134,8 @@ x64_comptime_word: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // The unsigned little-endian value of `width` bytes at `at`.
 x64_comptime_unsigned: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
-    value := 0
-    index := width - 1
+    ^value: 0
+    ^index: width - 1
     loop index >= 0 {
         value = value * 256 + Int{bytes[at + index]}
         index -= 1
@@ -200,13 +200,13 @@ X64_AUDIT_ARCH_X86_64: 3221225534
 // and a call whose sixth argument is `cookie` (nonzero) is admitted when it
 // is a file call (x64_comptime_admit_block).
 x64_comptime_filter: fn(stdout: Bool, cookie: Int) -> [U8] Never! {
-    program := [X64ComptimeBpf]{
+    ^program: [X64ComptimeBpf]{
         X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 4, jt: -1, jf: -1},
         X64ComptimeBpf{code: X64_BPF_JEQ_K, k: X64_AUDIT_ARCH_X86_64, jt: 3, jf: 2},
         X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_KILL_PROCESS, jt: -1, jf: -1},
     }
     x64_comptime_admit_block(program, cookie)
-    fds := [Int]{X64_COMPTIME_REPLY_FD, 2}
+    ^fds: [Int]{X64_COMPTIME_REPLY_FD, 2}
     if stdout -> fds.push(1)
     x64_comptime_refusal_block(program, fds)
     x64_comptime_bpf_bytes(program)
@@ -289,7 +289,7 @@ x64_comptime_refusal_block: fn(program: ^[X64ComptimeBpf], fds: [Int]) Never! {
 // Encodes `program`: a jump target becomes its offset past the next
 // instruction.
 x64_comptime_bpf_bytes: fn(program: [X64ComptimeBpf]) -> [U8] Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop (at, row) in program {
         jt: if row.jt < 0 -> 0 else -> row.jt - at - 1
         jf: if row.jf < 0 -> 0 else -> row.jf - at - 1
@@ -318,7 +318,7 @@ x64_comptime_bpf_bytes: fn(program: [X64ComptimeBpf]) -> [U8] Never! {
 // The action `program` (a filter's bytes) takes on system call `number` with
 // first argument `first` and sixth argument `sixth`.
 x64_comptime_bpf_run: fn(program: [U8], number: Int, first: Int, sixth: Int) -> Int Never! {
-    data := [U8]{}
+    ^data: [U8]{}
     // seccomp_data: the call's number and architecture (32 bits each), its
     // instruction pointer, then its six arguments.
     header: [Int]{number, X64_AUDIT_ARCH_X86_64}
@@ -329,8 +329,8 @@ x64_comptime_bpf_run: fn(program: [U8], number: Int, first: Int, sixth: Int) -> 
     x64_comptime_put_word(data, first)
     loop _ in 0..<4 -> x64_comptime_put_word(data, 0)
     x64_comptime_put_word(data, sixth)
-    accumulator := 0
-    at := 0
+    ^accumulator: 0
+    ^at: 0
     loop at * 8 < program.len() {
         code: x64_comptime_unsigned(program, at * 8, 2)
         k: x64_comptime_unsigned(program, at * 8 + 4, 4)

@@ -238,7 +238,7 @@ pkg_authority_error_diagnostic: fn(code: String, what: String, why: String, fix:
 
 // Where the first invalid sequence starts.
 pkg_authority_utf8_error: fn(bytes: [U8]) -> String Never! {
-    valid := 0
+    ^valid: 0
     loop valid < bytes.len() {
         lead: Int{bytes[valid]}
         width: if {
@@ -357,7 +357,7 @@ pkg_authority_path_within: fn(path: String, root: String) -> Bool Never! {
 // unless that dot starts the name.
 pkg_authority_extension: fn(name: String) -> String? Never! {
     raw: name.bytes()
-    index := raw.len() - 1
+    ^index: raw.len() - 1
     loop index > 0 {
         if (Int{raw[index]}) == 46 {
             return Val(String.from_bytes(raw[index + 1..<raw.len()]) ?? "")

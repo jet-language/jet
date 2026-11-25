@@ -61,9 +61,7 @@ root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
     if value != "" -> value.copy() else -> fallback.copy()
 }
 
-state_root: fn() -[Env, FS]> String Never! {
-    roots.value("JET_STATE_ROOT")
-}
+state_root: fn() -[Env, FS]> String Never! { roots.value("JET_STATE_ROOT") }
 
 scratch_root: fn() -[Env, FS]> String Never! { roots.value("JET_SCRATCH_ROOT") }
 
@@ -124,14 +122,14 @@ cap_bytes: fn(memory: String) -> Int? Never! {
 
 // The lane's slot lock `_slot` stays held until the job ends.
 run_job: fn(lane: Lane, argv: [String], _slot: FileLock) -[Env, Exec, FS, Time, Time.Wait, IO]> Int Never! {
-    scoped := [String]{}
+    ^scoped: [String]{}
     scopes: user_scopes()
     if scopes {
         unit: "jw-{lane.name}-{sys.pid()}-{time.unix_ns()}"
         scoped.extend([String]{"systemd-run", "--user", "--slice=jetwork.slice", "--scope", "-q", "--expand-environment=no", "--unit={unit}", "-p", "MemoryMax={lane.memory}", "-p", "MemorySwapMax=0"})
     }
     loop arg in argv -> scoped.push(arg.copy())
-    spec := process.cmd(scoped).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    ^spec: process.cmd(scoped).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     if !scopes {
         if cap_bytes(lane.memory) == .Val(bytes) -> spec = spec.memory_limit(bytes)
     }
@@ -160,7 +158,7 @@ lane_error: fn(lane: Lane, message: String) -[IO]> Int Never! {
 
 digits_value: fn(text: String) -> Int? Never! {
     if text == "" -> return None
-    value := 0
+    ^value: 0
     loop byte in text.bytes() {
         code: Int{byte}
         if code < 48 || code > 57 -> return None
@@ -184,7 +182,7 @@ jet_lane: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     memory: process.env_nonempty("SAFE_JET_MEM") ?? "6G"
     timeout: digits_value(process.env_nonempty("SAFE_JET_TIMEOUT") ?? "300") ?? return refuse("jet lane: SAFE_JET_TIMEOUT must be whole seconds", 64)
     slots: [String]{"{state}/jet-slots/1", "{state}/jet-slots/2", "{state}/jet-slots/3"}
-    argv := [String]{jet}
+    ^argv: [String]{jet}
     loop arg in args -> argv.push(arg.copy())
     run_in_lane(Lane{name: "safe-jet", slots: slots, wait_ms: 500, memory: memory, timeout_s: Val(timeout), env: [{name: String, value: String}]{{name: "TMPDIR", value: scratch_root()}}}, argv)
 }
@@ -258,7 +256,7 @@ digits_dots: fn(text: String) -> Bool Never! {
 
 deps_jet_hash: fn(cmdline: String) -> Bool Never! {
     marker: "deps/jet-"
-    parts := cmdline.partition(marker)
+    ^parts: cmdline.partition(marker)
     loop parts.sep != "" {
         if parts.tail.len() > 0 {
             code: Int{parts.tail.bytes()[0]}
@@ -286,7 +284,7 @@ meminfo_available_kb: fn() -[FS]> Int? Never! {
 
 // A /proc command line with its NUL separators as spaces.
 cmdline_text: fn(raw: [U8]) -> String Never! {
-    bytes := raw
+    ^bytes: raw
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{0}) -> bytes[index] = U8{32}
     }
@@ -295,7 +293,7 @@ cmdline_text: fn(raw: [U8]) -> String Never! {
 
 // The largest-RSS eligible process, from /proc.
 largest_victim: fn() -[FS]> Victim? Never! {
-    best := [Victim]{}
+    ^best: [Victim]{}
     entries: files.list_dir("/proc") ?? return None
     loop entry in entries {
         pid: digits_value(entry.name) ?? next

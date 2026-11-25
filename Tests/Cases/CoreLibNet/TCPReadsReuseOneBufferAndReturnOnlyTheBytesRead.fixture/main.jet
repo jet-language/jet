@@ -9,14 +9,14 @@ use net: core.net
 // buffer by an earlier, longer read, and a list a caller still holds must not
 // change when later reads reuse the buffer.
 pattern: fn(seed: Int, count: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<count { out.push(U8{(seed + i * 7) %% 251}) }
     out
 }
 
 // Exactly `want` bytes, read in reads of at most `limit`.
 drain: fn(client: TCPStream, want: Int, limit: Int) -> [U8] {
-    got := [U8]{}
+    ^got: [U8]{}
     loop got.len() < want {
         chunk: net.tcp_read_bytes(client, limit) ?? panic("read")
         if chunk.len() == 0 -> panic("end of stream after {got.len()} of {want} bytes")
@@ -30,7 +30,7 @@ run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.listener_local_socket_addr(listener) ?? panic("listener address")
     client: net.tcp_connect_addr(address) ?? panic("connect")
-    server := net.tcp_accept(listener) ?? panic("accept")
+    ^server: net.tcp_accept(listener) ?? panic("accept")
 
     // A long read first.
     first: pattern(1, 3000)
@@ -40,7 +40,7 @@ run: fn() {
 
     // A thousand short reads into the same buffer: each list is just the
     // bytes sent, never the tail of the 3000-byte read before it.
-    short_ok := true
+    ^short_ok: true
     loop round in 0..<1000 {
         size: 1 + round %% 13
         sent: pattern(round, size)

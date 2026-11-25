@@ -146,8 +146,8 @@ jet_driver_rust_foreign_convention: fn(convention: AccessConvention) -> String N
 }
 
 jet_driver_rust_foreign_dependencies: fn(entries: [JetDriverRustForeignEntry]) -> [JetDriverRustForeignDependency] JetDriverRustForeignError! {
-    versions := [String:String]{}
-    names := [String]{}
+    ^versions: [String:String]{}
+    ^names: [String]{}
     loop entry in entries {
         if entry.crate_spec == "std" -> next
         parts: entry.crate_spec.split("@").to_list()
@@ -165,7 +165,7 @@ jet_driver_rust_foreign_dependencies: fn(entries: [JetDriverRustForeignEntry]) -
 }
 
 jet_driver_rust_foreign_manifest: fn(crate_name: String, deps: [JetDriverRustForeignDependency]) -> String Never! {
-    out := "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n\n[lib]\ncrate-type = [\"staticlib\"]\n\n[package.metadata.jet]\nnative-helper-artifact-mode = \"{JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE}\"\n\n"
+    ^out: "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n\n[lib]\ncrate-type = [\"staticlib\"]\n\n[package.metadata.jet]\nnative-helper-artifact-mode = \"{JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE}\"\n\n"
     if deps.len() > 0 -> out = "{out}[dependencies]\n"
     loop dependency in deps -> out = "{out}{dependency.name} = \"{dependency.version}\"\n"
     out
@@ -173,7 +173,7 @@ jet_driver_rust_foreign_manifest: fn(crate_name: String, deps: [JetDriverRustFor
 
 jet_driver_rust_foreign_plan: fn(facts: JetDriverRustForeignFacts, rust_toolchain: String, target: String, link_closure: String) -> JetDriverRustForeignPlan JetDriverRustForeignError! {
     dependencies: jet_driver_rust_foreign_dependencies(facts.entries) ?? return Err(err)
-    identity := [U8]{}
+    ^identity: [U8]{}
     jet_driver_rust_foreign_field(identity, "schema", "jet-ffi-bridge-identity-v1".bytes())
     jet_driver_rust_foreign_field(identity, "descriptor_schema", "jet-inline-ffi-v10-asm-early-clobber".bytes())
     jet_driver_rust_foreign_field(identity, "c-record-source", facts.record_source.bytes())
@@ -211,7 +211,7 @@ jet_driver_rust_foreign_plan: fn(facts: JetDriverRustForeignFacts, rust_toolchai
     jet_driver_rust_foreign_field(identity, "link_closure", link_closure.bytes())
     jet_driver_rust_foreign_field(identity, "native_helper_artifact_mode", JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE.bytes())
     key: jet_driver_rust_foreign_digest(identity)
-    shared := [U8]{}
+    ^shared: [U8]{}
     jet_driver_rust_foreign_field(shared, "schema", "jet-ffi-bridge-identity-v1".bytes())
     jet_driver_rust_foreign_field(shared, "descriptor_schema", "jet-ffi-shared-deps-v1".bytes())
     jet_driver_rust_foreign_field(shared, "selected_target", target.bytes())
@@ -330,7 +330,7 @@ jet_driver_rust_foreign_record_type: fn(ty: Type, records: JetDriverRustForeignR
             if records.names.get(name) == .Val(value) -> return Val(value)
             if stack.contains(name) -> return None
             base: records.aliases.get(name) ?? return None
-            next := stack
+            ^next: stack
             next.push(name.copy())
             return jet_driver_rust_foreign_record_type(base, records, next)
         }
@@ -357,13 +357,13 @@ jet_driver_rust_foreign_present: fn(graph: SemaRegistrationGraph) -> Bool Never!
 
 jet_driver_rust_foreign_facts: fn(graph: SemaRegistrationGraph) -> JetDriverRustForeignFacts Never! {
     if !jet_driver_rust_foreign_present(graph) -> return jet_driver_rust_foreign_empty()
-    entries := [JetDriverRustForeignEntry]{}
-    records := JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
+    ^entries: [JetDriverRustForeignEntry]{}
+    ^records: JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
     loop module_row in graph.modules {
         jet_driver_rust_foreign_collect_items(module_row.declarations, module_row.module_name, module_row.module_identity, entries, records)
     }
     if entries.len() == 0 -> return jet_driver_rust_foreign_empty()
-    source := [String]{}
+    ^source: [String]{}
     loop record in records.records {
         repr: if record.alignment == .Val(alignment) -> "#[repr(C, align({alignment}))]" else -> "#[repr(C)]"
         source.push("{repr}\nstruct {record.rust_name} {{\n")

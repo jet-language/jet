@@ -103,12 +103,12 @@ recipe_validate: fn(recipe: BuildRecipe, ctx: RecipeBuildContext) -[FS, Env]> Re
 recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String:String]) -[FS, Env, Rand]> HermeticBuildPlan RecipeDiagnostic! {
     recipe_validate_finite(recipe, package)
     host: PlatformKey.host()
-    plan_ctx := HermeticBuildContext.new()
-    action_handles := [HermeticActionHandle]{}
+    ^plan_ctx: HermeticBuildContext.new()
+    ^action_handles: [HermeticActionHandle]{}
     step_count: recipe.steps.len()
     loop index in 0..<step_count {
         step: recipe.steps[index]
-        spec := if step == {
+        ^spec: if step == {
             .Fetch(url, sha256) -> {
                 if recipe_credentialed_fetch_url(url) {
                     return Err(RecipeDiagnostic.e1236_credentialed_url())
@@ -126,7 +126,7 @@ recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String:St
             }
             .Exec(tool, args) -> {
                 tool_path: recipe_realized_tool(tools, tool)
-                argv := [String]{tool_path}
+                ^argv: [String]{tool_path}
                 loop arg in args -> argv.push(arg.copy())
                 ActionSpec.new(argv)
                     .with_kind(.Compile)
@@ -158,7 +158,7 @@ recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String:St
                 .with_label("recipe.step", "install-tree")
                 .with_label("install.dest", dest)
         }
-        outputs := [String]{recipe_step_marker(package, index)}
+        ^outputs: [String]{recipe_step_marker(package, index)}
         if step == {
             .Install(_, dest) -> { outputs.push(recipe_declared_output_path(package, dest)) }
             .InstallTree(_, dest) -> outputs.push(recipe_declared_output_path(package, dest))
@@ -175,7 +175,7 @@ recipe_lower_to_plan: fn(recipe: BuildRecipe, package: String, tools: [String:St
         handle: plan_ctx.action("recipe-{package}-{index}", spec) ?? return Err(RecipeDiagnostic.new("E1238", "recipe step could not lower into BuildPlan", err.debug_text(), "fix the recipe step so it declares a valid action."))
         action_handles.push(handle)
     }
-    package_spec := TargetSpec.new().with_metadata("profile", "default")
+    ^package_spec: TargetSpec.new().with_metadata("profile", "default")
     loop handle in action_handles -> package_spec = package_spec.with_action(handle)
     package_target: plan_ctx.add_package(package, package_spec) ?? return Err(RecipeDiagnostic.new("E1238", "recipe package `{package}` could not lower into BuildPlan", err.debug_text(), "choose a unique package name for the recipe target."))
     plan: plan_ctx.plan_with_default(package_target) ?? return Err(RecipeDiagnostic.new("E1238", "recipe BuildPlan failed validation", err.debug_text(), "resolve duplicate outputs or empty steps before caching."))
@@ -197,7 +197,7 @@ recipe_validate_finite: fn(recipe: BuildRecipe, package: String) RecipeDiagnosti
         return Err(RecipeDiagnostic.e1238_plan("recipe must declare at least one finite staged action"))
     }
     root: recipe_normalize(".jet/recipe/{package}/outputs")
-    declared := [RecipeDeclaredOutput]{}
+    ^declared: [RecipeDeclaredOutput]{}
     loop index in 0..<recipe.steps.len() {
         target: if recipe.steps[index] == {
             .Install(_, dest) -> RecipeOutputTarget{dest: dest, is_tree: false}
@@ -265,9 +265,9 @@ recipe_plan_fingerprint: fn(plan: HermeticBuildPlan) -> String RecipeDiagnostic!
 // them: exactly one action per finite stage, every step exactly once.
 recipe_admitted_step_order: fn(plan: HermeticBuildPlan, step_count: Int) -> [Int] RecipeDiagnostic! {
     model: plan.execution_model() ?? return Err(RecipeDiagnostic.new("E1238", "recipe action graph is not finite and acyclic", err.debug_text(), "remove cyclic or incomplete stage dependencies before execution."))
-    seen := [Bool]{}
+    ^seen: [Bool]{}
     loop _ in 0..<step_count -> seen.push(false)
-    order := [Int]{}
+    ^order: [Int]{}
     loop stage in model.stages {
         if stage.actions.len() != 1 {
             return Err(RecipeDiagnostic.e1238_plan("recipe stage graph must admit exactly one action per finite stage"))

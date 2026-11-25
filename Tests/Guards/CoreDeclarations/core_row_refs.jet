@@ -100,15 +100,15 @@ CRRTable: struct {
 // after its `#Marker` and `#Marker(…)` prefixes and a `priv`, starts
 // `<name>:` or `<name><`.
 crr_declared_names: fn(text: String) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop raw in text.lines() {
-        line := raw.copy()
+        ^line: raw.copy()
         loop line.starts_with("#") {
             bytes: line.bytes()
-            at := 1
+            ^at: 1
             loop at < bytes.len() && (crr_name_byte(bytes[at]) || bytes[at] == 46) -> at += 1
             if at < bytes.len() && bytes[at] == 40 {
-                depth := 0
+                ^depth: 0
                 loop at < bytes.len() {
                     if bytes[at] == 40 -> depth += 1
                     if bytes[at] == 41 {
@@ -128,11 +128,9 @@ crr_declared_names: fn(text: String) -> [String] Never! {
         if line.starts_with("priv(") {
             parts: line.split_once(") ") ?? next
             line = parts.after.copy()
-        } else if line.starts_with("priv ") {
-            line = line.slice("priv ".len(), line.len())
-        }
+        } else if line.starts_with("priv ") { line = line.slice("priv ".len(), line.len()) }
         bytes: line.bytes()
-        end := 0
+        ^end: 0
         loop end < bytes.len() && crr_name_byte(bytes[end]) -> end += 1
         if end == 0 || end >= bytes.len() || (bytes[end] != 58 && bytes[end] != 60) -> next
         names.push(line.slice(0, end))
@@ -157,7 +155,7 @@ crr_add: fn(table: ^CRRTable, module_name: String, member: String) {
 // and dispatcher rows, and the names each of its Core sources declares (a
 // part also counts for its owner).
 crr_table: fn(declared: CoreDeclarations) -[FS]> CRRTable {
-    table := CRRTable{modules: [String:Bool]{}, members: [String:Bool]{}}
+    ^table: CRRTable{modules: [String:Bool]{}, members: [String:Bool]{}}
     loop entry in declared.modules {
         crr_module(table, entry.name)
         loop member in entry.members -> crr_add(table, entry.name, member)
@@ -167,7 +165,7 @@ crr_table: fn(declared: CoreDeclarations) -[FS]> CRRTable {
     loop row in declared.dispatchers {
         if row.module_name != "" -> crr_add(table, row.module_name, row.member)
     }
-    sources := [CoreDeclarationSource]{}
+    ^sources: [CoreDeclarationSource]{}
     loop row in declared.source_rows -> sources.push(row.copy())
     loop row in declared.parts -> sources.push(row.copy())
     loop row in declared.runtime -> sources.push(row.copy())
@@ -178,14 +176,16 @@ crr_table: fn(declared: CoreDeclarations) -[FS]> CRRTable {
             crr_add(table, row.module_name, name)
             if row.owner != "" -> crr_add(table, row.owner, name)
         }
-        loop name in row.members -> crr_add(table, if row.owner != "" -> row.owner else -> row.module_name, name)
+        loop name in row.members {
+            crr_add(table, if row.owner != "" -> row.owner else -> row.module_name, name)
+        }
     }
     table
 }
 
 // The 1-based line of byte `at` in `text`.
 crr_line: fn(text: String, at: Int) -> Int Never! {
-    line := 1
+    ^line: 1
     loop (index, byte) in text.bytes() {
         if index >= at -> break
         if byte == 10 -> line += 1
@@ -195,7 +195,7 @@ crr_line: fn(text: String, at: Int) -> Int Never! {
 
 // The first `count` of `segments`, joined with dots.
 crr_path: fn(segments: [String], count: Int) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop at in 0..<count -> out.push(segments[at].copy())
     out.join(".")
 }
@@ -219,7 +219,9 @@ crr_miss_key: fn(miss: CRRMiss) -> String Never! {
 }
 
 crr_miss_text: fn(miss: CRRMiss) -> String Never! {
-    if miss.owner == Val(owner) -> return "{miss.path}:{miss.line}: `{miss.written}`: {owner} has no Core.rows row or declaration `{miss.missing}`"
+    if miss.owner == Val(owner) {
+        return "{miss.path}:{miss.line}: `{miss.written}`: {owner} has no Core.rows row or declaration `{miss.missing}`"
+    }
     "{miss.path}:{miss.line}: `{miss.written}` names no Core module"
 }
 
@@ -229,7 +231,7 @@ crr_miss_text: fn(miss: CRRMiss) -> String Never! {
 // context keys) or has the next segment as a member. A segment a template
 // pastes (`#{hook}`) is not known before the paste.
 crr_resolve: fn(table: CRRTable, path: String, text: String, at: Int, segments: [String], written: String) -> CRRMiss? Never! {
-    count := segments.len()
+    ^count: segments.len()
     loop count > 0 {
         if table.modules.get(crr_path(segments, count)) != None -> break
         count -= 1
@@ -249,8 +251,8 @@ crr_resolve: fn(table: CRRTable, path: String, text: String, at: Int, segments: 
 // of a `use` line or block. Each token of a `use` declaration is marked in
 // `declared`.
 crr_aliases: fn(table: CRRTable, tables: TokenTables, tokens: [Token], declared: ^[Bool]) -> [String:String] Never! {
-    aliases := [String:String]{}
-    at := 0
+    ^aliases: [String:String]{}
+    ^at: 0
     loop at < tokens.len() {
         if tokens[at].kind != TOKEN_KW_USE {
             at += 1
@@ -258,9 +260,9 @@ crr_aliases: fn(table: CRRTable, tables: TokenTables, tokens: [Token], declared:
         }
         start: at
         at += 1
-        end := at + 1
+        ^end: at + 1
         if at < tokens.len() && tokens[at].kind == TOKEN_LBRACE {
-            depth := 0
+            ^depth: 0
             end = at
             loop end < tokens.len() {
                 if tokens[end].kind == TOKEN_LBRACE -> depth += 1
@@ -274,8 +276,8 @@ crr_aliases: fn(table: CRRTable, tables: TokenTables, tokens: [Token], declared:
         loop at < end && at + 2 < tokens.len() {
             if tokens[at].kind == TOKEN_IDENT && tokens[at + 1].kind == TOKEN_COLON && tokens[at + 2].kind == TOKEN_IDENT {
                 alias: token_decoded(tables, tokens[at])
-                segments := [String]{token_decoded(tables, tokens[at + 2])}
-                cursor := at + 3
+                ^segments: [String]{token_decoded(tables, tokens[at + 2])}
+                ^cursor: at + 3
                 loop cursor + 1 < tokens.len() && tokens[cursor].kind == TOKEN_DOT && tokens[cursor + 1].kind == TOKEN_IDENT {
                     segments.push(token_decoded(tables, tokens[cursor + 1]))
                     cursor += 2
@@ -300,13 +302,13 @@ crr_aliases: fn(table: CRRTable, tables: TokenTables, tokens: [Token], declared:
 // declarations may be that local, so its references are not read. A
 // marker's arguments (`#On(build.link)`) name no member.
 crr_findings: fn(table: CRRTable, path: String, text: String) -> [CRRMiss] Never! {
-    findings := [CRRMiss]{}
+    ^findings: [CRRMiss]{}
     lexed: lex(text.bytes())
     tokens: lexed.tokens
     tables: lexed.tables
-    bound := [String:Bool]{}
-    marked := [Bool]{}
-    declared := [Bool]{}
+    ^bound: [String:Bool]{}
+    ^marked: [Bool]{}
+    ^declared: [Bool]{}
     loop _ in tokens {
         marked.push(false)
         declared.push(false)
@@ -315,10 +317,12 @@ crr_findings: fn(table: CRRTable, path: String, text: String) -> [CRRMiss] Never
     loop at in 0..<tokens.len() {
         kind: tokens[at].kind
         if kind == TOKEN_HASH {
-            cursor := at + 1
-            loop cursor < tokens.len() && (tokens[cursor].kind == TOKEN_IDENT || tokens[cursor].kind == TOKEN_DOT) -> cursor += 1
+            ^cursor: at + 1
+            loop cursor < tokens.len() && (tokens[cursor].kind == TOKEN_IDENT || tokens[cursor].kind == TOKEN_DOT) {
+                cursor += 1
+            }
             if cursor < tokens.len() && tokens[cursor].kind == TOKEN_LPAREN && cursor > at + 1 {
-                depth := 0
+                ^depth: 0
                 loop cursor < tokens.len() {
                     if tokens[cursor].kind == TOKEN_LPAREN -> depth += 1
                     if tokens[cursor].kind == TOKEN_RPAREN -> depth -= 1
@@ -329,7 +333,9 @@ crr_findings: fn(table: CRRTable, path: String, text: String) -> [CRRMiss] Never
             }
             next
         }
-        if kind != TOKEN_IDENT || declared[at] || at + 1 >= tokens.len() || (at > 0 && tokens[at - 1].kind == TOKEN_DOT) -> next
+        if kind != TOKEN_IDENT || declared[at] || at + 1 >= tokens.len() || (at > 0 && tokens[at - 1].kind == TOKEN_DOT) {
+            next
+        }
         after: tokens[at + 1].kind
         opened: at > 1 && tokens[at - 1].kind == TOKEN_LPAREN && after == TOKEN_RPAREN
         parameter: opened && tokens[at - 2].kind == TOKEN_KW_FN
@@ -340,20 +346,20 @@ crr_findings: fn(table: CRRTable, path: String, text: String) -> [CRRMiss] Never
         }
     }
     loop at in 0..<tokens.len() {
-        if marked[at] || tokens[at].kind != TOKEN_IDENT || (at > 0 && tokens[at - 1].kind == TOKEN_DOT) -> next
+        if marked[at] || tokens[at].kind != TOKEN_IDENT || (at > 0 && tokens[at - 1].kind == TOKEN_DOT) {
+            next
+        }
         head: token_decoded(tables, tokens[at])
-        base := [String]{}
+        ^base: [String]{}
         if CRR_ROOTS.contains(head) {
             if bound.get(head) != None -> next
             base.push(head.copy())
         } else if aliases.get(head) == Val(target) {
             if bound.get(head) != None -> next
             loop segment in target.split(".") -> base.push(segment.copy())
-        } else {
-            next
-        }
-        rest := [String]{}
-        cursor := at + 1
+        } else { next }
+        ^rest: [String]{}
+        ^cursor: at + 1
         loop cursor + 1 < tokens.len() && tokens[cursor].kind == TOKEN_DOT && tokens[cursor + 1].kind == TOKEN_IDENT {
             rest.push(token_decoded(tables, tokens[cursor + 1]))
             cursor += 2
@@ -361,42 +367,44 @@ crr_findings: fn(table: CRRTable, path: String, text: String) -> [CRRMiss] Never
         spelled: if rest.len() == 0 -> head.copy() else -> "{head}.{rest.join(".")}"
         // A bracket list after the path names members of it.
         if cursor + 1 < tokens.len() && tokens[cursor].kind == TOKEN_DOT && tokens[cursor + 1].kind == TOKEN_LBRACKET {
-            item := [String]{}
-            inner := cursor + 2
+            ^item: [String]{}
+            ^inner: cursor + 2
             loop inner < tokens.len() && tokens[inner].kind != TOKEN_RBRACKET {
                 kind: tokens[inner].kind
                 if kind == TOKEN_IDENT -> item.push(token_decoded(tables, tokens[inner]))
                 if kind == TOKEN_COMMA || (inner + 1 < tokens.len() && tokens[inner + 1].kind == TOKEN_RBRACKET) {
                     if item.len() > 0 {
-                        segments := base.copy()
+                        ^segments: base.copy()
                         loop segment in rest -> segments.push(segment.copy())
                         loop segment in item -> segments.push(segment.copy())
                         written: "{spelled}.[{item.join(".")}]"
-                        if crr_resolve(table, path, text, tokens[at].span.start, segments, written) == Val(finding) -> findings.push(finding)
+                        if crr_resolve(table, path, text, tokens[at].span.start, segments, written) == Val(finding) {
+                            findings.push(finding)
+                        }
                     }
                     item = [String]{}
-                } else if kind != TOKEN_IDENT && kind != TOKEN_DOT {
-                    item = [String]{}
-                }
+                } else if kind != TOKEN_IDENT && kind != TOKEN_DOT { item = [String]{} }
                 inner += 1
             }
             next
         }
         if rest.len() == 0 && !CRR_ROOTS.contains(head) -> next
-        segments := base.copy()
+        ^segments: base.copy()
         loop segment in rest -> segments.push(segment.copy())
-        if crr_resolve(table, path, text, tokens[at].span.start, segments, spelled) == Val(finding) -> findings.push(finding)
+        if crr_resolve(table, path, text, tokens[at].span.start, segments, spelled) == Val(finding) {
+            findings.push(finding)
+        }
     }
     findings
 }
 
 // The tracked Jet sources under CRR_TREES.
 crr_tracked_sources: fn() -> [String] {
-    argv := [String]{"git", "ls-files", "--"}
+    ^argv: [String]{"git", "ls-files", "--"}
     loop tree in CRR_TREES -> argv.push(tree)
     listed: crr_process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("run git ls-files: {err}")
     assert(listed.code == 0, "git ls-files failed: {crr_process.combined_output(listed).trim()}")
-    paths := [String]{}
+    ^paths: [String]{}
     loop line in crr_process.stdout_lines(listed) {
         if line.ends_with(".jet") -> paths.push(line.copy())
     }
@@ -406,7 +414,7 @@ crr_tracked_sources: fn() -> [String] {
 #Test("every Core member reference names a Core.rows row or declaration of the checkout") {
     guards_enter_root()
     declared: core_guard_declared() ?? panic("Core.rows was refused: {err.message}")
-    table := crr_table(declared)
+    ^table: crr_table(declared)
     loop row in CRR_CODED_MEMBERS {
         words: row.split(" ").to_list()
         assert(words.len() == 3, "`{row}` is no `<module> <member> <source>` row")
@@ -417,9 +425,9 @@ crr_tracked_sources: fn() -> [String] {
     }
     paths: crr_tracked_sources()
     assert(paths.len() > 10000, "only {paths.len()} tracked Jet sources were found")
-    refused := [String:Bool]{}
-    fixtures := [String:Bool]{}
-    findings := [String]{}
+    ^refused: [String:Bool]{}
+    ^fixtures: [String:Bool]{}
+    ^findings: [String]{}
     loop path in paths {
         text: crr_files.read(path) ?? panic("{path} did not read")
         if !text.contains("core") && !text.contains("jet_builtins") -> next
@@ -429,7 +437,7 @@ crr_tracked_sources: fn() -> [String] {
                 refused[key] = true
                 next
             }
-            fixture := false
+            ^fixture: false
             loop prefix in CRR_REFUSED_FIXTURES {
                 if path.starts_with(prefix) {
                     fixtures[prefix] = true
@@ -440,31 +448,36 @@ crr_tracked_sources: fn() -> [String] {
         }
     }
     loop key in CRR_TEST_REFUSED {
-        if refused.get(key) == None -> findings.push("`{key}` is no longer refused in Tests; drop its CRR_TEST_REFUSED row")
+        if refused.get(key) == None {
+            findings.push("`{key}` is no longer refused in Tests; drop its CRR_TEST_REFUSED row")
+        }
     }
     loop prefix in CRR_REFUSED_FIXTURES {
-        if fixtures.get(prefix) == None -> findings.push("{prefix} refers to no missing member; drop its CRR_REFUSED_FIXTURES row")
+        if fixtures.get(prefix) == None {
+            findings.push("{prefix} refers to no missing member; drop its CRR_REFUSED_FIXTURES row")
+        }
     }
     assert_eq(findings.join("\n"), "")
 }
 
 #Test("a reference to a member no row or declaration gives is named") {
-    table := CRRTable{modules: [String:Bool]{}, members: [String:Bool]{}}
+    ^table: CRRTable{modules: [String:Bool]{}, members: [String:Bool]{}}
     modules: [String]{"core", "core.context", "core.service", "core.files", "jet_builtins"}
     loop name in modules -> crr_module(table, name)
     declared: crr_declared_names("#Builtin.Role(.X) priv atomic_rename: fn(a: Int) -> Int {{\nRecord<T>: struct {{\nuse {{\n    impl_x: fn() {{\n#Test(\"t\") {{\n")
-    loop name in declared {
-        crr_add(table, "core.files", name)
-    }
+    loop name in declared { crr_add(table, "core.files", name) }
     crr_add(table, "jet_builtins", "temp_join")
     crr_add(table, "core.service", "state_publish")
     source: "use {{\n    core: core\n    builtin: jet_builtins\n    fs: core.files\n    ctx: core.context\n    core.files.[Record, gone_type]\n}}\n// core.files.__comment_only\n#On(core.files.event) run: fn() {{\n    core.files.atomic_rename(1)\n    core.service.__host_rename(\"core.files.nope\")\n    builtin.temp_join()\n    builtin.lock_open()\n    fs.Record.new()\n    fs.vanished()\n    core.nothing.at_all()\n    local.core.files.skipped()\n    ctx.deadline\n    core.files.#{{hook}}()\n}}\n"
     found: loop miss in crr_findings(table, "x.jet", source) -> crr_miss_text(miss)
-    assert_eq(found.join("\n"), [String]{
-        "x.jet:6: `core.files.[gone_type]`: core.files has no Core.rows row or declaration `gone_type`",
-        "x.jet:11: `core.service.__host_rename`: core.service has no Core.rows row or declaration `__host_rename`",
-        "x.jet:13: `builtin.lock_open`: jet_builtins has no Core.rows row or declaration `lock_open`",
-        "x.jet:15: `fs.vanished`: core.files has no Core.rows row or declaration `vanished`",
-        "x.jet:16: `core.nothing.at_all` names no Core module",
-    }.join("\n"))
+    assert_eq(
+        found.join("\n"),
+        [String]{
+            "x.jet:6: `core.files.[gone_type]`: core.files has no Core.rows row or declaration `gone_type`",
+            "x.jet:11: `core.service.__host_rename`: core.service has no Core.rows row or declaration `__host_rename`",
+            "x.jet:13: `builtin.lock_open`: jet_builtins has no Core.rows row or declaration `lock_open`",
+            "x.jet:15: `fs.vanished`: core.files has no Core.rows row or declaration `vanished`",
+            "x.jet:16: `core.nothing.at_all` names no Core module",
+        }.join("\n"),
+    )
 }

@@ -18,7 +18,7 @@ use {
 // The body of the answer to `GET path`, once the app listens.
 get_body: fn(port: String, path: String) -> [U8] {
     deadline: time.instant() + 120s
-    connected := net.TCPStream?{None}
+    ^connected: net.TCPStream?{None}
     loop {
         if net.tcp_connect("127.0.0.1:{port}") == {
             .Ok(stream) -> {
@@ -31,9 +31,9 @@ get_body: fn(port: String, path: String) -> [U8] {
             }
         }
     }
-    stream := connected ?? panic("connected stream")
+    ^stream: connected ?? panic("connected stream")
     stream.write_bytes("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".bytes()) ?? panic("request write")
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         part: net.tcp_read_bytes(stream, 65536) ?? panic("response read")
         if part.len() == 0 -> break
@@ -51,7 +51,7 @@ get_body: fn(port: String, path: String) -> [U8] {
 
 // Every `/a/` address on `page`, in the order it names them.
 addresses: fn(page: String) -> [String] {
-    found := [String]{}
+    ^found: [String]{}
     loop (index, piece) in page.split("\"/a/").to_list() {
         if index == 0 -> next
         loop candidate in piece.split("\"").to_list()[0].split(", /a/") {
@@ -66,7 +66,7 @@ run: fn() {
     port: sys.get("IMAGE_PAGE_PORT") ?? panic("missing IMAGE_PAGE_PORT")
     out: sys.get("IMAGE_HASHES_FILE") ?? panic("missing IMAGE_HASHES_FILE")
     page: String.from_bytes(get_body(port, "/")) ?? panic("page UTF-8")
-    lines := [String]{}
+    ^lines: [String]{}
     loop address in addresses(page) {
         lines.push("{address} {crypto.sha256(get_body(port, address)).hex()}\n")
     }

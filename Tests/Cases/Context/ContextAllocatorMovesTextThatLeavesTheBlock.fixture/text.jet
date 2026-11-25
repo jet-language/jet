@@ -40,7 +40,7 @@ Holder: struct {
 word: fn(n: Int) -> String { "item-{n}" }
 
 counted: fn(n: Int) -> String {
-    out := ""
+    ^out: ""
     loop i in 0..<n -> out += "{i},"
     out
 }
@@ -55,10 +55,10 @@ returned: fn(reuser: ^Reuser) -> String {
 
 // Fills the blocks the earlier blocks released with other text.
 scribble: fn(reuser: ^Reuser) -> Int {
-    filled := 0
+    ^filled: 0
     #Context(allocator: reuser) {
         loop round in 0..<40 {
-            junk := ""
+            ^junk: ""
             loop i in 0..<16 -> junk += "#{round}{i}#"
             filled += junk.len()
         }
@@ -68,12 +68,12 @@ scribble: fn(reuser: ^Reuser) -> Int {
 
 run: fn() {
     region: mem.Region.reserve(1 << 22) ?? panic("reserve")
-    reuser := Reuser{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
-    local := ""
-    grown := "start"
-    holder := Holder{name: ""}
-    names := [String]{}
-    table := [String:Int]{}
+    ^reuser: Reuser{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
+    ^local: ""
+    ^grown: "start"
+    ^holder: Holder{name: ""}
+    ^names: [String]{}
+    ^table: [String:Int]{}
     count: 5
     #Context(allocator: reuser) {
         local = "made {word(1)} here"
@@ -87,7 +87,7 @@ run: fn() {
     // not only its length: a text read only for its length costs no bytes
     // at -O1 and -O2, so the block would serve nothing.
     left: word(names.len() + 8)
-    concat_len := 0
+    ^concat_len: 0
     before: reuser.taken
     #Context(allocator: reuser) {
         both: "{left}!"

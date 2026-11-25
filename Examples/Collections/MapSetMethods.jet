@@ -2,7 +2,7 @@
 ints: fn(xs: [Int]) -> String { xs.map(fn(n) { "{n}" }).join(",") }
 
 maps: fn() {
-    m := [String:Int]{"a": 1, "b": 2}
+    ^m: [String:Int]{"a": 1, "b": 2}
     print("add: {m.add("c", 3) ?? 0}, replace: {m.replace("c", 4) ?? 0}")
     if m.try_insert("d", 5) == {
         .Ok(old) -> { print("try_insert: {old ?? 0}") }
@@ -22,7 +22,7 @@ maps: fn() {
     print("map: {m.map(fn(key: String, value: Int) { value * 2 }).get("b") ?? 0}")
     print("filter: {m.filter(fn(key: String, value: Int) { value > 4 }).len()}")
     print("flat_map: {m.flat_map(fn(key: String, value: Int) { [String:Int]{"{key}{key}": value} }).len()}")
-    seen := [String]{}
+    ^seen: [String]{}
     m.each(fn(key: String, value: Int) { seen.push(key.copy()) })
     print("each: {seen.join(",")}")
     print("any: {m.any(fn(key: String, value: Int) { value > 10 })}, all: {m.all(fn(key: String, value: Int) { value > 10 })}")
@@ -36,7 +36,7 @@ maps: fn() {
 }
 
 sets: fn() {
-    s := Set.from([1, 2, 3])
+    ^s: Set.from([1, 2, 3])
     print("add: {s.add(4)} {s.add(4)}, has: {s.has(4)}")
     s.remove(4)
     s.discard(9)
@@ -56,22 +56,22 @@ sets: fn() {
     print("is_superset: {s.is_superset(Set.from([4]))}, issuperset: {s.issuperset(t)}")
     print("is_disjoint: {s.is_disjoint(Set.from([9]))}, isdisjoint: {s.isdisjoint(t)}")
     print("len: {s.len()}, is_empty: {s.is_empty()}, capacity: {s.capacity() >= s.len()}")
-    listed := s.to_list()
+    ^listed: s.to_list()
     listed.sort()
-    valued := s.values().to_list()
+    ^valued: s.values().to_list()
     valued.sort()
-    shuffled := s.shuffle()
+    ^shuffled: s.shuffle()
     shuffled.sort()
     print("to_list: {ints(listed)}, values: {ints(valued)}, shuffle: {ints(shuffled)}, first: {s.has(s.first() ?? -1)}")
-    mapped := s.map(fn(n) { n * 10 })
+    ^mapped: s.map(fn(n) { n * 10 })
     mapped.sort()
-    kept := s.filter(fn(n) { n > 2 })
+    ^kept: s.filter(fn(n) { n > 2 })
     print("map: {ints(mapped)}, filter: {ints(kept)}")
-    visited := [Int]{}
+    ^visited: [Int]{}
     s.each(fn(n) { visited.push(n) })
     visited.sort()
     print("each: {ints(visited)}, all: {s.all(fn(n) { n > 0 })}")
-    spread := s.flat_map(fn(n) { [n, n + 100] }).to_list()
+    ^spread: s.flat_map(fn(n) { [n, n + 100] }).to_list()
     spread.sort()
     print("flat_map: {ints(spread)}")
     print("fold: {s.fold(0, fn(total: Int, n: Int) { total + n })}, min: {s.min() ?? 0}, max: {s.max() ?? 0}")

@@ -394,7 +394,7 @@ code_point: fn(source: [U8], index: Int) -> Int {
     lead: byte_at(source, index)
     width: scalar_width(lead)
     if width == 1 -> return lead
-    value := if width == 2 -> lead - 192 else if width == 3 -> lead - 224 else -> lead - 240
+    ^value: if width == 2 -> lead - 192 else if width == 3 -> lead - 224 else -> lead - 240
     loop offset in 1..<width -> value = value * 64 + byte_at(source, index + offset) - 128
     value
 }
@@ -426,7 +426,7 @@ identifier_char_at: fn(source: [U8], index: Int) -> Bool {
 // scalar never counts: the JavaScript checker this replaced read one UTF-16
 // unit back, a lone low surrogate.
 identifier_char_before: fn(source: [U8], index: Int) -> Bool {
-    start := index - 1
+    ^start: index - 1
     if start < 0 -> return false
     loop start > 0 && is_continuation(byte_at(source, start)) -> start -= 1
     if scalar_width(byte_at(source, start)) == 4 -> return false
@@ -446,7 +446,7 @@ space_width: fn(source: [U8], index: Int) -> Int {
 }
 
 skip_space: fn(source: [U8], start: Int) -> Int {
-    index := start
+    ^index: start
     loop {
         width: space_width(source, index)
         if width == 0 -> return index
@@ -457,15 +457,15 @@ skip_space: fn(source: [U8], start: Int) -> Int {
 
 skip_comment: fn(source: [U8], start: Int) -> Int {
     if byte_at(source, start + 1) == SLASH {
-        index := start + 2
+        ^index: start + 2
         loop index < source.len() {
             if (Int{source[index]}) == NEWLINE -> return index + 1
             index += 1
         }
         return source.len()
     }
-    depth := 1
-    index := start + 2
+    ^depth: 1
+    ^index: start + 2
     loop index < source.len() {
         if byte_at(source, index) == SLASH && byte_at(source, index + 1) == STAR {
             depth += 1
@@ -480,7 +480,7 @@ skip_comment: fn(source: [U8], start: Int) -> Int {
 }
 
 skip_layout: fn(source: [U8], start: Int) -> Int {
-    index := start
+    ^index: start
     loop {
         spaced: skip_space(source, index)
         if spaced != index -> index = spaced else if comment_at(source, index) {
@@ -495,7 +495,7 @@ skip_layout: fn(source: [U8], start: Int) -> Int {
 // do not end the text; `{{` is a literal brace.
 skip_quoted: fn(source: [U8], start: Int, triple: Bool, quote: Int) -> Int {
     width: if triple -> 3 else -> 1
-    index := start + width
+    ^index: start + width
     loop index < source.len() {
         byte: Int{source[index]}
         if byte == BACKSLASH -> index += 2 else if byte == quote && (!triple || triple_quote_at(source, index)) {
@@ -519,8 +519,8 @@ skip_literal: fn(source: [U8], index: Int) -> Int {
 }
 
 skip_balanced: fn(source: [U8], start: Int, open: Int, close: Int) -> Int {
-    depth := 0
-    index := start
+    ^depth: 0
+    ^index: start
     loop index < source.len() {
         literal_end: skip_literal(source, index)
         if literal_end >= 0 {
@@ -546,8 +546,8 @@ closer: fn(open: Int) -> Int {
 // A plain Jet string body: `\n \t \" \\` and doubled braces only. Any other
 // escape or a single brace (interpolation) is not a plain reason.
 decode_jet_string: fn(source: [U8], start: Int, end: Int) -> String? {
-    out := [U8]{}
-    index := start
+    ^out: [U8]{}
+    ^index: start
     loop index < end {
         byte: Int{source[index]}
         next_byte: if index + 1 < end -> (Int{source[index + 1]}) else -> -1
@@ -575,7 +575,7 @@ quoted_reason_at: fn(source: [U8], start: Int) -> String? {
 }
 
 skip_marker_argument: fn(source: [U8], start: Int) -> Int {
-    index := start
+    ^index: start
     loop index < source.len() {
         literal_end: skip_literal(source, index)
         if literal_end >= 0 {
@@ -595,7 +595,7 @@ skip_marker_argument: fn(source: [U8], start: Int) -> Int {
 
 // The end of `identifier` at `start`.
 identifier_end: fn(source: [U8], start: Int) -> Int {
-    index := start + scalar_width(byte_at(source, start))
+    ^index: start + scalar_width(byte_at(source, start))
     loop identifier_char_at(source, index) -> index += scalar_width(byte_at(source, index))
     index
 }
@@ -605,12 +605,12 @@ identifier_end: fn(source: [U8], start: Int) -> Int {
 unsafe_arguments_at: fn(source: [U8], start: Int) -> UnsafeArguments? {
     end: skip_balanced(source, start, OPEN_PAREN, CLOSE_PAREN)
     if end <= start || byte_at(source, end - 1) != CLOSE_PAREN -> return None
-    index := skip_layout(source, start + 1)
-    positional := 0
-    reason := String?{None}
+    ^index: skip_layout(source, start + 1)
+    ^positional: 0
+    ^reason: String?{None}
     loop index < end - 1 {
-        labeled := false
-        label_is_reason := false
+        ^labeled: false
+        ^label_is_reason: false
         if identifier_start_at(source, index) {
             label_end: identifier_end(source, index)
             after_label: skip_layout(source, label_end)
@@ -654,15 +654,15 @@ marker_group_start: fn(source: [U8], start: Int) -> Int {
 marker_group_at: fn(source: [U8], start: Int) -> MarkerGroup? {
     bracket: marker_group_start(source, start)
     if bracket < 0 -> return None
-    reasoned_unsafe := 0
-    first_reason := ""
-    index := bracket + 1
+    ^reasoned_unsafe: 0
+    ^first_reason: ""
+    ^index: bracket + 1
     loop index < source.len() {
         index = skip_layout(source, index)
         if byte_at(source, index) == CLOSE_BRACKET {
             return Val(MarkerGroup{end: index + 1, reasoned_unsafe: reasoned_unsafe, reason: first_reason})
         }
-        negated := false
+        ^negated: false
         if byte_at(source, index) == BANG {
             negated = true
             index = skip_layout(source, index + 1)
@@ -671,7 +671,7 @@ marker_group_at: fn(source: [U8], start: Int) -> MarkerGroup? {
         name_end: marker_name_end(source, index)
         is_unsafe: span_text(source, index, name_end) == "Unsafe"
         index = skip_layout(source, name_end)
-        reason := String?{None}
+        ^reason: String?{None}
         if byte_at(source, index) == OPEN_PAREN {
             if is_unsafe {
                 arguments: unsafe_arguments_at(source, index) ?? UnsafeArguments{end: skip_balanced(source, index, OPEN_PAREN, CLOSE_PAREN), reason: None}
@@ -699,7 +699,7 @@ marker_group_at: fn(source: [U8], start: Int) -> MarkerGroup? {
 // The end of a bare `#Name` or `#Name(...)` marker at `start`, else -1.
 skip_bare_marker: fn(source: [U8], start: Int) -> Int {
     if byte_at(source, start) != HASH -> return -1
-    index := skip_layout(source, start + 1)
+    ^index: skip_layout(source, start + 1)
     if byte_at(source, index) == BANG -> index = skip_layout(source, index + 1)
     if !identifier_start_at(source, index) -> return -1
     index = skip_layout(source, marker_name_end(source, index))
@@ -711,8 +711,10 @@ skip_bare_marker: fn(source: [U8], start: Int) -> Int {
 // The end of the marker name at `index`: an identifier, or a dotted path of
 // them (`#[Builtin.Role(.Copy), Unsafe("…")]`, `#Lib.Fast`).
 marker_name_end: fn(source: [U8], index: Int) -> Int {
-    end := identifier_end(source, index)
-    loop byte_at(source, end) == DOT && identifier_start_at(source, end + 1) -> end = identifier_end(source, end + 1)
+    ^end: identifier_end(source, index)
+    loop byte_at(source, end) == DOT && identifier_start_at(source, end + 1) {
+        end = identifier_end(source, end + 1)
+    }
     end
 }
 
@@ -733,7 +735,7 @@ past_visibility: fn(source: [U8], index: Int) -> Int {
 colon_fn_at: fn(source: [U8], index: Int) -> Int {
     start: past_visibility(source, index)
     if !identifier_start_at(source, start) -> return -1
-    end := identifier_end(source, start)
+    ^end: identifier_end(source, start)
     loop byte_at(source, end) == DOT && identifier_start_at(source, end + 1) {
         end = identifier_end(source, end + 1)
     }
@@ -743,7 +745,7 @@ colon_fn_at: fn(source: [U8], index: Int) -> Int {
 }
 
 leads_to_function: fn(source: [U8], start: Int) -> Bool {
-    index := skip_layout(source, start)
+    ^index: skip_layout(source, start)
     loop {
         if byte_at(source, index) == SEMICOLON -> index = skip_layout(source, index + 1) else if marker_group_start(source, index) >= 0 {
             group: marker_group_at(source, index) ?? return false
@@ -771,7 +773,7 @@ locate: fn(source: [U8], cursor: ^LineCursor, index: Int) -> {line: Int, column:
         }
         cursor.offset += 1
     }
-    column := 1
+    ^column: 1
     loop offset in cursor.line_start..<index {
         if !is_continuation(Int{source[offset]}) -> column += 1
     }
@@ -780,8 +782,8 @@ locate: fn(source: [U8], cursor: ^LineCursor, index: Int) -> {line: Int, column:
 
 // Every `#Unsafe` region marker in `source`, in source order.
 unsafe_markers: fn(source: [U8]) -> [RegionMarker] {
-    markers := [RegionMarker]{}
-    index := 0
+    ^markers: [RegionMarker]{}
+    ^index: 0
     loop index < source.len() {
         byte: Int{source[index]}
         if byte == SLASH || byte == QUOTE || byte == BACKTICK || byte == APOSTROPHE {
@@ -819,7 +821,7 @@ unsafe_markers: fn(source: [U8]) -> [RegionMarker] {
 }
 
 scan_source: fn(source: [U8], file: String, owner: String, regions: ^[Region]) {
-    cursor := LineCursor{offset: 0, line: 1, line_start: 0}
+    ^cursor: LineCursor{offset: 0, line: 1, line_start: 0}
     loop marker in unsafe_markers(source) {
         at: locate(source, cursor, marker.start)
         regions.push(Region{package: owner.copy(), file: file.copy(), line: at.line, column: at.column, reason: marker.reason.copy()})
@@ -842,9 +844,9 @@ signal_boundary: fn(file: String) -> Bool {
 // values may hold braces. A function header that ends its line outside them
 // is a bodiless (FFI) declaration, which ends there.
 region_end: fn(code: [U8], start: Int) -> Int {
-    parens := 0
-    header := false
-    index := start
+    ^parens: 0
+    ^header: false
+    ^index: start
     loop index < code.len() {
         byte: Int{code[index]}
         if byte == OPEN_PAREN || byte == OPEN_BRACKET -> parens += 1 else if byte == CLOSE_PAREN || byte == CLOSE_BRACKET {
@@ -870,7 +872,7 @@ signal_registrations: fn(source: [U8], file: String, owner: String, out: ^[Regio
         return
     }
     code: blank_literals(source)
-    cursor := LineCursor{offset: 0, line: 1, line_start: 0}
+    ^cursor: LineCursor{offset: 0, line: 1, line_start: 0}
     loop marker in unsafe_markers(source) {
         body: String.from_bytes_lossy(code[marker.end..<region_end(code, marker.end)])
         if SIGNAL_REGISTRATION.is_match(body) {
@@ -882,7 +884,7 @@ signal_registrations: fn(source: [U8], file: String, owner: String, out: ^[Regio
 }
 
 format_signals: fn(regions: [Region]) -> String RatchetError! {
-    lines := [String]{"unsafe ratchet: #Unsafe regions outside the vetted runtime boundary register a signal handler:"}
+    ^lines: [String]{"unsafe ratchet: #Unsafe regions outside the vetted runtime boundary register a signal handler:"}
     loop region in regions -> lines.push(region_line(region) ?? return Err(err))
     lines.push("register handlers through core.process.signals, core.process.on_signal or core.sys.on_interrupt; only")
     lines.push("{SIGNAL_BOUNDARY.join(", ")} may install one (SIGNAL_BOUNDARY in Tools/Agent/UnsafeRatchet.jet)")
@@ -904,7 +906,7 @@ memory_area: fn(file: String) -> Int {
 // `code`, the literal-blanked source, and an `#FFI(asm)` template as written.
 memory_actions: fn(source: [U8], code: [U8], start: Int, end: Int) -> [Bool] {
     body: span_text(code, start, end)
-    actions := [Bool]{}
+    ^actions: [Bool]{}
     loop pattern in MEMORY_PATTERNS -> actions.push(pattern.is_match(body))
     if body.contains("FFI(asm)") {
         template: span_text(source, start, end)
@@ -923,7 +925,7 @@ memory_regions: fn(source: [U8], file: String, area: Int, out: ^[MemoryRow]) {
         return
     }
     code: blank_literals(source)
-    cursor := LineCursor{offset: 0, line: 1, line_start: 0}
+    ^cursor: LineCursor{offset: 0, line: 1, line_start: 0}
     loop marker in markers {
         at: locate(source, cursor, marker.start)
         actions: memory_actions(source, code, marker.start, region_end(code, marker.end))
@@ -934,7 +936,7 @@ memory_regions: fn(source: [U8], file: String, area: Int, out: ^[MemoryRow]) {
 // The directory of the nearest package.jet above `file`, relative to `root`
 // ("" for the root itself), or None when no package.jet holds the file.
 package_directory: fn(root: String, file: String) -[FS]> String? {
-    directory := file.rpartition("/").head
+    ^directory: file.rpartition("/").head
     loop directory != "" {
         if files.exists(files.join(root, "{directory}/package.jet")) -> return Val(directory)
         parent: directory.rpartition("/").head
@@ -946,7 +948,7 @@ package_directory: fn(root: String, file: String) -[FS]> String? {
 // The paths `policy.memory` names in a package.jet's `text`, relative to the
 // package, without a leading `./` or a trailing `/`.
 kernel_paths: fn(text: String) -> [String] {
-    paths := [String]{}
+    ^paths: [String]{}
     field: MEMORY_KERNEL_FIELD.match(text) ?? return paths
     loop found in QUOTED_PATH.matches(field.groups[0]) {
         path: found.groups[0]
@@ -973,7 +975,7 @@ tests_tree: fn(path: String) -> Bool {
 // package's entry must be a `*Tests.jet` test file, and a shipped package's
 // entry must not point into a Tests/ tree.
 kernel_scope_problems: fn(packages: [KernelPackage]) -> [String] {
-    problems := [String]{}
+    ^problems: [String]{}
     loop package in packages {
         name: if package.directory == "" -> "(root)" else -> package.directory.copy()
         loop path in package.paths {
@@ -991,16 +993,16 @@ kernel_scope_problems: fn(packages: [KernelPackage]) -> [String] {
 // Set each row's kernel flag from its package's `policy.memory`; the
 // packages that hold rows, sorted by directory.
 mark_kernels: fn(root: String, rows: ^[MemoryRow]) -[FS]> [KernelPackage] RatchetError! {
-    packages := [KernelPackage]{}
-    file := ""
-    kernel := true
+    ^packages: [KernelPackage]{}
+    ^file: ""
+    ^kernel: true
     loop index in 0..<rows.len() {
         if rows[index].file != file {
             file = rows[index].file.copy()
             kernel = true
             if package_directory(root, file) == {
                 .Val(directory) -> {
-                    known := -1
+                    ^known: -1
                     loop at in 0..<packages.len() {
                         if packages[at].directory == directory -> known = at
                     }
@@ -1025,7 +1027,7 @@ mark_kernels: fn(root: String, rows: ^[MemoryRow]) -[FS]> [KernelPackage] Ratche
 memory_outside: fn(row: MemoryRow) -> Bool { !row.kernel && row.actions.contains(true) }
 
 memory_outside_count: fn(rows: [MemoryRow]) -> Int {
-    count := 0
+    ^count: 0
     loop row in rows {
         if memory_outside(row) -> count += 1
     }
@@ -1036,7 +1038,7 @@ memory_outside_count: fn(rows: [MemoryRow]) -> Int {
 memory_count: fn(row: MemoryRow, counts: ^[Int]) {
     counts[0] = counts[0] + 1
     if memory_outside(row) -> counts[1] = counts[1] + 1
-    other := true
+    ^other: true
     loop index in 0..<row.actions.len() {
         if row.actions[index] {
             counts[index + 2] = counts[index + 2] + 1
@@ -1048,13 +1050,13 @@ memory_count: fn(row: MemoryRow, counts: ^[Int]) {
 }
 
 memory_count_line: fn(label: String, counts: [Int]) -> String {
-    line := "| {label}"
+    ^line: "| {label}"
     loop count in counts -> line = "{line} | {count}"
     "{line} |"
 }
 
 memory_action_names: fn(row: MemoryRow) -> String {
-    names := [String]{}
+    ^names: [String]{}
     loop index in 0..<row.actions.len() {
         if row.actions[index] -> names.push(MEMORY_ACTIONS[index].copy())
     }
@@ -1064,9 +1066,9 @@ memory_action_names: fn(row: MemoryRow) -> String {
 // The memory inventory as Markdown tables: the outside-kernel count, the
 // counts by area and action, the kernel packages, and one row per region.
 render_memory_inventory: fn(rows: [MemoryRow], packages: [KernelPackage]) -> String {
-    lines := [String]{"Regions outside kernel files that perform a raw memory action: {memory_outside_count(rows)}", ""}
-    header := "| area | regions | outside the kernel"
-    rule := "| --- | ---: | ---:"
+    ^lines: [String]{"Regions outside kernel files that perform a raw memory action: {memory_outside_count(rows)}", ""}
+    ^header: "| area | regions | outside the kernel"
+    ^rule: "| --- | ---: | ---:"
     loop name in MEMORY_ACTIONS {
         header = "{header} | {name}"
         rule = "{rule} | ---:"
@@ -1074,10 +1076,10 @@ render_memory_inventory: fn(rows: [MemoryRow], packages: [KernelPackage]) -> Str
     lines.push("{header} | other |")
     lines.push("{rule} | ---: |")
     width: MEMORY_ACTIONS.len() + 3
-    totals := [Int]{}
+    ^totals: [Int]{}
     loop _ in 0..<width -> totals.push(0)
     loop area in 0..<MEMORY_AREA_NAMES.len() {
-        counts := [Int]{}
+        ^counts: [Int]{}
         loop _ in 0..<width -> counts.push(0)
         loop row in rows {
             if row.area != area -> next
@@ -1110,15 +1112,15 @@ render_memory_inventory: fn(rows: [MemoryRow], packages: [KernelPackage]) -> Str
 
 // The memory inventory as JSON, for tools.
 memory_inventory_json: fn(rows: [MemoryRow], packages: [KernelPackage]) -> Dyn {
-    kernels := [Dyn]{}
+    ^kernels: [Dyn]{}
     loop package in packages {
-        paths := [Dyn]{}
+        ^paths: [Dyn]{}
         loop path in package.paths -> paths.push(Dyn.Text(path.copy()))
         kernels.push(Dyn.Object([String:Dyn]{"package": Dyn.Text(package.directory.copy()), "kernel": Dyn.Array(paths), "test_only": Dyn.Bool(package.test_only)}))
     }
-    regions := [Dyn]{}
+    ^regions: [Dyn]{}
     loop row in rows {
-        actions := [Dyn]{}
+        ^actions: [Dyn]{}
         loop index in 0..<row.actions.len() {
             if row.actions[index] -> actions.push(Dyn.Text(MEMORY_ACTIONS[index].copy()))
         }
@@ -1188,9 +1190,9 @@ memory_ratchet: fn(options: Options, rows: ^[MemoryRow]) -[FS, IO]> Bool Ratchet
 
 // Print the classified inventory, as JSON when `json`.
 print_memory_inventory: fn(options: Options) -[FS, IO]> RatchetError! {
-    signals := [Region]{}
-    rows := [MemoryRow]{}
-    _ := scan(options.root, signals, rows) ?? return Err(err)
+    ^signals: [Region]{}
+    ^rows: [MemoryRow]{}
+    ^_: scan(options.root, signals, rows) ?? return Err(err)
     packages: mark_kernels(options.root, rows) ?? return Err(err)
     if options.json {
         print(json.to_string_pretty(memory_inventory_json(rows, packages)) ?? return Err(ratchet_fail("cannot encode the inventory: {err}")))
@@ -1205,7 +1207,7 @@ print_memory_inventory: fn(options: Options) -[FS, IO]> RatchetError! {
 jet_files: fn(base: String, relative: String, out: ^[String]) -[FS]> RatchetError! {
     directory: if relative == "" -> base else -> files.join(base, relative)
     entries: files.list_dir(directory) ?? return Err(ratchet_fail("cannot list {directory}: {err}"))
-    names := [String]{}
+    ^names: [String]{}
     loop entry in entries -> names.push(entry.name.copy())
     names.sort_by(fn(left: String, right: String) { left <=> right })
     loop name in names {
@@ -1269,9 +1271,9 @@ compare_regions: fn(left: Region, right: Region) -> Ordering {
 // the vetted runtime boundary go to `signals`, and the memory inventory's
 // regions to `memory`.
 scan: fn(root: String, signals: ^[Region], memory: ^[MemoryRow]) -[FS]> Census RatchetError! {
-    paths := [String]{}
+    ^paths: [String]{}
     jet_files(root, "", paths) ?? return Err(err)
-    regions := [Region]{}
+    ^regions: [Region]{}
     loop file in paths {
         source: read_source(files.join(root, file)) ?? return Err(err)
         owner: package_name(root, file) ?? return Err(err)
@@ -1282,7 +1284,7 @@ scan: fn(root: String, signals: ^[Region], memory: ^[MemoryRow]) -[FS]> Census R
     }
     // #6319: sort_by with a named comparator crashes; the lambda forwards to it.
     regions.sort_by(fn(left: Region, right: Region) { compare_regions(left, right) })
-    counts := [PackageCount]{}
+    ^counts: [PackageCount]{}
     loop region in regions {
         last: counts.len() - 1
         if last >= 0 && counts[last].name == region.package -> counts[last].count += 1 else {
@@ -1303,8 +1305,8 @@ scan: fn(root: String, signals: ^[Region], memory: ^[MemoryRow]) -[FS]> Census R
 // The source with every comment and quoted text blanked to spaces (line breaks
 // kept), so offsets match the source and nothing quoted looks like code.
 blank_literals: fn(source: [U8]) -> [U8] {
-    code := source.copy()
-    index := 0
+    ^code: source.copy()
+    ^index: 0
     loop index < source.len() {
         literal_end: skip_literal(source, index)
         if literal_end < 0 {
@@ -1322,10 +1324,10 @@ blank_literals: fn(source: [U8]) -> [U8] {
 // Raw-operation matches in `code`, ordered by offset then operation. Each byte
 // past ASCII stands in as U+0001 so match offsets are byte offsets.
 raw_hits: fn(code: [U8]) -> [RawHit] {
-    ascii := [U8]{}
+    ^ascii: [U8]{}
     loop byte in code -> ascii.push(if byte < 128 -> byte else -> U8{1})
     text: String.from_bytes_lossy(ascii)
-    hits := [RawHit]{}
+    ^hits: [RawHit]{}
     if text.contains(".*") {
         loop found in POINTER_DEREFERENCE.matches(text) {
             hits.push(RawHit{index: found.start, operation: 0})
@@ -1353,21 +1355,21 @@ raw_hits: fn(code: [U8]) -> [RawHit] {
 scan_corelib_source: fn(source: [U8], file: String, result: ^CoreLibScan) {
     code: blank_literals(source)
     hits: raw_hits(code)
-    cursor := LineCursor{offset: 0, line: 1, line_start: 0}
-    frames := [Frame]{}
-    gates := [Int]{}
-    unsafe_frames := 0
-    depth := 0
-    parens := 0
-    has_pending := false
-    pending_name := ""
-    pending_unsafe := false
-    pending_line := 0
-    pending_parens := 0
-    next_function_unsafe := false
-    pending_gate := false
-    hit := 0
-    index := 0
+    ^cursor: LineCursor{offset: 0, line: 1, line_start: 0}
+    ^frames: [Frame]{}
+    ^gates: [Int]{}
+    ^unsafe_frames: 0
+    ^depth: 0
+    ^parens: 0
+    ^has_pending: false
+    ^pending_name: ""
+    ^pending_unsafe: false
+    ^pending_line: 0
+    ^pending_parens: 0
+    ^next_function_unsafe: false
+    ^pending_gate: false
+    ^hit: 0
+    ^index: 0
     loop index < code.len() {
         byte: Int{code[index]}
         if byte == HASH {
@@ -1439,7 +1441,7 @@ scan_corelib_source: fn(source: [U8], file: String, result: ^CoreLibScan) {
         } else if byte == CLOSE_BRACE {
             // A default parameter can close a value literal before the function body.
             if parens == pending_parens -> has_pending = false
-            if gates.len() > 0 && gates[gates.len() - 1] == depth -> _ := gates.pop()
+            if gates.len() > 0 && gates[gates.len() - 1] == depth -> ^_: gates.pop()
             if frames.len() > 0 && frames[frames.len() - 1].depth == depth {
                 frame: frames.pop() ?? panic("a checked frame vanished")
                 if frame.is_unsafe -> unsafe_frames -= 1
@@ -1462,10 +1464,10 @@ scan_corelib_source: fn(source: [U8], file: String, result: ^CoreLibScan) {
 }
 
 scan_corelib: fn(root: String) -[FS]> CoreLibScan RatchetError! {
-    result := CoreLibScan{abstractions: [Abstraction]{}, violations: [Violation]{}}
+    ^result: CoreLibScan{abstractions: [Abstraction]{}, violations: [Violation]{}}
     directory: files.join(root, CORELIB_DIRECTORY)
     if !files.exists(directory) -> return Ok(result)
-    paths := [String]{}
+    ^paths: [String]{}
     jet_files(directory, "", paths) ?? return Err(err)
     loop file in paths {
         source: read_source(files.join(directory, file)) ?? return Err(err)
@@ -1483,7 +1485,7 @@ object_fields: fn(value: Dyn) -> [{key: String, value: Dyn}]? {
 
 // The last value of `key`, as JSON.parse keeps the last duplicate.
 field: fn(fields: [{key: String, value: Dyn}], key: String) -> Dyn? {
-    index := fields.len() - 1
+    ^index: fields.len() - 1
     loop index >= 0 {
         if fields[index].key == key -> return Val(fields[index].value.copy())
         index -= 1
@@ -1523,7 +1525,7 @@ json_text: fn(text: String) -> String RatchetError! {
 
 // UTF-16 code units of `text`, the length JavaScript strings report.
 utf16_length: fn(text: String) -> Int {
-    total := 0
+    ^total: 0
     loop scalar in text.chars() -> total += if "{scalar}".bytes().len() == 4 -> 2 else -> 1
     total
 }
@@ -1546,12 +1548,12 @@ read_abstractions: fn(text: String) -> [AbstractionRow] RatchetError! {
     close: body.find("\n```")
     if close < 0 -> return Err(ratchet_fail("safe-abstraction registry has no ```json block"))
     parsed: json.parse(byte_slice(body, 0, close)) ?? return Err(ratchet_fail("safe-abstraction registry has invalid JSON: {err}"))
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     if parsed == {
         .Array(values) -> items = values.copy()
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(ratchet_fail("safe-abstraction registry must be a JSON array"))
     }
-    rows := [AbstractionRow]{}
+    ^rows: [AbstractionRow]{}
     loop item in items {
         fields: object_fields(item) ?? [{key: String, value: Dyn}]{}
         file: text_field(fields, "file")
@@ -1569,13 +1571,13 @@ read_abstractions: fn(text: String) -> [AbstractionRow] RatchetError! {
 check_corelib: fn(root: String, baseline_text: String) -[FS]> String RatchetError! {
     current: scan_corelib(root) ?? return Err(err)
     rows: read_abstractions(baseline_text) ?? return Err(err)
-    recorded := [String:Bool]{}
+    ^recorded: [String:Bool]{}
     loop row in rows -> recorded["{row.file}\t{row.function}"] = true
-    problems := [String]{}
+    ^problems: [String]{}
     loop violation in current.violations {
         problems.push("  - {violation.file}:{violation.line}:{violation.column} {violation.operation} outside an audited #Unsafe gate")
     }
-    found := [String:Bool]{}
+    ^found: [String:Bool]{}
     loop abstraction in current.abstractions {
         key: "{abstraction.file}\t{abstraction.function}"
         found[key.copy()] = true
@@ -1590,7 +1592,7 @@ check_corelib: fn(root: String, baseline_text: String) -[FS]> String RatchetErro
         }
     }
     if problems.len() == 0 -> return Ok("")
-    lines := [String]{"CoreLib unsafe audit failed:"}
+    ^lines: [String]{"CoreLib unsafe audit failed:"}
     loop problem in problems -> lines.push(problem)
     lines.push("make the function `#Unsafe(\"<caller contract>\") name: fn …` so every caller audits the call, or record why it is a safe")
     lines.push("abstraction in the safety.md unsafe-abstractions registry (file, function, proof).")
@@ -1621,7 +1623,7 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
     counts_value: field(fields, "counts") ?? return Err(ratchet_fail(invalid))
     regions_value: field(fields, "regions") ?? return Err(ratchet_fail(invalid))
     if schema != 1 || !truthy(counts_value) -> return Err(ratchet_fail(invalid))
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     if regions_value == {
         .Array(values) -> items = values.copy()
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(ratchet_fail(invalid))
@@ -1629,7 +1631,7 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
     if total != items.len() {
         return Err(ratchet_fail("unsafe baseline total does not match its region rows"))
     }
-    regions := [Region]{}
+    ^regions: [Region]{}
     loop item in items {
         row: object_fields(item) ?? return Err(ratchet_fail("unsafe baseline has an invalid region row"))
         package: text_field(row, "package")
@@ -1642,9 +1644,9 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
         }
         regions.push(Region{package: package ?? "", file: file ?? "", line: line ?? 0, column: column ?? 0, reason: reason ?? ""})
     }
-    counts := [PackageCount]{}
+    ^counts: [PackageCount]{}
     loop region in regions {
-        known := false
+        ^known: false
         loop index in 0..<counts.len() {
             if counts[index].name == region.package {
                 counts[index].count += 1
@@ -1655,7 +1657,7 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
     }
     counts.sort_by(fn(left: PackageCount, right: PackageCount) { left.name <=> right.name })
     recorded: object_fields(counts_value) ?? return Err(ratchet_fail("unsafe baseline counts do not match its region rows"))
-    matches := recorded.len() == counts.len()
+    ^matches: recorded.len() == counts.len()
     loop index in 0..<counts.len() {
         if !matches -> break
         matches = recorded[index].key == counts[index].name && integer(recorded[index].value) == Val(counts[index].count)
@@ -1665,9 +1667,9 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
 }
 
 census_json: fn(census: Census) -> Dyn {
-    counts := [String:Dyn]{}
+    ^counts: [String:Dyn]{}
     loop entry in census.counts -> counts[entry.name.copy()] = Dyn.Int(entry.count)
-    regions := [Dyn]{}
+    ^regions: [Dyn]{}
     loop region in census.regions {
         regions.push(Dyn.Object([String:Dyn]{"package": Dyn.Text(region.package.copy()), "file": Dyn.Text(region.file.copy()), "line": Dyn.Int(region.line), "column": Dyn.Int(region.column), "reason": Dyn.Text(region.reason.copy())}))
     }
@@ -1680,7 +1682,7 @@ markdown_cell: fn(value: String) -> String {
 
 render_section: fn(census: Census) -> String RatchetError! {
     data: json.to_string_pretty(census_json(census)) ?? return Err(ratchet_fail("cannot encode the baseline data: {err}"))
-    lines := [String]{"{DATA_BEGIN}\n{data}\n{DATA_END}", "", "### Counts", "", "| crate/package | regions |", "| --- | ---: |"}
+    ^lines: [String]{"{DATA_BEGIN}\n{data}\n{DATA_END}", "", "### Counts", "", "| crate/package | regions |", "| --- | ---: |"}
     if census.counts.len() == 0 -> lines.push("| (none) | 0 |")
     loop entry in census.counts -> lines.push("| {markdown_cell(entry.name)} | {entry.count} |")
     lines.push("| **total** | **{census.total}** |")
@@ -1713,7 +1715,7 @@ baseline_document: fn(text: String, census: Census) -> String RatchetError! {
 
 parse_baseline: fn(path: String, text: String) -> Baseline RatchetError! {
     bounds: section_bounds(text) ?? return Err(ratchet_fail("baseline {path} has no unsafe-ratchet section"))
-    body := byte_slice(text, bounds.begin + byte_len(BEGIN), bounds.end)
+    ^body: byte_slice(text, bounds.begin + byte_len(BEGIN), bounds.end)
     if body.starts_with("\n") -> body = byte_tail(body, 1)
     if body.ends_with("\n") -> body = byte_slice(body, 0, byte_len(body) - 1)
     header: "{DATA_BEGIN}\n"
@@ -1750,7 +1752,7 @@ exact_key: fn(region: Region) -> String {
 }
 
 tally: fn(regions: [Region], exact: Bool) -> [String:Int] {
-    remaining := [String:Int]{}
+    ^remaining: [String:Int]{}
     loop region in regions {
         key: if exact -> exact_key(region) else -> semantic_key(region)
         remaining[key.copy()] = (remaining.get(key) ?? 0) + 1
@@ -1760,7 +1762,7 @@ tally: fn(regions: [Region], exact: Bool) -> [String:Int] {
 
 // Current rows with no counterpart left in `remaining`, which they consume.
 unmatched: fn(current: [Region], remaining: ^[String:Int], exact: Bool) -> [Region] {
-    added := [Region]{}
+    ^added: [Region]{}
     loop region in current {
         key: if exact -> exact_key(region) else -> semantic_key(region)
         count: remaining.get(key) ?? 0
@@ -1778,9 +1780,9 @@ same_regions: fn(current: Census, baseline: Census) -> Bool {
 }
 
 stale_rows: fn(current: Census, baseline: Census) -> RowChanges {
-    remaining := tally(baseline.regions, true)
+    ^remaining: tally(baseline.regions, true)
     added: unmatched(current.regions, remaining, true)
-    removed := [Region]{}
+    ^removed: [Region]{}
     loop region in baseline.regions {
         key: exact_key(region)
         count: remaining.get(key) ?? 0
@@ -1800,7 +1802,7 @@ count_of: fn(counts: [PackageCount], name: String) -> Int {
 }
 
 increases: fn(current: Census, baseline: Census) -> [CountChange] {
-    names := [String]{}
+    ^names: [String]{}
     loop entry in current.counts {
         if !names.contains(entry.name) -> names.push(entry.name.copy())
     }
@@ -1808,7 +1810,7 @@ increases: fn(current: Census, baseline: Census) -> [CountChange] {
         if !names.contains(entry.name) -> names.push(entry.name.copy())
     }
     names.sort_by(fn(left: String, right: String) { left <=> right })
-    changes := [CountChange]{}
+    ^changes: [CountChange]{}
     loop name in names {
         before: count_of(baseline.counts, name)
         after: count_of(current.counts, name)
@@ -1825,7 +1827,7 @@ region_line: fn(region: Region) -> String RatchetError! {
 }
 
 format_growth: fn(changes: [CountChange], added: [Region]) -> String RatchetError! {
-    lines := [String]{"unsafe-region baseline grew:"}
+    ^lines: [String]{"unsafe-region baseline grew:"}
     loop change in changes -> lines.push("  {change.name}: {change.before} -> {change.after}")
     lines.push("new regions:")
     if added.len() == 0 {
@@ -1838,7 +1840,7 @@ format_growth: fn(changes: [CountChange], added: [Region]) -> String RatchetErro
 }
 
 format_stale: fn(changes: RowChanges) -> String RatchetError! {
-    lines := [String]{"unsafe-region baseline is stale; semantic site rows changed:", "current rows:"}
+    ^lines: [String]{"unsafe-region baseline is stale; semantic site rows changed:", "current rows:"}
     if changes.added.len() == 0 -> lines.push("  (none)")
     loop region in changes.added -> lines.push(region_line(region) ?? return Err(err))
     lines.push("baseline rows no longer present:")
@@ -1871,7 +1873,7 @@ ratchet: fn(options: Options, signals: ^[Region], memory: ^[MemoryRow]) -[FS, IO
     }
     grown: increases(current, baseline.census)
     if grown.len() > 0 {
-        remaining := tally(baseline.census.regions, false)
+        ^remaining: tally(baseline.census.regions, false)
         term.eprint(format_growth(grown, unmatched(current.regions, remaining, false)) ?? return Err(err))
         return Ok(false)
     }
@@ -1905,8 +1907,8 @@ resolved: fn(path: String) -[FS, Env]> String RatchetError! {
 
 parse_args: fn(args: [String]) -[FS, Env]> Options RatchetError! {
     root: resolved(".") ?? return Err(err)
-    options := Options{root: root.copy(), baseline: files.join(root, "Docs/Spec/safety.md"), update: false, check: false, help: false, inventory: false, json: false}
-    index := 0
+    ^options: Options{root: root.copy(), baseline: files.join(root, "Docs/Spec/safety.md"), update: false, check: false, help: false, inventory: false, json: false}
+    ^index: 0
     loop index < args.len() {
         arg: args[index]
         if arg == "--update" -> options.update = true else if arg == "--check" {
@@ -1949,9 +1951,9 @@ unsafe_ratchet_main: fn(args: [String]) -[FS, Env, IO]> Bool RatchetError! {
         print_memory_inventory(options) ?? return Err(err)
         return Ok(true)
     }
-    signals := [Region]{}
-    memory := [MemoryRow]{}
-    passed := ratchet(options, signals, memory) ?? return Err(err)
+    ^signals: [Region]{}
+    ^memory: [MemoryRow]{}
+    ^passed: ratchet(options, signals, memory) ?? return Err(err)
     if signals.len() > 0 {
         term.eprint(format_signals(signals) ?? return Err(err))
         passed = false
@@ -1977,13 +1979,13 @@ run: fn() {
 // Tests
 
 scanned: fn(text: String, file: String) -> [Region] {
-    regions := [Region]{}
+    ^regions: [Region]{}
     scan_source(text.bytes(), file, "pkg", regions)
     regions
 }
 
 audited: fn(text: String) -> CoreLibScan {
-    result := CoreLibScan{abstractions: [Abstraction]{}, violations: [Violation]{}}
+    ^result: CoreLibScan{abstractions: [Abstraction]{}, violations: [Violation]{}}
     scan_corelib_source(text.bytes(), "Core/Sys/Sys.jet", result)
     result
 }
@@ -2032,7 +2034,7 @@ audited: fn(text: String) -> CoreLibScan {
 }
 
 signals_in: fn(text: String) -> [Region] {
-    regions := [Region]{}
+    ^regions: [Region]{}
     signal_registrations(text.bytes(), "app.jet", "pkg", regions)
     regions
 }
@@ -2078,7 +2080,7 @@ signals_in: fn(text: String) -> [Region] {
     large: Census{total: 2, counts: [PackageCount]{PackageCount{name: "P", count: 2}}, regions: [Region]{one.copy(), two.copy()}}
     grown: increases(large, small)
     assert_eq(grown.len(), 1)
-    remaining := tally(small.regions, false)
+    ^remaining: tally(small.regions, false)
     added: unmatched(large.regions, remaining, false)
     assert_eq(added.len(), 1)
     assert_eq(added[0].file, "b.jet")
@@ -2103,14 +2105,14 @@ signals_in: fn(text: String) -> [Region] {
 }
 
 inventoried: fn(text: String, file: String) -> [MemoryRow] {
-    rows := [MemoryRow]{}
+    ^rows: [MemoryRow]{}
     memory_regions(text.bytes(), file, memory_area(file), rows)
     rows
 }
 
 #Test("the memory inventory tags each region with the raw memory actions its code spells") {
     source: "a: fn(p: Ptr<U8>) {{\n    #Unsafe(\"alloc\") {{ q: alloc_raw(8)\n p.* = 1 }}\n    // free_raw(q)\n    #Unsafe(\"text\") {{ s: \"free_raw(q)\" }}\n}}\n#[Unsafe(\"store\"), FFI(asm)]\nstore: fn(address: Int, value: Int) {{\n    \"\"\"\n    mov qword ptr [{{address}}], {{value}}\n    \"\"\"\n}}\n#[Unsafe(\"abi\"), FFI(c)]\nwrite: fn(fd: Int) -> Int\n"
-    rows := inventoried(source, "Core/A.jet")
+    ^rows: inventoried(source, "Core/A.jet")
     assert_eq(rows.len(), 4)
     assert_eq(rows[0].line, 2)
     assert_eq(memory_action_names(rows[0]), "allocate, raw read/write")

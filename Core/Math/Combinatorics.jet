@@ -14,7 +14,7 @@ use math: core.math
 permutations: fn<T>(items: [T], k: Int) -> [[T]] Never! {
     n: items.len()
     if k < 0 || k > n -> return [[T]]{}
-    used := [Bool]{}
+    ^used: [Bool]{}
     loop _i in 0..<n -> used.push(false)
     perm_rec<T>(items, k, used, [T]{})
 }
@@ -32,13 +32,13 @@ combinations_with_replacement: fn<T>(items: [T], k: Int) -> [[T]] Never! {
 
 product: fn<T>(items: [T], repeat: Int) -> [[T]] Never! {
     if repeat <= 0 -> return [[T]]{[T]{}}
-    out := [[T]]{[T]{}}
-    r := 0
+    ^out: [[T]]{[T]{}}
+    ^r: 0
     loop r < repeat {
-        nxt := [[T]]{}
+        ^nxt: [[T]]{}
         loop row in out {
             loop x in items {
-                cloned := row.copy()
+                ^cloned: row.copy()
                 cloned.push(x.copy())
                 nxt.push(cloned)
             }
@@ -50,7 +50,7 @@ product: fn<T>(items: [T], repeat: Int) -> [[T]] Never! {
 }
 
 cartesian: fn<T>(left: [T], right: [T]) -> [[T]] Never! {
-    out := [[T]]{}
+    ^out: [[T]]{}
     loop a in left {
         loop b in right -> out.push([T]{a.copy(), b.copy()})
     }
@@ -59,13 +59,13 @@ cartesian: fn<T>(left: [T], right: [T]) -> [[T]] Never! {
 
 perm_rec: fn<T>(items: [T], k: Int, used: [Bool], cur: [T]) -> [[T]] {
     if cur.len() == k -> return [[T]]{cur.copy()}
-    out := [[T]]{}
-    i := 0
+    ^out: [[T]]{}
+    ^i: 0
     loop i < items.len() {
         if used[i] == false {
-            next_used := used.copy()
+            ^next_used: used.copy()
             next_used[i] = true
-            next_cur := cur.copy()
+            ^next_cur: cur.copy()
             next_cur.push(items[i].copy())
             kids: perm_rec<T>(items, k, next_used, next_cur)
             loop row in kids -> out.push(row.copy())
@@ -77,10 +77,10 @@ perm_rec: fn<T>(items: [T], k: Int, used: [Bool], cur: [T]) -> [[T]] {
 
 comb_rec: fn<T>(items: [T], k: Int, start: Int, cur: [T]) -> [[T]] {
     if cur.len() == k -> return [[T]]{cur.copy()}
-    out := [[T]]{}
-    i := start
+    ^out: [[T]]{}
+    ^i: start
     loop i < items.len() {
-        next_cur := cur.copy()
+        ^next_cur: cur.copy()
         next_cur.push(items[i].copy())
         kids: comb_rec<T>(items, k, i + 1, next_cur)
         loop row in kids -> out.push(row.copy())
@@ -91,10 +91,10 @@ comb_rec: fn<T>(items: [T], k: Int, start: Int, cur: [T]) -> [[T]] {
 
 comb_rep_rec: fn<T>(items: [T], k: Int, start: Int, cur: [T]) -> [[T]] {
     if cur.len() == k -> return [[T]]{cur.copy()}
-    out := [[T]]{}
-    i := start
+    ^out: [[T]]{}
+    ^i: start
     loop i < items.len() {
-        next_cur := cur.copy()
+        ^next_cur: cur.copy()
         next_cur.push(items[i].copy())
         kids: comb_rep_rec<T>(items, k, i, next_cur)
         loop row in kids -> out.push(row.copy())
@@ -104,12 +104,12 @@ comb_rep_rec: fn<T>(items: [T], k: Int, start: Int, cur: [T]) -> [[T]] {
 }
 
 multinomial: fn(parts: [Int]) -> Int? Never! {
-    n := 0
+    ^n: 0
     loop p in parts {
         if p < 0 -> return None
         n += p
     }
-    acc := 1
+    ^acc: 1
     loop p in parts {
         c: math.binomial(n, p) ?? return None
         acc *= c
@@ -120,8 +120,8 @@ multinomial: fn(parts: [Int]) -> Int? Never! {
 
 rising_factorial: fn(n: Int, k: Int) -> Int? Never! {
     if k < 0 -> return None
-    acc := 1
-    i := 0
+    ^acc: 1
+    ^i: 0
     loop i < k {
         acc *= (n + i)
         i += 1
@@ -130,14 +130,14 @@ rising_factorial: fn(n: Int, k: Int) -> Int? Never! {
 }
 
 chain: fn<T>(left: [T], right: [T]) -> [T] Never! {
-    out := left.copy()
+    ^out: left.copy()
     loop x in right -> out.push(x.copy())
     out
 }
 
 compress: fn<T>(items: [T], mask: [Bool]) -> [T] Never! {
-    out := [T]{}
-    i := 0
+    ^out: [T]{}
+    ^i: 0
     loop i < items.len() {
         if i < mask.len() && mask[i] -> out.push(items[i].copy())
         i += 1
@@ -146,9 +146,9 @@ compress: fn<T>(items: [T], mask: [Bool]) -> [T] Never! {
 }
 
 unique: fn<T: Equatable>(items: [T]) -> [T] Never! {
-    out := [T]{}
+    ^out: [T]{}
     loop x in items {
-        seen := false
+        ^seen: false
         loop y in out {
             if y == x -> seen = true
         }
@@ -158,9 +158,9 @@ unique: fn<T: Equatable>(items: [T]) -> [T] Never! {
 }
 
 count_from: fn(start: Int, step: Int, n: Int) -> [Int] Never! {
-    out := [Int]{}
-    v := start
-    i := 0
+    ^out: [Int]{}
+    ^v: start
+    ^i: 0
     loop i < n {
         out.push(v)
         v += step
@@ -170,17 +170,17 @@ count_from: fn(start: Int, step: Int, n: Int) -> [Int] Never! {
 }
 
 tee: fn<T>(items: [T], copies: Int) -> [[T]] Never! {
-    out := [[T]]{}
+    ^out: [[T]]{}
     if copies <= 0 -> return out
     loop _ in 0..<copies -> out.push(items.copy())
     out
 }
 
 zip_longest: fn<T>(left: [T], right: [T], fill: T) -> [[T]] Never! {
-    out := [[T]]{}
-    n := left.len()
+    ^out: [[T]]{}
+    ^n: left.len()
     if right.len() > n -> n = right.len()
-    i := 0
+    ^i: 0
     loop i < n {
         a: if i < left.len() -> left[i].copy() else -> fill.copy()
         b: if i < right.len() -> right[i].copy() else -> fill.copy()
@@ -191,12 +191,12 @@ zip_longest: fn<T>(left: [T], right: [T], fill: T) -> [[T]] Never! {
 }
 
 powerset: fn<T>(items: [T]) -> [[T]] Never! {
-    out := [[T]]{[T]{}}
+    ^out: [[T]]{[T]{}}
     loop x in items {
-        nxt := [[T]]{}
+        ^nxt: [[T]]{}
         loop row in out {
             nxt.push(row.copy())
-            grown := row.copy()
+            ^grown: row.copy()
             grown.push(x.copy())
             nxt.push(grown)
         }

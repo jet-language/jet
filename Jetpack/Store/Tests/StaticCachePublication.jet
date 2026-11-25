@@ -28,7 +28,7 @@ store_static_cache_serve: fn(site: String) -> StoreTestCacheServer Never! {
     restored: files.tmpdir("static-cache-restored-") ?? panic("restored")
     roots: HangarRoots{root: root, dev_mode: false}
     files.write(files.join(source, "payload"), "static cache bytes\n") ?? panic("cache source")
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     request: IngestRequest{
         name: "static-cache-demo",
         version: "1",
@@ -62,7 +62,7 @@ store_static_cache_serve: fn(site: String) -> StoreTestCacheServer Never! {
 
     info_path: files.join(publication, "{hash}-{entry.id}.narinfo")
     signed_info: files.read(info_path) ?? panic("signed static narinfo")
-    unsigned := [String]{}
+    ^unsigned: [String]{}
     loop line in signed_info.lines() {
         if !line.starts_with("Sig: ") -> unsigned.push(line)
     }

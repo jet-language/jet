@@ -16,7 +16,7 @@ WorkloadArgs: struct {
 }
 
 field_text: fn(bytes: [U8], start: Int, width: Int) -> String {
-    value := [U8]{}
+    ^value: [U8]{}
     loop i in 0..<width {
         byte: bytes.get(start + i) ?? 0
         if byte == 0 -> break
@@ -26,12 +26,12 @@ field_text: fn(bytes: [U8], start: Int, width: Int) -> String {
 }
 
 valid_field: fn(bytes: [U8], start: Int, width: Int) -> Bool {
-    i := 0
+    ^i: 0
     loop i < width {
         first: bytes.get(start + i) ?? return false
         if first == 0 -> return true
-        count := 0
-        code := 0
+        ^count: 0
+        ^code: 0
         if first < 128 {
             count = 1
             code = Int{first}
@@ -62,15 +62,15 @@ valid_field: fn(bytes: [U8], start: Int, width: Int) -> Bool {
 number_field: fn(bytes: [U8], start: Int, width: Int) -> Int {
     first: bytes.get(start) ?? return -1
     if first >= 128 {
-        value := Int{first} - 128
+        ^value: Int{first} - 128
         loop i in 1..<width {
             byte: bytes.get(start + i) ?? return -1
             value = value * 256 + Int{byte}
         }
         return value
     }
-    value := 0
-    seen := false
+    ^value: 0
+    ^seen: false
     loop i in 0..<width {
         byte: bytes.get(start + i) ?? return -1
         if byte == 0 || byte == 32 {
@@ -87,7 +87,7 @@ number_field: fn(bytes: [U8], start: Int, width: Int) -> Int {
 checksum_ok: fn(bytes: [U8], offset: Int) -> Bool {
     stored: number_field(bytes, offset + 148, 8)
     if stored < 0 -> return false
-    sum := 0
+    ^sum: 0
     loop i in 0..<512 {
         byte: bytes.get(offset + i) ?? return false
         if i >= 148 && i < 156 -> sum += 32 else -> sum += (Int{byte})
@@ -125,10 +125,10 @@ safe_path: fn(path: String) -> Bool {
 glob_match: fn(pattern: String, path: String) -> Bool {
     p: pattern.bytes()
     s: path.bytes()
-    pattern_index := 0
-    path_index := 0
-    star := -1
-    star_match := 0
+    ^pattern_index: 0
+    ^path_index: 0
+    ^star: -1
+    ^star_match: 0
     loop path_index < s.len() {
         if pattern_index < p.len() {
             pattern_byte: p[pattern_index]
@@ -181,19 +181,19 @@ run: fn(args: WorkloadArgs) {
     // Keep core.archive on the same byte path as the explicit metadata parser.
     // Its canonical name reader is a cross-check for archives with no rejects.
     core_names: archive.tar_names_json(raw)
-    rows := [String]{}
-    seen := [String:Int]{}
-    offset := 0
-    entries := 0
-    accepted := 0
-    bytes := 0
-    rejected := 0
-    traversal := 0
-    duplicates := 0
-    malformed := 0
-    oversize := 0
-    limited := 0
-    terminated := false
+    ^rows: [String]{}
+    ^seen: [String:Int]{}
+    ^offset: 0
+    ^entries: 0
+    ^accepted: 0
+    ^bytes: 0
+    ^rejected: 0
+    ^traversal: 0
+    ^duplicates: 0
+    ^malformed: 0
+    ^oversize: 0
+    ^limited: 0
+    ^terminated: false
     loop offset < raw.len() {
         if raw.len() - offset < 512 {
             malformed += 1
@@ -310,7 +310,7 @@ run: fn(args: WorkloadArgs) {
         rejected += 1
     }
     rows.sort()
-    report := [String]{
+    ^report: [String]{
         "format={args.format}",
         "entries={entries}",
         "accepted={accepted}",
@@ -323,7 +323,7 @@ run: fn(args: WorkloadArgs) {
         "limited={limited}",
     }
     report.extend(rows)
-    text := ""
+    ^text: ""
     loop line in report -> text = "{text}{line}\n"
     if args.output == .None {
         loop line in report -> print(line)

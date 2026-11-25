@@ -1,19 +1,18 @@
 // `build: fn` reads a constant whose work runs past the limit it sets.
 total: fn(count: Int) -> Int {
-    sum := 0
+    ^sum: 0
     loop i in 0..<count -> sum += i
     sum
 }
 
-#StepLimit(1000)
-TOTAL: #run total(100000)
+#StepLimit(1000) TOTAL: #run total(100000)
 
 build: fn(b: Build) {
-    if TOTAL <= 0 -> return
+    if TOTAL <= 0 {
+        return
+    }
     app: b.add_executable("app", ["over.jet"], [])
     b.default(app)
 }
 
-run: fn() {
-    print("total={TOTAL}")
-}
+run: fn() { print("total={TOTAL}") }

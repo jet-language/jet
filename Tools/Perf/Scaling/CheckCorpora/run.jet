@@ -47,7 +47,7 @@ Checked: struct {
 
 check: fn(jet: String, dir: String) -> Checked Err! {
     receipt: process.cmd([String]{jet, "check", dir}).env("NO_COLOR", "1").run() ?? return Err("cannot run {jet}: {err}")
-    checked := Checked{code: receipt.code, errors: 0, warnings: 0, first: ""}
+    ^checked: Checked{code: receipt.code, errors: 0, warnings: 0, first: ""}
     loop line in "{receipt.output}\n{receipt.errors}".split("\n") {
         error: line.starts_with("Error")
         warning: line.starts_with("Warning")
@@ -85,8 +85,8 @@ judge: fn(jet: String, work: String, name: String, package: [String:String], exp
 
 check_all: fn(jet: String, work: String) -> [String] Err! {
     if files.exists(work) -> return Err("Output already exists: {work}")
-    failures := [String]{}
-    count := 0
+    ^failures: [String]{}
+    ^count: 0
     loop shape in shapes() {
         n: if shape.kind == .Stress -> STRESS_N else -> DOMAIN_LINES
         loop layout in layouts() {

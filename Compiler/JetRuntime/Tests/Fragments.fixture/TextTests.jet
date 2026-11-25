@@ -3,7 +3,7 @@ text_test_require: fn(ok: Bool) {
     if ok {
         return
     }
-    _ := os_exit_group_i64(I64{1})
+    ^_: os_exit_group_i64(I64{1})
     loop {
 
     }
@@ -34,7 +34,7 @@ text_test_done: fn(state: I64) -> Bool {
 
 text_test_find_reference: fn(data: I64, len: I64, pattern: I64, n: I64, start: I64, last: Bool) -> I64 {
     if n > len - start -> return I64{-1}
-    at := if last -> len - n else -> start
+    ^at: if last -> len - n else -> start
     loop at >= start && at <= len - n {
         if rt_text_equal_bytes(data + at, pattern, n) -> return at
         if last -> at -= I64{1} else { at += I64{1} }
@@ -47,25 +47,25 @@ text_test_search: fn() {
     // and every start offset: exercise periodic/nonperiodic factorization.
     data: jet_rt_alloc(I64{6}, I64{1})
     pattern: jet_rt_alloc(I64{3}, I64{1})
-    len := I64{0}
+    ^len: I64{0}
     loop len <= (I64{6}) {
-        bits := I64{0}
+        ^bits: I64{0}
         loop bits < (I64{1} << len) {
-            at := I64{0}
+            ^at: I64{0}
             loop at < len {
                 rt_text_put(data + at, I64{97} + ((bits >> at) & I64{1}))
                 at += I64{1}
             }
-            n := I64{0}
+            ^n: I64{0}
             loop n <= (I64{3}) {
-                needle_bits := I64{0}
+                ^needle_bits: I64{0}
                 loop needle_bits < (I64{1} << n) {
                     at = I64{0}
                     loop at < n {
                         rt_text_put(pattern + at, I64{97} + ((needle_bits >> at) & I64{1}))
                         at += I64{1}
                     }
-                    start := I64{0}
+                    ^start: I64{0}
                     loop start <= len {
                         text_test_require(rt_text_find_bytes(data, len, pattern, n, start, false) == text_test_find_reference(data, len, pattern, n, start, false))
                         text_test_require(rt_text_find_bytes(data, len, pattern, n, start, true) == text_test_find_reference(data, len, pattern, n, start, true))
@@ -88,14 +88,14 @@ text_test_live: fn(width: I64) -> I64 { alloc_live_blocks(width) }
 
 text_test_concat: fn() {
     snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         rt_text_store(snapshot + at * I64{8}, text_test_live(width))
         width *= I64{2}
         at += I64{1}
     }
-    case := I64{0}
+    ^case: I64{0}
     loop case < (I64{7}) {
         left: jet_rt_string_builder_new()
         right: if (case == I64{5}) -> left else -> jet_rt_string_builder_new()
@@ -279,7 +279,7 @@ text_tests: fn() {
     jet_rt_string_builder_push(alias, alias)
     jet_rt_string_builder_push(alias, alias)
     text_test_require(rt_text_len(alias) == I64{24} && jet_char_len(alias) == I64{24})
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{24}) {
         text_test_require(rt_text_byte(rt_text_data(alias) + at) == I64{97} + at % I64{3})
         at += I64{1}

@@ -9,9 +9,9 @@ program: fn(source: String) -> Program { parser_test_program(source) }
 #Test("clean_preparation_reuses_byte_identical_tokens") {
     // A colon declaration is rewritten during preparation, so a clean source
     // here is a plain statement line.
-    lexed := lex("print(1)\n".bytes())
+    ^lexed: lex("print(1)\n".bytes())
     assert(lexed.diagnostics.is_empty())
-    expected := [Token]{}
+    ^expected: [Token]{}
     loop token in lexed.tokens {
         if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT {
             expected.push(token)
@@ -146,7 +146,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
             }
         } ?? false,
     )
-    names := [String]{}
+    ^names: [String]{}
     loop item in checked.program.items {
         if item == .Func(func) -> names.push(func.name)
     }

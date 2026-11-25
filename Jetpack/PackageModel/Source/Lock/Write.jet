@@ -5,9 +5,9 @@ use jet_foundation.[jet_ring_layer_name]
 
 // Render `lock` as canonical lock text.
 pkg_lock_write: fn(input: LockFile) -> String Never! {
-    lock := input
+    ^lock: input
     pkg_lock_canonicalize(lock)
-    out := [String]{}
+    ^out: [String]{}
     out.push("version = {lock.version}\n")
 
     // Top-level workspace identity precedes the first table. With no members
@@ -271,14 +271,14 @@ pkg_lock_write_workspace_overlay_policy: fn(out: ^[String], policy: OverlayPolic
             out.push("priority = {package.priority}\n")
             if package.field_priorities.len() > 0 {
                 // Field priorities are written in key order.
-                keys := package.field_priorities.keys().to_list()
+                ^keys: package.field_priorities.keys().to_list()
                 keys.sort()
-                facts := [String]{}
+                ^facts: [String]{}
                 loop key in keys -> facts.push("{key}={package.field_priorities[key]}")
                 out.push("field_priorities = {pkg_lock_string_array(facts)}\n")
             }
             if package.env.len() > 0 {
-                facts := [String]{}
+                ^facts: [String]{}
                 loop fact in package.env -> facts.push("{fact.key}={fact.value}")
                 out.push("env = {pkg_lock_string_array(facts)}\n")
             }
@@ -292,7 +292,7 @@ pkg_lock_write_workspace_overlay_policy: fn(out: ^[String], policy: OverlayPolic
 
 // The manifest-shaped `authority = { … }` value.
 pkg_lock_authority_value: fn(authority: PackageAuthority) -> String Never! {
-    fields := [String]{}
+    ^fields: [String]{}
 
     if authority.allow == {
         .Val(allow) -> { fields.push("allow: {pkg_lock_string_array(allow)}") }
@@ -306,7 +306,7 @@ pkg_lock_authority_value: fn(authority: PackageAuthority) -> String Never! {
     if authority.needs.len() > 0 -> fields.push("needs: {pkg_lock_string_array(authority.needs)}")
 
     if authority.grants.len() > 0 {
-        grants := [String]{}
+        ^grants: [String]{}
         loop grant in authority.grants {
             grants.push("\"{pkg_lock_escape(grant.package)}\": {pkg_lock_string_array(grant.rights)}")
         }
@@ -315,7 +315,7 @@ pkg_lock_authority_value: fn(authority: PackageAuthority) -> String Never! {
 
     if authority.trust == {
         .Val(trust) -> {
-            trust_fields := [String]{}
+            ^trust_fields: [String]{}
             if trust.default == {
                 .Val(decision) -> {
                     trust_fields.push("default: {pkg_lock_trust_decision(decision)}")
@@ -329,7 +329,7 @@ pkg_lock_authority_value: fn(authority: PackageAuthority) -> String Never! {
                 .None -> {}
             }
             if trust.services.len() > 0 {
-                services := [String]{}
+                ^services: [String]{}
                 loop service in trust.services {
                     services.push("\"{pkg_lock_escape(service.service)}\": {pkg_lock_trust_decision(service.decision)}")
                 }
@@ -345,9 +345,9 @@ pkg_lock_authority_value: fn(authority: PackageAuthority) -> String Never! {
     }
 
     if authority.providers.len() > 0 {
-        providers := [String]{}
+        ^providers: [String]{}
         loop provider in authority.providers {
-            provider_fields := [String]{"registry: \"{pkg_lock_escape(provider.registry)}\""}
+            ^provider_fields: [String]{"registry: \"{pkg_lock_escape(provider.registry)}\""}
             if provider.allow.len() > 0 {
                 provider_fields.push("allow: {pkg_lock_string_array(provider.allow)}")
             }
@@ -376,7 +376,7 @@ pkg_lock_trust_decision: fn(decision: TrustDecision) -> String Never! {
 pkg_lock_canonicalize: fn(lock: ^LockFile) Never! {
     lock.root_dependencies = pkg_overlay_sorted_unique(lock.root_dependencies)
     loop index in 0..<lock.packages.len() {
-        package := lock.packages[index]
+        ^package: lock.packages[index]
         package.dependencies = pkg_overlay_sorted_unique(package.dependencies)
         package.effects = pkg_overlay_sorted_unique(package.effects)
         package.effect_grants = pkg_overlay_sorted_unique(package.effect_grants)
@@ -395,15 +395,15 @@ pkg_lock_canonicalize: fn(lock: ^LockFile) Never! {
     lock.comptime_inputs = pkg_lock_last_comptime_inputs(lock.comptime_inputs)
     lock.build_contributions = pkg_lock_dedup_contributions(pkg_lock_sorted_contributions(lock.build_contributions))
 
-    policy := lock.workspace_overlay_policy
+    ^policy: lock.workspace_overlay_policy
     policy.allow_unfree = pkg_overlay_sorted_unique(policy.allow_unfree)
     policy.build_deny = pkg_overlay_sorted_unique(policy.build_deny)
-    grants := [BuildGrant]{}
+    ^grants: [BuildGrant]{}
     loop grant in policy.build_grants {
         grants.push(BuildGrant{subject: grant.subject, effects: pkg_overlay_sorted_unique(grant.effects)})
     }
     grants.sort_by(fn(grant) { grant.subject })
-    unique := [BuildGrant]{}
+    ^unique: [BuildGrant]{}
     loop grant in grants {
         if unique.len() > 0 && unique[unique.len() - 1].subject == grant.subject -> next
         unique.push(grant)
@@ -415,8 +415,8 @@ pkg_lock_canonicalize: fn(lock: ^LockFile) Never! {
 // Keep one package per name at the position of its first record, holding
 // the last record's value.
 pkg_lock_last_by_name_in_order: fn(values: [LockedPackage]) -> [LockedPackage] Never! {
-    positions := [String:Int]{}
-    canonical := [LockedPackage]{}
+    ^positions: [String:Int]{}
+    ^canonical: [LockedPackage]{}
     loop value in values {
         if positions.get(value.name) == {
             .Val(index) -> { canonical[index] = value }
@@ -431,51 +431,51 @@ pkg_lock_last_by_name_in_order: fn(values: [LockedPackage]) -> [LockedPackage] N
 
 // Keep the last record per name, ordered by name.
 pkg_lock_last_members: fn(values: [LockedWorkspaceMember]) -> [LockedWorkspaceMember] Never! {
-    by_key := [String:LockedWorkspaceMember]{}
+    ^by_key: [String:LockedWorkspaceMember]{}
     loop value in values -> by_key[value.name] = value
-    out := [LockedWorkspaceMember]{}
+    ^out: [LockedWorkspaceMember]{}
     loop key in pkg_lock_sorted_keys(by_key.keys().to_list()) -> out.push(by_key[key])
     out
 }
 
 // Keep the last toolchain per id, ordered by id.
 pkg_lock_last_toolchains: fn(values: [LockedToolchain]) -> [LockedToolchain] Never! {
-    by_key := [String:LockedToolchain]{}
+    ^by_key: [String:LockedToolchain]{}
     loop value in values -> by_key[value.id] = value
-    out := [LockedToolchain]{}
+    ^out: [LockedToolchain]{}
     loop key in pkg_lock_sorted_keys(by_key.keys().to_list()) -> out.push(by_key[key])
     out
 }
 
 // Keep the last browser per engine, ordered by engine.
 pkg_lock_last_browsers: fn(values: [LockedBrowser]) -> [LockedBrowser] Never! {
-    by_key := [String:LockedBrowser]{}
+    ^by_key: [String:LockedBrowser]{}
     loop value in values -> by_key[value.engine] = value
-    out := [LockedBrowser]{}
+    ^out: [LockedBrowser]{}
     loop key in pkg_lock_sorted_keys(by_key.keys().to_list()) -> out.push(by_key[key])
     out
 }
 
 // Keep the last source channel per name, ordered by name.
 pkg_lock_last_source_channels: fn(values: [LockedSourceChannel]) -> [LockedSourceChannel] Never! {
-    by_key := [String:LockedSourceChannel]{}
+    ^by_key: [String:LockedSourceChannel]{}
     loop value in values -> by_key[value.name] = value
-    out := [LockedSourceChannel]{}
+    ^out: [LockedSourceChannel]{}
     loop key in pkg_lock_sorted_keys(by_key.keys().to_list()) -> out.push(by_key[key])
     out
 }
 
 // Keep the last comptime input per path, ordered by path.
 pkg_lock_last_comptime_inputs: fn(values: [ComptimeInput]) -> [ComptimeInput] Never! {
-    by_key := [String:ComptimeInput]{}
+    ^by_key: [String:ComptimeInput]{}
     loop value in values -> by_key[value.path] = value
-    out := [ComptimeInput]{}
+    ^out: [ComptimeInput]{}
     loop key in pkg_lock_sorted_keys(by_key.keys().to_list()) -> out.push(by_key[key])
     out
 }
 
 pkg_lock_sorted_keys: fn(keys: [String]) -> [String] Never! {
-    sorted := keys
+    ^sorted: keys
     sorted.sort()
     sorted
 }
@@ -483,7 +483,7 @@ pkg_lock_sorted_keys: fn(keys: [String]) -> [String] Never! {
 // Build contributions ordered by (package, key, layer, scope, source, value,
 // reason): stable passes from the least significant field.
 pkg_lock_sorted_contributions: fn(values: [LockedBuildContribution]) -> [LockedBuildContribution] Never! {
-    sorted := values
+    ^sorted: values
     sorted = loop fresh_item in sorted -> fresh_item
     sorted.sort_by(fn(record) { record.reason })
     sorted = loop fresh_item in sorted -> fresh_item
@@ -503,7 +503,7 @@ pkg_lock_sorted_contributions: fn(values: [LockedBuildContribution]) -> [LockedB
 
 // Drop consecutive equal records.
 pkg_lock_dedup_contributions: fn(values: [LockedBuildContribution]) -> [LockedBuildContribution] Never! {
-    out := [LockedBuildContribution]{}
+    ^out: [LockedBuildContribution]{}
     loop value in values {
         if out.len() > 0 && out[out.len() - 1] == value -> next
         out.push(value.copy())
@@ -513,7 +513,7 @@ pkg_lock_dedup_contributions: fn(values: [LockedBuildContribution]) -> [LockedBu
 
 // Comptime inputs ordered by (path, hash).
 pkg_lock_sorted_comptime_inputs: fn(values: [ComptimeInput]) -> [ComptimeInput] Never! {
-    sorted := values
+    ^sorted: values
     sorted = loop fresh_item in sorted -> fresh_item
     sorted.sort_by(fn(input) { input.hash })
     sorted = loop fresh_item in sorted -> fresh_item
@@ -523,7 +523,7 @@ pkg_lock_sorted_comptime_inputs: fn(values: [ComptimeInput]) -> [ComptimeInput] 
 
 // Drop consecutive equal comptime inputs.
 pkg_lock_dedup_comptime_inputs: fn(values: [ComptimeInput]) -> [ComptimeInput] Never! {
-    out := [ComptimeInput]{}
+    ^out: [ComptimeInput]{}
     loop value in values {
         if out.len() > 0 && out[out.len() - 1] == value -> next
         out.push(value.copy())
@@ -536,7 +536,7 @@ pkg_lock_string_field: fn(key: String, value: String) -> String Never! {
 }
 
 pkg_lock_string_array: fn(values: [String]) -> String Never! {
-    quoted := [String]{}
+    ^quoted: [String]{}
     loop value in values -> quoted.push("\"{pkg_lock_escape(value)}\"")
     "[{quoted.join(", ")}]"
 }

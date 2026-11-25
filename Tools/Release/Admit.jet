@@ -203,10 +203,10 @@ is_count: fn(text: String) -> Bool Never! {
 
 // The options of `admit`; every problem is collected at once.
 parse_admit_args: fn(args: [String]) -> AdmitOptions Never! {
-    options := AdmitOptions{commit: "", summary: "", dispositions: "", min_gains: 10, shards: 8, jobs: 0, timeout: 0, filter: "", reuse: "", seeds: "", work: "", check_gate: false, errors: [String]{}}
+    ^options: AdmitOptions{commit: "", summary: "", dispositions: "", min_gains: 10, shards: 8, jobs: 0, timeout: 0, filter: "", reuse: "", seeds: "", work: "", check_gate: false, errors: [String]{}}
     values: [String]{"--summary", "--dispositions", "--filter", "--reuse", "--seeds", "--work"}
     counts: [String]{"--min-gains", "--shards", "--jobs", "--timeout"}
-    index := 0
+    ^index: 0
     loop index < args.len() {
         flag: args[index]
         if values.contains(flag) || counts.contains(flag) {
@@ -256,7 +256,7 @@ parse_admit_args: fn(args: [String]) -> AdmitOptions Never! {
 // How many CPUs a CPU list (`8-31`, `4-9,20-25`) names; 0 for an empty or
 // malformed one.
 cpu_count: fn(list: String) -> Int Never! {
-    total := 0
+    ^total: 0
     loop part in list.split(",") {
         span: part.trim().partition("-")
         low: Int.parse(span.head) ?? return 0
@@ -273,7 +273,7 @@ cpu_count: fn(list: String) -> Int Never! {
 // cgroup room, and the slot's threads (`slot_cpus`) split the same way, at
 // least 1 each, or a given --jobs N.
 shard_pool: fn(options: AdmitOptions, processes: Int, slot_memory: String, slot_cpus: String) -> [String] Never! {
-    digits := ""
+    ^digits: ""
     loop byte in slot_memory.bytes() {
         code: Int{byte}
         if code < 48 || code > 57 -> break
@@ -282,7 +282,7 @@ shard_pool: fn(options: AdmitOptions, processes: Int, slot_memory: String, slot_
     parsed: Int.parse(digits) ?? 0
     gib: if parsed > 0 -> parsed else -> 16
     share: gib /% processes
-    pool := [String]{"--memory={if share < 1 -> 1 else -> share}G"}
+    ^pool: [String]{"--memory={if share < 1 -> 1 else -> share}G"}
     threads: cpu_count(slot_cpus)
     jobs: if options.jobs > 0 -> options.jobs else -> threads /% processes
     if options.jobs > 0 || threads > 0 -> pool.push("--jobs={if jobs < 1 -> 1 else -> jobs}")
@@ -311,7 +311,7 @@ is_card: fn(text: String) -> Bool Never! {
 // Disposition lines: suite TAB case TAB tier|* TAB #card TAB reason, the
 // suite one of `suites`. A line starting with `#` is a comment.
 parse_dispositions: fn(text: String, suites: [String]) -> Dispositions Never! {
-    out := Dispositions{rows: [Disposition]{}, errors: [String]{}}
+    ^out: Dispositions{rows: [Disposition]{}, errors: [String]{}}
     lines: text.split("\n").to_list()
     loop (index, line) in lines {
         if line.trim() == "" || line.starts_with("#") -> next
@@ -334,7 +334,7 @@ native_suites_of: fn(text: String) -> [String] Never! {
     loop line in text.split("\n").to_list() {
         decl: line.trim()
         if !line.starts_with(NATIVE_SUITES_DECL) || !decl.ends_with("}}") -> next
-        out := [String]{}
+        ^out: [String]{}
         loop part in decl.slice(NATIVE_SUITES_DECL.len()..<decl.len() - 1).split(",").to_list() {
             quoted: part.trim()
             if quoted.len() < 3 || !quoted.starts_with("\"") || !quoted.ends_with("\"") {
@@ -365,7 +365,7 @@ native_suites: fn(repo: String, sha: String) -[Exec, Time.Wait]> {suites: [Strin
 
 // The native suites the kit pool runs: every one but REGISTRY_SUITE.
 kit_suites: fn(native: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop suite in native {
         if suite != REGISTRY_SUITE -> out.push(suite.copy())
     }
@@ -444,7 +444,7 @@ untracked_row: fn(suite: String, compared: Compared) -> GateRow Never! {
 // that ends in a tracked failure (a known-failing line, a host skip) is
 // owned by that line.
 flaky_row: fn(suite: String, compared: Compared) -> GateRow Never! {
-    open := [String]{}
+    ^open: [String]{}
     loop found in compared.flaky {
         if passes(found.now) && !found.disposed {
             open.push("{found.id} {found.tier} ({found.was} then {found.now})")
@@ -460,7 +460,7 @@ flaky_row: fn(suite: String, compared: Compared) -> GateRow Never! {
 // A flaky row: the candidate's first outcome and its retry's, with the
 // disposition naming it, if any.
 flaky_of: fn(first: SuiteRow, retried: SuiteRow, dispositions: [Disposition]) -> LostRow Never! {
-    out := LostRow{suite: first.suite.copy(), id: first.id.copy(), tier: first.tier.copy(), was: first.status.copy(), now: retried.status.copy(), detail: first.detail.copy(), disposed: false, disposition: Disposition{suite: "", id: "", tier: "", card: "", reason: ""}}
+    ^out: LostRow{suite: first.suite.copy(), id: first.id.copy(), tier: first.tier.copy(), was: first.status.copy(), now: retried.status.copy(), detail: first.detail.copy(), disposed: false, disposition: Disposition{suite: "", id: "", tier: "", card: "", reason: ""}}
     if disposition_for(dispositions, first.suite, first.id, first.tier) == .Val(entry) {
         out.disposed = true
         out.disposition = entry
@@ -487,7 +487,7 @@ Indexed: struct {
 }
 
 index_rows: fn(rows: [SuiteRow]) -> Indexed Never! {
-    out := Indexed{order: [String]{}, at: [String:Int]{}}
+    ^out: Indexed{order: [String]{}, at: [String:Int]{}}
     loop (index, item) in rows {
         key: row_key(item.suite, item.id, item.tier)
         if !out.at.has_key(key) -> out.order.push(key.copy())
@@ -502,7 +502,7 @@ index_rows: fn(rows: [SuiteRow]) -> Indexed Never! {
 // with the same status is not lost; a disposition naming it tracks it
 // (`carded`), else it is untracked.
 compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [SuiteRow], dispositions: [Disposition]) -> Compared Never! {
-    out := Compared{rows: 0, lost: [LostRow]{}, gained: [GainedRow]{}, added: [SuiteRow]{}, flaky: [LostRow]{}, untracked: [SuiteRow]{}, carded: [LostRow]{}, release_untracked: 0}
+    ^out: Compared{rows: 0, lost: [LostRow]{}, gained: [GainedRow]{}, added: [SuiteRow]{}, flaky: [LostRow]{}, untracked: [SuiteRow]{}, carded: [LostRow]{}, release_untracked: 0}
     loop item in before_rows {
         if is_untracked(item.status) -> out.release_untracked += 1
     }
@@ -522,13 +522,13 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
         }
         if again.at.get(key) == .Val(at) && passes(retry[at].status) {
             // copy: the release's row stands for the candidate's first run, which may be missing.
-            first := was.copy()
+            ^first: was.copy()
             first.status = now_status.copy()
             first.detail = if found == .Val(index) -> after_rows[index].detail.copy() else -> ""
             out.flaky.push(flaky_of(first, retry[at], dispositions))
             next
         }
-        lost := LostRow{suite: was.suite.copy(), id: was.id.copy(), tier: was.tier.copy(), was: was.status.copy(), now: now_status.copy(), detail: if found == .Val(at) -> after_rows[at].detail.copy() else -> "", disposed: false, disposition: Disposition{suite: "", id: "", tier: "", card: "", reason: ""}}
+        ^lost: LostRow{suite: was.suite.copy(), id: was.id.copy(), tier: was.tier.copy(), was: was.status.copy(), now: now_status.copy(), detail: if found == .Val(at) -> after_rows[at].detail.copy() else -> "", disposed: false, disposition: Disposition{suite: "", id: "", tier: "", card: "", reason: ""}}
         if disposition_for(dispositions, was.suite, was.id, was.tier) == .Val(entry) {
             lost.disposed = true
             lost.disposition = entry
@@ -547,7 +547,7 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
     // passes it is flaky; when its retry ends in a tracked status (a
     // known-failing line, a host skip) that line owns it. The report lists
     // it either way.
-    tracked := [String:Bool]{}
+    ^tracked: [String:Bool]{}
     loop lost in out.lost {
         if lost.disposed -> tracked[row_key(lost.suite, lost.id, lost.tier)] = true
     }
@@ -576,8 +576,8 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
 // Jetpack/Bootstrap check-errors.txt rows as census keys: source file TAB
 // message, line-insensitive.
 jetpack_keys: fn(text: String) -> [String] Never! {
-    seen := [String:Bool]{}
-    keys := [String]{}
+    ^seen: [String:Bool]{}
+    ^keys: [String]{}
     loop line in text.split("\n").to_list() {
         // The summary starts at `errors per file:`; a clean check prints only
         // `total errors: 0`.
@@ -601,16 +601,16 @@ ChainRow: struct {
 
 // Tools/Agent/Chain.jet RESULT (TSV with a header) as rows by stage.
 parse_chain_result: fn(text: String) -> [ChainRow] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in text.split("\n").to_list() {
         if line != "" -> lines.push(line.copy())
     }
-    rows := [ChainRow]{}
+    ^rows: [ChainRow]{}
     if lines.len() == 0 -> return rows
     head: lines[0].split("\t").to_list()
     loop line in lines[1..<lines.len()] {
         cells: line.split("\t").to_list()
-        row := ChainRow{stage: "", status: "", note: ""}
+        ^row: ChainRow{stage: "", status: "", note: ""}
         loop (index, name) in head {
             value: if index < cells.len() -> cells[index].copy() else -> ""
             if {
@@ -625,7 +625,7 @@ parse_chain_result: fn(text: String) -> [ChainRow] Never! {
 }
 
 chain_row: fn(rows: [ChainRow], stage: String) -> ChainRow? Never! {
-    found := ChainRow?{None}
+    ^found: ChainRow?{None}
     loop row in rows {
         if row.stage == stage -> found = Val(row.copy())
     }
@@ -636,8 +636,8 @@ chain_row: fn(rows: [ChainRow], stage: String) -> ChainRow? Never! {
 // (after the tree id, up to the blank line).
 merge_tree_conflicts: fn(text: String) -> [String] Never! {
     lines: text.split("\n").to_list()
-    paths := [String]{}
-    index := 1
+    ^paths: [String]{}
+    ^index: 1
     loop index < lines.len() && lines[index] != "" {
         paths.push(lines[index].copy())
         index += 1
@@ -671,7 +671,7 @@ pack_field: fn(body: String, name: String) -> String Never! {
 
 // The rows of pinned-asset table `table` in `text` (a source's text).
 pinned_assets: fn(text: String, table: String) -> [PinnedAsset] Never! {
-    rows := [PinnedAsset]{}
+    ^rows: [PinnedAsset]{}
     if !text.contains("{table}:") -> return rows
     body_text: text.partition("{table}:").tail.partition("}} }}").head
     loop piece in body_text.split("{{").to_list() {
@@ -693,7 +693,7 @@ pinned_asset_problem: fn(expected: PinnedAsset, sha256: String, size: Int, table
 
 // The first 16 hex digits of the sha256 of `parts` joined by NUL bytes.
 cache_key: fn(parts: [String]) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop (index, part) in parts {
         if index > 0 -> bytes.push(U8{0})
         bytes.extend(part.bytes())
@@ -730,8 +730,8 @@ no_seed: fn(error: String) -> SeedRelease Never! {
 // identity and the commit SOURCE names: only then is the export of that
 // commit the tree this jet reads its Core from.
 seed_info: fn(dir: String) -[FS]> SeedRelease Never! {
-    info := no_seed("")
-    missing := [String]{}
+    ^info: no_seed("")
+    ^missing: [String]{}
     loop name in STAGE_FILES {
         if !files.exists(files.join(dir, name)) -> missing.push(name.copy())
     }
@@ -755,7 +755,7 @@ seed_info: fn(dir: String) -[FS]> SeedRelease Never! {
     info.release_name = text_field(recorded, "name")
     identity: text_field(recorded, "identity")
     commit: text_field(recorded, "commit")
-    problems := [String]{}
+    ^problems: [String]{}
     if !has_line(read_text(files.join(dir, "SHA256SUMS")) ?? "", "{info.jet_sha}  jet") {
         problems.push("SHA256SUMS does not list its jet ({short(info.jet_sha, 16)})")
     }
@@ -794,7 +794,7 @@ baseline_info: fn(seeds: String, current: SeedRelease) -[Env, FS]> SeedRelease N
     named: files.join(seeds, current.release_name)
     if !files.exists(named) -> return no_seed("{why}, and {named} does not exist")
     dir: files.realpath(named) ?? return no_seed("{why}, and {named} does not resolve: {err}")
-    found := seed_info(dir)
+    ^found: seed_info(dir)
     if found.error == "" && found.genuine != "" {
         found.error = "{why}, nor is {named}'s: {found.genuine}"
     }
@@ -820,14 +820,14 @@ Pre: struct {
 absolute_or: fn(path: String) -[Env, FS]> String Never! { files.absolute(path) ?? path.copy() }
 
 preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wait]> Pre Never! {
-    errors := options.errors.copy()
+    ^errors: options.errors.copy()
     dev: dev_roots(root, [String]{"JET_STATE_ROOT", "JET_SEEDS"})
     if dev.err != "" -> errors.push(dev.err)
     state: dev.roots.get("JET_STATE_ROOT") ?? ""
     seeds: absolute_or(if options.seeds != "" -> options.seeds else -> dev.roots.get("JET_SEEDS") ?? "")
     work_root: absolute_or(if options.work != "" -> options.work else -> process.env_nonempty("JET_RELEASE_WORK") ?? files.join(state, "release"))
-    sha := ""
-    native := [String]{}
+    ^sha: ""
+    ^native: [String]{}
     if options.commit != "" {
         parsed: git_in(root, [String]{"rev-parse", "--verify", "{options.commit}^{{commit}}"})
         if parsed.rc != 0 -> errors.push("{options.commit} is not a commit of {root}") else {
@@ -848,7 +848,7 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     if options.filter == "" && !files.exists(key) {
         errors.push("no release signing key at {key}: create it with `jet registry keygen --registry {RELEASE_KEY}`")
     }
-    dispositions := [Disposition]{}
+    ^dispositions: [Disposition]{}
     if options.dispositions != "" {
         if files.read(options.dispositions) == {
             .Ok(text) -> {
@@ -932,7 +932,7 @@ row: fn(ctx: ^Ctx, check: String, status: String, detail: String) -[FS, IO, Time
 }
 
 failed_rows: fn(ctx: Ctx) -> [GateRow] Never! {
-    out := [GateRow]{}
+    ^out: [GateRow]{}
     loop found in ctx.rows {
         if found.status == "FAIL" || found.status == "BLOCKED" -> out.push(found.copy())
     }
@@ -940,13 +940,13 @@ failed_rows: fn(ctx: Ctx) -> [GateRow] Never! {
 }
 
 with_vars: fn(base: [Var], extra: [Var]) -> [Var] Never! {
-    out := base.copy()
+    ^out: base.copy()
     out.extend(extra.copy())
     out
 }
 
 joined: fn(prefix: [String], rest: [String]) -> [String] Never! {
-    out := prefix.copy()
+    ^out: prefix.copy()
     out.extend(rest.copy())
     out
 }
@@ -1038,7 +1038,7 @@ candidate_preflight: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never!
 // REPORT.md of a run its release column's preflight refused: the columns
 // and the refusal, with no comparison.
 refused_report: fn(ctx: Ctx, refused: String) -> String Never! {
-    lines := [String]{"# {ctx.next}: release gate of dev {short(ctx.sha, 10)}", "", "Verdict: REFUSED at preflight", "Seed: {ctx.release.name} ({ctx.release.identity})"}
+    ^lines: [String]{"# {ctx.next}: release gate of dev {short(ctx.sha, 10)}", "", "Verdict: REFUSED at preflight", "Seed: {ctx.release.name} ({ctx.release.identity})"}
     lines.push("Release column: {column_text(ctx.baseline.name, ctx.baseline.identity, ctx.baseline.jet, ctx.baseline.jet_sha, ctx.baseline.commit)}")
     lines.extend([String]{"", "| check | status | detail |", "|---|---|---|"})
     loop found in ctx.rows {
@@ -1066,7 +1066,7 @@ chain_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     }
     rows: parse_chain_result(text)
     verdict: chain_row(rows, "verdict")
-    problems := [String]{}
+    ^problems: [String]{}
     verdict_status: if verdict == .Val(found) -> found.status.copy() else -> "missing"
     verdict_note: if verdict == .Val(found) -> found.note.copy() else -> ""
     if verdict_status != "FIXED_POINT" -> problems.push("verdict {verdict_status}")
@@ -1082,7 +1082,7 @@ chain_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     if !files.exists(files.join(out, "s2/jet-runtime")) {
         problems.push("s2/jet-runtime (pack2) is missing")
     }
-    stages := [String]{}
+    ^stages: [String]{}
     loop found in rows {
         if found.stage != "verdict" -> stages.push("{found.stage} {found.status}")
     }
@@ -1104,14 +1104,14 @@ chain_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // The regular files of the tree `root` that differ from `other`, and how
 // many `root` holds.
 tree_differences: fn(root: String, other: String) -[FS]> {differ: [String], files: Int} Never! {
-    left := [Artifact]{}
-    right := [Artifact]{}
+    ^left: [Artifact]{}
+    ^right: [Artifact]{}
     tree_artifacts(root, "", left)
     tree_artifacts(other, "", right)
-    theirs := [String:String]{}
+    ^theirs: [String:String]{}
     loop artifact in right -> theirs[artifact.path.copy()] = artifact.sha256.copy()
-    ours := [String:Bool]{}
-    differ := [String]{}
+    ^ours: [String:Bool]{}
+    ^differ: [String]{}
     loop artifact in left {
         ours[artifact.path.copy()] = true
         if (theirs.get(artifact.path) ?? "") != artifact.sha256 {
@@ -1180,7 +1180,7 @@ bwrap_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // it from the release it names, and the seed ships it there. s2 names no
 // release, so without the copy its suites' C rows could get no pack at all.
 pinned_asset_stage: fn(ctx: ^Ctx, check: String, nix: String, source: String, table: String, key: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
-    expected := PinnedAsset?{None}
+    ^expected: PinnedAsset?{None}
     loop found in pinned_assets(read_text(files.join(ctx.tree, source)) ?? "", table) {
         if (found.platform == key || found.arch == key) && expected == None {
             expected = Val(found.copy())
@@ -1216,7 +1216,7 @@ pinned_asset_stage: fn(ctx: ^Ctx, check: String, nix: String, source: String, ta
 
 bootstrap_scratch: fn(state: String, worker: String) -[FS]> [String] Never! {
     root: files.join(state, "jetpack-bootstrap")
-    out := [String]{}
+    ^out: [String]{}
     entries: files.list_dir(root) ?? return out
     loop entry in entries {
         if entry.name.starts_with("{worker}-") -> out.push(files.join(root, entry.name))
@@ -1264,7 +1264,7 @@ jetpack_census: fn(ctx: Ctx, side: String, jet: String, identity: String, root: 
 }
 
 read_keys: fn(path: String) -[FS]> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop line in (read_text(path) ?? "").split("\n").to_list() {
         if line != "" -> out.push(line.copy())
     }
@@ -1277,7 +1277,7 @@ keys_text: fn(keys: [String]) -> String Never! {
 }
 
 shown_keys: fn(keys: [String], count: Int) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop key in keys {
         if out.len() >= count -> break
         out.push(key.replace("\t", ": "))
@@ -1292,7 +1292,7 @@ shown_keys: fn(keys: [String], count: Int) -> String Never! {
 jetpack_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     recorded: files.join(ctx.baseline.dir, "evidence/jetpack-candidate.keys")
     cache: files.join(files.join(ctx.work_root, "cache"), "jetpack-{cache_key([String]{ctx.baseline.jet_sha, ctx.baseline.commit})}.keys")
-    before := Census{finished: false, keys: [String]{}, detail: ""}
+    ^before: Census{finished: false, keys: [String]{}, detail: ""}
     if {
         files.exists(recorded) -> {
             before = Census{finished: true, keys: read_keys(recorded), detail: "recorded in {ctx.baseline.name}/evidence"}
@@ -1329,15 +1329,15 @@ jetpack_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
         row(ctx, "jetpack", "NOTE", "census restored: {ctx.baseline.name} could not finish it ({before.detail}); candidate {after.detail}")
         return
     }
-    old := [String:Bool]{}
+    ^old: [String:Bool]{}
     loop key in before.keys -> old[key.copy()] = true
-    now := [String:Bool]{}
+    ^now: [String:Bool]{}
     loop key in after.keys -> now[key.copy()] = true
-    added := [String]{}
+    ^added: [String]{}
     loop key in after.keys {
         if !old.has_key(key) -> added.push(key.copy())
     }
-    fixed := [String]{}
+    ^fixed: [String]{}
     loop key in before.keys {
         if !now.has_key(key) -> fixed.push(key.copy())
     }
@@ -1359,7 +1359,7 @@ hosted_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     receipt: first_existing(bootstrap_scratch(ctx.state, worker), "hosted.receipt")
     text: if receipt != "" -> read_text(receipt) ?? "" else -> ""
     binary: line_value(text, "hosted-binary: ")
-    ok := has_line(text, "exit: 0") && binary != "" && files.exists(binary)
+    ^ok: has_line(text, "exit: 0") && binary != "" && files.exists(binary)
     if ok {
         engine: files.join(ctx.work, "jetpack/jetpack")
         files.create_dir_all(files.dirname(engine)) ?? ()
@@ -1393,13 +1393,13 @@ SuiteRun: struct {
 }
 
 rows_of: fn(items: [Dyn]) -> [SuiteRow] Never! {
-    out := [SuiteRow]{}
+    ^out: [SuiteRow]{}
     loop item in items -> out.push(suite_row(item))
     out
 }
 
 rows_json: fn(rows: [SuiteRow]) -> String Never! {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop found in rows -> items.push(found.raw.copy())
     json.dumps(Dyn.Array(items)) ?? "[]"
 }
@@ -1438,13 +1438,13 @@ suite_batch: fn(ctx: Ctx, side: String, profile: String, label_tag: String, extr
     listed: label_tag != ""
     count: if shards < 1 -> 1 else -> shards
     kit: files.join(ctx.work, "kit")
-    out := SuiteBatch{labels: [String]{}, jobs: [Job]{}}
+    ^out: SuiteBatch{labels: [String]{}, jobs: [Job]{}}
     loop index in 1..<count + 1 {
         label: "{side}-{profile}{if listed -> "-{label_tag}" else -> ""}-{index}"
         vars: suite_vars(ctx.vars, ctx.tree, root, identity, jet)
         // Suite rows run host tools (C compilers, interpreters) that only
         // the dev shell supplies until jet does.
-        argv := in_dev_shell(ctx.candidate.jet, ctx.tree, false, [String]{ctx.candidate.jet.copy(), "test", files.join(ctx.tree, "Compiler"), "--profile", profile.copy(), "--compiler={jet}", "--results={files.join(kit, "{label}.json")}"})
+        ^argv: in_dev_shell(ctx.candidate.jet, ctx.tree, false, [String]{ctx.candidate.jet.copy(), "test", files.join(ctx.tree, "Compiler"), "--profile", profile.copy(), "--compiler={jet}", "--results={files.join(kit, "{label}.json")}"})
         if count > 1 -> argv.push("--shard={index}/{count}")
         argv.extend(shard_pool(ctx.options, count, sys.get("SLOT_MEMORY_MAX") ?? "", sys.get("SLOT_CPUS") ?? ""))
         if ctx.options.filter != "" && !listed -> argv.push("--filter={ctx.options.filter}")
@@ -1459,8 +1459,8 @@ suite_batch: fn(ctx: Ctx, side: String, profile: String, label_tag: String, extr
 // The rows `batch`'s processes wrote, merged; `results` are their exits in order.
 suite_rows: fn(ctx: Ctx, batch: SuiteBatch, results: [Finished]) -[FS]> SuiteRun Never! {
     kit: files.join(ctx.work, "kit")
-    rows := [SuiteRow]{}
-    errors := [String]{}
+    ^rows: [SuiteRow]{}
+    ^errors: [String]{}
     loop (index, label) in batch.labels {
         result: if index < results.len() -> results[index].copy() else -> Finished{rc: 127, timed_out: false, wall: 0}
         file: files.join(kit, "{label}.json")
@@ -1492,7 +1492,7 @@ suite_run: fn(ctx: Ctx, side: String, profile: String, label_tag: String, extra:
 
 // The rows of `run` in `suite`, with its error.
 suite_part: fn(run: SuiteRun, suite: String) -> SuiteRun Never! {
-    rows := [SuiteRow]{}
+    ^rows: [SuiteRow]{}
     loop item in run.rows {
         if item.suite == suite -> rows.push(item.copy())
     }
@@ -1500,7 +1500,7 @@ suite_part: fn(run: SuiteRun, suite: String) -> SuiteRun Never! {
 }
 
 lost_shown: fn(lost: [LostRow], count: Int) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop found in lost {
         if out.len() >= count -> break
         out.push("{found.id} {found.tier} {found.was}->{found.now}")
@@ -1525,7 +1525,7 @@ RowFile: struct {
 }
 
 row_file_text: fn(file: RowFile) -> String Never! {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop found in file.rows -> items.push(found.raw.copy())
     record: Dyn.Object([String:Dyn]{"schema": text_dyn(ROWS_SCHEMA), "commit": text_dyn(file.commit), "sourceIdentity": text_dyn(file.source), "compiler": text_dyn(file.compiler), "rows": Dyn.Array(items)})
     "{json.dumps(record) ?? "{{}}"}\n"
@@ -1580,7 +1580,7 @@ has_prefix: fn(path: String, prefixes: [String]) -> Bool Never! {
 // The ids of `rows` a changed path can reach: a row whose own file changed,
 // or whose directory holds a changed file at any depth.
 rerun_ids: fn(rows: [SuiteRow], paths: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop item in rows {
         if out.contains(item.id) -> next
         dir: files.dirname(item.id)
@@ -1598,14 +1598,14 @@ rerun_ids: fn(rows: [SuiteRow], paths: [String]) -> [String] Never! {
 // once: rows of another compiler source than COMMIT's (`source`, "" when
 // COMMIT's is unknown), and a kit suite of `suites` with no rows.
 row_file_problems: fn(file: RowFile, path: String, source: String, suites: [String]) -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     if source == "" {
         problems.push("this run could not read the compiler source identity of COMMIT, so no rows can match it")
     } else if file.source != source {
         problems.push("{path} holds the rows of compiler source {if file.source == "" -> "(none named)" else -> file.source}, not {source}")
     }
     loop suite in suites {
-        held := false
+        ^held: false
         loop item in file.rows {
             if item.suite == suite {
                 held = true
@@ -1618,7 +1618,7 @@ row_file_problems: fn(file: RowFile, path: String, source: String, suites: [Stri
 }
 
 reuse_plan: fn(ctx: Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
-    plan := ReusePlan{active: false, prior: "", rows: [SuiteRow]{}, paths: [String]{}, ledger: [String]{}, error: ""}
+    ^plan: ReusePlan{active: false, prior: "", rows: [SuiteRow]{}, paths: [String]{}, ledger: [String]{}, error: ""}
     if ctx.options.reuse == "" -> return plan
     plan.active = true
     path: reuse_file(ctx.options.reuse)
@@ -1634,7 +1634,7 @@ reuse_plan: fn(ctx: Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
         plan.error = "{path}: {err.text}"
         return plan
     }
-    problems := row_file_problems(file, path, ctx.source, kit_suites(ctx.native))
+    ^problems: row_file_problems(file, path, ctx.source, kit_suites(ctx.native))
     parsed: git_in(ctx.root, [String]{"rev-parse", "--verify", "{file.commit}^{{commit}}"})
     if parsed.rc != 0 -> problems.push("{path} names {file.commit}, no commit of this repository") else {
         plan.prior = parsed.out.copy()
@@ -1686,7 +1686,7 @@ reuse_plan: fn(ctx: Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
 
 // `prior` without the rows of `ids`, then `fresh`, the rows that ran again.
 merged_rows: fn(prior: [SuiteRow], fresh: [SuiteRow], ids: [String]) -> [SuiteRow] Never! {
-    out := [SuiteRow]{}
+    ^out: [SuiteRow]{}
     loop item in prior {
         if !ids.contains(item.id) -> out.push(item.copy())
     }
@@ -1710,7 +1710,7 @@ release_cache: fn(ctx: Ctx) -[FS]> String Never! {
 ledger_changes: fn(before: String, after: String) -> [String:Bool] Never! {
     old: ledger_ids(before)
     new: ledger_ids(after)
-    out := [String:Bool]{}
+    ^out: [String:Bool]{}
     loop raw in "{before}\n{after}".split("\n").to_list() {
         line: raw.trim()
         fields: line.split("\t").to_list()
@@ -1727,7 +1727,7 @@ ledger_changes: fn(before: String, after: String) -> [String:Bool] Never! {
 // checkout), and the IDs a known-failing line `ledger` added or removed owns.
 // No changed file leaves every row as it ran.
 carried_stale: fn(rows: [SuiteRow], paths: [String], sources: [String:String], ledger: [String:Bool]) -> [String:Bool] Never! {
-    stale := [String:Bool]{}
+    ^stale: [String:Bool]{}
     if paths.len() == 0 -> return stale
     index: change_index(rows, paths)
     loop item in rows {
@@ -1759,13 +1759,13 @@ carried_rows: fn(ctx: Ctx, sources: [String:String]) -[Exec, FS, Time.Wait]> Car
     }
     diff: git_in(ctx.root, [String]{"diff", "--name-only", "--no-renames", file.commit, ctx.sha})
     if diff.rc != 0 -> return no_carry()
-    paths := [String]{}
+    ^paths: [String]{}
     loop line in diff.out.split("\n").to_list() {
         if line.trim() != "" -> paths.push(line.trim().copy())
     }
     ledger: if paths.contains(KNOWN_LEDGER) -> ledger_changes(git_in(ctx.root, [String]{"show", "{file.commit}:{KNOWN_LEDGER}"}).out, read_text(files.join(ctx.tree, KNOWN_LEDGER)) ?? "") else -> [String:Bool]{}
     stale: carried_stale(file.rows, paths, sources, ledger)
-    out := Carried{rows: [SuiteRow]{}, from: file.commit.copy(), dropped: 0}
+    ^out: Carried{rows: [SuiteRow]{}, from: file.commit.copy(), dropped: 0}
     loop item in file.rows {
         if stale.has_key(item.id) -> out.dropped += 1 else -> out.rows.push(item.copy())
     }
@@ -1779,7 +1779,7 @@ KNOWN_LEDGER: "Tests/known-failing.tsv"
 // The row IDs a ledger names (JetTestKit kit_known_load): a line of three
 // tab-separated fields; blank lines and `#` comments name none.
 ledger_ids: fn(text: String) -> [String:Bool] Never! {
-    out := [String:Bool]{}
+    ^out: [String:Bool]{}
     loop raw in text.split("\n").to_list() {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
@@ -1835,19 +1835,19 @@ ChangeIndex: struct {
 }
 
 change_index: fn(rows: [SuiteRow], paths: [String]) -> ChangeIndex Never! {
-    ids := [String:Bool]{}
-    dirs := [String:Bool]{}
+    ^ids: [String:Bool]{}
+    ^dirs: [String:Bool]{}
     loop item in rows {
         ids[item.id.copy()] = true
         dirs[files.dirname(item.id)] = true
     }
-    changed := [String:Bool]{}
-    touched := [String:Bool]{}
-    names := [String]{}
+    ^changed: [String:Bool]{}
+    ^touched: [String:Bool]{}
+    ^names: [String]{}
     loop path in paths {
         changed[path.copy()] = true
-        held := false
-        dir := files.dirname(path)
+        ^held: false
+        ^dir: files.dirname(path)
         loop dir != "" && dir != "/" {
             touched[dir.copy()] = true
             if dirs.has_key(dir) -> held = true
@@ -1881,13 +1881,13 @@ change_reason: fn(id: String, source: String, index: ChangeIndex) -> String Neve
 // `--cases` list runs the opt-in rows that the full kit run leaves opt-in on
 // both sides.
 release_picks: fn(rows: [SuiteRow], rule: ReleaseRule) -> [ReleasePick] Never! {
-    opt_in := [String:Bool]{}
+    ^opt_in: [String:Bool]{}
     loop item in rows {
         if item.status == "OPT-IN" -> opt_in[item.id.copy()] = true
     }
     index: change_index(rows, rule.paths)
-    out := [ReleasePick]{}
-    picked := [String:Bool]{}
+    ^out: [ReleasePick]{}
+    ^picked: [String:Bool]{}
     loop item in rows {
         if picked.has_key(item.id) || opt_in.has_key(item.id) -> next
         reason: if {
@@ -1906,7 +1906,7 @@ release_picks: fn(rows: [SuiteRow], rule: ReleaseRule) -> [ReleasePick] Never! {
 // Each row ID's sources under `tree`: its file, then the `.case` sidecar
 // that holds a `.jet` entry's steps (a project's beside its directory).
 row_sources: fn(tree: String, rows: [SuiteRow]) -[FS]> [String:String] Never! {
-    out := [String:String]{}
+    ^out: [String:String]{}
     loop item in rows {
         if out.has_key(item.id) -> next
         sidecar: if {
@@ -1914,7 +1914,7 @@ row_sources: fn(tree: String, rows: [SuiteRow]) -[FS]> [String:String] Never! {
             item.id.ends_with(".jet") -> "{item.id.removesuffix(".jet")}.case"
             else -> ""
         }
-        text := read_text(files.join(tree, item.id)) ?? ""
+        ^text: read_text(files.join(tree, item.id)) ?? ""
         if sidecar != "" -> text = "{text}\n{read_text(files.join(tree, sidecar)) ?? ""}"
         out[item.id.copy()] = text
     }
@@ -1928,9 +1928,9 @@ row_sources: fn(tree: String, rows: [SuiteRow]) -[FS]> [String:String] Never! {
 // release too (a host skip and an opt-in are the kit's, the same on both
 // sides).
 judged_release: fn(ran: [SuiteRow], candidate: [SuiteRow]) -> [SuiteRow] Never! {
-    seen := [String:Bool]{}
+    ^seen: [String:Bool]{}
     loop item in ran -> seen[item.id.copy()] = true
-    out := ran.copy()
+    ^out: ran.copy()
     loop item in candidate {
         if !seen.has_key(item.id) && (item.status == "PASS" || item.status == "SKIP-HOST" || item.status == "OPT-IN") {
             out.push(item.copy())
@@ -1947,7 +1947,7 @@ judged_release: fn(ran: [SuiteRow], candidate: [SuiteRow]) -> [SuiteRow] Never! 
 // in place of the carried rows of their IDs.
 release_rows: fn(ctx: ^Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time.Wait]> SuiteRun Never! {
     diff: git_in(ctx.root, [String]{"diff", "--name-only", "--no-renames", ctx.baseline.commit, ctx.sha})
-    paths := [String]{}
+    ^paths: [String]{}
     if diff.rc == 0 {
         loop line in diff.out.split("\n").to_list() {
             if line.trim() != "" -> paths.push(line.trim().copy())
@@ -1956,23 +1956,23 @@ release_rows: fn(ctx: ^Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time
     rule: ReleaseRule{every: diff.rc != 0, paths: paths.copy(), known: ledger_ids(read_text(files.join(ctx.release_tree, KNOWN_LEDGER)) ?? ""), sources: row_sources(ctx.tree, candidate.rows)}
     picks: release_picks(candidate.rows, rule)
     carried: carried_rows(ctx, rule.sources)
-    have := [String:Bool]{}
+    ^have: [String:Bool]{}
     loop item in carried.rows -> have[item.id.copy()] = true
-    all_ids := [String:Bool]{}
+    ^all_ids: [String:Bool]{}
     loop item in candidate.rows -> all_ids[item.id.copy()] = true
-    wanted := [String]{}
-    picked := [String:Bool]{}
-    counts := [String:Int]{}
+    ^wanted: [String]{}
+    ^picked: [String:Bool]{}
+    ^counts: [String:Int]{}
     loop pick in picks {
         counts[pick.reason.copy()] = (counts.get(pick.reason) ?? 0) + 1
         picked[pick.id.copy()] = true
         if !have.has_key(pick.id) -> wanted.push(pick.id.copy())
     }
-    out := SuiteRun{rows: [SuiteRow]{}, error: ""}
+    ^out: SuiteRun{rows: [SuiteRow]{}, error: ""}
     loop item in carried.rows {
         if picked.has_key(item.id) -> out.rows.push(item.copy())
     }
-    fresh := SuiteRun{rows: [SuiteRow]{}, error: ""}
+    ^fresh: SuiteRun{rows: [SuiteRow]{}, error: ""}
     if wanted.len() > 0 {
         list: files.join(ctx.work, "kit/release-picks.txt")
         files.write(list, keys_text(wanted)) ?? ()
@@ -1986,7 +1986,7 @@ release_rows: fn(ctx: ^Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time
         files.create_dir_all(files.dirname(cache)) ?? ()
         files.write(cache, row_file_text(RowFile{commit: ctx.sha.copy(), source: "", compiler: ctx.baseline.identity.copy(), rows: merged_rows(carried.rows, fresh.rows, wanted)})) ?? ()
     }
-    reasons := [String]{}
+    ^reasons: [String]{}
     order: [String]{"every row", "failing on s2", "known-failing", "changed", "reading the checkout", "naming a changed file"}
     loop reason in order {
         count: counts.get(reason) ?? 0
@@ -2023,20 +2023,20 @@ reused_suites: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
         }
         return
     }
-    reran := [String]{}
-    verified := [String]{}
-    errors := [String]{}
-    candidate := SuiteRun{rows: [SuiteRow]{}, error: ""}
+    ^reran: [String]{}
+    ^verified: [String]{}
+    ^errors: [String]{}
+    ^candidate: SuiteRun{rows: [SuiteRow]{}, error: ""}
     loop suite in kit_suites(ctx.native) {
         after: suite_part(SuiteRun{rows: plan.rows.copy(), error: ""}, suite).rows
-        changed := rerun_ids(after, plan.paths)
+        ^changed: rerun_ids(after, plan.paths)
         loop item in after {
             if plan.ledger.contains(item.id) && !changed.contains(item.id) {
                 changed.push(item.id.copy())
             }
         }
         // copy: the rows a change reaches stay apart from the failures run again.
-        ids := changed.copy()
+        ^ids: changed.copy()
         loop item in after {
             if !is_untracked(item.status) || changed.contains(item.id) -> next
             // A failure no change reaches is run again: a pass now is a retry's.
@@ -2046,7 +2046,7 @@ reused_suites: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
                 verified.push(item.id.copy())
             }
         }
-        rows := after.copy()
+        ^rows: after.copy()
         if ids.len() > 0 {
             list: files.join(ctx.work, "kit/rerun-{suite}.txt")
             files.write(list, keys_text(ids)) ?? ()
@@ -2072,10 +2072,10 @@ reused_suites: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // listed with both outcomes, and fails the gate unless a disposition names
 // the card that owns it (flaky_row).
 judge_suites: fn(ctx: ^Ctx, kit: [String], release: [SuiteRun], candidate: [SuiteRun]) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
-    firsts := [Compared]{}
-    judged := [[SuiteRow]]{}
-    seen := [String:Bool]{}
-    lines := [String]{}
+    ^firsts: [Compared]{}
+    ^judged: [[SuiteRow]]{}
+    ^seen: [String:Bool]{}
+    ^lines: [String]{}
     loop (index, suite) in kit {
         files.write(files.join(ctx.work, "evidence/kit-release-{suite}.json"), rows_json(release[index].rows)) ?? ()
         files.write(files.join(ctx.work, "evidence/kit-candidate-{suite}.json"), rows_json(candidate[index].rows)) ?? ()
@@ -2095,7 +2095,7 @@ judge_suites: fn(ctx: ^Ctx, kit: [String], release: [SuiteRun], candidate: [Suit
             lines.push(item.id.copy())
         }
     }
-    again := SuiteRun{rows: [SuiteRow]{}, error: ""}
+    ^again: SuiteRun{rows: [SuiteRow]{}, error: ""}
     if lines.len() > 0 {
         ids: files.join(ctx.work, "kit/retry.txt")
         files.write(ids, keys_text(lines)) ?? ()
@@ -2103,20 +2103,20 @@ judge_suites: fn(ctx: ^Ctx, kit: [String], release: [SuiteRun], candidate: [Suit
     }
     loop (index, suite) in kit {
         if release[index].error != "" || candidate[index].error != "" {
-            parts := [String]{}
+            ^parts: [String]{}
             if release[index].error != "" -> parts.push("release: {release[index].error}")
             if candidate[index].error != "" -> parts.push("candidate: {candidate[index].error}")
             row(ctx, "suite:{suite}", "BLOCKED", parts.join("; "))
             next
         }
-        compared := firsts[index].copy()
+        ^compared: firsts[index].copy()
         retried: suite_part(again, suite)
         if retried.rows.len() > 0 {
             compared = compare_suites(judged[index], candidate[index].rows, retried.rows, ctx.dispositions)
         }
         compared.flaky.extend(reused_flaky(ctx.reused_failures, candidate[index].rows, suite, ctx.dispositions))
         ctx.suites.push(SuiteResult{suite: suite.copy(), compared: compared.copy()})
-        open := [LostRow]{}
+        ^open: [LostRow]{}
         loop lost in compared.lost {
             if !lost.disposed -> open.push(lost.copy())
         }
@@ -2158,8 +2158,8 @@ registries_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
         row(ctx, check, "FAIL", why)
         return
     }
-    receipts := [String]{}
-    jobs := [Job]{}
+    ^receipts: [String]{}
+    ^jobs: [Job]{}
     loop at in 0..<REGISTRY_SHARDS {
         shard: "{at + 1}/{REGISTRY_SHARDS}"
         receipt: files.join(dir, "receipt.{at + 1}.json")
@@ -2181,13 +2181,13 @@ registries_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // owning card, the rule every other suite's failing rows follow.
 registries_verdict: fn(texts: [String], sha: String, dispositions: [Disposition]) -> {status: String, detail: String} Never! {
     if texts.len() == 0 -> return {status: "FAIL", detail: "no registry receipt"}
-    untracked := [String]{}
-    carded := 0
-    total := 0
-    passed := 0
-    listed := 0
-    full := -1
-    whole := true
+    ^untracked: [String]{}
+    ^carded: 0
+    ^total: 0
+    ^passed: 0
+    ^listed: 0
+    ^full: -1
+    ^whole: true
     loop text in texts {
         receipt: json.parse(text) ?? return {status: "FAIL", detail: "no registry receipt: {err}"}
         head: text_field(receipt, "head")
@@ -2250,11 +2250,11 @@ speed_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     log: files.join(ctx.work, "logs/speed.log")
     tool: files.join(ctx.tree, SPEED_TOOL)
     vars: with_vars(ctx.vars, [Var]{set_var("JET", ctx.candidate.jet), set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree)})
-    shared := [String]{"--tree", ctx.tree.copy(), "--out", files.join(ctx.work, "evidence/throughput.tsv")}
+    ^shared: [String]{"--tree", ctx.tree.copy(), "--out", files.join(ctx.work, "evidence/throughput.tsv")}
     if sys.get("SLOT_CPUS") == .Val(cpus) && cpus != "" {
         shared.extend([String]{"--cpus", cpus.copy()})
     }
-    gate_args := [String]{ctx.candidate.jet.copy(), tool.copy(), "--against", ctx.release.jet.copy(), "--modes", SPEED_GATE_MODES, "--runs", "{SPEED_RUNS}", "--work", files.join(work, "gate")}
+    ^gate_args: [String]{ctx.candidate.jet.copy(), tool.copy(), "--against", ctx.release.jet.copy(), "--modes", SPEED_GATE_MODES, "--runs", "{SPEED_RUNS}", "--work", files.join(work, "gate")}
     gate_args.extend(shared.copy())
     gate: run_logged(in_dev_shell(ctx.candidate.jet, ctx.tree, true, gate_args), ctx.tree, vars, log, 4 * 3600)
     text: read_text(log) ?? ""
@@ -2268,7 +2268,7 @@ speed_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     accepted: if waiver == .Val(entry) -> "accepted by {entry.card}: {entry.reason}; " else -> ""
     timed: if gate.timed_out -> " (timed out)" else -> ""
     row(ctx, "speed", status, "{accepted}s2 against {ctx.release.name}, {SPEED_GATE_MODES} level, {SPEED_RUNS} rounds: {if said.verdict == "" -> "no verdict, rc={gate.rc}{timed}: {tail_of(log, 3)}" else -> said.detail}; log {log}")
-    cell_args := [String]{ctx.candidate.jet.copy(), tool.copy(), "--modes", SPEED_CELL_MODES, "--runs", "1", "--work", files.join(work, "cell")}
+    ^cell_args: [String]{ctx.candidate.jet.copy(), tool.copy(), "--modes", SPEED_CELL_MODES, "--runs", "1", "--work", files.join(work, "cell")}
     cell_args.extend(shared.copy())
     cell: run_logged(in_dev_shell(ctx.candidate.jet, ctx.tree, true, cell_args), ctx.tree, vars, log, 2 * 3600, true)
     passed: if cell.rc == 0 -> "PASS" else -> "FAIL"
@@ -2283,16 +2283,16 @@ speed_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // CPU change of each mode, then every quantity that failed or could not be
 // judged.
 speed_detail: fn(text: String) -> {verdict: String, detail: String} Never! {
-    verdict := ""
-    in_gate := false
-    cpu := [String]{}
-    flagged := [String]{}
+    ^verdict: ""
+    ^in_gate: false
+    ^cpu: [String]{}
+    ^flagged: [String]{}
     loop line in text.split("\n").to_list() {
         if line.starts_with("speed gate: ") {
             verdict = line.slice(12..<line.len()).trim().copy()
             next
         }
-        words := [String]{}
+        ^words: [String]{}
         loop word in line.split(" ") {
             if word != "" -> words.push(word.copy())
         }
@@ -2310,7 +2310,7 @@ speed_detail: fn(text: String) -> {verdict: String, detail: String} Never! {
         }
     }
     shown: if flagged.len() > 6 -> "{flagged[0..<6].join(" | ")} | ..." else -> flagged.join(" | ")
-    detail := "speed gate {if verdict == "" -> "missing" else -> verdict}"
+    ^detail: "speed gate {if verdict == "" -> "missing" else -> verdict}"
     if cpu.len() > 0 -> detail = "{detail}, {cpu.join(", ")}"
     if flagged.len() > 0 -> detail = "{detail}; {shown}"
     {verdict: verdict, detail: detail}
@@ -2328,7 +2328,7 @@ flaky_owner: fn(found: LostRow) -> String Never! {
 // first outcome the prior run's.
 reused_flaky: fn(failures: [SuiteRow], rows: [SuiteRow], suite: String, dispositions: [Disposition]) -> [LostRow] Never! {
     now: index_rows(rows)
-    out := [LostRow]{}
+    ^out: [LostRow]{}
     loop first in failures {
         if first.suite != suite -> next
         if now.at.get(row_key(first.suite, first.id, first.tier)) == .Val(at) && passes(rows[at].status) {
@@ -2342,10 +2342,10 @@ reused_flaky: fn(failures: [SuiteRow], rows: [SuiteRow], suite: String, disposit
 // case ID or tier must not pass unseen. A registries disposition is judged by
 // registries_verdict, not here.
 unused_dispositions: fn(dispositions: [Disposition], suites: [SuiteResult]) -> [String] Never! {
-    unused := [String]{}
+    ^unused: [String]{}
     loop entry in dispositions {
         if entry.suite == REGISTRY_SUITE || entry.suite == SPEED_ROW -> next
-        used := false
+        ^used: false
         loop result in suites {
             loop lost in result.compared.lost {
                 if lost.disposed && same_disposition(lost.disposition, entry) -> used = true
@@ -2385,7 +2385,7 @@ MergePlan: struct {
 }
 
 merge_plan: fn(ctx: Ctx) -[Exec, Time.Wait]> MergePlan Never! {
-    plan := MergePlan{checkout: "", conflicts: [String]{}, resolutions: [Resolution]{}, fast_forward: false, origin: "", error: ""}
+    ^plan: MergePlan{checkout: "", conflicts: [String]{}, resolutions: [Resolution]{}, fast_forward: false, origin: "", error: ""}
     loop block in git_in(ctx.root, [String]{"worktree", "list", "--porcelain"}).out.split("\n\n").to_list() {
         if plan.checkout == "" && line_value(block, "branch ") == "refs/heads/master" {
             plan.checkout = line_value(block, "worktree ")
@@ -2401,7 +2401,7 @@ merge_plan: fn(ctx: Ctx) -[Exec, Time.Wait]> MergePlan Never! {
         // dev's history of the path: the dev side is the newer edit of the
         // same text.
         ours: git_in(ctx.root, [String]{"rev-parse", "--verify", "-q", "refs/heads/master:{path}"}).out
-        carried := false
+        ^carried: false
         if ours != "" {
             loop commit in git_in(ctx.root, [String]{"log", "--format=%H", ctx.sha, "--", path}).out.split("\n").to_list() {
                 if commit != "" && git_in(ctx.root, [String]{"rev-parse", "--verify", "-q", "{commit}:{path}"}).out == ours {
@@ -2427,13 +2427,13 @@ Gains: struct {
 }
 
 gains_of: fn(ctx: Ctx) -> Gains Never! {
-    gained := 0
+    ^gained: 0
     loop result in ctx.suites -> gained += result.compared.gained.len()
     Gains{suites: gained, jetpack: ctx.jetpack_fixed.len(), total: gained + ctx.jetpack_fixed.len()}
 }
 
 all_lost: fn(ctx: Ctx) -> [LostRow] Never! {
-    out := [LostRow]{}
+    ^out: [LostRow]{}
     loop result in ctx.suites -> out.extend(result.compared.lost.copy())
     out
 }
@@ -2441,7 +2441,7 @@ all_lost: fn(ctx: Ctx) -> [LostRow] Never! {
 report: fn(ctx: Ctx, verdict: String, plan: MergePlan) -> String Never! {
     gains: gains_of(ctx)
     filtered: if ctx.options.filter != "" -> " (filtered by \"{ctx.options.filter}\": not a release)" else -> ""
-    lines := [String]{"# {ctx.next}: release gate of dev {short(ctx.sha, 10)}", "", "Verdict: {verdict}{filtered}", "Seed: {ctx.release.name} ({ctx.release.identity})"}
+    ^lines: [String]{"# {ctx.next}: release gate of dev {short(ctx.sha, 10)}", "", "Verdict: {verdict}{filtered}", "Seed: {ctx.release.name} ({ctx.release.identity})"}
     lines.push("Release column: {column_text(ctx.baseline.name, ctx.baseline.identity, ctx.baseline.jet, ctx.baseline.jet_sha, ctx.baseline.commit)}")
     if ctx.built {
         lines.push("Candidate: {ctx.candidate.identity}")
@@ -2496,7 +2496,7 @@ report: fn(ctx: Ctx, verdict: String, plan: MergePlan) -> String Never! {
             if index < 200 -> lines.push("- {key.replace("\t", ": ")}")
         }
     }
-    resolutions := [String]{}
+    ^resolutions: [String]{}
     loop found in plan.resolutions -> resolutions.push("{found.path} (take {found.pick})")
     lines.extend([String]{"", "## Master merge", "- predicted conflicts: {if plan.conflicts.len() > 0 -> resolutions.join(", ") else -> "none"}"})
     lines.push(if plan.fast_forward -> "- push: the merge of {short(ctx.sha, 10)} into master fast-forwards origin/master" else -> "- push: origin/master {short(plan.origin, 10)} is not an ancestor of local master; update master from origin before the merge")
@@ -2506,17 +2506,17 @@ report: fn(ctx: Ctx, verdict: String, plan: MergePlan) -> String Never! {
 text_dyn: fn(value: String) -> Dyn Never! { Dyn.Text(value.copy()) }
 
 strings_dyn: fn(values: [String]) -> Dyn Never! {
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     loop value in values -> out.push(text_dyn(value))
     Dyn.Array(out)
 }
 
 plan_dyn: fn(plan: MergePlan) -> Dyn Never! {
-    resolutions := [Dyn]{}
+    ^resolutions: [Dyn]{}
     loop found in plan.resolutions {
         resolutions.push(Dyn.Object([String:Dyn]{"path": text_dyn(found.path), "take": text_dyn(found.pick)}))
     }
-    entry := [String:Dyn]{"checkout": text_dyn(plan.checkout), "conflicts": strings_dyn(plan.conflicts), "resolutions": Dyn.Array(resolutions), "fastForward": Dyn.Bool(plan.fast_forward), "origin": text_dyn(plan.origin)}
+    ^entry: [String:Dyn]{"checkout": text_dyn(plan.checkout), "conflicts": strings_dyn(plan.conflicts), "resolutions": Dyn.Array(resolutions), "fastForward": Dyn.Bool(plan.fast_forward), "origin": text_dyn(plan.origin)}
     if plan.error != "" -> entry["error"] = text_dyn(plan.error)
     Dyn.Object(entry)
 }
@@ -2525,11 +2525,11 @@ plan_dyn: fn(plan: MergePlan) -> Dyn Never! {
 // (Receipts.jet parse_admission_receipt, Gate.jet admission_problems).
 release_record: fn(ctx: Ctx, plan: MergePlan, summary: String, scope: String, created: String) -> Dyn Never! {
     gains: gains_of(ctx)
-    checks := [Dyn]{}
+    ^checks: [Dyn]{}
     loop found in ctx.rows {
         checks.push(Dyn.Object([String:Dyn]{"check": text_dyn(found.check), "status": text_dyn(found.status), "detail": text_dyn(found.detail)}))
     }
-    lost := [Dyn]{}
+    ^lost: [Dyn]{}
     loop found in all_lost(ctx) {
         lost.push(Dyn.Object([String:Dyn]{"suite": text_dyn(found.suite), "case": text_dyn(found.id), "tier": text_dyn(found.tier), "was": text_dyn(found.was), "now": text_dyn(found.now), "card": text_dyn(found.disposition.card), "reason": text_dyn(found.disposition.reason)}))
     }
@@ -2595,7 +2595,7 @@ assemble: fn(ctx: Ctx, plan: MergePlan) -[Env, Exec, FS, Time, Time.Wait]> Assem
     if ctx.candidate.jetpack != "" {
         copy_file(ctx.candidate.jetpack, files.join(temp, "jetpack"), true) ?? return Err(assembly("cannot copy jetpack into {temp}: {err}"))
     }
-    cards := [String]{}
+    ^cards: [String]{}
     loop found in lost {
         if !cards.contains(found.disposition.card) -> cards.push(found.disposition.card.copy())
     }
@@ -2677,7 +2677,7 @@ publish_release: fn(ctx: Ctx, dest: String) -[Env, Exec, FS, IO, Time, Time.Wait
         {name: "candidate", argv: joined(release, [String]{"candidate", dest.copy()})},
         {name: "publish", argv: joined(release, [String]{"publish", dest.copy()})},
     }
-    state := Published{ok: false, tagged: false, pushed: false, step: "", detail: "", log: log.copy(), left: [String]{}}
+    ^state: Published{ok: false, tagged: false, pushed: false, step: "", detail: "", log: log.copy(), left: [String]{}}
     loop (index, step) in steps {
         shown: step.argv.join(" ")
         say("release", ctx.log, "publish: {shown}")
@@ -2697,7 +2697,7 @@ publish_release: fn(ctx: Ctx, dest: String) -[Env, Exec, FS, IO, Time, Time.Wait
 }
 
 print_commands: fn(ctx: Ctx, dest: String, plan: MergePlan) -[IO]> Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     if ctx.options.filter != "" {
         lines.extend([String]{"FILTERED RUN (--filter {ctx.options.filter}): {ctx.next} is not a release and was neither tagged nor published. Do not run these commands; jet-use refuses it.", ""})
     } else {
@@ -2718,7 +2718,7 @@ print_commands: fn(ctx: Ctx, dest: String, plan: MergePlan) -[IO]> Never! {
 }
 
 release_names: fn(seeds: String) -[FS]> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     entries: files.list_dir(seeds) ?? return names
     loop entry in entries -> names.push(entry.name.copy())
     names
@@ -2759,7 +2759,7 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     remove_tree(work)
     work_dirs: [String]{"logs", "evidence", "kit", "tmp"}
     loop dir in work_dirs -> files.create_dir_all(files.join(work, dir)) ?? ()
-    ctx := new_ctx(options, pre, work)
+    ^ctx: new_ctx(options, pre, work)
     say("release", ctx.log, "release gate of {short(ctx.sha, 10)}: chain seed {ctx.release.name}; release column {column_text(ctx.baseline.name, ctx.baseline.identity, ctx.baseline.jet, ctx.baseline.jet_sha, ctx.baseline.commit)}; next name {ctx.next}; work {work}")
     if export_commit(ctx.root, ctx.sha, ctx.tree) == .Val(why) {
         term.eprint("admit: {why}")
@@ -2803,7 +2803,7 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     }
     launch: early && failed_rows(ctx).len() == 0
     batch: if launch -> suite_batch(ctx, "candidate", CORPORA_PROFILE, "", [String]{}, options.shards) else -> SuiteBatch{labels: [String]{}, jobs: [Job]{}}
-    finished := [Finished]{}
+    ^finished: [Finished]{}
     task.group candidate_rows(limit: 1) {
         started: task run_batch(batch.jobs.copy())
         if ctx.built {
@@ -2812,7 +2812,7 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
         }
         finished = started.join() ?? [Finished]{}
     }
-    preflight := [Dyn]{}
+    ^preflight: [Dyn]{}
     loop found in ctx.rows {
         preflight.push(Dyn.Object([String:Dyn]{"check": text_dyn(found.check), "status": text_dyn(found.status), "detail": text_dyn(found.detail)}))
     }
@@ -2844,7 +2844,7 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     scratch: [String]{ctx.tree, ctx.release_tree, files.join(work, "pack")}
     loop dir in scratch -> remove_tree(dir)
     if verdict != "PASS" {
-        names := [String]{}
+        ^names: [String]{}
         loop found in failed -> names.push("{found.check} {found.status}")
         print("FAIL: {ctx.next} not released; {ctx.seeds} is unchanged. {names.join(", ")}. Report: {files.join(work, "REPORT.md")}")
         return 1
@@ -2864,7 +2864,7 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
                 files.rename(released.dest, aside) ?? ()
                 print("FAIL: {why}. {ctx.seeds} has no {ctx.next}: the assembled release moved to {aside}.")
             } else {
-                lines := [String]{"FAIL: {why}. Tag {ctx.next} is on origin, but {released.dest} is not admitted (no current.env): do not jet-use it.", "Once the cause is fixed, finish the publication from {ctx.root}, then admit it:"}
+                ^lines: [String]{"FAIL: {why}. Tag {ctx.next} is on origin, but {released.dest} is not admitted (no current.env): do not jet-use it.", "Once the cause is fixed, finish the publication from {ctx.root}, then admit it:"}
                 loop command in published.left -> lines.push("  {command}")
                 lines.push("  cp {files.join(work, "current.env")} {released.dest}/current.env")
                 print(lines.join("\n"))
@@ -2899,7 +2899,7 @@ admit_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
     }
     files.create_dir_all(pre.work_root) ?? ()
     // One release run at a time: the slot run below inherits the lock.
-    held := false
+    ^held: false
     if sys.get("JET_RELEASE_LOCK_HELD") == None {
         lock_path: files.join(pre.work_root, "release.lock")
         _lock: files.lock(lock_path, Val(time.duration_ms(1))) ?? {
@@ -2918,7 +2918,7 @@ admit_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
 // again under `Tools/Agent/Chain.jet slot --release`.
 admit_in_slot: fn(args: [String], root: String, options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     if sys.get("JET_RELEASE_SLOT") != .Val("") && sys.get("SLOT_CPUS") == None {
-        argv := [String]{pre.release.jet.copy(), files.join(root, "Tools/Agent/Chain.jet"), "slot", "--release", "--", pre.release.jet.copy(), "run", files.join(root, "Tools/Release/Main.jet"), "--", "admit"}
+        ^argv: [String]{pre.release.jet.copy(), files.join(root, "Tools/Agent/Chain.jet"), "slot", "--release", "--", pre.release.jet.copy(), "run", files.join(root, "Tools/Release/Main.jet"), "--", "admit"}
         argv.extend(args.copy())
         inner: process.cmd(argv).cwd(root).env("JET_RELEASE_LOCK_HELD", "1").env("JET_COMPILER_IDENTITY", pre.release.identity).env("JET_TOOLCHAIN_ROOT", root).env_remove("JET").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
             term.eprint("admit: {pre.release.jet} Tools/Agent/Chain.jet slot could not start: {err}")
@@ -2935,11 +2935,11 @@ admit_in_slot: fn(args: [String], root: String, options: AdmitOptions, pre: Pre)
 // from the sources --source names. It reports every problem, and writes no file
 // when there is any.
 rows_main: fn(args: [String], root: String) -[Exec, FS, IO, Time.Wait]> Int Never! {
-    flags := [String:String]{}
-    commit := ""
-    results := [String]{}
-    problems := [String]{}
-    index := 0
+    ^flags: [String:String]{}
+    ^commit: ""
+    ^results: [String]{}
+    ^problems: [String]{}
+    ^index: 0
     loop index < args.len() {
         arg: args[index]
         if arg == "--source" || arg == "--compiler" || arg == "--out" {
@@ -2966,8 +2966,8 @@ rows_main: fn(args: [String], root: String) -[Exec, FS, IO, Time.Wait]> Int Neve
     if compiler == "" -> problems.push("--compiler IDENTITY is required")
     if out == "" -> problems.push("--out FILE is required")
     if results.len() == 0 -> problems.push("no RESULTS file")
-    full := ""
-    kit := [String]{}
+    ^full: ""
+    ^kit: [String]{}
     if commit != "" {
         parsed: git_in(root, [String]{"rev-parse", "--verify", "{commit}^{{commit}}"})
         if parsed.rc != 0 -> problems.push("{commit} is no commit of {root}") else {
@@ -2979,7 +2979,7 @@ rows_main: fn(args: [String], root: String) -[Exec, FS, IO, Time.Wait]> Int Neve
         if listed.error != "" -> problems.push(listed.error.copy())
         kit = kit_suites(listed.suites)
     }
-    rows := [SuiteRow]{}
+    ^rows: [SuiteRow]{}
     loop path in results {
         text: read_text(path) ?? ""
         found: rows_of(array_field(json.parse(text) ?? Dyn.Null, "results"))
@@ -2989,9 +2989,9 @@ rows_main: fn(args: [String], root: String) -[Exec, FS, IO, Time.Wait]> Int Neve
         }
         rows.extend(found)
     }
-    counts := [String]{}
+    ^counts: [String]{}
     loop suite in kit {
-        count := 0
+        ^count: 0
         loop item in rows {
             if item.suite == suite -> count += 1
         }

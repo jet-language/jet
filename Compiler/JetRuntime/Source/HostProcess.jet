@@ -96,12 +96,12 @@ host_pid: fn() -> I64 { host_call(I64{39}, I64{0}, I64{0}, I64{0}) }
     if (jet_scheduler_native_propagate() != I64{0}) {
         return
     }
-    _ := host_call(I64{3}, native, I64{0}, I64{0})
+    ^_: host_call(I64{3}, native, I64{0}, I64{0})
 }
 
 #Export(c) jet_std_os_sync: fn() {
     jet_rt_stdout_flush()
-    _ := host_call(I64{162}, I64{0}, I64{0}, I64{0})
+    ^_: host_call(I64{162}, I64{0}, I64{0}, I64{0})
 }
 
 // Under the process root (jet_rt_main) the exit is a root stop: every frame
@@ -115,7 +115,7 @@ host_pid: fn() -> I64 { host_call(I64{39}, I64{0}, I64{0}, I64{0}) }
         return
     }
     if (jet_rt_stop_domain() == I64{1}) {
-        _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, status)
+        ^_: jet_rt_root_publish_rendered(I64{0}, I64{0}, status)
         return
     }
     jet_rt_process_exit(status)
@@ -214,7 +214,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     if (jet_scheduler_native_propagate() != I64{0}) {
         return
     }
-    status := I64{0}
+    ^status: I64{0}
     #Unsafe("rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action") {
         status = os_syscall_stack4_i64(I64{13}, native, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
     }
@@ -256,7 +256,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     thread_zero(buffer, I64{16})
     // `buffer` owns the sixteen-byte struct rlimit64 the kernel writes; the
     // caller lends the tuple's Bool byte and three Int words.
-    result := I64{0}
+    ^result: I64{0}
     #Unsafe("buffer owns the sixteen-byte struct rlimit64 the kernel writes") {
         result = host_syscall(I64{302}, I64{0}, native, I64{0}, buffer, I64{0}, I64{0})
     }

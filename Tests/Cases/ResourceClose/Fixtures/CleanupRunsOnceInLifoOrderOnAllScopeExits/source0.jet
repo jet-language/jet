@@ -9,22 +9,22 @@ Resource: struct {
 fail: fn() -> Int Err! { return Err("stop") }
 
 returned: fn() {
-    resource := Resource{name: "return"}
+    ^resource: Resource{name: "return"}
     defer close(resource)
     print("return body")
     return
 }
 
 questioned: fn() -> Int Err! {
-    resource := Resource{name: "question"}
+    ^resource: Resource{name: "question"}
     defer close(resource)
-    value := fail()
+    ^value: fail()
     return Ok(value)
 }
 
 looped: fn() {
     loop n in [0, 1] {
-        resource := Resource{name: if n == 0 -> "continue" else -> "break"}
+        ^resource: Resource{name: if n == 0 -> "continue" else -> "break"}
         defer close(resource)
         if n == 0 -> next
         break
@@ -32,15 +32,15 @@ looped: fn() {
 }
 
 run: fn() {
-    first := Resource{name: "a"}
+    ^first: Resource{name: "a"}
     defer close(first)
-    second := Resource{name: "b"}
+    ^second: Resource{name: "b"}
     defer close(second)
     print("body")
     returned()
     questioned().drop("this path intentionally proves `?` cleanup")
     looped()
-    unwind := Resource{name: "unwind"}
+    ^unwind: Resource{name: "unwind"}
     defer close(unwind)
     panic("boom")
 }

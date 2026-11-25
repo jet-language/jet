@@ -33,7 +33,7 @@ StepLog: struct {
 
     // The step as persisted: secrets in captured output are redacted.
     to_tree: fn(self) -> Dyn Never! {
-        fields := [String:Dyn]{}
+        ^fields: [String:Dyn]{}
         fields["index"] = Dyn.Int(self.index)
         fields["total"] = Dyn.Int(self.total)
         fields["name"] = Dyn.Text(self.name.copy())
@@ -132,9 +132,9 @@ BuildAttempt: struct {
 
     // The persisted JSON document, fields in their wire order.
     to_json: fn(self) -> String Never! {
-        steps := [Dyn]{}
+        ^steps: [Dyn]{}
         loop step in self.steps -> steps.push(step.to_tree())
-        fields := [String:Dyn]{}
+        ^fields: [String:Dyn]{}
         fields["id"] = Dyn.Text(self.id.copy())
         fields["package"] = Dyn.Text(self.package.copy())
         fields["reference"] = Dyn.Text(self.reference.copy())
@@ -185,7 +185,7 @@ recipe_recover_build_scratch: fn(hangar_dir: String) -[FS]> Int StoreError! {
     if info.is_symlink || !info.is_dir {
         return Err(StoreError.InvalidData("failed-build scratch root is not a real directory"))
     }
-    recovered := 0
+    ^recovered: 0
     entries: files.list_dir(root)
     loop entry in entries {
         if !entry.name.starts_with(BUILD_DEBUG_STAGE_PREFIX) -> next
@@ -228,7 +228,7 @@ recipe_debug_latest_json: fn(hangar_dir: String, package: String) -[FS]> String?
 // directory and the attempt is re-persisted with paths in the user Hangar.
 recipe_promote_failed_attempt: fn(source_hangar: String, target_hangar: String, package: String) -[FS, Env, Rand]> Bool StoreError! {
     found: recipe_debug_latest(source_hangar, package)
-    attempt := found ?? return Ok(false)
+    ^attempt: found ?? return Ok(false)
     if attempt.scratch_dir == "" -> return Ok(false)
     recipe_debug_validate_id(attempt.id)
     source_root: files.canonicalize(files.join(source_hangar, BUILD_DEBUG_SCRATCH_ROOT))
@@ -260,7 +260,7 @@ recipe_debug_promote_stage: fn(stage: String, source_scratch: String, target_scr
 
 // `jet logs` text: a header, then each step's status and trimmed output.
 recipe_debug_text_logs: fn(attempt: BuildAttempt) -> String Never! {
-    out := "{attempt.package}  {attempt.status}  {attempt.reference}\n"
+    ^out: "{attempt.package}  {attempt.status}  {attempt.reference}\n"
     loop step in attempt.steps {
         out = "{out}[step {step.index}/{step.total} {step.name}] {step.status}\n"
         if step.stdout.trim() != "" -> out = "{out}{step.stdout.trim_end()}\n"
@@ -271,7 +271,7 @@ recipe_debug_text_logs: fn(attempt: BuildAttempt) -> String Never! {
 
 // `jet explain` text for one attempt.
 recipe_debug_explain: fn(attempt: BuildAttempt) -> String Never! {
-    failed := "-"
+    ^failed: "-"
     loop step in attempt.steps {
         if step.index == attempt.failed_step {
             failed = "step {step.index}/{step.total} ({step.command})"
@@ -285,7 +285,7 @@ recipe_debug_explain: fn(attempt: BuildAttempt) -> String Never! {
 // ASCII alphanumerics, `-`, `_` and `.` kept, everything else `_`; an empty,
 // `.` or `..` result becomes `_`.
 recipe_debug_safe_name: fn(value: String) -> String Never! {
-    name := ""
+    ^name: ""
     loop scalar in value.chars() {
         text: "{scalar}"
         code: if text.bytes().len() == 1 -> (Int{text.bytes()[0]}) else -> 0
@@ -327,7 +327,7 @@ recipe_debug_parse_attempt: fn(text: String) -> BuildAttempt StoreError! {
         }
     }
     object: pkg_json_object(tree) ?? return Err(StoreError.InvalidData("build attempt is not a JSON object"))
-    attempt := BuildAttempt{
+    ^attempt: BuildAttempt{
         id: recipe_debug_str_field(object, "id"),
         package: recipe_debug_str_field(object, "package"),
         reference: recipe_debug_str_field(object, "reference"),
@@ -472,7 +472,7 @@ recipe_debug_write_atomic: fn(path: String, bytes: [U8]) -[FS, Env, Rand]> Store
 }
 
 recipe_debug_publish_partial: fn(partial: String, path: String, bytes: [U8]) -[FS]> StoreError! {
-    out := files.create(partial, if_exists: .Refuse)
+    ^out: files.create(partial, if_exists: .Refuse)
     out.write_bytes(bytes)
     out.fsync()
     files.rename(partial, path)

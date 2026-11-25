@@ -77,7 +77,7 @@ BinderToolOutput: struct {
 // not exist is `ToolMissing(tool)`; any other launch failure is `IO`. The
 // caller decides what a timeout or a failing status means.
 pkg_binder_supervise: fn(argv: [String], cwd: String?, env: [{name: String, value: String}], limit: Int, timeout: Duration, tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
-    spec := binder_core_process.cmd(argv).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(limit)
+    ^spec: binder_core_process.cmd(argv).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(limit)
     if cwd == {
         .Val(directory) -> { spec = spec.cwd(directory) }
         .None -> {}
@@ -188,7 +188,7 @@ pkg_binder_remove_file_quiet: fn(path: String) -[FS]> { binder_core_files.remove
 // `str::lines`: split on `\n`, drop one trailing `\r` per line, and no final
 // empty line after a trailing newline.
 pkg_binder_lines: fn(text: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     if text == "" -> return out
     parts: text.split("\n").to_list()
     loop index in 0..<parts.len() {
@@ -203,8 +203,8 @@ pkg_binder_lines: fn(text: String) -> [String] Never! {
 // `str::split_whitespace`.
 pkg_binder_words: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    out := [String]{}
-    cursor := 0
+    ^out: [String]{}
+    ^cursor: 0
     loop cursor < raw.len() {
         cursor = pkg_bytes_skip_space(raw, cursor)
         if cursor >= raw.len() -> break
@@ -219,7 +219,7 @@ pkg_binder_words: fn(text: String) -> [String] Never! {
 pkg_binder_find: fn(text: String, needle: String, from: Int) -> Int Never! {
     raw: text.bytes()
     pattern: needle.bytes()
-    cursor := if from < 0 -> 0 else -> from
+    ^cursor: if from < 0 -> 0 else -> from
     loop cursor + pattern.len() <= raw.len() {
         if pkg_bytes_starts_with(raw, cursor, pattern) -> return cursor
         cursor += 1
@@ -231,7 +231,7 @@ pkg_binder_find: fn(text: String, needle: String, from: Int) -> Int Never! {
 pkg_binder_rfind: fn(text: String, needle: String) -> Int Never! {
     raw: text.bytes()
     pattern: needle.bytes()
-    cursor := raw.len() - pattern.len()
+    ^cursor: raw.len() - pattern.len()
     loop cursor >= 0 {
         if pkg_bytes_starts_with(raw, cursor, pattern) -> return cursor
         cursor -= 1
@@ -252,7 +252,7 @@ pkg_binder_tail: fn(text: String, start: Int) -> String Never! {
 
 // The first `count` characters.
 pkg_binder_take_chars: fn(text: String, count: Int) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop scalar in text.chars() {
         if out.len() >= count -> break
         out.push("{scalar}")
@@ -262,21 +262,21 @@ pkg_binder_take_chars: fn(text: String, count: Int) -> String Never! {
 
 // `str::trim_end_matches(pattern)` for a non-empty pattern.
 pkg_binder_trim_end_matches: fn(text: String, pattern: String) -> String Never! {
-    out := text
+    ^out: text
     loop pattern != "" && out.ends_with(pattern) -> out = out.removesuffix(pattern)
     out
 }
 
 // `str::trim_matches(pattern)` for a non-empty pattern.
 pkg_binder_trim_matches: fn(text: String, pattern: String) -> String Never! {
-    out := text
+    ^out: text
     loop pattern != "" && out.starts_with(pattern) -> out = out.removeprefix(pattern)
     pkg_binder_trim_end_matches(out, pattern)
 }
 
 // ASCII-only uppercase (`str::to_ascii_uppercase`).
 pkg_binder_ascii_upper: fn(value: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in value.bytes() {
         code: Int{byte}
         if {
@@ -289,8 +289,8 @@ pkg_binder_ascii_upper: fn(value: String) -> String Never! {
 
 // A `u64` length field in little-endian bytes (`(n as u64).to_le_bytes()`).
 pkg_binder_u64_le: fn(value: Int) -> [U8] Never! {
-    out := [U8]{}
-    rest := value
+    ^out: [U8]{}
+    ^rest: value
     loop _ in 0..<8 {
         out.push(checked(U8{rest % 256}) ?? U8{0})
         rest = rest /% 256

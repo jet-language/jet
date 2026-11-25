@@ -14,9 +14,9 @@ run: fn() {
     path: files.join(root.path, "s")
     listener: net.unix_listen(path) ?? panic("listen: {err}")
     peer: process.cmd([String]{"python3", "peer.py", path}).stdout(.Capture).stderr(.Capture).spawn() ?? panic("peer: {err}")
-    server := net.unix_accept(listener) ?? panic("accept: {err}")
+    ^server: net.unix_accept(listener) ?? panic("accept: {err}")
 
-    memory := sys.shared_memory(4096) ?? panic("shared memory: {err}")
+    ^memory: sys.shared_memory(4096) ?? panic("shared memory: {err}")
     memory.write(0, "jet".bytes()) ?? panic("write: {err}")
     descriptor: memory.descriptor() ?? panic("descriptor: {err}")
     net.unix_send(server, [U8]{1}, [sys.Fd]{descriptor}) ?? panic("send: {err}")
@@ -32,7 +32,7 @@ run: fn() {
 
 // One newline-ended line from the peer, without its newline.
 receive_line: fn(stream: ^net.UnixStream) -> String {
-    line := [U8]{}
+    ^line: [U8]{}
     loop {
         message: net.unix_receive(stream, 256) ?? panic("receive: {err}")
         if message.bytes.len() == 0 -> panic("the peer hung up mid-line")

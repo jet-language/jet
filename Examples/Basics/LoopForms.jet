@@ -21,18 +21,18 @@
 // body.
 run: fn() {
     // 1. Infinite loop, left with `break`.
-    n := 0
+    ^n: 0
     loop {
         n += 1
         if n == 3 -> break
     }
     print("infinite stopped at {n}")
     // 2. Conditional loop.
-    c := 0
+    ^c: 0
     loop c < 3 -> c += 1
     print("conditional ran to {c}")
     // 3. Iterator loop over a list (item only).
-    sum := 0
+    ^sum: 0
     loop x in [10, 20, 30] -> sum += x
     print("iterator sum {sum}")
     // 4. Two-binding over a list — index comes free, no bounds math. The
@@ -42,7 +42,7 @@ run: fn() {
     // 5. Index-only, always in bounds for this source.
     loop i in items.indexes() -> print("idx {i}")
     // 6. Two-name iteration over a map (sorted by key).
-    scores := [String:Int]{}
+    ^scores: [String:Int]{}
     scores["ana"] = 1
     scores["bo"] = 2
     loop (name, score) in scores -> print("{name} = {score}")
@@ -62,7 +62,7 @@ run: fn() {
 }
 
 counted_loop_lesson: fn() {
-    sum := 0
+    ^sum: 0
     loop i in 0..<5 -> sum += i
     print(sum)
 }
@@ -117,7 +117,7 @@ range_step_lesson: fn() {
 // the end when it lands on it. Computed ends that are backward stay empty,
 // so `0..n - 1` runs zero times for an empty list.
 count_items: fn(n: Int) -> Int {
-    turns := 0
+    ^turns: 0
     loop _ in 0..n - 1 -> turns += 1
     turns
 }
@@ -129,7 +129,7 @@ range_countdown_lesson: fn() {
     print(count_items(3))
     start: 4
     stop: 1
-    empty := 0
+    ^empty: 0
     loop _ in start..stop -> empty += 1
     print(empty)
 }

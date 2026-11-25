@@ -108,7 +108,7 @@ write_len_point: fn(out: ^[U8], limit: Int, grp: ecp.EcpGroup, format: ecp.Point
 
 /// The proof challenge H(G, V, X, id) mod N (7.4.2.2.2.1).
 ecjpake_hash: fn(md: hashes.Md, grp: ecp.EcpGroup, format: ecp.PointFormat, g: ecp.Point, v: ecp.Point, x: ecp.Point, id: [U8]) -> bn.Mpi ecp.EcpError! {
-    buf := [U8]{}
+    ^buf: [U8]{}
     write_len_point(buf, HASH_BUF_LEN, grp, format, g)
     write_len_point(buf, HASH_BUF_LEN, grp, format, v)
     write_len_point(buf, HASH_BUF_LEN, grp, format, x)
@@ -178,7 +178,7 @@ kkp_write: fn<R: RNG>(md: hashes.Md, grp: ecp.EcpGroup, format: ecp.PointFormat,
 /// Read the peer's round-one ECJPAKEKeyKPPairList, exactly all of buf
 /// (mbedtls_ecjpake_read_round_one).
 ecjpake_read_round_one: fn(ctx: ^ECJPAKEContext, buf: [U8]) ecp.EcpError! {
-    p := 0
+    ^p: 0
     id: id_peer(ctx)
     ctx.pp1 = kkp_read(ctx.md, ctx.grp, ctx.point_format, ctx.grp.g, id, buf, p)
     ctx.pp2 = kkp_read(ctx.md, ctx.grp, ctx.point_format, ctx.grp.g, id, buf, p)
@@ -188,7 +188,7 @@ ecjpake_read_round_one: fn(ctx: ^ECJPAKEContext, buf: [U8]) ecp.EcpError! {
 /// Our round-one ECJPAKEKeyKPPairList of two fresh key pairs, at most
 /// limit bytes (mbedtls_ecjpake_write_round_one).
 ecjpake_write_round_one: fn<R: RNG>(ctx: ^ECJPAKEContext, limit: Int, rng: ^R) -> [U8] ecp.EcpError! {
-    out := [U8]{}
+    ^out: [U8]{}
     id: id_mine(ctx)
     a: kkp_write(ctx.md, ctx.grp, ctx.point_format, ctx.grp.g, id, out, limit, rng)
     ctx.xm1 = a.d.move()
@@ -212,7 +212,7 @@ add3: fn(grp: ecp.EcpGroup, a: ecp.Point, b: ecp.Point, c: ecp.Point) -> ecp.Poi
 /// C: 7.4.2.5, S: 7.4.2.6). Its base is G = Xm1 + Xm2 + Xp1.
 ecjpake_read_round_two: fn(ctx: ^ECJPAKEContext, buf: [U8]) ecp.EcpError! {
     g: add3(ctx.grp, ctx.pm1, ctx.pm2, ctx.pp1)
-    p := 0
+    ^p: 0
     if ctx.role == .Client {
         group: ecp.tls_read_group_id(buf)
         if group.id != ctx.grp.id -> return Err(.FeatureUnavailable)
@@ -228,7 +228,7 @@ ecjpake_mul_secret: fn<R: RNG>(x: bn.Mpi, s: bn.Mpi, n: bn.Mpi, rng: ^R, negate:
     b: bn.fill_random(16, rng) ?? return Err(.Mpi(err))
     bnn: bn.mul_mpi(b, n) ?? return Err(.Mpi(err))
     blinded: bn.add_mpi(bnn, s) ?? return Err(.Mpi(err))
-    prod := bn.mul_mpi(x, blinded) ?? return Err(.Mpi(err))
+    ^prod: bn.mul_mpi(x, blinded) ?? return Err(.Mpi(err))
     if negate -> prod.s = 0 - prod.s
     out: bn.mod_mpi(prod, n) ?? return Err(.Mpi(err))
     Ok(out)
@@ -241,7 +241,7 @@ ecjpake_write_round_two: fn<R: RNG>(ctx: ECJPAKEContext, limit: Int, rng: ^R) ->
     g: add3(ctx.grp, ctx.pp1, ctx.pp2, ctx.pm1)
     xm: ecjpake_mul_secret(ctx.xm2, ctx.s, ctx.grp.n, rng)
     big_xm: ecp.ecp_mul(ctx.grp, xm, g, rng)
-    out := [U8]{}
+    ^out: [U8]{}
     if ctx.role == .Server {
         group: ecp.tls_write_group(ctx.grp, limit)
         loop b in group -> out.push(b)
@@ -266,7 +266,7 @@ derive_k: fn<R: RNG>(ctx: ECJPAKEContext, rng: ^R) -> ecp.Point ecp.EcpError! {
 ecjpake_derive_secret: fn<R: RNG>(ctx: ECJPAKEContext, limit: Int, rng: ^R) -> [U8] ecp.EcpError! {
     if limit < hashes.md_size(ctx.md) -> return Err(.BufferTooSmall)
     k: derive_k(ctx, rng)
-    kx := bn.write_binary(k.x, (ctx.grp.pbits + 7) /% 8) ?? return Err(.Mpi(err))
+    ^kx: bn.write_binary(k.x, (ctx.grp.pbits + 7) /% 8) ?? return Err(.Mpi(err))
     pms: hashes.hash(ctx.md, kx)
     core.crypto.wipe(kx)
     Ok(pms)

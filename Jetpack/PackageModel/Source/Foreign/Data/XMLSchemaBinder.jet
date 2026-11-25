@@ -11,10 +11,10 @@ XML_NAMESPACE_URI: "http://www.w3.org/XML/1998/namespace"
 XMLNS_NAMESPACE_URI: "http://www.w3.org/2000/xmlns/"
 
 pkg_data_bind_xml: fn(input: String, root_name: String?) -> SchemaBuilder DataBindError! {
-    parser := XMLParser{chars: pkg_data_scalars(input), pos: 0}
+    ^parser: XMLParser{chars: pkg_data_scalars(input), pos: 0}
     root: parser.parse_document()
     preferred: root_name ?? pkg_data_type_name(root.name)
-    builder := SchemaBuilder.new()
+    ^builder: SchemaBuilder.new()
     _: pkg_data_add_xml_record(builder, preferred, [XMLNode]{root})
     Ok(builder)
 }
@@ -181,9 +181,9 @@ XMLParser: struct {
 
     parse_document: fn(^self) -> XMLNode DataBindError! {
         if self.peek() == pkg_data_scalar_of(0xFEFF) -> self.pos += 1
-        declaration_allowed := true
-        stack := [XMLNode]{}
-        root := XMLNode?{None}
+        ^declaration_allowed: true
+        ^stack: [XMLNode]{}
+        ^root: XMLNode?{None}
         loop !self.at_end() {
             if self.starts_with_xml_declaration() {
                 if !declaration_allowed {
@@ -268,9 +268,9 @@ XMLParser: struct {
             }
             self.pos += 1
             raw_name: self.read_name()
-            raw_attrs := [{name: String, value: String}]{}
-            attr_names := [String]{}
-            self_closing := false
+            ^raw_attrs: [{name: String, value: String}]{}
+            ^attr_names: [String]{}
+            ^self_closing: false
             loop {
                 self.skip_space()
                 if self.starts_with("/>") {
@@ -303,8 +303,8 @@ XMLParser: struct {
             inherited: if stack.len() > 0 -> stack[stack.len() - 1].namespaces else -> pkg_data_xml_initial_namespaces()
             namespaces: pkg_data_xml_resolve_namespaces(inherited, raw_attrs)
             name: pkg_data_xml_resolve_name(raw_name, namespaces, true)
-            attrs := [{name: String, value: String}]{}
-            expanded_names := [String]{}
+            ^attrs: [{name: String, value: String}]{}
+            ^expanded_names: [String]{}
             loop attr in raw_attrs {
                 if attr.name == "xmlns" || attr.name.starts_with("xmlns:") -> next
                 expanded: pkg_data_xml_resolve_name(attr.name, namespaces, false)
@@ -344,7 +344,7 @@ pkg_data_xml_initial_namespaces: fn() -> [String:String] Never! {
 
 // The namespace bindings in scope after an element's `xmlns` attributes.
 pkg_data_xml_resolve_namespaces: fn(inherited: [String:String], attrs: [{name: String, value: String}]) -> [String:String] DataBindError! {
-    namespaces := inherited
+    ^namespaces: inherited
     loop attr in attrs {
         if !attr.name.starts_with("xmlns:") {
             if attr.name == "xmlns" -> namespaces[""] = attr.value
@@ -436,7 +436,7 @@ pkg_data_xml_character_allowed: fn(code: Int) -> Bool Never! {
 // allowed character.
 pkg_data_validate_xml_entities: fn(text: String) DataBindError! {
     chars: pkg_data_scalars(text)
-    index := 0
+    ^index: 0
     loop index < chars.len() {
         if chars[index] != "&" {
             index += 1
@@ -477,7 +477,7 @@ pkg_data_xml_entity_valid: fn(entity: String) -> Bool Never! {
 pkg_data_parse_radix: fn(digits: String, radix: Int) -> Int? Never! {
     raw: digits.bytes()
     if raw.len() == 0 -> return None
-    total := 0
+    ^total: 0
     loop byte in raw {
         code: Int{byte}
         digit: if {
@@ -494,7 +494,7 @@ pkg_data_parse_radix: fn(digits: String, radix: Int) -> Int? Never! {
 }
 
 pkg_data_xml_child_elements: fn(node: XMLNode) -> [XMLNode] Never! {
-    out := [XMLNode]{}
+    ^out: [XMLNode]{}
     loop content in node.content {
         if content == {
             .Element(child) -> out.push(child.copy())
@@ -519,8 +519,8 @@ pkg_data_xml_is_simple: fn(node: XMLNode) -> Bool Never! {
 // then sorted child element names.
 pkg_data_add_xml_record: fn(builder: ^SchemaBuilder, preferred: String, nodes: [XMLNode]) -> String Never! {
     record: builder.begin_record(preferred)
-    attr_names := [String]{}
-    child_names := [String]{}
+    ^attr_names: [String]{}
+    ^child_names: [String]{}
     loop node in nodes {
         loop attr in node.attrs {
             if !attr_names.contains(attr.name) -> attr_names.push(attr.name)
@@ -531,9 +531,9 @@ pkg_data_add_xml_record: fn(builder: ^SchemaBuilder, preferred: String, nodes: [
     }
     attr_names.sort()
     child_names.sort()
-    fields := [FieldSeed]{}
+    ^fields: [FieldSeed]{}
     loop attr in attr_names {
-        present := 0
+        ^present: 0
         loop node in nodes {
             loop candidate in node.attrs {
                 if candidate.name == attr {
@@ -544,7 +544,7 @@ pkg_data_add_xml_record: fn(builder: ^SchemaBuilder, preferred: String, nodes: [
         }
         fields.push(FieldSeed{wire_name: "@{attr}", ty: BoundType.Scalar("String"), optional: present != nodes.len(), note: None})
     }
-    simple_count := 0
+    ^simple_count: 0
     loop node in nodes {
         if pkg_data_xml_is_simple(node) -> simple_count += 1
     }
@@ -556,11 +556,11 @@ pkg_data_add_xml_record: fn(builder: ^SchemaBuilder, preferred: String, nodes: [
         fields.push(FieldSeed{wire_name: "$content", ty: BoundType.Scalar("Dyn"), optional: simple_count > 0, note: None})
     }
     loop child_name in child_names {
-        children := [XMLNode]{}
-        present_count := 0
-        repeated := false
+        ^children: [XMLNode]{}
+        ^present_count: 0
+        ^repeated: false
         loop node in nodes {
-            matching := [XMLNode]{}
+            ^matching: [XMLNode]{}
             loop child in pkg_data_xml_child_elements(node) {
                 if child.name == child_name -> matching.push(child)
             }
@@ -568,7 +568,7 @@ pkg_data_add_xml_record: fn(builder: ^SchemaBuilder, preferred: String, nodes: [
             if matching.len() > 1 -> repeated = true
             loop child in matching -> children.push(child)
         }
-        all_simple := true
+        ^all_simple: true
         loop child in children {
             if child.attrs.len() > 0 || !pkg_data_xml_is_simple(child) -> all_simple = false
         }

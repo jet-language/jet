@@ -17,17 +17,17 @@ cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> Report
         .Tool -> "tool"
     }
     named: file.as_str()
-    snapshot := ReportOrigin?{None}
-    origin := DiagnosticRecordOrigin?{None}
+    ^snapshot: ReportOrigin?{None}
+    ^origin: DiagnosticRecordOrigin?{None}
     if diagnostic.origin == .Val(placed) {
-        path := String?{None}
+        ^path: String?{None}
         if named != "" -> path = Val(named)
         snapshot = Val(cli_report_origin(named, placed.revision))
         origin = Val(DiagnosticRecordOrigin{path: path, source_digest: placed.revision})
     }
     paths: diagnostic_repair_paths(diagnostic)
     record: diagnostic_record(diagnostic, named, origin, paths, paths)
-    report := ReportEnvelope.new(moment, record.severity, record.code, record.message, record.why, record.fix)
+    ^report: ReportEnvelope.new(moment, record.severity, record.code, record.message, record.why, record.fix)
     report.tier = diagnostic_tier_word(diagnostic)
     if diagnostic.applicability == .Val(applicability) {
         report.applicability = Val(if applicability == {
@@ -53,7 +53,7 @@ cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> Report
         report.set_no_fix_reason(NoFixReason.new(reason.kind, reason.next)) ?? panic("a registry no-fix reason is valid for its report")
     }
     loop cause in diagnostic.cause {
-        projected := ReportCause.new(cause.code)
+        ^projected: ReportCause.new(cause.code)
         if cause.span == .Val(span) {
             projected.span = Val(ReportSpan.new(named, span.start, span.end))
             if diagnostic.origin == .Val(placed) {
@@ -68,7 +68,7 @@ cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> Report
 // The origin a report names: the batch's file, if it has one, and the digest
 // of the bytes it checked.
 cli_report_origin: fn(named: String, digest: String) -> ReportOrigin Never! {
-    path := String?{None}
+    ^path: String?{None}
     if named != "" -> path = Val("{named}")
     ReportOrigin{path: path, source_digest: "{digest}"}
 }

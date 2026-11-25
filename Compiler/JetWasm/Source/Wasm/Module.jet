@@ -207,7 +207,7 @@ WasmModule: struct {
     }
 
     imported: fn(self, kind: Int) -> Int Never! {
-        count := 0
+        ^count: 0
         loop entry in self.imports {
             if entry.kind == kind -> count += 1
         }
@@ -216,7 +216,7 @@ WasmModule: struct {
 
     // The type index of function `index` in the function index space.
     function_type: fn(self, index: Int) -> Int? {
-        seen := 0
+        ^seen: 0
         loop entry in self.imports {
             if entry.kind == WASM_EXTERN_FUNC {
                 if seen == index -> return Val(entry.type_index)
@@ -232,7 +232,7 @@ WasmModule: struct {
 
     // The table type of `index` in the table index space.
     table_type: fn(self, index: Int) -> WasmTableType? {
-        seen := 0
+        ^seen: 0
         loop entry in self.imports {
             if entry.kind == WASM_EXTERN_TABLE {
                 if seen == index -> return entry.table
@@ -249,7 +249,7 @@ WasmModule: struct {
     memory_count: fn(self) -> Int Never! { self.imported(WASM_EXTERN_MEMORY) + self.memories.len() }
 
     global_type: fn(self, index: Int) -> WasmGlobalType? {
-        seen := 0
+        ^seen: 0
         loop entry in self.imports {
             if entry.kind == WASM_EXTERN_GLOBAL {
                 if seen == index -> return entry.global

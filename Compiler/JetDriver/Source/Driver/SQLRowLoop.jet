@@ -32,7 +32,7 @@ jet_driver_sql_row_loop_function_hits: fn(pos: Int, function: FnBody, symbols: S
         return
     }
     tree: function.tree
-    bodies := [Span]{}
+    ^bodies: [Span]{}
     loop statement in tree.stmts {
         if statement == .ForIn(_, variable, _, _, collection, _, _, _, _, _, _, span) && jet_driver_sql_rows(variable.ty, body_type(interner, tree, collection)) {
             bodies.push(Span{start: body_node(tree, collection).span.end, end: span.end})
@@ -54,10 +54,10 @@ jet_driver_sql_row_loop_function_hits: fn(pos: Int, function: FnBody, symbols: S
 
 // Deduplicates and formats L0308 diagnostics from collected `hits`.
 jet_driver_sql_row_loop_hits_to_lints: fn(load: JetDriverLoadResult, functions: [FnBody], hits: [JetDriverSQLRowHit]) -> [Diagnostic] {
-    lints := [Diagnostic]{}
+    ^lints: [Diagnostic]{}
     if hits.len() == 0 -> return lints
-    files := name_table()
-    seen := [Int:Bool]{}
+    ^files: name_table()
+    ^seen: [Int:Bool]{}
     loop hit in hits {
         function: functions[hit.pos]
         site: (Int{name_intern(files, function.source_file).id} << 32) | hit.span.start
@@ -72,7 +72,7 @@ jet_driver_sql_row_loop_hits_to_lints: fn(load: JetDriverLoadResult, functions: 
 // one per query call inside a loop over rows, at the call, once however many
 // specializations share its source.
 jet_driver_sql_row_loop_lints: fn(load: JetDriverLoadResult, functions: [FnBody], symbols: SymbolTable, interner: Interner) -> [Diagnostic] {
-    hits := [JetDriverSQLRowHit]{}
+    ^hits: [JetDriverSQLRowHit]{}
     loop (pos, function) in functions {
         jet_driver_sql_row_loop_function_hits(pos, function, symbols, interner, hits)
     }
@@ -139,7 +139,7 @@ jet_driver_sql_head: fn(tree: BodyTree, id: Int) -> String? Never! {
 // The first word of `text`, lowercased: up to a blank or `(`.
 jet_driver_sql_first_word: fn(text: String) -> String Never! {
     bytes: text.bytes()
-    start := -1
+    ^start: -1
     loop position in 0..<bytes.len() {
         blank: bytes[position] <= 32 || bytes[position] == 40
         if start < 0 && !blank -> start = position

@@ -72,8 +72,10 @@ sema_must_use_call_target: fn(expr: Expr, check: SemaBodyCheck) -> String? {
 
 // An ignored must-use value, for a statement whose value is not fallible.
 sema_must_use_check_statement: fn(expr: Expr, ty: Type, span: Span, check: ^SemaBodyCheck) {
-    if sema_copy_carrier_declares(ty, MarkerHook.SingleUse) -> return
-    target := sema_must_use_call_target(expr, check)
+    if sema_copy_carrier_declares(ty, MarkerHook.SingleUse) {
+        return
+    }
+    ^target: sema_must_use_call_target(expr, check)
     if target == None {
         if ty == (Type.Named{name: "Unit"}) {
             return

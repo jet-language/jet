@@ -32,7 +32,7 @@ jet_cli_inspect_target: fn(request: JetCLIInspectRequest, color: Bool{false}, js
     lacks: loop capability in TARGET_CAPABILITY_ALL if !jet_target_machine_provides_capability(machine, capability) -> jet_target_capability_name(capability)
     provided: if provides.len() == 0 -> "(none)" else -> provides.join(", ")
     lacking: if lacks.len() == 0 -> "(none)" else -> lacks.join(", ")
-    out := "Target {machine.name}\n"
+    ^out: "Target {machine.name}\n"
     out = "{out}  Triple: {machine.triple}\n"
     out = "{out}  Environment: {jet_target_environment_identity(machine)}\n"
     out = "{out}  Provider identity: {jet_target_provider_identity(machine)}\n"
@@ -46,7 +46,7 @@ jet_cli_inspect_target: fn(request: JetCLIInspectRequest, color: Bool{false}, js
 // tiers. A name and its identity are shown whatever the machine's audit policy;
 // only the dossier needs the dossier lens.
 jet_cli_inspect_target_list: fn(json: Bool{false}) -> JetCLIPlan Never! {
-    machines := [TargetMachine]{}
+    ^machines: [TargetMachine]{}
     loop name in JET_DRIVER_TARGET_MACHINE_NAMES {
         machine: jet_driver_target_machine_by_name(name, JET_VERSION) ?? next
         machines.push(machine)
@@ -71,7 +71,7 @@ jet_cli_inspect_target_list: fn(json: Bool{false}) -> JetCLIPlan Never! {
         line: jet_cli_status_render("inspect.target", true, [JetCLIStatusField]{jet_cli_status_field("targets", jet_cli_status_array(rows))})
         return JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "{line}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
     }
-    out := "Target Machines\n"
+    ^out: "Target Machines\n"
     loop machine in machines {
         out = "{out}  {machine.name} ({machine.triple}, {jet_target_environment_identity(machine)}): runs {jet_cli_inspect_target_runs(machine)}\n"
     }

@@ -6,7 +6,7 @@ use jet_foundation.[Diagnostic, diagnostic_from_registry]
 // Native C links (`c@…`) are link dependencies, never Jet packages, and are
 // skipped.
 pkg_to_manifest: fn(facts: PackageFacts, raw: String) -> Manifest ManifestError! {
-    dependencies := [String:DepSpec]{}
+    ^dependencies: [String:DepSpec]{}
     loop name in pkg_manifest_sorted(facts.deps.keys().to_list()) {
         is_clib: if facts.deps[name] == {
             .CLib(_) -> true

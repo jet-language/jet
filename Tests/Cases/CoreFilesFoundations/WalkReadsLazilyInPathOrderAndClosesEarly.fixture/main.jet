@@ -69,9 +69,9 @@ run: fn() {
 
     // A full walk: every entry in path order, the unreadable directory's
     // error where its entries would be, and the walk goes on after it.
-    walked := [String]{}
-    shown := [String]{}
-    errors := 0
+    ^walked: [String]{}
+    ^shown: [String]{}
+    ^errors: 0
     loop item in unread {
         if item == {
             .Ok(entry) -> {
@@ -91,10 +91,10 @@ run: fn() {
 
     // The order is the one every walk has kept.
     files.set_mode(locked, 0o755) ?? panic("unlock")
-    expected := [String]{}
+    ^expected: [String]{}
     listed(root, expected)
     expected.sort()
-    readable := [String]{}
+    ^readable: [String]{}
     loop path in expected {
         if !path.starts_with("{locked}/") -> readable.push(path)
     }
@@ -122,8 +122,8 @@ run: fn() {
     print("closed after list: {open_descriptors() == before}")
 
     // The cursor a loop reads, driven by hand: it closes once it runs out.
-    cursor := files.walk(root).iter()
-    stepped := 0
+    ^cursor: files.walk(root).iter()
+    ^stepped: 0
     loop {
         step: cursor.next() ?? break
         _: step ?? panic("step")

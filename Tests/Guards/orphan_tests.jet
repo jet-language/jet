@@ -74,7 +74,7 @@ OrphanFacts: struct {
 orphan_git_lines: fn(args: [String]) -> [String] {
     listed: orphan_process.cmd(args).stdout(.Capture).stderr(.Capture).run() ?? panic("run {args.join(" ")}: {err}")
     assert(listed.code == 0, "{args.join(" ")} failed: {orphan_process.combined_output(listed).trim()}")
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in orphan_process.stdout_lines(listed) {
         if line.len() > 0 -> lines.push(line.copy())
     }
@@ -83,11 +83,11 @@ orphan_git_lines: fn(args: [String]) -> [String] {
 
 // Tracked and untracked unignored files, less the ones deleted from the tree.
 orphan_tracked: fn() -> [String] {
-    deleted := [String:Bool]{}
+    ^deleted: [String:Bool]{}
     loop path in orphan_git_lines([String]{"git", "-c", "core.quotePath=false", "ls-files", "--deleted"}) {
         deleted[path] = true
     }
-    paths := [String]{}
+    ^paths: [String]{}
     loop path in orphan_git_lines([String]{"git", "-c", "core.quotePath=false", "ls-files", "--cached", "--others", "--exclude-standard"}) {
         if deleted.get(path) == None -> paths.push(path)
     }
@@ -97,13 +97,13 @@ orphan_tracked: fn() -> [String] {
 // The runner sources that name `Tests/`: the tracked ones git grep finds, and
 // every untracked text file in the source trees.
 orphan_sources: fn() -> [String] {
-    grep := [String]{"git", "-c", "core.quotePath=false", "grep", "-l", "-I", "-F", "Tests/", "--"}
-    others := [String]{"git", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard", "--"}
+    ^grep: [String]{"git", "-c", "core.quotePath=false", "grep", "-l", "-I", "-F", "Tests/", "--"}
+    ^others: [String]{"git", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard", "--"}
     loop tree in ORPHAN_SOURCE_TREES {
         grep.push(tree.copy())
         others.push(tree)
     }
-    sources := orphan_git_lines(grep)
+    ^sources: orphan_git_lines(grep)
     loop path in orphan_git_lines(others) {
         if orphan_has_extension(path, ORPHAN_SOURCE_EXTENSIONS) -> sources.push(path)
     }
@@ -111,12 +111,12 @@ orphan_sources: fn() -> [String] {
 }
 
 orphan_facts: fn(tracked: [String]) -> OrphanFacts {
-    files := [String:Bool]{}
-    folders := [String:Bool]{}
+    ^files: [String:Bool]{}
+    ^folders: [String:Bool]{}
     loop path in tracked {
         files[path] = true
         segments: path.split("/").to_list()
-        prefix := ""
+        ^prefix: ""
         loop index in 0..<segments.len() - 1 {
             prefix = if index == 0 -> segments[0].copy() else -> "{prefix}/{segments[index]}"
             folders[prefix.copy()] = true
@@ -137,8 +137,8 @@ orphan_delimiter: fn(byte: U8) -> Bool {
 
 orphan_words: fn(text: String) -> [String] {
     raw: text.bytes()
-    words := [String]{}
-    start := -1
+    ^words: [String]{}
+    ^start: -1
     loop index in 0..<raw.len() {
         if orphan_delimiter(raw[index]) {
             if start >= 0 -> words.push(policy_slice_raw(raw, start, index))
@@ -153,8 +153,8 @@ orphan_words: fn(text: String) -> [String] {
 // repository root or after `{root}/`, with any `{…}` part cut to the folder
 // before it.
 orphan_named: fn(word: String, base: String) -> String? {
-    name := if word.ends_with(":") -> policy_slice_bytes(word, 0, word.bytes().len() - 1) else -> word.copy()
-    rooted := base == ""
+    ^name: if word.ends_with(":") -> policy_slice_bytes(word, 0, word.bytes().len() - 1) else -> word.copy()
+    ^rooted: base == ""
     if name.starts_with(ORPHAN_ROOT) {
         name = policy_slice_bytes(name, ORPHAN_ROOT.bytes().len(), name.bytes().len())
         rooted = true
@@ -169,18 +169,18 @@ orphan_named: fn(word: String, base: String) -> String? {
 
 // The folder holding `path` ("" at the root).
 orphan_parent: fn(path: String) -> String {
-    segments := path.split("/").to_list()
-    _ := segments.pop()
+    ^segments: path.split("/").to_list()
+    ^_: segments.pop()
     segments.join("/")
 }
 
 // `path` with `.` and `..` segments resolved.
 orphan_normal: fn(path: String) -> String {
-    out := [String]{}
+    ^out: [String]{}
     loop segment in path.split("/") {
         if segment == "" || segment == "." -> next
         if segment == ".." && out.len() > 0 && out[out.len() - 1] != ".." {
-            _ := out.pop()
+            ^_: out.pop()
             next
         }
         out.push(segment.copy())
@@ -221,7 +221,7 @@ orphan_cover_words: fn(words: [String], bases: [String], facts: OrphanFacts, cov
 // outside comment lines, any other file's every word.
 orphan_source_words: fn(path: String, text: String) -> [String] {
     if !(path.ends_with(".jet") || path.ends_with(".template")) -> return orphan_words(text)
-    words := [String]{}
+    ^words: [String]{}
     loop line in text.split("\n") {
         if line.trim().starts_with("//") -> next
         segments: line.split("\"").to_list()
@@ -235,7 +235,7 @@ orphan_source_words: fn(path: String, text: String) -> [String] {
 }
 
 orphan_is_covered: fn(path: String, covered: [String:Bool]) -> Bool {
-    current := path.copy()
+    ^current: path.copy()
     loop current != "" {
         if covered.get(current) != None -> return true
         if !current.contains("/") -> return false
@@ -275,9 +275,9 @@ orphan_data: fn(path: String) -> Bool {
 // Every candidate under Tests/ no runner reads, sorted.
 orphan_findings: fn(tree: OrphanTree) -> [String] {
     facts: orphan_facts(tree.tracked)
-    covered := [String:Bool]{}
+    ^covered: [String:Bool]{}
     loop corpus in ORPHAN_CORPORA -> covered[corpus.root.copy()] = true
-    runners := [String]{}
+    ^runners: [String]{}
     loop path in tree.sources {
         if path == ORPHAN_SELF || path.ends_with(".case") -> next
         case_data: path.starts_with("Tests/Cases/") && !orphan_has_extension(path, ORPHAN_CASE_SOURCE_EXTENSIONS)
@@ -305,8 +305,8 @@ orphan_findings: fn(tree: OrphanTree) -> [String] {
         orphan_cover_words(orphan_source_words(path, orphan_text(tree, path)), [String]{"", orphan_parent(path)}, facts, covered)
     }
     // A data file a reader names by file is a reader in turn.
-    read := [String:Bool]{}
-    changed := true
+    ^read: [String:Bool]{}
+    ^changed: true
     loop changed {
         changed = false
         loop path in tree.tracked {
@@ -316,7 +316,7 @@ orphan_findings: fn(tree: OrphanTree) -> [String] {
             orphan_cover_words(orphan_words(orphan_text(tree, path)), [String]{orphan_parent(path), ""}, facts, covered)
         }
     }
-    findings := [String]{}
+    ^findings: [String]{}
     loop path in tree.tracked {
         if orphan_candidate(path) && !orphan_is_covered(path, covered) -> findings.push(path.copy())
     }

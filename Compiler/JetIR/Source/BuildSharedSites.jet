@@ -168,10 +168,10 @@ ir_process_cell_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, site: Int, h
 // `key`.
 ir_shared_site_word: fn(m: ^IRModule, b: ^IRBuilder, key: String) -> Int Never! {
     object_key: "shared-site:{key}"
-    object := name_column_value(m.constant_rows_keys, m.constant_rows, object_key) ?? -1
+    ^object: name_column_value(m.constant_rows_keys, m.constant_rows, object_key) ?? -1
     if object < 0 {
         object = m.data.len()
-        word := [U8]{}
+        ^word: [U8]{}
         loop _ in 0..<IR_SHARED_SITE_BYTES -> word.push(U8{0})
         m.data.push(word)
         // No address words; the entry marks a word-aligned static object.

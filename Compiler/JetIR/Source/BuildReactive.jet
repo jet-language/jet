@@ -13,8 +13,8 @@ IR_REACTIVE_CORE_PREFIX: "<corelib>/core.reactive."
 // "Signal", "Derived", "Computed" or "Effect" for the Core reactive carrier
 // `ty`, None for any other type (a program's own `Signal` declaration too).
 ir_reactive_kind: fn(p: IRProgram, ty: Type) -> String? Never! {
-    name := ""
-    arity := 0
+    ^name: ""
+    ^arity: 0
     if ir_untag(ty) == {
         .Named(named) -> name = named
         .Apply(applied, args) -> {
@@ -23,7 +23,7 @@ ir_reactive_kind: fn(p: IRProgram, ty: Type) -> String? Never! {
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
-    short := name
+    ^short: name
     if ir_type_def(p, name) == .Val(row) {
         key: p.types[row].key
         if !key.starts_with(IR_REACTIVE_CORE_PREFIX) {
@@ -72,7 +72,7 @@ ir_reactive_moved_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int
 ir_reactive_cell_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: Int, version: Int, span: Span) -> Int Never! {
     row: ir_reactive_row(m, p, ty)
     element: ir_reactive_element(ty)
-    slot := ir_word_const(m, b, 0)
+    ^slot: ir_word_const(m, b, 0)
     if !ir_unit_type(element) {
         payload: ir_expr(m, p, b, value)
         if ir_failed(b) || payload < 0 -> return -1
@@ -149,7 +149,7 @@ ir_reactive_field: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, recei
     kind: ir_reactive_kind(p, ir_ty(m, p, b, receiver)) ?? return ir_fail_slot(b, span, "field: struct {field}")
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
-    result := -1
+    ^result: -1
     if kind == "Effect" {
         export: if field == {
             "last" -> "jet_reactive_effect_last"
@@ -193,7 +193,7 @@ ir_reactive_derived: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, exe
     if kind != "Derived" && kind != "Computed" {
         return ir_fail_slot(b, span, "reactive.derived producing {ir_type_name(ty)}")
     }
-    body := ir_reactive_body(m, p, b, executable, "callback", span)
+    ^body: ir_reactive_body(m, p, b, executable, "callback", span)
     if body.len() != 3 -> return -1
     meta: ir_lazy_meta(m, p, b, ir_reactive_element(ty), span)
     if meta < 0 -> return -1
@@ -289,7 +289,7 @@ ir_reactive_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rece
     kind: ir_reactive_kind(p, ir_ty(m, p, b, receiver)) ?? return None
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return Val(-1)
-    result := -1
+    ^result: -1
     if operation == .ReactiveEffectMethod {
         if kind != "Effect" -> return Val(ir_fail_slot(b, span, "Effect method on {kind}"))
         if ir_unit_type(ty) {
@@ -302,7 +302,7 @@ ir_reactive_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rece
         if kind != "Signal" || args.len() != 1 {
             return Val(ir_fail_slot(b, span, "{kind}.set with {args.len()} arguments"))
         }
-        slot := ir_word_const(m, b, 0)
+        ^slot: ir_word_const(m, b, 0)
         if !ir_unit_type(ir_reactive_element(ir_ty(m, p, b, receiver))) {
             value: ir_expr(m, p, b, args[0])
             if ir_failed(b) || value < 0 -> return Val(-1)

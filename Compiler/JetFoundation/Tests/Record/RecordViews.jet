@@ -28,7 +28,7 @@ use jet_foundation.[
 ]
 
 record_views_test_sample: fn() -> [RecordSection] Never! {
-    digest := [U8]{}
+    ^digest: [U8]{}
     loop _ in 0..<32 -> digest.push(U8{7})
     [RecordSection]{
         RecordSection{
@@ -82,7 +82,7 @@ record_views_test_sample: fn() -> [RecordSection] Never! {
     assert_eq(digest, reader.digest)
     hex: record_digest_hex(digest)
     assert_eq(record_parse_digest_hex(hex), Val(digest))
-    upper := ""
+    ^upper: ""
     loop _ in 0..<32 -> upper = "{upper}AB"
     assert_eq(record_parse_digest_hex(upper), [U8]?{None})
     assert_eq(record_parse_digest_hex("00"), [U8]?{None})
@@ -90,7 +90,7 @@ record_views_test_sample: fn() -> [RecordSection] Never! {
 
 #Test("a trusted open skips the checksum but not the framing") {
     encoded: record_encode("jet.test/v1", record_views_test_sample())
-    bytes := encoded.bytes ?? panic("encodes: {encoded.problem ?? ""}")
+    ^bytes: encoded.bytes ?? panic("encodes: {encoded.problem ?? ""}")
     last: bytes.len() - 1
     bytes[last] = wrapping(U8{Int{bytes[last]} + 1})
     assert_eq(record_open_schema(bytes, "jet.test/v1").problem, Val("record checksum does not match its bytes"))

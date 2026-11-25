@@ -108,15 +108,15 @@ LockDiff: struct {
     // schema. `None` is a missing snapshot: an empty side of the diff.
     // Package and channel names are compared in name order.
     between: fn(before: LockFile?, after: LockFile?) -> LockDiff Never! {
-        package_names := [String]{}
-        channel_names := [String]{}
+        ^package_names: [String]{}
+        ^channel_names: [String]{}
         sides: [LockFile?]{before, after}
         loop side in sides {
             lock: side ?? next
             loop package in lock.packages -> package_names.push(package.name)
             loop channel in lock.source_channels -> channel_names.push(channel.name)
         }
-        packages := [LockPackageChange]{}
+        ^packages: [LockPackageChange]{}
         loop name in pkg_overlay_sorted_unique(package_names) {
             old: pkg_lock_diff_package(before, name)
             current_record: pkg_lock_diff_package(after, name)
@@ -139,7 +139,7 @@ LockDiff: struct {
                 }
             }
         }
-        channels := [LockChannelChange]{}
+        ^channels: [LockChannelChange]{}
         loop name in pkg_overlay_sorted_unique(channel_names) {
             old: pkg_lock_diff_channel_exact(before, name)
             current_exact: pkg_lock_diff_channel_exact(after, name)
@@ -159,7 +159,7 @@ LockDiff: struct {
     is_empty: fn(self) -> Bool Never! { self.packages.len() == 0 && self.channels.len() == 0 }
 
     count: fn(self, kind: LockPackageChangeKind) -> Int Never! {
-        total := 0
+        ^total: 0
         loop change in self.packages {
             if change.kind == kind -> total += 1
         }

@@ -151,7 +151,7 @@ native_panel_memory: fn(session: NativeSession) -> NativeMemory Never! {
 // frame does not hold is not `known`; the vector registers and mxcsr are
 // known only in the stopped thread's innermost frame of a live program.
 native_registers: fn(session: ^NativeSession, all: Bool{false}) -> [NativeRegisterRow] NativeDebugError! {
-    at := NativePanelFrame?{None}
+    ^at: NativePanelFrame?{None}
     if native_panel_frame(session) == {
         .Ok(found) -> { at = found }
         .Err(error) -> return Err(error)
@@ -163,13 +163,13 @@ native_registers: fn(session: ^NativeSession, all: Bool{false}) -> [NativeRegist
 // The registers of `frame` (native_registers), which the Canvas Debug view
 // reads with the frame it keys their changes by.
 native_registers_at: fn(session: ^NativeSession, frame: NativePanelFrame, all: Bool{false}) -> [NativeRegisterRow] Never! {
-    rows := [NativeRegisterRow]{}
+    ^rows: [NativeRegisterRow]{}
     held: native_register_locals(session.image, frame)
     spans: native_memory_spans(session, frame)
     loop index in X64_TRACE_SHOWN {
         known: frame.frame.known[index]
         value: if known -> frame.frame.registers[index] else -> 0
-        label := held.get(index) ?? ""
+        ^label: held.get(index) ?? ""
         if known && label == "" {
             label = if {
                 index == X64_TRACE_RIP -> native_panel_code(session, value)
@@ -210,7 +210,7 @@ NATIVE_PANEL_VECTOR: 1000
 // its pc, by the register's index in the kernel's register block (a vector
 // register's by NATIVE_PANEL_VECTOR plus its number), names joined by ", ".
 native_register_locals: fn(image: NativeImage, at: NativePanelFrame) -> [Int:String] Never! {
-    held := [Int:String]{}
+    ^held: [Int:String]{}
     function: native_function_at(image, at.lookup) ?? return held
     loop variable in function.variables {
         if variable.site != at.site || variable.list < 0 -> next
@@ -240,7 +240,7 @@ native_panel_code: fn(session: ^NativeSession, pc: Int) -> String Never! {
 
 // The flags set in `value`, by name in bit order.
 native_panel_flags: fn(value: Int) -[]> String {
-    set := [String]{}
+    ^set: [String]{}
     loop (k, bit) in X64_TRACE_FLAG_BITS {
         if (value >> bit) & 1 == 1 -> set.push(X64_TRACE_FLAG_NAMES[k])
     }
@@ -264,7 +264,7 @@ native_memory_points: fn(spans: [NativeMemorySpan], value: Int) -[]> String {
 
 // The bytes the frame's locals own (NativeMemorySpan), in their order.
 native_memory_spans: fn(session: NativeSession, at: NativePanelFrame) -> [NativeMemorySpan] Never! {
-    spans := [NativeMemorySpan]{}
+    ^spans: [NativeMemorySpan]{}
     function: native_function_at(session.image, at.lookup) ?? return spans
     memory: native_panel_memory(session)
     loop variable in function.variables {
@@ -316,8 +316,8 @@ native_memory_list: fn(image: NativeImage, memory: NativeMemory, own: {address: 
 // mapping's end is tried again at the next page. The bytes under the
 // debugger's trap bytes, placed jumps and zone probes are the program's own.
 native_memory_view: fn(session: NativeSession, at: NativePanelFrame?, address: Int, count: Int) -> NativeMemoryView Never! {
-    bytes := loop _ in 0..<count -> U8{0}
-    mapped := loop _ in 0..<count -> false
+    ^bytes: loop _ in 0..<count -> U8{0}
+    ^mapped: loop _ in 0..<count -> false
     if session.dump == {
         .Val(dumped) -> {
             loop block in dumped.memory.blocks {
@@ -332,7 +332,7 @@ native_memory_view: fn(session: NativeSession, at: NativePanelFrame?, address: I
             }
         }
         None -> {
-            done := 0
+            ^done: 0
             loop done < count {
                 got: if address + done > 0 -> x64_trace_read(session.trace, address + done, count - done) ?? [U8]{} else -> [U8]{}
                 loop (k, byte) in got {
@@ -348,7 +348,7 @@ native_memory_view: fn(session: NativeSession, at: NativePanelFrame?, address: I
             session.restore_code(address, bytes)
         }
     }
-    debugger := loop _ in 0..<count -> false
+    ^debugger: loop _ in 0..<count -> false
     if session.dump == None {
         loop placed in session.placed {
             native_memory_mark(debugger, address, placed.low, placed.high - placed.low)
@@ -358,7 +358,7 @@ native_memory_view: fn(session: NativeSession, at: NativePanelFrame?, address: I
         }
     }
     owned: if at == .Val(frame) -> native_memory_spans(session, frame) else -> [NativeMemorySpan]{}
-    secret := loop _ in 0..<count -> false
+    ^secret: loop _ in 0..<count -> false
     if session.dump != None {
         loop span in owned {
             if span.secret -> native_memory_mark(secret, address, span.address, span.size)
@@ -385,7 +385,7 @@ native_registers_answer: fn(session: ^NativeSession, operand: String) -> NativeA
     }
     rows: native_registers(session, all: operand == "--all") ?? return Err(err)
     if rows.len() == 0 -> return Ok(NativeAnswer{text: "No frame to read registers in\n"})
-    text := ""
+    ^text: ""
     loop row in rows -> text = "{text}{native_register_text(row)}\n"
     Ok(NativeAnswer{text: text})
 }
@@ -420,7 +420,7 @@ native_register_decimal: fn(row: NativeRegisterRow) -[]> String {
 // `value` as 16 hex digits, the word's bits as they are.
 native_panel_hex: fn(value: Int) -[]> String {
     digits: "0123456789abcdef"
-    shown := ""
+    ^shown: ""
     loop k in 0..<16 {
         nibble: (value >> (4 * (15 - k))) & 15
         shown = "{shown}{digits.slice(nibble, nibble + 1)}"
@@ -447,29 +447,29 @@ native_memory_refused: fn(refusal: String) -[]> NativeMemoryAsk {
 // The operand of `memory`: WHERE, then COUNT, then `as TYPE`. WHERE may
 // hold spaces inside an index (`xs[i + 1]`).
 native_memory_ask: fn(operand: String) -> NativeMemoryAsk Never! {
-    words := [String]{}
+    ^words: [String]{}
     loop part in operand.split(" ") {
         if part != "" -> words.push("{part}")
     }
-    type_name := "U8"
+    ^type_name: "U8"
     typed: words.len() >= 2 && words[words.len() - 2] == "as"
     if typed {
         type_name = words[words.len() - 1]
-        _ := words.pop()
-        _ := words.pop()
+        ^_: words.pop()
+        ^_: words.pop()
     }
     size: native_memory_type_size(type_name)
     if size == 0 {
         return native_memory_refused("`{type_name}` is not a number type; memory reads as {NATIVE_MEMORY_TYPES}")
     }
     if words.len() == 0 -> return native_memory_refused(NATIVE_MEMORY_SHAPE)
-    place := words[0]
-    next_word := 1
+    ^place: words[0]
+    ^next_word: 1
     loop place.contains("[") && !place.contains("]") && next_word < words.len() {
         place = "{place} {words[next_word]}"
         next_word += 1
     }
-    count := -1
+    ^count: -1
     if next_word < words.len() {
         count = Int.parse(words[next_word]) ?? 0
         if count <= 0 {
@@ -503,7 +503,7 @@ native_memory_address: fn(text: String) -[]> Int? {
     if !text.starts_with("0x") && !text.starts_with("0X") -> return None
     digits: text.slice(2, text.len())
     if digits.len() == 0 || digits.len() > 16 -> return None
-    value := 0
+    ^value: 0
     loop byte in digits.bytes() {
         digit: Int{byte}
         nibble: if {
@@ -544,7 +544,7 @@ native_memory_answered: fn(text: String, refused: Bool{true}) -[]> NativeMemoryA
 native_memory_aim: fn(session: ^NativeSession, place: String, path: NativeWatchPath) -> NativeMemoryAim NativeDebugError! {
     split: native_memory_offset(place)
     base: split.base
-    selected := NativePanelFrame?{None}
+    ^selected: NativePanelFrame?{None}
     if native_panel_frame(session) == {
         .Ok(found) -> { selected = found }
         .Err(error) -> return Err(error)
@@ -616,7 +616,7 @@ native_panel_register: fn(name: String) -[]> Int? {
 // when the image has none of that name, or two, or doesn't load it.
 native_memory_section: fn(session: ^NativeSession, name: String, offset: Int, at: NativePanelFrame?) -> NativeMemoryAim NativeDebugError! {
     elf: native_image_bytes(native_image_of(session)) ?? return Err(err)
-    named := [NativeImageSection]{}
+    ^named: [NativeImageSection]{}
     loop section in native_image_sections(elf) {
         if section.name == name -> named.push(section)
     }
@@ -644,7 +644,7 @@ native_memory_section: fn(session: ^NativeSession, name: String, offset: Int, at
 // nearest frame outward that does. A local held in a register has no
 // address; a local the image can't show answers as `locals` shows it.
 native_memory_place: fn(session: ^NativeSession, place: String, path: NativeWatchPath) -> NativeMemoryAim NativeDebugError! {
-    found_frame := NativePanelJet?{None}
+    ^found_frame: NativePanelJet?{None}
     if native_panel_jet_frame(session) == {
         .Ok(found) -> { found_frame = found }
         .Err(error) -> return Err(error)
@@ -677,7 +677,7 @@ native_memory_place: fn(session: ^NativeSession, place: String, path: NativeWatc
     }
     where: if jet.moved -> ", in {jet.function}, the nearest Jet frame" else -> ""
     size: native_type_size(session.image, own.ty)
-    shown := "{native_type_name(session.image, own.ty)}, {size} bytes"
+    ^shown: "{native_type_name(session.image, own.ty)}, {size} bytes"
     if native_memory_list(session.image, memory, own) == .Val(list) {
         capacity: if list.cap >= 0 -> " cap={list.cap}" else -> ""
         shown = "len={list.length}{capacity} buffer={x64_hex(list.data)}"
@@ -732,8 +732,8 @@ native_memory_read: fn(session: ^NativeSession, ask: NativeMemoryAsk, path: Nati
     aim: native_memory_aim(session, ask.place, path) ?? return Err(err)
     if aim.answer != "" -> return Ok(NativeMemoryRead{aim: aim, view: None, after: ""})
     asked: if ask.count > 0 -> ask.count else -> NATIVE_MEMORY_DEFAULT.div_euclid(ask.size)
-    values := asked
-    after := ""
+    ^values: asked
+    ^after: ""
     if aim.limit >= 0 && values * ask.size > aim.limit {
         values = aim.limit.div_euclid(ask.size)
         if ask.count > 0 {
@@ -775,14 +775,14 @@ native_memory_answer: fn(session: ^NativeSession, ask: NativeMemoryAsk, path: Na
 // debugger's own is none, and so is one pointing into the debugger's own
 // bytes. Each page a word points into is looked up once.
 native_memory_pointers: fn(session: NativeSession, view: NativeMemoryView) -> [Int] Never! {
-    found := [Int]{}
+    ^found: [Int]{}
     memory: native_panel_memory(session)
-    pages := [Int:Bool]{}
-    at := (8 - (view.address & 7)) & 7
+    ^pages: [Int:Bool]{}
+    ^at: (8 - (view.address & 7)) & 7
     loop at + 8 <= view.bytes.len() {
         offset: at
         at += 8
-        whole := true
+        ^whole: true
         loop k in offset..<offset + 8 {
             if !view.mapped[k] || view.secret[k] || view.debugger[k] -> whole = false
         }
@@ -811,23 +811,23 @@ native_memory_debugger: fn(session: NativeSession, address: Int) -> Bool Never! 
 // A run of the debugger's own bytes is one `[debugger]` row, and a row no
 // mapping holds says so.
 native_memory_byte_rows: fn(session: ^NativeSession, view: NativeMemoryView) -> String Never! {
-    text := ""
+    ^text: ""
     count: view.bytes.len()
-    start := 0
+    ^start: 0
     loop start < count {
         address: view.address + start
         if view.debugger[start] {
-            stop := start
+            ^stop: start
             loop stop < count && view.debugger[stop] -> stop += 1
             text = "{text}{x64_hex(address)}  {NATIVE_LISTING_DEBUGGER}, {stop - start} bytes\n"
             start = stop
             next
         }
-        end := start
+        ^end: start
         loop end < count && end < start + NATIVE_MEMORY_ROW_BYTES && !view.debugger[end] -> end += 1
-        hex := [String]{}
-        shown := [U8]{}
-        mapped := false
+        ^hex: [String]{}
+        ^shown: [U8]{}
+        ^mapped: false
         loop k in start..<end {
             if {
                 view.secret[k] -> {
@@ -860,9 +860,9 @@ native_memory_byte_rows: fn(session: ^NativeSession, view: NativeMemoryView) -> 
 // one a dump redacted as `##`, one in the debugger's own bytes as
 // `[debugger]`.
 native_memory_value_rows: fn(session: NativeSession, view: NativeMemoryView, type_name: String, size: Int) -> String Never! {
-    text := ""
+    ^text: ""
     values: view.bytes.len().div_euclid(size)
-    row := 0
+    ^row: 0
     loop row < values {
         end: if row + NATIVE_MEMORY_ROW_VALUES < values -> row + NATIVE_MEMORY_ROW_VALUES else -> values
         shown: loop value in row..<end -> native_memory_shown(view, value * size, type_name, size)
@@ -879,9 +879,9 @@ native_memory_value_rows: fn(session: NativeSession, view: NativeMemoryView, typ
 // byte of it is unmapped, `##` when a dump redacted one, `[debugger]` when
 // one is the debugger's own.
 native_memory_shown: fn(view: NativeMemoryView, at: Int, type_name: String, size: Int) -> String Never! {
-    unmapped := false
-    secret := false
-    debugger := false
+    ^unmapped: false
+    ^secret: false
+    ^debugger: false
     loop k in at..<at + size {
         if !view.mapped[k] -> unmapped = true
         if view.secret[k] -> secret = true
@@ -918,14 +918,14 @@ native_memory_unsigned: fn(word: Int) -[]> String {
 // and List items whose bytes do (`items[2..4]` for a run of items), and a
 // fix's jump.
 native_memory_row_labels: fn(session: NativeSession, view: NativeMemoryView, low: Int, high: Int) -> String Never! {
-    labels := [String]{}
+    ^labels: [String]{}
     loop span in view.spans {
         if span.stride == 0 {
             if span.address >= low && span.address < high -> labels.push(span.name)
             next
         }
-        first := -1
-        last := -1
+        ^first: -1
+        ^last: -1
         loop item in 0..<span.size.div_euclid(span.stride) {
             start: span.address + item * span.stride
             if start >= high -> break
@@ -968,9 +968,9 @@ native_gdb_word: fn(command: String) -[]> String? {
     if word == "x" || word.starts_with("x/") {
         if operand == "" -> return Val("memory WHERE [COUNT] [as TYPE]")
         format: if word.starts_with("x/") -> word.slice(2, word.len()) else -> ""
-        count := 0
-        letter := ""
-        unit := ""
+        ^count: 0
+        ^letter: ""
+        ^unit: ""
         loop byte in format.bytes() {
             code: Int{byte}
             if code >= 48 && code <= 57 && letter == "" && unit == "" {

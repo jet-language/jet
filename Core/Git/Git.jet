@@ -52,7 +52,7 @@ Repo: struct {
     patch_paths: fn(self, patch: String) -[Exec, Time.Wait, FS.Read]> [String] Never! {
         receipt: self.spec(Sh{"git apply --numstat -z {patch}"}).stderr(.Capture).run() ?? return [String]{}
         if !receipt.success -> return [String]{}
-        paths := [String]{}
+        ^paths: [String]{}
         // `added TAB deleted TAB path` records, a renamed file under its new
         // path; the patch's `rename from` lines name the paths renames remove.
         loop record in git_fields(receipt.output) {
@@ -101,7 +101,7 @@ Repo: struct {
         listed: self.spec(Sh{"git ls-files -z"}).run()
         core.process.check(listed)
         tracked: git_fields(listed.output).filter(fn(path) { path != "" })
-        found := [Drift]{}
+        ^found: [Drift]{}
         loop path in tracked.copy() {
             mine: core.files.join(self.dir, path)
             tested: core.files.join(dir, path)

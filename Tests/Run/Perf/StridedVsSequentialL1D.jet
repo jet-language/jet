@@ -16,11 +16,11 @@ run: fn() {
     rows: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 4096 else -> 4096
     count: rows * 520
     data: loop index in 0..<count -> index
-    sequential := 0
+    ^sequential: 0
     loop _ in 0..<8 {
         loop index in 0..<count -> sequential += data[index]
     }
-    strided := 0
+    ^strided: 0
     loop _ in 0..<8 {
         loop index in 0..<count -> strided += data[(index % rows) * 520 + index /% rows]
     }

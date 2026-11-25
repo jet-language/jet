@@ -97,7 +97,7 @@ ir_ssa_find: fn(s: IRSsa, value: Int) -> Int Never! {
     if value < 0 -> return value
     next: s.repl[value]
     if next == value -> return value
-    at := next
+    ^at: next
     loop at >= 0 && s.repl[at] != at -> at = s.repl[at]
     at
 }
@@ -175,9 +175,9 @@ ir_ssa_phi_arg: fn(s: IRSsa, phi: Int, k: Int) -> Int Never! {
 // enclosing open one write it too.
 ir_ssa_written: fn(s: ^IRSsa, f: IRFunction) Never! {
     exposed: ir_ssa_exposed(f)
-    depth := [Int]{}
+    ^depth: [Int]{}
     loop _ in 0..<f.slot_type.len() -> depth.push(0)
-    open := [Int]{}
+    ^open: [Int]{}
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .Block || op == .Loop || op == .If {
@@ -214,14 +214,14 @@ ir_ssa_written: fn(s: ^IRSsa, f: IRFunction) Never! {
 // ir_ssa_build starts a block. The reads are ir_ssa_reads' operands
 // (ir_x64_reads_into), taken before the instruction's own write.
 ir_ssa_exposed: fn(f: IRFunction) -> [Bool] Never! {
-    exposed := [Bool]{}
-    wrote := [Int]{}
+    ^exposed: [Bool]{}
+    ^wrote: [Int]{}
     loop _ in 0..<f.slot_type.len() {
         exposed.push(false)
         wrote.push(-1)
     }
-    reads := [Int]{}
-    run := 0
+    ^reads: [Int]{}
+    ^run: 0
     loop at in 0..<f.op.len() {
         ir_x64_reads_into(f, at, reads)
         loop slot in reads {
@@ -239,7 +239,7 @@ ir_ssa_exposed: fn(f: IRFunction) -> [Bool] Never! {
 }
 
 ir_ssa_new: fn(f: IRFunction) -> IRSsa Never! {
-    s := IRSsa{
+    ^s: IRSsa{
         val_slot: [Int]{},
         val_kind: [IRSsaKind]{},
         val_at: [Int]{},
@@ -315,19 +315,19 @@ ir_ssa_reads: fn(s: ^IRSsa, f: IRFunction, at: Int, current: [Int]) Never! {
 }
 
 ir_ssa_build: fn(f: IRFunction) -> IRSsa Never! {
-    s := ir_ssa_new(f)
+    ^s: ir_ssa_new(f)
     ir_ssa_written(s, f)
-    current := [Int]{}
+    ^current: [Int]{}
     loop _ in 0..<f.slot_type.len() -> current.push(-1)
     loop slot in 0..<f.param_count -> current[slot] = ir_ssa_value(s, slot, .Param, slot)
-    block := ir_ssa_block(s, [Int]{})
-    live := true
+    ^block: ir_ssa_block(s, [Int]{})
+    ^live: true
     // Per open construct: its opener, the block an If branches from (-1
     // when unreachable or not an If), and an If's merged slots' values at
     // the If (restored at its Else).
-    open := [Int]{}
-    branch := [Int]{}
-    saved := [[Int]]{}
+    ^open: [Int]{}
+    ^branch: [Int]{}
+    ^saved: [[Int]]{}
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if live -> s.block[at] = block
@@ -352,7 +352,7 @@ ir_ssa_build: fn(f: IRFunction) -> IRSsa Never! {
             }
             .If -> {
                 join: s.join_of[at]
-                values := [Int]{}
+                ^values: [Int]{}
                 if live {
                     ir_ssa_reads(s, f, at, current)
                     loop slot in s.join_slots[join] -> values.push(current[slot])
@@ -375,8 +375,8 @@ ir_ssa_build: fn(f: IRFunction) -> IRSsa Never! {
             }
             .End -> {
                 opener: ir_construct_closed(open)
-                _ := branch.pop()
-                _ := saved.pop()
+                ^_: branch.pop()
+                ^_: saved.pop()
                 join: s.join_of[opener]
                 if f.op[opener] == .Loop {
                     if live -> block = ir_ssa_block(s, [Int]{block})
@@ -387,7 +387,7 @@ ir_ssa_build: fn(f: IRFunction) -> IRSsa Never! {
                     live = false
                     next
                 }
-                preds := [Int]{}
+                ^preds: [Int]{}
                 loop edge in s.join_edges[join] -> preds.push(s.edge_block[edge])
                 block = ir_ssa_block(s, preds)
                 s.join_block[join] = block
@@ -435,14 +435,14 @@ ir_ssa_build: fn(f: IRFunction) -> IRSsa Never! {
 // Replaces each phi whose arguments are one value (or itself) by that
 // value, until none is left.
 ir_ssa_prune: fn(s: ^IRSsa) Never! {
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
         loop phi in 0..<s.phi_val.len() {
             value: s.phi_val[phi]
             if s.repl[value] != value -> next
-            same := -1
-            trivial := true
+            ^same: -1
+            ^trivial: true
             loop k in 0..<s.join_edges[s.phi_join[phi]].len() {
                 arg: ir_ssa_find(s, ir_ssa_phi_arg(s, phi, k))
                 if arg == value || arg == same -> next
@@ -461,7 +461,7 @@ ir_ssa_prune: fn(s: ^IRSsa) Never! {
     loop value in 0..<s.repl.len() {
         next: s.repl[value]
         if next != value {
-            root := next
+            ^root: next
             loop root >= 0 && s.repl[root] != root -> root = s.repl[root]
             s.repl[value] = root
         }
@@ -483,15 +483,15 @@ ir_ssa_dominators: fn(s: ^IRSsa) Never! {
     }
     s.idom[0] = 0
     loop block in 1..<count {
-        dom := -1
+        ^dom: -1
         loop pred in s.preds[block] {
             if pred >= block || s.idom[pred] < 0 -> next
             if dom < 0 {
                 dom = pred
                 next
             }
-            x := pred
-            y := dom
+            ^x: pred
+            ^y: dom
             loop x != y {
                 loop x > y -> x = s.idom[x]
                 loop y > x -> y = s.idom[y]
@@ -500,14 +500,14 @@ ir_ssa_dominators: fn(s: ^IRSsa) Never! {
         }
         s.idom[block] = dom
     }
-    children := [[Int]]{}
+    ^children: [[Int]]{}
     loop _ in 0..<count -> children.push([Int]{})
     loop block in 1..<count {
         if s.idom[block] >= 0 -> children[s.idom[block]].push(block)
     }
-    clock := 0
-    work := [Int]{0}
-    next_child := [Int]{0}
+    ^clock: 0
+    ^work: [Int]{0}
+    ^next_child: [Int]{0}
     s.pre[0] = clock
     clock += 1
     loop work.len() > 0 {
@@ -524,8 +524,8 @@ ir_ssa_dominators: fn(s: ^IRSsa) Never! {
         }
         s.post[node] = clock
         clock += 1
-        _ := work.pop()
-        _ := next_child.pop()
+        ^_: work.pop()
+        ^_: next_child.pop()
     }
 }
 
@@ -549,9 +549,9 @@ ir_ssa_available: fn(s: IRSsa, value: Int, block: Int, at: Int) -> Bool Never! {
 // Every value a reachable instruction reads, and every argument of a phi
 // that is read, transitively (a phi read by nothing is dead).
 ir_ssa_live: fn(s: IRSsa, f: IRFunction) -> [Bool] Never! {
-    live := [Bool]{}
+    ^live: [Bool]{}
     loop _ in 0..<s.val_slot.len() -> live.push(false)
-    work := [Int]{}
+    ^work: [Int]{}
     loop at in 0..<f.op.len() {
         if s.block[at] < 0 -> next
         ir_ssa_mark(s, live, work, s.use_a[at])
@@ -590,7 +590,7 @@ ir_ssa_mark: fn(s: IRSsa, live: ^[Bool], work: ^[Int], used: Int) Never! {
 // argument at the end of its edge's block) and has the type of the slot
 // operand it stands for. Returns one line per violation.
 ir_ssa_verify: fn(f: IRFunction, s: IRSsa) -> [String] Never! {
-    errors := [String]{}
+    ^errors: [String]{}
     loop at in 0..<f.op.len() {
         block: s.block[at]
         if block < 0 -> next

@@ -402,7 +402,7 @@ cipher_set_iv: fn(ctx: ^CipherContext, iv: [U8]) CipherLayerError! {
     mode: ctx.info.mode
     if mode == .Stream && ctx.info.id == .ChaCha20 {
         if iv.len() != 12 -> return Err(.BadInputData)
-        if ^ctx.base == {
+        if ctx.base.in_place() == {
             .ChaCha20(c) -> {
                 if !aead.chacha20_starts(c, iv, 0) -> return Err(.BadInputData)
             }
@@ -413,7 +413,7 @@ cipher_set_iv: fn(ctx: ^CipherContext, iv: [U8]) CipherLayerError! {
     decrypt: decrypting(ctx)
     if {
         mode == .GCM -> {
-            if ^ctx.base == {
+            if ctx.base.in_place() == {
                 .GCMAES(g) -> gcm_restart(g, decrypt, iv)
                 .GCMCamellia(g) -> gcm_restart(g, decrypt, iv)
                 .GCMARIA(g) -> gcm_restart(g, decrypt, iv)
@@ -422,7 +422,7 @@ cipher_set_iv: fn(ctx: ^CipherContext, iv: [U8]) CipherLayerError! {
         }
         mode == .CCMStarNoTag -> {
             if ctx.operation == None -> return Err(.BadInputData)
-            if ^ctx.base == {
+            if ctx.base.in_place() == {
                 .CCMAES(c) -> ccm_star_restart(c, decrypt, iv)
                 .CCMCamellia(c) -> ccm_star_restart(c, decrypt, iv)
                 .CCMARIA(c) -> ccm_star_restart(c, decrypt, iv)
@@ -455,7 +455,7 @@ gcm_ad: fn<K: ForwardBlock>(g: ^GCMContext<K>, ad: [U8]) CipherLayerError! {
 cipher_update_ad: fn(ctx: ^CipherContext, ad: [U8]) CipherLayerError! {
     if ctx.info.mode == {
         .GCM -> {
-            if ^ctx.base == {
+            if ctx.base.in_place() == {
                 .GCMAES(g) -> gcm_ad(g, ad)
                 .GCMCamellia(g) -> gcm_ad(g, ad)
                 .GCMARIA(g) -> gcm_ad(g, ad)
@@ -464,7 +464,7 @@ cipher_update_ad: fn(ctx: ^CipherContext, ad: [U8]) CipherLayerError! {
         }
         .ChaChaPoly -> {
             decrypt: decrypting(ctx)
-            if ^ctx.base == {
+            if ctx.base.in_place() == {
                 .ChaChaPoly(cp) -> {
                     if !aead.chachapoly_starts(cp, ctx.iv, decrypt) -> return Err(.ChaCha20BadInput)
                     if !aead.chachapoly_update_ad(cp, ad) -> return Err(.ChaChaPolyBadState)
@@ -515,11 +515,11 @@ update_cbc: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]) C
         ctx.unprocessed_len += len
         return
     }
-    at := off
-    n := len
+    ^at: off
+    ^n: len
     if ctx.unprocessed_len != 0 {
         loop i in 0..<room -> ctx.unprocessed[ctx.unprocessed_len + i] = src[at + i]
-        blk := cipher.bytes_of(ctx.unprocessed, 0, bs)
+        ^blk: cipher.bytes_of(ctx.unprocessed, 0, bs)
         cbc_run(ctx, blk, 0, bs, out) ?? {
             core.crypto.wipe(blk)
             return Err(err)
@@ -530,7 +530,7 @@ update_cbc: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]) C
         n -= room
     }
     if n != 0 {
-        tail := n %% bs
+        ^tail: n %% bs
         if tail == 0 && keep_block -> tail = bs
         loop i in 0..<tail -> ctx.unprocessed[i] = src[at + n - tail + i]
         ctx.unprocessed_len += tail
@@ -576,7 +576,7 @@ cipher_update: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]
             ecb_block(ctx, src, off, out)
         }
         .GCM -> {
-            if ^ctx.base == {
+            if ctx.base.in_place() == {
                 .GCMAES(g) -> gcm_data(g, src, off, len, out)
                 .GCMCamellia(g) -> gcm_data(g, src, off, len, out)
                 .GCMARIA(g) -> gcm_data(g, src, off, len, out)
@@ -584,7 +584,7 @@ cipher_update: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]
             }
         }
         .CCMStarNoTag -> {
-            if ^ctx.base == {
+            if ctx.base.in_place() == {
                 .CCMAES(c) -> ccm_data(c, src, off, len, out)
                 .CCMCamellia(c) -> ccm_data(c, src, off, len, out)
                 .CCMARIA(c) -> ccm_data(c, src, off, len, out)
@@ -592,7 +592,7 @@ cipher_update: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]
             }
         }
         .ChaChaPoly -> {
-            if ^ctx.base == {
+            if ctx.base.in_place() == {
                 .ChaChaPoly(cp) -> {
                     if cp.stage != aead.CHACHAPOLY_AAD && cp.stage != aead.CHACHAPOLY_CIPHERTEXT {
                         return Err(.ChaChaPolyBadState)
@@ -629,7 +629,7 @@ cipher_update: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]
             if {
                 ctx.info.id == .Null -> push_all(out, cipher.bytes_of(src, off, len))
                 else -> {
-                    if ^ctx.base == {
+                    if ctx.base.in_place() == {
                         .ChaCha20(c) -> {
                             if !aead.chacha20_update(c, src, off, len, out) {
                                 return Err(.BadInputData)
@@ -664,7 +664,7 @@ finish_cbc: fn(ctx: ^CipherContext, out: ^[U8]) -> Bool CipherLayerError! {
         }
         else -> {}
     }
-    blk := cipher.bytes_of(ctx.unprocessed, 0, bs)
+    ^blk: cipher.bytes_of(ctx.unprocessed, 0, bs)
     if !decrypt {
         cbc_run(ctx, blk, 0, bs, out) ?? {
             core.crypto.wipe(blk)
@@ -673,7 +673,7 @@ finish_cbc: fn(ctx: ^CipherContext, out: ^[U8]) -> Bool CipherLayerError! {
         core.crypto.wipe(blk)
         return Ok(true)
     }
-    plain := [U8]{}
+    ^plain: [U8]{}
     cbc_run(ctx, blk, 0, bs, plain) ?? {
         core.crypto.wipe(blk)
         core.crypto.wipe(plain)
@@ -765,7 +765,7 @@ finish_tag: fn(ctx: ^CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
 cipher_check_tag: fn(ctx: ^CipherContext, expected: [U8]) CipherLayerError! {
     if ctx.operation != Val(.Decrypt) -> return Err(.BadInputData)
     if ctx.info.mode == .GCM && expected.len() > 16 -> return Err(.BadInputData)
-    want := finish_tag(ctx, expected.len())
+    ^want: finish_tag(ctx, expected.len())
     same: aead.tags_equal(expected, want, expected.len())
     core.crypto.wipe(want)
     if !same -> return Err(.AuthFailed)
@@ -777,7 +777,7 @@ cipher_check_tag: fn(ctx: ^CipherContext, expected: [U8]) CipherLayerError! {
 cipher_crypt: fn(ctx: ^CipherContext, iv: [U8], input: [U8]) -> [U8] CipherLayerError! {
     cipher_set_iv(ctx, iv)
     cipher_reset(ctx)
-    out := [U8]{}
+    ^out: [U8]{}
     cipher_update(ctx, input, 0, input.len(), out) ?? {
         core.crypto.wipe(out)
         return Err(err)
@@ -840,7 +840,7 @@ ccm_open: fn<K: ForwardBlock>(c: CCMContext<K>, iv: [U8], ad: [U8], input: [U8],
 chachapoly_seal: fn(cp: ^aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8]) -> [U8] CipherLayerError! {
     if !aead.chachapoly_starts(cp, iv, false) -> return Err(.ChaCha20BadInput)
     if !aead.chachapoly_update_ad(cp, ad) -> return Err(.ChaChaPolyBadState)
-    out := [U8]{}
+    ^out: [U8]{}
     if !aead.chachapoly_update(cp, input, 0, input.len(), out) -> return Err(.ChaCha20BadInput)
     mac: aead.chachapoly_finish(cp) ?? return Err(.ChaChaPolyBadState)
     push_all(out, mac)
@@ -852,10 +852,10 @@ chachapoly_seal: fn(cp: ^aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8]) -> [U
 chachapoly_open: fn(cp: ^aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8], len: Int) -> [U8] CipherLayerError! {
     if !aead.chachapoly_starts(cp, iv, true) -> return Err(.ChaCha20BadInput)
     if !aead.chachapoly_update_ad(cp, ad) -> return Err(.ChaChaPolyBadState)
-    out := [U8]{}
+    ^out: [U8]{}
     if !aead.chachapoly_update(cp, input, 0, len, out) -> return Err(.ChaCha20BadInput)
-    want := aead.chachapoly_finish(cp) ?? return Err(.ChaChaPolyBadState)
-    mac := cipher.bytes_of(input, len, 16)
+    ^want: aead.chachapoly_finish(cp) ?? return Err(.ChaChaPolyBadState)
+    ^mac: cipher.bytes_of(input, len, 16)
     same: aead.tags_equal(mac, want, 16)
     core.crypto.wipe(want)
     if !same {
@@ -957,14 +957,14 @@ cipher_auth_decrypt_ext: fn(ctx: ^CipherContext, iv: [U8], ad: [U8], input: [U8]
     iv: [U8]{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f}
     plain: [U8]{0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a}
     sealed: [U8]{0x76, 0x49, 0xab, 0xac, 0x81, 0x19, 0xb2, 0x46, 0xce, 0xe9, 0x8e, 0x9b, 0x12, 0xe9, 0x19, 0x7d}
-    enc := cipher_setup(info)
+    ^enc: cipher_setup(info)
     cipher_setkey(enc, key, .Encrypt) ?? panic("setkey")
     cipher_set_padding_mode(enc, .Unpadded) ?? panic("padding")
     assert((cipher_crypt(enc, iv, plain) ?? panic("crypt")) == sealed)
     cipher_set_padding_mode(enc, .PKCS7) ?? panic("padding")
     padded: cipher_crypt(enc, iv, plain) ?? panic("crypt")
     assert(padded.len() == 32)
-    dec := cipher_setup(info)
+    ^dec: cipher_setup(info)
     cipher_setkey(dec, key, .Decrypt) ?? panic("setkey")
     cipher_set_padding_mode(dec, .PKCS7) ?? panic("padding")
     assert((cipher_crypt(dec, iv, padded) ?? panic("crypt")) == plain)
@@ -973,7 +973,7 @@ cipher_auth_decrypt_ext: fn(ctx: ^CipherContext, iv: [U8], ad: [U8], input: [U8]
         .Err(e) -> e == .InvalidPadding
     }
     assert(refused)
-    gcm := cipher_setup(cipher_info_from_string("AES-128-GCM") ?? panic("AES-128-GCM"))
+    ^gcm: cipher_setup(cipher_info_from_string("AES-128-GCM") ?? panic("AES-128-GCM"))
     cipher_setkey(gcm, cipher.zero_bytes(16), .Encrypt) ?? panic("setkey")
     out: cipher_auth_encrypt_ext(gcm, cipher.zero_bytes(12), [U8]{}, cipher.zero_bytes(16), 16) ?? panic("seal")
     assert(

@@ -170,7 +170,7 @@ SemanticLockFile: struct {
 
     // Drop every record of `kind` whose key is `key`.
     remove_records: fn(^self, kind: LockRecordKind, key: String) Never! {
-        kept := [SemanticRecord]{}
+        ^kept: [SemanticRecord]{}
         loop record in self.records {
             if record.identity.kind == kind && record.identity.key == key -> next
             kept.push(record.copy())
@@ -182,7 +182,7 @@ SemanticLockFile: struct {
     // their bytes. Returns the replaced record.
     selective_update: fn(^self, new_record: SemanticRecord) -> SemanticRecord? Never! {
         key: new_record.identity.semantic_key()
-        found := -1
+        ^found: -1
         loop index in 0..<self.records.len() {
             if self.records[index].identity.semantic_key() == key {
                 found = index
@@ -194,7 +194,7 @@ SemanticLockFile: struct {
             return None
         }
         previous: self.records[found].copy()
-        kept := [SemanticRecord]{}
+        ^kept: [SemanticRecord]{}
         loop index in 0..<self.records.len() {
             if index != found -> kept.push(self.records[index])
         }
@@ -207,7 +207,7 @@ SemanticLockFile: struct {
     // canonical `PackageVariant::identity_key()`.
     record_selected_variant: fn(^self, package: String, variant_identity: String, hash: String, reason: String) Never! {
         identity: LockIdentity{kind: LockRecordKind.Variant, key: package, exact: variant_identity, hash: hash, platform: variant_identity}
-        rationale := LockRationale.empty()
+        ^rationale: LockRationale.empty()
         rationale.owner_package = package
         rationale.reason = reason
         rationale.provider = "native"
@@ -218,7 +218,7 @@ SemanticLockFile: struct {
 
     // Identity keys of every locked variant domain, sorted and unique.
     locked_variant_domains: fn(self) -> [String] Never! {
-        domains := [String]{}
+        ^domains: [String]{}
         loop record in self.records {
             if record.identity.kind == LockRecordKind.Variant -> domains.push(record.identity.exact)
         }
@@ -232,7 +232,7 @@ SemanticLockFile: struct {
             .Val(parts) -> parts.before
             .None -> provider_ref.copy()
         }
-        why := LockRationale.empty()
+        ^why: LockRationale.empty()
         why.owner_package = owner
         why.reason = rationale
         why.source_ref = "catalog:{logical_name}"

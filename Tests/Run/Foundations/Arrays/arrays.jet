@@ -31,7 +31,7 @@ ImageArray: struct {
 }
 
 find_text: fn(xs: [String], needle: String) -> Int? {
-    i := 0
+    ^i: 0
     loop i < xs.len() {
         if xs[i] == needle -> return Val(i)
         i += 1
@@ -67,7 +67,7 @@ lookup: fn(array: LabeledArray, dim: String, label: String) -> Float? {
     label_index: find_text(coordinate.labels, label)
     if label_index == .None -> return None
 
-    indexes := [Int]{}
+    ^indexes: [Int]{}
     loop _i in 0..<array.dims.len() -> indexes.push(0)
     indexes[axis] = label_index
     cell: compute.get(array.values, indexes) ?? panic("labeled lookup")
@@ -80,8 +80,8 @@ cell: fn(array: LabeledArray, row_label: String, col_label: String) -> Float? {
     row_axis: find_text(array.dims, "row")
     col_axis: find_text(array.dims, "col")
     if row_axis == .None || col_axis == .None -> return None
-    row_index := row_axis ?? 0
-    col_index := col_axis ?? 0
+    ^row_index: row_axis ?? 0
+    ^col_index: col_axis ?? 0
     if row_index >= array.coords.len() || col_index >= array.coords.len() -> return None
 
     row_coordinate: array.coords[row_index]
@@ -91,7 +91,7 @@ cell: fn(array: LabeledArray, row_label: String, col_label: String) -> Float? {
     col_label_index: find_text(col_coordinate.labels, col_label)
     if row_label_index == .None || col_label_index == .None -> return None
 
-    indexes := [Int]{}
+    ^indexes: [Int]{}
     loop _i in 0..<array.dims.len() -> indexes.push(0)
     indexes[row_index] = row_label_index ?? 0
     indexes[col_index] = col_label_index ?? 0
@@ -119,11 +119,11 @@ chunk_count: fn(plan: ChunkedArray) -> Int {
 // materialized chunk; no nested list stands in for compute storage.
 read_chunk: fn(plan: ChunkedArray, index: Int) -> Tensor {
     if index < 0 || index >= chunk_count(plan) -> panic("chunk index out of bounds")
-    start := index * plan.chunk_size
-    values := [Float]{}
-    offset := 0
+    ^start: index * plan.chunk_size
+    ^values: [Float]{}
+    ^offset: 0
     loop offset < plan.chunk_size {
-        position := start + offset
+        ^position: start + offset
         if position >= plan.length -> break
         value: compute.get(plan.source, [position]) ?? panic("chunk read")
         values.push(value)
@@ -136,13 +136,13 @@ map_chunk: fn(plan: ^ChunkedArray, index: Int, f: fn(Float) -[]> Float) -> Tenso
     plan.reads += 1
     chunk: read_chunk(plan, index)
     values: compute.to_list(chunk)
-    mapped := [Float]{}
+    ^mapped: [Float]{}
     loop value in values -> mapped.push(f(value))
     return compute.from_list(mapped) ?? panic("mapped chunk")
 }
 
 map_all: fn(plan: ^ChunkedArray, f: fn(Float) -[]> Float) -> Tensor {
-    mapped := [Float]{}
+    ^mapped: [Float]{}
     loop index in 0..<chunk_count(plan) {
         chunk: map_chunk(plan, index, f)
         values: compute.to_list(chunk)
@@ -152,7 +152,7 @@ map_all: fn(plan: ^ChunkedArray, f: fn(Float) -[]> Float) -> Tensor {
 }
 
 ppm_tokens: fn(source: String) -> [String] {
-    tokens := [String]{}
+    ^tokens: [String]{}
     loop line in source.split("\n") {
         cleaned: line.trim()
         if cleaned != "" && !cleaned.starts_with("#") {
@@ -179,9 +179,9 @@ decode_ppm: fn(source: String) -> ImageArray Err! {
     if width <= 0 || height <= 0 -> return Err("PPM dimensions must be positive")
     if max_value <= 0 -> return Err("PPM maximum must be positive")
 
-    expected := width * height * 3
-    values := [Float]{}
-    index := 4
+    ^expected: width * height * 3
+    ^values: [Float]{}
+    ^index: 4
     loop index < tokens.len() {
         sample: tokens[index].to_int() ?? return Err("PPM sample is invalid")
         if sample < 0 || sample > max_value -> return Err("PPM sample is out of range")
@@ -206,14 +206,14 @@ decode_ppm: fn(source: String) -> ImageArray Err! {
 
 resize_nearest: fn(image: ImageArray, new_width: Int, new_height: Int) -> ImageArray {
     if new_width <= 0 || new_height <= 0 -> panic("resize dimensions must be positive")
-    out := compute.zeros([new_height, new_width, image.channels]) ?? panic("resize allocation")
-    y := 0
+    ^out: compute.zeros([new_height, new_width, image.channels]) ?? panic("resize allocation")
+    ^y: 0
     loop y < new_height {
-        x := 0
+        ^x: 0
         loop x < new_width {
-            source_y := y * image.height /% new_height
-            source_x := x * image.width /% new_width
-            channel := 0
+            ^source_y: y * image.height /% new_height
+            ^source_x: x * image.width /% new_width
+            ^channel: 0
             loop channel < image.channels {
                 value: compute.get(image.pixels, [source_y, source_x, channel]) ?? panic("resize read")
                 compute.set(out, [y, x, channel], value) ?? panic("resize write")
@@ -235,15 +235,15 @@ resize_nearest: fn(image: ImageArray, new_width: Int, new_height: Int) -> ImageA
 
 grayscale: fn(image: ImageArray) -> ImageArray {
     if image.channels < 3 -> panic("RGB image required")
-    out := compute.zeros([image.height, image.width, 1]) ?? panic("grayscale allocation")
-    y := 0
+    ^out: compute.zeros([image.height, image.width, 1]) ?? panic("grayscale allocation")
+    ^y: 0
     loop y < image.height {
-        x := 0
+        ^x: 0
         loop x < image.width {
             red: compute.get(image.pixels, [y, x, 0]) ?? panic("red read")
             green: compute.get(image.pixels, [y, x, 1]) ?? panic("green read")
             blue: compute.get(image.pixels, [y, x, 2]) ?? panic("blue read")
-            gray := red * 0.3 + green * 0.59 + blue * 0.11
+            ^gray: red * 0.3 + green * 0.59 + blue * 0.11
             compute.set(out, [y, x, 0], gray) ?? panic("gray write")
             x += 1
         }
@@ -262,16 +262,16 @@ grayscale: fn(image: ImageArray) -> ImageArray {
 // Encode image Tensor data to a real P3 file.  Grayscale values are expanded
 // to three equal samples so the output can be decoded by the same path.
 encode_ppm: fn(image: ImageArray) -> String {
-    lines := [String]{
+    ^lines: [String]{
         "P3",
         "{image.width} {image.height}",
         "255",
     }
-    y := 0
+    ^y: 0
     loop y < image.height {
-        x := 0
+        ^x: 0
         loop x < image.width {
-            samples := [String]{}
+            ^samples: [String]{}
             if image.channels == 1 {
                 gray: compute.get(image.pixels, [y, x, 0]) ?? panic("gray output read")
                 sample: saturating(Int{gray * 255.0})
@@ -279,7 +279,7 @@ encode_ppm: fn(image: ImageArray) -> String {
                 samples.push("{sample}")
                 samples.push("{sample}")
             } else {
-                channel := 0
+                ^channel: 0
                 loop channel < 3 {
                     value: compute.get(image.pixels, [y, x, channel]) ?? panic("output read")
                     sample: saturating(Int{value * 255.0})

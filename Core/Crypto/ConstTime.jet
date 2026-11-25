@@ -205,7 +205,7 @@ memcpy_offset: fn(dest: ^[#Secret U8], doff: Int, src: [#Secret U8], soff: Int, 
 /// True when a[aoff..<aoff+n] and b[boff..<boff+n] differ; every byte is
 /// read and the outcome stays secret (the mask form of mbedtls_ct_memcmp).
 mem_ne: fn(a: [#Secret U8], aoff: Int, b: [#Secret U8], boff: Int, n: Int) -> CtCond Never! {
-    diff := U64{0}
+    ^diff: U64{0}
     loop i in 0..<n -> diff |= U64{a[aoff + i] ~ b[boff + i]}
     cond_of(diff)
 }
@@ -221,7 +221,7 @@ mem_ne: fn(a: [#Secret U8], aoff: Int, b: [#Secret U8], boff: Int, n: Int) -> Ct
 /// else one, and only the outcome published.
 #Scrub(Secret) memcmp_partial: fn(a: [#Secret U8], b: [#Secret U8], n: Int, skip_head: Int, skip_tail: Int) -> Int Never! {
     valid_end: n - skip_tail
-    diff := U64{0}
+    ^diff: U64{0}
     loop i in 0..<n {
         d: U64{a[i] ~ b[i]}
         valid: bool_and(size_ge(i, skip_head), size_lt(i, valid_end))
@@ -240,13 +240,13 @@ mem_ne: fn(a: [#Secret U8], aoff: Int, b: [#Secret U8], boff: Int, n: Int) -> Ct
     per: 1 << per_log
     width: 64 >> per_log
     hi: x >> per_log
-    word := U64{0}
+    ^word: U64{0}
     // All ones when the index matches: the xor is small, so subtracting one
     // borrows into bit 63 only from zero.
     loop i in 0..<packed.len() -> word |= packed[i] & U64{0} - (((U64{i} ~ hi) - U64{1}) >> 63)
     lo: x & U64{per - 1}
     entry_bits: (U64{1} << width) - U64{1}
-    out := U64{0}
+    ^out: U64{0}
     loop k in 0..<per {
         hit: U64{0} - (((U64{k} ~ lo) - U64{1}) >> 63)
         out |= (word >> (width * k)) & entry_bits & hit
@@ -279,10 +279,10 @@ mem_ne: fn(a: [#Secret U8], aoff: Int, b: [#Secret U8], boff: Int, n: Int) -> Ct
 }
 
 #Test("The memory operations move, copy, zero and compare as their plain forms do") {
-    buf := [U8]{1, 2, 3, 4, 5}
+    ^buf: [U8]{1, 2, 3, 4, 5}
     memmove_left(buf, 0, 5, U64{2})
     assert(memcmp(buf, 0, [U8]{3, 4, 5, 0, 0}, 0, 5) == 0)
-    dst := [U8]{0, 0}
+    ^dst: [U8]{0, 0}
     memcpy_offset(dst, 0, [U8]{9, 8, 7, 6}, 0, U64{1}, 0, 2, 2)
     assert(memcmp(dst, 0, [U8]{8, 7}, 0, 2) == 0)
     zeroize_if(ct_true(), dst, 0, 2)

@@ -33,7 +33,7 @@ holder: fn() -> [[Int]] AllocError! { List.try_with_capacity(64) }
 // 4 KB of the cap is left. `ballast` holds every list it takes; its capacity
 // is reserved, so pushing to it allocates nothing.
 fill: fn(ballast: ^[[Int]]) {
-    count := 8_388_608
+    ^count: 8_388_608
     loop count >= 512 {
         if reserve(count) == {
             .Ok(chunk) -> { ballast.push(chunk) }
@@ -50,7 +50,7 @@ fill: fn(ballast: ^[[Int]]) {
 refused_under_ballast: fn(capped: Atomic<Int>, huge: Int) -> Bool {
     if holder() == {
         .Ok(chunks) -> {
-            ballast := chunks
+            ^ballast: chunks
             if reserve(1024) == {
                 .Ok(_spare) -> fill(ballast)
                 .Err(_error) -> return false
@@ -75,7 +75,7 @@ run: fn() {
     word: Atomic<I64>.new(0)
     small: Atomic<U32>.new(4294967000)
     signed: Atomic<I32>.new(-2147479000)
-    done := 0
+    ^done: 0
     task.group adders {
         exact_tasks: loop _ in 0..<TASKS -> task exact_adds(crossing)
         fixed_tasks: loop _ in 0..<TASKS -> task fixed_adds(word, small, signed)

@@ -58,7 +58,7 @@ scan_tests: fn() {
     scan_test_require(jet_rt_binary_pattern_match(I64{1}, I64{0}, I64{1}, rows, I64{0}) == I64{1})
     scan_test_require(jet_rt_text_pattern_match(I64{1}, I64{0}, I64{1}, rows, I64{0}) == I64{1})
     // Byte-order, all-ones U64 (signed intermediate), and owned rest capture.
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{8}) {
         rt_text_store(data + at * I64{8}, I64{255})
         at += I64{1}
@@ -144,9 +144,9 @@ scan_stream_tests: fn() {
     scan_test_f32(input, slots, I64{2139095040})  // +inf
     scan_test_f32(input, slots, I64{2143363909})  // quiet NaN + payload
     scan_test_f32(input, slots, I64{2139169605})  // signaling NaN + payload
-    stride := I64{1}
+    ^stride: I64{1}
     loop stride <= (I64{8}) {
-        at := I64{0}
+        ^at: I64{0}
         loop at < (I64{8}) {
             if (stride == I64{1}) { rt_text_put(input + at, I64{255}) } else {
                 rt_text_store(input + at * stride, I64{255})
@@ -216,9 +216,9 @@ scan_stream_tests: fn() {
 }
 
 scan_test_f32: fn(input: I64, slots: I64, word: I64) {
-    order := I64{0}
+    ^order: I64{0}
     loop order < (I64{2}) {
-        at := I64{0}
+        ^at: I64{0}
         loop at < (I64{4}) {
             shift: (if (order == I64{0}) -> at else -> I64{3} - at) * I64{8}
             rt_text_put(input + at, (word >> shift) & I64{255})

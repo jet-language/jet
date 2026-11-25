@@ -81,9 +81,9 @@ CBindingMetadata: struct {
     }
 
     add_closure: fn(^self, closure: FFILinkClosure) Never! {
-        direct := self.link_closure.direct
+        ^direct: self.link_closure.direct
         loop library in closure.direct -> direct.push(library.copy())
-        transitive := self.link_closure.transitive
+        ^transitive: self.link_closure.transitive
         loop library in closure.transitive -> transitive.push(library.copy())
         self.link_closure = FFILinkClosure.new(direct, transitive)
     }
@@ -119,7 +119,7 @@ pkg_cffi_parse_boundary_list: fn(provenance: ForeignProvenance, name: String) ->
 }
 
 pkg_cffi_split_nonblank: fn(value: String, separator: String) -> [String] Never! {
-    items := [String]{}
+    ^items: [String]{}
     loop item in value.split(separator) {
         if item.trim() != "" -> items.push(item)
     }
@@ -169,8 +169,8 @@ pkg_cffi_read_boundary_facts: fn(cache: String, expected_language: String, expec
     if library != expected_lib {
         return Err(pkg_bridge_error("foreign boundary library `{library}` does not match `{expected_lib}`"))
     }
-    artifact_digests := [String]{}
-    names := provenance.fields.keys().to_list()
+    ^artifact_digests: [String]{}
+    ^names: provenance.fields.keys().to_list()
     names.sort()
     loop name in names {
         if !name.starts_with("artifact.") -> next
@@ -182,7 +182,7 @@ pkg_cffi_read_boundary_facts: fn(cache: String, expected_language: String, expec
         artifact_digests.push(digest.copy())
     }
     rows: provenance.fields.get("boundary-obligation") ?? return Err(pkg_bridge_error("foreign boundary provenance has no obligation rows"))
-    obligations := [FFIBoundaryObligation]{}
+    ^obligations: [FFIBoundaryObligation]{}
     loop row in rows -> obligations.push(pkg_cffi_parse_obligation(row))
     digest: pkg_cffi_provenance_value(provenance, "boundary-digest")
     language: pkg_cffi_provenance_value(provenance, "boundary-language")
@@ -212,7 +212,7 @@ pkg_cffi_read_boundary_facts: fn(cache: String, expected_language: String, expec
     compiler_flags: pkg_cffi_parse_boundary_list(provenance, "boundary-compiler-flags")
     target: pkg_cffi_provenance_value(provenance, "boundary-coverage-target")
     generator: pkg_cffi_provenance_value(provenance, "boundary-coverage-generator")
-    coverage := ForeignArtifactCoverage.new(loaded_artifact, target, generator)
+    ^coverage: ForeignArtifactCoverage.new(loaded_artifact, target, generator)
     if transitive_dependencies == .Val(values) {
         coverage = coverage.with_transitive_dependencies(values)
     }
@@ -246,8 +246,8 @@ pkg_cffi_hex_value: fn(code: Int) -> Int? Never! {
 
 pkg_cffi_metadata_unescape: fn(value: String) -> String ForeignBridgeError! {
     bytes: value.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         if (Int{bytes[index]}) != 37 {
             out.push(bytes[index])
@@ -279,11 +279,11 @@ pkg_cffi_read_binding_metadata: fn(cache: String, expected_lib: String) -[FS]> C
     path: pkg_cffi_binding_metadata_path(cache)
     if !files.is_file(path) -> return Ok(None)
     text: files.read(path) ?? return Err(pkg_bridge_error("could not read {path}: {err}"))
-    schema := String?{None}
-    library := String?{None}
-    direct := [String]{}
-    transitive := [String]{}
-    facts := [FFIHandleFact]{}
+    ^schema: String?{None}
+    ^library: String?{None}
+    ^direct: [String]{}
+    ^transitive: [String]{}
+    ^facts: [FFIHandleFact]{}
     loop line in pkg_bridge_text_lines(text) {
         field: line.split_once("=") ?? return Err(pkg_bridge_error("malformed binding metadata line in {path}"))
         value: field.after
@@ -320,7 +320,7 @@ pkg_cffi_read_binding_metadata: fn(cache: String, expected_lib: String) -[FS]> C
 
 // Write the typed C binding metadata produced by the C binder.
 pkg_cffi_write_c_binding_metadata: fn(cache: String, handles: [HandleFact], closure: LinkClosure) -[FS, Env]> String ForeignBridgeError! {
-    facts := [FFIHandleFact]{}
+    ^facts: [FFIHandleFact]{}
     loop handle in handles -> facts.push(pkg_cffi_canonical_handle_fact(handle))
     path: pkg_cffi_binding_metadata_path(cache)
     text: pkg_cffi_render_binding_metadata(closure.primary, facts, pkg_cffi_canonical_link_closure(closure))
@@ -356,7 +356,7 @@ pkg_cffi_generated_cache_language: fn(display: String) -> String? Never! {
 // language's bridge prefix, and its source library name.
 pkg_cffi_generated_boundary_cache: fn(project_root: String, language: String, loaded_lib: String) -> {cache: String, lib: String} ForeignBridgeError! {
     prefix: pkg_foreign_bridge_prefix(language)
-    source_lib := loaded_lib
+    ^source_lib: loaded_lib
     if prefix != "" {
         if !loaded_lib.starts_with(prefix) {
             return Err(pkg_bridge_error("generated `{language}` binding library `{loaded_lib}` does not match its bridge prefix `{prefix}`"))
@@ -384,7 +384,7 @@ pkg_cffi_canonical_or_self: fn(path: String) -[FS, Env]> String Never! {
 }
 
 pkg_cffi_handle_keys: fn(facts: [FFIHandleFact]) -> String Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     loop fact in facts -> keys.push(fact.stable_key())
     keys.join("\n")
 }
@@ -402,7 +402,7 @@ pkg_cffi_c_binding_identity_with_entry: fn(project_root: String, lib: String, he
     header_bytes: files.read_bytes(header_path) ?? return Err(pkg_bridge_error("could not read {header_path} for C binding identity: {err}"))
     cache_bytes: files.read_bytes(cache_path) ?? return Err(pkg_bridge_error("could not read {cache_path} for C binding identity: {err}"))
     descriptor: pkg_binder_descriptor(C_MODULE_ROOT) ?? return Err(pkg_bridge_error("C binder descriptor is not registered"))
-    identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    ^identity: ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
     identity.field("language", C_MODULE_ROOT.bytes())
     identity.field("binder_schema", C_BINDER_SCHEMA.bytes())
     identity.field("library", lib.bytes())
@@ -444,13 +444,13 @@ pkg_cffi_write_c_binding_provenance_with_boundary: fn(project_root: String, lib:
     metadata: pkg_cffi_metadata_or_default(cache_path, lib)
     cc: pkg_bridge_tool_identity("cc")
     ar: pkg_bridge_tool_identity("ar")
-    boundary := supplied_boundary ?? ForeignBoundaryContract.new(descriptor, lib, ForeignBoundaryIdentity.new("header:{header_path}:{header_sha}", "cache-recorded-or-none", "c-bind:{C_BINDER_SCHEMA}", "cache:{identity}", "cc={cc};ar={ar}", pkg_bridge_foreign_host_target()))
+    ^boundary: supplied_boundary ?? ForeignBoundaryContract.new(descriptor, lib, ForeignBoundaryIdentity.new("header:{header_path}:{header_sha}", "cache-recorded-or-none", "c-bind:{C_BINDER_SCHEMA}", "cache:{identity}", "cc={cc};ar={ar}", pkg_bridge_foreign_host_target()))
     if supplied_boundary == None {
         boundary.ownership = if metadata.handle_facts.len() == 0 -> "signature-declared; no opaque handles" else -> "owned opaque handles recorded in binding metadata"
         boundary.assumptions.push("cache was published without an in-memory overlay identity; foreign source remains authoritative")
     }
     cache_sha: pkg_bridge_sha_file(cache_path)
-    fields := [{name: String, value: String}]{
+    ^fields: [{name: String, value: String}]{
         {name: "language", value: C_MODULE_ROOT},
         {name: "abi", value: "c_{lib}"},
         {name: "transport", value: "direct-c-abi"},
@@ -468,7 +468,7 @@ pkg_cffi_write_c_binding_provenance_with_boundary: fn(project_root: String, lib:
     // provenance publisher uses: a stable key is itself a `key=value;...`
     // record, and a header with several handles must not fold them into one
     // multi-line value.
-    handle_keys := [String]{}
+    ^handle_keys: [String]{}
     loop fact in metadata.handle_facts {
         key: fact.stable_key()
         if !handle_keys.contains(key) -> handle_keys.push(key)
@@ -488,7 +488,7 @@ pkg_cffi_write_c_binding_provenance_with_boundary: fn(project_root: String, lib:
         }
         fields.push({name: "linked-archive-sha256", value: archive_sha})
     }
-    artifacts := [{name: String, digest: String}]{{name: files.basename(cache_path), digest: cache_sha}}
+    ^artifacts: [{name: String, digest: String}]{{name: files.basename(cache_path), digest: cache_sha}}
     metadata_path: pkg_cffi_binding_metadata_path(cache_path)
     if files.is_file(metadata_path) {
         artifacts.push({name: files.basename(metadata_path), digest: pkg_bridge_sha_file(metadata_path)})

@@ -33,7 +33,7 @@ nixeval_test_integer: fn(document: NixEvalJSON, index: Int) -> Int {
 
 // A JSON array of strings.
 nixeval_test_strings: fn(document: NixEvalJSON, index: Int) -> [String] {
-    strings := [String]{}
+    ^strings: [String]{}
     loop item in nixeval_test_array(document, index) {
         strings.push(nixeval_test_string(document, item))
     }
@@ -53,7 +53,7 @@ nixeval_test_json_error: fn(text: String) -> String {
 }
 
 nixeval_test_nested_arrays: fn(depth: Int) -> String {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop _ in 0..<depth -> nixeval_push_byte(bytes, 91)
     nixeval_push_text(bytes, "true")
     loop _ in 0..<depth -> nixeval_push_byte(bytes, 93)

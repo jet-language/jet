@@ -21,7 +21,7 @@ inline_assembly_test_problem: fn(template: String, names: [String], returns: Boo
 }
 
 #Test("the rail mnemonics are exactly the closed templates' words outside the line grammar") {
-    words := [String]{}
+    ^words: [String]{}
     rails: [[String]]{X64_FIBER_SWITCH, X64_GS_BASE_WRITE, X64_SIGNAL_RETURN, X64_CLONE_CHILD}
     loop rail in rails {
         loop line in rail {
@@ -42,7 +42,7 @@ inline_assembly_test_problem: fn(template: String, names: [String], returns: Boo
     template: "rdtsc\nshl rdx, 32\nor rax, rdx\nmov {{seed}}, rax ; -> return"
     assembled: x64_assemble_template(template, [String]{"seed"}, true, false)
     assert(assembled.error == None)
-    expected := x64_code()
+    ^expected: x64_code()
     x64_byte(expected.bytes, 0x0f)
     x64_byte(expected.bytes, 0x31)
     x64_shift_ri(expected, X64Shift.Shl, 2, 32)

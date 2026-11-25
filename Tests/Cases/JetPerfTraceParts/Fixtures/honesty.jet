@@ -20,9 +20,9 @@ s6_decimal_compare: fn(a: String, b: String) -> Int {
 
 s6_json_u64_after: fn(text: String, key: String) -> String? {
     framed: text.split_once("\"{key}\":") ?? return None
-    digits := [U8]{}
-    seen := false
-    nonzero := false
+    ^digits: [U8]{}
+    ^seen: false
+    ^nonzero: false
     loop byte in framed.after.bytes() {
         if byte < 48 || byte > 57 -> break
         seen = true
@@ -148,7 +148,7 @@ s6_honest_capture: fn() {
     // A span row holds its wait stack's frames, so rows split at the key each
     // row starts with. A task_wait span is one wait of its task; only the
     // task_observed span carries the task's parent, one per task.
-    observed_count := 0
+    ^observed_count: 0
     loop span in spans.split(`},{"awaited_task_id":`).to_list() {
         assert(span.contains("\"status\":\"captured\""))
         task_id: s6_required_u64(span, "task_id")

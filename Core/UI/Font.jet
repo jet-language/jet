@@ -193,12 +193,12 @@ Face: struct {
     /// Glyph `id`'s outline; an id outside the face is glyph 0's.
     outline: fn(self, id: Int) -> GlyphOutline {
         glyph: if id < 0 || id >= self.glyph_count -> 0 else -> id
-        points := [OutlinePoint]{}
-        ends := [Int]{}
+        ^points: [OutlinePoint]{}
+        ^ends: [Int]{}
         // The face checked every glyph when it loaded.
         glyph_points(self, glyph, 0, UNSCALED, points, ends) ?? return GlyphOutline{contours: [[OutlinePoint]]{}}
-        contours := [[OutlinePoint]]{}
-        first := 0
+        ^contours: [[OutlinePoint]]{}
+        ^first: 0
         loop end in ends {
             contours.push(points[first..<(end + 1)].copy())
             first = end + 1
@@ -212,8 +212,8 @@ Face: struct {
         shaped: shape(self, text)
         adjusted: positions(self, shaped.ids)
         scale: size_px / Float{self.units}
-        glyphs := [PlacedGlyph]{}
-        pen := 0
+        ^glyphs: [PlacedGlyph]{}
+        ^pen: 0
         loop k in 0..<shaped.ids.len() {
             glyphs.push(
                 PlacedGlyph{
@@ -235,10 +235,10 @@ Face: struct {
     /// between characters, at least one per line.
     wrap: fn(self, text: String, size_px: Float, max_width: Float) -> [TextLine] {
         bytes: text.bytes()
-        lines := [TextLine]{}
-        start := 0
+        ^lines: [TextLine]{}
+        ^start: 0
         loop {
-            stop := start
+            ^stop: start
             loop stop < bytes.len() && (Int{bytes[stop]}) != 10 -> stop += 1
             wrap_paragraph(self, bytes, start, stop, size_px, max_width, lines)
             if stop >= bytes.len() -> break
@@ -317,7 +317,7 @@ face: fn(bytes: [U8]) -> Face FontError! {
     within(loca, (glyph_count + 1) * loca_width, "loca")
     vertical: vertical_metrics(bytes, hhea, table(tables, "OS/2"))
     picked: pick_cmap(bytes, cmap)
-    out := Face{
+    ^out: Face{
         bytes: bytes.copy(),
         glyph_count: glyph_count,
         units: units,
@@ -340,15 +340,15 @@ face: fn(bytes: [U8]) -> Face FontError! {
     }
     // Every outline is read once now, so later queries cannot fail.
     loop id in 0..<glyph_count {
-        points := [OutlinePoint]{}
-        ends := [Int]{}
+        ^points: [OutlinePoint]{}
+        ^ends: [Int]{}
         glyph_points(out, id, 0, UNSCALED, points, ends)
     }
     if table(tables, "GPOS") == .Val(gpos) -> out.lookups = kerning_lookups(bytes, gpos)
     if out.lookups.len() == 0 && table(tables, "kern") == .Val(kern) {
         out.kern_pairs = kern_table(bytes, kern)
     }
-    mask := 0
+    ^mask: 0
     loop lookup in out.lookups -> mask |= lookup.skip_mask
     if mask != 0 && table(tables, "GDEF") == .Val(gdef) -> out.classes = glyph_classes(bytes, gdef)
     Ok(out)
@@ -532,7 +532,7 @@ draw_text: fn(pixels: ^[U8], width: Int, height: Int, stride_bytes: Int, cache: 
     if size == 0 -> return 0
     shaped: shape(face, text)
     adjusted: positions(face, shaped.ids)
-    pen := 0
+    ^pen: 0
     loop k in 0..<shaped.ids.len() {
         at: x * 64 + units_64(pen + adjusted.x_offsets[k], size, face.units)
         whole: at /% 64
@@ -574,7 +574,7 @@ priv internal: module {
     }
 
     tag_text: fn(value: Int) -> String Never! {
-        out := [U8]{}
+        ^out: [U8]{}
         loop k in 0..<4 -> out.push(U8{(value >> (24 - k * 8)) & 255})
         String.from_bytes(out) ?? ""
     }
@@ -583,7 +583,7 @@ priv internal: module {
     directory: fn(b: [U8]) -> [String:TableSpan] FontError! {
         count: u16(b, 4, "table directory")
         need(b, 12, count * 16, "table directory")
-        out := [String:TableSpan]{}
+        ^out: [String:TableSpan]{}
         loop i in 0..<count {
             at: 12 + i * 16
             name: tag_text(raw32(b, at))
@@ -610,8 +610,8 @@ priv internal: module {
 
     // The index of the range holding `glyph`, or -1.
     range_at: fn(ranges: Ranges, glyph: Int) -> Int {
-        lo := 0
-        hi := ranges.starts.len()
+        ^lo: 0
+        ^hi: ranges.starts.len()
         loop lo < hi {
             mid: (lo + hi) /% 2
             if ranges.ends[mid] < glyph -> lo = mid + 1 else -> hi = mid
@@ -647,7 +647,7 @@ priv internal: module {
     coverage_table: fn(b: [U8], at: Int) -> Ranges FontError! {
         format: u16(b, at, "GPOS coverage")
         count: u16(b, at + 2, "GPOS coverage")
-        out := no_ranges()
+        ^out: no_ranges()
         if format == 1 {
             need(b, at + 4, count * 2, "GPOS coverage")
             loop i in 0..<count {
@@ -666,7 +666,7 @@ priv internal: module {
 
     class_table: fn(b: [U8], at: Int, what: String) -> Ranges FontError! {
         format: u16(b, at, what)
-        out := no_ranges()
+        ^out: no_ranges()
         if format == 1 {
             first: u16(b, at + 2, what)
             count: u16(b, at + 4, what)
@@ -717,7 +717,7 @@ priv internal: module {
     pick_cmap: fn(b: [U8], cmap: TableSpan) -> CmapPick FontError! {
         count: u16(b, cmap.offset + 2, "cmap")
         need(b, cmap.offset + 4, count * 8, "cmap")
-        best := CmapPick{offset: -1, format: 0, count: 0, rank: 0}
+        ^best: CmapPick{offset: -1, format: 0, count: 0, rank: 0}
         loop i in 0..<count {
             row: cmap.offset + 4 + i * 8
             platform: raw16(b, row)
@@ -735,7 +735,7 @@ priv internal: module {
         if best.format == 12 {
             groups: u32(b, best.offset + 12, "cmap format 12")
             need(b, best.offset + 16, groups * 12, "cmap format 12")
-            previous := Int{-1}
+            ^previous: Int{-1}
             loop g in 0..<groups {
                 row: best.offset + 16 + g * 12
                 first: raw32(b, row)
@@ -750,7 +750,7 @@ priv internal: module {
             segments: u16(b, best.offset + 6, "cmap format 4") /% 2
             if segments == 0 -> return Err(font_error("cmap format 4: no segments"))
             need(b, best.offset + 14, segments * 8 + 2, "cmap format 4")
-            previous := Int{-1}
+            ^previous: Int{-1}
             loop s in 0..<segments {
                 last: raw16(b, best.offset + 14 + s * 2)
                 first: raw16(b, best.offset + 16 + segments * 2 + s * 2)
@@ -772,8 +772,8 @@ priv internal: module {
         starts_at: ends_at + segments * 2 + 2
         deltas_at: starts_at + segments * 2
         ranges_at: deltas_at + segments * 2
-        lo := 0
-        hi := segments
+        ^lo: 0
+        ^hi: segments
         loop lo < hi {
             mid: (lo + hi) /% 2
             if raw16(b, ends_at + mid * 2) < scalar -> lo = mid + 1 else -> hi = mid
@@ -791,8 +791,8 @@ priv internal: module {
 
     map_format12: fn(face: Face, scalar: Int) -> Int {
         b: face.bytes
-        lo := 0
-        hi := face.cmap_count
+        ^lo: 0
+        ^hi: face.cmap_count
         loop lo < hi {
             mid: (lo + hi) /% 2
             if raw32(b, face.cmap + 16 + mid * 12 + 4) < scalar -> lo = mid + 1 else -> hi = mid
@@ -845,12 +845,12 @@ priv internal: module {
     simple_points: fn(face: Face, id: Int, span: TableSpan, contours: Int, scale: Int, points: ^[OutlinePoint], ends: ^[Int]) FontError! {
         b: face.bytes
         limit: span.offset + span.length
-        at := span.offset + 10
+        ^at: span.offset + 10
         if at + contours * 2 + 2 > limit {
             return Err(font_error("glyf: glyph {id}'s contour ends pass its end"))
         }
         base: points.len()
-        last := Int{-1}
+        ^last: Int{-1}
         loop c in 0..<contours {
             end: raw16(b, at + c * 2)
             if end <= last {
@@ -865,7 +865,7 @@ priv internal: module {
         at += contours * 2
         instructions: raw16(b, at)
         at += 2 + instructions
-        flags := [Int]{}
+        ^flags: [Int]{}
         loop flags.len() < count {
             if at >= limit -> return Err(font_error("glyf: glyph {id}'s flags pass its end"))
             flag: Int{b[at]}
@@ -881,8 +881,8 @@ priv internal: module {
         if flags.len() > count {
             return Err(font_error("glyf: glyph {id}'s flags repeat past its {count} points"))
         }
-        xs := [Int]{}
-        x := 0
+        ^xs: [Int]{}
+        ^x: 0
         loop flag in flags {
             if flag & 2 != 0 {
                 if at >= limit {
@@ -900,7 +900,7 @@ priv internal: module {
             }
             xs.push(x)
         }
-        y := 0
+        ^y: 0
         loop p in 0..<count {
             flag: flags[p]
             if flag & 4 != 0 {
@@ -932,7 +932,7 @@ priv internal: module {
         b: face.bytes
         limit: span.offset + span.length
         base: points.len()
-        at := span.offset + 10
+        ^at: span.offset + 10
         loop {
             if at + 4 > limit {
                 return Err(font_error("glyf: glyph {id}'s components pass its end"))
@@ -948,8 +948,8 @@ priv internal: module {
             if at + (if words -> 4 else -> 2) > limit {
                 return Err(font_error("glyf: glyph {id}'s component arguments pass its end"))
             }
-            arg1 := 0
-            arg2 := 0
+            ^arg1: 0
+            ^arg2: 0
             if words {
                 arg1 = raw16(b, at)
                 arg2 = raw16(b, at + 2)
@@ -968,10 +968,10 @@ priv internal: module {
                 at += 2
             }
             // The transform as 16.16 fixed point: [xx xy; yx yy].
-            xx := 65536
-            xy_term := 0
-            yx := 0
-            yy := 65536
+            ^xx: 65536
+            ^xy_term: 0
+            ^yx: 0
+            ^yy: 65536
             scale_bytes: if flags & 8 != 0 -> 2 else if flags & 64 != 0 -> 4 else if flags & 128 != 0 -> 8 else -> 0
             if at + scale_bytes > limit {
                 return Err(font_error("glyf: glyph {id}'s component transform passes its end"))
@@ -989,8 +989,8 @@ priv internal: module {
                 yy = signed16(raw16(b, at + 6)) * 4
             }
             at += scale_bytes
-            part := [OutlinePoint]{}
-            part_ends := [Int]{}
+            ^part: [OutlinePoint]{}
+            ^part_ends: [Int]{}
             glyph_points(face, child, depth + 1, scale, part, part_ends)
             if points.len() + part.len() > GLYPH_POINTS_MAX {
                 return Err(font_error("glyf: glyph {id} has more than {GLYPH_POINTS_MAX} points"))
@@ -1001,8 +1001,8 @@ priv internal: module {
                     part[k] = OutlinePoint{x: mul_fix(p.x, xx) + mul_fix(p.y, xy_term), y: mul_fix(p.x, yx) + mul_fix(p.y, yy), on: p.on}
                 }
             }
-            dx := scaled(arg1, scale)
-            dy := scaled(arg2, scale)
+            ^dx: scaled(arg1, scale)
+            ^dy: scaled(arg2, scale)
             if !xy {
                 // Point matching: the parent's point arg1 meets the child's arg2.
                 if arg1 >= points.len() - base || arg2 >= part.len() {
@@ -1020,7 +1020,7 @@ priv internal: module {
     }
 
     value_size: fn(format: Int) -> Int Never! {
-        size := 0
+        ^size: 0
         loop bit in 0..<8 {
             if (format >> bit) & 1 != 0 -> size += 2
         }
@@ -1028,8 +1028,8 @@ priv internal: module {
     }
 
     value_record: fn(b: [U8], at: Int, format: Int) -> ValueRecord Never! {
-        out := ValueRecord{x_place: 0, y_place: 0, x_advance: 0}
-        field := at
+        ^out: ValueRecord{x_place: 0, y_place: 0, x_advance: 0}
+        ^field: at
         if format & 1 != 0 {
             out.x_place = signed16(raw16(b, field))
             field += 2
@@ -1064,7 +1064,7 @@ priv internal: module {
         lookups_at: gpos.offset + raw16(b, gpos.offset + 8)
         script_count: u16(b, scripts_at, "GPOS scripts")
         need(b, scripts_at + 2, script_count * 6, "GPOS scripts")
-        script := Int{-1}
+        ^script: Int{-1}
         loop i in 0..<script_count {
             row: scripts_at + 2 + i * 6
             name: tag_text(raw32(b, row))
@@ -1079,12 +1079,12 @@ priv internal: module {
         required: u16(b, lang + 2, "GPOS language")
         feature_count: u16(b, lang + 4, "GPOS language")
         need(b, lang + 6, feature_count * 2, "GPOS language")
-        indices := [Int]{}
+        ^indices: [Int]{}
         if required != 65535 -> indices.push(required)
         loop i in 0..<feature_count -> indices.push(raw16(b, lang + 6 + i * 2))
         all_features: u16(b, features_at, "GPOS features")
         need(b, features_at + 2, all_features * 6, "GPOS features")
-        chosen := [Int]{}
+        ^chosen: [Int]{}
         loop index in indices {
             if index >= all_features {
                 return Err(font_error("GPOS language: feature {index} of {all_features}"))
@@ -1096,7 +1096,7 @@ priv internal: module {
             need(b, feature + 4, count * 2, "GPOS feature")
             loop k in 0..<count {
                 lookup: raw16(b, feature + 4 + k * 2)
-                known := false
+                ^known: false
                 loop seen in chosen {
                     if seen == lookup -> known = true
                 }
@@ -1106,7 +1106,7 @@ priv internal: module {
         chosen.sort()
         lookup_count: u16(b, lookups_at, "GPOS lookups")
         need(b, lookups_at + 2, lookup_count * 2, "GPOS lookups")
-        out := [PairLookup]{}
+        ^out: [PairLookup]{}
         loop index in chosen {
             if index >= lookup_count {
                 return Err(font_error("GPOS feature kern: lookup {index} of {lookup_count}"))
@@ -1116,10 +1116,10 @@ priv internal: module {
             flag: u16(b, lookup + 2, "GPOS lookup")
             count: u16(b, lookup + 4, "GPOS lookup")
             need(b, lookup + 6, count * 2, "GPOS lookup")
-            subtables := [PairSubtable]{}
+            ^subtables: [PairSubtable]{}
             loop k in 0..<count {
-                sub := lookup + raw16(b, lookup + 6 + k * 2)
-                sub_kind := kind
+                ^sub: lookup + raw16(b, lookup + 6 + k * 2)
+                ^sub_kind: kind
                 if kind == 9 {
                     // An extension subtable points to the real one.
                     sub_kind = u16(b, sub + 2, "GPOS extension")
@@ -1141,7 +1141,7 @@ priv internal: module {
         format2: u16(b, at + 6, "GPOS pair")
         size1: value_size(format1)
         size2: value_size(format2)
-        out := PairSubtable{
+        ^out: PairSubtable{
             format: format,
             coverage: coverage,
             set_starts: [Int]{},
@@ -1161,7 +1161,7 @@ priv internal: module {
                 stride: 2 + size1 + size2
                 need(b, set + 2, count * stride, "GPOS pair set")
                 out.set_starts.push(out.seconds.len())
-                previous := Int{-1}
+                ^previous: Int{-1}
                 loop p in 0..<count {
                     row: set + 2 + p * stride
                     second: raw16(b, row)
@@ -1210,8 +1210,8 @@ priv internal: module {
             return Val(sub.adjusts[class1 * sub.class2_count + class_of(sub.class2, second)])
         }
         if index + 1 >= sub.set_starts.len() -> return None
-        lo := sub.set_starts[index]
-        hi := sub.set_starts[index + 1]
+        ^lo: sub.set_starts[index]
+        ^hi: sub.set_starts[index + 1]
         loop lo < hi {
             mid: (lo + hi) /% 2
             if sub.seconds[mid] < second -> lo = mid + 1 else -> hi = mid
@@ -1229,11 +1229,11 @@ priv internal: module {
 
     // The kern table's horizontal format 0 pairs, summed over its subtables.
     kern_table: fn(b: [U8], kern: TableSpan) -> [Int:Int] FontError! {
-        out := [Int:Int]{}
+        ^out: [Int:Int]{}
         within(kern, 4, "kern")
         if raw16(b, kern.offset) != 0 -> return Ok(out)
         count: raw16(b, kern.offset + 2)
-        at := kern.offset + 4
+        ^at: kern.offset + 4
         loop _ in 0..<count {
             need(b, at, 6, "kern")
             length: raw16(b, at + 2)
@@ -1262,15 +1262,15 @@ priv internal: module {
         first: Int{bytes[i]}
         width: if first < 128 -> 1 else if first < 224 -> 2 else if first < 240 -> 3 else -> 4
         if i + width > bytes.len() -> return Decoded{scalar: 65533, next: bytes.len()}
-        scalar := if width == 1 -> first else if width == 2 -> first & 31 else if width == 3 -> first & 15 else -> first & 7
+        ^scalar: if width == 1 -> first else if width == 2 -> first & 31 else if width == 3 -> first & 15 else -> first & 7
         loop k in 1..<width -> scalar = (scalar << 6) + ((Int{bytes[i + k]}) & 63)
         Decoded{scalar: scalar, next: i + width}
     }
 
     shape: fn(face: Face, text: String) -> Shaped {
         bytes: text.bytes()
-        out := Shaped{ids: [Int]{}, clusters: [Int]{}}
-        i := 0
+        ^out: Shaped{ids: [Int]{}, clusters: [Int]{}}
+        ^i: 0
         loop i < bytes.len() {
             decoded: decode(bytes, i)
             out.ids.push(face.glyph(decoded.scalar))
@@ -1289,7 +1289,7 @@ priv internal: module {
     // Advances and offsets in font units after pair kerning, applied lookup by
     // lookup in the order HarfBuzz applies them.
     positions: fn(face: Face, ids: [Int]) -> Positions {
-        out := Positions{advances: [Int]{}, x_offsets: [Int]{}, y_offsets: [Int]{}}
+        ^out: Positions{advances: [Int]{}, x_offsets: [Int]{}, y_offsets: [Int]{}}
         loop id in ids {
             out.advances.push(advance_units(face, id))
             out.x_offsets.push(0)
@@ -1297,16 +1297,16 @@ priv internal: module {
         }
         n: ids.len()
         loop lookup in face.lookups {
-            i := 0
+            ^i: 0
             loop i < n {
                 if skips(face, lookup.skip_mask, ids[i]) {
                     i += 1
                     next
                 }
-                j := i + 1
+                ^j: i + 1
                 loop j < n && skips(face, lookup.skip_mask, ids[j]) -> j += 1
                 if j >= n -> break
-                applied := false
+                ^applied: false
                 loop sub in lookup.subtables {
                     adjust: pair_adjust(sub, ids[i], ids[j]) ?? next
                     out.advances[i] = out.advances[i] + adjust.x_advance1
@@ -1341,7 +1341,7 @@ priv internal: module {
 
     // Greedy filling of one paragraph, bytes `start..<stop` without its "\n".
     wrap_paragraph: fn(face: Face, bytes: [U8], start: Int, stop: Int, size_px: Float, max_width: Float, lines: ^[TextLine]) {
-        line := start
+        ^line: start
         loop line < stop && is_space(Int{bytes[line]}) -> line += 1
         if line >= stop {
             lines.push(TextLine{start: start, end: start, width: Float{0.0}})
@@ -1349,11 +1349,11 @@ priv internal: module {
         }
         loop line < stop {
             // Extend the line word by word while it fits.
-            end := line
-            width := Float{0.0}
-            cursor := line
+            ^end: line
+            ^width: Float{0.0}
+            ^cursor: line
             loop cursor < stop {
-                word_end := cursor
+                ^word_end: cursor
                 loop word_end < stop && !is_space(Int{bytes[word_end]}) {
                     hyphen: Int{bytes[word_end]} == 45 && word_end > cursor
                     word_end += 1
@@ -1369,9 +1369,9 @@ priv internal: module {
             }
             if width > max_width {
                 // One word wider than the line: break it between characters.
-                fit := line
-                fit_width := Float{0.0}
-                at := line
+                ^fit: line
+                ^fit_width: Float{0.0}
+                ^at: line
                 loop at < end {
                     after: decode(bytes, at).next
                     w: span_width(face, bytes, line, after, size_px)
@@ -1395,12 +1395,12 @@ priv internal: module {
     // right.
     cached_mask: fn(cache: ^GlyphCache, face: Face, id: Int, size: Int, quarter: Int) -> GlyphMask {
         if quarter == 4 {
-            moved := cached_mask(cache, face, id, size, 0)
+            ^moved: cached_mask(cache, face, id, size, 0)
             moved.left += 1
             return moved
         }
         glyph: if id < 0 || id >= face.glyph_count -> 0 else -> id
-        slot := -1
+        ^slot: -1
         loop k in 0..<cache.faces.len() {
             if cache.faces[k] == face.fingerprint -> slot = k
         }
@@ -1424,7 +1424,7 @@ priv internal: module {
 
     // Identifies a font's bytes for the cache.
     fingerprint: fn(bytes: [U8]) -> Int Never! {
-        h := bytes.len() % 2147483647
+        ^h: bytes.len() % 2147483647
         loop byte in bytes -> h = (h * 31 + Int{byte}) % 2147483647
         h
     }
@@ -1460,8 +1460,8 @@ priv internal: module {
         if size <= 0 -> return empty
         glyph: if id < 0 || id >= face.glyph_count -> 0 else -> id
         scale: (size * 65536 + face.units /% 2) /% face.units
-        points := [OutlinePoint]{}
-        ends := [Int]{}
+        ^points: [OutlinePoint]{}
+        ^ends: [Int]{}
         // The face checked every glyph when it loaded.
         glyph_points(face, glyph, 0, scale, points, ends) ?? return empty
         mask_of(points, ends, shift)
@@ -1473,10 +1473,10 @@ priv internal: module {
         if points.len() == 0 {
             return GlyphMask{width: 0, height: 0, left: 0, top: 0, coverage: [U8]{}}
         }
-        xmin := points[0].x
-        xmax := points[0].x
-        ymin := points[0].y
-        ymax := points[0].y
+        ^xmin: points[0].x
+        ^xmax: points[0].x
+        ^ymin: points[0].y
+        ^ymax: points[0].y
         loop p in points {
             xmin = min_int(xmin, p.x)
             xmax = max_int(xmax, p.x)
@@ -1491,23 +1491,23 @@ priv internal: module {
         if width <= 0 || height <= 0 || width > MASK_SIDE_MAX || height > MASK_SIDE_MAX || width * height > MASK_PIXELS_MAX {
             return GlyphMask{width: 0, height: 0, left: left, top: top, coverage: [U8]{}}
         }
-        cells := Cells{width: width, height: height, cover: [Int]{}, area: [Int]{}}
+        ^cells: Cells{width: width, height: height, cover: [Int]{}, area: [Int]{}}
         loop _ in 0..<((width + 1) * height) {
             cells.cover.push(0)
             cells.area.push(0)
         }
-        first := 0
+        ^first: 0
         loop end in ends {
             contour(cells, points, first, end, left * 64 - shift, bottom * 64)
             first = end + 1
         }
-        coverage := [U8]{}
+        ^coverage: [U8]{}
         loop r in 0..<height {
             row: (height - 1 - r) * (width + 1)
-            cover := 0
+            ^cover: 0
             loop c in 0..<width {
                 cover += cells.cover[row + c]
-                level := (cover * 2 * SUBPIXEL - cells.area[row + c]) /% (2 * SUBPIXEL)
+                ^level: (cover * 2 * SUBPIXEL - cells.area[row + c]) /% (2 * SUBPIXEL)
                 if level < 0 -> level = -level - 1
                 coverage.push(U8{min_int(level, 255)})
             }
@@ -1524,15 +1524,15 @@ priv internal: module {
         if n < 2 {
             return
         }
-        start := -1
+        ^start: -1
         loop k in 0..<n {
             if start < 0 && points[first + k].on -> start = k
         }
         // With no on-curve point the contour starts between its last and first
         // points, and every point, its last included, is a control point.
         steps: if start < 0 -> n + 1 else -> n
-        sx := 0
-        sy := 0
+        ^sx: 0
+        ^sy: 0
         if start < 0 {
             sx = (points[last].x + points[first].x - 2 * ox) /% 2
             sy = (points[last].y + points[first].y - 2 * oy) /% 2
@@ -1541,11 +1541,11 @@ priv internal: module {
             sx = points[first + start].x - ox
             sy = points[first + start].y - oy
         }
-        x := sx
-        y := sy
-        curved := false
-        cx := 0
-        cy := 0
+        ^x: sx
+        ^y: sy
+        ^curved: false
+        ^cx: 0
+        ^cy: 0
         loop k in 1..<(steps + 1) {
             p: points[first + (start + k) % n]
             closing: k == steps
@@ -1578,28 +1578,28 @@ priv internal: module {
     conic: fn(cells: ^Cells, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int) {
         ax: x0 + x2 - 2 * x1
         ay: y0 + y2 - 2 * y1
-        bend := max_int(abs_int(ax), abs_int(ay))
+        ^bend: max_int(abs_int(ax), abs_int(ay))
         if bend <= SUBPIXEL /% 4 {
             line(cells, x0, y0, x2, y2)
             return
         }
-        shift := 16
+        ^shift: 16
         loop {
             bend /%= 4
             shift -= 1
             if bend <= SUBPIXEL /% 4 -> break
         }
         count: 65536 >> shift
-        rx := ax * (1 << (2 * shift))
-        ry := ay * (1 << (2 * shift))
-        qx := (x1 - x0) * (1 << (shift + 17)) + rx
-        qy := (y1 - y0) * (1 << (shift + 17)) + ry
+        ^rx: ax * (1 << (2 * shift))
+        ^ry: ay * (1 << (2 * shift))
+        ^qx: (x1 - x0) * (1 << (shift + 17)) + rx
+        ^qy: (y1 - y0) * (1 << (shift + 17)) + ry
         rx *= 2
         ry *= 2
-        px := x0 * 4294967296
-        py := y0 * 4294967296
-        x := x0
-        y := y0
+        ^px: x0 * 4294967296
+        ^py: y0 * 4294967296
+        ^x: x0
+        ^y: y0
         loop _ in 0..<count {
             px += qx
             py += qy
@@ -1620,10 +1620,10 @@ priv internal: module {
         }
         dx: x1 - x0
         dy: y1 - y0
-        x := x0
-        y := y0
+        ^x: x0
+        ^y: y0
         if dy > 0 {
-            row := y0 /% SUBPIXEL
+            ^row: y0 /% SUBPIXEL
             loop {
                 bound: (row + 1) * SUBPIXEL
                 if bound >= y1 {
@@ -1637,7 +1637,7 @@ priv internal: module {
                 row += 1
             }
         } else {
-            row := (y0 - 1) /% SUBPIXEL
+            ^row: (y0 - 1) /% SUBPIXEL
             loop {
                 bound: row * SUBPIXEL
                 if bound <= y1 {
@@ -1665,10 +1665,10 @@ priv internal: module {
         }
         dx: x1 - x0
         dy: y1 - y0
-        x := x0
-        y := y0
+        ^x: x0
+        ^y: y0
         if dx > 0 {
-            col := x0 /% SUBPIXEL
+            ^col: x0 /% SUBPIXEL
             loop {
                 bound: (col + 1) * SUBPIXEL
                 if bound >= x1 {
@@ -1682,7 +1682,7 @@ priv internal: module {
                 col += 1
             }
         } else {
-            col := (x0 - 1) /% SUBPIXEL
+            ^col: (x0 - 1) /% SUBPIXEL
             loop {
                 bound: col * SUBPIXEL
                 if bound <= x1 {
@@ -1714,8 +1714,8 @@ priv internal: module {
     // format 12 mapping U+1F600 to glyph 1, and a kern table pair (1, 1) = -50.
     tiny_font: fn() -> [U8] {
         tables: [String]{"cmap", "glyf", "head", "hhea", "hmtx", "kern", "loca", "maxp"}
-        bodies := [[U8]]{}
-        cmap := [U8]{}
+        ^bodies: [[U8]]{}
+        ^cmap: [U8]{}
         put(cmap, 0, 2)
         put(cmap, 1, 2)
         put(cmap, 3, 2)
@@ -1730,7 +1730,7 @@ priv internal: module {
         put(cmap, 0x1F600, 4)
         put(cmap, 1, 4)
         bodies.push(cmap)
-        glyf := [U8]{}
+        ^glyf: [U8]{}
         loop v in ([Int]{1, 0, 0, 100, 100, 3, 0}) -> put(glyf, v, 2)
         // Points (0,0) (0,100) (100,100) (100,0): four on-curve flags, then
         // x and y deltas as words.
@@ -1738,13 +1738,13 @@ priv internal: module {
         loop v in ([Int]{0, 0, 100, 0}) -> put(glyf, v, 2)
         loop v in ([Int]{0, 100, 0, 65436}) -> put(glyf, v, 2)
         bodies.push(glyf.copy())
-        head := [U8]{}
+        ^head: [U8]{}
         loop _ in 0..<54 -> head.push(U8{0})
         head[18] = U8{4}
         head[19] = U8{0}
         head[51] = U8{1}
         bodies.push(head)
-        hhea := [U8]{}
+        ^hhea: [U8]{}
         loop _ in 0..<36 -> hhea.push(U8{0})
         hhea[4] = U8{3}
         hhea[5] = U8{32}
@@ -1752,23 +1752,23 @@ priv internal: module {
         hhea[7] = U8{0}
         hhea[35] = U8{2}
         bodies.push(hhea)
-        hmtx := [U8]{}
+        ^hmtx: [U8]{}
         loop v in ([Int]{500, 0, 600, 0}) -> put(hmtx, v, 2)
         bodies.push(hmtx)
-        kern := [U8]{}
+        ^kern: [U8]{}
         loop v in ([Int]{0, 1, 0, 20, 1, 1, 6, 0, 0, 1, 1, 65486}) -> put(kern, v, 2)
         bodies.push(kern)
-        loca := [U8]{}
+        ^loca: [U8]{}
         loop v in ([Int]{0, 0, glyf.len()}) -> put(loca, v, 4)
         bodies.push(loca)
-        maxp := [U8]{}
+        ^maxp: [U8]{}
         loop v in ([Int]{0, 20480, 2}) -> put(maxp, v, 2)
         bodies.push(maxp)
-        out := [U8]{}
+        ^out: [U8]{}
         put(out, 65536, 4)
         put(out, tables.len(), 2)
         loop _ in 0..<6 -> out.push(U8{0})
-        offset := 12 + tables.len() * 16
+        ^offset: 12 + tables.len() * 16
         loop i in 0..<tables.len() {
             loop byte in tables[i].bytes() -> out.push(byte)
             put(out, 0, 4)
@@ -1797,7 +1797,7 @@ priv internal: module {
     }
 
     filled: fn(count: Int, pixel: [U8]) -> [U8] {
-        out := [U8]{}
+        ^out: [U8]{}
         loop _ in 0..<count {
             loop byte in pixel -> out.push(byte)
         }
@@ -1807,7 +1807,7 @@ priv internal: module {
     // Every query a canvas makes of a face; none of it may fail.
     exercise: fn(face: Face) {
         _: face.metrics(13.5)
-        kept := cache()
+        ^kept: cache()
         loop scalar in ([Int]{0, 32, 65, 193, 0x1F600, -1, 0x110000}) {
             id: face.glyph(scalar)
             _: face.advance(id, 13.5)
@@ -1816,7 +1816,7 @@ priv internal: module {
         }
         _: face.layout("AV To Á 😀", 13.5)
         _: face.wrap("one two-three", 13.5, 20.0)
-        canvas := filled(32 * 16, [U8]{0, 0, 0, 0})
+        ^canvas: filled(32 * 16, [U8]{0, 0, 0, 0})
         _: draw_text(canvas, 32, 16, 128, kept, face, "AV Á 😀", 13.5, 1, 12, 0xFF336699, UIRect{x: 0, y: 0, width: 32, height: 16})
     }
 
@@ -1938,7 +1938,7 @@ priv internal: module {
 
 #Test("the cache keeps one mask per face, glyph, size and quarter pixel") {
     face: regular()
-    kept := cache()
+    ^kept: cache()
     first: kept.glyph(face, 1, 16.0, 0.3)
     again: kept.glyph(face, 1, 16.0, 0.26)
     assert_eq(first.coverage, again.coverage)
@@ -1952,7 +1952,7 @@ priv internal: module {
 
 #Test("a cache stays within its budget and still gives every glyph's mask") {
     face: regular()
-    small := cache_within(2000)
+    ^small: cache_within(2000)
     loop id in 1..<40 {
         assert_eq(small.glyph(face, id, 16.0, 0.0).coverage, face.raster(id, 16.0, 0.0).coverage)
         assert(small.recent_bytes <= 1000, "the recent masks hold {small.recent_bytes} bytes")
@@ -1968,42 +1968,42 @@ priv internal: module {
     // mul(255, 127) = 127 of each byte, and alpha 128 + 127 = 255.
     mask: GlyphMask{width: 2, height: 1, left: 0, top: 1, coverage: [U8]{255, 128}}
     all: UIRect{x: 0, y: 0, width: 2, height: 1}
-    white := filled(2, [U8]{255, 255, 255, 255})
+    ^white: filled(2, [U8]{255, 255, 255, 255})
     blend(white, 2, 1, 8, mask, 0, 1, 0xFF000000, all)
     assert_eq(white, [U8]{0, 0, 0, 255, 127, 127, 127, 255})
-    clipped := filled(2, [U8]{255, 255, 255, 255})
+    ^clipped: filled(2, [U8]{255, 255, 255, 255})
     blend(clipped, 2, 1, 8, mask, 0, 1, 0xFF000000, UIRect{x: 1, y: 0, width: 5, height: 5})
     assert_eq(clipped, [U8]{255, 255, 255, 255, 127, 127, 127, 255})
     // White on a clear canvas: mul(255, 128) = 128, premultiplied.
-    clear := filled(2, [U8]{0, 0, 0, 0})
+    ^clear: filled(2, [U8]{0, 0, 0, 0})
     blend(clear, 2, 1, 8, mask, 0, 1, 0xFFFFFFFF, all)
     assert_eq(clear, [U8]{255, 255, 255, 255, 128, 128, 128, 128})
     // Color order B, G, R, A; a translucent source: half green (sa 128)
     // over blue keeps mul(255, 127) = 127 of the blue and adds
     // mul(255, 128) = 128 of green.
-    blue := filled(1, [U8]{255, 0, 0, 255})
+    ^blue: filled(1, [U8]{255, 0, 0, 255})
     blend(blue, 1, 1, 4, GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{255}}, 0, 1, 0x8000FF00, all)
     assert_eq(blue, [U8]{127, 128, 0, 255})
     // A translucent canvas: coverage 200 of black keeps mul(64, 55) = 14
     // of each byte, and alpha 200 + mul(128, 55) = 228.
-    gray := filled(1, [U8]{64, 64, 64, 128})
+    ^gray: filled(1, [U8]{64, 64, 64, 128})
     blend(gray, 1, 1, 4, GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{200}}, 0, 1, 0xFF000000, all)
     assert_eq(gray, [U8]{14, 14, 14, 228})
     // Alpha 20 of white over Jet black, 0x0B0B0D: 20 + mul(11, 235) = 30
     // and 20 + mul(13, 235) = 32, so 0x1E1E20, as a design tool mixes it.
-    jet := filled(1, [U8]{13, 11, 11, 255})
+    ^jet: filled(1, [U8]{13, 11, 11, 255})
     blend(jet, 1, 1, 4, GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{255}}, 0, 1, 0x14FFFFFF, all)
     assert_eq(jet, [U8]{32, 30, 30, 255})
     // Rows `stride_bytes` apart: the padding after each row stays.
-    padded := filled(6, [U8]{9, 9, 9, 9})
+    ^padded: filled(6, [U8]{9, 9, 9, 9})
     tall: GlyphMask{width: 1, height: 2, left: 0, top: 2, coverage: [U8]{255, 255}}
     blend(padded, 2, 2, 12, tall, 1, 2, 0xFF102030, UIRect{x: 0, y: 0, width: 2, height: 2})
     assert_eq(padded, [U8]{9, 9, 9, 9, 48, 32, 16, 255, 9, 9, 9, 9, 9, 9, 9, 9, 48, 32, 16, 255, 9, 9, 9, 9})
     // Off the canvas, or a canvas shorter than it claims: nothing changes.
-    short := [U8]{0, 0, 0, 0}
+    ^short: [U8]{0, 0, 0, 0}
     blend(short, 2, 4, 8, mask, -5, 3, 0xFF000000, UIRect{x: 0, y: 0, width: 9, height: 9})
     assert_eq(short, [U8]{0, 0, 0, 0})
-    narrow := filled(2, [U8]{0, 0, 0, 0})
+    ^narrow: filled(2, [U8]{0, 0, 0, 0})
     blend(narrow, 2, 1, 4, mask, 0, 1, 0xFF000000, all)
     assert_eq(narrow, filled(2, [U8]{0, 0, 0, 0}))
     // A hand-built mask with less coverage than its size paints nothing.
@@ -2013,11 +2013,11 @@ priv internal: module {
 
 #Test("draw_text paints a line and returns its advance") {
     face: regular()
-    kept := cache()
-    canvas := filled(64 * 24, [U8]{0, 0, 0, 0})
+    ^kept: cache()
+    ^canvas: filled(64 * 24, [U8]{0, 0, 0, 0})
     advance: draw_text(canvas, 64, 24, 256, kept, face, "AV", 16.0, 2, 18, 0xFFFFFFFF, UIRect{x: 0, y: 0, width: 64, height: 24})
     assert_eq(advance, 19)
-    inked := 0
+    ^inked: 0
     loop k in 0..<(64 * 24) {
         if (Int{canvas[k * 4 + 3]}) != 0 -> inked += 1
     }
@@ -2042,7 +2042,7 @@ priv internal: module {
         loop at in 0..<source.len() {
             if at % 263 != 0 && at > 300 -> next
             loop value in ([Int]{0, 1, 127, 128, 255}) {
-                mutated := source.copy()
+                ^mutated: source.copy()
                 mutated[at] = U8{value}
                 survives(mutated)
             }

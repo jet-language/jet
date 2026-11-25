@@ -27,14 +27,14 @@ use {
 // The runtime image of the compiler under test, never this test binary's.
 raw_image_path: fn() -> String {
     jet: raw_sys.get("JET") ?? (raw_process.which("jet") ?? panic("set JET to the compiler under test"))
-    parts := jet.split("/").to_list()
-    _ := parts.pop()
+    ^parts: jet.split("/").to_list()
+    ^_: parts.pop()
     "{parts.join("/")}/jet-runtime/jet_runtime.image"
 }
 
 // A program object whose one function, `name`, returns.
 raw_object: fn(name: String) -> [U8] Never! {
-    s := link_synth()
+    ^s: link_synth()
     link_synth_function(s, name)
     link_synth_code(s, [Int]{0xc3})
     link_synth_object(s)
@@ -51,7 +51,7 @@ raw_object: fn(name: String) -> [U8] Never! {
     path: raw_image_path()
     read: x64_image_file_read(path)
     assert(read.failure == "", "the image file is read: {read.failure}")
-    entry := x64_bind_runtime_image("entry", raw_object("main"), read.bytes.move(), path, read.stamp.move(), 0, read.gap_at, read.gap, true)
+    ^entry: x64_bind_runtime_image("entry", raw_object("main"), read.bytes.move(), path, read.stamp.move(), 0, read.gap_at, read.gap, true)
     assert(entry.errors.len() == 0, "the entry program binds: {entry.errors.join("; ")}")
     image: x64_executable_load(entry.executable)
     assert(image.failure == "", "the bound program loads: {image.failure}")
@@ -69,7 +69,7 @@ raw_object: fn(name: String) -> [U8] Never! {
     assert(own.failure == "" && own.functions.len() > 0, "the image names its functions: {own.failure}")
     read: x64_image_file_read(path)
     assert(read.failure == "", "the image file is read: {read.failure}")
-    entry := x64_bind_runtime_image("entry", raw_object("main"), read.bytes.move(), path, read.stamp.move(), 0, read.gap_at, read.gap, false)
+    ^entry: x64_bind_runtime_image("entry", raw_object("main"), read.bytes.move(), path, read.stamp.move(), 0, read.gap_at, read.gap, false)
     assert(entry.errors.len() == 0, "the entry program binds: {entry.errors.join("; ")}")
     assert(entry.executable.image_symbols_left, "the program part leaves the image's symbols out")
     image: x64_executable_load(entry.executable)
@@ -88,7 +88,7 @@ raw_object: fn(name: String) -> [U8] Never! {
 // One "start size name" row per function, sorted: functions at one start
 // come in either table's order.
 raw_function_rows: fn(functions: [X64ImageFunction]) -> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop function in functions -> rows.push("{function.start} {function.size} {function.name}")
     rows.sort()
     rows

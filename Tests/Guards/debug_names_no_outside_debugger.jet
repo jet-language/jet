@@ -68,7 +68,7 @@ dn_lines: fn(path: String, out: ^[String]) -[FS]> {
 
 #Test("debug_names_no_outside_debugger") {
     guards_enter_root()
-    found := [String]{}
+    ^found: [String]{}
     loop root in DN_ROOTS {
         assert(dn_files.exists(root), "the root {root} must exist")
         dn_lines(root, found)
@@ -174,8 +174,8 @@ dn_command_tool: fn(command: String) -[]> String? {
 // `prefix=(strace -f)` run their tools too.
 dn_shell_tool: fn(line: String) -[]> String? {
     bytes: line.bytes()
-    start := 0
-    at := 0
+    ^start: 0
+    ^at: 0
     loop at <= bytes.len() {
         if at == bytes.len() || DN_RUN_BREAKS.contains(Int{bytes[at]}) {
             tool: dn_command_tool(String.from_bytes(bytes[start..<at]) ?? "")
@@ -217,8 +217,8 @@ dn_text_tool: fn(text: String, before: Int, after: String) -[]> String? {
 // outside a literal ends the code of the line.
 dn_literal_tool: fn(line: String) -[]> String? {
     bytes: line.bytes()
-    before := 0
-    at := 0
+    ^before: 0
+    ^at: 0
     loop at < bytes.len() {
         quote: Int{bytes[at]}
         if quote == 47 && at + 1 < bytes.len() && (Int{bytes[at + 1]}) == 47 -> break
@@ -264,8 +264,8 @@ dn_run_kind: fn(path: String, text: String) -[]> String {
 // one argument, so it starts no command: `{jet} perf run` is jet's profiler.
 dn_case_command: fn(text: String) -[]> String {
     bytes: text.bytes()
-    out := [U8]{}
-    at := 0
+    ^out: [U8]{}
+    ^at: 0
     loop at < bytes.len() {
         end: dn_placeholder_end(bytes, at)
         if {
@@ -287,7 +287,7 @@ dn_case_command: fn(text: String) -[]> String {
 dn_placeholder_end: fn(bytes: [U8], at: Int) -[]> Int {
     open: Int{bytes[at]}
     if open != 123 -> return at
-    close := at + 1
+    ^close: at + 1
     loop close < bytes.len() {
         byte: Int{bytes[close]}
         if byte == 125 -> return if close > at + 1 -> close else -> at
@@ -321,7 +321,7 @@ dn_text_runs: fn(path: String, text: String, out: ^[String]) -[]> {
     if kind == "" {
         return
     }
-    fenced := false
+    ^fenced: false
     loop (index, line) in text.lines() {
         if kind == "markdown" && line.trim().starts_with("```") {
             fenced = !fenced
@@ -356,7 +356,7 @@ dn_runs_under: fn(base: String, rel: String, tests_only: Bool, out: ^[String]) -
 // Every run of an outside tool in the checkout at `base` ("" for the working
 // directory).
 dn_runs: fn(base: String) -[FS]> [String] {
-    found := [String]{}
+    ^found: [String]{}
     loop root in DN_RUN_ROOTS {
         path: if base == "" -> root.copy() else -> "{base}/{root}"
         if !dn_files.exists(path) -> next
@@ -376,7 +376,7 @@ dn_run_kept_by: fn(row: DnRunKept, finding: String) -[]> Bool {
 // and a row that keeps no run any more, as when its harness was ported to a
 // Jet tool. Each problem is one line.
 dn_kept_problems: fn(rows: [DnRunKept], found: [String]) -[]> [String] {
-    problems := [String]{}
+    ^problems: [String]{}
     loop row in rows {
         if row.why == "" -> problems.push("DN_RUNS_KEPT row {row.path} names no reason")
         if !DN_RUN_CLASSES.contains(row.class) {
@@ -395,7 +395,7 @@ dn_kept_problems: fn(rows: [DnRunKept], found: [String]) -[]> [String] {
 #Test("no script, skill, tool or case runs an outside debugger or profiler") {
     guards_enter_root()
     found: dn_runs("")
-    refused := [String]{}
+    ^refused: [String]{}
     loop finding in found {
         if DN_RUNS_KEPT.find(fn(row) { dn_run_kept_by(row, finding) }) == None {
             refused.push(finding)

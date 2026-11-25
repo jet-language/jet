@@ -61,7 +61,7 @@ csv_reader: fn<T: Decode>(reader: ^^FileReader, limits: DataLimits) -[FS, IO]> D
 // One pull of `csv_reader<T>`: the header on the first pull, then one data
 // record decoded to `T`; `None` at end of input.
 csv_reader_next: fn<T: Decode>(state: Shared<CSVRowSource>) -> T? DataError! {
-    cell := state.guard_edit()
+    ^cell: state.guard_edit()
     if !cell.value.started {
         cell.value.started = true
         if cell.value.records.next() == {
@@ -89,11 +89,11 @@ csv_reader_next: fn<T: Decode>(state: Shared<CSVRowSource>) -> T? DataError! {
 // `Float` field reads "10.0".
 csv_reader_row: fn<T: Decode>(header: [String], fields: [String], row: Int) -> T DataError! {
     if fields.len() != header.len() {
-        error := core.data.data_error(DataErrorKind.Decode, "CSV row has {fields.len()} fields; expected {header.len()}", "csv_reader")
+        ^error: core.data.data_error(DataErrorKind.Decode, "CSV row has {fields.len()} fields; expected {header.len()}", "csv_reader")
         error.row = Val(row)
         return Err(error)
     }
-    entries := [{key: String, value: Dyn}]{}
+    ^entries: [{key: String, value: Dyn}]{}
     loop column in 0..<header.len() {
         entries.push({key: header[column].copy(), value: Dyn.Text(fields[column].copy())})
     }
@@ -106,7 +106,7 @@ csv_reader_row: fn<T: Decode>(header: [String], fields: [String], row: Int) -> T
         }
         .Err(failures) -> {
             rt.text_cells_leave(previous)
-            error := core.data.data_decode_error(failures, "csv_reader")
+            ^error: core.data.data_decode_error(failures, "csv_reader")
             error.row = Val(row)
             return Err(error)
         }
@@ -129,7 +129,7 @@ data_from_encoding: fn(operation: String, row: Int?, cause: EncodingError) -> Da
 // allocation budget, and a failure stays latched.
 json_reader: fn<T: Decode>(reader: ^^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     core.data.data_limits_check(limits) ?? return Err(err)
-    parser := encoding_stream.json_reader<FileReader>(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
+    ^parser: encoding_stream.json_reader<FileReader>(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
     parser.typed_numbers = true
     state: Shared{JSONRowSource{parser: parser.move(), array_started: false, array_done: false, row: 0}}
     Ok(core.data.__stream_from<T>(fn() { json_reader_next<T>(state) }, limits))
@@ -138,7 +138,7 @@ json_reader: fn<T: Decode>(reader: ^^FileReader, limits: DataLimits) -[FS, IO]> 
 // One pull of `json_reader<T>`: the opening `[` on the first pull, then one
 // array element decoded to `T`; `None` at the closing `]` or end of input.
 json_reader_next: fn<T: Decode>(state: Shared<JSONRowSource>) -> T? DataError! {
-    cell := state.guard_edit()
+    ^cell: state.guard_edit()
     if cell.value.array_done -> return Ok(None)
     if !cell.value.array_started {
         if cell.value.parser.next() == {
@@ -166,7 +166,7 @@ json_reader_next: fn<T: Decode>(state: Shared<JSONRowSource>) -> T? DataError! {
         cell.value.array_done = true
         return Ok(None)
     }
-    heap := encoding_stream.FoldBudget{decoded: 0, tracked: 0}
+    ^heap: encoding_stream.FoldBudget{decoded: 0, tracked: 0}
     tree: if cell.value.parser.fold(event, heap) == {
         .Ok(folded) -> folded
         .Err(failure) -> {
@@ -179,7 +179,7 @@ json_reader_next: fn<T: Decode>(state: Shared<JSONRowSource>) -> T? DataError! {
     if tree.decode<T>() == {
         .Ok(value) -> Ok(Val(value))
         .Err(failures) -> {
-            error := core.data.data_decode_error(failures, "json_reader")
+            ^error: core.data.data_decode_error(failures, "json_reader")
             error.row = Val(cell.value.row)
             Err(error)
         }
@@ -188,7 +188,7 @@ json_reader_next: fn<T: Decode>(state: Shared<JSONRowSource>) -> T? DataError! {
 
 /// Native facts and live, explicitly opted-in bridge availability.
 status: fn() -[FS, Env]> [DataStatus] Never! {
-    rows := [DataStatus]{}
+    ^rows: [DataStatus]{}
     native_steps: [String]{"core.data.csv", "core.data.stats", "core.data.query", "core.data.stream", "core.data.schema", "core.data.json"}
     loop step in native_steps {
         rows.push(DataStatus{step: step, path: "native", clone_value: "none", ownership: "jet", trust: "native", fallback: "none", replacement: "native"})
@@ -206,7 +206,7 @@ require_bridge: fn(provider: String) -[FS, Env]> DataError! {
 }
 
 bridge_provider: fn(provider: String) -> String? Never! {
-    name := core.data.trim(provider)
+    ^name: core.data.trim(provider)
     loop name.ends_with(".") {
         name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 1]) ?? ""
     }
@@ -223,7 +223,7 @@ bridge_provider: fn(provider: String) -> String? Never! {
 }
 
 bridge_status: fn(step: String) -[FS, Env]> DataStatus Never! {
-    path := "unavailable"
+    ^path: "unavailable"
     if step == "r.*" && bridge_tool_on_path("Rscript") {
         if sys.get("JET_DATA_R_BRIDGE") == .Val(enabled) {
             if enabled == "1" -> path = "available"
@@ -243,9 +243,9 @@ bridge_tool_on_path: fn(tool: String) -[FS, Env]> Bool Never! {
     path: sys_rt.host_env("PATH") ?? return false
     windows: sys.is_windows()
     delimiter: if windows -> U8{59} else -> U8{58}
-    directory := [U8]{}
-    quoted := false
-    index := 0
+    ^directory: [U8]{}
+    ^quoted: false
+    ^index: 0
     loop {
         at_end: index == path.len()
         if !at_end {
@@ -268,7 +268,7 @@ bridge_tool_on_path: fn(tool: String) -[FS, Env]> Bool Never! {
             }
         }
         loop b in tool.bytes() -> directory.push(b)
-        is_file := false
+        ^is_file: false
         #Unsafe("native path bytes originate from the host environment and are split at ASCII boundaries") {
             is_file = data_rt.host_path_is_file(directory) ?? false
         }

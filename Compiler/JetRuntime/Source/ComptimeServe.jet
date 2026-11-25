@@ -27,7 +27,7 @@
 // (comptime_serve_refuse).
 
 // The outermost serve frame while the image serves the compiler, else 0.
-comptime_serve_root := I64{0}
+^comptime_serve_root: I64{0}
 
 comptime_serving: fn() -> Bool { comptime_serve_root != I64{0} }
 
@@ -36,9 +36,9 @@ comptime_serving: fn() -> Bool { comptime_serve_root != I64{0} }
 // trapped call with the cookie as its sixth argument, which the filter
 // allows for a file call (JetBackend ComptimeWire.jet
 // x64_comptime_admit_block).
-comptime_serve_cookie := I64{0}
+^comptime_serve_cookie: I64{0}
 
-comptime_serve_admitted := I64{0}
+^comptime_serve_admitted: I64{0}
 
 // The steps the running CALL has left (its seventh operand). Each turn poll
 // of compile-time code (a loop's iteration, a recursive body's entry)
@@ -46,10 +46,10 @@ comptime_serve_admitted := I64{0}
 // is below zero the turn's routine stops the call
 // (comptime_serve_out_of_steps). A step is counted, never timed, so a
 // program's limit gives the same answer on every machine.
-comptime_serve_steps := I64{0}
+^comptime_serve_steps: I64{0}
 
 comptime_serve_move: fn(fd: I64, number: I64, address: I64, count: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         moved: trap_syscall(number, fd, address + at, count - at, I64{0}, I64{0}, I64{0})
         if (moved == I64{-4}) { next }
@@ -218,17 +218,17 @@ comptime_serve_loop: fn(frame: I64) -> I64 {
     }
     comptime_serve_reply(frame, I64{0}, count, if (comptime_serve_shm != I64{0}) -> I64{1} else -> I64{0}, I64{0}, I64{0})
     comptime_serve_send(table, count * I64{8})
-    _ := comptime_serve_loop(frame)
+    ^_: comptime_serve_loop(frame)
     trap_defect_exit(I64{0})
 }
 
-comptime_serve_shm := I64{0}
+^comptime_serve_shm: I64{0}
 
 // Maps the shared staging memfd passed on fd 6 and closes fd 6 immediately
 // so seccomp and `#Impure` file opens start cleanly from fd 6.
 comptime_serve_shm_init: fn() -> I64 {
     mapped: trap_syscall(I64{9}, I64{0}, I64{4194304}, I64{3}, I64{1}, I64{6}, I64{0})
-    _ := trap_syscall(I64{3}, I64{6}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    ^_: trap_syscall(I64{3}, I64{6}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     if (mapped > I64{0}) -> mapped else -> I64{0}
 }
 
@@ -256,7 +256,7 @@ comptime_serve_shm_cmd: fn(frame: I64, kind: I64, a: I64, b: I64) -> Bool {
 // segment: low, map_size, vaddr, file_size, protection, shm_offset); returns 0
 // or the first failing mmap/mprotect result.
 comptime_serve_shm_load: fn(count: I64) -> I64 {
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
         row: wrapping(comptime_serve_shm + index * I64{48})
         low: trap_word(row)
@@ -297,7 +297,7 @@ comptime_serve_request: fn(kind: I64, operands: I64, count: I64, result: I64) ->
 }
 
 #Export(c) jet_comptime_host_into: fn(result: I64, kind: I64, operands: I64, count: I64) -> I64 {
-    _ := comptime_serve_request(kind, operands, count, result)
+    ^_: comptime_serve_request(kind, operands, count, result)
     result
 }
 
@@ -308,7 +308,7 @@ rt_comptime_serve_stop_address: fn() -> I64 {
 // jet_rt_comptime_serve_stop while the image serves the compiler, else 0:
 // every runtime stop asks it first (Trap.jet trap_stop), so only the serve
 // entry installs it and a program that never serves links no serve loop.
-comptime_serve_stop_code := I64{0}
+^comptime_serve_stop_code: I64{0}
 
 // A runtime stop of served code (Trap.jet): its kind and words go to the
 // compiler, which reads their texts. The child then serves on above the
@@ -328,7 +328,7 @@ comptime_serve_stop_code := I64{0}
     comptime_serve_fill(frame, I64{3}, kind, a, b, c)
     trap_store(wrapping(frame + I64{40}), d)
     comptime_serve_send(frame, I64{64})
-    _ := comptime_serve_loop(frame)
+    ^_: comptime_serve_loop(frame)
     trap_defect_exit(I64{0})
     I64{0}
 }

@@ -78,7 +78,7 @@ print_probe: fn(item: Dyn, port: Int, timeout_ms: Int) {
 
 // What a probe answered, as the driver shows it.
 shown: fn(result: Dyn, port: Int) -> Dyn {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["ok"] = dyn_at(result, "ok")
     loop key in ["status", "headers", "body"] -> put_present(out, key, value_of(result, key))
     if text_at(result, "error") == .Val(error) {
@@ -114,7 +114,7 @@ serve: fn(listener: TCPListener, routes: Dyn, connections: Int) {
 
 // The request on `stream` once its head and body are complete.
 read_request: fn(stream: TCPStream) -> Asked {
-    text := ""
+    ^text: ""
     loop {
         if complete(text) == .Val(asked) -> return asked
         chunk: stream.read(8192) ?? ""

@@ -58,9 +58,9 @@ jet_eval_ir_host_arguments: fn(s: ^JetEvalIRState, params: [Int], args: [TCompti
     }
     types_cell: jet_eval_ir_host_types(s) ?? return None
     layouts_cell: jet_eval_ir_host_layouts(s) ?? return None
-    types := types_cell.guard_edit()
+    ^types: types_cell.guard_edit()
     layouts: layouts_cell.guard_read()
-    words := [Int]{}
+    ^words: [Int]{}
     loop (index, value) in args {
         words.push(jet_eval_ir_host_store(types.value, layouts.value[0], s, value, params[index], 0) ?? return None)
     }
@@ -110,10 +110,10 @@ jet_eval_ir_host_method_route: fn(s: ^JetEvalIRState, args: [Int], dst_row: Int,
     parts: jet_eval_compiler_value_method_owner(member) ?? return jet_eval_ir_primitive_shape(s, "jet_comptime_host_method")
     types_cell: jet_eval_ir_host_types(s) ?? return None
     layouts_cell: jet_eval_ir_host_layouts(s) ?? return None
-    types := types_cell.guard_edit()
+    ^types: types_cell.guard_edit()
     layouts: layouts_cell.guard_read()
-    values := [TComptimeValue]{}
-    at := 5
+    ^values: [TComptimeValue]{}
+    ^at: 5
     loop at < args.len() {
         row: jet_eval_ir_host_row(types.value, s, args[at]) ?? return None
         values.push(jet_eval_ir_data(types.value, layouts.value[0], s, args[at + 1], row) ?? return None)
@@ -139,11 +139,11 @@ jet_eval_ir_host_field_route: fn(s: ^JetEvalIRState, args: [Int], dst_row: Int, 
     field: jet_eval_ir_text(s, args[0]) ?? return None
     types_cell: jet_eval_ir_host_types(s) ?? return None
     layouts_cell: jet_eval_ir_host_layouts(s) ?? return None
-    types := types_cell.guard_edit()
+    ^types: types_cell.guard_edit()
     layouts: layouts_cell.guard_read()
     row: jet_eval_ir_host_row(types.value, s, args[1]) ?? return None
     base: jet_eval_ir_data(types.value, layouts.value[0], s, args[2], row) ?? return None
-    found := TComptimeValue?{None}
+    ^found: TComptimeValue?{None}
     if base == .Struct(_, fields) -> found = jet_eval_compiler_value_field(fields, field)
     value: found ?? {
         jet_eval_ir_problem(s, "compiler value {type_name(ir_row_ty(types.value, layouts.value[0], row))} has no field `{field}`")
@@ -162,7 +162,7 @@ jet_eval_ir_host_constant_route: fn(s: ^JetEvalIRState, args: [Int], dst_row: In
     key: jet_eval_ir_text(s, args[0]) ?? return None
     types_cell: jet_eval_ir_host_types(s) ?? return None
     layouts_cell: jet_eval_ir_host_layouts(s) ?? return None
-    types := types_cell.guard_edit()
+    ^types: types_cell.guard_edit()
     layouts: layouts_cell.guard_read()
     at: ir_constant_row(layouts.value[0], key) ?? {
         jet_eval_ir_problem(s, "compiler value constant {key} has no constant row")
@@ -180,7 +180,7 @@ jet_eval_ir_host_literal_route: fn(s: ^JetEvalIRState, args: [Int], dst_row: Int
     key: jet_eval_ir_text(s, args[0]) ?? return None
     types_cell: jet_eval_ir_host_types(s) ?? return None
     layouts_cell: jet_eval_ir_host_layouts(s) ?? return None
-    types := types_cell.guard_edit()
+    ^types: types_cell.guard_edit()
     layouts: layouts_cell.guard_read()
     found: ir_host_literal_row(types.value, key) ?? {
         jet_eval_ir_problem(s, "compiler value literal {key} is not in the built module")
@@ -195,7 +195,9 @@ jet_eval_ir_host_literal_route: fn(s: ^JetEvalIRState, args: [Int], dst_row: Int
 // builder's ir_host_row_key).
 jet_eval_ir_host_row: fn(types: IRModule, s: ^JetEvalIRState, key: Int) -> Int? Never! {
     text: jet_eval_ir_text(s, key) ?? return None
-    if name_column_value(types.type_rows_keys, types.type_rows, text) == .Val(row) -> return Val(row)
+    if name_column_value(types.type_rows_keys, types.type_rows, text) == .Val(row) {
+        return Val(row)
+    }
     jet_eval_ir_problem(s, "host operand type `{text}` is not a row of the module")
     None
 }
@@ -392,7 +394,7 @@ jet_eval_ir_host_box: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, val
         return Val(boxed)
     }
     if checked == .Result(ok_ty, err_ty) {
-        success := true
+        ^success: true
         if value == .Failed(_) -> success = false
         payload: if value == {
             .Present(present) -> present
@@ -503,7 +505,7 @@ jet_eval_ir_host_fill: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, va
         stride: ir_list_stride(types, element_row)
         // A [U8] read back as its bytes (Values.jet) is written back as them.
         if value == .Bytes(bytes) && stride == 1 {
-            buffer := 0
+            ^buffer: 0
             if bytes.len() > 0 {
                 buffer = jet_eval_native_alloc(s, bytes.len(), 8) ?? return false
                 if !jet_eval_native_put(s, buffer, bytes) -> return false
@@ -517,7 +519,7 @@ jet_eval_ir_host_fill: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, va
                 return false
             }
         }
-        data := 0
+        ^data: 0
         if items.len() > 0 {
             data = jet_eval_native_alloc(s, stride * items.len(), 8) ?? return false
         }
@@ -528,7 +530,7 @@ jet_eval_ir_host_fill: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, va
         }
         return jet_eval_ir_write(s, address, 8, items.len()) && jet_eval_ir_write(s, address + 8, 8, items.len()) && jet_eval_ir_write(s, address + 16, 8, data)
     }
-    members := [IRMember]{}
+    ^members: [IRMember]{}
     if {
         checked == .Tuple(tuple_fields) -> {
             members = ir_tuple_members(types, p, tuple_fields) ?? {

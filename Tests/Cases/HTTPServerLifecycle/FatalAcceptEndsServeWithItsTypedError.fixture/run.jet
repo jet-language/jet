@@ -17,7 +17,7 @@ use {
     listening: web.app().get("/hi", fn() { Ok(server.response(200, "hi")) }).bind("127.0.0.1:0") ?? panic("bind: {err}")
     stopper: task {
         time.sleep(120ms)
-        _ := listening.shutdown()
+        ^_: listening.shutdown()
     }
     if listening.serve() == {
         .Ok(report) -> { assert_eq(report.accepted, 0) }

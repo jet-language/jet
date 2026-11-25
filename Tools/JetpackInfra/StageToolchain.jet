@@ -86,15 +86,15 @@ usage: fn() -> String Never! {
 stage: fn(args: [String]) -[Env, FS, Time]> String StageError! {
     options: parse_args(args) ?? return Err(err)
     directory(options.output, "publication output") ?? return Err(err)
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<options.artifacts.len() {
-        at := order.len()
+        ^at: order.len()
         loop at > 0 && options.artifacts[order[at - 1]].target > options.artifacts[index].target {
             at -= 1
         }
         order.insert(at, index)
     }
-    staged := [Staged]{}
+    ^staged: [Staged]{}
     loop index in order {
         artifact: options.artifacts[index]
         if staged.len() > 0 && staged[staged.len() - 1].target == artifact.target {
@@ -135,22 +135,22 @@ manifest_bytes: fn(options: Options, staged: [Staged]) -> [U8] Never! {
 
 // The bytes the release signer signs: the domain line, then the payload.
 signing_request: fn(domain: String, payload: [U8]) -> [U8] Never! {
-    request := "{domain}\n".bytes()
+    ^request: "{domain}\n".bytes()
     // copy: the caller keeps the payload it publishes beside the request
     request.extend(payload.copy())
     request
 }
 
 parse_args: fn(args: [String]) -[Env, FS, Time]> Options StageError! {
-    artifacts := [Artifact]{}
-    version := ""
-    sequence := 0
-    channel := "stable"
-    min_version := "1.0.0"
-    published := Int?{None}
-    expires := Int?{None}
-    output := ""
-    index := 0
+    ^artifacts: [Artifact]{}
+    ^version: ""
+    ^sequence: 0
+    ^channel: "stable"
+    ^min_version: "1.0.0"
+    ^published: Int?{None}
+    ^expires: Int?{None}
+    ^output: ""
+    ^index: 0
     loop index < args.len() {
         name: args[index]
         index += 1
@@ -198,7 +198,7 @@ parse_args: fn(args: [String]) -[Env, FS, Time]> Options StageError! {
     if expires_at - published_at > MANIFEST_TTL_SECONDS {
         return Err(failed("expires-at exceeds the 30-day freshness window"))
     }
-    resolved := [Artifact]{}
+    ^resolved: [Artifact]{}
     loop artifact in artifacts {
         validate_component(artifact.target, "artifact target") ?? return Err(err)
         resolved.push(Artifact{target: artifact.target, file: resolve(artifact.file) ?? return Err(err)})
@@ -247,8 +247,8 @@ resolve: fn(path: String) -[Env, FS]> String StageError! {
 
 // The absolute path's leading directories, then the path itself.
 prefixes: fn(path: String) -> [String] Never! {
-    out := [String]{}
-    cursor := ""
+    ^out: [String]{}
+    ^cursor: ""
     loop component in path.split("/") {
         if component == "" -> next
         cursor = "{cursor}/{component}"
@@ -308,8 +308,8 @@ regular: fn(file: String, label: String) -[FS]> Int StageError! {
 // The bytes of `file`, refusing a final link, more than `limit` bytes, and
 // a file whose size moved away from `size` while it was read.
 read_bounded: fn(file: String, size: Int, label: String, limit: Int) -[FS]> [U8] StageError! {
-    reader := files.open(file, links: .Refuse) ?? return Err(failed("{label} cannot be opened: {file}: {err}"))
-    bytes := [U8]{}
+    ^reader: files.open(file, links: .Refuse) ?? return Err(failed("{label} cannot be opened: {file}: {err}"))
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(READ_CHUNK) ?? return Err(failed("{label} cannot be read: {file}: {err}"))
         if chunk.len() == 0 -> break
@@ -326,7 +326,7 @@ read_bounded: fn(file: String, size: Int, label: String, limit: Int) -[FS]> [U8]
 // Make `dir` and its missing ancestors, each a real directory.
 directory: fn(dir: String, label: String) -[FS]> StageError! {
     loop cursor in prefixes(dir) {
-        info := entry(cursor, label) ?? return Err(err)
+        ^info: entry(cursor, label) ?? return Err(err)
         if info == .Missing {
             files.create_dir_all(cursor) ?? return Err(failed("{label} cannot be created: {cursor}: {err}"))
             info = entry(cursor, label) ?? return Err(err)
@@ -362,7 +362,7 @@ immutable: fn(file: String, bytes: [U8]) -[Env, FS]> StageError! {
     if files.lexists(partial) {
         return Err(failed("publication temporary file is already present: {partial}"))
     }
-    writer := files.create(partial, if_exists: .Refuse, mode: Val(0o644), links: .Refuse) ?? return Err(failed("publication temporary file cannot be created: {partial}: {err}"))
+    ^writer: files.create(partial, if_exists: .Refuse, mode: Val(0o644), links: .Refuse) ?? return Err(failed("publication temporary file cannot be created: {partial}: {err}"))
     if publish(writer, partial, file, parent, bytes) == .Err(error) {
         files.remove(partial).drop("the partial file is removed best-effort")
         return Err(failed("publication write failed: {file}: {error}"))

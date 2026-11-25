@@ -14,12 +14,12 @@ rt_crypto_sha1: fn(input: I64, length: I64, output: I64, scratch: I64) {
     rt_text_store(wrapping(scratch + I64{32}), I64{0xc3d2e1f0})
     schedule: wrapping(scratch + I64{40})
     end: ((length + I64{8}) / I64{64} + I64{1}) * I64{64}
-    off := I64{0}
+    ^off: I64{0}
     loop off < end {
-        t := I64{0}
+        ^t: I64{0}
         loop t < (I64{16}) {
-            word := I64{0}
-            j := I64{0}
+            ^word: I64{0}
+            ^j: I64{0}
             loop j < (I64{4}) {
                 word = (word << I64{8}) | rt_sha512_byte(input, length, off + t * I64{4} + j, end)
                 j += I64{1}
@@ -32,15 +32,15 @@ rt_crypto_sha1: fn(input: I64, length: I64, output: I64, scratch: I64) {
             rt_text_store(wrapping(schedule + t * I64{8}), rt_sha256_rotate(mixed, I64{31}))
             t += I64{1}
         }
-        a := rt_text_word(scratch)
-        b := rt_text_word(wrapping(scratch + I64{8}))
-        c := rt_text_word(wrapping(scratch + I64{16}))
-        d := rt_text_word(wrapping(scratch + I64{24}))
-        e := rt_text_word(wrapping(scratch + I64{32}))
+        ^a: rt_text_word(scratch)
+        ^b: rt_text_word(wrapping(scratch + I64{8}))
+        ^c: rt_text_word(wrapping(scratch + I64{16}))
+        ^d: rt_text_word(wrapping(scratch + I64{24}))
+        ^e: rt_text_word(wrapping(scratch + I64{32}))
         t = I64{0}
         loop t < (I64{80}) {
-            f := I64{0}
-            k := I64{0}
+            ^f: I64{0}
+            ^k: I64{0}
             if {
                 (t < I64{20}) -> {
                     f = (b & c) | (b ~ I64{0xffffffff}) & d
@@ -74,7 +74,7 @@ rt_crypto_sha1: fn(input: I64, length: I64, output: I64, scratch: I64) {
         rt_text_store(wrapping(scratch + I64{32}), (rt_text_word(wrapping(scratch + I64{32})) + e) & I64{0xffffffff})
         off += I64{64}
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{20}) {
         word: rt_text_word(wrapping(scratch + (at / I64{4}) * I64{8}))
         rt_text_put(wrapping(output + at), (word >> (I64{24} - (at % I64{4}) * I64{8})) & I64{255})

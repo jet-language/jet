@@ -163,7 +163,7 @@ census_quoted_codes: fn(text: String, codes: ^[String]) Never! {
     loop (index, byte) in bytes {
         if byte != (U8{34}) && byte != (U8{91}) -> next
         close: if byte == (U8{34}) -> U8{34} else -> U8{93}
-        end := index + 1
+        ^end: index + 1
         loop end < bytes.len() && census_code_byte(bytes[end]) -> end += 1
         if end > index + 1 && end < bytes.len() && bytes[end] == close {
             code: census_slice(text, index + 1, end)
@@ -199,7 +199,7 @@ census_names: fn(text: String, names: ^[String]) Never! {
         if index > 0 && (census_name_byte(bytes[index - 1]) || bytes[index - 1] == (U8{46}) || bytes[index - 1] == (U8{95})) {
             next
         }
-        end := index + 4
+        ^end: index + 4
         loop end < bytes.len() && census_name_byte(bytes[end]) -> end += 1
         if end == index + 4 -> next
         heading: end + 1 < bytes.len() && bytes[end] == (U8{58}) && bytes[end + 1] == (U8{32})
@@ -214,7 +214,7 @@ census_quoted_names: fn(text: String, names: ^[String]) Never! {
     pieces: text.split("\"Jet.").to_list()
     loop at in 1..<pieces.len() {
         bytes: pieces[at].bytes()
-        end := 0
+        ^end: 0
         loop end < bytes.len() && census_name_byte(bytes[end]) -> end += 1
         if end > 0 && end < bytes.len() && bytes[end] == (U8{34}) {
             census_add(names, "Jet.{census_slice(pieces[at], 0, end)}")
@@ -225,10 +225,10 @@ census_quoted_names: fn(text: String, names: ^[String]) Never! {
 // The typed rows: each `X: struct {` whose `impl Diagnostic` block names its
 // `code` and, unless it is active, its `status` is the row named `Jet.X`.
 census_registered_rows: fn(text: String) -> [CensusRow] DiagnosticCensusError! {
-    rows := [CensusRow]{}
-    name := ""
-    code := ""
-    status := ""
+    ^rows: [CensusRow]{}
+    ^name: ""
+    ^code: ""
+    ^status: ""
     loop line in text.split("\n") {
         if {
             !line.starts_with(" ") && line.ends_with(": struct {{") -> {
@@ -315,11 +315,11 @@ census_rustc_code: fn(code: String) -> Bool Never! { RUSTC_CODES.contains(code) 
 
 // The codes and names the compiler, package manager and Core sources emit.
 census_emitted: fn() -[FS]> CensusEmitters DiagnosticCensusError! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop root in EMIT_ROOTS {
         census_walk(root, [String]{"Tests", "Fixtures", "fixtures"}, .Sources, paths) ?? return Err(err)
     }
-    emitters := CensusEmitters{compiler: CensusTokens{codes: [String]{}, names: [String]{}}, tool: CensusTokens{codes: [String]{}, names: [String]{}}}
+    ^emitters: CensusEmitters{compiler: CensusTokens{codes: [String]{}, names: [String]{}}, tool: CensusTokens{codes: [String]{}, names: [String]{}}}
     loop path in paths {
         text: census_read(path) ?? return Err(err)
         if {
@@ -348,7 +348,7 @@ census_carried_text: fn(path: String, text: String, tokens: ^CensusTokens) Never
         census_trail(text, tokens.names)
         return
     }
-    kept := [String]{}
+    ^kept: [String]{}
     loop line in text.split("\n") {
         // copy: the kept lines outlive the split of `text`.
         if !line.trim().starts_with("#") -> kept.push(line.copy())
@@ -368,9 +368,9 @@ census_trail: fn(text: String, names: ^[String]) Never! {
 
 // What the rendered outputs of the files under `roots` that `kind` keeps show.
 census_tokens: fn(roots: [String], kind: CensusFiles) -[FS]> CensusTokens DiagnosticCensusError! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop root in roots -> census_walk(root, [String]{}, kind, paths) ?? return Err(err)
-    tokens := CensusTokens{codes: [String]{}, names: [String]{}}
+    ^tokens: CensusTokens{codes: [String]{}, names: [String]{}}
     loop path in paths {
         text: census_read(path) ?? return Err(err)
         census_carried_text(path, text, tokens)
@@ -380,7 +380,7 @@ census_tokens: fn(roots: [String], kind: CensusFiles) -[FS]> CensusTokens Diagno
 
 census_carriers: fn() -[FS]> CensusCarriers DiagnosticCensusError! {
     ui: census_tokens(UI_ROOTS, .Snapshots) ?? return Err(err)
-    fixture := census_tokens(FIXTURE_ROOTS, .Snapshots) ?? return Err(err)
+    ^fixture: census_tokens(FIXTURE_ROOTS, .Snapshots) ?? return Err(err)
     reports: census_tokens(REPORT_ROOTS, .Reports) ?? return Err(err)
     loop code in reports.codes -> census_add(fixture.codes, code)
     loop name in reports.names -> census_add(fixture.names, name)
@@ -404,8 +404,8 @@ census_carriage: fn(carriers: CensusCarriers, row: CensusRow) -> String Never! {
 // The census of the typed rows `registry` holds, given what the sources emit
 // and what the rendered outputs carry, sorted by code, then name.
 census_rows: fn(registry: String, emitters: CensusEmitters, carriers: CensusCarriers) -> [CensusRow] DiagnosticCensusError! {
-    rows := census_registered_rows(registry) ?? return Err(err)
-    known := [String]{}
+    ^rows: census_registered_rows(registry) ?? return Err(err)
+    ^known: [String]{}
     loop row in rows -> census_add(known, row.code)
     loop codes in ([[String]]{emitters.compiler.codes, emitters.tool.codes}) {
         loop code in codes {
@@ -443,7 +443,7 @@ census_line: fn(row: CensusRow) -> String Never! {
 
 census_render: fn(rows: [CensusRow]) -> String Never! {
     // copy: the rendered lines own their text.
-    lines := [String]{GENERATED_BY.copy(), COLUMNS.copy()}
+    ^lines: [String]{GENERATED_BY.copy(), COLUMNS.copy()}
     loop row in rows -> lines.push(census_line(row))
     "{lines.join("\n")}\n"
 }
@@ -451,7 +451,7 @@ census_render: fn(rows: [CensusRow]) -> String Never! {
 // The tab-separated rows of `text` with `width` columns, skipping blank and
 // `#` lines.
 census_columns: fn(path: String, text: String, width: Int) -> [[String]] DiagnosticCensusError! {
-    rows := [[String]]{}
+    ^rows: [[String]]{}
     loop (index, line) in text.lines() {
         if line == "" || line.starts_with("#") -> next
         columns: line.split("\t").to_list()
@@ -465,7 +465,7 @@ census_columns: fn(path: String, text: String, width: Int) -> [[String]] Diagnos
 }
 
 census_parse: fn(text: String) -> [CensusRow] DiagnosticCensusError! {
-    rows := [CensusRow]{}
+    ^rows: [CensusRow]{}
     loop columns in census_columns(CENSUS_PATH, text, 5) ?? return Err(err) {
         rows.push(CensusRow{code: columns[0], name: columns[1], status: columns[2], emitter: columns[3], carriage: columns[4]})
     }
@@ -485,7 +485,7 @@ census_gap: fn(row: CensusRow) -> String Never! {
 }
 
 baseline_parse: fn(text: String) -> [BaselineRow] DiagnosticCensusError! {
-    rows := [BaselineRow]{}
+    ^rows: [BaselineRow]{}
     loop columns in census_columns(BASELINE_PATH, text, 4) ?? return Err(err) {
         rows.push(BaselineRow{code: columns[0], name: columns[1], gap: columns[2], owner: columns[3]})
     }
@@ -494,7 +494,7 @@ baseline_parse: fn(text: String) -> [BaselineRow] DiagnosticCensusError! {
 
 baseline_render: fn(rows: [BaselineRow]) -> String Never! {
     // copy: the rendered lines own their text.
-    lines := [String]{BASELINE_HEADER.copy()}
+    ^lines: [String]{BASELINE_HEADER.copy()}
     loop row in rows -> lines.push("{row.code}\t{row.name}\t{row.gap}\t{row.owner}")
     "{lines.join("\n")}\n"
 }
@@ -515,7 +515,7 @@ baseline_open: fn(rows: [CensusRow], entry: BaselineRow) -> Bool Never! {
 
 // The baseline rows that are still gaps in `rows`.
 baseline_shrunk: fn(baseline: [BaselineRow], rows: [CensusRow]) -> [BaselineRow] Never! {
-    kept := [BaselineRow]{}
+    ^kept: [BaselineRow]{}
     loop entry in baseline {
         if baseline_open(rows, entry) {
             kept.push(BaselineRow{code: "{entry.code}", name: "{entry.name}", gap: "{entry.gap}", owner: "{entry.owner}"})
@@ -527,7 +527,7 @@ baseline_shrunk: fn(baseline: [BaselineRow], rows: [CensusRow]) -> [BaselineRow]
 // Every way `rows` and `baseline` break the gate, one line each. `before` is
 // HEAD's baseline, when HEAD has one.
 census_gate: fn(rows: [CensusRow], baseline: [BaselineRow], before: [BaselineRow]?) -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     loop row in rows {
         gap: census_gap(row)
         if gap == "" || baseline_admits(baseline, row.code, row.name, gap) -> next
@@ -568,11 +568,11 @@ census_gate: fn(rows: [CensusRow], baseline: [BaselineRow], before: [BaselineRow
 
 // The rows that differ between two censuses, at most `limit`.
 census_changed: fn(current: [CensusRow], proposed: [CensusRow], limit: Int) -> [String] Never! {
-    old := [String]{}
+    ^old: [String]{}
     loop row in current -> old.push(census_line(row))
-    fresh := [String]{}
+    ^fresh: [String]{}
     loop row in proposed -> fresh.push(census_line(row))
-    changed := [String]{}
+    ^changed: [String]{}
     loop line in fresh {
         if !old.contains(line) && changed.len() < limit -> changed.push("+ {line}")
     }
@@ -583,10 +583,10 @@ census_changed: fn(current: [CensusRow], proposed: [CensusRow], limit: Int) -> [
 }
 
 census_summary: fn(rows: [CensusRow]) -> String Never! {
-    active := 0
-    ui := 0
-    gaps := [String]{"dead", "uncarried", "no-ui", "unregistered", "emitted"}
-    counts := [Int]{0, 0, 0, 0, 0}
+    ^active: 0
+    ^ui: 0
+    ^gaps: [String]{"dead", "uncarried", "no-ui", "unregistered", "emitted"}
+    ^counts: [Int]{0, 0, 0, 0, 0}
     loop row in rows {
         if row.status == "active" -> active += 1
         if row.status == "active" && row.carriage == "ui" -> ui += 1
@@ -595,7 +595,7 @@ census_summary: fn(rows: [CensusRow]) -> String Never! {
             if gaps[at] == gap -> counts[at] = counts[at] + 1
         }
     }
-    shown := [String]{}
+    ^shown: [String]{}
     loop at in 0..<gaps.len() -> shown.push("{counts[at]} {gaps[at]}")
     "{rows.len()} rows, {active} active, {ui} active in ui snapshots; gaps: {shown.join(", ")}"
 }
@@ -620,8 +620,8 @@ diagnostic_census_main: fn(args: [String]) -[Exec, FS, Time.Wait]> String Diagno
     generated: census_render(rows)
     current_text: files.read(CENSUS_PATH) ?? ""
     baseline_text: files.read(BASELINE_PATH) ?? ""
-    baseline := baseline_parse(baseline_text) ?? return Err(err)
-    before := [BaselineRow]?{None}
+    ^baseline: baseline_parse(baseline_text) ?? return Err(err)
+    ^before: [BaselineRow]?{None}
     if baseline_head_text() == .Val(head_text) {
         before = Val(baseline_parse(head_text) ?? return Err(err))
     }
@@ -661,19 +661,19 @@ census_test_entry: fn(code: String, gap: String) -> BaselineRow Never! {
 }
 
 #Test("the census reads emitted codes, heading names, name links and trail sections, and nothing else") {
-    tokens := CensusTokens{codes: [String]{}, names: [String]{}}
+    ^tokens: CensusTokens{codes: [String]{}, names: [String]{}}
     census_quoted_codes("fail(\"E3413\", x) [E0001] \"E2416: bad line\" \"E9\" [EOF] \"E2417 later\"", tokens.codes)
     assert_eq(tokens.codes, [String]{"E3413", "E0001"})
     census_names("Error: Jet.FetchHashMismatch: x\nMore: jet-lang.dev/e/Jet.ProhibitedEffectReached\nsee /e/nothing #Allow(Jet.FloatMoney, \"why\") `Jet.Prose` game.Jet.Other: Jet.: x ~ \"Stop: Jet.Labeled\" Errors: Jet.Prose \"Jet.EnvDecodeFailed: bad line\"", tokens.names)
     assert_eq(tokens.names, [String]{"Jet.FetchHashMismatch", "Jet.ProhibitedEffectReached", "Jet.Labeled", "Jet.EnvDecodeFailed"})
-    case_tokens := CensusTokens{codes: [String]{}, names: [String]{}}
+    ^case_tokens: CensusTokens{codes: [String]{}, names: [String]{}}
     census_carried_text("t/a.case", "# \"E0001\" \"Jet.Hidden\" in a comment\nstderr: ~ \"E0749\" # the denial\nstderr: ~ \"Jet.UnknownName\" !~ \"Jet.Prose here\"\n", case_tokens)
     assert_eq(case_tokens.codes, [String]{"E0749"})
     assert_eq(case_tokens.names, [String]{"Jet.UnknownName"})
-    report_tokens := CensusTokens{codes: [String]{}, names: [String]{}}
+    ^report_tokens: CensusTokens{codes: [String]{}, names: [String]{}}
     census_carried_text("t/a.stderr", "Error: boom\n Trail (1 call passed it up, origin first):\n  1. f (a.jet:1)\n", report_tokens)
     assert_eq(report_tokens.names, [String]{TRAIL_ROW})
-    prose := CensusTokens{codes: [String]{}, names: [String]{}}
+    ^prose: CensusTokens{codes: [String]{}, names: [String]{}}
     census_carried_text("t/b.stderr", "see the Trail (above)\n  Trail (indented)\n", prose)
     assert_eq(prose.names, [String]{})
     assert(census_is_code("E-WEB-RUN") && census_is_code("JT0001") && !census_is_code("E-WEB") && !census_is_code("E01"))

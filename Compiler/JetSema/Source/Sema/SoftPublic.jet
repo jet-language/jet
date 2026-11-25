@@ -33,8 +33,8 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
         return
     }
     raw: graph.modules[module_index].source.bytes()
-    seen := [Int:Bool]{}
-    skipped := 0
+    ^seen: [Int:Bool]{}
+    ^skipped: 0
     loop (index, reference) in module_result.name_references {
         loop skipped < generated_references.len() && generated_references[skipped].end <= index {
             skipped += 1
@@ -97,8 +97,8 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
     module_identity: graph.modules[module_index].module_identity
     raw: graph.modules[module_index].source.bytes()
     segments: graph.modules[module_index].source_segments
-    candidates := [SemaModuleValueRead]{}
-    skipped := 0
+    ^candidates: [SemaModuleValueRead]{}
+    ^skipped: 0
     loop (index, reference) in module_result.name_references {
         loop skipped < generated_references.len() && generated_references[skipped].end <= index {
             skipped += 1
@@ -116,7 +116,7 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
         return
     }
     bodies: sema_module_value_bodies(graph.modules[module_index].declarations)
-    reads := [SemaModuleValueRead]{}
+    ^reads: [SemaModuleValueRead]{}
     loop candidate in candidates {
         consumer: sema_module_value_consumer(bodies, candidate.span) ?? next
         reads.push(SemaModuleValueRead{key: candidate.key, name: candidate.name, consumer: consumer, span: candidate.span})
@@ -124,14 +124,14 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
     if reads.len() < 2 {
         return
     }
-    moved := [{position: Int, diagnostic: Diagnostic}]{}
+    ^moved: [{position: Int, diagnostic: Diagnostic}]{}
     loop (position, diagnostic) in module_result.diagnostics {
         failed: sema_module_value_failed_read(reads, raw, segments, diagnostic) ?? next
         read: reads[failed]
         agreeing: reads[sema_module_value_agreeing_read(reads, module_result.diagnostics, raw, segments, read) ?? next]
         constant: sema_module_value_constant(graph.modules[module_index].constants, read.key) ?? next
         shown: if constant.ty == .Val(ty) -> " as {sema_module_value_type_show(ty)}" else -> ""
-        updated := diagnostic.copy()
+        ^updated: diagnostic.copy()
         // The value's name is located afresh: it may sit in another file of
         // this module than the read.
         updated.span = Val(constant.declaration.name_span)
@@ -179,7 +179,7 @@ SemaModuleValueBody: struct {
 
 // The functions and methods of `declarations`, in declaration order.
 sema_module_value_bodies: fn(declarations: [Item]) -> [SemaModuleValueBody] {
-    bodies := [SemaModuleValueBody]{}
+    ^bodies: [SemaModuleValueBody]{}
     loop item in declarations {
         if item == {
             .Func(function) -> {
@@ -220,7 +220,7 @@ sema_module_value_consumer: fn(bodies: [SemaModuleValueBody], span: Span) -> Str
 // at a read, or just past the `.` after one (sema_module_value_failed_read,
 // before its location checks). Most modules' errors fail none.
 sema_module_value_reads_failed: fn(reads: [SemaModuleValueRead], raw: [U8], diagnostics: [Diagnostic]) -> Bool {
-    starts := [Int:Bool]{}
+    ^starts: [Int:Bool]{}
     loop read in reads {
         starts[read.span.start] = true
         if read.span.end < raw.len() && (Int{raw[read.span.end]}) == 46 {
@@ -307,19 +307,19 @@ sema_check_soft_public_signature: fn(function: Func, module_row: SemaRegistratio
     if function.compiler_generated {
         return
     }
-    local := [String]{}
+    ^local: [String]{}
     loop parameter in function.type_params -> local.push(parameter.name)
-    ranges := [Span]{}
+    ^ranges: [Span]{}
     loop parameter in function.params -> ranges.push(parameter.ty_span)
     if function.return_type_span == .Val(span) -> ranges.push(span.copy())
     // A bound runs from the parameter's name to its `,`, `>` or default `=`.
     loop parameter in function.type_params {
-        end := parameter.name_span.end
+        ^end: parameter.name_span.end
         loop end < raw.len() && raw[end] != 44 && raw[end] != 62 && raw[end] != 61 -> end += 1
         ranges.push(Span{start: parameter.name_span.end, end: end})
     }
     loop range in ranges {
-        at := if range.start < 0 -> 0 else -> range.start
+        ^at: if range.start < 0 -> 0 else -> range.start
         limit: if range.end > raw.len() -> raw.len() else -> range.end
         loop at < limit {
             if raw[at] != 95 || (at > 0 && sema_soft_public_word_byte(raw[at - 1])) {
@@ -330,7 +330,9 @@ sema_check_soft_public_signature: fn(function: Func, module_row: SemaRegistratio
             loop at < limit && sema_soft_public_word_byte(raw[at]) -> at += 1
             name: String.from_bytes(raw[start..<at]) ?? next
             qualified: start > 0 && raw[start - 1] == 46
-            if !qualified && (sema_registration_declaration_row(module_row, name) != None || local.contains(name)) -> next
+            if !qualified && (sema_registration_declaration_row(module_row, name) != None || local.contains(name)) {
+                next
+            }
             sema_soft_public_warn({start: start, name: name}, seen, diagnostics)
         }
     }
@@ -345,11 +347,11 @@ sema_check_soft_public_signature: fn(function: Func, module_row: SemaRegistratio
 // span another source owns) and names nothing.
 sema_soft_public_written_leaf: fn(raw: [U8], span: Span) -> {start: Int, name: String}? Never! {
     if span.start < 0 || span.end > raw.len() || span.start >= span.end -> return None
-    end := span.end
+    ^end: span.end
     loop end > span.start && (raw[end - 1] == 32 || raw[end - 1] == 10) -> end -= 1
     if end > span.start && raw[end - 1] == 41 {
-        index := end - 1
-        depth := 0
+        ^index: end - 1
+        ^depth: 0
         loop index >= span.start {
             if raw[index] == 41 -> depth += 1
             if raw[index] == 40 {
@@ -362,7 +364,7 @@ sema_soft_public_written_leaf: fn(raw: [U8], span: Span) -> {start: Int, name: S
         end = index
     }
     if end > span.start && raw[end - 1] == 62 {
-        angle := 0
+        ^angle: 0
         loop end > span.start {
             end -= 1
             if raw[end] == 62 -> angle += 1
@@ -372,7 +374,7 @@ sema_soft_public_written_leaf: fn(raw: [U8], span: Span) -> {start: Int, name: S
             }
         }
     }
-    start := end
+    ^start: end
     loop start > span.start && sema_soft_public_word_byte(raw[start - 1]) -> start -= 1
     if start == end || raw[start] != 95 -> return None
     if (start > 0 && sema_soft_public_word_byte(raw[start - 1])) || (end < raw.len() && sema_soft_public_word_byte(raw[end])) {

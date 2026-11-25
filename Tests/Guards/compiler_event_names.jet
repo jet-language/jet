@@ -31,8 +31,8 @@ compiler_event_between: fn(line: String, open: String, close: String) -> String 
 
 // The moments the rows list, as `name variant payload`, in row order.
 compiler_event_rows: fn(text: String) -> [String] {
-    names := [String:String]{}
-    rows := [String]{}
+    ^names: [String:String]{}
+    ^rows: [String]{}
     loop line in text.lines() {
         if line.starts_with("COMPILER_EVENT_") && line.contains(": \"") {
             parts: line.split_once(": ") ?? next
@@ -51,11 +51,11 @@ compiler_event_rows: fn(text: String) -> [String] {
 // next `name:` line, may name its home module on a `home:` line, and lists
 // one `CompilerEventField{…}` per line.
 compiler_event_payload_rows: fn(text: String) -> [String] {
-    rows := [String]{}
-    current := ""
-    home := ""
-    opened := false
-    fields := [String]{}
+    ^rows: [String]{}
+    ^current: ""
+    ^home: ""
+    ^opened: false
+    ^fields: [String]{}
     loop line in text.lines() {
         word: line.trim()
         if {
@@ -85,8 +85,8 @@ compiler_event_payload_rows: fn(text: String) -> [String] {
 // The member lines of the top-level `head` block in `text`, trimmed, without
 // comments or blank lines.
 compiler_event_block: fn(text: String, head: String) -> [String] {
-    members := [String]{}
-    inside := false
+    ^members: [String]{}
+    ^inside: false
     loop line in text.lines() {
         if !inside {
             if line == head -> inside = true
@@ -102,7 +102,7 @@ compiler_event_block: fn(text: String, head: String) -> [String] {
 
 // Every Jet source under `directory`, in directory order.
 compiler_event_sources_under: fn(directory: String) -> [String] {
-    found := [String]{}
+    ^found: [String]{}
     entries: compiler_event_files.list_dir(directory) ?? panic("read {directory}: {err}")
     loop entry in entries {
         if entry.name.starts_with(".") -> next
@@ -119,8 +119,8 @@ compiler_event_sources_under: fn(directory: String) -> [String] {
 // Each place in `text` (read from `path`) outside a comment line that writes
 // one of the moment `names` itself, as `path:line: name`.
 compiler_event_spelled: fn(path: String, text: String, names: [String]) -> [String] {
-    found := [String]{}
-    number := 0
+    ^found: [String]{}
+    ^number: 0
     loop line in text.lines() {
         number += 1
         if line.trim().starts_with("//") -> next
@@ -139,13 +139,13 @@ compiler_event_spelled: fn(path: String, text: String, names: [String]) -> [Stri
     rows: compiler_event_rows(rows_text)
     payloads: compiler_event_payload_rows(rows_text)
     assert(rows.len() > 0 && payloads.len() > 0, "{COMPILER_EVENT_ROWS_PATH} lists no moment or no payload")
-    problems := [String]{}
-    seen := [String]{}
+    ^problems: [String]{}
+    ^seen: [String]{}
     variants: compiler_event_block(core_text, "Event: enum {{")
     if variants.len() != rows.len() {
         problems.push("the rows list {rows.len()} moments, core.compiler.Event declares {variants.len()} variants")
     }
-    payload_names := [String]{}
+    ^payload_names: [String]{}
     loop payload in payloads -> payload_names.push((payload.split_once("@") ?? next).before)
     loop (index, row) in rows {
         words: row.split(" ").to_list()
@@ -175,7 +175,7 @@ compiler_event_spelled: fn(path: String, text: String, names: [String]) -> [Stri
             next
         }
         home_text: compiler_event_files.read(home_path) ?? panic("read {home_path}: {err}")
-        declared := [String]{}
+        ^declared: [String]{}
         loop member in compiler_event_block(home_text, "{named.before}: struct {{") {
             field: member.split_once(": ") ?? next
             declared.push("{field.before} {field.after}")
@@ -190,11 +190,11 @@ compiler_event_spelled: fn(path: String, text: String, names: [String]) -> [Stri
 #Test("JetCLI and JetDriver name a compiler event only through its row constant") {
     guards_enter_root()
     rows_text: compiler_event_files.read(COMPILER_EVENT_ROWS_PATH) ?? panic("read {COMPILER_EVENT_ROWS_PATH}: {err}")
-    names := [String]{}
+    ^names: [String]{}
     loop row in compiler_event_rows(rows_text) {
         names.push((row.split_once(" ") ?? next).before.copy())
     }
-    found := [String]{}
+    ^found: [String]{}
     loop root in COMPILER_EVENT_NAMING_ROOTS {
         loop path in compiler_event_sources_under(root) {
             text: compiler_event_files.read(path) ?? panic("read {path}: {err}")

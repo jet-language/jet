@@ -130,8 +130,8 @@ services_run_verified_stop_action: fn(state: ServiceProcessState, action: StopAc
 // policy's KILL), a bounded wait, then KILL if it is still alive. A failed
 // TERM still escalates; a failed KILL is final.
 services_stop_process_with: fn(pid: Int, shutdown: ShutdownPolicy?, grace_ms: Int, run: fn(StopAction) ServicesError!, alive: fn() -> Bool ServicesError!) -[Time]> ServicesError! {
-    action := StopAction.Term
-    wait_ms := grace_ms
+    ^action: StopAction.Term
+    ^wait_ms: grace_ms
     if shutdown == .Val(policy) {
         if policy == {
             .Kill -> {
@@ -141,7 +141,7 @@ services_stop_process_with: fn(pid: Int, shutdown: ShutdownPolicy?, grace_ms: In
             .Term(grace) -> wait_ms = grace
         }
     }
-    request_error := String?{None}
+    ^request_error: String?{None}
     if run(action) == .Err(error) {
         if action == StopAction.Kill -> return Err(error)
         request_error = Val(error.message)
@@ -294,7 +294,7 @@ services_stop_persisted_authority_after_leader_exit: fn(state: ServiceProcessSta
 // Kill and reap a child whose state could not be published. The platform
 // authority is tried first; the direct group kill covers the rest.
 services_cleanup_child_with_authority: fn(child: ProcessChild, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> String Never! {
-    authority_error := String?{None}
+    ^authority_error: String?{None}
     if authority.uses_platform_authority() {
         if services_kill_authority_now(authority) == .Err(first) {
             if services_stop_platform_authority(authority) == .Err(second) {
@@ -302,12 +302,12 @@ services_cleanup_child_with_authority: fn(child: ProcessChild, authority: Servic
             }
         }
     }
-    kill_error := String?{None}
+    ^kill_error: String?{None}
     exited: child.exited() ?? false
     if !exited {
         if child.kill() == .Err(error) -> kill_error = Val("{error}")
     }
-    wait_error := String?{None}
+    ^wait_error: String?{None}
     if child.wait() == .Err(error) -> wait_error = Val("{error}")
     if authority_error == None && kill_error == None && wait_error == None -> return ""
     "; child cleanup failed (authority: {services_debug_option(authority_error)}, kill: {services_debug_option(kill_error)}, wait: {services_debug_option(wait_error)})"
@@ -334,7 +334,7 @@ services_debug_option: fn(value: String?) -> String Never! {
 // process group is killed and reaped.
 services_run_bounded_probe: fn(spec: ProcessSpec, timeout_ms: Int) -[Env, Exec, Time, Time.Wait]> Bool Never! {
     bounded: if timeout_ms < SERVICES_MAX_READY_PROBE_MS -> timeout_ms else -> SERVICES_MAX_READY_PROBE_MS
-    child := spec.spawn() ?? return false
+    ^child: spec.spawn() ?? return false
     deadline: services_now_ms() + bounded
     loop {
         exited: child.exited() ?? {
@@ -384,7 +384,7 @@ services_authority_for: fn(host: ServiceHost, project_dir: String, plan: DevServ
 
 // ASCII letters, digits, `_`, and `-` survive; every other scalar is `-`.
 services_unit_safe_name: fn(name: String) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop scalar in name.chars() {
         text: "{scalar}"
         bytes: text.bytes()

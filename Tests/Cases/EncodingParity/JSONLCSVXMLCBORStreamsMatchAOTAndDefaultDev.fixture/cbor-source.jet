@@ -5,9 +5,9 @@ use {
 }
 
 run: fn() {
-    path := "{work}/packet.cbor"
+    ^path: "{work}/packet.cbor"
     output: files.create(path) ?? panic("create")
-    writer := fmt.writer(output) ?? panic("writer")
+    ^writer: fmt.writer(output) ?? panic("writer")
     writer.write(encoding.DataEvent.ObjectStart) ?? panic("start")
     writer.write(encoding.DataEvent.Key("aa")) ?? panic("key aa")
     writer.write(encoding.DataEvent.Int(1)) ?? panic("int aa")
@@ -20,13 +20,13 @@ run: fn() {
     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
     writer.finish() ?? panic("finish")
     input: files.open(path) ?? panic("open")
-    reader := fmt.reader(input) ?? panic("reader")
+    ^reader: fmt.reader(input) ?? panic("reader")
     first: reader.next()
     if first == {
         .Val(_) -> { print(true) }
         .None -> print(false)
     }
-    whole := Dyn.Object(
+    ^whole: Dyn.Object(
         [
             "aa": Dyn.Int(1),
             "b": Dyn.Int(2),

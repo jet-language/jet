@@ -132,7 +132,7 @@ cli_test_host_compiler: fn() -> String {
 #Test("strict cached jobs reject secret environment names") {
     names: [String]{"API_KEY", "PRIVATE_KEY", "AWS_ACCESS_KEY_ID"}
     loop name in names {
-        env := cli_empty_job_env()
+        ^env: cli_empty_job_env()
         env.vars[name] = "not-for-cache"
         plan: RunPlan.empty(".", cli_builtin_table())
         if cli_validate_cached_job_environment(plan, env) == {
@@ -170,9 +170,9 @@ cli_test_host_compiler: fn() -> String {
 
 #Test("task environment hash changes when active environment changes") {
     table: SourceTable.empty()
-    first := EnvironmentFacts{}
+    ^first: EnvironmentFacts{}
     first.active_environment = Val("dev")
-    second := first
+    ^second: first
     second.active_environment = Val("ci")
     no_vars: [String:String]{}
     assert(cli_task_environment_hash_with_vars([RefSpec]{}, table, [SecretSpec]{}, first, no_vars) != cli_task_environment_hash_with_vars([RefSpec]{}, table, [SecretSpec]{}, second, no_vars))
@@ -181,9 +181,9 @@ cli_test_host_compiler: fn() -> String {
 #Test("task environment hash changes when allowed dotenv value changes") {
     table: SourceTable.empty()
     facts: EnvironmentFacts{}
-    first := [String:String]{}
+    ^first: [String:String]{}
     first["PORT"] = "8080"
-    second := first
+    ^second: first
     second["PORT"] = "8081"
     assert(cli_task_environment_hash_with_vars([RefSpec]{}, table, [SecretSpec]{}, facts, first) != cli_task_environment_hash_with_vars([RefSpec]{}, table, [SecretSpec]{}, facts, second))
 }

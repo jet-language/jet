@@ -6,10 +6,10 @@ use jet_lsp.[LSPServer, LSP_SEMANTIC_TOKEN_MODIFIERS]
 // Each token as `line:character+length=type/modifiers`.
 lsp_test_marker_tokens: fn(server: ^LSPServer, uri: String) -> [String] {
     data: lsp_test_token_data(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{lsp_test_text_document(uri)}}}"))
-    tokens := [String]{}
-    line := 0
-    character := 0
-    at := 0
+    ^tokens: [String]{}
+    ^line: 0
+    ^character: 0
+    ^at: 0
     loop at + 4 < data.len() {
         if data[at] > 0 -> character = 0
         line += data[at]
@@ -22,7 +22,7 @@ lsp_test_marker_tokens: fn(server: ^LSPServer, uri: String) -> [String] {
 
 #Test("markers are decorators, and compiler words, fact roots and pastes are macro keywords") {
     assert_eq(LSP_SEMANTIC_TOKEN_MODIFIERS[3], "macro")
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     uri: "file:///w/marked.jet"
     lsp_test_open(
         server,

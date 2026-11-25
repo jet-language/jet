@@ -16,10 +16,10 @@ use jet_driver.[JetDriverCompileMode, jet_driver_compile]
         "}}",
         "",
     }
-    request := seams_request(source.join("\n"), JetDriverCompileMode.Program)
+    ^request: seams_request(source.join("\n"), JetDriverCompileMode.Program)
     request.core_sources = idiom_core_rows()
     result: jet_driver_compile(request)
-    codes := [String]{}
+    ^codes: [String]{}
     loop diagnostic in result.diagnostics {
         if diagnostic.severity == 1 -> codes.push("{diagnostic.code} {diagnostic.what}")
     }

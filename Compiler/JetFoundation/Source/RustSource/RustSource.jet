@@ -21,10 +21,10 @@ RustSourceMaskState: enum {
 // byte for byte; newlines inside them are kept so lines stay aligned.
 rust_code_mask: fn(source: String) -> String Never! {
     bytes: source.bytes()
-    escaped_char_ends := [Int]{}
-    out := [U8]{}
-    state := RustSourceMaskState.Code
-    index := 0
+    ^escaped_char_ends: [Int]{}
+    ^out: [U8]{}
+    ^state: RustSourceMaskState.Code
+    ^index: 0
     loop index < bytes.len() {
         byte: bytes[index]
         code: Int{byte}
@@ -153,7 +153,7 @@ rust_source_raw_string_start: fn(bytes: [U8], at: Int) -> RustSourceRawStringSta
     byte_string: first == 98 && rust_source_byte(bytes, at + 1) == 114
     if first != 114 && !byte_string -> return None
     start: if byte_string -> 2 else -> 1
-    index := start
+    ^index: start
     loop rust_source_byte(bytes, at + index) == 35 -> index += 1
     if rust_source_byte(bytes, at + index) != 34 -> return None
     Val(RustSourceRawStringStart{prefix_len: index + 1, hashes: index - start})
@@ -189,10 +189,10 @@ rust_source_char_literal_end: fn(bytes: [U8], at: Int, escaped_ends: [Int]) -> I
 // Reverse DP: each suffix is read once even with many invalid escaped-char
 // openers on one long line. Entries are reverse indexed.
 rust_source_escaped_char_ends: fn(bytes: [U8]) -> [Int] Never! {
-    ends := [Int]{}
-    normal := -1
-    escaped := -1
-    index := bytes.len() - 1
+    ^ends: [Int]{}
+    ^normal: -1
+    ^escaped: -1
+    ^index: bytes.len() - 1
     loop index >= 0 {
         byte: rust_source_byte(bytes, index)
         next_normal: if {

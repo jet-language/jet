@@ -17,7 +17,7 @@ Record: struct {
 }
 
 document: fn(count: Int) -> String {
-    parts := [String]{}
+    ^parts: [String]{}
     loop i in 0..<count {
         kind: if i % 2 == 0 -> "\"Plain\"" else -> "{{\"Level\":{{\"depth\":{i % 7}}}}}"
         parts.push("{{\"id\":{i},\"kind\":{kind},\"name\":\"r{i}\"}}")
@@ -29,8 +29,8 @@ run: fn() [FieldError]! {
     loop scale in [1, 2, 4] {
         count: 100000 * scale
         records: json.decode<[Record]>(document(count))
-        depth := 0
-        plain := 0
+        ^depth: 0
+        ^plain: 0
         loop record in records {
             if record.kind == .Level(level) -> depth += level
             if record.kind == .Plain -> plain += 1

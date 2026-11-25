@@ -50,7 +50,7 @@ faults_of: fn(text: String) -> [GrammarFault] Never! {
 
 #Test("one literal may not be the operator of two alternatives") {
     faults: faults_of("e : e '+' e # Add | e op=('-' | '+') e # Sub | NUM # Num ;\nNUM : [0-9]+ ;")
-    found := false
+    ^found: false
     loop fault in faults {
         if fault.message == "`+` is the operator of two alternatives of `e`" {
             found = true

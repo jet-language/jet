@@ -9,9 +9,9 @@ Counter: struct {
 bump: fn(c: ^Counter) { c.n += 1 }
 
 run: fn() {
-    c := Counter{n: 1}
+    ^c: Counter{n: 1}
     #Unsafe("c lives in place until `run` returns") {
-        pointer := mem.from_addr<Counter>(mem.address_of(c))
+        ^pointer: mem.from_addr<Counter>(mem.address_of(c))
         bump(pointer.*)
     }
     print(c.n)

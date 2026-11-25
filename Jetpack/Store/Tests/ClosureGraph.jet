@@ -25,8 +25,8 @@ store_test_closure_ingest: fn(verification: StoreVerification, roots: HangarRoot
 
 // Physical bytes of `paths`, each filesystem identity counted once.
 store_test_independent_physical_bytes: fn(paths: [String]) -> Int Never! {
-    seen := [FileID:Bool]{}
-    total := 0
+    ^seen: [FileID:Bool]{}
+    ^total: 0
     loop path in paths -> total += store_test_physical_walk(path, seen)
     total
 }
@@ -35,7 +35,7 @@ store_test_physical_walk: fn(path: String, seen: ^[FileID:Bool]) -> Int Never! {
     metadata: files.stat(path) ?? panic("stat")
     if seen.has_key(metadata.id) -> return 0
     seen[metadata.id] = true
-    bytes := metadata.size_on_disk
+    ^bytes: metadata.size_on_disk
     if metadata.is_dir {
         loop child in files.list_dir(path) ?? panic("list") {
             bytes += store_test_physical_walk(child.path, seen)
@@ -73,7 +73,7 @@ store_test_register_entry_locked: fn(verification: StoreVerification, roots: Han
 }
 
 #Test("store hangar du counts each closure object once and splits shared bytes") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     shared: store_test_closure_ingest(verification, roots, "du-shared", [String]{}, "bytes", "registration-test")
     first: store_test_closure_ingest(verification, roots, "du-first", [String]{shared.entry.envelope.output_hash}, "du-first", "du-test")
@@ -88,14 +88,14 @@ store_test_register_entry_locked: fn(verification: StoreVerification, roots: Han
     assert_eq(report.packages, 3)
     assert((report.shared_bytes ?? 0) > 0)
     assert_eq((report.unique_bytes ?? 0) + (report.shared_bytes ?? 0), report.closure_physical_bytes ?? -1)
-    first_shared := false
+    ^first_shared: false
     loop entry in report.entries {
         if entry.id == first.entry.id && (entry.shared_bytes ?? 0) > 0 -> first_shared = true
     }
     assert(first_shared)
 
     graph: store_closure_graph_structure(verification, roots) ?? panic("graph")
-    paths := [String]{}
+    ^paths: [String]{}
     loop record in graph.sorted_records() {
         loop output in record.outputs {
             loop digest in graph.closure(output.value) -> paths.push(graph.objects[digest].path)
@@ -107,11 +107,11 @@ store_test_register_entry_locked: fn(verification: StoreVerification, roots: Han
 }
 
 #Test("store hangar du never substitutes logical length for physical use") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_closure_ingest(verification, roots, "du-physical", [String]{}, "bytes", "registration-test")
     report: store_du(verification, roots) ?? panic("du")
-    logical := 0
+    ^logical: 0
     loop entry in files.list_dir(ingested.entry.out) ?? panic("list") {
         logical += (files.stat(entry.path) ?? panic("stat")).size
     }
@@ -120,7 +120,7 @@ store_test_register_entry_locked: fn(verification: StoreVerification, roots: Han
 }
 
 #Test("store connected receipt is atomic recoverable and corruption preserves output") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_closure_ingest(verification, roots, "receipt-proof", [String]{}, "bytes", "registration-test")
     assert(ingested.entry.receipt.starts_with("sha256-"))
@@ -159,7 +159,7 @@ store_test_register_entry_locked: fn(verification: StoreVerification, roots: Han
 }
 
 #Test("store receipt directory symlink is rejected without path escape") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     outside: files.join(roots.root, "receipt-outside")
     files.create_dir_all(outside) ?? panic("outside dir")
@@ -188,7 +188,7 @@ store_test_register_entry_locked: fn(verification: StoreVerification, roots: Han
 }
 
 #Test("store external output is rejected before registration") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     out: files.join(roots.root, "external-output")
     files.create_dir_all(out) ?? panic("dir")
@@ -205,7 +205,7 @@ store_test_register_entry_locked: fn(verification: StoreVerification, roots: Han
 }
 
 #Test("store projection failure after journal commit is recoverable success") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_closure_ingest(verification, roots, "projection-commit", [String]{}, "bytes", "registration-test")
     dir: files.join(roots.hangar_dir(), ingested.entry.id)
@@ -225,7 +225,7 @@ store_test_register_entry_locked: fn(verification: StoreVerification, roots: Han
 }
 
 #Test("store disappearing output after journal append rolls back transaction") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     ingested: store_test_closure_ingest(verification, roots, "post-append-race", [String]{}, "bytes", "registration-test")
     object: ingested.entry.out
@@ -265,16 +265,16 @@ store_test_register_with_hook: fn(verification: StoreVerification, roots: Hangar
 // Give each entry a hashed `payload` dependency object and optionally make it
 // an admitted Nix record.
 store_test_batch_entries: fn(verification: StoreVerification, roots: HangarRoots, prefix: String, nix: Bool) -> [StoreEntry] Never! {
-    entries := [StoreEntry]{}
+    ^entries: [StoreEntry]{}
     loop index in 0..<3 {
-        entry := store_test_closure_ingest(verification, roots, "{prefix}-{index}", [String]{}, "bytes", "registration-test").entry
+        ^entry: store_test_closure_ingest(verification, roots, "{prefix}-{index}", [String]{}, "bytes", "registration-test").entry
         assert(store_remove_closure_record(verification, roots, entry.id) ?? panic("remove record"))
         output: entry.out
         store_invalidate_verified_digest(verification, output)
         store_reset_verified_digest_hash_count(verification, output)
         dependency: files.join(output, "payload")
         digest: "sha256-{store_sha256_hex(files.read_bytes(dependency) ?? panic("read dependency"))}"
-        producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+        ^producer: ProducerRecord.decode(entry.producer_record) ?? panic("producer")
         if nix {
             producer.provider = "nix"
             producer.immutable_source = "nix-source-{index}"
@@ -300,7 +300,7 @@ store_test_assert_hashed_at_most_once: fn(verification: StoreVerification, entri
 }
 
 #Test("store batch registration hashes each object once") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     entries: store_test_batch_entries(verification, roots, "batch", false)
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
@@ -310,7 +310,7 @@ store_test_assert_hashed_at_most_once: fn(verification: StoreVerification, entri
 }
 
 #Test("store admitted nix batch verifies each shared output once") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
     entries: store_test_batch_entries(verification, roots, "admitted-nix", true)
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
@@ -340,12 +340,12 @@ store_test_assert_hashed_at_most_once: fn(verification: StoreVerification, entri
 // All outputs and dependency facts must share the decoded producer without
 // consuming its optional payload per output.
 #Test("store descriptor shares one producer across named outputs and dependencies") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     roots: store_test_temp_roots()
-    entry := store_test_closure_ingest(verification, roots, "descriptor-producer", [String]{}, "dependency bytes", "registration-test").entry
+    ^entry: store_test_closure_ingest(verification, roots, "descriptor-producer", [String]{}, "dependency bytes", "registration-test").entry
     dependency: files.join(entry.out, "payload")
     dependency_digest: "sha256-{store_sha256_hex(files.read_bytes(dependency) ?? panic("dependency bytes"))}"
-    producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    ^producer: ProducerRecord.decode(entry.producer_record) ?? panic("producer")
     object_root: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
     preferred: files.join(roots.root, "external-dev")
     fallback: files.join(entry.out, "doc")
@@ -359,7 +359,7 @@ store_test_assert_hashed_at_most_once: fn(verification: StoreVerification, entri
     entry.references = [String]{dependency_digest, dependency_digest, "unmapped-reference"}
     entry.producer_record = producer.encode()
     descriptor: store_descriptor_for_entry(verification, roots, entry) ?? panic("descriptor")
-    objects := [String:ClosureObject]{}
+    ^objects: [String:ClosureObject]{}
     loop object in descriptor.objects -> objects[object.digest] = object
     assert_eq(objects.len(), 5)
     assert_eq(objects[entry.envelope.output_hash].path, entry.out)

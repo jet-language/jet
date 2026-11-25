@@ -76,7 +76,7 @@ ssl_cache_find_entry: fn(cache: SSLCacheContext, session_id: [U8]) -> Int ssldef
 /// CacheEntryNotFound when there is none or it has expired.
 ssl_cache_get: fn(cache: SSLCacheContext, session_id: [U8]) -> ssldefs.SSLSession ssldefs.SSLError! {
     i: ssl_cache_find_entry(cache, session_id) ?? return Err(err)
-    session := ssldefs.SSLSession{}
+    ^session: ssldefs.SSLSession{}
     sslser.ssl_session_load(session, cache.chain[i].session) ?? return Err(err)
     Ok(session)
 }
@@ -96,7 +96,7 @@ ssl_cache_entry_zeroize: fn(entry: ^SSLCacheEntry) Never! {
 // else the oldest. The entry is wiped and stamped with the current time.
 ssl_cache_pick_writing_slot: fn(cache: ^SSLCacheContext, session_id: [U8]) -> Int ssldefs.SSLError! {
     t: ssldefs.ssl_time()
-    found := -1
+    ^found: -1
     // Check 1: an entry with the given session ID is overwritten.
     loop i in 0..<cache.chain.len() {
         cur: cache.chain[i]
@@ -106,9 +106,9 @@ ssl_cache_pick_writing_slot: fn(cache: ^SSLCacheContext, session_id: [U8]) -> In
         }
     }
     // Check 2: an outdated entry is overwritten; else the oldest is kept.
-    old := -1
+    ^old: -1
     if found < 0 {
-        oldest := 0
+        ^oldest: 0
         loop i in 0..<cache.chain.len() {
             cur: cache.chain[i]
             if ssl_cache_expired(cache, cur, t) {
@@ -142,7 +142,7 @@ ssl_cache_pick_writing_slot: fn(cache: ^SSLCacheContext, session_id: [U8]) -> In
 /// C does.
 ssl_cache_set: fn(cache: ^SSLCacheContext, session_id: [U8], session: ssldefs.SSLSession) ssldefs.SSLError! {
     i: ssl_cache_pick_writing_slot(cache, session_id) ?? return Err(err)
-    serialized := sslser.ssl_session_save(session) ?? return Err(err)
+    ^serialized: sslser.ssl_session_save(session) ?? return Err(err)
     if session_id.len() > SSL_CACHE_SESSION_ID_LEN {
         ssldefs.ssl_wipe(serialized)
         return Err(.BadInputData)
@@ -183,12 +183,12 @@ ssl_cache_free: fn(cache: ^SSLCacheContext) Never! {
 }
 
 ssl_cache_get_locked: fn(cache: Shared<SSLCacheContext>, session_id: [U8]) -> ssldefs.SSLSession ssldefs.SSLError! {
-    guard := cache.guard_edit()
+    ^guard: cache.guard_edit()
     ssl_cache_get(guard.value, session_id)
 }
 
 ssl_cache_set_locked: fn(cache: Shared<SSLCacheContext>, session_id: [U8], session: ssldefs.SSLSession) -> Bool ssldefs.SSLError! {
-    guard := cache.guard_edit()
+    ^guard: cache.guard_edit()
     ssl_cache_set(guard.value, session_id, session) ?? return Err(err)
     Ok(true)
 }

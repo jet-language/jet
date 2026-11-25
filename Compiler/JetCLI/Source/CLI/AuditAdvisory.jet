@@ -72,13 +72,13 @@ jet_cli_advisory_audit_fail_one: fn(diagnostic: Diagnostic, color: Bool, json: B
 }
 
 jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
-    advisory_db := String?{None}
+    ^advisory_db: String?{None}
     if jet_cli_advisory_audit_flag(args, "--advisory-db") == {
         .Absent -> {}
         .Given(value) -> advisory_db = Val(value)
         .Missing -> return jet_cli_advisory_audit_usage("`--advisory-db` needs a path", JET_DRIVER_EXIT_USAGE, color, json)
     }
-    explain := String?{None}
+    ^explain: String?{None}
     if jet_cli_advisory_audit_flag(args, "--explain") == {
         .Absent -> {}
         .Given(value) -> explain = Val(value)
@@ -86,8 +86,8 @@ jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool
     }
     // The package's `policy.exceptions` (its inline Package or `package.jet`);
     // a package that fails to load is its own diagnostic.
-    cache := WorkspaceDeclarationCache.new()
-    exceptions := [PackagePolicyException]{}
+    ^cache: WorkspaceDeclarationCache.new()
+    ^exceptions: [PackagePolicyException]{}
     if pkg_package_facts_for_root(cache, root) == {
         .Val(facts) -> exceptions = facts.policy.exceptions
         .None -> {}
@@ -115,8 +115,8 @@ jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool
         }
         return jet_cli_advisory_audit_usage("the verified advisory feed has no advisory `{id}`", JET_DRIVER_EXIT_USER_ERROR, color, json)
     }
-    diagnostics := report.maturity
-    critical := 0
+    ^diagnostics: report.maturity
+    ^critical: 0
     loop found in report.matches {
         diagnostics.push(found.diagnostic)
         if found.severity == .Critical -> critical += 1
@@ -136,7 +136,7 @@ jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool
         }
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render_with_reports("audit", !failed, jet_cli_reports_json(None, "", "", diagnostics), fields)}\n", stderr: "", exit_code: exit_code}
     }
-    stdout := "Audit: feed sequence {report.receipt.sequence} verified (key {report.receipt.key_id}, digest {report.receipt.digest}, offline local feed).\n"
+    ^stdout: "Audit: feed sequence {report.receipt.sequence} verified (key {report.receipt.key_id}, digest {report.receipt.digest}, offline local feed).\n"
     stdout = "{stdout}Audit: policy maturity {report.receipt.maturity_seconds}s; exact exceptions use package#version; {lock.packages.len()} dependencies checked.\n"
     loop exception in report.source_exceptions {
         stdout = "{stdout}Audit: source policy exception applied: {exception}\n"
@@ -144,7 +144,7 @@ jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool
     if diagnostics.len() == 0 {
         return JetDriverVerbOutput{stdout: "{stdout}Audit: no advisories found.\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    stderr := "{diagnostic_render_all("", "", diagnostics, color)}\n{report.matches.len()} advisory match(es) found ({critical} critical)\n"
+    ^stderr: "{diagnostic_render_all("", "", diagnostics, color)}\n{report.matches.len()} advisory match(es) found ({critical} critical)\n"
     if failed {
         stderr = "{stderr}Audit: policy checks failed. Upgrade the affected dependencies or wait for an approved exception.\n"
     }

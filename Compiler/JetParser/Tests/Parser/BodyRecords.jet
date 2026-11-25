@@ -3,14 +3,14 @@
 // body's own level makes it a record. After a declared result that carries a
 // value, one `name: value` line is a record too, unless its value starts with
 // `loop`. Every other body holds code.
-use {
-    jet_foundation.[Func, Stmt]
-}
+use jet_foundation.[Func, Stmt]
 
 // The field count of the record a body's one line builds; -1 when the body is
 // code.
 body_record_fields: fn(body: [Stmt]) -> Int {
-    if body.len() == 1 && body[0] == .Expr(value) && value == .StructLit(_, _, _, _, fields, _, _, _) -> return fields.len()
+    if body.len() == 1 && body[0] == .Expr(value) && value == .StructLit(_, _, _, _, fields, _, _, _) {
+        return fields.len()
+    }
     return -1
 }
 

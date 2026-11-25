@@ -20,7 +20,7 @@ wasm_section_rank: fn(id: Int) -> Int Never! {
 
 wasm_decode_module: fn(bytes: ^^[U8]) -> WasmModule WasmError! {
     end: bytes.len()
-    reader := WasmReader.new(bytes)
+    ^reader: WasmReader.new(bytes)
     magic: reader.fixed(4) ?? return Err(WasmError.new("unexpected end: not a WebAssembly binary", 0))
     if magic != WASM_MAGIC {
         return Err(WasmError.new("magic header not detected: not a WebAssembly binary", 0))
@@ -38,11 +38,11 @@ wasm_decode_module: fn(bytes: ^^[U8]) -> WasmModule WasmError! {
 // The sections of one core module whose header ends at `start`, up to `end`
 // (a whole file, or a module nested in a component).
 wasm_decode_module_body: fn(bytes: ^^[U8], start: Int, end: Int) -> WasmModule WasmError! {
-    reader := WasmReader{bytes: bytes, at: start, end: end}
+    ^reader: WasmReader{bytes: bytes, at: start, end: end}
     ops: WasmOpTable.new()
-    wm := WasmModule.empty()
-    last_rank := 0
-    code_seen := false
+    ^wm: WasmModule.empty()
+    ^last_rank: 0
+    ^code_seen: false
     loop !reader.done() {
         id_at: reader.at
         id: reader.byte()
@@ -51,7 +51,7 @@ wasm_decode_module_body: fn(bytes: ^^[U8], start: Int, end: Int) -> WasmModule W
         if size > reader.end - body_start {
             return Err(WasmError.new("section size mismatch: unexpected end", body_start))
         }
-        section := WasmReader{bytes: reader.bytes, at: body_start, end: body_start + size}
+        ^section: WasmReader{bytes: reader.bytes, at: body_start, end: body_start + size}
         reader.at = body_start + size
         if id == 0 {
             wasm_decode_custom(wm, section)
@@ -63,17 +63,11 @@ wasm_decode_module_body: fn(bytes: ^^[U8], start: Int, end: Int) -> WasmModule W
         last_rank = rank
         if {
             id == 1 -> wasm_decode_types(wm, section)
-            id == 2 -> {
-                wasm_decode_imports(wm, section)
-            }
+            id == 2 -> { wasm_decode_imports(wm, section) }
             id == 3 -> { wasm_decode_functions(wm, section) }
-            id == 4 -> {
-                wasm_decode_tables(wm, section)
-            }
+            id == 4 -> { wasm_decode_tables(wm, section) }
             id == 5 -> { wasm_decode_memories(wm, section) }
-            id == 6 -> {
-                wasm_decode_globals(wm, section)
-            }
+            id == 6 -> { wasm_decode_globals(wm, section) }
             id == 7 -> { wasm_decode_exports(wm, section) }
             id == 8 -> {
                 index: section.u32()
@@ -166,7 +160,7 @@ wasm_read_global_type: fn(section: ^WasmReader) -> WasmGlobalType WasmError! {
 
 wasm_read_valtypes: fn(section: ^WasmReader, what: String) -> [Int] WasmError! {
     count: wasm_count(section, 1000, what)
-    out := [Int]{}
+    ^out: [Int]{}
     loop _ in 0..<count {
         code: wasm_read_valtype(section)
         out.push(code)
@@ -195,7 +189,7 @@ wasm_decode_imports: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
         name: section.name()
         at: section.at
         kind: section.byte()
-        entry := WasmImport{module_name: module_name, name: name, kind: kind, type_index: -1, table: None, memory: None, global: None}
+        ^entry: WasmImport{module_name: module_name, name: name, kind: kind, type_index: -1, table: None, memory: None, global: None}
         if {
             kind == WASM_EXTERN_FUNC -> {
                 index: section.u32()
@@ -273,21 +267,17 @@ wasm_decode_exports: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
 wasm_read_const_expr: fn(section: ^WasmReader) -> WasmConstExpr WasmError! {
     at: section.at
     op: section.byte()
-    value := 0
+    ^value: 0
     if {
         op == WASM_OP_I32_CONST -> value = section.signed(32)
-        op == WASM_OP_I64_CONST -> {
-            value = section.signed(64)
-        }
+        op == WASM_OP_I64_CONST -> { value = section.signed(64) }
         op == WASM_OP_F32_CONST -> { value = section.fixed(4) }
         op == WASM_OP_F64_CONST -> {
             bits: section.fixed(8)
             value = wasm_signed(bits, 64)
         }
         op == WASM_OP_GLOBAL_GET || op == WASM_OP_REF_FUNC -> { value = section.u32() }
-        op == WASM_OP_REF_NULL -> {
-            value = wasm_read_reftype(section)
-        }
+        op == WASM_OP_REF_NULL -> { value = wasm_read_reftype(section) }
         else -> {
             return Err(WasmError.new("constant expression required (found opcode 0x{wasm_hex(op)})", at))
         }
@@ -308,17 +298,17 @@ wasm_decode_elems: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
         at: section.at
         flags: section.u32()
         if flags > 7 -> return Err(WasmError.new("malformed element segment flags {flags}", at))
-        mode := WASM_SEGMENT_ACTIVE
+        ^mode: WASM_SEGMENT_ACTIVE
         if flags & 1 != 0 {
             mode = if flags & 2 == 0 -> WASM_SEGMENT_PASSIVE else -> WASM_SEGMENT_DECLARATIVE
         }
-        table := 0
+        ^table: 0
         if flags == 2 || flags == 6 -> table = section.u32()
-        offset := wasm_zero_offset()
+        ^offset: wasm_zero_offset()
         if mode == WASM_SEGMENT_ACTIVE -> offset = wasm_read_const_expr(section)
         uses_exprs: flags & 4 != 0
         // Flags 0 and 4 imply funcref; the others carry an elemkind (0x00) or a reference type.
-        elem_type := WASM_FUNCREF
+        ^elem_type: WASM_FUNCREF
         if flags != 0 && flags != 4 {
             kind_at: section.at
             if uses_exprs -> elem_type = wasm_read_reftype(section) else {
@@ -327,7 +317,7 @@ wasm_decode_elems: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
             }
         }
         item_count: wasm_count(section, WASM_MAX_TABLE, "element items")
-        items := [Int]{}
+        ^items: [Int]{}
         loop _ in 0..<item_count {
             if {
                 uses_exprs -> {
@@ -335,9 +325,7 @@ wasm_decode_elems: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
                     expr: wasm_read_const_expr(section)
                     if {
                         expr.op == WASM_OP_REF_FUNC -> items.push(expr.value)
-                        expr.op == WASM_OP_REF_NULL -> {
-                            items.push(-1)
-                        }
+                        expr.op == WASM_OP_REF_NULL -> { items.push(-1) }
                         else -> {
                             return Err(WasmError.new("element expressions other than ref.func and ref.null are not supported", expr_at))
                         }
@@ -359,10 +347,10 @@ wasm_decode_datas: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
         at: section.at
         flags: section.u32()
         if flags > 2 -> return Err(WasmError.new("malformed data segment flags {flags}", at))
-        memory := 0
+        ^memory: 0
         if flags == 2 -> memory = section.u32()
         mode: if flags == 1 -> WASM_SEGMENT_PASSIVE else -> WASM_SEGMENT_ACTIVE
-        offset := wasm_zero_offset()
+        ^offset: wasm_zero_offset()
         if mode == WASM_SEGMENT_ACTIVE -> offset = wasm_read_const_expr(section)
         length: section.u32()
         bytes: section.slice(length)
@@ -386,7 +374,7 @@ wasm_decode_names: fn(wm: ^WasmModule, section: ^WasmReader) Never! {
         if size > section.end - section.at {
             return
         }
-        sub := WasmReader{bytes: section.bytes, at: section.at, end: section.at + size}
+        ^sub: WasmReader{bytes: section.bytes, at: section.at, end: section.at + size}
         section.at += size
         if {
             id == 0 -> {
@@ -418,7 +406,7 @@ wasm_decode_codes: fn(wm: ^WasmModule, section: ^WasmReader, ops: WasmOpTable) W
         if size > section.end - body_at {
             return Err(WasmError.new("function body size out of bounds", body_at))
         }
-        body := WasmReader{bytes: section.bytes, at: body_at, end: body_at + size}
+        ^body: WasmReader{bytes: section.bytes, at: body_at, end: body_at + size}
         section.at = body_at + size
         code: wasm_decode_body(body, ops, has_data_count)
         wm.codes.push(code)
@@ -427,7 +415,7 @@ wasm_decode_codes: fn(wm: ^WasmModule, section: ^WasmReader, ops: WasmOpTable) W
 
 wasm_decode_body: fn(body: ^WasmReader, ops: WasmOpTable, has_data_count: Bool) -> WasmCode WasmError! {
     groups: wasm_count(body, WASM_MAX_LOCALS, "local declarations")
-    locals := [Int]{}
+    ^locals: [Int]{}
     loop _ in 0..<groups {
         at: body.at
         n: body.u32()
@@ -435,15 +423,15 @@ wasm_decode_body: fn(body: ^WasmReader, ops: WasmOpTable, has_data_count: Bool) 
         ty: wasm_read_valtype(body)
         loop _ in 0..<n -> locals.push(ty)
     }
-    code := WasmCode{locals: locals, op: [Int]{}, a: [Int]{}, b: [Int]{}, at: [Int]{}, tables: [[Int]]{}, start: body.at, end: body.end}
-    depth := 1
+    ^code: WasmCode{locals: locals, op: [Int]{}, a: [Int]{}, b: [Int]{}, at: [Int]{}, tables: [[Int]]{}, start: body.at, end: body.end}
+    ^depth: 1
     loop depth > 0 {
         at: body.at
         if body.done() {
             return Err(WasmError.new("unexpected end of function body: missing `end`", at))
         }
         first: body.byte()
-        op := first
+        ^op: first
         if {
             first == 0xfc -> {
                 sub: body.u32()
@@ -457,8 +445,8 @@ wasm_decode_body: fn(body: ^WasmReader, ops: WasmOpTable, has_data_count: Bool) 
             }
         }
         info: ops.info(op) ?? return Err(wasm_unsupported_opcode(op, at))
-        a := 0
-        b := 0
+        ^a: 0
+        ^b: 0
         imm: info.imm
         if {
             imm == WASM_IMM_BLOCK -> a = wasm_read_block_type(body)
@@ -471,7 +459,7 @@ wasm_decode_body: fn(body: ^WasmReader, ops: WasmOpTable, has_data_count: Bool) 
             }
             imm == WASM_IMM_BR_TABLE -> {
                 n: wasm_count(body, 1000000, "br_table targets")
-                targets := [Int]{}
+                ^targets: [Int]{}
                 loop _ in 0..<n {
                     target: body.u32()
                     targets.push(target)
@@ -503,9 +491,7 @@ wasm_decode_body: fn(body: ^WasmReader, ops: WasmOpTable, has_data_count: Bool) 
                 wasm_read_zero_memory(body)
             }
             imm == WASM_IMM_I32 -> { a = body.signed(32) }
-            imm == WASM_IMM_I64 -> {
-                a = body.signed(64)
-            }
+            imm == WASM_IMM_I64 -> { a = body.signed(64) }
             imm == WASM_IMM_F32 -> { a = body.fixed(4) }
             imm == WASM_IMM_F64 -> {
                 bits: body.fixed(8)

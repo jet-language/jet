@@ -64,20 +64,20 @@ effect_origin_input: fn(module_index: Int, file: String) -> SemaEffectModuleInpu
 }
 
 #Test("effect_diagnostic_origins") {
-    caller := effect_origin_node("main.ceiling", 0)
+    ^caller: effect_origin_node("main.ceiling", 0)
     caller.has_declared_row = true
     caller.declared = [String]{"IO"}
     caller.call_edges = [String]{"worker.inspect"}
     caller.call_targets = [Int]{1}
-    helper := effect_origin_node("worker.inspect", 1)
+    ^helper: effect_origin_node("worker.inspect", 1)
     helper.dispatches = [TEffectSpan]{TEffectSpan{name: "Shape.area", span: Span{start: 30, end: 34}}}
     nodes: [SemaEffectNode]{caller.copy(), helper.copy()}
     // callers[i] lists the nodes that call node i.
     reach: sema_effect_dispatch_reach(nodes, [[Int]]{[Int]{}, [Int]{0}})
     if !reach[0] || !reach[1] -> panic("dispatch reach lost the calling ceiling")
-    inputs := [SemaEffectModuleInput]{effect_origin_input(0, "main.jet"), effect_origin_input(1, "worker.jet")}
-    seen := [Bool]{false, false}
-    visited := [Int]{}
+    ^inputs: [SemaEffectModuleInput]{effect_origin_input(0, "main.jet"), effect_origin_input(1, "worker.jet")}
+    ^seen: [Bool]{false, false}
+    ^visited: [Int]{}
     site: sema_effect_find_dispatch(nodes, reach, 0, seen, visited) ?? panic("transitive dispatch not found")
     if visited.len() != 2 || visited[0] != 0 || visited[1] != 1 {
         panic("dispatch search did not record its visited rows")
@@ -89,10 +89,10 @@ effect_origin_input: fn(module_index: Int, file: String) -> SemaEffectModuleInpu
     if located.source_path != Val("worker.jet") || located.span != Val(site.dispatch.span) {
         panic("foreign dispatch lost its source location")
     }
-    batch := [Diagnostic]{}
-    pure_reached := [String]{}
+    ^batch: [Diagnostic]{}
+    ^pure_reached: [String]{}
     sema_effect_check_node(caller, [String]{"IO"}, false, Val(located), [String]{}, None, [SemaEffectInstanceNote]{}, pure_reached, batch)
-    all := [Diagnostic]{}
+    ^all: [Diagnostic]{}
     sema_effect_publish_diagnostics(all, inputs[0].source_segments, batch)
     if all.len() != 1 || all[0].code != "E0743" || all[0].source_path != Val("worker.jet") {
         panic("publication rebound the foreign dispatch to main")
@@ -109,21 +109,21 @@ effect_origin_input: fn(module_index: Int, file: String) -> SemaEffectModuleInpu
         panic("unknown dispatch origin invented a position")
     }
 
-    bounded := helper
+    ^bounded: helper
     bounded.dispatches = [TEffectSpan]{}
     bounded.declared = [String]{"Net"}
     bounded.has_declared_row = true
-    boundary := [Diagnostic]{}
+    ^boundary: [Diagnostic]{}
     sema_effect_check_node(bounded, [String]{"IO"}, false, None, [String]{}, None, [SemaEffectInstanceNote]{}, pure_reached, boundary)
     inputs[1] = effect_origin_input(1, "worker.jet")
-    boundary_all := [Diagnostic]{}
+    ^boundary_all: [Diagnostic]{}
     sema_effect_publish_diagnostics(boundary_all, inputs[1].source_segments, boundary)
     if boundary_all.len() != 1 || boundary_all[0].code != "E0740" || boundary_all[0].source_path != Val("worker.jet") {
         panic("effect boundary lost its declaring module")
     }
     // Unlocated diagnostics still acquire the declaring module's source;
     // already located foreign diagnostics above must never be rebound.
-    local := [Diagnostic]{}
+    ^local: [Diagnostic]{}
     sema_effect_publish_diagnostics(local, inputs[0].source_segments, [Diagnostic]{sema_effect_unbounded_dispatch_diagnostic(entry_site.dispatch)})
     if local.len() != 1 || local[0].source_path != Val("main.jet") || local[0].span != Val(entry_site.dispatch.span) {
         panic("local effect publication lost its source location")

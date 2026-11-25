@@ -13,7 +13,7 @@ point_key: fn(p: Point, seen: ^String) -> Int Err! {
 }
 
 names: fn(points: [Point]) -> String Never! {
-    out := ""
+    ^out: ""
     loop p in points -> out += p.name
     out
 }
@@ -21,20 +21,20 @@ names: fn(points: [Point]) -> String Never! {
 unit: fn() {}
 
 view: fn() -> String {
-    points := [Point{x: 3, name: "c"}, Point{x: 1, name: "a"}, Point{x: 2, name: "b"}]
-    seen := ""
+    ^points: [Point{x: 3, name: "c"}, Point{x: 1, name: "a"}, Point{x: 2, name: "b"}]
+    ^seen: ""
     points.sort_by(fn(p: Point) { point_key(p, seen) }) ?? {
         seen += "!{err.code}"
         unit()
     }
-    stopped := [Point{x: 5, name: "e"}, Point{x: -1, name: "z"}, Point{x: 4, name: "d"}]
-    tried := ""
-    failure := ""
+    ^stopped: [Point{x: 5, name: "e"}, Point{x: -1, name: "z"}, Point{x: 4, name: "d"}]
+    ^tried: ""
+    ^failure: ""
     stopped.sort_by(fn(p: Point) { point_key(p, tried) }) ?? {
         failure = "{err.code}:{err.message}"
         unit()
     }
-    tally := Tally<String>.new()
+    ^tally: Tally<String>.new()
     loop p in stopped -> tally.add(p.name)
     tally.add("e")
     return "{names(points)} after {seen}|{names(stopped)} after {tried}, {failure}|{"  core  ".trim()}|{tally.len()}|{tally.count("e")}"

@@ -24,20 +24,20 @@ Gate: struct {
 run: fn() {
     { sender: wake, receiver: hold }: channel<Int>()
     { sender: ready, receiver: started }: channel<Int>()
-    owned := Res{name: "unstarted"}
+    ^owned: Res{name: "unstarted"}
     outer: task ^^owned {
         task.group limited(limit: 1) {
             blocker: task {
-                _ := hold.receive() ?? 0
+                ^_: hold.receive() ?? 0
             }
-            gate := Gate{wake: wake}
+            ^gate: Gate{wake: wake}
             ready.send(1)
             late: task ^^owned {
                 owned.name.len()
             }
         }
     }
-    _ := started.receive() ?? 0
+    ^_: started.receive() ?? 0
     outer.cancel()
     if outer.join() == {
         .Err(_) -> { print("outer stopped") }

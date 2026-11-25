@@ -1,9 +1,9 @@
 use db: core.db
 
 run: fn() {
-    conn := db.open_memory()
+    ^conn: db.open_memory()
     policy: db.policy("blobs", "true") ?? panic("policy")
-    scoped := conn.with_policy(policy, "alice")
+    ^scoped: conn.with_policy(policy, "alice")
     _created: db.migrate(
         scoped,
         "blobs-v1",

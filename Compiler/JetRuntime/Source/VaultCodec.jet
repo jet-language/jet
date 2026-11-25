@@ -94,9 +94,7 @@ vault_error_drop: fn(error: I64) {
 
 // The Core VaultError record ABI (IR_GENERATED_RECORDS): its variant index,
 // owned member getters (Crypto as its CryptoError index), clone and drop.
-#Export(c) jet_rt_record_tag_core_vault_error: fn(value: I64) -> I64 {
-    vault_error_tag(value)
-}
+#Export(c) jet_rt_record_tag_core_vault_error: fn(value: I64) -> I64 { vault_error_tag(value) }
 
 #Export(c) jet_rt_record_get_core_vault_error_crypto: fn(value: I64) -> I64 {
     rt_text_word(wrapping(value + VAULT_ERROR_FIRST))
@@ -114,13 +112,9 @@ vault_error_drop: fn(error: I64) {
     jet_rt_string_clone(rt_text_word(wrapping(value + VAULT_ERROR_FIRST)))
 }
 
-#Export(c) jet_rt_handle_clone_core_vault_error: fn(value: I64) -> I64 {
-    vault_error_clone(value)
-}
+#Export(c) jet_rt_handle_clone_core_vault_error: fn(value: I64) -> I64 { vault_error_clone(value) }
 
-#Export(c) jet_rt_handle_drop_core_vault_error: fn(value: I64) {
-    vault_error_drop(value)
-}
+#Export(c) jet_rt_handle_drop_core_vault_error: fn(value: I64) { vault_error_drop(value) }
 
 vault_error_equal: fn(left: I64, right: I64) -> Bool {
     kind: vault_error_tag(left)
@@ -266,7 +260,7 @@ vault_payload_hash: fn(payload: I64, length: I64, digest: I64, scratch: I64) {
 VAULT_PAIR_BYTES: I64{16}
 
 vault_utf8_valid: fn(data: I64, length: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         width: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
         if (width <= I64{0}) { return false }
@@ -289,8 +283,8 @@ vault_put_u32: fn(target: I64, value: I64) {
 vault_encode_pairs: fn(pairs: I64) -> I64 {
     count: rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA))
-    length := I64{4}
-    at := I64{0}
+    ^length: I64{4}
+    ^at: I64{0}
     loop at < count {
         pair: data + at * VAULT_PAIR_BYTES
         key: rt_text_word(pair)
@@ -306,7 +300,7 @@ vault_encode_pairs: fn(pairs: I64) -> I64 {
     result: rt_text_builder_with_capacity(length)
     output: rt_text_data(result)
     vault_put_u32(output, count)
-    cursor := I64{4}
+    ^cursor: I64{4}
     at = I64{0}
     loop at < count {
         pair: data + at * VAULT_PAIR_BYTES
@@ -331,7 +325,7 @@ vault_encode_pairs: fn(pairs: I64) -> I64 {
 vault_text_zero: fn(value: I64) {
     data: rt_text_data(value)
     capacity: rt_text_word(wrapping(value + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < capacity {
         rt_text_put(wrapping(data + at), I64{0})
         at += I64{1}
@@ -344,7 +338,7 @@ vault_pairs_drop: fn(pairs: I64) {
     }
     count: rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         pair: wrapping(data + at * VAULT_PAIR_BYTES)
         key: rt_text_word(pair)
@@ -366,10 +360,10 @@ vault_decode_pairs: fn(bytes: I64, length: I64) -> I64 {
     if (length < I64{4}) { return I64{0} }
     count: vault_u32(bytes)
     if (count > (length - I64{4}) / I64{8}) { return I64{0} }
-    at := I64{4}
-    index := I64{0}
+    ^at: I64{4}
+    ^index: I64{0}
     loop index < count {
-        field := I64{0}
+        ^field: I64{0}
         loop {
             if (field == I64{2}) { break }
             if (length - at < I64{4}) { return I64{0} }
@@ -431,25 +425,25 @@ vault_record_compare: fn(left: I64, right: I64) -> I64 {
 // records/key buffers are never copied. Caller lends two count-word scratch
 // arrays; count is bounded by the codec.
 vault_sorted_indices: fn(data: I64, count: I64, records: Bool, first: I64, second: I64) -> I64 {
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         item: if records -> rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES)) else -> data + at * VAULT_PAIR_BYTES
         rt_text_store(wrapping(first + at * DYN_ELEMENT_BYTES), item)
         at += I64{1}
     }
-    source := first
-    target := second
-    width := I64{1}
+    ^source: first
+    ^target: second
+    ^width: I64{1}
     loop width < count {
-        start := I64{0}
+        ^start: I64{0}
         loop start < count {
             middle: if start + width < count -> start + width else -> count
             end: if (start + width * I64{2} < count) -> start + width * I64{2} else -> count
-            left := start
-            right := middle
-            out := start
+            ^left: start
+            ^right: middle
+            ^out: start
             loop out < end {
-                use_left := right == end
+                ^use_left: right == end
                 if left < middle && right < end {
                     a: rt_text_word(wrapping(source + left * DYN_ELEMENT_BYTES))
                     b: rt_text_word(wrapping(source + right * DYN_ELEMENT_BYTES))
@@ -497,7 +491,7 @@ vault_id_nodes_drop: fn(nodes: I64, count: I64) {
 }
 
 vault_id_compare: fn(left: I64, right: I64) -> I64 {
-    at := I64{0}
+    ^at: I64{0}
     loop {
         if (at == I64{16}) { break }
         a: rt_text_byte(wrapping(wrapping(left + VAULT_RECORD_OPAQUE) + at))
@@ -569,7 +563,7 @@ vault_group_end: fn(records: I64, count: I64, start: I64) -> I64 {
     first: rt_text_word(wrapping(records + start * DYN_ELEMENT_BYTES))
     key_type: rt_text_word(wrapping(first + VAULT_RECORD_TYPE))
     name: rt_text_word(wrapping(first + VAULT_RECORD_NAME))
-    end := start + I64{1}
+    ^end: start + I64{1}
     loop end < count {
         row: rt_text_word(wrapping(records + end * DYN_ELEMENT_BYTES))
         if rt_text_word(wrapping(row + VAULT_RECORD_TYPE)) != key_type -> break
@@ -580,7 +574,7 @@ vault_group_end: fn(records: I64, count: I64, start: I64) -> I64 {
 }
 
 vault_write_origin: fn(buffer: I64, cursor: I64, origin: I64) -> I64 {
-    at := cursor
+    ^at: cursor
     if (origin == I64{0}) {
         end: at + I64{75}
         loop at < end {
@@ -608,7 +602,7 @@ vault_write_origin: fn(buffer: I64, cursor: I64, origin: I64) -> I64 {
 }
 
 vault_write_record: fn(buffer: I64, cursor: I64, record: I64) -> I64 {
-    at := cursor
+    ^at: cursor
     rt_text_put(wrapping(buffer + at), rt_text_word(wrapping(record + VAULT_RECORD_TYPE)))
     rt_text_put(wrapping(wrapping(buffer + at) + I64{1}), rt_text_word(wrapping(record + VAULT_RECORD_STATUS)))
     rt_text_put(wrapping(wrapping(buffer + at) + I64{2}), rt_text_word(wrapping(record + VAULT_RECORD_PROVENANCE)))
@@ -644,13 +638,13 @@ vault_write_record: fn(buffer: I64, cursor: I64, record: I64) -> I64 {
 // No output owner is allocated until validation succeeds; caller scratch/index
 // owners are always released by the outer function, including on every error.
 vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: I64, record_count: I64, nodes: I64, scratch: I64, output: I64) -> I64 {
-    names := I64{0}
-    at := I64{0}
+    ^names: I64{0}
+    ^at: I64{0}
     loop at < record_count {
         end: vault_group_end(records, record_count, at)
-        active_count := I64{0}
-        current := I64{0}
-        index := at
+        ^active_count: I64{0}
+        ^current: I64{0}
+        ^index: at
         loop index < end {
             record: rt_text_word(wrapping(records + index * DYN_ELEMENT_BYTES))
             generation: rt_text_word(wrapping(record + VAULT_RECORD_GENERATION))
@@ -666,8 +660,8 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
         at = end
     }
     if names > VAULT_MAX_NAMES -> return I64{8}
-    length := I64{44}
-    previous := I64{0}
+    ^length: I64{44}
+    ^previous: I64{0}
     at = I64{0}
     loop at < string_count {
         pair: rt_text_word(wrapping(strings + at * DYN_ELEMENT_BYTES))
@@ -691,7 +685,7 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
         length += I64{19} + rt_text_len(name)
         at = vault_group_end(records, record_count, at)
     }
-    id_root := I64{0}
+    ^id_root: I64{0}
     at = I64{0}
     loop at < record_count {
         record: rt_text_word(wrapping(records + at * DYN_ELEMENT_BYTES))
@@ -722,7 +716,7 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
     vault_put_u32(wrapping(buffer + I64{32}), string_count)
     vault_put_u32(wrapping(buffer + I64{36}), names)
     vault_put_u32(wrapping(buffer + I64{40}), record_count)
-    cursor := I64{44}
+    ^cursor: I64{44}
     at = I64{0}
     loop at < string_count {
         pair: rt_text_word(wrapping(strings + at * DYN_ELEMENT_BYTES))
@@ -746,8 +740,8 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
         first: rt_text_word(wrapping(records + at * DYN_ELEMENT_BYTES))
         name: rt_text_word(wrapping(first + VAULT_RECORD_NAME))
         name_length: rt_text_len(name)
-        current := I64{0}
-        index := at
+        ^current: I64{0}
+        ^index: at
         loop index < end {
             row: rt_text_word(wrapping(records + index * DYN_ELEMENT_BYTES))
             if (rt_text_word(wrapping(row + VAULT_RECORD_STATUS)) == I64{1}) {
@@ -821,8 +815,8 @@ vault_take_bytes: fn(cursor: I64, count: I64) -> I64 {
 vault_take_uint: fn(cursor: I64, width: I64) -> I64 {
     bytes: vault_take_bytes(cursor, width)
     if (bytes == I64{0}) { return I64{0} }
-    at := I64{0}
-    value := I64{0}
+    ^at: I64{0}
+    ^value: I64{0}
     loop at < width {
         value |= (rt_text_byte(wrapping(bytes + at)) << (at * I64{8}))
         at += I64{1}
@@ -849,8 +843,8 @@ vault_take_text: fn(cursor: I64, width: I64, maximum: I64) -> I64 {
 vault_decode_strings: fn(cursor: I64, count: I64) -> I64 {
     pairs: data_sequence_new(count, VAULT_PAIR_BYTES)
     data: rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA))
-    previous := I64{0}
-    at := I64{0}
+    ^previous: I64{0}
+    ^at: I64{0}
     loop at < count {
         name: vault_take_text(cursor, I64{2}, I64{128})
         if (name == I64{0}) { break }
@@ -887,7 +881,7 @@ vault_groups_drop: fn(groups: I64) {
     if (groups == I64{0}) {
         return
     }
-    at := I64{0}
+    ^at: I64{0}
     count: rt_text_word(wrapping(groups + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(groups + DATA_SEQUENCE_DATA))
     loop at < count {
@@ -902,9 +896,9 @@ vault_groups_drop: fn(groups: I64) {
 vault_decode_groups: fn(cursor: I64, count: I64) -> I64 {
     groups: data_sequence_new(count, VAULT_GROUP_BYTES)
     data: rt_text_word(wrapping(groups + DATA_SEQUENCE_DATA))
-    previous := I64{0}
-    previous_tag := I64{0}
-    at := I64{0}
+    ^previous: I64{0}
+    ^previous_tag: I64{0}
+    ^at: I64{0}
     loop at < count {
         key_tag: vault_take_uint(cursor, I64{1})
         name: vault_take_text(cursor, I64{2}, I64{128})
@@ -1003,7 +997,7 @@ vault_decode_record: fn(cursor: I64, previous: I64) -> I64 {
         return I64{0}
     }
     generation: vault_take_uint(cursor, I64{8})
-    ordered := true
+    ^ordered: true
     if (previous != I64{0}) {
         prior_tag: rt_text_word(wrapping(previous + VAULT_RECORD_TYPE))
         compare: jet_rt_string_compare(rt_text_word(wrapping(previous + VAULT_RECORD_NAME)), name)
@@ -1053,14 +1047,14 @@ vault_decode_record: fn(cursor: I64, previous: I64) -> I64 {
 vault_decode_records: fn(cursor: I64, count: I64, nodes: I64, scratch: I64) -> I64 {
     records: data_sequence_new(count, DYN_ELEMENT_BYTES)
     data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
-    previous := I64{0}
-    root := I64{0}
-    at := I64{0}
+    ^previous: I64{0}
+    ^root: I64{0}
+    ^at: I64{0}
     loop at < count {
         record: vault_decode_record(cursor, previous)
         if (record == I64{0}) { break }
         key_tag: rt_text_word(wrapping(record + VAULT_RECORD_TYPE))
-        error := I64{8}
+        ^error: I64{8}
         if ((key_tag == I64{1} || key_tag == I64{2}) && !vault_bytes_zero(wrapping(record + VAULT_RECORD_OPAQUE), I64{16})) {
             node: vault_id_node(nodes, at, record)
             root = vault_id_insert(root, node)
@@ -1090,8 +1084,8 @@ vault_groups_cover_records: fn(groups: I64, records: I64) -> Bool {
     data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
     group_count: rt_text_word(wrapping(groups + DATA_SEQUENCE_LENGTH))
     group_data: rt_text_word(wrapping(groups + DATA_SEQUENCE_DATA))
-    group_index := I64{0}
-    at := I64{0}
+    ^group_index: I64{0}
+    ^at: I64{0}
     loop group_index < group_count {
         if at == count -> return false
         group: wrapping(group_data + group_index * VAULT_GROUP_BYTES)
@@ -1104,9 +1098,9 @@ vault_groups_cover_records: fn(groups: I64, records: I64) -> Bool {
         current: rt_text_word(wrapping(group + I64{16}))
         latest: rt_text_word(wrapping(group + I64{24}))
         if latest != end - at -> return false
-        active_count := I64{0}
-        active_generation := I64{0}
-        index := at
+        ^active_count: I64{0}
+        ^active_generation: I64{0}
+        ^index: at
         loop index < end {
             record: rt_text_word(wrapping(data + index * DYN_ELEMENT_BYTES))
             generation: rt_text_word(wrapping(record + VAULT_RECORD_GENERATION))
@@ -1156,7 +1150,7 @@ vault_decode_v2: fn(bytes: I64, length: I64, output: I64) -> I64 {
     groups: if (pairs == I64{0}) -> I64{0} else -> vault_decode_groups(cursor, name_count)
     nodes: if (groups == I64{0}) -> I64{8} else -> vault_id_nodes_new(record_count)
     records: if (groups == I64{0}) -> I64{0} else -> vault_decode_records(cursor, record_count, nodes, scratch)
-    error := rt_text_word(wrapping(cursor + I64{24}))
+    ^error: rt_text_word(wrapping(cursor + I64{24}))
     if (error == I64{-1}) {
         if rt_text_word(wrapping(cursor + I64{16})) != payload_length || !vault_groups_cover_records(groups, records) {
             error = I64{8}

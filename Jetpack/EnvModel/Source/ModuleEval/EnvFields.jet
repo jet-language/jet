@@ -127,7 +127,7 @@ envmodel_evaluate_env_contribution: fn(value: Expr, src: String, scope: ModuleEv
             if type_name != "" && type_name != TYPE_ENV {
                 return Err(envmodel_wrong_namespace_type(TYPE_ENV, type_name, expr_span(value)))
             }
-            named := [NamedExpr]{}
+            ^named: [NamedExpr]{}
             loop field in fields {
                 named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
             }
@@ -145,14 +145,14 @@ envmodel_evaluate_env_contribution: fn(value: Expr, src: String, scope: ModuleEv
 // generated. A headless record a field types (a prompt, a language, a
 // preset, a file) is passed through that type's `envmodel_expect_*`.
 envmodel_plan_env_fields: fn(plan: ^EnvValueProgram, fields: [NamedExpr], globals: [String:CtValue]) EnvModelEvalError! {
-    siblings := [String:String]{}
+    ^siblings: [String:String]{}
     loop field in fields {
         kind: EnvFieldKind.classify(field.name)
         if !kind.is_computed() || siblings.get(field.name) != None -> next
         one_value: (kind == EnvFieldKind.Prompt && envmodel_value_headless_record(field.value)) || !envmodel_value_structural(field.value)
         siblings[field.name] = if one_value -> envmodel_value_name(plan) else -> ""
     }
-    planned := [String:Bool]{}
+    ^planned: [String:Bool]{}
     loop field in fields {
         kind: EnvFieldKind.classify(field.name)
         if kind == EnvFieldKind.Packages -> next
@@ -188,7 +188,7 @@ envmodel_plan_env_contribution: fn(plan: ^EnvValueProgram, value: Expr, globals:
         if type_name != "" && type_name != TYPE_ENV {
             return
         }
-        named := [NamedExpr]{}
+        ^named: [NamedExpr]{}
         loop field in fields {
             named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
         }
@@ -199,7 +199,7 @@ envmodel_plan_env_contribution: fn(plan: ^EnvValueProgram, value: Expr, globals:
 // Each field is lowered with the values computed for it (envmodel_value_of):
 // a sibling read was resolved by the compiler, in any declaration order.
 envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String:CtValue], source: String) -> EnvCapture EnvModelEvalError! {
-    capture := EnvCapture{
+    ^capture: EnvCapture{
         entry: EntryContribution{packages: [Pkg]{}, settings: [String:[FactContribution]]{}},
         secrets: [SecretSpec]{},
         adapters: [AdapterPlan]{},
@@ -265,19 +265,19 @@ envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope) -> CtV
         .Ident(name, _, _) -> Ok(CtValue.Str{value: name})
         .Field(_, _, _, _) -> Ok(CtValue.Str{value: envmodel_expression_name(expr)})
         .ListLit(values, _, _) -> {
-            items := [CtValue]{}
+            ^items: [CtValue]{}
             loop value in values { items.push(envmodel_evaluate_lifecycle_value(value, scope)) }
             Ok(CtValue.List{values: items})
         }
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
-            lowered := [NamedCtValue]{}
+            ^lowered: [NamedCtValue]{}
             loop field in fields {
                 lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_lifecycle_value(field.value, scope)})
             }
             Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
         .EnumLit(type_name, variant, _, args, _, _, _) -> {
-            lowered := [CtEnumArg]{}
+            ^lowered: [CtEnumArg]{}
             loop arg in args {
                 if arg == {
                     .Positional(value) -> {
@@ -291,7 +291,7 @@ envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope) -> CtV
             Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
         }
         .MapLit(entries, _, _) -> {
-            lowered := [CtMapEntry]{}
+            ^lowered: [CtMapEntry]{}
             loop entry in entries {
                 key_value: envmodel_evaluate_lifecycle_value(entry.key, scope)
                 key: envmodel_scalar_ct_key(key_value) ?? return Err(envmodel_error("E1333", "lifecycle map keys must be deterministic scalar values", "lifecycle records are captured as stable plan facts", "use a string, integer, boolean, or character key", Val(expr_span(expr))))
@@ -403,7 +403,7 @@ envmodel_capture_prompt_setting: fn(entry: ^EntryContribution, value: Expr, scop
     evaluated: envmodel_value_of(value, scope)
     record: envmodel_unparen_record(value)
     if record == .StructLit(type_name, _, _, _, fields, _, _, _) && (type_name == "" || type_name == TYPE_PROMPT) {
-        checked := [String:CtValue]{}
+        ^checked: [String:CtValue]{}
         if evaluated == .Struct(_, values) {
             loop named in values -> checked[named.name] = named.value
         }
@@ -432,7 +432,7 @@ envmodel_capture_prompt_setting: fn(entry: ^EntryContribution, value: Expr, scop
 
 // Record one environment-layer text fact written by `{source}.{key}`.
 envmodel_record_setting: fn(entry: ^EntryContribution, key: String, value: String, span: Span, source: String) Never! {
-    writers := entry.settings.get(key) ?? [FactContribution]{}
+    ^writers: entry.settings.get(key) ?? [FactContribution]{}
     writers.push(FactContribution.new(key, FactValue.Text{value: value}, SourceScope.Item, ContributionLayer.Environment, "{source}.{key}").at(span))
     entry.settings[key] = writers
 }

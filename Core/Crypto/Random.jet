@@ -28,14 +28,14 @@ bytes: fn(n: Int) -[Rand]> [U8] CryptoError! {
 
 u32: fn() -[Rand]> U32 CryptoError! {
     b: bytes(4) ?? return Err(.Unavailable)
-    n := 0
+    ^n: 0
     loop x in b -> n = n * 256 + Int{x}
     Ok(U32{n})
 }
 
 u64: fn() -[Rand]> U64 CryptoError! {
     b: bytes(8) ?? return Err(.Unavailable)
-    n := 0
+    ^n: 0
     loop x in b -> n = n * 256 + Int{x}
     Ok(U64{n})
 }
@@ -51,7 +51,7 @@ int_range: fn(lo: Int, hi: Int) -[Rand]> Int CryptoError! {
     // A hostile or wedged provider must not turn rejection sampling into an
     // unbounded wait. 128 draws leaves a negligible false-rejection chance
     // for the accepted range sizes while preserving fail-closed behavior.
-    attempts := 0
+    ^attempts: 0
     loop {
         if attempts >= 128 -> return Err(.Unavailable)
         attempts += 1
@@ -62,14 +62,14 @@ int_range: fn(lo: Int, hi: Int) -[Rand]> Int CryptoError! {
 
 random_word64: fn() -[Rand]> Int CryptoError! {
     b: bytes(8) ?? return Err(.Unavailable)
-    n := 0
+    ^n: 0
     loop x in b -> n = n * 256 + (Int{x})
     n
 }
 
 token_hex: fn(n: Int) -[Rand]> String CryptoError! {
     b: bytes(n)
-    s := ""
+    ^s: ""
     loop x in b {
         d: Int{x}
         hi: d /% 16
@@ -83,8 +83,8 @@ token_urlsafe: fn(n: Int) -[Rand]> String CryptoError! {
     b: bytes(n)
     alphabet: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
     raw: alphabet.bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i + 3 <= b.len() {
         v: (((Int{b[i]} << 16)) | (Int{b[i + 1]} << 8)) | Int{b[i + 2]}
         out.push(raw[((v >> 18)) & 63])
@@ -148,10 +148,10 @@ randbits: fn(k: Int) -[Rand]> Int CryptoError! {
     if k < 0 || k > 8388608 -> return Err(.Length)
     if k == 0 -> return Ok(0)
     width: (k + 7) /% 8
-    b := bytes(width) ?? return Err(.Unavailable)
+    ^b: bytes(width) ?? return Err(.Unavailable)
     excess: width * 8 - k
     if excess > 0 -> b[0] = (U8{(Int{b[0]}) & (255 >> excess)})
-    out := 0
+    ^out: 0
     loop x in b -> out = ((out << 8)) | Int{x}
     Ok(out)
 }
@@ -165,16 +165,16 @@ choice_int: fn(items: [Int]) -[Rand]> Int CryptoError! {
 }
 
 shuffle_ints: fn(items: [Int]) -[Rand]> [Int] CryptoError! {
-    out := [Int]{}
+    ^out: [Int]{}
     loop x in items -> out.push(x)
-    i := out.len()
+    ^i: out.len()
     loop i > 1 {
         i -= 1
         j: int_range(0, i + 1) ?? return Err(.Unavailable)
-        a := out[i]
-        b := out[j]
-        tmp := [Int]{}
-        k := 0
+        ^a: out[i]
+        ^b: out[j]
+        ^tmp: [Int]{}
+        ^k: 0
         loop k < out.len() {
             if {
                 k == i -> { tmp.push(b) }

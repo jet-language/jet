@@ -15,7 +15,7 @@ use {
 
 count_lines: fn(src: String) -> Int IOError! {
     handle: files.open(src.copy())
-    n := 0
+    ^n: 0
     loop _ in handle.lines() -> n += 1
     return Ok(n)
 }
@@ -34,7 +34,7 @@ run: fn() {
         producer.join() ?? panic("producer failed")
 
         // The timer never ends by itself; the consumer owns the bound.
-        seen := 0
+        ^seen: 0
         loop _tick in tasks.interval(1ms) {
             seen += 1
             if seen == 3 -> break

@@ -48,7 +48,7 @@ provider_read_devshell_output_facts: fn(flake_dir: String, fixtures: String?, ou
         }
         .None -> {}
     }
-    flake_path := ""
+    ^flake_path: ""
     foreign_files: [String]{FOREIGN_FLAKE_FILE, FOREIGN_DEVENV_FILE}
     loop name in foreign_files {
         candidate: files.join(flake_dir, name)
@@ -75,7 +75,7 @@ provider_projection_error: fn(reason: String) -> ProviderError Never! {
 }
 
 provider_devshell_facts_from: fn(evaluation: NixEvalDevShell) -> DevShellFacts Never! {
-    unmapped := evaluation.unsupported
+    ^unmapped: evaluation.unsupported
     loop package in evaluation.cross_packages -> unmapped.push("cross-package:{package}")
     DevShellFacts{packages: evaluation.packages, unmapped: unmapped}
 }
@@ -154,7 +154,7 @@ provider_normalize_authority_path: fn(raw: String) -> String NixEvalError! {
     if raw.contains("\\") || raw.bytes().contains(U8{0}) || raw.starts_with("/") {
         return Err(denied)
     }
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in raw.split("/") {
         if part == "" -> next
         if part == "." || part == ".." -> return Err(denied)
@@ -230,8 +230,8 @@ provider_fetch_hash_hex: fn(value: String) -> String NixEvalError! {
 provider_parse_facts_json: fn(text: String) -> DevShellFacts ProviderError! {
     parsed: provider_json_parse_lenient(text)
     object: provider_json_object(parsed.value) ?? return Err(parsed.bad_output(err.message))
-    packages := [String]{}
-    package_field_seen := false
+    ^packages: [String]{}
+    ^package_field_seen: false
     package_fields: [String]{"packages", "buildInputs", "nativeBuildInputs"}
     loop field in package_fields {
         value: object.get(field) ?? next
@@ -245,7 +245,7 @@ provider_parse_facts_json: fn(text: String) -> DevShellFacts ProviderError! {
     if !package_field_seen {
         return Err(parsed.bad_output("missing one of `packages`, `buildInputs`, or `nativeBuildInputs`"))
     }
-    unmapped := [String]{}
+    ^unmapped: [String]{}
     hook_value: object.get("shellHook") ?? return Err(parsed.bad_output("missing key `shellHook`"))
     hook: provider_json_string(hook_value) ?? return Err(parsed.bad_output(err.message))
     if hook.trim() != "" -> unmapped.push("shellHook")
@@ -278,7 +278,7 @@ provider_l0204_unmappable: fn(field: String, file: String) -> Diagnostic Never! 
 // graph to `.jet/lock`, print the shim to stdout and one L0204 warning per
 // unmapped field to stderr. Returns the exit code.
 provider_cmd_flake: fn(theme: Theme, dir: String, fixtures: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
-    flake_path := ""
+    ^flake_path: ""
     foreign_files: [String]{FOREIGN_FLAKE_FILE, FOREIGN_DEVENV_FILE}
     loop name in foreign_files {
         candidate: files.join(dir, name)
@@ -288,7 +288,7 @@ provider_cmd_flake: fn(theme: Theme, dir: String, fixtures: String?) -[IO, FS, E
         theme.error("no foreign flake here", "`jet os bridge flake` translates `{FOREIGN_FLAKE_FILE}` or `{FOREIGN_DEVENV_FILE}` in the current directory; neither was found.", "run this from the directory that has the foreign file, or write env.* by hand.")
         return 2
     }
-    facts := if provider_read_devshell_facts(dir, fixtures) == {
+    ^facts: if provider_read_devshell_facts(dir, fixtures) == {
         .Ok(found) -> found
         .Err(error) -> {
             error.report(theme)
@@ -298,7 +298,7 @@ provider_cmd_flake: fn(theme: Theme, dir: String, fixtures: String?) -[IO, FS, E
     // The bridge consumes the same typed foreign graph as `.jet/lock`. The
     // bounded translation stays usable when the graph carries unsupported
     // fields, but every known projection loss is surfaced.
-    graph := if FlakeGraph.load(flake_path) == {
+    ^graph: if FlakeGraph.load(flake_path) == {
         .Ok(loaded) -> loaded
         .Err(error) -> {
             theme.error("couldn't load the foreign graph", error.message(), "refresh the semantic lock after confirming the flake source is correct.")
@@ -313,7 +313,7 @@ provider_cmd_flake: fn(theme: Theme, dir: String, fixtures: String?) -[IO, FS, E
     facts.packages = provider_sorted_unique(facts.packages)
     file: files.basename(flake_path)
     loop field in unmapped {
-        stderr_handle := term.stderr()
+        ^stderr_handle: term.stderr()
         stderr_handle.write(diagnostic_render_all(file, "", [Diagnostic]{provider_l0204_unmappable(field, file)}, false)).drop("warnings are best-effort output")
     }
     facts.unmapped = unmapped
@@ -339,7 +339,7 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
             return Val(1)
         }
     }
-    derivations := [{name: String, system: String, derivation: NixNativeDerivation}]{}
+    ^derivations: [{name: String, system: String, derivation: NixNativeDerivation}]{}
     loop output in graph.outputs {
         if output.kind != FlakeOutputKind.Package -> next
         if output.system == "" {
@@ -371,7 +371,7 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
         }
     }
     default_facts: facts.copy()
-    shells := [{name: String, facts: DevShellFacts}]{}
+    ^shells: [{name: String, facts: DevShellFacts}]{}
     loop output in graph.named_dev_shells() {
         if output.system != system -> next
         if output.attribute == "default" {
@@ -421,7 +421,7 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
         if !graph.unsupported.contains(field) -> graph.unsupported.push(field.copy())
     }
     graph.unsupported = provider_sorted_unique(graph.unsupported)
-    lock := graph.semantic_lock()
+    ^lock: graph.semantic_lock()
     lock.records.push(provider_evaluator_record("flake-evaluator", evaluator, system, flake_path, "bounded native devShell and derivation evaluation identity"))
     loop entry in inventory {
         exact: "status={entry.status.label()};class={entry.class.label()};reason={entry.reason}"
@@ -433,7 +433,7 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
             loss: "derivation output {built.name} has no out path"
             if !facts.unmapped.contains(loss) -> facts.unmapped.push(loss)
         }
-        rendered := [String]{}
+        ^rendered: [String]{}
         loop name in provider_sorted_keys(outputs) -> rendered.push("{name}={outputs[name]}")
         exact: "drvPath={built.derivation.drv_path};{rendered.join(";")}"
         lock.records.push(provider_evaluator_record("flake-derivation:{built.name}", exact, built.system, flake_path, "bounded package derivation identity"))
@@ -454,7 +454,7 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
 // One `flake-evaluator` record: the exact text and its SHA-256 on `platform`,
 // explained by the native evaluator.
 provider_evaluator_record: fn(key: String, exact: String, platform: String, flake_path: String, reason: String) -> SemanticRecord Never! {
-    rationale := LockRationale.empty()
+    ^rationale: LockRationale.empty()
     rationale.source_ref = flake_path
     rationale.provider = "native-nix-evaluator"
     rationale.exact_output = exact

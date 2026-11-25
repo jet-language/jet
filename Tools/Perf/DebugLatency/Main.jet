@@ -189,7 +189,7 @@ LATENCY_IMAGE: "out/prog"
 // The program: N functions of five lines each (the last one blank), then
 // `run`, which calls each in turn, then the tail (latency_run_tail).
 latency_program: fn(functions: Int) -> String Never! {
-    lines := latency_functions(functions)
+    ^lines: latency_functions(functions)
     lines.push("run: fn() {{")
     lines.push("    total := 0")
     loop index in 0..<functions -> lines.push("    total = f_{index}(total)")
@@ -228,7 +228,7 @@ latency_tally_line: fn(program: String) -> Int Never! {
 
 // The N functions, five lines each (the last one blank).
 latency_functions: fn(functions: Int) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop index in 0..<functions {
         lines.push("f_{index}: fn(x: Int) -> Int {{")
         lines.push("    y: x + {index}")
@@ -242,7 +242,7 @@ latency_functions: fn(functions: Int) -> [String] Never! {
 // `--stop nested`'s entry: `run` calls `outer` (latency_nested_lib), then
 // each of the N functions in turn, then the tail (latency_run_tail).
 latency_nested_program: fn(functions: Int) -> String Never! {
-    lines := [String]{"run: fn() {{", "    total := 0", "    total = outer(total)"}
+    ^lines: [String]{"run: fn() {{", "    total := 0", "    total = outer(total)"}
     loop index in 0..<functions -> lines.push("    total = f_{index}(total)")
     lines.extend(latency_run_tail())
     lines.join("\n")
@@ -252,7 +252,7 @@ latency_nested_program: fn(functions: Int) -> String Never! {
 // which calls `inner`, whose `total` is its own local; the stop is
 // `inner`'s first call.
 latency_nested_lib: fn(functions: Int) -> String Never! {
-    lines := latency_functions(functions)
+    ^lines: latency_functions(functions)
     lines.push("outer: fn(x: Int) -> Int {{")
     lines.push("    inner(x + 1)")
     lines.push("}}")
@@ -293,7 +293,7 @@ latency_break_line: fn(functions: Int, nested: Bool{false}) -> Int Never! {
 // The middle of `values` in order.
 latency_median: fn(values: [Int]) -> Int Never! {
     if values.len() == 0 -> return 0
-    sorted := values.copy()
+    ^sorted: values.copy()
     sorted.sort()
     sorted[sorted.len() /% 2]
 }
@@ -320,7 +320,7 @@ latency_time: fn(argv: [String], work: String, input: String, stopped: String) -
 
 // The median of `runs` timings of `argv`.
 latency_median_time: fn(argv: [String], work: String, input: String, stopped: String, runs: Int) -[Exec, Time, Time.Wait]> Int Err! {
-    times := [Int]{}
+    ^times: [Int]{}
     loop _ in 0..<runs -> times.push(latency_time(argv, work, input, stopped) ?? return Err(err))
     Ok(latency_median(times))
 }
@@ -372,7 +372,7 @@ latency_ask: fn(child: ProcessChild, command: String, until: LatencyUntil) -[Exe
     if command != "" {
         child.stdin.write(command) ?? return Err("couldn't send `{command.trim()}`: {err}")
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         us: time.elapsed(watch).ns /% 1000
         // A read may end inside a UTF-8 sequence; the next completes it.
@@ -407,8 +407,8 @@ latency_lldb_ask: fn(child: ProcessChild, command: String, marker: String, count
 // The process under the debugger `pid` (its child, or a child's child)
 // running the image, if there is one.
 latency_target_pid: fn(pid: Int) -[FS]> Int? Never! {
-    pending := [Int]{pid}
-    at := 0
+    ^pending: [Int]{pid}
+    ^at: 0
     loop at < pending.len() {
         current: pending[at]
         at += 1
@@ -480,7 +480,7 @@ latency_jet_session: fn(options: LatencyOptions, work: String, tally: Int) -[Exe
 }
 
 latency_jet_drive: fn(child: ProcessChild, steps: Int, file: String, line: Int, tally: Int) -[Exec, FS, Time]> LatencyTimes Err! {
-    samples := [LatencySample]{}
+    ^samples: [LatencySample]{}
     _: latency_jet_ask(child, "", "Breakpoint hit  {file}:{line}", 1) ?? return Err(err)
     place: latency_jet_ask(child, "print total\n", "total = ", 1) ?? return Err(err)
     samples.push(LatencySample{measure: "print_place", us: place.us})
@@ -524,7 +524,7 @@ latency_lldb_session: fn(lldb: String, options: LatencyOptions, work: String, ta
 }
 
 latency_lldb_drive: fn(child: ProcessChild, steps: Int, file: String, line: Int, tally: Int) -[Exec, FS, Time]> LatencyTimes Err! {
-    samples := [LatencySample]{}
+    ^samples: [LatencySample]{}
     // Each `expr` answers `(type) $N = value`.
     value: ") $"
     _: latency_lldb_ask(child, "breakpoint set --file {file} --line {line}\n", "Breakpoint 1: ", 1) ?? return Err(err)
@@ -573,7 +573,7 @@ latency_lldb_drive: fn(child: ProcessChild, steps: Int, file: String, line: Int,
 
 // The microseconds of `measure`'s samples.
 latency_samples: fn(samples: [LatencySample], measure: String) -> [Int] Never! {
-    picked := [Int]{}
+    ^picked: [Int]{}
     loop sample in samples {
         if sample.measure == measure -> picked.push(sample.us)
     }
@@ -583,7 +583,7 @@ latency_samples: fn(samples: [LatencySample], measure: String) -> [Int] Never! {
 // A row per measure, in the order `jet` first took them, each the median
 // of its samples.
 latency_medians: fn(jet: [LatencySample], lldb: [LatencySample]) -> [LatencyRow] Never! {
-    rows := [LatencyRow]{}
+    ^rows: [LatencyRow]{}
     loop sample in jet {
         seen: loop row in rows {
             if row.measure == sample.measure {
@@ -614,16 +614,16 @@ latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Tim
     line: latency_break_line(options.functions, nested: options.nested)
     tally: latency_tally_line(entry)
     debug: latency_debug_argv(options.jet, file, line)
-    jet_samples := [LatencySample]{}
-    jet_target := LatencyTarget?{None}
+    ^jet_samples: [LatencySample]{}
+    ^jet_target: LatencyTarget?{None}
     loop _ in 0..<options.runs {
         timed: latency_jet_session(options, work, tally) ?? return Err("a jet debug session: {err.message}")
         jet_samples.extend(timed.samples)
         jet_target = timed.target
     }
-    lldb := LatencyLldb?{None}
-    lldb_samples := [LatencySample]{}
-    lldb_target := LatencyTarget?{None}
+    ^lldb: LatencyLldb?{None}
+    ^lldb_samples: [LatencySample]{}
+    ^lldb_target: LatencyTarget?{None}
     if options.lldb == .Val(tool) {
         timed: LatencyLldb{
             version: latency_version(tool) ?? return Err(err),
@@ -663,12 +663,12 @@ latency_target_text: fn(debugger: String, target: LatencyTarget) -> String Never
 latency_rows: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! {
     file: latency_break_file(nested: options.nested)
     line: latency_break_line(options.functions, nested: options.nested)
-    rows := [String]{
+    ^rows: [String]{
         "# image {LATENCY_IMAGE} sha256 {runs.image_sha256}",
         "# jet {runs.jet_version}",
     }
-    lldb_line := "# lldb not timed: none on PATH and no `--lldb`"
-    lldb_stop := "-"
+    ^lldb_line: "# lldb not timed: none on PATH and no `--lldb`"
+    ^lldb_stop: "-"
     if runs.lldb == .Val(lldb) {
         lldb_line = "# lldb {lldb.version}"
         lldb_stop = "{lldb.stop}"
@@ -704,7 +704,7 @@ latency_rows: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! 
 // first_stop with them, at most LLDB's on the same image and host, judged
 // only when LLDB was timed.
 latency_verdicts: fn(runs: LatencyRuns) -> [String] Never! {
-    verdicts := [String]{}
+    ^verdicts: [String]{}
     if runs.lldb == .Val(lldb) {
         verdicts.push(latency_bar("first_stop", met: runs.debug_stop <= lldb.stop))
     }
@@ -731,8 +731,8 @@ latency_bar_missed: fn(options: LatencyOptions, runs: LatencyRuns) -> Bool Never
 
 debug_latency: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     args: process.args()
-    options := LatencyOptions{jet: process.which("jet") ?? "jet", lldb: process.which("lldb"), functions: 2000, steps: 20, runs: 5, bar: None}
-    at := 0
+    ^options: LatencyOptions{jet: process.which("jet") ?? "jet", lldb: process.which("lldb"), functions: 2000, steps: 20, runs: 5, bar: None}
+    ^at: 0
     loop at < args.len() {
         if at + 1 >= args.len() -> return usage()
         value: args[at + 1]

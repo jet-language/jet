@@ -58,9 +58,9 @@ run: fn() {
     section: sections[1]
     tabled: section.split("\"rows\":[[").to_list()
     if tabled.len() < 2 -> panic("the causal_tasks section has no rows")
-    rows := 0
+    ^rows: 0
     loop text in tabled[1].split("]],\"seen\"").to_list()[0].split("],[").to_list() {
-        row := [Int]{}
+        ^row: [Int]{}
         loop word in text.split(",").to_list() {
             row.push(Int.parse(word) ?? panic("a causal_tasks row holds `{word}`, no number"))
         }

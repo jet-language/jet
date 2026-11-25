@@ -1567,7 +1567,7 @@ X64_DECODE_ROUNDING: [String]{"{{rn-sae}}", "{{rd-sae}}", "{{ru-sae}}", "{{rz-sa
 
 // The words of `text` split at spaces.
 x64_decode_words: fn(text: String) -> [String] Never! {
-    words := [String]{}
+    ^words: [String]{}
     loop word in text.split(" ") {
         if word != "" -> words.push(word)
     }
@@ -1576,7 +1576,7 @@ x64_decode_words: fn(text: String) -> [String] Never! {
 
 // The value of hex digits `text`, or the build stops naming `row`.
 x64_decode_hex_parse: fn(text: String, row: String) -> Int Never! {
-    value := 0
+    ^value: 0
     if text == "" -> build_time_refused("X64_DECODE_TABLE: an empty number in `{row}`")
     loop byte in text.bytes() {
         digit: Int{byte}
@@ -1619,7 +1619,7 @@ x64_decode_spaces: fn(word: String, row: String) -> [Int] Never! {
 // EVEX rounding control or suppress-all-exceptions a register form takes
 // under EVEX.b.
 x64_decode_rows: fn(table: String) -> [X64DecodeRow] Never! {
-    buckets := loop _key in 0..<X64_DECODE_KEYS -> [X64DecodeRow]{}
+    ^buckets: loop _key in 0..<X64_DECODE_KEYS -> [X64DecodeRow]{}
     loop line in table.split("\n") {
         text: line.trim().copy()
         if text == "" || text.starts_with("#") -> next
@@ -1635,7 +1635,7 @@ x64_decode_rows: fn(table: String) -> [X64DecodeRow] Never! {
         bounds: left[1].split("-").to_list()
         first: x64_decode_hex_parse(bounds[0], text)
         last: if bounds.len() == 2 -> x64_decode_hex_parse(bounds[1], text) else -> first
-        row := X64DecodeRow{space: 0, opcode: 0, name: right[0].copy(), operands: if right.len() == 2 -> right[1].split(",").to_list() else -> [String]{}}
+        ^row: X64DecodeRow{space: 0, opcode: 0, name: right[0].copy(), operands: if right.len() == 2 -> right[1].split(",").to_list() else -> [String]{}}
         loop k in 2..<left.len() {
             word: left[k]
             if {
@@ -1668,7 +1668,9 @@ x64_decode_rows: fn(table: String) -> [X64DecodeRow] Never! {
                 word.starts_with("=") -> {
                     row.modrm = x64_decode_hex_parse(word.slice(1, word.len()), text)
                 }
-                else -> build_time_refused("X64_DECODE_TABLE: unknown condition `{word}` in `{text}`")
+                else -> {
+                    build_time_refused("X64_DECODE_TABLE: unknown condition `{word}` in `{text}`")
+                }
             }
         }
         if row.reg > 7 -> build_time_refused("X64_DECODE_TABLE: ModRM.reg past 7 in `{text}`")
@@ -1681,7 +1683,7 @@ x64_decode_rows: fn(table: String) -> [X64DecodeRow] Never! {
             }
         }
     }
-    rows := [X64DecodeRow]{}
+    ^rows: [X64DecodeRow]{}
     loop bucket in buckets {
         loop row in bucket {
             rows.push(x64_decode_row_at(row, row.space, row.opcode, row.name.copy()))
@@ -1697,8 +1699,8 @@ x64_decode_row_at: fn(row: X64DecodeRow, space: Int, opcode: Int, name: String) 
 
 // Where each key's rows start in `rows` (ordered by key), and their end.
 x64_decode_index: fn(rows: [X64DecodeRow]) -> [Int] Never! {
-    starts := [Int]{}
-    at := 0
+    ^starts: [Int]{}
+    ^at: 0
     loop key in 0..<X64_DECODE_KEYS {
         loop at < rows.len() && rows[at].space * 256 + rows[at].opcode < key -> at += 1
         starts.push(at)
@@ -1715,7 +1717,7 @@ x64_decode_modrm_operand: fn(code: String) -> Bool Never! {
 
 // Whether each key (space * 256 + opcode) takes a ModRM byte.
 x64_decode_modrm_keys: fn(rows: [X64DecodeRow]) -> [Bool] Never! {
-    keys := loop _key in 0..<X64_DECODE_KEYS -> false
+    ^keys: loop _key in 0..<X64_DECODE_KEYS -> false
     loop row in rows {
         key: row.space * 256 + row.opcode
         // Every VEX and EVEX form but vzeroupper and vzeroall takes one.
@@ -1732,8 +1734,8 @@ x64_decode_modrm_keys: fn(rows: [X64DecodeRow]) -> [Bool] Never! {
 // "0x" and the hex digits of `value`, a negative one read as its 64 bits
 // unsigned.
 x64_hex: fn(value: Int) -> String Never! {
-    digits := [U8]{}
-    rest := value
+    ^digits: [U8]{}
+    ^rest: value
     loop {
         digit: rest & 15
         digits.insert(0, U8{if digit < 10 -> 48 + digit else -> 87 + digit})
@@ -1759,7 +1761,7 @@ x64_decode_signed: fn(value: Int, bits: Int) -> Int Never! {
 
 // The little-endian `size`-byte number at `at` of `bytes`.
 x64_decode_le: fn(bytes: [U8], at: Int, size: Int) -> Int Never! {
-    value := 0
+    ^value: 0
     loop k in 0..<size -> value = value | (Int{bytes[at + k]} << (8 * k))
     value
 }
@@ -1784,7 +1786,7 @@ x64_decode_bad: fn() -> X64Insn Never! {
 // when the bytes end before it does.
 x64_decode: fn(bytes: [U8], from: Int, address: Int) -> X64Insn? Never! {
     if from < 0 || from >= bytes.len() -> return None
-    d := X64Decoding{from: from, at: from, address: address, prefixes: [Int]{}, immediates: [Int]{}}
+    ^d: X64Decoding{from: from, at: from, address: address, prefixes: [Int]{}, immediates: [Int]{}}
     loop d.at < bytes.len() {
         byte: Int{bytes[d.at]}
         if byte >= 0x40 && byte <= 0x4f {
@@ -1930,7 +1932,7 @@ x64_decode_modrm: fn(d: ^X64Decoding, bytes: [U8]) -> Bool Never! {
     d.reg = (byte >> 3) & 7
     d.rm = byte & 7
     if d.mod == 3 -> return true
-    size := if { d.mod == 1 -> 1, d.mod == 2 -> 4, else -> 0 }
+    ^size: if { d.mod == 1 -> 1, d.mod == 2 -> 4, else -> 0 }
     if {
         d.rm == 4 -> {
             if d.at >= bytes.len() -> return false
@@ -2093,8 +2095,8 @@ x64_decode_memory_operand: fn(d: X64Decoding, code: String) -> Bool Never! {
 
 // The instruction `row` names, its immediates read from the cursor.
 x64_decode_named: fn(d: ^X64Decoding, bytes: [U8], row: X64DecodeRow) -> X64Insn? Never! {
-    field := -1
-    width := 0
+    ^field: -1
+    ^width: 0
     loop code in row.operands {
         size: x64_decode_immediate_size(d, row, code)
         if size == 0 -> next
@@ -2111,10 +2113,10 @@ x64_decode_named: fn(d: ^X64Decoding, bytes: [U8], row: X64DecodeRow) -> X64Insn
     length: d.at - d.from
     if length > 15 -> return Val(x64_decode_bad())
     flow: x64_decode_flow(d)
-    insn := X64Insn{length: length, named: true, invalid: false, mnemonic: "", operands: [String]{}, rip: d.rip, field: field, width: width, flow: flow, cond: if flow == .Cond -> d.opcode & 15 else -> 0, indirect: d.space == 0 && d.opcode == 0xff && d.reg >= 2 && d.reg <= 5, reaches: false, reach: 0}
-    memory := false
-    sized := row.size >= 0
-    slot := 0
+    ^insn: X64Insn{length: length, named: true, invalid: false, mnemonic: "", operands: [String]{}, rip: d.rip, field: field, width: width, flow: flow, cond: if flow == .Cond -> d.opcode & 15 else -> 0, indirect: d.space == 0 && d.opcode == 0xff && d.reg >= 2 && d.reg <= 5, reaches: false, reach: 0}
+    ^memory: false
+    ^sized: row.size >= 0
+    ^slot: 0
     loop code in row.operands {
         immediate: if x64_decode_immediate_size(d, row, code) > 0 -> d.immediates[slot] else -> 0
         if x64_decode_immediate_size(d, row, code) > 0 -> slot += 1
@@ -2137,17 +2139,17 @@ x64_decode_named: fn(d: ^X64Decoding, bytes: [U8], row: X64DecodeRow) -> X64Insn
         // operand, before any immediate.
         if d.bcst == 1 && d.mod == 3 && row.rounding > 0 {
             control: if row.rounding == 1 -> X64_DECODE_ROUNDING[d.l] else -> "{{sae}}"
-            last_register := insn.operands.len() - 1
+            ^last_register: insn.operands.len() - 1
             loop last_register > 0 && insn.operands[last_register].starts_with("0x") {
                 last_register -= 1
             }
             insn.operands[last_register] = "{insn.operands[last_register]}{control}"
         }
     }
-    name := row.name.copy()
+    ^name: row.name.copy()
     // The predicate immediates objdump spells into the name.
     last: if d.immediates.len() > 0 -> d.immediates[d.immediates.len() - 1] else -> -1
-    predicate := ""
+    ^predicate: ""
     if d.opcode == 0xc2 && (d.space == 1 || d.space == 4 || d.space == 7) && last >= 0 && last < (if d.space == 1 -> 8 else -> 32) {
         predicate = X64_DECODE_CMP_PREDICATES[last]
         name = name.replace("cmp", "cmp{predicate}")
@@ -2167,7 +2169,7 @@ x64_decode_named: fn(d: ^X64Decoding, bytes: [U8], row: X64DecodeRow) -> X64Insn
     }
     if predicate != "" {
         // The immediate is the row's last operand; EVEX rounding follows it.
-        kept := [String]{}
+        ^kept: [String]{}
         loop (k, operand) in insn.operands {
             if k != row.operands.len() - 1 -> kept.push(operand.copy())
         }
@@ -2186,9 +2188,9 @@ x64_decode_named: fn(d: ^X64Decoding, bytes: [U8], row: X64DecodeRow) -> X64Insn
 // a REX a later prefix voided, and a bare REX (40) no byte register of
 // `operands` needed: only spl, bpl, sil and dil take one.
 x64_decode_prefix_words: fn(d: X64Decoding, row: X64DecodeRow, flow: X64Flow, indirect: Bool, memory: Bool, sized: Bool, operands: [String]) -> String Never! {
-    words := [String]{}
+    ^words: [String]{}
     if d.voided_rex != 0 {
-        bits := ""
+        ^bits: ""
         if d.voided_rex & 8 != 0 -> bits = "{bits}W"
         if d.voided_rex & 4 != 0 -> bits = "{bits}R"
         if d.voided_rex & 2 != 0 -> bits = "{bits}X"
@@ -2199,7 +2201,7 @@ x64_decode_prefix_words: fn(d: X64Decoding, row: X64DecodeRow, flow: X64Flow, in
     compare_op: d.space == 0 && (d.opcode == 0xa6 || d.opcode == 0xa7 || d.opcode == 0xae || d.opcode == 0xaf)
     branch: flow == .Jump || flow == .Call || flow == .Return || flow == .Cond
     loop (k, byte) in d.prefixes {
-        latest := true
+        ^latest: true
         loop later in k + 1..<d.prefixes.len() {
             same: d.prefixes[later] == byte || ((byte == 0xf2 || byte == 0xf3) && (d.prefixes[later] == 0xf2 || d.prefixes[later] == 0xf3)) || (x64_decode_segment_prefix(byte) && x64_decode_segment_prefix(d.prefixes[later]))
             if same -> latest = false
@@ -2337,8 +2339,8 @@ x64_decode_memory: fn(d: X64Decoding, label: String, n: Int, vsib: Int) -> Strin
     if !d.sib && d.mod == 0 && d.rm == 5 {
         return "{label}{segment}[{if d.addr32 -> "eip" else -> "rip"}{x64_decode_disp(disp)}]"
     }
-    base := -1
-    index := -1
+    ^base: -1
+    ^index: -1
     if {
         d.sib -> {
             if !(d.mod == 0 && d.base == 5) -> base = d.base | (d.b << 3)
@@ -2356,7 +2358,7 @@ x64_decode_memory: fn(d: X64Decoding, label: String, n: Int, vsib: Int) -> Strin
     if base < 0 && index < 0 && !zero {
         return "{label}{if segment == "" -> "ds:" else -> segment}{x64_hex(x64_decode_unsigned(disp, bits))}"
     }
-    inner := if base >= 0 -> x64_decode_gpr(base, bits, true) else -> ""
+    ^inner: if base >= 0 -> x64_decode_gpr(base, bits, true) else -> ""
     if index >= 0 || zero {
         name: if {
             vsib > 0 -> x64_decode_vreg(index, vsib)

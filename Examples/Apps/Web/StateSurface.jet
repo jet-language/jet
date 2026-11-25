@@ -103,7 +103,7 @@ router_surface: fn() WebRouterError! {
     initial: router.new()
     routed: router.route(initial, "/rows", [], [], route_loader) ?? panic("route")
     coded: router.route_with_search_codec(routed, "/search", [], [], .Query, route_loader) ?? panic("codec route")
-    named := router.not_found(coded, not_found) ?? panic("not found")
+    ^named: router.not_found(coded, not_found) ?? panic("not found")
     _stale: router.stale(named, "rows")
     _expired: router.expire(named, "rows")
     _collected: router.collect(named, "rows")
@@ -119,7 +119,7 @@ router_surface: fn() WebRouterError! {
 query_surface: fn() (StateError | WebQueryError)! {
     loaded: query.load("rows", "rows", "initial", fetch_rows)
     seed: query.WebQuerySeed{data: loaded.data, generation: loaded.generation, subscribers: loaded.subscribers}
-    created := query.new("rows", seed)
+    ^created: query.new("rows", seed)
     watched: query.watch("rows")
     _generation: query.mark_stale(created)
     _value: query.get(created)
@@ -182,7 +182,7 @@ form_surface: fn() (Err | WebFormActionError | WebFormError)! {
     _excluded: forms.input_exclude(input0, "name")
     _grouped: forms.input_group(input0, "name", "profile")
     _replaced: forms.input_replace(input0, "name", replacement)
-    typed := forms.typed<Profile>(input0, "save") ?? panic("typed form")
+    ^typed: forms.typed<Profile>(input0, "save") ?? panic("typed form")
 
     _set: forms.typed_set(typed, "name", "Ada")
     _blur: forms.typed_blur(typed, "name")
@@ -208,20 +208,20 @@ form_surface: fn() (Err | WebFormActionError | WebFormError)! {
     action_field: forms.action_field_error(forms.action_error(), "name", "required")
     _action_form: forms.action_form_error(action_field, "invalid profile")
 
-    validation0 := forms.typed_validate_async(typed)
+    ^validation0: forms.typed_validate_async(typed)
     _wait_validation: forms.typed_validation_wait(validation0)
-    validation1 := forms.typed_validate_async(typed)
+    ^validation1: forms.typed_validate_async(typed)
     _cancel_validation: forms.typed_validation_cancel(validation1)
-    submission0 := forms.typed_submit_async(typed)
+    ^submission0: forms.typed_submit_async(typed)
     _wait_submission: forms.typed_submission_wait(submission0)
-    submission1 := forms.typed_submit_async(typed)
+    ^submission1: forms.typed_submit_async(typed)
     _cancel_submission: forms.typed_submission_cancel(submission1)
 }
 
 table_surface: fn() WebTableError! {
     source: rows()
-    plain := table.new("Rows", source)
-    configured := table.new_keyed("KeyedRows", source, row_key)
+    ^plain: table.new("Rows", source)
+    ^configured: table.new_keyed("KeyedRows", source, row_key)
     table.with_column(configured, table.column("id", "Int", fn(r) { row_key(r) }))
     table.with_column(configured, table.column("name", "String", row_name))
     table.with_column(configured, table.column("active", "Bool", row_active))
@@ -272,7 +272,7 @@ virtual_surface: fn() {
     measured: virtual.plan_measure(plan, 0, 40)
     _plan_slice: virtual.plan_slice(source, measured)
     _plan_indices: virtual.plan_indices(measured)
-    viewport := virtual.plan_viewport(measured)
+    ^viewport: virtual.plan_viewport(measured)
     _viewport_plan: virtual.plan_viewport_state(viewport)
     virtual.plan_scroll_to(viewport, 64)
     virtual.plan_resize(viewport, 640, 320)
@@ -282,7 +282,7 @@ virtual_surface: fn() {
 }
 
 store_surface: fn() {
-    state_store := web_store.with_history("surface-counter", 0, 8)
+    ^state_store: web_store.with_history("surface-counter", 0, 8)
     _new_store: web_store.new("surface-new", 0)
     _value: web_store.value(state_store)
     _signal: web_store.signal(state_store)
@@ -306,11 +306,11 @@ store_surface: fn() {
     _patch0_generation: web_store.patch_generation(patch0)
     _patch0_transaction: web_store.patch_transaction(patch0)
     _patch0_active: web_store.patch_active(patch0)
-    patch1 := web_store.patch(state_store, "patch", ["value"], fn(n: ^Int) { n += 1000 })
+    ^patch1: web_store.patch(state_store, "patch", ["value"], fn(n: ^Int) { n += 1000 })
     _patch1_transaction: web_store.patch_transaction(patch1)
     _committed: web_store.patch_commit(patch1)
     print("patch: {state_store.get()}")
-    patch2 := web_store.patch(state_store, "rollback", ["value"], fn(n: ^Int) { n = -1 })
+    ^patch2: web_store.patch(state_store, "rollback", ["value"], fn(n: ^Int) { n = -1 })
     print("rollback patch: {state_store.get()}")
     _rolled_back: web_store.patch_rollback(patch2)
 
@@ -334,8 +334,8 @@ store_surface: fn() {
     _event_json: web_store.event_json(state_store)
     derived: web_store.derived(state_store, store_select)
     selector: web_store.selector(state_store, store_select)
-    subscription := web_store.listen(state_store, store_update)
-    selected_subscription := web_store.listen_selector(state_store, store_select, store_selected)
+    ^subscription: web_store.listen(state_store, store_update)
+    ^selected_subscription: web_store.listen_selector(state_store, store_select, store_selected)
     _subscription_active: web_store.subscription_active(subscription)
     _selected_active: web_store.subscription_active(selected_subscription)
     web_store.subscription_unsubscribe(subscription)

@@ -27,7 +27,7 @@ status_kb: fn(field: String) -> Int {
 }
 
 trimmed: fn(text: String) -> Int {
-    count := 0
+    ^count: 0
     loop raw in text.split("\n") {
         line: raw.trim().copy()
         count += line.count_bytes()
@@ -36,13 +36,13 @@ trimmed: fn(text: String) -> Int {
 }
 
 lowered: fn(text: String) -> Int {
-    count := 0
+    ^count: 0
     loop raw in text.split("\n") -> count += raw.to_lower().copy().count_bytes()
     count
 }
 
 measure: fn(name: String, text: String, scenario: fn(String) -> Int) {
-    total := scenario(text)
+    ^total: scenario(text)
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario(text)
     grown: status_kb("VmRSS:") - start
@@ -53,7 +53,7 @@ measure: fn(name: String, text: String, scenario: fn(String) -> Int) {
 }
 
 run: fn() {
-    text := ""
+    ^text: ""
     loop i in 0..<LINES -> text = "{text}  Line Number {i} With Some Padding  \n"
     measure("trim", text, trimmed)
     measure("to_lower", text, lowered)

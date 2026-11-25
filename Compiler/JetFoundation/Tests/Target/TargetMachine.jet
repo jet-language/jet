@@ -57,7 +57,7 @@ use {
 }
 
 target_test_valid_machine: fn() -> TargetMachine Never! {
-    machine := jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", "0.0.1")
+    ^machine: jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", "0.0.1")
     machine.memory = [MemoryRegion]{
         jet_target_memory_region_new("flash", 0x08000000, ByteSize{bytes: 524288}, .Flash, .Rx),
         jet_target_memory_region_new("ram", 0x20000000, ByteSize{bytes: 131072}, .Ram, .Rw),
@@ -88,12 +88,12 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 }
 
 #Test("target_capability_facts_validate_provider_contracts") {
-    machine := target_test_valid_machine()
+    ^machine: target_test_valid_machine()
     assert(jet_target_machine_provides_capability(machine, .MMIO))
     assert(jet_target_machine_provides_capability(machine, .TimeMonotonic))
     assert(!jet_target_machine_provides_capability(machine, .TimeWall))
     assert(!jet_target_machine_provides_capability(machine, .Entropy))
-    usage := jet_target_machine_use_default()
+    ^usage: jet_target_machine_use_default()
     usage.required_capabilities = [TargetCapability]{.TimeMonotonic, .TimeWall}
     assert(jet_target_machine_validate(machine, usage).contains(.MissingTargetCapability{capability: "Time.Wall"}))
     machine.mmio = .Provider{provider: target_test_provider("", "not-a-digest")}
@@ -102,7 +102,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 
 #Test("hosted_default_keeps_full_runtime") {
     machine: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
-    usage := jet_target_machine_use_default()
+    ^usage: jet_target_machine_use_default()
     usage.core_apis = [String]{"core.files", "core.http.client"}
     usage.heap_required = true
     assert_eq(jet_target_max_runtime_layer(machine), RuntimeLayer.Std)
@@ -110,20 +110,20 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 }
 
 #Test("hosted_counting_allocator_is_typed_and_auditable") {
-    machine := jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
+    ^machine: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
     machine.allocator = .Counting{cap: Val(ByteSize{bytes: 2147483648})}
     assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).is_empty())
     assert_eq(jet_target_allocator_json(machine.allocator), "{{\"kind\":\"counting\",\"wraps\":\"system\",\"cap_bytes\":2147483648}}")
 }
 
 #Test("no_os_machine_rejects_hosted_counting_wrapper") {
-    machine := target_test_valid_machine()
+    ^machine: target_test_valid_machine()
     machine.allocator = .Counting{cap: None}
     assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).contains(.HostedAllocatorRequiresOS))
 }
 
 #Test("valid_no_os_machine_passes") {
-    usage := jet_target_machine_use_default()
+    ^usage: jet_target_machine_use_default()
     usage.stack_bytes = 4096
     usage.static_ram_bytes = 8192
     usage.heap_required = true
@@ -158,9 +158,9 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 }
 
 #Test("validation_reports_ram_heap_core_and_mmio_errors") {
-    machine := target_test_valid_machine()
+    ^machine: target_test_valid_machine()
     machine.allocator = .NoAllocator
-    usage := jet_target_machine_use_default()
+    ^usage: jet_target_machine_use_default()
     usage.stack_bytes = 98304
     usage.static_ram_bytes = 65536
     usage.heap_required = true
@@ -175,13 +175,13 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 }
 
 #Test("memory_linker_allocator_bounds_and_order") {
-    machine := target_test_valid_machine()
+    ^machine: target_test_valid_machine()
     machine.memory = [MemoryRegion]{
         jet_target_memory_region_new("same", 8, ByteSize{bytes: 8}, .Ram, .Rw),
         jet_target_memory_region_new("same", 8, ByteSize{bytes: 0}, .Flash, .Rx),
         jet_target_memory_region_new("overflow", 18446744073709551615, ByteSize{bytes: 1}, .Reserved, .R),
     }
-    errors := [TargetMachineError]{}
+    ^errors: [TargetMachineError]{}
     jet_target_validate_memory_regions(machine.memory, errors)
     assert_eq(errors, [TargetMachineError]{.EmptyMemoryRegion{name: "same"}, .DuplicateMemoryRegion{name: "same"}, .MemoryAddressOverflow{name: "overflow"}, .OverlappingMemoryRegions{first: "same", second: "same"}})
     errors = [TargetMachineError]{}
@@ -204,15 +204,15 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 }
 
 #Test("provider_startup_limits_and_unique_capability_failures") {
-    machine := target_test_valid_machine()
+    ^machine: target_test_valid_machine()
     machine.startup_entry = " "
     machine.startup_vectors = ""
     machine.startup_abi.version = "bad version"
-    usage := jet_target_machine_use_default()
+    ^usage: jet_target_machine_use_default()
     usage.required_capabilities = [TargetCapability]{.TimeWall, .TimeWall}
     errors: jet_target_machine_validate(machine, usage)
     assert_eq(errors, [TargetMachineError]{.MissingTargetCapability{capability: "Time.Wall"}, .MissingTargetCapability{capability: "Target.Startup"}, .InvalidProviderContract{capability: "Target.Startup", provider: "test.startup", sha256: "sha256:test-startup"}})
-    provider := target_test_provider("test", "sha256:x")
+    ^provider: target_test_provider("test", "sha256:x")
     assert(jet_target_provider_valid(provider))
     provider.sha256 = "sha256:x y"
     assert(!jet_target_provider_valid(provider))
@@ -225,12 +225,12 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 }
 
 #Test("ram_saturates_mmio_half_open_range_and_gate_order") {
-    machine := target_test_valid_machine()
-    usage := jet_target_machine_use_default()
+    ^machine: target_test_valid_machine()
+    ^usage: jet_target_machine_use_default()
     usage.stack_bytes = 18446744073709551615
     usage.static_ram_bytes = 1
     usage.mmio = [MMIOAccess]{MMIOAccess{address: 0x40020400, size: ByteSize{bytes: 0}, unsafe_gate: Val(TargetUnsafeGate{reason: " "})}, MMIOAccess{address: 18446744073709551615, size: ByteSize{bytes: 1}, unsafe_gate: None}}
-    errors := [TargetMachineError]{}
+    ^errors: [TargetMachineError]{}
     jet_target_validate_ram_budget(machine, usage, errors)
     jet_target_validate_mmio(machine, usage, errors)
     assert_eq(errors, [TargetMachineError]{.RamOverflow{used_bytes: 18446744073709551615, ram_bytes: 131072}, .MMIOEmptyUnsafeReason{address: 0x40020400}, .MMIOOutsideRegion{address: 18446744073709551615, size_bytes: 1}, .MMIOMissingUnsafeGate{address: 18446744073709551615}})
@@ -368,7 +368,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 
 // Every push site and precedence.
 #Test("hardware_validation_preserves_all_fact_errors_in_order") {
-    hardware := jet_target_hardware_empty()
+    ^hardware: jet_target_hardware_empty()
     hardware.svd = Val(SVDProvenance{source: "", sha256: "invalid"})
     empty: TargetRegisterFact{name: "", offset: 18446744073709551615, width: .U64, access: .ReadWrite, volatile: true}
     outside: TargetRegisterFact{name: "", offset: 0, width: .U32, access: .ReadWrite, volatile: true}
@@ -415,7 +415,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 }
 
 #Test("hosted_boundary_policies_and_panic_sink_preserve_unique_order") {
-    machine := jet_target_machine_wasm_no_os("0.0.1")
+    ^machine: jet_target_machine_wasm_no_os("0.0.1")
     machine.mmio = .HostedDefault
     machine.wall_clock = .HostedDefault
     machine.monotonic_clock = .HostedDefault
@@ -446,7 +446,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     invalid: target_test_provider("", "invalid")
     machine.panic = .Report{provider: invalid}
     machine.byte_sink = .Provider{read: Val(invalid), write: Val(invalid), report: None}
-    usage := jet_target_machine_use_default()
+    ^usage: jet_target_machine_use_default()
     usage.required_capabilities = [TargetCapability]{.PanicReport, .PanicReport}
     assert_eq(
         jet_target_machine_validate(machine, usage),
@@ -479,7 +479,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 
 // SVD provenance validity is deliberately weaker than ProviderContract.
 #Test("svd_digest_and_effect_set_keep_their_distinct_rust_contracts") {
-    hardware := jet_target_hardware_empty()
+    ^hardware: jet_target_hardware_empty()
     hardware.svd = Val(SVDProvenance{source: "vendor.svd", sha256: "sha256:a b"})
     assert(jet_target_hardware_validate(hardware, [MemoryRegion]{}).is_empty())
     assert(!jet_target_provider_valid(target_test_provider("provider", "sha256:a b")))
@@ -499,16 +499,16 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 // saturate at u64::MAX, so a greater RAM total cannot overflow the RAM budget.
 // In particular MAX + 2 must not become a one-byte budget.
 #Test("ram_region_totals_above_u64_max_keep_the_true_budget") {
-    machine := jet_target_machine_wasm_no_os("0.0.1")
+    ^machine: jet_target_machine_wasm_no_os("0.0.1")
     machine.memory = [MemoryRegion]{
         jet_target_memory_region_new("flash", 0, ByteSize{bytes: 1}, .Flash, .Rx),
         jet_target_memory_region_new("ram.first", 0, ByteSize{bytes: 18446744073709551615}, .Ram, .Rw),
         jet_target_memory_region_new("ram.second", 0, ByteSize{bytes: 2}, .Ram, .Rw),
     }
-    usage := jet_target_machine_use_default()
+    ^usage: jet_target_machine_use_default()
     usage.stack_bytes = 18446744073709551615
     usage.static_ram_bytes = 1
-    errors := [TargetMachineError]{}
+    ^errors: [TargetMachineError]{}
     jet_target_validate_ram_budget(machine, usage, errors)
     assert(errors.is_empty())
 }
@@ -516,7 +516,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 // The `board.sensor_v1` machine with the MMIO range the compile-path volatile
 // tests use and an explicit linker and allocator.
 target_test_sensor_machine: fn() -> TargetMachine Never! {
-    machine := jet_target_machine_board_sensor_v1("0.0.1")
+    ^machine: jet_target_machine_board_sensor_v1("0.0.1")
     machine.memory = [MemoryRegion]{
         jet_target_memory_region_new("flash", 0x08000000, ByteSize{bytes: 524288}, .Flash, .Rx),
         jet_target_memory_region_new("ram", 0x20000000, ByteSize{bytes: 65536}, .Ram, .Rw),
@@ -534,7 +534,7 @@ target_test_named_provider: fn(name: String) -> ProviderContract Never! {
 
 // The sensor machine with `provider` behind `capability`.
 target_test_set_provider: fn(capability: TargetCapability, provider: ProviderContract) -> TargetMachine Never! {
-    machine := target_test_sensor_machine()
+    ^machine: target_test_sensor_machine()
     read: target_test_named_provider("io-read")
     write: target_test_named_provider("io-write")
     report: target_test_named_provider("panic-report")
@@ -566,7 +566,7 @@ target_test_set_provider: fn(capability: TargetCapability, provider: ProviderCon
 
 // The sensor machine with no provider behind `capability`.
 target_test_clear_provider: fn(capability: TargetCapability) -> TargetMachine Never! {
-    machine := target_test_sensor_machine()
+    ^machine: target_test_sensor_machine()
     read: Val(target_test_named_provider("io-read"))
     write: Val(target_test_named_provider("io-write"))
     report: Val(target_test_named_provider("panic-report"))
@@ -619,7 +619,7 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
 }
 
 #Test("target_machine_rows_are_registered_and_stable") {
-    machine := jet_target_machine_wasm_no_os("0.0.1")
+    ^machine: jet_target_machine_wasm_no_os("0.0.1")
     target_test_assert_row(
         jet_target_machine_diagnostics(machine, jet_target_machine_use_from_core_apis([String]{"core.files"})),
         "E3310",
@@ -627,7 +627,7 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
         "The complete semantic Prelude closure includes `core.files`; a target cannot emit a higher layer or substitute a second Prelude.",
         "Select a typed target with `hosted` support, or remove `core.files` from the reachable closure.",
     )
-    wall := jet_target_machine_use_default()
+    ^wall: jet_target_machine_use_default()
     wall.required_capabilities = [TargetCapability]{.TimeWall}
     target_test_assert_row(
         jet_target_machine_diagnostics(machine, wall),
@@ -636,9 +636,9 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
         "The selected target profile must state each machine service separately; a target triple cannot imply a UART, clock, entropy source, scheduler, allocator, startup provider, or MMIO device.",
         "Select a typed target profile with a `Time.Wall` provider, or remove the reachable operation.",
     )
-    invalid_provider := jet_target_machine_wasm_no_os("0.0.1")
+    ^invalid_provider: jet_target_machine_wasm_no_os("0.0.1")
     invalid_provider.monotonic_clock = .Provider{provider: target_test_provider("", "not-a-digest")}
-    monotonic := jet_target_machine_use_default()
+    ^monotonic: jet_target_machine_use_default()
     monotonic.required_capabilities = [TargetCapability]{.TimeMonotonic}
     target_test_assert_row(
         jet_target_machine_diagnostics(invalid_provider, monotonic),
@@ -647,7 +647,7 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
         "Every selected provider needs a stable identity and sha256 provenance so artifacts cannot reuse changed target behavior.",
         "Declare a nonempty provider identity and a `sha256:` digest for `Time.Monotonic`.",
     )
-    mmio := jet_target_machine_use_default()
+    ^mmio: jet_target_machine_use_default()
     mmio.mmio = [MMIOAccess]{MMIOAccess{address: 0x10, size: ByteSize{bytes: 4}, unsafe_gate: Val(TargetUnsafeGate{reason: "probe"})}}
     target_test_assert_row(
         jet_target_machine_diagnostics(machine, mmio),
@@ -670,7 +670,7 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
     capabilities: [TargetCapability]{.MMIO, .TimeWall, .TimeMonotonic, .TimeZoneData, .TimeSleep, .Entropy, .Scheduler, .IORead, .IOWrite, .PanicReport, .Allocator, .Startup}
     malformed_providers: [ProviderContract]{target_test_provider("", "not-a-digest"), target_test_provider("tests.target.invalid", ""), target_test_provider("tests.target.invalid", "sha256:")}
     loop (at, capability) in capabilities {
-        usage := jet_target_machine_use_default()
+        ^usage: jet_target_machine_use_default()
         usage.required_capabilities = [TargetCapability]{capability}
         if capability == .Allocator -> usage.heap_required = true
         present: target_test_set_provider(capability, target_test_named_provider(names[at]))
@@ -695,15 +695,15 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
 
 #Test("panic_policy_matrix_covers_explicit_missing_and_malformed") {
     usage: jet_target_machine_use_default()
-    present := target_test_sensor_machine()
+    ^present: target_test_sensor_machine()
     present.panic = .Abort
     assert(jet_target_machine_validate(present, usage).is_empty())
     assert(jet_target_machine_diagnostics(present, usage).is_empty())
-    missing := target_test_sensor_machine()
+    ^missing: target_test_sensor_machine()
     missing.panic = .Unspecified
     assert(jet_target_machine_validate(missing, usage).contains(.MissingPanicPolicy))
     assert(target_test_has_code(jet_target_machine_diagnostics(missing, usage), "E3314"))
-    malformed := target_test_sensor_machine()
+    ^malformed: target_test_sensor_machine()
     malformed.panic = .Report{provider: target_test_provider("", "not-a-digest")}
     assert(target_test_has_invalid_provider(jet_target_machine_validate(malformed, usage), .PanicReport))
     assert(target_test_has_code(jet_target_machine_diagnostics(malformed, usage), "E3312"))
@@ -738,15 +738,15 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
 #Test("memory_and_panic_are_checked_target_capabilities") {
     assert(jet_target_machine_provides_capability(jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1"), .Memory))
     assert(jet_target_machine_provides_capability(jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1"), .Panic))
-    machine := target_test_valid_machine()
+    ^machine: target_test_valid_machine()
     assert(jet_target_machine_provides_capability(machine, .Memory))
     assert(jet_target_machine_provides_capability(machine, .Panic))
-    usage := jet_target_machine_use_default()
+    ^usage: jet_target_machine_use_default()
     usage.required_capabilities = [TargetCapability]{.Memory, .Panic}
     errors: jet_target_machine_validate(machine, usage)
     assert(!errors.contains(.MissingTargetCapability{capability: "Target.Memory"}))
     assert(!errors.contains(.MissingTargetCapability{capability: "Target.Panic"}))
-    bare := target_test_valid_machine()
+    ^bare: target_test_valid_machine()
     bare.memory = [MemoryRegion]{jet_target_memory_region_new("flash", 0x08000000, ByteSize{bytes: 524288}, .Flash, .Rx)}
     bare.allocator = .Unspecified
     bare.panic = .Unspecified

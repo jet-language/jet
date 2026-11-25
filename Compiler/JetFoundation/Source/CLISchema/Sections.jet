@@ -42,7 +42,7 @@ cli_schema_read_num: fn(bytes: View<U8>, at: Int, width: Int, little: Bool, maxi
     if width != 2 && width != 4 && width != 8 {
         return Err(RecordDecodeError.Malformed{why: "invalid integer width"})
     }
-    number := U64{0}
+    ^number: U64{0}
     loop index in 0..<width {
         shift: if little -> index * 8 else -> (width - index - 1) * 8
         number |= (U64{value[index]} << shift)
@@ -59,7 +59,7 @@ cli_schema_usize_num: fn(value: U64, maximum: U64) -> Int RecordDecodeError! {
 // reader rejects malformed UTF-8 even for an unrelated section. No name string
 // or byte-list allocation is needed to enforce that rule.
 cli_schema_c_name_is: fn(bytes: View<U8>, expected: String) -> Bool RecordDecodeError! {
-    end := bytes.len()
+    ^end: bytes.len()
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{0}) {
             end = index
@@ -67,7 +67,7 @@ cli_schema_c_name_is: fn(bytes: View<U8>, expected: String) -> Bool RecordDecode
         }
     }
     name: bytes[0..<end]
-    at := 0
+    ^at: 0
     loop at < end {
         first: Int{name[at]}
         if first < 128 {
@@ -129,7 +129,7 @@ cli_schema_elf_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] RecordD
     _: cli_schema_bounds(bytes, shoff, table_length, maximum)
     names_section: cli_schema_elf_section(bytes, names_index, shoff, entsize, layout.sh_offset_at, layout.sh_size_at, layout.value_width, little, maximum)
     names: cli_schema_bounds(bytes, names_section.offset, names_section.size, maximum)
-    found := [View<U8>]{}
+    ^found: [View<U8>]{}
     loop index in 0..<count {
         section: cli_schema_elf_section(bytes, index, shoff, entsize, layout.sh_offset_at, layout.sh_size_at, layout.value_width, little, maximum)
         if section.name > names.len() {
@@ -163,7 +163,7 @@ cli_schema_pe_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] RecordDe
     table: cli_schema_size_add(base_table, optional, maximum) ?? return Err(RecordDecodeError.Malformed{why: "PE section table overflow"})
     table_length: cli_schema_size_mul(count, 40, maximum) ?? return Err(RecordDecodeError.Malformed{why: "PE section count overflow"})
     _: cli_schema_bounds(bytes, table, table_length, maximum)
-    found := [View<U8>]{}
+    ^found: [View<U8>]{}
     loop index in 0..<count {
         base: table + index * 40
         if !cli_schema_c_name_is(cli_schema_bounds(bytes, base, 8, maximum), PE_SECTION) -> next
@@ -208,8 +208,8 @@ cli_schema_mach_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Record
     header: if is_64 -> 32 else -> 28
     _: cli_schema_bounds(bytes, 0, header, maximum)
     count: cli_schema_usize_num(cli_schema_read_num(bytes, 16, 4, true, maximum), maximum)
-    command := header
-    found := [View<U8>]{}
+    ^command: header
+    ^found: [View<U8>]{}
     loop _ in 0..<count {
         kind: cli_schema_read_num(bytes, command, 4, true, maximum)
         size: cli_schema_usize_num(cli_schema_read_num(bytes, command + 4, 4, true, maximum), maximum)
@@ -256,7 +256,7 @@ cli_schema_fat_mach_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Re
     entry_size: if is_64 -> 32 else -> 20
     table_length: cli_schema_size_mul(count, entry_size, maximum) ?? return Err(RecordDecodeError.Malformed{why: "universal Mach-O table overflow"})
     _: cli_schema_bounds(bytes, 8, table_length, maximum)
-    canonical := View<U8>?{None}
+    ^canonical: View<U8>?{None}
     loop index in 0..<count {
         arch: 8 + index * entry_size
         width: if is_64 -> 8 else -> 4
@@ -288,8 +288,8 @@ cli_schema_fat_mach_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Re
 }
 
 cli_schema_wasm_leb: fn(bytes: View<U8>, at: ^Int, maximum: U64) -> Int RecordDecodeError! {
-    value := U64{0}
-    shift := 0
+    ^value: U64{0}
+    ^shift: 0
     bits: if maximum <= (U64{0xffffffff}) -> 32 else -> 64
     loop shift < 35 {
         if at >= bytes.len() -> return Err(RecordDecodeError.Malformed{why: "truncated Wasm LEB"})
@@ -309,8 +309,8 @@ cli_schema_wasm_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Record
     if !cli_schema_bytes_start(header, [U8]{0, 97, 115, 109, 1, 0, 0, 0}) {
         return Err(RecordDecodeError.Malformed{why: "unsupported Wasm header"})
     }
-    at := 8
-    found := [View<U8>]{}
+    ^at: 8
+    ^found: [View<U8>]{}
     loop at < bytes.len() {
         id: bytes[at]
         at += 1
@@ -318,7 +318,7 @@ cli_schema_wasm_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Record
         payload: cli_schema_bounds(bytes, at, size, maximum)
         at += size
         if id == (U8{0}) {
-            name_at := 0
+            ^name_at: 0
             name_len: cli_schema_wasm_leb(payload, name_at, maximum)
             name: cli_schema_bounds(payload, name_at, name_len, maximum)
             name_at += name_len
@@ -332,9 +332,9 @@ cli_schema_wasm_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Record
 }
 
 cli_schema_put_wasm_leb: fn(out: ^[U8], input: Int) Never! {
-    value := input
+    ^value: input
     loop {
-        byte := value & 127
+        ^byte: value & 127
         value = value >> 7
         if value != 0 -> byte |= 128
         out.push(wrapping(U8{byte}))
@@ -347,7 +347,7 @@ cli_schema_put_wasm_leb: fn(out: ^[U8], input: Int) Never! {
 cli_schema_embed_wasm_record: fn(wasm: ^[U8], record: [U8], usize_max: U64) RecordDecodeError! {
     _: cli_schema_wasm_sections(wasm[0..<wasm.len()], usize_max)
     name: WASM_SECTION.bytes()
-    payload := [U8]{}
+    ^payload: [U8]{}
     cli_schema_put_wasm_leb(payload, name.len())
     loop byte in name -> payload.push(byte)
     loop byte in record -> payload.push(byte)

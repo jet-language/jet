@@ -33,7 +33,7 @@ AnalysisReceipt: struct {
 // Generate the same deterministic 100k workload as the area probe instead of
 // relying on a repository-local or cache-local fixture path.
 fixture_text: fn() -> String {
-    lines := [String]{"team,segment,x,y,value"}
+    ^lines: [String]{"team,segment,x,y,value"}
     loop i in 0..<100000 {
         x: Float.from_int(i % 1000) / Float{10.0}
         residual: Float.from_int((i % 7) - 3)
@@ -90,7 +90,7 @@ run: fn() {
         .count()
         .collect() ?? panic("group count")
     pivot: data.pivot_sum(filtered) ?? panic("pivot")
-    values := [Float]{}
+    ^values: [Float]{}
     loop row in filtered -> values.push(row.value)
     rolling: data.rolling_mean(values, 8) ?? panic("rolling mean")
     described: data.describe(values) ?? panic("describe")

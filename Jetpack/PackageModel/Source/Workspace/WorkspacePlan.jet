@@ -192,7 +192,7 @@ pkg_workspace_declaration_probe: fn(cache: ^WorkspaceDeclarationCache, src: Stri
 
 pkg_workspace_head_possible: fn(src: String) -> Bool Never! {
     if !src.contains(NS_WORKSPACE) -> return false
-    head := true
+    ^head: true
     loop part in src.split(NS_WORKSPACE) {
         if head {
             head = false
@@ -208,7 +208,7 @@ pkg_workspace_head_possible: fn(src: String) -> Bool Never! {
 // token list.
 pkg_lex_workspace_declaration: fn(src: [U8]) -> WorkspaceDeclarationProbe Never! {
     lexed: lex(src)
-    tokens := [Token]{}
+    ^tokens: [Token]{}
     loop token in lexed.tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
         tokens.push(token)
@@ -219,7 +219,7 @@ pkg_lex_workspace_declaration: fn(src: [U8]) -> WorkspaceDeclarationProbe Never!
 
 // A top-level `workspace: module` head (not after a `.`).
 pkg_workspace_tokens_declare_module: fn(tokens: [Token], tables: TokenTables) -> Bool Never! {
-    depth := 0
+    ^depth: 0
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if {
@@ -262,7 +262,7 @@ pkg_declares_workspace_members: fn(cache: ^WorkspaceDeclarationCache, src: Strin
 // E1239: the workspace authority must have one declaration source. Each
 // path is shown by its file name.
 pkg_e1239_ambiguous_workspace: fn(paths: [String]) -> Diagnostic Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop path in paths {
         name: files.basename(path)
         names.push(if name == "" -> path else -> name)

@@ -30,12 +30,12 @@ sema_job_schedule_unit: fn(suffix: String, environment: SemaScopeEnvironment, pr
 }
 
 sema_job_schedule_float_to_int: fn(value: Float) -> Int Never! {
-    remaining := value
-    result := 0
-    bit := 62
+    ^remaining: value
+    ^result: 0
+    ^bit: 62
     loop bit >= 0 {
-        unit := 1 << bit
-        floating_unit := Float.from_int(unit)
+        ^unit: 1 << bit
+        ^floating_unit: Float.from_int(unit)
         if remaining >= floating_unit {
             result += unit
             remaining -= floating_unit
@@ -50,7 +50,7 @@ sema_job_schedule_duration_int: fn(value: Int, unit: SemaRegistrationUnitFact) -
     if unit.scale.numerator <= 0 || unit.scale.denominator <= 0 -> return None
     max_int: 9223372036854775807
     if value > max_int /% unit.scale.numerator -> return None
-    nanos := value * unit.scale.numerator /% unit.scale.denominator
+    ^nanos: value * unit.scale.numerator /% unit.scale.denominator
     if nanos <= 0 || nanos > max_int -> return None
     Val(nanos)
 }
@@ -62,7 +62,7 @@ sema_job_schedule_duration_float: fn(value: Float, unit: SemaRegistrationUnitFac
     if unit.scale.numerator <= 0 || unit.scale.denominator <= 0 {
         return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
     }
-    nanos := value * approx(unit.scale.numerator) / approx(unit.scale.denominator)
+    ^nanos: value * approx(unit.scale.numerator) / approx(unit.scale.denominator)
     max_int_exclusive: Float{9223372036854775808.0}
     if !math.is_finite(nanos) || nanos >= max_int_exclusive {
         return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
@@ -70,7 +70,7 @@ sema_job_schedule_duration_float: fn(value: Float, unit: SemaRegistrationUnitFac
     if nanos <= 0.0 {
         return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
     }
-    integer_nanos := sema_job_schedule_float_to_int(nanos)
+    ^integer_nanos: sema_job_schedule_float_to_int(nanos)
     if integer_nanos <= 0 {
         return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
     }
@@ -78,12 +78,12 @@ sema_job_schedule_duration_float: fn(value: Float, unit: SemaRegistrationUnitFac
 }
 
 sema_job_schedule_wall_clock: fn(text: String) -> SemaJobScheduleResolution Never! {
-    bytes := text.bytes()
+    ^bytes: text.bytes()
     if bytes.len() != 5 || (Int{bytes[2]}) != 58 {
         return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     }
     loop index in ([Int]{0, 1, 3, 4}) {
-        digit := Int{bytes[index]}
+        ^digit: Int{bytes[index]}
         if digit < 48 || digit > 57 {
             return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
         }
@@ -107,7 +107,7 @@ sema_job_resolve_every_arg: fn(argument: EveryArg, environment: SemaScopeEnviron
             unit: sema_job_schedule_unit(suffix, environment, program) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.UnknownDurationUnit)}
             if int == .Val(value) {
                 nanos: sema_job_schedule_duration_int(value, unit) ?? {
-                    error := if value <= 0 -> EveryScheduleError.NonPositiveDuration else -> EveryScheduleError.DurationOutOfRange
+                    ^error: if value <= 0 -> EveryScheduleError.NonPositiveDuration else -> EveryScheduleError.DurationOutOfRange
                     return SemaJobScheduleResolution{schedule: None, error: Val(error)}
                 }
                 return SemaJobScheduleResolution{schedule: Val(EverySchedule.Duration{nanos: nanos}), error: None}
@@ -161,7 +161,7 @@ sema_job_reserved_name_error: fn(name: String, span: Span) -> Diagnostic {
 }
 
 sema_job_duplicate_error: fn(name: String, scope: JobScope, span: Span) -> Diagnostic {
-    scope_name := sema_job_scope_name(scope)
+    ^scope_name: sema_job_scope_name(scope)
     sema_error("E0928", span, "job `{name}` is declared more than once in scope .{scope_name}", "`jet {name}` must select exactly one function", "rename one of the jobs, or give the declarations different scopes")
 }
 
@@ -180,10 +180,10 @@ SemaJobCommandWord: struct {
 // not a computed-field getter and each bound command, lowercased as the
 // command line reads them (CliEntry.jet `sema_cli_entry_spec`).
 sema_job_cli_commands: fn(items: [Item]) -> [SemaJobCommandWord] {
-    words := [SemaJobCommandWord]{}
+    ^words: [SemaJobCommandWord]{}
     loop item in items {
         if item == .Struct(definition) {
-            cli := false
+            ^cli: false
             loop derive_item in definition.derives {
                 if derive_item.name == "CLI" -> cli = true
             }
@@ -204,24 +204,24 @@ sema_job_cli_commands: fn(items: [Item]) -> [SemaJobCommandWord] {
 /// command of the module (unless the job is `.Internal`), or two jobs share
 /// one name in the same scope of a module.
 sema_check_job_names: fn(items: [Item]) -> [Diagnostic] {
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     commands: sema_job_cli_commands(items)
-    seen_names := [String]{}
-    seen_scopes := [JobScope]{}
+    ^seen_names: [String]{}
+    ^seen_scopes: [JobScope]{}
     loop item in items {
         if item == {
             .Func(function) -> {
                 if !function.is_job -> next
-                span := function.job_span ?? function.name_span
+                ^span: function.job_span ?? function.name_span
                 if sema_job_is_reserved(function.name) {
                     diagnostics.push(sema_job_reserved_name_error(function.name, span))
                     next
                 }
-                metadata := function.job_metadata ?? ast_job_metadata()
-                scope := metadata.scope
+                ^metadata: function.job_metadata ?? ast_job_metadata()
+                ^scope: metadata.scope
                 if scope != .Internal {
                     word: unicode.lower(function.name)
-                    clash := false
+                    ^clash: false
                     loop command in commands {
                         if command.name == word {
                             diagnostics.push(sema_job_command_clash_error(function.name, span, command.span))
@@ -231,8 +231,8 @@ sema_check_job_names: fn(items: [Item]) -> [Diagnostic] {
                     }
                     if clash -> next
                 }
-                index := 0
-                duplicate := false
+                ^index: 0
+                ^duplicate: false
                 loop index < seen_names.len() {
                     if seen_names[index] == function.name && seen_scopes[index] == scope {
                         duplicate = true
@@ -257,7 +257,7 @@ sema_check_job_names: fn(items: [Item]) -> [Diagnostic] {
 /// parameter of a type other than `Duration` is the marker's argument-type
 /// error (E0930), so it is not also reported as a dynamic schedule.
 sema_check_job_schedules: fn(items: [Item], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [Diagnostic] {
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop item in items {
         if item == {
             .Func(function) -> {

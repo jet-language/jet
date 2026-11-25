@@ -31,18 +31,18 @@ sema_protocols_expand: fn(items: ^[Item], diagnostics: ^[Diagnostic]) {
     if !has_protocol {
         return
     }
-    expanded := [Item]{}
+    ^expanded: [Item]{}
     loop item in items {
         if item == .ProtocolDecl(declaration) {
             parsed: parse_source(sema_protocol_source(declaration).bytes())
             if parsed.diagnostics.len() > 0 {
                 diagnostics.push(sema_error("E0153", declaration.name_span, "protocol `{declaration.name}` failed to expand into handle types", "the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the protocol block — a fragment did not parse", "check the protocol declaration for typos; if this persists, file a bug"))
             } else {
-                generated := parsed.program.items
+                ^generated: parsed.program.items
                 sema_protocol_mark_generated(generated, declaration.name)
                 // Written state types are rewritten before any module
                 // registers; the generated handles name theirs here.
-                owners := sema_state_types_owners()
+                ^owners: sema_state_types_owners()
                 sema_state_types_collect(generated, owners)
                 loop value in sema_state_types_rewrite_items(generated, owners) {
                     expanded.push(value)
@@ -51,7 +51,7 @@ sema_protocols_expand: fn(items: ^[Item], diagnostics: ^[Diagnostic]) {
         }
         expanded.push(item.copy())
     }
-    loop items.len() > 0 -> _ := items.pop()
+    loop items.len() > 0 -> ^_: items.pop()
     loop item in expanded -> items.push(item)
 }
 
@@ -63,18 +63,18 @@ sema_protocol_mark_generated: fn(items: ^[Item], protocol: String) Never! {
     loop index in 0..<items.len() {
         if items[index] == {
             .Impl(definition) -> {
-                updated := definition
+                ^updated: definition
                 sema_protocol_mark_methods(updated.methods)
                 items[index] = Item.Impl{value: updated}
             }
             .Struct(definition) -> {
-                updated := definition.copy()
+                ^updated: definition.copy()
                 updated.name = "{protocol}.{definition.name}"
                 sema_protocol_mark_methods(updated.methods)
                 items[index] = Item.Struct{value: updated}
             }
             .Enum(definition) -> {
-                updated := definition
+                ^updated: definition
                 sema_protocol_mark_methods(updated.methods)
                 items[index] = Item.Enum{value: updated}
             }
@@ -91,13 +91,13 @@ sema_protocol_source: fn(declaration: ProtocolDecl) -> String Never! {
     client: "{declaration.name}.Client"
     server: "{declaration.name}.Server"
     states: loop index in 0..<(declaration.messages.len() + 1) -> "S{index}"
-    lines := [String]{}
+    ^lines: [String]{}
     loop index in 0..<declaration.messages.len() {
         lines.push("        {states[index]} -> {states[index + 1]}\n")
     }
     lines.push("        {states[declaration.messages.len()]}\n")
     state_list: lines.join("")
-    out := [String]{}
+    ^out: [String]{}
     out.push("#SingleUse Client: struct {{\n    state {{\n{state_list}    }}\n\n    _token: Int\n}}\n\n")
     out.push("#SingleUse Server: struct {{\n    state {{\n{state_list}    }}\n\n    _token: Int\n}}\n\n")
     out.push("impl {client} {{\n")

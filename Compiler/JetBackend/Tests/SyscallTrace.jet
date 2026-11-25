@@ -9,17 +9,17 @@ use jet_backend.[X64_TRACE_ORIG_RAX, X64_TRACE_REGISTERS, X64_TRACE_SYSCALL_STOP
 SYSCALL_TRACE_EXIT_GROUP: 231
 
 #Test("a traced command stops at each system call's entry and exit, and its end gives its exit status") {
-    trace := x64_trace_command("/bin/sh", [String]{"sh", "-c", "exit 3"}, None)
+    ^trace: x64_trace_command("/bin/sh", [String]{"sh", "-c", "exit 3"}, None)
     if trace.refused != 0 {
         // The kernel's ptrace policy refused the trace: the command never ran.
         x64_trace_close(trace)
         return
     }
     assert_eq(trace.failure, "")
-    stops := 0
-    exited := false
-    status := -1
-    resume := trace.pid
+    ^stops: 0
+    ^exited: false
+    ^status: -1
+    ^resume: trace.pid
     loop {
         step: x64_trace_syscall_step(trace, resume, 0)
         if step.thread <= 0 -> break
@@ -45,7 +45,7 @@ SYSCALL_TRACE_EXIT_GROUP: 231
 }
 
 #Test("a traced command whose program can't be started gives the execve's error") {
-    trace := x64_trace_command("/nonexistent/syscall-trace-program", [String]{"syscall-trace-program"}, None)
+    ^trace: x64_trace_command("/nonexistent/syscall-trace-program", [String]{"syscall-trace-program"}, None)
     assert(trace.pid <= 0, "no program started")
     if trace.refused == 0 {
         assert_eq(trace.failure, "execve of /nonexistent/syscall-trace-program failed")

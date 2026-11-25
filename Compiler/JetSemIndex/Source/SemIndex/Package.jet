@@ -27,12 +27,14 @@ use {
 semindex_workspace_overlay_policy_for_entry: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[FS, Env]> OverlayPolicy? ManifestError! {
     if entry == "" || entry == "/" -> return Ok(None)
     first: AuthorityResolver.open(pkg_path_parent(entry)) ?? return Err(ManifestError{diagnostic: err.diagnostic()})
-    dir := first.root
+    ^dir: first.root
     loop {
         resolver: AuthorityResolver.open(dir) ?? return Err(ManifestError{diagnostic: err.diagnostic()})
         found: if resolver.resolve_workspace_source(cache) == {
             .Ok(source) -> source != None
-            .Err(error) -> return Err(ManifestError{diagnostic: error.workspace_diagnostic()})
+            .Err(error) -> {
+                return Err(ManifestError{diagnostic: error.workspace_diagnostic()})
+            }
         }
         if found {
             if semindex_workspace_lock_at(cache, resolver) == {
@@ -79,14 +81,18 @@ semindex_workspace_lock_at: fn(cache: ^WorkspaceDeclarationCache, resolver: Auth
 // model's own diagnostic; a workspace failure is reported rather than
 // leaving the index half attached.
 semindex_attach_package_facts: fn(index: ^SemIndex, entry: String) -[FS, Env]> Diagnostic? {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     facts: if pkg_package_facts_for_entry(cache, entry) == {
         .Ok(found) -> found
-        .Err(error) -> return Val(error.diagnostic)
+        .Err(error) -> {
+            return Val(error.diagnostic)
+        }
     }
     policy: if semindex_workspace_overlay_policy_for_entry(cache, entry) == {
         .Ok(found) -> found
-        .Err(error) -> return Val(error.diagnostic)
+        .Err(error) -> {
+            return Val(error.diagnostic)
+        }
     }
     index.package_facts = facts
     index.workspace_overlays = policy

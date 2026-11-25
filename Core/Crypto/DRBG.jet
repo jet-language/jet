@@ -81,7 +81,7 @@ CTRDrbg: struct {
 
     impl Close {
         close: fn(^^self) {
-            counter := self.counter.move()
+            ^counter: self.counter.move()
             core.crypto.wipe(counter)
         }
     }
@@ -118,7 +118,7 @@ block_cipher_df: fn(data: [U8], len: Int) -> [U8] DrbgError! {
     // block that carries the counter i in its first four bytes.
     total: CTR_BLOCKSIZE + 8 + len + 1
     padded: (total + CTR_BLOCKSIZE - 1) /% CTR_BLOCKSIZE * CTR_BLOCKSIZE
-    buf := cipher.zero_bytes(padded)
+    ^buf: cipher.zero_bytes(padded)
     buf[CTR_BLOCKSIZE] = U8{(len >> 24) & 255}
     buf[CTR_BLOCKSIZE + 1] = U8{(len >> 16) & 255}
     buf[CTR_BLOCKSIZE + 2] = U8{(len >> 8) & 255}
@@ -126,16 +126,16 @@ block_cipher_df: fn(data: [U8], len: Int) -> [U8] DrbgError! {
     buf[CTR_BLOCKSIZE + 7] = U8{CTR_SEEDLEN}
     loop i in 0..<len -> buf[CTR_BLOCKSIZE + 8 + i] = data[i]
     buf[CTR_BLOCKSIZE + 8 + len] = U8{0x80}
-    key_bytes := cipher.zero_bytes(CTR_KEYSIZE)
+    ^key_bytes: cipher.zero_bytes(CTR_KEYSIZE)
     loop i in 0..<CTR_KEYSIZE -> key_bytes[i] = U8{i}
     k: aes256(key_bytes)
     nblocks: padded /% CTR_BLOCKSIZE
     // BCC: a CBC-MAC of S under the fixed key, once per output block.
-    tmp := cipher.zero_bytes(CTR_SEEDLEN)
-    j := 0
+    ^tmp: cipher.zero_bytes(CTR_SEEDLEN)
+    ^j: 0
     loop j < CTR_SEEDLEN {
-        iv := cipher.zero_bytes(CTR_BLOCKSIZE)
-        chain := [U8]{}
+        ^iv: cipher.zero_bytes(CTR_BLOCKSIZE)
+        ^chain: [U8]{}
         cipher.blocks(k, cipher.CBC_ENC, iv, buf, 0, nblocks, chain)
         loop i in 0..<CTR_BLOCKSIZE -> tmp[j + i] = chain[(nblocks - 1) * CTR_BLOCKSIZE + i]
         core.crypto.wipe(chain)
@@ -145,8 +145,8 @@ block_cipher_df: fn(data: [U8], len: Int) -> [U8] DrbgError! {
     }
     // Encrypt the chained IV under the derived key until SEEDLEN bytes.
     k2: aes256(cipher.bytes_of(tmp, 0, CTR_KEYSIZE))
-    x := cipher.bytes_of(tmp, CTR_KEYSIZE, CTR_BLOCKSIZE)
-    out := cipher.zero_bytes(CTR_SEEDLEN)
+    ^x: cipher.bytes_of(tmp, CTR_KEYSIZE, CTR_BLOCKSIZE)
+    ^out: cipher.zero_bytes(CTR_SEEDLEN)
     j = 0
     loop j < CTR_SEEDLEN {
         cipher.encrypt_in_place(k2, x)
@@ -163,7 +163,7 @@ block_cipher_df: fn(data: [U8], len: Int) -> [U8] DrbgError! {
 /// `count` counter blocks after `ctr`, which ends at the last of them, each
 /// encrypted, appended to `out`.
 ctr_blocks: fn(ctx: ^CTRDrbg, count: Int, out: ^[U8]) Never! {
-    ctrs := cipher.zero_bytes(count * CTR_BLOCKSIZE)
+    ^ctrs: cipher.zero_bytes(count * CTR_BLOCKSIZE)
     loop b in 0..<count {
         cipher.increment(ctx.counter, CTR_BLOCKSIZE)
         loop i in 0..<CTR_BLOCKSIZE -> ctrs[b * CTR_BLOCKSIZE + i] = ctx.counter[i]
@@ -174,7 +174,7 @@ ctr_blocks: fn(ctx: ^CTRDrbg, count: Int, out: ^[U8]) Never! {
 
 /// CTR_DRBG_Update (SP 800-90A section 10.2.1.2) with CTR_SEEDLEN bytes.
 ctr_update_internal: fn(ctx: ^CTRDrbg, data: [U8]) Never! {
-    tmp := [U8]{}
+    ^tmp: [U8]{}
     ctr_blocks(ctx, CTR_SEEDLEN /% CTR_BLOCKSIZE, tmp)
     loop i in 0..<CTR_SEEDLEN -> tmp[i] = tmp[i] ~ data[i]
     ctx.key = aes256(cipher.bytes_of(tmp, 0, CTR_KEYSIZE))
@@ -188,7 +188,7 @@ ctr_drbg_update: fn(ctx: ^CTRDrbg, additional: [U8]) DrbgError! {
     if additional.len() == 0 {
         return
     }
-    seed := block_cipher_df(additional, additional.len())
+    ^seed: block_cipher_df(additional, additional.len())
     ctr_update_internal(ctx, seed)
     core.crypto.wipe(seed)
 }
@@ -199,13 +199,13 @@ ctr_reseed_internal: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E, additional: [U8], no
     if additional.len() > CTR_MAX_SEED_INPUT - ctx.entropy_len - nonce_len {
         return Err(.InputTooBig)
     }
-    seed := cipher.zero_bytes(ctx.entropy_len)
+    ^seed: cipher.zero_bytes(ctx.entropy_len)
     if !entropy.fill(seed) {
         core.crypto.wipe(seed)
         return Err(.EntropySourceFailed)
     }
     if nonce_len != 0 {
-        nonce := cipher.zero_bytes(nonce_len)
+        ^nonce: cipher.zero_bytes(nonce_len)
         ok: entropy.fill(nonce)
         loop b in nonce -> seed.push(b)
         core.crypto.wipe(nonce)
@@ -216,7 +216,7 @@ ctr_reseed_internal: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E, additional: [U8], no
     }
     loop b in additional -> seed.push(b)
     // The length checks above keep the input within block_cipher_df's bound.
-    derived := block_cipher_df(seed, seed.len()) ?? return Err(err)
+    ^derived: block_cipher_df(seed, seed.len()) ?? return Err(err)
     ctr_update_internal(ctx, derived)
     core.crypto.wipe(seed)
     core.crypto.wipe(derived)
@@ -249,19 +249,19 @@ ctr_drbg_seed: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E, custom: [U8]) DrbgError! {
 ctr_drbg_random_with_add: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E, len: Int, additional: [U8]) -> [U8] DrbgError! {
     if len > CTR_MAX_REQUEST -> return Err(.RequestTooBig)
     if additional.len() > CTR_MAX_INPUT -> return Err(.InputTooBig)
-    add_input := cipher.zero_bytes(CTR_SEEDLEN)
-    use_add := additional.len() > 0
+    ^add_input: cipher.zero_bytes(CTR_SEEDLEN)
+    ^use_add: additional.len() > 0
     if ctx.reseed_counter >= ctx.reseed_interval || ctx.prediction_resistance {
         ctr_drbg_reseed(ctx, entropy, additional)
         use_add = false
     }
     if use_add {
-        derived := block_cipher_df(additional, additional.len())
+        ^derived: block_cipher_df(additional, additional.len())
         loop i in 0..<CTR_SEEDLEN -> add_input[i] = derived[i]
         core.crypto.wipe(derived)
         ctr_update_internal(ctx, add_input)
     }
-    stream := [U8]{}
+    ^stream: [U8]{}
     ctr_blocks(ctx, (len + CTR_BLOCKSIZE - 1) /% CTR_BLOCKSIZE, stream)
     out: cipher.bytes_of(stream, 0, len)
     core.crypto.wipe(stream)
@@ -321,7 +321,7 @@ HMACDrbg: struct {
 
     impl Close {
         close: fn(^^self) {
-            v := self.v.move()
+            ^v: self.v.move()
             core.crypto.wipe(v)
         }
     }
@@ -330,8 +330,8 @@ HMACDrbg: struct {
     /// needs no entropy. ECDSA's RFC 6979 nonces draw from one.
     impl RNG {
         fill: fn(^self, out: ^[U8]) -> Bool Never! {
-            none := NoEntropy{}
-            bytes := hmac_drbg_random(self, none, out.len()) ?? return false
+            ^none: NoEntropy{}
+            ^bytes: hmac_drbg_random(self, none, out.len()) ?? return false
             loop i in 0..<out.len() -> out[i] = bytes[i]
             core.crypto.wipe(bytes)
             true
@@ -367,14 +367,14 @@ hmac_drbg_reset: fn(ctx: ^HMACDrbg) Never! {
 hmac_drbg_update: fn(ctx: ^HMACDrbg, data: [U8]) Never! {
     rounds: if data.len() > 0 -> 2 else -> 1
     loop sep in 0..<rounds {
-        inner := hashes.hash_clone(ctx.key.inner)
+        ^inner: hashes.hash_clone(ctx.key.inner)
         hashes.hash_update(inner, ctx.v)
         hashes.hash_update_byte(inner, U8{sep})
         hashes.hash_update(inner, data)
-        k := hashes.hmac_finish(ctx.key, inner)
+        ^k: hashes.hmac_finish(ctx.key, inner)
         ctx.key = hashes.hmac_key(ctx.md, k)
         core.crypto.wipe(k)
-        next_v := hashes.hmac_mac(ctx.key, ctx.v)
+        ^next_v: hashes.hmac_mac(ctx.key, ctx.v)
         core.crypto.wipe(ctx.v)
         ctx.v = next_v.move()
     }
@@ -392,7 +392,7 @@ hmac_reseed_core: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E, additional: [U8], use_
     if additional.len() > HMAC_MAX_INPUT || total + additional.len() > HMAC_MAX_SEED_INPUT {
         return Err(.InputTooBig)
     }
-    seed := cipher.zero_bytes(ctx.entropy_len)
+    ^seed: cipher.zero_bytes(ctx.entropy_len)
     if !entropy.fill(seed) {
         core.crypto.wipe(seed)
         return Err(.EntropySourceFailed)
@@ -400,7 +400,7 @@ hmac_reseed_core: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E, additional: [U8], use_
     // The nonce is a second draw, as mbedtls makes it: a source may return
     // less entropy per call than asked for.
     if use_nonce {
-        nonce := cipher.zero_bytes(ctx.entropy_len /% 2)
+        ^nonce: cipher.zero_bytes(ctx.entropy_len /% 2)
         ok: entropy.fill(nonce)
         loop b in nonce -> seed.push(b)
         core.crypto.wipe(nonce)
@@ -443,16 +443,16 @@ hmac_drbg_seed: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E, custom: [U8]) DrbgError!
 hmac_drbg_random_with_add: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E, len: Int, additional: [U8]) -> [U8] DrbgError! {
     if len > HMAC_MAX_REQUEST -> return Err(.RequestTooBig)
     if additional.len() > HMAC_MAX_INPUT -> return Err(.InputTooBig)
-    use_add := additional.len() > 0
+    ^use_add: additional.len() > 0
     if ctx.seeded && (ctx.prediction_resistance || ctx.reseed_counter >= ctx.reseed_interval) {
         hmac_drbg_reseed(ctx, entropy, additional)
         use_add = false
     }
     if use_add -> hmac_drbg_update(ctx, additional)
-    out := cipher.zero_bytes(len)
-    at := 0
+    ^out: cipher.zero_bytes(len)
+    ^at: 0
     loop at < len {
-        next_v := hashes.hmac_mac(ctx.key, ctx.v)
+        ^next_v: hashes.hmac_mac(ctx.key, ctx.v)
         core.crypto.wipe(ctx.v)
         ctx.v = next_v.move()
         n: if len - at < ctx.v.len() -> len - at else -> ctx.v.len()

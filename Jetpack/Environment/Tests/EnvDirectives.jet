@@ -47,7 +47,7 @@ env_file_test_classify_in: fn(raw: String, table: SourceTable) -> RefSpec {
 }
 
 env_file_test_sorted: fn(values: [String]) -> [String] {
-    out := values
+    ^out: values
     out.sort()
     out
 }
@@ -108,7 +108,7 @@ env_file_test_sorted: fn(values: [String]) -> [String] {
 
 #Test("render keeps hostile values as jet string data") {
     hostile: "$(touch pwned); `id`; \"quote\" {{interpolation}}\nnext"
-    file := EnvFile.empty()
+    ^file: EnvFile.empty()
     file.default_source = Val(hostile)
     file.packages = [String]{hostile}
     file.prompt = Val(hostile)
@@ -131,9 +131,9 @@ env_file_test_sorted: fn(values: [String]) -> [String] {
 }
 
 #Test("bare and explicit jetpack refs are identical") {
-    bare := EnvFile.empty()
+    ^bare: EnvFile.empty()
     bare.packages = [String]{"ripgrep"}
-    explicit := EnvFile.empty()
+    ^explicit: EnvFile.empty()
     explicit.packages = [String]{"ripgrep@jetpack"}
     assert_eq(bare.refs(), explicit.refs())
 }

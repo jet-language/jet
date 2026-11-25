@@ -53,7 +53,7 @@ env_transition_test_error: fn(result: TransitionResult EnvironmentError!, what: 
 }
 
 #Test("transition journal preserves every byte and distinguishes absent from empty") {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop value in 0..<256 -> bytes.push(U8{value})
     encoded: env_transition_encode_state(Val(bytes))
     assert(encoded.starts_with("f00010203"))
@@ -152,7 +152,7 @@ env_transition_test_error: fn(result: TransitionResult EnvironmentError!, what: 
     env_transition_create_real_dirs(plan.root, files.dirname(plan.journal_path)) ?? panic("create journal dir")
     env_transition_write_atomic(plan.journal_path, plan.journal) ?? panic("write journal")
     generated: files.join(plan.root, "package/env.jet")
-    generated_after := [U8]?{None}
+    ^generated_after: [U8]?{None}
     loop change in plan.changes {
         if change.relative == "package/env.jet" -> generated_after = change.after
     }

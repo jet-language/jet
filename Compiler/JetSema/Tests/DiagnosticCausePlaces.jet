@@ -17,9 +17,9 @@ cause_require: fn(ok: Bool, name: String) Never! {
 
 // `code file start-end` of a presented cause, `-` where it has none.
 cause_place: fn(cause: DiagnosticCause) -> String Never! {
-    file := "-"
+    ^file: "-"
     if cause.origin == .Val(origin) -> file = "{origin.display}@{origin.revision}"
-    place := "-"
+    ^place: "-"
     if cause.span == .Val(span) -> place = "{span.start}-{span.end}"
     "{cause.code} {file} {place}"
 }
@@ -40,7 +40,7 @@ cause_place: fn(cause: DiagnosticCause) -> String Never! {
     }
     raw: Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E2404", span: Val(Span{start: 112, end: 120}), source_path: Val("main.jet"), source_offset: Val(100), source_start: Val(0), cause: causes, what: "a call fails", why: "why", fix: "fix"}
 
-    origins := [String:DiagnosticOrigin]{}
+    ^origins: [String:DiagnosticOrigin]{}
     presented: jet_driver_present_diagnostic(raw, snapshot, [SourceFile]{}, origins)
     own: presented.origin ?? panic("diagnostic cause places: the report lost its origin")
     cause_require(own.display == "main.jet", "the report is placed in main.jet")

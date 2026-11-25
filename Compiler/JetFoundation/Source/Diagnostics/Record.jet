@@ -74,7 +74,7 @@ diagnostic_tier_word: fn(diagnostic: Diagnostic) -> String? Never! {
 // once, in diagnostic_record's order. A caller names each for
 // diagnostic_record.
 diagnostic_repair_paths: fn(diagnostic: Diagnostic) -> [String] Never! {
-    paths := [String]{}
+    ^paths: [String]{}
     if diagnostic.edit == .Val(edit) {
         diagnostic_repair_path_add(paths, edit)
         loop other in diagnostic.fix_edits -> diagnostic_repair_path_add(paths, other)
@@ -102,13 +102,13 @@ diagnostic_repair_path_add: fn(paths: ^[String], repair: TextEdit) Never! {
 // `paths[i]` (diagnostic_repair_paths), else `file`. Every repair carries the
 // diagnostic's grade.
 diagnostic_record: fn(diagnostic: Diagnostic, file: String, origin: ^^DiagnosticRecordOrigin?, paths: [String], names: [String]) -> DiagnosticRecord Never! {
-    span := DiagnosticRecordSpan?{None}
-    placed := DiagnosticRecordOrigin?{None}
+    ^span: DiagnosticRecordSpan?{None}
+    ^placed: DiagnosticRecordOrigin?{None}
     if diagnostic.span == .Val(found) {
         span = Val(DiagnosticRecordSpan{file: "{file}", start: found.start, end: found.end})
         placed = origin
     }
-    edits := [DiagnosticRecordEdit]{}
+    ^edits: [DiagnosticRecordEdit]{}
     if diagnostic.edit == .Val(edit) {
         diagnostic_record_repair(edits, diagnostic, edit, file, paths, names)
         loop other in diagnostic.fix_edits {
@@ -141,7 +141,7 @@ diagnostic_record: fn(diagnostic: Diagnostic, file: String, origin: ^^Diagnostic
 // applies only a graded repair.
 diagnostic_record_repair: fn(edits: ^[DiagnosticRecordEdit], diagnostic: Diagnostic, repair: TextEdit, file: String, paths: [String], names: [String]) Never! {
     safety: diagnostic.safety ?? return
-    named := "{file}"
+    ^named: "{file}"
     if repair.path == .Val(path) {
         loop index in 0..<paths.len() {
             if paths[index] == path && index < names.len() {

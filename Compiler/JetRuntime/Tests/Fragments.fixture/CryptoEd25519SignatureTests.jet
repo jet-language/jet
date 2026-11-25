@@ -9,12 +9,12 @@
     scratch: owned + I64{8}
     rt_text_store(owned, I64{0x42})
     rt_text_store(scratch + size, I64{0x24})
-    at := I64{0}
+    ^at: I64{0}
     loop at < size {
         rt_text_put(scratch + at, I64{165})
         at += I64{1}
     }
-    result := I64{1}
+    ^result: I64{1}
     if (kind == I64{0}) { rt_crypto_ed25519_sign(key, message, length, signature, scratch) } else {
         if (kind == I64{3}) { rt_crypto_ed25519_public(key, signature, scratch) } else {
             if (kind == I64{1}) {

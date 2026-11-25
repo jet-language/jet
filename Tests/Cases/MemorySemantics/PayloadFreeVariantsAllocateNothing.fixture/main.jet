@@ -54,13 +54,13 @@ weight: fn(shape: Shape) -> Int {
 point_or_empty: fn(i: Int) -> Shape { if i % 2 == 0 -> Shape.Point else -> Shape.Empty }
 
 no_allocation_per_variant: fn() {
-    warm := [Shape]{}
+    ^warm: [Shape]{}
     loop i in 0..<1000 -> warm.push(point_or_empty(i))
-    shapes := [Shape]{}
+    ^shapes: [Shape]{}
     before: status_kb("VmRSS:")
     loop i in 0..<COUNT -> shapes.push(point_or_empty(i))
     grown: status_kb("VmRSS:") - before
-    total := 0
+    ^total: 0
     loop shape in shapes -> total += weight(shape)
     if total != 2 * COUNT -> panic("payload-free variants weigh {total}")
     per_value: grown * 1024 /% COUNT
@@ -90,9 +90,9 @@ tree_sum: fn(tree: Tree<Int>) -> Int {
 }
 
 churn: fn(from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
-        shapes := [Shape]{Shape.Point, Shape.Empty, Shape.Point, Shape.Label{text: "l{i % 10}"}}
+        ^shapes: [Shape]{Shape.Point, Shape.Empty, Shape.Point, Shape.Label{text: "l{i % 10}"}}
         kept: shapes.copy()
         grow(shapes[0], i % 9 + 2)
         shapes[1] = Shape.Circle{radius: 5}
@@ -103,7 +103,7 @@ churn: fn(from: Int, to: Int) -> Int {
         if weight(shapes[0]) != i % 9 + 2 || weight(shapes[1]) != 5 || weight(shapes[2]) != 3 {
             panic("a written variant reads wrong")
         }
-        tree := Tree<Int>.Leaf
+        ^tree: Tree<Int>.Leaf
         values: [Int]{i % 5, i % 3, i % 7}
         loop value in values -> tree = insert(tree, value)
         copied: tree.copy()

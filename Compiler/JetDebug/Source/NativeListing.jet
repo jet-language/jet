@@ -35,9 +35,9 @@ NativeListingAsk: struct {
 // of each function of the file that hold it, the pieces the optimizer moved
 // away included. `file` is the console's source, read as `lines`.
 native_disassemble: fn(session: ^NativeSession, operand: String, file: String, lines: [String]) -> String NativeDebugError! {
-    spec := ""
-    specs := 0
-    bytes := false
+    ^spec: ""
+    ^specs: 0
+    ^bytes: false
     loop word in operand.split(" ") {
         if {
             word == "--bytes" -> bytes = true
@@ -71,17 +71,17 @@ native_disassemble: fn(session: ^NativeSession, operand: String, file: String, l
         }
         return Ok("No function or symbol holds the pc {x64_hex(pc)}\n")
     }
-    line := Int.parse(spec) ?? -1
-    in_file := "{file}"
-    last := line
+    ^line: Int.parse(spec) ?? -1
+    ^in_file: "{file}"
+    ^last: line
     if line == -1 && spec.contains(":") {
         in_file = "{spec.before(":")}"
         span: spec.after(":")
         line = Int.parse(span.before("-")) ?? 0
         last = if span.contains("-") -> Int.parse(span.after("-")) ?? 0 else -> line
     }
-    ask := NativeListingAsk{pc: -1, first: 0, last: 0, bytes: bytes, places: ""}
-    text := ""
+    ^ask: NativeListingAsk{pc: -1, first: 0, last: 0, bytes: bytes, places: ""}
+    ^text: ""
     if line == -1 {
         loop (index, function) in session.image.lines.functions {
             if function.name != spec || native_listing_replaced(session, function.low) -> next
@@ -145,7 +145,7 @@ native_listing_replaced: fn(session: NativeSession, low: Int) -> Bool Never! {
 // headed by the line and its source text; a run of inlined code is headed
 // by the function inlined and the line of its call (native_listing_call_line).
 native_listing_block: fn(session: NativeSession, symbols: [X64ListingSymbol], function: Int, low: Int, high: Int, name: String, ask: NativeListingAsk, file: String, lines: [String]) -> String Never! {
-    marks := [Int:String]{}
+    ^marks: [Int:String]{}
     loop breakpoint in session.breakpoints {
         loop at in breakpoint.addresses {
             if at < low || at >= high -> next
@@ -153,10 +153,10 @@ native_listing_block: fn(session: NativeSession, symbols: [X64ListingSymbol], fu
         }
     }
     rows: x64_listing(session.code(low, high - low), low, session.image.lines, function, symbols, marks)
-    least := 0
-    most := 0
-    widest := 0
-    kept := 0
+    ^least: 0
+    ^most: 0
+    ^widest: 0
+    ^kept: 0
     loop row in rows {
         if ask.first > 0 && (row.line < ask.first || row.line > ask.last) -> next
         kept += 1
@@ -166,8 +166,8 @@ native_listing_block: fn(session: NativeSession, symbols: [X64ListingSymbol], fu
         if row.line > most -> most = row.line
     }
     if kept == 0 -> return ""
-    base := ""
-    path := ""
+    ^base: ""
+    ^path: ""
     if function >= 0 {
         base = native_listing_files.basename(session.image.lines.functions[function].file)
         path = native_line_source(session.image.lines.functions[function].dir, session.image.lines.functions[function].file)
@@ -178,7 +178,7 @@ native_listing_block: fn(session: NativeSession, symbols: [X64ListingSymbol], fu
         least == 0 -> "  {base}  -O{session.image.level}"
         else -> "  {base}:{span}  -O{session.image.level}"
     }
-    text := "{name}{located}  {x64_hex(low)}, {high - low} bytes\n"
+    ^text: "{name}{located}  {x64_hex(low)}, {high - low} bytes\n"
     loop fixed in session.fixed {
         if fixed.was == low {
             text = "{text}  fix replaced it: its entry jumps to the edit's code at {x64_hex(fixed.address)}\n"
@@ -197,7 +197,7 @@ native_listing_block: fn(session: NativeSession, symbols: [X64ListingSymbol], fu
     // without a note.
     core: path.starts_with(MODULE_CORE_PREFIX)
     own: base == file && !core && lines.len() > 0
-    other := [String]{}
+    ^other: [String]{}
     if function >= 0 && !own && (session.evaluator != None || !core) {
         if session.source_text(path) == {
             .Ok(found) -> { other = found.split("\n").to_list() }
@@ -205,8 +205,8 @@ native_listing_block: fn(session: NativeSession, symbols: [X64ListingSymbol], fu
         }
     }
     described: native_function_at(session.image, low)
-    line := 0
-    run := -1
+    ^line: 0
+    ^run: -1
     loop row in rows {
         if ask.first > 0 && (row.line < ask.first || row.line > ask.last) -> next
         if row.line > 0 && row.line != line {
@@ -216,7 +216,7 @@ native_listing_block: fn(session: NativeSession, symbols: [X64ListingSymbol], fu
         }
         // The innermost inlined run holding the row: runs follow the run
         // they are nested in.
-        inner := -1
+        ^inner: -1
         if described == .Val(found) {
             loop (index, inlined) in found.inlined {
                 if row.address >= inlined.low && row.address < inlined.high -> inner = index
@@ -259,8 +259,8 @@ native_listing_call_line: fn(function: NativeFunction, run: Int) -> String Never
 // function. Without the image's symbols (NativeSession.eval_facts) only the
 // functions.
 native_listing_symbols: fn(session: ^NativeSession) -> [X64ListingSymbol] Never! {
-    symbols := [X64ListingSymbol]{}
-    starts := [Int:Bool]{}
+    ^symbols: [X64ListingSymbol]{}
+    ^starts: [Int:Bool]{}
     loop function in session.image.lines.functions {
         symbols.push(X64ListingSymbol{address: function.low, size: function.high - function.low, name: "{function.name}"})
         starts[function.low] = true
@@ -273,7 +273,7 @@ native_listing_symbols: fn(session: ^NativeSession) -> [X64ListingSymbol] Never!
 // The `.symtab` symbols named `name`; none without the image's symbols
 // (NativeSession.eval_facts).
 native_listing_named: fn(session: ^NativeSession, name: String) -> [X64ListingSymbol] Never! {
-    found := [X64ListingSymbol]{}
+    ^found: [X64ListingSymbol]{}
     facts_cell: session.eval_facts() ?? return found
     facts: facts_cell.guard_read()
     slot: facts.value.symbols.slots.get(name) ?? return found
@@ -337,25 +337,25 @@ NATIVE_LISTING_DEBUGGER: "[debugger]"
 native_listing_window: fn(session: ^NativeSession, address: Int, skip: Int, count: Int) -> [NativeListedRow] Never! {
     symbols: native_listing_symbols(session)
     spans: native_listing_spans(session, symbols)
-    at := -1
+    ^at: -1
     loop (index, span) in spans {
         if address >= span.low && address < span.high -> at = index
     }
-    shown := [NativeListedRow]{}
+    ^shown: [NativeListedRow]{}
     if at < 0 {
         loop index in 0..<count -> shown.push(native_listing_invalid(address + skip + index))
         return shown
     }
-    rows := native_listing_span_rows(session, symbols, spans[at])
-    here := 0
+    ^rows: native_listing_span_rows(session, symbols, spans[at])
+    ^here: 0
     loop (index, row) in rows {
         if row.address <= address -> here = index
     }
-    first := at
-    last := at
+    ^first: at
+    ^last: at
     loop here + skip < 0 && first > 0 && spans[first - 1].high == spans[first].low {
         first -= 1
-        earlier := native_listing_span_rows(session, symbols, spans[first])
+        ^earlier: native_listing_span_rows(session, symbols, spans[first])
         here += earlier.len()
         loop row in rows.move() -> earlier.push(row)
         rows = earlier
@@ -392,7 +392,7 @@ native_listing_invalid: fn(address: Int) -> NativeListedRow Never! {
 // bytes apart, the padding. A stretch overlapping an earlier one is left
 // out.
 native_listing_spans: fn(session: NativeSession, symbols: [X64ListingSymbol]) -> [NativeListingSpan] Never! {
-    found := [NativeListingSpan]{}
+    ^found: [NativeListingSpan]{}
     loop symbol in symbols {
         if symbol.size <= 0 -> next
         index: x64_jetline_find(session.image.lines, symbol.address)
@@ -413,7 +413,7 @@ native_listing_spans: fn(session: NativeSession, symbols: [X64ListingSymbol]) ->
         }
     }
     found.sort_by(fn(left: NativeListingSpan, right: NativeListingSpan) { (left.low <=> right.low).then(right.function <=> left.function) })
-    spans := [NativeListingSpan]{}
+    ^spans: [NativeListingSpan]{}
     loop span in found.move() {
         if spans.len() > 0 {
             end: spans[spans.len() - 1].high
@@ -429,13 +429,13 @@ native_listing_spans: fn(session: NativeSession, symbols: [X64ListingSymbol]) ->
 
 // The rows of the stretch `span`, through the one listing builder.
 native_listing_span_rows: fn(session: NativeSession, symbols: [X64ListingSymbol], span: NativeListingSpan) -> [NativeListedRow] Never! {
-    file := ""
-    path := ""
+    ^file: ""
+    ^path: ""
     if span.function >= 0 {
         file = "{session.image.lines.functions[span.function].file}"
         path = native_line_source(session.image.lines.functions[span.function].dir, session.image.lines.functions[span.function].file)
     }
-    listed := [NativeListedRow]{}
+    ^listed: [NativeListedRow]{}
     loop row in x64_listing(session.code(span.low, span.high - span.low), span.low, session.image.lines, span.function, symbols, [Int:String]{}) {
         text: x64_listing_text(row, span.low, span.high)
         symbol: if span.name == "" -> "" else -> "{span.name}+{row.offset}"
@@ -451,7 +451,7 @@ native_listing_span_rows: fn(session: NativeSession, symbols: [X64ListingSymbol]
 // register or at a register plus an offset.
 native_listing_places: fn(image: NativeImage, lookup: Int, site: Int) -> String Never! {
     function: native_function_at(image, lookup) ?? return ""
-    places := [String]{}
+    ^places: [String]{}
     loop variable in function.variables {
         if variable.site != site || variable.list < 0 -> next
         range: native_variable_covering(image, variable, lookup) ?? next
@@ -479,7 +479,7 @@ native_listing_places: fn(image: NativeImage, lookup: Int, site: Int) -> String 
 // `bytes` as two hex digits each, spaced: `48 8d 7b ff`.
 native_listing_bytes: fn(bytes: [U8]) -> String Never! {
     digits: "0123456789abcdef"
-    text := ""
+    ^text: ""
     loop (index, byte) in bytes {
         value: Int{byte}
         text = "{text}{if index == 0 -> "" else -> " "}{digits.slice(value >> 4, (value >> 4) + 1)}{digits.slice(value & 15, (value & 15) + 1)}"

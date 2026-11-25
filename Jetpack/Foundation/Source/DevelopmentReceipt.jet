@@ -59,7 +59,7 @@ JetDevelopmentReceipt: struct {
     failure_path: JetDevelopmentReceiptPath?,
 
     render: fn(self) -> String Never! {
-        out := "{JET_DEVELOPMENT_RECEIPT_HEADER}\n"
+        ^out: "{JET_DEVELOPMENT_RECEIPT_HEADER}\n"
         out = "{out}{jet_receipt_line("act", "", self.act)}"
         out = "{out}{jet_receipt_line("closure", "", self.locked_closure)}"
         loop input in jet_receipt_sorted_pairs(self.inputs) {
@@ -88,7 +88,7 @@ JetDevelopmentReceipt: struct {
     // Inputs are sorted so callers cannot manufacture a second identity by
     // presenting the same locked closure in a different order.
     identity_bytes: fn(self) -> [U8] Never! {
-        out := "jet-development-act-v1".bytes()
+        ^out: "jet-development-act-v1".bytes()
         out.push(U8{0})
         jet_receipt_frame(out, self.act)
         jet_receipt_frame(out, self.locked_closure)
@@ -120,7 +120,7 @@ jet_receipt_is_content_address: fn(value: String) -> Bool Never! {
 
 // Inputs ordered by (name, digest).
 jet_receipt_sorted_pairs: fn(values: [JetDevelopmentReceiptInput]) -> [JetDevelopmentReceiptInput] Never! {
-    sorted := values.copy()
+    ^sorted: values.copy()
     sorted.sort_by(fn(left: JetDevelopmentReceiptInput, right: JetDevelopmentReceiptInput) { (left.name <=> right.name).then(left.digest <=> right.digest) })
     sorted
 }
@@ -132,7 +132,7 @@ jet_receipt_line: fn(kind: String, name: String, value: String) -> String Never!
 
 jet_receipt_hex: fn(value: String) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in value.bytes() {
         code: Int{byte}
         out.push(digits[code >> 4])
@@ -144,7 +144,7 @@ jet_receipt_hex: fn(value: String) -> String Never! {
 // An 8-byte big-endian length followed by the UTF-8 bytes.
 jet_receipt_frame: fn(out: ^[U8], value: String) Never! {
     bytes: value.bytes()
-    shift := 56
+    ^shift: 56
     loop shift >= 0 {
         out.push(U8{((bytes.len() >> shift)) & 255})
         shift -= 8

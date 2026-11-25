@@ -15,7 +15,7 @@ hold: fn(r: ^^Res) -> Int { r.name.len() }
 
 from_param: fn(env: Res?) -> Int {
     if env == .Val(held) {
-        applied := held
+        ^applied: held
         return hold(applied)
     }
     0
@@ -23,14 +23,14 @@ from_param: fn(env: Res?) -> Int {
 
 from_element: fn(items: [Res?]) -> Int {
     if items[0] == .Val(held) {
-        applied := held
+        ^applied: held
         return hold(applied)
     }
     0
 }
 
 from_payload_loop: fn(warm: [Res]?) -> Int {
-    merged := [Res]{}
+    ^merged: [Res]{}
     if warm == .Val(existing) {
         loop entry in existing -> merged.push(entry)
     }
@@ -42,16 +42,16 @@ Holder: struct {
 }
 
 from_projection_loop: fn() -> Int {
-    value := Holder{items: [Res{name: "a"}]}
+    ^value: Holder{items: [Res{name: "a"}]}
     items: value.items
     value.items = [Res]{}
-    sink := [Res]{}
+    ^sink: [Res]{}
     loop item in items -> sink.push(item)
     sink.len()
 }
 
 from_param_loop: fn(items: [Res]) -> Int {
-    sink := [Res]{}
+    ^sink: [Res]{}
     loop item in items -> sink.push(item)
     sink.len()
 }

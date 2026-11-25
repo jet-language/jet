@@ -9,7 +9,7 @@ JetCLIComplexityReport: struct {
 }
 
 jet_cli_complexity_reports: fn(program: Program) -> [JetCLIComplexityReport] Never! {
-    reports := [JetCLIComplexityReport]{}
+    ^reports: [JetCLIComplexityReport]{}
     jet_cli_complexity_items(program.tables, program.items, reports)
     // Descending score, then source position, then name: a stable order.
     reports.sort_by(fn(left: JetCLIComplexityReport, right: JetCLIComplexityReport) { (right.score <=> left.score).then(left.span.start <=> right.span.start).then(left.name <=> right.name) })
@@ -95,13 +95,13 @@ JetCLIComplexityVisitor: struct {
 // A control node's span covers its head only (`if`, `loop`): its nesting
 // scope runs to the end of the furthest expression under it, at least `end`.
 jet_cli_complexity_extent: fn(tables: ASTTables, expression: ExprNode, end: Int) -> Int Never! {
-    ends := [Int]{end}
+    ^ends: [Int]{end}
     ast_visit_expr(tables, expression, fn(inner: ExprNode) { ends.push(ast_expr_span(tables, inner).end) })
     jet_cli_complexity_furthest(ends)
 }
 
 jet_cli_complexity_body_extent: fn(tables: ASTTables, bodies: [[StmtNode]], end: Int) -> Int Never! {
-    ends := [Int]{end}
+    ^ends: [Int]{end}
     loop body in bodies {
         ast_visit_body(tables, body, fn(inner: ExprNode) { ends.push(ast_expr_span(tables, inner).end) }, true)
     }
@@ -109,7 +109,7 @@ jet_cli_complexity_body_extent: fn(tables: ASTTables, bodies: [[StmtNode]], end:
 }
 
 jet_cli_complexity_furthest: fn(ends: [Int]) -> Int Never! {
-    furthest := ends[0]
+    ^furthest: ends[0]
     loop value in ends {
         if value > furthest -> furthest = value
     }
@@ -117,12 +117,12 @@ jet_cli_complexity_furthest: fn(ends: [Int]) -> Int Never! {
 }
 
 jet_cli_complexity_function: fn(tables: ASTTables, function: Func, reports: ^[JetCLIComplexityReport]) Never! {
-    visitor := JetCLIComplexityVisitor{function_name: function.name, controls: [Span]{}, nesting: [Span]{}, mixed: 0, recursive: false}
+    ^visitor: JetCLIComplexityVisitor{function_name: function.name, controls: [Span]{}, nesting: [Span]{}, mixed: 0, recursive: false}
     loop statement in function.body {
         jet_cli_complexity_statement(tables, statement, visitor.controls, visitor.nesting)
         ast_visit_statement(tables, statement, fn(expression: ExprNode) { visitor.visit(tables, expression) }, false)
     }
-    score := visitor.mixed + if visitor.recursive -> 1 else -> 0
+    ^score: visitor.mixed + if visitor.recursive -> 1 else -> 0
     loop inner in visitor.controls {
         score += 1
         loop outer in visitor.nesting {
@@ -160,7 +160,7 @@ jet_cli_complexity_statement: fn(tables: ASTTables, statement: StmtNode, control
         }
         .Switch(_, arms, else_body, span) | .ComptimeSwitch(_, arms, else_body, span) -> {
             controls.push(span.copy())
-            bodies := [[StmtNode]]{}
+            ^bodies: [[StmtNode]]{}
             loop arm in arms {
                 jet_cli_complexity_body(tables, arm.body, controls, nesting)
                 // copy: the arm stays the statement's; the extent walk reads its own list.
@@ -176,7 +176,7 @@ jet_cli_complexity_statement: fn(tables: ASTTables, statement: StmtNode, control
             controls.push(span.copy())
             jet_cli_complexity_body(tables, then_body, controls, nesting)
             // copy: the bodies stay the statement's; the extent walk reads its own list.
-            bodies := [[StmtNode]]{then_body.copy()}
+            ^bodies: [[StmtNode]]{then_body.copy()}
             if else_body == .Val(body) {
                 jet_cli_complexity_body(tables, body, controls, nesting)
                 bodies.push(body.copy())

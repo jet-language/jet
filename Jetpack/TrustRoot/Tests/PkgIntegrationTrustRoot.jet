@@ -63,14 +63,14 @@ use {
     keys: fixture.keys
     signed_root: trust_sign_root(root, [TrustKey]{keys[0], keys[1]}) ?? panic("sign root")
     pin: crypto.sha256(trust_canonical_root(root).bytes()).hex()
-    policy := TrustRootPolicy.default()
+    ^policy: TrustRootPolicy.default()
     policy.trusted_unix = Val(now)
     policy.max_clock_skew_secs = 60
-    eng := TrustEngine.bootstrap(signed_root, fixture.keyring, policy, Val(pin), TrustedClock.Fixed(now), Val(dir)) ?? panic("bootstrap")
+    ^eng: TrustEngine.bootstrap(signed_root, fixture.keyring, policy, Val(pin), TrustedClock.Fixed(now), Val(dir)) ?? panic("bootstrap")
     loaded: RootBootstrap.load(dir) ?? panic("load bootstrap")
     assert_eq(loaded.pin_digest, pin)
     assert(loaded.consistent_snapshot)
-    stripped := signed_root
+    ^stripped: signed_root
     stripped.signatures = [TrustSignature]{}
     assert(
         if TrustEngine.bootstrap(stripped, eng.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
@@ -81,7 +81,7 @@ use {
             }
         },
     )
-    rotated := root
+    ^rotated: root
     rotated.version = 2
     eng.recovery_drill_threshold_minus_one(rotated, [TrustKey]{keys[0]}, TrustedClock.Fixed(now)) ?? panic("recovery drill")
     rotated.roles = eng.root.roles
@@ -89,9 +89,9 @@ use {
     rotated.delegations = eng.root.delegations
     signed_rot: trust_sign_root(rotated, [TrustKey]{keys[1], keys[2]}) ?? panic("sign rotation")
     eng.update_root(signed_rot, TrustedClock.Fixed(now)) ?? panic("rotate root")
-    hashes := [String:String]{}
+    ^hashes: [String:String]{}
     hashes["sha256"] = crypto.sha256("pkg".bytes()).hex()
-    target_map := [String:TargetMeta]{}
+    ^target_map: [String:TargetMeta]{}
     target_map["jetsrc/pkg"] = TargetMeta{length: 3, hashes: hashes, custom: [String:String]{}}
     targets: TargetsMetadata{version: 3, expires_unix: now + 3600, targets: target_map}
     signed_t: trust_sign_targets(targets, [TrustKey]{keys[3]}) ?? panic("sign targets")
@@ -106,15 +106,15 @@ use {
         },
     )
     t_canon: trust_canonical_targets(targets)
-    t_hashes := [String:String]{}
+    ^t_hashes: [String:String]{}
     t_hashes["sha256"] = crypto.sha256(t_canon.bytes()).hex()
-    meta := [String:SnapshotMetaEntry]{}
+    ^meta: [String:SnapshotMetaEntry]{}
     meta["targets"] = SnapshotMetaEntry{version: 3, length: t_canon.bytes().len(), hashes: t_hashes}
     snap: SnapshotMetadata{version: 4, expires_unix: now + 3600, meta: meta}
     signed_s: trust_sign_snapshot(snap, [TrustKey]{keys[4]}) ?? panic("sign snapshot")
     eng.verify_snapshot(signed_s, t_canon, 3, TrustedClock.Fixed(now)) ?? panic("verify snapshot")
     s_canon: trust_canonical_snapshot(snap)
-    s_hashes := [String:String]{}
+    ^s_hashes: [String:String]{}
     s_hashes["sha256"] = crypto.sha256(s_canon.bytes()).hex()
     ts: TimestampMetadata{version: 5, expires_unix: now + 3600, snapshot: SnapshotMetaEntry{version: 4, length: s_canon.bytes().len(), hashes: s_hashes}}
     eng.verify_timestamp(trust_sign_timestamp(ts, [TrustKey]{keys[5]}) ?? panic("sign timestamp"), s_canon, 4, TrustedClock.Fixed(now)) ?? panic("verify timestamp")
@@ -158,7 +158,7 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
             }
         },
     )
-    replacement := root
+    ^replacement: root
     replacement.version = 2
     replacement_root: trust_sign_root(replacement, [TrustKey]{keys[0], keys[1]}) ?? panic("sign replacement root")
     assert(
@@ -170,18 +170,18 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
             }
         },
     )
-    hashes := [String:String]{}
+    ^hashes: [String:String]{}
     hashes["sha256"] = crypto.sha256("pkg".bytes()).hex()
-    target_map := [String:TargetMeta]{}
+    ^target_map: [String:TargetMeta]{}
     target_map["jetsrc/pkg"] = TargetMeta{length: 3, hashes: hashes, custom: [String:String]{}}
-    targets := TargetsMetadata{version: 1, expires_unix: now + 3600, targets: target_map}
+    ^targets: TargetsMetadata{version: 1, expires_unix: now + 3600, targets: target_map}
     signed_targets: trust_sign_targets(targets, [TrustKey]{keys[3]}) ?? panic("sign targets")
-    engine := pkg_integration_trust_boot(fixture, signed_root, pin, now)
+    ^engine: pkg_integration_trust_boot(fixture, signed_root, pin, now)
     engine.verify_targets(signed_targets, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify targets v1")
     targets.version = 2
     signed_v2: trust_sign_targets(targets, [TrustKey]{keys[3]}) ?? panic("sign targets v2")
     engine.verify_targets(signed_v2, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify targets v2")
-    old := targets
+    ^old: targets
     old.version = 1
     signed_old: trust_sign_targets(old, [TrustKey]{keys[3]}) ?? panic("sign older targets")
     assert(
@@ -193,10 +193,10 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
             }
         },
     )
-    frozen := targets
+    ^frozen: targets
     frozen.version = 3
     frozen.expires_unix = now
-    frozen_engine := pkg_integration_trust_boot(fixture, signed_root, pin, now)
+    ^frozen_engine: pkg_integration_trust_boot(fixture, signed_root, pin, now)
     assert(
         if frozen_engine.verify_targets(trust_sign_targets(frozen, [TrustKey]{keys[3]}) ?? panic("sign frozen targets"), Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
             .Ok(_) -> false
@@ -206,12 +206,12 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
             }
         },
     )
-    changed_custom := signed_targets
-    custom_target := changed_custom.signed.targets.get("jetsrc/pkg") ?? panic("target")
+    ^changed_custom: signed_targets
+    ^custom_target: changed_custom.signed.targets.get("jetsrc/pkg") ?? panic("target")
     custom_target.custom["provenance"] = "attacker"
     changed_custom.signed.targets["jetsrc/pkg"] = custom_target
     changed_custom.signatures = (trust_sign_targets(changed_custom.signed, [TrustKey]{keys[3]}) ?? panic("resign custom metadata")).signatures
-    custom_engine := pkg_integration_trust_boot(fixture, signed_root, pin, now)
+    ^custom_engine: pkg_integration_trust_boot(fixture, signed_root, pin, now)
     custom_engine.verify_targets(signed_targets, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify before custom mutation")
     assert(
         if custom_engine.verify_targets(changed_custom, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
@@ -222,18 +222,18 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
             }
         },
     )
-    chain := pkg_integration_trust_boot(fixture, signed_root, pin, now)
+    ^chain: pkg_integration_trust_boot(fixture, signed_root, pin, now)
     chain.verify_targets(signed_targets, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify chain targets")
     targets_canonical: trust_canonical_targets(signed_targets.signed)
-    t_hashes := [String:String]{}
+    ^t_hashes: [String:String]{}
     t_hashes["sha256"] = crypto.sha256(targets_canonical.bytes()).hex()
-    meta := [String:SnapshotMetaEntry]{}
+    ^meta: [String:SnapshotMetaEntry]{}
     meta["targets"] = SnapshotMetaEntry{version: 1, length: targets_canonical.bytes().len(), hashes: t_hashes}
     snapshot: SnapshotMetadata{version: 1, expires_unix: now + 3600, meta: meta}
     signed_snapshot: trust_sign_snapshot(snapshot, [TrustKey]{keys[4]}) ?? panic("sign snapshot")
     chain.verify_snapshot(signed_snapshot, targets_canonical, 1, TrustedClock.Fixed(now)) ?? panic("verify snapshot")
     snapshot_canonical: trust_canonical_snapshot(snapshot)
-    s_hashes := [String:String]{}
+    ^s_hashes: [String:String]{}
     s_hashes["sha256"] = crypto.sha256(snapshot_canonical.bytes()).hex()
     timestamp: TimestampMetadata{version: 1, expires_unix: now + 3600, snapshot: SnapshotMetaEntry{version: 1, length: snapshot_canonical.bytes().len() + 1, hashes: s_hashes}}
     assert(
@@ -254,7 +254,7 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
     assert(trust_is_cache_witness_allowed(dir, "public", receipt.witness) ?? panic("check allowed witness"))
     untrusted_witness: if receipt.witness == "stranger" -> "other-stranger" else -> "stranger"
     assert(!(trust_is_cache_witness_allowed(dir, "public", untrusted_witness) ?? panic("check untrusted witness")))
-    tampered_witness := receipt
+    ^tampered_witness: receipt
     tampered_witness.witness = untrusted_witness
     assert(
         if tampered_witness.verify(cache_key, TrustedClock.Fixed(now)) == {
@@ -265,7 +265,7 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
             }
         },
     )
-    tampered_receipt := receipt
+    ^tampered_receipt: receipt
     tampered_receipt.provenance.output = "sha256:attacker"
     assert(
         if tampered_receipt.verify(cache_key, TrustedClock.Fixed(now)) == {

@@ -28,7 +28,7 @@ JetCLICanvasDebugHost: struct {
         }
 
         replay: fn(self, live: ^NativeSession, image: String, recording: String, entry: String, scratch: String, args: ^[String]) -[FS, Env, Time.Wait]> CanvasDebugError! {
-            refusal := JetCLIProveRefusal?{None}
+            ^refusal: JetCLIProveRefusal?{None}
             if jet_cli_debug_replay_env(recording, entry, scratch, args) == {
                 .Ok(env) -> { live.env = Val(env) }
                 .Err(refused) -> { refusal = Val(refused) }

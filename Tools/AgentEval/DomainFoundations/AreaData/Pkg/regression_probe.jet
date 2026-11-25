@@ -25,11 +25,11 @@ Regression: struct {
 }
 
 fit: fn(rows: [Observation]) -> Regression {
-    n := 0
-    sum_x := Float{0.0}
-    sum_y := Float{0.0}
-    sum_xx := Float{0.0}
-    sum_xy := Float{0.0}
+    ^n: 0
+    ^sum_x: Float{0.0}
+    ^sum_y: Float{0.0}
+    ^sum_xx: Float{0.0}
+    ^sum_xy: Float{0.0}
     loop row in rows {
         n += 1
         sum_x += row.x
@@ -42,8 +42,8 @@ fit: fn(rows: [Observation]) -> Regression {
     slope: (nf * sum_xy - sum_x * sum_y) / denominator
     intercept: (sum_y - slope * sum_x) / nf
     mean_y: sum_y / nf
-    total := Float{0.0}
-    residual := Float{0.0}
+    ^total: Float{0.0}
+    ^residual: Float{0.0}
     loop row in rows {
         predicted: intercept + slope * row.x
         total += (row.y - mean_y) * (row.y - mean_y)

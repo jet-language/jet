@@ -23,8 +23,8 @@ receiver: fn(rx: Receiver<Int>) -> Int { rx.receive() ?? 0 }
 
 // Cancel against send: the task either got the value or was canceled.
 cancel_vs_send: fn(rounds: Int) -> {received: Int, canceled: Int} {
-    received := 0
-    canceled := 0
+    ^received: 0
+    ^canceled: 0
     loop i in 0..<rounds {
         { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
         waiter: task receiver(rx)
@@ -46,8 +46,8 @@ napper: fn() -> Int {
 
 // Cancel against a timer: the sleep either ran out or was canceled.
 cancel_vs_timer: fn(rounds: Int) -> {woke: Int, canceled: Int} {
-    woke := 0
-    canceled := 0
+    ^woke: 0
+    ^canceled: 0
     loop i in 0..<rounds {
         sleeper: task napper()
         if i % 3 != 0 -> tasks.yield_now()
@@ -61,15 +61,15 @@ cancel_vs_timer: fn(rounds: Int) -> {woke: Int, canceled: Int} {
 }
 
 deadline_receiver: fn(rx: Receiver<Int>) -> Int {
-    got := 0
+    ^got: 0
     #Deadline(1ms) { got = rx.receive() ?? 0 }
     got
 }
 
 // Deadline against send: the receive either got the value or its deadline blew.
 deadline_vs_send: fn(rounds: Int) -> {received: Int, expired: Int} {
-    received := 0
-    expired := 0
+    ^received: 0
+    ^expired: 0
     loop _ in 0..<rounds {
         { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
         waiter: task deadline_receiver(rx)
@@ -98,18 +98,18 @@ idler: fn(nap: Duration) -> Int {
 // CPU spent while 1000 tasks sleep for `nap`, and how many woke.
 parked_cpu: fn(nap: Duration) -[Env, Time.Wait]> {spent: Duration, woke: Int} {
     before: sys.usage() ?? panic("usage")
-    idle := [Task<Int>]{}
+    ^idle: [Task<Int>]{}
     loop _ in 0..<1000 -> idle.push(task idler(nap))
-    woke := 0
+    ^woke: 0
     loop handle in idle -> woke += handle.join() ?? 0
     after: sys.usage() ?? panic("usage")
     {spent: (after.user + after.system) - (before.user + before.system), woke: woke}
 }
 
 run: fn() {
-    races := [Task<Int>]{}
+    ^races: [Task<Int>]{}
     loop _ in 0..<RACERS -> races.push(task racer())
-    accounted := 0
+    ^accounted: 0
     loop race in races -> accounted += race.join() ?? 0
     print("rounds accounted {accounted} of {RACERS * 2000}")
 

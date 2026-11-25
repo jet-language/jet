@@ -118,7 +118,7 @@ init_lower: fn(c: Int) -> Int Never! { if c >= 65 && c <= 90 -> c + 32 else -> c
 
 // The text up to its first NUL, as C sees a NUL-terminated string.
 c_text: fn(z: [U8]) -> [U8] Never! {
-    n := 0
+    ^n: 0
     loop n < z.len() && z[n] != (U8{0}) -> n += 1
     if n == z.len() -> return z.copy()
     z[0..<n].copy()
@@ -126,7 +126,7 @@ c_text: fn(z: [U8]) -> [U8] Never! {
 
 // sqlite3MPrintf's %w: the text with each double quote doubled.
 quote_w: fn(z: [U8]) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop c in z {
         out.push(c)
         if c == (U8{34}) -> out.push(c)
@@ -136,7 +136,7 @@ quote_w: fn(z: [U8]) -> [U8] Never! {
 
 // The bytes of a, then b.
 concat: fn(a: [U8], b: [U8]) -> [U8] Never! {
-    out := a.copy()
+    ^out: a.copy()
     loop c in b -> out.push(c)
     out
 }
@@ -155,7 +155,7 @@ db_set_property: fn(db: ^conn.Conn, i_db: Int, prop: Int) Never! {
 
 // Move the Parse out of `p`, leaving an empty one, for a builder to own.
 take_parse: fn(p: ^cg.Parse) -> cg.Parse Never! {
-    out := p
+    ^out: p
     p = cg.parse_new(conn.conn_new(), EngineGen{unused: 0})
     out
 }
@@ -217,7 +217,7 @@ finish_coding: fn(p: ^cg.Parse, a: ^ast.AST) -[DB]> Never! {
     if a.ctx.nerr == 0 {
         aux.make_ready(p.db, p.f.v, a.ctx.nvar, p.f.n_mem, p.f.n_tab, a.ctx.explain, p.f.is_multi_write && p.f.may_abort)
         // p->pVList = pParse->pVList: the names of the parameters.
-        names := [[U8]?]{}
+        ^names: [[U8]?]{}
         loop _ in 0..<a.ctx.nvar -> names.push(None)
         loop x in a.ctx.vlist {
             if x.num >= 1 && x.num <= names.len() -> names[x.num - 1] = Val(x.name)
@@ -306,7 +306,7 @@ EngineBuilder: struct {
 
         // cmd ::= select: sqlite3Select with an SRT_Output destination.
         select_output: fn(^self, a: ^ast.AST, select: Int) -[DB]> Never! {
-            dest := ex.select_dest_init(cg.SRT_OUTPUT, 0)
+            ^dest: ex.select_dest_init(cg.SRT_OUTPUT, 0)
             _: sel.select(self.p, a, select, dest)
         }
 
@@ -437,9 +437,9 @@ EngineGen: struct {
         // sqlite3ReadSchema (prepare.c).
         read_schema: fn(self, p: ^cg.Parse, a: ^ast.AST) -[DB]> Int Never! {
             if p.db.init.busy -> return base.OK
-            db := cg.take_conn(p.db)
-            h := EngineHost{unused: 0}
-            err := [U8]?{None}
+            ^db: cg.take_conn(p.db)
+            ^h: EngineHost{unused: 0}
+            ^err: [U8]?{None}
             rc: init<EngineHost>(h, db, a, err)
             if rc != base.OK {
                 a.ctx.rc = rc
@@ -516,7 +516,7 @@ EngineGen: struct {
             p.f.rename = -1
             saved_flags: p.db.m_db_flags
             p.db.m_db_flags |= conn.DBFLAG_PREFER_BUILTIN
-            b := EngineBuilder{p: take_parse(p)}
+            ^b: EngineBuilder{p: take_parse(p)}
             _: parse.run_parser<EngineBuilder>(b, a)
             p = b.p
             run_parser_cleanup(p, a)
@@ -683,9 +683,9 @@ EngineHost: struct {
                 db.has_auth = false
                 db.m_trace = 0
             }
-            h := EngineHost{unused: 0}
-            a := cg.take_ast(db)
-            data := init_data_new(0, 0)
+            ^h: EngineHost{unused: 0}
+            ^a: cg.take_ast(db)
+            ^data: init_data_new(0, 0)
             rc: exec_in<EngineHost>(h, db, a, sql, false, data, err)
             db.ast = a
             db.has_auth = saved_auth
@@ -695,8 +695,8 @@ EngineHost: struct {
 
         // OP_ParseSchema without a WHERE clause: sqlite3InitOne.
         init_one: fn(^self, db: ^conn.Conn, i_db: Int, flags: Int, err: ^[U8]?) -[DB]> Int Never! {
-            h := EngineHost{unused: 0}
-            a := cg.take_ast(db)
+            ^h: EngineHost{unused: 0}
+            ^a: cg.take_ast(db)
             rc: init_one<EngineHost>(h, db, a, i_db, err, flags)
             db.ast = a
             rc
@@ -705,17 +705,17 @@ EngineHost: struct {
         // OP_ParseSchema with a WHERE clause (vdbe.c): the matching schema
         // rows, through sqlite3InitCallback with db->init.busy set.
         parse_schema: fn(^self, db: ^conn.Conn, i_db: Int, where: [U8], err: ^[U8]?) -[DB]> Int Never! {
-            h := EngineHost{unused: 0}
-            a := cg.take_ast(db)
-            data := init_data_new(i_db, 0)
+            ^h: EngineHost{unused: 0}
+            ^a: cg.take_ast(db)
+            ^data: init_data_new(i_db, 0)
             data.mx_page = btree.btree_last_page(db.btrees[db.dbs[i_db].bt])
-            sql := concat("SELECT*FROM\"".bytes(), quote_w(db.dbs[i_db].name))
+            ^sql: concat("SELECT*FROM\"".bytes(), quote_w(db.dbs[i_db].name))
             sql = concat(sql, "\".{bld.LEGACY_SCHEMA_TABLE} WHERE ".bytes())
             sql = concat(sql, where)
             sql = concat(sql, " ORDER BY rowid".bytes())
             db.init.busy = true
-            ignored := [U8]?{None}
-            rc := exec_in<EngineHost>(h, db, a, sql, true, data, ignored)
+            ^ignored: [U8]?{None}
+            ^rc: exec_in<EngineHost>(h, db, a, sql, true, data, ignored)
             if rc == base.OK -> rc = data.rc
             // The reparse must find at least one row, or the schema table is
             // corrupt.
@@ -738,7 +738,7 @@ EngineHost: struct {
         }
 
         reprepare: fn(^self, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
-            h := EngineHost{unused: 0}
+            ^h: EngineHost{unused: 0}
             reprepare<EngineHost>(h, db, v)
         }
     }
@@ -759,7 +759,7 @@ corrupt_schema: fn(db: conn.Conn, data: ^InitData, obj_type: [U8]?, obj_name: [U
         data.rc = base.ERROR
     } else if db.flags & btree.SQLITE_WRITE_SCHEMA != 0 { data.rc = base.CORRUPT } else {
         obj: obj_name ?? "?".bytes()
-        z := "malformed database schema ({ast.text(obj)})"
+        ^z: "malformed database schema ({ast.text(obj)})"
         if extra == .Val(x) && x.len() > 0 -> z = "{z} - {ast.text(x)}"
         data.err = Val(z.bytes())
         data.rc = base.CORRUPT
@@ -792,7 +792,7 @@ init_callback: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, data: ^InitDa
             corrupt_schema(db, data, argv[0], argv[1], Val("invalid rootpage".bytes()))
         }
         db.init.orphan_trigger = false
-        az := [[U8]]{}
+        ^az: [[U8]]{}
         loop x in argv -> az.push(x ?? [U8]{})
         db.init.az_init = az
         r: prepare_in<H>(h, db, a, sql, -1, 0, None)
@@ -831,13 +831,13 @@ init_one: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, i_db: Int, err: ^[
     db.init.busy = true
     // The schema table itself, by the parser, as row 1 of a schema.
     schema_name: bld.schema_table(i_db).bytes()
-    data := init_data_new(i_db, flags)
-    args := [[U8]?]{Val("table".bytes()), Val(schema_name), Val(schema_name), Val("1".bytes()), Val(SCHEMA_TABLE_SQL.bytes())}
+    ^data: init_data_new(i_db, flags)
+    ^args: [[U8]?]{Val("table".bytes()), Val(schema_name), Val(schema_name), Val("1".bytes()), Val(SCHEMA_TABLE_SQL.bytes())}
     _: init_callback<H>(h, db, a, data, Val(args))
     db.m_db_flags &= mask
     if data.err != None -> err = data.err
-    rc := data.rc
-    opened := false
+    ^rc: data.rc
+    ^opened: false
     if rc == base.OK {
         bt: db.dbs[i_db].bt
         if bt < 0 -> db_set_property(db, 1, conn.DB_SCHEMA_LOADED) else {
@@ -859,7 +859,7 @@ init_one_read: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, i_db: Int, er
     bt: db.dbs[i_db].bt
     s: db.dbs[i_db].schema
     if btree.btree_txn_state(db.btrees[bt]) == btree.TRANS_NONE {
-        ignored := 0
+        ^ignored: 0
         rc: btree.btree_begin_trans(db.btrees[bt], 0, ignored)
         if rc != base.OK {
             err = Val(base.error_string(rc).bytes())
@@ -869,7 +869,7 @@ init_one_read: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, i_db: Int, er
     }
     // meta[0..4]: schema cookie, file format, default cache size, largest
     // root page and text encoding.
-    meta := [Int]{}
+    ^meta: [Int]{}
     loop i in 0..<5 -> meta.push(btree.btree_get_meta(db.btrees[bt], i + 1))
     if db.flags & btree.SQLITE_RESET_DATABASE != 0 {
         loop i in 0..<5 -> meta[i] = 0
@@ -877,7 +877,7 @@ init_one_read: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, i_db: Int, er
     db.schemas[s].schema_cookie = meta[btree.BTREE_SCHEMA_VERSION - 1]
     if meta[btree.BTREE_TEXT_ENCODING - 1] != 0 {
         if i_db == 0 && db.m_db_flags & conn.DBFLAG_ENCODING_FIXED == 0 {
-            encoding := meta[btree.BTREE_TEXT_ENCODING - 1] & 3
+            ^encoding: meta[btree.BTREE_TEXT_ENCODING - 1] & 3
             if encoding == 0 -> encoding = base.UTF8
             if db.n_vdbe_active > 0 && encoding != db.enc && db.m_db_flags & conn.DBFLAG_VACUUM == 0 {
                 return base.LOCKED
@@ -890,7 +890,7 @@ init_one_read: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, i_db: Int, er
     }
     db.schemas[s].enc = db.enc
     if db.schemas[s].cache_size == 0 {
-        size := meta[btree.BTREE_DEFAULT_CACHE_SIZE - 1]
+        ^size: meta[btree.BTREE_DEFAULT_CACHE_SIZE - 1]
         if size < 0 -> size = 0 - size
         if size == 0 -> size = btree.DEFAULT_CACHE_SIZE
         db.schemas[s].cache_size = size
@@ -908,12 +908,12 @@ init_one_read: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, i_db: Int, er
         db.flags = util.clear_bits(db.flags, conn.SQLITE_LEGACY_FILE_FMT)
     }
     data.mx_page = btree.btree_last_page(db.btrees[bt])
-    sql := concat("SELECT*FROM\"".bytes(), quote_w(db.dbs[i_db].name))
+    ^sql: concat("SELECT*FROM\"".bytes(), quote_w(db.dbs[i_db].name))
     sql = concat(sql, "\".{bld.schema_table(i_db)} ORDER BY rowid".bytes())
     saved_auth: db.has_auth
     db.has_auth = false
-    ignored := [U8]?{None}
-    rc := exec_in<H>(h, db, a, sql, true, data, ignored)
+    ^ignored: [U8]?{None}
+    ^rc: exec_in<H>(h, db, a, sql, true, data, ignored)
     db.has_auth = saved_auth
     if data.err != None -> err = data.err
     if rc == base.OK -> rc = data.rc
@@ -939,7 +939,7 @@ init: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, err: ^[U8]?) -[DB]> In
         rc: init_one<H>(h, db, a, 0, err, 0)
         if rc != base.OK -> return rc
     }
-    i := db.dbs.len() - 1
+    ^i: db.dbs.len() - 1
     loop i > 0 {
         if !db_has_property(db, i, conn.DB_SCHEMA_LOADED) {
             rc: init_one<H>(h, db, a, i, err, 0)
@@ -957,9 +957,9 @@ schema_is_valid: fn(p: ^cg.Parse, a: ^ast.AST) -[DB]> Never! {
     loop i_db in 0..<p.db.dbs.len() {
         bt: p.db.dbs[i_db].bt
         if bt < 0 -> next
-        opened := false
+        ^opened: false
         if btree.btree_txn_state(p.db.btrees[bt]) == btree.TRANS_NONE {
-            ignored := 0
+            ^ignored: 0
             rc: btree.btree_begin_trans(p.db.btrees[bt], 0, ignored)
             if rc == base.NOMEM || rc == base.IOERR_NOMEM {
                 aux.oom_fault(p.db)
@@ -986,7 +986,7 @@ schema_is_valid: fn(p: ^cg.Parse, a: ^ast.AST) -[DB]> Never! {
 // caller's length (-1 for a NUL-terminated string); rep the statement
 // sqlite3Reprepare recompiles.
 prepare_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], n_bytes: Int, prep_flags: Int, rep: PrepareFrom?) -[DB]> Prepared Never! {
-    out := Prepared{rc: base.OK, stmt: -1, tail: 0}
+    ^out: Prepared{rc: base.OK, stmt: -1, tail: 0}
     // The statement compiled while another is (a schema row's CREATE)
     // shares the arena: keep the outer statement's context.
     saved_ctx: a.ctx
@@ -995,7 +995,7 @@ prepare_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], n_by
     saved_offset: a.err_offset
     saved_limits: a.limits
     saved_opt: a.opt_flags
-    p := cg.parse_new(cg.take_conn(db), EngineGen{unused: 0})
+    ^p: cg.parse_new(cg.take_conn(db), EngineGen{unused: 0})
     if rep == .Val(r) -> p.reprepare_vars = r.vars
     if p.db.malloc_failed {
         p.db.err_code = base.NOMEM
@@ -1007,7 +1007,7 @@ prepare_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], n_by
     // The schema lock check is shared-cache only (sqlite3BtreeSchemaLocked
     // is 0 without it).
     if p.db.disconnect >= 0 -> conn.vtab_unlock_list(p.db)
-    sql := sql0
+    ^sql: sql0
     if n_bytes >= 0 {
         if n_bytes > p.db.limits[ast.LIMIT_SQL_LENGTH] {
             aux.error_with_msg(p.db, base.TOOBIG, "statement too long".bytes())
@@ -1027,7 +1027,7 @@ prepare_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], n_by
         a.ctx.reprepare = true
         a.ctx.explain = r.explain
     }
-    b := EngineBuilder{p: p}
+    ^b: EngineBuilder{p: p}
     _: parse.run_parser<EngineBuilder>(b, a)
     p = b.p
     run_parser_cleanup(p, a)
@@ -1042,7 +1042,7 @@ prepare_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], n_by
     if a.ctx.rc != base.OK && a.ctx.rc != base.DONE {
         if p.f.check_schema && !p.db.init.busy -> schema_is_valid(p, a)
         if p.f.has_vdbe {
-            v := p.f.v
+            ^v: p.f.v
             p.f.v = conn.vdbe_new()
             p.f.has_vdbe = false
             _: aux.finalize<H>(h, p.db, v)
@@ -1054,7 +1054,7 @@ prepare_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], n_by
         } else { aux.sql_error(p.db, out.rc) }
     } else {
         if p.f.has_vdbe {
-            v := p.f.v
+            ^v: p.f.v
             p.f.v = conn.vdbe_new()
             p.f.has_vdbe = false
             out.stmt = v.slot
@@ -1078,8 +1078,8 @@ prepare_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], n_by
 // the schemas reset.
 lock_and_prepare: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql: [U8], n_bytes: Int, prep_flags: Int, rep: PrepareFrom?) -[DB]> Prepared Never! {
     if !safety_check_ok(db) -> return Prepared{rc: base.MISUSE, stmt: -1, tail: 0}
-    cnt := 0
-    out := Prepared{rc: base.OK, stmt: -1, tail: 0}
+    ^cnt: 0
+    ^out: Prepared{rc: base.OK, stmt: -1, tail: 0}
     loop {
         out = prepare_in<H>(h, db, a, sql, n_bytes, prep_flags, rep)
         if out.rc == base.OK || db.malloc_failed -> break
@@ -1107,7 +1107,7 @@ lock_and_prepare: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql: [U8],
 // program takes v's place (sqlite3VdbeSwap), v keeping its slot, SQL,
 // expiry mask, flags and counters, and v's bound values move to it.
 reprepare: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
-    a := cg.take_ast(db)
+    ^a: cg.take_ast(db)
     r: lock_and_prepare<H>(h, db, a, v.sql, -1, v.prep_flags, Val(PrepareFrom{explain: v.explain, vars: v.vars}))
     db.ast = a
     if r.rc != base.OK {
@@ -1116,7 +1116,7 @@ reprepare: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Neve
     }
     // sqlite3VdbeSwap: the contents trade places; each keeps its list
     // place (the slot) and its SQL.
-    old := v
+    ^old: v
     v = conn.vdbe_take(db, r.stmt)
     v.slot = old.slot
     v.sql = old.sql
@@ -1151,12 +1151,12 @@ reprepare: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Neve
 exec_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], cb: Bool, data: ^InitData, err: ^[U8]?) -[DB]> Int Never! {
     if !safety_check_ok(db) -> return base.MISUSE
     sql: c_text(sql0)
-    rc := base.OK
-    pos := 0
-    s := -1
+    ^rc: base.OK
+    ^pos: 0
+    ^s: -1
     aux.sql_error(db, base.OK)
     loop rc == base.OK && pos < sql.len() {
-        n_col := 0
+        ^n_col: 0
         s = -1
         r: lock_and_prepare<H>(h, db, a, sql[pos..<sql.len()].copy(), -1, conn.PREPARE_SAVESQL, None)
         rc = r.rc
@@ -1167,8 +1167,8 @@ exec_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], cb: Boo
             next
         }
         s = r.stmt
-        callback_is_init := false
-        failed := false
+        ^callback_is_init: false
+        ^failed: false
         loop {
             rc = api.stmt_step<H>(h, db, s)
             if cb && (rc == base.ROW || (rc == base.DONE && !callback_is_init && db.flags & conn.SQLITE_NULL_CALLBACK != 0)) {
@@ -1178,9 +1178,9 @@ exec_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], cb: Boo
                     n_col = api.column_count(db, s)
                     callback_is_init = true
                 }
-                vals := [[U8]?]?{None}
+                ^vals: [[U8]?]?{None}
                 if rc == base.ROW {
-                    row := [[U8]?]{}
+                    ^row: [[U8]?]{}
                     loop i in 0..<n_col {
                         z: api.column_text(db, s, i)
                         if z == None && api.column_type(db, s, i) != base.SQL_NULL {
@@ -1221,7 +1221,7 @@ exec_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], cb: Boo
 // sqlite3VdbeFinalize of statement s (none for -1).
 finalize_stmt_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, s: Int) -[DB]> Int Never! {
     if s < 0 -> return base.OK
-    v := conn.vdbe_take(db, s)
+    ^v: conn.vdbe_take(db, s)
     aux.finalize<H>(h, db, v)
 }
 
@@ -1232,8 +1232,8 @@ finalize_stmt_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, s: Int) -[DB]> Int Neve
 // database file at path (":memory:" for an in-memory database). On failure
 // the connection holds the error; close it with close_v2.
 open_v2: fn(path: String, flags_in: Int) -[DB]> {rc: Int, db: conn.Conn} Never! {
-    db := conn.conn_new()
-    flags := flags_in
+    ^db: conn.conn_new()
+    ^flags: flags_in
     // SQLITE_OPEN_PRIVATECACHE drops SHAREDCACHE; shared cache is not
     // enabled globally. Then the bits sqlite3_open_v2 does not take go.
     if flags & os.OPEN_PRIVATECACHE != 0 -> flags = util.clear_bits(flags, os.OPEN_SHAREDCACHE)
@@ -1248,7 +1248,7 @@ open_v2: fn(path: String, flags_in: Int) -[DB]> {rc: Int, db: conn.Conn} Never! 
     db.flags = db.flags | conn.SQLITE_SHORT_COL_NAMES | conn.SQLITE_ENABLE_TRIGGER | conn.SQLITE_ENABLE_VIEW | conn.SQLITE_CACHE_SPILL | conn.SQLITE_TRUSTED_SCHEMA | conn.SQLITE_DQS_DML | conn.SQLITE_DQS_DDL | conn.SQLITE_AUTO_INDEX
     db.open_flags = flags
     // Only READONLY, READWRITE and READWRITE|CREATE make sense.
-    rc := base.OK
+    ^rc: base.OK
     if (1 << (flags & 7)) & 70 == 0 {
         rc = base.MISUSE
         aux.sql_error(db, rc)
@@ -1274,7 +1274,7 @@ open_main: fn(db: ^conn.Conn, path: String, flags: Int) -[DB]> Int Never! {
     }
     bt: conn.btree_slot_new(db)
     bd: conn.bt_db_of(db)
-    rc := btree.btree_open(db.btrees[bt], Val(path), bd, 0, flags | os.OPEN_MAIN_DB, true, false, false, false)
+    ^rc: btree.btree_open(db.btrees[bt], Val(path), bd, 0, flags | os.OPEN_MAIN_DB, true, false, false, false)
     if rc != base.OK {
         conn.btree_slot_free(db, bt)
         if rc == base.IOERR_NOMEM -> rc = base.NOMEM
@@ -1299,7 +1299,7 @@ open_main: fn(db: ^conn.Conn, path: String, flags: Int) -[DB]> Int Never! {
 // a zombie and closes once its last statement is finalized.
 close_v2: fn(db: ^conn.Conn) -[DB]> Int Never! {
     if !safety_check_sick_or_ok(db) -> return base.MISUSE
-    h := EngineHost{unused: 0}
+    ^h: EngineHost{unused: 0}
     // disconnectAllVtab and sqlite3VtabRollback: no virtual tables here.
     aux.vtab_rollback<EngineHost>(h, db)
     db.open_state = conn.STATE_ZOMBIE
@@ -1375,8 +1375,8 @@ changes: fn(db: conn.Conn) -> Int Never! { db.n_change }
 // it holds none (white space or a comment), tail the byte offset of the
 // rest.
 prepare_v3: fn(db: ^conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt: Int, tail: Int} Never! {
-    h := EngineHost{unused: 0}
-    a := cg.take_ast(db)
+    ^h: EngineHost{unused: 0}
+    ^a: cg.take_ast(db)
     r: lock_and_prepare<EngineHost>(h, db, a, sql, sql.len(), conn.PREPARE_SAVESQL | flags & conn.PREPARE_MASK, None)
     db.ast = a
     {rc: r.rc, stmt: r.stmt, tail: r.tail}
@@ -1391,27 +1391,27 @@ prepare_tables: fn(db: ^conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt:
     db.auth_tables = [[U8]]{}
     r: prepare_v3(db, sql, flags)
     db.has_auth = false
-    tables := db.auth_tables
+    ^tables: db.auth_tables
     db.auth_tables = [[U8]]{}
     {rc: r.rc, stmt: r.stmt, tail: r.tail, tables: tables}
 }
 
 // sqlite3_step.
 step: fn(db: ^conn.Conn, s: Int) -[DB]> Int Never! {
-    h := EngineHost{unused: 0}
+    ^h: EngineHost{unused: 0}
     api.stmt_step<EngineHost>(h, db, s)
 }
 
 // sqlite3_reset.
 reset_stmt: fn(db: ^conn.Conn, s: Int) -[DB]> Int Never! {
-    h := EngineHost{unused: 0}
+    ^h: EngineHost{unused: 0}
     api.stmt_reset<EngineHost>(h, db, s)
 }
 
 // sqlite3_finalize: a zombie connection closes with its last statement.
 finalize_stmt: fn(db: ^conn.Conn, s: Int) -[DB]> Int Never! {
     if s < 0 -> return base.OK
-    h := EngineHost{unused: 0}
+    ^h: EngineHost{unused: 0}
     rc: api.stmt_finalize<EngineHost>(h, db, s)
     close_zombie<EngineHost>(h, db)
     rc
@@ -1419,10 +1419,10 @@ finalize_stmt: fn(db: ^conn.Conn, s: Int) -[DB]> Int Never! {
 
 // sqlite3_exec without a callback.
 exec_sql: fn(db: ^conn.Conn, sql: [U8]) -[DB]> Int Never! {
-    h := EngineHost{unused: 0}
-    a := cg.take_ast(db)
-    data := init_data_new(0, 0)
-    ignored := [U8]?{None}
+    ^h: EngineHost{unused: 0}
+    ^a: cg.take_ast(db)
+    ^data: init_data_new(0, 0)
+    ^ignored: [U8]?{None}
     rc: exec_in<EngineHost>(h, db, a, sql, false, data, ignored)
     db.ast = a
     rc

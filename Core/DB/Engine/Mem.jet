@@ -59,7 +59,7 @@ handle_bom: fn(m: ^Mem) Never! {
     }
     b1: Int{m.z[0]}
     b2: Int{m.z[1]}
-    bom := 0
+    ^bom: 0
     if b1 == 254 && b2 == 255 -> bom = base.UTF16BE
     if b1 == 255 && b2 == 254 -> bom = base.UTF16LE
     if bom == 0 {
@@ -174,8 +174,8 @@ numerify: fn(m: ^Mem) Never! {
     if m.flags & (MEM_INT | MEM_REAL | MEM_INT_REAL | MEM_NULL) == 0 {
         rc: util.atof(m.z, m.enc)
         m.r = rc.value
-        as_int := false
-        ix := 0
+        ^as_int: false
+        ^ix: 0
         if rc.kind == 0 || rc.kind == 1 {
             ai: util.atoi64(m.z, m.enc)
             if ai.rc <= 1 {
@@ -210,7 +210,7 @@ apply_numeric_affinity: fn(m: ^Mem, try_for_int: Bool) Never! {
     if rc.kind <= 0 {
         return
     }
-    done := false
+    ^done: false
     if rc.kind == 1 {
         if also_an_int(m, rc.value) == .Val(ix) {
             m.i = ix
@@ -336,7 +336,7 @@ set_double: fn(m: ^Mem, r: Float) Never! {
 // (SQLITE_LIMIT_LENGTH), counting a blob's zero tail.
 too_big: fn(m: Mem, limit: Int) -> Bool Never! {
     if m.flags & (MEM_STR | MEM_BLOB) == 0 -> return false
-    n := m.z.len()
+    ^n: m.z.len()
     if m.flags & MEM_ZERO != 0 -> n += m.i
     n > limit
 }
@@ -350,7 +350,7 @@ mem_copy: fn(m: Mem) -> Mem Never! {
 // in UTF-8, the first 0x0000 unit in UTF-16, and never past `limit`.
 c_text_len: fn(z: [U8], enc: Int, limit: Int) -> Int Never! {
     if enc == base.UTF8 -> return printf.c_len(z)
-    n := 0
+    ^n: 0
     loop n <= limit && n + 1 < z.len() && (z[n] != (U8{0}) || z[n + 1] != (U8{0})) -> n += 2
     n
 }
@@ -360,9 +360,9 @@ c_text_len: fn(z: [U8], enc: Int, limit: Int) -> Int Never! {
 // runs to the C string's terminator. Longer than `limit` bytes is
 // SQLITE_TOOBIG and leaves NULL; a UTF-16 byte-order mark is consumed.
 set_str: fn(m: ^Mem, z: [U8], n: Int, enc_in: Int, limit: Int) -> Int Never! {
-    enc := enc_in
-    nbyte := n
-    flags := MEM_STR
+    ^enc: enc_in
+    ^nbyte: n
+    ^flags: MEM_STR
     if nbyte < 0 -> nbyte = c_text_len(z, enc, limit) else if enc == 0 {
         flags = MEM_BLOB
         enc = base.UTF8
@@ -467,7 +467,7 @@ SQLArgs: struct {
         next_text: fn(^self, out: ^[U8]) -> Bool Never! {
             if self.used >= self.args.len() -> return false
             self.used += 1
-            m := self.args[self.used - 1]
+            ^m: self.args[self.used - 1]
             if !value_text(m, base.UTF8) {
                 self.args[self.used - 1] = m
                 return false
@@ -484,9 +484,9 @@ new_sql_args: fn(args: [Mem]) -> SQLArgs Never! { SQLArgs{args: args, used: 0} }
 
 // SQL printf(fmt, args...) as func.c printfFunc renders it.
 sql_printf: fn(fmt: [U8], args: [Mem], limit: Int) -> [U8]? Never! {
-    acc := printf.str_new(limit)
+    ^acc: printf.str_new(limit)
     acc.printf_flags = printf.PRINTF_SQLFUNC
-    list := new_sql_args(args)
+    ^list: new_sql_args(args)
     printf.str_vappendf(acc, fmt, list)
     if acc.acc_error != 0 -> return None
     acc.text.copy()
@@ -496,18 +496,18 @@ sql_printf: fn(fmt: [U8], args: [Mem], limit: Int) -> [U8]? Never! {
 sql_text: fn(s: String) -> Mem Never! { base.mem_text(s.bytes(), base.UTF8) }
 
 #Test("numbers render as SQLite renders them") {
-    m := base.mem_real(0.1)
+    ^m: base.mem_real(0.1)
     assert(value_text(m, base.UTF8) && m.z == "0.1".bytes() && base.value_type(m) == base.SQL_FLOAT)
-    big := base.mem_real(1.0e20)
+    ^big: base.mem_real(1.0e20)
     assert(value_text(big, base.UTF8) && big.z == "1.0e+20".bytes())
-    whole := base.mem_real(3.0)
+    ^whole: base.mem_real(3.0)
     assert(value_text(whole, base.UTF8) && whole.z == "3.0".bytes())
-    third := base.mem_real(Float{1} / Float{3})
+    ^third: base.mem_real(Float{1} / Float{3})
     assert(value_text(third, base.UTF8) && third.z == "0.333333333333333".bytes())
-    i := base.mem_int(-9223372036854775808)
+    ^i: base.mem_int(-9223372036854775808)
     assert(value_text(i, base.UTF16LE) && i.z.len() == 40 && i.enc == base.UTF16LE)
     assert_eq(value_bytes(i, base.UTF8), 20)
-    ir := base.mem_init(MEM_INT_REAL)
+    ^ir: base.mem_init(MEM_INT_REAL)
     ir.i = 5
     stringify(ir, base.UTF8, true)
     assert(ir.z == "5.0".bytes() && ir.flags == MEM_STR)
@@ -524,73 +524,73 @@ sql_text: fn(s: String) -> Mem Never! { base.mem_text(s.bytes(), base.UTF8) }
 }
 
 #Test("affinities follow applyAffinity") {
-    a := sql_text(" 12 ")
+    ^a: sql_text(" 12 ")
     apply_affinity(a, base.AFF_NUMERIC, base.UTF8)
     assert(a.flags == MEM_INT && a.i == 12)
-    b := sql_text("48.00")
+    ^b: sql_text("48.00")
     apply_affinity(b, base.AFF_INTEGER, base.UTF8)
     assert(b.flags == MEM_INT && b.i == 48)
-    c := sql_text("1.5")
+    ^c: sql_text("1.5")
     apply_affinity(c, base.AFF_REAL, base.UTF8)
     assert(c.flags == MEM_REAL && c.r == 1.5)
-    d := sql_text("12abc")
+    ^d: sql_text("12abc")
     apply_affinity(d, base.AFF_NUMERIC, base.UTF8)
     assert(d.flags == MEM_STR)
-    e := base.mem_int(7)
+    ^e: base.mem_int(7)
     apply_affinity(e, base.AFF_TEXT, base.UTF8)
     assert(e.flags == MEM_STR && e.z == "7".bytes())
-    f := base.mem_real(2.0)
+    ^f: base.mem_real(2.0)
     apply_affinity(f, base.AFF_NUMERIC, base.UTF8)
     assert(f.flags == MEM_INT && f.i == 2)
-    g := sql_text("1e2")
+    ^g: sql_text("1e2")
     assert_eq(value_numeric_type(g), base.SQL_FLOAT)
-    h := sql_text("9223372036854775808")
+    ^h: sql_text("9223372036854775808")
     apply_affinity(h, base.AFF_NUMERIC, base.UTF8)
     assert(h.flags == MEM_REAL && h.r == 9223372036854775808.0)
 }
 
 #Test("CAST follows sqlite3VdbeMemCast") {
-    a := sql_text("3.0abc")
+    ^a: sql_text("3.0abc")
     cast(a, base.AFF_NUMERIC, base.UTF8)
     assert(a.flags == MEM_INT && a.i == 3)
-    b := sql_text("3.5")
+    ^b: sql_text("3.5")
     cast(b, base.AFF_NUMERIC, base.UTF8)
     assert(b.flags == MEM_REAL && b.r == 3.5)
-    c := sql_text("abc")
+    ^c: sql_text("abc")
     cast(c, base.AFF_INTEGER, base.UTF8)
     assert(c.flags == MEM_INT && c.i == 0)
-    d := base.mem_real(1.5)
+    ^d: base.mem_real(1.5)
     cast(d, base.AFF_TEXT, base.UTF8)
     assert(d.flags == MEM_STR && d.z == "1.5".bytes())
-    e := base.mem_int(12)
+    ^e: base.mem_int(12)
     cast(e, base.AFF_BLOB, base.UTF8)
     assert(e.flags == MEM_BLOB && e.z == "12".bytes())
-    f := base.mem_blob("hi".bytes())
+    ^f: base.mem_blob("hi".bytes())
     cast(f, base.AFF_TEXT, base.UTF16LE)
     assert(f.flags == MEM_STR && f.z == [U8]{104, 0, 105, 0})
-    g := base.mem_blob("abc".bytes())
+    ^g: base.mem_blob("abc".bytes())
     g.enc = base.UTF16LE
     cast(g, base.AFF_TEXT, base.UTF16LE)
     assert(g.z == "ab".bytes())
-    n := base.mem_null()
+    ^n: base.mem_null()
     cast(n, base.AFF_INTEGER, base.UTF8)
     assert(n.flags == MEM_NULL)
 }
 
 #Test("strings, blobs and encodings follow vdbemem.c") {
-    m := base.mem_null()
+    ^m: base.mem_null()
     assert_eq(set_str(m, "abc".bytes(), 10, base.UTF8, 2), base.TOOBIG)
     assert(m.flags == MEM_NULL)
     assert_eq(set_str(m, [U8]{97, 0, 98}, -1, base.UTF8, 100), base.OK)
     assert(m.z == "a".bytes())
     assert_eq(set_str(m, [U8]{255, 254, 104, 0, 0, 0}, -1, base.UTF16, 100), base.OK)
     assert(m.enc == base.UTF16LE && m.z == [U8]{104, 0})
-    z := base.mem_null()
+    ^z: base.mem_null()
     set_zero_blob(z, 3)
     assert_eq(value_bytes(z, base.UTF8), 3)
     assert(value_blob(z) && z.z == [U8]{0, 0, 0} && z.flags == MEM_BLOB)
     assert(too_big(base.mem_blob([U8]{1, 2, 3}), 2) && !too_big(base.mem_int(1 << 40), 2))
-    s := sql_text("é")
+    ^s: sql_text("é")
     change_encoding(s, base.UTF16BE)
     assert(s.z == [U8]{0, 233} && s.enc == base.UTF16BE)
     change_encoding(s, base.UTF16LE)

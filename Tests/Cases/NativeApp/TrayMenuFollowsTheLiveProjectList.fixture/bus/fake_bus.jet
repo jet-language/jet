@@ -19,13 +19,13 @@ APP: ":1.48"
 run: fn() -[FS, Net, Time]> {
     listener: net.unix_listen("bus.sock") ?? panic("listen on bus.sock: {err}")
     files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
-    stream := net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
-    said := [U8]{}
-    authenticated := false
-    sent := 0
-    layouts := 0
-    menus := [String]{}
-    last := [String]{}
+    ^stream: net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
+    ^said: [U8]{}
+    ^authenticated: false
+    ^sent: 0
+    ^layouts: 0
+    ^menus: [String]{}
+    ^last: [String]{}
     loop {
         got: net.unix_receive(stream, 4096) ?? break
         if got.bytes.len() == 0 -> break
@@ -47,13 +47,13 @@ run: fn() -[FS, Net, Time]> {
             m: said[0..<n].copy()
             said = said[n..<said.len()].copy()
             kind: Int{m[1]}
-            out := [U8]{}
+            ^out: [U8]{}
             if kind == 1 {
                 // A call from the app to the bus or to the tray host.
                 sent += 1
                 member: text_field(m, 3)
-                body := [U8]{}
-                signature := ""
+                ^body: [U8]{}
+                ^signature: ""
                 if member == "Hello" {
                     put_text(body, APP)
                     signature = "s"
@@ -85,7 +85,7 @@ run: fn() -[FS, Net, Time]> {
 
 // The bus's answer `serial` to the app's call `to`.
 reply: fn(serial: Int, to: Int, signature: String, body: [U8]) -> [U8] {
-    out := start(2, serial)
+    ^out: start(2, serial)
     field_word(out, 5, to)
     field_text(out, 6, 115, APP)
     field_text(out, 7, 115, "org.freedesktop.DBus")
@@ -96,7 +96,7 @@ reply: fn(serial: Int, to: Int, signature: String, body: [U8]) -> [U8] {
 
 // The tray host's call `serial` to the app's menu.
 menu_call: fn(serial: Int, member: String, signature: String, body: [U8]) -> [U8] {
-    out := start(1, serial)
+    ^out: start(1, serial)
     field_text(out, 1, 111, "/MenuBar")
     field_text(out, 2, 115, "com.canonical.dbusmenu")
     field_text(out, 3, 115, member)
@@ -110,7 +110,7 @@ menu_call: fn(serial: Int, member: String, signature: String, body: [U8]) -> [U8
 // GetLayout of the whole menu: the root (0), every depth (-1), every
 // property (none named).
 get_layout: fn(serial: Int) -> [U8] {
-    body := [U8]{}
+    ^body: [U8]{}
     put_word(body, 0)
     put_word(body, -1)
     put_word(body, 0)
@@ -119,7 +119,7 @@ get_layout: fn(serial: Int) -> [U8] {
 
 // A click on the menu item `id`: an Event "clicked" with data 0 at time 0.
 click: fn(serial: Int, id: Int) -> [U8] {
-    body := [U8]{}
+    ^body: [U8]{}
     put_word(body, id)
     put_text(body, "clicked")
     // A variant holding an int32: its signature "i", then the number.
@@ -144,7 +144,7 @@ id_of: fn(labels: [String], label: String) -> Int {
 // `-` for a separator.
 labels_of: fn(body: [U8]) -> [String] {
     texts: texts_of(body)
-    labels := [String]{}
+    ^labels: [String]{}
     loop (at, text) in texts {
         if text == "label" && at + 1 < texts.len() -> labels.push(texts[at + 1].copy())
         if text == "separator" -> labels.push("-")
@@ -155,7 +155,7 @@ labels_of: fn(body: [U8]) -> [String] {
 // A message's fixed header: little-endian, `kind`, no flags, version 1;
 // `finish` fills in the lengths.
 start: fn(kind: Int, serial: Int) -> [U8] {
-    out := [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
+    ^out: [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
     put_word(out, 0)
     put_word(out, serial)
     put_word(out, 0)
@@ -218,8 +218,8 @@ set_word: fn(out: ^[U8], at: Int, n: Int) {
 }
 
 word_bytes: fn(n: Int) -> [U8] {
-    v := if n < 0 -> n + 4294967296 else -> n
-    bytes := [U8]{}
+    ^v: if n < 0 -> n + 4294967296 else -> n
+    ^bytes: [U8]{}
     loop _ in 0..<4 {
         bytes.push(U8{v % 256})
         v = v /% 256
@@ -252,7 +252,7 @@ word_field: fn(m: [U8], code: Int) -> Int {
 // -1.
 field_at: fn(m: [U8], code: Int) -> Int {
     end: 16 + word(m, 12)
-    at := 16
+    ^at: 16
     loop at < end {
         found: Int{m[at]}
         kind: Int{m[at + 2]}
@@ -274,8 +274,8 @@ field_at: fn(m: [U8], code: Int) -> Int {
 // The runs of two or more printable ASCII bytes in `body`: the texts of a
 // message body whose numbers are not printable.
 texts_of: fn(body: [U8]) -> [String] {
-    found := [String]{}
-    run := [U8]{}
+    ^found: [String]{}
+    ^run: [U8]{}
     loop b in body {
         n: Int{b}
         if n >= 32 && n < 127 {

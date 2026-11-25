@@ -90,13 +90,13 @@ WebTable: struct<T> {
 // A new table is named, has no columns, and keys its rows by position unless a
 // key function is given.
 new: fn<T>(name: String, rows: [T]) -> WebTable<T> Never! {
-    keyed := [WebTableRow<T>]{}
+    ^keyed: [WebTableRow<T>]{}
     loop i in 0..<rows.len() -> keyed.push(WebTableRow<T>{key: "{i}", value: rows[i]})
     WebTable<T>{name: name, columns: [WebTableColumn<T>]{}, rows: keyed, state: default_state(), server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]{}}
 }
 
 new_keyed: fn<T, E>(name: String, rows: [T], key_fn: fn(T) -> String E!) -> WebTable<T> E! {
-    keyed := [WebTableRow<T>]{}
+    ^keyed: [WebTableRow<T>]{}
     loop row in rows -> keyed.push(WebTableRow<T>{key: key_fn(row), value: row})
     WebTable<T>{name: name, columns: [WebTableColumn<T>]{}, rows: keyed, state: default_state(), server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]{}}
 }
@@ -122,7 +122,7 @@ facts: fn<T>(table: WebTable<T>) -> String Never! {
 }
 
 keys: fn<T>(table: WebTable<T>) -> [String] WebTableError! {
-    out := [String]{}
+    ^out: [String]{}
     loop row in table.rows -> out.push(row.key)
     Ok(out)
 }
@@ -134,7 +134,7 @@ page_state: fn<T>(table: WebTable<T>) -> WebTablePage<T> WebTableError! {
     if table.state.page_mode == WebTablePageMode.Server {
         if table.server_page.len() == 0 -> return Err(WebTableError.Invalid)
         loader: table.server_page[0]
-        loaded := loader(table.state)
+        ^loaded: loader(table.state)
         if loaded.page_index != table.state.page_index || loaded.page_size != table.state.page_size || loaded.total_rows < 0 || loaded.total_rows > C_MAX_TABLE_ROWS || loaded.rows.len() > loaded.total_rows || loaded.rows.len() > loaded.page_size || loaded.row_keys.len() != loaded.rows.len() {
             return Err(WebTableError.Invalid)
         }
@@ -147,13 +147,13 @@ page_state: fn<T>(table: WebTable<T>) -> WebTablePage<T> WebTableError! {
         loaded.page_count = (loaded.total_rows + loaded.page_size - 1) /% loaded.page_size
         return Ok(loaded)
     }
-    rows := projected_rows<T>(table)
-    start := table.state.page_index * table.state.page_size
+    ^rows: projected_rows<T>(table)
+    ^start: table.state.page_index * table.state.page_size
     if start > rows.len() -> start = rows.len()
-    finish := start + table.state.page_size
+    ^finish: start + table.state.page_size
     if finish > rows.len() -> finish = rows.len()
-    visible := [T]{}
-    keys := [String]{}
+    ^visible: [T]{}
+    ^keys: [String]{}
     loop i in start..<finish {
         visible.push(rows[i].value)
         keys.push(rows[i].key)
@@ -162,17 +162,17 @@ page_state: fn<T>(table: WebTable<T>) -> WebTablePage<T> WebTableError! {
 }
 
 sort: fn<T, E>(rows: [T], descending: Bool, key_fn: fn(T) -> String E!) -> [T] E! {
-    out := copy_values<T>(rows)
-    n := out.len()
+    ^out: copy_values<T>(rows)
+    ^n: out.len()
     if n < 2 -> return out
     loop _i in 0..<n {
         loop j in 0..<(n - 1) {
-            a := key_fn(out[j])
-            b := key_fn(out[j + 1])
-            swap := a > b
+            ^a: key_fn(out[j])
+            ^b: key_fn(out[j + 1])
+            ^swap: a > b
             if descending -> swap = a < b
             if swap {
-                tmp := out[j]
+                ^tmp: out[j]
                 out[j] = out[j + 1]
                 out[j + 1] = tmp
             }
@@ -182,7 +182,7 @@ sort: fn<T, E>(rows: [T], descending: Bool, key_fn: fn(T) -> String E!) -> [T] E
 }
 
 filter: fn<T, E>(rows: [T], predicate: fn(T) -> Bool E!) -> [T] E! {
-    out := [T]{}
+    ^out: [T]{}
     loop row in rows {
         if predicate(row) -> out.push(row.copy())
     }
@@ -193,12 +193,12 @@ page: fn<T>(rows: [T], index: Int, size: Int) -> WebTablePage<T> WebTableError! 
     if size < 1 || size > C_MAX_TABLE_PAGE_SIZE || index < 0 || index > C_MAX_TABLE_INDEX {
         return Err(WebTableError.Invalid)
     }
-    start := index * size
+    ^start: index * size
     if start > rows.len() -> start = rows.len()
-    finish := start + size
+    ^finish: start + size
     if finish > rows.len() -> finish = rows.len()
-    out := [T]{}
-    keys := [String]{}
+    ^out: [T]{}
+    ^keys: [String]{}
     loop i in start..<finish {
         out.push(rows[i])
         keys.push("{i}")
@@ -224,7 +224,7 @@ paginate: fn<T>(table: ^WebTable<T>, index: Int, size: Int) Never! {
 
 set_rows: fn<T>(table: ^WebTable<T>, rows: [T]) WebTableError! {
     if rows.len() > C_MAX_TABLE_ROWS -> return Err(WebTableError.Invalid)
-    keyed := [WebTableRow<T>]{}
+    ^keyed: [WebTableRow<T>]{}
     loop i in 0..<rows.len() -> keyed.push(WebTableRow<T>{key: "{i}", value: rows[i]})
     table.rows = keyed
     table.state.page_index = 0
@@ -235,7 +235,7 @@ set_rows: fn<T>(table: ^WebTable<T>, rows: [T]) WebTableError! {
 
 set_selected: fn<T>(table: ^WebTable<T>, key: String, on: Bool) WebTableError! {
     if !has_key<T>(table.rows, key) -> return Err(WebTableError.NotFound)
-    selected := [String]{}
+    ^selected: [String]{}
     loop item in table.state.selected {
         if item != key -> selected.push(item.copy())
     }
@@ -244,7 +244,7 @@ set_selected: fn<T>(table: ^WebTable<T>, key: String, on: Bool) WebTableError! {
 }
 
 toggle_selection: fn<T>(table: ^WebTable<T>, key: String) WebTableError! {
-    enabled := true
+    ^enabled: true
     loop item in table.state.selected {
         if item == key -> enabled = false
     }
@@ -268,8 +268,8 @@ clear_selection: fn<T>(table: ^WebTable<T>) Never! { table.state.selected = [Str
 selected_keys: fn<T>(table: WebTable<T>) -> [String] Never! { table.state.selected }
 
 selected_rows: fn<T>(table: WebTable<T>) -> [WebTableRow<T>] WebTableError! {
-    out := [WebTableRow<T>]{}
-    seen := [String]{}
+    ^out: [WebTableRow<T>]{}
+    ^seen: [String]{}
     loop key in table.state.selected {
         if contains_key(seen, key) -> next
         loop row in table.rows {
@@ -285,7 +285,7 @@ selected_rows: fn<T>(table: WebTable<T>) -> [WebTableRow<T>] WebTableError! {
 
 insert_row: fn<T>(table: ^WebTable<T>, row: T) -> String WebTableError! {
     if table.rows.len() >= C_MAX_TABLE_ROWS -> return Err(WebTableError.Invalid)
-    key := "{table.rows.len()}"
+    ^key: "{table.rows.len()}"
     loop {
         if !has_key<T>(table.rows, key) -> break
         key = "{table.rows.len() + 1}"
@@ -317,9 +317,9 @@ update_row: fn<T, E>(table: ^WebTable<T>, key: String, transform: fn(T) -> T E!)
 
 remove_row: fn<T>(table: ^WebTable<T>, key: String) -> T WebTableError! {
     if table.rows.len() == 0 -> return Err(WebTableError.NotFound)
-    remaining := [WebTableRow<T>]{}
-    found := false
-    removed := table.rows[0].value
+    ^remaining: [WebTableRow<T>]{}
+    ^found: false
+    ^removed: table.rows[0].value
     loop row in table.rows {
         if row.key == key {
             removed = row.value
@@ -328,19 +328,19 @@ remove_row: fn<T>(table: ^WebTable<T>, key: String) -> T WebTableError! {
     }
     if !found -> return Err(WebTableError.NotFound)
     table.rows = remaining
-    selected := [String]{}
+    ^selected: [String]{}
     loop item in table.state.selected {
         if item != key -> selected.push(item.copy())
     }
     table.state.selected = selected
     if table.state.focus == key -> table.state.focus = ""
     if table.state.page_index > 0 {
-        visible := projected_rows<T>(table)
-        page_size := table.state.page_size
+        ^visible: projected_rows<T>(table)
+        ^page_size: table.state.page_size
         if page_size < 1 -> page_size = 25
         if page_size > C_MAX_TABLE_PAGE_SIZE -> page_size = C_MAX_TABLE_PAGE_SIZE
         table.state.page_size = page_size
-        pages := (visible.len() + page_size - 1) /% page_size
+        ^pages: (visible.len() + page_size - 1) /% page_size
         if pages < 1 -> pages = 1
         if table.state.page_index >= pages -> table.state.page_index = pages - 1
     }
@@ -354,8 +354,8 @@ next_page: fn<T>(table: ^WebTable<T>) Never! {
     if table.state.page_size > C_MAX_TABLE_PAGE_SIZE {
         table.state.page_size = C_MAX_TABLE_PAGE_SIZE
     }
-    rows := projected_rows<T>(table)
-    pages := (rows.len() + table.state.page_size - 1) /% table.state.page_size
+    ^rows: projected_rows<T>(table)
+    ^pages: (rows.len() + table.state.page_size - 1) /% table.state.page_size
     if pages < 1 -> pages = 1
     if table.state.page_index + 1 < pages -> table.state.page_index += 1
 }
@@ -364,46 +364,46 @@ last_page: fn<T>(table: ^WebTable<T>) WebTableError! {
     if table.state.page_size < 1 || table.state.page_size > C_MAX_TABLE_PAGE_SIZE {
         return Err(WebTableError.Invalid)
     }
-    rows := projected_rows<T>(table)
-    pages := (rows.len() + table.state.page_size - 1) /% table.state.page_size
+    ^rows: projected_rows<T>(table)
+    ^pages: (rows.len() + table.state.page_size - 1) /% table.state.page_size
     if pages < 1 -> pages = 1
     table.state.page_index = pages - 1
 }
 
 visible_rows: fn<T>(table: WebTable<T>, plan: WebVirtualPlan) -> [WebTableRow<T>] WebTableError! {
-    projected := projected_rows<T>(table)
-    start := plan.start
+    ^projected: projected_rows<T>(table)
+    ^start: plan.start
     if start < 0 -> start = 0
     if start > projected.len() -> start = projected.len()
-    end := plan.end
+    ^end: plan.end
     if end < start -> end = start
     if end > projected.len() -> end = projected.len()
     if end - start > C_MAX_TABLE_PAGE_SIZE -> end = start + C_MAX_TABLE_PAGE_SIZE
     if end > projected.len() -> end = projected.len()
-    out := [WebTableRow<T>]{}
+    ^out: [WebTableRow<T>]{}
     loop i in start..<end -> out.push(projected[i])
     Ok(out)
 }
 
 projected_rows: fn<T>(table: WebTable<T>) -> [WebTableRow<T>] Never! {
-    rows := [WebTableRow<T>]{}
-    filter_index := column_index<T>(table.columns, table.state.filter.column)
+    ^rows: [WebTableRow<T>]{}
+    ^filter_index: column_index<T>(table.columns, table.state.filter.column)
     loop row in table.rows {
         if filter_index < 0 || table.state.filter.value.len() == 0 -> rows.push(row.copy()) else {
-            text := table.columns[filter_index].project(row.value)
+            ^text: table.columns[filter_index].project(row.value)
             if contains_text(text, table.state.filter.value) -> rows.push(row.copy())
         }
     }
-    sort_index := column_index<T>(table.columns, table.state.sort.column)
+    ^sort_index: column_index<T>(table.columns, table.state.sort.column)
     if sort_index >= 0 && rows.len() > 1 {
         loop _i in 0..<rows.len() {
             loop j in 0..<(rows.len() - 1) {
-                left := table.columns[sort_index].project(rows[j].value)
-                right := table.columns[sort_index].project(rows[j + 1].value)
-                swap := left > right
+                ^left: table.columns[sort_index].project(rows[j].value)
+                ^right: table.columns[sort_index].project(rows[j + 1].value)
+                ^swap: left > right
                 if table.state.sort.descending -> swap = left < right
                 if swap {
-                    temp := rows[j]
+                    ^temp: rows[j]
                     rows[j] = rows[j + 1]
                     rows[j + 1] = temp
                 }
@@ -423,11 +423,11 @@ column_index: fn<T>(columns: [WebTableColumn<T>], name: String) -> Int Never! {
 
 contains_text: fn(text: String, needle: String) -> Bool Never! {
     if needle.len() == 0 -> return true
-    a := text.bytes()
-    b := needle.bytes()
+    ^a: text.bytes()
+    ^b: needle.bytes()
     if b.len() > a.len() -> return false
     loop i in 0..<(a.len() - b.len() + 1) {
-        match := true
+        ^match: true
         loop j in 0..<b.len() {
             if a[i + j] != b[j] -> match = false
         }
@@ -448,7 +448,7 @@ default_state: fn() -> WebTableState {
 }
 
 copy_values: fn<T>(values: [T]) -> [T] {
-    out := [T]{}
+    ^out: [T]{}
     loop value in values -> out.push(value.copy())
     out
 }

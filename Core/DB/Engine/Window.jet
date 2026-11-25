@@ -111,8 +111,8 @@ nth_value_step: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     }
     r1: v.fctx.arg + 1
     t: mem.value_numeric_type(v.mem[r1])
-    ival := 0
-    ok := false
+    ^ival: 0
+    ^ok: false
     if t == base.SQL_INTEGER {
         ival = mem.int_value(v.mem[r1])
         ok = true
@@ -340,7 +340,7 @@ window_func_call: fn(db: conn.Conn, v: ^conn.Vdbe, method: Int) Never! {
 // sort orders the terms'.
 key_info_from_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, list: Int, i_start: Int, n_extra: Int) -> record.KeyInfo Never! {
     n_expr: ast.list_len(a, list)
-    info := cat.key_info_alloc(p.db, n_expr - i_start, n_extra + 1)
+    ^info: cat.key_info_alloc(p.db, n_expr - i_start, n_extra + 1)
     loop i in i_start..<n_expr {
         e: ast.list_expr(a, list, i)
         coll: ex.expr_nn_coll_seq(p, a, e)
@@ -372,7 +372,7 @@ WindowRewriteWalker: struct {
             op: a.exprs[e].op
             if p.walks[t].u2 >= 0 {
                 if op != tk.TK_COLUMN -> return ast.WRC_CONTINUE
-                found := false
+                ^found: false
                 loop i in 0..<ast.src_len(a, self.src) {
                     si: ast.src_item(a, self.src, i)
                     if a.exprs[e].itable == a.items[si].cursor {
@@ -384,7 +384,7 @@ WindowRewriteWalker: struct {
             }
             if op == tk.TK_FUNCTION {
                 if !ast.has(a, e, ast.EP_WIN_FUNC) -> return ast.WRC_CONTINUE
-                win := self.mwin
+                ^win: self.mwin
                 loop win >= 0 {
                     if a.exprs[e].y == win -> return ast.WRC_PRUNE
                     win = a.windows[win].next_win
@@ -393,8 +393,8 @@ WindowRewriteWalker: struct {
                 return ast.WRC_CONTINUE
             }
             if p.db.malloc_failed -> return ast.WRC_ABORT
-            sub := p.walks[t].u
-            icol := -1
+            ^sub: p.walks[t].u
+            ^icol: -1
             loop i in 0..<ast.list_len(a, sub) {
                 x: ast.list_expr(a, sub, i)
                 if ast.expr_compare(a, x, e, -1) == 0 {
@@ -410,7 +410,7 @@ WindowRewriteWalker: struct {
             }
             f: a.exprs[e].flags & ast.EP_COLLATE
             ast.expr_delete(a, e)
-            n := ast.zero_expr(tk.TK_COLUMN)
+            ^n: ast.zero_expr(tk.TK_COLUMN)
             n.icolumn = if icol < 0 -> ast.list_len(a, sub) - 1 else -> icol
             n.itable = a.windows[self.mwin].eph_csr
             n.y = self.tab
@@ -444,7 +444,7 @@ WindowRewriteWalker: struct {
 // moves to the subquery's result list `sub`; the list, made at the first
 // append when sub is -1.
 select_window_rewrite_elist: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int, src: Int, elist: Int, tab: Int, sub: Int) -[DB]> Int Never! {
-    w := WindowRewriteWalker{mwin: mwin, src: src, tab: tab}
+    ^w: WindowRewriteWalker{mwin: mwin, src: src, tab: tab}
     cg.walk_push(p, w, sub)
     t: cg.walk_top(p)
     p.walks[t].u2 = -1
@@ -457,7 +457,7 @@ select_window_rewrite_elist: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int, src: Int, 
 // sort flags kept; with int_to_null an integer literal copies as NULL.
 expr_list_append_list: fn(a: ^ast.AST, list0: Int, append: Int, int_to_null: Bool) -> Int Never! {
     if append < 0 -> return list0
-    list := list0
+    ^list: list0
     n_init: ast.list_len(a, list)
     loop i in 0..<ast.list_len(a, append) {
         src: ast.list_expr(a, append, i)
@@ -553,7 +553,7 @@ expr_list_prefix_same: fn(a: ^ast.AST, sort: Int, ob: Int) -> Bool Never! {
 // no-op for a SELECT without them; an error code, with the error left,
 // on failure.
 window_rewrite: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
-    rc := base.OK
+    ^rc: base.OK
     if a.selects[s].win < 0 || a.selects[s].prior >= 0 || a.selects[s].sel_flags & ast.SF_WIN_REWRITE != 0 || ast.in_rename(a) {
         return rc
     }
@@ -567,7 +567,7 @@ window_rewrite: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
     tab: conn.table_alloc(p.db)
     ex.agg_info_persist_select(p, a, s)
     if sel_flags & ast.SF_AGGREGATE == 0 {
-        w := DisallowAggOrderByWalker{unused: 0}
+        ^w: DisallowAggOrderByWalker{unused: 0}
         cg.walk_push(p, w, 0)
         ob: a.selects[s].order_by
         _: cg.pwalk_expr_list(p, a, ob)
@@ -583,7 +583,7 @@ window_rewrite: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
     // the SELECT's own ORDER BY goes when that makes it redundant.
     part: a.windows[mwin].partition
     wob: a.windows[mwin].order_by
-    sort := expr_list_append_list(a, -1, part, true)
+    ^sort: expr_list_append_list(a, -1, part, true)
     sort = expr_list_append_list(a, sort, wob, true)
     ob: a.selects[s].order_by
     if sort >= 0 && ob >= 0 && ast.list_len(a, ob) <= ast.list_len(a, sort) && expr_list_prefix_same(a, sort, ob) {
@@ -597,7 +597,7 @@ window_rewrite: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
     p.f.n_tab += 4
 
     elist: a.selects[s].elist
-    sublist := select_window_rewrite_elist(p, a, mwin, src, elist, tab, -1)
+    ^sublist: select_window_rewrite_elist(p, a, mwin, src, elist, tab, -1)
     ob2: a.selects[s].order_by
     sublist = select_window_rewrite_elist(p, a, mwin, src, ob2, tab, sublist)
     a.windows[mwin].nbuffer_col = ast.list_len(a, sublist)
@@ -607,7 +607,7 @@ window_rewrite: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
     // for its accumulator and result.
     sublist = expr_list_append_list(a, sublist, part, false)
     sublist = expr_list_append_list(a, sublist, wob, false)
-    win := mwin
+    ^win: mwin
     loop win >= 0 {
         owner: a.windows[win].owner
         args: a.exprs[owner].x
@@ -648,7 +648,7 @@ window_rewrite: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
     a.items[si].is_correlated = true
     p.f.n_tab = ast.src_list_assign_cursors(a, new_src, p.f.n_tab)
     a.selects[sub].sel_flags = a.selects[sub].sel_flags | ast.SF_EXPANDED | ast.SF_ORDER_BY_REQD
-    g := p.up
+    ^g: p.up
     tab2: g.result_set_of_select(p, a, sub, base.AFF_NONE)
     a.selects[sub].sel_flags = a.selects[sub].sel_flags | sel_flags & ast.SF_AGGREGATE
     if tab2 < 0 {
@@ -656,12 +656,12 @@ window_rewrite: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
         rc = base.NOMEM
         conn.delete_table_now(p.db, tab)
     } else {
-        eph_tab := p.db.tables[tab2].copy()
+        ^eph_tab: p.db.tables[tab2].copy()
         eph_tab.tab_flags |= ast.TF_EPHEMERAL
         p.db.tables[tab] = eph_tab
         a.items[si].tab = tab
         conn.delete_table_now(p.db, tab2)
-        w := WindowAggDepthWalker{unused: 0}
+        ^w: WindowAggDepthWalker{unused: 0}
         cg.walk_push(p, w, 0)
         _: cg.pwalk_select(p, a, sub)
         _: cg.walk_pop(p)
@@ -715,7 +715,7 @@ window_code_init: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) Never! {
         return
     }
 
-    win := mwin
+    ^win: mwin
     loop win >= 0 {
         d: p.wfuncs[a.windows[win].wfunc].copy()
         if d.flags & conn.FUNC_MINMAX != 0 && a.windows[win].start_type != tk.TK_UNBOUNDED {
@@ -724,7 +724,7 @@ window_code_init: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) Never! {
             // integer that keeps keys unique, and the record.
             owner: a.windows[win].owner
             list: a.exprs[owner].x
-            key := key_info_from_expr_list(p, a, list, 0, 0)
+            ^key: key_info_from_expr_list(p, a, list, 0, 0)
             csr_app: p.f.n_tab
             p.f.n_tab += 1
             a.windows[win].csr_app = csr_app
@@ -846,17 +846,17 @@ window_read_peer_values: fn(p: ^cg.Parse, a: ast.AST, s: WindowCodeArg, csr: Int
 window_agg_step: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int, csr: Int, inverse: Bool, reg: Int) -[DB]> Never! {
     eph: a.windows[mwin].eph_csr
     b_inverse: if inverse -> 1 else -> 0
-    win := mwin
+    ^win: mwin
     loop win >= 0 {
         w: a.windows[win].copy()
         d: p.wfuncs[w.wfunc].copy()
-        n_arg := if w.expr_args -> 0 else -> window_arg_count(a, win)
+        ^n_arg: if w.expr_args -> 0 else -> window_arg_count(a, win)
         is_nth: wfunc_is(p, a, win, cat.FI_NTH_VALUE)
         loop i in 0..<n_arg {
             c: if i != 1 || !is_nth -> csr else -> eph
             _: cg.op3(p, opc.OP_COLUMN, c, w.iarg_col + i, reg + i)
         }
-        reg_arg := reg
+        ^reg_arg: reg
         is_noop: wfunc_is(p, a, win, cat.FI_LEAD) || wfunc_is(p, a, win, cat.FI_LAG)
         if a.windows[mwin].reg_start_rowid == 0 && d.flags & conn.FUNC_MINMAX != 0 && w.start_type != tk.TK_UNBOUNDED {
             addr_is_null: cg.op1(p, opc.OP_IS_NULL, reg_arg)
@@ -873,7 +873,7 @@ window_agg_step: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int, csr: Int, inverse: Boo
             }
             cg.v_jump_here(p, addr_is_null)
         } else if w.reg_app != 0 { _: cg.op2(p, opc.OP_ADD_IMM, w.reg_app + 1 - b_inverse, 1) } else if !is_noop {
-            addr_if := 0
+            ^addr_if: 0
             if w.filter >= 0 {
                 reg_tmp: cg.get_temp_reg(p)
                 _: cg.op3(p, opc.OP_COLUMN, csr, w.iarg_col + n_arg, reg_tmp)
@@ -884,7 +884,7 @@ window_agg_step: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int, csr: Int, inverse: Boo
             if w.expr_args {
                 // The arguments coded in place, their reads of the
                 // ephemeral table's row made reads of csr's.
-                i_op := cg.v_current_addr(p)
+                ^i_op: cg.v_current_addr(p)
                 n_arg = ast.list_len(a, owner_args)
                 reg_arg = cg.get_temp_range(p, n_arg)
                 _: ex.expr_code_expr_list(p, a, owner_args, reg_arg, 0, 0)
@@ -916,7 +916,7 @@ window_agg_step: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int, csr: Int, inverse: Boo
 // into their result registers.
 window_agg_final: fn(p: ^cg.Parse, a: ast.AST, s: WindowCodeArg, fin: Bool) Never! {
     mwin: s.mwin
-    win := mwin
+    ^win: mwin
     loop win >= 0 {
         w: a.windows[win].copy()
         d: p.wfuncs[w.wfunc].copy()
@@ -954,15 +954,15 @@ window_full_scan: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg) -[DB]> Never! 
     lbl_brk: cg.v_make_label(p)
     reg_c_rowid: cg.get_temp_reg(p)
     reg_rowid: cg.get_temp_reg(p)
-    reg_c_peer := 0
-    reg_peer := 0
+    ^reg_c_peer: 0
+    ^reg_peer: 0
     if n_peer != 0 {
         reg_c_peer = cg.get_temp_range(p, n_peer)
         reg_peer = cg.get_temp_range(p, n_peer)
     }
     _: cg.op2(p, opc.OP_ROWID, mw.eph_csr, reg_c_rowid)
     window_read_peer_values(p, a, s, mw.eph_csr, reg_c_peer)
-    win := mwin
+    ^win: mwin
     loop win >= 0 {
         _: cg.op2(p, opc.OP_NULL, 0, a.windows[win].reg_accum)
         win = a.windows[win].next_win
@@ -972,7 +972,7 @@ window_full_scan: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg) -[DB]> Never! 
     _: cg.op2(p, opc.OP_ROWID, csr, reg_rowid)
     _: cg.op3(p, opc.OP_GT, mw.reg_end_rowid, lbl_brk, reg_rowid)
     if mw.exclude == tk.TK_CURRENT -> _: cg.op3(p, opc.OP_EQ, reg_c_rowid, lbl_next, reg_rowid) else if mw.exclude != tk.TK_NO {
-        addr_eq := 0
+        ^addr_eq: 0
         if mw.exclude == tk.TK_TIES -> addr_eq = cg.op3(p, opc.OP_EQ, reg_c_rowid, 0, reg_rowid)
         if mw.order_by >= 0 {
             key: key_info_from_expr_list(p, a, mw.order_by, 0, 0)
@@ -1006,7 +1006,7 @@ window_return_one_row: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg) -[DB]> Ne
     mwin: s.mwin
     if a.windows[mwin].reg_start_rowid != 0 -> window_full_scan(p, a, s) else {
         eph: a.windows[mwin].eph_csr
-        win := mwin
+        ^win: mwin
         loop win >= 0 {
             w: a.windows[win].copy()
             is_nth: wfunc_is(p, a, win, cat.FI_NTH_VALUE)
@@ -1061,8 +1061,8 @@ window_return_one_row: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg) -[DB]> Ne
 // of the registers for the largest argument list.
 window_init_accum: fn(p: ^cg.Parse, a: ast.AST, mwin: Int) -> Int Never! {
     cg.get_vdbe(p)
-    n_arg := 0
-    win := mwin
+    ^n_arg: 0
+    ^win: mwin
     loop win >= 0 {
         w: a.windows[win].copy()
         d: p.wfuncs[w.wfunc]
@@ -1090,7 +1090,7 @@ window_init_accum: fn(p: ^cg.Parse, a: ast.AST, mwin: Int) -> Int Never! {
 // though no xInverse needs it.
 window_cache_frame: fn(p: cg.Parse, a: ast.AST, mwin: Int) -> Bool Never! {
     if a.windows[mwin].reg_start_rowid != 0 -> return true
-    win := mwin
+    ^win: mwin
     loop win >= 0 {
         if wfunc_is(p, a, win, cat.FI_NTH_VALUE) || wfunc_is(p, a, win, cat.FI_FIRST_VALUE) || wfunc_is(p, a, win, cat.FI_LEAD) || wfunc_is(p, a, win, cat.FI_LAG) {
             return true
@@ -1127,11 +1127,11 @@ window_code_range_test: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg, op0: Int
     reg2: cg.get_temp_reg(p)
     p.f.n_mem += 1
     reg_string: p.f.n_mem
-    arith := opc.OP_ADD
+    ^arith: opc.OP_ADD
     addr_done: cg.v_make_label(p)
     window_read_peer_values(p, a, s, csr1, reg1)
     window_read_peer_values(p, a, s, csr2, reg2)
-    op := op0
+    ^op: op0
     sf: a.lists[ob].items[0].sort_flags
     if sf & base.KEYINFO_ORDER_DESC != 0 {
         if op == opc.OP_GE -> op = opc.OP_LE else if op == opc.OP_GT -> op = opc.OP_LT else {
@@ -1176,10 +1176,10 @@ window_code_range_test: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg, op0: Int
 // of the stepped cursor, else 0.
 window_code_op: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg, op: Int, reg_countdown: Int, jump_on_eof: Bool) -[DB]> Int Never! {
     mw: a.windows[s.mwin].copy()
-    ret := 0
+    ^ret: 0
     b_peer: mw.frm_type != tk.TK_ROWS
     lbl_done: cg.v_make_label(p)
-    addr_next_range := 0
+    ^addr_next_range: 0
 
     // AGGINVERSE does nothing for a frame from UNBOUNDED PRECEDING.
     if op == WINDOW_AGGINVERSE && mw.start_type == tk.TK_UNBOUNDED -> return 0
@@ -1220,8 +1220,8 @@ window_code_op: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg, op: Int, reg_cou
         cg.release_temp_reg(p, reg_rowid2)
     }
 
-    csr := 0
-    reg := 0
+    ^csr: 0
+    ^reg: 0
     if op == WINDOW_RETURN_ROW {
         csr = s.current_csr
         reg = s.current_reg
@@ -1294,7 +1294,7 @@ window_code_step: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, wi: ^we.WhereInfo, reg
     n_input: p.db.tables[t_in].cols.len()
     lbl_where_end: cg.v_make_label(p)
 
-    s := WindowCodeArg{mwin: mwin, addr_gosub: addr_gosub, reg_gosub: reg_gosub, reg_arg: 0, e_delete: 0, reg_rowid: 0, start_csr: mw.eph_csr + 2, start_reg: 0, current_csr: mw.eph_csr, current_reg: 0, end_csr: mw.eph_csr + 3, end_reg: 0}
+    ^s: WindowCodeArg{mwin: mwin, addr_gosub: addr_gosub, reg_gosub: reg_gosub, reg_arg: 0, e_delete: 0, reg_rowid: 0, start_csr: mw.eph_csr + 2, start_reg: 0, current_csr: mw.eph_csr, current_reg: 0, end_csr: mw.eph_csr + 3, end_reg: 0}
     csr_write: mw.eph_csr + 1
 
     // When a buffered row may go: never (0), once out of the frame
@@ -1322,8 +1322,8 @@ window_code_step: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, wi: ^we.WhereInfo, reg
     s.reg_rowid = p.f.n_mem
 
     // The values of an <expr> PRECEDING or FOLLOWING.
-    reg_start := 0
-    reg_end := 0
+    ^reg_start: 0
+    ^reg_end: 0
     if mw.start_type == tk.TK_PRECEDING || mw.start_type == tk.TK_FOLLOWING {
         p.f.n_mem += 1
         reg_start = p.f.n_mem
@@ -1335,8 +1335,8 @@ window_code_step: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, wi: ^we.WhereInfo, reg
 
     // Other than for ROWS, the peer values of the main loop and of each
     // cursor.
-    reg_new_peer := 0
-    reg_peer := 0
+    ^reg_new_peer: 0
+    ^reg_peer: 0
     if mw.frm_type != tk.TK_ROWS {
         n_peer: ast.list_len(a, ob)
         reg_new_peer = reg_new + mw.nbuffer_col + ast.list_len(a, mw.partition)
@@ -1357,8 +1357,8 @@ window_code_step: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, wi: ^we.WhereInfo, reg
 
     // A new partition flushes the one before, through a Gosub whose
     // target is filled in below.
-    addr_gosub_flush := 0
-    reg_flush_part := 0
+    ^addr_gosub_flush: 0
+    ^reg_flush_part: 0
     if mw.partition >= 0 {
         n_part: ast.list_len(a, mw.partition)
         reg_new_part: reg_new + mw.nbuffer_col
@@ -1440,11 +1440,11 @@ window_code_step: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, wi: ^we.WhereInfo, reg
         _: window_code_op(p, a, s, WINDOW_RETURN_ROW, 0, false)
         if !b_rps -> _: window_code_op(p, a, s, WINDOW_AGGINVERSE, reg_start, false)
     } else {
-        addr := 0
+        ^addr: 0
         _: window_code_op(p, a, s, WINDOW_AGGSTEP, 0, false)
         if mw.end_type != tk.TK_UNBOUNDED {
             if mw.frm_type == tk.TK_RANGE {
-                lbl := 0
+                ^lbl: 0
                 addr = cg.v_current_addr(p)
                 if reg_end != 0 {
                     lbl = cg.v_make_label(p)
@@ -1471,7 +1471,7 @@ window_code_step: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, wi: ^we.WhereInfo, reg
 
     // The flush, fallen into at the end of the input and called at each
     // new partition.
-    addr_integer := 0
+    ^addr_integer: 0
     if mw.partition >= 0 {
         addr_integer = cg.op2(p, opc.OP_INTEGER, 0, reg_flush_part)
         cg.v_jump_here(p, addr_gosub_flush)
@@ -1484,9 +1484,9 @@ window_code_step: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, wi: ^we.WhereInfo, reg
         if b_rps -> _: window_code_op(p, a, s, WINDOW_AGGINVERSE, reg_start, false)
         _: window_code_op(p, a, s, WINDOW_RETURN_ROW, 0, false)
     } else if mw.start_type == tk.TK_FOLLOWING {
-        addr_start := 0
-        addr_break1 := 0
-        addr_break2 := 0
+        ^addr_start: 0
+        ^addr_break1: 0
+        ^addr_break2: 0
         _: window_code_op(p, a, s, WINDOW_AGGSTEP, 0, false)
         if mw.frm_type == tk.TK_RANGE {
             addr_start = cg.v_current_addr(p)
@@ -1534,7 +1534,7 @@ window_code_step: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, wi: ^we.WhereInfo, reg
 // Tests.
 
 window_test_vdbe: fn(id: Int, args: [base.Mem]) -> conn.Vdbe Never! {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     v.mem.push(base.mem_null())
     v.mem.push(base.mem_null())
     loop m in args -> v.mem.push(m.copy())
@@ -1546,13 +1546,13 @@ window_test_vdbe: fn(id: Int, args: [base.Mem]) -> conn.Vdbe Never! {
 }
 
 #Test("row_number, rank and dense_rank count rows and peer groups") {
-    db := conn.conn_new()
-    v := window_test_vdbe(cat.FI_ROW_NUMBER, [base.Mem]{})
+    ^db: conn.conn_new()
+    ^v: window_test_vdbe(cat.FI_ROW_NUMBER, [base.Mem]{})
     window_func_call(db, v, aux.FN_STEP)
     window_func_call(db, v, aux.FN_STEP)
     window_func_call(db, v, aux.FN_VALUE)
     assert_eq(v.mem[0].i, 2)
-    r := window_test_vdbe(cat.FI_RANK, [base.Mem]{})
+    ^r: window_test_vdbe(cat.FI_RANK, [base.Mem]{})
     // Two peers, then a new group: rank() is 1, then 3.
     window_func_call(db, r, aux.FN_STEP)
     window_func_call(db, r, aux.FN_STEP)
@@ -1561,7 +1561,7 @@ window_test_vdbe: fn(id: Int, args: [base.Mem]) -> conn.Vdbe Never! {
     window_func_call(db, r, aux.FN_STEP)
     window_func_call(db, r, aux.FN_VALUE)
     assert_eq(r.mem[0].i, 3)
-    d := window_test_vdbe(cat.FI_DENSE_RANK, [base.Mem]{})
+    ^d: window_test_vdbe(cat.FI_DENSE_RANK, [base.Mem]{})
     window_func_call(db, d, aux.FN_STEP)
     window_func_call(db, d, aux.FN_VALUE)
     window_func_call(db, d, aux.FN_STEP)
@@ -1570,8 +1570,8 @@ window_test_vdbe: fn(id: Int, args: [base.Mem]) -> conn.Vdbe Never! {
 }
 
 #Test("ntile splits the partition and nth_value checks its argument") {
-    db := conn.conn_new()
-    v := window_test_vdbe(cat.FI_NTILE, [base.Mem]{base.mem_int(3)})
+    ^db: conn.conn_new()
+    ^v: window_test_vdbe(cat.FI_NTILE, [base.Mem]{base.mem_int(3)})
     loop _ in 0..<7 -> window_func_call(db, v, aux.FN_STEP)
     window_func_call(db, v, aux.FN_VALUE)
     assert_eq(v.mem[0].i, 1)
@@ -1581,11 +1581,11 @@ window_test_vdbe: fn(id: Int, args: [base.Mem]) -> conn.Vdbe Never! {
     loop _ in 0..<3 -> window_func_call(db, v, aux.FN_INVERSE)
     window_func_call(db, v, aux.FN_VALUE)
     assert_eq(v.mem[0].i, 3)
-    n := window_test_vdbe(cat.FI_NTH_VALUE, [base.Mem]{base.mem_int(7), base.mem_real(2.5)})
+    ^n: window_test_vdbe(cat.FI_NTH_VALUE, [base.Mem]{base.mem_int(7), base.mem_real(2.5)})
     window_func_call(db, n, aux.FN_STEP)
     assert_eq(n.fctx.is_error, base.ERROR)
     assert_eq(String.from_bytes(n.mem[0].z) ?? "", "second argument to nth_value must be a positive integer")
-    m := window_test_vdbe(cat.FI_NTH_VALUE, [base.Mem]{base.mem_int(7), base.mem_real(2.0)})
+    ^m: window_test_vdbe(cat.FI_NTH_VALUE, [base.Mem]{base.mem_int(7), base.mem_real(2.0)})
     window_func_call(db, m, aux.FN_STEP)
     m.mem[2] = base.mem_int(8)
     window_func_call(db, m, aux.FN_STEP)
@@ -1595,8 +1595,8 @@ window_test_vdbe: fn(id: Int, args: [base.Mem]) -> conn.Vdbe Never! {
 }
 
 #Test("last_value follows the frame and empties with it") {
-    db := conn.conn_new()
-    v := window_test_vdbe(cat.FI_LAST_VALUE, [base.Mem]{base.mem_int(4)})
+    ^db: conn.conn_new()
+    ^v: window_test_vdbe(cat.FI_LAST_VALUE, [base.Mem]{base.mem_int(4)})
     window_func_call(db, v, aux.FN_STEP)
     v.mem[2] = base.mem_int(5)
     window_func_call(db, v, aux.FN_STEP)
@@ -1610,9 +1610,9 @@ window_test_vdbe: fn(id: Int, args: [base.Mem]) -> conn.Vdbe Never! {
 }
 
 #Test("an appended list keeps sort flags and can make integers NULL") {
-    a := ast.stmt_ast("")
+    ^a: ast.stmt_ast("")
     e3: ast.expr(a, tk.TK_INTEGER, "3".bytes())
-    l := ast.expr_list_append(a, -1, e3)
+    ^l: ast.expr_list_append(a, -1, e3)
     es: ast.expr(a, tk.TK_STRING, "x".bytes())
     l = ast.expr_list_append(a, l, es)
     a.lists[l].items[0].sort_flags = base.KEYINFO_ORDER_DESC
@@ -1627,7 +1627,7 @@ window_test_vdbe: fn(id: Int, args: [base.Mem]) -> conn.Vdbe Never! {
 }
 
 #Test("a frame offset check halts unless the value is in range") {
-    p := cg.parse_new(conn.conn_new(), cg.CodegenTestGen{calls: 0})
+    ^p: cg.parse_new(conn.conn_new(), cg.CodegenTestGen{calls: 0})
     cg.get_vdbe(p)
     start: cg.v_current_addr(p)
     window_check_value(p, 9, WINDOW_ENDING_NUM)

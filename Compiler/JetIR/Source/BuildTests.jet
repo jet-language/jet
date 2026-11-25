@@ -91,7 +91,7 @@ ir_coverage_put: fn(coverage: ^IRCoverage, key: String, line: Int) Never! {
 // Builds `harness` and every function it reaches, keeping `checks`
 // (ir_bounds_mode).
 ir_build_tests: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, type_defs: ^^[TTypeDef], impls: ^^[TImplDef], sources: ^^IRSourceTexts, constants: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
-    p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants)
+    ^p: ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants)
     p.checks = checks
     p.zone_table = true
     p.sentries = ir_checks_sentries(checks)
@@ -99,9 +99,9 @@ ir_build_tests: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTab
     p.contract_records = true
     p.coverage = harness.coverage.copy()
     ir_foreign_index(p, foreign, decls)
-    m := ir_module_for(p)
-    failures := [IRBuildFailure]{}
-    bodies := [Int]{}
+    ^m: ir_module_for(p)
+    ^failures: [IRBuildFailure]{}
+    ^bodies: [Int]{}
     loop test in harness.tests {
         id: ir_function_id(m, p, test.key, [Type]{}) ?? -1
         if id < 0 {
@@ -112,7 +112,7 @@ ir_build_tests: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTab
         if id >= 0 -> m.functions[id].name = "test \"{test.name}\""
         bodies.push(id)
     }
-    check_ids := [Int]{}
+    ^check_ids: [Int]{}
     loop check in harness.checks {
         id: ir_function_id(m, p, check.key, [Type]{}) ?? -1
         if id < 0 {
@@ -132,7 +132,7 @@ ir_build_tests: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTab
     ir_debug_variants(m, p)
     ir_drop_glues(m, p)
     ir_module_finalize_interner(m, p.interner.move())
-    merged := ir_merge_serial(m)
+    ^merged: ir_merge_serial(m)
     ir_recursion_checks(merged, 1)
     IRBuildResult{program: merged.move(), failures: failures}
 }
@@ -178,10 +178,10 @@ ir_test_override_key: fn(functions: [FnBody]) -> String Never! {
 // function `from` (`suffix` appended), at its source location; a shared
 // helper (`from` < 0) is keyed `jet_ir_test_<suffix>`.
 ir_test_function: fn(m: ^IRModule, name: String, from: Int, suffix: String) -> Int Never! {
-    key := "jet_ir_test_{suffix}"
-    symbol := key.copy()
-    source_file := ""
-    line := 0
+    ^key: "jet_ir_test_{suffix}"
+    ^symbol: key.copy()
+    ^source_file: ""
+    ^line: 0
     if from >= 0 {
         key = "{m.functions[from].key}#test.{suffix}"
         symbol = "{m.functions[from].symbol}__test_{suffix}"
@@ -198,7 +198,7 @@ ir_test_function: fn(m: ^IRModule, name: String, from: Int, suffix: String) -> I
 // Ends a generated function: records its failure, resolves its deferred
 // calls and stores it.
 ir_test_finish: fn(m: ^IRModule, p: IRProgram, b: ^^IRBuilder, id: Int, failures: ^[IRBuildFailure]) Never! {
-    built := b.move()
+    ^built: b.move()
     if built.error != "" {
         failures.push(IRBuildFailure{key: m.functions[id].key, name: m.functions[id].name, message: built.error, source_file: m.functions[id].source_file, span: built.error_span})
     }
@@ -263,7 +263,7 @@ ir_test_exit: fn(m: ^IRModule, b: ^IRBuilder, code: Int) Never! {
 // test.invoke(env) for the test body `body`.
 ir_test_invoke: fn(m: ^IRModule, p: IRProgram, body: Int, failures: ^[IRBuildFailure]) -> Int Never! {
     id: ir_test_function(m, "test.invoke", body, "invoke")
-    b := ir_builder_new(m.functions[id].copy())
+    ^b: ir_builder_new(m.functions[id].copy())
     b.line = m.functions[body].line
     span: Span{start: 0, end: 0}
     pointer_row: ir_pointer_row(m)
@@ -274,7 +274,7 @@ ir_test_invoke: fn(m: ^IRModule, p: IRProgram, body: Int, failures: ^[IRBuildFai
     no_args: [Int]{}
     null: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.Const, null, 0, -1, -1, b.line)
-    result := -1
+    ^result: -1
     if m.functions[body].param_count > 0 -> result = ir_test_property_call(m, p, b, body, env, span) else {
         row: m.functions[body].result
         if row >= 0 && m.types[row].kind != .Unit -> result = ir_temp(m, b, row)
@@ -344,7 +344,7 @@ ir_test_message_word: fn(m: ^IRModule, b: ^IRBuilder, text: Int) -> Int Never! {
 ir_test_property_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, body: Int, ctx: Int, span: Span) -> Int Never! {
     row: ir_function_row(p, m.functions[body].key) ?? return ir_fail_slot(b, span, "a property test outside the checked program")
     params: p.functions[row].params
-    values := [Int]{}
+    ^values: [Int]{}
     loop param in params {
         value: ir_test_generate(m, p, b, ctx, param.ty, span)
         if ir_failed(b) -> return -1
@@ -529,7 +529,7 @@ ir_test_generate_list: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ctx: Int, r
 ir_test_unit: fn(m: ^IRModule, p: IRProgram, test: IRTestCase, body: Int, failures: ^[IRBuildFailure]) -> Int Never! {
     invoke: ir_test_invoke(m, p, body, failures)
     id: ir_test_function(m, "test.unit", body, "unit")
-    b := ir_builder_new(m.functions[id].copy())
+    ^b: ir_builder_new(m.functions[id].copy())
     b.line = m.functions[body].line
     pointer_row: ir_pointer_row(m)
     env_name: ir_intern_name(m, "env")
@@ -540,7 +540,7 @@ ir_test_unit: fn(m: ^IRModule, p: IRProgram, test: IRTestCase, body: Int, failur
     code: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.FunctionAddress, code, invoke, -1, -1, b.line)
     property: m.functions[body].param_count > 0
-    outcome := -1
+    ^outcome: -1
     if test.faults.len() > 0 {
         selectors: ir_test_text(m, b, test.faults.join("\n"))
         flag: ir_test_bool(m, b, property)
@@ -560,7 +560,7 @@ ir_test_unit: fn(m: ^IRModule, p: IRProgram, test: IRTestCase, body: Int, failur
 // nothing.
 ir_test_release: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure]) -> Int Never! {
     id: ir_test_function(m, "test.release", -1, "release")
-    b := ir_builder_new(m.functions[id].copy())
+    ^b: ir_builder_new(m.functions[id].copy())
     pointer_row: ir_pointer_row(m)
     env_name: ir_intern_name(m, "env")
     _: ir_new_slot(b, pointer_row, IRSlotKind.Param, env_name)
@@ -656,7 +656,7 @@ ir_test_call_override: fn(m: ^IRModule, b: ^IRBuilder, override: Int) Never! {
 ir_test_check: fn(m: ^IRModule, p: IRProgram, check: IROutputCheck, function: Int, failures: ^[IRBuildFailure]) -> Int Never! {
     name: m.functions[function].name.copy()
     id: ir_test_function(m, name, function, "check")
-    b := ir_builder_new(m.functions[id].copy())
+    ^b: ir_builder_new(m.functions[id].copy())
     b.line = m.functions[function].line
     span: Span{start: 0, end: 0}
     if m.functions[function].param_count > 0 {
@@ -691,7 +691,7 @@ ir_test_main: fn(m: ^IRModule, p: IRProgram, harness: IRTestHarness, bodies: [In
     release_id: ir_test_release(m, p, failures)
     check_helpers: loop (index, check) in harness.checks -> ir_test_check(m, p, check, check_ids[index], failures)
     id: ir_test_function(m, "main", -1, "main")
-    b := ir_builder_new(m.functions[id].copy())
+    ^b: ir_builder_new(m.functions[id].copy())
     pointer_row: ir_pointer_row(m)
     ir_sentry_release_link(m, p, b)
     ir_checked_alloc_link(m, p, b)

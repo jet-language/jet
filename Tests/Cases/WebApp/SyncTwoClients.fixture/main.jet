@@ -104,7 +104,7 @@ run: fn() {
     _: app.new("Crew").offline(.Queue)
     store: db.open_memory()
     served: web.app().mount("/api", Board{store: store.copy()})
-    server := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    ^server: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: "http://{server.local_addr()}/api"
     serving: task {
         loop _ in 0..<SENDS { served.serve_once(server) ?? panic("serve") }

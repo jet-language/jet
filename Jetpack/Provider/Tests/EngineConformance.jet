@@ -107,7 +107,7 @@
     assert(provider_test_has(homebrew.conflicts, [String]{"conflicting version"}))
     provider_test_invalid(homebrew)
     shared_homebrew: homebrew.shared_facts()
-    matched := false
+    ^matched: false
     loop conflict in shared_homebrew.conflicts {
         if conflict.right.contains("conflicting version") && conflict.left != conflict.right {
             matched = true
@@ -117,7 +117,7 @@
     github: provider_normalize_document(ProviderFamily.Github, "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"assets\":[{{\"name\":\"tool-linux\",\"platform\":\"x86_64-linux\",\"browser_download_url\":\"https://example.invalid/tool\"}}]}}")
     assert(provider_test_has(github.losses, [String]{"no content digest"}))
     provider_test_invalid(github)
-    matched_github := false
+    ^matched_github: false
     loop loss in github.shared_facts().losses {
         if loss.reason.contains("no content digest") -> matched_github = true
     }
@@ -126,7 +126,7 @@
     assert(provider_test_has(binary.losses, [String]{"not an exact digest"}))
     assert(provider_test_has(binary.losses, [String]{"no target platform"}))
     provider_test_invalid(binary)
-    matched_binary := false
+    ^matched_binary: false
     loop loss in binary.shared_facts().losses {
         if loss.reason.contains("exact version, revision, or digest") -> matched_binary = true
     }
@@ -179,7 +179,7 @@
     missing_version: provider_normalize_document(ProviderFamily.PyPI, "{{\"info\":{{\"name\":\"sample-pkg\"}},\"urls\":[]}}")
     assert(provider_test_has(missing_version.losses, [String]{"exact version"}))
     provider_test_invalid(missing_version)
-    matched := false
+    ^matched: false
     loop loss in missing_version.shared_facts().losses {
         if loss.reason.contains("exact version") -> matched = true
     }

@@ -24,10 +24,10 @@ rt_age_b64_value: fn(c: I64) -> I64 {
 }
 
 rt_age_b64_encode: fn(input: I64, length: I64, output: I64) -> I64 {
-    acc := I64{0}
-    bits := I64{0}
-    at := I64{0}
-    i := I64{0}
+    ^acc: I64{0}
+    ^bits: I64{0}
+    ^at: I64{0}
+    ^i: I64{0}
     loop i < length {
         acc = ((acc << I64{8}) | rt_text_byte(wrapping(input + i))) & I64{65535}
         bits += I64{8}
@@ -49,10 +49,10 @@ rt_age_b64_encode: fn(input: I64, length: I64, output: I64) -> I64 {
 // Return byte count or -1; no padding accepted, unused low bits MUST be zero.
 rt_age_b64_decode: fn(input: I64, length: I64, output: I64, capacity: I64) -> I64 {
     if (length < I64{0} || length % I64{4} == I64{1}) { return I64{-1} }
-    acc := I64{0}
-    bits := I64{0}
-    at := I64{0}
-    i := I64{0}
+    ^acc: I64{0}
+    ^bits: I64{0}
+    ^at: I64{0}
+    ^i: I64{0}
     loop i < length {
         v: rt_age_b64_value(rt_text_byte(wrapping(input + i)))
         if (v < I64{0}) { return I64{-1} }
@@ -108,8 +108,8 @@ rt_age_bech_char_public: fn(i: I64) -> I64 {
 }
 
 rt_age_bech_char: fn(value: I64) -> I64 {
-    selected := I64{0}
-    i := I64{0}
+    ^selected: I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{32}) { break }
         selected |= (rt_age_bech_char_public(i) & rt_age_equal_mask(value, i))
@@ -119,7 +119,7 @@ rt_age_bech_char: fn(value: I64) -> I64 {
 }
 
 rt_age_bech_value: fn(character: I64) -> I64 {
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{32}) { return I64{-1} }
         if (character == rt_age_bech_char_public(i)) { return i }
@@ -145,7 +145,7 @@ rt_age_hrp: fn(i: I64) -> I64 {
 
 rt_age_polymod: fn(chk: I64, value: I64) -> I64 {
     top: chk >> I64{25}
-    next := ((chk & I64{0x1ffffff}) << I64{5}) ~ value
+    ^next: ((chk & I64{0x1ffffff}) << I64{5}) ~ value
     next ~= I64{0x3b6a57b2} & (I64{0} - (top & I64{1}))
     next ~= I64{0x26508e6d} & (I64{0} - ((top >> I64{1}) & I64{1}))
     next ~= I64{0x1ea119fa} & (I64{0} - ((top >> I64{2}) & I64{1}))
@@ -154,8 +154,8 @@ rt_age_polymod: fn(chk: I64, value: I64) -> I64 {
 }
 
 rt_age_hrp_checksum: fn(hrp_len: I64) -> I64 {
-    chk := I64{1}
-    i := I64{0}
+    ^chk: I64{1}
+    ^i: I64{0}
     loop i < hrp_len {
         chk = rt_age_polymod(chk, rt_age_hrp(i) >> I64{5})
         i += I64{1}
@@ -171,19 +171,19 @@ rt_age_hrp_checksum: fn(hrp_len: I64) -> I64 {
 
 rt_age_key_encode: fn(key: I64, identity: Bool, output: I64) -> I64 {
     hrp_len: if identity -> I64{15} else -> I64{3}
-    i := I64{0}
+    ^i: I64{0}
     loop i < hrp_len {
         c: rt_age_hrp(i)
         rt_text_put(wrapping(output + i), if identity -> c - (I64{32} & (((c - I64{97}) >> I64{63}) ~ I64{-1})) else -> c)
         i += I64{1}
     }
     rt_text_put(wrapping(output + hrp_len), I64{49})
-    chk := rt_age_hrp_checksum(hrp_len)
-    group := I64{0}
+    ^chk: rt_age_hrp_checksum(hrp_len)
+    ^group: I64{0}
     loop {
         if (group >= I64{52}) { break }
-        v := I64{0}
-        j := I64{0}
+        ^v: I64{0}
+        ^j: I64{0}
         loop {
             if (j >= I64{5}) { break }
             bit: group * I64{5} + j
@@ -218,9 +218,9 @@ rt_age_key_encode: fn(key: I64, identity: Bool, output: I64) -> I64 {
 rt_age_key_decode: fn(input: I64, length: I64, identity: Bool, output: I64) -> Bool {
     hrp_len: if identity -> I64{15} else -> I64{3}
     if (length != hrp_len + I64{59}) { return false }
-    lower := false
-    upper := false
-    i := I64{0}
+    ^lower: false
+    ^upper: false
+    ^i: I64{0}
     loop i < length {
         c: rt_text_byte(wrapping(input + i))
         if (c >= I64{65} && c <= I64{90}) { upper = true }
@@ -230,20 +230,20 @@ rt_age_key_decode: fn(input: I64, length: I64, identity: Bool, output: I64) -> B
     if (upper && lower) { return false }
     i = I64{0}
     loop i < hrp_len {
-        c := rt_text_byte(wrapping(input + i))
+        ^c: rt_text_byte(wrapping(input + i))
         if (upper && c >= I64{65} && c <= I64{90}) { c += I64{32} }
         if (c != rt_age_hrp(i)) { return false }
         i += I64{1}
     }
     if (rt_text_byte(wrapping(input + hrp_len)) != I64{49}) { return false }
-    chk := rt_age_hrp_checksum(hrp_len)
-    acc := I64{0}
-    bits := I64{0}
-    at := I64{0}
+    ^chk: rt_age_hrp_checksum(hrp_len)
+    ^acc: I64{0}
+    ^bits: I64{0}
+    ^at: I64{0}
     i = I64{0}
     loop {
         if (i >= I64{58}) { break }
-        c := rt_text_byte(wrapping(wrapping(wrapping(input + hrp_len) + I64{1}) + i))
+        ^c: rt_text_byte(wrapping(wrapping(wrapping(input + hrp_len) + I64{1}) + i))
         if (upper && c >= I64{65} && c <= I64{90}) { c += I64{32} }
         v: rt_age_bech_value(c)
         if (v < I64{0}) { return false }

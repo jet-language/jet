@@ -97,7 +97,7 @@ env_warn_sandbox_fallback: fn(theme: Theme) -[IO, FS, Env, Exec, Time.Wait]> Nev
 // The machine report for a sandbox refusal or warning.
 env_sandbox_json: fn(code: String, severity: String, status: SandboxStatus) -> String EncodingError! {
     refusal: code == "E1275"
-    fields := [String:Dyn]{}
+    ^fields: [String:Dyn]{}
     fields["schema_version"] = Dyn.Text("1")
     fields["code"] = Dyn.Text(code.copy())
     fields["severity"] = Dyn.Text(severity.copy())
@@ -117,7 +117,7 @@ env_sandbox_receipt_is_truthful: fn(class: String, policy: String) -> Bool Never
     if class == "non-executing" {
         return policy == "no child launched" || policy.starts_with("no child launched (") || policy.starts_with("trusted substitution (")
     }
-    fields := [String:String]{}
+    ^fields: [String:String]{}
     loop field in policy.split(";") {
         pair: field.split_once("=") ?? return false
         if pair.before == "" || pair.after == "" || fields.has_key(pair.before) -> return false

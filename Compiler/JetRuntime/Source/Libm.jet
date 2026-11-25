@@ -61,8 +61,8 @@ libm_nonzero: fn(word: I64) -> I64 { if (word == I64{0}) -> I64{0} else -> I64{1
 libm_clz64: fn(word: I64) -> I64 {
     if (word < I64{0}) { return I64{0} }
     if (word == I64{0}) { return I64{64} }
-    v := word
-    top := I64{0}
+    ^v: word
+    ^top: I64{0}
     if ((v >> I64{32}) != I64{0}) {
         top += I64{32}
         v = v >> I64{32}
@@ -120,7 +120,7 @@ libm_ceil: fn(x: Float) -> Float {
 // trunc.c
 libm_trunc: fn(x: Float) -> Float {
     ix: rt_f64_bits(x)
-    e := libm_exponent(ix) - I64{1023} + I64{12}
+    ^e: libm_exponent(ix) - I64{1023} + I64{12}
     if (e >= I64{64}) { return x }
     if (e < I64{12}) { e = I64{1} }
     m: libm_shr(I64{-1}, e)
@@ -135,7 +135,7 @@ libm_round: fn(x: Float) -> Float {
     if (e >= I64{1075}) { return x }
     a: if (ix < I64{0}) -> -x else -> x
     if (e < I64{1022}) { return Float{0.0} * x }
-    y := a + LIBM_TOINT - LIBM_TOINT - a
+    ^y: a + LIBM_TOINT - LIBM_TOINT - a
     if (y > Float{0.5}) { y = y + a - Float{1.0} } else if (y <= Float{-0.5}) {
         y = y + a + Float{1.0}
     } else { y += a }
@@ -154,10 +154,10 @@ libm_nan_pair: fn(x: Float, y: Float) -> Float {
 
 // fmod.c
 libm_fmod: fn(x: Float, y: Float) -> Float {
-    uxi := rt_f64_bits(x)
-    uyi := rt_f64_bits(y)
-    ex := libm_exponent(uxi)
-    ey := libm_exponent(uyi)
+    ^uxi: rt_f64_bits(x)
+    ^uyi: rt_f64_bits(y)
+    ^ex: libm_exponent(uxi)
+    ^ey: libm_exponent(uyi)
     negative: uxi < I64{0}
     if (x != x || y != y) { return libm_nan_pair(x, y) }
     if (libm_shl(uyi, I64{1}) == I64{0} || ex == I64{2047}) { return (x * y) / (x * y) }
@@ -167,7 +167,7 @@ libm_fmod: fn(x: Float, y: Float) -> Float {
     }
     // normalize x and y
     if (ex == I64{0}) {
-        i := libm_shl(uxi, I64{12})
+        ^i: libm_shl(uxi, I64{12})
         loop i >= (I64{0}) {
             ex -= I64{1}
             i = libm_shl(i, I64{1})
@@ -175,7 +175,7 @@ libm_fmod: fn(x: Float, y: Float) -> Float {
         uxi = libm_shl(uxi, I64{1} - ex)
     } else { uxi = uxi & LIBM_MANTISSA | LIBM_IMPLICIT }
     if (ey == I64{0}) {
-        i := libm_shl(uyi, I64{12})
+        ^i: libm_shl(uyi, I64{12})
         loop i >= (I64{0}) {
             ey -= I64{1}
             i = libm_shl(i, I64{1})
@@ -211,8 +211,8 @@ libm_fmod: fn(x: Float, y: Float) -> Float {
 
 // scalbn.c
 libm_scalbn: fn(x: Float, exponent: I64) -> Float {
-    y := x
-    n := exponent
+    ^y: x
+    ^n: exponent
     if (n > I64{1023}) {
         y *= LIBM_P1023
         n -= I64{1023}
@@ -238,7 +238,7 @@ libm_scalbn: fn(x: Float, exponent: I64) -> Float {
 // fma.c normalize(): the exponent, with ZEROINFNAN (971) for an infinity
 // or NaN and 972 for a zero. The significand is libm_fma_significand.
 libm_fma_exponent: fn(x: Float) -> I64 {
-    e := libm_exponent(rt_f64_bits(x))
+    ^e: libm_exponent(rt_f64_bits(x))
     if (e == I64{0}) {
         scaled: libm_exponent(rt_f64_bits(x * LIBM_P63))
         e = if (scaled == I64{0}) -> I64{2048} else -> scaled - I64{63}
@@ -248,7 +248,7 @@ libm_fma_exponent: fn(x: Float) -> I64 {
 
 // fma.c normalize(): the significand with its top 10 bits and last bit 0.
 libm_fma_significand: fn(x: Float) -> I64 {
-    ix := rt_f64_bits(x)
+    ^ix: rt_f64_bits(x)
     if (libm_exponent(ix) == I64{0}) { ix = rt_f64_bits(x * LIBM_P63) }
     (ix & LIBM_MANTISSA | LIBM_IMPLICIT) << I64{1}
 }
@@ -287,15 +287,15 @@ libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
     t1: wrapping(xlo * ylo)
     t2: xlo * yhi + xhi * ylo
     t3: xhi * yhi
-    rlo := wrapping(t1 + libm_shl(t2, I64{32}))
-    rhi := t3 + (t2 >> I64{32}) + (if libm_ult(rlo, t1) -> I64{1} else -> I64{0})
+    ^rlo: wrapping(t1 + libm_shl(t2, I64{32}))
+    ^rhi: t3 + (t2 >> I64{32}) + (if libm_ult(rlo, t1) -> I64{1} else -> I64{0})
     // either top 20 or 21 bits of rhi and last 2 bits of rlo are 0
 
     // align exponents
-    e := xe + ye
-    d := ze - e
-    zlo := I64{0}
-    zhi := I64{0}
+    ^e: xe + ye
+    ^d: ze - e
+    ^zlo: I64{0}
+    ^zhi: I64{0}
     // shift bits z<<=kz, r>>=kr, so kz+kr == d, set e = e+kr (== ez-kz)
     if (d > I64{0}) {
         if (d < I64{64}) {
@@ -321,9 +321,9 @@ libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
     }
 
     // add
-    sign := (rt_f64_bits(x) < I64{0}) != (rt_f64_bits(y) < I64{0})
+    ^sign: (rt_f64_bits(x) < I64{0}) != (rt_f64_bits(y) < I64{0})
     samesign: sign == (rt_f64_bits(z) < I64{0})
-    nonzero := true
+    ^nonzero: true
     if samesign {
         // r += z
         rlo = wrapping(rlo + zlo)
@@ -359,11 +359,11 @@ libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
     e -= d
 
     // convert to double
-    i := rhi
+    ^i: rhi
     // i is in [1<<62,(1<<63)-1]
     if sign -> i = I64{0} - i
     // |r| is in [0x1p62,0x1p63]; (double)i rounds to nearest, as approx does
-    r := approx(i)
+    ^r: approx(i)
     if (e < I64{-1084}) {
         // result is subnormal before rounding
         if (e == I64{-1085}) {

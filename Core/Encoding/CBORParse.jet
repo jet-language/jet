@@ -19,13 +19,13 @@ integer_fits: fn(n: Int) -> Bool Never! { n >= -18446744073709551616 && n <= 184
 // leading zero (RFC 8949 §3.4.3). Tag 2 carries a wide n >= 0 as n, tag 3 a
 // wide n < 0 as -1 - n.
 bignum_bytes: fn(magnitude: Int) -> [U8] Never! {
-    reversed := [U8]{}
-    rest := magnitude
+    ^reversed: [U8]{}
+    ^rest: magnitude
     loop rest > 0 {
         reversed.push(U8{rest & 255})
         rest = rest >> 8
     }
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<reversed.len() -> out.push(reversed[reversed.len() - 1 - i])
     out
 }
@@ -33,7 +33,7 @@ bignum_bytes: fn(magnitude: Int) -> [U8] Never! {
 // The exact Int a CBOR bignum's big-endian `bytes` hold: tag 2 the unsigned
 // value, tag 3 (`negative`) minus one minus it.
 bignum_value: fn(bytes: [U8], negative: Bool) -> Int Never! {
-    magnitude := 0
+    ^magnitude: 0
     loop byte in bytes -> magnitude = magnitude * 256 + (Int{byte})
     if negative -> -magnitude - 1 else -> magnitude
 }
@@ -63,8 +63,8 @@ narrow_bits: fn(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never
     bias: (1 << (exponent_bits - 1)) - 1
     target_exponent: exponent - 1023 + bias
     if target_exponent >= max_exponent -> return None
-    shift := 52 - fraction_bits
-    significand := fraction
+    ^shift: 52 - fraction_bits
+    ^significand: fraction
     if target_exponent <= 0 {
         shift += 1 - target_exponent
         if shift > 52 + fraction_bits -> return None
@@ -94,7 +94,7 @@ parse: fn(bytes: [U8], options: CBOROptions) -> Dyn CBORError! {
     if bytes.len() > options.max_bytes {
         return Err(failure(.Limit, 0, "$", "input exceeds max_bytes {options.max_bytes}"))
     }
-    parser := Parser{cursor: 0, items: 0, live: 0, options: options}
+    ^parser: Parser{cursor: 0, items: 0, live: 0, options: options}
     value: parser.value(bytes, 0, "$") ?? return Err(err)
     if parser.cursor != bytes.len() {
         return Err(failure(.TrailingData, parser.cursor, "$", "trailing CBOR data after root value"))
@@ -162,7 +162,7 @@ Parser: struct {
         if width > input.len() - self.cursor {
             return Err(failure(.Truncated, input.len(), path, "CBOR length argument is truncated"))
         }
-        number := 0
+        ^number: 0
         loop _ in 0..<width {
             number = (number << 8) | Int{input[self.cursor]}
             self.cursor += 1
@@ -180,7 +180,7 @@ Parser: struct {
                 return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
             }
             what: if major == 2 -> "CBOR byte string" else -> "CBOR text string"
-            bytes := [U8]{}
+            ^bytes: [U8]{}
             loop {
                 if self.cursor == input.len() {
                     return Err(failure(.Truncated, input.len(), path, "indefinite CBOR string ended before its break"))
@@ -217,7 +217,7 @@ Parser: struct {
             return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string is truncated"))
         }
         what: if major == 2 -> "CBOR byte string" else -> "CBOR text string"
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         self.reserve<U8>(bytes, length, 1, start, path, what) ?? return Err(err)
         loop _ in 0..<length {
             bytes.push(input[self.cursor])
@@ -271,13 +271,13 @@ Parser: struct {
         if depth + 1 > self.options.max_depth {
             return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
         }
-        items := [Dyn]{}
-        length := -1
+        ^items: [Dyn]{}
+        ^length: -1
         if additional == 31 -> self.indefinite(start, path) ?? return Err(err) else {
             length = self.argument(input, additional, start, path) ?? return Err(err)
             self.reserve<Dyn>(items, length, 32, start, path, "CBOR array") ?? return Err(err)
         }
-        index := 0
+        ^index: 0
         loop length < 0 || index < length {
             if length < 0 {
                 if self.cursor == input.len() {
@@ -313,15 +313,15 @@ Parser: struct {
         if depth + 1 > self.options.max_depth {
             return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
         }
-        entries := [{key: String, value: Dyn}]{}
-        length := -1
+        ^entries: [{key: String, value: Dyn}]{}
+        ^length: -1
         if additional == 31 -> self.indefinite(start, path) ?? return Err(err) else {
             length = self.argument(input, additional, start, path) ?? return Err(err)
             self.reserve<{key: String, value: Dyn}>(entries, length, 56, start, path, "CBOR map") ?? return Err(err)
         }
-        prior_start := -1
-        prior_end := -1
-        index := 0
+        ^prior_start: -1
+        ^prior_end: -1
+        ^index: 0
         loop length < 0 || index < length {
             if length < 0 {
                 if self.cursor == input.len() {
@@ -338,7 +338,7 @@ Parser: struct {
             }
             key_start: self.cursor
             key_value: self.value(input, depth + 1, path) ?? return Err(err)
-            key := ""
+            ^key: ""
             if key_value == {
                 .Text(text) -> key = text
                 .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(failure(.Unsupported, key_start, path, "CBOR map key must be text"))
@@ -383,7 +383,7 @@ Parser: struct {
         if width > input.len() - self.cursor {
             return Err(failure(.Truncated, input.len(), path, "CBOR {name} is truncated"))
         }
-        bits := 0
+        ^bits: 0
         loop i in 0..<width {
             byte: Int{input[self.cursor]}
             if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256 else {
@@ -436,7 +436,7 @@ Parser: struct {
 }
 
 bytewise_before: fn(bytes: [U8], a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
-    width := a_end - a
+    ^width: a_end - a
     if b_end - b < width -> width = b_end - b
     loop i in 0..<width {
         if bytes[a + i] != bytes[b + i] -> return bytes[a + i] < bytes[b + i]
@@ -455,7 +455,7 @@ widen_float: fn(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Float Neve
     bias: (1 << (exponent_bits - 1)) - 1
     if exponent == 0 {
         if fraction == 0 -> return math.from_bits(sign)
-        lead := fraction_bits - 1
+        ^lead: fraction_bits - 1
         loop 0 == (fraction & (1 << lead)) -> lead -= 1
         normal_exponent: 1 - bias - fraction_bits + lead
         mantissa: (fraction - (1 << lead)) << (52 - lead)
@@ -494,7 +494,7 @@ widen_float: fn(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Float Neve
         [U8]{65, 224, 160, 32},
     }
     loop bytes in cases {
-        validation := String?{None}
+        ^validation: String?{None}
         if rt.utf8_validate(bytes) == {
             .Ok(_) -> {}
             .Err(error) -> validation = Val(error.message)

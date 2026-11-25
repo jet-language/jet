@@ -41,7 +41,7 @@ descend: fn(depth: Int, signal: Int) {
     pid: process.current_pid()
     task.group deep {
         diver: task dive(depth, pid, signal)
-        _ := diver.join() ?? panic("the recursion did not finish")
+        ^_: diver.join() ?? panic("the recursion did not finish")
     }
     if signal != 0 {
         received: subscription.receiver.receive() ?? panic("the subscription closed before the signal")
@@ -66,8 +66,8 @@ run: fn() {
     sys.set_memory_limit(Val(SPACE), None) ?? panic("set_memory_limit: {err}")
     program: sys.executable()
     // The deepest surviving depth lies in [low, high).
-    low := 0
-    high := 1024
+    ^low: 0
+    ^high: 1024
     loop high <= DEEPEST && survives(program, high) {
         low = high
         high *= 2

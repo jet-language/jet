@@ -51,10 +51,10 @@ use jet_foundation.[
 ]
 
 sema_expression_unit_literal_type_name: fn(name: String) -> String Never! {
-    output := ""
+    ^output: ""
     loop piece in name.split("_") {
         if piece == "" -> next
-        bytes := piece.bytes()
+        ^bytes: piece.bytes()
         if bytes.len() == 0 -> next
         code: Int{bytes[0]}
         if code >= 97 && code <= 122 -> bytes[0] = U8{code - 32}
@@ -160,8 +160,8 @@ sema_expression_unit_literal: fn(raw: String, int_value: Int?, float_value: Floa
         fact: sema_expression_unit_literal_fact(suffix, facts_graph, sema_app_module_row(check.environment.*, facts_graph))
         if fact == .Val(unit) {
             if unit.name == "Duration" && unit.family == "Time" {
-                is_float := float_value != None
-                unit_value := if is_float -> sema_node(check.context, Type.Float, NodeKind.FloatLit{value: float_value ?? 0.0}, span) else -> sema_expr_unbounded_integer_literal(int_value ?? 0, span)
+                ^is_float: float_value != None
+                ^unit_value: if is_float -> sema_node(check.context, Type.Float, NodeKind.FloatLit{value: float_value ?? 0.0}, span) else -> sema_expr_unbounded_integer_literal(int_value ?? 0, span)
                 if {
                     unit.scale.denominator != 1 -> {
                         unit_value = sema_node(check.context, Type.Float, NodeKind.FloatLit{value: approx(int_value ?? 0)}, span)
@@ -280,14 +280,14 @@ sema_expression_list_mark_owned_value: fn(value: Expr, check: ^SemaBodyCheck) ->
     if value == {
         .Ident(name, span, _) -> {
             binding_index: sema_scope_resolve_index_at(check.scopes, name, span) ?? return true
-            binding := check.scopes.bindings[binding_index]
+            ^binding: check.scopes.bindings[binding_index]
             if binding.symbol.kind != SymbolKind.Local -> return true
             // A share site copies; the source stays usable.
             if sema_ownership_is_share_site(check.state, span) -> return true
             if sema_ownership_report_invalidated_view(check.state, value, check.scopes, span, check.diagnostics) {
                 return false
             }
-            places := sema_ownership_places_from_expr_in_state(value, check.scopes, check.state)
+            ^places: sema_ownership_places_from_expr_in_state(value, check.scopes, check.state)
             if places.len() == 0 -> return true
             if sema_ownership_report_own_place_moved(check.state, value, check.scopes, check.diagnostics) {
                 return false
@@ -328,13 +328,13 @@ sema_expression_list_mark_owned_value: fn(value: Expr, check: ^SemaBodyCheck) ->
 }
 
 sema_expression_list_check_clone: fn(element: Type, span: Span, check: ^SemaBodyCheck) -> Bool {
-    facts := sema_copy_classify(element, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.context.generic_params, false)
-    effect_name := sema_copy_effect_name(facts)
+    ^facts: sema_copy_classify(element, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.context.generic_params, false)
+    ^effect_name: sema_copy_effect_name(facts)
     if effect_name != None {
         check.context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
     }
     if !facts.accepted {
-        diagnostic := sema_copy_refusal(facts, span, check.environment.*, check.program.*)
+        ^diagnostic: sema_copy_refusal(facts, span, check.environment.*, check.program.*)
         if diagnostic != None {
             check.diagnostics.push(diagnostic ?? sema_error("E0211", span, "`{type_name(element)}` can't be copied", "list spread clones each element while building the result", "spread values whose elements support `Clone`"))
         }
@@ -371,18 +371,18 @@ sema_expression_list_item_mismatch: fn(required: Type, offered: Type, span: Span
 sema_expression_list_item_replace_mismatch: fn(required: Type, element: Expr, diagnostic_start: Int, check: ^SemaBodyCheck) {
     element_span: expr_span(element)
     mismatch_index: sema_value_mismatch_index(check.diagnostics, diagnostic_start, element_span) ?? return
-    probe_diagnostics := [Diagnostic]{}
+    ^probe_diagnostics: [Diagnostic]{}
     offered: sema_probe_expression(element, None, check, probe_diagnostics) ?? return
     check.diagnostics[mismatch_index] = sema_expression_list_item_mismatch(required, offered.ty, element_span, check)
 }
 
 sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, check: ^SemaBodyCheck) -> SemaExpressionListCheckedParts? {
-    checked_parts := [TListSpreadPart?]{}
-    element_types := [Type?]{}
-    deferred := [Int]{}
-    index := 0
+    ^checked_parts: [TListSpreadPart?]{}
+    ^element_types: [Type?]{}
+    ^deferred: [Int]{}
+    ^index: 0
     loop index < elements.len() {
-        element := elements[index]
+        ^element: elements[index]
         if expected_element == None && (sema_expression_list_element_needs_expected_type(element) || sema_expression_list_element_is_empty_list(element)) {
             checked_parts.push(None)
             element_types.push(None)
@@ -396,7 +396,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
                 if !sema_copy_site_check_guard_owned(checked, check, false) -> return None
                 if !sema_expression_list_mark_owned_value(value, check) -> return None
                 normalized: sema_expr_expected_type(sema_expr_unwrap_tag(checked.ty), check.environment.*, check.program.*)
-                spread_element := if normalized == {
+                ^spread_element: if normalized == {
                     .List(inner) -> inner
                     .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
                         check.diagnostics.push(sema_error("E1311", spread_span, "spread needs a list, not `{type_name(normalized)}`", "list spread `[...xs, y]` expands a list's elements in place", "spread a `[T]` value here"))
@@ -444,7 +444,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
         index += 1
     }
     if expected_element == None && elements.len() > 0 {
-        first := Type?{None}
+        ^first: Type?{None}
         loop item_type in element_types {
             if item_type == .Val(ty) {
                 first = Val(ty)
@@ -453,7 +453,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
         }
         if first == None {
             loop deferred_index in deferred {
-                element := elements[deferred_index]
+                ^element: elements[deferred_index]
                 // No sibling names a type, so an inferred struct item has
                 // none; the first record item names the list's record type.
                 record: sema_expression_list_element_is_inferred_struct(element) && sema_expression_list_element_is_record(element, check)
@@ -479,7 +479,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
         first_type: first ?? return None
         loop deferred_index in deferred {
             if checked_parts[deferred_index] != None -> next
-            element := elements[deferred_index]
+            ^element: elements[deferred_index]
             value: sema_check_expression(element, Val(first_type), check) ?? return None
             if !sema_copy_site_check_guard_owned(value, check, false) -> return None
             if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", check) {
@@ -489,14 +489,14 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
             checked_parts[deferred_index] = Val(TListSpreadPart.Element{value: value})
             element_types[deferred_index] = Val(value.ty)
         }
-        inferred_element := first_type
+        ^inferred_element: first_type
         loop item_type in element_types {
             if item_type == .Val(candidate) && !type_identity_equal(inferred_element, candidate) {
                 joined: sema_expr_numeric_join(inferred_element, candidate)
                 if joined == .Val(common) -> inferred_element = common
             }
         }
-        inference_failed := false
+        ^inference_failed: false
         loop part_index in 0..<checked_parts.len() {
             item_type: element_types[part_index] ?? next
             if type_identity_equal(item_type, inferred_element) -> next
@@ -532,8 +532,8 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, che
         }
         if inference_failed -> return None
     }
-    parts := [TListSpreadPart]{}
-    resolved_types := [Type]{}
+    ^parts: [TListSpreadPart]{}
+    ^resolved_types: [Type]{}
     loop slot in 0..<checked_parts.len() {
         part: checked_parts[slot] ?? {
             check.context.incomplete_reasons.push("checked list element inference left an unresolved part")
@@ -555,7 +555,7 @@ sema_expression_member_spread_fields: fn(base: Expr, members: [ExprMember], span
 }
 
 sema_expression_list_member_spreads: fn(elements: [Expr]) -> [Expr] Never! {
-    expanded := [Expr]{}
+    ^expanded: [Expr]{}
     loop element in elements {
         if element == {
             .MemberSpread(base, members, span, _) -> {
@@ -572,15 +572,15 @@ sema_expression_list_member_spreads: fn(elements: [Expr]) -> [Expr] Never! {
 }
 
 sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    has_spread := false
+    ^has_spread: false
     loop element in elements {
         if element == {
             .Spread(_, _, _) -> has_spread = true
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
         }
     }
-    expected_element := Type?{None}
-    result_ty := Type?{None}
+    ^expected_element: Type?{None}
+    ^result_ty: Type?{None}
     if expected == .Val(expected_ty) {
         normalized: sema_expr_expected_type(sema_expr_unwrap_tag(expected_ty), check.environment.*, check.program.*)
         if normalized == {
@@ -610,8 +610,8 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
                 }
                 expected_element = Val(element)
                 if measure_literal_value(len) == .Val(expected_len) && expected_len != elements.len() {
-                    element_suffix := if elements.len() == 1 -> "" else -> "s"
-                    expected_suffix := if expected_len == 1 -> "" else -> "s"
+                    ^element_suffix: if elements.len() == 1 -> "" else -> "s"
+                    ^expected_suffix: if expected_len == 1 -> "" else -> "s"
                     check.diagnostics.push(sema_error("E0963", span, "this list has {elements.len()} element{element_suffix}, but `[T#{measure_expression(len)}]` expects exactly {expected_len}", "a fixed-size list `[T#N]` requires exactly N elements", "provide exactly {expected_len} element{expected_suffix}"))
                     return None
                 }
@@ -642,9 +642,9 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
             check.state.deferred_view_opens.push(element_span)
         }
     }
-    checked_elements := sema_expression_list_elements(elements, expected_element, check)
+    ^checked_elements: sema_expression_list_elements(elements, expected_element, check)
     loop check.state.deferred_view_opens.len() > deferred_before {
-        _ := check.state.deferred_view_opens.pop()
+        ^_: check.state.deferred_view_opens.pop()
     }
     checked: checked_elements ?? return None
     if result_ty == None {
@@ -669,7 +669,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
         if !sema_expression_list_check_clone(element_type, span, check) -> return None
         return sema_expr_expected_owned(sema_tree_node(ty, TExprKind.ListSpread{parts: checked.parts}, span), expected, check.environment.*, check.program.*, check.diagnostics)
     }
-    values := [TExpr]{}
+    ^values: [TExpr]{}
     loop part in checked.parts {
         if part == {
             .Element(value) -> { values.push(value) }
@@ -706,9 +706,9 @@ sema_expression_runtime_measure_name: fn(measure: Measure, scopes: SemaScopeTabl
 }
 
 sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    expected_key := Type?{None}
-    expected_value := Type?{None}
-    result_ty := Type?{None}
+    ^expected_key: Type?{None}
+    ^expected_value: Type?{None}
+    ^result_ty: Type?{None}
     if expected == .Val(expected_ty) {
         normalized: sema_expr_unwrap_tag(expected_ty)
         if normalized == {
@@ -738,13 +738,13 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
         ty: result_ty ?? Type.Map{key: Type.Int, key_span: None, value: Type.Int}
         return sema_expr_expected_owned(sema_tree_node(ty, TExprKind.Map{entries: [TMapEntry]{}}, span), expected, check.environment.*, check.program.*, check.diagnostics)
     }
-    lowered := [TMapEntry]{}
-    inferred_key := Type?{None}
-    inferred_value := Type?{None}
+    ^lowered: [TMapEntry]{}
+    ^inferred_key: Type?{None}
+    ^inferred_value: Type?{None}
     // Each written key's spelling by name id, and its first entry.
-    written := name_table()
-    first_at := [Int?]{None}
-    position := 0
+    ^written: name_table()
+    ^first_at: [Int?]{None}
+    ^position: 0
     loop entry in entries {
         key: if expected_key != None -> sema_check_expression(entry.key, expected_key, check) else -> sema_check_expression(entry.key, None, check)
         value: if expected_value != None -> sema_check_expression(entry.value, expected_value, check) else -> sema_check_expression(entry.value, None, check)
@@ -816,7 +816,7 @@ sema_map_written_key: fn(key: TExpr, context: SemaCheckContext) -> String? Never
         return None
     }
     if key.kind == .StrLit(parts) {
-        text := ""
+        ^text: ""
         loop part in parts {
             if part == {
                 .Literal(piece) -> text = "{text}{piece}"
@@ -846,7 +846,7 @@ sema_map_written_node: fn(node: NodeKind) -> String? Never! {
         return None
     }
     if node == .StrLit(parts) {
-        text := ""
+        ^text: ""
         loop part in parts {
             if part == {
                 .Literal(piece) -> text = "{text}{piece}"
@@ -875,7 +875,7 @@ sema_map_written_value: fn(value: TComptimeValue) -> String? Never! {
 sema_map_duplicate_key: fn(first: Expr, second: Expr, same: String) -> Diagnostic {
     written: sema_map_key_text(second)
     key: if written == "" -> same else -> written
-    diagnostic := sema_error("E0508", expr_source_span(second), "This map literal writes the key `{key}` twice", "A map holds one value per key, so one of the two values would be lost without a word.", "Delete one of the two entries; to replace a value on purpose, assign it after the literal, as in `stats[\"level\"] = 99`.")
+    ^diagnostic: sema_error("E0508", expr_source_span(second), "This map literal writes the key `{key}` twice", "A map holds one value per key, so one of the two values would be lost without a word.", "Delete one of the two entries; to replace a value on purpose, assign it after the literal, as in `stats[\"level\"] = 99`.")
     diagnostic.labels.push(DiagnosticLabel{span: expr_source_span(first), message: "first written here"})
     diagnostic
 }
@@ -897,7 +897,7 @@ sema_map_key_text: fn(key: Expr) -> String Never! {
         return "{owner}.{member}"
     }
     if key == .Str(parts, _, _) {
-        text := ""
+        ^text: ""
         loop part in parts {
             if part == {
                 .Lit(piece) -> text = "{text}{piece}"
@@ -910,7 +910,7 @@ sema_map_key_text: fn(key: Expr) -> String Never! {
 }
 
 sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    expected_fields := [TypeTupleField]?{None}
+    ^expected_fields: [TypeTupleField]?{None}
     if expected == .Val(expected_ty) {
         normalized: sema_expr_unwrap_tag(expected_ty)
         if normalized == .Tuple(items) -> expected_fields = Val(items)
@@ -919,8 +919,8 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, che
         check.diagnostics.push(sema_type_mismatch(expected, Type.Tuple{fields: [TypeTupleField]{}}, span, check.program.*))
         return None
     }
-    values := [TExpr]{}
-    types := [TypeTupleField]{}
+    ^values: [TExpr]{}
+    ^types: [TypeTupleField]{}
     loop field in fields {
         duplicate: loop previous in types {
             if previous.name == field.name {
@@ -932,7 +932,7 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, che
             return None
         }
         // Members match the expected record by name, written in any order.
-        field_expected := Type?{None}
+        ^field_expected: Type?{None}
         if expected_fields == .Val(rows) {
             loop row in rows {
                 if row.name == field.name {
@@ -969,7 +969,7 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, che
         } ?? false
         if reordered {
             record: Type.Tuple{fields: rows.copy()}
-            members := [TStructFieldValue]{}
+            ^members: [TStructFieldValue]{}
             loop (index, written) in types {
                 member_ty: loop row in rows {
                     if row.name == written.name {
@@ -1067,8 +1067,8 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
             return sema_expression_map_slot(base, call.args[0].expr, call.args[1].expr, span, expected, check)
         }
     }
-    checked_base := sema_check_expression(base, None, check) ?? return None
-    base_ty := sema_expr_unwrap_tag(checked_base.ty)
+    ^checked_base: sema_check_expression(base, None, check) ?? return None
+    ^base_ty: sema_expr_unwrap_tag(checked_base.ty)
     index_expected: if base_ty == {
         .List(_) -> Val(Type.Int)
         .FixedList(_, _) -> Val(Type.Int)
@@ -1098,9 +1098,9 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
     checked_index_opt: sema_check_expression(index, hint, check)
     check.context.borrow_ctx = previous_borrow
     check.context.allow_string_view_read = previous_view_read
-    inferred_index := checked_index_opt ?? {
+    ^inferred_index: checked_index_opt ?? {
         if sema_value_mismatch_index(check.diagnostics, index_start, expr_span(index)) != None {
-            probe_diagnostics := [Diagnostic]{}
+            ^probe_diagnostics: [Diagnostic]{}
             if sema_probe_expression(index, None, check, probe_diagnostics) == .Val(offered) {
                 sema_expression_index_replace_mismatch(base_ty, offered.ty, expr_span(index), index_start, check.diagnostics)
             }
@@ -1113,7 +1113,7 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
     // A `distinct Int(lo..hi)` position on a `[T#N]` indexes by its raw Int,
     // and its declared range is the interval the bounds proof reads.
     distinct_range: if base_ty == .FixedList(_, _) -> sema_contract_distinct_range(inferred_index.ty, check) else -> None
-    index_bounds := tree_expr_known_bounds(inferred_index)
+    ^index_bounds: tree_expr_known_bounds(inferred_index)
     if index_bounds == None && distinct_range == .Val(range) {
         index_bounds = Val(TIntegerBounds{lo: range.lo, hi: range.hi})
     }
@@ -1123,7 +1123,7 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
     derived_range: if index_bounds == None && base_ty == .FixedList(_, _) -> sema_contract_index_interval(inferred_index, check) else -> None
     named_mismatch: named_position && distinct_range == None && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty)
     named_ty: inferred_index.ty
-    checked_index := if named_mismatch -> sema_expr_expected(inferred_index, index_expected, check.environment.*, check.program.*, check.diagnostics) ?? {
+    ^checked_index: if named_mismatch -> sema_expr_expected(inferred_index, index_expected, check.environment.*, check.program.*, check.diagnostics) ?? {
         sema_expression_index_replace_mismatch(base_ty, named_ty, expr_span(index), index_start, check.diagnostics)
         return None
     } else -> inferred_index
@@ -1187,8 +1187,8 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
         base_ty = lane_array.ty
         checked_base = lane_array
     }
-    result_ty := Type?{None}
-    resolved_kind := ast_kind
+    ^result_ty: Type?{None}
+    ^resolved_kind: ast_kind
     if base_ty == {
         .List(element) -> {
             if {
@@ -1381,11 +1381,13 @@ sema_expression_index_hook: fn(check: SemaBodyCheck, ty: Type, role: String) -> 
 
 // The method a `[ ]` read or write calls through the trait that fills index
 // role `role`: that trait's one method (`get`, `set`).
-sema_expression_index_hook_method: fn(role: String) -> String Never! { owned_role_method(role) ?? "" }
+sema_expression_index_hook_method: fn(role: String) -> String Never! {
+    owned_role_method(role) ?? ""
+}
 
 // `receiver.method(args…)`, a generated hook call.
 sema_expression_index_hook_call: fn(receiver: Expr, method: String, args: [Expr], span: Span) -> Expr Never! {
-    call_args := [CallArg]{}
+    ^call_args: [CallArg]{}
     loop value in args -> call_args.push(sema_expression_index_hook_arg(value))
     Expr.MethodCall{receiver: receiver, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
 }
@@ -1407,7 +1409,7 @@ sema_expression_index_self_typed: fn(index: Expr) -> Bool Never! {
 // `Row`) rather than a user type spelled the same: its struct declares
 // the reserved field `__rows` (`__slot` for `Row`), which only Core may name.
 sema_expression_rows_type: fn(name: String, kind: String, check: ^SemaBodyCheck) -> Bool {
-    owner := sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, name)
+    ^owner: sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, name)
     if owner == None {
         owner = sema_expression_carrier_type_symbol(check.environment.*, check.program.*, name)
     }
@@ -1420,7 +1422,7 @@ sema_expression_rows_type: fn(name: String, kind: String, check: ^SemaBodyCheck)
 // `table[row]` on a `Rows<T>` (`element` is T): the table's row list indexed
 // by the handle's slot. A handle of another row type is E0112.
 sema_expression_rows_index: fn(table: TExpr, row: TExpr, element: Type, row_span: Span, span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    handle := Type?{None}
+    ^handle: Type?{None}
     if sema_expr_unwrap_tag(row.ty) == .Apply(row_name, row_args) {
         if row_args.len() == 1 && sema_expression_rows_type(row_name, "Row", check) {
             handle = Val(row_args[0])
@@ -1455,10 +1457,10 @@ sema_expression_slice: fn(base: Expr, start: Expr, end: Expr, range: Expr?, span
     if check.scopes.loop_depth > 0 && sema_expression_view_subrange_type(checked_base.ty) == None {
         check.diagnostics.push(sema_lint("L0501", span, "slicing inside a loop copies every time", "each slice makes a fresh copy of the range — that adds up in a loop", "build indices outside the loop, or collect into one list"))
     }
-    result_ty := Type?{None}
-    range_value := TExpr?{None}
-    checked_start := TExpr?{None}
-    checked_end := TExpr?{None}
+    ^result_ty: Type?{None}
+    ^range_value: TExpr?{None}
+    ^checked_start: TExpr?{None}
+    ^checked_end: TExpr?{None}
     if range == {
         .Val(range_expr) -> {
             range_checked: sema_check_expression(range_expr, Val(Type.Named{name: "Range"}), check) ?? return None
@@ -1653,9 +1655,9 @@ sema_expression_displayable: fn(ty: Type, environment: SemaScopeEnvironment, pro
 sema_expression_distinct_bundles: fn(name: String, check: ^SemaBodyCheck) -> [String]? {
     owner: sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, name) ?? return None
     definition: sema_scope_declaration_distinct(check, owner.id) ?? return None
-    granted := [String]{}
+    ^granted: [String]{}
     loop derived in definition.derives {
-        marker := ""
+        ^marker: ""
         if {
             owned_trait_bundle(derived.name) -> marker = "#{derived.name}"
             owned_trait_codec(derived.name) -> marker = "#{MARKER_CODABLE}"
@@ -1729,7 +1731,7 @@ sema_expression_interpolation_display: fn(value: TExpr, check: ^SemaBodyCheck) -
     // L0535), and `:Debug` where the value has a Debug form (else that hole
     // is E0112).
     written: sema_expression_interpolation_text(value.span, check)
-    fixes := [String]{}
+    ^fixes: [String]{}
     if sema_expression_impl_allowed(ty, check) {
         if sema_expression_impl_in_body(ty, check) {
             fixes.push("add `impl Display {{ display: fn(self) -> String {{ … }} }}` to the body of `{type_name(ty)}`")

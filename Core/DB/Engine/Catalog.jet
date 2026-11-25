@@ -294,7 +294,7 @@ insert_builtin: fn(b: ^BuiltinFuncs, def: ^^conn.FuncDef) Never! {
 
 // One entry of the tables: `methods` is a set of M_* bits.
 bf: fn(b: ^BuiltinFuncs, name: String, n_arg: Int, flags: Int, user_data: Int, impl_id: Int, methods: Int) Never! {
-    def := conn.FuncDef{
+    ^def: conn.FuncDef{
         n_arg: n_arg,
         flags: flags | conn.FUNC_BUILTIN | base.UTF8,
         user_data: user_data,
@@ -328,7 +328,7 @@ bf_agg: fn(b: ^BuiltinFuncs, name: String, n_arg: Int, arg: Int, need_coll: Bool
 
 // JFUNCTION.
 bf_json: fn(b: ^BuiltinFuncs, name: String, n_arg: Int, use_cache: Bool, b_ws: Bool, b_rs: Bool, b_jsonb: Bool, i_arg: Int, impl_id: Int) Never! {
-    flags := conn.FUNC_DETERMINISTIC | conn.FUNC_CONSTANT
+    ^flags: conn.FUNC_DETERMINISTIC | conn.FUNC_CONSTANT
     if use_cache -> flags |= conn.FUNC_RUNONLY
     if b_rs -> flags |= conn.FUNC_SUBTYPE
     if b_ws -> flags |= conn.FUNC_RESULT_SUBTYPE
@@ -344,7 +344,7 @@ bf_window: fn(b: ^BuiltinFuncs, name: String, n_arg: Int, impl_id: Int) Never! {
 // sqlite3RegisterBuiltinFunctions, in its order: alter.c, window.c,
 // date.c, json.c, then func.c's aBuiltinFunc.
 init_builtin_funcs: fn() -> Shared<BuiltinFuncs> Never! {
-    b := BuiltinFuncs{hash: conn.hash_new(), defs: [conn.FuncDef]{}, next: [Int]{}}
+    ^b: BuiltinFuncs{hash: conn.hash_new(), defs: [conn.FuncDef]{}, next: [Int]{}}
     internal: conn.FUNC_INTERNAL | conn.FUNC_CONSTANT
     // sqlite3AlterFunctions.
     bf(b, "sqlite_rename_column", 9, internal, 0, FI_RENAME_COLUMN, M_SFUNC)
@@ -509,7 +509,7 @@ match_quality: fn(p: conn.FuncDef, n_arg: Int, enc: Int) -> Int Never! {
         if n_arg == -2 -> return if p.has_sfunc || p.has_step -> FUNC_PERFECT_MATCH else -> 0
         if p.n_arg >= 0 -> return 0
     }
-    score := if p.n_arg == n_arg -> 4 else -> 1
+    ^score: if p.n_arg == n_arg -> 4 else -> 1
     p_enc: p.flags & conn.FUNC_ENCMASK
     if enc == p_enc -> score += 2 else if enc & p_enc & 2 != 0 -> score += 1
     score
@@ -521,9 +521,9 @@ match_quality: fn(p: conn.FuncDef, n_arg: Int, enc: Int) -> Int Never! {
 // built-ins are searched when none matched, or first under
 // DBFLAG_PREFER_BUILTIN.
 find_function: fn(db: conn.Conn, name: [U8], n_arg: Int, enc: Int) -> conn.FuncDef? Never! {
-    best := -1
-    best_score := 0
-    i := conn.hash_find(db.func_hash, name)
+    ^best: -1
+    ^best_score: 0
+    ^i: conn.hash_find(db.func_hash, name)
     loop i >= 0 {
         score: match_quality(db.funcs[i], n_arg, enc)
         if score > best_score {
@@ -537,9 +537,9 @@ find_function: fn(db: conn.Conn, name: [U8], n_arg: Int, enc: Int) -> conn.FuncD
         return if def.has_sfunc || def.has_step -> Val(def) else -> None
     }
     guard: core.mem.__process_shared(init_builtin_funcs).guard_read()
-    b_best := -1
-    b_score := 0
-    j := conn.hash_find(guard.value.hash, name)
+    ^b_best: -1
+    ^b_score: 0
+    ^j: conn.hash_find(guard.value.hash, name)
     loop j >= 0 {
         score: match_quality(guard.value.defs[j], n_arg, enc)
         if score > b_score {
@@ -562,12 +562,12 @@ find_function: fn(db: conn.Conn, name: [U8], n_arg: Int, enc: Int) -> conn.FuncD
 // added blank (its name lowered) when no perfect match exists.
 find_or_create_function: fn(db: ^conn.Conn, name: [U8], n_arg: Int, enc: Int) -> Int Never! {
     first: conn.hash_find(db.func_hash, name)
-    i := first
+    ^i: first
     loop i >= 0 {
         if match_quality(db.funcs[i], n_arg, enc) == FUNC_PERFECT_MATCH -> return i
         i = db.func_next[i]
     }
-    lower := [U8]{}
+    ^lower: [U8]{}
     loop c in name -> lower.push(U8{util.lower_byte(Int{c})})
     slot: db.funcs.len()
     db.funcs.push(conn.FuncDef{n_arg: n_arg, flags: enc, user_data: 0, name: lower, impl_id: 0, has_sfunc: false, has_step: false, has_finalize: false, has_value: false, has_inverse: false})
@@ -640,11 +640,11 @@ set_text_encoding: fn(db: ^conn.Conn, enc: Int) Never! {
 // name no CREATE made. -1 with the error left in the Parse, unless
 // LOCATE_NOERR.
 locate_table: fn(p: ^cg.Parse, a: ^ast.AST, flags: Int, name: [U8], db_name: [U8]?) -[DB]> Int Never! {
-    g := p.up
+    ^g: p.up
     if p.db.m_db_flags & conn.DBFLAG_SCHEMA_KNOWN_OK == 0 && g.read_schema(p, a) != base.OK {
         return -1
     }
-    t := conn.find_table(p.db, name, db_name)
+    ^t: conn.find_table(p.db, name, db_name)
     if t < 0 {
         if p.f.prep_flags & conn.PREPARE_NO_VTAB == 0 && !p.db.init.busy {
             epo: g.eponymous_table(p, a, name)
@@ -667,7 +667,7 @@ locate_table: fn(p: ^cg.Parse, a: ^ast.AST, flags: Int, name: [U8], db_name: [U8
 // sqlite3LocateTableItem: FROM item `si`, within its schema when it has one.
 locate_table_item: fn(p: ^cg.Parse, a: ^ast.AST, flags: Int, si: Int) -[DB]> Int Never! {
     item: a.items[si]
-    db_name := item.database
+    ^db_name: item.database
     if item.schema >= 0 {
         i_db: conn.schema_to_index(p.db, item.schema)
         db_name = Val(p.db.dbs[i_db].name)
@@ -737,7 +737,7 @@ column_decl_type: fn(col: conn.Column, dflt: [U8]) -> [U8] Never! {
 
 // sqlite3PrimaryKeyIndex: the PRIMARY KEY index of table t, or -1.
 primary_key_index: fn(db: conn.Conn, t: Int) -> Int Never! {
-    i := db.tables[t].index
+    ^i: db.tables[t].index
     loop i >= 0 && db.indexes[i].idx_type != ast.IDXTYPE_PRIMARYKEY -> i = db.indexes[i].next
     i
 }
@@ -746,15 +746,15 @@ primary_key_index: fn(db: conn.Conn, t: Int) -> Int Never! {
 // one the rowid's, outside the key), every entry zero.
 allocate_index_object: fn(db: ^conn.Conn, n_col: Int) -> Int Never! {
     ix: conn.index_alloc(db)
-    ai_column := [Int]{}
-    sort_order := [Int]{}
-    coll := [[U8]]{}
+    ^ai_column: [Int]{}
+    ^sort_order: [Int]{}
+    ^coll: [[U8]]{}
     loop _ in 0..<n_col {
         ai_column.push(0)
         sort_order.push(0)
         coll.push([U8]{})
     }
-    ai_row_log_est := [Int]{}
+    ^ai_row_log_est: [Int]{}
     loop _ in 0..<(n_col + 1) -> ai_row_log_est.push(0)
     db.indexes[ix].ai_column = ai_column
     db.indexes[ix].sort_order = sort_order
@@ -779,8 +779,8 @@ table_column_to_index: fn(db: conn.Conn, ix: Int, i_col: Int) -> Int Never! {
 storage_column_to_table: fn(db: conn.Conn, t: Int, i_col: Int) -> Int Never! {
     tab: db.tables[t]
     if tab.tab_flags & ast.TF_HAS_VIRTUAL == 0 -> return i_col
-    out := i_col
-    i := 0
+    ^out: i_col
+    ^i: 0
     loop i <= out {
         if tab.cols[i].col_flags & conn.COLFLAG_VIRTUAL != 0 -> out += 1
         i += 1
@@ -792,7 +792,7 @@ storage_column_to_table: fn(db: conn.Conn, t: Int, i_col: Int) -> Int Never! {
 table_column_to_storage: fn(db: conn.Conn, t: Int, i_col: Int) -> Int Never! {
     tab: db.tables[t]
     if tab.tab_flags & ast.TF_HAS_VIRTUAL == 0 || i_col < 0 -> return i_col
-    n := 0
+    ^n: 0
     loop i in 0..<i_col {
         if tab.cols[i].col_flags & conn.COLFLAG_VIRTUAL == 0 -> n += 1
     }
@@ -803,10 +803,10 @@ table_column_to_storage: fn(db: conn.Conn, t: Int, i_col: Int) -> Int Never! {
 // sqlite3AffinityType: the affinity of declared type `z`, and the
 // column-size estimate C stores in Column.szEst.
 affinity_type: fn(z: [U8]) -> {aff: Int, sz_est: Int} Never! {
-    h := 0
-    aff := base.AFF_NUMERIC
-    z_char := -1
-    i := 0
+    ^h: 0
+    ^aff: base.AFF_NUMERIC
+    ^z_char: -1
+    ^i: 0
     loop i < z.len() {
         c: Int{z[i]}
         if c == 0 -> break
@@ -832,10 +832,10 @@ affinity_type: fn(z: [U8]) -> {aff: Int, sz_est: Int} Never! {
             break
         }
     }
-    v := 0
+    ^v: 0
     if aff < base.AFF_NUMERIC {
         if z_char >= 0 {
-            k := z_char
+            ^k: z_char
             loop k < z.len() && (Int{z[k]}) != 0 {
                 if util.is_digit(Int{z[k]}) {
                     v = util.get_int32(z.slice(k, z.len())) ?? 0
@@ -852,8 +852,8 @@ affinity_type: fn(z: [U8]) -> {aff: Int, sz_est: Int} Never! {
 
 // sqlite3KeyInfoAlloc: n key fields and x more, every collation unset.
 key_info_alloc: fn(db: conn.Conn, n: Int, x: Int) -> record.KeyInfo Never! {
-    colls := [Int]{}
-    flags := [Int]{}
+    ^colls: [Int]{}
+    ^flags: [Int]{}
     loop _ in 0..<(n + x) {
         colls.push(record.COLL_NONE)
         flags.push(0)
@@ -866,7 +866,7 @@ key_info_alloc: fn(db: conn.Conn, n: Int, x: Int) -> record.KeyInfo Never! {
 key_info_of_index: fn(p: ^cg.Parse, a: ^ast.AST, ix: Int) -> record.KeyInfo? Never! {
     if cg.n_err(a) > 0 -> return None
     idx: p.db.indexes[ix]
-    key := if idx.uniq_not_null -> key_info_alloc(p.db, idx.n_key_col, idx.n_column - idx.n_key_col) else -> key_info_alloc(p.db, idx.n_column, 0)
+    ^key: if idx.uniq_not_null -> key_info_alloc(p.db, idx.n_key_col, idx.n_column - idx.n_key_col) else -> key_info_alloc(p.db, idx.n_column, 0)
     loop i in 0..<idx.n_column {
         coll: idx.coll[i]
         key.colls[i] = if util.str_icmp(coll, "BINARY".bytes()) == 0 -> record.COLL_NONE else -> locate_coll_seq(p, a, coll)
@@ -893,7 +893,7 @@ key_info_of_index: fn(p: ^cg.Parse, a: ^ast.AST, ix: Int) -> record.KeyInfo? Nev
 }
 
 #Test("built-in functions are found by name, arity and encoding") {
-    db := conn.conn_new()
+    ^db: conn.conn_new()
     len1: find_function(db, "LENGTH".bytes(), 1, base.UTF8)
     assert(len1 != None)
     if len1 == .Val(d) -> assert(d.impl_id == FI_LENGTH && d.n_arg == 1 && d.has_sfunc)

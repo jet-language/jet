@@ -16,8 +16,8 @@ use {
 
 // The child alternates its two streams, flushing every write.
 speak: fn() {
-    out := term.stdout()
-    errors := term.stderr()
+    ^out: term.stdout()
+    ^errors: term.stderr()
     loop i in 1..<4 {
         out.write_line("out {i}") ?? panic("stdout write failed")
         out.flush() ?? panic("stdout flush failed")
@@ -48,7 +48,7 @@ run: fn() {
     print("streamed:")
     loop line in child.stdout.lines() -> print("  {line.trim()}")
     waited: child.wait() ?? panic("wait failed")
-    stray := 0
+    ^stray: 0
     loop _ in child.stderr.lines() -> stray += 1
     print("stderr lines: {stray}")
     print("exit: {waited.code}")

@@ -14,7 +14,7 @@ BuildKeyWriter: struct {
     new: fn() -> BuildKeyWriter Never! { BuildKeyWriter{bytes: [U8]{}} }
 
     number: fn(^self, value: Int) Never! {
-        shift := 56
+        ^shift: 56
         loop shift >= 0 {
             self.bytes.push(U8{(value >> shift) & 255})
             shift -= 8
@@ -36,7 +36,7 @@ BuildKeyWriter: struct {
 
     // Entries in key order.
     map: fn(^self, values: [String:String]) Never! {
-        keys := values.keys().to_list()
+        ^keys: values.keys().to_list()
         keys.sort()
         self.number(keys.len())
         loop key in keys {
@@ -49,7 +49,7 @@ BuildKeyWriter: struct {
 }
 
 build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot]) -> String Never! {
-    w := BuildKeyWriter.new()
+    ^w: BuildKeyWriter.new()
     w.text("jet.action-key.v2")
     w.text("kind")
     w.text(action.kind.as_str())
@@ -65,13 +65,13 @@ build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
     w.text("inputs")
     w.texts(action.inputs)
     w.text("input-snapshots")
-    snapshots := inputs
+    ^snapshots: inputs
     snapshots.sort_by(fn(left: ActionInputSnapshot, right: ActionInputSnapshot) { left.path <=> right.path })
     if observes {
         // Every declared input contributes a digest when the action surface
         // can observe source.
         loop path in action.inputs {
-            present := false
+            ^present: false
             loop snapshot in snapshots {
                 if snapshot.path == path -> present = true
             }
@@ -163,12 +163,12 @@ build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
 // `CacheIdentity.recipe_fingerprint` (E4-JP2). Every action belongs to the
 // plan, so there is no unknown-action error.
 build_complete_recipe_fingerprint: fn(plan: HermeticBuildPlan) -> String Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     loop action in plan.actions {
         keys.push(build_canonical_action_key(plan, action, [ActionInputSnapshot]{}))
     }
     keys.sort()
-    bytes := "jet.plan-fingerprint.v1".bytes()
+    ^bytes: "jet.plan-fingerprint.v1".bytes()
     bytes.push(U8{0})
     loop key in keys {
         loop byte in key.bytes() -> bytes.push(byte)
@@ -180,9 +180,9 @@ build_complete_recipe_fingerprint: fn(plan: HermeticBuildPlan) -> String Never! 
 // Entries in key order, each `<len>:<key>:<len>:<value>` with byte lengths,
 // concatenated.
 build_fact_map: fn(values: [String:String]) -> String Never! {
-    keys := values.keys().to_list()
+    ^keys: values.keys().to_list()
     keys.sort()
-    out := ""
+    ^out: ""
     loop key in keys {
         value: values[key]
         out = "{out}{key.bytes().len()}:{key}:{value.bytes().len()}:{value}"
@@ -198,7 +198,7 @@ build_fact_digest: fn(w: BuildKeyWriter) -> String Never! {
 // The whole env map when the allowlist is empty.
 build_allowlisted_env: fn(action: HermeticBuildAction) -> [String:String] Never! {
     if action.env_allowlist.len() == 0 -> return action.env
-    out := [String:String]{}
+    ^out: [String:String]{}
     loop key in action.env.keys() {
         if action.env_allowlist.contains(key) -> out[key] = action.env[key]
     }
@@ -210,7 +210,7 @@ build_allowlisted_env: fn(action: HermeticBuildAction) -> [String:String] Never!
 build_declared_dep_outputs: fn(plan: HermeticBuildPlan, action: HermeticBuildAction) -> [String] Never! {
     owner: plan.action_targets().get(action.id) ?? return [String]{}
     target: plan.targets.get(owner) ?? return [String]{}
-    outs := [String]{}
+    ^outs: [String]{}
     loop dep in target.deps {
         dep_target: plan.targets.get(dep.id) ?? next
         loop path in dep_target.outputs -> build_insert_sorted_text(outs, path)
@@ -228,7 +228,7 @@ build_declared_dep_outputs: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
 // and actual probe facts, which name each found program's path.
 build_canonical_effective_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot], grants: [BuildEffect], executable_digest: ContentDigest, programs: [ContentDigest], probe_facts: [BuildProbeFact]) -> String Never! {
     base: build_canonical_action_key(plan, action, inputs)
-    w := BuildKeyWriter.new()
+    ^w: BuildKeyWriter.new()
     w.text("jet.effective-action-key.v1")
     w.text(base)
     w.text("effective-policy")
@@ -258,7 +258,7 @@ build_canonical_effective_action_key: fn(plan: HermeticBuildPlan, action: Hermet
 
 // Canonical order, each effect once.
 build_effect_set: fn(effects: [BuildEffect]) -> [BuildEffect] Never! {
-    out := [BuildEffect]{}
+    ^out: [BuildEffect]{}
     loop ability in effects -> build_insert_effect(out, ability)
     out
 }

@@ -28,7 +28,7 @@ stage: fn(args: [String]) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
         term.eprint("missing {binary}; set JETPACK_TRUST_ROOT_BIN to the native jetpack-trust-root binary")
         return 1
     }
-    output := sys.get("JET_TRUST_OUTPUT") ?? ""
+    ^output: sys.get("JET_TRUST_OUTPUT") ?? ""
     if output == "" {
         repo: repo_root()
         if repo == "" {
@@ -37,7 +37,7 @@ stage: fn(args: [String]) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
         }
         output = "{repo}/Docs/Site/Dist/keys"
     }
-    argv := [String]{binary, "export", "--output", output}
+    ^argv: [String]{binary, "export", "--output", output}
     argv.extend(args.copy())
     receipt: process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
         term.eprint("StageTrustRoot: {binary} could not start: {err}")
@@ -51,7 +51,7 @@ stage: fn(args: [String]) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
 repo_root: fn() -[Env, FS]> String Never! {
     script: sys.executable()
     if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
-    dir := files.cwd() ?? return ""
+    ^dir: files.cwd() ?? return ""
     loop {
         if files.exists("{dir}{TOOL}") -> return dir
         if dir == "/" || dir == "" -> return ""

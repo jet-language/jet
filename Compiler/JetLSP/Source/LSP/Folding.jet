@@ -21,8 +21,8 @@ lsp_folding_range_json: fn(fold: LSPFoldingRange) -> String Never! {
 lsp_compute_folding_ranges: fn(src: String, lexed: Lexed) -> [LSPFoldingRange] Never! {
     bytes: src.bytes()
     table: lsp_line_table_bytes(bytes)
-    folds := [LSPFoldingRange]{}
-    open := [Int]{}
+    ^folds: [LSPFoldingRange]{}
+    ^open: [Int]{}
     loop token in lexed.tokens {
         if token.kind == TOKEN_LBRACE -> open.push(token.span.start)
         if token.kind == TOKEN_RBRACE {
@@ -50,7 +50,7 @@ lsp_push_fold: fn(bytes: [U8], table: LineTable, start: Int, end: Int, kind: Str
 
 // The byte offset of a line's first character that is not a space or tab.
 lsp_indent_end: fn(bytes: [U8], line: Span) -> Int Never! {
-    at := line.start
+    ^at: line.start
     loop at < line.end && (bytes[at] == (U8{32}) || bytes[at] == (U8{9})) -> at += 1
     at
 }
@@ -65,7 +65,7 @@ lsp_line_starts_with: fn(src: String, line: Span, prefix: String) -> Bool Never!
 // line's text to the end of the last.
 lsp_line_group_folds: fn(src: String, lines: [Span], prefix: String, kind: String, folds: ^[LSPFoldingRange]) Never! {
     bytes: src.bytes()
-    run_start := -1
+    ^run_start: -1
     loop index in 0..<(lines.len() + 1) {
         matched: index < lines.len() && lsp_line_starts_with(src, lines[index], prefix)
         if matched {

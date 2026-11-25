@@ -204,7 +204,7 @@ assembly_env: fn(jet: String) -> [Setting] {
 }
 
 assembly_spec: fn(jet: String, repo: String) -[Env, Exec]> ProcessSpec {
-    spec := tool_cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}, repo)
+    ^spec: tool_cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}, repo)
     loop setting in assembly_env(jet) -> spec = spec.env(setting.name, setting.value)
     spec
 }
@@ -320,7 +320,7 @@ repo_root: fn() -[Env, Exec, FS, IO]> String Never! {
     script: sys.executable()
     if script.ends_with(tool) -> return script.removesuffix(tool)
     start: files.cwd() ?? "/"
-    dir := start.copy()
+    ^dir: start.copy()
     loop !files.exists("{dir}{tool}") {
         if dir == "/" || dir == "" {
             process.fail(1, "lane-check: run from inside the Jet checkout (no Tools/Agent/LaneCheck.jet above {start})")
@@ -406,8 +406,8 @@ prelude_mode: fn(repo: String, jet: String) -[Exec, Time.Wait]> Bool Never! {
 prelude_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran? Never! {
     name: relative.removeprefix("{PRELUDE_TREE}/")
     generator: prelude_generator(name, jet)
-    text := ""
-    generated := 0
+    ^text: ""
+    ^generated: 0
     if generator.len() > 0 {
         ran: generator_check(repo, generator, relative)
         text = ran.text
@@ -422,7 +422,7 @@ prelude_check: fn(repo: String, jet: String, relative: String, target: String, s
         return None
     }
     checked: run_check(repo, jet, [String]{"check", "--prelude", target}, scratch)
-    code := checked.code
+    ^code: checked.code
     if generated != 0 -> code = generated
     Val(Ran{code: code, text: "{text}{checked.text}"})
 }
@@ -472,7 +472,9 @@ core_generated_check: fn(repo: String, jet: String, relative: String, target: St
 // The command whose `--check` holds the generated block of Core source
 // `relative` equal to what its declarations give.
 core_generator: fn(relative: String, jet: String) -> [String] Never! {
-    if relative == ROLE_KIND_SOURCE -> return [String]{jet, "Tools/Agent/OwnedTraitRows.jet", "--check"}
+    if relative == ROLE_KIND_SOURCE {
+        return [String]{jet, "Tools/Agent/OwnedTraitRows.jet", "--check"}
+    }
     [String]{jet, "Tools/Agent/CoreSourceRows.jet", "--check"}
 }
 
@@ -507,7 +509,7 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
         term.eprint("lane-check: cannot create {lockdir}: {err}")
         return 1
     }
-    held := [FileLock]{}
+    ^held: [FileLock]{}
     loop slot in 1..<(if slots < 1 -> 2 else -> slots + 1) {
         lock: files.try_lock("{lockdir}/{slot}") ?? next
         held.push(lock)
@@ -528,7 +530,7 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
     relative: if target.starts_with("{root}/") -> target.removeprefix("{root}/") else -> ""
     runtime_owned: relative == RUNTIME_TREE || relative.starts_with("{RUNTIME_TREE}/")
     runtime_shared: !runtime_owned && relative != "" && runtime_sources(repo).paths.contains(relative)
-    ran := Ran{code: 0, text: ""}
+    ^ran: Ran{code: 0, text: ""}
     if {
         runtime_owned -> ran = runtime_check(repo, jet, scratch)
         prelude_source(relative) -> {
@@ -541,7 +543,9 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
         relative == CORE_EFFECTS_SOURCE || relative == META_EFFECTS_SOURCE -> {
             ran = core_effects_check(repo, jet, relative, target, scratch)
         }
-        relative == LANG_SOURCE || relative == ROLE_KIND_SOURCE -> ran = core_generated_check(repo, jet, relative, target, scratch)
+        relative == LANG_SOURCE || relative == ROLE_KIND_SOURCE -> {
+            ran = core_generated_check(repo, jet, relative, target, scratch)
+        }
         relative.starts_with("Core/") && relative.ends_with(".jet") -> {
             ran = core_check(repo, jet, relative, target, scratch)
         }
@@ -565,7 +569,7 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
 
 int_or: fn(text: String, fallback: Int) -> Int Never! {
     if text == "" -> return fallback
-    value := 0
+    ^value: 0
     loop byte in text.bytes() {
         code: Int{byte}
         if code < 48 || code > 57 -> return fallback
@@ -592,8 +596,8 @@ mem_available_mb: fn() -[FS]> Int Never! {
 // JET_CHECK_MEM's size (`20G`, `512M`, `4096K` or bare bytes) in bytes, or
 // -1 when it is not one.
 memory_bytes: fn(text: String) -> Int Never! {
-    scale := 1
-    digits := text.copy()
+    ^scale: 1
+    ^digits: text.copy()
     if text.ends_with("G") {
         scale = 1073741824
         digits = text.removesuffix("G").copy()
@@ -624,9 +628,9 @@ run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[E
     if limit < 0 {
         return Ran{code: 64, text: "lane-check: JET_CHECK_MEM must be `off` or a size such as 20G, 512M or 4096K, not `{memory}`\n"}
     }
-    argv := [String]{jet.copy(), command[0].copy(), "--keep-going"}
+    ^argv: [String]{jet.copy(), command[0].copy(), "--keep-going"}
     loop index in 1..<command.len() -> argv.push(command[index].copy())
-    spec := process.cmd(argv).cwd(repo).env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
+    ^spec: process.cmd(argv).cwd(repo).env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
         .env("JET_TOOLCHAIN_ROOT", process.env_nonempty("JET_TOOLCHAIN_ROOT") ?? repo).timeout(1800s).output_limit(1073741824)
     if limit > 0 -> spec = spec.memory_limit(limit)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return Ran{code: 127, text: "lane-check: {argv[0]} could not start: {err}\n"}
@@ -656,10 +660,10 @@ Located: struct {
 // the complete compiler output.
 report: fn(text: String, code: Int) -> String Never! {
     lines: text.split("\n").to_list()
-    found := [Located]{}
+    ^found: [Located]{}
     loop index in 0..<lines.len() {
         if !diagnostic_head(lines[index]) -> next
-        location := ""
+        ^location: ""
         stop: if index + 6 < lines.len() -> index + 6 else -> lines.len()
         loop next_index in index + 1..<stop {
             if diagnostic_head(lines[next_index]) -> break
@@ -675,15 +679,15 @@ report: fn(text: String, code: Int) -> String Never! {
     if found.len() == 0 {
         return "CHECK FAILED — jet check exited {code} without a compiler diagnostic\n{text}"
     }
-    keys := [String]{}
-    order := [String]{}
+    ^keys: [String]{}
+    ^order: [String]{}
     loop entry in found {
-        key := file_of(entry.location)
+        ^key: file_of(entry.location)
         if key == "" -> key = "(no location)"
         if !order.contains(key) -> order.push(key.copy())
         keys.push(key)
     }
-    out := "CHECK FAILED — {found.len()} error(s) in {order.len()} file(s)\n"
+    ^out: "CHECK FAILED — {found.len()} error(s) in {order.len()} file(s)\n"
     loop key in order {
         out = "{out}\n{key}\n"
         loop index in 0..<found.len() {
@@ -790,7 +794,7 @@ RuntimeUnit: struct {
 // The runtime's explicit source manifest: every non-empty, non-comment line,
 // none twice.
 runtime_sources: fn(repo: String) -[FS]> {paths: [String], problem: String} Never! {
-    paths := [String]{}
+    ^paths: [String]{}
     text: files.read("{repo}/{RUNTIME_SOURCES}") ?? return {paths: paths, problem: "cannot read {RUNTIME_SOURCES}: {err}"}
     loop raw in text.split("\n") {
         line: raw.trim()
@@ -810,7 +814,7 @@ runtime_unit: fn(repo: String) -[FS]> RuntimeUnit Never! {
     if listed.problem != "" {
         return RuntimeUnit{text: "", lines: [UnitLine]{}, problem: listed.problem}
     }
-    texts := [String]{}
+    ^texts: [String]{}
     loop path in listed.paths {
         text: files.read("{repo}/{path}") ?? return RuntimeUnit{text: "", lines: [UnitLine]{}, problem: "cannot read {path}: {err}"}
         texts.push(text)
@@ -823,15 +827,15 @@ runtime_unit: fn(repo: String) -[FS]> RuntimeUnit Never! {
 // `// [unit source: PATH]` line, after the distinct Core imports they named
 // and one blank line.
 assemble_runtime: fn(paths: [String], texts: [String]) -> RuntimeUnit Never! {
-    uses := [String]{}
-    body := [String]{}
-    origins := [UnitLine]{}
+    ^uses: [String]{}
+    ^body: [String]{}
+    ^origins: [UnitLine]{}
     loop index in 0..<paths.len() {
         path: paths[index]
         body.push("// [unit source: {path}]")
         origins.push(UnitLine{path: path.copy(), line: 1})
-        importing := false
-        number := 0
+        ^importing: false
+        ^number: 0
         loop line in unblock_uses(texts[index]).split("\n") {
             number += 1
             dropped: importing || line.starts_with("use ")
@@ -844,10 +848,10 @@ assemble_runtime: fn(paths: [String], texts: [String]) -> RuntimeUnit Never! {
             origins.push(UnitLine{path: path.copy(), line: number})
         }
     }
-    lines := [UnitLine]{}
+    ^lines: [UnitLine]{}
     loop _ in 0..<(uses.len() + 1) -> lines.push(UnitLine{path: "", line: 0})
     lines.extend(origins)
-    text := uses.copy()
+    ^text: uses.copy()
     text.push("")
     text.extend(body)
     RuntimeUnit{text: text.join("\n"), lines: lines, problem: ""}
@@ -873,10 +877,10 @@ space_byte: fn(b: U8) -> Bool Never! {
 // `use {` and its `}` turn to spaces and each row's last four columns of
 // indentation become `use `.
 unblock_uses: fn(text: String) -> String Never! {
-    lines := text.split("\n").to_list()
-    indent := ""
-    open := false
-    depth := 0
+    ^lines: text.split("\n").to_list()
+    ^indent: ""
+    ^open: false
+    ^depth: 0
     loop at in 0..<lines.len() {
         line: lines[at].copy()
         if !open {
@@ -935,13 +939,13 @@ runtime_check: fn(repo: String, jet: String, scratch: String) -[Env, Exec, FS, I
 // nearest above each of the unit's sources, so its kernel rule reads each
 // source's own policy.
 runtime_manifest: fn(repo: String, manifest: String, lines: [UnitLine]) -[FS]> String Never! {
-    kernel := [String]{}
-    seen := [String]{}
-    source := ""
+    ^kernel: [String]{}
+    ^seen: [String]{}
+    ^source: ""
     loop origin in lines {
         if origin.path == source -> next
         source = origin.path.copy()
-        directory := source.rpartition("/").head
+        ^directory: source.rpartition("/").head
         loop directory != "" && !files.exists("{repo}/{directory}/package.jet") {
             directory = directory.rpartition("/").head
         }
@@ -952,8 +956,8 @@ runtime_manifest: fn(repo: String, manifest: String, lines: [UnitLine]) -[FS]> S
     }
     quoted: loop path in kernel -> "\"{path}\""
     memory: "memory: .Kernel([{quoted.join(", ")}])"
-    rows := [String]{}
-    replaced := false
+    ^rows: [String]{}
+    ^replaced: false
     loop line in manifest.split("\n") {
         field: line.partition("memory:")
         kernel_field: field.sep != "" && field.tail.contains(".Kernel(")
@@ -979,7 +983,7 @@ kernel_entries: fn(text: String) -> [String] Never! {
 // The compiler output with each `--> unit.jet:LINE:COL` naming the listed
 // source and line instead.
 runtime_locations: fn(text: String, unit_path: String, lines: [UnitLine]) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop line in text.split("\n") {
         trimmed: line.trim_start()
         location: trimmed.removeprefix("-->").trim().partition(" ")
@@ -1025,7 +1029,7 @@ Rule: struct {
 GENERIC_NAMES: [String]{"admin", "arch", "build", "builder", "ci", "debian", "dev", "devhost", "fedora", "localhost", "nixos", "owner", "root", "runner", "test", "tester", "ubuntu", "user", "users"}
 
 escape_pcre: fn(text: String) -> String Never! {
-    out := ""
+    ^out: ""
     loop ch in text.chars() {
         if "\\^$.*+?()[]{{}}|/".contains("{ch}") -> out = "{out}\\"
         out = "{out}{ch}"
@@ -1038,7 +1042,7 @@ within: fn(path: String, root: String) -> Bool Never! {
 }
 
 trim_slashes: fn(text: String) -> String Never! {
-    out := text
+    ^out: text
     loop out.ends_with("/") -> out = out.removesuffix("/")
     out
 }
@@ -1046,8 +1050,8 @@ trim_slashes: fn(text: String) -> String Never! {
 // /proc/mounts escapes space, tab, newline and backslash as octal \NNN.
 unescape_mount: fn(text: String) -> String Never! {
     bytes: text.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         if (Int{bytes[index]}) == 92 && octal3(bytes, index + 1) >= 0 {
             out.push(checked(U8{octal3(bytes, index + 1)}) ?? U8{63})
@@ -1062,7 +1066,7 @@ unescape_mount: fn(text: String) -> String Never! {
 
 octal3: fn(bytes: [U8], at: Int) -> Int Never! {
     if at + 3 > bytes.len() -> return -1
-    value := 0
+    ^value: 0
     loop index in at..<at + 3 {
         code: Int{bytes[index]}
         if code < 48 || code > 55 -> return -1
@@ -1072,7 +1076,7 @@ octal3: fn(bytes: [U8], at: Int) -> Int Never! {
 }
 
 machine_mounts: fn() -[FS]> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     text: files.read("/proc/mounts") ?? return out
     loop line in text.lines() {
         fields: line.split(" ").to_list()
@@ -1151,7 +1155,7 @@ noreply_handle: fn(email: String) -> String Never! {
 // Path rules match a literal path that does not continue into a longer name;
 // word rules match a whole word in any letter case.
 personal_info_rules: fn(identity: Identity) -> [Rule] Never! {
-    set := RuleSet{rules: [Rule]{}, seen: [String]{}}
+    ^set: RuleSet{rules: [Rule]{}, seen: [String]{}}
     home: identity.home
     login: if identity.user != "root" -> identity.user else -> ""
     scratch: if identity.scratch_root != "" && !within(identity.scratch_root, home) && !within(identity.scratch_root, "/tmp") -> trim_slashes(identity.scratch_root) else -> ""
@@ -1173,20 +1177,20 @@ personal_info_rules: fn(identity: Identity) -> [Rule] Never! {
     // bare cache-relative form; none when roots.env cannot be read.
     state_root: identity.state_root
     if state_root != "" {
-        prefixes := [String]{}
+        ^prefixes: [String]{}
         if home != "" && home != "/" -> prefixes.push(home.copy())
         if login != "" {
             prefixes.push("/home/{login}")
             prefixes.push("/Users/{login}")
         }
         prefixes.extend([String]{"${{HOME}}", "$HOME", "~"})
-        forms := [String]{}
+        ^forms: [String]{}
         loop prefix in prefixes {
             form: "{prefix}/{state_root}"
             if !forms.contains(form) -> forms.push(form)
         }
         forms.push(state_root.copy())
-        escaped := [String]{}
+        ^escaped: [String]{}
         loop form in forms -> escaped.push(escape_pcre(form))
         set.rules.push(Rule{kind: "path", find: forms[0].copy(), source: "(?:{escaped.join("|")})(?![\\w-])"})
     }
@@ -1197,7 +1201,7 @@ personal_info_rules: fn(identity: Identity) -> [Rule] Never! {
 }
 
 grep_args: fn(rules: [Rule], kind: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop rule in rules {
         if rule.kind == kind -> out.extend([String]{"-e", rule.source.copy()})
     }
@@ -1222,11 +1226,11 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
     rules: personal_info_rules(machine_identity(dir))
     path_args: grep_args(rules, "path")
     word_args: grep_args(rules, "word")
-    found := [String]{}
+    ^found: [String]{}
     passes: [{flags: [String], args: [String]}]{{flags: [String]{"-l", "-a"}, args: path_args}, {flags: [String]{"-l", "-i", "-I"}, args: word_args}}
     loop pass in passes {
         if pass.args.len() == 0 -> next
-        argv := [String]{"git", "grep", "--no-index", "--exclude-standard", "-P"}
+        ^argv: [String]{"git", "grep", "--no-index", "--exclude-standard", "-P"}
         argv.extend(pass.flags)
         argv.extend(pass.args)
         argv.extend(GREP_EXCLUDES)
@@ -1245,11 +1249,11 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
     if found.len() == 0 -> return 0
     term.eprint("personal-info-guard: {found.len()} file(s) name this machine's home, user, host, email or mounts.")
     term.eprint("Write ~ or $HOME, $USER, $JET_SCRATCH_ROOT, $JET_STATE_ROOT, $JET_RUN_ROOT, `user` or `devhost` instead (#6564 c5). First hits:")
-    shown := 0
+    ^shown: 0
     loop file in found {
         if shown == 20 -> break
         shown += 1
-        line := first_hit(dir, file, path_args, [String]{"-a"})
+        ^line: first_hit(dir, file, path_args, [String]{"-a"})
         if line == "" -> line = first_hit(dir, file, word_args, [String]{"-i", "-I"})
         term.eprint("  {hit_text(line)}")
     }
@@ -1263,7 +1267,7 @@ hit_text: fn(line: String) -> String Never! {
 
 first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec, Time.Wait]> String Never! {
     if args.len() == 0 -> return ""
-    argv := [String]{"git", "grep", "--no-index", "-P", "-n", "-m", "1"}
+    ^argv: [String]{"git", "grep", "--no-index", "-P", "-n", "-m", "1"}
     argv.extend(flags.copy())
     argv.extend(args.copy())
     argv.extend([String]{"--", file})
@@ -1276,7 +1280,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     failed: report("beginning\nend\n", 17)
     assert(failed.starts_with("CHECK FAILED — jet check exited 17 without a compiler diagnostic\n"))
     assert(failed.contains("beginning\nend\n"))
-    text := ""
+    ^text: ""
     loop n in 1..<9 {
         text = "{text}error[E0308]: independent error {n}\n  --> src/shared.jet:{n}:1\n"
     }
@@ -1293,7 +1297,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
 #Test("personal-information rules follow the machine's identity") {
     identity: Identity{home: "/home/ada", user: "ada", host: "lovelace", scratch_root: "/mnt/big", state_root: home_state_root(), mounts: [String]{"/mnt/big", "/media/usb"}, email: "12+adagh@users.noreply.github.com", name: "Ada King"}
     rules: personal_info_rules(identity)
-    finds := [String]{}
+    ^finds: [String]{}
     loop rule in rules -> finds.push("{rule.kind}:{rule.find}")
     assert(finds.contains("path:/etc/profiles/per-user/ada"))
     assert(finds.contains("path:/mnt/big"))
@@ -1317,7 +1321,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     files.write_bytes(files.join(dir, "clean.bin"), [U8]{0, 1, 2, 3}) ?? panic("clean.bin: {err}")
     assert_eq(personal_info_guard(dir), 0)
     if home != "" && home != "/" {
-        record := [U8]{0, 1, 2}
+        ^record: [U8]{0, 1, 2}
         record.extend("{home}/.cache/run".bytes())
         files.write_bytes(files.join(dir, "record.bin"), record) ?? panic("record.bin: {err}")
         assert_eq(personal_info_guard(dir), 65)
@@ -1378,7 +1382,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
 }
 
 #Test("the Jetpack assembly check runs its Jet tool under the checked jet, not the seed") {
-    tool := ""
+    ^tool: ""
     loop setting in assembly_env("/opt/jet/bin/jet") {
         if setting.name == "JET_BIN" -> tool = setting.value
     }

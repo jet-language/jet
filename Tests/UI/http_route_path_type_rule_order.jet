@@ -22,7 +22,9 @@ Gauged: struct {
         sites: [.Type],
 
         check: fn(self, call: CompilerCall) {
-            if call.name.text == "read" && call.args[0].type.name != "Int" -> reject(Fraction{}, at: call.args[0])
+            if call.name.text == "read" && call.args[0].type.name != "Int" {
+                reject(Fraction{}, at: call.args[0])
+            }
         }
     }
 }
@@ -40,7 +42,7 @@ run: fn() {
     first: Int{1.5}
     print(first)
     router: http.router()
-    verb := "PURGE"
+    ^verb: "PURGE"
     verb = "PATCH"
     router.custom(verb, "/files/:name", named)
     second: Int{2.5}

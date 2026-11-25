@@ -61,7 +61,7 @@ sema_lint_allowance_item: fn(item: Item, segments: [SemaSourceSegment], allowanc
         .Struct(definition) -> {
             sema_lint_allowance_push(definition.type_markers, definition.span, segments, allowances)
             loop field in definition.fields {
-                end := field.ty_span.end
+                ^end: field.ty_span.end
                 if field.computed == .Val(computed) -> end = expr_span(computed).end
                 if field.default == .Val(default) -> end = expr_span(default).end
                 sema_lint_allowance_push(field.serde_markers, Span{start: field.name_span.start, end: end}, segments, allowances)

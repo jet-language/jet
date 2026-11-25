@@ -133,7 +133,7 @@ sema_comptime_input_path_value: fn(call: Call, check: ^SemaBodyCheck) -> TExpr? 
 // calling function's row carries it and its denials refuse it. False after a
 // reported refusal.
 sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_type: Type, span: Span, check: ^SemaBodyCheck) -> Bool {
-    facts := SemaCallFacts{
+    ^facts: SemaCallFacts{
         return_type: result_type,
         failure_carrier: TFailureCarrier.Infallible,
         effect_bound: Val([EffectRowEntry]{EffectRowEntry{name: row_effect, span: span}}),
@@ -155,11 +155,11 @@ sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [Cal
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
     failed: SemaDirectSpecialCheck{handled: true, value: None}
-    pinned := false
+    ^pinned: false
     if args.len() == 2 && args[0].label == None {
         if args[1].label == .Val(label) -> pinned = label.name == "sha256"
     }
-    pin := String?{None}
+    ^pin: String?{None}
     if pinned -> pin = sema_comptime_input_literal(args[1].expr)
     sha256: pin ?? {
         check.diagnostics.push(sema_error("E3414", span, "`net.fetch` takes a URL and a literal `sha256:` pin", "a compile-time download is pinned by the content hash written in the source", "write `net.fetch(\"https://example.com/data.txt\", sha256: \"<64 hex digits>\")`"))

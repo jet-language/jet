@@ -16,9 +16,9 @@ use {
 }
 
 selfhost_parser_text: fn(facts: ^[Int], text: String) {
-    bytes := text.bytes()
+    ^bytes: text.bytes()
     facts.push(bytes.len())
-    index := 0
+    ^index: 0
     loop index < bytes.len() {
         facts.push(Int{bytes[index]})
         index += 1
@@ -92,13 +92,13 @@ selfhost_parser_expr: fn(facts: ^[Int], expression: Expr) {
 }
 
 selfhost_parser_call_arg: fn(facts: ^[Int], argument: CallArg) {
-    convention := 0
+    ^convention: 0
     if argument.convention == AccessConvention.Write -> convention = 1
     if argument.convention == AccessConvention.Move -> convention = 2
     facts.push(convention)
     facts.push(argument.span.start)
     facts.push(argument.span.end)
-    spread := 0
+    ^spread: 0
     if argument.spread -> spread = 1
     facts.push(spread)
     selfhost_parser_label(facts, argument.label)
@@ -107,9 +107,9 @@ selfhost_parser_call_arg: fn(facts: ^[Int], argument: CallArg) {
 
 selfhost_parser_marker: fn(facts: ^[Int], marker: Marker) {
     facts.push(marker.args.len())
-    index := 0
+    ^index: 0
     loop index < marker.args.len() {
-        label := CallLabel?{None}
+        ^label: CallLabel?{None}
         if index < marker.arg_labels.len() -> label = marker.arg_labels[index]
         selfhost_parser_label(facts, label)
         if marker.args[index] == {
@@ -147,13 +147,13 @@ selfhost_parser_diagnostic: fn(facts: ^[Int], diagnostic: Diagnostic) {
         }
         .None -> facts.push(0)
     }
-    applicability := 0
+    ^applicability: 0
     if diagnostic.applicability == .Val(value) {
         if value == DiagnosticFixApplicability.Safe -> applicability = 1
         if value == DiagnosticFixApplicability.Suggested -> applicability = 2
     }
     facts.push(applicability)
-    safety := 0
+    ^safety: 0
     if diagnostic.safety == .Val(value) {
         if value == DiagnosticFixSafety.Formatting -> safety = 1
         if value == DiagnosticFixSafety.BehaviorPreserving -> safety = 2
@@ -175,15 +175,15 @@ selfhost_parser_probe: fn(source: [U8]) -> [Int] {
 }
 
 selfhost_parser_result_facts: fn(parsed: ParseResult) -> [Int] {
-    facts := [Int]{}
+    ^facts: [Int]{}
     facts.push(parsed.diagnostics.len())
-    index := 0
+    ^index: 0
     loop index < parsed.diagnostics.len() {
         selfhost_parser_diagnostic(facts, parsed.diagnostics[index])
         index += 1
     }
 
-    show_ast := true
+    ^show_ast: true
     index = 0
     loop index < parsed.diagnostics.len() {
         if parsed.diagnostics[index].code != "E0029" -> show_ast = false
@@ -196,7 +196,7 @@ selfhost_parser_result_facts: fn(parsed: ParseResult) -> [Int] {
     }
 
     if parsed.program.script_body.len() > 0 {
-        statement := parsed.program.script_body[0]
+        ^statement: parsed.program.script_body[0]
         if statement == {
             .Expr(expression) -> {
                 if expression == {
@@ -223,7 +223,7 @@ selfhost_parser_result_facts: fn(parsed: ParseResult) -> [Int] {
     }
 
     if parsed.program.items.len() > 0 {
-        item := parsed.program.items[0]
+        ^item: parsed.program.items[0]
         if item == {
             .Func(function) -> {
                 if function.markers.len() > 0 {

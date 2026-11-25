@@ -7,7 +7,7 @@ run: fn() Err! {
     n: Int.parse(process.args().get(0) ?? "1000") ?? 1000
     data: "A".repeat(n).bytes()
     reader: Reader.over(data)
-    total := U64{0}
+    ^total: U64{0}
     loop _ in 0..<n {
         byte: reader.read_u8() ?? return
         total = wrapping(total + U64{byte})

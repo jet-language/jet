@@ -55,7 +55,7 @@ ds_ui_expected: fn(directory: String, lint: Bool, out: ^[String]) {
 // lint fixture plus every direct report fixture, independent of whether the
 // snapshot file exists.
 ds_report_fixture_snapshot_paths: fn() -> [String] {
-    paths := [String]{}
+    ^paths: [String]{}
     ds_ui_expected("Tests/UI", false, paths)
     ds_ui_expected("Tests/UILint", true, paths)
     loop row in DS_REPORT_FIXTURE_DIRS {
@@ -67,7 +67,7 @@ ds_report_fixture_snapshot_paths: fn() -> [String] {
         }
     }
     paths.sort()
-    unique := [String]{}
+    ^unique: [String]{}
     loop path in paths -> dc_add(unique, path)
     unique
 }
@@ -91,7 +91,7 @@ ds_row: fn(rows: [DcRow], id: String) -> Int {
 // The entries the accepted-failing ledger (Tests/known-failing.tsv) owns.
 // Their snapshots are absent or stale on an owning card until the check lands.
 ds_known_failing: fn() -> [String] {
-    entries := [String]{}
+    ^entries: [String]{}
     loop line in dc_read("Tests/known-failing.tsv").split("\n") {
         if line == "" || line.starts_with("#") -> next
         entries.push(line.split("\t").to_list()[0].copy())
@@ -139,7 +139,7 @@ ds_part: fn(line: String, label: String) -> Bool {
     guards_enter_root()
     rows: dc_registered_rows()
     known: ds_known_failing()
-    failures := [String]{}
+    ^failures: [String]{}
     loop path in ds_report_fixture_snapshot_paths() {
         if !ds_files.exists(path) || dc_has(known, ds_entry(path)) -> next
         lines: dc_read(path).split("\n").to_list()
@@ -156,11 +156,11 @@ ds_part: fn(line: String, label: String) -> Bool {
                 next
             }
             name: rows[row].name
-            end := lines.len()
+            ^end: lines.len()
             loop (index, other) in lines {
                 if index > start && index < end && ds_opener(other) != "" -> end = index
             }
-            returned := false
+            ^returned: false
             loop (index, other) in lines {
                 if index > start && index < end && other.trim().starts_with("failed here: ") {
                     returned = true
@@ -171,9 +171,9 @@ ds_part: fn(line: String, label: String) -> Bool {
             if what < 0 || dc_slice(line, what + id.count_bytes() + 2, line.count_bytes()).trim() == "" {
                 failures.push("{path}:{start + 1} lost What for {id}")
             }
-            why := false
-            fix := false
-            more := false
+            ^why: false
+            ^fix: false
+            ^more: false
             loop (index, other) in lines {
                 if index < start || index >= end -> next
                 if ds_part(other, "Why") -> why = true
@@ -197,7 +197,7 @@ ds_part: fn(line: String, label: String) -> Bool {
 // and blessing that output fails here, so a broken contract never lands.
 #Test("no_report_snapshot_holds_a_registry_contract_note") {
     guards_enter_root()
-    held := [String]{}
+    ^held: [String]{}
     loop path in ds_report_fixture_snapshot_paths() {
         if !ds_files.exists(path) -> next
         lines: dc_read(path).split("\n").to_list()
@@ -213,7 +213,7 @@ ds_part: fn(line: String, label: String) -> Bool {
 #Test("every_report_fixture_has_a_snapshot_file") {
     guards_enter_root()
     known: ds_known_failing()
-    missing := [String]{}
+    ^missing: [String]{}
     loop path in ds_report_fixture_snapshot_paths() {
         if !ds_files.exists(path) && !dc_has(known, ds_entry(path)) -> missing.push(path)
     }
@@ -238,8 +238,8 @@ ds_part: fn(line: String, label: String) -> Bool {
 
 // The codes only `left` holds and the codes only `right` holds, each sorted.
 ds_set_diff: fn(left: [String], right: [String]) -> {left_only: [String], right_only: [String]} {
-    left_only := [String]{}
-    right_only := [String]{}
+    ^left_only: [String]{}
+    ^right_only: [String]{}
     loop code in left {
         if !dc_has(right, code) -> dc_add(left_only, code)
     }

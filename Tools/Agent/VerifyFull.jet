@@ -98,7 +98,7 @@ run: fn() {
     compiler: files.read_bytes(binary) ?? return abort("verify-full: `{binary}` cannot be read: {err}")
     timeout_text: process.env_nonempty("JET_VERIFY_TIMEOUT_MS") ?? "{DEFAULT_TIMEOUT_MS}"
     timeout_ms: Int.parse(timeout_text) ?? return abort("verify-full: JET_VERIFY_TIMEOUT_MS `{timeout_text}` is not a number of milliseconds")
-    state := Verify{
+    ^state: Verify{
         repo: repo.copy(),
         binary: binary.copy(),
         jet_sha256: crypto.sha256(compiler).hex(),
@@ -146,7 +146,7 @@ run: fn() {
         [String]{"core-module-check", binary, "CoreModuleCheck.jet", "--check"},
         [String]{"runtime-effect-rows", binary, "RuntimeEffectRows.jet", "--check"},
     }) {
-        argv := [String]{gate[1], "{root}/Tools/Agent/{gate[2]}"}
+        ^argv: [String]{gate[1], "{root}/Tools/Agent/{gate[2]}"}
         loop index in 3..<gate.len() -> argv.push(gate[index])
         ran: run_child(state, gate[0], argv)
         record(state, ran.row)
@@ -164,7 +164,7 @@ run: fn() {
             // `jet test Compiler --profile <suite>` runs that corpus in process with
             // JET from this environment, stages its rows in memory and writes its
             // case verdicts to $JET_CI_EVIDENCE_DIR/<suite>.json.
-            ran := run_child(state, suite, [String]{binary.copy(), "test", "{root}/Compiler", "--profile", suite.copy(), "--color=never"})
+            ^ran: run_child(state, suite, [String]{binary.copy(), "test", "{root}/Compiler", "--profile", suite.copy(), "--color=never"})
             if ran.row.status == "PASS" {
                 testkit_verdict(ran.row, "{evidence}/{suite}.json", binary, suite)
             }
@@ -173,7 +173,7 @@ run: fn() {
         }
         output: "{scratch}/registries"
         manifest: "{output}/manifest.json"
-        listed := run_child(state, "registry-manifest", [String]{binary.copy(), "{root}/Tools/Agent/CompilerRegistries.jet", "manifest", head.copy(), "--out", output})
+        ^listed: run_child(state, "registry-manifest", [String]{binary.copy(), "{root}/Tools/Agent/CompilerRegistries.jet", "manifest", head.copy(), "--out", output})
         if listed.row.status == "PASS" {
             registry_verdict(listed.row, manifest, None, head, root, binary)
         }
@@ -184,7 +184,7 @@ run: fn() {
             next
         }
         receipt: "{evidence}/registries.json"
-        ran := run_child(state, "registries", [String]{binary.copy(), "{root}/Tools/Agent/CompilerRegistries.jet", "run", "--jet", binary.copy(), "--manifest", manifest.copy(), "--receipt", receipt.copy()})
+        ^ran: run_child(state, "registries", [String]{binary.copy(), "{root}/Tools/Agent/CompilerRegistries.jet", "run", "--jet", binary.copy(), "--manifest", manifest.copy(), "--receipt", receipt.copy()})
         if ran.row.status == "PASS" {
             registry_verdict(ran.row, manifest, Val(receipt), head, root, binary)
         }
@@ -206,7 +206,7 @@ repo_root: fn() -[Env, Exec, FS, IO]> String Never! {
     tool: "/Tools/Agent/VerifyFull.jet"
     script: sys.executable()
     if script.ends_with(tool) -> return script.removesuffix(tool)
-    dir := files.cwd() ?? "/"
+    ^dir: files.cwd() ?? "/"
     loop {
         if files.exists("{dir}{tool}") -> return dir
         if dir == "/" || dir == "" {
@@ -255,9 +255,9 @@ spawn: fn(spec: ProcessSpec) -[Env, Exec, FS, IO, Time, Time.Wait]> ProcessRecei
 run_child: fn(state: ^Verify, scope: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     log: "{state.evidence}/{scope}.log"
     if state.unsafe != "" -> return Ran{row: blocked_row(scope, state.unsafe, log), output: ""}
-    spec := process.cmd(argv).cwd(state.repo).timeout(time.duration_ms(state.timeout_ms)).output_limit(134217728)
+    ^spec: process.cmd(argv).cwd(state.repo).timeout(time.duration_ms(state.timeout_ms)).output_limit(134217728)
     loop setting in state.env -> spec = spec.env(setting.name, setting.value)
-    row := Row{scope: scope.copy(), status: "FAIL", ran: true, code: None, signal: None, reason: None, log: log.copy(), total: None, passed: None}
+    ^row: Row{scope: scope.copy(), status: "FAIL", ran: true, code: None, signal: None, reason: None, log: log.copy(), total: None, passed: None}
     receipt: spawn(spec) ?? {
         state.unsafe = "unsafe child {err} in {scope}"
         files.write(log, "{err}\n") ?? return abort("verify-full: `{log}` cannot be written: {err}")
@@ -309,13 +309,13 @@ pin_source: fn(state: ^Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never
 // native suites: `registries` runs Tools/Agent/CompilerRegistries.jet, and any
 // other suite is a Compiler test profile of that name.
 shard_suites: fn(state: Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> [String] Never! {
-    spec := process.cmd([String]{state.binary, "{state.repo}/Tools/CI/TestShards.jet", state.shard_index, state.shard_count}).cwd(state.repo)
+    ^spec: process.cmd([String]{state.binary, "{state.repo}/Tools/CI/TestShards.jet", state.shard_index, state.shard_count}).cwd(state.repo)
     loop setting in state.env -> spec = spec.env(setting.name, setting.value)
     receipt: spawn(spec) ?? return abort("verify-full: native suite inventory failed: {err}")
     if receipt.code != 0 || receipt.signal != None || receipt.timed_out {
         return abort("verify-full: native suite inventory failed: {receipt.errors.trim_end()}")
     }
-    suites := [String]{}
+    ^suites: [String]{}
     loop line in receipt.output.split("\n") {
         if line == "" -> next
         if line.starts_with("-") || line.contains(" ") || suites.contains(line) {
@@ -331,8 +331,8 @@ check_pin: fn(state: ^Verify, scope: String) -[FS, Exec, IO]> Bool Never! {
     log: "{state.evidence}/{scope}.log"
     pin: state.pin ?? ""
     problem: pinned_source_problem(state.repo, pin)
-    row := Row{scope: scope.copy(), status: "PASS", ran: true, code: Val(0), signal: None, reason: None, log: log.copy(), total: None, passed: None}
-    text := "{pin}\t{state.repo}\n"
+    ^row: Row{scope: scope.copy(), status: "PASS", ran: true, code: Val(0), signal: None, reason: None, log: log.copy(), total: None, passed: None}
+    ^text: "{pin}\t{state.repo}\n"
     if problem == .Val(reason) {
         row.status = "FAIL"
         row.code = Val(2)
@@ -382,7 +382,7 @@ executable: fn(mode: Int) -> Bool Never! {
 
 // Git's blob id: sha1 of `blob <length>\0<bytes>`.
 blob_hash: fn(bytes: [U8]) -> String Never! {
-    framed := "blob {bytes.len()}".bytes()
+    ^framed: "blob {bytes.len()}".bytes()
     framed.push(U8{0})
     framed.extend(bytes.copy())
     crypto.sha1(framed)
@@ -421,7 +421,7 @@ registry_verdict: fn(row: ^Row, manifest_path: String, receipt_path: String?, he
     if text_field(manifest, "head") != head || text_field(manifest, "repo") != root || !complete || entries.len() == 0 || entries.any(fn(entry) { text_field(entry, "status") == "BLOCKED" }) {
         return fail_row(row, "registry manifest is missing, unpinned, incomplete or BLOCKED")
     }
-    ids := [String]{}
+    ^ids: [String]{}
     loop entry in entries {
         id: text_field(entry, "id")
         if ids.contains(id) -> return fail_row(row, "duplicate registry manifest entries")
@@ -435,8 +435,8 @@ registry_verdict: fn(row: ^Row, manifest_path: String, receipt_path: String?, he
     receipt: read_document(path) ?? return fail_row(row, "registry receipt `{path}` is missing or not JSON")
     ran: array_field(receipt, "entries")
     // Same length, each receipt id a distinct manifest id: the same id set.
-    ran_ids := [String]{}
-    same_ids := true
+    ^ran_ids: [String]{}
+    ^same_ids: true
     loop entry in ran {
         id: text_field(entry, "id")
         if !ids.contains(id) || ran_ids.contains(id) -> same_ids = false
@@ -482,7 +482,7 @@ optional_int: fn(value: Int?) -> Dyn Never! {
 }
 
 row_tree: fn(row: Row) -> Dyn Never! {
-    entries := [String:Dyn]{"scope": Dyn.Text(row.scope.copy()), "status": Dyn.Text(row.status.copy())}
+    ^entries: [String:Dyn]{"scope": Dyn.Text(row.scope.copy()), "status": Dyn.Text(row.status.copy())}
     if row.ran {
         entries["code"] = optional_int(row.code)
         entries["signal"] = optional_int(row.signal)
@@ -496,8 +496,8 @@ row_tree: fn(row: Row) -> Dyn Never! {
 
 // Rewrite verify-full-summary.tsv and verify-full.json from every row so far.
 publish: fn(state: Verify) -[FS, Exec, IO]> () {
-    summary := "status\tscope\trc\tprerequisite\tlog\ttarget\n"
-    rows := [Dyn]{}
+    ^summary: "status\tscope\trc\tprerequisite\tlog\ttarget\n"
+    ^rows: [Dyn]{}
     loop row in state.rows {
         code: if row.code == .Val(number) -> "{number}" else -> "-"
         summary = "{summary}{row.status}\t{row.scope}\t{code}\t{row.reason ?? "-"}\t{row.log}\t{row.scope}\n"
@@ -542,7 +542,7 @@ fixture_put: fn(tree: String, path: String, text: String) -[FS]> () {
 // One fixture tree: this runner, the fake compiler and git, and the gate
 // sources. `export` is what the fake jet prints for ProofSource.jet.
 fixture_tree: fn(tree: String, runner: String, export: String) -[FS]> [String] {
-    written := [{path: String, text: String}]{
+    ^written: [{path: String, text: String}]{
         {path: "Tools/Agent/VerifyFull.jet", text: runner.copy()},
         {path: "Tools/Agent/CoreCoverage.jet", text: "// fixture gate: passes\n"},
         {path: "Tools/Agent/CoreModuleCheck.jet", text: "// fixture gate: passes\n"},
@@ -551,7 +551,7 @@ fixture_tree: fn(tree: String, runner: String, export: String) -[FS]> [String] {
         {path: "bin/jet", text: FIXTURE_JET},
         {path: "bin/git", text: FIXTURE_GIT},
     }
-    paths := [String]{}
+    ^paths: [String]{}
     loop item in written {
         fixture_put(tree, item.path, item.text)
         paths.push(item.path.copy())
@@ -567,7 +567,7 @@ fixture_row: fn(rows: [Dyn], scope: String) -> Dyn Never! {
 }
 
 fixture_checkout: fn() -[FS, Env]> String {
-    dir := files.cwd() ?? panic("working directory")
+    ^dir: files.cwd() ?? panic("working directory")
     loop {
         if files.exists("{dir}/Tools/Agent/VerifyFull.jet") -> return dir
         if dir == "/" || dir == "" -> panic("run the test from inside the Jet checkout")
@@ -591,7 +591,7 @@ fixture_checkout: fn() -[FS, Env]> String {
     loop mode in modes {
         fixture_tree(work, runner, pinned)
         tracked: fixture_tree(pinned, runner, pinned)
-        listed := [Dyn]{}
+        ^listed: [Dyn]{}
         loop path in tracked {
             bytes: files.read_bytes("{pinned}/{path}") ?? panic("fixture bytes: {err}")
             listed.push(Dyn.Object([String:Dyn]{"path": Dyn.Text(path.copy()), "mode": Dyn.Text("100755"), "blob": Dyn.Text(blob_hash(bytes))}))

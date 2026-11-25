@@ -281,7 +281,7 @@ Keymap: struct {
 
     /// The evdev codes of the keys with symbols at level 1 of group 1, in order.
     codes: fn(self) -> [Int] {
-        out := [Int]{}
+        ^out: [Int]{}
         loop keycode in 9..<self.by_code.len() {
             index: self.by_code[keycode]
             if index < 0 -> next
@@ -336,7 +336,7 @@ Keymap: struct {
 
 /// Compiles an XKB text-v1 keymap. Every failure is `UIError.Protocol`.
 keymap: fn(bytes: [U8]) -> Keymap UIError! {
-    p := Parser{
+    ^p: Parser{
         toks: lex(bytes),
         at: 0,
         names: keysym_names(),
@@ -364,8 +364,8 @@ priv internal: module {
     // At least `width` upper-case hex digits.
     hex: fn(value: Int, width: Int) -> String {
         digits: "0123456789ABCDEF".bytes()
-        out := [U8]{}
-        v := value
+        ^out: [U8]{}
+        ^v: value
         loop v > 0 || out.len() < width {
             out.push(digits[v %% 16])
             v = v /% 16
@@ -393,7 +393,7 @@ priv internal: module {
     number_value: fn(word: [U8]) -> Int {
         if word.len() > 2 && (Int{word[0]}) == 48 && (Int{word[1]} == 120 || Int{word[1]} == 88) {
             if word.len() > 10 -> return -1
-            value := 0
+            ^value: 0
             loop i in 2..<word.len() {
                 digit: hex_digit(Int{word[i]})
                 if digit < 0 -> return -1
@@ -402,7 +402,7 @@ priv internal: module {
             return value
         }
         if word.len() > 12 -> return -1
-        value := 0
+        ^value: 0
         loop b in word {
             c: Int{b}
             if c < 48 || c > 57 -> return -1
@@ -412,10 +412,10 @@ priv internal: module {
     }
 
     lex: fn(source: [U8]) -> [Token] UIError! {
-        out := [Token]{}
+        ^out: [Token]{}
         n: source.len()
-        i := 0
-        line := 1
+        ^i: 0
+        ^line: 1
         loop i < n {
             c: Int{source[i]}
             if c == 10 {
@@ -425,7 +425,7 @@ priv internal: module {
                 loop i < n && (Int{source[i]}) != 10 -> i += 1
             } else if c == 34 {
                 start_line: line
-                text := [U8]{}
+                ^text: [U8]{}
                 i += 1
                 loop i < n && (Int{source[i]}) != 34 {
                     if (Int{source[i]}) == 92 && i + 1 < n -> i += 1
@@ -540,7 +540,7 @@ priv internal: module {
     // Skips tokens up to the end of the current statement: past its `;`, or up
     // to a closing `}` (or `,` when `items`) at nesting depth 0.
     skip_statement: fn(p: ^Parser, items: Bool) UIError! {
-        depth := 0
+        ^depth: 0
         loop {
             k: kind_at(p)
             if k == T_END -> return Err(syntax(line_at(p), "unexpected end of the keymap"))
@@ -615,7 +615,7 @@ priv internal: module {
     // A modifier mask: real and virtual modifier names, `none`, `all` or a
     // number, joined by `+`. Virtual modifier i is bit 8 + i.
     mod_expr: fn(p: ^Parser) -> Int UIError! {
-        mask := 0
+        ^mask: 0
         loop {
             if kind_at(p) == T_NUMBER -> mask = mask | expect_number(p) else {
                 name: expect_word(p)
@@ -638,7 +638,7 @@ priv internal: module {
     virtual_modifiers: fn(p: ^Parser) UIError! {
         loop {
             name: expect_word(p)
-            fixed := Int{-1}
+            ^fixed: Int{-1}
             if accept(p, "=") -> fixed = mod_expr(p)
             index: vmod_index(p, name)
             if index >= 0 {
@@ -656,13 +656,13 @@ priv internal: module {
     }
 
     be: fn(bytes: [U8], at: Int, width: Int) -> Int {
-        value := 0
+        ^value: 0
         loop k in 0..<width -> value = (value << 8) + (Int{bytes[at + k]})
         value
     }
 
     keysym_names: fn() -> [String:Int] {
-        out := [String:Int]{}
+        ^out: [String:Int]{}
         values: tables.XKB_KEYSYM_VALUES
         names: tables.XKB_KEYSYM_NAMES.split("\n").to_list()
         loop i in 0..<names.len() {
@@ -692,8 +692,8 @@ priv internal: module {
         if (sym >= 32 && sym <= 126) || (sym >= 160 && sym <= 255) -> return sym
         if sym >= 16777472 && sym <= 17891327 -> return sym - 16777216
         rows: tables.XKB_KEYSYM_SCALARS
-        lo := 0
-        hi := rows.len() /% 7
+        ^lo: 0
+        ^hi: rows.len() /% 7
         loop lo < hi {
             mid: (lo + hi) /% 2
             value: be(rows, mid * 7, 4)
@@ -715,7 +715,7 @@ priv internal: module {
     }
 
     utf8: fn(scalar: Int) -> String {
-        out := [U8]{}
+        ^out: [U8]{}
         if scalar < 128 -> out.push(U8{scalar}) else if scalar < 2048 {
             out.push(U8{192 + (scalar >> 6)})
             out.push(U8{128 + (scalar & 63)})
@@ -734,13 +734,13 @@ priv internal: module {
 
     // The scalars of `text`.
     scalars: fn(text: String) -> [Int] {
-        out := [Int]{}
+        ^out: [Int]{}
         bytes: text.bytes()
-        i := 0
+        ^i: 0
         loop i < bytes.len() {
             b: Int{bytes[i]}
             width: if b < 128 -> 1 else if b < 224 -> 2 else if b < 240 -> 3 else -> 4
-            value := if b < 128 -> b else if b < 224 -> b & 31 else if b < 240 -> b & 15 else -> b & 7
+            ^value: if b < 128 -> b else if b < 224 -> b & 31 else if b < 240 -> b & 15 else -> b & 7
             loop k in 1..<width {
                 if i + k < bytes.len() -> value = (value << 6) + ((Int{bytes[i + k]}) & 63)
             }
@@ -797,8 +797,8 @@ priv internal: module {
     // is `sym`, or -1.
     compose_child: fn(first: Int, count: Int, sym: Int) -> Int {
         rows: tables.XKB_COMPOSE_NODES
-        lo := first
-        hi := first + count
+        ^lo: first
+        ^hi: first + count
         loop lo < hi {
             mid: (lo + hi) /% 2
             value: be(rows, mid * 9, 4)
@@ -843,7 +843,7 @@ priv internal: module {
 
     // Text without C0/C1 control characters and DEL.
     visible: fn(text: String) -> String {
-        out := ""
+        ^out: ""
         loop scalar in scalars(text) {
             if scalar >= 32 && (scalar < 127 || scalar > 159) {
                 piece: utf8(scalar)
@@ -862,7 +862,7 @@ priv internal: module {
         if kind_at(p) == T_STRING -> advance(p)
         expect(p, "{{")
         loop !is_punct(p, "}}") {
-            section := ""
+            ^section: ""
             loop is_word(p) {
                 word: word_lower(p)
                 advance(p)
@@ -939,9 +939,9 @@ priv internal: module {
     key_type: fn(p: ^Parser) UIError! {
         name: expect_string(p)
         expect(p, "{{")
-        mods := 0
-        entries := [TypeEntry]{}
-        levels := 1
+        ^mods: 0
+        ^entries: [TypeEntry]{}
+        ^levels: 1
         loop !is_punct(p, "}}") {
             word: word_lower(p)
             if word == "modifiers" {
@@ -981,7 +981,7 @@ priv internal: module {
         }
         expect(p, "}}")
         expect(p, ";")
-        kept := [TypeEntry]{}
+        ^kept: [TypeEntry]{}
         loop entry in entries {
             if entry.mods & mods == entry.mods -> kept.push(entry)
         }
@@ -1018,7 +1018,7 @@ priv internal: module {
     // `Name(arg, arg=value, !flag)`.
     action: fn(p: ^Parser) -> Action UIError! {
         name: expect_word(p)
-        out := no_action()
+        ^out: no_action()
         out.kind = action_kind(name)
         expect(p, "(")
         loop !is_punct(p, ")") {
@@ -1098,8 +1098,8 @@ priv internal: module {
             } else { skip_statement(p, false) }
             return Ok()
         }
-        any := false
-        sym := 0
+        ^any: false
+        ^sym: 0
         if kind_at(p) == T_NUMBER {
             value: expect_number(p)
             sym = if value <= 9 -> 48 + value else -> value
@@ -1108,8 +1108,8 @@ priv internal: module {
             any = name.lower() == "any"
             sym = if any -> 0 else -> keysym_named(p, name)
         }
-        match := MATCH_ANY_OR_NONE
-        mods := ALL_MODS
+        ^match: MATCH_ANY_OR_NONE
+        ^mods: ALL_MODS
         if accept(p, "+") {
             kind: if is_word(p) && p.toks[p.at + 1].kind == T_PUNCT && p.toks[p.at + 1].text == "(" -> match_kind(p.toks[p.at].text) else -> Int{-1}
             if kind >= 0 {
@@ -1123,7 +1123,7 @@ priv internal: module {
                 mods = mod_expr(p)
             }
         }
-        rule := Interp{sym: sym, any: any || sym == 0, match: match, mods: mods & REAL_MODS, action: no_action(), vmod: -1, level_one: p.default_level_one, repeat: p.default_repeat}
+        ^rule: Interp{sym: sym, any: any || sym == 0, match: match, mods: mods & REAL_MODS, action: no_action(), vmod: -1, level_one: p.default_level_one, repeat: p.default_repeat}
         expect(p, "{{")
         loop !is_punct(p, "}}") {
             field: word_lower(p)
@@ -1195,7 +1195,7 @@ priv internal: module {
     // The key a symbols name refers to, through an alias; -1 if no keycode.
     key_slot: fn(p: ^Parser, name: String) -> Int {
         if p.key_index.get(name) == .Val(index) -> return index
-        real := name.copy()
+        ^real: name.copy()
         if p.aliases.get(name) == .Val(target) -> real = target.copy()
         if p.key_index.get(real) == .Val(index) -> return index
         code: p.codes.get(real) ?? return -1
@@ -1240,9 +1240,9 @@ priv internal: module {
     // `[ a, A, {b, c}, NoSymbol ]`: each level's keysyms.
     symbol_list: fn(p: ^Parser) -> [[Int]] UIError! {
         expect(p, "[")
-        levels := [[Int]]{}
+        ^levels: [[Int]]{}
         loop !is_punct(p, "]") {
-            level := [Int]{}
+            ^level: [Int]{}
             if accept(p, "{{") {
                 loop !is_punct(p, "}}") {
                     sym: keysym_token(p)
@@ -1263,11 +1263,11 @@ priv internal: module {
 
     action_list: fn(p: ^Parser) -> [Action] UIError! {
         expect(p, "[")
-        out := [Action]{}
+        ^out: [Action]{}
         loop !is_punct(p, "]") {
             if accept(p, "{{") {
-                first := no_action()
-                seen := false
+                ^first: no_action()
+                ^seen: false
                 loop !is_punct(p, "}}") {
                     one: action(p)
                     if !seen {
@@ -1289,14 +1289,14 @@ priv internal: module {
         name: expect_key(p)
         index: key_slot(p, name)
         expect(p, "{{")
-        groups := [Group]{}
-        explicit_actions := false
-        repeat := Int{-1}
-        vmods := 0
-        explicit_vmods := false
-        out_of_range := GROUPS_WRAP
-        redirect := 0
-        implicit := 0
+        ^groups: [Group]{}
+        ^explicit_actions: false
+        ^repeat: Int{-1}
+        ^vmods: 0
+        ^explicit_vmods: false
+        ^out_of_range: GROUPS_WRAP
+        ^redirect: 0
+        ^implicit: 0
         loop !is_punct(p, "}}") {
             if is_punct(p, "[") {
                 levels: symbol_list(p)
@@ -1322,7 +1322,7 @@ priv internal: module {
                     explicit_actions = true
                 } else if field == "type" {
                     advance(p)
-                    group := Int{-1}
+                    ^group: Int{-1}
                     if is_punct(p, "[") -> group = group_index(p)
                     expect(p, "=")
                     type_name: expect_string(p)
@@ -1349,7 +1349,7 @@ priv internal: module {
                     explicit_vmods = true
                 } else if field == "groupswrap" || field == "wrapgroups" || field == "groupsclamp" || field == "clampgroups" {
                     advance(p)
-                    on := true
+                    ^on: true
                     if accept(p, "=") -> on = parse_bool(p)
                     if on {
                         out_of_range = if field == "groupswrap" || field == "wrapgroups" -> GROUPS_WRAP else -> GROUPS_CLAMP
@@ -1462,7 +1462,7 @@ priv internal: module {
     }
 
     effective: fn(mods: Int, vmod_masks: [Int]) -> Int {
-        mask := mods & REAL_MODS
+        ^mask: mods & REAL_MODS
         loop i in 0..<vmod_masks.len() {
             if (mods >> (8 + i)) & 1 == 1 -> mask |= vmod_masks[i]
         }
@@ -1474,7 +1474,7 @@ priv internal: module {
         loop m in 0..<p.modmap.len() {
             entry: p.modmap[m].copy()
             if entry.mod < 0 -> next
-            index := Int{-1}
+            ^index: Int{-1}
             if entry.key != "" -> index = key_slot(p, entry.key) else {
                 index = key_for_sym(p, entry.sym)
             }
@@ -1482,7 +1482,7 @@ priv internal: module {
         }
         // Interprets, most specific first: keysym rules before Any, then by
         // match kind, then in declaration order.
-        order := [Int]{}
+        ^order: [Int]{}
         loop class in 0..<10 {
             loop i in 0..<p.interps.len() {
                 if (if p.interps[i].any -> 5 else -> 0) + match_rank(p.interps[i].match) == class {
@@ -1492,7 +1492,7 @@ priv internal: module {
         }
         // Types, interprets and the virtual modifier map of every key.
         loop k in 0..<p.keys.len() {
-            key := p.keys[k].copy()
+            ^key: p.keys[k].copy()
             loop g in 0..<key.groups.len() {
                 name: if key.groups[g].explicit_type -> key.groups[g].type_name.copy() else -> automatic_type(key.groups[g])
                 found: type_named(p, name)
@@ -1501,7 +1501,7 @@ priv internal: module {
                     key.groups[g].actions.push(no_action())
                 }
             }
-            vmodmap := 0
+            ^vmodmap: 0
             if !key.explicit_actions {
                 loop g in 0..<key.groups.len() {
                     loop l in 0..<key.groups[g].levels.len() {
@@ -1525,9 +1525,9 @@ priv internal: module {
             p.keys[k] = key
         }
         // Virtual modifiers map to the real modifiers of the keys that carry them.
-        vmod_masks := [Int]{}
+        ^vmod_masks: [Int]{}
         loop v in 0..<p.vmods.len() {
-            mask := if p.vmod_fixed[v] >= 0 -> p.vmod_fixed[v] else -> 0
+            ^mask: if p.vmod_fixed[v] >= 0 -> p.vmod_fixed[v] else -> 0
             if p.vmod_fixed[v] < 0 {
                 loop key in p.keys {
                     if (key.vmodmap >> v) & 1 == 1 -> mask |= key.modmap
@@ -1542,27 +1542,27 @@ priv internal: module {
                 p.types[t].entries[e].preserve_mask = effective(p.types[t].entries[e].preserve, vmod_masks)
             }
         }
-        group_count := 1
-        max_code := 0
+        ^group_count: 1
+        ^max_code: 0
         loop k in 0..<p.keys.len() {
             if p.keys[k].groups.len() > group_count -> group_count = p.keys[k].groups.len()
             if p.keys[k].code > max_code -> max_code = p.keys[k].code
             modmap: p.keys[k].modmap
             loop g in 0..<p.keys[k].groups.len() {
                 loop l in 0..<p.keys[k].groups[g].actions.len() {
-                    act := p.keys[k].groups[g].actions[l].copy()
+                    ^act: p.keys[k].groups[g].actions[l].copy()
                     if act.modmap -> act.mods = modmap
                     act.mask = effective(act.mods, vmod_masks)
                     p.keys[k].groups[g].actions[l] = act
                 }
             }
         }
-        by_code := [Int]{}
+        ^by_code: [Int]{}
         loop _ in 0..max_code -> by_code.push(-1)
         loop k in 0..<p.keys.len() -> by_code[p.keys[k].code] = k
-        counts := [Int]{}
+        ^counts: [Int]{}
         loop _ in 0..<32 -> counts.push(0)
-        sym_names := [Int:String]{}
+        ^sym_names: [Int:String]{}
         values: tables.XKB_KEYSYM_VALUES
         names: tables.XKB_KEYSYM_NAMES.split("\n").to_list()
         loop i in 0..<names.len() {
@@ -1607,8 +1607,8 @@ priv internal: module {
 
     // The key whose lowest group and level types `sym`, lowest keycode first.
     key_for_sym: fn(p: Parser, sym: Int) -> Int {
-        best := Int{-1}
-        best_rank := Int{-1}
+        ^best: Int{-1}
+        ^best_rank: Int{-1}
         loop k in 0..<p.keys.len() {
             groups: p.keys[k].groups
             loop g in 0..<groups.len() {
@@ -1704,7 +1704,7 @@ priv internal: module {
     one_sym: fn(km: Keymap, index: Int) -> Int {
         syms: key_syms(km, index)
         if syms.len() != 1 -> return 0
-        sym := syms[0]
+        ^sym: syms[0]
         groups: km.keys[index].groups
         if groups.len() > 1 && sym > 127 && transforms(km, index, CONTROL) {
             loop g in 0..<groups.len() {
@@ -1731,7 +1731,7 @@ priv internal: module {
     // xkb_state_key_get_utf8 without control characters.
     key_text: fn(km: Keymap, index: Int, one: Int) -> String {
         syms: key_syms(km, index)
-        text := ""
+        ^text: ""
         if syms.len() == 1 {
             scalar: keysym_scalar(one)
             if scalar > 0 {
@@ -1827,7 +1827,7 @@ priv internal: module {
         code: km.keys[index].code
         km.set_mods = 0
         km.clear_mods = 0
-        swallowed := false
+        ^swallowed: false
         loop f in 0..<km.filters.len() {
             if km.filters[f].active && filter_key(km, f, code, index, down) -> swallowed = true
         }
@@ -1853,7 +1853,7 @@ priv internal: module {
                 }
             }
         }
-        kept := [Filter]{}
+        ^kept: [Filter]{}
         loop filter in km.filters {
             if filter.active -> kept.push(filter.copy())
         }
@@ -1921,7 +1921,7 @@ priv internal: module {
     latch_filter: fn(km: ^Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
         act: km.filters[f].action.copy()
         group_latch: act.kind == ACT_LATCH_GROUP
-        latch := km.filters[f].latch
+        ^latch: km.filters[f].latch
         if down && latch == LATCH_PENDING {
             next_action: key_action(km, index)
             if !group_latch && next_action.kind == ACT_LATCH_MODS && next_action.mask == act.mask && next_action.clear_locks == act.clear_locks && next_action.latch_to_lock == act.latch_to_lock {
@@ -2095,7 +2095,7 @@ priv internal: module {
 // --- tests -------------------------------------------------------------------
 
 #Test("keysym, keysym_name, layout and active report the keyboard state") {
-    km := test_keymap()
+    ^km: test_keymap()
     assert_eq(km.layout(), "English (US)")
     assert_eq(km.keysym_name(km.keysym(16)), "q")
     _: km.press(42, true)
@@ -2119,7 +2119,7 @@ priv internal: module {
 }
 
 #Test("a small US+DE keymap parses and types its levels") {
-    km := test_keymap()
+    ^km: test_keymap()
     plain: km.press(16, true)
     assert_eq(plain.key, Key.Char('q'))
     assert_eq(plain.text, "q")
@@ -2139,7 +2139,7 @@ priv internal: module {
 }
 
 #Test("Alt+Shift switches to the DE group, where AltGr reaches level 3") {
-    km := test_keymap()
+    ^km: test_keymap()
     _: km.press(42, true)
     _: km.press(56, true)
     _: km.press(56, false)
@@ -2156,7 +2156,7 @@ priv internal: module {
 }
 
 #Test("the compositor's modifiers pick the group and level; dead keys compose") {
-    km := test_keymap()
+    ^km: test_keymap()
     km.modifiers(depressed: 0, latched: 0, locked: 0, group: 1)
     dead: km.press(13, true)
     assert_eq(dead.key, Key.Char("'".chars()[0]))
@@ -2191,7 +2191,7 @@ priv internal: module {
     loop cut in 0..<source.len() {
         if cut % 3 != 0 -> next
         if keymap(source[0..<cut]) == .Ok(km) {
-            hostile := km
+            ^hostile: km
             exercise(hostile)
         }
     }
@@ -2199,16 +2199,16 @@ priv internal: module {
     loop at in 0..<source.len() {
         if at % 11 != 0 -> next
         loop swap in swaps {
-            mutated := source.copy()
+            ^mutated: source.copy()
             mutated[at] = swap
             if keymap(mutated) == .Ok(km) {
-                hostile := km
+                ^hostile: km
                 exercise(hostile)
             }
         }
     }
     huge: "xkb_keymap {{ xkb_keycodes {{ <A> = 4294967296; }}; }};"
     assert(keymap(huge.bytes()) == .Err(.Protocol("xkb keymap line 1: keycode 4294967296 is out of range")))
-    km := test_keymap()
+    ^km: test_keymap()
     exercise(km)
 }

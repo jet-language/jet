@@ -117,7 +117,7 @@ jet_cli_new_app_name_problem: fn(name: String) -> String? Never! {
 // The lower-case words of a checked name, split as Jet splits names into
 // words (`OrderItems`, `order_items` and `order-items` are order, items).
 jet_cli_new_app_words: fn(name: String) -> [String] Never! {
-    words := [String]{}
+    ^words: [String]{}
     loop piece in name.split("-") {
         loop word in sema_casing_split_words(piece) -> words.push(word.to_ascii_lower())
     }
@@ -137,7 +137,7 @@ jet_cli_new_app_type: fn(words: [String]) -> String Never! {
 // The words as a sentence for people (`Order items`).
 jet_cli_new_app_display: fn(words: [String]) -> String Never! {
     if words.len() == 0 -> return ""
-    rest := ""
+    ^rest: ""
     loop index in 1..<words.len() -> rest = "{rest} {words[index]}"
     "{sema_casing_pascal_words(words[0])}{rest}"
 }
@@ -155,8 +155,8 @@ jet_cli_new_app_route: fn(address: String) -> JetCLINewAppRoute Never! {
     if !address.starts_with("/") {
         return jet_cli_new_app_route_problem("`{address}` isn't a route address, which starts with `/`")
     }
-    parts := [String]{}
-    title := "Home"
+    ^parts: [String]{}
+    ^title: "Home"
     if address != "/" {
         segments: address.slice(1, address.len()).split("/").to_list()
         loop (index, segment) in segments {
@@ -214,7 +214,7 @@ jet_cli_new_app_plan: fn(kind: String, jet_argv: [String], args: [String], color
         return jet_cli_new_app_usage_fail(kind, "`jet new {kind}` takes one name, and got {names.len()}: {names.join(", ")}", color)
     }
     name: if names.len() == 1 -> names[0] else -> ""
-    address := jet_cli_new_app_value(jet_argv, "--path", "--route")
+    ^address: jet_cli_new_app_value(jet_argv, "--path", "--route")
     path_written: jet_cli_new_app_has_flag(jet_argv, "--path") || jet_cli_new_app_has_flag(jet_argv, "--route")
     if {
         kind == "route" && address == "" && name == "" -> return jet_cli_new_app_usage_fail(kind, "`jet new route` needs a name or a `--path`", color)
@@ -233,7 +233,7 @@ jet_cli_new_app_plan: fn(kind: String, jet_argv: [String], args: [String], color
         return jet_cli_fail("E2104", "`{name}` can't name a job: its method `{words.join("_")}` would be a Jet keyword", jet_cli_why("E2104"), "choose another name, such as `Run{jet_cli_new_app_pascal(words)}`", color, JET_DRIVER_EXIT_USAGE)
     }
     remove: jet_argv.contains("--remove")
-    sql := ""
+    ^sql: ""
     has_sql: jet_cli_new_app_has_flag(jet_argv, "--up") || jet_cli_new_app_has_flag(jet_argv, "--sql")
     if {
         kind == "migration" && !remove -> {
@@ -295,7 +295,7 @@ jet_cli_new_app_sources: fn(request: JetCLINewApp, version: Int) -> [JetCLINewAp
 }
 
 jet_cli_new_app_receipt_text: fn(request: JetCLINewApp, key: String, version: Int, state: String, entries: [JetCLINewAppEntry]) -> String Never! {
-    text := "{JET_CLI_NEW_APP_RECEIPT_HEAD}\nkind: {request.kind}\nname: {key}\nversion: {version}\nstate: {state}\n"
+    ^text: "{JET_CLI_NEW_APP_RECEIPT_HEAD}\nkind: {request.kind}\nname: {key}\nversion: {version}\nstate: {state}\n"
     loop entry in entries -> text = "{text}file: {entry.hash} {entry.path}\n"
     text
 }
@@ -305,7 +305,7 @@ jet_cli_new_app_receipt_text: fn(request: JetCLINewApp, key: String, version: In
 jet_cli_new_app_parse_receipt: fn(text: String) -> JetCLINewAppReceipt? Never! {
     lines: text.split("\n").to_list()
     if lines.len() == 0 || lines[0] != JET_CLI_NEW_APP_RECEIPT_HEAD -> return None
-    receipt := JetCLINewAppReceipt{state: "", version: 0, files: [JetCLINewAppEntry]{}}
+    ^receipt: JetCLINewAppReceipt{state: "", version: 0, files: [JetCLINewAppEntry]{}}
     loop line in lines {
         if line.starts_with("state: ") -> receipt.state = line.slice(7, line.len())
         if line.starts_with("version: ") {
@@ -335,7 +335,7 @@ jet_cli_new_app_read_receipt: fn(path: String, relative: String) -[FS]> JetCLINe
 // The leading decimal digits of `name` as a number (`004_add_index.jet` is
 // 4), or 0.
 jet_cli_new_app_leading_number: fn(name: String) -> Int Never! {
-    digits := 0
+    ^digits: 0
     loop byte in name.bytes() {
         code: Int{byte}
         if code < 48 || code > 57 -> break
@@ -348,7 +348,7 @@ jet_cli_new_app_leading_number: fn(name: String) -> Int Never! {
 // The next migration version: one past every version in `Migrations/` and in
 // every migration receipt, removed ones too, so no number is used twice.
 jet_cli_new_app_next_version: fn(root: String) -[FS]> Int JetCLIReadError! {
-    highest := 0
+    ^highest: 0
     if cli_files.is_dir("{root}/Migrations") {
         names: cli_files.listdir("{root}/Migrations") ?? return Err(jet_cli_read_error("couldn't list `Migrations/`: {err}"))
         loop name in names {
@@ -408,7 +408,7 @@ jet_cli_new_app_run: fn(request: JetCLINewApp) -[Env, Exec, Exec.Args, FFI.Asm, 
     receipt_relative: ".jet/generated/{request.kind}-{key}.receipt"
     receipt_path: "{root}/{receipt_relative}"
     // No receipt reads as one with no state.
-    previous := JetCLINewAppReceipt{state: "", version: 0, files: [JetCLINewAppEntry]{}}
+    ^previous: JetCLINewAppReceipt{state: "", version: 0, files: [JetCLINewAppEntry]{}}
     if cli_files.exists(receipt_path) {
         previous = jet_cli_new_app_read_receipt(receipt_path, receipt_relative) ?? return jet_cli_new_failed("E2105", err.message, "restore the receipt, or remove it with the files it lists by hand", color)
     }
@@ -424,12 +424,12 @@ jet_cli_new_app_run: fn(request: JetCLINewApp) -[Env, Exec, Exec.Args, FFI.Asm, 
         return jet_cli_new_failed("E2105", "`{command}` already generated {listed.join(", ")}", "remove them first with `{command} --remove`, or choose another name", color)
     }
     // A removed receipt keeps the version its migration was generated at.
-    version := previous.version
+    ^version: previous.version
     if request.kind == "migration" && version == 0 {
         version = jet_cli_new_app_next_version(root) ?? return jet_cli_new_failed("E2105", err.message, fix_io, color)
     }
-    files := [JetCLINewAppFile]{}
-    hooks := jet_cli_tool_stage_memo()
+    ^files: [JetCLINewAppFile]{}
+    ^hooks: jet_cli_tool_stage_memo()
     loop source in jet_cli_new_app_sources(request, version) {
         formatted: jet_cli_fmt_format_source(source.text, source.path, false, false, false, color, hooks) ?? return jet_cli_ice("the `jet new {request.kind}` template for `{source.path}` does not format")
         if formatted.report != None || formatted.diagnostics.len() > 0 {
@@ -443,7 +443,7 @@ jet_cli_new_app_run: fn(request: JetCLINewApp) -[Env, Exec, Exec.Args, FFI.Asm, 
     entries: loop file in files -> JetCLINewAppEntry{hash: sha256_hex(file.text), path: file.path}
     receipt_text: jet_cli_new_app_receipt_text(request, key, version, "generated", entries)
     paths: loop file in files -> file.path
-    fields := [JetCLIStatusField]{
+    ^fields: [JetCLIStatusField]{
         jet_cli_status_field("kind", jet_cli_status_text(request.kind)),
         jet_cli_status_field("files", jet_cli_status_texts(paths)),
         jet_cli_status_field("receipt", jet_cli_status_text(receipt_relative)),
@@ -453,8 +453,8 @@ jet_cli_new_app_run: fn(request: JetCLINewApp) -[Env, Exec, Exec.Args, FFI.Asm, 
         fields.push(jet_cli_status_field("version", jet_cli_status_int(version)))
     }
     if request.preview {
-        shown := ""
-        contents := [JetCLIStatusValue]{}
+        ^shown: ""
+        ^contents: [JetCLIStatusValue]{}
         loop file in files {
             shown = "{shown}== {file.path}\n{file.text}"
             contents.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(file.path)), jet_cli_status_field("text", jet_cli_status_text(file.text))}))
@@ -470,7 +470,7 @@ jet_cli_new_app_run: fn(request: JetCLINewApp) -[Env, Exec, Exec.Args, FFI.Asm, 
     }
     cli_files.create_dir_all("{root}/.jet/generated") ?? return jet_cli_new_failed("E2105", "couldn't create `.jet/generated/`: {err}", fix_io, color)
     cli_files.write(receipt_path, receipt_text) ?? return jet_cli_new_failed("E2105", "couldn't write `{receipt_relative}`: {err}", fix_io, color)
-    status := ""
+    ^status: ""
     loop file in files -> status = "{status}Created {file.path}\n"
     status = "{status}Recorded {receipt_relative}\nUndo: {command} --remove\n"
     if request.kind == "route" && !jet_cli_new_app_serves_routes(root) {
@@ -489,7 +489,7 @@ jet_cli_new_app_remove: fn(request: JetCLINewApp, root: String, key: String, rec
     if receipt.state != "generated" {
         return jet_cli_new_failed("E2105", "`{command}` was already removed", "generate it again with `{command}`", color)
     }
-    present := [String]{}
+    ^present: [String]{}
     loop entry in receipt.files {
         path: "{root}/{entry.path}"
         if !cli_files.exists(path) -> next
@@ -506,7 +506,7 @@ jet_cli_new_app_remove: fn(request: JetCLINewApp, root: String, key: String, rec
         jet_cli_status_field("preview", jet_cli_status_bool(request.preview)),
     }
     if request.preview {
-        shown := ""
+        ^shown: ""
         loop path in present -> shown = "{shown}Would remove {path}\n"
         return jet_cli_new_app_output(request, shown, "", fields)
     }
@@ -515,7 +515,7 @@ jet_cli_new_app_remove: fn(request: JetCLINewApp, root: String, key: String, rec
     }
     kept: jet_cli_new_app_receipt_text(request, key, receipt.version, "removed", receipt.files)
     cli_files.write("{root}/{receipt_relative}", kept) ?? return jet_cli_new_failed("E2105", "couldn't write `{receipt_relative}`: {err}", fix_io, color)
-    status := ""
+    ^status: ""
     loop path in present -> status = "{status}Removed {path}\n"
     status = "{status}Recorded {receipt_relative} as removed\n"
     jet_cli_new_app_output(request, "", status, fields)

@@ -90,15 +90,15 @@ SemaComptimeUseReference: struct {
 // module order: the diagnostics and runtime names are the same for any
 // thread count.
 sema_comptime_use_check: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThreads) -> SemaRegistrationGraph {
-    owned := graph.move()
+    ^owned: graph.move()
     count: owned.modules.len()
-    own_callees := [NameTable]{}
+    ^own_callees: [NameTable]{}
     loop module_index in 0..<count {
         own_callees.push(sema_comptime_use_own_callees(owned.modules[module_index].program.items))
     }
-    rows := [Int]{}
-    weights := [Int]{}
-    work := 0
+    ^rows: [Int]{}
+    ^weights: [Int]{}
+    ^work: 0
     loop module_index in 0..<count {
         if module_is_core(owned.modules[module_index].module_identity) -> next
         bytes: owned.modules[module_index].source.count_bytes()
@@ -107,22 +107,22 @@ sema_comptime_use_check: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThr
         work += bytes
     }
     workers: compiler_threads_admit(threads, rows.len(), work, SEMA_COMPTIME_USE_MIN_BYTES_PER_THREAD, 0, 0)
-    scan := sema_graph_scan_new(owned, [SemaGraphModuleResult]{}, rows, compiler_threads_heaviest_first(weights))
+    ^scan: sema_graph_scan_new(owned, [SemaGraphModuleResult]{}, rows, compiler_threads_heaviest_first(weights))
     scan.own_callees = Val(own_callees.move())
-    done := sema_graph_scan(scan, workers)
+    ^done: sema_graph_scan(scan, workers)
     owned = done.graph.move()
-    found := done.found.move()
-    runtime_names := [NameTable]{}
-    scanned := [Bool]{}
+    ^found: done.found.move()
+    ^runtime_names: [NameTable]{}
+    ^scanned: [Bool]{}
     loop _ in 0..<count {
         runtime_names.push(name_table_sized(2))
         scanned.push(false)
     }
     found.reverse()
     loop found.len() > 0 {
-        slot := found.pop() ?? break
-        row := compiler_threads_slot_taken(slot)
-        module_found := compiler_threads_slot_taken(row.comptime.move())
+        ^slot: found.pop() ?? break
+        ^row: compiler_threads_slot_taken(slot)
+        ^module_found: compiler_threads_slot_taken(row.comptime.move())
         loop diagnostic in module_found.diagnostics {
             sema_registration_push_graph_diagnostic(owned, module_found.module_index, diagnostic)
         }
@@ -193,14 +193,14 @@ sema_graph_scan_new: fn(graph: ^^SemaRegistrationGraph, modules: ^^[SemaGraphMod
 // scan's inputs and writes only its own findings, so the findings are the
 // same for any thread count.
 sema_graph_scan: fn(scan: ^^SemaGraphScan, workers: Int) -> SemaGraphScanDone {
-    owned := scan.move()
-    found := [SemaGraphScanFound?]{}
+    ^owned: scan.move()
+    ^found: [SemaGraphScanFound?]{}
     loop _ in 0..<owned.rows.len() -> found.push(None)
     if workers <= 1 {
         loop position in 0..<owned.rows.len() {
             found[position] = Val(sema_graph_scan_row(owned, position))
         }
-        graph := compiler_threads_taken(owned.graphs)
+        ^graph: compiler_threads_taken(owned.graphs)
         return SemaGraphScanDone{graph: graph, modules: owned.modules.move(), rows: owned.rows.move(), order: owned.order.move(), found: found}
     }
     shared_state: Shared{owned.move()}
@@ -214,7 +214,7 @@ sema_graph_scan: fn(scan: ^^SemaGraphScan, workers: Int) -> SemaGraphScanDone {
 // (`qualified` None) and then rewrites with every module's.
 sema_graph_scan_row: fn(scan: SemaGraphScan, position: Int) -> SemaGraphScanFound {
     row: scan.rows[position]
-    found := SemaGraphScanFound{position: position, comptime: None, qualified: None, divergence: None}
+    ^found: SemaGraphScanFound{position: position, comptime: None, qualified: None, divergence: None}
     if {
         scan.own_callees == .Val(callees) -> {
             found.comptime = Val(sema_comptime_use_scan_module(scan.graphs[0], row, callees))
@@ -238,9 +238,9 @@ sema_graph_scan_threads: fn(shared_state: Shared<SemaGraphScan>, from: Int, work
     task.group sema_graph_scan_group {
         head: task sema_graph_scan_claimed(shared_state)
         sema_graph_scan_threads(shared_state, from + 1, workers, found)
-        claimed := compiler_threads_joined(head)
+        ^claimed: compiler_threads_joined(head)
         loop claimed.len() > 0 {
-            done := claimed.pop() ?? break
+            ^done: claimed.pop() ?? break
             position: done.position
             found[position] = Val(done.move())
         }
@@ -250,7 +250,7 @@ sema_graph_scan_threads: fn(shared_state: Shared<SemaGraphScan>, from: Int, work
 // One thread: scans the rows it claims.
 sema_graph_scan_claimed: fn(shared_state: Shared<SemaGraphScan>) -> [SemaGraphScanFound] {
     scan: shared_state.guard_read()
-    claimed := [SemaGraphScanFound]{}
+    ^claimed: [SemaGraphScanFound]{}
     loop {
         rank: sema_finalize_core_claim(scan.value.queue)
         if rank >= scan.value.order.len() -> break
@@ -264,7 +264,7 @@ sema_graph_scan_claimed: fn(shared_state: Shared<SemaGraphScan>) -> [SemaGraphSc
 // the threads' cell.
 sema_graph_scan_take: fn(shared_state: Shared<SemaGraphScan>, found: ^^[SemaGraphScanFound?]) -> SemaGraphScanDone {
     permit: shared_state.guard_edit()
-    graph := compiler_threads_taken(permit.value.graphs)
+    ^graph: compiler_threads_taken(permit.value.graphs)
     SemaGraphScanDone{graph: graph, modules: compiler_take_rows<SemaGraphModuleResult>(permit.value.modules), rows: compiler_take_rows<Int>(permit.value.rows), order: compiler_take_rows<Int>(permit.value.order), found: found}
 }
 
@@ -274,7 +274,7 @@ sema_graph_scan_take: fn(shared_state: Shared<SemaGraphScan>, found: ^^[SemaGrap
 sema_comptime_use_scan_module: fn(graph: SemaRegistrationGraph, module_index: Int, own_callees: [NameTable]) -> SemaComptimeUseScanned {
     module_row: graph.modules[module_index]
     if module_row.program.imports.len() == 0 {
-        has_code_module := false
+        ^has_code_module: false
         loop item in module_row.program.items {
             if item == .CodeModule(_) {
                 has_code_module = true
@@ -285,7 +285,7 @@ sema_comptime_use_scan_module: fn(graph: SemaRegistrationGraph, module_index: In
             return SemaComptimeUseScanned{module_index: module_index, runtime_names: name_table_sized(2), diagnostics: [Diagnostic]{}}
         }
     }
-    scan := sema_comptime_use_scan_for(graph, module_index, own_callees)
+    ^scan: sema_comptime_use_scan_for(graph, module_index, own_callees)
     sema_comptime_use_items(graph.modules[module_index].program.items, scan)
     if name_count(scan.import_locals) > 1 {
         sema_comptime_use_body(graph.modules[module_index].program.script_body, scan)
@@ -296,7 +296,7 @@ sema_comptime_use_scan_module: fn(graph: SemaRegistrationGraph, module_index: In
 
 sema_comptime_use_scan_for: fn(graph: SemaRegistrationGraph, module_index: Int, own_callees: [NameTable]) -> SemaComptimeUseScan {
     module_row: graph.modules[module_index]
-    scan := SemaComptimeUseScan{tables: module_row.program.tables, import_locals: name_table_sized(16), comptime_spans: [Span?]{None}, comptime_callees: own_callees[module_index].copy(), source: [U8]{}, bound_mark: [Int]{0}, bound_gen: 1, wrap: None, pending: [SemaComptimeUseReference]{}, runtime_names: name_table_sized(16), diagnostics: [Diagnostic]{}}
+    ^scan: SemaComptimeUseScan{tables: module_row.program.tables, import_locals: name_table_sized(16), comptime_spans: [Span?]{None}, comptime_callees: own_callees[module_index].copy(), source: [U8]{}, bound_mark: [Int]{0}, bound_gen: 1, wrap: None, pending: [SemaComptimeUseReference]{}, runtime_names: name_table_sized(16), diagnostics: [Diagnostic]{}}
     sema_comptime_use_bind_imports(module_row.program.imports, scan)
     loop import in module_row.imports {
         target: sema_registration_module_index(graph, import.target_module_identity) ?? next
@@ -307,7 +307,7 @@ sema_comptime_use_scan_for: fn(graph: SemaRegistrationGraph, module_index: Int, 
             .Unqualified(_, _, items, _, _) -> {
                 loop item in items {
                     if name_find(callees, item.original) != None {
-                        _ := name_intern(scan.comptime_callees, member_import_local(item.original, item.alias))
+                        ^_: name_intern(scan.comptime_callees, member_import_local(item.original, item.alias))
                     }
                 }
             }
@@ -315,12 +315,12 @@ sema_comptime_use_scan_for: fn(graph: SemaRegistrationGraph, module_index: Int, 
                 alias: import_alias(import.declaration)
                 loop id in 1..<name_count(callees) {
                     name: name_text(callees, Name{id: U32{id}})
-                    _ := name_intern(scan.comptime_callees, "{alias}.{name}")
+                    ^_: name_intern(scan.comptime_callees, "{alias}.{name}")
                 }
             }
         }
     }
-    direct := module_row.source_segments.len() == 0
+    ^direct: module_row.source_segments.len() == 0
     if module_row.source_segments.len() == 1 {
         direct = module_row.source_segments[0].generated.start == 0 && module_row.source_segments[0].source_start == 0
     }
@@ -358,11 +358,11 @@ sema_comptime_use_bind_local: fn(name: String, scan: ^SemaComptimeUseScan) Never
 // A module's `#run fn`s as its own code calls them: `name` at the top
 // level, `Type.name` for a method.
 sema_comptime_use_own_callees: fn(items: [Item]) -> NameTable Never! {
-    callees := name_table_sized(4)
+    ^callees: name_table_sized(4)
     loop item in items {
         if item == {
             .Func(function) -> {
-                if function.is_comptime -> _ := name_intern(callees, function.name)
+                if function.is_comptime -> ^_: name_intern(callees, function.name)
             }
             .Struct(definition) -> {
                 sema_comptime_use_method_callees(definition.name, definition.methods, definition.trait_impls, callees)
@@ -381,11 +381,11 @@ sema_comptime_use_own_callees: fn(items: [Item]) -> NameTable Never! {
 
 sema_comptime_use_method_callees: fn(owner: String, methods: [Func], trait_impls: [TraitImplBlock], callees: ^NameTable) Never! {
     loop method in methods {
-        if method.is_comptime -> _ := name_intern(callees, "{owner}.{method.name}")
+        if method.is_comptime -> ^_: name_intern(callees, "{owner}.{method.name}")
     }
     loop block in trait_impls {
         loop method in block.methods {
-            if method.is_comptime -> _ := name_intern(callees, "{owner}.{method.name}")
+            if method.is_comptime -> ^_: name_intern(callees, "{owner}.{method.name}")
         }
     }
 }
@@ -475,9 +475,7 @@ sema_comptime_use_items: fn(items: [Item], scan: ^SemaComptimeUseScan) {
                 sema_comptime_use_flush(scan)
             }
             // An inline module sees the file's imports and its own.
-            .CodeModule(definition) -> {
-                sema_comptime_use_code_module(definition, scan)
-            }
+            .CodeModule(definition) -> { sema_comptime_use_code_module(definition, scan) }
             .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -518,9 +516,9 @@ sema_comptime_use_flush: fn(scan: ^SemaComptimeUseScan) {
         gen: scan.bound_gen
         loop reference in pending {
             if scan.bound_mark[reference.id] == gen -> next
-            _ := name_intern(scan.runtime_names, reference.name)
+            ^_: name_intern(scan.runtime_names, reference.name)
             prefix: scan.comptime_spans[reference.id] ?? next
-            diagnostic := diagnostic_with_edit(sema_error("E0944", reference.span, "`{reference.name}` comes from a `#run use` import, but this code runs in the shipped program", "A `#run use` import exists only while building, so the shipped program does not contain its module", "Import it with plain `use`, or move this use into compile-time code: a `#run {{ … }}` block, a `#run fn`, or a value computed while building"), TextEdit{span: prefix, new_text: ""})
+            ^diagnostic: diagnostic_with_edit(sema_error("E0944", reference.span, "`{reference.name}` comes from a `#run use` import, but this code runs in the shipped program", "A `#run use` import exists only while building, so the shipped program does not contain its module", "Import it with plain `use`, or move this use into compile-time code: a `#run {{ … }}` block, a `#run fn`, or a value computed while building"), TextEdit{span: prefix, new_text: ""})
             if reference.wrap == .Val(value_span) {
                 if sema_comptime_use_wrap_edit(scan.source, value_span) == .Val(alternative) {
                     diagnostic = diagnostic_with_alternative_edit(diagnostic, alternative)
@@ -543,7 +541,7 @@ sema_comptime_use_wrap_edit: fn(source: [U8], wrap: Span) -> TextEdit? Never! {
 // `name`, when an import binds it.
 sema_comptime_use_reference: fn(name: String, span: Span, scan: ^SemaComptimeUseScan) Never! {
     bytes: name.bytes()
-    end := bytes.len()
+    ^end: bytes.len()
     loop (index, byte) in bytes {
         if byte == (U8{46}) {
             end = index
@@ -783,7 +781,9 @@ sema_comptime_use_expr: fn(expression: Expr, scan: ^SemaComptimeUseScan) {
             sema_comptime_use_reference(call.name, call.name_span, scan)
             sema_comptime_use_type_args(call.type_args, call.name_span, scan)
             // A `#run fn` takes its arguments while building.
-            if name_count(scan.comptime_callees) <= 1 || name_find(scan.comptime_callees, call.name) == None -> sema_comptime_use_args(call.args, scan)
+            if name_count(scan.comptime_callees) <= 1 || name_find(scan.comptime_callees, call.name) == None {
+                sema_comptime_use_args(call.args, scan)
+            }
         }
         .MethodCall(receiver, _, method_span, owner_type_args, type_args, args, _) -> {
             sema_comptime_use_expr(receiver, scan)
@@ -924,9 +924,9 @@ sema_comptime_use_type: fn(ty: Type, span: Span, scan: ^SemaComptimeUseScan) Nev
 // Per module, the modules it imports only with `#run use` -> the
 // prefix of one such import, which the fix deletes.
 sema_comptime_use_record_targets: fn(graph: ^SemaRegistrationGraph) Never! {
-    targets := [Int:Span]{}
+    ^targets: [Int:Span]{}
     loop module_row in graph.modules {
-        has_comptime := false
+        ^has_comptime: false
         loop import in module_row.imports {
             if import.declaration.comptime_span != None {
                 has_comptime = true
@@ -934,7 +934,7 @@ sema_comptime_use_record_targets: fn(graph: ^SemaRegistrationGraph) Never! {
             }
         }
         if !has_comptime -> next
-        plain := [U32:Bool]{}
+        ^plain: [U32:Bool]{}
         loop import in module_row.imports {
             if import.declaration.comptime_span == None {
                 plain[import.target_module_identity.id] = true
@@ -962,8 +962,8 @@ sema_comptime_use_slot: fn(module_identity: ModuleID, target: ModuleID) -> Int N
 // re-export counts as a runtime use.
 sema_comptime_use_build_only: fn(graph: SemaRegistrationGraph, runtime_names: [NameTable], scanned: [Bool]) -> [ModuleID] Never! {
     count: graph.modules.len()
-    imported := (loop _ in 0..<count -> false)
-    edges := (loop _ in 0..<count -> [Int]{})
+    ^imported: (loop _ in 0..<count -> false)
+    ^edges: (loop _ in 0..<count -> [Int]{})
     loop module_index in 0..<count {
         loop import in graph.modules[module_index].imports {
             target: sema_registration_module_index(graph, import.target_module_identity) ?? next
@@ -980,8 +980,8 @@ sema_comptime_use_build_only: fn(graph: SemaRegistrationGraph, runtime_names: [N
             }
         }
     }
-    ships := (loop _ in 0..<count -> false)
-    pending := [Int]{}
+    ^ships: (loop _ in 0..<count -> false)
+    ^pending: [Int]{}
     loop module_index in 0..<count {
         module_row: graph.modules[module_index]
         candidate: scanned[module_index] && imported[module_index] && module_row.module_identity != graph.entry_module_identity && sema_comptime_use_build_only_shape(graph, module_index)
@@ -999,7 +999,7 @@ sema_comptime_use_build_only: fn(graph: SemaRegistrationGraph, runtime_names: [N
             }
         }
     }
-    build_only := [ModuleID]{}
+    ^build_only: [ModuleID]{}
     loop module_index in 0..<count {
         if !ships[module_index] -> build_only.push(graph.modules[module_index].module_identity)
     }
@@ -1048,7 +1048,9 @@ sema_comptime_use_build_only_shape: fn(graph: SemaRegistrationGraph, module_inde
 // comes from a module this module imports only with `#run use`: the
 // shipped program has no such module to hold it.
 sema_comptime_use_value_read: fn(name: String, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) {
-    if sema_scope_build_time(scopes, environment, program) -> return
+    if sema_scope_build_time(scopes, environment, program) {
+        return
+    }
     graph: program.registration_graph
     if graph.comptime_use_targets.len() == 0 {
         return

@@ -103,7 +103,7 @@ parser_parse_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {
 }
 
 parser_next_code_index: fn(state: JetParserState, start: Int) -> Int Never! {
-    index := start
+    ^index: start
     loop index < state.tokens.len() {
         if !parser_is_trivia(state.tokens[index].kind) -> return index
         index += 1
@@ -115,12 +115,12 @@ parser_next_code_index: fn(state: JetParserState, start: Int) -> Int Never! {
 // type path with optional `<...>` arguments, a `( ... )` group, or a
 // `[ ... ]` list of errors), or -1.
 parser_scan_contract_member: fn(state: JetParserState, start: Int) -> Int Never! {
-    index := parser_next_code_index(state, start)
+    ^index: parser_next_code_index(state, start)
     if index < 0 -> return -1
     kind: state.tokens[index].kind
     if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET {
         close_kind: if kind == TOKEN_LPAREN -> TOKEN_RPAREN else -> TOKEN_RBRACKET
-        depth := 0
+        ^depth: 0
         loop index < state.tokens.len() {
             current: state.tokens[index].kind
             if current == kind -> depth += 1
@@ -146,8 +146,8 @@ parser_scan_contract_member: fn(state: JetParserState, start: Int) -> Int Never!
     }
     open: parser_next_code_index(state, index)
     if open >= 0 && state.tokens[open].kind == TOKEN_LT {
-        depth := 0
-        cursor := open
+        ^depth: 0
+        ^cursor: open
         loop cursor < state.tokens.len() {
             current: state.tokens[cursor].kind
             if current == TOKEN_LT -> depth += 1
@@ -170,8 +170,8 @@ parser_scan_contract_member: fn(state: JetParserState, start: Int) -> Int Never!
 parser_suffix_contract_ahead: fn(state: ^JetParserState) -> Int Never! {
     if state.pending_type_gt -> return -1
     parser_skip_trivia(state)
-    index := state.position
-    members := 0
+    ^index: state.position
+    ^members: 0
     loop {
         index = parser_scan_contract_member(state, index)
         if index < 0 -> return -1
@@ -209,8 +209,8 @@ parser_parse_suffix_contract: fn(state: ^JetParserState, depth: Int) -> ParsedTy
 // The token where the last member of a bare `A | B` union starts: the one
 // member its `!` actually marks.
 parser_contract_last_member: fn(state: JetParserState, first: Int) -> Int Never! {
-    start := first
-    index := first
+    ^start: first
+    ^index: first
     loop {
         index = parser_scan_contract_member(state, index)
         if index < 0 -> return start
@@ -237,8 +237,8 @@ parser_type_tag_ahead: fn(state: ^JetParserState) -> Bool Never! {
 }
 
 parser_tokens_text: fn(state: JetParserState, first: Int, end: Int) -> String Never! {
-    out := ""
-    previous_end := -1
+    ^out: ""
+    ^previous_end: -1
     loop index in first..<end {
         token: state.tokens[index]
         text: parser_text(state, token)
@@ -261,8 +261,8 @@ parser_parse_type_union: fn(state: ^JetParserState, depth: Int) -> ParsedType {
 }
 
 parser_parse_type_union_tail: fn(state: ^JetParserState, first: ParsedType, depth: Int) -> ParsedType {
-    result := first
-    members := [Type]{}
+    ^result: first
+    ^members: [Type]{}
     loop parser_current_kind(state) == TOKEN_PIPE {
         parser_bump(state)
         next: if parser_union_case_ahead(state, true) -> parser_parse_union_case(state, depth + 1) else -> parser_parse_type_atom(state, depth + 1)
@@ -289,8 +289,8 @@ parser_union_case_ahead: fn(state: ^JetParserState, in_union: Bool) -> Bool Neve
     opened: parser_kind_at(state, 2)
     if opened == TOKEN_INT || opened == TOKEN_MINUS || opened == TOKEN_RPAREN -> return false
     if in_union -> return true
-    open := 0
-    offset := 1
+    ^open: 0
+    ^offset: 1
     loop {
         kind: parser_kind_at(state, offset)
         if kind == TOKEN_EOF -> return false
@@ -404,14 +404,14 @@ parser_parse_type_base: fn(state: ^JetParserState, depth: Int) -> ParsedType {
             }
             parser_bump(state)
             raw_name: parser_value(state, start)
-            is_link := false
-            name := raw_name
+            ^is_link: false
+            ^name: raw_name
             if kind == TOKEN_IDENT && !site_value && state.derive_template_depth == 0 && raw_name.starts_with("@") && raw_name.len() > 1 {
                 is_link = true
                 name = String.from_bytes(raw_name.bytes()[1..<raw_name.bytes().len()]) ?? ""
             }
-            end := start.span
-            head := start.span
+            ^end: start.span
+            ^head: start.span
             if site_value {
                 word: parser_bump(state)
                 name = "#{parser_value(state, word)}"
@@ -426,7 +426,9 @@ parser_parse_type_base: fn(state: ^JetParserState, depth: Int) -> ParsedType {
             }
             if parser_current_kind(state) == TOKEN_LT {
                 applied: parser_parse_applied_type(state, name, parser_cover(start.span, end), depth + 1)
-                if is_link -> return ParsedType{ty: foundation_link_type(applied.ty), span: applied.span}
+                if is_link {
+                    return ParsedType{ty: foundation_link_type(applied.ty), span: applied.span}
+                }
                 return applied
             }
             // `Box<>`: `<>` is one token, the value a pipe step receives, so
@@ -488,9 +490,9 @@ parser_named_type: fn(state: JetParserState, name: String) -> Type Never! {
 // bindings only leaves a size name for Sema, which resolves it through the
 // same alias.
 parser_bound_size_rows: fn(tokens: [Token], tables: TokenTables) -> Int Never! {
-    bound := 0
-    ids := [Int]{}
-    rows := [Int]{}
+    ^bound: 0
+    ^ids: [Int]{}
+    ^rows: [Int]{}
     loop row in 0..<FOUNDATION_SIZE_ALIASES.len() {
         if name_find(tables.names, FOUNDATION_SIZE_ALIASES[row].name) == .Val(id) {
             ids.push(name_index(id))
@@ -498,7 +500,7 @@ parser_bound_size_rows: fn(tokens: [Token], tables: TokenTables) -> Int Never! {
         }
     }
     if ids.len() == 0 -> return bound
-    member_list := false
+    ^member_list: false
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if kind == TOKEN_LBRACKET {
@@ -534,27 +536,25 @@ parser_size_declaring: fn(kind: Int) -> Bool Never! {
 
 // The kind of the code token before `index` (TOKEN_EOF at the start).
 parser_size_code_before: fn(tokens: [Token], index: Int) -> Int Never! {
-    at := index - 1
-    loop at >= 0 && parser_is_trivia(tokens[at].kind) {
-        at -= 1
-    }
+    ^at: index - 1
+    loop at >= 0 && parser_is_trivia(tokens[at].kind) -> at -= 1
     if at >= 0 -> tokens[at].kind else -> TOKEN_EOF
 }
 
 // The index of the code token after `index` (tokens.len() at the end).
 parser_size_code_after: fn(tokens: [Token], index: Int) -> Int Never! {
-    at := index + 1
-    loop at < tokens.len() && parser_is_trivia(tokens[at].kind) {
-        at += 1
-    }
+    ^at: index + 1
+    loop at < tokens.len() && parser_is_trivia(tokens[at].kind) -> at += 1
     at
 }
 
 // Whether the colon at `colon` starts Core's alias of the size name before
 // it: `: family<sizes>` and nothing else on the line's type.
 parser_size_alias_line: fn(tokens: [Token], tables: TokenTables, colon: Int, family: String, sizes: [Int]) -> Bool Never! {
-    at := parser_size_code_after(tokens, colon)
-    if at >= tokens.len() || tokens[at].kind != TOKEN_IDENT || token_text(tables, tokens[at]) != family -> return false
+    ^at: parser_size_code_after(tokens, colon)
+    if at >= tokens.len() || tokens[at].kind != TOKEN_IDENT || token_text(tables, tokens[at]) != family {
+        return false
+    }
     at = parser_size_code_after(tokens, at)
     if at >= tokens.len() || tokens[at].kind != TOKEN_LT -> return false
     loop index in 0..<sizes.len() {
@@ -563,7 +563,9 @@ parser_size_alias_line: fn(tokens: [Token], tables: TokenTables, colon: Int, fam
             if at >= tokens.len() || tokens[at].kind != TOKEN_COMMA -> return false
         }
         at = parser_size_code_after(tokens, at)
-        if at >= tokens.len() || tokens[at].kind != TOKEN_INT || (token_integer(tables, tokens[at]) ?? -1) != sizes[index] -> return false
+        if at >= tokens.len() || tokens[at].kind != TOKEN_INT || (token_integer(tables, tokens[at]) ?? -1) != sizes[index] {
+            return false
+        }
     }
     at = parser_size_code_after(tokens, at)
     at < tokens.len() && tokens[at].kind == TOKEN_GT
@@ -575,31 +577,33 @@ parser_size_alias_line: fn(tokens: [Token], tables: TokenTables, colon: Int, fam
 // rotated head declares (`fn name<U8>`), or before the colon of an alias
 // (`Name<U8>: …`).
 parser_size_params: fn(tokens: [Token], open: Int, ids: [Int], rows: [Int]) -> Int Never! {
-    before_at := open - 1
-    loop before_at >= 0 && parser_is_trivia(tokens[before_at].kind) {
-        before_at -= 1
-    }
+    ^before_at: open - 1
+    loop before_at >= 0 && parser_is_trivia(tokens[before_at].kind) -> before_at -= 1
     if before_at < 0 -> return 0
     before: tokens[before_at].kind
     declared: parser_size_declaring(before) || (before == TOKEN_IDENT && parser_size_declaring(parser_size_code_before(tokens, before_at)))
     if !declared && before != TOKEN_IDENT -> return 0
-    names := 0
-    depth := 1
-    previous := TOKEN_LT
-    at := open + 1
+    ^names: 0
+    ^depth: 1
+    ^previous: TOKEN_LT
+    ^at: open + 1
     loop at < tokens.len() && at < open + 256 {
         kind: tokens[at].kind
         if parser_is_trivia(kind) {
             at += 1
             next
         }
-        if kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || kind == TOKEN_SEMI || kind == TOKEN_EOF -> return 0
+        if kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || kind == TOKEN_SEMI || kind == TOKEN_EOF {
+            return 0
+        }
         if kind == TOKEN_LT -> depth += 1
         if kind == TOKEN_GT -> depth -= 1
         if kind == TOKEN_SHR -> depth -= 2
         if depth <= 0 -> break
         if depth == 1 && kind == TOKEN_IDENT && (previous == TOKEN_LT || previous == TOKEN_COMMA) {
-            if ids.index_of(name_index(tokens[at].text)) == .Val(found) -> names = names | (1 << rows[found])
+            if ids.index_of(name_index(tokens[at].text)) == .Val(found) {
+                names = names | (1 << rows[found])
+            }
         }
         previous = kind
         at += 1
@@ -658,7 +662,7 @@ parser_parse_tuple_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {
         close: parser_bump(state)
         return ParsedType{ty: Type.Named{name: "Unit"}, span: parser_cover(open.span, close.span)}
     }
-    fields := [TypeTupleField]{}
+    ^fields: [TypeTupleField]{}
     loop {
         ty: parser_parse_type(state, depth + 1)
         fields.push(TypeTupleField{name: "", ty: ty.ty})
@@ -682,7 +686,7 @@ parser_parse_tuple_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {
 // Its members are separated by commas, on one line or many.
 parser_parse_record_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     open: parser_bump(state)
-    fields := [TypeTupleField]{}
+    ^fields: [TypeTupleField]{}
     loop {
         loop parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
         if parser_current_kind(state) == TOKEN_RBRACE -> break
@@ -709,13 +713,13 @@ parser_parse_record_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {
 // shape, so only a type position asks.
 parser_record_type_end_at: fn(state: ^JetParserState, at: Int) -> Int? Never! {
     if parser_kind_at(state, at) != TOKEN_LBRACE -> return None
-    first := at + 1
+    ^first: at + 1
     loop parser_kind_at(state, first) == TOKEN_SEMI -> first += 1
     if parser_kind_at(state, first) != TOKEN_IDENT || parser_kind_at(state, first + 1) != TOKEN_COLON {
         return None
     }
-    depth := 1
-    offset := at + 1
+    ^depth: 1
+    ^offset: at + 1
     loop {
         kind: parser_kind_at(state, offset)
         if kind == TOKEN_EOF -> return None
@@ -735,8 +739,8 @@ parser_record_type_end_at: fn(state: ^JetParserState, at: Int) -> Int? Never! {
 // fails it.
 parser_record_type_members_typed_at: fn(state: ^JetParserState, at: Int) -> Bool Never! {
     end: parser_record_type_end_at(state, at) ?? return false
-    depth := 0
-    offset := at + 1
+    ^depth: 0
+    ^offset: at + 1
     loop offset < end - 1 {
         kind: parser_kind_at(state, offset)
         if kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
@@ -770,14 +774,14 @@ parser_parse_function_type: fn(state: ^JetParserState, depth: Int) -> ParsedType
 // A function type from its `(` on; `start` is where the type began.
 parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: Span) -> ParsedType {
     parser_expect(state, TOKEN_LPAREN, "`(` after `fn` in a function type")
-    params := [Type]{}
-    names := [String]{}
-    zones := [ParamZone]{}
-    conventions := [AccessConvention]{}
-    marked := false
-    zone := ParamZone.Either
-    saw_slash := false
-    saw_star := false
+    ^params: [Type]{}
+    ^names: [String]{}
+    ^zones: [ParamZone]{}
+    ^conventions: [AccessConvention]{}
+    ^marked: false
+    ^zone: ParamZone.Either
+    ^saw_slash: false
+    ^saw_star: false
     if parser_current_kind(state) != TOKEN_RPAREN {
         loop !parser_aborting(state) {
             token: parser_current(state)
@@ -790,7 +794,7 @@ parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: S
                         }
                         else -> {
                             saw_slash = true
-                            positional := [ParamZone]{}
+                            ^positional: [ParamZone]{}
                             loop _ in zones -> positional.push(ParamZone.PositionalOnly)
                             zones = positional
                         }
@@ -804,7 +808,7 @@ parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: S
                     }
                 }
                 else -> {
-                    name := ""
+                    ^name: ""
                     if token.kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON {
                         parser_bump(state)
                         parser_bump(state)
@@ -813,7 +817,7 @@ parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: S
                     // A parameter type marks a written input `^` or a taken input
                     // `^^`, as a declared parameter does: `fn(^[Int])` writes its
                     // argument and `fn(^^Map)` takes it.
-                    convention := AccessConvention.Read
+                    ^convention: AccessConvention.Read
                     mark_kind: parser_current_kind(state)
                     if parser_write_mark(mark_kind) || parser_take_mark(mark_kind) {
                         parser_bump(state)
@@ -832,8 +836,8 @@ parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: S
         }
     }
     close: parser_expect(state, TOKEN_RPAREN, "`)` after parameter types in `fn(...)`")
-    has_label_only := false
-    unlabeled_label_only := false
+    ^has_label_only: false
+    ^unlabeled_label_only: false
     loop index in 0..<zones.len() {
         if zones[index] == ParamZone.LabelOnly {
             has_label_only = true
@@ -845,9 +849,9 @@ parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: S
     if unlabeled_label_only {
         parser_add_error_code(state, "E0763", after_params, "a parameter after `*` in this function type has no label", "a label-only parameter is reached by writing its label, so it has to have one", "name it, as in `fn(*, force: Bool) Int`")
     }
-    param_contract := [CallContractRow]?{None}
+    ^param_contract: [CallContractRow]?{None}
     if saw_slash || saw_star {
-        rows := [CallContractRow]{}
+        ^rows: [CallContractRow]{}
         loop index in 0..<zones.len() {
             label: if zones[index] == ParamZone.LabelOnly -> names[index] else -> ""
             rows.push(CallContractRow{label: label, zone: zones[index]})
@@ -857,10 +861,10 @@ parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: S
     first: parser_current_kind(state)
     second: parser_kind_at(state, 1)
     canonical: first == TOKEN_MINUS && second == TOKEN_LBRACKET
-    effect_bound := [EffectRowEntry]?{None}
+    ^effect_bound: [EffectRowEntry]?{None}
     if canonical -> effect_bound = Val(parser_parse_effect_arrow_row(state))
-    arrow_return := false
-    result := ParsedType?{None}
+    ^arrow_return: false
+    ^result: ParsedType?{None}
     if {
         canonical -> {
             result = parser_parse_unit_fallible_return(state)
@@ -879,8 +883,8 @@ parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: S
         }
         else -> result = parser_parse_unit_fallible_return(state)
     }
-    returned := Type?{None}
-    end := close.span
+    ^returned: Type?{None}
+    ^end: close.span
     if result == .Val(parsed) {
         returned = Val(parsed.ty)
         end = parsed.span
@@ -898,7 +902,7 @@ parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: S
     end = parser_lookahead(state, -1).span
     // Only a marked parameter needs call metadata; its names repeat the contract's labels so
     // the mark adds no label a plain function type lacks.
-    call_metadata := FunctionCallMetadata?{None}
+    ^call_metadata: FunctionCallMetadata?{None}
     if marked {
         call_metadata = Val(FunctionCallMetadata{
             names: loop index in 0..<zones.len() -> if zones[index] == ParamZone.LabelOnly -> names[index] else -> "",
@@ -933,7 +937,7 @@ parser_report_fn_type_zone: fn(state: ^JetParserState, span: Span) {
 
 parser_parse_applied_type: fn(state: ^JetParserState, name: String, prefix: Span, depth: Int) -> ParsedType {
     parser_bump(state)
-    args := [Type]{}
+    ^args: [Type]{}
     // `Vec<N>` and `Matrix<M, N>` take shape measures in the declared-measure
     // language: `Matrix<3, 4>` holds two shape literals, as compute_shape_type
     // builds them, not the length measures of a `<N: Int>` number argument.

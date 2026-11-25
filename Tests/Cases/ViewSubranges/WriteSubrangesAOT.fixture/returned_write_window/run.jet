@@ -3,13 +3,13 @@ fill: fn(window: ViewMut<U8>, value: Int) {
 }
 
 tail_mut: fn(window: ViewMut<U8>, start: Int) -> ViewMut<U8> from window {
-    tail: ^window[start..<window.len()]
+    tail: window[start..<window.len()].in_place()
     tail
 }
 
 run: fn() {
-    data := [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
-    edit: ^data[0..<5]
+    ^data: [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
+    edit: data[0..<5].in_place()
     rest: tail_mut(edit, 3)
     fill(rest, 9)
     loop byte in data -> print(Int{byte})

@@ -32,10 +32,10 @@ use jet_foundation.[
 // The case that none of a value block's trailing `if cond -> return …` guards
 // covers.
 sema_stmt_uncovered_guard_path: fn(statements: [Stmt]) -> String? {
-    reversed := [Expr]{}
-    index := statements.len() - 1
+    ^reversed: [Expr]{}
+    ^index: statements.len() - 1
     loop index >= 0 {
-        guard_arms := [SwitchArm]?{None}
+        ^guard_arms: [SwitchArm]?{None}
         if statements[index] == .Switch(guard_subject, switch_arms, guard_else, guard_span) {
             if guard_else == None && sema_stmt_refutable_is_subjectless_guard(guard_subject, guard_span) && switch_arms.len() > 0 {
                 guard_arms = Val(switch_arms)
@@ -47,7 +47,7 @@ sema_stmt_uncovered_guard_path: fn(statements: [Stmt]) -> String? {
                 return sema_stmt_guard_path(reversed)
             }
         }
-        arm_index := arms.len() - 1
+        ^arm_index: arms.len() - 1
         loop arm_index >= 0 {
             reversed.push(arms[arm_index].cond)
             arm_index -= 1
@@ -59,28 +59,28 @@ sema_stmt_uncovered_guard_path: fn(statements: [Stmt]) -> String? {
 
 sema_stmt_guard_path: fn(reversed: [Expr]) -> String? {
     if reversed.len() == 0 -> return None
-    conds := [Expr]{}
-    index := reversed.len() - 1
+    ^conds: [Expr]{}
+    ^index: reversed.len() - 1
     loop index >= 0 {
         conds.push(reversed[index])
         index -= 1
     }
     // Guards that compare one name with one whole number from both sides
     // (`n > 0`, `n < 0`) leave exactly that number.
-    point_name := ""
-    point_value := 0
-    has_point := false
-    below := false
-    above := false
-    single_point := true
+    ^point_name: ""
+    ^point_value: 0
+    ^has_point: false
+    ^below: false
+    ^above: false
+    ^single_point: true
     loop cond in conds {
-        comparison := SemaGuardComparison?{None}
+        ^comparison: SemaGuardComparison?{None}
         if cond == .Binary(op, left, right, _, _) {
             if left == .Ident(name, _, _) && right == .Int(value, _, _, _, _) {
                 comparison = Val(SemaGuardComparison{op: op, name: name, value: value})
             }
             if left == .Int(value, _, _, _, _) && right == .Ident(name, _, _) {
-                flipped := op
+                ^flipped: op
                 if op == BinOp.Lt -> flipped = BinOp.Gt
                 if op == BinOp.Gt -> flipped = BinOp.Lt
                 comparison = Val(SemaGuardComparison{op: flipped, name: name, value: value})
@@ -113,7 +113,7 @@ sema_stmt_guard_path: fn(reversed: [Expr]) -> String? {
     if has_point && single_point && below && above {
         return Val("`{point_name}` is `{point_value}`")
     }
-    texts := [String]{}
+    ^texts: [String]{}
     loop cond in conds {
         text: sema_stmt_guard_text(cond) ?? return None
         texts.push("`{text}`")
@@ -227,14 +227,14 @@ sema_stmt_check_subject_switch: fn(subject: Expr, arms: [SwitchArm], else_body: 
         return sema_stmt_check_switch(local, sema_stmt_rebind_switch_arms(arms, subject_span, subject), else_body, span, return_type, check, loop_depth)
     }
     sema_scope_enter(check.scopes, check.state, "if.subject@{span.start}")
-    carrier := false
+    ^carrier: false
     loop arm in arms {
         if sema_expression_if_condition_tests_carrier(arm.cond, None, check) -> carrier = true
     }
-    checked_subject := if carrier -> sema_check_expression_carrier(subject, None, check) else -> sema_check_expression(subject, None, check)
+    ^checked_subject: if carrier -> sema_check_expression_carrier(subject, None, check) else -> sema_check_expression(subject, None, check)
     success: if carrier -> sema_expression_carrier_success_enum(subject, checked_subject, check) else -> None
     if success != None {
-        names_case := false
+        ^names_case: false
         loop arm in arms {
             if sema_expression_if_condition_tests_carrier(arm.cond, success, check) {
                 names_case = true
@@ -262,13 +262,13 @@ sema_stmt_check_subject_switch: fn(subject: Expr, arms: [SwitchArm], else_body: 
     // The arms' payload sources are rooted at `it`; the subject it holds
     // decides whether a payload moves out of a named place.
     sema_copy_site_note_subject(check.state, "it", subject_span, subject)
-    it_local := checked_symbol_local("it", subject_span, id, init.ty)
+    ^it_local: checked_symbol_local("it", subject_span, id, init.ty)
     it_local.generated = true
     it_local.integer_bounds = bounds
     checked: sema_stmt_check_switch(local, sema_stmt_rebind_switch_arms(arms, subject_span, local), else_body, span, return_type, check, loop_depth)
     sema_single_use_leave_scope(check)
     if !checked.complete -> return checked
-    body := [TStmt]{TStmt.Let{local: it_local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: subject_span}}
+    ^body: [TStmt]{TStmt.Let{local: it_local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: subject_span}}
     loop statement in checked.value -> body.push(statement)
     SemaStatementResult{value: [TStmt]{TStmt.Inline{body: body, span: span}}, complete: true}
 }
@@ -292,7 +292,7 @@ sema_stmt_condition_type: fn(condition: TExpr?) -> Type Never! {
 sema_stmt_check_unit_branch: fn(body: [Stmt], value_expr: Expr, bindings: [SemaConditionBinding], return_type: Type?, check: ^SemaBodyCheck, owner: String, loop_depth: Int) -> SemaStatementResult {
     sema_scope_enter(check.scopes, check.state, owner)
     sema_expression_declare_condition_bindings(bindings, check, true)
-    result := sema_check_statements(body, return_type, check, loop_depth)
+    ^result: sema_check_statements(body, return_type, check, loop_depth)
     if result.complete {
         value_span: expr_span(value_expr)
         // The arm's value is discarded like an expression statement's, so an
@@ -302,13 +302,13 @@ sema_stmt_check_unit_branch: fn(body: [Stmt], value_expr: Expr, bindings: [SemaC
         discarded: !sema_stmt_unit_arm_form(value_expr)
         expected: if discarded -> None else -> Val(Type.Named{name: "Unit"})
         fact_start: check.context.call_facts.len()
-        checked_value := sema_check_expression(value_expr, expected, check)
+        ^checked_value: sema_check_expression(value_expr, expected, check)
         if {
             checked_value == None -> result.complete = false
             else -> {
                 value: checked_value ?? sema_node(check.context, Type.Named{name: "Unit"}, NodeKind.Unit, value_span)
                 // A `()` value statement does nothing.
-                unit := false
+                ^unit: false
                 if value.kind == .Flat(index) {
                     unit = check.context.arena.tree.nodes[index - check.context.arena.tree.node_base].kind == .Unit
                 }
@@ -354,8 +354,8 @@ sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value
     // `if T == Int { … }` is the one-arm type test, checked
     // as a type-table arm: its body reads `T` as the named type.
     type_param: sema_expression_type_table_param(condition, check)
-    type_target := Type?{None}
-    condition_check := SemaConditionCheck{checked: None, bindings: [SemaConditionBinding]{}}
+    ^type_target: Type?{None}
+    ^condition_check: SemaConditionCheck{checked: None, bindings: [SemaConditionBinding]{}}
     if type_param == .Val(param) {
         type_target = sema_stmt_type_switch_target(param, condition, [Type]{}, check.environment.*, check.program.*, check.scopes, check.diagnostics)
         if type_target == .Val(target) {
@@ -389,7 +389,7 @@ sema_stmt_check_unit_if_arms: fn(
     fork: sema_ownership_fork(check.state)
     before_hardware: sema_scope_hardware_facts(check.scopes)
     then_mark: sema_scope_mark(check.scopes)
-    then_return := return_type.copy()
+    ^then_return: return_type.copy()
     if type_param == .Val(param) && type_target == .Val(target) {
         names: [String]{param.copy()}
         actuals: [Type]{target.copy()}
@@ -405,8 +405,8 @@ sema_stmt_check_unit_if_arms: fn(
     then_hardware: sema_scope_hardware_facts(check.scopes)
     sema_scope_rollback(check.scopes, then_mark)
     else_mark: sema_scope_mark(check.scopes)
-    else_is_elseif := false
-    else_result := SemaStatementResult{value: [TStmt]{}, complete: false}
+    ^else_is_elseif: false
+    ^else_result: SemaStatementResult{value: [TStmt]{}, complete: false}
     if else_value == {
         .If(_, _, _, _, _, _, _) -> {
             else_is_elseif = true
@@ -431,7 +431,7 @@ sema_stmt_check_unit_if_arms: fn(
     else_reaches_merge: sema_stmt_tree_block_can_fall_through(else_result.value)
     // The single-use check reads the state before the branch, which the
     // rollback left live; the join reports nothing, so the order holds.
-    single_use_moves := [[Bool]]{}
+    ^single_use_moves: [[Bool]]{}
     if then_reaches_merge {
         single_use_moves.push(sema_single_use_path_moves(check.state, then_path))
     }
@@ -468,11 +468,11 @@ sema_stmt_check_unit_if: fn(expr: Expr, return_type: Type?, check: ^SemaBodyChec
                 table_it: sema_expression_if_subject_is_table_it(subject)
                 if table_it -> sema_scope_enter(check.scopes, check.state, "if.it@{span.start}")
                 bound: sema_expression_if_bind_subject(subject, condition, else_value, check)
-                table := if bound != None -> sema_stmt_check_unit_if_parts(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, return_type, check, loop_depth) else -> SemaStatementResult{value: [TStmt]{}, complete: false}
+                ^table: if bound != None -> sema_stmt_check_unit_if_parts(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, return_type, check, loop_depth) else -> SemaStatementResult{value: [TStmt]{}, complete: false}
                 if table_it -> sema_single_use_leave_scope(check)
                 binding: bound ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
                 if !table.complete -> return table
-                statements := [TStmt]{binding}
+                ^statements: [TStmt]{binding}
                 loop statement in table.value -> statements.push(statement)
                 return SemaStatementResult{value: statements, complete: true}
             }
@@ -502,9 +502,9 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     }
     // `if T == { Int -> … else -> … }` over a type parameter
     // is a type table (sema_stmt_type_switch_param).
-    type_param := String?{None}
+    ^type_param: String?{None}
     if !(subject_is_true || multi_head) -> type_param = sema_stmt_type_switch_param(subject, check)
-    type_arms := [Type]{}
+    ^type_arms: [Type]{}
     // The arms of `if subject OP { … }` over a plain name test that name
     // directly; any other subject is read once as the `it` the pattern heads
     // test.
@@ -544,36 +544,36 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     fork: sema_ownership_fork(check.state)
     before_hardware: sema_scope_hardware_facts(check.scopes)
     fallthrough_mark: sema_scope_mark(check.scopes)
-    conditions := [SemaCheckedCondition?]{}
-    branches := [SemaStatementResult]{}
-    branch_hardware := [SemaScopeHardwareFacts]{}
+    ^conditions: [SemaCheckedCondition?]{}
+    ^branches: [SemaStatementResult]{}
+    ^branch_hardware: [SemaScopeHardwareFacts]{}
     // The fallthrough state after the condition of the last arm that reaches
     // the merge.
-    reach := SemaOwnershipFork?{None}
-    arm_found := [SemaOwnershipShareSite]{}
-    complete := true
+    ^reach: SemaOwnershipFork?{None}
+    ^arm_found: [SemaOwnershipShareSite]{}
+    ^complete: true
     // The paths of the arms that reach the merge.
-    arm_paths := [SemaOwnershipPath]{}
+    ^arm_paths: [SemaOwnershipPath]{}
     // A subjectless table with a readiness arm waits on channels and timers;
     // its heads are not Boolean guards.
     readiness: subjectless_guard && sema_readiness_is_table(arms)
-    readiness_table := sema_readiness_table_new()
+    ^readiness_table: sema_readiness_table_new()
     // The diagnostics mark of the first `#Through` arm: a run-on body is
     // checked again in its own arm, and each finding is reported once.
-    through_from := Int?{None}
-    arm_index := 0
+    ^through_from: Int?{None}
+    ^arm_index: 0
     loop arm_index < arms.len() {
         // The arm is read in place (`arms[arm_index]`): binding it copied the
         // whole arm, its body included.
-        arm_bindings := [SemaConditionBinding]{}
+        ^arm_bindings: [SemaConditionBinding]{}
         // A type-table arm checks its body with `T` read as the arm's type
         // (sema_stmt_type_switch_rebind after the branch mark below).
-        arm_target := Type?{None}
-        arm_return := Type?{None}
-        caught := SemaCatchAllErr?{None}
+        ^arm_target: Type?{None}
+        ^arm_return: Type?{None}
+        ^caught: SemaCatchAllErr?{None}
         // A guard arm `T == Int` (the one-arm `if T == Int { … }`, or an
         // `else if` link) is the same type test.
-        arm_param := type_param.copy()
+        ^arm_param: type_param.copy()
         if subject_is_true && !readiness {
             arm_param = sema_expression_type_table_param(arms[arm_index].cond, check)
         }
@@ -583,7 +583,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
             }
             if readiness_table.arms[arm_index] == None -> complete = false
         } else if arm_param == .Val(param) {
-            target := sema_stmt_type_switch_target(param, arms[arm_index].cond, type_arms, check.environment.*, check.program.*, check.scopes, check.diagnostics)
+            ^target: sema_stmt_type_switch_target(param, arms[arm_index].cond, type_arms, check.environment.*, check.program.*, check.scopes, check.diagnostics)
             if target == .Val(arm_type) {
                 if return_type == .Val(declared) {
                     arm_return = Val(sema_inference_substitute_type(declared, [String]{param.copy()}, [Type]{arm_type.copy()}))
@@ -599,7 +599,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
             // A catch-all `.Err(e)` over an open failure union binds `e` as `Err`
             // (sema_catch_all_err_arm).
             caught = sema_catch_all_err_arm(arms[arm_index].cond, check)
-            condition_result := if caught == .Val(found) -> sema_expression_check_condition(found.cond, check) else -> sema_expression_check_condition(arms[arm_index].cond, check)
+            ^condition_result: if caught == .Val(found) -> sema_expression_check_condition(found.cond, check) else -> sema_expression_check_condition(arms[arm_index].cond, check)
             if condition_result.checked == None -> complete = false
             arm_bindings = condition_result.bindings
             conditions.push(condition_result.checked)
@@ -615,7 +615,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         if value_tail {
             check.context.value_tail_span = sema_stmt_value_tail_marker(arms[arm_index].body)
         }
-        branch := if {
+        ^branch: if {
             caught == .Val(found) -> if arm_return != None -> sema_catch_all_err_check_body(found, arms[arm_index].body, arm_return, check, loop_depth) else -> sema_catch_all_err_check_body(found, arms[arm_index].body, return_type, check, loop_depth)
             arm_return != None -> sema_check_statements(arms[arm_index].body, arm_return, check, loop_depth)
             else -> sema_check_statements(arms[arm_index].body, return_type, check, loop_depth)
@@ -653,13 +653,13 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     if subjectless_guard && !readiness {
         sema_stmt_lint_same_enum_guards(arms, conditions, span, check.diagnostics)
     }
-    else_result := [TStmt]?{None}
+    ^else_result: [TStmt]?{None}
     else_fork: sema_ownership_fork(check.state)
     else_mark: sema_scope_mark(check.scopes)
     if else_body == .Val(body) {
         complement: sema_stmt_else_presence_names(arms, check.scopes)
         if value_tail -> check.context.value_tail_span = sema_stmt_value_tail_marker(body)
-        checked_else := if complement.len() == 0 -> sema_stmt_check_block(body, return_type, check, "if.else@{span.start}", loop_depth) else -> sema_stmt_check_else_complement(complement, body, span, return_type, check, loop_depth)
+        ^checked_else: if complement.len() == 0 -> sema_stmt_check_block(body, return_type, check, "if.else@{span.start}", loop_depth) else -> sema_stmt_check_else_complement(complement, body, span, return_type, check, loop_depth)
         if !checked_else.complete -> complete = false
         if value_tail {
             check.context.value_tail_span = Val(span)
@@ -667,7 +667,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
                 complete = false
             }
         }
-        checked_value := checked_else.value.move()
+        ^checked_value: checked_else.value.move()
         checked_else.value = [TStmt]{}
         else_result = Val(checked_value.move())
     }
@@ -678,10 +678,10 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     else_hardware: sema_scope_hardware_facts(check.scopes)
     sema_scope_rollback(check.scopes, else_mark)
     sema_scope_rollback(check.scopes, fallthrough_mark)
-    hardware_merged := sema_scope_hardware_facts(check.scopes)
+    ^hardware_merged: sema_scope_hardware_facts(check.scopes)
     if branch_hardware.len() > 0 {
         hardware_merged = branch_hardware[0]
-        branch_hardware_index := 1
+        ^branch_hardware_index: 1
         loop branch_hardware_index < branch_hardware.len() {
             hardware_merged = sema_scope_hardware_join(before_hardware, hardware_merged, branch_hardware[branch_hardware_index], true)
             branch_hardware_index += 1
@@ -702,7 +702,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     // The fallthrough path ends here: the live state is the one before the
     // table again, which the single-use check reads.
     sema_ownership_fork_rollback(check.state, fork)
-    single_use_moves := [[Bool]]{}
+    ^single_use_moves: [[Bool]]{}
     loop path in arm_paths -> single_use_moves.push(sema_single_use_path_moves(check.state, path))
     if else_reaches_merge {
         single_use_moves.push(sema_single_use_path_moves(check.state, else_path))
@@ -740,7 +740,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     // with or without an `else`, before the E0307 completeness proof. A type
     // table noted its repeated arms itself (sema_stmt_type_switch_target).
     if !subjectless_guard && type_param == None {
-        noted_conditions := [TExpr]{}
+        ^noted_conditions: [TExpr]{}
         loop condition in conditions {
             if condition == .Val(noted) -> noted_conditions.push(noted.value)
         }
@@ -766,7 +766,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
                 return SemaStatementResult{value: [TStmt]{}, complete: false}
             }
         } else {
-            checked_conditions := [TExpr]{}
+            ^checked_conditions: [TExpr]{}
             loop condition in conditions {
                 checked: condition ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
                 checked_conditions.push(checked.value)
@@ -801,10 +801,10 @@ sema_stmt_check_through: fn(arms: [SwitchArm], index: Int, else_body: [Stmt]?, t
         return false
     }
     if index + 1 < arms.len() {
-        names := [BindName]{}
+        ^names: [BindName]{}
         ast_visit_expr(check.environment.tables, arms[index + 1].cond, fn(value: ExprNode) { sema_stmt_through_bound_names(ast_expr(check.environment.tables, value), names) })
         if names.len() > 0 {
-            scan := SemaStmtThroughScan{names: [String]{}, found: None}
+            ^scan: SemaStmtThroughScan{names: [String]{}, found: None}
             loop bound in names -> scan.names.push(bound.name)
             ast_visit_body(check.environment.tables, arms[index + 1].body, fn(value: ExprNode) { sema_stmt_through_note_read(scan, ast_expr(check.environment.tables, value)) }, false)
             if scan.found == .Val(read) {
@@ -830,10 +830,10 @@ sema_stmt_check_through: fn(arms: [SwitchArm], index: Int, else_body: [Stmt]?, t
 
 sema_stmt_check_through_body: fn(body: [Stmt], through: Span, arm_body: ^[TStmt], return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int) -> Bool {
     sema_scope_enter(check.scopes, check.state, "if.through@{through.start}")
-    checked := sema_check_statements(body, return_type, check, loop_depth)
+    ^checked: sema_check_statements(body, return_type, check, loop_depth)
     sema_single_use_leave_scope(check)
     if !checked.complete -> return false
-    ran_on := checked.value.move()
+    ^ran_on: checked.value.move()
     loop statement in ran_on -> arm_body.push(statement)
     true
 }
@@ -861,15 +861,15 @@ sema_stmt_through_note_read: fn(scan: ^SemaStmtThroughScan, value: Expr) Never! 
 // its own arm; each finding from `from` on is kept once. The repeats leave in
 // place, from the back, so the kept findings are never copied.
 sema_stmt_through_dedupe: fn(diagnostics: ^[Diagnostic], from: Int) Never! {
-    seen := SemaKeyRows{}
-    repeated := [Int]{}
+    ^seen: SemaKeyRows{}
+    ^repeated: [Int]{}
     loop (index, diagnostic) in diagnostics {
         if index < from -> next
         if !sema_key_report_first(seen, diagnostic.code, diagnostic.span, diagnostic.what) {
             repeated.push(index)
         }
     }
-    loop repeated.pop() == .Val(index) -> _ := diagnostics.remove(index, .Slot)
+    loop repeated.pop() == .Val(index) -> ^_: diagnostics.remove(index, .Slot)
 }
 
 // The subject of `if T == { … }` when it names a type
@@ -1018,17 +1018,17 @@ sema_stmt_type_switch_rebound: fn(symbol: Symbol, names: [String], actuals: [Typ
 // consumed rows and the chain so far into the new level, so no checked body
 // is copied (the old recursion copied every arm's body and the else body).
 sema_stmt_switch_chain: fn(conditions: ^^[SemaCheckedCondition?], branches: ^^[SemaStatementResult], arms: [SwitchArm], else_result: ^^[TStmt]?, span: Span) -> [TStmt]? {
-    owned_conditions := conditions.move()
-    owned_branches := branches.move()
-    chain := else_result.move()
-    index := arms.len()
+    ^owned_conditions: conditions.move()
+    ^owned_branches: branches.move()
+    ^chain: else_result.move()
+    ^index: arms.len()
     loop index > 0 {
         index -= 1
-        condition_row := owned_conditions.pop() ?? return None
-        condition := condition_row.move() ?? return None
-        branch := owned_branches.pop() ?? return None
+        ^condition_row: owned_conditions.pop() ?? return None
+        ^condition: condition_row.move() ?? return None
+        ^branch: owned_branches.pop() ?? return None
         arm_span: if index == 0 -> span else -> arms[index].span
-        rest := chain.move()
+        ^rest: chain.move()
         chain = Val([TStmt]{TStmt.If{condition: condition.condition.move(), then_body: branch.value.move(), else_body: rest.move(), else_is_elseif: index + 1 < arms.len(), span: arm_span}})
     }
     chain

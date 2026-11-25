@@ -228,7 +228,7 @@ CanvasDebugSessions: struct {
             .Val(wanted) -> wanted
             .None -> "canvas-debug-{self.next_id}"
         }
-        session := if requested == {
+        ^session: if requested == {
             .Val(wanted) -> self.resume(wanted, source_id, revision, tier, commands.len()) ?? return Err(err)
             .None -> if {
                 tier.name == CANVAS_DEBUG_DUMP -> canvas_debug_open_dump(file, source_id, revision, tier.target, self.next_id) ?? return Err(err)
@@ -238,7 +238,7 @@ CanvasDebugSessions: struct {
         if requested == None -> self.next_id += 1
         session.commands += commands.len()
         dump: canvas_debug_tier_name(session) == CANVAS_DEBUG_DUMP
-        failed := NativeDebugError?{None}
+        ^failed: NativeDebugError?{None}
         loop line in breakpoints {
             // A dump runs nothing, so it stops at no breakpoint.
             if dump || session.breakpoints.contains(line) || failed != None -> next
@@ -270,7 +270,7 @@ CanvasDebugSessions: struct {
             }
             return Err(canvas_debug_error("diagnostic", transcript))
         }
-        snapshot := DebugSnapshot?{None}
+        ^snapshot: DebugSnapshot?{None}
         if session.live.snapshot() == {
             .Ok(found) -> { snapshot = found }
             .Err(failure) -> {
@@ -278,7 +278,7 @@ CanvasDebugSessions: struct {
                 return Err(canvas_debug_unavailable(failure))
             }
         }
-        panels := CanvasDebugPanels{}
+        ^panels: CanvasDebugPanels{}
         if canvas_debug_panels(session, folded, reads) == {
             .Ok(found) -> { panels = found }
             .Err(failure) -> {
@@ -288,19 +288,17 @@ CanvasDebugSessions: struct {
         }
         // The task list is the console's `tasks`; a program whose registry
         // can't be read shows none.
-        listed := ""
+        ^listed: ""
         if {
             dump -> listed = native_dump_task_list(session.live, session.jet_file)
-            session.live.tasks_text() == .Ok(text) -> {
-                listed = text
-            }
+            session.live.tasks_text() == .Ok(text) -> { listed = text }
         }
-        tasks := [String]{}
+        ^tasks: [String]{}
         loop line in listed.split("\n").to_list() {
             if line.trim() != "" -> tasks.push(line)
         }
         on: canvas_debug_tier_name(session)
-        trail := [Int]{}
+        ^trail: [Int]{}
         if snapshot == .Val(found) && session.stop.frame == .Val(frame) && frame.line == found.line {
             loop line in session.trail -> trail.push(line)
         }
@@ -314,7 +312,7 @@ CanvasDebugSessions: struct {
     // tier than `tier` names, or whose command history would overflow,
     // stays.
     resume: fn(^self, id: String, source_id: String, revision: String, tier: CanvasDebugTier, count: Int) -> CanvasDebugSession CanvasDebugError! {
-        session := self.sessions.remove(id) ?? return Err(canvas_debug_error("session", "debug session is no longer live; start a new session"))
+        ^session: self.sessions.remove(id) ?? return Err(canvas_debug_error("session", "debug session is no longer live; start a new session"))
         if session.source_id != source_id || session.revision != revision {
             canvas_debug_close(session)
             return Err(canvas_debug_error("conflict", "debug session is stale for the current source identity or revision"))
@@ -337,8 +335,8 @@ CanvasDebugSessions: struct {
         if self.sessions.len() < CANVAS_DEBUG_MAX_SESSIONS {
             return
         }
-        oldest := ""
-        oldest_created := -1
+        ^oldest: ""
+        ^oldest_created: -1
         loop entry in self.sessions {
             if oldest_created < 0 || entry.value.created < oldest_created {
                 oldest = entry.key
@@ -372,13 +370,13 @@ CanvasDebugSessions: struct {
 
     // End session `id`, if it is live.
     release: fn(^self, id: String) {
-        session := self.sessions.remove(id) ?? return
+        ^session: self.sessions.remove(id) ?? return
         canvas_debug_close(session)
     }
 
     // End every session: the host has stopped.
     release_all: fn(^self) {
-        ids := [String]{}
+        ^ids: [String]{}
         loop entry in self.sessions -> ids.push(entry.key)
         loop id in ids -> self.release(id)
     }
@@ -421,13 +419,13 @@ canvas_debug_open: fn(host: CanvasDebugHost, jet: String, file: String, source_i
         return Err(canvas_debug_error("diagnostic", "{built.output}{built.errors}"))
     }
     image: native_debug_image(file, out_dir)
-    live := NativeSession.start(image, session_files.join(dir, "output.txt")) ?? {
+    ^live: NativeSession.start(image, session_files.join(dir, "output.txt")) ?? {
         canvas_debug_remove(dir)
         return Err(canvas_debug_unavailable(err))
     }
     // A recorded tier reruns the recording with the program arguments it was
     // made with.
-    recorded := [String]{}
+    ^recorded: [String]{}
     if tier.name == CANVAS_DEBUG_RECORDED && host.replay(live, image, tier.target, file, dir, recorded) == .Err(refused) {
         live.close()
         canvas_debug_remove(dir)
@@ -436,7 +434,7 @@ canvas_debug_open: fn(host: CanvasDebugHost, jet: String, file: String, source_i
     host.evaluate(live, file)
     jet_file: session_files.basename(file)
     jet_lines: src.split("\n").to_list()
-    opened := NativeDebugStep?{None}
+    ^opened: NativeDebugStep?{None}
     if live.open(jet_file, jet_lines, recorded) == {
         .Ok(step) -> { opened = step }
         .Err(failure) -> {
@@ -450,7 +448,7 @@ canvas_debug_open: fn(host: CanvasDebugHost, jet: String, file: String, source_i
         canvas_debug_remove(dir)
         return Err(canvas_debug_error("diagnostic", "`{jet_file}` has no `run` function to debug"))
     }
-    trail := [Int]{}
+    ^trail: [Int]{}
     if first.stop.frame == .Val(frame) -> trail.push(frame.line)
     trail_depth: live.jet_depth() ?? -1
     Ok(
@@ -485,7 +483,7 @@ canvas_debug_open_dump: fn(file: String, source_id: String, revision: String, na
     }
     path: session_files.join(session_files.dirname(file), named)
     opened: native_dump_open(path) ?? return Err(canvas_debug_unavailable(err))
-    live := opened.session.move()
+    ^live: opened.session.move()
     entry: live.entry_source()
     changed: native_dump_sources(path, live.image).changed.contains("{entry}")
     program: native_dump_source(path, entry)
@@ -500,7 +498,7 @@ canvas_debug_open_dump: fn(file: String, source_id: String, revision: String, na
     jet_lines: src.split("\n").to_list()
     frames: live.backtrace() ?? return Err(canvas_debug_unavailable(err))
     stop: native_dump_jet_frame(frames, 0) ?? 0
-    _ := live.select_frame(stop) ?? return Err(canvas_debug_unavailable(err))
+    ^_: live.select_frame(stop) ?? return Err(canvas_debug_unavailable(err))
     shown: native_dump_frame(live, frames, stop, jet_file, jet_lines) ?? return Err(canvas_debug_unavailable(err))
     events: native_dump_events(live.image, opened.ring, opened.routines)
     transcript: "Dump of process {opened.pid}, {events.len()} flight events\n{shown}"
@@ -559,7 +557,7 @@ canvas_debug_follow: fn(session: ^CanvasDebugSession, input: String) NativeDebug
     if (moved == "s" || moved == "n") && depth == session.trail_depth && left == .Val(from) && from.file == frame.file && from.line == last {
         if frame.line != last -> session.trail.push(frame.line)
         if session.trail.len() > CANVAS_DEBUG_MAX_TRAIL {
-            kept := [Int]{}
+            ^kept: [Int]{}
             loop index in 1..<session.trail.len() -> kept.push(session.trail[index])
             session.trail = kept
         }
@@ -630,12 +628,12 @@ canvas_debug_payload: fn(debugs: ^CanvasDebugSessions, host: CanvasDebugHost, st
         if session_id == .Val(id) -> debugs.release(id)
         return Err(canvas_debug_error("conflict", "source changed since this Canvas debug state was drawn"))
     }
-    anchors := request.anchors.move()
+    ^anchors: request.anchors.move()
     if anchors.len() > CANVAS_DEBUG_MAX_BREAKPOINTS {
         return Err(canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
     }
-    candidates := request.breakpoints.move()
-    stale := [String]{}
+    ^candidates: request.breakpoints.move()
+    ^stale: [String]{}
     anchors.reverse()
     loop anchors.len() > 0 {
         anchor: anchors.pop() ?? break
@@ -653,7 +651,7 @@ canvas_debug_payload: fn(debugs: ^CanvasDebugSessions, host: CanvasDebugHost, st
     }
     line_count: canvas_debug_lines(src).len()
     candidates.sort()
-    breakpoints := [Int]{}
+    ^breakpoints: [Int]{}
     loop line in candidates {
         if line < 1 || line > line_count {
             stale.push("line:{line}")
@@ -664,8 +662,8 @@ canvas_debug_payload: fn(debugs: ^CanvasDebugSessions, host: CanvasDebugHost, st
         }
     }
     // A watch drawn on another revision is stale and isn't watched.
-    watches := [String]{}
-    stale_watches := [String]{}
+    ^watches: [String]{}
+    ^stale_watches: [String]{}
     loop watch in request.watches {
         own: canvas_debug_anchor_current(watch, current_revision) ?? {
             stale_watches.push(watch)
@@ -712,7 +710,7 @@ canvas_debug_tier: fn(request: CanvasDebugRequest) -> CanvasDebugTier CanvasDebu
     if request.recording != None && request.dump != None {
         return Err(canvas_debug_error("bad_request", "a Canvas debug request opens a `recording` or a `dump`, not both"))
     }
-    implied := CANVAS_DEBUG_TIER
+    ^implied: CANVAS_DEBUG_TIER
     if request.recording != None -> implied = CANVAS_DEBUG_RECORDED
     if request.dump != None -> implied = CANVAS_DEBUG_DUMP
     if implied != CANVAS_DEBUG_TIER && request.session_id != None {
@@ -724,7 +722,7 @@ canvas_debug_tier: fn(request: CanvasDebugRequest) -> CanvasDebugTier CanvasDebu
         return Err(canvas_debug_error("bad_request", "Canvas debug tier must be native, native-recorded or native-dump"))
     }
     if request.session_id == None && name != implied {
-        refused := "the native Canvas debug tier runs the entry; `recording` and `dump` open the native-recorded and native-dump tiers"
+        ^refused: "the native Canvas debug tier runs the entry; `recording` and `dump` open the native-recorded and native-dump tiers"
         if name == CANVAS_DEBUG_RECORDED {
             refused = "the native-recorded Canvas debug tier replays a recording; name it in `recording`"
         }
@@ -817,9 +815,9 @@ CanvasDebugRequest: struct {
 // The request `value` is, taken out of it; anything but an object reads as
 // one with no members.
 canvas_debug_request: fn(value: ^^Dyn) -> CanvasDebugRequest Never! {
-    request := CanvasDebugRequest{schema_version: -1, revision: None, source_id: None, tier: None, session_id: None, recording: None, dump: None, stop: false, commands: [String]{}, breakpoints: [Int]{}, anchors: [String]{}, watches: [String]{}, folded: [String]{}, reads: [CanvasDebugRead]{}}
+    ^request: CanvasDebugRequest{schema_version: -1, revision: None, source_id: None, tier: None, session_id: None, recording: None, dump: None, stop: false, commands: [String]{}, breakpoints: [Int]{}, anchors: [String]{}, watches: [String]{}, folded: [String]{}, reads: [CanvasDebugRead]{}}
     if value.move() == .Object(members) {
-        fields := members
+        ^fields: members
         fields.reverse()
         loop fields.len() > 0 {
             field: fields.pop() ?? break
@@ -854,12 +852,12 @@ canvas_debug_text: fn(value: ^^Dyn) -> String? Never! {
 
 // The strings of an array, in order, taken out of it.
 canvas_debug_texts: fn(value: ^^Dyn) -> [String] Never! {
-    items := if value.move() == {
+    ^items: if value.move() == {
         .Array(list) -> list
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> [Dyn]{}
     }
     items.reverse()
-    texts := [String]{}
+    ^texts: [String]{}
     loop items.len() > 0 {
         item: items.pop() ?? break
         if item.move() == .Text(text) -> texts.push(text)
@@ -870,17 +868,17 @@ canvas_debug_texts: fn(value: ^^Dyn) -> [String] Never! {
 // The reads of a request's `reads` array, in order; an item that is not an
 // object reads as one with no members, which names no kind.
 canvas_debug_reads: fn(value: ^^Dyn) -> [CanvasDebugRead] Never! {
-    items := if value.move() == {
+    ^items: if value.move() == {
         .Array(list) -> list
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> [Dyn]{}
     }
     items.reverse()
-    reads := [CanvasDebugRead]{}
+    ^reads: [CanvasDebugRead]{}
     loop items.len() > 0 {
         item: items.pop() ?? break
-        read := CanvasDebugRead{kind: "", where: "", count: -1, type_name: "", from: "", skip: 0}
+        ^read: CanvasDebugRead{kind: "", where: "", count: -1, type_name: "", from: "", skip: 0}
         if item.move() == .Object(members) {
-            fields := members
+            ^fields: members
             fields.reverse()
             loop fields.len() > 0 {
                 field: fields.pop() ?? break
@@ -902,7 +900,7 @@ canvas_debug_reads: fn(value: ^^Dyn) -> [CanvasDebugRead] Never! {
 
 // The integers of an array, in order.
 canvas_debug_ints: fn(value: Dyn) -> [Int] Never! {
-    numbers := [Int]{}
+    ^numbers: [Int]{}
     if value == .Array(items) {
         loop item in items {
             if foundation_json_integer(item) == .Val(number) -> numbers.push(number)
@@ -915,9 +913,9 @@ canvas_debug_ints: fn(value: Dyn) -> [Int] Never! {
 // operands it takes: the live, replay and dump consoles' vocabulary.
 // `disassemble` (`disas`) takes a name or line and `--bytes`, each optional.
 canvas_debug_known: fn(command: String) -> Bool Never! {
-    count := 0
-    least := 0
-    most := 0
+    ^count: 0
+    ^least: 0
+    ^most: 0
     loop word in command.replace("\t", " ").split(" ") {
         if word == "" -> next
         if count == 0 {
@@ -937,7 +935,7 @@ canvas_debug_known: fn(command: String) -> Bool Never! {
 
 // How many space-separated words `text` has.
 canvas_debug_word_count: fn(text: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop word in text.replace("\t", " ").split(" ") {
         if word != "" -> count += 1
     }
@@ -946,7 +944,7 @@ canvas_debug_word_count: fn(text: String) -> Int Never! {
 
 // The lines of `text`, split on `\n` with a trailing `\r` removed.
 canvas_debug_lines: fn(text: String) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in text.split("\n") -> lines.push(line.removesuffix("\r"))
     if lines.len() > 0 && lines[lines.len() - 1] == "" {
         lines.pop().drop("the text ends with a line break")
@@ -957,8 +955,8 @@ canvas_debug_lines: fn(text: String) -> [String] Never! {
 // The byte span of line `line` (from 1) of `src`, its line break left out.
 canvas_debug_line_span: fn(src: String, line: Int) -> Span Never! {
     bytes: src.bytes()
-    current := 1
-    start := if line <= 1 -> 0 else -> bytes.len()
+    ^current: 1
+    ^start: if line <= 1 -> 0 else -> bytes.len()
     loop i in 0..<bytes.len() {
         if current == line {
             start = i
@@ -969,7 +967,7 @@ canvas_debug_line_span: fn(src: String, line: Int) -> Span Never! {
             if current == line && i + 1 == bytes.len() -> start = bytes.len()
         }
     }
-    end := start
+    ^end: start
     loop end < bytes.len() && (Int{bytes[end]}) != 10 -> end += 1
     Span{start: start, end: end}
 }
@@ -978,7 +976,7 @@ canvas_debug_line_span: fn(src: String, line: Int) -> Span Never! {
 canvas_debug_line_of: fn(src: String, offset: Int) -> Int Never! {
     bytes: src.bytes()
     limit: if offset < bytes.len() -> offset else -> bytes.len()
-    line := 1
+    ^line: 1
     loop i in 0..<limit {
         if (Int{bytes[i]}) == 10 -> line += 1
     }
@@ -1008,7 +1006,7 @@ canvas_debug_bounded: fn(text: String, max_bytes: Int) -> CanvasDebugList Never!
     if text.len() <= max_bytes -> return CanvasDebugList{json: text, truncated: false}
     marker: " [truncated]"
     bytes: text.bytes()
-    end := if max_bytes > marker.len() -> max_bytes - marker.len() else -> 0
+    ^end: if max_bytes > marker.len() -> max_bytes - marker.len() else -> 0
     loop end > 0 && (Int{bytes[end]}) >= 128 && (Int{bytes[end]}) < 192 -> end -= 1
     prefix: String.from_bytes(bytes[0..<end]) ?? ""
     CanvasDebugList{json: "{prefix}{marker}", truncated: true}
@@ -1037,20 +1035,20 @@ canvas_debug_stopped: fn(src: String, id: String, tier: String, source_id: Strin
 canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, source_id: String, ran: CanvasDebugRun, breakpoints: [Int], stale: [String], watches: [String], stale_watches: [String]) -> String {
     revision: source_revision(src)
     empty: CanvasDebugList{json: "", truncated: false}
-    active_span := Span{start: 0, end: 0}
-    line_json := "null"
-    place := CanvasDebugPlace{graph_id: "", node_id: "", wire_ids: [String]{}, wires_truncated: false}
-    locals := empty
-    watch_values := empty
-    call_stack := empty
-    source := empty
-    first_line := 0
+    ^active_span: Span{start: 0, end: 0}
+    ^line_json: "null"
+    ^place: CanvasDebugPlace{graph_id: "", node_id: "", wire_ids: [String]{}, wires_truncated: false}
+    ^locals: empty
+    ^watch_values: empty
+    ^call_stack: empty
+    ^source: empty
+    ^first_line: 0
     if ran.snapshot == .Val(snapshot) {
         active_span = canvas_debug_line_span(src, snapshot.line)
         line_json = "{snapshot.line}"
         // The run's stepped stops end at this one; a stop it didn't step
         // to is all of its path.
-        stops := [Span]{}
+        ^stops: [Span]{}
         loop line in ran.trail -> stops.push(canvas_debug_line_span(src, line))
         if stops.len() == 0 -> stops.push(canvas_debug_line_span(src, snapshot.line))
         place = canvas_host_debug_place(state, revision, stops)
@@ -1059,8 +1057,8 @@ canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, source_id
         call_stack = canvas_debug_call_stack(snapshot, source_id)
         lines: canvas_debug_lines(src)
         first_line = if snapshot.line > CANVAS_DEBUG_SOURCE_CONTEXT -> snapshot.line - CANVAS_DEBUG_SOURCE_CONTEXT else -> 1
-        shown := [String]{}
-        clipped := false
+        ^shown: [String]{}
+        ^clipped: false
         loop number in first_line..<(snapshot.line + CANVAS_DEBUG_SOURCE_CONTEXT + 1) {
             if number > lines.len() -> break
             text: canvas_debug_bounded(lines[number - 1], CANVAS_DEBUG_MAX_VALUE_BYTES)
@@ -1071,7 +1069,7 @@ canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, source_id
     }
     // A watch drawn on another revision shows no value: it is stale.
     if stale_watches.len() > 0 {
-        shown := [String]{}
+        ^shown: [String]{}
         if watch_values.json != "" -> shown.push("{watch_values.json}")
         loop watch in stale_watches {
             shown.push("{{\"name\":{foundation_json_quote(canvas_debug_anchor_text(watch))},\"anchor\":{foundation_json_quote(watch)},\"state\":\"stale\"}}")
@@ -1092,10 +1090,10 @@ canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, source_id
         ran.snapshot != None -> "live"
         else -> "unavailable"
     }
-    wires := [String]{}
+    ^wires: [String]{}
     loop wire in place.wire_ids -> wires.push(foundation_json_quote(wire))
     active_wire: if place.wire_ids.len() > 0 -> place.wire_ids[place.wire_ids.len() - 1] else -> ""
-    marks := [String]{}
+    ^marks: [String]{}
     loop line in breakpoints {
         marks.push("{{\"line\":{line},\"source_span\":{canvas_debug_span_json(canvas_debug_line_span(src, line))},\"state\":\"valid\"}}")
     }
@@ -1112,7 +1110,7 @@ canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, source_id
     revision_json: foundation_json_quote(revision)
     limits: "{{\"locals_truncated\":{locals.truncated},\"watches_truncated\":{watch_values.truncated},\"call_stack_truncated\":{call_stack.truncated},\"trace_truncated\":{trace.truncated},\"tasks_truncated\":{tasks.truncated},\"source_truncated\":{source.truncated},\"wire_path_truncated\":{place.wires_truncated}}}"
     // A folded panel's field is not sent.
-    machine := ""
+    ^machine: ""
     if ran.panels.registers == .Val(rows) -> machine = "{machine}\"registers\":[{rows}],"
     if ran.panels.disassembly == .Val(rows) -> machine = "{machine}\"disassembly\":[{rows}],"
     overlay: "{{\"debug_overlay\":{foundation_json_quote(phase)},\"runtime_state\":{foundation_json_quote(runtime_state)},\"source_id\":{source_json},\"revision\":{revision_json},\"active_line\":{line_json},\"active_span\":{canvas_debug_span_json(active_span)},\"active_graph_id\":{foundation_json_quote(place.graph_id)},\"active_node_id\":{foundation_json_quote(place.node_id)},\"active_wire_id\":{foundation_json_quote(active_wire)},\"wire_path\":[{wires.join(",")}],\"breakpoints\":[{marks.join(",")}],\"locals\":[{locals.json}],\"watches\":[{watch_values.json}],\"call_stack\":[{call_stack.json}],\"source\":{{\"first_line\":{first_line},\"lines\":[{source.json}]}},\"trace\":[{trace.json}],\"tasks\":[{tasks.json}],{machine}\"limits\":{limits}}}"
@@ -1126,10 +1124,10 @@ canvas_debug_span_json: fn(span: Span) -> String Never! {
 // The stop's locals (at most CANVAS_DEBUG_MAX_LOCALS), or with `watches`
 // the watched ones, each with its Jet type and value.
 canvas_debug_locals: fn(snapshot: DebugSnapshot, watches: [String]?) -> CanvasDebugList Never! {
-    truncated := false
-    values := [String]{}
+    ^truncated: false
+    ^values: [String]{}
     loop local in snapshot.locals {
-        state := ""
+        ^state: ""
         if watches == .Val(names) {
             if !names.contains(local.name) -> next
             state = ",\"state\":\"ok\""
@@ -1148,9 +1146,9 @@ canvas_debug_locals: fn(snapshot: DebugSnapshot, watches: [String]?) -> CanvasDe
 
 // The Jet call stack, innermost first: `#0  run()  at main.jet:3`.
 canvas_debug_call_stack: fn(snapshot: DebugSnapshot, source_id: String) -> CanvasDebugList Never! {
-    entries := [String]{}
-    bytes := 0
-    truncated := false
+    ^entries: [String]{}
+    ^bytes: 0
+    ^truncated: false
     count: snapshot.call_stack.len()
     loop index in 0..<count {
         if index >= CANVAS_DEBUG_MAX_CALL_STACK {
@@ -1171,10 +1169,10 @@ canvas_debug_call_stack: fn(snapshot: DebugSnapshot, source_id: String) -> Canva
 
 // The newest transcript lines that fit the trace's bounds, in order.
 canvas_debug_newest: fn(lines: [String]) -> CanvasDebugList Never! {
-    truncated := false
-    bytes := 0
-    kept := [String]{}
-    index := lines.len()
+    ^truncated: false
+    ^bytes: 0
+    ^kept: [String]{}
+    ^index: lines.len()
     loop index > 0 {
         index -= 1
         entry: foundation_json_quote(lines[index])
@@ -1192,7 +1190,7 @@ canvas_debug_newest: fn(lines: [String]) -> CanvasDebugList Never! {
 // The machine panels of `session`'s stop (CanvasDebugPanels): the ones
 // `folded` leaves open, and the answer to each of `reads`, in order.
 canvas_debug_panels: fn(session: ^CanvasDebugSession, folded: [String], reads: [CanvasDebugRead]) -> CanvasDebugPanels NativeDebugError! {
-    at := NativePanelFrame?{None}
+    ^at: NativePanelFrame?{None}
     if native_panel_frame(session.live) == {
         .Ok(found) -> { at = found }
         .Err(error) -> return Err(error)
@@ -1200,12 +1198,12 @@ canvas_debug_panels: fn(session: ^CanvasDebugSession, folded: [String], reads: [
     // The address the frame's facts are looked up at: its pc, or for an
     // outer frame the call it returns from (-1: no frame).
     pc: if at == .Val(frame) -> frame.lookup else -> -1
-    panels := CanvasDebugPanels{}
+    ^panels: CanvasDebugPanels{}
     // A folded Registers panel marks nothing changed when it opens again.
     if folded.contains("registers") -> session.seen_frame = ""
     if !folded.contains("registers") -> panels.registers = Val(canvas_debug_registers(session, at))
     if !folded.contains("disassembly") {
-        rows := [String]{}
+        ^rows: [String]{}
         if pc >= 0 {
             loop row in native_listing_window(session.live, pc, -CANVAS_DEBUG_LISTED_BEFORE, CANVAS_DEBUG_LISTED) {
                 rows.push(canvas_debug_listed_json(row, pc))
@@ -1213,7 +1211,7 @@ canvas_debug_panels: fn(session: ^CanvasDebugSession, folded: [String], reads: [
         }
         panels.disassembly = Val(rows.join(","))
     }
-    answered := [String]{}
+    ^answered: [String]{}
     loop read in reads {
         answered.push(canvas_debug_read_json(session, read, pc) ?? return Err(err))
     }
@@ -1233,8 +1231,8 @@ canvas_debug_registers: fn(session: ^CanvasDebugSession, at: NativePanelFrame?) 
     }
     key: "{frame.frame.cfa}:{frame.site}"
     same: key == session.seen_frame
-    seen := [String:Int]{}
-    rows := [String]{}
+    ^seen: [String:Int]{}
+    ^rows: [String]{}
     loop row in native_registers_at(session.live, frame) {
         before: session.seen_registers.get(row.name)
         changed: same && row.known && before != None && before != Int?{Val(row.value)}
@@ -1286,11 +1284,11 @@ canvas_debug_read_json: fn(session: ^CanvasDebugSession, read: CanvasDebugRead, 
     if found.aim.answer != "" {
         return Ok("{{{head},\"ok\":false,\"refused\":{found.aim.refused},\"message\":{foundation_json_quote(found.aim.answer.trim())}}}")
     }
-    bytes := [U8]{}
-    state := [U8]{}
-    pointers := [String]{}
-    labels := [String]{}
-    values := [String]{}
+    ^bytes: [U8]{}
+    ^state: [U8]{}
+    ^pointers: [String]{}
+    ^labels: [String]{}
+    ^values: [String]{}
     if found.view == .Val(view) {
         bytes = view.bytes
         loop k in 0..<view.bytes.len() {
@@ -1304,7 +1302,7 @@ canvas_debug_read_json: fn(session: ^CanvasDebugSession, read: CanvasDebugRead, 
             )
         }
         loop offset in native_memory_pointers(session.live, view) -> pointers.push("{offset}")
-        start := 0
+        ^start: 0
         loop start < view.bytes.len() {
             end: if start + CANVAS_DEBUG_MEMORY_ROW < view.bytes.len() -> start + CANVAS_DEBUG_MEMORY_ROW else -> view.bytes.len()
             named: native_memory_row_labels(session.live, view, view.address + start, view.address + end)

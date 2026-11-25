@@ -5,7 +5,7 @@ use jet_foundation.[DiagnosticExplanation, diagnostic_display_name, registration
 
 // ASCII lowercase.
 jet_cli_ascii_lower: fn(value: String) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop byte in value.bytes() {
         code: Int{byte}
         if code >= 65 && code <= 90 -> bytes.push(checked(U8{code + 32}) ?? byte) else {
@@ -19,13 +19,13 @@ jet_cli_ascii_lower: fn(value: String) -> String Never! {
 jet_cli_edit_distance: fn(left: String, right: String) -> Int Never! {
     a: left.chars()
     b: right.chars()
-    previous := [Int]{}
+    ^previous: [Int]{}
     loop index in 0..<b.len() + 1 -> previous.push(index)
     loop i in 0..<a.len() {
-        current := [Int]{i + 1}
+        ^current: [Int]{i + 1}
         loop j in 0..<b.len() {
             cost: if a[i] == b[j] -> 0 else -> 1
-            best := previous[j] + cost
+            ^best: previous[j] + cost
             if previous[j + 1] + 1 < best -> best = previous[j + 1] + 1
             if current[j] + 1 < best -> best = current[j] + 1
             current.push(best)
@@ -88,10 +88,10 @@ jet_cli_syntax_marker_sites: fn(name: String) -> String Never! {
 }
 
 jet_cli_syntax_meanings_text: fn(meanings: [JetCLISyntaxMeaning]) -> String Never! {
-    text := ""
+    ^text: ""
     loop (index, meaning) in meanings {
         if index > 0 -> text = "{text}\n"
-        indent := ""
+        ^indent: ""
         if meaning.position != "" {
             text = "{text}{meaning.position}:\n"
             indent = "  "
@@ -100,7 +100,7 @@ jet_cli_syntax_meanings_text: fn(meanings: [JetCLISyntaxMeaning]) -> String Neve
         loop line in meaning.example.split("\n") -> text = "{text}{indent}  {line}\n"
         if meaning.afterwards != "" -> text = "{text}{indent}Afterwards: {meaning.afterwards}\n"
         if meaning.related_codes.len() > 0 {
-            related := [String]{}
+            ^related: [String]{}
             loop code in meaning.related_codes -> related.push(diagnostic_display_name(code))
             text = "{text}{indent}Related: {related.join(", ")}\n"
         }
@@ -137,7 +137,7 @@ jet_cli_syntax_query: fn(query: String) -> Bool Never! {
     if text.starts_with("package-overlay:") -> return false
     if text.contains("@") && !text.starts_with("@") -> return false
     raw: text.bytes()
-    colon := -1
+    ^colon: -1
     loop (index, byte) in raw {
         if byte == (U8{58}) {
             colon = index
@@ -145,7 +145,7 @@ jet_cli_syntax_query: fn(query: String) -> Bool Never! {
         }
     }
     if colon > 0 && colon + 1 < raw.len() {
-        prefix := true
+        ^prefix: true
         loop index in 0..<colon {
             code: Int{raw[index]}
             if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 45 && code != 46 && code != 47 {
@@ -170,8 +170,8 @@ jet_cli_syntax_query: fn(query: String) -> Bool Never! {
 
 jet_cli_syntax_nearest: fn(query: String) -> String Never! {
     wanted: jet_cli_ascii_lower(query.trim())
-    best := -1
-    closest := -1
+    ^best: -1
+    ^closest: -1
     loop (index, row) in JET_CLI_SYNTAX_ROWS {
         distance: jet_cli_edit_distance(wanted, jet_cli_syntax_folded(row))
         if best < 0 || distance < best {

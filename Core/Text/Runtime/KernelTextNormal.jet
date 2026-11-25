@@ -46,7 +46,7 @@ hangul_compose: fn(a: Int, b: Int) -> Int? {
 }
 
 encode_cps_prefix: fn(cps: [Int], length: Int) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<length -> normal_string.append_cp(out, cps[i])
     String.from_bytes(out) ?? ""
 }
@@ -56,7 +56,7 @@ encode_cps_prefix: fn(cps: [Int], length: Int) -> String Never! {
 // selects *C.
 normalize: fn(text: String, compat: Bool, recompose: Bool) -> String Never! {
     bytes: text.bytes()
-    non_ascii := false
+    ^non_ascii: false
     loop byte in bytes {
         if byte >= (U8{128}) {
             non_ascii = true
@@ -79,11 +79,11 @@ normalize: fn(text: String, compat: Bool, recompose: Bool) -> String Never! {
     index: index_asset[40..<normal_assets.uint(index_bytes, 28, 4)]
     pool: pool_asset[40..<normal_assets.uint(pool_bytes, 28, 4)]
     ccc: ccc_asset[40..<normal_assets.uint(ccc_bytes, 28, 4)]
-    out := [Int]{}
-    at := 0
+    ^out: [Int]{}
+    ^at: 0
     loop at < bytes.len() {
         width: normal_string.utf8_width_at(bytes, at)
-        cp := Int{bytes[at]}
+        ^cp: Int{bytes[at]}
         if width == 2 -> cp &= 31
         if width == 3 -> cp &= 15
         if width == 4 -> cp &= 7
@@ -111,8 +111,8 @@ decompose_cp: fn(out: ^[Int], cp: Int, compat: Bool, index: View<U8>, pool: View
         if sindex % C_TCOUNT != 0 -> out.push(C_TBASE + sindex % C_TCOUNT)
         return
     }
-    low := 0
-    high := index.len() /% 7
+    ^low: 0
+    ^high: index.len() /% 7
     loop low < high {
         mid: (low + high) /% 2
         row: mid * 7
@@ -143,17 +143,17 @@ normal_ccc: fn(table: View<U8>, cp: Int) -> Int Never! { normal_assets.range_tag
 // linear time even for hostile descending CCC sequences. Sorted runs (the usual
 // case) need no scratch allocation.
 canon_order: fn(cps: ^[Int], ccc: View<U8>) Never! {
-    positions := [Int]{}
-    scratch := [Int]{}
-    at := 0
+    ^positions: [Int]{}
+    ^scratch: [Int]{}
+    ^at: 0
     loop at < cps.len() {
         if normal_ccc(ccc, cps[at]) == 0 {
             at += 1
             next
         }
         start: at
-        previous := 0
-        unordered := false
+        ^previous: 0
+        ^unordered: false
         loop at < cps.len() {
             class: normal_ccc(ccc, cps[at])
             if class == 0 -> break
@@ -170,7 +170,7 @@ canon_order: fn(cps: ^[Int], ccc: View<U8>) Never! {
             class: normal_ccc(ccc, cps[i])
             positions[class] = positions[class] + 1
         }
-        offset := 0
+        ^offset: 0
         loop class in 1..<256 {
             count: positions[class].copy()
             positions[class] = offset
@@ -189,9 +189,9 @@ canon_order: fn(cps: ^[Int], ccc: View<U8>) Never! {
 // Canonical composition/blocking. Compact in place: a successful composition
 // does not change last_class.
 compose: fn(cps: ^[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
-    length := 0
-    starter := 0
-    last_class := 0
+    ^length: 0
+    ^starter: 0
+    ^last_class: 0
     loop i in 0..<cps.len() {
         cp: cps[i].copy()
         class: normal_ccc(ccc, cp)
@@ -213,8 +213,8 @@ compose: fn(cps: ^[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
 // including singleton and nonstarter exclusions.
 compose_pair: fn(pairs: View<U8>, a: Int, b: Int) -> Int? {
     if hangul_compose(a, b) == .Val(cp) -> return Val(cp)
-    low := 0
-    high := pairs.len() /% 9
+    ^low: 0
+    ^high: pairs.len() /% 9
     loop low < high {
         mid: (low + high) /% 2
         row: mid * 9

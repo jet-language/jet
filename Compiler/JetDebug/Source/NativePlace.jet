@@ -277,8 +277,8 @@ native_branch_target: fn(bytes: [U8], at: Int, address: Int, insn: NativeInsn) -
 // whole instructions covering NATIVE_PLACE_JUMP bytes. None when one can't
 // be read or moved: an indirect jump, or a call before the last.
 native_displaced: fn(bytes: [U8], at: Int) -> [NativeInsn]? Never! {
-    insns := [NativeInsn]{}
-    covered := 0
+    ^insns: [NativeInsn]{}
+    ^covered: 0
     loop covered < NATIVE_PLACE_JUMP {
         insn: native_decode(bytes, at + covered) ?? return None
         if insn.indirect -> return None
@@ -294,8 +294,8 @@ native_displaced: fn(bytes: [U8], at: Int) -> [NativeInsn]? Never! {
 // whole instructions with one starting at `at`, none an indirect jump, and
 // no branch may land inside the bytes replaced.
 native_place_refusal: fn(bytes: [U8], address: Int, at: Int, length: Int) -> String Never! {
-    offset := 0
-    boundary := false
+    ^offset: 0
+    ^boundary: false
     loop offset < bytes.len() {
         if offset == at -> boundary = true
         insn: native_decode(bytes, offset) ?? return "the debugger can't read its function's code"
@@ -337,7 +337,7 @@ native_place_rel: fn(out: ^[U8], field: Int, base: Int, target: Int) -> Bool Nev
 // takes its rel32 form and a call pushes the return address it would have
 // pushed and jumps. False when a target can't be reached from there.
 native_moved: fn(out: ^[U8], base: Int, bytes: [U8], at: Int, address: Int, insns: [NativeInsn]) -> Bool Never! {
-    offset := at
+    ^offset: at
     loop insn in insns {
         here: address + (offset - at)
         start: out.len()
@@ -415,7 +415,7 @@ native_place_restore: fn(out: ^[U8]) Never! {
 // instruction's target can't be reached, or a text part has no ring or
 // not one capture.
 native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: NativePlaceRing?, arena: Int, bytes: [U8], at: Int, insns: [NativeInsn]) -> NativePlaceCode? Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     // lea rsp,[rsp-128]; pushfq; push each register, DWARF 15 down to 0
     native_place_emit(out, [Int]{0x48, 0x8d, 0x64, 0x24, 0x80, 0x9c})
     loop k in 0..<16 {
@@ -447,7 +447,7 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
     }
     if ring == None && calls.len() != 1 -> return None
     parts: calls.len()
-    texts := 0
+    ^texts: 0
     loop call in calls {
         if call.text -> texts += 1
     }
@@ -455,7 +455,7 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
     // The arena's claim: movabs r11,arena; xor eax,eax; mov ecx,1;
     // lock cmpxchg [r11+busy],rcx; jne contended (patched once known);
     // then it empties: mov rax,[r11+base]; mov [r11+cursor],rax
-    contended := -1
+    ^contended: -1
     if arena != 0 {
         native_eval_r11(out, arena)
         native_place_emit(out, [Int]{0x31, 0xc0, 0xb9, 1, 0, 0, 0, 0xf0, 0x49, 0x0f, 0xb1, 0x4b, NATIVE_PLACE_ARENA_BUSY, 0x0f, 0x85})
@@ -463,7 +463,7 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
         native_place_word(out, 0, 4)
         native_place_emit(out, [Int]{0x49, 0x8b, 0x43, NATIVE_EVAL_BASE, 0x49, 0x89, 0x43, NATIVE_EVAL_CURSOR})
     }
-    full := -1
+    ^full: -1
     if ring == .Val(log) {
         // The claim: movabs rax,ring; mov rcx,1; lock xadd [rax],rcx;
         // cmp rcx,slots; jae out (patched once `abort` is known)
@@ -487,8 +487,8 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
         native_place_emit(out, [Int]{0x48, 0xc7, 0xc2, 1, 0, 0, 0, 0xf0, 0x48, 0x0f, 0xc1, 0x10, 0x48, 0x89, 0x91})
         native_place_word(out, 8 * parts + 8, 4)
     }
-    back := 0
-    read := 0
+    ^back: 0
+    ^read: 0
     loop (index, call) in calls {
         if call.text {
             if ring == None || call.arguments.len() != 1 -> return None
@@ -677,7 +677,7 @@ native_place_capture: fn(out: ^[U8], argument: NativePlaceArg, reg: Int) Never! 
 // The jump at a breakpoint `address` to a trampoline at `target`, padded
 // with int3 to `length` bytes; empty when it can't reach.
 native_place_jump: fn(address: Int, target: Int, length: Int) -> [U8] Never! {
-    out := [U8]{0xe9}
+    ^out: [U8]{0xe9}
     native_place_word(out, 0, 4)
     if !native_place_rel(out, 1, address, target) -> return [U8]{}
     loop out.len() < length -> out.push(0xcc)
@@ -694,8 +694,8 @@ native_place_arg: fn(expression: [U8]) -> NativePlaceArg? Never! {
     if op >= 0x50 && op <= 0x5f && expression.len() == 1 {
         return Val(NativePlaceArg{register: op - 0x50, memory: false, offset: 0, deref: false})
     }
-    register := -1
-    at := 1
+    ^register: -1
+    ^at: 1
     if {
         op >= 0x70 && op <= 0x7f -> register = op - 0x70
         op == 0x91 -> register = 6
@@ -754,7 +754,7 @@ native_place_arg: fn(expression: [U8]) -> NativePlaceArg? Never! {
     // mov rax,[rip+0x100]; jne -2 at 0x1000, both moved to 0x2000
     code: [U8]{0x48, 0x8b, 0x05, 0x00, 0x01, 0, 0, 0x75, 0xfe}
     insns: [NativeInsn]{native_decode(code, 0) ?? panic("load"), native_decode(code, 7) ?? panic("jne")}
-    out := [U8]{}
+    ^out: [U8]{}
     assert(native_moved(out, 0x2000, code, 0, 0x1000, insns))
     // The load reads 0x1107 from 0x2007: rip+0x-F00.
     assert_eq(native_number(out, 3, 4, X64DebugEncoding.Signed), 0x1107 - 0x2007)
@@ -821,7 +821,7 @@ native_place_arg: fn(expression: [U8]) -> NativePlaceArg? Never! {
 // Where `wanted` first starts in `bytes`; -1 when nowhere.
 native_place_find: fn(bytes: [U8], wanted: [Int]) -> Int Never! {
     loop k in 0..<bytes.len() - wanted.len() + 1 {
-        same := true
+        ^same: true
         loop (j, byte) in wanted {
             got: Int{bytes[k + j]}
             if got != byte {
@@ -849,7 +849,7 @@ native_place_find: fn(bytes: [U8], wanted: [Int]) -> Int Never! {
     full: claim + 5 + 7 + 2
     abort: full + 4 + native_number(bytes, full, 4, X64DebugEncoding.Signed)
     assert_eq(native_place_find(bytes[abort..<abort + 3], [Int]{0x48, 0x89, 0xec}), 0)
-    restore := [U8]{}
+    ^restore: [U8]{}
     native_place_restore(restore)
     assert_eq(abort + 3 + restore.len(), placed.unknown)
     // The second part writes the slot's second word.
@@ -866,7 +866,7 @@ native_place_find: fn(bytes: [U8], wanted: [Int]) -> Int Never! {
     calls: [NativePlaceCall]{NativePlaceCall{entry: 0x201000, arguments: [NativePlaceArg]{}}}
     placed: native_place_code(0x200000, 0x1000, calls, None, 0x400000, code, 0, insns) ?? panic("code")
     bytes: placed.bytes
-    restore := [U8]{}
+    ^restore: [U8]{}
     native_place_restore(restore)
     // The claim's lock cmpxchg, then its jne past the arena's release on
     // the path that calls out: a hit that finds it claimed gives up none.

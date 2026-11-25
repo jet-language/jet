@@ -157,8 +157,8 @@ pause_action: fn() -> Dyn {
 // first, pauses through the pointer actions, then releases them.
 driver_pointer: fn(d: Driver, actions: [Dyn], modifiers: [String]) Failure! {
     if modifiers.len() == 0 -> return driver_actions(d, [Dyn]{pointer_source(actions)})
-    keys := [Dyn]{}
-    pointer := [Dyn]{}
+    ^keys: [Dyn]{}
+    ^pointer: [Dyn]{}
     loop key in modifiers {
         keys.push(key_action("keyDown", key))
         pointer.push(pause_action())
@@ -175,7 +175,7 @@ driver_pointer: fn(d: Driver, actions: [Dyn], modifiers: [String]) Failure! {
 }
 
 driver_click: fn(d: Driver, x: Float, y: Float, button: Int, count: Int, modifiers: [String]) Failure! {
-    actions := [Dyn]{move_action(x, y, 0)}
+    ^actions: [Dyn]{move_action(x, y, 0)}
     loop _ in 0..<count {
         actions.push(button_action("pointerDown", button))
         actions.push(button_action("pointerUp", button))
@@ -185,7 +185,7 @@ driver_click: fn(d: Driver, x: Float, y: Float, button: Int, count: Int, modifie
 
 // Press at `from`, move to `to` in `steps` even steps, release.
 driver_drag: fn(d: Driver, from: Point, to: Point, steps: Int, modifiers: [String]) Failure! {
-    actions := [Dyn]{move_action(from.x, from.y, 0), button_action("pointerDown", 0)}
+    ^actions: [Dyn]{move_action(from.x, from.y, 0), button_action("pointerDown", 0)}
     count: if steps < 1 -> 1 else -> steps
     loop index in 1..<count + 1 {
         t: Float.from_int(index) / Float.from_int(count)
@@ -212,7 +212,7 @@ driver_wheel: fn(d: Driver, x: Float, y: Float, delta_x: Float, delta_y: Float) 
 
 // Type each character of `value` as a key press.
 driver_type: fn(d: Driver, value: String) Failure! {
-    actions := [Dyn]{}
+    ^actions: [Dyn]{}
     loop ch in value.chars() {
         actions.push(obj([{key: "type", value: Dyn.Text("keyDown")}, {key: "value", value: Dyn.Text("{ch}")}]))
         actions.push(obj([{key: "type", value: Dyn.Text("keyUp")}, {key: "value", value: Dyn.Text("{ch}")}]))
@@ -222,7 +222,7 @@ driver_type: fn(d: Driver, value: String) Failure! {
 
 // Press `keys` in order and release them in reverse: one key or a chord.
 driver_keys: fn(d: Driver, keys: [String]) Failure! {
-    actions := [Dyn]{}
+    ^actions: [Dyn]{}
     loop key in keys -> actions.push(key_action("keyDown", key))
     loop index in 0..<keys.len() -> actions.push(key_action("keyUp", keys[keys.len() - 1 - index]))
     driver_actions(d, [Dyn]{key_source(actions)})
@@ -316,14 +316,14 @@ round: fn(value: Float) -> Int { Int{math.round(value)} }
 // --- Dyn ----------------------------------------------------------------------
 
 obj: fn(entries: [{key: String, value: Dyn}]) -> Dyn {
-    fields := [String:Dyn]{}
+    ^fields: [String:Dyn]{}
     loop entry in entries -> fields[entry.key.copy()] = entry.value.copy()
     Dyn.Object(fields)
 }
 
 // The value at a dotted path of object keys and array indices; Null when absent.
 at: fn(tree: Dyn, path: String) -> Dyn {
-    current := tree.copy()
+    ^current: tree.copy()
     loop part in path.split(".").to_list() {
         if part == "" -> next
         current = child(current, part)
@@ -395,7 +395,7 @@ items: fn(tree: Dyn) -> [Dyn] {
 
 // An object's values in order (Object.values).
 values: fn(tree: Dyn) -> [Dyn] {
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     if tree == .Object(entries) {
         loop entry in entries -> out.push(entry.value.copy())
     }
@@ -403,7 +403,7 @@ values: fn(tree: Dyn) -> [Dyn] {
 }
 
 keys: fn(tree: Dyn) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     if tree == .Object(entries) {
         loop entry in entries -> out.push(entry.key.copy())
     }

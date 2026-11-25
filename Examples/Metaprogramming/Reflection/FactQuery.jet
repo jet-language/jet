@@ -12,7 +12,7 @@ IDENTITY: #run SCHEMA.identity().text()
 // One line per marker row: the marker's name and the sites it applies to.
 // A store that can't answer is a MetadataError, never an empty list.
 marker_lines: fn(snapshot: compiler.SchemaSnapshot) -> [String] {
-    lines := [String]{}
+    ^lines: [String]{}
     rows: compiler.query(compiler.FactSource.Schema{snapshot: snapshot.copy()}, compiler.FactKind.Marker) ?? panic("the schema store refused: {err}")
     loop row in rows {
         if row == .Schema(fact) -> lines.push("{fact.name}  {fact.scope.join(", ")}")

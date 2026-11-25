@@ -21,7 +21,9 @@ use {
 // `traits`) or type is the declaration `def`: the span of the name the editor
 // shows for it (the trait's, else the type's).
 lsp_impl_spans: fn(checked: LSPChecked, index: SemIndex, def: SemDef, spans: ^[LSPTarget], traits: Bool{false}) Never! {
-    loop module_ref in checked.modules -> lsp_collect_impl_spans(index, def, module_ref.path, module_ref.items, spans, traits: traits)
+    loop module_ref in checked.modules {
+        lsp_collect_impl_spans(index, def, module_ref.path, module_ref.items, spans, traits: traits)
+    }
 }
 
 lsp_collect_impl_spans: fn(index: SemIndex, def: SemDef, module_path: String, items: [Item], spans: ^[LSPTarget], traits: Bool{false}) Never! {
@@ -30,15 +32,27 @@ lsp_collect_impl_spans: fn(index: SemIndex, def: SemDef, module_path: String, it
             .Impl(implementation) -> {
                 if implementation.is_generated_serde -> next
                 span: implementation.trait_span ?? implementation.type_span
-                if !traits -> lsp_impl_span_add(index, def, module_path, implementation.type_name, span, spans)
-                if traits && implementation.trait_name == .Val(trait_name) -> lsp_impl_span_add(index, def, module_path, trait_name, span, spans, traits: true)
+                if !traits {
+                    lsp_impl_span_add(index, def, module_path, implementation.type_name, span, spans)
+                }
+                if traits && implementation.trait_name == .Val(trait_name) {
+                    lsp_impl_span_add(index, def, module_path, trait_name, span, spans, traits: true)
+                }
             }
-            .Struct(structure) -> lsp_collect_trait_block_spans(index, def, module_path, structure.name, structure.trait_impls, spans, traits: traits)
-            .Enum(enumeration) -> lsp_collect_trait_block_spans(index, def, module_path, enumeration.name, enumeration.trait_impls, spans, traits: traits)
+            .Struct(structure) -> {
+                lsp_collect_trait_block_spans(index, def, module_path, structure.name, structure.trait_impls, spans, traits: traits)
+            }
+            .Enum(enumeration) -> {
+                lsp_collect_trait_block_spans(index, def, module_path, enumeration.name, enumeration.trait_impls, spans, traits: traits)
+            }
             .CodeModule(code_module) -> {
-                if code_module.body == .Val(body) -> lsp_collect_impl_spans(index, def, module_path, body, spans, traits: traits)
+                if code_module.body == .Val(body) {
+                    lsp_collect_impl_spans(index, def, module_path, body, spans, traits: traits)
+                }
             }
-            .GenericModule(generic) -> lsp_collect_impl_spans(index, def, module_path, generic.body, spans, traits: traits)
+            .GenericModule(generic) -> {
+                lsp_collect_impl_spans(index, def, module_path, generic.body, spans, traits: traits)
+            }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
@@ -48,14 +62,18 @@ lsp_collect_impl_spans: fn(index: SemIndex, def: SemDef, module_path: String, it
 lsp_collect_trait_block_spans: fn(index: SemIndex, def: SemDef, module_path: String, owner: String, blocks: [TraitImplBlock], spans: ^[LSPTarget], traits: Bool{false}) Never! {
     loop block in blocks {
         if block.compiler_generated -> next
-        if traits -> lsp_impl_span_add(index, def, module_path, block.trait_name, block.trait_span, spans, traits: true)
+        if traits {
+            lsp_impl_span_add(index, def, module_path, block.trait_name, block.trait_span, spans, traits: true)
+        }
         if !traits -> lsp_impl_span_add(index, def, module_path, owner, block.trait_span, spans)
     }
 }
 
 // Adds `span` when `name`, written in `module_path`, names `def`.
 lsp_impl_span_add: fn(index: SemIndex, def: SemDef, module_path: String, name: String, span: Span, spans: ^[LSPTarget], traits: Bool{false}) Never! {
-    if lsp_slot_is(index, lsp_named_type_slot(index, module_path, name, traits: traits), def) -> spans.push(LSPTarget{module_path: module_path, span: span})
+    if lsp_slot_is(index, lsp_named_type_slot(index, module_path, name, traits: traits), def) {
+        spans.push(LSPTarget{module_path: module_path, span: span})
+    }
 }
 
 // Whether `def` is the declaration at `slot`.
@@ -68,7 +86,9 @@ lsp_slot_is: fn(index: SemIndex, slot: Int?, def: SemDef) -> Bool Never! {
 // The trait a trait method's requirement belongs to, when `def` is one.
 lsp_requirement_trait: fn(index: SemIndex, def: SemDef) -> Int? Never! {
     loop member in index.members {
-        if member.origin != "trait_requirement" || member.identity != def.identity || member.module_path != def.module_path -> next
+        if member.origin != "trait_requirement" || member.identity != def.identity || member.module_path != def.module_path {
+            next
+        }
         return lsp_named_type_slot(index, member.module_path, member.owner, traits: true)
     }
     None
@@ -76,16 +96,20 @@ lsp_requirement_trait: fn(index: SemIndex, def: SemDef) -> Int? Never! {
 
 // Each name span in `checked`'s modules implementing `def`.
 lsp_implementation_spans: fn(checked: LSPChecked, index: SemIndex, def: SemDef) -> [LSPTarget] Never! {
-    spans := [LSPTarget]{}
+    ^spans: [LSPTarget]{}
     if {
-        lsp_hierarchy_trait_kind(def.kind) -> lsp_impl_spans(checked, index, def, spans, traits: true)
+        lsp_hierarchy_trait_kind(def.kind) -> {
+            lsp_impl_spans(checked, index, def, spans, traits: true)
+        }
         lsp_hierarchy_type_kind(def.kind) -> lsp_impl_spans(checked, index, def, spans)
         else -> {
             trait_slot: lsp_requirement_trait(index, def) ?? return spans
             loop member in index.members {
                 if member.origin != "trait_impl" || member.name != def.name -> next
                 named: lsp_named_type_slot(index, member.module_path, member.origin_trait, traits: true) ?? next
-                if named == trait_slot -> spans.push(LSPTarget{module_path: member.module_path, span: member.span})
+                if named == trait_slot {
+                    spans.push(LSPTarget{module_path: member.module_path, span: member.span})
+                }
             }
         }
     }
@@ -110,20 +134,24 @@ lsp_place_implementations: fn(checked: LSPChecked, def: SemDef, seen: ^[String:B
 // document's check that read the same text of the declaring module, as
 // references are found.
 lsp_open_implementations: fn(server: LSPServer, view: LSPView, def: SemDef) -> [LSPLocation] {
-    found := [LSPLocation]{}
-    seen := [String:Bool]{}
+    ^found: [LSPLocation]{}
+    ^seen: [String:Bool]{}
     lsp_place_implementations(view.checked, def, seen, found)
     declaring: view.checked.modules[lsp_module_index(view.checked, def.module_path) ?? return found]
     if declaring.physical_path == "" -> return found
-    uris := server.published.keys().to_list()
+    ^uris: server.published.keys().to_list()
     uris.sort()
     loop uri in uris {
         if uri == view.uri -> next
         checked: server.published[uri]
         index: checked.index ?? next
         loop module_ref in checked.modules {
-            if !lsp_source_paths_equal(module_ref.physical_path, declaring.physical_path) || module_ref.source != declaring.source -> next
-            if lsp_definition_at(index, LSPTarget{module_path: module_ref.path, span: def.def_span}) == .Val(same) -> lsp_place_implementations(checked, same, seen, found)
+            if !lsp_source_paths_equal(module_ref.physical_path, declaring.physical_path) || module_ref.source != declaring.source {
+                next
+            }
+            if lsp_definition_at(index, LSPTarget{module_path: module_ref.path, span: def.def_span}) == .Val(same) {
+                lsp_place_implementations(checked, same, seen, found)
+            }
             break
         }
     }
@@ -135,8 +163,10 @@ lsp_implementation_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
     index: at.view.checked.index ?? return lsp_response(id, "null")
     target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "[]")
     def: lsp_definition_at(index, target) ?? return lsp_response(id, "[]")
-    rows := [String]{}
-    loop location in lsp_open_implementations(server, at.view, def) -> rows.push(lsp_location_json(location))
+    ^rows: [String]{}
+    loop location in lsp_open_implementations(server, at.view, def) {
+        rows.push(lsp_location_json(location))
+    }
     lsp_response(id, "[{rows.join(",")}]")
 }
 
@@ -144,7 +174,7 @@ lsp_implementation_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
 // outermost first, each once.
 lsp_type_slots: fn(index: SemIndex, module_path: String, ty: Type, slots: ^[Int]) Never! {
     if ty == {
-        .Named(name) -> lsp_type_slot_add(index, module_path, name, slots)
+        .Named(name) -> { lsp_type_slot_add(index, module_path, name, slots) }
         .Apply(name, args) -> {
             lsp_type_slot_add(index, module_path, name, slots)
             loop arg in args -> lsp_type_slots(index, module_path, arg, slots)
@@ -152,7 +182,9 @@ lsp_type_slots: fn(index: SemIndex, module_path: String, ty: Type, slots: ^[Int]
         .TraitObject(bounds) -> {
             loop bound in bounds -> lsp_type_slot_add(index, module_path, bound, slots)
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Case(_, inner) | .Quantity(inner, _) -> lsp_type_slots(index, module_path, inner, slots)
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Case(_, inner) | .Quantity(inner, _) -> {
+            lsp_type_slots(index, module_path, inner, slots)
+        }
         .Map(key, _, value) -> {
             lsp_type_slots(index, module_path, key, slots)
             lsp_type_slots(index, module_path, value, slots)
@@ -182,18 +214,22 @@ lsp_type_slot_add: fn(index: SemIndex, module_path: String, name: String, slots:
 // parameter's or a field's type, a function's return type, a variant's enum,
 // and a type itself.
 lsp_value_type_slots: fn(index: SemIndex, def: SemDef) -> [Int] Never! {
-    slots := [Int]{}
+    ^slots: [Int]{}
     if def.kind == {
         .Local(_, ty) -> {
             if ty == .Val(shown) -> lsp_type_slots(index, def.module_path, shown, slots)
         }
-        .Param(ty) -> lsp_type_slots(index, def.module_path, ty, slots)
-        .Field(ty, _) -> lsp_type_slots(index, def.module_path, ty, slots)
+        .Param(ty) -> { lsp_type_slots(index, def.module_path, ty, slots) }
+        .Field(ty, _) -> { lsp_type_slots(index, def.module_path, ty, slots) }
         .Function(callable) -> {
-            if callable.return_type == .Val(returned) -> lsp_type_slots(index, def.module_path, returned, slots)
+            if callable.return_type == .Val(returned) {
+                lsp_type_slots(index, def.module_path, returned, slots)
+            }
         }
         .EnumVariant(parent) -> lsp_type_slot_add(index, def.module_path, parent, slots)
-        .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> lsp_type_slot_add(index, def.module_path, def.name, slots)
+        .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> {
+            lsp_type_slot_add(index, def.module_path, def.name, slots)
+        }
         .Module | .Tag | .Const -> {}
     }
     slots
@@ -205,7 +241,7 @@ lsp_type_definition_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
     index: at.view.checked.index ?? return lsp_response(id, "null")
     target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "null")
     def: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
-    rows := [String]{}
+    ^rows: [String]{}
     loop slot in lsp_value_type_slots(index, def) {
         declared: index.definitions[slot].def
         rows.push(lsp_location_json(lsp_location(at.view.checked, declared.module_path, declared.def_span) ?? next))

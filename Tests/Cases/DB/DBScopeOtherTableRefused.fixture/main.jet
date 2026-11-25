@@ -4,7 +4,7 @@
 use db: core.db
 
 run: fn() {
-    store := db.open_memory()
+    ^store: db.open_memory()
     _: db.migrate(store.all_rows(), "notes-v1", [SQL{"CREATE TABLE notes (owner TEXT, title TEXT)"}, SQL{"CREATE TABLE tags (tag TEXT)"}]) ?? panic("migrate: {err}")
     _: store.execute(SQL{"INSERT INTO tags (tag) VALUES ('work')"}) ?? panic("tags: {err}")
     owned: db.policy("notes", "owner == user") ?? panic("policy: {err}")

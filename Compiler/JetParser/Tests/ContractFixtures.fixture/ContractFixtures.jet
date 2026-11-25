@@ -30,7 +30,7 @@ limit: I64{0}
 // The marker structs of MARKER_SOURCE, in source order: each `Name: struct {`
 // line at the left margin.
 pc_marker_names: fn() -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop line in MARKER_SOURCE.lines() {
         if line.ends_with(": struct {{") && !line.starts_with(" ") && !line.starts_with("/") {
             names.push(line.removesuffix(": struct {{"))
@@ -44,7 +44,7 @@ pc_require: fn(ok: Bool, name: String) {
 }
 
 pc_binding_names: fn(parsed: ParseResult) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop item in parsed.program.items {
         if item == .Func(func) {
             loop statement in func.body {
@@ -56,7 +56,7 @@ pc_binding_names: fn(parsed: ParseResult) -> [String] {
 }
 
 pc_binding_values: fn(parsed: ParseResult) -> [Int] {
-    values := [Int]{}
+    ^values: [Int]{}
     loop item in parsed.program.items {
         if item == .Func(func) {
             loop statement in func.body {
@@ -140,7 +140,7 @@ pc_marker_metadata: fn() {
     parsed: parse_source(MARKER_SOURCE.bytes())
     pc_require(parsed.diagnostics.len() == 0, "complete canonical marker registry parses")
     markers: pc_marker_names()
-    seen := [String]{}
+    ^seen: [String]{}
     loop item in parsed.program.items {
         if item == .MarkerDecl(declaration) {
             pc_require(markers.contains(declaration.name), "unregistered marker {declaration.name}")
@@ -156,7 +156,7 @@ pc_marker_metadata: fn() {
     // Rule settings are values after the struct's fields in one list.
     facts: parse_source("Pre: struct {{\n    condition: String,\n    message: String,\n\n    impl Marker {{\n        sites: [.Function, .Method],\n        repeatable: true,\n    }}\n}}\nrun: fn() {{}}\n".bytes())
     pc_require(facts.diagnostics.len() == 0, "named marker metadata parses")
-    names := [String]{}
+    ^names: [String]{}
     loop item in facts.program.items {
         if item == .MarkerDecl(declaration) {
             loop parameter in declaration.params {
@@ -249,22 +249,22 @@ pc_same_state: fn(state: JetParserState, oracle: JetParserState) -> Bool {
 pc_current_kind_equivalence: fn() {
     sources: [String]{">> /* after split */ name", "/* block */ // line\n name", "/* block */ // line\n"}
     loop source in sources {
-        bytes := source.bytes()
-        lexed := lex(bytes)
+        ^bytes: source.bytes()
+        ^lexed: lex(bytes)
         pc_require(lexed.diagnostics.len() == 0, "current-kind fixture lexes real tokens")
-        prepared := parser_prepare_tokens(lexed.tokens.move(), lexed.tables)
+        ^prepared: parser_prepare_tokens(lexed.tokens.move(), lexed.tables)
         pc_require(prepared.diagnostics.len() == 0, "current-kind fixture uses canonical prepared tokens")
         end: bytes.len()
-        state := JetParserState{tokens: prepared.tokens.move(), position: 0, diagnostics: lexed.diagnostics.move(), source_end: end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: end, end: end}, statement_start: -1, line_starts: parser_line_starts(bytes), sources: [[U8]]{bytes.move()}, allow_environment_reads: false, tables: [TokenTables]{lexed.tables.move()}}
+        ^state: JetParserState{tokens: prepared.tokens.move(), position: 0, diagnostics: lexed.diagnostics.move(), source_end: end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: end, end: end}, statement_start: -1, line_starts: parser_line_starts(bytes), sources: [[U8]]{bytes.move()}, allow_environment_reads: false, tables: [TokenTables]{lexed.tables.move()}}
         pc_require(state.tokens.len() > 0 && state.tokens[state.tokens.len() - 1].kind == TOKEN_EOF, "fixture retains the actual lexical EOF token")
         split: source.starts_with(">>")
         if split {
             pc_require(state.tokens[0].kind == TOKEN_SHR, "real lexer produces the combined type-close token")
-            _ := parser_take_type_close(state)
+            ^_: parser_take_type_close(state)
             pc_require(state.pending_type_gt, "real type-close consumer leaves the pending second GT")
         }
         before: state.position
-        oracle := state.copy()
+        ^oracle: state.copy()
         expected: parser_current(oracle).kind
         actual: parser_current_kind(state)
         pc_require(actual == expected && pc_same_state(state, oracle), "kind-only query preserves full parser state and the token-accessor verdict")
@@ -348,7 +348,7 @@ pc_formatter_runtime_declarations: fn() {
 pc_qualified_generic_literal: fn() {
     parsed: parse_source("run: fn() {{\n case: testing.TypedHistoryCase<Set<Int>>{{value: 1}}\n}}\n".bytes())
     pc_require(parsed.diagnostics.len() == 0, "qualified generic literal parses without comparison diagnostics")
-    seen := false
+    ^seen: false
     loop item in parsed.program.items {
         if item == .Func(func) {
             loop statement in func.body {
@@ -369,9 +369,9 @@ pc_qualified_generic_literal: fn() {
 // (parser E0003): the parser still teaches after the lexer's error.
 pc_lexical_and_parser_diagnostics: fn() {
     parsed: parse_source("run: fn() {{\n __value: if {{\n true -> 1\n }}\n print(__value)\n}}\n".bytes())
-    reserved := false
-    parser := false
-    codes := [String]{}
+    ^reserved: false
+    ^parser: false
+    ^codes: [String]{}
     loop diagnostic in parsed.diagnostics {
         codes.push(diagnostic.code.copy())
         if diagnostic.code == "E0067" -> reserved = true

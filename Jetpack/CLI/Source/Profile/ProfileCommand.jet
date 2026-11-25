@@ -11,7 +11,7 @@ PackageProfileLoad: struct {
 }
 
 cli_cmd_profile: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     if (parsed.positional.get(1) ?? "") == TOOL_PROFILE_NAME && parsed.positional.len() > 1 {
         return cli_cmd_tool_profile(verification, theme, parsed)
     }
@@ -44,11 +44,11 @@ cli_package_profile_plan: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, pa
     loaded: cli_load_package_profile_plan(cache, theme, name) ?? return EXIT_USAGE
     plan: loaded.plan
     if parsed.flags.json {
-        facts := [{key: String, value: Dyn}]{}
+        ^facts: [{key: String, value: Dyn}]{}
         loop raw in cli_sorted_provider_fact_keys(plan.provider_facts) {
             facts.push({key: raw, value: plan.provider_facts[raw].to_json_tree()})
         }
-        packages := [Dyn]{}
+        ^packages: [Dyn]{}
         loop package in plan.packages {
             packages.push(
                 Dyn.Object(
@@ -65,7 +65,7 @@ cli_package_profile_plan: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, pa
                 ),
             )
         }
-        collisions := [{key: String, value: Dyn}]{}
+        ^collisions: [{key: String, value: Dyn}]{}
         loop path in cli_sorted_map_keys(plan.collisions) {
             collisions.push({key: path, value: Dyn.Text(plan.collisions[path])})
         }
@@ -107,7 +107,7 @@ cli_package_profile_plan: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, pa
 }
 
 cli_sorted_provider_fact_keys: fn(values: [String:ProviderFacts]) -> [String] Never! {
-    keys := values.keys().to_list()
+    ^keys: values.keys().to_list()
     keys.sort()
     keys
 }
@@ -147,7 +147,7 @@ cli_switch_package_generation_locked: fn(verification: StoreVerification, cache:
     _lock: cli_package_profile_lock(project_dir, plan.name)
     state: cli_package_profile_state_dir(project_dir, plan.name)
     records: cli_read_package_generations(verification, state)
-    generation := 0
+    ^generation: 0
     loop record in records {
         if record.fingerprint == plan.fingerprint -> generation = record.generation
     }
@@ -171,7 +171,7 @@ cli_package_profile_rollback: fn(verification: StoreVerification, cache: ^Worksp
         theme.error("profile generation name is unsafe", "generation names are single path components", "use a name such as `dev` or `release`")
         return EXIT_USAGE
     }
-    target := Int?{None}
+    ^target: Int?{None}
     if parsed.positional.get(2) == .Val(value) {
         number: cli_parse_u64(value) ?? 0
         if number == 0 {
@@ -194,7 +194,7 @@ cli_rollback_package_generation_locked: fn(verification: StoreVerification, proj
     state: cli_package_profile_state_dir(project_dir, name)
     records: cli_read_package_generations(verification, state)
     pointer: cli_read_package_current_pointer(verification, state)
-    generation := target ?? 0
+    ^generation: target ?? 0
     if target == None {
         current: pointer ?? return Err(CLIError.Other("profile has no current generation to roll back"))
         loop record in records {
@@ -232,7 +232,7 @@ cli_package_profile_generations: fn(verification: StoreVerification, cache: ^Wor
     project_dir: cli_project_env_root(cache, cli_current_dir())
     history: cli_package_generation_history_locked(verification, project_dir, name) ?? return cli_report_package_generation_error(theme, err)
     if parsed.flags.json {
-        generations := [Dyn]{}
+        ^generations: [Dyn]{}
         loop record in history.records {
             lock: cli_json_parse(record.metadata) ?? return cli_report_package_generation_error(theme, err)
             generations.push(Dyn.Object(["generation": Dyn.Int(record.generation), "fingerprint": Dyn.Text(record.fingerprint), "witness": Dyn.Text(record.witness), "lock": lock]))
@@ -245,7 +245,7 @@ cli_package_profile_generations: fn(verification: StoreVerification, cache: ^Wor
     } else if history.records.len() == 0 {
         theme.detail("package generation {name} has no built generations")
     } else {
-        index := history.records.len() - 1
+        ^index: history.records.len() - 1
         loop index >= 0 {
             record: history.records[index]
             marker: if (history.current ?? 0) == record.generation -> " current" else -> ""

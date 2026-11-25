@@ -32,9 +32,9 @@ drop_prefix: fn(text: String, count: Int) -> String { slice_str(text, count, tex
 
 decode_argv: fn(argv: [String]) -> Dyn Never! {
     // Options keep their argv order.
-    entries := [{key: String, value: Dyn}]{}
-    positionals := [Dyn]{}
-    i := 0
+    ^entries: [{key: String, value: Dyn}]{}
+    ^positionals: [Dyn]{}
+    ^i: 0
     // Skip argv[0] (program name) when present.
     if argv.len() > 0 -> i = 1
     loop {
@@ -104,11 +104,11 @@ parse_atom: fn(text: String) -> Dyn {
         "true" -> return Dyn.Bool(true)
         "false" -> return Dyn.Bool(false)
         "null" -> return Dyn.Null
-        else -> { _ := 0 }
+        else -> { ^_: 0 }
     }
-    n := 0
-    sign := 1
-    i := 0
+    ^n: 0
+    ^sign: 1
+    ^i: 0
     raw: text.bytes()
     if raw.len() > 0 && raw[0] == (U8{45}) {
         sign = -1
@@ -127,7 +127,7 @@ parse_atom: fn(text: String) -> Dyn {
 negative_number: fn(text: String) -> Bool {
     raw: text.bytes()
     if raw.len() < 2 || raw[0] != (U8{45}) -> return false
-    i := 1
+    ^i: 1
     loop i < raw.len() {
         if raw[i] < 48 || raw[i] > 57 -> return false
         i += 1
@@ -192,7 +192,7 @@ put_entry: fn(entries: ^[{key: String, value: Dyn}], key: String, value: Dyn) {
 }
 
 #Test("repeated value options replace their tuple slot without changing order") {
-    entries := [{key: String, value: Dyn}]{
+    ^entries: [{key: String, value: Dyn}]{
         {key: "first", value: Dyn.Text("old")},
         {key: "second", value: Dyn.Int(2)},
     }
@@ -219,7 +219,7 @@ index_of: fn(text: String, needle: String) -> Int {
     if nd.len() == 0 -> return 0
     if nd.len() > hay.len() -> return -1
     loop i in 0..<(hay.len() - nd.len() + 1) {
-        ok := true
+        ^ok: true
         loop j in 0..<nd.len() {
             if hay[i + j] != nd[j] -> ok = false
         }
@@ -285,7 +285,7 @@ get_int: fn(tree: Dyn, key: String) -> Int Never! {
 }
 
 positionals: fn(tree: Dyn) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     if tree == {
         .Object(entries) -> {
             v: object_get(entries, "_")
@@ -296,18 +296,18 @@ positionals: fn(tree: Dyn) -> [String] Never! {
                         if item == {
                             .Text(s) -> out.push(s.copy())
                             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
-                                _ := 0
+                                ^_: 0
                             }
                         }
                     }
                 }
                 .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
-                    _ := 0
+                    ^_: 0
                 }
             }
         }
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
-            _ := 0
+            ^_: 0
         }
     }
     out
@@ -400,7 +400,7 @@ get_choice: fn(tree: Dyn, key: String, choices: [String]) -> String? Never! {
 }
 
 missing_required: fn(tree: Dyn, defs: [ArgDef]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop d in defs {
         if d.required && !has(tree, d.dest) && !has(tree, d.name) -> out.push(d.name.copy())
     }
@@ -408,19 +408,19 @@ missing_required: fn(tree: Dyn, defs: [ArgDef]) -> [String] Never! {
 }
 
 apply_defaults: fn(tree: Dyn, defs: [ArgDef]) -> Dyn Never! {
-    out := tree
+    ^out: tree
     loop d in defs {
         if d.default_text.bytes().len() == 0 -> next
         if out.copy() == {
             .Object(entries) -> {
                 if object_get(entries, d.dest) == .None && object_get(entries, d.name) == .None {
-                    next_entries := entries.copy()
+                    ^next_entries: entries.copy()
                     next_entries.push({key: d.dest, value: parse_atom(d.default_text)})
                     out = Dyn.Object(next_entries)
                 }
             }
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
-                _ := 0
+                ^_: 0
             }
         }
     }
@@ -428,9 +428,9 @@ apply_defaults: fn(tree: Dyn, defs: [ArgDef]) -> Dyn Never! {
 }
 
 usage: fn(name: String, defs: [ArgDef]) -> String Never! {
-    s := "usage: {name}"
+    ^s: "usage: {name}"
     loop d in defs {
-        token := "--{d.name}"
+        ^token: "--{d.name}"
         if !d.flag -> token = "{token} <{d.dest}>"
         if d.required -> s = "{s} {token}" else -> s = "{s} [{token}]"
     }
@@ -438,13 +438,13 @@ usage: fn(name: String, defs: [ArgDef]) -> String Never! {
 }
 
 help_from: fn(name: String, summary: String, defs: [ArgDef]) -> String Never! {
-    s := "{usage(name, defs)}\n\n{summary}\n\nOptions:\n"
+    ^s: "{usage(name, defs)}\n\n{summary}\n\nOptions:\n"
     loop d in defs {
-        flag := "--{d.name}"
+        ^flag: "--{d.name}"
         if !d.flag -> flag = "{flag} <{d.dest}>"
-        req := ""
+        ^req: ""
         if d.required -> req = " (required)"
-        def := ""
+        ^def: ""
         if d.default_text.bytes().len() > 0 -> def = " [default: {d.default_text}]"
         s = "{s}  {flag}    {d.help}{req}{def}\n"
     }
@@ -557,7 +557,7 @@ CLITableCursor: struct {
 
 // The table field at the cursor: its decimal byte length, `:`, its bytes.
 cli_take: fn(cursor: ^CLITableCursor) -> String Never! {
-    length := 0
+    ^length: 0
     loop cursor.raw[cursor.at] != (U8{58}) {
         length = length * 10 + Int{cursor.raw[cursor.at]} - 48
         cursor.at += 1
@@ -577,9 +577,9 @@ cli_take: fn(cursor: ^CLITableCursor) -> String Never! {
 // field is its decimal byte length, `:` and the bytes. `envs` holds the
 // environment value of each input that names a variable, in table order.
 #Builtin.Role(.CLISpec) priv __cli_spec: fn(table: String, help: String, version: String, has_version: Bool, envs: [String?]) -> CLISpec Never! {
-    spec := CLISpec{help: help.copy(), version: if has_version -> Val(version.copy()) else -> None, inputs: [CLIInput]{}, commands: [CLICommand]{}}
-    cursor := CLITableCursor{table: table.copy(), raw: table.bytes(), at: 0}
-    env_index := 0
+    ^spec: CLISpec{help: help.copy(), version: if has_version -> Val(version.copy()) else -> None, inputs: [CLIInput]{}, commands: [CLICommand]{}}
+    ^cursor: CLITableCursor{table: table.copy(), raw: table.bytes(), at: 0}
+    ^env_index: 0
     loop cursor.at < cursor.raw.len() {
         if cursor.raw[cursor.at] == (U8{99}) {
             cursor.at += 1
@@ -597,14 +597,14 @@ cli_take: fn(cursor: ^CLITableCursor) -> String Never! {
         cursor.at += 7
         name: cli_take(cursor)
         short: cli_take(cursor)
-        default := String?{None}
+        ^default: String?{None}
         if has_default -> default = Val(cli_take(cursor))
-        choices := [String]{}
+        ^choices: [String]{}
         if kind == CLI_CHOICE {
             count: Int.parse(cli_take(cursor)) ?? 0
             loop _ in 0..<count -> choices.push(cli_take(cursor))
         }
-        env := String?{None}
+        ^env: String?{None}
         if has_env {
             env = envs[env_index].copy()
             env_index += 1
@@ -619,7 +619,7 @@ cli_take: fn(cursor: ^CLITableCursor) -> String Never! {
 // argv[0]'s file name without `.jet`.
 cli_program_name: fn(argv0: String) -> String Never! {
     raw: argv0.bytes()
-    start := 0
+    ^start: 0
     loop i in 0..<raw.len() {
         if raw[i] == (U8{47}) || raw[i] == (U8{92}) -> start = i + 1
     }
@@ -642,9 +642,9 @@ cli_root_level: fn(spec: CLISpec, program: String) -> CLILevel Never! {
 // A command inherits every root input; its own
 // input of the same name gives way to the inherited one.
 cli_command_level: fn(spec: CLISpec, program: String, command: CLICommand) -> CLILevel Never! {
-    local := [CLIInput]{}
+    ^local: [CLIInput]{}
     loop input in command.inputs {
-        shadowed := false
+        ^shadowed: false
         loop parent in spec.inputs {
             if parent.name == input.name && parent.flag == input.flag -> shadowed = true
         }
@@ -654,7 +654,7 @@ cli_command_level: fn(spec: CLISpec, program: String, command: CLICommand) -> CL
 }
 
 cli_all: fn(level: CLILevel) -> [CLIInput] Never! {
-    all := level.inherited.copy()
+    ^all: level.inherited.copy()
     loop input in level.local -> all.push(input.copy())
     all
 }
@@ -726,8 +726,8 @@ cli_failed: fn(message: String) -> CLIParsed Never! { cli_parsed(2, message) }
 
 // `text` padded with spaces to `width` bytes (the ArgsSpec help columns).
 cli_pad: fn(text: String, width: Int) -> String Never! {
-    out := text.copy()
-    count := text.bytes().len()
+    ^out: text.copy()
+    ^count: text.bytes().len()
     loop count < width {
         out = "{out} "
         count += 1
@@ -736,7 +736,7 @@ cli_pad: fn(text: String, width: Int) -> String Never! {
 }
 
 cli_ascii_lower: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         if byte >= 65 && byte <= 90 -> out.push(byte + U8{32}) else -> out.push(byte)
     }
@@ -744,12 +744,12 @@ cli_ascii_lower: fn(text: String) -> String Never! {
 }
 
 #Builtin.Role(.CLIIsInt) priv __cli_is_int: fn(text: String) -> Bool Never! {
-    _ := Int.parse(text) ?? return false
+    ^_: Int.parse(text) ?? return false
     true
 }
 
 #Builtin.Role(.CLIIsFloat) priv __cli_is_float: fn(text: String) -> Bool Never! {
-    _ := Float.parse(text) ?? return false
+    ^_: Float.parse(text) ?? return false
     true
 }
 
@@ -773,12 +773,12 @@ cli_store_error: fn(input: CLIInput, value: String, float_ok: fn(String) -> Bool
 cli_edit_distance: fn(a: String, b: String) -> Int Never! {
     left: a.bytes()
     right: b.bytes()
-    previous := [Int]{}
+    ^previous: [Int]{}
     loop j in 0..<(right.len() + 1) -> previous.push(j)
     loop (i, x) in left {
-        current := [Int]{i + 1}
+        ^current: [Int]{i + 1}
         loop (j, y) in right {
-            best := previous[j]
+            ^best: previous[j]
             if x != y {
                 if previous[j + 1] < best -> best = previous[j + 1]
                 if current[j] < best -> best = current[j]
@@ -813,11 +813,11 @@ cli_unknown: fn(name: String, inputs: [CLIInput], help: String) -> String Never!
 // precedence.
 cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, float_ok: fn(String) -> Bool Never!) -> CLIParsed Never! {
     all: cli_all(level)
-    out := cli_parsed(-1, "")
+    ^out: cli_parsed(-1, "")
     root_help: start >= argv.len() && level.commands.len() > 0
     cli_set_flag(out, "help", false)
     cli_set_flag(out, "version", false)
-    fallbacks := CLIValues{names: [String]{}, values: [String]{}}
+    ^fallbacks: CLIValues{names: [String]{}, values: [String]{}}
     loop input in all {
         if input.flag {
             cli_set_flag(out, input.name, false)
@@ -827,7 +827,7 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
             cli_store(fallbacks, input.name, value)
         }
     }
-    i := start
+    ^i: start
     loop i < argv.len() {
         arg: argv[i].copy()
         if arg == "--" {
@@ -880,7 +880,7 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
         if starts(arg, "-") && arg.bytes().len() > 1 {
             rest: drop_prefix(arg, 1)
             length: rest.bytes().len()
-            k := 0
+            ^k: 0
             loop k < length {
                 short: slice_str(rest, k, k + 1)
                 found: cli_find_short(all, short)
@@ -895,7 +895,7 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
                     next
                 }
                 // A value option takes the rest of a cluster, else the next word.
-                value := slice_str(rest, k + 1, length)
+                ^value: slice_str(rest, k + 1, length)
                 if value.bytes().len() == 0 {
                     i += 1
                     if i >= argv.len() {
@@ -913,7 +913,7 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
             next
         }
         if out.command.bytes().len() == 0 {
-            command_index := -1
+            ^command_index: -1
             loop (index, command) in level.commands {
                 if command.name == arg {
                     command_index = index
@@ -948,9 +948,9 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
     }
     // Named wins: a named value satisfies its positional slot and
     // consumes one bare value without shifting later positionals.
-    bare := 0
-    missing := [String]{}
-    filled := [String]{}
+    ^bare: 0
+    ^missing: [String]{}
+    ^filled: [String]{}
     loop input in all {
         if !input.positional -> next
         if cli_slot(out.options.names, input.name) >= 0 {
@@ -997,7 +997,7 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
 cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!) -> CLIParsed Never! {
     program: cli_program_name(if argv.len() > 0 -> argv[0].copy() else -> "")
     root: cli_root_level(spec, program)
-    parsed := cli_parse_level(spec, root, argv, 1, float_ok)
+    ^parsed: cli_parse_level(spec, root, argv, 1, float_ok)
     if parsed.status >= 0 -> return parsed
     if cli_get_flag(parsed, "help") ?? false {
         parsed.status = 0
@@ -1019,7 +1019,7 @@ cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!
         return parsed
     }
     // Environment and default values decode like argv values.
-    inputs := spec.inputs.copy()
+    ^inputs: spec.inputs.copy()
     loop command in spec.commands {
         if command.name == parsed.command {
             loop input in command.inputs -> inputs.push(input.copy())
@@ -1052,9 +1052,13 @@ cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!
 
 #Builtin.Role(.CLIStatus) priv __cli_status: fn(parsed: CLIParsed) -> Int Never! { parsed.status }
 
-#Builtin.Role(.CLIMessage) priv __cli_message: fn(parsed: CLIParsed) -> String Never! { parsed.message.copy() }
+#Builtin.Role(.CLIMessage) priv __cli_message: fn(parsed: CLIParsed) -> String Never! {
+    parsed.message.copy()
+}
 
-#Builtin.Role(.CLICommandName) priv __cli_command_name: fn(parsed: CLIParsed) -> String Never! { parsed.command.copy() }
+#Builtin.Role(.CLICommandName) priv __cli_command_name: fn(parsed: CLIParsed) -> String Never! {
+    parsed.command.copy()
+}
 
 #Builtin.Role(.CLIFlag) priv __cli_flag: fn(parsed: CLIParsed, name: String) -> Bool Never! {
     cli_get_flag(parsed, name) ?? false
@@ -1069,15 +1073,25 @@ cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!
 }
 
 // The decoded value of an input from its text, `value` (None when absent).
-#Builtin.Role(.CLITextOf) priv __cli_text_of: fn(value: String?) -> String Never! { value.copy() ?? "" }
+#Builtin.Role(.CLITextOf) priv __cli_text_of: fn(value: String?) -> String Never! {
+    value.copy() ?? ""
+}
 
-#Builtin.Role(.CLIIntOf) priv __cli_int_of: fn(value: String?) -> Int Never! { Int.parse(__cli_text_of(value)) ?? 0 }
+#Builtin.Role(.CLIIntOf) priv __cli_int_of: fn(value: String?) -> Int Never! {
+    Int.parse(__cli_text_of(value)) ?? 0
+}
 
-#Builtin.Role(.CLIFloatOf) priv __cli_float_of: fn(value: String?) -> Float Never! { Float.parse(__cli_text_of(value)) ?? 0.0 }
+#Builtin.Role(.CLIFloatOf) priv __cli_float_of: fn(value: String?) -> Float Never! {
+    Float.parse(__cli_text_of(value)) ?? 0.0
+}
 
-#Builtin.Role(.CLIBoolOf) priv __cli_bool_of: fn(value: String?) -> Bool Never! { cli_ascii_lower(__cli_text_of(value)) == "true" }
+#Builtin.Role(.CLIBoolOf) priv __cli_bool_of: fn(value: String?) -> Bool Never! {
+    cli_ascii_lower(__cli_text_of(value)) == "true"
+}
 
-#Builtin.Role(.CLITextOptOf) priv __cli_text_opt_of: fn(value: String?) -> String? Never! { value.copy() }
+#Builtin.Role(.CLITextOptOf) priv __cli_text_opt_of: fn(value: String?) -> String? Never! {
+    value.copy()
+}
 
 #Builtin.Role(.CLIIntOptOf) priv __cli_int_opt_of: fn(value: String?) -> Int? Never! {
     if value == None -> return None
@@ -1110,13 +1124,17 @@ cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!
 
 #Builtin.Role(.CLILong) priv __cli_long: fn(arg: String) -> Bool Never! { starts(arg, "--") }
 
-#Builtin.Role(.CLIShort) priv __cli_short: fn(arg: String) -> Bool Never! { starts(arg, "-") && arg.bytes().len() > 1 }
+#Builtin.Role(.CLIShort) priv __cli_short: fn(arg: String) -> Bool Never! {
+    starts(arg, "-") && arg.bytes().len() > 1
+}
 
 #Builtin.Role(.CLIRest) priv __cli_rest: fn(text: String, start: Int) -> String Never! {
     slice_str(text, start, text.bytes().len())
 }
 
-#Builtin.Role(.CLISlice) priv __cli_slice: fn(text: String, start: Int, end: Int) -> String Never! { slice_str(text, start, end) }
+#Builtin.Role(.CLISlice) priv __cli_slice: fn(text: String, start: Int, end: Int) -> String Never! {
+    slice_str(text, start, end)
+}
 
 #Builtin.Role(.CLIEq) priv __cli_eq: fn(text: String) -> Int Never! {
     loop (at, byte) in text.bytes() {
@@ -1142,7 +1160,7 @@ cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!
 }
 
 #Builtin.Role(.CLISurplus) priv __cli_surplus: fn(positionals: [String], start: Int) -> String Never! {
-    surplus := [String]{}
+    ^surplus: [String]{}
     loop index in start..<positionals.len() -> surplus.push("`{positionals[index]}`")
     plural: if surplus.len() == 1 -> "" else -> "s"
     "unexpected argument{plural}: {surplus.join(", ")}"
@@ -1199,13 +1217,13 @@ ArgsSpec: struct {
     levels: [ArgsLevel],
 
     description: fn(^^self, description: String) -> ArgsSpec Never! {
-        out := self.move()
+        ^out: self.move()
         out.levels[0].description = Val(description.copy())
         out
     }
 
     version: fn(^^self, version: String) -> ArgsSpec Never! {
-        out := self.move()
+        ^out: self.move()
         out.levels[0].version = Val(version.copy())
         out
     }
@@ -1244,7 +1262,7 @@ ArgsSpec: struct {
 
     // `choices` is a comma list; each choice is trimmed and an empty one dropped.
     option_choice: fn(^^self, name: String, help: String, meta: String, choices: String) -> ArgsSpec Never! {
-        entry := args_option_entry(name, help, meta, CLI_CHOICE)
+        ^entry: args_option_entry(name, help, meta, CLI_CHOICE)
         loop part in choices.split(",") {
             choice: part.trim()
             if choice.bytes().len() > 0 -> entry.choices.push(choice.copy())
@@ -1268,15 +1286,15 @@ ArgsSpec: struct {
     // own input of the same name gives way to the inherited one. Its levels move
     // after the parent's, so each nested level index shifts by the parent count.
     subcommand: fn(^^self, name: String, help: String, command: ^^ArgsSpec) -> ArgsSpec Never! {
-        out := self.move()
-        nested := command.move()
-        inherited := out.levels[0].inherited.copy()
+        ^out: self.move()
+        ^nested: command.move()
+        ^inherited: out.levels[0].inherited.copy()
         loop entry in out.levels[0].entries {
             if entry.kind != ARG_COMMAND -> inherited.push(entry.copy())
         }
-        kept := [ArgEntry]{}
+        ^kept: [ArgEntry]{}
         loop entry in nested.levels[0].entries {
-            shadowed := false
+            ^shadowed: false
             loop parent in inherited {
                 if args_same_input(parent, entry) -> shadowed = true
             }
@@ -1284,7 +1302,7 @@ ArgsSpec: struct {
         }
         nested.levels[0].entries = kept.move()
         loop entry in inherited {
-            present := false
+            ^present: false
             loop parent in nested.levels[0].inherited {
                 if args_same_input(parent, entry) -> present = true
             }
@@ -1294,7 +1312,7 @@ ArgsSpec: struct {
         if nested.levels[0].inherited_version -> nested.levels[0].version = None
         offset: out.levels.len()
         loop level in nested.levels {
-            moved := level.copy()
+            ^moved: level.copy()
             loop index in 0..<moved.entries.len() {
                 if moved.entries[index].kind == ARG_COMMAND {
                     moved.entries[index].nested = moved.entries[index].nested + offset
@@ -1302,7 +1320,7 @@ ArgsSpec: struct {
             }
             out.levels.push(moved)
         }
-        entry := args_entry(ARG_COMMAND, name, None, help, "", None, None, false, false, CLI_TEXT)
+        ^entry: args_entry(ARG_COMMAND, name, None, help, "", None, None, false, false, CLI_TEXT)
         entry.nested = offset
         out.levels[0].entries.push(entry)
         out
@@ -1313,7 +1331,7 @@ ArgsSpec: struct {
     // The words a shell completes, in declaration
     // order.
     completion: fn(self, shell: String) -> String Never! {
-        words := [String]{"--help"}
+        ^words: [String]{"--help"}
         if self.levels[0].version != None -> words.push("--version")
         loop entry in self.levels[0].entries {
             if entry.kind == ARG_FLAG || entry.kind == ARG_OPTION {
@@ -1327,7 +1345,7 @@ ArgsSpec: struct {
     // Parses the user's words (`process.args()`, no program name); a refusal
     // is the Err's message.
     parse: fn(self, args: [String]) -[Env, Exec.Args]> ParsedArgs Err! {
-        out := args_parsed()
+        ^out: args_parsed()
         refusal: args_parse_level(self, 0, args, 0, out)
         if refusal.bytes().len() > 0 -> return Err(refusal)
         Ok(out)
@@ -1336,7 +1354,7 @@ ArgsSpec: struct {
     // `--help` prints the help and exits 0; a
     // refusal goes to stderr and exits 2.
     parse_or_exit: fn(self, args: [String]) -[Env, Exec, Exec.Args, IO, Time.Wait]> ParsedArgs Never! {
-        out := args_parsed()
+        ^out: args_parsed()
         refusal: args_parse_level(self, 0, args, 0, out)
         if refusal.bytes().len() > 0 -> core.process.fail(2, refusal)
         if out.flags.get("help") ?? false {
@@ -1403,7 +1421,7 @@ args_option_entry: fn(name: String, help: String, meta: String, value: Int) -> A
 }
 
 args_with: fn(spec: ^^ArgsSpec, entry: ^^ArgEntry) -> ArgsSpec Never! {
-    out := spec.move()
+    ^out: spec.move()
     out.levels[0].entries.push(entry)
     out
 }
@@ -1413,7 +1431,7 @@ args_same_input: fn(left: ArgEntry, right: ArgEntry) -> Bool Never! {
 }
 
 args_label: fn(entry: ArgEntry) -> String Never! {
-    out := "--{entry.name}"
+    ^out: "--{entry.name}"
     if entry.short == .Val(short) -> out = "-{short}, {out}"
     if entry.kind == ARG_OPTION -> out = "{out} {entry.meta}"
     out
@@ -1422,8 +1440,8 @@ args_label: fn(entry: ArgEntry) -> String Never! {
 // The help text for one level. Every level names the program argv[0] runs as.
 args_help: fn(spec: ArgsSpec, at: Int) -[Exec.Args]> String Never! {
     argv: rt.argv()
-    s := "Usage: {cli_program_name(if argv.len() > 0 -> argv[0].copy() else -> "")}"
-    positional_count := 0
+    ^s: "Usage: {cli_program_name(if argv.len() > 0 -> argv[0].copy() else -> "")}"
+    ^positional_count: 0
     loop entry in spec.levels[at].entries {
         if entry.kind == ARG_POSITIONAL {
             s = "{s} {entry.name}"
@@ -1442,7 +1460,7 @@ args_help: fn(spec: ArgsSpec, at: Int) -[Exec.Args]> String Never! {
     s = "{s}\nOptions:\n"
     loop entry in spec.levels[at].entries {
         if entry.kind == ARG_FLAG -> s = "{s}  {cli_pad(args_label(entry), 24)} {entry.help}\n" else if entry.kind == ARG_OPTION {
-            note := entry.help.copy()
+            ^note: entry.help.copy()
             if entry.required -> note = "{note} (required)"
             if entry.repeat -> note = "{note} (repeatable)"
             if entry.default == .Val(value) {
@@ -1461,7 +1479,7 @@ args_help: fn(spec: ArgsSpec, at: Int) -[Exec.Args]> String Never! {
 
 // The inherited inputs, then the level's own.
 args_all: fn(level: ArgsLevel) -> [ArgEntry] Never! {
-    all := level.inherited.copy()
+    ^all: level.inherited.copy()
     loop entry in level.entries {
         if entry.kind != ARG_COMMAND -> all.push(entry.copy())
     }
@@ -1495,7 +1513,7 @@ args_store: fn(options: ^[String:[String]], entry: ArgEntry, value: String) -> S
     if entry.value == CLI_CHOICE && !entry.choices.contains(value) {
         return __cli_choice_refusal(entry.name, value, entry.choices.join(", "))
     }
-    values := if entry.repeat -> (options.get(entry.name) ?? [String]{}).copy() else -> [String]{}
+    ^values: if entry.repeat -> (options.get(entry.name) ?? [String]{}).copy() else -> [String]{}
     values.push(value.copy())
     options[entry.name.copy()] = values.move()
     ""
@@ -1503,7 +1521,7 @@ args_store: fn(options: ^[String:[String]], entry: ArgEntry, value: String) -> S
 
 // The unknown-input refusal, with the help text after it.
 args_unknown: fn(name: String, all: [ArgEntry], help: String) -> String Never! {
-    suggestion := ""
+    ^suggestion: ""
     loop entry in all {
         if (entry.kind == ARG_FLAG || entry.kind == ARG_OPTION) && cli_edit_distance(entry.name, name) <= 2 {
             suggestion = "\ndid you mean `--{entry.name}`?"
@@ -1522,7 +1540,7 @@ args_parsed: fn() -> ParsedArgs Never! {
 // command word and the positional fill, with explicit > env > default.
 args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: ^ParsedArgs) -[Env, Exec.Args]> String Never! {
     all: args_all(spec.levels[at])
-    has_commands := false
+    ^has_commands: false
     loop entry in spec.levels[at].entries {
         if entry.kind == ARG_COMMAND -> has_commands = true
     }
@@ -1530,7 +1548,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: ^
     root_help: start >= argv.len() && has_commands
     out.flags["help"] = false
     out.flags["version"] = false
-    fallbacks := [String:String]{}
+    ^fallbacks: [String:String]{}
     loop entry in all {
         if entry.kind == ARG_FLAG {
             out.flags[entry.name.copy()] = false
@@ -1542,7 +1560,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: ^
             fallbacks[entry.name.copy()] = value.copy()
         }
     }
-    i := start
+    ^i: start
     loop i < argv.len() {
         arg: argv[i].copy()
         if arg == "--" {
@@ -1591,7 +1609,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: ^
         if starts(arg, "-") && arg.bytes().len() > 1 {
             rest: drop_prefix(arg, 1)
             length: rest.bytes().len()
-            k := 0
+            ^k: 0
             loop k < length {
                 short: slice_str(rest, k, k + 1)
                 found: args_find_short(all, short)
@@ -1603,7 +1621,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: ^
                     next
                 }
                 // A value option takes the rest of a cluster, else the next word.
-                value := slice_str(rest, k + 1, length)
+                ^value: slice_str(rest, k + 1, length)
                 if value.bytes().len() == 0 {
                     i += 1
                     if i >= argv.len() {
@@ -1620,7 +1638,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: ^
             next
         }
         if out.command == None {
-            command := -1
+            ^command: -1
             loop entry in spec.levels[at].entries {
                 if entry.kind == ARG_COMMAND && entry.name == arg {
                     command = entry.nested
@@ -1628,7 +1646,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: ^
                 }
             }
             if command >= 0 {
-                nested := args_parsed()
+                ^nested: args_parsed()
                 refusal: args_parse_level(spec, command, argv, i + 1, nested)
                 if refusal.bytes().len() > 0 -> return refusal
                 loop (name, value) in nested.flags {
@@ -1658,8 +1676,8 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: ^
     }
     // Named wins: a named value satisfies its positional slot and
     // consumes one bare value without shifting later positionals.
-    bare := 0
-    missing := [String]{}
+    ^bare: 0
+    ^missing: [String]{}
     loop entry in all {
         if entry.kind != ARG_POSITIONAL -> next
         if out.option_values.get(entry.name) != None {
@@ -1679,13 +1697,15 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: ^
         } else { missing.push(entry.name.copy()) }
     }
     if out.command == None && bare < out.positionals.len() {
-        surplus := [String]{}
+        ^surplus: [String]{}
         loop index in bare..<out.positionals.len() -> surplus.push("`{out.positionals[index]}`")
         plural: if surplus.len() == 1 -> "" else -> "s"
         return "unexpected argument{plural}: {surplus.join(", ")}\n\n{args_help(spec, at)}"
     }
     loop (name, value) in fallbacks {
-        if out.option_values.get(name) == None -> out.option_values[name.copy()] = [String]{value.copy()}
+        if out.option_values.get(name) == None {
+            out.option_values[name.copy()] = [String]{value.copy()}
+        }
     }
     asked_help: out.flags.get("help") ?? false
     if missing.len() > 0 && !root_help && !asked_help {

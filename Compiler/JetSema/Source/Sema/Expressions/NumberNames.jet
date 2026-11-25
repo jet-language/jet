@@ -123,8 +123,8 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
     required: sema_call_resolved_type(wanted, check.environment.*, check.program.*)
     if sema_call_type_assignable(required, own, check) ?? true -> return unhandled
     if sema_expr_numeric_widening_to(own, required) == (Val(true)) -> return unhandled
-    trial := [Diagnostic]{}
-    fitted := sema_probe_expression(literal, expected, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
+    ^trial: [Diagnostic]{}
+    ^fitted: sema_probe_expression(literal, expected, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
     if sema_has_error_since(trial, 0) {
         return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
     }
@@ -146,7 +146,7 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
             return SemaNumberNameRead{handled: true, value: None}
         }
     }
-    value := sema_check_expression(literal, expected, check) ?? return SemaNumberNameRead{handled: true, value: None}
+    ^value: sema_check_expression(literal, expected, check) ?? return SemaNumberNameRead{handled: true, value: None}
     value.span = span
     SemaNumberNameRead{handled: true, value: Val(value)}
 }
@@ -177,12 +177,12 @@ sema_expr_number_constant_reread: fn(name: String, span: Span, index: Int, expec
     if sema_call_type_assignable(required, own, check) ?? true -> return unhandled
     if sema_expr_numeric_widening_to(own, required) == (Val(true)) -> return unhandled
     literal: sema_expr_number_constant_literal(symbol, check.program.*) ?? return unhandled
-    trial := [Diagnostic]{}
+    ^trial: [Diagnostic]{}
     _: sema_probe_expression(literal, expected, check, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
     if sema_has_error_since(trial, 0) {
         return sema_expr_number_unfit(name, span, required, literal, trial, check.diagnostics)
     }
-    value := sema_check_expression(literal, expected, check) ?? return SemaNumberNameRead{handled: true, value: None}
+    ^value: sema_check_expression(literal, expected, check) ?? return SemaNumberNameRead{handled: true, value: None}
     value.span = span
     SemaNumberNameRead{handled: true, value: Val(value)}
 }
@@ -221,7 +221,7 @@ sema_expr_number_constant_row: fn(name: String, check: SemaBodyCheck) -> Int? {
 // and pointing at the number. Handled once one is reported; any other
 // refusal is the caller's ordinary mismatch.
 sema_expr_number_unfit: fn(name: String, span: Span, required: Type, literal: Expr, trial: [Diagnostic], diagnostics: ^[Diagnostic]) -> SemaNumberNameRead {
-    reported := false
+    ^reported: false
     if !sema_expr_is_numeric(required) && sema_expr_precise_name(required) == None {
         return SemaNumberNameRead{handled: false, value: None}
     }
@@ -229,7 +229,7 @@ sema_expr_number_unfit: fn(name: String, span: Span, required: Type, literal: Ex
     loop refusal in trial {
         if refusal.severity != DIAGNOSTIC_ERROR -> next
         // copy: the trial's report moves to the use; the trial list is dropped.
-        moved := refusal.copy()
+        ^moved: refusal.copy()
         moved.span = Val(span)
         diagnostics.push(diagnostic_with_label(moved, number, "`{name}` is this number"))
         reported = true
@@ -319,8 +319,8 @@ sema_expr_number_target_retype: fn(index: Int, offered: Type, name_span: Span, c
     }
     // copy: the scope row keeps its literal for the name's other uses.
     literal: (check.scopes.bindings[index].number_literal ?? return).copy()
-    trial := [Diagnostic]{}
-    fitted := sema_probe_expression(literal, Val(offered), check, trial) ?? return
+    ^trial: [Diagnostic]{}
+    ^fitted: sema_probe_expression(literal, Val(offered), check, trial) ?? return
     if sema_has_error_since(trial, 0) {
         return
     }
@@ -344,7 +344,7 @@ sema_expr_number_retype: fn(binding: Span, known: [SemaNumberRetype]) -> Type? N
 sema_expr_number_accept_retypes: fn(known: ^[SemaNumberRetype], found: [SemaNumberRetype]) -> Bool Never! {
     known_before: known.len()
     loop retype in found {
-        decided := -1
+        ^decided: -1
         loop index in 0..<known.len() {
             if sema_expr_number_same_binding(known[index].binding, retype.binding) {
                 decided = index

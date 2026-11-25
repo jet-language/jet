@@ -82,7 +82,7 @@ sema_single_use_holder: fn(ty: Type, environment: SemaScopeEnvironment, program:
     if sema_copy_table_facts(program.copy_facts, row) == .Val(facts) && !facts.holds_resource {
         return false
     }
-    seen := [String]{}
+    ^seen: [String]{}
     sema_copy_holds_declared(ty, graph, caller, seen, MarkerHook.SingleUse)
 }
 
@@ -96,7 +96,7 @@ sema_single_use_duty_methods: fn(ty: Type) -> [String] Never! {
 // The job a duty names: "`join` or `detach`", or "`consume`".
 sema_single_use_job: fn(methods: [String]) -> String Never! {
     if methods.len() == 0 -> return "`consume`"
-    names := [String]{}
+    ^names: [String]{}
     loop method in methods -> names.push("`{method}`")
     names.join(" or ")
 }
@@ -105,7 +105,7 @@ sema_single_use_job: fn(methods: [String]) -> String Never! {
 // nothing when only a move does it.
 sema_single_use_job_calls: fn(methods: [String]) -> String Never! {
     if methods.len() == 0 -> return ""
-    calls := [String]{}
+    ^calls: [String]{}
     loop method in methods -> calls.push("`.{method}()`")
     "call {calls.join(" or ")} on it, "
 }
@@ -132,7 +132,7 @@ sema_single_use_note_binding: fn(check: ^SemaBodyCheck, symbol: Symbol) {
 // The fields of a tuple or of a struct (not itself `#SingleUse`) that hold
 // its duty; empty when only a move of the whole value discharges it.
 sema_single_use_duty_fields: fn(ty: Type, check: SemaBodyCheck) -> [String] {
-    fields := [String]{}
+    ^fields: [String]{}
     if ty == {
         .Tuple(members) -> {
             loop member in members {
@@ -151,7 +151,7 @@ sema_single_use_duty_fields: fn(ty: Type, check: SemaBodyCheck) -> [String] {
             bindings: sema_copy_generic_bindings(nominal, ty).bindings
             loop field in nominal.fields {
                 if field.computed -> next
-                seen := [String]{}
+                ^seen: [String]{}
                 if sema_copy_holds_declared(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings), graph, caller, seen, MarkerHook.SingleUse) {
                     fields.push(field.symbol.name)
                 }
@@ -288,7 +288,7 @@ sema_single_use_note_drain: fn(tables: ASTTables, state: ^SemaOwnershipState, co
         if sema_stmt_refutable_loop_body_can_break(body) {
             return
         }
-        drain := SemaSingleUseDrain{name: name, mentions: 0, reads: 0, pops: 0}
+        ^drain: SemaSingleUseDrain{name: name, mentions: 0, reads: 0, pops: 0}
         loop statement in body {
             ast_visit_statement(tables, statement, fn(expression: ExprNode) { drain.visit(tables, expression) }, true)
         }
@@ -385,8 +385,8 @@ sema_single_use_check_paths: fn(check: ^SemaBodyCheck, paths: [[Bool]]) {
         fact: check.state.declarations[row]
         if !fact.active || fact.scope_depth != check.state.scope_depth -> next
         if sema_single_use_moved(check.state, fact) -> next
-        consumed := false
-        kept := false
+        ^consumed: false
+        ^kept: false
         loop moves in paths {
             if {
                 moves[index] -> consumed = true
@@ -407,7 +407,7 @@ sema_single_use_check_consume: fn(call: Call, check: ^SemaBodyCheck) -> SemaDire
     if call.args.len() != 1 {
         check.diagnostics.push(sema_error("E0103", call.name_span, "`consume` discards exactly one value", "`drop` throws a single value away, running its cleanup", "e.g. consume(x)"))
         loop argument_index in 0..<call.args.len() {
-            _ := sema_check_expression(call.args[argument_index].expr, None, check)
+            ^_: sema_check_expression(call.args[argument_index].expr, None, check)
         }
         return SemaDirectSpecialCheck{handled: true, value: None}
     }

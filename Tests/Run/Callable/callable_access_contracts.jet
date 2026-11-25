@@ -15,7 +15,7 @@ Wrapper: struct {
 }
 
 grow: fn(values: ^^[Int]) -> Int {
-    kept := values
+    ^kept: values
     kept.push(0)
     kept.len()
 }
@@ -23,25 +23,25 @@ grow: fn(values: ^^[Int]) -> Int {
 take_through: fn(f: fn(^^[Int]) -> Int, values: ^^[Int]) -> Int { f(values) }
 
 run: fn() {
-    named := [Int]{}
+    ^named: [Int]{}
     through(push_one, named)
     print("named {named}")
-    plain := [Int]{}
+    ^plain: [Int]{}
     through(fn(buf: ^[Int]) { buf.push(1) }, plain)
     print("lambda {plain}")
     one: 1
-    captured := [Int]{}
+    ^captured: [Int]{}
     through(fn(buf) { buf.push(one) }, captured)
     print("capturing {captured}")
-    generic := [Int]{}
+    ^generic: [Int]{}
     through_generic(push_one, generic)
     print("generic {generic}")
     wrapper: Wrapper{edit: push_one}
-    wrapped := [Int]{}
+    ^wrapped: [Int]{}
     wrapper.edit(wrapped)
     print("wrapper {wrapped}")
     held: Wrapper{edit: fn(buf: ^[Int]) { buf.push(1) }}
-    twice := [Int]{}
+    ^twice: [Int]{}
     held.edit(twice)
     through(held.edit, twice)
     print("held {twice}")

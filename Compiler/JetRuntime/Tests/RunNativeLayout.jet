@@ -37,7 +37,7 @@ fail: fn(message: String) -> Never { process.fail(1, message) }
 // path.resolve against the working directory.
 resolve: fn(cwd: String, path: String) -> String {
     full: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in full.split("/").to_list() {
         if part == ".." {
             if parts.len() > 0 -> _: parts.pop()
@@ -62,11 +62,11 @@ byte: fn(value: Int) -> U8 { checked(U8{value}) ?? U8{0} }
 // little-endian word at byte `at` (pointer rows add root and are skipped).
 literal_block: fn(source: String) -> [U8] {
     pattern: re.compile("layout_put\\(wrapping\\(root \\+ I64\\{{([0-9]+)\\}}\\), I64\\{{([0-9]+)\\}}\\)") ?? fail("literal pattern: {err}")
-    block := [U8]{}
+    ^block: [U8]{}
     loop _ in 0..<LITERAL_BYTES -> block.push(U8{0})
     loop found in pattern.matches(source) {
         at: Int.parse(found.group(1) ?? "") ?? 0
-        rest := Int.parse(found.group(2) ?? "") ?? 0
+        ^rest: Int.parse(found.group(2) ?? "") ?? 0
         loop k in 0..<8 {
             if at + k < LITERAL_BYTES -> block[at + k] = byte(rest % 256)
             rest = rest /% 256
@@ -76,7 +76,7 @@ literal_block: fn(source: String) -> [U8] {
 }
 
 word: fn(block: [U8], at: Int) -> Int {
-    value := 0
+    ^value: 0
     loop k in 0..<8 -> value = value * 256 + (Int{block[at + 7 - k]})
     value
 }
@@ -86,7 +86,7 @@ word: fn(block: [U8], at: Int) -> Int {
 literal_departures: fn(block: [U8]) -> [Int] {
     expected: [String]{"layout constraint expression has more than 16 distinct terms", "constraint#", " (<=)", " (>=)", " (==)", "suggest(", ")", "(layout has no feasible solution)", "layout \"", "\" has no feasible solution — conflicting constraints: ", ", ", "."}
     offsets: [Int]{192, 256, 272, 280, 288, 296, 304, 312, 352, 360, 416, 424}
-    bad := [Int]{}
+    ^bad: [Int]{}
     loop index in 0..<expected.len() {
         length: word(block, index * 16 + 8)
         start: offsets[index]
@@ -103,8 +103,8 @@ literal_departures: fn(block: [U8]) -> [Int] {
 
 load_policy: fn(root: String) -> Policy {
     text: files.read("{root}/{POLICY}") ?? fail("cannot read {POLICY}: {err}")
-    flags := [String]{}
-    removed := [String]{}
+    ^flags: [String]{}
+    ^removed: [String]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         line: lines[index]
@@ -124,7 +124,7 @@ load_policy: fn(root: String) -> Policy {
 // Tools/Packaging/NativeCCompiler.jet runs it.
 native_cc: fn(policy: Policy, args: [String]) -> ProcessSpec {
     removed: policy.removed
-    spec := process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)
+    ^spec: process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)
     if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) {
         words: re.split(Regex{"\s+"}, enabled)
         kept: loop word in words if word != "" && !removed.contains(word) -> word
@@ -166,7 +166,7 @@ run: fn() {
     source: files.read("{root}/{TEXT}") ?? fail("cannot read {TEXT}: {err}")
     bad: literal_departures(literal_block(source))
     if bad.len() > 0 -> fail("Layout literal {bad[0]} bytes/length mismatch")
-    vectors_path := "{root}/{HERE}/LayoutVectors.txt"
+    ^vectors_path: "{root}/{HERE}/LayoutVectors.txt"
     vectors: files.read_bytes(vectors_path) ?? fail("cannot read LayoutVectors.txt: {err}")
     seed_text: files.read("{root}/{HERE}/LayoutSeed.json") ?? fail("cannot read LayoutSeed.json: {err}")
     seed: json.parse(seed_text) ?? fail("LayoutSeed.json is not JSON: {err}")
@@ -175,7 +175,7 @@ run: fn() {
         fail("frozen oracle/vector checksum mismatch")
     }
     binary: "{out}/native-layout"
-    cc_args := [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "{root}/{HERE}/NativeLayoutWitness.c"}
+    ^cc_args: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "{root}/{HERE}/NativeLayoutWitness.c"}
     loop input in args[1..<args.len()] {
         cc_args.push(if input.starts_with("-") -> input.copy() else -> resolve(root, input))
     }
@@ -188,7 +188,7 @@ run: fn() {
     if executed.signal != None || executed.code != 0 {
         fail("native-execute: exit {executed.code}; see {out}/native-execute.log")
     }
-    actual := executed.output.trim().split("\n").to_list()
+    ^actual: executed.output.trim().split("\n").to_list()
     if actual.len() == 0 || actual[actual.len() - 1] != OWNERSHIP {
         fail("ownership witness did not complete")
     }
@@ -203,7 +203,7 @@ run: fn() {
             fail("observation mismatch {index}: {actual[index]} != {expected[index]}")
         }
     }
-    fatal := 0
+    ^fatal: 0
     loop row in rows {
         if !row.starts_with("p ") -> next
         parts: row.removeprefix("p ").split("|").to_list()

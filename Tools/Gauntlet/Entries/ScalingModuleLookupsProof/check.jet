@@ -22,7 +22,7 @@ run: fn() {
     }
     written: json.parse(files.read("proof/module-lookups-proof.json") ?? process.fail(1, "{err}")) ?? process.fail(1, err.display_text())
     loop key in FIELDS -> print("{key}: {show(written.get(key) ?? Dyn.Null, here)}")
-    result := [String]{}
+    ^result: [String]{}
     loop line in (files.read(process.args()[0]) ?? process.fail(1, "{err}")).lines() {
         if result.len() > 0 || line == "{{" -> result.push(line.copy())
     }
@@ -32,7 +32,7 @@ run: fn() {
 
 show: fn(value: Dyn, here: String) -> String Never! {
     if value == .Object(entries) {
-        shown := [String]{}
+        ^shown: [String]{}
         loop entry in entries {
             if entry.value != Dyn.Null -> shown.push("{entry.key}: {show(entry.value, here)}")
         }

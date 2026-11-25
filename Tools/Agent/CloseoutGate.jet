@@ -39,7 +39,7 @@ repo_root: fn() -[Env, Exec, FS, IO]> String Never! {
     tool: "/Tools/Agent/CloseoutGate.jet"
     script: sys.executable()
     if script.ends_with(tool) -> return script.removesuffix(tool)
-    dir := files.cwd() ?? "/"
+    ^dir: files.cwd() ?? "/"
     loop {
         if files.exists("{dir}{tool}") -> return dir
         if dir == "/" || dir == "" {
@@ -60,7 +60,7 @@ output: fn(repo: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> 
 
 // Tower reads go through the Jet board reader.
 board: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String Never! {
-    argv := [String]{process.env_nonempty("JET") ?? "jet", "{repo}/Tools/Tower/Board.jet"}
+    ^argv: [String]{process.env_nonempty("JET") ?? "jet", "{repo}/Tools/Tower/Board.jet"}
     loop arg in args -> argv.push(arg.copy())
     output(repo, argv)
 }
@@ -100,7 +100,7 @@ frozen_head: fn(repo: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Neve
 
 // `git status --porcelain=v1` lines outside Tower's own state directory.
 non_tower_changes: fn(status: String) -> [String] Never! {
-    changed := [String]{}
+    ^changed: [String]{}
     loop line in status.split("\n") {
         if line == "" -> next
         path: String.from_bytes_lossy(line.bytes()[3..<line.bytes().len()]).removeprefix("\"")

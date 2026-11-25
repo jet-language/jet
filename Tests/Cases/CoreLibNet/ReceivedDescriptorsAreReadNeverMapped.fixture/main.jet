@@ -15,9 +15,9 @@ run: fn() {
     path: files.join(root.path, "s")
     listener: net.unix_listen(path) ?? panic("listen: {err}")
     peer: process.cmd([String]{"python3", "peer.py", path}).stdout(.Capture).stderr(.Capture).spawn() ?? panic("peer: {err}")
-    server := net.unix_accept(listener) ?? panic("accept: {err}")
+    ^server: net.unix_accept(listener) ?? panic("accept: {err}")
 
-    message := net.unix_receive(server, 16) ?? panic("receive: {err}")
+    ^message: net.unix_receive(server, 16) ?? panic("receive: {err}")
     received: message.fds.remove(0, .Slot) ?? panic("no descriptor arrived")
     print(received.size() ?? panic("size: {err}"))
     print(received.read_at(65532, 4) ?? panic("read the end: {err}"))

@@ -23,7 +23,7 @@ check_repeated_headers: fn() {
     peer: task {
         stream: net.tcp_accept(listener) ?? panic("accept")
         request: http_read(stream)
-        warnings := ""
+        ^warnings: ""
         loop line in request.lines() {
             if txt.lower(line).starts_with("warning:") {
                 if warnings != "" -> warnings += "\n"
@@ -41,7 +41,7 @@ check_repeated_headers: fn() {
     response: client.request("GET", "http://{address}/").header("Warning", "one").header("Warning", "two").send() ?? panic("request")
     bytes: response.body().bytes(8) ?? panic("body")
     assert(bytes == [U8]{255, 0}, "original raw body bytes")
-    selected := [String]{}
+    ^selected: [String]{}
     loop field in response.headers.fields {
         if field.name == "x-a" || field.name == "x-b" || field.name == "set-cookie" {
             selected.push(field.name)

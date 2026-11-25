@@ -23,7 +23,7 @@ pkg_ffi_prepare_for_target: fn(program: RustBridgeProgram, target: String) -[FS,
     }
     // Native inline bodies have no Web lowering; keep them out of the wasm
     // bridge instead of handing an inapplicable row to a native emitter.
-    entries := [ExternEntry]{}
+    ^entries: [ExternEntry]{}
     wasm: target.split("-").to_list()[0] == "wasm32"
     loop entry in collected {
         if wasm && entry.inline != None -> next
@@ -32,16 +32,16 @@ pkg_ffi_prepare_for_target: fn(program: RustBridgeProgram, target: String) -[FS,
     // Link discovery is independent of bridge eligibility: a C surface made
     // only from local Jet types still resolves its declared provider and
     // reports E3201 when the provider is absent.
-    c_link_args := [String]{}
+    ^c_link_args: [String]{}
     if program.cffi.links_c() {
-        entry_path := String?{None}
+        ^entry_path: String?{None}
         if program.entry >= 0 && program.entry < program.modules.len() {
             entry_path = Val(program.modules[program.entry].path)
         }
         c_link_args = pkg_cffi_rustc_link_args_for_target_with_entry(program.cffi, program.project_root, target, entry_path) ?? return Err(RustBridgeError{diagnostics: err.diagnostics})
     }
     if entries.len() == 0 -> return Ok(None)
-    uses_c_abi := false
+    ^uses_c_abi: false
     loop entry in entries {
         if entry.c_abi -> uses_c_abi = true
     }

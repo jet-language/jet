@@ -70,7 +70,7 @@ ExplainReport: struct {
     // error, a loss a warning-tier lint.
     to_tree: fn(self) -> Dyn Never! {
         conflict: self.kind == ExplainReportKind.Conflict
-        report := ReportEnvelope.new(
+        ^report: ReportEnvelope.new(
             "tool",
             if conflict -> "error" else -> "lint",
             "E1340",
@@ -82,7 +82,7 @@ ExplainReport: struct {
         tree: report.to_tree()
         if tree == {
             .Object(fields) -> {
-                extended := [{key: String, value: Dyn}]{}
+                ^extended: [{key: String, value: Dyn}]{}
                 loop pair in fields {
                     if pair.key != "kind" -> extended.push(pair)
                 }
@@ -108,7 +108,7 @@ ExplainEntry: struct {
     last_used_at: Int,
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["id"] = Dyn.Text(self.id.copy())
         object["name"] = Dyn.Text(self.name.copy())
         object["version"] = Dyn.Text(self.version.copy())
@@ -132,7 +132,7 @@ ExplainObject: struct {
     owners: [String],
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["digest"] = Dyn.Text(self.digest.copy())
         object["path"] = Dyn.Text(self.path.copy())
         object["external"] = Dyn.Bool(self.external)
@@ -154,7 +154,7 @@ ExplainGraph: struct {
     }
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["direct_dependencies"] = store_explain_objects_tree(self.direct_dependencies)
         object["dependencies"] = store_explain_objects_tree(self.dependencies)
         object["direct_referrers"] = store_explain_objects_tree(self.direct_referrers)
@@ -165,7 +165,7 @@ ExplainGraph: struct {
 }
 
 store_explain_objects_tree: fn(objects: [ExplainObject]) -> Dyn Never! {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop object in objects -> items.push(object.to_tree())
     Dyn.Array(items)
 }
@@ -177,7 +177,7 @@ ExplainProfile: struct {
     provider_facts: ProviderFacts,
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["profile"] = Dyn.Text(self.profile.copy())
         object["generation"] = Dyn.Int(self.generation)
         object["output_hash"] = Dyn.Text(self.output_hash.copy())
@@ -199,12 +199,12 @@ ExplainProvider: struct {
     native_document: String,
 
     to_tree: fn(self) -> Dyn Never! {
-        facts := [String:Dyn]{}
+        ^facts: [String:Dyn]{}
         fact_keys: store_sorted_keys(self.producer_facts)
         loop key in fact_keys -> facts[key] = Dyn.Text(self.producer_facts[key].copy())
-        profiles := [Dyn]{}
+        ^profiles: [Dyn]{}
         loop profile in self.profile_facts -> profiles.push(profile.to_tree())
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["provider"] = Dyn.Text(self.provider.copy())
         object["immutable_source"] = Dyn.Text(self.immutable_source.copy())
         object["source_digest"] = Dyn.Text(self.source_digest.copy())
@@ -237,7 +237,7 @@ ExplainRoot: struct {
     reason: String,
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["kind"] = Dyn.Text(self.kind.copy())
         object["id"] = Dyn.Text(self.id.copy())
         object["producer"] = Dyn.Text(self.producer.copy())
@@ -260,9 +260,9 @@ ExplainLiveness: struct {
     }
 
     to_tree: fn(self) -> Dyn Never! {
-        roots := [Dyn]{}
+        ^roots: [Dyn]{}
         loop root in self.roots -> roots.push(root.to_tree())
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["live"] = Dyn.Bool(self.live)
         object["reason"] = Dyn.Text(self.reason.copy())
         object["roots"] = Dyn.Array(roots)
@@ -285,7 +285,7 @@ ExplainAttempt: struct {
     }
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["id"] = Dyn.Text(self.id.copy())
         object["package"] = Dyn.Text(self.package.copy())
         object["reference"] = Dyn.Text(self.reference.copy())
@@ -308,7 +308,7 @@ ExplainCacheAdmission: struct {
     reason: String,
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["role"] = Dyn.Text(self.role.copy())
         object["decision"] = Dyn.Text(self.decision.copy())
         object["builder"] = Dyn.Text(self.builder.copy())
@@ -348,9 +348,9 @@ ExplainRebuild: struct {
     }
 
     to_tree: fn(self) -> Dyn Never! {
-        admissions := [Dyn]{}
+        ^admissions: [Dyn]{}
         loop admission in self.cache_admissions -> admissions.push(admission.to_tree())
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["decision"] = Dyn.Text(self.decision.copy())
         object["reason"] = Dyn.Text(self.reason.copy())
         object["action_key"] = Dyn.Text(self.action_key.copy())
@@ -367,7 +367,7 @@ ExplainRebuild: struct {
 
 // A text map as an object in key order.
 store_explain_sorted_text_map: fn(map: [String:String]) -> Dyn Never! {
-    object := [String:Dyn]{}
+    ^object: [String:Dyn]{}
     keys: store_sorted_keys(map)
     loop key in keys -> object[key] = Dyn.Text(map[key].copy())
     Dyn.Object(object)
@@ -386,13 +386,13 @@ PackageExplain: struct {
 
     // The `jet.status/v1` `explain` object; any conflict makes `ok` false.
     to_json: fn(self) -> String ReportError! {
-        conflicted := false
-        reports := [Dyn]{}
+        ^conflicted: false
+        ^reports: [Dyn]{}
         loop report in self.reports {
             if report.kind == ExplainReportKind.Conflict -> conflicted = true
             reports.push(report.to_tree())
         }
-        payload := [String:Dyn]{}
+        ^payload: [String:Dyn]{}
         payload["query"] = Dyn.Text(self.query.copy())
         payload["lens"] = Dyn.Text(self.lens.copy())
         payload["entry"] = if self.entry == {
@@ -411,7 +411,7 @@ PackageExplain: struct {
     }
 
     text: fn(self) -> String Never! {
-        out := "package explain {self.query}\nview     {self.lens}\n"
+        ^out: "package explain {self.query}\nview     {self.lens}\n"
         if self.entry == {
             .Val(entry) -> {
                 out = "{out}entry    {entry.name} {store_explain_empty_dash(entry.version)} {entry.id}\nref      {entry.reference}\noutput   {entry.output_hash}\n"
@@ -455,7 +455,7 @@ PackageExplain: struct {
 }
 
 store_explain_provider_text: fn(provider: ExplainProvider) -> String Never! {
-    out := "provider {provider.provider}\nsource   {provider.immutable_source}\nsource-digest {provider.source_digest}\n"
+    ^out: "provider {provider.provider}\nsource   {provider.immutable_source}\nsource-digest {provider.source_digest}\n"
     if provider.provider_facts == {
         .Val(facts) -> {
             loop line in facts.explain_lines() -> out = "{out}fact     {line}\n"
@@ -482,7 +482,7 @@ store_explain_graph_text: fn(graph: ExplainGraph) -> String Never! {
 
 store_explain_objects_text: fn(title: String, objects: [ExplainObject]) -> String Never! {
     if objects.len() == 0 -> return "{title}\n  -\n"
-    out := "{title}\n"
+    ^out: "{title}\n"
     loop object in objects {
         owners: if object.owners.len() == 0 -> "-" else -> object.owners.join(", ")
         path: if object.known -> store_explain_empty_dash(object.path) else -> "<unknown>"
@@ -494,13 +494,13 @@ store_explain_objects_text: fn(title: String, objects: [ExplainObject]) -> Strin
 
 store_explain_liveness_text: fn(liveness: ExplainLiveness) -> String Never! {
     state: if liveness.live -> "live" else -> "unrooted"
-    out := "liveness {state}  {liveness.reason}\n"
+    ^out: "liveness {state}  {liveness.reason}\n"
     loop root in liveness.roots -> out = "{out}  root {root.kind} {root.id} {root.reason}\n"
     out
 }
 
 store_explain_rebuild_text: fn(rebuild: ExplainRebuild) -> String Never! {
-    out := "rebuild {rebuild.decision}  {rebuild.reason}\naction   {rebuild.action_key}\n"
+    ^out: "rebuild {rebuild.decision}  {rebuild.reason}\naction   {rebuild.action_key}\n"
     identity_keys: store_sorted_keys(rebuild.cache_identity)
     loop key in identity_keys -> out = "{out}cache {key} {rebuild.cache_identity[key]}\n"
     loop admission in rebuild.cache_admissions {
@@ -531,13 +531,13 @@ store_explain_package: fn(verification: StoreVerification, roots: HangarRoots, q
     entries: store_list_read_only(roots)
     found: store_explain_find_entry(entries, query)
     entry: found ?? return store_explain_without_entry(roots, query, lens)
-    reports := [ExplainReport]{}
+    ^reports: [ExplainReport]{}
     graph: store_explain_load_graph(verification, roots, reports)
     receipt_ok: store_explain_receipt_projection(roots, entry, graph, reports)
-    provider := store_explain_provider_projection(entry, reports)
+    ^provider: store_explain_provider_projection(entry, reports)
     if provider == {
         .Val(projected) -> {
-            completed := projected
+            ^completed: projected
             completed.locked_provider_facts = store_explain_locked_provider_facts(entry, reports)
             completed.profile_facts = store_explain_profile_provider_facts(entry, reports)
             if completed.provider_facts == {
@@ -575,7 +575,7 @@ store_explain_without_entry: fn(roots: HangarRoots, query: String, lens: Explain
         ExplainReport.loss("no realized StoreEntry exists for `{query}`; dependency, closure, and liveness facts are unavailable"),
         ExplainReport.loss(rebuild.reason),
     }
-    liveness := ExplainLiveness.empty()
+    ^liveness: ExplainLiveness.empty()
     liveness.reason = "no realized StoreEntry can be matched to a root"
     Ok(Val(PackageExplain{schema: REPORT_SCHEMA, query: query, lens: lens.label(), entry: None, provider: None, graph: ExplainGraph.empty(), liveness: liveness, rebuild: rebuild, reports: reports}))
 }
@@ -583,14 +583,14 @@ store_explain_without_entry: fn(roots: HangarRoots, query: String, lens: Explain
 // An exact id or reference match; otherwise the one entry whose package name
 // matches. More than one match is ambiguous.
 store_explain_find_entry: fn(entries: [StoreEntry], query: String) -> StoreEntry? StoreError! {
-    exact := [StoreEntry]{}
+    ^exact: [StoreEntry]{}
     loop entry in entries {
         if entry.id == query || entry.reference == query -> exact.push(entry.copy())
     }
     if exact.len() > 1 -> return Err(store_explain_ambiguous_query(query, exact))
     if exact.len() == 1 -> return Ok(Val(exact[0]))
     package: store_explain_package_name(query)
-    matches := [StoreEntry]{}
+    ^matches: [StoreEntry]{}
     loop entry in entries {
         if entry.name == package || store_explain_package_name(entry.reference) == package {
             matches.push(entry.copy())
@@ -603,7 +603,7 @@ store_explain_find_entry: fn(entries: [StoreEntry], query: String) -> StoreEntry
 }
 
 store_explain_ambiguous_query: fn(query: String, entries: [StoreEntry]) -> StoreError Never! {
-    references := [String]{}
+    ^references: [String]{}
     loop entry in entries -> references.push(entry.reference)
     StoreError.Other("package explain query `{query}` is ambiguous; matching references: {references.join(", ")}")
 }
@@ -720,7 +720,7 @@ store_explain_provider_projection: fn(entry: StoreEntry, reports: ^[ExplainRepor
             return None
         }
     }
-    facts := ProviderFacts?{None}
+    ^facts: ProviderFacts?{None}
     if producer.facts.get("provider-facts") == {
         .Val(raw) -> {
             if ProviderFacts.from_json(raw) == {
@@ -820,7 +820,7 @@ store_explain_locked_provider_facts: fn(entry: StoreEntry, reports: ^[ExplainRep
         reports.push(ExplainReport.loss("project lock `{lock_path}` is present but could not be read"))
         return None
     }
-    matches := [ProviderFacts]{}
+    ^matches: [ProviderFacts]{}
     canonical_entry: ProviderFacts.for_reference("", entry.reference).qualified_reference()
     loop record in lock.records {
         record_matches: store_explain_lock_record_matches_entry(record, entry, canonical_entry)
@@ -845,7 +845,7 @@ store_explain_locked_provider_facts: fn(entry: StoreEntry, reports: ^[ExplainRep
             store_explain_report_provider_facts(facts, reports)
             store_explain_report_provider_validation(facts, "locked", reports)
         }
-        identity_ok := true
+        ^identity_ok: true
         if record.future_fields.get("provider-facts-digest") == {
             .Val(expected) -> {
                 actual: facts.digest()
@@ -879,7 +879,7 @@ store_explain_locked_provider_facts: fn(entry: StoreEntry, reports: ^[ExplainRep
     }
     unique: store_explain_unique_facts(matches)
     if unique.len() > 1 {
-        digests := [String]{}
+        ^digests: [String]{}
         loop facts in unique -> digests.push(facts.digest())
         reports.push(ExplainReport.conflict("multiple locked provider-fact records match `{entry.reference}`: {digests.join(", ")}"))
     }
@@ -889,13 +889,13 @@ store_explain_locked_provider_facts: fn(entry: StoreEntry, reports: ^[ExplainRep
 
 // Facts sorted by digest with equal digests collapsed.
 store_explain_unique_facts: fn(facts: [ProviderFacts]) -> [ProviderFacts] Never! {
-    sorted := [ProviderFacts]{}
+    ^sorted: [ProviderFacts]{}
     loop item in facts {
-        at := sorted.len()
+        ^at: sorted.len()
         loop at > 0 && item.digest() < sorted[at - 1].digest() -> at -= 1
         sorted.insert(at, item.copy())
     }
-    unique := [ProviderFacts]{}
+    ^unique: [ProviderFacts]{}
     loop item in sorted {
         if unique.len() > 0 && unique[unique.len() - 1].digest() == item.digest() -> next
         unique.push(item)
@@ -935,7 +935,7 @@ store_explain_compare_provider_identity: fn(source: ProviderFacts, locked: Provi
 store_explain_graph_projection: fn(entries: [StoreEntry], entry: StoreEntry, graph: ClosureGraph?, reports: ^[ExplainReport]) -> ExplainGraph Never! {
     found: graph ?? return ExplainGraph.empty()
     digest: entry.envelope.output_hash
-    record_exists := false
+    ^record_exists: false
     loop pair in found.records {
         if pair.value.id == entry.id -> record_exists = true
         loop output in pair.value.outputs {
@@ -968,18 +968,18 @@ store_explain_graph_projection: fn(entries: [StoreEntry], entry: StoreEntry, gra
 }
 
 store_explain_object_views: fn(entries: [StoreEntry], graph: ClosureGraph, digests: [String]) -> [ExplainObject] Never! {
-    views := [ExplainObject]{}
+    ^views: [ExplainObject]{}
     loop digest in digests -> views.push(store_explain_object_projection(entries, graph, digest))
     views
 }
 
 // One object and the sorted, unique owners of its digest.
 store_explain_object_projection: fn(entries: [StoreEntry], graph: ClosureGraph, digest: String) -> ExplainObject Never! {
-    owners := [String]{}
+    ^owners: [String]{}
     record_ids: store_sorted_keys_of_records(graph.records)
     loop record_id in record_ids {
         record: graph.records[record_id]
-        owns := false
+        ^owns: false
         loop output in record.outputs {
             if output.value == digest -> owns = true
         }
@@ -1015,7 +1015,7 @@ store_explain_owner_label: fn(entries: [StoreEntry], record: ClosureRecord) -> S
 // Why the entry is live: the nearest project lock naming it, and every
 // active lifecycle root protecting it or its closure.
 store_explain_liveness_projection: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: ^[ExplainReport]) -> ExplainLiveness Never! {
-    reasons := [ExplainRoot]{}
+    ^reasons: [ExplainRoot]{}
     if store_explain_project_lock_matches(entry, reports) {
         lock: store_explain_nearest_lock()
         id: lock ?? "nearest-project-lock"
@@ -1028,7 +1028,7 @@ store_explain_liveness_projection: fn(verification: StoreVerification, roots: Ha
             loop root_id in root_ids {
                 root: snapshot.roots[root_id]
                 if root.phase == RootPhase.Tombstoned || root.metadata.is_expired(now) -> next
-                protects := false
+                ^protects: false
                 loop target in root.protected_targets {
                     if target == entry.id || target == entry.envelope.output_hash -> protects = true
                     if graph == {
@@ -1066,9 +1066,9 @@ store_explain_liveness_projection: fn(verification: StoreVerification, roots: Ha
 
 // Stable sort by (kind, id).
 store_explain_sorted_roots: fn(roots: [ExplainRoot]) -> [ExplainRoot] Never! {
-    sorted := [ExplainRoot]{}
+    ^sorted: [ExplainRoot]{}
     loop root in roots {
-        at := sorted.len()
+        ^at: sorted.len()
         loop at > 0 && (root.kind < sorted[at - 1].kind || (root.kind == sorted[at - 1].kind && root.id < sorted[at - 1].id)) {
             at -= 1
         }
@@ -1148,12 +1148,12 @@ store_explain_provider_is_usable: fn(provider: ExplainProvider) -> Bool Never! {
 // Whether the stored output, its digest, the closure action record, the
 // producer provenance, and the receipt still support the realized result.
 store_explain_rebuild_projection: fn(verification: StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: ^[ExplainReport]) -> ExplainRebuild Never! {
-    checks := [String:String]{}
+    ^checks: [String:String]{}
     provider_usable: if provider == {
         .Val(found) -> store_explain_provider_is_usable(found)
         .None -> false
     }
-    admissions := [ExplainCacheAdmission]{}
+    ^admissions: [ExplainCacheAdmission]{}
     if store_cache_admissions_for_explain(roots, entry) == {
         .Ok(found) -> {
             loop admission in found {
@@ -1170,7 +1170,7 @@ store_explain_rebuild_projection: fn(verification: StoreVerification, roots: Han
     }
     checks["output"] = if output_exists -> "present" else -> "missing"
     // Some(true) matches, Some(false) mismatches, None unverifiable.
-    output_digest := Bool?{None}
+    ^output_digest: Bool?{None}
     if output_exists {
         if store_try_entry_output_hash(verification, roots, entry) == {
             .Ok(actual) -> {
@@ -1190,7 +1190,7 @@ store_explain_rebuild_projection: fn(verification: StoreVerification, roots: Han
         }
     } else { checks["output_digest"] = "missing" }
     action_key: store_entry_action_key(entry)
-    action_recorded := false
+    ^action_recorded: false
     if graph == {
         .Val(found) -> {
             loop pair in found.records {
@@ -1211,7 +1211,7 @@ store_explain_rebuild_projection: fn(verification: StoreVerification, roots: Han
     if !action_recorded {
         reports.push(ExplainReport.loss("stored action `{action_key}` has no matching closure record"))
     }
-    attempt := ExplainAttempt?{None}
+    ^attempt: ExplainAttempt?{None}
     if recipe_debug_latest(roots.hangar_dir(), entry.name) == {
         .Ok(found) -> {
             if found == {
@@ -1224,7 +1224,7 @@ store_explain_rebuild_projection: fn(verification: StoreVerification, roots: Han
         }
     }
     decision: store_explain_rebuild_decision(attempt, output_exists, output_digest, action_recorded, provider_usable, receipt_ok)
-    cache_identity := [String:String]{}
+    ^cache_identity: [String:String]{}
     cache_identity["source"] = entry.cache_identity.source_fingerprint
     cache_identity["recipe"] = entry.cache_identity.recipe_fingerprint
     cache_identity["policy"] = entry.cache_identity.policy_fingerprint
@@ -1265,7 +1265,7 @@ store_explain_rebuild_decision: fn(attempt: ExplainAttempt?, output_exists: Bool
 }
 
 store_explain_rebuild_without_entry: fn(attempt: BuildAttempt) -> ExplainRebuild Never! {
-    rebuild := ExplainRebuild.empty()
+    ^rebuild: ExplainRebuild.empty()
     rebuild.decision = "rebuild-required"
     rebuild.reason = if attempt.status == "failed" -> "latest recorded build attempt failed at step {attempt.failed_step} and produced no StoreEntry" else -> "build attempt produced no StoreEntry yet"
     rebuild.attempt = Val(ExplainAttempt.from_attempt(attempt))

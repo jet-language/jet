@@ -65,7 +65,7 @@ jet_config_evaluate_program: fn(program: String, base_dir: String) -> JetConfigO
 // requester's source.
 jet_config_module_values: fn(program: String, base_dir: String) -> JetModuleValuesOutcome {
     result: jet_config_checked(program, base_dir, true) ?? return jet_module_values_refused(err.diagnostic)
-    owner := ""
+    ^owner: ""
     loop value in result.comptime_values {
         if value.kind == SemaComptimeItemKind.Constant && symbol_key_names(value.key, JET_CONFIG_VALUE_NAME) {
             owner = value.key.slice(0..<(value.key.len() - JET_CONFIG_VALUE_NAME.len()))
@@ -74,8 +74,8 @@ jet_config_module_values: fn(program: String, base_dir: String) -> JetModuleValu
     if owner == "" {
         return jet_module_values_refused(jet_config_eval_diagnostic(None, "the module values produced no build-time values"))
     }
-    values := [NamedCtValue]{}
-    unreadable := [String]{}
+    ^values: [NamedCtValue]{}
+    ^unreadable: [String]{}
     loop value in result.comptime_values {
         if value.kind != SemaComptimeItemKind.Constant || !value.key.starts_with(owner) -> next
         name: value.key.slice(owner.len()..<value.key.len())

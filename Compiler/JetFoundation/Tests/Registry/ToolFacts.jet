@@ -113,13 +113,13 @@ tool_facts_projection_matches: fn(read: FactRead, member: String?, reflection: S
 // The existing merged registry supplies both the plane list and source reader;
 // exercise its actual rows, not a test-local copy or second registry provider.
 #Test("every_registered_plane_has_one_typed_read_projection") {
-    seen := [String]{}
+    ^seen: [String]{}
     loop row in FOUNDATION_FACT_READ_ROWS {
         loop plane in row.planes {
             member: row.member ?? panic("registered plane has no source reader")
             read: fact_read_kind(member) ?? panic("registered plane has no typed reader")
             assert(fact_read_reflection_kind(read) == fact_read_reflection_kind(FactRead.RegisteredPlane{name: plane}))
-            found := false
+            ^found: false
             loop registered in FOUNDATION_FACT_READ_ROWS {
                 if registered.read == read && registered.planes.contains(plane) -> found = true
             }

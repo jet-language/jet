@@ -42,14 +42,14 @@ HangarRoots: struct {
     // User and custom Hangar roots visible from this machine. Discovery stays
     // bounded to known parents; it never walks an arbitrary tree.
     machine_roots: fn() -[FS, Env]> [HangarRoots] Never! {
-        roots := [HangarRoots]{}
+        ^roots: [HangarRoots]{}
         candidates: [HangarRoots]{
             pkg_resolve_roots(),
             {root: foundation_user_data_root(), dev_mode: true},
             HangarRoots.at(pkg_legacy_user_root()),
         }
         loop candidate in candidates -> pkg_hangar_add_machine_root(roots, candidate)
-        parents := [String]{}
+        ^parents: [String]{}
         loop root in roots {
             if root.root != "/" && root.root != "" -> parents.push(files.dirname(root.root))
         }
@@ -190,7 +190,7 @@ StoreEntry: struct {
             {key: "receipt", value: self.receipt, raw: false},
             {key: "realized_at", value: "{self.realized_at}", raw: false},
         }
-        out := "{{\n"
+        ^out: "{{\n"
         loop field in fields {
             rendered: if field.raw -> field.value else -> pkg_json_quote(field.value)
             out = "{out}  {pkg_json_quote(field.key)}: {rendered},\n"
@@ -204,15 +204,15 @@ StoreEntry: struct {
 pkg_json_quote: fn(text: String) -> String Never! { pkg_json_render(Dyn.Text(text.copy())) }
 
 pkg_hangar_json_string_array: fn(items: [String]) -> String Never! {
-    quoted := [String]{}
+    ^quoted: [String]{}
     loop item in items -> quoted.push(pkg_json_quote(item))
     "[{quoted.join(", ")}]"
 }
 
 pkg_hangar_json_string_object: fn(map: [String:String]) -> String Never! {
-    keys := map.keys().to_list()
+    ^keys: map.keys().to_list()
     keys.sort()
-    parts := [String]{}
+    ^parts: [String]{}
     loop key in keys -> parts.push("{pkg_json_quote(key)}: {pkg_json_quote(map[key])}")
     "{{{parts.join(", ")}}}"
 }
@@ -244,7 +244,7 @@ pkg_parse_meta: fn(text: String) -> ParsedMeta? Never! {
     reference: pkg_meta_text(object, "ref") ?? return None
     out: pkg_meta_text(object, "out") ?? return None
     bin: pkg_meta_text(object, "bin") ?? return None
-    references := [String]{}
+    ^references: [String]{}
     if object.get("references") == {
         .Val(value) -> {
             items: pkg_json_array(value) ?? [Dyn]{}
@@ -255,7 +255,7 @@ pkg_parse_meta: fn(text: String) -> ParsedMeta? Never! {
         }
         .None -> {}
     }
-    named_outputs := [String:String]{}
+    ^named_outputs: [String:String]{}
     if object.get("named_outputs") == {
         .Val(value) -> {
             fields: pkg_json_object(value) ?? [String:Dyn]{}
@@ -340,7 +340,7 @@ pkg_store_list_checked: fn(roots: HangarRoots) -[FS, Env]> [StoreEntry] HangarRe
 }
 
 pkg_store_list_impl: fn(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntry] HangarReadError! {
-    out := [StoreEntry]{}
+    ^out: [StoreEntry]{}
     store: roots.hangar_dir()
     entries: if files.list_dir(store) == {
         .Ok(listed) -> listed
@@ -349,7 +349,7 @@ pkg_store_list_impl: fn(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntr
             return Err(HangarReadError.IO(error))
         }
     }
-    object_count := 0
+    ^object_count: 0
     loop entry in entries {
         kind: if files.stat(entry.path) == {
             .Ok(info) -> info

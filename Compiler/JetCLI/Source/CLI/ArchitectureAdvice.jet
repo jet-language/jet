@@ -44,9 +44,9 @@ jet_cli_architecture_key: fn(definition: SemDef) -> String Never! {
 }
 
 jet_cli_architecture_calls: fn(index: SemIndex) -> [JetCLIArchitectureCall] Never! {
-    calls := [JetCLIArchitectureCall]{}
+    ^calls: [JetCLIArchitectureCall]{}
     loop edge in index.calls {
-        caller := SemDef?{None}
+        ^caller: SemDef?{None}
         short: edge.caller.split(".").to_list()
         loop row in index.definitions {
             definition: row.def
@@ -56,7 +56,7 @@ jet_cli_architecture_calls: fn(index: SemIndex) -> [JetCLIArchitectureCall] Neve
             }
         }
         from: caller ?? next
-        reference := SemRef?{None}
+        ^reference: SemRef?{None}
         loop candidate in index.references {
             if candidate.module_path != edge.module_path || candidate.target == None || candidate.span.start > edge.span.end || edge.span.start > candidate.span.end {
                 next
@@ -70,7 +70,7 @@ jet_cli_architecture_calls: fn(index: SemIndex) -> [JetCLIArchitectureCall] Neve
         }
         selected: reference ?? next
         target: selected.target ?? next
-        callee := SemDef?{None}
+        ^callee: SemDef?{None}
         loop row in index.definitions {
             definition: row.def
             if definition.module_path == target.module_path && definition.def_span == target.def_span {
@@ -88,7 +88,7 @@ jet_cli_architecture_calls: fn(index: SemIndex) -> [JetCLIArchitectureCall] Neve
 
 jet_cli_architecture_unique: fn(values: ^[String]) Never! {
     values.sort()
-    unique := [String]{}
+    ^unique: [String]{}
     loop value in values {
         if unique.len() == 0 || unique[unique.len() - 1] != value -> unique.push(value.copy())
     }
@@ -96,10 +96,10 @@ jet_cli_architecture_unique: fn(values: ^[String]) Never! {
 }
 
 jet_cli_architecture_row: fn(index: SemIndex, kind: String, subject: String, calls: [JetCLIArchitectureCall], note: String) -> JetCLIArchitectureRow Never! {
-    evidence := [JetCLIArchitectureEvidence]{}
-    evidence_keys := [String]{}
-    boundaries := [String]{}
-    cross_module := false
+    ^evidence: [JetCLIArchitectureEvidence]{}
+    ^evidence_keys: [String]{}
+    ^boundaries: [String]{}
+    ^cross_module: false
     loop call in calls {
         boundaries.push("{call.caller_module} -> {call.callee_module}")
         if call.caller_module != call.callee_module -> cross_module = true
@@ -130,19 +130,19 @@ jet_cli_architecture_row: fn(index: SemIndex, kind: String, subject: String, cal
 
 jet_cli_architecture_rows: fn(index: SemIndex) -> [JetCLIArchitectureRow] Never! {
     calls: jet_cli_architecture_calls(index)
-    callee_keys := [String]{}
-    caller_keys := [String]{}
+    ^callee_keys: [String]{}
+    ^caller_keys: [String]{}
     loop call in calls {
         callee_keys.push(call.callee_key)
         caller_keys.push(call.caller_key)
     }
     jet_cli_architecture_unique(callee_keys)
     jet_cli_architecture_unique(caller_keys)
-    rows := [JetCLIArchitectureRow]{}
-    seen := [String]{}
+    ^rows: [JetCLIArchitectureRow]{}
+    ^seen: [String]{}
     loop key in callee_keys {
-        group := [JetCLIArchitectureCall]{}
-        callers := [String]{}
+        ^group: [JetCLIArchitectureCall]{}
+        ^callers: [String]{}
         loop call in calls {
             if call.callee_key != key -> next
             group.push(call.copy())
@@ -156,9 +156,9 @@ jet_cli_architecture_rows: fn(index: SemIndex) -> [JetCLIArchitectureRow] Never!
         rows.push(jet_cli_architecture_row(index, "shared-callee", subject, group, "one checked callable is consumed by multiple callers; review whether they must preserve one invariant"))
     }
     loop key in caller_keys {
-        group := [JetCLIArchitectureCall]{}
-        callees := [String]{}
-        returns := [String]{}
+        ^group: [JetCLIArchitectureCall]{}
+        ^callees: [String]{}
+        ^returns: [String]{}
         loop call in calls {
             if call.caller_key != key -> next
             group.push(call.copy())
@@ -188,7 +188,7 @@ jet_cli_architecture_behavior: fn() -> [JetCLIStatusValue] Never! {
 }
 
 jet_cli_architecture_value: fn(inspection: JetCLIArchitectureInspection) -> JetCLIStatusValue Never! {
-    rows := [JetCLIStatusValue]{}
+    ^rows: [JetCLIStatusValue]{}
     loop row in inspection.rows {
         evidence: loop entry in row.evidence -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("role", jet_cli_status_text(entry.role)), jet_cli_status_field("module", jet_cli_status_text(entry.module_path)), jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(entry.span.start)), jet_cli_status_field("end", jet_cli_status_int(entry.span.end))}))})
         rows.push(
@@ -206,7 +206,7 @@ jet_cli_architecture_value: fn(inspection: JetCLIArchitectureInspection) -> JetC
             ),
         )
     }
-    fields := [JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text(if inspection.reason == None -> "advisory" else -> "unavailable")), jet_cli_status_field("rows", jet_cli_status_array(rows)), jet_cli_status_field("operator_action", jet_cli_status_text("review_or_reject"))}
+    ^fields: [JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text(if inspection.reason == None -> "advisory" else -> "unavailable")), jet_cli_status_field("rows", jet_cli_status_array(rows)), jet_cli_status_field("operator_action", jet_cli_status_text("review_or_reject"))}
     if inspection.reason == .Val(reason) {
         fields.push(jet_cli_status_field("reason", jet_cli_status_text(reason)))
     }
@@ -214,7 +214,7 @@ jet_cli_architecture_value: fn(inspection: JetCLIArchitectureInspection) -> JetC
 }
 
 jet_cli_architecture_text: fn(inspection: JetCLIArchitectureInspection) -> String Never! {
-    output := "Architecture Advice (advisory, operator may reject):\n"
+    ^output: "Architecture Advice (advisory, operator may reject):\n"
     if {
         inspection.reason == .Val(reason) -> output = "{output}  Status: unavailable — {reason}\n"
         inspection.rows.len() == 0 -> {

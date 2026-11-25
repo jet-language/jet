@@ -82,22 +82,22 @@ EXPECTED_BYTES: #run show_bytes([130, 1, 2])
 EXPECTED_ALLOC: #run show_alloc([130, 1, 2])
 
 run: fn() {
-    malformed_wire := [U8]{255}
-    truncated_wire := [U8]{129}
-    noncanonical_wire := [U8]{24, 1}
-    unsupported_wire := [U8]{192, 1}
-    mismatch_wire := [U8]{129, 97, 120}
-    depth_wire := [U8]{129, 129, 1}
-    items_wire := [U8]{130, 1, 2}
-    actual_malformed := show(malformed_wire)
-    actual_truncated := show(truncated_wire)
-    actual_noncanonical := show_strict(noncanonical_wire)
-    actual_unsupported := show(unsupported_wire)
-    actual_mismatch := show_ints(mismatch_wire)
-    actual_depth := show_depth(depth_wire)
-    actual_items := show_items(items_wire)
-    actual_bytes := show_bytes(items_wire)
-    actual_alloc := show_alloc(items_wire)
+    ^malformed_wire: [U8]{255}
+    ^truncated_wire: [U8]{129}
+    ^noncanonical_wire: [U8]{24, 1}
+    ^unsupported_wire: [U8]{192, 1}
+    ^mismatch_wire: [U8]{129, 97, 120}
+    ^depth_wire: [U8]{129, 129, 1}
+    ^items_wire: [U8]{130, 1, 2}
+    ^actual_malformed: show(malformed_wire)
+    ^actual_truncated: show(truncated_wire)
+    ^actual_noncanonical: show_strict(noncanonical_wire)
+    ^actual_unsupported: show(unsupported_wire)
+    ^actual_mismatch: show_ints(mismatch_wire)
+    ^actual_depth: show_depth(depth_wire)
+    ^actual_items: show_items(items_wire)
+    ^actual_bytes: show_bytes(items_wire)
+    ^actual_alloc: show_alloc(items_wire)
     comptime_diff_frame("{EXPECTED_MALFORMED}{EXPECTED_TRUNCATED}.copy(){EXPECTED_NONCANONICAL}.copy(){EXPECTED_UNSUPPORTED}.copy(){EXPECTED_MISMATCH}.copy(){EXPECTED_DEPTH}.copy(){EXPECTED_ITEMS}.copy(){EXPECTED_BYTES}.copy(){EXPECTED_ALLOC}.copy()", "{actual_malformed}{actual_truncated}.copy(){actual_noncanonical}.copy(){actual_unsupported}.copy(){actual_mismatch}.copy(){actual_depth}.copy(){actual_items}.copy(){actual_bytes}.copy(){actual_alloc}.copy()")
 }
 

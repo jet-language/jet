@@ -120,7 +120,7 @@ core_clz: fn(a: U64) -> Int Never! { a.leading_zeros() }
 
 /// The bit length of the first `limbs` limbs of a.
 core_bitlen: fn(a: [U64], limbs: Int) -> Int Never! {
-    i := limbs - 1
+    ^i: limbs - 1
     loop i >= 0 {
         if a[i] != (U64{0}) -> return i * LIMB_BITS + LIMB_BITS - core_clz(a[i])
         i -= 1
@@ -131,16 +131,16 @@ core_bitlen: fn(a: [U64], limbs: Int) -> Int Never! {
 /// 1 when min <= a, in constant time; `limbs` must be at least 1.
 core_uint_le_mpi: fn(min: U64, a: [#Secret U64], limbs: Int) -> U64 Never! {
     min_le_lsl: ct_lt(a[0], min) ~ U64{1}
-    msll := U64{0}
+    ^msll: U64{0}
     loop i in 1..<limbs -> msll |= ct_bool(a[i])
     msll | min_le_lsl
 }
 
 /// 1 when a < b, both of `limbs` limbs, in constant time.
 core_lt_ct: fn(a: [#Secret U64], b: [#Secret U64], limbs: Int) -> U64 Never! {
-    ret := U64{0}
-    done := U64{0}
-    i := limbs
+    ^ret: U64{0}
+    ^done: U64{0}
+    ^i: limbs
     loop i > 0 {
         gt: ct_lt(b[i - 1], a[i - 1])
         done |= gt
@@ -154,7 +154,7 @@ core_lt_ct: fn(a: [#Secret U64], b: [#Secret U64], limbs: Int) -> U64 Never! {
 
 /// 1 when a has a bit set above bit `pos`, in constant time.
 core_bits_above: fn(a: [#Secret U64], pos: Int) -> U64 Never! {
-    seen := U64{0}
+    ^seen: U64{0}
     loop i in 0..<a.len() {
         low: i * LIMB_BITS
         if low > pos -> seen = seen | a[i] else if low + LIMB_BITS > pos + 1 {
@@ -209,7 +209,7 @@ core_read_be: fn(x: ^[U64], x_limbs: Int, input: [U8]) MpiError! {
 core_write_le: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
     stored: a_limbs * LIMB_BYTES
     if !core_fits(a, a_limbs, out_len) -> return Err(.BufferTooSmall)
-    out := cipher.zero_bytes(out_len)
+    ^out: cipher.zero_bytes(out_len)
     loop i in 0..<(if stored < out_len -> stored else -> out_len) -> out[i] = get_byte(a, i)
     Ok(out)
 }
@@ -218,7 +218,7 @@ core_write_le: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
 core_write_be: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
     stored: a_limbs * LIMB_BYTES
     if !core_fits(a, a_limbs, out_len) -> return Err(.BufferTooSmall)
-    out := cipher.zero_bytes(out_len)
+    ^out: cipher.zero_bytes(out_len)
     loop i in 0..<(if stored < out_len -> stored else -> out_len) {
         out[out_len - 1 - i] = get_byte(a, i)
     }
@@ -232,7 +232,7 @@ core_write_be: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
 #Scrub(Secret) core_fits: fn(a: [#Secret U64], a_limbs: Int, out_len: Int) -> Bool Never! {
     stored: a_limbs * LIMB_BYTES
     if stored <= out_len -> return true
-    extra := U8{0}
+    ^extra: U8{0}
     loop i in out_len..<stored -> extra |= get_byte(a, i)
     extra == U8{0}
 }
@@ -250,8 +250,8 @@ core_shift_r: fn(x: ^[U64], limbs: Int, count: Int) Never! {
         loop i in limbs - v0..<limbs -> x[i] = U64{0}
     }
     if v1 > 0 {
-        r0 := U64{0}
-        i := limbs
+        ^r0: U64{0}
+        ^i: limbs
         loop i > 0 {
             r1: x[i - 1] << (LIMB_BITS - v1)
             x[i - 1] = (x[i - 1] >> v1) | r0
@@ -266,7 +266,7 @@ core_shift_l: fn(x: ^[U64], limbs: Int, count: Int) Never! {
     v0: count /% LIMB_BITS
     v1: count % LIMB_BITS
     if v0 > 0 {
-        i := limbs
+        ^i: limbs
         loop i > v0 {
             x[i - 1] = x[i - v0 - 1]
             i -= 1
@@ -277,7 +277,7 @@ core_shift_l: fn(x: ^[U64], limbs: Int, count: Int) Never! {
         }
     }
     if v1 > 0 && v0 < limbs {
-        r0 := U64{0}
+        ^r0: U64{0}
         loop i in v0..<limbs {
             r1: x[i] >> (LIMB_BITS - v1)
             x[i] = (x[i] << v1) | r0
@@ -288,7 +288,7 @@ core_shift_l: fn(x: ^[U64], limbs: Int, count: Int) Never! {
 
 /// x = a + b over `limbs` limbs; the carry out.
 #Overflow(.Wrapping) core_add: fn(x: ^[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
-    c := U64{0}
+    ^c: U64{0}
     loop i in 0..<limbs {
         t: c + a[i]
         c = ct_lt(t, a[i])
@@ -302,7 +302,7 @@ core_shift_l: fn(x: ^[U64], limbs: Int, count: Int) Never! {
 /// x += a over `limbs` limbs when `cond` is 1, in constant time; the carry.
 #Overflow(.Wrapping) core_add_if: fn(x: ^[U64], a: [U64], limbs: Int, cond: U64) -> U64 Never! {
     mask: ct_mask(cond)
-    c := U64{0}
+    ^c: U64{0}
     loop i in 0..<limbs {
         add: a[i] & mask
         t: c + x[i]
@@ -316,7 +316,7 @@ core_shift_l: fn(x: ^[U64], limbs: Int, count: Int) Never! {
 
 /// x = a - b over `limbs` limbs; the borrow out.
 #Overflow(.Wrapping) core_sub: fn(x: ^[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
-    c := U64{0}
+    ^c: U64{0}
     loop i in 0..<limbs {
         z: ct_lt(a[i], c)
         t: a[i] - c
@@ -328,7 +328,7 @@ core_shift_l: fn(x: ^[U64], limbs: Int, count: Int) Never! {
 
 /// x = a - c over `limbs` limbs for one limb c; the borrow out.
 #Overflow(.Wrapping) core_sub_int: fn(x: ^[U64], a: [U64], c: U64, limbs: Int) -> U64 Never! {
-    borrow := c
+    ^borrow: c
     loop i in 0..<limbs {
         s: a[i]
         t: s - borrow
@@ -342,11 +342,11 @@ core_shift_l: fn(x: ^[U64], limbs: Int, count: Int) Never! {
 /// least s_len; a shorter d gives a wrong result, never a write past it.
 #Overflow(.Wrapping) core_mla: fn(d: ^[U64], off: Int, d_len: Int, s: [U64], s_len: Int, b: U64) -> U64 Never! {
     n: if d_len < s_len -> d_len else -> s_len
-    c := U64{0}
+    ^c: U64{0}
     loop i in 0..<n {
         p: mul_wide(s[i], b)
         lo: p.lo + c
-        hi := p.hi + ct_lt(lo, c)
+        ^hi: p.hi + ct_lt(lo, c)
         r: d[off + i] + lo
         hi += ct_lt(r, lo)
         d[off + i] = r
@@ -368,7 +368,7 @@ core_mul: fn(x: ^[U64], a: [U64], a_limbs: Int, b: [U64], b_limbs: Int) Never! {
 
 /// -n^-1 mod 2^64 for odd n[0], by Newton iteration (Tom St Denis).
 #Overflow(.Wrapping) core_montmul_init: fn(n: [U64]) -> U64 Never! {
-    x := n[0]
+    ^x: n[0]
     x += ((n[0] + U64{2}) & U64{4}) << 1
     loop _ in 0..<4 -> x *= U64{2} - n[0] * x
     U64{0} - x
@@ -397,9 +397,9 @@ core_mul: fn(x: ^[U64], a: [U64], a_limbs: Int, b: [U64], b_limbs: Int) Never! {
 
 /// R^2 mod n, R = 2^(64 * n.p.len()), in exactly n.p.len() limbs or more.
 core_get_mont_r2_unsafe: fn(n: Mpi) -> Mpi MpiError! {
-    x := from_int(1)
+    ^x: from_int(1)
     shift_l(x, n.p.len() * 2 * LIMB_BITS) ?? return Err(err)
-    r := mod_mpi(x, n) ?? return Err(err)
+    ^r: mod_mpi(x, n) ?? return Err(err)
     shrink(r, n.p.len()) ?? return Err(err)
     Ok(r)
 }
@@ -419,7 +419,7 @@ core_ct_uint_table_lookup: fn(dest: ^[U64], table: [U64], limbs: Int, count: Int
 /// a partial x behind.
 core_fill_random: fn<R: RNG>(x: ^[U64], x_limbs: Int, n_bytes: Int, rng: ^R) MpiError! {
     if x_limbs < (n_bytes + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BadInput)
-    buf := cipher.zero_bytes(n_bytes)
+    ^buf: cipher.zero_bytes(n_bytes)
     if !rng.fill(buf) {
         core.crypto.wipe(buf)
         return Err(.Random)
@@ -440,7 +440,7 @@ core_random: fn<R: RNG>(x: ^[U64], min: U64, n: [U64], limbs: Int, rng: ^R) MpiE
     n_bytes: (n_bits + 7) /% 8
     // When n is crypto-sized one try almost always lands; a small n needs
     // many more to keep the failure probability negligible.
-    count := if n_bytes > 4 -> 30 else -> 250
+    ^count: if n_bytes > 4 -> 30 else -> 250
     loop {
         core_fill_random(x, limbs, n_bytes, rng) ?? {
             cipher.wipe_words(x)
@@ -476,18 +476,18 @@ exp_mod_window: fn(ebits: Int) -> Int Never! { if ebits > 79 -> WINDOW_SIZE else
 /// and access pattern depend only on the start. Left-to-right k-ary
 /// exponentiation, one bit per step (HAC 14.82).
 core_exp_mod: fn(x: ^[U64], a: [U64], n: [U64], an_limbs: Int, e: [#Secret U64], start_limb: Int, start_bit: Int, rr: [U64]) Never! {
-    limb_index := start_limb
-    bit_index := start_bit
+    ^limb_index: start_limb
+    ^bit_index: start_bit
     wsize: exp_mod_window(limb_index * LIMB_BITS)
     welem: 1 << wsize
     mm: core_montmul_init(n)
-    table := cipher.words(welem * an_limbs)
-    selected := cipher.words(an_limbs)
-    temp := cipher.words(2 * an_limbs + 1)
-    row := cipher.words(an_limbs)
-    prev := cipher.words(an_limbs)
+    ^table: cipher.words(welem * an_limbs)
+    ^selected: cipher.words(an_limbs)
+    ^temp: cipher.words(2 * an_limbs + 1)
+    ^row: cipher.words(an_limbs)
+    ^prev: cipher.words(an_limbs)
     // W[0] = 1 and W[1] = A in Montgomery form; W[i] = W[i - 1] * W[1].
-    one := cipher.words(an_limbs)
+    ^one: cipher.words(an_limbs)
     one[0] = U64{1}
     core_montmul(row, one, rr, an_limbs, n, an_limbs, mm, temp)
     loop j in 0..<an_limbs -> table[j] = row[j]
@@ -499,8 +499,8 @@ core_exp_mod: fn(x: ^[U64], a: [U64], n: [U64], an_limbs: Int, e: [#Secret U64],
         copy_limbs(prev, row, an_limbs)
     }
     loop j in 0..<an_limbs -> x[j] = table[j]
-    window_bits := 0
-    window := U64{0}
+    ^window_bits: 0
+    ^window: U64{0}
     loop {
         copy_limbs(prev, x, an_limbs)
         core_montmul(x, prev, prev, an_limbs, n, an_limbs, mm, temp)
@@ -529,7 +529,7 @@ core_exp_mod: fn(x: ^[U64], a: [U64], n: [U64], an_limbs: Int, e: [#Secret U64],
 
 /// 1 when any of a's first `limbs` limbs is not zero, in constant time.
 core_check_zero_ct: fn(a: [#Secret U64], limbs: Int) -> U64 Never! {
-    bits := U64{0}
+    ^bits: U64{0}
     loop i in 0..<limbs -> bits |= a[i]
     ct_bool(bits)
 }
@@ -552,7 +552,7 @@ core_sub_mod: fn(x: ^[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
 
 /// x = a + b mod n with a and b in [0, n).
 core_add_mod: fn(x: ^[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
-    sum := cipher.words(limbs)
+    ^sum: cipher.words(limbs)
     carry: core_add(sum, a, b, limbs)
     borrow: core_sub(x, sum, n, limbs)
     // a + b < n: (0, 1), keep the sum; otherwise keep a + b - n, as in
@@ -564,7 +564,7 @@ core_add_mod: fn(x: ^[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
 /// x = a * b mod n for a < R and b < n, all of an_limbs limbs: the
 /// Montgomery product a b R^-1, then its product with rr = R^2 mod n.
 core_mul_mod: fn(x: ^[U64], a: [U64], b: [U64], n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: ^[U64]) Never! {
-    ab := cipher.words(an_limbs)
+    ^ab: cipher.words(an_limbs)
     core_montmul(ab, a, b, an_limbs, n, an_limbs, mm, t)
     core_montmul(x, ab, rr, an_limbs, n, an_limbs, mm, t)
     cipher.wipe_words(ab)
@@ -576,10 +576,10 @@ core_mul_mod: fn(x: ^[U64], a: [U64], b: [U64], n: [U64], an_limbs: Int, mm: U64
 /// test of a's or n's limbs.
 core_to_mont_rep_wide: fn(x: ^[U64], a: [U64], a_limbs: Int, n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: ^[U64]) Never! {
     zero_limbs(x, an_limbs)
-    chunk := cipher.words(an_limbs)
-    high := cipher.words(an_limbs)
-    low := cipher.words(an_limbs)
-    k := (a_limbs + an_limbs - 1) /% an_limbs
+    ^chunk: cipher.words(an_limbs)
+    ^high: cipher.words(an_limbs)
+    ^low: cipher.words(an_limbs)
+    ^k: (a_limbs + an_limbs - 1) /% an_limbs
     loop k > 0 {
         k -= 1
         loop j in 0..<an_limbs {
@@ -600,7 +600,7 @@ core_to_mont_rep_wide: fn(x: ^[U64], a: [U64], a_limbs: Int, n: [U64], an_limbs:
 /// rr = R^2 mod n: into Montgomery form by core_to_mont_rep_wide and out
 /// again, with no division.
 core_mod_wide: fn(x: ^[U64], a: [#Secret U64], a_limbs: Int, n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: ^[U64]) Never! {
-    m := cipher.words(an_limbs)
+    ^m: cipher.words(an_limbs)
     core_to_mont_rep_wide(m, a, a_limbs, n, an_limbs, mm, rr, t)
     core_from_mont_rep(x, m, n, an_limbs, mm, t)
     cipher.wipe_words(m)
@@ -611,12 +611,12 @@ core_mod_wide: fn(x: ^[U64], a: [#Secret U64], a_limbs: Int, n: [U64], an_limbs:
 /// chosen by mask, so a secret modulus (a CRT prime) shows nothing.
 core_get_mont_r2_ct: fn(n: Mpi) -> Mpi MpiError! {
     an: n.p.len()
-    x := zeros(an) ?? return Err(err)
+    ^x: zeros(an) ?? return Err(err)
     // 1 mod n: 0 when n is 1.
     x.p[0] = core_uint_le_mpi(U64{2}, n.p, an)
-    d := cipher.words(an)
+    ^d: cipher.words(an)
     loop _ in 0..<(2 * an * LIMB_BITS) {
-        carry := U64{0}
+        ^carry: U64{0}
         loop i in 0..<an {
             d[i] = (x.p[i] << 1) | carry
             carry = x.p[i] >> 63
@@ -643,15 +643,15 @@ core_div2_mod_odd: fn(x: ^[U64], n: [U64], limbs: Int) Never! {
 /// bitlen(a) + bitlen(n) steps reach the fixed point u = 0, v = gcd.
 core_gcd_modinv_odd: fn(g: ^[U64], i: ^[U64], inverse: Bool, a: [#Secret U64], a_limbs: Int, n: [#Secret U64], n_limbs: Int) Never! {
     an: if a_limbs > n_limbs -> n_limbs else -> a_limbs
-    u := cipher.words(n_limbs)
+    ^u: cipher.words(n_limbs)
     copy_limbs(u, a, an)
-    v := cipher.words(n_limbs)
+    ^v: cipher.words(n_limbs)
     copy_limbs(v, n, n_limbs)
-    d := cipher.words(n_limbs)
-    t1 := cipher.words(n_limbs)
-    t2 := cipher.words(n_limbs)
-    q := cipher.words(n_limbs)
-    r := cipher.words(n_limbs)
+    ^d: cipher.words(n_limbs)
+    ^t1: cipher.words(n_limbs)
+    ^t2: cipher.words(n_limbs)
+    ^q: cipher.words(n_limbs)
+    ^r: cipher.words(n_limbs)
     r[0] = U64{1}
     loop _ in 0..<(an + n_limbs) * LIMB_BITS {
         u_odd: u[0] & U64{1}
@@ -707,7 +707,7 @@ Mpi: struct {
 
     impl Close {
         close: fn(^^self) {
-            p := self.p.move()
+            ^p: self.p.move()
             cipher.wipe_words(p)
         }
     }
@@ -724,7 +724,7 @@ mpi: fn() -> Mpi Never! { Mpi{s: 1, p: [U64]{}} }
 
 /// z in one limb (mbedtls_mpi_lset on a fresh number).
 from_int: fn(z: Int) -> Mpi Never! {
-    p := cipher.words(1)
+    ^p: cipher.words(1)
     p[0] = sint_abs(z)
     Mpi{s: if z < 0 -> -1 else -> 1, p: p}
 }
@@ -735,7 +735,7 @@ grow: fn(x: ^Mpi, limbs: Int) MpiError! {
     if x.p.len() >= limbs {
         return
     }
-    p := cipher.words(limbs)
+    ^p: cipher.words(limbs)
     copy_limbs(p, x.p, x.p.len())
     cipher.wipe_words(x.p)
     x.p = p
@@ -746,10 +746,10 @@ grow: fn(x: ^Mpi, limbs: Int) MpiError! {
 shrink: fn(x: ^Mpi, limbs: Int) MpiError! {
     if limbs > MAX_LIMBS -> return Err(.AllocFailed)
     if x.p.len() <= limbs -> return grow(x, limbs)
-    i := x.p.len() - 1
+    ^i: x.p.len() - 1
     loop i > 0 && x.p[i] == (U64{0}) -> i -= 1
     keep: if i + 1 < limbs -> limbs else -> i + 1
-    p := cipher.words(keep)
+    ^p: cipher.words(keep)
     copy_limbs(p, x.p, keep)
     cipher.wipe_words(x.p)
     x.p = p
@@ -763,7 +763,7 @@ zeros: fn(limbs: Int) -> Mpi MpiError! {
 
 /// The count of x's limbs up to its most significant non-zero one.
 used_limbs: fn(x: Mpi) -> Int Never! {
-    i := x.p.len()
+    ^i: x.p.len()
     loop i > 0 && x.p[i - 1] == (U64{0}) -> i -= 1
     i
 }
@@ -772,9 +772,9 @@ used_limbs: fn(x: Mpi) -> Int Never! {
 /// (mbedtls_mpi_copy into a fresh number; not constant time).
 copy_mpi: fn(y: Mpi) -> Mpi Never! {
     if y.p.len() == 0 -> return mpi()
-    i := used_limbs(y)
+    ^i: used_limbs(y)
     if i == 0 -> i = 1
-    p := cipher.words(i)
+    ^p: cipher.words(i)
     copy_limbs(p, y.p, i)
     Mpi{s: y.s, p: p}
 }
@@ -795,7 +795,7 @@ set_mpi: fn(x: ^Mpi, y: Mpi) MpiError! {
         }
         return
     }
-    i := used_limbs(y)
+    ^i: used_limbs(y)
     if i == 0 -> i = 1
     x.s = y.s
     if x.p.len() < i -> grow(x, i) ?? return Err(err) else {
@@ -820,7 +820,7 @@ swap: fn(x: ^Mpi, y: ^Mpi) Never! {
     s: x.s
     x.s = y.s
     y.s = s
-    p := x.p.copy()
+    ^p: x.p.copy()
     x.p = y.p.copy()
     y.p = p.move()
 }
@@ -875,7 +875,7 @@ size: fn(x: Mpi) -> Int Never! { (bitlen(x) + 7) >> 3 }
 /// The value of digit `c` in `radix`, or InvalidCharacter.
 digit: fn(c: U8, radix: Int) -> U64 MpiError! {
     v: Int{c}
-    d := 255
+    ^d: 255
     if v >= 0x30 && v <= 0x39 -> d = v - 0x30
     if v >= 0x41 && v <= 0x46 -> d = v - 0x37
     if v >= 0x61 && v <= 0x66 -> d = v - 0x57
@@ -891,7 +891,7 @@ read_string: fn(radix: Int, s: String) -> Mpi MpiError! {
     if text.len() == 0 -> return Ok(mpi())
     start: if text[0] == (U8{0x2d}) -> 1 else -> 0
     slen: text.len() - start
-    x := mpi()
+    ^x: mpi()
     if radix == 16 {
         limbs: (slen * 4 + LIMB_BITS - 1) /% LIMB_BITS
         grow(x, limbs) ?? return Err(err)
@@ -920,7 +920,7 @@ HEX_DIGITS: "0123456789ABCDEF"
 /// must fit, as mbedtls_mpi_write_string checks it.
 write_string: fn(x: Mpi, radix: Int, buflen: Int) -> String MpiError! {
     if radix < 2 || radix > 16 -> return Err(.BadInput)
-    n := bitlen(x)
+    ^n: bitlen(x)
     if radix >= 4 -> n >>= 1
     if radix >= 16 -> n >>= 1
     // NUL, the rounding of the halvings, and a sign; then even for hex.
@@ -928,17 +928,17 @@ write_string: fn(x: Mpi, radix: Int, buflen: Int) -> String MpiError! {
     n += n % 2
     if buflen < n -> return Err(.BufferTooSmall)
     digits: HEX_DIGITS.bytes()
-    out := [U8]{}
-    room := buflen
+    ^out: [U8]{}
+    ^room: buflen
     if x.s == -1 {
         out.push(U8{0x2d})
         room -= 1
     }
     if radix == 16 {
-        started := false
-        i := x.p.len()
+        ^started: false
+        ^i: x.p.len()
         loop i > 0 {
-            j := LIMB_BYTES
+            ^j: LIMB_BYTES
             loop j > 0 {
                 c: Int{(x.p[i - 1] >> ((j - 1) * 8)) & U64{0xff}}
                 if c != 0 || started || i + j == 2 {
@@ -951,9 +951,9 @@ write_string: fn(x: Mpi, radix: Int, buflen: Int) -> String MpiError! {
             i -= 1
         }
     } else {
-        t := copy_mpi(x)
+        ^t: copy_mpi(x)
         t.s = 1
-        reversed := [U8]{}
+        ^reversed: [U8]{}
         loop {
             if reversed.len() >= room -> return Err(.BufferTooSmall)
             r: mod_int(t, radix) ?? return Err(err)
@@ -962,7 +962,7 @@ write_string: fn(x: Mpi, radix: Int, buflen: Int) -> String MpiError! {
             reversed.push(digits[Int{r}])
             if cmp_int(t, 0) == 0 -> break
         }
-        i := reversed.len()
+        ^i: reversed.len()
         loop i > 0 {
             out.push(reversed[i - 1])
             i -= 1
@@ -978,7 +978,7 @@ write_string: fn(x: Mpi, radix: Int, buflen: Int) -> String MpiError! {
 read_file_data: fn(radix: Int, data: [U8]) -> Mpi MpiError! {
     if radix < 2 || radix > 16 -> return Err(.BadInput)
     if data.len() == 0 -> return Err(.FileIO)
-    line := [U8]{}
+    ^line: [U8]{}
     loop b in data {
         if line.len() == RW_BUFFER_SIZE - 2 -> break
         line.push(b)
@@ -993,12 +993,12 @@ read_file_data: fn(radix: Int, data: [U8]) -> Mpi MpiError! {
     if line.len() == RW_BUFFER_SIZE - 2 -> return Err(.BufferTooSmall)
     if line.len() > 0 && line[line.len() - 1] == (U8{10}) -> _: line.pop()
     if line.len() > 0 && line[line.len() - 1] == (U8{13}) -> _: line.pop()
-    p := line.len()
+    ^p: line.len()
     loop p > 0 {
         if digit(line[p - 1], radix) == .Err(_) -> break
         p -= 1
     }
-    tail := [U8]{}
+    ^tail: [U8]{}
     loop i in p..<line.len() -> tail.push(line[i])
     read_string(radix, String.from_bytes(tail) ?? "")
 }
@@ -1011,14 +1011,14 @@ write_file_text: fn(prefix: String, x: Mpi, radix: Int) -> String MpiError! {
 
 /// The unsigned little-endian `buf` in exactly ceil(len / 8) limbs.
 read_binary_le: fn(buf: [U8]) -> Mpi MpiError! {
-    x := zeros((buf.len() + LIMB_BYTES - 1) /% LIMB_BYTES) ?? return Err(err)
+    ^x: zeros((buf.len() + LIMB_BYTES - 1) /% LIMB_BYTES) ?? return Err(err)
     core_read_le(x.p, x.p.len(), buf) ?? return Err(err)
     Ok(x)
 }
 
 /// The unsigned big-endian `buf` in exactly ceil(len / 8) limbs.
 read_binary: fn(buf: [U8]) -> Mpi MpiError! {
-    x := zeros((buf.len() + LIMB_BYTES - 1) /% LIMB_BYTES) ?? return Err(err)
+    ^x: zeros((buf.len() + LIMB_BYTES - 1) /% LIMB_BYTES) ?? return Err(err)
     core_read_be(x.p, x.p.len(), buf) ?? return Err(err)
     Ok(x)
 }
@@ -1045,7 +1045,7 @@ shift_r: fn(x: ^Mpi, count: Int) Never! {
 
 /// The sign of |x| - |y|: -1, 0 or 1.
 cmp_abs: fn(x: Mpi, y: Mpi) -> Int Never! {
-    i := used_limbs(x)
+    ^i: used_limbs(x)
     j: used_limbs(y)
     if i > j -> return 1
     if j > i -> return -1
@@ -1059,7 +1059,7 @@ cmp_abs: fn(x: Mpi, y: Mpi) -> Int Never! {
 
 /// The sign of x - y: -1, 0 or 1.
 cmp_mpi: fn(x: Mpi, y: Mpi) -> Int Never! {
-    i := used_limbs(x)
+    ^i: used_limbs(x)
     j: used_limbs(y)
     if i == 0 && j == 0 -> return 0
     if i > j -> return x.s
@@ -1120,12 +1120,12 @@ safe_cond_swap: fn(x: ^Mpi, y: ^Mpi, swap: Int) MpiError! {
 
 /// |a| + |b| (HAC 14.7).
 #Overflow(.Wrapping) add_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
-    x := copy_mpi(a)
+    ^x: copy_mpi(a)
     x.s = 1
-    j := used_limbs(b)
+    ^j: used_limbs(b)
     if j == 0 -> return Ok(x)
     grow(x, j) ?? return Err(err)
-    c := U64{0}
+    ^c: U64{0}
     loop i in 0..<j {
         t: x.p[i] + c
         c = ct_lt(t, c)
@@ -1147,9 +1147,9 @@ safe_cond_swap: fn(x: ^Mpi, y: ^Mpi, swap: Int) MpiError! {
 #Overflow(.Wrapping) sub_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     n: used_limbs(b)
     if n > a.p.len() -> return Err(.NegativeValue)
-    x := zeros(a.p.len()) ?? return Err(err)
+    ^x: zeros(a.p.len()) ?? return Err(err)
     copy_limbs(x.p, a.p, a.p.len())
-    carry := core_sub(x.p, a.p, b.p, n)
+    ^carry: core_sub(x.p, a.p, b.p, n)
     loop i in n..<x.p.len() {
         s: x.p[i]
         t: s - carry
@@ -1166,16 +1166,16 @@ add_sub_mpi: fn(a: Mpi, b: Mpi, flip: Int) -> Mpi MpiError! {
     if a.s * b.s * flip < 0 {
         cmp: cmp_abs(a, b)
         if cmp >= 0 {
-            x := sub_abs(a, b) ?? return Err(err)
+            ^x: sub_abs(a, b) ?? return Err(err)
             // |a| = |b| gives zero, which is positive.
             x.s = if cmp == 0 -> 1 else -> s
             return Ok(x)
         }
-        x := sub_abs(b, a) ?? return Err(err)
+        ^x: sub_abs(b, a) ?? return Err(err)
         x.s = -s
         return Ok(x)
     }
-    x := add_abs(a, b) ?? return Err(err)
+    ^x: add_abs(a, b) ?? return Err(err)
     x.s = s
     Ok(x)
 }
@@ -1197,7 +1197,7 @@ sub_int: fn(a: Mpi, b: Int) -> Mpi MpiError! { sub_mpi(a, from_int(b)) }
 mul_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     i: used_limbs(a)
     j: used_limbs(b)
-    x := zeros(if i + j == 0 -> 1 else -> i + j) ?? return Err(err)
+    ^x: zeros(if i + j == 0 -> 1 else -> i + j) ?? return Err(err)
     core_mul(x.p, a.p, i, b.p, j)
     x.s = if i == 0 || j == 0 -> 1 else -> a.s * b.s
     Ok(x)
@@ -1207,7 +1207,7 @@ mul_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 #Overflow(.Wrapping) mul_int: fn(a: Mpi, b: U64) -> Mpi MpiError! {
     n: used_limbs(a)
     if b == (U64{0}) || n == 0 -> return Ok(from_int(0))
-    x := zeros(n + 1) ?? return Err(err)
+    ^x: zeros(n + 1) ?? return Err(err)
     copy_limbs(x.p, a.p, n)
     x.s = a.s
     _: core_mla(x.p, 0, x.p.len(), a.p, n, b - U64{1})
@@ -1222,22 +1222,22 @@ mul_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     half: radix - U64{1}
     s: core_clz(divisor)
     d: divisor << s
-    u1 := high << s
+    ^u1: high << s
     if s > 0 -> u1 |= low >> (LIMB_BITS - s)
     u0: low << s
     d1: d >> 32
     d0: d & half
     u0_msw: u0 >> 32
     u0_lsw: u0 & half
-    q1 := u1 /% d1
-    r0 := u1 - d1 * q1
+    ^q1: u1 /% d1
+    ^r0: u1 - d1 * q1
     loop q1 >= radix || q1 * d0 > radix * r0 + u0_msw {
         q1 -= U64{1}
         r0 += d1
         if r0 >= radix -> break
     }
     rax: u1 * radix + (u0_msw - q1 * d)
-    q0 := rax /% d1
+    ^q0: rax /% d1
     r0 = rax - q0 * d1
     loop q0 >= radix || q0 * d0 > radix * r0 + u0_lsw {
         q0 -= U64{1}
@@ -1252,12 +1252,12 @@ mul_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 div_mpi: fn(a: Mpi, b: Mpi) -> {q: Mpi, r: Mpi} MpiError! {
     if cmp_int(b, 0) == 0 -> return Err(.DivisionByZero)
     if cmp_abs(a, b) < 0 -> return Ok({q: from_int(0), r: copy_mpi(a)})
-    x := copy_mpi(a)
-    y := copy_mpi(b)
+    ^x: copy_mpi(a)
+    ^y: copy_mpi(b)
     x.s = 1
     y.s = 1
-    z := zeros(a.p.len() + 2) ?? return Err(err)
-    k := bitlen(y) % LIMB_BITS
+    ^z: zeros(a.p.len() + 2) ?? return Err(err)
+    ^k: bitlen(y) % LIMB_BITS
     if k < LIMB_BITS - 1 {
         k = LIMB_BITS - 1 - k
         shift_l(x, k) ?? return Err(err)
@@ -1272,31 +1272,31 @@ div_mpi: fn(a: Mpi, b: Mpi) -> {q: Mpi, r: Mpi} MpiError! {
         set_mpi(x, diff) ?? return Err(err)
     }
     shift_r(y, LIMB_BITS * (n - t))
-    i := n
+    ^i: n
     loop i > t {
         // x keeps at least n + 1 limbs, as mbedtls's in-place x does.
         grow(x, n + 1) ?? return Err(err)
         at: i - t - 1
         z.p[at] = if x.p[i] >= y.p[t] -> ~U64{0} else -> int_div_int(x.p[i], x.p[i - 1], y.p[t])
-        t2 := zeros(3) ?? return Err(err)
+        ^t2: zeros(3) ?? return Err(err)
         t2.p[0] = if i < 2 -> U64{0} else -> x.p[i - 2]
         t2.p[1] = if i < 1 -> U64{0} else -> x.p[i - 1]
         t2.p[2] = x.p[i]
         z.p[at] = wrapping(z.p[at] + U64{1})
         loop {
             z.p[at] = wrapping(z.p[at] - U64{1})
-            t1 := zeros(2) ?? return Err(err)
+            ^t1: zeros(2) ?? return Err(err)
             t1.p[0] = if t < 1 -> U64{0} else -> y.p[t - 1]
             t1.p[1] = y.p[t]
             product: mul_int(t1, z.p[at]) ?? return Err(err)
             if cmp_mpi(product, t2) <= 0 -> break
         }
-        t1 := mul_int(y, z.p[at]) ?? return Err(err)
+        ^t1: mul_int(y, z.p[at]) ?? return Err(err)
         shift_l(t1, LIMB_BITS * at) ?? return Err(err)
         diff: sub_mpi(x, t1) ?? return Err(err)
         set_mpi(x, diff) ?? return Err(err)
         if cmp_int(x, 0) < 0 {
-            back := copy_mpi(y)
+            ^back: copy_mpi(y)
             shift_l(back, LIMB_BITS * at) ?? return Err(err)
             sum: add_mpi(x, back) ?? return Err(err)
             set_mpi(x, sum) ?? return Err(err)
@@ -1304,11 +1304,11 @@ div_mpi: fn(a: Mpi, b: Mpi) -> {q: Mpi, r: Mpi} MpiError! {
         }
         i -= 1
     }
-    q := copy_mpi(z)
+    ^q: copy_mpi(z)
     q.s = a.s * b.s
     shift_r(x, k)
     x.s = a.s
-    r := copy_mpi(x)
+    ^r: copy_mpi(x)
     if cmp_int(r, 0) == 0 -> r.s = 1
     Ok({q: q, r: r})
 }
@@ -1320,7 +1320,7 @@ div_int: fn(a: Mpi, b: Int) -> {q: Mpi, r: Mpi} MpiError! { div_mpi(a, from_int(
 mod_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     if cmp_int(b, 0) < 0 -> return Err(.NegativeValue)
     qr: div_mpi(a, b) ?? return Err(err)
-    r := copy_mpi(qr.r)
+    ^r: copy_mpi(qr.r)
     loop cmp_int(r, 0) < 0 {
         sum: add_mpi(r, b) ?? return Err(err)
         set_mpi(r, sum) ?? return Err(err)
@@ -1339,10 +1339,10 @@ mod_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     if b == 1 || a.p.len() == 0 -> return Ok(U64{0})
     if b == 2 -> return Ok(a.p[0] & U64{1})
     d: U64{b}
-    y := U64{0}
-    i := a.p.len()
+    ^y: U64{0}
+    ^i: a.p.len()
     loop i > 0 {
-        x := a.p[i - 1]
+        ^x: a.p[i - 1]
         y = (y << 32) | x >> 32
         y -= (y /% d) * d
         x <<= 32
@@ -1359,7 +1359,7 @@ mod_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 /// computed in constant time, since the modulus may be a CRT prime.
 mont_r2: fn(rr: ^Mpi, n: Mpi) MpiError! {
     if rr.p.len() == 0 {
-        computed := core_get_mont_r2_ct(n) ?? return Err(err)
+        ^computed: core_get_mont_r2_ct(n) ?? return Err(err)
         swap(rr, computed)
     } else { grow(rr, n.p.len()) ?? return Err(err) }
 }
@@ -1371,9 +1371,9 @@ mod_ct: fn(a: Mpi, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
     if a.s < 0 -> return Err(.BadInput)
     mont_r2(rr, n) ?? return Err(err)
     an: n.p.len()
-    x := zeros(an) ?? return Err(err)
+    ^x: zeros(an) ?? return Err(err)
     mm: core_montmul_init(n.p)
-    t := cipher.words(2 * an + 1)
+    ^t: cipher.words(2 * an + 1)
     core_mod_wide(x.p, a.p, a.p.len(), n.p, an, mm, rr.p, t)
     cipher.wipe_words(t)
     Ok(x)
@@ -1382,7 +1382,7 @@ mod_ct: fn(a: Mpi, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
 /// x's limbs in exactly `limbs` limbs: zero-extended, or cut where a value
 /// in range has only zero limbs. Only x's limb count is tested.
 limbs_of: fn(x: Mpi, limbs: Int) -> [U64] Never! {
-    out := cipher.words(limbs)
+    ^out: cipher.words(limbs)
     loop i in 0..<(if x.p.len() < limbs -> x.p.len() else -> limbs) -> out[i] = x.p[i]
     out
 }
@@ -1396,10 +1396,10 @@ limbs_of: fn(x: Mpi, limbs: Int) -> [U64] Never! {
 exp_mod_from: fn(a: Mpi, ep: [#Secret U64], start_limb: Int, start_bit: Int, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
     an: n.p.len()
     mont_r2(rr, n) ?? return Err(err)
-    x := zeros(an) ?? return Err(err)
+    ^x: zeros(an) ?? return Err(err)
     mm: core_montmul_init(n.p)
-    t := cipher.words(2 * an + 1)
-    m := cipher.words(an)
+    ^t: cipher.words(2 * an + 1)
+    ^m: cipher.words(an)
     core_to_mont_rep_wide(m, a.p, a.p.len(), n.p, an, mm, rr.p, t)
     core_exp_mod(x.p, m, n.p, an, ep, start_limb, start_bit, rr.p)
     copy_limbs(m, x.p, an)
@@ -1407,7 +1407,7 @@ exp_mod_from: fn(a: Mpi, ep: [#Secret U64], start_limb: Int, start_bit: Int, n: 
     // A negative a with an odd exponent: the result is n - |a|^e mod n
     // (zero stays zero), chosen by mask on the exponent's low bit.
     if a.s == -1 {
-        negated := cipher.words(an)
+        ^negated: cipher.words(an)
         _: core_sub(negated, n.p, x.p, an)
         odd: ep[0] & U64{1}
         nonzero: core_check_zero_ct(x.p, an)
@@ -1438,11 +1438,11 @@ exp_mod: fn(a: Mpi, e: Mpi, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
         return Err(.BadInput)
     }
     if e.p.len() == 0 -> return Ok(from_int(1))
-    limbs := n.p.len()
+    ^limbs: n.p.len()
     if e.p.len() > limbs -> limbs = e.p.len()
-    ep := cipher.words(limbs)
+    ^ep: cipher.words(limbs)
     copy_limbs(ep, e.p, e.p.len())
-    x := exp_mod_from(a, ep, limbs, 0, n, rr) ?? {
+    ^x: exp_mod_from(a, ep, limbs, 0, n, rr) ?? {
         cipher.wipe_words(ep)
         return Err(err)
     }
@@ -1454,7 +1454,7 @@ exp_mod: fn(a: Mpi, e: Mpi, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
 exp_mod_unsafe: fn(a: Mpi, e: Mpi, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
     if !exp_mod_modulus_ok(n) || cmp_int(e, 0) < 0 || bitlen(e) > MAX_BITS -> return Err(.BadInput)
     if e.p.len() == 0 -> return Ok(from_int(1))
-    e_bits := bitlen(e)
+    ^e_bits: bitlen(e)
     if e_bits == 0 -> e_bits = 1
     exp_mod_from(a, e.p, e_bits /% LIMB_BITS, e_bits % LIMB_BITS, n, rr)
 }
@@ -1464,10 +1464,10 @@ exp_mod_unsafe: fn(a: Mpi, e: Mpi, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
 /// Both results have n's limb count; `i` is empty without `inverse`.
 gcd_modinv_odd: fn(a: Mpi, n: Mpi, inverse: Bool) -> {g: Mpi, i: Mpi} MpiError! {
     if !modinv_args_ok(a, n, inverse) -> return Err(.BadInput)
-    g := zeros(n.p.len()) ?? return Err(err)
-    i := if inverse -> zeros(n.p.len()) ?? return Err(err) else -> mpi()
+    ^g: zeros(n.p.len()) ?? return Err(err)
+    ^i: if inverse -> zeros(n.p.len()) ?? return Err(err) else -> mpi()
     // The working copy of a is wiped: a may be a blinded nonce or key.
-    ap := if a.p.len() == 0 -> [U64]{U64{0}} else -> a.p.copy()
+    ^ap: if a.p.len() == 0 -> [U64]{U64{0}} else -> a.p.copy()
     an: if a.p.len() >= n.p.len() -> n.p.len() else if a.p.len() != 0 -> a.p.len() else -> 1
     core_gcd_modinv_odd(g.p, i.p, inverse, ap, an, n.p, n.p.len())
     cipher.wipe_words(ap)
@@ -1480,12 +1480,12 @@ gcd_modinv_odd: fn(a: Mpi, n: Mpi, inverse: Bool) -> {g: Mpi, i: Mpi} MpiError! 
 modinv_args_ok: fn(a: Mpi, n: Mpi, inverse: Bool) -> Bool Never! {
     if a.s < 0 || n.s < 0 || n.p.len() == 0 -> return false
     nl: n.p.len()
-    low := cipher.words(nl)
-    high := U64{0}
+    ^low: cipher.words(nl)
+    ^high: U64{0}
     loop i in 0..<a.p.len() {
         if i < nl -> low[i] = a.p[i] else -> high |= a.p[i]
     }
-    ok := (core_lt_ct(n.p, low, nl) | ct_bool(high)) ~ U64{1}
+    ^ok: (core_lt_ct(n.p, low, nl) | ct_bool(high)) ~ U64{1}
     ok &= n.p[0] & U64{1}
     if inverse -> ok &= core_uint_le_mpi(U64{2}, n.p, nl)
     cipher.wipe_words(low)
@@ -1494,8 +1494,8 @@ modinv_args_ok: fn(a: Mpi, n: Mpi, inverse: Bool) -> Bool Never! {
 
 /// gcd(a, b) >= 0; gcd(0, b) = |b|. Constant time once both are non-zero.
 gcd: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
-    ta := copy_mpi(a)
-    tb := copy_mpi(b)
+    ^ta: copy_mpi(a)
+    ^tb: copy_mpi(b)
     ta.s = 1
     tb.s = 1
     grow(ta, if tb.p.len() != 0 -> tb.p.len() else -> 1) ?? return Err(err)
@@ -1510,7 +1510,7 @@ gcd: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     swap: core_lt_ct(tb.p, ta.p, ta.p.len())
     core_cond_swap(ta.p, tb.p, ta.p.len(), swap)
     result: gcd_modinv_odd(ta, tb, false) ?? return Err(err)
-    g := copy_mpi(result.g)
+    ^g: copy_mpi(result.g)
     grow(g, result.g.p.len()) ?? return Err(err)
     shift_l(g, if za > zb -> zb else -> za) ?? return Err(err)
     Ok(g)
@@ -1519,7 +1519,7 @@ gcd: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 /// `size` random bytes as a big-endian number in exactly ceil(size / 8)
 /// limbs.
 fill_random: fn<R: RNG>(size: Int, rng: ^R) -> Mpi MpiError! {
-    x := zeros((size + LIMB_BYTES - 1) /% LIMB_BYTES) ?? return Err(err)
+    ^x: zeros((size + LIMB_BYTES - 1) /% LIMB_BYTES) ?? return Err(err)
     if size == 0 -> return Ok(x)
     core_fill_random(x.p, x.p.len(), size, rng) ?? return Err(err)
     Ok(x)
@@ -1529,7 +1529,7 @@ fill_random: fn<R: RNG>(size: Int, rng: ^R) -> Mpi MpiError! {
 random: fn<R: RNG>(min: Int, n: Mpi, rng: ^R) -> Mpi MpiError! {
     if min < 0 -> return Err(.BadInput)
     if cmp_int(n, min) <= 0 -> return Err(.BadInput)
-    x := zeros(n.p.len()) ?? return Err(err)
+    ^x: zeros(n.p.len()) ?? return Err(err)
     core_random(x.p, U64{min}, n.p, x.p.len(), rng) ?? return Err(err)
     Ok(x)
 }
@@ -1618,7 +1618,7 @@ check_small_factors: fn(x: Mpi) -> Bool MpiError! {
     if x.p[0] & (U64{1}) == (U64{0}) -> return Err(.NotAcceptable)
     if cmp_int(x, SMALL_PRIMES_LIMIT) <= 0 {
         v: Int{x.p[0]}
-        d := 2
+        ^d: 2
         loop v % d != 0 -> d += 1
         if v == d -> return Ok(true)
         return Err(.NotAcceptable)
@@ -1632,12 +1632,12 @@ check_small_factors: fn(x: Mpi) -> Bool MpiError! {
 miller_rabin: fn<R: RNG>(x: Mpi, rounds: Int, rng: ^R) MpiError! {
     w: sub_int(x, 1) ?? return Err(err)
     s: lsb(w)
-    r := copy_mpi(w)
+    ^r: copy_mpi(w)
     shift_r(r, s)
-    rr := mpi()
+    ^rr: mpi()
     loop _ in 0..<rounds {
-        count := 0
-        a := mpi()
+        ^count: 0
+        ^a: mpi()
         loop {
             drawn: fill_random(x.p.len() * LIMB_BYTES, rng) ?? return Err(err)
             set_mpi(a, drawn) ?? return Err(err)
@@ -1655,7 +1655,7 @@ miller_rabin: fn<R: RNG>(x: Mpi, rounds: Int, rng: ^R) MpiError! {
         power: exp_mod(a, r, x, rr) ?? return Err(err)
         set_mpi(a, power) ?? return Err(err)
         if cmp_mpi(a, w) == 0 || cmp_int(a, 1) == 0 -> next
-        j := 1
+        ^j: 1
         loop j < s && cmp_mpi(a, w) != 0 {
             sq: mul_mpi(a, a) ?? return Err(err)
             reduced: mod_mpi(sq, x) ?? return Err(err)
@@ -1713,7 +1713,7 @@ gen_prime: fn<R: RNG>(nbits: Int, rng: ^R, dh: Bool{false}, low_err: Bool{false}
         else -> 27
     }
     loop {
-        x := fill_random(n * LIMB_BYTES, rng) ?? return Err(err)
+        ^x: fill_random(n * LIMB_BYTES, rng) ?? return Err(err)
         // At least (nbits - 1) + 0.5 bits (FIPS 186-4 B.3.3 steps 4.4, 5.5).
         if x.p[n - 1] < CEIL_MAXUINT_DIV_SQRT2 -> next
         k: n * LIMB_BITS
@@ -1735,7 +1735,7 @@ gen_prime: fn<R: RNG>(nbits: Int, rng: ^R, dh: Bool{false}, low_err: Bool{false}
                 sum: add_int(x, 4) ?? return Err(err)
                 set_mpi(x, sum) ?? return Err(err)
             }
-            y := copy_mpi(x)
+            ^y: copy_mpi(x)
             shift_r(y, 1)
             loop {
                 if safe_prime_step(x, y, rounds, rng) == .Err(e) {
@@ -1771,7 +1771,7 @@ safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: ^R) MpiError! {
     u: read_string(16, "256567336059E52CAE22925474705F39A94") ?? panic("U")
     assert(cmp_mpi(qr.q, u) == 0)
     assert((write_string(qr.r, 16, 1000) ?? "") == "6613F26162223DF488E9CD48CC132C7A0AC93C701B001B092E4E5B9F73BCD27B9EE50D0657C77F374E903CDFA4C642")
-    rr := mpi()
+    ^rr: mpi()
     x3: exp_mod(a, e, n, rr) ?? panic("exp_mod")
     assert((write_string(x3, 16, 1000) ?? "") == "36E139AEA55215609D2816998ED020BBBD96C37890F65171D948E9BC7CBAA4D9325D24D6A3C12710F10A09FA08AB87")
     x3u: exp_mod_unsafe(a, e, n, rr) ?? panic("exp_mod_unsafe")
@@ -1786,9 +1786,9 @@ safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: ^R) MpiError! {
 }
 
 #Test("The small-prime product is the product of every odd prime up to 997") {
-    p := from_int(1)
+    ^p: from_int(1)
     loop v in 3..<(SMALL_PRIMES_LIMIT + 1) {
-        d := 2
+        ^d: 2
         loop v % d != 0 -> d += 1
         if d == v {
             product: mul_int(p, U64{v}) ?? panic("mul_int")
@@ -1805,7 +1805,7 @@ safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: ^R) MpiError! {
 #Test("The most negative Int64 round-trips through lset, add, sub, div and mod") {
     most_positive: 9223372036854775807
     most_negative: 0 - most_positive - 1
-    a := mpi()
+    ^a: mpi()
     lset(a, most_negative) ?? panic("lset")
     assert(a.s == -1 && a.p.len() == 1 && a.p[0] == (U64{1} << 63))
     assert(cmp_int(a, most_negative) == 0)
@@ -1821,14 +1821,14 @@ safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: ^R) MpiError! {
 #Test("set_mpi_ct keeps every limb of its source, leading zero ones too, and zeroes a longer target above them") {
     y: read_binary([U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{7}}) ?? panic("read")
     assert(y.p.len() == 2)
-    short := mpi()
+    ^short: mpi()
     set_mpi_ct(short, y) ?? panic("grow")
     assert(short.p.len() == 2 && short.p[0] == (U64{7}) && short.p[1] == (U64{0}) && cmp_int(short, 7) == 0)
-    trimmed := mpi()
+    ^trimmed: mpi()
     set_mpi(trimmed, y) ?? panic("set")
     assert(trimmed.p.len() == 1 && cmp_mpi(trimmed, short) == 0)
     long: read_string(16, "112233445566778899AABBCCDDEEFF00") ?? panic("long")
-    wide := copy_mpi_ct(long)
+    ^wide: copy_mpi_ct(long)
     set_mpi_ct(wide, from_int(-5)) ?? panic("wide")
     assert(wide.s == -1 && wide.p.len() == long.p.len() && cmp_int(wide, -5) == 0)
     loop j in 1..<wide.p.len() -> assert(wide.p[j] == (U64{0}))
@@ -1856,7 +1856,7 @@ safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: ^R) MpiError! {
 }
 
 #Test("Exponentiation, inverse and gcd reject the inputs mbedtls rejects") {
-    rr := mpi()
+    ^rr: mpi()
     assert(exp_mod(from_int(3), from_int(5), from_int(8), rr) == .Err(.BadInput))
     assert(exp_mod(from_int(3), from_int(-1), from_int(7), rr) == .Err(.BadInput))
     r: exp_mod(from_int(-3), from_int(3), from_int(7), rr) ?? panic("exp_mod")
@@ -1887,8 +1887,8 @@ FailingDraws: struct {
     n: [U64]{U64{5}}
     lefts: [Int]{0, 3, 1000}
     loop left in lefts {
-        x := [U64]{U64{0x5A5A5A5A5A5A5A5A}}
-        rng := FailingDraws{left: left}
+        ^x: [U64]{U64{0x5A5A5A5A5A5A5A5A}}
+        ^rng: FailingDraws{left: left}
         if left == 1000 -> assert(core_random(x, U64{1}, n, 1, rng) == .Err(.NotAcceptable)) else {
             assert(core_random(x, U64{1}, n, 1, rng) == .Err(.Random))
         }

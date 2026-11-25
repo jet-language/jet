@@ -35,7 +35,7 @@ collect: fn<T>(stream: ^DataStream<T>) -> [T] DataError! { core.data.__stream_co
 cancel: fn<T>(stream: ^DataStream<T>) Never! { stream.canceled = true }
 
 skip: fn<T>(stream: ^DataStream<T>, count: Int) Never! {
-    remaining := count
+    ^remaining: count
     loop remaining > 0 {
         if core.data.__stream_pull<T>(stream) == {
             .Ok(item) -> {
@@ -53,8 +53,8 @@ take_n: fn<T>(stream: ^DataStream<T>, count: Int) -> [T] DataError! {
     if stream.canceled {
         return Err(stream_error(DataErrorKind.State, "stream was canceled", "data.stream"))
     }
-    out := [T]{}
-    remaining := count
+    ^out: [T]{}
+    ^remaining: count
     loop remaining > 0 {
         item: core.data.__stream_pull<T>(stream)
         row: item ?? return Ok(out)

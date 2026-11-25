@@ -146,10 +146,10 @@ pkg_cffi_validate_c_binding: fn(lib: String, project_root: String, overlay_overr
         return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "the local archive `{input.path}` could not be read")))
     }
     source: files.read(cache) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "the generated C cache could not be read ({err})")))
-    expected := pkg_cffi_binding_symbols(source)
+    ^expected: pkg_cffi_binding_symbols(source)
     loop overlay in overlay_overrides {
         if overlay.lib != lib -> next
-        remaining := [String]{}
+        ^remaining: [String]{}
         loop symbol in expected {
             if symbol != overlay.generated_symbol -> remaining.push(symbol)
         }
@@ -161,7 +161,7 @@ pkg_cffi_validate_c_binding: fn(lib: String, project_root: String, overlay_overr
         return
     }
     defined: pkg_cffi_nm_symbols(input.path, false) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "could not inventory exported symbols in `{input.path}` ({err.message})")))
-    missing := [String]{}
+    ^missing: [String]{}
     loop symbol in expected {
         if !defined.contains(pkg_cffi_normalize_nm_symbol(symbol)) -> missing.push(symbol)
     }
@@ -188,7 +188,7 @@ pkg_cffi_validate_c_binding_provenance: fn(lib: String, project_root: String, ca
 // The native symbols a generated cache binds: the quoted target of every
 // `= "<symbol>"` declaration, sorted and unique.
 pkg_cffi_binding_symbols: fn(source: String) -> [String] Never! {
-    symbols := [String]{}
+    ^symbols: [String]{}
     loop line in pkg_bridge_text_lines(source) {
         parts: line.cut_last("= \"") ?? next
         symbol: if parts.after.split_once("\"") == {
@@ -205,9 +205,9 @@ pkg_cffi_binding_symbols: fn(source: String) -> [String] Never! {
 // declared libraries export (C++ runtime and standard-library symbols aside).
 pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive: String, target: String, flags: LinkFlags) -[FS, Env, Exec, Time.Wait]> CFFIError! {
     generated_name: "{pkg_foreign_bridge_prefix(CPP_MODULE_ROOT)}{actual}"
-    libraries := [String]{}
+    ^libraries: [String]{}
     loop name in flags.link_names {
-        bare := name.copy()
+        ^bare: name.copy()
         if {
             name.starts_with("static=") -> bare = name.removeprefix("static=")
             name.starts_with("dylib=") -> bare = name.removeprefix("dylib=")
@@ -218,14 +218,14 @@ pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive
             libraries.push(bare)
         }
     }
-    inputs := [ArchiveInput]{}
+    ^inputs: [ArchiveInput]{}
     loop input in pkg_bridge_local_archive_inputs(flags.lib_dirs, libraries) {
         if files.is_file(input.path) -> inputs.push(input)
     }
     if inputs.len() == 0 {
         return
     }
-    defined := [String]{}
+    ^defined: [String]{}
     loop input in inputs {
         if input.bytes == None {
             return Err(pkg_cffi_error(pkg_cffi_e3208(generated_archive, lib, "the local archive `{input.path}` could not be read")))
@@ -236,7 +236,7 @@ pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive
         }
     }
     undefined: pkg_cffi_nm_symbols(generated_archive, true) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(generated_archive, lib, "could not inventory bound symbols in `{generated_archive}` ({err.message})")))
-    missing := [String]{}
+    ^missing: [String]{}
     loop symbol in undefined {
         if pkg_cffi_ignorable_cpp_symbol(symbol) || defined.contains(symbol) -> next
         missing.push(symbol)
@@ -257,7 +257,7 @@ pkg_cffi_cpp_runtime_library: fn(name: String, target: String) -> Bool Never! {
 
 // `nm -g [-u] <path>`: the sorted global (or undefined) symbols.
 pkg_cffi_nm_symbols: fn(path: String, undefined: Bool) -[Exec, Time.Wait]> [String] ForeignBridgeError! {
-    argv := [String]{"nm", "-g"}
+    ^argv: [String]{"nm", "-g"}
     if undefined -> argv.push("-u")
     argv.push(path.copy())
     receipt: process.cmd(argv).run() ?? return Err(pkg_bridge_error(pkg_bridge_spawn_error("nm", err)))
@@ -270,7 +270,7 @@ pkg_cffi_nm_symbols: fn(path: String, undefined: Bool) -[Exec, Time.Wait]> [Stri
 
 // Symbols of the requested kind from `nm` output rows (`[addr] <kind> <name>`).
 pkg_cffi_parse_nm_symbols: fn(output: String, undefined: Bool) -> [String] Never! {
-    symbols := [String]{}
+    ^symbols: [String]{}
     loop line in pkg_bridge_text_lines(output) {
         tokens: pkg_cffi_whitespace_tokens(line)
         if tokens.len() < 2 -> next
@@ -297,7 +297,7 @@ CFFI_IGNORABLE_CPP_NAMES: [String]{"abort", "free", "malloc", "memcpy", "memmove
 // C++ runtime, standard-library, and libc symbols a generated archive may
 // leave undefined for the platform to supply.
 pkg_cffi_ignorable_cpp_symbol: fn(raw: String) -> Bool Never! {
-    symbol := raw
+    ^symbol: raw
     loop symbol.starts_with("_") -> symbol = symbol.removeprefix("_")
     loop prefix in CFFI_IGNORABLE_CPP_PREFIXES {
         if symbol.starts_with(prefix) -> return true

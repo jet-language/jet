@@ -81,7 +81,7 @@ rt_ed25519_swap: fn(p: I64, q: I64, bit: I64) {
 }
 
 rt_ed25519_d2_init: fn(d2: I64) {
-    i := I64{0}
+    ^i: I64{0}
     loop i < (I64{16}) {
         rt_text_store(wrapping(d2 + i * I64{8}), rt_ed25519_d2(i))
         i += I64{1}
@@ -90,7 +90,7 @@ rt_ed25519_d2_init: fn(d2: I64) {
 
 rt_ed25519_base: fn(q: I64, work: I64) {
     rt_crypto_wipe(q, I64{512})
-    i := I64{0}
+    ^i: I64{0}
     loop i < (I64{16}) {
         rt_text_store(wrapping(q + i * I64{8}), rt_ed25519_x(i))
         rt_text_store(wrapping(wrapping(q + I64{128}) + i * I64{8}), I64{0x6666})
@@ -106,7 +106,7 @@ rt_ed25519_mul: fn(p: I64, q: I64, scalar: I64, temporaries: I64, d2: I64, work:
     rt_crypto_wipe(p, I64{512})
     rt_text_store(wrapping(p + I64{128}), I64{1})
     rt_text_store(wrapping(p + I64{256}), I64{1})
-    i := I64{255}
+    ^i: I64{255}
     loop {
         if (i < I64{0}) { break }
         bit: (rt_text_byte(wrapping(scalar + i / I64{8})) >> (i % I64{8})) & I64{1}
@@ -121,7 +121,7 @@ rt_ed25519_mul: fn(p: I64, q: I64, scalar: I64, temporaries: I64, d2: I64, work:
 // Packing consumes p's affine coordinates; all spans are disjoint.
 rt_ed25519_pack: fn(output: I64, p: I64, inverse: I64, work: I64, reduced: I64, packed_x: I64) {
     rt_x25519_copy(inverse, wrapping(p + I64{256}))
-    i := I64{253}
+    ^i: I64{253}
     loop {
         if (i < I64{0}) { break }
         rt_x25519_mul(inverse, inverse, inverse, work)
@@ -182,14 +182,14 @@ rt_ed25519_l: fn(index: I64) -> I64 {
 }
 
 rt_ed25519_mod_l: fn(output: I64, x: I64) {
-    i := I64{63}
+    ^i: I64{63}
     loop {
         if (i < I64{32}) { break }
         high: rt_text_word(wrapping(x + i * I64{8}))
-        carry := I64{0}
+        ^carry: I64{0}
         start: i - I64{32}
         end: i - I64{12}
-        j := start
+        ^j: start
         loop j < end {
             value: rt_text_word(wrapping(x + j * I64{8})) + carry - I64{16} * high * rt_ed25519_l(j - start)
             carry = (value + I64{128}) >> I64{8}
@@ -201,8 +201,8 @@ rt_ed25519_mod_l: fn(output: I64, x: I64) {
         i -= I64{1}
     }
     top: rt_text_word(wrapping(x + I64{248})) >> I64{4}
-    carry := I64{0}
-    j := I64{0}
+    ^carry: I64{0}
+    ^j: I64{0}
     loop j < (I64{32}) {
         value: rt_text_word(wrapping(x + j * I64{8})) + carry - top * rt_ed25519_l(j)
         carry = value >> I64{8}
@@ -225,7 +225,7 @@ rt_ed25519_mod_l: fn(output: I64, x: I64) {
 }
 
 rt_ed25519_reduce: fn(hash: I64, x: I64) {
-    i := I64{0}
+    ^i: I64{0}
     loop i < (I64{64}) {
         rt_text_store(wrapping(x + i * I64{8}), rt_text_byte(wrapping(hash + i)))
         i += I64{1}
@@ -264,7 +264,7 @@ rt_crypto_ed25519_sign: fn(seed: I64, message: I64, length: I64, signature: I64,
     rt_crypto_sha512_parts3(signature, I64{32}, public_key, I64{32}, message, length, k, scratch)
     rt_ed25519_reduce(k, x)
     rt_crypto_wipe(x, I64{512})
-    i := I64{0}
+    ^i: I64{0}
     loop i < (I64{32}) {
         rt_text_store(wrapping(x + i * I64{8}), rt_text_byte(wrapping(r + i)))
         i += I64{1}
@@ -272,7 +272,7 @@ rt_crypto_ed25519_sign: fn(seed: I64, message: I64, length: I64, signature: I64,
     i = I64{0}
     loop i < (I64{32}) {
         ki: rt_text_byte(wrapping(k + i))
-        j := I64{0}
+        ^j: I64{0}
         loop j < (I64{32}) {
             at: wrapping(x + (i + j) * I64{8})
             rt_text_store(at, rt_text_word(at) + ki * rt_text_byte(wrapping(h + j)))
@@ -328,7 +328,7 @@ rt_ed25519_sqrt_i: fn(index: I64) -> I64 {
 
 rt_ed25519_decode_constants: fn(scratch: I64) {
     rt_ed25519_d2_init(wrapping(scratch + I64{3072}))
-    i := I64{0}
+    ^i: I64{0}
     loop i < (I64{16}) {
         rt_text_store(wrapping(wrapping(scratch + I64{4608}) + i * I64{8}), rt_ed25519_d(i))
         rt_text_store(wrapping(wrapping(scratch + I64{4736}) + i * I64{8}), rt_ed25519_sqrt_i(i))
@@ -344,7 +344,7 @@ rt_ed25519_field_equal: fn(a: I64, b: I64, scratch: I64) -> Bool {
 
 rt_ed25519_pow2523: fn(output: I64, base: I64, temporary: I64, work: I64) {
     rt_x25519_copy(temporary, base)
-    i := I64{250}
+    ^i: I64{250}
     loop {
         if (i < I64{0}) { break }
         rt_x25519_mul(temporary, temporary, temporary, work)
@@ -360,7 +360,7 @@ rt_ed25519_pow2523: fn(output: I64, base: I64, temporary: I64, work: I64) {
 rt_ed25519_decode: fn(point: I64, bytes: I64, scratch: I64) -> Bool {
     rt_crypto_wipe(point, I64{512})
     rt_text_store(wrapping(point + I64{256}), I64{1})
-    i := I64{0}
+    ^i: I64{0}
     loop i < (I64{16}) {
         rt_text_store(wrapping(wrapping(point + I64{128}) + i * I64{8}), rt_text_byte(wrapping(bytes + i * I64{2})) | (rt_text_byte(wrapping(wrapping(bytes + i * I64{2}) + I64{1})) << I64{8}))
         i += I64{1}
@@ -412,14 +412,14 @@ rt_ed25519_decode: fn(point: I64, bytes: I64, scratch: I64) -> Bool {
 rt_ed25519_small_order: fn(point: I64, scratch: I64) -> Bool {
     clone: wrapping(scratch + I64{4096})
     rt_text_bytes_copy(clone, point, I64{512})
-    i := I64{0}
+    ^i: I64{0}
     loop i < (I64{3}) {
         rt_ed25519_add(clone, clone, wrapping(scratch + I64{1792}), wrapping(scratch + I64{3072}), wrapping(scratch + I64{2816}))
         i += I64{1}
     }
     packed: wrapping(scratch + I64{4928})
     rt_ed25519_pack(packed, clone, wrapping(scratch + I64{1792}), wrapping(scratch + I64{2816}), wrapping(scratch + I64{3200}), wrapping(scratch + I64{3328}))
-    diff := rt_text_byte(packed) ~ I64{1}
+    ^diff: rt_text_byte(packed) ~ I64{1}
     i = I64{1}
     loop i < (I64{32}) {
         diff |= rt_text_byte(wrapping(packed + i))
@@ -429,7 +429,7 @@ rt_ed25519_small_order: fn(point: I64, scratch: I64) -> Bool {
 }
 
 rt_ed25519_scalar_canonical: fn(scalar: I64) -> Bool {
-    i := I64{31}
+    ^i: I64{31}
     loop {
         if (i < I64{0}) { break }
         byte: rt_text_byte(wrapping(scalar + i))

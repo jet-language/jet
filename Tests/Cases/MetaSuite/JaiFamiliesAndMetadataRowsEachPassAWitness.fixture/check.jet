@@ -48,7 +48,7 @@ family_id: fn(index: Int) -> String {
 
 // The words of a manifest column; `-` is none.
 column_words: fn(column: String) -> [String] {
-    words := [String]{}
+    ^words: [String]{}
     if column.trim() == "-" -> return words
     loop word in column.split(" ") {
         if word != "" -> words.push(word.copy())  // copy: the words outlive the line.
@@ -58,8 +58,8 @@ column_words: fn(column: String) -> [String] {
 
 // The manifest's sources by kind and its family rows, with every problem.
 read_manifest: fn(root: String, text: String, coverage: ^Coverage) {
-    kinds := [String:String]{}
-    seen := [String]{}
+    ^kinds: [String:String]{}
+    ^seen: [String]{}
     loop raw in text.split("\n") {
         line: raw.trim_end()
         if line == "" || line.starts_with("#") -> next
@@ -154,7 +154,7 @@ add_row: fn(root: String, name: String, witnesses: [String], coverage: ^Coverage
 }
 
 coverage_of: fn(root: String, manifest: String) -> Coverage {
-    coverage := Coverage{rows: [], families: 0, contract: 0, historical_only: [], problems: [], owed: [], owed_rows: 0}
+    ^coverage: Coverage{rows: [], families: 0, contract: 0, historical_only: [], problems: [], owed: [], owed_rows: 0}
     manifest_text: files.read(manifest) ?? process.fail(1, "can't read the manifest `{manifest}`: {err}")
     registry_text: files.read(files.join(root, REGISTRY)) ?? process.fail(1, "can't read `{REGISTRY}`: {err}")
     read_manifest(root, manifest_text, coverage)
@@ -164,7 +164,7 @@ coverage_of: fn(root: String, manifest: String) -> Coverage {
 
 // Each witness once, in the order the rows name them.
 witness_ids: fn(coverage: Coverage) -> [String] {
-    ids := [String]{}
+    ^ids: [String]{}
     loop row in coverage.rows {
         loop witness in row.witnesses {
             if !ids.contains(witness) -> ids.push(witness.copy())  // copy: the list outlives the rows.
@@ -193,10 +193,10 @@ read_results: fn(path: String) -> [String:[Verdict]] {
         .Array(items) -> items
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> process.fail(1, "the results `{path}` hold no `results` list")
     }
-    verdicts := [String:[Verdict]]{}
+    ^verdicts: [String:[Verdict]]{}
     loop record in records {
         id: text_field(record, "case")
-        list := verdicts.get(id) ?? [Verdict]{}
+        ^list: verdicts.get(id) ?? [Verdict]{}
         list.push(Verdict{tier: text_field(record, "tier"), status: text_field(record, "status"), detail: text_field(record, "detail")})
         verdicts[id] = list
     }
@@ -211,12 +211,12 @@ WitnessReport: struct {
 }
 
 witness_report: fn(id: String, verdicts: [String:[Verdict]]) -> WitnessReport {
-    report := WitnessReport{problems: [], owed: []}
+    ^report: WitnessReport{problems: [], owed: []}
     list: verdicts.get(id) ?? {
         report.problems.push("`{id}` has no result: it did not run")
         return report
     }
-    tiers := [String]{}
+    ^tiers: [String]{}
     loop verdict in list {
         line: "`{id}` is {verdict.status} at {verdict.tier}: {verdict.detail}"
         if verdict.status == {
@@ -227,7 +227,7 @@ witness_report: fn(id: String, verdicts: [String:[Verdict]]) -> WitnessReport {
         tiers.push(verdict.tier.copy())  // copy: the level check reads them after the loop.
     }
     // A witness that runs per level runs on every level.
-    missing := [String]{}
+    ^missing: [String]{}
     loop level in LEVELS {
         if !tiers.contains(level) -> missing.push(level)
     }
@@ -240,7 +240,7 @@ witness_report: fn(id: String, verdicts: [String:[Verdict]]) -> WitnessReport {
 verify: fn(coverage: ^Coverage, results: String) {
     verdicts: read_results(results)
     loop row in coverage.rows {
-        owed := false
+        ^owed: false
         loop witness in row.witnesses {
             report: witness_report(witness, verdicts)
             loop problem in report.problems { coverage.problems.push("{row.name}: {problem}") }
@@ -265,7 +265,7 @@ run: fn() {
     if args.len() != 4 || (args[0] != "plan" && args[0] != "verify") {
         process.fail(2, "usage: check.jet plan|verify <root> <manifest> <witnesses|results>")
     }
-    coverage := coverage_of(args[1], args[2])
+    ^coverage: coverage_of(args[1], args[2])
     if args[0] == "plan" {
         fail_on_problems(coverage)
         files.write(args[3], "{witness_ids(coverage).join("\n")}\n") ?? process.fail(1, "can't write `{args[3]}`: {err}")

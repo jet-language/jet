@@ -31,7 +31,7 @@ command_setting_text: fn(key: String, text: String, line: Int) -> JetCLICommandS
 }
 
 command_setting_items: fn(key: String, items: [String], line: Int) -> JetCLICommandSetting Never! {
-    values := [Dyn]{}
+    ^values: [Dyn]{}
     loop item in items -> values.push(Dyn.Text(item.copy()))  // copy: the caller keeps its items.
     JetCLICommandSetting{key: key, value: Dyn.Array(values), line: line}
 }
@@ -142,7 +142,7 @@ command_setting_refused: fn(word: String, layers: [JetCLICommandSettingLayer]) -
     assert_eq(reports[3].what, "`run.deny` in `user` line 4 is a list with an item that isn't a string, but `--deny` takes a list of strings, one per flag.")
     assert_eq(reports[4].what, "`fmt.check` in `package` line 3 is a string, but `--check` takes true or false.")
     assert_eq(reports[6].why, "A settings file applies a flag to every run, but `-e` is typed each time: it names what one run works on.")
-    codes := [String]{}
+    ^codes: [String]{}
     loop report in reports -> codes.push(report.code.copy())  // copy: the report keeps its code.
     assert_eq(codes, [String]{"E2104", "E2117", "E2104", "E2104", "E2104", "E2117", "E2117"})
 }
@@ -163,11 +163,11 @@ command_setting_names_flag: fn(key: String, names: [String]) -> Bool Never! {
         spec: jet_cli_flag_spec(long) ?? panic("{long} is registered")
         assert_eq(spec.typed, "authority")
     }
-    names := [String]{}
+    ^names: [String]{}
     loop spec in JET_CLI_FLAGS {
         if spec.typed == "authority" -> names.push(jet_cli_setting_flag_name(spec.long))
     }
-    refused := 0
+    ^refused: 0
     loop key in jet_cli_setting_keys(jet_cli_setting_commands()) {
         if !command_setting_names_flag(key, names) -> next
         layer: command_setting_layer("user", [JetCLICommandSetting]{command_setting_on(key, true, 1)})
@@ -210,7 +210,7 @@ command_setting_names_flag: fn(key: String, names: [String]) -> Bool Never! {
 // built flag has one `-` row. A short form shares its long flag's row.
 // `jet test -u` rewrites the file.
 command_settings_census: fn() -> String Never! {
-    lines := [String]{"COMMAND\tFLAG\tSETTING"}
+    ^lines: [String]{"COMMAND\tFLAG\tSETTING"}
     loop command in jet_cli_setting_commands() {
         flags: jet_cli_setting_command_flags(command)
         if flags.is_empty() -> lines.push("{command.path}\t-\tnone: it takes no built flag")
@@ -223,7 +223,7 @@ command_settings_census: fn() -> String Never! {
 }
 
 #Test("the settings census lists every command family and every flag with its setting or why it has none") {
-    families := [String]{}
+    ^families: [String]{}
     loop command in jet_cli_setting_commands() -> families.push(command.path.copy())  // copy: the census keeps its row.
     loop command in JET_CLI_COMMANDS {
         assert(families.contains(jet_cli_setting_command_path(command.name)), "the census leaves out the `{command.name}` family")

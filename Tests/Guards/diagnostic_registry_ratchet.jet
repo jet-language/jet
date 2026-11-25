@@ -33,7 +33,7 @@ rr_generic_why: fn(value: String) -> Bool {
 // The active, compiler-emitted rows the census shows without a UI snapshot.
 rr_no_ui_codes: fn() -> [String] {
     text: rr_files.read(RR_CENSUS) ?? panic("read {RR_CENSUS}: {err}")
-    codes := [String]{}
+    ^codes: [String]{}
     loop line in text.split("\n").to_list() {
         if line.starts_with("#") -> next
         columns: line.split("\t").to_list()
@@ -61,10 +61,10 @@ RrRegistryRows: struct {
 // The registry rows with a generic Why, and the rows naming a decision in a
 // user-facing column, read from the generated registry `text`.
 rr_registry_counts: fn(text: String) -> RrRegistryRows {
-    generic := [String]{}
-    decisions := [String]{}
-    code := ""
-    active := false
+    ^generic: [String]{}
+    ^decisions: [String]{}
+    ^code: ""
+    ^active: false
     loop line in text.split("\n").to_list() {
         trimmed: line.trim()
         if trimmed.starts_with("//") -> next
@@ -110,7 +110,7 @@ rr_check: fn(name: String, codes: [String], ceiling: Int, constant: String) -> S
     generic: rows.generic
     decisions: rows.decisions
     print("diagnostic registry: {no_ui.len()} active compiler rows without a UI snapshot, {generic.len()} rows with a generic Why, {decisions.len()} rows naming a decision")
-    failures := [String]{}
+    ^failures: [String]{}
     checks: [String]{
         rr_check("no UI snapshot", no_ui, RR_CEILING_NO_UI, "RR_CEILING_NO_UI"),
         rr_check("generic Why", generic, RR_CEILING_GENERIC_WHY, "RR_CEILING_GENERIC_WHY"),

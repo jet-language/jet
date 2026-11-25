@@ -2,10 +2,10 @@
 // `jet test --measure`; plain `jet test` still checks the claim once.
 // `jet run` ignores test claims and just runs `main`.
 fib: fn(n: Int) -> Int {
-    a := 0
-    b := 1
+    ^a: 0
+    ^b: 1
     loop _ in 0..<n {
-        next := a + b
+        ^next: a + b
         a = b
         b = next
     }
@@ -23,7 +23,7 @@ elided_baseline: fn(n: Int) -> Int {
 
 // Feed each value to keep() inside the measured loop before using it.
 kept_loop: fn(n: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in 0..<n -> total += keep(work(i))
     return total
 }
@@ -41,7 +41,7 @@ run: fn() {
 
 #Test("sum to 100") {
     .measure {
-        total := 0
+        ^total: 0
         loop i in 0..<100 -> total += i
         assert_eq(total, 4950)
     }

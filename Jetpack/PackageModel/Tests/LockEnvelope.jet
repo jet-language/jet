@@ -25,7 +25,7 @@ pkg_lock_test_env: fn(hash: String, platform: String, signature: String, provena
 
 // `count` copies of `text`.
 pkg_lock_test_repeat: fn(text: String, count: Int) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     unit: text.bytes()
     loop _ in 0..<count {
         loop byte in unit -> bytes.push(byte)
@@ -61,7 +61,7 @@ pkg_lock_test_pkg: fn(name: String, envelope: LockEnvelope?) -> LockedPackage Ne
 }
 
 pkg_lock_test_base_lock: fn(packages: [LockedPackage], toolchains: [LockedToolchain]) -> LockFile Never! {
-    lock := LockFile.empty()
+    ^lock: LockFile.empty()
     lock.packages = packages
     lock.toolchains = toolchains
     lock
@@ -123,7 +123,7 @@ pkg_lock_test_project: fn(label: String) -[FS]> TempDir Never! {
 
 #Test("receipt roundtrips without changing other packages") {
     receipt: "sha256-{pkg_lock_test_repeat("a", 64)}"
-    lock := pkg_lock_test_base_lock([LockedPackage]{pkg_lock_test_pkg("hello", Val(pkg_lock_test_env("sha256-output", "x86_64-linux", "", "hello"))), pkg_lock_test_pkg("other", None)}, [LockedToolchain]{})
+    ^lock: pkg_lock_test_base_lock([LockedPackage]{pkg_lock_test_pkg("hello", Val(pkg_lock_test_env("sha256-output", "x86_64-linux", "", "hello"))), pkg_lock_test_pkg("other", None)}, [LockedToolchain]{})
     lock.packages[0].receipt = Val(receipt)
     reloaded: pkg_lock_parse(pkg_lock_write(lock)) ?? panic("parse")
     assert_eq(reloaded.packages[0].receipt, Val(receipt))
@@ -133,7 +133,7 @@ pkg_lock_test_project: fn(label: String) -[FS]> TempDir Never! {
 // The envelope coexists with the older per-package fields (effects,
 // content-hash); the canonical writer sorts effect rows.
 #Test("envelope coexists with effects and content hash") {
-    package := pkg_lock_test_pkg("p", Val(pkg_lock_test_env("sha256-x", "x86_64-linux", "", "r via core-source")))
+    ^package: pkg_lock_test_pkg("p", Val(pkg_lock_test_env("sha256-x", "x86_64-linux", "", "r via core-source")))
     package.content_hash = Val("sha256-tree")
     package.effects = [String]{"Net", "FS"}
     package.required_effects = package.effects
@@ -145,10 +145,10 @@ pkg_lock_test_project: fn(label: String) -[FS]> TempDir Never! {
 
 #Test("lock writer keeps canonical refs verbatim") {
     canonical: "can1357/oh-my-pi@github#v18.0.4"
-    package := pkg_lock_test_pkg("omp", None)
+    ^package: pkg_lock_test_pkg("omp", None)
     package.source = LockSource.Nix{reference: canonical, output: pkg_lock_test_nix_digest("a")}
     package.nix_closure = Val(pkg_lock_test_nix_closure(pkg_lock_test_nix_digest("a")))
-    lock := pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{})
+    ^lock: pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{})
     lock.source_channels.push(LockedSourceChannel{name: "releases", channel: "latest", exact: canonical})
     back: pkg_lock_parse(pkg_lock_write(lock)) ?? panic("canonical lock parses")
     if back.packages[0].source == {

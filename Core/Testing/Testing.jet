@@ -59,7 +59,7 @@ assert_equal: fn(comparison: TestComparison) -> Bool Never! {
 /// Both callbacks share one failure type `E`, which the
 /// comparison passes up; two callbacks that cannot fail make it `Never`.
 compare: fn<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) -> Dyn E!, relation: String) -> TestComparison E! {
-    normalized := relation
+    ^normalized: relation
     if normalized.len() == 0 -> normalized = "typed_equality"
     if normalized == "ordered_effects" || normalized == "typed_failure" {
         return terminal_comparison(normalized, "relation requires recorded observations")
@@ -67,11 +67,11 @@ compare: fn<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) ->
     if cases.len() == 0 {
         return terminal_comparison(normalized, "comparison needs at least one case")
     }
-    inputs := [Dyn]{}
-    reference_values := [Dyn]{}
-    candidate_values := [Dyn]{}
-    case_ids := [String]{}
-    first_difference := -1
+    ^inputs: [Dyn]{}
+    ^reference_values: [Dyn]{}
+    ^candidate_values: [Dyn]{}
+    ^case_ids: [String]{}
+    ^first_difference: -1
     loop i in 0..<cases.len() {
         input: cases[i]
         expected: reference(input)
@@ -82,8 +82,8 @@ compare: fn<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) ->
         case_ids.push("case-{i}")
         if first_difference < 0 && !expected.equal_unordered(actual) -> first_difference = i
     }
-    status := "matched"
-    reason := "comparison matched all cases"
+    ^status: "matched"
+    ^reason: "comparison matched all cases"
     if first_difference >= 0 {
         status = "mismatch"
         reason = "reference and candidate differ at case-{first_difference}"
@@ -232,10 +232,10 @@ temp_dir: fn(prefix: String) -[FS]> String Never! {
 /// The parameter retains the historical spelling `glob`; it names a directory.
 corpus: fn(glob: String) -[FS]> [String] Never! {
     entries: files.list_dir(glob) ?? return [String]{}
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in entries -> paths.push(entry.path)
     paths.sort()
-    values := [String]{}
+    ^values: [String]{}
     loop path in paths {
         if !files.is_file(path) -> next
         value: files.read(path) ?? next
@@ -256,7 +256,7 @@ CorpusEntry: struct {
 /// ordered by id. Names starting with `.` are skipped, folders included; an
 /// absent or unreadable root or folder has no entries.
 corpus_entries: fn(root: String, suffix: String) -[FS]> [CorpusEntry] Never! {
-    entries := [CorpusEntry]{}
+    ^entries: [CorpusEntry]{}
     testing_corpus_walk(root, "", suffix, entries)
     entries.sort_by(fn(left: CorpusEntry, right: CorpusEntry) { left.id <=> right.id })
     entries
@@ -366,9 +366,7 @@ fake_index: fn(state: ^U64, count: Int) -> Int Never! {
     core.math.random.__seeded_int(state, 0, count - 1) ?? panic("fake tables are nonempty")
 }
 
-fake_row: fn(locale: Int) -> Int Never! {
-    if locale == 1 -> 1 else -> 0
-}
+fake_row: fn(locale: Int) -> Int Never! { if locale == 1 -> 1 else -> 0 }
 
 fake_first: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
@@ -396,7 +394,7 @@ fake_city: fn(state: ^U64, locale: Int) -> String Never! {
 }
 
 #Test("Fake English draw order matches the shipped seed 42 corpus") {
-    fake := fake_data(42)
+    ^fake: fake_data(42)
     assert_eq(fake.name(), "Clara Smith")
     assert_eq(fake.email(), "bob.jones@example.test")
     assert_eq(fake.host(), "www.demo.test")
@@ -404,7 +402,7 @@ fake_city: fn(state: ^U64, locale: Int) -> String Never! {
 }
 
 #Test("Fake German locale salt and draw order match the shipped seed 42 corpus") {
-    fake := fake_data(42).locale("de")
+    ^fake: fake_data(42).locale("de")
     assert_eq(fake.name(), "Dieter Schmidt")
     assert_eq(fake.email(), "bruno.schmidt@mail.test")
     assert_eq(fake.host(), "www.beispiel.test")
@@ -412,11 +410,11 @@ fake_city: fn(state: ^U64, locale: Int) -> String Never! {
 }
 
 #Test("Fake copies keep independent streams and locale selection does not draw") {
-    original := fake_data(-1)
-    duplicate := original.copy()
-    english := original.locale("en")
+    ^original: fake_data(-1)
+    ^duplicate: original.copy()
+    ^english: original.locale("en")
     assert_eq(original.name(), duplicate.name())
-    fresh := fake_data(-1)
+    ^fresh: fake_data(-1)
     assert_eq(english.name(), fresh.name())
 }
 
@@ -542,8 +540,7 @@ impl Test {
     /// JET_TEST_SUITE_ROWS and selecting them by JET_TEST_SUITE_FILTER; any
     /// other run skips it. `name` is written as a string literal, so
     /// `jet test --profile` lists the suites without running `test: fn`.
-    #SuiteNameWritten
-    suite: fn(self, name: String, body: fn(TestRows)) -[FS, Env]> {
+    #SuiteNameWritten suite: fn(self, name: String, body: fn(TestRows)) -[FS, Env]> {
         if (sys.get("JET_TEST_SUITE") ?? "") != name {
             return
         }
@@ -609,7 +606,9 @@ impl Test {
     allow_shrink: fn(self, rows: String) { test_setting(self, "allow_shrink", rows) }
 
     /// Checks the ui suite's emitted and rendered codes against the coverage allowlist.
-    diagnostic_coverage: fn(self, on: Bool{true}) { test_setting(self, "diagnostic_coverage", "{on}") }
+    diagnostic_coverage: fn(self, on: Bool{true}) {
+        test_setting(self, "diagnostic_coverage", "{on}")
+    }
 
     /// Writes every selected test's verdict to the JSON file at `path`.
     results: fn(self, path: String) { test_setting(self, "results", path) }
@@ -668,7 +667,9 @@ impl Test {
 
 // One `jet test` setting: in the plan step, the line `name<TAB>value<NL>`
 // joins the plan file JET_TEST_PLAN names.
-priv test_setting: fn(suite: Test, name: String, value: String) { world_rt.suite_setting(suite, "JET_TEST_PLAN", "{name}\t{value}\n") }
+priv test_setting: fn(suite: Test, name: String, value: String) {
+    world_rt.suite_setting(suite, "JET_TEST_PLAN", "{name}\t{value}\n")
+}
 
 // `jet test --profile` lists a package's code suites by reading each
 // `t.suite("name", …)` name from test.jet's tokens, so a suite name the
@@ -691,9 +692,13 @@ priv SuiteNameComputed: struct {
 
         what: fn(self) -> String { "The suite name passed to `Test.suite` is computed" }
 
-        why: fn(self) -> String { "`jet test --profile` lists a package's code suites by reading their names, without running `test: fn`" }
+        why: fn(self) -> String {
+            "`jet test --profile` lists a package's code suites by reading their names, without running `test: fn`"
+        }
 
-        fix: fn(self) -> String { "Write the suite name as a string literal, as in `t.suite(\"perf\", perf_rows)`" }
+        fix: fn(self) -> String {
+            "Write the suite name as a string literal, as in `t.suite(\"perf\", perf_rows)`"
+        }
     }
 }
 
@@ -735,9 +740,9 @@ priv history_rng_new: fn(seed: Int) -> HistoryRNG Never! {
 }
 
 priv history_rng_draw: fn(rng: HistoryRNG) -> U64 Never! {
-    guard := rng.__state.guard_edit()
+    ^guard: rng.__state.guard_edit()
     guard.value.word = wrapping(guard.value.word + U64{11400714819323198485})
-    value := guard.value.word
+    ^value: guard.value.word
     value = wrapping((value ~ value >> U64{30}) * U64{13787848793156543929})
     value = wrapping((value ~ value >> U64{27}) * U64{10723151780598845931})
     value ~ value >> U64{31}
@@ -968,15 +973,15 @@ testing_history_campaign: fn<T>(
     if config != "" -> return Err(testing_history_err("invalid history config: {config}"))
     generate: strategy.generate
     rng: history_rng_new(seed)
-    discarded := 0
-    explored := 0
-    samples := [TestingHistorySample]{}
-    inputs := [Dyn]{}
-    reference_values := [Dyn]{}
-    candidate_values := [Dyn]{}
+    ^discarded: 0
+    ^explored: 0
+    ^samples: [TestingHistorySample]{}
+    ^inputs: [Dyn]{}
+    ^reference_values: [Dyn]{}
+    ^candidate_values: [Dyn]{}
     loop case_index in 0..<cases {
-        admitted := false
-        case := HistoryCase{case_id: "", seed: 0, operations: [HistoryOperation]{}, schedule: [HistoryScheduleChoice]{}}
+        ^admitted: false
+        ^case: HistoryCase{case_id: "", seed: 0, operations: [HistoryOperation]{}, schedule: [HistoryScheduleChoice]{}}
         generated: generate(rng, case_index, bounds.max_steps)
         if generated == .Val(typed) {
             case = typed.case.copy()
@@ -1010,8 +1015,8 @@ testing_history_campaign: fn<T>(
         reference_values.push(observation.reference.copy())
         candidate_values.push(observation.candidate.copy())
     }
-    status := "matched"
-    reason := "{samples.len()} observed case(s) matched under typed_equality"
+    ^status: "matched"
+    ^reason: "{samples.len()} observed case(s) matched under typed_equality"
     if samples.len() == 0 {
         status = "empty"
         reason = if discarded > 0 -> "all comparison cases were discarded" else -> "comparison corpus is empty"
@@ -1023,7 +1028,7 @@ testing_history_campaign: fn<T>(
         status = "unavailable"
         reason = "no history case produced an observation"
     }
-    case_ids := [String]{}
+    ^case_ids: [String]{}
     loop sample in samples -> case_ids.push(sample.case_id.copy())
     Ok(
         TestComparison{
@@ -1057,7 +1062,7 @@ testing_history_admits: fn<T>(case: HistoryCase, bounds: HistoryBounds, strategy
 
 testing_history_within_bounds: fn(case: HistoryCase, bounds: HistoryBounds) -> Bool Never! {
     if case.operations.len() > bounds.max_steps -> return false
-    created := [Int:Bool]{}
+    ^created: [Int:Bool]{}
     loop operation in case.operations {
         loop handle in operation.creates -> created[handle.value] = true
     }
@@ -1085,8 +1090,8 @@ testing_history_observe: fn<T>(case: HistoryCase, strategy: HistoryStrategy<T>, 
         reference_replay: json.dumps(reference_replay) ?? "null",
         candidate_replay: json.dumps(candidate_replay) ?? "null",
     }
-    status := "matched"
-    reason := "1 observed case(s) matched under typed_equality"
+    ^status: "matched"
+    ^reason: "1 observed case(s) matched under typed_equality"
     if sample.reference != sample.reference_replay {
         status = "contaminated"
         reason = "reference observation changed on replay for case `{case.case_id}`"
@@ -1117,11 +1122,11 @@ testing_history_shrink: fn<T>(
     actual: fn([T]) -> Dyn,
     observe: fn(Dyn) -> Dyn,
 ) -> TestingHistoryShrunk {
-    current := original.copy()
-    current_observation := first.copy()
-    attempts := 0
+    ^current: original.copy()
+    ^current_observation: first.copy()
+    ^attempts: 0
     loop {
-        changed := false
+        ^changed: false
         loop index in 0..<current.operations.len() {
             if attempts >= bounds.max_shrink_attempts -> break
             candidate: testing_history_without(current, index) ?? next
@@ -1136,7 +1141,7 @@ testing_history_shrink: fn<T>(
             }
         }
         if changed -> next
-        exhausted := false
+        ^exhausted: false
         loop operation_index in 0..<current.operations.len() {
             if changed || exhausted -> break
             loop argument_index in 0..<current.operations[operation_index].arguments.len() {
@@ -1165,7 +1170,7 @@ testing_history_shrink: fn<T>(
 }
 
 testing_history_value_shrinks: fn(value: HistoryValue) -> [HistoryValue] Never! {
-    values := [HistoryValue]{}
+    ^values: [HistoryValue]{}
     if value == {
         .Integer(number) -> {
             values.push(HistoryValue.Integer(0))
@@ -1179,7 +1184,7 @@ testing_history_value_shrinks: fn(value: HistoryValue) -> [HistoryValue] Never! 
             if text != "" {
                 values.push(HistoryValue.Text(""))
                 characters: text.chars()
-                half := ""
+                ^half: ""
                 loop index in 0..<(characters.len() /% 2) -> half = "{half}{characters[index]}"
                 values.push(HistoryValue.Text(half))
             }
@@ -1190,11 +1195,11 @@ testing_history_value_shrinks: fn(value: HistoryValue) -> [HistoryValue] Never! 
 }
 
 testing_history_with_argument: fn(case: HistoryCase, operation_index: Int, argument_index: Int, value: HistoryValue) -> HistoryCase Never! {
-    operations := [HistoryOperation]{}
+    ^operations: [HistoryOperation]{}
     loop index in 0..<case.operations.len() {
-        operation := case.operations[index].copy()
+        ^operation: case.operations[index].copy()
         if index == operation_index {
-            arguments := [HistoryValue]{}
+            ^arguments: [HistoryValue]{}
             loop position in 0..<operation.arguments.len() {
                 arguments.push(if position == argument_index -> value.copy() else -> operation.arguments[position].copy())
             }
@@ -1211,12 +1216,12 @@ testing_history_with_argument: fn(case: HistoryCase, operation_index: Int, argum
 testing_history_without: fn(case: HistoryCase, index: Int) -> HistoryCase? Never! {
     count: case.operations.len()
     if count <= 1 || index < 0 || index >= count -> return None
-    removed := [Int:Bool]{}
+    ^removed: [Int:Bool]{}
     removed[index] = true
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
-        handles := [Int:Bool]{}
+        ^handles: [Int:Bool]{}
         loop position in 0..<count {
             if removed.get(position) == None -> next
             loop handle in case.operations[position].creates -> handles[handle.value] = true
@@ -1230,18 +1235,18 @@ testing_history_without: fn(case: HistoryCase, index: Int) -> HistoryCase? Never
         }
     }
     if removed.len() >= count -> return None
-    remap := [Int:Int]{}
-    kept := 0
+    ^remap: [Int:Int]{}
+    ^kept: 0
     loop position in 0..<count {
         if removed.get(position) != None -> next
         remap[case.operations[position].index] = kept
         kept += 1
     }
-    operations := [HistoryOperation]{}
+    ^operations: [HistoryOperation]{}
     loop position in 0..<count {
         if removed.get(position) != None -> next
-        operation := case.operations[position].copy()
-        depends := [Int]{}
+        ^operation: case.operations[position].copy()
+        ^depends: [Int]{}
         loop dependency in operation.depends_on {
             found: remap.get(dependency)
             if found == .Val(mapped) -> depends.push(mapped)
@@ -1250,10 +1255,10 @@ testing_history_without: fn(case: HistoryCase, index: Int) -> HistoryCase? Never
         operation.depends_on = depends
         operations.push(operation)
     }
-    schedule := [HistoryScheduleChoice]{}
+    ^schedule: [HistoryScheduleChoice]{}
     loop choice in case.schedule {
         mapped: remap.get(choice.operation) ?? next
-        entry := choice.copy()
+        ^entry: choice.copy()
         entry.operation = mapped
         schedule.push(entry)
     }
@@ -1299,10 +1304,10 @@ testing_history_case_error: fn(case: HistoryCase) -> String Never! {
     }
     if case.operations.len() == 0 -> return "case must contain at least one operation"
     if case.operations.len() > 4096 -> return "operation count exceeds the history bound"
-    live := [Int:Bool]{}
-    known := [Int:Bool]{}
-    completed := [Int:Bool]{}
-    events := [Int:Bool]{}
+    ^live: [Int:Bool]{}
+    ^known: [Int:Bool]{}
+    ^completed: [Int:Bool]{}
+    ^events: [Int:Bool]{}
     loop position in 0..<case.operations.len() {
         operation: case.operations[position]
         if operation.index != position {
@@ -1318,7 +1323,7 @@ testing_history_case_error: fn(case: HistoryCase) -> String Never! {
             failure: testing_history_argument_error(position, argument, live)
             if failure != "" -> return failure
         }
-        dependencies := [Int:Bool]{}
+        ^dependencies: [Int:Bool]{}
         loop dependency in operation.depends_on {
             if dependency < 0 || dependency >= position || dependencies.get(dependency) != None {
                 return "operation {position} has a duplicate or forward dependency"
@@ -1329,14 +1334,14 @@ testing_history_case_error: fn(case: HistoryCase) -> String Never! {
             failure: testing_history_precondition_error(position, precondition, live, completed, events)
             if failure != "" -> return failure
         }
-        creates := [Int:Bool]{}
+        ^creates: [Int:Bool]{}
         loop handle in operation.creates {
             if creates.get(handle.value) != None {
                 return "operation {position} creates a handle more than once"
             }
             creates[handle.value] = true
         }
-        consumes := [Int:Bool]{}
+        ^consumes: [Int:Bool]{}
         loop handle in operation.consumes {
             if consumes.get(handle.value) != None {
                 return "operation {position} consumes a handle more than once"
@@ -1454,17 +1459,17 @@ testing_history_precondition_json: fn(precondition: HistoryPrecondition) -> Stri
 }
 
 testing_history_operation_json: fn(operation: HistoryOperation) -> String Never! {
-    arguments := [String]{}
+    ^arguments: [String]{}
     loop value in operation.arguments -> arguments.push(testing_history_value_json(value))
-    creates := [String]{}
+    ^creates: [String]{}
     loop handle in operation.creates -> creates.push("{handle.value}")
-    consumes := [String]{}
+    ^consumes: [String]{}
     loop handle in operation.consumes -> consumes.push("{handle.value}")
-    preconditions := [String]{}
+    ^preconditions: [String]{}
     loop precondition in operation.preconditions {
         preconditions.push(testing_history_precondition_json(precondition))
     }
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     loop dependency in operation.depends_on -> dependencies.push("{dependency}")
     event_json: if operation.event == .Val(event_id) -> "{event_id.value}" else -> "null"
     task_json: if operation.task == .Val(task_id) -> "{task_id.value}" else -> "null"
@@ -1478,13 +1483,13 @@ testing_history_schedule_json: fn(choice: HistoryScheduleChoice) -> String Never
 }
 
 testing_history_operations_json: fn(case: HistoryCase) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop operation in case.operations -> rows.push(testing_history_operation_json(operation))
     rows.join(",")
 }
 
 testing_history_schedules_json: fn(case: HistoryCase) -> String Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop choice in case.schedule -> rows.push(testing_history_schedule_json(choice))
     rows.join(",")
 }
@@ -1509,7 +1514,7 @@ testing_history_sample_json: fn(sample: TestingHistorySample, source: String, to
 // Operations after the first that carry neither a dependency nor a
 // precondition: legal, but reported so a case count cannot hide them.
 testing_history_vacuous: fn(case: HistoryCase) -> Int Never! {
-    count := 0
+    ^count: 0
     loop position in 1..<case.operations.len() {
         if case.operations[position].preconditions.len() == 0 && case.operations[position].depends_on.len() == 0 {
             count += 1
@@ -1526,7 +1531,7 @@ testing_history_failure: fn(shrunk: TestingHistoryShrunk, discarded: Int, cases:
     sample: shrunk.observation.sample ?? return testing_history_err("history mismatch in case `{case.case_id}`")
     samples: testing_history_sample_json(sample, source, tool, target)
     comparison: "{{\"contamination\":null,\"discardedCases\":0,\"firstDifference\":0,\"reason\":{testing_history_quote(shrunk.observation.reason)},\"relation\":\"typed_equality\",\"samples\":[{samples}],\"status\":\"mismatch\",\"universalProof\":false}}"
-    rows := [String]{}
+    ^rows: [String]{}
     loop distribution in distributions {
         rows.push("{{\"operation\":{testing_history_quote(distribution.operation)},\"weight\":{distribution.weight}}}")
     }
@@ -1534,7 +1539,7 @@ testing_history_failure: fn(shrunk: TestingHistoryShrunk, discarded: Int, cases:
     oracle: "{{\"dependencies\":[],\"root\":\"testing.histories.model\"}}"
     body: "\"bounds\":{{\"maxDiscardedCases\":{bounds.max_discarded_cases},\"maxResources\":{bounds.max_resources},\"maxSteps\":{bounds.max_steps},\"maxShrinkAttempts\":{bounds.max_shrink_attempts}}},\"case\":{testing_history_quote(case.case_id)},\"cases\":{cases},\"commandType\":{testing_history_quote(command_type)},\"comparison\":{comparison},\"discardedCases\":{discarded},\"distributions\":[{rows.join(",")}],\"identity\":{identity},\"operations\":[{testing_history_operations_json(case)}],\"oracle\":{oracle},\"schedule\":[{testing_history_schedules_json(case)}],\"schema\":\"jet.testing.history\",\"seed\":{case.seed},\"vacuousPreconditions\":{testing_history_vacuous(case)},\"version\":1}}"
     artifact_id: crypto.sha256("{{{body}").hex()
-    names := [String]{}
+    ^names: [String]{}
     loop operation in case.operations -> names.push(operation.name.copy())
     artifact: Err{message: "history-artifact {{\"artifactId\":{testing_history_quote(artifact_id)},{body}", code: None, cause: None}
     Err{message: "history mismatch in case `{case.case_id}`: {names.join(" -> ")}", code: None, cause: Val(artifact)}
@@ -1568,12 +1573,12 @@ testing_history_artifact_id: fn(failure: Err) -> String Never! {
 // command from the row position and the payload values grouped by kind.
 // Every variant has weight 1.
 testing_history_derived: fn<T>(command_type: ^^String, variants: [String], make: ^^fn(Int, [Int], [Bool], [String]) -[]> T Never!) -> HistoryStrategy<T> {
-    names := [String]{}
-    kinds := [[String]]{}
-    distributions := [HistoryDistribution]{}
+    ^names: [String]{}
+    ^kinds: [[String]]{}
+    ^distributions: [HistoryDistribution]{}
     loop row in variants {
         parts: row.split(":").to_list()
-        fields := [String]{}
+        ^fields: [String]{}
         loop position in 1..<parts.len() -> fields.push(parts[position].copy())
         names.push(parts[0].copy())
         kinds.push(fields)
@@ -1607,17 +1612,17 @@ testing_history_derived_generate: fn<T>(rng: HistoryRNG, case_index: Int, max_st
     case_seed: history_rng_next(rng)
     local: history_rng_new(case_seed)
     step_count: 1 + history_rng_below(local, if max_steps < 8 -> max_steps else -> 8)
-    operations := [HistoryOperation]{}
+    ^operations: [HistoryOperation]{}
     loop index in 0..<step_count {
         choice: history_rng_below(local, names.len())
-        arguments := [HistoryValue]{}
+        ^arguments: [HistoryValue]{}
         loop kind in kinds[choice] {
             if kind == "i" -> arguments.push(HistoryValue.Integer(history_rng_below(local, 17) - 8)) else if kind == "b" {
                 arguments.push(HistoryValue.Boolean(history_rng_below(local, 2) != 0))
             } else { arguments.push(HistoryValue.Text("history-{history_rng_below(local, 17)}")) }
         }
-        preconditions := [HistoryPrecondition]{}
-        depends_on := [Int]{}
+        ^preconditions: [HistoryPrecondition]{}
+        ^depends_on: [Int]{}
         if index > 0 {
             depends_on.push(index - 1)
             preconditions.push(HistoryPrecondition.TaskCompleted(TaskID{value: (index - 1) % 2}))
@@ -1642,9 +1647,9 @@ testing_history_derived_generate: fn<T>(rng: HistoryRNG, case_index: Int, max_st
 }
 
 testing_history_derived_rebuild: fn<T>(case: HistoryCase, names: [String], kinds: [[String]], make: fn(Int, [Int], [Bool], [String]) -[]> T Never!) -> TypedHistoryCase<T>? {
-    commands := [T]{}
+    ^commands: [T]{}
     loop operation in case.operations {
-        choice := -1
+        ^choice: -1
         loop position in 0..<names.len() {
             if names[position] == operation.name {
                 choice = position
@@ -1654,9 +1659,9 @@ testing_history_derived_rebuild: fn<T>(case: HistoryCase, names: [String], kinds
         if choice < 0 || operation.creates.len() != 0 || operation.consumes.len() != 0 || operation.arguments.len() != kinds[choice].len() {
             return None
         }
-        ints := [Int]{}
-        bools := [Bool]{}
-        texts := [String]{}
+        ^ints: [Int]{}
+        ^bools: [Bool]{}
+        ^texts: [String]{}
         loop position in 0..<operation.arguments.len() {
             kind: kinds[choice][position]
             if operation.arguments[position] == {
@@ -1718,7 +1723,7 @@ status: fn(comparison: TestComparison) -> String Never! { comparison.status }
         files.write("{root}/{file}", file) ?? panic("corpus file: {err}")
     }
     entries: corpus_entries(root, ".jet")
-    ids := [String]{}
+    ^ids: [String]{}
     loop entry in entries -> ids.push(entry.id.copy())
     assert_eq(ids, ["a/deep/one", "a/zero", "b/two", "top"])
     assert_eq(files.read(entries[0].path) ?? "", "a/deep/one.jet")
@@ -1736,7 +1741,7 @@ status: fn(comparison: TestComparison) -> String Never! { comparison.status }
 }
 
 snapshot_name: fn(name: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in name.bytes() {
         c: Int{byte}
         if (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 45 || c == 95 {
@@ -1761,7 +1766,7 @@ snapshot_name: fn(name: String) -> String Never! {
 testing_byte: fn(text: String, index: Int) -> Int Never! { Int{rt.string_byte(text, U64{index})} }
 
 testing_boundary: fn(text: String, end: Int) -> Int Never! {
-    position := end
+    ^position: end
     length: text.count_bytes()
     loop position > 0 && position < length {
         byte: testing_byte(text, position)
@@ -1789,9 +1794,9 @@ TestingDiffLines: struct {
 testing_diff_lines: fn(text: String) -> TestingDiffLines Never! {
     length: text.count_bytes()
     end: testing_boundary(text, if length > 65536 -> 65536 else -> length)
-    lines := [String]{}
-    start := 0
-    cursor := 0
+    ^lines: [String]{}
+    ^start: 0
+    ^cursor: 0
     loop cursor < end && lines.len() < 256 {
         byte: testing_byte(text, cursor)
         cursor += 1
@@ -1866,11 +1871,11 @@ testing_unified_diff: fn(path: String, expected: String, actual: String) -> Stri
     after: testing_diff_lines(actual)
     rows: before.lines.len() + 1
     cols: after.lines.len() + 1
-    lcs := [Int]{}
+    ^lcs: [Int]{}
     loop _ in 0..<(rows * cols) -> lcs.push(0)
-    row := before.lines.len() - 1
+    ^row: before.lines.len() - 1
     loop row >= 0 {
-        col := after.lines.len() - 1
+        ^col: after.lines.len() - 1
         loop col >= 0 {
             index: row * cols + col
             if before.lines[row] == after.lines[col] {
@@ -1884,13 +1889,13 @@ testing_unified_diff: fn(path: String, expected: String, actual: String) -> Stri
         }
         row -= 1
     }
-    output := TestingDiffOutput{bytes: [U8]{}, truncated: false}
+    ^output: TestingDiffOutput{bytes: [U8]{}, truncated: false}
     testing_diff_push(output, "--- expected {path}\n+++ actual {path}\n")
     if before.truncated -> testing_diff_push(output, "# expected input truncated\n")
     if after.truncated -> testing_diff_push(output, "# actual input truncated\n")
     testing_diff_push(output, "@@ -1,{before.lines.len()} +1,{after.lines.len()} @@\n")
     row = 0
-    col := 0
+    ^col: 0
     loop row < before.lines.len() || col < after.lines.len() {
         if row < before.lines.len() && col < after.lines.len() && before.lines[row] == after.lines[col] {
             testing_diff_line(output, " ", before.lines[row])
@@ -1908,7 +1913,7 @@ testing_unified_diff: fn(path: String, expected: String, actual: String) -> Stri
 }
 
 testing_ascii_name: fn(text: String, thread: Bool) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop index in 0..<text.count_bytes() {
         byte: testing_byte(text, index)
         alnum: (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57)

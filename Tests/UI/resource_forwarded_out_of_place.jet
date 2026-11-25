@@ -59,7 +59,7 @@ match_arm: fn(h: Holder) -> Int {
 }
 
 assign_or: fn(h: Holder) -> Int {
-    out := Holder{first: None, second: None}
+    ^out: Holder{first: None, second: None}
     out.first = Val(h.first ?? return 0)
     0
 }
@@ -70,7 +70,7 @@ hold: fn(r: ^^Res) -> Int { r.name.len() }
 
 loop_push: fn() -> Int {
     list: [Res{name: "push"}]
-    out := [Res]{}
+    ^out: [Res]{}
     loop item in list { out.push(item) }
     out.len()
 }
@@ -83,14 +83,14 @@ loop_collect: fn() -> Int {
 
 loop_take: fn() -> Int {
     list: [Res{name: "take"}]
-    total := 0
+    ^total: 0
     loop item in list -> total += hold(item)
     total
 }
 
 loop_drive_moves: fn() -> Int {
     list: [Res{name: "drive"}]
-    out := [Res]{}
+    ^out: [Res]{}
     loop item in list.move() { out.push(item) }
     out.len()
 }

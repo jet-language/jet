@@ -33,7 +33,7 @@ wasm_signed: fn(value: Int, bits: Int) -> Int Never! {
 // The unsigned pattern of `bits` bits of a signed or unsigned value.
 wasm_unsigned: fn(value: Int, bits: Int) -> Int Never! {
     full: 1 << bits
-    wrapped := value % full
+    ^wrapped: value % full
     if wrapped < 0 -> wrapped += full
     wrapped
 }
@@ -41,8 +41,8 @@ wasm_unsigned: fn(value: Int, bits: Int) -> Int Never! {
 // Lowercase hexadecimal digits of a non-negative value (for diagnostics).
 wasm_hex: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
-    rest := value
+    ^out: [U8]{}
+    ^rest: value
     loop {
         out.insert(0, digits[rest % 16])
         rest /%= 16
@@ -82,8 +82,8 @@ WasmReader: struct {
     // An unsigned LEB128 value of at most `bits` bits.
     unsigned: fn(^self, bits: Int) -> Int WasmError! {
         start: self.at
-        result := 0
-        shift := 0
+        ^result: 0
+        ^shift: 0
         loop shift < bits {
             b: self.byte() ?? return Err(WasmError.new("unexpected end of LEB128 integer", start))
             result |= (b & 0x7f) << shift
@@ -99,8 +99,8 @@ WasmReader: struct {
     // A signed LEB128 value of at most `bits` bits.
     signed: fn(^self, bits: Int) -> Int WasmError! {
         start: self.at
-        result := 0
-        shift := 0
+        ^result: 0
+        ^shift: 0
         loop shift < bits {
             b: self.byte() ?? return Err(WasmError.new("unexpected end of LEB128 integer", start))
             result |= (b & 0x7f) << shift
@@ -125,7 +125,7 @@ WasmReader: struct {
         if self.end - self.at < count {
             return Err(WasmError.new("unexpected end of fixed-width value", self.at))
         }
-        value := 0
+        ^value: 0
         loop k in 0..<count -> value |= Int{self.bytes[self.at + k]} << (8 * k)
         self.at += count
         Ok(value)
@@ -150,8 +150,8 @@ WasmReader: struct {
 
 // Writing the binary format (the text reader's data segments and tests).
 wasm_put_unsigned: fn(out: ^[U8], value: Int) Never! {
-    rest := value
-    more := true
+    ^rest: value
+    ^more: true
     loop more {
         b: rest & 0x7f
         rest >>= 7
@@ -161,8 +161,8 @@ wasm_put_unsigned: fn(out: ^[U8], value: Int) Never! {
 }
 
 wasm_put_signed: fn(out: ^[U8], value: Int) Never! {
-    rest := value
-    more := true
+    ^rest: value
+    ^more: true
     loop more {
         b: rest & 0x7f
         rest >>= 7

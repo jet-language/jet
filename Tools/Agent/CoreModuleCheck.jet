@@ -77,7 +77,7 @@ run: fn() {
 repo_root: fn() -[Env, FS]> String CheckError! {
     script: sys.executable()
     if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
-    dir := files.cwd() ?? return Err(problem("the working directory cannot be read: {err}"))
+    ^dir: files.cwd() ?? return Err(problem("the working directory cannot be read: {err}"))
     loop {
         if files.exists("{dir}{TOOL}") -> return dir
         if dir == "/" || dir == "" -> return Err(problem("run from inside the Jet checkout"))
@@ -103,7 +103,7 @@ core_modules: fn(structure: String) -> [String] CheckError! {
     rows: if listed == .Array(entries) -> entries.copy() else -> {
         return Err(problem("`jet inspect structure --core --json` printed no Core module list"))
     }
-    modules := [String]{}
+    ^modules: [String]{}
     loop entry in rows {
         named: entry.get("module") ?? next
         if named == .Text(name) && !modules.contains(name) -> modules.push(name.copy())
@@ -127,14 +127,14 @@ is_error_header: fn(line: String) -> Bool Never! {
 // its location names the module's leading failure.
 check_summary: fn(name: String, output: String, status: Int) -> Summary Never! {
     lines: output.split("\n").to_list()
-    errors := 0
-    first := ""
+    ^errors: 0
+    ^first: ""
     loop index in 0..<lines.len() {
         line: lines[index]
         if !is_error_header(line) -> next
         errors += 1
         if first == "" {
-            at := ""
+            ^at: ""
             stop: if index + 4 < lines.len() -> index + 4 else -> lines.len()
             loop look in (index + 1)..<stop {
                 if lines[look].trim_start().starts_with("--> ") {
@@ -147,7 +147,7 @@ check_summary: fn(name: String, output: String, status: Int) -> Summary Never! {
     }
     if status != 0 && errors == 0 {
         errors = 1
-        shown := ""
+        ^shown: ""
         loop line in lines {
             if line.trim() != "" {
                 shown = line.copy()
@@ -169,7 +169,7 @@ ceiling_of: fn(ceilings: [Ceiling], name: String) -> Int Never! {
 // Compares measured error counts with the committed ceilings for the modules
 // that ran. Returns every problem; an empty list means the gate holds.
 ratchet_problems: fn(ceilings: [Ceiling], results: [Summary]) -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     loop result in results {
         ceiling: ceiling_of(ceilings, result.name)
         if result.errors > ceiling {
@@ -187,8 +187,8 @@ ratchet_problems: fn(ceilings: [Ceiling], results: [Summary]) -> [String] Never!
 lowered_ceilings: fn(committed: [Ceiling]?, results: [Summary]) -> Lowered Never! {
     initialize: committed == None
     ceilings: committed ?? [Ceiling]{}
-    out := ceilings.copy()
-    rises := [String]{}
+    ^out: ceilings.copy()
+    ^rises: [String]{}
     loop result in results {
         ceiling: ceiling_of(ceilings, result.name)
         if result.errors > ceiling && !initialize {
@@ -196,7 +196,7 @@ lowered_ceilings: fn(committed: [Ceiling]?, results: [Summary]) -> Lowered Never
             next
         }
         dropped: result.name.copy()
-        kept := out.filter(fn(row) { row.name != dropped })
+        ^kept: out.filter(fn(row) { row.name != dropped })
         if result.errors != 0 -> kept.push(Ceiling{name: result.name.copy(), errors: result.errors})
         out = kept
     }
@@ -207,7 +207,7 @@ lowered_ceilings: fn(committed: [Ceiling]?, results: [Summary]) -> Lowered Never
 read_ceilings: fn(path: String) -[FS]> [Ceiling] CheckError! {
     text: files.read(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
     tree: json.parse(text) ?? return Err(problem("`{path}` is not JSON: {err}"))
-    ceilings := [Ceiling]{}
+    ^ceilings: [Ceiling]{}
     if tree == .Object(entries) {
         loop entry in entries {
             count: if entry.value == {
@@ -232,8 +232,8 @@ ceilings_text: fn(ceilings: [Ceiling]) -> String Never! {
 // The probe of each of `modules`, then EVERY_BODY when `every`, at most
 // `jobs` at once; one Summary per row, in that order.
 sweep: fn(jet: String, root: String, modules: [String], every: Bool, jobs: Int, scratch: String) -[Env, Exec, FS, Time.Wait]> [Summary] CheckError! {
-    specs := [ProcessSpec]{}
-    names := [String]{}
+    ^specs: [ProcessSpec]{}
+    ^names: [String]{}
     loop name in modules {
         file: "{scratch}/{name.replace(".", "_")}.jet"
         files.write(file, probe_source(name)) ?? return Err(problem("`{file}` cannot be written: {err}"))
@@ -245,7 +245,7 @@ sweep: fn(jet: String, root: String, modules: [String], every: Bool, jobs: Int, 
         names.push(EVERY_BODY)
     }
     ran: process.run_all(specs, jobs) ?? return Err(problem("the probes cannot run: {err}"))
-    results := [Summary]{}
+    ^results: [Summary]{}
     loop at in 0..<names.len() {
         results.push(
             if ran[at] == {
@@ -289,8 +289,8 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
     base: option(args, "--scratch") ?? roots.value("JET_SCRATCH_ROOT")
     scratch: "{base}/core-module-check-{sys.pid()}-{time.unix_ns()}"
     files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
-    results := [Summary]{}
-    failure := ""
+    ^results: [Summary]{}
+    ^failure: ""
     if sweep(jet, root, modules, option(args, "--only") == None, jobs, scratch) == {
         .Ok(found) -> { results = found }
         .Err(problem_found) -> { failure = problem_found.message.copy() }

@@ -4,8 +4,8 @@
 foundation_json_escape: fn(value: String) -> String Never! {
     bytes: value.bytes()
     hex: "0123456789abcdef".bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         byte: Int{bytes[index]}
         // U+0080-U+009F encode as C2 80 .. C2 9F.
@@ -46,7 +46,7 @@ foundation_json_append: fn(out: ^[U8], text: String) Never! {
 foundation_float_display: fn(value: Float) -> String Never! {
     debug: "{value}"
     bytes: debug.bytes()
-    exponent_at := -1
+    ^exponent_at: -1
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{101}) {
             exponent_at = index
@@ -61,8 +61,8 @@ foundation_float_display: fn(value: Float) -> String Never! {
     }
     negative: bytes[0] == (U8{45})
     mantissa_start: if negative -> 1 else -> 0
-    digits := [U8]{}
-    point := -1
+    ^digits: [U8]{}
+    ^point: -1
     loop index in mantissa_start..<exponent_at {
         if bytes[index] == (U8{46}) {
             point = digits.len()
@@ -73,10 +73,10 @@ foundation_float_display: fn(value: Float) -> String Never! {
     if point < 0 -> point = digits.len()
     exponent_negative: bytes[exponent_at + 1] == (U8{45})
     exponent_start: if exponent_negative -> exponent_at + 2 else -> exponent_at + 1
-    exponent := 0
+    ^exponent: 0
     loop index in exponent_start..<bytes.len() -> exponent = exponent * 10 + Int{bytes[index]} - 48
     if exponent_negative -> point -= exponent else -> point += exponent
-    out := [U8]{}
+    ^out: [U8]{}
     if negative -> out.push(U8{45})
     if point <= 0 {
         foundation_json_append(out, "0.")
@@ -98,7 +98,7 @@ foundation_float_display: fn(value: Float) -> String Never! {
 
 // Shared structural Debug quoting (formerly JetEval's value formatter).
 foundation_debug_quoted: fn(text: String, quote: Int) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     out.push(U8{quote})
     loop byte in text.bytes() {
         code: Int{byte}

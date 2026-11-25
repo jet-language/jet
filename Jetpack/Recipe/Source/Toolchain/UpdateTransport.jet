@@ -113,7 +113,7 @@ recipe_update_parse_endpoint: fn(raw: String) -[FS, Env]> ToolchainEndpoint Reci
     if origin.scheme == "http" && !origin.is_loopback() {
         return Err(RecipeError.Update("plain HTTP toolchain endpoints must use loopback"))
     }
-    base := raw
+    ^base: raw
     loop base.ends_with("/") -> base = base.removesuffix("/")
     Ok(ToolchainEndpoint.HTTP(ToolchainHTTPEndpoint{base: base, origin: origin}))
 }
@@ -177,8 +177,8 @@ recipe_update_parse_http_authority: fn(authority: String, default_port: Int) -> 
     if authority.contains("[") || authority.contains("]") {
         return Err(RecipeError.Update("toolchain URL has an invalid authority"))
     }
-    host := authority
-    port := default_port
+    ^host: authority
+    ^port: default_port
     if authority.cut_last(":") == {
         .Val(parts) -> {
             if parts.before.contains(":") {
@@ -256,8 +256,8 @@ recipe_update_fetch_bytes: fn(endpoint: ToolchainEndpoint, relative: String, lim
 // GET with each redirect hop checked by the toolchain redirect rule, a
 // success status, and a bounded body that must agree with Content-Length.
 recipe_update_fetch_http: fn(http: ToolchainHTTPEndpoint, url: String, limit: Int) -[Net, Time.Wait]> [U8] RecipeError! {
-    current := url
-    hops := 0
+    ^current: url
+    ^hops: 0
     loop {
         request: http_client.request("GET", current).total_timeout(TOOLCHAIN_FETCH_TIMEOUT_SECONDS * 1000).redirects(0)
         response: http_client.send(request) ?? return Err(RecipeError.Other("{current}: {err}"))
@@ -274,7 +274,7 @@ recipe_update_fetch_http: fn(http: ToolchainHTTPEndpoint, url: String, limit: In
         if status < 200 || status >= 300 {
             return Err(RecipeError.Other("{url}: URL returned HTTP {status}"))
         }
-        declared := Int?{None}
+        ^declared: Int?{None}
         if response.header("content-length") == {
             .Val(text) -> {
                 declared = if Int.parse(text.trim()) == {
@@ -292,7 +292,7 @@ recipe_update_fetch_http: fn(http: ToolchainHTTPEndpoint, url: String, limit: In
             }
             .None -> {}
         }
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         loop part in response.body().chunks(TOOLCHAIN_READ_CHUNK) {
             chunk: part ?? return Err(RecipeError.Other("{url}: could not read response: {err}"))
             loop byte in chunk -> bytes.push(byte)
@@ -322,7 +322,7 @@ recipe_update_endpoint_url: fn(endpoint: ToolchainEndpoint, relative: String) ->
 
 // Read an endpoint file, refusing any link along the relative path.
 recipe_update_read_local_path: fn(root: String, relative: String, limit: Int, label: String) -[FS, Env]> [U8] RecipeError! {
-    path := root
+    ^path: root
     parts: relative.split("/").to_list()
     loop component in parts {
         path = files.join(path, component)
@@ -341,8 +341,8 @@ recipe_update_read_local_file: fn(path: String, limit: Int, label: String) -[FS,
         return Err(RecipeError.Update("{label} is not a regular file"))
     }
     if info.size > limit -> return Err(RecipeError.Update("{label} exceeds its bound"))
-    file := files.open(path, links: .Refuse) ?? return Err(RecipeError.Update("open {label}: {err}"))
-    bytes := [U8]{}
+    ^file: files.open(path, links: .Refuse) ?? return Err(RecipeError.Update("open {label}: {err}"))
+    ^bytes: [U8]{}
     loop {
         chunk: file.read_bytes(TOOLCHAIN_READ_CHUNK) ?? return Err(RecipeError.Update("read {label}: {err}"))
         if chunk.len() == 0 -> break
@@ -402,7 +402,7 @@ recipe_update_write_state: fn(path: String, state: ToolchainUpdateState) -[FS, E
             }
         }
     }
-    out := files.create(partial, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage toolchain update state: {err}"))
+    ^out: files.create(partial, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage toolchain update state: {err}"))
     if recipe_update_write_all_synced(out, state.canonical().bytes()) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -436,8 +436,8 @@ recipe_update_sync_parent: fn(parent: String) -[FS]> RecipeError! {
 recipe_update_validate_no_symlink_ancestors: fn(path: String, label: String) -[FS, Env]> RecipeError! {
     if path == "" -> return Err(RecipeError.Update("{label} path is empty"))
     if recipe_has_parent_component(path) -> return Err(RecipeError.Update("{label} path is unsafe"))
-    probe := if files.is_abs(path) -> path else -> files.join(files.cwd() ?? return Err(RecipeError.Update("inspect {label}: {err}")), path)
-    descendant_requires_directory := false
+    ^probe: if files.is_abs(path) -> path else -> files.join(files.cwd() ?? return Err(RecipeError.Update("inspect {label}: {err}")), path)
+    ^descendant_requires_directory: false
     loop {
         if files.stat(probe) == {
             .Ok(info) -> {

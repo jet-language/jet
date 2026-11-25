@@ -92,7 +92,7 @@ Sh: struct {
     args: fn(self) -> [String] Never! { self.argv.copy() }
 
     raw: fn(text: String) -> Sh Never! {
-        argv := [String]{}
+        ^argv: [String]{}
         sh_split_into(text, argv)
         Sh{argv: argv}
     }
@@ -122,7 +122,7 @@ Sh: struct {
     text: fn(self) -[Exec, Time.Wait]> String IOError! {
         output: self.spec().stderr(.Inherit).run().output
         bytes: output.bytes()
-        end := bytes.len()
+        ^end: bytes.len()
         loop end > 0 && bytes[end - 1] == (U8{10}) -> end -= 1
         if end == bytes.len() -> return output
         String.from_bytes_lossy(bytes.slice(0, end))
@@ -148,7 +148,7 @@ Sh: struct {
         encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
 
         build: fn(parts: [String], holes: [String]) -[]> Sh {
-            argv := [String]{}
+            ^argv: [String]{}
             sh_split_into(parts[0], argv)
             loop index in 0..<holes.len() {
                 argv.push(holes[index].copy())
@@ -169,7 +169,7 @@ check: fn(receipt: ProcessReceipt) IOError! {
     if receipt.success -> return Ok()
     limit_hit: receipt.limit_hit
     if limit_hit == {
-        .None -> { _ := 0 }
+        .None -> { ^_: 0 }
         .Val(limit) -> return Err(IOError.ResourceLimit(limit))
     }
     if receipt.timed_out {
@@ -184,10 +184,10 @@ check: fn(receipt: ProcessReceipt) IOError! {
             ),
         )
     }
-    cause := "process exited unsuccessfully: code={receipt.code}"
+    ^cause: "process exited unsuccessfully: code={receipt.code}"
     signal: receipt.signal.copy()
     if signal == {
-        .None -> { _ := 0 }
+        .None -> { ^_: 0 }
         .Val(number) -> cause = "{cause}; signal={number}"
     }
     return Err(
@@ -328,7 +328,7 @@ fail: fn(code: Int, message: String) -[Exec.Exit, IO, Time.Wait]> Never Never! {
 // `argv[0]: <error>` on stderr, as a shell's "command not found" does.
 exec: fn(argv: [String], env: [String:String]{[String:String]{}}) -[Exec, IO, Time.Wait]> Never Never! {
     // copy: the plan owns its argv; argv[0] is still read for the error.
-    spec := cmd(argv.copy()).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    ^spec: cmd(argv.copy()).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     loop (name, value) in env -> spec = spec.env(name, value)
     if spec.run() == {
         .Ok(receipt) -> { exit(exit_status(receipt)) }
@@ -399,7 +399,7 @@ run_all: fn(specs: [ProcessSpec], jobs: Int) -[Exec, Time.Wait]> [ProcessReceipt
             ),
         )
     }
-    results := [ProcessReceipt IOError!]{}
+    ^results: [ProcessReceipt IOError!]{}
     task.group pool(limit: jobs) {
         handles: loop spec in specs -> task run_all_job(rt.spec_parent_death(spec.copy()))
         loop handle in handles {
@@ -471,38 +471,133 @@ impl ProcessSpec {
 // runtime export. A builder takes its spec and answers it changed; a child
 // step reads its receiver. The launch-step roles serve a compiler built before
 // `impl ProcessSpec` declared `plan`, `run`, `run_checked` and `spawn`.
-#Builtin.Role(.ProcessSpecCwd) priv __spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec Never! { rt.spec_cwd(spec, path) }
-#Builtin.Role(.ProcessSpecArg) priv __spec_arg: fn(spec: ^^ProcessSpec, extra: String) -> ProcessSpec Never! { rt.spec_arg(spec, extra) }
-#Builtin.Role(.ProcessSpecArgsExtend) priv __spec_args_extend: fn(spec: ^^ProcessSpec, extra: [String]) -> ProcessSpec Never! { rt.spec_args_extend(spec, extra) }
-#Builtin.Role(.ProcessSpecEnv) priv __spec_env: fn(spec: ^^ProcessSpec, name: String, value: String) -> ProcessSpec Never! { rt.spec_env(spec, name, value) }
-#Builtin.Role(.ProcessSpecEnvRemove) priv __spec_env_remove: fn(spec: ^^ProcessSpec, name: String) -> ProcessSpec Never! { rt.spec_env_remove(spec, name) }
-#Builtin.Role(.ProcessSpecEnvClear) priv __spec_env_clear: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_env_clear(spec) }
-#Builtin.Role(.ProcessSpecOutputLimit) priv __spec_output_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_output_limit(spec, limit) }
-#Builtin.Role(.ProcessSpecMemoryLimit) priv __spec_memory_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_memory_limit(spec, limit) }
-#Builtin.Role(.ProcessSpecMemoryScope) priv __spec_memory_scope: fn(spec: ^^ProcessSpec, bytes: Int) -> ProcessSpec Never! { rt.spec_memory_scope(spec, bytes) }
-#Builtin.Role(.ProcessSpecOpenFileLimit) priv __spec_open_file_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_open_file_limit(spec, limit) }
-#Builtin.Role(.ProcessSpecCPUAffinity) priv __spec_cpu_affinity: fn(spec: ^^ProcessSpec, cpus: [Int]) -> ProcessSpec Never! { rt.spec_cpu_affinity(spec, cpus) }
-#Builtin.Role(.ProcessSpecIOPriority) priv __spec_io_priority: fn(spec: ^^ProcessSpec, level: Int) -> ProcessSpec Never! { rt.spec_io_priority(spec, level) }
-#Builtin.Role(.ProcessSpecIOIdle) priv __spec_io_idle: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_io_idle(spec) }
-#Builtin.Role(.ProcessSpecDetached) priv __spec_detached: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_detached(spec) }
-#Builtin.Role(.ProcessSpecTerminal) priv __spec_terminal: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_terminal(spec) }
-#Builtin.Role(.ProcessSpecTerminalWithPolicy) priv __spec_terminal_with_policy: fn(spec: ^^ProcessSpec, policy: TerminalPolicy) -> ProcessSpec Never! { rt.spec_terminal_with_policy(spec, policy) }
-#Builtin.Role(.ProcessSpecUnder) priv __spec_under: fn(spec: ^^ProcessSpec, authority: Authority) -> ProcessSpec Never! { rt.spec_under(spec, authority) }
-#Builtin.Role(.ProcessSpecStdin) priv __spec_stdin: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec Never! { rt.spec_stdin(spec, mode) }
-#Builtin.Role(.ProcessSpecStdout) priv __spec_stdout: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec Never! { rt.spec_stdout(spec, mode) }
-#Builtin.Role(.ProcessSpecStderr) priv __spec_stderr: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec Never! { rt.spec_stderr(spec, mode) }
-#Builtin.Role(.ProcessSpecTimeout) priv __spec_timeout: fn(spec: ^^ProcessSpec, limit: Duration) -> ProcessSpec Never! { rt.spec_timeout(spec, limit.ns) }
-#Builtin.Role(.ProcessSpecCPUTimeLimit) priv __spec_cpu_time_limit: fn(spec: ^^ProcessSpec, limit: Duration) -> ProcessSpec Never! { rt.spec_cpu_time_limit(spec, limit.ns) }
-#Builtin.Role(.ProcessSpecPlan) priv __spec_plan: fn(spec: ProcessSpec) -> ProcessPlan IOError! { rt.spec_plan(spec) }
-#Builtin.Role(.ProcessSpecRun) priv __spec_run: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! { rt.spec_run(spec) }
-#Builtin.Role(.ProcessSpecRunChecked) priv __spec_run_checked: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! { rt.spec_run_checked(spec) }
-#Builtin.Role(.ProcessSpecSpawn) priv __spec_spawn: fn(spec: ProcessSpec) -[Exec]> ProcessChild IOError! { rt.spec_spawn(spec) }
-#Builtin.Role(.ProcessChildID) priv __child_id: fn(child: ProcessChild) -> Int Never! { rt.child_id(child) }
-#Builtin.Role(.ProcessChildWait) priv __child_wait: fn(child: ProcessChild) -[Exec]> ProcessReceipt IOError! { rt.child_wait(child) }
-#Builtin.Role(.ProcessChildExited) priv __child_exited: fn(child: ProcessChild) -[Exec]> Bool IOError! { rt.child_exited(child) }
-#Builtin.Role(.ProcessChildKill) priv __child_kill: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_kill(child) }
-#Builtin.Role(.ProcessChildTerminate) priv __child_terminate: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_terminate(child) }
-#Builtin.Role(.ProcessChildInterrupt) priv __child_interrupt: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_interrupt(child) }
+#Builtin.Role(.ProcessSpecCwd) priv __spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec Never! {
+    rt.spec_cwd(spec, path)
+}
+
+#Builtin.Role(.ProcessSpecArg) priv __spec_arg: fn(spec: ^^ProcessSpec, extra: String) -> ProcessSpec Never! {
+    rt.spec_arg(spec, extra)
+}
+
+#Builtin.Role(.ProcessSpecArgsExtend) priv __spec_args_extend: fn(spec: ^^ProcessSpec, extra: [String]) -> ProcessSpec Never! {
+    rt.spec_args_extend(spec, extra)
+}
+
+#Builtin.Role(.ProcessSpecEnv) priv __spec_env: fn(spec: ^^ProcessSpec, name: String, value: String) -> ProcessSpec Never! {
+    rt.spec_env(spec, name, value)
+}
+
+#Builtin.Role(.ProcessSpecEnvRemove) priv __spec_env_remove: fn(spec: ^^ProcessSpec, name: String) -> ProcessSpec Never! {
+    rt.spec_env_remove(spec, name)
+}
+
+#Builtin.Role(.ProcessSpecEnvClear) priv __spec_env_clear: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! {
+    rt.spec_env_clear(spec)
+}
+
+#Builtin.Role(.ProcessSpecOutputLimit) priv __spec_output_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! {
+    rt.spec_output_limit(spec, limit)
+}
+
+#Builtin.Role(.ProcessSpecMemoryLimit) priv __spec_memory_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! {
+    rt.spec_memory_limit(spec, limit)
+}
+
+#Builtin.Role(.ProcessSpecMemoryScope) priv __spec_memory_scope: fn(spec: ^^ProcessSpec, bytes: Int) -> ProcessSpec Never! {
+    rt.spec_memory_scope(spec, bytes)
+}
+
+#Builtin.Role(.ProcessSpecOpenFileLimit) priv __spec_open_file_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! {
+    rt.spec_open_file_limit(spec, limit)
+}
+
+#Builtin.Role(.ProcessSpecCPUAffinity) priv __spec_cpu_affinity: fn(spec: ^^ProcessSpec, cpus: [Int]) -> ProcessSpec Never! {
+    rt.spec_cpu_affinity(spec, cpus)
+}
+
+#Builtin.Role(.ProcessSpecIOPriority) priv __spec_io_priority: fn(spec: ^^ProcessSpec, level: Int) -> ProcessSpec Never! {
+    rt.spec_io_priority(spec, level)
+}
+
+#Builtin.Role(.ProcessSpecIOIdle) priv __spec_io_idle: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! {
+    rt.spec_io_idle(spec)
+}
+
+#Builtin.Role(.ProcessSpecDetached) priv __spec_detached: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! {
+    rt.spec_detached(spec)
+}
+
+#Builtin.Role(.ProcessSpecTerminal) priv __spec_terminal: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! {
+    rt.spec_terminal(spec)
+}
+
+#Builtin.Role(.ProcessSpecTerminalWithPolicy) priv __spec_terminal_with_policy: fn(spec: ^^ProcessSpec, policy: TerminalPolicy) -> ProcessSpec Never! {
+    rt.spec_terminal_with_policy(spec, policy)
+}
+
+#Builtin.Role(.ProcessSpecUnder) priv __spec_under: fn(spec: ^^ProcessSpec, authority: Authority) -> ProcessSpec Never! {
+    rt.spec_under(spec, authority)
+}
+
+#Builtin.Role(.ProcessSpecStdin) priv __spec_stdin: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec Never! {
+    rt.spec_stdin(spec, mode)
+}
+
+#Builtin.Role(.ProcessSpecStdout) priv __spec_stdout: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec Never! {
+    rt.spec_stdout(spec, mode)
+}
+
+#Builtin.Role(.ProcessSpecStderr) priv __spec_stderr: fn(spec: ^^ProcessSpec, mode: ProcessStreamMode) -> ProcessSpec Never! {
+    rt.spec_stderr(spec, mode)
+}
+
+#Builtin.Role(.ProcessSpecTimeout) priv __spec_timeout: fn(spec: ^^ProcessSpec, limit: Duration) -> ProcessSpec Never! {
+    rt.spec_timeout(spec, limit.ns)
+}
+
+#Builtin.Role(.ProcessSpecCPUTimeLimit) priv __spec_cpu_time_limit: fn(spec: ^^ProcessSpec, limit: Duration) -> ProcessSpec Never! {
+    rt.spec_cpu_time_limit(spec, limit.ns)
+}
+
+#Builtin.Role(.ProcessSpecPlan) priv __spec_plan: fn(spec: ProcessSpec) -> ProcessPlan IOError! {
+    rt.spec_plan(spec)
+}
+
+#Builtin.Role(.ProcessSpecRun) priv __spec_run: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! {
+    rt.spec_run(spec)
+}
+
+#Builtin.Role(.ProcessSpecRunChecked) priv __spec_run_checked: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! {
+    rt.spec_run_checked(spec)
+}
+
+#Builtin.Role(.ProcessSpecSpawn) priv __spec_spawn: fn(spec: ProcessSpec) -[Exec]> ProcessChild IOError! {
+    rt.spec_spawn(spec)
+}
+
+#Builtin.Role(.ProcessChildID) priv __child_id: fn(child: ProcessChild) -> Int Never! {
+    rt.child_id(child)
+}
+
+#Builtin.Role(.ProcessChildWait) priv __child_wait: fn(child: ProcessChild) -[Exec]> ProcessReceipt IOError! {
+    rt.child_wait(child)
+}
+
+#Builtin.Role(.ProcessChildExited) priv __child_exited: fn(child: ProcessChild) -[Exec]> Bool IOError! {
+    rt.child_exited(child)
+}
+
+#Builtin.Role(.ProcessChildKill) priv __child_kill: fn(child: ProcessChild) -[Exec]> IOError! {
+    rt.child_kill(child)
+}
+
+#Builtin.Role(.ProcessChildTerminate) priv __child_terminate: fn(child: ProcessChild) -[Exec]> IOError! {
+    rt.child_terminate(child)
+}
+
+#Builtin.Role(.ProcessChildInterrupt) priv __child_interrupt: fn(child: ProcessChild) -[Exec]> IOError! {
+    rt.child_interrupt(child)
+}
 
 status_ok: fn(receipt: ProcessReceipt) -> Bool Never! { receipt.success }
 
@@ -594,8 +689,8 @@ env_truthy: fn(name: String) -[Env]> Bool Never! {
 failed: fn(receipt: ProcessReceipt) -> Bool Never! { !receipt.success }
 
 list2cmdline: fn(argv: [String]) -> String Never! {
-    out := ""
-    first := true
+    ^out: ""
+    ^first: true
     loop item in argv {
         if !first -> out = "{out} "
         out = "{out}{quote_arg(item)}"
@@ -654,9 +749,9 @@ path_separator: fn(value: String) -> U8 {
 
 path_parts: fn(value: String, separator: U8) -> [String] Never! {
     raw: value.bytes()
-    out := [String]{}
-    start := 0
-    i := 0
+    ^out: [String]{}
+    ^start: 0
+    ^i: 0
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == separator {
             if i == start -> out.push(".") else {
@@ -671,9 +766,9 @@ path_parts: fn(value: String, separator: U8) -> [String] Never! {
 
 split_lines: fn(value: String) -> [String] {
     raw: value.bytes()
-    out := [String]{}
-    start := 0
-    i := 0
+    ^out: [String]{}
+    ^start: 0
+    ^i: 0
     loop i < raw.len() {
         if raw[i] == (U8{10}) || raw[i] == (U8{13}) {
             out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
@@ -689,22 +784,22 @@ split_lines: fn(value: String) -> [String] {
 
 quote_arg: fn(value: String) -> String {
     raw: value.bytes()
-    needs_quote := raw.len() == 0
+    ^needs_quote: raw.len() == 0
     loop byte in raw {
         if byte == (U8{9}) || byte == (U8{10}) || byte == (U8{13}) || byte == (U8{32}) {
             needs_quote = true
         }
     }
-    out := [U8]{}
+    ^out: [U8]{}
     if needs_quote -> out.push(U8{34})
-    backslashes := 0
+    ^backslashes: 0
     loop byte in raw {
         if byte == (U8{92}) {
             backslashes += 1
             next
         }
         if byte == (U8{34}) {
-            count := backslashes * 2 + 1
+            ^count: backslashes * 2 + 1
             loop count > 0 {
                 out.push(U8{92})
                 count -= 1
@@ -736,8 +831,8 @@ quote_arg: fn(value: String) -> String {
 }
 
 slice_u8: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop i < end {
         out.push(raw[i])
         i += 1
@@ -812,7 +907,7 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     }
     elapsed: core.time.instant() - start
     child.stdin.close()
-    _ := child.wait()
+    ^_: child.wait()
     // One 10ms poll per reply would take a second; woken reads take far less.
     assert(elapsed.ns < 600000000)
 }
@@ -987,7 +1082,7 @@ priv ProcessChunkCursor: struct {
 
         next: fn(^self) -[Exec, Time.Wait]> [U8]? {
             if self.done -> return None
-            piece := [U8]{}
+            ^piece: [U8]{}
             if self.stdout == .Val(stream) -> piece = stream.read_bytes(self.size) ?? [U8]{} else if self.stderr == .Val(stream) {
                 piece = stream.read_bytes(self.size) ?? [U8]{}
             }
@@ -1011,7 +1106,7 @@ priv ProcessChunkCursor: struct {
 }
 
 pipe_line: fn(input: ^^[U8]) -> String? IOError! {
-    bytes := input.move()
+    ^bytes: input.move()
     if bytes.len() == 0 -> return Ok(None)
     trim_pipe_line(bytes)
     text: String.from_bytes(bytes) ?? return Err(
@@ -1035,10 +1130,10 @@ trim_pipe_line: fn(bytes: ^[U8]) Never! {
 }
 
 #Test("pipe next_line preserves final bare CR and removes only one CR before LF") {
-    final := [U8]{120, 13}
+    ^final: [U8]{120, 13}
     trim_pipe_line(final)
     assert_eq(final, [U8]{120, 13})
-    crlf := [U8]{120, 13, 13, 10}
+    ^crlf: [U8]{120, 13, 13, 10}
     trim_pipe_line(crlf)
     assert_eq(crlf, [U8]{120, 13})
     if pipe_line([U8]{10}) == .Ok(line) -> assert_eq(line, Val("")) else -> panic("empty line")

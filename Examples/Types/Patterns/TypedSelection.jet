@@ -34,14 +34,14 @@ circle_or_err: fn(shape: Shape) -> Float Err! {
 }
 
 all_circles: fn(shapes: [Shape]) -> [Float] Err! {
-    radii := [Float]{}
+    ^radii: [Float]{}
     loop shape in shapes -> radii.push(circle_or_err(shape))
     Ok(radii)
 }
 
 // Reads the payloads of a list the caller keeps.
 label_lengths: fn(shapes: [Shape]) -> [Int] {
-    lengths := [Int]{}
+    ^lengths: [Int]{}
     loop shape in shapes {
         if shape == .Label(text) -> lengths.push(text.len())
     }
@@ -59,7 +59,7 @@ first_steps: fn(shapes: [Shape], none: [Int]) -> View<Int> from shapes | none {
 
 // Moves each label's text out of a list the caller gives up.
 take_labels: fn(shapes: ^^[Shape]) -> [String] {
-    labels := [String]{}
+    ^labels: [String]{}
     loop shape in shapes.move() {
         if shape == .Label(text) -> labels.push(text)
     }

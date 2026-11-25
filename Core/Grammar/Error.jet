@@ -28,7 +28,9 @@ GrammarError: struct {
     found: String,
 
     impl Display {
-        display: fn(self) -> String { "{self.line}:{self.column}: {grammar_error_text(self.expected, self.found)}" }
+        display: fn(self) -> String {
+            "{self.line}:{self.column}: {grammar_error_text(self.expected, self.found)}"
+        }
     }
 }
 
@@ -42,15 +44,11 @@ grammar_error_text: fn(expected: [String], found: String) -> String Never! {
 
 /// `a`, `a or b`, `a, b or c`.
 expected_list: fn(items: [String]) -> String Never! {
-    out := ""
+    ^out: ""
     loop (index, item) in items {
-        if index == 0 {
-            out = item.copy()
-        } else if index == items.len() - 1 {
+        if index == 0 -> out = item.copy() else if index == items.len() - 1 {
             out = "{out} or {item}"
-        } else {
-            out = "{out}, {item}"
-        }
+        } else { out = "{out}, {item}" }
     }
     out
 }
@@ -66,9 +64,9 @@ TextPlace: struct {
 text_place: fn(text: String, offset: Int) -> TextPlace Never! {
     bytes: text.bytes()
     stop: if offset > bytes.len() -> bytes.len() else -> offset
-    line := 1
-    column := 1
-    i := 0
+    ^line: 1
+    ^column: 1
+    ^i: 0
     loop i < stop {
         b: Int{bytes[i]}
         if b == 10 {
@@ -136,17 +134,17 @@ GrammarFaults: struct {
 }
 
 grammar_faults_text: fn(faults: [GrammarFault]) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop fault in faults -> out.push(fault.message.copy())
     out.join("\n")
 }
 
 /// The faults, ordered by the spot they point at.
 grammar_faults: fn(faults: [GrammarFault]) -> GrammarFaults Never! {
-    sorted := faults.copy()
-    i := 1
+    ^sorted: faults.copy()
+    ^i: 1
     loop i < sorted.len() {
-        k := i
+        ^k: i
         loop k > 0 && fault_after(sorted[k - 1], sorted[k]) {
             held: sorted[k - 1]
             sorted[k - 1] = sorted[k]

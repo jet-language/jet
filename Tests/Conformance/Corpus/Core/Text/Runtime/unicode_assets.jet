@@ -25,7 +25,7 @@ use {
     assert_eq(empty_pool.len(), 0)
     assert(!text_asset.valid(asset, 2, 7))
     assert(!text_asset.valid(asset, 3, 6))
-    corrupt := asset.copy()
+    ^corrupt: asset.copy()
     corrupt[4] = U8{2}
     assert(!text_asset.valid(corrupt, 3, 7))
     corrupt[4] = U8{1}
@@ -175,7 +175,7 @@ use {
 }
 
 binary_text: fn(bits: Int, length: Int) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop i in 0..<length -> bytes.push(U8{97 + ((bits >> i) & 1)})
     String.from_bytes(bytes) ?? panic("ASCII fixture")
 }
@@ -186,9 +186,9 @@ expected_search: fn(hay: String, needle: String, reverse: Bool) -> Int? {
     h: hay.bytes()
     n: needle.bytes()
     if n.len() > h.len() -> return None
-    result := Int?{None}
+    ^result: Int?{None}
     loop at in 0..<(h.len() - n.len() + 1) {
-        matched := true
+        ^matched: true
         loop i in 0..<n.len() {
             if h[at + i] != n[i] {
                 matched = false

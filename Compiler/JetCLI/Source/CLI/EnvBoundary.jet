@@ -43,9 +43,9 @@ use {
 jet_cli_env_boundary_refusal: fn(typed: String, jet_argv: [String], color: Bool) -[FS, Env, Exec]> JetCLIPlan? Never! {
     // The typed spelling when it names a file or directory, else `<typed>.jet`.
     start: if !cli_files.is_dir(typed) && !cli_files.is_file(typed) && cli_files.is_file("{typed}.{FILE_EXT}") -> "{typed}.{FILE_EXT}" else -> typed
-    preset := String?{None}
-    environment := String?{None}
-    index := 0
+    ^preset: String?{None}
+    ^environment: String?{None}
+    ^index: 0
     loop index < jet_argv.len() {
         argument: jet_argv[index]
         if argument == "--" -> break
@@ -131,10 +131,10 @@ jet_cli_environment_active: fn(root: String, preset: String?, environment: Strin
 jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS, Env]> String? Never! {
     directory: cli_files.is_dir(start)
     search: if directory -> start else -> jet_cli_parent(start) ?? "."
-    project_root := environment_root
-    dependencies := [String]{}
-    allow_inline := true
-    cache := WorkspaceDeclarationCache.new()
+    ^project_root: environment_root
+    ^dependencies: [String]{}
+    ^allow_inline: true
+    ^cache: WorkspaceDeclarationCache.new()
     if jet_cli_find_package_root_checked(cache, cli_files.realpath(search) ?? search) == .Ok(found) {
         if found == .Val(root) {
             if pkg_package_facts_for_root(cache, root) == .Ok(loaded) {
@@ -154,16 +154,16 @@ jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS
     // Outside a package, a directory target's programs are the sources under
     // it, never the environment root's others.
     canonical_root: if directory && allow_inline -> cli_files.realpath(start) ?? start else -> cli_files.realpath(project_root) ?? project_root
-    sources := [JetDriverAuthorizedSourceFile]{}
-    _ := jet_cli_discover_sources(canonical_root, sources)
-    pending := [String]{}
+    ^sources: [JetDriverAuthorizedSourceFile]{}
+    ^_: jet_cli_discover_sources(canonical_root, sources)
+    ^pending: [String]{}
     if {
         directory -> {
             loop file in sources -> pending.push(file.path)
         }
         else -> { pending.push(start.copy()) }
     }
-    visited := [String]{}
+    ^visited: [String]{}
     loop pending.len() > 0 {
         file: pending.pop() ?? break
         identity: cli_files.realpath(file) ?? file
@@ -213,7 +213,7 @@ jet_cli_local_import_target: fn(importing: String, import: ImportDecl, root: Str
     if import.kind == {
         .File(path, _) -> {
             if path.contains("..") -> return None
-            target := jet_cli_parent(importing) ?? "."
+            ^target: jet_cli_parent(importing) ?? "."
             loop part in path.split("/") {
                 if part != "" && part != "." -> target = "{target}/{part}"
             }
@@ -227,7 +227,7 @@ jet_cli_local_import_target: fn(importing: String, import: ImportDecl, root: Str
         .Module(name, _) -> {
             if name == "core" || name.starts_with("core.") -> return None
             direct: "{name}.{FILE_EXT}"
-            found := String?{None}
+            ^found: String?{None}
             loop file in sources {
                 file_name: jet_cli_file_name(file.relative_path)
                 matches: file_name == direct || (file_name == DEFAULT_ENTRY_FILE && jet_cli_file_name(jet_cli_relative_parent(file.relative_path)) == name)

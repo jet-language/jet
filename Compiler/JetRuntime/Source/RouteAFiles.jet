@@ -25,7 +25,7 @@ ENTRIES_SLOT_BYTES: I64{64}
 
 ENTRIES_NUL: I64{-5000}
 
-entries_root := I64{0}
+^entries_root: I64{0}
 
 // runtime-init: 4 when entries_root
 #Export(c) jet_rt_entries8_init: fn() {
@@ -41,12 +41,12 @@ entries_root := I64{0}
 entries_enter: fn(key: I64) -> I64 {
     root: entries_root
     sync_mutex_lock(root)
-    node := rt_text_word(wrapping(root + I64{16}))
+    ^node: rt_text_word(wrapping(root + I64{16}))
     loop node != (I64{0}) && rt_text_word(wrapping(node + I64{8})) != key {
         node = rt_text_word(node)
     }
     context: if (node == I64{0}) -> I64{0} else -> rt_text_word(wrapping(node + I64{16}))
-    if (context != I64{0}) { _ := sync_add(wrapping(context + I64{56}), I64{1}) }
+    if (context != I64{0}) { ^_: sync_add(wrapping(context + I64{56}), I64{1}) }
     sync_mutex_unlock(root)
     if (context == I64{0}) {
         walk_panic(rt_static_text("live entries context"))
@@ -71,7 +71,7 @@ entries_release: fn(context: I64) {
         return
     }
     count: rt_text_word(wrapping(context + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         slot: wrapping(rt_text_word(wrapping(context + I64{8})) + at * ENTRIES_SLOT_BYTES)
         if (rt_text_word(slot) != I64{0}) { entries_slot_clear(slot) }
@@ -200,8 +200,8 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
     key: int_saturated(key_int)
     root: entries_root
     sync_mutex_lock(root)
-    link := root + I64{16}
-    context := I64{0}
+    ^link: root + I64{16}
+    ^context: I64{0}
     loop rt_text_word(link) != (I64{0}) {
         node: rt_text_word(link)
         if (rt_text_word(wrapping(node + I64{8})) == key) {
@@ -257,9 +257,9 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
         return
     }
     data: rt_text_word(wrapping(slot + I64{8}))
-    failure := ENTRIES_NUL
+    ^failure: ENTRIES_NUL
     if !walk_has_nul(data, rt_text_word(wrapping(slot + I64{16}))) {
-        fd := I64{-4}
+        ^fd: I64{-4}
         loop fd == (I64{-4}) -> fd = host_call(I64{2}, data, FILES_O_DIRECTORY_CLOEXEC, I64{0})
         failure = if (fd < I64{0}) -> fd else -> I64{0}
         if (fd >= I64{0}) {
@@ -317,8 +317,8 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
     scratch: jet_rt_alloc(I64{16}, I64{8})
     path_length: walk_join(rt_text_word(wrapping(parent + I64{8})), rt_text_word(wrapping(parent + I64{16})), name, name_length, scratch)
     path: rt_text_word(scratch)
-    destination := I64{0}
-    destination_length := I64{0}
+    ^destination: I64{0}
+    ^destination_length: I64{0}
     if (rt_text_word(wrapping(parent + I64{24})) != I64{0}) {
         destination_length = walk_join(rt_text_word(wrapping(parent + I64{24})), rt_text_word(wrapping(parent + I64{32})), name, name_length, wrapping(scratch + I64{8}))
         destination = rt_text_word(wrapping(scratch + I64{8}))
@@ -501,20 +501,20 @@ entries_destination_text: fn(context: I64, slot: I64) -> I64 {
     shown: fs_held_shown_name(key, name)
     if (shown == I64{0}) { return fs_held_closed(HOST_IO_OP_READ, error) }
     scratch: jet_rt_alloc(I64{16}, I64{8})
-    result := I64{0}
+    ^result: I64{0}
     if fs_held_parent(key, name, HOST_IO_OP_READ, shown, scratch, error) {
         parent: rt_text_word(scratch)
         start: rt_text_word(wrapping(scratch + I64{8}))
         end: rt_text_len(name)
         part: fs_held_cpart(name, start, end, HOST_IO_OP_READ, shown, error)
         if (part != I64{0}) {
-            capacity := I64{256}
+            ^capacity: I64{256}
             loop {
                 buffer: jet_rt_alloc(capacity, I64{1})
                 got: host_call4(I64{267}, parent, part, buffer, capacity)
                 if (got < I64{0}) {
                     jet_rt_free(buffer, capacity, I64{1})
-                    _ := compiler_fs_errno(HOST_IO_OP_READ, shown, -got, error)
+                    ^_: compiler_fs_errno(HOST_IO_OP_READ, shown, -got, error)
                     break
                 }
                 if (got < capacity) {
@@ -522,7 +522,7 @@ entries_destination_text: fn(context: I64, slot: I64) -> I64 {
                         rt_text_store(ok, rt_text_copy(buffer, got))
                         result = I64{1}
                     } else {
-                        _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, shown, I64{0}, jet_rt_string_clone(rt_static_text("the link text is not valid UTF-8")), error)
+                        ^_: compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, shown, I64{0}, jet_rt_string_clone(rt_static_text("the link text is not valid UTF-8")), error)
                     }
                     jet_rt_free(buffer, capacity, I64{1})
                     break
@@ -554,10 +554,10 @@ host_call5: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64) -> I64 
 // jet_fs_cstring's refusal: "the name contains a NUL byte" naming `shown`.
 files_name_valid: fn(text: I64, operation: I64, shown: I64, error: I64) -> Bool {
     data: rt_text_data(text)
-    at := I64{0}
+    ^at: I64{0}
     loop at < rt_text_len(text) {
         if (rt_text_byte(wrapping(data + at)) == I64{0}) {
-            _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{0}, jet_rt_string_clone(rt_static_text("the name contains a NUL byte")), error)
+            ^_: compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{0}, jet_rt_string_clone(rt_static_text("the name contains a NUL byte")), error)
             return false
         }
         at += I64{1}
@@ -572,11 +572,11 @@ files_name_valid: fn(text: I64, operation: I64, shown: I64, error: I64) -> Bool 
         return I64{0}
     }
     name: fd_c_path(path)
-    buffer := I64{0}
-    allocated := I64{0}
-    size := I64{0}
-    failure := I64{0}
-    sizing := true
+    ^buffer: I64{0}
+    ^allocated: I64{0}
+    ^size: I64{0}
+    ^failure: I64{0}
+    ^sizing: true
     loop {
         wanted: host_call(I64{195}, name, I64{0}, I64{0})
         if (wanted < I64{0}) {
@@ -610,9 +610,9 @@ files_name_valid: fn(text: I64, operation: I64, shown: I64, error: I64) -> Bool 
         return compiler_fs_errno(HOST_IO_OP_READ, path, -failure, error)
     }
     names: files_words_new()
-    start := I64{0}
-    at := I64{0}
-    invalid := false
+    ^start: I64{0}
+    ^at: I64{0}
+    ^invalid: false
     loop at <= size && size != (I64{0}) {
         if (at == size || rt_text_byte(wrapping(buffer + at)) == I64{0}) {
             if (at > start) {
@@ -652,11 +652,11 @@ files_name_valid: fn(text: I64, operation: I64, shown: I64, error: I64) -> Bool 
     if !files_name_valid(attribute, HOST_IO_OP_READ, path, error) -> return I64{0}
     name: fd_c_path(path)
     key: fd_c_path(attribute)
-    buffer := I64{0}
-    allocated := I64{0}
-    size := I64{0}
-    failure := I64{0}
-    sizing := true
+    ^buffer: I64{0}
+    ^allocated: I64{0}
+    ^size: I64{0}
+    ^failure: I64{0}
+    ^sizing: true
     loop {
         wanted: host_call5(I64{192}, name, key, I64{0}, I64{0}, I64{0})
         if (wanted < I64{0}) {
@@ -709,10 +709,10 @@ files_utf8_valid: fn(data: I64, length: I64) -> Bool {
 
 // Vec<String>.sort: byte order (insertion sort keeps equal names stable).
 files_texts_sort: fn(data: I64, count: I64) {
-    at := I64{1}
+    ^at: I64{1}
     loop at < count {
         value: rt_text_word(wrapping(data + at * I64{8}))
-        cursor := at
+        ^cursor: at
         loop cursor > (I64{0}) && jet_rt_string_compare(rt_text_word(wrapping(data + (cursor - I64{1}) * I64{8})), value) > (I64{0}) {
             rt_text_store(wrapping(data + cursor * I64{8}), rt_text_word(wrapping(data + (cursor - I64{1}) * I64{8})))
             cursor -= I64{1}
@@ -759,11 +759,11 @@ files_texts_sort: fn(data: I64, count: I64) {
 #Export(c) jet_std_fs_temp_file_raw: fn(path: I64, ok: I64, error: I64) -> I64 {
     if !compiler_fs_link_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
     name: fd_c_path(path)
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, I64{524481}, I64{438})
     fd_c_path_drop(name, path)
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, path, -fd, error) }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     owner: jet_rt_alloc(I64{16}, I64{8})
     sync_store(owner, I64{1})
     rt_text_store(wrapping(owner + I64{8}), jet_rt_string_clone(path))
@@ -772,7 +772,7 @@ files_texts_sort: fn(data: I64, count: I64) {
 }
 
 #Export(c) jet_rt_handle_clone_jet_temp_file_owner: fn(owner: I64) -> I64 {
-    _ := sync_add(owner, I64{1})
+    ^_: sync_add(owner, I64{1})
     owner
 }
 
@@ -786,7 +786,7 @@ files_texts_sort: fn(data: I64, count: I64) {
     path: rt_text_word(wrapping(owner + I64{8}))
     if !walk_has_nul(rt_text_data(path), rt_text_len(path)) {
         name: fd_c_path(path)
-        _ := host_call(I64{87}, name, I64{0}, I64{0})
+        ^_: host_call(I64{87}, name, I64{0}, I64{0})
         fd_c_path_drop(name, path)
     }
     jet_rt_string_drop(path)
@@ -845,13 +845,13 @@ files_texts_sort: fn(data: I64, count: I64) {
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
     name: fd_c_path(path)
-    fd := I64{-4}
+    ^fd: I64{-4}
     loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, I64{524353}, I64{438})
     fd_c_path_drop(name, path)
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, path, -fd, error) }
     sought: host_call(I64{8}, fd, position, I64{0})
     if (sought < I64{0}) {
-        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        ^_: host_call(I64{3}, fd, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_WRITE, path, -sought, error)
     }
     temporary: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
@@ -859,7 +859,7 @@ files_texts_sort: fn(data: I64, count: I64) {
     if temporary -> net_copy_packed(data, length, packed)
     failure: host_write_all(fd, packed, length)
     if temporary -> jet_rt_free(packed, length, I64{8})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if (failure == HOST_WRITE_ZERO) {
         return host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(path), host_write_zero_text(), error)
     }

@@ -38,10 +38,10 @@ kit_steps_terminal_session: fn(steps: [KitStep], label: String, joined: [String]
 // types the terminal's end-of-file character, as a terminal user ends input.
 // Partial terminal wiring such as `pty: stdout,stderr` stays refused.
 kit_steps_terminal_line: fn(plan: KitPlan, key: String, original: String, joined: [String]) -> KitPlan Err! {
-    result := plan
+    ^result: plan
     i: result.steps.len() - 1
     tokens: kit_steps_tokens(kit_steps_body(original)) ?? return Err("invalid process wiring")
-    words := [String]{}
+    ^words: [String]{}
     loop token in tokens -> words.push(token.text)
     if key == "pty" {
         if words[0] != "true" {
@@ -57,7 +57,7 @@ kit_steps_terminal_line: fn(plan: KitPlan, key: String, original: String, joined
     }
     if result.steps[i].refused_capability != "" -> return Ok(result)
     if result.steps[i].action == "" {
-        terminal := result.steps[i].terminal ?? return Err("{key} needs a terminal step")
+        ^terminal: result.steps[i].terminal ?? return Err("{key} needs a terminal step")
         if key == "pty-resize" {
             size: kit_steps_terminal_dimensions(words[0]) ?? return Err("invalid terminal size")
             at: kit_steps_offset_ns(words[2]) ?? return Err("invalid terminal event time")
@@ -88,7 +88,7 @@ kit_steps_terminal_line: fn(plan: KitPlan, key: String, original: String, joined
 
 kit_steps_wiring_valid: fn(key: String, original: String) -> Bool {
     tokens: kit_steps_tokens(kit_steps_body(original)) ?? return false
-    words := [String]{}
+    ^words: [String]{}
     loop token in tokens -> words.push(token.text)
     if key == "stderr-to-stdout" -> return words == ["true"]
     if key == "pty" {
@@ -114,7 +114,7 @@ kit_steps_wiring_valid: fn(key: String, original: String) -> Bool {
 // the original observes either. File wiring is observable only after completion;
 // a live observation requires process-file-fd instead.
 kit_steps_wiring_finish: fn(step: KitStep, context: KitStepCtx, state: KitStepState) -> KitStepResult {
-    result := state
+    ^result: state
     loop stream in ["stdout", "stderr"] {
         target: if stream == "stdout" -> step.stdout_target else -> step.stderr_target
         if target == "" || target == "null" -> next
@@ -138,8 +138,8 @@ kit_steps_stream_nulled: fn(selector: String, output: Bool, errors: Bool) -> Boo
 // Joining inherits the opener's wiring. Check at the plan boundary so neither
 // JSON/capture selectors nor a later recv can bypass the stream assertion rule.
 kit_steps_wiring_error: fn(plan: KitPlan) -> String {
-    output := false
-    errors := false
+    ^output: false
+    ^errors: false
     loop step in plan.steps {
         if step.action == "recv" || step.action == "send" {
             loop opened in plan.steps {
@@ -153,7 +153,7 @@ kit_steps_wiring_error: fn(plan: KitPlan) -> String {
             }
         }
         if step.action == "capture" {
-            selector := step.argv[1]
+            ^selector: step.argv[1]
             if selector == "=" || selector == "+=" {
                 selector = if step.argv[2] == "text" || step.argv[2] == "lines" -> step.argv[3] else -> ""
             }
@@ -161,8 +161,8 @@ kit_steps_wiring_error: fn(plan: KitPlan) -> String {
                 return "capture on a nulled stream"
             }
         } else if step.action == "for" && step.argv[1] == "line" {
-            loop_output := output
-            loop_errors := errors
+            ^loop_output: output
+            ^loop_errors: errors
             if step.argv.len() == 7 {
                 loop opened in plan.steps {
                     if opened.label == step.argv[4] && kit_expect_named(["", "poll", "session", "spawn"], opened.action) {

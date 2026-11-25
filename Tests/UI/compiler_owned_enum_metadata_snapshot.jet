@@ -32,8 +32,8 @@ metadata_field_name: fn(emitter: ^MetadataEmitter, name: String) -> String Never
 }
 
 render_metadata: fn(emitter: ^MetadataEmitter) -> [String] Never! {
-    definition := emitter.definitions[0].copy()
-    names := [String]{}
+    ^definition: emitter.definitions[0].copy()
+    ^names: [String]{}
     if definition.kind == .Enum(variants) {
         loop variant in variants {
             if variant.payload == .Named(fields) {
@@ -45,7 +45,7 @@ render_metadata: fn(emitter: ^MetadataEmitter) -> [String] Never! {
 }
 
 run: fn() Never! {
-    emitter := MetadataEmitter{
+    ^emitter: MetadataEmitter{
         definitions: [MetadataDefinition]{
             MetadataDefinition{
                 _key: "Choice",
@@ -61,7 +61,7 @@ run: fn() Never! {
         },
         rendered: 0,
     }
-    names := render_metadata(emitter)
+    ^names: render_metadata(emitter)
     assert(names == [String]{"first", "second"})
     assert(emitter.rendered == 2)
     assert(emitter.definitions.len() == 1)

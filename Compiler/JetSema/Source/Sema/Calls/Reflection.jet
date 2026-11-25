@@ -37,12 +37,12 @@ sema_call_reflection_leaf_name: fn(name: String) -> String Never! { symbol_key_l
 // the capture can't hold is named first, since it says more than the whole
 // value's copy gate (a secret-bearing field also makes its value one owner's).
 sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck) -> [TExpr]? {
-    args := [TExpr]{}
+    ^args: [TExpr]{}
     sema_call_reflection_names(ty, span, check, args)
     if !sema_call_reflection_level_args(ty, span, value_span, check, [String]{}, args) {
         return None
     }
-    held := ""
+    ^held: ""
     facts: sema_copy_classify(ty, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.environment.generic_params, false)
     if facts.holds_resource -> held = "resource state, which has one owner"
     if facts.dynamic_loan -> held = "a borrowed loan, which lives only as long as its lender"
@@ -83,8 +83,8 @@ sema_call_reflection_names: fn(ty: Type, span: Span, check: SemaBodyCheck, args:
 sema_call_reflection_declared_impls: fn(bounds: [String], span: Span, program: SemaProgramTables, args: ^[TExpr]) -> Int {
     graph: program.registration_graph
     holders: sema_call_reflection_trait_holders(graph, bounds) ?? return 0
-    rows := [SemaRegistrationRowRef]{}
-    builtins := 0
+    ^rows: [SemaRegistrationRowRef]{}
+    ^builtins: 0
     loop reference in holders.impls {
         target: graph.modules[reference.module_index].impls[reference.row].target_type
         if sema_type_resolve_nominal_row_at(graph, target, reference.module_index) == .Val(row) {
@@ -119,7 +119,7 @@ sema_call_reflection_level_args: fn(ty: Type, span: Span, value_span: Span, chec
         args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
         return true
     }
-    inner := [String]{path}
+    ^inner: [String]{path}
     loop name in open -> inner.push(name.copy())
     if !sema_call_reflection_field_args(ty, span, value_span, check, inner, args) -> return false
     sema_call_reflection_case_args(ty, path, span, value_span, check, inner, args)
@@ -135,7 +135,7 @@ sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, chec
     count_at: args.len()
     args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
     definition: sema_http_route_find_struct(check, ty, check.environment.module_identity) ?? return true
-    count := 0
+    ^count: 0
     loop field in definition.fields {
         if field.computed != None -> next
         field_ty: sema_shared_access_field_type(ty, field.name, check.environment.*, check.program.*, check.scopes) ?? {
@@ -177,7 +177,7 @@ sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_spa
         loop case in cases {
             args.push(sema_call_reflection_text(case.name, span))
             args.push(sema_call_reflection_text("{path}.{case.name}", span))
-            members := 0
+            ^members: 0
             if case.payload != None -> members = 1
             args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: members, width: None}, span))
             if case.payload == .Val(member_ty) {
@@ -395,7 +395,9 @@ sema_call_reflection_named_displayable: fn(name: String, ty: Type, environment: 
     if sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" {
         return true
     }
-    if sema_call_reflection_synthetic_printable(name) || sema_call_reflection_runtime_shown(name, ty, environment, program) -> return true
+    if sema_call_reflection_synthetic_printable(name) || sema_call_reflection_runtime_shown(name, ty, environment, program) {
+        return true
+    }
     if sema_call_reflection_bound(ty, "Display", environment, program) || sema_call_reflection_bound(ty, "Printable", environment, program) {
         return true
     }
@@ -519,7 +521,7 @@ sema_call_reflection_trait_holders: fn(graph: SemaRegistrationGraph, bounds: [St
     // Snapshot: a lone program registers no impl or nominal to hold the trait.
     if graph.mode == .Snapshot -> return None
     leaf: sema_call_reflection_leaf_name(bounds[0])
-    holders := SemaCallTraitHolders{impls: [SemaRegistrationRowRef]{}, nominals: [SemaRegistrationRowRef]{}}
+    ^holders: SemaCallTraitHolders{impls: [SemaRegistrationRowRef]{}, nominals: [SemaRegistrationRowRef]{}}
     if sema_registration_impl_trait_name_slot(graph, leaf) == .Val(slot) {
         loop reference in graph.impl_trait_name_buckets[slot] {
             holders.impls.push(SemaRegistrationRowRef{module_index: reference.module_index, row: reference.row})
@@ -566,7 +568,7 @@ sema_call_reflection_cases_refusal: fn(owner: Symbol, written: String, args: [Ty
         if definition.type_params.len() > 0 && args.len() != definition.type_params.len() {
             return Val(sema_error("E0904", span, "`{written}` is generic, so `{written}.reflect()` has no payload types to list its cases with", "a case catalog describes each payload at one type, and a generic enum named without its type arguments is a family of types", "name one type per parameter, as `{written}<…>.reflect()`"))
         }
-        visited := [SemaRegistrationRowRef]{}
+        ^visited: [SemaRegistrationRowRef]{}
         caller: sema_type_module_row(graph, check.environment.module_identity)
         loop arg in args {
             refusal: sema_call_reflection_cases_reach(graph, arg, caller, [TypeParam]{}, written, span, check, visited)
@@ -784,7 +786,7 @@ sema_call_reflection_marker_lookup: fn(
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     written: sema_call_reflection_marker_name(args[0].expr) ?? ""
-    declaration := MarkerDecl?{None}
+    ^declaration: MarkerDecl?{None}
     graph: check.program.registration_graph
     if written != "" {
         declaration = sema_marker_module_resolve(graph, check.environment.module_identity, written).declaration
@@ -792,7 +794,7 @@ sema_call_reflection_marker_lookup: fn(
     // A Prelude marker is no type in the program: its record is a compiler
     // value the evaluator holds, and keeps only the defaults that check where
     // the lookup is written.
-    prelude := false
+    ^prelude: false
     if declaration == None && written != "" && !written.contains(".") {
         declaration = sema_marker_module_prelude_declaration(written)
         prelude = declaration != None
@@ -805,12 +807,12 @@ sema_call_reflection_marker_lookup: fn(
     if !sema_effect_record_intrinsic_effects(check, "{owner}.marker", span, [EffectRowEntry]{}) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    host_args := [TExpr]{sema_call_reflection_text(marker.name, span)}
+    ^host_args: [TExpr]{sema_call_reflection_text(marker.name, span)}
     loop param in marker.params {
         if param.name.starts_with("$") -> next
         default: param.value ?? next
         if prelude {
-            refusals := [Diagnostic]{}
+            ^refusals: [Diagnostic]{}
             sema_body_check_swap_diagnostics(check, refusals)
             refused_checked: sema_check_expression(default, None, check)
             sema_body_check_swap_diagnostics(check, refusals)
@@ -825,7 +827,7 @@ sema_call_reflection_marker_lookup: fn(
         host_args.push(checked)
     }
     marker_type: if prelude -> Type.Named{name: IR_PRELUDE_MARKER_RECORD} else -> sema_call_resolved_type(Type.Named{name: written}, check.environment.*, check.program.*)
-    value := sema_tree_node(Type.Option{inner: marker_type}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "marker", args: host_args}}, span)
+    ^value: sema_tree_node(Type.Option{inner: marker_type}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "marker", args: host_args}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
@@ -846,21 +848,21 @@ sema_call_try_reflection_metadata_method: fn(
         return sema_call_reflection_marker_lookup(owner, receiver, receiver_value, args, span, expected, check)
     }
     if args.len() != 1 {
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+        loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
         if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         check.diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects one String argument, got {args.len()}", "metadata predicates inspect one trait or method name", "call `.{method}(name)` with one String"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    params := [SemaCallParam]{SemaCallParam{label: "name", name: "name", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
-    checked_args := args
+    ^params: [SemaCallParam]{SemaCallParam{label: "name", name: "name", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+    ^checked_args: args
     binding: sema_call_bind_args("{owner}.{method}", params, checked_args, span, check.diagnostics) ?? {
-        loop argument in checked_args -> _ := sema_check_expression(argument.expr, None, check)
+        loop argument in checked_args -> ^_: sema_check_expression(argument.expr, None, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     typed: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, checked_args, check, span, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    ownership := sema_ownership_check_method_call(check, "{owner}.{method}", receiver, AccessConvention.Read, params, checked_args, span)
+    ^ownership: sema_ownership_check_method_call(check, "{owner}.{method}", receiver, AccessConvention.Read, params, checked_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -868,7 +870,7 @@ sema_call_try_reflection_metadata_method: fn(
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type: sema_call_reflection_method_return(owner, method, [Type]{Type.String}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed.values}}, span)
+    ^value: sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed.values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
@@ -901,7 +903,7 @@ sema_call_try_reflection_handle_method: fn(
     expected: Type?,
     check: ^SemaBodyCheck,
 ) -> SemaMethodSpecialCheck {
-    metadata := sema_call_try_reflection_metadata_method(receiver, receiver_value, method, args, span, expected, check)
+    ^metadata: sema_call_try_reflection_metadata_method(receiver, receiver_value, method, args, span, expected, check)
     if metadata.handled -> return metadata
     owner: if receiver_value.ty == {
         .Named(name) -> name
@@ -913,11 +915,11 @@ sema_call_try_reflection_handle_method: fn(
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() != 0 {
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+        loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
         check.diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` takes no arguments, got {args.len()}", "reflection handle accessors only inspect their existing value", "call `.{method}()` with no arguments"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type: sema_call_reflection_method_return(owner, method, [Type]{}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
+    ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }

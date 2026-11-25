@@ -64,21 +64,21 @@ jens_offenders: fn(path: String, source: String, offenders: ^[String]) {
 
 #Test("package_and_environment_paths_have_no_installed_nix_shellout") {
     guards_enter_root()
-    sources := [String]{}
+    ^sources: [String]{}
     loop root in JENS_ROOTS {
         assert(jens_files.exists(root), "the scanned successor {root} must exist")
         before: sources.len()
         jens_walk(root, sources)
         assert(sources.len() > before, "{root} holds no Jet source to scan")
     }
-    offenders := [String]{}
+    ^offenders: [String]{}
     loop path in sources {
         jens_offenders(path, jens_files.read(path) ?? panic("read {path}: {err}"), offenders)
     }
     assert_eq(offenders.join("\n"), "")
     // The needles see the Jet spellings: a seeded spawn and a seeded PATH lookup
     // each report once.
-    seeded := [String]{}
+    ^seeded: [String]{}
     jens_offenders("synthetic.jet", "receipt: process.cmd([String]{{\"nix\", \"build\"}}).run()\nfound: files.which(\"wget\")\n", seeded)
     assert_eq(seeded.len(), 2)
 }

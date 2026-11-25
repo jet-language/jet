@@ -4,7 +4,7 @@ use core.encoding.[Dyn]
 consume: fn(value: ^^[Int]) -[]> Int { value.len() }
 
 move_then_return: fn() -[]> Int {
-    out := [1, 2]
+    ^out: [1, 2]
     loop {
         count: consume(out)
         return count
@@ -12,8 +12,8 @@ move_then_return: fn() -[]> Int {
 }
 
 move_then_break: fn() -[]> Int {
-    out := [1, 2, 3]
-    count := 0
+    ^out: [1, 2, 3]
+    ^count: 0
     loop {
         count = consume(out)
         break
@@ -22,8 +22,8 @@ move_then_break: fn() -[]> Int {
 }
 
 move_then_reset: fn() -[]> Int {
-    current := [1]
-    total := 0
+    ^current: [1]
+    ^total: 0
     loop i in 0..<3 {
         total += consume(current)
         current = [1, 2]
@@ -38,7 +38,7 @@ Tree: enum {
 }
 
 owned_payload: fn(tree: ^^Tree) -[]> Int {
-    owned := tree.move()
+    ^owned: tree.move()
     if owned.move() == {
         .Object(entries) -> return consume(entries)
         .Text(text) -> return text.count_bytes()
@@ -46,7 +46,7 @@ owned_payload: fn(tree: ^^Tree) -[]> Int {
 }
 
 owned_dyn_payload: fn(tree: ^^Dyn) -[]> Int {
-    owned := tree.move()
+    ^owned: tree.move()
     if owned.move() == {
         .Text(text) -> {
             rebuilt: Dyn.Text(text)

@@ -6,7 +6,7 @@ use {
 
 typed_goal_expect: fn(expected: Type?, wanted: Type, card: String, candidates: [String]) {
     span: Span{start: 3, end: 7}
-    context := sema_check_context_init()
+    ^context: sema_check_context_init()
     goal: sema_expression_todo(expected, span, 4, candidates, context) ?? panic("goal was not checked")
     if goal.ty != wanted || goal.span != span -> panic("typed goal lost its type or source")
     if goal.kind != (TExprKind.Flat{index: 0}) || context.arena.tree.nodes[0].kind != (NodeKind.Never{reason: "todo", line: 4}) {

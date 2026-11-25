@@ -74,7 +74,7 @@ OverlayStage: struct {
 
     // Keys in path order.
     sorted_keys: fn(self) -> [String] Never! {
-        keys := [String]{}
+        ^keys: [String]{}
         loop entry in self.entries -> keys.push(entry.key)
         keys.sort()
         keys
@@ -105,7 +105,7 @@ OverlayAuthority: struct {
         }
         path: files.join(self.resolver.root, relative)
         parent_handle: self.resolver.directory_handle(parent)
-        handle := if parent_handle.open(name) == {
+        ^handle: if parent_handle.open(name) == {
             .Ok(file) -> file
             .Err(error) -> {
                 if env_overlay_is_symlink(parent_handle, name) {
@@ -119,7 +119,7 @@ OverlayAuthority: struct {
             return Err(OverlayError.Patch("{label} `{path}` must be a regular file"))
         }
         identity: env_overlay_identity(info) ?? return Err(OverlayError.Patch("{label} `{path}` {ENV_OVERLAY_HARD_LINKED}"))
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         loop {
             chunk: handle.read_bytes(65536) ?? return Err(OverlayError.IO("could not read {label} `{path}`: {err}"))
             if chunk.len() == 0 -> break
@@ -146,8 +146,8 @@ env_overlay_is_symlink: fn(parent: Directory, name: String) -[FS]> Bool Never! {
 env_apply_overlay_patches: fn(workspace_root: String, source_root: String, package: PackageOverride) -[FS, Env, Rand]> [PatchApplication] OverlayError! {
     workspace: OverlayAuthority.open(workspace_root, "workspace root")
     source: OverlayAuthority.open(source_root, "source root")
-    stage := OverlayStage.new()
-    applied := [PatchApplication]{}
+    ^stage: OverlayStage.new()
+    ^applied: [PatchApplication]{}
     loop patch in package.patches {
         patch_file: workspace.open_file(patch, "patch")
         text: String.from_bytes(patch_file.bytes) ?? return Err(OverlayError.IO("could not read patch `{patch_file.path}`: patch is not valid UTF-8"))
@@ -161,7 +161,7 @@ env_apply_overlay_patches: fn(workspace_root: String, source_root: String, packa
 // `str::lines`: `\n`-separated lines without a final empty line, each with a
 // trailing `\r` removed.
 env_overlay_lines: fn(text: String) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     parts: text.split("\n").to_list()
     loop index in 0..<parts.len() {
         if index == parts.len() - 1 && parts[index] == "" -> break
@@ -178,9 +178,9 @@ env_overlay_strip_carriage_return: fn(line: String) -> String Never! {
 
 // Stage one unified diff against `source`; repeated files compose in order.
 env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text: String, stage: ^OverlayStage) -[FS, Env]> [PatchApplication] OverlayError! {
-    applications := [PatchApplication]{}
+    ^applications: [PatchApplication]{}
     lines: env_overlay_lines(patch_text)
-    at := 0
+    ^at: 0
     loop at < lines.len() {
         line: lines[at]
         at += 1
@@ -206,18 +206,18 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
         }
         original: stage.entries[relative].output
         text: String.from_bytes(original) ?? return Err(OverlayError.Patch("patched file `{target}` is not valid UTF-8"))
-        file_lines := env_overlay_lines(text)
+        ^file_lines: env_overlay_lines(text)
         trailing_newline: text.ends_with("\n")
-        added := 0
-        removed := 0
-        had_hunk := false
+        ^added: 0
+        ^removed: 0
+        ^had_hunk: false
         loop at < lines.len() && lines[at].starts_with("@@ ") {
             had_hunk = true
             range: env_overlay_parse_hunk_range(lines[at])
             at += 1
-            index := if range.old_start > 0 -> range.old_start - 1 else -> 0
-            old_seen := 0
-            new_seen := 0
+            ^index: if range.old_start > 0 -> range.old_start - 1 else -> 0
+            ^old_seen: 0
+            ^new_seen: 0
             loop !(old_seen == range.old_count && new_seen == range.new_count) {
                 if at >= lines.len() {
                     return Err(OverlayError.Patch("patch hunk body ended unexpectedly"))
@@ -258,7 +258,7 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
             }
         }
         if !had_hunk -> return Err(OverlayError.Patch("patch for `{target}` has no hunks"))
-        output := file_lines.join("\n")
+        ^output: file_lines.join("\n")
         if trailing_newline -> output = "{output}\n"
         stage.entries[relative].output = output.bytes()
         applications.push(PatchApplication{path: target, added: added, removed: removed})
@@ -275,7 +275,7 @@ env_overlay_safe_relative_path: fn(raw: String, label: String) -> String Overlay
         return Err(refusal)
     }
     parts: raw.split("/").to_list()
-    names := [String]{}
+    ^names: [String]{}
     loop index in 0..<parts.len() {
         part: parts[index]
         if part == ".." || (index == 0 && part == ".") -> return Err(refusal)
@@ -306,14 +306,14 @@ env_overlay_has_control: fn(raw: String) -> Bool Never! {
 env_overlay_commit_staged: fn(source: OverlayAuthority, stage: OverlayStage, after_commit: fn(String) -[FS]> Never!) -[FS, Env, Rand]> OverlayError! {
     root: source.resolver.checked_directory(".") ?? return Err(OverlayError.IO("could not validate source authority: {err.message()}"))
     root_handle: source.resolver.directory_handle(root)
-    committed := [String]{}
+    ^committed: [String]{}
     keys: stage.sorted_keys()
     loop key in keys {
         if stage.entries[key].output == stage.entries[key].original -> next
         parent: source.resolver.directory_handle(stage.entries[key].parent)
         if env_overlay_write_atomically(stage.entries[key], root_handle, parent, stage.entries[key].output, true) == .Err(error) {
-            rollback_errors := [String]{}
-            at := committed.len() - 1
+            ^rollback_errors: [String]{}
+            ^at: committed.len() - 1
             loop at >= 0 {
                 done_key: committed[at]
                 rollback_parent: source.resolver.directory_handle(stage.entries[done_key].parent)
@@ -365,11 +365,11 @@ env_overlay_write_atomically: fn(entry: OverlayStagedFile, root_handle: Director
             return Err(env_overlay_io("source root authority is no longer a directory"))
         }
     }
-    collision := IOError?{None}
+    ^collision: IOError?{None}
     loop _ in 0..<OVERLAY_TEMP_ATTEMPTS {
         token: random.token_hex(8) ?? return Err(env_overlay_io("could not draw an overlay temporary name"))
         temporary: ".{entry.name}.jet-overlay-{sys.pid()}-{token}"
-        file := if parent.create(temporary, if_exists: .Refuse, mode: Val(OVERLAY_TEMP_MODE)) == {
+        ^file: if parent.create(temporary, if_exists: .Refuse, mode: Val(OVERLAY_TEMP_MODE)) == {
             .Ok(created) -> created
             .Err(error) -> {
                 if error == {
@@ -412,8 +412,8 @@ env_overlay_publish: fn(entry: OverlayStagedFile, parent: Directory, file: ^File
 
 // `@@ -a,b +c,d @@` -> (old start, old count, new count).
 env_overlay_parse_hunk_range: fn(header: String) -> {old_start: Int, old_count: Int, new_count: Int} OverlayError! {
-    old_part := String?{None}
-    new_part := String?{None}
+    ^old_part: String?{None}
+    ^new_part: String?{None}
     loop word in env_overlay_text.split_ws(header) {
         if old_part == None && word.starts_with("-") -> old_part = Val(word)
         if new_part == None && word.starts_with("+") -> new_part = Val(word)
@@ -427,7 +427,7 @@ env_overlay_parse_hunk_range: fn(header: String) -> {old_start: Int, old_count: 
 
 env_overlay_parse_hunk_side: fn(raw: String, prefix: String) -> {start: Int, count: Int} OverlayError! {
     bad: OverlayError.Patch("patch hunk has bad range")
-    trimmed := raw
+    ^trimmed: raw
     loop trimmed.starts_with(prefix) -> trimmed = trimmed.removeprefix(prefix)
     parts: trimmed.split(",").to_list()
     if parts.len() > 2 -> return Err(bad)
@@ -450,7 +450,7 @@ env_overlay_parse_count: fn(text: String) -> Int? Never! {
 // The first word of a `+++` path with any `a/` then `b/` prefixes removed.
 env_overlay_normalize_patch_path: fn(raw: String) -> String Never! {
     words: env_overlay_text.split_ws(raw)
-    path := if words.len() > 0 -> words[0] else -> raw
+    ^path: if words.len() > 0 -> words[0] else -> raw
     loop path.starts_with("a/") -> path = path.removeprefix("a/")
     loop path.starts_with("b/") -> path = path.removeprefix("b/")
     path

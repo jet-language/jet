@@ -343,7 +343,7 @@ Ran: struct {
 
 // `argv` run in `dir`, with GIT_INDEX_FILE set to `index` unless it is "".
 run_in: fn(dir: String, argv: [String], index: String) -[Exec, Time.Wait]> Ran Never! {
-    spec := process.cmd(argv).cwd(dir).output_limit(268435456)
+    ^spec: process.cmd(argv).cwd(dir).output_limit(268435456)
     if index != "" -> spec = spec.env("GIT_INDEX_FILE", index)
     receipt: spec.run() ?? return Ran{code: 127, output: "", errors: "{argv[0]}: {err}"}
     code: if receipt.signal == .Val(_) -> 128 else -> receipt.code
@@ -351,13 +351,13 @@ run_in: fn(dir: String, argv: [String], index: String) -[Exec, Time.Wait]> Ran N
 }
 
 git: fn(dir: String, args: [String]) -[Exec, Time.Wait]> Ran Never! {
-    argv := [String]{"git"}
+    ^argv: [String]{"git"}
     argv.extend(args.copy())
     run_in(dir, argv, "")
 }
 
 git_index: fn(dir: String, index: String, args: [String]) -[Exec, Time.Wait]> Ran Never! {
-    argv := [String]{"git"}
+    ^argv: [String]{"git"}
     argv.extend(args.copy())
     run_in(dir, argv, index)
 }
@@ -394,9 +394,7 @@ root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
     if value != "" -> value.copy() else -> fallback.copy()
 }
 
-state_root: fn() -[Env, FS]> String Never! {
-    roots.value("JET_STATE_ROOT")
-}
+state_root: fn() -[Env, FS]> String Never! { roots.value("JET_STATE_ROOT") }
 
 scratch_root: fn() -[Env, FS]> String Never! { roots.value("JET_SCRATCH_ROOT") }
 
@@ -418,10 +416,10 @@ absolute: fn(path: String) -[FS, Env]> String Never! { files.absolute(path) ?? p
 // and both sides of a rename.
 touched_paths: fn(dir: String, patch: String) -[Exec, Time.Wait]> [String] Never! {
     stat: git(dir, [String]{"apply", "--numstat", "-z", patch})
-    paths := [String]{}
+    ^paths: [String]{}
     if stat.code != 0 -> return paths
     fields: nul_fields(stat.output)
-    index := 0
+    ^index: 0
     loop {
         if index >= fields.len() -> break
         field: fields[index]
@@ -446,8 +444,8 @@ touched_paths: fn(dir: String, patch: String) -[Exec, Time.Wait]> [String] Never
 }
 
 nul_fields: fn(text: String) -> [String] Never! {
-    fields := [String]{}
-    current := [U8]{}
+    ^fields: [String]{}
+    ^current: [U8]{}
     loop byte in text.bytes() {
         if (Int{byte}) == 0 {
             fields.push(String.from_bytes_lossy(current))
@@ -481,9 +479,9 @@ LandError: struct {
 }
 
 land_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
-    copy_dir := ""
-    positional := [String]{}
-    index := 0
+    ^copy_dir: ""
+    ^positional: [String]{}
+    ^index: 0
     loop {
         if index >= args.len() -> break
         arg: args[index]
@@ -497,7 +495,7 @@ land_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         positional.push(arg.copy())
     }
     if positional.len() == 0 || positional.len() % 2 != 0 -> usage()
-    pairs := [Pair]{}
+    ^pairs: [Pair]{}
     loop at in 0..<(positional.len() /% 2) {
         patch: absolute(positional[at * 2])
         message: absolute(positional[at * 2 + 1])
@@ -549,8 +547,8 @@ land: fn(dir: String, pairs: [Pair]) -[Exec, Env, FS, IO, Time.Wait]> Int Never!
         return 3
     }
     pre: git(dir, [String]{"rev-parse", "--verify", "HEAD"}).output.trim()
-    applied := [String]{}
-    touched := [String]{}
+    ^applied: [String]{}
+    ^touched: [String]{}
     loop pair in pairs {
         name: files.basename(pair.patch)
         touched.extend(touched_paths(dir, pair.patch))
@@ -601,8 +599,8 @@ revert: fn(dir: String, applied: [String]) -[Exec, IO, Time.Wait]> Never! {
 // script-pairing guard alone. Error rows are shown as the check prints them.
 check: fn(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool Never! {
     jet: jet_binary()
-    compiler := false
-    targets := [String]{}
+    ^compiler: false
+    ^targets: [String]{}
     loop path in touched {
         if compiler_input(path) -> compiler = true
         if path.ends_with(".jet") && files.basename(path) != "package.jet" && files.exists(files.join(dir, path)) {
@@ -623,9 +621,9 @@ check: fn(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool 
         if receipt.errors.trim() != "" -> term.eprint(receipt.errors.trim())
         return false
     }
-    clean := true
+    ^clean: true
     loop target in targets {
-        argv := [String]{jet.copy(), "Tools/Agent/LaneCheck.jet"}
+        ^argv: [String]{jet.copy(), "Tools/Agent/LaneCheck.jet"}
         if target != "" -> argv.push(target.copy())
         label: if target == "" -> "the compiler" else -> target.copy()
         receipt: process.cmd(argv).cwd(dir).env("JET", jet).env("JET_TOOLCHAIN_ROOT", dir).output_limit(268435456).run() ?? {
@@ -650,9 +648,9 @@ commit_stack: fn(dir: String, pre: String, pairs: [Pair]) -[Exec, Env, FS, Time.
     index_path: git(dir, [String]{"rev-parse", "--git-path", "land-index"}).output.trim()
     index: if index_path.starts_with("/") -> index_path.copy() else -> files.join(dir, index_path)
     files.remove(index) ?? ()
-    tip := pre.copy()
-    landed := [String]{}
-    failure := ""
+    ^tip: pre.copy()
+    ^landed: [String]{}
+    ^failure: ""
     read: git_index(dir, index, [String]{"read-tree", pre})
     if read.code != 0 -> failure = "read-tree of {pre.slice(0..<10)} failed: {first_line(read)}"
     loop pair in pairs {
@@ -699,7 +697,7 @@ commit_stack: fn(dir: String, pre: String, pairs: [Pair]) -[Exec, Env, FS, Time.
 queue_main: fn(args: [String]) -[Exec, Env, FS, IO, Time]> Int Never! {
     if args.len() < 2 -> usage()
     lane: args[0]
-    bases := [String]{}
+    ^bases: [String]{}
     loop base in args[1..<args.len()] -> bases.push(absolute(base))
     loop base in bases {
         loop ext in JOB_FILES {
@@ -730,11 +728,11 @@ queue_main: fn(args: [String]) -[Exec, Env, FS, IO, Time]> Int Never! {
         term.eprint("NOT QUEUED: cannot create {queue}: {err}")
         return 2
     }
-    start := time.now().to_timestamp()
+    ^start: time.now().to_timestamp()
     loop at in 0..<bases.len() {
         base: bases[at]
         suffix: if bases.len() > 1 -> "{at + 1}" else -> ""
-        name := "{start + at}-{lane}{suffix}"
+        ^name: "{start + at}-{lane}{suffix}"
         // Never overwrite a queued or taken job with the same second-based name.
         loop {
             if !files.exists("{queue}/{name}.job") && !files.exists("{queue}/taken/{name}.job") {
@@ -743,7 +741,7 @@ queue_main: fn(args: [String]) -[Exec, Env, FS, IO, Time]> Int Never! {
             start += 1
             name = "{start + at}-{lane}{suffix}"
         }
-        writer := files.create("{queue}/{name}.job", if_exists: .Refuse) ?? {
+        ^writer: files.create("{queue}/{name}.job", if_exists: .Refuse) ?? {
             term.eprint("NOT QUEUED: cannot create {queue}/{name}.job: {err}")
             return 2
         }
@@ -760,7 +758,7 @@ queue_main: fn(args: [String]) -[Exec, Env, FS, IO, Time]> Int Never! {
 // Why a speed lane's stack may not be queued, "" when it may.
 pareto_refusal: fn(lane: String, bases: [String]) -[Env, FS]> String Never! {
     approved_file: process.env_nonempty("PARETO_APPROVED") ?? "{scratch_root()}/lanes/Main/pareto-approved.txt"
-    approved := false
+    ^approved: false
     if files.read(approved_file) == .Ok(text) {
         loop line in text.lines() {
             if line.partition("\t").head == lane -> approved = true
@@ -769,7 +767,7 @@ pareto_refusal: fn(lane: String, bases: [String]) -[Env, FS]> String Never! {
     loop base in bases {
         message: files.read("{base}.msg") ?? ""
         wall: tagged_seconds(message, "PARETO:")
-        stage := false
+        ^stage: false
         loop line in message.lines() {
             if line.starts_with("PARETO-STAGE:") && line.remove_prefix("PARETO-STAGE:").trim() != "" {
                 stage = true
@@ -792,7 +790,7 @@ tagged_seconds: fn(message: String, marker: String) -> Float? Never! {
     loop line in message.lines() {
         if !line.starts_with(marker) -> next
         rest: line.remove_prefix(marker).trim_start().remove_prefix("-")
-        digits := [U8]{}
+        ^digits: [U8]{}
         loop byte in rest.bytes() {
             code: Int{byte}
             if !((code >= 48 && code <= 57) || code == 46) -> break
@@ -822,7 +820,7 @@ stack_applies: fn(worktree: String, bases: [String]) -[Exec, Env, FS, IO, Time.W
     files.create_dir_all(scratch) ?? ()
     index: "{scratch}/stackidx.{sys.pid()}"
     files.remove(index) ?? ()
-    clean := true
+    ^clean: true
     read: git_index(worktree, index, [String]{"read-tree", "HEAD"})
     if read.code != 0 {
         print("FAIL read-tree of HEAD in {worktree}: {first_line(read)}")
@@ -849,13 +847,13 @@ stack_applies: fn(worktree: String, bases: [String]) -[Exec, Env, FS, IO, Time.W
 
 // The nonblank lines CompilerPackages.jet prints for `args` on `tree`.
 compiler_packages_run: fn(tree: String, args: [String]) -[Exec, Env, FS, Time.Wait]> [String] LandError! {
-    argv := [String]{"{seed_dir()}/jet", files.join(dev_worktree(), "Tools/Agent/CompilerPackages.jet"), "--root", tree}
+    ^argv: [String]{"{seed_dir()}/jet", files.join(dev_worktree(), "Tools/Agent/CompilerPackages.jet"), "--root", tree}
     argv.extend(args.copy())  // copy: the caller keeps its arguments
     ran: run_in(tree, argv, "")
     if ran.code != 0 {
         return Err(LandError{message: "Tools/Agent/CompilerPackages.jet {args[0]} on {tree} failed: {first_line(ran)}"})
     }
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in ran.output.lines() {
         if line != "" -> lines.push(line.copy())
     }
@@ -874,7 +872,7 @@ compiler_source_identity: fn(tree: String) -[Exec, Env, FS, Time.Wait]> String L
 // The repo-relative directories of the compiler's packages in `tree`.
 compiler_package_dirs: fn(tree: String) -[Exec, Env, FS, Time.Wait]> [String] LandError! {
     rows: compiler_packages_run(tree, [String]{"packages"}) ?? return Err(err)
-    dirs := [String]{}
+    ^dirs: [String]{}
     loop row in rows -> dirs.push(row.partition("\t").tail.copy())
     dirs
 }
@@ -882,7 +880,7 @@ compiler_package_dirs: fn(tree: String) -[Exec, Env, FS, Time.Wait]> [String] La
 // The repo-relative `paths` that are compiler inputs of `tree`.
 compiler_input_paths: fn(tree: String, paths: [String]) -[Exec, Env, FS, Time.Wait]> [String] LandError! {
     if paths.len() == 0 -> return Ok([String]{})
-    args := [String]{"select"}
+    ^args: [String]{"select"}
     args.extend(paths.copy())  // copy: the caller keeps its paths
     compiler_packages_run(tree, args)
 }
@@ -890,12 +888,12 @@ compiler_input_paths: fn(tree: String, paths: [String]) -[Exec, Env, FS, Time.Wa
 // The relative `path` from the repo-relative `directory`, normalized; ""
 // when it leaves the repository.
 repo_join: fn(directory: String, path: String) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in "{directory}/{path}".split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
             if parts.len() == 0 -> return ""
-            _ := parts.pop()
+            ^_: parts.pop()
             next
         }
         parts.push(part.copy())
@@ -923,9 +921,9 @@ Setting: struct {
 // `argv` as a heavy pass, capped at `memory` on the CPUs `cpus`, killed
 // after `seconds` (0: no limit), run as run_logged runs it.
 run_heavy: fn(dir: String, seconds: Int, memory: String, cpus: String, argv: [String], env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
-    out := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax={memory}", "-p", "MemorySwapMax=0", "nice", "-n", "19", "ionice", "-c3", "taskset", "-c", cpus, "prlimit", HEAVY_STACK, "--"}
+    ^out: [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax={memory}", "-p", "MemorySwapMax=0", "nice", "-n", "19", "ionice", "-c3", "taskset", "-c", cpus, "prlimit", HEAVY_STACK, "--"}
     out.extend(argv.copy())
-    spec := process.cmd(out)
+    ^spec: process.cmd(out)
     if seconds > 0 -> spec = spec.timeout(time.duration_seconds(seconds))
     run_spec(spec, out[0], dir, env, log)
 }
@@ -938,7 +936,7 @@ run_logged: fn(dir: String, argv: [String], env: [Setting], log: String) -[Exec,
 }
 
 run_spec: fn(base: ProcessSpec, program: String, dir: String, env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
-    spec := base.cwd(dir).output_limit(1073741824)
+    ^spec: base.cwd(dir).output_limit(1073741824)
     loop setting in env -> spec = spec.env(setting.name, setting.value)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? {
         files.write("{log}.out", "") ?? ()
@@ -975,7 +973,7 @@ compile_env: fn(identity: String, tree: String) -> [Setting] Never! {
 export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) -[Exec, FS, Time.Wait]> LandError! {
     files.create_dir_all(dir) ?? return Err(LandError{message: "`{dir}` cannot be created: {err}"})
     archive: "{dir}.tar"
-    argv := [String]{"archive", "--format=tar", "-o", archive, commit}
+    ^argv: [String]{"archive", "--format=tar", "-o", archive, commit}
     if paths.len() > 0 {
         argv.push("--")
         argv.extend(paths.copy())
@@ -1033,8 +1031,8 @@ read_identity: fn(dir: String) -[FS]> String Never! { (files.read("{dir}/IDENTIT
 // At most `limit` characters of `text`.
 clip: fn(text: String, limit: Int) -> String Never! {
     if text.count_bytes() <= limit -> return text.copy()
-    out := ""
-    taken := 0
+    ^out: ""
+    ^taken: 0
     loop scalar in text.chars() {
         if taken >= limit -> break
         out = "{out}{scalar}"
@@ -1156,7 +1154,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     }
     package_dirs: compiler_package_dirs(snap) ?? [String]{}
     seed_jet: "{compiler_dir}/jet"
-    runs := [PassRun]{}
+    ^runs: [PassRun]{}
 
     // Phase A. The build makes jet and, beside it, the runtime pack that jet
     // lowers, behind the dev shell (Tools/Agent/JetEnv.jet), at `basic` as
@@ -1224,7 +1222,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
 // A receipt's rows: each pass that ran but a REPORTED_PASSES one, and each
 // area, with its exit.
 receipt_rows: fn(runs: [PassRun]) -> [Dyn] Never! {
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     loop run in runs {
         if run.name != "" && !REPORTED_PASSES.contains(run.name) {
             out.push(Dyn.Object([String:Dyn]{"name": Dyn.Text(run.name.copy()), "rc": Dyn.Int(run.rc), "note": Dyn.Text(run.note.copy())}))
@@ -1237,19 +1235,19 @@ receipt_rows: fn(runs: [PassRun]) -> [Dyn] Never! {
 // does: every failing row (an exit that is not 0), then every RECEIPT_PASSES
 // pass with no row.
 receipt_rows_problem: fn(rows: [Dyn]) -> String Never! {
-    failing := [String]{}
-    names := [String]{}
+    ^failing: [String]{}
+    ^names: [String]{}
     loop row in rows {
         name: text_field(row, "name")
         names.push(name.copy())
         rc: int_field(row, "rc") ?? -1
         if rc != 0 -> failing.push("{name} rc={rc}")
     }
-    missing := [String]{}
+    ^missing: [String]{}
     loop pass in RECEIPT_PASSES {
         if !names.contains(pass) -> missing.push(pass.copy())
     }
-    parts := [String]{}
+    ^parts: [String]{}
     if failing.len() > 0 -> parts.push("lists failing rows: {failing.join(", ")}")
     if missing.len() > 0 -> parts.push("has no row for {missing.join(", ")}")
     parts.join("; ")
@@ -1269,7 +1267,7 @@ lane_check_pass: fn(snap: String, out: String, self_jet: String, identity: Strin
     env: [Setting]{Setting{name: "JET", value: self_jet.copy()}, Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: snap.copy()}}
     log: "{out}/lane-{name}"
     code: run_heavy(snap, 900, CORE_MEMORY, CENSUS_CPUS, [String]{self_jet, "Tools/Agent/LaneCheck.jet", "--check", name}, env, log)
-    lines := [String]{"{name} rc={code}"}
+    ^lines: [String]{"{name} rc={code}"}
     if code != 0 {
         lines.push(clip("{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}".trim(), 600))
     }
@@ -1283,7 +1281,7 @@ codegen_pass: fn(snap: String, out: String, self_jet: String, identity: String) 
     watch: time.start()
     env: [Setting]{Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: snap.copy()}}
     code: run_logged(snap, [String]{self_jet, "Tools/Perf/CodegenCeiling.jet", "--check", "--jet", self_jet}, env, "{out}/codegen")
-    lines := [String]{"codegen rc={code}"}
+    ^lines: [String]{"codegen rc={code}"}
     if code != 0 -> lines.push(clip(files.read("{out}/codegen.err") ?? "", 600))
     PassRun{name: "codegen", rc: code, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "", lines: lines}
 }
@@ -1311,7 +1309,7 @@ core_bodies_pass: fn(out: String, self_jet: String, identity: String) -[Exec, FS
     counts: core_bodies_counts(errors)
     loaded: counts.loaded > 0
     rc: if code == 0 && loaded -> 0 else -> 1
-    lines := [String]{"core-bodies rc={rc} bodies_loaded={counts.loaded} bodies_from_text={counts.from_text}"}
+    ^lines: [String]{"core-bodies rc={rc} bodies_loaded={counts.loaded} bodies_from_text={counts.from_text}"}
     if code != 0 -> lines.push(clip(errors, 600))
     if code == 0 && !loaded {
         lines.push("the built jet checked hello.jet loading no Core function checks from its Core bodies file")
@@ -1329,7 +1327,7 @@ CoreBodiesCounts: struct {
 // The counts in `--phase-counters` stderr `text`, read from its
 // `JET_PHASE_COUNTERS {"phase":"core","NAME":VALUE}` lines.
 core_bodies_counts: fn(text: String) -> CoreBodiesCounts Never! {
-    counts := CoreBodiesCounts{loaded: -1, from_text: -1}
+    ^counts: CoreBodiesCounts{loaded: -1, from_text: -1}
     mark: "JET_PHASE_COUNTERS "
     loop line in text.lines() {
         if !line.starts_with(mark) -> next
@@ -1343,7 +1341,7 @@ core_bodies_counts: fn(text: String) -> CoreBodiesCounts Never! {
 
 // The first `limit` of `lines`.
 first_of: fn(lines: [String], limit: Int) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop line in lines {
         if out.len() >= limit -> break
         out.push(line.copy())
@@ -1367,12 +1365,12 @@ census_rc: fn(runs: [PassRun]) -> Int Never! {
 compile_pass: fn(name: String, snap: String, out: String, memory: String, seconds: Int, argv: [String], identity: String, package_dirs: [String], limit: Int) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
     watch: time.start()
     report: "{out}/{name}-keep-going.tsv"
-    args := argv.copy()
+    ^args: argv.copy()
     args.push("--keep-going")
     args.push("--keep-going-report={report}")
     code: run_heavy(snap, seconds, memory, CENSUS_CPUS, args, compile_env(identity, snap), "{out}/{name}")
     rows: report_rows(report)
-    lines := [String]{"{name} rc={code} rows={rows}"}
+    ^lines: [String]{"{name} rc={code} rows={rows}"}
     lines.extend(first_of(census_rows(report, snap, package_dirs), limit))
     if code != 0 && rows == 0 -> lines.push(clip(files.read("{out}/{name}.err") ?? "", 600))
     PassRun{name: name.copy(), rc: if code == 0 && rows == 0 -> 0 else -> 1, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "cap {memory}", lines: lines}
@@ -1385,7 +1383,7 @@ build_pass: fn(passes: Passes, worktree: String, head: String, snap: String, out
     if !passes.build {
         return PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}}
     }
-    run := compile_pass("build", snap, out, BUILD_MEMORY, 1800, [String]{seed_jet, "{snap}/Tools/Agent/JetEnv.jet", seed_jet, "build", "-O1", "--threads", "12", "Compiler"}, identity, package_dirs, 21)
+    ^run: compile_pass("build", snap, out, BUILD_MEMORY, 1800, [String]{seed_jet, "{snap}/Tools/Agent/JetEnv.jet", seed_jet, "build", "-O1", "--threads", "12", "Compiler"}, identity, package_dirs, 21)
     if run.rc != 0 -> return run
     stale: stale_kept(worktree, head, snap, named)
     if stale.len() > 0 {
@@ -1407,7 +1405,7 @@ build_pass: fn(passes: Passes, worktree: String, head: String, snap: String, out
 // Every guard: GUARD_SHARDS shards of Tests/Guards and each GUARD_PACKAGES
 // package at once, run by `jet`, the compiler under test, as one pass.
 guards_by: fn(snap: String, out: String, jet: String, identity: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
-    shard_runs := [PassRun]{}
+    ^shard_runs: [PassRun]{}
     task.group guarding(limit: GUARD_SHARDS + GUARD_PACKAGES.len()) {
         shards: loop at in 0..<GUARD_SHARDS -> task guard_shard(snap, out, jet, identity, at + 1)
         packages: loop name in GUARD_PACKAGES -> task guard_package(snap, out, jet, identity, name)
@@ -1433,9 +1431,9 @@ guard_package: fn(snap: String, out: String, jet: String, identity: String, name
 // runs the compiler under test finds `jet` as $JET.
 guard_test: fn(snap: String, jet: String, identity: String, log: String, memory: String, args: ^^[String], note: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
     watch: time.start()
-    argv := [String]{jet, "{snap}/Tools/Agent/JetEnv.jet", jet, "test"}
+    ^argv: [String]{jet, "{snap}/Tools/Agent/JetEnv.jet", jet, "test"}
     argv.extend(args)
-    env := compile_env(identity, snap)
+    ^env: compile_env(identity, snap)
     env.push(Setting{name: "JET", value: jet.copy()})
     code: run_heavy(snap, 2400, memory, CENSUS_CPUS, argv, env, log)
     text: "{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}"
@@ -1447,8 +1445,8 @@ guard_test: fn(snap: String, jet: String, identity: String, log: String, memory:
 // finish (no `N passed, M failed` tally; the runner may add `, K skipped` and
 // further counts after it).
 guard_failures: fn(text: String) -> [String] Never! {
-    out := [String]{}
-    finished := false
+    ^out: [String]{}
+    ^finished: false
     loop line in text.lines() {
         if line.ends_with(": FAIL") -> out.push("  FAIL {line.removesuffix(": FAIL")}")
         tally: line.partition(" passed, ")
@@ -1463,9 +1461,9 @@ guard_failures: fn(text: String) -> [String] Never! {
 
 // The guard shards as one pass: the longest shard's seconds, every failure.
 guards_run: fn(shards: [PassRun]) -> PassRun Never! {
-    lines := [String]{}
-    seconds := 0
-    rc := 0
+    ^lines: [String]{}
+    ^seconds: 0
+    ^rc: 0
     loop shard in shards {
         if shard.seconds > seconds -> seconds = shard.seconds
         if shard.rc != 0 {
@@ -1474,7 +1472,7 @@ guards_run: fn(shards: [PassRun]) -> PassRun Never! {
             lines.extend(shard.lines.copy())
         }
     }
-    head := [String]{"guards rc={rc} shards={shards.len()}"}
+    ^head: [String]{"guards rc={rc} shards={shards.len()}"}
     head.extend(first_of(lines, 40))
     PassRun{name: "guards", rc: rc, seconds: seconds, peak: 0, note: "{shards.len()} shards", lines: head}
 }
@@ -1490,12 +1488,12 @@ core_tests_pass: fn(snap: String, out: String, seed_jet: String, self_jet: Strin
         return PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}}
     }
     watch: time.start()
-    known := [String]{}
+    ^known: [String]{}
     loop line in (files.read("{snap}/{CORE_KNOWN}") ?? "").lines() {
         row: line.trim()
         if row != "" && !row.starts_with("#") -> known.push(row.copy())
     }
-    targets := [String]{}
+    ^targets: [String]{}
     loop path in named {
         if path.starts_with("Core/") && path.ends_with(".jet") && !targets.contains(path) && (files.read("{snap}/{path}") ?? "").contains("#Test") {
             targets.push(path.copy())
@@ -1506,8 +1504,8 @@ core_tests_pass: fn(snap: String, out: String, seed_jet: String, self_jet: Strin
         if !targets.contains(path) && files.is_file("{snap}/{path}") -> targets.push(path.copy())
     }
     files.create_dir_all("{out}/core-tests") ?? ()
-    lines := [String]{}
-    rc := 0
+    ^lines: [String]{}
+    ^rc: 0
     loop path in targets {
         log: "{out}/core-tests/{path.replace("/", "_")}"
         // The dev shell runs under the seed's identity; the test under the built jet's own.
@@ -1527,7 +1525,7 @@ core_tests_pass: fn(snap: String, out: String, seed_jet: String, self_jet: Strin
             lines.push("  NEW {key}")
         }
     }
-    head := [String]{"core-tests rc={rc} files={targets.len()}"}
+    ^head: [String]{"core-tests rc={rc} files={targets.len()}"}
     head.extend(first_of(lines, 40))
     PassRun{name: "core-tests", rc: rc, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "{targets.len()} files", lines: head}
 }
@@ -1542,11 +1540,11 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
     if listed.code != 0 {
         return [PassRun]{PassRun{name: "areas", rc: 1, seconds: 0, peak: 0, note: "", lines: [String]{"areas rc=1 (Assemble.jet areas populated: {first_line(listed)})"}}}
     }
-    all := [String]{}
+    ^all: [String]{}
     loop line in listed.output.lines() {
         if line.trim() != "" -> all.push(line.trim().copy())
     }
-    sources := [[String]]{}
+    ^sources: [[String]]{}
     if !reaches_every_area(named) {
         loop area in all {
             listing: run_in_env(snap, [String]{self_jet, "{snap}/Jetpack/Bootstrap/Assemble.jet", "areas", "sources", area}, env)
@@ -1555,7 +1553,7 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
                 sources.push(named.copy())
                 next
             }
-            area_sources := [String]{}
+            ^area_sources: [String]{}
             loop line in listing.output.lines() -> area_sources.push(line.trim().copy())
             sources.push(area_sources)
         }
@@ -1564,7 +1562,7 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
     peaks_path: "{r14}/area-peaks.tsv"
     known: read_peaks(files.read(peaks_path) ?? "")
     forced: Int.parse(process.env_nonempty("CENSUS_AREA_CAP") ?? "") ?? 0
-    caps := [Int]{}
+    ^caps: [Int]{}
     loop area in reached {
         caps.push(if forced > 0 -> forced else -> area_cap(peak_of(known, area)))
     }
@@ -1573,7 +1571,7 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
     home: "{out}/jetpack-areas-home"
     files.create_dir_all("{state}/jetpack-bootstrap") ?? ()
     files.create_dir_all("{home}/cwd") ?? ()
-    checked := [PassRun]{}
+    ^checked: [PassRun]{}
     task.group area_lanes(limit: if lanes.len() > 0 -> lanes.len() else -> 1) {
         handles: loop lane in lanes -> task area_lane(lane.areas.copy(), reached.copy(), caps.copy(), snap.copy(), state.copy(), home.copy(), self_jet.copy(), identity.copy())
         loop handle in handles -> checked.extend(handle.join() ?? [PassRun]{lost_pass("areas")})
@@ -1592,7 +1590,7 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
         }
     }
     files.remove_all(home) ?? ()
-    updated := known.copy()
+    ^updated: known.copy()
     loop run in checked {
         area: run.name.removeprefix("area:")
         if run.peak > 0 {
@@ -1600,24 +1598,24 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
         }
     }
     files.write(peaks_path, peak_rows(updated)) ?? ()
-    rc := 0
-    lines := [String]{}
+    ^rc: 0
+    ^lines: [String]{}
     loop run in checked {
         if run.rc != 0 {
             rc = 1
             lines.extend(run.lines.copy())
         }
     }
-    carried := 0
+    ^carried: 0
     loop area in all {
         if !reached.contains(area) {
             carried += 1
             lines.push("area {area} carried over: no named file reaches its closure and the checker is the last landed census's")
         }
     }
-    head := [String]{"jetpack-areas rc={rc} run={reached.len()} carried-over={carried} lanes={lanes.len()}"}
+    ^head: [String]{"jetpack-areas rc={rc} run={reached.len()} carried-over={carried} lanes={lanes.len()}"}
     head.extend(lines)
-    out_runs := [PassRun]{PassRun{name: "areas", rc: rc, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "{reached.len()} run, {carried} carried over, {lanes.len()} lanes", lines: head}}
+    ^out_runs: [PassRun]{PassRun{name: "areas", rc: rc, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "{reached.len()} run, {carried} carried over, {lanes.len()} lanes", lines: head}}
     out_runs.extend(checked)
     out_runs
 }
@@ -1625,10 +1623,10 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
 // One lane's areas, checked one after another by Jetpack/Bootstrap/Check.jet,
 // each in Check.jet's own memory scopes capped at its cap.
 area_lane: fn(lane_areas: [String], areas: [String], caps: [Int], snap: String, state: String, home: String, self_jet: String, identity: String) -[Exec, FS, Time, Time.Wait]> [PassRun] Never! {
-    out := [PassRun]{}
+    ^out: [PassRun]{}
     loop area in lane_areas {
         watch: time.start()
-        cap := AREA_UNMEASURED
+        ^cap: AREA_UNMEASURED
         loop at in 0..<areas.len() {
             if areas[at] == area -> cap = caps[at]
         }
@@ -1649,7 +1647,7 @@ area_lane: fn(lane_areas: [String], areas: [String], caps: [Int], snap: String, 
         spec: process.cmd([String]{"taskset", "-c", CENSUS_CPUS, self_jet, "{snap}/Jetpack/Bootstrap/Check.jet", "--area", area.copy()}).timeout(time.duration_seconds(1800))
         code: run_spec(spec, self_jet, "{home}/cwd", env, log)
         peak: area_peak(state, area)
-        lines := [String]{"area {area} FAILED exit {code} (log {log}.out)"}
+        ^lines: [String]{"area {area} FAILED exit {code} (log {log}.out)"}
         loop line in "{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}".lines() {
             if lines.len() > 6 -> break
             if line.starts_with("  --> ") || line.starts_with("Error: ") {
@@ -1664,7 +1662,7 @@ area_lane: fn(lane_areas: [String], areas: [String], caps: [Int], snap: String, 
 // The check peak an area's receipt (in a `census-each-AREA-*` directory)
 // records, 0 for none.
 area_peak: fn(state: String, area: String) -[FS]> Int Never! {
-    peak := 0
+    ^peak: 0
     loop entry in entries("{state}/jetpack-bootstrap") {
         if !entry.is_dir || !entry.name.starts_with("census-each-{area}-") -> next
         loop line in (files.read("{state}/jetpack-bootstrap/{entry.name}/check.receipt") ?? "").lines() {
@@ -1717,7 +1715,7 @@ reaches_every_area: fn(named: [String]) -> Bool Never! {
 // `areas[i]`) hold a named file.
 areas_reached: fn(areas: [String], sources: [[String]], named: [String]) -> [String] Never! {
     if reaches_every_area(named) -> return areas.copy()
-    out := [String]{}
+    ^out: [String]{}
     loop at in 0..<areas.len() {
         if at < sources.len() && sources[at].any(fn(path) { named.contains(path) }) {
             out.push(areas[at].copy())
@@ -1747,12 +1745,12 @@ area_cap: fn(peak: Int) -> Int Never! {
 // cap fit `budget` (the first always does), else it joins the least loaded
 // lane, which is at least as wide as it is.
 pack_lanes: fn(areas: [String], caps: [Int], budget: Int) -> [AreaLane] Never! {
-    taken := [Bool]{}
+    ^taken: [Bool]{}
     loop _ in 0..<areas.len() -> taken.push(false)
-    lanes := [AreaLane]{}
-    used := 0
+    ^lanes: [AreaLane]{}
+    ^used: 0
     loop _ in 0..<areas.len() {
-        pick := -1
+        ^pick: -1
         loop at in 0..<areas.len() {
             if !taken[at] && (pick < 0 || caps[at] > caps[pick]) -> pick = at
         }
@@ -1763,11 +1761,11 @@ pack_lanes: fn(areas: [String], caps: [Int], budget: Int) -> [AreaLane] Never! {
             used += cap
             next
         }
-        home := 0
+        ^home: 0
         loop at in 1..<lanes.len() {
             if lanes[at].load < lanes[home].load -> home = at
         }
-        grown := lanes[home].areas.copy()
+        ^grown: lanes[home].areas.copy()
         grown.push(areas[pick].copy())
         lanes[home] = AreaLane{width: lanes[home].width, load: lanes[home].load + cap, areas: grown}
     }
@@ -1776,7 +1774,7 @@ pack_lanes: fn(areas: [String], caps: [Int], budget: Int) -> [AreaLane] Never! {
 
 // `area<TAB>bytes` rows; malformed rows are skipped.
 read_peaks: fn(text: String) -> [Setting] Never! {
-    out := [Setting]{}
+    ^out: [Setting]{}
     loop line in text.lines() {
         row: line.partition("\t")
         if row.sep != "" && row.head != "" && (Int.parse(row.tail.trim()) ?? 0) > 0 {
@@ -1794,7 +1792,7 @@ peak_of: fn(peaks: [Setting], area: String) -> Int Never! {
 }
 
 with_peak: fn(peaks: [Setting], area: String, peak: Int) -> [Setting] Never! {
-    out := [Setting]{}
+    ^out: [Setting]{}
     loop row in peaks {
         if row.name != area -> out.push(row.copy())
     }
@@ -1803,7 +1801,7 @@ with_peak: fn(peaks: [Setting], area: String, peak: Int) -> [Setting] Never! {
 }
 
 peak_rows: fn(peaks: [Setting]) -> String Never! {
-    text := ""
+    ^text: ""
     loop row in peaks -> text = "{text}{row.name}\t{row.value}\n"
     text
 }
@@ -1827,7 +1825,7 @@ census_finish: fn(runs: [PassRun], out: String) -[FS, IO]> Int Never! {
 // The phases.tsv text: a header, then each run's row, passes in PASS_ORDER
 // and then the areas as they ran; peaks in MiB.
 phase_rows: fn(runs: [PassRun]) -> String Never! {
-    text := "phase\tseconds\trc\tpeak_mb\tnote\n"
+    ^text: "phase\tseconds\trc\tpeak_mb\tnote\n"
     loop name in PASS_ORDER {
         loop run in runs {
             if run.name == name -> text = "{text}{phase_row(run)}"
@@ -1848,7 +1846,7 @@ phase_row: fn(run: PassRun) -> String Never! {
 // path: each a checkout path.
 stale_kept: fn(worktree: String, head: String, snap: String, named: [String]) -[Exec, FS, Time.Wait]> [String] Never! {
     receipt: json.parse(files.read("{snap}/Compiler/.jet/build/receipt.json") ?? "") ?? return [String]{"Compiler/.jet/build/receipt.json"}
-    stale := [String]{}
+    ^stale: [String]{}
     loop row in array_field(receipt, "kept") {
         path: "Compiler/{text_field(row, "path")}"
         committed: if named.contains(path) -> files.read(files.join(worktree, path)) ?? "" else -> git(worktree, [String]{"show", "{head}:{path}"}).output
@@ -1862,8 +1860,8 @@ stale_kept: fn(worktree: String, head: String, snap: String, named: [String]) -[
 // The rows of a keep-going report: its nonblank lines after the header.
 report_rows: fn(report: String) -[FS]> Int Never! {
     text: files.read(report) ?? return 0
-    rows := 0
-    first := true
+    ^rows: 0
+    ^first: true
     loop line in text.lines() {
         if first {
             first = false
@@ -1880,24 +1878,24 @@ report_rows: fn(report: String) -[FS]> Int Never! {
 // mapped to the file of `tree` it names (else the span, else the item).
 census_rows: fn(report: String, tree: String, package_dirs: [String]) -[FS]> [String] Never! {
     text: files.read(report) ?? return [String]{"no keep-going report at {report}: the compile wrote no census"}
-    header := [String]{}
-    rows := [String]{}
-    codes := [String]{}
-    counts := [Int]{}
-    cached_file := ""
-    cached := [U8]{}
+    ^header: [String]{}
+    ^rows: [String]{}
+    ^codes: [String]{}
+    ^counts: [Int]{}
+    ^cached_file: ""
+    ^cached: [U8]{}
     loop line in text.lines() {
         if header.len() == 0 {
             loop name in line.split("\t") -> header.push(name.copy())
             next
         }
         if line.trim() == "" -> next
-        fields := [String]{}
+        ^fields: [String]{}
         loop value in line.split("\t") -> fields.push(value.copy())
         code: column(fields, header, "code")
         span: column(fields, header, "span")
         place: span_place(tree, package_dirs, span)
-        where := if span != "-" -> span.copy() else -> column(fields, header, "item")
+        ^where: if span != "-" -> span.copy() else -> column(fields, header, "item")
         if place.file != "" {
             if place.file != cached_file {
                 cached = files.read_bytes(files.join(tree, place.file)) ?? [U8]{}
@@ -1908,7 +1906,7 @@ census_rows: fn(report: String, tree: String, package_dirs: [String]) -[FS]> [St
         phase: column(fields, header, "phase")
         detail: clip("{phase}: {column(fields, header, "message")}", 200)
         rows.push("{code}\t{where}\t{detail}")
-        found := false
+        ^found: false
         loop at in 0..<codes.len() {
             if codes[at] == code {
                 counts[at] = counts[at] + 1
@@ -1920,9 +1918,9 @@ census_rows: fn(report: String, tree: String, package_dirs: [String]) -[FS]> [St
             counts.push(1)
         }
     }
-    tally := [String]{}
+    ^tally: [String]{}
     loop at in 0..<codes.len() -> tally.push("\"{codes[at]}\":{counts[at]}")
-    out := [String]{"{rows.len()} rows {{{tally.join(",")}}}"}
+    ^out: [String]{"{rows.len()} rows {{{tally.join(",")}}}"}
     out.extend(rows)
     out
 }
@@ -1937,7 +1935,7 @@ column: fn(fields: [String], header: [String], name: String) -> String Never! {
 
 // The 1-based line of the byte `offset` of `bytes`.
 line_at: fn(bytes: [U8], offset: Int) -> Int Never! {
-    line := 1
+    ^line: 1
     loop at in 0..<bytes.len() {
         if at >= offset -> break
         if (Int{bytes[at]}) == 10 -> line += 1
@@ -1976,20 +1974,20 @@ is_digits: fn(text: String) -> Bool Never! {
 
 source_file: fn(tree: String, package_dirs: [String], path: String) -[FS]> String Never! {
     if path.starts_with("/") {
-        parts := [String]{}
+        ^parts: [String]{}
         loop part in path.split("/") {
             if part != "" && part != "." -> parts.push(part.copy())
         }
         loop start in 0..<parts.len() {
-            candidate := parts[start].copy()
+            ^candidate: parts[start].copy()
             loop at in (start + 1)..<parts.len() -> candidate = "{candidate}/{parts[at]}"
             if files.is_file(files.join(tree, candidate)) -> return candidate
         }
         return ""
     }
-    bases := [String]{"", "Compiler"}
+    ^bases: [String]{"", "Compiler"}
     bases.extend(package_dirs.copy())
-    found := [String]{}
+    ^found: [String]{}
     loop base in bases {
         candidate: repo_join(base, path)
         if candidate == "" || found.contains(candidate) -> next
@@ -2008,7 +2006,7 @@ precommit_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Ne
         print("PRECOMMIT FAILED")
         return 1
     }
-    needed := inputs.len() > 0
+    ^needed: inputs.len() > 0
     loop path in args {
         if census_source(path) -> needed = true
     }
@@ -2034,9 +2032,9 @@ ratchets_main: fn(args: [String]) -[Exec, IO]> Int Never! {
 ratchets: fn(worktree: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     compiler_dir: seed_dir()
     identity: read_identity(compiler_dir)
-    specs := [ProcessSpec]{}
+    ^specs: [ProcessSpec]{}
     loop tool in RATCHETS {
-        spec := process.cmd([String]{"{compiler_dir}/jet", tool, "--check"}).cwd(worktree).env("JET_TOOLCHAIN_ROOT", worktree).output_limit(268435456)
+        ^spec: process.cmd([String]{"{compiler_dir}/jet", tool, "--check"}).cwd(worktree).env("JET_TOOLCHAIN_ROOT", worktree).output_limit(268435456)
         if identity != "" -> spec = spec.env("JET_COMPILER_IDENTITY", identity)
         specs.push(spec)
     }
@@ -2044,7 +2042,7 @@ ratchets: fn(worktree: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         print("PRECOMMIT: the ratchets cannot start: {err}")
         return RATCHETS.len()
     }
-    failed := 0
+    ^failed: 0
     loop index in 0..<RATCHETS.len() {
         tool: RATCHETS[index]
         receipt: results[index] ?? {
@@ -2057,13 +2055,13 @@ ratchets: fn(worktree: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
             next
         }
         failed += 1
-        output := [String]{}
+        ^output: [String]{}
         loop line in process.combined_output(receipt).trim_end().split("\n") {
             output.push(line.copy())
         }
         // The verdict is at the end (CoreCoverage prints its module table first).
         tail: if output.len() > 40 -> output.len() - 40 else -> 0
-        lines := [String]{}
+        ^lines: [String]{}
         loop at in tail..<output.len() -> lines.push(output[at].copy())
         show(lines, 40)
         print("PRECOMMIT: {tool} --check failed (exit {receipt.code})")
@@ -2074,7 +2072,7 @@ ratchets: fn(worktree: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
 prescreen_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     if args.len() == 0 -> usage()
     patch: absolute(args[0])
-    earlier := [String]{}
+    ^earlier: [String]{}
     loop path in args[1..<args.len()] -> earlier.push(absolute(path))
     worktree: dev_worktree()
     if worktree == "" {
@@ -2099,8 +2097,8 @@ prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) 
         print("prescreen: does not apply to HEAD {git(worktree, [String]{"rev-parse", "--short", "HEAD"}).output.trim()}")
         return 3
     }
-    touched := [String]{}
-    patches := earlier.copy()
+    ^touched: [String]{}
+    ^patches: earlier.copy()
     patches.push(patch.copy())
     loop path in patches {
         loop name in touched_paths(tree, path) {
@@ -2108,7 +2106,7 @@ prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) 
         }
     }
     // Unreadable packages count every path as an input.
-    needed := true
+    ^needed: true
     if compiler_input_paths(worktree, touched) == .Ok(inputs) -> needed = inputs.len() > 0
     if !needed {
         print("prescreen: clean (no compiler inputs; apply check only)")
@@ -2128,12 +2126,12 @@ prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) 
 
 // Each `Error...` line of a check's output with the location on the line after it.
 error_rows: fn(text: String) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in text.lines() -> lines.push(line.copy())
-    rows := [String]{}
+    ^rows: [String]{}
     loop at in 0..<lines.len() {
         if !lines[at].starts_with("Error") -> next
-        words := [String]{}
+        ^words: [String]{}
         if at + 1 < lines.len() {
             loop word in lines[at + 1].split(" ") {
                 if word != "" -> words.push(word.copy())
@@ -2147,12 +2145,12 @@ error_rows: fn(text: String) -> [String] Never! {
 
 // Equal rows once each, sorted, after their count.
 counted: fn(rows: [String]) -> [String] Never! {
-    sorted := rows.copy()
+    ^sorted: rows.copy()
     sorted.sort()
-    out := [String]{}
-    at := 0
+    ^out: [String]{}
+    ^at: 0
     loop at < sorted.len() {
-        count := 1
+        ^count: 1
         loop at + count < sorted.len() && sorted[at + count] == sorted[at] -> count += 1
         out.push("{count} {sorted[at]}")
         at += count
@@ -2192,7 +2190,7 @@ Step: struct {
 // The jobs of a list, one `LANE<TAB>MSG<TAB>PATCH[<TAB>NAME]` per line
 // (absolute paths); blank lines and `#` comments are skipped.
 read_jobs: fn(text: String) -> [Job] Never! {
-    jobs := [Job]{}
+    ^jobs: [Job]{}
     loop line in text.lines() {
         if line.trim() == "" || line.starts_with("#") -> next
         fields: line.split("\t").to_list()
@@ -2222,7 +2220,7 @@ epoch: fn() -[Time]> Int Never! { time.unix_ns() /% 1000000000 }
 // The last `count` of `lines`.
 last_of: fn(lines: [String], count: Int) -> [String] Never! {
     start: if lines.len() > count -> lines.len() - count else -> 0
-    out := [String]{}
+    ^out: [String]{}
     loop at in start..<lines.len() -> out.push(lines[at].copy())
     out
 }
@@ -2232,7 +2230,7 @@ both: fn(ran: Ran) -> String Never! { "{ran.output}{ran.errors}" }
 
 // The paths of a `-z` git listing.
 nul_paths: fn(ran: Ran) -> [String] Never! {
-    paths := [String]{}
+    ^paths: [String]{}
     if ran.code != 0 -> return paths
     loop field in nul_fields(ran.output) {
         if field != "" -> paths.push(field.copy())
@@ -2242,7 +2240,7 @@ nul_paths: fn(ran: Ran) -> [String] Never! {
 
 // The paths with tracked changes in the worktree `dir`.
 dirty_paths: fn(dir: String) -[Exec, Time.Wait]> [String] Never! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop field in nul_paths(git(dir, [String]{"status", "--porcelain", "-z", "--untracked-files=no"})) {
         raw: field.bytes()
         // `XY PATH`: two status letters and a space.
@@ -2259,7 +2257,7 @@ on_disk: fn(dir: String, path: String) -[FS]> Bool Never! {
 
 // `git --literal-pathspecs ARGS... -- PATHS...` in `dir` with the index `index` ("" for the checkout's).
 git_paths: fn(dir: String, index: String, args: [String], paths: [String]) -[Exec, Time.Wait]> Ran Never! {
-    argv := [String]{"--literal-pathspecs"}
+    ^argv: [String]{"--literal-pathspecs"}
     argv.extend(args.copy())
     argv.push("--")
     argv.extend(paths.copy())
@@ -2270,9 +2268,9 @@ git_paths: fn(dir: String, index: String, args: [String], paths: [String]) -[Exe
 // after `seconds` (0: no limit); 124 on a timeout.
 seed_run: fn(dir: String, args: [String], seconds: Int) -[Exec, Env, FS, Time.Wait]> Ran Never! {
     seed: seed_dir()
-    argv := [String]{"{seed}/jet"}
+    ^argv: [String]{"{seed}/jet"}
     argv.extend(args.copy())
-    spec := process.cmd(argv).cwd(dir).env("JET_COMPILER_IDENTITY", read_identity(seed)).env("JET_TOOLCHAIN_ROOT", dir).output_limit(268435456)
+    ^spec: process.cmd(argv).cwd(dir).env("JET_COMPILER_IDENTITY", read_identity(seed)).env("JET_TOOLCHAIN_ROOT", dir).output_limit(268435456)
     if seconds > 0 -> spec = spec.timeout(time.duration_seconds(seconds))
     receipt: spec.run() ?? return Ran{code: 127, output: "", errors: "{argv[0]}: {err}"}
     code: if {
@@ -2291,19 +2289,15 @@ tools_checkout: fn() -[Exec, Env, FS, Time.Wait]> String Never! {
     dev_worktree()
 }
 
-seeds_root: fn() -[Env, FS]> String Never! {
-    roots.value("JET_SEEDS")
-}
+seeds_root: fn() -[Env, FS]> String Never! { roots.value("JET_SEEDS") }
 
-base_root: fn() -[Env, FS]> String Never! {
-    roots.value("JET_BASE_ROOT")
-}
+base_root: fn() -[Env, FS]> String Never! { roots.value("JET_BASE_ROOT") }
 
 // The environment a detached run of this tool starts with: PATH, the roots,
 // and the seed's identity with `tools` as its toolchain root.
 unit_env: fn(tools: String) -[Exec, Env, FS, Time.Wait]> [Setting] Never! {
     seed: seed_dir()
-    env := [Setting]{
+    ^env: [Setting]{
         Setting{name: "PATH", value: process.env_nonempty("PATH") ?? ""},
         Setting{name: "JET_STATE_ROOT", value: state_root()},
         Setting{name: "JET_SCRATCH_ROOT", value: scratch_root()},
@@ -2322,8 +2316,8 @@ unit_env: fn(tools: String) -[Exec, Env, FS, Time.Wait]> [Setting] Never! {
 // `unit` (systemd-run), detached from the caller, in `tools`, with the
 // unit `properties` and its output appended to `log`.
 start_unit: fn(tools: String, unit: String, properties: [String], args: [String], log: String) -[Exec, Env, FS, Time.Wait]> Ran Never! {
-    argv := [String]{"systemd-run", "--user", "--unit={unit}", "--collect", "-q", "--expand-environment=no", "--working-directory={tools}"}
-    props := properties.copy()
+    ^argv: [String]{"systemd-run", "--user", "--unit={unit}", "--collect", "-q", "--expand-environment=no", "--working-directory={tools}"}
+    ^props: properties.copy()
     props.push("StandardOutput=append:{log}")
     props.push("StandardError=append:{log}")
     loop property in props {
@@ -2345,7 +2339,7 @@ lock_free: fn(path: String) -[FS, Env]> Bool Never! {
 
 // `items` newest first.
 newest_first: fn(items: [Dated]) -> [Dated] Never! {
-    sorted := items.copy()
+    ^sorted: items.copy()
     sorted.sort_by(fn(left: Dated, right: Dated) {
         if left.time > right.time -> return Ordering.Less
         if left.time < right.time -> return Ordering.Greater
@@ -2369,8 +2363,8 @@ first_line_of: fn(path: String) -[FS]> String Never! {
 // `text` with `git stripspace`'s cleanup: trailing whitespace removed, runs
 // of blank lines collapsed, no blank lines at either end, one final newline.
 stripspace: fn(text: String) -> String Never! {
-    out := [String]{}
-    blank := false
+    ^out: [String]{}
+    ^blank: false
     loop raw in text.lines() {
         line: raw.trim_end()
         if line == "" {
@@ -2387,7 +2381,7 @@ stripspace: fn(text: String) -> String Never! {
 
 // The root of `at`'s group.
 group_root: fn(group: [Int], at: Int) -> Int Never! {
-    current := at
+    ^current: at
     loop group[current] != current -> current = group[current]
     current
 }
@@ -2396,9 +2390,9 @@ group_root: fn(group: [Int], at: Int) -> Int Never! {
 // of each patch's group: a group lands as one commit, since staging a whole
 // file would take another patch's hunks too.
 share_groups: fn(paths: [[String]]) -> [Int] Never! {
-    group := [Int]{}
+    ^group: [Int]{}
     loop at in 0..<paths.len() -> group.push(at)
-    owner := [String:Int]{}
+    ^owner: [String:Int]{}
     loop at in 0..<paths.len() {
         loop path in paths[at] {
             if owner.get(path) == .Val(first) {
@@ -2410,7 +2404,7 @@ share_groups: fn(paths: [[String]]) -> [Int] Never! {
             owner[path] = at
         }
     }
-    roots := [Int]{}
+    ^roots: [Int]{}
     loop at in 0..<paths.len() -> roots.push(group_root(group, at))
     roots
 }
@@ -2473,10 +2467,10 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
         say(log, "{work} cannot be created: {err}")
         return 2
     }
-    stages := [Stage]{}
-    started := epoch()
-    aside := [String]{}
-    composed := compose(dir, jobs, aside, log)
+    ^stages: [Stage]{}
+    ^started: epoch()
+    ^aside: [String]{}
+    ^composed: compose(dir, jobs, aside, log)
     stages.push(Stage{name: "compose", seconds: epoch() - started})
     if !composed.ok -> return finish(log, stages, 5)
     if composed.applied.len() == 0 {
@@ -2502,8 +2496,8 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
 
     // Rule 2: one build. Rows it attributes set their jobs aside and the
     // build runs once more; anything else fails the batch.
-    rebuilt := false
-    built := false
+    ^rebuilt: false
+    ^built: false
     loop {
         started = epoch()
         checked: precommit_batch(dir, composed, log)
@@ -2542,7 +2536,7 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
         started = epoch()
         before: aside.copy()
         aside = set_aside(aside, composed.applied, tested.red, "a red test row", log)
-        compiler := false
+        ^compiler: false
         loop item in composed.applied {
             if before.contains(job_key(item.job)) || !aside.contains(job_key(item.job)) -> next
             loop path in item.paths {
@@ -2558,7 +2552,7 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
         }
         // The build stands unless a set-aside job changed a compiler input;
         // the ratchets always rerun on what is left.
-        rechecked_code := 0
+        ^rechecked_code: 0
         if compiler {
             rebuilt_checked: precommit_batch(dir, composed, log)
             rechecked_code = rebuilt_checked.code
@@ -2589,27 +2583,27 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
 
     // Every commit is built in a private index, chained on the pre-batch HEAD;
     // nothing visible changes until the one compare-and-swap of HEAD.
-    groups_of := [[String]]{}
+    ^groups_of: [[String]]{}
     loop item in applied -> groups_of.push(item.paths.copy())
     roots: share_groups(groups_of)
     index: "{run}/batch-land.index.{sys.pid()}"
     files.remove(index) ?? ()
-    tip := pre.copy()
-    failure := ""
-    landed := [String]{}
+    ^tip: pre.copy()
+    ^failure: ""
+    ^landed: [String]{}
     if git_index(dir, index, [String]{"read-tree", pre}).code != 0 {
         failure = "read-tree of the pre-batch HEAD failed"
     }
     loop group in 0..<applied.len() {
         if failure != "" -> break
         if roots[group] != group -> next
-        members := [Int]{}
+        ^members: [Int]{}
         loop at in 0..<applied.len() {
             if roots[at] == group -> members.push(at)
         }
-        message := ""
-        names := [String]{}
-        paths := [String]{}
+        ^message: ""
+        ^names: [String]{}
+        ^paths: [String]{}
         loop at in members {
             job: applied[at].job
             name: files.basename(job.patch)
@@ -2646,20 +2640,20 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
     // changed, nothing else. The verified tree starts from the pre-batch HEAD,
     // so a path the batch deleted counts when HEAD tracked it.
     if failure == "" {
-        candidates := all.copy()
-        extra := regenerated.copy()
+        ^candidates: all.copy()
+        ^extra: regenerated.copy()
         extra.extend(nul_paths(git(dir, [String]{"diff", "--name-only", "-z", pre})))
         loop path in extra {
             if !candidates.contains(path) -> candidates.push(path.copy())
         }
         tracked: nul_paths(git_paths(dir, "", [String]{"ls-tree", "-r", "-z", "--name-only", pre}, candidates))
-        verified := [String]{}
+        ^verified: [String]{}
         loop path in candidates {
             if on_disk(dir, path) || tracked.contains(path) -> verified.push(path.copy())
         }
         full: "{index}.full"
         files.remove(full) ?? ()
-        want := ""
+        ^want: ""
         if git_index(dir, full, [String]{"read-tree", pre}).code == 0 && git_paths(dir, full, [String]{"add", "-A"}, verified).code == 0 {
             written: git_index(dir, full, [String]{"write-tree"})
             if written.code == 0 -> want = written.output.trim()
@@ -2813,7 +2807,7 @@ finish: fn(log: String, stages: [Stage], code: Int) -[FS, IO]> Int Never! {
     say(log, "stages (wall minutes):")
     say(log, "| stage | min |")
     say(log, "|---|---|")
-    total := 0
+    ^total: 0
     loop stage in stages {
         say(log, "| {stage.name} | {minutes(stage.seconds)} |")
         total += stage.seconds
@@ -2841,9 +2835,9 @@ DIAGNOSTIC_GENERATED: [String]{
 // generated diagnostic file applies without it), then regenerate the runtime
 // generators' outputs and the diagnostic copies.
 compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env, FS, IO, Time.Wait]> Composed Never! {
-    applied := [Applied]{}
-    all := [String]{}
-    broken := [String:String]{}
+    ^applied: [Applied]{}
+    ^all: [String]{}
+    ^broken: [String:String]{}
     loop job in jobs {
         if aside.contains(job_key(job)) -> next
         name: files.basename(job.patch)
@@ -2856,8 +2850,8 @@ compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env,
             next
         }
         if git(dir, [String]{"apply", "--check", job.patch}).code != 0 || git(dir, [String]{"apply", job.patch}).code != 0 {
-            checked := [String]{"apply", "--check"}
-            without := [String]{"apply"}
+            ^checked: [String]{"apply", "--check"}
+            ^without: [String]{"apply"}
             loop pattern in DIAGNOSTIC_GENERATED {
                 checked.push("--exclude={pattern}")
                 without.push("--exclude={pattern}")
@@ -2887,7 +2881,7 @@ compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env,
     // The diagnostic copies (registry rows, coverage lists, explain pages, safety audit).
     rows: seed_run(dir, [String]{"Tools/Agent/DiagnosticRows.jet", "--write"}, 900)
     say(log, "DiagnosticRows rc={rows.code} {both(rows).trim_end().last_lines(2).join(" ")}")
-    regenerated := [String]{}
+    ^regenerated: [String]{}
     loop path in dirty_paths(dir) {
         if !all.contains(path) -> regenerated.push(path)
     }
@@ -2903,7 +2897,7 @@ compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env,
 // or a lane, with a red job is not a dependency. Each new one is reported as
 // `SET ASIDE LANE NAME - why`.
 set_aside: fn(aside: [String], applied: [Applied], red: [String], why: String, log: String) -[FS, IO]> [String] Never! {
-    out := aside.copy()
+    ^out: aside.copy()
     loop item in applied {
         key: job_key(item.job)
         if !red.contains(key) || out.contains(key) -> next
@@ -2926,7 +2920,7 @@ package_of: fn(tree: String, path: String) -[FS]> String Never! {
     loop index in 0..<TEST_INPUT_MARKS.len() {
         if path.contains(TEST_INPUT_MARKS[index]) -> return ""
     }
-    dir := path.rpartition("/").head
+    ^dir: path.rpartition("/").head
     loop dir != "" {
         if files.is_file("{tree}/{dir}/package.jet") -> return dir
         dir = dir.rpartition("/").head
@@ -2940,8 +2934,8 @@ package_of: fn(tree: String, path: String) -[FS]> String Never! {
 // touches makes the job red (unless its meta is seed-split); other rows and
 // a failed check with no rows are reported. The red jobs' keys.
 prebuild_gate: fn(dir: String, applied: [Applied], work: String, log: String) -[Exec, Env, FS, IO, Time.Wait]> [String] Never! {
-    red := [String]{}
-    packages := [String]{}
+    ^red: [String]{}
+    ^packages: [String]{}
     loop item in applied {
         loop path in item.paths {
             package: package_of(dir, path)
@@ -2956,11 +2950,11 @@ prebuild_gate: fn(dir: String, applied: [Applied], work: String, log: String) -[
     files.create_dir_all(cwd) ?? ()
     seed: seed_dir()
     identity: read_identity(seed)
-    specs := [ProcessSpec]{}
+    ^specs: [ProcessSpec]{}
     loop at in 0..<packages.len() {
         report: "{work}/gate-{at}.tsv"
         argv: capped(GATE_GIB, [String]{"{seed}/jet", "check", "--keep-going", "--keep-going-report={report}", "--threads", "8", "{dir}/{packages[at]}"})
-        spec := process.cmd(argv).cwd(cwd).timeout(time.duration_seconds(1200)).output_limit(268435456)
+        ^spec: process.cmd(argv).cwd(cwd).timeout(time.duration_seconds(1200)).output_limit(268435456)
         loop setting in compile_env(identity, dir) -> spec = spec.env(setting.name, setting.value)
         specs.push(spec)
     }
@@ -2969,13 +2963,13 @@ prebuild_gate: fn(dir: String, applied: [Applied], work: String, log: String) -[
         say(log, "gate: the checks cannot start: {err}")
         return red
     }
-    package_dirs := compiler_package_dirs(dir) ?? [String]{}
+    ^package_dirs: compiler_package_dirs(dir) ?? [String]{}
     loop at in 0..<packages.len() {
         receipt: results[at] ?? {
             say(log, "gate {packages[at]}: cannot start: {err}")
             next
         }
-        bases := package_dirs.copy()
+        ^bases: package_dirs.copy()
         bases.push(packages[at].copy())
         rows: census_rows("{work}/gate-{at}.tsv", dir, bases)
         say(log, "gate {packages[at]} rc={exit_code(receipt)} {rows[0]}")
@@ -3007,7 +3001,7 @@ prebuild_gate: fn(dir: String, applied: [Applied], work: String, log: String) -[
 // `argv` in its own systemd scope capped at `gib` GiB (no swap), at low
 // priority, with the compiler's 1 GiB stack.
 capped: fn(gib: Int, argv: [String]) -> [String] Never! {
-    out := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax={gib}G", "-p", "MemorySwapMax=0", "nice", "-n", "19", "ionice", "-c3", "prlimit", HEAVY_STACK, "--"}
+    ^out: [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax={gib}G", "-p", "MemorySwapMax=0", "nice", "-n", "19", "ionice", "-c3", "prlimit", HEAVY_STACK, "--"}
     out.extend(argv.copy())
     out
 }
@@ -3030,7 +3024,7 @@ row_file: fn(row: String) -> String Never! {
 
 // The keys of the applied jobs that change `file`.
 row_owners: fn(applied: [Applied], file: String) -> [String] Never! {
-    owners := [String]{}
+    ^owners: [String]{}
     if file == "" -> return owners
     loop item in applied {
         if item.paths.contains(file) -> owners.push(job_key(item.job))
@@ -3040,13 +3034,13 @@ row_owners: fn(applied: [Applied], file: String) -> [String] Never! {
 
 // Rule 2's build: the `precommit` of every path the composition changed.
 precommit_batch: fn(dir: String, composed: Composed, log: String) -[Exec, Env, FS, IO, Time.Wait]> Checked Never! {
-    args := [String]{"Tools/Agent/Land.jet", "precommit"}
+    ^args: [String]{"Tools/Agent/Land.jet", "precommit"}
     args.extend(composed.all.copy())
     args.extend(composed.regenerated.copy())
     checked: seed_run(dir, args, 0)
-    rows := [String]{}
-    census := false
-    ratchet_failed := false
+    ^rows: [String]{}
+    ^census: false
+    ^ratchet_failed: false
     loop line in both(checked).lines() {
         if line.starts_with("nm: ") || line.starts_with("skip ") -> next
         if line.starts_with("check rc=") -> census = true
@@ -3063,8 +3057,8 @@ census_red: fn(applied: [Applied], log: String) -[Exec, Env, FS, IO, Time.Wait]>
     r14: "{scratch_root()}/discovery/r14"
     snap: "{r14}/snap"
     package_dirs: compiler_package_dirs(snap) ?? [String]{}
-    red := [String]{}
-    rows := 0
+    ^red: [String]{}
+    ^rows: 0
     loop pass in CENSUS_PASSES {
         report: "{r14}/census/{pass}-keep-going.tsv"
         if !files.is_file(report) -> next
@@ -3098,7 +3092,7 @@ seal: fn(dir: String, pre: String, composed: Composed, work: String, from: Strin
     sealed: "{work}/sealed"
     tree: "{sealed}/tree"
     export_tree(dir, pre, tree, [String]{}) ?? return err.message
-    changed := composed.all.copy()
+    ^changed: composed.all.copy()
     changed.extend(composed.regenerated.copy())
     loop path in changed {
         target: files.join(tree, path)
@@ -3144,15 +3138,15 @@ seal: fn(dir: String, pre: String, composed: Composed, work: String, from: Strin
 // otherwise its jobs are red. A whole-profile row goes to the jobs that change
 // a file of its path stem; a row no job owns is counted.
 train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log: String, from: String) -[Exec, Env, FS, IO, Time.Wait]> Tested Never! {
-    lines := [TestLine]{}
-    compiler := false
+    ^lines: [TestLine]{}
+    ^compiler: false
     loop item in composed.applied {
         key: job_key(item.job)
         text: files.read(job_side(item.job, "tests")) ?? ""
         loop raw in text.lines() {
             line: raw.trim()
             if line == "" || line.starts_with("#") || line.contains("LaneCheck") -> next
-            at := -1
+            ^at: -1
             loop k in 0..<lines.len() {
                 if lines[k].line == line -> at = k
             }
@@ -3160,7 +3154,7 @@ train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log:
                 lines.push(TestLine{line: line.copy(), owners: [String]{key.copy()}, train: false, code: -1})
                 next
             }
-            entry := lines[at].copy()
+            ^entry: lines[at].copy()
             if !entry.owners.contains(key) -> entry.owners.push(key.copy())
             lines[at] = entry
         }
@@ -3171,7 +3165,7 @@ train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log:
     if compiler {
         loop profile in TRAIN_PROFILES {
             whole: "jet test Compiler --profile {profile}"
-            listed := false
+            ^listed: false
             loop entry in lines {
                 if entry.line == whole -> listed = true
             }
@@ -3180,8 +3174,8 @@ train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log:
             }
         }
     }
-    red := [String]{}
-    unowned := 0
+    ^red: [String]{}
+    ^unowned: 0
     if lines.len() == 0 {
         say(log, "tests: no test lines")
         return Tested{red: red, unowned: unowned}
@@ -3198,7 +3192,7 @@ train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log:
     seed: seed_dir()
     say(log, "tests: {lines.len()} distinct line(s) on {tree}")
     loop wave in 0..<3 {
-        picked := [Int]{}
+        ^picked: [Int]{}
         loop at in 0..<lines.len() {
             entry: lines[at]
             in_wave: if {
@@ -3207,7 +3201,7 @@ train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log:
                 else -> wave == 1
             }
             if !in_wave -> next
-            all_red := !entry.train
+            ^all_red: !entry.train
             loop key in entry.owners {
                 if !red.contains(key) -> all_red = false
             }
@@ -3220,7 +3214,7 @@ train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log:
         if picked.len() == 0 -> next
         gib: if wave == 2 -> PROFILE_GIB else -> TEST_GIB
         codes: run_lines(lines, picked, tree, "{work}/sealed/jet", gib, out, "")
-        reds := [Int]{}
+        ^reds: [Int]{}
         loop k in 0..<picked.len() {
             lines[picked[k]].code = codes[k]
             if codes[k] == 0 {
@@ -3236,7 +3230,7 @@ train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log:
             entry: lines[at]
             got: fail_rows(files.read("{out}/{at}.out") ?? "")
             was: fail_rows(files.read("{out}/{at}.base.out") ?? "")
-            new := [String]{}
+            ^new: [String]{}
             loop row in got {
                 if !was.contains(row) -> new.push(row.copy())
             }
@@ -3325,10 +3319,10 @@ S2ProbeVerdict: struct {
 
 // Parse `VERDICT<TAB>PATH<TAB>TIER...` rows from `jet test` output.
 parse_probe_rows: fn(suite: String, text: String, code: Int) -> ProbeRun Never! {
-    rows := [ProbeRow]{}
-    pass_count := 0
-    fail_count := 0
-    other_count := 0
+    ^rows: [ProbeRow]{}
+    ^pass_count: 0
+    ^fail_count: 0
+    ^other_count: 0
     loop line in text.lines() {
         fields: line.split("\t").to_list()
         if fields.len() < 3 -> next
@@ -3352,13 +3346,13 @@ parse_probe_rows: fn(suite: String, text: String, code: Int) -> ProbeRun Never! 
 // Compare s1 and s2 rows for one probe suite. Any differing row verdict,
 // missing row, empty probe output, or differing exit code is an s1/s2 split.
 diff_probe_runs: fn(s1: ProbeRun, s2: ProbeRun) -> [String] Never! {
-    splits := [String]{}
+    ^splits: [String]{}
     if s1.rows.len() == 0 || s2.rows.len() == 0 {
         splits.push("s1/s2 split ({s1.suite}): probe produced no rows (s1={s1.rows.len()} rc={s1.code}, s2={s2.rows.len()} rc={s2.code})")
         return splits
     }
     loop r1 in s1.rows {
-        found := false
+        ^found: false
         loop r2 in s2.rows {
             if r2.path == r1.path && r2.tier == r1.tier {
                 found = true
@@ -3373,7 +3367,7 @@ diff_probe_runs: fn(s1: ProbeRun, s2: ProbeRun) -> [String] Never! {
         }
     }
     loop r2 in s2.rows {
-        found := false
+        ^found: false
         loop r1 in s1.rows {
             if r1.path == r2.path && r1.tier == r2.tier {
                 found = true
@@ -3417,7 +3411,7 @@ ensure_s2: fn(tree: String, s1_dir: String, identity: String, source_identity: S
     files.remove_all(s2_snap) ?? ()
     files.copy_dir(tree, s2_snap) ?? return S2Build{ok: false, reused: false, dir: "", error: "s2 snapshot copy failed: {err}"}
     files.remove_all("{s2_snap}/Compiler/JetCLI/.jet/build") ?? ()
-    env := compile_env(identity, s2_snap)
+    ^env: compile_env(identity, s2_snap)
     env.push(Setting{name: "JET", value: s1_jet.copy()})
     argv: [String]{s1_jet, "{s2_snap}/Tools/Agent/JetEnv.jet", s1_jet, "build", "-O1", "--keep-going", "--threads", "12", "Compiler"}
     build_log: "{work}/s2-build"
@@ -3448,7 +3442,7 @@ ensure_s2: fn(tree: String, s1_dir: String, identity: String, source_identity: S
 run_probe_suite: fn(tree: String, jet_dir: String, identity: String, suite: String, profile: String, filter: String, out_log: String) -[Exec, Env, FS, Time.Wait]> ProbeRun Never! {
     path: process.env_nonempty("PATH") ?? ""
     argv: [String]{"{jet_dir}/jet", "test", "Compiler", "--profile", profile, "--filter", filter}
-    spec := process.cmd(argv).cwd(tree).timeout(time.duration_seconds(S2_PROBE_SECONDS)).output_limit(67108864)
+    ^spec: process.cmd(argv).cwd(tree).timeout(time.duration_seconds(S2_PROBE_SECONDS)).output_limit(67108864)
     spec = spec.env("PATH", "{jet_dir}:{path}").env("JET", "{jet_dir}/jet").env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree)
     receipt: spec.run() ?? {
         files.write(out_log, "s2-probe could not start {jet_dir}/jet: {err}\n") ?? ()
@@ -3478,7 +3472,7 @@ compare_s1_s2_probe: fn(tree: String, s1_dir: String, s2_dir: String, identity: 
     exit_splits: diff_probe_runs(s1_exit, s2_exit)
     say(log, "s2-probe ProcessExitUnmapped: s1={probe_counts_text(s1_exit)} s2={probe_counts_text(s2_exit)} splits={exit_splits.len()}")
 
-    splits := ice_splits.copy()
+    ^splits: ice_splits.copy()
     splits.extend(exit_splits.copy())
     loop split in splits -> say(log, "s2-probe {split}")
     s1_total: s1_ice.rows.len() + s1_exit.rows.len()
@@ -3501,7 +3495,7 @@ batch_s2_probe: fn(dir: String, pre: String, composed: Composed, work: String, s
     export_tree(dir, pre, tree, [String]{}) ?? {
         return S2ProbeVerdict{ok: false, reused: false, s2_dir: "", source_identity: "", s1_rows: 0, s2_rows: 0, splits: [String]{err.message}, summary: "s2-probe export failed: {err.message}"}
     }
-    changed := composed.all.copy()
+    ^changed: composed.all.copy()
     changed.extend(composed.regenerated.copy())
     loop path in changed {
         target: files.join(tree, path)
@@ -3548,18 +3542,18 @@ available_gib: fn() -[FS]> Int Never! {
 // PATH, each capped at `gib`, as many at once as memory allows; each line's
 // output goes to `out`/<index><suffix>.out. Their exit codes.
 run_lines: fn(lines: [TestLine], picked: [Int], tree: String, jet_dir: String, gib: Int, out: String, suffix: String) -[Exec, Env, FS, Time.Wait]> [Int] Never! {
-    width := (available_gib() - TRAIN_FLOOR_GIB) /% gib
+    ^width: (available_gib() - TRAIN_FLOOR_GIB) /% gib
     if width < 1 -> width = 1
     if width > TEST_JOBS_MAX -> width = TEST_JOBS_MAX
     identity: read_identity(seed_dir())
     path: process.env_nonempty("PATH") ?? ""
-    specs := [ProcessSpec]{}
+    ^specs: [ProcessSpec]{}
     loop at in picked {
-        spec := process.cmd(capped(gib, [String]{"bash", "-c", lines[at].line})).cwd(tree).timeout(time.duration_seconds(TEST_SECONDS)).output_limit(268435456)
+        ^spec: process.cmd(capped(gib, [String]{"bash", "-c", lines[at].line})).cwd(tree).timeout(time.duration_seconds(TEST_SECONDS)).output_limit(268435456)
         spec = spec.env("PATH", "{jet_dir}:{path}").env("JET", "{jet_dir}/jet").env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree)
         specs.push(spec)
     }
-    codes := [Int]{}
+    ^codes: [Int]{}
     results: process.run_all(specs, width) ?? {
         loop at in picked {
             files.write("{out}/{at}{suffix}.out", "the test lines cannot start: {err}\n") ?? ()
@@ -3581,10 +3575,10 @@ run_lines: fn(lines: [TestLine], picked: [Int], tree: String, jet_dir: String, g
 
 // The FAIL rows of a test output without their timings, sorted, once each.
 fail_rows: fn(text: String) -> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop line in text.lines() {
         if !line.contains("FAIL") -> next
-        words := [String]{}
+        ^words: [String]{}
         loop word in line.split(" ") {
             if !is_timing(word) -> words.push(word.copy())
         }
@@ -3609,7 +3603,7 @@ is_timing: fn(word: String) -> Bool Never! {
 
 // At most `limit` lines of `text` that read as an error.
 error_lines: fn(text: String, limit: Int) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop line in text.lines() {
         if out.len() >= limit -> break
         if line.contains("error") || line.contains("Error") || line.contains("panic") || line.contains("failed") {
@@ -3622,7 +3616,7 @@ error_lines: fn(text: String, limit: Int) -> [String] Never! {
 // The keys of the applied jobs that change a file with the path stem of a
 // path in `row` (a test case and its expected output share one).
 stem_owners: fn(applied: [Applied], row: String) -> [String] Never! {
-    owners := [String]{}
+    ^owners: [String]{}
     loop word in row.split(" ") {
         token: path_token(word)
         if !token.contains("/") || !token.contains(".") -> next
@@ -3644,7 +3638,7 @@ stem_owners: fn(applied: [Applied], row: String) -> [String] Never! {
 
 // A word of a row as a path: quotes and brackets dropped, and a `:line` after it.
 path_token: fn(word: String) -> String Never! {
-    token := word.copy()
+    ^token: word.copy()
     loop mark in PATH_MARKS -> token = token.removeprefix(mark).removesuffix(mark)
     token.partition(":").head.copy()
 }
@@ -3659,7 +3653,7 @@ path_stem: fn(path: String) -> String Never! {
 // The report lines about `job` (its set-aside, gate, build and test rows).
 rows_of: fn(report: String, job: Job, name: String) -> [String] Never! {
     key: "{job.lane} {name}"
-    out := [String]{}
+    ^out: [String]{}
     loop line in report.lines() {
         if line.contains(key) -> out.push(clip(line, 400))
     }
@@ -3672,7 +3666,7 @@ chain_commit: fn(dir: String, index: String, tip: String, what: String, paths: [
     // A path one member creates and a later one removes (a move within the
     // group) is neither on disk nor tracked; staging it would fail the group.
     tracked: nul_paths(git_paths(dir, index, [String]{"ls-files", "-z"}, paths))
-    live := [String]{}
+    ^live: [String]{}
     loop path in paths {
         if path == "" || live.contains(path) -> next
         if on_disk(dir, path) || tracked.contains(path) -> live.push(path.copy())
@@ -3781,8 +3775,8 @@ serve_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never!
             time.sleep(30s)
             next
         }
-        queued := [Job]{}
-        names := [String]{}
+        ^queued: [Job]{}
+        ^names: [String]{}
         loop entry in entries(queue) {
             if !entry.is_dir && entry.name.ends_with(".job") -> names.push(entry.name.copy())
         }
@@ -3795,7 +3789,7 @@ serve_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never!
                 files.write("{results}/{name.removesuffix(".job")}.result", "REJECTED the job file is not LANE<TAB>MSG<TAB>PATCH\n") ?? ()
                 next
             }
-            job := found[0].copy()
+            ^job: found[0].copy()
             job.name = name.removesuffix(".job")
             queued.push(job)
         }
@@ -3806,7 +3800,7 @@ serve_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never!
                 next
             }
             list: "{queue}/taken/batch-{epoch()}.list"
-            lines := [String]{}
+            ^lines: [String]{}
             loop job in admitted -> lines.push(job_line(job))
             files.write(list, "{lines.join("\n")}\n") ?? ()
             note(log, "batch: {admitted.len()} job(s)")
@@ -3828,7 +3822,7 @@ note: fn(log: String, line: String) -[FS, Time]> {
 // queue.
 admit: fn(tools: String, queue: String, results: String, log: String, queued: [Job]) -[Exec, Env, FS, IO, Time, Time.Wait]> [Job] Never! {
     if queued.len() > 1 {
-        stacked := [String]{"Tools/Agent/Land.jet", "prescreen", queued[queued.len() - 1].patch.copy()}
+        ^stacked: [String]{"Tools/Agent/Land.jet", "prescreen", queued[queued.len() - 1].patch.copy()}
         loop at in 0..<(queued.len() - 1) -> stacked.push(queued[at].patch.copy())
         if seed_run(tools, stacked, 0).code == 0 {
             loop job in queued {
@@ -3839,9 +3833,9 @@ admit: fn(tools: String, queue: String, results: String, log: String, queued: [J
         }
         note(log, "stacked prescreen failed; admitting one by one")
     }
-    admitted := [Job]{}
+    ^admitted: [Job]{}
     loop job in queued {
-        args := [String]{"Tools/Agent/Land.jet", "prescreen", job.patch.copy()}
+        ^args: [String]{"Tools/Agent/Land.jet", "prescreen", job.patch.copy()}
         loop earlier in admitted -> args.push(earlier.patch.copy())
         screened: seed_run(tools, args, 0)
         files.rename("{queue}/{job.name}.job", "{queue}/taken/{job.name}.job") ?? ()
@@ -3875,20 +3869,20 @@ land_bisecting: fn(tools: String, worktree: String, results: String, log: String
         return
     }
     half: (jobs.len() + 1) /% 2
-    first := [Job]{}
-    second := [Job]{}
+    ^first: [Job]{}
+    ^second: [Job]{}
     loop at in 0..<jobs.len() {
         if at < half -> first.push(jobs[at].copy()) else -> second.push(jobs[at].copy())
     }
     note(log, "batch of {jobs.len()} failed (rc {code}); bisecting {half} + {jobs.len() - half}")
     land_bisecting(tools, worktree, results, log, "{list}.a", first)
     // A lane whose job in the first half did not land keeps its later jobs.
-    failed := [String:String]{}
+    ^failed: [String:String]{}
     loop job in first {
         result: files.read("{results}/{job.name}.result") ?? ""
         if !result.starts_with("LANDED") -> failed[job.lane] = job.name.copy()
     }
-    rest := [Job]{}
+    ^rest: [Job]{}
     loop job in second {
         if failed.get(job.lane) == .Val(base) {
             files.write("{results}/{job.name}.result", "STALE an earlier patch of its stack did not land ({base}); rebase the stack onto HEAD\n") ?? ()
@@ -3910,11 +3904,11 @@ write_results: fn(results: String, jobs: [Job], report: String, why: String) -[F
 
 job_result: fn(job: Job, report: String, why: String) -> String Never! {
     name: files.basename(job.patch)
-    landed := ""
-    stale_stack := false
-    stale := false
-    skipped := false
-    aside := ""
+    ^landed: ""
+    ^stale_stack: false
+    ^stale: false
+    ^skipped: false
+    ^aside: ""
     loop line in report.lines() {
         if line.starts_with("COMMITTED ") && line.ends_with(" {job.lane} {name}") {
             landed = line.remove_prefix("COMMITTED ").partition(" ").head.copy()
@@ -3938,7 +3932,7 @@ job_result: fn(job: Job, report: String, why: String) -> String Never! {
     if aside != "" {
         return "REJECTED set aside by the train: {aside}\n{rows_of(report, job, name).join("\n")}\n"
     }
-    tail := [String]{}
+    ^tail: [String]{}
     loop line in report.lines() {
         if !line.starts_with("nm: ") -> tail.push(line.copy())
     }
@@ -4029,7 +4023,7 @@ publish_base: fn(tools: String, repo: String, commit: String) -[Exec, Env, FS, I
         return Step{ok: false, line: "publish-base: install-latest is {short_sha(published)}, not {short_sha(sha)}; nothing published"}
     }
     dir: "{base}/{sha}"
-    state := "already published"
+    ^state: "already published"
     if !files.is_dir(dir) {
         staged: "{base}/.new.{sys.pid()}"
         files.remove_all(staged) ?? ()
@@ -4054,7 +4048,7 @@ publish_base: fn(tools: String, repo: String, commit: String) -[Exec, Env, FS, I
     files.symlink(sha, link, replace: true) ?? ()
     files.rename(link, "{base}/latest") ?? ()
     prune_bases(base)
-    seeding := process.cmd([String]{"{seed_dir()}/jet", "Tools/Agent/Chain.jet", "seed-published", dir}).cwd(tools).output_limit(268435456)
+    ^seeding: process.cmd([String]{"{seed_dir()}/jet", "Tools/Agent/Chain.jet", "seed-published", dir}).cwd(tools).output_limit(268435456)
     loop setting in unit_env(tools) -> seeding = seeding.env(setting.name, setting.value)
     seeded: if seeding.run() == .Ok(receipt) -> "{receipt.output}{receipt.errors}".trim_end().last_lines(1).join("") else -> "seed-published: Tools/Agent/Chain.jet could not start"
     // A jetpack whose inputs did not change is copied now; otherwise the golden run builds one after its census.
@@ -4081,9 +4075,9 @@ copy_install: fn(from: String, to: String) -[FS]> String Never! {
 // Keep the BASE_KEEP newest published bases, plus the newest one with a
 // finished goldens.json, so lanes always have a golden baseline.
 prune_bases: fn(base: String) -[FS]> {
-    published := [Dated]{}
-    golden := ""
-    golden_time := -1
+    ^published: [Dated]{}
+    ^golden: ""
+    ^golden_time: -1
     loop entry in entries(base) {
         if entry.name.starts_with(".") || entry.name == "latest" -> next
         dir: "{base}/{entry.name}"
@@ -4145,8 +4139,8 @@ golden_worker_main: fn(tools: String) -[Exec, Env, FS, IO, Time, Time.Wait]> Int
         }
         close(want)
         print("{stamp()} worker: queueing a golden run (want {short_sha(first_line_of("{base}/.golden-want"))})")
-        argv := [String]{"{seed_dir()}/jet", "Tools/Agent/Chain.jet", "slot", "--", "{seed_dir()}/jet", "Tools/Agent/Land.jet", "publish", "golden-run"}
-        spec := process.cmd(argv).cwd(tools).env("SLOT_SMALL", "0").output_limit(268435456)
+        ^argv: [String]{"{seed_dir()}/jet", "Tools/Agent/Chain.jet", "slot", "--", "{seed_dir()}/jet", "Tools/Agent/Land.jet", "publish", "golden-run"}
+        ^spec: process.cmd(argv).cwd(tools).env("SLOT_SMALL", "0").output_limit(268435456)
         loop setting in unit_env(tools) -> spec = spec.env(setting.name, setting.value)
         receipt: spec.run() ?? {
             print("{stamp()} worker: the build slot cannot start: {err}")
@@ -4185,7 +4179,7 @@ golden_census: fn(repo: String, base: String, sha: String, dir: String, work: St
         return 1
     }
     identity: read_identity(dir)
-    exclude := [String]{}
+    ^exclude: [String]{}
     loop stem in (process.env_get("GOLD_EXCLUDE") ?? GOLD_EXCLUDE).split(" ") {
         if stem != "" -> exclude.push(stem.copy())
     }
@@ -4206,10 +4200,10 @@ golden_census: fn(repo: String, base: String, sha: String, dir: String, work: St
     // Golden examples run host tools (C compilers, interpreters) that only the
     // dev shell (Tools/Agent/JetEnv.jet) supplies until jet does.
     cpus: process.env_nonempty("SLOT_CPUS") ?? ""
-    argv := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax=24G", "-p", "MemorySwapMax=0", "timeout", "7200", "prlimit", "--core=0", HEAVY_STACK, "--"}
+    ^argv: [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax=24G", "-p", "MemorySwapMax=0", "timeout", "7200", "prlimit", "--core=0", HEAVY_STACK, "--"}
     if cpus != "" -> argv.extend([String]{"taskset", "-c", cpus})
     argv.extend([String]{"{dir}/jet", "{tree}/Tools/Agent/JetEnv.jet", "{dir}/jet", "test", "Compiler", "--profile", "golden", "-O0", "--cases={selection}", "--jobs=6", "--time-limit=120s", "--results={results}"})
-    env := compile_env(identity, tree)
+    ^env: compile_env(identity, tree)
     env.push(Setting{name: "JET_TEST_STATE_DIR", value: "{work}/state"})
     env.push(Setting{name: "TMPDIR", value: "{work}/tmp"})
     code: run_logged(tree, argv, env, "{work}/goldens")
@@ -4227,7 +4221,7 @@ golden_census: fn(repo: String, base: String, sha: String, dir: String, work: St
         else -> {
             errors: files.read("{work}/goldens.err") ?? ""
             output: files.read("{work}/goldens.out") ?? ""
-            clipped := [String]{}
+            ^clipped: [String]{}
             loop line in output.trim_end().last_lines(20) -> clipped.push(clip(line, 400))
             size: (files.read_bytes(results) ?? [U8]{}).len()
             files.write("{dir}/goldens.failed", "rc={code}: no counts after {secs}s; results bytes {size}\n-- stderr tail\n{errors.trim_end().last_lines(60).join("\n")}\n-- stdout tail\n{clipped.join("\n")}\n") ?? ()
@@ -4242,7 +4236,7 @@ golden_census: fn(repo: String, base: String, sha: String, dir: String, work: St
 
 // `argv` in `dir` with `env` added.
 run_in_env: fn(dir: String, argv: [String], env: [Setting]) -[Exec, Time.Wait]> Ran Never! {
-    spec := process.cmd(argv).cwd(dir).output_limit(268435456)
+    ^spec: process.cmd(argv).cwd(dir).output_limit(268435456)
     loop setting in env -> spec = spec.env(setting.name, setting.value)
     receipt: spec.run() ?? return Ran{code: 127, output: "", errors: "{argv[0]}: {err}"}
     code: if receipt.signal == .Val(_) -> 128 else -> receipt.code
@@ -4253,14 +4247,14 @@ run_in_env: fn(dir: String, argv: [String], env: [Setting]) -[Exec, Time.Wait]> 
 // golden Examples rows minus the `exclude` example stems. Each stem must drop
 // a row, or the exclusion could not hold.
 golden_rows: fn(listed: String, exclude: [String]) -> [String] LandError! {
-    hit := [Bool]{}
+    ^hit: [Bool]{}
     loop _ in exclude -> hit.push(false)
-    rows := [String]{}
+    ^rows: [String]{}
     loop line in listed.lines() {
         fields: line.partition("\t")
         path: fields.tail.partition("\t").head
         if fields.head != "golden" || !path.starts_with("Examples/") -> next
-        dropped := false
+        ^dropped: false
         loop at in 0..<exclude.len() {
             file: "Examples/{exclude[at]}.jet"
             stem: "Examples/{exclude[at]}"
@@ -4293,7 +4287,7 @@ jetpack_reuse: fn(repo: String, base: String, sha: String) -[Exec, FS, Time.Wait
     dir: "{base}/{sha}"
     if files.is_file("{dir}/jetpack") -> return true
     if !files.is_dir(dir) -> return false
-    built := [Dated]{}
+    ^built: [Dated]{}
     loop entry in entries(base) {
         if entry.name.starts_with(".") || entry.name == "latest" || entry.name == sha -> next
         jetpack: "{base}/{entry.name}/jetpack"
@@ -4302,7 +4296,7 @@ jetpack_reuse: fn(repo: String, base: String, sha: String) -[Exec, FS, Time.Wait
         }
     }
     loop prev in newest_first(built) {
-        args := [String]{"diff", "--quiet", prev.path, sha, "--"}
+        ^args: [String]{"diff", "--quiet", prev.path, sha, "--"}
         args.extend(JETPACK_INPUTS.copy())
         if git(repo, args).code != 0 -> next
         // The receipt first: Tools/Agent/Suite.jet keys on the jetpack file, so it never sees a jetpack without its receipt.
@@ -4332,18 +4326,18 @@ jetpack_build: fn(repo: String, base: String, sha: String, tree: String, tmp: St
     start: epoch()
     print("{stamp()} jetpack {short_sha(sha)}: hosted build with {dir}/jet")
     files.create_dir_all(tmp) ?? ()
-    argv := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax=16G", "-p", "MemorySwapMax=0", "timeout", "6000", "prlimit", "--core=0", "--"}
+    ^argv: [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax=16G", "-p", "MemorySwapMax=0", "timeout", "6000", "prlimit", "--core=0", "--"}
     cpus: process.env_nonempty("SLOT_CPUS") ?? ""
     if cpus != "" -> argv.extend([String]{"taskset", "-c", cpus})
     argv.extend([String]{"{dir}/jet", "Jetpack/Bootstrap/Check.jet", "--hosted"})
-    env := compile_env(read_identity(dir), tree)
+    ^env: compile_env(read_identity(dir), tree)
     env.push(Setting{name: "JETPACK_WORKER", value: worker.copy()})
     env.push(Setting{name: "JET", value: "{dir}/jet"})
     env.push(Setting{name: "TMPDIR", value: tmp.copy()})
     built: run_in_env(tree, argv, env)
     files.write("{dir}/jetpack.log", both(built)) ?? ()
     bootstrap: "{state_root()}/jetpack-bootstrap"
-    runs := [Dated]{}
+    ^runs: [Dated]{}
     loop entry in entries(bootstrap) {
         if !entry.name.starts_with("{worker}-") -> next
         bin: "{bootstrap}/{entry.name}/hosted/project/.jet/build/jetpack"
@@ -4456,7 +4450,7 @@ release_train_run: fn() -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
 // The batch-log line of a release gate run of `head`.
 train_verdict: fn(code: Int, output: String, head: String, out: String) -> String Never! {
     if code == 0 {
-        version := ""
+        ^version: ""
         loop line in output.lines() {
             if line.starts_with("PASS:") {
                 version = line.remove_prefix("PASS:").trim().partition(" ").head.copy()
@@ -4465,7 +4459,7 @@ train_verdict: fn(code: Int, output: String, head: String, out: String) -> Strin
         return "RELEASE READY {version} from {short_sha(head)}; run the commands in {out}"
     }
     if code == 1 {
-        reasons := [String]{}
+        ^reasons: [String]{}
         loop line in output.lines() {
             if line.starts_with("FAIL: ") -> reasons.push(clip(line.remove_prefix("FAIL: "), 200))
         }
@@ -4585,8 +4579,8 @@ receipt_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         term.eprint("{launcher}: seed {seed} has no IDENTITY")
         return 2
     }
-    commit := ""
-    source_identity := ""
+    ^commit: ""
+    ^source_identity: ""
     if {
         args[0] == "check" -> {
             tree: absolute(args[2])
@@ -4682,7 +4676,7 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     source: "jet@a0.0.43#aaaa"
     seed: "jet@a0.0.43#bbbb"
     assert_eq(gate(source, seed, dir).reason, "no preflight receipt for source identity jet@a0.0.43#aaaa")
-    clean := [PassRun]{}
+    ^clean: [PassRun]{}
     loop pass in RECEIPT_PASSES {
         clean.push(PassRun{name: pass.copy(), rc: 0, seconds: 1, peak: 0, note: "", lines: [String]{}})
     }
@@ -4700,7 +4694,7 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     assert_eq(other.reason, "the preflight receipt for source identity jet@a0.0.43#aaaa is from a census by seed jet@a0.0.43#bbbb, not jet@a0.0.43#cccc")
     assert(!gate("jet@a0.0.43#dddd", seed, dir).admitted)
     // #6763: a receipt with a failing row, or none for a RECEIPT_PASSES pass, admits nothing.
-    failing := clean.copy()
+    ^failing: clean.copy()
     failing[failing.len() - 2] = PassRun{name: "area:CLI", rc: 1, seconds: 1, peak: 0, note: "cap 5857M", lines: [String]{}}
     failing[failing.len() - 3] = PassRun{name: "areas", rc: 1, seconds: 1, peak: 0, note: "", lines: [String]{}}
     write_receipt(source, seed, "0123456789abcdef", [String]{}, receipt_rows(failing), dir) ?? panic(err.message)

@@ -6,9 +6,9 @@ use {
 failure_worker: fn() {}
 
 run: fn() {
-    tree := services.tree("delivery")
+    ^tree: services.tree("delivery")
     tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
-    temp := testing.temp_dir("service-failure")
+    ^temp: testing.temp_dir("service-failure")
     store_path: Path.from(temp).join("delivery.state").to_string()
     store: services.state_store(store_path) ?? panic("state store")
     tree.set_state_event_log(store, "delivery-events", 1, "reversible") ?? panic("state")

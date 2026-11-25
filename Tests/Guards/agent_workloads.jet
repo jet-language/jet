@@ -108,8 +108,8 @@ s4_agent_adapter_has_all: fn(adapter: String, needles: [String]) {
 // version checks are part of each caller's assertions, not a bypassed parser.
 s4_agent_tsv_rows: fn(path: String, header: String, width: Int) -> [String] {
     source: files.read(path) ?? panic("read {path}")
-    rows := [String]{}
-    first := true
+    ^rows: [String]{}
+    ^first: true
     loop line in source.lines() {
         if first {
             assert(line == header, "{path}: schema drifted")
@@ -148,7 +148,7 @@ s4_agent_native_os_matrix_is_frozen_and_names_current_host: fn() {
     assert(rows == expected, "native OS matrix changed without a frozen review")
     host: sys.name()
     architecture: sys.arch()
-    found := false
+    ^found: false
     loop row in rows {
         fields: row.split("\t").to_list()
         if fields[1] == host {

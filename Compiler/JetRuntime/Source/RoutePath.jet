@@ -8,7 +8,7 @@
 path_route_new: fn(data: I64, len: I64) -> I64 {
     sequence: data_sequence_new(len, RT_HOST_U8_STRIDE)
     bytes: rt_text_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < len {
         host_u8_put(bytes, at, rt_text_byte(wrapping(data + at)))
         at += I64{1}
@@ -25,7 +25,7 @@ path_route_from_text: fn(text: I64) -> I64 { path_route_new(rt_text_data(text), 
 path_route_lexical: fn(text: I64) -> I64 {
     result: rt_text_copy(rt_text_data(text), rt_text_len(text))
     data: rt_text_data(result)
-    at := I64{0}
+    ^at: I64{0}
     loop at < rt_text_len(result) {
         if (rt_text_byte(wrapping(data + at)) == I64{92}) {
             rt_text_put(wrapping(data + at), I64{47})
@@ -50,10 +50,10 @@ path_route_byte: fn(data: I64, at: I64) -> I64 { rt_text_byte(wrapping(data + at
 // CurDir and stays). Never trims into the root separator at `start`.
 path_route_trim_end: fn(data: I64, start: I64, end: I64, rooted: Bool) -> I64 {
     floor: if rooted -> start + I64{1} else -> start
-    cut := end
+    ^cut: end
     loop {
         loop cut > floor && path_route_byte(data, cut - I64{1}) == (I64{47}) -> cut -= I64{1}
-        first := cut
+        ^first: cut
         loop first > floor && path_route_byte(data, first - I64{1}) != (I64{47}) -> first -= I64{1}
         if !(cut - first == I64{1} && path_route_byte(data, first) == I64{46} && first > start) {
             break
@@ -65,7 +65,7 @@ path_route_trim_end: fn(data: I64, start: I64, end: I64, rooted: Bool) -> I64 {
 
 // The start of the component ending at `end` (after trimming).
 path_route_component_start: fn(data: I64, floor: I64, end: I64) -> I64 {
-    first := end
+    ^first: end
     loop first > floor && path_route_byte(data, first - I64{1}) != (I64{47}) -> first -= I64{1}
     first
 }
@@ -96,7 +96,7 @@ path_route_file_name: fn(data: I64, len: I64, out: I64) -> I64 {
 // rsplit_file_at_dot: the position of the extension dot in a file name, or -1
 // when the name has none (no dot, or only a leading one).
 path_route_extension_dot: fn(data: I64, start: I64, length: I64) -> I64 {
-    at := start + length - I64{1}
+    ^at: start + length - I64{1}
     loop at > start {
         if (path_route_byte(data, at) == I64{46}) { return at }
         at -= I64{1}
@@ -179,7 +179,7 @@ path_route_extension_dot: fn(data: I64, start: I64, length: I64) -> I64 {
 // pushed as owned texts in order, CurDir dropped. True when rooted.
 path_route_parts: fn(data: I64, len: I64, parts: I64) -> Bool {
     rooted: len > I64{0} && path_route_byte(data, I64{0}) == I64{47}
-    at := I64{0}
+    ^at: I64{0}
     loop at < len {
         loop at < len && path_route_byte(data, at) == (I64{47}) -> at += I64{1}
         if (at >= len) { break }
@@ -201,7 +201,7 @@ path_route_push: fn(words: I64, text: I64) {
 
 path_route_words_drop: fn(words: I64) {
     count: rt_text_word(wrapping(words + DATA_SEQUENCE_LENGTH))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         jet_rt_string_drop(rt_text_word(wrapping(rt_text_word(wrapping(words + DATA_SEQUENCE_DATA)) + at * I64{8})))
         at += I64{1}
@@ -237,8 +237,8 @@ path_route_text_is_dot_dot: fn(text: I64) -> Bool {
     rooted: path_route_parts(rt_text_data(source), rt_text_len(source), raw)
     jet_rt_string_drop(source)
     kept: data_sequence_new(I64{0}, I64{8})
-    depth := I64{0}
-    at := I64{0}
+    ^depth: I64{0}
+    ^at: I64{0}
     loop at < path_route_count(raw) {
         part: path_route_word(raw, at)
         at += I64{1}
@@ -275,7 +275,7 @@ path_route_containment_parts: fn(path: I64, parts: I64) -> Bool {
     raw: data_sequence_new(I64{0}, I64{8})
     rooted: path_route_parts(rt_text_data(source), rt_text_len(source), raw)
     jet_rt_string_drop(source)
-    at := I64{0}
+    ^at: I64{0}
     loop at < path_route_count(raw) {
         part: path_route_word(raw, at)
         at += I64{1}
@@ -299,8 +299,8 @@ path_route_containment_parts: fn(path: I64, parts: I64) -> Bool {
     path_rooted: path_route_containment_parts(path, path_parts)
     base_count: path_route_count(base_parts)
     path_count: path_route_count(path_parts)
-    within := base_rooted == path_rooted && path_count >= base_count
-    at := I64{0}
+    ^within: base_rooted == path_rooted && path_count >= base_count
+    ^at: I64{0}
     loop within && at < base_count {
         if !jet_rt_string_eq(path_route_word(base_parts, at), path_route_word(path_parts, at)) {
             within = false
@@ -324,7 +324,7 @@ path_route_containment_parts: fn(path: I64, parts: I64) -> Bool {
         return result
     }
     slot: jet_rt_alloc(I64{16}, I64{8})
-    text := jet_rt_string_clone(rt_static_text(""))
+    ^text: jet_rt_string_clone(rt_static_text(""))
     if (jet_sys_current_dir_raw(slot, wrapping(slot + I64{8})) == I64{1}) {
         jet_rt_string_drop(text)
         text = rt_text_word(slot)

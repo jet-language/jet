@@ -49,9 +49,9 @@ foundation_pascal_name_case: fn(name: String) -> String Never! {
         return "{GENERATED_NAME_COMPTIME_MARK}{foundation_pascal_name_case(name.removeprefix(GENERATED_NAME_COMPTIME_MARK))}"
     }
     leading: name.starts_with("_")
-    body := name
+    ^body: name
     loop body.starts_with("_") -> body = body.removeprefix("_")
-    words := [String]{}
+    ^words: [String]{}
     loop word in body.split("_") {
         if word == "" -> next
         words.push(foundation_capitalize_first(word))
@@ -62,7 +62,7 @@ foundation_pascal_name_case: fn(name: String) -> String Never! {
 }
 
 foundation_capitalize_first: fn(word: String) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop scalar in word.chars() {
         text: "{scalar}"
         out.push(if out.len() == 0 -> text.to_upper() else -> text)
@@ -76,12 +76,12 @@ foundation_capitalize_first: fn(word: String) -> String Never! {
 foundation_generated_type_name: fn(input: String, fallback: String) -> String Never! {
     // Clark-expanded names use `{uri}local`; the opening delimiter is
     // namespace syntax, not part of the identifier.
-    raw := input
+    ^raw: input
     loop raw.starts_with("@") || raw.starts_with("$") {
         raw = raw.removeprefix("@").removeprefix("$")
     }
     raw = raw.removeprefix("{{")
-    normalized := ""
+    ^normalized: ""
     loop scalar in raw.chars() {
         text: "{scalar}"
         if {
@@ -96,7 +96,7 @@ foundation_generated_type_name: fn(input: String, fallback: String) -> String Ne
     }
     loop normalized.ends_with("_") -> normalized = normalized.removesuffix("_")
     if normalized == "" -> normalized = fallback
-    result := foundation_pascal_name_case(normalized)
+    ^result: foundation_pascal_name_case(normalized)
     loop result.ends_with("_") -> result = result.removesuffix("_")
     if result == "" -> result = foundation_pascal_name_case(fallback)
     // A preserved soft-public `_` is legal only before an alphabetic name.
@@ -121,14 +121,14 @@ foundation_starts_alphabetic: fn(text: String) -> Bool Never! {
 // byte outside ASCII word characters replaced by `_`, `out` when empty, and a
 // leading digit guarded by `_`.
 foundation_sanitize_crate_name: fn(raw: String) -> String Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop scalar in raw.chars() {
         text: "{scalar}"
         bytes: text.bytes()
         word: bytes.len() == 1 && foundation_ascii_word(Int{bytes[0]})
         out.push(if word -> text else -> "_")
     }
-    name := out.join("")
+    ^name: out.join("")
     if name == "" -> name = "out"
     first: Int{name.bytes()[0]}
     if first >= 48 && first <= 57 -> name = "_{name}"
@@ -144,13 +144,13 @@ foundation_ascii_word: fn(code: Int) -> Bool Never! {
 // upper-case letter after a lower-case letter or digit starts a new `_` word,
 // every letter is lower-cased, and a reserved result gains `_field`.
 foundation_generated_snake_name: fn(input: String, fallback: String) -> String Never! {
-    raw := input
+    ^raw: input
     loop raw.starts_with("@") || raw.starts_with("$") {
         raw = raw.removeprefix("@").removeprefix("$")
     }
     raw = raw.removeprefix("{{")
-    normalized := ""
-    previous_lower_or_digit := false
+    ^normalized: ""
+    ^previous_lower_or_digit: false
     loop scalar in raw.chars() {
         text: "{scalar}"
         if {
@@ -180,7 +180,7 @@ foundation_generated_snake_name: fn(input: String, fallback: String) -> String N
     if normalized == "" -> normalized = fallback
     // Every letter is already lower-case, so `canonical_name_case(_, Snake)`
     // keeps the normalized spelling.
-    result := normalized
+    ^result: normalized
     loop result.ends_with("_") -> result = result.removesuffix("_")
     if result == "" -> result = fallback
     // A preserved soft-public `_` is legal only before an alphabetic name.

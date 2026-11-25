@@ -46,7 +46,7 @@ SemaFunctionHeaderMarkerGate: struct {
 
 sema_function_header_normalize_external_method: fn(function: Func) -> Item Never! {
     external: function.external_type ?? return Item.Func{value: function}
-    method := function
+    ^method: function
     method.external_type = None
     Item.Impl{
         value: ImplDef{
@@ -76,25 +76,25 @@ sema_function_header_normalize_external_method: fn(function: Func) -> Item Never
 // before the target, and a clean body reports the target, E0301
 // (sema_function_header_external_target).
 sema_function_header_normalize_external_methods: fn(program: ^Program, in_package: Bool, diagnostics: ^[Diagnostic]) Never! {
-    external := false
+    ^external: false
     loop item in program.items {
         if item == .Func(function) && function.external_type != None -> external = true
     }
     if !external {
         return
     }
-    imported := false
+    ^imported: false
     loop import in program.imports {
         if import.kind == .Unqualified(_, _, _, _, _) -> imported = true
     }
-    declared := [String:Bool]{}
+    ^declared: [String:Bool]{}
     loop item in program.items {
         if item == .Func(_) -> next
         name: sema_registration_root_name(item)
         if name != "" -> declared[name] = true
     }
-    seen := SemaKeyRows{}
-    items := [Item]{}
+    ^seen: SemaKeyRows{}
+    ^items: [Item]{}
     loop item in program.items {
         if item == .Func(function) && function.external_type == .Val(target) {
             target_id: sema_key_text(seen, target.name)
@@ -125,7 +125,7 @@ sema_function_header_external_target: fn(function: Func, diagnostics: ^[Diagnost
 }
 
 sema_function_header_check_root_params: fn(function: Func, is_method: Bool, diagnostics: ^[Diagnostic]) -> Bool {
-    valid := true
+    ^valid: true
     if is_method || function.external_type != None {
         loop parameter_index in 0..<function.params.len() {
             if function.params[parameter_index].root {
@@ -200,7 +200,7 @@ SemaMemoConfig: struct {
 sema_function_header_memo_config: fn(function: Func) -> SemaMemoConfig Never! {
     loop marker in function.markers {
         if marker.name != MARKER_MEMO -> next
-        unbounded := false
+        ^unbounded: false
         if marker.args.len() == 1 && marker.arg_labels.len() > 0 {
             if marker.arg_labels[0] == .Val(label) {
                 if marker.args[0] == .Expr(value) {
@@ -245,14 +245,14 @@ sema_function_header_memo_target: fn(check: SemaBodyCheck, target: SymbolID) -> 
 sema_function_header_memo_stats: fn(receiver: Expr, method: String, args: [CallArg], method_span: Span, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     if method != "cache" || args.len() > 0 -> return unhandled
-    name := ""
+    ^name: ""
     if receiver == .Ident(receiver_name, _, _) -> name = receiver_name
     if name == "" -> return unhandled
     nearest: sema_scope_resolve_index(check.scopes, name) ?? return unhandled
     symbol: sema_scope_binding_symbol(check.environment.*, check.scopes, nearest)
     if symbol.kind != SymbolKind.Function -> return unhandled
     config: sema_function_header_memo_target(check, symbol.id) ?? return unhandled
-    bound := "none"
+    ^bound: "none"
     if config.bound == .Val(limit) -> bound = "{limit}" else if !config.unbounded {
         return unhandled
     }
@@ -267,22 +267,22 @@ sema_function_header_memo_stats: fn(receiver: Expr, method: String, args: [CallA
 // A script variable's default names the caller's variable of its own name,
 // not the parameter.
 sema_function_header_check_default_forward_refs: fn(function: Func, diagnostics: ^[Diagnostic]) -> [Int] {
-    names := [String]{}
+    ^names: [String]{}
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].name != "self" {
             names.push(function.params[parameter_index].name)
         }
     }
-    invalid := [Int]{}
-    index := 0
+    ^invalid: [Int]{}
+    ^index: 0
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].name == "self" -> next
         if !function.params[parameter_index].script_variable && function.params[parameter_index].default == .Val(default) {
-            references := [Expr]{}
+            ^references: [Expr]{}
             sema_function_header_default_idents(default, references)
             loop reference in references {
                 if reference == .Ident(name, span, _) {
-                    later := false
+                    ^later: false
                     loop (position, candidate) in names {
                         if candidate == name {
                             later = position >= index
@@ -425,7 +425,7 @@ sema_policy_sentries: fn(declarations: [PolicyDeclaration]) -> Bool? Never! {
 // The header forms the body checker does not handle yet. Each one records
 // why on `context`, so an incomplete function never fails without a cause.
 sema_function_header_supported: fn(function: Func, context: ^SemaCheckContext) -> Bool Never! {
-    supported := true
+    ^supported: true
     if function.head_pattern != None {
         sema_check_unsupported(context, "the multi-head pattern function `{function.name}` reached body checking without being desugared")
         supported = false
@@ -505,7 +505,7 @@ sema_function_header_check_variadic_bound_shape: fn(function: Func, environment:
     if function.params.len() == 0 -> return true
     last: function.params[function.params.len() - 1]
     if !last.variadic -> return true
-    bounded := false
+    ^bounded: false
     if last.variadic_bound_list == .Val(list) -> bounded = list.len() > 0 else {
         if last.ty == .Named(trait_name) && trait_name != "" {
             bounded = sema_type_builtin_trait_symbol(trait_name) != None
@@ -516,8 +516,8 @@ sema_function_header_check_variadic_bound_shape: fn(function: Func, environment:
         }
     }
     if !bounded -> return true
-    loops := 0
-    uses := [Span]{}
+    ^loops: 0
+    ^uses: [Span]{}
     loop statement in function.body {
         sema_function_header_variadic_statement(statement, last.name, true, loops, uses)
     }
@@ -561,7 +561,7 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
             sema_function_header_variadic_body(body, name, loops, uses)
         }
         .For(_, _, second, kind, body, span, _, label, _) -> {
-            direct := false
+            ^direct: false
             if top_level && second == None && label == None && kind == .In(direct_collection, direct_step) && direct_step == None && direct_collection == .Ident(direct_name, _, _) && direct_name == name {
                 direct = true
             }

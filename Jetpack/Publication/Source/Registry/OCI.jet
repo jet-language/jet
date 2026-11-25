@@ -158,7 +158,7 @@ publication_finalize_oci_referrers: fn(repo: String, entry: PublicationIndexEntr
     }
     payloads: [String]{sbom, publication_oci_signature_payload(entry), publication_oci_provenance_payload(entry), publication_oci_reproducibility_payload(entry)}
     types: [String]{PUBLICATION_OCI_SBOM_TYPE, PUBLICATION_OCI_SIGNATURE_TYPE, PUBLICATION_OCI_PROVENANCE_TYPE, PUBLICATION_OCI_REPRODUCIBILITY_TYPE}
-    descriptors := [PublicationOCIDescriptor]{}
+    ^descriptors: [PublicationOCIDescriptor]{}
     loop index in 0..<payloads.len() {
         bytes: payloads[index].bytes()
         digest: "sha256-{pkg_sha256_hex(bytes)}"
@@ -296,7 +296,7 @@ publication_read_oci_file: fn(path: String, limit: Int) -[FS, Env]> [U8] IOError
     if info.size > limit {
         return Err(publication_invalid_oci("OCI referrer payload exceeds its size limit"))
     }
-    held := foundation_open_file_authority(files.dirname(path), files.basename(path))
+    ^held: foundation_open_file_authority(files.dirname(path), files.basename(path))
     bytes: if held.read_bounded(limit) == {
         .Ok(bytes) -> bytes
         .Err(error) -> {
@@ -341,7 +341,7 @@ publication_oci_unavailable: fn(error: IOError, detail: String) -> IOError Never
 }
 
 publication_render_oci_index: fn(subject: String, descriptors: [PublicationOCIDescriptor]) -> String Never! {
-    manifests := [Dyn]{}
+    ^manifests: [Dyn]{}
     loop descriptor in descriptors {
         manifests.push(
             Dyn.Object(
@@ -365,7 +365,7 @@ publication_verify_oci_referrers: fn(repo: String, entry: PublicationIndexEntry)
     blobs: files.join(root, "blobs")
     publication_ensure_real_directory(blobs, "OCI referrer blob store")
     blob_authority: foundation_open_directory_authority(blobs)
-    referenced := [String]{}
+    ^referenced: [String]{}
     loop descriptor in descriptors {
         if referenced.contains(descriptor.digest) {
             return Err(publication_invalid_oci("OCI referrer index repeats a blob digest"))
@@ -450,8 +450,8 @@ publication_parse_oci_index: fn(bytes: [U8], subject: String) -> [PublicationOCI
     if manifests.len() != 4 {
         return Err(publication_invalid_oci("OCI referrer index must contain SBOM, signature, provenance, and reproducibility"))
     }
-    seen := [String]{}
-    descriptors := [PublicationOCIDescriptor]{}
+    ^seen: [String]{}
+    ^descriptors: [PublicationOCIDescriptor]{}
     loop manifest_value in manifests {
         manifest: pkg_json_object(manifest_value) ?? return Err(publication_invalid_oci("OCI referrer descriptor is not an object"))
         publication_require_oci_keys(manifest, [String]{"artifactType", "digest", "mediaType", "size"}, "descriptor")

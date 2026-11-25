@@ -9,7 +9,7 @@
 // No Rust/libc parse operation, fixed digit cap, or host floating-point mode.
 
 numeric_node_shift: fn(node: I64, bits: I64) {
-    count := bits
+    ^count: bits
     loop count >= (I64{29}) {
         int_scale(node, I64{536870912}, I64{0})
         count -= I64{29}
@@ -18,12 +18,12 @@ numeric_node_shift: fn(node: I64, bits: I64) {
 }
 
 numeric_node_power10: fn(node: I64, power: I64) {
-    count := power
+    ^count: power
     loop count >= (I64{9}) {
         int_scale(node, I64{1000000000}, I64{0})
         count -= I64{9}
     }
-    factor := I64{1}
+    ^factor: I64{1}
     loop count > (I64{0}) {
         factor *= I64{10}
         count -= I64{1}
@@ -38,7 +38,7 @@ numeric_node_compare_twice: fn(a: I64, b: I64) -> I64 {
     bl: int_load(wrapping(b + I64{32}))
     doubled: bl + (if (int_get(b, bl - I64{1}) >= I64{500000000}) -> I64{1} else -> I64{0})
     if (al != doubled) { return if (al < doubled) -> I64{-1} else -> I64{1} }
-    at := al
+    ^at: al
     loop at > (I64{0}) {
         at -= I64{1}
         carry: if (at > I64{0} && int_get(b, at - I64{1}) >= I64{500000000}) -> I64{1} else -> I64{0}
@@ -53,7 +53,7 @@ numeric_node_compare_twice: fn(a: I64, b: I64) -> I64 {
 // ratio to [1,2), then extract only the target's significand/subnormal quanta.
 // Exact remainder comparison supplies guard+sticky together, including ties.
 numeric_float_ratio_bits: fn(numerator: I64, denominator: I64, decimal_exponent: I64) -> I64 {
-    exponent := decimal_exponent * I64{3322} /% I64{1000}
+    ^exponent: decimal_exponent * I64{3322} /% I64{1000}
     if (exponent < I64{0}) { numeric_node_shift(numerator, -exponent) } else {
         numeric_node_shift(denominator, exponent)
     }
@@ -73,8 +73,8 @@ numeric_float_ratio_bits: fn(numerator: I64, denominator: I64, decimal_exponent:
     }
     normal: exponent >= I64{-1022}
     count: if normal -> I64{53} else -> exponent + I64{1075}
-    mantissa := I64{0}
-    at := I64{0}
+    ^mantissa: I64{0}
+    ^at: I64{0}
     loop at < count {
         mantissa <<= I64{1}
         if (int_compare_abs(int_tag(numerator), int_tag(denominator)) >= I64{0}) {
@@ -108,8 +108,8 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
     start: numeric_trim_start(text)
     end: numeric_trim_end(text, start)
     data: rt_text_data(text)
-    at := start
-    sign := I64{0}
+    ^at: start
+    ^sign: I64{0}
     if (at < end) {
         byte: rt_text_byte(wrapping(data + at))
         if (byte == I64{43} || byte == I64{45}) {
@@ -120,8 +120,8 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
     // The case-insensitive specials have exactly 3 or 8 bytes after sign.
     length: end - at
     if (length == I64{3} || length == I64{8}) {
-        special := I64{0}
-        i := I64{0}
+        ^special: I64{0}
+        ^i: I64{0}
         loop i < length {
             special |= (rt_text_byte(wrapping(wrapping(data + at) + i)) & I64{223}) << (i * I64{8})
             i += I64{1}
@@ -135,13 +135,13 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
             return I64{1}
         }
     }
-    digits := I64{0}
-    fractional := I64{0}
-    significant := I64{0}
-    trailing := I64{0}
-    first_nonzero := I64{-1}
-    last_nonzero := I64{-1}
-    dot := false
+    ^digits: I64{0}
+    ^fractional: I64{0}
+    ^significant: I64{0}
+    ^trailing: I64{0}
+    ^first_nonzero: I64{-1}
+    ^last_nonzero: I64{-1}
+    ^dot: false
     loop at < end {
         byte: rt_text_byte(wrapping(data + at))
         if (byte == I64{46} && !dot) {
@@ -161,10 +161,10 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
         at += I64{1}
     }
     if (digits == I64{0}) { return numeric_float_error(text, err) }
-    explicit := I64{0}
+    ^explicit: I64{0}
     if (at < end && (rt_text_byte(wrapping(data + at)) == I64{101} || rt_text_byte(wrapping(data + at)) == I64{69})) {
         at += I64{1}
-        negative := false
+        ^negative: false
         if (at < end && (rt_text_byte(wrapping(data + at)) == I64{43} || rt_text_byte(wrapping(data + at)) == I64{45})) {
             negative = rt_text_byte(wrapping(data + at)) == I64{45}
             at += I64{1}
@@ -206,7 +206,7 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
     // so one IEEE multiply or divide rounds the exact rational once, to the
     // same nearest-even result as the exact path.
     if (significant_digits <= I64{16} && power >= I64{-22} && power <= I64{22}) {
-        whole := I64{0}
+        ^whole: I64{0}
         at = first_nonzero
         loop at <= last_nonzero {
             byte: rt_text_byte(wrapping(data + at))
@@ -214,8 +214,8 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
             at += I64{1}
         }
         if (whole <= I64{9007199254740992}) {
-            scale := Float{1.0}
-            count := if (power < I64{0}) -> -power else -> power
+            ^scale: Float{1.0}
+            ^count: if (power < I64{0}) -> -power else -> power
             loop count > (I64{0}) {
                 scale *= Float{10.0}
                 count -= I64{1}

@@ -106,7 +106,7 @@ Hasher: struct {
     /// The lowercase hex SHA-256 of everything absorbed so far; the hasher
     /// can keep absorbing afterwards.
     digest: fn(self) -> String Never! {
-        done := hashes.hash_clone(self.ctx)
+        ^done: hashes.hash_clone(self.ctx)
         hex_encode(hashes.hash_finish_with(hashes.SHA256Hash{}, done))
     }
 }
@@ -128,7 +128,7 @@ Secret: struct {
     /// `bytes` as secret material. While the Secret lives, a crash dump
     /// zeroes every run of its bytes and a process end wipes them.
     from_bytes: fn(bytes: [U8]) -> Secret Never! {
-        secret := Secret{bytes: bytes}
+        ^secret: Secret{bytes: bytes}
         crypto_rt.secret_keep(secret.bytes)
         secret
     }
@@ -148,7 +148,7 @@ Secret: struct {
     // second owner whose scope-end Close re-enters this one.
     impl Close {
         close: fn(^^self) {
-            bytes := self.bytes.move()
+            ^bytes: self.bytes.move()
             core.crypto.wipe(bytes)
         }
     }
@@ -174,7 +174,7 @@ SigningKey: struct {
 
     impl Close {
         close: fn(^^self) {
-            bytes := self.bytes.move()
+            ^bytes: self.bytes.move()
             core.crypto.wipe(bytes)
         }
     }
@@ -213,7 +213,7 @@ X25519SecretKey: struct {
 
     impl Close {
         close: fn(^^self) {
-            bytes := self.bytes.move()
+            ^bytes: self.bytes.move()
             core.crypto.wipe(bytes)
         }
     }
@@ -244,7 +244,7 @@ SharedSecret: struct {
 
     impl Close {
         close: fn(^^self) {
-            bytes := self.bytes.move()
+            ^bytes: self.bytes.move()
             core.crypto.wipe(bytes)
         }
     }
@@ -369,15 +369,15 @@ wipe: fn(bytes: ^[U8]) Never! { crypto_rt.wipe(bytes) }
 /// Whether a and b hold the same bytes, in time that depends only on their
 /// lengths: the bytes fold into one U8 difference, with no branch on them.
 constant_time_equal_bytes: fn(a: [U8], b: [U8]) -> Bool Never! {
-    diff := U8{0}
+    ^diff: U8{0}
     if a.len() != b.len() -> diff = U8{1}
     n: a.len()
     m: b.len()
-    limit := n
+    ^limit: n
     if m > limit -> limit = m
     loop i in 0..<limit {
-        left := U8{0}
-        right := U8{0}
+        ^left: U8{0}
+        ^right: U8{0}
         if i < n -> left = a[i]
         if i < m -> right = b[i]
         diff |= left ~ right
@@ -412,7 +412,7 @@ seal: fn(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Sealed 
     salt: random.bytes(16) ?? return Err(CryptoError.Unavailable)
     nonce: random.bytes(24) ?? return Err(CryptoError.Unavailable)
     file_key: random.bytes(32) ?? return Err(CryptoError.Unavailable)
-    header := [U8]{}
+    ^header: [U8]{}
     loop b in "JETV".bytes() -> header.push(b)
     header.push(U8{1})
     header.push(U8{1})
@@ -423,20 +423,20 @@ seal: fn(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Sealed 
     loop b in eph_pk.bytes -> header.push(b)
     loop b in salt -> header.push(b)
     loop b in nonce -> header.push(b)
-    stanzas := [U8]{}
+    ^stanzas: [U8]{}
     loop rec in sorted {
         shared: x25519(X25519SecretKey{bytes: copy_bytes(eph_sk)}, rec) ?? return Err(CryptoError.KeyRejected)
-        key_info := [U8]{}
+        ^key_info: [U8]{}
         loop b in "JETV1 wrap".bytes() -> key_info.push(b)
         loop b in eph_pk.bytes -> key_info.push(b)
         loop b in rec.bytes -> key_info.push(b)
         kek: hkdf_sha256(shared.bytes, salt, key_info, 32) ?? return Err(CryptoError.Length)
-        nonce_info := [U8]{}
+        ^nonce_info: [U8]{}
         loop b in "JETV1 nonce".bytes() -> nonce_info.push(b)
         loop b in eph_pk.bytes -> nonce_info.push(b)
         loop b in rec.bytes -> nonce_info.push(b)
         wrap_nonce: hkdf_sha256(shared.bytes, salt, nonce_info, 24) ?? return Err(CryptoError.Length)
-        stanza_aad := [U8]{}
+        ^stanza_aad: [U8]{}
         loop b in "JETV1 stanza".bytes() -> stanza_aad.push(b)
         loop b in header -> stanza_aad.push(b)
         loop b in rec.bytes -> stanza_aad.push(b)
@@ -445,13 +445,13 @@ seal: fn(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Sealed 
         loop b in rec.bytes -> stanzas.push(b)
         loop b in wrapped -> stanzas.push(b)
     }
-    payload_aad := [U8]{}
+    ^payload_aad: [U8]{}
     loop b in "JETV1 payload".bytes() -> payload_aad.push(b)
     loop b in header -> payload_aad.push(b)
     loop b in stanzas -> payload_aad.push(b)
     loop b in aad -> payload_aad.push(b)
     body: xchacha_seal(file_key, nonce, payload_aad, bytes)
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in header -> out.push(b)
     loop b in stanzas -> out.push(b)
     _: append_be32(out, bytes.len()) ?? return Err(CryptoError.Length)
@@ -474,14 +474,14 @@ open_sealed: fn(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypt
     payload_len: read_be32(raw, len_offset)
     payload_end: len_offset + 4 + payload_len + 16
     if payload_len > 16777216 || raw.len() != payload_end -> return Err(CryptoError.OpenFailed)
-    previous := [U8]{}
+    ^previous: [U8]{}
     loop index in 0..<count {
         current: slice_u8(raw, 82 + index * 80, 82 + index * 80 + 32)
         if index > 0 && key_order(previous, current) >= 0 -> return Err(CryptoError.OpenFailed)
         previous = current
     }
     own_public: x25519_public(identity) ?? return Err(CryptoError.KeyRejected)
-    stanza_index := -1
+    ^stanza_index: -1
     loop index in 0..<count {
         current: slice_u8(raw, 82 + index * 80, 82 + index * 80 + 32)
         if constant_time_equal_bytes(current, own_public.bytes) -> stanza_index = index
@@ -490,17 +490,17 @@ open_sealed: fn(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypt
     eph: slice_u8(raw, 10, 42)
     shared: x25519(identity, X25519PublicKey{bytes: copy_bytes(eph)}) ?? return Err(CryptoError.KeyRejected)
     salt: slice_u8(raw, 42, 58)
-    key_info := [U8]{}
+    ^key_info: [U8]{}
     loop b in "JETV1 wrap".bytes() -> key_info.push(b)
     loop b in eph -> key_info.push(b)
     loop b in own_public.bytes -> key_info.push(b)
     kek: hkdf_sha256(shared.bytes, salt, key_info, 32) ?? return Err(CryptoError.Length)
-    nonce_info := [U8]{}
+    ^nonce_info: [U8]{}
     loop b in "JETV1 nonce".bytes() -> nonce_info.push(b)
     loop b in eph -> nonce_info.push(b)
     loop b in own_public.bytes -> nonce_info.push(b)
     wrap_nonce: hkdf_sha256(shared.bytes, salt, nonce_info, 24) ?? return Err(CryptoError.Length)
-    stanza_aad := [U8]{}
+    ^stanza_aad: [U8]{}
     loop b in "JETV1 stanza".bytes() -> stanza_aad.push(b)
     loop b in slice_u8(raw, 0, 82) -> stanza_aad.push(b)
     loop b in own_public.bytes -> stanza_aad.push(b)
@@ -509,7 +509,7 @@ open_sealed: fn(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypt
     file_key_opt: xchacha_open(kek.bytes, wrap_nonce.bytes, stanza_aad, wrapped)
     file_key: file_key_opt ?? return Err(CryptoError.OpenFailed)
     if file_key.len() != 32 -> return Err(CryptoError.OpenFailed)
-    payload_aad := [U8]{}
+    ^payload_aad: [U8]{}
     loop b in "JETV1 payload".bytes() -> payload_aad.push(b)
     loop b in slice_u8(raw, 0, 82) -> payload_aad.push(b)
     loop b in slice_u8(raw, 82, len_offset) -> payload_aad.push(b)
@@ -521,12 +521,12 @@ open_sealed: fn(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypt
 }
 
 canonical_recipients: fn(items: [X25519PublicKey]) -> [X25519PublicKey] Never! {
-    out := [X25519PublicKey]{}
+    ^out: [X25519PublicKey]{}
     loop item in items -> out.push(X25519PublicKey{bytes: copy_bytes(item.bytes)})
-    i := 1
+    ^i: 1
     loop i < out.len() {
-        current := out[i]
-        j := i
+        ^current: out[i]
+        ^j: i
         loop j > 0 && key_order(out[j - 1].bytes, current.bytes) > 0 {
             out[j] = out[j - 1]
             j -= 1
@@ -591,7 +591,7 @@ x25519_public: fn(secret_key: X25519SecretKey) -> X25519PublicKey CryptoError! {
 
 /// The RFC 7748 X25519 base point, u = 9.
 x25519_base_point: fn() -> [U8] Never! {
-    base := [U8]{}
+    ^base: [U8]{}
     loop _ in 0..<32 -> base.push(U8{0})
     base[0] = (U8{9})
     base
@@ -600,7 +600,7 @@ x25519_base_point: fn() -> [U8] Never! {
 /// Bech32m generator polymod (BIP 350).
 bech32_polymod: fn(values: [Int]) -> Int Never! {
     generators: [Int]{0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3}
-    chk := 1
+    ^chk: 1
     loop v in values {
         top: chk >> 25
         chk = ((((chk) & 0x1ffffff) << 5)) ~ v
@@ -613,7 +613,7 @@ bech32_polymod: fn(values: [Int]) -> Int Never! {
 
 bech32_hrp_expand: fn(hrp: String) -> [Int] Never! {
     raw: hrp.bytes()
-    out := [Int]{}
+    ^out: [Int]{}
     loop b in raw -> out.push(Int{b} >> 5)
     out.push(0)
     loop b in raw -> out.push((Int{b}) & 31)
@@ -623,7 +623,7 @@ bech32_hrp_expand: fn(hrp: String) -> [Int] Never! {
 bech32_charset: fn() -> [U8] Never! { "qpzry9x8gf2tvdw0s3jn54khce6mua7l".bytes() }
 
 bech32_value: fn(b: U8) -> Int? {
-    i := 0
+    ^i: 0
     loop c in bech32_charset() {
         if c == b -> return Val(i)
         i += 1
@@ -634,9 +634,9 @@ bech32_value: fn(b: U8) -> Int? {
 C_BECH32M_CONST: 0x2bc830a3
 
 x25519_recipient_encode: fn(key: [U8]) -> String Never! {
-    data := [Int]{}
-    acc := 0
-    bits := 0
+    ^data: [Int]{}
+    ^acc: 0
+    ^bits: 0
     loop b in key {
         acc = ((((acc << 8)) | Int{b})) & 4095
         bits += 8
@@ -646,12 +646,12 @@ x25519_recipient_encode: fn(key: [U8]) -> String Never! {
         }
     }
     if bits > 0 -> data.push(((acc << (5 - bits))) & 31)
-    input := bech32_hrp_expand("jetx25519")
+    ^input: bech32_hrp_expand("jetx25519")
     loop v in data -> input.push(v)
     loop _ in 0..<6 -> input.push(0)
     polymod: (bech32_polymod(input)) ~ C_BECH32M_CONST
     charset: bech32_charset()
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in "jetx255191".bytes() -> out.push(b)
     loop v in data -> out.push(charset[v])
     loop i in 0..<6 -> out.push(charset[((polymod >> (5 * (5 - i)))) & 31])
@@ -667,17 +667,17 @@ x25519_recipient_decode: fn(text: String) -> [U8]? {
     loop i in 0..<10 {
         if raw[i] != prefix[i] -> return None
     }
-    values := [Int]{}
+    ^values: [Int]{}
     loop i in 10..<68 {
         v: bech32_value(raw[i]) ?? return None
         values.push(v)
     }
-    check := bech32_hrp_expand("jetx25519")
+    ^check: bech32_hrp_expand("jetx25519")
     loop v in values -> check.push(v)
     if bech32_polymod(check) != C_BECH32M_CONST -> return None
-    out := [U8]{}
-    acc := 0
-    bits := 0
+    ^out: [U8]{}
+    ^acc: 0
+    ^bits: 0
     loop i in 0..<52 {
         acc = ((((acc << 5)) | values[i])) & 4095
         bits += 5
@@ -692,7 +692,7 @@ x25519_recipient_decode: fn(text: String) -> [U8]? {
 }
 
 all_zero: fn(bytes: [U8]) -> Bool Never! {
-    diff := U8{0}
+    ^diff: U8{0}
     loop b in bytes -> diff |= b
     diff == U8{0}
 }
@@ -728,17 +728,17 @@ wrap: fn(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoErro
     eph_pk: x25519_public(X25519SecretKey{bytes: copy_bytes(eph_sk)}) ?? return Err(CryptoError.KeyRejected)
     salt: random.bytes(16) ?? return Err(CryptoError.Unavailable)
     shared: x25519(X25519SecretKey{bytes: copy_bytes(eph_sk)}, recipient) ?? return Err(CryptoError.KeyRejected)
-    key_info := [U8]{}
+    ^key_info: [U8]{}
     loop b in "JETW1 key".bytes() -> key_info.push(b)
     loop b in eph_pk.bytes -> key_info.push(b)
     loop b in recipient.bytes -> key_info.push(b)
     kek: hkdf_sha256(shared.bytes, salt, key_info, 32) ?? return Err(CryptoError.Length)
-    nonce_info := [U8]{}
+    ^nonce_info: [U8]{}
     loop b in "JETW1 nonce".bytes() -> nonce_info.push(b)
     loop b in eph_pk.bytes -> nonce_info.push(b)
     loop b in recipient.bytes -> nonce_info.push(b)
     nonce: hkdf_sha256(shared.bytes, salt, nonce_info, 24) ?? return Err(CryptoError.Length)
-    header := [U8]{}
+    ^header: [U8]{}
     loop b in "JETW".bytes() -> header.push(b)
     header.push(U8{1})
     header.push(U8{1})
@@ -750,11 +750,11 @@ wrap: fn(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoErro
     _: append_be32(header, key.bytes.len()) ?? return Err(CryptoError.Length)
     // JETW1 AAD is the domain label followed by the 92-byte header; `unwrap`
     // authenticates the same bytes.
-    wrap_aad := [U8]{}
+    ^wrap_aad: [U8]{}
     loop b in "JETW1 wrap".bytes() -> wrap_aad.push(b)
     loop b in header -> wrap_aad.push(b)
     body: xchacha_seal(kek.bytes, nonce.bytes, wrap_aad, key.bytes)
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in header -> out.push(b)
     loop b in body -> out.push(b)
     Ok(WrappedKey{bytes: out})
@@ -776,17 +776,17 @@ unwrap: fn(recipient: X25519SecretKey, wrapped: WrappedKey) -> Secret CryptoErro
     eph: slice_u8(raw, 40, 72)
     salt: slice_u8(raw, 72, 88)
     shared: x25519(recipient, X25519PublicKey{bytes: copy_bytes(eph)}) ?? return Err(CryptoError.KeyRejected)
-    key_info := [U8]{}
+    ^key_info: [U8]{}
     loop b in "JETW1 key".bytes() -> key_info.push(b)
     loop b in eph -> key_info.push(b)
     loop b in expected_recipient -> key_info.push(b)
     kek: hkdf_sha256(shared.bytes, salt, key_info, 32) ?? return Err(CryptoError.Length)
-    nonce_info := [U8]{}
+    ^nonce_info: [U8]{}
     loop b in "JETW1 nonce".bytes() -> nonce_info.push(b)
     loop b in eph -> nonce_info.push(b)
     loop b in expected_recipient -> nonce_info.push(b)
     nonce: hkdf_sha256(shared.bytes, salt, nonce_info, 24) ?? return Err(CryptoError.Length)
-    wrap_aad := [U8]{}
+    ^wrap_aad: [U8]{}
     loop b in "JETW1 wrap".bytes() -> wrap_aad.push(b)
     loop b in slice_u8(raw, 0, 92) -> wrap_aad.push(b)
     body: slice_u8(raw, 92, raw.len())
@@ -805,7 +805,7 @@ password_hash_with_salt: fn(password: Secret, salt: [U8]) -> PasswordHash Crypto
     if password.bytes.len() > 1048576 || salt.len() < 8 || salt.len() > 64 {
         return Err(CryptoError.Length)
     }
-    dk := Secret{bytes: [U8]{}}
+    ^dk: Secret{bytes: [U8]{}}
     #Unsafe("crypto expert: Argon2id password hashing") {
         dk = rawcrypto.argon2id(password, salt.copy(), 65536, 3, 1, 32) ?? return Err(CryptoError.Unavailable)
     }
@@ -832,7 +832,7 @@ password_verify: fn(password: Secret, stored: PasswordHash) -> Bool CryptoError!
     if salt.len() < 8 || salt.len() > 64 || want.len() < 16 || want.len() > 64 {
         return Err(CryptoError.Length)
     }
-    got := Secret{bytes: [U8]{}}
+    ^got: Secret{bytes: [U8]{}}
     #Unsafe("crypto expert: Argon2id password verification") {
         got = rawcrypto.argon2id(password, salt, memory, iterations, lanes, want.len()) ?? return Err(CryptoError.Unavailable)
     }
@@ -843,7 +843,7 @@ parse_prefixed_int: fn(text: String, prefix: String) -> Int? {
     raw: text.bytes()
     wanted: prefix.bytes()
     if raw.len() <= wanted.len() -> return None
-    i := 0
+    ^i: 0
     loop b in wanted {
         if raw[i] != b -> return None
         i += 1
@@ -853,8 +853,8 @@ parse_prefixed_int: fn(text: String, prefix: String) -> Int? {
 }
 
 split_comma: fn(text: String) -> [String] Never! {
-    out := [String]{}
-    current := [U8]{}
+    ^out: [String]{}
+    ^current: [U8]{}
     loop b in text.bytes() {
         if b == (U8{44}) {
             out.push(String.from_bytes(current) ?? panic("invalid UTF-8 in PHC parameter"))
@@ -869,8 +869,8 @@ split_comma: fn(text: String) -> [String] Never! {
 /// digit is computed from its six bits (`b64_digit`), with no table lookup or
 /// branch on them: the bytes are a password hash's.
 phc_b64_encode: fn(bytes: [U8]) -> String Never! {
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i + 3 <= bytes.len() {
         n: ((U32{bytes[i]} << 16) | U32{bytes[i + 1]} << 8) | U32{bytes[i + 2]}
         out.push(b64_digit(n >> 18))
@@ -899,7 +899,7 @@ phc_b64_encode: fn(bytes: [U8]) -> String Never! {
 /// a mask from the borrow of a wrapping subtraction.
 #Overflow(.Wrapping) priv b64_digit: fn(n: U32) -> U8 Never! {
     v: n & U32{63}
-    c := v + U32{65}
+    ^c: v + U32{65}
     c += ((U32{25} - v) >> 8) & U32{6}
     c -= ((U32{51} - v) >> 8) & U32{75}
     c -= ((U32{61} - v) >> 8) & U32{15}
@@ -911,9 +911,9 @@ phc_b64_encode: fn(bytes: [U8]) -> String Never! {
 /// tail, and non-zero trailing bits.
 phc_b64_decode: fn(text: String) -> [U8]? {
     raw: text.bytes()
-    out := [U8]{}
-    n := 0
-    bits := 0
+    ^out: [U8]{}
+    ^n: 0
+    ^bits: 0
     loop b in raw {
         value: phc_b64_value(b) ?? return None
         n = ((n << 6)) | value
@@ -930,7 +930,7 @@ phc_b64_decode: fn(text: String) -> [U8]? {
 
 phc_b64_value: fn(b: U8) -> Int? {
     alphabet: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    i := 0
+    ^i: 0
     loop c in alphabet.bytes() {
         if c == b -> return Val(i)
         i += 1
@@ -956,7 +956,7 @@ priv byte_words: module {
 }
 
 copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in bytes -> out.push(b)
     out
 }
@@ -964,7 +964,7 @@ copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
 /// The lowercase hex of `bytes`, each digit computed with no branch or table
 /// lookup on it (`hex_digit`): the bytes may be a key's.
 hex_encode: fn(bytes: [U8]) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in bytes {
         n: U32{b}
         out.push(hex_digit(n >> 4))
@@ -980,8 +980,8 @@ hex_encode: fn(bytes: [U8]) -> String Never! {
 }
 
 slice_u8: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end || i >= bytes.len() -> return out
         out.push(bytes[i])
@@ -990,8 +990,8 @@ slice_u8: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
 }
 
 split_dollar: fn(text: String) -> [String] Never! {
-    out := [String]{}
-    cur := [U8]{}
+    ^out: [String]{}
+    ^cur: [U8]{}
     loop b in text.bytes() {
         if b == (U8{36}) {
             out.push(String.from_bytes(cur) ?? panic("invalid UTF-8 in PHC field"))
@@ -1003,8 +1003,8 @@ split_dollar: fn(text: String) -> [String] Never! {
 }
 
 parse_int: fn(text: String) -> Int? {
-    n := 0
-    any := false
+    ^n: 0
+    ^any: false
     loop b in text.bytes() {
         d: Int{b}
         if d < 48 || d > 57 -> return None
@@ -1018,8 +1018,8 @@ parse_int: fn(text: String) -> Int? {
 hex_decode: fn(text: String) -> [U8]? {
     raw: text.bytes()
     if raw.len() % 2 != 0 -> return None
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop {
         if i >= raw.len() -> return Val(out.copy())
         hi: hex_val(raw[i]) ?? return None
@@ -1064,7 +1064,7 @@ priv chacha20_core: module {
 
     /// The sixteen-word working buffer every block of one call reuses.
     chacha20_words: fn() -> [U32] Never! {
-        w := [U32]{}
+        ^w: [U32]{}
         loop _ in 0..<16 -> w.push(U32{0})
         w
     }
@@ -1087,18 +1087,18 @@ priv chacha20_core: module {
 
 #Overflow(.Wrapping) chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     state: chacha20_state(key, nonce, counter)
-    w := chacha20_words()
+    ^w: chacha20_words()
     chacha20_rounds(state, w)
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<16 -> push_le32(out, w[i] + state[i])
     out
 }
 
 #Overflow(.Wrapping) qr: fn(s: ^[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
-    a := s[ia]
-    b := s[ib]
-    c := s[ic]
-    d := s[id]
+    ^a: s[ia]
+    ^b: s[ib]
+    ^c: s[ic]
+    ^d: s[id]
     a += b
     d = (d ~ a).rotate_left(16)
     c += d
@@ -1114,10 +1114,10 @@ priv chacha20_core: module {
 }
 
 #Overflow(.Wrapping) chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
-    state := chacha20_state(key, nonce, counter)
-    w := chacha20_words()
-    out := [U8]{}
-    i := 0
+    ^state: chacha20_state(key, nonce, counter)
+    ^w: chacha20_words()
+    ^out: [U8]{}
+    ^i: 0
     loop i < plain.len() {
         chacha20_rounds(state, w)
         loop k in 0..<16 {
@@ -1140,8 +1140,8 @@ poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! {
 }
 
 le_bytes: fn(n: Int, width: Int) -> [U8] Never! {
-    out := [U8]{}
-    v := n
+    ^out: [U8]{}
+    ^v: n
     loop _i in 0..<width {
         out.push(wrapping(U8{v}))
         v = v >> 8
@@ -1150,7 +1150,7 @@ le_bytes: fn(n: Int, width: Int) -> [U8] Never! {
 }
 
 pad16: fn(n: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     rem: (16 - (n % 16)) % 16
     loop _i in 0..<rem -> out.push(U8{0})
     out
@@ -1159,7 +1159,7 @@ pad16: fn(n: Int) -> [U8] Never! {
 chacha_poly_seal: fn(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
     otk: chacha20_block(key, nonce, 0)
     ct: chacha20_xor(key, nonce, 1, plain)
-    mac_data := [U8]{}
+    ^mac_data: [U8]{}
     loop b in aad -> mac_data.push(b)
     loop b in pad16(aad.len()) -> mac_data.push(b)
     loop b in ct -> mac_data.push(b)
@@ -1167,7 +1167,7 @@ chacha_poly_seal: fn(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Nev
     loop b in le_bytes(aad.len(), 8) -> mac_data.push(b)
     loop b in le_bytes(ct.len(), 8) -> mac_data.push(b)
     auth_tag: poly1305(otk, mac_data)
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in ct -> out.push(b)
     loop b in auth_tag -> out.push(b)
     out
@@ -1178,7 +1178,7 @@ chacha_poly_open: fn(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     ct: slice_u8(cipher, 0, cipher.len() - 16)
     auth_tag: slice_u8(cipher, cipher.len() - 16, cipher.len())
     otk: chacha20_block(key, nonce, 0)
-    mac_data := [U8]{}
+    ^mac_data: [U8]{}
     loop b in aad -> mac_data.push(b)
     loop b in pad16(aad.len()) -> mac_data.push(b)
     loop b in ct -> mac_data.push(b)
@@ -1209,9 +1209,9 @@ hchacha20: fn(key: [U8], nonce16: [U8]) -> [U8] Never! {
         load_le32(nonce16, 8),
         load_le32(nonce16, 12),
     }
-    w := chacha20_words()
+    ^w: chacha20_words()
     chacha20_rounds(state, w)
-    out := [U8]{}
+    ^out: [U8]{}
     loop k in 0..<4 -> push_le32(out, w[k])
     loop k in 12..<16 -> push_le32(out, w[k])
     out
@@ -1219,14 +1219,14 @@ hchacha20: fn(key: [U8], nonce16: [U8]) -> [U8] Never! {
 
 xchacha_seal: fn(key: [U8], nonce24: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
     sub: hchacha20(key, slice_u8(nonce24, 0, 16))
-    n := [U8]{0, 0, 0, 0}
+    ^n: [U8]{0, 0, 0, 0}
     loop b in slice_u8(nonce24, 16, 24) -> n.push(b)
     chacha_poly_seal(sub, n, aad, plain)
 }
 
 xchacha_open: fn(key: [U8], nonce24: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     sub: hchacha20(key, slice_u8(nonce24, 0, 16))
-    n := [U8]{0, 0, 0, 0}
+    ^n: [U8]{0, 0, 0, 0}
     loop b in slice_u8(nonce24, 16, 24) -> n.push(b)
     chacha_poly_open(sub, n, aad, cipher)
 }
@@ -1381,12 +1381,12 @@ C_BLAKE3_MSG: [Int]{
 blake3_raw: fn(input: [U8]) -> [U8] {
     if input.len() <= 1024 -> return blake3_root_chunk(input)
     // tree: 1024-byte chunks
-    chunks := [U32]{}  // flattened chaining values 8 words each
-    i := 0
-    idx := 0
+    ^chunks: [U32]{}  // flattened chaining values 8 words each
+    ^i: 0
+    ^idx: 0
     loop {
         if i >= input.len() -> break
-        end := i + 1024
+        ^end: i + 1024
         if end > input.len() -> end = input.len()
         cv: blake3_chunk(slice_u8(input, i, end), idx, i + 1024 >= input.len() && (idx == 0 || end - i < 1024) && idx == 0)
         loop w in cv -> chunks.push(w)
@@ -1395,23 +1395,23 @@ blake3_raw: fn(input: [U8]) -> [U8] {
     }
     // parent merge until one cv; last is root
     n: chunks.len() /% 8
-    cvs := chunks
-    count := n
+    ^cvs: chunks
+    ^count: n
     loop {
         if count == 1 {
-            out := [U8]{}
+            ^out: [U8]{}
             loop k in 0..<8 -> push_le32(out, cvs[k])
             return out
         }
-        next := [U32]{}
-        p := 0
+        ^next: [U32]{}
+        ^p: 0
         loop {
             if p + 16 <= cvs.len() {
-                left := [U32]{}
-                right := [U32]{}
+                ^left: [U32]{}
+                ^right: [U32]{}
                 loop k in 0..<8 -> left.push(cvs[p + k])
                 loop k in 0..<8 -> right.push(cvs[p + 8 + k])
-                is_root := p + 16 >= cvs.len() && next.len() == 0 && (cvs.len() - p) == 16
+                ^is_root: p + 16 >= cvs.len() && next.len() == 0 && (cvs.len() - p) == 16
                 cv: blake3_parent(left, right, is_root)
                 loop w in cv -> next.push(w)
                 p += 16
@@ -1426,20 +1426,20 @@ blake3_raw: fn(input: [U8]) -> [U8] {
 }
 
 priv blake3_chunk: fn(data: [U8], chunk_index: Int, is_root: Bool) -> [U32] {
-    cv := C_BLAKE3_IV
-    blocks := (data.len() + 63) /% 64
+    ^cv: C_BLAKE3_IV
+    ^blocks: (data.len() + 63) /% 64
     if blocks == 0 -> blocks = 1
     loop i in 0..<blocks {
         start: i * 64
-        end := start + 64
+        ^end: start + 64
         if end > data.len() -> end = data.len()
-        block := [U8]{}
+        ^block: [U8]{}
         loop b in slice_u8(data, start, end) -> block.push(b)
         loop {
             if block.len() >= 64 -> break
             block.push(U8{0})
         }
-        flags := 0
+        ^flags: 0
         if i == 0 -> flags = (flags) | 1
         if i == blocks - 1 -> flags = (flags) | 2
         if is_root && i == blocks - 1 -> flags = (flags) | 8
@@ -1450,24 +1450,24 @@ priv blake3_chunk: fn(data: [U8], chunk_index: Int, is_root: Bool) -> [U32] {
 
 blake3_root_chunk: fn(data: [U8]) -> [U8] {
     cv: blake3_chunk(data, 0, true)
-    out := [U8]{}
+    ^out: [U8]{}
     loop k in 0..<8 -> push_le32(out, cv[k])
     out
 }
 
 priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
-    block := [U8]{}
+    ^block: [U8]{}
     loop w in left -> push_le32(block, w)
     loop w in right -> push_le32(block, w)
-    flags := 4
+    ^flags: 4
     if is_root -> flags = (flags) | 8
     blake3_compress(C_BLAKE3_IV, block, 0, 64, flags)
 }
 
 #Overflow(.Wrapping) priv blake3_compress: fn(cv: [U32], block: [U8], counter: Int, block_len: Int, flags: Int) -> [U32] {
-    m := [U32]{}
+    ^m: [U32]{}
     loop i in 0..<16 -> m.push(load_le32(block, i * 4))
-    s := [U32]{
+    ^s: [U32]{
         cv[0],
         cv[1],
         cv[2],
@@ -1496,7 +1496,7 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
         blake3_g(s, 2, 7, 8, 13, m[C_BLAKE3_MSG[base + 12]], m[C_BLAKE3_MSG[base + 13]])
         blake3_g(s, 3, 4, 9, 14, m[C_BLAKE3_MSG[base + 14]], m[C_BLAKE3_MSG[base + 15]])
     }
-    out := [U32]{}
+    ^out: [U32]{}
     loop i in 0..<8 -> out.push(s[i] ~ s[i + 8])
     out
 }
@@ -1527,14 +1527,14 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
         "bab6c09cb8ce8cf459261398d2e7aef35700bf488116ceb94a36d0f5f1b7bc3b",
     }
     loop k in 0..<lengths.len() {
-        data := [U8]{}
+        ^data: [U8]{}
         loop i in 0..<lengths[k] -> data.push(U8{i %% 251})
         assert_eq(blake3(data).hex(), want[k])
     }
 }
 
 #Test("Hex and PHC base64 digits match their alphabets at every value") {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop i in 0..<256 -> bytes.push(U8{i})
     hex: hex_encode(bytes).bytes()
     digits: "0123456789abcdef".bytes()
@@ -1549,10 +1549,10 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
 }
 
 #Test("JETC2 streaming hash matches the one-shot digest across partial blocks") {
-    data := [U8]{}
+    ^data: [U8]{}
     loop i in 0..<257 -> data.push(U8{i %% 251})
-    hash := hashes.hash_start(.SHA256)
-    offset := 0
+    ^hash: hashes.hash_start(.SHA256)
+    ^offset: 0
     loop offset < data.len() {
         end: if offset + 17 < data.len() -> offset + 17 else -> data.len()
         hashes.hash_update_range(hash, data, offset, end - offset)
@@ -1565,9 +1565,9 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
 #Test("JETC2 streaming hash finalizes one- and two-block padding in place") {
     lengths: [Int]{0, 55, 56, 63, 64, 65, 127}
     loop length in lengths {
-        data := [U8]{}
+        ^data: [U8]{}
         loop index in 0..<length -> data.push(U8{index %% 251})
-        hash := hashes.hash_start(.SHA256)
+        ^hash: hashes.hash_start(.SHA256)
         hashes.hash_update(hash, data)
         assert(hashes.hash_finish(hash) == sha256(data).bytes)
         assert(hash.used == 0)
@@ -1575,19 +1575,19 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
 }
 
 #Test("SHA-256 host block compression agrees with the Jet rounds at every length and offset") {
-    lengths := [Int]{}
+    ^lengths: [Int]{}
     loop length in 0..<200 -> lengths.push(length)
     lengths.push(4109)
     offsets: [Int]{0, 1, 3, 8}
     loop length in lengths {
-        data := [U8]{}
+        ^data: [U8]{}
         loop index in 0..<length -> data.push(U8{(index * 167 + length * 31) %% 256})
         loop off in offsets {
             if off <= length {
                 count: (length - off) /% 64
                 iv: [U32]{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
-                fast := iv.copy()
-                scalar := iv.copy()
+                ^fast: iv.copy()
+                ^scalar: iv.copy()
                 if !crypto_rt.sha256_blocks(fast, data, off, count) {
                     hashes.sha256_blocks(fast, data, off, count)
                 }
@@ -1601,15 +1601,15 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
 #Test("Hasher fed in chunks of every size matches the one-shot SHA-256, and digest leaves it absorbing") {
     chunk_sizes: [Int]{1, 3, 55, 63, 64, 65, 127, 200}
     loop length in 0..<200 {
-        data := [U8]{}
+        ^data: [U8]{}
         loop index in 0..<length -> data.push(U8{(index * 89 + length) %% 256})
         want: sha256(data).hex()
         loop chunk in chunk_sizes {
-            hasher := Hasher.new()
-            offset := 0
+            ^hasher: Hasher.new()
+            ^offset: 0
             loop offset < length {
                 end: if offset + chunk < length -> offset + chunk else -> length
-                part := [U8]{}
+                ^part: [U8]{}
                 loop index in offset..<end -> part.push(data[index])
                 hasher.update(part)
                 offset = end
@@ -1617,10 +1617,10 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
             assert_eq(hasher.digest(), want)
         }
         // A digest in the middle neither ends nor changes the stream.
-        split := Hasher.new()
+        ^split: Hasher.new()
         half: length /% 2
-        head := [U8]{}
-        tail := [U8]{}
+        ^head: [U8]{}
+        ^tail: [U8]{}
         loop index in 0..<half -> head.push(data[index])
         loop index in half..<length -> tail.push(data[index])
         split.update(head)
@@ -1631,9 +1631,9 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
 }
 
 #Test("Hasher streams FIPS 180-2's one million 'a' bytes in 4000-byte updates") {
-    block := [U8]{}
+    ^block: [U8]{}
     loop _ in 0..<4000 -> block.push(U8{0x61})
-    hasher := new()
+    ^hasher: new()
     loop _ in 0..<250 -> update(hasher, block)
     assert_eq(digest(hasher), "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
 }

@@ -10,13 +10,13 @@ Pair: struct {
 
 run: fn() {
     original: Pair{label: "pair", clocks: [time.Clock.new(0), time.Clock.new(5)]}
-    copied := original.copy()
+    ^copied: original.copy()
     assert_eq(copied.clocks[0].advance(3), 3)
     assert_eq(copied.clocks[1].advance(9), 9)
     assert_eq(original.clocks[0].now(), 0)
     assert_eq(original.clocks[1].now(), 5)
     assert_eq(copied.label, "pair")
-    bare := copied.clocks.copy()
+    ^bare: copied.clocks.copy()
     assert_eq(bare[1].advance(12), 12)
     assert_eq(copied.clocks[1].now(), 9)
     print("forked")

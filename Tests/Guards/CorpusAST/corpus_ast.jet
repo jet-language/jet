@@ -19,7 +19,7 @@ policy_parse_program: fn(source_label: String, source: String) -> Program Policy
     }
     stripped: policy_strip_inline_package(source, lexed.tokens)
     parsed: parse_source(stripped.bytes())
-    errors := [String]{}
+    ^errors: [String]{}
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic.code)
     }
@@ -30,17 +30,17 @@ policy_parse_program: fn(source_label: String, source: String) -> Program Policy
 }
 
 policy_strip_inline_package: fn(source: String, tokens: [Token]) -> String {
-    first := 0
+    ^first: 0
     loop first < tokens.len() && (tokens[first].kind == TOKEN_LINE_COMMENT || tokens[first].kind == TOKEN_BLOCK_COMMENT) {
         first += 1
     }
     if first == tokens.len() || tokens[first].kind != TOKEN_IDENT || policy_slice_bytes(source, tokens[first].span.start, tokens[first].span.end) != "package" {
         return source.copy()
     }
-    opener := first + 1
+    ^opener: first + 1
     loop opener < tokens.len() && tokens[opener].kind != TOKEN_LBRACE -> opener += 1
     if opener == tokens.len() -> return source.copy()
-    depth := 0
+    ^depth: 0
     loop index in opener..<tokens.len() {
         token: tokens[index]
         if token.kind == TOKEN_LBRACE -> depth += 1
@@ -63,7 +63,7 @@ policy_ast_test_compiler_dependency: fn() {
 }
 
 policy_without_parens: fn(expression: Expr) -> Expr {
-    current := expression
+    ^current: expression
     loop {
         if current == .Paren(inner, _, _) -> current = inner else { break }
     }
@@ -81,7 +81,7 @@ PolicyWalkNode: enum {
 }
 
 policy_push_body: fn(stack: ^[PolicyWalkNode], body: [Stmt]) {
-    index := body.len()
+    ^index: body.len()
     loop index > 0 {
         index -= 1
         stack.push(PolicyWalkNode.Statement{value: body[index]})
@@ -89,7 +89,7 @@ policy_push_body: fn(stack: ^[PolicyWalkNode], body: [Stmt]) {
 }
 
 policy_push_args: fn(stack: ^[PolicyWalkNode], args: [CallArg]) {
-    index := args.len()
+    ^index: args.len()
     loop index > 0 {
         index -= 1
         stack.push(PolicyWalkNode.Expression{value: args[index].expr})
@@ -157,7 +157,7 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
                     }
                     .Switch(subject, arms, other, _) | .ComptimeSwitch(subject, arms, other, _) -> {
                         if other == .Val(body) -> policy_push_body(stack, body)
-                        index := arms.len()
+                        ^index: arms.len()
                         loop index > 0 {
                             index -= 1
                             policy_push_body(stack, arms[index].body)
@@ -191,7 +191,7 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
                     }
                     .ContextBlock(fields, body, _) -> {
                         policy_push_body(stack, body)
-                        index := fields.len()
+                        ^index: fields.len()
                         loop index > 0 {
                             index -= 1
                             stack.push(PolicyWalkNode.Expression{value: fields[index].value})
@@ -208,7 +208,7 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
                     }
                     .ScopeMember(_, _, args, _, body, _, _, _) -> {
                         policy_push_body(stack, body)
-                        index := args.len()
+                        ^index: args.len()
                         loop index > 0 {
                             index -= 1
                             stack.push(PolicyWalkNode.Expression{value: args[index]})
@@ -221,7 +221,7 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
                 visited.push(expression.copy())
                 if expression == {
                     .Str(parts, _, _) -> {
-                        index := parts.len()
+                        ^index: parts.len()
                         loop index > 0 {
                             index -= 1
                             if parts[index] == .Interp(value, _) {
@@ -230,7 +230,7 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
                         }
                     }
                     .ListLit(values, _, _) | .CompareChain(values, _, _, _, _) -> {
-                        index := values.len()
+                        ^index: values.len()
                         loop index > 0 {
                             index -= 1
                             stack.push(PolicyWalkNode.Expression{value: values[index]})
@@ -246,7 +246,7 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
                         stack.push(PolicyWalkNode.Expression{value: value})
                     }
                     .MapLit(entries, _, _) -> {
-                        index := entries.len()
+                        ^index: entries.len()
                         loop index > 0 {
                             index -= 1
                             stack.push(PolicyWalkNode.Expression{value: entries[index].value})
@@ -271,14 +271,14 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
                         stack.push(PolicyWalkNode.Expression{value: receiver})
                     }
                     .StructLit(_, _, _, _, fields, _, _, _) -> {
-                        index := fields.len()
+                        ^index: fields.len()
                         loop index > 0 {
                             index -= 1
                             stack.push(PolicyWalkNode.Expression{value: fields[index].value})
                         }
                     }
                     .TupleLit(fields, _, _, _) -> {
-                        index := fields.len()
+                        ^index: fields.len()
                         loop index > 0 {
                             index -= 1
                             stack.push(PolicyWalkNode.Expression{value: fields[index].value})
@@ -287,21 +287,21 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
                     .TypedLit(_, body, _, _) -> {
                         if body == {
                             .Fields(fields) -> {
-                                index := fields.len()
+                                ^index: fields.len()
                                 loop index > 0 {
                                     index -= 1
                                     stack.push(PolicyWalkNode.Expression{value: fields[index].value})
                                 }
                             }
                             .Elements(values) -> {
-                                index := values.len()
+                                ^index: values.len()
                                 loop index > 0 {
                                     index -= 1
                                     stack.push(PolicyWalkNode.Expression{value: values[index]})
                                 }
                             }
                             .Entries(entries) -> {
-                                index := entries.len()
+                                ^index: entries.len()
                                 loop index > 0 {
                                     index -= 1
                                     stack.push(PolicyWalkNode.Expression{value: entries[index].value})
@@ -313,7 +313,7 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
                         }
                     }
                     .EnumLit(_, _, _, args, _, _, _) -> {
-                        index := args.len()
+                        ^index: args.len()
                         loop index > 0 {
                             index -= 1
                             if args[index] == {
@@ -350,14 +350,14 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
             .MatchPattern(pattern) -> {
                 if pattern == {
                     .Or(alternatives, _) -> {
-                        index := alternatives.len()
+                        ^index: alternatives.len()
                         loop index > 0 {
                             index -= 1
                             stack.push(PolicyWalkNode.MatchPattern{value: alternatives[index]})
                         }
                     }
                     .Struct(fields, _, _, _) -> {
-                        index := fields.len()
+                        ^index: fields.len()
                         loop index > 0 {
                             index -= 1
                             if fields[index] == .Value(_, _, value) {
@@ -391,15 +391,15 @@ policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
 }
 
 policy_body_expressions: fn(body: [Stmt]) -> [Expr] {
-    stack := [PolicyWalkNode]{}
+    ^stack: [PolicyWalkNode]{}
     policy_push_body(stack, body)
-    visited := [Expr]{}
+    ^visited: [Expr]{}
     policy_walk(stack, visited)
     visited
 }
 
 policy_program_expressions: fn(program: Program) -> [Expr] {
-    visited := policy_body_expressions(program.script_body)
+    ^visited: policy_body_expressions(program.script_body)
     loop item in program.items {
         if item == {
             .Func(function) -> {
@@ -425,8 +425,8 @@ policy_visit_body: fn(body: [Stmt], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.
 }
 
 policy_visit_expression: fn(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
-    stack := [PolicyWalkNode]{PolicyWalkNode.Expression{value: expression}}
-    visited := [Expr]{}
+    ^stack: [PolicyWalkNode]{PolicyWalkNode.Expression{value: expression}}
+    ^visited: [Expr]{}
     policy_walk(stack, visited)
     loop child in visited -> visitor(child)
 }
@@ -436,7 +436,7 @@ policy_visit_program: fn(program: Program, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc
 }
 
 policy_module_aliases: fn(program: Program) -> [String:String] {
-    aliases := [String:String]{}
+    ^aliases: [String:String]{}
     loop imported in program.imports {
         if imported.kind == .Module(name, _) {
             if name == "core" || name == "app" || name.starts_with("core.") {
@@ -506,7 +506,7 @@ policy_nonnegative_numeric_literal: fn(expression: Expr) -> Bool {
 }
 
 policy_constant_expression: fn(expression: Expr) -> Bool {
-    constant := true
+    ^constant: true
     policy_visit_expression(expression, fn(child) {
         if policy_without_parens(child) == {
             .Str(parts, _, _) -> {
@@ -554,7 +554,7 @@ policy_is_unit_projection: fn(expression: Expr) -> Bool {
 }
 
 policy_direct_scalar: fn(expression: Expr) -> Bool {
-    current := expression
+    ^current: expression
     loop true {
         if policy_without_parens(current) == {
             .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Ident(_, _, _) -> return true
@@ -722,8 +722,8 @@ policy_is_build_command_literal: fn(expression: Expr) -> Bool {
 // struct text (`Name {{ field: .. }}`), shell scripts and error prose all
 // carry braces and colons without a quoted key.
 policy_is_hand_json_wire: fn(expression: Expr) -> Bool {
-    interpolated := false
-    quoted_key := false
+    ^interpolated: false
+    ^quoted_key: false
     if policy_without_parens(expression) == .Str(parts, _, _) {
         loop part in parts {
             if part == {
@@ -752,8 +752,8 @@ policy_text_has_quoted_key: fn(text: String) -> Bool {
     loop i in 0..<bytes.len() {
         if bytes[i] != quote -> next
         if !policy_json_member_start(bytes, i) -> next
-        j := i + 1
-        key_len := 0
+        ^j: i + 1
+        ^key_len: 0
         loop j < bytes.len() && policy_json_key_byte(bytes[j]) {
             j += 1
             key_len += 1
@@ -771,7 +771,7 @@ policy_text_has_quoted_key: fn(text: String) -> Bool {
 // Whether the quote at `at` can open an object member: only blanks (after
 // one escaping backslash) precede it in the part, or `{` or `,` does.
 policy_json_member_start: fn(bytes: [U8], at: Int) -> Bool {
-    k := at - 1
+    ^k: at - 1
     if k >= 0 && bytes[k] == (U8{92}) -> k -= 1
     loop k >= 0 && (bytes[k] == (U8{32}) || bytes[k] == (U8{10}) || bytes[k] == (U8{13}) || bytes[k] == (U8{9})) {
         k -= 1
@@ -797,7 +797,7 @@ policy_is_string_prefix_containment: fn(expression: Expr, url_receivers: [String
             if policy_without_parens(receiver) == .Ident(name, _, _) && url_receivers.contains(name) {
                 return false
             }
-            interpolated := false
+            ^interpolated: false
             loop part in parts {
                 if part == .Interp(_, _) -> interpolated = true
             }
@@ -813,7 +813,7 @@ policy_is_string_prefix_containment: fn(expression: Expr, url_receivers: [String
 
 // The identifiers a source tests with `starts_with("<scheme>://")`.
 policy_url_receivers: fn(expressions: [Expr]) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop expression in expressions {
         if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _) {
             if method != "starts_with" || args.len() == 0 -> next
@@ -869,10 +869,10 @@ policy_ascii_literal: fn(expression: Expr) -> Int? {
 }
 
 policy_is_ascii_replacement_chain: fn(expression: Expr) -> Bool {
-    current := expression
-    count := 0
-    lower := 0
-    upper := 0
+    ^current: expression
+    ^count: 0
+    ^lower: 0
+    ^upper: 0
     loop true {
         if policy_without_parens(current) == .MethodCall(receiver, method, _, _, _, args, _) {
             if method != "replace" || args.len() != 2 -> break
@@ -923,7 +923,7 @@ policy_expression_effect: fn(expression: Expr, aliases: [String:String]) -> Stri
 policy_redundant_effect_row: fn(function: Func, aliases: [String:String]) -> Bool {
     declared: function.declared_effects ?? return false
     if declared.len() == 0 -> return false
-    inferred := [String]{}
+    ^inferred: [String]{}
     loop expression in policy_body_expressions(function.body) {
         if policy_expression_effect(expression, aliases) == .Val(effect_name) {
             if !inferred.contains(effect_name) -> inferred.push(effect_name)
@@ -931,7 +931,7 @@ policy_redundant_effect_row: fn(function: Func, aliases: [String:String]) -> Boo
     }
     if inferred.len() == 0 || inferred.len() != declared.len() -> return false
     loop entry in declared {
-        found := false
+        ^found: false
         loop effect_name in inferred {
             if policy_ascii_equal(effect_name, entry.name) -> found = true
         }
@@ -941,7 +941,7 @@ policy_redundant_effect_row: fn(function: Func, aliases: [String:String]) -> Boo
 }
 
 policy_is_task_expression: fn(expression: Expr, only_all: Bool) -> Bool {
-    current := expression
+    ^current: expression
     loop true {
         if policy_without_parens(current) == {
             .Call(call, _) -> {
@@ -997,7 +997,7 @@ policy_compares_parameter_pair: fn(function: Func) -> Bool {
     if function.params.len() < 2 -> return false
     left_name: function.params[0].name
     right_name: function.params[1].name
-    found := false
+    ^found: false
     policy_visit_body(function.body, fn(expression) {
         if policy_without_parens(expression) == .Binary(operator, left, right, _, _) {
             if operator == BinOp.Eq && ((policy_ident_is(left, left_name) && policy_ident_is(right, right_name)) || (policy_ident_is(left, right_name) && policy_ident_is(right, left_name))) {
@@ -1016,7 +1016,7 @@ policy_named_tower_truthiness: fn(path: String, name: String) -> Bool {
 }
 
 policy_dyn_violations: fn(path: String, program: Program) -> [PolicyOccurrence] {
-    violations := [PolicyOccurrence]{}
+    ^violations: [PolicyOccurrence]{}
     loop item in program.items {
         if item == .Func(function) {
             if policy_named_tower_truthiness(path, function.name) -> next
@@ -1033,12 +1033,12 @@ policy_dyn_violations: fn(path: String, program: Program) -> [PolicyOccurrence] 
 }
 
 policy_unused_parameter: fn(function: Func, parameter: String) -> Bool {
-    declared := false
+    ^declared: false
     loop param in function.params {
         if param.name == parameter -> declared = true
     }
     if !declared -> return false
-    used := false
+    ^used: false
     policy_visit_body(function.body, fn(expression) {
         if policy_ident_is(expression, parameter) -> used = true
     })
@@ -1055,7 +1055,7 @@ policy_response_decoder: fn(function: Func) -> Bool {
 }
 
 policy_ordinary_envelope_decoder: fn(function: Func) -> Bool {
-    found := false
+    ^found: false
     policy_visit_body(function.body, fn(expression) {
         if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _) {
             if method == "field" && args.len() > 0 && policy_literal_string(args[0].expr, "ok") {
@@ -1067,7 +1067,7 @@ policy_ordinary_envelope_decoder: fn(function: Func) -> Bool {
 }
 
 policy_evaluate_generated: fn(manifest: PolicyManifest, producer: String, source: String) -> [PolicyOccurrence] PolicyError! {
-    protocol := String?{None}
+    ^protocol: String?{None}
     loop row in manifest.producers {
         if row.selector == producer {
             protocol = Val(row.protocol)
@@ -1077,9 +1077,9 @@ policy_evaluate_generated: fn(manifest: PolicyManifest, producer: String, source
     selected: protocol ?? return Err(PolicyError{message: policy_inventory_error("unclassified generated-source producer", producer, "inventory:producer")})
     program: policy_parse_program(producer, source)
     if selected == "no-response-protocol" -> return Ok([PolicyOccurrence]{})
-    violations := [PolicyOccurrence]{}
-    count := 0
-    first := Func?{None}
+    ^violations: [PolicyOccurrence]{}
+    ^count: 0
+    ^first: Func?{None}
     loop item in program.items {
         if item == .Func(function) {
             if !policy_response_decoder(function) -> next
@@ -1109,8 +1109,8 @@ policy_ascii_equal: fn(left: String, right: String) -> Bool {
     r: right.bytes()
     if l.len() != r.len() -> return false
     loop index in 0..<l.len() {
-        a := Int{l[index]}
-        b := Int{r[index]}
+        ^a: Int{l[index]}
+        ^b: Int{r[index]}
         if a >= 65 && a <= 90 -> a += 32
         if b >= 65 && b <= 90 -> b += 32
         if a != b -> return false
@@ -1136,7 +1136,7 @@ PolicyPendingBody: enum {
 }
 
 policy_indexes_sequence: fn(init: Binding, body: [Stmt]) -> Bool {
-    found := false
+    ^found: false
     policy_visit_body(body, fn(expression) {
         if policy_without_parens(expression) == .Index(_, index, _, _, _) {
             if policy_ident_is(index, init.name) -> found = true
@@ -1155,8 +1155,8 @@ policy_counter_increment: fn(statement: Stmt, counter: String) -> Bool {
 }
 
 policy_manual_counter_body: fn(counter: String, body: [Stmt]) -> Bool {
-    increments := 0
-    used := false
+    ^increments: 0
+    ^used: false
     loop index in 0..<body.len() {
         if policy_counter_increment(body[index], counter) {
             increments += 1
@@ -1186,7 +1186,7 @@ policy_negative_directory_filter: fn(expression: Expr) -> Bool {
 }
 
 policy_body_directory_filter: fn(body: [Stmt]) -> Bool {
-    found := false
+    ^found: false
     policy_visit_body(body, fn(expression) {
         if policy_negative_directory_filter(expression) -> found = true
     })
@@ -1223,8 +1223,8 @@ policy_body_walk_filter: fn(body: [Stmt], aliases: [String:String]) -> Span? {
 policy_collect_statement: fn(statement: Stmt, aliases: [String:String], facts: ^PolicyStatementFacts, pending: ^[PolicyPendingBody]) {
     if statement == {
         .TaskGroup(_, _, _, nested, span) -> {
-            combinators := 0
-            has_all := false
+            ^combinators: 0
+            ^has_all: false
             loop child in nested {
                 if policy_is_task_statement(child, false) -> combinators += 1
                 if policy_is_task_statement(child, true) -> has_all = true
@@ -1242,7 +1242,7 @@ policy_collect_statement: fn(statement: Stmt, aliases: [String:String], facts: ^
         }
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
             if else_body == .Val(other) -> pending.push(PolicyPendingBody.Body{body: other})
-            index := arms.len()
+            ^index: arms.len()
             loop index > 0 {
                 index -= 1
                 pending.push(PolicyPendingBody.Body{body: arms[index].body})
@@ -1257,7 +1257,7 @@ policy_collect_statement: fn(statement: Stmt, aliases: [String:String], facts: ^
 }
 
 policy_collect_body_facts: fn(root: [Stmt], aliases: [String:String], facts: ^PolicyStatementFacts) {
-    pending := [PolicyPendingBody]{PolicyPendingBody.Body{body: root}}
+    ^pending: [PolicyPendingBody]{PolicyPendingBody.Body{body: root}}
     loop pending.len() > 0 {
         selected: pending.pop() ?? panic("pending statement body")
         if selected == {
@@ -1284,7 +1284,7 @@ policy_collect_body_facts: fn(root: [Stmt], aliases: [String:String], facts: ^Po
                 if policy_body_walk_filter(body, aliases) == .Val(span) {
                     facts.file_walks.push(span)
                 }
-                index := body.len()
+                ^index: body.len()
                 loop index > 0 {
                     index -= 1
                     policy_collect_statement(body[index], aliases, facts, pending)
@@ -1295,7 +1295,7 @@ policy_collect_body_facts: fn(root: [Stmt], aliases: [String:String], facts: ^Po
 }
 
 policy_statement_facts: fn(program: Program, aliases: [String:String]) -> PolicyStatementFacts {
-    facts := PolicyStatementFacts{task_groups: [PolicySpanFact]{}, counted_loops: [PolicySpanFact]{}, manual_counter_loops: [Span]{}, file_walks: [Span]{}}
+    ^facts: PolicyStatementFacts{task_groups: [PolicySpanFact]{}, counted_loops: [PolicySpanFact]{}, manual_counter_loops: [Span]{}, file_walks: [Span]{}}
     policy_collect_body_facts(program.script_body, aliases, facts)
     loop item in program.items {
         if item == {
@@ -1321,9 +1321,9 @@ policy_anchored_literal: fn(expression: Expr) -> Bool {
 }
 
 policy_body_anchored_regex_capture: fn(body: [Stmt], aliases: [String:String]) -> Bool {
-    anchored := false
-    matched := false
-    captured := false
+    ^anchored: false
+    ^matched: false
+    ^captured: false
     policy_visit_body(body, fn(expression) {
         if policy_without_parens(expression) == {
             .StructLit(name, _, _, _, fields, _, _, _) -> {
@@ -1444,8 +1444,8 @@ policy_direct_run: fn(program: Program) -> Bool {
 }
 
 policy_has_typed_cli_entry: fn(program: Program) -> Bool {
-    selected := String?{None}
-    executable_selected := false
+    ^selected: String?{None}
+    ^executable_selected: false
     loop item in program.items {
         if item == .Const(value) {
             if value.resolved_output == .Val(output) && output.selected && output.kind == OutputKind.Executable {
@@ -1489,8 +1489,8 @@ policy_has_typed_cli_entry: fn(program: Program) -> Bool {
 
 policy_has_args_builder: fn(program: Program) -> Bool {
     aliases: policy_module_aliases(program)
-    specification := false
-    parsed := false
+    ^specification: false
+    ^parsed: false
     policy_visit_program(program, fn(expression) {
         if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _) {
             if method == "spec" && policy_receiver_is(receiver, "args", aliases) {
@@ -1504,7 +1504,7 @@ policy_has_args_builder: fn(program: Program) -> Bool {
 
 policy_has_raw_process_boundary: fn(program: Program) -> Bool {
     aliases: policy_module_aliases(program)
-    found := false
+    ^found: false
     policy_visit_program(program, fn(expression) {
         if policy_is_process_input(expression, aliases) -> found = true
     })
@@ -1537,7 +1537,7 @@ policy_validate_lint_allows: fn(path: String, row: PolicySourceRow, program: Pro
         first: policy_marker_expression(marker, 0) ?? next
         if policy_allow_lint(first) == .Val(rule) {
             if !policy_guidance_lint(rule) -> next
-            explained := false
+            ^explained: false
             if policy_marker_expression(marker, 1) == .Val(reason) {
                 if reason == .Str(parts, _, _) && parts.len() > 0 {
                     explained = true
@@ -1581,10 +1581,10 @@ policy_occurrence: fn(path: String, rule: String, kind: String, span: Span) -> P
 }
 
 policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicySourceRow, program: Program) -> [PolicyOccurrence] {
-    violations := [PolicyOccurrence]{}
+    ^violations: [PolicyOccurrence]{}
     aliases: policy_module_aliases(program)
     facts: policy_statement_facts(program, aliases)
-    argv_sites := [Span]{}
+    ^argv_sites: [Span]{}
     // Keep Rust's per-expression rule order: occurrence diagnostics are ordered.
     rules: [String]{
         "raw-cli-fixed-shape",
@@ -1624,7 +1624,7 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
         "call:String.replace",
         "call:crypto.sha256_bytes",
     }
-    first_build := Span?{None}
+    ^first_build: Span?{None}
     if policy_applies(manifest, path, row, "first-hour-doc-recipe") && path == "Examples/Types/TypedLiteralForms.jet" {
         policy_visit_program(program, fn(expression) {
             if first_build == None && policy_is_build_command_literal(expression) {
@@ -1635,7 +1635,7 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
             violations.push(policy_occurrence(path, "first-hour-doc-recipe", "literal:jet-build", span))
         }
     }
-    enabled := [Bool]{}
+    ^enabled: [Bool]{}
     loop rule in rules -> enabled.push(policy_applies(manifest, path, row, rule))
     expressions: policy_program_expressions(program)
     url_receivers: policy_url_receivers(expressions)
@@ -1715,7 +1715,7 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
         violations.push(policy_occurrence(path, "walk-files-filter", "call:fs.walk", facts.file_walks[0]))
     }
     if policy_applies(manifest, path, row, "regex-capture-recipe") && !policy_has_anchored_regex_capture(program, aliases) {
-        span := Span{start: 0, end: 0}
+        ^span: Span{start: 0, end: 0}
         loop item in program.items {
             if item == .Func(function) {
                 span = function.span
@@ -1740,9 +1740,9 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
 }
 
 policy_markdown_fences: fn(source: String, language: String) -> [String] {
-    fences := [String]{}
-    inside := false
-    current := ""
+    ^fences: [String]{}
+    ^inside: false
+    ^current: ""
     loop line in source.lines() {
         trimmed: line.trim()
         if !inside {
@@ -1766,7 +1766,7 @@ policy_has_jet_run_command: fn(source: String) -> Bool {
                 line: raw.trim()
                 if line.is_empty() || line.starts_with("#") -> next
                 words: policy_split_whitespace(line)
-                index := 0
+                ^index: 0
                 loop index < words.len() && words[index] != "#" {
                     word: words[index]
                     index += 1
@@ -1791,8 +1791,8 @@ policy_source_programs: fn(path: String, source: String) -> [String] {
 policy_evaluate_source: fn(manifest: PolicyManifest, path: String, source: String) -> [PolicyOccurrence] PolicyError! {
     row: policy_source_row(manifest, path) ?? return Err(PolicyError{message: policy_inventory_error("unclassified eligible source", path, "inventory:source")})
     if !policy_semantic_role(row.role) -> return Ok([PolicyOccurrence]{})
-    all := [PolicyOccurrence]{}
-    typed := false
+    ^all: [PolicyOccurrence]{}
+    ^typed: false
     loop program_source in policy_source_programs(path, source) {
         program: policy_parse_program(path, program_source)
         policy_validate_lint_allows(path, row, program)
@@ -1811,7 +1811,7 @@ policy_evaluate_source: fn(manifest: PolicyManifest, path: String, source: Strin
 }
 
 policy_occurrence_messages: fn(violations: [PolicyOccurrence]) -> String {
-    messages := [String]{}
+    ^messages: [String]{}
     loop violation in violations {
         messages.push(policy_violation(violation.file, violation.rule, violation.site))
     }
@@ -1840,7 +1840,7 @@ policy_declared_config: fn(root: String, candidate: String) -> Bool {
 
 policy_ast_inventory: fn(manifest: PolicyManifest, root: String) -> PolicyInventory PolicyError! {
     discovery: policy_discover_manifest_files(manifest, root)
-    declared := [String]{}
+    ^declared: [String]{}
     loop candidate in discovery.config_candidates {
         if policy_declared_config(root, candidate) -> declared.push(candidate)
     }
@@ -1849,7 +1849,7 @@ policy_ast_inventory: fn(manifest: PolicyManifest, root: String) -> PolicyInvent
 
 policy_check_fixture_inventory: fn(manifest: PolicyManifest, root: String) PolicyError! {
     inventory: policy_ast_inventory(manifest, root)
-    errors := [String]{}
+    ^errors: [String]{}
     loop entry in inventory.files {
         expected: if {
             entry.path.starts_with("Tests/UI/") || entry.path.starts_with("Tests/UILint/") -> "negative-diagnostic"
@@ -1885,8 +1885,8 @@ policy_read_source: fn(root: String, path: String) -> String PolicyError! {
 policy_check_cli_recipe_inventory: fn(manifest: PolicyManifest, root: String) PolicyError! {
     policy_check_fixture_inventory(manifest, root)
     inventory: policy_ast_inventory(manifest, root)
-    errors := [String]{}
-    checked := false
+    ^errors: [String]{}
+    ^checked: false
     loop entry in inventory.files {
         row: policy_source_row(manifest, entry.path) ?? next
         profile: row.profile
@@ -1897,10 +1897,10 @@ policy_check_cli_recipe_inventory: fn(manifest: PolicyManifest, root: String) Po
             next
         }
         source: policy_read_source(root, entry.path)
-        count := 0
-        typed_count := 0
-        builder := false
-        raw := false
+        ^count: 0
+        ^typed_count: 0
+        ^builder: false
+        ^raw: false
         loop program_source in policy_source_programs(entry.path, source) {
             program: policy_parse_program(entry.path, program_source)
             count += 1
@@ -1927,10 +1927,10 @@ policy_check_cli_recipe_inventory: fn(manifest: PolicyManifest, root: String) Po
 policy_check_gate: fn(manifest: PolicyManifest, root: String, gate: String) PolicyError! {
     policy_check_cli_recipe_inventory(manifest, root)
     inventory: policy_ast_inventory(manifest, root)
-    violations := [PolicyOccurrence]{}
+    ^violations: [PolicyOccurrence]{}
     // Collect-all: a source the parser rejects is reported with the rest, not
     // as the first failure that hides every later file.
-    rejected := [String]{}
+    ^rejected: [String]{}
     loop entry in inventory.files {
         row: policy_source_row(manifest, entry.path) ?? next
         if row.role == "generated-output" || !policy_proof_matches(row.proof, gate) || !policy_semantic_role(row.role) {
@@ -1960,7 +1960,7 @@ policy_check_gate: fn(manifest: PolicyManifest, root: String, gate: String) Poli
         }
     }
     if violations.len() > 0 || rejected.len() > 0 {
-        messages := rejected.copy()
+        ^messages: rejected.copy()
         if violations.len() > 0 -> messages.push(policy_occurrence_messages(violations))
         return Err(PolicyError{message: messages.join("\n")})
     }
@@ -2065,7 +2065,7 @@ policy_ast_test_cli_boundaries: fn() PolicyError! {
 
 policy_ast_test_allow_source_reason: fn() PolicyError! {
     manifest: policy_manifest()
-    error := ""
+    ^error: ""
     if policy_evaluate_source(manifest, "Examples/Text/unreviewed_allow.jet", "run: fn() {{ #Allow(Jet.UnitScalarRewrap) print(\"kept\") }}") == {
         .Err(failure) -> { error = failure.message }
         .Ok(_) -> panic("maintained guidance allowance must explain itself")
@@ -2098,7 +2098,7 @@ policy_ast_test_response_decoder: fn() PolicyError! {
 
 policy_ast_test_binding_renderers: fn() PolicyError! {
     manifest: policy_manifest()
-    count := 0
+    ^count: 0
     loop producer in manifest.producers {
         if !producer.selector.contains("/Foreign/Binders/") || producer.protocol == "no-response-protocol" {
             next
@@ -2177,7 +2177,7 @@ policy_ast_test_reintroduced_ceremony: fn() PolicyError! {
     manifest: policy_manifest()
     loop example in cases {
         violations: policy_evaluate_source(manifest, example.path, example.source)
-        rendered := ""
+        ^rendered: ""
         loop violation in violations {
             if violation.rule == example.rule {
                 rendered = policy_violation(violation.file, violation.rule, violation.site)
@@ -2332,7 +2332,7 @@ policy_ast_test_fixture_roles: fn() PolicyError! {
 // The engine entry is the raw process protocol, not a typed CLI entry
 policy_ast_test_engine_entry_protocol: fn() PolicyError! {
     manifest: policy_manifest()
-    found := false
+    ^found: false
     loop row in manifest.sources {
         if row.selector == "file:Jetpack/CLI/Source/Entry/Main.jet" {
             found = true
@@ -2360,7 +2360,7 @@ policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
     policy_check_cli_recipe_inventory(manifest, ".")
     typed_selectors: [String]{"file:Tools/Adoption/Fixtures/CleanProject/run.jet", "file:Examples/Basics/FirstHour.jet", "file:Examples/Basics/Onboarding/run.jet", "file:Docs/Spec/Guides/first-hour.md", "root:Tools/Gauntlet/Entries", "root:Tests/AgentWorkloads/adapters", "root:Tests/CompiledWorkloads/Adapters/Jet"}
     loop selector in typed_selectors {
-        found := false
+        ^found: false
         loop row in manifest.sources {
             if row.selector == selector {
                 found = true
@@ -2371,7 +2371,7 @@ policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
     }
     expert_selectors: [String]{"file:Examples/Systems/CLI/ArgsSpec.jet", "file:Examples/Systems/CLI/ArgsAudit.jet", "file:Examples/Systems/CLI/CLIArgs.jet", "file:Examples/Systems/Files/Watcher.jet", "file:Tools/Gauntlet/Entries/TaskfileCLI/Jet/run.jet"}
     loop selector in expert_selectors {
-        found := false
+        ^found: false
         expected: if selector.contains("ArgsSpec.jet") || selector.contains("ArgsAudit.jet") -> "builder-cli" else -> "raw-cli"
         loop row in manifest.sources {
             if row.selector == selector {
@@ -2383,7 +2383,7 @@ policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
     }
     starter_selectors: [String]{"producer:Compiler/JetCLI/Source/CLI/Host.jet#jet_cli_new_run_source.native", "producer:Jetpack/PackageModel/Source/Manifest/Convert.jet#pkg_new_template"}
     loop selector in starter_selectors {
-        found := false
+        ^found: false
         loop producer in manifest.producers {
             if producer.selector == selector -> found = true
         }
@@ -2401,7 +2401,7 @@ policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
 // not Core/ directory names: unregistered files are not necessarily modules.
 policy_ast_test_core_reference: fn() {
     docs: policy_ast_files.read("Docs/Spec/Reference/core-library.md") ?? panic("core library reference must exist")
-    missing := [String]{}
+    ^missing: [String]{}
     loop module_entry in CORE_MODULE_EXPORTS {
         if module_entry.module_name == "core" -> next
         if !docs.contains("`{module_entry.module_name}`") -> missing.push(module_entry.module_name)
@@ -2430,7 +2430,7 @@ policy_ast_test_unicode_shell_words: fn() {
 }
 
 policy_planted_ascii_ladder: fn() -> String {
-    lower := "\"text\""
+    ^lower: "\"text\""
     loop index in 0..<26 {
         from: String.from_bytes([U8]{checked(U8{65 + index}) ?? panic("ASCII uppercase byte")}) ?? panic("ASCII")
         to: String.from_bytes([U8]{checked(U8{97 + index}) ?? panic("ASCII lowercase byte")}) ?? panic("ASCII")
@@ -2483,7 +2483,7 @@ policy_ast_test_planted_rule_pairs: fn() PolicyError! {
         // real corpus exceptions or scope changes. Checked-manifest tests above
         // still require every original source/provenance/classification.
         path: if pair.rule == "first-hour-doc-recipe" -> "Examples/Types/TypedLiteralForms.jet" else -> "planted/{pair.rule}.jet"
-        manifest := PolicyManifest{sources: [PolicySourceRow]{PolicySourceRow{selector: "file:{path}", role: "canonical-teaching", profile: "typed-cli", decision: "planted", proof: "planted", owner: "corpus-policy", reason: "planted AST pair"}}, scopes: [corpus_manifest.PolicyScopeRow]{corpus_manifest.PolicyScopeRow{rule: pair.rule, selector: "file:{path}", reason: "planted AST pair"}}, producers: [corpus_manifest.PolicyProducerRow]{}, artifacts: [corpus_manifest.PolicyArtifactRow]{}, findings: [corpus_manifest.PolicyFindingRow]{}, exceptions: [corpus_manifest.PolicyExceptionRow]{}}
+        ^manifest: PolicyManifest{sources: [PolicySourceRow]{PolicySourceRow{selector: "file:{path}", role: "canonical-teaching", profile: "typed-cli", decision: "planted", proof: "planted", owner: "corpus-policy", reason: "planted AST pair"}}, scopes: [corpus_manifest.PolicyScopeRow]{corpus_manifest.PolicyScopeRow{rule: pair.rule, selector: "file:{path}", reason: "planted AST pair"}}, producers: [corpus_manifest.PolicyProducerRow]{}, artifacts: [corpus_manifest.PolicyArtifactRow]{}, findings: [corpus_manifest.PolicyFindingRow]{}, exceptions: [corpus_manifest.PolicyExceptionRow]{}}
         bad: policy_evaluate_source(manifest, path, pair.rejected)
         assert(bad.len() == 1, "{pair.rule}: exactly one planted violation")
         assert_eq(bad[0].file, path)
@@ -2517,7 +2517,7 @@ policy_ast_test_explicit_entry: fn() PolicyError! {
         }
         loop (index, source) in rejected {
             violations: policy_evaluate_source(manifest, path, source)
-            entries := 0
+            ^entries: 0
             loop violation in violations {
                 if violation.rule != "entry-explicit" -> next
                 entries += 1
@@ -2544,8 +2544,8 @@ policy_ast_test_explicit_entry: fn() PolicyError! {
 // parser because inventory needs the declared-config exclusion.
 policy_ast_test_manifest_scoped_inventory: fn() PolicyError! {
     inventory: policy_ast_inventory(policy_manifest(), ".")
-    first_hour := false
-    scratch := false
+    ^first_hour: false
+    ^scratch: false
     loop entry in inventory.files {
         if entry.path == "Docs/Spec/Guides/first-hour.md" -> first_hour = true
         if entry.path == "scratch-parser-call.jet" -> scratch = true
@@ -2588,7 +2588,7 @@ policy_ast_test_declared_config_exclusion: fn() PolicyError! {
 // and `jet fmt` cannot disagree. Sources the formatter does not accept are
 // left to the corpus parse gates.
 policy_redundant_grouping_sites: fn(root: String) -> [String] PolicyError! {
-    sites := [String]{}
+    ^sites: [String]{}
     loop item in policy_ast_files.walk_files(root) {
         entry: item ?? return Err(PolicyError{message: "walk {root}: {err}"})
         if !entry.path.ends_with(".jet") -> next
@@ -2596,8 +2596,8 @@ policy_redundant_grouping_sites: fn(root: String) -> [String] PolicyError! {
         spans: jet_format_redundant_grouping(source) ?? next
         if spans.len() == 0 -> next
         bytes: source.bytes()
-        line := 1
-        at := 0
+        ^line: 1
+        ^at: 0
         loop span in spans {
             loop at < span.start {
                 if bytes[at] == 10 -> line += 1
@@ -2623,7 +2623,7 @@ policy_redundant_grouping_sites: fn(root: String) -> [String] PolicyError! {
 // through the generated source-owned rows.
 policy_core_api_names: fn(module_name: String, known: ^[String:[String]]) -> [String] PolicyError! {
     if known.get(module_name) == .Val(cached) -> return Ok(cached.copy())
-    names := [String]{}
+    ^names: [String]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         if row.module_name != module_name -> next
         source: policy_ast_files.read(row.path) ?? return Err(PolicyError{message: "read {row.path}: {err}"})
@@ -2650,9 +2650,9 @@ policy_word_byte: fn(byte: U8) -> Bool {
 
 // The identifier words of `text`, in order.
 policy_literal_words: fn(text: String) -> [String] {
-    words := [String]{}
+    ^words: [String]{}
     bytes: text.bytes()
-    start := 0
+    ^start: 0
     loop at in 0..<bytes.len() + 1 {
         if at < bytes.len() && policy_word_byte(bytes[at]) -> next
         if at > start -> words.push(policy_slice_bytes(text, start, at))
@@ -2664,7 +2664,7 @@ policy_literal_words: fn(text: String) -> [String] {
 // The text of a string literal with no interpolation.
 policy_plain_literal: fn(expression: Expr) -> String? {
     if policy_without_parens(expression) == .Str(parts, _, _) {
-        text := ""
+        ^text: ""
         loop part in parts {
             if part == .Lit(piece) -> text = "{text}{piece}" else -> return None
         }
@@ -2675,15 +2675,15 @@ policy_plain_literal: fn(expression: Expr) -> String? {
 
 policy_api_name_only_sites: fn(path: String, source: String, known: ^[String:[String]]) -> [String] PolicyError! {
     program: policy_parse_program(path, source) ?? return Ok([String]{})
-    modules := [String]{}
+    ^modules: [String]{}
     loop (_, imported) in policy_module_aliases(program) {
         if !modules.contains(imported) -> modules.push(imported.copy())
     }
-    sites := [String]{}
+    ^sites: [String]{}
     if modules.len() == 0 -> return Ok(sites)
     expressions: policy_program_expressions(program)
     // A name the program calls is observed, so a progress label may repeat it.
-    called := [String]{}
+    ^called: [String]{}
     loop expression in expressions {
         if policy_without_parens(expression) == .Call(call, _) -> called.push(call.name.copy())
         if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, _, _) {
@@ -2691,7 +2691,7 @@ policy_api_name_only_sites: fn(path: String, source: String, known: ^[String:[St
         }
     }
     loop expression in expressions {
-        printed := String?{None}
+        ^printed: String?{None}
         if policy_without_parens(expression) == .Call(call, _) {
             if call.name == "print" && call.args.len() == 1 {
                 printed = policy_plain_literal(call.args[0].expr)
@@ -2703,7 +2703,7 @@ policy_api_name_only_sites: fn(path: String, source: String, known: ^[String:[St
         words: policy_literal_words(text)
         loop imported in modules {
             api: policy_core_api_names(imported, known) ?? return Err(err)
-            named := [String]{}
+            ^named: [String]{}
             loop word in words {
                 if api.contains(word) && !called.contains(word) && !named.contains(word) {
                     named.push(word.copy())
@@ -2718,8 +2718,8 @@ policy_api_name_only_sites: fn(path: String, source: String, known: ^[String:[St
 }
 
 policy_api_name_only_corpus: fn(root: String) -> [String] PolicyError! {
-    known := [String:[String]]{}
-    sites := [String]{}
+    ^known: [String:[String]]{}
+    ^sites: [String]{}
     loop item in policy_ast_files.walk_files(root) {
         entry: item ?? return Err(PolicyError{message: "walk {root}: {err}"})
         if !entry.path.ends_with(".jet") || entry.path.ends_with("/package.jet") || entry.path.ends_with("/workspace.jet") {
@@ -2735,7 +2735,7 @@ policy_api_name_only_corpus: fn(root: String) -> [String] PolicyError! {
 
 #Test("examples_observe_the_api_they_teach") {
     guards_enter_root()
-    known := [String:[String]]{}
+    ^known: [String:[String]]{}
     rejected: "use browser: core.browser\nrun: fn() {{\n    print(\"locators:get_by_role+get_by_text+click\")\n}}\n"
     observed: "use browser: core.browser\nrun: fn() {{\n    profile: browser.profile(\"bidi-2025.5\") ?? panic(\"profile\")\n    print(\"profile:{{profile.name()}}\")\n    print(\"click the button, then wait\")\n}}\n"
     planted: policy_api_name_only_sites("Examples/planted.jet", rejected, known) ?? panic("{err.message}")

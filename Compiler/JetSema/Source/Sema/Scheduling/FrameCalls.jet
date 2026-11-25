@@ -33,7 +33,7 @@ SemaFrameCallScan: struct {
 // The schedule facts of `lambda`, the callback of one `on_frame` call, checked
 // against the scope that encloses the call.
 sema_frame_lambda_schedule: fn(lambda: Lambda, check: SemaBodyCheck) -> SemaFrameScheduleFacts {
-    scan := SemaFrameCallScan{operations: [FrameOperation]{}, dma_starts: [SemaFrameDMABinding]{}, refusal: None, refusal_index: -1}
+    ^scan: SemaFrameCallScan{operations: [FrameOperation]{}, dma_starts: [SemaFrameDMABinding]{}, refusal: None, refusal_index: -1}
     if lambda.body == {
         .Expr(value) -> {
             ast_visit_expr(check.environment.tables, value, fn(expression: ExprNode) { sema_frame_note_call(scan, ast_expr(check.environment.tables, expression), check) })
@@ -46,7 +46,7 @@ sema_frame_lambda_schedule: fn(lambda: Lambda, check: SemaBodyCheck) -> SemaFram
     if scan.refusal != None {
         return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, error: scan.refusal}
     }
-    operations := scan.operations.move()
+    ^operations: scan.operations.move()
     operations.sort_by(fn(left: FrameOperation, right: FrameOperation) { left.source_index <=> right.source_index })
     source: sema_source_file_at(check.environment.source_segments, check.environment.source_file, check.environment.source_origin, lambda.span)
     sema_frame_schedule_produce(operations, check, source, lambda.span.start)
@@ -113,15 +113,15 @@ sema_frame_module_call_operation: fn(receiver: Expr, method: String, args: [Call
     path: sema_expr_core_module_receiver_path(receiver) ?? return None
     if !sema_expr_core_module_alias_visible(path.alias, check.scopes) -> return None
     if sema_call_core_import_module(check.environment.*, check.program.*, path.alias) == .Val(core_module) {
-        module_name := core_module
+        ^module_name: core_module
         loop leaf in path.leaves {
             module_name = "{module_name}.{leaf}"
             if core_module_export(module_name) == None -> return None
         }
         // A source-owned row's effects are its Core declaration's.
         if core_call(module_name, method) == .Val(found) {
-            record := found
-            declared := [String]{}
+            ^record: found
+            ^declared: [String]{}
             if sema_call_core_declared_effects(record, check, declared) -> record.effects = declared
             return Val(sema_frame_core_call_operation(record, "{module_name}.{method}", index))
         }

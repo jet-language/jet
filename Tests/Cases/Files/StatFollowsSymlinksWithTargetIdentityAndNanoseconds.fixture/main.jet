@@ -55,7 +55,7 @@ run: fn() {
     }
     print("broken: nofollow_sym={broken_own} follow_not_found={broken_follow} refuse_invalid={broken_refuse}")
 
-    reader := files.open(link2) ?? panic("open followed")
+    ^reader: files.open(link2) ?? panic("open followed")
     rstat: reader.stat() ?? panic("reader stat")
     handle_eq: rstat.id.device == canonical.id.device && rstat.id.inode == canonical.id.inode && (rstat.modified.to_unix_ns() ?? -1) == (canonical.modified.to_unix_ns() ?? -2)
     print("handle: matches_canonical={handle_eq}")

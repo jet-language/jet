@@ -39,7 +39,7 @@ data_sequence_clone: fn(sequence: I64, kind: I64) -> I64 {
     result: data_sequence_new(length, stride)
     source: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     target: dyn_word(wrapping(result + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if kind == DYN_BYTE_LIST -> host_u8_put(target, at, host_u8_get(source, at)) else if kind == DYN_OBJECT {
             dyn_store(wrapping(wrapping(target + at * stride) + DYN_ENTRY_KEY), jet_rt_string_clone(dyn_word(wrapping(wrapping(source + at * stride) + DYN_ENTRY_KEY))))
@@ -58,7 +58,7 @@ data_sequence_drop: fn(sequence: I64, kind: I64) {
     length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     capacity: dyn_word(wrapping(sequence + DATA_SEQUENCE_CAPACITY))
     data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop kind != DYN_BYTE_LIST && at < length {
         if kind == DYN_OBJECT {
             jet_rt_string_drop(dyn_word(wrapping(wrapping(data + at * stride) + DYN_ENTRY_KEY)))
@@ -72,7 +72,7 @@ data_sequence_drop: fn(sequence: I64, kind: I64) {
 
 #Export(c) jet_rt_handle_clone_dyn: fn(tree: I64) -> I64 {
     kind: dyn_word(wrapping(tree + DYN_TAG))
-    payload := dyn_word(wrapping(tree + DYN_PAYLOAD))
+    ^payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
     if kind == DYN_INT -> payload = jet_rt_int_clone(payload) else if kind == DYN_NUMBER || kind == DYN_TEXT {
         payload = jet_rt_string_clone(payload)
     } else if kind == DYN_DATETIME { payload = data_dyn_datetime_clone(payload) } else if kind == DYN_BYTE_LIST || kind >= DYN_ARRAY {
@@ -113,7 +113,7 @@ data_sequence_drop: fn(sequence: I64, kind: I64) {
     ap: dyn_word(wrapping(a + DATA_SEQUENCE_DATA))
     bp: dyn_word(wrapping(b + DATA_SEQUENCE_DATA))
     stride: if kind == DYN_OBJECT -> DYN_ENTRY_BYTES else -> DYN_ELEMENT_BYTES
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if kind == DYN_BYTE_LIST {
             if host_u8_get(ap, at) != host_u8_get(bp, at) -> return false
@@ -137,7 +137,7 @@ dyn_quote: fn(target: I64, text: I64) {
     rt_text_push_word(target, I64{34}, I64{1})
     data: rt_text_data(text)
     length: rt_text_len(text)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
         if (byte == I64{34} || byte == I64{92}) {
@@ -205,7 +205,7 @@ dyn_render: fn(target: I64, tree: I64) {
     rt_text_push_word(target, if object -> I64{123} else -> I64{91}, I64{1})
     length: dyn_word(wrapping(value + DATA_SEQUENCE_LENGTH))
     data: dyn_word(wrapping(value + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (at != I64{0}) { rt_text_push_word(target, I64{44}, I64{1}) }
         if object {
@@ -250,7 +250,7 @@ dyn_render: fn(target: I64, tree: I64) {
         sequence: dyn_word(wrapping(tree + DYN_PAYLOAD))
         length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
         data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-        at := I64{0}
+        ^at: I64{0}
         loop at < length {
             entry: wrapping(data + at * DYN_ENTRY_BYTES)
             if jet_rt_string_eq(dyn_word(wrapping(entry + DYN_ENTRY_KEY)), name) {
@@ -423,15 +423,15 @@ DynNumberParts: struct {
 }
 
 dyn_number_parts: fn(data: I64, len: I64) -> DynNumberParts {
-    parts := DynNumberParts{negative: false, first: I64{0}, last: I64{0}, digits: I64{0}, adjust: I64{0}, exponent_at: len, exponent_len: I64{0}}
-    at := I64{0}
+    ^parts: DynNumberParts{negative: false, first: I64{0}, last: I64{0}, digits: I64{0}, adjust: I64{0}, exponent_at: len, exponent_len: I64{0}}
+    ^at: I64{0}
     if (len > I64{0} && rt_text_byte(data) == I64{45}) {
         parts.negative = true
         at = I64{1}
     }
-    point := false
-    leading := true
-    trailing := I64{0}
+    ^point: false
+    ^leading: true
+    ^trailing: I64{0}
     loop at < len {
         byte: rt_text_byte(wrapping(data + at))
         if (byte == I64{101} || byte == I64{69}) {
@@ -466,8 +466,8 @@ dyn_number_equal: fn(left: I64, right: I64) -> Bool {
     b: dyn_number_parts(b_data, rt_text_len(right))
     if (a.digits == I64{0} || b.digits == I64{0}) { return a.digits == b.digits }
     if (a.negative != b.negative || a.digits != b.digits) { return false }
-    left_at := a.first
-    right_at := b.first
+    ^left_at: a.first
+    ^right_at: b.first
     loop left_at < a.last {
         left_byte: rt_text_byte(wrapping(a_data + left_at))
         right_byte: rt_text_byte(wrapping(b_data + right_at))
@@ -510,7 +510,7 @@ dyn_number_equal: fn(left: I64, right: I64) -> Bool {
     ap: dyn_word(wrapping(a + DATA_SEQUENCE_DATA))
     bp: dyn_word(wrapping(b + DATA_SEQUENCE_DATA))
     if kind == DYN_ARRAY {
-        at := I64{0}
+        ^at: I64{0}
         loop at < length {
             if !jet_dyn_equal_unordered(dyn_word(wrapping(ap + at * DYN_ELEMENT_BYTES)), dyn_word(wrapping(bp + at * DYN_ELEMENT_BYTES))) {
                 return false
@@ -521,12 +521,12 @@ dyn_number_equal: fn(left: I64, right: I64) -> Bool {
     }
     used: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
     if (length != I64{0}) { coll_zero(used, length * I64{8}) }
-    same := true
-    at := I64{0}
+    ^same: true
+    ^at: I64{0}
     loop same && at < length {
         entry: wrapping(ap + at * DYN_ENTRY_BYTES)
-        matched := false
-        other := I64{0}
+        ^matched: false
+        ^other: I64{0}
         loop !matched && other < length {
             candidate: wrapping(bp + other * DYN_ENTRY_BYTES)
             if (dyn_word(wrapping(used + other * I64{8})) == I64{0} && jet_rt_string_eq(dyn_word(wrapping(entry + DYN_ENTRY_KEY)), dyn_word(wrapping(candidate + DYN_ENTRY_KEY))) && jet_dyn_equal_unordered(dyn_word(wrapping(entry + DYN_ENTRY_VALUE)), dyn_word(wrapping(candidate + DYN_ENTRY_VALUE)))) {
@@ -565,7 +565,7 @@ dyn_object_find: fn(tree: I64, key: I64) -> I64 {
     sequence: dyn_word(wrapping(tree + DYN_PAYLOAD))
     length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         entry: wrapping(data + at * DYN_ENTRY_BYTES)
         if jet_rt_string_eq(dyn_word(wrapping(entry + DYN_ENTRY_KEY)), key) {
@@ -645,7 +645,7 @@ dyn_push_position_out_of_range: fn(target: I64, position: I64, array: I64) {
     length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     words: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         dyn_store(wrapping(words + at * I64{8}), jet_rt_string_clone(dyn_word(wrapping(wrapping(data + at * DYN_ENTRY_BYTES) + DYN_ENTRY_KEY))))
         at += I64{1}
@@ -687,9 +687,7 @@ dyn_push_position_out_of_range: fn(target: I64, position: I64, array: I64) {
     }
     kind: dyn_word(wrapping(tree + DYN_TAG))
     target: dyn_stop_begin(site)
-    if kind == DYN_ARRAY {
-        dyn_push_position_out_of_range(target, position, tree)
-    } else {
+    if kind == DYN_ARRAY -> dyn_push_position_out_of_range(target, position, tree) else {
         jet_rt_string_builder_push(target, rt_static_text("expected an array, found "))
         jet_rt_string_builder_push(target, dyn_kind_name(kind))
     }
@@ -829,7 +827,7 @@ dyn_bytes_order: fn(left: I64, right: I64) -> I64 {
     right_length: dyn_word(wrapping(right + DATA_SEQUENCE_LENGTH))
     left_data: dyn_word(wrapping(left + DATA_SEQUENCE_DATA))
     right_data: dyn_word(wrapping(right + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < left_length && at < right_length {
         order: dyn_word_order(host_u8_get(left_data, at), host_u8_get(right_data, at))
         if (order != I64{0}) { return order }
@@ -913,13 +911,13 @@ dyn_order: fn(left: I64, right: I64) -> I64 {
     sequence: dyn_word(wrapping(tree + DYN_PAYLOAD))
     length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         entry: wrapping(data + at * DYN_ENTRY_BYTES)
         if (jet_rt_string_eq(dyn_word(wrapping(entry + DYN_ENTRY_KEY)), key)) {
             dyn_store(some, dyn_word(wrapping(entry + DYN_ENTRY_VALUE)))
             jet_rt_string_drop(dyn_word(wrapping(entry + DYN_ENTRY_KEY)))
-            later := at + I64{1}
+            ^later: at + I64{1}
             loop later < length {
                 from: wrapping(data + later * DYN_ENTRY_BYTES)
                 dyn_store(wrapping(wrapping(from - DYN_ENTRY_BYTES) + DYN_ENTRY_KEY), dyn_word(wrapping(from + DYN_ENTRY_KEY)))
@@ -950,8 +948,8 @@ dyn_set_refused: fn(target: I64, value: I64, err: I64) -> I64 {
     sequence: dyn_word(wrapping(steps + DYN_PAYLOAD))
     count: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    node := tree
-    at := I64{0}
+    ^node: tree
+    ^at: I64{0}
     loop at < count {
         step: dyn_word(wrapping(data + at * DYN_ELEMENT_BYTES))
         kind: dyn_word(wrapping(node + DYN_TAG))
@@ -1131,7 +1129,7 @@ data_dyn_bytes_text: fn(sequence: I64) -> I64 {
     data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     alphabet: rt_static_text("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
     target: jet_rt_string_builder_new()
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         a: host_u8_get(data, at)
         b: if (at + I64{1} < length) -> host_u8_get(data, at + I64{1}) else -> I64{0}
@@ -1181,8 +1179,8 @@ data_dyn_datetime_text: fn(value: I64) -> I64 {
     nanos: dyn_word(wrapping(value + DYN_DATETIME_NANOS))
     if (nanos != I64{0}) {
         rt_text_push_scalar(target, I64{46})
-        digits := I64{9}
-        fraction := nanos
+        ^digits: I64{9}
+        ^fraction: nanos
         loop fraction %% (I64{10}) == (I64{0}) {
             fraction /= I64{10}
             digits -= I64{1}

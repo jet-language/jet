@@ -7,7 +7,7 @@
 // "fault injected: FS.Write" checkpoint (IOError.other).
 files_write_fault: fn(path: I64, operation: I64, error: I64) -> Bool {
     if !jet_fault_should_fail(rt_static_text("FS.Write")) -> return false
-    _ := host_io_other_take(operation, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("fault injected: FS.Write")), error)
+    ^_: host_io_other_take(operation, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("fault injected: FS.Write")), error)
     true
 }
 
@@ -34,18 +34,18 @@ files_open_reader_shown: fn(handle: I64, name: I64, shown: I64, links: I64, outp
     if (fd < I64{0}) { return I64{0} }
     if (handle >= I64{0}) {
         facts: jet_rt_alloc(I64{128}, I64{8})
-        result := I64{0}
+        ^result: I64{0}
         #Unsafe("the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat") {
             result = os_stat_facts_i64(I64{5}, fd, facts)
         }
         mode: rt_text_word(wrapping(facts + I64{16}))
         jet_rt_free(facts, I64{128}, I64{8})
         if (result < I64{0}) {
-            _ := host_call(I64{3}, fd, I64{0}, I64{0})
+            ^_: host_call(I64{3}, fd, I64{0}, I64{0})
             return compiler_fs_errno(HOST_IO_OP_READ, shown, -result, error)
         }
         if ((mode & I64{61440}) != I64{32768}) {
-            _ := host_call(I64{3}, fd, I64{0}, I64{0})
+            ^_: host_call(I64{3}, fd, I64{0}, I64{0})
             return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, shown, I64{0}, jet_rt_string_clone(rt_static_text("not a regular file; use open_directory for a directory")), error)
         }
     }
@@ -62,7 +62,7 @@ files_open_reader_shown: fn(handle: I64, name: I64, shown: I64, links: I64, outp
     links: int_saturated(links_int)
     display: fs_name_display(name)
     shown: if (display == I64{0}) -> name else -> display
-    result := I64{0}
+    ^result: I64{0}
     if !files_write_fault(shown, HOST_IO_OP_WRITE, error) && !(handle < I64{0} && jet_std_files_writer_refusal(name, error) != I64{0}) {
         fd: fs_open_at(handle, name, if append -> I64{2} else -> I64{1}, if_exists, mode, links, error)
         if (fd >= I64{0}) {
@@ -117,8 +117,8 @@ FILES_WRITE_BUFFERED_ZERO: I64{-4098}
 // FILES_WRITE_*_ZERO fact. `bytes` are packed (stride 1).
 files_writer_write: fn(writer: I64, bytes: I64, length: I64) -> I64 {
     scratch: jet_rt_alloc(I64{40}, I64{8})
-    at := I64{0}
-    failure := I64{0}
+    ^at: I64{0}
+    ^failure: I64{0}
     loop at < length {
         rt_text_put(wrapping(scratch + I64{32}), I64{0})
         count: jet_fd_write_raw(writer, wrapping(bytes + at), length - at, scratch, wrapping(scratch + I64{32}))
@@ -197,7 +197,7 @@ files_writer_hostile_write: fn(hostile: I64, writer: I64, path: I64, data: I64, 
 #Export(c) jet_std_file_writer_write_line: fn(writer: I64, line: I64, error: I64) -> I64 {
     path: files_writer_path(writer)
     if files_write_fault(path, HOST_IO_OP_WRITE, error) -> return I64{0}
-    failure := files_writer_write(writer, rt_text_data(line), rt_text_len(line))
+    ^failure: files_writer_write(writer, rt_text_data(line), rt_text_len(line))
     if (failure == I64{0}) {
         failure = files_writer_write(writer, rt_text_data(rt_static_text("\n")), I64{1})
     }
@@ -238,7 +238,7 @@ files_writer_flush: fn(writer: I64) -> I64 {
     failure: files_writer_flush(writer)
     if (failure != I64{0}) { return files_writer_failure(HOST_IO_OP_FLUSH, path, failure, error) }
     scratch: jet_rt_alloc(I64{32}, I64{8})
-    code := I64{4}
+    ^code: I64{4}
     loop code == (I64{4}) {
         jet_fd_sync_raw(writer, false, scratch)
         code = files_out_errno(scratch)
@@ -281,7 +281,7 @@ files_writer_flush: fn(writer: I64) -> I64 {
 // The 64-bit two's complement octal digits.
 files_push_octal: fn(target: I64, value: I64) {
     rt_text_push_word(target, I64{28464}, I64{2})  // "0o"
-    top := I64{21}
+    ^top: I64{21}
     loop top > (I64{0}) {
         digit: if (top == I64{21}) -> (value >> I64{63}) & I64{1} else -> (value >> (top * I64{3})) & I64{7}
         if (digit != I64{0}) { break }
@@ -310,7 +310,7 @@ files_push_octal: fn(target: I64, value: I64) {
     }
     scratch: jet_rt_alloc(I64{160}, I64{8})
     jet_fd_stat_raw(writer, scratch, wrapping(scratch + I64{128}))
-    code := files_out_errno(wrapping(scratch + I64{128}))
+    ^code: files_out_errno(wrapping(scratch + I64{128}))
     if (code == I64{0}) {
         code = I64{4}
         loop code == (I64{4}) {
@@ -339,7 +339,7 @@ files_push_octal: fn(target: I64, value: I64) {
     if (size == I64{0}) { return I64{1} }
     fd: jet_fd_number_raw(writer)
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_WRITE, path, I64{9}, error) }
-    result := I64{-4}
+    ^result: I64{-4}
     loop result == (I64{-4}) -> result = host_call4(I64{285}, fd, I64{0}, I64{0}, size)
     if (result == I64{-95} || result == I64{-38}) {
         return compiler_fs_error(HOST_IO_KIND_UNSUPPORTED, HOST_IO_OP_WRITE, path, -result, jet_rt_string_clone(rt_static_text("this file system cannot reserve space")), error)

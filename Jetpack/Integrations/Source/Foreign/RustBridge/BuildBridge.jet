@@ -187,7 +187,7 @@ pkg_ffi_write_bridge_sources: fn(request: RustBridgeBuild, deps: [String:String]
     src_dir: files.join(paths.cache_root, "src")
     files.create_dir_all(src_dir) ?? return Err(pkg_ffi_tool_error("couldn't create the FFI build folder: {err}"))
     manifest: files.join(paths.cache_root, "Cargo.toml")
-    has_native := false
+    ^has_native: false
     loop entry in entries {
         lang: entry.inline_lang() ?? next
         if lang == "c" || lang == "cpp" -> has_native = true
@@ -200,7 +200,7 @@ pkg_ffi_write_bridge_sources: fn(request: RustBridgeBuild, deps: [String:String]
             files.write(files.join(paths.cache_root, "inline_{index}.{lang}"), pkg_ffi_emit_native_inline_source(entries[index], index)) ?? return Err(pkg_ffi_tool_error("couldn't write the inline foreign source: {err}"))
         }
     }
-    handle_names := [String]{}
+    ^handle_names: [String]{}
     loop fact in request.handle_facts {
         if !handle_names.contains(fact.jet_name) -> handle_names.push(fact.jet_name)
     }
@@ -213,7 +213,7 @@ pkg_ffi_write_bridge_sources: fn(request: RustBridgeBuild, deps: [String:String]
 // user's Cargo registry mounted read-only.
 pkg_ffi_run_sandboxed_cargo: fn(cargo_path: String, selected_target: String, paths: BridgePaths, native_link_args: [String]) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput RustBridgeError! {
     cargo_args: [String]{"build", "--keep-going", "--release", "--target", selected_target, "--manifest-path", "/work/source/Cargo.toml"}
-    sandbox_env := [String:String]{}
+    ^sandbox_env: [String:String]{}
     sandbox_env["CARGO_HOME"] = "/work/output/cargo-home"
     sandbox_env["CARGO_TARGET_DIR"] = "/work/output"
     sandbox_env["HOME"] = "/work/output/home"
@@ -222,7 +222,7 @@ pkg_ffi_run_sandboxed_cargo: fn(cargo_path: String, selected_target: String, pat
         if path != "" -> sandbox_env["PATH"] = path
     }
     cargo_home: sys.get("CARGO_HOME") ?? files.join(pkg_ffi_dirs_home(), ".cargo")
-    mounts := [NativeSandboxMount]{}
+    ^mounts: [NativeSandboxMount]{}
     if files.canonicalize(files.join(cargo_home, "registry")) == .Ok(registry) {
         if files.is_dir(registry) {
             mounts.push(NativeSandboxMount{source: registry, destination: "/work/output/cargo-home/registry"})
@@ -315,7 +315,7 @@ pkg_ffi_looks_like_signature_mismatch: fn(stderr: String) -> Bool Never! {
 }
 
 pkg_ffi_indent_block: fn(text: String) -> String Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in pkg_bridge_text_lines(text) -> lines.push(if line == "" -> "" else -> "    {line}")
     lines.join("\n")
 }
@@ -324,7 +324,7 @@ pkg_ffi_indent_block: fn(text: String) -> String Never! {
 // chatter dropped, generated wrapper excerpts, crate names, and cache paths
 // normalized.
 pkg_ffi_stable_cargo_detail: fn(stderr: String) -> String Never! {
-    kept := [String]{}
+    ^kept: [String]{}
     loop line in pkg_bridge_text_lines(stderr) {
         trimmed: line.trim()
         if trimmed == "" || trimmed.starts_with("Updating crates.io") || trimmed.starts_with("Locking ") || trimmed.starts_with("Adding ") || trimmed.contains("waiting for other jobs") {
@@ -349,8 +349,8 @@ pkg_ffi_normalize_ffi_generated_source_line: fn(line: String) -> String Never! {
 // `jet_ffi_<16 hex>` becomes `jet_ffi_<hash>`.
 pkg_ffi_normalize_ffi_crate_name: fn(line: String) -> String Never! {
     marker: "jet_ffi_"
-    out := ""
-    rest := line
+    ^out: ""
+    ^rest: line
     loop {
         parts: rest.split_once(marker) ?? break
         out = "{out}{parts.before}"
@@ -368,7 +368,7 @@ pkg_ffi_normalize_ffi_crate_name: fn(line: String) -> String Never! {
 
 // The length of the leading run of ASCII hex digits.
 pkg_ffi_hex_prefix_len: fn(text: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop byte in text.bytes() {
         code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) {
@@ -387,9 +387,9 @@ pkg_ffi_normalize_ffi_cache_path: fn(line: String) -> String Never! {
     parts: line.split_once(marker) ?? return line
     head: parts.before
     bytes: head.bytes()
-    path_start := bytes.len()
+    ^path_start: bytes.len()
     // The path begins after the last `(` or space before the last `/`.
-    last_slash := -1
+    ^last_slash: -1
     loop index in 0..<bytes.len() {
         if (Int{bytes[index]}) == 47 -> last_slash = index
     }
@@ -400,8 +400,8 @@ pkg_ffi_normalize_ffi_cache_path: fn(line: String) -> String Never! {
             if code == 40 || code == 32 -> path_start = index + 1
         }
     }
-    rest := parts.after
-    shared := ""
+    ^rest: parts.after
+    ^shared: ""
     if rest.starts_with("deps/") {
         shared = "deps/"
         rest = rest.removeprefix("deps/")

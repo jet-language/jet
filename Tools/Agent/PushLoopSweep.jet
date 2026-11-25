@@ -84,7 +84,9 @@ site_at: fn(lines: [String], index: Int) -> Site? Never! {
     element: found[0].groups[2]
     if element.contains("?") || element.contains("|") -> return None
     opened: LOOP_OPEN.matches(lines[index + 1])
-    if opened.len() != 1 || opened[0].groups[0] != indent || opened[0].groups[2] != "{{" -> return None
+    if opened.len() != 1 || opened[0].groups[0] != indent || opened[0].groups[2] != "{{" {
+        return None
+    }
     header: opened[0].groups[1].copy()
     if !header.contains(" in ") || header.contains("{{") || !balanced(header) -> return None
     push: regex.compile("^{indent}    {name}\\.push\\((.*)\\)$") ?? return None
@@ -103,7 +105,7 @@ site_at: fn(lines: [String], index: Int) -> Site? Never! {
 // Whether `source` is a generator's output, whose header says so; its
 // generator is changed instead.
 generated: fn(source: String) -> Bool Never! {
-    head := 0
+    ^head: 0
     loop line in source.split("\n") {
         if line.contains("do not edit") -> return true
         head += 1
@@ -118,8 +120,8 @@ skip_key: fn(path: String, site: Site) -> String Never! { "{path}\t{site.name}\t
 // The sites of `source` not named in `skips`.
 sites_in: fn(path: String, source: String, skips: [String:Bool]) -> [Site] Never! {
     lines: source.split("\n").to_list()
-    sites := [Site]{}
-    index := 0
+    ^sites: [Site]{}
+    ^index: 0
     loop {
         if index >= lines.len() -> break
         if site_at(lines, index) == .Val(site) {
@@ -137,9 +139,9 @@ sites_in: fn(path: String, source: String, skips: [String:Bool]) -> [Site] Never
 // `source` with every site rewritten as its collecting loop.
 rewrite: fn(source: String, sites: [Site]) -> String Never! {
     lines: source.split("\n").to_list()
-    out := [String]{}
-    index := 0
-    next_site := 0
+    ^out: [String]{}
+    ^index: 0
+    ^next_site: 0
     loop {
         if index >= lines.len() -> break
         if next_site < sites.len() && sites[next_site].index == index {
@@ -156,11 +158,13 @@ rewrite: fn(source: String, sites: [Site]) -> String Never! {
 }
 
 tracked_sources: fn(roots: [String]) -[Exec, IO, Time.Wait]> [String] SweepError! {
-    argv := [String]{"git", "ls-files", "--"}
+    ^argv: [String]{"git", "ls-files", "--"}
     loop root in roots -> argv.push(root.copy())
     receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(SweepError{message: "cannot run git ls-files: {err}"})
-    if receipt.code != 0 -> return Err(SweepError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
-    paths := [String]{}
+    if receipt.code != 0 {
+        return Err(SweepError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
+    }
+    ^paths: [String]{}
     loop path in receipt.output.split("\n") {
         if path.ends_with(".jet") -> paths.push(path.copy())
     }
@@ -168,7 +172,7 @@ tracked_sources: fn(roots: [String]) -[Exec, IO, Time.Wait]> [String] SweepError
 }
 
 read_skips: fn(path: String) -[FS]> [String:Bool] SweepError! {
-    skips := [String:Bool]{}
+    ^skips: [String:Bool]{}
     if path == "" -> return Ok(skips)
     text: files.read(path) ?? return Err(SweepError{message: "cannot read {path}: {err}"})
     loop line in text.split("\n") {
@@ -179,8 +183,8 @@ read_skips: fn(path: String) -[FS]> [String:Bool] SweepError! {
 
 sweep_main: fn(write: Bool, skip_path: String, roots: [String]) -[Exec, FS, IO, Time.Wait]> Int SweepError! {
     skips: read_skips(skip_path) ?? return Err(err)
-    total := 0
-    touched := 0
+    ^total: 0
+    ^touched: 0
     loop path in tracked_sources(roots) ?? return Err(err) {
         source: files.read(path) ?? return Err(SweepError{message: "cannot read {path}: {err}"})
         if generated(source) -> next
@@ -199,19 +203,15 @@ sweep_main: fn(write: Bool, skip_path: String, roots: [String]) -[Exec, FS, IO, 
 }
 
 run: fn() {
-    write := false
-    skip_path := ""
-    roots := [String]{}
+    ^write: false
+    ^skip_path: ""
+    ^roots: [String]{}
     loop arg in process.args() {
-        if arg == "--write" {
-            write = true
-        } else if after(arg, "--skip=") == .Val(path) {
+        if arg == "--write" -> write = true else if after(arg, "--skip=") == .Val(path) {
             skip_path = path
         } else if arg.starts_with("--") {
             process.fail(64, "usage: jet Tools/Agent/PushLoopSweep.jet [--write] [--skip=FILE] [PATH...]")
-        } else {
-            roots.push(arg.copy())
-        }
+        } else { roots.push(arg.copy()) }
     }
     if roots.len() == 0 -> roots.push("Compiler")
     code: sweep_main(write, skip_path, roots) ?? process.fail(1, err.message)
@@ -251,7 +251,7 @@ run: fn() {
 
 #Test("a skipped site stays") {
     source: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n}}\n"
-    skips := [String:Bool]{}
+    ^skips: [String:Bool]{}
     skips["a.jet\tnames\tp in ps"] = true
     assert_eq(sites_in("a.jet", source, skips).len(), 0)
 }

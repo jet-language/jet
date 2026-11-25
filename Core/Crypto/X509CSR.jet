@@ -112,12 +112,12 @@ x509_csr_get_version: fn(data: [U8], p: ^Int, end: Int) -> Int x509.X509Error! {
 // the callback, or fails the parse when it is critical.
 x509_csr_parse_extensions: fn(csr: ^X509CSR, data: [U8], p: ^Int, end: Int, cb: X509CSRExtCallback?) x509.X509Error! {
     loop p < end {
-        len := asn1.get_tag(data, p, end, X509CSR_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+        ^len: asn1.get_tag(data, p, end, X509CSR_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
         end_ext_data: p + len
         len = asn1.get_tag(data, p, end_ext_data, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
         extn_oid: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
         p += len
-        is_critical := false
+        ^is_critical: false
         if asn1.get_bool(data, p, end_ext_data) == {
             .Ok(value) -> { is_critical = value }
             .Err(e) -> {
@@ -129,7 +129,7 @@ x509_csr_parse_extensions: fn(csr: ^X509CSR, data: [U8], p: ^Int, end: Int, cb: 
         if end_ext_octet != end_ext_data -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
         ext_type: oids.x509_ext_type(data, extn_oid) ?? 0
         if ext_type == 0 {
-            given := cb
+            ^given: cb
             if given == {
                 .Val(handler) -> {
                     call: handler.call
@@ -172,9 +172,9 @@ x509_csr_parse_extensions: fn(csr: ^X509CSR, data: [U8], p: ^Int, end: Int, cb: 
 // x509_csr_parse_attributes: the [0] Attributes, of which only an
 // extensionRequest is read.
 x509_csr_parse_attributes: fn(csr: ^X509CSR, data: [U8], start: Int, end: Int, cb: X509CSRExtCallback?) x509.X509Error! {
-    p := start
+    ^p: start
     loop p < end {
-        len := asn1.get_tag(data, p, end, X509CSR_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+        ^len: asn1.get_tag(data, p, end, X509CSR_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
         end_attr_data: p + len
         len = asn1.get_tag(data, p, end_attr_data, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
         attr_oid: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
@@ -196,11 +196,11 @@ x509_csr_parse_attributes: fn(csr: ^X509CSR, data: [U8], start: Int, end: Int, c
 // mbedtls_x509_csr_parse_der_internal: one request filling all of buf.
 x509_csr_parse_der_core: fn(buf: [U8], cb: X509CSRExtCallback?) -> X509CSR x509.X509Error! {
     if buf.len() == 0 -> return Err(.BadInput)
-    csr := x509_csr_new()
+    ^csr: x509_csr_new()
     data: buf.copy()
-    p := 0
+    ^p: 0
     raw_end: data.len()
-    len := asn1.get_tag(data, p, raw_end, X509CSR_SEQUENCE) ?? return Err(.InvalidFormat(None))
+    ^len: asn1.get_tag(data, p, raw_end, X509CSR_SEQUENCE) ?? return Err(.InvalidFormat(None))
     if len != raw_end - p -> return Err(.InvalidFormat(Val(.LengthMismatch)))
     csr.cri.p = p
     len = asn1.get_tag(data, p, raw_end, X509CSR_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
@@ -272,7 +272,7 @@ x509_csr_parse: fn(buf: [U8]) -> X509CSR x509.X509Error! {
 /// not fit its column, as for an ECDSA or EC_DH key.
 x509_csr_info: fn(prefix: String, csr: X509CSR) -> [U8] x509.X509Error! {
     data: csr.raw
-    out := [U8]{}
+    ^out: [U8]{}
     out.extend("{prefix}CSR version   : {csr.version}".bytes())
     out.extend("\n{prefix}subject name  : ".bytes())
     out.extend(x509.x509_dn_gets(csr.subject))
@@ -283,7 +283,7 @@ x509_csr_info: fn(prefix: String, csr: X509CSR) -> [U8] x509.X509Error! {
         }
         .None -> out.extend("???".bytes())
     }
-    key_size := x509.x509_key_size_helper(pk.pk_get_name(csr.pk))
+    ^key_size: x509.x509_key_size_helper(pk.pk_get_name(csr.pk))
     if key_size.len() >= X509CSR_BEFORE_COLON -> return Err(.BufferTooSmall)
     loop key_size.len() < X509CSR_BEFORE_COLON -> key_size = "{key_size} "
     out.extend("\n{prefix}{key_size}: {pk.pk_get_bitlen(csr.pk)} bits\n".bytes())

@@ -4,9 +4,9 @@ use jet_foundation.[JobRegistry, JobScope, JobFact, Func, Param, Type, Expr, Ite
 
 registry_function: fn(name: String, scope: JobScope, after: [String], parallel: Int) -> Func Never! {
     span: Span{start: 0, end: 0}
-    function := ast_func(name, span, span)
+    ^function: ast_func(name, span, span)
     function.is_job = true
-    metadata := ast_job_metadata()
+    ^metadata: ast_job_metadata()
     metadata.scope = scope
     metadata.after = after
     metadata.parallel = Val(parallel)
@@ -95,9 +95,9 @@ registry_optional: fn(value: String?, expected: String) -> Bool Never! {
     assert(registry_error(invalid, "z") == "job `z` declares a zero parallel bound")
     assert(registry_validation_error(invalid) == "job graph references unknown job `missing`")
 
-    entry := ast_program()
+    ^entry: ast_program()
     entry.items = registry_items([Func]{registry_function("entry", .Dev, [String]{"helper"}, 1)})
-    helper := ast_program()
+    ^helper: ast_program()
     helper.items = registry_items([Func]{registry_function("helper", .Dev, [String]{}, 1)})
     selected: JobRegistry.for_entry([jet_foundation.Program]{entry, helper}, 0)
     assert(selected.completion_words().join(" ") == "entry")
@@ -106,7 +106,7 @@ registry_optional: fn(value: String?, expected: String) -> Bool Never! {
     assert(out_of_range.jobs().len() == 0)
 
     span: Span{start: 0, end: 0}
-    function := registry_function("args", .Dev, [String]{}, 1)
+    ^function: registry_function("args", .Dev, [String]{}, 1)
     function.params = [Param]{
         registry_param("self", .Int, None, false),
         registry_param("required", .String, None, false),

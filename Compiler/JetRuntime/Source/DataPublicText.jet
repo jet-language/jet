@@ -1,7 +1,7 @@
 // ONE private rendering policy, ported. Trim = Unicode White_Space; folding =
 // ASCII only. No Core/Data policy reuse.
 data_public_trim_start: fn(data: I64, start: I64, end: I64) -> I64 {
-    at := start
+    ^at: start
     loop at < end {
         if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         at += rt_text_width(wrapping(data + at))
@@ -10,9 +10,9 @@ data_public_trim_start: fn(data: I64, start: I64, end: I64) -> I64 {
 }
 
 data_public_trim_end: fn(data: I64, start: I64, end: I64) -> I64 {
-    last := end
+    ^last: end
     loop last > start {
-        at := last - I64{1}
+        ^at: last - I64{1}
         loop {
             if (at <= start || (rt_text_byte(wrapping(data + at)) & I64{192}) != I64{128}) { break }
             at -= I64{1}
@@ -25,9 +25,9 @@ data_public_trim_end: fn(data: I64, start: I64, end: I64) -> I64 {
 
 data_public_match: fn(data: I64, length: I64, at: I64, first: I64, tail: I64, width: I64) -> Bool {
     if width > length - at -> return false
-    i := I64{0}
+    ^i: I64{0}
     loop i < width {
-        byte := rt_text_byte(wrapping(wrapping(data + at) + i))
+        ^byte: rt_text_byte(wrapping(wrapping(data + at) + i))
         if (byte >= I64{65} && byte <= I64{90}) { byte += I64{32} }
         word: if (i < I64{8}) -> first else -> tail
         if byte != ((word >> ((i % I64{8}) * I64{8})) & I64{255}) -> return false
@@ -45,7 +45,7 @@ data_public_sensitive_value: fn(data: I64, length: I64) -> Bool {
 }
 
 data_public_sensitive_key: fn(data: I64, length: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (data_public_match(data, length, at, I64{7237970109966541168}, I64{0}, I64{8}) || data_public_match(data, length, at, I64{110464200827248}, I64{0}, I64{6}) || data_public_match(data, length, at, I64{6584176}, I64{0}, I64{3}) || data_public_match(data, length, at, I64{127979059635571}, I64{0}, I64{6}) || data_public_match(data, length, at, I64{474147942260}, I64{0}, I64{5}) || data_public_match(data, length, at, I64{7598819853035991651}, I64{27745}, I64{10}) || data_public_match(data, length, at, I64{8820707168001226081}, I64{474315584609}, I64{13}) || data_public_match(data, length, at, I64{1752462689}, I64{0}, I64{4}) || data_public_match(data, length, at, I64{34169984018640993}, I64{0}, I64{7}) || data_public_match(data, length, at, I64{133476500729953}, I64{0}, I64{6}) || data_public_match(data, length, at, I64{7737029624305247073}, I64{31077}, I64{10}) || data_public_match(data, length, at, I64{8371474221811065697}, I64{1852140399}, I64{12}) || data_public_match(data, length, at, I64{8247626254411852147}, I64{101}, I64{9}) || data_public_match(data, length, at, I64{111503448436579}, I64{0}, I64{6}) || data_public_match(data, length, at, I64{31084746137363827}, I64{0}, I64{7}) || data_public_match(data, length, at, I64{6874028368198201968}, I64{7955819}, I64{11}) || data_public_match(data, length, at, I64{3271148666301805168}, I64{7955819}, I64{11}) || data_public_match(data, length, at, I64{9132979290989922}, I64{0}, I64{6})) {
             return true
@@ -61,7 +61,7 @@ data_public_bounded: fn(target: I64, data: I64, length: I64) {
         return
     }
     // The 14-byte ASCII suffix leaves 4082 bytes, ending at a UTF-8 boundary.
-    end := I64{4082}
+    ^end: I64{4082}
     loop {
         if ((rt_text_byte(wrapping(data + end)) & I64{192}) != I64{128}) { break }
         end -= I64{1}
@@ -91,7 +91,7 @@ data_public_digest: fn(target: I64, data: I64, length: I64) {
     jet_rt_native_sha256(data, length, digest, workspace)
     rt_text_push_word(target, I64{7526409316051214710}, I64{8})
     rt_text_push_word(target, I64{194182984289}, I64{5})
-    at := I64{0}
+    ^at: I64{0}
     loop {
         if (at >= I64{32}) { break }
         byte: rt_text_byte(wrapping(digest + at))
@@ -105,7 +105,7 @@ data_public_digest: fn(target: I64, data: I64, length: I64) {
 }
 
 data_public_find: fn(data: I64, start: I64, end: I64, byte: I64) -> I64 {
-    at := start
+    ^at: start
     loop at < end {
         if rt_text_byte(wrapping(data + at)) == byte -> return at
         at += I64{1}
@@ -132,7 +132,7 @@ data_public_locator: fn(target: I64, value: I64) {
     data: rt_text_data(value)
     end: data_public_find(data, I64{0}, rt_text_len(value), I64{35})
     query: data_public_find(data, I64{0}, end, I64{63})
-    scheme := I64{0}
+    ^scheme: I64{0}
     loop {
         if (scheme + I64{2} >= query) { break }
         if (rt_text_byte(wrapping(data + scheme)) == I64{58} && rt_text_byte(wrapping(wrapping(data + scheme) + I64{1})) == I64{47} && rt_text_byte(wrapping(wrapping(data + scheme) + I64{2})) == I64{47}) {
@@ -152,7 +152,7 @@ data_public_locator: fn(target: I64, value: I64) {
         return
     }
     rt_text_push_scalar(target, I64{63})
-    start := query + I64{1}
+    ^start: query + I64{1}
     loop {
         next: data_public_find(data, start, end, I64{38})
         data_public_parameter(target, wrapping(data + start), next - start)

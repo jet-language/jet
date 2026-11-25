@@ -41,7 +41,7 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
     primary: primary_metric(mode)
     row_map: object_or_empty(Val(rows))
     peers: items_at(languages, "").filter_map(fn(item) { text_at(item, "") }).filter(fn(language) { language != "jet" && language != "jet-expert" })
-    output := Dyn.object()
+    ^output: Dyn.object()
     loop language in peers {
         peer: row_map.get(language) ?? Dyn.Null
         expert: language.ends_with("-expert")
@@ -50,7 +50,7 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
         compared_tiers: if expert -> expert_tiers(matched) else -> tiers
         policy: peer_tier_policy(entry, language)
         required: policy.filter(fn(rule) { rule.required }).map(fn(rule) { rule.tier })
-        ready := true
+        ^ready: true
         loop tier in required {
             if text_at(compared_tiers, "{tier}/status") != Val("ok") -> ready = false
         }
@@ -58,7 +58,7 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
         declared_reason: truthy(declared)
         peer_not_applicable: text_at(peer, "status") == Val("not_applicable")
         undeclared: peer_not_applicable && !declared_reason
-        comparison := Dyn.object()
+        ^comparison: Dyn.object()
         comparison["status"] = if undeclared -> Dyn.Text("invalid") else -> member(peer, "status") ?? Dyn.Text("unavailable")
         comparison["applicable"] = Dyn.Bool(!peer_not_applicable || declared == None)
         comparison["basis"] = if {
@@ -88,8 +88,8 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
             output[language] = comparison
             next
         }
-        compared := Dyn.object()
-        verdicts := Dyn.object()
+        ^compared: Dyn.object()
+        ^verdicts: Dyn.object()
         loop rule in policy {
             tier_row: compared_tiers.get(rule.tier) ?? Dyn.Null
             jet_row: if rule.tier == "aot" -> matched else -> tier_row
@@ -101,12 +101,12 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
                 peer: peer,
                 configuration: configuration.copy(),
             }
-            cells := Dyn.object()
+            ^cells: Dyn.object()
             loop metric in metrics {
                 cells[metric] = if rule.tier == "run" -> run_tier_cell(entry, language, metric, tier_row, context) else -> metric_cell(entry, language, metric, rule.tier, context)
             }
             verdicts[rule.tier] = member(cells, "{primary}/verdict") ?? Dyn.Null
-            tier_comparison := Dyn.object()
+            ^tier_comparison: Dyn.object()
             tier_comparison["metrics"] = cells
             tier_comparison["peer_sample"] = peer_sample(language, peer)
             compared[rule.tier] = tier_comparison
@@ -122,7 +122,7 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
 // The one tier an expert peer is compared on: the AOT build of the
 // `jet-expert` row.
 expert_tiers: fn(matched: Dyn) -> Dyn {
-    aot := Dyn.object()
+    ^aot: Dyn.object()
     aot["status"] = if text_at(matched, "status") == Val("ok") -> Dyn.Text("ok") else -> member(matched, "status") ?? Dyn.Text("unavailable")
     aot["metrics"] = member(matched, "metrics") ?? Dyn.object()
     Dyn{[String:Dyn]{"aot": aot}}
@@ -146,7 +146,7 @@ metric_cell: fn(entry: Dyn, language: String, metric: String, tier: String, cont
     applicability_status: text_at(applicability, "status") ?? ""
     if applicability_status == {
         "invalid" -> {
-            cell := unjudged_cell("unmeasured", applicability)
+            ^cell: unjudged_cell("unmeasured", applicability)
             cell["reason"] = member(applicability, "reason") ?? Dyn.Null
             return cell
         }
@@ -177,7 +177,7 @@ metric_cell: fn(entry: Dyn, language: String, metric: String, tier: String, cont
     evidence_ready: if evidence == .Val(found) -> evidence_side_ready(found, "jet") && evidence_side_ready(found, "peer") else -> true
     inconclusive: evidence != None && !evidence_ready
     verdict: if evidence_ready -> ratio_verdict(ratio) else -> None
-    cell := Dyn.object()
+    ^cell: Dyn.object()
     cell["status"] = if {
         verdict != None -> "measured"
         inconclusive -> "inconclusive"
@@ -221,7 +221,7 @@ unjudged_cell: fn(status: String, applicability: Dyn) -> Dyn {
 // so the cell wins only when every gated state wins.
 run_tier_cell: fn(entry: Dyn, language: String, metric: String, run_tier: Dyn, context: CellContext) -> Dyn {
     run_ok: text_at(run_tier, "status") == Val("ok")
-    ordered := [{state: String, cell: Dyn}]{}
+    ^ordered: [{state: String, cell: Dyn}]{}
     loop state in GATED_RUN_CACHE_STATES {
         measured: member(run_tier, "cache_states/{state}") ?? Dyn.Null
         state_context: CellContext{
@@ -234,7 +234,7 @@ run_tier_cell: fn(entry: Dyn, language: String, metric: String, run_tier: Dyn, c
         }
         ordered.push({state: state, cell: metric_cell(entry, language, metric, "run", state_context)})
     }
-    chosen := ordered[0]
+    ^chosen: ordered[0]
     unsettled: ordered.filter(fn(item) { text_at(item.cell, "status") != Val("measured") && text_at(item.cell, "status") != Val("not_applicable") })
     if {
         unsettled.len() > 0 -> chosen = unsettled[0]
@@ -246,7 +246,7 @@ run_tier_cell: fn(entry: Dyn, language: String, metric: String, run_tier: Dyn, c
             }
         }
     }
-    states := Dyn.object()
+    ^states: Dyn.object()
     loop item in ordered {
         states[item.state] = Dyn{
             [String:Dyn]{
@@ -259,7 +259,7 @@ run_tier_cell: fn(entry: Dyn, language: String, metric: String, run_tier: Dyn, c
             }
         }
     }
-    cell := chosen.cell
+    ^cell: chosen.cell
     cell["cache_state"] = chosen.state
     cell["cache_states"] = states
     cell

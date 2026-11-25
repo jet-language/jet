@@ -51,7 +51,7 @@ rowset_insert: fn(p: ^RowSet, rowid: Int) Never! {
 // rowSetEntrySort: sort the pending entries ascending and drop duplicates.
 rowset_sort: fn(p: ^RowSet) Never! {
     p.entries.sort()
-    out := [Int]{}
+    ^out: [Int]{}
     loop v in p.entries {
         n: out.len()
         if n == 0 || out[n - 1] != v -> out.push(v)
@@ -90,10 +90,10 @@ rowset_test: fn(p: ^RowSet, batch: Int, rowid: Int) -> Bool Never! {
 }
 
 #Test("a rowset drains sorted and unique, and probes see only earlier batches") {
-    r := rowset_new()
+    ^r: rowset_new()
     values: [Int]{5, 3, 9, 3, 1, 9}
     loop v in values -> rowset_insert(r, v)
-    got := [Int]{}
+    ^got: [Int]{}
     loop {
         v: rowset_next(r) ?? break
         got.push(v)
@@ -101,7 +101,7 @@ rowset_test: fn(p: ^RowSet, batch: Int, rowid: Int) -> Bool Never! {
     assert_eq(got, [Int]{1, 3, 5, 9})
     assert(rowset_next(r) == None)
 
-    t := rowset_new()
+    ^t: rowset_new()
     rowset_insert(t, 7)
     assert(!rowset_test(t, 0, 7))
     assert(rowset_test(t, 1, 7))

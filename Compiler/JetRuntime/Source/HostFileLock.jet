@@ -49,7 +49,7 @@ fs_lock_identity: fn(result: I64, facts: I64) -> I64 {
 #Export(c) jet_fs_lock_open_raw: fn(path: I64) -> I64 {
     if fs_text_has_nul(path) -> return fs_lock_call(I64{-1}, I64{0})
     name: fd_c_path(path)
-    opened := I64{0}
+    ^opened: I64{0}
     loop {
         opened = host_call(I64{2}, name, I64{655426}, I64{384})
         if (opened != I64{-4}) { break }
@@ -79,7 +79,7 @@ fs_lock_identity: fn(result: I64, facts: I64) -> I64 {
     native: host_native_int(fd)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     facts: jet_rt_alloc(I64{128}, I64{8})
-    result := I64{0}
+    ^result: I64{0}
     #Unsafe("the borrowed lock descriptor and 128 writable stat-fact bytes live through fstat") {
         result = os_stat_facts_i64(I64{5}, native, facts)
     }
@@ -121,7 +121,7 @@ fs_lock_sleep: fn(nanos: I64) {
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     carried: host_native_int(deadline_ns)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
-    deadline := I64{0}
+    ^deadline: I64{0}
     if bounded {
         if (carried != I64{0}) { deadline = carried } else {
             sample: time_host_monotonic_i64()
@@ -130,7 +130,7 @@ fs_lock_sleep: fn(nanos: I64) {
             if (deadline < I64{1}) { deadline = I64{1} }
         }
     }
-    first := carried == I64{0}
+    ^first: carried == I64{0}
     loop {
         if (bounded && !first && time_host_monotonic_i64() >= deadline) {
             return fs_lock_wait(false, true, I64{0}, deadline)
@@ -161,7 +161,9 @@ fs_lock_out_flag: fn(record: I64, at: I64, out: I64) {
 }
 
 fs_lock_call_out: fn(call: I64, value: I64, errno: I64, platform: I64) {
-    if (call == I64{0}) { return }
+    if (call == I64{0}) {
+        return
+    }
     fs_lock_out_int(call, I64{0}, value)
     fs_lock_out_int(call, I64{8}, errno)
     fs_lock_out_int(call, I64{16}, platform)
@@ -169,7 +171,9 @@ fs_lock_call_out: fn(call: I64, value: I64, errno: I64, platform: I64) {
 }
 
 fs_lock_identity_out: fn(identity: I64, device: I64, low: I64, high: I64, regular: I64, reparse: I64, errno: I64, platform: I64) {
-    if (identity == I64{0}) { return }
+    if (identity == I64{0}) {
+        return
+    }
     fs_lock_out_int(identity, I64{0}, device)
     fs_lock_out_int(identity, I64{8}, low)
     fs_lock_out_int(identity, I64{16}, high)
@@ -190,7 +194,9 @@ fs_lock_identity_out: fn(identity: I64, device: I64, low: I64, high: I64, regula
 
 #Export(c) jet_fs_lock_wait: fn(fd: I64, timeout_ns: I64, bounded: Bool, carried_ns: I64, acquired: I64, timed_out: I64, errno: I64, platform: I64, deadline_ns: I64) {
     wait: jet_fs_lock_wait_raw(fd, timeout_ns, bounded, carried_ns)
-    if (wait == I64{0}) { return }
+    if (wait == I64{0}) {
+        return
+    }
     fs_lock_out_flag(wait, I64{0}, acquired)
     fs_lock_out_flag(wait, I64{8}, timed_out)
     fs_lock_out_int(wait, I64{16}, errno)
@@ -276,7 +282,7 @@ fs_lock_byte: fn(flag: U8) -> I64 { if (flag != U8{0}) -> I64{1} else -> I64{0} 
 }
 
 fs_lock_words_eq: fn(left: I64, right: I64, size: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < size {
         if (rt_text_word(wrapping(left + at)) != rt_text_word(wrapping(right + at))) {
             return false

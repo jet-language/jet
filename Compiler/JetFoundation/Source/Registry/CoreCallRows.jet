@@ -38,7 +38,7 @@ core_call_lookup_key: fn(module_name: String, member: String) -> String Never! {
 }
 
 core_call_lookup_keys: fn(rows: [CoreCallRecord]) -> [String] Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     loop row in rows {
         if {
             core_call_is_receiver(row) -> keys.push("")
@@ -49,15 +49,15 @@ core_call_lookup_keys: fn(rows: [CoreCallRecord]) -> [String] Never! {
 }
 
 core_module_export_names: fn(rows: [CoreModuleExportNames]) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop row in rows -> names.push(row.module_name)
     names
 }
 
 // The distinct type export leaves of `rows`, in first-export order.
 core_type_export_leaves: fn(rows: [CoreModuleExportNames]) -> [String] Never! {
-    leaves := [String]{}
-    seen := [String:Bool]{}
+    ^leaves: [String]{}
+    ^seen: [String:Bool]{}
     loop row in rows {
         loop at in 0..<row.type_exports.len() {
             if seen.get(row.type_exports[at]) != None -> next
@@ -71,10 +71,10 @@ core_type_export_leaves: fn(rows: [CoreModuleExportNames]) -> [String] Never! {
 // Per leaf of `leaves`, the module of each row of `rows` exporting it, in
 // table order.
 core_type_export_modules: fn(rows: [CoreModuleExportNames], leaves: [String]) -> [[String]] Never! {
-    slots := [String:Int]{}
-    groups := [[String]]{}
+    ^slots: [String:Int]{}
+    ^groups: [[String]]{}
     // The last row that joined each leaf's modules, so a row joins once.
-    joined := [Int]{}
+    ^joined: [Int]{}
     loop index in 0..<leaves.len() {
         slots[leaves[index]] = index
         groups.push([String]{})
@@ -92,13 +92,13 @@ core_type_export_modules: fn(rows: [CoreModuleExportNames], leaves: [String]) ->
 }
 
 core_bare_source_names: fn(rows: [CoreBareSourceModule]) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop row in rows -> names.push(row.name)
     names
 }
 
 core_module_export_rows: fn(declared: CoreDeclarations) -> [CoreModuleExportNames] Never! {
-    rows := [CoreModuleExportNames]{}
+    ^rows: [CoreModuleExportNames]{}
     loop entry in declared.modules {
         types: loop leaf in entry.types -> leaf.name.copy()
         rows.push(CoreModuleExportNames{module_name: entry.name.copy(), members: entry.members.copy(), type_exports: types})
@@ -107,8 +107,8 @@ core_module_export_rows: fn(declared: CoreDeclarations) -> [CoreModuleExportName
 }
 
 core_call_rows: fn(declared: CoreDeclarations) -> [CoreCallRecord] {
-    rows := [CoreCallRecord]{}
-    seen := [String:Bool]{}
+    ^rows: [CoreCallRecord]{}
+    ^seen: [String:Bool]{}
     loop row in declared.dispatchers {
         key: core_call_key(row.record)
         if seen.has_key(key) {

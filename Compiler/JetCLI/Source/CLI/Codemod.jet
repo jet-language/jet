@@ -192,7 +192,7 @@ JetCLICodemodReplayRow: struct {
 
 // The `jet inspect codemod` host: `plan` (dry run), `apply`, or `undo`.
 jet_cli_codemod_host: fn(action: String, path: String, yes: Bool, color: Bool, json: Bool) -> JetDriverVerbOutput {
-    run := JetCLICodemodRun{out: [String]{}, warning: "", verbatim: None, failure: None}
+    ^run: JetCLICodemodRun{out: [String]{}, warning: "", verbatim: None, failure: None}
     absolute: jet_cli_inspect_absolutize(path)
     if {
         action == "undo" -> {
@@ -226,7 +226,7 @@ jet_cli_codemod_error: fn(message: String) -> JetCLIReadError Never! { jet_cli_r
 
 jet_cli_codemod_object: fn(value: JetCLIStatusValue, message: String) -> JetCLICodemodObject JetCLIReadError! {
     if value == .Object(fields) {
-        taken := [Bool]{}
+        ^taken: [Bool]{}
         loop index in 0..<fields.len() -> taken.push(false)
         return Ok(JetCLICodemodObject{fields: fields.copy(), taken: taken})
     }
@@ -235,7 +235,7 @@ jet_cli_codemod_object: fn(value: JetCLIStatusValue, message: String) -> JetCLIC
 
 // Remove `key` (the last duplicate wins).
 jet_cli_codemod_take: fn(object: ^JetCLICodemodObject, key: String) -> JetCLIStatusValue? Never! {
-    found := -1
+    ^found: -1
     loop index in 0..<object.fields.len() {
         if object.fields[index].name == key && !object.taken[index] {
             object.taken[index] = true
@@ -247,7 +247,7 @@ jet_cli_codemod_take: fn(object: ^JetCLICodemodObject, key: String) -> JetCLISta
 }
 
 jet_cli_codemod_reject_unknown: fn(object: JetCLICodemodObject, what: String) JetCLIReadError! {
-    names := [String]{}
+    ^names: [String]{}
     loop index in 0..<object.fields.len() {
         if !object.taken[index] && !names.contains(object.fields[index].name) {
             names.push(object.fields[index].name.copy())
@@ -291,7 +291,7 @@ jet_cli_codemod_take_number: fn(object: ^JetCLICodemodObject, key: String) -> In
 // Read without consuming the field.
 jet_cli_codemod_number_default: fn(value: JetCLIStatusValue, key: String, default: Int) -> Int JetCLIReadError! {
     if value == .Object(fields) {
-        found := JetCLIStatusValue?{None}
+        ^found: JetCLIStatusValue?{None}
         loop field in fields {
             if field.name == key -> found = Val(field.value.copy())
         }
@@ -332,7 +332,7 @@ jet_cli_codemod_take_object: fn(object: ^JetCLICodemodObject, key: String) -> Je
 
 // The components of a relative path: `.` drops except in front.
 jet_cli_codemod_components: fn(raw: String) -> [String] Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop (index, part) in raw.split("/").to_list() {
         if part == "" -> next
         if part == "." && index > 0 -> next
@@ -365,7 +365,7 @@ jet_cli_codemod_canonicalish: fn(path: String) -[FS, Env]> String Never! {
 jet_cli_codemod_extension: fn(path: String) -> String? Never! {
     name: jet_cli_file_name(path)
     bytes: name.bytes()
-    at := bytes.len() - 1
+    ^at: bytes.len() - 1
     loop at > 0 {
         if bytes[at] == 46 -> return Val(foundation_byte_text(bytes, at + 1, bytes.len()))
         at -= 1
@@ -390,7 +390,7 @@ jet_cli_codemod_reject_parent_or_absolute: fn(raw: String, label: String) JetCLI
 }
 
 jet_cli_codemod_secure_components: fn(project: String, raw: String) -[FS]> String JetCLIReadError! {
-    path := project.copy()
+    ^path: project.copy()
     loop part in jet_cli_codemod_components(raw) {
         if part == ".." || part == "." {
             return Err(jet_cli_codemod_error("path `{raw}` contains a forbidden component"))
@@ -477,7 +477,7 @@ jet_cli_codemod_validate_destination: fn(project: String, path: String, any_path
             return Err(jet_cli_codemod_error("destination must be a .jet source or paired Tests/UI .stderr snapshot"))
         }
     }
-    current := project.copy()
+    ^current: project.copy()
     loop index in 0..<(parts.len() - 1) {
         current = jet_cli_rooted_join(current, parts[index])
         info: cli_files.stat(current) ?? return Err(jet_cli_codemod_error(jet_cli_io_error_text(err)))
@@ -514,8 +514,8 @@ jet_cli_codemod_has_identity: fn(identities: [cli_files.FileID], id: cli_files.F
 
 jet_cli_codemod_validate_destinations: fn(project: String, paths: [String], any_path: Bool) -[FS, Env]> JetCLIReadError! {
     canonical_project: jet_cli_codemod_open_project(project)
-    names := [String]{}
-    identities := [cli_files.FileID]{}
+    ^names: [String]{}
+    ^identities: [cli_files.FileID]{}
     loop path in paths {
         canonical: jet_cli_codemod_validate_destination(canonical_project, path, any_path) ?? return Err(jet_cli_codemod_error("unsafe codemod destination `{path}`: {err.message}"))
         if names.contains(canonical) {
@@ -532,7 +532,7 @@ jet_cli_codemod_validate_destinations: fn(project: String, paths: [String], any_
 
 jet_cli_codemod_validate_replay_aliases: fn(project: String, log: String, paths: [String], any_path: Bool) -[FS, Env]> JetCLIReadError! {
     canonical_project: jet_cli_codemod_open_project(project)
-    identities := [cli_files.FileID]{}
+    ^identities: [cli_files.FileID]{}
     log_id: jet_cli_codemod_path_identity(log) ?? return Err(jet_cli_codemod_error("could not inspect replay log: {err.message}"))
     identities.push(log_id)
     loop path in paths {
@@ -559,8 +559,8 @@ jet_cli_codemod_word: fn(text: String) -> Bool Never! {
 }
 
 jet_cli_codemod_validate_ident: fn(name: String) JetCLIReadError! {
-    first := true
-    valid := true
+    ^first: true
+    ^valid: true
     loop character in name.chars() {
         text: "{character}"
         if {
@@ -587,8 +587,8 @@ jet_cli_codemod_pair: fn(bytes: [U8], at: Int, first: Int, second: Int) -> Bool 
 // A capture-aware byte scanner, not Jet lexing.
 jet_cli_codemod_lex_template: fn(source: String) -> [JetCLICodemodTemplateToken] JetCLIReadError! {
     bytes: source.bytes()
-    tokens := [JetCLICodemodTemplateToken]{}
-    at := 0
+    ^tokens: [JetCLICodemodTemplateToken]{}
+    ^at: 0
     loop at < bytes.len() {
         byte: Int{bytes[at]}
         if byte == 32 || (byte >= 9 && byte <= 13) {
@@ -602,7 +602,7 @@ jet_cli_codemod_lex_template: fn(source: String) -> [JetCLICodemodTemplateToken]
         if jet_cli_codemod_pair(bytes, at, 47, 42) {
             start: at
             at += 2
-            depth := 1
+            ^depth: 1
             loop at < bytes.len() && depth > 0 {
                 if {
                     jet_cli_codemod_pair(bytes, at, 47, 42) -> {
@@ -675,8 +675,8 @@ jet_cli_codemod_lex_template: fn(source: String) -> [JetCLICodemodTemplateToken]
 
 jet_cli_codemod_parse_template: fn(source: String) -> [JetCLICodemodAtom] JetCLIReadError! {
     raw: jet_cli_codemod_lex_template(source)
-    atoms := [JetCLICodemodAtom]{}
-    at := 0
+    ^atoms: [JetCLICodemodAtom]{}
+    ^at: 0
     loop at < raw.len() {
         if {
             raw[at].text == "$" -> {
@@ -698,7 +698,7 @@ jet_cli_codemod_parse_template: fn(source: String) -> [JetCLICodemodAtom] JetCLI
 }
 
 jet_cli_codemod_capture_names: fn(atoms: [JetCLICodemodAtom]) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop atom in atoms {
         if atom == .Capture(name, _) {
             if !names.contains(name) -> names.push(name.copy())
@@ -708,8 +708,8 @@ jet_cli_codemod_capture_names: fn(atoms: [JetCLICodemodAtom]) -> [String] Never!
 }
 
 jet_cli_codemod_validate_templates: fn(id: String, pattern: [JetCLICodemodAtom], replacement: [JetCLICodemodAtom]) JetCLIReadError! {
-    declared := jet_cli_codemod_capture_names(pattern)
-    used := [String]{}
+    ^declared: jet_cli_codemod_capture_names(pattern)
+    ^used: [String]{}
     loop atom in replacement {
         if atom == .Capture(name, _) {
             if !declared.contains(name) {
@@ -727,7 +727,7 @@ jet_cli_codemod_validate_templates: fn(id: String, pattern: [JetCLICodemodAtom],
 }
 
 jet_cli_codemod_template_text: fn(atoms: [JetCLICodemodAtom]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop atom in atoms {
         if atom == {
             .Literal(value) -> { parts.push(value.copy()) }
@@ -750,7 +750,7 @@ jet_cli_codemod_first_char: fn(text: String) -> String Never! {
 }
 
 jet_cli_codemod_last_char: fn(text: String) -> String Never! {
-    last := ""
+    ^last: ""
     loop character in text.chars() -> last = "{character}"
     last
 }
@@ -758,7 +758,7 @@ jet_cli_codemod_last_char: fn(text: String) -> String Never! {
 // A space joins two word characters, and follows a `,` or `:` literal that is
 // not last.
 jet_cli_codemod_render: fn(atoms: [JetCLICodemodAtom], captures: [JetCLICodemodCaptured]) -> String Never! {
-    out := ""
+    ^out: ""
     loop index in 0..<atoms.len() {
         atom: atoms[index]
         part: if atom == {
@@ -781,7 +781,7 @@ jet_cli_codemod_render: fn(atoms: [JetCLICodemodAtom], captures: [JetCLICodemodC
 }
 
 jet_cli_codemod_sentinels: fn(atoms: [JetCLICodemodAtom], typed: Bool) -> [JetCLICodemodCaptured] Never! {
-    captures := [JetCLICodemodCaptured]{}
+    ^captures: [JetCLICodemodCaptured]{}
     loop atom in atoms {
         if atom == .Capture(name, variadic) {
             text: if {
@@ -816,7 +816,7 @@ jet_cli_codemod_normalized: fn(source: String) -> [String] JetCLIReadError! {
     if lexed.diagnostics.len() > 0 {
         return Err(jet_cli_codemod_error("compiler-owned fragment no longer lexes while matching an AST template"))
     }
-    out := [String]{}
+    ^out: [String]{}
     loop token in lexed.tokens {
         if token.span.start >= token.span.end || token.span.end > bytes.len() -> next
         out.push(foundation_byte_text(bytes, token.span.start, token.span.end))
@@ -828,7 +828,7 @@ jet_cli_codemod_normalized: fn(source: String) -> [String] JetCLIReadError! {
 jet_cli_codemod_is_identifier_literal: fn(text: String) -> Bool Never! {
     lexed: lex(text.bytes())
     if lexed.diagnostics.len() > 0 -> return false
-    meaningful := 0
+    ^meaningful: 0
     loop token in lexed.tokens {
         if token.span.start == token.span.end -> next
         if token.kind != TOKEN_IDENT -> return false
@@ -851,9 +851,9 @@ jet_cli_codemod_next_is_colon: fn(atoms: [JetCLICodemodAtom], index: Int) -> Boo
 
 // The typed tree over every node of one module, built once as an arena.
 jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodForest JetCLIReadError! {
-    positions := [Int:Int]{}
+    ^positions: [Int:Int]{}
     loop index in 0..<nodes.len() -> positions[nodes[index].id] = index
-    direct := [[Int]]{}
+    ^direct: [[Int]]{}
     loop _index in 0..<nodes.len() -> direct.push([Int]{})
     loop index in 0..<nodes.len() {
         if nodes[index].parent == .Val(parent) {
@@ -861,12 +861,12 @@ jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodFor
         }
     }
     bytes: source.bytes()
-    trees := [JetCLICodemodTypedTree]{}
+    ^trees: [JetCLICodemodTypedTree]{}
     loop index in 0..<nodes.len() {
         node: nodes[index]
-        children := direct[index].copy()
+        ^children: direct[index].copy()
         children.sort_by(fn(left: Int, right: Int) { (nodes[left].slot <=> nodes[right].slot).then(nodes[left].ordinal <=> nodes[right].ordinal) })
-        slots := [JetCLICodemodTypedSlot]{}
+        ^slots: [JetCLICodemodTypedSlot]{}
         loop child in children {
             row: nodes[child]
             last: slots.len() - 1
@@ -880,8 +880,8 @@ jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodFor
             }
         }
         children.sort_by(fn(left: Int, right: Int) { (nodes[left].span.start <=> nodes[right].span.start).then(nodes[left].span.end <=> nodes[right].span.end) })
-        scalar := [U8]{}
-        cursor := node.span.start
+        ^scalar: [U8]{}
+        ^cursor: node.span.start
         loop child in children {
             span: nodes[child].span
             if cursor <= span.start {
@@ -892,7 +892,7 @@ jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodFor
         if cursor <= node.span.end {
             loop at in cursor..<node.span.end -> scalar.push(bytes[at])
         }
-        signature := [String]{}
+        ^signature: [String]{}
         loop token in jet_cli_codemod_normalized(String.from_bytes(scalar) ?? "") {
             if token != "," -> signature.push(token.copy())
         }
@@ -911,7 +911,7 @@ jet_cli_codemod_pattern_node: fn(forest: JetCLICodemodForest, index: Int, source
             return pattern.len() - 1
         }
     }
-    slots := [JetCLICodemodPatternSlot]{}
+    ^slots: [JetCLICodemodPatternSlot]{}
     loop slot in tree.slots {
         children: loop child in slot.children -> jet_cli_codemod_pattern_node(forest, child, source, captures, variadic, pattern)
         slots.push(JetCLICodemodPatternSlot{name: slot.name.copy(), kind: slot.kind.copy(), children: children})
@@ -924,7 +924,7 @@ jet_cli_codemod_pattern_node: fn(forest: JetCLICodemodForest, index: Int, source
 // capture replaced by a sentinel identifier.
 jet_cli_codemod_parse_pattern: fn(atoms: [JetCLICodemodAtom], class: String) -> JetCLICodemodPattern JetCLIReadError! {
     captures: jet_cli_codemod_sentinels(atoms, false)
-    variadic := [String]{}
+    ^variadic: [String]{}
     loop atom in atoms {
         if atom == .Capture(name, many) {
             if many -> variadic.push(name.copy())
@@ -956,8 +956,8 @@ jet_cli_codemod_parse_pattern: fn(atoms: [JetCLICodemodAtom], class: String) -> 
     pattern_module: JetDriverDocModule{path: "<codemod-pattern>", physical_path: "<codemod-pattern>", alias: "pattern", source: wrapped.copy(), items: parsed.program.items.copy(), block_spans: parsed.program.block_spans.copy(), imports: parsed.program.imports.copy(), tables: parsed.program.tables.move()}
     // A pattern is parsed, never checked: it has no checked bodies to type.
     index: semindex_build([JetDriverDocModule]{pattern_module}, interner_empty(), jet_cli_effect_projection(jet_cli_policy_authority([String]{}, None)))
-    root := -1
-    width := -1
+    ^root: -1
+    ^width: -1
     loop position in 0..<index.nodes.len() {
         node: index.nodes[position]
         if node.class != class || node.span.start > start || node.span.end < end -> next
@@ -971,7 +971,7 @@ jet_cli_codemod_parse_pattern: fn(atoms: [JetCLICodemodAtom], class: String) -> 
         return Err(jet_cli_codemod_error("compiler did not produce a typed {class} pattern node"))
     }
     forest: jet_cli_codemod_forest(index.nodes, wrapped)
-    pattern := [JetCLICodemodPatternNode]{}
+    ^pattern: [JetCLICodemodPatternNode]{}
     top: jet_cli_codemod_pattern_node(forest, root, wrapped, captures, variadic, pattern)
     Ok(JetCLICodemodPattern{nodes: pattern, root: top})
 }
@@ -980,7 +980,7 @@ jet_cli_codemod_parse_pattern: fn(atoms: [JetCLICodemodAtom], class: String) -> 
 jet_cli_codemod_tree_key: fn(forest: JetCLICodemodForest, index: Int) -> String Never! {
     tree: forest.trees[index]
     signature: loop token in tree.signature -> foundation_json_quote(token)
-    slots := [String]{}
+    ^slots: [String]{}
     loop slot in tree.slots {
         children: loop child in slot.children -> jet_cli_codemod_tree_key(forest, child)
         slots.push("{slot.name}:{slot.kind}=[{children.join(",")}]")
@@ -1029,11 +1029,11 @@ jet_cli_codemod_match_children: fn(pattern: JetCLICodemodPattern, wanted: [Int],
     if node.capture == .Val(name) {
         if node.variadic {
             if kind != "list" -> return false
-            limit := ci
+            ^limit: ci
             loop limit < candidates.len() && forest.trees[candidates[limit]].class == node.class {
                 limit += 1
             }
-            end := limit
+            ^end: limit
             loop end >= ci {
                 text: if end == ci -> "" else -> foundation_byte_text(source.bytes(), forest.trees[candidates[ci]].span.start, forest.trees[candidates[end - 1]].span.end)
                 keys: loop position in ci..<end -> jet_cli_codemod_tree_key(forest, candidates[position])
@@ -1077,16 +1077,16 @@ jet_cli_codemod_find_matches: fn(atoms: [JetCLICodemodAtom], source: String, cla
     // Nodes the compiler synthesized past the file's bytes (generated
     // declarations) have no editable source text.
     limit: source.bytes().len()
-    nodes := [SemNode]{}
+    ^nodes: [SemNode]{}
     loop node in indexed.index.nodes {
         if node.module_path == module_path && node.span.end <= limit -> nodes.push(node.copy())
     }
     forest: jet_cli_codemod_forest(nodes, source)
-    out := [JetCLICodemodFound]{}
+    ^out: [JetCLICodemodFound]{}
     loop at in 0..<forest.trees.len() {
         tree: forest.trees[at]
         if tree.class != class -> next
-        captures := [JetCLICodemodCaptured]{}
+        ^captures: [JetCLICodemodCaptured]{}
         if jet_cli_codemod_match_tree(pattern, pattern.root, forest, at, source, captures) {
             out.push(JetCLICodemodFound{start: tree.span.start, end: tree.span.end, captures: captures})
         }
@@ -1103,7 +1103,7 @@ jet_cli_codemod_semantic_candidate: fn(atoms: [JetCLICodemodAtom], found: JetCLI
             if !jet_cli_codemod_is_identifier_literal(name) || jet_cli_codemod_is_builtin(name) || jet_cli_codemod_next_is_colon(atoms, index) {
                 next
             }
-            resolved := false
+            ^resolved: false
             loop reference in indexed.index.references {
                 if reference.name == name && reference.module_path == module_path && reference.span.start >= found.start && reference.span.end <= found.end && reference.target != None {
                     resolved = true
@@ -1130,7 +1130,7 @@ jet_cli_codemod_validate_bindings: fn(id: String, pattern: [JetCLICodemodAtom], 
                 if !jet_cli_codemod_is_identifier_literal(name) || captures.contains(name) || jet_cli_codemod_next_is_colon(atoms, index) {
                     next
                 }
-                defs := 0
+                ^defs: 0
                 loop definition in indexed.index.definitions {
                     if definition.def.name == name -> defs += 1
                 }
@@ -1158,7 +1158,7 @@ jet_cli_codemod_add_file: fn(files: ^JetCLICodemodFiles, path: String, bytes: [U
     if jet_cli_codemod_file_index(files, path) >= 0 {
         return
     }
-    at := files.paths.len()
+    ^at: files.paths.len()
     loop position in 0..<files.paths.len() {
         if jet_cli_import_path_order(path, files.paths[position]) == Ordering.Less {
             at = position
@@ -1178,9 +1178,9 @@ jet_cli_codemod_read_fingerprint: fn(path: String, inputs: ^[String:String]) -[F
 }
 
 jet_cli_codemod_verify_inputs: fn(inputs: [String:String]) -[FS]> JetCLIReadError! {
-    paths := inputs.keys().to_list()
+    ^paths: inputs.keys().to_list()
     paths.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
-    drift := [String]{}
+    ^drift: [String]{}
     loop path in paths {
         expected: inputs.get(path) ?? next
         now: cli_files.read_bytes(path) ?? {
@@ -1198,7 +1198,7 @@ jet_cli_codemod_verify_inputs: fn(inputs: [String:String]) -[FS]> JetCLIReadErro
 jet_cli_codemod_overlays: fn(entry: String, files: JetCLICodemodFiles) -[FS]> [JetDriverSourceDocument] JetCLIReadError! {
     root: jet_cli_source_root(entry)
     prefix: jet_cli_rooted_join(root, "")
-    overlays := [JetDriverSourceDocument]{}
+    ^overlays: [JetDriverSourceDocument]{}
     loop index in 0..<files.paths.len() {
         path: files.paths[index]
         if !path.ends_with(".jet") -> next
@@ -1240,7 +1240,7 @@ jet_cli_codemod_index_unit: fn(entry: String, files: JetCLICodemodFiles, inputs:
                 stderr: "{diagnostic_render_all(entry, source, errors, false)}\n"
                 return Err(jet_cli_codemod_refuse(run, JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}))
             }
-            physical := [String:String]{}
+            ^physical: [String:String]{}
             loop doc_module in result.doc_modules {
                 real: jet_cli_codemod_canonicalish(doc_module.physical_path)
                 physical[doc_module.path] = real.copy()
@@ -1256,7 +1256,7 @@ jet_cli_codemod_index_unit: fn(entry: String, files: JetCLICodemodFiles, inputs:
 // ---- version 2 batches ----
 
 jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -[FS, Env]> JetCLICodemodBatch JetCLIReadError! {
-    object := jet_cli_codemod_object(value, "expected JSON object")
+    ^object: jet_cli_codemod_object(value, "expected JSON object")
     if jet_cli_codemod_take_number(object, "version") != 2 {
         return Err(jet_cli_codemod_error("batch codemod requires `version: 2`"))
     }
@@ -1275,9 +1275,9 @@ jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -
     if root_values.len() == 0 {
         return Err(jet_cli_codemod_error("batch codemod needs at least one root"))
     }
-    roots := [JetCLICodemodRoot]{}
+    ^roots: [JetCLICodemodRoot]{}
     loop root_value in root_values {
-        root := jet_cli_codemod_object(root_value, "root must be an object")
+        ^root: jet_cli_codemod_object(root_value, "root must be an object")
         raw: jet_cli_codemod_take_string(root, "path")
         path: jet_cli_codemod_secure_existing(project, raw, true)
         validate: jet_cli_codemod_take_string(root, "validate")
@@ -1291,10 +1291,10 @@ jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -
     if values.len() == 0 {
         return Err(jet_cli_codemod_error("batch codemod needs at least one rule"))
     }
-    ids := [String]{}
-    rules := [JetCLICodemodRule]{}
+    ^ids: [String]{}
+    ^rules: [JetCLICodemodRule]{}
     loop rule_value in values {
-        rule := jet_cli_codemod_object(rule_value, "rule must be an object")
+        ^rule: jet_cli_codemod_object(rule_value, "rule must be an object")
         id: jet_cli_codemod_take_string(rule, "id")
         if ids.contains(id) -> return Err(jet_cli_codemod_error("duplicate rule id `{id}`"))
         ids.push(id.copy())
@@ -1306,11 +1306,11 @@ jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -
         }
         if {
             kind == "symbol_rename" -> {
-                from := jet_cli_codemod_take_object(rule, "from")
+                ^from: jet_cli_codemod_take_object(rule, "from")
                 symbol: jet_cli_codemod_take_string(from, "name")
                 symbol_kind: jet_cli_codemod_take_string(from, "symbol_kind")
                 defined_raw: jet_cli_codemod_take_string_opt(from, "defined_in")
-                defined_in := String?{None}
+                ^defined_in: String?{None}
                 if defined_raw == .Val(raw) {
                     defined_in = Val(jet_cli_codemod_secure_existing(project, raw, false))
                 }
@@ -1337,16 +1337,16 @@ jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -
             else -> { return Err(jet_cli_codemod_error("unknown codemod rule kind `{kind}`")) }
         }
     }
-    snapshots := [JetCLICodemodSnapshot]{}
+    ^snapshots: [JetCLICodemodSnapshot]{}
     snapshot_map: jet_cli_codemod_take_object_opt(object, "snapshot_after")
     if snapshot_map == .Val(map) {
-        keys := [String]{}
+        ^keys: [String]{}
         loop field in map.fields {
             if !keys.contains(field.name) -> keys.push(field.name.copy())
         }
         keys.sort()
         loop raw in keys {
-            input_value := JetCLIStatusValue.Null
+            ^input_value: JetCLIStatusValue.Null
             loop field in map.fields {
                 if field.name == raw -> input_value = field.value.copy()
             }
@@ -1388,7 +1388,7 @@ jet_cli_codemod_insert_unit: fn(units: ^[JetCLICodemodUnit], path: String, fixtu
 // Sorted, no links, every `.jet` file a unit.
 jet_cli_codemod_walk: fn(directory: String, fixture: Bool, units: ^[JetCLICodemodUnit]) -[FS, Env]> JetCLIReadError! {
     listed: cli_files.list_dir(directory) ?? return Err(jet_cli_codemod_error("could not read root `{directory}`: {jet_cli_io_error_text(err)}"))
-    paths := loop entry in listed -> jet_cli_rooted_join(directory, entry.name)
+    ^paths: loop entry in listed -> jet_cli_rooted_join(directory, entry.name)
     paths.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
     loop path in paths {
         info: cli_files.stat(path) ?? return Err(jet_cli_codemod_error("could not inspect `{path}`: {jet_cli_io_error_text(err)}"))
@@ -1406,7 +1406,7 @@ jet_cli_codemod_walk: fn(directory: String, fixture: Bool, units: ^[JetCLICodemo
 
 // The codemod units, in path order.
 jet_cli_codemod_discover_units: fn(batch: JetCLICodemodBatch) -[FS, Env]> [JetCLICodemodUnit] JetCLIReadError! {
-    units := [JetCLICodemodUnit]{}
+    ^units: [JetCLICodemodUnit]{}
     loop root in batch.roots {
         if {
             cli_files.is_file(root.path) -> {
@@ -1431,16 +1431,16 @@ jet_cli_codemod_push_edit: fn(edits: ^JetCLICodemodEdits, path: String, edit: Te
 }
 
 jet_cli_codemod_dedup_apply: fn(id: String, edits: JetCLICodemodEdits, files: ^JetCLICodemodFiles) -> Int JetCLIReadError! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<edits.paths.len() -> order.push(index)
     order_paths: edits.paths.copy()
     order.sort_by(fn(left: Int, right: Int) { jet_cli_import_path_order(order_paths[left], order_paths[right]) })
-    count := 0
+    ^count: 0
     loop slot in order {
         path: edits.paths[slot]
-        sorted := edits.edits[slot].copy()
+        ^sorted: edits.edits[slot].copy()
         sorted.sort_by(fn(left: TextEdit, right: TextEdit) { (left.span.start <=> right.span.start).then(left.span.end <=> right.span.end) })
-        unique := [TextEdit]{}
+        ^unique: [TextEdit]{}
         loop edit in sorted {
             if unique.len() > 0 {
                 last: unique[unique.len() - 1]
@@ -1499,7 +1499,7 @@ jet_cli_codemod_same_anchor: fn(left: SemAnchor, right: SemAnchor) -> Bool Never
 // The innermost fact whose text holds the definition, so a method's is its own,
 // not its type's.
 jet_cli_codemod_definition_fact: fn(index: SemIndex, def: SemDef) -> SemDefinitionFact? Never! {
-    found := Int?{None}
+    ^found: Int?{None}
     loop (at, fact) in index.definition_facts {
         if fact.module_path != def.module_path || fact.span.start > def.def_span.start || def.def_span.end > fact.span.end {
             next
@@ -1519,8 +1519,8 @@ jet_cli_codemod_target: fn(fact: SemDefinitionFact, to: String) -> JetCLISemOpTa
 
 // Apply a `symbol_rename` rule.
 jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit], plan: ^JetCLICodemodPlan, run: ^JetCLICodemodRun) -> Int JetCLIReadError! {
-    anchors := [SemAnchor]{}
-    targets := [JetCLISemOpTarget]{}
+    ^anchors: [SemAnchor]{}
+    ^targets: [JetCLISemOpTarget]{}
     loop unit in units {
         indexed: jet_cli_codemod_index_unit(unit.entry, plan.files, plan.inputs, run)
         loop definition in indexed.index.definitions {
@@ -1539,7 +1539,7 @@ jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodU
                 }
             }
             anchor: jet_cli_codemod_anchor(def)
-            known := false
+            ^known: false
             loop existing in anchors {
                 if jet_cli_codemod_same_anchor(existing, anchor) -> known = true
             }
@@ -1551,7 +1551,7 @@ jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodU
         }
     }
     if anchors.len() == 0 -> return Ok(0)
-    edits := JetCLICodemodEdits{paths: [String]{}, edits: [[TextEdit]]{}}
+    ^edits: JetCLICodemodEdits{paths: [String]{}, edits: [[TextEdit]]{}}
     loop unit in units {
         indexed: jet_cli_codemod_index_unit(unit.entry, plan.files, plan.inputs, run)
         loop definition in indexed.index.definitions {
@@ -1581,7 +1581,7 @@ jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodU
 
 // Apply an `ast_rewrite` rule.
 jet_cli_codemod_apply_ast: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit], plan: ^JetCLICodemodPlan, run: ^JetCLICodemodRun) -> Int JetCLIReadError! {
-    edits := JetCLICodemodEdits{paths: [String]{}, edits: [[TextEdit]]{}}
+    ^edits: JetCLICodemodEdits{paths: [String]{}, edits: [[TextEdit]]{}}
     loop unit in units {
         indexed: jet_cli_codemod_index_unit(unit.entry, plan.files, plan.inputs, run)
         jet_cli_codemod_validate_bindings(rule.id, rule.pattern, rule.replacement, indexed, unit.entry)
@@ -1612,7 +1612,7 @@ jet_cli_codemod_validate_units: fn(batch: JetCLICodemodBatch, units: [JetCLICode
     loop unit in units {
         overlays: jet_cli_codemod_overlays(unit.entry, plan.files)
         compiled: jet_cli_compile_overlays(unit.entry, unit.entry, overlays, false, None, JetDriverCompileMode.Check, None) ?? return Err(jet_cli_codemod_error("could not check `{unit.entry}`: {err}"))
-        errors := [Diagnostic]{}
+        ^errors: [Diagnostic]{}
         if compiled == {
             .Refused(output) -> return Err(jet_cli_codemod_refuse(run, output))
             .Compiled(result, snapshot) -> {
@@ -1639,7 +1639,7 @@ jet_cli_codemod_validate_units: fn(batch: JetCLICodemodBatch, units: [JetCLICode
                 bytes: diagnostic_render_all(unit.entry, source, errors, false).bytes()
                 stderr: jet_cli_codemod_with_extension(unit.entry, "stderr")
                 stderr_at: jet_cli_codemod_file_index(plan.files, stderr)
-                declared := String?{None}
+                ^declared: String?{None}
                 loop snapshot in batch.snapshots {
                     if snapshot.destination == stderr -> declared = Val(snapshot.input.copy())
                 }
@@ -1665,7 +1665,7 @@ jet_cli_codemod_validate_units: fn(batch: JetCLICodemodBatch, units: [JetCLICode
 
 jet_cli_codemod_plan_batch: fn(batch: JetCLICodemodBatch, run: ^JetCLICodemodRun) -> JetCLICodemodPlan JetCLIReadError! {
     units: jet_cli_codemod_discover_units(batch)
-    plan := JetCLICodemodPlan{files: JetCLICodemodFiles{paths: [String]{}, before: [[U8]]{}, staged: [[U8]]{}}, count_ids: [String]{}, counts: [Int]{}, validations: [String]{}, inputs: [String:String]{}, semantic_ops: [JetCLISemOp]{}}
+    ^plan: JetCLICodemodPlan{files: JetCLICodemodFiles{paths: [String]{}, before: [[U8]]{}, staged: [[U8]]{}}, count_ids: [String]{}, counts: [Int]{}, validations: [String]{}, inputs: [String:String]{}, semantic_ops: [JetCLISemOp]{}}
     loop unit in units {
         bytes: jet_cli_codemod_read_fingerprint(unit.entry, plan.inputs)
         jet_cli_codemod_add_file(plan.files, unit.entry, bytes)
@@ -1697,7 +1697,7 @@ jet_cli_codemod_plan_batch: fn(batch: JetCLICodemodBatch, run: ^JetCLICodemodRun
 // `\n` separated, a final `\r` dropped, no empty tail.
 jet_cli_codemod_lines: fn(bytes: [U8]) -> [String] Never! {
     text: String.from_bytes(bytes) ?? ""
-    lines := [String]{}
+    ^lines: [String]{}
     if text == "" -> return lines
     parts: text.split("\n").to_list()
     loop index in 0..<parts.len() {
@@ -1723,11 +1723,11 @@ jet_cli_codemod_print_diff: fn(run: ^JetCLICodemodRun, before: [U8], after: [U8]
 }
 
 jet_cli_codemod_print_batch: fn(batch: JetCLICodemodBatch, plan: JetCLICodemodPlan, run: ^JetCLICodemodRun) -[FS, Env]> JetCLIReadError! {
-    changed := 0
+    ^changed: 0
     loop index in 0..<plan.files.paths.len() {
         if plan.files.before[index] != plan.files.staged[index] -> changed += 1
     }
-    edits := 0
+    ^edits: 0
     loop count in plan.counts -> edits += count
     units: jet_cli_codemod_discover_units(batch)
     jet_cli_codemod_print(run, "Codemod `{batch.name}` dry run\n  Units: {units.len()}  Rules: {batch.rules.len()}  Files: {changed}  Edits: {edits}")
@@ -1744,7 +1744,7 @@ jet_cli_codemod_print_batch: fn(batch: JetCLICodemodBatch, plan: JetCLICodemodPl
 }
 
 jet_cli_codemod_file_rows: fn(changes: [JetCLISourceChange], inverse: Bool) -> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop change in changes {
         path: foundation_json_quote(change.path)
         before_hash: jet_cli_source_hash(change.before)
@@ -1782,7 +1782,7 @@ jet_cli_codemod_run_v2: fn(batch: JetCLICodemodBatch, apply: Bool, yes: Bool, ru
         run.warning = "Warning: an editor that does not honor the codemod lock can still race the final rename\n Fix: review the dry run, then repeat with `--yes`\n"
         return Err(jet_cli_codemod_error("apply requires `--yes`"))
     }
-    changes := [JetCLISourceChange]{}
+    ^changes: [JetCLISourceChange]{}
     loop index in 0..<plan.files.paths.len() {
         if plan.files.before[index] == plan.files.staged[index] -> next
         changes.push(JetCLISourceChange{path: plan.files.paths[index].copy(), before: plan.files.before[index].copy(), after: plan.files.staged[index].copy()})
@@ -1795,7 +1795,7 @@ jet_cli_codemod_run_v2: fn(batch: JetCLICodemodBatch, apply: Bool, yes: Bool, ru
 // ---- version 1 ----
 
 jet_cli_codemod_parse_v1: fn(value: JetCLIStatusValue, path: String) -> JetCLICodemodV1 JetCLIReadError! {
-    object := jet_cli_codemod_object(value, "expected JSON object")
+    ^object: jet_cli_codemod_object(value, "expected JSON object")
     _: jet_cli_codemod_take_number_opt(object, "version")
     name: jet_cli_codemod_take_string_opt(object, "name") ?? "Codemod"
     entry: jet_cli_codemod_resolve_against(jet_cli_parent(path), jet_cli_codemod_take_string(object, "entry"))
@@ -1816,7 +1816,7 @@ jet_cli_codemod_parse_v1: fn(value: JetCLIStatusValue, path: String) -> JetCLICo
 jet_cli_codemod_managed_project: fn(entry: String) -[FS, Env]> String JetCLIReadError! {
     canonical: cli_files.realpath(entry) ?? return Err(jet_cli_codemod_error("could not canonicalize codemod entry: {jet_cli_io_error_text(err)}"))
     parent: jet_cli_parent(canonical) ?? return Err(jet_cli_codemod_error("codemod entry `{canonical}` has no directory"))
-    ancestor := Val(parent.copy())
+    ^ancestor: Val(parent.copy())
     loop {
         directory: ancestor ?? break
         relative: jet_cli_codemod_components(jet_cli_codemod_project_rel(directory, canonical))
@@ -1831,11 +1831,11 @@ jet_cli_codemod_managed_project: fn(entry: String) -[FS, Env]> String JetCLIRead
 
 // The unit's index, every `from` definition and reference.
 jet_cli_codemod_run_v1: fn(codemod: JetCLICodemodV1, apply: Bool, run: ^JetCLICodemodRun) JetCLIReadError! {
-    inputs := [String:String]{}
+    ^inputs: [String:String]{}
     files: JetCLICodemodFiles{paths: [String]{}, before: [[U8]]{}, staged: [[U8]]{}}
     indexed: jet_cli_codemod_index_unit(codemod.entry, files, inputs, run)
-    targets := [JetCLISemOpTarget]{}
-    edits := JetCLICodemodEdits{paths: [String]{}, edits: [[TextEdit]]{}}
+    ^targets: [JetCLISemOpTarget]{}
+    ^edits: JetCLICodemodEdits{paths: [String]{}, edits: [[TextEdit]]{}}
     loop definition in indexed.index.definitions {
         def: definition.def
         if def.name != codemod.from -> next
@@ -1851,11 +1851,11 @@ jet_cli_codemod_run_v1: fn(codemod: JetCLICodemodV1, apply: Bool, run: ^JetCLICo
     if edits.paths.len() == 0 {
         return Err(jet_cli_codemod_error("codemod `{codemod.name}` found no `{codemod.from}` symbols"))
     }
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<edits.paths.len() -> order.push(index)
     order_paths: edits.paths.copy()
     order.sort_by(fn(left: Int, right: Int) { jet_cli_import_path_order(order_paths[left], order_paths[right]) })
-    changes := [JetCLISourceChange]{}
+    ^changes: [JetCLISourceChange]{}
     loop slot in order {
         path: edits.paths[slot]
         before: cli_files.read_bytes(path) ?? return Err(jet_cli_codemod_error("could not read `{path}`: {jet_cli_io_error_text(err)}"))
@@ -1969,7 +1969,7 @@ jet_cli_codemod_undo: fn(path: String, run: ^JetCLICodemodRun) -[FS, Env, Exec, 
 
 // The codemod-side checks, then the held source undo.
 jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: String, run: ^JetCLICodemodRun) -[FS, Env, Exec, Time]> JetCLIReadError! {
-    object := jet_cli_codemod_object(value, "expected JSON object")
+    ^object: jet_cli_codemod_object(value, "expected JSON object")
     if jet_cli_codemod_take_number(object, "schema") != 2 {
         return Err(jet_cli_codemod_error("unsupported codemod log schema"))
     }
@@ -1988,9 +1988,9 @@ jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: Str
     if canonical != project {
         return Err(jet_cli_codemod_error("replay log project does not match its .jet/codemods location"))
     }
-    paths := [String]{}
+    ^paths: [String]{}
     loop row_value in rows {
-        row := jet_cli_codemod_object(row_value, "replay log file must be object")
+        ^row: jet_cli_codemod_object(row_value, "replay log file must be object")
         file: jet_cli_codemod_take_string(row, "path")
         before_hash: jet_cli_codemod_take_string(row, "before_hash")
         after_hash: jet_cli_codemod_take_string(row, "after_hash")
@@ -2011,17 +2011,17 @@ jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: Str
 // A legacy log restores `before_bytes` or replays its inverse edits over the
 // checkpointed bytes.
 jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path: String, run: ^JetCLICodemodRun) -[FS, Env, Exec, Time]> JetCLIReadError! {
-    object := jet_cli_codemod_object(value, "expected JSON object")
+    ^object: jet_cli_codemod_object(value, "expected JSON object")
     name: jet_cli_codemod_take_string_opt(object, "name") ?? "UndoCodemod"
     files: jet_cli_codemod_take_array(object, "files")
-    decoded := [JetCLICodemodReplayRow]{}
+    ^decoded: [JetCLICodemodReplayRow]{}
     loop file_value in files {
-        row := jet_cli_codemod_object(file_value, "expected JSON object")
+        ^row: jet_cli_codemod_object(file_value, "expected JSON object")
         file: jet_cli_codemod_take_string(row, "path")
         before_hash: jet_cli_codemod_take_string(row, "before_hash")
         after_hash: jet_cli_codemod_take_string(row, "after_hash")
         before_bytes: jet_cli_codemod_take_string_opt(row, "before_bytes")
-        inverse := [JetCLIStatusValue]{}
+        ^inverse: [JetCLIStatusValue]{}
         if before_bytes == None -> inverse = jet_cli_codemod_take_array(row, "inverse_edits") else {
             _: jet_cli_codemod_take_array_opt(row, "inverse_edits")
         }
@@ -2034,17 +2034,17 @@ jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path
     journal: project.descendant([String]{".jet", "codemods"}, true)
     lock: journal.transaction_lock()
     jet_cli_transaction_recover(project, journal)
-    changes := [JetCLISourceChange]{}
+    ^changes: [JetCLISourceChange]{}
     loop row in decoded {
         current: jet_cli_codemod_read_destination(project_path, row.path) ?? return Err(jet_cli_codemod_error("could not read `{row.path}`: {err.message}"))
         if jet_cli_source_hash(current) != row.after_hash {
             return Err(jet_cli_codemod_error("checkpoint mismatch for `{row.path}`; refusing undo"))
         }
-        before := [U8]{}
+        ^before: [U8]{}
         if row.before_bytes == .Val(hex) -> before = jet_cli_codemod_unhex(hex) else {
-            edits := [TextEdit]{}
+            ^edits: [TextEdit]{}
             loop edit_value in row.inverse_edits {
-                edit := jet_cli_codemod_object(edit_value, "legacy inverse edit must be an object")
+                ^edit: jet_cli_codemod_object(edit_value, "legacy inverse edit must be an object")
                 start: jet_cli_codemod_take_number(edit, "start")
                 end: jet_cli_codemod_take_number(edit, "end")
                 new_text: jet_cli_codemod_take_string(edit, "new_text")

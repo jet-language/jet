@@ -113,7 +113,7 @@ get_u32_be: fn(data: [U8], at: Int) -> Int Never! {
 }
 
 u32_bytes: fn(v: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     push_u32_be(out, v)
     out
 }
@@ -149,7 +149,7 @@ LMOTSPrivate: struct {
 
     impl Close {
         close: fn(^^self) {
-            keys := self.keys.move()
+            ^keys: self.keys.move()
             loop i in 0..<keys.len() -> core.crypto.wipe(keys[i])
         }
     }
@@ -162,14 +162,14 @@ copy_params: fn(p: LMOTSParams) -> LMOTSParams Never! {
 // SHA-256 over I || q || D_MESG || C || msg, then the 16-bit checksum of its
 // digits: the 34 digits a signature hashes (create_digit_array_with_checksum).
 digit_array: fn(params: LMOTSParams, msg: [U8], sig: [U8], c_at: Int) -> [U8] Never! {
-    ctx := hashes.hash_start(.SHA256)
+    ^ctx: hashes.hash_start(.SHA256)
     hashes.hash_update(ctx, params.key_id)
     hashes.hash_update(ctx, params.leaf_id)
     hashes.hash_update(ctx, D_MESSAGE)
     hashes.hash_update_range(ctx, sig, c_at, N_HASH_LEN)
     hashes.hash_update(ctx, msg)
-    out := hashes.hash_finish(ctx)
-    sum := 0
+    ^out: hashes.hash_finish(ctx)
+    ^sum: 0
     loop i in 0..<N_HASH_LEN -> sum += DIGIT_MAX - (Int{out[i]})
     out.push(U8{(sum >> 8) & 0xFF})
     out.push(U8{sum & 0xFF})
@@ -180,8 +180,8 @@ digit_array: fn(params: LMOTSParams, msg: [U8], sig: [U8], c_at: Int) -> [U8] Ne
 // min[i] up to max[i] of tmp = H(I || q || u16 i || u8 j || tmp); a missing
 // bound is 0 or 255 (hash_digit_array).
 hash_chains: fn(params: LMOTSParams, x: [U8], x_at: Int, min: [U8]?, max: [U8]?) -> [U8] Never! {
-    out := [U8]{}
-    block := [U8]{}
+    ^out: [U8]{}
+    ^block: [U8]{}
     loop b in params.key_id -> block.push(b)
     loop b in params.leaf_id -> block.push(b)
     prefix: block.len()
@@ -206,7 +206,7 @@ hash_chains: fn(params: LMOTSParams, x: [U8], x_at: Int, min: [U8]?, max: [U8]?)
 // K = H(I || q || D_PBLC || y[0] || ... || y[p-1])
 // (public_key_from_hashed_digit_array).
 public_from_chains: fn(params: LMOTSParams, y: [U8]) -> [U8] Never! {
-    ctx := hashes.hash_start(.SHA256)
+    ^ctx: hashes.hash_start(.SHA256)
     hashes.hash_update(ctx, params.key_id)
     hashes.hash_update(ctx, params.leaf_id)
     hashes.hash_update(ctx, D_PUBLIC)
@@ -230,7 +230,7 @@ lmots_import_public_key: fn(key: [U8]) -> LMOTSPublic LMSError! {
 
 /// The encoding lmots_import_public_key reads (mbedtls_lmots_export_public_key).
 lmots_export_public_key: fn(ctx: LMOTSPublic) -> [U8] Never! {
-    out := u32_bytes(lmots_code(ctx.params.kind))
+    ^out: u32_bytes(lmots_code(ctx.params.kind))
     put_all(out, ctx.params.key_id)
     put_all(out, ctx.params.leaf_id)
     put_all(out, ctx.key)
@@ -262,9 +262,9 @@ lmots_verify: fn(ctx: LMOTSPublic, msg: [U8], sig: [U8]) LMSError! {
 lmots_generate_private_key: fn(kind: LMOTSType, key_id: [U8], leaf: Int, seed: [U8]) -> LMOTSPrivate LMSError! {
     if key_id.len() != KEY_ID_LEN || leaf < 0 || leaf > 0xFFFFFFFF -> return Err(.BadInput)
     params: LMOTSParams{key_id: key_id.copy(), leaf_id: u32_bytes(leaf), kind: kind}
-    keys := [[U8]]{}
+    ^keys: [[U8]]{}
     loop i in 0..<P_DIGITS {
-        ctx := hashes.hash_start(.SHA256)
+        ^ctx: hashes.hash_start(.SHA256)
         hashes.hash_update(ctx, params.key_id)
         hashes.hash_update(ctx, params.leaf_id)
         hashes.hash_update_byte(ctx, U8{(i >> 8) & 0xFF})
@@ -278,7 +278,7 @@ lmots_generate_private_key: fn(kind: LMOTSType, key_id: [U8], leaf: Int, seed: [
 
 // The p private hashes end to end.
 flat_keys: fn(ctx: LMOTSPrivate) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop k in ctx.keys -> put_all(out, k)
     out
 }
@@ -286,8 +286,8 @@ flat_keys: fn(ctx: LMOTSPrivate) -> [U8] Never! {
 /// The public key of an unused private key (mbedtls_lmots_calculate_public_key).
 lmots_calculate_public_key: fn(secret: LMOTSPrivate) -> LMOTSPublic LMSError! {
     if !secret.usable -> return Err(.BadInput)
-    x := flat_keys(secret)
-    y := hash_chains(secret.params, x, 0, None, None)
+    ^x: flat_keys(secret)
+    ^y: hash_chains(secret.params, x, 0, None, None)
     key: public_from_chains(secret.params, y)
     core.crypto.wipe(x)
     core.crypto.wipe(y)
@@ -298,13 +298,13 @@ lmots_calculate_public_key: fn(secret: LMOTSPrivate) -> LMOTSPublic LMSError! {
 /// so it never signs again (mbedtls_lmots_sign).
 lmots_sign: fn<R: RNG>(ctx: ^LMOTSPrivate, rng: ^R, msg: [U8]) -> [U8] LMSError! {
     if !ctx.usable -> return Err(.BadInput)
-    c := cipher.zero_bytes(N_HASH_LEN)
+    ^c: cipher.zero_bytes(N_HASH_LEN)
     if !rng.fill(c) -> return Err(.RandomFailed)
-    sig := u32_bytes(lmots_code(ctx.params.kind))
+    ^sig: u32_bytes(lmots_code(ctx.params.kind))
     put_all(sig, c)
     digits: digit_array(ctx.params, msg, sig, TYPE_LEN)
-    x := flat_keys(ctx)
-    y := hash_chains(ctx.params, x, 0, None, Val(digits))
+    ^x: flat_keys(ctx)
+    ^y: hash_chains(ctx.params, x, 0, None, Val(digits))
     core.crypto.wipe(x)
     // The key is spent before the signature leaves.
     ctx.usable = false
@@ -342,7 +342,7 @@ LMSPrivate: struct {
 
 // T[r] for leaf r: H(I || u32 r || D_LEAF || K) (create_merkle_leaf_value).
 merkle_leaf: fn(key_id: [U8], ots_key: [U8], r: Int) -> [U8] Never! {
-    ctx := hashes.hash_start(.SHA256)
+    ^ctx: hashes.hash_start(.SHA256)
     hashes.hash_update(ctx, key_id)
     hashes.hash_update(ctx, u32_bytes(r))
     hashes.hash_update(ctx, D_LEAF)
@@ -353,7 +353,7 @@ merkle_leaf: fn(key_id: [U8], ots_key: [U8], r: Int) -> [U8] Never! {
 // T[r] for an inner node: H(I || u32 r || D_INTR || left || right)
 // (create_merkle_internal_value).
 merkle_internal: fn(key_id: [U8], left: [U8], right: [U8], r: Int) -> [U8] Never! {
-    ctx := hashes.hash_start(.SHA256)
+    ^ctx: hashes.hash_start(.SHA256)
     hashes.hash_update(ctx, key_id)
     hashes.hash_update(ctx, u32_bytes(r))
     hashes.hash_update(ctx, D_INTERNAL)
@@ -377,7 +377,7 @@ lms_import_public_key: fn(key: [U8]) -> LMSPublic LMSError! {
 
 /// The encoding lms_import_public_key reads (mbedtls_lms_export_public_key).
 lms_export_public_key: fn(ctx: LMSPublic) -> [U8] Never! {
-    out := u32_bytes(lms_code(ctx.params.kind))
+    ^out: u32_bytes(lms_code(ctx.params.kind))
     push_u32_be(out, lmots_code(ctx.params.ots))
     put_all(out, ctx.params.key_id)
     put_all(out, ctx.root)
@@ -396,8 +396,8 @@ lms_verify: fn(ctx: LMSPublic, msg: [U8], sig: [U8]) LMSError! {
     ots_params: LMOTSParams{key_id: ctx.params.key_id.copy(), leaf_id: u32_bytes(q), kind: ctx.params.ots}
     ots_sig: cipher.bytes_of(sig, LEAF_ID_LEN, LMOTS_SIG_LEN)
     candidate: lmots_public_key_candidate(ots_params, msg, ots_sig) ?? return Err(.VerifyFailed)
-    node := LEAF_COUNT + q
-    t := merkle_leaf(ctx.params.key_id, candidate, node)
+    ^node: LEAF_COUNT + q
+    ^t: merkle_leaf(ctx.params.key_id, candidate, node)
     path_at: type_at + TYPE_LEN
     loop height in 0..<TREE_HEIGHT {
         sibling: cipher.bytes_of(sig, path_at + height * M_NODE_LEN, M_NODE_LEN)
@@ -411,10 +411,10 @@ lms_verify: fn(ctx: LMSPublic, msg: [U8], sig: [U8]) LMSError! {
 /// A new LMS private key: I from rng and the LM-OTS keys of every leaf from
 /// seed, with their public keys (mbedtls_lms_generate_private_key).
 lms_generate_private_key: fn<R: RNG>(kind: LMSType, ots: LMOTSType, rng: ^R, seed: [U8]) -> LMSPrivate LMSError! {
-    key_id := cipher.zero_bytes(KEY_ID_LEN)
+    ^key_id: cipher.zero_bytes(KEY_ID_LEN)
     if !rng.fill(key_id) -> return Err(.RandomFailed)
-    ots_private := [LMOTSPrivate]{}
-    ots_public := [LMOTSPublic]{}
+    ^ots_private: [LMOTSPrivate]{}
+    ^ots_public: [LMOTSPublic]{}
     loop leaf in 0..<LEAF_COUNT {
         private: lmots_generate_private_key(ots, key_id, leaf, seed)
         public: lmots_calculate_public_key(private)
@@ -427,12 +427,12 @@ lms_generate_private_key: fn<R: RNG>(kind: LMSType, ots: LMOTSType, rng: ^R, see
 // The whole Merkle tree, node r at index r (1 the root, LEAF_COUNT + q the
 // leaf of q; index 0 unused) (calculate_merkle_tree).
 merkle_tree: fn(ctx: LMSPrivate) -> [[U8]] Never! {
-    tree := [[U8]]{}
+    ^tree: [[U8]]{}
     loop _ in 0..<(2 * LEAF_COUNT) -> tree.push([U8]{})
     loop q in 0..<LEAF_COUNT {
         tree[LEAF_COUNT + q] = merkle_leaf(ctx.params.key_id, ctx.ots_public[q].key, LEAF_COUNT + q)
     }
-    r := LEAF_COUNT - 1
+    ^r: LEAF_COUNT - 1
     loop r > 0 {
         tree[r] = merkle_internal(ctx.params.key_id, tree[2 * r], tree[2 * r + 1], r)
         r -= 1
@@ -454,11 +454,11 @@ lms_sign: fn<R: RNG>(ctx: ^LMSPrivate, rng: ^R, msg: [U8]) -> [U8] LMSError! {
     q: ctx.next_leaf
     ctx.next_leaf += 1
     ots_sig: lmots_sign(ctx.ots_private[q], rng, msg)
-    sig := u32_bytes(q)
+    ^sig: u32_bytes(q)
     put_all(sig, ots_sig)
     push_u32_be(sig, lms_code(ctx.params.kind))
     tree: merkle_tree(ctx)
-    node := LEAF_COUNT + q
+    ^node: LEAF_COUNT + q
     loop _ in 0..<TREE_HEIGHT {
         put_all(sig, tree[node ~ 1])
         node >>= 1
@@ -468,14 +468,14 @@ lms_sign: fn<R: RNG>(ctx: ^LMSPrivate, rng: ^R, msg: [U8]) -> [U8] LMSError! {
 
 #Test("An LM-OTS key signs once, its signature verifies, and a changed message fails") {
     key_id: [U8]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
-    private := lmots_generate_private_key(.SHA256N32W8, key_id, 7, "Lms.jet seed".bytes()) ?? panic("generate")
+    ^private: lmots_generate_private_key(.SHA256N32W8, key_id, 7, "Lms.jet seed".bytes()) ?? panic("generate")
     public: lmots_calculate_public_key(private) ?? panic("public")
     assert(lmots_export_public_key(public).len() == LMOTS_PUBLIC_KEY_LEN)
     assert((lmots_import_public_key(lmots_export_public_key(public)) ?? panic("import")).key == public.key)
-    rng := hashes.hash_start(.SHA256)
+    ^rng: hashes.hash_start(.SHA256)
     hashes.hash_update(rng, "randomizer".bytes())
     c: hashes.hash_finish(rng)
-    fixed := FixedRNG{bytes: c}
+    ^fixed: FixedRNG{bytes: c}
     sig: lmots_sign(private, fixed, "message".bytes()) ?? panic("sign")
     assert(sig.len() == LMOTS_SIG_LEN)
     if lmots_verify(public, "message".bytes(), sig) == .Err(_) {
@@ -549,7 +549,7 @@ lms_sign: fn<R: RNG>(ctx: ^LMSPrivate, rng: ^R, msg: [U8]) -> [U8] LMSError! {
     assert(lms_export_public_key(public) == key)
     assert(lms_import_public_key(cipher.bytes_of(key, 0, 3)) == .Err(.BadInput))
     assert(lms_import_public_key(cipher.bytes_of(key, 0, 55)) == .Err(.BadInput))
-    wrong_ots := key.copy()
+    ^wrong_ots: key.copy()
     wrong_ots[7] = U8{5}
     assert(lms_import_public_key(wrong_ots) == .Err(.BadInput))
     assert(lms_verify(public, [U8]{}, cipher.zero_bytes(LMS_SIG_LEN - 1)) == .Err(.VerifyFailed))

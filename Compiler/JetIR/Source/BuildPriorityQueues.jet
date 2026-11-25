@@ -51,7 +51,7 @@ ir_heap_kind: fn(m: IRModule, p: IRProgram, elem_row: Int) -> String Never! {
 ir_heap_helper: fn(m: ^IRModule, p: IRProgram, row: Int, elem_row: Int, name: String) -> Int? Never! {
     key: "{name}<{type_carrier_identity(ir_row_ty(m, p, row))}>"
     if ir_keyed_function(m, key) == .Val(known) -> return Val(known)
-    option_row := -1
+    ^option_row: -1
     if name == "priority_queue.pop" {
         elem_ty: ir_row_ty(m, p, elem_row)
         option_row = ir_value_type(m, p, Type.Option{inner: elem_ty}) ?? return None
@@ -61,7 +61,7 @@ ir_heap_helper: fn(m: ^IRModule, p: IRProgram, row: Int, elem_row: Int, name: St
     symbol: name.split(".").to_list().join("_")
     m.functions.push(ir_hashed_function(name, key, "jet_ir_{symbol}_", "", 0))
     ir_function_bind(m, key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     heap: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "heap"))
     if name == "priority_queue.push" {
         value: ir_new_slot(a, elem_row, IRSlotKind.Param, ir_intern_name(m, "value"))
@@ -423,7 +423,7 @@ ir_float_total_key: fn(m: ^IRModule, a: ^IRBuilder, address: Int) -> Int Never! 
 // totalOrder, -NaN < -inf < ... < -0.0 < +0.0 < ... < +inf < NaN. A Float32
 // widens to Float first, which keeps its order.
 ir_float_total_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, span: Span) -> Int Never! {
-    floating := value
+    ^floating: value
     if m.types[b.f.slot_type[value]].kind == .Float32 {
         float_row: ir_value_type(m, p, Type.Float) ?? return ir_type_fail(b, span, Type.Float)
         floating = ir_temp(m, b, float_row)
@@ -520,7 +520,7 @@ ir_key_ordered: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, descendi
     elem_row: ir_priority_queue_row(m, p, header_row) ?? return ir_fail_slot(b, span, "key-ordered construction of {ir_type_name(ty)}")
     order: ir_key_order(m, p, b, key, elem_row, descending, span)
     if ir_failed(b) -> return -1
-    header := -1
+    ^header: -1
     if !from -> header = ir_list_empty(m, p, b, header_row) else if ir_list_element(m, p, b, subject) != Val(elem_row) {
         return ir_fail_slot(b, span, "from_by source is not its element List")
     } else if b.fresh[subject] {
@@ -573,7 +573,7 @@ ir_key_order_helper: fn(m: ^IRModule, p: IRProgram, closure_ty: Type, elem_row: 
     id: m.functions.len()
     m.functions.push(ir_hashed_function("key_order.before", key, "jet_ir_key_order_before_", "", 0))
     ir_function_bind(m, key, id)
-    a := ir_builder_new(m.functions[id].copy())
+    ^a: ir_builder_new(m.functions[id].copy())
     pointer_row: ir_pointer_row(m)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     boxed: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "boxed"))
@@ -623,7 +623,7 @@ ir_priority_queue_from: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, 
     if ir_list_element(m, p, b, source) != Val(elem_row) {
         return ir_fail_slot(b, span, "PriorityQueue source is not its element List")
     }
-    heap := -1
+    ^heap: -1
     if b.fresh[source] {
         heap = ir_list_empty(m, p, b, heap_row)
         ir_emit(b.f, IROp.CopyBytes, -1, heap, source, 24, b.line)

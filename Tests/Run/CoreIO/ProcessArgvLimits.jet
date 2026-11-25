@@ -34,7 +34,7 @@ report: fn(label: String, spec: ProcessSpec) -[Exec, IO, Time.Wait]> {
 // The bytes of child stderr carried in the checked error's cause.
 checked_stderr_len: fn(spec: ProcessSpec) -[Exec, Time.Wait]> Int {
     _: process.check_call(spec) ?? {
-        tail := ""
+        ^tail: ""
         loop part in "{err}".split("stderr=") -> tail = part
         return tail.trim().len()
     }
@@ -83,7 +83,7 @@ run: fn() -[Exec, IO, Time.Wait]> {
 
     child: process.cmd(["seq", "1", "1000000"]).stdout(.Stream).timeout(10s).spawn() ?? panic("spawn failed")
     pid: child.id()
-    seen := 0
+    ^seen: 0
     loop _ in child.stdout.lines() {
         seen += 1
         if seen == 3 -> break

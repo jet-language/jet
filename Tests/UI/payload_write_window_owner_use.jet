@@ -7,7 +7,7 @@ Res: struct {
 }
 
 touch: fn(result: ^Res) {
-    if ^result.session == {
+    if result.session.in_place() == {
         .Val(session) -> {
             result.session = None
             session.hits += 1
@@ -17,6 +17,6 @@ touch: fn(result: ^Res) {
 }
 
 run: fn() {
-    result := Res{session: Val(Session{hits: 0})}
+    ^result: Res{session: Val(Session{hits: 0})}
     touch(result)
 }

@@ -37,7 +37,7 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         return
     }
     // Each checked function by key: its module result and its row there.
-    slots := [String:SemaTargetSlot]{}
+    ^slots: [String:SemaTargetSlot]{}
     loop module_index in 0..<modules.len() {
         loop (row, function) in modules[module_index].functions {
             if slots.get(function.key) != None -> next
@@ -47,14 +47,14 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
     roots: sema_target_entry_keys(modules, graph)
     // The functions the entry reaches through calls and function values,
     // in the order the walk first meets them.
-    reached := [String]{}
-    seen := [String:Bool]{}
+    ^reached: [String]{}
+    ^seen: [String:Bool]{}
     loop key in roots {
         if seen.get(key) != None -> next
         seen[key] = true
         reached.push(key)
     }
-    at := 0
+    ^at: 0
     loop at < reached.len() {
         key: reached[at]
         at += 1
@@ -78,8 +78,8 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         function: modules[slot.module_index].functions[slot.row]
         if module_is_core(function.module_identity) -> next
         if sema_effect_covered(function.effects.solved, denied).len() == 0 -> next
-        found := [Diagnostic]{}
-        reported := [String]{}
+        ^found: [Diagnostic]{}
+        ^reported: [String]{}
         loop site in function.effects.direct_spans {
             denial: sema_target_denied_by(site.name, denied) ?? next
             if reported.contains(denial) -> next
@@ -122,8 +122,8 @@ sema_target_no_os_reach_check: fn(modules: [SemaGraphModuleResult], graph: SemaR
     }
     // Each checked function once, at the id of its key in `keys`: its row of
     // `rows`. Row 0 stands for id 0, the empty key, which no function has.
-    keys := name_table()
-    rows := [SemaTargetSlot]{SemaTargetSlot{module_index: -1, row: -1}}
+    ^keys: name_table()
+    ^rows: [SemaTargetSlot]{SemaTargetSlot{module_index: -1, row: -1}}
     loop module_index in 0..<modules.len() {
         loop (row, function) in modules[module_index].functions {
             if name_index(name_intern(keys, function.key)) < rows.len() -> next
@@ -132,16 +132,16 @@ sema_target_no_os_reach_check: fn(modules: [SemaGraphModuleResult], graph: SemaR
     }
     // The functions the entries reach, in the order the walk first meets
     // them, and the position each was first reached from (-1 for an entry).
-    parents := (loop _ in rows -> -2)
-    reached := [Int]{}
+    ^parents: (loop _ in rows -> -2)
+    ^reached: [Int]{}
     loop key in sema_target_entry_keys(modules, graph) {
         position: sema_target_position(keys, key) ?? next
         if parents[position] != -2 -> next
         parents[position] = -1
         reached.push(position)
     }
-    reported := SemaKeyRows{}
-    at := 0
+    ^reported: SemaKeyRows{}
+    ^at: 0
     loop at < reached.len() {
         position: reached[at]
         at += 1
@@ -178,10 +178,10 @@ sema_target_position: fn(keys: NameTable, key: String) -> Int? Never! {
 // path that reaches the module straight from the program's own code was
 // refused in that body.
 sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, rows: [SemaTargetSlot], keys: NameTable, parents: [Int], position: Int, reported: ^SemaKeyRows, diagnostics: ^[Diagnostic]) Never! {
-    back := [Int]{position}
+    ^back: [Int]{position}
     loop parents[back[back.len() - 1]] >= 0 { back.push(parents[back[back.len() - 1]]) }
     steps: loop at in 0..<back.len() -> back[back.len() - 1 - at]
-    own := 0
+    ^own: 0
     loop own + 1 < steps.len() && sema_target_own_row(modules, graph, rows[steps[own + 1]]) {
         own += 1
     }
@@ -192,7 +192,7 @@ sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: Sema
     caller: modules[caller_slot.module_index].functions[caller_slot.row]
     callee: modules[rows[steps[own + 1]].module_index].functions[rows[steps[own + 1]].row]
     target: modules[rows[position].module_index].functions[rows[position].row]
-    span := caller.source_span
+    ^span: caller.source_span
     loop call in modules[caller_slot.module_index].call_facts {
         if call.caller_key != caller.key -> next
         symbol: call.callee ?? next
@@ -207,7 +207,7 @@ sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: Sema
     }
     hint: sema_call_core_no_os_hint(target.module_name) ?? return
     short_name: foundation_byte_text(target.module_name.bytes(), target.module_name.rfind(".") + 1, target.module_name.count_bytes())
-    found := [Diagnostic]{sema_error("E3301", span, "`{callee.name}` reaches `{short_name}.{target.name}`, which is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available, in Core and packages as in the program's own code.", hint)}
+    ^found: [Diagnostic]{sema_error("E3301", span, "`{callee.name}` reaches `{short_name}.{target.name}`, which is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available, in Core and packages as in the program's own code.", hint)}
     registration: sema_registration_module_index(graph, caller.module_identity) ?? return
     sema_attach_diagnostic_source_locations(found, 0, graph.modules[registration].source_segments)
     loop diagnostic in found -> diagnostics.push(diagnostic)
@@ -223,7 +223,7 @@ sema_target_own_row: fn(modules: [SemaGraphModuleResult], graph: SemaRegistratio
 // `run` and every function an Output links (sema_liveness_is_root). A
 // `build: fn` runs on the building machine, not the target.
 sema_target_entry_keys: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph) -> [String] Never! {
-    roots := [String]{}
+    ^roots: [String]{}
     loop module_row in modules {
         loop function in module_row.functions {
             if function.name == "run" && function.module_identity == graph.entry_module_identity && !roots.contains(function.key) {
@@ -285,11 +285,11 @@ sema_target_capability_check: fn(graph: SemaRegistrationGraph, core_usage: SemaC
     // The profile's own gaps hold for every program; only what a use adds is
     // the program's.
     declared: jet_target_machine_validate(machine, jet_target_machine_use_default())
-    complete := true
+    ^complete: true
     loop module_usage in core_usage.modules {
         if module_is_core(module_usage.module_identity) -> next
-        found := [Diagnostic]{}
-        reported := [TargetMachineError]{}
+        ^found: [Diagnostic]{}
+        ^reported: [TargetMachineError]{}
         loop site in module_usage.usage_spans {
             parts: core_path_parts(site.usage)
             member_head: if parts.member.split_once(".") == .Val(cut) -> cut.before else -> parts.member
@@ -297,7 +297,7 @@ sema_target_capability_check: fn(graph: SemaRegistrationGraph, core_usage: SemaC
             if sema_call_core_no_os_hint(parts.module_name) != None -> next
             loop error in jet_target_machine_validate(machine, jet_target_machine_use_from_core_apis([String]{site.usage})) {
                 if declared.contains(error) || reported.contains(error) -> next
-                diagnostic := jet_target_machine_error_diagnostic(machine, error)
+                ^diagnostic: jet_target_machine_error_diagnostic(machine, error)
                 if diagnostic.code != "E3311" -> next
                 reported.push(error)  // copy: the validator's list keeps its row.
                 diagnostic.span = Val(site.span)

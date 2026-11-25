@@ -103,7 +103,7 @@ jet_cli_solver_fixed_width: fn(ty: Type) -> Bool Never! {
 
 jet_cli_solver_lookup: fn(scope: JetCLISolverScope, local: TLocal) -> JetCLISolverAffine JetCLISolverUnknown! {
     name: local.name
-    pinned := JetCLISolverPin?{None}
+    ^pinned: JetCLISolverPin?{None}
     loop pin in scope.pins {
         if pin.name == name || (pin.symbol != None && pin.symbol == local.symbol_id) {
             pinned = Val(pin.copy())
@@ -280,7 +280,7 @@ jet_cli_solver_text: fn(source: String, span: Span) -> String Never! {
 jet_cli_solver_index_obligations: fn(function: FnBody, source: String, out: ^[JetCLISolverObligation]) Never! {
     loop proof in function.index_proofs {
         text: jet_cli_solver_text(source, proof.span)
-        row := JetCLISolverObligation{kind: "fixed_index_bounds", function: function.name.copy(), callee: "", span: proof.span, claim: text, formula: None, reason: "", detail: "", pre: false}
+        ^row: JetCLISolverObligation{kind: "fixed_index_bounds", function: function.name.copy(), callee: "", span: proof.span, claim: text, formula: None, reason: "", detail: "", pre: false}
         formula: jet_cli_solver_index_formula(proof) ?? {
             row.reason = err.reason
             row.detail = err.detail
@@ -317,7 +317,7 @@ jet_cli_solver_post_obligations: fn(interner: Interner, function: FnBody, source
     if body_stmt(function.tree, function.body[0]) == .ContractScope(_, body, post, result, _) {
         loop contract in post {
             claim: jet_cli_solver_text(source, body_node(function.tree, contract.condition).span)
-            row := JetCLISolverObligation{kind: "function_postcondition", function: function.name.copy(), callee: "", span: contract.span, claim: claim, formula: None, reason: "", detail: "", pre: function.pre.len() > 0}
+            ^row: JetCLISolverObligation{kind: "function_postcondition", function: function.name.copy(), callee: "", span: contract.span, claim: claim, formula: None, reason: "", detail: "", pre: function.pre.len() > 0}
             formula: jet_cli_solver_post_formula(interner, function, body, contract, result) ?? {
                 row.reason = err.reason
                 row.detail = err.detail
@@ -332,8 +332,8 @@ jet_cli_solver_post_obligations: fn(interner: Interner, function: FnBody, source
 
 jet_cli_solver_post_formula: fn(interner: Interner, function: FnBody, body: [Int], contract: BodyContract, result: TContractResult) -> JetCLISolverFormula JetCLISolverUnknown! {
     tree: function.tree
-    scope := JetCLISolverScope{names: [String]{}, pins: [JetCLISolverPin]{}}
-    facts := [JetCLISolverBool]{}
+    ^scope: JetCLISolverScope{names: [String]{}, pins: [JetCLISolverPin]{}}
+    ^facts: [JetCLISolverBool]{}
     jet_cli_solver_entry(interner, function, scope, facts)
     name: if result.mode == .Direct -> result.carrier_local.name else -> result.binding_local.name
     bounds: jet_cli_solver_type_bounds(result.binding_ty)
@@ -455,13 +455,13 @@ jet_cli_solver_scan: fn(tree: BodyTree, id: Int, found: ^[Int]) Never! {
 // whose claim fails stops there). Any other pinned call is unsupported.
 jet_cli_solver_call_obligations: fn(function: FnBody, source: String, callees: JetCLISolverCallees, out: ^[JetCLISolverObligation]) Never! {
     tree: function.tree
-    scope := JetCLISolverScope{names: [String]{}, pins: [JetCLISolverPin]{}}
-    facts := [JetCLISolverBool]{}
-    blocked := jet_cli_solver_entry_blocked(callees.interner, function, scope, facts)
-    straight := [Int]{}
+    ^scope: JetCLISolverScope{names: [String]{}, pins: [JetCLISolverPin]{}}
+    ^facts: [JetCLISolverBool]{}
+    ^blocked: jet_cli_solver_entry_blocked(callees.interner, function, scope, facts)
+    ^straight: [Int]{}
     loop id in jet_cli_solver_body(function) {
         statement: body_stmt(tree, id)
-        found := [Int]{}
+        ^found: [Int]{}
         if statement == {
             .Let(_, _, init, _, _, _) -> jet_cli_solver_scan(tree, init, found)
             .ExprStmt(value, _) -> jet_cli_solver_scan(tree, value, found)
@@ -493,13 +493,13 @@ jet_cli_solver_call_obligations: fn(function: FnBody, source: String, callees: J
 
 // Why the function's parameters and `#Pre` can't be assumed, or "".
 jet_cli_solver_entry_blocked: fn(interner: Interner, function: FnBody, scope: ^JetCLISolverScope, facts: ^[JetCLISolverBool]) -> String Never! {
-    _ := jet_cli_solver_entry(interner, function, scope, facts) ?? return err.detail
+    ^_: jet_cli_solver_entry(interner, function, scope, facts) ?? return err.detail
     ""
 }
 
 // Why a `let` leaves later reads ambiguous (it shadows a name), or "".
 jet_cli_solver_let_blocked: fn(interner: Interner, tree: BodyTree, local: TLocal, init: Int, scope: ^JetCLISolverScope, facts: ^[JetCLISolverBool]) -> String Never! {
-    _ := jet_cli_solver_let(interner, tree, local, init, scope, facts) ?? return err.detail
+    ^_: jet_cli_solver_let(interner, tree, local, init, scope, facts) ?? return err.detail
     ""
 }
 
@@ -509,7 +509,7 @@ jet_cli_solver_call_block: fn(function: FnBody, block: Int, source: String, call
     tree: function.tree
     body: if body_node(tree, block).kind == .InlineBlock(items) -> items else -> [Int]{}
     callee: jet_cli_solver_callee(tree, body, callees)
-    pinned := scope.copy()
+    ^pinned: scope.copy()
     loop item in body {
         statement: body_stmt(tree, item)
         if statement == .Let(local, _, init, _, _, _) {
@@ -522,7 +522,7 @@ jet_cli_solver_call_block: fn(function: FnBody, block: Int, source: String, call
         }
         if statement == .Contract(contract) && contract.kind == .Pre {
             claim_text: jet_cli_solver_text(source, body_node(tree, contract.condition).span)
-            row := JetCLISolverObligation{kind: "call_precondition", function: function.name.copy(), callee: callee.copy(), span: contract.span, claim: claim_text, formula: None, reason: "", detail: "", pre: function.pre.len() > 0}
+            ^row: JetCLISolverObligation{kind: "call_precondition", function: function.name.copy(), callee: callee.copy(), span: contract.span, claim: claim_text, formula: None, reason: "", detail: "", pre: function.pre.len() > 0}
             if blocked != "" {
                 row.reason = "unsupported_formula"
                 row.detail = blocked.copy()
@@ -568,17 +568,17 @@ jet_cli_solver_obligation_order: fn(left: JetCLISolverKeyedObligation, right: Je
 // Identical obligations are one: each instance of a generic body repeats
 // its claims.
 jet_cli_solver_obligations: fn(functions: [FnBody], callees: JetCLISolverCallees, file: String, source: String) -> [JetCLISolverObligation] Never! {
-    out := [JetCLISolverObligation]{}
+    ^out: [JetCLISolverObligation]{}
     loop function in functions {
         if function.synthetic || function.source_file != file -> next
         jet_cli_solver_index_obligations(function, source, out)
         jet_cli_solver_call_obligations(function, source, callees, out)
         jet_cli_solver_post_obligations(callees.interner, function, source, out)
     }
-    keyed := loop item in out -> JetCLISolverKeyedObligation{text: if item.formula == .Val(formula) -> jet_cli_solver_formula_json(formula) else -> "{item.reason}\t{item.detail}", obligation: item}
+    ^keyed: loop item in out -> JetCLISolverKeyedObligation{text: if item.formula == .Val(formula) -> jet_cli_solver_formula_json(formula) else -> "{item.reason}\t{item.detail}", obligation: item}
     // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
     keyed.sort_by(fn(left: JetCLISolverKeyedObligation, right: JetCLISolverKeyedObligation) { jet_cli_solver_obligation_order(left, right) })
-    kept := [JetCLISolverObligation]{}
+    ^kept: [JetCLISolverObligation]{}
     loop (index, item) in keyed {
         if index > 0 {
             previous: keyed[index - 1]

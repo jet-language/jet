@@ -1,9 +1,9 @@
 kit_steps_failure_paths: fn(text: String) -> String? {
     first: kit_steps_transform_one(text, "normalize_journey_paths") ?? return None
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in kit_steps_rust_lines(first) {
-        start := -1
-        cursor := 0
+        ^start: -1
+        ^cursor: 0
         loop cursor < line.count_bytes() {
             offset: kit_steps_byte_index(kit_steps_byte_slice(line, cursor, line.count_bytes()), "jet_") ?? break
             found: cursor + offset
@@ -31,13 +31,13 @@ kit_steps_failure_paths: fn(text: String) -> String? {
 
 // Lines as `kit_steps_rust_lines` splits them: the CR of a CRLF is stripped.
 kit_steps_contract_arrow: fn(text: String) -> String {
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in kit_steps_rust_lines(text) {
         index: kit_steps_byte_index(line, "  --> ")
         if index == {
             .Val(start) -> {
                 location: kit_steps_byte_slice(line, start + 6, line.count_bytes())
-                colon := -1
+                ^colon: -1
                 loop (offset, byte) in location.bytes() {
                     if byte == (U8{58}) -> colon = offset
                 }
@@ -53,7 +53,7 @@ kit_steps_contract_arrow: fn(text: String) -> String {
 kit_steps_mask: fn(text: String) -> Int? {
     if !text.starts_with("0o") -> return Val(Int.parse(text) ?? return None)
     if text.len() == 2 -> return None
-    value := 0
+    ^value: 0
     loop byte in kit_steps_byte_slice(text, 2, text.count_bytes()).bytes() {
         digit: Int{byte} - 48
         if digit < 0 || digit > 7 || value > (9223372036854775807 - digit) /% 8 -> return None

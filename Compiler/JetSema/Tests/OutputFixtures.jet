@@ -53,12 +53,12 @@ use {
 }
 
 output_fixture_graph: fn(label: String, source: String, effects_source: String, failures: ^[String]) -> SemaRegistrationGraph? {
-    parsed := parse_source(source.bytes())
+    ^parsed: parse_source(source.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
         failures.push("{label}: source parsing failed: {parsed.diagnostics:Debug}")
         return None
     }
-    table := module_table()
+    ^table: module_table()
     main_id: module_intern(table, "output-fixture.main")
     canonical: jet_driver_canonical_effect_module(effect_vocabulary_module(effects_source), table) ?? {
         failures.push("{label}: canonical effect module declares no effects")
@@ -76,18 +76,18 @@ output_fixture_graph: fn(label: String, source: String, effects_source: String, 
 }
 
 output_fixture_case: fn(label: String, source: String, effects_source: String, intent: SemaOutputIntent, address: String?, expected_codes: [String], expected_selected: [String], failures: ^[String]) {
-    graph := output_fixture_graph(label, source, effects_source, failures) ?? return
+    ^graph: output_fixture_graph(label, source, effects_source, failures) ?? return
     if !graph.complete || graph.internal_problem != None {
         failures.push("{label}: registration failed: {graph.diagnostics:Debug}")
         return
     }
     diagnostics: sema_output_resolve(graph, intent, address, false)
-    codes := [String]{}
+    ^codes: [String]{}
     loop diagnostic in diagnostics -> codes.push(diagnostic.code.copy())
     if codes != expected_codes {
         failures.push("{label}: diagnostics {codes:Debug}, expected {expected_codes:Debug}")
     }
-    selected := [String]{}
+    ^selected: [String]{}
     loop constant in graph.modules[0].constants {
         if constant.declaration.resolved_output == .Val(output) {
             if output.selected -> selected.push(output.address.copy())
@@ -106,7 +106,7 @@ output_fixture_case: fn(label: String, source: String, effects_source: String, i
 
 output_fixture_solved_effects: fn(effects_source: String, failures: ^[String]) {
     source: "APP: Output.Executable{{name: \"app\", entry: launch}}\nleaf: fn() {{ print(\"checked effect\") }}\nlaunch: fn() {{ leaf() }}\n"
-    graph := output_fixture_graph("solved effect publication", source, effects_source, failures) ?? return
+    ^graph: output_fixture_graph("solved effect publication", source, effects_source, failures) ?? return
     output_diagnostics: sema_output_resolve(graph, SemaOutputIntent.Run, None, false)
     if sema_has_error_since(output_diagnostics, 0) {
         failures.push("solved effect publication: Output resolution failed {output_diagnostics:Debug}")
@@ -114,8 +114,8 @@ output_fixture_solved_effects: fn(effects_source: String, failures: ^[String]) {
     }
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
     // Declaration checking loans the graph to its stage, which returns it.
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None)
-    declared := stage.graph.move()
+    ^stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None)
+    ^declared: stage.graph.move()
     stage.graph = None
     graph = declared.move() ?? {
         failures.push("solved effect publication: the declaration pass lost its registration graph")
@@ -125,17 +125,17 @@ output_fixture_solved_effects: fn(effects_source: String, failures: ^[String]) {
     // re-reads the declared graph, so finalize a copy. The checked bodies'
     // types are rows of the finalized graph's interner, which the
     // finalization hands back with that graph.
-    trail := sema_graph_trail_init()
-    finalized := sema_finalize_graph(graph.copy(), trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), true, None)
-    checked := finalized.result.move()
+    ^trail: sema_graph_trail_init()
+    ^finalized: sema_finalize_graph(graph.copy(), trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), true, None)
+    ^checked: finalized.result.move()
     if !checked.complete {
         failures.push("solved effect publication: real body/effect check failed {checked.diagnostics:Debug}")
         return
     }
-    finalized_graph := finalized.graph.move()
+    ^finalized_graph: finalized.graph.move()
     key: symbol_key_text(SymbolKind.Function, "output-fixture.main", "", "launch")
-    solved := [String]?{None}
-    settled_return := Type?{None}
+    ^solved: [String]?{None}
+    ^settled_return: Type?{None}
     loop function in checked.modules[0].functions {
         if function.key == key {
             solved = Val(function.effects.solved.copy())
@@ -149,7 +149,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: ^[String]) {
     if expected.len() == 0 {
         failures.push("solved effect publication: genuine print/call chain has no solved effects")
     }
-    declaration_span := Span?{None}
+    ^declaration_span: Span?{None}
     loop function in graph.modules[0].functions {
         if symbol_table_key(graph.symbols, function.symbol.id) == key {
             declaration_span = function.declaration.return_type_span
@@ -164,7 +164,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: ^[String]) {
             failures.push("solved output publication: the graph result differs from the settled callable contract")
         }
     }
-    found := false
+    ^found: false
     loop constant in checked.modules[0].constants {
         if constant.declaration.resolved_output == .Val(resolved) {
             found = true
@@ -179,7 +179,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: ^[String]) {
     if !found -> failures.push("solved effect publication: checked Output fact is missing")
     // Effect inputs need not share the checked module order. Re-publish through
     // the production in-place graph path and cover each manifest denial once.
-    effect_inputs := [SemaEffectModuleInput]{}
+    ^effect_inputs: [SemaEffectModuleInput]{}
     type_caps: sema_effect_type_caps(graph.modules)
     loop module_index in 0..<checked.modules.len() {
         source_index: sema_registration_module_index(graph, checked.modules[module_index].module_identity) ?? {
@@ -196,19 +196,19 @@ output_fixture_solved_effects: fn(effects_source: String, failures: ^[String]) {
         )
     }
     effect_inputs.reverse()
-    prepared := sema_effect_prepare_modules(checked.modules, effect_inputs, graph.decls, graph.symbols)
-    effect_symbols := graph.symbols.copy()
-    effect_interner := finalized_graph.interner.move()
+    ^prepared: sema_effect_prepare_modules(checked.modules, effect_inputs, graph.decls, graph.symbols)
+    ^effect_symbols: graph.symbols.copy()
+    ^effect_interner: finalized_graph.interner.move()
     republished: sema_effects_check_modules(checked.modules, effect_inputs, prepared, [String]{"Mem.Alloc", "Mem.Rc"}, [Bool]{}, [[SemaEffectModuleCap]]{}, sema_effect_trait_caps(graph), graph.decls, effect_symbols, effect_interner, graph.module_table, name_table_sized(2), compiler_threads_single(), false)
     if republished.memory_declarations.len() != 2 {
         failures.push("in-place effect publication: manifest memory declarations duplicated")
     }
-    function_count := 0
+    ^function_count: 0
     loop module_row in checked.modules -> function_count += module_row.functions.len()
     if republished.memory_projections.len() != 2 * function_count {
         failures.push("in-place effect publication: manifest projections omitted or duplicated")
     }
-    launch_found := false
+    ^launch_found: false
     loop function in checked.modules[0].functions {
         if function.key == key {
             launch_found = true
@@ -225,26 +225,26 @@ output_fixture_solved_effects: fn(effects_source: String, failures: ^[String]) {
 // `linked` is the registered name of the function a linking Output selects,
 // or None when the link is rejected.
 output_fixture_visibility: fn(label: String, main_source: String, bank_source: String, bridge_source: String?, bank_package: String, main_package: String, effects_source: String, linked: String?, failures: ^[String]) {
-    sources := [String]{main_source, bank_source}
-    names := [String]{"main", "bank"}
-    packages := [String]{main_package, bank_package}
+    ^sources: [String]{main_source, bank_source}
+    ^names: [String]{"main", "bank"}
+    ^packages: [String]{main_package, bank_package}
     if bridge_source == .Val(source) {
         sources.push(source.copy())
         names.push("bridge")
         packages.push(bank_package.copy())
     }
-    inputs := [SemaRegistrationModuleInput]{}
-    edges := [SemaRegistrationImportEdge]{}
-    table := module_table()
+    ^inputs: [SemaRegistrationModuleInput]{}
+    ^edges: [SemaRegistrationImportEdge]{}
+    ^table: module_table()
     loop (index, source) in sources {
-        parsed := parse_source(source.bytes())
+        ^parsed: parse_source(source.bytes())
         if sema_has_error_since(parsed.diagnostics, 0) {
             failures.push("{label}: real module {names[index]} did not parse {parsed.diagnostics:Debug}")
             return
         }
         identity: module_intern(table, "{packages[index]}.{names[index]}")
         loop declaration in parsed.program.imports {
-            target := Int?{None}
+            ^target: Int?{None}
             if declaration.kind == .File(path, _) {
                 loop (candidate, name) in names {
                     file_name: "{name}.jet"
@@ -267,7 +267,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
     inputs.push(canonical)
     facts: SemaBuildFacts{package_name: main_package.copy(), package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     main_id: module_intern(table, "{main_package}.main")
-    graph := sema_registration_prepare_graph(inputs, edges, main_package, main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
+    ^graph: sema_registration_prepare_graph(inputs, edges, main_package, main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     if !graph.complete || graph.internal_problem != None || sema_has_error_since(graph.diagnostics, 0) {
         failures.push("{label}: ordinary registration failed {graph.diagnostics:Debug}")
         return
@@ -277,7 +277,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
         if diagnostics.len() != 0 {
             failures.push("{label}: public link rejected {diagnostics:Debug}")
         }
-        found := false
+        ^found: false
         loop constant in graph.modules[0].constants {
             if constant.declaration.resolved_output == .Val(output) {
                 found = true
@@ -288,7 +288,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
         }
         if !found -> failures.push("{label}: checked Output fact is missing")
         expected_key: symbol_key_text(SymbolKind.Function, "{bank_package}.bank", "", function_name)
-        function_references := 0
+        ^function_references: 0
         loop reference in graph.output_name_references {
             if reference.kind == Val(SymbolKind.Function) {
                 function_references += 1
@@ -302,7 +302,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
         }
     } else {
         // The rejected link selects nothing, so the run also has no entry (E0101).
-        codes := [String]{}
+        ^codes: [String]{}
         loop diagnostic in diagnostics -> codes.push(diagnostic.code.copy())
         expected: [String]{"E1321", "E0101"}
         if codes != expected {
@@ -319,9 +319,9 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
 // A run with no address, no `run: fn` and no Output selects nothing (E0101),
 // unless the package manifest binds an `outputs.*.entry` function.
 output_fixture_manifest_entry: fn(label: String, manifest_entry: Bool, expected_codes: [String], effects_source: String, failures: ^[String]) {
-    graph := output_fixture_graph(label, "cli_run: fn() {{}}\n", effects_source, failures) ?? return
+    ^graph: output_fixture_graph(label, "cli_run: fn() {{}}\n", effects_source, failures) ?? return
     diagnostics: sema_output_resolve(graph, SemaOutputIntent.Run, None, manifest_entry)
-    codes := [String]{}
+    ^codes: [String]{}
     loop diagnostic in diagnostics -> codes.push(diagnostic.code.copy())
     if codes != expected_codes {
         failures.push("{label}: diagnostics {codes:Debug}, expected {expected_codes:Debug}")
@@ -349,7 +349,7 @@ output_fixture_visibility_cases: fn(effects_source: String, failures: ^[String])
 }
 
 output_fixture_run: fn(effects_source: String) Never! {
-    failures := [String]{}
+    ^failures: [String]{}
     nine: "LIB: Output.Library{{name: \"lib\"}}\nAPP: Output.Executable{{name: \"app\", entry: launch}}\nRPC: Output.Service{{name: \"rpc\", entry: launch}}\nCHECK: Output.Check{{name: \"check\", entry: launch}}\nENV: Output.Environment{{name: \"env\"}}\nIMAGE: Output.Image{{name: \"image\"}}\nBUNDLE: Output.Bundle{{name: \"bundle\"}}\nSYSTEM: Output.System{{name: \"system\"}}\nFLEET: Output.Fleet{{name: \"fleet\"}}\nlaunch: fn() {{}}\n"
     output_fixture_case("nine closed kinds/check projection", nine, effects_source, SemaOutputIntent.Check, None, [String]{}, [String]{}, failures)
     output_fixture_case("nine kinds/test projection", nine, effects_source, SemaOutputIntent.Test, None, [String]{}, [String]{"CHECK"}, failures)
@@ -384,7 +384,7 @@ output_fixture_run: fn(effects_source: String) Never! {
     output_fixture_case("missing inline member", "APP: Output.Executable{{name: \"a\", entry: bank.missing}}\nbank: module {{ launch: fn() {{}} }}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, failures)
     output_fixture_case("private inline entry", "APP: Output.Executable{{name: \"a\", entry: bank.internal.launch}}\nbank: module {{ priv internal: module {{ launch: fn() {{}} }} }}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, failures)
     output_fixture_case("inline authenticated re-export", "APP: Output.Executable{{name: \"a\", entry: bridge.launch}}\nbank: module {{ launch: fn() {{}} }}\nbridge: module {{ launch: bank.launch }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, failures)
-    empty := output_fixture_graph("no-inline early return", "helper: fn() {{}}\n", effects_source, failures)
+    ^empty: output_fixture_graph("no-inline early return", "helper: fn() {{}}\n", effects_source, failures)
     if empty == .Val(graph) {
         if name_count(graph.modules[0].inline_bindings.imports.names) > 1 || graph.modules[0].inline_bindings.modules.len() != 0 {
             failures.push("no-inline early return retains empty binder products")

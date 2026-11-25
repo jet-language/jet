@@ -12,19 +12,19 @@ JetDriverApplyError: enum {
 
 jet_driver_apply_edits: fn(src: String, edits: [TextEdit]) -> String JetDriverApplyError! {
     if edits.len() == 0 -> return Ok(src)
-    order := [Int]{}
+    ^order: [Int]{}
     loop index in 0..<edits.len() -> order.push(index)
-    width := 1
+    ^width: 1
     loop width < order.len() {
-        merged := [Int]{}
-        start := 0
+        ^merged: [Int]{}
+        ^start: 0
         loop start < order.len() {
             middle: if start + width < order.len() -> start + width else -> order.len()
             end: if start + width * 2 < order.len() -> start + width * 2 else -> order.len()
-            left := start
-            right := middle
+            ^left: start
+            ^right: middle
             loop left < middle || right < end {
-                take_left := right >= end
+                ^take_left: right >= end
                 if !take_left && left < middle {
                     a: edits[order[left]].span
                     b: edits[order[right]].span
@@ -51,8 +51,8 @@ jet_driver_apply_edits: fn(src: String, edits: [TextEdit]) -> String JetDriverAp
         }
     }
     bytes: src.bytes()
-    out := [U8]{}
-    cursor := 0
+    ^out: [U8]{}
+    ^cursor: 0
     loop index in order {
         edit: edits[index]
         start: if edit.span.start < bytes.len() -> edit.span.start else -> bytes.len()

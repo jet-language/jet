@@ -4,15 +4,15 @@ Particle: struct {
 }
 
 run: fn() {
-    particles := [Particle]{{position: 10, _velocity: 2}, {position: 20, _velocity: 3}, {position: 30, _velocity: 4}}
+    ^particles: [Particle]{{position: 10, _velocity: 2}, {position: 20, _velocity: 3}, {position: 30, _velocity: 4}}
     task.group outer {
-        left: ^particles[0]
+        left: particles[0].in_place()
         a: task {
             left.position += 1
             left.position
         }
         task.group inner {
-            right: ^particles[2]
+            right: particles[2].in_place()
             b: task {
                 right.position += 1
                 right.position

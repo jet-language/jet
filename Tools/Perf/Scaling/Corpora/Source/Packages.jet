@@ -46,7 +46,7 @@ Seeded: struct {
 
     next: fn(^self) -> Int {
         self.state = wrapping(self.state + U32{1831565813})
-        t := self.state
+        ^t: self.state
         t = wrapping((t ~ t >> 15) * (t | U32{1}))
         t ~= wrapping(t + wrapping((t ~ t >> 7) * (t | U32{61})))
         Int{t ~ t >> 14}
@@ -85,9 +85,9 @@ code_lines: fn(files: [String:String]) -> Int {
 // One digest over the whole package: each file's name and bytes, by name.
 source_digest: fn(files: [String:String]) -> String {
     // copy: the names are sorted apart from the map
-    names := files.keys().map(fn(name) { name.copy() }).to_list()
+    ^names: files.keys().map(fn(name) { name.copy() }).to_list()
     names.sort()
-    data := [U8]{}
+    ^data: [U8]{}
     loop name in names {
         data.extend(name.bytes())
         data.push(U8{0})
@@ -107,14 +107,14 @@ FILE_GROUPS: 24
 
 consumer_tree: fn(files: ^[String:String], entries: [String], prefix: String) -> [String] {
     // copy: the level is rebuilt each round
-    level := entries.copy()
-    depth := 0
+    ^level: entries.copy()
+    ^depth: 0
     loop level.len() > GROUP {
-        next_level := [String]{}
-        groups := [[String]]{}
+        ^next_level: [String]{}
+        ^groups: [[String]]{}
         loop group in 0..<(level.len() + GROUP - 1) /% GROUP {
             name: "{prefix}_l{depth}_g{group}"
-            body := [String]{"{name}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
+            ^body: [String]{"{name}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
             loop index in group * GROUP..<min(level.len(), (group + 1) * GROUP) {
                 body.push("    acc = (acc * 31 + {level[index]}(acc + {index - group * GROUP + 1})) % {M}")
             }
@@ -123,7 +123,7 @@ consumer_tree: fn(files: ^[String:String], entries: [String], prefix: String) ->
             next_level.push(name)
         }
         loop chunk in 0..<(groups.len() + FILE_GROUPS - 1) /% FILE_GROUPS {
-            text := [String]{}
+            ^text: [String]{}
             loop index in chunk * FILE_GROUPS..<min(groups.len(), (chunk + 1) * FILE_GROUPS) {
                 text.extend(groups[index])
             }
@@ -138,7 +138,7 @@ consumer_tree: fn(files: ^[String:String], entries: [String], prefix: String) ->
 // The entry file: `run` folds every root into one checksum line, after any
 // declarations the shape already placed in main.jet.
 finish: fn(name: String, files: ^[String:String], roots: [String]) {
-    body := [String]{"run: fn() {{", "    checksum := 0"}
+    ^body: [String]{"run: fn() {{", "    checksum := 0"}
     loop (index, root) in roots {
         body.push("    checksum = (checksum * 31 + {root}({index + 1})) % {M}")
     }
@@ -150,9 +150,9 @@ finish: fn(name: String, files: ^[String:String], roots: [String]) {
 
 // Split `items` (lists of lines) into files of about `per_file` code lines.
 pack: fn(files: ^[String:String], prefix: String, items: [[String]], per_file: Int{600}) {
-    current := [String]{}
-    size := 0
-    index := 0
+    ^current: [String]{}
+    ^size: 0
+    ^index: 0
     loop item in items {
         // copy: the item's lines join the file being filled
         current.extend(item.copy())

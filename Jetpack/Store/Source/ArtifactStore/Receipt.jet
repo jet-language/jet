@@ -83,12 +83,12 @@ ReceiptRecord: struct {
     // payload the codec does not carry is an error; the caller then leaves the
     // invocation unrecorded so the next one checks fresh.
     to_bytes: fn(self) -> [U8] StoreDiagnosticRecordError! {
-        revisions := [String]{}
+        ^revisions: [String]{}
         loop recorded in self.modules {
             if !revisions.contains(recorded.digest) -> revisions.push(recorded.digest)
         }
         diagnostics: store_encode_diagnostics(self.diagnostics, revisions)
-        facts := [RecordValue]{}
+        ^facts: [RecordValue]{}
         loop fact in self.facts {
             facts.push(
                 RecordValue.Map{
@@ -131,7 +131,7 @@ ReceiptRecord: struct {
         modules: store_receipt_decode_inputs(store_receipt_elements(reader, STORE_RECEIPT_SECTION_MODULES))
         inputs: store_receipt_decode_inputs(store_receipt_elements(reader, STORE_RECEIPT_SECTION_INPUTS))
         diagnostics: store_decode_diagnostics(store_receipt_elements(reader, STORE_RECEIPT_SECTION_ORIGINS), store_receipt_elements(reader, STORE_RECEIPT_SECTION_DIAGNOSTICS), source_for_revision)
-        facts := [ReceiptFact]{}
+        ^facts: [ReceiptFact]{}
         loop fact in store_receipt_elements(reader, STORE_RECEIPT_SECTION_FACTS) {
             facts.push(ReceiptFact{name: store_receipt_text(fact, "name"), value: store_receipt_text(fact, "value")})
         }
@@ -141,9 +141,9 @@ ReceiptRecord: struct {
 
 // Sort, then drop adjacent duplicates, over `(path, digest)`.
 store_receipt_sorted_inputs: fn(inputs: [ReceiptInput]) -> [ReceiptInput] Never! {
-    sorted := inputs
+    ^sorted: inputs
     sorted.sort_by(fn(left: ReceiptInput, right: ReceiptInput) { (left.path <=> right.path).then(left.digest <=> right.digest) })
-    unique := [ReceiptInput]{}
+    ^unique: [ReceiptInput]{}
     loop input in sorted {
         if unique.len() == 0 || unique[unique.len() - 1] != input -> unique.push(input)
     }
@@ -152,17 +152,17 @@ store_receipt_sorted_inputs: fn(inputs: [ReceiptInput]) -> [ReceiptInput] Never!
 
 // Name order, the last value for a name wins.
 store_receipt_sorted_facts: fn(facts: [ReceiptFact]) -> [ReceiptFact] Never! {
-    by_name := [String:String]{}
+    ^by_name: [String:String]{}
     loop fact in facts -> by_name[fact.name] = fact.value
-    names := by_name.keys().to_list()
+    ^names: by_name.keys().to_list()
     names.sort()
-    sorted := [ReceiptFact]{}
+    ^sorted: [ReceiptFact]{}
     loop name in names -> sorted.push(ReceiptFact{name: name.copy(), value: by_name[name]})
     sorted
 }
 
 store_receipt_encode_inputs: fn(inputs: [ReceiptInput]) -> [RecordValue] Never! {
-    values := [RecordValue]{}
+    ^values: [RecordValue]{}
     loop input in inputs {
         values.push(
             RecordValue.Map{
@@ -184,7 +184,7 @@ store_receipt_text: fn(value: RecordValue, name: String) -> String StoreDiagnost
 }
 
 store_receipt_decode_inputs: fn(values: [RecordValue]) -> [ReceiptInput] StoreDiagnosticRecordError! {
-    inputs := [ReceiptInput]{}
+    ^inputs: [ReceiptInput]{}
     loop value in values {
         inputs.push(ReceiptInput{path: store_receipt_text(value, "path"), digest: store_receipt_text(value, "digest")})
     }

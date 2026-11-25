@@ -31,9 +31,9 @@ CoreDeclarationCall: struct {
 // The byte offset of the `)` that closes the `(` at byte `open`.
 core_decl_call_end: fn(source: String, open: Int, context: String) -> Int CoreDeclarationError! {
     bytes: source.bytes()
-    depth := 0
-    quoted := false
-    escaped := false
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
     loop index in open..<bytes.len() {
         code: Int{bytes[index]}
         if quoted {
@@ -61,16 +61,16 @@ core_decl_call_end: fn(source: String, open: Int, context: String) -> Int CoreDe
 // dropped; strings and comments are skipped.
 core_decl_split_top_level: fn(source: String, context: String) -> [String] CoreDeclarationError! {
     bytes: source.bytes()
-    parts := [String]{}
-    start := 0
-    paren := 0
-    bracket := 0
-    brace := 0
-    quoted := false
-    escaped := false
-    line_comment := false
-    block_depth := 0
-    skip := false
+    ^parts: [String]{}
+    ^start: 0
+    ^paren: 0
+    ^bracket: 0
+    ^brace: 0
+    ^quoted: false
+    ^escaped: false
+    ^line_comment: false
+    ^block_depth: 0
+    ^skip: false
     loop index in 0..<bytes.len() {
         if skip {
             skip = false
@@ -141,7 +141,7 @@ core_decl_split_top_level: fn(source: String, context: String) -> [String] CoreD
 // optional whitespace and its parenthesized arguments.
 core_decl_read_call: fn(source: String, start: Int, context: String) -> CoreDeclRustCall CoreDeclarationError! {
     bytes: source.bytes()
-    end := core_decl_name_end(bytes, start)
+    ^end: core_decl_name_end(bytes, start)
     if end == start {
         return Err(core_decl_fail("unsupported Rust call in {context}: {source.trim()}"))
     }
@@ -188,7 +188,7 @@ core_decl_hex_value: fn(code: Int) -> Int Never! {
 // The value of hex digits `text`, or -1 when one is not a hex digit.
 core_decl_hex_number: fn(text: String) -> Int Never! {
     if text == "" -> return -1
-    value := 0
+    ^value: 0
     loop byte in text.bytes() {
         digit: core_decl_hex_value(Int{byte})
         if digit < 0 || value > 1114111 -> return -1
@@ -210,8 +210,8 @@ core_decl_utf8: fn(value: Int) -> [U8] Never! {
 // The text of a Rust string literal's content.
 core_decl_rust_string_text: fn(content: String, context: String) -> String CoreDeclarationError! {
     bytes: content.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         code: Int{bytes[index]}
         index += 1
@@ -319,7 +319,7 @@ core_decl_rust_int: fn(expression: String, context: String) -> Int CoreDeclarati
 }
 
 core_decl_rust_bools: fn(expression: String, context: String) -> [Bool] CoreDeclarationError! {
-    out := [Bool]{}
+    ^out: [Bool]{}
     loop item in core_decl_rust_slice(expression, context) ?? return Err(err) {
         out.push(core_decl_rust_bool(item, context) ?? return Err(err))
     }
@@ -327,7 +327,7 @@ core_decl_rust_bools: fn(expression: String, context: String) -> [Bool] CoreDecl
 }
 
 core_decl_rust_strings: fn(expression: String, context: String, constants: CoreDeclTexts) -> [String] CoreDeclarationError! {
-    out := [String]{}
+    ^out: [String]{}
     loop item in core_decl_rust_slice(expression, context) ?? return Err(err) {
         out.push(core_decl_rust_string(item, context, constants) ?? return Err(err))
     }
@@ -375,7 +375,7 @@ core_decl_coverage: fn(expression: String, context: String) -> CoreCallCoverage 
     if call.name != "CoreCallCoverage.from_bits" || call.args.len() != 1 {
         return Err(core_decl_fail("unsupported CoreCallCoverage in {context}: {expression.trim()}"))
     }
-    bits := 0
+    ^bits: 0
     loop raw in call.args[0].split("|") {
         part: raw.trim()
         if part.starts_with("CoreCallCoverage.") {
@@ -398,7 +398,7 @@ core_decl_pure_capability: fn() -> CoreCapabilityContract Never! {
 
 core_decl_capability: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreCapabilityContract CoreDeclarationError! {
     call: core_decl_whole_call(expression, context, "CoreCapabilityContract") ?? return Err(err)
-    strings := [String]{}
+    ^strings: [String]{}
     loop arg in call.args {
         strings.push(core_decl_rust_string(arg, context, constants) ?? return Err(err))
     }
@@ -539,7 +539,7 @@ core_decl_plain_record: fn(module_name: String, member: String, symbol: String, 
     root: core_decl_call_effect(module_name, member)
     capability: if root == None -> core_decl_pure_capability() else -> CoreCapabilityContract{kind: CoreCapabilityKind.NativeRequired, provider: Val(module_name.copy()), fallback: None, failure: Val("core.capability.unavailable")}
     leaf: core_decl_call_effect_leaf(module_name, member) ?? ""
-    effects := [String]{}
+    ^effects: [String]{}
     if root == .Val(root_name) {
         if leaf == "" || !leaf.starts_with("{root_name}.") -> effects.push(root_name)
     }
@@ -552,7 +552,7 @@ core_decl_plain_record: fn(module_name: String, member: String, symbol: String, 
 // effects of its own (its Core declaration's row is its effects), Sema
 // coverage only, no direct AOT call.
 core_decl_source_owned: fn(record: CoreCallRecord) -> CoreCallRecord Never! {
-    owned := record
+    ^owned: record
     owned.symbol = CoreCallSymbol.SourceOwned
     owned.effects = [String]{}
     owned.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}
@@ -578,7 +578,7 @@ core_decl_new_record: fn(call: CoreDeclRustCall, count: Int, context: String, co
     module_name: core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)
     member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)
     symbol: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)
-    record := core_decl_plain_record(module_name, member, symbol, core_decl_rust_bools(call.args[4], context) ?? return Err(err))
+    ^record: core_decl_plain_record(module_name, member, symbol, core_decl_rust_bools(call.args[4], context) ?? return Err(err))
     if count == 6 -> record.coverage = core_decl_coverage(call.args[5], context) ?? return Err(err)
     Ok(record)
 }
@@ -610,7 +610,7 @@ core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, consta
 
 // `record` with the builder `.name(args)` applied.
 core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, context: String, constants: CoreDeclTexts) -> CoreCallRecord CoreDeclarationError! {
-    built := record
+    ^built: record
     if call.name == "without_direct_aot" || call.name == "with_source_owned" {
         core_decl_expect_args(call, 0, context) ?? return Err(err)
         if call.name == {
@@ -636,9 +636,9 @@ core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, cont
 core_decl_call_record: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreDeclarationCall CoreDeclarationError! {
     value: expression.trim()
     root: core_decl_read_call(value, 0, context) ?? return Err(err)
-    record := core_decl_constructor_record(root, context, constants) ?? return Err(err)
+    ^record: core_decl_constructor_record(root, context, constants) ?? return Err(err)
     bytes: value.bytes()
-    position := root.end
+    ^position: root.end
     loop position < bytes.len() {
         position = core_decl_skip_space(bytes, position)
         if position >= bytes.len() -> break

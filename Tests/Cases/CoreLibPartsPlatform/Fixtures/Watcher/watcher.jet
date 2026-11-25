@@ -89,7 +89,7 @@ run: fn() {
     })
     fs.write(created, "hello") ?? panic("write failed")
     first: files.poll()
-    first_kind := no_kind()
+    ^first_kind: no_kind()
     loop ev in first {
         if ev.path == created.to_string() -> first_kind = Val(ev.kind)
     }
@@ -107,7 +107,7 @@ run: fn() {
     }
     fs.write(after_drop, "cleanup") ?? panic("scope-drop write failed")
     after_drop_events: files.poll()
-    after_drop_kind := no_kind()
+    ^after_drop_kind: no_kind()
     loop ev in after_drop_events {
         if ev.path == after_drop.to_string() -> after_drop_kind = Val(ev.kind)
     }
@@ -121,13 +121,13 @@ run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen failed")
     address: net.listener_local_socket_addr(listener) ?? panic("listener address failed")
     ready: watcher.port("127.0.0.1", net.socket_port(address))
-    set := watcher.set()
+    ^set: watcher.set()
     set.add(exited)
     set.add(ready)
     print(set.summary())
     combined: set.poll()
-    process_kind := no_kind()
-    port_kind := no_kind()
+    ^process_kind: no_kind()
+    ^port_kind: no_kind()
     loop ev in combined {
         if ev.domain == {
             .File -> {}

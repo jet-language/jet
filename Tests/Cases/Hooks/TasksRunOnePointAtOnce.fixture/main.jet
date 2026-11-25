@@ -8,7 +8,7 @@ gate: event.decision_point<Int, String>(HookPolicy.FirstCancelElseTransform)
 bumped: fn(n: Int) -[]> HookDecision<Int, String> Never! { HookDecision.Transform(n + 1) }
 
 worker: fn(rounds: Int) -> Int {
-    passed := 0
+    ^passed: 0
     loop n in 0..<rounds {
         passed += if gate.run(n) == {
             .Continue(kept) -> if kept == n + 1 -> 1 else -> 0
@@ -22,9 +22,9 @@ worker: fn(rounds: Int) -> Int {
 run: fn() {
     scope: event.scope()
     _: gate.on(scope, bumped)
-    passed := 0
+    ^passed: 0
     loop _ in 0..<100 {
-        workers := [Task<Int>]{}
+        ^workers: [Task<Int>]{}
         loop _ in 0..<32 -> workers.push(task { worker(1000) })
         loop handle in workers -> passed += handle.join() ?? 0
     }

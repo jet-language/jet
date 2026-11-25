@@ -25,12 +25,12 @@ NixIndexOracleCandidate: struct {
 // A validated document: records and misses sorted, coverage derived from the
 // indexed records.
 nix_index_generated_document: fn(channel: String, revision: String, system: String, released_unix: Int, records: [NixIndexRecord], not_indexed: [NixIndexCoverageMiss]) -> NixIndexDocument NixIndexError! {
-    sorted_records := records.copy()
+    ^sorted_records: records.copy()
     sorted_records.sort_by(fn(left: NixIndexRecord, right: NixIndexRecord) { nix_index_attrpath_order(left.attrpath, right.attrpath) })
-    misses := not_indexed.copy()
+    ^misses: not_indexed.copy()
     misses.sort_by(fn(left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) { nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason) })
-    indexed := [[String]]{}
-    wires := [NixIndexRecordWire]{}
+    ^indexed: [[String]]{}
+    ^wires: [NixIndexRecordWire]{}
     loop record in sorted_records {
         indexed.push(record.attrpath)
         wires.push(NixIndexRecordWire.from_record(record))
@@ -53,7 +53,7 @@ nix_index_parse_oracle_for_producer: fn(bytes: [U8], system: String, revision: S
     if nix_index_string_field(map, "system") != system {
         return Err(NixIndexError.Invalid("oracle has the wrong system"))
     }
-    candidates := [NixIndexOracleCandidate]{}
+    ^candidates: [NixIndexOracleCandidate]{}
     records: nix_index_value_array(nix_index_field(map, "records"), "oracle records")
     loop item in records -> candidates.push(nix_index_parse_oracle_record(item, system))
     Ok(candidates)
@@ -71,9 +71,9 @@ nix_index_parse_oracle_record: fn(value: Dyn, system: String) -> NixIndexOracleC
         .None -> {}
     }
     outputs: nix_index_parse_oracle_outputs(nix_index_field(map, "outputs"))
-    names := [String]{}
-    paths := [String]{}
-    by_name := [String:String]{}
+    ^names: [String]{}
+    ^paths: [String]{}
+    ^by_name: [String:String]{}
     loop output in outputs {
         if names.contains(output.name) {
             return Err(NixIndexError.Invalid("oracle record repeats an output name"))
@@ -92,7 +92,7 @@ nix_index_parse_oracle_record: fn(value: Dyn, system: String) -> NixIndexOracleC
         outputs: nixeval_key_ordered(by_name),
     }
     nix_index_validate_oracle_record(record)
-    cache_admitted := false
+    ^cache_admitted: false
     if map.get("cache") == {
         .Val(flag) -> {
             cache_admitted = pkg_json_bool(flag) ?? return Err(NixIndexError.Invalid("oracle cache field must be boolean"))
@@ -104,7 +104,7 @@ nix_index_parse_oracle_record: fn(value: Dyn, system: String) -> NixIndexOracleC
 
 // Oracle outputs: the index wire array, or Nix's `{name: {path}}` map.
 nix_index_parse_oracle_outputs: fn(value: Dyn) -> [NixIndexOutputWire] NixIndexError! {
-    outputs := [NixIndexOutputWire]{}
+    ^outputs: [NixIndexOutputWire]{}
     if value == {
         .Array(items) -> {
             loop item in items -> outputs.push(nix_index_parse_output(item))
@@ -113,7 +113,7 @@ nix_index_parse_oracle_outputs: fn(value: Dyn) -> [NixIndexOutputWire] NixIndexE
             loop entry in entries {
                 output: nix_index_object(entry.value, "oracle output")
                 nix_index_reject_unknown(output, [String]{"path", "storePath"})
-                store_path := String?{None}
+                ^store_path: String?{None}
                 loop field in output {
                     store_path = Val(nix_index_string_value(field.value, "oracle output path"))
                     break
@@ -136,7 +136,7 @@ nix_index_validate_oracle_record: fn(record: NixIndexRecord) NixIndexError! {
     if record.outputs.len() == 0 {
         return Err(NixIndexError.Invalid("oracle record has no outputs"))
     }
-    paths := [String]{}
+    ^paths: [String]{}
     names: nixeval_sorted(record.outputs.keys().to_list())
     loop name in names {
         if name == "" || pkg_text_has_control(name) {
@@ -162,8 +162,8 @@ nix_index_producer_generate_with_hydra_paths: fn(channel: String, system: String
     nix_index_validate_channel(channel)
     nix_index_validate_system(system)
     nix_index_validate_revision(revision)
-    records := [NixIndexRecord]{}
-    not_indexed := [NixIndexCoverageMiss]{}
+    ^records: [NixIndexRecord]{}
+    ^not_indexed: [NixIndexCoverageMiss]{}
     loop candidate in oracle {
         reason: nix_index_coverage_reason(candidate, store_paths, hydra_output_paths)
         if reason == {
@@ -184,7 +184,7 @@ nix_index_producer_generate_with_hydra_paths: fn(channel: String, system: String
 
 // Why a candidate is not indexed, or None when it is.
 nix_index_coverage_reason: fn(candidate: NixIndexOracleCandidate, store_paths: [String], hydra_output_paths: [String]) -> String? Never! {
-    missing := false
+    ^missing: false
     loop entry in candidate.record.outputs {
         if !store_paths.contains(entry.value) -> missing = true
         if hydra_output_paths.len() != 0 && !hydra_output_paths.contains(entry.value) {
@@ -201,7 +201,7 @@ nix_index_coverage_reason: fn(candidate: NixIndexOracleCandidate, store_paths: [
 }
 
 nix_index_generation_report: fn(decoded: [U8], compressed: [U8], document: NixIndexDocument) -> String Never! {
-    output_count := 0
+    ^output_count: 0
     loop record in document.records -> output_count += record.outputs.len()
     pkg_json_render(
         Dyn.Object(
@@ -225,9 +225,9 @@ nix_index_generation_report: fn(decoded: [U8], compressed: [U8], document: NixIn
 // The indexed and not-indexed attribute paths of one decoded index.
 nix_index_producer_coverage_report: fn(decoded: [U8]) -> String NixIndexError! {
     document: NixIndexDocument.parse(decoded)
-    indexed := [Dyn]{}
+    ^indexed: [Dyn]{}
     loop attrpath in document.coverage.indexed -> indexed.push(pkg_json_texts(attrpath))
-    misses := [Dyn]{}
+    ^misses: [Dyn]{}
     loop miss in document.coverage.not_indexed -> misses.push(miss.tree())
     Ok(
         pkg_json_render(
@@ -248,7 +248,7 @@ nix_index_producer_coverage_report: fn(decoded: [U8]) -> String NixIndexError! {
 
 nix_index_decode_index_records_for_producer: fn(bytes: [U8]) -> [NixIndexRecord] NixIndexError! {
     document: NixIndexDocument.parse(nix_index_maybe_decode(bytes))
-    records := [NixIndexRecord]{}
+    ^records: [NixIndexRecord]{}
     loop record in document.records -> records.push(record.record())
     Ok(records)
 }

@@ -4,7 +4,7 @@ use files: core.files
 #Test("checked_hangar_listing_rejects_oversized_metadata") {
     scratch: files.tmpdir("jet-engine-oversized-meta-") ?? panic("fixture root")
     roots: HangarRoots.at(scratch)
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     object: files.join(roots.hangar_dir(), "oversized")
     files.create_dir_all(object) ?? panic("fixture object")
     files.write(files.join(object, "meta.json"), "x".repeat((1 << 20) + 1)) ?? panic("oversized fixture bytes")
@@ -20,7 +20,7 @@ use files: core.files
     source: files.tmpdir("jet-engine-canonical-gc-source-") ?? panic("source fixture")
     files.write(files.join(source, "payload"), "orphaned bytes\n") ?? panic("source payload")
     roots: HangarRoots{root: root, dev_mode: false}
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     request: IngestRequest{name: "canonical-gc", version: "1", reference: "path:canonical-gc", cache_identity: CacheIdentity{source_fingerprint: "sha256:canonical-gc-source", recipe_fingerprint: "sha256:canonical-gc-recipe", policy_fingerprint: "sha256:canonical-gc-policy", platform: pkg_host_platform()}, references: [String]{}, outputs: [String:String]{"out": source}, signature: "", provenance: "canonical GC test", platform_artifact_kind: ""}
     entry: (store_ingest_tree(verification, roots, request) ?? panic("canonical ingest")).entry
     output: entry.out

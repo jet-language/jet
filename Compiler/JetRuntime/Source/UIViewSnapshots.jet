@@ -4,7 +4,7 @@ ui_virtual_measurements_clone: fn(value: I64) -> I64 {
     result: data_sequence_new(length, UI_VIRTUAL_PAIR_BYTES)
     source: ui_carrier_word(wrapping(value + DATA_SEQUENCE_DATA))
     target: ui_carrier_word(wrapping(result + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         offset: at * UI_VIRTUAL_PAIR_BYTES
         ui_carrier_store(wrapping(target + offset), ui_carrier_word(wrapping(source + offset)))
@@ -25,7 +25,7 @@ ui_virtual_measurements_drop: fn(value: I64) {
 
 #Export(c) jet_rt_handle_clone_jet_web_virtual_plan: fn(value: I64) -> I64 {
     result: jet_rt_alloc(UI_VIRTUAL_BYTES, I64{8})
-    offset := I64{0}
+    ^offset: I64{0}
     loop offset < UI_VIRTUAL_MEASUREMENTS {
         ui_carrier_store(wrapping(result + offset), ui_carrier_word(wrapping(value + offset)))
         offset += UI_VIRTUAL_WORD_BYTES
@@ -43,7 +43,7 @@ ui_virtual_measurements_drop: fn(value: I64) {
 }
 
 #Export(c) jet_rt_handle_eq_jet_web_virtual_plan: fn(a: I64, b: I64) -> Bool {
-    offset := I64{0}
+    ^offset: I64{0}
     loop offset < UI_VIRTUAL_MEASUREMENTS {
         if (ui_carrier_word(wrapping(a + offset)) != ui_carrier_word(wrapping(b + offset))) {
             return false

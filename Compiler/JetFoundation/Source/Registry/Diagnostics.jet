@@ -120,7 +120,7 @@ diagnostic_byte_at: fn(source: [U8], index: Int) -> Int Never! {
 }
 
 diagnostic_utf8_width: fn(source: [U8], index: Int) -> Int Never! {
-    width := foundation_utf8_lead_width(diagnostic_byte_at(source, index))
+    ^width: foundation_utf8_lead_width(diagnostic_byte_at(source, index))
     if width <= 1 -> return width
     width = foundation_utf8_width(width, diagnostic_byte_at(source, index + 1))
     if width <= 2 -> return width
@@ -132,7 +132,7 @@ diagnostic_utf8_width: fn(source: [U8], index: Int) -> Int Never! {
 diagnostic_scalar_at: fn(source: [U8], index: Int) -> String Never! {
     width: diagnostic_utf8_width(source, index)
     if width <= 0 -> return ""
-    out := [U8]{}
+    ^out: [U8]{}
     loop offset in 0..<width {
         if index + offset >= source.len() -> break
         out.push(source[index + offset])
@@ -152,14 +152,14 @@ diagnostic_is_whitespace_at: fn(source: [U8], index: Int) -> Bool Never! {
 diagnostic_is_sentence_digit: fn(value: Int) -> Bool Never! { value >= 48 && value <= 57 }
 
 diagnostic_sentence_case_line: fn(value: String) -> String Never! {
-    bytes := value.bytes()
-    first := -1
-    token_len := 0
-    is_fn := false
-    preserve := false
-    period := false
-    finished := false
-    index := 0
+    ^bytes: value.bytes()
+    ^first: -1
+    ^token_len: 0
+    ^is_fn: false
+    ^preserve: false
+    ^period: false
+    ^finished: false
+    ^index: 0
     loop index < bytes.len() {
         width: diagnostic_utf8_width(bytes, index)
         if finished {
@@ -233,8 +233,8 @@ diagnostic_display_identities: fn(value: String, clashes: [String]) -> String Ne
     identities: diagnostic_identities_in(bytes)
     // copy: the caller keeps its text; the displayed line is a new value.
     if identities.len() == 0 -> return value.copy()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop identity in identities {
         loop index < identity.start {
             out.push(bytes[index])
@@ -262,10 +262,10 @@ diagnostic_display_identities: fn(value: String, clashes: [String]) -> String Ne
 // message already prints by its plain name.
 diagnostic_identity_clashes: fn(context: [U8]) -> [String] Never! {
     identities: diagnostic_identities_in(context)
-    clashes := [String]{}
+    ^clashes: [String]{}
     loop identity in identities {
         if clashes.contains(identity.head) -> next
-        clash := diagnostic_identity_plain_use(context, identities, identity.head)
+        ^clash: diagnostic_identity_plain_use(context, identities, identity.head)
         loop other in identities {
             if other.head == identity.head && other.qualifier != identity.qualifier -> clash = true
         }
@@ -275,8 +275,8 @@ diagnostic_identity_clashes: fn(context: [U8]) -> [String] Never! {
 }
 
 diagnostic_identities_in: fn(bytes: [U8]) -> [DiagnosticIdentity] Never! {
-    found := [DiagnosticIdentity]{}
-    index := 0
+    ^found: [DiagnosticIdentity]{}
+    ^index: 0
     loop index < bytes.len() {
         end: diagnostic_identity_push(bytes, index, found)
         index = if end > index -> end else -> index + 1
@@ -297,11 +297,11 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: ^[DiagnosticIdentit
     if first != 109 && first != 60 -> return -1
     module_form: diagnostic_bytes_at(bytes, index, "module:")
     if !module_form && !diagnostic_bytes_at(bytes, index, "<corelib>/") -> return -1
-    path_start := index + 10
+    ^path_start: index + 10
     if module_form {
-        cursor := index + 7
-        length := 0
-        digits := 0
+        ^cursor: index + 7
+        ^length: 0
+        ^digits: 0
         loop diagnostic_is_sentence_digit(diagnostic_byte_at(bytes, cursor)) {
             length = length * 10 + diagnostic_byte_at(bytes, cursor) - 48
             digits += 1
@@ -312,17 +312,17 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: ^[DiagnosticIdentit
         if diagnostic_byte_at(bytes, cursor) != 58 -> return -1
         path_start = cursor + 1
     }
-    end := path_start
+    ^end: path_start
     loop end < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, end)) -> end += 1
-    leaf := -1
-    qualifier := ""
+    ^leaf: -1
+    ^qualifier: ""
     if {
         module_form -> {
-            stem_start := path_start
+            ^stem_start: path_start
             loop at in path_start..<end {
                 if diagnostic_byte_at(bytes, at) == 47 -> stem_start = at + 1
             }
-            at := stem_start
+            ^at: stem_start
             loop leaf < 0 && at + 5 < end {
                 if diagnostic_bytes_at(bytes, at, ".jet.") -> leaf = at + 5
                 at += 1
@@ -333,16 +333,16 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: ^[DiagnosticIdentit
         else -> {
             path: foundation_byte_text(bytes, path_start, end)
             // Not a Core module: the module is the path before its last `.`.
-            module_name := core_path_module(path) ?? ""
+            ^module_name: core_path_module(path) ?? ""
             if module_name == "" {
-                dot := end - 1
+                ^dot: end - 1
                 loop dot >= path_start && diagnostic_byte_at(bytes, dot) != 46 -> dot -= 1
                 if dot < path_start -> return -1
                 module_name = foundation_byte_text(bytes, path_start, dot)
             }
             module_end: path_start + module_name.count_bytes()
             leaf = module_end + 1
-            qualifier_start := module_end
+            ^qualifier_start: module_end
             loop qualifier_start > path_start && diagnostic_byte_at(bytes, qualifier_start - 1) != 46 {
                 qualifier_start -= 1
             }
@@ -350,7 +350,7 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: ^[DiagnosticIdentit
         }
     }
     if leaf >= end -> return -1
-    head_end := leaf
+    ^head_end: leaf
     loop head_end < end && diagnostic_byte_at(bytes, head_end) != 46 -> head_end += 1
     found.push(DiagnosticIdentity{start: index, end: end, name: foundation_byte_text(bytes, leaf, end), head: foundation_byte_text(bytes, leaf, head_end), qualifier: qualifier})
     end
@@ -365,9 +365,9 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: ^[DiagnosticIdentit
 diagnostic_identity_plain_use: fn(context: [U8], identities: [DiagnosticIdentity], head: String) -> Bool Never! {
     word: head.bytes()
     if word.len() == 0 -> return false
-    index := 0
+    ^index: 0
     loop index + word.len() <= context.len() {
-        inside := false
+        ^inside: false
         loop identity in identities {
             if index >= identity.start && index < identity.end -> inside = true
         }
@@ -513,7 +513,7 @@ diagnostic_registry_applicability: fn(row: DiagnosticRegistryRow, has_edit: Bool
 }
 
 diagnostic_registry_project_row: fn(diagnostic: ^^Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
-    updated := diagnostic
+    ^updated: diagnostic
     if updated.span != None {
         span: updated.span ?? return updated
         edit: diagnostic_registry_static_edit(row, span)
@@ -560,7 +560,7 @@ DIAGNOSTIC_REGISTRY_CONTRACT: "Registry contract: "
 // `diagnostic` with the registry-contract note that its code `reason`
 // (`is retired and is never reported`), before any detail it carries.
 diagnostic_registry_contract_broken: fn(diagnostic: ^^Diagnostic, reason: String) -> Diagnostic Never! {
-    updated := diagnostic
+    ^updated: diagnostic
     note: " {DIAGNOSTIC_REGISTRY_CONTRACT}`{updated.code}` {reason}"
     updated.detail = if updated.detail == .Val(detail) -> Val("{note}\n{detail}") else -> Val(note)
     updated
@@ -570,7 +570,7 @@ diagnostic_registry_contract_broken: fn(diagnostic: ^^Diagnostic, reason: String
 // preserves the exact replacement/span authored by the producer without
 // deriving safety from human Fix prose.
 diagnostic_registry_with_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
-    updated := diagnostic
+    ^updated: diagnostic
     row: diagnostic_registry_row_of(updated.code)
     if updated.no_fix_reason != None || row.no_fix_reason != None {
         return diagnostic_registry_contract_broken(updated, "cannot carry an edit and a registry no-fix reason")
@@ -607,7 +607,7 @@ diagnostic_registry_safety_auto_apply: fn(safety: DiagnosticFixSafety) -> Bool N
 }
 
 diagnostic_registry_with_edit_grade: fn(diagnostic: ^^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
-    updated := diagnostic
+    ^updated: diagnostic
     row: diagnostic_registry_row_of(updated.code)
     if updated.no_fix_reason != None || row.no_fix_reason != None {
         return diagnostic_registry_contract_broken(updated, "cannot carry an edit and a registry no-fix reason")
@@ -626,7 +626,7 @@ diagnostic_registry_with_edit_grade: fn(diagnostic: ^^Diagnostic, edit: TextEdit
 }
 
 diagnostic_registry_with_structured_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
-    updated := diagnostic
+    ^updated: diagnostic
     row: diagnostic_registry_row_of(updated.code)
     if updated.no_fix_reason != None || row.no_fix_reason != None {
         return diagnostic_registry_contract_broken(updated, "cannot carry an edit and a registry no-fix reason")
@@ -642,8 +642,10 @@ diagnostic_registry_with_structured_edit: fn(diagnostic: ^^Diagnostic, edit: Tex
 }
 
 diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
-    updated := diagnostic
-    if updated.edit != None -> return diagnostic_registry_contract_broken(updated, "already carries an edit")
+    ^updated: diagnostic
+    if updated.edit != None {
+        return diagnostic_registry_contract_broken(updated, "already carries an edit")
+    }
     row: diagnostic_registry_row_of(updated.code)
     if row.no_fix_reason == None {
         return diagnostic_registry_contract_broken(updated, "has no explanatory row reason to replace")
@@ -660,8 +662,10 @@ diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^^Diagnostic,
 // behavior-preserving edit, whatever the row grades the diagnostic's own
 // fixes; the row's no-fix reason covers only the other sources of the error.
 diagnostic_registry_with_migration_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
-    updated := diagnostic
-    if updated.edit != None -> return diagnostic_registry_contract_broken(updated, "already carries an edit")
+    ^updated: diagnostic
+    if updated.edit != None {
+        return diagnostic_registry_contract_broken(updated, "already carries an edit")
+    }
     _: diagnostic_registry_row_of(updated.code)
     updated.no_fix_reason = None
     updated.applicability = Val(DiagnosticFixApplicability.Safe)
@@ -671,7 +675,7 @@ diagnostic_registry_with_migration_edit: fn(diagnostic: ^^Diagnostic, edit: Text
 }
 
 diagnostic_registry_with_alternative_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
-    updated := diagnostic
+    ^updated: diagnostic
     if updated.no_fix_reason != None {
         return diagnostic_registry_contract_broken(updated, "cannot carry an edit and a no-fix reason")
     }
@@ -685,7 +689,7 @@ diagnostic_registry_with_alternative_edit: fn(diagnostic: ^^Diagnostic, edit: Te
     structured: updated.structured ?? return updated
     if structured == {
         .SuggestedEdits(edits) -> {
-            alternatives := edits.copy()
+            ^alternatives: edits.copy()
             alternatives.push(edit.copy())
             updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: alternatives})
             updated

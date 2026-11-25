@@ -67,7 +67,7 @@ CLIRecordCursor: struct {
         if self.at > self.bytes.len() || self.bytes.len() - self.at < 4 {
             return Err(RecordDecodeError.Malformed{why: "truncated payload"})
         }
-        value := 0
+        ^value: 0
         loop index in 0..<4 -> value |= (Int{self.bytes[self.at + index]} << (8 * index))
         self.at += 4
         Ok(value)
@@ -112,7 +112,7 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
     if version != RECORD_VERSION {
         return Err(RecordDecodeError.UnsupportedVersion{version: version})
     }
-    length := 0
+    ^length: 0
     loop index in 0..<4 -> length |= (Int{record[10 + index]} << (8 * index))
     if length > CLI_SCHEMA_MAX_RECORD_BYTES || record.len() - 46 != length {
         return Err(RecordDecodeError.Malformed{why: "invalid record length"})
@@ -124,7 +124,7 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
             return Err(RecordDecodeError.Malformed{why: "digest mismatch"})
         }
     }
-    cursor := CLIRecordCursor{bytes: payload, at: 0}
+    ^cursor: CLIRecordCursor{bytes: payload, at: 0}
     entry_type: cursor.string()
     description: cursor.optional_string()
     standard: if cursor.byte() == {
@@ -139,14 +139,14 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
     if count > CLI_SCHEMA_MAX_INPUTS {
         return Err(RecordDecodeError.Malformed{why: "too many inputs"})
     }
-    inputs := [CLIInputSchema]{}
+    ^inputs: [CLIInputSchema]{}
     inputs.try_reserve(count) ?? ()
     loop _ in 0..<count -> inputs.push(cli_schema_decode_input(cursor))
     command_count: cursor.u32()
     if command_count > CLI_SCHEMA_MAX_INPUTS {
         return Err(RecordDecodeError.Malformed{why: "too many commands"})
     }
-    commands := [CLISubcommandSchema]{}
+    ^commands: [CLISubcommandSchema]{}
     commands.try_reserve(command_count) ?? ()
     loop _ in 0..<command_count {
         name: cursor.string()
@@ -155,7 +155,7 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
         if input_count > CLI_SCHEMA_MAX_INPUTS {
             return Err(RecordDecodeError.Malformed{why: "too many command inputs"})
         }
-        command_inputs := [CLIInputSchema]{}
+        ^command_inputs: [CLIInputSchema]{}
         command_inputs.try_reserve(input_count) ?? ()
         loop _ in 0..<input_count -> command_inputs.push(cli_schema_decode_input(cursor))
         commands.push(CLISubcommandSchema{name: name, description: command_description, inputs: command_inputs.move()})
@@ -164,7 +164,7 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
     if job_count > CLI_SCHEMA_MAX_JOBS {
         return Err(RecordDecodeError.Malformed{why: "too many jobs"})
     }
-    jobs := [JobFact]{}
+    ^jobs: [JobFact]{}
     jobs.try_reserve(job_count) ?? ()
     loop _ in 0..<job_count -> jobs.push(cli_schema_decode_job(cursor))
     if cursor.at != cursor.bytes.len() {
@@ -233,7 +233,7 @@ cli_schema_decode_input: fn(cursor: ^CLIRecordCursor) -> CLIInputSchema RecordDe
 cli_schema_decode_strings: fn(cursor: ^CLIRecordCursor, maximum: Int, refusal: String) -> [String] RecordDecodeError! {
     count: cursor.u32()
     if count > maximum -> return Err(RecordDecodeError.Malformed{why: refusal})
-    values := [String]{}
+    ^values: [String]{}
     values.try_reserve(count) ?? ()
     loop _ in 0..<count -> values.push(cursor.string())
     Ok(values)
@@ -262,7 +262,7 @@ cli_schema_decode_job: fn(cursor: ^CLIRecordCursor) -> JobFact RecordDecodeError
     if argument_count > CLI_SCHEMA_MAX_INPUTS {
         return Err(RecordDecodeError.Malformed{why: "too many job arguments"})
     }
-    arguments := [JobArgumentSchema]{}
+    ^arguments: [JobArgumentSchema]{}
     arguments.try_reserve(argument_count) ?? ()
     loop _ in 0..<argument_count {
         argument_name: cursor.string()
@@ -315,12 +315,12 @@ cli_schema_decode_job: fn(cursor: ^CLIRecordCursor) -> JobFact RecordDecodeError
     if limit_count > CLI_SCHEMA_MAX_INPUTS {
         return Err(RecordDecodeError.Malformed{why: "too many job limits"})
     }
-    limit_map := [String:String]{}
+    ^limit_map: [String:String]{}
     loop _ in 0..<limit_count {
         key: cursor.string()
         limit_map[key] = cursor.string()
     }
-    names := limit_map.keys().to_list()
+    ^names: limit_map.keys().to_list()
     names.sort()
     limits: loop key in names -> StringMapEntry{key: key.copy(), value: limit_map[key]}
     Ok(JobFact{name: name, scope: scope, doc: doc, arguments: arguments.move(), after: after, packages: packages, cwd: cwd, inputs: inputs, outputs: outputs, skip: skip, cache: cache, parallel: parallel, limits: limits, schedule: schedule})
@@ -443,7 +443,7 @@ cli_schema_encode_job: fn(out: ^[U8], job: JobFact) Never! {
         },
     )
     cli_schema_put_u32(out, job.limits.len())
-    order := (loop index in 0..<job.limits.len() -> index)
+    ^order: (loop index in 0..<job.limits.len() -> index)
     order.sort_by(fn(a: Int, b: Int) { job.limits[a].key <=> job.limits[b].key })
     loop index in order {
         cli_schema_put_string(out, job.limits[index].key)
@@ -452,7 +452,7 @@ cli_schema_encode_job: fn(out: ^[U8], job: JobFact) Never! {
 }
 
 encode_record: fn(schema: CLICommandSchema) -> [U8] Never! {
-    payload := [U8]{}
+    ^payload: [U8]{}
     cli_schema_put_string(payload, schema.entry_type)
     cli_schema_put_optional_string(payload, schema.description)
     payload.push(if schema.standard -> U8{1} else -> U8{0})
@@ -468,7 +468,7 @@ encode_record: fn(schema: CLICommandSchema) -> [U8] Never! {
     }
     cli_schema_put_u32(payload, schema.jobs.len())
     loop job in schema.jobs -> cli_schema_encode_job(payload, job)
-    record := [U8]{}
+    ^record: [U8]{}
     record.try_reserve(46 + payload.len()) ?? ()
     record.extend(CLI_SCHEMA_MAGIC)
     record.push(U8{Int{RECORD_VERSION} & 255})

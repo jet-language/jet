@@ -147,8 +147,8 @@ jet_cli_gc_parse: fn(raw: String, expected_project: String, now: Int) -> JetCLIG
     if values.len() > 4096 {
         return Err(jet_cli_gc_error("oversized", "GC trace has too many promotion sites"))
     }
-    sites := [JetCLIGCSite]{}
-    identities_seen := [Int:Bool]{}
+    ^sites: [JetCLIGCSite]{}
+    ^identities_seen: [Int:Bool]{}
     loop value in values {
         jet_cli_gc_object(value, "GC promotion site")
         source: jet_cli_gc_safe_text(value, "source")
@@ -163,8 +163,8 @@ jet_cli_gc_parse: fn(raw: String, expected_project: String, now: Int) -> JetCLIG
         if identities_seen.len() + identity_values.len() > 65536 {
             return Err(jet_cli_gc_error("oversized", "GC trace has too many identities"))
         }
-        identities := [JetCLIGCIdentity]{}
-        retained_count := 0
+        ^identities: [JetCLIGCIdentity]{}
+        ^retained_count: 0
         loop row in identity_values {
             jet_cli_gc_object(row, "GC identity")
             id: jet_cli_gc_uint(row, "identity")
@@ -213,7 +213,7 @@ jet_cli_gc_read: fn(path: String) -[FS, Env, Time.Wait]> String JetCLIGCError! {
     }
     canonical: cli_files.realpath(parent) ?? return Err(jet_cli_gc_error("unsafe", "cannot securely open GC trace: {jet_cli_io_error_text(err)}"))
     held: JetCLIRootedDirectory.open(canonical, [String]{}, false) ?? return Err(jet_cli_gc_error("unsafe", err.message))
-    reader := held.handle.open(jet_cli_file_name(path)) ?? return Err(jet_cli_gc_error("unsafe", "cannot securely open GC trace: {jet_cli_io_error_text(err)}"))
+    ^reader: held.handle.open(jet_cli_file_name(path)) ?? return Err(jet_cli_gc_error("unsafe", "cannot securely open GC trace: {jet_cli_io_error_text(err)}"))
     metadata: reader.stat() ?? return Err(jet_cli_gc_error("unsafe", "cannot inspect GC trace: {jet_cli_io_error_text(err)}"))
     if !metadata.is_file -> return Err(jet_cli_gc_error("unsafe", "GC trace is not a regular file"))
     if cli_sys.is_unix() && (metadata.mode & 0o077) != 0 {
@@ -229,7 +229,7 @@ jet_cli_gc_read: fn(path: String) -[FS, Env, Time.Wait]> String JetCLIGCError! {
     if metadata.size > 4194304 {
         return Err(jet_cli_gc_error("oversized", "GC trace exceeds the 4 MiB safety limit"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(jet_cli_table_min(65536, 4194305 - bytes.len())) ?? return Err(jet_cli_gc_error("malformed", "cannot read GC trace: {jet_cli_io_error_text(err)}"))
         if chunk.len() == 0 -> break
@@ -246,7 +246,7 @@ jet_cli_gc_recommendation: fn(site: JetCLIGCSite) -> String Never! {
 }
 
 jet_cli_gc_retained: fn(identities: [JetCLIGCIdentity]) -> Int Never! {
-    count := 0
+    ^count: 0
     loop identity in identities {
         if identity.retained -> count += 1
     }
@@ -254,26 +254,26 @@ jet_cli_gc_retained: fn(identities: [JetCLIGCIdentity]) -> Int Never! {
 }
 
 jet_cli_gc_identity_summary: fn(identities: [JetCLIGCIdentity]) -> String Never! {
-    values := [String]{}
+    ^values: [String]{}
     loop index in 0..<jet_cli_table_min(8, identities.len()) {
         row: identities[index]
         values.push("{row.id}{if row.retained -> "*" else -> ""}")
     }
-    text := values.join(", ")
+    ^text: values.join(", ")
     if identities.len() > 8 -> text = "{text} (+{identities.len() - 8} more)"
     if text == "" -> return "-"
     text
 }
 
 jet_cli_gc_render: fn(trace: JetCLIGCTrace, color: Bool, json: Bool) -> String Never! {
-    allocations := 0
-    retained := 0
+    ^allocations: 0
+    ^retained: 0
     loop site in trace.sites {
         allocations += site.identities.len()
         retained += jet_cli_gc_retained(site.identities)
     }
     if !json {
-        out := "{diagnostic_theme_paint(color, "1;36", "jet gc report")} · {allocations} promotions · {retained} retained · {trace.collections} collections\n"
+        ^out: "{diagnostic_theme_paint(color, "1;36", "jet gc report")} · {allocations} promotions · {retained} retained · {trace.collections} collections\n"
         if trace.sites.len() == 0 {
             return "{out}\nNo automatic GC promotions recorded.\nRemove the effective gc opt-in; ownership already proves every allocation.\n"
         }
@@ -282,7 +282,7 @@ jet_cli_gc_render: fn(trace: JetCLIGCTrace, color: Bool, json: Bool) -> String N
         }
         return out
     }
-    sites := [JetCLIStatusValue]{}
+    ^sites: [JetCLIStatusValue]{}
     loop site in trace.sites {
         identities: loop identity in site.identities -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("identity", jet_cli_status_int(identity.id)), jet_cli_status_field("retained", jet_cli_status_bool(identity.retained))})
         sites.push(
@@ -314,7 +314,7 @@ jet_cli_gc_fail: fn(error: JetCLIGCError, color: Bool, json: Bool) -> JetCLIPlan
         error.kind == "incomplete" -> "trace a smaller complete workload; reports never estimate dropped promotions"
         else -> "rerun the program with `--gc-trace` to replace the rejected trace"
     }
-    detail := error.detail
+    ^detail: error.detail
     loop detail.ends_with(".") -> detail = detail.slice(0, detail.len() - 1)
     diagnostic: diagnostic_from_registry("E2110", None, "GC trace cannot be reported", "{detail}.", "{fix}.")
     if json {

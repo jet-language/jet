@@ -44,7 +44,7 @@ PlugDesc: struct {
 }
 
 plug_desc_new: fn(name: String, artifact: [U8]) -> PlugDesc Never! {
-    d := PlugDesc{out: [U8]{}}
+    ^d: PlugDesc{out: [U8]{}}
     loop _ in 0..<PLUG_DESC_HEADER -> d.word(0)
     d.set(0, PLUG_DESC_VERSION)
     d.text(3, name)
@@ -56,7 +56,7 @@ plug_desc_new: fn(name: String, artifact: [U8]) -> PlugDesc Never! {
 
 // The descriptor of an artifact that didn't load: its error `detail`.
 plug_failure_descriptor: fn(name: String, artifact: [U8], detail: String) -> [U8] Never! {
-    d := plug_desc_new(name, artifact)
+    ^d: plug_desc_new(name, artifact)
     d.text(1, detail)
     d.out.move()
 }
@@ -70,11 +70,11 @@ plug_thunk_op: fn(thunks: [Int:Int], fid: Int) -> Int Never! {
 // entry op, `sigs` gives each function's signature class, `needs` the
 // loading package's `authority.needs`.
 plug_descriptor: fn(flat: PlugFlat, name: String, artifact: [U8], thunks: [Int:Int], sigs: [Int], needs: [String]) -> [U8] Never! {
-    d := plug_desc_new(name, artifact)
+    ^d: plug_desc_new(name, artifact)
     d.text(23, needs.join("\n"))
-    export_names := [Int]{}
-    export_params := [Int]{}
-    export_fields := [Int]{}
+    ^export_names: [Int]{}
+    ^export_params: [Int]{}
+    ^export_fields: [Int]{}
     loop export in flat.exports {
         at: d.bytes(export.name.bytes())
         export_names.push(at)
@@ -83,26 +83,26 @@ plug_descriptor: fn(flat: PlugFlat, name: String, artifact: [U8], thunks: [Int:I
         fields: d.words(export.fields)
         export_fields.push(fields)
     }
-    import_names := [Int]{}
-    import_params := [Int]{}
+    ^import_names: [Int]{}
+    ^import_params: [Int]{}
     loop entry in flat.imports {
         at: d.bytes(entry.name.bytes())
         import_names.push(at)
         params: d.words(entry.params)
         import_params.push(params)
     }
-    data_bytes := [Int]{}
+    ^data_bytes: [Int]{}
     loop data in flat.datas {
         at: d.bytes(data.bytes)
         data_bytes.push(at)
     }
-    elem_items := [Int]{}
+    ^elem_items: [Int]{}
     loop elem in flat.elems {
         at: d.words(elem.items)
         elem_items.push(at)
     }
-    func_names := [Int]{}
-    func_modules := [Int]{}
+    ^func_names: [Int]{}
+    ^func_modules: [Int]{}
     loop func in flat.funcs {
         at: d.bytes(func.name.bytes())
         func_names.push(at)

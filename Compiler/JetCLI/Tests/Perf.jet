@@ -162,7 +162,7 @@ use {
 // A decoded, process-bound live snapshot (jet_foundation's LiveSnapshot.jet
 // codec is witnessed by Tests/LiveInspect.jet).
 jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
-    resources := [String:Int]{}
+    ^resources: [String:Int]{}
     resources["workers"] = 1
     resources["running"] = 0
     resources["queued"] = 0
@@ -268,13 +268,13 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
 }
 
 #Test("an attach's window counts each thread's CPU in it, names the threads that exited, and its header names a tick resolution") {
-    opened := [Int:U64]{}
+    ^opened: [Int:U64]{}
     opened[1] = U64{1000}
     opened[2] = U64{500}
     opened[3] = U64{700}
     // Thread 1 ran 600 ns more, thread 2 slept, thread 3 exited and thread 4
     // started in the window.
-    shut := [Int:U64]{}
+    ^shut: [Int:U64]{}
     shut[1] = U64{1600}
     shut[2] = U64{500}
     shut[4] = U64{300}
@@ -297,13 +297,13 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{0}, live: live}}
     toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
-    exact := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^exact: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     jet_cli_perf_attach_keep_window(exact, 7, precise, [String]{"its live snapshot", "its flight ring"})
     assert(exact.profile.window_reason.contains("from its first read of the program to its last (its live snapshot, its flight ring)"))
     assert(exact.profile.window_reason.contains("less that of the threads that exited in it (1)"))
     exact_trace: verify_jettrace(jet_cli_perf_capture_bytes(exact, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
     assert((jet_cli_perf_profile_summary(exact_trace) ?? "").ends_with(" window=live run_wall=5000ns run_cpu=900ns"))
-    coarse := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^coarse: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     jet_cli_perf_attach_keep_window(coarse, 7, ticked, [String]{"its live snapshot"})
     coarse_trace: verify_jettrace(jet_cli_perf_capture_bytes(coarse, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
     assert((jet_cli_perf_profile_summary(coarse_trace) ?? "").ends_with(" window=live run_wall=5000ns run_cpu=30000000ns run_cpu_resolution=10ms"))
@@ -312,9 +312,9 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
 #Test("an attach's wall and cpu samples and native process CPU are its window's, not its live snapshot's") {
     // The snapshot published 50 ns of wall and 25 ns of CPU; the window held
     // 5000 ns of wall and 900 ns of CPU.
-    opened := [Int:U64]{}
+    ^opened: [Int:U64]{}
     opened[1] = U64{1000}
-    shut := [Int:U64]{}
+    ^shut: [Int:U64]{}
     shut[1] = U64{1900}
     first: JetCLIPerfAttachCPU{ns: U64{1000}, resolution_ns: U64{1}, threads: opened}
     last: JetCLIPerfAttachCPU{ns: U64{1900}, resolution_ns: U64{1}, threads: shut}
@@ -322,7 +322,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{0}, live: live}}
     toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
-    seen := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^seen: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     jet_cli_perf_attach_keep_window(seen, 7, jet_cli_perf_attach_closed(U64{5000}, Val(first), Val(last)), [String]{"its live snapshot"})
     assert_eq(seen.samples.len(), 2)
     assert_eq(seen.samples[0].domain, "wall")
@@ -336,7 +336,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     _: verify_jettrace(jet_cli_perf_capture_bytes(seen, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
     // A window /proc showed no CPU for at one end keeps its wall and drops
     // the snapshot's CPU.
-    blind := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^blind: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     jet_cli_perf_attach_keep_window(blind, 7, jet_cli_perf_attach_closed(U64{5000}, None, Val(last)), [String]{"its live snapshot"})
     assert_eq(blind.samples.len(), 1)
     assert_eq(blind.samples[0].domain, "wall")
@@ -356,7 +356,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{0}, live: live}}
     toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
-    capture := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     jet_cli_perf_attach_keep_window(capture, 7, zoned, [String]{"its live snapshot", "its zones for 500 ms", "its records in the zones window"})
     assert(capture.profile.window_reason.starts_with("the zones window process 7 sampled in, from its opening to its close"), capture.profile.window_reason)
     assert(capture.profile.window_reason.contains("its process's CPU-time clock in it, to the nanosecond"), capture.profile.window_reason)
@@ -366,7 +366,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
 
 #Test("perf observations of a run sit on its own clock, from its start") {
     early: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
-    late := jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
+    ^late: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
     late.runtime.elapsed_ns = U64{900}
     observations: [JetCLIPerfObservation]{jet_cli_perf_observed(early), jet_cli_perf_observed(late)}
     capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", Val(U64{5000})) ?? panic(err.message)
@@ -386,7 +386,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
 
 #Test("perf observations refuse mixed process revisions") {
     live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))
-    other := live
+    ^other: live
     other.revision = "different"
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: other}}
     if jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "test", None) == {
@@ -412,7 +412,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
 
 // Little-endian 8-byte words, as the runtime's sample records are.
 jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop value in values {
         loop shift in 0..<8 -> bytes.push(U8{(value >> (8 * shift)) & 255})
     }
@@ -540,7 +540,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             0,
         },
     )
-    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    ^sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
     // The task clock, its .pc file's eighth word the kernel's callchain
     // depth.
     sampled.sampler = jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{3, 0, 0, 0, 2, 125000, 0, 127}))
@@ -636,7 +636,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             0,
         },
     )
-    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    ^sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
     sampled.sampler = jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{3, 0, 0, 0, 2, 125000, 0, 127}))
     assert_eq(sampled.total, U64{8})
     text: "\n\n\n\nfib: fn(n: Int) -> Int {{ n }}\n"
@@ -656,7 +656,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
     four: 4 << 48
     first: 1 << 48
-    values := [Int]{}
+    ^values: [Int]{}
     // Samples at the 1st, 2nd, 4th, 5th, 7th and 8th of sampler 1's period
     // ends: the 3rd's was drained and lost, the 6th's the kernel dropped.
     counts: [Int]{125000, 250000, 500000, 625000, 875000, 1000000}
@@ -682,7 +682,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     values.push(1500)
     values.push(0)
     values.push(1)
-    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, jet_cli_perf_test_words(values), 0)
+    ^sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, jet_cli_perf_test_words(values), 0)
     sampled.sampler = jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{3, 0, 0, 0, 2, 125000, 0, 127}))
     assert_eq(sampled.total, U64{6})
     text: "\n\n\n\nfib: fn(n: Int) -> Int {{ n }}\n"
@@ -701,7 +701,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     four: 4 << 48
     first: 1 << 48
     throttle: (13 << 59) | (4 << 48) | 3
-    values := [Int]{}
+    ^values: [Int]{}
     // Sampler 1, at 125 µs a period: samples at 125 and 250 µs. The kernel
     // throttles it at the second and restarts it at 1250 µs; its count ran
     // on to 9 ms by the next sample, at 1300 µs. Then a sample at 1425 µs,
@@ -743,7 +743,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     values.push(1000)
     values.push(0)
     values.push(0)
-    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, jet_cli_perf_test_words(values), 0)
+    ^sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, jet_cli_perf_test_words(values), 0)
     sampled.sampler = jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{3, 0, 0, 0, 2, 125000, 0, 127}))
     assert_eq(sampled.total, U64{4})
     assert_eq(sampled.throttles.len(), 3)
@@ -835,7 +835,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
         X64ImageFunction{start: 4864, size: 256, name: "unit.host_syscall"},
         X64ImageFunction{start: 5120, size: 256, name: "unit.spawn_pipe"},
     }
-    sampled := jet_cli_perf_samples_count(X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, [U8]{}, 0)
+    ^sampled: jet_cli_perf_samples_count(X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, [U8]{}, 0)
     // Rows of 10 words: the main thread, the collector spawned through
     // thread_spawn by the collector's start, and a thread at an address
     // no symbol holds.
@@ -1007,8 +1007,8 @@ JetCLIPerfTestSample: struct {
 // after one of `counted` sample indices is preceded by an LLC-miss
 // counter's record, which a cite reaches past.
 jet_cli_perf_test_records: fn(samples: [JetCLIPerfTestSample], cited: Bool, counted: [Int]{[Int]{}}) -> [U8] Never! {
-    values := [Int]{}
-    before := 0
+    ^values: [Int]{}
+    ^before: 0
     loop k in 0..<samples.len() {
         sample: samples[k]
         if counted.contains(k) {
@@ -1016,7 +1016,7 @@ jet_cli_perf_test_records: fn(samples: [JetCLIPerfTestSample], cited: Bool, coun
             values.push(8200)
         }
         own: sample.sites.len()
-        shared := 0
+        ^shared: 0
         if cited && k > 0 {
             last: samples[k - 1].sites
             loop shared < own && shared < last.len() && sample.sites[own - 1 - shared] == last[last.len() - 1 - shared] {
@@ -1043,8 +1043,8 @@ jet_cli_perf_test_records: fn(samples: [JetCLIPerfTestSample], cited: Bool, coun
 // Each CPU-time sample's call sites, innermost first, as the reader
 // expands them from `words` (jet_cli_perf_sites), each from the one before.
 jet_cli_perf_test_stacks: fn(words: [U8]) -> [[Int]] Never! {
-    stacks := [[Int]]{}
-    at := 0
+    ^stacks: [[Int]]{}
+    ^at: 0
     loop at + 8 <= words.len() {
         head: jet_cli_perf_head(words, at)
         if head.kind == 0 && head.size > 3 {
@@ -1070,7 +1070,7 @@ jet_cli_perf_test_same_stacks: fn(words: [U8], samples: [JetCLIPerfTestSample]) 
 // each sample's time, task and line, each program counter's samples and
 // each sample's count word.
 jet_cli_perf_test_decoded: fn(sampled: JetCLIPerfSamples) -> [String] Never! {
-    rows := [String]{"total {sampled.total} outside {sampled.outside} stackless {sampled.stackless} helpers {sampled.helpers}"}
+    ^rows: [String]{"total {sampled.total} outside {sampled.outside} stackless {sampled.stackless} helpers {sampled.helpers}"}
     loop line in sampled.lines {
         rows.push("line {line.line} count {line.count} inclusive {line.inclusive}")
     }
@@ -1115,7 +1115,7 @@ jet_cli_perf_test_cites: fn(samples: [JetCLIPerfTestSample], counted: [Int]{[Int
     // Repeated: one stack, each sample its own program counter, time and
     // task, cites the one before.
     repeated: [JetCLIPerfTestSample]{sample(4112, a, 100), sample(4116, a, 200), sample(4120, a, 300)}
-    decoded := jet_cli_perf_test_cites(repeated)
+    ^decoded: jet_cli_perf_test_cites(repeated)
     assert(jet_cli_perf_test_records(repeated, true).len() < jet_cli_perf_test_records(repeated, false).len())
     assert_eq(decoded[0], "total 3 outside 0 stackless 0 helpers 0")
     assert(decoded.contains("line 9 count 0 inclusive 3"))
@@ -1140,7 +1140,7 @@ jet_cli_perf_test_cites: fn(samples: [JetCLIPerfTestSample], counted: [Int]{[Int
 // a call or by a jump of 20, shallower by a call or down to the outermost
 // two, or another innermost call site under the same callers.
 jet_cli_perf_test_step: fn(before: [Int], choice: Int, k: Int, state: Int) -> [Int] Never! {
-    stack := [Int]{}
+    ^stack: [Int]{}
     if choice <= 2 && before.len() < 60 {
         stack.push(4100 + (state >> 12) % 3)
         stack.extend(before[0..<before.len()])
@@ -1160,9 +1160,9 @@ jet_cli_perf_test_step: fn(before: [Int], choice: Int, k: Int, state: Int) -> [I
 // recursion in and out of up to 60 frames, alternating branches under one
 // caller, jumps of depth, and counters' samples between.
 #Test("random stack sequences decode exactly as cited as written whole") {
-    state := 20261118
-    samples := [JetCLIPerfTestSample]{}
-    counted := [Int]{}
+    ^state: 20261118
+    ^samples: [JetCLIPerfTestSample]{}
+    ^counted: [Int]{}
     loop k in 0..<600 {
         state = (state * 1103515245 + 12345) % 2147483648
         choice: (state >> 8) % 8
@@ -1199,7 +1199,7 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
     assert_eq(corrupt(jet_cli_perf_test_corrupt(3, 8, 5)), "at byte 112 past its header: its cite shares 5 call sites of the 4 the sample before it holds")
     assert_eq(corrupt(jet_cli_perf_test_corrupt(3, 8, 4).slice(64, 152)), "at byte 0 past its header: its cite reaches 8 words back, not to the CPU-time sample just before it")
     path: "{perf_test_sys.temp_dir()}/jet-perf-samples-cite-{perf_test_process.current_pid()}.samples"
-    headed := jet_cli_perf_test_words([Int]{5498980087985620298, 2})
+    ^headed: jet_cli_perf_test_words([Int]{5498980087985620298, 2})
     headed.extend(jet_cli_perf_test_corrupt(5, 8, 4))
     perf_test_files.write_bytes(path, headed) ?? panic("the samples file: {err}")
     if jet_cli_perf_samples_records(path) == {
@@ -1216,7 +1216,7 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 #Test("a samples file is read past its header, and an older one is refused by its version") {
     path: "{perf_test_sys.temp_dir()}/jet-perf-samples-version-{perf_test_process.current_pid()}.samples"
     records: fn() -> [U8] { jet_cli_perf_test_words([Int]{4112 | (4 << 48), 100, 7, 0}) }
-    headed := jet_cli_perf_test_words([Int]{5498980087985620298, 2})
+    ^headed: jet_cli_perf_test_words([Int]{5498980087985620298, 2})
     headed.extend(records())
     perf_test_files.write_bytes(path, headed) ?? panic("the samples file: {err}")
     assert_eq(jet_cli_perf_samples_records(path) ?? panic(err.message), records())
@@ -1227,7 +1227,7 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
             assert(failure.message.contains("has no version header, as an older jet's runtime writes it; this jet reads version 2"))
         }
     }
-    other := jet_cli_perf_test_words([Int]{5498980087985620298, 3})
+    ^other: jet_cli_perf_test_words([Int]{5498980087985620298, 3})
     other.extend(records())
     perf_test_files.write_bytes(path, other) ?? panic("the samples file: {err}")
     if jet_cli_perf_samples_records(path) == {
@@ -1277,11 +1277,11 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
     sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
     assert_eq(sampled.timed.len(), 5)
     // solve's row of the spans file, as perf_zone_row writes it.
-    row := jet_cli_perf_test_words([Int]{1293, 4293, 7, 5 | (1 << 32)})
+    ^row: jet_cli_perf_test_words([Int]{1293, 4293, 7, 5 | (1 << 32)})
     row.extend("solve".bytes())
     path: "{perf_test_sys.temp_dir()}/jet-perf-zone-clock-{perf_test_process.current_pid()}.spans"
     perf_test_files.write_bytes(path, row) ?? panic("the spans file: {err}")
-    capture := jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^capture: jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     jet_cli_perf_log_spans_read(capture, path, "fib.jet", 0, sampled.timed)
     assert(!perf_test_files.exists(path))
     assert_eq(capture.spans[capture.spans.len() - 1].start_ns, Val(U64{1293}))
@@ -1294,14 +1294,14 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 // runtime's perf_spans_write): the rows before it stay trace rows, and the
 // zones section names the cut, which is no row of its own.
 #Test("a spans file cut at its bound keeps its earlier rows and names the cut in the zones section") {
-    row := jet_cli_perf_test_words([Int]{100, 400, 7, 5 | (1 << 32)})
+    ^row: jet_cli_perf_test_words([Int]{100, 400, 7, 5 | (1 << 32)})
     row.extend("solve".bytes())
     reason: "the spans file reached its 16 MiB bound, so the rows after this were dropped"
     row.extend(jet_cli_perf_test_words([Int]{0, 0, 0, reason.len() | (5 << 32)}))
     row.extend(reason.bytes())
     path: "{perf_test_sys.temp_dir()}/jet-perf-zone-cut-{perf_test_process.current_pid()}.spans"
     perf_test_files.write_bytes(path, row) ?? panic("the spans file: {err}")
-    capture := jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^capture: jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     spans: capture.spans.len()
     jet_cli_perf_log_spans_read(capture, path, "fib.jet", 0, [JetCLIPerfTimed]{})
     assert(!perf_test_files.exists(path))
@@ -1320,7 +1320,7 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 // are no text, and the rows after them are still read.
 #Test("a spans file cut at its bound counts the rows it dropped, by kind, in the zones section") {
     reason: "the spans file reached its 16 MiB bound, so the rows after this were dropped"
-    row := jet_cli_perf_test_words([Int]{100, 400, 7, 5 | (1 << 32)})
+    ^row: jet_cli_perf_test_words([Int]{100, 400, 7, 5 | (1 << 32)})
     row.extend("solve".bytes())
     row.extend(jet_cli_perf_test_words([Int]{0, 0, 0, reason.len() | (5 << 32)}))
     row.extend(reason.bytes())
@@ -1330,7 +1330,7 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
     row.extend("solve".bytes())
     path: "{perf_test_sys.temp_dir()}/jet-perf-zone-dropped-{perf_test_process.current_pid()}.spans"
     perf_test_files.write_bytes(path, row) ?? panic("the spans file: {err}")
-    capture := jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^capture: jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     spans: capture.spans.len()
     jet_cli_perf_log_spans_read(capture, path, "fib.jet", 0, [JetCLIPerfTimed]{})
     assert_eq(capture.spans.len(), spans + 2)
@@ -1347,7 +1347,7 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 // signal's delivery and its lost records. It is no trace row, and the rows
 // after it still are.
 #Test("a zones window's row is read for its interval and cost, and the rows beside it stay trace rows") {
-    row := jet_cli_perf_test_words([Int]{1000, 4000, 0, 40 | (6 << 32), 125, 375000, 3000, 1000, 2})
+    ^row: jet_cli_perf_test_words([Int]{1000, 4000, 0, 40 | (6 << 32), 125, 375000, 3000, 1000, 2})
     row.extend(jet_cli_perf_test_words([Int]{1293, 3293, 7, 5 | (1 << 32)}))
     row.extend("solve".bytes())
     window: jet_cli_perf_spans_window(row) ?? panic("the row names a window")
@@ -1361,7 +1361,7 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
     assert(jet_cli_perf_spans_window(jet_cli_perf_test_words([Int]{1293, 3293, 7, 0 | (1 << 32)})) == None, "a file of zones alone names no window")
     path: "{perf_test_sys.temp_dir()}/jet-perf-zone-window-{perf_test_process.current_pid()}.spans"
     perf_test_files.write_bytes(path, row) ?? panic("the spans file: {err}")
-    capture := jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^capture: jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     spans: capture.spans.len()
     jet_cli_perf_log_spans_read(capture, path, "fib.jet", 0, [JetCLIPerfTimed]{})
     assert_eq(capture.spans.len(), spans + 1)
@@ -1504,10 +1504,10 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
             150,
         },
     )
-    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    ^sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
     assert_eq(sampled.spawns.len(), 1)
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))}}
-    capture := jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^capture: jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     jet_cli_perf_waits_read(capture, sampled.waits.move(), sampled.wakes.move(), sampled.spawns.move(), [U64:U64]{}, sampled.transfers.move(), "fib.jet", 0)
     assert_eq(capture.tasks.len(), 2)
     assert_eq(capture.tasks[1].id, U64{2})
@@ -1530,8 +1530,8 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 // the runtime's wake carried a line on its stack.
 #Test("a socket's wait the runtime woke names its peer and no line") {
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))}}
-    capture := jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
-    waits := [JetCLIPerfWait]{JetCLIPerfWait{task: U64{1}, slot: 64, start_ns: 100, end_ns: 200, class: JET_CLI_PERF_OBJECT_SOCKET, id: U64{3}, local: "127.0.0.1:4000", peer: "127.0.0.1:5000", name: "tcp read", frames: [TraceStackFrame]{}}}
+    ^capture: jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^waits: [JetCLIPerfWait]{JetCLIPerfWait{task: U64{1}, slot: 64, start_ns: 100, end_ns: 200, class: JET_CLI_PERF_OBJECT_SOCKET, id: U64{3}, local: "127.0.0.1:4000", peer: "127.0.0.1:5000", name: "tcp read", frames: [TraceStackFrame]{}}}
     wakes: [JetCLIPerfWake]{JetCLIPerfWake{task: U64{0}, slot: 64, at_ns: 150, line: Val(7)}}
     jet_cli_perf_waits_read(capture, waits, wakes, [JetCLIPerfSpawn]{}, [U64:U64]{}, [JetCLIPerfIO]{}, "fib.jet", 0)
     wait: capture.spans[capture.spans.len() - 1]
@@ -1582,16 +1582,16 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
     )
     table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
     functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
-    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    ^sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
     assert_eq(sampled.transfers.len(), 2)
     assert_eq(sampled.transfers[0].operation, 2)
     assert_eq(sampled.transfers[0].target, "127.0.0.1:4000")
     assert_eq(sampled.transfers[0].local, "127.0.0.1:5000")
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))}}
-    capture := jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^capture: jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     // Task 1's accept on the listener from 100 to 300 ns, which the
     // runtime's poller woke at 290 ns.
-    waits := [JetCLIPerfWait]{JetCLIPerfWait{task: U64{1}, slot: 64, start_ns: 100, end_ns: 300, class: JET_CLI_PERF_OBJECT_SOCKET, id: U64{3}, local: "127.0.0.1:4000", peer: "", name: "tcp accept", frames: [TraceStackFrame]{}}}
+    ^waits: [JetCLIPerfWait]{JetCLIPerfWait{task: U64{1}, slot: 64, start_ns: 100, end_ns: 300, class: JET_CLI_PERF_OBJECT_SOCKET, id: U64{3}, local: "127.0.0.1:4000", peer: "", name: "tcp accept", frames: [TraceStackFrame]{}}}
     wakes: [JetCLIPerfWake]{JetCLIPerfWake{task: U64{0}, slot: 64, at_ns: 290, line: None}}
     spawns: [JetCLIPerfSpawn]{JetCLIPerfSpawn{task: U64{2}, parent: U64{1}, line: None}}
     spans: capture.spans.len()
@@ -1663,10 +1663,10 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 #Test("an outside attach folds each sample's stack, a rare one into its caller's") {
     names: [String]{"main", "work", "rare"}
     rows: loop name in names -> JetCLIPerfOutsideRow{name: name, own: 0, total: 0, seen: -1, file: "", line: 0, package: "", root: false}
-    tree := JetCLIPerfOutsideTree{rows: [Int]{}, parents: [Int]{}, totals: [Int]{}, children: [Int:Int]{}}
-    loop _ in 0..<150 -> _ := jet_cli_perf_outside_tree_add(tree, [Int]{1, 0})
-    loop _ in 0..<49 -> _ := jet_cli_perf_outside_tree_add(tree, [Int]{0})
-    _ := jet_cli_perf_outside_tree_add(tree, [Int]{2, 1, 0})
+    ^tree: JetCLIPerfOutsideTree{rows: [Int]{}, parents: [Int]{}, totals: [Int]{}, children: [Int:Int]{}}
+    loop _ in 0..<150 -> ^_: jet_cli_perf_outside_tree_add(tree, [Int]{1, 0})
+    loop _ in 0..<49 -> ^_: jet_cli_perf_outside_tree_add(tree, [Int]{0})
+    ^_: jet_cli_perf_outside_tree_add(tree, [Int]{2, 1, 0})
     stacks: jet_cli_perf_outside_folded(tree, rows, 200)
     assert_eq(stacks.len(), 2)
     assert_eq(stacks[0].stack, "main")
@@ -1678,7 +1678,7 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 // The timeline keeps each sample's time and innermost node, the earliest
 // first, and the call tree its nodes name, a parent before its children.
 #Test("an outside attach's timeline orders its samples by time and names their nodes") {
-    fold := jet_cli_perf_outside_fold()
+    ^fold: jet_cli_perf_outside_fold()
     names: [String]{"main", "work"}
     loop name in names {
         fold.rows.push(JetCLIPerfOutsideRow{name: name, own: 0, total: 0, seen: -1, file: "", line: 0, package: "", root: false})
@@ -1701,7 +1701,7 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 #Test("an outside attach names an ended process's code by the mappings the kernel reported") {
     exe: perf_test_files.read_link("/proc/self/exe") ?? panic("this test's executable can't be found")
     maps: perf_test_files.read("/proc/self/maps") ?? panic("this test's mappings can't be read")
-    fold := jet_cli_perf_outside_fold()
+    ^fold: jet_cli_perf_outside_fold()
     // Pids past the kernel's largest, so no /proc entry names them.
     ended: 1073741823
     child: 1073741822
@@ -1737,12 +1737,12 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
     assert_eq(loop pc in pcs -> jet_cli_perf_outside_code_at(listed, pc), [Int]{-1, 0, 0, 1, 1, -1})
     // A pid past the kernel's largest, so no /proc entry names its code.
     child: 1073741821
-    fold := jet_cli_perf_outside_fold()
+    ^fold: jet_cli_perf_outside_fold()
     fold.code = "{perf_test_sys.temp_dir()}/jet-perf-listing-{perf_test_process.current_pid()}-%p.code"
     path: fold.code.replace("%p", "{child}")
     perf_test_files.write_bytes(path, "4096\t4160\t7\tsrc/spin.jet\tunit.spin\n4160\t4200\t0\t\tmain\n".bytes()) ?? panic("the listing file: {err}")
     fold.drains = 1
-    taken := X64Samples{words: [Int]{child, child, 10, 2, 4100, 4170, child, child, 20, 1, 9000}, execs: [Int]{}, maps: [X64SampleMapping]{}, forks: [Int]{}, samples: 2, lost: 0}
+    ^taken: X64Samples{words: [Int]{child, child, 10, 2, 4100, 4170, child, child, 20, 1, 9000}, execs: [Int]{}, maps: [X64SampleMapping]{}, forks: [Int]{}, samples: 2, lost: 0}
     jet_cli_perf_outside_take(fold, taken)
     perf_test_files.remove(path) ?? panic("the listing file: {err}")
     rows: loop row in fold.rows -> "{row.name} {row.file}:{row.line} own={row.own} total={row.total} root={row.root}"
@@ -1812,12 +1812,12 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 // phase.
 #Test("tasks past the row limit fold into their phases with their samples, the fewest samples first") {
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))}}
-    capture := jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    ^capture: jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
     // Task 1 spawns tasks 2 to 4100: 4099 tasks beside it, 4 past the 4096
     // rows. Tasks 2 to 5 took one sample each, the rest two, and task 1
     // three; tasks 2 to 2049 opened `parse`, the rest `lower`.
-    spawns := [JetCLIPerfSpawn]{}
-    samples := [U64:U64]{}
+    ^spawns: [JetCLIPerfSpawn]{}
+    ^samples: [U64:U64]{}
     samples[U64{1}] = U64{3}
     loop task in 2..<4101 {
         spawns.push(JetCLIPerfSpawn{task: U64{task}, parent: U64{1}, line: None})
@@ -1844,13 +1844,13 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 // A task that opened no zone or log span takes its spawner's phase; the
 // samples of a task the run recorded no spawn of count in none.
 #Test("a task's phase is its spawner's when it opened none, and an unrecorded task's samples leave the coverage partial") {
-    rowed := [U64:U64]{}
+    ^rowed: [U64:U64]{}
     rowed[U64{1}] = U64{1}
     rowed[U64{2}] = U64{2}
-    named := [U64:String]{}
+    ^named: [U64:String]{}
     named[U64{2}] = "parse"
     spawns: [JetCLIPerfSpawn]{JetCLIPerfSpawn{task: U64{2}, parent: U64{1}, line: None}, JetCLIPerfSpawn{task: U64{3}, parent: U64{2}, line: None}, JetCLIPerfSpawn{task: U64{4}, parent: U64{1}, line: None}}
-    samples := [U64:U64]{}
+    ^samples: [U64:U64]{}
     samples[U64{1}] = U64{1}
     samples[U64{3}] = U64{2}
     samples[U64{4}] = U64{4}
@@ -1871,8 +1871,8 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
 // lines fold by function, or by source when the functions alone pass it.
 #Test("profile rows past the row limit fold by function, else by source, keeping every sample") {
     digest: sha256_hex("run")
-    by_function := [TraceProfileRow]{}
-    by_source := [TraceProfileRow]{}
+    ^by_function: [TraceProfileRow]{}
+    ^by_source: [TraceProfileRow]{}
     loop at in 0..<4100 {
         by_function.push(jet_cli_perf_test_line_row(digest, at, if at < 4090 -> "hot" else -> "cold"))
         by_source.push(jet_cli_perf_test_line_row(digest, at, "f{at}"))
@@ -1960,7 +1960,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     // then DW_OP_fbreg -16.
     rooms: NativeVariable{name: "rooms", line: 3, ty: 40, list: 0, base: 4096, role: NativeVariableRole.Local, site: -1}
     facts: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{NativeFunction{low: 4096, high: 4352, name: "serve", file: -1, variables: [NativeVariable]{rooms}, inlined: [NativeInlined]{}}}, types: types, members: members, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{0x04, 0x00, 0x80, 0x02, 0x02, 0x91, 0x70, 0x00}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
-    heap := JetCLIPerfHeap{
+    ^heap: JetCLIPerfHeap{
         number: U64{1},
         name: "exit",
         blocks: U64{3},
@@ -2032,10 +2032,10 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     )
     sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, inlines, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
     assert_eq(sampled.total, U64{3})
-    text := ""
+    ^text: ""
     loop _ in 0..<16 -> text = "{text}line\n"
     profile: jet_cli_perf_samples_profile(jet_cli_perf_source("prog.jet", text), sampled) ?? panic("run's lines hold samples")
-    found := 0
+    ^found: 0
     loop row in profile.rows {
         line: row.source.start_line
         if line == (U64{6}) {
@@ -2064,7 +2064,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
 }
 
 #Test("a causal rate counts each experiment's passes after its first over the time from its first pass to its last, less the delay inserted meanwhile") {
-    experiments := [JetCLIPerfExperiment]{}
+    ^experiments: [JetCLIPerfExperiment]{}
     // Baselines: 4 passes after the first in 20 ms, a pass each 5 ms. The
     // line's experiments: 4 in 22 ms with 6 ms of it inserted delay, a pass
     // each 4 ms, 20% sooner. Each thread has a CPU: they never wait for one,
@@ -2082,7 +2082,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
 }
 
 #Test("a causal run whose CPUs clocked down between experiments, with no fit of how that slows its tasks, keeps its gains, flagged with the drop") {
-    experiments := [JetCLIPerfExperiment]{}
+    ^experiments: [JetCLIPerfExperiment]{}
     // The same rates, but each experiment ended with one of the CPUs that
     // ran the program's threads at 3,908 MHz beside one at 4,993: a CPU
     // that idled clocked down. An experiment whose clocks could not be read
@@ -2102,7 +2102,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
 }
 
 #Test("a causal run's gains are warmed by the fit of how much slower a task runs the longer its CPU idled, which unflags a clock drop") {
-    experiments := [JetCLIPerfExperiment]{}
+    ^experiments: [JetCLIPerfExperiment]{}
     // The clocked-down run's rates: virtually, the line makes a round 20%
     // sooner.
     loop _ in 0..<6 {
@@ -2115,7 +2115,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     // octave of idle.
     runs: [Int:Int]{3: 100000000, 5: 110000000, 7: 120000000}
     gaps: [Int:Int]{3: 800000, 5: 3200000, 7: 12800000}
-    idle := [Int]{16384}
+    ^idle: [Int]{16384}
     loop octave in 0..<16 {
         idle.push(if runs.get(octave) == None -> 0 else -> 100)
         idle.push(runs.get(octave) ?? 0)
@@ -2133,7 +2133,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
 }
 
 #Test("a causal run's idle table with too few octaves of tasks fits nothing and leaves the gains as they are") {
-    experiments := [JetCLIPerfExperiment]{}
+    ^experiments: [JetCLIPerfExperiment]{}
     loop _ in 0..<6 {
         experiments.push(JetCLIPerfExperiment{line: U64{0}, name: "", speedup: 0, run_ns: 25000000, wait_ns: 0, khz_high: 4900000, khz_low: 4800000, after: [Int]{4}, span_ns: [Int]{20000000}, span_delay_ns: [Int]{0}})
         experiments.push(JetCLIPerfExperiment{line: U64{30}, name: "narrow", speedup: 300, run_ns: 25000000, wait_ns: 0, khz_high: 4900000, khz_low: 4800000, after: [Int]{4}, span_ns: [Int]{22000000}, span_delay_ns: [Int]{6000000}})
@@ -2141,7 +2141,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     // 100 tasks after 8 µs and 20 after 128 µs: one octave of 30 or more.
     tasks: [Int:Int]{3: 100, 7: 20}
     gaps: [Int:Int]{3: 800000, 7: 2560000}
-    idle := [Int]{16384}
+    ^idle: [Int]{16384}
     loop octave in 0..<16 {
         idle.push(tasks.get(octave) ?? 0)
         idle.push((tasks.get(octave) ?? 0) * 1000000)
@@ -2155,7 +2155,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
 }
 
 #Test("a causal run whose threads waited for a CPU most of their run time is refused with the wait, its gains withheld") {
-    experiments := [JetCLIPerfExperiment]{}
+    ^experiments: [JetCLIPerfExperiment]{}
     // The same rates as a run with a CPU per thread would rank, but the
     // threads waited 16 ms of every 20 they ran, as four threads do on
     // 2.15 CPUs.
@@ -2175,7 +2175,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
 }
 
 #Test("the causal lens's tasks' timings keep each task's row, its start from the first task's and its wall time, beside the experiments by line") {
-    experiments := [JetCLIPerfExperiment]{}
+    ^experiments: [JetCLIPerfExperiment]{}
     experiments.push(JetCLIPerfExperiment{line: U64{0}, name: "", speedup: 0, run_ns: 25000000, wait_ns: 0, khz_high: 0, khz_low: 0, after: [Int]{4}, span_ns: [Int]{20000000}, span_delay_ns: [Int]{0}})
     experiments.push(JetCLIPerfExperiment{line: U64{30}, name: "narrow", speedup: 300, run_ns: 25000000, wait_ns: 0, khz_high: 0, khz_low: 0, after: [Int]{4}, span_ns: [Int]{22000000}, span_delay_ns: [Int]{6000000}})
     // Two tasks of one body, written in the order they ended: the second
@@ -2210,7 +2210,7 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     // fib's code at 0x1000, its rows line 5 at +0 and line 7 at +16, and
     // step inlined into it at +32 for the call on line 6; a runtime
     // function beside it in the symbol table.
-    rows := [U8]{}
+    ^rows: [U8]{}
     x64_jetline_rows(rows, [X64LineRow]{X64LineRow{at: 0, line: 5}, X64LineRow{at: 16, line: 7}})
     end: rows.len()
     table: X64Jetline{table: rows, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: end}}, ascending: true}
@@ -2342,9 +2342,9 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
 perf_counts_test_lines: fn(counted: X64Counted, paranoid: Int?) -> [String] {
     toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
-    capture := jet_cli_perf_counts_capture(counted, 40000000000, paranoid)
+    ^capture: jet_cli_perf_counts_capture(counted, 40000000000, paranoid)
     trace: verify_jettrace(jet_cli_perf_capture_bytes(capture, "attach", [String]{"attach", "--lens=counts", "--", "jet", "build"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
-    lines := jet_cli_perf_counts_lines(trace)
+    ^lines: jet_cli_perf_counts_lines(trace)
     lines.push(jet_cli_perf_profile_summary(trace) ?? "no profile")
     lines
 }

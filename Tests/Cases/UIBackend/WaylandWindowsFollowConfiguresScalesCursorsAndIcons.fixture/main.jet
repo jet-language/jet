@@ -156,13 +156,13 @@ fake_put: fn(out: ^[U8], value: Int) {
 }
 
 fake_words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values -> fake_put(out, value)
     out
 }
 
 fake_text: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: text.bytes()
     fake_put(out, bytes.len() + 1)
     loop b in bytes -> out.push(b)
@@ -254,7 +254,7 @@ fake_configure: fn(f: ^Fake, width: Int, height: Int, resizing: Bool) {
     f.configures.push(FakeConfigure{serial: serial, width: width, height: height})
     toplevel: f.toplevel
     xdg_surface: f.xdg_surface
-    args := fake_words([Int]{width, height})
+    ^args: fake_words([Int]{width, height})
     // states: [resizing (3)] or none.
     if resizing {
         fake_put(args, 4)
@@ -288,7 +288,7 @@ fake_begin: fn(f: ^Fake) {
 
 // Configures the next `count` sizes of the interactive resize.
 fake_drag: fn(f: ^Fake, count: Int) {
-    sent := 0
+    ^sent: 0
     loop sent < count && f.drag.len() > 0 {
         size: f.drag[0].copy()
         f.drag = f.drag[1..<f.drag.len()].copy()
@@ -331,7 +331,7 @@ fake_commit: fn(f: ^Fake) {
     step: f.steps[f.step].copy()
     if acked >= 0 {
         // Acking a configure answers it and every older one.
-        index := -1
+        ^index: -1
         loop k in 0..<f.configures.len() {
             if f.configures[k].serial == acked -> index = k
         }
@@ -349,7 +349,7 @@ fake_commit: fn(f: ^Fake) {
     want_w: fake_pixels(f.logical_w, scale120)
     want_h: fake_pixels(f.logical_h, scale120)
     matches: buffer.width == want_w && buffer.height == want_h
-    mapped := true
+    ^mapped: true
     if fake_fractional(f.mode) {
         mapped = f.destination_w == f.logical_w && f.destination_h == f.logical_h
     } else {
@@ -435,15 +435,15 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
         f.registry = fake_u32(body, 0)
         registry: f.registry
         if f.mode == .DisplayError {
-            args := fake_words([Int]{registry, 3})
+            ^args: fake_words([Int]{registry, 3})
             loop b in fake_text("no globals for you") -> args.push(b)
             fake_event(f, 1, 0, args)
             return
         }
-        names := 0
+        ^names: 0
         loop interface in f.globals.copy() {
             names += 1
-            args := fake_words([Int]{names})
+            ^args: fake_words([Int]{names})
             loop b in fake_text(interface) -> args.push(b)
             fake_put(args, fake_version(f.mode, interface))
             fake_event(f, registry, 0, args)
@@ -620,7 +620,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
 
 // Handles every complete request in the inbox.
 fake_dispatch: fn(f: ^Fake) -[Env]> {
-    at := 0
+    ^at: 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
         word: fake_u32(f.inbox, at + 4)
@@ -641,7 +641,7 @@ fake_dispatch: fn(f: ^Fake) -[Env]> {
 // Accepts one window and serves it until it disconnects.
 fake_serve: fn(listener: net.UnixListener, mode: FakeMode, steps: [FakeStep]) -[Env, Net, Time, IO]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept: {err}")
-    f := Fake{
+    ^f: Fake{
         stream: stream,
         mode: mode,
         inbox: [U8]{},
@@ -700,7 +700,7 @@ fake_serve: fn(listener: net.UnixListener, mode: FakeMode, steps: [FakeStep]) -[
         report: [String]{},
         failures: [String]{},
     }
-    idle := 0
+    ^idle: 0
     loop idle < 40 {
         ready: net.unix_wait(f.stream, 50000000) ?? {
             f.failures.push("wait failed: {err}")
@@ -731,17 +731,17 @@ client: fn(label: String) -[Env, IO, Net, Time]> {
         print("{label}: open failed: {err}")
         return
     }
-    frames := 0
-    resizes := 0
+    ^frames: 0
+    ^resizes: 0
     // A text cursor from the start; hidden once the pointer arrives.
     window.set_cursor(.Text)
     if label == "fractional" -> identity(window)
-    hidden := false
+    ^hidden: false
     // Every scale the frames carried, in order, once each time it changes.
-    scales := [Float]{}
+    ^scales: [Float]{}
     loop frame in window.frames() {
         if scales.len() == 0 || scales[scales.len() - 1] != frame.scale -> scales.push(frame.scale)
-        closed := false
+        ^closed: false
         loop event in frame.events() {
             if event == .Close -> closed = true
             if event == .Resize(_, _) -> resizes += 1
@@ -751,8 +751,8 @@ client: fn(label: String) -[Env, IO, Net, Time]> {
             }
         }
         if closed -> break
-        pixels := [U8]{}
-        count := frame.width * frame.height
+        ^pixels: [U8]{}
+        ^count: frame.width * frame.height
         loop count > 0 {
             // RGBA, straight alpha.
             pixels.push(U8{40})
@@ -792,7 +792,7 @@ identity: fn(window: ui.Window) -[Env, IO]> {
 // A `side` x `side` half-transparent icon in straight-alpha RGBA: R, G, B,
 // A. The display stores it premultiplied, B, G, R, A: 100, 40, 20, 128.
 icon_pixels: fn(side: Int) -> [U8] {
-    pixels := [U8]{}
+    ^pixels: [U8]{}
     loop _ in 0..<(side * side) {
         pixels.push(U8{40})
         pixels.push(U8{80})

@@ -4,12 +4,12 @@ use jet_backend.[LINK_ABS, LINK_BASE, LINK_COMMON, LINK_UNDEF, link_context, lin
 
 run: fn() {
     indexes: [Int]{0, 1, 0xfeff, 0xff00, 0xfff0, 0xfff1, 0xfff2, 0xffff, 0x10000, 0x10100, LINK_ABS, LINK_COMMON}
-    symtab := [U8]{}
-    xindex := [U8]{}
+    ^symtab: [U8]{}
+    ^xindex: [U8]{}
     loop index in indexes -> link_pack_sym(symtab, xindex, 0, 0, index, 0, 0)
     xindex_at: symtab.len()
     symtab.extend(xindex)
-    c := link_context([[U8]]{symtab}, LINK_BASE)
+    ^c: link_context([[U8]]{symtab}, LINK_BASE)
     c.obj_buffer.push(0)
     c.obj_symtab.push(0)
     c.obj_shndx.push(xindex_at)

@@ -29,8 +29,8 @@ Seen: struct {
 
 // READS reads of each clock, none before `monotonic_low` or `wall_low`.
 reads: fn(monotonic_low: Int, wall_low: Int) -> Seen {
-    last := monotonic_low
-    latest_wall := wall_low
+    ^last: monotonic_low
+    ^latest_wall: wall_low
     loop read in 0..<READS {
         monotonic: time.instant().start_ns
         wall: time.unix_ns()
@@ -49,7 +49,7 @@ reads: fn(monotonic_low: Int, wall_low: Int) -> Seen {
 run: fn() {
     monotonic_low: time.instant().start_ns
     wall_low: time.unix_ns()
-    seen := [Seen]{}
+    ^seen: [Seen]{}
     loop wave in 0..<TASKS /% 4 {
         handles: loop _offset in 0..<4 -> task reads(monotonic_low, wall_low)
         loop handle in handles -> seen.push(handle.join() ?? panic("a task of wave {wave} failed"))

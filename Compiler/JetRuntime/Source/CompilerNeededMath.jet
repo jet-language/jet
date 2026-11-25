@@ -76,8 +76,8 @@
 #Export(c) jet_std_math_from_bits_f32: fn(bits: I64) -> Float {
     raw: (if int_inline(bits) -> bits else -> int_word(bits)) & I64{4294967295}
     sign: if (raw & I64{2147483648} != I64{0}) -> I64{-9223372036854775807} - I64{1} else -> I64{0}
-    exponent := (raw >> I64{23}) & I64{255}
-    fraction := raw & I64{8388607}
+    ^exponent: (raw >> I64{23}) & I64{255}
+    ^fraction: raw & I64{8388607}
     if (exponent == I64{255}) {
         return rt_f64_from_bits(sign | I64{9218868437227405312} | fraction << I64{29})
     }

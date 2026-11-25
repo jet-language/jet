@@ -44,7 +44,7 @@ implicit_failure: fn(fail: Bool) -> DomainError {
 }
 
 nested_locally_handled: fn(fail: Bool) -> DomainError DomainError! {
-    recovered := implicit_failure(fail) ?? DomainError{reason: "handled default"}
+    ^recovered: implicit_failure(fail) ?? DomainError{reason: "handled default"}
     return Err(recovered)
 }
 
@@ -58,7 +58,7 @@ nested_conversion: fn(fail: Bool) -> DomainError DomainError! { return Err(decla
 implicit_collection: fn() -> [Int] { [1, 2, 3] }
 
 sum_implicit_collection: fn() -> Int {
-    total := 0
+    ^total: 0
     loop value in implicit_collection() -> total += value
     total
 }

@@ -20,7 +20,7 @@ GenericPair: struct<T, U> {
 paths: fn(pair: Pair) -> [String] { [pair.left.path, pair.right.path] }
 
 generic_partial: fn<U>(value: U) -> Bool {
-    pair := GenericPair<U, files.TempFile>{
+    ^pair: GenericPair<U, files.TempFile>{
         first: value,
         second: files.temp_file("generic-partial") ?? panic("generic"),
     }
@@ -29,7 +29,7 @@ generic_partial: fn<U>(value: U) -> Bool {
 }
 
 exercise: fn(move_first: Bool) -> String {
-    pair := Pair{
+    ^pair: Pair{
         left: files.temp_file("partial-left") ?? panic("left"),
         right: files.temp_file("partial-right") ?? panic("right"),
     }
@@ -62,7 +62,7 @@ exercise: fn(move_first: Bool) -> String {
 }
 
 nested: fn() -> [String] {
-    outer := Envelope{
+    ^outer: Envelope{
         pair: Pair{
             left: files.temp_file("nested-left") ?? panic("left"),
             right: files.temp_file("nested-right") ?? panic("right"),
@@ -90,7 +90,7 @@ run: fn() {
         print(!files.exists(survivor))
     }
     remaining: nested()
-    generic_value := generic_partial(7)
+    ^generic_value: generic_partial(7)
 
     print(!files.exists(remaining[0]) && generic_value)
     print(!files.exists(remaining[1]))

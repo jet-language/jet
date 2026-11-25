@@ -59,7 +59,7 @@ wrote: fn(result: Task db.DBError!) -> String {
 
 found: fn(words: String) -[DB.Read]> String {
     rows: (tasks().search(words) ?? return "unsearchable").collect() ?? return "uncollected"
-    titles := [String]{}
+    ^titles: [String]{}
     loop row in rows -> titles.push(row.title)
     "[{titles.join(", ")}]"
 }
@@ -72,7 +72,7 @@ deleted: fn(id: Int) -[DB.Read, DB.Write]> String {
 }
 
 open_store: fn(store: db.Store) {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     stores.value.store = Val(store.copy())
 }
 

@@ -20,7 +20,7 @@ atomic_word_init: fn(place: I64, value: I64) { sync_store(place, value) }
 
 atomic_word_load: fn(place: I64) -> I64 { sync_load(place) }
 
-atomic_word_store: fn(place: I64, value: I64) { _ := sync_swap(place, value) }
+atomic_word_store: fn(place: I64, value: I64) { ^_: sync_swap(place, value) }
 
 atomic_word_cas: fn(place: I64, expected: I64, replacement: I64) -> Bool {
     sync_cas(place, expected, replacement) == expected

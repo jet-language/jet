@@ -44,7 +44,7 @@ render_into: fn(out: ^String, seed: Int) {
 twice: fn(out: ^String) { out += out }
 
 run: fn() {
-    text := ""
+    ^text: ""
     loop i in 0..<4 {
         render_into(text, i)
         print(text)
@@ -59,7 +59,7 @@ run: fn() {
     twice(text)
     print(text)
     // An owned local, emptied and refilled.
-    local := "start"
+    ^local: "start"
     local += "-more"
     print(local)
     local = ""
@@ -67,13 +67,13 @@ run: fn() {
     local += "again"
     print(local)
     // A static text, emptied.
-    s := "static"
+    ^s: "static"
     s = ""
     s += "x"
     print(s)
     // The second fill reuses the first fill's buffer.
     chunk: "c".repeat(CHUNK)
-    out := ""
+    ^out: ""
     fill(out, chunk)
     print(out.len())
     files.write("/proc/self/clear_refs", "5") ?? panic("reset the peak resident set")

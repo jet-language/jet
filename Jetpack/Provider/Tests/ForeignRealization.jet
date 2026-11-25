@@ -32,7 +32,7 @@ provider_foreign_test_projection_error: fn(verification: StoreVerification, root
 }
 
 #Test("foreign realization rejects recursive symlink as foreign projection error") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     if sys.is_windows() {
         return
     }
@@ -56,9 +56,9 @@ provider_foreign_test_projection_error: fn(verification: StoreVerification, root
 }
 
 #Test("foreign realization rejects oversized recursive source as foreign projection error") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: provider_foreign_test_root("depth")
-    current := provider_foreign_test_write_binding(root, "hostile")
+    ^current: provider_foreign_test_write_binding(root, "hostile")
     loop index in 0..<MAX_TREE_DEPTH + 2 {
         current = files.join(current, "d{index}")
         files.create_dir_all(current) ?? panic("nested directory")

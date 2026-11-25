@@ -51,13 +51,13 @@ held: fn(s: Shared<Context>) {
 }
 
 overwritten: fn(s: Shared<Context>) {
-    k := make(s, 1)
-    total := k.peek()
+    ^k: make(s, 1)
+    ^total: k.peek()
     loop i in 0..<4 {
         k = make(s, i)
         total += k.peek()
     }
-    h := Holder{sink: make(s, 5), spare: None}
+    ^h: Holder{sink: make(s, 5), spare: None}
     h.sink = make(s, 6)
     h.spare = Val(make(s, 7))
     h.spare = None
@@ -65,7 +65,7 @@ overwritten: fn(s: Shared<Context>) {
 }
 
 run: fn() {
-    s := Shared{Context{_id: 1}}
+    ^s: Shared{Context{_id: 1}}
     bound(s)
     print("bound dropped {s.strong_count()}")
     held(s)

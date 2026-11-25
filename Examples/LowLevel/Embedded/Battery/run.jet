@@ -20,16 +20,16 @@ use {
 run: fn() {
     board: embedded.board()
     dossier: embedded.target_dossier()
-    registers := embedded.registers()
+    ^registers: embedded.registers()
     embedded.gpio_init(registers)
     embedded.timer_init(registers, 4)
     embedded.uart_init(registers)
     embedded.dma_init(registers)
     mmio_echo: embedded.uart_control_write(registers, 1)
 
-    interrupts := embedded.interrupt_queue()
-    control := embedded.control_state(2048, 100)
-    interrupt_count := 0
+    ^interrupts: embedded.interrupt_queue()
+    ^control: embedded.control_state(2048, 100)
+    ^interrupt_count: 0
     loop tick in 0..<16 {
         if embedded.timer_advance(registers) {
             _accepted: embedded.interrupt_enqueue(interrupts, tick)
@@ -46,13 +46,13 @@ run: fn() {
 
     // Fill a second queue to exercise the explicit overflow policy, then drain
     // one item to exercise the non-empty task path.
-    overflow := embedded.interrupt_queue()
+    ^overflow: embedded.interrupt_queue()
     loop event in 0..<5 -> _queued: embedded.interrupt_enqueue(overflow, event)
     _drained: embedded.task_drain(overflow) ?? -1
 
     // RX and TX are independent instances of the same fixed-capacity ring.
-    rx := embedded.uart_ring()
-    tx := embedded.uart_ring()
+    ^rx: embedded.uart_ring()
+    ^tx: embedded.uart_ring()
     loop _ in 0..<9 -> _received: embedded.uart_enqueue(rx, U8{65})
     first_rx: embedded.uart_dequeue(rx) ?? U8{0}
     _sent: embedded.uart_enqueue(tx, U8{84})
@@ -63,7 +63,7 @@ run: fn() {
     // The checksum is taken while the buffer is pinned. Submit, complete, and
     // reuse all use the same ownership state machine; target mapping is not
     // invented when the board provider is absent.
-    dma := embedded.dma_buffer([Int#4]{10, 20, 30, 40})
+    ^dma: embedded.dma_buffer([Int#4]{10, 20, 30, 40})
     checksum: embedded.dma_checksum(dma)
     submitted: embedded.dma_submit(dma, registers)
     completed: embedded.dma_complete(dma, registers)
@@ -82,7 +82,7 @@ run: fn() {
     signature: crypto.sign(release_key, image) ?? panic("the image did not sign: {err}")
     authenticated_release: crypto.verify(release_key.public_key(), image, signature) ?? false
     authenticated_tamper: crypto.verify(release_key.public_key(), tampered, signature) ?? false
-    slots := embedded.slot_policy(1)
+    ^slots: embedded.slot_policy(1)
     accepted: embedded.stage_image(slots, checksum, authenticated_release)
     confirmed: embedded.confirm_trial(slots)
     activated: embedded.activate_confirmed(slots)

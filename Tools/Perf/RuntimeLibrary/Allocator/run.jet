@@ -195,7 +195,7 @@ run: fn() -> Never Err! {
         source_hashes: {driver: hash(files.join(source, "Allocator.c")), rust: hash(files.join(source, "Allocator.rs"))},
         inputs: {o0: {file: o0.copy(), sha256: hash(o0)}, o1: {file: o1.copy(), sha256: hash(o1)}, remaining: {file: remaining.copy(), sha256: hash(remaining)}},  // copy: the pins own their text
     }
-    steps := [Step]{}
+    ^steps: [Step]{}
     driver: files.join(out, "allocator-driver.o")
     rust: files.join(out, "allocator-rust.a")
     // Every step runs, a failed one too, so build.json records them all.
@@ -205,7 +205,7 @@ run: fn() -> Never Err! {
         step(steps, out, tree, "driver", ["cc", "-std=c11", "-O2", "-fno-lto", "-c", files.join(source, "Allocator.c"), "-o", driver]),
         step(steps, out, tree, "rust", [JET_ENV, "rustc", "--edition=2024", "-C", "opt-level=3", "--crate-type=staticlib", files.join(source, "Allocator.rs"), "-o", rust]),
     }
-    linked := [Bool]{}
+    ^linked: [Bool]{}
     if built.all(fn(ok) { ok }) {
         loop link in
             [{arm: "O0", libraries: [o0, remaining]}, {arm: "O1", libraries: [o1, remaining]}, {arm: "Rust", libraries: [rust]}] {
@@ -215,7 +215,7 @@ run: fn() -> Never Err! {
     files.write(files.join(out, "build.json"), "{json.stringify(Build{pins: pins.copy(), steps: steps}, 2)}\n")  // copy: result.json repeats the pins
     if !built.concat(linked).all(fn(ok) { ok }) -> process.exit(1)
     within: out.copy()  // copy: the arms' lambda takes its own
-    arms := ARMS.map(fn(name) { Arm{name: name, binary: files.join(within, name), sha256: hash(files.join(within, name)), verdict: "PASS", samples: [Float]{}} })
+    ^arms: ARMS.map(fn(name) { Arm{name: name, binary: files.join(within, name), sha256: hash(files.join(within, name)), verdict: "PASS", samples: [Float]{}} })
     samples: files.join(out, "samples.jsonl")
     loop round in 0..<ROUNDS {
         // Rotate the arm order so no one arm owns the startup and cache position.
@@ -231,9 +231,9 @@ run: fn() -> Never Err! {
             }
         }
     }
-    measured := [Measured]{}
+    ^measured: [Measured]{}
     loop arm in arms {
-        sorted := arm.samples
+        ^sorted: arm.samples
         sorted.sort()
         // The median, least and most, when every round printed the expected checksum.
         bounds: if arm.verdict == "PASS" && sorted.len() == ROUNDS -> [Float?]{Val(sorted[3]), Val(sorted[0]), Val(sorted[6])} else -> [Float?]{None, None, None}

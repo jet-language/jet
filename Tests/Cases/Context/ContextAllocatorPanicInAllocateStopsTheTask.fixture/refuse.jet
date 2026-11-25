@@ -26,11 +26,11 @@ Picky: struct {
 
 run: fn() {
     region: mem.Region.reserve(1 << 20) ?? panic("reserve")
-    picky := Picky{region: region, kept: [mem.Block]{}, taken: 0}
+    ^picky: Picky{region: region, kept: [mem.Block]{}, taken: 0}
     print("before the block")
-    total := 0
+    ^total: 0
     #Context(allocator: picky) {
-        words := [String]{}
+        ^words: [String]{}
         loop i in 0..<1000 -> words.push("word {i}")
         total = words.len()
     }

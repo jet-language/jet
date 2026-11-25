@@ -43,7 +43,7 @@ jetos_load_target: fn(theme: Theme, target: JetOSTarget) -[IO, FS, Env, Time.Wai
     loop system in plan.systems {
         if system.name == target.host -> return Val({plan: plan, system: system})
     }
-    names := loop system in plan.systems -> system.name
+    ^names: loop system in plan.systems -> system.name
     names.sort()
     known: if names.len() == 0 -> "this Package defines no systems" else -> "available systems: {names.join(", ")}"
     theme.error_coded("E0980", "`{target.host}` is not a system in this Package", known, "declare a `System` output named `{target.host}`, or select one of the systems above.")

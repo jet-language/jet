@@ -19,8 +19,8 @@ use {
 rust_foreign_test_facts: fn(source: String) -> JetDriverRustForeignFacts {
     parsed: parse_source(source.bytes())
     assert(parsed.diagnostics.len() == 0)
-    entries := [JetDriverRustForeignEntry]{}
-    records := JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
+    ^entries: [JetDriverRustForeignEntry]{}
+    ^records: JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
     jet_driver_rust_foreign_collect_items(parsed.program.items, "", module_none(), entries, records)
     JetDriverRustForeignFacts{entries: entries, record_source: "", record_names: records.names}
 }

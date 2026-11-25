@@ -89,8 +89,8 @@ l64a: fn(value: Int) -> String Base64Error! {
         return Err(rewrap("l64a needs a value from 0 through 4294967295, got {value}"))
     }
     digits: C_L64A_ALPHABET.bytes()
-    out := [U8]{}
-    rest := value
+    ^out: [U8]{}
+    ^rest: value
     loop rest > 0 {
         out.push(digits[rest & 63])
         rest = rest >> 6
@@ -105,7 +105,7 @@ l64a: fn(value: Int) -> String Base64Error! {
 a64l: fn(text: String) -> Int Base64Error! {
     raw: text.bytes()
     if raw.len() > 6 -> return Err(rewrap("a64l takes at most six characters, got {raw.len()}"))
-    value := 0
+    ^value: 0
     loop k in 0..<raw.len() {
         digit: l64a_digit(raw[k]) ?? return Err(rewrap("invalid a64l character at byte {k}"))
         value |= digit << (6 * k)
@@ -116,7 +116,7 @@ a64l: fn(text: String) -> Int Base64Error! {
 
 encodebytes: fn(data: [U8]) -> String Never! {
     encoded: encode(data).bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<encoded.len() {
         out.push(encoded[i])
         if (i + 1) %% 76 == 0 || i + 1 == encoded.len() -> out.push(U8{10})
@@ -158,14 +158,14 @@ encode_url_padded: fn(data: [U8]) -> String Never! {
 pad: fn(text: String) -> String Never! {
     remainder: text.bytes().len() %% 4
     if remainder == 0 -> return text.copy()
-    out := text.copy()
+    ^out: text.copy()
     loop _ in 0..<(4 - remainder) -> out = "{out}="
     out
 }
 
 unpad: fn(text: String) -> String Never! {
     raw: text.bytes()
-    end := raw.len()
+    ^end: raw.len()
     loop end > 0 && raw[end - 1] == (U8{61}) -> end -= 1
     String.from_bytes(raw[0..<end]) ?? ""
 }
@@ -191,11 +191,11 @@ priv radix64: module {
 }
 
 ascii85_encode: fn(data: [U8]) -> String {
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < data.len() {
         remain: data.len() - i
-        width := remain
+        ^width: remain
         if width > 4 -> width = 4
         a: u8_int(data[i])
         b: if width > 1 -> u8_int(data[i + 1]) else -> 0
@@ -203,13 +203,13 @@ ascii85_encode: fn(data: [U8]) -> String {
         d: if width > 3 -> u8_int(data[i + 3]) else -> 0
         n: ((((a << 24)) | (b << 16)) | (c << 8)) | d
         if width == 4 && n == 0 -> out.push(U8{122}) else {
-            digits := [U8]{}
-            v := n
+            ^digits: [U8]{}
+            ^v: n
             loop _ in 0..<5 {
                 digits.push(U8{33 + (v %% 85)})
                 v = v /% 85
             }
-            k := digits.len()
+            ^k: digits.len()
             loop k > 0 {
                 k -= 1
                 if width == 4 || k >= 5 - (width + 1) -> out.push(digits[k])
@@ -222,8 +222,8 @@ ascii85_encode: fn(data: [U8]) -> String {
 
 ascii85_decode: fn(text: String) -> [U8] Base64Error! {
     raw: text.bytes()
-    out := [U8]{}
-    group := [Int]{}
+    ^out: [U8]{}
+    ^group: [Int]{}
     loop b in raw {
         n: u8_int(b)
         if n == 122 {
@@ -239,7 +239,7 @@ ascii85_decode: fn(text: String) -> [U8] Base64Error! {
         if n < 33 || n > 117 -> return Err(rewrap("invalid Ascii85 character"))
         group.push(n - 33)
         if group.len() == 5 {
-            value := 0
+            ^value: 0
             loop d in group -> value = value * 85 + d
             if value > 4294967295 {
                 return Err(rewrap("invalid Ascii85 quantum; encoded value exceeds four bytes"))
@@ -257,7 +257,7 @@ ascii85_decode: fn(text: String) -> [U8] Base64Error! {
     if group.len() > 1 {
         original: group.len()
         loop group.len() < 5 -> group.push(84)
-        value := 0
+        ^value: 0
         loop d in group -> value = value * 85 + d
         if value > 4294967295 {
             return Err(rewrap("invalid Ascii85 quantum; encoded value exceeds four bytes"))
@@ -272,23 +272,23 @@ base85_encode: fn(data: [U8], alphabet: String, require_full: Bool) -> String Ba
         return Err(rewrap("Z85 encoding requires a byte length divisible by four"))
     }
     ab: alphabet.bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < data.len() {
-        width := data.len() - i
+        ^width: data.len() - i
         if width > 4 -> width = 4
         a: u8_int(data[i])
         b: if width > 1 -> u8_int(data[i + 1]) else -> 0
         c: if width > 2 -> u8_int(data[i + 2]) else -> 0
         d: if width > 3 -> u8_int(data[i + 3]) else -> 0
         value: ((((a << 24)) | (b << 16)) | (c << 8)) | d
-        digits := [Int]{}
-        v := value
+        ^digits: [Int]{}
+        ^v: value
         loop _ in 0..<5 {
             digits.push(v %% 85)
             v = v /% 85
         }
-        k := digits.len()
+        ^k: digits.len()
         loop k > 0 {
             k -= 1
             if width == 4 || k >= 5 - (width + 1) -> out.push(ab[digits[k]])
@@ -307,16 +307,16 @@ base85_decode: fn(text: String, alphabet: String, require_full: Bool) -> [U8] Ba
         return Err(rewrap("invalid Base85 length; a final quantum needs at least two characters"))
     }
     ab: alphabet.bytes()
-    table := [Int]{}
+    ^table: [Int]{}
     loop _ in 0..<256 -> table.push(-1)
     loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < raw.len() {
         remain: raw.len() - i
-        width := remain
+        ^width: remain
         if width > 5 -> width = 5
-        digits := [Int]{}
+        ^digits: [Int]{}
         loop j in 0..<width {
             v: table[u8_int(raw[i + j])]
             if v < 0 -> return Err(rewrap("invalid Base85 character"))
@@ -324,12 +324,12 @@ base85_decode: fn(text: String, alphabet: String, require_full: Bool) -> [U8] Ba
         }
         original: width
         loop digits.len() < 5 -> digits.push(84)
-        value := 0
+        ^value: 0
         loop d in digits -> value = value * 85 + d
         if value > 4294967295 {
             return Err(rewrap("invalid Base85 quantum; encoded value exceeds four bytes"))
         }
-        count := 4
+        ^count: 4
         if original < 5 -> count = original - 1
         loop j in 0..<count -> out.push(wrapping(U8{value >> (24 - j * 8)}))
         i += width
@@ -339,8 +339,8 @@ base85_decode: fn(text: String, alphabet: String, require_full: Bool) -> [U8] Ba
 
 encode_alphabet: fn(data: [U8], alphabet: String, padded: Bool) -> String Never! {
     chars: alphabet.bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < data.len() {
         remain: data.len() - i
         a: u8_int(data[i])
@@ -418,13 +418,13 @@ invalid_byte: fn(url: Bool, offset: Int, byte: U8) -> Base64Error Never! {
 
 decode_strict: fn(text: String, url: Bool, whitespace: Bool, relaxed: Bool) -> [U8] Base64Error! {
     raw: text.bytes()
-    count := 0
-    last := -1
-    out := [U8]{}
-    buffer := 0
-    bits := 0
-    padding := 0
-    pad_start := -1
+    ^count: 0
+    ^last: -1
+    ^out: [U8]{}
+    ^buffer: 0
+    ^bits: 0
+    ^padding: 0
+    ^pad_start: -1
     loop i in 0..<raw.len() {
         b: raw[i]
         if ascii_space(b) {

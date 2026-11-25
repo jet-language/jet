@@ -3,9 +3,7 @@
 // Every meaning a generated parser has lives here: the cursor, the
 // character columns, the token automata, keyword lookup, the depth bound,
 // error text and resynchronization. The generated code only arranges calls.
-use {
-    core.grammar.plan.[GrammarLexer]
-}
+use core.grammar.plan.[GrammarLexer]
 
 /// The byte length of the UTF-8 sequence that starts with `lead`. Jet
 /// Strings are valid UTF-8.
@@ -21,10 +19,10 @@ code_point_at: fn(bytes: [U8], at: Int) -> Int Never! {
     first: Int{bytes[at]}
     if first < 128 -> return first
     width: code_point_width(first)
-    cp := first & 7
+    ^cp: first & 7
     if width == 2 -> cp = first & 31
     if width == 3 -> cp = first & 15
-    k := 1
+    ^k: 1
     loop k < width && at + k < bytes.len() {
         cp = (cp << 6) | Int{bytes[at + k]} & 63
         k += 1
@@ -34,9 +32,7 @@ code_point_at: fn(bytes: [U8], at: Int) -> Int Never! {
 
 /// The UTF-8 bytes of code point `cp`, appended to `out`.
 push_code_point: fn(out: ^[U8], cp: Int) Never! {
-    if cp < 128 {
-        out.push(U8{cp})
-    } else if cp < 2048 {
+    if cp < 128 -> out.push(U8{cp}) else if cp < 2048 {
         out.push(U8{Int{192} | cp >> 6})
         out.push(U8{Int{128} | cp & 63})
     } else if cp < 65536 {
@@ -53,7 +49,7 @@ push_code_point: fn(out: ^[U8], cp: Int) Never! {
 
 /// The text of code point `cp`.
 code_point_text: fn(cp: Int) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     push_code_point(out, cp)
     String.from_bytes(out) ?? ""
 }
@@ -72,7 +68,7 @@ ascii_property_bits: fn(cp: Int) -> Int Never! {
 property_bits: fn(cp: Int) -> Int Never! {
     if cp < 128 -> return ascii_property_bits(cp)
     text: code_point_text(cp)
-    bits := 0
+    ^bits: 0
     if text.is_alphabetic() -> bits |= 1
     if text.is_numeric() -> bits |= 2
     if text.is_whitespace() -> bits |= 4
@@ -87,7 +83,7 @@ fold_code_point: fn(cp: Int) -> Int Never! {
 
 /// `text` as an `i` literal compares it: ASCII capitals lowered.
 fold_text: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         if b >= 65 && b <= 90 -> out.push(b + 32) else -> out.push(b)
     }
@@ -96,8 +92,8 @@ fold_text: fn(text: String) -> String Never! {
 
 /// The column of code point `cp` in `lexer`.
 lexer_column: fn(lexer: GrammarLexer, cp: Int) -> Int Never! {
-    low := 0
-    high := lexer.bounds.len()
+    ^low: 0
+    ^high: lexer.bounds.len()
     loop high - low > 1 {
         mid: (low + high) /% 2
         if lexer.bounds[mid] <= cp -> low = mid else -> high = mid
@@ -109,9 +105,9 @@ lexer_column: fn(lexer: GrammarLexer, cp: Int) -> Int Never! {
 /// The end of the longest match of token `kind` at byte `at` of `bytes`
 /// (the first match, past a non-greedy repeat), or -1 for none.
 lexer_match: fn(lexer: GrammarLexer, kind: Int, bytes: [U8], at: Int) -> Int Never! {
-    state := lexer.starts[kind]
-    end := -1
-    pos := at
+    ^state: lexer.starts[kind]
+    ^end: -1
+    ^pos: at
     loop state >= 0 {
         if lexer.accept[state] > 0 -> end = pos
         if lexer.accept[state] == 2 || pos >= bytes.len() -> return end

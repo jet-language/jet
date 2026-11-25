@@ -71,8 +71,8 @@ ToolManifest: struct {
         if source_values.len() > TOOL_PROFILE_MAX_TOOLS {
             return Err(CLIError.Other("user-tools source count exceeds bound"))
         }
-        sources := [ToolManifestSource]{}
-        source_names := [String]{}
+        ^sources: [ToolManifestSource]{}
+        ^source_names: [String]{}
         loop value in source_values {
             sources.push(cli_tool_parse_manifest_source(value, source_names))
         }
@@ -81,9 +81,9 @@ ToolManifest: struct {
         if tool_values.len() > TOOL_PROFILE_MAX_TOOLS {
             return Err(CLIError.Other("user-tools tool count exceeds bound"))
         }
-        tools := [ToolManifestEntry]{}
-        tool_names := [String]{}
-        bins := [String]{}
+        ^tools: [ToolManifestEntry]{}
+        ^tool_names: [String]{}
+        ^bins: [String]{}
         loop value in tool_values {
             tools.push(cli_tool_parse_manifest_entry(value, tool_names, bins))
         }
@@ -94,11 +94,11 @@ ToolManifest: struct {
     // The canonical manifest text: sources by name, tools by (name,
     // resolved), every ref in its migrated spelling.
     format: fn(self) -> String Never! {
-        sources := self.sources
+        ^sources: self.sources
         sources.sort_by(fn(left: ToolManifestSource, right: ToolManifestSource) { left.name <=> right.name })
-        tools := self.tools
+        ^tools: self.tools
         tools.sort_by(fn(left: ToolManifestEntry, right: ToolManifestEntry) { (left.name <=> right.name).then(left.resolved <=> right.resolved) })
-        source_rows := [Dyn]{}
+        ^source_rows: [Dyn]{}
         loop source in sources {
             source_rows.push(
                 Dyn.Object(
@@ -112,7 +112,7 @@ ToolManifest: struct {
                 ),
             )
         }
-        tool_rows := [Dyn]{}
+        ^tool_rows: [Dyn]{}
         loop tool in tools {
             tool_rows.push(
                 Dyn.Object(
@@ -141,11 +141,11 @@ ToolManifest: struct {
     // The realization source table: declared sources, the built-ins, and
     // each source's recorded channel metadata.
     source_table: fn(self) -> SourceTable Never! {
-        decls := [NamedSourceDecl]{}
+        ^decls: [NamedSourceDecl]{}
         loop source in self.sources {
             decls.push(NamedSourceDecl{name: source.name, upstream: source.upstream, via: source.provider})
         }
-        table := SourceTable.from_decls(decls)
+        ^table: SourceTable.from_decls(decls)
         cli_ensure_builtin_sources(table)
         loop source in self.sources {
             table.set_channel_metadata(source.name, source.policy, source.raw)
@@ -244,7 +244,7 @@ cli_tool_source_manifest_ref: fn(upstream: String) -> String Never! {
 
 // The manifest sources recorded from a realization source table.
 cli_tool_manifest_sources_from_table: fn(table: SourceTable) -> [ToolManifestSource] Never! {
-    sources := [ToolManifestSource]{}
+    ^sources: [ToolManifestSource]{}
     loop decl in table.declarations() {
         sources.push(ToolManifestSource{name: decl.name, upstream: decl.upstream, provider: decl.via, policy: table.channel_policy(decl.name), raw: cli_tool_source_manifest_ref(decl.upstream)})
     }

@@ -6,7 +6,7 @@ use {
 
 s3_unicode_scalar: fn(cp: Int) -> String Never! {
     if cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) -> return ""
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     if cp < 128 -> bytes.push(U8{cp}) else if cp < 2048 {
         bytes.push(U8{(cp >> 6) | 192})
         bytes.push(U8{cp & 63 | 128})
@@ -25,8 +25,8 @@ s3_unicode_scalar: fn(cp: Int) -> String Never! {
 
 // Reuses Core.text.wrap's Unicode splitter and the public Core.text primitives.
 s3_unicode_split_ws: fn(text: String) -> [String] Never! {
-    out := [String]{}
-    current := ""
+    ^out: [String]{}
+    ^current: ""
     loop scalar in s3_unicode_text.scalars(text) {
         if s3_unicode_text.is_whitespace(scalar) {
             if current.bytes().len() > 0 {
@@ -41,7 +41,7 @@ s3_unicode_split_ws: fn(text: String) -> [String] Never! {
 
 // Original cps(): invalid hex/scalars are filtered out.
 s3_unicode_cps: fn(field: String) -> String Never! {
-    out := ""
+    ^out: ""
     loop token in s3_unicode_split_ws(field) {
         cp: s3_unicode_parse.parse_int_base(token, 16) ?? next
         scalar: s3_unicode_scalar(cp)
@@ -57,10 +57,10 @@ S3UnicodeBreak: struct {
 
 // Original parse_break(): malformed hex/scalar => None; empty => None.
 s3_unicode_break: fn(line: String) -> S3UnicodeBreak? Never! {
-    full := ""
-    current := ""
-    segments := [String]{}
-    any := false
+    ^full: ""
+    ^current: ""
+    ^segments: [String]{}
+    ^any: false
     loop token in s3_unicode_split_ws(line) {
         if token == "÷" {
             if current != "" {
@@ -90,7 +90,7 @@ s3_unicode_clean: fn(raw: String) -> String Never! {
 // The segments core.text.words keeps: each holding an Alphabetic or Numeric
 // scalar.
 s3_unicode_kept_words: fn(segments: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop segment in segments {
         loop scalar in s3_unicode_text.scalars(segment) {
             if s3_unicode_text.is_alphabetic(scalar) || s3_unicode_text.is_numeric(scalar) {
@@ -105,7 +105,7 @@ s3_unicode_kept_words: fn(segments: [String]) -> [String] Never! {
 // The segments core.text.sentences keeps: each trimmed, the blank ones
 // dropped.
 s3_unicode_kept_sentences: fn(segments: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop segment in segments {
         trimmed: segment.trim()
         if trimmed != "" -> out.push(trimmed.copy())
@@ -118,14 +118,14 @@ s3_unicode_kept_sentences: fn(segments: [String]) -> [String] Never! {
 // the segments those calls keep.
 s3_unicode_boundary_corpora: fn() {
     word_data: s3_unicode_files.read("data/WordBreakTest.txt") ?? panic("missing word corpus")
-    word := 0
+    ^word: 0
     loop raw in word_data.lines() {
         parsed: s3_unicode_break(s3_unicode_clean(raw)) ?? next
         assert(s3_unicode_text.words(parsed.full) == s3_unicode_kept_words(parsed.segments), "break mismatch: {raw}")
         word += 1
     }
     sentence_data: s3_unicode_files.read("data/SentenceBreakTest.txt") ?? panic("missing sentence corpus")
-    sentence := 0
+    ^sentence: 0
     loop raw in sentence_data.lines() {
         parsed: s3_unicode_break(s3_unicode_clean(raw)) ?? next
         assert(s3_unicode_text.sentences(parsed.full) == s3_unicode_kept_sentences(parsed.segments), "break mismatch: {raw}")

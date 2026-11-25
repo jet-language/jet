@@ -32,7 +32,7 @@ leaf: fn(name: String) -> Node {
 }
 
 renamed: fn(node: Node, note: String) -> Node {
-    value := node
+    ^value: node
     value.meta.note = note
     value
 }
@@ -49,48 +49,48 @@ held_note: fn(slot: Slot) -> String {
 }
 
 run: fn() {
-    original := Node{_name: "root", meta: Meta{note: "first", count: 1, tags: [String]{"a"}, children: [Node]{}, detail: Detail{label: "plain", _seen: [Node]{}}}}
+    ^original: Node{_name: "root", meta: Meta{note: "first", count: 1, tags: [String]{"a"}, children: [Node]{}, detail: Detail{label: "plain", _seen: [Node]{}}}}
 
-    second := original
+    ^second: original
     second.meta.note = "second"
     print("assign: {original.meta.note} / {second.meta.note}")
 
-    other := renamed(original, "third")
+    ^other: renamed(original, "third")
     print("returned: {original.meta.note} / {other.meta.note}")
 
-    tagged := original
+    ^tagged: original
     add_tag(tagged, "b")
     print("write param: {original.meta.tags.len()} / {tagged.meta.tags.len()}")
 
-    grown := original
+    ^grown: original
     grown.meta.children.push(leaf("leaf"))
     grown.meta.children[0].meta.note = "leaf edited"
     print("nested: {original.meta.children.len()} / {grown.meta.children.len()} {grown.meta.children[0].meta.note}")
 
-    counted := original
+    ^counted: original
     counted.meta.count += 5
     print("compound: {original.meta.count} / {counted.meta.count}")
 
     // A field of a field, both out of line.
-    deep := original
+    ^deep: original
     deep.meta.detail.label = "deep"
     print("field of field: {original.meta.detail.label} / {deep.meta.detail.label}")
 
     // A field written inside a function through its write parameter.
-    noted := original
+    ^noted: original
     set_note(noted, "param field")
     print("param field: {original.meta.note} / {noted.meta.note}")
 
     // A Map value's field.
     book: [String:Node]{"k": original}
-    entry := book
+    ^entry: book
     entry["k"].meta.note = "mapped"
     print("map value: {book["k"].meta.note} / {entry["k"].meta.note}")
 
     // An enum payload's field, through a write window.
     slot: Slot.Held{node: original}
-    edited := slot
-    if ^edited == {
+    ^edited: slot
+    if edited.in_place() == {
         .Held(node) -> { node.meta.note = "held" }
         ._Empty -> {}
     }
@@ -98,7 +98,7 @@ run: fn() {
 
     // A tuple element's field.
     pair: {node: original, rank: 1}
-    moved := pair
+    ^moved: pair
     moved.node.meta.note = "tupled"
     print("tuple: {pair.node.meta.note} / {moved.node.meta.note}")
 }

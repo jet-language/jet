@@ -16,7 +16,7 @@ TICKS: 10000000
 ROUNDS: 5
 
 mod_div_kernel: fn(ticks: Int) -> Int {
-    check := 0
+    ^check: 0
     loop tick in 0..<ticks {
         raw: (tick * 73 + 19) % 4096
         frame: (raw * 17 + tick * 31 + 7) % 65536
@@ -29,8 +29,8 @@ run: fn() {
     args: process.args()
     ticks: if args.len() > 0 -> Int.parse(args[0]) ?? TICKS else -> TICKS
 
-    best := -1
-    check := 0
+    ^best: -1
+    ^check: 0
     loop _ in 0..<ROUNDS {
         started: time.instant()
         check = mod_div_kernel(ticks)

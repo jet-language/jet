@@ -31,7 +31,7 @@ header_end: fn(bytes: [U8], index: Int) -> Bool {
 
 get_address: fn(port: String, path: String) -> Answer {
     deadline: time.instant() + 30s
-    connected := net.TCPStream?{None}
+    ^connected: net.TCPStream?{None}
     loop {
         if net.tcp_connect("127.0.0.1:{port}") == {
             .Ok(stream) -> {
@@ -44,16 +44,16 @@ get_address: fn(port: String, path: String) -> Answer {
             }
         }
     }
-    stream := connected ?? panic("connected stream")
+    ^stream: connected ?? panic("connected stream")
     stream.write_bytes("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".bytes()) ?? panic("request write")
     net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         part: net.tcp_read_bytes(stream, 65536) ?? panic("response read")
         if part.len() == 0 -> break
         loop byte in part -> bytes.push(byte)
     }
-    split := -1
+    ^split: -1
     loop index in 0..<bytes.len() - 3 {
         if header_end(bytes, index) {
             split = index
@@ -87,7 +87,7 @@ run: fn() {
     page: get_address(port, "/")
     text: String.from_bytes(page.body) ?? panic("page UTF-8")
     files.write("page.html", text) ?? panic("record page: {err}")
-    addresses := [String]{}
+    ^addresses: [String]{}
     loop (index, piece) in text.split("\"/a/").to_list() {
         if index == 0 -> next
         address: "/a/{piece.split("\"").to_list()[0].split(" ").to_list()[0]}"
@@ -98,7 +98,7 @@ run: fn() {
         address: "/a/{piece.split(" ").to_list()[0]}"
         if !addresses.contains(address) -> addresses.push(address)
     }
-    rows := [String]{}
+    ^rows: [String]{}
     loop address in addresses {
         name: address.split("/").to_list()
         pieces: name[name.len() - 1].split(".").to_list()

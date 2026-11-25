@@ -130,8 +130,8 @@ cli_plan_downloads: fn(verification: StoreVerification, theme: Theme, roots: Han
     project_dir: cli_scope_project_dir(scope)
     fixtures: cli_effective_fixtures(flags)
     allow_local: flags.local_nix_catalog != None
-    pending := [RefSpec]{}
-    plan := DownloadPlan.empty()
+    ^pending: [RefSpec]{}
+    ^plan: DownloadPlan.empty()
     loop spec in specs {
         uses_nix: provider_uses_nix_provider_for_project(spec, table, flags.offline, store_dir, project_dir)
         if uses_nix && fixtures != None -> next
@@ -168,13 +168,13 @@ cli_plan_downloads: fn(verification: StoreVerification, theme: Theme, roots: Han
         } else { pending.push(spec.copy()) }
     }
     if pending.len() == 0 -> return Ok(plan)
-    pending_uses_nix := false
+    ^pending_uses_nix: false
     loop spec in pending {
         if provider_uses_nix_provider_for_project(spec, table, flags.offline, store_dir, project_dir) {
             pending_uses_nix = true
         }
     }
-    nix_index := NixIndexClient?{None}
+    ^nix_index: NixIndexClient?{None}
     if pending_uses_nix && fixtures == None {
         client: cli_nix_index_client(roots, flags) ?? {
             ProviderError.NixIndex(err).report(theme)
@@ -182,7 +182,7 @@ cli_plan_downloads: fn(verification: StoreVerification, theme: Theme, roots: Han
         }
         nix_index = Val(client)
     }
-    ctx := cli_provider_ctx(roots, flags, fixtures, project_dir, nix_index, Val(roots))
+    ^ctx: cli_provider_ctx(roots, flags, fixtures, project_dir, nix_index, Val(roots))
     ctx.progress = progress
     downloads: provider_plan_downloads(verification, pending, table, ctx) ?? {
         err.report(theme)
@@ -195,7 +195,7 @@ cli_plan_downloads: fn(verification: StoreVerification, theme: Theme, roots: Han
 // Realize one ref, recording it in the store and printing progress. `table`
 // resolves named sources it is empty for direct CLI refs.
 cli_realize_ref: fn(verification: StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {entry: StoreEntry, state: SourceState}? Never! {
-    live := LiveRegion?{None}
+    ^live: LiveRegion?{None}
     if cli_realize_ref_outcome(verification, theme, roots, flags, table, spec, name_w, RowStyle.Ledger, live, RealizeScope.Project) == {
         .Realized(entry, state, _, _) -> Val({entry: entry, state: state})
         .NeedsNix(need) -> {
@@ -208,7 +208,7 @@ cli_realize_ref: fn(verification: StoreVerification, theme: Theme, roots: Hangar
 
 // Erase a caller's live region before a diagnostic or row.
 cli_clear_live_region: fn(live: ^LiveRegion?) -[IO, Time.Wait]> Never! {
-    if ^live == .Val(region) -> region.clear()
+    if live.in_place() == .Val(region) -> region.clear()
 }
 
 // Stop the resolving spinner, if one is drawn, before any other output.
@@ -228,7 +228,7 @@ cli_realize_ref_outcome: fn(verification: StoreVerification, theme: Theme, roots
     if style != RowStyle.Silent -> cli_clear_live_region(live)
     // A TTY gets a live spinner that the final ledger row replaces; without
     // one (piped output, NO_COLOR) the plain status line stands instead.
-    spinner := Spinner?{None}
+    ^spinner: Spinner?{None}
     if style != RowStyle.Silent {
         if theme.color -> spinner = Val(theme.spinner("Resolving {spec.raw} …")) else {
             theme.status("Resolving {theme.bold(spec.raw)} …")
@@ -243,7 +243,7 @@ cli_realize_ref_outcome: fn(verification: StoreVerification, theme: Theme, roots
     uses_nix: provider_uses_nix_provider_for_project(spec, table, flags.offline, store_dir, project_dir)
     recorded_project_candidate: scope == RealizeScope.Project && !uses_nix && store_find_by_reference_read_only(roots, spec.raw) != None
     project_metadata_missing: recorded_project_candidate && provider_cache_expectation(verification, spec, table, cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), project_dir, None, Val(roots))) == None
-    recorded_reuse := VerifiedRealization?{None}
+    ^recorded_reuse: VerifiedRealization?{None}
     if scope == RealizeScope.Use || project_metadata_missing {
         if store_find_verified_user_profile_by_reference(verification, roots, spec.raw) == {
             .Val(found) -> { recorded_reuse = Val(found) }
@@ -267,7 +267,7 @@ cli_realize_ref_outcome: fn(verification: StoreVerification, theme: Theme, roots
     // proof exactly once on the cached path. A verified imported object is a
     // Jetpack result in every mode, so it is probed before the Nix-bridge
     // diagnostic.
-    cache_candidate_ok := recorded_reuse != None
+    ^cache_candidate_ok: recorded_reuse != None
     if !cache_candidate_ok && uses_nix && offline_fixtures == None {
         probe: cli_provider_ctx(roots, flags, None, project_dir, None, None)
         if provider_cache_expectation(verification, spec, table, probe) == .Val(expected) {
@@ -277,7 +277,7 @@ cli_realize_ref_outcome: fn(verification: StoreVerification, theme: Theme, roots
     indexed_nix: flags.offline && uses_nix && offline_fixtures == None && (allow_local || provider_needs_nix_bridge(spec, table, flags.offline, store_dir, project_dir) == None)
     // A reference the project lock already pins was realized here before.
     // Preserve that authority during verified reuse or authenticated repair.
-    locked_pin := false
+    ^locked_pin: false
     if project_dir == .Val(project) {
         locked_pin = pkg_lock_nix_realization(project, spec.raw) != None
     }
@@ -298,7 +298,7 @@ cli_realize_ref_outcome: fn(verification: StoreVerification, theme: Theme, roots
     fixtures: if flags.offline && uses_nix -> offline_fixtures else -> flags.fixtures
     // Build the index client when an unresolved Nix ref may need discovery.
     // A lock-pinned ref is already bound to its project CAS bundle.
-    nix_index := NixIndexClient?{None}
+    ^nix_index: NixIndexClient?{None}
     if uses_nix && fixtures == None && !locked_pin {
         if cli_nix_index_client(roots, flags) == {
             .Ok(client) -> { nix_index = Val(client) }
@@ -316,7 +316,7 @@ cli_realize_ref_outcome: fn(verification: StoreVerification, theme: Theme, roots
             }
         }
     }
-    ctx := cli_provider_ctx(roots, flags, fixtures, project_dir, nix_index, Val(roots))
+    ^ctx: cli_provider_ctx(roots, flags, fixtures, project_dir, nix_index, Val(roots))
     // A Core Cargo action is an upstream executable
     // hook. The exact staged source/recipe/capability identity must be
     // approved outside the project metadata before Store realization.
@@ -345,7 +345,7 @@ cli_realize_ref_outcome: fn(verification: StoreVerification, theme: Theme, roots
         .Ok(realized) -> {
             cli_stop_spinner(spinner)
             parts: realized.into_parts()
-            entry := parts.entry
+            ^entry: parts.entry
             // The entry keeps its durable paths; a child reaches them only
             // through the lease the env passes. Revalidate before use.
             if style == RowStyle.Ready && (entry.bin != "" || entry.rlib != "") {
@@ -450,13 +450,13 @@ cli_package_fixture_available: fn(flags: CLIFlags, spec: RefSpec) -[FS, Env]> Bo
 // the hole list precedes the human diagnostic.
 cli_report_nix_bridge_required: fn(theme: Theme, flags: CLIFlags, holes: [NixBridgeNeed], realized_refs: [String]) -[IO, Time.Wait]> Never! {
     if flags.json {
-        hole_texts := [String]{}
+        ^hole_texts: [String]{}
         loop hole in holes -> hole_texts.push(hole.reference)
         print(cli_json_render(Dyn.Object(["code": Dyn.Text("E1272"), "realized": cli_json_texts(realized_refs), "holes": cli_json_texts(hole_texts)])))
     }
     count: holes.len()
     subject: if count == 1 -> "package lacks" else -> "packages lack"
-    quoted := [String]{}
+    ^quoted: [String]{}
     loop hole in holes -> quoted.push("`{hole.reference}`")
     fix_ref: if count == 0 -> "<ref>" else -> holes[0].reference
     theme.error_coded(
@@ -487,7 +487,7 @@ cli_realize_adapter: fn(verification: StoreVerification, theme: Theme, roots: Ha
     if store_realize_verified(verification, roots, ctx, request) == {
         .Ok(realized) -> {
             parts: realized.into_parts()
-            entry := parts.entry
+            ^entry: parts.entry
             if consume && entry.bin != "" {
                 parts.lease.validate() ?? {
                     store_report_integrity(theme, parts.lease.consumption_failure(err))

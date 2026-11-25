@@ -42,7 +42,7 @@ Board: struct {
     runs: Shared<Int>,
 
     #App.Public is_open: fn(self) -> Bool {
-        guard := self.runs.guard_edit()
+        ^guard: self.runs.guard_edit()
         guard.value += 1
         if flags_in(self.store).get(1) == {
             .Val(flag) -> flag.open
@@ -71,7 +71,7 @@ serving: fn(path: String, calls: Int) -> Server {
     serving: task {
         loop _ in 0..<calls {
             mounted.serve_once(listener) ?? panic("serve")
-            guard := counted.guard_edit()
+            ^guard: counted.guard_edit()
             guard.value += 1
         }
     }
@@ -116,7 +116,7 @@ server_a: fn() {
 
 // The address server A wrote, once it has.
 address_of_a: fn() -> String {
-    waited := 0
+    ^waited: 0
     loop !fs.exists(ADDRESS) {
         if waited >= 1500 -> panic("server a did not listen")
         time.sleep(20ms)

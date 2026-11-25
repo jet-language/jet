@@ -9,7 +9,7 @@ use {
 }
 
 arena: fn(words: Int) -> [I64] Never! {
-    w := [I64]{}
+    ^w: [I64]{}
     if !mem.__list_reserve_exact<I64>(w, words) -> panic("crypto workspace allocation failed")
     loop _ in 0..<words -> w.push(I64{0})
     w
@@ -40,14 +40,14 @@ load: fn(w: ^[I64], at: Int, data: [U8]) Never! {
 }
 
 extract: fn(w: [I64], at: Int, count: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     if !mem.__list_reserve_exact<U8>(out, count) -> panic("crypto output allocation failed")
     loop i in 0..<count -> out.push(wrapping(U8{byte(w, at + i)}))
     out
 }
 
 equal: fn(w: [I64], a: Int, b: Int, count: Int) -> Bool Never! {
-    diff := I64{0}
+    ^diff: I64{0}
     loop i in 0..<count -> diff |= (byte(w, a + i) ~ byte(w, b + i))
     diff == I64{0}
 }
@@ -145,7 +145,7 @@ copy_field: fn(w: ^[I64], out: Int, input: Int) Never! {
 
 inverse: fn(w: ^[I64], out: Int, input: Int, work: Int) Never! {
     copy_field(w, out, input)
-    i := 253
+    ^i: 253
     loop {
         if i < 0 -> break
         mul(w, out, out, out, work)
@@ -157,7 +157,7 @@ inverse: fn(w: ^[I64], out: Int, input: Int, work: Int) Never! {
 
 x25519: fn(sk: [U8], point: [U8]) -> [U8] Never! {
     if sk.len() != 32 || point.len() != 32 -> panic("invalid X25519 input")
-    w := arena(204)
+    ^w: arena(204)
     load(w, 1536, sk)
     load(w, 1568, point)
     low: byte(w, 1536) & I64{248}
@@ -175,7 +175,7 @@ x25519: fn(sk: [U8], point: [U8]) -> [U8] Never! {
     store(w, 512, I64{1})
     store(w, 896, I64{56129})
     store(w, 904, I64{1})
-    i := 254
+    ^i: 254
     loop {
         if i < 0 -> break
         bit: (byte(w, 1536 + i /% 8) >> (i %% 8)) & I64{1}
@@ -269,7 +269,7 @@ point_mul: fn(w: ^[I64], p: Int, q: Int, scalar: Int) Never! {
     clear(w, p, 512)
     store(w, p + 128, I64{1})
     store(w, p + 256, I64{1})
-    i := 255
+    ^i: 255
     loop {
         if i < 0 -> break
         bit: (byte(w, scalar + i /% 8) >> (i %% 8)) & I64{1}
@@ -292,14 +292,14 @@ point_pack: fn(w: ^[I64], out: Int, p: Int) Never! {
 }
 
 #Overflow(.Wrapping) mod_l: fn(w: ^[I64], out: Int, x: Int) Never! {
-    i := 63
+    ^i: 63
     loop {
         if i < 32 -> break
         high: word(w, x + i * 8)
-        c := I64{0}
+        ^c: I64{0}
         start: i - 32
         end: i - 12
-        j := start
+        ^j: start
         loop j < end {
             v: word(w, x + j * 8) + c - I64{16} * high * C_L[j - start]
             c = (v + I64{128}) >> 8
@@ -312,7 +312,7 @@ point_pack: fn(w: ^[I64], out: Int, p: Int) Never! {
         i -= 1
     }
     top: word(w, x + 248) >> 4
-    c := I64{0}
+    ^c: I64{0}
     loop j in 0..<32 {
         v: word(w, x + j * 8) + c - top * C_L[j]
         c = v >> 8
@@ -340,21 +340,21 @@ reduce: fn(w: ^[I64], hash: Int) Never! {
 }
 
 hash_parts: fn(w: ^[I64], out: Int, a: Int, an: Int, b: Int, bn: Int, msg: [U8]) Never! {
-    data := [U8]{}
+    ^data: [U8]{}
     if !mem.__list_reserve_exact<U8>(data, an + bn + msg.len()) {
         panic("crypto hash input allocation failed")
     }
     loop i in 0..<an -> data.push(wrapping(U8{byte(w, a + i)}))
     loop i in 0..<bn -> data.push(wrapping(U8{byte(w, b + i)}))
     loop v in msg -> data.push(v)
-    digest := crypto.sha512(data).bytes
+    ^digest: crypto.sha512(data).bytes
     load(w, out, digest)
     crypto.wipe(data)
     crypto.wipe(digest)
 }
 
 expand: fn(w: ^[I64], seed: [U8]) Never! {
-    digest := crypto.sha512(seed).bytes
+    ^digest: crypto.sha512(seed).bytes
     load(w, 4096, digest)
     crypto.wipe(digest)
     low: byte(w, 4096) & I64{248}
@@ -365,7 +365,7 @@ expand: fn(w: ^[I64], seed: [U8]) Never! {
 }
 
 ed_public: fn(seed: [U8]) -> [U8] Never! {
-    w := arena(684)
+    ^w: arena(684)
     expand(w, seed)
     base(w, 1280)
     point_mul(w, 768, 1280, 4096)
@@ -376,7 +376,7 @@ ed_public: fn(seed: [U8]) -> [U8] Never! {
 }
 
 #Overflow(.Wrapping) ed_sign: fn(seed: [U8], msg: [U8]) -> [U8] Never! {
-    w := arena(696)
+    ^w: arena(696)
     expand(w, seed)
     base(w, 1280)
     point_mul(w, 768, 1280, 4096)
@@ -410,7 +410,7 @@ ed_public: fn(seed: [U8]) -> [U8] Never! {
 // These helpers process only PUBLIC verification inputs. Core rejects y>=p,
 // but retains its historical negative-zero and algebraic ordinary semantics.
 canonical_y: fn(w: [I64], bytes: Int) -> Bool Never! {
-    i := 31
+    ^i: 31
     loop {
         if i < 0 -> return false
         v: if i == 31 -> byte(w, bytes + i) & I64{127} else -> byte(w, bytes + i)
@@ -422,7 +422,7 @@ canonical_y: fn(w: [I64], bytes: Int) -> Bool Never! {
 }
 
 scalar_canonical: fn(w: [I64], scalar: Int) -> Bool Never! {
-    i := 31
+    ^i: 31
     loop {
         if i < 0 -> return false
         v: byte(w, scalar + i)
@@ -458,7 +458,7 @@ field_equal: fn(w: ^[I64], a: Int, b: Int) -> Bool Never! {
     mul(w, 1792, 2432, 1920, 2816)
     mul(w, 1792, 1792, 2048, 2816)
     copy_field(w, 2560, 1792)
-    i := 250
+    ^i: 250
     loop {
         if i < 0 -> break
         mul(w, 2560, 2560, 2560, 2816)
@@ -495,7 +495,7 @@ small_order: fn(w: ^[I64], p: Int) -> Bool Never! {
     }
     loop _ in 0..<3 -> point_add(w, 4096, 4096)
     point_pack(w, 4928, 4096)
-    diff := byte(w, 4928) ~ I64{1}
+    ^diff: byte(w, 4928) ~ I64{1}
     loop i in 1..<32 -> diff |= byte(w, 4928 + i)
     diff == I64{0}
 }
@@ -503,7 +503,7 @@ small_order: fn(w: ^[I64], p: Int) -> Bool Never! {
 canonical_point: fn(w: ^[I64], p: Int, encoded: Int) -> Bool Never! {
     // decode returns -P; invert the sign bit of its encoding unless x=0.
     point_pack(w, 4928, p)
-    diff := I64{0}
+    ^diff: I64{0}
     loop i in 0..<32 -> diff |= byte(w, 3328 + i)
     sign: if diff == (I64{0}) -> I64{0} else -> I64{128}
     value: byte(w, 4959) ~ sign
@@ -539,12 +539,12 @@ verify_equation: fn(w: ^[I64], msg: [U8]) -> Bool Never! {
 
 ed_verify: fn(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
     if pk.len() != 32 || sig.len() != 64 -> return false
-    w := arena(696)
+    ^w: arena(696)
     constants(w)
     load(w, 5472, sig)
     load(w, 5536, pk)
     valid: scalar_canonical(w, 5504) && decode(w, 1280, 5536)
-    ok := false
+    ^ok: false
     if valid -> ok = verify_equation(w, msg)
     wipe(w)
     ok
@@ -553,11 +553,11 @@ ed_verify: fn(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
 // Result codes preserve expert's existing errors: -1 rejected public key,
 // 0 invalid signature, 1 valid signature. All branching here is on public data.
 ed_verify_strict: fn(pk: [U8], msg: [U8], sig: [U8]) -> Int Never! {
-    w := arena(696)
+    ^w: arena(696)
     constants(w)
     load(w, 5472, sig)
     load(w, 5536, pk)
-    result := 0
+    ^result: 0
     if !decode(w, 1280, 5536) -> result = -1 else {
         if !canonical_point(w, 1280, 5536) -> result = -1 else {
             if !small_order(w, 1280) && decode(w, 768, 5472) {
@@ -601,7 +601,7 @@ le32: fn(w: [I64], at: Int) -> I64 Never! {
             store(w, at, value)
         }
     }
-    c := I64{0}
+    ^c: I64{0}
     loop i in 0..<5 {
         v: word(w, 120 + i * 8) + c
         store(w, 40 + i * 8, v & I64{0x3ffffff})
@@ -614,7 +614,7 @@ le32: fn(w: [I64], at: Int) -> I64 Never! {
 }
 
 #Overflow(.Wrapping) poly_finish: fn(w: ^[I64]) Never! {
-    c := I64{0}
+    ^c: I64{0}
     loop i in 1..<5 {
         v: word(w, 40 + i * 8) + c
         store(w, 40 + i * 8, v & I64{0x3ffffff})
@@ -653,7 +653,7 @@ le32: fn(w: [I64], at: Int) -> I64 Never! {
 }
 
 poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! {
-    w := arena(26)
+    ^w: arena(26)
     loop i in 0..<32 -> put(w, 176 + i, I64{key[i]})
     t0: le32(w, 176)
     t1: le32(w, 180)
@@ -668,7 +668,7 @@ poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! {
         value: byte(w, 192 + i)
         put(w, 80 + i, value)
     }
-    at := 0
+    ^at: 0
     loop at < data.len() {
         count: if data.len() - at < 16 -> data.len() - at else -> 16
         clear(w, 96, 24)
@@ -710,10 +710,10 @@ poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! {
         [U8]{72, 240, 172, 234, 52, 158, 42, 246, 151, 174, 1, 71, 39, 75, 130, 204},
         [U8]{31, 120, 88, 67, 252, 201, 126, 243, 60, 63, 185, 145, 185, 19, 183, 119},
     }
-    key := [U8]{}
+    ^key: [U8]{}
     loop i in 0..<32 -> key.push(U8{(i * 197 + 23) & 255})
     loop i in 0..<sizes.len() {
-        data := [U8]{}
+        ^data: [U8]{}
         loop j in 0..<sizes[i] -> data.push(U8{(j * 29 + 7) & 255})
         assert(poly1305(key, data) == tags[i])
     }
@@ -751,10 +751,10 @@ poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! {
         [U8]{226, 45, 97, 157, 65, 47, 111, 207, 76, 191, 114, 39, 185, 136, 212, 73},
         [U8]{163, 71, 102, 215, 132, 159, 194, 18, 19, 182, 77, 110, 156, 151, 216, 135},
     }
-    state := U32{2499746518}
+    ^state: U32{2499746518}
     loop i in 0..<32 {
-        random_key := [U8]{}
-        data := [U8]{}
+        ^random_key: [U8]{}
+        ^data: [U8]{}
         loop j in 0..<(32 + sizes[i %% sizes.len()]) {
             state ~= (state << 13)
             state ~= (state >> 17)

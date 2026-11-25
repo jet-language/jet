@@ -11,7 +11,7 @@ use {
 // whose call on line 7 spans 0x2008..<0x200d and whose line 7 goes on after
 // it.
 crash_callers_table: fn() -> X64Jetline {
-    rows := [U8]{}
+    ^rows: [U8]{}
     x64_jetline_rows(rows, [X64LineRow]{X64LineRow{at: 0, line: 5}, X64LineRow{at: 8, line: 7, column: 5, call: true}, X64LineRow{at: 13, line: 7}})
     end: rows.len()
     X64Jetline{
@@ -42,13 +42,13 @@ crash_callers_report: fn() -> [String] {
 }
 
 #Test("a release stop's callers name its `-->` line at the innermost caller outside Core, without the Core site") {
-    out := [String]{"Stop: Jet.Panic: `panic: no`"}
+    ^out: [String]{"Stop: Jet.Panic: `panic: no`"}
     left: jet_cli_crash_callers(crash_callers_report(), 2, crash_callers_table(), out)
     assert_eq(out, [String]{"Stop: Jet.Panic: `panic: no`", "  --> prog.jet:7"})
     assert_eq(left, 11)
-    report := crash_callers_report()
+    ^report: crash_callers_report()
     report[2] = "Callers with function:"
-    named := [String]{}
+    ^named: [String]{}
     _: jet_cli_crash_callers(report, 2, crash_callers_table(), named)
     assert_eq(named, [String]{"  --> prog.jet:7 in run"})
 }
@@ -56,7 +56,7 @@ crash_callers_report: fn() -> [String] {
 #Test("a release stop with no caller outside Core keeps the Core site it fell back to") {
     report: crash_callers_report()
     kept: [String]{report[0], report[1], report[2], report[3], report[4], report[7], report[8], report[9], report[10], report[11]}
-    out := [String]{}
+    ^out: [String]{}
     left: jet_cli_crash_callers(kept, 2, crash_callers_table(), out)
     assert_eq(out.len(), 0)
     assert_eq(left, 5)

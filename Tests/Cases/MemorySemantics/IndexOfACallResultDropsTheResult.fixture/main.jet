@@ -32,19 +32,19 @@ status_kb: fn(field: String) -> Int {
 }
 
 make_rows: fn(n: Int) -> [Row] {
-    rows := [Row]{}
+    ^rows: [Row]{}
     loop i in 0..<n -> rows.push(Row{name: "row {i}", items: [String]{"a {i}", "b {i}"}})
     rows
 }
 
 make_map: fn(n: Int) -> [String:Int] {
-    map := [String:Int]{}
+    ^map: [String:Int]{}
     loop i in 0..<n -> map["key {i}"] = i
     map
 }
 
 make_names: fn(n: Int) -> [String:String] {
-    map := [String:String]{}
+    ^map: [String:String]{}
     loop i in 0..<n -> map["key {i}"] = "name {i}"
     map
 }
@@ -75,13 +75,13 @@ map_text_returned: fn() -> String { return make_names(16)["key 7"] }
 
 // A Map value read in a loop condition, once per pass.
 map_value_in_a_loop_condition: fn() -> Int {
-    passes := 0
+    ^passes: 0
     loop passes < make_map(16)["key 4"] -> passes += 1
     passes
 }
 
 measure: fn(name: String, scenario: fn() -> Int) {
-    total := scenario()
+    ^total: scenario()
     start: status_kb("VmRSS:")
     loop _ in 1..<ROUNDS -> total += scenario()
     grown: status_kb("VmRSS:") - start

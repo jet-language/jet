@@ -18,7 +18,7 @@ use jet_pkg_model.[
         trust: facts.authority.trust ?? panic("trust")
         assert_eq(trust.require, Val(expected[index]))
     }
-    lock := pkg_lock_parse(
+    ^lock: pkg_lock_parse(
         `version = 1
 
 [[package]]
@@ -42,7 +42,7 @@ dependencies = ["textkit"]
         .Ok(_) -> false
     }
     assert(logged_rejected)
-    provenance := DependencyProvenance{transparency: Val("registry log #48122"), publisher: Val("ed25519:ak3f \"textkit team\""), build: None}
+    ^provenance: DependencyProvenance{transparency: Val("registry log #48122"), publisher: Val("ed25519:ak3f \"textkit team\""), build: None}
     lock.packages[0].provenance = Val(provenance)
     lock.packages[0].envelope = Val(LockEnvelope{output_hash: "sha256-output", platform: "x86_64-linux", signature: "", provenance: "provider-built", catalog_tier: "", catalog_trust: ""})
     if pkg_lock_enforce_provenance_requirement(lock, ProvenanceRequirement.Logged) == {

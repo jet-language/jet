@@ -80,7 +80,7 @@ jet_cli_import_boundary_value: fn(plan: JetCLIImportPlan) -> JetCLIStatusValue N
 
 // `report` is the ordered report value as one JSON line.
 jet_cli_import_report_value: fn(plan: JetCLIImportPlan) -> JetCLIStatusValue Never! {
-    omissions := [JetCLIStatusValue]{}
+    ^omissions: [JetCLIStatusValue]{}
     loop todo in plan.todos {
         diagnostic: jet_cli_import_todo_diagnostic(todo)
         omissions.push(
@@ -141,7 +141,7 @@ jet_cli_import_attach_evidence: fn(plan: ^JetCLIImportPlan) JetCLIImportPlanErro
     }
     derivation: plan.evidence.derivations.records[0].copy()
     record: plan.evidence.records[0].copy()
-    boundary := plan.boundary.copy()
+    ^boundary: plan.boundary.copy()
     boundary = boundary.attach_derivation(derivation) ?? return Err(jet_cli_import_plan_error(err.message))
     boundary = boundary.attach_evidence(record) ?? return Err(jet_cli_import_plan_error(err.message))
     boundary.validate() ?? return Err(jet_cli_import_plan_error(err.message))
@@ -157,7 +157,7 @@ jet_cli_import_persist_evidence: fn(report: EvidenceReport, target_inputs_sha256
     }
     bytes: evidence_report_encode(report) ?? return Err(jet_cli_read_error(err.message))
     artifact_id: import_crypto.sha256(bytes).hex()
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     jet_cli_evidence_persist(cache, report, bytes, artifact_id, target_inputs_sha256, true) ?? return Err(err)
 }
 
@@ -204,11 +204,11 @@ jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: Strin
 }
 
 jet_cli_import_apply: fn(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: Bool) -[FS, Env, Time, IO]> JetDriverVerbOutput Never! {
-    current := plan
+    ^current: plan
     if mode != JetCLIImportMode.DryRun {
         jet_cli_import_attach_evidence(current) ?? return jet_cli_import_operation_error("attach import evidence", err.message, json)
     }
-    accepted := ForeignSourceReceipt?{None}
+    ^accepted: ForeignSourceReceipt?{None}
     if mode == JetCLIImportMode.Update {
         cwd: import_out_sys.current_dir() ?? return jet_cli_import_operation_error("read current directory", jet_cli_io_error_text(err), json)
         receipt: jet_cli_import_accept_update_replacement(current, cwd) ?? return jet_cli_import_operation_error("accept source replacement", err.message, json)
@@ -216,8 +216,8 @@ jet_cli_import_apply: fn(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: B
     }
     report: jet_cli_import_report(current)
     baseline_root: import_out_files.join(current.target, ".jet-import/baseline")
-    writes := [JetCLIImportWrite]{}
-    conflicts := [String]{}
+    ^writes: [JetCLIImportWrite]{}
+    ^conflicts: [String]{}
     loop generated in current.generated {
         jet_cli_import_stage(mode, import_out_files.join(current.target, generated.relative), import_out_files.join(baseline_root, generated.relative), generated.contents, writes, conflicts)
     }
@@ -251,9 +251,9 @@ jet_cli_import_apply: fn(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: B
     }
     verb: if mode == JetCLIImportMode.DryRun -> "Would import" else -> "Imported"
     boundary: current.boundary
-    out := "{verb} {current.source} -> {current.target}\n  {current.functions} functions, {current.tests} carried tests, {current.todos.len()} TODO diagnostics\n  Migration: {boundary.disposition.as_str()} (mode: {jet_cli_import_migration_mode(boundary)}; source conversion: {jet_cli_import_migration_source_conversion(boundary)}; source authority: {boundary.source_authority.as_str()})\n"
+    ^out: "{verb} {current.source} -> {current.target}\n  {current.functions} functions, {current.tests} carried tests, {current.todos.len()} TODO diagnostics\n  Migration: {boundary.disposition.as_str()} (mode: {jet_cli_import_migration_mode(boundary)}; source conversion: {jet_cli_import_migration_source_conversion(boundary)}; source authority: {boundary.source_authority.as_str()})\n"
     loop todo in current.todos {
-        diagnostic := jet_cli_import_todo_diagnostic(todo)
+        ^diagnostic: jet_cli_import_todo_diagnostic(todo)
         diagnostic.detail = Val(" Target: {todo.target}\n Status: {todo.status}")
         out = "{out}{diagnostic_render(diagnostic, "", "", false)}"
     }

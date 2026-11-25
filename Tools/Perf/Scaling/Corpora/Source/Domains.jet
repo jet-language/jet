@@ -64,7 +64,7 @@ call: fn(r: ^Seeded, h: [String], x: String) -> String {
 
 // Sixteen comma-separated values per line, as table rows.
 table_rows: fn(values: [Int]) -> String {
-    rows := [String]{}
+    ^rows: [String]{}
     loop row in 0..<values.len() /% 16 {
         rows.push("        {values.slice(row * 16, row * 16 + 16).map(fn(value) { "{value}" }).join(", ")},")
     }
@@ -72,7 +72,7 @@ table_rows: fn(values: [Int]) -> String {
 }
 
 draws: fn(r: ^Seeded, count: Int, hi: Int) -> [Int] {
-    values := [Int]{}
+    ^values: [Int]{}
     loop _ in 0..<count -> values.push(r.int(0, hi))
     values
 }
@@ -98,7 +98,7 @@ float_rules: fn() -> FloatRules {
 float_literals: fn(line: String, rules: FloatRules) -> String {
     codes: rules.strings.split(line)
     quoted: rules.strings.find_all(line)
-    out := [String]{}
+    ^out: [String]{}
     loop k in 0..<codes.len() {
         out.push(rules.decimals.replace(codes[k], "Float{{$0}}"))
         // copy: the string literal joins the line
@@ -124,14 +124,14 @@ domain_files: fn(name: String, target: Int, r: ^Seeded) -> [String:String] {
         "generated": fn(k, i, h) { generated(k, i, r, h) },
     }
     unit_of: units[name]
-    files := [String:String]{}
-    entries := [String]{}
-    helpers := [String]{}
-    code := code_of(domain.common) + 8
-    file := [String]{}
-    file_code := 0
-    index := 0
-    i := 0
+    ^files: [String:String]{}
+    ^entries: [String]{}
+    ^helpers: [String]{}
+    ^code: code_of(domain.common) + 8
+    ^file: [String]{}
+    ^file_code: 0
+    ^index: 0
+    ^i: 0
     loop code < target || i < domain.kinds {
         made: unit_of(i % domain.kinds, i, helpers)
         loop line in made.lines -> file.push(float_literals(line, rules))
@@ -1577,7 +1577,7 @@ absf: fn(v: Float) -> Float {{ if v < 0.0 -> 0.0 - v else -> v }}
 scientific: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
-            coefficients := [String]{}
+            ^coefficients: [String]{}
             loop _ in 0..<6 {
                 whole: r.int(0, 9)
                 coefficients.push("{whole}.{r.int(0, 9)}")
@@ -1798,11 +1798,11 @@ generated: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             types: ["Int", "String", "Bool"]
-            fields := [String]{}
-            zeros := [String]{}
-            samples := [String]{}
-            encodes := [String]{}
-            numbers := [String]{}
+            ^fields: [String]{}
+            ^zeros: [String]{}
+            ^samples: [String]{}
+            ^encodes: [String]{}
+            ^numbers: [String]{}
             loop f in 0..<16 {
                 kind: (f + i) % 3
                 fields.push("    field_{f}: {types[kind]},")
@@ -1842,9 +1842,9 @@ generated: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
             )
         },
         fn() {
-            variants := [String]{}
-            to_code := [String]{}
-            from_code := [String]{}
+            ^variants: [String]{}
+            ^to_code: [String]{}
+            ^from_code: [String]{}
             loop v in 0..<24 {
                 variants.push("    Kind{v},")
                 to_code.push("        .Kind{v} -> {v * 3 + 1}")
@@ -1899,11 +1899,11 @@ generated: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
         },
         fn() {
             names: ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
-            fields := [String]{}
-            accessors := [String]{}
-            values := [String]{}
-            sets := [String]{}
-            gets := [String]{}
+            ^fields: [String]{}
+            ^accessors: [String]{}
+            ^values: [String]{}
+            ^sets: [String]{}
+            ^gets: [String]{}
             loop (index, name) in names {
                 fields.push("    {name}: Int,")
                 accessors.extend(["    get_{name}: fn(self) -> Int {{ self.{name} }}", "    set_{name}: fn(^self, value: Int) {{ self.{name} = value }}"])

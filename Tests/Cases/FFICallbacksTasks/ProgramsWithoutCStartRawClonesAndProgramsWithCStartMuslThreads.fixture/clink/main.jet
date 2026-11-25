@@ -11,10 +11,10 @@ use c: c.probe
 
 run: fn() {
     c.mark_initial()
-    workers := [Task<Int>]{}
+    ^workers: [Task<Int>]{}
     loop _ in 0..<16 { workers.push(task { c.place() }) }
-    own := 0
-    shared := 0
+    ^own: 0
+    ^shared: 0
     loop worker in workers {
         place: worker.join() ?? panic("C probe task")
         if place == 1 -> own += 1

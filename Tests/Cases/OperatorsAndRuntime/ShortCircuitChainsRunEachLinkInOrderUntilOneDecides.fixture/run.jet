@@ -24,19 +24,19 @@ run: fn() {
         a: mask & 1 != 0
         b: mask & 2 != 0
         c: mask & 4 != 0
-        any := [String]{}
+        ^any: [String]{}
         either: probe(any, "a", a) || probe(any, "b", b) || probe(any, "c", c)
-        all := [String]{}
+        ^all: [String]{}
         every: probe(all, "a", a) && probe(all, "b", b) && probe(all, "c", c)
-        mixed := [String]{}
+        ^mixed: [String]{}
         some: probe(mixed, "a", a) || (probe(mixed, "b", b) && probe(mixed, "c", c)) || probe(mixed, "d", !a)
         print("{mask}: or={either} [{any.join(",")}] and={every} [{all.join(",")}] mixed={some} [{mixed.join(",")}]")
     }
     raw: "1234x67:9".bytes()
-    digits := [String]{}
+    ^digits: [String]{}
     loop at in 0..<(raw.len() - 1) -> digits.push("{two_digits(raw, at)}")
     print("digits {digits.join(" ")}")
-    words := 0
+    ^words: 0
     loop c in "a1-Z_9 q".bytes() {
         if word_byte(c) -> words += 1
     }

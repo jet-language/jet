@@ -47,10 +47,14 @@ derivation_store_new: fn() -> DerivationStore Never! {
 
 // Interns `record`: its reference, shared with an equal record already held.
 derivation_store_add: fn(store: ^DerivationStore, record: ^^DerivationRecord) -> DerivationRef DerivationStoreError! {
-    if !derivation_record_validate(record) -> return Err(DerivationStoreError{message: "derivation {record.id} has a non-canonical identity"})
+    if !derivation_record_validate(record) {
+        return Err(DerivationStoreError{message: "derivation {record.id} has a non-canonical identity"})
+    }
     reference: derivation_record_reference(record)
     if name_column_get(store.keys, store.slots, record.id) == .Val(slot) {
-        if store.records[slot] != record -> return Err(DerivationStoreError{message: "two different derivation records claim the id {record.id}"})
+        if store.records[slot] != record {
+            return Err(DerivationStoreError{message: "two different derivation records claim the id {record.id}"})
+        }
         return Ok(reference)
     }
     derivation_store_index(store, store.records.len(), record)
@@ -74,15 +78,17 @@ derivation_store_index: fn(store: ^DerivationStore, slot: Int, record: Derivatio
 // one, and two stores holding the same records are equal whatever order
 // their producers added them in.
 derivation_store_sort: fn(store: ^DerivationStore) Never! {
-    sorted := true
+    ^sorted: true
     loop index in 1..<store.records.len() {
         if store.records[index - 1].id > store.records[index].id {
             sorted = false
             break
         }
     }
-    if sorted -> return
-    records := loop fresh_item in store.records -> fresh_item
+    if sorted {
+        return
+    }
+    ^records: loop fresh_item in store.records -> fresh_item
     records.sort_by(fn(left: DerivationRecord, right: DerivationRecord) { left.id <=> right.id })
     store.keys = name_column_table()
     store.slots = name_column()
@@ -99,7 +105,7 @@ derivation_store_record: fn(store: DerivationStore, reference: DerivationRef) ->
 
 // The records that conclude `subject`.
 derivation_store_subject: fn(store: DerivationStore, subject: String) -> [DerivationRecord] Never! {
-    records := [DerivationRecord]{}
+    ^records: [DerivationRecord]{}
     row: name_column_get(store.keys, store.subjects, subject) ?? return records
     loop slot in store.subject_rows[row] -> records.push(store.records[slot])
     records
@@ -110,25 +116,33 @@ derivation_store_subject: fn(store: DerivationStore, subject: String) -> [Deriva
 // names neither (a source hash, an operation) is a leaf. Each record appears
 // once, where the walk first reaches it.
 derivation_store_chain: fn(store: DerivationStore, subject: String) -> [DerivationChainStep] Never! {
-    steps := [DerivationChainStep]{}
-    shown := loop _ in store.records -> false
-    loop slot in derivation_store_premise_slots(store, subject) -> derivation_store_chain_from(store, slot, 0, shown, steps)
+    ^steps: [DerivationChainStep]{}
+    ^shown: loop _ in store.records -> false
+    loop slot in derivation_store_premise_slots(store, subject) {
+        derivation_store_chain_from(store, slot, 0, shown, steps)
+    }
     steps
 }
 
 derivation_store_chain_from: fn(store: DerivationStore, slot: Int, depth: Int, shown: ^[Bool], steps: ^[DerivationChainStep]) Never! {
-    if shown[slot] -> return
+    if shown[slot] {
+        return
+    }
     shown[slot] = true
     steps.push(DerivationChainStep{depth: depth, record: store.records[slot]})
     loop premise in store.records[slot].premises {
-        loop premise_slot in derivation_store_premise_slots(store, premise) -> derivation_store_chain_from(store, premise_slot, depth + 1, shown, steps)
+        loop premise_slot in derivation_store_premise_slots(store, premise) {
+            derivation_store_chain_from(store, premise_slot, depth + 1, shown, steps)
+        }
     }
 }
 
 // The rows `name` reaches: the records concluding it as a subject, else the
 // record it names by id.
 derivation_store_premise_slots: fn(store: DerivationStore, name: String) -> [Int] Never! {
-    if name_column_get(store.keys, store.subjects, name) == .Val(row) -> return store.subject_rows[row]
+    if name_column_get(store.keys, store.subjects, name) == .Val(row) {
+        return store.subject_rows[row]
+    }
     if name_column_get(store.keys, store.slots, name) == .Val(slot) -> return [Int]{slot}
     [Int]{}
 }
@@ -138,7 +152,7 @@ derivation_store_premise_slots: fn(store: DerivationStore, name: String) -> [Int
 // disposition when it is not current.
 derivation_record_line: fn(record: DerivationRecord) -> String Never! {
     method: derivation_method_raw(record.method).replace("_", " ")
-    line := "{record.producer} · {record.rule} · {method}"
+    ^line: "{record.producer} · {record.rule} · {method}"
     if record.disposition != DerivationDisposition.Current {
         line = "{line} · {derivation_disposition_raw(record.disposition).replace("_", " ")}"
     }

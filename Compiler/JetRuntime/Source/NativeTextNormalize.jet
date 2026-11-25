@@ -61,9 +61,9 @@ normal_decompose_cp: fn(buffer: I64, cp: I64) {
 
 // Scratch is allocated only for an unordered run, and reused for later runs.
 normal_canon_order: fn(buffer: I64) {
-    positions := I64{0}
-    scratch := I64{0}
-    at := I64{0}
+    ^positions: I64{0}
+    ^scratch: I64{0}
+    ^at: I64{0}
     length: rt_text_len(buffer)
     loop at < length {
         if (unicode_normal_ccc(normal_buffer_get(buffer, at)) == I64{0}) {
@@ -71,8 +71,8 @@ normal_canon_order: fn(buffer: I64) {
             next
         }
         start: at
-        previous := I64{0}
-        unordered := false
+        ^previous: I64{0}
+        ^unordered: false
         loop at < length {
             class: unicode_normal_ccc(normal_buffer_get(buffer, at))
             if (class == I64{0}) { break }
@@ -85,18 +85,18 @@ normal_canon_order: fn(buffer: I64) {
             positions = jet_rt_alloc(I64{2048}, I64{8})
             scratch = normal_buffer_new()
         }
-        class := I64{1}
+        ^class: I64{1}
         loop class < (I64{256}) {
             rt_text_store(wrapping(positions + class * I64{8}), I64{0})
             class += I64{1}
         }
-        i := start
+        ^i: start
         loop i < at {
             cell: positions + unicode_normal_ccc(normal_buffer_get(buffer, i)) * I64{8}
             rt_text_store(cell, rt_text_word(cell) + I64{1})
             i += I64{1}
         }
-        offset := I64{0}
+        ^offset: I64{0}
         class = I64{1}
         loop class < (I64{256}) {
             cell: positions + class * I64{8}
@@ -141,10 +141,10 @@ normal_compose_pair: fn(a: I64, b: I64) -> I64 {
 }
 
 normal_compose: fn(buffer: I64) -> I64 {
-    length := I64{0}
-    starter := I64{-1}
-    last_class := I64{-1}
-    i := I64{0}
+    ^length: I64{0}
+    ^starter: I64{-1}
+    ^last_class: I64{-1}
+    ^i: I64{0}
     loop i < rt_text_len(buffer) {
         cp: normal_buffer_get(buffer, i)
         class: unicode_normal_ccc(cp)
@@ -169,7 +169,7 @@ normal_compose: fn(buffer: I64) -> I64 {
 native_text_normalize_nfc: fn(value: I64) -> I64 {
     data: rt_text_data(value)
     bytes: rt_text_len(value)
-    at := I64{0}
+    ^at: I64{0}
     loop at < bytes && rt_text_byte(wrapping(data + at)) < (I64{128}) -> at += I64{1}
     if at == bytes -> return jet_rt_string_clone(value)
     buffer: normal_buffer_new()
@@ -180,7 +180,7 @@ native_text_normalize_nfc: fn(value: I64) -> I64 {
     }
     normal_canon_order(buffer)
     length: normal_compose(buffer)
-    output_bytes := I64{0}
+    ^output_bytes: I64{0}
     at = I64{0}
     loop at < length {
         cp: normal_buffer_get(buffer, at)

@@ -19,7 +19,7 @@ use jet_foundation.[
 sema_inference_binding_type: fn(name: String, bindings: [SemaInferenceBinding], seen: [String]) -> Type? {
     loop binding in bindings {
         if binding.name == name {
-            next_seen := seen
+            ^next_seen: seen
             next_seen.push(name.copy())
             value: binding.ty
             if value == .Named(next) {
@@ -69,7 +69,7 @@ sema_inference_substitute_type_inner: fn(ty: Type, bindings: [SemaInferenceBindi
             // copy: the substituted type is a new owned Type. For a self-binding it equals `ty`,
             // the caller's type (a read parameter), which stays in the signature.
             if type_identity_equal(value, ty) -> return ty.copy()
-            next_seen := seen
+            ^next_seen: seen
             next_seen.push(name.copy())
             sema_inference_substitute_type_inner(value, bindings, next_seen, chain)
         }
@@ -129,12 +129,12 @@ sema_inference_union_binds_member: fn(members: [Type], bindings: [SemaInferenceB
 // `(KeyError | ShopError)!`, and a union every member of which is `Never` is
 // `Never`.
 sema_inference_failure_union: fn(members: [Type]) -[]> Type {
-    flat := [Type]{}
+    ^flat: [Type]{}
     loop member in members -> sema_failure_union_flatten(member, flat)
-    index := flat.len()
+    ^index: flat.len()
     loop index > 0 {
         index -= 1
-        if flat[index] == (Type.Named{name: "Never"}) -> _ := flat.remove(index, .Slot)
+        if flat[index] == (Type.Named{name: "Never"}) -> ^_: flat.remove(index, .Slot)
     }
     if flat.len() == 0 -> return Type.Named{name: "Never"}
     sema_failure_union_canonical(flat)

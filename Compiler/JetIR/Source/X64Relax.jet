@@ -67,23 +67,23 @@ ir_x64_loop_align: fn(length: Int) -> Int Never! {
 // instruction starts, in any order, no loop inside another), each loop
 // ending at `ends` (the same index), and returns the layout map.
 ir_x64_relax: fn(code: ^[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
-    r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, stays_long: [Bool]{}, gone: [Bool]{}, shrunk: [Int]{}, heads: [Int]{}, ends: [Int]{}, pads: [Int]{}, padded: [Int]{}, align: X64_FUNCTION_ALIGN}
+    ^r: IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, stays_long: [Bool]{}, gone: [Bool]{}, shrunk: [Int]{}, heads: [Int]{}, ends: [Int]{}, pads: [Int]{}, padded: [Int]{}, align: X64_FUNCTION_ALIGN}
     if sites.len() == 0 && heads.len() == 0 -> return r
-    sorted := true
+    ^sorted: true
     loop i in 1..<sites.len() {
         if sites[i] < sites[i - 1] {
             sorted = false
             break
         }
     }
-    ordered := if sorted -> sites else -> {
-        tmp := [Int]{}
+    ^ordered: if sorted -> sites else -> {
+        ^tmp: [Int]{}
         loop s in sites -> tmp.push(s)
         tmp.sort()
         tmp
     }
     has_pinned: pinned.len() > 0
-    targets := [Int]{}
+    ^targets: [Int]{}
     loop site in ordered {
         if r.sites.len() > 0 && r.sites[r.sites.len() - 1] == site -> next
         jump: Int{code[site - 1]} == 0xe9
@@ -102,7 +102,7 @@ ir_x64_relax: fn(code: ^[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [
         r.ends.push(ends[index])
         r.pads.push(0)
         r.padded.push(0)
-        at := r.heads.len() - 1
+        ^at: r.heads.len() - 1
         loop at > 0 && r.heads[at - 1] > r.heads[at] {
             moved: r.heads[at - 1]
             r.heads[at - 1] = r.heads[at]
@@ -117,9 +117,9 @@ ir_x64_relax: fn(code: ^[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [
     ir_x64_relax_shrink(r)
     has_heads: r.heads.len() > 0
     site_count: r.sites.len()
-    end_heads := [Int]{}
-    target_branches := [Int]{}
-    target_heads := [Int]{}
+    ^end_heads: [Int]{}
+    ^target_branches: [Int]{}
+    ^target_heads: [Int]{}
     loop index in 0..<site_count {
         target_branches.push(ir_x64_relax_branches_to(r, targets[index]))
         if has_heads {
@@ -128,8 +128,8 @@ ir_x64_relax: fn(code: ^[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [
             target_heads.push(ir_x64_relax_heads_to(r, targets[index], true))
         }
     }
-    changed := true
-    shorten := [Int]{}
+    ^changed: true
+    ^shorten: [Int]{}
     loop changed {
         changed = false
         if has_heads {
@@ -170,11 +170,11 @@ ir_x64_relax: fn(code: ^[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [
             changed = true
         }
     }
-    out := [U8]{}
+    ^out: [U8]{}
     if out.try_reserve(code.len()) == .Err(_) {}
-    copied := 0
-    branch := 0
-    head := 0
+    ^copied: 0
+    ^branch: 0
+    ^head: 0
     loop branch < site_count || head < r.heads.len() {
         // A head's no-ops go before a branch that starts there.
         if head < r.heads.len() && (branch >= site_count || r.heads[head] <= r.starts[branch]) {
@@ -219,7 +219,7 @@ ir_x64_relax: fn(code: ^[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [
 // How many bytes the code up to and including each branch shrank by, from
 // the branches short now and the jmps gone.
 ir_x64_relax_shrink: fn(r: ^IRX64Relax) Never! {
-    total := 0
+    ^total: 0
     loop index in 0..<r.sites.len() {
         if r.gone[index] -> total += r.lengths[index] else if r.short[index] {
             total += r.lengths[index] - 2
@@ -236,11 +236,13 @@ ir_x64_relax_shrink: fn(r: ^IRX64Relax) Never! {
 // jmp or a loop head starts there, as that code would no longer exist. A
 // tail jump is a relocation, not a listed branch, so it never fuses.
 ir_x64_relax_fuse: fn(code: ^[U8], r: ^IRX64Relax, targets: ^[Int]) Never! {
-    if r.sites.len() < 2 -> return
-    landed := targets.copy()
+    if r.sites.len() < 2 {
+        return
+    }
+    ^landed: targets.copy()
     landed.sort()
-    seen := 0
-    index := 0
+    ^seen: 0
+    ^index: 0
     loop index + 1 < r.sites.len() {
         jump: index + 1
         start: r.starts[jump]
@@ -259,7 +261,7 @@ ir_x64_relax_fuse: fn(code: ^[U8], r: ^IRX64Relax, targets: ^[Int]) Never! {
 // order: the head's place after the shrinking and the no-ops before it,
 // and its loop's length there (no head is inside it).
 ir_x64_relax_pad: fn(r: ^IRX64Relax) Never! {
-    total := 0
+    ^total: 0
     loop index in 0..<r.heads.len() {
         at: r.heads[index] - ir_x64_relax_shrunk(r, r.heads[index]) + total
         length: r.ends[index] - ir_x64_relax_shrunk(r, r.ends[index]) + total - at
@@ -299,11 +301,11 @@ ir_x64_relax_walk: fn() -> IRX64RelaxWalk Never! { IRX64RelaxWalk{branches: 0, h
 // `at`: an offset a little after the last one steps over the few branches
 // and heads between them; any other searches for its place.
 ir_x64_relaxed_next: fn(r: IRX64Relax, walk: ^IRX64RelaxWalk, at: Int) -> Int Never! {
-    branches := walk.branches
+    ^branches: walk.branches
     if branches > r.sites.len() || (branches > 0 && r.starts[branches - 1] + r.lengths[branches - 1] > at) {
         branches = ir_x64_relax_branches_to(r, at)
     } else {
-        steps := 0
+        ^steps: 0
         loop branches < r.sites.len() && r.starts[branches] + r.lengths[branches] <= at {
             if steps == IR_X64_RELAX_WALK_STEPS {
                 branches = ir_x64_relax_branches_to(r, at)
@@ -313,7 +315,7 @@ ir_x64_relaxed_next: fn(r: IRX64Relax, walk: ^IRX64RelaxWalk, at: Int) -> Int Ne
             steps += 1
         }
     }
-    heads := walk.heads
+    ^heads: walk.heads
     if heads > r.heads.len() || (heads > 0 && r.heads[heads - 1] > at) {
         heads = ir_x64_relax_heads_to(r, at, true)
     } else {
@@ -343,24 +345,26 @@ ir_x64_relax_shrunk: fn(r: IRX64Relax, at: Int) -> Int Never! {
 
 // How many branches end at or before `at`.
 ir_x64_relax_branches_to: fn(r: IRX64Relax, at: Int) -> Int Never! {
-    low := I64{0}
-    high := I64{r.sites.len()}
+    ^low: I64{0}
+    ^high: I64{r.sites.len()}
     loop low < high {
         middle: Int{(low + high) >> I64{1}}
-        if r.starts[middle] + r.lengths[middle] <= at -> low = I64{middle} + I64{1} else -> high = I64{middle}
+        if r.starts[middle] + r.lengths[middle] <= at -> low = I64{middle} + I64{1} else {
+            high = I64{middle}
+        }
     }
     Int{low}
 }
 
 // How many heads lie before `at` (and at it, when `inclusive`).
 ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
-    low := I64{0}
-    high := I64{r.heads.len()}
+    ^low: I64{0}
+    ^high: I64{r.heads.len()}
     loop low < high {
         middle: Int{(low + high) >> I64{1}}
-        if r.heads[middle] < at || (inclusive && r.heads[middle] == at) -> low = I64{middle} + I64{1} else {
-            high = I64{middle}
-        }
+        if r.heads[middle] < at || (inclusive && r.heads[middle] == at) {
+            low = I64{middle} + I64{1}
+        } else { high = I64{middle} }
     }
     Int{low}
 }
@@ -369,7 +373,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
 // back to its head: both jumps go short, the 22-byte loop starts on a
 // 32-byte window, and the forward jump lands after it.
 #Test("A small loop's head starts on its window after the branches before it shrink") {
-    code := [U8]{0xe9, 0, 0, 0, 0, 0x90, 0x90, 0x90}
+    ^code: [U8]{0xe9, 0, 0, 0, 0, 0x90, 0x90, 0x90}
     loop _ in 0..<20 -> code.push(U8{0x90})
     code.push(U8{0xe9})
     loop _ in 0..<4 -> code.push(U8{0})
@@ -390,8 +394,8 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
 // offsets walked in rising order, in falling order and in strides map as
 // ir_x64_relaxed_at maps each one alone.
 #Test("A walk maps offsets in any order as the search does") {
-    code := [U8]{}
-    sites := [Int]{}
+    ^code: [U8]{}
+    ^sites: [Int]{}
     loop _ in 0..<20 {
         start: code.len()
         code.push(U8{0xe9})
@@ -402,11 +406,11 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
     }
     length: code.len()
     r: ir_x64_relax(code, sites, [Int]{}, [Int]{80}, [Int]{120})
-    offsets := [Int]{}
+    ^offsets: [Int]{}
     loop at in 0..<(length + 1) -> offsets.push(at)
     loop at in 0..<(length + 1) -> offsets.push(length - at)
     loop k in 0..<(length + 1) -> offsets.push(k * 37 % (length + 1))
-    walk := ir_x64_relax_walk()
+    ^walk: ir_x64_relax_walk()
     loop at in offsets -> assert_eq(ir_x64_relaxed_next(r, walk, at), ir_x64_relaxed_at(r, at))
 }
 
@@ -414,7 +418,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
 // grow the head's padding from 6 to 9 bytes and land 129 bytes on, so it
 // stays long, and the head still starts on 16.
 #Test("A branch the head's padding pushes out of reach stays long") {
-    code := [U8]{0xe9, 0, 0, 0, 0}
+    ^code: [U8]{0xe9, 0, 0, 0, 0}
     loop _ in 0..<118 -> code.push(U8{0x90})
     code.push(U8{0xe9})
     loop _ in 0..<4 -> code.push(U8{0})
@@ -432,7 +436,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
 // je over a jmp to a ret 9 filler bytes on: the je becomes a short jne to
 // the ret, and the jmp goes; its offsets map to the filler after it.
 #Test("A jcc over the jmp after it takes the jmp's target inverted") {
-    code := [U8]{0x0f, 0x84, 0, 0, 0, 0, 0xe9, 0, 0, 0, 0}
+    ^code: [U8]{0x0f, 0x84, 0, 0, 0, 0, 0xe9, 0, 0, 0, 0}
     loop _ in 0..<9 -> code.push(U8{0x90})
     code.push(U8{0xc3})
     x64_patch_rel32(code, 2, 11)
@@ -450,7 +454,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
 
 // The same shape, but a later jmp lands on the jmp: both stay, short.
 #Test("A jmp another branch lands on stays after the jcc over it") {
-    code := [U8]{0x0f, 0x84, 0, 0, 0, 0, 0xe9, 0, 0, 0, 0}
+    ^code: [U8]{0x0f, 0x84, 0, 0, 0, 0, 0xe9, 0, 0, 0, 0}
     loop _ in 0..<9 -> code.push(U8{0x90})
     code.push(U8{0xe9})
     loop _ in 0..<4 -> code.push(U8{0})
@@ -471,7 +475,7 @@ ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never!
 // The je-over-jmp shape again, but the jmp is pinned (a patchable zone
 // site): the jmp stays, long, and the je only goes short.
 #Test("A pinned jmp keeps its rel32 form and is never fused") {
-    code := [U8]{0x0f, 0x84, 0, 0, 0, 0, 0xe9, 0, 0, 0, 0}
+    ^code: [U8]{0x0f, 0x84, 0, 0, 0, 0, 0xe9, 0, 0, 0, 0}
     loop _ in 0..<9 -> code.push(U8{0x90})
     code.push(U8{0xc3})
     x64_patch_rel32(code, 2, 11)

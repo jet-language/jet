@@ -263,11 +263,11 @@ parser_parse_expression_restricted: fn(state: ^JetParserState, minimum: Int, dep
         return parser_parse_operators(state, minimum, depth, allow_struct_lit, stop_before_comparison)
     }
     state.pipe_owner_depths.push(level)
-    left := parser_parse_operators(state, minimum, depth, allow_struct_lit, stop_before_comparison)
+    ^left: parser_parse_operators(state, minimum, depth, allow_struct_lit, stop_before_comparison)
     if parser_current_kind(state) == TOKEN_PIPE_GT {
         left = parser_parse_pipe(state, left, depth + 1, allow_struct_lit)
     }
-    _ := state.pipe_owner_depths.pop()
+    ^_: state.pipe_owner_depths.pop()
     left
 }
 
@@ -276,7 +276,7 @@ parser_parse_expression_restricted: fn(state: ^JetParserState, minimum: Int, dep
 parser_token_depth: fn(state: ^JetParserState, index: Int) -> Int {
     if state.token_depths.len() != state.tokens.len() {
         state.token_depths = [Int]{}
-        level := 0
+        ^level: 0
         loop cursor in 0..<state.tokens.len() {
             kind: state.tokens[cursor].kind
             if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> level -= 1
@@ -296,11 +296,11 @@ parser_token_depth: fn(state: ^JetParserState, index: Int) -> Int {
 // binding may hide it) keeps the hidden name. A step that never reads `<>`
 // keeps `reads` at 0 for sema's E0438, whose fix needs the value's type.
 parser_parse_pipe: fn(state: ^JetParserState, head: ParsedExpr, depth: Int, allow_struct_lit: Bool) -> ParsedExpr {
-    steps := [PipeStep]{}
-    end := head.span
+    ^steps: [PipeStep]{}
+    ^end: head.span
     loop parser_current_kind(state) == TOKEN_PIPE_GT {
         bar: parser_bump(state)
-        name := pipe_value_name(bar.span.start)
+        ^name: pipe_value_name(bar.span.start)
         if steps.len() == 0 {
             // copy: the head keeps its name; the first step reads it as `<>`.
             if head.expr == .Ident(head_name, _, _) -> name = head_name.copy()
@@ -309,7 +309,7 @@ parser_parse_pipe: fn(state: ^JetParserState, head: ParsedExpr, depth: Int, allo
         saved_diagnostics: state.diagnostics.len()
         saved_blocks: state.block_spans.len()
         saved_else_arms: state.else_arms.len()
-        step := parser_parse_pipe_step(state, name, depth, allow_struct_lit)
+        ^step: parser_parse_pipe_step(state, name, depth, allow_struct_lit)
         if !pipe_value_is_name(name) && parser_pipe_step_writes(state, start, name) {
             parser_rewind(state, start, saved_diagnostics, saved_blocks, saved_else_arms)
             name = pipe_value_name(bar.span.start)
@@ -331,7 +331,7 @@ parser_parse_pipe_step: fn(state: ^JetParserState, name: String, depth: Int, all
     state.pipe_step_reads.push(0)
     value: parser_parse_expression_restricted(state, 1, depth + 1, allow_struct_lit, false)
     reads: state.pipe_step_reads.pop() ?? 0
-    _ := state.pipe_step_names.pop()
+    ^_: state.pipe_step_names.pop()
     {value: value, reads: reads}
 }
 
@@ -387,8 +387,8 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
     // into its subject (`if ^slot == .Val(item) -> item.count += 1`); a `^`
     // that a pattern test does not follow is not a value. `^^` opens a take
     // mark on a receiver (parser_parse_take_mark).
-    marked_subject := parser_write_mark(parser_current_kind(state))
-    left := if {
+    ^marked_subject: parser_write_mark(parser_current_kind(state))
+    ^left: if {
         marked_subject -> parser_parse_marked_place(state, depth + 1, allow_struct_lit, true)
         parser_take_mark(parser_current_kind(state)) -> parser_parse_take_mark(state, depth + 1, allow_struct_lit, stop_before_comparison)
         else -> {
@@ -399,13 +399,13 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
     // A non-place after `^` was reported where it was read.
     if marked_subject && !(left.expr == .Place(_, _, _, _)) -> marked_subject = false
     loop {
-        operator := parser_current_kind(state)
+        ^operator: parser_current_kind(state)
         // `<>` only ever stands for a value, so after a value it joins
         // nothing (`a <> b`): name the operators that do, then read on.
         if operator == TOKEN_LT_GT {
             stray: parser_bump(state)
             parser_add_error(state, stray.span, "something unexpected appeared after this value, found `<>`", "after a value, an expression continues only with an operator: `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, `&&`, `||`, `??` or `|>`", "write the operator you mean, such as `!=` for not equal")
-            _ := parser_parse_operators(state, minimum, depth + 1, allow_struct_lit, stop_before_comparison)
+            ^_: parser_parse_operators(state, minimum, depth + 1, allow_struct_lit, stop_before_comparison)
             break
         }
         // `~=` updates by exclusive-or, so in an `if` or `loop` header it is
@@ -478,10 +478,10 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
         }
 
         if parser_is_relational(operator) {
-            ops := [BinOp]{parser_binary_operator(operator)}
-            operands := [Expr]{left.expr, right.expr}
+            ^ops: [BinOp]{parser_binary_operator(operator)}
+            ^operands: [Expr]{left.expr, right.expr}
             direction: parser_compare_direction(operator)
-            end := right.span
+            ^end: right.span
             loop parser_is_relational(parser_current_kind(state)) && parser_compare_direction(parser_current_kind(state)) == direction {
                 next_operator: parser_current_kind(state)
                 parser_bump(state)
@@ -502,8 +502,8 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
             chain_span: parser_cover(left.span, end)
             if {
                 ops.len() > 1 -> {
-                    hooks := [Bool]{}
-                    hook_index := 0
+                    ^hooks: [Bool]{}
+                    ^hook_index: 0
                     loop hook_index < ops.len() {
                         hooks.push(false)
                         hook_index += 1
@@ -525,7 +525,7 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
         if (operator == TOKEN_EQ_EQ || operator == TOKEN_NOT_EQ || operator == TOKEN_COMPARE) && parser_expression_comparison_token(parser_current_kind(state)) {
             parser_report_chained_comparison(state)
         }
-        right_value := right.expr.move()
+        ^right_value: right.expr.move()
         if operator == TOKEN_AMP_TILDE {
             complement_span: Span{start: operator_token.span.start + 1, end: right.span.end}
             right_value = Expr.Unary{op: UnOp.Complement, operand: right_value.move(), span: complement_span, id: parser_node_id(state)}
@@ -576,8 +576,8 @@ parser_check_mixed_logic: fn(state: ^JetParserState, operand: ParsedExpr) {
 // Rebuild the source spelling of `span` from its tokens. Whitespace between
 // tokens becomes the same number of spaces, so byte offsets stay aligned.
 parser_source_text: fn(state: JetParserState, span: Span) -> String Never! {
-    text := ""
-    cursor := span.start
+    ^text: ""
+    ^cursor: span.start
     loop token in state.tokens {
         if token.span.start < span.start || token.span.end > span.end || token.span.start == token.span.end {
             next
@@ -598,8 +598,8 @@ parser_typed_literal_head_ahead: fn(state: ^JetParserState) -> Bool Never! {
     // The optional typed-literal head is
     // `T?{ body }`; the `?` sits between the head type and its body.
     if first == TOKEN_LBRACKET {
-        nested := 0
-        index := head + 1
+        ^nested: 0
+        ^index: head + 1
         loop index < state.tokens.len() {
             kind: state.tokens[index].kind
             if kind == TOKEN_EOF -> return false
@@ -619,9 +619,9 @@ parser_typed_literal_head_ahead: fn(state: ^JetParserState) -> Bool Never! {
         return false
     }
     if first != TOKEN_IDENT && first != TOKEN_SELF -> return false
-    index := head + 1
-    nested := 0
-    after_dot := false
+    ^index: head + 1
+    ^nested: 0
+    ^after_dot: false
     loop index < state.tokens.len() {
         kind: state.tokens[index].kind
         index += 1
@@ -661,9 +661,9 @@ parser_header_typed_literal_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if !parser_expression_comparison_token(before) && before != TOKEN_KW_IN -> return false
     if !parser_typed_literal_head_ahead(state) -> return false
     // The literal's `{`: the first one outside the head's `[…]` and `<…>`.
-    open := -1
-    nested := 0
-    index := state.position
+    ^open: -1
+    ^nested: 0
+    ^index: state.position
     loop index < state.tokens.len() {
         kind: state.tokens[index].kind
         if kind == TOKEN_LBRACKET || kind == TOKEN_LT -> nested += 1
@@ -676,7 +676,7 @@ parser_header_typed_literal_ahead: fn(state: ^JetParserState) -> Bool Never! {
         index += 1
     }
     if open <= 0 || state.tokens[open - 1].span.end != state.tokens[open].span.start -> return false
-    depth := 0
+    ^depth: 0
     index = open
     loop index < state.tokens.len() {
         kind: state.tokens[index].kind
@@ -751,9 +751,9 @@ parser_parse_typed_literal_body: fn(state: ^JetParserState, head: Type?, start: 
     if parser_typed_literal_byte_head(head) && (parser_current_kind(state) == TOKEN_STRING || parser_current_kind(state) == TOKEN_RAW_STRING) && parser_kind_at(state, 1) == TOKEN_RBRACE {
         text: parser_parse_string(state, depth + 1)
         state.head_text_at = saved_head
-        parts := [ByteTextPart]{}
-        run := [U8]{}
-        interpolated := false
+        ^parts: [ByteTextPart]{}
+        ^run: [U8]{}
+        ^interpolated: false
         if text.expr == {
             .Str(source_parts, _, _) -> {
                 loop part in source_parts {
@@ -813,7 +813,7 @@ parser_parse_typed_literal_body: fn(state: ^JetParserState, head: Type?, start: 
         (map_head && parser_current_kind(state) != TOKEN_RBRACE) || ((head == None || named_head) && parser_current_kind(state) == TOKEN_COLON) -> {
             parser_expect(state, TOKEN_COLON, "`:` between a map key and its value")
             first_value: parser_parse_expression(state, 1, depth + 1)
-            entries := [ExprPair]{ExprPair{key: first.expr.move(), value: first_value.expr.move()}}
+            ^entries: [ExprPair]{ExprPair{key: first.expr.move(), value: first_value.expr.move()}}
             loop parser_current_kind(state) == TOKEN_COMMA {
                 parser_bump(state)
                 if parser_current_kind(state) == TOKEN_RBRACE -> break
@@ -825,7 +825,7 @@ parser_parse_typed_literal_body: fn(state: ^JetParserState, head: Type?, start: 
             TypedLitBody.Entries{entries: entries.move()}
         }
         list_head || ((head == None || named_head) && parser_current_kind(state) == TOKEN_COMMA) -> {
-            elements := [Expr]{first.expr.move()}
+            ^elements: [Expr]{first.expr.move()}
             loop parser_current_kind(state) == TOKEN_COMMA {
                 parser_bump(state)
                 if parser_current_kind(state) == TOKEN_RBRACE -> break
@@ -897,7 +897,7 @@ parser_try_parse_typed_literal: fn(state: ^JetParserState, depth: Int) -> Parsed
     parsed: parser_parse_type(state, depth + 1)
     if state.diagnostics.len() != saved_diagnostics || parser_current_kind(state) != TOKEN_LBRACE {
         state.position = saved_position
-        loop state.diagnostics.len() > saved_diagnostics -> _ := state.diagnostics.pop()
+        loop state.diagnostics.len() > saved_diagnostics -> ^_: state.diagnostics.pop()
         state.pending_type_gt = saved_gt
         state.pending_type_gt_span = saved_gt_span
         return None
@@ -910,9 +910,9 @@ parser_try_parse_typed_literal: fn(state: ^JetParserState, depth: Int) -> Parsed
 // literal counts, one holding an optional element's `?` or a fixed length's
 // `#`, so `[x].len()` stays a call on a list literal.
 parser_list_type_owner_ahead: fn(state: JetParserState) -> Bool Never! {
-    nested := 0
-    type_only := false
-    index := state.position + 1
+    ^nested: 0
+    ^type_only: false
+    ^index: state.position + 1
     loop index < state.tokens.len() {
         kind: state.tokens[index].kind
         if kind == TOKEN_EOF || kind == TOKEN_SEMI || kind == TOKEN_LBRACE || kind == TOKEN_LPAREN {
@@ -944,7 +944,7 @@ parser_try_parse_list_type_static: fn(state: ^JetParserState, depth: Int) -> Par
     parsed: parser_parse_type(state, depth + 1)
     if state.diagnostics.len() != saved_diagnostics || parser_current_kind(state) != TOKEN_DOT {
         state.position = saved_position
-        loop state.diagnostics.len() > saved_diagnostics -> _ := state.diagnostics.pop()
+        loop state.diagnostics.len() > saved_diagnostics -> ^_: state.diagnostics.pop()
         state.pending_type_gt = saved_gt
         state.pending_type_gt_span = saved_gt_span
         return None
@@ -981,14 +981,14 @@ parser_parse_shared_cell: fn(state: ^JetParserState, head: Type?, start: Span, d
     operand: parser_parse_expression(state, 1, depth + 1)
     parser_literal_close_terminators(state)
     close: parser_expect(state, TOKEN_RBRACE, "`}}` to close a `Shared{{…}}` cell")
-    owner_type_args := [Type]{}
+    ^owner_type_args: [Type]{}
     // copy: `inner` is part of read parameter `head`; the call owns its owner type argument.
     if head == .Val(.Shared(inner)) -> owner_type_args.push(inner.copy())
     parser_shared_cell(state, operand.expr, operand.span, owner_type_args, start, parser_cover(start, close.span))
 }
 
 parser_shared_cell: fn(state: ^JetParserState, operand: Expr, operand_span: Span, owner_type_args: [Type], head: Span, span: Span) -> ParsedExpr {
-    flags := AST_EMPTY_CALL_ARG_FLAGS
+    ^flags: AST_EMPTY_CALL_ARG_FLAGS
     flags.shared_operand = true
     argument: CallArg{convention: AccessConvention.Move, expr: operand, span: operand_span, flags: flags, label: None, spread: false}
     ParsedExpr{
@@ -1139,7 +1139,7 @@ parser_parse_prefix: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bo
         parser_bump(state)
         variant: if parser_current_kind(state) == TOKEN_NULL -> parser_bump(state) else -> parser_expect_name(state, "after `.` in an enum value")
         args: parser_parse_variant_args(state, depth + 1, allow_struct_lit)
-        end := variant.span
+        ^end: variant.span
         if state.position > 0 {
             previous: parser_lookahead(state, -1)
             if previous.kind == TOKEN_RPAREN || previous.kind == TOKEN_RBRACE -> end = previous.span
@@ -1266,8 +1266,8 @@ parser_parse_prefix: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bo
 parser_parse_marker_value: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
     hash: parser_bump(state)
     first: parser_bump(state)
-    name := parser_value(state, first)
-    name_end := first.span.end
+    ^name: parser_value(state, first)
+    ^name_end: first.span.end
     loop parser_current_kind(state) == TOKEN_DOT && parser_kind_at(state, 1) == TOKEN_IDENT {
         parser_bump(state)
         segment: parser_bump(state)
@@ -1300,7 +1300,7 @@ parser_parse_marker_value: fn(state: ^JetParserState, depth: Int, allow_struct_l
         return ParsedExpr{expr: Expr.Unit{span: head_span, id: parser_node_id(state)}, span: head_span}
     }
     named: parser_current_kind(state) == TOKEN_IDENT
-    inner := parser_parse_prefix(state, depth + 1, allow_struct_lit, stop_before_comparison)
+    ^inner: parser_parse_prefix(state, depth + 1, allow_struct_lit, stop_before_comparison)
     // A bare name's call or member call is read with the name, so
     // `#Checked Die.from_int(1)` tags the call's value.
     if named && inner.expr == .Ident(_, _, _) {
@@ -1314,8 +1314,8 @@ parser_parse_marker_value: fn(state: ^JetParserState, depth: Int, allow_struct_l
 // head's reading (parser_mark_head_body); any other text reads plain.
 parser_parse_string: fn(state: ^JetParserState, depth: Int) -> ParsedExpr {
     token: parser_take_text(state, state.position == state.head_text_at)
-    parts := [StrPart]{}
-    index := 0
+    ^parts: [StrPart]{}
+    ^index: 0
     token_parts: parser_string_parts(state, token)
     loop index < token_parts.len() {
         part: token_parts[index]
@@ -1335,7 +1335,7 @@ parser_parse_string: fn(state: ^JetParserState, depth: Int) -> ParsedExpr {
 // selector, then the end of the hole. A failure is fatal for the statement;
 // an unknown selector (E0914) is not.
 parser_parse_interpolation: fn(state: ^JetParserState, part: StringPart, depth: Int, parts: ^[StrPart]) {
-    nested := JetParserState{
+    ^nested: JetParserState{
         tokens: part.tokens,
         position: 0,
         diagnostics: [Diagnostic]{},
@@ -1372,7 +1372,7 @@ parser_parse_interpolation: fn(state: ^JetParserState, part: StringPart, depth: 
         parser_take_nested_failure(state, nested.diagnostics)
         return
     }
-    label := ""
+    ^label: ""
     if parser_current_kind(nested) == TOKEN_EQ {
         loop index in 0..<nested.position {
             token: nested.tokens[index].copy()
@@ -1392,7 +1392,7 @@ parser_parse_interpolation: fn(state: ^JetParserState, part: StringPart, depth: 
         }
         parser_bump(nested)
     }
-    computed := [Expr]{}
+    ^computed: [Expr]{}
     format: parser_parse_string_format(nested, depth + 1, computed)
     extra: parser_current(nested)
     extra_found: parser_describe_token(nested, extra)
@@ -1464,7 +1464,7 @@ parser_parse_string_format: fn(state: ^JetParserState, depth: Int, computed: ^[E
     selector: parser_bump(state)
     name: parser_value(state, selector)
     head: ":{name}"
-    args := [StrSelectorArg]{}
+    ^args: [StrSelectorArg]{}
     if parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
         close: parser_current(state)
@@ -1522,7 +1522,7 @@ parser_parse_selector_fill: fn(state: ^JetParserState, head: String) -> String {
     }
     token_parts: parser_string_parts(state, token)
     if token_parts.len() == 0 -> return parser_value(state, token)
-    fill := ""
+    ^fill: ""
     loop part in token_parts {
         if part.kind == STRING_PART_INTERPOLATION {
             parser_add_error(state, token.span, "text inside `{head}( )` cannot interpolate", "a selector's text argument is fixed text, not a second interpolation", "write a quoted text such as `{head}(8, \"0\")`")
@@ -1562,20 +1562,22 @@ parser_parse_parenthesized: fn(state: ^JetParserState, depth: Int) -> ParsedExpr
 // member value.
 parser_brace_record_value_at: fn(state: ^JetParserState, at: Int, one_field: Bool) -> Bool Never! {
     if parser_kind_at(state, at) != TOKEN_LBRACE -> return false
-    offset := at + 1
-    depth := 0
-    commas := 0
-    fields := 0
-    loop_value := false
-    member_start := true
+    ^offset: at + 1
+    ^depth: 0
+    ^commas: 0
+    ^fields: 0
+    ^loop_value: false
+    ^member_start: true
     loop {
         kind: parser_kind_at(state, offset)
         if kind == TOKEN_EOF -> return false
         if depth == 0 {
-            if kind == TOKEN_RBRACE -> return commas > 0 || (one_field && fields == 1 && !loop_value)
+            if kind == TOKEN_RBRACE {
+                return commas > 0 || (one_field && fields == 1 && !loop_value)
+            }
             if kind == TOKEN_SEMI {
                 if !member_start {
-                    end := offset
+                    ^end: offset
                     loop parser_kind_at(state, end) == TOKEN_SEMI -> end += 1
                     return parser_kind_at(state, end) == TOKEN_RBRACE && (commas > 0 || (one_field && fields == 1 && !loop_value))
                 }
@@ -1622,9 +1624,9 @@ parser_generic_head_close_at: fn(state: ^JetParserState, at: Int) -> Int Never! 
     name: parser_lookahead(state, at - 1)
     open: parser_lookahead(state, at)
     if name.kind != TOKEN_IDENT || name.span.end != open.span.start -> return -1
-    nested := 0
-    braces := 0
-    offset := at
+    ^nested: 0
+    ^braces: 0
+    ^offset: at
     loop {
         token: parser_lookahead(state, offset)
         kind: token.kind
@@ -1643,7 +1645,9 @@ parser_generic_head_close_at: fn(state: ^JetParserState, at: Int) -> Int Never! 
             if kind == TOKEN_SHR -> nested -= 2
             if (kind == TOKEN_GT || kind == TOKEN_SHR) && nested <= 0 {
                 after: parser_lookahead(state, offset + 1)
-                if after.span.start == token.span.end && (after.kind == TOKEN_LBRACE || after.kind == TOKEN_LPAREN) -> return offset
+                if after.span.start == token.span.end && (after.kind == TOKEN_LBRACE || after.kind == TOKEN_LPAREN) {
+                    return offset
+                }
                 return -1
             }
         }
@@ -1654,13 +1658,13 @@ parser_generic_head_close_at: fn(state: ^JetParserState, at: Int) -> Int Never! 
 // The parameters after a lambda's `(`, up to (not including) its `)`: each a
 // name with an optional `: Type`.
 parser_parse_lambda_params: fn(state: ^JetParserState, depth: Int) -> [LambdaParam] {
-    params := [LambdaParam]{}
+    ^params: [LambdaParam]{}
     if parser_current_kind(state) == TOKEN_RPAREN -> return params
     loop !parser_aborting(state) {
         name: parser_expect_name(state, "as a lambda parameter")
-        ty := Type?{None}
-        ty_span := Span?{None}
-        convention := AccessConvention.Read
+        ^ty: Type?{None}
+        ^ty_span: Span?{None}
+        ^convention: AccessConvention.Read
         if parser_current_kind(state) == TOKEN_COLON {
             parser_bump(state)
             // A written type may mark a written `^` or taken `^^` input, as a
@@ -1722,14 +1726,14 @@ parser_parse_fn_lambda: fn(state: ^JetParserState, depth: Int) -> ParsedExpr {
 // the list is E0961, skipped to the next `,` or `]`.
 parser_parse_member_spread: fn(state: ^JetParserState, base: ParsedExpr) -> ParsedExpr {
     parser_bump(state)
-    members := [ExprMember]{}
+    ^members: [ExprMember]{}
     if parser_current_kind(state) != TOKEN_RBRACKET {
         loop {
             if {
                 parser_current_kind(state) == TOKEN_IDENT -> {
                     first: parser_bump(state)
-                    name := parser_value(state, first)
-                    end := first.span.end
+                    ^name: parser_value(state, first)
+                    ^end: first.span.end
                     loop parser_current_kind(state) == TOKEN_MINUS && parser_current(state).span.start == end && parser_kind_at(state, 1) == TOKEN_IDENT && parser_lookahead(state, 1).span.start == end + 1 {
                         parser_bump(state)
                         segment: parser_bump(state)
@@ -1821,15 +1825,15 @@ parser_parse_task_surface: fn(state: ^JetParserState, depth: Int) -> ParsedExpr 
             return ParsedExpr{expr: parser_task_call(state, head, TaskForm.Timeout, selector.span, argument.expr, argument.span), span: span}
         }
         open: parser_expect(state, TOKEN_LBRACE, "after the task selector")
-        named := [TupleField]{}
-        positional := [Expr]{}
-        saw_named := false
-        saw_positional := false
-        mixed := Span?{None}
+        ^named: [TupleField]{}
+        ^positional: [Expr]{}
+        ^saw_named: false
+        ^saw_positional: false
+        ^mixed: Span?{None}
         if parser_current_kind(state) != TOKEN_RBRACE {
             loop !parser_aborting(state) {
-                label := ""
-                style_span := parser_current(state).span
+                ^label: ""
+                ^style_span: parser_current(state).span
                 if {
                     name == "all" && parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON -> {
                         label_token: parser_bump(state)
@@ -1841,7 +1845,7 @@ parser_parse_task_surface: fn(state: ^JetParserState, depth: Int) -> ParsedExpr 
                     else -> { saw_positional = true }
                 }
                 if saw_named && saw_positional && mixed == None -> mixed = Val(style_span)
-                spawn := Expr.Unit{span: style_span, id: parser_node_id(state)}
+                ^spawn: Expr.Unit{span: style_span, id: parser_node_id(state)}
                 if {
                     parser_current_kind(state) == TOKEN_LBRACE -> {
                         block: parser_parse_block(state)
@@ -1872,7 +1876,7 @@ parser_parse_task_surface: fn(state: ^JetParserState, depth: Int) -> ParsedExpr 
         return ParsedExpr{expr: parser_task_call(state, head, form, selector.span, argument, list_span), span: span}
     }
     // `task ^^name { … }` consumes one enclosing binding.
-    take_names := [NamedSpan]{}
+    ^take_names: [NamedSpan]{}
     if parser_take_mark(parser_current_kind(state)) {
         mark: parser_bump(state)
         mark_text: parser_text(state, mark)
@@ -1929,7 +1933,7 @@ parser_parse_collection: fn(state: ^JetParserState, depth: Int) -> ParsedExpr {
     if parser_current_kind(state) == TOKEN_COLON {
         parser_bump(state)
         first_value: parser_parse_expression(state, 1, depth + 1)
-        entries := [ExprPair]{ExprPair{key: first.expr, value: first_value.expr}}
+        ^entries: [ExprPair]{ExprPair{key: first.expr, value: first_value.expr}}
         loop parser_current_kind(state) == TOKEN_COMMA {
             parser_bump(state)
             if parser_current_kind(state) == TOKEN_RBRACKET -> break
@@ -1946,7 +1950,7 @@ parser_parse_collection: fn(state: ^JetParserState, depth: Int) -> ParsedExpr {
         span: parser_cover(open.span, close.span)
         return ParsedExpr{expr: Expr.MapLit{entries: entries, span: span, id: parser_node_id(state)}, span: span}
     }
-    values := [Expr]{first.expr}
+    ^values: [Expr]{first.expr}
     loop parser_current_kind(state) == TOKEN_COMMA {
         parser_bump(state)
         if parser_current_kind(state) == TOKEN_RBRACKET -> break
@@ -1965,7 +1969,9 @@ parser_parse_collection: fn(state: ^JetParserState, depth: Int) -> ParsedExpr {
 // which a primary tail reads on: `#Reviewed crypto.Secret.from_text(…)` tags
 // the call's value, as `#Checked Die.from_int(1)` does.
 parser_module_type_member_ahead: fn(state: ^JetParserState, expr: Expr) -> Bool Never! {
-    if parser_current_kind(state) != TOKEN_DOT || parser_kind_at(state, 1) != TOKEN_IDENT -> return false
+    if parser_current_kind(state) != TOKEN_DOT || parser_kind_at(state, 1) != TOKEN_IDENT {
+        return false
+    }
     if expr == .Field(base, member, _, _) && parser_pascal_name(member) {
         if base == .Ident(alias, _, _) -> return !parser_pascal_name(alias)
     }
@@ -1993,16 +1999,16 @@ parser_reflect_subject: fn(expr: Expr) -> Expr? Never! {
 }
 
 parser_parse_postfix: fn(state: ^JetParserState, initial: ^^ParsedExpr, depth: Int, allow_struct_lit: Bool, primary_tail: Bool) -> ParsedExpr {
-    expression := initial.move()
+    ^expression: initial.move()
     // A capitalized name's own `<…>` (`Pool<T>.new()`) and call-site
     // arguments (`decode<Order>(raw)`).
-    owner_type_args := [Type]{}
-    call_type_args := [Type]{}
+    ^owner_type_args: [Type]{}
+    ^call_type_args: [Type]{}
     // `primary_tail` reads only what follows a bare name: one call
     // (`name(…)`), or one member with its call (`name.member(…)`), with their
     // `<…>` lists and a literal head.
-    tail_member := false
-    tail_done := false
+    ^tail_member: false
+    ^tail_done: false
     loop {
         kind: parser_current_kind(state)
         if primary_tail {
@@ -2074,7 +2080,7 @@ parser_parse_postfix: fn(state: ^JetParserState, initial: ^^ParsedExpr, depth: I
                 .Field(_, method, _, _) -> method
                 .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
             }
-            args := [CallArg]{}
+            ^args: [CallArg]{}
             if {
                 method_name == "take_pattern" -> {
                     parser_bump(state)
@@ -2092,7 +2098,7 @@ parser_parse_postfix: fn(state: ^JetParserState, initial: ^^ParsedExpr, depth: I
                 .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
             }
             if allow_struct_lit && !optional_call && !generated_block && parser_current_kind(state) == TOKEN_LBRACE {
-                callee_text := "callee"
+                ^callee_text: "callee"
                 if {
                     expression.expr == .Ident(_, _, _) -> {
                         callee_text = parser_source_slice(state, expression.span.start, paren_start)
@@ -2106,7 +2112,7 @@ parser_parse_postfix: fn(state: ^JetParserState, initial: ^^ParsedExpr, depth: I
                 break
             }
             close_span: parser_current(state)
-            end := close_span.span
+            ^end: close_span.span
             if state.position > 0 -> end = parser_lookahead(state, -1).span
             span: parser_cover(expression.span, end)
             if expression.expr == {
@@ -2142,9 +2148,9 @@ parser_parse_postfix: fn(state: ^JetParserState, initial: ^^ParsedExpr, depth: I
         // A bare `{ }` after a field chain is a struct literal only on an
         // `alias.Type` head; after any other field or an index it is E0335.
         if kind == TOKEN_LBRACE && allow_struct_lit {
-            alias := ""
-            type_name := ""
-            bad_block := false
+            ^alias: ""
+            ^type_name: ""
+            ^bad_block: false
             if expression.expr == {
                 .Field(base, member, _, _) -> {
                     if base == {
@@ -2344,7 +2350,7 @@ parser_parse_ptr_from_addr: fn(state: ^JetParserState, alias: String, alias_span
         parser_add_error_here(state, "expected `>` after `Ptr<…>`", "generic type arguments must be closed", "add `>`")
         return absent
     }
-    _ := parser_type_gt_span(state)
+    ^_: parser_type_gt_span(state)
     parser_expect(state, TOKEN_DOT, "`.` after `Ptr<…>`")
     method: parser_expect_name(state, "after `Ptr<…>.`")
     method_name: parser_value(state, method)
@@ -2383,8 +2389,8 @@ parser_turbofish_ahead: fn(state: ^JetParserState, following: Int) -> Bool Never
     if state.position == 0 || state.tokens[state.position - 1].span.end != parser_current(state).span.start {
         return false
     }
-    nested := 0
-    skip_braces := 0
+    ^nested: 0
+    ^skip_braces: 0
     loop index in state.position..<state.tokens.len() {
         token: state.tokens[index]
         if token.kind == TOKEN_LT -> nested += 1
@@ -2413,7 +2419,7 @@ parser_turbofish_ahead: fn(state: ^JetParserState, following: Int) -> Bool Never
 // comma allowed, closed by `>` (or half of `>>`).
 parser_parse_call_type_args: fn(state: ^JetParserState, depth: Int) -> [Type] {
     parser_bump(state)
-    args := [Type]{}
+    ^args: [Type]{}
     loop {
         args.push(parser_parse_type_argument(state, depth + 1))
         if state.pending_type_gt || parser_current_kind(state) != TOKEN_COMMA -> break
@@ -2424,7 +2430,7 @@ parser_parse_call_type_args: fn(state: ^JetParserState, depth: Int) -> [Type] {
         parser_add_error_here(state, "expected `>` after call type arguments", "generic type arguments must be closed", "add `>`")
         return args
     }
-    _ := parser_type_gt_span(state)
+    ^_: parser_type_gt_span(state)
     args
 }
 
@@ -2485,15 +2491,11 @@ parser_report_mark_not_value: fn(state: ^JetParserState, mark: Token) {
 
 // The write mark: `^` (`^T`, `^self`, `edit: ^xs[a..<b]`). `^` is only the
 // bit-and operator.
-parser_write_mark: fn(kind: Int) -> Bool Never! {
-    kind == TOKEN_CARET
-}
+parser_write_mark: fn(kind: Int) -> Bool Never! { kind == TOKEN_CARET }
 
 // The take mark: `^^` (`^^T`, `^^self`, `task ^^name`). `^^` is only the
 // logical and.
-parser_take_mark: fn(kind: Int) -> Bool Never! {
-    kind == TOKEN_CARET_CARET
-}
+parser_take_mark: fn(kind: Int) -> Bool Never! { kind == TOKEN_CARET_CARET }
 
 // A call mark (`^` writes, `^^` takes) binds the maximal place after it: the
 // receiver of the first method call on that place (`^xs.push(4)`,
@@ -2526,7 +2528,7 @@ parser_mark_place: fn(expr: Expr) -> Bool Never! {
 
 parser_parse_call_args: fn(state: ^JetParserState, depth: Int, allow_marker_labels: Bool) -> [CallArg] {
     parser_expect(state, TOKEN_LPAREN, "`(` before call arguments")
-    args := [CallArg]{}
+    ^args: [CallArg]{}
     if parser_current_kind(state) != TOKEN_RPAREN {
         loop {
             // A call cut off before its next argument reports its opener, not
@@ -2535,13 +2537,13 @@ parser_parse_call_args: fn(state: ^JetParserState, depth: Int, allow_marker_labe
             argument_span: parser_current(state).span
             spread: parser_current_kind(state) == TOKEN_DOT_DOT_DOT
             if spread -> parser_bump(state)
-            label := CallLabel?{None}
+            ^label: CallLabel?{None}
             label_kind: parser_current_kind(state)
             has_label: label_kind == TOKEN_IDENT || (allow_marker_labels && label_kind == TOKEN_KW_USE)
             if has_label && parser_kind_at(state, 1) == TOKEN_COLON {
                 label_token: parser_bump(state)
                 parser_bump(state)
-                label_name := parser_value(state, label_token)
+                ^label_name: parser_value(state, label_token)
                 if label_token.kind == TOKEN_KW_USE -> label_name = "use"
                 label = Val(CallLabel{name: label_name, span: label_token.span})
             }
@@ -2590,7 +2592,7 @@ parser_parse_marked_argument: fn(state: ^JetParserState, depth: Int, argument_sp
 
 parser_parse_expression_fields: fn(state: ^JetParserState, depth: Int) -> ParsedExprFields {
     open: parser_expect(state, TOKEN_LBRACE, "`{{` before record fields")
-    fields := [ExprField]{}
+    ^fields: [ExprField]{}
     if parser_current_kind(state) != TOKEN_RBRACE {
         loop {
             entry_start: state.position
@@ -2607,7 +2609,7 @@ parser_parse_expression_fields: fn(state: ^JetParserState, depth: Int) -> Parsed
                 next
             }
             name_token: parser_field_name(state, "for a record field")
-            value := Expr.Ident{name: parser_value(state, name_token), span: name_token.span, id: parser_node_id(state)}
+            ^value: Expr.Ident{name: parser_value(state, name_token), span: name_token.span, id: parser_node_id(state)}
             if parser_current_kind(state) == TOKEN_COLON {
                 parser_bump(state)
                 parsed_value: parser_parse_expression(state, 1, depth + 1)
@@ -2627,7 +2629,7 @@ parser_parse_expression_fields: fn(state: ^JetParserState, depth: Int) -> Parsed
 // A record payload `.Case{…}` is read only where a struct literal may stand:
 // in an `if` or loop header the `{` opens the body.
 parser_parse_variant_args: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bool) -> [EnumLitArg] {
-    args := [EnumLitArg]{}
+    ^args: [EnumLitArg]{}
     if {
         parser_current_kind(state) == TOKEN_LPAREN -> {
             parser_bump(state)
@@ -2655,7 +2657,7 @@ parser_parse_variant_args: fn(state: ^JetParserState, depth: Int, allow_struct_l
         }
         allow_struct_lit && parser_current_kind(state) == TOKEN_LBRACE -> {
             fields: parser_parse_expression_fields(state, depth + 1)
-            field_index := 0
+            ^field_index: 0
             loop field_index < fields.fields.len() {
                 field: fields.fields[field_index]
                 args.push(EnumLitArg.Named{label: field.name, expr: field.value})
@@ -2674,7 +2676,7 @@ parser_parse_or_fallback: fn(state: ^JetParserState, depth: Int, allow_struct_li
     token: parser_current(state)
     if token.kind == TOKEN_RETURN {
         parser_bump(state)
-        value := Expr?{None}
+        ^value: Expr?{None}
         if parser_starts_expression(parser_current_kind(state)) {
             value = Val(parser_parse_expression_restricted(state, 1, depth + 1, allow_struct_lit, stop_before_comparison).expr)
         }

@@ -41,10 +41,10 @@ stop_process: fn(code: Int) {
 signal_ready: fn(ready: Sender<Int>) Err! { ready.send(1) }
 
 body: fn(path: String, ready: Sender<Int>?, blocked: Receiver<Int>?) -> Int CaseFail! {
-    first := Resource{name: "first"}
+    ^first: Resource{name: "first"}
     defer close(first)
     _guard_1: scope.guard(fn() { print("guard 1") })
-    second := Resource{name: "second"}
+    ^second: Resource{name: "second"}
     defer close(second)
     _guard_2: scope.guard(fn() { print("guard 2") })
     print("body {path}")
@@ -64,7 +64,7 @@ body: fn(path: String, ready: Sender<Int>?, blocked: Receiver<Int>?) -> Int Case
         else -> return Ok(0)
     }
     print("after {path}")
-    late := Resource{name: "late"}
+    ^late: Resource{name: "late"}
     defer close(late)
     _late_guard: scope.guard(fn() { print("guard late") })
     Ok(1)

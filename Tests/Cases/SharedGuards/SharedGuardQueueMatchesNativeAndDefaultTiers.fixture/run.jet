@@ -26,8 +26,8 @@ consume: fn(queue: Shared<WorkQueue>, changed: Condition) {
 }
 
 run: fn() {
-    queue := Shared{WorkQueue{jobs: [1], capacity: 1}}
-    changed := Condition.new()
+    ^queue: Shared{WorkQueue{jobs: [1], capacity: 1}}
+    ^changed: Condition.new()
     task.group workers {
         producer: task produce(queue, changed)
         consume(queue, changed)

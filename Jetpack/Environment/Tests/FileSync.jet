@@ -32,7 +32,7 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
 }
 
 #Test("debug redacts sensitive managed bytes but keeps public bytes") {
-    private := env_files_test_declaration("private", true)
+    ^private: env_files_test_declaration("private", true)
     private.content = Val("managed-hostile-secret".bytes())
     private_debug: "{private:Debug}"
     assert(!private_debug.contains("managed-hostile-secret"))
@@ -55,7 +55,7 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
     }
     root: env_files_test_project("jet-env-files-temp-mode-")
     temp: files.join(root, "secret.tmp")
-    declaration := env_files_test_declaration("private", true)
+    ^declaration: env_files_test_declaration("private", true)
     declaration.permissions = Val(0o644)
     output: env_files_create_new_file(temp, env_files_destination_permissions(declaration)) ?? panic("create sensitive temp")
     info: output.stat() ?? panic("stat sensitive temp")
@@ -68,7 +68,7 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
         return
     }
     root: env_files_test_project("jet-env-files-sensitive-permissions-")
-    file := env_files_test_declaration("private", true)
+    ^file: env_files_test_declaration("private", true)
     file.mode = FileMode.Copy
     file.permissions = Val(0o644)
     digest: pkg_sha256_hex("same bytes".bytes())
@@ -85,7 +85,7 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
         return
     }
     root: env_files_test_project("jet-env-files-copy-mode-")
-    file := env_files_test_declaration("private", true)
+    ^file: env_files_test_declaration("private", true)
     file.mode = FileMode.Copy
     file.permissions = Val(0o644)
     assert_eq(env_files_test_apply(env_files_test_plan(root, [ManagedFile]{file})).applied, 1)

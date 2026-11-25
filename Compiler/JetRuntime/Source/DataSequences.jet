@@ -51,7 +51,7 @@ data_u8_list_copy_into: fn(source: I64, target: I64) {
     rt_text_store(wrapping(target + DATA_SEQUENCE_CAPACITY), length)
     rt_text_store(wrapping(target + DATA_SEQUENCE_DATA), data)
     original: rt_text_word(wrapping(source + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         host_u8_put(data, at, host_u8_get(original, at))
         at += I64{1}
@@ -72,7 +72,7 @@ data_text_list_copy_into: fn(source: I64, target: I64) {
     rt_text_store(wrapping(target + I64{8}), length)
     rt_text_store(wrapping(target + I64{16}), data)
     original: rt_text_word(wrapping(source + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         rt_text_store(wrapping(data + at * I64{8}), jet_rt_string_clone(rt_text_word(wrapping(original + at * I64{8}))))
         at += I64{1}

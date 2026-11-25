@@ -71,8 +71,8 @@ by_n: fn(crit: [Dyn], n: Dyn?, num: String) -> Int Err! {
 apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}) Err! {
     num: label(s.get("num"))
     c: card(repo, num) ?? return Err(err)
-    crit := list(c, "criteria")
-    changes := [String]{}
+    ^crit: list(c, "criteria")
+    ^changes: [String]{}
     rewrite: s.get("rewrite") ?? Dyn.object()
     loop key in rewrite.keys() {
         at: by_n(crit, Dyn.Text(key.copy()), num) ?? return Err(err)
@@ -97,7 +97,7 @@ apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}
             changes.push("c{n} REPLACE '{from}' -> '{to}'")
         }
     }
-    removed := [Int]{}
+    ^removed: [Int]{}
     loop n in list(s, "remove") {
         at: by_n(crit, n, num) ?? return Err(err)
         if text(crit[at], "status") != "open" {
@@ -105,9 +105,9 @@ apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}
         }
         removed.push(at)
     }
-    next := crit.map(fn(k) { label(k.get("n")).to_int() ?? 0 }).max() ?? 0
+    ^next: crit.map(fn(k) { label(k.get("n")).to_int() ?? 0 }).max() ?? 0
     gone: removed.copy()
-    kept := crit.indexed().filter(fn(k) { !gone.contains(k.idx) }).map(fn(k) { k.item.copy() }).to_list()
+    ^kept: crit.indexed().filter(fn(k) { !gone.contains(k.idx) }).map(fn(k) { k.item.copy() }).to_list()
     loop added in list(s, "add") {
         next += 1
         kept.push(Dyn.Object(["n": Dyn.Int(next), "text": added.copy(), "status": Dyn.Text("open")]))
@@ -116,7 +116,7 @@ apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}
     loop at in removed {
         changes.push("c{label(crit[at].get("n"))} REMOVE {text(crit[at], "text")}")
     }
-    patch := Dyn.object()
+    ^patch: Dyn.object()
     if changes.len() > 0 -> patch["criteria"] = Dyn.Array(kept)
     title: text(s, "title")
     if title != "" {
@@ -125,7 +125,7 @@ apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}
     }
     loop field in ["body", "plan"] {
         old: text(c, field)
-        new := old.copy()
+        ^new: old.copy()
         loop pair in list(s, "{field}Replace") {
             p: if pair == .Array(l) -> l.concat([Dyn.Null, Dyn.Null]) else -> [Dyn.Null, Dyn.Null]
             new = sub(new, str(p[0]), str(p[1]), "#{num} {field}") ?? return Err(err)
@@ -173,7 +173,7 @@ run: fn() {
     repo: files.absolute(process.env_nonempty("TOWER_SPEC_REPO") ?? checkout)
     writer: files.absolute(process.env_nonempty("TOWER_SPEC_WRITER") ?? "{r["JET_STATE_ROOT"]}/scratch/Main/tower-dev.mjs")
     patches: files.absolute(process.env_nonempty("TOWER_SPEC_PATCHES") ?? "{r["JET_SCRATCH_ROOT"]}/lanes/Main")
-    failed := 0
+    ^failed: 0
     loop s in (if spec == .Array(l) -> l.copy() else -> [Dyn]{}) {
         if apply(s, repo, writer, patches, go: args.contains("--go")) == .Err(e) {
             failed += 1

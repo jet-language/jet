@@ -106,7 +106,7 @@ publication_validate_takeover: fn(repo: String, entries: [PublicationIndexEntry]
         return
     }
     publication_require_takeover_review(repo, candidate.name, candidate.version)
-    all := entries.copy()
+    ^all: entries.copy()
     all.push(candidate.copy())
     _: publication_verify_index_entry(all, candidate, true, "registry")
 }
@@ -168,8 +168,8 @@ publication_index_entry_path: fn(repo: String, name: String) -> String IOError! 
 publication_read_entries: fn(repo: String, name: String) -[FS]> [PublicationIndexEntry] IOError! {
     path: publication_index_entry_path(repo, name)
     text: publication_index_read_or_empty(path)
-    out := [PublicationIndexEntry]{}
-    line_number := 0
+    ^out: [PublicationIndexEntry]{}
+    ^line_number: 0
     loop raw in text.lines() {
         line_number += 1
         if raw.trim() == "" -> next
@@ -195,7 +195,7 @@ publication_package_names: fn(repo: String) -[FS]> [String] IOError! {
         if err == .NotFound(_) -> return Ok([String]{})
         return Err(err)
     }
-    names := [String]{}
+    ^names: [String]{}
     loop directory in directories {
         metadata: files.stat(directory.path)
         if metadata.is_symlink {
@@ -229,7 +229,7 @@ publication_find_entry: fn(repo: String, name: String, version: String) -[FS]> P
 }
 
 publication_non_yanked_entries: fn(repo: String, name: String) -[FS]> [PublicationIndexEntry] IOError! {
-    out := [PublicationIndexEntry]{}
+    ^out: [PublicationIndexEntry]{}
     loop entry in publication_read_entries(repo, name) {
         if !entry.yanked -> out.push(entry)
     }
@@ -247,7 +247,7 @@ publication_with_index_lock: fn<T>(repo: String, name: String, action: fn() -[FS
     }
     path: files.join(root, ".{name}.lock")
     loop _ in 0..<100 {
-        writer := files.create(path, if_exists: .Refuse, links: .Refuse) ?? {
+        ^writer: files.create(path, if_exists: .Refuse, links: .Refuse) ?? {
             if err == {
                 .AlreadyExists(_) -> {}
                 .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(err)
@@ -321,7 +321,7 @@ publication_write_index_entry_locked: fn(repo: String, entry: PublicationIndexEn
         }
     }
     text: publication_index_read_or_empty(path)
-    entries := [PublicationIndexEntry]{}
+    ^entries: [PublicationIndexEntry]{}
     loop line in text.lines() {
         if line.trim() == "" -> next
         existing: publication_index_parse_line(line) ?? return Err(publication_index_error(.InvalidInput, path, "malformed registry index record"))
@@ -353,11 +353,11 @@ publication_mark_yanked: fn(repo: String, name: String, version: String) -[FS, E
 publication_mark_yanked_locked: fn(repo: String, name: String, version: String) -[FS, Env, Time]> Bool IOError! {
     path: publication_index_entry_path(repo, name)
     text: publication_index_read_or_empty(path)
-    found := false
-    output := [String]{}
+    ^found: false
+    ^output: [String]{}
     loop line in text.lines() {
         if line.trim() == "" -> next
-        entry := publication_index_parse_line(line) ?? return Err(publication_index_error(.InvalidInput, path, "malformed registry index record"))
+        ^entry: publication_index_parse_line(line) ?? return Err(publication_index_error(.InvalidInput, path, "malformed registry index record"))
         if entry.name == name && entry.version == version && !entry.yanked {
             entry.yanked = true
             found = true

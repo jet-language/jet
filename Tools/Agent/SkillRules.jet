@@ -93,7 +93,7 @@ join_path: fn(directory: String, name: String) -> String Never! {
 
 sorted_names: fn(directory: String) -[FS]> [String] SkillRulesError! {
     entries: files.list_dir(directory) ?? return Err(SkillRulesError{message: "cannot list {directory}: {err}"})
-    names := entries.map(fn(entry: DirEntry) { entry.name })
+    ^names: entries.map(fn(entry: DirEntry) { entry.name })
     names.sort()
     Ok(names)
 }
@@ -101,7 +101,7 @@ sorted_names: fn(directory: String) -[FS]> [String] SkillRulesError! {
 // ---- the inventory ----
 
 inventory_rows: fn(text: String) -> [SkillRow] Never! {
-    rows := [SkillRow]{}
+    ^rows: [SkillRow]{}
     loop (index, line) in LINE_BREAK.split(text) {
         if ROW.match(line) == {
             .Val(row) -> {
@@ -115,7 +115,7 @@ inventory_rows: fn(text: String) -> [SkillRow] Never! {
 
 // The source keys of one Source cell: "R + M" is R and M; "—" is none.
 source_keys: fn(source: String) -> [String] Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     loop part in SOURCE_JOIN.split(source.trim()) {
         if part == "R" || part == "T" || part == "M" || part == "H" || part == "G" {
             keys.push(part.copy())
@@ -127,7 +127,7 @@ source_keys: fn(source: String) -> [String] Never! {
 // Each SKILL.md directory under `directory` that no row maps with source `key`.
 unmapped: fn(rows: [SkillRow], key: String, directory: String, names: [String], errors: ^[String]) Never! {
     loop name in names {
-        mapped := false
+        ^mapped: false
         loop row in rows {
             if row.name == name && source_keys(row.source).contains(key) -> mapped = true
         }
@@ -140,8 +140,8 @@ unmapped: fn(rows: [SkillRow], key: String, directory: String, names: [String], 
 // Inventory problems, given the skills with a SKILL.md under .agents/skills
 // (`repo`, source key R) and under Tools/Tower/skills (`tower`, source key T).
 inventory_errors: fn(rows: [SkillRow], repo: [String], tower: [String]) -> [String] Never! {
-    errors := [String]{}
-    seen := [String:Int]{}
+    ^errors: [String]{}
+    ^seen: [String:Int]{}
     loop row in rows {
         if seen.get(row.name) == {
             .Val(first) -> {
@@ -170,7 +170,7 @@ inventory_errors: fn(rows: [SkillRow], repo: [String], tower: [String]) -> [Stri
 }
 
 skills_in: fn(directory: String) -[FS]> [String] SkillRulesError! {
-    found := [String]{}
+    ^found: [String]{}
     loop name in sorted_names(directory) ?? return Err(err) {
         if files.is_file("{directory}/{name}/SKILL.md") -> found.push(name.copy())
     }
@@ -183,7 +183,7 @@ normalized: fn(text: String) -> String Never! { SPACES.replace(text, " ") }
 
 negated: fn(line: String, start: Int) -> Bool Never! {
     before: line.slice(0, start)
-    clause := before
+    ^clause: before
     loop found in CLAUSE_BREAK.matches(before) -> clause = before.slice(found.end, before.len())
     NEGATION.is_match(clause)
 }
@@ -195,7 +195,7 @@ compiled: fn(rule: Contradiction) -> Regex Never! {
 // The laws each rule defends that AGENTS.md no longer states.
 missing_laws: fn(agents: String, rules: [Contradiction]) -> [String] Never! {
     text: normalized(agents)
-    missing := [String]{}
+    ^missing: [String]{}
     loop rule in rules {
         if !text.contains(rule.law) {
             missing.push("AGENTS.md no longer says \"{rule.law}\"; update the {rule.topic} rule in Tools/Agent/SkillRules.jet")
@@ -205,7 +205,7 @@ missing_laws: fn(agents: String, rules: [Contradiction]) -> [String] Never! {
 }
 
 contradiction_errors: fn(path: String, text: String, rules: [Contradiction]) -> [String] Never! {
-    errors := [String]{}
+    ^errors: [String]{}
     lines: LINE_BREAK.split(text)
     loop rule in rules {
         pattern: compiled(rule)
@@ -243,12 +243,12 @@ skill_rules_main: fn() -[FS, IO]> Int SkillRulesError! {
     rows: inventory_rows(read_text(INVENTORY) ?? return Err(err))
     repo: skills_in(REPO_SKILLS) ?? return Err(err)
     tower: skills_in(TOWER_SKILLS) ?? return Err(err)
-    errors := inventory_errors(rows, repo, tower)
+    ^errors: inventory_errors(rows, repo, tower)
     rules: contradictions()
     loop missing in missing_laws(read_text("AGENTS.md") ?? return Err(err), rules) {
         errors.push(missing)
     }
-    paths := [String]{}
+    ^paths: [String]{}
     loop root in SCANNED_ROOTS -> visit_markdown(root, paths) ?? return Err(err)
     loop path in paths {
         loop error in contradiction_errors(path, read_text(path) ?? return Err(err), rules) {

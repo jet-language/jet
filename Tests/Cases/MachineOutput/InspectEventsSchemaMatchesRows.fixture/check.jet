@@ -20,8 +20,8 @@ check_between: fn(line: String, open: String, close: String) -> String {
 
 // The moments the rows list, as `name variant payload`, in row order.
 check_rows: fn(text: String) -> [String] {
-    names := [String:String]{}
-    rows := [String]{}
+    ^names: [String:String]{}
+    ^rows: [String]{}
     loop line in text.lines() {
         if line.starts_with("COMPILER_EVENT_") && line.contains(": \"") {
             parts: line.split_once(": ") ?? next
@@ -39,10 +39,10 @@ check_rows: fn(text: String) -> [String] {
 // payload row opens with `CompilerEventPayload{`, names its struct on the
 // next `name:` line, and lists one `CompilerEventField{…}` per line.
 check_payload_rows: fn(text: String) -> [String] {
-    rows := [String]{}
-    current := ""
-    opened := false
-    fields := [String]{}
+    ^rows: [String]{}
+    ^current: ""
+    ^opened: false
+    ^fields: [String]{}
     loop line in text.lines() {
         word: line.trim()
         if {
@@ -99,7 +99,7 @@ check_field_problem: fn(schema: Dyn, at: String, ty: String, payloads: [String])
 // Where `schema`, the JSON Schema of an item of `jet build --json`'s
 // `events`, departs from the rows in `rows_text`.
 check_schema_problems: fn(rows_text: String, schema: Dyn) -> [String] {
-    problems := [String]{}
+    ^problems: [String]{}
     rows: check_rows(rows_text)
     if rows.len() == 0 -> problems.push("{CHECK_ROWS_PATH} lists no moment")
     loop (index, row) in rows {
@@ -114,11 +114,11 @@ check_schema_problems: fn(rows_text: String, schema: Dyn) -> [String] {
     extra: check_json.at<String>(schema, "oneOf/{rows.len()}/$ref") ?? ""
     if extra != "" -> problems.push("It lists `{extra}` past the {rows.len()} rows")
     payload_rows: check_payload_rows(rows_text)
-    payload_names := [String]{}
+    ^payload_names: [String]{}
     loop payload in payload_rows { payload_names.push((payload.split_once(":") ?? next).before) }
     loop payload in payload_rows {
         parts: payload.split_once(": ") ?? next
-        fields := [String]{}
+        ^fields: [String]{}
         loop field in parts.after.split(", ") {
             typed: field.split_once(" ") ?? next
             fields.push(typed.before)

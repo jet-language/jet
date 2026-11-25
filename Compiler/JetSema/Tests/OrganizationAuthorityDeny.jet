@@ -10,7 +10,7 @@ use {
 }
 
 organization_denial_errors: fn(file: String) -> [String] {
-    errors := [String]{}
+    ^errors: [String]{}
     checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
         .Refused(refusal) -> { errors.push(refusal.stderr) }
@@ -35,7 +35,7 @@ organization_denial_errors: fn(file: String) -> [String] {
     unaffected: organization_denial_errors("Tests/Cases/BuildEntry/OnlyTheRootsCompilerValueRunsTheHook.fixture/steps/main.jet")
     sys.set("JET_ORG_UNSAFE_POLICY", "Tests/Cases/CLIPartsCore/Fixtures/GatePolicy/org-policy.jet")
     gate_only: organization_denial_errors(app)
-    _ := sys.unset("JET_ORG_UNSAFE_POLICY")
+    ^_: sys.unset("JET_ORG_UNSAFE_POLICY")
     assert_eq(denied, [String]{"`build` reaches the `Meta.Generate` effect, which the organization policy `{fixture}/org-policy.jet` denies with `authority: {{ deny: [Meta] }}`"})
     assert_eq(unaffected, [String]{})
     assert_eq(gate_only, [String]{})

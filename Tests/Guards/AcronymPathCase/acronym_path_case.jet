@@ -14,7 +14,7 @@ use {
 path_case_tracked: fn() -> [String] {
     listed: apc_process.cmd([String]{"git", "-c", "core.quotePath=false", "ls-files"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run git ls-files: {err}")
     assert(listed.code == 0, "git ls-files failed: {apc_process.combined_output(listed).trim()}")
-    paths := [String]{}
+    ^paths: [String]{}
     loop line in apc_process.stdout_lines(listed) {
         if line.len() > 0 -> paths.push(line.copy())
     }
@@ -24,7 +24,7 @@ path_case_tracked: fn() -> [String] {
 path_case_fixture_roots: fn() -> [String] {
     listed: apc_process.cmd([String]{"git", "-c", "core.quotePath=false", "grep", "-I", "-E", "-e", "^fixture:", "--", "*.case"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run git grep: {err}")
     assert(listed.code == 0, "git grep for `fixture:` lines failed: {apc_process.combined_output(listed).trim()}")
-    roots := [String]{}
+    ^roots: [String]{}
     loop line in apc_process.stdout_lines(listed) {
         if path_case_fixture_root(line) == .Val(root) -> roots.push(root)
     }
@@ -34,7 +34,7 @@ path_case_fixture_roots: fn() -> [String] {
 // Every tracked folder or file name that breaks the rule, as `path: problem`
 // lines, sorted.
 path_case_report: fn(tracked: [String], fixture_roots: [String]) -> [String] {
-    lines := [String]{}
+    ^lines: [String]{}
     loop finding in path_case_findings(tracked, fixture_roots) {
         lines.push("{finding.path}: {finding.problem}")
     }
@@ -55,14 +55,14 @@ path_case_report: fn(tracked: [String], fixture_roots: [String]) -> [String] {
 #Test("acronym_path_case: the rule on disk, as `jet check` runs it, agrees with the tracked sweep") {
     guards_enter_root()
     root: apc_files.cwd() ?? panic("read the working folder: {err}")
-    checked := [String]{}
+    ^checked: [String]{}
     loop path in path_case_tracked() {
         if !path.ends_with(".jet") -> next
         absolute: "{root}/{path}"
         if (path_case_repository(absolute) ?? "") == root -> checked.push(absolute)
     }
     assert(checked.len() > 1000, "the on-disk rule found the repository above only {checked.len()} tracked `.jet` files")
-    found := [String]{}
+    ^found: [String]{}
     loop placed in path_case_disk_findings(checked) {
         found.push("{placed.finding.path}: {placed.finding.problem}")
     }
@@ -119,7 +119,7 @@ path_case_report: fn(tracked: [String], fixture_roots: [String]) -> [String] {
     facts: path_case_facts(tracked, path_case_fixture_roots())
     folders: path_case_folders(tracked)
     loop row in PATH_CASE_TOOL_NAMES {
-        found := false
+        ^found: false
         loop folder in folders {
             if folder == row.pattern || folder.ends_with("/{row.pattern}") {
                 found = true
@@ -141,7 +141,7 @@ path_case_report: fn(tracked: [String], fixture_roots: [String]) -> [String] {
         assert(path_case_matches_any(folders, row.pattern), "PATH_CASE_TOOL_LAYOUTS names no tracked folder; delete its row: {row.pattern}")
     }
     loop row in PATH_CASE_CLASSES {
-        found := false
+        ^found: false
         loop folder in folders {
             if path_case_class_keeps(row.kind, folder, folder.split("/").to_list(), facts) {
                 found = true

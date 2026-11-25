@@ -8,7 +8,7 @@ ip_show_segment: fn(value: I64, index: I64) -> I64 {
 }
 
 ip_show_v4: fn(target: I64, value: I64, offset: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{4}) {
         if (at != I64{0}) { rt_text_push_scalar(target, I64{46}) }
         rt_text_push_number(target, rt_text_byte(wrapping(wrapping(wrapping(value + I64{8}) + offset) + at)))
@@ -17,7 +17,7 @@ ip_show_v4: fn(target: I64, value: I64, offset: I64) {
 }
 
 ip_show_hex: fn(target: I64, segment: I64) {
-    shift := I64{12}
+    ^shift: I64{12}
     loop shift > (I64{0}) && (segment >> shift) == (I64{0}) -> shift -= I64{4}
     loop {
         digit: (segment >> shift) & I64{15}
@@ -42,11 +42,11 @@ ip_show_into: fn(result: I64, value: I64) {
         ip_show_v4(result, value, I64{12})
         return
     }
-    best_start := I64{-1}
-    best_length := I64{0}
-    current_start := I64{0}
-    current_length := I64{0}
-    at := I64{0}
+    ^best_start: I64{-1}
+    ^best_length: I64{0}
+    ^current_start: I64{0}
+    ^current_length: I64{0}
+    ^at: I64{0}
     loop at < (I64{8}) {
         if (ip_show_segment(value, at) == I64{0}) {
             if (current_length == I64{0}) { current_start = at }

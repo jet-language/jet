@@ -52,7 +52,7 @@ resident_kb: fn() -> Int {
 }
 
 rounds: fn(s: Shared<Context>, from: Int, to: Int) -> Int {
-    total := 0
+    ^total: 0
     loop i in from..<to {
         a: make(s, i)
         total += a.finish()
@@ -72,14 +72,14 @@ consumed: fn(s: Shared<Context>) {
 }
 
 popped: fn(s: Shared<Context>) {
-    list := [Sink]{make(s, 1), make(s, 2)}
+    ^list: [Sink]{make(s, 1), make(s, 2)}
     k: list.pop() ?? make(s, 3)
     t: k.finish()
     print("popped {t} {list[0].peek()} live {s.strong_count()}")
 }
 
 run: fn() {
-    s := Shared{Context{_id: 1}}
+    ^s: Shared{Context{_id: 1}}
     consumed(s)
     print("consumed dropped {s.strong_count()}")
     popped(s)

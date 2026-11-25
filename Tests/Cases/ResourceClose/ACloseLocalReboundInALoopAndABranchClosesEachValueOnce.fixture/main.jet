@@ -17,7 +17,7 @@ stamp: fn(name: String, n: Int) -> Stamp { Stamp{name: name, n: n} }
 
 // One binding, rebound on each step and then on one of two branches.
 rolled: fn() -> Int {
-    current := stamp("start", 0)
+    ^current: stamp("start", 0)
     loop i in 1..<4 -> current = stamp("step{i}", current.n + i)
     if current.n > 5 -> current = stamp("big", current.n * 2) else {
         current = stamp("small", current.n)
@@ -27,9 +27,9 @@ rolled: fn() -> Int {
 
 // A fresh binding on each step, rebound on the even steps.
 churned: fn() -> Int {
-    total := 0
+    ^total: 0
     loop i in 0..<3 {
-        item := stamp("item{i}", i)
+        ^item: stamp("item{i}", i)
         if i % 2 == 0 -> item = stamp("even{i}", i * 10)
         total += item.n
     }

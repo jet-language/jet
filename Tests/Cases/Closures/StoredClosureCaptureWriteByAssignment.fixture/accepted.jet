@@ -7,7 +7,7 @@ Holder: struct {
 }
 
 counter: fn() -> Holder {
-    n := 0
+    ^n: 0
     Holder{
         action: fn() {
             n += 1
@@ -17,7 +17,7 @@ counter: fn() -> Holder {
 }
 
 counters: fn() -> [fn() -[]> Int] {
-    n := 100
+    ^n: 100
     [fn() -[]> Int]{
         fn() {
             n += 1
@@ -33,16 +33,16 @@ fill: fn(values: ^[Int]) {
             values.len()
         },
     }
-    loop _ in 0..<10 -> _ := h.action()
+    loop _ in 0..<10 -> ^_: h.action()
 }
 
 run: fn() {
-    k := 0
+    ^k: 0
     bump: fn() { k += 1 }
     loop _ in 0..<10 -> bump()
     print(k)
     h: counter()
-    last := 0
+    ^last: 0
     loop _ in 0..<10 -> last = h.action()
     print(last)
     list: counters()
@@ -51,7 +51,7 @@ run: fn() {
         last = act()
     }
     print(last)
-    values := [Int]{}
+    ^values: [Int]{}
     fill(values)
     print(values.len())
 }

@@ -15,7 +15,8 @@
 //   - `table.field` returns the contiguous `[F]` column directly via one
 //     Offset (zero loop, zero allocation, zero element copy).
 use {
-    jet_foundation.[interner_empty, 
+    jet_foundation.[
+        interner_empty,
         BodyStructFieldValue,
         FnBody,
         Span,
@@ -55,8 +56,8 @@ ir_rows_is_core_def: fn(p: IRProgram, row: Int) -> Bool Never! {
     definition: p.types[row]
     if definition.generic_params.len() != 1 -> return false
     if definition.kind == .Struct(fields, _) {
-        stored := 0
-        has_rows := false
+        ^stored: 0
+        ^has_rows: false
         loop field in fields {
             if field.computed -> next
             stored += 1
@@ -81,7 +82,7 @@ ir_rows_element_def: fn(p: IRProgram, elem_ty: Type) -> Int? Never! {
     definition: p.types[elem_def]
     if definition.boxed_edges.len() > 0 -> return None
     if definition.kind == .Struct(fields, _) {
-        stored := 0
+        ^stored: 0
         loop field in fields {
             if !field.computed -> stored += 1
         }
@@ -100,8 +101,8 @@ ir_rows_struct_members_in: fn(m: ^IRModule, p: IRProgram, elem_ty: Type, laying:
     elem_args: ir_type_args(ir_untag(elem_ty))
     definition: p.types[elem_def]
     if definition.kind == .Struct(fields, _) {
-        col_members := [IRMember]{}
-        offset := 0
+        ^col_members: [IRMember]{}
+        ^offset: 0
         loop field in fields {
             if field.computed -> next
             field_ty: sema_type_def_instance_type(p.types[elem_def], elem_args, field.ty)
@@ -409,13 +410,13 @@ ir_rows_field_place_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, recei
 // no allocation, and no element copy.
 ir_rows_column_view: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, body: [Int], span: Span) -> Int? Never! {
     if body.len() != 3 -> return None
-    collect_name := ""
+    ^collect_name: ""
     if ir_body_stmt(p, b, body[0]) == .Let(local, _, init, _, _, _) {
         if !ir_empty_list_literal(m, p, b, init) -> return None
         collect_name = local.name
     } else { return None }
-    table := -1
-    col_field := ""
+    ^table: -1
+    ^col_field: ""
     if ir_body_stmt(p, b, body[1]) == .ForIn(_, row_var, var2, _, collection, step, _, _, _, _, loop_body, _) {
         if var2 != None || step != None || loop_body.len() != 1 -> return None
         table = ir_rows_backing_table(m, p, b, collection)
@@ -498,13 +499,13 @@ ir_rows_comptime_fields: fn(m: ^IRModule, p: IRProgram, ty: Type, fields: [TComp
     if fields.len() != 1 || fields[0].name != "__rows" -> return None
     info: ir_rows_columnar(m, p, ty) ?? return None
     if fields[0].value == .List(items) {
-        columns := [[TComptimeValue]]{}
+        ^columns: [[TComptimeValue]]{}
         loop _ in info.col_members -> columns.push([TComptimeValue]{})
         loop item in items {
             if item == .Struct(_, row_fields) {
                 loop ci in 0..<info.col_members.len() {
                     col_name: info.col_members[ci].name
-                    found := false
+                    ^found: false
                     loop rf in row_fields {
                         if rf.name == col_name {
                             columns[ci].push(rf.value)
@@ -523,7 +524,7 @@ ir_rows_comptime_fields: fn(m: ^IRModule, p: IRProgram, ty: Type, fields: [TComp
 }
 
 ir_rows_test_struct: fn(name: String, generic: [String], fields: [TypeTupleField]) -> TTypeDef Never! {
-    params := [TGenericParam]{}
+    ^params: [TGenericParam]{}
     loop param in generic -> params.push(TGenericParam{name: param, bounds: [SymbolID]{}})
     TTypeDef{
         module_identity: module_none(),
@@ -559,7 +560,7 @@ ir_rows_test_struct: fn(name: String, generic: [String], fields: [TypeTupleField
     node_def: ir_rows_test_struct("Node", [String]{}, [TypeTupleField]{TypeTupleField{name: "line", ty: Type.Int}, TypeTupleField{name: "kind", ty: Type.Int}})
     ty_def: ir_rows_test_struct("Ty", [String]{}, [TypeTupleField]{TypeTupleField{name: "size", ty: Type.Int}})
     p: ir_program_declared([TTypeDef]{rows_def, user_rows_def, node_def, ty_def}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
-    m := ir_module_new()
+    ^m: ir_module_new()
 
     assert(ir_rows_is_core_def(p, 0), "core.collections.Rows is recognized as Core Rows")
     assert(!ir_rows_is_core_def(p, 1), "user struct with field `items` is not Core Rows")

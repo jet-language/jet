@@ -251,7 +251,7 @@ ComptimeNameSite: struct {
 // Every direct `Call` name in an expression tree, in visit order (shallow over
 // lambda and `#Impure` bodies, crossing `#run` blocks; `WalkOpts.PLAIN`).
 comptime_walk_calls: fn(expr: Expr) -> [ComptimeNameSite] Never! {
-    sites := [ComptimeNameSite]{}
+    ^sites: [ComptimeNameSite]{}
     ast_comptime_walk_expr(expr, true, sites)
     sites
 }
@@ -261,7 +261,7 @@ comptime_walk_calls: fn(expr: Expr) -> [ComptimeNameSite] Never! {
 // identifiers too, so a consumer filters the names against its own
 // declarations; a lambda's own parameter is reported like any other name.
 comptime_walk_identifiers: fn(expr: Expr) -> [ComptimeNameSite] Never! {
-    sites := [ComptimeNameSite]{}
+    ^sites: [ComptimeNameSite]{}
     ast_comptime_walk_expr(expr, false, sites)
     sites
 }
@@ -550,7 +550,7 @@ ast_comptime_key_from_value: fn(value: CtValue) -> CtKey? Never! {
         .Bool(flag) -> Val(CtKey.Bool{value: flag})
         .Char(code) -> Val(CtKey.Char{value: code})
         .Struct(type_name, fields) -> {
-            keys := [NamedCtKey]{}
+            ^keys: [NamedCtKey]{}
             loop field in fields {
                 if ast_comptime_memo_storage_name(field.name) -> next
                 key: ast_comptime_key_from_value(field.value) ?? return None
@@ -744,7 +744,7 @@ ast_comptime_value_debug: fn(value: CtValue) -> String Never! {
         }
         .Struct(type_name, fields) -> {
             mangled: ast_comptime_generated_path(ast_comptime_generated_suffix(type_name))
-            parts := [String]{}
+            ^parts: [String]{}
             loop field in fields {
                 if ast_comptime_memo_storage_name(field.name) -> next
                 parts.push("{ast_comptime_generated_name(ast_comptime_generated_suffix(field.name))}: {ast_comptime_value_debug(field.value)}")
@@ -756,12 +756,12 @@ ast_comptime_value_debug: fn(value: CtValue) -> String Never! {
             if type_name == "Loadable" -> return ast_comptime_loadable(variant, args, true)
             mangled: ast_comptime_generated_path(variant)
             if args.len() == 0 -> return mangled
-            labeled := true
+            ^labeled: true
             loop arg in args {
                 if arg.label == None -> labeled = false
             }
             if labeled {
-                parts := [String]{}
+                ^parts: [String]{}
                 loop arg in args {
                     label: arg.label ?? ""
                     parts.push("{label}: {ast_comptime_value_debug(arg.value)}")
@@ -800,7 +800,7 @@ ast_comptime_bytes_list: fn(bytes: [U8]) -> String Never! {
 
 // `Debug` escaping inside a quoted string (`"`) or char (`'`) literal.
 ast_comptime_debug_escape: fn(text: String, in_char: Bool) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         escaped: if {
             byte == (U8{92}) -> U8{92}
@@ -831,7 +831,7 @@ ast_comptime_generated_suffix: fn(name: String) -> String Never! { name.removepr
 
 ast_comptime_generated_path: fn(name: String) -> String Never! {
     hex: "0123456789abcdef".bytes()
-    out := "__jet_".bytes()
+    ^out: "__jet_".bytes()
     loop byte in name.bytes() {
         alphanumeric: (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
         if alphanumeric {

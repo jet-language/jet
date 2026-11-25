@@ -87,7 +87,7 @@ sema_call_enqueue: fn(alias: String, args: [CallArg], span: Span, expected: Type
     encoded_arg: sema_app_enqueue_arg(Expr.ListLit{elements: job.encoded, span: span, id: AST_NODE_GENERATED}, params.encoded, span, check) ?? return sema_live_rejected()
     retries_arg: sema_app_enqueue_arg(job.retries, params.retries, span, check) ?? return sema_live_rejected()
     sema_scope_enter(check.scopes, check.state, "enqueue:{span.start}")
-    body := [TStmt]{}
+    ^body: [TStmt]{}
     statement: sema_stmt_check_binding(ast_binding(service_name, span, false, service, None), None, check) ?? {
         sema_single_use_leave_scope(check)
         return sema_live_rejected()
@@ -139,8 +139,8 @@ sema_app_enqueue_arg: fn(value: ^^Expr, param_type: Type, span: Span, check: ^Se
 // Ok(args.__ran(value))`. A method error that doesn't encode replies
 // `__failed`, a bare failure.
 sema_app_job_statements: fn(args_name: String, service_name: String, method: Func, method_module: ModuleID, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment) -> [Stmt] Never! {
-    statements := [Stmt]{}
-    reads := [CallArg]{}
+    ^statements: [Stmt]{}
+    ^reads: [CallArg]{}
     loop index in 1..<method.params.len() {
         local_name: "{args_name}_{index}"
         param: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
@@ -211,9 +211,9 @@ sema_app_job_method: fn(alias: String, call: Expr, span: Span, check: ^SemaBodyC
         if owner_type_args.len() != 0 || type_args.len() != 0 {
             return sema_app_job_not_one("its call has type arguments", method_span, check.diagnostics)
         }
-        on_self := false
-        receiver_span := method_span
-        receiver_id := AST_NODE_GENERATED
+        ^on_self: false
+        ^receiver_span: method_span
+        ^receiver_id: AST_NODE_GENERATED
         if receiver == .Ident(written, at, id) {
             on_self = written == "self"
             receiver_span = at
@@ -239,9 +239,9 @@ sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_s
     row: sema_type_resolve_nominal_row(graph, service, check.environment.module_identity) ?? return sema_app_job_not_one("`self` is a {sema_type_show_quoted(service)}, not a service", receiver_span, check.diagnostics)
     service_module: graph.modules[row.module_index].module_identity
     service_name: graph.modules[row.module_index].nominals[row.row].symbol.name
-    definition := sema_http_route_find_struct(check, service, check.environment.module_identity) ?? return sema_app_job_not_one("`self` is a {sema_type_show_quoted(service)}, not a service", receiver_span, check.diagnostics)
-    method_at := -1
-    marker_at := -1
+    ^definition: sema_http_route_find_struct(check, service, check.environment.module_identity) ?? return sema_app_job_not_one("`self` is a {sema_type_show_quoted(service)}, not a service", receiver_span, check.diagnostics)
+    ^method_at: -1
+    ^marker_at: -1
     loop (index, candidate) in definition.methods {
         if candidate.name != method -> next
         loop (at, written) in candidate.markers {
@@ -256,7 +256,7 @@ sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_s
     if method_at < 0 {
         return sema_app_job_not_one("`{service_name}.{method}` is not an `#App.Job` method", method_span, check.diagnostics)
     }
-    declaration := definition.methods.remove(method_at, .Slot) ?? return None
+    ^declaration: definition.methods.remove(method_at, .Slot) ?? return None
     marker: declaration.markers.remove(marker_at, .Slot) ?? return None
     if args.len() != declaration.params.len() - 1 {
         check.diagnostics.push(sema_call_arity_diagnostic("{service_name}.{method}", declaration.params.len() - 1, args.len(), false, method_span))
@@ -273,7 +273,7 @@ sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_s
         }
     }
     arg_member: sema_live_role_member(graph, "LiveArg", method_span, check.diagnostics) ?? return None
-    encoded := [Expr]{}
+    ^encoded: [Expr]{}
     loop index in 1..<declaration.params.len() {
         param: sema_type_resolve_declared(graph, declaration.params[index].ty, service_module)
         missing: loop codec in owned_trait_codec_names() {

@@ -40,7 +40,7 @@ store_malformed_object_reason: fn(path: String) -[FS, Env]> String? StoreError! 
 
 // Every malformed package record, in id order.
 store_malformed_objects: fn(hangar: String) -[FS, Env]> [MalformedObject] StoreError! {
-    malformed := [MalformedObject]{}
+    ^malformed: [MalformedObject]{}
     entries: store_object_dirs(hangar)
     loop entry in entries {
         found_reason: store_malformed_object_reason(entry.path)
@@ -54,7 +54,7 @@ store_malformed_objects: fn(hangar: String) -[FS, Env]> [MalformedObject] StoreE
 // Permissions opened for the renames are restored on every exit.
 store_quarantine_malformed_objects: fn(verification: StoreVerification, roots: HangarRoots, objects: [MalformedObject]) -[FS, Env, Time]> Int StoreError! {
     if objects.len() == 0 -> return Ok(0)
-    permissions := MovePathPermissions.default()
+    ^permissions: MovePathPermissions.default()
     if store_quarantine_move_objects(verification, roots, objects, permissions) == {
         .Ok(count) -> {
             permissions.restore() ?? return Err(err)
@@ -73,7 +73,7 @@ store_quarantine_move_objects: fn(verification: StoreVerification, roots: Hangar
     permissions.make_writable(hangar, hangar)
     store_ensure_real_directory(quarantine, "Hangar quarantine")
     permissions.make_writable(quarantine, hangar)
-    moved := 0
+    ^moved: 0
     loop object in objects {
         // Admitted objects are directory, regular file, or symlink roots;
         // every shape is quarantinable by rename.

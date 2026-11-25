@@ -32,7 +32,7 @@ provider_packagist_parse_metadata: fn(repository: String, name: String, raw: Str
     listed: packages.get(name) ?? return Err(RegistryError.Reason("Packagist has no package `{name}`"))
     releases: pkg_json_array(listed) ?? return Err(RegistryError.Reason("invalid Packagist releases: {PKG_JSON_NOT_ARRAY}"))
     expanded: provider_packagist_expand_releases(value, releases)
-    out := [RegistryPackage]{}
+    ^out: [RegistryPackage]{}
     loop release in expanded {
         version: provider_script_trim_v(provider_script_json_string(release, "version"))
         if !provider_script_safe_piece(version, "+_-.") -> next
@@ -63,7 +63,7 @@ provider_packagist_parse_metadata: fn(repository: String, name: String, raw: Str
                 return Err(RegistryError.Reason("package `{name}` {version} has no supported dist checksum"))
             }
         }
-        dependencies := [RegistryDependency]{}
+        ^dependencies: [RegistryDependency]{}
         if provider_script_json_field(release, "require") == {
             .Val(require_value) -> {
                 if pkg_json_object(require_value) == {
@@ -85,7 +85,7 @@ provider_packagist_parse_metadata: fn(repository: String, name: String, raw: Str
             }
             .None -> {}
         }
-        psr4 := [String:[String]]{}
+        ^psr4: [String:[String]]{}
         if provider_script_json_field(release, "autoload") == {
             .Val(autoload_value) -> {
                 if pkg_json_object(autoload_value) == {
@@ -133,7 +133,7 @@ provider_packagist_psr4_paths: fn(value: Dyn) -> [String] RegistryError! {
     if value == {
         .Text(path) -> Ok([String]{path})
         .Array(items) -> {
-            paths := [String]{}
+            ^paths: [String]{}
             loop item in items -> paths.push(provider_script_json_str(item))
             Ok(paths)
         }
@@ -152,14 +152,14 @@ provider_packagist_expand_releases: fn(metadata: Dyn, releases: [Dyn]) -> [Dyn] 
     if format != "composer/2.0" {
         return Err(RegistryError.Reason("unsupported Packagist metadata minifier"))
     }
-    expanded := [Dyn]{}
-    previous := [{key: String, value: Dyn}]{}
+    ^expanded: [Dyn]{}
+    ^previous: [{key: String, value: Dyn}]{}
     loop release in releases {
         changes: pkg_json_object(release) ?? return Err(RegistryError.Reason("invalid minified release: {PKG_JSON_NOT_OBJECT}"))
         loop change in changes {
             unset: (pkg_json_text(change.value) ?? "") == "__unset"
-            next_fields := [{key: String, value: Dyn}]{}
-            replaced := false
+            ^next_fields: [{key: String, value: Dyn}]{}
+            ^replaced: false
             loop field in previous {
                 if field.key == change.key {
                     if !unset {
@@ -171,7 +171,7 @@ provider_packagist_expand_releases: fn(metadata: Dyn, releases: [Dyn]) -> [Dyn] 
             if !unset && !replaced -> next_fields.push({key: change.key, value: change.value})
             previous = next_fields
         }
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         loop field in previous -> object[field.key] = field.value
         expanded.push(Dyn.Object(object))
     }
@@ -233,7 +233,7 @@ provider_packagist_install: fn(artifact: RegistryArtifact, out: String, scratch:
     loop line in lines {
         pair: line.split_once("\t") ?? return Err(RegistryError.Reason("Packagist zip type listing is malformed"))
         entry: pair.after
-        trimmed := entry.copy()
+        ^trimmed: entry.copy()
         loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
         if entry == "" || !provider_registry_safe_relative(trimmed) {
             return Err(RegistryError.Reason("Packagist zip contains unsafe path `{entry}`"))
@@ -263,12 +263,12 @@ PackagistAutoloadMapping: struct {
 // `vendor/autoload.php`: one `spl_autoload_register` over every PSR-4
 // mapping, longest prefix first; `composer-autoload` names it.
 provider_packagist_write_autoloader: fn(artifacts: [RegistryArtifact], out: String) -[FS]> RegistryError! {
-    mappings := [PackagistAutoloadMapping]{}
+    ^mappings: [PackagistAutoloadMapping]{}
     loop artifact in artifacts {
-        prefixes := artifact.package.psr4.keys().to_list()
+        ^prefixes: artifact.package.psr4.keys().to_list()
         prefixes.sort()
         loop prefix in prefixes {
-            directories := [String]{}
+            ^directories: [String]{}
             relatives: artifact.package.psr4[prefix]
             loop relative in relatives {
                 trimmed: provider_script_trim_slashes(relative)
@@ -278,7 +278,7 @@ provider_packagist_write_autoloader: fn(artifacts: [RegistryArtifact], out: Stri
         }
     }
     mappings.sort_by(fn(left: PackagistAutoloadMapping, right: PackagistAutoloadMapping) { (right.prefix.bytes().len() <=> left.prefix.bytes().len()).then(left.prefix <=> right.prefix) })
-    php := [String]{"<?php\nspl_autoload_register(static function (string $class): void {{\n"}
+    ^php: [String]{"<?php\nspl_autoload_register(static function (string $class): void {{\n"}
     loop mapping in mappings {
         php.push("    if (str_starts_with($class, '{provider_packagist_php_quote(mapping.prefix)}')) {{\n")
         loop directory in mapping.directories {

@@ -24,14 +24,14 @@ first_leaf_now: fn(tree: Tree) -> Int {
 run: fn() {
     leaf: Node{label: "leaf", clock: time.Clock.new(10), kids: [Node]{}}
     root: Node{label: "root", clock: time.Clock.new(0), kids: [Node]{leaf}}
-    copied := root.copy()
+    ^copied: root.copy()
     assert_eq(copied.clock.advance(2), 2)
     assert_eq(copied.kids[0].clock.advance(15), 15)
     assert_eq(root.clock.now(), 0)
     assert_eq(root.kids[0].clock.now(), 10)
     assert_eq(copied.kids[0].label, "leaf")
     tree: Tree.Branch{label: "top", kids: [Tree]{Tree.Branch{label: "mid", kids: [Tree]{Tree.Leaf(time.Clock.new(5))}}}}
-    forked := tree.copy()
+    ^forked: tree.copy()
     if forked == {
         .Branch(label, kids) -> {
             assert_eq(label, "top")
@@ -39,7 +39,7 @@ run: fn() {
                 .Branch(_, inner) -> {
                     if inner[0] == {
                         .Leaf(clock) -> {
-                            ticking := clock
+                            ^ticking: clock
                             assert_eq(ticking.advance(8), 8)
                         }
                         .Branch(_, _) -> {}

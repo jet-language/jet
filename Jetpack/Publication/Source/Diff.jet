@@ -23,7 +23,7 @@ PublicationBreakingChange: struct {
 // A registry snapshot's rows; publication_read_api_snapshot has checked every
 // line names its kind.
 publication_api_snapshot_items: fn(snapshot: PackageCapabilitySnapshot) -> [PublicAPIItem] Never! {
-    items := [PublicAPIItem]{}
+    ^items: [PublicAPIItem]{}
     loop line in snapshot.signatures {
         if pkg_api_snapshot_line_name(line) == .Val(row) {
             items.push(PublicAPIItem{kind: row.kind, name: row.name, signature: line.copy()})
@@ -36,8 +36,8 @@ publication_api_snapshot_items: fn(snapshot: PackageCapabilitySnapshot) -> [Publ
 // version below it, yanked or not, so a backport to 1.4.x is held to 1.4's
 // API and not to a later 2.0.
 publication_api_baseline: fn(entries: [PublicationIndexEntry], version: PublicationSemVer) -> PublicationIndexEntry? Never! {
-    best := PublicationIndexEntry?{None}
-    best_version := publication_ver(0, 0, 0)
+    ^best: PublicationIndexEntry?{None}
+    ^best_version: publication_ver(0, 0, 0)
     loop entry in entries {
         published: publication_parse_semver(entry.version) ?? next
         if publication_precedence(published, version) != Ordering.Less -> next
@@ -53,10 +53,10 @@ publication_api_baseline: fn(entries: [PublicationIndexEntry], version: Publicat
 // Match the first unused full triple before the first unused kind/name pair.
 // Duplicate legacy names therefore retain signature-multiset semantics.
 publication_diff_public_api: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreakingChange] Never! {
-    changes := [PublicationBreakingChange]{}
-    matched := (loop _ in new -> false)
+    ^changes: [PublicationBreakingChange]{}
+    ^matched: (loop _ in new -> false)
     loop old_item in old {
-        exact := -1
+        ^exact: -1
         loop index in 0..<new.len() {
             item: new[index]
             if !matched[index] && item.kind == old_item.kind && item.name == old_item.name && item.signature == old_item.signature {
@@ -68,7 +68,7 @@ publication_diff_public_api: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [
             matched[exact] = true
             next
         }
-        replacement := -1
+        ^replacement: -1
         loop index in 0..<new.len() {
             item: new[index]
             if !matched[index] && item.kind == old_item.kind && item.name == old_item.name {
@@ -183,7 +183,7 @@ PublicationAPICap: struct {
 publication_api_cap: fn(signature: String) -> PublicationAPICap? Never! {
     parts: signature.split_once(" #FX(") ?? return None
     inner: parts.after.removesuffix(")")
-    cap := PublicationAPICap{allowed: [String]{}, denied: [String]{}}
+    ^cap: PublicationAPICap{allowed: [String]{}, denied: [String]{}}
     if inner == "" -> return Val(cap)
     loop name in inner.split(", ") {
         if name.starts_with("!") -> cap.denied.push(name.removeprefix("!")) else if name != "Panic" && !name.starts_with("Panic.") {
@@ -238,7 +238,7 @@ publication_e1218: fn(old_version: String, new_version: String, bump: Publicatio
         .Same -> "unchanged"
         .Major -> "major"
     }
-    diagnostic := diagnostic_from_registry(
+    ^diagnostic: diagnostic_from_registry(
         "E1218",
         None,
         "publishing {new_version} after {old_version} is a {label} bump but breaks the public API item `{change.item_name}`",

@@ -55,7 +55,7 @@ sha1_pbe: fn(name: String) -> PBEAlg? Never! {
 /// `filler` repeated to `v` bytes (pkcs12_fill_buffer); `filler` is not
 /// empty.
 fill_block: fn(filler: [U8], v: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     cipher.reserve(out, v)
     loop i in 0..<v -> out.push(filler[i %% filler.len()])
     out
@@ -63,7 +63,7 @@ fill_block: fn(filler: [U8], v: Int) -> [U8] Never! {
 
 /// block += addend, as `v`-byte big-endian numbers modulo 2^(8v).
 add_block: fn(block: ^[U8], addend: [U8], v: Int) Never! {
-    carry := 0
+    ^carry: 0
     loop k in 0..<v {
         i: v - 1 - k
         sum: Int{block[i]} + Int{addend[i]} + carry
@@ -82,36 +82,36 @@ pkcs12_derivation: fn(md: hashes.Md, password: [U8], salt: [U8], id: Int, iterat
     use_password: password.len() != 0
     use_salt: salt.len() != 0
     hlen: hashes.md_size(md)
-    v := 128
+    ^v: 128
     if hlen <= 32 -> v = 64
     diversifier: fill_block([U8]{wrapping(U8{id %% 256})}, v)
-    salt_block := [U8]{}
+    ^salt_block: [U8]{}
     if use_salt -> salt_block = fill_block(salt, v)
-    pwd_block := [U8]{}
+    ^pwd_block: [U8]{}
     if use_password -> pwd_block = fill_block(password, v)
-    rounds := iterations
+    ^rounds: iterations
     if rounds < 1 -> rounds = 1
-    out := [U8]{}
+    ^out: [U8]{}
     cipher.reserve(out, len)
     loop out.len() < len {
         // A = H^c(D || S || P).
-        ctx := hashes.hash_start(md)
+        ^ctx: hashes.hash_start(md)
         hashes.hash_update(ctx, diversifier)
         if use_salt -> hashes.hash_update(ctx, salt_block)
         if use_password -> hashes.hash_update(ctx, pwd_block)
-        a := hashes.hash_finish(ctx)
+        ^a: hashes.hash_finish(ctx)
         loop _ in 1..<rounds {
-            next := hashes.hash(md, a)
+            ^next: hashes.hash(md, a)
             core.crypto.wipe(a)
             a = next.move()
         }
-        use_len := len - out.len()
+        ^use_len: len - out.len()
         if use_len > hlen -> use_len = hlen
         loop i in 0..<use_len -> out.push(a[i])
         if out.len() < len {
             // B = A repeated to v bytes, plus one; then I_j += B.
-            b := fill_block(a, v)
-            one := cipher.zero_bytes(v)
+            ^b: fill_block(a, v)
+            ^one: cipher.zero_bytes(v)
             one[v - 1] = U8{1}
             add_block(b, one, v)
             if use_salt -> add_block(salt_block, b, v)
@@ -136,7 +136,7 @@ parse_pbe_params: fn(data: [U8], params: asn1.ASN1Buf) -> PBEParams pkcs5.PBEErr
     if params.tag_id != asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE {
         return Err(.InvalidFormat(Val(.UnexpectedTag)))
     }
-    p := params.p
+    ^p: params.p
     end: params.p + params.len
     salt_len: asn1.get_tag(data, p, end, asn1.ASN1_OCTET_STRING) ?? return Err(.InvalidFormat(Val(err)))
     salt: cipher.bytes_of(data, p, salt_len)
@@ -161,10 +161,10 @@ pkcs12_pbe: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperatio
     pbe: parse_pbe_params(data, params)
     // The password as a BMPString with its terminating NUL: each byte a
     // big-endian UTF-16 unit.
-    unipwd := cipher.zero_bytes(2 * password.len() + 2)
+    ^unipwd: cipher.zero_bytes(2 * password.len() + 2)
     loop i in 0..<password.len() -> unipwd[2 * i + 1] = password[i]
-    key := pkcs12_derivation(md, unipwd, pbe.salt, PKCS12_DERIVE_KEY, pbe.iterations, info.key_bits /% 8) ?? return refuse(unipwd, err)
-    iv := [U8]{}
+    ^key: pkcs12_derivation(md, unipwd, pbe.salt, PKCS12_DERIVE_KEY, pbe.iterations, info.key_bits /% 8) ?? return refuse(unipwd, err)
+    ^iv: [U8]{}
     if info.iv_size != 0 {
         if pkcs12_derivation(md, unipwd, pbe.salt, PKCS12_DERIVE_IV, pbe.iterations, info.iv_size) == {
             .Ok(derived) -> { iv = derived }
@@ -175,7 +175,7 @@ pkcs12_pbe: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperatio
         }
     }
     core.crypto.wipe(unipwd)
-    ctx := layer.cipher_setup(info)
+    ^ctx: layer.cipher_setup(info)
     if layer.cipher_setkey(ctx, key, operation) == {
         .Ok(_) -> { core.crypto.wipe(key) }
         .Err(e) -> {

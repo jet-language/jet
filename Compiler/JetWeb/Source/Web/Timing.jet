@@ -58,8 +58,8 @@ web_timing_memory: fn(op: Int) -> Bool Never! {
 // and the return it stands for decides nothing.
 web_timing_check: fn(st: ^WebState, m: IRModule, f: IRFunction, body: WebBody, marks: [Int], decided: [Int]) Never! {
     fixed: ir_timing_fixed(f)
-    reads := [Int]{}
-    operands := [Bool]{}
+    ^reads: [Int]{}
+    ^operands: [Bool]{}
     loop at in 0..<f.op.len() {
         ir_x64_reads_into(f, at, reads)
         operand: ir_timing_any(fixed, reads)
@@ -71,18 +71,18 @@ web_timing_check: fn(st: ^WebState, m: IRModule, f: IRFunction, body: WebBody, m
     }
     ops: WasmOpTable.new()
     // copy: the reader owns the bytes it decodes; the body keeps its own.
-    bytes := body.code.copy()
+    ^bytes: body.code.copy()
     loop pair in 0..<(body.fixups.len() /% 2) {
         at: body.fixups[2 * pair]
         if at > 0 && bytes[at - 1] == 0x12 -> bytes[at - 1] = U8{0x10}
         web_patch_padded(bytes, at, 0)
     }
-    reader := WasmReader.new(bytes.move())
+    ^reader: WasmReader.new(bytes.move())
     code: wasm_decode_body(reader, ops, true) ?? {
         st.errors.push("{f.name}: fixed timing: its code does not decode: {err.render()}")
         return
     }
-    mark := 0
+    ^mark: 0
     loop k in 0..<code.op.len() {
         offset: code.at[k] - code.start
         loop mark + 2 < marks.len() && marks[mark + 2] <= offset -> mark += 2
@@ -93,7 +93,7 @@ web_timing_check: fn(st: ^WebState, m: IRModule, f: IRFunction, body: WebBody, m
         if web_timing_public_decision(decided, fixed, offset) -> next
         if web_timing_row(op) -> next
         if web_timing_memory(op) && web_timing_public_address(f, fixed, at) -> next
-        name := "opcode {op}"
+        ^name: "opcode {op}"
         if ops.info(op) == .Val(info) -> name = info.name
         st.errors.push(ir_timing_finding(f, at, "a fixed operand meets `{name}`, which the wasm32 table has no row for"))
     }
@@ -126,17 +126,17 @@ web_timing_public_address: fn(f: IRFunction, fixed: [Bool], at: Int) -> Bool Nev
 // indices, `checks` pairs of the offsets [start, end) of code the right
 // operand alone decides.
 web_timing_test_errors: fn(op: IROp, code: [U8], fixups: [Int], checks: [Int], secret_right: Bool) -> [String] Never! {
-    m := ir_module_new()
+    ^m: ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? panic("no U64 row")
-    f := ir_function_new("mix", "test:timing.jet.mix", "", "timing.jet", 1)
+    ^f: ir_function_new("mix", "test:timing.jet.mix", "", "timing.jet", 1)
     key: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "key"), 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     mixed: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
     f.slot_fixed[key] = true
     left: if secret_right -> data else -> key
     right: if secret_right -> key else -> data
-    _ := ir_emit(f, op, mixed, left, right, IR_OVERFLOW_WRAP, 2)
-    st := WebState{
+    ^_: ir_emit(f, op, mixed, left, right, IR_OVERFLOW_WRAP, 2)
+    ^st: WebState{
         app: true,
         stop_points: false,
         data_at: [Int]{},
@@ -158,15 +158,15 @@ web_timing_test_errors: fn(op: IROp, code: [U8], fixups: [Int], checks: [Int], s
         errors: [String]{},
     }
     // The body's one byte of local declarations comes first.
-    bytes := [U8]{0x00}
+    ^bytes: [U8]{0x00}
     bytes.extend(code.copy())
     bytes.push(0x0b)
-    patches := [Int]{}
+    ^patches: [Int]{}
     loop at in fixups {
         patches.push(at + 1)
         patches.push(0)
     }
-    decided := [Int]{}
+    ^decided: [Int]{}
     loop pair in 0..<(checks.len() /% 2) {
         decided.push(checks[2 * pair])
         decided.push(checks[2 * pair + 1])

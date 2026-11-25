@@ -25,7 +25,7 @@ jet_driver_rust_foreign_rust_type: fn(ty: Type, user_types: [String]) -> String 
         }
         .Apply(name, args) -> {
             if !user_types.contains(name) -> return "Box<dyn std::any::Any>"
-            types := [String]{}
+            ^types: [String]{}
             loop arg in args -> types.push(jet_driver_rust_foreign_rust_type(arg, user_types))
             "{ast_comptime_generated_path(name)}<{types.join(", ")}>"
         }
@@ -39,8 +39,8 @@ jet_driver_rust_foreign_param_type: fn(convention: AccessConvention, ty: Type, u
 }
 
 jet_driver_rust_foreign_wrapper: fn(function: JetDriverRustForeignFunction, user_types: [String]) -> String Never! {
-    params := [String]{}
-    args := [String]{}
+    ^params: [String]{}
+    ^args: [String]{}
     loop index in 0..<function.params.len() {
         param: function.params[index]
         params.push("p{index}: {jet_driver_rust_foreign_param_type(param.convention, param.ty, user_types)}")
@@ -86,7 +86,7 @@ jet_driver_rust_foreign_trampoline: fn(function: JetDriverRustForeignFunction, r
             return None
         }
     }
-    body := [String]{
+    ^body: [String]{
         "    if argc != {function.params.len()} || args.is_null() || out.is_null() {{",
         "        ffi_host_fault();",
         "        return 1;",
@@ -97,10 +97,10 @@ jet_driver_rust_foreign_trampoline: fn(function: JetDriverRustForeignFunction, r
         "    out.ptr = std::ptr::null_mut();",
         "    out.len = 0;",
     }
-    args := [String]{}
+    ^args: [String]{}
     loop index in 0..<function.params.len() {
         ty: function.params[index].ty
-        expr := ""
+        ^expr: ""
         if ty == {
             .String -> {
                 body.push("    let p{index}_ptr = args[{index}].ptr;")
@@ -162,11 +162,11 @@ jet_driver_rust_foreign_trampoline: fn(function: JetDriverRustForeignFunction, r
 }
 
 jet_driver_rust_foreign_source: fn(facts: JetDriverRustForeignFacts) -> String Never! {
-    out := [String]{jet_driver_rust_foreign_preamble(), facts.record_source, "// jet-ffi-descriptor={JET_DRIVER_RUST_FOREIGN_DESCRIPTOR}\n"}
-    names := [String]{}
+    ^out: [String]{jet_driver_rust_foreign_preamble(), facts.record_source, "// jet-ffi-descriptor={JET_DRIVER_RUST_FOREIGN_DESCRIPTOR}\n"}
+    ^names: [String]{}
     loop entry in facts.entries -> names.push(entry.declaration.name)
-    trampolines := [String?]{}
-    has_trampoline := false
+    ^trampolines: [String?]{}
+    ^has_trampoline: false
     loop entry in facts.entries {
         source: jet_driver_rust_foreign_trampoline(entry.declaration, facts.record_names)
         if source != None -> has_trampoline = true

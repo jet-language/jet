@@ -45,12 +45,12 @@ lambda_shape1_file: fn(path: String, text: String, source: Bool) -> MigrationOut
 // expected output follows the sources and messages it shows.
 lambda_shape1_lines: fn(path: String, text: String) -> MigrationOutcome {
     bytes: text.bytes()
-    edits := [LambdaShapeEdit]{}
-    rewritten := 0
-    start := 0
+    ^edits: [LambdaShapeEdit]{}
+    ^rewritten: 0
+    ^start: 0
     loop start < bytes.len() {
-        end := start
-        ticks := false
+        ^end: start
+        ^ticks: false
         loop end < bytes.len() && bytes[end] != 10 {
             if bytes[end] == 96 -> ticks = true
             end += 1
@@ -72,9 +72,9 @@ lambda_shape1_lines: fn(path: String, text: String) -> MigrationOutcome {
 lambda_shape1_source: fn(path: String, text: String) -> MigrationOutcome {
     bytes: text.bytes()
     lexed: lex_generated(bytes)
-    edits := [LambdaShapeEdit]{}
-    skipped := [String]{}
-    rewritten := lambda_shape1_scan(path, bytes, lexed.tables, lexed.tokens, TOKEN_LBRACE, edits, skipped)
+    ^edits: [LambdaShapeEdit]{}
+    ^skipped: [String]{}
+    ^rewritten: lambda_shape1_scan(path, bytes, lexed.tables, lexed.tokens, TOKEN_LBRACE, edits, skipped)
     loop token in lexed.tokens {
         if token.kind != TOKEN_RAW_STRING && token.kind != TOKEN_STRING -> next
         if lambda_shape1_quoted(path, bytes, token, skipped) == .Val(quoted_edit) {
@@ -150,10 +150,10 @@ lambda_shape1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: ^[Str
 // one interpolation hole's, whose enclosing bracket is `outer`.
 lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Token], outer: Int, edits: ^[LambdaShapeEdit], skipped: ^[String]) -> Int {
     tokens: lexer_without_comments(raw)
-    rewritten := 0
-    stack := [Int]{}
+    ^rewritten: 0
+    ^stack: [Int]{}
     // Whether each open `{` on `stack` is a statement block.
-    blocks := [Bool]{}
+    ^blocks: [Bool]{}
     loop index in 0..<tokens.len() {
         token: tokens[index]
         if token.literal >= 0 {
@@ -165,7 +165,7 @@ lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Tok
         }
         enclosing: if stack.len() > 0 -> stack[stack.len() - 1] else -> outer
         block: blocks.len() > 0 && blocks[blocks.len() - 1]
-        params_end := -1
+        ^params_end: -1
         if lambda_shape1_leads(bytes, tokens, index, enclosing, block, outer == LAMBDA_SHAPE_SPAN || outer == LAMBDA_SHAPE_TEXT) {
             if token.kind == TOKEN_LPAREN -> params_end = lambda_shape1_match(tokens, index)
             if token.kind == TOKEN_IDENT -> params_end = index
@@ -274,8 +274,8 @@ lambda_shape1_block: fn(tokens: [Token], index: Int) -> Bool {
 // `[K: V]{…}`): it follows a `[…]` type that does not index a value.
 lambda_shape1_collection: fn(tokens: [Token], index: Int) -> Bool {
     if index < 2 || tokens[index - 1].kind != TOKEN_RBRACKET -> return false
-    depth := 0
-    at := index - 1
+    ^depth: 0
+    ^at: index - 1
     loop at >= 0 {
         kind: tokens[at].kind
         if kind == TOKEN_RBRACKET -> depth += 1
@@ -299,20 +299,20 @@ lambda_shape1_capital: fn(bytes: [U8], token: Token) -> Bool {
 // quotes around a command line's Jet argument. Inside a string literal
 // (`doubled`) the inserted braces are doubled. Returns how many it rewrote.
 lambda_shape1_spans: fn(bytes: [U8], start: Int, end: Int, mark: Int, doubled: Bool, edits: ^[LambdaShapeEdit]) -> Int {
-    rewritten := 0
-    index := start
+    ^rewritten: 0
+    ^index: start
     loop index < end {
         if (Int{bytes[index]}) != mark {
             index += 1
             next
         }
-        run := index
+        ^run: index
         loop run < end && (Int{bytes[run]}) == mark -> run += 1
         if run - index != 1 {
             index = run
             next
         }
-        close := index + 1
+        ^close: index + 1
         loop close < end && (Int{bytes[close]}) != mark && bytes[close] != 10 -> close += 1
         if close >= end || (Int{bytes[close]}) != mark {
             index = close
@@ -342,7 +342,7 @@ lambda_shape1_snippet: fn(bytes: [U8], token: Token, edits: ^[LambdaShapeEdit]) 
     inner: lambda_shape1_unquote(inner_raw) ?? return 0
     if lambda_shape1_quote(inner) != inner_raw -> return 0
     inner_bytes: inner.bytes()
-    inner_edits := [LambdaShapeEdit]{}
+    ^inner_edits: [LambdaShapeEdit]{}
     count: lambda_shape1_plain(inner_bytes, 0, inner_bytes.len(), false, inner_edits)
     if count == 0 -> return 0
     rewritten_inner: lambda_shape1_apply(inner_bytes, inner_edits) ?? return 0
@@ -368,8 +368,8 @@ lambda_shape1_span: fn(bytes: [U8], from: Int, to: Int, mode: Int, doubled: Bool
     placeholder: written.contains("…") && !written.contains("___")
     content: if placeholder -> written.replace("…", "___").bytes() else -> written.bytes()
     lexed: lex_generated(content)
-    span_edits := [LambdaShapeEdit]{}
-    span_skipped := [String]{}
+    ^span_edits: [LambdaShapeEdit]{}
+    ^span_skipped: [String]{}
     count: lambda_shape1_scan("", content, lexed.tables, lexed.tokens, mode, span_edits, span_skipped)
     if count == 0 || span_skipped.len() > 0 -> return 0
     loop edit in span_edits {
@@ -405,9 +405,9 @@ lambda_shape1_body_end: fn(bytes: [U8], tokens: [Token], body: Int, enclosing: I
     if tokens[body].kind == TOKEN_LBRACE && lambda_shape1_match(tokens, body) < 0 {
         return tokens[body].span.end
     }
-    depth := 0
-    last := body
-    index := body
+    ^depth: 0
+    ^last: body
+    ^index: body
     loop index < tokens.len() {
         kind: tokens[index].kind
         closer: kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE
@@ -486,8 +486,8 @@ lambda_shape1_apply: fn(bytes: [U8], edits: ^[LambdaShapeEdit]) -> String? {
             else -> right.order <=> left.order
         }
     })
-    out := [String]{}
-    cursor := 0
+    ^out: [String]{}
+    ^cursor: 0
     loop edit in edits {
         if edit.start < cursor -> return None
         out.push(lambda_shape1_text(bytes, cursor, edit.start))
@@ -506,8 +506,8 @@ lambda_shape1_match: fn(tokens: [Token], open: Int) -> Int {
         opener == TOKEN_LBRACKET -> TOKEN_RBRACKET
         else -> TOKEN_RBRACE
     }
-    depth := 0
-    index := open
+    ^depth: 0
+    ^index: open
     loop index < tokens.len() {
         kind: tokens[index].kind
         if kind == opener -> depth += 1
@@ -525,7 +525,7 @@ lambda_shape1_text: fn(bytes: [U8], start: Int, end: Int) -> String {
 }
 
 lambda_shape1_line: fn(bytes: [U8], offset: Int) -> Int {
-    line := 1
+    ^line: 1
     loop index in 0..<offset {
         if bytes[index] == 10 -> line += 1
     }
@@ -541,9 +541,9 @@ lambda_shape1_newline: fn(bytes: [U8], start: Int, end: Int) -> Bool {
 
 // The leading blanks of the line holding `offset`.
 lambda_shape1_indent: fn(bytes: [U8], offset: Int) -> String {
-    start := offset
+    ^start: offset
     loop start > 0 && bytes[start - 1] != 10 -> start -= 1
-    end := start
+    ^end: start
     loop end < bytes.len() && (bytes[end] == 32 || bytes[end] == 9) -> end += 1
     lambda_shape1_text(bytes, start, end)
 }
@@ -551,7 +551,7 @@ lambda_shape1_indent: fn(bytes: [U8], offset: Int) -> String {
 // How many `mark` bytes open `raw`.
 lambda_shape1_fence: fn(raw: String, mark: Int) -> Int {
     bytes: raw.bytes()
-    count := 0
+    ^count: 0
     loop count < bytes.len() && (Int{bytes[count]}) == mark -> count += 1
     count
 }
@@ -561,8 +561,8 @@ lambda_shape1_fence: fn(raw: String, mark: Int) -> Int {
 // other escape.
 lambda_shape1_unquote: fn(raw: String) -> String? {
     bytes: raw.bytes()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < bytes.len() {
         byte: Int{bytes[index]}
         if byte == 92 {
@@ -598,16 +598,16 @@ lambda_shape1_quote: fn(text: String) -> String {
 // code spans of its prose. Other fences stay as written.
 lambda_shape1_markdown: fn(path: String, text: String) -> MigrationOutcome {
     lines: text.split("\n").to_list()
-    out := [String]{}
-    skipped := [String]{}
-    rewritten := 0
-    index := 0
+    ^out: [String]{}
+    ^skipped: [String]{}
+    ^rewritten: 0
+    ^index: 0
     loop index < lines.len() {
         line: lines[index].copy()
         index += 1
         if !line.trim().starts_with("```") {
             line_bytes: line.bytes()
-            edits := [LambdaShapeEdit]{}
+            ^edits: [LambdaShapeEdit]{}
             count: lambda_shape1_spans(line_bytes, 0, line_bytes.len(), 96, false, edits)
             if {
                 count > 0 && lambda_shape1_apply(line_bytes, edits) == .Val(rewritten_line) -> {
@@ -620,7 +620,7 @@ lambda_shape1_markdown: fn(path: String, text: String) -> MigrationOutcome {
         }
         fence: line.trim() == "```jet"
         out.push(line)
-        block := [String]{}
+        ^block: [String]{}
         loop index < lines.len() && lines[index].trim() != "```" {
             block.push(lines[index].copy())
             index += 1

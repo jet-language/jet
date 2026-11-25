@@ -24,8 +24,8 @@ Data: struct {
 
 // A counted loop over a list by index: the bounds check is provably dead.
 list_sum: fn(data: Data) -> Int {
-    total := 0
-    loop i := 0, i < data.xs.len() {
+    ^total: 0
+    loop ^i: 0, i < data.xs.len() {
         total += data.xs[i]
         i += 1
     }
@@ -34,8 +34,8 @@ list_sum: fn(data: Data) -> Int {
 
 // An indexed gather: the inner index needs its bounds check.
 gather_sum: fn(data: Data) -> Int {
-    total := 0
-    loop i := 0, i < data.at.len() {
+    ^total: 0
+    loop ^i: 0, i < data.at.len() {
         total += data.xs[data.at[i]]
         i += 1
     }
@@ -44,15 +44,15 @@ gather_sum: fn(data: Data) -> Int {
 
 // A strided range over bytes.
 stride_sum: fn(data: Data) -> Int {
-    total := 0
+    ^total: 0
     loop m in 9..<data.flags.len(), 3 -> total += (Int{data.flags[m]})
     total
 }
 
 // Data-dependent branches with no closed form.
 collatz_steps: fn(data: Data) -> Int {
-    n := data.start
-    steps := 0
+    ^n: data.start
+    ^steps: 0
     loop n != 1 {
         if n % 2 == 0 -> n = n /% 2 else -> n = 3 * n + 1
         steps += 1
@@ -62,14 +62,14 @@ collatz_steps: fn(data: Data) -> Int {
 
 // A loop over structs read by field.
 point_sum: fn(data: Data) -> Int {
-    total := 0
+    ^total: 0
     loop p in data.points -> total += p.x + p.y + p.z
     total
 }
 
 // A byte scan of a text.
 byte_count: fn(data: Data) -> Int {
-    count := 0
+    ^count: 0
     loop byte in data.text.bytes() {
         if byte == 111 -> count += 1
     }
@@ -79,7 +79,7 @@ byte_count: fn(data: Data) -> Int {
 // Allocator fast paths: every piece is a small box (jet_rt_alloc_8) freed
 // at the end of its pass (jet_rt_free_8).
 box_churn: fn(data: Data) -> Int {
-    total := 0
+    ^total: 0
     loop word in data.text.split(" ") {
         piece: "<{word}>"
         total += piece.len()

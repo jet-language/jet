@@ -250,7 +250,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
     jet: cases_test_real_jet("for executable-copy acceptance")
     // The version stamps beside jet travel with it; a copy without them is a
     // build of an unknown commit.
-    stamps := ""
+    ^stamps: ""
     names: [String]{"VERSION", "COMMIT"}
     loop stamp in names {
         if files.exists(files.join(files.dirname(jet), stamp)) {
@@ -258,7 +258,7 @@ cases_test_advanced: fn(root: String, name: String, source: String) -> KitOutcom
         }
     }
     cases_test_source(root, "jet-copy", "step original: jet --version\ncopy: {{jet}} isolated/jet\n{stamps}file: isolated/jet is-file\nstep: {{work}}/isolated/jet --version\nstdout: == original\nstderr: empty\n")
-    context := cases_test_context(root, files.join(root, "scratch"))
+    ^context: cases_test_context(root, files.join(root, "scratch"))
     context.env.jet = jet
     limits: kit_test_run_limits()
     context.env.timeout = limits.wall

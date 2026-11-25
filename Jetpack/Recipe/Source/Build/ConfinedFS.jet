@@ -35,7 +35,7 @@ PinnedRecipeDirectory: struct {
     // directories.
     open_or_create: fn(path: String) -[FS, Env]> PinnedRecipeDirectory RecipeError! {
         absolute: recipe_absolute_path(path)
-        directory := files.open_directory(recipe_path_anchor(absolute))
+        ^directory: files.open_directory(recipe_path_anchor(absolute))
         names: recipe_path_names(absolute)
         loop name in names {
             if directory.open_directory(name) == {
@@ -132,7 +132,7 @@ PinnedRecipeDirectory: struct {
     publish_new_file: fn(self, temporary: String, final: String, bytes: [U8]) -[FS]> RecipeError! {
         recipe_validate_component(temporary)
         recipe_validate_component(final)
-        out := self.directory.create(temporary, if_exists: .Refuse)
+        ^out: self.directory.create(temporary, if_exists: .Refuse)
         out.write_bytes(bytes)
         out.fsync()
         if self.directory.rename(temporary, final) == {
@@ -228,7 +228,7 @@ recipe_path_anchor: fn(absolute: String) -> String Never! {
 
 // The normal components below the root anchor.
 recipe_path_names: fn(absolute: String) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     parts: files.split_slash(absolute)
     start: if absolute.starts_with("/") -> 0 else -> 1
     loop index in start..<parts.len() {
@@ -241,7 +241,7 @@ recipe_path_names: fn(absolute: String) -> [String] Never! {
 // components, and let `..` remove the previous component.
 recipe_normalize: fn(path: String) -> String Never! {
     absolute: path.starts_with("/")
-    out := [String]{}
+    ^out: [String]{}
     segments: path.split("/").to_list()
     loop segment in segments {
         if segment == "" || segment == "." -> next
@@ -319,7 +319,7 @@ recipe_commit_staged_output_io: fn(parent: PinnedRecipeDirectory, staged_name: S
         // held parent; a child cannot turn this cleanup into a path escape.
         parent.remove_name(staged_name).drop("the replaced output is private scratch")
     } else if had_previous {
-        backup_name := ""
+        ^backup_name: ""
         loop _ in 0..<RECIPE_EXCLUSIVE_ATTEMPTS {
             candidate: parent.fresh_name("jet-recipe-backup")
             if parent.rename_name(output_name, candidate) == {
@@ -386,7 +386,7 @@ recipe_copy_tree: fn(src: String, dst: String) -[FS, Env]> RecipeError! {
 
 // Member names of `path` in byte order.
 recipe_sorted_names: fn(path: String) -[FS]> [String] RecipeError! {
-    names := [String]{}
+    ^names: [String]{}
     entries: files.list_dir(path)
     loop entry in entries -> names.push(entry.name)
     names.sort()
@@ -397,12 +397,12 @@ recipe_sorted_names: fn(path: String) -[FS]> [String] RecipeError! {
 // links at either end and a source that changes during the copy. The copy
 // keeps the source permission bits.
 recipe_copy_regular_file_nofollow: fn(src: String, dst: String, expected: Stat) -[FS, Env]> RecipeError! {
-    source := files.open(src, links: .Refuse)
+    ^source: files.open(src, links: .Refuse)
     opened: source.stat()
     if !opened.is_file || opened.id != expected.id {
         return Err(RecipeError.PermissionDenied("recipe source file changed before copy `{src}`"))
     }
-    destination := files.create(dst, links: .Refuse)
+    ^destination: files.create(dst, links: .Refuse)
     loop {
         chunk: source.read_bytes(RECIPE_COPY_CHUNK)
         if chunk.len() == 0 -> break
@@ -431,12 +431,12 @@ recipe_read_file_nofollow: fn(path: String, limit: Int) -[FS]> [U8] RecipeError!
     if expected.size > limit {
         return Err(RecipeError.InvalidData("recipe input exceeds its size limit `{path}`"))
     }
-    file := files.open(path, links: .Refuse)
+    ^file: files.open(path, links: .Refuse)
     opened: file.stat()
     if !opened.is_file || !recipe_same_file_identity(expected, opened) {
         return Err(RecipeError.Other("recipe input changed before read `{path}`"))
     }
-    content := [U8]{}
+    ^content: [U8]{}
     loop {
         remaining: limit + 1 - content.len()
         if remaining <= 0 -> break
@@ -490,7 +490,7 @@ recipe_validate_source_components: fn(source_root: String, relative: String) -[F
     if root_info.is_symlink {
         return Err(RecipeError.PermissionDenied("recipe source root must not be a symlink or reparse point"))
     }
-    components := [String]{}
+    ^components: [String]{}
     segments: relative.split("/").to_list()
     loop segment in segments {
         if segment == "" || segment == "." -> next
@@ -499,7 +499,7 @@ recipe_validate_source_components: fn(source_root: String, relative: String) -[F
         }
         components.push(segment)
     }
-    current := source_root
+    ^current: source_root
     loop index in 0..<components.len() {
         current = files.join(current, components[index])
         info: files.stat(current)

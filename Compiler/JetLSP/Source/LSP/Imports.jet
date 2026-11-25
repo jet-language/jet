@@ -73,7 +73,7 @@ lsp_import_unresolved: fn(view: LSPView, slot: Int, diagnostic: Diagnostic) -> [
 // a module that offers it, `binding.name`, else a new import row. The titles
 // and rows read the module names from the ledger while it is held.
 lsp_import_actions: fn(view: LSPView, diagnostic: Diagnostic) -> [LSPImportAction] Never! {
-    actions := [LSPImportAction]{}
+    ^actions: [LSPImportAction]{}
     span: diagnostic.span ?? return actions
     slot: lsp_import_doc_slot(view) ?? return actions
     name: lsp_import_unresolved_name(view.doc.text, diagnostic) ?? return actions
@@ -94,7 +94,7 @@ lsp_import_actions: fn(view: LSPView, diagnostic: Diagnostic) -> [LSPImportActio
 // Every module that offers `name` to the module `from`, by identity. A
 // member (`Shape.area`) is reached through its owner and is never offered.
 lsp_import_candidates: fn(ledger: NameLedger, modules: [JetDriverDocModule], from: Int, imports: [ImportDecl], name: String) -> [LSPImportCandidate] Never! {
-    found := [LSPImportCandidate]{}
+    ^found: [LSPImportCandidate]{}
     if from < 0 || from >= ledger.facts.modules.len() -> return found
     loop index in (ledger.declaration_names.get(name) ?? [Int]{}) {
         row: ledger.facts.declarations[index]
@@ -201,7 +201,7 @@ lsp_import_plain: fn(import: ImportDecl) -> Bool Never! {
 // `use` line at the top when the document imports nothing.
 lsp_import_row_edit: fn(text: String, imports: [ImportDecl], module_alias: String, name: String) -> TextEdit Never! {
     bytes: text.bytes()
-    last := -1
+    ^last: -1
     loop (index, import) in imports {
         if !lsp_import_plain(import) -> next
         if import.kind == .Unqualified(written, _, items, _, _) && written == module_alias && items.len() > 0 && import.span.end <= bytes.len() && bytes[import.span.end - 1] == 93 {
@@ -215,13 +215,13 @@ lsp_import_row_edit: fn(text: String, imports: [ImportDecl], module_alias: Strin
     if lsp_import_starts_use(bytes, span.start) {
         return TextEdit{span: span, new_text: "use {{\n    {lsp_import_written(bytes, span)}\n    {row}\n}}"}
     }
-    line := span.start
+    ^line: span.start
     loop line > 0 && bytes[line - 1] != 10 -> line -= 1
     indent: foundation_byte_text(bytes, line, span.start)
     if indent.trim() == "" && indent.count_bytes() > 0 {
         return TextEdit{span: Span{start: span.end, end: span.end}, new_text: "\n{indent}{row}"}
     }
-    end := span.end
+    ^end: span.end
     loop end < bytes.len() && bytes[end] != 10 -> end += 1
     TextEdit{span: Span{start: end, end: end}, new_text: "\nuse {row}"}
 }
@@ -237,7 +237,7 @@ lsp_import_starts_use: fn(bytes: [U8], at: Int) -> Bool Never! {
 
 // A row as written, without the `use` of a lone `use` line.
 lsp_import_written: fn(bytes: [U8], span: Span) -> String Never! {
-    start := span.start
+    ^start: span.start
     if lsp_import_starts_use(bytes, start) {
         start += 3
         loop start < span.end && (bytes[start] == 32 || bytes[start] == 9) -> start += 1
@@ -247,7 +247,7 @@ lsp_import_written: fn(bytes: [U8], span: Span) -> String Never! {
 
 // The position of the last byte before `at` that is not white space, or -1.
 lsp_import_back: fn(bytes: [U8], at: Int) -> Int Never! {
-    back := at - 1
+    ^back: at - 1
     loop back >= 0 && (bytes[back] == 32 || bytes[back] == 9 || bytes[back] == 10 || bytes[back] == 13) {
         back -= 1
     }
@@ -257,7 +257,7 @@ lsp_import_back: fn(bytes: [U8], at: Int) -> Int Never! {
 // The position of the first byte from `at` that is neither white space nor
 // a `;`.
 lsp_import_ahead: fn(bytes: [U8], at: Int) -> Int Never! {
-    ahead := at
+    ^ahead: at
     loop ahead < bytes.len() && (bytes[ahead] == 32 || bytes[ahead] == 9 || bytes[ahead] == 10 || bytes[ahead] == 13 || bytes[ahead] == 59) {
         ahead += 1
     }
@@ -268,13 +268,13 @@ lsp_import_ahead: fn(bytes: [U8], at: Int) -> Int Never! {
 // but white space between its rows (a comment) is not read, so it stays as
 // written.
 lsp_import_statements: fn(bytes: [U8], imports: [ImportDecl]) -> [LSPImportStatement] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop (index, import) in imports {
         if lsp_import_plain(import) -> order.push(index)
     }
     order.sort_by(fn(a: Int, b: Int) { imports[a].span.start <=> imports[b].span.start })
-    statements := [LSPImportStatement]{}
-    at := 0
+    ^statements: [LSPImportStatement]{}
+    ^at: 0
     loop at < order.len() {
         first: imports[order[at]].span
         at += 1
@@ -286,9 +286,9 @@ lsp_import_statements: fn(bytes: [U8], imports: [ImportDecl]) -> [LSPImportState
         if open < 0 || bytes[open] != 123 -> next
         keyword: lsp_import_back(bytes, open)
         if !lsp_import_starts_use(bytes, keyword - 2) -> next
-        rows := [Int]{order[at - 1]}
-        cursor := first.end
-        end := -1
+        ^rows: [Int]{order[at - 1]}
+        ^cursor: first.end
+        ^end: -1
         loop {
             ahead: lsp_import_ahead(bytes, cursor)
             if ahead >= bytes.len() -> break
@@ -323,8 +323,8 @@ lsp_import_reported: fn(diagnostics: [Diagnostic], span: Span) -> Bool Never! {
 lsp_import_kept_row: fn(bytes: [U8], imports: [ImportDecl], index: Int, diagnostics: [Diagnostic], needed: [Int]) -> String? Never! {
     import: imports[index]
     if import.kind == .Unqualified(module_alias, _, items, _, _) {
-        members := ""
-        kept := 0
+        ^members: ""
+        ^kept: 0
         loop (at, item) in items {
             item_span: if at < import.item_spans.len() -> import.item_spans[at] else -> import.span
             local_span: if at < import.local_spans.len() -> import.local_spans[at] else -> item_span
@@ -347,14 +347,14 @@ lsp_import_kept_row: fn(bytes: [U8], imports: [ImportDecl], index: Int, diagnost
 // and a `use` left with no row deleted with the line breaks after it. A row
 // an unresolved name's repair writes through (`binding.name`) stays.
 lsp_organize_imports_edits: fn(view: LSPView, diagnostics: [Diagnostic]) -> [TextEdit] Never! {
-    edits := [TextEdit]{}
-    reports := false
+    ^edits: [TextEdit]{}
+    ^reports: false
     loop diagnostic in diagnostics {
         if diagnostic.code == "L0103" && diagnostic.span != None -> reports = true
     }
     if !reports -> return edits
     slot: lsp_import_doc_slot(view) ?? return edits
-    needed := [Int]{}
+    ^needed: [Int]{}
     loop diagnostic in diagnostics {
         candidates: lsp_import_unresolved(view, slot, diagnostic) ?? next
         loop candidate in candidates {
@@ -365,7 +365,7 @@ lsp_organize_imports_edits: fn(view: LSPView, diagnostics: [Diagnostic]) -> [Tex
     bytes: view.doc.text.bytes()
     imports: view.checked.modules[slot].imports
     loop statement in lsp_import_statements(bytes, imports) {
-        kept := [String]{}
+        ^kept: [String]{}
         loop index in statement.rows {
             if lsp_import_kept_row(bytes, imports, index, diagnostics, needed) == .Val(row) {
                 kept.push(row)
@@ -377,9 +377,9 @@ lsp_organize_imports_edits: fn(view: LSPView, diagnostics: [Diagnostic]) -> [Tex
             else -> "use {{\n    {kept.join("\n    ")}\n}}"
         }
         if written == foundation_byte_text(bytes, statement.start, statement.end) -> next
-        end := statement.end
+        ^end: statement.end
         if kept.len() == 0 {
-            breaks := 0
+            ^breaks: 0
             loop end < bytes.len() && bytes[end] == 10 && breaks < 2 {
                 end += 1
                 breaks += 1

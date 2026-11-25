@@ -57,9 +57,7 @@ is_name_start: fn(c: Int) -> Bool Never! {
     c == 95 || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
 }
 
-is_name_char: fn(c: Int) -> Bool Never! {
-    is_name_start(c) || (c >= 48 && c <= 57)
-}
+is_name_char: fn(c: Int) -> Bool Never! { is_name_start(c) || (c >= 48 && c <= 57) }
 
 hex_digit: fn(c: Int) -> Int Never! {
     if c >= 48 && c <= 57 -> return c - 48
@@ -71,11 +69,11 @@ hex_digit: fn(c: Int) -> Int Never! {
 /// Adds the inclusive range `lo..hi` to sorted, disjoint `ranges`, merging
 /// it with every range it touches.
 add_range: fn(ranges: ^[Int], lo: Int, hi: Int) Never! {
-    out := [Int]{}
-    start := lo
-    end := hi
-    placed := false
-    k := 0
+    ^out: [Int]{}
+    ^start: lo
+    ^end: hi
+    ^placed: false
+    ^k: 0
     loop k < ranges.len() {
         a: ranges[k]
         b: ranges[k + 1]
@@ -161,7 +159,7 @@ NoteLexer: struct {
             }
             if c == 47 && self.peek(1) == 42 {
                 self.i += 2
-                closed := false
+                ^closed: false
                 loop self.i < self.bytes.len() {
                     if self.peek(0) == 42 && self.peek(1) == 47 {
                         self.i += 2
@@ -170,7 +168,9 @@ NoteLexer: struct {
                     }
                     self.i += 1
                 }
-                if !closed -> self.fault(at, "this `/*` comment is never closed", "End the comment with `*/`")
+                if !closed {
+                    self.fault(at, "this `/*` comment is never closed", "End the comment with `*/`")
+                }
                 next
             }
             if is_name_start(c) {
@@ -230,9 +230,7 @@ NoteLexer: struct {
                 if self.peek(0) == 63 {
                     self.i += 1
                     self.push(.LazyStar, "*?", at)
-                } else {
-                    self.push(.Star, "*", at)
-                }
+                } else { self.push(.Star, "*", at) }
                 next
             }
             if c == 43 {
@@ -242,9 +240,7 @@ NoteLexer: struct {
                 } else if self.peek(0) == 63 {
                     self.i += 1
                     self.push(.LazyPlus, "+?", at)
-                } else {
-                    self.push(.Plus, "+", at)
-                }
+                } else { self.push(.Plus, "+", at) }
                 next
             }
             if c == 61 {
@@ -276,7 +272,7 @@ NoteLexer: struct {
             if c == 123 {
                 // An action `{…}`, or the block of `options {…}`: skip to
                 // its closing brace so one fault covers it.
-                depth := 1
+                ^depth: 1
                 loop self.i < self.bytes.len() && depth > 0 {
                     d: self.peek(0)
                     if d == 123 -> depth += 1
@@ -317,9 +313,9 @@ NoteLexer: struct {
     /// A literal whose opening quote `quote` is at `at`.
     literal: fn(^self, at: Int, quote: Int) Never! {
         self.i += 1
-        out := [U8]{}
-        closed := false
-        broken := false
+        ^out: [U8]{}
+        ^closed: false
+        ^broken: false
         loop self.i < self.bytes.len() {
             c: self.peek(0)
             if c == quote {
@@ -340,12 +336,14 @@ NoteLexer: struct {
             self.fault(at, "this literal is never closed", "End it with the quote it starts with, on the same line")
             return
         }
-        fold := false
+        ^fold: false
         if self.peek(0) == 105 && !is_name_char(self.peek(1)) {
             self.i += 1
             fold = true
         }
-        if broken -> return
+        if broken {
+            return
+        }
         if out.len() == 0 {
             self.fault(at, "an empty literal matches nothing", "Drop it, or make the element optional with `?`")
             return
@@ -381,8 +379,8 @@ NoteLexer: struct {
             return -1
         }
         self.i += 1
-        value := 0
-        digits := 0
+        ^value: 0
+        ^digits: 0
         loop self.peek(0) != 125 {
             h: hex_digit(self.peek(0))
             if h < 0 || digits == 6 {
@@ -412,8 +410,10 @@ NoteLexer: struct {
         }
         self.i += 2
         property: self.property_name(at)
-        if property < 0 -> return
-        class := empty_class()
+        if property < 0 {
+            return
+        }
+        ^class: empty_class()
         class.properties.push(property)
         class.negated = letter == 80
         self.tokens.push(NoteToken{kind: .Class, text: "", at: at, end: self.i, fold: false, class: class})
@@ -435,18 +435,20 @@ NoteLexer: struct {
         }
         self.i += 1
         property: property_named(name)
-        if property < 0 -> self.fault(at, "the Unicode property `{name}` is not supported", PROPERTY_FIX)
+        if property < 0 {
+            self.fault(at, "the Unicode property `{name}` is not supported", PROPERTY_FIX)
+        }
         property
     }
 
     /// The body of a class after its `[`.
     class_body: fn(^self, at: Int) -> GrammarClass Never! {
-        class := empty_class()
+        ^class: empty_class()
         if self.peek(0) == 94 {
             self.i += 1
             class.negated = true
         }
-        members := 0
+        ^members: 0
         loop {
             c: self.peek(0)
             if c < 0 || c == 10 {
@@ -478,9 +480,7 @@ NoteLexer: struct {
                     next
                 }
                 add_range(class.ranges, lo, hi)
-            } else {
-                add_range(class.ranges, lo, lo)
-            }
+            } else { add_range(class.ranges, lo, lo) }
         }
         if members == 0 && !class.negated {
             self.fault(at, "an empty class matches nothing", "List the members, as in `[a-z]`")
@@ -575,11 +575,15 @@ NoteParser: struct {
     }
 
     fail: fn(^self, at: Int, message: String, fix: String) Never! {
-        if self.failed -> return
+        if self.failed {
+            return
+        }
         self.failed = true
         loop k in 0..<self.lexed {
             offset: self.faults[k].at.offset
-            if offset >= self.start && offset <= at -> return
+            if offset >= self.start && offset <= at {
+                return
+            }
         }
         self.faults.push(grammar_fault(.Notation, at, message, fix))
     }
@@ -615,8 +619,12 @@ NoteParser: struct {
                 if word == {
                     "import" -> self.import()
                     "options" | "tokens" | "channels" -> self.refuse_block(word)
-                    "mode" -> self.fail(self.at(), "lexer modes are not supported", "Tokens are lexed by context: only the tokens viable at each spot are tried, so no mode is needed")
-                    "grammar" | "lexer" | "parser" -> self.fail(self.at(), "a `{word}` header is not part of a grammar literal", "Drop the header: the binding's name names the grammar")
+                    "mode" -> {
+                        self.fail(self.at(), "lexer modes are not supported", "Tokens are lexed by context: only the tokens viable at each spot are tried, so no mode is needed")
+                    }
+                    "grammar" | "lexer" | "parser" -> {
+                        self.fail(self.at(), "a `{word}` header is not part of a grammar literal", "Drop the header: the binding's name names the grammar")
+                    }
                     else -> self.rule()
                 }
             }
@@ -651,7 +659,7 @@ NoteParser: struct {
     }
 
     rule: fn(^self) Never! {
-        fragment := false
+        ^fragment: false
         if self.text() == "fragment" && self.ahead(1) == .Name {
             fragment = true
             self.advance()
@@ -671,8 +679,10 @@ NoteParser: struct {
         self.advance()
         self.token_rule = token
         body: self.alternatives()
-        if self.failed -> return
-        skip := false
+        if self.failed {
+            return
+        }
+        ^skip: false
         if self.kind() == .Arrow {
             self.advance()
             if self.kind() != .Name || self.text() != "skip" {
@@ -711,9 +721,7 @@ NoteParser: struct {
         alt: self.node(.Alt, self.at(), "")
         if self.kind() == .Option {
             option: self.text()
-            if option == "assoc=right" {
-                self.tree.nodes[alt].right = true
-            } else if option != "assoc=left" {
+            if option == "assoc=right" -> self.tree.nodes[alt].right = true else if option != "assoc=left" {
                 self.fail(self.at(), "`<{option}>` is not an option an alternative takes", "Only `<assoc=right>` may start an alternative")
                 return alt
             }
@@ -756,9 +764,9 @@ NoteParser: struct {
     }
 
     element: fn(^self) -> Int Never! {
-        label := ""
-        append := false
-        label_at := 0
+        ^label: ""
+        ^append: false
+        ^label_at: 0
         if self.kind() == .Name && (self.ahead(1) == .Equals || self.ahead(1) == .PlusEquals) {
             label_at = self.at()
             label = self.text()
@@ -861,7 +869,9 @@ NoteParser: struct {
         id: self.node(kind, at, "")
         self.tree.nodes[id].children.push(atom)
         self.tree.nodes[id].lazy = lazy
-        if is_suffix(self.kind()) -> self.fail(self.at(), "an element takes one suffix", "Group the element to repeat it, as in `(x?)*`")
+        if is_suffix(self.kind()) {
+            self.fail(self.at(), "an element takes one suffix", "Group the element to repeat it, as in `(x?)*`")
+        }
         id
     }
 }
@@ -888,7 +898,7 @@ NoteTokens: struct {
 }
 
 notation_tokens: fn(text: String) -> NoteTokens Never! {
-    lexer := NoteLexer{bytes: text.bytes(), i: 0, tokens: [NoteToken]{}, faults: [GrammarFault]{}}
+    ^lexer: NoteLexer{bytes: text.bytes(), i: 0, tokens: [NoteToken]{}, faults: [GrammarFault]{}}
     lexer.run()
     NoteTokens{tokens: lexer.tokens, faults: lexer.faults}
 }
@@ -897,7 +907,7 @@ notation_tokens: fn(text: String) -> NoteTokens Never! {
 read_notation: fn(text: String) -> RuleTree GrammarFaults! {
     lexed: notation_tokens(text)
     tree: RuleTree{rules: [GrammarRule]{}, nodes: [GrammarNode]{}, classes: [GrammarClass]{}, imports: [GrammarImport]{}}
-    parser := NoteParser{tokens: lexed.tokens, p: 0, tree: tree, faults: lexed.faults, lexed: lexed.faults.len(), start: 0, failed: false, token_rule: false}
+    ^parser: NoteParser{tokens: lexed.tokens, p: 0, tree: tree, faults: lexed.faults, lexed: lexed.faults.len(), start: 0, failed: false, token_rule: false}
     parser.run()
     if parser.faults.len() > 0 -> return Err(grammar_faults(parser.faults))
     Ok(parser.tree)

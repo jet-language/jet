@@ -21,9 +21,9 @@ cpu: fn() {
 }
 
 memory: fn() {
-    blocks := [[U8]]{}
+    ^blocks: [[U8]]{}
     loop {
-        block := "x".repeat(256 * 1024).bytes()
+        ^block: "x".repeat(256 * 1024).bytes()
         block[0] = U8{1}
         blocks.push(block)
         time.sleep(1ms)
@@ -31,7 +31,7 @@ memory: fn() {
 }
 
 descriptors: fn() {
-    handles := [FileReader]{}
+    ^handles: [FileReader]{}
     path: if sys.family() == "windows" -> "NUL" else -> "/dev/null"
     loop {
         if files.open(path) == {
@@ -92,7 +92,7 @@ kill_pending: fn(status: String) -> Bool {
 reaped_how: fn(pid: String) -> String {
     if !sys.is_linux() {
         target: Int.parse(pid) ?? panic("descendant pid {pid} is not an integer")
-        gone := false
+        ^gone: false
         #Unsafe("kill -0 only asks whether the killed descendant still exists") {
             if sys.kill(target, 0) == {
                 .Ok(_) -> {}
@@ -119,7 +119,7 @@ reaped_how: fn(pid: String) -> String {
 reaped: fn(pid_files: [String]) {
     loop pid_file in pid_files {
         pid: (files.read(pid_file) ?? panic("read descendant pid file {pid_file}")).trim()
-        how := reaped_how(pid)
+        ^how: reaped_how(pid)
         loop _ in 0..<200 {
             if how != "" -> break
             time.sleep(10ms)

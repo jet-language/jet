@@ -8,31 +8,31 @@ use {
 // A node with a role paints with its ARIA role and its label as its
 // accessible name; one without paints with neither.
 render_tree: fn(with_role: Bool) {
-    tree := ui.node("plain", 80.0, 24.0)
+    ^tree: ui.node("plain", 80.0, 24.0)
     if with_role -> tree = ui.node_role("Named", 80.0, 24.0, ui.aria_role_label())
-    backend := ui.null_backend()
-    size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    ^backend: ui.null_backend()
+    ^size: backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
     backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
     backend.paint(tree)
 }
 
 render_focus_tree: fn() {
-    tree := ui.box([ui.button("Save"), ui.button("Cancel")])
-    backend := ui.null_backend()
-    size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    ^tree: ui.box([ui.button("Save"), ui.button("Cancel")])
+    ^backend: ui.null_backend()
+    ^size: backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
     backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
     backend.paint(tree)
 }
 
 // Two backends paint in one entry: the page shows the last paint.
 render_two_backends: fn() {
-    first := ui.null_backend()
-    first_tree := ui.button("Backend A")
+    ^first: ui.null_backend()
+    ^first_tree: ui.button("Backend A")
     first.layout(first_tree, ui.rect(0.0, 0.0, 80.0, 24.0))
     first.paint(first_tree)
 
-    second := ui.null_backend()
-    second_tree := ui.button("Backend B")
+    ^second: ui.null_backend()
+    ^second_tree: ui.button("Backend B")
     second.layout(second_tree, ui.rect(0.0, 24.0, 80.0, 24.0))
     second.paint(second_tree)
 }

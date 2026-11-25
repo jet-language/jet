@@ -21,7 +21,7 @@ DoctorTreeNode: struct {
 
 // Every node under `root` in sorted path order, without following links.
 cli_doctor_test_tree: fn(root: String) -[FS]> [DoctorTreeNode] {
-    out := [DoctorTreeNode]{}
+    ^out: [DoctorTreeNode]{}
     if files.lexists(root) -> cli_doctor_test_walk(root, root, out)
     out
 }
@@ -36,7 +36,7 @@ cli_doctor_test_walk: fn(root: String, path: String, out: ^[DoctorTreeNode]) -[F
         info.is_dir -> {
             out.push(DoctorTreeNode{relative: relative, kind: "dir", bytes: [U8]{}})
             entries: files.list_dir(path) ?? panic("list scratch directory")
-            children := [String]{}
+            ^children: [String]{}
             loop entry in entries -> children.push(entry.path)
             children.sort()
             loop child in children -> cli_doctor_test_walk(root, child, out)
@@ -58,7 +58,7 @@ cli_doctor_test_trees_equal: fn(left: [DoctorTreeNode], right: [DoctorTreeNode])
 }
 
 #Test("doctor hangar enumeration rejects missing and malformed metadata") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: cli_doctor_test_scratch("enumeration")
     roots: cli_doctor_test_roots(root)
     files.create_dir_all(files.join(roots.hangar_dir(), "missing-meta")) ?? panic("create object")
@@ -115,7 +115,7 @@ cli_doctor_test_trees_equal: fn(left: [DoctorTreeNode], right: [DoctorTreeNode])
 }
 
 #Test("doctor hangar check is byte for byte read only") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     root: cli_doctor_test_scratch("read-only")
     roots: cli_doctor_test_roots(root)
     files.create_dir_all(roots.hangar_dir()) ?? panic("create hangar")
@@ -141,7 +141,7 @@ cli_doctor_test_trees_equal: fn(left: [DoctorTreeNode], right: [DoctorTreeNode])
 }
 
 #Test("doctor absent hangar check does not initialize store") {
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     scratch: cli_doctor_test_scratch("absent")
     root: files.join(scratch, "root")
     roots: cli_doctor_test_roots(root)

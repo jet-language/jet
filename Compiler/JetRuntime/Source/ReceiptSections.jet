@@ -59,7 +59,7 @@ receipt_section_stop_with: fn(head: I64, value: I64, tail: I64) {
 receipt_section_digest_ok: fn(value: I64) -> Bool {
     if (rt_text_len(value) != I64{64}) { return false }
     data: rt_text_data(value)
-    at := I64{0}
+    ^at: I64{0}
     loop at < (I64{64}) {
         byte: rt_text_byte(wrapping(data + at))
         if !((byte >= I64{48} && byte <= I64{57}) || (byte >= I64{97} && byte <= I64{102})) {
@@ -76,7 +76,7 @@ receipt_section_name_ok: fn(value: I64, limit: I64) -> Bool {
     length: rt_text_len(value)
     if (length == I64{0} || length > limit) { return false }
     data: rt_text_data(value)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
         if (byte < I64{32} || byte == I64{127} || byte == I64{47} || byte == I64{92}) {
@@ -132,7 +132,7 @@ receipt_section_render: fn(target: I64, tree: I64) {
     data: rt_text_word(wrapping(value + DATA_SEQUENCE_DATA))
     if (kind == DYN_ARRAY) {
         rt_text_push_word(target, I64{91}, I64{1})
-        at := I64{0}
+        ^at: I64{0}
         loop at < length {
             if (at != I64{0}) { rt_text_push_word(target, I64{44}, I64{1}) }
             receipt_section_render(target, rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES)))
@@ -142,10 +142,10 @@ receipt_section_render: fn(target: I64, tree: I64) {
         return
     }
     order: jet_rt_alloc(if (length == I64{0}) -> I64{8} else -> length * I64{8}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         entry: wrapping(data + at * DYN_ENTRY_BYTES)
-        slot := at
+        ^slot: at
         loop slot > (I64{0}) {
             previous: rt_text_word(wrapping(order + (slot - I64{1}) * I64{8}))
             if (jet_rt_string_compare(rt_text_word(wrapping(previous + DYN_ENTRY_KEY)), rt_text_word(wrapping(entry + DYN_ENTRY_KEY))) <= I64{0}) {
@@ -174,7 +174,7 @@ receipt_section_render: fn(target: I64, tree: I64) {
 // One frame: the value's byte length as a big-endian u64, then its bytes.
 receipt_section_frame: fn(target: I64, value: I64) {
     length: rt_text_len(value)
-    shift := I64{56}
+    ^shift: I64{56}
     loop shift >= (I64{0}) {
         rt_text_append_raw_word(target, (length >> shift) & I64{255}, I64{1})
         shift -= I64{8}
@@ -241,7 +241,7 @@ receipt_section_store: fn(tree: I64, section: I64, type_name: I64, schema: I64, 
 // lstat of a terminated path into the 128-byte StatFacts row: mode@16,
 // size@56. Returns 0 or -errno.
 receipt_section_lstat: fn(name: I64, facts: I64) -> I64 {
-    result := I64{0}
+    ^result: I64{0}
     #Unsafe("the terminated path and the 128-byte stat fact row are live for the syscall") {
         result = os_stat_facts_i64(I64{6}, name, facts)
     }
@@ -258,15 +258,15 @@ receipt_section_capacity: fn(directory: I64, payload_bytes: I64) -> Bool {
     if (fd < I64{0}) { return true }
     buffer: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
     facts: jet_rt_alloc(I64{128}, I64{8})
-    count := I64{0}
-    total := I64{0}
+    ^count: I64{0}
+    ^total: I64{0}
     // The static stop message, or 0 while every entry is acceptable.
-    stop := I64{0}
+    ^stop: I64{0}
     loop stop == (I64{0}) {
         listed: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
         if (listed == I64{-4}) { next }
         if (listed <= I64{0}) { break }
-        at := I64{0}
+        ^at: I64{0}
         loop at < listed {
             record: wrapping(buffer + at)
             at += rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})
@@ -296,7 +296,7 @@ receipt_section_capacity: fn(directory: I64, payload_bytes: I64) -> Bool {
     }
     jet_rt_free(facts, I64{128}, I64{8})
     jet_rt_free(buffer, FILES_DIRENT_BYTES, I64{8})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if (stop != I64{0}) {
         receipt_section_stop(stop)
         return false
@@ -327,8 +327,8 @@ receipt_section_directory: fn(directory: I64) -> Bool {
 // `length` bytes and a 128-byte stat fact row: no allocation, so a root stop's
 // development receipt (ProductionReceipt.jet) can use it too.
 receipt_section_directory_at: fn(name: I64, length: I64, facts: I64) -> Bool {
-    safe := true
-    at := I64{0}
+    ^safe: true
+    ^at: I64{0}
     loop safe && at <= length {
         boundary: at == length || rt_text_byte(wrapping(name + at)) == I64{47}
         if !boundary {
@@ -371,7 +371,7 @@ receipt_section_directory_at: fn(name: I64, length: I64, facts: I64) -> Bool {
 }
 
 receipt_section_write_all: fn(fd: I64, data: I64, length: I64) -> Bool {
-    written := I64{0}
+    ^written: I64{0}
     loop written < length {
         // write: trap_syscall, not host_call, whose read recorder allocates
         // (and records no write).
@@ -389,14 +389,14 @@ receipt_section_same: fn(name: I64, bytes: I64) -> Bool {
     if (fd < I64{0}) { return false }
     length: rt_text_len(bytes)
     buffer: jet_rt_alloc(length + I64{1}, I64{1})
-    filled := I64{0}
+    ^filled: I64{0}
     loop filled <= length {
         result: host_call(I64{0}, fd, wrapping(buffer + filled), length + I64{1} - filled)
         if (result == I64{-4}) { next }
         if (result <= I64{0}) { break }
         filled += result
     }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     same: filled == length && rt_text_equal_bytes(buffer, rt_text_data(bytes), length)
     jet_rt_free(buffer, length + I64{1}, I64{1})
     same
@@ -406,7 +406,7 @@ receipt_section_same: fn(name: I64, bytes: I64) -> Bool {
 // record name: an existing record must hold the same bytes.
 receipt_section_publish: fn(directory: I64, record_id: I64, record: I64) {
     clock: jet_rt_alloc(I64{16}, I64{8})
-    _ := host_call(I64{228}, I64{0}, clock, I64{0})
+    ^_: host_call(I64{228}, I64{0}, clock, I64{0})
     nanos: wrapping(rt_text_word(clock) * I64{1000000000} + rt_text_word(wrapping(clock + I64{8})))
     jet_rt_free(clock, I64{16}, I64{8})
     staged_text: jet_rt_string_builder_new()
@@ -421,16 +421,16 @@ receipt_section_publish: fn(directory: I64, record_id: I64, record: I64) {
     published: receipt_section_join(directory, rt_static_text("/"), record_id)
     staged_name: fd_c_path(staged)
     published_name: fd_c_path(published)
-    failure := rt_static_text("")
+    ^failure: rt_static_text("")
     fd: host_call(I64{2}, staged_name, RECEIPT_SECTION_STAGE_OPEN, I64{438})
     if (fd < I64{0}) { failure = rt_static_text("could not stage receipt section") } else {
-        flushed := receipt_section_write_all(fd, rt_text_data(record), rt_text_len(record))
+        ^flushed: receipt_section_write_all(fd, rt_text_data(record), rt_text_len(record))
         if flushed {
-            synced := I64{-4}
+            ^synced: I64{-4}
             loop synced == (I64{-4}) -> synced = host_call(I64{74}, fd, I64{0}, I64{0})
             flushed = synced == I64{0}
         }
-        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        ^_: host_call(I64{3}, fd, I64{0}, I64{0})
         if !flushed -> failure = rt_static_text("could not flush receipt section") else {
             linked: host_call(I64{86}, staged_name, published_name, I64{0})
             if (linked == I64{-17}) {
@@ -441,7 +441,7 @@ receipt_section_publish: fn(directory: I64, record_id: I64, record: I64) {
                 failure = rt_static_text("could not publish receipt section")
             }
         }
-        _ := host_call(I64{87}, staged_name, I64{0}, I64{0})
+        ^_: host_call(I64{87}, staged_name, I64{0}, I64{0})
     }
     fd_c_path_drop(staged_name, staged)
     fd_c_path_drop(published_name, published)

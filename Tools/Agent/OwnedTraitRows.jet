@@ -170,7 +170,7 @@ flag: fn(source: TraitSource, name: String) -> Bool Never! { fact(source, name) 
 // The space-separated words of a text fact, empty when the trait omits it.
 words: fn(source: TraitSource, name: String) -> [String] Never! {
     value: fact(source, name) ?? return [String]{}
-    out := [String]{}
+    ^out: [String]{}
     loop word in value.split(" ").to_list() {
         if word != "" -> out.push(word.copy())
     }
@@ -189,8 +189,8 @@ parse_method: fn(text: String, context: String) -> TraitMethod OwnedTraitRowsErr
     if signature.sep == "" {
         return Err(rows_fail("{context}: expected `) -> Type Error!` or `) Error!`, found `{text}`"))
     }
-    returns := ""
-    error := signature.tail.copy()
+    ^returns: ""
+    ^error: signature.tail.copy()
     if signature.tail.starts_with("-> ") {
         result: signature.tail.remove_prefix("-> ").rpartition(" ")
         if result.sep == "" {
@@ -202,8 +202,8 @@ parse_method: fn(text: String, context: String) -> TraitMethod OwnedTraitRowsErr
     if error.contains(" ") || error == "" {
         return Err(rows_fail("{context}: expected one error type before `!`, found `{text}`"))
     }
-    receiver := ""
-    params := [TraitParam]{}
+    ^receiver: ""
+    ^params: [TraitParam]{}
     loop written in signature.head.split(", ").to_list() {
         if written == "" -> next
         if params.len() == 0 && receiver == "" && (written == "self" || written == "^self" || written == "^^self") {
@@ -221,12 +221,12 @@ parse_method: fn(text: String, context: String) -> TraitMethod OwnedTraitRowsErr
 
 read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
     lines: source_text.split("\n").to_list()
-    traits := [TraitSource]{}
-    group := ""
+    ^traits: [TraitSource]{}
+    ^group: ""
     // The role a `#Builtin.Role(.X)` line gives the trait it stands above.
-    role := ""
-    role_line := 0
-    index := 0
+    ^role: ""
+    ^role_line: 0
+    ^index: 0
     loop index < lines.len() {
         line: lines[index]
         index += 1
@@ -255,10 +255,10 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
         name: if group == "" -> opened.groups[0].copy() else -> "{group}.{opened.groups[0]}"
         context: "trait {name}"
         start: index
-        facts := [TraitFact]{}
-        associated := [String]{}
-        methods := [TraitMethod]{}
-        laws := [TraitLaw]{}
+        ^facts: [TraitFact]{}
+        ^associated: [String]{}
+        ^methods: [TraitMethod]{}
+        ^laws: [TraitLaw]{}
         member_indent: "{indent}    "
         loop index < lines.len() && lines[index] != "{indent}}}" {
             member: lines[index]
@@ -306,7 +306,7 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
                             return Err(rows_fail("line {index}: {context}: the law `{head.head}` is declared twice"))
                         }
                     }
-                    written := [String]{body.copy()}
+                    ^written: [String]{body.copy()}
                     close: "{member_indent}}}"
                     loop index < lines.len() && lines[index] != close {
                         inner: lines[index]
@@ -325,8 +325,8 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
                 }
                 METHOD_OPEN.match(body) != None && !body.ends_with(" {{") -> methods.push(parse_method(body, "line {index}: {context}") ?? return Err(err))
                 METHOD_OPEN.match(body) != None -> {
-                    method := parse_method(body.remove_suffix(" {{"), "line {index}: {context}") ?? return Err(err)
-                    written := [String]{body.copy()}
+                    ^method: parse_method(body.remove_suffix(" {{"), "line {index}: {context}") ?? return Err(err)
+                    ^written: [String]{body.copy()}
                     close: "{member_indent}}}"
                     loop index < lines.len() && lines[index] != close {
                         inner: lines[index]
@@ -357,7 +357,9 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
         traits.push(TraitSource{name: name, line: start, literal: group != "", role: role, facts: facts, associated: associated, methods: methods, laws: laws})
         role = ""
     }
-    if role != "" -> return Err(rows_fail("line {role_line}: `#Builtin.Role(.{role})` stands above no trait"))
+    if role != "" {
+        return Err(rows_fail("line {role_line}: `#Builtin.Role(.{role})` stands above no trait"))
+    }
     if group != "" -> return Err(rows_fail("`module {group}` is not closed"))
     if traits.len() == 0 -> return Err(rows_fail("{SOURCE_PATH} declares no trait"))
     Ok(traits)
@@ -425,7 +427,7 @@ render_method: fn(method: TraitMethod, any_receiver: Bool, context: String) -> S
     if any_receiver && method.receiver != "self" {
         return Err(rows_fail("{where}: `any_receiver` takes a plain `self`"))
     }
-    params := [String]{}
+    ^params: [String]{}
     loop param in method.params {
         access: if {
             param.ty.starts_with("^^") -> "Move"
@@ -459,7 +461,7 @@ check_defaults: fn(source: TraitSource, context: String) OwnedTraitRowsError! {
 }
 
 quoted: fn(names: [String]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop name in names -> parts.push("\"{name}\"")
     "[String]{{{parts.join(", ")}}}"
 }
@@ -471,7 +473,7 @@ optional_text: fn(source: TraitSource, name: String) -> String Never! {
 
 // The contract kinds a trait's facts and placement select; a valid trait selects at most one.
 contract_kinds: fn(source: TraitSource) -> [String] Never! {
-    kinds := [String]{}
+    ^kinds: [String]{}
     if flag(source, "codec") -> kinds.push("codec")
     if flag(source, "conversion") -> kinds.push("conversion")
     if flag(source, "derived") -> kinds.push("derived")
@@ -520,14 +522,14 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
             return Err(rows_fail("{context}: `shares` names `{name}`, which is not another trait here"))
         }
     }
-    contract := ""
+    ^contract: ""
     if kind == {
         "operator role" -> {
             method: sole_method(source, context, kind) ?? return Err(err)
             if method.receiver != "self" || method.params.len() != 1 || method.params[0].ty != "Rhs" || !source.associated.contains("Rhs") || method.error != "Never" || method.returns == "" {
                 return Err(rows_fail("{context}: an operator hook is `Rhs: type` and `hook: fn(self, rhs: Rhs) -> Result Never!`"))
             }
-            result := "None"
+            ^result: "None"
             if !source.associated.contains(method.returns) {
                 fixed: render_type(method.returns, context) ?? return Err(err)
                 result = "Val({fixed})"
@@ -572,7 +574,7 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
             if source.methods.len() == 0 {
                 return Err(rows_fail("{context}: a methods trait declares at least one `fn`"))
             }
-            lines := [String]{}
+            ^lines: [String]{}
             loop method in source.methods {
                 rendered: render_method(method, flag(source, "any_receiver"), "trait {source.name}") ?? return Err(err)
                 lines.push("                {rendered},\n")
@@ -581,7 +583,7 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
             contract = "OwnedContract.Methods{{\n            methods: [OwnedMethod]{{\n{lines.join("")}            }},\n            associated: {quoted(source.associated)},\n            shares: {shares},\n        }}"
         }
     }
-    fields := [String]{
+    ^fields: [String]{
         "name: \"{source.name}\"",
         "local: {flag(source, "local")}",
         "bare_bound: {flag(source, "bare_bound")}",
@@ -619,7 +621,7 @@ declared: fn(traits: [TraitSource], name: String) -> Bool Never! {
 // The facts no single trait can check: each role fills one trait, and family
 // markers that name no trait.
 check_table: fn(traits: [TraitSource]) OwnedTraitRowsError! {
-    roles := [String]{}
+    ^roles: [String]{}
     loop source in traits {
         if source.role != "" {
             if roles.contains(source.role) {
@@ -657,7 +659,7 @@ homed: fn(source: TraitSource, homes: [TraitSource]) -> TraitSource OwnedTraitRo
 render_rows: fn(source_text: String, checked_text_declared: Bool, homes: [TraitSource]) -> String OwnedTraitRowsError! {
     traits: read_traits(source_text) ?? return Err(err)
     check_table(traits) ?? return Err(err)
-    rows := [String]{}
+    ^rows: [String]{}
     loop source in traits {
         written: homed(source, homes) ?? return Err(err)
         rows.push(render_row(written, traits, checked_text_declared) ?? return Err(err))
@@ -667,7 +669,7 @@ render_rows: fn(source_text: String, checked_text_declared: Bool, homes: [TraitS
 
 // The traits a marker covers, written for a reader: `Encode` and `Decode`.
 spelled: fn(names: [String]) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop name in names -> parts.push("`{name}`")
     if parts.len() == 2 -> return "{parts[0]} and {parts[1]}"
     parts.join(", ")
@@ -675,15 +677,15 @@ spelled: fn(names: [String]) -> String Never! {
 
 // What `#{marker}` means, read from the table.
 marker_text: fn(marker: String, traits: [TraitSource]) -> String Never! {
-    derives := [String]{}
-    bundles := [String]{}
+    ^derives: [String]{}
+    ^bundles: [String]{}
     loop source in traits {
         if (source.name == marker && flag(source, "auto_derive")) || fact(source, "auto_derive_family") == Val((marker)) {
             derives.push(source.name.copy())
         }
         if source.name == marker && flag(source, "bundle") -> bundles.push(source.name.copy())
     }
-    parts := [String]{}
+    ^parts: [String]{}
     if derives.len() > 0 {
         parts.push("On a struct or enum, derives {spelled(derives)} from its fields; `#!{marker}` refuses it.")
     }
@@ -696,7 +698,7 @@ marker_text: fn(marker: String, traits: [TraitSource]) -> String Never! {
 // The dictionary rows of every derive and bundle marker, sorted by token.
 render_dictionary_rows: fn(source_text: String) -> String OwnedTraitRowsError! {
     traits: read_traits(source_text) ?? return Err(err)
-    markers := [String]{}
+    ^markers: [String]{}
     loop source in traits {
         if (flag(source, "auto_derive") || flag(source, "bundle")) && !markers.contains(source.name) {
             markers.push(source.name.copy())
@@ -705,7 +707,7 @@ render_dictionary_rows: fn(source_text: String) -> String OwnedTraitRowsError! {
         if !markers.contains(family) -> markers.push(family.copy())
     }
     markers.sort()
-    rows := [String]{}
+    ^rows: [String]{}
     loop marker in markers {
         rows.push("    {{token: \"{marker}\", query: \"{marker.lower()}\", registry_name: \"{REGISTRY_NAME}\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{JetCLISyntaxMeaning{{position: \"\", text: \"{marker_text(marker, traits)}\", example: \"#{marker} …\", afterwards: \"\", related_codes: [String]{{}}}}}}}},\n")
     }
@@ -716,16 +718,10 @@ render_dictionary_rows: fn(source_text: String) -> String OwnedTraitRowsError! {
 // `close` line replaced by `block`.
 replace_block: fn(text: String, open: String, close: String, path: String, block: String) -> String OwnedTraitRowsError! {
     before: text.partition("{open}\n")
-    if before.sep == "" {
-        return Err(rows_fail("{path} has no `{open.trim()}` line"))
-    }
+    if before.sep == "" -> return Err(rows_fail("{path} has no `{open.trim()}` line"))
     after: before.tail.partition("{close}\n")
-    if after.sep == "" {
-        return Err(rows_fail("{path} has no `{close.trim()}` line"))
-    }
-    if after.tail.contains(open) {
-        return Err(rows_fail("{path} has two `{open.trim()}` blocks"))
-    }
+    if after.sep == "" -> return Err(rows_fail("{path} has no `{close.trim()}` line"))
+    if after.tail.contains(open) -> return Err(rows_fail("{path} has two `{open.trim()}` blocks"))
     Ok("{before.head}{block}{after.tail}")
 }
 
@@ -737,7 +733,7 @@ read_text: fn(path: String) -[FS]> String OwnedTraitRowsError! {
 // the `}` that closes it, or "" when the source declares no such trait.
 trait_block: fn(source_text: String, name: String) -> String Never! {
     opening: "{name}: trait {{"
-    block := [String]{}
+    ^block: [String]{}
     loop line in source_text.split("\n").to_list() {
         if block.len() == 0 {
             if line == opening -> block.push(line.copy())
@@ -755,7 +751,7 @@ trait_block: fn(source_text: String, name: String) -> String Never! {
 // spells `Never!`.
 home_trait: fn(stub: TraitSource, block: String, path: String) -> TraitSource OwnedTraitRowsError! {
     raw: flag(stub, "raw_return")
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in block.split("\n").to_list() {
         bare: raw && METHOD_OPEN.match(line.trim()) != None && line.ends_with(",") && !line.ends_with("!,")
         lines.push(if bare -> "{line.remove_suffix(",")} Never!," else -> line.copy())
@@ -777,8 +773,8 @@ core_source_path: fn(core_rows: String, module_name: String) -> String OwnedTrai
 // from that Core module's source.
 home_traits: fn(source_text: String) -[FS]> [TraitSource] OwnedTraitRowsError! {
     traits: read_traits(source_text) ?? return Err(err)
-    homes := [TraitSource]{}
-    core_rows := ""
+    ^homes: [TraitSource]{}
+    ^core_rows: ""
     loop source in traits {
         module_name: fact(source, DECLARED_IN_COLUMN) ?? next
         if core_rows == "" -> core_rows = read_text(CORE_ROWS_PATH) ?? return Err(err)
@@ -802,10 +798,14 @@ RoleMark: struct {
 // The roles the function, method and trait markers of `text`, the Core
 // source at `path`, give, in line order.
 function_roles: fn(path: String, text: String, marks: ^[RoleMark]) {
-    if !text.contains(FUNCTION_ROLE_PREFIX) -> return
+    if !text.contains(FUNCTION_ROLE_PREFIX) {
+        return
+    }
     loop line in text.split("\n").to_list() {
         marked: line.trim_start()
-        if !marked.starts_with("#{FUNCTION_ROLE_PREFIX}") && !marked.starts_with("#[{FUNCTION_ROLE_PREFIX}") -> next
+        if !marked.starts_with("#{FUNCTION_ROLE_PREFIX}") && !marked.starts_with("#[{FUNCTION_ROLE_PREFIX}") {
+            next
+        }
         found: FUNCTION_ROLE_MARKER.match(marked) ?? next
         marks.push(RoleMark{role: found.groups[0].copy(), path: path.copy()})
     }
@@ -813,8 +813,10 @@ function_roles: fn(path: String, text: String, marks: ^[RoleMark]) {
 
 // The roles the functions of every Core source under `folder` give, by path.
 core_roles: fn(folder: String, marks: ^[RoleMark]) -[FS]> OwnedTraitRowsError! {
-    names := [String]{}
-    loop entry in (files.list_dir(folder) ?? return Err(rows_fail("cannot list {folder}: {err}"))) -> names.push(entry.name.copy())
+    ^names: [String]{}
+    loop entry in (files.list_dir(folder) ?? return Err(rows_fail("cannot list {folder}: {err}"))) {
+        names.push(entry.name.copy())
+    }
     names.sort()
     loop name in names {
         path: "{folder}/{name}"
@@ -830,7 +832,9 @@ core_roles: fn(folder: String, marks: ^[RoleMark]) -[FS]> OwnedTraitRowsError! {
 // The roles the traits of `traits` give, after the Core functions' in `marks`.
 trait_roles: fn(traits: [TraitSource], marks: ^[RoleMark]) {
     loop source in traits {
-        if source.role != "" -> marks.push(RoleMark{role: source.role.copy(), path: "{SOURCE_PATH} trait {source.name}"})
+        if source.role != "" {
+            marks.push(RoleMark{role: source.role.copy(), path: "{SOURCE_PATH} trait {source.name}"})
+        }
     }
 }
 
@@ -856,7 +860,7 @@ generated_files: fn() -[FS]> [TextFile] OwnedTraitRowsError! {
     dictionary: read_text(DICTIONARY_PATH) ?? return Err(err)
     block: render_dictionary_rows(source_text) ?? return Err(err)
     next_dictionary: replace_block(dictionary, DICTIONARY_OPEN, DICTIONARY_CLOSE, DICTIONARY_PATH, block) ?? return Err(err)
-    marks := [RoleMark]{}
+    ^marks: [RoleMark]{}
     core_roles(CORE_TREE, marks) ?? return Err(err)
     trait_roles(read_traits(source_text) ?? return Err(err), marks)
     role_kind: render_role_kind(marks) ?? return Err(err)
@@ -870,7 +874,7 @@ owned_trait_rows_main: fn(args: [String]) -[FS]> String OwnedTraitRowsError! {
         return Err(rows_fail("usage: OwnedTraitRows.jet [--check|--write]"))
     }
     generated: generated_files() ?? return Err(err)
-    differing := [String]{}
+    ^differing: [String]{}
     loop file in generated {
         current: if files.exists(file.path) -> read_text(file.path) ?? return Err(err) else -> ""
         if current == file.text -> next
@@ -978,7 +982,7 @@ HOME_SOURCE: "// A value read back.\nDecode: trait {{\n    decode: fn(tree: Dyn)
 }
 
 #Test("the role markers give RoleKind one case each, Core functions first") {
-    marks := [RoleMark]{}
+    ^marks: [RoleMark]{}
     function_roles("Core/Math/Math.jet", "// #Builtin.Role(.Note)\n#Builtin.Role(.AbsFloat) abs_float: fn(x: Float) -> Float {{ x }}\n#Builtin.Role(.Bare)\n#[Builtin.Role(.Copy), Unsafe(\"why\")]\ncopy: fn() {{}}\nTree: struct {{\n    #Builtin.Role(.TreeOpen) new: fn() -> Tree {{ Tree{{}} }}\n}}\n", marks)
     trait_roles(read_traits(MINIMAL_TRAITS) ?? panic(err.message), marks)
     block: render_role_kind(marks) ?? panic(err.message)
@@ -987,7 +991,9 @@ HOME_SOURCE: "// A value read back.\nDecode: trait {{\n    decode: fn(tree: Dyn)
     assert_eq(replace_block(builtins, ROLE_KIND_OPEN, ROLE_KIND_CLOSE, BUILTINS_PATH, block) ?? panic(err.message), "x\n{block}y\n")
     function_roles("Core/Event/Event.jet", "#Builtin.Role(.Add) plus: fn(a: Int, b: Int) -> Int {{ a + b }}\n", marks)
     if render_role_kind(marks) == {
-        .Ok(_) -> panic("a role two markers give was accepted")
-        .Err(error) -> assert(error.message.contains("marks two declarations: in Compiler/Prelude/Traits.jet trait Add and in Core/Event/Event.jet"))
+        .Ok(_) -> { panic("a role two markers give was accepted") }
+        .Err(error) -> {
+            assert(error.message.contains("marks two declarations: in Compiler/Prelude/Traits.jet trait Add and in Core/Event/Event.jet"))
+        }
     }
 }

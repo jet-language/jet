@@ -1122,7 +1122,7 @@ is_identifier: fn(name: String) -> Bool Never! {
 
 // The lines of `source` as a split on /\r?\n/ reads them.
 split_lines: fn(source: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop line in source.split("\n") {
         out.push(if line.ends_with("\r") -> line.removesuffix("\r") else -> line.copy())
     }
@@ -1153,16 +1153,16 @@ count_then_key: fn(left_count: Int, left_key: [U8], right_count: Int, right_key:
 
 // `values` in Unicode's default collation order (a localeCompare sort).
 collated: fn(values: [String]) -> [String] Never! {
-    keyed := loop value in values -> {key: text.collation_key(value), value: value.copy()}
+    ^keyed: loop value in values -> {key: text.collation_key(value), value: value.copy()}
     keyed.sort_by(fn(left: {key: [U8], value: String}, right: {key: [U8], value: String}) { compare_bytes(left.key, right.key) })
     loop item in keyed -> item.value.copy()
 }
 
 // `values` in byte order with repeats dropped (a sorted Set).
 sorted_unique: fn(values: [String]) -> [String] Never! {
-    out := values.copy()
+    ^out: values.copy()
     out.sort()
-    unique := [String]{}
+    ^unique: [String]{}
     loop value in out {
         if unique.len() > 0 && unique[unique.len() - 1] == value -> next
         unique.push(value.copy())
@@ -1172,8 +1172,8 @@ sorted_unique: fn(values: [String]) -> [String] Never! {
 
 // `values` with later repeats dropped, first-seen order kept.
 first_seen: fn(values: [String]) -> [String] Never! {
-    seen := [String:Bool]{}
-    out := [String]{}
+    ^seen: [String:Bool]{}
+    ^out: [String]{}
     loop value in values {
         if seen.get(value) != None -> next
         seen[value] = true
@@ -1293,7 +1293,7 @@ keys_of: fn(value: Dyn) -> [String] Never! {
 
 // The text items of an array, non-text items skipped.
 text_items: fn(value: Dyn) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop item in items(value) {
         if item == .Text(content) -> out.push(content.copy())
     }
@@ -1321,7 +1321,7 @@ Synonyms: struct {
 
 normalize: fn(name: String) -> String Never! {
     lowered: name.to_lower()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in lowered.bytes() {
         code: Int{byte}
         if code == 95 || code == 33 || code == 63 || code == 46 || code == 45 -> next
@@ -1331,7 +1331,7 @@ normalize: fn(name: String) -> String Never! {
 }
 
 add_keys: fn(index: ^[String:[String]], key: String, keys: [String]) {
-    known := index.get(key) ?? [String]{}
+    ^known: index.get(key) ?? [String]{}
     loop other in keys {
         if !known.contains(other) -> known.push(other.copy())
     }
@@ -1339,10 +1339,10 @@ add_keys: fn(index: ^[String:[String]], key: String, keys: [String]) {
 }
 
 synonyms: fn() -> Synonyms Never! {
-    index := [String:[String]]{}
-    index_module := [String:[String]]{}
-    canonical := [String:String]{}
-    canonical_module := [String:String]{}
+    ^index: [String:[String]]{}
+    ^index_module: [String:[String]]{}
+    ^canonical: [String:String]{}
+    ^canonical_module: [String:String]{}
     loop group in SYNONYM_GROUPS {
         keys: loop name in group -> normalize(name)
         type_only: TYPE_ONLY_GROUP_HEADS.contains(keys[0])
@@ -1374,7 +1374,7 @@ canonical_key: fn(names: Synonyms, name: String, container: String) -> String Ne
 
 synonyms_for: fn(names: Synonyms, member: String, container: String) -> [String] Never! {
     base: normalize(member)
-    keys := [String]{base.copy()}
+    ^keys: [String]{base.copy()}
     aliases: if container != "" && !is_type_container(container) -> names.index_module.get(base) ?? [String]{} else -> names.index.get(base) ?? [String]{}
     loop alias in aliases {
         if !keys.contains(alias) -> keys.push(alias.copy())
@@ -1429,7 +1429,7 @@ Binding: struct {
 }
 
 fixture_bindings: fn(source: String) -> [Binding] LedgerError! {
-    bindings := [Binding]{}
+    ^bindings: [Binding]{}
     loop (index, raw) in source.split("\n").to_list() {
         if raw.trim() == "" || raw.starts_with("#") -> next
         where: "{CORE_CONFORMANCE_PATH}:{index + 1}: "
@@ -1439,12 +1439,12 @@ fixture_bindings: fn(source: String) -> [Binding] LedgerError! {
         }
         row: fields[0]
         path: fields[1]
-        bad := path.starts_with("/") || path.contains("\\")
+        ^bad: path.starts_with("/") || path.contains("\\")
         loop part in path.split("/") {
             if part == "" || part == "." || part == ".." -> bad = true
         }
         if bad -> return Err(fail("{where}invalid conformance fixture binding path: {path}"))
-        at := -1
+        ^at: -1
         loop (position, binding) in bindings {
             if binding.row == row -> at = position
         }
@@ -1482,7 +1482,7 @@ has_header_line: fn(source: String, name: String, rest: Bool) -> Bool Never! {
 // The fixture sources bound to `row_id`, each checked for its row marker,
 // coverage header and web applicability declaration.
 conformance_fixture_sources: fn(root: String, bindings: [Binding], row_id: String) -[FS]> [String] LedgerError! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop binding in bindings {
         if binding.row != row_id -> next
         loop path in binding.paths -> paths.push("{CORE_CONFORMANCE_FIXTURE_ROOT}/{path}")
@@ -1537,7 +1537,7 @@ ReceiverTables: struct {
 }
 
 record_name: fn(table: ^[String:[String]], key: String, name: String) {
-    known := table.get(key) ?? [String]{}
+    ^known: table.get(key) ?? [String]{}
     if !known.contains(name) -> known.push(name.copy())
     table[key] = known
 }
@@ -1566,7 +1566,7 @@ METHOD_HEADER: Regex{"^\s+([A-Za-z_][A-Za-z0-9_]*):\s*fn\b.*\x7B"}
 
 walk_sema: fn(root: String, directory: String, spelled: ^[String:Bool]) -[FS]> Int LedgerError! {
     listed: files.list_dir("{root}/{directory}") ?? return Err(fail("cannot list {directory}: {err}"))
-    names := loop entry in listed -> entry.name.copy()
+    ^names: loop entry in listed -> entry.name.copy()
     names.sort()
     loop name in names {
         path: "{directory}/{name}"
@@ -1582,11 +1582,11 @@ walk_sema: fn(root: String, directory: String, spelled: ^[String:Bool]) -[FS]> I
 }
 
 jet_receiver_tables: fn(root: String, module_paths: [String:[String]]) -[FS]> ReceiverTables LedgerError! {
-    builtin := [String:[String]]{}
-    collection := [String:[String]]{}
-    statics := [String:[String]]{}
-    numeric := [String]{}
-    duration := [String]{}
+    ^builtin: [String:[String]]{}
+    ^collection: [String:[String]]{}
+    ^statics: [String:[String]]{}
+    ^numeric: [String]{}
+    ^duration: [String]{}
     loop line in split_lines(read_source(root, BUILTIN_METHODS_PATH) ?? return Err(err)) {
         if BUILTIN_ROW.match(line) == .Val(row) {
             record_name(builtin, row.group(1) ?? "", row.group(2) ?? "")
@@ -1626,7 +1626,7 @@ jet_receiver_tables: fn(root: String, module_paths: [String:[String]]) -[FS]> Re
         method: "from_{(alias.group(1) ?? "").lower()}"
         if !numeric.contains(method) -> numeric.push(method)
     }
-    sema_names := [String:Bool]{}
+    ^sema_names: [String:Bool]{}
     walk_sema(root, SEMA_SOURCE_DIR, sema_names) ?? return Err(err)
     Ok(ReceiverTables{builtin: builtin, collection: collection, statics: statics, numeric: numeric, duration: duration, module_paths: module_paths.copy(), sema_names: sema_names})
 }
@@ -1641,7 +1641,7 @@ receiver_source_methods: fn(root: String, tables: ReceiverTables, item: String, 
     source: RECEIVER_SOURCE.match(item) ?? return Err(fail("{context} has an invalid receivers source: {item}"))
     kind: source.group(1) ?? ""
     key: source.group(2) ?? ""
-    methods := [String]{}
+    ^methods: [String]{}
     if kind == "builtin" -> methods = tables.builtin.get(key) ?? [String]{}
     if kind == "collection" -> methods = tables.collection.get(key) ?? [String]{}
     if kind == "static" -> methods = tables.statics.get(key) ?? [String]{}
@@ -1664,14 +1664,14 @@ receiver_source_methods: fn(root: String, tables: ReceiverTables, item: String, 
 // The braces of `line` outside `"…"` strings and before a `//` comment.
 brace_delta: fn(line: String) -> Int Never! {
     bytes: line.bytes()
-    delta := 0
-    index := 0
+    ^delta: 0
+    ^index: 0
     loop index < bytes.len() {
         code: Int{bytes[index]}
         if code == 34 {
             // A closed string is skipped whole; an unclosed quote is a plain character.
-            close := -1
-            scan := index + 1
+            ^close: -1
+            ^scan: index + 1
             loop scan < bytes.len() {
                 inner: Int{bytes[scan]}
                 if inner == 92 {
@@ -1704,10 +1704,10 @@ brace_delta: fn(line: String) -> Int Never! {
 // members of its struct or enum body and of its `impl` blocks, trait implementations
 // included. A member without a body is a field of function type.
 core_type_methods: fn(root: String, paths: [String], type_name: String) -[FS]> [String] LedgerError! {
-    methods := [String]{}
+    ^methods: [String]{}
     loop path in paths {
-        owner := false
-        depth := 0
+        ^owner: false
+        ^depth: 0
         loop line in split_lines(read_source(root, path) ?? return Err(err)) {
             if depth == 0 {
                 owner = false
@@ -1741,8 +1741,8 @@ core_type_methods: fn(root: String, paths: [String], type_name: String) -[FS]> [
 core_surface_inventory: fn(root: String, module_paths: [String:[String]], fixed_pairs: [String]) -[FS]> Inventory LedgerError! {
     source: read_source(root, CORE_SURFACE_INVENTORY_PATH) ?? return Err(err)
     tables: jet_receiver_tables(root, module_paths) ?? return Err(err)
-    derived := [Collection]{}
-    declared := [Collection]{}
+    ^derived: [Collection]{}
+    ^declared: [Collection]{}
     loop (index, raw) in split_lines(source) {
         line: raw.trim()
         if line == "" || line.starts_with("//") -> next
@@ -1761,7 +1761,7 @@ core_surface_inventory: fn(root: String, module_paths: [String:[String]], fixed_
             }
         }
         if kind == "receivers" {
-            methods := [String]{}
+            ^methods: [String]{}
             loop item in listed {
                 loop method in receiver_source_methods(root, tables, item, context) ?? return Err(err) {
                     if !methods.contains(method) -> methods.push(method.copy())
@@ -1780,14 +1780,14 @@ core_surface_inventory: fn(root: String, module_paths: [String:[String]], fixed_
         }
         declared.push(Collection{function: CORE_SURFACE_INVENTORY_PATH, type_name: name.copy(), methods: listed, source_line: index + 1})
     }
-    collections := derived
+    ^collections: derived
     loop entry in declared {
-        at := -1
+        ^at: -1
         loop (position, owner) in collections {
             if owner.type_name == entry.type_name -> at = position
         }
         if at >= 0 {
-            repeated := [String]{}
+            ^repeated: [String]{}
             loop method in entry.methods {
                 if collections[at].methods.contains(method) -> repeated.push(method.copy())
             }
@@ -1807,11 +1807,11 @@ core_surface_inventory: fn(root: String, module_paths: [String:[String]], fixed_
     if collections.len() == 0 {
         return Err(fail("{CORE_SURFACE_INVENTORY_PATH} has an empty table"))
     }
-    sorted_pairs := fixed_pairs.copy()
+    ^sorted_pairs: fixed_pairs.copy()
     sorted_pairs.sort()
     loop at in 0..<collections.len() -> collections[at].methods.sort()
     order: collated(loop entry in collections -> entry.type_name)
-    ordered := [Collection]{}
+    ^ordered: [Collection]{}
     loop type_name in order {
         loop entry in collections {
             if entry.type_name == type_name -> ordered.push(entry.copy())
@@ -1835,13 +1835,13 @@ parse_json: fn(source: String, path: String) -> Dyn LedgerError! {
 // Python's snapshot projected onto the shared containers.
 python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
     snapshot: parse_json(read_source(root, PYTHON_SURFACE_PATH) ?? return Err(err), PYTHON_SURFACE_PATH) ?? return Err(err)
-    names := [String]{}
-    sources := [[String]]{}
-    operations := [[String]]{}
+    ^names: [String]{}
+    ^sources: [[String]]{}
+    ^operations: [[String]]{}
     loop entry in PYTHON_SOURCE_CONTAINER {
         key: entry.source
         name: byte_tail(key, key.find(":") + 1)
-        members := [String]{}
+        ^members: [String]{}
         if key.starts_with("type:") {
             found: field(field(snapshot, "builtinTypes"), name)
             if !truthy(found) {
@@ -1856,7 +1856,7 @@ python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
                 loop member in text_items(typed.value) -> members.push(member)
             }
         }
-        at := names.index_of(entry.container) ?? -1
+        ^at: names.index_of(entry.container) ?? -1
         if at < 0 {
             names.push(entry.container.copy())
             sources.push([String]{})
@@ -1866,20 +1866,20 @@ python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
         sources[at].push(key.copy())
         loop member in members -> operations[at].push(member)
     }
-    containers := [{key: String, value: Dyn}]{}
+    ^containers: [{key: String, value: Dyn}]{}
     loop (at, name) in names {
-        record := Dyn.object()
+        ^record: Dyn.object()
         record["present"] = Dyn.Bool(true)
         record["pythonSources"] = texts(sorted_unique(sources[at]))
         record["operations"] = texts(sorted_unique(operations[at]))
         containers.push({key: name.copy(), value: record})
     }
     loop absent in PYTHON_ABSENT {
-        record := Dyn.object()
+        ^record: Dyn.object()
         record["present"] = Dyn.Bool(false)
         record["reason"] = jtext(absent.reason)
         record["operations"] = Dyn.Array([Dyn]{})
-        at := -1
+        ^at: -1
         loop (position, entry) in containers {
             if entry.key == absent.container -> at = position
         }
@@ -1887,15 +1887,15 @@ python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
             containers.push({key: absent.container.copy(), value: record})
         }
     }
-    present := 0
-    operation_count := 0
+    ^present: 0
+    ^operation_count: 0
     loop entry in containers {
         if truthy(field(entry.value, "present")) -> present += 1
         operation_count += items(field(entry.value, "operations")).len()
     }
-    unassigned := Dyn.object()
+    ^unassigned: Dyn.object()
     loop entry in PYTHON_UNASSIGNED -> unassigned[entry.source] = jtext(entry.reason)
-    surface := Dyn.object()
+    ^surface: Dyn.object()
     surface["language"] = jtext("Python")
     surface["sourceKind"] = jtext("runtime introspection")
     surface["runtime"] = jtext("python {text_of(field(snapshot, "pythonVersion"))}")
@@ -1910,7 +1910,7 @@ python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
     )
     count: containers.len()
     surface["containers"] = Dyn.Object(containers)
-    totals := Dyn.object()
+    ^totals: Dyn.object()
     totals["containers"] = Dyn.Int(count)
     totals["presentContainers"] = Dyn.Int(present)
     totals["operations"] = Dyn.Int(operation_count)
@@ -1919,7 +1919,7 @@ python_surface: fn(root: String) -[FS]> Dyn LedgerError! {
 }
 
 load_surfaces: fn(root: String) -[FS]> [SurfaceEntry] LedgerError! {
-    surfaces := [SurfaceEntry]{}
+    ^surfaces: [SurfaceEntry]{}
     loop entry in SURFACE_FILES {
         surface: parse_json(read_source(root, entry.path) ?? return Err(err), entry.path) ?? return Err(err)
         if !truthy(field(surface, "containers")) {
@@ -1934,7 +1934,7 @@ load_surfaces: fn(root: String) -[FS]> [SurfaceEntry] LedgerError! {
 // The canonical container set is the union of every recorded surface. A
 // language missing one of them is a hidden exclusion, not a silent absence.
 canonical_containers: fn(surfaces: [SurfaceEntry]) -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop entry in surfaces {
         loop name in keys_of(field(entry.surface, "containers")) -> names.push(name)
     }
@@ -1961,15 +1961,15 @@ LanguageSurface: struct {
 }
 
 index_surfaces: fn(surfaces: [SurfaceEntry]) -> [LanguageSurface] Never! {
-    out := [LanguageSurface]{}
+    ^out: [LanguageSurface]{}
     loop entry in surfaces {
-        names := [String]{}
-        records := [SurfaceRecord]{}
-        position := [String:Int]{}
+        ^names: [String]{}
+        ^records: [SurfaceRecord]{}
+        ^position: [String:Int]{}
         loop container in entries(field(entry.surface, "containers")) {
             if !is_object(container.value) -> next
             operations: text_items(field(container.value, "operations"))
-            first := [String:Int]{}
+            ^first: [String:Int]{}
             loop (at, operation) in operations {
                 key: normalize(operation)
                 if first.get(key) == None -> first[key] = at
@@ -2000,8 +2000,8 @@ index_surfaces: fn(surfaces: [SurfaceEntry]) -> [LanguageSurface] Never! {
 // stripped only when at least two members in the container share it and the
 // qualifier is not itself a member there, so zip_pad keeps its zip.
 container_prefixes: fn(members: [String]) -> [String] Never! {
-    heads := [String]{}
-    counts := [String:Int]{}
+    ^heads: [String]{}
+    ^counts: [String:Int]{}
     loop member in members {
         cut: member.find("_")
         if cut <= 0 -> next
@@ -2009,7 +2009,7 @@ container_prefixes: fn(members: [String]) -> [String] Never! {
         if counts.get(head) == None -> heads.push(head.copy())
         counts[head] = (counts.get(head) ?? 0) + 1
     }
-    prefixes := [String]{}
+    ^prefixes: [String]{}
     loop head in heads {
         if (counts.get(head) ?? 0) >= 2 && !members.contains(head) -> prefixes.push(head.copy())
     }
@@ -2017,7 +2017,7 @@ container_prefixes: fn(members: [String]) -> [String] Never! {
 }
 
 keys_for_member: fn(names: Synonyms, member: String, prefixes: [String], container: String) -> [String] Never! {
-    keys := synonyms_for(names, member, container)
+    ^keys: synonyms_for(names, member, container)
     cut: member.find("_")
     if cut > 0 && prefixes.contains(byte_slice(member, 0, cut)) {
         loop key in synonyms_for(names, byte_tail(member, cut + 1), container) {
@@ -2034,7 +2034,7 @@ keys_for_member: fn(names: Synonyms, member: String, prefixes: [String], contain
 // every suffix of a member that already matched. It reports the verdict of the
 // member it qualifies; "" when it qualifies none.
 qualifier_base: fn(member: String, siblings: [String]) -> String Never! {
-    best := ""
+    ^best: ""
     loop other in siblings {
         if other == member || !member.starts_with("{other}_") -> next
         suffix: byte_tail(member, byte_len(other) + 1)
@@ -2056,7 +2056,7 @@ JetSide: struct {
 }
 
 add_member: fn(side: ^JetSide, container: String, member: String) {
-    at := side.position.get(container) ?? -1
+    ^at: side.position.get(container) ?? -1
     if at < 0 {
         at = side.containers.len()
         side.position[container] = at
@@ -2071,7 +2071,7 @@ cover_keys: fn(names: Synonyms, side: ^JetSide) {
     loop at in 0..<side.containers.len() {
         container: side.containers[at]
         domain: domain_for(container)
-        slot := side.domains.get(domain) ?? -1
+        ^slot: side.domains.get(domain) ?? -1
         if slot < 0 {
             slot = side.domain_keys.len()
             side.domains[domain] = slot
@@ -2116,7 +2116,7 @@ plain_cell: fn(language: String, status: String) -> CompetitorCell Never! {
 // The first spelling `record` has for `exact`, else for any of `keys`, or -1.
 record_hit: fn(record: SurfaceRecord, exact: String, keys: [String]) -> Int Never! {
     if record.first.get(exact) == .Val(at) -> return at
-    best := -1
+    ^best: -1
     loop key in keys {
         if record.first.get(key) == .Val(at) {
             if best < 0 || at < best -> best = at
@@ -2127,13 +2127,13 @@ record_hit: fn(record: SurfaceRecord, exact: String, keys: [String]) -> Int Neve
 
 competitor_cells: fn(surfaces: [LanguageSurface], container: String, member: String, keys: [String]) -> [CompetitorCell] Never! {
     domain: domain_for(container)
-    look_in := [String]{}
+    ^look_in: [String]{}
     loop entry in MATCH_DOMAIN {
         if entry.domain == domain -> look_in.push(entry.container.copy())
     }
     if look_in.len() == 0 -> look_in.push(container.copy())
     exact: normalize(member)
-    cells := [CompetitorCell]{}
+    ^cells: [CompetitorCell]{}
     loop surface in surfaces {
         at: surface.position.get(container) ?? -1
         if at < 0 {
@@ -2146,8 +2146,8 @@ competitor_cells: fn(surfaces: [LanguageSurface], container: String, member: Str
         }
         // Look across the domain: Jet's core.files.remove is answered by Python's
         // os.unlink, which the snapshot records under core.sys.
-        hit_operation := ""
-        hit_container := ""
+        ^hit_operation: ""
+        ^hit_container: ""
         loop name in look_in {
             sibling: surface.position.get(name) ?? -1
             if sibling < 0 || !surface.records[sibling].present -> next
@@ -2169,7 +2169,7 @@ competitor_cells: fn(surfaces: [LanguageSurface], container: String, member: Str
 // at least one answers is equal. A container no surface records cannot be
 // scored either way, and says so.
 verdict_for: fn(cells: [CompetitorCell]) -> String Never! {
-    recorded := false
+    ^recorded: false
     loop cell in cells {
         if cell.status == "has" -> return "equal"
         if cell.status != "no_container_recorded" -> recorded = true
@@ -2233,7 +2233,7 @@ row_for_collection: fn(entry: Collection, method: String, surfaces: [LanguageSur
     container: container_for(entry.type_name)
     cells: competitor_cells(surfaces, container, method, keys)
     type_item: is_type_item(method)
-    evidence := [String]{"source:{CORE_SURFACE_INVENTORY_PATH}"}
+    ^evidence: [String]{"source:{CORE_SURFACE_INVENTORY_PATH}"}
     loop path in fixtures -> evidence.push("fixture:{path}")
     Row{
         id: "collection.{entry.type_name}.{method}",
@@ -2261,7 +2261,7 @@ row_for_collection: fn(entry: Collection, method: String, surfaces: [LanguageSur
 // The keys a member covers: its own, and those of the member it qualifies.
 member_keys: fn(names: Synonyms, side: JetSide, container: String, member: String) -> [String] Never! {
     prefixes: side_prefixes(side, container)
-    keys := keys_for_member(names, member, prefixes, container)
+    ^keys: keys_for_member(names, member, prefixes, container)
     base: qualifier_base(member, side_members(side, container))
     if base != "" {
         loop key in keys_for_member(names, base, prefixes, container) {
@@ -2286,8 +2286,8 @@ module_fact_named: fn(modules: [ModuleFact], name: String) -> ModuleFact? Never!
 build_rows: fn(root: String, names: Synonyms, modules: [ModuleFact], inventory: Inventory, surfaces: [LanguageSurface], bindings: [Binding]) -[FS]> JetRows LedgerError! {
     // Two passes: the Jet side decides which keys are covered before any verdict
     // is taken, so a container's own naming pattern is known up front.
-    side := JetSide{containers: [String]{}, members: [[String]]{}, position: [String:Int]{}, prefixes: [[String]]{}, domains: [String:Int]{}, domain_keys: [[String:Bool]]{}}
-    module_keys := [String:Bool]{}
+    ^side: JetSide{containers: [String]{}, members: [[String]]{}, position: [String:Int]{}, prefixes: [[String]]{}, domains: [String:Int]{}, domain_keys: [[String:Bool]]{}}
+    ^module_keys: [String:Bool]{}
     loop entry in modules {
         loop member in entry.members {
             module_keys["{entry.name}.{member}"] = true
@@ -2304,7 +2304,7 @@ build_rows: fn(root: String, names: Synonyms, modules: [ModuleFact], inventory: 
     }
     cover_keys(names, side)
 
-    rows := [Row]{}
+    ^rows: [Row]{}
     loop entry in modules {
         container: container_for(entry.name)
         loop member in entry.members {
@@ -2328,9 +2328,9 @@ build_rows: fn(root: String, names: Synonyms, modules: [ModuleFact], inventory: 
         }
     }
     order: collated(loop row in rows -> row.id)
-    position := [String:Int]{}
+    ^position: [String:Int]{}
     loop (at, row) in rows -> position[row.id] = at
-    sorted := loop id in order -> rows[position.get(id) ?? 0].copy()
+    ^sorted: loop id in order -> rows[position.get(id) ?? 0].copy()
     Ok(JetRows{rows: sorted, side: side})
 }
 
@@ -2354,14 +2354,14 @@ competitor_rows: fn(names: Synonyms, surfaces: [LanguageSurface], jet: JetRows) 
     // each Jet member happened to match left every other spelling of the same
     // workflow scored as a gap: List.push matched Rust append, and Rust push,
     // Ruby push and Python append all still counted as separate losses.
-    jet_containers := [String:Bool]{}
+    ^jet_containers: [String:Bool]{}
     loop row in jet.rows -> jet_containers[row.container] = true
 
     // A gap is one workflow Jet lacks, not one row per language. Ten languages
     // shipping sqrt is one missing operation with ten witnesses, and minting a
     // row each multiplied the backlog by the size of the comparison set.
-    gaps := [Gap]{}
-    gap_at := [String:Int]{}
+    ^gaps: [Gap]{}
+    ^gap_at: [String:Int]{}
     loop surface in surfaces {
         loop (at, container) in surface.names {
             if !surface.records[at].present -> next
@@ -2389,7 +2389,7 @@ competitor_rows: fn(names: Synonyms, surfaces: [LanguageSurface], jet: JetRows) 
                 // unlink under core.sys and Ruby under core.path; they are one missing
                 // capability with two witnesses, not two single-witness rows.
                 id: "gap.{domain}.{key}"
-                index := gap_at.get(id) ?? -1
+                ^index: gap_at.get(id) ?? -1
                 if index < 0 {
                     index = gaps.len()
                     gap_at[id] = index
@@ -2421,30 +2421,30 @@ competitor_rows: fn(names: Synonyms, surfaces: [LanguageSurface], jet: JetRows) 
     // you hold; it does not transfer into a module namespace. `core.math` gains
     // no `clear` because a List has one, and reading it that way invented gaps
     // like `core.sys.hash` and `core.time.push`.
-    pooled_names := [String:Bool]{}
+    ^pooled_names: [String:Bool]{}
     loop name in CROSS_DOMAIN_POOLED -> pooled_names[name] = true
-    pooled := [String:[String]]{}
+    ^pooled: [String:[String]]{}
     loop gap in gaps {
         if pooled_names.get(gap.key) == None || gap.containers.len() == 0 -> next
-        all_types := true
+        ^all_types: true
         loop container in gap.containers {
             if !is_type_container(container) -> all_types = false
         }
         if !all_types -> next
-        known := pooled.get(gap.key) ?? [String]{}
+        ^known: pooled.get(gap.key) ?? [String]{}
         loop language in gap.languages {
             if !known.contains(language) -> known.push(language.copy())
         }
         pooled[gap.key] = known
     }
 
-    rows := [Row]{}
+    ^rows: [Row]{}
     loop gap in gaps {
         languages: sorted_unique(gap.languages)
         pooled_languages: pooled.get(gap.key)
         scored: if pooled_languages == .Val(list) -> list.len() else -> languages.len()
         containers: sorted_unique(gap.containers)
-        cells := [CompetitorCell]{}
+        ^cells: [CompetitorCell]{}
         loop language in languages {
             at: gap.languages.index_of(language) ?? 0
             cells.push(CompetitorCell{language: language.copy(), status: "has", operation: gap.operations[at].copy(), found_in: gap.found_in[at].copy(), reason: Dyn.Null, has_reason: false})
@@ -2485,7 +2485,7 @@ competitor_rows: fn(names: Synonyms, surfaces: [LanguageSurface], jet: JetRows) 
 }
 
 apply_ratified_declines: fn(rows: ^[Row]) -> Int LedgerError! {
-    seen := [String:Bool]{}
+    ^seen: [String:Bool]{}
     loop at in 0..<rows.len() {
         loop entry in RATIFIED_DECLINES {
             if entry.id != rows[at].id -> next
@@ -2498,7 +2498,7 @@ apply_ratified_declines: fn(rows: ^[Row]) -> Int LedgerError! {
             seen[entry.id] = true
         }
     }
-    missing := [String]{}
+    ^missing: [String]{}
     loop entry in RATIFIED_DECLINES {
         if seen.get(entry.id) == None -> missing.push(entry.id.copy())
     }
@@ -2509,7 +2509,7 @@ apply_ratified_declines: fn(rows: ^[Row]) -> Int LedgerError! {
 }
 
 cell_dyn: fn(cell: CompetitorCell) -> Dyn Never! {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["status"] = jtext(cell.status)
     out["operation"] = if cell.operation == "" -> Dyn.Null else -> jtext(cell.operation)
     if cell.status == "container_absent" && cell.has_reason -> out["reason"] = cell.reason.copy()
@@ -2518,15 +2518,15 @@ cell_dyn: fn(cell: CompetitorCell) -> Dyn Never! {
 }
 
 cells_dyn: fn(cells: [CompetitorCell]) -> Dyn Never! {
-    out := Dyn.object()
+    ^out: Dyn.object()
     loop cell in cells -> out[cell.language] = cell_dyn(cell)
     out
 }
 
 row_dyn: fn(row: Row) -> Dyn Never! {
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["id"] = jtext(row.id)
-    source := Dyn.object()
+    ^source: Dyn.object()
     source["kind"] = jtext(row.kind)
     if row.kind == "competitor_operation" {
         source["container"] = jtext(row.containers[0])
@@ -2581,7 +2581,7 @@ Board: struct {
 }
 
 tower_command: fn(jet: String, root: String, args: [String]) -> ProcessSpec Never! {
-    argv := [String]{jet.copy(), TOWER_BOARD_TOOL}
+    ^argv: [String]{jet.copy(), TOWER_BOARD_TOOL}
     loop arg in args -> argv.push(arg.copy())
     argv.push("--json")
     argv.push("--data")
@@ -2607,26 +2607,26 @@ tower_board: fn(root: String) -[Env, Exec, FS, Time.Wait]> Board LedgerError! {
     if !files.exists("{root}/{TOWER_BOARD_PATH}") {
         return Ok(Board{readable: false, cards: [BoardCard]{}, decisions: [BoardDecision]{}})
     }
-    nums := [Int]{}
+    ^nums: [Int]{}
     loop entry in CLUSTER_OWNER {
         if !nums.contains(entry.card) -> nums.push(entry.card)
     }
-    ids := [String]{}
+    ^ids: [String]{}
     loop entry in RATIFIED_DECLINES {
         if !ids.contains(entry.decision) -> ids.push(entry.decision.copy())
     }
-    specs := [ProcessSpec]{}
+    ^specs: [ProcessSpec]{}
     jet: process.env_get_or("JET", "jet")
     loop num in nums -> specs.push(tower_command(jet, root, [String]{"card", "show", "#{num}"}))
     loop id in ids -> specs.push(tower_command(jet, root, [String]{"decision", "show", id}))
     ran: process.run_all(specs, 8) ?? return Err(fail("tower cannot run: {err}"))
-    cards := [BoardCard]{}
+    ^cards: [BoardCard]{}
     loop (at, num) in nums {
         card: tower_record(ran[at], "card #{num}") ?? return Err(err)
         if card == .Null -> next
         cards.push(BoardCard{num: num, phase: text_field(card, "phase")})
     }
-    decisions := [BoardDecision]{}
+    ^decisions: [BoardDecision]{}
     loop (at, id) in ids {
         decision: tower_record(ran[nums.len() + at], "decision {id}") ?? return Err(err)
         if decision == .Null -> next
@@ -2653,13 +2653,13 @@ owner_card: fn(container: String) -> Int Never! {
 // existing cards already do, so the ledger folds into them rather than opening
 // a second owner for the same surface.
 loss_clusters: fn(rows: [Row], board: Board) -> Dyn Never! {
-    containers := [String]{}
-    counts := [Int]{}
-    pooled := [Int]{}
-    languages := [[String]]{}
+    ^containers: [String]{}
+    ^counts: [Int]{}
+    ^pooled: [Int]{}
+    ^languages: [[String]]{}
     loop row in rows {
         if row.verdict != "jet_loses" -> next
-        at := containers.index_of(row.container) ?? -1
+        ^at: containers.index_of(row.container) ?? -1
         if at < 0 {
             containers.push(row.container.copy())
             counts.push(0)
@@ -2673,21 +2673,21 @@ loss_clusters: fn(rows: [Row], board: Board) -> Dyn Never! {
         if row.pooled_witness_count > 0 -> pooled[at] = pooled[at] + 1
         loop language in row.languages -> languages[at].push(language.copy())
     }
-    keyed := loop (at, container) in containers -> {count: counts[at], key: text.collation_key(container), at: at}
+    ^keyed: loop (at, container) in containers -> {count: counts[at], key: text.collation_key(container), at: at}
     keyed.sort_by(fn(left: {count: Int, key: [U8], at: Int}, right: {count: Int, key: [U8], at: Int}) { count_then_key(left.count, left.key, right.count, right.key) })
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     loop item in keyed {
         at: item.at
         container: containers[at]
         card: owner_card(container)
         record: if card >= 0 && board.readable -> board_card(board, card) else -> None
-        state := "needs_card"
+        ^state: "needs_card"
         if card >= 0 && !board.readable -> state = "unverified" else {
             if record == .Val(found) -> state = if found.phase != "done" -> "live" else -> "closed" else {
                 if card >= 0 -> state = "missing"
             }
         }
-        cluster := Dyn.object()
+        ^cluster: Dyn.object()
         cluster["container"] = jtext(container)
         cluster["lossCount"] = Dyn.Int(counts[at])
         cluster["pooledLossCount"] = Dyn.Int(pooled[at])
@@ -2704,11 +2704,11 @@ loss_clusters: fn(rows: [Row], board: Board) -> Dyn Never! {
 // It can confirm a Jet match but cannot mint a gap row, so it is listed here
 // and the skip stays countable.
 package_attributed_containers: fn(surfaces: [LanguageSurface]) -> Dyn Never! {
-    found := [{language: [U8], container: [U8], value: Dyn}]{}
+    ^found: [{language: [U8], container: [U8], value: Dyn}]{}
     loop surface in surfaces {
         loop (at, container) in surface.names {
             if !surface.records[at].present || surface.records[at].attribution != "package" -> next
-            entry := Dyn.object()
+            ^entry: Dyn.object()
             entry["language"] = jtext(surface.language)
             entry["container"] = jtext(container)
             entry["recordedOperations"] = Dyn.Int(surface.records[at].operations.len())
@@ -2731,11 +2731,11 @@ Repeat: struct {
 }
 
 repeated_operations: fn(rows: [Row]) -> [Repeat] Never! {
-    repeats := [Repeat]{}
-    at_key := [String:Int]{}
+    ^repeats: [Repeat]{}
+    ^at_key: [String:Int]{}
     loop row in rows {
         if row.verdict != "jet_loses" -> next
-        at := at_key.get(row.member) ?? -1
+        ^at: at_key.get(row.member) ?? -1
         if at < 0 {
             at = repeats.len()
             at_key[row.member] = at
@@ -2743,16 +2743,16 @@ repeated_operations: fn(rows: [Row]) -> [Repeat] Never! {
         }
         repeats[at].containers.push(row.container.copy())
     }
-    kept := [{count: Int, key: [U8], at: Int}]{}
+    ^kept: [{count: Int, key: [U8], at: Int}]{}
     loop (at, item) in repeats {
         if item.containers.len() >= 3 {
             kept.push({count: item.containers.len(), key: text.collation_key(item.operation), at: at})
         }
     }
     kept.sort_by(fn(left: {count: Int, key: [U8], at: Int}, right: {count: Int, key: [U8], at: Int}) { count_then_key(left.count, left.key, right.count, right.key) })
-    out := [Repeat]{}
+    ^out: [Repeat]{}
     loop item in kept {
-        sorted := repeats[item.at].containers.copy()
+        ^sorted: repeats[item.at].containers.copy()
         sorted.sort()
         out.push(Repeat{operation: repeats[item.at].operation.copy(), containers: sorted})
     }
@@ -2760,9 +2760,9 @@ repeated_operations: fn(rows: [Row]) -> [Repeat] Never! {
 }
 
 repeats_dyn: fn(repeats: [Repeat]) -> Dyn Never! {
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     loop item in repeats {
-        entry := Dyn.object()
+        ^entry: Dyn.object()
         entry["operation"] = jtext(item.operation)
         entry["containers"] = texts(item.containers)
         entry["rowCount"] = Dyn.Int(item.containers.len())
@@ -2772,9 +2772,9 @@ repeats_dyn: fn(repeats: [Repeat]) -> Dyn Never! {
 }
 
 uncompared_domains: fn(modules: [ModuleFact], containers: [String]) -> [String] Never! {
-    recorded := [String:Bool]{}
+    ^recorded: [String:Bool]{}
     loop name in containers -> recorded[name] = true
-    out := [String]{}
+    ^out: [String]{}
     loop entry in modules {
         if recorded.get(container_for(entry.name)) == None -> out.push(entry.name.copy())
     }
@@ -2784,7 +2784,7 @@ uncompared_domains: fn(modules: [ModuleFact], containers: [String]) -> [String] 
 
 // Every conformance fixture path the bindings name, each once, first seen first.
 conformance_fixture_paths: fn(bindings: [Binding]) -> [String] Never! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop binding in bindings {
         loop path in binding.paths -> paths.push("{CORE_CONFORMANCE_FIXTURE_ROOT}/{path}")
     }
@@ -2792,7 +2792,7 @@ conformance_fixture_paths: fn(bindings: [Binding]) -> [String] Never! {
 }
 
 source_files: fn(root: String, bindings: [Binding]) -[FS]> Dyn LedgerError! {
-    paths := [String]{
+    ^paths: [String]{
         CORE_SOURCE_PATH,
         CORE_SURFACE_INVENTORY_PATH,
         BUILTIN_METHODS_PATH,
@@ -2801,7 +2801,7 @@ source_files: fn(root: String, bindings: [Binding]) -[FS]> Dyn LedgerError! {
         CORE_SOURCE_PARTS_PATH,
     }
     listed: files.list_dir("{root}/{SYNTAX_DIR}") ?? return Err(fail("cannot list {SYNTAX_DIR}: {err}"))
-    syntax := [String]{}
+    ^syntax: [String]{}
     loop entry in listed {
         if entry.name.ends_with(".jet") -> syntax.push(entry.name.copy())
     }
@@ -2833,10 +2833,10 @@ source_files: fn(root: String, bindings: [Binding]) -[FS]> Dyn LedgerError! {
         "Tests/UI/user_policy_bad_args.stderr",
     }) -> paths.push(path)
     loop entry in SURFACE_FILES -> paths.push(entry.path)
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     loop path in paths {
         source: read_source(root, path) ?? return Err(err)
-        entry := Dyn.object()
+        ^entry: Dyn.object()
         entry["path"] = jtext(path)
         entry["sha256"] = jtext(sha_hex(source))
         entry["lineCount"] = Dyn.Int(split_lines(source).len())
@@ -2850,19 +2850,19 @@ source_files: fn(root: String, bindings: [Binding]) -[FS]> Dyn LedgerError! {
 // One frozen TSV manifest: each row by its header's column names.
 tsv_records: fn(root: String, path: String) -[FS]> [[String:String]] LedgerError! {
     source: read_source(root, path) ?? return Err(err)
-    rows := [[String]]{}
+    ^rows: [[String]]{}
     loop row in source.tsv_records() {
         if row.len() > 1 || row[0] != "" -> rows.push(row.copy())
     }
     if rows.len() < 2 -> return Err(fail("empty frozen TSV manifest: {path}"))
     header: rows[0]
-    records := [[String:String]]{}
+    ^records: [[String:String]]{}
     loop index in 1..<rows.len() {
         cells: rows[index]
         if cells.len() != header.len() {
             return Err(fail("malformed frozen TSV row {path}:{index + 1}"))
         }
-        record := [String:String]{}
+        ^record: [String:String]{}
         loop (at, name) in header -> record[name] = cells[at].copy()
         records.push(record)
     }
@@ -2913,7 +2913,7 @@ adapter_suffix: fn(adapter: String) -> String Never! {
 nul: fn() -> String Never! { String.from_bytes_lossy([U8]{U8{0}}) }
 
 fixture_source_digest: fn(root: String, paths: [String]) -[FS]> String LedgerError! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop path in paths {
         source: read_source(root, path) ?? return Err(err)
         parts.push("{path}{nul()}{source}")
@@ -2947,7 +2947,7 @@ file_digest: fn(path: String) -[FS]> String LedgerError! {
 
 walk_fixture_input: fn(root: String, current: String, found: ^[String]) -[FS]> Int LedgerError! {
     listed: files.list_dir(current) ?? return Err(fail("cannot list {current}: {err}"))
-    keyed := loop entry in listed -> {name: entry.name.copy(), is_dir: entry.is_dir}
+    ^keyed: loop entry in listed -> {name: entry.name.copy(), is_dir: entry.is_dir}
     keyed.sort_by(fn(left: {name: String, is_dir: Bool}, right: {name: String, is_dir: Bool}) { compare_bytes(left.name.bytes(), right.name.bytes()) })
     loop entry in keyed {
         child: "{current}/{entry.name}"
@@ -2966,7 +2966,7 @@ walk_fixture_input: fn(root: String, current: String, found: ^[String]) -[FS]> I
 
 fixture_input_digest: fn(root: String, relative_path: String) -[FS]> String LedgerError! {
     path: fixture_absolute_path(root, "{AGENT_CORPUS_ROOT}/{relative_path}") ?? return Err(err)
-    found := [String]{}
+    ^found: [String]{}
     if files.is_dir(path) -> walk_fixture_input(path, path, found) ?? return Err(err) else {
         if !files.is_file(path) {
             return Err(fail("unsupported Core API fixture input: {relative_path}"))
@@ -2986,9 +2986,9 @@ fixture_artifact_digest: fn(root: String, relative_path: String) -[FS]> String L
 fixture_source_token_count: fn(root: String, path: String) -[FS]> Int LedgerError! {
     source: read_source(root, path) ?? return Err(err)
     bytes: source.bytes()
-    count := 0
-    at := 0
-    in_word := false
+    ^count: 0
+    ^at: 0
+    ^in_word: false
     loop {
         if at >= bytes.len() -> return Ok(count)
         space: space_len(bytes, at)
@@ -3026,7 +3026,7 @@ number_dyn: fn(value: String) -> Dyn Never! {
 
 // `text` with its trailing newlines cut, as /\n+$/ replaced by "" does.
 without_trailing_newlines: fn(value: String) -> String Never! {
-    out := value.copy()
+    ^out: value.copy()
     loop {
         if !out.ends_with("\n") -> return out
         out = out.removesuffix("\n")
@@ -3038,9 +3038,9 @@ core_api_fixture_contract: fn(root: String) -[FS]> Dyn LedgerError! {
     manifest: tsv_records(root, AGENT_MANIFEST_PATH) ?? return Err(err)
     receipts: tsv_records(root, AGENT_RECEIPT_PATH) ?? return Err(err)
     reviews: tsv_records(root, AGENT_REVIEW_PATH) ?? return Err(err)
-    task_ids := [String:Bool]{}
+    ^task_ids: [String:Bool]{}
     loop row in manifest -> task_ids[cell(row, "task_id")] = true
-    review_at := [String:Int]{}
+    ^review_at: [String:Int]{}
     loop (at, review) in reviews {
         task: cell(review, "task_id")
         if review_at.get(task) != None {
@@ -3051,10 +3051,10 @@ core_api_fixture_contract: fn(root: String) -[FS]> Dyn LedgerError! {
         }
         review_at[task] = at
     }
-    receipts_at := [String:[Int]]{}
-    pinned := Dyn.object()
-    run_ids := [String]{}
-    machines := [String]{}
+    ^receipts_at: [String:[Int]]{}
+    ^pinned: Dyn.object()
+    ^run_ids: [String]{}
+    ^machines: [String]{}
     loop (at, receipt) in receipts {
         task: cell(receipt, "task_id")
         if task_ids.get(task) == None {
@@ -3070,31 +3070,31 @@ core_api_fixture_contract: fn(root: String) -[FS]> Dyn LedgerError! {
             return Err(fail("Core API fixture tool version drifted: {adapter}"))
         }
         pinned[adapter] = jtext(cell(receipt, "tool_version"))
-        known := receipts_at.get(task) ?? [Int]{}
+        ^known: receipts_at.get(task) ?? [Int]{}
         known.push(at)
         receipts_at[task] = known
     }
     if first_seen(run_ids).len() != 1 || first_seen(machines).len() != 1 {
         return Err(fail("Core API fixture receipt mixes run identities"))
     }
-    tasks := [Dyn]{}
+    ^tasks: [Dyn]{}
     loop row in manifest {
         task_id: cell(row, "task_id")
-        adapters := [String]{}
+        ^adapters: [String]{}
         loop adapter in cell(row, "adapters").split(",") {
             if adapter != "" -> adapters.push(adapter.copy())
         }
-        task_receipts := [[String:String]]{}
+        ^task_receipts: [[String:String]]{}
         task_receipt_at: receipts_at.get(task_id) ?? [Int]{}
         loop at in task_receipt_at -> task_receipts.push(receipts[at].copy())
         at_review: review_at.get(task_id) ?? return Err(fail("missing Core API fixture review: {task_id}"))
         review: reviews[at_review]
-        tool_versions := Dyn.object()
+        ^tool_versions: Dyn.object()
         loop receipt in task_receipts {
             tool_versions[cell(receipt, "adapter")] = jtext(cell(receipt, "tool_version"))
         }
         stem: agent_adapter_stem(task_id) ?? return Err(err)
-        source_paths := [String]{}
+        ^source_paths: [String]{}
         loop adapter in adapters {
             path: "Tests/AgentWorkloads/adapters/{stem}.{adapter_suffix(adapter)}"
             if adapter_suffix(adapter) == "" || !files.exists("{root}/{path}") {
@@ -3108,7 +3108,7 @@ core_api_fixture_contract: fn(root: String) -[FS]> Dyn LedgerError! {
             return Err(fail("Core API fixture receipts disagree on task identity: {task_id}"))
         }
         source_digest: fixture_source_digest(root, source_paths) ?? return Err(err)
-        independent := Dyn.object()
+        ^independent: Dyn.object()
         independent["status"] = jtext(cell(review, "status"))
         independent["reviewer"] = jtext(cell(review, "reviewer"))
         independent["method"] = jtext(cell(review, "review_method"))
@@ -3125,11 +3125,11 @@ core_api_fixture_contract: fn(root: String) -[FS]> Dyn LedgerError! {
         if !accepted_fixture_review(independent, task_id, jtext(source_digest), jtext(inputs[0]), jtext(expecteds[0]), adapters.contains("python")) {
             return Err(fail("Core API fixture review is not accepted: {task_id}"))
         }
-        boundary := Dyn.object()
+        ^boundary: Dyn.object()
         boundary["userAuthored"] = texts(source_paths)
         boundary["generatedAndReferenceExcluded"] = texts([String]{"Tests/AgentWorkloads/baselines", "Tests/AgentWorkloads/expected"})
-        receipt_rows := loop receipt in task_receipts -> receipt_dyn(receipt)
-        task := Dyn.object()
+        ^receipt_rows: loop receipt in task_receipts -> receipt_dyn(receipt)
+        ^task: Dyn.object()
         task["task"] = jtext(task_id)
         task["domain"] = jtext(cell(row, "domain"))
         task["case"] = jtext(cell(row, "case"))
@@ -3153,7 +3153,7 @@ core_api_fixture_contract: fn(root: String) -[FS]> Dyn LedgerError! {
     checksums: read_source(root, AGENT_CHECKSUMS_PATH) ?? return Err(err)
     domain_contract: read_source(root, AGENT_DOMAIN_CONTRACT_PATH) ?? return Err(err)
     policy: read_source(root, AGENT_WORKLOAD_POLICY_PATH) ?? return Err(err)
-    execution := Dyn.object()
+    ^execution: Dyn.object()
     execution["source"] = texts(AGENT_RUNNER_SOURCE_PATHS)
     execution["test"] = jtext(AGENT_RUNNER)
     execution["checksumManifest"] = jtext(AGENT_CHECKSUMS_PATH)
@@ -3164,19 +3164,19 @@ core_api_fixture_contract: fn(root: String) -[FS]> Dyn LedgerError! {
     execution["policyDigest"] = jtext(sha_hex(without_trailing_newlines(policy)))
     execution["checks"] = texts(EXECUTION_CHECKS)
     execution["runnerMarkers"] = texts(AGENT_RUNNER_MARKERS)
-    selection := Dyn.object()
+    ^selection: Dyn.object()
     selection["source"] = jtext(AGENT_REVIEW_PATH)
     selection["field"] = jtext("task_id")
     selection["oneReviewPerTask"] = Dyn.Bool(true)
     selection["sameTaskInputOutcome"] = Dyn.Bool(true)
-    pinned_run := Dyn.object()
+    ^pinned_run: Dyn.object()
     pinned_run["runId"] = jtext(run_ids[0])
     pinned_run["machine"] = jtext(machines[0])
     pinned_run["toolVersions"] = pinned
-    boundary := Dyn.object()
+    ^boundary: Dyn.object()
     boundary["rule"] = jtext("Only user-authored adapter source under Tests/AgentWorkloads/adapters is compared.")
     boundary["excluded"] = texts([String]{"Tests/AgentWorkloads/baselines", "Tests/AgentWorkloads/expected"})
-    contract := Dyn.object()
+    ^contract: Dyn.object()
     contract["manifest"] = jtext(AGENT_MANIFEST_PATH)
     contract["receipt"] = jtext(AGENT_RECEIPT_PATH)
     contract["review"] = jtext(AGENT_REVIEW_PATH)
@@ -3202,7 +3202,7 @@ holds_any: fn(text: String, words: [String]) -> Bool Never! {
 
 core_api_case_kinds: fn(row: Row) -> [String] Never! {
     words: "{row.container} {row.member.to_lower()} {row.workflow}".to_lower()
-    cases := [String]{"beginner"}
+    ^cases: [String]{"beginner"}
     expert: [String]{"policy", "limit", "precision", "bound", "timeout", "schedule", "capacity", "canonical", "tls", "auth", "unsafe", "raw", "expert"}
     failure: [String]{"parse", "decode", "encode", "read", "write", "open", "load", "save", "query", "find", "get", "try", "error", "invalid", "validate", "check"}
     lifecycle: [String]{"close", "cancel", "join", "wait", "start", "stop", "resume", "pause", "stream", "task", "watch", "socket", "reader", "writer", "transaction"}
@@ -3218,19 +3218,19 @@ core_api_case_kinds: fn(row: Row) -> [String] Never! {
 // fail-closed diagnosis when the row records a competitor-only operation. Keep
 // the three claims distinct so a loss is never rewritten as parity.
 core_api_jet_win: fn(row: Row) -> Dyn LedgerError! {
-    evidence := [String]{}
+    ^evidence: [String]{}
     loop item in row.evidence {
         if item.trim() != "" -> evidence.push(item.copy())
     }
     if evidence.len() == 0 {
         return Err(fail("Core API workflow has no Jet-win evidence: {row.id}"))
     }
-    property := ""
-    metric := ""
-    method := ""
-    comparison := ""
+    ^property: ""
+    ^metric: ""
+    ^method: ""
+    ^comparison: ""
     if row.verdict == "jet_wins" {
-        matched := 0
+        ^matched: 0
         loop cell in row.competitors {
             if cell.status == "has" -> matched += 1
         }
@@ -3251,14 +3251,14 @@ core_api_jet_win: fn(row: Row) -> Dyn LedgerError! {
             comparison = "Jet keeps unsupported or declined work explicit; hidden-loss count=0"
         }
     }
-    measurement := Dyn.object()
+    ^measurement: Dyn.object()
     measurement["metric"] = jtext(metric)
     measurement["method"] = jtext(method)
     measurement["comparison"] = jtext(comparison)
     measurement["rowVerdict"] = jtext(row.verdict)
     measurement["jet"] = Dyn.Int(1)
     measurement["competitor"] = Dyn.Int(0)
-    win := Dyn.object()
+    ^win: Dyn.object()
     win["status"] = jtext("accepted")
     win["property"] = jtext(property)
     win["evidenceRef"] = jtext("ledger-row:{row.id}; {evidence.join(", ")}")
@@ -3324,7 +3324,7 @@ char_len: fn(lead: Int) -> Int Never! {
 
 // The end of a quoted string opening at `at`, or -1 when it never closes.
 quoted_end: fn(bytes: [U8], at: Int, quote: Int) -> Int Never! {
-    probe := at + 1
+    ^probe: at + 1
     loop {
         if probe >= bytes.len() -> return -1
         code: Int{bytes[probe]}
@@ -3337,7 +3337,7 @@ quoted_end: fn(bytes: [U8], at: Int, quote: Int) -> Int Never! {
 }
 
 word_end: fn(bytes: [U8], at: Int) -> Int Never! {
-    probe := at
+    ^probe: at
     loop {
         if probe >= bytes.len() || !is_word_code(Int{bytes[probe]}) -> return probe
         probe += 1
@@ -3346,7 +3346,7 @@ word_end: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // The end of `[A-Za-z0-9_$]*` from `at`.
 dollar_word_end: fn(bytes: [U8], at: Int) -> Int Never! {
-    probe := at
+    ^probe: at
     loop {
         if probe >= bytes.len() -> return probe
         code: Int{bytes[probe]}
@@ -3356,7 +3356,7 @@ dollar_word_end: fn(bytes: [U8], at: Int) -> Int Never! {
 }
 
 digits_end: fn(bytes: [U8], at: Int) -> Int Never! {
-    probe := at
+    ^probe: at
     loop {
         if probe >= bytes.len() || !is_digit_byte(Int{bytes[probe]}) -> return probe
         probe += 1
@@ -3364,7 +3364,7 @@ digits_end: fn(bytes: [U8], at: Int) -> Int Never! {
 }
 
 spaces_end: fn(bytes: [U8], at: Int) -> Int Never! {
-    probe := at
+    ^probe: at
     loop {
         if probe >= bytes.len() -> return probe
         width: space_len(bytes, probe)
@@ -3391,8 +3391,8 @@ operator_len: fn(bytes: [U8], at: Int) -> Int Never! {
 }
 
 source_tokens: fn(bytes: [U8]) -> Int Never! {
-    count := 0
-    at := 0
+    ^count: 0
+    ^at: 0
     loop {
         if at >= bytes.len() -> return count
         code: Int{bytes[at]}
@@ -3462,13 +3462,13 @@ source_metrics: fn(source: String) -> Metrics Never! {
     statement_words: [String]{"fn", "def", "func", "function", "export", "return", "if", "for", "while", "loop"}
     import_words: [String]{"use", "import", "from", "require", "include"}
     temporary_words: [String]{"let", "const", "var", "comptime"}
-    semicolons := 0
-    statement_lines := 0
-    imports := 0
-    calls := 0
-    temporaries := 0
-    line_open := true
-    at := 0
+    ^semicolons: 0
+    ^statement_lines: 0
+    ^imports: 0
+    ^calls: 0
+    ^temporaries: 0
+    ^line_open: true
+    ^at: 0
     loop {
         if at >= bytes.len() -> break
         code: Int{bytes[at]}
@@ -3509,7 +3509,7 @@ source_metrics: fn(source: String) -> Metrics Never! {
         if at >= bytes.len() -> break
         code: Int{bytes[at]}
         before: at > 0 && is_word_code(Int{bytes[at - 1]})
-        matched := false
+        ^matched: false
         if !before && is_letter_byte(code) {
             loop word in temporary_words {
                 if matched || !keyword_prefix_at(bytes, at, word) -> next
@@ -3545,11 +3545,11 @@ cached_metrics: fn(root: String, cache: ^MetricsCache, path: String) -[FS]> Metr
 
 source_boundary_counts: fn(root: String, cache: ^MetricsCache, paths: [String], cases: [String]) -[FS]> Dyn LedgerError! {
     source_paths: sorted_unique(paths)
-    tokens := 0
-    statements := 0
-    calls := 0
-    temporaries := 0
-    imports := 0
+    ^tokens: 0
+    ^statements: 0
+    ^calls: 0
+    ^temporaries: 0
+    ^imports: 0
     loop path in source_paths {
         metrics: cached_metrics(root, cache, path) ?? return Err(err)
         tokens += metrics.tokens
@@ -3558,7 +3558,7 @@ source_boundary_counts: fn(root: String, cache: ^MetricsCache, paths: [String], 
         temporaries += metrics.named_temporaries
         imports += metrics.imports
     }
-    counts := Dyn.object()
+    ^counts: Dyn.object()
     counts["tokens"] = Dyn.Int(tokens)
     counts["statements"] = Dyn.Int(statements)
     counts["calls"] = Dyn.Int(calls)
@@ -3579,7 +3579,7 @@ surface_path: fn(surfaces: [LanguageSurface], language: String) -> String Never!
 
 // The `source:` evidence of a row, without the prefix.
 jet_sources: fn(row: Row) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop item in row.evidence {
         if item.starts_with("source:") -> out.push(item.remove_prefix("source:"))
     }
@@ -3588,11 +3588,11 @@ jet_sources: fn(row: Row) -> [String] Never! {
 
 core_api_inventory_evidence: fn(root: String, cache: ^MetricsCache, row: Row, surfaces: [LanguageSurface], cases: [String]) -[FS]> Dyn LedgerError! {
     sources: jet_sources(row)
-    arms := Dyn.object()
+    ^arms: Dyn.object()
     if sources.len() > 0 {
         arms["jet"] = source_boundary_counts(root, cache, sources, cases) ?? return Err(err)
     }
-    lookups := row.evidence.copy()
+    ^lookups: row.evidence.copy()
     loop cell in row.competitors {
         if cell.status != "has" -> next
         path: surface_path(surfaces, cell.language)
@@ -3603,23 +3603,23 @@ core_api_inventory_evidence: fn(root: String, cache: ^MetricsCache, row: Row, su
         arms[cell.language] = source_boundary_counts(root, cache, [String]{path}, cases) ?? return Err(err)
     }
     if entries(arms).len() == 0 -> return Err(fail("Core API workflow has no source arm: {row.id}"))
-    concepts := [String]{"workflow:{row.id}", "container:{row.container}"}
+    ^concepts: [String]{"workflow:{row.id}", "container:{row.container}"}
     if row.member != "" -> concepts.push("operation:{normalize(row.member)}")
     if row.module_name != "" -> concepts.push("module:{row.module_name}")
     if row.type_name != "" -> concepts.push("type:{row.type_name}")
-    hidden := [String]{"verdict:{row.verdict}"}
+    ^hidden: [String]{"verdict:{row.verdict}"}
     if row.jet_spelling == None -> hidden.push("jet-spelling:absent")
     if row.kind == "competitor_operation" -> hidden.push("source-line:unrecorded")
     loop cell in row.competitors {
         if cell.status != "has" -> hidden.push("competitor:{cell.language}:{cell.status}")
     }
     hidden.sort()
-    counts := Dyn.object()
+    ^counts: Dyn.object()
     counts["unit"] = jtext("lexical-token")
     counts["includes"] = texts(EVIDENCE_INCLUDES)
     counts["basis"] = jtext("frozen source boundary; fixture status remains pending-fixture")
     counts["arms"] = arms
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["rawSourceCounts"] = counts
     out["mandatoryConceptIds"] = texts(sorted_unique(concepts))
     out["hiddenFacts"] = texts(hidden)
@@ -3628,56 +3628,56 @@ core_api_inventory_evidence: fn(root: String, cache: ^MetricsCache, row: Row, su
 }
 
 core_api_workflow_manifest: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surfaces: [LanguageSurface]) -[FS]> [Dyn] LedgerError! {
-    versions := Dyn.object()
+    ^versions: Dyn.object()
     loop entry in entries_in {
         if has_field(entry.surface, "runtime") {
             versions[entry.language] = field(entry.surface, "runtime")
         }
     }
-    cache := MetricsCache{paths: [String]{}, metrics: [Metrics]{}}
-    workflows := [Dyn]{}
+    ^cache: MetricsCache{paths: [String]{}, metrics: [Metrics]{}}
+    ^workflows: [Dyn]{}
     loop row in rows {
-        competitor_sources := [String]{}
+        ^competitor_sources: [String]{}
         loop cell in row.competitors {
             if cell.status == "has" {
                 competitor_sources.push(surface_path(surfaces, cell.language))
             }
         }
         competitor_sources.sort()
-        sources := jet_sources(row)
+        ^sources: jet_sources(row)
         sources.sort()
         cases: core_api_case_kinds(row)
         evidence: core_api_inventory_evidence(root, cache, row, surfaces, cases) ?? return Err(err)
-        input := Dyn.object()
+        ^input: Dyn.object()
         input["kind"] = jtext("frozen-ledger-workflow")
         input["row"] = jtext(row.id)
         input["sameInputsAcrossArms"] = Dyn.Bool(true)
         input["fixtureStatus"] = jtext("not-bound")
-        outcome := Dyn.object()
+        ^outcome: Dyn.object()
         outcome["workflow"] = jtext(row.workflow)
         outcome["ledgerVerdict"] = jtext(row.verdict)
         outcome["competingOperation"] = jtext(row.member)
-        allowed := Dyn.object()
+        ^allowed: Dyn.object()
         allowed["jet"] = jtext("shipped Core API only")
         allowed["competitors"] = jtext("the recorded standard-library surface only")
-        boundary := Dyn.object()
+        ^boundary: Dyn.object()
         boundary["jet"] = texts(sources)
         boundary["competitors"] = texts(competitor_sources)
         boundary["fixtureManifest"] = jtext(AGENT_MANIFEST_PATH)
         boundary["userAuthoredRoot"] = jtext("Tests/AgentWorkloads/adapters")
         boundary["generatedSourceExcluded"] = Dyn.Bool(true)
-        decline := Dyn.Null
+        ^decline: Dyn.Null
         if row.declined_by != "" {
-            declined := Dyn.object()
+            ^declined: Dyn.object()
             declined["decision"] = jtext(row.declined_by)
             declined["scored"] = Dyn.Bool(true)
             declined["reason"] = jtext("A design decline remains a scored comparison result.")
             decline = declined
         }
-        scope := Dyn.object()
+        ^scope: Dyn.object()
         scope["excluded"] = Dyn.Bool(false)
         scope["decline"] = decline
-        measured := Dyn.object()
+        ^measured: Dyn.object()
         measured["status"] = jtext("pending-fixture")
         measured["rawSourceCounts"] = field(evidence, "rawSourceCounts")
         measured["mandatoryConceptIds"] = field(evidence, "mandatoryConceptIds")
@@ -3687,7 +3687,7 @@ core_api_workflow_manifest: fn(root: String, rows: [Row], entries_in: [SurfaceEn
         measured["reasoningBurden"] = Dyn.Null
         measured["independentFixtureReview"] = Dyn.Null
         measured["jetWin"] = core_api_jet_win(row) ?? return Err(err)
-        workflow := Dyn.object()
+        ^workflow: Dyn.object()
         workflow["id"] = jtext(row.id)
         workflow["task"] = jtext("core-api/{row.id}")
         workflow["input"] = input
@@ -3707,9 +3707,9 @@ core_api_workflow_manifest: fn(root: String, rows: [Row], entries_in: [SurfaceEn
 core_api_gate: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surfaces: [LanguageSurface]) -[FS]> Dyn LedgerError! {
     workflows: core_api_workflow_manifest(root, rows, entries_in, surfaces) ?? return Err(err)
     contract: core_api_fixture_contract(root) ?? return Err(err)
-    case_counts := Dyn.object()
-    pending := 0
-    accepted := 0
+    ^case_counts: Dyn.object()
+    ^pending: 0
+    ^accepted: 0
     loop workflow in workflows {
         loop kind in text_items(field(workflow, "cases")) {
             case_counts[kind] = Dyn.Int(if field(case_counts, kind) == .Int(count) -> count + 1 else -> 1)
@@ -3718,22 +3718,22 @@ core_api_gate: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surface
         if !text_is(evidence, "status", "measured") -> pending += 1
         if text_is(field(evidence, "jetWin"), "status", "accepted") -> accepted += 1
     }
-    languages := loop surface in surfaces -> surface.language.copy()
+    ^languages: loop surface in surfaces -> surface.language.copy()
     languages.sort()
     review_source: read_source(root, CORE_API_REVIEW_TEST_PATH) ?? return Err(err)
-    inventory := Dyn.object()
+    ^inventory: Dyn.object()
     inventory["source"] = jtext("rows")
     inventory["rowIdField"] = jtext("id")
     inventory["workflowField"] = jtext("workflow")
     inventory["manualWorkflowInventory"] = Dyn.Bool(false)
     inventory["rule"] = jtext("Every ledger row has one manifest entry; no workflow may be hidden by a fixture filter.")
-    review := Dyn.object()
+    ^review: Dyn.object()
     review["method"] = jtext("fresh-context-release-check")
     review["command"] = jtext(CORE_API_REVIEW_COMMAND)
     review["source"] = jtext(CORE_API_REVIEW_TEST)
     review["sourceDigest"] = jtext(sha_hex(review_source))
     review["checks"] = texts(CORE_API_REVIEW_CHECKS)
-    summary := Dyn.object()
+    ^summary: Dyn.object()
     summary["workflowCount"] = Dyn.Int(workflows.len())
     summary["caseCounts"] = case_counts
     summary["pendingEvidenceCount"] = Dyn.Int(pending)
@@ -3741,7 +3741,7 @@ core_api_gate: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surface
     summary["acceptedJetWinCount"] = Dyn.Int(accepted)
     summary["releaseStatus"] = jtext(if pending == 0 -> "ready" else -> "blocked-until-evidence-complete")
     summary["releaseOwner"] = jtext("#1398")
-    gate := Dyn.object()
+    ^gate: Dyn.object()
     gate["schemaVersion"] = Dyn.Int(1)
     gate["ownerCard"] = Dyn.Int(1398)
     gate["policyDocument"] = jtext(CORE_API_LAWS_PATH)
@@ -3783,7 +3783,7 @@ core_structure: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn LedgerError! {
 // The `module.member` pair of each of the compiler's non-receiver Core call
 // records, once each.
 core_call_pairs: fn(core: Dyn) -> [String] Never! {
-    pairs := [String]{}
+    ^pairs: [String]{}
     loop entry in items(field(core, "calls")) {
         pair: "{text_field(entry, "module")}.{text_field(entry, "member")}"
         if !pairs.contains(pair) -> pairs.push(pair)
@@ -3794,11 +3794,11 @@ core_call_pairs: fn(core: Dyn) -> [String] Never! {
 // The ledger's module inventory: each Core.rows module with its members, its
 // Core.rows line, its type exports and its dependencies.
 core_module_inventory: fn(core: Dyn) -> Dyn Never! {
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     loop entry in items(field(core, "modules")) {
-        types := [Dyn]{}
+        ^types: [Dyn]{}
         loop leaf in items(field(entry, "type_exports")) {
-            item := Dyn.object()
+            ^item: Dyn.object()
             item["name"] = field(leaf, "name")
             item["kind"] = jtext(if text_field(leaf, "kind") == "crypto_nominal" -> "crypto_nominal" else -> "plain")
             item["variants"] = if has_field(leaf, "variants") -> field(leaf, "variants") else -> Dyn.Array([Dyn]{})
@@ -3806,7 +3806,7 @@ core_module_inventory: fn(core: Dyn) -> Dyn Never! {
             types.push(item)
         }
         name: text_field(entry, "module")
-        fact := Dyn.object()
+        ^fact: Dyn.object()
         fact["module"] = jtext(name)
         fact["rawModules"] = Dyn.Array([Dyn]{jtext("{name} (Prelude/Core.rows)")})
         fact["members"] = field(entry, "members")
@@ -3819,7 +3819,7 @@ core_module_inventory: fn(core: Dyn) -> Dyn Never! {
 }
 
 module_facts: fn(facts: Dyn) -> [ModuleFact] Never! {
-    out := [ModuleFact]{}
+    ^out: [ModuleFact]{}
     loop entry in items(facts) {
         line: int_of(field(entry, "sourceLine")) ?? -1
         out.push(ModuleFact{name: text_field(entry, "module"), members: text_items(field(entry, "members")), source_line: line})
@@ -3831,7 +3831,7 @@ module_facts: fn(facts: Dyn) -> [ModuleFact] Never! {
 // then the compiler-private parts it owns, in load order. Runtime units belong
 // to no module's receivers.
 core_module_paths: fn(core: Dyn) -> [String:[String]] Never! {
-    out := [String:[String]]{}
+    ^out: [String:[String]]{}
     loop source in items(field(core, "sources")) {
         if field(source, "runtime") == .Bool(true) -> next
         owner: text_field(source, "owner")
@@ -3874,33 +3874,33 @@ build_ledger: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built Ledg
     surfaces: index_surfaces(entries_in)
     names: synonyms()
     jet: build_rows(root, names, modules, inventory, surfaces, bindings) ?? return Err(err)
-    rows := jet.rows.copy()
+    ^rows: jet.rows.copy()
     loop row in competitor_rows(names, surfaces, jet) -> rows.push(row)
     apply_ratified_declines(rows) ?? return Err(err)
     board: tower_board(root) ?? return Err(err)
     clusters: loss_clusters(rows, board)
     uncompared: uncompared_domains(modules, containers)
 
-    by_verdict := Dyn.object()
+    ^by_verdict: Dyn.object()
     loop row in rows {
         by_verdict[row.verdict] = Dyn.Int(if field(by_verdict, row.verdict) == .Int(count) -> count + 1 else -> 1)
     }
 
-    per_language := Dyn.object()
+    ^per_language: Dyn.object()
     loop entry in entries_in {
-        matched := 0
+        ^matched: 0
         loop row in jet.rows {
             loop cell in row.competitors {
                 if cell.language == entry.language && cell.status == "has" -> matched += 1
             }
         }
-        losses := 0
+        ^losses: 0
         loop row in rows {
             if row.verdict == "jet_loses" && row.kind == "competitor_operation" && row.languages.contains(entry.language) {
                 losses += 1
             }
         }
-        language := Dyn.object()
+        ^language: Dyn.object()
         copy_field(language, entry.surface, "sourceKind", "sourceKind")
         copy_field(language, entry.surface, "runtime", "runtime")
         language["surface"] = jtext(entry.path)
@@ -3918,14 +3918,14 @@ build_ledger: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built Ledg
     repeats: repeated_operations(rows)
     attributed: package_attributed_containers(surfaces)
 
-    aliases := Dyn.object()
+    ^aliases: Dyn.object()
     loop alias in CONTAINER_ALIASES -> aliases[alias.name] = jtext(alias.container)
-    groups := Dyn.Array(loop group in SYNONYM_GROUPS -> texts(group))
+    ^groups: Dyn.Array(loop group in SYNONYM_GROUPS -> texts(group))
 
-    collections := [Dyn]{}
-    method_count := 0
+    ^collections: [Dyn]{}
+    ^method_count: 0
     loop entry in inventory.collections {
-        collection := Dyn.object()
+        ^collection: Dyn.object()
         collection["function"] = jtext(entry.function)
         collection["type"] = jtext(entry.type_name)
         collection["methods"] = texts(entry.methods)
@@ -3933,28 +3933,28 @@ build_ledger: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built Ledg
         collections.push(collection)
         method_count += entry.methods.len()
     }
-    inventory_out := Dyn.object()
+    ^inventory_out: Dyn.object()
     inventory_out["modules"] = facts
     inventory_out["fixedSignaturePairs"] = texts(inventory.fixed_pairs)
     inventory_out["collections"] = Dyn.Array(collections)
     inventory_out["unregisteredDispatcherRows"] = Dyn.Array([Dyn]{})
 
-    member_count := 0
+    ^member_count: 0
     loop entry in modules -> member_count += entry.members.len()
-    fixed_only := 0
-    qualified_wins := 0
+    ^fixed_only: 0
+    ^qualified_wins: 0
     loop row in rows {
         if row.kind == "fixed_sig" -> fixed_only += 1
         if row.verdict == "jet_wins" && row.qualifies != "" -> qualified_wins += 1
     }
-    needing_card := 0
+    ^needing_card: 0
     loop cluster in items(clusters) {
         if !text_is(cluster, "ownerState", "live") -> needing_card += 1
     }
-    repeat_rows := 0
+    ^repeat_rows: 0
     loop item in repeats -> repeat_rows += item.containers.len()
 
-    summary := Dyn.object()
+    ^summary: Dyn.object()
     summary["languageCount"] = Dyn.Int(entries_in.len())
     summary["containerCount"] = Dyn.Int(containers.len())
     summary["moduleCount"] = Dyn.Int(modules.len())
@@ -3976,7 +3976,7 @@ build_ledger: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built Ledg
     summary["repeatedOperationRowCount"] = Dyn.Int(repeat_rows)
     summary["packageAttributedContainerCount"] = Dyn.Int(items(attributed).len())
 
-    ledger := Dyn.object()
+    ^ledger: Dyn.object()
     ledger["schemaVersion"] = Dyn.Int(2)
     ledger["title"] = jtext("Jet Core surface ledger")
     ledger["generatedOn"] = jtext(time.isoformat_date(time.today()))
@@ -4046,7 +4046,7 @@ no_benefit: fn(value: Dyn) -> Bool Never! {
 has_text: fn(value: Dyn, want: String) -> Bool Never! { text_items(value).contains(want) }
 
 sorted_texts: fn(value: Dyn) -> [String] Never! {
-    out := text_items(value)
+    ^out: text_items(value)
     out.sort()
     out
 }
@@ -4057,7 +4057,7 @@ validate_inventory_evidence: fn(workflow: Dyn) -> Int LedgerError! {
     counts: field(evidence, "rawSourceCounts")
     arms: field(counts, "arms")
     includes: field(counts, "includes")
-    lacks_include := false
+    ^lacks_include: false
     loop item in EVIDENCE_INCLUDES {
         if !has_text(includes, item) -> lacks_include = true
     }
@@ -4065,7 +4065,7 @@ validate_inventory_evidence: fn(workflow: Dyn) -> Int LedgerError! {
         return Err(fail("Core API workflow evidence is missing rawSourceCounts: {id}"))
     }
     loop arm in entries(arms) {
-        incomplete := !is_object(arm.value)
+        ^incomplete: !is_object(arm.value)
         loop name in EVIDENCE_REQUIRED_COUNT_FIELDS {
             if !non_negative_int(field(arm.value, name)) -> incomplete = true
         }
@@ -4120,7 +4120,7 @@ validate_measured_evidence: fn(workflow: Dyn) -> Int LedgerError! {
     counts: field(evidence, "rawSourceCounts")
     arms: field(counts, "arms")
     includes: field(counts, "includes")
-    lacks_include := false
+    ^lacks_include: false
     loop item in EVIDENCE_INCLUDES {
         if !has_text(includes, item) -> lacks_include = true
     }
@@ -4128,7 +4128,7 @@ validate_measured_evidence: fn(workflow: Dyn) -> Int LedgerError! {
         return Err(fail("measured evidence has incomplete raw source counts: {id}"))
     }
     loop arm in entries(arms) {
-        incomplete := !is_object(arm.value)
+        ^incomplete: !is_object(arm.value)
         loop name in EVIDENCE_REQUIRED_COUNT_FIELDS {
             if !non_negative_int(field(arm.value, name)) -> incomplete = true
         }
@@ -4172,7 +4172,7 @@ validate_measured_evidence: fn(workflow: Dyn) -> Int LedgerError! {
 
 // One frozen receipt row as the fixture contract records it.
 receipt_dyn: fn(receipt: [String:String]) -> Dyn Never! {
-    entry := Dyn.object()
+    ^entry: Dyn.object()
     entry["adapter"] = jtext(cell(receipt, "adapter"))
     entry["sourceTokens"] = number_dyn(cell(receipt, "source_tokens"))
     entry["exitCode"] = number_dyn(cell(receipt, "exit_code"))
@@ -4204,7 +4204,7 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
     if !truthy(execution) || !same_texts(field(execution, "source"), AGENT_RUNNER_SOURCE_PATHS) || !text_is(execution, "test", AGENT_RUNNER) || !text_is(execution, "checksumManifest", AGENT_CHECKSUMS_PATH) || !text_is(execution, "runnerDigest", runner_digest) || !text_is(execution, "checksumDigest", sha_hex(checksums)) || !text_is(execution, "domainContract", AGENT_DOMAIN_CONTRACT_PATH) || !text_is(execution, "domainContractDigest", sha_hex(domain_contract)) || !text_is(execution, "policyDigest", sha_hex(without_trailing_newlines(policy))) || !same_texts(field(execution, "checks"), EXECUTION_CHECKS) || !same_texts(field(execution, "runnerMarkers"), AGENT_RUNNER_MARKERS) {
         return Err(fail("Core API fixture execution contract drifted"))
     }
-    runner_parts := [String]{}
+    ^runner_parts: [String]{}
     loop path in AGENT_RUNNER_SOURCE_PATHS {
         runner_parts.push(read_source(root, path) ?? return Err(err))
     }
@@ -4221,35 +4221,35 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
     }
 
     manifest: tsv_records(root, AGENT_MANIFEST_PATH) ?? return Err(err)
-    manifest_at := [String:Int]{}
+    ^manifest_at: [String:Int]{}
     loop (at, row) in manifest -> manifest_at[cell(row, "task_id")] = at
     tasks: items(field(fixture, "tasks"))
-    task_at := [String:Int]{}
-    task_names := [String]{}
+    ^task_at: [String:Int]{}
+    ^task_names: [String]{}
     loop (at, task) in tasks {
         name: spelled(field(task, "task"))
         if task_at.get(name) != None -> return Err(fail("duplicate Core API fixture task: {name}"))
         task_at[name] = at
         task_names.push(name)
     }
-    manifest_names := sorted_unique(loop row in manifest -> cell(row, "task_id"))
+    ^manifest_names: sorted_unique(loop row in manifest -> cell(row, "task_id"))
     task_names.sort()
     if task_names != manifest_names {
         return Err(fail("Core API fixture selection does not cover the frozen manifest"))
     }
 
     pinned: field(fixture, "pinnedRun")
-    adapters_sorted := AGENT_BASELINE_ADAPTERS.copy()
+    ^adapters_sorted: AGENT_BASELINE_ADAPTERS.copy()
     adapters_sorted.sort()
-    pinned_tools := keys_of(field(pinned, "toolVersions"))
+    ^pinned_tools: keys_of(field(pinned, "toolVersions"))
     pinned_tools.sort()
     if !truthy(pinned) || !non_empty(field(pinned, "runId")) || !non_empty(field(pinned, "machine")) || pinned_tools != adapters_sorted {
         return Err(fail("Core API fixture tool pin is incomplete"))
     }
     receipts: tsv_records(root, AGENT_RECEIPT_PATH) ?? return Err(err)
-    seen := [String]{}
-    projected := [String]{}
-    current := [String:String]{}
+    ^seen: [String]{}
+    ^projected: [String]{}
+    ^current: [String:String]{}
     loop receipt in receipts {
         task_id: cell(receipt, "task_id")
         at_row: manifest_at.get(task_id) ?? return Err(fail("Core API fixture receipt names an unknown task: {task_id}"))
@@ -4261,7 +4261,7 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
         key: "{adapter}{nul()}{task_id}"
         if seen.contains(key) -> return Err(fail("duplicate Core API fixture receipt: {key}"))
         seen.push(key.copy())
-        stored := Dyn.Null
+        ^stored: Dyn.Null
         if task_at.get(task_id) == .Val(at_task) {
             loop candidate in items(field(tasks[at_task], "receipts")) {
                 if stored == .Null && text_is(candidate, "adapter", adapter) -> stored = candidate
@@ -4321,12 +4321,12 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
             return Err(fail("Core API fixture output artifact drifted: {key}"))
         }
     }
-    current_tools := [String]{}
+    ^current_tools: [String]{}
     loop name in AGENT_BASELINE_ADAPTERS {
         if current.get(name) != None -> current_tools.push(name.copy())
     }
     current_tools.sort()
-    seen_sorted := seen.copy()
+    ^seen_sorted: seen.copy()
     seen_sorted.sort()
     projected.sort()
     if seen.len() != manifest.len() * AGENT_BASELINE_ADAPTERS.len() || current_tools != adapters_sorted || projected != seen_sorted {
@@ -4336,7 +4336,7 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
     loop row in manifest {
         task_id: cell(row, "task_id")
         stem: agent_adapter_stem(task_id) ?? return Err(err)
-        expected_sources := [String]{}
+        ^expected_sources: [String]{}
         loop adapter in cell(row, "adapters").split(",") {
             if adapter != "" {
                 expected_sources.push("Tests/AgentWorkloads/adapters/{stem}.{adapter_suffix(adapter)}")
@@ -4368,7 +4368,7 @@ labeled_line: fn(line: String, label: String) -> Bool Never! {
 error_line: fn(line: String) -> Bool Never! {
     if !line.starts_with("Error: Jet.") -> return false
     bytes: line.removesuffix("\r").bytes()
-    at := 11
+    ^at: 11
     if at >= bytes.len() -> return false
     first: Int{bytes[at]}
     if first < 65 || first > 90 -> return false
@@ -4380,8 +4380,8 @@ error_line: fn(line: String) -> Bool Never! {
 
 // The blank-line-separated entries of a diagnostics stream.
 diagnostic_entries: fn(source: String) -> [[String]] Never! {
-    out := [[String]]{}
-    current := [String]{}
+    ^out: [[String]]{}
+    ^current: [String]{}
     loop line in source.split("\n") {
         if line.trim() == "" {
             if current.len() > 0 -> out.push(current.copy())
@@ -4401,7 +4401,7 @@ validate_core_api_syntax_coverage: fn(root: String) -[FS]> Int LedgerError! {
             return Err(fail("syntax reference does not teach Core gate form: {marker}"))
         }
     }
-    editor_parts := [String]{}
+    ^editor_parts: [String]{}
     loop path in EDITOR_COVERAGE_PATHS {
         editor_parts.push(read_source(root, path) ?? return Err(err))
     }
@@ -4430,14 +4430,14 @@ validate_core_api_syntax_coverage: fn(root: String) -[FS]> Int LedgerError! {
         {path: "Tests/UI/user_policy_bad_args.stderr", name: "Jet.MissingArgument"},
     }) {
         diagnostics: read_source(root, pair.path) ?? return Err(err)
-        complete := false
-        found := false
+        ^complete: false
+        ^found: false
         loop entry in diagnostic_entries(diagnostics) {
             if found || !entry[0].starts_with("Error: {pair.name}: ") -> next
             found = true
-            has_error := false
-            has_why := false
-            has_fix := false
+            ^has_error: false
+            ^has_why: false
+            ^has_fix: false
             loop line in entry {
                 if error_line(line) -> has_error = true
                 if labeled_line(line, "Why: ") -> has_why = true
@@ -4457,9 +4457,9 @@ validate_fresh_review: fn(root: String, ledger: Dyn, workflows: [Dyn]) -[FS]> In
     review: field(gate, "freshReview")
     loop name in text_items(field(review, "checks")) {
         if name == "workflow-closure" {
-            row_ids := [String:Bool]{}
+            ^row_ids: [String:Bool]{}
             loop row in items(field(ledger, "rows")) -> row_ids[text_field(row, "id")] = true
-            workflow_ids := [String:Bool]{}
+            ^workflow_ids: [String:Bool]{}
             loop workflow in workflows {
                 id: text_field(workflow, "id")
                 if !is_object(workflow) || !non_empty(field(workflow, "id")) || workflow_ids.get(id) != None || row_ids.get(id) == None || !text_is(workflow, "task", "core-api/{id}") || !truthy(field(workflow, "input")) || !text_is(field(workflow, "input"), "row", id) {
@@ -4511,7 +4511,7 @@ validate_fresh_review: fn(root: String, ledger: Dyn, workflows: [Dyn]) -[FS]> In
 
 // Whether a policy line opens with `heading` and a word boundary.
 heading_count: fn(policy: String, heading: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop line in policy.split("\n") {
         if !line.starts_with(heading) -> next
         rest: byte_tail(line, byte_len(heading))
@@ -4537,14 +4537,14 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
     }
     validate_core_api_syntax_coverage(root) ?? return Err(err)
     rows: items(field(ledger, "rows"))
-    row_at := [String:Int]{}
+    ^row_at: [String:Int]{}
     loop (at, row) in rows -> row_at[text_field(row, "id")] = at
     workflows: items(field(gate, "workflowManifest"))
     if !is_array(field(gate, "workflowManifest")) || workflows.len() != row_at.len() {
         return Err(fail("Core API gate workflow manifest does not cover every ledger row"))
     }
-    workflow_ids := [String:Bool]{}
-    case_counts := Dyn.object()
+    ^workflow_ids: [String:Bool]{}
+    ^case_counts: Dyn.object()
     loop workflow in workflows {
         id: text_field(workflow, "id")
         if workflow_ids.get(id) != None {
@@ -4570,11 +4570,11 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
         row: rows[at_row]
         allowed: entries(field(workflow, "allowedDependency"))
         versions: entries(field(workflow, "toolVersions"))
-        blank_dependency := false
+        ^blank_dependency: false
         loop entry in allowed {
             if !non_empty(entry.value) -> blank_dependency = true
         }
-        blank_version := false
+        ^blank_version: false
         loop entry in versions {
             if !non_empty(entry.value) -> blank_version = true
         }
@@ -4583,7 +4583,7 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
         }
         cases: field(workflow, "cases")
         kinds: text_items(cases)
-        unknown_case := kinds.len() != items(cases).len()
+        ^unknown_case: kinds.len() != items(cases).len()
         loop kind in kinds {
             if !CASE_KINDS.contains(kind) -> unknown_case = true
         }
@@ -4633,8 +4633,8 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
     if !same(field(summary, "caseCounts"), case_counts) {
         return Err(fail("Core API workflow case counts drifted"))
     }
-    pending := 0
-    wins := 0
+    ^pending: 0
+    ^wins: 0
     loop workflow in workflows {
         evidence: field(workflow, "evidence")
         if !text_is(evidence, "status", "measured") -> pending += 1
@@ -4659,7 +4659,7 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
     if !is_array(field(fixture, "tasks")) || tasks.len() == 0 {
         return Err(fail("Core API gate has no frozen fixture tasks"))
     }
-    task_ids := [String:Bool]{}
+    ^task_ids: [String:Bool]{}
     loop task in tasks {
         name: spelled(field(task, "task"))
         if task_ids.get(name) != None -> return Err(fail("duplicate Core API fixture task: {name}"))
@@ -4673,16 +4673,16 @@ validate_core_api_gate: fn(root: String, ledger: Dyn) -[FS]> Int LedgerError! {
             return Err(fail("Core API fixture source boundary is incomplete: {name}"))
         }
         adapters: text_items(field(task, "adapters"))
-        competitor_adapters := [String]{}
+        ^competitor_adapters: [String]{}
         loop adapter in adapters {
             if adapter != "jet" -> competitor_adapters.push(adapter.copy())
         }
         competitor_adapters.sort()
         receipts: items(field(task, "receipts"))
-        receipt_adapters := loop receipt in receipts -> text_field(receipt, "adapter")
+        ^receipt_adapters: loop receipt in receipts -> text_field(receipt, "adapter")
         receipt_adapters.sort()
         source_digest: fixture_source_digest(root, text_items(field(boundary, "userAuthored"))) ?? return Err(err)
-        bad_receipt := false
+        ^bad_receipt: false
         loop receipt in receipts {
             if !adapters.contains(text_field(receipt, "adapter")) || !non_empty(field(receipt, "toolVersion")) || !non_negative_int(field(receipt, "sourceTokens")) || !int_is(receipt, "exitCode", 0) || !bool_is(receipt, "outputStable", true) || field(receipt, "scoring") != field(fixture, "scoring") || !non_empty(field(receipt, "policyDigest")) || field(receipt, "inputSha256") != field(task, "inputDigest") || field(receipt, "expectedSha256") != field(task, "expectedDigest") {
                 bad_receipt = true
@@ -4714,9 +4714,9 @@ validate_surfaces: fn(ledger: Dyn, surfaces: [SurfaceEntry]) -> Int LedgerError!
     }
     loop entry in surfaces {
         records: entries(field(entry.surface, "containers"))
-        recorded := [String:Bool]{}
+        ^recorded: [String:Bool]{}
         loop record in records -> recorded[record.key] = true
-        missing_names := [String]{}
+        ^missing_names: [String]{}
         loop name in containers {
             if recorded.get(name) == None -> missing_names.push(name.copy())
         }
@@ -4738,7 +4738,7 @@ validate_surfaces: fn(ledger: Dyn, surfaces: [SurfaceEntry]) -> Int LedgerError!
         // One source feeds one container. This was asserted in prose and never
         // enforced, and R's base package really did feed core.math and
         // core.math.random, so one function minted two gaps.
-        owner := [String:String]{}
+        ^owner: [String:String]{}
         loop record in records {
             if !truthy(field(record.value, "present")) -> next
             loop key in
@@ -4766,15 +4766,15 @@ validate_surfaces: fn(ledger: Dyn, surfaces: [SurfaceEntry]) -> Int LedgerError!
 // recurring name that is in neither table, so a ledger refresh cannot introduce
 // an unreviewed repeat and have it quietly keep per-domain scoring.
 validate_repeated_names: fn(rows: [Dyn], pooled: [String], distinct: [String]) -> Int LedgerError! {
-    keys := [String]{}
-    at_key := [String:Int]{}
-    witnesses := [[String]]{}
-    domains := [[String]]{}
+    ^keys: [String]{}
+    ^at_key: [String:Int]{}
+    ^witnesses: [[String]]{}
+    ^domains: [[String]]{}
     loop row in rows {
         source: field(row, "source")
         if !text_is(source, "kind", "competitor_operation") -> next
         key: spelled(field(source, "member"))
-        at := at_key.get(key) ?? -1
+        ^at: at_key.get(key) ?? -1
         if at < 0 {
             at = keys.len()
             at_key[key] = at
@@ -4791,7 +4791,7 @@ validate_repeated_names: fn(rows: [Dyn], pooled: [String], distinct: [String]) -
             }
         }
     }
-    unclassified := [String]{}
+    ^unclassified: [String]{}
     loop (at, key) in keys {
         // Recurring means it appears in more than one domain. A name confined to
         // one domain is already scored on all the evidence there is.
@@ -4809,7 +4809,7 @@ validate_repeated_names: fn(rows: [Dyn], pooled: [String], distinct: [String]) -
 // Every operation each recorded present container holds, keyed
 // language, container and operation.
 surface_operations: fn(surfaces: [SurfaceEntry]) -> [String:Bool] Never! {
-    known := [String:Bool]{}
+    ^known: [String:Bool]{}
     loop entry in surfaces {
         loop record in entries(field(entry.surface, "containers")) {
             if !truthy(field(record.value, "present")) -> next
@@ -4832,9 +4832,9 @@ validate_rows: fn(ledger: Dyn, surfaces: [SurfaceEntry]) -> Int LedgerError! {
     rows: items(field(ledger, "rows"))
     validate_repeated_names(rows, CROSS_DOMAIN_POOLED, CROSS_DOMAIN_DISTINCT) ?? return Err(err)
     known: surface_operations(surfaces)
-    languages := loop entry in surfaces -> entry.language.copy()
-    ids := [String:Bool]{}
-    source_keys := [String:Bool]{}
+    ^languages: loop entry in surfaces -> entry.language.copy()
+    ^ids: [String:Bool]{}
+    ^source_keys: [String:Bool]{}
     verdicts: [String]{"equal", "jet_wins", "jet_loses", "single_witness", "not_compared", "declined", "type_item"}
     loop row in rows {
         id: text_field(row, "id")
@@ -4857,7 +4857,7 @@ validate_rows: fn(ledger: Dyn, surfaces: [SurfaceEntry]) -> Int LedgerError! {
             return Err(fail("row without a Jet spelling: {id}"))
         }
         container: text_field(row, "container")
-        any_has := false
+        ^any_has: false
         // A row may not assert an operation the recorded surface does not have.
         loop entry in entries(field(row, "competitors")) {
             if !text_is(entry.value, "status", "has") -> next
@@ -4931,8 +4931,8 @@ validate_owners: fn(ledger: Dyn, board: Board) -> Int LedgerError! {
             return Err(fail("declined row without a decision id: {id}"))
         }
         declined_by: spelled(field(row, "declinedBy"))
-        status := ""
-        known := false
+        ^status: ""
+        ^known: false
         if board.readable {
             loop decision in board.decisions {
                 if !known && decision.id == declined_by {
@@ -4954,7 +4954,7 @@ validate_coverage: fn(ledger: Dyn, modules: [ModuleFact]) -> Int LedgerError! {
     listed: field(ledger, "uncomparedDomains")
     if !same_texts(listed, expected) {
         present: text_items(listed)
-        hidden := [String]{}
+        ^hidden: [String]{}
         loop name in expected {
             if !present.contains(name) -> hidden.push(name.copy())
         }
@@ -4975,7 +4975,7 @@ validate_ledger: fn(root: String, built: Built) -[FS]> Int LedgerError! {
 }
 
 without_generated_on: fn(ledger: Dyn) -> Dyn Never! {
-    kept := [{key: String, value: Dyn}]{}
+    ^kept: [{key: String, value: Dyn}]{}
     loop entry in entries(ledger) {
         if entry.key != "generatedOn" {
             kept.push({key: entry.key.copy(), value: entry.value.copy()})
@@ -5013,7 +5013,7 @@ check_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Ledge
     single: verdict_count(verdicts, "single_witness")
     types: verdict_count(verdicts, "type_item")
     uncompared: verdict_count(verdicts, "not_compared")
-    lines := [String]{}
+    ^lines: [String]{}
     lines.push("core surface ledger: source-derived, verified against {spelled(field(summary, "languageCount"))} recorded competitor surfaces, and unique")
     lines.push("rows={spelled(field(summary, "rowCount"))} wins={wins} equal={equal} loses={loses} single-witness={single} types={types} not-compared={uncompared} clusters-needing-a-card={spelled(field(summary, "clustersNeedingCard"))}")
     lines.push("core API gate: {spelled(field(gate_summary, "releaseStatus"))} workflows={spelled(field(gate_summary, "workflowCount"))} pending-evidence={spelled(field(gate_summary, "pendingEvidenceCount"))} accepted-jet-wins={spelled(field(gate_summary, "acceptedJetWinCount"))}")
@@ -5042,7 +5042,7 @@ release_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Led
     built: build_ledger(root) ?? return Err(err)
     validate_ledger(root, built) ?? return Err(fail("{err.message} (owner #1398)"))
     workflows: items(field(field(built.ledger, "coreApiGate"), "workflowManifest"))
-    failures := [ReleaseFailure]{}
+    ^failures: [ReleaseFailure]{}
     loop workflow in workflows {
         task: spelled(field(workflow, "task"))
         evidence: field(workflow, "evidence")
@@ -5071,7 +5071,7 @@ release_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Led
                     failures.push(ReleaseFailure{task: task, reason: "extra construct is missing {name}"})
                 }
             }
-            claimed := false
+            ^claimed: false
             loop name in CONSTRUCT_BENEFITS {
                 if field(construct, name) != .Null && !text_is(construct, name, "") {
                     claimed = true
@@ -5096,7 +5096,7 @@ release_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Led
         }
     }
     if failures.len() > 0 {
-        shown := [String]{}
+        ^shown: [String]{}
         loop at in 0..<failures.len() {
             if at < 4 -> shown.push("{failures[at].task}: {failures[at].reason} (owner #1398)")
         }
@@ -5121,22 +5121,22 @@ release_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Led
 edited: fn(value: Dyn, path: [String], kind: String, new_value: Dyn) -> Dyn Never! {
     if path.len() == 0 {
         if kind == "set" -> return new_value.copy()
-        list := items(value)
+        ^list: items(value)
         if kind == "pop" -> _: list.pop()
         if kind == "push" -> list.push(new_value.copy())
         return Dyn.Array(list)
     }
     step: path[0]
-    rest := [String]{}
+    ^rest: [String]{}
     loop at in 1..<path.len() -> rest.push(path[at].copy())
     if value == .Array(list) {
         at: Int.parse(step) ?? 0
-        out := list.copy()
+        ^out: list.copy()
         out[at] = edited(out[at], rest, kind, new_value)
         return Dyn.Array(out)
     }
-    kept := [{key: String, value: Dyn}]{}
-    found := false
+    ^kept: [{key: String, value: Dyn}]{}
+    ^found: false
     loop entry in entries(value) {
         if entry.key != step {
             kept.push({key: entry.key.copy(), value: entry.value.copy()})
@@ -5201,7 +5201,7 @@ collection_verbs_stay_in_containers: fn() -> Int LedgerError! {
 }
 
 without_name: fn(values: [String], name: String) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop value in values {
         if value != name -> out.push(value.copy())
     }
@@ -5229,7 +5229,7 @@ surface_index: fn(surfaces: [SurfaceEntry], language: String) -> Int Never! {
 }
 
 fixture_cluster: fn(container: String, card: Int, state: String) -> Dyn Never! {
-    cluster := Dyn.object()
+    ^cluster: Dyn.object()
     cluster["container"] = jtext(container)
     cluster["lossCount"] = Dyn.Int(1)
     cluster["languages"] = texts([String]{"Rust"})
@@ -5250,7 +5250,7 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     surfaces: built.surfaces
     board: built.board
     zeros: "0".repeat(64)
-    results := [String]{}
+    ^results: [String]{}
 
     results.push(
         rejects(
@@ -5274,19 +5274,19 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
         ) ?? return Err(err),
     )
 
-    arms := Dyn.object()
-    jet_arm := Dyn.object()
+    ^arms: Dyn.object()
+    ^jet_arm: Dyn.object()
     jet_arm["tokens"] = Dyn.Int(1)
     arms["jet"] = jet_arm
-    counts := Dyn.object()
+    ^counts: Dyn.object()
     counts["unit"] = jtext("lexical-token")
     counts["includes"] = texts(EVIDENCE_INCLUDES)
     counts["arms"] = arms
-    burden := Dyn.object()
+    ^burden: Dyn.object()
     burden["status"] = jtext("equal")
     burden["evidence"] = jtext("fixture review")
     workflow_path: [String]{"coreApiGate", "workflowManifest", "0"}
-    measured := edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "input", "fixtureStatus"}, "set", jtext("accepted"))
+    ^measured: edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "input", "fixtureStatus"}, "set", jtext("accepted"))
     loop change in
         ([{name: String, value: Dyn}]{
         {name: "status", value: jtext("measured")},
@@ -5299,7 +5299,7 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
         {name: "independentFixtureReview", value: Dyn.object()},
         {name: "jetWin", value: Dyn.object()},
     }) {
-        path := workflow_path.copy()
+        ^path: workflow_path.copy()
         path.push("evidence")
         path.push(change.name.copy())
         measured = edited(measured, path, "set", change.value)
@@ -5347,7 +5347,7 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
             validate_core_api_gate(root, edited(ledger, [String]{"coreApiGate", "freshReview", "checks"}, "pop", Dyn.Null)),
         ) ?? return Err(err),
     )
-    hidden := edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "scope", "excluded"}, "set", Dyn.Bool(true))
+    ^hidden: edited(ledger, [String]{"coreApiGate", "workflowManifest", "0", "scope", "excluded"}, "set", Dyn.Bool(true))
     hidden = edited(hidden, [String]{"coreApiGate", "workflowManifest", "0", "scope", "decline"}, "set", Dyn.Null)
     results.push(
         rejects(
@@ -5383,13 +5383,13 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
             validate_rows(edited(ledger, [String]{"rows"}, "push", rows[0]), surfaces),
         ) ?? return Err(err),
     )
-    matched := -1
+    ^matched: -1
     loop (at, entry) in entries(field(rows[jet_at], "competitors")) {
         if matched < 0 && text_is(entry.value, "status", "has") -> matched = at
     }
     matched_at: must_index(matched, "the sample equal row has no matched competitor") ?? return Err(err)
     language: entries(field(rows[jet_at], "competitors"))[matched_at].key.copy()
-    fabricated := Dyn.object()
+    ^fabricated: Dyn.object()
     fabricated["status"] = jtext("has")
     fabricated["operation"] = jtext("jet_ledger_operation_that_does_not_exist")
     results.push(
@@ -5399,10 +5399,10 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
             validate_rows(edited(ledger, [String]{"rows", "{jet_at}", "competitors", language}, "set", fabricated), surfaces),
         ) ?? return Err(err),
     )
-    lacking := Dyn.object()
+    ^lacking: Dyn.object()
     lacking["status"] = jtext("lacks")
     lacking["operation"] = Dyn.Null
-    emptied := Dyn.object()
+    ^emptied: Dyn.object()
     loop entry in entries(field(rows[jet_at], "competitors")) -> emptied[entry.key] = lacking.copy()
     results.push(
         rejects(
@@ -5427,7 +5427,7 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     )
 
     rust_at: must_index(surface_index(surfaces, "Rust"), "no Rust surface is recorded") ?? return Err(err)
-    skipped := surfaces.copy()
+    ^skipped: surfaces.copy()
     skipped[rust_at].surface = edited(skipped[rust_at].surface, [String]{"containers", text_items(field(ledger, "canonicalContainers"))[0]}, "remove", Dyn.Null)
     results.push(
         rejects(
@@ -5436,13 +5436,13 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
             validate_surfaces(ledger, skipped),
         ) ?? return Err(err),
     )
-    absent := -1
+    ^absent: -1
     loop (at, entry) in entries(field(surfaces[rust_at].surface, "containers")) {
         if absent < 0 && !truthy(field(entry.value, "present")) -> absent = at
     }
     absent_at: must_index(absent, "Rust records no absent container") ?? return Err(err)
     absent_name: entries(field(surfaces[rust_at].surface, "containers"))[absent_at].key.copy()
-    unreasoned := surfaces.copy()
+    ^unreasoned: surfaces.copy()
     unreasoned[rust_at].surface = edited(unreasoned[rust_at].surface, [String]{"containers", absent_name, "reason"}, "remove", Dyn.Null)
     results.push(
         rejects(
@@ -5451,7 +5451,7 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
             validate_surfaces(ledger, unreasoned),
         ) ?? return Err(err),
     )
-    dropped := [SurfaceEntry]{}
+    ^dropped: [SurfaceEntry]{}
     loop entry in surfaces {
         if entry.language != "Julia" -> dropped.push(entry.copy())
     }
@@ -5463,7 +5463,7 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
         ) ?? return Err(err),
     )
     go_at: must_index(surface_index(surfaces, "Go"), "no Go surface is recorded") ?? return Err(err)
-    unscoped := surfaces.copy()
+    ^unscoped: surfaces.copy()
     unscoped[go_at].surface = edited(unscoped[go_at].surface, [String]{"scopeRule"}, "remove", Dyn.Null)
     results.push(
         rejects(
@@ -5478,11 +5478,11 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     // fail on its own setup instead of proving the gate.
     // The card is one no real cluster names, so reopening it on a copy of the
     // board can only trip the synthesised cluster.
-    owned := [Int]{}
+    ^owned: [Int]{}
     loop cluster in items(field(ledger, "lossClusters")) {
         owned.push(int_of(field(cluster, "ownerCard")) ?? -1)
     }
-    done := -1
+    ^done: -1
     loop card in board.cards {
         if done < 0 && card.phase == "done" && !owned.contains(card.num) -> done = card.num
     }
@@ -5495,7 +5495,7 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
         ) ?? return Err(err),
     )
     must_index(items(field(ledger, "lossClusters")).len() - 1, "the ledger has no loss cluster") ?? return Err(err)
-    missing_card := edited(ledger, [String]{"lossClusters", "0", "ownerState"}, "set", jtext("live"))
+    ^missing_card: edited(ledger, [String]{"lossClusters", "0", "ownerState"}, "set", jtext("live"))
     missing_card = edited(missing_card, [String]{"lossClusters", "0", "ownerCard"}, "set", Dyn.Int(999999))
     results.push(
         rejects(
@@ -5504,7 +5504,7 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
             validate_owners(missing_card, board),
         ) ?? return Err(err),
     )
-    reopened := board.copy()
+    ^reopened: board.copy()
     loop at in 0..<reopened.cards.len() {
         if reopened.cards[at].num == done_card -> reopened.cards[at].phase = "building"
     }
@@ -5528,9 +5528,9 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
 
     // The board holds no unratified decision today, so the fixture injects one.
     // Reading the live board would let the fixture pass by finding nothing.
-    open_board := board.copy()
+    ^open_board: board.copy()
     open_board.decisions.push(BoardDecision{id: "D-LEDGER-FIXTURE-1", status: "open"})
-    unratified := edited(ledger, [String]{"rows", "{loss_at}", "verdict"}, "set", jtext("declined"))
+    ^unratified: edited(ledger, [String]{"rows", "{loss_at}", "verdict"}, "set", jtext("declined"))
     unratified = edited(unratified, [String]{"rows", "{loss_at}", "declinedBy"}, "set", jtext("D-LEDGER-FIXTURE-1"))
     results.push(
         rejects(
@@ -5539,7 +5539,7 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
             validate_owners(unratified, open_board),
         ) ?? return Err(err),
     )
-    unknown := edited(ledger, [String]{"rows", "{loss_at}", "verdict"}, "set", jtext("declined"))
+    ^unknown: edited(ledger, [String]{"rows", "{loss_at}", "verdict"}, "set", jtext("declined"))
     unknown = edited(unknown, [String]{"rows", "{loss_at}", "declinedBy"}, "set", jtext("D-LEDGER-NO-SUCH-DECISION"))
     results.push(
         rejects(
@@ -5558,7 +5558,7 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
 
     uncompared: text_items(field(ledger, "uncomparedDomains"))
     must_index(uncompared.len() - 1, "the ledger lists no uncompared domain") ?? return Err(err)
-    rest := [String]{}
+    ^rest: [String]{}
     loop at in 1..<uncompared.len() -> rest.push(uncompared[at].copy())
     results.push(
         rejects(
@@ -5579,8 +5579,8 @@ hostile_fixtures: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String
     )
     jet_id: text_field(rows[jet_at], "id")
     loss_id: text_field(rows[loss_at], "id")
-    without_jet := [Dyn]{}
-    without_loss := [Dyn]{}
+    ^without_jet: [Dyn]{}
+    ^without_loss: [Dyn]{}
     loop row in rows {
         id: text_field(row, "id")
         if id != jet_id -> without_jet.push(row.copy())
@@ -5619,7 +5619,7 @@ ledger_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String Le
 repo_root: fn() -[Env, FS]> String Never! {
     script: sys.executable()
     if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
-    dir := files.cwd() ?? return ""
+    ^dir: files.cwd() ?? return ""
     loop {
         if files.exists("{dir}{TOOL}") -> return dir
         if dir == "/" || dir == "" -> return ""

@@ -1,8 +1,8 @@
 // Resolve environment tokens against the effective environment before this line.
 kit_steps_env_token_end: fn(argument: String, start: Int) -> Int? {
     bytes: argument.bytes()
-    i := start + 5
-    depth := 1
+    ^i: start + 5
+    ^depth: 1
     loop i < bytes.len() {
         byte: Int{bytes[i]}
         if byte == 123 -> depth += 1
@@ -27,7 +27,7 @@ kit_steps_env_name: fn(name: String) -> Bool {
 }
 
 kit_steps_argv_env_valid: fn(argument: String) -> Bool {
-    rest := argument
+    ^rest: argument
     loop {
         start: kit_steps_byte_index(rest, "{{env:") ?? return true
         end: kit_steps_env_token_end(rest, start) ?? return false
@@ -45,7 +45,7 @@ kit_steps_argv_env_valid: fn(argument: String) -> Bool {
 }
 
 kit_steps_env_value: fn(name: String, env: KitEnv, scratch: String, overlay: [KitEnvVar]) -> String? {
-    value := kit_exec_base_value(name, env, scratch)
+    ^value: kit_exec_base_value(name, env, scratch)
     loop variable in overlay {
         if variable.name == name -> value = variable.value
     }
@@ -64,8 +64,8 @@ kit_steps_env_fallback: fn(body: String, env: KitEnv, scratch: String, overlay: 
 }
 
 kit_steps_argv_env: fn(argument: String, env: KitEnv, scratch: String, overlay: [KitEnvVar]) -> String {
-    rest := argument
-    result := ""
+    ^rest: argument
+    ^result: ""
     loop {
         start: kit_steps_byte_index(rest, "{{env:") ?? break
         end: kit_steps_env_token_end(rest, start) ?? panic("validated environment token")
@@ -78,10 +78,10 @@ kit_steps_argv_env: fn(argument: String, env: KitEnv, scratch: String, overlay: 
 }
 
 kit_steps_whitespace_words: fn(text: String) -> [String] {
-    words := [String]{}
+    ^words: [String]{}
     bytes: text.bytes()
-    start := 0
-    index := 0
+    ^start: 0
+    ^index: 0
     loop index < bytes.len() {
         scalar: kit_steps_scalar(bytes, index)
         if kit_steps_unicode_space(scalar.value) {

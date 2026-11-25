@@ -39,9 +39,11 @@ lsp_declared_at: fn(view: LSPView, offset: Int) -> SemDeclared? Never! {
     if at < 0 -> return None
     name: token_text(view.lexed.tables, tokens[at])
     dotted: at >= 1 && tokens[at - 1].kind == TOKEN_DOT
-    qualified := String?{None}
+    ^qualified: String?{None}
     if dotted && at >= 2 && tokens[at - 2].kind == TOKEN_IDENT {
-        if lsp_import_binding(view, token_text(view.lexed.tables, tokens[at - 2])) == .Val(module_name) -> qualified = Val("{module_name}.{name}")
+        if lsp_import_binding(view, token_text(view.lexed.tables, tokens[at - 2])) == .Val(module_name) {
+            qualified = Val("{module_name}.{name}")
+        }
     }
     if !dotted -> qualified = lsp_import_binding(view, name)
     if qualified == .Val(wanted) {
@@ -92,7 +94,9 @@ lsp_declared_markdown: fn(declared: SemDeclared) -> String Never! {
 lsp_method_markdown: fn(view: LSPView, offset: Int) -> String? Never! {
     tokens: view.lexed.tokens
     at: lsp_ident_position(tokens, offset)
-    if at < 2 || tokens[at - 1].kind != TOKEN_DOT || at + 1 >= tokens.len() || tokens[at + 1].kind != TOKEN_LPAREN -> return None
+    if at < 2 || tokens[at - 1].kind != TOKEN_DOT || at + 1 >= tokens.len() || tokens[at + 1].kind != TOKEN_LPAREN {
+        return None
+    }
     index: view.checked.index ?? return None
     receiver: lsp_target_at(view, tokens[at - 2].span.start) ?? return None
     shown: type_name(type_identity_unqualified_nominals(lsp_checked_type(lsp_definition_at(index, receiver) ?? return None) ?? return None))
@@ -103,16 +107,18 @@ lsp_method_markdown: fn(view: LSPView, offset: Int) -> String? Never! {
     }
     owner: lsp_type_owner(shown)
     loop symbol in view.checked.symbols {
-        if symbol.name == name && (symbol.owner ?? "") == owner -> return Val(lsp_hover_markdown(symbol.signature, symbol.summary))
+        if symbol.name == name && (symbol.owner ?? "") == owner {
+            return Val(lsp_hover_markdown(symbol.signature, symbol.summary))
+        }
     }
     None
 }
 
 lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
-    markdown := String?{None}
+    ^markdown: String?{None}
     if at.view.checked.index == .Val(index) {
-        hovered := SemDef?{None}
+        ^hovered: SemDef?{None}
         if lsp_target_at(at.view, at.offset) == .Val(target) {
             if lsp_definition_at(index, target) == .Val(def) {
                 markdown = Val(lsp_hover_markdown(def.qualified_name, ""))
@@ -158,7 +164,7 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{choices}") else -> Val(choices)
     }
     text: markdown ?? return lsp_response(id, "null")
-    range := ""
+    ^range: ""
     if lsp_ident_token_at(at.view.lexed, at.offset) == .Val(name) {
         range = ",\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, name.span))}"
     }
@@ -170,12 +176,14 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
 // and the frame schedule of each `on_frame` callback the hover sits in, as
 // the relation holds them. One `Known by …` line each; None when none.
 lsp_derivation_markdown: fn(at: LSPAt, index: SemIndex, hovered: SemDef?) -> String? Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     if hovered == .Val(def) {
         loop fact in index.definition_facts {
             if fact.human_identity != def.identity || fact.module_path != def.module_path -> next
             loop record in derivation_store_subject(index.derivations, fact.stable_id) {
-                if derivation_record_notable(record) -> lines.push("Known by {derivation_record_line(record)}: {record.claim}")
+                if derivation_record_notable(record) {
+                    lines.push("Known by {derivation_record_line(record)}: {record.claim}")
+                }
             }
         }
     }
@@ -214,14 +222,18 @@ lsp_layout_markdown: fn(checked: LSPChecked, def: SemDef) -> String? Never! {
 // marks unavailable is named with its reason. None for a handwritten
 // declaration whose facts are all known.
 lsp_origin_markdown: fn(checked: LSPChecked, def: SemDef) -> String? Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     if def.kind == .Function(callable) {
         if callable.foreign_boundary {
             lines.push("Origin: foreign. The check reads this declaration, not the foreign body, so what the body does beyond its declared signature is an unknown analysis boundary.")
         }
-        unknown := [String]{}
-        if callable.failure_unavailable == .Val(missing) -> unknown.push("failure contract ({missing.reason})")
-        if callable.generic_unavailable == .Val(missing) -> unknown.push("generic parameters ({missing.reason})")
+        ^unknown: [String]{}
+        if callable.failure_unavailable == .Val(missing) {
+            unknown.push("failure contract ({missing.reason})")
+        }
+        if callable.generic_unavailable == .Val(missing) {
+            unknown.push("generic parameters ({missing.reason})")
+        }
         if unknown.len() > 0 -> lines.push("Unknown to the check: {unknown.join("; ")}.")
     }
     if lsp_module_index(checked, def.module_path) == .Val(module_index) {
@@ -246,7 +258,7 @@ lsp_generated_module: fn(path: String) -> Bool Never! {
 lsp_goal_markdown: fn(at: LSPAt) -> String? Never! {
     module_path: at.view.module_path ?? return None
     module_index: lsp_module_index(at.view.checked, module_path) ?? return None
-    found := String?{None}
+    ^found: String?{None}
     loop function in at.view.checked.modules[module_index].functions {
         loop goal in function.typed_goals {
             if !lsp_span_holds(goal.span, at.offset) -> next
@@ -261,7 +273,7 @@ lsp_goal_markdown: fn(at: LSPAt) -> String? Never! {
 // document's checked module, one `- kind: choice` line each.
 lsp_choices_markdown: fn(at: LSPAt) -> String? Never! {
     module_path: at.view.module_path ?? return None
-    lines := [String]{}
+    ^lines: [String]{}
     loop choice in at.view.checked.choices {
         if choice.module_path == module_path && choice.line == at.line + 1 {
             lines.push("- {choice.kind}: {choice.choice}")
@@ -276,7 +288,7 @@ lsp_choices_markdown: fn(at: LSPAt) -> String? Never! {
 // first), the `Meta` effect it was made under, the dependency consent it
 // used, and its stable identity.
 lsp_producer_markdown: fn(producer: LSPProducer) -> String Never! {
-    text := "Generated module `{producer.name}`, made by {producer.made_by}"
+    ^text: "Generated module `{producer.name}`, made by {producer.made_by}"
     if producer.handoffs.len() > 0 -> text = "{text}, after {producer.handoffs.join(", then ")}"
     text = "{text}."
     if producer.authority == .Val(authority) -> text = "{text} Made under `{authority}`."
@@ -313,7 +325,9 @@ lsp_keyword_symbol_at: fn(view: LSPView, offset: Int) -> Int? Never! {
 lsp_definition_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
     if lsp_target_at(at.view, at.offset) == .Val(target) {
-        if lsp_location(at.view.checked, target.module_path, target.span) == .Val(location) -> return lsp_response(id, lsp_location_json(location))
+        if lsp_location(at.view.checked, target.module_path, target.span) == .Val(location) {
+            return lsp_response(id, lsp_location_json(location))
+        }
     }
     declared: lsp_declared_at(at.view, at.offset) ?? return lsp_response(id, "null")
     loop file in at.view.checked.declared_files {
@@ -341,7 +355,7 @@ lsp_document_highlight_response: fn(server: LSPServer, params: Dyn?, id: Dyn) ->
     index: at.view.checked.index ?? return lsp_response(id, "null")
     module_path: at.view.module_path ?? return lsp_response(id, "null")
     target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "[]")
-    rows := [String]{}
+    ^rows: [String]{}
     loop occurrence in lsp_occurrences(index, target, declaration: true) {
         if occurrence.module_path != module_path -> next
         kind: if occurrence.target == None -> 3 else -> 2
@@ -368,7 +382,7 @@ lsp_linked_editing_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) 
     }
     if def.module_path != module_path -> return lsp_response(id, "null")
     text: at.view.doc.text
-    rows := [String]{}
+    ^rows: [String]{}
     loop occurrence in lsp_occurrences(index, target, declaration: true) {
         if occurrence.module_path != module_path -> return lsp_response(id, "null")
         span: lsp_name_span(text, occurrence.span, def.name)
@@ -472,7 +486,7 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
 // written (a casing error never changes what a name means).
 lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: String, tolerated: String{""}) -> String LSPRPCError! {
     occurrences: lsp_open_occurrences(server, view, LSPTarget{module_path: def.module_path, span: def.def_span}, declaration: true, tolerated: tolerated)
-    errors := occurrences.errors
+    ^errors: occurrences.errors
     loop diagnostic in view.checked.diagnostics {
         if diagnostic.code != tolerated && !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) {
             errors += 1
@@ -482,9 +496,9 @@ lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: Str
         counted: if errors == 1 -> "1 error" else -> "{errors} errors"
         return Err(LSPRPCError{code: -32803, message: "the program has {counted}, so the check may have missed a use of `{def.name}`; fix them, then rename"})
     }
-    by_uri := [String:[String]]{}
-    versions := [String:String]{}
-    order := [String]{}
+    ^by_uri: [String:[String]]{}
+    ^versions: [String:String]{}
+    ^order: [String]{}
     loop placed in occurrences.placed {
         source: placed.source
         span: lsp_name_span(source, placed.span, def.name)
@@ -496,7 +510,7 @@ lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: Str
         if fresh {
             // An open document's edits apply only to the version the check
             // read; a file no editor holds is the one on disk.
-            version := "null"
+            ^version: "null"
             loop (_, doc) in server.diagnostic_state.docs {
                 if !lsp_source_paths_equal(doc.path, placed.path) -> next
                 if doc.text != source {
@@ -511,7 +525,7 @@ lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: Str
         if fresh -> order.push(uri)
     }
     order.sort()
-    files := [String]{}
+    ^files: [String]{}
     loop uri in order {
         edits: by_uri[uri].join(",")
         files.push(if server.document_changes -> "{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{versions[uri]}}},\"edits\":[{edits}]}}" else -> "{foundation_json_quote(uri)}:[{edits}]")
@@ -523,7 +537,7 @@ lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: Str
 // the checked definition it renames, before and after. A local has no
 // definition fact, so its operation names no target.
 lsp_rename_semantic_op: fn(index: SemIndex, def: SemDef, to: String) -> String Never! {
-    targets := [String]{}
+    ^targets: [String]{}
     loop fact in index.definition_facts {
         if fact.human_identity != def.identity -> next
         targets.push("{{\"stable_id\":{foundation_json_quote(fact.stable_id)},\"before\":{foundation_json_quote(fact.human_identity)},\"after\":{foundation_json_quote(semindex_renamed_identity(fact, to))},\"kind\":{foundation_json_quote(fact.kind)},\"module_path\":{foundation_json_quote(fact.module_path)}}}")
@@ -543,12 +557,12 @@ LSPActiveCall: struct {
 
 lsp_active_call: fn(lexed: Lexed, offset: Int) -> LSPActiveCall? Never! {
     tokens: lexed.tokens
-    end := 0
+    ^end: 0
     loop end < tokens.len() && tokens[end].span.end <= offset -> end += 1
-    depth := 0
-    argument := 0
-    argument_start := end
-    cursor := end
+    ^depth: 0
+    ^argument: 0
+    ^argument_start: end
+    ^cursor: end
     loop cursor > 0 {
         cursor -= 1
         kind: tokens[cursor].kind
@@ -565,7 +579,7 @@ lsp_active_call: fn(lexed: Lexed, offset: Int) -> LSPActiveCall? Never! {
                 return None
             }
             if argument == 0 -> argument_start = cursor + 1
-            label := String?{None}
+            ^label: String?{None}
             if argument_start + 1 < end && tokens[argument_start].kind == TOKEN_IDENT && tokens[argument_start + 1].kind == TOKEN_COLON {
                 label = Val(token_text(lexed.tables, tokens[argument_start]))
             }
@@ -583,9 +597,9 @@ lsp_signature_help_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
     call: lsp_active_call(at.view.lexed, at.offset) ?? return lsp_response(id, "null")
     index: at.view.checked.index ?? return lsp_response(id, "null")
-    def := SemDef?{None}
-    label := ""
-    documentation := ""
+    ^def: SemDef?{None}
+    ^label: ""
+    ^documentation: ""
     if lsp_target_at(at.view, call.callee.span.start) == .Val(target) {
         found: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
         label = found.qualified_name
@@ -609,8 +623,8 @@ lsp_signature_help_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
             return lsp_response(id, "null")
         }
     }
-    rows := [String]{}
-    active := call.argument
+    ^rows: [String]{}
+    ^active: call.argument
     loop (position, param) in callable.params {
         rest: if param.variadic -> "..." else -> ""
         param_label: "{param.name}: {rest}{type_name(param.ty)}"

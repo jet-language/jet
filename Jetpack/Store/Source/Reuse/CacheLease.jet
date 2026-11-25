@@ -85,15 +85,15 @@ LeaseText: struct {
     plain: fn(text: String) -> LeaseText Never! { LeaseText{text: text} }
 
     join: fn(parts: [LeaseText], separator: String) -> LeaseText Never! {
-        texts := [String]{}
+        ^texts: [String]{}
         loop part in parts -> texts.push(part.text)
         LeaseText{text: texts.join(separator)}
     }
 
     // `join` keeping only the first of equal parts.
     join_unique: fn(parts: [LeaseText], separator: String) -> LeaseText Never! {
-        seen := [String:Bool]{}
-        texts := [String]{}
+        ^seen: [String:Bool]{}
+        ^texts: [String]{}
         loop part in parts {
             if seen.has_key(part.text) -> next
             seen[part.text] = true
@@ -116,7 +116,7 @@ LeaseText: struct {
     // The child-visible text, or `Unbound` when it names a leased directory
     // that `binding` did not pass.
     render: fn(self, binding: LeaseBinding) -> String LeaseHandoffError! {
-        out := self.text
+        ^out: self.text
         loop fd in binding.fds {
             out = out.replace(store_lease_fd_token(fd), store_lease_child_fd_path(fd))
         }
@@ -128,7 +128,7 @@ LeaseText: struct {
     // The text for a parent shell, each token replaced by the durable root
     // `roots` names for its descriptor; None when one has no durable root.
     render_durable: fn(self, roots: [Int:String]) -> String? Never! {
-        out := self.text
+        ^out: self.text
         loop fd in roots.keys().to_list() -> out = out.replace(store_lease_fd_token(fd), roots[fd])
         if out.contains(store_lease_token_mark()) -> return None
         Val(out)
@@ -210,7 +210,7 @@ LeasedDirectory: struct {
     // Each entry as `name\ttarget`, read through the held handle. The path
     // can die first: a wrapper's is the mount keeper's /proc root.
     link_entries: fn(self) -> [String] IOError! {
-        out := [String]{}
+        ^out: [String]{}
         loop entry in self.list("") -> out.push("{entry.name}\t{self.read_link(entry.name)}")
         Ok(out)
     }
@@ -333,7 +333,7 @@ CacheLease: struct {
     // lock, so `release` and recovery leave the container intact until the
     // whole process tree is gone.
     keep_open_for: fn(^self, spec: ProcessSpec, binding: ^LeaseBinding) -> ProcessSpec LeaseHandoffError! {
-        out := spec
+        ^out: spec
         if sys.family() != "windows" {
             if self.snapshot_dir == {
                 .Val(held) -> { out = held.pass_into(out, binding) }
@@ -410,7 +410,7 @@ CacheLease: struct {
     // and immutable: the only root a parent shell may name once this
     // process, and its leases, are gone.
     parent_shell_root: fn(self) -> String? Never! {
-        verification := self.verification
+        ^verification: self.verification
         if self.consumption_status_value != ConsumptionStatus.Consumable || self.expected_digest == "" || self.expected_digest.contains("/") || self.expected_digest.contains("\\") {
             return None
         }
@@ -431,7 +431,7 @@ CacheLease: struct {
     // Each reserved descriptor mapped to the durable root a parent shell
     // names instead; None when the primary output has no such root.
     durable_roots: fn(self) -> [Int:String]? Never! {
-        roots := [Int:String]{}
+        ^roots: [Int:String]{}
         if self.snapshot_dir == {
             .Val(held) -> { roots[held.child_fd] = self.parent_shell_root() ?? return None }
             .None -> {}
@@ -452,7 +452,7 @@ CacheLease: struct {
 
     profile_install_receipt: fn(self) -> ProfileInstallReceipt IOError! {
         self.validate()
-        members := [String]{}
+        ^members: [String]{}
         loop executable in self.executables -> members.push(executable.relative)
         members.sort()
         if members.len() == 0 {
@@ -511,7 +511,7 @@ CacheLease: struct {
             .None -> {}
         }
         resolved_paths: store_reuse_path_variants(resolved)
-        roots := [String]{self.out, self.lease_root}
+        ^roots: [String]{self.out, self.lease_root}
         optional_roots: [String?]{self.bin_output_root, self.projected_bin_root}
         loop root in optional_roots {
             if root == {
@@ -547,7 +547,7 @@ CacheLease: struct {
                     return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased executable member changed")}))
                 }
                 input.seek(0)
-                hasher := StreamingSHA256.new()
+                ^hasher: StreamingSHA256.new()
                 loop {
                     chunk: input.read_bytes(65536)
                     if chunk.len() == 0 -> break
@@ -617,8 +617,8 @@ CacheLease: struct {
 
     // The text of the regular file `relative` in the primary output.
     read_output: fn(self, relative: String) -> String IOError! {
-        input := self.open_output(relative)
-        bytes := [U8]{}
+        ^input: self.open_output(relative)
+        ^bytes: [U8]{}
         loop {
             chunk: input.read_bytes(65536)
             if chunk.len() == 0 -> break
@@ -701,7 +701,7 @@ CacheLease: struct {
     }
 
     validate_binding: fn(self, binding: NixProjectionBinding) IOError! {
-        verification := self.verification
+        ^verification: self.verification
         info: files.stat(binding.source)
         if !info.is_symlink && !info.is_dir && !info.is_file {
             return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("Nix projection source `{binding.source}` is not a regular node")}))
@@ -774,7 +774,7 @@ CacheLease: struct {
     // descendant may still hold the inherited lease lock, in which case
     // recovery owns cleanup and the whole container stays intact.
     release: fn(^^self) Never! {
-        lease := self.move()
+        ^lease: self.move()
         lease.live_lock = None
         // The owner lock authenticates publication but cannot prove a
         // descendant exists; only the inherited container lock is the
@@ -858,9 +858,9 @@ store_lease_wrapper_target: fn(root_fd: Int, bin: String, name: String) -> Strin
 // `actual` is read through the held handle: the keeper that exposed its
 // path has exited.
 store_lease_validate_wrappers: fn(actual: [String], root_fd: Int, bin: String, executables: [SnapshotFile]) IOError! {
-    found := actual
+    ^found: actual
     found.sort()
-    expected := [String]{}
+    ^expected: [String]{}
     loop executable in executables {
         expected.push("{executable.relative}\t{store_lease_wrapper_target(root_fd, bin, executable.relative)}")
     }
@@ -885,7 +885,7 @@ store_reuse_file_name: fn(path: String) -> String? Never! {
 // caller-created symlink aliases into a protected lease.
 store_reuse_path_variants: fn(path: String) -> [String] Never! {
     lexical: store_reuse_lexical_normalize(path)
-    variants := [String]{lexical}
+    ^variants: [String]{lexical}
     if files.canonicalize(path) == {
         .Ok(canonical) -> {
             // A detached `/proc/self/fd/<n>` directory can resolve to `/`
@@ -904,8 +904,8 @@ store_reuse_path_variants: fn(path: String) -> [String] Never! {
 // relative path.
 store_reuse_lexical_normalize: fn(path: String) -> String Never! {
     absolute: path.starts_with("/")
-    parts := [String]{}
-    normal := 0
+    ^parts: [String]{}
+    ^normal: 0
     loop part in path.split("/") {
         if part == {
             "" | "." -> {}

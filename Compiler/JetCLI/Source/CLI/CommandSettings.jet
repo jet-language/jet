@@ -86,7 +86,7 @@ jet_cli_setting_command_path: fn(word: String) -> String Never! {
 // action dispatched under its own word (`publish`, `digest`). An action that
 // keeps its group's word (`inspect expand`) has its group's settings.
 jet_cli_setting_commands: fn() -> [JetCLISettingCommand] Never! {
-    commands := [JetCLISettingCommand]{}
+    ^commands: [JetCLISettingCommand]{}
     loop command in JET_CLI_COMMANDS {
         jet_cli_setting_command_add(commands, command.name)
         loop action in command.actions {
@@ -113,7 +113,7 @@ jet_cli_setting_command_add: fn(commands: ^[JetCLISettingCommand], word: String)
 // built, short forms aside.
 jet_cli_setting_command_flags: fn(command: JetCLISettingCommand) -> [JetCLIFlagSpec] Never! {
     form: command.path.replace(".", " ")
-    flags := [JetCLIFlagSpec]{}
+    ^flags: [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FLAGS {
         if spec.help.starts_with("Short form of ") -> next
         if !jet_cli_flag_takes(spec, command.word) -> next
@@ -125,7 +125,7 @@ jet_cli_setting_command_flags: fn(command: JetCLISettingCommand) -> [JetCLIFlagS
 
 // Every setting key, persistable or not, of every command.
 jet_cli_setting_keys: fn(commands: [JetCLISettingCommand]) -> [String] Never! {
-    keys := [String]{}
+    ^keys: [String]{}
     loop command in commands {
         loop spec in jet_cli_setting_command_flags(command) {
             keys.push("{command.path}.{jet_cli_setting_flag_name(spec.long)}")
@@ -162,7 +162,7 @@ jet_cli_setting_held: fn(value: Dyn) -> String Never! {
 
 // The items of a list setting, or None when one isn't a string.
 jet_cli_setting_strings: fn(items: [Dyn]) -> [String]? Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop item in items {
         if item == .Text(text) && text != "" {
             out.push(text.copy())  // copy: the setting keeps its item.
@@ -204,7 +204,7 @@ jet_cli_setting_on_words: fn(spec: JetCLIFlagSpec, on: Bool) -> [String]? Never!
 // The words a list writes for a Repeated `spec`: one flag per item.
 jet_cli_setting_items_words: fn(spec: JetCLIFlagSpec, items: [String]) -> [String]? Never! {
     if spec.value != .Repeated -> return None
-    words := [String]{}
+    ^words: [String]{}
     loop item in items {
         loop word in jet_cli_setting_valued(spec.long, item) -> words.push(word)
     }
@@ -234,7 +234,7 @@ jet_cli_setting_check: fn(commands: [JetCLISettingCommand], key: String, place: 
             return JetCLISettingCheck.Flag{path: command.path.copy(), spec: spec, words: words}  // copy: the command list keeps its path.
         }
     }
-    fix := "Name a setting `<command>.<flag>` after a flag that command takes (`jet help <command>` lists them), or remove `{key}`."
+    ^fix: "Name a setting `<command>.<flag>` after a flag that command takes (`jet help <command>` lists them), or remove `{key}`."
     if jet_cli_closest(key, jet_cli_setting_near_keys(commands, key)) == .Val(closest) {
         fix = "Write `{closest}`, or remove `{key}`."
     }
@@ -245,7 +245,7 @@ jet_cli_setting_check: fn(commands: [JetCLISettingCommand], key: String, place: 
 // longest known prefix names (`fmt.chek` is matched against `fmt`'s), else
 // every command's.
 jet_cli_setting_near_keys: fn(commands: [JetCLISettingCommand], key: String) -> [String] Never! {
-    best := -1
+    ^best: -1
     loop (index, command) in commands {
         if !key.starts_with("{command.path}.") -> next
         if best < 0 || command.path.len() > commands[best].path.len() -> best = index
@@ -285,8 +285,8 @@ jet_cli_setting_typed: fn(spec: JetCLIFlagSpec, written: [String]) -> Bool Never
 jet_cli_command_settings_words: fn(word: String, written: [String], layers: [JetCLICommandSettingLayer]) -> JetCLICommandSettingWords Never! {
     commands: jet_cli_setting_commands()
     path: jet_cli_setting_command_path(word)
-    reports := [Diagnostic]{}
-    chosen := [JetCLISettingChosen]{}
+    ^reports: [Diagnostic]{}
+    ^chosen: [JetCLISettingChosen]{}
     loop layer in layers {
         loop setting in layer.settings {
             place: jet_cli_setting_place(layer.source, setting.line)
@@ -300,7 +300,7 @@ jet_cli_command_settings_words: fn(word: String, written: [String], layers: [Jet
         }
     }
     if reports.len() > 0 -> return JetCLICommandSettingWords.Refused{reports: reports}
-    words := [String]{}
+    ^words: [String]{}
     loop flag in chosen {
         loop item in flag.words -> words.push(item.copy())  // copy: the chosen list keeps its words.
     }
@@ -310,7 +310,7 @@ jet_cli_command_settings_words: fn(word: String, written: [String], layers: [Jet
 // A later layer's value of a flag replaces an earlier one's; a list is never
 // merged.
 jet_cli_setting_choose: fn(chosen: ^[JetCLISettingChosen], long: String, words: [String]) Never! {
-    found := -1
+    ^found: -1
     loop (index, flag) in chosen {
         if flag.long == long -> found = index
     }

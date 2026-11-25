@@ -18,8 +18,8 @@ JetCLIProjectClaim: struct {
 // `target_arg` up to its default: the one explicit target, or None when the
 // caller must select the stock project entry.
 jet_cli_project_status_target: fn(args: [String]) -> String? JetCLIUsageError! {
-    target := String?{None}
-    skip := false
+    ^target: String?{None}
+    ^skip: false
     loop arg in args {
         if skip {
             skip = false
@@ -60,9 +60,9 @@ jet_cli_project_status_sections: fn(receipt: JetDriverRunReceipt) -> JetCLIStatu
 }
 
 jet_cli_project_status_summarize: fn(root: String, receipts: [JetDriverRunReceipt], name: String, target: String) -[FS, Time.Wait]> JetCLIProjectClaim Never! {
-    success := JetDriverRunReceipt?{None}
-    failure := JetDriverRunReceipt?{None}
-    stale := JetDriverRunReceipt?{None}
+    ^success: JetDriverRunReceipt?{None}
+    ^failure: JetDriverRunReceipt?{None}
+    ^stale: JetDriverRunReceipt?{None}
     loop receipt in receipts {
         if jet_cli_receipt_lookup(root, receipt.claim) == {
             .Val(_) -> {
@@ -72,9 +72,9 @@ jet_cli_project_status_summarize: fn(root: String, receipts: [JetDriverRunReceip
             .Err(_) -> failure = Val(receipt)
         }
     }
-    selected := JetDriverRunReceipt?{None}
-    state := "unproven"
-    reason := "no receipt proves this claim"
+    ^selected: JetDriverRunReceipt?{None}
+    ^state: "unproven"
+    ^reason: "no receipt proves this claim"
     if {
         failure != None -> {
             selected = failure
@@ -91,8 +91,8 @@ jet_cli_project_status_summarize: fn(root: String, receipts: [JetDriverRunReceip
             reason = "receipt input closure changed"
         }
     }
-    receipt_id := String?{None}
-    sections := jet_cli_status_object([JetCLIStatusField]{})
+    ^receipt_id: String?{None}
+    ^sections: jet_cli_status_object([JetCLIStatusField]{})
     if selected == .Val(receipt) {
         receipt_id = Val(receipt.claim.key.slice(0, if receipt.claim.key.len() < 12 -> receipt.claim.key.len() else -> 12))
         sections = jet_cli_project_status_sections(receipt)
@@ -101,14 +101,14 @@ jet_cli_project_status_summarize: fn(root: String, receipts: [JetDriverRunReceip
 }
 
 jet_cli_project_status_pad: fn(text: String, width: Int) -> String Never! {
-    padded := text
+    ^padded: text
     loop _ in text.len()..<width -> padded = "{padded} "
     padded
 }
 
 jet_cli_project_status_render: fn(target: String, rows: [JetCLIProjectClaim], error: String, json: Bool) -> JetCLIPlan Never! {
     if json {
-        claims := [JetCLIStatusValue]{}
+        ^claims: [JetCLIStatusValue]{}
         loop row in rows {
             claims.push(
                 jet_cli_status_object(
@@ -126,7 +126,7 @@ jet_cli_project_status_render: fn(target: String, rows: [JetCLIProjectClaim], er
         fields: [JetCLIStatusField]{jet_cli_status_field("claims", jet_cli_status_array(claims)), jet_cli_status_field("error", if error == "" -> JetCLIStatusValue.Null else -> jet_cli_status_text(error)), jet_cli_status_field("target", jet_cli_status_text(target))}
         return jet_cli_done("{jet_cli_status_render("status", true, fields)}\n", "", JET_DRIVER_EXIT_OK)
     }
-    out := "Target  {target}\n"
+    ^out: "Target  {target}\n"
     loop row in rows {
         out = "{out}{jet_cli_project_status_pad(row.name, 8)} {jet_cli_project_status_pad(row.state, 9)} receipt {row.receipt ?? "none"}"
         if row.state != "proven" -> out = "{out} · act: {row.action} · {row.reason}"
@@ -145,8 +145,8 @@ jet_cli_project_status_at: fn(root: String, cwd: String, target: String, json: B
         .Ok(info) -> info.is_dir
         .Err(_) -> false
     }
-    by_verb := [String:[JetDriverRunReceipt]]{}
-    verbs := [String]{}
+    ^by_verb: [String:[JetDriverRunReceipt]]{}
+    ^verbs: [String]{}
     loop receipt in receipts {
         if !jet_cli_project_status_matches(receipt, canonical, directory) -> next
         name: receipt.claim.verb
@@ -157,7 +157,7 @@ jet_cli_project_status_at: fn(root: String, cwd: String, target: String, json: B
         by_verb[name].push(receipt)
     }
     verbs.sort()
-    rows := [JetCLIProjectClaim]{}
+    ^rows: [JetCLIProjectClaim]{}
     loop name in verbs {
         rows.push(jet_cli_project_status_summarize(root, by_verb.get(name) ?? [JetDriverRunReceipt]{}, name, target))
     }
@@ -168,15 +168,15 @@ jet_cli_project_status_at: fn(root: String, cwd: String, target: String, json: B
 // one target is the root's, so it lists the members in index order, each
 // with its directory and the entry a command there starts, or none.
 jet_cli_project_status_workspace: fn(root: String, index_path: String, color: Bool, json: Bool, notices: ^[String]) -[FS, Env]> JetCLIPlan Never! {
-    members := [JetCLIWorkspaceMember]{}
+    ^members: [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_members(root, index_path, "status", color) == {
         .Refused(plan) -> return plan
         .Members(found) -> members = found
     }
-    entries := [String]{}
+    ^entries: [String]{}
     loop member in members {
         member_root: jet_cli_entry_join(root, member.path)
-        entry := ""
+        ^entry: ""
         if jet_cli_find_project_entry_at(member_root, "status", color, notices, true) == {
             .Entry(found) -> {
                 if cli_files.is_file(found.path) {
@@ -189,7 +189,7 @@ jet_cli_project_status_workspace: fn(root: String, index_path: String, color: Bo
         entries.push(entry)
     }
     if json {
-        rows := [JetCLIStatusValue]{}
+        ^rows: [JetCLIStatusValue]{}
         loop (index, member) in members {
             rows.push(
                 jet_cli_status_object(
@@ -204,13 +204,13 @@ jet_cli_project_status_workspace: fn(root: String, index_path: String, color: Bo
         fields: [JetCLIStatusField]{jet_cli_status_field("members", jet_cli_status_array(rows)), jet_cli_status_field("workspace", jet_cli_status_text(jet_cli_project_status_relative(root, index_path)))}
         return jet_cli_done("{jet_cli_status_render("status", true, fields)}\n", "", JET_DRIVER_EXIT_OK)
     }
-    name_width := 0
-    path_width := 0
+    ^name_width: 0
+    ^path_width: 0
     loop member in members {
         if member.name.len() > name_width -> name_width = member.name.len()
         if member.path.len() > path_width -> path_width = member.path.len()
     }
-    out := "Workspace  {jet_cli_project_status_relative(root, index_path)} · {members.len()} members\n"
+    ^out: "Workspace  {jet_cli_project_status_relative(root, index_path)} · {members.len()} members\n"
     loop (index, member) in members {
         out = "{out}{jet_cli_project_status_pad(member.name, name_width)}  {jet_cli_project_status_pad(member.path, path_width)}  entry {if entries[index] == "" -> "none" else -> entries[index]}\n"
     }

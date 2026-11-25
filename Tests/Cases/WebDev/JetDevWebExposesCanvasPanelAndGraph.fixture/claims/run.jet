@@ -9,7 +9,7 @@ s5_canvas_token: fn() -> String {
     marker: "session=".bytes()
     bytes: text.bytes()
     start: (s5_web_find(bytes, marker) ?? panic("session parameter")) + marker.len()
-    end := start
+    ^end: start
     loop end < bytes.len() {
         byte: Int{bytes[end]}
         if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) {
@@ -38,7 +38,7 @@ s5_canvas_field: fn(body: String, field: String) -> String {
     marker: "\"{field}\":\"".bytes()
     bytes: body.bytes()
     start: (s5_web_find(bytes, marker) ?? panic("json field")) + marker.len()
-    end := start
+    ^end: start
     loop end < bytes.len() && (Int{bytes[end]}) != 34 -> end += 1
     assert(end < bytes.len(), "field terminator")
     String.from_bytes_lossy(s5_web_bytes(bytes, start, end))
@@ -198,7 +198,7 @@ s5_canvas_field: fn(body: String, field: String) -> String {
     app_marker: (String.from_bytes([U8]{34, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 34, 58, 123, 34, 104, 111, 115, 116, 34, 58, 34, 49, 50, 55, 46, 48, 46, 48, 46, 49, 34, 44, 34, 112, 111, 114, 116, 34, 58}) ?? panic("literal UTF-8")).bytes()
     session_bytes: session.bytes()
     app_start: (s5_web_find(session_bytes, app_marker) ?? panic("application port marker")) + app_marker.len()
-    app_end := app_start
+    ^app_end: app_start
     loop app_end < session_bytes.len() {
         byte: Int{session_bytes[app_end]}
         if byte < 48 || byte > 57 -> break
@@ -592,10 +592,10 @@ s5_canvas_field: fn(body: String, field: String) -> String {
     assert(graph.contains("\"source_text\""))
     source: files.read(files.join(root, "app.jet")) ?? panic("source")
     revision: s5_canvas_revision(source)
-    helper_revision := ""
-    helper_session := ""
-    project_revision := ""
-    manifest_revision := ""
+    ^helper_revision: ""
+    ^helper_session: ""
+    ^project_revision: ""
+    ^manifest_revision: ""
     noop_response: s5_canvas_post("/canvas/transaction", (String.from_bytes([U8]{123, 34, 115, 99, 104, 101, 109, 97, 95, 118, 101, 114, 115, 105, 111, 110, 34, 58, 49, 44, 34, 111, 112, 34, 58, 34, 110, 111, 111, 112, 34, 44, 34, 114, 101, 118, 105, 115, 105, 111, 110, 34, 58, 34, 64, 82, 69, 86, 64, 34, 125}) ?? panic("literal UTF-8")).replace("@REV@", revision).replace("@HELPER@", helper_revision).replace("@SESSION@", helper_session).replace("@PROJECT@", project_revision).replace("@MANIFEST@", manifest_revision))
     assert_eq(noop_response.status, 200)
     noop: s5_canvas_body(noop_response)

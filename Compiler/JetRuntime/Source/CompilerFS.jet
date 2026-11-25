@@ -57,10 +57,10 @@ compiler_fs_link_path: fn(path: I64, operation: I64, error: I64) -> Bool {
 }
 
 compiler_fs_admit: fn(path: I64, operation: I64, follow: Bool, error: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < rt_text_len(path) {
         if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) {
-            _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, path, I64{0}, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")), error)
+            ^_: compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, path, I64{0}, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")), error)
             return false
         }
         at += I64{1}
@@ -70,20 +70,20 @@ compiler_fs_admit: fn(path: I64, operation: I64, follow: Bool, error: I64) -> Bo
 
 compiler_fs_fault: fn(path: I64, error: I64) -> Bool {
     if !jet_fault_should_fail(rt_static_text("FS.Read")) -> return false
-    _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("fault injected: FS.Read")), error)
+    ^_: host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("fault injected: FS.Read")), error)
     true
 }
 
 // Return exactly len native U8 elements; the caller's list owns this allocation.
 compiler_fs_bytes_take: fn(bytes: I64, capacity: I64, length: I64, output: I64, len: I64) {
-    data := I64{0}
+    ^data: I64{0}
     if (length != I64{0}) {
         if (RT_HOST_U8_STRIDE == I64{1} && length == capacity) { data = bytes } else if (RT_HOST_U8_STRIDE == I64{1}) {
             data = jet_rt_alloc_8(length)
             rt_text_bytes_copy(data, bytes, length)
         } else {
             data = jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
-            at := I64{0}
+            ^at: I64{0}
             loop at < length {
                 host_u8_put(data, at, rt_text_byte(wrapping(bytes + at)))
                 at += I64{1}
@@ -151,7 +151,7 @@ compiler_fs_read_whole: fn(path: I64, align: I64, cells: I64, error: I64) -> I64
         perf_samples_io(began, PERF_SAMPLES_IO_READ, fd, PERF_SAMPLES_TARGET_PATH, rt_text_data(path), rt_text_len(path))
         return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
     }
-    capacity := I64{8192}
+    ^capacity: I64{8192}
     // A regular file's size sizes the buffer once: the reads fill it exactly
     // and the EOF probe ends them, with no growth copies and no final copy.
     facts: jet_rt_alloc(I64{144}, I64{8})
@@ -162,15 +162,15 @@ compiler_fs_read_whole: fn(path: I64, align: I64, cells: I64, error: I64) -> I64
         }
     }
     jet_rt_free(facts, I64{144}, I64{8})
-    bytes := jet_rt_alloc(capacity, align)
-    used := I64{0}
-    failure := I64{0}
+    ^bytes: jet_rt_alloc(capacity, align)
+    ^used: I64{0}
+    ^failure: I64{0}
     loop {
         // Probe EOF before growing, avoiding a final unnecessary reallocation.
         if (used == capacity) {
             // The now-unused terminated path allocation lends its first byte.
             probe: name
-            count := I64{0}
+            ^count: I64{0}
             loop {
                 count = replay_read(probe, I64{1}, host_call(I64{0}, fd, probe, I64{1}))
                 if (count != I64{-4}) { break }
@@ -196,7 +196,7 @@ compiler_fs_read_whole: fn(path: I64, align: I64, cells: I64, error: I64) -> I64
         }
         used += count
     }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     fd_c_path_drop(name, path)
     perf_samples_io(began, PERF_SAMPLES_IO_READ, if (failure < I64{0}) -> failure else -> used, PERF_SAMPLES_TARGET_PATH, rt_text_data(path), rt_text_len(path))
     if (failure < I64{0}) {
@@ -234,8 +234,8 @@ compiler_fs_write_open: fn(path: I64, data: I64, length: I64, error: I64, flags:
     temporary: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
     packed: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
     if temporary -> net_copy_packed(data, length, packed)
-    at := I64{0}
-    failure := I64{0}
+    ^at: I64{0}
+    ^failure: I64{0}
     loop at < length {
         count: host_call(I64{1}, fd, packed + at, length - at)
         if (count == I64{-4}) { next }
@@ -246,7 +246,7 @@ compiler_fs_write_open: fn(path: I64, data: I64, length: I64, error: I64, flags:
         at += count
     }
     if temporary -> jet_rt_free(packed, length, I64{8})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     perf_samples_io(began, PERF_SAMPLES_IO_WRITE, if (failure < I64{0} && failure != HOST_WRITE_ZERO) -> failure else -> at, PERF_SAMPLES_TARGET_PATH, rt_text_data(path), rt_text_len(path))
     if (failure == HOST_WRITE_ZERO) {
         return host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(path), host_write_zero_text(), error)
@@ -260,7 +260,7 @@ compiler_fs_write_open: fn(path: I64, data: I64, length: I64, error: I64, flags:
 compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     saved: rt_text_byte(wrapping(name + at))
     rt_text_put(wrapping(name + at), I64{0})
-    result := host_call(I64{83}, name, I64{511}, I64{0})
+    ^result: host_call(I64{83}, name, I64{511}, I64{0})
     if (result < I64{0}) {
         // create_dir_all accepts existing directories, not existing files.
         #Unsafe("the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes") {
@@ -284,17 +284,17 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     if (length == I64{0}) { return I64{1} }
     name: fd_c_path(path)
     scratch: jet_rt_alloc(I64{128}, I64{8})
-    present := false
+    ^present: false
     #Unsafe("name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes") {
         present = os_stat_facts_i64(I64{4}, name, scratch) >= I64{0} && (rt_text_word(wrapping(scratch + I64{16})) & I64{61440}) == I64{16384}
     }
-    result := I64{1}
+    ^result: I64{1}
     if !present {
-        at := length
+        ^at: length
         loop {
             result = compiler_fs_mkdir_prefix(name, at, scratch)
             if (result != I64{-2}) { break }
-            back := at - I64{1}
+            ^back: at - I64{1}
             loop back > (I64{0}) && rt_text_byte(wrapping(name + back)) != (I64{47}) {
                 back -= I64{1}
             }
@@ -316,7 +316,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
 #Export(c) jet_files_read_link_os: fn(path: I64, output: I64, error: I64) -> I64 {
     if !compiler_fs_link_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     scratch: jet_rt_alloc(I64{32}, I64{8})
-    capacity := I64{256}
+    ^capacity: I64{256}
     loop {
         bytes: jet_rt_alloc(capacity, I64{8})
         count: jet_fs_readlink_raw(path, bytes, capacity, scratch)
@@ -361,7 +361,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
 #Export(c) jet_std_file_reader_read: fn(reader: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 {
     path: fd_word(reader, I64{24})
     if compiler_fs_fault(path, error) -> return I64{0}
-    limit := I64{16777216}
+    ^limit: I64{16777216}
     if (jet_int_compare(maximum, limit) < I64{0}) {
         if (jet_int_compare(maximum, I64{0}) <= I64{0}) {
             count: if int_fits(maximum, U64{9223372036854775808}) -> jet_int_owned_to_i64(maximum) else -> I64{-9223372036854775808}
@@ -374,7 +374,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     }
     scratch: jet_rt_alloc(I64{32}, I64{8})
     bytes: jet_rt_alloc(limit, I64{8})
-    count := I64{0}
+    ^count: I64{0}
     loop {
         count = jet_fd_read_raw(reader, bytes, limit, scratch)
         if (count >= I64{0} || rt_text_word(wrapping(scratch + I64{8})) != I64{4}) { break }
@@ -408,7 +408,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
         rt_text_push_number(cause, count)
         return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, path, I64{0}, jet_rt_string_builder_finish(cause), error)
     }
-    limit := I64{16777216}
+    ^limit: I64{16777216}
     if (jet_int_compare(maximum, limit) < I64{0}) { limit = jet_int_owned_to_i64(maximum) }
     hostile: encoding_hostile_state()
     if (hostile != I64{0}) {
@@ -423,7 +423,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     length: rt_text_word(header)
     into: wrapping(rt_text_word(wrapping(header + I64{16})) + length * RT_HOST_U8_STRIDE)
     scratch: wrapping(into + limit * RT_HOST_U8_STRIDE + I64{7}) & I64{-8}
-    count := I64{0}
+    ^count: I64{0}
     loop {
         count = jet_fd_read_raw(reader, into, limit, scratch)
         if (count >= I64{0} || rt_text_word(wrapping(scratch + I64{8})) != I64{4}) { break }

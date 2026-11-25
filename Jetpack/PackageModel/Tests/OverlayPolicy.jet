@@ -134,7 +134,7 @@ workspace: module {
     )
     app: policy.package_override("ordered", "app") ?? panic("app override")
     assert_eq(app.patches, [String]{"b.patch", "a.patch", "c.patch"})
-    reversed := app.copy()
+    ^reversed: app.copy()
     reversed.patches = [String]{"c.patch", "a.patch", "b.patch"}
     overlay: policy.overlay("ordered") ?? panic("overlay ordered")
     assert(app.policy_fingerprint(overlay) != reversed.policy_fingerprint(overlay))
@@ -249,8 +249,8 @@ workspace: module {
     )
     assert_eq(app.patches, [String]{"base.patch", "local.patch"})
     assert_eq(app.provenance.len(), 7)
-    base_version := false
-    local_cc := false
+    ^base_version: false
+    ^local_cc: false
     loop fact in app.provenance {
         if fact.overlay == "base" && fact.field == "version" -> base_version = true
         if fact.overlay == "local" && fact.field == "env.CC" -> local_cc = true

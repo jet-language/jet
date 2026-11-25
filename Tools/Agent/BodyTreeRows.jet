@@ -117,7 +117,7 @@ body_tree_line: fn(view: BodyTreeView, line: String, number: Int) -> String Body
     if line.trim_start().starts_with("//") -> return Ok(line.copy())
     names: TREE_TYPE.find_all(line)
     pieces: TREE_TYPE.split(line)
-    out := [String]{pieces[0].copy()}
+    ^out: [String]{pieces[0].copy()}
     loop (index, name) in names {
         body: body_tree_type(view, name) ?? return Err(rows_fail("{SOURCE_PATH}:{number} names `{name}`, a tree type with no body form"))
         out.push(body)
@@ -134,11 +134,11 @@ render_body_tree: fn(view: BodyTreeView, text: String) -> String BodyTreeRowsErr
             break index
         }
     } ?? return Err(rows_fail("{SOURCE_PATH} declares no `{view.source_open}` line"))
-    out := [String]{GENERATED_BY}
+    ^out: [String]{GENERATED_BY}
     loop line in view.lede -> out.push(line.copy())
     out.push("")
     out.push(view.output_open.copy())
-    index := start + 1
+    ^index: start + 1
     loop index < lines.len() {
         line: lines[index]
         if line == "}}" {
@@ -158,7 +158,7 @@ body_tree_rows_main: fn(args: [String]) -[FS]> String BodyTreeRowsError! {
         return Err(rows_fail("usage: jet Tools/Agent/BodyTreeRows.jet [--check|--write]"))
     }
     text: files.read(SOURCE_PATH) ?? return Err(rows_fail("cannot read {SOURCE_PATH}: {err}"))
-    stale := [String]{}
+    ^stale: [String]{}
     loop view in body_tree_views() {
         generated: render_body_tree(view, text) ?? return Err(err)
         if (files.read(view.output_path) ?? "") == generated -> next

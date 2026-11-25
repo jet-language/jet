@@ -43,7 +43,7 @@ SemaCoreRoleFunction: struct {
 
 // The top-level Core functions that fill one of `roles` (sema_core_role).
 sema_core_role_functions: fn(graph: SemaRegistrationGraph, roles: [String]) -> [SemaCoreRoleFunction] {
-    found := [SemaCoreRoleFunction]{}
+    ^found: [SemaCoreRoleFunction]{}
     if roles.len() == 0 -> return found
     loop module_row in graph.modules {
         if !module_is_core(module_row.module_identity) -> next
@@ -169,11 +169,11 @@ sema_core_role_case: fn(graph: SemaRegistrationGraph, kind: SemaCoreRoleKind, ro
 // loaded Core declarations fill, for sema_core_roles_check_filled.
 sema_core_roles_check: fn(graph: ^SemaRegistrationGraph) -> SemaCoreRoleFill {
     kind: sema_core_role_kind(graph) ?? return SemaCoreRoleFill{kind: None, fillers: [String]{}}
-    fillers := [String]{}
+    ^fillers: [String]{}
     loop variant in graph.modules[kind.module_index].nominals[kind.nominal_index].variants {
         fillers.push(sema_core_role_owned_filler(variant.symbol.name))
     }
-    problems := [SemaCoreRoleProblem]{}
+    ^problems: [SemaCoreRoleProblem]{}
     loop (module_index, module_row) in graph.modules {
         if !module_is_core(module_row.module_identity) -> next
         loop function in module_row.functions {
@@ -192,7 +192,9 @@ sema_core_roles_check: fn(graph: ^SemaRegistrationGraph) -> SemaCoreRoleFill {
             if nominal.source == .SourceAST(item) {
                 if item == .Trait(definition) {
                     role: sema_core_role(definition.markers, graph, module_row.module_identity)
-                    if role != "" -> sema_core_role_record(graph, kind, role, definition.name, definition.name_span, module_index, fillers, problems)
+                    if role != "" {
+                        sema_core_role_record(graph, kind, role, definition.name, definition.name_span, module_index, fillers, problems)
+                    }
                 }
             }
         }
@@ -209,13 +211,15 @@ sema_core_role_record: fn(graph: SemaRegistrationGraph, kind: SemaCoreRoleKind, 
     slot: sema_core_role_case(graph, kind, role) ?? return
     if {
         fillers[slot] == "" -> fillers[slot] = name
-        else -> problems.push(SemaCoreRoleProblem{module_index: module_index, diagnostic: sema_duplicate_core_role(name, role, fillers[slot], span)})
+        else -> {
+            problems.push(SemaCoreRoleProblem{module_index: module_index, diagnostic: sema_duplicate_core_role(name, role, fillers[slot], span)})
+        }
     }
 }
 
 // The compiler-owned trait that fills `role`, or "" when none does.
 sema_core_role_owned_filler: fn(role: String) -> String Never! {
-    owned := owned_trait_for_role(role) ?? return ""
+    ^owned: owned_trait_for_role(role) ?? return ""
     owned.name.move()
 }
 
@@ -224,7 +228,7 @@ sema_core_role_owned_filler: fn(role: String) -> String Never! {
 // function fills is E1015, at the case.
 sema_core_roles_check_filled: fn(graph: ^SemaRegistrationGraph, fill: SemaCoreRoleFill) {
     kind: fill.kind ?? return
-    problems := [Diagnostic]{}
+    ^problems: [Diagnostic]{}
     loop (index, variant) in graph.modules[kind.module_index].nominals[kind.nominal_index].variants {
         if fill.fillers[index] == "" {
             problems.push(sema_missing_core_role(variant.symbol.name, variant.symbol.span))

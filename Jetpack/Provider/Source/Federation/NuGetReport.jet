@@ -19,12 +19,12 @@ impl ProviderFactReport {
         if provider_xml_has_namespace(document) {
             return ProviderFactReport.unreadable(ProviderFamily.NuGet, "nuget", "NuGet XML uses a namespaced vocabulary that this provider cannot normalize").retaining("xml", document)
         }
-        facts := MetadataFacts.empty(ProviderFamily.NuGet, "")
+        ^facts: MetadataFacts.empty(ProviderFamily.NuGet, "")
         root_name: provider_xml_first_tag(document, [String]{"id", "Id"})
         root_version: provider_xml_first_tag(document, [String]{"version", "Version"})
         has_root: root_name != None && root_version != None
-        references := [NuGetReference]{}
-        losses := [String]{}
+        ^references: [NuGetReference]{}
+        ^losses: [String]{}
         loop opening in provider_xml_opening_tags(document, "PackageReference") {
             version: provider_xml_attribute(opening, "Version") ?? ""
             name: provider_xml_first_attribute(opening, [String]{"Include", "Update"}) ?? {
@@ -45,7 +45,7 @@ impl ProviderFactReport {
             references.push(NuGetReference{name: name, version: version, opening: opening})
         }
         dependency_tags: provider_xml_opening_tags(document, "dependency")
-        dependency_values := [String]{}
+        ^dependency_values: [String]{}
         loop opening in dependency_tags {
             name: provider_xml_first_attribute(opening, [String]{"id", "name"}) ?? {
                 losses.push("NuGet dependency has no id or name")
@@ -57,7 +57,7 @@ impl ProviderFactReport {
                 losses.push("NuGet dependency `{name}` has no resolved exact version")
             }
         }
-        reference_values := [String]{}
+        ^reference_values: [String]{}
         loop reference in references {
             reference_values.push(provider_format_dependency(reference.name, reference.version))
         }
@@ -200,7 +200,7 @@ impl ProviderFactReport {
         }
         facts.integrity_hash = provider_xml_tag(document, "contentHash") ?? ""
         facts.source_identity = "nuget:{facts.name}@{facts.version}"
-        report := ProviderFactReport.with_identity(facts)
+        ^report: ProviderFactReport.with_identity(facts)
         loop loss in losses -> report.losses.push(loss)
         if multiple_references {
             report.losses.push("NuGet metadata contains multiple packages; lock each package identity separately")
@@ -232,7 +232,7 @@ provider_xml_first_attribute: fn(opening: String, keys: [String]) -> String? Nev
 
 // Each `<element …>` opening tag's text.
 provider_xml_opening_tags: fn(document: String, element: String) -> [String] Never! {
-    tags := [String]{}
+    ^tags: [String]{}
     loop opening in provider_xml_openings(document, element) -> tags.push(opening.text)
     tags
 }
@@ -241,7 +241,7 @@ provider_xml_opening_tags: fn(document: String, element: String) -> [String] Nev
 provider_xml_has_namespace: fn(document: String) -> Bool Never! {
     if document.contains("xmlns:") || document.contains("xmlns=") -> return true
     bytes: document.bytes()
-    cursor := 0
+    ^cursor: 0
     loop cursor < bytes.len() {
         start: provider_find(bytes, "<".bytes(), cursor, bytes.len())
         if start < 0 -> break

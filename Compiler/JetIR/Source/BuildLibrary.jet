@@ -290,16 +290,16 @@ ir_runtime_intrinsic: fn(name: String) -> Bool Never! {
 // whose function does not satisfy the C export law is not an export.
 // `lifecycle_rows` are the lines of the lifecycle list (ir_lifecycle_rows).
 ir_build_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, type_defs: ^^[TTypeDef], impls: ^^[TImplDef], sources: ^^IRSourceTexts, constants: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String], threads: CompilerThreads) -> IRLibraryResult Never! {
-    p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
+    ^p: ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
     ir_foreign_index(p, foreign, decls)
     p.stop_points = false
     p.zone_table = true
-    exports := [IRLibraryExportRow]{}
-    export_rows := [Int]{}
+    ^exports: [IRLibraryExportRow]{}
+    ^export_rows: [Int]{}
     // The wave build's roots: each export's checked function, in row order.
-    jobs := [IRWaveJob]{}
-    unchecked := 0
-    outside := 0
+    ^jobs: [IRWaveJob]{}
+    ^unchecked: 0
+    ^outside: 0
     loop row in rows {
         index: ir_function_row(p, row.key) ?? {
             unchecked += 1
@@ -317,11 +317,11 @@ ir_build_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
         return ir_library_failed([String]{"the checked NativeLibrary artifact has no #Export(c) functions ({rows.len()} export rows: {unchecked} without a checked function, {outside} outside the C export law)"})
     }
     // Every export problem is collected, so one run lists them all.
-    problems := [String]{}
-    export_symbols_keys := name_column_table(exports.len())
-    export_symbols := name_column(exports.len())
-    export_keys_keys := name_column_table(exports.len())
-    export_keys := name_column(exports.len())
+    ^problems: [String]{}
+    ^export_symbols_keys: name_column_table(exports.len())
+    ^export_symbols: name_column(exports.len())
+    ^export_keys_keys: name_column_table(exports.len())
+    ^export_keys: name_column(exports.len())
     loop (index, row) in exports {
         if name_column_get(export_symbols_keys, export_symbols, row.symbol) != None {
             problems.push("duplicate checked export symbol {row.symbol}")
@@ -337,10 +337,10 @@ ir_build_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
         }
     }
     if problems.len() > 0 -> return ir_library_failed(problems)
-    lifecycle := IRLifecycles{keys: name_column_table(), rows: name_column(), hooks: [IRLifecycle]{}}
+    ^lifecycle: IRLifecycles{keys: name_column_table(), rows: name_column(), hooks: [IRLifecycle]{}}
     lifecycle_problem: ir_lifecycle_rows(lifecycle_rows, lifecycle)
     if lifecycle_problem != "" -> return ir_library_failed([String]{lifecycle_problem})
-    hooked := 0
+    ^hooked: 0
     loop (index, row) in exports {
         hook: ir_lifecycle_of(lifecycle, row.symbol) ?? next
         hooked += 1
@@ -351,12 +351,12 @@ ir_build_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
     if hooked != lifecycle.hooks.len() {
         return ir_library_failed([String]{"a runtime lifecycle row names no checked #Export(c) function"})
     }
-    intrinsics := p.intrinsics.move()
-    bits := false
-    from_bits := false
-    rails := false
+    ^intrinsics: p.intrinsics.move()
+    ^bits: false
+    ^from_bits: false
+    ^rails: false
     loop spec in ir_runtime_intrinsic_specs() {
-        selected := false
+        ^selected: false
         loop function in p.functions {
             if function.name != spec.name -> next
             if selected {
@@ -388,7 +388,7 @@ ir_build_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
                     if !ir_intrinsic_signature(function, 0) || !ir_i64_type(ir_executable_return(function)) {
                         return ir_library_failed([String]{"runtime intrinsic {spec.name} has an invalid checked scalar signature"})
                     }
-                    target := String?{None}
+                    ^target: String?{None}
                     loop (index, row) in exports {
                         if row.symbol != symbol -> next
                         if !ir_address_target_signature(p.functions[export_rows[index]], arity) {
@@ -416,13 +416,13 @@ ir_build_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
     p.asm_rails = rails
     kept: ir_build_waves_kept(p, jobs, false, threads, None)
     built: kept.result.move()
-    m := built.program.move()
+    ^m: built.program.move()
     if built.failures.len() > 0 {
         return IRLibraryResult{program: m, failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, abis: [IRExportABI]{}}
     }
     p = kept.program.move()
     // Each export's function in the merged module.
-    roots := [Int]{}
+    ^roots: [Int]{}
     loop row in exports {
         id: name_column_get(m.function_rows_keys, m.function_rows, row.key) ?? return ir_library_failed([String]{"export {row.symbol} names a missing checked function"})
         roots.push(id)
@@ -431,19 +431,19 @@ ir_build_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
     // its body lowered to a call of the routine it defines, which recurses
     // without end (a sized literal that missed the fold once made
     // jet_int_checked_fixed call itself). Every such export is reported.
-    recursive := [String]{}
+    ^recursive: [String]{}
     loop (index, row) in exports {
         if ir_calls_own_route(m, roots[index], row.symbol) {
             recursive.push("runtime export {row.symbol} calls its own runtime route {row.symbol}: a construct in its body lowers to the routine it defines")
         }
     }
     if recursive.len() > 0 -> return ir_library_failed(recursive)
-    globals := [IRLibraryExport]{}
-    abis := [IRExportABI]{}
-    guard_problems := [String]{}
+    ^globals: [IRLibraryExport]{}
+    ^abis: [IRExportABI]{}
+    ^guard_problems: [String]{}
     loop (index, row) in exports {
         hook: ir_lifecycle_of(lifecycle, row.symbol) ?? IRLifecycle{init_priority: -1, fini_priority: -1, guards: [String]{}}
-        guards := [Int]{}
+        ^guards: [Int]{}
         loop name in hook.guards {
             guard: ir_lifecycle_guard(m, p, name)
             if guard < 0 {
@@ -468,7 +468,7 @@ ir_build_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
     // allocator's root the debugger reads (X64_OBSERVE_ROOT_SYMBOL,
     // X64_ALLOC_ROOT_SYMBOL) and the words the debugger writes around an
     // evaluation (X64_DEBUG_EVAL_STORAGE), when this library holds them.
-    data := [X64DataExport]{}
+    ^data: [X64DataExport]{}
     ending: ir_lifecycle_guard(m, p, IR_X64_PROCESS_ENDING_STORAGE)
     if ending >= 0 -> data.push(X64DataExport{data: ending, symbol: IR_X64_PROCESS_ENDING_SYMBOL})
     armed: ir_lifecycle_guard(m, p, IR_X64_CHECKS_ARMED_STORAGE)
@@ -516,7 +516,7 @@ ir_calls_own_route: fn(m: IRModule, id: Int, symbol: String) -> Bool Never! {
 ir_export_abi: fn(m: IRModule, id: Int, symbol: String) -> IRExportABI Never! {
     f: m.functions[id]
     parameters: loop slot in 0..<f.param_count -> ir_export_layout(m.types[f.slot_type[slot]])
-    result := IRExportLayout?{None}
+    ^result: IRExportLayout?{None}
     if f.result >= 0 && m.types[f.result].kind != .Unit {
         result = Val(ir_export_layout(m.types[f.result]))
     }
@@ -533,7 +533,7 @@ ir_export_layout_json: fn(layout: IRExportLayout) -> String Never! {
 
 // The runtime ABI receipt (`<prefix>.abi.json`): one row per export.
 ir_export_abi_json: fn(rows: [IRExportABI]) -> String Never! {
-    encoded := [String]{}
+    ^encoded: [String]{}
     loop row in rows {
         parameters: loop layout in row.parameters -> ir_export_layout_json(layout)
         result: if row.result == .Val(layout) -> ir_export_layout_json(layout) else -> "null"
@@ -563,28 +563,28 @@ IR_THREAD_START_SYMBOLS: [String]{"os_clone_i64", "signal", "dlopen"}
 // receipt again and no guard scans every DataAddress.
 ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]) -> [String] Never! {
     count: m.functions.len()
-    defined_keys := name_column_table(exports.len())
-    defined := name_column(exports.len())
+    ^defined_keys: name_column_table(exports.len())
+    ^defined: name_column(exports.len())
     loop row in exports -> name_column_set(defined_keys, defined, row.symbol, row.function)
     // Per name row, the export function a CallRuntime of it reaches (-1:
     // none; -2: not looked up yet) and whether it can start a thread.
-    name_callees := [Int]{}
-    name_starts := [Bool]{}
+    ^name_callees: [Int]{}
+    ^name_starts: [Bool]{}
     loop _ in m.names {
         name_callees.push(-2)
         name_starts.push(false)
     }
-    callers := [[Int]]{}
+    ^callers: [[Int]]{}
     loop _ in 0..<count -> callers.push([Int]{})
     // Per data row, the functions that take its address (DataAddress), in
     // function order; a row past the last one taken has none.
-    takers := [[Int]]{}
-    reaches := [Bool]{}
-    work := [Int]{}
+    ^takers: [[Int]]{}
+    ^reaches: [Bool]{}
+    ^work: [Int]{}
     loop (id, f) in m.functions {
-        starts := f.asm != None && IR_THREAD_START_SYMBOLS.contains(f.name)
+        ^starts: f.asm != None && IR_THREAD_START_SYMBOLS.contains(f.name)
         loop (at, op) in f.op {
-            callee := -1
+            ^callee: -1
             if op == .Call || op == .FunctionAddress -> callee = f.a[at]
             if op == .CallRuntime {
                 name: f.a[at]
@@ -606,9 +606,9 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]
         reaches.push(starts)
         if starts -> work.push(id)
     }
-    guarded := [Bool]{}
+    ^guarded: [Bool]{}
     loop _ in exports -> guarded.push(false)
-    head := 0
+    ^head: 0
     loop {
         loop head < work.len() {
             id: work[head]
@@ -621,7 +621,7 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]
         }
         // A hook that can reach a thread start: whatever keeps its guard
         // storage runs it.
-        added := false
+        ^added: false
         loop (index, row) in exports {
             if guarded[index] || !reaches[row.function] || (row.init_priority < 0 && row.fini_priority < 0) {
                 next
@@ -646,7 +646,7 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]
 // The symbols of `exports` whose function `reaches` marks, sorted: a
 // receipt's rows.
 ir_reached_exports: fn(exports: [IRLibraryExport], reaches: [Bool]) -> [String] Never! {
-    symbols := [String]{}
+    ^symbols: [String]{}
     loop row in exports {
         if reaches[row.function] -> symbols.push(row.symbol.copy())
     }
@@ -742,26 +742,26 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
     count: m.functions.len()
     // Per name row, the export function a CallRuntime of it reaches (-1: a
     // C symbol).
-    name_callees := loop _ in m.names -> -1
+    ^name_callees: loop _ in m.names -> -1
     loop row in exports {
         if ir_interned_name(m, row.symbol) == .Val(at) -> name_callees[at] = row.function
     }
     writes: loop f in m.functions -> ir_slot_writes(f)
     // Per function and parameter, the uses of the code word passed there,
     // grown until every caller's flows are known.
-    uses := [[[Int]]]{}
+    ^uses: [[[Int]]]{}
     loop f in m.functions {
-        params := loop _ in 0..<f.param_count -> [Int]{}
+        ^params: loop _ in 0..<f.param_count -> [Int]{}
         if f.asm != None && f.name.starts_with(IR_ADDRESS_CALL_PREFIX) && f.param_count > 0 {
             params[0].push(IR_CODE_CALLED)
         }
         uses.push(params.move())
     }
-    flows := [IRCodeFlow]{}
+    ^flows: [IRCodeFlow]{}
     loop {
         flows.clear()
         loop id in 0..<count -> ir_code_flows(m, id, writes[id], uses, name_callees, flows)
-        grown := false
+        ^grown: false
         loop flow in flows {
             if flow.source.kind == IRCodeSource.Param {
                 index: flow.source.at
@@ -773,16 +773,16 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
         }
         if !grown -> break
     }
-    callers := loop _ in 0..<count -> [Int]{}
-    roots := loop f in m.functions -> f.host_symbol != ""
-    entries := loop f in m.functions -> f.host_symbol != ""
+    ^callers: loop _ in 0..<count -> [Int]{}
+    ^roots: loop f in m.functions -> f.host_symbol != ""
+    ^entries: loop f in m.functions -> f.host_symbol != ""
     loop row in exports -> entries[row.function] = true
-    installs := loop _ in m.data -> [Int]{}
-    tainted := loop _ in m.data -> false
-    reads := [Int]{}
+    ^installs: loop _ in m.data -> [Int]{}
+    ^tainted: loop _ in m.data -> false
+    ^reads: [Int]{}
     loop (id, f) in m.functions {
         loop (at, op) in f.op {
-            callee := -1
+            ^callee: -1
             if op == .Call -> callee = f.a[at]
             if op == .CallRuntime -> callee = name_callees[f.a[at]]
             if callee >= 0 && callee < count -> callers[callee].push(id)
@@ -802,8 +802,8 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
     leaf_code: loop f in m.functions -> IR_STOP_LEAF_CODE.contains(f.name)
     // A function that calls the code word a rail cell holds, and beside it
     // the cell's data row.
-    called_by := [Int]{}
-    called_cells := [Int]{}
+    ^called_by: [Int]{}
+    ^called_cells: [Int]{}
     loop flow in flows {
         at: flow.source.at
         if flow.source.kind == {
@@ -848,9 +848,9 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
     }
     // A route reaches no stop through a fatal function or a deferred hook.
     fatal: loop f in m.functions -> IR_STOP_FATAL.contains(f.name) || IR_STOP_DEFERRED.contains(f.name)
-    published := false
-    reaches := [Bool]{}
-    work := [Int]{}
+    ^published: false
+    ^reaches: [Bool]{}
+    ^work: [Int]{}
     loop (id, f) in m.functions {
         sink: f.name == IR_STOP_PUBLISH
         if sink -> published = true
@@ -859,7 +859,7 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
         if starts -> work.push(id)
     }
     if !published -> return [String]{}
-    head := 0
+    ^head: 0
     loop head < work.len() {
         id: work[head]
         head += 1
@@ -874,7 +874,7 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
 
 // Per slot of `f`, the instructions that write it.
 ir_slot_writes: fn(f: IRFunction) -> [[Int]] Never! {
-    writes := loop _ in f.slot_type -> [Int]{}
+    ^writes: loop _ in f.slot_type -> [Int]{}
     loop at in 0..<f.op.len() {
         slot: ir_x64_write(f, at)
         if slot >= 0 && slot < writes.len() -> writes[slot].push(at)
@@ -886,11 +886,11 @@ ir_slot_writes: fn(f: IRFunction) -> [[Int]] Never! {
 // holds wherever it is read (a DataAddress, or a copy of one), else -1;
 // `writes` is f's ir_slot_writes.
 ir_code_cell: fn(f: IRFunction, writes: [[Int]], slot: Int) -> Int Never! {
-    row := -1
-    seen := [Int]{}
-    work := [Int]{slot}
+    ^row: -1
+    ^seen: [Int]{}
+    ^work: [Int]{slot}
     loop {
-        at := work.pop() ?? break
+        ^at: work.pop() ?? break
         if seen.contains(at) -> next
         seen.push(at)
         if at < f.param_count || at >= writes.len() || writes[at].len() == 0 -> return -1
@@ -908,11 +908,11 @@ ir_code_cell: fn(f: IRFunction, writes: [[Int]], slot: Int) -> Int Never! {
 // through copies and numeric conversions to each write of it; a parameter
 // is its own source. A constant 0 is no code.
 ir_code_sources: fn(f: IRFunction, writes: [[Int]], slot: Int) -> [IRCodeOrigin] Never! {
-    found := [IRCodeOrigin]{}
-    seen := [Int]{}
-    work := [Int]{slot}
+    ^found: [IRCodeOrigin]{}
+    ^seen: [Int]{}
+    ^work: [Int]{slot}
     loop {
-        at := work.pop() ?? break
+        ^at: work.pop() ?? break
         if at < 0 || at >= writes.len() {
             found.push(IRCodeOrigin{kind: IRCodeSource.Unknown, at: -1})
             next
@@ -978,7 +978,7 @@ ir_lifecycle_rows: fn(lines: [String], lifecycle: ^IRLifecycles) -> String Never
     loop line in lines {
         text: line.trim()
         if text == "" || text.starts_with("#") -> next
-        fields := [String]{}
+        ^fields: [String]{}
         loop field in text.copy().split(" ").to_list() {
             if field != "" -> fields.push(field)
         }
@@ -992,7 +992,7 @@ ir_lifecycle_rows: fn(lines: [String], lifecycle: ^IRLifecycles) -> String Never
         if name_column_get(lifecycle.keys, lifecycle.rows, fields[0]) != None {
             return "duplicate runtime lifecycle row `{fields[0]}`"
         }
-        guards := [String]{}
+        ^guards: [String]{}
         if fields.len() == 4 {
             loop name in fields[3].split(",").to_list() {
                 if name == "" || guards.contains(name) {
@@ -1011,7 +1011,7 @@ ir_lifecycle_rows: fn(lines: [String], lifecycle: ^IRLifecycles) -> String Never
 // cell, BuildStatic.jet ir_storage_address), or -1 when no storage has that
 // name, more than one does, or no built function reads or writes it.
 ir_lifecycle_guard: fn(m: IRModule, p: IRProgram, name: String) -> Int Never! {
-    found := -1
+    ^found: -1
     loop definition in p.constant_defs {
         if !definition.is_storage || definition.name != name -> next
         if found != -1 -> return -1
@@ -1025,9 +1025,9 @@ ir_lifecycle_guard: fn(m: IRModule, p: IRProgram, name: String) -> Int Never! {
 // (code it installs), takes the address of data row `row`: the hook sets
 // that state up.
 ir_names_data: fn(m: IRModule, id: Int, row: Int) -> Bool Never! {
-    seen := [Int:Bool]{}
+    ^seen: [Int:Bool]{}
     seen[id] = true
-    work := [Int]{id}
+    ^work: [Int]{id}
     loop work.len() > 0 {
         next_id: work.pop() ?? break
         f: m.functions[next_id]
@@ -1133,13 +1133,11 @@ ir_export_native_type: fn(ty: Type) -> String? Never! {
 // a declared carrier, sema_guest_check_export_failures for an inferred one),
 // so the build lists a carrier only if a refusal was missed.
 ir_export_signature_problems: fn(function: FnBody) -> [String] Never! {
-    problems := [String]{}
+    ^problems: [String]{}
     if !ir_top_level(function) || function.generic_params.len() != 0 {
         problems.push("is not a monomorphic top-level function")
     }
-    if !ir_infallible(function) {
-        problems.push("has a failure carrier; a C export cannot fail")
-    }
+    if !ir_infallible(function) -> problems.push("has a failure carrier; a C export cannot fail")
     loop param in function.params {
         if param.convention == AccessConvention.Write {
             problems.push("parameter `{param.name}` is written; C exports take primitives by value")
@@ -1224,7 +1222,9 @@ ir_f32_type: fn(ty: Type?) -> Bool Never! {
 ir_float_op_signature: fn(function: FnBody, count: Int) -> Bool Never! {
     if !ir_intrinsic_signature(function, count) -> return false
     loop param in function.params {
-        if param.convention != AccessConvention.Read || !ir_float_type(Val(param.ty)) -> return false
+        if param.convention != AccessConvention.Read || !ir_float_type(Val(param.ty)) {
+            return false
+        }
     }
     ir_float_type(ir_executable_return(function))
 }
@@ -1341,7 +1341,7 @@ ir_intrinsic_result: fn(p: IRProgram, b: ^IRBuilder, callee: String, type_args: 
 
 // The argument expression nodes of an intrinsic call, in order.
 ir_intrinsic_nodes: fn(args: [BodyCallArg]) -> [Int] Never! {
-    nodes := [Int]{}
+    ^nodes: [Int]{}
     loop arg in args -> nodes.push(arg.value)
     nodes
 }
@@ -1356,7 +1356,7 @@ ir_fault_report_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyC
     if args.len() != IR_X64_ARGUMENT_REGISTERS.len() {
         return ir_fail_slot(b, span, "rt_fault_print reads six I64 values")
     }
-    values := [Int]{}
+    ^values: [Int]{}
     loop arg in args {
         value: ir_value_as(m, p, b, arg.value, word_row, span)
         if ir_failed(b) -> return -1
@@ -1376,7 +1376,7 @@ ir_static_text_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyCa
             return ir_fail_slot(b, span, "rt_static_text is literal-only")
         }
     }
-    literal := ""
+    ^literal: ""
     loop part in parts {
         if part == {
             .Literal(text) -> literal = "{literal}{text}"
@@ -1434,7 +1434,7 @@ ir_float_sqrt: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyCallArg]
 // an FMA3 probe with that call as its slow path (X64Select.jet ir_x64_fma).
 ir_float_fma: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyCallArg], float_row: Int, span: Span) -> Int Never! {
     if args.len() != 3 -> return ir_fail_slot(b, span, "a Float fma reads three values")
-    values := [Int]{}
+    ^values: [Int]{}
     loop arg in args {
         value: ir_value_as(m, p, b, arg.value, float_row, span)
         if ir_failed(b) -> return -1

@@ -24,7 +24,7 @@ use jet_foundation.[DIAGNOSTIC_STOP_OPEN, diagnostic_registry_row, diagnostic_re
 DIAGNOSTIC_NAMES1_LABELS: #run diagnostic_names1_labels()
 
 diagnostic_names1_labels: fn() -> [String] {
-    labels := [String]{}
+    ^labels: [String]{}
     loop severity in Severity.reflect().values -> labels.push("{severity}")
     labels.push(DIAGNOSTIC_STOP_OPEN.remove_suffix(": "))
     labels
@@ -44,9 +44,9 @@ DIAGNOSTIC_NAMES1_MATCHES: [String]{": ~ \"", ": !~ \""}
 // Rewrites every old diagnostic name, heading, link, hint and jet.report
 // object of one file of any kind.
 diagnostic_names1_file: fn(path: String, text: String, source: Bool) -[]> MigrationOutcome {
-    skipped := [String]{}
-    rewritten := 0
-    result := text
+    ^skipped: [String]{}
+    ^rewritten: 0
+    ^result: text
     loop pass in 0..<8 {
         bytes: result.bytes()
         outcome: if pass == {
@@ -89,8 +89,8 @@ diagnostic_names1_name: fn(token: String) -[]> String? {
 
 // `Error [token]` and the other labels: `Error: name`.
 diagnostic_names1_headings: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
-    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
-    at := 0
+    ^edits: DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    ^at: 0
     loop at < bytes.len() {
         start: at
         at += 1
@@ -117,9 +117,9 @@ diagnostic_names1_headings: fn(path: String, bytes: [U8]) -[]> MigrationOutcome 
 
 // `jet-lang.dev/e/<code or jet.Name>`: the link names the row's name.
 diagnostic_names1_links: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
-    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    ^edits: DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
     link: DIAGNOSTIC_NAMES1_LINK.bytes()
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         start: at + link.len()
         if !diagnostic_names1_at(bytes, at, link) {
@@ -142,10 +142,10 @@ diagnostic_names1_links: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
 
 // "Run `jet explain <code>` to learn more": the hint names the row's name.
 diagnostic_names1_hints: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
-    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    ^edits: DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
     hint: DIAGNOSTIC_NAMES1_HINT.bytes()
     after: DIAGNOSTIC_NAMES1_HINT_END.bytes()
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         start: at + hint.len()
         if !diagnostic_names1_at(bytes, at, hint) {
@@ -171,19 +171,19 @@ diagnostic_names1_hints: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
 // string, gains `"name":"Jet.UnknownFunction"` after its code; a code no row
 // owns is its own name.
 diagnostic_names1_reports: fn(bytes: [U8]) -[]> MigrationOutcome {
-    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
-    at := 0
+    ^edits: DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    ^at: 0
     loop at < bytes.len() {
         start: at
         at += 1
-        quote := "\""
+        ^quote: "\""
         if {
             diagnostic_names1_at(bytes, start, "\\\"code\\\"".bytes()) -> quote = "\\\""
             !diagnostic_names1_at(bytes, start, "\"code\"".bytes()) -> next
         }
         colon: start + quote.count_bytes() * 2 + 4
         if !diagnostic_names1_at(bytes, colon, ":".bytes()) -> next
-        gap := ""
+        ^gap: ""
         if diagnostic_names1_at(bytes, colon + 1, " ".bytes()) -> gap = " "
         open: colon + 1 + gap.count_bytes()
         if !diagnostic_names1_at(bytes, open, quote.bytes()) -> next
@@ -209,9 +209,9 @@ diagnostic_names1_reports: fn(bytes: [U8]) -[]> MigrationOutcome {
 // `[jet.Name]` outside a heading: the bare name. A Markdown link's text,
 // followed by `(`, keeps its brackets.
 diagnostic_names1_bracketed: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
-    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    ^edits: DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
     open: "[jet.".bytes()
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         start: at
         at += 1
@@ -237,13 +237,13 @@ diagnostic_names1_bracketed: fn(path: String, bytes: [U8]) -[]> MigrationOutcome
 // recorded output and inside a `.case` predicate's quoted text, any code
 // followed by `: ` opens one. A code no row owns is reported and left alone.
 diagnostic_names1_messages: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
-    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    ^edits: DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
     output: diagnostic_names1_recorded_output(path)
     predicates: path.ends_with(".case")
-    quoted := false
-    comment := false
-    line_start := true
-    at := 0
+    ^quoted: false
+    ^comment: false
+    ^line_start: true
+    ^at: 0
     loop at < bytes.len() {
         start: at
         byte: bytes[start]
@@ -330,9 +330,9 @@ diagnostic_names1_predicates: fn(path: String, text: String) -[]> MigrationOutco
     if !path.ends_with(".case") {
         return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
     }
-    out := [String]{}
-    rewritten := 0
-    explain := false
+    ^out: [String]{}
+    ^rewritten: 0
+    ^explain: false
     loop line in text.split("\n") {
         trimmed: line.trim()
         if trimmed.starts_with("step:") -> explain = trimmed.contains("jet explain")
@@ -362,7 +362,7 @@ diagnostic_names1_predicates: fn(path: String, text: String) -[]> MigrationOutco
 // `"Error: Jet.`, and a predicate on the text after `"Error ["` that ends at
 // the bracket (`^= "Jet.MissingGit]"`) ends at the colon.
 diagnostic_names1_opener: fn(line: String) -[]> String? {
-    moved := "{line}"
+    ^moved: "{line}"
     loop label in DIAGNOSTIC_NAMES1_LABELS {
         moved = moved.replace("\"{label} [\"", "\"{label}: \"").replace("\"{label} [jet.", "\"{label}: Jet.")
         moved = moved.replace("~ {label} [ ", "~ \"{label}: \" ")
@@ -384,15 +384,15 @@ diagnostic_names1_opener: fn(line: String) -[]> String? {
 diagnostic_names1_predicate: fn(line: String) -[]> String? {
     bytes: line.bytes()
     loop operator in DIAGNOSTIC_NAMES1_MATCHES {
-        at := 0
+        ^at: 0
         loop at < bytes.len() && !diagnostic_names1_at(bytes, at, operator.bytes()) -> at += 1
         if at >= bytes.len() -> next
         open: at + operator.count_bytes()
-        close := open
+        ^close: open
         loop close < bytes.len() && bytes[close] != 34 -> close += 1
         if close >= bytes.len() || close == open -> return None
-        start := open
-        end := close
+        ^start: open
+        ^end: close
         if bytes[open] == 91 && bytes[close - 1] == 93 {
             start = open + 1
             end = close - 1
@@ -410,9 +410,9 @@ diagnostic_names1_predicate: fn(line: String) -[]> String? {
 
 // Any other `jet.Name` not inside a longer dotted path: `Jet.Name`.
 diagnostic_names1_bare: fn(path: String, bytes: [U8]) -[]> MigrationOutcome {
-    edits := DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
+    ^edits: DiagnosticNames1Edits{out: [String]{}, cursor: 0, rewritten: 0, skipped: [String]{}}
     prefix: "jet.".bytes()
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         start: at
         at += 1
@@ -451,7 +451,7 @@ diagnostic_names1_splice: fn(edits: ^DiagnosticNames1Edits, bytes: [U8], start: 
 }
 
 diagnostic_names1_skip: fn(edits: ^DiagnosticNames1Edits, path: String, bytes: [U8], at: Int, token: String) Never! {
-    line := 1
+    ^line: 1
     loop byte in bytes[0..<at] {
         if byte == 10 -> line += 1
     }
@@ -462,7 +462,7 @@ diagnostic_names1_finish: fn(edits: DiagnosticNames1Edits, bytes: [U8]) -[]> Mig
     if edits.rewritten == 0 {
         return MigrationOutcome{text: String.from_bytes(bytes) ?? "", rewritten: 0, skipped: edits.skipped}
     }
-    out := edits.out
+    ^out: edits.out
     out.push(String.from_bytes(bytes[edits.cursor..<bytes.len()]) ?? "")
     MigrationOutcome{text: out.join(""), rewritten: edits.rewritten, skipped: edits.skipped}
 }
@@ -486,7 +486,7 @@ diagnostic_names1_at: fn(bytes: [U8], at: Int, needle: [U8]) -[]> Bool {
 
 // The end of the run of word bytes from `at`.
 diagnostic_names1_word_end: fn(bytes: [U8], at: Int) -[]> Int {
-    end := at
+    ^end: at
     loop end < bytes.len() && diagnostic_names1_word_byte(bytes[end]) -> end += 1
     end
 }
@@ -494,7 +494,7 @@ diagnostic_names1_word_end: fn(bytes: [U8], at: Int) -[]> Int {
 // The end of the code or dotted name from `at`: word bytes and `-`, joined
 // by single dots; a dot that ends a sentence is not part of it.
 diagnostic_names1_path_end: fn(bytes: [U8], at: Int) -[]> Int {
-    end := at
+    ^end: at
     loop end < bytes.len() {
         byte: bytes[end]
         if {

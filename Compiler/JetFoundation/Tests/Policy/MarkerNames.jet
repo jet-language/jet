@@ -65,7 +65,7 @@ use jet_foundation.[
 
 // The struct names MARKER_SOURCE declares at its top level.
 marker_names_declared: fn() -> [String] Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop line in MARKER_SOURCE.split("\n") {
         if line.starts_with(" ") || !line.contains(": struct") -> next
         colon: line.index(": struct") ?? next
@@ -135,7 +135,7 @@ marker_names_declared: fn() -> [String] Never! {
         MARKER_UNSAFE,
         MARKER_WAIVE,
     }
-    missing := [String]{}
+    ^missing: [String]{}
     loop name in constants {
         if !declared.contains(name) -> missing.push(name.copy())
     }
@@ -146,8 +146,8 @@ marker_names_declared: fn() -> [String] Never! {
 // struct, and every row names its declaration once.
 #Test("every marker hook keys a declared marker") {
     declared: marker_names_declared()
-    seen := [String]{}
-    problems := [String]{}
+    ^seen: [String]{}
+    ^problems: [String]{}
     loop row in MARKER_HOOKS {
         guest: row.declaration == MARKER_GUEST_IMPORT || row.declaration == MARKER_GUEST_EXPORT
         if !guest && !declared.contains(row.declaration) {

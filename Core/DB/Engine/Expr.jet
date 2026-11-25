@@ -73,8 +73,8 @@ table_column_affinity: fn(db: conn.Conn, t: Int, i_col: Int) -> Int Never! {
 
 // sqlite3ExprAffinity: the affinity of expression `e0`, 0 for none.
 expr_affinity: fn(db: conn.Conn, a: ast.AST, e0: Int) -> Int Never! {
-    e := e0
-    op := a.exprs[e].op
+    ^e: e0
+    ^op: a.exprs[e].op
     loop {
         if op == tk.TK_COLUMN || (op == tk.TK_AGG_COLUMN && a.exprs[e].y >= 0) {
             return table_column_affinity(db, a.exprs[e].y, a.exprs[e].icolumn)
@@ -103,7 +103,7 @@ expr_affinity: fn(db: conn.Conn, a: ast.AST, e0: Int) -> Int Never! {
 // sqlite3ExprDataType: the datatypes `e0` may yield, 0x01 numeric, 0x02
 // text, 0x04 blob; 0 when it must be NULL.
 expr_data_type: fn(db: conn.Conn, a: ast.AST, e0: Int) -> Int Never! {
-    e := e0
+    ^e: e0
     loop e >= 0 {
         op: a.exprs[e].op
         if op == tk.TK_COLLATE || op == tk.TK_IF_NULL_ROW || op == tk.TK_UPLUS {
@@ -122,10 +122,10 @@ expr_data_type: fn(db: conn.Conn, a: ast.AST, e0: Int) -> Int Never! {
             return 7
         }
         if op == tk.TK_CASE {
-            res := 0
+            ^res: 0
             l: a.exprs[e].x
             n: ast.list_len(a, l)
-            ii := 1
+            ^ii: 1
             loop ii < n {
                 res |= expr_data_type(db, a, ast.list_expr(a, l, ii))
                 ii += 2
@@ -140,10 +140,10 @@ expr_data_type: fn(db: conn.Conn, a: ast.AST, e0: Int) -> Int Never! {
 
 // sqlite3ExprCollSeq: the collating sequence of `e0`, -1 when it has none.
 expr_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int) -> Int Never! {
-    coll := -1
-    q := e0
+    ^coll: -1
+    ^q: e0
     loop q >= 0 {
-        op := a.exprs[q].op
+        ^op: a.exprs[q].op
         if op == tk.TK_REGISTER -> op = a.exprs[q].op2
         if (op == tk.TK_AGG_COLUMN && a.exprs[q].y >= 0) || op == tk.TK_COLUMN || op == tk.TK_TRIGGER {
             j: a.exprs[q].icolumn
@@ -170,7 +170,7 @@ expr_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int) -> Int Never! {
         if !ast.has(a, q, ast.EP_COLLATE) -> break
         l: a.exprs[q].left
         if l >= 0 && ast.has(a, l, ast.EP_COLLATE) -> q = l else {
-            nxt := a.exprs[q].right
+            ^nxt: a.exprs[q].right
             x: a.exprs[q].x
             if !ast.has(a, q, ast.EP_X_IS_SELECT) && x >= 0 && !p.db.malloc_failed {
                 loop i in 0..<ast.list_len(a, x) {
@@ -217,7 +217,7 @@ compare_affinity: fn(db: conn.Conn, a: ast.AST, e: Int, aff2: Int) -> Int Never!
 
 // comparisonAffinity: the affinity both operands of comparison `e` take.
 comparison_affinity: fn(db: conn.Conn, a: ast.AST, e: Int) -> Int Never! {
-    aff := expr_affinity(db, a, a.exprs[e].left)
+    ^aff: expr_affinity(db, a, a.exprs[e].left)
     if a.exprs[e].right >= 0 -> aff = compare_affinity(db, a, a.exprs[e].right, aff) else if ast.has(a, e, ast.EP_X_IS_SELECT) {
         aff = compare_affinity(db, a, ast.list_expr(a, a.selects[a.exprs[e].x].elist, 0), aff)
     } else if aff == 0 { aff = base.AFF_BLOB }
@@ -244,7 +244,7 @@ binary_compare_p5: fn(db: conn.Conn, a: ast.AST, e1: Int, e2: Int, jump_if_null:
 binary_compare_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, l: Int, r: Int) -> Int Never! {
     if ast.has(a, l, ast.EP_COLLATE) -> return expr_coll_seq(p, a, l)
     if r >= 0 && ast.has(a, r, ast.EP_COLLATE) -> return expr_coll_seq(p, a, r)
-    c := expr_coll_seq(p, a, l)
+    ^c: expr_coll_seq(p, a, l)
     if c < 0 -> c = expr_coll_seq(p, a, r)
     c
 }
@@ -301,8 +301,8 @@ code_vector_compare: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest: Int, op: Int, p
     l: a.exprs[e].left
     r: a.exprs[e].right
     n_left: ast.vector_size(a, l)
-    opx := op
-    addr_cmp := 0
+    ^opx: op
+    ^addr_cmp: 0
     addr_done: cg.v_make_label(p)
     is_commuted: ast.has(a, e, ast.EP_COMMUTED)
     if cg.n_err(a) > 0 {
@@ -318,7 +318,7 @@ code_vector_compare: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest: Int, op: Int, p
     reg_left: expr_code_subselect(p, a, l)
     reg_right: expr_code_subselect(p, a, r)
     _: cg.op2(p, opc.OP_INTEGER, 1, dest)
-    i := 0
+    ^i: 0
     loop {
         if addr_cmp != 0 -> cg.v_jump_here(p, addr_cmp)
         rl: expr_vector_register(p, a, l, i, reg_left)
@@ -390,7 +390,7 @@ ConstOrGroupByWalker: struct {
                 p.walks[t].e_code = 0
                 return ast.WRC_ABORT
             }
-            w := ast.SQLConstWalker{code: p.walks[t].e_code, cur: 0}
+            ^w: ast.SQLConstWalker{code: p.walks[t].e_code, cur: 0}
             rc: w.walk_expr_cb(a, e)
             p.walks[t].e_code = w.code
             rc
@@ -413,7 +413,7 @@ ConstOrGroupByWalker: struct {
 // sqlite3ExprIsConstantOrGroupBy: whether `e` is constants and BINARY copies
 // of GROUP BY terms only.
 expr_is_constant_or_group_by: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, group_by: Int) -[DB]> Bool Never! {
-    w := ConstOrGroupByWalker{unused: 0}
+    ^w: ConstOrGroupByWalker{unused: 0}
     cg.walk_push(p, w, group_by)
     p.walks[cg.walk_top(p)].e_code = 1
     _: cg.pwalk_expr(p, a, e)
@@ -425,13 +425,13 @@ expr_is_constant_or_group_by: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, group_by: In
 // constant `e0` unchanged.
 expr_needs_no_affinity_change: fn(a: ast.AST, e0: Int, aff: Int) -> Bool Never! {
     if aff == base.AFF_BLOB -> return true
-    e := e0
-    unary_minus := false
+    ^e: e0
+    ^unary_minus: false
     loop a.exprs[e].op == tk.TK_UPLUS || a.exprs[e].op == tk.TK_UMINUS {
         if a.exprs[e].op == tk.TK_UMINUS -> unary_minus = true
         e = a.exprs[e].left
     }
-    op := a.exprs[e].op
+    ^op: a.exprs[e].op
     if op == tk.TK_REGISTER -> op = a.exprs[e].op2
     if op == tk.TK_INTEGER || op == tk.TK_FLOAT -> return aff >= base.AFF_NUMERIC
     if op == tk.TK_STRING -> return !unary_minus && aff == base.AFF_TEXT
@@ -445,7 +445,7 @@ rowid_alias: fn(db: conn.Conn, t: Int) -> [U8]? Never! {
     opts: [String]{"_ROWID_", "ROWID", "OID"}
     loop opt in opts {
         z: opt.bytes()
-        taken := false
+        ^taken: false
         loop c in db.tables[t].cols {
             if util.str_icmp(z, c.name) == 0 {
                 taken = true
@@ -505,12 +505,12 @@ in_rhs_is_constant: fn(a: ^ast.AST, e: Int) -> Bool Never! {
 // when the RHS holds a NULL (untouched when it cannot).
 find_in_index: fn(p: ^cg.Parse, a: ^ast.AST, x: Int, in_flags: Int, want_null: Bool, rhs_has_null: ^Int) -[DB]> {typ: Int, tab: Int, map: [Int]} Never! {
     must_be_unique: in_flags & IN_INDEX_LOOP != 0
-    i_tab := p.f.n_tab
+    ^i_tab: p.f.n_tab
     p.f.n_tab += 1
-    want := want_null
+    ^want: want_null
     if want && ast.has(a, x, ast.EP_X_IS_SELECT) {
         el: a.selects[a.exprs[x].x].elist
-        can := false
+        ^can: false
         loop i in 0..<ast.list_len(a, el) {
             if rs.expr_can_be_null(p.db, a, ast.list_expr(a, el, i)) {
                 can = true
@@ -521,9 +521,9 @@ find_in_index: fn(p: ^cg.Parse, a: ^ast.AST, x: Int, in_flags: Int, want_null: B
     }
     lhs_vec: a.exprs[x].left
     n_vec: ast.vector_size(a, lhs_vec)
-    ai_map := [Int]{}
+    ^ai_map: [Int]{}
     loop i in 0..<n_vec -> ai_map.push(i)
-    e_type := 0
+    ^e_type: 0
     s: if cg.n_err(a) == 0 -> is_candidate_for_in_opt(p.db, a, x) else -> -1
     if s >= 0 {
         el: a.selects[s].elist
@@ -539,7 +539,7 @@ find_in_index: fn(p: ^cg.Parse, a: ^ast.AST, x: Int, in_flags: Int, want_null: B
             _: cg.explain(p, a, false, "USING ROWID SEARCH ON TABLE {z_tab} FOR IN-OPERATOR")
             cg.v_jump_here(p, i_addr)
         } else {
-            affinity_ok := true
+            ^affinity_ok: true
             loop i in 0..<n_expr {
                 if !affinity_ok -> break
                 lhs: ast.vector_field_subexpr(a, lhs_vec, i)
@@ -549,7 +549,7 @@ find_in_index: fn(p: ^cg.Parse, a: ^ast.AST, x: Int, in_flags: Int, want_null: B
                     affinity_ok = idxaff >= base.AFF_NUMERIC
                 }
             }
-            ix := if affinity_ok -> p.db.tables[t].index else -> -1
+            ^ix: if affinity_ok -> p.db.tables[t].index else -> -1
             loop ix >= 0 && e_type == 0 {
                 cur_ix: ix
                 ix = p.db.indexes[cur_ix].next
@@ -560,14 +560,14 @@ find_in_index: fn(p: ^cg.Parse, a: ^ast.AST, x: Int, in_flags: Int, want_null: B
                 if must_be_unique && (p.db.indexes[cur_ix].n_key_col > n_expr || (n_col > n_expr && p.db.indexes[cur_ix].on_error == ast.OE_NONE)) {
                     next
                 }
-                col_used := 0
-                map := [Int]{}
+                ^col_used: 0
+                ^map: [Int]{}
                 loop i in 0..<n_vec -> map.push(i)
                 loop i in 0..<n_expr {
                     lhs: ast.vector_field_subexpr(a, lhs_vec, i)
                     rhs: ast.list_expr(a, el, i)
                     req: binary_compare_coll_seq(p, a, lhs, rhs)
-                    j := 0
+                    ^j: 0
                     loop j < n_expr {
                         if p.db.indexes[cur_ix].ai_column[j] == a.exprs[rhs].icolumn && (req < 0 || util.str_icmp(conn.coll_name(p.db, req), p.db.indexes[cur_ix].coll[j]) == 0) {
                             break
@@ -605,7 +605,7 @@ find_in_index: fn(p: ^cg.Parse, a: ^ast.AST, x: Int, in_flags: Int, want_null: B
     }
     if e_type == 0 {
         saved_n_query_loop: p.f.n_query_loop
-        r_may_have_null := 0
+        ^r_may_have_null: 0
         e_type = IN_INDEX_EPH
         if in_flags & IN_INDEX_LOOP != 0 -> p.f.n_query_loop = 0 else if want {
             p.f.n_mem += 1
@@ -627,7 +627,7 @@ expr_in_affinity: fn(db: conn.Conn, a: ast.AST, e: Int) -> [U8] Never! {
     l: a.exprs[e].left
     n_val: ast.vector_size(a, l)
     s: if ast.has(a, e, ast.EP_X_IS_SELECT) -> a.exprs[e].x else -> -1
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<n_val {
         aff: expr_affinity(db, a, ast.vector_field_subexpr(a, l, i))
         if s >= 0 {
@@ -655,7 +655,7 @@ vector_error_msg: fn(a: ^ast.AST, e: Int) Never! {
 // sqlite3CodeRhsOfIN: an ephemeral index on cursor i_tab holding the right
 // side of IN `e`, coded once as a subroutine when it does not vary.
 code_rhs_of_in: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, i_tab: Int) -[DB]> Never! {
-    addr_once := 0
+    ^addr_once: 0
     if !ast.has(a, e, ast.EP_VAR_SELECT) && p.f.i_self_tab == 0 {
         if ast.has(a, e, ast.EP_SUBRTN) {
             addr_once = cg.op0(p, opc.OP_ONCE)
@@ -677,20 +677,20 @@ code_rhs_of_in: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, i_tab: Int) -[DB]> Never! 
     n_val: ast.vector_size(a, l)
     a.exprs[e].itable = i_tab
     addr: cg.op2(p, opc.OP_OPEN_EPHEMERAL, i_tab, n_val)
-    key := cat.key_info_alloc(p.db, n_val, 1)
+    ^key: cat.key_info_alloc(p.db, n_val, 1)
     if ast.has(a, e, ast.EP_X_IS_SELECT) {
         s: a.exprs[e].x
         el: a.selects[s].elist
         corr: if addr_once != 0 -> "" else -> "CORRELATED "
         _: cg.explain(p, a, true, "{corr}LIST SUBQUERY {a.selects[s].sel_id}")
         if ast.list_len(a, el) == n_val {
-            dest := select_dest_init(cg.SRT_SET, i_tab)
+            ^dest: select_dest_init(cg.SRT_SET, i_tab)
             dest.aff_sdst = Val(expr_in_affinity(p.db, a, e))
             a.selects[s].ilimit = 0
             dup: ast.select_dup(a, s, 0)
-            rc := 1
+            ^rc: 1
             if !p.db.malloc_failed {
-                g := p.up
+                ^g: p.up
                 rc = g.select(p, a, dup, dest)
             }
             if rc != 0 {
@@ -704,7 +704,7 @@ code_rhs_of_in: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, i_tab: Int) -[DB]> Never! 
         }
     } else if a.exprs[e].x >= 0 {
         list: a.exprs[e].x
-        affinity := expr_affinity(p.db, a, l)
+        ^affinity: expr_affinity(p.db, a, l)
         if affinity <= base.AFF_NONE -> affinity = base.AFF_BLOB else if affinity == base.AFF_REAL {
             affinity = base.AFF_NUMERIC
         }
@@ -749,12 +749,12 @@ code_subselect: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
     p.f.n_mem += 1
     a.exprs[e].y_reg = p.f.n_mem
     a.exprs[e].y = cg.op2(p, opc.OP_BEGIN_SUBRTN, 0, a.exprs[e].y_reg) + 1
-    addr_once := 0
+    ^addr_once: 0
     if !ast.has(a, e, ast.EP_VAR_SELECT) -> addr_once = cg.op0(p, opc.OP_ONCE)
     corr: if addr_once != 0 -> "" else -> "CORRELATED "
     _: cg.explain(p, a, true, "{corr}SCALAR SUBQUERY {a.selects[s].sel_id}")
     n_reg: if a.exprs[e].op == tk.TK_SELECT -> ast.list_len(a, a.selects[s].elist) else -> 1
-    dest := select_dest_init(0, p.f.n_mem + 1)
+    ^dest: select_dest_init(0, p.f.n_mem + 1)
     p.f.n_mem += n_reg
     if a.exprs[e].op == tk.TK_SELECT {
         dest.e_dest = cg.SRT_MEM
@@ -776,7 +776,7 @@ code_subselect: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
         a.selects[s].limit = ast.pexpr(a, tk.TK_LIMIT, one, -1)
     }
     a.selects[s].ilimit = 0
-    g := p.up
+    ^g: p.up
     if g.select(p, a, s, dest) != 0 {
         a.exprs[e].op2 = a.exprs[e].op
         a.exprs[e].op = tk.TK_ERROR
@@ -821,7 +821,7 @@ expr_code_in: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest_if_false: Int, dest_if_
     if p.db.malloc_failed {
         return
     }
-    r_rhs_has_null := 0
+    ^r_rhs_has_null: 0
     found: find_in_index(p, a, e, IN_INDEX_MEMBERSHIP | IN_INDEX_NOOP_OK, dest_if_false != dest_if_null, r_rhs_has_null)
     e_type: found.typ
     i_tab: found.tab
@@ -830,14 +830,14 @@ expr_code_in: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest_if_false: Int, dest_if_
     lhs_vec: expr_code_vector(p, a, l)
     r_lhs_orig: lhs_vec.reg
     p.f.ok_const_factor = ok_const_factor
-    reordered := false
+    ^reordered: false
     loop i in 0..<n_vector {
         if ai_map[i] != i {
             reordered = true
             break
         }
     }
-    r_lhs := r_lhs_orig
+    ^r_lhs: r_lhs_orig
     if reordered {
         r_lhs = cg.get_temp_range(p, n_vector)
         loop i in 0..<n_vector -> _: cg.op3(p, opc.OP_COPY, r_lhs_orig + i, r_lhs + ai_map[i], 0)
@@ -847,7 +847,7 @@ expr_code_in: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest_if_false: Int, dest_if_
         list: a.exprs[e].x
         coll: expr_coll_seq(p, a, l)
         label_ok: cg.v_make_label(p)
-        reg_ck_null := 0
+        ^reg_ck_null: 0
         if dest_if_null != dest_if_false {
             reg_ck_null = cg.get_temp_reg(p)
             _: cg.op3(p, opc.OP_BIT_AND, r_lhs, r_lhs, reg_ck_null)
@@ -879,8 +879,8 @@ expr_code_in: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest_if_false: Int, dest_if_
         if r_lhs != r_lhs_orig -> cg.release_temp_reg(p, r_lhs)
         return
     }
-    dest_step6 := 0
-    dest_step2 := dest_if_false
+    ^dest_step6: 0
+    ^dest_step2: dest_if_false
     if dest_if_null != dest_if_false {
         dest_step6 = cg.v_make_label(p)
         dest_step2 = dest_step6
@@ -892,7 +892,7 @@ expr_code_in: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest_if_false: Int, dest_if_
         }
         if rs.expr_can_be_null(p.db, a, fe) -> _: cg.op2(p, opc.OP_IS_NULL, r_lhs + i, dest_step2)
     }
-    addr_truth_op := 0
+    ^addr_truth_op: 0
     if e_type == IN_INDEX_ROWID {
         _: cg.op3(p, opc.OP_SEEK_ROWID, i_tab, dest_if_false, r_lhs)
         addr_truth_op = cg.op0(p, opc.OP_GOTO)
@@ -959,7 +959,7 @@ code_integer: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, neg: Bool, i_mem: Int) Never
         } else { code_real(p, z, neg, i_mem) }
         return
     }
-    value := r.value
+    ^value: r.value
     if neg -> value = if c == 3 -> base.I64_MIN else -> -value
     _: cg.op4(p, opc.OP_INT64, 0, i_mem, 0, conn.P4.Int64(value))
 }
@@ -1000,8 +1000,8 @@ expr_code_get_column_of_table: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i_tab_cur: 
         _: cg.op2(p, opc.OP_ROWID, i_tab_cur, reg_out)
         return
     }
-    op := opc.OP_COLUMN
-    x := i_col
+    ^op: opc.OP_COLUMN
+    ^x: i_col
     if is_virtual(p.db, t) -> op = opc.OP_VCOLUMN else if p.db.tables[t].cols[i_col].col_flags & conn.COLFLAG_VIRTUAL != 0 {
         if p.db.tables[t].cols[i_col].col_flags & conn.COLFLAG_BUSY != 0 {
             ast.error(a, "generated column loop on \"{ast.text(p.db.tables[t].cols[i_col].name)}\"")
@@ -1085,7 +1085,7 @@ vtab_overload_function: fn(p: ^cg.Parse, a: ^ast.AST, def: conn.FuncDef, n_arg: 
     if a.exprs[e].op != tk.TK_COLUMN -> return def.copy()
     t: a.exprs[e].y
     if t < 0 || !is_virtual(p.db, t) -> return def.copy()
-    g := p.up
+    ^g: p.up
     g.vtab_overload_function(p, a, def, n_arg, e)
 }
 
@@ -1125,7 +1125,7 @@ expr_code_inline_function: fn(p: ^cg.Parse, a: ^ast.AST, farg: Int, func_id: Int
         return target
     }
     if func_id == cat.INLINEFUNC_IIF {
-        case_expr := ast.zero_expr(tk.TK_CASE)
+        ^case_expr: ast.zero_expr(tk.TK_CASE)
         case_expr.x = farg
         c: ast.push_expr(a, case_expr)
         return expr_code_target(p, a, c, target)
@@ -1164,11 +1164,11 @@ expr_code_inline_function: fn(p: ^cg.Parse, a: ^ast.AST, farg: Int, func_id: Int
 // sqlite3IndexedExprLookup: when `e` is an expression of an index on
 // p.f.idx_epr, read it from the index into target; target, or -1.
 indexed_expr_lookup: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> Int Never! {
-    ie := p.f.idx_epr
+    ^ie: p.f.idx_epr
     loop ie >= 0 {
         x: p.idx_exprs[ie].copy()
         ie = x.next
-        i_data_cur := x.i_data_cur
+        ^i_data_cur: x.i_data_cur
         if i_data_cur < 0 -> next
         if p.f.i_self_tab != 0 {
             if x.i_data_cur != p.f.i_self_tab - 1 -> next
@@ -1198,12 +1198,12 @@ indexed_expr_lookup: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> I
 // exprPartidxExprLookup: when column `e` is fixed by the WHERE clause of a
 // partial index on p.f.idx_part_epr, code that value; its register, or 0.
 partidx_expr_lookup: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> Int Never! {
-    ie := p.f.idx_part_epr
+    ^ie: p.f.idx_part_epr
     loop ie >= 0 {
         x: p.idx_exprs[ie].copy()
         ie = x.next
         if a.exprs[e].icolumn == x.i_idx_col && a.exprs[e].itable == x.i_data_cur {
-            addr := 0
+            ^addr: 0
             if x.b_maybe_null_row -> addr = cg.op1(p, opc.OP_IF_NULL_ROW, x.i_idx_cur)
             ret: expr_code_target(p, a, x.expr, target)
             _: cg.op4(p, opc.OP_AFFINITY, ret, 1, 0, conn.P4.Text([U8]{U8{x.aff}}))
@@ -1224,8 +1224,8 @@ is_comparison: fn(op: Int) -> Bool Never! {
 // sqlite3ExprCodeTarget: code `e0`, ideally into register target; the
 // register that holds the result.
 expr_code_target: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, target: Int) -[DB]> Int Never! {
-    e := e0
-    op := tk.TK_NULL
+    ^e: e0
+    ^op: tk.TK_NULL
     // expr_code_doover
     loop e >= 0 {
         if p.f.idx_epr >= 0 && !ast.has(a, e, ast.EP_LEAF) {
@@ -1264,7 +1264,7 @@ expr_code_target: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, target: Int) -[DB]> Int
         op = tk.TK_COLUMN
     }
     if op == tk.TK_COLUMN {
-        i_tab := a.exprs[e].itable
+        ^i_tab: a.exprs[e].itable
         t: a.exprs[e].y
         if ast.has(a, e, ast.EP_FIXED_COL) {
             i_reg: expr_code_target(p, a, a.exprs[e].left, target)
@@ -1345,8 +1345,8 @@ expr_code_target: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, target: Int) -[DB]> Int
         return target
     }
     if op == tk.TK_IS || op == tk.TK_ISNOT || is_comparison(op) {
-        cop := op
-        p5 := 0
+        ^cop: op
+        ^p5: 0
         if op == tk.TK_IS {
             cop = tk.TK_EQ
             p5 = conn.CMP_NULLEQ
@@ -1391,7 +1391,7 @@ expr_code_target: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, target: Int) -[DB]> Int
             code_real(p, a.exprs[l].token ?? [U8]{}, true, target)
             return target
         }
-        zero := ast.zero_expr(tk.TK_INTEGER)
+        ^zero: ast.zero_expr(tk.TK_INTEGER)
         zero.flags = ast.EP_INT_VALUE | ast.EP_TOKEN_ONLY
         temp_x: ast.push_expr(a, zero)
         t1: expr_code_temp(p, a, temp_x)
@@ -1546,7 +1546,7 @@ expr_code_function: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> In
     farg: a.exprs[e].x
     n_farg: if farg >= 0 -> ast.list_len(a, farg) else -> 0
     z_id: a.exprs[e].token ?? [U8]{}
-    def := cat.find_function(p.db, z_id, n_farg, p.db.enc) ?? return unknown_function_error(a, e, target)
+    ^def: cat.find_function(p.db, z_id, n_farg, p.db.enc) ?? return unknown_function_error(a, e, target)
     if def.has_finalize -> return unknown_function_error(a, e, target)
     if def.flags & conn.FUNC_INLINE != 0 && farg >= 0 {
         return expr_code_inline_function(p, a, farg, def.user_data, target)
@@ -1554,15 +1554,15 @@ expr_code_function: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> In
     if def.flags & (conn.FUNC_DIRECT | conn.FUNC_UNSAFE) != 0 {
         rs.expr_function_usable(p, a, e, def)
     }
-    const_mask := 0
-    coll := -1
+    ^const_mask: 0
+    ^coll: -1
     need_coll: def.flags & conn.FUNC_NEEDCOLL != 0
     loop i in 0..<n_farg {
         ai: ast.list_expr(a, farg, i)
         if i < 32 && ast.expr_is_constant(a, ai) -> const_mask |= 1 << i
         if need_coll && coll < 0 -> coll = expr_coll_seq(p, a, ai)
     }
-    r1 := 0
+    ^r1: 0
     if farg >= 0 {
         if const_mask != 0 {
             r1 = p.f.n_mem + 1
@@ -1605,20 +1605,20 @@ expr_code_case: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> Int Ne
     n_expr: ast.list_len(a, list)
     end_label: cg.v_make_label(p)
     x: a.exprs[e].left
-    op_compare := -1
+    ^op_compare: -1
     if x >= 0 {
         del: ast.expr_dup(a, x, 0)
         if p.db.malloc_failed -> return target
         v: expr_code_vector(p, a, del)
         expr_to_register(a, del, v.reg)
         // v.free is not released: its value may be copied into the result.
-        cmp := ast.zero_expr(tk.TK_EQ)
+        ^cmp: ast.zero_expr(tk.TK_EQ)
         cmp.left = del
         op_compare = ast.push_expr(a, cmp)
     }
-    i := 0
+    ^i: 0
     loop i < n_expr - 1 {
-        test := ast.list_expr(a, list, i)
+        ^test: ast.list_expr(a, list, i)
         if x >= 0 {
             a.exprs[op_compare].right = test
             test = op_compare
@@ -1645,7 +1645,7 @@ expr_code_case: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> Int Ne
 // reg_dest when positive, else a register of its choosing (which equal
 // factored expressions share).
 expr_code_run_just_once: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, reg_dest0: Int) -[DB]> Int Never! {
-    reg_dest := reg_dest0
+    ^reg_dest: reg_dest0
     l: p.f.const_expr
     if reg_dest < 0 && l >= 0 {
         loop i in 0..<ast.list_len(a, l) {
@@ -1728,11 +1728,11 @@ expr_code_factorable: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> 
 // target (flags cg.ECEL_*); the number coded.
 expr_code_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, list: Int, target: Int, src_reg: Int, flags0: Int) -[DB]> Int Never! {
     copy_op: if flags0 & cg.ECEL_DUP != 0 -> opc.OP_COPY else -> opc.OP_SCOPY
-    flags := flags0
+    ^flags: flags0
     if !p.f.ok_const_factor -> flags = util.clear_bits(flags, cg.ECEL_FACTOR)
     count: ast.list_len(a, list)
-    n := count
-    i := 0
+    ^n: count
+    ^i: 0
     loop k in 0..<count {
         e: a.lists[list].items[k].expr
         j: a.lists[list].items[k].order_by_col
@@ -1748,7 +1748,7 @@ expr_code_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, list: Int, target: Int, src_r
             in_reg: expr_code_target(p, a, e, target + i)
             if in_reg != target + i {
                 last: cg.v_last_addr(p)
-                merged := false
+                ^merged: false
                 if copy_op == opc.OP_COPY && last >= 0 {
                     o: cg.v_op_at(p, last)
                     if o.opcode == opc.OP_COPY && o.p1 + o.p3 + 1 == in_reg && o.p2 + o.p3 + 1 == target + i && o.p5 == 0 {
@@ -1773,15 +1773,15 @@ expr_code_between: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest: Int, jump: Int, j
         return
     }
     list: a.exprs[e].x
-    cl := ast.zero_expr(tk.TK_GE)
+    ^cl: ast.zero_expr(tk.TK_GE)
     cl.left = del
     cl.right = ast.list_expr(a, list, 0)
     comp_left: ast.push_expr(a, cl)
-    cr := ast.zero_expr(tk.TK_LE)
+    ^cr: ast.zero_expr(tk.TK_LE)
     cr.left = del
     cr.right = ast.list_expr(a, list, 1)
     comp_right: ast.push_expr(a, cr)
-    and_expr := ast.zero_expr(tk.TK_AND)
+    ^and_expr: ast.zero_expr(tk.TK_AND)
     and_expr.left = comp_left
     and_expr.right = comp_right
     expr_and: ast.push_expr(a, and_expr)
@@ -1804,11 +1804,11 @@ expr_if_true: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest: Int, jump_if_null0: In
     if !p.f.has_vdbe || e < 0 {
         return
     }
-    op := a.exprs[e].op
-    jump_if_null := jump_if_null0
-    free1 := 0
-    free2 := 0
-    default := false
+    ^op: a.exprs[e].op
+    ^jump_if_null: jump_if_null0
+    ^free1: 0
+    ^free2: 0
+    ^default: false
     l: a.exprs[e].left
     r: a.exprs[e].right
     if op == tk.TK_AND || op == tk.TK_OR {
@@ -1875,11 +1875,11 @@ expr_if_false: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest: Int, jump_if_null0: I
     // The opcode of the opposite test: TK_ISNULL -> OP_NotNull, TK_NE ->
     // OP_Eq, TK_GT -> OP_Le and so on, the TK_ and OP_ codes arranged so.
     odd: tk.TK_ISNULL & 1
-    op := ((eop + odd) ~ 1) - odd
-    jump_if_null := jump_if_null0
-    free1 := 0
-    free2 := 0
-    default := false
+    ^op: ((eop + odd) ~ 1) - odd
+    ^jump_if_null: jump_if_null0
+    ^free1: 0
+    ^free2: 0
+    ^default: false
     l: a.exprs[e].left
     r: a.exprs[e].right
     if eop == tk.TK_AND || eop == tk.TK_OR {
@@ -1959,7 +1959,7 @@ ParseVarMatch: struct {
                 i_var: a.exprs[var].icolumn
                 self.used.push(i_var)
                 if i_var < 1 || i_var > self.vars.len() -> return false
-                pl := mem.mem_copy(self.vars[i_var - 1])
+                ^pl: mem.mem_copy(self.vars[i_var - 1])
                 if pl.flags & base.MEM_NULL != 0 -> return false
                 if base.value_type(pl) == base.SQL_TEXT -> _: mem.value_text(pl, base.UTF8)
                 return record.mem_compare(pl, pr, record.COLL_NONE) == 0
@@ -1976,7 +1976,7 @@ expr_implies_not_null: fn(m: ^ParseVarMatch, a: ^ast.AST, e: Int, nn: Int, i_tab
     }
     op: a.exprs[e].op
     l: a.exprs[e].left
-    seen_not := seen_not0
+    ^seen_not: seen_not0
     if op == tk.TK_IN {
         if seen_not && ast.has(a, e, ast.EP_X_IS_SELECT) -> return false
         return expr_implies_not_null(m, a, l, nn, i_tab, true)
@@ -2024,7 +2024,7 @@ implies_expr_with: fn(m: ^ParseVarMatch, a: ^ast.AST, e1: Int, e2: Int, i_tab: I
 // variables of e1 match equal literals of e2, and mark the Vdbe to
 // reprepare when they are rebound.
 expr_implies_expr: fn(p: ^cg.Parse, a: ^ast.AST, e1: Int, e2: Int, i_tab: Int) -> Bool Never! {
-    m := ParseVarMatch{vars: p.reprepare_vars, used: [Int]{}}
+    ^m: ParseVarMatch{vars: p.reprepare_vars, used: [Int]{}}
     r: implies_expr_with(m, a, e1, e2, i_tab)
     loop i in m.used -> aux.set_varmask(p.f.v, i)
     r
@@ -2116,7 +2116,7 @@ both_imply_not_null_row: fn(p: ^cg.Parse, a: ^ast.AST, e1: Int, e2: Int) -[DB]> 
 // column of cursor i_tab is not NULL (false when in doubt); is_rj for a
 // RIGHT JOIN.
 expr_implies_non_null_row: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, i_tab: Int, is_rj: Bool) -[DB]> Bool Never! {
-    e := ast.skip_collate_and_likely(a, e0)
+    ^e: ast.skip_collate_and_likely(a, e0)
     if e < 0 -> return false
     if a.exprs[e].op == tk.TK_NOTNULL -> e = a.exprs[e].left else {
         loop a.exprs[e].op == tk.TK_AND {
@@ -2124,7 +2124,7 @@ expr_implies_non_null_row: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, i_tab: Int, is
             e = a.exprs[e].right
         }
     }
-    w := ImpliesNotNullRowWalker{unused: 0}
+    ^w: ImpliesNotNullRowWalker{unused: 0}
     cg.walk_push(p, w, i_tab)
     p.walks[cg.walk_top(p)].mw_flags = if is_rj -> 1 else -> 0
     _: cg.pwalk_expr(p, a, e)
@@ -2166,9 +2166,9 @@ IdxCoverWalker: struct {
 // sqlite3ExprCoveredByIndex: whether index ix on the table of cursor i_cur
 // holds every column of it `e` reads.
 expr_covered_by_index: fn(db: conn.Conn, a: ^ast.AST, e: Int, i_cur: Int, ix: Int) -> Bool Never! {
-    cols := [Int]{}
+    ^cols: [Int]{}
     loop i in 0..<db.indexes[ix].n_column -> cols.push(db.indexes[ix].ai_column[i])
-    w := IdxCoverWalker{cur: i_cur, cols: cols, code: 0}
+    ^w: IdxCoverWalker{cur: i_cur, cols: cols, code: 0}
     _: ast.walk_expr<IdxCoverWalker>(w, a, e)
     w.code == 0
 }
@@ -2216,7 +2216,7 @@ AggInfoPersistWalker: struct {
 
 // sqlite3AggInfoPersistWalkerInit and sqlite3WalkSelect over SELECT `s`.
 agg_info_persist_select: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {
-    w := AggInfoPersistWalker{unused: 0}
+    ^w: AggInfoPersistWalker{unused: 0}
     cg.walk_push(p, w, 0)
     _: cg.pwalk_select(p, a, s)
     _: cg.walk_pop(p)
@@ -2227,7 +2227,7 @@ agg_info_persist_select: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {
 find_or_create_agg_info_column: fn(p: ^cg.Parse, a: ^ast.AST, ai: Int, e: Int) Never! {
     op: a.exprs[e].op
     n: p.aggs[ai].cols.len()
-    k := 0
+    ^k: 0
     loop k < n {
         if p.aggs[ai].cols[k].c_expr == e {
             return
@@ -2238,7 +2238,7 @@ find_or_create_agg_info_column: fn(p: ^cg.Parse, a: ^ast.AST, ai: Int, e: Int) N
         k += 1
     }
     if k == n {
-        col := cg.AggCol{tab: a.exprs[e].y, c_expr: e, itable: a.exprs[e].itable, icolumn: a.exprs[e].icolumn, i_sorter_column: -1}
+        ^col: cg.AggCol{tab: a.exprs[e].y, c_expr: e, itable: a.exprs[e].itable, icolumn: a.exprs[e].icolumn, i_sorter_column: -1}
         gb: p.aggs[ai].group_by
         if gb >= 0 && op != tk.TK_IF_NULL_ROW {
             loop j in 0..<ast.list_len(a, gb) {
@@ -2289,7 +2289,7 @@ AnalyzeAggWalker: struct {
                     return ast.WRC_CONTINUE
                 }
                 nf: p.aggs[ai].funcs.len()
-                i := 0
+                ^i: 0
                 loop i < nf {
                     fe: p.aggs[ai].funcs[i].f_expr
                     if fe == e || ast.expr_compare(a, fe, e, -1) == 0 -> break
@@ -2299,14 +2299,14 @@ AnalyzeAggWalker: struct {
                     x: a.exprs[e].x
                     n_arg: if x >= 0 -> ast.list_len(a, x) else -> 0
                     def: cat.find_function(p.db, a.exprs[e].token ?? [U8]{}, n_arg, p.db.enc) ?? return ast.WRC_ABORT
-                    item := cg.AggFunc{f_expr: e, func: def.copy(), i_distinct: -1, i_dist_addr: 0, i_ob_tab: -1, b_ob_payload: false, b_ob_unique: false, b_use_subtype: false}
+                    ^item: cg.AggFunc{f_expr: e, func: def.copy(), i_distinct: -1, i_dist_addr: 0, i_ob_tab: -1, b_ob_payload: false, b_ob_unique: false, b_use_subtype: false}
                     l: a.exprs[e].left
                     // The NEEDCOLL test ignores ORDER BY on min() and max().
                     if l >= 0 && def.flags & conn.FUNC_NEEDCOLL == 0 {
                         item.i_ob_tab = p.f.n_tab
                         p.f.n_tab += 1
                         ob: a.exprs[l].x
-                        same := false
+                        ^same: false
                         if ast.list_len(a, ob) == 1 && n_arg == 1 {
                             ob0: ast.list_expr(a, ob, 0)
                             x0: ast.list_expr(a, x, 0)
@@ -2330,7 +2330,7 @@ AnalyzeAggWalker: struct {
             // An expression of an index on p.f.idx_epr, inside an aggregate's
             // arguments, becomes a reference to that index column.
             if !in_agg_func || p.f.idx_epr < 0 -> return ast.WRC_CONTINUE
-            ie := p.f.idx_epr
+            ^ie: p.f.idx_epr
             loop ie >= 0 {
                 dc: p.idx_exprs[ie].i_data_cur
                 ix_e: p.idx_exprs[ie].expr
@@ -2339,7 +2339,7 @@ AnalyzeAggWalker: struct {
             }
             if ie < 0 -> return ast.WRC_CONTINUE
             // C tests a[0] of the FROM list on each pass; kept as it is.
-            hit := false
+            ^hit: false
             loop _i in 0..<ast.src_len(a, src) {
                 if a.items[ast.src_item(a, src, 0)].cursor == p.idx_exprs[ie].i_data_cur {
                     hit = true
@@ -2348,7 +2348,7 @@ AnalyzeAggWalker: struct {
             }
             if !hit || a.exprs[e].agg_info >= 0 -> return ast.WRC_CONTINUE
             if cg.n_err(a) > 0 -> return ast.WRC_ABORT
-            tmp := ast.zero_expr(tk.TK_AGG_COLUMN)
+            ^tmp: ast.zero_expr(tk.TK_AGG_COLUMN)
             tmp.itable = p.idx_exprs[ie].i_idx_cur
             tmp.icolumn = p.idx_exprs[ie].i_idx_col
             tmp_e: ast.push_expr(a, tmp)
@@ -2380,7 +2380,7 @@ AnalyzeAggWalker: struct {
 // sqlite3ExprAnalyzeAggregates: add the aggregate functions and columns of
 // `e` to the AggInfo of NameContext nc.
 expr_analyze_aggregates: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, e: Int) -[DB]> Never! {
-    w := AnalyzeAggWalker{unused: 0}
+    ^w: AnalyzeAggWalker{unused: 0}
     cg.walk_push(p, w, nc)
     _: cg.pwalk_expr(p, a, e)
     _: cg.walk_pop(p)
@@ -2400,8 +2400,8 @@ expr_analyze_agg_list: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, list: Int) -[DB]> 
 // valueFromExpr (vdbemem.c) without a STAT4 context: the value of literal
 // `e0` under affinity aff in encoding enc, or None when it is no literal.
 value_from_expr: fn(a: ast.AST, e0: Int, enc: Int, aff: Int) -> base.Mem? Never! {
-    e := e0
-    op := a.exprs[e].op
+    ^e: e0
+    ^op: a.exprs[e].op
     loop op == tk.TK_UPLUS || op == tk.TK_SPAN {
         e = a.exprs[e].left
         op = a.exprs[e].op
@@ -2411,7 +2411,7 @@ value_from_expr: fn(a: ast.AST, e0: Int, enc: Int, aff: Int) -> base.Mem? Never!
         caff: cat.affinity_type(a.exprs[e].token ?? [U8]{}).aff
         inner: value_from_expr(a, a.exprs[e].left, enc, caff)
         if inner == .Val(v) {
-            m := v
+            ^m: v
             mem.cast(m, caff, enc)
             mem.apply_affinity(m, aff, enc)
             return Val(m)
@@ -2419,7 +2419,7 @@ value_from_expr: fn(a: ast.AST, e0: Int, enc: Int, aff: Int) -> base.Mem? Never!
         return None
     }
     // A negative integer in one step, for -9223372036854775808.
-    neg := false
+    ^neg: false
     if op == tk.TK_UMINUS {
         l: a.exprs[e].left
         if a.exprs[l].op == tk.TK_INTEGER || a.exprs[l].op == tk.TK_FLOAT {
@@ -2429,7 +2429,7 @@ value_from_expr: fn(a: ast.AST, e0: Int, enc: Int, aff: Int) -> base.Mem? Never!
         }
     }
     if op == tk.TK_STRING || op == tk.TK_FLOAT || op == tk.TK_INTEGER {
-        m := base.mem_null()
+        ^m: base.mem_null()
         if ast.has(a, e, ast.EP_INT_VALUE) {
             iv: a.exprs[e].ivalue
             m = base.mem_int(if neg -> -iv else -> iv)
@@ -2451,7 +2451,7 @@ value_from_expr: fn(a: ast.AST, e0: Int, enc: Int, aff: Int) -> base.Mem? Never!
         // Several negative signs: -(-5).
         inner: value_from_expr(a, a.exprs[e].left, enc, aff)
         if inner == .Val(v) {
-            m := v
+            ^m: v
             mem.numerify(m)
             if m.flags & base.MEM_REAL != 0 -> m.r = -m.r else if m.i == base.I64_MIN {
                 m.r = 9223372036854775808.0
@@ -2468,7 +2468,7 @@ value_from_expr: fn(a: ast.AST, e0: Int, enc: Int, aff: Int) -> base.Mem? Never!
         return Val(base.mem_blob(util.hex_to_blob(z.slice(2, z.len() - 1))))
     }
     if op == tk.TK_TRUEFALSE {
-        m := base.mem_int(if ast.expr_truth_value(a, e) -> 1 else -> 0)
+        ^m: base.mem_int(if ast.expr_truth_value(a, e) -> 1 else -> 0)
         mem.apply_affinity(m, aff, enc)
         return Val(m)
     }
@@ -2534,8 +2534,8 @@ expr_test_col: fn(a: ^ast.AST, c: Int) -> Int Never! {
 }
 
 #Test("arithmetic codes both operands, then the operator into target") {
-    a := ast.stmt_ast("")
-    p := rs.resolve_test_parse()
+    ^a: ast.stmt_ast("")
+    ^p: rs.resolve_test_parse()
     cg.get_vdbe(p)
     p.f.ok_const_factor = false
     p.f.n_mem = 10
@@ -2553,8 +2553,8 @@ expr_test_col: fn(a: ^ast.AST, c: Int) -> Int Never! {
 }
 
 #Test("expr_if_false codes the opposite test") {
-    a := ast.stmt_ast("")
-    p := rs.resolve_test_parse()
+    ^a: ast.stmt_ast("")
+    ^p: rs.resolve_test_parse()
     cg.get_vdbe(p)
     r7: expr_test_reg(a, 7)
     isnull: ast.pexpr(a, tk.TK_ISNULL, r7, -1)
@@ -2573,8 +2573,8 @@ expr_test_col: fn(a: ^ast.AST, c: Int) -> Int Never! {
 }
 
 #Test("a comparison of a column implies the column is not NULL") {
-    a := ast.stmt_ast("")
-    p := rs.resolve_test_parse()
+    ^a: ast.stmt_ast("")
+    ^p: rs.resolve_test_parse()
     cg.get_vdbe(p)
     ca: expr_test_col(a, 0)
     five: ast.expr(a, tk.TK_INTEGER, "5".bytes())
@@ -2593,7 +2593,7 @@ expr_test_col: fn(a: ^ast.AST, c: Int) -> Int Never! {
 }
 
 #Test("literal values convert under the requested affinity") {
-    a := ast.stmt_ast("")
+    ^a: ast.stmt_ast("")
     five: ast.expr(a, tk.TK_INTEGER, "5".bytes())
     neg: ast.pexpr(a, tk.TK_UMINUS, five, -1)
     v: value_from_expr(a, neg, base.UTF8, base.AFF_BLOB)

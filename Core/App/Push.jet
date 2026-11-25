@@ -87,12 +87,12 @@ PushHeader: struct {
 /// A random generator seeded from the system entropy source, for the keys
 /// and the salt of each push.
 push_rng: fn() -> drbg.HMACDrbg PushError! {
-    seed := net_rt.tls_entropy(48) ?? return Err(push_fail("the system entropy source failed"))
+    ^seed: net_rt.tls_entropy(48) ?? return Err(push_fail("the system entropy source failed"))
     if seed.len() != 48 {
         core.crypto.wipe(seed)
         return Err(push_fail("the system entropy source failed"))
     }
-    rng := drbg.hmac_drbg_new(.SHA256)
+    ^rng: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(rng, seed)
     core.crypto.wipe(seed)
     Ok(rng)
@@ -137,7 +137,7 @@ push_ec_private: fn<R: RNG>(key: String, rng: ^R) -> [U8] PushError! {
 /// (RFC 8030 section 5.4). Each part is length-prefixed, so no two triples
 /// hash the same input.
 push_collapse_key: fn(run_key: String, to: String, open: String) -> String Never! {
-    data := [U8]{}
+    ^data: [U8]{}
     loop part in ([String]{run_key, to, open}) {
         bytes: part.bytes()
         data.extend("{bytes.len()}:".bytes())
@@ -152,7 +152,7 @@ push_collapse_key: fn(run_key: String, to: String, open: String) -> String Never
 /// `rng` (RFC 8291 section 3).
 push_web_seal: fn<R: RNG>(plain: [U8], ua_public: [U8], auth_secret: [U8], rng: ^R) -> [U8] PushError! {
     sender: push_key_pair_new(rng) ?? return Err(err)
-    salt := cipher.zero_bytes(16)
+    ^salt: cipher.zero_bytes(16)
     if !rng.fill(salt) -> return Err(push_fail("the system entropy source failed"))
     push_web_encrypt(plain, ua_public, auth_secret, sender, salt, rng)
 }
@@ -179,25 +179,25 @@ push_web_encrypt: fn<R: RNG>(plain: [U8], ua_public: [U8], auth_secret: [U8], se
     ecp.check_pubkey(grp, ua) ?? return Err(push_fail("a subscription's public key is not on P-256"))
     d: push_scalar(grp, sender.private) ?? return Err(err)
     shared: ecdh.ecdh_compute_shared(grp, ua, d, rng) ?? return Err(push_fail("the key agreement failed"))
-    ecdh_secret := bn.write_binary(shared, 32) ?? return Err(push_fail("the shared secret does not encode"))
+    ^ecdh_secret: bn.write_binary(shared, 32) ?? return Err(push_fail("the shared secret does not encode"))
     // IKM = HKDF(auth_secret, ecdh_secret, "WebPush: info" 0 ua_public
     // as_public, 32) (RFC 8291 section 3.4).
-    key_info := push_label("WebPush: info")
+    ^key_info: push_label("WebPush: info")
     key_info.extend(ua_public.copy())
     key_info.extend(sender.public.copy())
-    ikm := push_hkdf(auth_secret, ecdh_secret, key_info, 32)
+    ^ikm: push_hkdf(auth_secret, ecdh_secret, key_info, 32)
     core.crypto.wipe(ecdh_secret)
-    cek := push_hkdf(salt, ikm, push_label("Content-Encoding: aes128gcm"), 16)
+    ^cek: push_hkdf(salt, ikm, push_label("Content-Encoding: aes128gcm"), 16)
     nonce: push_hkdf(salt, ikm, push_label("Content-Encoding: nonce"), 12)
     core.crypto.wipe(ikm)
     // One record: the payload, then the last record's delimiter 2.
-    record := plain.copy()
+    ^record: plain.copy()
     record.push(U8{2})
     key: aead.gcm_key(cipher.aes_key(cek, false) ?? panic("a content-encryption key is 16 bytes"))
     core.crypto.wipe(cek)
     sealed: aead.gcm_encrypt(key, nonce, [U8]{}, record, 16) ?? panic("one push record seals")
     core.crypto.wipe(record)
-    body := salt.copy()
+    ^body: salt.copy()
     body.push(U8{0})
     body.push(U8{0})
     body.push(U8{PUSH_RECORD_SIZE /% 256})
@@ -281,7 +281,7 @@ push_apns_request: fn(origin: String, device_token: String, topic: String, provi
 /// `token_uri`, `iat` `now` and `exp` an hour later, signed by the
 /// account's RSA key `key` (PEM).
 push_fcm_token_request: fn<R: RNG>(client_email: String, token_uri: String, now: Int, key: String, rng: ^R) -> PushRequest PushError! {
-    parsed := pkparse.pk_parse_key(key.bytes(), None, rng) ?? return Err(push_fail("the service account's key does not parse"))
+    ^parsed: pkparse.pk_parse_key(key.bytes(), None, rng) ?? return Err(push_fail("the service account's key does not parse"))
     if parsed.kind != .Val(.RSA) -> return Err(push_fail("the service account's key is no RSA key"))
     claims: "{{\"iss\":{push_json_text(client_email)},\"scope\":\"{PUSH_FCM_SCOPE}\",\"aud\":{push_json_text(token_uri)},\"iat\":{now},\"exp\":{now + 3600}}}"
     signing_input: "{base64.encode_url("{{\"alg\":\"RS256\",\"typ\":\"JWT\"}}".bytes())}.{base64.encode_url(claims.bytes())}"
@@ -326,7 +326,7 @@ push_es256: fn<R: RNG>(private: [U8], data: [U8], rng: ^R) -> [U8] PushError! {
     d: push_scalar(grp, private) ?? return Err(err)
     hash: hashes.hash(.SHA256, data)
     sig: ecdsa.ecdsa_sign_det(grp, d, hash, .SHA256, rng) ?? return Err(push_fail("the signature failed"))
-    out := bn.write_binary(sig.r, 32) ?? return Err(push_fail("the signature does not encode"))
+    ^out: bn.write_binary(sig.r, 32) ?? return Err(push_fail("the signature does not encode"))
     out.extend(bn.write_binary(sig.s, 32) ?? return Err(push_fail("the signature does not encode")))
     Ok(out)
 }
@@ -338,7 +338,7 @@ push_origin: fn(url: String) -> String? Never! {
     }
     bytes: url.bytes()
     slash: U8{47}
-    end := start
+    ^end: start
     loop end < bytes.len() && bytes[end] != slash -> end += 1
     if end == start -> return None
     origin: String.from_bytes(cipher.bytes_of(bytes, 0, end)) ?? return None
@@ -466,8 +466,8 @@ priv PushFCMGrant: struct {
 /// of the services set up before. Fails, keeping those, when a key is not
 /// the kind its service takes; the reason names where the key came from.
 push_configure: fn(settings: PushSettings) -[Net]> PushError! {
-    rng := push_rng() ?? return Err(err)
-    senders := PushSenders{apns: None, apns_key: [U8]{}, apns_token: "", apns_until: 0, fcm: None, fcm_key: "", fcm_token: "", fcm_until: 0, web: None, web_key: None}
+    ^rng: push_rng() ?? return Err(err)
+    ^senders: PushSenders{apns: None, apns_key: [U8]{}, apns_token: "", apns_until: 0, fcm: None, fcm_key: "", fcm_token: "", fcm_until: 0, web: None, web_key: None}
     if settings.apns == .Val(apns) {
         senders.apns_key = push_ec_private(apns.key, rng) ?? return Err(push_fail("{apns.key_from} holds no APNs signing key: {err.reason}"))
         senders.apns = Val(apns.copy())
@@ -482,7 +482,7 @@ push_configure: fn(settings: PushSettings) -[Net]> PushError! {
         senders.web_key = Val(push_key_pair(private, rng) ?? return Err(push_fail("{web.key_from} holds no Web Push key: {err.reason}")))
         senders.web = Val(web.copy())
     }
-    held := PUSH_SENDERS.guard_edit()
+    ^held: PUSH_SENDERS.guard_edit()
     held.value = senders
     Ok()
 }
@@ -507,8 +507,8 @@ push_service_label: fn(service: String) -> String Never! {
 /// A key no other push has: 24 random bytes, base64url, as long as a
 /// collapse key.
 push_fresh_key: fn() -> String PushError! {
-    rng := push_rng() ?? return Err(err)
-    bytes := cipher.zero_bytes(24)
+    ^rng: push_rng() ?? return Err(err)
+    ^bytes: cipher.zero_bytes(24)
     if !rng.fill(bytes) -> return Err(push_fail("the system entropy source failed"))
     Ok(base64.encode_url(bytes))
 }
@@ -518,7 +518,7 @@ push_fresh_key: fn() -> String PushError! {
 /// Web Push device's token is its subscription's endpoint, with its `p256dh`
 /// key and `auth` secret base64url. `now` (Unix seconds) dates the tokens.
 push_deliver: fn(service: String, token: String, p256dh: String, auth: String, key: String, title: String, body: String, open: String, now: Int) -[Net, Time.Wait]> PushOutcome Never! {
-    rng := push_rng() ?? return push_failed(err.reason)
+    ^rng: push_rng() ?? return push_failed(err.reason)
     if service == "apns" -> return push_deliver_apns(token, key, title, body, open, now, rng)
     if service == "fcm" -> return push_deliver_fcm(token, key, title, body, open, now, rng)
     if service == "web" {
@@ -547,15 +547,15 @@ priv push_senders: fn() -> PushSenders Never! {
 priv push_deliver_apns: fn<R: RNG>(token: String, key: String, title: String, body: String, open: String, now: Int, rng: ^R) -[Net, Time.Wait]> PushOutcome Never! {
     senders: push_senders()
     apns: senders.apns ?? return push_failed("no APNs settings")
-    bearer := senders.apns_token.copy()
+    ^bearer: senders.apns_token.copy()
     if bearer == "" || now >= senders.apns_until {
         bearer = push_apns_token(apns.team_id, apns.key_id, now, senders.apns_key, rng) ?? return push_failed(err.reason)
-        held := PUSH_SENDERS.guard_edit()
+        ^held: PUSH_SENDERS.guard_edit()
         held.value.apns_token = bearer.copy()
         held.value.apns_until = now + PUSH_APNS_TOKEN_SECONDS
     }
     request: push_apns_request(apns.origin, token, apns.topic, bearer, key, title, body, open)
-    fields := [http.Header]{}
+    ^fields: [http.Header]{}
     loop header in request.headers {
         fields.push(http.Header{name: header.name.copy(), value: header.value.copy()})
     }
@@ -563,7 +563,7 @@ priv push_deliver_apns: fn<R: RNG>(token: String, key: String, title: String, bo
     if response.status == 200 -> return PushOutcome{reason: "", gone: false}
     answer: response.text() ?? ""
     if answer.contains("ExpiredProviderToken") {
-        held := PUSH_SENDERS.guard_edit()
+        ^held: PUSH_SENDERS.guard_edit()
         held.value.apns_token = ""
     }
     gone: response.status == 410 || answer.contains("BadDeviceToken") || answer.contains("Unregistered")
@@ -573,7 +573,7 @@ priv push_deliver_apns: fn<R: RNG>(token: String, key: String, title: String, bo
 priv push_deliver_fcm: fn<R: RNG>(token: String, key: String, title: String, body: String, open: String, now: Int, rng: ^R) -[Net, Time.Wait]> PushOutcome Never! {
     senders: push_senders()
     fcm: senders.fcm ?? return push_failed("no FCM settings")
-    bearer := senders.fcm_token.copy()
+    ^bearer: senders.fcm_token.copy()
     if bearer == "" || now >= senders.fcm_until {
         exchange: push_fcm_token_request(fcm.client_email, fcm.token_uri, now, senders.fcm_key, rng) ?? return push_failed(err.reason)
         granted: push_post(exchange) ?? return push_failed("the FCM token exchange: {err}")
@@ -582,7 +582,7 @@ priv push_deliver_fcm: fn<R: RNG>(token: String, key: String, title: String, bod
         }
         grant: granted.json<PushFCMGrant>() ?? return push_failed("the FCM token exchange's answer: {err}")
         bearer = grant.access_token.copy()
-        held := PUSH_SENDERS.guard_edit()
+        ^held: PUSH_SENDERS.guard_edit()
         held.value.fcm_token = bearer.copy()
         held.value.fcm_until = now + grant.expires_in - PUSH_FCM_RENEW_SECONDS
     }
@@ -591,7 +591,7 @@ priv push_deliver_fcm: fn<R: RNG>(token: String, key: String, title: String, bod
     if response.status == 200 -> return PushOutcome{reason: "", gone: false}
     answer: response.text() ?? ""
     if response.status == 401 {
-        held := PUSH_SENDERS.guard_edit()
+        ^held: PUSH_SENDERS.guard_edit()
         held.value.fcm_token = ""
     }
     PushOutcome{reason: "FCM answered {response.status} {answer}", gone: response.status == 404}
@@ -615,7 +615,7 @@ priv push_deliver_web: fn<R: RNG>(endpoint: String, p256dh: String, auth: String
 
 // Sends `request` over HTTP/1.1.
 priv push_post: fn(request: PushRequest) -[Net, Time.Wait]> http.HTTPResponse http.HTTPError! {
-    out := http.__request("POST", request.url).timeout(PUSH_SEND_MS)
+    ^out: http.__request("POST", request.url).timeout(PUSH_SEND_MS)
     loop header in request.headers -> out = out.__with_header(header.name, header.value)
     out.__with_body_value(http.body_bytes(request.body.copy())).send()
 }
@@ -640,7 +640,7 @@ priv push_scalar: fn(grp: ecp.EcpGroup, private: [U8]) -> bn.Mpi PushError! {
 
 // `label`, then a zero byte: an HKDF info of RFC 8291 and RFC 8188.
 priv push_label: fn(label: String) -> [U8] Never! {
-    out := label.bytes()
+    ^out: label.bytes()
     out.push(U8{0})
     out
 }
@@ -656,7 +656,7 @@ priv push_json_text: fn(text: String) -> String Never! {
     quote: U8{34}
     backslash: U8{92}
     space: U8{32}
-    out := [U8]{quote}
+    ^out: [U8]{quote}
     loop b in text.bytes() {
         if b == quote || b == backslash {
             out.push(backslash)
@@ -673,7 +673,7 @@ priv push_json_text: fn(text: String) -> String Never! {
 
 // A generator that only blinds: the tests' results do not depend on it.
 priv push_test_rng: fn() -> drbg.HMACDrbg Never! {
-    rng := drbg.hmac_drbg_new(.SHA256)
+    ^rng: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(rng, "Jet push test blinding".bytes())
     rng
 }
@@ -685,12 +685,12 @@ priv push_b64: fn(text: String) -> [U8] Never! {
 // The browser's side of RFC 8291 section 3.4: the record of the aes128gcm
 // `body`, opened with the subscription's key pair `ua` and `auth_secret`.
 priv push_test_open: fn(body: [U8], ua: PushKeyPair, auth_secret: [U8]) -> [U8] Never! {
-    rng := push_test_rng()
+    ^rng: push_test_rng()
     grp: push_group() ?? panic("P-256")
     sender_public: cipher.bytes_of(body, 21, 65)
     sender: ecp.point_read_binary(grp, sender_public) ?? panic("the key ID is a P-256 point")
     shared: ecdh.ecdh_compute_shared(grp, sender, push_scalar(grp, ua.private) ?? panic("scalar"), rng) ?? panic("agree")
-    key_info := push_label("WebPush: info")
+    ^key_info: push_label("WebPush: info")
     key_info.extend(ua.public.copy())
     key_info.extend(sender_public)
     ikm: push_hkdf(auth_secret, bn.write_binary(shared, 32) ?? panic("secret"), key_info, 32)
@@ -727,7 +727,7 @@ priv push_test_header: fn(request: PushRequest, name: String) -> String Never! {
 
 // The APNs signing key of the tests: a P-256 key in PKCS#8, as a `.p8`.
 priv push_test_apns_key: fn() -> String Never! {
-    key := "-----BEGIN PRIVATE KEY-----\n"
+    ^key: "-----BEGIN PRIVATE KEY-----\n"
     key += "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgb1/LfsVROP2MEAEY\n"
     key += "jvl9UHRLWHgMAnIw7Puts6zaqCqhRANCAAQsDjHjpjwneoxuNL5MrFBau348HXHX\n"
     key += "wkYP4QxtLseQNZesKMN/VGg8GTJIovUILcMaWWEPIMsj2B08qX6yMsLJ\n"
@@ -737,7 +737,7 @@ priv push_test_apns_key: fn() -> String Never! {
 
 // The service account key of the tests: RSA-2048 in PKCS#8.
 priv push_test_fcm_key: fn() -> String Never! {
-    key := "-----BEGIN PRIVATE KEY-----\n"
+    ^key: "-----BEGIN PRIVATE KEY-----\n"
     key += "MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQCcfKxtknOKIkoJ\n"
     key += "ncTlatZGHI1opb5rm1EPo6r6DCSVC+zWYgiTKDL0fqMPsOVv3T5ExpqCaY/wAeag\n"
     key += "Kui/SJCsi2a4G+zuNyoSS66cQLbizSxAOQAQnpuWV5XRM05NlJkgyj60xoo7XCzv\n"
@@ -769,7 +769,7 @@ priv push_test_fcm_key: fn() -> String Never! {
 }
 
 #Test("RFC 8291 Appendix A: the example push encrypts to the example body") {
-    rng := push_test_rng()
+    ^rng: push_test_rng()
     sender: push_key_pair(push_b64("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"), rng) ?? panic("the sender's key")
     assert(sender.public == push_b64("BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8"))
     ua_public: push_b64("BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4")
@@ -780,23 +780,23 @@ priv push_test_fcm_key: fn() -> String Never! {
 }
 
 #Test("A push opens with the subscription's key, and a fresh seal differs each time") {
-    rng := push_test_rng()
+    ^rng: push_test_rng()
     ua: push_key_pair(push_b64("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94"), rng) ?? panic("the subscription's key")
     auth_secret: push_b64("BTBZMqHH6r4Tts7J_aSIgg")
     first: push_web_seal("ping".bytes(), ua.public, auth_secret, rng) ?? panic("the first push seals")
     second: push_web_seal("ping".bytes(), ua.public, auth_secret, rng) ?? panic("the second push seals")
     assert(first != second)
     assert_eq(first.len(), 16 + 4 + 1 + 65 + 4 + 1 + 16)
-    want := "ping".bytes()
+    ^want: "ping".bytes()
     want.push(U8{2})
     assert_eq(push_test_open(first, ua, auth_secret), want)
 }
 
 #Test("A payload longer than one record, and keys of the wrong size, are refused") {
-    rng := push_test_rng()
+    ^rng: push_test_rng()
     ua: push_key_pair(push_b64("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94"), rng) ?? panic("the subscription's key")
     auth_secret: push_b64("BTBZMqHH6r4Tts7J_aSIgg")
-    long := [U8]{}
+    ^long: [U8]{}
     loop _ in 0..<(PUSH_PAYLOAD_MAX + 1) -> long.push(U8{120})
     too_long: if push_web_seal(long, ua.public, auth_secret, rng) == {
         .Ok(_) -> ""
@@ -813,18 +813,18 @@ priv push_test_fcm_key: fn() -> String Never! {
 }
 
 #Test("RFC 6979 A.2.5: ES256 of \"sample\" is the example's r and s") {
-    rng := push_test_rng()
+    ^rng: push_test_rng()
     private: bn.write_binary(bn.read_string(16, "C9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721") ?? panic("x"), 32) ?? panic("x bytes")
     got: push_es256(private, "sample".bytes(), rng) ?? panic("sign")
     r: bn.write_binary(bn.read_string(16, "EFD48B2AACB6A8FD1140DD9CD45E81D69D2C877B56AAF991C34D0EA84EAF3716") ?? panic("r"), 32) ?? panic("r bytes")
     s: bn.write_binary(bn.read_string(16, "F7CB1C942D657C41D436C7A1B6E29F65F3E900DBB9AFF4064DC4AB2F843ACDA8") ?? panic("s"), 32) ?? panic("s bytes")
-    want := r.copy()
+    ^want: r.copy()
     want.extend(s)
     assert_eq(got, want)
 }
 
 #Test("A VAPID header carries a token its key verifies, with the push service's origin") {
-    rng := push_test_rng()
+    ^rng: push_test_rng()
     sender: push_key_pair(push_b64("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"), rng) ?? panic("the sender's key")
     header: push_vapid_authorization("https://push.example.net", "mailto:push@example.com", 1700000000, 1700043200, sender, rng) ?? panic("the header signs")
     key_part: ", k={base64.encode_url(sender.public)}"
@@ -841,8 +841,8 @@ priv push_test_fcm_key: fn() -> String Never! {
 }
 
 #Test("Generators seeded from the system entropy source draw different keys") {
-    first_rng := push_rng() ?? panic("the system entropy source")
-    second_rng := push_rng() ?? panic("the system entropy source")
+    ^first_rng: push_rng() ?? panic("the system entropy source")
+    ^second_rng: push_rng() ?? panic("the system entropy source")
     first: push_key_pair_new(first_rng) ?? panic("the first key")
     second: push_key_pair_new(second_rng) ?? panic("the second key")
     assert(first.public != second.public)
@@ -860,7 +860,7 @@ priv push_test_fcm_key: fn() -> String Never! {
 }
 
 #Test("An APNs push carries a provider token its .p8 key verifies, and the collapse key") {
-    rng := push_test_rng()
+    ^rng: push_test_rng()
     private: push_ec_private(push_test_apns_key(), rng) ?? panic("the .p8 key")
     sender: push_key_pair(private, rng) ?? panic("the key pair")
     token: push_apns_token("TEAM123456", "KEY1234567", 1700000000, private, rng) ?? panic("the provider token signs")
@@ -881,7 +881,7 @@ priv push_test_fcm_key: fn() -> String Never! {
 }
 
 #Test("An FCM push trades an RS256 assertion for a token, and tags the notification with the collapse key") {
-    rng := push_test_rng()
+    ^rng: push_test_rng()
     exchange: push_fcm_token_request("push@crew-test.iam.gserviceaccount.com", "https://oauth2.googleapis.com/token", 1700000000, push_test_fcm_key(), rng) ?? panic("the assertion signs")
     assert_eq(exchange.url, "https://oauth2.googleapis.com/token")
     assert_eq(push_test_header(exchange, "content-type"), "application/x-www-form-urlencoded")
@@ -897,7 +897,7 @@ priv push_test_fcm_key: fn() -> String Never! {
 }
 
 #Test("A Web Push request is sealed to the subscription, signed for its origin and topped with the collapse key") {
-    rng := push_test_rng()
+    ^rng: push_test_rng()
     ua: push_key_pair(push_b64("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94"), rng) ?? panic("the subscription's key")
     sender: push_key_pair(push_b64("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"), rng) ?? panic("the sender's key")
     to: PushSubscription{endpoint: "https://push.example.net:8443/wpush/v2/abc", public: ua.public.copy(), auth_secret: push_b64("BTBZMqHH6r4Tts7J_aSIgg")}
@@ -910,7 +910,7 @@ priv push_test_fcm_key: fn() -> String Never! {
     key_part: ", k={base64.encode_url(sender.public)}"
     token: String.from_bytes(cipher.bytes_of(authorization.bytes(), 8, authorization.len() - 8 - key_part.len())) ?? panic("token text")
     assert_eq(push_test_jwt_claims(token, "{{\"typ\":\"JWT\",\"alg\":\"ES256\"}}", sender.public), "{{\"aud\":\"https://push.example.net:8443\",\"exp\":1700043200,\"sub\":\"mailto:push@example.com\"}}")
-    want := "{{\"title\":\"Due today\",\"body\":\"Ship v2\",\"tag\":\"pFQJvnnN1Np_dA1rXFXz9-kChARR6hdC\",\"open\":\"{{\\\"TaskView\\\":{{\\\"id\\\":7}}}}\"}}".bytes()
+    ^want: "{{\"title\":\"Due today\",\"body\":\"Ship v2\",\"tag\":\"pFQJvnnN1Np_dA1rXFXz9-kChARR6hdC\",\"open\":\"{{\\\"TaskView\\\":{{\\\"id\\\":7}}}}\"}}".bytes()
     want.push(U8{2})
     assert_eq(push_test_open(request.body, ua, to.auth_secret), want)
     assert_eq(push_origin("http://127.0.0.1:9000/push/1"), .Val("http://127.0.0.1:9000"))
@@ -924,13 +924,13 @@ priv push_test_fcm_key: fn() -> String Never! {
 // `statuses` and `bodies`, and gives each request whole.
 priv push_test_serve: fn(listener: net.TCPListener, statuses: [Int], bodies: [String]) -[Net, Time.Wait]> [String] Never! {
     deadline: Duration{ns: 10000000000}
-    seen := [String]{}
+    ^seen: [String]{}
     loop index in 0..<statuses.len() {
-        stream := net.tcp_accept(listener) ?? panic("accept: {err}")
-        input := [U8]{}
-        buffer := [U8]{}
-        head := -1
-        length := 0
+        ^stream: net.tcp_accept(listener) ?? panic("accept: {err}")
+        ^input: [U8]{}
+        ^buffer: [U8]{}
+        ^head: -1
+        ^length: 0
         loop head < 0 || input.len() < head + length {
             buffer.clear()
             read: stream.read_into(buffer, 8192, deadline: deadline) ?? panic("read: {err}")
@@ -947,7 +947,7 @@ priv push_test_serve: fn(listener: net.TCPListener, statuses: [Int], bodies: [St
         head_text: String.from_bytes(cipher.bytes_of(input, 0, head)) ?? ""
         seen.push("{head_text}{String.from_bytes(cipher.bytes_of(input, head, input.len() - head)) ?? ""}")
         reply: "HTTP/1.1 {statuses[index]} X\r\ncontent-type: application/json\r\ncontent-length: {bodies[index].len()}\r\nconnection: close\r\n\r\n{bodies[index]}".bytes()
-        sent := 0
+        ^sent: 0
         loop sent < reply.len() {
             sent += stream.write_some(reply.slice(sent, reply.len()), deadline: deadline) ?? panic("write: {err}")
         }
@@ -969,7 +969,7 @@ priv push_test_head_end: fn(input: [U8]) -> Int Never! {
 priv push_test_content_length: fn(head: String) -> Int Never! {
     loop line in head.split("\r\n") {
         if !line.to_lower().starts_with("content-length:") -> next
-        length := 0
+        ^length: 0
         loop byte in line.bytes() {
             if byte >= (U8{48}) && byte <= (U8{57}) -> length = length * 10 + Int{byte} - 48
         }
@@ -984,16 +984,16 @@ priv push_test_content_length: fn(head: String) -> Int Never! {
 // each request's header fields as `name: value` lines, then its body.
 priv push_test_h2_serve: fn(listener: net.TCPListener, statuses: [Int]) -[Net, Time.Wait]> [String] Never! {
     deadline: Duration{ns: 10000000000}
-    seen := [String]{}
+    ^seen: [String]{}
     loop status in statuses {
-        stream := net.tcp_accept(listener) ?? panic("accept: {err}")
-        input := [U8]{}
-        buffer := [U8]{}
-        decoder := h2.hpack_decoder(h2.H2_TABLE_SIZE)
-        request := ""
-        body := [U8]{}
-        at := h2.H2_PREFACE.bytes().len()
-        ended := false
+        ^stream: net.tcp_accept(listener) ?? panic("accept: {err}")
+        ^input: [U8]{}
+        ^buffer: [U8]{}
+        ^decoder: h2.hpack_decoder(h2.H2_TABLE_SIZE)
+        ^request: ""
+        ^body: [U8]{}
+        ^at: h2.H2_PREFACE.bytes().len()
+        ^ended: false
         loop !ended {
             buffer.clear()
             read: stream.read_into(buffer, 8192, deadline: deadline) ?? panic("read: {err}")
@@ -1014,12 +1014,12 @@ priv push_test_h2_serve: fn(listener: net.TCPListener, statuses: [Int]) -[Net, T
             }
         }
         answer: if status == 200 -> "" else -> "{{\"reason\":\"Unregistered\"}}"
-        reply := [U8]{}
+        ^reply: [U8]{}
         h2.h2_frame(reply, h2.H2_SETTINGS, 0, 0, [U8]{})
         head: [h2.H2Header]{h2.H2Header{name: ":status", value: "{status}"}}
         h2.h2_frame(reply, h2.H2_HEADERS, h2.H2_END_HEADERS, 1, h2.hpack_encode(head))
         h2.h2_frame(reply, h2.H2_DATA, h2.H2_END_STREAM, 1, answer.bytes())
-        sent := 0
+        ^sent: 0
         loop sent < reply.len() {
             sent += stream.write_some(reply.slice(sent, reply.len()), deadline: deadline) ?? panic("write: {err}")
         }
@@ -1068,7 +1068,7 @@ priv push_test_has: fn(seen: String, part: String) Never! {
     assert_eq(sent, PushOutcome{reason: "", gone: false})
     gone: push_deliver("apns", "d-1", "", "", "k1", "Due today", "Ship v2", open, now)
     assert_eq(gone, PushOutcome{reason: "APNs answered 410 {{\"reason\":\"Unregistered\"}}", gone: true})
-    rng := push_test_rng()
+    ^rng: push_test_rng()
     ua: push_key_pair(push_b64("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94"), rng) ?? panic("the subscription's key")
     endpoint: "http://127.0.0.1:{web_port}/push/1"
     assert_eq(push_deliver("web", endpoint, base64.encode_url(ua.public), "BTBZMqHH6r4Tts7J_aSIgg", "k1", "Due today", "Ship v2", open, now), PushOutcome{reason: "", gone: false})

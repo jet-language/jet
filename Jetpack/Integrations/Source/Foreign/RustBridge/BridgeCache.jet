@@ -73,7 +73,7 @@ RustBridgeKeyInputs: struct {
     // The content-addressed key: every field that can change the generated
     // crate, its dependency graph, or the toolchain that builds it.
     cache_key: fn(self) -[FS]> String Never! {
-        identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+        ^identity: ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
         identity.field("descriptor_schema", FFI_INLINE_BRIDGE_SCHEMA.bytes())
         identity.field("c-record-source", self.record_source.bytes())
         identity.field("selected_target", self.selected_target.bytes())
@@ -88,7 +88,7 @@ RustBridgeKeyInputs: struct {
             identity.field("dependency_version", self.deps[name].bytes())
         }
         loop entry in self.entries -> pkg_ffi_identity_entry(identity, entry)
-        handle_keys := [String]{}
+        ^handle_keys: [String]{}
         loop fact in self.handle_facts -> handle_keys.push(fact.stable_key())
         loop key in pkg_ffi_sorted_unique(handle_keys) -> identity.field("handle_fact", key.bytes())
         identity.field("link_closure", self.link_closure.stable_key().bytes())
@@ -148,7 +148,7 @@ pkg_ffi_asm_output_key: fn(output: InlineAsmOutput?) -> String Never! {
 
 // Sorted, deduplicated strings (the Rust `sort` + `dedup` / `BTreeSet`).
 pkg_ffi_sorted_unique: fn(values: [String]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop value in values {
         if !out.contains(value) -> out.push(value.copy())
     }
@@ -159,8 +159,8 @@ pkg_ffi_sorted_unique: fn(values: [String]) -> [String] Never! {
 // Static archives named by `-L native=<dir>` / `-l static=<name>` rustflags
 // enter the identity by exact bytes; an absent archive is recorded as such.
 pkg_ffi_identity_static_link_inputs: fn(identity: ^ForeignIdentityBuilder, args: [String]) -[FS]> Never! {
-    dirs := [String]{}
-    static_libs := [String]{}
+    ^dirs: [String]{}
+    ^static_libs: [String]{}
     loop index in 1..<args.len() {
         flag: args[index - 1]
         value: args[index]
@@ -170,7 +170,7 @@ pkg_ffi_identity_static_link_inputs: fn(identity: ^ForeignIdentityBuilder, args:
         }
     }
     loop name in static_libs {
-        found := String?{None}
+        ^found: String?{None}
         loop dir in dirs {
             candidate: files.join(dir, "lib{name}.a")
             if files.is_file(candidate) {
@@ -233,7 +233,7 @@ pkg_ffi_bridge_paths: fn(key: String, selected_target: String, native_link_args:
 // rustc/cargo toolchain, the selected target, and the rustflags handed to
 // Cargo. The profile is the `release` segment Cargo appends itself.
 pkg_ffi_shared_target_dir: fn(selected_target: String, native_link_args: [String], rust_toolchain: String) -[Env]> String Never! {
-    identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    ^identity: ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
     identity.field("descriptor_schema", FFI_SHARED_DEPS_SCHEMA.bytes())
     identity.field("selected_target", selected_target.bytes())
     identity.field("rust_toolchain", rust_toolchain.bytes())
@@ -307,7 +307,7 @@ pkg_ffi_parse_bridge_manifest: fn(target: String, crate_name: String) -[FS]> [St
     manifest: files.read(pkg_ffi_bridge_manifest_path(target, crate_name)) ?? return None
     lines: pkg_bridge_text_lines(manifest)
     if lines.len() == 0 || lines[0] != FFI_BRIDGE_ARTIFACTS_SCHEMA -> return None
-    expected := [String:String]{}
+    ^expected: [String:String]{}
     loop index in 1..<lines.len() {
         row: lines[index].split_once(" ") ?? return None
         digest: row.before
@@ -354,7 +354,7 @@ pkg_ffi_bridge_cache_verified: fn(target: String, crate_name: String, cache_iden
     if pkg_ffi_sorted_unique(provenance.fields.get("descriptor") ?? [String]{}) != expected_descriptors {
         return false
     }
-    expected_languages := [String]{}
+    ^expected_languages: [String]{}
     loop language in pkg_ffi_entry_languages(entries) -> expected_languages.push(language)
     expected_languages.sort()
     actual_languages: provenance.fields.get("boundary-language") ?? [String]{}
@@ -397,7 +397,7 @@ pkg_ffi_bridge_cache_verified: fn(target: String, crate_name: String, cache_iden
 
 // Publish the artifact digest manifest: stage beside the target, rename.
 pkg_ffi_publish_bridge_manifest: fn(target: String, crate_name: String, artifacts: [String]) -[FS, Env]> ForeignBridgeError! {
-    manifest := "{FFI_BRIDGE_ARTIFACTS_SCHEMA}\n"
+    ^manifest: "{FFI_BRIDGE_ARTIFACTS_SCHEMA}\n"
     loop path in artifacts {
         relative: pkg_ffi_artifact_relative_path(target, path) ?? return Err(pkg_bridge_error("FFI artifact escapes the shared target dir: {path}"))
         bytes: files.read_bytes(path) ?? return Err(pkg_bridge_error("could not read FFI artifact {path}: {err}"))
@@ -418,7 +418,7 @@ pkg_ffi_publish_bridge_manifest: fn(target: String, crate_name: String, artifact
 // obligation rows in the same provenance sidecar.
 pkg_ffi_inline_boundary_rows: fn(entries: [ExternEntry], cache_identity: String, selected_target: String, crate_name: String, source: String, toolchain_digest: String, artifact_digests: [{name: String, digest: String}]) -[FS]> [{name: String, value: String}] ForeignBridgeError! {
     source_digest: pkg_bridge_sha_file(source)
-    artifact_identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+    ^artifact_identity: ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
     loop artifact in artifact_digests {
         artifact_identity.field("artifact-path", artifact.name.bytes())
         artifact_identity.field("artifact-digest", artifact.digest.bytes())
@@ -428,11 +428,11 @@ pkg_ffi_inline_boundary_rows: fn(entries: [ExternEntry], cache_identity: String,
         return Err(pkg_bridge_error("inline FFI bridge produced no artifacts for boundary coverage"))
     }
     loaded_artifact: "{artifact_digests[0].name}:sha256-{artifact_digests[0].digest}"
-    transitive := [String]{}
+    ^transitive: [String]{}
     loop index in 1..<artifact_digests.len() {
         transitive.push("{artifact_digests[index].name}:sha256-{artifact_digests[index].digest}")
     }
-    rows := [{name: String, value: String}]{}
+    ^rows: [{name: String, value: String}]{}
     loop language in pkg_ffi_entry_languages(entries) {
         descriptor: pkg_binder_descriptor(language) ?? return Err(pkg_bridge_error("missing binder descriptor for {pkg_foreign_language_name(language)}"))
         descriptor_stamp: descriptor.stamp()
@@ -454,7 +454,7 @@ pkg_ffi_inline_boundary_rows: fn(entries: [ExternEntry], cache_identity: String,
 // The digest of every entry one language (the root `language`) contributes
 // to the bridge.
 pkg_ffi_boundary_entry_identity: fn(entries: [ExternEntry], language: String, cache_identity: String, descriptor_stamp: String) -> String Never! {
-    identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+    ^identity: ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
     identity.field("cache-identity", cache_identity.bytes())
     identity.field("language", language.bytes())
     identity.field("descriptor", descriptor_stamp.bytes())
@@ -488,7 +488,7 @@ pkg_ffi_boundary_entry_identity: fn(entries: [ExternEntry], language: String, ca
 // Publish the bridge provenance sidecar: build receipt, descriptors, one
 // boundary row per language, handle facts, link closure, artifact digests.
 pkg_ffi_publish_bridge_provenance: fn(path: String, cache_identity: String, selected_target: String, crate_name: String, target: String, source: String, receipt: CargoBridgeReceipt, entries: [ExternEntry], handle_facts: [FFIHandleFact], link_closure: FFILinkClosure, artifacts: [String], rust_toolchain: String) -[FS, Env]> ForeignBridgeError! {
-    artifact_digests := [{name: String, digest: String}]{}
+    ^artifact_digests: [{name: String, digest: String}]{}
     loop artifact in artifacts {
         relative: pkg_ffi_artifact_relative_path(target, artifact) ?? return Err(pkg_bridge_error("FFI artifact escapes the shared target dir: {artifact}"))
         bytes: files.read_bytes(artifact) ?? return Err(pkg_bridge_error("could not read FFI artifact {artifact}: {err}"))
@@ -497,7 +497,7 @@ pkg_ffi_publish_bridge_provenance: fn(path: String, cache_identity: String, sele
     toolchain_digest: pkg_sha256_hex(rust_toolchain.bytes())
     boundary_rows: pkg_ffi_inline_boundary_rows(entries, cache_identity, selected_target, crate_name, source, toolchain_digest, artifact_digests)
     compile_time: if receipt.compile_time_code -> "present" else -> "none"
-    fields := [{name: String, value: String}]{
+    ^fields: [{name: String, value: String}]{
         {name: "target", value: selected_target},
         {name: "crate", value: crate_name},
         {name: "source", value: source},
@@ -513,7 +513,7 @@ pkg_ffi_publish_bridge_provenance: fn(path: String, cache_identity: String, sele
         fields.push({name: "descriptor", value: stamp})
     }
     loop row in boundary_rows -> fields.push(row)
-    handle_keys := [String]{}
+    ^handle_keys: [String]{}
     loop fact in handle_facts -> handle_keys.push(fact.stable_key())
     loop key in pkg_ffi_sorted_unique(handle_keys) -> fields.push({name: "handle-fact", value: key})
     fields.push({name: "link-closure", value: link_closure.stable_key()})
@@ -542,9 +542,9 @@ pkg_ffi_bridge_artifact_integrity_diagnostic: fn(target: String, crate_name: Str
 // A registry row with its `{field}` placeholders filled (Rust `Diagnostic::from_row`).
 pkg_ffi_diagnostic_from_row: fn(code: String, fields: [{name: String, value: String}]) -> Diagnostic Never! {
     row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
-    what := row.what
-    why := row.why
-    fix := row.fix
+    ^what: row.what
+    ^why: row.why
+    ^fix: row.fix
     loop field in fields {
         placeholder: "{{{field.name}}}"
         what = what.replace(placeholder, field.value)
@@ -583,7 +583,7 @@ pkg_ffi_sync_bridge_lock: fn(project_root: String?, cache_root: String, bridge_i
 // Registry, sparse, and git packages of a Cargo.lock as locked foreign Rust
 // packages carrying the bridge identity in their build provenance.
 pkg_ffi_cargo_lock_bridge_packages: fn(raw: String, bridge_identity: String, output: String) -> [LockedPackage] ForeignBridgeError! {
-    packages := [LockedPackage]{}
+    ^packages: [LockedPackage]{}
     loop package in pkg_ffi_parse_cargo_lock(raw) {
         source: package.source ?? next
         if !(source.starts_with("registry+") || source.starts_with("sparse+") || source.starts_with("git+")) {
@@ -591,7 +591,7 @@ pkg_ffi_cargo_lock_bridge_packages: fn(raw: String, bridge_identity: String, out
         }
         name: package.name ?? next
         version: package.version ?? next
-        content_hash := String?{None}
+        ^content_hash: String?{None}
         if package.checksum == .Val(checksum) -> content_hash = Val("sha256-{checksum}")
         packages.push(
             LockedPackage{
@@ -609,9 +609,9 @@ pkg_ffi_cargo_lock_bridge_packages: fn(raw: String, bridge_identity: String, out
 }
 
 pkg_ffi_parse_cargo_lock: fn(raw: String) -> [CargoLockPackage] ForeignBridgeError! {
-    packages := [CargoLockPackage]{}
-    current := CargoLockPackage?{None}
-    in_dependencies := false
+    ^packages: [CargoLockPackage]{}
+    ^current: CargoLockPackage?{None}
+    ^in_dependencies: false
     loop raw_line in pkg_bridge_text_lines(raw) {
         line: raw_line.trim()
         if line == "[[package]]" {
@@ -626,7 +626,7 @@ pkg_ffi_parse_cargo_lock: fn(raw: String) -> [CargoLockPackage] ForeignBridgeErr
             in_dependencies = false
             next
         }
-        package := current ?? next
+        ^package: current ?? next
         if in_dependencies {
             if line == "]" -> in_dependencies = false else if pkg_ffi_cargo_lock_quoted_value(line.copy()) == .Val(dependency) {
                 name: if dependency.split_once(" ") == {
@@ -682,7 +682,7 @@ pkg_ffi_cargo_lock_field: fn(line: String, key: String) -> String? Never! {
 
 // One `"value",` dependency row.
 pkg_ffi_cargo_lock_quoted_value: fn(line: String) -> String? Never! {
-    value := line
+    ^value: line
     loop value.ends_with(",") -> value = value.removesuffix(",")
     pkg_ffi_json_string(value.trim())
 }

@@ -14,15 +14,15 @@ trust_env_definition_hash: fn(refs: [RefSpec], table: SourceTable, secrets: [Sec
 }
 
 trust_env_definition_text: fn(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec]) -> String Never! {
-    ref_lines := [String]{}
+    ^ref_lines: [String]{}
     loop spec in refs -> ref_lines.push(spec.raw)
     ref_lines.sort()
-    source_lines := table.trust_lines()
+    ^source_lines: table.trust_lines()
     source_lines.sort()
-    secret_lines := [String]{}
+    ^secret_lines: [String]{}
     loop secret in secrets -> secret_lines.push(secret.trust_fingerprint())
     secret_lines.sort()
-    content := [String]{}
+    ^content: [String]{}
     loop line in ref_lines -> content.push("{line}\n")
     content.push("--sources--\n")
     loop line in source_lines -> content.push("{line}\n")
@@ -35,7 +35,7 @@ trust_env_definition_text: fn(refs: [RefSpec], table: SourceTable, secrets: [Sec
 // presets, package profiles, languages, managed files, services, and
 // integrations are executable environment policy just like package refs.
 trust_environment_definition_hash: fn(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], facts: EnvironmentFacts) -> String Never! {
-    content := [String]{trust_env_definition_hash(refs, table, secrets), "\n--lifecycle--\n", facts.lifecycle.fingerprint(), "--presets--\n"}
+    ^content: [String]{trust_env_definition_hash(refs, table, secrets), "\n--lifecycle--\n", facts.lifecycle.fingerprint(), "--presets--\n"}
     loop preset in facts.presets {
         content.push("{preset.name}\n")
         loop parent in preset.extends -> content.push("extends={parent}\n")
@@ -75,14 +75,14 @@ trust_environment_definition_hash: fn(refs: [RefSpec], table: SourceTable, secre
     loop projection in facts.language_projections -> content.push(projection.fingerprint())
     loop pack in facts.language_packs -> content.push("pack={pack.fingerprint()}")
     content.push("--files--\n")
-    file_prints := [String]{}
+    ^file_prints: [String]{}
     loop file in facts.files -> file_prints.push(file.fingerprint())
     file_prints.sort()
     loop line in file_prints -> content.push("{line}\n")
     content.push("--services--\n")
     loop service in facts.dev_services -> content.push("{service:Debug}\n")
     content.push("--integrations--\n")
-    integration_prints := [String]{}
+    ^integration_prints: [String]{}
     loop integration in facts.integrations -> integration_prints.push(integration.fingerprint())
     integration_prints.sort()
     loop line in integration_prints -> content.push(line)
@@ -199,7 +199,7 @@ trust_missing_integration_grant: fn(store: String, facts: EnvironmentFacts) -[FS
     loop fact in facts.integration_facts.task_facts {
         loop grant_name in fact.grants {
             subject: "{fact.integration.as_str()}:{grant_name}"
-            granted := false
+            ^granted: false
             loop record in records {
                 stored: trust_record_grant(record) ?? next
                 if stored.is(TrustAuthority.Integration) && stored.subject == subject {

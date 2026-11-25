@@ -57,7 +57,7 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     partition: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_WEB_FILE) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime's web partition: {err.message}"}, color)
     receipt_bytes: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_WEB_RECEIPT_FILE) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime's web receipt: {err.message}"}, color)
     receipt: String.from_bytes(receipt_bytes) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "the Jet runtime's web receipt {jet_cli_runtime_label(runtime_dir, JET_CLI_RUNTIME_WEB_RECEIPT_FILE)} is not UTF-8"}, color)
-    census := [JetDriverIceRow]{}
+    ^census: [JetDriverIceRow]{}
     built: jet_cli_native_program(result, checked, None, options, runtime, census, file, jet_driver_entry_root_path(snapshot))
     if built.failure == .Val(failure) -> return jet_cli_native_report(file, "build", failure, color)
     entry: built.program.entry
@@ -71,7 +71,7 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     if jet_cli_build_dir(build_dir, color) == .Val(refused) -> return refused
     // The program's JetCommandSchema record rides in its `jet.command`
     // custom section (spec.md:4675); the module addresses 32 bits.
-    app := web.bytes.copy()
+    ^app: web.bytes.copy()
     if result.command_record.len() > 0 {
         cli_schema_embed_wasm_record(app, result.command_record, U64{4294967295}) ?? return jet_cli_ice("the web program module of `{file}` is not a well-framed Wasm module: {err.display()}")
     }
@@ -128,7 +128,7 @@ jet_cli_web_binding: fn(app: [U8], partition: [U8]) -> WebTargetBinding? Never! 
 // settled it.
 jet_cli_web_partition_report: fn(functions: [FnBody]) -> String Never! {
     // Each row is `<key>\t<shown row>`, so sorting the rows orders them by key.
-    rows := [String]{}
+    ^rows: [String]{}
     loop function in functions {
         if function.synthetic || module_is_core(function.module_identity) -> next
         bucket: function.web_bucket ?? next
@@ -148,13 +148,13 @@ jet_cli_web_partition_report: fn(functions: [FnBody]) -> String Never! {
             .JS -> "JS"
             .Wasm -> "Wasm"
         }
-        effects := function.effects.solved.copy()
+        ^effects: function.effects.solved.copy()
         effects.sort()
         shown: if effects.len() == 0 -> "(pure)" else -> effects.join(", ")
         rows.push("{function.key}\t{qualifier}{function.name} -> {partition}  {reason}  effects: {shown}")
     }
     rows.sort()
-    text := "Web partition report\n"
+    ^text: "Web partition report\n"
     loop row in rows {
         // `find` counts bytes, so the row is cut from its bytes.
         bytes: row.bytes()
@@ -168,10 +168,10 @@ jet_cli_web_partition_report: fn(functions: [FnBody]) -> String Never! {
 // entry root's sources, as the checked snapshot holds them; a source outside
 // the entry root (Core's) is left out, so the map names no host path.
 jet_cli_web_source_map: fn(snapshot: JetDriverAuthorizedSourceSnapshot, entry_source: String, sources: [String], lines: [Int]) -> String Never! {
-    wanted := [String:Int]{}
+    ^wanted: [String:Int]{}
     loop (k, source) in sources -> wanted[source.copy()] = k
-    names := loop _ in sources -> ""
-    contents := loop _ in sources -> ""
+    ^names: loop _ in sources -> ""
+    ^contents: loop _ in sources -> ""
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
         loop row in root.files {
@@ -204,11 +204,11 @@ jet_cli_web_write_text: fn(file: String, color: Bool, path: String, text: String
 // with its report, and so does a preview server that stops.
 jet_cli_dev_web_loop: fn(file: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, port: Int, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? (jet_cli_parent(file) ?? ".")
-    stamp := jet_cli_dev_stamp(root, [String]{})
+    ^stamp: jet_cli_dev_stamp(root, [String]{})
     first: jet_cli_dev_web_build(file, color, options, threads, invocation, trace_sink)
     if first.output.exit_code != JET_DRIVER_EXIT_OK -> return first.output
     jet_cli_write_output(first.output)
-    revision := 1
+    ^revision: 1
     version_path: "{first.build_dir}/__jet_dev_version"
     if jet_cli_web_write_text(file, color, version_path, "{revision}") == .Val(refused) {
         return refused
@@ -260,7 +260,7 @@ jet_cli_dev_web_stopped: fn(state: Shared<JetCLIDevWebState>) -> String? {
 }
 
 jet_cli_dev_web_stop: fn(state: Shared<JetCLIDevWebState>, reason: String) {
-    permit := state.guard_edit()
+    ^permit: state.guard_edit()
     permit.value.stopped = Val(reason)
 }
 

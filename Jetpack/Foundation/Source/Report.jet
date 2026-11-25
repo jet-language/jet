@@ -70,7 +70,7 @@ report_optional_int: fn(value: Int?) -> Dyn Never! {
 }
 
 report_texts: fn(values: [String]) -> Dyn Never! {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop value in values -> items.push(Dyn.Text(value))
     Dyn.Array(items)
 }
@@ -117,7 +117,7 @@ StatusFields: struct {
     }
 
     try_with: fn(self, name: String, value: Dyn) -> StatusFields ReportError! {
-        fields := self
+        ^fields: self
         fields.insert(name, value)
         Ok(fields)
     }
@@ -141,7 +141,7 @@ StatusFields: struct {
     // Status fields refuse duplicate names, so an object is re-inserted field
     // by field in document order.
     from_dyn_object: fn(value: [String:Dyn]) -> StatusFields ReportError! {
-        fields := StatusFields.new()
+        ^fields: StatusFields.new()
         loop entry in value -> fields.insert(entry.key, entry.value)
         Ok(fields)
     }
@@ -156,7 +156,7 @@ report_status_value_parse: fn(text: String) -> Dyn ReportError! {
 }
 
 report_status_object: fn(fields: StatusFields) -> Dyn Never! {
-    object := [String:Dyn]{}
+    ^object: [String:Dyn]{}
     loop entry in fields.entries -> object[entry.name] = entry.value
     Dyn.Object(object)
 }
@@ -173,19 +173,19 @@ StatusEnvelope: struct {
     }
 
     with_report: fn(self, report: ReportEnvelope) -> StatusEnvelope Never! {
-        envelope := self
+        ^envelope: self
         envelope.reports.push(report.copy())
         envelope
     }
 
     with_reports: fn(self, reports: [ReportEnvelope]) -> StatusEnvelope Never! {
-        envelope := self
+        ^envelope: self
         loop report in reports -> envelope.reports.push(report.copy())
         envelope
     }
 
     with_field: fn(self, name: String, value: Dyn) -> StatusEnvelope Never! {
-        envelope := self
+        ^envelope: self
         envelope.fields = envelope.fields.with(name, value)
         envelope
     }
@@ -195,7 +195,7 @@ StatusEnvelope: struct {
     }
 
     try_with_fields: fn(self, fields: StatusFields) -> StatusEnvelope ReportError! {
-        envelope := self
+        ^envelope: self
         envelope.fields.extend(fields)
         Ok(envelope)
     }
@@ -216,11 +216,11 @@ StatusEnvelope: struct {
 
     to_tree: fn(self) -> Dyn Never! {
         self.validate() ?? panic("invalid jet.status/v1 envelope")
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["schema"] = Dyn.Text(STATUS_SCHEMA)
         object["action"] = Dyn.Text(self.action.copy())
         object["ok"] = Dyn.Bool(self.ok)
-        reports := [Dyn]{}
+        ^reports: [Dyn]{}
         loop report in self.reports -> reports.push(report.to_tree())
         object["reports"] = Dyn.Array(reports)
         loop entry in self.fields.entries -> object[entry.name] = entry.value
@@ -292,12 +292,12 @@ ReportPath: struct {
 // Drop `.`, pop on `..` (never above the root).
 report_lexically_normalize: fn(path: String) -> String Never! {
     absolute: path.starts_with("/")
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in path.split("/") {
         if part == {
             "" | "." -> {}
             ".." -> {
-                if parts.len() > 0 -> _ := parts.pop()
+                if parts.len() > 0 -> ^_: parts.pop()
             }
             else -> { parts.push(part) }
         }
@@ -319,7 +319,7 @@ ReportSpan: struct {
     }
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["file"] = Dyn.Text("{self.file}")
         object["start"] = Dyn.Int(self.start)
         object["end"] = Dyn.Int(self.end)
@@ -334,7 +334,7 @@ ReportOrigin: struct {
     source_digest: String,
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["path"] = report_optional_text(self.path)
         object["source_digest"] = Dyn.Text("{self.source_digest}")
         Dyn.Object(object)
@@ -370,7 +370,7 @@ ReportCause: struct {
     as_str: fn(self) -> String Never! { self.code }
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["code"] = Dyn.Text(self.code.copy())
         report_placed_span(object, self.span, self.origin)
         object["line"] = report_optional_int(self.line)
@@ -390,7 +390,7 @@ ReportEdit: struct {
     }
 
     to_tree: fn(self) -> Dyn Never! {
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["span"] = self.span.to_tree()
         object["new_text"] = Dyn.Text(self.new_text.copy())
         object["safety"] = Dyn.Text(diagnostic_fix_safety_word(self.safety))
@@ -480,7 +480,7 @@ ReportEnvelope: struct {
     }
 
     with_fix_edits: fn(self, edits: [ReportEdit]) -> ReportEnvelope ReportError! {
-        report := self
+        ^report: self
         loop edit in edits -> report.push_fix_edit(edit)
         Ok(report)
     }
@@ -494,7 +494,7 @@ ReportEnvelope: struct {
     }
 
     with_no_fix_reason: fn(self, reason: NoFixReason) -> ReportEnvelope ReportError! {
-        report := self
+        ^report: self
         report.set_no_fix_reason(reason)
         Ok(report)
     }
@@ -525,7 +525,7 @@ ReportEnvelope: struct {
 
     to_tree: fn(self) -> Dyn Never! {
         self.validate() ?? panic("invalid jet.report/v4 envelope")
-        object := [String:Dyn]{}
+        ^object: [String:Dyn]{}
         object["schema"] = Dyn.Text("{self.schema_name}/v{self.schema_version}")
         object["code"] = Dyn.Text(self.code.copy())
         object["severity"] = Dyn.Text(self.severity.copy())
@@ -533,7 +533,7 @@ ReportEnvelope: struct {
         object["why"] = Dyn.Text(self.why.copy())
         object["fix"] = Dyn.Text(self.fix.copy())
         report_placed_span(object, self.span, self.origin)
-        edits := [Dyn]{}
+        ^edits: [Dyn]{}
         loop edit in self.fix_edits -> edits.push(edit.to_tree())
         object["fix_edits"] = Dyn.Array(edits)
         object["moment"] = Dyn.Text(self.moment.copy())
@@ -551,12 +551,12 @@ ReportEnvelope: struct {
         object["line"] = report_optional_int(self.line)
         object["col"] = report_optional_int(self.col)
         if self.no_fix_reason == .Val(reason) {
-            no_fix := [String:Dyn]{}
+            ^no_fix: [String:Dyn]{}
             no_fix["kind"] = Dyn.Text(diagnostic_no_fix_kind_word(reason.kind))
             no_fix["next"] = Dyn.Text(reason.next)
             object["no_fix_reason"] = Dyn.Object(no_fix)
         }
-        causes := [Dyn]{}
+        ^causes: [Dyn]{}
         loop cause in self.cause -> causes.push(cause.to_tree())
         object["cause"] = Dyn.Array(causes)
         object["clears"] = Dyn.Int(self.clears)

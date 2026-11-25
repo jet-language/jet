@@ -100,16 +100,16 @@ class Hidden { function method($input) {} }
     files.write(worker_path, pkg_php_render_worker([String]{"run"})) ?? panic("write PHP worker")
     files.write(source_path, "<?php\n") ?? panic("write PHP source")
     files.write(autoload_path, "<?php function run($input) {{ return $input + 1; }}\n") ?? panic("write PHP autoload")
-    child := process.cmd([String]{php, worker_path, source_path}).env("COMPOSER_AUTOLOAD", autoload_path).stdin(.Stream).stdout(.Stream).spawn() ?? panic("start PHP worker")
+    ^child: process.cmd([String]{php, worker_path, source_path}).env("COMPOSER_AUTOLOAD", autoload_path).stdin(.Stream).stdout(.Stream).spawn() ?? panic("start PHP worker")
     ready: pkg_binders_test_read_exact(child, 9)
     assert_eq(ready, [U8]{U8{5}, U8{0}, U8{0}, U8{0}, U8{82}, U8{69}, U8{65}, U8{68}, U8{89}})
     request: "{{\"op\":\"invoke\",\"command\":\"run\",\"input\":41,\"id\":7}}".bytes()
     child.stdin.write_bytes(pkg_binders_test_u32_le(request.len())) ?? panic("write request length")
     child.stdin.write_bytes(request) ?? panic("write request")
     header: pkg_binders_test_read_exact(child, 12)
-    length := 0
+    ^length: 0
     loop index in 0..<4 -> length = (length) | (Int{header[index]} << (index * 8))
-    id := 0
+    ^id: 0
     loop index in 0..<8 -> id = (id) | (Int{header[4 + index]} << (index * 8))
     assert_eq(id, 7)
     response: pkg_binders_test_read_exact(child, length)

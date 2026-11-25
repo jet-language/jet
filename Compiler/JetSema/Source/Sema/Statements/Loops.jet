@@ -93,7 +93,7 @@ sema_stmt_tree_loop_body_has_break: fn(statements: [TStmt], label: String?, allo
 // Statements are read in place (read windows): an index read or an unwrapped
 // optional would copy the statement, and with it a whole else-if chain.
 sema_stmt_tree_block_can_fall_through: fn(statements: [TStmt]) -> Bool Never! {
-    seen := 0
+    ^seen: 0
     loop last in statements {
         seen += 1
         if seen < statements.len() -> next
@@ -157,7 +157,7 @@ sema_stmt_check_loop_value_break: fn(value: Expr, label: String?, label_span: Sp
     // copy: `frame` is read after sema_check_expression and loop-value recording, which write
     // context.loop_value_frames (`^context`). A view would be live across those writes.
     frame: check.context.loop_value_frames[frame_index].copy()
-    payload_expected := Type?{None}
+    ^payload_expected: Type?{None}
     if frame.ty == .Val(expected_type) && !sema_expr_is_numeric(expected_type) {
         payload_expected = Val(expected_type)
     }
@@ -186,7 +186,7 @@ sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, check: ^S
         if !sema_stmt_move_direct(value, check, "the collecting loop") -> return None
         return Val(TStmt.ExprStmt{value: item, span: span})
     }
-    stream_return := return_type
+    ^stream_return: return_type
     if sema_stmt_stream_element_type(stream_return) == None {
         stream_return = check.scopes.return_type
     }
@@ -194,7 +194,7 @@ sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, check: ^S
         // The report sits at the `yield` keyword.
         keyword: Span{start: span.start, end: span.start + "yield".count_bytes()}
         check.diagnostics.push(sema_error("E0805", keyword, "`yield` outside a generator", "`yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it", "declare `Stream<T> ->` on this function, or remove the `yield`"))
-        _ := sema_check_expression(value, None, check)
+        ^_: sema_check_expression(value, None, check)
         return None
     }
     diagnostic_start: check.diagnostics.len()
@@ -202,13 +202,13 @@ sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, check: ^S
         // The element type is the yielded value's target, and a value of
         // another type is E0807 about the stream.
         mismatch_index: sema_value_mismatch_index(check.diagnostics, diagnostic_start, expr_span(value)) ?? return None
-        probe_diagnostics := [Diagnostic]{}
+        ^probe_diagnostics: [Diagnostic]{}
         offered: sema_probe_expression(value, None, check, probe_diagnostics) ?? return None
         check.diagnostics[mismatch_index] = sema_stmt_yield_mismatch(elem_type, offered.ty, expr_span(value))
         return None
     }
     if !sema_copy_site_check_guard_owned(checked, check, false) -> return None
-    yielded := checked
+    ^yielded: checked
     if !type_identity_equal(checked.ty, elem_type) {
         if {
             sema_expr_numeric_value_widening(checked, elem_type) == (Val(true)) -> {
@@ -222,7 +222,7 @@ sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, check: ^S
         }
     }
     if !sema_stmt_move_direct(value, check, "`yield`") -> return None
-    call := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.YieldSend{value: yielded}}, span)
+    ^call: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.YieldSend{value: yielded}}, span)
     Val(TStmt.ExprStmt{value: call, span: span})
 }
 
@@ -235,19 +235,19 @@ sema_stmt_yield_mismatch: fn(element: Type, offered: Type, span: Span) -> Diagno
 // return was rejected.
 sema_stmt_generator_return_rejected: fn(value: Expr?, return_type: Type?, check: ^SemaBodyCheck) -> Bool {
     returned: value ?? return false
-    stream_return := return_type
+    ^stream_return: return_type
     if sema_stmt_stream_element_type(stream_return) == None {
         stream_return = check.scopes.return_type
     }
     if sema_stmt_stream_element_type(stream_return) == None -> return false
-    _ := sema_check_expression(returned, None, check)
+    ^_: sema_check_expression(returned, None, check)
     check.diagnostics.push(sema_error("E0806", expr_span(returned), "`{check.context.function_name}` yields values, so `return` can't carry one", "a generator body produces values with `yield`; `return` only ends the stream early", "write `yield ...;` to hand back a value, or a bare `return;` to end the stream"))
     true
 }
 
 sema_stmt_close_loop_value_frame: fn(check: ^SemaBodyCheck, frame_index: Int, body: ^[TStmt], fork: SemaOwnershipFork, outer: Bool, may_skip: Bool) -> Bool {
-    valid := true
-    frame := SemaLoopValueFrame?{None}
+    ^valid: true
+    ^frame: SemaLoopValueFrame?{None}
     if frame_index >= 0 && frame_index < check.context.loop_value_frames.len() {
         frame = Val(check.context.loop_value_frames[frame_index])
     }
@@ -257,11 +257,11 @@ sema_stmt_close_loop_value_frame: fn(check: ^SemaBodyCheck, frame_index: Int, bo
             valid = false
         }
     }
-    body_falls_through := sema_stmt_tree_block_can_fall_through(body)
+    ^body_falls_through: sema_stmt_tree_block_can_fall_through(body)
     if body_falls_through && frame != None {
         sema_ownership_check_loop_move_backedge(check.state, check.context.loop_value_frames[frame_index], check.diagnostics)
     }
-    _ := sema_ownership_join_loop_value_paths(check, frame_index, fork, outer, body_falls_through, may_skip)
+    ^_: sema_ownership_join_loop_value_paths(check, frame_index, fork, outer, body_falls_through, may_skip)
     sema_loop_value_pop_frame(check.context)
     valid
 }
@@ -283,8 +283,8 @@ sema_stmt_check_loop_step: fn(step: Stmt, check: ^SemaBodyCheck) -> TStmt? {
 sema_stmt_check_loop: fn(body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?, return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int, output: ^[TStmt]) -> Bool {
     loop_fork: sema_ownership_mark(check.state)
     sema_scope_enter(check.scopes, check.state, "loop@{span.start}")
-    label_name := String?{None}
-    label_valid := true
+    ^label_name: String?{None}
+    ^label_valid: true
     if label != None {
         label_name = Val(label.name)
         if !sema_scope_push_loop_label(check.scopes, label.name) {
@@ -292,11 +292,11 @@ sema_stmt_check_loop: fn(body: [Stmt], span: Span, arrow_body: Bool, label: Name
             label_valid = false
         }
     }
-    loop_frame_index := check.context.loop_value_frames.len()
+    ^loop_frame_index: check.context.loop_value_frames.len()
     sema_loop_value_push_frame(check.context, label_name, loop_fork)
-    previous_arrow_loop_body := check.context.arrow_loop_body
+    ^previous_arrow_loop_body: check.context.arrow_loop_body
     check.context.arrow_loop_body = arrow_body
-    nested := sema_stmt_check_block(body, return_type, check, "loop.body@{span.start}", loop_depth + 1)
+    ^nested: sema_stmt_check_block(body, return_type, check, "loop.body@{span.start}", loop_depth + 1)
     check.context.arrow_loop_body = previous_arrow_loop_body
     if label != None -> sema_scope_pop_loop_label(check.scopes)
     sema_single_use_leave_scope(check)

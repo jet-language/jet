@@ -14,7 +14,7 @@ use {
 publication_state: fn(run: Dyn) -> Dyn {
     axis_id: dyn_at(run, "axisId")
     if axis_id != Dyn.Null -> return axis_publication(run, axis_id)
-    blockers := items_at(run, "validationIssues")
+    ^blockers: items_at(run, "validationIssues")
     loaded: items_at(run, "loaded")
     skipped: items_at(run, "skipped")
     results: items_at(run, "results")
@@ -80,7 +80,7 @@ publication_state: fn(run: Dyn) -> Dyn {
             metric: or_text(member(failure, "metric"), "metric")
             peer_failures: items_at(failure, "peers")
             loop peer_failure in peer_failures {
-                reasons := [dyn_at(peer_failure, "reason")]
+                ^reasons: [dyn_at(peer_failure, "reason")]
                 reasons.extend(items_at(failure, "reasons"))
                 kept: distinct_values(reasons.filter(fn(reason) { truthy_at(reason, "") }))
                 detail: if kept.len() > 0 -> " ({kept.map(fn(reason) { js_text(reason) }).join("; ")})" else -> ""
@@ -94,7 +94,7 @@ publication_state: fn(run: Dyn) -> Dyn {
         }
     }
     covered: results.flat_map(fn(result) { items_at(result, "entry/cells") })
-    uncovered := [Dyn]{}
+    ^uncovered: [Dyn]{}
     loop id in matrix_ids {
         if !listed(covered, Val(id)) && !listed(allowed, Val(id)) -> uncovered.push(id)
     }
@@ -134,7 +134,7 @@ publication_state: fn(run: Dyn) -> Dyn {
         category: or_text(member(owner, "category"), "unknown category")
         blockers.push(Dyn.Text("{template(value_at(owner, "entry"))}/{or_text(member(owner, "peer"), "peer")}/{or_text(member(owner, "metric"), "metric")} ({category}): loss owner {or_text(member(owner, "card"), "is not declared")} is not live"))
     }
-    cells := combinatorics.unique<String>(allowed.filter_map(fn(cell) { text_at(cell, "") }).to_list())
+    ^cells: combinatorics.unique<String>(allowed.filter_map(fn(cell) { text_at(cell, "") }).to_list())
     cells.sort_by(fn(left: String, right: String) { text.collate(left, right) })
     state(if full_scope -> "full_matrix" else -> "partial_entry", blockers, cells)
 }
@@ -142,7 +142,7 @@ publication_state: fn(run: Dyn) -> Dyn {
 // The publication state of the one axis `axis_id` of `run`.
 axis_publication: fn(run: Dyn, axis_id: Dyn) -> Dyn {
     id: js_text(axis_id)
-    blockers := items_at(run, "validationIssues")
+    ^blockers: items_at(run, "validationIssues")
     axis: axis_record(dyn_at(run, "axes"), id)
     if {
         !truthy_at(axis, "") -> blockers.push(Dyn.Text("{id} axis is missing"))
@@ -163,7 +163,7 @@ axis_publication: fn(run: Dyn, axis_id: Dyn) -> Dyn {
 // are none.
 state: fn(scope: String, blockers: [Dyn], allowed: [String]) -> Dyn {
     kept: combinatorics.unique<String>(blockers.filter_map(fn(blocker) { text_at(blocker, "") }).filter(fn(blocker) { blocker != "" }).to_list())
-    out := Dyn.object()
+    ^out: Dyn.object()
     out["scope"] = Dyn.Text(scope.copy())
     out["status"] = Dyn.Text(if kept.len() > 0 -> "incomplete" else -> "complete")
     out["complete"] = Dyn.Bool(kept.len() == 0)
@@ -183,7 +183,7 @@ axis_record: fn(axes: Dyn, id: String) -> Dyn {
 // The last of `cells` whose `id` is `id`, as a Map built from them keeps it;
 // null when none is.
 last_with_id: fn(cells: [Dyn], id: Dyn) -> Dyn {
-    found := Dyn.Null
+    ^found: Dyn.Null
     loop cell in cells {
         if strictly_equal(Val(dyn_at(cell, "id")), Val(id)) -> found = cell.copy()
     }
@@ -209,7 +209,7 @@ same_values: fn(left: [Dyn], right: [Dyn]) -> Bool {
 
 // The distinct `values` in first-seen order, as a Set keeps them.
 distinct_values: fn(values: [Dyn]) -> [Dyn] {
-    out := [Dyn]{}
+    ^out: [Dyn]{}
     loop value in values {
         if !listed(out, Val(value)) -> out.push(value.copy())
     }

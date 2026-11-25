@@ -94,7 +94,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     host_dir: recipe_test_scratch("logged-native-linux-host")
     marker: files.join(host_dir, "logged-host-escape")
     command: "if printf hostile > '{marker}'; then exit 41; fi && printf ok > \"$JET_BUILD_OUTPUT/ok\""
-    attempt := BuildAttempt.new("logged-sandbox", "logged-sandbox", "test", "recipe", "source")
+    ^attempt: BuildAttempt.new("logged-sandbox", "logged-sandbox", "test", "recipe", "source")
     status: foundation_native_sandbox_status()
     if recipe_run_logged(recipe_sandbox_test_exec("sh", [String]{"-c", command}), ctx, None, attempt) == {
         .Ok(report) -> {

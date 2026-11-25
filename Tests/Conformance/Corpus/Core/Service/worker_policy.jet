@@ -3,7 +3,7 @@ use service: core.service
 checked_worker: fn() {}
 
 run: fn() {
-    tree := service.tree("workers")
+    ^tree: service.tree("workers")
     endpoint: tree.worker("worker", checked_worker, capacity: 2) ?? panic("worker")
     tree.group("supervisor", ["worker"]) ?? panic("group")
     tree.start() ?? panic("start")

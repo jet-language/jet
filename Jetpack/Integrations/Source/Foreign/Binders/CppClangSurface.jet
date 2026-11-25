@@ -90,7 +90,7 @@ CppSurface: struct {
     }
 
     append: fn(self, other: CppSurface) -> CppSurface Never! {
-        out := self
+        ^out: self
         loop class in other.classes -> out.classes.push(class.copy())
         loop function in other.functions -> out.functions.push(function.copy())
         loop template in other.templates -> out.templates.push(template.copy())
@@ -109,13 +109,13 @@ pkg_cpp_parse_ast: fn(stdout: [U8]) -> Dyn ForeignBindError! {
 
 // The surface declared in `header` within the selected namespaces.
 pkg_cpp_project_surface: fn(ast: Dyn, header: String, selected: [String]) -> CppSurface ForeignBindError! {
-    surface := pkg_cpp_walk_ast(ast, header, false, [String]{}, selected)
+    ^surface: pkg_cpp_walk_ast(ast, header, false, [String]{}, selected)
     surface.functions = pkg_cpp_disambiguate(surface.functions)
     Ok(surface)
 }
 
 pkg_cpp_walk_ast: fn(value: Dyn, header: String, inherited_main: Bool, namespace: [String], selected: [String]) -> CppSurface ForeignBindError! {
-    surface := CppSurface.empty()
+    ^surface: CppSurface.empty()
     map: pkg_json_object(value) ?? return Ok(surface)
     kind: pkg_cpp_string(map, "kind") ?? ""
     in_main: if pkg_cpp_location_file(map) == {
@@ -125,7 +125,7 @@ pkg_cpp_walk_ast: fn(value: Dyn, header: String, inherited_main: Bool, namespace
     if kind == "NamespaceDecl" {
         name: pkg_cpp_string(map, "name") ?? ""
         if name != "" {
-            nested := namespace
+            ^nested: namespace
             nested.push(name)
             loop child in pkg_cpp_children(map) {
                 surface = surface.append(pkg_cpp_walk_ast(child, header, in_main, nested, selected))
@@ -166,9 +166,9 @@ pkg_cpp_parse_class: fn(map: [String:Dyn], namespace: [String]) -> CppClass Fore
     if !pkg_binder_is_ident(name) {
         return Err(ForeignBindError.Source("clang reported an unnamed C++ class"))
     }
-    public := (pkg_cpp_string(map, "tagUsed") ?? "") == "struct"
-    ctor := [CppParam]?{None}
-    methods := [CppRoutine]{}
+    ^public: (pkg_cpp_string(map, "tagUsed") ?? "") == "struct"
+    ^ctor: [CppParam]?{None}
+    ^methods: [CppRoutine]{}
     loop raw_child in pkg_cpp_children(map) {
         child: pkg_json_object(raw_child) ?? next
         child_kind: pkg_cpp_string(child, "kind") ?? ""
@@ -195,8 +195,8 @@ pkg_cpp_parse_class: fn(map: [String:Dyn], namespace: [String]) -> CppClass Fore
 
 pkg_cpp_parse_template: fn(map: [String:Dyn], namespace: [String]) -> CppFunctionTemplate ForeignBindError! {
     name: pkg_cpp_string(map, "name") ?? ""
-    type_params := [String]{}
-    function := [String:Dyn]?{None}
+    ^type_params: [String]{}
+    ^function: [String:Dyn]?{None}
     loop raw_child in pkg_cpp_children(map) {
         child: pkg_json_object(raw_child) ?? next
         child_kind: pkg_cpp_string(child, "kind") ?? ""
@@ -219,14 +219,14 @@ pkg_cpp_parse_template: fn(map: [String:Dyn], namespace: [String]) -> CppFunctio
 
 // Instantiate only the templates the caller requested, by qualified name.
 pkg_cpp_instantiate_templates: fn(surface: CppSurface, requests: [CppTemplateInstantiation]) -> CppSurface ForeignBindError! {
-    out := surface
-    names := [String]{}
+    ^out: surface
+    ^names: [String]{}
     loop request in requests {
         if names.contains(request.jet_name) {
             return Err(ForeignBindError.Source("duplicate Jet template name `{request.jet_name}`"))
         }
         names.push(request.jet_name)
-        found := CppFunctionTemplate?{None}
+        ^found: CppFunctionTemplate?{None}
         loop template in out.templates {
             if template.cpp_name == request.qualified_name {
                 found = Val(template)
@@ -234,7 +234,7 @@ pkg_cpp_instantiate_templates: fn(surface: CppSurface, requests: [CppTemplateIns
             }
         }
         if found == None {
-            known := [String]{}
+            ^known: [String]{}
             loop template in out.templates -> known.push(template.cpp_name)
             return Err(ForeignBindError.Source("clang found no function template `{request.qualified_name}` (selected templates: {known.join(", ")})"))
         }
@@ -242,11 +242,11 @@ pkg_cpp_instantiate_templates: fn(surface: CppSurface, requests: [CppTemplateIns
         if template.type_params.len() != request.cpp_args.len() {
             return Err(ForeignBindError.Source("template `{request.qualified_name}` needs {template.type_params.len()} type argument(s), not {request.cpp_args.len()}"))
         }
-        substitutions := [String:String]{}
+        ^substitutions: [String:String]{}
         loop index in 0..<template.type_params.len() {
             substitutions[template.type_params[index]] = request.cpp_args[index]
         }
-        params := [CppParam]{}
+        ^params: [CppParam]{}
         loop param in template.params {
             kind: pkg_cpp_scalar_substituted(param.spelling, substitutions) ?? return Err(ForeignBindError.Source("template `{request.qualified_name}` parameter `{param.name}` has unsupported instantiated type `{param.spelling}`"))
             params.push(CppParam{name: param.name, kind: kind})
@@ -268,7 +268,7 @@ pkg_cpp_parse_routine: fn(map: [String:Dyn], cpp_name: String) -> CppRoutine For
 }
 
 pkg_cpp_parse_params: fn(map: [String:Dyn], substitutions: [String:String]) -> [CppParam] ForeignBindError! {
-    out := [CppParam]{}
+    ^out: [CppParam]{}
     loop param in pkg_cpp_raw_params(map) {
         kind: pkg_cpp_scalar_substituted(param.spelling, substitutions) ?? return Err(ForeignBindError.Source("parameter `{param.name}` has unsupported clang type `{param.spelling}`"))
         out.push(CppParam{name: param.name, kind: kind})
@@ -278,8 +278,8 @@ pkg_cpp_parse_params: fn(map: [String:Dyn], substitutions: [String:String]) -> [
 
 // `ParmVarDecl` children: the declared name (or `argN`) and clang's type.
 pkg_cpp_raw_params: fn(map: [String:Dyn]) -> [{name: String, spelling: String}] ForeignBindError! {
-    out := [{name: String, spelling: String}]{}
-    index := 0
+    ^out: [{name: String, spelling: String}]{}
+    ^index: 0
     loop raw_child in pkg_cpp_children(map) {
         child: pkg_json_object(raw_child) ?? next
         if (pkg_cpp_string(child, "kind") ?? "") != "ParmVarDecl" -> next
@@ -383,14 +383,14 @@ pkg_cpp_path_under: fn(path: String, directory: String) -> Bool Never! {
 // Rename every routine whose Jet name another routine shares, in order: the
 // renamed name is visible to the later comparisons.
 pkg_cpp_disambiguate: fn(routines: [CppRoutine]) -> [CppRoutine] Never! {
-    out := routines
+    ^out: routines
     loop index in 0..<out.len() {
-        shared := false
+        ^shared: false
         loop other in 0..<out.len() {
             if other != index && out[other].jet_name == out[index].jet_name -> shared = true
         }
         if !shared -> next
-        labels := [String]{}
+        ^labels: [String]{}
         loop param in out[index].params -> labels.push(param.name)
         suffix: if labels.len() == 0 -> "no_args" else -> labels.join("_")
         out[index].jet_name = "{out[index].jet_name}_{suffix}"
@@ -419,8 +419,8 @@ pkg_cpp_qualified_ident: fn(value: String) -> Bool Never! {
 // `camelCase`/`PascalCase` to `snake_case`: `_` before every ASCII capital
 // after the first character, then ASCII lowercase.
 pkg_cpp_snake: fn(value: String) -> String Never! {
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop scalar in value.chars() {
         loop byte in "{scalar}".bytes() {
             code: Int{byte}

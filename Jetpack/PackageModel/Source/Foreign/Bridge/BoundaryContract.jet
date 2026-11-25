@@ -86,8 +86,8 @@ ForeignBoundaryObservation: struct {
 
     // Builders consume the observation (Rust `mut self`), never copying it.
     with_assumptions: fn(^^self, assumptions: [String]) -> ForeignBoundaryObservation Never! {
-        out := self
-        rows := [String]{}
+        ^out: self
+        ^rows: [String]{}
         loop assumption in assumptions {
             if !rows.contains(assumption) -> rows.push(assumption.copy())
         }
@@ -97,7 +97,7 @@ ForeignBoundaryObservation: struct {
     }
 
     with_evidence: fn(^^self, evidence: EvidenceIdentity) -> ForeignBoundaryObservation Never! {
-        out := self
+        ^out: self
         out.evidence = Val(evidence)
         out
     }
@@ -155,7 +155,7 @@ pkg_foreign_boundary_capability: fn(root: String) -> ForeignBoundaryCapability N
 
 // The complete family matrix used by foreign inspection and comparison views.
 pkg_foreign_boundary_capabilities: fn() -> [ForeignBoundaryCapability] Never! {
-    rows := [ForeignBoundaryCapability]{}
+    ^rows: [ForeignBoundaryCapability]{}
     loop root in pkg_foreign_language_roots() -> rows.push(pkg_foreign_boundary_capability(root))
     rows
 }
@@ -242,7 +242,7 @@ ForeignSourceReceipt: struct {
 
     // Queryable fields for the existing provenance/receipt channels.
     provenance_fields: fn(self) -> [{name: String, value: String}] Never! {
-        fields := [{name: String, value: String}]{
+        ^fields: [{name: String, value: String}]{
             {name: "source-receipt-schema", value: self.schema},
             {name: "source-receipt-boundary", value: self.boundary_digest},
             {name: "source-receipt-coverage", value: self.artifact_coverage_digest},
@@ -269,7 +269,7 @@ ForeignSourceReceipt: struct {
     // Deterministic text form suitable for the existing receipt store.
     render: fn(self) -> String ForeignBridgeError! {
         self.validate()
-        output := ""
+        ^output: ""
         loop field in self.provenance_fields() {
             pkg_bridge_append_line(output, field.name, field.value)
         }
@@ -331,7 +331,7 @@ ForeignBoundaryContract: struct {
     new: fn(descriptor: BinderDescriptor, library: String, identity: ForeignBoundaryIdentity) -> ForeignBoundaryContract Never! {
         capability: pkg_foreign_boundary_capability(descriptor.root)
         contract: descriptor.contract
-        scalar_widths := [String:String]{}
+        ^scalar_widths: [String:String]{}
         scalar_widths["integer"] = pkg_bridge_scalar_width(contract.integer)
         scalar_widths["floating"] = pkg_bridge_scalar_width(contract.floating)
         scalar_widths["boolean"] = pkg_bridge_scalar_width(contract.boolean)
@@ -341,7 +341,7 @@ ForeignBoundaryContract: struct {
         is_c: descriptor.root == C_MODULE_ROOT
         artifact_coverage: ForeignArtifactCoverage.new("not-recorded", identity.target, identity.generator)
         coverage_digest: artifact_coverage.digest()
-        obligations := [ForeignObligationEvidence]{}
+        ^obligations: [ForeignObligationEvidence]{}
         loop obligation in FOREIGN_BOUNDARY_OBLIGATIONS {
             obligations.push(ForeignObligationEvidence{obligation: obligation, basis: FFIEvidenceBasis.Unknown, checker: "not-established", assumptions: [String]{"descriptor declarations do not prove the foreign implementation"}, coverage_digest: coverage_digest.copy()})
         }
@@ -400,7 +400,7 @@ ForeignBoundaryContract: struct {
         if self.obligations.len() < FOREIGN_BOUNDARY_OBLIGATIONS.len() {
             return Err(pkg_bridge_error("foreign boundary is missing canonical obligation rows"))
         }
-        names := [String]{}
+        ^names: [String]{}
         loop obligation in self.obligations {
             obligation.validate(self.artifact_coverage)
             if names.contains(obligation.obligation) {
@@ -450,8 +450,8 @@ ForeignBoundaryContract: struct {
     }
 
     with_assumptions: fn(self, assumptions: [String]) -> ForeignBoundaryContract Never! {
-        out := self
-        rows := [String]{}
+        ^out: self
+        ^rows: [String]{}
         loop assumption in assumptions {
             if !rows.contains(assumption) -> rows.push(assumption.copy())
         }
@@ -463,7 +463,7 @@ ForeignBoundaryContract: struct {
     // Attach exact artifact coverage and retarget every existing obligation
     // row to the same coverage digest.
     with_artifact_coverage: fn(self, coverage: ForeignArtifactCoverage) -> ForeignBoundaryContract Never! {
-        out := self
+        ^out: self
         digest: coverage.digest()
         out.artifact_coverage = coverage
         loop index in 0..<out.obligations.len() {
@@ -475,7 +475,7 @@ ForeignBoundaryContract: struct {
     // Replace one obligation row without creating a parallel evidence store.
     record_obligation: fn(^self, obligation: ForeignObligationEvidence) ForeignBridgeError! {
         obligation.validate(self.artifact_coverage)
-        replaced := false
+        ^replaced: false
         loop index in 0..<self.obligations.len() {
             if self.obligations[index].obligation == obligation.obligation {
                 self.obligations[index] = obligation
@@ -521,7 +521,7 @@ ForeignBoundaryContract: struct {
     // Project the canonical row into the lower-layer carrier used by sema,
     // the checked tree, and execution tiers.
     carrier_facts: fn(self) -> FFIBoundaryFacts Never! {
-        obligations := [FFIBoundaryObligation]{}
+        ^obligations: [FFIBoundaryObligation]{}
         loop obligation in self.obligations {
             obligations.push(FFIBoundaryObligation{name: obligation.obligation, basis: obligation.basis, checker: obligation.checker, assumptions: obligation.assumptions, coverage_digest: obligation.coverage_digest})
         }
@@ -552,7 +552,7 @@ ForeignBoundaryContract: struct {
         if record.identity != self.identity.derivation_identity() {
             return Err(pkg_bridge_error("foreign boundary derivation identity does not match its source/build/run/target inputs"))
         }
-        out := self
+        ^out: self
         out.derivation = Val(derivation_record_reference(record))
         Ok(out)
     }
@@ -563,7 +563,7 @@ ForeignBoundaryContract: struct {
         if self.derivation != Val(derivation) {
             return Err(pkg_bridge_error("foreign boundary evidence and derivation references disagree"))
         }
-        out := self
+        ^out: self
         if !out.evidence.contains(record.identity) {
             out.evidence.push(record.identity)
             // Rust derived EvidenceIdentity Ord: field tuple, not the joined
@@ -596,7 +596,7 @@ ForeignBoundaryContract: struct {
         }
         comparison_record_assert_equal(comparison) ?? return Err(pkg_bridge_error("foreign replacement comparison was not accepted: {comparison_assertion_error_text(err)}"))
         // Exactly one copy, Rust's `self.clone()`; the attach steps consume it.
-        candidate := self.copy()
+        ^candidate: self.copy()
         candidate = candidate.attach_derivation(derivation)
         candidate = candidate.attach_evidence(evidence)
         candidate.record_comparison(comparison, Val(evidence.identity))
@@ -626,10 +626,10 @@ ForeignBoundaryContract: struct {
         relation: observation_relation_as_str(record.relation)
         if record.samples.len() == 0 {
             reason: record.reason ?? "comparison produced no samples"
-            assumptions := self.assumptions
+            ^assumptions: self.assumptions
             assumptions.push("comparison-terminal:{outcome}:{reason}")
             assumptions.push("comparison-relation:{relation}")
-            rows := [String]{}
+            ^rows: [String]{}
             loop assumption in assumptions {
                 if !rows.contains(assumption) -> rows.push(assumption)
             }
@@ -638,14 +638,14 @@ ForeignBoundaryContract: struct {
             return
         }
         loop sample in record.samples {
-            assumptions := [String]{"relation={relation}", "source={sample.identity.source}", "tool={sample.identity.tool}", "target={sample.identity.target}"}
+            ^assumptions: [String]{"relation={relation}", "source={sample.identity.source}", "tool={sample.identity.tool}", "target={sample.identity.target}"}
             if sample.reference_replay == .Val(replay) {
                 assumptions.push("reference-replay={replay.raw}")
             }
             if sample.candidate_replay == .Val(replay) {
                 assumptions.push("replacement-replay={replay.raw}")
             }
-            observation := ForeignBoundaryObservation.new(sample.identity.case_id, sample.identity.input_id, sample.reference.raw, sample.candidate.raw, outcome).with_assumptions(assumptions)
+            ^observation: ForeignBoundaryObservation.new(sample.identity.case_id, sample.identity.input_id, sample.reference.raw, sample.candidate.raw, outcome).with_assumptions(assumptions)
             if evidence == .Val(identity) -> observation = observation.with_evidence(identity)
             self.record_observation(observation)
         }
@@ -684,7 +684,7 @@ ForeignBoundaryContract: struct {
 
     // Stable digest for a complete boundary row; it only keys the row.
     digest: fn(self) -> String Never! {
-        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+        ^identity: ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
         loop field in self.stable_fields() -> identity.field(field.name, field.value.bytes())
         identity.finish()
     }
@@ -704,7 +704,7 @@ ForeignBoundaryContract: struct {
     }
 
     sorted_width_names: fn(self) -> [String] Never! {
-        names := self.scalar_widths.keys().to_list()
+        ^names: self.scalar_widths.keys().to_list()
         names.sort()
         names
     }
@@ -712,7 +712,7 @@ ForeignBoundaryContract: struct {
     // Queryable fields merged into the bridge provenance record.
     provenance_fields: fn(self) -> [{name: String, value: String}] Never! {
         coverage: self.artifact_coverage
-        fields := [{name: String, value: String}]{
+        ^fields: [{name: String, value: String}]{
             {name: "boundary-schema", value: self.schema},
             {name: "boundary-digest", value: self.digest()},
             {name: "boundary-language", value: self.language},
@@ -773,11 +773,11 @@ ForeignBoundaryContract: struct {
 
     stable_fields: fn(self) -> [{name: String, value: String}] Never! {
         coverage: self.artifact_coverage
-        obligation_rows := [String]{}
+        ^obligation_rows: [String]{}
         loop obligation in self.obligations {
             obligation_rows.push("{obligation.obligation}:{obligation.basis.as_str()}:{obligation.checker}:{obligation.coverage_digest}:{obligation.assumptions.join("|")}")
         }
-        fields := [{name: String, value: String}]{
+        ^fields: [{name: String, value: String}]{
             {name: "schema", value: self.schema},
             {name: "language", value: self.language},
             {name: "library", value: self.library},

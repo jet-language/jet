@@ -51,7 +51,7 @@ comparison_equality_status: fn(relation: ObservationRelation, reference: Dyn, ca
         comparison_equality_require(comparison_equality_status(relation, Dyn.Float(-0.0), Dyn.Float(0.0)) == ComparisonStatus.Matched, "signed zeros compare equal under {name}")
         comparison_equality_require(comparison_equality_status(relation, left, right) == ComparisonStatus.Matched, "objects ignore insertion order under {name}")
         comparison_equality_require(comparison_equality_status(relation, Dyn.Int(1), Dyn.Float(1.0)) == ComparisonStatus.Mismatch, "numeric variants remain distinct under {name}")
-        missing := comparison_equality_sample(Dyn.Int(1), Dyn.Int(1))
+        ^missing: comparison_equality_sample(Dyn.Int(1), Dyn.Int(1))
         missing.declared_equal = None
         missing_record: testing_compare_samples_with_discarded(relation, [ComparisonSample]{missing}, 0)
         comparison_equality_require(missing_record.status == ComparisonStatus.InvalidOracle, "a missing fact cannot pass under {name}")

@@ -6,7 +6,7 @@ use time: core.time
 
 spin: fn() -> Int {
     {sender, receiver}: channel<Int>(capacity: 1)
-    turns := 0
+    ^turns: 0
     loop turns >= 0 {
         sender.send(1)
         turns += receiver.receive() ?? 0
@@ -28,7 +28,7 @@ run: fn() {
     { sender: started, receiver: ready }: channel<Int>(capacity: 1)
     task.group outer {
         worker: task middle(started)
-        _ := ready.receive() ?? panic("closed")
+        ^_: ready.receive() ?? panic("closed")
         time.sleep(20ms)
         worker.cancel()
         if worker.join() == {

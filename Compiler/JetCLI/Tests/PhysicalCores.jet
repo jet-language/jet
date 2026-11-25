@@ -69,7 +69,7 @@ use jet_cli.[JetCLILoadSample, jet_cli_allowed_cpus, jet_cli_busy_cpus, jet_cli_
     // Over three ticks cpu0 stays busy and cpu1 idles.
     second: JetCLILoadSample{stat: "cpu0 3 0 0 0 0 0 0 0 0 0\ncpu1 0 0 0 3 0 0 0 0 0 0\n", own_ns: 0, at_ns: 30000000}
     third: JetCLILoadSample{stat: "cpu0 3 0 0 0 0 0 0 0 0 0\ncpu1 0 0 0 3 0 0 0 0 0 0\n", own_ns: 0, at_ns: 35000000}
-    _ := jet_cli_load_window(2, mask, first.move())
+    ^_: jet_cli_load_window(2, mask, first.move())
     // From `first`: one CPU busy, one left.
     assert_eq(jet_cli_load_window(2, mask, second.move()), 1)
     // From `second`, not `first`: 5 ms is too short to count load.

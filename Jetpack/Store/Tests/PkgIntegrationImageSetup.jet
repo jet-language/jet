@@ -25,7 +25,7 @@ store_image_setup: fn() {
     root: sys.get("JET_TEST_IMAGE_SETUP") ?? return
     entries: sys.get("JET_TEST_IMAGE_EXECUTABLES") ?? panic("image executables")
     roots: HangarRoots{root: root, dev_mode: false}
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     loop entry in entries.split(";") {
         words: entry.trim().split(" ").to_list()
         if words.len() != 3 && words.len() != 4 -> panic("image executable entry: {entry}")

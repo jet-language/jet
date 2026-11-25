@@ -99,8 +99,8 @@ SemaLibraryEffectReach: struct {
 // writes its effect declaration beside the type) and is no Prelude effect.
 sema_library_effect_declared: fn(items: [Item], name: String) -> Bool Never! {
     if EFFECT_VOCABULARY_ROOTS.contains(name) -> return false
-    typed := false
-    declared := false
+    ^typed: false
+    ^declared: false
     loop item in items {
         if item == {
             .Struct(definition) -> {
@@ -121,7 +121,7 @@ sema_library_effect_declared: fn(items: [Item], name: String) -> Bool Never! {
 // The kernel effects a library effect's `#FX(…)` lists; a `!` entry or a
 // name that is no kernel effect lists nothing (E0757, E0119).
 sema_library_effect_kernel_list: fn(cap: ModuleCap?) -> [String] Never! {
-    kernel := [String]{}
+    ^kernel: [String]{}
     written: cap ?? return kernel
     loop entry in written.entries {
         if entry.name.starts_with("!") -> next
@@ -136,7 +136,7 @@ sema_library_effect_collect: fn(effects: ^[SemaLibraryEffect], package_identity:
         if item == {
             .Struct(definition) -> {
                 if sema_library_effect_declared(items, definition.name) {
-                    parent := NamedSpan?{None}
+                    ^parent: NamedSpan?{None}
                     if definition.effect_impl == .Val(declared) -> parent = declared.parent
                     fields: loop field in definition.fields -> SemaLibraryEffectField{name: field.name, ty: field.ty}
                     effects.push(SemaLibraryEffect{package_identity: package_identity, module_index: module_index, name: definition.name, cases: [String]{}, kernel: sema_library_effect_kernel_list(definition.cap), parent: parent, fields: fields})
@@ -156,12 +156,12 @@ sema_library_effect_collect: fn(effects: ^[SemaLibraryEffect], package_identity:
 // Every library effect the graph's source modules declare, each package
 // effect's parent resolved (sema_library_effect_resolve).
 sema_library_effects: fn(graph: SemaRegistrationGraph) -> [SemaLibraryEffect] Never! {
-    effects := [SemaLibraryEffect]{}
+    ^effects: [SemaLibraryEffect]{}
     loop (module_index, module_row) in graph.modules {
         if module_row.module_identity == graph.canonical_effect_module_identity -> next
         sema_library_effect_collect(effects, module_row.package_identity, module_index, module_row.program.items)
     }
-    states := (loop _ in effects -> 0)
+    ^states: (loop _ in effects -> 0)
     loop index in 0..<effects.len() -> sema_library_effect_resolve(effects, graph, states, index)
     effects
 }
@@ -252,7 +252,7 @@ sema_library_effect_parent: fn(effects: ^[SemaLibraryEffect], graph: SemaRegistr
     if effects[row].problem != None || (effects[row].parent != None && effects[row].ancestors.len() == 0) {
         return SemaLibraryEffectParent{limit: [String]{}, ancestors: [String]{}, problem: None, blocked: true}
     }
-    ancestors := [String]{found.token}
+    ^ancestors: [String]{found.token}
     loop ancestor in effects[row].ancestors -> ancestors.push(ancestor.copy())  // copy: the parent keeps its own list.
     // copy: the kind keeps its own limit.
     SemaLibraryEffectParent{limit: effects[row].kernel.copy(), ancestors: ancestors, problem: None, blocked: false}
@@ -284,7 +284,7 @@ sema_library_effect_add_names: fn(names: ^[SemaLibraryEffectName], prefix: Strin
 // The library effect names `source` may write: its own package's bare, and
 // each imported package's under the name it is imported as.
 sema_library_effect_view: fn(effects: [SemaLibraryEffect], source: SemaRegistrationModule) -> [SemaLibraryEffectName] Never! {
-    names := [SemaLibraryEffectName]{}
+    ^names: [SemaLibraryEffectName]{}
     if effects.len() == 0 -> return names
     loop declared in effects {
         if declared.package_identity == source.package_identity {
@@ -314,7 +314,7 @@ sema_library_effect_find: fn(view: [SemaLibraryEffectName], written: String) -> 
         if name.written != base -> next
         if base == written -> return Val(name.copy())
         value: sema_library_effect_value(name.fields, written) ?? return None
-        found := name.copy()
+        ^found: name.copy()
         found.written = written.copy()
         found.token = "{name.token}{value}"
         return Val(found)
@@ -328,7 +328,7 @@ sema_library_effect_find: fn(view: [SemaLibraryEffectName], written: String) -> 
 sema_library_effect_value: fn(fields: [SemaLibraryEffectField], written: String) -> String? Never! {
     given: effect_value_fields(written)
     if given.len() != fields.len() -> return None
-    pairs := [String]{}
+    ^pairs: [String]{}
     loop field in fields {
         literal: loop entry in given {
             if entry.name == field.name {
@@ -420,13 +420,13 @@ sema_library_effect_field_list: fn(fields: [SemaLibraryEffectField]) -> String N
 // `e0756`: a function whose row names a library effect reaches a kernel
 // effect that effect doesn't list. The span is the row's first entry.
 sema_library_effect_reach_diagnostic: fn(node: SemaEffectNode, over: [String]) -> Diagnostic {
-    sorted := over.copy()
+    ^sorted: over.copy()
     sorted.sort()
     over_list: sema_effect_show(sorted)
     rare: node.rare ?? SEMA_EFFECT_NODE_NO_RARE
     written: loop row in rare.library_rows -> row.written
     effects: sema_effect_show(written)
-    listed := [String]{}
+    ^listed: [String]{}
     loop row in rare.library_rows {
         loop name in row.kernel -> sema_effect_set_add(listed, name)
     }
@@ -472,7 +472,7 @@ sema_library_effect_check_list: fn(items: [Item], name: String, cap: ModuleCap?,
 // effects they are kinds of, and every one a function it can call reaches.
 // Empty rows when no node denies one and no row names a kind or a value.
 sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> SemaLibraryEffectReach Never! {
-    ancestry := [String:[String]]{}
+    ^ancestry: [String:[String]]{}
     loop node in nodes {
         rare: node.rare ?? next
         loop row in rare.library_rows {
@@ -492,11 +492,11 @@ sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> Sema
             break true
         }
     } ?? false
-    reached := (loop _ in nodes -> [String]{})
+    ^reached: (loop _ in nodes -> [String]{})
     if !any_denial && !any_kind && !any_value {
         return SemaLibraryEffectReach{reached: reached, ancestry: ancestry}
     }
-    pending := [SemaEffectPending]{}
+    ^pending: [SemaEffectPending]{}
     loop (index, node) in nodes {
         rare: node.rare ?? next
         loop row in rare.library_rows {
@@ -510,7 +510,7 @@ sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> Sema
             }
         }
     }
-    cursor := 0
+    ^cursor: 0
     loop cursor < pending.len() {
         incoming: pending[cursor]
         cursor += 1
@@ -569,9 +569,9 @@ sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffe
     if rare.library_rows.len() == 0 {
         return
     }
-    named := [String]{}
-    own := [String]{}
-    roots := [String]{}
+    ^named: [String]{}
+    ^own: [String]{}
+    ^roots: [String]{}
     loop row in rare.library_rows {
         sema_effect_set_add(named, row.token)
         // A value's other values are sema_library_effect_check_values's.

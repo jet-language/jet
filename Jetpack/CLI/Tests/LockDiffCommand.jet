@@ -23,7 +23,7 @@ cli_lock_test_lock: fn(package: String, version: String, trust: String) -> LockF
 
 #Test("cli lock diff rendering is changelog shaped") {
     before: cli_lock_test_lock("alpha", "1.0.0", "signed")
-    after := cli_lock_test_lock("alpha", "1.1.0", "unverified-mapping")
+    ^after: cli_lock_test_lock("alpha", "1.1.0", "unverified-mapping")
     added: pkg_lock_parse("version = 1\n\n[[package]]\nname = \"beta\"\nversion = \"2.0.0\"\nsource = {{ path = \"beta\" }}\nfingerprint = \"fp\"\ndependencies = []\n") ?? panic("added package")
     after.packages.push(added.packages[0])
     diff: LockDiff.between(Val(before), Val(after))

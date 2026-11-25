@@ -42,7 +42,7 @@ LSPServer: struct {
     // In the Jet repository the document's own path is held to the path case
     // rule (jet_foundation's PathCase.jet), as `jet check` holds it.
     check: fn(self, doc: LSPDocument) -> LSPChecked {
-        checked := self.checker.check(doc.path, self.overlays())
+        ^checked: self.checker.check(doc.path, self.overlays())
         loop placed in path_case_disk_findings([String]{doc.path}) {
             checked.diagnostics.push(path_case_diagnostic(placed.finding))
         }
@@ -55,10 +55,10 @@ LSPServer: struct {
     // holding byte `at` when one is given. None until the check read the
     // document's current text, whose offsets the rows name.
     stage_items: fn(self, view: LSPView, stage: String, at: Int{-1}) -> [JetDriverToolStageItem] {
-        items := [JetDriverToolStageItem]{}
+        ^items: [JetDriverToolStageItem]{}
         module_path: view.module_path ?? return items
         index: lsp_module_index(view.checked, module_path) ?? return items
-        plan := jet_driver_tool_stage_plan(view.checked.modules, index, stage, at: at)
+        ^plan: jet_driver_tool_stage_plan(view.checked.modules, index, stage, at: at)
         if plan.bodies.len() == 0 -> return items
         loop rows in self.checker.stage(view.doc.path, self.overlays(), stage, plan.bodies, plan.program.move()) {
             loop row in rows -> items.push(row)
@@ -95,7 +95,7 @@ lsp_lex_source: fn(text: String) -> Lexed Never! {
 
 lsp_apply_content_change: fn(doc: ^LSPDocument, change: Dyn) -> Bool Never! {
     replacement: lsp_text_member(change, "text") ?? return false
-    length := Int?{None}
+    ^length: Int?{None}
     if lsp_member(change, "rangeLength") == .Val(value) {
         length = Val(lsp_uinteger(value) ?? return false)
     }
@@ -134,7 +134,7 @@ lsp_update_document: fn(state: ^LSPDiagnosticState, params: Dyn?, is_open: Bool{
     }
     current: state.docs.get(uri) ?? return None
     if version <= current.version -> return None
-    updated := LSPDocument{path: current.path.copy(), text: current.text.copy(), version: version}
+    ^updated: LSPDocument{path: current.path.copy(), text: current.text.copy(), version: version}
     loop change in rows {
         if !lsp_apply_content_change(updated, change) -> return None
     }

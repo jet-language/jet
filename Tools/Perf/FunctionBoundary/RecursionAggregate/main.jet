@@ -14,7 +14,7 @@ Stats: struct {
 
 stats: fn(lo: Int, hi: Int) -> Stats {
     if hi - lo <= 4 {
-        s := Stats{count: 0, sum: 0, low: 10007, high: 0}
+        ^s: Stats{count: 0, sum: 0, low: 10007, high: 0}
         loop i in lo..<hi {
             v: (i * 7919) % 10007
             s.count += 1
@@ -27,15 +27,15 @@ stats: fn(lo: Int, hi: Int) -> Stats {
     mid: lo + (hi - lo) /% 2
     a: stats(lo, mid)
     b: stats(mid, hi)
-    low := a.low
+    ^low: a.low
     if b.low < low -> low = b.low
-    high := a.high
+    ^high: a.high
     if b.high > high -> high = b.high
     Stats{count: a.count + b.count, sum: a.sum + b.sum, low: low, high: high}
 }
 
 run: fn(args: Args) {
-    acc := 0
+    ^acc: 0
     loop r in 0..<args.n {
         s: stats(r, r + 100000)
         acc += s.count + s.sum + s.low + s.high

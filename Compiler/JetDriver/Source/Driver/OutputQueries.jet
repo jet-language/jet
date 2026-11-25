@@ -20,15 +20,15 @@ JetDriverOutputQueryResult: struct {
 }
 
 jet_driver_output_query: fn(request: ^^JetDriverCompileRequest, address: String?) -> JetDriverOutputQueryResult {
-    selected := request.move()
+    ^selected: request.move()
     selected.mode = JetDriverCompileMode.Doc
     selected.output_intent = SemaOutputIntent.Run
     selected.output_address = address
     compile: jet_driver_compile(selected)
-    outputs := [ResolvedOutput]{}
-    layouts := [JetDriverOutputLayoutRow]{}
-    target_triple := ""
-    target_layout := JetTargetLayout?{None}
+    ^outputs: [ResolvedOutput]{}
+    ^layouts: [JetDriverOutputLayoutRow]{}
+    ^target_triple: ""
+    ^target_layout: JetTargetLayout?{None}
     if compile.complete && compile.internal_problem == None {
         loop projection in compile.doc_modules {
             if target_layout == None {

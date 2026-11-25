@@ -15,9 +15,9 @@ LSPDerivedUsesChecker: struct {
     impl LSPChecker {
         check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
             plain: LSPFixtureChecker{}
-            checked := plain.check(entry, overlays)
+            ^checked: plain.check(entry, overlays)
             past: LSP_TEST_MAIN.count_bytes() + 10
-            index := checked.index.move() ?? panic("the fixture check builds an index")
+            ^index: checked.index.move() ?? panic("the fixture check builds an index")
             index.references.push(
                 SemRef{
                     name: "add",
@@ -47,7 +47,7 @@ LSPDerivedUsesChecker: struct {
 }
 
 #Test("references and rename leave out a use checked past the end of its module's text") {
-    server := lsp_server(LSPDerivedUsesChecker{})
+    ^server: lsp_server(LSPDerivedUsesChecker{})
     lsp_test_open(server, LSP_TEST_MAIN_URI, LSP_TEST_MAIN)
     with: "{{{lsp_test_text_document(LSP_TEST_MAIN_URI)},\"position\":{{\"line\":0,\"character\":1}},\"context\":{{\"includeDeclaration\":true}}}}"
     assert_eq(lsp_test_ranges(lsp_test_rows(lsp_test_result(server, "textDocument/references", with))), [String]{"0:0-0:3", "5:11-5:14", "5:4-5:7"})

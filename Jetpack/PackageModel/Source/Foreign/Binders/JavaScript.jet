@@ -40,7 +40,7 @@ pkg_javascript_bind: fn(declaration_path: String, declarations: String, runtime_
     provenance_path: pkg_bridge_write_scalar_provenance_with_sources(cache, lib, descriptor, PKG_JS_RUNTIME, runtime, sources, worker, archive, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
     provenance: pkg_binder_read_text(provenance_path, "could not read binding provenance")
     rendered: pkg_bridge_render_scalar_jet(abi, descriptor, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
-    bound := [String]{}
+    ^bound: [String]{}
     loop function in functions -> bound.push(function.name)
     Ok(ScalarBindResult{source: rendered, bound: bound, archive: archive, worker: worker, provenance: provenance})
 }
@@ -67,12 +67,12 @@ pkg_javascript_check_node: fn(path: String) -[Exec, Time.Wait]> ForeignBindError
 pkg_javascript_parse: fn(source: String) -> [ScalarBridgeFunction] ForeignBindError! {
     prefixes: [String]{"export declare function ", "export function ", "declare function "}
     lines: pkg_binder_lines(source)
-    functions := [ScalarBridgeFunction]{}
+    ^functions: [ScalarBridgeFunction]{}
     loop index in 0..<lines.len() {
         number: index + 1
         line: lines[index].trim()
-        signature := ""
-        declared := false
+        ^signature: ""
+        ^declared: false
         loop prefix in prefixes {
             if line.starts_with(prefix) {
                 signature = line.removeprefix(prefix)
@@ -115,7 +115,7 @@ pkg_javascript_parse: fn(source: String) -> [ScalarBridgeFunction] ForeignBindEr
 }
 
 pkg_javascript_parse_params: fn(source: String, line: Int) -> [ForeignScalar] ForeignBindError! {
-    out := [ForeignScalar]{}
+    ^out: [ForeignScalar]{}
     if source.trim() == "" -> return Ok(out)
     loop raw in source.split(",") {
         param: raw.trim()
@@ -147,9 +147,9 @@ pkg_javascript_scalar: fn(name: String) -> ForeignScalar? Never! {
 }
 
 pkg_javascript_render_worker: fn(functions: [ScalarBridgeFunction]) -> String Never! {
-    out := [String]{"import {{ pathToFileURL }} from \"node:url\";\n\nconst KINDS = {{\n"}
+    ^out: [String]{"import {{ pathToFileURL }} from \"node:url\";\n\nconst KINDS = {{\n"}
     loop function in functions {
-        kinds := [String]{}
+        ^kinds: [String]{}
         loop scalar in function.params {
             kinds.push(pkg_binder_debug_quote(pkg_binder_scalar_kind(scalar)))
         }

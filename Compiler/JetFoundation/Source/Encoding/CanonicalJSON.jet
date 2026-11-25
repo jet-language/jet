@@ -24,14 +24,14 @@ CanonicalJSONError: struct {
 
 // A repeated key is refused.
 canonical_json_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON CanonicalJSONError! {
-    seen := [String:Bool]{}
+    ^seen: [String:Bool]{}
     loop field in fields {
         if seen.get(field.key) != None {
             return Err(CanonicalJSONError{message: "duplicate JSON key `{field.key}`"})
         }
         seen[field.key] = true
     }
-    sorted := fields
+    ^sorted: fields
     sorted = loop fresh_item in sorted -> fresh_item
     sorted.sort_by(fn(left: CanonicalJSONField, right: CanonicalJSONField) { left.key <=> right.key })
     Ok(CanonicalJSON.Object(sorted))
@@ -39,7 +39,7 @@ canonical_json_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON Canonic
 
 // The encoding plus one LF.
 canonical_json_bytes: fn(value: CanonicalJSON) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     canonical_json_encode(value, out)
     out.push(U8{10})
     out

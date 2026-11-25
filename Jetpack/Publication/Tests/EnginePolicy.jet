@@ -40,7 +40,7 @@ engine_policy_manifest_error: fn(raw: String) -> Diagnostic {
 }
 
 #Test("package_policy_drops_expired_source_exception_from_receipt") {
-    policy := PackagePolicy.default()
+    ^policy: PackagePolicy.default()
     policy.exceptions = [PackagePolicyException]{PackagePolicyException{id: "JSA-EXPIRED", scope: "Acme.Widget#1.2.3", reason: "old waiver", expires_at: 0}}
     receipt: publication_policy_test_receipt(publication_authorize_package_candidate(policy, "Acme.Widget", "1.2.3", Val("MIT"), "public"))
     assert_eq(receipt.exception, None)
@@ -48,7 +48,7 @@ engine_policy_manifest_error: fn(raw: String) -> Diagnostic {
 }
 
 #Test("package_policy_rejects_unmapped_or_non_spdx_candidates_before_ingest") {
-    policy := PackagePolicy.default()
+    ^policy: PackagePolicy.default()
     policy.licenses = Val([String]{"MIT"})
     policy.source_maps = [PolicySourceMap]{PolicySourceMap{pattern: "Acme.*", sources: [String]{"internal"}}}
     source_error: publication_policy_test_error(publication_authorize_package_candidate(policy, "Acme.Widget", "1.2.3", Val("MIT"), "public"))

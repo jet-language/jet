@@ -151,7 +151,7 @@ PlainSource: struct {
 plain: fn(from: Int) -> PlainSource { PlainSource{from: from} }
 
 sum: fn(end: Int, torn: Int, gone: Int, name: String) -> Int ReadError! {
-    total := 0
+    ^total: 0
     loop item in source(end, torn, gone, name) {
         print("item {item}")
         total += item
@@ -160,25 +160,25 @@ sum: fn(end: Int, torn: Int, gone: Int, name: String) -> Int ReadError! {
 }
 
 sum_app: fn(end: Int, torn: Int) -> Int AppError! {
-    total := 0
+    ^total: 0
     loop item in source(end, torn, 0, "app") -> total += item
     Ok(total)
 }
 
 sum_inferred: fn(end: Int, gone: Int) -> Int {
-    total := 0
+    ^total: 0
     loop item in source(end, 0, gone, "inferred") -> total += item
     total
 }
 
 strict_total: fn(from: Int) -> Int ReadError! {
-    total := 0
+    ^total: 0
     loop item in strict(from) -> total += item
     Ok(total)
 }
 
 walk_by_hand: fn() {
-    cursor := Reads{at: 0, end: 5, torn: 2, gone: 3, tears: 0, calls: 0, name: "hand"}
+    ^cursor: Reads{at: 0, end: 5, torn: 2, gone: 3, tears: 0, calls: 0, name: "hand"}
     loop _ in 0..<6 {
         print(
             if cursor.next() == {

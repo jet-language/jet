@@ -14,9 +14,9 @@ hold: fn(r: ^^Res) -> Int { r.name.len() }
 make: fn(name: String) -> Res? { Val(Res{name: name}) }
 
 from_local: fn() -> Int {
-    local := make("local")
+    ^local: make("local")
     if local == .Val(held) {
-        applied := held.move()
+        ^applied: held.move()
         return hold(applied)
     }
     0
@@ -25,7 +25,7 @@ from_local: fn() -> Int {
 from_call: fn() -> Int {
     if make("call") == {
         .Val(held) -> {
-            applied := held.move()
+            ^applied: held.move()
             hold(applied)
         }
         .None -> 0

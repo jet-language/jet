@@ -133,13 +133,13 @@ fake_put: fn(out: ^[U8], value: Int) {
 }
 
 fake_words: fn(values: [Int]) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop value in values -> fake_put(out, value)
     out
 }
 
 fake_text: fn(text: String) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: text.bytes()
     fake_put(out, bytes.len() + 1)
     loop b in bytes -> out.push(b)
@@ -219,7 +219,7 @@ fake_configure: fn(f: ^Fake, states: [Int]) {
     f.configures.push(serial)
     toplevel: f.toplevel
     xdg_surface: f.xdg_surface
-    args := fake_words([Int]{400, 300, states.len() * 4})
+    ^args: fake_words([Int]{400, 300, states.len() * 4})
     loop state in states -> fake_put(args, state)
     fake_event(f, toplevel, 0, args)
     fake_event(f, xdg_surface, 0, fake_words([Int]{serial}))
@@ -262,7 +262,7 @@ fake_commit: fn(f: ^Fake) {
     acked: f.acked
     f.acked = -1
     if acked >= 0 {
-        index := -1
+        ^index: -1
         loop k in 0..<f.configures.len() {
             if f.configures[k] == acked -> index = k
         }
@@ -410,10 +410,10 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
-        names := 0
+        ^names: 0
         loop interface in f.globals.copy() {
             names += 1
-            args := fake_words([Int]{names})
+            ^args: fake_words([Int]{names})
             loop b in fake_text(interface) -> args.push(b)
             fake_put(args, fake_version(interface))
             fake_event(f, registry, 0, args)
@@ -607,7 +607,7 @@ fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
 
 // Handles every complete request in the inbox.
 fake_dispatch: fn(f: ^Fake) -[Env]> {
-    at := 0
+    ^at: 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
         word: fake_u32(f.inbox, at + 4)
@@ -632,7 +632,7 @@ fake_chrome: fn() -> FakeChrome {
 // Accepts one window and serves it until it disconnects.
 fake_serve: fn(listener: net.UnixListener, mode: FakeMode) -[Env, Net, Time, IO]> Fake {
     stream: net.unix_accept(listener) ?? panic("accept: {err}")
-    f := Fake{
+    ^f: Fake{
         stream: stream,
         mode: mode,
         inbox: [U8]{},
@@ -692,7 +692,7 @@ fake_serve: fn(listener: net.UnixListener, mode: FakeMode) -[Env, Net, Time, IO]
         failures: [String]{},
         closing: false,
     }
-    idle := 0
+    ^idle: 0
     loop idle < 40 {
         ready: net.unix_wait(f.stream, 50000000) ?? {
             f.failures.push("wait failed: {err}")
@@ -732,17 +732,17 @@ client: fn(label: String) -[Env, IO, Net, Time]> {
         print("{label}: open failed: {err}")
         return
     }
-    sizes := [String]{}
+    ^sizes: [String]{}
     loop frame in window.frames() {
-        closed := false
+        ^closed: false
         loop event in frame.events() {
             if event == .Close -> closed = true
         }
         if closed -> break
         size: "{frame.width}x{frame.height}"
         if sizes.len() == 0 || sizes[sizes.len() - 1] != size -> sizes.push(size)
-        pixels := [U8]{}
-        count := frame.width * frame.height
+        ^pixels: [U8]{}
+        ^count: frame.width * frame.height
         loop count > 0 {
             // RGBA, straight alpha.
             pixels.push(U8{40})

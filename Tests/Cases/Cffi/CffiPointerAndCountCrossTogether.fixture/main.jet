@@ -11,7 +11,7 @@ use {
 run: fn() {
     bytes: [U8]{10, 20, 30}
     #Unsafe("the block holds the three bytes for the whole call, C keeps no pointer to it, and it is released once") {
-        block := mem.alloc_raw(bytes.len(), 1) ?? panic("no memory")
+        ^block: mem.alloc_raw(bytes.len(), 1) ?? panic("no memory")
         mem.list_copy<U8>(block, bytes, 0, bytes.len())
         print(sums.sum_bytes(block, U64{bytes.len()}))
         mem.free_raw(block)

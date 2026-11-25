@@ -52,10 +52,10 @@ sema_app_field_error_refused: fn(module_name: String, member: String, args: [Cal
         check.diagnostics.push(sema_field_error_unknown(graph, path.shown, roots, at_span))
         return true
     }
-    holders := roots.copy()  // copy: `roots` names the fields the report lists
+    ^holders: roots.copy()  // copy: `roots` names the fields the report lists
     loop (position, step) in steps {
-        found := Type?{None}
-        owner := -1
+        ^found: Type?{None}
+        ^owner: -1
         loop row in holders {
             if sema_field_error_field(graph, row, step.name) == .Val(declared) {
                 found = Val(declared)
@@ -63,11 +63,11 @@ sema_app_field_error_refused: fn(module_name: String, member: String, args: [Cal
                 break
             }
         }
-        ty := found ?? {
+        ^ty: found ?? {
             check.diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
             return true
         }
-        indexes := step.indexes
+        ^indexes: step.indexes
         loop indexes > 0 {
             element: sema_field_error_element(ty) ?? {
                 check.diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
@@ -102,8 +102,8 @@ sema_field_error_at: fn(args: [CallArg]) -> CallArg? {
 // whole of a `[…]` index.
 sema_field_error_path: fn(expression: Expr) -> SemaFieldErrorPath? {
     if expression == .Str(parts, _, _) {
-        shown := ""
-        checked := ""
+        ^shown: ""
+        ^checked: ""
         loop (index, part) in parts {
             if part == .Lit(text) {
                 shown = "{shown}{text}"
@@ -128,18 +128,18 @@ sema_field_error_path: fn(expression: Expr) -> SemaFieldErrorPath? {
 // The steps of `path`, or None when it is not a path of field names each
 // followed by `[n]` indexes.
 sema_field_error_steps: fn(path: String) -> [SemaFieldErrorStep]? {
-    steps := [SemaFieldErrorStep]{}
+    ^steps: [SemaFieldErrorStep]{}
     loop segment in path.split(".") {
         bytes: segment.bytes()
-        end := 0
+        ^end: 0
         loop end < bytes.len() && bytes[end] != 91 -> end += 1
         if end == 0 -> return None
         name: String.from_bytes(bytes.slice(0, end)) ?? return None
-        indexes := 0
-        at := end
+        ^indexes: 0
+        ^at: end
         loop at < bytes.len() {
             if bytes[at] != 91 -> return None
-            digits := at + 1
+            ^digits: at + 1
             loop digits < bytes.len() && bytes[digits] >= 48 && bytes[digits] <= 57 -> digits += 1
             if digits == at + 1 || digits >= bytes.len() || bytes[digits] != 93 -> return None
             indexes += 1
@@ -153,9 +153,9 @@ sema_field_error_steps: fn(path: String) -> [SemaFieldErrorStep]? {
 
 // The structs the parameters visible here take, `self` aside, each once.
 sema_field_error_roots: fn(graph: SemaRegistrationGraph, check: SemaBodyCheck) -> [SemaRegistrationRowRef] {
-    roots := [SemaRegistrationRowRef]{}
+    ^roots: [SemaRegistrationRowRef]{}
     caller: sema_type_module_row(graph, check.environment.module_identity)
-    frame := check.scopes.current
+    ^frame: check.scopes.current
     loop frame >= 0 {
         loop binding in check.scopes.bindings {
             if binding.frame != frame || binding.symbol.kind != SymbolKind.Parameter || binding.symbol.name == "self" {
@@ -199,7 +199,7 @@ sema_field_error_field: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRo
 
 // The stored field names of the structs at `rows`, each once.
 sema_field_error_field_names: fn(graph: SemaRegistrationGraph, rows: [SemaRegistrationRowRef]) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop row in rows {
         if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
             if item == .Struct(definition) {

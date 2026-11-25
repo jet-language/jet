@@ -31,8 +31,8 @@ next: fn(state: Int) -> Int { (state * 1103515245 + 12345) & 2147483647 }
 // second the list (bits 16 to 23). The generator's low bits repeat too soon
 // to pick a class.
 operations: fn() -> [Op] {
-    ops := [Op]{}
-    state := 12345
+    ^ops: [Op]{}
+    ^state: 12345
     loop _ in 0..<OPS {
         state = next(state)
         class: (state >> 28) & 3
@@ -46,11 +46,11 @@ operations: fn() -> [Op] {
 run: fn(args: Args) {
     passes: if args.n > 0 -> args.n else -> 1
     ops: operations()
-    source := [U8]{}
+    ^source: [U8]{}
     loop i in 0..<64 -> source.push(U8{i})
-    lists := [[U8]]{}
+    ^lists: [[U8]]{}
     loop _ in 0..<SLOTS -> lists.push([U8]{})
-    total := 0
+    ^total: 0
     #Unsafe("every append reads the first `op.size` of the 64 bytes `source` holds, and `source` neither grows nor drops while the appends run") {
         from: mem.Ptr<U8>.from_addr(mem.address_of(source[0]))
         loop _ in 0..<passes {

@@ -14,7 +14,7 @@ Record: struct {
 }
 
 little: fn(bytes: [U8], start: Int, count: Int) -> Int {
-    value := 0
+    ^value: 0
     loop i in 0..<count -> value |= Int{bytes[start + i]} << (8 * i)
     value
 }
@@ -36,7 +36,7 @@ plain_length: fn(body: Int) -> Int? {
         source: "source-{size}.bin"
         envelope: "envelope-{size}.jetc"
         restored: "restored-{size}.out"
-        plaintext := [U8]{}
+        ^plaintext: [U8]{}
         loop index in 0..<size -> plaintext.push((U8{index % 251}))
         files.write_bytes(source, plaintext) ?? panic("source")
         sealed.seal([public], Path.from(source), Path.from(envelope)) ?? panic("seal")
@@ -44,8 +44,8 @@ plain_length: fn(body: Int) -> Int? {
         header_length: little(encoded, 8, 4)
         body_length: little(encoded, 12, 8)
         assert_eq(plain_length(body_length), Val(size))
-        at := 20 + header_length
-        records := [Record]{}
+        ^at: 20 + header_length
+        ^records: [Record]{}
         loop at < encoded.len() {
             length: little(encoded, at, 4)
             flags: Int{encoded[at + 4]}
@@ -54,7 +54,7 @@ plain_length: fn(body: Int) -> Int? {
             at += 5 + length + 16
         }
         assert_eq(at, encoded.len())
-        expected := [Record]{}
+        ^expected: [Record]{}
         if size < 1048576 -> expected.push(Record{length: size, flags: 1}) else {
             expected.push(Record{length: 1048576, flags: 0})
             expected.push(Record{length: size - 1048576, flags: 1})

@@ -157,9 +157,9 @@ jetpack_unit_command: fn(setup: SuiteSetup, args: [String], project: String) -> 
 // checkout as JETPACK_TEST_REPO_ROOT, the repository whose committed files
 // the Jetpack claims read.
 jet_child: fn(setup: SuiteSetup, jet: String, args: [String]) -> ProcessSpec {
-    argv := [String]{jet}
+    ^argv: [String]{jet}
     loop arg in args -> argv.push(arg.copy())
-    spec := process.cmd(argv).cwd(setup.checkout).env(ENV_JETPACK_TEST_REPO_ROOT, setup.checkout)
+    ^spec: process.cmd(argv).cwd(setup.checkout).env(ENV_JETPACK_TEST_REPO_ROOT, setup.checkout)
     names: sys.vars() ?? [String]{}
     loop name in names {
         if name.starts_with("JET_TEST_") || name.starts_with("JET_NATIVE_TEST_") || name.starts_with("JET_EVIDENCE_") {
@@ -172,7 +172,7 @@ jet_child: fn(setup: SuiteSetup, jet: String, args: [String]) -> ProcessSpec {
 // A child's output reduced to a failing row's detail: its first `Error`
 // line (a jet diagnostic's header), else its last non-blank line.
 failure_line: fn(text: String) -> String {
-    found := ""
+    ^found: ""
     loop line in text.split("\n") {
         if line.starts_with("Error") -> return line.trim()
         if line.trim() != "" -> found = line.trim()
@@ -202,7 +202,7 @@ package_suite_rows: fn(rows: TestRows) {
         rows.fail("Compiler", err.message)
         return
     }
-    packages := [String]{}
+    ^packages: [String]{}
     loop tree in PACKAGE_TREES {
         package_dirs(setup.checkout, tree, members, packages) ?? {
             rows.fail(tree, err.message)
@@ -213,8 +213,8 @@ package_suite_rows: fn(rows: TestRows) {
     loop package in ASSEMBLED_PACKAGES {
         rows.skip(package, "assembled by the compiler from its sources, not built as a package")
     }
-    sources := [TestSource]{}
-    listing := ""
+    ^sources: [TestSource]{}
+    ^listing: ""
     if test_sources(setup) == {
         .Ok(found) -> { sources = found }
         .Err(error) -> { listing = error.message.copy() }  // copy: the result is dropped
@@ -222,13 +222,13 @@ package_suite_rows: fn(rows: TestRows) {
     held: test_names_by_run(setup, sources)
     // A script (a `#!` file) is no package's source: `jet test <script>` runs
     // its #Tests, a run of its own beside the packages.
-    candidates := packages.copy()
+    ^candidates: packages.copy()
     loop source in sources {
         if source.script && test_frozen_tree(source.path) == "" {
             candidates.push(source.path.copy())
         }
     }
-    runs := [String]{}
+    ^runs: [String]{}
     loop run in candidates {
         if run_selected(rows, run, held.get(run) ?? [String]{}) -> runs.push(run.copy())
     }
@@ -237,16 +237,16 @@ package_suite_rows: fn(rows: TestRows) {
     // following them, and it starts while the host is still quiet.
     engine: engine_selected(rows, sources)
     prep: if engine -> jetpack_prepare(rows, setup) else -> JetpackPrep{assembled: "", map: JetpackMap{claims: [JetpackClaim]{}, files: [String]{}}, engine: "", build: None, error: ""}
-    specs := [ProcessSpec]{}
-    paths := [String]{}
-    first := 0
+    ^specs: [ProcessSpec]{}
+    ^paths: [String]{}
+    ^first: 0
     if prep.build == .Val(build) {
         specs.push(build.copy())
         paths.push(ENGINE_BUILD_RUN)
         first = 1
     }
     loop run in runs {
-        args := [String]{"test", run}
+        ^args: [String]{"test", run}
         if run_filter(rows, run, held.get(run) ?? [String]{}) == .Val(filter) {
             args.push("--filter")
             args.push(filter)
@@ -255,8 +255,8 @@ package_suite_rows: fn(rows: TestRows) {
         paths.push(run)
     }
     results: pool_runs(setup, "compiler-packages", paths, specs)
-    ran := [String:[String]]{}
-    broke := [String]{}
+    ^ran: [String:[String]]{}
+    ^broke: [String]{}
     loop (index, run) in runs {
         if results[index + first].receipt == {
             .Val(receipt) -> {
@@ -273,7 +273,7 @@ package_suite_rows: fn(rows: TestRows) {
     }
     // The hosted engine's build, when the batch ran it: why it left no
     // engine, else "".
-    build_failure := ""
+    ^build_failure: ""
     if first == 1 {
         if results[0].receipt == {
             .Val(receipt) -> {
@@ -302,12 +302,12 @@ package_suite_rows: fn(rows: TestRows) {
 // The #Test names of each run's sources: a script's are its own, any other
 // source's its owner's (test_owner). Frozen trees hold none a run makes.
 test_names_by_run: fn(setup: SuiteSetup, sources: [TestSource]) -> [String:[String]] {
-    held := [String:[String]]{}
+    ^held: [String:[String]]{}
     loop source in sources {
         if test_frozen_tree(source.path) != "" -> next
         run: if source.script -> source.path.copy() else -> test_owner(setup.checkout, source.path)
         if run == "" -> next
-        names := held.get(run) ?? [String]{}
+        ^names: held.get(run) ?? [String]{}
         loop name in source.names -> names.push(name.copy())
         held[run] = names.move()
     }
@@ -369,7 +369,7 @@ pool_runs: fn(setup: SuiteSetup, suite: String, paths: [String], specs: [Process
     state: kit_state_dir(setup.checkout) ?? ""
     dir: if state == "" -> "" else -> files.join(state, "history")
     history: if dir == "" -> [String:KitHistory]{} else -> kit_history_load(dir, [suite])
-    keys := [String]{}
+    ^keys: [String]{}
     loop path in paths -> keys.push(kit_history_key(suite, path))
     available: kit_exec_available_memory()
     requested: Int.parse(sys.get(ENV_JET_TEST_SUITE_MEMORY) ?? "") ?? 0
@@ -400,8 +400,8 @@ JetpackPrep: struct {
 // needs no engine.
 jetpack_prepare: fn(rows: TestRows, setup: SuiteSetup) -> JetpackPrep {
     scratch: files.join(setup.checkout, JETPACK_ENGINE_SCRATCH)
-    prep := JetpackPrep{assembled: "", map: JetpackMap{claims: [JetpackClaim]{}, files: [String]{}}, engine: sys.get(ENV_JETPACK_BIN) ?? "", build: None, error: ""}
-    assembled := jetpack_assemble(setup, scratch, "aot") ?? {
+    ^prep: JetpackPrep{assembled: "", map: JetpackMap{claims: [JetpackClaim]{}, files: [String]{}}, engine: sys.get(ENV_JETPACK_BIN) ?? "", build: None, error: ""}
+    ^assembled: jetpack_assemble(setup, scratch, "aot") ?? {
         prep.error = err.message.copy()
         return prep
     }
@@ -445,7 +445,7 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
     map: prep.map
     selected: map.claims.filter(fn(claim) { rows.selects(jetpack_claim_id(claim)) })
     if selected.len() == 0 -> return none
-    args := [String]{"test", "src/jetpack.jet"}
+    ^args: [String]{"test", "src/jetpack.jet"}
     if rows.filter != "" && selected.all(fn(claim) { claim.name.contains(rows.filter) }) {
         args.push("--filter")
         args.push(rows.filter.copy())
@@ -454,8 +454,8 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
         rows.fail(unit, "couldn't run `jet test` on the engine unit: {err}")
         return none
     }
-    results := [String:String]{}
-    summary := false
+    ^results: [String:String]{}
+    ^summary: false
     loop line in receipt.output.split("\n") {
         if line.contains(" passed, ") && line.contains(" failed") -> summary = true
         // A test name may hold any character, so the cut counts characters.
@@ -468,7 +468,7 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
         rows.fail(unit, "`jet test` of the engine unit exited {receipt.code}: {if detail == "" -> failure_line(receipt.output) else -> detail}")
         return none
     }
-    reported := [String]{}
+    ^reported: [String]{}
     loop claim in selected {
         id: jetpack_claim_id(claim)
         verdict: results.get(claim.name) ?? ""
@@ -529,7 +529,7 @@ jetpack_map: fn(path: String) -> JetpackMap Err! {
         return Err("`{path}` lists no claims with their sections")
     }
     claims: loop (index, name) in names -> JetpackClaim{name: name.copy(), section: sections[index].copy()}
-    sources := [String]{}
+    ^sources: [String]{}
     if json_field(tree, "files") == .Array(items) {
         loop item in items {
             if json_field(item, "path") == .Text(source) -> sources.push(source.copy())
@@ -549,7 +549,7 @@ json_field: fn(tree: Dyn, name: String) -> Dyn {
 }
 
 json_texts: fn(value: Dyn) -> [String] {
-    texts := [String]{}
+    ^texts: [String]{}
     if value == .Array(items) {
         loop item in items {
             if item == .Text(text) -> texts.push(text.copy())
@@ -567,7 +567,7 @@ workspace_members: fn(setup: SuiteSetup) -> [String] Err! {
     start: text.index_of("members: [") ?? return Err("`{path}` has no `members: [` list")
     rest: text.slice(start, text.len())
     end: rest.index_of("]") ?? return Err("`{path}` doesn't close its `members` list")
-    members := [String]{}
+    ^members: [String]{}
     loop (index, part) in rest.slice(0, end).split("\"").to_list() {
         if index % 2 == 1 -> members.push("Compiler/{part}")
     }
@@ -602,13 +602,13 @@ test_data_dir: fn(name: String) -> Bool {
 // Returns the names of the tests it reported, none when the row `<run>`
 // failed: that row stands for every #Test the run holds.
 package_rows: fn(rows: TestRows, package: String, receipt: ProcessReceipt) -> [String]? {
-    names := [String]{}
+    ^names: [String]{}
     if receipt.errors.contains("Jet.NoTestsFound") || receipt.output.contains("Jet.NoTestsFound") {
         rows.skip(package, "no #Test blocks")
         return Val(names)
     }
-    summary := false
-    failed := false
+    ^summary: false
+    ^failed: false
     loop line in receipt.output.split("\n") {
         if line.contains(" passed, ") && line.contains(" failed, ") -> summary = true
         at: line.last_index_of(": ") ?? next
@@ -654,12 +654,12 @@ TestSource: struct {
 // walked, not asked of git: batches and releases run from an export with no
 // repository.
 test_sources: fn(setup: SuiteSetup) -> [TestSource] Err! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop tree in COVERAGE_TREES {
         jet_sources(setup.checkout, tree, paths) ?? return Err(err.message)
     }
     paths.sort()
-    sources := [TestSource]{}
+    ^sources: [TestSource]{}
     loop path in paths {
         text: files.read(files.join(setup.checkout, path)) ?? return Err("couldn't read `{path}`: {err}")
         names: test_names(text)
@@ -701,8 +701,8 @@ TestRuns: struct {
 // rows. Every #Test no run reports is named in the failing row: a package no
 // gate should run is deleted, not left unrun.
 test_coverage_rows: fn(rows: TestRows, setup: SuiteSetup, members: [String], sources: [TestSource], runs: TestRuns) {
-    problems := [String]{}
-    frozen := [String:Int]{}
+    ^problems: [String]{}
+    ^frozen: [String:Int]{}
     loop source in sources {
         tree: test_frozen_tree(source.path)
         if tree != "" {
@@ -712,8 +712,8 @@ test_coverage_rows: fn(rows: TestRows, setup: SuiteSetup, members: [String], sou
         owner: if source.script -> source.path.copy() else -> test_owner(setup.checkout, source.path)
         if members.contains(owner) || runs.broke.contains(owner) -> next
         in_unit: runs.unit.files.contains(source.path)
-        reported := [String]{}
-        known := false
+        ^reported: [String]{}
+        ^known: false
         if runs.ran.get(owner) == .Val(names) {
             reported = names.copy()
             known = true
@@ -730,7 +730,7 @@ test_coverage_rows: fn(rows: TestRows, setup: SuiteSetup, members: [String], sou
             }
             next
         }
-        where := "`{owner}`"
+        ^where: "`{owner}`"
         if in_unit {
             where = if owner == "" -> "the Jetpack engine unit" else -> "the Jetpack engine unit or `{owner}`"
         }
@@ -759,7 +759,7 @@ test_frozen_tree: fn(path: String) -> String {
 
 // The nearest directory above a checkout path with a package.jet, else "".
 test_owner: fn(checkout: String, path: String) -> String {
-    directory := files.dirname(path)
+    ^directory: files.dirname(path)
     loop {
         if directory == "" || directory == "." || directory == "/" -> return ""
         if files.is_file(files.join(files.join(checkout, directory), "package.jet")) {
@@ -771,7 +771,7 @@ test_owner: fn(checkout: String, path: String) -> String {
 
 // The names of the `#Test("<name>")` declarations in a source text.
 test_names: fn(text: String) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop line in text.split("\n") {
         declaration: line.trim()
         if !declaration.starts_with("#Test(\"") -> next
@@ -795,14 +795,14 @@ CORE_LEVELS: [String]{"O0", "O1", "O2"}
 
 core_rows: fn(rows: TestRows) {
     setup: suite_setup(rows) ?? return
-    paths := [String]{}
+    ^paths: [String]{}
     jet_sources(setup.checkout, "Core", paths) ?? {
         rows.fail("Core", err.message)
         return
     }
     paths.sort()
-    tested := [String]{}
-    names := [[String]]{}
+    ^tested: [String]{}
+    ^names: [[String]]{}
     loop path in paths {
         text: files.read(files.join(setup.checkout, path)) ?? {
             rows.fail(path, "couldn't read `{path}`: {err}")
@@ -815,9 +815,9 @@ core_rows: fn(rows: TestRows) {
     }
     // Run `ids[i]` tests the file `tested[file]` at CORE_LEVELS[level], where
     // `at[i]` is (file, level).
-    ids := [String]{}
-    held := [[String]]{}
-    at := [{file: Int, level: Int}]{}
+    ^ids: [String]{}
+    ^held: [[String]]{}
+    ^at: [{file: Int, level: Int}]{}
     loop (level, name) in CORE_LEVELS {
         loop (index, path) in tested {
             ids.push("{path} [{name}]")
@@ -826,10 +826,10 @@ core_rows: fn(rows: TestRows) {
         }
     }
     runs: kit_exec_select_runs(ids, held, rows.filter)
-    specs := [ProcessSpec]{}
-    run_ids := [String]{}
+    ^specs: [ProcessSpec]{}
+    ^run_ids: [String]{}
     loop run in runs {
-        args := [String]{"test", tested[at[run].file], "-{CORE_LEVELS[at[run].level]}"}
+        ^args: [String]{"test", tested[at[run].file], "-{CORE_LEVELS[at[run].level]}"}
         if run_filter(rows, ids[run], held[run]) == .Val(filter) {
             args.push("--filter")
             args.push(filter)
@@ -843,7 +843,7 @@ core_rows: fn(rows: TestRows) {
     results: pool_runs(setup, "compiler-core", run_ids, specs)
     loop (index, run) in runs {
         if results[index].receipt == {
-            .Val(receipt) -> { _ := package_rows(rows, ids[run], receipt) }
+            .Val(receipt) -> { ^_: package_rows(rows, ids[run], receipt) }
             .None -> {
                 rows.fail(ids[run], "couldn't run `jet test {tested[at[run].file]} -{CORE_LEVELS[at[run].level]}`: {results[index].error}")
             }
@@ -886,17 +886,17 @@ inline_census_rows: fn(rows: TestRows) {
         return
     }
     discovered: kit_golden_discover(setup.checkout, [String]{CENSUS_EXAMPLES})
-    examples := [Int]{}
+    ^examples: [Int]{}
     loop (index, entry) in discovered {
         if entry.path.ends_with(".jet") -> examples.push(index)
     }
-    sources := [String]{}
+    ^sources: [String]{}
     jet_sources(setup.checkout, "Core", sources) ?? {
         rows.fail("Core", err.message)
         return
     }
     sources.sort()
-    core := [Int]{}
+    ^core: [Int]{}
     loop (index, path) in sources {
         text: files.read(files.join(setup.checkout, path)) ?? {
             rows.fail(path, "couldn't read `{path}`: {err}")
@@ -913,8 +913,8 @@ inline_census_rows: fn(rows: TestRows) {
         rows.fail("inline census", "couldn't raise the stack limit: {err}")
         return
     }
-    ids := [String]{}
-    runs := [CensusRun]{}
+    ^ids: [String]{}
+    ^runs: [CensusRun]{}
     loop level in CORE_LEVELS {
         id: "Examples [{level}]"
         if rows.selects(id) {
@@ -942,16 +942,16 @@ inline_census_rows: fn(rows: TestRows) {
         return
     }
     trace: files.join(scratch.path, "trace-%p.json")
-    keys := [String]{}
-    specs := [ProcessSpec]{}
+    ^keys: [String]{}
+    ^specs: [ProcessSpec]{}
     loop run in runs {
         keys.push("{ids[run.row]} {run.args[run.file]}")
         specs.push(jet_command(setup, setup.jet, run.args).env("JET_TRACE_FILE", trace).env("JET_PHASE_COUNTERS", "1"))
     }
     results: pool_runs(setup, "compiler-inline-census", keys, specs)
     loop (row, id) in ids {
-        counted := 0
-        left := [String]{}
+        ^counted: 0
+        ^left: [String]{}
         loop (index, run) in runs {
             if run.row != row -> next
             if results[index].receipt == {
@@ -1055,12 +1055,12 @@ fuzz_rows: fn(rows: TestRows) {
         rows.fail(FUZZ_CORPUS, "couldn't list `{FUZZ_CORPUS}`: {err}")
         return
     }
-    dirs := [String]{}
+    ^dirs: [String]{}
     loop entry in listed {
         if entry.is_dir -> dirs.push(entry.name.copy())  // copy: the listing keeps its entries
     }
     dirs.sort()
-    programs := [FuzzProgram]{}
+    ^programs: [FuzzProgram]{}
     loop dir in dirs -> fuzz_programs(rows, setup.checkout, scratch.path, dir, programs)
     if programs.len() == 0 {
         return
@@ -1070,10 +1070,10 @@ fuzz_rows: fn(rows: TestRows) {
         rows.fail("fuzz", "couldn't start the fuzz checks: {err}")
         return
     }
-    running := [Int]{}
-    runs := [ProcessSpec]{}
+    ^running: [Int]{}
+    ^runs: [ProcessSpec]{}
     loop (index, program) in programs {
-        failure := ""
+        ^failure: ""
         if checked[index] == {
             .Ok(receipt) -> { failure = fuzz_check_failure(program, receipt) }
             .Err(error) -> failure = "couldn't start jet: {error}"
@@ -1094,7 +1094,7 @@ fuzz_rows: fn(rows: TestRows) {
         rows.fail("fuzz", "couldn't start the fuzz runs: {err}")
         return
     }
-    outcomes := [FuzzOutcome]{}
+    ^outcomes: [FuzzOutcome]{}
     loop index in 0..<runs.len() {
         if ran[index] == {
             // copy: the outcome outlives the receipt it is read from
@@ -1127,7 +1127,7 @@ fuzz_programs: fn(rows: TestRows, checkout: String, scratch: String, dir: String
         rows.fail(relative, "couldn't list `{relative}`: {err}")
         return
     }
-    names := [String]{}
+    ^names: [String]{}
     loop entry in listed {
         if !entry.is_dir && entry.name.ends_with(".jet") -> names.push(entry.name.copy())  // copy: the listing keeps its entries
     }
@@ -1140,7 +1140,7 @@ fuzz_programs: fn(rows: TestRows, checkout: String, scratch: String, dir: String
     pins: if runs -> fuzz_pins(directory) else -> [String:String]{}
     loop name in names {
         id: "{relative}/{name}"
-        run_selected := false
+        ^run_selected: false
         if runs {
             loop level in CORE_LEVELS {
                 if rows.selects("{id} [{level}]") -> run_selected = true
@@ -1152,7 +1152,7 @@ fuzz_programs: fn(rows: TestRows, checkout: String, scratch: String, dir: String
             rows.fail(id, "couldn't read `{id}`: {err}")
             next
         }
-        cwd := directory.copy()  // copy: every check and run of this file starts in this directory
+        ^cwd: directory.copy()  // copy: every check and run of this file starts in this directory
         if text.contains("__NUL__") {
             files.write(files.join(scratch, name), text.replace("__NUL__", String.from_bytes([U8]{0}) ?? "")) ?? {
                 rows.fail(id, "couldn't write its scratch copy: {err}")
@@ -1161,7 +1161,7 @@ fuzz_programs: fn(rows: TestRows, checkout: String, scratch: String, dir: String
             cwd = scratch.copy()  // copy: the program holds its own directory
         }
         pin: pins.get(name) ?? ""
-        pinned := ""
+        ^pinned: ""
         if run_selected && pin != "" {
             pinned = files.read(files.join(directory, pin)) ?? {
                 rows.fail("{id} [{CORE_LEVELS[0]}]", "couldn't read `{relative}/{pin}`, the output {FUZZ_MANIFEST} pairs it with: {err}")
@@ -1176,7 +1176,7 @@ fuzz_programs: fn(rows: TestRows, checkout: String, scratch: String, dir: String
 // The `exact-stdout` pairs of a FUZZ_RUNS directory's FUZZ_MANIFEST
 // (`source<TAB>output<TAB>relation<TAB>exception` rows): source -> output.
 fuzz_pins: fn(directory: String) -> [String:String] {
-    pins := [String:String]{}
+    ^pins: [String:String]{}
     text: files.read(files.join(directory, FUZZ_MANIFEST)) ?? return pins
     loop line in text.split("\n") {
         if line.starts_with("#") -> next
@@ -1262,7 +1262,7 @@ fuzz_run_failure: fn(program: FuzzProgram, first: FuzzOutcome, this: FuzzOutcome
 // The error reports of a `jet check --json` answer, each `<name>: <message>`.
 fuzz_reports: fn(output: String) -> [String] {
     tree: json.parse(output) ?? return [String]{}
-    reports := [String]{}
+    ^reports: [String]{}
     if json_field(tree, "reports") == .Array(items) {
         loop item in items {
             if json_field(item, "severity") != (Dyn.Text("error")) -> next
@@ -1344,7 +1344,7 @@ compiler_build: fn(setup: SuiteSetup, builder: String, output: String, trace: St
     }
     current: sys.stack_limit() ?? return Err("couldn't read the stack limit: {err}")
     sys.set_stack_limit(Val(BUILD_STACK), current.hard) ?? return Err("couldn't raise the stack limit: {err}")
-    spec := jet_command(setup, builder, [String]{"build", "--profile", "ship", "Compiler"}).env(ENV_JET_COMPILER_IDENTITY, "{setup.version}#{crypto.sha256(bytes).hex()}")
+    ^spec: jet_command(setup, builder, [String]{"build", "--profile", "ship", "Compiler"}).env(ENV_JET_COMPILER_IDENTITY, "{setup.version}#{crypto.sha256(bytes).hex()}")
     if trace == .Val(path) -> spec = spec.env("JET_TRACE_FILE", path)
     receipt: spec.run() ?? return Err("couldn't run `{builder} build --profile ship Compiler`: {err}")
     Ok(receipt)
@@ -1406,10 +1406,10 @@ perf_rows: fn(rows: TestRows) {
         rows.fail("budget", "couldn't run Tools/Perf/Budget/Check: {err}")
         return
     }
-    table := ""
-    count := 0
+    ^table: ""
+    ^count: 0
     loop line in checked.output.split("\n") {
-        cells := [String]{}
+        ^cells: [String]{}
         loop cell in line.split("  ") {
             if cell.trim() != "" -> cells.push(cell.trim())
         }

@@ -216,7 +216,7 @@ instance: fn(c: ^Check, f: Int, pattern: String) -> Int Never! {
 /// `module.name` of a function key: the `function:<corelib>/` or
 /// `function:` prefix and any generic arguments dropped.
 key_base: fn(key: String) -> String Never! {
-    plain := key.removeprefix("function:").removeprefix("<corelib>/")
+    ^plain: key.removeprefix("function:").removeprefix("<corelib>/")
     plain.partition("<").head
 }
 
@@ -226,9 +226,9 @@ number: fn(token: String) -> Int Never! { Int.parse(token.trim()) ?? -1 }
 
 /// Reads one log into `c`; the problems it found.
 read_log: fn(c: ^Check, text: String) -> [String] Never! {
-    problems := [String]{}
-    current := -1
-    file := ""
+    ^problems: [String]{}
+    ^current: -1
+    ^file: ""
     loop raw in text.split("\n") {
         line: raw.removesuffix("\r")
         if line.starts_with("x64 ") {
@@ -242,16 +242,16 @@ read_log: fn(c: ^Check, text: String) -> [String] Never! {
             // differ in size and type (member_keys).
             words: line.split(" ").to_list()
             if words.len() >= 6 {
-                ty := words[5].copy()
+                ^ty: words[5].copy()
                 loop w in 6..<words.len() -> ty = "{ty} {words[w]}"
                 offset: number(words[2])
-                owners := [String]{key_base(words[1])}
+                ^owners: [String]{key_base(words[1])}
                 if words[1].contains("<") -> owners.push(words[1].copy())
                 loop owner in owners {
                     key: "{owner}/{words[4]}"
                     known: c.field_offset.get(key)
                     if known == None {
-                        keys := c.members.get(owner) ?? [String]{}
+                        ^keys: c.members.get(owner) ?? [String]{}
                         keys.push(key.copy())
                         c.members[owner.copy()] = keys
                     }
@@ -353,7 +353,7 @@ is_struct: fn(ty: String) -> Bool Never! {
 read_op: fn(c: ^Check, text: String, whole: String) Never! {
     called: text.partition(" ; ")
     main: called.head
-    args := [Int]{}
+    ^args: [Int]{}
     if main.contains("(") {
         inside: main.partition("(").tail.rpartition(")").head
         if inside.trim() != "" {
@@ -362,16 +362,16 @@ read_op: fn(c: ^Check, text: String, whole: String) Never! {
     }
     tokens: main.partition(" (").head.split(" ").to_list()
     op: tokens[0]
-    at := 1
-    dst := -1
+    ^at: 1
+    ^dst: -1
     if tokens.len() > 2 && tokens[2] == "<-" {
         dst = slot_ref(tokens[1])
         at = 3
     }
-    callee := called.tail.copy()
-    a := -1
-    b := -1
-    cc := -1
+    ^callee: called.tail.copy()
+    ^a: -1
+    ^b: -1
+    ^cc: -1
     if op == "call_runtime" {
         if at < tokens.len() -> callee = tokens[at].copy()
     } else {
@@ -394,7 +394,7 @@ read_op: fn(c: ^Check, text: String, whole: String) Never! {
 /// The slots instruction `k` reads, as its function's slots.
 reads: fn(c: Check, k: Int) -> [Int] Never! {
     op: c.op_name[k]
-    local := [Int]{}
+    ^local: [Int]{}
     if op == {
         "copy" | "move" | "drop" | "close" | "neg" | "not" | "sqrt" | "convert" | "int_big" | "load" | "offset" | "if" | "br_if" -> {
             local.push(c.op_a[k])
@@ -422,7 +422,7 @@ reads: fn(c: Check, k: Int) -> [Int] Never! {
         }
         else -> {}
     }
-    out := [Int]{}
+    ^out: [Int]{}
     loop slot in local {
         if slot >= 0 -> out.push(slot)
     }
@@ -452,12 +452,12 @@ declassify_inlined: fn(c: ^Check, spec: Spec) Never! {
         loop row in sites_at..<sites_end {
             if spec.public.get(key_base(c.site_key[row])) == None -> next
             site: row - sites_at + 1
-            read_outside := [Int:Bool]{}
+            ^read_outside: [Int:Bool]{}
             loop j in first..<last {
                 if in_site(c, sites_at, c.op_site[j], site) -> next
                 loop slot in reads(c, j) -> read_outside[slot] = true
             }
-            verdict := [Int:Bool]{}
+            ^verdict: [Int:Bool]{}
             loop j in first..<last {
                 if in_site(c, sites_at, c.op_site[j], site) && c.op_dst[j] >= 0 && read_outside.get(c.op_dst[j]) != None {
                     c.op_declassified[j] = true
@@ -477,7 +477,7 @@ declassify_inlined: fn(c: ^Check, spec: Spec) Never! {
 /// Whether inline site `at` of a function (whose first site row is
 /// `sites_at`) is site `site` or sits inside it.
 in_site: fn(c: Check, sites_at: Int, at: Int, site: Int) -> Bool Never! {
-    current := at
+    ^current: at
     loop current > 0 {
         if current == site -> return true
         current = c.site_outer[sites_at + current - 1]
@@ -542,19 +542,19 @@ set_contents: fn(c: ^Check, slot: Int, on: Bool) -> Bool Never! {
 find_addresses: fn(c: ^Check, spec: Spec) Never! {
     c.slot_addr = loop s in 0..<c.slot_kind.len() -> !scalar_kind(c.slot_kind[s]) || c.slot_type[s] == "Pointer"
     count: c.fn_op.len()
-    called := loop _ in 0..<count -> false
+    ^called: loop _ in 0..<count -> false
     loop k in 0..<c.op_name.len() {
         if c.op_name[k] != "call" -> next
         callee: c.by_key.get(c.op_callee[k]) ?? -1
         if callee >= 0 && c.fn_params[callee] == c.op_args[k].len() -> called[callee] = true
     }
-    returns := loop _ in 0..<count -> false
+    ^returns: loop _ in 0..<count -> false
     loop f in 0..<count {
         if called[f] -> next
         loop p in 0..<c.fn_params[f] -> mark_address(c, c.fn_slot[f] + p)
     }
     loop {
-        changed := false
+        ^changed: false
         loop f in 0..<count {
             base: c.fn_slot[f]
             last: if f + 1 < count -> c.fn_op[f + 1] else -> c.op_name.len()
@@ -562,7 +562,7 @@ find_addresses: fn(c: ^Check, spec: Spec) Never! {
                 op: c.op_name[k]
                 a: if op == "call_runtime" || c.op_a[k] < 0 -> -1 else -> base + c.op_a[k]
                 b: if c.op_b[k] < 0 -> -1 else -> base + c.op_b[k]
-                is := false
+                ^is: false
                 if op == {
                     "copy" | "move" -> is = a >= 0 && c.slot_addr[a]
                     "add" | "sub" -> is = (a >= 0 && c.slot_addr[a]) || (b >= 0 && c.slot_addr[b])
@@ -666,11 +666,11 @@ find_elements: fn(c: ^Check, spec: Spec) Never! {
         last: if f + 1 < count -> c.fn_op[f + 1] else -> c.op_name.len()
         // Untyped addresses a value of unknown type was copied into, with
         // the bytes copied.
-        whole := [Int:Int]{}
+        ^whole: [Int:Int]{}
         // Untyped addresses with struct-typed `offset`s: the one type and
         // start they address, "?" for two.
-        pointed := [Int:String]{}
-        pointed_at := [Int:Int]{}
+        ^pointed: [Int:String]{}
+        ^pointed_at: [Int:Int]{}
         loop k in c.fn_op[f]..<last {
             op: c.op_name[k]
             addressing: op == "copy_bytes" || op == "load" || op == "store"
@@ -717,7 +717,7 @@ find_elements: fn(c: ^Check, spec: Spec) Never! {
         }
     }
     loop {
-        changed := false
+        ^changed: false
         loop f in 0..<count {
             base: c.fn_slot[f]
             last: if f + 1 < count -> c.fn_op[f + 1] else -> c.op_name.len()
@@ -726,7 +726,7 @@ find_elements: fn(c: ^Check, spec: Spec) Never! {
                 if c.op_dst[k] < 0 || c.op_a[k] < 0 || op == "call_runtime" -> next
                 d: base + c.op_dst[k]
                 a: base + c.op_a[k]
-                elem := ""
+                ^elem: ""
                 if op == {
                     "load" -> {
                         at: access(c, spec, a, c.op_b[k])
@@ -777,8 +777,8 @@ place_payload: fn(c: ^Check, a: Int, ty: String, at: Int) Never! {
 /// from its start; "" outside one.
 copy_glue: fn(c: Check, f: Int, k: Int) -> String Never! {
     sites_at: c.fn_site[f]
-    site := c.op_site[k]
-    outermost := ""
+    ^site: c.op_site[k]
+    ^outermost: ""
     loop site > 0 {
         key: c.site_key[sites_at + site - 1]
         if key.starts_with("#copy<") -> outermost = key
@@ -792,7 +792,7 @@ glue_size: fn(key: String) -> Int Never! { number(key.partition(":").tail.partit
 
 /// The type copy glue `key` (copy_glue) copies.
 glue_type: fn(key: String) -> String Never! {
-    rest := key.removeprefix("#copy<").removesuffix(">")
+    ^rest: key.removeprefix("#copy<").removesuffix(">")
     loop _ in 0..<4 -> rest = rest.partition(":").tail
     rest.removeprefix("struct:").removeprefix("enum:").copy()
 }
@@ -806,7 +806,7 @@ scaled: fn(c: Check, base: Int, local: Int, size: Int, depth: Int) -> Bool Never
     if defs.len() == 0 -> return false
     loop k in defs {
         op: c.op_name[k]
-        ok := false
+        ^ok: false
         if op == {
             "const" -> ok = c.op_a[k] %% size == 0
             "mul" -> {
@@ -899,17 +899,17 @@ FieldAt: struct {
 }
 
 field_at: fn(c: Check, spec: Spec, ty: String, offset: Int) -> FieldAt Never! {
-    at := ty.copy()
-    off := offset
-    leaf := ""
+    ^at: ty.copy()
+    ^off: offset
+    ^leaf: ""
     loop {
         if public_field(c, spec, at, off) || spec.public_types.get(key_base(at)) != None {
             return FieldAt{ty: at, offset: off, public: true, leaf: ""}
         }
-        inner := ""
-        start := -1
+        ^inner: ""
+        ^start: -1
         if is_tuple(at) {
-            from := 0
+            ^from: 0
             loop element in tuple_elements(at) {
                 size: type_size(c, element)
                 if size < 0 -> break
@@ -956,8 +956,8 @@ occurrences: fn(text: String, mark: String) -> Int Never! { text.split(mark).to_
 
 /// The element types of tuple type `ty` (`(a: T, U)`), names dropped.
 tuple_elements: fn(ty: String) -> [String] Never! {
-    out := [String]{}
-    pending := ""
+    ^out: [String]{}
+    ^pending: ""
     loop piece in ty.removeprefix("(").removesuffix(")").split(", ") {
         pending = if pending == "" -> piece.copy() else -> "{pending}, {piece}"
         open: occurrences(pending, "(") + occurrences(pending, "[") + occurrences(pending, "<")
@@ -988,7 +988,7 @@ type_size: fn(c: Check, ty: String) -> Int Never! {
     if ty == "I16" || ty == "U16" -> return 2
     if ty == "Bool" || ty == "I8" || ty == "U8" -> return 1
     if is_tuple(ty) {
-        from := 0
+        ^from: 0
         loop element in tuple_elements(ty) {
             size: type_size(c, element)
             if size < 0 -> return -1
@@ -1000,7 +1000,7 @@ type_size: fn(c: Check, ty: String) -> Int Never! {
     if !is_struct(ty) || is_tagged(ty) -> return -1
     keys: member_keys(c, ty)
     if keys.len() == 0 -> return -1
-    end := 0
+    ^end: 0
     loop key in keys {
         from: c.field_offset.get(key) ?? -1
         if from < 0 -> return -1
@@ -1021,7 +1021,7 @@ flow: fn(c: ^Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
     // A declassified copy or store writes the verdict's storage (its address
     // `a`); any other declassified instruction writes the verdict `d`.
     c.at_declassified = if !c.op_declassified[k] -> -1 else if c.op_dst[k] >= 0 -> d else -> a
-    changed := false
+    ^changed: false
     if op == {
         "copy" | "move" | "offset" -> {
             if op == "offset" {
@@ -1106,7 +1106,7 @@ flow: fn(c: ^Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
             if callee >= 0 && c.fn_params[callee] == args.len() {
                 // The callee walked with this pattern of secret arguments;
                 // none secret, it computes nothing secret.
-                pattern := ""
+                ^pattern: ""
                 loop arg in args {
                     v: if c.value[arg] -> "v" else -> "-"
                     m: if c.contents[arg] -> "c" else -> "-"
@@ -1163,9 +1163,9 @@ frame_register: fn(reg: String) -> Bool Never! { reg == "rbp" || reg == "rsp" ||
 /// steps, each step to a slot the trail has not been through (a loop's
 /// counter and its sum set each other's bits).
 trail: fn(c: Check, slots: [Int]) -> String Never! {
-    steps := [String]{}
-    slot := -1
-    value := true
+    ^steps: [String]{}
+    ^slot: -1
+    ^value: true
     loop s in slots {
         if c.value[s] {
             slot = s
@@ -1181,7 +1181,7 @@ trail: fn(c: Check, slots: [Int]) -> String Never! {
             }
         }
     }
-    through := [Int:Bool]{}
+    ^through: [Int:Bool]{}
     loop slot >= 0 && steps.len() < 8 {
         through[slot] = true
         k: if value -> c.why_value[slot] else -> c.why_contents[slot]
@@ -1219,7 +1219,7 @@ trail: fn(c: Check, slots: [Int]) -> String Never! {
 /// around that).
 marked: fn(c: Check, spec: Spec, f: Int, k: Int, line: String) -> String Never! {
     if spec.expected.get(c.fn_base[f]) != None -> return "expected `{c.fn_base[f]}`: {line}"
-    site := c.op_site[k]
+    ^site: c.op_site[k]
     loop site > 0 {
         row: c.fn_site[f] + site - 1
         base: key_base(c.site_key[row])
@@ -1232,7 +1232,7 @@ marked: fn(c: Check, spec: Spec, f: Int, k: Int, line: String) -> String Never! 
 /// The findings of instance `i`, each one line (marked), but for those
 /// `seen` (lines of another instance of the same function) holds.
 findings_of: fn(c: Check, spec: Spec, i: Int, seen: ^[String:Bool]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     f: c.inst_fn[i]
     loop r in c.fn_row[f]..<(c.fn_row[f] + c.fn_rows[f]) {
         k: c.row_at[r]
@@ -1241,7 +1241,7 @@ findings_of: fn(c: Check, spec: Spec, i: Int, seen: ^[String:Bool]) -> [String] 
         secret: any_value(c, ins)
         kind: c.row_kind[r]
         op: c.op_name[k]
-        problem := ""
+        ^problem: ""
         if kind == {
             "jcc" -> {
                 // `jcc <cond> stop [s<slot>]`: a branch whose taken side
@@ -1323,7 +1323,7 @@ findings_of: fn(c: Check, spec: Spec, i: Int, seen: ^[String:Bool]) -> [String] 
         if !(any_value(c, ins) || any_contents(c, ins)) -> next
         // A cleared callee or routine takes secret memory, never a secret word.
         word: any_value(c, ins)
-        line := ""
+        ^line: ""
         if op == "call" {
             base: key_base(c.op_callee[k])
             if c.by_key.get(c.op_callee[k]) != None -> next
@@ -1357,8 +1357,8 @@ judged: fn(spec: Spec, file: String, base: String) -> Bool Never! {
 /// The spec in `text`, less the directive lines in `dropped` (each must be
 /// one of its lines).
 read_spec: fn(text: String, dropped: [String:Bool]) -> Spec Never! {
-    spec := Spec{roots: [String:[String]]{}, public: [String:Bool]{}, callees: [String:Bool]{}, runtime: [String:Bool]{}, secret_structs: [String:Bool]{}, public_types: [String:Bool]{}, public_fields: [String:Bool]{}, public_tags: [String:Bool]{}, expected: [String:String]{}, checked: [String]{}}
-    seen := [String:Bool]{}
+    ^spec: Spec{roots: [String:[String]]{}, public: [String:Bool]{}, callees: [String:Bool]{}, runtime: [String:Bool]{}, secret_structs: [String:Bool]{}, public_types: [String:Bool]{}, public_fields: [String:Bool]{}, public_tags: [String:Bool]{}, expected: [String:String]{}, checked: [String]{}}
+    ^seen: [String:Bool]{}
     loop raw in text.split("\n") {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
@@ -1370,7 +1370,7 @@ read_spec: fn(text: String, dropped: [String:Bool]) -> Spec Never! {
         if words.len() < 2 -> next
         if words[0] == {
             "root" -> {
-                names := spec.roots.get(words[1]) ?? [String]{}
+                ^names: spec.roots.get(words[1]) ?? [String]{}
                 loop i in 2..<words.len() -> names.push(words[i].copy())
                 spec.roots[words[1].copy()] = names
             }
@@ -1388,7 +1388,7 @@ read_spec: fn(text: String, dropped: [String:Bool]) -> Spec Never! {
                 if words.len() < 3 {
                     process.fail(2, "`{line}`: an expected function needs its reason")
                 }
-                why := words[2].copy()
+                ^why: words[2].copy()
                 loop w in 3..<words.len() -> why = "{why} {words[w]}"
                 spec.expected[words[1].copy()] = why
             }
@@ -1407,9 +1407,9 @@ run: fn() {
     // `--drop <directive>` (repeatable) checks without that spec line, and
     // `--add <directive>` with that line too: the case's proof that the
     // check finds what a directive clears, and what a stricter spec plants.
-    dropped := [String:Bool]{}
-    added := ""
-    first := 0
+    ^dropped: [String:Bool]{}
+    ^added: ""
+    ^first: 0
     loop first + 1 < argv.len() && (argv[first] == "--drop" || argv[first] == "--add") {
         if argv[first] == "--drop" -> dropped[argv[first + 1].copy()] = true else {
             added = "{added}\n{argv[first + 1]}"
@@ -1421,9 +1421,9 @@ run: fn() {
     }
     spec_text: files.read(argv[first]) ?? process.fail(2, "{argv[first]}: cannot read: {err}")
     spec: read_spec("{spec_text}{added}", dropped)
-    failed := 0
+    ^failed: 0
     // The expected functions some log finds something in.
-    hit := [String:Bool]{}
+    ^hit: [String:Bool]{}
     loop i in (first + 1)..<argv.len() {
         path: argv[i]
         text: files.read(path) ?? {
@@ -1431,7 +1431,7 @@ run: fn() {
             failed += 1
             next
         }
-        c := check_new()
+        ^c: check_new()
         problems: read_log(c, text)
         loop ty in c.slot_type -> c.slot_public.push(spec.public_types.get(key_base(ty)) != None)
         declassify_inlined(c, spec)
@@ -1447,12 +1447,12 @@ run: fn() {
                 failed += 1
             }
         }
-        missing := 0
+        ^missing: 0
         loop (root, names) in spec.roots {
             // Every function of that base (one per generic instance); a
             // root ending `*` takes every base it begins.
-            found := [String:Bool]{}
-            matched := 0
+            ^found: [String:Bool]{}
+            ^matched: 0
             loop g in 0..<c.fn_base.len() {
                 if !root_matches(root, c.fn_base[g]) -> next
                 matched += 1
@@ -1478,12 +1478,12 @@ run: fn() {
             }
         }
         failed += missing
-        rounds := 0
+        ^rounds: 0
         loop {
             rounds += 1
-            changed := false
+            ^changed: false
             // Instances made in a pass are walked in the same pass.
-            at := 0
+            ^at: 0
             loop at < c.inst_fn.len() {
                 f: c.inst_fn[at]
                 last: if f + 1 < c.fn_op.len() -> c.fn_op[f + 1] else -> c.op_name.len()
@@ -1494,10 +1494,10 @@ run: fn() {
             }
             if !changed -> break
         }
-        reached := [String:Bool]{}
-        findings := 0
-        expected := 0
-        seen := [String:Bool]{}
+        ^reached: [String:Bool]{}
+        ^findings: 0
+        ^expected: 0
+        ^seen: [String:Bool]{}
         loop inst in 0..<c.inst_fn.len() {
             f: c.inst_fn[inst]
             if spec.checked.len() > 0 && !judged(spec, c.fn_file[f], c.fn_base[f]) -> next

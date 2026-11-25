@@ -17,8 +17,10 @@
 // fixed stack array and the state in locals; SHA-256 takes the host's SHA
 // extensions through jet.runtime.crypto.sha256_blocks where they exist and runs
 // the same rounds in Jet everywhere else, so every tier computes one meaning.
-use core
-use crypto_rt: jet.runtime.crypto
+use {
+    core
+    crypto_rt: jet.runtime.crypto
+}
 
 // SHA-224 and SHA-256 round constants (FIPS 180-4 section 4.2.2).
 C_SHA256_K: [U32]{
@@ -262,11 +264,11 @@ HashCtx: struct {
 
     impl Close {
         close: fn(^^self) {
-            buf := self.buf.move()
+            ^buf: self.buf.move()
             core.crypto.wipe(buf)
-            s32 := self.s32.move()
+            ^s32: self.s32.move()
             loop i in 0..<s32.len() -> s32[i] = U32{0}
-            s64 := self.s64.move()
+            ^s64: self.s64.move()
             loop i in 0..<s64.len() -> s64[i] = U64{0}
         }
     }
@@ -296,7 +298,7 @@ hash_start_with: fn<H: HashFamily>(family: H, md: Md) -> HashCtx Never! { family
 
 /// A context for `md` in the chaining state `s32` and `s64`, no input taken.
 fresh_ctx: fn(md: Md, s32: [U32], s64: [U64]) -> HashCtx Never! {
-    buf := [U8]{}
+    ^buf: [U8]{}
     loop _ in 0..<md_block(md) -> buf.push(U8{0})
     HashCtx{md: md, s32: s32, s64: s64, buf: buf, used: 0, total: 0}
 }
@@ -321,7 +323,7 @@ sha512_state: fn(md: Md) -> [U64] Never! {
 
 /// The 25 zero lanes a Keccak sponge starts from.
 keccak_state: fn() -> [U64] Never! {
-    lanes := [U64]{}
+    ^lanes: [U64]{}
     loop _ in 0..<25 -> lanes.push(U64{0})
     lanes
 }
@@ -364,7 +366,7 @@ MD5Hash: struct {
 
         finish: fn(self, md: Md, ctx: ^HashCtx, used: Int, total: Int) -> [U8] Never! {
             md_pad_with(self, md, ctx, used, total)
-            out := [U8]{}
+            ^out: [U8]{}
             le32_digest(out, ctx.s32, 16)
             hash_wipe(ctx)
             out
@@ -383,7 +385,7 @@ RIPEMD160Hash: struct {
 
         finish: fn(self, md: Md, ctx: ^HashCtx, used: Int, total: Int) -> [U8] Never! {
             md_pad_with(self, md, ctx, used, total)
-            out := [U8]{}
+            ^out: [U8]{}
             le32_digest(out, ctx.s32, 20)
             hash_wipe(ctx)
             out
@@ -402,7 +404,7 @@ SHA1Hash: struct {
 
         finish: fn(self, md: Md, ctx: ^HashCtx, used: Int, total: Int) -> [U8] Never! {
             md_pad_with(self, md, ctx, used, total)
-            out := [U8]{}
+            ^out: [U8]{}
             be32_digest(out, ctx.s32, 20)
             hash_wipe(ctx)
             out
@@ -424,7 +426,7 @@ SHA256Hash: struct {
 
         finish: fn(self, md: Md, ctx: ^HashCtx, used: Int, total: Int) -> [U8] Never! {
             md_pad_with(self, md, ctx, used, total)
-            out := [U8]{}
+            ^out: [U8]{}
             be32_digest(out, ctx.s32, md_size(md))
             hash_wipe(ctx)
             out
@@ -443,7 +445,7 @@ SHA512Hash: struct {
 
         finish: fn(self, md: Md, ctx: ^HashCtx, used: Int, total: Int) -> [U8] Never! {
             md_pad_with(self, md, ctx, used, total)
-            out := [U8]{}
+            ^out: [U8]{}
             be64_digest(out, ctx.s64, md_size(md))
             hash_wipe(ctx)
             out
@@ -462,7 +464,7 @@ KeccakHash: struct {
 
         finish: fn(self, md: Md, ctx: ^HashCtx, used: Int, _total: Int) -> [U8] Never! {
             keccak_pad_with(self, md, ctx, used)
-            out := [U8]{}
+            ^out: [U8]{}
             le64_digest(out, ctx.s64, md_size(md))
             hash_wipe(ctx)
             out
@@ -513,7 +515,7 @@ AnyHash: struct {
                     md_pad_with(self, md, ctx, used, total)
                 }
             }
-            out := [U8]{}
+            ^out: [U8]{}
             any_digest(out, md, ctx.s32, ctx.s64, size)
             hash_wipe(ctx)
             out
@@ -539,7 +541,7 @@ md_pad_with: fn<H: HashFamily>(family: H, md: Md, ctx: ^HashCtx, used: Int, tota
     block: ctx.buf.len()
     length_bytes: if block == 64 -> 8 else -> 16
     little: md == .MD5 || md == .RIPEMD160
-    at := used
+    ^at: used
     ctx.buf[at] = U8{0x80}
     at += 1
     if at > block - length_bytes {
@@ -611,8 +613,8 @@ hash_update_range_with: fn<H: HashFamily>(family: H, ctx: ^HashCtx, data: [U8], 
     shape: hash_shape(ctx)
     block: ctx.buf.len()
     ctx.total = shape.total + len
-    used := shape.used
-    at := start
+    ^used: shape.used
+    ^at: start
     end: start + len
     if used > 0 {
         fill: if block - used < len -> block - used else -> len
@@ -672,7 +674,7 @@ hash: fn(md: Md, data: [U8]) -> [U8] Never! { hash_with(AnyHash{}, md, data) }
 
 /// The `md` digest of `data`, compressed through `family`.
 hash_with: fn<H: HashFamily>(family: H, md: Md, data: [U8]) -> [U8] Never! {
-    ctx := family.start(md)
+    ^ctx: family.start(md)
     hash_update_range_with(family, ctx, data, 0, data.len())
     hash_finish_with(family, ctx)
 }
@@ -693,25 +695,25 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
 // --- SHA-1 (FIPS 180-4 section 6.1.2) ------------------------------------
 
 #Overflow(.Wrapping) sha1_blocks: fn(s: ^[U32], msg: [U8], off: Int, count: Int) Never! {
-    w := [U32#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ^w: [U32#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop n in 0..<count {
         base: off + n * 64
         loop t in 0..<16 {
             p: base + t * 4
             w[t] = (U32{msg[p]} << 24) | U32{msg[p + 1]} << 16 | U32{msg[p + 2]} << 8 | U32{msg[p + 3]}
         }
-        a := s[0]
-        b := s[1]
-        c := s[2]
-        d := s[3]
-        e := s[4]
+        ^a: s[0]
+        ^b: s[1]
+        ^c: s[2]
+        ^d: s[3]
+        ^e: s[4]
         loop t in 0..<80 {
             if t >= 16 {
                 x: w[(t - 3) & 15] ~ w[(t - 8) & 15] ~ w[(t - 14) & 15] ~ w[t & 15]
                 w[t & 15] = (x << 1) | x >> 31
             }
-            f := U32{0}
-            k := U32{0}
+            ^f: U32{0}
+            ^k: U32{0}
             if {
                 t < 20 -> {
                     f = d ~ b & (c ~ d)
@@ -751,21 +753,21 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
 // to one instruction, and `rotate_right` with a constant to two variable
 // shifts.
 #Overflow(.Wrapping) sha256_blocks: fn(s: ^[U32], msg: [U8], off: Int, count: Int) Never! {
-    w := [U32#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ^w: [U32#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop n in 0..<count {
         base: off + n * 64
         loop t in 0..<16 {
             p: base + t * 4
             w[t] = (U32{msg[p]} << 24) | U32{msg[p + 1]} << 16 | U32{msg[p + 2]} << 8 | U32{msg[p + 3]}
         }
-        a := s[0]
-        b := s[1]
-        c := s[2]
-        d := s[3]
-        e := s[4]
-        f := s[5]
-        g := s[6]
-        h := s[7]
+        ^a: s[0]
+        ^b: s[1]
+        ^c: s[2]
+        ^d: s[3]
+        ^e: s[4]
+        ^f: s[5]
+        ^g: s[6]
+        ^h: s[7]
         loop t in 0..<64 {
             if t >= 16 {
                 x: w[(t - 15) & 15]
@@ -802,7 +804,7 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
 // --- SHA-384 and SHA-512 (FIPS 180-4 section 6.4.2) ----------------------
 
 #Overflow(.Wrapping) sha512_blocks: fn(s: ^[U64], msg: [U8], off: Int, count: Int) Never! {
-    w := [U64#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ^w: [U64#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop n in 0..<count {
         base: off + n * 128
         loop t in 0..<16 {
@@ -811,14 +813,14 @@ le64: fn(bytes: [U8], off: Int) -> U64 Never! {
             lo: (U32{msg[p + 4]} << 24) | U32{msg[p + 5]} << 16 | U32{msg[p + 6]} << 8 | U32{msg[p + 7]}
             w[t] = (U64{hi} << 32) | U64{lo}
         }
-        a := s[0]
-        b := s[1]
-        c := s[2]
-        d := s[3]
-        e := s[4]
-        f := s[5]
-        g := s[6]
-        h := s[7]
+        ^a: s[0]
+        ^b: s[1]
+        ^c: s[2]
+        ^d: s[3]
+        ^e: s[4]
+        ^f: s[5]
+        ^g: s[6]
+        ^h: s[7]
         loop t in 0..<80 {
             if t >= 16 {
                 x: w[(t - 15) & 15]
@@ -866,8 +868,8 @@ keccak_absorb: fn(lanes: ^[U64], msg: [U8], off: Int, count: Int, rate: Int) Nev
 
 /// Keccak-f[1600]: 24 rounds of theta, rho, pi, chi and iota.
 #Overflow(.Wrapping) keccak_f1600: fn(lanes: ^[U64]) Never! {
-    a := [U64#25]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-    c := [U64#5]{0, 0, 0, 0, 0}
+    ^a: [U64#25]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ^c: [U64#5]{0, 0, 0, 0, 0}
     loop i in 0..<25 -> a[i] = lanes[i]
     loop round in 0..<24 {
         loop x in 0..<5 -> c[x] = a[x] ~ a[x + 5] ~ a[x + 10] ~ a[x + 15] ~ a[x + 20]
@@ -880,7 +882,7 @@ keccak_absorb: fn(lanes: ^[U64], msg: [U8], off: Int, count: Int, rate: Int) Nev
             a[x + 15] = a[x + 15] ~ d
             a[x + 20] = a[x + 20] ~ d
         }
-        carry := a[1]
+        ^carry: a[1]
         loop j in 0..<24 {
             to: C_KECCAK_PI[j]
             r: C_KECCAK_RHO[j]
@@ -922,15 +924,15 @@ hmac_key: fn(md: Md, key: [#Secret U8]) -> HMACKey Never! { hmac_key_with(AnyHas
 hmac_key_with: fn<H: HashFamily>(family: H, md: Md, key: [#Secret U8]) -> HMACKey Never! {
     block: md_block(md)
     // Section 2 of RFC 2104: a key longer than the block is hashed first.
-    k := if key.len() > block -> hash_with(family, md, key) else -> key.copy()
-    pad := [U8]{}
+    ^k: if key.len() > block -> hash_with(family, md, key) else -> key.copy()
+    ^pad: [U8]{}
     loop i in 0..<block -> pad.push(if i < k.len() -> k[i] ~ U8{0x36} else -> U8{0x36})
     core.crypto.wipe(k)
-    inner := family.start(md)
+    ^inner: family.start(md)
     hash_update_with(family, inner, pad)
     // ipad 0x36 xor opad 0x5c is 0x6a.
     loop i in 0..<block -> pad[i] = pad[i] ~ U8{0x6a}
-    outer := family.start(md)
+    ^outer: family.start(md)
     hash_update_with(family, outer, pad)
     core.crypto.wipe(pad)
     HMACKey{md: md, inner: inner.move(), outer: outer.move()}
@@ -943,8 +945,8 @@ hmac_finish: fn(key: HMACKey, inner: ^HashCtx) -> [U8] Never! {
 
 /// hmac_finish, compressed through `family`.
 hmac_finish_with: fn<H: HashFamily>(family: H, key: HMACKey, inner: ^HashCtx) -> [U8] Never! {
-    digest := hash_finish_with(family, inner)
-    outer := hash_clone(key.outer)
+    ^digest: hash_finish_with(family, inner)
+    ^outer: hash_clone(key.outer)
     hash_update_with(family, outer, digest)
     core.crypto.wipe(digest)
     hash_finish_with(family, outer)
@@ -952,7 +954,7 @@ hmac_finish_with: fn<H: HashFamily>(family: H, key: HMACKey, inner: ^HashCtx) ->
 
 /// HMAC of `data` under `key`.
 hmac_mac: fn(key: HMACKey, data: [U8]) -> [U8] Never! {
-    inner := hash_clone(key.inner)
+    ^inner: hash_clone(key.inner)
     hash_update(inner, data)
     hmac_finish(key, inner)
 }
@@ -965,9 +967,9 @@ hmac: fn(md: Md, key: [#Secret U8], data: [#Secret U8]) -> [U8] Never! {
 /// HMAC-`md` of `data` under `key`, compressed through `family`.
 hmac_with: fn<H: HashFamily>(family: H, md: Md, key: [#Secret U8], data: [#Secret U8]) -> [U8] Never! {
     // The key serves one message: absorb into its contexts, no clones.
-    k := hmac_key_with(family, md, key)
+    ^k: hmac_key_with(family, md, key)
     hash_update_with(family, k.inner, data)
-    digest := hash_finish_with(family, k.inner)
+    ^digest: hash_finish_with(family, k.inner)
     hash_update_with(family, k.outer, digest)
     core.crypto.wipe(digest)
     hash_finish_with(family, k.outer)
@@ -1002,11 +1004,11 @@ hkdf_expand_bytes: fn(md: Md, prk: [#Secret U8], info: [U8], len: Int) -> [U8] N
 hkdf_expand_bytes_with: fn<H: HashFamily>(family: H, md: Md, prk: [#Secret U8], info: [U8], len: Int) -> [U8] Never! {
     size: md_size(md)
     key: hmac_key_with(family, md, prk)
-    out := [U8]{}
-    last := [U8]{}
-    counter := 1
+    ^out: [U8]{}
+    ^last: [U8]{}
+    ^counter: 1
     loop out.len() < len {
-        inner := hash_clone(key.inner)
+        ^inner: hash_clone(key.inner)
         hash_update_with(family, inner, last)
         hash_update_with(family, inner, info)
         hash_update_byte_with(family, inner, wrapping(U8{counter}))
@@ -1029,7 +1031,7 @@ hkdf: fn(md: Md, salt: [U8], ikm: [U8], info: [U8], len: Int) -> [U8]? Never! {
 
 /// HKDF compressed through `family`.
 hkdf_with: fn<H: HashFamily>(family: H, md: Md, salt: [U8], ikm: [U8], info: [U8], len: Int) -> [U8]? Never! {
-    prk := hmac_with(family, md, salt, ikm)
+    ^prk: hmac_with(family, md, salt, ikm)
     out: hkdf_expand_with(family, md, prk, info, len)
     core.crypto.wipe(prk)
     out
@@ -1053,7 +1055,7 @@ state_digest: fn(md: Md, s32: [U32], s64: [U64], out: ^[U8], size: Int) Never! {
 /// key block: message bytes (left zero here), 1, zeros, then the bit length
 /// (FIPS 180-4 section 5.1). `size + 9 <= block` for SHA-1 and SHA-2.
 digest_block: fn(block: Int, size: Int) -> [U8] Never! {
-    b := [U8]{}
+    ^b: [U8]{}
     loop _ in 0..<block -> b.push(U8{0})
     b[size] = U8{0x80}
     bits: (block + size) * 8
@@ -1082,20 +1084,20 @@ pbkdf2_with: fn<H: HashFamily>(family: H, md: Md, password: [#Secret U8], salt: 
     // For SHA-1 and SHA-2 each U_i = HMAC(P, U_{i-1}) is two compressions
     // of a fixed padded block from the keyed states: `ib` holds U_{i-1},
     // `ob` the inner digest.
-    ib := digest_block(block, size)
-    ob := digest_block(block, size)
-    s32 := key.inner.s32.copy()
-    s64 := key.inner.s64.copy()
-    out := [U8]{}
-    index := 1
+    ^ib: digest_block(block, size)
+    ^ob: digest_block(block, size)
+    ^s32: key.inner.s32.copy()
+    ^s64: key.inner.s64.copy()
+    ^out: [U8]{}
+    ^index: 1
     loop out.len() < key_len {
-        inner := hash_clone(key.inner)
+        ^inner: hash_clone(key.inner)
         hash_update_with(family, inner, salt)
         loop k in 0..<4 {
             hash_update_byte_with(family, inner, wrapping(U8{(index >> (24 - 8 * k)) %% 256}))
         }
-        u := hmac_finish_with(family, key, inner)
-        acc := u.copy()
+        ^u: hmac_finish_with(family, key, inner)
+        ^acc: u.copy()
         if merkle_damgard {
             loop i in 0..<size -> ib[i] = u[i]
             loop _ in 1..<iterations {
@@ -1111,7 +1113,7 @@ pbkdf2_with: fn<H: HashFamily>(family: H, md: Md, password: [#Secret U8], salt: 
             }
         } else {
             loop _ in 1..<iterations {
-                next := hash_clone(key.inner)
+                ^next: hash_clone(key.inner)
                 hash_update_with(family, next, u)
                 core.crypto.wipe(u)
                 u = hmac_finish_with(family, key, next)
@@ -1151,7 +1153,7 @@ rotl: fn(x: U32, n: Int) -> U32 Never! { (x << n) | x >> (32 - n) }
 /// (RFC 1321 section 3.4).
 #Overflow(.Wrapping) md5_blocks: fn(s: ^[U32], msg: [U8], off: Int, count: Int) Never! {
     // T[i] = floor(2^32 * abs(sin(i + 1))).
-    t := [U32#64]{
+    ^t: [U32#64]{
         0xd76aa478,
         0xe8c7b756,
         0x242070db,
@@ -1217,19 +1219,19 @@ rotl: fn(x: U32, n: Int) -> U32 Never! { (x << n) | x >> (32 - n) }
         0x2ad7d2bb,
         0xeb86d391,
     }
-    shift := [Int#16]{7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21}
-    x := [U32#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ^shift: [Int#16]{7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21}
+    ^x: [U32#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop n in 0..<count {
         base: off + n * 64
         loop i in 0..<16 -> x[i] = le32_word(msg, base + 4 * i)
-        a := s[0]
-        b := s[1]
-        c := s[2]
-        d := s[3]
+        ^a: s[0]
+        ^b: s[1]
+        ^c: s[2]
+        ^d: s[3]
         loop i in 0..<64 {
             round: i /% 16
-            f := U32{0}
-            k := 0
+            ^f: U32{0}
+            ^k: 0
             if round == {
                 0 -> {
                     f = b & c | ~b & d
@@ -1276,7 +1278,7 @@ ripemd_f: fn(g: Int, x: U32, y: U32, z: U32) -> U32 Never! {
 /// The `count` 64-byte blocks of `msg` from `off` folded into the
 /// RIPEMD-160 state: two parallel lines of 80 steps each.
 #Overflow(.Wrapping) ripemd160_blocks: fn(s: ^[U32], msg: [U8], off: Int, count: Int) Never! {
-    r := [Int#80]{
+    ^r: [Int#80]{
         0,
         1,
         2,
@@ -1358,7 +1360,7 @@ ripemd_f: fn(g: Int, x: U32, y: U32, z: U32) -> U32 Never! {
         15,
         13,
     }
-    rr := [Int#80]{
+    ^rr: [Int#80]{
         5,
         14,
         7,
@@ -1440,7 +1442,7 @@ ripemd_f: fn(g: Int, x: U32, y: U32, z: U32) -> U32 Never! {
         9,
         11,
     }
-    sl := [Int#80]{
+    ^sl: [Int#80]{
         11,
         14,
         15,
@@ -1522,7 +1524,7 @@ ripemd_f: fn(g: Int, x: U32, y: U32, z: U32) -> U32 Never! {
         5,
         6,
     }
-    sr := [Int#80]{
+    ^sr: [Int#80]{
         8,
         9,
         9,
@@ -1604,22 +1606,22 @@ ripemd_f: fn(g: Int, x: U32, y: U32, z: U32) -> U32 Never! {
         11,
         11,
     }
-    kl := [U32#5]{0x00000000, 0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xa953fd4e}
-    kr := [U32#5]{0x50a28be6, 0x5c4dd124, 0x6d703ef3, 0x7a6d76e9, 0x00000000}
-    x := [U32#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    ^kl: [U32#5]{0x00000000, 0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xa953fd4e}
+    ^kr: [U32#5]{0x50a28be6, 0x5c4dd124, 0x6d703ef3, 0x7a6d76e9, 0x00000000}
+    ^x: [U32#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop n in 0..<count {
         base: off + n * 64
         loop i in 0..<16 -> x[i] = le32_word(msg, base + 4 * i)
-        al := s[0]
-        bl := s[1]
-        cl := s[2]
-        dl := s[3]
-        el := s[4]
-        ar := s[0]
-        br := s[1]
-        cr := s[2]
-        dr := s[3]
-        er := s[4]
+        ^al: s[0]
+        ^bl: s[1]
+        ^cl: s[2]
+        ^dl: s[3]
+        ^el: s[4]
+        ^ar: s[0]
+        ^br: s[1]
+        ^cr: s[2]
+        ^dr: s[3]
+        ^er: s[4]
         loop j in 0..<80 {
             g: j /% 16
             tl: rotl(al + ripemd_f(g, bl, cl, dl) + x[r[j]] + kl[g], sl[j]) + el

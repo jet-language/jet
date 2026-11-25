@@ -25,12 +25,12 @@
     // stop (proof-replay-decisions.md: caught assertions exit 1, runtime
     // stops 70); the outcome's runtime_stop flag carries it to the host.
     runtime_stop: record != I64{0} && !test_stop_assertion_take()
-    error := returned
+    ^error: returned
     if (record != I64{0}) {
         error = scheduler_stop_take_message(record)
         scheduler_stop_drop(record)
         if (error == I64{0}) {
-            _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, trap_word(wrapping(save + I64{32})))
+            ^_: jet_rt_root_publish_rendered(I64{0}, I64{0}, trap_word(wrapping(save + I64{32})))
             error = test_text_new(I64{0})
         }
     }
@@ -53,15 +53,15 @@
 #Export(c) jet_rt_test_unit_faults: fn(name: I64, expected: Bool, env: I64, invoke: I64, selectors: I64, property: Bool) -> I64 {
     data: rt_text_data(selectors)
     length: rt_text_len(selectors)
-    count := I64{0}
-    at := I64{0}
+    ^count: I64{0}
+    ^at: I64{0}
     loop at <= length {
         if (at == length || trap_byte(wrapping(data + at)) == I64{10}) { count += I64{1} }
         at += I64{1}
     }
     rows: jet_rt_alloc(count * I64{8}, I64{8})
-    start := I64{0}
-    row := I64{0}
+    ^start: I64{0}
+    ^row: I64{0}
     at = I64{0}
     loop at <= length {
         if (at == length || trap_byte(wrapping(data + at)) == I64{10}) {
@@ -72,7 +72,7 @@
         at += I64{1}
     }
     fault_schedule_arm(rows, count, I64{-1}, I64{0})
-    outcome := test_fault_run(name, expected, env, invoke, property)
+    ^outcome: test_fault_run(name, expected, env, invoke, property)
     observed: jet_rt_alloc(count * I64{8}, I64{8})
     schedule: trap_word(wrapping(fault_allocation_state() + I64{40}))
     row = I64{0}
@@ -84,7 +84,7 @@
     if (!expected && flags & I64{5} == I64{1}) {
         row = I64{0}
         loop row < count {
-            nth := I64{1}
+            ^nth: I64{1}
             loop nth <= trap_word(wrapping(observed + row * I64{8})) {
                 fault_schedule_arm(rows, count, row, nth)
                 injected: test_fault_run(name, expected, env, invoke, property)
@@ -127,7 +127,7 @@ test_fault_report: fn(outcome: I64, selector: I64, nth: I64) {
     report_len: rt_text_len(report)
     text: test_text_new(rt_text_len(head) + selector_len + rt_text_len(call) + I64{20} + I64{1} + report_len)
     out: rt_text_data(text)
-    used := I64{0}
+    ^used: I64{0}
     test_copy_bytes(wrapping(out + used), rt_text_data(head), rt_text_len(head))
     used += rt_text_len(head)
     test_copy_bytes(wrapping(out + used), rt_text_data(selector), selector_len)

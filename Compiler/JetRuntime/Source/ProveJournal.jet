@@ -37,7 +37,7 @@ PROVE_JOURNAL_REQUEST: I64{81}
 // The errno a timed stdin read whose wait ran out records, ETIMEDOUT.
 PROVE_JOURNAL_TIMED_OUT: I64{110}
 
-prove_journal_root := I64{0}
+^prove_journal_root: I64{0}
 
 rt_prove_journal_open: fn() {
     if (prove_journal_root != I64{0}) {
@@ -78,7 +78,7 @@ rt_prove_journal_open: fn() {
         if (jet_time_raw_zone_file_bytes(trace, out, wrapping(out + I64{8})) != I64{0}) {
             served: trap_word(wrapping(out + I64{8}))
             data: trap_word(out)
-            seen := I64{0}
+            ^seen: I64{0}
             loop seen < served {
                 mark: rt_text_byte(wrapping(data + seen))
                 if (mark == PROVE_JOURNAL_REQUEST && seen + I64{9} <= served) {
@@ -116,7 +116,7 @@ rt_prove_rand_fill: fn(out: I64, count: I64) -> I64 {
     root: prove_journal_root
     if (root == I64{0}) { return rt_crypto_entropy_fill(out, count) }
     sync_mutex_lock(root)
-    status := I64{1}
+    ^status: I64{1}
     if (trap_word(wrapping(root + I64{8})) == I64{1}) {
         status = rt_crypto_entropy_fill(out, count)
         if (status == I64{0}) {
@@ -144,7 +144,7 @@ rt_prove_stdin_read: fn(into: I64, capacity: I64) -> I64 {
     root: prove_journal_root
     if (root == I64{0}) { return rt_prove_stdin_os_read(into, capacity) }
     sync_mutex_lock(root)
-    got := I64{-5}
+    ^got: I64{-5}
     if (trap_word(wrapping(root + I64{8})) == I64{1}) {
         got = rt_prove_stdin_terminal_read(into, capacity)
         if (got >= I64{0}) {
@@ -179,7 +179,7 @@ rt_prove_stdin_wait: fn(capacity: I64, wait: I64) -> I64 {
     root: prove_journal_root
     if (root == I64{0}) { return rt_prove_stdin_os_wait(wait) }
     sync_mutex_lock(root)
-    ready := I64{1}
+    ^ready: I64{1}
     mode: trap_word(wrapping(root + I64{8}))
     if (mode == I64{1}) {
         ready = rt_prove_stdin_os_wait(wait)
@@ -206,7 +206,7 @@ rt_prove_journal_timed_out: fn(root: I64, capacity: I64) -> Bool {
 // terminal read that would wait for typing.
 rt_prove_stdin_os_read: fn(into: I64, capacity: I64) -> I64 {
     if replay_replaying() -> return replay_read(into, capacity, I64{0})
-    got := I64{0}
+    ^got: I64{0}
     #Unsafe("into lends `capacity` writable bytes for a raw Linux read of stdin") {
         got = host_syscall(I64{0}, I64{0}, into, capacity, I64{0}, I64{0}, I64{0})
     }
@@ -230,8 +230,8 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
     // cell0: a process group id; cell8: the SIGTTOU mask; cell16: the old mask.
     cell: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(cell, I64{24})
-    owner := I64{0}
-    own := I64{0}
+    ^owner: I64{0}
+    ^own: I64{0}
     #Unsafe("cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none") {
         if (host_syscall(I64{16}, I64{0}, I64{21519}, cell, I64{0}, I64{0}, I64{0}) == I64{0}) {
             owner = trap_word(cell) & I64{4294967295}
@@ -243,16 +243,16 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
         trap_store(wrapping(cell + I64{8}), I64{1} << I64{21})
         trap_store(cell, own)
         #Unsafe("cell lends the new and old signal masks and the group id to rt_sigprocmask and TIOCSPGRP") {
-            _ := host_syscall(I64{14}, I64{0}, wrapping(cell + I64{8}), wrapping(cell + I64{16}), I64{8}, I64{0}, I64{0})
-            _ := host_syscall(I64{16}, I64{0}, I64{21520}, cell, I64{0}, I64{0}, I64{0})
+            ^_: host_syscall(I64{14}, I64{0}, wrapping(cell + I64{8}), wrapping(cell + I64{16}), I64{8}, I64{0}, I64{0})
+            ^_: host_syscall(I64{16}, I64{0}, I64{21520}, cell, I64{0}, I64{0}, I64{0})
         }
     }
     got: rt_prove_stdin_os_read(into, capacity)
     if handoff {
         trap_store(cell, owner)
         #Unsafe("cell lends the group id to TIOCSPGRP and the old mask to rt_sigprocmask") {
-            _ := host_syscall(I64{16}, I64{0}, I64{21520}, cell, I64{0}, I64{0}, I64{0})
-            _ := host_syscall(I64{14}, I64{2}, wrapping(cell + I64{16}), I64{0}, I64{8}, I64{0}, I64{0})
+            ^_: host_syscall(I64{16}, I64{0}, I64{21520}, cell, I64{0}, I64{0}, I64{0})
+            ^_: host_syscall(I64{14}, I64{2}, wrapping(cell + I64{16}), I64{0}, I64{8}, I64{0}, I64{0})
         }
     }
     jet_rt_free(cell, I64{24}, I64{8})
@@ -291,7 +291,7 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
     root: prove_journal_root
     if (root == I64{0} || length < I64{0}) { return I64{0} }
     sync_mutex_lock(root)
-    served := I64{-1}
+    ^served: I64{-1}
     if (trap_word(wrapping(root + I64{8})) == I64{2}) {
         total: I64{9} + length
         request: jet_rt_alloc(total, I64{8})
@@ -302,7 +302,7 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
         jet_rt_free(request, total, I64{8})
         served = rt_prove_journal_take(root, PROVE_JOURNAL_NET, I64{0})
     }
-    found := I64{0}
+    ^found: I64{0}
     if (served >= I64{0}) {
         records: trap_word(wrapping(root + I64{24}))
         rt_prove_net_bytes_out(wrapping(records + served + PROVE_JOURNAL_HEAD), rt_prove_le(wrapping(records + served + I64{9})), out, out_length)
@@ -317,14 +317,14 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
 // list owns it and frees it with jet_rt_free_8. An empty record allocates
 // nothing and stores address 0.
 rt_prove_net_bytes_out: fn(source: I64, length: I64, out: I64, out_length: I64) {
-    data := I64{0}
+    ^data: I64{0}
     if (length != I64{0}) {
         if (RT_HOST_U8_STRIDE == I64{1}) {
             data = jet_rt_alloc_8(length)
             rt_text_bytes_copy(data, source, length)
         } else {
             data = jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
-            at := I64{0}
+            ^at: I64{0}
             loop at < length {
                 host_u8_put(data, at, rt_text_byte(wrapping(source + at)))
                 at += I64{1}
@@ -400,8 +400,8 @@ rt_prove_journal_write: fn(root: I64, data: I64, length: I64) {
 }
 
 rt_prove_le: fn(address: I64) -> I64 {
-    value := I64{0}
-    at := I64{8}
+    ^value: I64{0}
+    ^at: I64{8}
     first: I64{0}
     loop at > first {
         at -= I64{1}
@@ -411,8 +411,8 @@ rt_prove_le: fn(address: I64) -> I64 {
 }
 
 rt_prove_put_le: fn(address: I64, value: I64) {
-    rest := value
-    at := I64{0}
+    ^rest: value
+    ^at: I64{0}
     width: I64{8}
     loop at < width {
         trap_put(wrapping(address + at), rest & I64{255})

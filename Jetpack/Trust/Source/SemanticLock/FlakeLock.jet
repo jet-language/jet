@@ -70,13 +70,13 @@ trust_json_parse: fn(text: String) -> TrustJSONDocument Never! {
 // dropped lines after the error.
 trust_json_parse_lenient: fn(input: String) -> TrustJSONDocument Never! {
     raw: input.bytes()
-    kept := [U8]{}
-    noise := [String]{}
-    start := 0
+    ^kept: [U8]{}
+    ^noise: [String]{}
+    ^start: 0
     loop start < raw.len() {
         newline: trust_text_find_byte(raw, TRUST_NEWLINE, start)
         end: if newline < 0 -> raw.len() else -> newline + 1
-        content_end := if newline < 0 -> raw.len() else -> newline
+        ^content_end: if newline < 0 -> raw.len() else -> newline
         if content_end > start && (Int{raw[content_end - 1]}) == TRUST_CARRIAGE_RETURN {
             content_end -= 1
         }
@@ -97,7 +97,7 @@ trust_json_parse_lenient: fn(input: String) -> TrustJSONDocument Never! {
 
 trust_json_with_noise: fn(error: String, noise: [String]) -> String Never! {
     if noise.len() == 0 -> return error.copy()
-    lines := [String]{"{error}\nfiltered provider noise:"}
+    ^lines: [String]{"{error}\nfiltered provider noise:"}
     loop line in noise -> lines.push("\n  {line}")
     lines.join("")
 }
@@ -145,7 +145,7 @@ trust_json_object: fn(value: Dyn) -> [String:Dyn]? Never! {
     if value == {
         // The object's ordered pairs, indexed by name.
         .Object(fields) -> {
-            members := [String:Dyn]{}
+            ^members: [String:Dyn]{}
             loop pair in fields -> members[pair.key] = pair.value
             Val(members)
         }
@@ -206,14 +206,14 @@ trust_json_value: fn(text: String) -> Dyn Never! {
 }
 
 trust_json_texts: fn(values: [String]) -> Dyn Never! {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop value in values -> items.push(Dyn.Text(value.copy()))
     Dyn.Array(items)
 }
 
 // An object of `fields` keyed through a map.
 trust_json_object_tree: fn(fields: [TrustJSONField]) -> Dyn Never! {
-    object := [String:Dyn]{}
+    ^object: [String:Dyn]{}
     loop field in fields -> object[field.key] = field.value
     Dyn.Object(object)
 }
@@ -232,7 +232,7 @@ trust_flake_find_node: fn(nodes: [FlakeLockNode], name: String) -> FlakeLockNode
 
 // Nodes in derived order; names are unique by the time they sort.
 trust_flake_sorted_lock_nodes: fn(nodes: [FlakeLockNode]) -> [FlakeLockNode] Never! {
-    sorted := nodes
+    ^sorted: nodes
     sorted.sort_by(fn(node) { node.locked })
     sorted.sort_by(fn(node) { node.original })
     sorted.sort_by(fn(node) { node.name })
@@ -240,14 +240,14 @@ trust_flake_sorted_lock_nodes: fn(nodes: [FlakeLockNode]) -> [FlakeLockNode] Nev
 }
 
 trust_flake_sorted_edges: fn(edges: [FlakeLockEdge]) -> [FlakeLockEdge] Never! {
-    sorted := edges
+    ^sorted: edges
     sorted.sort_by(fn(edge) { edge.target })
     sorted.sort_by(fn(edge) { edge.name })
     sorted
 }
 
 trust_flake_sorted_registries: fn(entries: [FlakeRegistryEntry]) -> [FlakeRegistryEntry] Never! {
-    sorted := entries
+    ^sorted: entries
     sorted.sort_by(fn(entry) { entry.locked })
     sorted.sort_by(fn(entry) { entry.original })
     sorted.sort_by(fn(entry) { entry.node })
@@ -256,7 +256,7 @@ trust_flake_sorted_registries: fn(entries: [FlakeRegistryEntry]) -> [FlakeRegist
 }
 
 trust_sorted_keys: fn(object: [String:Dyn]) -> [String] Never! {
-    keys := object.keys().to_list()
+    ^keys: object.keys().to_list()
     keys.sort()
     keys
 }
@@ -289,7 +289,7 @@ trust_flake_resolve_follow_path: fn(segments: [Dyn], nodes: [String:Dyn], path: 
         direct: trust_json_string(segments[0]) ?? ""
         if direct != "" && nodes.has_key(direct) -> return Ok(Val(direct))
     }
-    current := start_node.copy()
+    ^current: start_node.copy()
     loop value in segments {
         segment: trust_json_string(value) ?? return Err(TrustError.IO("flake.lock node reference array must contain strings: {TRUST_JSON_NOT_STRING}"))
         if segment == "" {
@@ -302,7 +302,7 @@ trust_flake_resolve_follow_path: fn(segments: [Dyn], nodes: [String:Dyn], path: 
         node: nodes.get(current) ?? return Err(TrustError.IO("flake.lock follow path starts at missing node `{current}`"))
         inputs: trust_json_object_field(node, "inputs") ?? return Err(TrustError.IO("flake.lock follow path node `{current}` has no inputs map"))
         target: inputs.get(segment) ?? return Err(TrustError.IO("flake.lock follow path `{segment}` is missing from node `{current}`"))
-        deeper := path
+        ^deeper: path
         deeper.push(step)
         resolved: trust_flake_resolve_reference(target, nodes, deeper, current)
         current = resolved ?? return Err(TrustError.IO("flake.lock follow path `{segment}` resolves to an empty node reference"))
@@ -313,14 +313,14 @@ trust_flake_resolve_follow_path: fn(segments: [Dyn], nodes: [String:Dyn], path: 
 // Each node as `{"inputs": {...}}` with its edge targets parsed, the map a
 // follow path walks.
 trust_flake_lock_node_values: fn(nodes: [FlakeLockNode]) -> [String:Dyn] TrustError! {
-    values := [String:Dyn]{}
+    ^values: [String:Dyn]{}
     loop node in nodes {
-        inputs := [String:Dyn]{}
+        ^inputs: [String:Dyn]{}
         loop edge in node.inputs {
             target: trust_json_parse_or_io(edge.target, "flake.lock node `{node.name}` input `{edge.name}` is invalid")
             if inputs.get(edge.name) == None -> inputs[edge.name] = target
         }
-        wrapper := [String:Dyn]{}
+        ^wrapper: [String:Dyn]{}
         wrapper["inputs"] = Dyn.Object(inputs)
         values[node.name] = Dyn.Object(wrapper)
     }
@@ -432,14 +432,14 @@ trust_flake_revision_matches: fn(revision: String?, input: FlakeInput, locked: [
 trust_flake_check_semantic_root_inputs: fn(graph: FlakeGraph) TrustError! {
     root: trust_flake_find_node(graph.lock_nodes, "root") ?? return
     nodes: trust_flake_lock_node_values(graph.lock_nodes)
-    root_inputs := [String:Dyn]{}
+    ^root_inputs: [String:Dyn]{}
     loop edge in root.inputs {
         if trust_json_parse(edge.target) == {
             .Parsed(target) -> root_inputs[edge.name] = target
             .Failed(reason) -> return Err(TrustError.StaleSemanticLock("root input `{edge.name}` is invalid: {reason}"))
         }
     }
-    source_names := [String]{}
+    ^source_names: [String]{}
     loop input in graph.inputs -> source_names.push(input.name)
     loop name in trust_sorted_keys(root_inputs) {
         if !source_names.contains(name) {
@@ -476,7 +476,7 @@ trust_flake_read_lock_node: fn(name: String, value: Dyn) -> FlakeLockNode TrustE
             return Err(TrustError.IO("flake.lock node `{name}` has empty original/locked metadata"))
         }
     }
-    inputs := [FlakeLockEdge]{}
+    ^inputs: [FlakeLockEdge]{}
     if object.get("inputs") == {
         .Val(declared) -> {
             edges: trust_json_object(declared) ?? return Err(TrustError.IO("flake.lock node `{name}` inputs are invalid: {TRUST_JSON_NOT_OBJECT}"))
@@ -494,7 +494,7 @@ trust_flake_read_lock_node: fn(name: String, value: Dyn) -> FlakeLockNode TrustE
 
 // Keys in serde_json's sorted order.
 trust_flake_lock_node_tree: fn(node: FlakeLockNode) -> Dyn Never! {
-    edges := [Dyn]{}
+    ^edges: [Dyn]{}
     loop edge in node.inputs {
         edges.push(Dyn.Object(["name": Dyn.Text(edge.name.copy()), "target": trust_json_value(edge.target)]))
     }
@@ -536,7 +536,7 @@ trust_flake_parse_lock_node: fn(raw: String) -> FlakeLockNode TrustError! {
     object: trust_json_parse_record(raw)
     declared: object.get("inputs") ?? return Err(TrustError.InvalidAssignment("missing lock node inputs"))
     items: trust_json_array(declared) ?? return Err(TrustError.InvalidAssignment(TRUST_JSON_NOT_ARRAY))
-    inputs := [FlakeLockEdge]{}
+    ^inputs: [FlakeLockEdge]{}
     loop item in items {
         edge: trust_json_object(item) ?? return Err(TrustError.InvalidAssignment(TRUST_JSON_NOT_OBJECT))
         edge_name: edge.get("name") ?? return Err(TrustError.InvalidAssignment("missing lock edge name"))
@@ -592,7 +592,7 @@ trust_flake_parse_composition: fn(raw: String) -> FlakeComposition TrustError! {
     framework_value: object.get("framework") ?? return Err(TrustError.InvalidAssignment("missing composition framework"))
     framework: trust_json_string(framework_value) ?? return Err(TrustError.InvalidAssignment(TRUST_JSON_NOT_STRING))
     per_system: trust_json_bool(object.get("perSystem") ?? Dyn.Null) ?? return Err(TrustError.InvalidAssignment("composition perSystem is not boolean"))
-    module_sources := [String]{}
+    ^module_sources: [String]{}
     if object.has_key("moduleSources") {
         module_sources = trust_flake_composition_strings(object, "moduleSources")
     }
@@ -604,7 +604,7 @@ trust_flake_parse_composition: fn(raw: String) -> FlakeComposition TrustError! {
 trust_flake_composition_strings: fn(object: [String:Dyn], key: String) -> [String] TrustError! {
     declared: object.get(key) ?? return Err(TrustError.InvalidAssignment("missing composition field `{key}`"))
     items: trust_json_array(declared) ?? return Err(TrustError.InvalidAssignment(TRUST_JSON_NOT_ARRAY))
-    values := [String]{}
+    ^values: [String]{}
     loop item in items {
         value: trust_json_string(item) ?? return Err(TrustError.InvalidAssignment(TRUST_JSON_NOT_STRING))
         values.push(value)

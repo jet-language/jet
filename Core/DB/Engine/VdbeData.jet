@@ -74,7 +74,7 @@ HALT_TYPES: ["NOT NULL", "UNIQUE", "CHECK", "FOREIGN KEY"]
 op_halt: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     if v.frames.len() > 0 && r.p1 == base.OK {
         aux.set_changes(db, v.n_change)
-        pcx := aux.frame_restore<H>(h, db, v)
+        ^pcx: aux.frame_restore<H>(h, db, v)
         if r.p2 == ast.OE_IGNORE -> pcx = v.ops[pcx].p2 - 1
         r.pc = pcx
         return GO_NEXT
@@ -83,7 +83,7 @@ op_halt: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int N
     v.error_action = r.p2
     if v.rc != base.OK {
         if r.p5 != 0 {
-            msg := "{HALT_TYPES[r.p5 - 1]} constraint failed".bytes()
+            ^msg: "{HALT_TYPES[r.p5 - 1]} constraint failed".bytes()
             if run.p4_text(v, r.pc) == .Val(z) {
                 aux.append_bytes(msg, ": ".bytes())
                 aux.append_bytes(msg, z)
@@ -141,8 +141,8 @@ op_real: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
 op_string8: fn(db: conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p2
     run.out2(v, i)
-    z := run.p4_text(v, r.pc) ?? [U8]{}
-    n := mem.c_text_len(z, base.UTF8, db.limits[ast.LIMIT_LENGTH])
+    ^z: run.p4_text(v, r.pc) ?? [U8]{}
+    ^n: mem.c_text_len(z, base.UTF8, db.limits[ast.LIMIT_LENGTH])
     if r.enc != base.UTF8 {
         if mem.set_str(v.mem[i], z, -1, base.UTF8, db.limits[ast.LIMIT_LENGTH]) != base.OK {
             return GO_TOO_BIG
@@ -211,7 +211,7 @@ op_blob: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
 op_variable: fn(db: conn.Conn, v: ^conn.Vdbe, r: Run) -> Int Never! {
     if mem.too_big(v.vars[r.p1 - 1], db.limits[ast.LIMIT_LENGTH]) -> return GO_TOO_BIG
     i: v.mem_base + r.p2
-    m := v.vars[r.p1 - 1].copy()
+    ^m: v.vars[r.p1 - 1].copy()
     m.flags |= MEM_FROM_BIND
     run.reg_set(v, i, m)
     GO_NEXT
@@ -224,7 +224,7 @@ op_move: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     to: v.mem_base + r.p2
     loop k in 0..<r.p3 {
         run.release_dyn(v, to + k)
-        m := v.mem[from + k].copy()
+        ^m: v.mem[from + k].copy()
         v.mem[to + k] = m
         v.mem[from + k].flags = conn.MEM_UNDEFINED
         v.mem[from + k].z = [U8]{}
@@ -282,7 +282,7 @@ op_concat: fn(db: conn.Conn, v: ^conn.Vdbe, r: Run) -> Int Never! {
     i1: v.mem_base + r.p1
     i2: v.mem_base + r.p2
     out: v.mem_base + r.p3
-    flags1 := v.mem[i1].flags
+    ^flags1: v.mem[i1].flags
     if (flags1 | v.mem[i2].flags) & MEM_NULL != 0 {
         run.reg_null(v, out)
         return GO_NEXT
@@ -294,7 +294,7 @@ op_concat: fn(db: conn.Conn, v: ^conn.Vdbe, r: Run) -> Int Never! {
         mem.expand_blob(v.mem[i1])
         flags1 = clear_bits(v.mem[i1].flags, MEM_STR)
     }
-    flags2 := v.mem[i2].flags
+    ^flags2: v.mem[i2].flags
     if flags2 & (MEM_STR | MEM_BLOB) == 0 {
         mem.stringify(v.mem[i2], r.enc, false)
         flags2 = clear_bits(v.mem[i2].flags, MEM_STR)
@@ -302,9 +302,9 @@ op_concat: fn(db: conn.Conn, v: ^conn.Vdbe, r: Run) -> Int Never! {
         mem.expand_blob(v.mem[i2])
         flags2 = clear_bits(v.mem[i2].flags, MEM_STR)
     }
-    n_byte := v.mem[i1].z.len() + v.mem[i2].z.len()
+    ^n_byte: v.mem[i1].z.len() + v.mem[i2].z.len()
     if n_byte > db.limits[ast.LIMIT_LENGTH] -> return GO_TOO_BIG
-    z := v.mem[i2].z.copy()
+    ^z: v.mem[i2].z.copy()
     loop b in v.mem[i1].z -> z.push(b)
     if r.enc > base.UTF8 && n_byte & 1 == 1 -> _: z.pop()
     if out != i2 -> v.mem[i2].flags = flags2
@@ -326,9 +326,9 @@ op_arith: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     i1: v.mem_base + r.p1
     i2: v.mem_base + r.p2
     out: v.mem_base + r.p3
-    type1 := v.mem[i1].flags
-    type2 := v.mem[i2].flags
-    int_math := false
+    ^type1: v.mem[i1].flags
+    ^type2: v.mem[i2].flags
+    ^int_math: false
     if type1 & type2 & MEM_INT != 0 -> int_math = true else if (type1 | type2) & MEM_NULL != 0 {
         run.reg_null(v, out)
         return GO_NEXT
@@ -338,9 +338,9 @@ op_arith: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
         int_math = type1 & type2 & MEM_INT != 0
     }
     if int_math {
-        a := v.mem[i1].i
+        ^a: v.mem[i1].i
         b: v.mem[i2].i
-        res := Int?{None}
+        ^res: Int?{None}
         if r.op == opc.OP_ADD -> res = util.add_int64(b, a) else if r.op == opc.OP_SUBTRACT {
             res = util.sub_int64(b, a)
         } else if r.op == opc.OP_MULTIPLY { res = util.mul_int64(b, a) } else {
@@ -363,7 +363,7 @@ op_arith: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
         }
     }
     ra: mem.real_value(v.mem[i1])
-    rb := mem.real_value(v.mem[i2])
+    ^rb: mem.real_value(v.mem[i2])
     if r.op == opc.OP_ADD -> rb += ra else if r.op == opc.OP_SUBTRACT -> rb -= ra else if r.op == opc.OP_MULTIPLY {
         rb *= ra
     } else if r.op == opc.OP_DIVIDE {
@@ -373,7 +373,7 @@ op_arith: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
         }
         rb /= ra
     } else {
-        a := mem.int_value(v.mem[i1])
+        ^a: mem.int_value(v.mem[i1])
         b: mem.int_value(v.mem[i2])
         if a == 0 {
             run.reg_null(v, out)
@@ -412,16 +412,16 @@ op_bits: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
         run.reg_null(v, out)
         return GO_NEXT
     }
-    a := mem.int_value(v.mem[i2])
-    b := mem.int_value(v.mem[i1])
-    op := r.op
+    ^a: mem.int_value(v.mem[i2])
+    ^b: mem.int_value(v.mem[i1])
+    ^op: r.op
     if op == opc.OP_BIT_AND -> a = a & b else if op == opc.OP_BIT_OR -> a = a | b else if b != 0 {
         if b < 0 {
             op = 2 * opc.OP_SHIFT_LEFT + 1 - op
             b = if b > -64 -> -b else -> 64
         }
         if b >= 64 -> a = if a >= 0 || op == opc.OP_SHIFT_LEFT -> 0 else -> -1 else {
-            ua := util.as_u64(a)
+            ^ua: util.as_u64(a)
             if op == opc.OP_SHIFT_LEFT -> ua = (ua << b) & U64_MASK else {
                 ua >>= b
                 if a < 0 -> ua |= (U64_MASK << (64 - b)) & U64_MASK
@@ -502,8 +502,8 @@ cmp_jumps: fn(op: Int, res: Int) -> Bool Never! {
 op_compare_jump: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i1: v.mem_base + r.p1
     i3: v.mem_base + r.p3
-    flags1 := v.mem[i1].flags
-    flags3 := v.mem[i3].flags
+    ^flags1: v.mem[i1].flags
+    ^flags3: v.mem[i3].flags
     if flags1 & flags3 & MEM_INT != 0 {
         x: v.mem[i3].i
         y: v.mem[i1].i
@@ -512,7 +512,7 @@ op_compare_jump: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
         r.i_compare = res
         return GO_NEXT
     }
-    res := 0
+    ^res: 0
     if (flags1 | flags3) & MEM_NULL != 0 {
         if r.p5 & conn.CMP_NULLEQ != 0 {
             if flags1 & flags3 & MEM_NULL != 0 && flags3 & MEM_CLEARED == 0 -> res = 0 else {
@@ -568,7 +568,7 @@ op_else_eq: fn(r: Run) -> Int Never! {
 // P3 columns under the KeyInfo P4, in the order of the OP_Permutation
 // before when P5 has OPFLAG_PERMUTE.
 op_compare: fn(v: conn.Vdbe, r: ^Run) -> Int Never! {
-    permute := [Int]{}
+    ^permute: [Int]{}
     use_permute: r.p5 & conn.OPFLAG_PERMUTE != 0
     if use_permute {
         if v.ops[r.pc - 1].p4 == .IntArray(ai) {
@@ -580,7 +580,7 @@ op_compare: fn(v: conn.Vdbe, r: ^Run) -> Int Never! {
     if v.ops[r.pc].p4 == .KeyInfo(info) {
         loop i in 0..<r.p3 {
             idx: if use_permute -> permute[i] else -> i
-            c := record.mem_compare(v.mem[p1 + idx], v.mem[p2 + idx], record.coll_of(info, i))
+            ^c: record.mem_compare(v.mem[p1 + idx], v.mem[p2 + idx], record.coll_of(info, i))
             r.i_compare = c
             if c != 0 {
                 sf: record.sort_flags_of(info, i)
@@ -705,7 +705,7 @@ IS_TYPE_MASKS: [16, 1, 1, 1, 1, 1, 1, 2, 1, 1, 16, 16]
 // P3 when P1 < 0) is one of the P5 bits (1 << (SQLITE_type - 1)); a column
 // past the parsed header has the type P4.
 op_is_type: fn(v: conn.Vdbe, r: Run) -> Int Never! {
-    mask := 0
+    ^mask: 0
     if r.p1 >= 0 {
         ci: v.csr_base + r.p1
         if r.p3 < v.csr[ci].n_hdr_parsed {
@@ -733,43 +733,43 @@ op_zero_or_null: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
 }
 
 #Test("arithmetic stays in integers until it overflows or divides by zero") {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     v.mem.push(base.mem_int(3))
     v.mem.push(base.mem_int(base.I64_MAX))
     v.mem.push(base.mem_null())
     v.ops.push(test_op(opc.OP_ADD, conn.P4.NotUsed))
     v.ops.push(test_op(opc.OP_DIVIDE, conn.P4.NotUsed))
     v.ops.push(test_op(opc.OP_REMAINDER, conn.P4.NotUsed))
-    add := test_run(v, 0, 0, 0, 2)
+    ^add: test_run(v, 0, 0, 0, 2)
     assert_eq(op_arith(v, add), GO_NEXT)
     assert(v.mem[2].flags & MEM_INT != 0 && v.mem[2].i == 6)
-    big := test_run(v, 0, 0, 1, 2)
+    ^big: test_run(v, 0, 0, 1, 2)
     _: op_arith(v, big)
     assert(v.mem[2].flags & MEM_REAL != 0)
     v.mem[0] = base.mem_int(0)
-    div := test_run(v, 1, 0, 1, 2)
+    ^div: test_run(v, 1, 0, 1, 2)
     _: op_arith(v, div)
     assert(v.mem[2].flags & MEM_NULL != 0)
     v.mem[0] = base.mem_int(-5)
     v.mem[1] = base.mem_int(17)
-    rem := test_run(v, 2, 0, 1, 2)
+    ^rem: test_run(v, 2, 0, 1, 2)
     _: op_arith(v, rem)
     assert(v.mem[2].flags & MEM_INT != 0 && v.mem[2].i == 2)
 }
 
 #Test("comparisons jump as vdbe.c's tables say and NULLs compare by P5") {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     v.mem.push(base.mem_int(1))
     v.mem.push(base.mem_int(2))
     v.mem.push(base.mem_null())
     v.ops.push(test_op(opc.OP_LT, conn.P4.NotUsed))
     v.ops.push(test_op(opc.OP_EQ, conn.P4.NotUsed))
-    lt := test_run(v, 0, 1, 0, 0)
+    ^lt: test_run(v, 0, 1, 0, 0)
     assert_eq(op_compare_jump(v, lt), GO_JUMP)
-    ge := test_run(v, 0, 0, 0, 1)
+    ^ge: test_run(v, 0, 0, 0, 1)
     assert_eq(op_compare_jump(v, ge), GO_NEXT)
     assert_eq(ge.i_compare, 1)
-    eq := test_run(v, 1, 2, 0, 2)
+    ^eq: test_run(v, 1, 2, 0, 2)
     assert_eq(op_compare_jump(v, eq), GO_NEXT)
     eq.p5 = conn.CMP_NULLEQ
     assert_eq(op_compare_jump(v, eq), GO_JUMP)
@@ -778,7 +778,7 @@ op_zero_or_null: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
 }
 
 #Test("AND and OR are three-valued and Gosub returns past itself") {
-    v := conn.vdbe_new()
+    ^v: conn.vdbe_new()
     v.mem.push(base.mem_int(0))
     v.mem.push(base.mem_null())
     v.mem.push(base.mem_null())
@@ -786,27 +786,27 @@ op_zero_or_null: fn(v: ^conn.Vdbe, r: Run) -> Int Never! {
     v.ops.push(test_op(opc.OP_OR, conn.P4.NotUsed))
     v.ops.push(test_op(opc.OP_GOSUB, conn.P4.NotUsed))
     v.ops.push(test_op(opc.OP_RETURN, conn.P4.NotUsed))
-    both := test_run(v, 0, 0, 1, 2)
+    ^both: test_run(v, 0, 0, 1, 2)
     _: op_and_or(v, both)
     assert(v.mem[2].flags & MEM_INT != 0 && v.mem[2].i == 0)
-    either := test_run(v, 1, 0, 1, 2)
+    ^either: test_run(v, 1, 0, 1, 2)
     _: op_and_or(v, either)
     assert(v.mem[2].flags & MEM_NULL != 0)
-    call := test_run(v, 2, 2, 0, 0)
+    ^call: test_run(v, 2, 2, 0, 0)
     assert_eq(op_gosub(v, call), GO_JUMP_CHECK)
-    back := test_run(v, 3, 2, 0, 0)
+    ^back: test_run(v, 3, 2, 0, 0)
     assert_eq(op_return(v, back), GO_NEXT)
     assert_eq(back.pc, 2)
 }
 
 #Test("concatenation renders numbers as text") {
-    db := conn.conn_new()
-    v := conn.vdbe_new()
+    ^db: conn.conn_new()
+    ^v: conn.vdbe_new()
     v.mem.push(base.mem_int(42))
     v.mem.push(base.mem_text("x".bytes(), base.UTF8))
     v.mem.push(base.mem_null())
     v.ops.push(test_op(opc.OP_CONCAT, conn.P4.NotUsed))
-    cat := test_run(v, 0, 0, 1, 2)
+    ^cat: test_run(v, 0, 0, 1, 2)
     assert_eq(op_concat(db, v, cat), GO_NEXT)
     assert(v.mem[2].flags & MEM_STR != 0 && v.mem[2].z == "x42".bytes())
     assert(v.mem[0].flags & MEM_STR == 0)

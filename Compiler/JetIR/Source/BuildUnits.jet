@@ -22,7 +22,7 @@ ir_unit_convert: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, argumen
     }
     parts: scale.split("/").to_list()
     if parts.len() != 2 -> return ir_fail_slot(b, span, "unit scale {scale}")
-    scaled := value
+    ^scaled: value
     one: Float{1.0}
     numerator: ir_unit_ratio_part(parts[0])
     if numerator != one -> scaled = ir_unit_float_op(m, b, IROp.Mul, scaled, numerator)
@@ -44,10 +44,10 @@ ir_unit_convert_checked: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type,
     row: ir_core_role_row(p, ir_unit_conversion_role(rounding != None)) ?? return ir_fail_slot(b, span, "unit conversion to {ir_type_name(ty)} without core.math")
     value: ir_expr(m, p, b, argument)
     if ir_failed(b) -> return -1
-    values := [Int]{value}
+    ^values: [Int]{value}
     values.push(ir_unit_const_text(m, b, scale))
     values.push(ir_unit_const_text(m, b, offset))
-    failure := "unit conversion is not exactly representable"
+    ^failure: "unit conversion is not exactly representable"
     if rounding == .Val(rounded) {
         int_row: ir_value_type(m, p, Type.Int) ?? return ir_type_fail(b, span, Type.Int)
         mode: if rounded.mode == {
@@ -94,8 +94,8 @@ ir_unit_float_op: fn(m: IRModule, b: ^IRBuilder, op: IROp, slot: Int, constant: 
 
 // One signed decimal side of a checked unit ratio.
 ir_unit_ratio_part: fn(text: String) -> Float Never! {
-    negative := false
-    total := Float{0.0}
+    ^negative: false
+    ^total: Float{0.0}
     loop byte in text.bytes() {
         code: Int{byte}
         if {
@@ -162,8 +162,8 @@ ir_unit_member_label: fn(p: IRProgram, name: String) -> String? Never! {
 // never Time's `ns` base member; an axis with no visible family is its
 // lowercase name.
 ir_quantity_label: fn(p: IRProgram, dimension: Dimension) -> String Never! {
-    numerator := [String]{}
-    denominator := [String]{}
+    ^numerator: [String]{}
+    ^denominator: [String]{}
     loop axis in dimension.axes {
         exponent: measure_signed_value(axis.exponent) ?? 0
         if exponent == 0 -> next
@@ -190,7 +190,7 @@ ir_unit_family_base: fn(p: IRProgram, family: String) -> String? Never! {
 
 // The rows of `types` that declare unit families.
 ir_unit_family_rows: fn(types: [TTypeDef]) -> [Int] Never! {
-    rows := [Int]{}
+    ^rows: [Int]{}
     loop (index, definition) in types {
         if definition.kind == .UnitFamily(_, _) -> rows.push(index)
     }

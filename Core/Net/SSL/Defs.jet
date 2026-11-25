@@ -1685,13 +1685,13 @@ SSLContext: struct {
 // Byte helpers.
 
 ssl_zeros: fn(n: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<n -> out.push(U8{0})
     out
 }
 
 ssl_bytes_of: fn(src: [U8], off: Int, len: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<len -> out.push(src[off + i])
     out
 }
@@ -1708,7 +1708,7 @@ ssl_move_within: fn(buf: ^[U8], doff: Int, soff: Int, len: Int) Never! {
         loop i in 0..<len -> buf[doff + i] = buf[soff + i]
         return
     }
-    i := len - 1
+    ^i: len - 1
     loop i >= 0 {
         buf[doff + i] = buf[soff + i]
         i -= 1

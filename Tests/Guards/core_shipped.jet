@@ -23,7 +23,7 @@ CORE_SHIPPED_ALWAYS: [String]{"prelude", "builtins"}
 
 // The Core package names, sorted.
 core_shipped_packages: fn() -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop child in
         (core_shipped_files.list_dir(CORE_SHIPPED_PACKAGES) ?? panic("list {CORE_SHIPPED_PACKAGES}: {err}")) {
         if child.name.starts_with(".") || !core_shipped_files.is_dir("{CORE_SHIPPED_PACKAGES}/{child.name}") {
@@ -56,7 +56,7 @@ core_shipped_scan: fn(path: String, found: ^[String]) {
 // The packages of `packages` that `text` names as `core.<package>`, each
 // once, in the order it first names them.
 core_shipped_named: fn(text: String, packages: [String]) -> [String] {
-    named := [String]{}
+    ^named: [String]{}
     pieces: text.split("core.").to_list()
     loop at in 1..<pieces.len() {
         before: pieces[at - 1].bytes()
@@ -65,7 +65,7 @@ core_shipped_named: fn(text: String, packages: [String]) -> [String] {
             next
         }
         after: pieces[at].bytes()
-        end := 0
+        ^end: 0
         loop end < after.len() && after[end] >= (U8{97}) && after[end] <= (U8{122}) -> end += 1
         if end == 0 || (end < after.len() && closed_list_ident_byte(after[end])) -> next
         word: policy_slice_raw(after, 0, end)
@@ -78,7 +78,7 @@ core_shipped_named: fn(text: String, packages: [String]) -> [String] {
 // that fewer than one in CORE_SHIPPED_SHARE of `programs` files names
 // (`counts`), but the ones that always ship.
 core_shipped_lowered: fn(counts: [String:Int], packages: [String], programs: Int) -> [String] {
-    lowered := [String]{}
+    ^lowered: [String]{}
     loop package in packages {
         if CORE_SHIPPED_ALWAYS.contains(package) -> next
         if (counts.get(package) ?? 0) * CORE_SHIPPED_SHARE < programs {
@@ -94,7 +94,7 @@ core_shipped_listed: fn(source: String) -> [String] {
     assert(parts.len() == 2, "{CORE_SHIPPED_LIST} must declare `{CORE_SHIPPED_LIST_OPENER}...}}` once")
     body: parts[1].split("}}").to_list()[0]
     quoted: body.split("\"").to_list()
-    listed := [String]{}
+    ^listed: [String]{}
     loop at in 0..<quoted.len() {
         if at % 2 == 1 -> listed.push(quoted[at].copy())
     }
@@ -104,7 +104,7 @@ core_shipped_listed: fn(source: String) -> [String] {
 // Each package the list and the rule disagree on, with the count that
 // decides it.
 core_shipped_problems: fn(listed: [String], lowered: [String], counts: [String:Int], programs: Int) -> [String] {
-    problems := [String]{}
+    ^problems: [String]{}
     loop package in lowered {
         if !listed.contains(package) {
             problems.push("core.{package}: {counts.get(package) ?? 0} of {programs} program files name it, fewer than one in {CORE_SHIPPED_SHARE}; add it to JET_CLI_CORE_LOWERED in {CORE_SHIPPED_LIST}")
@@ -124,10 +124,10 @@ core_shipped_problems: fn(listed: [String], lowered: [String], counts: [String:I
     loop always in CORE_SHIPPED_ALWAYS {
         assert(packages.contains(always), "{CORE_SHIPPED_PACKAGES} must hold the `{always}` folder")
     }
-    paths := [String]{}
+    ^paths: [String]{}
     loop root in CORE_SHIPPED_PROGRAMS -> core_shipped_scan(root, paths)
     assert(paths.len() > 0, "no program files under {CORE_SHIPPED_PROGRAMS}")
-    counts := [String:Int]{}
+    ^counts: [String:Int]{}
     loop path in paths {
         text: core_shipped_files.read(path) ?? panic("read {path}: {err}")
         loop package in core_shipped_named(text, packages) {

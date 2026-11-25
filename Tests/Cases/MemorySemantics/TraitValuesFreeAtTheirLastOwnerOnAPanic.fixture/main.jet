@@ -33,7 +33,7 @@ Worker: struct {
 make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{_context: s.copy(), n: n} }
 
 stop_with: fn(s: Shared<Context>) {
-    total := 0
+    ^total: 0
     loop i in 0..<5 {
         k: make(s, i)
         total += k.peek() + make(s, i).finish()
@@ -45,6 +45,6 @@ stop_with: fn(s: Shared<Context>) {
 }
 
 run: fn() {
-    s := Shared{Context{_id: 1}}
+    ^s: Shared{Context{_id: 1}}
     stop_with(s)
 }

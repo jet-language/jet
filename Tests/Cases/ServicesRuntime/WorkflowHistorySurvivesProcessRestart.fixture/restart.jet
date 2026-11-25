@@ -8,7 +8,7 @@ workflow_worker: fn() {}
 run: fn() {
     store_path: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
-    tree := services.tree("workflows")
+    ^tree: services.tree("workflows")
     store: services.state_store(store_path) ?? panic("state store")
     tree.set_state_event_log(store, "wf-events", 1, "reversible") ?? panic("state")
     tree.worker("worker", workflow_worker, capacity: 1) ?? panic("worker")

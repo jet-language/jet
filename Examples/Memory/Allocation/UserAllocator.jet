@@ -45,10 +45,10 @@ run: fn() {
     region: mem.Region.reserve(4096) ?? panic("reserve")
     base: region.address()
     print("region of {region.size()} bytes")
-    pool := FreeList{region: region, free: [mem.Block]{}}
+    ^pool: FreeList{region: region, free: [mem.Block]{}}
 
     a: pool.allocate(64, 16) ?? panic("a")
-    b := pool.allocate(64, 64) ?? panic("b")
+    ^b: pool.allocate(64, 64) ?? panic("b")
     print("a at {a.address() - base}, b at {b.address() - base}")
 
     pool.release(a)

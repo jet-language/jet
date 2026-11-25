@@ -38,7 +38,7 @@ EnvSubverb: enum {
 }
 
 cli_cmd_env: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     // One env command verifies each Hangar object once.
     store_arm_command_memo(verification)
     if parsed.positional.len() == 0 {
@@ -49,7 +49,7 @@ cli_cmd_env: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed
         return cli_cmd_env_project(verification, cache, theme, parsed)
     }
     // `jet env <name>` selects one `env.<name>` module.
-    routed := parsed
+    ^routed: parsed
     routed.flags.environment = Val(first)
     routed.positional = [String]{}
     cli_cmd_env_project(verification, cache, theme, routed)
@@ -68,7 +68,7 @@ cli_debug_duration: fn(duration: time.Duration) -> String Never! {
     whole: ns /% unit.divisor
     fraction: ns %% unit.divisor
     if fraction == 0 -> return "{whole}{unit.name}"
-    text := "{fraction}"
+    ^text: "{fraction}"
     loop text.len() < unit.digits -> text = "0{text}"
     loop text.ends_with("0") -> text = text.removesuffix("0")
     "{whole}.{text}{unit.name}"
@@ -112,11 +112,11 @@ cli_cmd_env_project: fn(verification: StoreVerification, cache: ^WorkspaceDeclar
     // hit has no work beyond reading the stamp and projecting the closure.
     timing: sys.get(ENV_JETPACK_TIMING) != None
     cli_env_timing_mark(timing, ready_started, "roots")
-    flags := parsed.flags
+    ^flags: parsed.flags
     // U16: `-p` needs no manifest at all; the "nothing to do" refusal
     // applies only when neither an env file nor ad-hoc packages exist.
     has_env_file: files.is_file(EnvFile.path_in(project_dir))
-    plan := RunPlan.empty(project_dir, cli_builtin_table())
+    ^plan: RunPlan.empty(project_dir, cli_builtin_table())
     if has_env_file || parsed.flags.packages.len() == 0 {
         plan = cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
     }
@@ -146,7 +146,7 @@ cli_cmd_env_project: fn(verification: StoreVerification, cache: ^WorkspaceDeclar
         .Val(receipt) -> cli_env_entry_matches_plan(receipt, plan)
         .None -> false
     }
-    warm := [VerifiedRealization]?{None}
+    ^warm: [VerifiedRealization]?{None}
     if !flags.prep && receipt_matches_plan {
         receipt: previous_receipt ?? panic("a matching receipt exists")
         warm = if store_reuse_verified_environment(verification, roots, receipt.stamp, project_dir, fingerprints.definition, receipt.packages, flags.local_nix_catalog != None) == {
@@ -167,7 +167,7 @@ cli_cmd_env_project: fn(verification: StoreVerification, cache: ^WorkspaceDeclar
     // An exact environment receipt reuses its checked leases directly.
     // Otherwise the same authenticated Store boundary as every package
     // consumer replays the locked Nix admissions and forwards their leases.
-    locked_nix_replayed := false
+    ^locked_nix_replayed: false
     if !warm_reused {
         locked_nix_replayed = cli_replay_locked_nix(verification, theme, roots, project_dir, plan.refs, plan.table, flags.offline, flags.local_nix_catalog != None, warm) ?? {
             theme.error_coded(
@@ -187,7 +187,7 @@ cli_cmd_env_project: fn(verification: StoreVerification, cache: ^WorkspaceDeclar
     }
     cli_env_timing_mark(timing, ready_started, "catalog-configured")
     composed: cli_compose_env_scoped_with_warm(verification, theme, roots, flags, plan, RealizeScope.Project, true, warm, !warm_reused) ?? return cli_exit_for(theme, err)
-    env := composed.env.move()
+    ^env: composed.env.move()
     stats: composed.stats
     hook: fingerprints.hook
     if hook == .Val(hook_hash) -> env.vars[ENV_HOOK_ACTIVE_HASH_VAR] = hook_hash
@@ -242,15 +242,15 @@ cli_replay_locked_nix: fn(verification: StoreVerification, theme: Theme, roots: 
         .None -> return Ok(false)
         .Err(error) -> return Err(CLIError.Other("project lock is invalid: {error.message()}"))
     }
-    nix_refs := [RefSpec]{}
+    ^nix_refs: [RefSpec]{}
     loop spec in refs {
         if provider_uses_nix_provider_for_project(spec, table, offline, roots.root, Val(project_dir)) {
             nix_refs.push(spec.copy())
         }
     }
     if nix_refs.len() == 0 -> return Ok(false)
-    locked := [RefSpec]{}
-    missing_real_nix := false
+    ^locked: [RefSpec]{}
+    ^missing_real_nix: false
     loop spec in nix_refs {
         pinned: if pkg_lock_locked_nix_package_strict(project_dir, spec.raw) == {
             .Val(_) -> true
@@ -276,7 +276,7 @@ cli_replay_locked_nix: fn(verification: StoreVerification, theme: Theme, roots: 
         nix_roots: Val(roots),
         allow_local_nix_catalog: local_nix_catalog,
     }
-    checked := [VerifiedRealization]{}
+    ^checked: [VerifiedRealization]{}
     loop spec in locked {
         realized: store_realize_verified(verification, roots, ctx, RealizeRequest.Package{spec: spec.copy(), table: table}) ?? {
             return Err(CLIError.Other("could not verify locked Nix admission for `{spec.raw}`: {err.message()}"))
@@ -286,13 +286,13 @@ cli_replay_locked_nix: fn(verification: StoreVerification, theme: Theme, roots: 
     // Replayed admissions replace the warm entries for the same reference;
     // the rest stay where they are.
     if warm == None -> warm = Val([VerifiedRealization]{})
-    if ^warm == .Val(existing) {
-        replaced := [String]{}
+    if warm.in_place() == .Val(existing) {
+        ^replaced: [String]{}
         loop replacement in checked -> replaced.push(replacement.metadata().reference)
-        index := 0
+        ^index: 0
         loop index < existing.len() {
             if replaced.contains(existing[index].metadata().reference) {
-                _ := existing.remove(index, .Slot)
+                ^_: existing.remove(index, .Slot)
             } else { index += 1 }
         }
         loop replacement in checked.move() -> existing.push(replacement)
@@ -324,7 +324,7 @@ cli_plan_needs_package_catalog: fn(plan: RunPlan) -> Bool Never! {
 // catalog-backed ref has a portable Nix record, discovery would only add an
 // unrelated catalog precondition before Store can replay the project CAS.
 cli_plan_has_complete_locked_catalog: fn(plan: RunPlan) -[FS]> Bool Never! {
-    found := false
+    ^found: false
     loop spec in plan.refs {
         if !cli_ref_needs_package_catalog(plan, spec) -> next
         found = true
@@ -411,13 +411,13 @@ cli_configure_project_catalog: fn(theme: Theme, roots: HangarRoots, project_dir:
 cli_cmd_env_test: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir: cli_project_env_root(cache, cli_current_dir())
     roots: pkg_resolve_roots()
-    plan := cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    ^plan: cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
     cli_apply_locked_channels(theme, project_dir, plan.table, parsed.flags) ?? return cli_exit_for(theme, err)
     if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) {
         return code
     }
     cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
-    env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    ^env: cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     entry: cli_find_project_entry(project_dir)
     cli_run_lifecycle_hooks_clean(verification, cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
     cli_run_lifecycle_hooks_clean(verification, cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.checks, "check") ?? return cli_exit_for(theme, err)
@@ -438,7 +438,7 @@ JETPACK_DEV_VERB: "__dev"
 // the trust gate, the declared-secret check, the `on_enter` hooks and every
 // enabled dev service reporting healthy.
 cli_cmd_dev: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     roots: pkg_resolve_roots()
     if roots.dev_mode -> theme.detail(theme.gray("user-owned hangar: using {roots.root}"))
     project_dir: cli_project_env_root(cache, cli_current_dir())
@@ -447,13 +447,13 @@ cli_cmd_dev: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed
         theme.error_coded("E1254", "this project has no `jet dev` entry", "`jet dev` runs the entry file's top-level `dev: fn()` if it defines one, else `run: fn()`; `{entry}` defines neither", "add `dev: fn() {{ … }}` (a custom dev command) or `run: fn() {{ … }}` (the default) to the entry file.")
         return EXIT_USAGE
     }
-    plan := cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    ^plan: cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
     cli_apply_locked_channels(theme, project_dir, plan.table, parsed.flags) ?? return cli_exit_for(theme, err)
     if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) {
         return code
     }
     cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
-    env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    ^env: cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     cli_run_lifecycle_hooks(verification, cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
     if plan.dev_services.len() > 0 {
         order: cli_services_order_or_report(theme, plan.dev_services, None, SERVICES_ORDER_FIX_DECLARE) ?? return EXIT_USAGE
@@ -464,7 +464,7 @@ cli_cmd_dev: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed
         }
     }
     theme.status("running {theme.bold(entry)}")
-    command := [String]{envmodel_find_jet_binary(), "dev", entry}
+    ^command: [String]{envmodel_find_jet_binary(), "dev", entry}
     if parsed.command == .Val(words) {
         loop word in words -> command.push(word.copy())
     }
@@ -515,7 +515,7 @@ cli_cmd_env_fetch_toolchain: fn(verification: StoreVerification, theme: Theme, p
 // `jet env sync`: show and optionally apply the complete managed-file plan.
 cli_cmd_env_sync: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir: cli_project_env_root(cache, cli_current_dir())
-    plan := cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    ^plan: cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
     cli_apply_locked_channels(theme, project_dir, plan.table, parsed.flags) ?? return cli_exit_for(theme, err)
     file_plan: env_files_plan(project_dir, plan.environment.files) ?? {
         theme.error("couldn't plan managed environment files", err.message(), "resolve the reported path or ownership conflict, then run `jet env sync` again.")
@@ -596,12 +596,12 @@ cli_enter_foreign_flake: fn(verification: StoreVerification, theme: Theme, proje
             "declare the effect explicitly in `env.*` if the project needs it",
         )
     }
-    plan := RunPlan.empty(cli_current_dir(), cli_builtin_table())
+    ^plan: RunPlan.empty(cli_current_dir(), cli_builtin_table())
     loop package in facts.packages {
         plan.refs.push(RefSpec{source: RefSource.Jetpack, package: package.copy(), raw: "{package}@{REF_SOURCE_JETPACK}"})
     }
     theme.status("entering native projection of foreign shell: {theme.bold(flake_path)}")
-    env := cli_compose_env(verification, theme, pkg_resolve_roots(), parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    ^env: cli_compose_env(verification, theme, pkg_resolve_roots(), parsed.flags, plan) ?? return cli_exit_for(theme, err)
     command: parsed.command ?? [String]{}
     if {
         command.len() > 0 && parsed.flags.pure -> env.run_clean_command(command)

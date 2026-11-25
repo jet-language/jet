@@ -8,7 +8,7 @@ CollectionStaticRow: struct {
 collection_static_try_bytes: fn() -> [U8] { List.try_with_capacity(1) }
 
 collection_static_bytes: fn() -> [U8] Never! {
-    values := collection_static_try_bytes() ?? panic("allocation failed")
+    ^values: collection_static_try_bytes() ?? panic("allocation failed")
     values.push(U8{7})
     values
 }
@@ -16,7 +16,7 @@ collection_static_bytes: fn() -> [U8] Never! {
 collection_static_try_strings: fn() -> [String] { List.try_new() }
 
 collection_static_strings: fn() -> [String] Never! {
-    values := collection_static_try_strings() ?? panic("allocation failed")
+    ^values: collection_static_try_strings() ?? panic("allocation failed")
     values.push("text")
     values
 }
@@ -24,7 +24,7 @@ collection_static_strings: fn() -> [String] Never! {
 collection_static_try_rows: fn() -> [CollectionStaticRow] { List.try_with_capacity(1) }
 
 collection_static_rows: fn() -> [CollectionStaticRow] Never! {
-    values := collection_static_try_rows() ?? panic("allocation failed")
+    ^values: collection_static_try_rows() ?? panic("allocation failed")
     values.push(CollectionStaticRow{value: 9})
     values
 }

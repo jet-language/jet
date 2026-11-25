@@ -28,7 +28,7 @@ ir_handle_type_without_tags: fn(ty: Type) -> Type Never! {
 ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type) -> IRHandleRoute? {
     if operation == {
         .DurationNew(unit, is_float) -> {
-            symbol := if is_float -> "jet_duration_from_float" else -> "jet_duration_from_int"
+            ^symbol: if is_float -> "jet_duration_from_float" else -> "jet_duration_from_int"
             return Val(ir_handle_h(symbol, [Bool]{false, false}))
         }
         .DataStreamNext -> return Val(ir_handle_h("jet_data_stream_next", [Bool]{true}))
@@ -58,8 +58,8 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type) -> IRHandle
         .ProcessStdoutRead -> return Val(ir_handle_h("jet_process_stdout_read", [Bool]{true, false}))
         .ProcessStderrRead -> return Val(ir_handle_h("jet_process_stderr_read", [Bool]{true, false}))
         .ReaderOver(owned) -> {
-            symbol := if owned -> "jet_reader_over_owned" else -> "jet_reader_over"
-            mask := if owned -> [Bool]{false, false} else -> [Bool]{true, false}
+            ^symbol: if owned -> "jet_reader_over_owned" else -> "jet_reader_over"
+            ^mask: if owned -> [Bool]{false, false} else -> [Bool]{true, false}
             return Val(ir_handle_h(symbol, mask))
         }
         .ReaderReadU8 -> return Val(ir_handle_h("jet_reader_read_u8", [Bool]{true}))

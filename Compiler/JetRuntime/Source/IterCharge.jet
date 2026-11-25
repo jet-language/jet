@@ -6,7 +6,7 @@
 // it would after the pull's locked section.
 #Export(c) jet_rt_iter_charge: fn() -> I64 {
     if (sync_load(wrapping(comptime_root + I64{8})) == I64{0}) { return I64{0} }
-    exhausted := false
+    ^exhausted: false
     sync_mutex_lock(comptime_root)
     if (sync_load(wrapping(comptime_root + I64{8})) != I64{0}) {
         remaining: sync_load(wrapping(comptime_root + I64{16}))

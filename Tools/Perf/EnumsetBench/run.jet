@@ -73,7 +73,7 @@ Arm: struct {
 // A file or command that fails ends the bench, as the original's raise does:
 // Jet propagates each failure implicitly.
 run: fn(args: Args) Err! {
-    sizes := [Int]{}
+    ^sizes: [Int]{}
     loop part in args.sizes.split(",") {
         sizes.push(Int.parse(part.trim()) ?? process.fail(1, "{PROGRAM}: ValueError: invalid literal for int() with base 10: '{part}'"))
     }
@@ -96,7 +96,7 @@ run: fn(args: Args) Err! {
     }
     version: sh(process.cmd([String]{bench.jet, "--version"}).cwd(root), 1800s)
     version_text: (if version.out != "" -> version.out else -> version.err).trim()
-    report := [{key: String, value: Dyn}]{
+    ^report: [{key: String, value: Dyn}]{
         {key: "card", value: Dyn.Int(3133)},
         {key: "finding", value: Dyn.Text("ENUM-F05")},
         {key: "commit", value: Dyn.Text(sh(process.cmd([String]{"git", "rev-parse", "HEAD"}).cwd(root), 1800s).out.trim())},
@@ -119,9 +119,9 @@ run: fn(args: Args) Err! {
         {key: "phases", value: Dyn.Array(PHASES.map(fn(phase) { Dyn.Text(phase.copy()) }))},  // copy: the report keeps its own
         {key: "win_rule", value: Dyn.Text("Jet/rust_native < 1.00 on every phase")},
     }
-    cells := [Dyn]{}
+    ^cells: [Dyn]{}
     loop k in sizes {
-        row := [Arm]{}
+        ^row: [Arm]{}
         loop arm in ARMS {
             cell: arm_cell(bench, arm, k)
             print("k={k} {arm}: {if cell.stdout == None -> "unavailable" else -> "measured"}")
@@ -200,8 +200,8 @@ arm_cell: fn(bench: Bench, arm: String, k: Int) -> Arm Err! {
 // first a warm-up, then once for its peak RSS and once under the allocation
 // counter.
 measure: fn(bench: Bench, binary: String, fields: [{key: String, value: Dyn}]) -> Arm Err! {
-    runs := [Ran]{}
-    timings := [[Int]]{}
+    ^runs: [Ran]{}
+    ^timings: [[Int]]{}
     loop _ in 0..<(bench.samples + 1) {
         ran: sh(process.cmd([String]{binary}), 900s)
         phases: (if ran.code == 0 -> phase_line(ran.err) else -> None) ?? return Ok(
@@ -222,8 +222,8 @@ measure: fn(bench: Bench, binary: String, fields: [{key: String, value: Dyn}]) -
     }
     kept: runs.slice(1, runs.len())
     first: kept[0].out.copy()  // copy: the stability check compares every run with it
-    phase_ns := [Int]{}
-    medians := [{key: String, value: Dyn}]{}
+    ^phase_ns: [Int]{}
+    ^medians: [{key: String, value: Dyn}]{}
     loop i in 0..<PHASES.len() {
         phase_ns.push(checked(Int{math.trunc(stats.median(timings.slice(1, timings.len()).map(fn(row) { Float.from_int(row[i]) })) ?? 0.0)}) ?? 0)
         medians.push({key: PHASES[i], value: Dyn.Int(phase_ns[i])})
@@ -251,16 +251,16 @@ measure: fn(bench: Bench, binary: String, fields: [{key: String, value: Dyn}]) -
 
 // The six phase timings from the last stderr line that names all of them.
 phase_line: fn(stderr: String) -> [Int]? {
-    lines := stderr.lines()
+    ^lines: stderr.lines()
     lines.reverse()
     loop line in lines {
-        fields := [String:String]{}
+        ^fields: [String:String]{}
         loop word in line.words().filter(fn(word) { word.contains("=") }) {
             fields[word.partition("=").head] = word.partition("=").tail
         }
         keys: fields.keys().to_list()
         if !PHASES.all(fn(phase) { keys.contains(phase) }) -> next
-        timings := [Int]{}
+        ^timings: [Int]{}
         loop phase in PHASES {
             timings.push(Int.parse(fields[phase]) ?? process.fail(1, "{PROGRAM}: ValueError: invalid literal for int() with base 10: '{fields[phase]}'"))
         }
@@ -279,8 +279,8 @@ allocations: fn(bench: Bench, binary: String) -> Dyn Err! {
     if ran.code != 0 || !files.is_file(count) {
         return Ok(Dyn.Object([{key: String, value: Dyn}]{{key: "status", value: status}, {key: "reason", value: Dyn.Text("counted run exit {ran.code}")}}))
     }
-    counted := [{key: String, value: Dyn}]{{key: "status", value: Dyn.Text("measured")}}
-    allocated := 0
+    ^counted: [{key: String, value: Dyn}]{{key: "status", value: Dyn.Text("measured")}}
+    ^allocated: 0
     loop pair in files.read(count).words() {
         number: Int.parse(pair.partition("=").tail) ?? process.fail(1, "{PROGRAM}: ValueError: invalid literal for int() with base 10: '{pair}'")
         if pair.partition("=").head == "allocations" -> allocated = number
@@ -296,19 +296,19 @@ allocations: fn(bench: Bench, binary: String) -> Dyn Err! {
 // measured reference first, with parity and per-phase ratios, then the rest
 // with parity unknown.
 compare: fn(row: [Arm]) -> [Dyn] {
-    compared := [Dyn]{}
-    unknown := [Dyn]{}
+    ^compared: [Dyn]{}
+    ^unknown: [Dyn]{}
     reference: row[0]
     loop cell in row {
-        fields := cell.fields.copy()  // copy: the parity keys extend the cell
+        ^fields: cell.fields.copy()  // copy: the parity keys extend the cell
         if cell.stdout == None || reference.stdout == None {
             fields.push({key: "parity", value: Dyn.Text("unknown")})
             unknown.push(Dyn.Object(fields))
             next
         }
         fields.push({key: "parity", value: Dyn.Text(if cell.stdout == reference.stdout -> "match" else -> "MISMATCH")})
-        ratios := [{key: String, value: Dyn}]{}
-        losing := [Dyn]{}
+        ^ratios: [{key: String, value: Dyn}]{}
+        ^losing: [Dyn]{}
         loop i in 0..<PHASES.len() {
             ratio: Float.from_int(cell.phase_ns[i]) / Float.from_int(max(1, reference.phase_ns[i]))
             ratios.push({key: PHASES[i], value: Dyn.Float(math.round_even(ratio * 1000.0) / 1000.0)})
@@ -323,8 +323,8 @@ compare: fn(row: [Arm]) -> [Dyn] {
 }
 
 jet_source: fn(arm: String, k: Int, rounds: Int) -> String {
-    names := [String]{}
-    members := [String]{}
+    ^names: [String]{}
+    ^members: [String]{}
     loop i in 0..<k {
         names.push("    C{i}")
         members.push("Case.C{i}")

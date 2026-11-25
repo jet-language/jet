@@ -141,7 +141,7 @@ EncodingCause: struct {
 
 /// The same location ladder used by the seed encoding error kernel.
 encoding_error_text: fn(format: String, kind: String, byte_offset: Int, line: Int?, column: Int?, path: String, reason: String) -> String Never! {
-    out := "{format} {kind} at byte {byte_offset}"
+    ^out: "{format} {kind} at byte {byte_offset}"
     if line == {
         Val(value) -> { out = "{out}, line {value}" }
         None -> {}
@@ -269,7 +269,7 @@ hex_value: fn(b: U8) -> Int? Never! {
 
 /// Lowercase hex of `bytes`. Allocates `2 * bytes.len()` ASCII bytes.
 bytes_to_hex: fn(bytes: [U8]) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in bytes {
         n: Int{b}
         out.push(hex_nibble(n /% 16))
@@ -284,8 +284,8 @@ hex_to_bytes: fn(text: String) -> [U8] HexError! {
     if raw.len() %% 2 != 0 {
         return Err(HexError{reason: "odd-length hex string; hex text encodes whole bytes, so the length must be even"})
     }
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < raw.len() {
         hi: hex_value(raw[i]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
         lo: hex_value(raw[i + 1]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
@@ -300,7 +300,7 @@ hex_to_bytes: fn(text: String) -> [U8] HexError! {
 // per line, under a head naming the `format`. They fail with it as an `Err`,
 // so a script's `run: fn()` passes it up as it is.
 priv __input_failure: fn(format: String, failures: [FieldError]) -> String Never! {
-    shown := "the input is not {format} that decodes as the expected records:"
+    ^shown: "the input is not {format} that decodes as the expected records:"
     loop failure in failures {
         at: if failure.path.is_empty() -> "" else -> "{failure.path}: "
         shown += "\n  {at}{failure.reason}"
@@ -362,8 +362,8 @@ impl Dyn.Decode {
 #Builtin.Role(.DecodeList) priv __decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
     if tree == {
         .Array(items) -> {
-            values := [Item]{}
-            failures := [FieldError]{}
+            ^values: [Item]{}
+            ^failures: [FieldError]{}
             loop (index, item) in items {
                 // `??` hands each decoded item over; a match would copy it out.
                 value: item.decode<Item>() ?? {
@@ -419,8 +419,8 @@ impl Dyn.Decode {
 #Builtin.Role(.DecodeMap) priv __decode_map: fn<Item: Decode>(tree: Dyn) -> [String:Item] [FieldError]! {
     if tree == {
         .Object(entries) -> {
-            values := [String:Item]{}
-            failures := [FieldError]{}
+            ^values: [String:Item]{}
+            ^failures: [FieldError]{}
             loop entry in entries {
                 if entry.value.decode<Item>() == {
                     .Ok(value) -> { values[entry.key] = value }
@@ -441,7 +441,8 @@ impl Dyn.Decode {
 // reads a record's members through it, and `capture` hands one whole value to
 // a type that decodes from a tree. Core-private; the compiler finds it by its
 // role.
-#Builtin.Role(.TypedDecodeSource) priv __DecodeSource: trait {
+#Builtin.Role(.TypedDecodeSource)
+priv __DecodeSource: trait {
     // Enters the Object at the cursor; false (nothing read) for any other value.
     begin_object: fn(^self) -> Bool Never!,
     // How many members the Object at the cursor has, read without moving the
@@ -492,9 +493,9 @@ priv __Decoding: struct {
             listed: reader.capture().decode<[Item]>() ?? return Err(err)
             return Ok(listed)
         }
-        values := [Item]{}
-        failures := [FieldError]{}
-        index := 0
+        ^values: [Item]{}
+        ^failures: [FieldError]{}
+        ^index: 0
         loop reader.next_item() {
             at: index
             index += 1
@@ -525,8 +526,8 @@ priv __Decoding: struct {
             mapped: reader.capture().decode<[String:Item]>() ?? return Err(err)
             return Ok(mapped)
         }
-        values := [String:Item]{}
-        failures := [FieldError]{}
+        ^values: [String:Item]{}
+        ^failures: [FieldError]{}
         loop reader.next_key() {
             key: reader.key_text()
             if __Decoding.read<Item, Source>(reader) == {
@@ -578,8 +579,8 @@ priv __DecodeTree: struct {
     }
 
     leave: fn(^self) Never! {
-        _ := self.open.pop()
-        _ := self.at.pop()
+        ^_: self.open.pop()
+        ^_: self.at.pop()
     }
 
     impl __DecodeSource {
@@ -601,9 +602,9 @@ priv __DecodeTree: struct {
             top: self.open.len() - 1
             if top < 0 -> return false
             position: self.at[top] + 1
-            found := false
-            key := ""
-            value := Dyn.Null
+            ^found: false
+            ^key: ""
+            ^value: Dyn.Null
             if self.open[top] == {
                 .Object(entries) -> {
                     if position < entries.len() {
@@ -641,8 +642,8 @@ priv __DecodeTree: struct {
             top: self.open.len() - 1
             if top < 0 -> return false
             position: self.at[top] + 1
-            found := false
-            value := Dyn.Null
+            ^found: false
+            ^value: Dyn.Null
             if self.open[top] == {
                 .Array(items) -> {
                     if position < items.len() {

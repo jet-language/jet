@@ -70,10 +70,10 @@ shape: fn(text: String, face: FontFace) -> GlyphRun Never! {
 }
 
 shape_fallback: fn(face: FontFace, text: String) -> GlyphRun {
-    glyphs := [Glyph]{}
-    advance := Float{0.0}
+    ^glyphs: [Glyph]{}
+    ^advance: Float{0.0}
     raw: text.bytes()
-    i := 0
+    ^i: 0
     loop i < raw.len() {
         pair: decode_cp(raw, i)
         width: glyph_advance(face, pair.cp)
@@ -116,8 +116,8 @@ decode_cp: fn(raw: [U8], i: Int) -> DecodePair {
     first: Int{raw[i]}
     if first < 128 -> return DecodePair{cp: first, next: i + 1}
 
-    width := 0
-    cp := 0
+    ^width: 0
+    ^cp: 0
     if first >= 194 && first <= 223 {
         width = 2
         cp = (first) & 31
@@ -142,7 +142,7 @@ decode_cp: fn(raw: [U8], i: Int) -> DecodePair {
         return DecodePair{cp: 65533, next: i + 1}
     }
 
-    k := 1
+    ^k: 1
     loop k < width {
         byte: Int{raw[i + k]}
         if byte < 128 || byte >= 192 -> return DecodePair{cp: 65533, next: i + 1}

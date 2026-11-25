@@ -9,13 +9,13 @@ use {
 }
 
 run: fn() {
-    body := reactive.signal("old")
-    mode := reactive.signal("dark")
-    settings := reactive.signal("closed")
-    backend := ui.tui_backend()
+    ^body: reactive.signal("old")
+    ^mode: reactive.signal("dark")
+    ^settings: reactive.signal("closed")
+    ^backend: ui.tui_backend()
     render_backend: backend.copy()
     ui.reactive_render(fn() {
-        rows := [UINode]{
+        ^rows: [UINode]{
             ui.text("JET NOTES"),
             ui.text("Meeting"),
             ui.node_role(body.get(), 30.0, 3.0, ui.aria_role_text_input()),

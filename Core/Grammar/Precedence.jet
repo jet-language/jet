@@ -28,7 +28,7 @@ report_empty_repeats: fn(work: ^GrammarWork) Never! {
 /// The literals a binary alternative's operator is: its element after the
 /// leading operand, a literal or a group of single literals.
 operator_literals: fn(work: GrammarWork, alt: Int) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     kids: work.tree.nodes[alt].children
     if kids.len() < 2 -> return out
     op: work.tree.nodes[kids[1]]
@@ -49,7 +49,7 @@ operator_literals: fn(work: GrammarWork, alt: Int) -> [String] Never! {
 /// A literal as one comparable text: a folded literal in lowercase.
 literal_key: fn(text: String, fold: Bool) -> String Never! {
     if !fold -> return text.copy()
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in text.bytes() {
         c: Int{b}
         if c >= 65 && c <= 90 -> out.push(U8{c + 32}) else -> out.push(b)
@@ -64,9 +64,9 @@ plan_precedence: fn(work: ^GrammarWork) Never! {
         rule: work.operators[o].rule
         name: work.tree.rules[rule].name
         ops: work.operators[o].operators.copy()
-        binary_literals := [[String]]{}
+        ^binary_literals: [[String]]{}
         loop op in ops {
-            literals := [String]{}
+            ^literals: [String]{}
             if op.kind == .Binary -> literals = operator_literals(work, op.alt)
             loop earlier in binary_literals {
                 loop literal in literals {
@@ -82,18 +82,16 @@ plan_precedence: fn(work: ^GrammarWork) Never! {
             last: kids.len() - 1
             loop k in 0..<kids.len() {
                 if !is_self(work, kids[k], rule) -> next
-                level := 0
-                if k == 0 && op.kind != .Prefix {
-                    level = -1
-                } else if k == last && op.kind == .Binary {
+                ^level: 0
+                if k == 0 && op.kind != .Prefix -> level = -1 else if k == last && op.kind == .Binary {
                     level = if op.right -> op.level else -> op.level + 1
-                } else if k == last && op.kind == .Prefix {
-                    level = op.level
-                } else if k > 0 && k < last && work.tree.nodes[kids[k - 1]].kind == .Literal && work.tree.nodes[kids[k + 1]].kind == .Literal {
+                } else if k == last && op.kind == .Prefix { level = op.level } else if k > 0 && k < last && work.tree.nodes[kids[k - 1]].kind == .Literal && work.tree.nodes[kids[k + 1]].kind == .Literal {
                     after: work.tree.nodes[kids[k + 1]]
                     key: literal_key(after.text, after.fold)
                     loop (j, other) in ops {
-                        if other.kind == .Binary && binary_literals[j].contains(key) && level == 0 -> level = other.level + 1
+                        if other.kind == .Binary && binary_literals[j].contains(key) && level == 0 {
+                            level = other.level + 1
+                        }
                     }
                 }
                 work.operators[o].operators[i].operands[k] = level

@@ -3,7 +3,7 @@
 // find stops at the first match, the others pull every item once.
 
 #Test("count_where counts the matching items of an Iter") {
-    pulled := 0
+    ^pulled: 0
     count: [Int]{1, 2, 3, 4}.lazy().map(fn(n) {
         pulled += 1
         n
@@ -14,7 +14,7 @@
 }
 
 #Test("find stops pulling at the first match") {
-    pulled := 0
+    ^pulled: 0
     found: [Int]{1, 2, 3, 4}.lazy().map(fn(n) {
         pulled += 1
         n
@@ -30,7 +30,7 @@
 }
 
 #Test("each lends every item of an Iter in order") {
-    seen := [String]{}
+    ^seen: [String]{}
     items: [String]{"a", "b", "c"}
     items.lazy().map(fn(s) { s.to_upper() }).each(fn(s) { seen.push(s.copy()) })
     assert_eq(seen, [String]{"A", "B", "C"})
@@ -44,7 +44,7 @@
 }
 
 #Test("max_by keeps the last of the longest items of an Iter") {
-    pulled := 0
+    ^pulled: 0
     longest: [String]{"bb", "a", "cc"}.lazy().map(fn(s) {
         pulled += 1
         s
@@ -74,7 +74,7 @@
 }
 
 #Test("indexed numbers the items of an Iter as they are pulled") {
-    pulled := 0
+    ^pulled: 0
     pairs: [String]{"x", "y", "z"}.lazy().map(fn(s) {
         pulled += 1
         s

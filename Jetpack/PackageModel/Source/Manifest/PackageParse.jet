@@ -75,8 +75,8 @@ InlinePackage: struct {
 impl ConfigFacts {
     parse: fn(text: String, origin: String) -> ConfigFacts PackageParseError! {
         stripped: pkg_strip_comments(text)
-        declared_name := String?{None}
-        body := stripped
+        ^declared_name: String?{None}
+        ^body: stripped
         if pkg_config_wrapper(stripped) == {
             .Val(wrapper) -> {
                 declared_name = Val(wrapper.key)
@@ -102,7 +102,7 @@ impl ConfigFacts {
 pkg_retired_record_head_spans: fn(text: String) -> [Span] Never! {
     lexed: pkg_manifest_lexed(text) ?? return [Span]{}
     tokens: lexed.tokens
-    spans := [Span]{}
+    ^spans: [Span]{}
     loop index in 1..<tokens.len() {
         if tokens[index - 1].kind == TOKEN_DOT && tokens[index].kind == TOKEN_LBRACE {
             spans.push(tokens[index - 1].span)
@@ -114,9 +114,9 @@ pkg_retired_record_head_spans: fn(text: String) -> [Span] Never! {
 // The compiler lexer's token stream without comments and EOF, retaining
 // its spelling/literal tables; None when the text has lexer diagnostics.
 pkg_manifest_lexed: fn(text: String) -> Lexed? Never! {
-    lexed := lex(text.bytes())
+    ^lexed: lex(text.bytes())
     if lexed.diagnostics.len() > 0 -> return None
-    tokens := [Token]{}
+    ^tokens: [Token]{}
     loop token in lexed.tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF {
             next
@@ -136,12 +136,12 @@ pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts
     if pkg_retired_record_head_spans(record).len() > 0 {
         return Err(PackageParseError.RetiredRecordHead)
     }
-    facts := PackageFacts.default()
+    ^facts: PackageFacts.default()
     facts.origin = origin
     facts.markers = markers
-    inline := [InlineConfigDecl]{}
-    inline_names := [String]{}
-    seen := [String]{}
+    ^inline: [InlineConfigDecl]{}
+    ^inline_names: [String]{}
+    ^seen: [String]{}
     loop entry in pkg_top_level_entries(pkg_strip_comments(record)) {
         if !config {
             if pkg_config_wrapper(entry) == .Val(wrapper) {
@@ -328,7 +328,7 @@ pkg_parse_package_policy: fn(body: String) -> PackagePolicy PackageParseError! {
 }
 
 pkg_parse_outputs: fn(value: String) -> [String:OutputFact] PackageParseError! {
-    outputs := [String:OutputFact]{}
+    ^outputs: [String:OutputFact]{}
     loop entry in pkg_record_entries(value, "outputs") {
         output: pkg_parse_output_value(entry.key, entry.value)
         if outputs.has_key(entry.key) {
@@ -344,9 +344,9 @@ pkg_parse_output_value: fn(key: String, raw: String) -> OutputFact PackageParseE
     kind_text: pkg_binder_trim_end_matches(pkg_trim_start_matches(head.trim(), "."), ".")
     kind: pkg_output_kind_parse(kind_text)
     raw_fields: pkg_named_entries_checked(pkg_record_body(raw, "output"), "outputs.{key}")
-    payload_fields := [String:OutputPayload]{}
+    ^payload_fields: [String:OutputPayload]{}
     loop field in raw_fields -> payload_fields[field.key] = pkg_parse_output_payload(field.value)
-    fields := [String:String]{}
+    ^fields: [String:String]{}
     loop field in raw_fields {
         name: field.key
         value: field.value
@@ -398,14 +398,14 @@ pkg_parse_output_payload: fn(input: String) -> OutputPayload PackageParseError! 
         return Ok(OutputPayload.String(pkg_scalar(value)))
     }
     if value.starts_with("[") && value.ends_with("]") {
-        items := [OutputPayload]{}
+        ^items: [OutputPayload]{}
         loop item in pkg_top_level_entries(pkg_binder_slice(value, 1, value.bytes().len() - 1)) {
             items.push(pkg_parse_output_payload(item))
         }
         return Ok(OutputPayload.Array(items))
     }
     if value.starts_with("{{") {
-        object := [String:OutputPayload]{}
+        ^object: [String:OutputPayload]{}
         loop entry in pkg_named_entries_checked(pkg_record_body(value, "output payload"), "output payload") {
             object[pkg_binder_trim_matches(entry.key, "\"")] = pkg_parse_output_payload(entry.value)
         }
@@ -424,8 +424,8 @@ pkg_is_float_literal: fn(value: String) -> Bool Never! {
     lower: pkg_ascii_lower(text)
     if lower == "inf" || lower == "infinity" || lower == "nan" -> return true
     raw: text.bytes()
-    index := 0
-    digits := 0
+    ^index: 0
+    ^digits: 0
     loop index < raw.len() && (Int{raw[index]}) >= 48 && (Int{raw[index]}) <= 57 {
         index += 1
         digits += 1
@@ -441,7 +441,7 @@ pkg_is_float_literal: fn(value: String) -> Bool Never! {
     if index < raw.len() && (Int{raw[index]} == 101 || Int{raw[index]} == 69) {
         index += 1
         if index < raw.len() && (Int{raw[index]} == 43 || Int{raw[index]} == 45) -> index += 1
-        exponent_digits := 0
+        ^exponent_digits: 0
         loop index < raw.len() && (Int{raw[index]}) >= 48 && (Int{raw[index]}) <= 57 {
             index += 1
             exponent_digits += 1
@@ -452,10 +452,10 @@ pkg_is_float_literal: fn(value: String) -> Bool Never! {
 }
 
 pkg_parse_environments: fn(value: String) -> [String:EnvironmentFact] PackageParseError! {
-    environments := [String:EnvironmentFact]{}
+    ^environments: [String:EnvironmentFact]{}
     loop entry in pkg_record_entries(value, "environments") {
         key: entry.key
-        fields := [String:String]{}
+        ^fields: [String:String]{}
         loop field in pkg_named_entries_checked(pkg_record_body(entry.value, "environment"), "environments.{key}") {
             if field.key == {
                 "name" | "tools" | "services" | "secrets" -> fields[field.key] = field.value
@@ -487,17 +487,17 @@ pkg_parse_environments: fn(value: String) -> [String:EnvironmentFact] PackagePar
 }
 
 pkg_parse_services: fn(value: String) -> [String:ServiceFact] PackageParseError! {
-    services := [String:ServiceFact]{}
+    ^services: [String:ServiceFact]{}
     loop entry in pkg_record_entries(value, "services") {
         key: entry.key
-        fields := [String:String]{}
+        ^fields: [String:String]{}
         loop field in pkg_named_entries_checked(pkg_record_body(entry.value, "service"), "services.{key}") {
             if !pkg_service_field_allowed(field.key) {
                 return Err(PackageParseError.UnknownField("services.{key}.{field.key}"))
             }
             fields[field.key] = field.value
         }
-        enable := false
+        ^enable: false
         if fields.get("enable") == .Val(raw) {
             if pkg_scalar(raw) == {
                 "true" -> enable = true
@@ -505,7 +505,7 @@ pkg_parse_services: fn(value: String) -> [String:ServiceFact] PackageParseError!
                 else -> return Err(PackageParseError.InvalidValue{field: "services.{key}.enable", value: raw})
             }
         }
-        ports := [Int]{}
+        ^ports: [Int]{}
         if fields.get("ports") == .Val(raw) {
             loop port in pkg_parse_list(raw) {
                 ports.push(pkg_parse_i64(port) ?? return Err(PackageParseError.InvalidValue{field: "services.{key}.ports", value: port}))
@@ -532,7 +532,7 @@ pkg_parse_members: fn(input: String) -> [MemberRef] PackageParseError! {
     if !value.starts_with("[") {
         return Err(PackageParseError.InvalidValue{field: "members", value: value})
     }
-    members := [MemberRef]{}
+    ^members: [MemberRef]{}
     loop path in pkg_parse_list(value) -> members.push(MemberRef.Path(path))
     Ok(members)
 }
@@ -556,7 +556,7 @@ pkg_service_field_allowed: fn(field: String) -> Bool Never! { PKG_SERVICE_FIELDS
 
 // `settings: { tls: Bool = true }` — a name, a Tier-0 type, and a default.
 pkg_parse_settings: fn(value: String) -> [String:SettingDecl] PackageParseError! {
-    out := [String:SettingDecl]{}
+    ^out: [String:SettingDecl]{}
     loop entry in pkg_record_entries(value, "settings") {
         key: pkg_binder_trim_matches(entry.key, "\"")
         parts: entry.value.split_once("=") ?? return Err(PackageParseError.InvalidValue{field: "settings.{key}", value: entry.value})
@@ -580,7 +580,7 @@ pkg_parse_settings: fn(value: String) -> [String:SettingDecl] PackageParseError!
 // quoted `<command>.<flag>` name, kept unquoted, and each value is kept as
 // written; the CLI reads and checks both against its flag registry.
 pkg_parse_command_settings: fn(value: String) -> [ManifestEntry] PackageParseError! {
-    out := [ManifestEntry]{}
+    ^out: [ManifestEntry]{}
     loop entry in pkg_record_entries(value, "commands") {
         quoted: entry.key.len() >= 2 && entry.key.starts_with("\"") && entry.key.ends_with("\"")
         if !quoted {
@@ -600,7 +600,7 @@ pkg_parse_command_settings: fn(value: String) -> [ManifestEntry] PackageParseErr
 // `app.Permission` enum, lowercased (pkg_purpose_key), named once, and each
 // value a non-empty quoted text, kept unquoted.
 pkg_parse_purposes: fn(value: String) -> [ManifestEntry] PackageParseError! {
-    out := [ManifestEntry]{}
+    ^out: [ManifestEntry]{}
     loop entry in pkg_record_entries(value, "purposes") {
         key: entry.key.trim()
         if !pkg_purpose_key(key) -> return Err(PackageParseError.UnknownField("purposes.{key}"))
@@ -632,8 +632,8 @@ pkg_purpose_key: fn(key: String) -> Bool {
 // table, lowest layer first, each layer a list of module names. A module is
 // listed in one layer only.
 pkg_parse_layers: fn(value: String) -> [ModuleLayer] PackageParseError! {
-    layers := [ModuleLayer]{}
-    listed := [String]{}
+    ^layers: [ModuleLayer]{}
+    ^listed: [String]{}
     loop entry in pkg_record_entries(value, "layers") {
         modules: pkg_parse_string_list(entry.value) ?? return Err(PackageParseError.InvalidValue{field: "layers.{entry.key}", value: entry.value})
         loop module_name in modules {
@@ -654,8 +654,8 @@ pkg_parse_layers: fn(value: String) -> [ModuleLayer] PackageParseError! {
 // directory): data only, whose one field is `commands:`, read as
 // pkg_parse_command_settings reads it. A file without it holds no settings.
 pkg_parse_user_settings: fn(text: String) -> [ManifestEntry] PackageParseError! {
-    out := [ManifestEntry]{}
-    seen := false
+    ^out: [ManifestEntry]{}
+    ^seen: false
     loop entry in pkg_top_level_entries(pkg_strip_comments(text)) {
         found: pkg_split_field(entry) ?? return Err(PackageParseError.MalformedField(entry))
         if found.key != "commands" -> return Err(PackageParseError.UnknownField(found.key))
@@ -672,8 +672,8 @@ pkg_parse_user_settings: fn(text: String) -> [ManifestEntry] PackageParseError! 
 // manifest unread, so a command's remembered flags apply (or are refused)
 // whatever else the manifest holds; none when it has no such block.
 pkg_package_command_settings: fn(text: String) -> [ManifestEntry] PackageParseError! {
-    out := [ManifestEntry]{}
-    seen := false
+    ^out: [ManifestEntry]{}
+    ^seen: false
     loop entry in pkg_top_level_entries(pkg_strip_comments(text)) {
         found: pkg_split_field(entry) ?? next
         if found.key != "commands" -> next
@@ -687,7 +687,7 @@ pkg_package_command_settings: fn(text: String) -> [ManifestEntry] PackageParseEr
 }
 
 pkg_parse_string_map: fn(field: String, value: String) -> [String:String] PackageParseError! {
-    map := [String:String]{}
+    ^map: [String:String]{}
     loop entry in pkg_record_entries(value, field) {
         key: pkg_binder_trim_matches(entry.key, "\"")
         text: pkg_scalar(entry.value)
@@ -705,7 +705,7 @@ pkg_parse_string_map: fn(field: String, value: String) -> [String:String] Packag
 // `package.jet`): its declared name and record body.
 pkg_config_wrapper: fn(text: String) -> ManifestEntry? PackageParseError! {
     split: pkg_split_package_binding(text) ?? return Ok(None)
-    value := split.right.trim()
+    ^value: split.right.trim()
     if !value.starts_with("Config") -> return Ok(None)
     name: split.left.trim()
     if name == "" -> return Err(PackageParseError.MalformedField(text.trim()))

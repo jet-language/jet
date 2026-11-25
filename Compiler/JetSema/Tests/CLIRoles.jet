@@ -5,7 +5,7 @@
 use jet_sema.[SEMA_CLI_ROLES, sema_cli_role_fillers, sema_cli_roles_called, sema_cli_roles_missing, sema_cli_roles_refusal]
 
 #Test("a role marker names the core.args function that fills it") {
-    roles := sema_cli_roles_called("sema_cli_call(\"CLIValue\") sema_cli_call(\"CLIArgv\")")
+    ^roles: sema_cli_roles_called("sema_cli_call(\"CLIValue\") sema_cli_call(\"CLIArgv\")")
     sema_cli_role_fillers("use {{\n    builtin: jet_builtins\n}}\n\n#Builtin.Role(.CLIValue) priv __cli_value: fn(parsed: CLIParsed, name: String) -> String? Never! {{\n    None\n}}\n\n#Builtin.Role(.CLIArgv) __cli_argv: fn() -[Exec.Args]> [String] Never! {{ rt.argv() }}\n\n#Builtin.Role(.CLIExit) __cli_exit: fn() -> Int {{ 1 }}\n\ncli_unmarked: fn() -> Int {{ 1 }}\n", roles)
     assert_eq(roles.len(), 2)
     assert_eq(roles[0].filler, "__cli_value")
@@ -28,7 +28,7 @@ use jet_sema.[SEMA_CLI_ROLES, sema_cli_role_fillers, sema_cli_roles_called, sema
 }
 
 #Test("a called role that no core.args function fills stops the build, naming the role") {
-    roles := sema_cli_roles_called("sema_cli_call(\"CLIValue\") sema_cli_call(\"CLIArgv\")")
+    ^roles: sema_cli_roles_called("sema_cli_call(\"CLIValue\") sema_cli_call(\"CLIArgv\")")
     sema_cli_role_fillers("#Builtin.Role(.CLIValue) priv __cli_value: fn() -> Int {{ 1 }}\n", roles)
     missing: sema_cli_roles_missing(roles)
     assert_eq(missing, "CLIArgv")

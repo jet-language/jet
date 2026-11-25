@@ -24,7 +24,7 @@ ModuleEvalScope: struct {
 
 // `expr` with every enclosing parenthesis removed.
 envmodel_unparen: fn(expr: Expr) -> Expr Never! {
-    current := expr
+    ^current: expr
     loop {
         if current == {
             .Paren(inner, _, _) -> current = inner
@@ -66,7 +66,7 @@ envmodel_unparen_record: fn(expr: Expr) -> Expr Never! {
 
 // The sibling field names `expr` reads, sorted and de-duplicated.
 envmodel_dependencies_for_expression: fn(expr: Expr, field_names: [String]) -> [String] Never! {
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     loop site in comptime_walk_identifiers(expr) {
         if field_names.contains(site.name) && !dependencies.contains(site.name) {
             dependencies.push(site.name)
@@ -79,7 +79,7 @@ envmodel_dependencies_for_expression: fn(expr: Expr, field_names: [String]) -> [
 // Insert into a key-ordered comptime map; false when the key was already
 // present, in which case the map is unchanged.
 envmodel_ct_map_insert: fn(entries: ^[CtMapEntry], key: CtKey, value: CtValue) -> Bool Never! {
-    index := 0
+    ^index: 0
     loop index < entries.len() {
         order: ast_comptime_key_compare(entries[index].key, key)
         if order == 0 -> return false

@@ -103,13 +103,13 @@ WebQuerySeed: struct {
 }
 
 new: fn(key: String, initial: WebQuerySeed) -> WebQuery Never! {
-    generation := initial.generation
+    ^generation: initial.generation
     if generation < 1 -> generation = 1
-    subscribers := initial.subscribers
+    ^subscribers: initial.subscribers
     if subscribers < 0 -> subscribers = 0
     if subscribers > C_MAX_QUERY_SUBSCRIBERS -> subscribers = C_MAX_QUERY_SUBSCRIBERS
-    status := WebQueryStatus.Fresh
-    error := ""
+    ^status: WebQueryStatus.Fresh
+    ^error: ""
     if !valid_key(key) || initial.data.len() > C_MAX_QUERY_PAYLOAD {
         status = WebQueryStatus.Error
         error = "invalid"
@@ -120,10 +120,10 @@ new: fn(key: String, initial: WebQuerySeed) -> WebQuery Never! {
 // A query entry for `key` holding `data`, or what `loader` returns when the
 // entry has a `url` to load from.
 load: fn<E>(key: String, data: String, url: String, loader: fn() -> String E!) -> WebQuery E! {
-    loaded := data
+    ^loaded: data
     if url.len() > 0 -> loaded = loader()
-    status := WebQueryStatus.Fresh
-    error := ""
+    ^status: WebQueryStatus.Fresh
+    ^error: ""
     if !valid_key(key) || loaded.len() > C_MAX_QUERY_PAYLOAD {
         status = WebQueryStatus.Error
         error = "invalid"
@@ -142,7 +142,7 @@ state: fn(q: WebQuery) -> WebQueryState Never! {
 state_signal: fn(q: WebQuery) -> String Never! { "{q.key}:{status_name(q.status)}:{q.generation}" }
 
 mutation_state: fn(q: WebQuery) -> WebMutationState Never! {
-    status := WebMutationStatus.Idle
+    ^status: WebMutationStatus.Idle
     if q.status == WebQueryStatus.Pending || q.status == WebQueryStatus.Fetching {
         status = WebMutationStatus.Pending
     }
@@ -157,8 +157,8 @@ mutation_signal: fn(q: WebQuery) -> String Never! { "{status_name(q.status)}:{q.
 
 // A stale entry for `key` with one watcher and no data yet.
 watch: fn(key: String) -> WebQuery Never! {
-    status := WebQueryStatus.Stale
-    error := ""
+    ^status: WebQueryStatus.Stale
+    ^error: ""
     if !valid_key(key) {
         status = WebQueryStatus.Error
         error = "invalid"
@@ -247,7 +247,7 @@ mutate: fn<E>(q: ^WebQuery, key: String, expected: String?, mutation: fn(String)
     }
     q.status = WebQueryStatus.Pending
     q.error = ""
-    next := mutation(q.data)
+    ^next: mutation(q.data)
     if next.len() > C_MAX_QUERY_PAYLOAD {
         q.status = WebQueryStatus.Error
         q.error = "payload"
@@ -330,7 +330,7 @@ valid_key: fn(key: String) -> Bool {
 }
 
 esc_json: fn(text: String) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     hex: "0123456789abcdef".bytes()
     loop b in text.bytes() {
         n: Int{b}

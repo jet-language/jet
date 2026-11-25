@@ -9,7 +9,7 @@
 // installs the capture as the host print's hook (Host.jet
 // host_print_capture_code): a program that never runs a test links no
 // capture.
-test_stack_key := I64{0}
+^test_stack_key: I64{0}
 
 // RuntimeLower resolves these checked function-address entries, never the bodies.
 rt_test_capture_abort_address: fn() -> I64 {
@@ -46,7 +46,7 @@ test_capture_state: fn() -> I64 {
 
 test_state_ensure: fn() -> I64 {
     jet_rt_test_capture_init()
-    state := test_capture_state()
+    ^state: test_capture_state()
     if (state == I64{0}) {
         state = jet_rt_alloc(I64{144}, I64{8})
         thread_zero(state, I64{144})
@@ -132,9 +132,9 @@ test_stop_assertion_take: fn() -> Bool {
 // its supplied state rather than looking up a cell that is already empty.
 #Export(c) jet_rt_test_capture_abort: fn(_closure: I64, state: I64) -> I64 {
     stack: wrapping(state + I64{8})
-    count := trap_word(stack)
+    ^count: trap_word(stack)
     data: trap_word(wrapping(stack + I64{16}))
-    current := trap_word(state)
+    ^current: trap_word(state)
     loop count > (I64{0}) {
         if (count < I64{2} || trap_word(wrapping(data + (count - I64{2}) * I64{8})) != I64{1}) {
             jet_rt_unreachable(I64{0}, I64{0})

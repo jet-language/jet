@@ -6,7 +6,7 @@ use {
 }
 
 shuffle_unit: fn() -[Rand]> {
-    values := [1, 2, 3]
+    ^values: [1, 2, 3]
     return random.shuffle(values)
 }
 
@@ -18,25 +18,25 @@ run: fn() -[IO, Rand, Time]> {
     print(random.bool())
     print(random.normal(0.0, 1.0) == random.normal(0.0, 1.0))
     print(random.exponential(2.0) >= 0.0)
-    items := ["red", "green", "blue"]
-    weights := [Float]{0.0, 1.0, 0.0}
+    ^items: ["red", "green", "blue"]
+    ^weights: [Float]{0.0, 1.0, 0.0}
     print(random.pick(items) ?? "none")
     print(random.weighted_pick(items, weights) ?? "none")
-    sample_items := [1, 2, 3]
+    ^sample_items: [1, 2, 3]
     print(random.sample(sample_items, 2))
-    shuffle_items := [1, 2, 3]
+    ^shuffle_items: [1, 2, 3]
     random.shuffle(shuffle_items)
     print("shuffle-unit-ok")
     print(shuffle_items[0])
     print(shuffle_items[1])
     print(shuffle_items[2])
     shuffle_unit()
-    split_rng := random.split(9)
+    ^split_rng: random.split(9)
     print(split_rng.float() >= 0.0)
     print(random.bytes(4).len())
 
-    rng := random.rng(99)
-    twin := random.rng(99)
+    ^rng: random.rng(99)
+    ^twin: random.rng(99)
     print(rng.int(1, 100) == twin.int(1, 100))
     print(rng.float() == twin.float())
     print(rng.float_range(1.0, 2.0) == twin.float_range(1.0, 2.0))
@@ -44,16 +44,16 @@ run: fn() -[IO, Rand, Time]> {
     print(rng.bool() == twin.bool())
     print(rng.normal(0.0, 1.0) == twin.normal(0.0, 1.0))
     print(rng.exponential(2.0) == twin.exponential(2.0))
-    rng_items := ["red", "green", "blue"]
-    twin_items := ["red", "green", "blue"]
+    ^rng_items: ["red", "green", "blue"]
+    ^twin_items: ["red", "green", "blue"]
     print((rng.pick(rng_items) ?? "none") == (twin.pick(twin_items) ?? "none"))
     print((rng.weighted_pick(rng_items, weights) ?? "none") == (twin.weighted_pick(twin_items, weights) ?? "none"))
     print(rng.sample(rng_items, 2) == twin.sample(twin_items, 2))
     rng.shuffle(rng_items)
     twin.shuffle(twin_items)
     print(rng_items == twin_items)
-    rng_float_items := [1.5, 2.5, 3.5]
-    twin_float_items := [1.5, 2.5, 3.5]
+    ^rng_float_items: [1.5, 2.5, 3.5]
+    ^twin_float_items: [1.5, 2.5, 3.5]
     print((rng.pick(rng_float_items) ?? -1.0) == (twin.pick(twin_float_items) ?? -1.0))
     print((rng.weighted_pick(rng_float_items, weights) ?? -1.0) == (twin.weighted_pick(twin_float_items, weights) ?? -1.0))
     print(rng.sample(rng_float_items, 2) == twin.sample(twin_float_items, 2))
@@ -61,8 +61,8 @@ run: fn() -[IO, Rand, Time]> {
     twin.shuffle(twin_float_items)
     print(rng_float_items == twin_float_items)
     print(rng.bytes(3) == twin.bytes(3))
-    child := rng.split()
-    twin_child := twin.split()
+    ^child: rng.split()
+    ^twin_child: twin.split()
     print(child.int(1, 100) == twin_child.int(1, 100))
 
     print(time.now().to_timestamp() >= 0)
@@ -70,7 +70,7 @@ run: fn() -[IO, Rand, Time]> {
     print(time.today().to_string().len() > 0)
     print(time.instant().elapsed_millis() >= 0)
     time.sleep(0ms)
-    stopwatch := time.start()
+    ^stopwatch: time.start()
     print(stopwatch.elapsed_millis() >= 0)
     print(date.today().to_string().len() > 0)
     print(time.now_utc().to_timestamp() > 0)

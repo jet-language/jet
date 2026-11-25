@@ -60,7 +60,7 @@ jet_eval_reflection_marker_value: fn(owner: String, args: [TComptimeValue]) -> J
             }
         }
         if jet_eval_reflection_marker_leaf(text) != wanted -> next
-        record := [TComptimeField]{}
+        ^record: [TComptimeField]{}
         written: jet_eval_compiler_value_field(marker_fields, "args") ?? TComptimeValue.List{values: [TComptimeValue]{}}
         if written == .List(arguments) {
             loop argument in arguments {
@@ -80,10 +80,10 @@ jet_eval_reflection_marker_value: fn(owner: String, args: [TComptimeValue]) -> J
                 }
             }
         }
-        at := 2
+        ^at: 2
         loop at + 1 < args.len() {
             if args[at] == .String(parameter) {
-                given := false
+                ^given: false
                 loop field in record {
                     if field.name == parameter -> given = true
                 }
@@ -173,7 +173,7 @@ jet_eval_reflection_marked_functions: fn(program: TComptimeValue, wanted: String
         }
     }
     leaf: jet_eval_reflection_marker_leaf(wanted)
-    marked := [TComptimeValue]{}
+    ^marked: [TComptimeValue]{}
     loop function in functions {
         function_fields: if {
             function == .Struct(_, values) -> values
@@ -224,7 +224,7 @@ jet_eval_reflection_calls_to: fn(program: TComptimeValue, wanted: String) -> TCo
             return None
         }
     }
-    heard := [TComptimeValue]{}
+    ^heard: [TComptimeValue]{}
     loop call in calls {
         call_fields: if {
             call == .Struct(_, values) -> values

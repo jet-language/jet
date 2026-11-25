@@ -13,8 +13,8 @@ run: fn() {
     path: "$JET_STATE_ROOT/dx3/area-gui/pkg/fs-smoke.txt"
     fs.write(path, "old") ?? panic("seed")
     loaded: fs.read(path) ?? panic("read")
-    body := reactive.signal(loaded)
-    backend := ui.tui_backend()
+    ^body: reactive.signal(loaded)
+    ^backend: ui.tui_backend()
     render_backend: backend.copy()
     ui.reactive_render(fn() {
         ui.mount(render_backend, ui.text(body.get()))

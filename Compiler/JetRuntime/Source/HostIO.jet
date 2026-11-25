@@ -31,9 +31,9 @@
     result: jet_rt_alloc(I64{56}, I64{8})
     // `value` borrows the complete error header; `result` exclusively owns 56
     // fresh bytes.
-    offset := I64{0}
+    ^offset: I64{0}
     loop offset < (I64{56}) {
-        word := rt_text_word(wrapping(value + offset))
+        ^word: rt_text_word(wrapping(value + offset))
         if (offset == I64{16} || offset == I64{40}) && word != (I64{0}) {
             word = jet_rt_string_clone(word)
         }
@@ -84,9 +84,9 @@ host_context_copy: fn(value: I64) -> I64 {
     result: jet_rt_alloc(I64{40}, I64{8})
     // `value` lends five initialized context words; `result` exclusively owns
     // its header and cloned nullable E4 children.
-    offset := I64{0}
+    ^offset: I64{0}
     loop offset < (I64{40}) {
-        word := rt_text_word(wrapping(value + offset))
+        ^word: rt_text_word(wrapping(value + offset))
         if ((offset == I64{8} || offset == I64{32}) && word != I64{0}) {
             word = jet_rt_string_clone(word)
         }
@@ -116,7 +116,7 @@ host_context_copy: fn(value: I64) -> I64 {
         host_record_index_refused()
         return I64{0}
     }
-    raw_code := I64{0}
+    ^raw_code: I64{0}
     if (os_code != I64{0}) {
         // The optional code box borrows one initialized exact-Int word.
         raw_code = jet_int_owned_to_i64(rt_text_word(os_code))
@@ -183,7 +183,7 @@ host_error_with_context: fn(context: I64, kind: I64) -> I64 {
     // `context` transfers its initialized five words and text owners into the
     // fresh error; only the context header is then freed.
     rt_text_store(value, kind)
-    offset := I64{0}
+    ^offset: I64{0}
     loop offset < (I64{40}) {
         rt_text_store(wrapping(value + I64{8} + offset), rt_text_word(wrapping(context + offset)))
         offset = wrapping(offset + I64{8})
@@ -211,7 +211,7 @@ host_error_with_context: fn(context: I64, kind: I64) -> I64 {
     // `value` exclusively owns seven initialized words; ResourceLimit has no
     // text children.
     rt_text_store(value, HOST_IO_KIND_RESOURCE_LIMIT)
-    offset := I64{8}
+    ^offset: I64{8}
     loop offset < (I64{56}) {
         rt_text_store(wrapping(value + offset), I64{0})
         offset = wrapping(offset + I64{8})

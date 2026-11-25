@@ -9,32 +9,32 @@ Guard: struct {
 hold: fn(g: ^^Guard) -> Int { g.tag.len() }
 
 run: fn() {
-    held := Guard{tag: "plain held"}
+    ^held: Guard{tag: "plain held"}
     held_task: task ^^held { 1 }
     print(held_task.join() ?? panic("plain held task failed"))
 
-    called := Guard{tag: "plain call"}
+    ^called: Guard{tag: "plain call"}
     called_task: task ^^called { hold(called) }
     print(called_task.join() ?? panic("plain call task failed"))
 
-    bound := Guard{tag: "plain binding"}
+    ^bound: Guard{tag: "plain binding"}
     bound_task: task ^^bound {
         mine: bound
         mine.tag.len()
     }
     print(bound_task.join() ?? panic("plain binding task failed"))
 
-    rebound := Guard{tag: "plain rebinding"}
+    ^rebound: Guard{tag: "plain rebinding"}
     rebound_task: task ^^rebound {
-        again := rebound
+        ^again: rebound
         again.tag.len()
     }
     print(rebound_task.join() ?? panic("plain rebinding task failed"))
 
-    group_held := Guard{tag: "group held"}
-    group_called := Guard{tag: "group call"}
-    group_bound := Guard{tag: "group binding"}
-    group_rebound := Guard{tag: "group rebinding"}
+    ^group_held: Guard{tag: "group held"}
+    ^group_called: Guard{tag: "group call"}
+    ^group_bound: Guard{tag: "group binding"}
+    ^group_rebound: Guard{tag: "group rebinding"}
     task.group moved {
         first: task ^^group_held { 1 }
         print(first.join() ?? panic("group held task failed"))
@@ -46,7 +46,7 @@ run: fn() {
         }
         print(third.join() ?? panic("group binding task failed"))
         fourth: task ^^group_rebound {
-            again := group_rebound
+            ^again: group_rebound
             again.tag.len()
         }
         print(fourth.join() ?? panic("group rebinding task failed"))

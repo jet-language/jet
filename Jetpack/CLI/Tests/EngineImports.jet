@@ -45,8 +45,8 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     insta.validate() ?? panic("lossless Cargo dev-dependency facts")
     assert(!plan.emit_pkg_jet().contains("insta:"))
     assert(engine_import_todo(plan, "Cargo.toml", "dev"))
-    cc_found := false
-    insta_found := false
+    ^cc_found: false
+    ^insta_found: false
     loop dep in plan.deps {
         if dep.name == "cc" -> cc_found = true
         if dep.name == "insta" && dep.dev -> insta_found = true
@@ -79,7 +79,7 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     loop entry in cases {
         facts: plan.provider_facts.get("{entry.name}@npm") ?? panic("unresolved npm facts")
         assert(facts.native_document.contains("web-app"))
-        matched := false
+        ^matched: false
         loop loss in facts.losses {
             if loss.source == "package.json.{entry.field}" -> matched = true
         }
@@ -93,7 +93,7 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     assert_eq(ProviderFacts.from_json(optional.to_json()) ?? panic("npm facts export"), optional)
     assert(engine_import_todo(plan, "package.json", "optional"))
     assert(engine_import_todo(plan, "package.json", "bundled"))
-    legacy_build := false
+    ^legacy_build: false
     loop todo in plan.todos {
         if todo.message.contains("legacy build action") -> legacy_build = true
     }
@@ -105,7 +105,7 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     plan: cli_import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n", "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+one\"\n[[package]]\nname = \"serde\"\nversion = \"1.0.201\"\nsource = \"registry+two\"\n")
     assert(!plan.emit_pkg_jet().contains("serde:"))
     facts: plan.provider_facts.get("serde@cargo") ?? panic("ambiguous Cargo facts")
-    matched := false
+    ^matched: false
     loop conflict in facts.conflicts {
         if conflict.key == "provider.selector.version" && conflict.source == "Cargo.lock" {
             matched = true
@@ -132,7 +132,7 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     assert(cargo.emit_pkg_jet().contains("serde: serde@cargo#version=1.0.200"))
     assert(cargo_facts.native_document.contains("Cargo.lock:"))
     assert(cargo_facts.facts.has_key("provider.cargo.lock.serde.checksum"))
-    kind_found := false
+    ^kind_found: false
     loop reference in cargo.provider_facts.keys() {
         facts: cargo.provider_facts.get(reference) ?? panic("provider facts key")
         if facts.facts.has_key("package.dependency_kind") -> kind_found = true

@@ -9,7 +9,7 @@ CARD_CITE_ROOT: "Tests"
 // Whether a line is a comment: after its indentation it starts with `//`,
 // `/*`, `* ` or `# `, or is a bare `#`. A `#Marker` line is code.
 card_cite_comment: fn(bytes: [U8]) -> Bool {
-    start := 0
+    ^start: 0
     loop {
         if start >= bytes.len() -> return false
         code: Int{bytes[start]}
@@ -31,7 +31,7 @@ card_cite_at: fn(bytes: [U8], start: Int) -> Bool {
             return false
         }
     }
-    end := start + 1
+    ^end: start + 1
     loop {
         if end >= bytes.len() || !s3_decision_is_digit(bytes[end]) -> break
         end += 1
@@ -78,7 +78,7 @@ card_cite_lines: fn(path: String, out: ^[String]) {
 #Test("tests_comments_cite_no_cards") {
     guards_enter_root()
     assert(card_cite_files.is_dir(CARD_CITE_ROOT), "the root {CARD_CITE_ROOT} must exist")
-    found := [String]{}
+    ^found: [String]{}
     card_cite_lines(CARD_CITE_ROOT, found)
     assert_eq(found.join("\n"), "")
     // The matcher sees a card in a `//`, `#`, `/*` and `*` comment, alone, in

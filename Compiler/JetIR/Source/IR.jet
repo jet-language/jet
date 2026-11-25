@@ -509,7 +509,7 @@ IRLoopProof: struct {
 // before the optimizer inlines any): where the loop is, the facts sema
 // recorded, and how it lowered.
 ir_loop_proof_rows: fn(m: IRModule) -> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop function in m.functions {
         loop proof in function.loop_proofs {
             facts: "aliasing-free {proof.no_aliasing}, no early exit {proof.no_early_exit}, effect-free {proof.effect_free}, independent {proof.independent}"
@@ -523,7 +523,7 @@ ir_loop_proof_rows: fn(m: IRModule) -> [String] Never! {
 // taken before the optimizer inlines any): a branch on a `timing: .Fixed`
 // value whose arms both run, the result chosen with a masked select.
 ir_masked_branch_rows: fn(m: IRModule) -> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop function in m.functions {
         loop line in function.masked {
             rows.push("masked {function.name} {function.source_file}:{line}: both arms run, the result is a masked select")
@@ -770,7 +770,9 @@ IRModule: struct {
 
 // The `host_literal_values` row of compile-time literal `key`, if `m` holds
 // it (ir_host_literal).
-ir_host_literal_row: fn(m: IRModule, key: String) -> Int? Never! { name_column_get(m.host_literals_keys, m.host_literals, key) }
+ir_host_literal_row: fn(m: IRModule, key: String) -> Int? Never! {
+    name_column_get(m.host_literals_keys, m.host_literals, key)
+}
 
 ir_module_new: fn() -> IRModule Never! {
     IRModule{types: [IRType]{}, type_keys: [String]{}, key_lists: [[Int]]{}, names: [String]{}, data: [[U8]]{}, data_relocs: [Int:[IRDataReloc]]{}, functions: [IRFunction]{}, entry: -1, layout_low: 0, member_lists: [[IRMember]]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, helper_messages: [String]{}}
@@ -778,9 +780,7 @@ ir_module_new: fn() -> IRModule Never! {
 
 // Whether `table` holds the compilation's rows (interner()), rather than
 // only interner_empty()'s row 0.
-ir_interner_live: fn(table: Interner) -> Bool Never! {
-    table.types.kind.len() > 1
-}
+ir_interner_live: fn(table: Interner) -> Bool Never! { table.types.kind.len() > 1 }
 
 // Interns `ty` directly into a standalone IRModule's interner (used by IR
 // unit tests and post-merge helpers that have no IRProgram), giving the
@@ -840,16 +840,16 @@ ir_module_row_identity: fn(m: IRModule, row: Int) -> String Never! {
 // the module's, with `m.type_delta` merged into it and `m.types` remapped.
 // A standalone program's empty interner leaves the module its own.
 ir_module_finalize_interner: fn(m: ^IRModule, base: ^^Interner) Never! {
-    if !ir_interner_live(base) -> return
+    if !ir_interner_live(base) {
+        return
+    }
     m.interner = [Interner]{base.move()}
     if m.type_delta.len() > 0 {
         if m.type_delta.pop() == .Val(delta) {
-            mut_delta := delta
+            ^mut_delta: delta
             if delta_has_rows(mut_delta) {
                 remap: interner_merge_delta(m.interner[0], mut_delta)
-                loop i in 0..<m.types.len() {
-                    m.types[i].ty = type_id_remap(m.types[i].ty, remap)
-                }
+                loop i in 0..<m.types.len() -> m.types[i].ty = type_id_remap(m.types[i].ty, remap)
             }
         }
     }
@@ -925,9 +925,9 @@ ir_intern_type: fn(m: ^IRModule, key: String, row: IRType) -> Int Never! {
             }
         }
     }
-    full := "{ir_kind_name(row.kind)}:{row.size}:{row.bits}:{row.signed}:{key}"
+    ^full: "{ir_kind_name(row.kind)}:{row.size}:{row.bits}:{row.signed}:{key}"
     full_hash: name_text_hash(full)
-    found := name_column_get_hashed(m.type_rows_keys, m.type_rows, full, full_hash) ?? -1
+    ^found: name_column_get_hashed(m.type_rows_keys, m.type_rows, full, full_hash) ?? -1
     if found < 0 {
         found = m.types.len()
         m.types.push(row.copy())
@@ -952,18 +952,18 @@ ir_row_key: fn(m: IRModule, row: Int) -> String Never! { m.type_keys[row].copy()
 // alike; ir_merge stops the build when two merged functions do.
 ir_hashed_function: fn(name: String, key: String, prefix: String, source_file: String, line: Int) -> IRFunction Never! {
     hash: stable_id("ir.symbol", key)
-    symbol := [U8]{}
+    ^symbol: [U8]{}
     symbol.try_reserve(prefix.len() + 16) ?? ()
     loop byte in prefix.bytes() -> symbol.push(byte)
     // Most significant nibble first: each rotate brings the next one down.
-    rest := hash
+    ^rest: hash
     loop _ in 0..<16 {
         rest = rest.rotate_left(4)
         nibble: Int{rest & U64{15}}
         symbol.push(if nibble < 10 -> U8{48 + nibble} else -> U8{87 + nibble})
     }
     // Valid UTF-8: `prefix`'s own bytes, then ASCII hex digits, so the lossy decode keeps every byte.
-    made := ir_function_new(name, key, String.from_bytes_lossy(symbol), source_file, line)
+    ^made: ir_function_new(name, key, String.from_bytes_lossy(symbol), source_file, line)
     made.symbol_hash = hash
     made
 }
@@ -1187,8 +1187,8 @@ ir_end: fn(f: ^IRFunction, line: Int) Never! {
 
 // The Br depth that reaches the open construct at instruction `target`.
 ir_depth: fn(f: IRFunction, target: Int) -> Int Never! {
-    depth := 0
-    index := f.open.len() - 1
+    ^depth: 0
+    ^index: f.open.len() - 1
     loop index >= 0 {
         if f.open[index] == target -> return depth
         depth += 1
@@ -1320,7 +1320,7 @@ ir_op_code: fn(op: IROp) -> Int Never! {
 // the function's content.
 ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
     result: if f.result >= 0 -> ir_type_name(ir_module_row_ty(m, f.result)) else -> "none"
-    lines := [String]{"fn {f.name} [{f.key}] params={f.param_count} result={result}"}
+    ^lines: [String]{"fn {f.name} [{f.key}] params={f.param_count} result={result}"}
     if f.asm == .Val(leaf) {
         code: loop byte in leaf.code -> "{byte}"
         regs: loop register in leaf.regs -> "{register}"
@@ -1337,19 +1337,19 @@ ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
         fixed: if f.slot_fixed[slot] -> " fixed" else -> ""
         lines.push("  s{slot} {kind} {name}: {ir_kind_name(ty.kind)}/{ty.size}{fixed}")
     }
-    depth := 1
+    ^depth: 1
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .End || op == .Else -> depth -= 1
-        pad := ""
+        ^pad: ""
         loop _ in 0..<depth -> pad = "{pad}  "
-        text := "{pad}{at}: {ir_op_name(op)}"
+        ^text: "{pad}{at}: {ir_op_name(op)}"
         if f.dst[at] >= 0 -> text = "{text} s{f.dst[at]} <-"
         if op == .CallRuntime -> text = "{text} {m.names[f.a[at]]}" else {
             text = "{text} {f.a[at]} {f.b[at]} {f.c[at]}"
         }
         if op == .Call || op == .CallRuntime || op == .CallIndirect {
-            operands := [String]{}
+            ^operands: [String]{}
             loop index in f.b[at]..<(f.b[at] + f.c[at]) -> operands.push("s{f.args[index]}")
             text = "{text} ({operands.join(", ")})"
         }

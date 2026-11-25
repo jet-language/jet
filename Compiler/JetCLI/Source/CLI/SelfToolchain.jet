@@ -20,8 +20,8 @@ CLI_PINNED_VERB_COUNT: #run effect_vocabulary_list_view_count("CLI/SelfToolchain
 
 jet_cli_self_toolchain: fn(json: Bool) -[FS, Env]> JetCLIPlan Never! {
     cwd: cli_files.cwd() ?? "."
-    cache := WorkspaceDeclarationCache.new()
-    root := String?{None}
+    ^cache: WorkspaceDeclarationCache.new()
+    ^root: String?{None}
     if jet_cli_find_package_root_checked(cache, cwd) == {
         .Ok(found) -> root = found
         .Err(error) -> return jet_cli_done("", diagnostic_render_all(JET_CLI_PACKAGE_FILE, "", [error.diagnostic], false), JET_DRIVER_EXIT_USER_ERROR)
@@ -42,7 +42,7 @@ jet_cli_pinned_toolchain: fn(cache: ^WorkspaceDeclarationCache, raw: [String], t
         .Val(path) -> if cli_files.is_dir(path) -> path else -> jet_cli_parent(path) ?? "."
         .None -> cli_files.cwd() ?? "."
     }
-    found := String?{None}
+    ^found: String?{None}
     if jet_cli_find_package_root_checked(cache, start) == {
         .Ok(value) -> found = value
         .Err(_) -> return None
@@ -60,10 +60,10 @@ jet_cli_pinned_toolchain: fn(cache: ^WorkspaceDeclarationCache, raw: [String], t
 // natively; its exit status is this run's (a signal-ended child exits 1).
 jet_cli_pinned_exec: fn(binary: String, channel: String, version: String, raw: [String], quiet: Bool) -> JetDriverVerbOutput {
     if !quiet -> jet_cli_write_notice("{trust_pin_handoff_line(channel, version, JET_VERSION)}\n")
-    command := [String]{binary}
+    ^command: [String]{binary}
     loop argument in raw -> command.push(argument.copy())
     receipt: cli_process.cmd(command).env(TOOLCHAIN_EXEC_MARKER_ENV, version).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return jet_cli_report_output("", "E2105", "couldn't exec the pinned toolchain `{binary}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
-    exit_code := receipt.code
+    ^exit_code: receipt.code
     if receipt.signal != None -> exit_code = JET_DRIVER_EXIT_USER_ERROR
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
 }

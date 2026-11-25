@@ -39,11 +39,11 @@ use {
 sema_stmt_ascii_case_ladder: fn(statements: [Stmt], index: Int, binding: Binding) -> Bool Never! {
     if binding.name == "" || binding.pattern != None || binding.is_comptime -> return false
     if index + 26 >= statements.len() -> return false
-    direction := 0
+    ^direction: 0
     loop offset in 0..<26 {
         pair: sema_stmt_ascii_replace(statements[index + offset + 1], binding.name) ?? return false
         // ASCII `A` is 65 and `a` is 97.
-        this_direction := 0
+        ^this_direction: 0
         if pair[0] == 65 + offset && pair[1] == 97 + offset -> this_direction = 1
         if pair[0] == 97 + offset && pair[1] == 65 + offset -> this_direction = 2
         if this_direction == 0 || (direction != 0 && direction != this_direction) -> return false
@@ -297,7 +297,7 @@ sema_stmt_empty_start_expr_use: fn(expr: Expr, name: String, kind: String, retur
             None
         }
         .Call(call, _) -> {
-            labeled := false
+            ^labeled: false
             loop (position, arg) in call.args {
                 if arg.label != None || arg.spread -> labeled = true
                 if sema_stmt_empty_start_name(arg.expr) == name {
@@ -345,7 +345,7 @@ sema_stmt_empty_start_report: fn(binding: Binding, statements: [Stmt], index: In
     }
     code: if kind == "none" -> "E0308" else -> "E0501"
     site: expr_span(binding.init)
-    reported := false
+    ^reported: false
     loop diagnostic in diagnostics {
         if diagnostic.code == code && (diagnostic.span ?? Span{start: -1, end: -1}) == site {
             reported = true
@@ -356,10 +356,10 @@ sema_stmt_empty_start_report: fn(binding: Binding, statements: [Stmt], index: In
     }
     found: sema_stmt_empty_start_use(statements, index + 1, binding.name, kind, return_type, tail_span, scopes) ?? return
     written: sema_stmt_empty_start_text(found.ty)
-    what := "an empty list needs a type"
+    ^what: "an empty list needs a type"
     if kind == "map" -> what = "an empty map needs a type"
     if kind == "none" -> what = "bare `None` needs a known optional type here"
-    use_text := "a later line"
+    ^use_text: "a later line"
     if sema_source_line_at(environment.source_segments, found.span) == .Val(line) {
         use_text = "line {line}"
     }
@@ -384,12 +384,12 @@ sema_stmt_lint_walk_filter: fn(var: String, collection: Expr, body: [Stmt], chec
     if body.len() == 0 || !sema_stmt_is_directory_filter(body[0], var) {
         return
     }
-    path_uses := 0
+    ^path_uses: 0
     loop index in 1..<body.len() {
         if sema_stmt_has_structural_control_flow(body[index]) {
             return
         }
-        facts := SemaStmtWalkFacts{path_uses: 0, path_bases: [Int]{}, variable_uses: [Int]{}, fallback_exit: false}
+        ^facts: SemaStmtWalkFacts{path_uses: 0, path_bases: [Int]{}, variable_uses: [Int]{}, fallback_exit: false}
         ast_visit_statement(check.environment.tables, body[index], fn(expression: ExprNode) { sema_stmt_note_walk_use(facts, var, ast_expr(check.environment.tables, expression)) }, true)
         if facts.fallback_exit {
             return
@@ -448,7 +448,7 @@ sema_stmt_int_listed: fn(values: [Int], wanted: Int) -> Bool Never! {
 // `core.files` import spelled `fs`: the span from `fs` through the walk
 // call's `)`.
 sema_stmt_direct_fs_walk: fn(collection: Expr, check: SemaBodyCheck) -> Span? {
-    expression := sema_registration_cli_without_parens(collection)
+    ^expression: sema_registration_cli_without_parens(collection)
     if expression == .OrFallback(value, _, _, _, _) {
         expression = sema_registration_cli_without_parens(value)
     }
@@ -522,7 +522,7 @@ sema_stmt_has_structural_control_flow: fn(statement: Stmt) -> Bool Never! {
 // miss falls through to the default return, so its check asks for no
 // `else` arm (E0003).
 sema_stmt_value_block_tail_lints: fn(statements: [Stmt], lint: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, tables: ^[Int], diagnostics: ^[Diagnostic]) {
-    tails := [ParserValueTail]{}
+    ^tails: [ParserValueTail]{}
     parser_value_tails(statements, ParserTailReach.Tables, [U8]{}, tails)
     loop tail in tails {
         if tail.kind == {

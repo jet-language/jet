@@ -19,7 +19,7 @@ fixture_run: fn() -> ProcessReceipt {
 }
 
 http_body_bytes: fn(byte: U8, n: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _i in 0..<n -> out.push(byte)
     out
 }
@@ -29,7 +29,7 @@ http_bounds_original: fn() {
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     peer: task {
         loop i in 0..<10 {
-            stream := net.tcp_accept(listener) ?? panic("accept")
+            ^stream: net.tcp_accept(listener) ?? panic("accept")
             _request: stream.read_bytes(4096, deadline: 5s) ?? panic("read")
             if i >= 8 {
                 bytes: files.read_bytes("case-{i}.response") ?? panic("response")
@@ -37,7 +37,7 @@ http_bounds_original: fn() {
             } else {
                 header: files.read_bytes("case-{i}.header") ?? panic("header")
                 net.tcp_write_all_bytes(stream, header) ?? panic("write header")
-                body := [U8]{}
+                ^body: [U8]{}
                 if i == 0 -> body = http_body_bytes(U8{97}, 8388608) else if i == 1 {
                     body = [U8]{255}
                 } else if i == 2 { body = "missing".bytes() } else if i == 3 {

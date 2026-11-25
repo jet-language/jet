@@ -4,8 +4,10 @@
 // the locked-memory limit (ENOMEM). The parent reaps the child's exit status
 // with waitpid, and a second wait finds no child (ECHILD). Nothing prints
 // before the fork, so the child holds no buffered output to repeat.
-use sys: core.sys
-use process: core.process
+use {
+    sys: core.sys
+    process: core.process
+}
 
 run: fn() {
     #Unsafe("fork a child that leads its own session, and reap it") {
@@ -21,7 +23,7 @@ run: fn() {
         status: sys.waitpid(child, 0) ?? panic("waitpid: {err}")
         print("child exit code {status / 256}, signal {status % 128}")
         if sys.wait() == {
-            .Err(error) -> print("wait again: {error}")
+            .Err(error) -> { print("wait again: {error}") }
             .Ok(reaped) -> print("wait again reaped {reaped}")
         }
     }

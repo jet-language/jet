@@ -135,7 +135,7 @@ sema_app_server_only_endpoint_check: fn(func: Func, graph: SemaRegistrationGraph
 sema_app_marker_arg_at: fn(marker: Marker, label: String, position: Int) -> Int? {
     loop (index, argument) in marker.args {
         if !(argument == .Expr(_)) -> next
-        chosen := index == position
+        ^chosen: index == position
         if index < marker.arg_labels.len() {
             if marker.arg_labels[index] == .Val(named) -> chosen = named.name == label
         }
@@ -202,9 +202,9 @@ sema_function_system_run: fn(func: Func, graph: SemaRegistrationGraph, module_id
 // String literal shows as `…`, and a labeled one keeps its label.
 sema_marker_written: fn(marker: Marker) -> String {
     if marker.args.len() == 0 -> return "#{marker.name}"
-    args := [String]{}
+    ^args: [String]{}
     loop (index, argument) in marker.args {
-        text := "…"
+        ^text: "…"
         if argument == .Expr(value) {
             if value == .Str(parts, _, _) {
                 if parts.len() == 1 {
@@ -246,7 +246,7 @@ sema_app_is_remote: fn(ty: Type, check: SemaBodyCheck) -> Bool {
 // The indices of the parameters of `method`, declared in module
 // `module_identity`, that take an `app.Upload`.
 sema_app_upload_params: fn(method: Func, graph: SemaRegistrationGraph, module_identity: ModuleID) -> [Int] {
-    found := [Int]{}
+    ^found: [Int]{}
     loop index in 1..<method.params.len() {
         param: sema_type_resolve_declared(graph, method.params[index].ty, module_identity)
         row: sema_type_resolve_nominal_row(graph, param, module_identity) ?? next
@@ -263,8 +263,8 @@ sema_app_upload_params: fn(method: Func, graph: SemaRegistrationGraph, module_id
 // and a name `S` does not declare is no method of the Remote (E0102).
 sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     graph: check.program.registration_graph
-    shown := "app.Remote<{type_name(service)}>"
-    declared := false
+    ^shown: "app.Remote<{type_name(service)}>"
+    ^declared: false
     if sema_type_resolve_nominal_row(graph, service, check.environment.module_identity) == .Val(row) {
         shown = "app.Remote<{graph.modules[row.module_index].nominals[row.row].symbol.name}>"
         service_module: graph.modules[row.module_index].module_identity
@@ -320,7 +320,7 @@ sema_call_app_endpoints: fn(alias: String, type_args: [Type], args: [CallArg], s
     row: sema_type_resolve_nominal_row(graph, service, check.environment.module_identity) ?? return sema_app_endpoints_no_service(callee, service, span, check.diagnostics)
     definition: sema_http_route_find_struct(check, service, check.environment.module_identity) ?? return sema_app_endpoints_no_service(callee, service, span, check.diagnostics)
     service_module: graph.modules[row.module_index].module_identity
-    names := [Expr]{}
+    ^names: [Expr]{}
     loop declaration in definition.methods {
         endpoint: loop marker in declaration.markers {
             if sema_app_endpoint_marker(marker, graph, service_module) {
@@ -392,7 +392,7 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
     start: method_span.start
     hidden: "__jet_app_remote_{start}"
     sema_scope_enter(check.scopes, check.state, "app.remote:{start}")
-    body := [TStmt]{}
+    ^body: [TStmt]{}
     remote: if {
         receiver == .Ident(written, _, _) -> "{written}"
         else -> "{hidden}"
@@ -404,8 +404,8 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
         }
         body.push(held)
     }
-    encoded := [Expr]{}
-    reads := [CallArg]{}
+    ^encoded: [Expr]{}
+    ^reads: [CallArg]{}
     loop index in 0..<args.len() {
         // A bare name is read where it stands (a read parameter cannot be
         // moved into a local); any other argument is bound once, as its
@@ -415,7 +415,7 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
             else -> "{hidden}_{index}"
         }
         if !(args[index].expr == .Ident(_, _, _)) {
-            binding := ast_binding(local_name, args[index].span, false, args[index].expr, None)
+            ^binding: ast_binding(local_name, args[index].span, false, args[index].expr, None)
             binding.ty = Val(sema_type_resolve_declared(graph, declaration.params[index + 1].ty, service_module))
             statement: sema_stmt_check_binding(binding, None, check) ?? {
                 sema_single_use_leave_scope(check)
@@ -474,7 +474,7 @@ sema_app_remote_fallible: fn(remote: String, hidden: String, wire: ^^[CallArg], 
     raise: sema_app_remote_method_call(failure_name, SEMA_APP_REMOTE_RAISE, [Type]{raised_ok}, [CallArg]{}, span)
     fail_body: [Stmt]{Stmt.Val{binding: ast_binding(raised_name, span, false, raise, None)}, Stmt.Expr{expr: Expr.Ok{value: sema_app_remote_ident(raised_name, span), span: span, id: AST_NODE_GENERATED}}}
     fail: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: failure_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: fail_body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
-    filled := wire.move()
+    ^filled: wire.move()
     filled.push(sema_http_mount_arg(fail, span))
     if ok == (Type.Named{name: "Unit"}) {
         return sema_app_remote_method_call(remote, SEMA_APP_REMOTE_WRITE, [Type]{failure}, filled, span)
@@ -531,7 +531,7 @@ sema_web_param_marker: fn(graph: SemaRegistrationGraph, key: String, name: Strin
 }
 
 sema_web_param_at: fn(function: Func, target: Span) -> Int? Never! {
-    start := function.name_span.end
+    ^start: function.name_span.end
     loop param_index in 0..<function.params.len() {
         if target.start >= start && target.end <= function.params[param_index].name_span.start {
             return Val(param_index)
@@ -569,7 +569,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
         check.diagnostics.push(sema_call_arity_diagnostic("mount", 2, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    prefix := ""
+    ^prefix: ""
     if args.len() == 2 {
         text: sema_http_route_constant_string(args[0].expr, check) ?? {
             check.diagnostics.push(sema_error("E2805", args[0].span, "app.mount prefix must be a static String", "a mounted struct's routes are fully checked while building, prefix included", "use a literal or compile-time String constant"))
@@ -580,7 +580,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     value_arg: args[args.len() - 1]
     call_frame: check.scopes.current
     sema_scope_enter(check.scopes, check.state, "http.mount:{span.start}")
-    body := [TStmt]{}
+    ^body: [TStmt]{}
     mux_name: "__jet_http_mount_mux_{span.start}"
     owner: sema_scope_local_owner_key(check.scopes)
     local_module: sema_scope_environment_module_text(check.environment.*, check.program.*)
@@ -596,7 +596,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
         ty: Val(receiver_value.ty),
         visibility: 0,
     }
-    _ := sema_scope_declare_local(check.scopes, mux_symbol, mux_key, false, AccessConvention.Read, None, false)
+    ^_: sema_scope_declare_local(check.scopes, mux_symbol, mux_key, false, AccessConvention.Read, None, false)
     sema_ownership_declare_binding(check.state, mux_symbol, false)
     mux_local: checked_symbol_local(mux_name, span, mux_id, receiver_value.ty)
     body.push(
@@ -611,7 +611,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     )
     value_name: "__jet_http_mount_value_{span.start}"
     binding: ast_binding(value_name, span, false, value_arg.expr, None)
-    checked_binding := sema_stmt_check_binding(binding, None, check)
+    ^checked_binding: sema_stmt_check_binding(binding, None, check)
     if checked_binding == .Val(statement) {
         body.push(statement)
         binding_index: sema_scope_resolve_index(check.scopes, value_name) ?? {
@@ -671,9 +671,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                         break
                     }
                     hook: sema_app_mount_webhook(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].symbol.name, definition.methods, method, method_module, marker, prefix, span, check)
-                    if hook == .Val(value) {
-                        body.push(TStmt.ExprStmt{value: value, span: span})
-                    }
+                    if hook == .Val(value) -> body.push(TStmt.ExprStmt{value: value, span: span})
                     break
                 }
                 // A schedule runs on its cron line once the App serves.
@@ -711,7 +709,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                         next
                     }
                     // `#Custom` takes its method token before the path.
-                    marked := [CallArg]{}
+                    ^marked: [CallArg]{}
                     loop mark_arg in marker.args {
                         if mark_arg == .Expr(mark_value) {
                             marked.push(sema_http_mount_arg(mark_value, expr_span(mark_value)))
@@ -732,17 +730,17 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                         }
                         marked[path_at] = sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{prefix}{path}"}}, span: marked[path_at].span, id: AST_NODE_GENERATED}, marked[path_at].span)
                     }
-                    params := [LambdaParam]{}
-                    call_args := [CallArg]{}
+                    ^params: [LambdaParam]{}
+                    ^call_args: [CallArg]{}
                     loop index in 1..<method.params.len() {
                         parameter_ty: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
                         params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None, convention: AccessConvention.Read})
-                        argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
+                        ^argument: sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
                         argument.convention = method.params[index].convention
                         call_args.push(argument)
                     }
                     invocation: Expr.MethodCall{receiver: Expr.Ident{name: value_name.copy(), span: span, id: AST_NODE_GENERATED}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
-                    meta := ast_empty_lambda_meta()
+                    ^meta: ast_empty_lambda_meta()
                     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
                     loop registered in nominal.methods {
                         if registered.declaration.name == method.name {
@@ -751,7 +749,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     }
                     // The marked method stands for the call `verb(path)`
                     // at its marker, which the receiver's rules hear.
-                    _ := sema_call_rules_hear_stand_in(receiver, receiver_value, verb, marker.span, marked, None, "mount{span.start}", call_frame, check)
+                    ^_: sema_call_rules_hear_stand_in(receiver, receiver_value, verb, marker.span, marked, None, "mount{span.start}", call_frame, check)
                     handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
                     marked.push(sema_http_mount_arg(handler, marker.span))
                     registration: sema_call_try_http_router(receiver, sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, marked, marker.span, None, check)
@@ -799,7 +797,7 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
     }
     address: "{prefix}/{method.name}"
     path: sema_call_http_static_tree_arg(sema_call_http_core_string(address, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: address}}, span: span, id: AST_NODE_GENERATED}, span))
-    limit := sema_app_endpoint_limit(marker, check) ?? return None
+    ^limit: sema_app_endpoint_limit(marker, check) ?? return None
     window: limit.pop() ?? {
         check.context.incomplete_reasons.push("an endpoint limit has no window")
         return None
@@ -845,7 +843,7 @@ sema_app_mount_upload: fn(mux: TExpr, value_name: String, service: String, metho
         check.diagnostics.push(sema_error("E2805", method.params[uploads[1]].name_span, "upload endpoint `{method.name}` takes {uploads.len()} `app.Upload`s", "an upload endpoint's request body is its one file", "take one `app.Upload`, and upload each other file in a call of its own"))
         return None
     }
-    check_at := -1
+    ^check_at: -1
     loop (index, candidate) in method.markers {
         if sema_app_marker_is(candidate, SEMA_APP_UPLOAD_CHECK_MARKER, graph, method_module) {
             check_at = index
@@ -862,7 +860,7 @@ sema_app_mount_upload: fn(mux: TExpr, value_name: String, service: String, metho
         check.diagnostics.push(sema_error("E2805", sema_app_marker_span(check_marker, name_at), "an upload check's method must be a static String", "an upload endpoint's check is found while building", "use a literal or compile-time String constant"))
         return None
     }
-    check_method_at := -1
+    ^check_method_at: -1
     loop (index, candidate) in methods {
         if candidate.name == check_name -> check_method_at = index
     }
@@ -888,7 +886,7 @@ sema_app_mount_upload: fn(mux: TExpr, value_name: String, service: String, metho
     run: Expr.MethodCall{receiver: sema_app_remote_ident(files_name, span), method: "run", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
     files: sema_app_mount_callback(files_name, [Stmt]{Stmt.Expr{expr: Expr.Ok{value: run, span: span, id: AST_NODE_GENERATED}}}, sema_app_mux_param_type(mux, "__remote_upload", 5, span, check) ?? return None, span, check) ?? return None
     answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, "__remote_upload", 6, span, check) ?? return None, span, check) ?? return None
-    limit := sema_app_endpoint_limit(marker, check) ?? return None
+    ^limit: sema_app_endpoint_limit(marker, check) ?? return None
     window: limit.pop() ?? {
         check.context.incomplete_reasons.push("an endpoint limit has no window")
         return None
@@ -957,8 +955,8 @@ sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, meth
     fields: sema_http_route_path_fields(address) ?? return None
     // The indices of the method's path parameters, in its order, and their
     // names joined by commas.
-    path_params := [Int]{}
-    joined := ""
+    ^path_params: [Int]{}
+    ^joined: ""
     loop index in 1..<method.params.len() {
         name: method.params[index].name
         in_path: loop field in fields {
@@ -1065,7 +1063,7 @@ sema_app_mount_job: fn(mux: TExpr, value_name: String, service: String, method: 
 // Why `text` is not a cron line, in the grammar the app module's scheduler
 // reads (`Every`); None when it is one.
 sema_app_cron_error: fn(text: String) -> String? {
-    fields := [String]{}
+    ^fields: [String]{}
     loop part in text.split(" ") {
         if part != "" -> fields.push(part)
     }
@@ -1100,7 +1098,7 @@ sema_app_cron_field_valid: fn(text: String, low: Int, high: Int) -> Bool {
         bounds: stepped[0].split("-").to_list()
         if bounds.len() > 2 -> return false
         first: sema_app_cron_number(bounds[0]) ?? return false
-        last := first
+        ^last: first
         if bounds.len() == 2 -> last = sema_app_cron_number(bounds[1]) ?? return false
         if first < low || last > high || first > last -> return false
     }
@@ -1128,11 +1126,11 @@ sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, metho
         return None
     }
     args_name: "__jet_http_webhook_key_{span.start}"
-    statements := [Stmt]{}
-    reads := [CallArg]{}
+    ^statements: [Stmt]{}
+    ^reads: [CallArg]{}
     loop index in 1..<key_method.params.len() {
         name: key_method.params[index].name
-        position := -1
+        ^position: -1
         loop (at, param_index) in path_params {
             if method.params[param_index].name == name -> position = at
         }
@@ -1154,7 +1152,7 @@ sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, metho
 // None, with the reason on `check`, when the App surface does not declare it.
 sema_app_mux_param_type: fn(mux: TExpr, name: String, index: Int, span: Span, check: ^SemaBodyCheck) -> Type? {
     graph: check.program.registration_graph
-    candidates := sema_expr_registration_method_candidates(graph, check.environment.module_identity, mux.ty, name, [Type]{}, [Type]{}, span, check.environment.*, check.program.*, check.diagnostics)
+    ^candidates: sema_expr_registration_method_candidates(graph, check.environment.module_identity, mux.ty, name, [Type]{}, [Type]{}, span, check.environment.*, check.program.*, check.diagnostics)
     candidate: candidates.pop() ?? {
         check.context.incomplete_reasons.push("App.{name} is not registered")
         return None
@@ -1181,8 +1179,8 @@ sema_app_mux_param_type: fn(mux: TExpr, name: String, index: Int, span: Span, ch
 sema_app_mount_answer: fn(value_name: String, method: Func, method_module: ModuleID, answer_type: Type, span: Span, check: ^SemaBodyCheck) -> TCallArg? {
     graph: check.program.registration_graph
     args_name: "__jet_http_mount_args_{span.start}"
-    statements := [Stmt]{}
-    reads := [CallArg]{}
+    ^statements: [Stmt]{}
+    ^reads: [CallArg]{}
     loop index in 1..<method.params.len() {
         local_name: "{args_name}_{index}"
         decoded: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__take", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{sema_type_resolve_declared(graph, method.params[index].ty, method_module)}, args: [CallArg]{sema_http_mount_arg(Expr.Int{value: index - 1, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span)}, id: AST_NODE_GENERATED}
@@ -1234,12 +1232,12 @@ sema_app_upload_check: fn(mux: TExpr, value_name: String, check_method: Func, me
         return None
     }
     args_name: "__jet_http_upload_check_{span.start}"
-    statements := [Stmt]{}
-    reads := [CallArg]{}
+    ^statements: [Stmt]{}
+    ^reads: [CallArg]{}
     loop index in 1..<check_method.params.len() {
         name: check_method.params[index].name
         // The call's arguments skip the Upload.
-        position := -1
+        ^position: -1
         loop param_index in 1..<method.params.len() {
             if param_index == upload_at || method.params[param_index].name != name -> next
             position = param_index - 1
@@ -1266,7 +1264,7 @@ sema_app_upload_check: fn(mux: TExpr, value_name: String, check_method: Func, me
 // the framework runs it on a request worker as one transaction.
 sema_app_mount_callback: fn(args_name: String, statements: [Stmt], callback_type: Type, span: Span, check: ^SemaBodyCheck) -> TCallArg? {
     handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: args_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: statements}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
-    callback_arg := sema_http_mount_arg(handler, span)
+    ^callback_arg: sema_http_mount_arg(handler, span)
     unbounded: if {
         callback_type == .Fn(params, ret, _, contract, metadata, provenance) -> Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
         else -> callback_type
@@ -1285,12 +1283,12 @@ SEMA_APP_LIMIT_WINDOW_NS: 60000000000
 // and its `per:` window in nanoseconds (`per.ns`), each checked as an Int.
 sema_app_endpoint_limit: fn(marker: Marker, check: ^SemaBodyCheck) -> [TCallArg]? {
     span: marker.span
-    calls := Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
-    window := Expr.Int{value: SEMA_APP_LIMIT_WINDOW_NS, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+    ^calls: Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+    ^window: Expr.Int{value: SEMA_APP_LIMIT_WINDOW_NS, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
     loop (index, argument) in marker.args {
         written: if argument == .Expr(value) -> value.copy() else -> next
         // The first argument is `limit:` and the rest `per:` unless labeled.
-        per := index != 0
+        ^per: index != 0
         if index < marker.arg_labels.len() {
             if marker.arg_labels[index] == .Val(named) {
                 if named.name != "limit" && named.name != "per" -> next
@@ -1301,7 +1299,7 @@ sema_app_endpoint_limit: fn(marker: Marker, check: ^SemaBodyCheck) -> [TCallArg]
             window = Expr.Field{base: written, member: "ns", span: expr_span(written), id: AST_NODE_GENERATED}
         } else { calls = written }
     }
-    args := [TCallArg]{}
+    ^args: [TCallArg]{}
     written: [Expr]{calls, window}
     loop expression in written {
         value: sema_check_expression(expression, Val(Type.Int), check) ?? return None
@@ -1313,7 +1311,7 @@ sema_app_endpoint_limit: fn(marker: Marker, check: ^SemaBodyCheck) -> [TCallArg]
 // A mount prefix as it leads each mounted path: no trailing slash, so `/api`
 // and `/api/` both mount `#Get("/orders")` at `/api/orders`.
 sema_http_mount_prefix: fn(text: String) -> String Never! {
-    end := text.len()
+    ^end: text.len()
     loop end > 0 && text.slice(end - 1, end) == "/" -> end -= 1
     text.slice(0, end)
 }
@@ -1362,14 +1360,14 @@ sema_http_unmounted_warnings: fn(graph: SemaRegistrationGraph, modules: [SemaGra
     // Only a route method can be unmounted: a program without one skips the
     // walk of every checked function body for mounts.
     if !sema_http_has_route_method(graph) -> return [Diagnostic]{}
-    mounted := [SymbolID]{}
+    ^mounted: [SymbolID]{}
     loop module_row in modules {
         identity: module_row.module_identity
         loop function in module_row.functions {
             sema_http_collect_mounted_body(function, graph, identity, mounted)
         }
     }
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop module_row_index in 0..<graph.modules.len() {
         diagnostic_start: diagnostics.len()
         loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {

@@ -35,7 +35,7 @@ is_digits: fn(text: String) -> Bool Never! {
 }
 
 digits_value: fn(text: String) -> Int Never! {
-    value := 0
+    ^value: 0
     loop byte in text.bytes() -> value = value * 10 + (Int{byte}) - 48
     value
 }
@@ -51,21 +51,21 @@ bytes_text: fn(bytes: [U8], from: Int, to: Int) -> String Never! {
 // around and between the two fields are skipped, the item keeps inner tabs.
 split_row: fn(line: [U8]) -> {weight: String, item: String} Never! {
     tab: U8{9}
-    start := 0
+    ^start: 0
     loop start < line.len() && line[start] == tab -> start += 1
-    at := start
+    ^at: start
     loop at < line.len() && line[at] != tab -> at += 1
     weight: bytes_text(line, start, at)
     loop at < line.len() && line[at] == tab -> at += 1
-    end := line.len()
+    ^end: line.len()
     loop end > at && line[end - 1] == tab -> end -= 1
     {weight: weight, item: bytes_text(line, at, end)}
 }
 
 parse_rows: fn(input: String) -> [WeightedRow] ShardError! {
-    rows := [WeightedRow]{}
+    ^rows: [WeightedRow]{}
     bytes: input.bytes()
-    line_start := 0
+    ^line_start: 0
     loop at in 0..<bytes.len() {
         if (Int{bytes[at]}) != 10 -> next
         fields: split_row(bytes[line_start..<at])
@@ -87,14 +87,14 @@ ShardPlan: struct {
 }
 
 assign: fn(rows: [WeightedRow], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
-    ordered := rows
+    ^ordered: rows
     ordered.sort_by(fn(left: WeightedRow, right: WeightedRow) { (right.weight <=> left.weight).then(left.item <=> right.item) })
-    loads := [Int]{}
+    ^loads: [Int]{}
     loop _ in 0..<shard_count -> loads.push(0)
-    selected := [String]{}
-    selected_seconds := 0
+    ^selected: [String]{}
+    ^selected_seconds: 0
     loop row in ordered {
-        lightest := 0
+        ^lightest: 0
         loop shard in 1..<shard_count {
             if loads[shard] < loads[lightest] -> lightest = shard
         }
@@ -104,18 +104,18 @@ assign: fn(rows: [WeightedRow], shard_index: Int, shard_count: Int, index_text: 
             selected_seconds += row.weight
         }
     }
-    heaviest := loads[0]
-    lightest_load := loads[0]
+    ^heaviest: loads[0]
+    ^lightest_load: loads[0]
     loop load in loads {
         if load > heaviest -> heaviest = load
         if load < lightest_load -> lightest_load = load
     }
-    spread := "n/a"
+    ^spread: "n/a"
     if lightest_load > 0 {
         hundredths: heaviest * 100 /% lightest_load
         spread = "{hundredths /% 100}.{two_digits(hundredths % 100)}x"
     }
-    load_words := [String]{}
+    ^load_words: [String]{}
     loop load in loads -> load_words.push("{load}")
     summary: "weighted-shards: shard {index_text}/{count_text} selected {selected.len()} of {rows.len()} items, predicted {selected_seconds}s (shard loads: {load_words.join(" ")}; spread {heaviest}s/{lightest_load}s = {spread})"
     ShardPlan{selected: selected, summary: summary}

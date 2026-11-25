@@ -55,9 +55,7 @@ deadline_save: fn(save: I64) {
 // delay counting as none. The binding lends the nanoseconds as their
 // exact-Int carrier, read saturated (Int.jet int_saturated): a delay beyond
 // I64 waits as long as I64.MAX does, one below it counts as none.
-#Export(c) jet_task_timeout_duration_ns: fn(nanos: I64) {
-    deadline_after_ns(int_saturated(nanos))
-}
+#Export(c) jet_task_timeout_duration_ns: fn(nanos: I64) { deadline_after_ns(int_saturated(nanos)) }
 
 // The deadline now plus `nanos`' whole milliseconds, if earlier than the
 // installed one; a negative delay counts as none.
@@ -100,15 +98,15 @@ deadline_parse_i64: fn(text: I64, out: I64) -> Bool {
     length: sync_load(wrapping(text + I64{8}))
     if (length == I64{0}) { return false }
     data: sync_load(text)
-    at := I64{0}
-    negative := false
+    ^at: I64{0}
+    ^negative: false
     first: trap_byte(data)
     if (first == I64{43} || first == I64{45}) {
         negative = first == I64{45}
         at = I64{1}
         if at == length -> return false
     }
-    value := I64{0}
+    ^value: I64{0}
     limit: if negative -> I64{-9223372036854775808} else -> I64{-9223372036854775807}
     loop at < length {
         byte: trap_byte(wrapping(data + at))
@@ -149,7 +147,7 @@ deadline_time_fixed: fn() -> Bool {
         key: scheduler_msg_replay()
         replay: rt_env_get(key)
         jet_rt_string_drop(key)
-        accepted := deadline_parse_i64(replay, value)
+        ^accepted: deadline_parse_i64(replay, value)
         jet_rt_string_drop(replay)
         if !accepted {
             epoch_key: scheduler_msg_epoch()
@@ -197,9 +195,7 @@ jet_deadline_remaining_ms: fn() -> I64 {
 // jet_deadline_remaining_ms reaches 0, not before it.
 deadline_remaining_ns: fn(deadline_ms: I64) -> I64 {
     world: world_current()
-    if (world != I64{0}) {
-        return deadline_ms_to_ns(deadline_until(deadline_ms, world_now(world)))
-    }
+    if (world != I64{0}) { return deadline_ms_to_ns(deadline_until(deadline_ms, world_now(world))) }
     if deadline_time_fixed() {
         return if (deadline_until(deadline_ms, sync_load(wrapping(time_host_root + I64{48}))) <= I64{0}) -> I64{0} else -> I64{9223372036854775807}
     }
@@ -221,7 +217,7 @@ scheduler_deadline_message: fn(wait_kind: I64) -> I64 {
 }
 
 scheduler_deliver_deadline: fn(wait_kind: I64) {
-    _ := scheduler_native_publish(scheduler_stop_new(I64{2}, scheduler_deadline_message(wait_kind)))
+    ^_: scheduler_native_publish(scheduler_stop_new(I64{2}, scheduler_deadline_message(wait_kind)))
 }
 
 scheduler_deadline_check: fn(wait_kind: I64) -> I64 {

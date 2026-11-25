@@ -140,8 +140,8 @@ NixIndexClient: struct {
         }
         target: manifest.manifest.target_for(key.revision, key.system) ?? return Err(NixIndexError.Invalid("manifest has no target for {key.channel}@{key.revision} on {key.system}"))
         cached: self.load_target(key, target)
-        compressed := [U8]{}
-        signature_bytes := [U8]{}
+        ^compressed: [U8]{}
+        ^signature_bytes: [U8]{}
         if cached == {
             .Val(pair) -> {
                 compressed = pair.compressed
@@ -243,7 +243,7 @@ NixIndexClient: struct {
         index_root: files.join(self.root, NIX_INDEX_LOCAL_INDEX_ROOT)
         nix_index_ensure_real_directory(index_root)
         entries: files.list_dir(index_root) ?? return Err(NixIndexError.Transport("read local index: {err}"))
-        revision := String?{None}
+        ^revision: String?{None}
         loop index in 0..<entries.len() {
             if index >= NIX_INDEX_MAX_LOCAL_REVISIONS {
                 return Err(NixIndexError.Invalid("local catalog has too many revisions"))
@@ -270,8 +270,8 @@ NixIndexClient: struct {
         path: files.join(self.root, NIX_INDEX_LOCAL_NATIVE_RECIPE_ROOT)
         if !nix_index_path_exists(path) -> return Ok(None)
         recipes: nix_index_parse_local_native_recipes(nix_index_read_regular(path, NIX_INDEX_MAX_NATIVE_RECIPE_BYTES))
-        name := package
-        requested := String?{None}
+        ^name: package
+        ^requested: String?{None}
         if package.split_once("#version=") == {
             .Val(parts) -> {
                 name = parts.before
@@ -292,7 +292,7 @@ NixIndexClient: struct {
             }
             .None -> {}
         }
-        matches := [NixNativeRecipe]{}
+        ^matches: [NixNativeRecipe]{}
         loop recipe in recipes {
             if recipe.name == name && (requested ?? recipe.version) == recipe.version {
                 matches.push(recipe)
@@ -314,8 +314,8 @@ NixIndexClient: struct {
         }
         nix_index_ensure_real_directory(target_dir)
         entries: files.list_dir(target_dir) ?? return Err(NixIndexError.Transport("read local unofficial nixpkgs catalog target directory {target_dir}: {err}"))
-        found_digest := String?{None}
-        found_document := NixIndexDocument?{None}
+        ^found_digest: String?{None}
+        ^found_document: NixIndexDocument?{None}
         loop entry in entries {
             info: files.stat(entry.path) ?? return Err(NixIndexError.Transport("inspect local catalog entry: {err}"))
             if info.is_symlink {
@@ -562,15 +562,15 @@ nix_index_parse_network_url: fn(url: String) -> {scheme: String, host: String, p
     if scheme != "http" && scheme != "https" {
         return Err(NixIndexError.Invalid("nix index URL must use HTTP or HTTPS"))
     }
-    authority := parts.after
+    ^authority: parts.after
     separators: [String]{"/", "?", "#"}
     loop separator in separators -> authority = authority.split(separator).to_list()[0]
     if authority == "" || authority.contains("@") {
         return Err(NixIndexError.Invalid("nix index URL authority is malformed"))
     }
     default_port: if scheme == "https" -> 443 else -> 80
-    host := ""
-    port := default_port
+    ^host: ""
+    ^port: default_port
     bracketed: authority.starts_with("[")
     if bracketed {
         inner: authority.removeprefix("[").split_once("]") ?? return Err(NixIndexError.Invalid("nix index IPv6 host is malformed"))
@@ -604,7 +604,7 @@ nix_index_parse_index_port: fn(text: String) -> Int NixIndexError! {
 nix_index_parse_decimal: fn(text: String) -> Int? Never! {
     digits: text.removeprefix("+").bytes()
     if digits.len() == 0 -> return None
-    value := 0
+    ^value: 0
     loop byte in digits {
         code: Int{byte}
         if !nixeval_is_ascii_digit(code) -> return None
@@ -650,7 +650,7 @@ nix_index_path_exists: fn(path: String) -[FS]> Bool NixIndexError! {
 // Every existing component of `path` must be a real directory; missing ones
 // are created one at a time.
 nix_index_ensure_real_directory: fn(path: String) -[FS]> NixIndexError! {
-    current := if path.starts_with("/") -> "/" else -> ""
+    ^current: if path.starts_with("/") -> "/" else -> ""
     segments: path.split("/").to_list()
     loop segment in segments {
         if segment == "" -> next
@@ -681,12 +681,12 @@ nix_index_read_regular: fn(path: String, limit: Int) -[FS]> [U8] NixIndexError! 
     if expected.size > limit {
         return Err(NixIndexError.Invalid("read {path}: file exceeds its read bound"))
     }
-    reader := files.open(path, links: .Refuse) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
+    ^reader: files.open(path, links: .Refuse) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
     opened: reader.stat() ?? return Err(NixIndexError.Transport("read {path}: {err}"))
     if !opened.is_file || opened.id != expected.id {
         return Err(NixIndexError.Transport("read {path}: file changed before reading"))
     }
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(65536) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
         if chunk.len() == 0 -> break
@@ -738,7 +738,7 @@ nix_index_write_atomic: fn(path: String, bytes: [U8], replace: Bool) -[FS, Env]>
 }
 
 nix_index_publish: fn(temporary: String, path: String, parent: String, bytes: [U8], replace: Bool) -[FS]> NixIndexError! {
-    out := files.create(temporary, if_exists: .Refuse, mode: 0o600, links: .Refuse) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
+    ^out: files.create(temporary, if_exists: .Refuse, mode: 0o600, links: .Refuse) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
     out.write_bytes(bytes) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
     out.fsync() ?? return Err(NixIndexError.Transport("write {path}: {err}"))
     if replace {

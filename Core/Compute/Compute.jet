@@ -62,7 +62,7 @@ full: fn(shape: [Int], value: Float) -> Tensor ComputeError! { filled(shape, val
 from_list: fn(values: [Float]) -> Tensor ComputeError! {
     if !all_finite(values) -> return Err(ComputeError.Arithmetic)
     shape: [Int]{values.len()}
-    _ := storage_len(shape)
+    ^_: storage_len(shape)
     Ok(Tensor{shape: shape, data: values.copy(), device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto", reason: "", transfer: "", node: -1})
 }
 
@@ -85,7 +85,7 @@ rank: fn(tensor: Tensor) -> Int Never! { tensor.shape.len() }
 // The element count, or 0 for a shape with a negative axis or a count past
 // the Int range.
 numel: fn(tensor: Tensor) -> Int Never! {
-    n := 1
+    ^n: 1
     loop dim in tensor.shape {
         if dim < 0 -> return 0
         if dim != 0 && n > INT_MAX /% dim -> return 0
@@ -114,20 +114,20 @@ to_list: fn(tensor: Tensor) -> [Float] Never! { tensor.data.copy() }
 // `tensor[range].copy()`: the window `values` (the `data` slabs `range`
 // selected) as an independent Tensor on the owner's device and profile.
 #Builtin.Role(.TensorWindowCopy) priv __window_copy: fn(tensor: Tensor, range: Range, values: [Float]) -> Tensor Never! {
-    shape := tensor.shape.copy()
+    ^shape: tensor.shape.copy()
     if shape.len() > 0 {
         slab: window_slab(shape)
         end: if range.contains(range.end) -> range.end + 1 else -> range.end
         shape[0] = if slab == 0 -> end - range.start else -> values.len() /% slab
     }
-    out := Tensor{shape: shape, data: values.copy(), device: tensor.device.copy(), numeric_profile: tensor.numeric_profile.copy(), requested: tensor.requested.copy(), reason: tensor.reason.copy(), transfer: tensor.transfer.copy(), node: -1}
+    ^out: Tensor{shape: shape, data: values.copy(), device: tensor.device.copy(), numeric_profile: tensor.numeric_profile.copy(), requested: tensor.requested.copy(), reason: tensor.reason.copy(), transfer: tensor.transfer.copy(), node: -1}
     if tensor.node >= 0 -> out.node = ad_record("window", [Tensor]{tensor.copy()}, 0)
     out
 }
 
 // The element count of one first-axis slab: the product of the inner axes.
 window_slab: fn(shape: [Int]) -> Int Never! {
-    slab := 1
+    ^slab: 1
     loop index in 1..<shape.len() -> slab *= shape[index]
     slab
 }
@@ -158,7 +158,7 @@ placement: fn(tensor: Tensor) -> String Never! {
 }
 
 get: fn(tensor: Tensor, index: [Int]) -> Float ComputeError! {
-    _ := checked(tensor)
+    ^_: checked(tensor)
     at: offset(tensor, index)
     Ok(tensor.data[at])
 }
@@ -168,16 +168,16 @@ set: fn(tensor: ^Tensor, index: [Int], value: Float) ComputeError! {
     if tensor.numeric_profile == PROFILE_F32 && !f32_exact(value) {
         return Err(ComputeError.Arithmetic)
     }
-    _ := checked(tensor)
+    ^_: checked(tensor)
     at: offset(tensor, index)
     tensor.data[at] = value
 }
 
 reshape: fn(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
-    _ := checked(tensor)
+    ^_: checked(tensor)
     n: storage_len(new_shape)
     if n != tensor.data.len() -> return Err(ComputeError.Shape)
-    out := like(tensor, new_shape.copy(), tensor.data.copy())
+    ^out: like(tensor, new_shape.copy(), tensor.data.copy())
     if tensor.node >= 0 -> out.node = ad_record("reshape", [Tensor]{tensor.copy()}, 0)
     Ok(out)
 }
@@ -185,23 +185,23 @@ reshape: fn(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
 broadcast_to: fn(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
     out: broadcast_shape(tensor.shape, new_shape)
     if out != new_shape -> return Err(ComputeError.Shape)
-    _ := checked(tensor)
+    ^_: checked(tensor)
     data: expand(tensor, new_shape)
-    result := like(tensor, new_shape.copy(), data)
+    ^result: like(tensor, new_shape.copy(), data)
     if tensor.node >= 0 -> result.node = ad_record("broadcast_to", [Tensor]{tensor.copy()}, 0)
     Ok(result)
 }
 
 transpose: fn(tensor: Tensor) -> Tensor ComputeError! {
-    _ := checked(tensor)
+    ^_: checked(tensor)
     if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     rows: tensor.shape[0]
     cols: tensor.shape[1]
-    data := [Float]{}
+    ^data: [Float]{}
     loop col in 0..<cols {
         loop row in 0..<rows -> data.push(tensor.data[row * cols + col])
     }
-    out := like(tensor, [Int]{cols, rows}, data)
+    ^out: like(tensor, [Int]{cols, rows}, data)
     if tensor.node >= 0 -> out.node = ad_record("transpose", [Tensor]{tensor.copy()}, 0)
     Ok(out)
 }
@@ -209,11 +209,11 @@ transpose: fn(tensor: Tensor) -> Tensor ComputeError! {
 // Sum over `axis`; the result drops that axis, and a rank-one input sums to
 // shape [1].
 sum_axis: fn(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
-    _ := checked(tensor)
+    ^_: checked(tensor)
     if axis < 0 || axis >= tensor.shape.len() -> return Err(ComputeError.OutOfBounds)
-    out_shape := [Int]{}
-    outer := 1
-    inner := 1
+    ^out_shape: [Int]{}
+    ^outer: 1
+    ^inner: 1
     loop (index, dim) in tensor.shape {
         if index == axis -> next
         out_shape.push(dim)
@@ -226,8 +226,8 @@ sum_axis: fn(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
     // input is read once in storage order. The input is finite, so a sum
     // that is not stays so through every later addition: one test of the
     // totals finds it.
-    data := [Float]{}
-    next := 0
+    ^data: [Float]{}
+    ^next: 0
     loop _ in 0..<outer {
         start: data.len()
         loop _ in 0..<inner -> data.push(Float{0.0})
@@ -240,7 +240,7 @@ sum_axis: fn(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
         }
     }
     if !all_finite(data) -> return Err(ComputeError.Arithmetic)
-    out := like(tensor, out_shape, data)
+    ^out: like(tensor, out_shape, data)
     if tensor.node >= 0 -> out.node = ad_record("sum_axis", [Tensor]{tensor.copy()}, axis)
     Ok(out)
 }
@@ -249,9 +249,9 @@ sum_axis: fn(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
 // total that is not stays so: one test after the loop finds it and returns
 // ComputeError.Arithmetic.
 sum: fn(tensor: Tensor) -> Float ComputeError! {
-    _ := checked(tensor)
+    ^_: checked(tensor)
     f32: tensor.numeric_profile == PROFILE_F32
-    total := Float{0.0}
+    ^total: Float{0.0}
     loop value in tensor.data {
         added: total + value
         total = if f32 -> narrow(added, true) else -> added
@@ -284,20 +284,20 @@ sqrt: fn(tensor: Tensor) -> Tensor ComputeError! { ad_unary("sqrt", tensor) }
 
 matmul: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     if a.shape.len() != 2 || b.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
-    _ := checked(a)
-    _ := checked(b)
+    ^_: checked(a)
+    ^_: checked(b)
     same_contract(a, b)
     rows: a.shape[0]
     inner: a.shape[1]
     cols: b.shape[1]
     if inner != b.shape[0] -> return Err(ComputeError.RankMismatch)
     out_shape: [Int]{rows, cols}
-    _ := storage_len(out_shape)
+    ^_: storage_len(out_shape)
     f32: a.numeric_profile == PROFILE_F32
-    data := [Float]{}
+    ^data: [Float]{}
     loop i in 0..<rows {
         loop j in 0..<cols {
-            sum := Float{0.0}
+            ^sum: Float{0.0}
             loop t in 0..<inner {
                 product: a.data[i * inner + t] * b.data[t * cols + j]
                 sum = if f32 -> narrow(narrow(product, true) + sum, true) else -> sum + product
@@ -306,7 +306,7 @@ matmul: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
             data.push(sum)
         }
     }
-    out := like(a, out_shape.copy(), data)
+    ^out: like(a, out_shape.copy(), data)
     if a.node >= 0 || b.node >= 0 -> out.node = ad_record("matmul", [Tensor]{a.copy(), b.copy()}, 0)
     Ok(out)
 }
@@ -323,27 +323,27 @@ TILE: 8
 
 matmul_f32_tile: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     if a.shape.len() != 2 || b.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
-    _ := checked(a)
-    _ := checked(b)
+    ^_: checked(a)
+    ^_: checked(b)
     rows: a.shape[0]
     inner: a.shape[1]
     cols: b.shape[1]
     if inner != b.shape[0] -> return Err(ComputeError.RankMismatch)
     out_shape: [Int]{rows, cols}
-    _ := storage_len(out_shape)
-    left := [Float]{}
+    ^_: storage_len(out_shape)
+    ^left: [Float]{}
     loop value in a.data -> left.push(narrow(value, true))
-    packed := [Float]{}
+    ^packed: [Float]{}
     loop column in 0..<cols {
         loop row in 0..<inner -> packed.push(narrow(b.data[row * cols + column], true))
     }
     lanes: simd_lanes()
-    data := [Float]{}
+    ^data: [Float]{}
     loop _ in 0..<rows * cols -> data.push(0.0)
-    row_tile := 0
+    ^row_tile: 0
     loop row_tile < rows {
         row_end: if row_tile + TILE < rows -> row_tile + TILE else -> rows
-        column_tile := 0
+        ^column_tile: 0
         loop column_tile < cols {
             column_end: if column_tile + TILE < cols -> column_tile + TILE else -> cols
             loop row in row_tile..<row_end {
@@ -355,7 +355,7 @@ matmul_f32_tile: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
         }
         row_tile += TILE
     }
-    out := Tensor{shape: out_shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F32, requested: "CPU", reason: "", transfer: "", node: -1}
+    ^out: Tensor{shape: out_shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F32, requested: "CPU", reason: "", transfer: "", node: -1}
     if a.node >= 0 || b.node >= 0 {
         out.node = ad_record("matmul_f32_tile", [Tensor]{a.copy(), b.copy()}, 0)
     }
@@ -367,17 +367,17 @@ matmul_f32_tile: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
 // order, then the remaining products add one at a time. One lane is the
 // scalar fold.
 dot_f32: fn(left: [Float], l: Int, right: [Float], r: Int, count: Int, lanes: Int) -> Float ComputeError! {
-    acc := [Float]{}
+    ^acc: [Float]{}
     loop _ in 0..<lanes -> acc.push(0.0)
     limit: count /% lanes * lanes
-    index := 0
+    ^index: 0
     loop index < limit {
         loop lane in 0..<lanes {
             acc[lane] = narrow(acc[lane] + narrow(left[l + index + lane] * right[r + index + lane], true), true)
         }
         index += lanes
     }
-    sum := Float{0.0}
+    ^sum: Float{0.0}
     loop lane in acc -> sum = narrow(sum + lane, true)
     loop index < count {
         sum = narrow(sum + narrow(left[l + index] * right[r + index], true), true)
@@ -412,7 +412,7 @@ profile_show: fn() -> String Never! { profile_f32_strict() }
 // the contract only; no closure becomes a native kernel here.
 kernel_bounds_ok: fn(shape: [Int], index: [Int]) -> Bool ComputeError! {
     if shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
-    _ := storage_len(shape)
+    ^_: storage_len(shape)
     loop (axis, coordinate) in index {
         if coordinate < 0 || coordinate >= shape[axis] -> return Err(ComputeError.OutOfBounds)
     }
@@ -490,7 +490,7 @@ accelerator: fn<A: Accelerator>(provider: A) -[GPU]> ComputeDevice ComputeError!
     if !caps.contains(KERNEL_IR) -> return Err(ComputeError.Unsupported)
     loop kernel in caps {
         if kernel == KERNEL_IR -> next
-        _ := launch(provider, kernel, reference_operands(kernel))
+        ^_: launch(provider, kernel, reference_operands(kernel))
     }
     Ok(ComputeDevice{name: provider.name()})
 }
@@ -517,9 +517,9 @@ launch: fn<A: Accelerator>(provider: A, kernel: String, operands: [Tensor]) -[GP
     if arity == 0 || !provider.caps().contains(kernel) -> return Err(ComputeError.Unsupported)
     if operands.len() != arity -> return Err(ComputeError.Shape)
     name: provider.name()
-    cpu := [Tensor]{}
-    buffers := [[Float]]{}
-    shapes := [[Int]]{}
+    ^cpu: [Tensor]{}
+    ^buffers: [[Float]]{}
+    ^shapes: [[Int]]{}
     loop operand in operands {
         if operand.device != "CPU" && operand.device != name -> return Err(ComputeError.Device)
         if operand.numeric_profile != PROFILE_F64 -> return Err(ComputeError.Unsupported)
@@ -565,9 +565,9 @@ select: fn(target: ComputeDevice) -> String ComputeError! {
 // `tensor` placed on `target`: the same values and profile, requested as
 // `target`, with a fresh placement and no transfer receipt.
 on_device: fn(tensor: Tensor, target: ComputeDevice) -> Tensor ComputeError! {
-    _ := checked(tensor)
+    ^_: checked(tensor)
     selected: select(target)
-    out := Tensor{shape: tensor.shape.copy(), data: tensor.data.copy(), device: selected, numeric_profile: tensor.numeric_profile.copy(), requested: target.name.copy(), reason: "", transfer: "", node: -1}
+    ^out: Tensor{shape: tensor.shape.copy(), data: tensor.data.copy(), device: selected, numeric_profile: tensor.numeric_profile.copy(), requested: target.name.copy(), reason: "", transfer: "", node: -1}
     if tensor.node >= 0 -> out.node = ad_record("identity", [Tensor]{tensor.copy()}, 0)
     Ok(out)
 }
@@ -580,7 +580,7 @@ on_device: fn(tensor: Tensor, target: ComputeDevice) -> Tensor ComputeError! {
 transfer: fn(tensor: Tensor, target: ComputeDevice) -> Tensor ComputeError! {
     from: tensor.device.copy()
     width: if tensor.numeric_profile == PROFILE_F32 -> 4 else -> 8
-    moved := on_device(tensor, target)
+    ^moved: on_device(tensor, target)
     same: from == moved.device
     bytes: if same -> 0 else -> tensor.data.len() * width
     kind: if same -> "no-op; same backend and allocation" else -> "copy; selected backend"
@@ -602,7 +602,7 @@ transfer_show: fn(tensor: Tensor) -> String Never! {
 // the checksum is the FNV-1a 64 hash of the text before `;checksum=`, as 16
 // lowercase hex digits.
 serialize: fn(tensor: Tensor) -> String ComputeError! {
-    _ := checked(tensor)
+    ^_: checked(tensor)
     axes: loop dim in tensor.shape -> "{dim}"
     values: loop value in tensor.data -> "{value}"
     body: "shape={axes.join(",")};data={values.join(",")};profile={tensor.numeric_profile}"
@@ -625,14 +625,14 @@ deserialize: fn(payload: String) -> Tensor ComputeError! {
     }
     axes_text: fields[0].removeprefix("shape=")
     if axes_text == "" -> return Err(ComputeError.Serialization)
-    shape := [Int]{}
+    ^shape: [Int]{}
     loop axis_text in axes_text.split(",") {
         axis: Int.parse(axis_text) ?? return Err(ComputeError.Serialization)
         if "{axis}" != axis_text -> return Err(ComputeError.Serialization)
         shape.push(axis)
     }
     values_text: fields[1].removeprefix("data=")
-    data := [Float]{}
+    ^data: [Float]{}
     if values_text != "" {
         loop value_text in values_text.split(",") {
             value: Float.parse(value_text) ?? return Err(ComputeError.Serialization)
@@ -658,10 +658,10 @@ deserialize: fn(payload: String) -> Tensor ComputeError! {
 
 // The FNV-1a 64 hash of `body`'s bytes as 16 lowercase hex digits.
 wire_checksum: fn(body: String) -> String Never! {
-    hash := U64{14695981039346656037}
+    ^hash: U64{14695981039346656037}
     loop byte in body.bytes() -> hash = wrapping((hash ~ U64{byte}) * U64{1099511628211})
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<16 {
         nibble: Int{(hash >> (60 - index * 4)) & U64{15}}
         out.push(digits[nibble])
@@ -689,12 +689,12 @@ stream_show: fn(stream: ComputeStream) -> String Never! { "ComputeStream(device=
 // indexes row r's nonzero `values` and their `col_idx` columns.
 to_sparse: fn(tensor: Tensor) -> SparseTensor ComputeError! {
     if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
-    _ := checked(tensor)
+    ^_: checked(tensor)
     rows: tensor.shape[0]
     cols: tensor.shape[1]
-    row_ptr := [Int]{0}
-    col_idx := [Int]{}
-    values := [Float]{}
+    ^row_ptr: [Int]{0}
+    ^col_idx: [Int]{}
+    ^values: [Float]{}
     loop r in 0..<rows {
         loop c in 0..<cols {
             value: tensor.data[r * cols + c]
@@ -716,20 +716,20 @@ sparse_show: fn(sparse: SparseTensor) -> String Never! {
 
 // `sparse` times a length-`cols` vector: a fresh F64 CPU tensor of `rows`.
 sparse_mv: fn(sparse: SparseTensor, vector: Tensor) -> Tensor ComputeError! {
-    _ := checked(vector)
+    ^_: checked(vector)
     if vector.shape.len() != 1 || vector.shape[0] != sparse.cols {
         return Err(ComputeError.RankMismatch)
     }
-    out := [Float]{}
+    ^out: [Float]{}
     loop r in 0..<sparse.rows {
-        acc := Float{0.0}
+        ^acc: Float{0.0}
         loop k in sparse.row_ptr[r]..<sparse.row_ptr[r + 1] {
             acc += sparse.values[k] * vector.data[sparse.col_idx[k]]
             if !math.is_finite(acc) -> return Err(ComputeError.Arithmetic)
         }
         out.push(acc)
     }
-    result := Tensor{shape: [Int]{sparse.rows}, data: out, device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto", reason: "", transfer: "", node: -1}
+    ^result: Tensor{shape: [Int]{sparse.rows}, data: out, device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto", reason: "", transfer: "", node: -1}
     if vector.node >= 0 -> result.node = ad_record("sparse_mv", [Tensor]{vector.copy()}, 0)
     Ok(result)
 }
@@ -742,11 +742,11 @@ PIVOT_EPSILON: Float{0.000000000000001}
 eye: fn(n: Int) -> Tensor ComputeError! {
     if n < 0 -> return Err(ComputeError.Shape)
     shape: [Int]{n, n}
-    _ := storage_len(shape)
-    data := [Float]{}
+    ^_: storage_len(shape)
+    ^data: [Float]{}
     loop i in 0..<n {
         loop j in 0..<n {
-            value := Float{0.0}
+            ^value: Float{0.0}
             if i == j -> value = Float{1.0}
             data.push(value)
         }
@@ -756,15 +756,15 @@ eye: fn(n: Int) -> Tensor ComputeError! {
 
 // Gaussian elimination with partial pivoting; each row swap flips the sign.
 det: fn(tensor: Tensor) -> Float ComputeError! {
-    _ := checked(tensor)
+    ^_: checked(tensor)
     if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] {
         return Err(ComputeError.RankMismatch)
     }
     n: tensor.shape[0]
-    a := tensor.data.copy()
-    product := Float{1.0}
+    ^a: tensor.data.copy()
+    ^product: Float{1.0}
     loop i in 0..<n {
-        pivot := i
+        ^pivot: i
         loop r in i..<n {
             if math.fabs(a[r * n + i]) > math.fabs(a[pivot * n + i]) -> pivot = r
         }
@@ -798,21 +798,21 @@ inv: fn(tensor: Tensor) -> Tensor ComputeError! {
     if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] {
         return Err(ComputeError.RankMismatch)
     }
-    _ := checked(tensor)
+    ^_: checked(tensor)
     n: tensor.shape[0]
     width: n * 2
     if n * width > MAX_ELEMENTS -> return Err(ComputeError.Shape)
-    a := [Float]{}
+    ^a: [Float]{}
     loop i in 0..<n {
         loop j in 0..<n -> a.push(tensor.data[i * n + j])
         loop j in 0..<n {
-            value := Float{0.0}
+            ^value: Float{0.0}
             if i == j -> value = Float{1.0}
             a.push(value)
         }
     }
     loop i in 0..<n {
-        pivot := i
+        ^pivot: i
         loop r in i..<n {
             if math.fabs(a[r * width + i]) > math.fabs(a[pivot * width + i]) -> pivot = r
         }
@@ -840,11 +840,11 @@ inv: fn(tensor: Tensor) -> Tensor ComputeError! {
             }
         }
     }
-    data := [Float]{}
+    ^data: [Float]{}
     loop i in 0..<n {
         loop j in 0..<n -> data.push(a[i * width + n + j])
     }
-    out := Tensor{shape: tensor.shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: "", node: -1}
+    ^out: Tensor{shape: tensor.shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: "", node: -1}
     if tensor.node >= 0 -> out.node = ad_record("inv", [Tensor]{tensor.copy()}, 0)
     Ok(out)
 }
@@ -853,22 +853,22 @@ inv: fn(tensor: Tensor) -> Tensor ComputeError! {
 // n-row matrix and the result has b's shape.
 solve: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     if a.shape.len() != 2 || a.shape[0] != a.shape[1] -> return Err(ComputeError.RankMismatch)
-    _ := checked(a)
-    _ := checked(b)
+    ^_: checked(a)
+    ^_: checked(b)
     n: a.shape[0]
-    rhs := 0
+    ^rhs: 0
     if b.shape.len() == 1 && b.shape[0] == n -> rhs = 1 else if b.shape.len() == 2 && b.shape[0] == n && b.shape[1] >= 0 {
         rhs = b.shape[1]
     } else { return Err(ComputeError.RankMismatch) }
     width: n + rhs
     if width > MAX_ELEMENTS || n * width > MAX_ELEMENTS -> return Err(ComputeError.Shape)
-    m := [Float]{}
+    ^m: [Float]{}
     loop row in 0..<n {
         loop col in 0..<n -> m.push(a.data[row * n + col])
         loop col in 0..<rhs -> m.push(b.data[row * rhs + col])
     }
     loop pivot in 0..<n {
-        best := pivot
+        ^best: pivot
         loop row in pivot..<n {
             if math.fabs(m[row * width + pivot]) > math.fabs(m[best * width + pivot]) -> best = row
         }
@@ -897,11 +897,11 @@ solve: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
             }
         }
     }
-    data := [Float]{}
+    ^data: [Float]{}
     loop row in 0..<n {
         loop col in 0..<rhs -> data.push(m[row * width + n + col])
     }
-    out := Tensor{shape: b.shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: "", node: -1}
+    ^out: Tensor{shape: b.shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: "", node: -1}
     if a.node >= 0 || b.node >= 0 -> out.node = ad_record("solve", [Tensor]{a.copy(), b.copy()}, 0)
     Ok(out)
 }
@@ -914,13 +914,13 @@ fft: fn(tensor: Tensor) -> Tensor ComputeError! {
     n: checked(tensor)
     if tensor.shape.len() != 1 -> return Err(ComputeError.RankMismatch)
     shape: [Int]{n * 2}
-    _ := storage_len(shape)
+    ^_: storage_len(shape)
     f32: tensor.numeric_profile == PROFILE_F32
-    data := [Float]{}
+    ^data: [Float]{}
     if n > 0 {
-        spectrum := Spectrum{real: [Float]{}, imaginary: [Float]{}}
+        ^spectrum: Spectrum{real: [Float]{}, imaginary: [Float]{}}
         if power_of_two(n) {
-            imaginary := [Float]{}
+            ^imaginary: [Float]{}
             loop _ in 0..<n -> imaginary.push(Float{0.0})
             spectrum = radix2(tensor.data.copy(), imaginary, false, f32)
         } else { spectrum = bluestein(tensor.data, f32) }
@@ -929,7 +929,7 @@ fft: fn(tensor: Tensor) -> Tensor ComputeError! {
             data.push(spectrum.imaginary[index])
         }
     }
-    out := like(tensor, shape.copy(), data)
+    ^out: like(tensor, shape.copy(), data)
     if tensor.node >= 0 -> out.node = ad_record("fft", [Tensor]{tensor.copy()}, 0)
     Ok(out)
 }
@@ -940,7 +940,7 @@ Spectrum: struct {
 }
 
 power_of_two: fn(n: Int) -> Bool Never! {
-    p := 1
+    ^p: 1
     loop p < n -> p *= 2
     p == n
 }
@@ -970,24 +970,24 @@ butterfly_f32: fn(cosine: Float, sine: Float, even_real: Float, even_imaginary: 
 // In-order iterative radix-2 transform of a power-of-two length; `inverse`
 // turns the twiddles and scales by 1/n.
 radix2: fn(real_in: ^^[Float], imaginary_in: ^^[Float], inverse: Bool, f32: Bool) -> Spectrum ComputeError! {
-    real := real_in
-    imaginary := imaginary_in
+    ^real: real_in
+    ^imaginary: imaginary_in
     n: real.len()
     if n <= 1 -> return Spectrum{real: real, imaginary: imaginary}
-    direction := Float{-2.0}
+    ^direction: Float{-2.0}
     if inverse -> direction = Float{2.0}
     length: narrow(Float{n}, f32)
     phase: narrow(narrow(direction * narrow(math.PI, f32), f32) / length, f32)
-    sines := [Float]{}
-    cosines := [Float]{}
+    ^sines: [Float]{}
+    ^cosines: [Float]{}
     loop index in 0..<(n /% 2) {
         angle: narrow(phase * narrow(Float{index}, f32), f32)
         sines.push(narrow(math.sin(angle), f32))
         cosines.push(narrow(math.cos(angle), f32))
     }
-    reversed := 0
+    ^reversed: 0
     loop index in 1..<n {
-        bit := n /% 2
+        ^bit: n /% 2
         loop bit > 0 && (reversed /% bit) % 2 == 1 {
             reversed -= bit
             bit = bit /% 2
@@ -1002,11 +1002,11 @@ radix2: fn(real_in: ^^[Float], imaginary_in: ^^[Float], inverse: Bool, f32: Bool
             imaginary[reversed] = held_imaginary
         }
     }
-    stage := 2
+    ^stage: 2
     loop stage <= n {
         half: stage /% 2
         step: n /% stage
-        block := 0
+        ^block: 0
         loop block < n {
             loop offset in 0..<half {
                 even: block + offset
@@ -1019,10 +1019,10 @@ radix2: fn(real_in: ^^[Float], imaginary_in: ^^[Float], inverse: Bool, f32: Bool
                 even_imaginary: imaginary[even]
                 product_real: cosine * odd_real - sine * odd_imaginary
                 product_imaginary: cosine * odd_imaginary + sine * odd_real
-                next_even_real := even_real + product_real
-                next_even_imaginary := even_imaginary + product_imaginary
-                next_odd_real := even_real - product_real
-                next_odd_imaginary := even_imaginary - product_imaginary
+                ^next_even_real: even_real + product_real
+                ^next_even_imaginary: even_imaginary + product_imaginary
+                ^next_odd_real: even_real - product_real
+                ^next_odd_imaginary: even_imaginary - product_imaginary
                 if f32 {
                     rounded: butterfly_f32(cosine, sine, even_real, even_imaginary, odd_real, odd_imaginary)
                     next_even_real = rounded.even_real
@@ -1060,12 +1060,12 @@ radix2: fn(real_in: ^^[Float], imaginary_in: ^^[Float], inverse: Bool, f32: Bool
 // two, then demodulate the first n outputs.
 bluestein: fn(values: [Float], f32: Bool) -> Spectrum ComputeError! {
     n: values.len()
-    padded := 1
+    ^padded: 1
     loop padded < 2 * n - 1 -> padded *= 2
-    real := [Float]{}
-    imaginary := [Float]{}
-    kernel_real := [Float]{}
-    kernel_imaginary := [Float]{}
+    ^real: [Float]{}
+    ^imaginary: [Float]{}
+    ^kernel_real: [Float]{}
+    ^kernel_imaginary: [Float]{}
     loop _ in 0..<padded {
         real.push(Float{0.0})
         imaginary.push(Float{0.0})
@@ -1074,8 +1074,8 @@ bluestein: fn(values: [Float], f32: Bool) -> Spectrum ComputeError! {
     }
     pi: narrow(math.PI, f32)
     length: narrow(Float{n}, f32)
-    sines := [Float]{}
-    cosines := [Float]{}
+    ^sines: [Float]{}
+    ^cosines: [Float]{}
     loop index in 0..<n {
         square: (index * index) % (2 * n)
         angle: narrow(narrow(pi * narrow(Float{square}, f32), f32) / length, f32)
@@ -1095,8 +1095,8 @@ bluestein: fn(values: [Float], f32: Bool) -> Spectrum ComputeError! {
     }
     signal: radix2(real, imaginary, false, f32)
     kernel: radix2(kernel_real, kernel_imaginary, false, f32)
-    convolved_real := [Float]{}
-    convolved_imaginary := [Float]{}
+    ^convolved_real: [Float]{}
+    ^convolved_imaginary: [Float]{}
     loop index in 0..<padded {
         sr: signal.real[index]
         si: signal.imaginary[index]
@@ -1106,8 +1106,8 @@ bluestein: fn(values: [Float], f32: Bool) -> Spectrum ComputeError! {
         convolved_imaginary.push(narrow(narrow(sr * ki, f32) + narrow(si * kr, f32), f32))
     }
     convolved: radix2(convolved_real, convolved_imaginary, true, f32)
-    out_real := [Float]{}
-    out_imaginary := [Float]{}
+    ^out_real: [Float]{}
+    ^out_imaginary: [Float]{}
     loop index in 0..<n {
         cr: convolved.real[index]
         ci: convolved.imaginary[index]
@@ -1120,7 +1120,7 @@ bluestein: fn(values: [Float], f32: Bool) -> Spectrum ComputeError! {
 filled: fn(shape: [Int], value: Float, requested: String) -> Tensor ComputeError! {
     if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
     n: storage_len(shape)
-    data := [Float]{}
+    ^data: [Float]{}
     loop _ in 0..<n -> data.push(value)
     Ok(Tensor{shape: shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: requested.copy(), reason: "", transfer: "", node: -1})
 }
@@ -1138,7 +1138,7 @@ storage_len: fn(shape: [Int]) -> Int ComputeError! {
     loop dim in shape {
         if dim < 0 || dim > MAX_ELEMENTS -> return Err(ComputeError.Shape)
     }
-    stride := 1
+    ^stride: 1
     loop k in 1..<shape.len() {
         dim: shape[shape.len() - k]
         if dim != 0 && stride > INT_MAX /% dim -> return Err(ComputeError.Shape)
@@ -1174,7 +1174,7 @@ checked: fn(tensor: Tensor) -> Int ComputeError! {
 // value and NaN for any other, and a NaN stays NaN through every later sum,
 // so one test after the loop does.
 all_finite: fn(values: [Float]) -> Bool Never! {
-    poison := Float{0.0}
+    ^poison: Float{0.0}
     loop value in values -> poison += value * Float{0.0}
     math.is_finite(poison)
 }
@@ -1188,7 +1188,7 @@ same_contract: fn(a: Tensor, b: Tensor) ComputeError! {
 // The flat row-major offset of `index`, one in-range coordinate per axis.
 offset: fn(tensor: Tensor, index: [Int]) -> Int ComputeError! {
     if index.len() != tensor.shape.len() -> return Err(ComputeError.RankMismatch)
-    at := 0
+    ^at: 0
     loop (axis, coordinate) in index {
         dim: tensor.shape[axis]
         if coordinate < 0 || coordinate >= dim -> return Err(ComputeError.OutOfBounds)
@@ -1208,7 +1208,7 @@ broadcast_shape: fn(a: [Int], b: [Int]) -> [Int] ComputeError! {
         if dim < 0 -> return Err(ComputeError.Shape)
     }
     rank: if a.len() > b.len() -> a.len() else -> b.len()
-    out := [Int]{}
+    ^out: [Int]{}
     loop axis in 0..<rank {
         da: if axis < rank - a.len() -> 1 else -> a[axis - (rank - a.len())]
         db: if axis < rank - b.len() -> 1 else -> b[axis - (rank - b.len())]
@@ -1216,7 +1216,7 @@ broadcast_shape: fn(a: [Int], b: [Int]) -> [Int] ComputeError! {
             return Err(ComputeError.RankMismatch)
         }
     }
-    _ := storage_len(out)
+    ^_: storage_len(out)
     Ok(out)
 }
 
@@ -1233,22 +1233,22 @@ expand: fn(tensor: Tensor, target: [Int]) -> [Float] ComputeError! {
     if broadcast_shape(tensor.shape, target) != target -> return Err(ComputeError.Shape)
     n: storage_len(target)
     lead: rank - source_rank
-    strides := [Int]{}
+    ^strides: [Int]{}
     loop _ in 0..<rank -> strides.push(0)
-    stride := 1
+    ^stride: 1
     loop k in 0..<source_rank {
         source_axis: source_rank - 1 - k
         dim: tensor.shape[source_axis]
         if dim != 1 || target[lead + source_axis] == 1 -> strides[lead + source_axis] = stride
         stride *= dim
     }
-    out := [Float]{}
-    position := [Int]{}
+    ^out: [Float]{}
+    ^position: [Int]{}
     loop _ in 0..<rank -> position.push(0)
-    at := 0
+    ^at: 0
     loop _ in 0..<n {
         out.push(tensor.data[at])
-        axis := rank - 1
+        ^axis: rank - 1
         loop axis >= 0 {
             position[axis] = position[axis] + 1
             at += strides[axis]
@@ -1264,8 +1264,8 @@ expand: fn(tensor: Tensor, target: [Int]) -> [Float] ComputeError! {
 // `a` and `b` combined element by element by the operator `code`: 0 add,
 // 1 sub, 2 mul, 3 div, 4 maximum, 5 minimum.
 binary: fn(code: Int, a: Tensor, b: Tensor) -> Tensor ComputeError! {
-    _ := checked(a)
-    _ := checked(b)
+    ^_: checked(a)
+    ^_: checked(b)
     same_contract(a, b)
     shape: broadcast_shape(a.shape, b.shape)
     // Operands that already have the result shape are read in place; others
@@ -1274,7 +1274,7 @@ binary: fn(code: Int, a: Tensor, b: Tensor) -> Tensor ComputeError! {
         return binary(code, like(a, shape.copy(), expand(a, shape)), like(b, shape.copy(), expand(b, shape)))
     }
     f32: a.numeric_profile == PROFILE_F32
-    data := [Float]{}
+    ^data: [Float]{}
     loop (index, x) in a.data {
         y: b.data[index]
         value: if code == {
@@ -1293,9 +1293,9 @@ binary: fn(code: Int, a: Tensor, b: Tensor) -> Tensor ComputeError! {
 }
 
 unary: fn(op: String, tensor: Tensor) -> Tensor ComputeError! {
-    _ := checked(tensor)
+    ^_: checked(tensor)
     f32: tensor.numeric_profile == PROFILE_F32
-    data := [Float]{}
+    ^data: [Float]{}
     loop x in tensor.data {
         if op == "log" && x <= 0.0 -> return Err(ComputeError.Arithmetic)
         if op == "sqrt" && x < 0.0 -> return Err(ComputeError.Arithmetic)
@@ -1382,12 +1382,12 @@ priv ADTape: struct {
 }
 
 #Builtin.Role(.TapeEnter) priv __ad_enter: fn() Never! {
-    tape := ad_tape().guard_edit()
+    ^tape: ad_tape().guard_edit()
     tape.value.depth += 1
 }
 
 #Builtin.Role(.TapeExit) priv __ad_exit: fn() Never! {
-    tape := ad_tape().guard_edit()
+    ^tape: ad_tape().guard_edit()
     tape.value.depth -= 1
     if tape.value.depth <= 0 {
         tape.value.depth = 0
@@ -1399,8 +1399,8 @@ priv ADTape: struct {
 // outer transform tracks enters as an identity of its node, so the outer
 // transform differentiates through the inner one.
 #Builtin.Role(.TapeLeaf) priv __ad_leaf: fn(tensor: Tensor) -> Tensor Never! {
-    leaf := tensor.copy()
-    tape := ad_tape().guard_edit()
+    ^leaf: tensor.copy()
+    ^tape: ad_tape().guard_edit()
     if tensor.node >= 0 {
         tape.value.nodes.push(ADNode{op: "identity", inputs: [Tensor]{tensor.copy()}, axis: 0})
     } else { tape.value.nodes.push(ADNode{op: "leaf", inputs: [Tensor]{}, axis: 0}) }
@@ -1411,7 +1411,7 @@ priv ADTape: struct {
 // The transform's value `out`, untracked once the outermost transform
 // returns it.
 #Builtin.Role(.TapeValue) priv __ad_value: fn(out: Tensor) -> Tensor Never! {
-    value := out.copy()
+    ^value: out.copy()
     if ad_depth() <= 1 -> value.node = -1
     value
 }
@@ -1419,7 +1419,7 @@ priv ADTape: struct {
 // The gradient of the sum of `out`'s elements with respect to `leaf`: zeros
 // of `leaf`'s shape when `out` does not depend on it.
 #Builtin.Role(.TapeGradient) priv __ad_gradient: fn(out: Tensor, leaf: Tensor) -> Tensor Never! {
-    gradient := ad_backward(out, leaf) ?? panic("compute.gradient: a derivative rule failed")
+    ^gradient: ad_backward(out, leaf) ?? panic("compute.gradient: a derivative rule failed")
     if ad_depth() <= 1 -> gradient.node = -1
     gradient
 }
@@ -1430,7 +1430,7 @@ priv ADTape: struct {
     if seed.shape != out.shape {
         panic("compute.vjp: the seed has shape {seed.shape} but the value has shape {out.shape}")
     }
-    gradient := ad_backward_seeded(out, leaf, seed) ?? panic("compute.vjp: a derivative rule failed")
+    ^gradient: ad_backward_seeded(out, leaf, seed) ?? panic("compute.vjp: a derivative rule failed")
     if ad_depth() <= 1 -> gradient.node = -1
     gradient
 }
@@ -1441,7 +1441,7 @@ priv ADTape: struct {
 // respect to `u` gives that leaf's share of J·t.
 #Builtin.Role(.TapeTangent) priv __ad_tangent: fn(out: Tensor, leaves: [Tensor], tangents: [Tensor]) -> Tensor Never! {
     seed: __ad_leaf(like(out, out.shape.copy(), ad_fill(out.data.len(), 1.0)))
-    tangent := like(out, out.shape.copy(), ad_fill(out.data.len(), 0.0))
+    ^tangent: like(out, out.shape.copy(), ad_fill(out.data.len(), 0.0))
     loop (index, leaf) in leaves {
         direction: tangents[index]
         if direction.shape != leaf.shape {
@@ -1474,7 +1474,7 @@ priv autodiff: module {
 
     // The node that records `op` over `inputs` while a transform is open, else -1.
     ad_record: fn(op: String, inputs: [Tensor], axis: Int) -> Int Never! {
-        tape := ad_tape().guard_edit()
+        ^tape: ad_tape().guard_edit()
         if tape.value.depth == 0 -> return -1
         tape.value.nodes.push(ADNode{op: op, inputs: inputs, axis: axis})
         tape.value.nodes.len() - 1
@@ -1487,13 +1487,13 @@ priv autodiff: module {
         if last >= tape.value.nodes.len() {
             panic("compute.gradient: a tracked Tensor outlived its transform")
         }
-        nodes := [ADNode]{}
+        ^nodes: [ADNode]{}
         loop index in 0..<(last + 1) -> nodes.push(tape.value.nodes[index].copy())
         nodes
     }
 
     ad_fill: fn(count: Int, value: Float) -> [Float] Never! {
-        data := [Float]{}
+        ^data: [Float]{}
         loop _ in 0..<count -> data.push(value)
         data
     }
@@ -1510,7 +1510,7 @@ priv autodiff: module {
         zero: like(leaf, leaf.shape.copy(), ad_fill(leaf.data.len(), 0.0))
         if out.node < 0 || leaf.node < 0 || leaf.node > out.node -> return Ok(zero)
         nodes: ad_nodes(out.node)
-        adjoints := [Tensor?]{}
+        ^adjoints: [Tensor?]{}
         loop _ in 0..<(out.node + 1) -> adjoints.push(None)
         adjoints[out.node] = Val(seed.copy())
         loop step in 0..<(out.node - leaf.node) {
@@ -1539,7 +1539,7 @@ priv autodiff: module {
             // The f32 tile rule's read of its adjoint as the oracle's profile:
             // the adjoint goes back in its input's contract, so it adds to
             // that input's other adjoints. A tracked adjoint stays tracked.
-            back := like(a, g.shape.copy(), g.data.copy())
+            ^back: like(a, g.shape.copy(), g.data.copy())
             if g.node >= 0 -> back.node = ad_record("identity", [Tensor]{g.copy()}, 0)
             return Ok(back)
         }
@@ -1555,7 +1555,7 @@ priv autodiff: module {
         if op == "reshape" -> return Ok(reshape(g, a.shape))
         if op == "broadcast_to" -> return Ok(ad_unbroadcast(g, a.shape))
         if op == "sum_axis" {
-            kept := a.shape.copy()
+            ^kept: a.shape.copy()
             kept[node.axis] = 1
             return Ok(broadcast_to(reshape(g, kept), a.shape))
         }
@@ -1568,7 +1568,7 @@ priv autodiff: module {
         // adjoint stays tracked through that read, so the backward pass
         // differentiates in turn.
         if op == "matmul_f32_tile" {
-            oracle := like(a, g.shape.copy(), g.data.copy())
+            ^oracle: like(a, g.shape.copy(), g.data.copy())
             if g.node >= 0 -> oracle.node = ad_record("identity", [Tensor]{g.copy()}, 0)
             return Ok(if index == 0 -> matmul(oracle, transpose(b)) else -> matmul(transpose(a), oracle))
         }
@@ -1584,11 +1584,11 @@ priv autodiff: module {
 
     // `g` summed back to `shape` over the axes a broadcast added or stretched.
     ad_unbroadcast: fn(g: Tensor, shape: [Int]) -> Tensor ComputeError! {
-        out := g.copy()
+        ^out: g.copy()
         loop out.shape.len() > shape.len() -> out = sum_axis(out, 0)
         loop (axis, dim) in shape {
             if dim == 1 && out.shape[axis] != 1 {
-                kept := out.shape.copy()
+                ^kept: out.shape.copy()
                 kept[axis] = 1
                 out = reshape(sum_axis(out, axis), kept)
             }
@@ -1602,7 +1602,7 @@ priv autodiff: module {
         shape: broadcast_shape(a.shape, b.shape)
         xs: expand(a, shape)
         ys: expand(b, shape)
-        data := [Float]{}
+        ^data: [Float]{}
         loop (at, x) in xs {
             y: ys[at]
             took_b: if op == "maximum" -> y > x else -> y < x
@@ -1613,7 +1613,7 @@ priv autodiff: module {
 
     // The sign of each element of `tensor`: 1.0, -1.0, or 0.0 at zero.
     ad_sign: fn(tensor: Tensor) -> Tensor Never! {
-        data := [Float]{}
+        ^data: [Float]{}
         loop x in tensor.data {
             if x > 0.0 -> data.push(1.0)
             if x < 0.0 -> data.push(-1.0)
@@ -1630,13 +1630,13 @@ priv autodiff: module {
     }
 
     ad_binary: fn(op: String, code: Int, a: Tensor, b: Tensor) -> Tensor ComputeError! {
-        out := binary(code, a, b)
+        ^out: binary(code, a, b)
         if a.node >= 0 || b.node >= 0 -> out.node = ad_record(op, [Tensor]{a.copy(), b.copy()}, 0)
         Ok(out)
     }
 
     ad_unary: fn(op: String, tensor: Tensor) -> Tensor ComputeError! {
-        out := unary(op, tensor)
+        ^out: unary(op, tensor)
         if tensor.node >= 0 -> out.node = ad_record(op, [Tensor]{tensor.copy()}, 0)
         Ok(out)
     }

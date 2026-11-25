@@ -139,15 +139,15 @@ word_at: fn(bytes: [U8], at: Int, word: String) -> Bool Never! {
 name_end: fn(bytes: [U8], at: Int) -> Int Never! {
     first: byte(bytes, at)
     if first < 0 || !is_name_byte(first) || is_digit(first) -> return at
-    end := at
+    ^end: at
     loop is_name_byte(byte(bytes, end)) -> end += 1
     end
 }
 
 // The index after the `>` that closes the `<` at `at`, on its line, or -1.
 angle_end: fn(bytes: [U8], at: Int) -> Int Never! {
-    depth := 0
-    end := at
+    ^depth: 0
+    ^end: at
     loop end < bytes.len() {
         code: byte(bytes, end)
         if code == {
@@ -167,8 +167,8 @@ angle_end: fn(bytes: [U8], at: Int) -> Int Never! {
 // The index after the bracket that closes the one at `at`, across lines, or
 // -1. `bytes` is code with string text blanked.
 group_end: fn(bytes: [U8], at: Int) -> Int Never! {
-    depth := 0
-    end := at
+    ^depth: 0
+    ^end: at
     loop end < bytes.len() {
         code: byte(bytes, end)
         if code == 40 || code == 91 || code == 123 -> depth += 1
@@ -183,8 +183,8 @@ group_end: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // The index of the bracket that opens the one closing at `at`, or -1.
 group_start: fn(bytes: [U8], at: Int) -> Int Never! {
-    depth := 0
-    start := at
+    ^depth: 0
+    ^start: at
     loop start >= 0 {
         code: byte(bytes, start)
         if code == 41 || code == 93 || code == 125 -> depth += 1
@@ -199,7 +199,7 @@ group_start: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // The last byte before `at` that is not a space, or -1.
 previous_visible: fn(bytes: [U8], at: Int) -> Int Never! {
-    index := at - 1
+    ^index: at - 1
     loop index >= 0 && is_space(byte(bytes, index)) -> index -= 1
     byte(bytes, index)
 }
@@ -214,15 +214,15 @@ blank: fn(bytes: ^[U8], start: Int, end: Int) Never! {
 // to spaces. Newlines stay, so offsets and lines match `text`. An
 // interpolation's code stays, and a raw fence keeps its two ends as quotes.
 code_only: fn(text: String) -> [U8] {
-    out := text.bytes()
+    ^out: text.bytes()
     count: out.len()
     // 0 code, 1 plain string, 2 triple string. `returns` holds the string
     // mode an interpolation returns to and `depths` its brace depth.
-    mode := 0
-    returns := [Int]{}
-    depths := [Int]{}
-    depth := 0
-    at := 0
+    ^mode: 0
+    ^returns: [Int]{}
+    ^depths: [Int]{}
+    ^depth: 0
+    ^at: 0
     loop at < count {
         code: byte(out, at)
         if mode == 0 {
@@ -234,7 +234,7 @@ code_only: fn(text: String) -> [U8] {
             }
             if code == 47 && byte(out, at + 1) == 42 {
                 start: at
-                nesting := 0
+                ^nesting: 0
                 loop at < count {
                     if {
                         byte(out, at) == 47 && byte(out, at + 1) == 42 -> {
@@ -254,7 +254,7 @@ code_only: fn(text: String) -> [U8] {
             }
             if code == 96 {
                 start: at
-                fence := 0
+                ^fence: 0
                 loop byte(out, at + fence) == 96 -> fence += 1
                 at += fence
                 loop at < count {
@@ -262,7 +262,7 @@ code_only: fn(text: String) -> [U8] {
                         at += 1
                         next
                     }
-                    run := 0
+                    ^run: 0
                     loop byte(out, at + run) == 96 -> run += 1
                     at += run
                     if run == fence -> break
@@ -338,23 +338,23 @@ CallNames: struct {
 }
 
 call_names: fn(code: [U8], open: Int, close: Int, growth: [String:Bool]) -> CallNames {
-    seen := [String:Bool]{}
-    names := [String]{}
-    direct := false
-    at := open
+    ^seen: [String:Bool]{}
+    ^names: [String]{}
+    ^direct: false
+    ^at: open
     loop at < close {
         first: byte(code, at)
         if !is_name_byte(first) {
             at += 1
             next
         }
-        stop := at
+        ^stop: at
         loop is_name_byte(byte(code, stop)) -> stop += 1
         if is_digit(first) {
             at = stop
             next
         }
-        after := stop
+        ^after: stop
         if byte(code, after) == 60 {
             closing: angle_end(code, after)
             if closing > 0 && byte(code, closing) == 40 -> after = closing
@@ -374,9 +374,9 @@ call_names: fn(code: [U8], open: Int, close: Int, growth: [String:Bool]) -> Call
 
 // The declaration whose `fn` keyword ends at `from`, when it has a body.
 fn_decl: fn(code: [U8], line: Int, name: String, from: Int, growth: [String:Bool]) -> FnDecl? {
-    depth := 0
-    at := from
-    open := -1
+    ^depth: 0
+    ^at: from
+    ^open: -1
     loop at < code.len() {
         current: byte(code, at)
         if {
@@ -397,17 +397,17 @@ fn_decl: fn(code: [U8], line: Int, name: String, from: Int, growth: [String:Bool
     if open < 0 -> return None
     close: group_end(code, open)
     if close < 0 -> return None
-    end := open
+    ^end: open
     loop end > from && (is_space(byte(code, end - 1)) || byte(code, end - 1) == 10) -> end -= 1
-    contract := ""
-    contract_start := -1
-    bang := -1
+    ^contract: ""
+    ^contract_start: -1
+    ^bang: -1
     if byte(code, end - 1) == 33 {
         bang = end - 1
         if {
             byte(code, bang - 1) == 41 -> contract_start = group_start(code, bang - 1)
             else -> {
-                start := bang
+                ^start: bang
                 loop start > from && !is_space(byte(code, start - 1)) && byte(code, start - 1) != 10 && byte(code, start - 1) != 62 {
                     start -= 1
                 }
@@ -426,7 +426,7 @@ fn_decl: fn(code: [U8], line: Int, name: String, from: Int, growth: [String:Bool
 type_decl: fn(code: [U8], name: String, name_end: Int, kind_at: Int) -> TypeDecl? {
     generic: byte(code, name_end) == 60
     kind: if word_at(code, kind_at, "enum") -> "enum" else -> "struct"
-    open := kind_at
+    ^open: kind_at
     loop byte(code, open) != 123 {
         if open >= code.len() || byte(code, open) == 10 -> return None
         open += 1
@@ -434,7 +434,7 @@ type_decl: fn(code: [U8], name: String, name_end: Int, kind_at: Int) -> TypeDecl
     close: group_end(code, open)
     if close < 0 -> return None
     fields: top_members(code, open + 1, close - 1)
-    has_case := false
+    ^has_case: false
     loop field in fields {
         if field == CASE || field.starts_with("{CASE}(") -> has_case = true
     }
@@ -445,9 +445,9 @@ type_decl: fn(code: [U8], name: String, name_end: Int, kind_at: Int) -> TypeDecl
 // The members of a declaration body `code[start..<end]` outside nested
 // braces, one per line or comma, without its `impl` blocks and attributes.
 top_members: fn(code: [U8], start: Int, end: Int) -> [String] {
-    members := [String]{}
-    depth := 0
-    from := start
+    ^members: [String]{}
+    ^depth: 0
+    ^from: start
     loop at in start..<(end + 1) {
         current: if at < end -> byte(code, at) else -> 10
         if {
@@ -465,7 +465,7 @@ top_members: fn(code: [U8], start: Int, end: Int) -> [String] {
             }
         }
     }
-    kept := [String]{}
+    ^kept: [String]{}
     loop member in members {
         if member != "" && !member.starts_with("impl ") && !member.starts_with("#") {
             kept.push(member.copy())
@@ -478,19 +478,19 @@ top_members: fn(code: [U8], start: Int, end: Int) -> [String] {
 // enums and structs.
 load_source: fn(path: String, text: String, growth: [String:Bool]) -> Source {
     code: code_only(text)
-    fns := [FnDecl]{}
-    types := [TypeDecl]{}
-    line := 1
-    at := 0
+    ^fns: [FnDecl]{}
+    ^types: [TypeDecl]{}
+    ^line: 1
+    ^at: 0
     loop at < code.len() {
-        start := at
+        ^start: at
         loop byte(code, start) == 32 || byte(code, start) == 9 -> start += 1
         if word_at(code, start + 1, "run") && byte(code, start) == 35 && byte(code, start + 4) == 32 {
             start += 5
         }
         stop: name_end(code, start)
         if stop > start {
-            after := stop
+            ^after: stop
             generic: byte(code, after) == 60
             if generic -> after = angle_end(code, after)
             if after > 0 && byte(code, after) == 58 && byte(code, after + 1) == 32 {
@@ -516,13 +516,13 @@ load_source: fn(path: String, text: String, growth: [String:Bool]) -> Source {
 
 // The names that reach a growth call, closed over calls by name.
 allocating_names: fn(sources: [Source]) -> [String:Bool] {
-    reached := [String:Bool]{}
+    ^reached: [String:Bool]{}
     loop source in sources {
         loop decl in source.fns {
             if decl.direct -> reached[decl.name.copy()] = true
         }
     }
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
         loop source in sources {
@@ -544,14 +544,14 @@ allocating_names: fn(sources: [Source]) -> [String:Bool] {
 // The names whose every declaration allocates with an inferred contract:
 // calls to them become fallible.
 newly_fallible: fn(sources: [Source], reached: [String:Bool]) -> [String:Bool] {
-    verdict := [String:Bool]{}
+    ^verdict: [String:Bool]{}
     loop source in sources {
         loop decl in source.fns {
             fallible: reached.has_key(decl.name) && decl.bang < 0
             verdict[decl.name.copy()] = fallible && (verdict.get(decl.name) ?? true)
         }
     }
-    kept := [String:Bool]{}
+    ^kept: [String:Bool]{}
     loop (name, fallible) in verdict {
         if fallible -> kept[name.copy()] = true
     }
@@ -566,7 +566,7 @@ TypeChoice: struct {
 }
 
 leaf: fn(name: String) -> String {
-    last := ""
+    ^last: ""
     loop part in name.split(".") -> last = part.copy()
     last
 }
@@ -596,9 +596,9 @@ type_choice: fn(contract: String, domains: String, sources: [Source], from: Int,
 // `found` holds every declaration of the name as pairs.
 pick_decl: fn(found: [Int], sources: [Source], from: Int) -> [Int] {
     home: directory(sources[from].path)
-    same_file := [Int]{}
-    same_directory := [Int]{}
-    index := 0
+    ^same_file: [Int]{}
+    ^same_directory: [Int]{}
+    ^index: 0
     loop index + 1 < found.len() {
         if found[index] == from {
             same_file.push(found[index])
@@ -618,7 +618,7 @@ pick_decl: fn(found: [Int], sources: [Source], from: Int) -> [Int] {
 
 directory: fn(path: String) -> String {
     bytes: path.bytes()
-    end := bytes.len()
+    ^end: bytes.len()
     loop end > 0 && byte(bytes, end - 1) != 47 -> end -= 1
     slice(bytes, 0, end)
 }
@@ -627,7 +627,7 @@ directory: fn(path: String) -> String {
 // already edited goes after the earlier one.
 put_edit: fn(edits: ^[Int:[Edit]], source: Int, edit: Edit) {
     if !edits.has_key(source) -> edits[source] = [Edit]{}
-    index := edits[source].len()
+    ^index: edits[source].len()
     loop index > 0 && edits[source][index - 1].start > edit.start -> index -= 1
     edits[source].insert(index, Edit{start: edit.start, end: edit.end, text: edit.text.copy()})
 }
@@ -635,7 +635,7 @@ put_edit: fn(edits: ^[Int:[Edit]], source: Int, edit: Edit) {
 // The start of the receiver chain that a call at `start` hangs off: names,
 // dots and bracketed groups.
 receiver_start: fn(code: [U8], start: Int) -> Int Never! {
-    at := start
+    ^at: start
     loop {
         before: byte(code, at - 1)
         if before == 46 || is_name_byte(before) {
@@ -654,10 +654,10 @@ receiver_start: fn(code: [U8], start: Int) -> Int Never! {
 // its receiver from the line start or a `-> `, and nothing after it on its
 // line.
 whole_statement: fn(code: [U8], start: Int, end: Int) -> Bool Never! {
-    after := end
+    ^after: end
     loop is_space(byte(code, after)) -> after += 1
     if byte(code, after) != 10 && byte(code, after) != -1 -> return false
-    at := receiver_start(code, start)
+    ^at: receiver_start(code, start)
     loop is_space(byte(code, at - 1)) -> at -= 1
     before: byte(code, at - 1)
     before == 10 || before == -1 || (before == 62 && byte(code, at - 2) == 45)
@@ -666,15 +666,15 @@ whole_statement: fn(code: [U8], start: Int, end: Int) -> Bool Never! {
 // The handler insertions in one `Never!` body, and the sites left over.
 handle_body: fn(source: Source, index: Int, decl: FnDecl, growth: [String:Bool], fallible: [String:Bool], edits: ^[Int:[Edit]], manual: ^[String]) -> Int {
     code: source.code
-    handled := 0
-    at := decl.open
+    ^handled: 0
+    ^at: decl.open
     loop at < decl.close {
         first: byte(code, at)
         if !is_name_byte(first) {
             at += 1
             next
         }
-        stop := at
+        ^stop: at
         loop is_name_byte(byte(code, stop)) -> stop += 1
         if is_digit(first) || byte(code, stop) != 40 {
             at = stop
@@ -701,7 +701,7 @@ handle_body: fn(source: Source, index: Int, decl: FnDecl, growth: [String:Bool],
 
 // Whether a `??` follows the call that ends at `end`.
 already_handled: fn(code: [U8], end: Int) -> Bool Never! {
-    after := end
+    ^after: end
     loop is_space(byte(code, after)) -> after += 1
     byte(code, after) == 63 && byte(code, after + 1) == 63
 }
@@ -709,22 +709,22 @@ already_handled: fn(code: [U8], end: Int) -> Bool Never! {
 plan_edits: fn(sources: [Source], domains: String, never: String, growth: [String:Bool]) -> Plan {
     reached: allocating_names(sources)
     fallible: newly_fallible(sources, reached)
-    declared := [String:[Int]]{}
+    ^declared: [String:[Int]]{}
     loop (index, source) in sources {
         loop (position, decl) in source.types {
-            found := declared.get(decl.name) ?? [Int]{}
+            ^found: declared.get(decl.name) ?? [Int]{}
             found.push(index)
             found.push(position)
             declared[decl.name.copy()] = found
         }
     }
-    edits := [Int:[Edit]]{}
-    manual := [String]{}
-    converted_types := [String:Bool]{}
-    admitted := 0
-    converted := 0
-    dropped := 0
-    handled := 0
+    ^edits: [Int:[Edit]]{}
+    ^manual: [String]{}
+    ^converted_types: [String:Bool]{}
+    ^admitted: 0
+    ^converted: 0
+    ^dropped: 0
+    ^handled: 0
     loop (index, source) in sources {
         loop decl in source.fns {
             if !reached.has_key(decl.name) || decl.bang < 0 -> next
@@ -784,12 +784,12 @@ plan_edits: fn(sources: [Source], domains: String, never: String, growth: [Strin
 // closing brace on its own line, ending the last member with a comma when it
 // has none, else `, Case` after the last member.
 case_edit: fn(code: [U8], domain: TypeDecl) -> Edit {
-    line_start := domain.close
+    ^line_start: domain.close
     loop line_start > 0 && is_space(byte(code, line_start - 1)) -> line_start -= 1
     if byte(code, line_start - 1) == 10 {
-        member := domain.open + 1
+        ^member: domain.open + 1
         loop byte(code, member) == 10 -> member += 1
-        indent_end := member
+        ^indent_end: member
         loop is_space(byte(code, indent_end)) -> indent_end += 1
         added: "{slice(code, member, indent_end)}{CASE},\n"
         if byte(code, line_start - 2) == 44 || line_start - 1 <= domain.open + 1 {
@@ -802,8 +802,8 @@ case_edit: fn(code: [U8], domain: TypeDecl) -> Edit {
 
 apply: fn(text: String, edits: [Edit]) -> String {
     bytes: text.bytes()
-    parts := [String]{}
-    last := 0
+    ^parts: [String]{}
+    ^last: 0
     loop edit in edits {
         parts.push(slice(bytes, last, edit.start))
         parts.push(edit.text.copy())
@@ -821,14 +821,14 @@ skipped: fn(path: String) -> Bool Never! {
 }
 
 tracked: fn(paths: [String]) -[Exec, IO, Time.Wait]> [String] ContractError! {
-    argv := [String]{"git", "ls-files", "--"}
+    ^argv: [String]{"git", "ls-files", "--"}
     if paths.len() == 0 -> argv.push(".")
     loop path in paths -> argv.push(path.copy())
     receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(ContractError{message: "cannot run git ls-files: {err}"})
     if receipt.code != 0 {
         return Err(ContractError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
     }
-    found := [String]{}
+    ^found: [String]{}
     loop line in receipt.output.split("\n") {
         if line.ends_with(".jet") && !skipped(line) -> found.push(line.copy())
     }
@@ -843,16 +843,16 @@ area: fn(path: String) -> String {
 census: fn(sources: [Source], growth: [String:Bool]) -[IO]> {
     reached: allocating_names(sources)
     fallible: newly_fallible(sources, reached)
-    tally := [String:Int]{}
-    domains := [String:Int]{}
-    total := 0
-    allocating := 0
+    ^tally: [String:Int]{}
+    ^domains: [String:Int]{}
+    ^total: 0
+    ^allocating: 0
     loop source in sources {
         loop decl in source.fns {
             total += 1
             if !reached.has_key(decl.name) -> next
             allocating += 1
-            kind := "typed"
+            ^kind: "typed"
             if {
                 decl.contract == "Never" -> kind = "Never"
                 decl.bang < 0 -> kind = "inferred"
@@ -867,7 +867,7 @@ census: fn(sources: [Source], growth: [String:Bool]) -[IO]> {
         }
     }
     print("functions\t{total}\tallocating\t{allocating}\tnewly-fallible names\t{fallible.len()}")
-    keys := [String]{}
+    ^keys: [String]{}
     loop (key, _) in tally -> keys.push(key.copy())
     keys.sort()
     loop key in keys -> print("{key}\t{tally.get(key) ?? 0}")
@@ -883,11 +883,11 @@ census: fn(sources: [Source], growth: [String:Bool]) -[IO]> {
 }
 
 contracts_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> Int ContractError! {
-    check := false
-    counting := false
-    domains := ""
-    never := ""
-    paths := [String]{}
+    ^check: false
+    ^counting: false
+    ^domains: ""
+    ^never: ""
+    ^paths: [String]{}
     loop arg in args {
         if {
             arg == "--check" -> check = true
@@ -905,9 +905,9 @@ contracts_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> Int ContractError
         return Err(ContractError{message: "unknown --never={never}\n{USAGE}"})
     }
     if !counting && domains == "" && never == "" -> return Err(ContractError{message: USAGE})
-    growth := [String:Bool]{}
+    ^growth: [String:Bool]{}
     loop word in GROWTH.split(" ") -> growth[word.copy()] = true
-    sources := [Source]{}
+    ^sources: [Source]{}
     loop path in tracked(paths) ?? return Err(err) {
         text: files.read(path) ?? next
         sources.push(load_source(path, text, growth))
@@ -917,7 +917,7 @@ contracts_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> Int ContractError
         return Ok(0)
     }
     plan: plan_edits(sources, domains, never, growth)
-    changed := 0
+    ^changed: 0
     loop (index, source) in sources {
         edits: plan.edits.get(index) ?? next
         changed += 1
@@ -948,7 +948,7 @@ run: fn() {
 }
 
 test_growth: fn() -> [String:Bool] {
-    growth := [String:Bool]{}
+    ^growth: [String:Bool]{}
     loop word in GROWTH.split(" ") -> growth[word.copy()] = true
     growth
 }

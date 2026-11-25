@@ -135,7 +135,7 @@ JobRegistry: struct {
     jobs: [JobFact],
 
     from_items: fn(items: [Item]) -> JobRegistry Never! {
-        jobs := [JobFact]{}
+        ^jobs: [JobFact]{}
         loop item in items {
             if item == .Func(function) {
                 if function.is_job -> jobs.push(cli_schema_job_fact(function))
@@ -156,7 +156,7 @@ JobRegistry: struct {
     jobs: fn(self) -> View<JobFact> Never! from self { self.jobs[0..<self.jobs.len()] }
 
     visible_jobs: fn(self) -> [View<JobFact>] Never! from self {
-        visible := [View<JobFact>]{}
+        ^visible: [View<JobFact>]{}
         loop index in 0..<self.jobs.len() {
             if self.jobs[index].scope != .Internal -> visible.push(self.jobs[index..<index + 1])
         }
@@ -181,11 +181,11 @@ JobRegistry: struct {
 
     dependency_closure: fn(self, root: String) -> [View<JobFact>] CLIJobGraphError! from self {
         index: cli_schema_job_index(self.jobs)
-        state := [Int]{}
+        ^state: [Int]{}
         loop _ in 0..<self.jobs.len() -> state.push(0)
-        stack := [CLIJobVisit]{}
+        ^stack: [CLIJobVisit]{}
         cli_schema_job_enter(self.jobs, index, root, state, stack)
-        rows := [View<JobFact>]{}
+        ^rows: [View<JobFact>]{}
         loop stack.len() > 0 {
             // A finish on a nonempty stack always pops a row.
             next_row: cli_schema_job_finish(self.jobs, index, state, stack)
@@ -196,23 +196,23 @@ JobRegistry: struct {
 
     validate_graph: fn(self) CLIJobGraphError! {
         index: cli_schema_job_index(self.jobs)
-        names := index.keys().to_list()
+        ^names: index.keys().to_list()
         names.sort()
-        state := [Int]{}
+        ^state: [Int]{}
         loop _ in 0..<self.jobs.len() -> state.push(0)
-        stack := [CLIJobVisit]{}
+        ^stack: [CLIJobVisit]{}
         // Reuse the completed-node marks: visiting an already validated
         // subtree cannot change the lexically-first failing root.
         loop name in names {
             cli_schema_job_enter(self.jobs, index, name, state, stack)
-            loop stack.len() > 0 -> _ := cli_schema_job_finish(self.jobs, index, state, stack)
+            loop stack.len() > 0 -> ^_: cli_schema_job_finish(self.jobs, index, state, stack)
         }
         Ok()
     }
 
     completion_words: fn(self) -> [String] Never! {
-        words := [String]{}
-        seen := [String:Bool]{}
+        ^words: [String]{}
+        ^seen: [String:Bool]{}
         loop job in self.jobs {
             if job.scope == .Internal || seen.get(job.name) != None -> next
             seen[job.name] = true
@@ -228,7 +228,7 @@ CLIJobVisit: struct {
 }
 
 cli_schema_job_index: fn(jobs: [JobFact]) -> [String:Int] Never! {
-    index := [String:Int]{}
+    ^index: [String:Int]{}
     loop (row, job) in jobs {
         if index.get(job.name) == None -> index[job.name] = row else -> index[job.name] = -1
     }
@@ -240,8 +240,8 @@ cli_schema_job_enter: fn(jobs: [JobFact], index: [String:Int], name: String, sta
     if row < 0 -> return Err(CLIJobGraphError{message: "job `{name}` has an ambiguous declaration"})
     if state[row] == 2 -> return Ok()
     if state[row] == 1 {
-        cycle := [String]{}
-        started := false
+        ^cycle: [String]{}
+        ^started: false
         loop visit in stack {
             if visit.row == row -> started = true
             if started -> cycle.push(jobs[visit.row].name)
@@ -268,7 +268,7 @@ cli_schema_job_finish: fn(jobs: [JobFact], index: [String:Int], state: ^[Int], s
                 cli_schema_job_enter(jobs, index, jobs[row].after[dependency], state, stack)
             }
             else -> {
-                _ := stack.pop()
+                ^_: stack.pop()
                 state[row] = 2
                 return Ok(Val(row))
             }
@@ -290,7 +290,7 @@ cli_schema_job_argument: fn(param: Param) -> JobArgumentSchema Never! {
         .Val(value) -> value.name
         .None -> param.name
     }
-    default := String?{None}
+    ^default: String?{None}
     if param.default == .Val(value) -> default = cli_schema_job_default(value)
     JobArgumentSchema{name: param.name, label: label, ty: type_name(param.ty), required: !param.variadic && !optional && !boolean && param.default == None, default: default, variadic: param.variadic, zone: param.zone}
 }
@@ -351,14 +351,14 @@ cli_schema_job_float_display: fn(value: Float) -> String Never! {
     decimal: (if dot < 0 -> unsigned.len() else -> dot) + exponent
     sign: if negative -> "-" else -> ""
     if decimal <= 0 {
-        zero_bytes := [U8]{}
+        ^zero_bytes: [U8]{}
         loop _ in 0..<(-decimal) -> zero_bytes.push(U8{48})
         // Valid UTF-8: the padding is the ASCII `0` bytes this loop writes, so the lossy decode keeps every byte.
         zeros: String.from_bytes_lossy(zero_bytes)
         return "{sign}0.{zeros}{digits}"
     }
     if decimal >= digits.len() {
-        zero_bytes := [U8]{}
+        ^zero_bytes: [U8]{}
         loop _ in digits.len()..<decimal -> zero_bytes.push(U8{48})
         // Valid UTF-8: the padding is the ASCII `0` bytes this loop writes, so the lossy decode keeps every byte.
         zeros: String.from_bytes_lossy(zero_bytes)
@@ -387,7 +387,7 @@ cli_schema_job_schedule: fn(function: Func) -> String? Never! {
 
 cli_schema_job_fact: fn(function: Func) -> JobFact Never! {
     metadata: function.job_metadata ?? ast_job_metadata()
-    arguments := [JobArgumentSchema]{}
+    ^arguments: [JobArgumentSchema]{}
     loop param in function.params {
         if param.name != "self" -> arguments.push(cli_schema_job_argument(param))
     }
@@ -405,7 +405,7 @@ CLICommandSchema: struct {
 
     standard_completion_words: fn(self) -> [String] Never! {
         if !self.standard -> return [String]{}
-        words := [String]{"--verbose", "-v", "--quiet", "-q", "--color"}
+        ^words: [String]{"--verbose", "-v", "--quiet", "-q", "--color"}
         if self.version != None -> words.push("--version")
         words
     }
@@ -415,13 +415,13 @@ CLICommandSchema: struct {
     }
 
     command_completion_words: fn(self, command: CLISubcommandSchema) -> [String] Never! {
-        words := [String]{"--help"}
+        ^words: [String]{"--help"}
         words.extend(cli_schema_input_words(command.inputs))
         words
     }
 
     job_completion_words: fn(self) -> [String] Never! {
-        words := [String]{}
+        ^words: [String]{}
         loop job in self.jobs {
             if job.scope != JobScope.Internal -> words.push(job.name)
         }
@@ -436,14 +436,14 @@ CLICommandSchema: struct {
     }
 
     root_completion_words: fn(self) -> [String] Never! {
-        words := [String]{"--help"}
+        ^words: [String]{"--help"}
         words.extend(self.standard_completion_words())
         words.extend(cli_schema_input_words(self.inputs))
         words
     }
 
     completion_words: fn(self) -> [String] Never! {
-        words := self.root_completion_words()
+        ^words: self.root_completion_words()
         loop command in self.commands -> words.push(command.name)
         words.extend(self.job_completion_words())
         words
@@ -451,13 +451,13 @@ CLICommandSchema: struct {
 }
 
 cli_schema_input_words: fn(inputs: [CLIInputSchema]) -> [String] Never! {
-    positionals := [Int]{}
+    ^positionals: [Int]{}
     loop index in 0..<inputs.len() {
         if inputs[index].positional != None -> positionals.push(index)
     }
     // Equal positions retain written order.
     positionals.sort_by(fn(a: Int, b: Int) { (inputs[a].positional ?? U16{0}) <=> (inputs[b].positional ?? U16{0}) })
-    words := [String]{}
+    ^words: [String]{}
     loop index in positionals -> words.push(inputs[index].flag)
     loop input in inputs -> words.push("--{input.flag}")
     loop input in inputs {

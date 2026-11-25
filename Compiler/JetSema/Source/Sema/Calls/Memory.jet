@@ -70,7 +70,7 @@ sema_call_memory_pin: fn(args: [CallArg], span: Span, expected: Type?, check: ^S
         return sema_expr_expected_owned(checked, expected, check.environment.*, check.program.*, check.diagnostics)
     }
     parameter: SemaCallParam{label: "place", name: "place", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(checked.ty), variadic: false}
-    call_args := [CallArg]{argument}
+    ^call_args: [CallArg]{argument}
     ownership: sema_ownership_check_call_arguments(check.state, "pin", [SemaCallParam]{parameter}, call_args, check.scopes, check.diagnostics)
     if !ownership.accepted -> return None
     pinned_ty: Type.Apply{name: "Pin", args: [Type]{checked.ty}}
@@ -91,7 +91,9 @@ sema_call_memory_allocator_name: fn(ty: Type) -> String? {
     if ty == .Named(name) {
         row: ir_runtime_handle_row(name) ?? return None
         family: IR_RUNTIME_HANDLES[row].runtime.removeprefix("Jet")
-        if family == "Arena" || family == "Bump" || family == "Pool" || family == "Fixed" -> return Val(family)
+        if family == "Arena" || family == "Bump" || family == "Pool" || family == "Fixed" {
+            return Val(family)
+        }
         return None
     }
     if ty == .Tagged(marker, inner) && marker == (TagMarker.Internal{internal_tag: InternalTag.AllocatorView}) {
@@ -101,11 +103,11 @@ sema_call_memory_allocator_name: fn(ty: Type) -> String? {
 }
 
 sema_call_memory_discard_args: fn(args: [CallArg], check: ^SemaBodyCheck) Never! {
-    loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+    loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
 }
 
 sema_call_memory_call_arg: fn(argument: CallArg, value: TExpr, borrow: Bool, mut_borrow: Bool) -> TCallArg Never! {
-    label := if argument.label == {
+    ^label: if argument.label == {
         .Val(found) -> Val(found.name)
         .None -> None
     }
@@ -125,7 +127,7 @@ sema_call_memory_call_arg: fn(argument: CallArg, value: TExpr, borrow: Bool, mut
 
 sema_call_memory_static_arity: fn(method: String, args: [CallArg], span: Span, check: ^SemaBodyCheck) -> Bool {
     if args.len() == 1 -> return true
-    fix := if method == "over" -> "write `mem.Fixed.over(bytes)`" else -> "write `mem.Fixed.new(size: N)`"
+    ^fix: if method == "over" -> "write `mem.Fixed.over(bytes)`" else -> "write `mem.Fixed.new(size: N)`"
     check.diagnostics.push(sema_error("E0103", span, "`Fixed.{method}` has the wrong number of arguments", "a fixed allocator needs one size or backing buffer", fix))
     sema_call_memory_discard_args(args, check)
     return false
@@ -144,7 +146,7 @@ sema_call_memory_compiletime_int: fn(expression: Expr, checked: TExpr, check: Se
         .ComptimeName(_, _, value, _) -> if value == .Val(inner) && inner == .Int(number) -> Val(number) else -> None
         .Ident(name, _, _) -> {
             index: sema_scope_resolve_index(check.scopes, name) ?? return None
-            symbol := check.scopes.bindings[index].symbol
+            ^symbol: check.scopes.bindings[index].symbol
             if symbol.kind != SymbolKind.Constant -> return None
             declaration: sema_scope_resolve_declaration(check.environment.*, check.program.*, symbol.id) ?? return None
             if declaration == .Const(definition) && definition.ct == .Val(inner) && inner == .Int(number) -> Val(number) else -> None
@@ -156,7 +158,7 @@ sema_call_memory_compiletime_int: fn(expression: Expr, checked: TExpr, check: Se
 // True when a `Fixed.new` size reads a parameter or local binding, whose value
 // exists only at run time.
 sema_call_memory_reads_runtime_local: fn(expression: Expr, scopes: SemaScopeTable) -> Bool Never! {
-    names := [String]{}
+    ^names: [String]{}
     sema_function_memory_collect_expr_idents(expression, names)
     loop name in names {
         index: sema_scope_resolve_index(scopes, name) ?? next
@@ -167,24 +169,24 @@ sema_call_memory_reads_runtime_local: fn(expression: Expr, scopes: SemaScopeTabl
 }
 
 sema_call_memory_check_fixed_buffer: fn(argument: CallArg, value: TExpr, check: ^SemaBodyCheck) -> Bool {
-    fixed_bytes := if value.ty == {
+    ^fixed_bytes: if value.ty == {
         .FixedList(element, length) -> element == Type.IntN{signed: false, bits: 8} && (measure_literal_value(length) ?? 0) > 0
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
-    direct_expr := if argument.expr == {
+    ^direct_expr: if argument.expr == {
         .Ident(_, _, _) -> true
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
     // `over`'s parameter is a write window, so the
     // buffer's name passed plain is that window.
-    direct_write := argument.convention != AccessConvention.Move && direct_expr
+    ^direct_write: argument.convention != AccessConvention.Move && direct_expr
     if !fixed_bytes || !direct_write {
         check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.over` needs one mutable fixed-size byte buffer", "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed", "bind `[Byte#N]` storage with `:=`, then write `fixed: mem.Fixed.over(storage)`"))
         return false
     }
-    parameter := SemaCallParam{label: "buffer", name: "buffer", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(value.ty), variadic: false}
-    call_args := [CallArg]{argument}
-    ownership := sema_ownership_check_call_arguments(check.state, "Fixed.over", [SemaCallParam]{parameter}, call_args, check.scopes, check.diagnostics)
+    ^parameter: SemaCallParam{label: "buffer", name: "buffer", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(value.ty), variadic: false}
+    ^call_args: [CallArg]{argument}
+    ^ownership: sema_ownership_check_call_arguments(check.state, "Fixed.over", [SemaCallParam]{parameter}, call_args, check.scopes, check.diagnostics)
     return ownership.accepted && ownership.complete
 }
 
@@ -211,7 +213,7 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
             // a constructor nested in its arguments.
             fixed_allowed: check.context.allow_fixed_constructor
             check.context.allow_fixed_constructor = false
-            alias := if base == {
+            ^alias: if base == {
                 .Ident(value, _, _) -> value
                 .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
                     return SemaMethodSpecialCheck{handled: false, value: None}
@@ -220,9 +222,7 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
             if sema_expr_core_import_module(check, alias) != Val("core.mem") {
                 return SemaMethodSpecialCheck{handled: false, value: None}
             }
-            if name != "Fixed" {
-                return SemaMethodSpecialCheck{handled: false, value: None}
-            }
+            if name != "Fixed" -> return SemaMethodSpecialCheck{handled: false, value: None}
             if method != "new" && method != "over" {
                 check.diagnostics.push(sema_error("E0102", span, "`Fixed` has no method `{method}`", "`Fixed` supports `new` and `over` constructors", "write `mem.Fixed.new(size: N)` or `mem.Fixed.over(bytes)`"))
                 sema_call_memory_discard_args(args, check)
@@ -235,22 +235,22 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
 
-            constructor := TAllocCtor.Fixed{size: 1}
-            values := [TExpr]{}
-            index := 0
+            ^constructor: TAllocCtor.Fixed{size: 1}
+            ^values: [TExpr]{}
+            ^index: 0
             loop index < args.len() {
-                argument := args[index]
-                required := if method == "over" -> None else -> Val(Type.Int)
+                ^argument: args[index]
+                ^required: if method == "over" -> None else -> Val(Type.Int)
                 checked: sema_check_expression(argument.expr, required, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
                 if {
                     method == "new" -> {
-                        size_value := sema_call_memory_compiletime_int(argument.expr, checked, check)
+                        ^size_value: sema_call_memory_compiletime_int(argument.expr, checked, check)
                         if size_value == None && sema_call_memory_reads_runtime_local(argument.expr, check.scopes) {
                             check.diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
                             return SemaMethodSpecialCheck{handled: true, value: None}
                         }
                         if size_value == None {
-                            staged := sema_comptime_body_value_find(check.context, check.environment.module_identity, sema_scope_function_owner_key(check.scopes), argument.span, span)
+                            ^staged: sema_comptime_body_value_find(check.context, check.environment.module_identity, sema_scope_function_owner_key(check.scopes), argument.span, span)
                             if staged == {
                                 .Val(body_value) -> {
                                     if body_value.ty != Type.Int {
@@ -266,7 +266,7 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
                                     }
                                 }
                                 .None -> {
-                                    _ := sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "Fixed.new size", argument.expr, Type.Int, argument.span, span)
+                                    ^_: sema_comptime_body_capture(check.context, check.environment.*, check.program.*, check.scopes, "Fixed.new size", argument.expr, Type.Int, argument.span, span)
                                     return SemaMethodSpecialCheck{handled: true, value: None}
                                 }
                             }
@@ -290,14 +290,14 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
                 }
                 index += 1
             }
-            tree_args := [TCallArg]{}
+            ^tree_args: [TCallArg]{}
             index = 0
             loop index < values.len() {
-                borrowed := method == "over"
+                ^borrowed: method == "over"
                 tree_args.push(sema_call_memory_call_arg(args[index], values[index], borrowed, borrowed))
                 index += 1
             }
-            value := sema_tree_node(Type.Named{name: name}, TExprKind.AllocNew{ctor: constructor, args: tree_args}, span)
+            ^value: sema_tree_node(Type.Named{name: name}, TExprKind.AllocNew{ctor: constructor, args: tree_args}, span)
             return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
@@ -307,7 +307,7 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
 }
 
 sema_call_memory_record_allocator_effect: fn(name: String, method: String, result_type: Type, span: Span, check: ^SemaBodyCheck) -> Bool Never! {
-    row := [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
+    ^row: [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
     sema_effect_record_intrinsic_fact(
         check.environment.*,
         check.program.*,
@@ -327,11 +327,11 @@ sema_call_memory_record_allocator_effect: fn(name: String, method: String, resul
 }
 
 sema_call_memory_allocator_method: fn(receiver: Expr, receiver_value: TExpr, name: String, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    updated_args := args
+    ^updated_args: args
     if method != "alloc" && method != "try_alloc" && method != "reset" {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    expected_arity := if method == "reset" -> 0 else -> 1
+    ^expected_arity: if method == "reset" -> 0 else -> 1
     if updated_args.len() != expected_arity {
         check.diagnostics.push(sema_error("E0103", span, "`{name}.{method}` takes {expected_arity} argument{if expected_arity == 1 -> "" else -> "s"}", if method == "reset" -> "reset clears all allocations, keeping the backing buffer" else -> "pass the value you want to store in the allocator", if method == "reset" -> "write `{name}.reset()`" else -> "write `{name}.{method}(my_value)`"))
         sema_call_memory_discard_args(updated_args, check)
@@ -349,11 +349,11 @@ sema_call_memory_allocator_method: fn(receiver: Expr, receiver_value: TExpr, nam
         if name == "Fixed" && !sema_ownership_check_write_change(check.state, receiver, "be reset", check.scopes, check.diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        result_type := Type.Named{name: "Unit"}
+        ^result_type: Type.Named{name: "Unit"}
         if !sema_call_memory_record_allocator_effect(name, method, result_type, span, check) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        receiver_is_ident := if receiver == {
+        ^receiver_is_ident: if receiver == {
             .Ident(_, _, _) -> true
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
         }
@@ -363,31 +363,31 @@ sema_call_memory_allocator_method: fn(receiver: Expr, receiver_value: TExpr, nam
         if sema_ownership_scratch_arena(check.state, receiver, check.scopes) {
             sema_ownership_invalidate_view_owner(check.state, sema_ownership_scratch_place(span), "reset", span)
         } else if receiver_is_ident {
-            places := sema_ownership_places_from_expr_in_state(receiver, check.scopes, check.state)
+            ^places: sema_ownership_places_from_expr_in_state(receiver, check.scopes, check.state)
             loop place in places {
                 sema_ownership_invalidate_view_owner(check.state, place, "reset", span)
             }
         }
-        value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.AllocReset, args: [TExpr]{}}, span)
+        ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.AllocReset, args: [TExpr]{}}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
     payload: sema_check_expression(updated_args[0].expr, None, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    parameter := SemaCallParam{label: "value", name: "value", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(payload.ty), variadic: false}
+    ^parameter: SemaCallParam{label: "value", name: "value", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(payload.ty), variadic: false}
     // `arena.alloc(v)` records no receiver write: it reads the allocator
     // handle (only `reset` writes it). On an allocator name that read is no
     // place read, so the arena's own views never meet it; the name's moves were
     // checked when it was read (sema_ownership_check_root_base_use).
-    ownership := if receiver == .Ident(_, _, _) -> sema_ownership_check_allocator_handle_call(check, "{name}.{method}", receiver, [SemaCallParam]{parameter}, updated_args, span) else -> sema_ownership_check_method_call(check, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, updated_args, span)
+    ^ownership: if receiver == .Ident(_, _, _) -> sema_ownership_check_allocator_handle_call(check, "{name}.{method}", receiver, [SemaCallParam]{parameter}, updated_args, span) else -> sema_ownership_check_method_call(check, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, updated_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    view := Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.AllocatorView}, inner: payload.ty}
-    result := if method == "try_alloc" -> Type.Result{ok: view, err: Type.Named{name: "AllocError"}} else -> view
-    operation := if method == "try_alloc" -> BodyHandleOp.AllocTryAlloc else -> BodyHandleOp.AllocAlloc
+    ^view: Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.AllocatorView}, inner: payload.ty}
+    ^result: if method == "try_alloc" -> Type.Result{ok: view, err: Type.Named{name: "AllocError"}} else -> view
+    ^operation: if method == "try_alloc" -> BodyHandleOp.AllocTryAlloc else -> BodyHandleOp.AllocAlloc
     if !sema_call_memory_record_allocator_effect(name, method, result, span, check) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{payload}}, span)
+    ^value: sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{payload}}, span)
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
@@ -398,9 +398,9 @@ SemaCallMemoryGuard: struct {
 }
 
 sema_call_memory_guard_shape: fn(receiver: Expr, ty: Type, scopes: SemaScopeTable) -> SemaCallMemoryGuard? {
-    marker := TagMarker?{None}
-    inner := Type?{None}
-    editable := false
+    ^marker: TagMarker?{None}
+    ^inner: Type?{None}
+    ^editable: false
     if ty == {
         .Tagged(found_marker, value) -> {
             if found_marker == (TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}) || found_marker == (TagMarker.Internal{internal_tag: InternalTag.SharedGuardEdit}) {
@@ -414,7 +414,7 @@ sema_call_memory_guard_shape: fn(receiver: Expr, ty: Type, scopes: SemaScopeTabl
             if receiver == .Ident(name, _, _) {
                 index: sema_scope_resolve_index(scopes, name)
                 if index != None {
-                    binding := scopes.bindings[index]
+                    ^binding: scopes.bindings[index]
                     editable = binding.symbol.kind == SymbolKind.Parameter && binding.access == AccessConvention.Write
                 }
             }
@@ -441,8 +441,8 @@ sema_call_memory_guard_ast_projection: fn(expression: Expr) -> [String]? {
         .Expr(value) -> Val(value)
         .Block(statements) -> if statements.len() == 1 && statements[0] == .Expr(value) -> Val(value) else -> None
     }
-    body := body_value ?? return None
-    fields := [String]{}
+    ^body: body_value ?? return None
+    ^fields: [String]{}
     loop {
         if body == {
             .Field(base, member, _, _) -> {
@@ -452,7 +452,7 @@ sema_call_memory_guard_ast_projection: fn(expression: Expr) -> [String]? {
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> break
         }
     }
-    parameter_match := if body == {
+    ^parameter_match: if body == {
         .Ident(name, _, _) -> name == lambda.params[0].name
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
@@ -473,8 +473,8 @@ sema_call_memory_guard_tree_projection: fn(value: TExpr, parameter: String) -> [
         .Expr(found) -> Val(found)
         .Block(statements) -> if statements.len() == 1 && statements[0] == .Return(returned, _) -> returned else -> None
     }
-    body := body_value ?? return None
-    fields := [TFieldRef]{}
+    ^body: body_value ?? return None
+    ^fields: [TFieldRef]{}
     loop {
         if body.kind == {
             .Field(base, reference) -> {
@@ -484,7 +484,7 @@ sema_call_memory_guard_tree_projection: fn(value: TExpr, parameter: String) -> [
             .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> break
         }
     }
-    parameter_match := if body.kind == {
+    ^parameter_match: if body.kind == {
         .Local(local) -> local.name == parameter
         .IntLit(_, _) | .StrLit(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> false
     }
@@ -508,9 +508,9 @@ sema_call_memory_guard_projection_stored: fn(path: [TFieldRef], check: SemaBodyC
 }
 
 sema_call_memory_guard_paths_overlap: fn(first: [TFieldRef], second: [TFieldRef]) -> Bool Never! {
-    shortest := if first.len() < second.len() -> first.len() else -> second.len()
+    ^shortest: if first.len() < second.len() -> first.len() else -> second.len()
     if shortest == 0 -> return true
-    index := 0
+    ^index: 0
     loop index < shortest {
         if first[index].name != second[index].name -> return false
         index += 1
@@ -519,7 +519,7 @@ sema_call_memory_guard_paths_overlap: fn(first: [TFieldRef], second: [TFieldRef]
 }
 
 sema_call_memory_guard_check_lambda: fn(argument: CallArg, value_type: Type, return_type: Type?, editable: Bool, check: ^SemaBodyCheck) -> TExpr? {
-    expected := Type.Fn{params: [Type]{value_type}, ret: return_type, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    ^expected: Type.Fn{params: [Type]{value_type}, ret: return_type, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     if argument.expr == .Lambda(_, _) {
         return sema_expression_lambda_host_callback(argument.expr, Val(expected), editable, check)
     }
@@ -532,9 +532,9 @@ sema_call_memory_shared_guard_method: fn(receiver: Expr, receiver_value: TExpr, 
     if method != "map" && method != "split" && method != "wait" {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    wanted := if method == "split" || method == "wait" -> 2 else -> 1
+    ^wanted: if method == "split" || method == "wait" -> 2 else -> 1
     if args.len() != wanted {
-        guidance := if {
+        ^guidance: if {
             method == "map" -> "write `guard.map(fn(value) {{ value.field }})`"
             method == "split" -> "write `guard.split(fn(value) {{ value.left }}, fn(value) {{ value.right }})`"
             else -> "write `guard.wait(condition, fn(value) {{ predicate }})`"
@@ -559,21 +559,21 @@ sema_call_memory_shared_guard_method: fn(receiver: Expr, receiver_value: TExpr, 
             if !sema_effect_record_intrinsic_effects(check, "SharedGuard.wait", span, [EffectRowEntry]{EffectRowEntry{name: "Time.Wait", span: span}}) {
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
-            value := sema_tree_node(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.String}, TExprKind.SharedGuardWait{guard: receiver_value, condition: condition, predicate: lambda}, span)
+            ^value: sema_tree_node(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.String}, TExprKind.SharedGuardWait{guard: receiver_value, condition: condition, predicate: lambda}, span)
             return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
         }
         check.diagnostics.push(sema_error("E0112", args[1].span, "`SharedGuard.wait` predicate must be a lambda", "wait rechecks the predicate after each wake", "write `value -> predicate`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    paths := [[TFieldRef]?]{}
-    values := [TExpr?]{}
-    index := 0
+    ^paths: [[TFieldRef]?]{}
+    ^values: [TExpr?]{}
+    ^index: 0
     loop index < args.len() {
-        projection := sema_call_memory_guard_ast_projection(args[index].expr)
+        ^projection: sema_call_memory_guard_ast_projection(args[index].expr)
         if projection != None {
             if args[index].expr == .Lambda(lambda, _) {
-                updated_args := args
-                updated_lambda := lambda
+                ^updated_args: args
+                ^updated_lambda: lambda
                 updated_lambda.meta.guard_projection = projection
                 updated_args[index].expr = Expr.Lambda{lambda: updated_lambda, id: AST_NODE_GENERATED}
             }
@@ -584,12 +584,12 @@ sema_call_memory_shared_guard_method: fn(receiver: Expr, receiver_value: TExpr, 
             index += 1
             next
         }
-        parameter_name := if args[index].expr == {
+        ^parameter_name: if args[index].expr == {
             .Lambda(lambda, _) -> lambda.params[0].name
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
         }
         path: sema_call_memory_guard_tree_projection(callback, parameter_name)
-        path_valid := path != None
+        ^path_valid: path != None
         if path_valid {
             path_valid = sema_call_memory_guard_projection_stored(path ?? [TFieldRef]{}, check)
         }
@@ -616,9 +616,9 @@ sema_call_memory_shared_guard_method: fn(receiver: Expr, receiver_value: TExpr, 
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         mapped_type: sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"}
-        mapped_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{mapped_type}}}
+        ^mapped_guard: Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{mapped_type}}}
         guard_row: sema_arena_adopt(check.context, receiver_value)
-        value := sema_node(check.context, mapped_guard, NodeKind.SharedGuardMap{guard: guard_row, path: projection, editable: guard.editable}, span)
+        ^value: sema_node(check.context, mapped_guard, NodeKind.SharedGuardMap{guard: guard_row, path: projection, editable: guard.editable}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
     second_callback: values[1] ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -629,11 +629,11 @@ sema_call_memory_shared_guard_method: fn(receiver: Expr, receiver_value: TExpr, 
     }
     first_type: sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"}
     second_type: sema_call_signature_return(second_callback.ty) ?? Type.Named{name: "Unit"}
-    first_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{first_type}}}
-    second_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{second_type}}}
-    result_type := Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "first", ty: first_guard}, TypeTupleField{name: "second", ty: second_guard}}}
+    ^first_guard: Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{first_type}}}
+    ^second_guard: Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{second_type}}}
+    ^result_type: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "first", ty: first_guard}, TypeTupleField{name: "second", ty: second_guard}}}
     guard_row: sema_arena_adopt(check.context, receiver_value)
-    value := sema_node(check.context, result_type, NodeKind.SharedGuardSplit{guard: guard_row, first: first_path, second: second_path, editable: guard.editable}, span)
+    ^value: sema_node(check.context, result_type, NodeKind.SharedGuardSplit{guard: guard_row, first: first_path, second: second_path, editable: guard.editable}, span)
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
@@ -652,7 +652,7 @@ sema_call_try_memory_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     if receiver_value.ty == .Named(name) {
         if name == "Condition" && args.is_empty() && (method == "notify_one" || method == "notify_all") {
             condition_row: sema_arena_adopt(check.context, receiver_value)
-            value := sema_node(check.context, Type.Named{name: "Unit"}, NodeKind.ConditionNotify{condition: condition_row, all: method == "notify_all"}, span)
+            ^value: sema_node(check.context, Type.Named{name: "Unit"}, NodeKind.ConditionNotify{condition: condition_row, all: method == "notify_all"}, span)
             return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
         }
     }
@@ -676,7 +676,7 @@ sema_call_try_raw_pointer_step: fn(receiver: Expr, receiver_value: TExpr, method
         }
     }
     receiver_type: sema_expr_unwrap_tag(receiver_value.ty)
-    element := Type.Int
+    ^element: Type.Int
     if receiver_type == .Apply(name, type_args) {
         if name != "Ptr" || type_args.len() != 1 -> return unhandled
         element = type_args[0].copy()
@@ -696,10 +696,10 @@ sema_call_try_raw_pointer_step: fn(receiver: Expr, receiver_value: TExpr, method
         return rejected
     }
     target: sema_call_core_source_target(check.environment.*, check.program.*, filler.module_identity, filler.name, [Type]{element.copy()}, span, true, check.diagnostics) ?? return rejected
-    call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
+    ^call_args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     loop argument in args -> call_args.push(argument.copy())
     check.scopes.ownership_call_depth += 1
-    value := sema_call_core_check_source_owned(target, method, [Type]{element}, call_args, span, expected, check)
+    ^value: sema_call_core_check_source_owned(target, method, [Type]{element}, call_args, span, expected, check)
     check.scopes.ownership_call_depth -= 1
     SemaMethodSpecialCheck{handled: true, value: value}
 }

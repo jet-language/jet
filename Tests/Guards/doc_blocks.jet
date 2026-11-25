@@ -23,12 +23,12 @@ doc_blocks_is_runnable: fn(code: String) -> Bool {
 }
 
 doc_blocks_extract: fn(file: String, text: String) -> [DocBlock] {
-    blocks := [DocBlock]{}
-    in_block := false
-    tag := ""
-    start_line := 0
-    buf := [String]{}
-    line_no := 0
+    ^blocks: [DocBlock]{}
+    ^in_block: false
+    ^tag: ""
+    ^start_line: 0
+    ^buf: [String]{}
+    ^line_no: 0
     loop raw in text.lines() {
         line_no += 1
         trimmed: raw.trim()
@@ -62,10 +62,10 @@ doc_blocks_first_error: fn(output: String) -> String {
 #Test("doc_blocks") {
     guards_enter_root()
     jet: md_jet()
-    docs := [String]{"README.md"}
+    ^docs: [String]{"README.md"}
     loop path in s3_truth_md_paths("Docs/Spec") -> docs.push(path)
     docs.sort()
-    blocks := [DocBlock]{}
+    ^blocks: [DocBlock]{}
     loop doc in docs {
         text: doc_blocks_files.read(doc) ?? panic("read {doc}: {err}")
         loop block in doc_blocks_extract(doc, text) -> blocks.push(block)
@@ -73,9 +73,9 @@ doc_blocks_first_error: fn(output: String) -> String {
     assert(blocks.len() > 0, "no runnable ```jet blocks found in README.md or Docs/Spec/")
     scratch: doc_blocks_files.temp_dir("jet-doc-blocks-") ?? panic("create temp dir: {err}")
     scratch_path: "{scratch.path}"
-    failures := [String]{}
-    checked := 0
-    idx := 0
+    ^failures: [String]{}
+    ^checked: 0
+    ^idx: 0
     loop block in blocks {
         if block.tag == "jet ignore" -> next
         idx += 1

@@ -22,7 +22,7 @@ use {
 }
 
 release_aside_front: fn(aside: Bool, steps: Int, mode: JetDriverCompileMode) -> JetDriverLoweringInputsResult {
-    source := "Shape: enum {{\n    Circle(radius: Int),\n    Square(side: Int),\n}}\narea: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(radius) -> radius * radius * 3\n        .Square(side) -> side * side\n    }}\n}}\nlabel: fn(shape: Shape) -> String {{ \"area {{area(shape)}}\" }}\nrun: fn() {{\n    print(label(.Circle(radius: 2)))\n    print(label(.Square(side: 3)))\n}}\n"
+    ^source: "Shape: enum {{\n    Circle(radius: Int),\n    Square(side: Int),\n}}\narea: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(radius) -> radius * radius * 3\n        .Square(side) -> side * side\n    }}\n}}\nlabel: fn(shape: Shape) -> String {{ \"area {{area(shape)}}\" }}\nrun: fn() {{\n    print(label(.Circle(radius: 2)))\n    print(label(.Square(side: 3)))\n}}\n"
     loop step in 0..<steps -> source = "{source}step{step}: fn(x: Int) -> Int {{ x + {step} }}\n"
     snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{
@@ -37,7 +37,7 @@ release_aside_front: fn(aside: Bool, steps: Int, mode: JetDriverCompileMode) -> 
         entry_root_identity: "release-aside-root",
         entry_path: "/release-aside/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), mode)
+    ^request: jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), mode)
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request.release_state_aside = aside
     jet_driver_lowering_inputs(request, None)
@@ -45,7 +45,7 @@ release_aside_front: fn(aside: Bool, steps: Int, mode: JetDriverCompileMode) -> 
 
 // One line per fact the native route reads from the front end.
 release_aside_rows: fn(front: JetDriverLoweringInputsResult) -> [String] {
-    rows := [String]{"complete {front.compile.complete} internal {front.compile.internal_problem:Debug} held {front.compile.held != None}"}
+    ^rows: [String]{"complete {front.compile.complete} internal {front.compile.internal_problem:Debug} held {front.compile.held != None}"}
     loop diagnostic in front.compile.diagnostics -> rows.push("{diagnostic.code} {diagnostic.what}")
     if front.inputs == .Val(checked) {
         rows.push("entry {checked.entry_key:Debug} modules {checked.modules.len()} effects {front.compile.entry_effects:Debug}")

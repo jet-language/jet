@@ -25,7 +25,7 @@ text_push_repeat_byte: fn(target: I64, byte: I64, count: I64) {
     if (buffer == I64{0}) {
         return
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         rt_text_put(wrapping(wrapping(buffer + used) + at), byte)
         at += I64{1}
@@ -35,7 +35,7 @@ text_push_repeat_byte: fn(target: I64, byte: I64, count: I64) {
 
 // Start of the scalar that ends at byte offset end (> floor).
 text_scalar_start: fn(data: I64, floor: I64, end: I64) -> I64 {
-    at := end - I64{1}
+    ^at: end - I64{1}
     loop at > floor && (rt_text_byte(wrapping(data + at)) & I64{192}) == (I64{128}) -> at -= I64{1}
     at
 }
@@ -44,8 +44,8 @@ text_scalar_start: fn(data: I64, floor: I64, end: I64) -> I64 {
 // char.is_whitespace is the same White_Space property).
 text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
     data: rt_text_data(value)
-    start := I64{0}
-    end := rt_text_len(value)
+    ^start: I64{0}
+    ^end: rt_text_len(value)
     if leading {
         loop start < end {
             if !unicode_is_white_space(rt_text_decode(wrapping(data + start))) -> break
@@ -91,7 +91,7 @@ text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
     data: rt_text_data(value)
     length: rt_text_len(value)
     result: rt_text_builder_with_capacity(length)
-    at := length
+    ^at: length
     loop at > (I64{0}) {
         start: text_scalar_start(data, I64{0}, at)
         rt_text_append(result, data + start, at - start)
@@ -103,7 +103,7 @@ text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
 #Export(c) jet_text_unicode_is_ascii: fn(value: I64) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (rt_text_byte(wrapping(data + at)) >= I64{128}) { return false }
         at += I64{1}
@@ -202,8 +202,8 @@ text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
     data: rt_text_data(value)
     length: rt_text_len(value)
     result: rt_text_builder_with_capacity(length)
-    column := I64{0}
-    at := I64{0}
+    ^column: I64{0}
+    ^at: I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
         step: rt_text_width(wrapping(data + at))
@@ -238,7 +238,7 @@ text_route_all: fn(value: I64, kind: I64, empty: Bool) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)
     if (length == I64{0}) { return empty }
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         cp: rt_text_decode(wrapping(data + at))
         holds: if {
@@ -268,7 +268,7 @@ text_route_all: fn(value: I64, kind: I64, empty: Bool) -> Bool {
     if (length == I64{0}) { return false }
     first: rt_text_decode(data)
     if !(first == I64{95} || compiler_text_alphabetic(first)) -> return false
-    at := rt_text_width(data)
+    ^at: rt_text_width(data)
     loop at < length {
         cp: rt_text_decode(wrapping(data + at))
         if !(cp == I64{95} || text_char_alnum(cp)) -> return false
@@ -281,9 +281,9 @@ text_route_all: fn(value: I64, kind: I64, empty: Bool) -> Bool {
 #Export(c) jet_text_istitle: fn(value: I64) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)
-    has_cased := false
-    expect_upper := true
-    at := I64{0}
+    ^has_cased: false
+    ^expect_upper: true
+    ^at: I64{0}
     loop at < length {
         cp: rt_text_decode(wrapping(data + at))
         if {
@@ -309,8 +309,8 @@ text_route_all: fn(value: I64, kind: I64, empty: Bool) -> Bool {
 text_cased_all: fn(value: I64, lower: Bool) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)
-    saw := false
-    at := I64{0}
+    ^saw: false
+    ^at: I64{0}
     loop at < length {
         cp: rt_text_decode(wrapping(data + at))
         if unicode_is_cased(cp) {
@@ -345,7 +345,7 @@ text_cased_all: fn(value: I64, lower: Bool) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)
     result: rt_text_builder_with_capacity(length)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         unicode_append_mapping(result, unicode_fold_mapping(rt_text_decode(wrapping(data + at))))
         at += rt_text_width(wrapping(data + at))
@@ -359,7 +359,7 @@ text_cased_all: fn(value: I64, lower: Bool) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)
     result: rt_text_builder_with_capacity(length)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         step: rt_text_width(wrapping(data + at))
         cp: rt_text_decode(wrapping(data + at))
@@ -380,8 +380,8 @@ text_cased_all: fn(value: I64, lower: Bool) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)
     result: rt_text_builder_with_capacity(length)
-    word_start := true
-    at := I64{0}
+    ^word_start: true
+    ^at: I64{0}
     loop at < length {
         step: rt_text_width(wrapping(data + at))
         cp: rt_text_decode(wrapping(data + at))

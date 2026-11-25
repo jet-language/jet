@@ -31,7 +31,7 @@ chores_of: fn(store: db.Store) -> db.Table<Int, Chore> {
 }
 
 ids: fn(rows: [Chore]) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop chore in rows -> out.push("{chore.id}")
     out
 }
@@ -40,7 +40,7 @@ ids: fn(rows: [Chore]) -> [String] {
 // writes it as SQL: the table reads only the team's rows, and a write re-runs
 // it only when the row it changes is the team's before or after.
 team_chores: fn(team: String) -[DB.Read]> [String] ChoreError! {
-    chores := CHORES.guard_edit()
+    ^chores: CHORES.guard_edit()
     chores.value.team_runs += 1
     store: chores.value.store ?? return Err(ChoreError.Unopened)
     query: chores_of(store).query() ?? return Err(ChoreError.Read)
@@ -50,7 +50,7 @@ team_chores: fn(team: String) -[DB.Read]> [String] ChoreError! {
 // The chores whose title holds a word. Its filter calls a method, which is
 // no SQL, so it reads the whole table and every write re-runs it.
 titled_chores: fn(word: String) -[DB.Read]> [String] ChoreError! {
-    chores := CHORES.guard_edit()
+    ^chores: CHORES.guard_edit()
     chores.value.word_runs += 1
     store: chores.value.store ?? return Err(ChoreError.Unopened)
     query: chores_of(store).query() ?? return Err(ChoreError.Read)
@@ -71,7 +71,7 @@ runs: fn() -> String {
 }
 
 remember: fn(store: db.Store) {
-    chores := CHORES.guard_edit()
+    ^chores: CHORES.guard_edit()
     chores.value.store = Val(store.copy())
 }
 

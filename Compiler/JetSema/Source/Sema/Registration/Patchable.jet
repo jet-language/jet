@@ -24,11 +24,11 @@ SEMA_PATCHABLE_BASE_METHODS: "__JetPatchableMethods"
 
 // The generated `T.Patch` items join the module after its declarations.
 sema_patchable_expand: fn(items: ^[Item]) {
-    generated := [Item]{}
+    ^generated: [Item]{}
     loop index in 0..<items.len() {
-        if ^items[index] == .Struct(definition) {
+        if items[index].in_place() == .Struct(definition) {
             if !sema_patchable_eligible(definition) -> next
-            fields := [Field]{}
+            ^fields: [Field]{}
             loop field in definition.fields {
                 if field.computed == None -> fields.push(field.copy())
             }
@@ -36,12 +36,12 @@ sema_patchable_expand: fn(items: ^[Item]) {
             if parsed.diagnostics.len() > 0 -> next
             loop item in parsed.program.items {
                 if item == .Struct(fragment) {
-                    methods := fragment.methods.copy()
+                    ^methods: fragment.methods.copy()
                     sema_patchable_mark(methods, definition)
                     if fragment.name == SEMA_PATCHABLE_BASE_METHODS {
                         loop method in methods -> definition.methods.push(method)
                     } else {
-                        patch := fragment.copy()
+                        ^patch: fragment.copy()
                         patch.name = "{definition.name}.Patch"
                         patch.span = definition.span
                         patch.name_span = definition.name_span
@@ -78,7 +78,7 @@ sema_patchable_eligible: fn(definition: StructDef) -> Bool Never! {
 // A patch field: the parsed `name: Unit? = None` row over the stored field's
 // own type, visibility and spans.
 sema_patchable_field: fn(parsed: Field, field: Field) -> Field Never! {
-    row := parsed.copy()
+    ^row: parsed.copy()
     row.is_pub = field.is_pub
     row.is_package_pub = field.is_package_pub
     row.name_span = field.name_span
@@ -104,7 +104,7 @@ sema_patchable_source: fn(base: String, fields: [Field]) -> String Never! {
     applied: loop field in fields -> "            {field.name}: patch.{field.name} ?? self.{field.name}"
     changed: loop field in fields -> "            {field.name}: if new.{field.name} == old.{field.name} -> None else -> Val(new.{field.name})"
     merged: loop field in fields -> "            {field.name}: if self.{field.name} == None -> other.{field.name} else -> self.{field.name}"
-    out := [String]{}
+    ^out: [String]{}
     out.push("{SEMA_PATCHABLE_BASE_METHODS}: struct {{\n")
     out.push("    apply: fn(self, patch: {patch}) -> {base} {{\n        return {base}{{\n{applied.join(",\n")}\n        }}\n    }}\n\n")
     out.push("    diff: fn(new: ^^{base}, old: ^^{base}) -> {patch} {{\n        return {patch}{{\n{changed.join(",\n")}\n        }}\n    }}\n}}\n\n")

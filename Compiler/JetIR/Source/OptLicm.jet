@@ -25,15 +25,11 @@ ir_licm_pure_op: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     dst: f.dst[at]
     if dst < 0 -> return false
     kind: m.types[f.slot_type[dst]].kind
-    if op == .Const {
-        return kind == .Word || kind == .Int || kind == .Bool
-    }
+    if op == .Const -> return kind == .Word || kind == .Int || kind == .Bool
     if op == .Add || op == .Sub || op == .Mul {
         return (kind == .Word || kind == .Int) && f.c[at] == IR_OVERFLOW_WRAP
     }
-    if op == .BitAnd || op == .BitOr || op == .BitXor {
-        return kind == .Word || kind == .Bool
-    }
+    if op == .BitAnd || op == .BitOr || op == .BitXor -> return kind == .Word || kind == .Bool
     if op == .Neg || op == .Not {
         return kind == .Word || kind == .Bool || kind == .Float || kind == .Float32
     }
@@ -45,7 +41,7 @@ ir_licm_pure_op: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 // (every If/Loop open at `def` stays open through `target`).
 ir_licm_dominates: fn(f: IRFunction, def: Int, target: Int) -> Bool Never! {
     if def < 0 || def >= target -> return false
-    k := def + 1
+    ^k: def + 1
     loop k < target {
         op: f.op[k]
         if op == .End {
@@ -80,7 +76,7 @@ ir_licm_safe_routes: fn(m: IRModule) -> [Int] Never! {
         "jet_char_len",
         "jet_string_bytes",
     }
-    ids := [Int]{}
+    ^ids: [Int]{}
     loop name in names {
         id: ir_interned_name(m, name) ?? -2
         if id >= 0 -> ids.push(id)
@@ -124,7 +120,9 @@ ir_licm_memory_pure: fn(m: IRModule, stop_keys: [Bool], f: IRFunction, safe_rout
 ir_licm_base_size: fn(m: IRModule, f: IRFunction, write_at: [Int], slot: Int) -> Int Never! {
     if slot < 0 || slot >= f.slot_type.len() -> return 0
     type_row: f.slot_type[slot]
-    if slot < f.param_count && m.types[type_row].kind == .Aggregate && m.types[type_row].size > 0 -> return m.types[type_row].size
+    if slot < f.param_count && m.types[type_row].kind == .Aggregate && m.types[type_row].size > 0 {
+        return m.types[type_row].size
+    }
     def: write_at[slot]
     if def >= 0 && f.op[def] == .StackAddress && f.a[def] > 0 -> return f.a[def]
     0
@@ -135,7 +133,7 @@ ir_licm_base_size: fn(m: IRModule, f: IRFunction, write_at: [Int], slot: Int) ->
 ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: ^IRFunction) -> Int Never! {
     count: f.op.len()
     if count < 4 -> return 0
-    has_loop := false
+    ^has_loop: false
     loop at in 0..<count {
         if f.op[at] == .Loop {
             has_loop = true
@@ -151,7 +149,7 @@ ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: ^IRFunction) -> Int Never! {
 ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_len_route: Int, f: ^IRFunction) -> Int Never! {
     count: f.op.len()
     if count < 4 -> return 0
-    has_loop := false
+    ^has_loop: false
     loop at in 0..<count {
         if f.op[at] == .Loop {
             has_loop = true
@@ -161,9 +159,9 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
     if !has_loop -> return 0
 
     slots: f.slot_type.len()
-    writes := loop _ in 0..<slots -> 0
-    write_at := loop _ in 0..<slots -> -1
-    dropped := loop _ in 0..<slots -> false
+    ^writes: loop _ in 0..<slots -> 0
+    ^write_at: loop _ in 0..<slots -> -1
+    ^dropped: loop _ in 0..<slots -> false
     loop at in 0..<count {
         w: ir_x64_write(f, at)
         if w >= 0 {
@@ -177,17 +175,17 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
     }
 
     // Collect loops innermost-first (reverse order of Loop opener index).
-    loops := [Int]{}
-    idx := count - 1
+    ^loops: [Int]{}
+    ^idx: count - 1
     loop idx >= 0 {
         if f.op[idx] == .Loop -> loops.push(idx)
         idx -= 1
     }
 
     // For each instruction, which Loop header it is hoisted before (-1: stays).
-    hoist_to := loop _ in 0..<count -> -1
-    total_hoisted := 0
-    reads := [Int]{}
+    ^hoist_to: loop _ in 0..<count -> -1
+    ^total_hoisted: 0
+    ^reads: [Int]{}
 
     loop loop_at in loops {
         loop_end: f.a[loop_at]
@@ -195,7 +193,7 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
         mem_pure: ir_licm_memory_pure(m, stop_keys, f, safe_routes, loop_at, loop_end)
 
         // Track which slots are currently written inside this loop (and not yet hoisted out).
-        in_loop := loop _ in 0..<slots -> false
+        ^in_loop: loop _ in 0..<slots -> false
         loop k in (loop_at + 1)..<loop_end {
             if hoist_to[k] >= 0 && hoist_to[k] <= loop_at -> next
             w: ir_x64_write(f, k)
@@ -204,10 +202,10 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
 
         // Compute top-level positions (not inside any If or nested Loop) and
         // unconditional prefix before the first branch/exit/call.
-        top_level := loop _ in 0..<(loop_end - loop_at) -> false
-        always_runs := loop _ in 0..<(loop_end - loop_at) -> false
-        if_or_loop_depth := 0
-        prefix_open := true
+        ^top_level: loop _ in 0..<(loop_end - loop_at) -> false
+        ^always_runs: loop _ in 0..<(loop_end - loop_at) -> false
+        ^if_or_loop_depth: 0
+        ^prefix_open: true
         loop k in (loop_at + 1)..<loop_end {
             op: f.op[k]
             if op == .End {
@@ -231,15 +229,13 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
                     top_level[k - loop_at] = true
                     always_runs[k - loop_at] = prefix_open
                 }
-            } else if op == .If || op == .Loop {
-                if_or_loop_depth += 1
-            }
+            } else if op == .If || op == .Loop { if_or_loop_depth += 1 }
         }
 
         // Fixed-point hoisting for this loop (up to 4 rounds).
-        round := 0
+        ^round: 0
         loop round < 4 {
-            gained := 0
+            ^gained: 0
             loop k in (loop_at + 1)..<loop_end {
                 if !top_level[k - loop_at] -> next
                 // If already hoisted to an inner loop inside this loop, we can hoist it
@@ -255,7 +251,7 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
 
                 // Check all slot operands are invariant in this loop.
                 ir_x64_reads_into(f, k, reads)
-                invariant := true
+                ^invariant: true
                 loop r in reads {
                     if r >= 0 && in_loop[r] {
                         invariant = false
@@ -275,12 +271,16 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
 
                 if op == .Load {
                     if !mem_pure -> next
-                    if m.types[dst_row].drop != "" && !(m.types[dst_row].kind == .Int && f.c[k] == IR_LOAD_LENGTH) -> next
+                    if m.types[dst_row].drop != "" && !(m.types[dst_row].kind == .Int && f.c[k] == IR_LOAD_LENGTH) {
+                        next
+                    }
                     if !always_runs[k - loop_at] {
                         base: f.a[k]
                         offset: f.b[k]
                         base_size: ir_licm_base_size(m, f, write_at, base)
-                        if base_size <= 0 || offset < 0 || offset + m.types[dst_row].size > base_size -> next
+                        if base_size <= 0 || offset < 0 || offset + m.types[dst_row].size > base_size {
+                            next
+                        }
                     }
                 }
 
@@ -297,16 +297,16 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
     if total_hoisted == 0 -> return 0
 
     // Bucket hoisted instructions by their target loop header, preserving original order.
-    buckets := [Int:[Int]]{}
+    ^buckets: [Int:[Int]]{}
     loop k in 0..<count {
         target: hoist_to[k]
         if target < 0 -> next
-        list := buckets.get(target) ?? [Int]{}
+        ^list: buckets.get(target) ?? [Int]{}
         list.push(k)
         buckets[target] = list.move()
     }
 
-    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ^code: IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     loop at in 0..<count {
         if buckets.get(at) == .Val(items) {
             loop k in items {
@@ -328,12 +328,12 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
 }
 
 #Test("LICM hoists loop-invariant aggregate field loads before the loop") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     flag: ir_scalar_type_row(m, Type.Bool)
     agg_tid: ir_module_intern_tid(m, Type.Named{name: "Pair"})
     agg: ir_intern_type(m, "test Pair", ir_layout(IRTypeKind.Aggregate, agg_tid, 16, 8, IRClass.Memory, false, 64, ""))
-    g := ir_function_new("scan", "test:licm.jet.scan", "", "licm.jet", 1)
+    ^g: ir_function_new("scan", "test:licm.jet.scan", "", "licm.jet", 1)
     p: ir_slot(g, agg, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
     g.result = word
     i: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
@@ -342,32 +342,32 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
     v: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     one: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, acc, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Load, n, p, 0, IR_LOAD_LENGTH, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_emit(g, IROp.Load, v, p, 8, -1, 4)
-    _ := ir_emit(g, IROp.Add, acc, acc, v, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, acc, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Load, n, p, 0, IR_LOAD_LENGTH, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Load, v, p, 8, -1, 4)
+    ^_: ir_emit(g, IROp.Add, acc, acc, v, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
     ir_end(g, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Return, -1, acc, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Return, -1, acc, -1, -1, 5)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     f: m.functions[0]
-    loop_at := -1
-    loads_before := 0
-    loads_inside := 0
+    ^loop_at: -1
+    ^loads_before: 0
+    ^loads_inside: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .Loop && loop_at < 0 -> loop_at = at
     }
@@ -383,12 +383,12 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
 }
 
 #Test("LICM does not hoist loads out of a loop that stores to memory") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     flag: ir_scalar_type_row(m, Type.Bool)
     agg_tid: ir_module_intern_tid(m, Type.Named{name: "Cell"})
     agg: ir_intern_type(m, "test Cell", ir_layout(IRTypeKind.Aggregate, agg_tid, 8, 8, IRClass.Memory, false, 64, ""))
-    g := ir_function_new("mut_scan", "test:licm.jet.mut_scan", "", "licm.jet", 1)
+    ^g: ir_function_new("mut_scan", "test:licm.jet.mut_scan", "", "licm.jet", 1)
     p: ir_slot(g, agg, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
     g.result = word
     i: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
@@ -396,31 +396,31 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
     one: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     v: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, ten, 10, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, ten, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_emit(g, IROp.Load, v, p, 0, -1, 4)
-    _ := ir_emit(g, IROp.Add, v, v, one, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Store, -1, p, 0, v, 4)
-    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 4)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, ten, 10, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, ten, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Load, v, p, 0, -1, 4)
+    ^_: ir_emit(g, IROp.Add, v, v, one, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Store, -1, p, 0, v, 4)
+    ^_: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 4)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
     ir_end(g, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     f: m.functions[0]
-    loop_at := -1
-    loads_inside := 0
+    ^loop_at: -1
+    ^loads_inside: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .Loop && loop_at < 0 -> loop_at = at
     }
@@ -432,41 +432,41 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
 }
 
 #Test("LICM hoists an IR_LOAD_LENGTH Int load from a memory-pure loop") {
-    m := ir_module_new()
+    ^m: ir_module_new()
     exact: ir_scalar_type_row(m, Type.Int)
     flag: ir_scalar_type_row(m, Type.Bool)
     list_tid: ir_module_intern_tid(m, Type.List{element: Type.Int})
     list: ir_intern_type(m, "test [Int]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Pointer, false, 64, ""))
-    g := ir_function_new("len_hoist", "test:licm.jet.len_hoist", "", "licm.jet", 1)
+    ^g: ir_function_new("len_hoist", "test:licm.jet.len_hoist", "", "licm.jet", 1)
     xs: ir_slot(g, list, IRSlotKind.Param, ir_intern_name(m, "xs"), 1)
     g.result = exact
     i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
     one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     n: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
     done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
-    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
-    _ := ir_open(g, IROp.Block, 3)
-    _ := ir_open(g, IROp.Loop, 3)
-    _ := ir_emit(g, IROp.Load, n, xs, 0, IR_LOAD_LENGTH, 3)
-    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
-    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
-    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
-    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ^_: ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    ^_: ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    ^_: ir_open(g, IROp.Block, 3)
+    ^_: ir_open(g, IROp.Loop, 3)
+    ^_: ir_emit(g, IROp.Load, n, xs, 0, IR_LOAD_LENGTH, 3)
+    ^_: ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    ^_: ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    ^_: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
+    ^_: ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
     ir_end(g, 4)
     ir_end(g, 4)
-    _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
+    ^_: ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
     m.entry = 0
     ir_function_bind(m, g.key, 0)
     m.functions.push(g)
-    options := ir_opt_options(2)
+    ^options: ir_opt_options(2)
     options.verify = true
     report: ir_optimize_module(m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
     f: m.functions[0]
-    loop_at := -1
-    loads_before := 0
-    loads_inside := 0
+    ^loop_at: -1
+    ^loads_before: 0
+    ^loads_inside: 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .Loop && loop_at < 0 -> loop_at = at
     }
@@ -480,4 +480,3 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
     assert_eq(loads_before, 1)
     assert_eq(loads_inside, 0)
 }
-

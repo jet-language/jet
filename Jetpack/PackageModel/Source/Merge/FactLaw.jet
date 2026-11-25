@@ -296,19 +296,19 @@ FactContribution: struct {
     }
 
     at: fn(^^self, span: Span) -> FactContribution Never! {
-        updated := self
+        ^updated: self
         updated.span = span
         updated
     }
 
     for_target: fn(^^self, target: Span) -> FactContribution Never! {
-        updated := self
+        ^updated: self
         updated.target = Val(target)
         updated
     }
 
     force_with_reason: fn(^^self, reason: String) -> FactContribution Never! {
-        updated := self
+        ^updated: self
         updated.force = true
         updated.force_reason = Val(reason)
         updated
@@ -323,7 +323,7 @@ FactContribution: struct {
     forced: fn(^^self) -> FactContribution Never! { self.force_with_reason(".Pin") }
 
     with_reason: fn(^^self, reason: String) -> FactContribution Never! {
-        updated := self
+        ^updated: self
         updated.reason = Val(reason)
         updated
     }
@@ -343,7 +343,7 @@ EffectiveFact: struct {
     forced: Bool,
 
     explain: fn(self) -> String Never! {
-        out := "{self.key.name} = {self.value.display()}"
+        ^out: "{self.key.name} = {self.value.display()}"
         loop index in 0..<self.provenance.len() {
             contribution: self.provenance[index]
             status: if {
@@ -410,13 +410,13 @@ pkg_fact_precedes: fn(left: FactContribution, right: FactContribution) -> Bool N
 // and a tighten-only key may never widen along the chain. None when nobody
 // writes the fact and the key has no default.
 pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
-    chain := [FactContribution]{}
+    ^chain: [FactContribution]{}
     loop declaration in declarations {
         if declaration.key == key.name -> chain.push(declaration.copy())
     }
     if key.default == {
         .Val(written) -> {
-            has_default := false
+            ^has_default: false
             loop declaration in chain {
                 if declaration.default -> has_default = true
             }
@@ -428,9 +428,9 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
     }
     if chain.len() == 0 -> return Ok(None)
     // A stable insertion sort keeps equal writers in their written order.
-    sorted := [FactContribution]{}
+    ^sorted: [FactContribution]{}
     loop declaration in chain {
-        index := sorted.len()
+        ^index: sorted.len()
         loop index > 0 && pkg_fact_precedes(declaration, sorted[index - 1]) -> index -= 1
         sorted.insert(index, declaration)
     }
@@ -443,7 +443,7 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
     // Same-rung writers must agree, except dependency entries: they stand
     // when a more explicit writer decides, and conflict below when their
     // layer is the one that decides.
-    group_start := 0
+    ^group_start: 0
     loop index in 1..<chain.len() {
         declaration: chain[index]
         first: chain[group_start]
@@ -453,29 +453,29 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
             return Err(FactError.Conflict{key: key.name, layer: declaration.layer, first: first, second: declaration})
         }
     }
-    force_layer := -1
+    ^force_layer: -1
     loop declaration in chain {
         if declaration.force && declaration.layer.rank() > force_layer {
             force_layer = declaration.layer.rank()
         }
     }
-    eligible := [Int]{}
+    ^eligible: [Int]{}
     loop index in 0..<chain.len() {
         if force_layer < 0 || chain[index].layer.rank() <= force_layer -> eligible.push(index)
     }
-    effective_layer := -1
+    ^effective_layer: -1
     loop index in eligible {
         if chain[index].layer.rank() > effective_layer {
             effective_layer = chain[index].layer.rank()
         }
     }
-    effective_scope := -1
+    ^effective_scope: -1
     loop index in eligible {
         if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() > effective_scope {
             effective_scope = chain[index].scope.rank()
         }
     }
-    candidates := [Int]{}
+    ^candidates: [Int]{}
     loop index in eligible {
         if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() == effective_scope {
             candidates.push(index)

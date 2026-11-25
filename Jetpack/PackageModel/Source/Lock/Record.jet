@@ -21,16 +21,16 @@ pkg_lock_file_path: fn(project_root: String) -> String Never! {
 // Read one lock without letting a corrupt line grow the buffer without
 // bound: the line and whole-file limits are checked per buffered segment.
 pkg_lock_read_text: fn(path: String) -[FS]> String LockError! {
-    reader := files.open(path)
-    raw := [U8]{}
-    line_length := 0
-    line_number := 1
+    ^reader: files.open(path)
+    ^raw: [U8]{}
+    ^line_length: 0
+    ^line_number: 1
     loop {
         chunk: reader.read_bytes(8192)
         if chunk.len() == 0 -> break
-        offset := 0
+        ^offset: 0
         loop offset < chunk.len() {
-            end := offset
+            ^end: offset
             loop end < chunk.len() && (Int{chunk[end]}) != 10 -> end += 1
             has_newline: end < chunk.len()
             content_length: end - offset
@@ -137,7 +137,7 @@ pkg_lock_publish_or_report: fn(project_root: String, contents: String) -[FS, Env
 // M2: persist the inferred runtime profile of the root
 // package after a build. A no-op when the lock or package is absent.
 pkg_lock_record_inferred_layer: fn(project_root: String, package_name: String, layer: RuntimeLayer) -[FS, Env, Exec, Time, Time.Wait, IO]> {
-    lock := pkg_lock_load(project_root) ?? return
+    ^lock: pkg_lock_load(project_root) ?? return
     loop index in 0..<lock.packages.len() {
         if lock.packages[index].name == package_name {
             lock.packages[index].inferred_layer = Val(layer)
@@ -152,7 +152,7 @@ pkg_lock_record_inferred_layer: fn(project_root: String, package_name: String, l
 // lock after it is built, so cache substitution can be driven off the lock.
 // A no-op when the lock or the named package is absent.
 pkg_lock_record_envelope: fn(project_root: String, package_name: String, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
-    lock := pkg_lock_load(project_root) ?? return
+    ^lock: pkg_lock_load(project_root) ?? return
     loop index in 0..<lock.packages.len() {
         if lock.packages[index].name == package_name {
             lock.packages[index].envelope = Val(envelope)
@@ -203,7 +203,7 @@ pkg_lock_record_nix_realization: fn(project_root: String, name: String, version:
         return Err(LockError.Invalid("Nix closure system does not match the lock envelope platform"))
     }
     reference: pkg_canonical_locked_ref(reference_input)
-    lock := pkg_lock_load_for_update(project_root)
+    ^lock: pkg_lock_load_for_update(project_root)
     source_name: pkg_lock_reference_source_name(reference)
     if lock.find_source_channel(source_name) == None {
         // The channel label is presentation metadata; the exact input is the
@@ -214,7 +214,7 @@ pkg_lock_record_nix_realization: fn(project_root: String, name: String, version:
         .Val(package) -> package.provenance
         .None -> None
     }
-    existing_receipt := String?{None}
+    ^existing_receipt: String?{None}
     loop package in lock.packages {
         if package.name != name || package.version != version -> next
         if package.source == {
@@ -250,10 +250,10 @@ pkg_lock_reference_source_name: fn(reference: String) -> String Never! {
 // foreign dependency name keeps a provider change visible and preserves the
 // receipt only when the identity and envelope are unchanged.
 pkg_lock_record_foreign_realization: fn(project_root: String, name: String, version: String, language: String, reference: String, output: String, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait]> LockError! {
-    lock := pkg_lock_load_for_update(project_root)
+    ^lock: pkg_lock_load_for_update(project_root)
     lock.version = PKG_LOCK_VERSION
     source: LockSource.Foreign{language: language, reference: reference, output: output}
-    existing_receipt := String?{None}
+    ^existing_receipt: String?{None}
     loop package in lock.packages {
         if package.name == name && package.version == version && package.source == source && pkg_lock_envelope_output_is(package, envelope.output_hash) {
             existing_receipt = package.receipt
@@ -278,9 +278,9 @@ pkg_lock_record_rust_bridge: fn(project_root: String, bridge_identity: String, p
     if packages.len() == 0 {
         return
     }
-    lock := pkg_lock_load_for_update(project_root)
+    ^lock: pkg_lock_load_for_update(project_root)
     lock.version = PKG_LOCK_VERSION
-    kept := [LockedPackage]{}
+    ^kept: [LockedPackage]{}
     loop package in lock.packages {
         if package.provenance_build() == {
             .Val(build) -> {
@@ -334,7 +334,7 @@ pkg_lock_locked_nix_package_strict: fn(project_root: String, reference_input: St
                 if closure.output != output {
                     return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
                 }
-                envelope := package.envelope ?? LockEnvelope.empty()
+                ^envelope: package.envelope ?? LockEnvelope.empty()
                 if package.envelope == None {
                     envelope.output_hash = closure.output
                     envelope.platform = closure.system
@@ -356,7 +356,7 @@ pkg_lock_locked_nix_package_strict: fn(project_root: String, reference_input: St
 // only when the exact source identity and envelope output are unchanged,
 // and replace the provider's record for `name`.
 pkg_lock_record_source_realization: fn(project_root: String, name: String, version: String, source: LockSource, source_hash: String, dependencies: [String], envelope: LockEnvelope, same_provider: fn(LockedPackage) -> Bool Never!) -[FS, Env, Exec, Time, Time.Wait, IO]> {
-    lock := pkg_lock_load_or_empty(project_root)
+    ^lock: pkg_lock_load_or_empty(project_root)
     lock.version = PKG_LOCK_VERSION
     existing_provenance: if pkg_lock_find_package_where(lock, fn(package) { package.name == name && package.version == version && same_provider(package) }) == {
         .Val(package) -> package.provenance
@@ -465,9 +465,9 @@ pkg_lock_registry_realization: fn(project_root: String, registry: String, refere
 pkg_lock_record_toolchain: fn(project_root: String, toolchain: LockedToolchain) -[FS, Env, Exec, Time, Time.Wait]> LockError! {
     toolchain.validate_completeness()
     loaded: pkg_lock_load_strict(project_root)
-    lock := loaded ?? LockFile.empty()
+    ^lock: loaded ?? LockFile.empty()
     lock.version = PKG_LOCK_VERSION
-    replaced := false
+    ^replaced: false
     loop index in 0..<lock.toolchains.len() {
         if !replaced && lock.toolchains[index].channel == toolchain.channel {
             lock.toolchains[index] = toolchain
@@ -486,9 +486,9 @@ pkg_lock_record_toolchain: fn(project_root: String, toolchain: LockedToolchain) 
 // (#1187): upsert a project-locked browser binary by
 // engine.
 pkg_lock_record_browser: fn(project_root: String, browser: LockedBrowser) -[FS, Env, Exec, Time, Time.Wait, IO]> {
-    lock := pkg_lock_load_or_empty(project_root)
+    ^lock: pkg_lock_load_or_empty(project_root)
     lock.version = PKG_LOCK_VERSION
-    replaced := false
+    ^replaced: false
     loop index in 0..<lock.browsers.len() {
         if !replaced && lock.browsers[index].engine == browser.engine {
             lock.browsers[index] = browser
@@ -509,13 +509,13 @@ pkg_lock_locked_source_channel: fn(project_root: String, name: String) -[FS]> Lo
 // Upsert a named source channel lock, keyed by source
 // name so moving a channel replaces the prior exact identity.
 pkg_lock_record_source_channel: fn(project_root: String, input: LockedSourceChannel) -[FS, Env, Exec, Time, Time.Wait]> LockError! {
-    source := input
+    ^source: input
     source.exact = pkg_canonical_locked_ref(source.exact)
     source.validate_completeness()
     loaded: pkg_lock_load_strict(project_root)
-    lock := loaded ?? LockFile.empty()
+    ^lock: loaded ?? LockFile.empty()
     lock.version = PKG_LOCK_VERSION
-    replaced := false
+    ^replaced: false
     loop index in 0..<lock.source_channels.len() {
         if !replaced && lock.source_channels[index].name == source.name {
             lock.source_channels[index] = source.copy()

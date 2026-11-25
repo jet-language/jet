@@ -15,14 +15,14 @@ use jetpack_foundation.[
 
 pkg_parse_workspace_policy: fn(src: String) -> OverlayPolicy OverlayError! {
     body: pkg_overlay_workspace_body(src) ?? return Ok(OverlayPolicy.empty())
-    policy := OverlayPolicy.empty()
+    ^policy: OverlayPolicy.empty()
     policy.allow_unfree = pkg_overlay_parse_allow_unfree(body)
     pkg_overlay_reject_unsupported_policy_fields(body)
     policy.build_deny = pkg_overlay_parse_build_deny(body)
     policy.build_grants = pkg_overlay_parse_build_grants(body)
     raw: body.bytes()
     keyword_len: WORKSPACE_OVERLAY.bytes().len()
-    position := 0
+    ^position: 0
     loop position < raw.len() {
         at: pkg_overlay_find_word(raw, WORKSPACE_OVERLAY, position) ?? break
         name_at: pkg_bytes_skip_space(raw, at + keyword_len)
@@ -39,7 +39,7 @@ pkg_parse_workspace_policy: fn(src: String) -> OverlayPolicy OverlayError! {
         policy.overlays.push(parsed)
         position = open + 1 + block.consumed
     }
-    packages := [String]{}
+    ^packages: [String]{}
     loop overlay in policy.overlays {
         loop candidate in overlay.packages -> packages.push(candidate.package)
     }
@@ -53,9 +53,9 @@ pkg_parse_workspace_policy: fn(src: String) -> OverlayPolicy OverlayError! {
 }
 
 pkg_overlay_parse_set: fn(name: String, body: String) -> OverlaySet OverlayError! {
-    overlay := OverlaySet{name: name, provider: None, packages: [PackageOverride]{}}
-    saw_overrides := false
-    keyed := [PackageOverride]{}
+    ^overlay: OverlaySet{name: name, provider: None, packages: [PackageOverride]{}}
+    ^saw_overrides: false
+    ^keyed: [PackageOverride]{}
     loop statement in pkg_overlay_top_level_statements(body) {
         line: pkg_overlay_trim_end_all(statement.trim(), ";").trim()
         if line == "" -> next
@@ -106,8 +106,8 @@ pkg_overlay_parse_set: fn(name: String, body: String) -> OverlaySet OverlayError
 // facts out of module evaluation while giving every consumer one typed
 // `PackageOverride` value.
 pkg_overlay_parse_keyed_overrides: fn(body: String) -> [PackageOverride] OverlayError! {
-    packages := [PackageOverride]{}
-    names := [String]{}
+    ^packages: [PackageOverride]{}
+    ^names: [String]{}
     loop piece in pkg_overlay_top_level_commas(body) {
         entry: pkg_overlay_split_colon(piece.trim()) ?? return Err(OverlayError.Malformed("each `overrides` entry needs `<package>: {{ … }}`"))
         package: pkg_overlay_unquote(entry.before.trim())
@@ -132,8 +132,8 @@ pkg_overlay_parse_keyed_overrides: fn(body: String) -> [PackageOverride] Overlay
 }
 
 pkg_overlay_parse_keyed_record: fn(package: String, body: String) -> PackageOverride OverlayError! {
-    result := PackageOverride.new(package)
-    seen := [String:String]{}
+    ^result: PackageOverride.new(package)
+    ^seen: [String:String]{}
     loop piece in pkg_overlay_top_level_commas(body) {
         entry: pkg_overlay_split_colon(piece.trim()) ?? return Err(OverlayError.Malformed("each package override field needs `name: value`"))
         field: entry.before.trim()
@@ -208,8 +208,8 @@ pkg_overlay_priority_payload: fn(input: String) -> {value: String, priority: Int
         .None -> {}
     }
     inner: pkg_overlay_strip_wrapped(raw, "Priority(", ")") ?? return Ok({priority: 0, value: raw})
-    weight := ""
-    value := ""
+    ^weight: ""
+    ^value: ""
     if pkg_overlay_split_colon(inner) == {
         .Val(parts) -> {
             weight = parts.before.trim()
@@ -236,7 +236,7 @@ pkg_overlay_parse_i32: fn(text: String) -> Int? Never! {
     negative: first == 45
     start: if first == 43 || first == 45 -> 1 else -> 0
     if start == raw.len() -> return None
-    value := 0
+    ^value: 0
     loop index in start..<raw.len() {
         digit: Int{raw[index]} - 48
         if digit < 0 || digit > 9 -> return None
@@ -250,7 +250,7 @@ pkg_overlay_parse_i32: fn(text: String) -> Int? Never! {
 
 pkg_overlay_parse_flag_record: fn(input: String) -> [String] OverlayError! {
     inner: pkg_overlay_strip_wrapped(input.trim(), "{{", "}}") ?? return Err(OverlayError.Malformed("`flags` must be a record like `{{ feature: true }}`"))
-    flags := [String]{}
+    ^flags: [String]{}
     loop piece in pkg_overlay_top_level_commas(inner) {
         entry: pkg_overlay_split_colon(piece.trim()) ?? return Err(OverlayError.Malformed("each `flags` entry needs `name: true|false`"))
         if pkg_overlay_parse_bool(entry.after) {
@@ -262,7 +262,7 @@ pkg_overlay_parse_flag_record: fn(input: String) -> [String] OverlayError! {
 
 pkg_overlay_parse_env_record: fn(input: String) -> [OverrideEnv] OverlayError! {
     inner: pkg_overlay_strip_wrapped(input.trim(), "{{", "}}") ?? return Err(OverlayError.Malformed("`env` must be a record like `{{ CC: \"clang\" }}`"))
-    values := [OverrideEnv]{}
+    ^values: [OverrideEnv]{}
     loop piece in pkg_overlay_top_level_commas(inner) {
         entry: pkg_overlay_split_colon(piece.trim()) ?? return Err(OverlayError.Malformed("each `env` entry needs `NAME: \"value\"`"))
         key: pkg_overlay_unquote(entry.before.trim())
@@ -323,13 +323,13 @@ pkg_overlay_provider_channel: fn(call: String) -> String? Never! {
 pkg_overlay_parse_package_line: fn(line: String) -> PackageOverride? OverlayError! {
     if !line.starts_with("package(") -> return Ok(None)
     closed: line.removeprefix("package(").split_once(")") ?? return Err(OverlayError.Malformed("`package(...)` override needs a closing `)`"))
-    result := PackageOverride.new(pkg_overlay_unquote(closed.before))
+    ^result: PackageOverride.new(pkg_overlay_unquote(closed.before))
     rest: pkg_overlay_trim_end_all(closed.after.trim(), ",")
     if !rest.starts_with(".") {
         return Err(OverlayError.Malformed("`package(...)` override needs a field like `.patches`"))
     }
     field_rest: rest.removeprefix(".")
-    operation := field_rest.split_once("+=")
+    ^operation: field_rest.split_once("+=")
     if operation == None -> operation = field_rest.split_once(":")
     if operation == None -> operation = field_rest.split_once("=")
     parts: operation ?? return Err(OverlayError.Malformed("`package(...)` override needs `:`, `=`, or `+=`"))
@@ -346,7 +346,7 @@ pkg_overlay_parse_package_line: fn(line: String) -> PackageOverride? OverlayErro
 }
 
 pkg_overlay_parse_patch_list: fn(input: String) -> [String] OverlayError! {
-    patches := [String]{}
+    ^patches: [String]{}
     loop entry in pkg_overlay_parse_list(input) {
         item: entry.trim()
         patches.push(pkg_overlay_unquote(pkg_overlay_strip_wrapped(item.copy(), "patch(", ")") ?? item.copy()))
@@ -355,7 +355,7 @@ pkg_overlay_parse_patch_list: fn(input: String) -> [String] OverlayError! {
 }
 
 pkg_overlay_parse_string_list: fn(input: String) -> [String] OverlayError! {
-    values := [String]{}
+    ^values: [String]{}
     loop entry in pkg_overlay_parse_list(input) -> values.push(pkg_overlay_unquote(entry.trim()))
     Ok(values)
 }
@@ -414,8 +414,8 @@ pkg_overlay_top_level_policy_fields: fn(body: String) -> [OverlayPolicyField] Ov
     raw: body.bytes()
     word: MANIFEST_BLOCK_POLICY
     word_len: word.bytes().len()
-    fields := [OverlayPolicyField]{}
-    position := 0
+    ^fields: [OverlayPolicyField]{}
+    ^position: 0
     loop position < raw.len() {
         at: pkg_overlay_find_word(raw, word, position) ?? break
         after: at + word_len
@@ -438,7 +438,7 @@ pkg_overlay_top_level_policy_fields: fn(body: String) -> [OverlayPolicyField] Ov
         if pkg_bytes_code(raw, colon) != OVERLAY_COLON {
             return Err(OverlayError.Malformed("`policy.{ident.ident}` needs `:`"))
         }
-        line_end := colon + 1
+        ^line_end: colon + 1
         loop line_end < raw.len() && (Int{raw[line_end]}) != OVERLAY_NEWLINE -> line_end += 1
         fields.push(OverlayPolicyField{name: ident.ident, value: pkg_bytes_text(raw, colon + 1, line_end).trim()})
         position = ident.end
@@ -452,7 +452,7 @@ pkg_overlay_parse_build_grants: fn(body: String) -> [BuildGrant] OverlayError! {
     field: pkg_overlay_exact_field_value(policy_body, MANIFEST_BLOCK_GRANTS)
     raw: field ?? return Ok([BuildGrant]{})
     inner: pkg_overlay_strip_wrapped(raw.trim(), "{{", "}}") ?? return Err(OverlayError.Malformed("`policy.grants:` must be a package map like `{{ \"pkg\": #(Net) }}`"))
-    grants := [BuildGrant]{}
+    ^grants: [BuildGrant]{}
     loop piece in pkg_overlay_top_level_commas(inner) {
         entry: pkg_overlay_split_colon(piece.trim()) ?? return Err(OverlayError.Malformed("each `policy.grants` entry needs `\"package\": #(…)`"))
         subject: pkg_overlay_unquote(entry.before.trim())
@@ -471,7 +471,7 @@ pkg_overlay_parse_build_grants: fn(body: String) -> [BuildGrant] OverlayError! {
 
 pkg_overlay_parse_effect_tuple: fn(raw: String, field: String) -> [String] OverlayError! {
     inner: pkg_overlay_strip_wrapped(raw, "#(", ")") ?? return Err(OverlayError.Malformed("`{field}:` must contain an effect tuple like `#(Net, Exec)`"))
-    effects := [String]{}
+    ^effects: [String]{}
     loop piece in pkg_overlay_top_level_commas(inner) {
         written: pkg_overlay_unquote(piece.trim())
         if written != "" -> effects.push(written)
@@ -491,10 +491,10 @@ pkg_overlay_parse_effect_tuple: fn(raw: String, field: String) -> [String] Overl
 pkg_overlay_named_block: fn(body: String, name: String) -> String? OverlayError! {
     raw: body.bytes()
     needle: name.bytes()
-    blocks := [String]{}
-    position := 0
+    ^blocks: [String]{}
+    ^position: 0
     loop position + needle.len() <= raw.len() {
-        at := position
+        ^at: position
         loop at + needle.len() <= raw.len() && !pkg_bytes_starts_with(raw, at, needle) -> at += 1
         if at + needle.len() > raw.len() -> break
         after: at + needle.len()
@@ -520,11 +520,11 @@ pkg_overlay_named_block: fn(body: String, name: String) -> String? OverlayError!
 
 // The text up to the `}` closing a policy record opened before `start`.
 pkg_overlay_balanced_policy_body: fn(raw: [U8], start: Int) -> String OverlayError! {
-    depth := 1
-    quoted := false
-    escaped := false
-    comment := false
-    cursor := start
+    ^depth: 1
+    ^quoted: false
+    ^escaped: false
+    ^comment: false
+    ^cursor: start
     loop cursor < raw.len() {
         index: cursor.copy()
         code: Int{raw[index]}
@@ -560,8 +560,8 @@ pkg_overlay_balanced_policy_body: fn(raw: [U8], start: Int) -> String OverlayErr
 // The value of `field` in a policy record, validating every entry: only
 // `deny`, `grants`, and `allow` are known, each at most once.
 pkg_overlay_exact_field_value: fn(body: String, field: String) -> String? OverlayError! {
-    seen := [String]{}
-    values := [String]{}
+    ^seen: [String]{}
+    ^values: [String]{}
     loop piece in pkg_overlay_top_level_commas(body) {
         entry: piece.trim()
         if pkg_overlay_split_colon(entry.copy()) == {
@@ -589,7 +589,7 @@ pkg_overlay_exact_field_value: fn(body: String, field: String) -> String? Overla
 // The text before the first White_Space scalar.
 pkg_overlay_first_word: fn(text: String) -> String Never! {
     raw: text.bytes()
-    end := 0
+    ^end: 0
     loop end < raw.len() && pkg_bytes_space_width(raw, end) == 0 -> end += 1
     pkg_bytes_text(raw, 0, end)
 }
@@ -610,8 +610,8 @@ pkg_strip_overlay_policy: fn(src: String) -> String Never! {
 pkg_overlay_strip_overlay_blocks: fn(body: String) -> String Never! {
     raw: body.bytes()
     keyword_len: WORKSPACE_OVERLAY.bytes().len()
-    out := [String]{}
-    position := 0
+    ^out: [String]{}
+    ^position: 0
     loop position < raw.len() {
         at: pkg_overlay_find_word(raw, WORKSPACE_OVERLAY, position) ?? break
         out.push(pkg_bytes_text(raw, position, at))
@@ -631,12 +631,12 @@ pkg_overlay_strip_overlay_blocks: fn(body: String) -> String Never! {
 // `\r\n` ending loses its `\r`), and every kept line ends with `\n`.
 pkg_overlay_strip_allow_unfree_lines: fn(body: String) -> String Never! {
     raw: body.bytes()
-    out := [String]{}
-    start := 0
+    ^out: [String]{}
+    ^start: 0
     loop start < raw.len() {
-        end := start
+        ^end: start
         loop end < raw.len() && (Int{raw[end]}) != OVERLAY_NEWLINE -> end += 1
-        content_end := end
+        ^content_end: end
         if end < raw.len() && content_end > start && (Int{raw[content_end - 1]}) == 13 {
             content_end -= 1
         }
@@ -654,8 +654,8 @@ pkg_overlay_strip_allow_unfree_lines: fn(body: String) -> String Never! {
 pkg_overlay_strip_build_policy_blocks: fn(body: String) -> String Never! {
     raw: body.bytes()
     word_len: MANIFEST_BLOCK_POLICY.bytes().len()
-    out := [String]{}
-    position := 0
+    ^out: [String]{}
+    ^position: 0
     loop position < raw.len() {
         at: pkg_overlay_find_word(raw, MANIFEST_BLOCK_POLICY, position) ?? break
         after: at + word_len

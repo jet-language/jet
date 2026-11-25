@@ -136,7 +136,7 @@ store_publish_cache_entry: fn(verification: StoreVerification, roots: HangarRoot
     store_cache_verify_writer_authority(roots, entry, role, key)
     info: store_cache_nar_info_for(entry, stats)
     store_cache_verify_decoded_output_hash(roots, entry, nar)
-    failures := [String]{}
+    ^failures: [String]{}
     loop mirror in binding.mirrors {
         endpoint: store_cache_parse_endpoint(mirror) ?? {
             failures.push("{mirror}: {err.message()}")
@@ -194,7 +194,7 @@ store_stage_cache_from_hangar: fn(verification: StoreVerification, roots: Hangar
     store_cache_ensure_directory(target)
     key: store_cache_read_trust_key(binding.trust_key)
     entries: store_list_checked(verification, roots)
-    bytes := 0
+    ^bytes: 0
     loop entry in entries {
         store_cache_ensure_reproducible_for_shared_cache(roots, entry)
         metadata: files.stat(entry.out)
@@ -230,7 +230,7 @@ store_verify_cache_transfer: fn(verification: StoreVerification, roots: HangarRo
     key: store_cache_read_trust_key(binding.trust_key)
     store_cache_verify_writer_authority(roots, expected, role, key)
     store_cache_require_allowed_builder(roots, role, expected)
-    failures := [String]{}
+    ^failures: [String]{}
     loop mirror in binding.mirrors {
         endpoint: store_cache_parse_endpoint(mirror) ?? {
             failures.push("{mirror}: {err.message()}")
@@ -297,7 +297,7 @@ store_substitute_cache_entry: fn(verification: StoreVerification, roots: HangarR
     key: store_cache_read_trust_key(binding.trust_key)
     store_cache_verify_writer_authority(roots, expected, role, key)
     store_cache_require_allowed_builder(roots, role, expected)
-    failures := [String]{}
+    ^failures: [String]{}
     loop mirror in binding.mirrors {
         endpoint: store_cache_parse_endpoint(mirror) ?? {
             failures.push("{mirror}: {err.message()}")
@@ -425,7 +425,7 @@ store_cache_entry_store_name: fn(entry: StoreEntry) -> String Never! {
 }
 
 store_cache_hangar_references: fn(entry: StoreEntry) -> [String] Never! {
-    references := [String]{}
+    ^references: [String]{}
     loop reference in entry.references -> references.push("/jet/hangar/{reference}")
     references
 }
@@ -455,7 +455,7 @@ store_cache_deriver: fn(entry: StoreEntry) -> String StoreError! {
         return Err(StoreError.InvalidData("cache entry has incomplete or mismatched provenance"))
     }
     ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData("cache entry has invalid producer provenance: {err.message()}"))
-    canonical := "jet.cache-deriver.v2".bytes()
+    ^canonical: "jet.cache-deriver.v2".bytes()
     canonical.push(U8{0})
     values: [String]{
         store_entry_action_key(entry),
@@ -481,7 +481,7 @@ store_cache_deriver: fn(entry: StoreEntry) -> String StoreError! {
 }
 
 store_cache_put_be_u64: fn(out: ^[U8], value: Int) Never! {
-    shift := 56
+    ^shift: 56
     loop shift >= 0 {
         out.push(U8{((value >> shift)) & 255})
         shift -= 8
@@ -620,7 +620,7 @@ store_cache_admissions_for_explain: fn(roots: HangarRoots, entry: StoreEntry) ->
     bindings: store_list_cache_bindings(roots)
     provenance_record: store_cache_provenance_for_entry(entry) ?? {
         reason: "cache provenance is not admissible: {err.message()}"
-        denied := [CacheAdmission]{}
+        ^denied: [CacheAdmission]{}
         loop binding in bindings {
             denied.push(CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: "", provenance: "", receipt_version: None, receipt_expires_unix: None, reason: reason.copy()})
         }
@@ -631,10 +631,10 @@ store_cache_admissions_for_explain: fn(roots: HangarRoots, entry: StoreEntry) ->
     store_name: store_cache_entry_store_name(entry)
     now: store_cache_now_seconds()
     builder_revoked: trust_is_cache_builder_revoked(roots.root, builder) ?? return Err(StoreError.Other(err.message()))
-    admissions := [CacheAdmission]{}
+    ^admissions: [CacheAdmission]{}
     loop binding in bindings {
         pin_path: store_cache_receipt_pin_path(roots, binding.role, store_name)
-        admission := CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: builder.copy(), provenance: provenance.copy(), receipt_version: None, receipt_expires_unix: None, reason: "cache builder is revoked; rebuild before reuse"}
+        ^admission: CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: builder.copy(), provenance: provenance.copy(), receipt_version: None, receipt_expires_unix: None, reason: "cache builder is revoked; rebuild before reuse"}
         if !builder_revoked {
             if store_cache_read_receipt_pin(pin_path) == {
                 .Ok(pin) -> {
@@ -669,7 +669,7 @@ store_cache_fingerprint_for_key: fn(key: TrustKey) -> String Never! {
 }
 
 store_cache_fingerprint_for_info: fn(info: NarInfo) -> String Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop signature in info.signatures -> parts.push("{signature.key_id}:{signature.algorithm}")
     parts.join(",")
 }
@@ -689,7 +689,7 @@ store_cache_verify_decoded_output_hash: fn(roots: HangarRoots, expected: StoreEn
     staging: files.join(files.join(files.join(roots.root, "cache"), "verify"), "{expected.id}-{store_archive_unique_suffix()}")
     store_cache_validate_path_components(staging)
     store_cache_ensure_parent(staging)
-    failure := StoreError?{None}
+    ^failure: StoreError?{None}
     if store_cache_decode_and_compare(staging, expected, nar) == {
         .Err(error) -> { failure = Val(error) }
         .Ok(_) -> {}
@@ -716,9 +716,9 @@ store_cache_decode_and_compare: fn(staging: String, expected: StoreEntry, nar: [
 // A narinfo describes `entry` only when its path, URL, references, and
 // deriver are exactly the ones publication would write and it claims no CA.
 store_cache_nar_info_matches_entry: fn(info: NarInfo, entry: StoreEntry) -> Bool Never! {
-    expected_references := store_cache_hangar_references(entry)
+    ^expected_references: store_cache_hangar_references(entry)
     expected_references.sort()
-    actual_references := info.references
+    ^actual_references: info.references
     actual_references.sort()
     expected_deriver: if store_cache_deriver(entry) == {
         .Ok(deriver) -> Val(deriver)
@@ -803,9 +803,9 @@ store_cache_receipt_pin_path: fn(roots: HangarRoots, role: String, store_name: S
 // Parse a `version=`, `expires=`, `digest=` pin; each field exactly once.
 store_cache_read_receipt_pin: fn(path: String) -> CacheReceiptPin StoreError! {
     text: String.from_bytes(store_cache_read_regular_bounded(path, 4096)) ?? return Err(StoreError.InvalidData("cache trust pin is not UTF-8"))
-    version := String?{None}
-    expires := String?{None}
-    digest := String?{None}
+    ^version: String?{None}
+    ^expires: String?{None}
+    ^digest: String?{None}
     loop raw in store_cache_lines(text) {
         pair: raw.split_once("=") ?? return Err(StoreError.InvalidData("cache trust pin has a malformed line"))
         if pair.before == {
@@ -835,7 +835,7 @@ store_cache_read_receipt_pin: fn(path: String) -> CacheReceiptPin StoreError! {
     expires_text: expires ?? return Err(StoreError.InvalidData("cache trust pin has no expiry"))
     expires_number: store_cache_parse_u64(expires_text) ?? return Err(StoreError.InvalidData("cache trust pin expiry is not an integer"))
     digest_text: digest ?? return Err(StoreError.InvalidData("cache trust pin has no digest"))
-    hex := digest_text.bytes().len() == 64
+    ^hex: digest_text.bytes().len() == 64
     loop byte in digest_text.bytes() {
         if !store_archive_is_hex_digit(Int{byte}) -> hex = false
     }
@@ -866,7 +866,7 @@ store_cache_receipt_for_publication: fn(endpoint: CacheEndpoint, role: String, e
     store_name: store_cache_entry_store_name(entry)
     existing: if endpoint.is_hangar() -> None else -> store_cache_endpoint_get(endpoint, store_cache_receipt_key(store_name), STORE_CACHE_MAX_INFO_BYTES)
     now: store_cache_now_seconds()
-    version := 1
+    ^version: 1
     if existing == {
         .Val(bytes) -> {
             current: store_cache_decode_receipt(bytes)
@@ -892,7 +892,7 @@ store_cache_encode_receipt: fn(receipt: CacheReceipt) -> String StoreError! {
         return Err(StoreError.InvalidData("cache trust receipt has an empty witness or control characters"))
     }
     receipt.provenance.validate() ?? return Err(StoreError.InvalidData(err.message()))
-    out := "{STORE_CACHE_RECEIPT_MAGIC}\n"
+    ^out: "{STORE_CACHE_RECEIPT_MAGIC}\n"
     store_cache_line(out, "role", receipt.role)
     store_cache_line(out, "witness", receipt.witness)
     store_cache_line(out, "version", "{receipt.version}")
@@ -918,7 +918,7 @@ store_cache_decode_receipt: fn(bytes: [U8]) -> CacheReceipt StoreError! {
     if lines.len() == 0 || lines[0] != STORE_CACHE_RECEIPT_MAGIC {
         return Err(StoreError.InvalidData("cache trust receipt has an unknown format"))
     }
-    fields := [String:String]{}
+    ^fields: [String:String]{}
     loop raw in lines[1..<lines.len()] {
         pair: raw.split_once("=") ?? return Err(StoreError.InvalidData("cache trust receipt has a malformed line"))
         store_cache_validate_text(pair.before, "cache trust receipt field")
@@ -1004,7 +1004,7 @@ store_cache_verify_receipt: fn(roots: HangarRoots, role: String, expected: Store
     _lock: env_runtime_lock(roots.root, "cache-trust")
     store_cache_ensure_parent(pin)
     digest: pkg_sha256_hex(store_cache_encode_receipt(receipt).bytes())
-    existing_pin := CacheReceiptPin?{None}
+    ^existing_pin: CacheReceiptPin?{None}
     if store_cache_read_receipt_pin(pin) == {
         .Ok(current) -> { existing_pin = Val(current) }
         .Err(error) -> {
@@ -1017,7 +1017,7 @@ store_cache_verify_receipt: fn(roots: HangarRoots, role: String, expected: Store
                 return Err(StoreError.InvalidData("cache trust metadata rollback rejected: current {existing.version}, incoming {receipt.version}; refresh or rebuild"))
             }
             pin_text: String.from_bytes(store_cache_read_regular_bounded(pin, 4096)) ?? return Err(StoreError.InvalidData("cache trust pin is not UTF-8"))
-            accepted := String?{None}
+            ^accepted: String?{None}
             loop line in store_cache_lines(pin_text) {
                 if accepted == None && line.starts_with("digest=") {
                     accepted = Val(line.removeprefix("digest="))
@@ -1104,7 +1104,7 @@ store_cache_copy_hangar_output: fn(verification: StoreVerification, roots: Hanga
 store_cache_copy_tree: fn(source: String, destination: String) StoreError! {
     parent: files.dirname(destination)
     if parent != "" -> files.create_dir_all(parent)
-    hardlinks := [String:String]{}
+    ^hardlinks: [String:String]{}
     store_copy_snapshot_node(source, destination, hardlinks)
 }
 
@@ -1193,7 +1193,7 @@ store_cache_write_resumable: fn(path: String, bytes: [U8]) StoreError! {
     }
     store_cache_ensure_parent(path)
     partial: store_archive_with_extension(path, "partial")
-    offset := 0
+    ^offset: 0
     if store_archive_lstat_ok(partial) == {
         .Val(metadata) -> {
             if metadata.is_symlink || !metadata.is_file || metadata.size > bytes.len() {
@@ -1210,7 +1210,7 @@ store_cache_write_resumable: fn(path: String, bytes: [U8]) StoreError! {
     if offset == 0 && store_archive_lstat_ok(partial) == None {
         files.create(partial, if_exists: .Refuse)
     }
-    out := files.append(partial)
+    ^out: files.append(partial)
     out.write_bytes(bytes[offset..<bytes.len()])
     out.fsync()
     if store_archive_lstat_ok(path) == {

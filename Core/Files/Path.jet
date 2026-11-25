@@ -40,7 +40,7 @@ of: fn(raw: String) -> Path Never! { Path{raw: raw.copy()} }
 path: fn(raw: String) -> Path Never! { of(raw) }
 
 from_parts: fn(parts: [String]) -> Path Never! {
-    acc := ""
+    ^acc: ""
     loop p in parts {
         if acc.bytes().len() == 0 -> acc = p else -> acc = files.join(acc, p)
     }
@@ -62,7 +62,7 @@ join: fn(base: Path, other: String) -> Path Never! { Path{raw: files.join(base.r
 join_path: fn(base: Path, other: Path) -> Path Never! { Path{raw: files.join(base.raw, other.raw)} }
 
 join_many: fn(base: Path, parts: [String]) -> Path Never! {
-    acc := base
+    ^acc: base
     loop p in parts -> acc = join(acc, p)
     acc
 }
@@ -76,15 +76,15 @@ ends_colon: fn(text: String) -> Bool {
 }
 
 parents: fn(path: Path) -> [Path] Never! {
-    out := [Path]{}
-    cur := parent(path)
-    seen := path.raw.copy()
+    ^out: [Path]{}
+    ^cur: parent(path)
+    ^seen: path.raw.copy()
     loop {
         if cur.raw == seen || cur.raw.bytes().len() == 0 -> return out
         out.push(cur.copy())
         if cur.raw == "/" || (cur.raw.bytes().len() == 2 && ends_colon(cur.raw)) -> return out
         seen = cur.raw.copy()
-        nxt := parent(cur)
+        ^nxt: parent(cur)
         if nxt.raw == cur.raw -> return out
         cur = nxt
     }
@@ -97,8 +97,8 @@ stem: fn(path: Path) -> String Never! { files.stem(path.raw) }
 suffix: fn(path: Path) -> String Never! { files.suffix(path.raw) }
 
 files_slice: fn(raw: [U8], start: Int, end: Int) -> String {
-    out := [U8]{}
-    i := start
+    ^out: [U8]{}
+    ^i: start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
@@ -109,9 +109,9 @@ files_slice: fn(raw: [U8], start: Int, end: Int) -> String {
 suffixes: fn(path: Path) -> [String] Never! {
     n: files.basename(path.raw)
     raw: n.bytes()
-    out := [String]{}
-    start := -1
-    i := 1
+    ^out: [String]{}
+    ^start: -1
+    ^i: 1
     loop i < raw.len() {
         if raw[i] == (U8{46}) {
             if start >= 0 -> out.push(files_slice(raw, start, i))
@@ -142,7 +142,7 @@ with_segments: fn(path: Path, segments: [String]) -> Path Never! { from_parts(se
 // trailing separators and every `.` drop, and `..` stays (that is
 // `collapse`'s job). `from_parts(parts(p))` spells the same path.
 parts: fn(path: Path) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     head: anchor(path)
     if head.bytes().len() > 0 -> out.push(head)
     raw: path.raw.bytes()
@@ -188,7 +188,7 @@ is_relative: fn(path: Path) -> Bool Never! { !files.is_absolute(path.raw) }
 is_empty: fn(path: Path) -> Bool Never! { path.raw.bytes().len() == 0 || path.raw == "." }
 
 as_posix: fn(path: Path) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in path.raw.bytes() {
         if b == (U8{92}) -> out.push(U8{47}) else -> out.push(b)
     }
@@ -196,7 +196,7 @@ as_posix: fn(path: Path) -> String Never! {
 }
 
 as_windows: fn(path: Path) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop b in path.raw.bytes() {
         if b == (U8{47}) -> out.push(U8{92}) else -> out.push(b)
     }
@@ -347,7 +347,7 @@ copy_into: fn(path: Path, dir: Path) -[FS]> Path IOError! {
 glob: fn(path: Path, pattern: String) -[FS]> [Path] IOError! {
     full: files.join(path.raw, pattern) ?? ""
     names: files.glob(full)?("glob")
-    out := [Path]{}
+    ^out: [Path]{}
     loop n in names -> out.push(Path{raw: n})
     Ok(out)
 }
@@ -356,20 +356,20 @@ rglob: fn(path: Path, pattern: String) -[FS]> [Path] IOError! {
     first: files.join(path.raw, "**") ?? ""
     full: files.join(first, pattern) ?? ""
     names: files.glob(full)?("glob")
-    out := [Path]{}
+    ^out: [Path]{}
     loop n in names -> out.push(Path{raw: n})
     Ok(out)
 }
 
 iterdir: fn(path: Path) -[FS]> [Path] IOError! {
     entries: files.list_dir(path.raw)
-    out := [Path]{}
+    ^out: [Path]{}
     loop e in entries -> out.push(Path{raw: e.path})
     Ok(out)
 }
 
 walk: fn(path: Path) -[FS]> [Path] IOError! {
-    out := [Path]{}
+    ^out: [Path]{}
     loop entry in files.walk(path.raw, None) {
         item: entry ?? return Err(err)
         out.push(Path{raw: item.path})

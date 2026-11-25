@@ -43,10 +43,10 @@ trust_merge_semantic_locks: fn(base: SemanticLockFile, left: SemanticLockFile, r
     base_by_key: trust_lock_records_by_key(base)
     left_by_key: trust_lock_records_by_key(left)
     right_by_key: trust_lock_records_by_key(right)
-    keys := left_by_key.keys().to_list()
+    ^keys: left_by_key.keys().to_list()
     loop key in right_by_key.keys() -> keys.push(key)
-    merged := [SemanticRecord]{}
-    conflicts := [LockConflict]{}
+    ^merged: [SemanticRecord]{}
+    ^conflicts: [LockConflict]{}
     loop key in pkg_overlay_sorted_unique(keys) {
         if left_by_key.get(key) == {
             .None -> {
@@ -98,42 +98,42 @@ trust_merge_record_pair: fn(base: SemanticRecord?, left: SemanticRecord, right: 
 
 // Records by semantic key; a later duplicate replaces an earlier one.
 trust_lock_records_by_key: fn(lock: SemanticLockFile) -> [String:SemanticRecord] Never! {
-    by_key := [String:SemanticRecord]{}
+    ^by_key: [String:SemanticRecord]{}
     loop record in lock.records -> by_key[record.identity.semantic_key()] = record.copy()
     by_key
 }
 
 // Right over left over base for one input name, in name order.
 trust_merge_lock_inputs: fn(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [LockInput] Never! {
-    by_name := [String:LockInput]{}
+    ^by_name: [String:LockInput]{}
     loop input in base.inputs -> by_name[input.name] = input.copy()
     loop input in left.inputs -> by_name[input.name] = input.copy()
     loop input in right.inputs -> by_name[input.name] = input.copy()
-    names := by_name.keys().to_list()
+    ^names: by_name.keys().to_list()
     names.sort()
-    merged := [LockInput]{}
+    ^merged: [LockInput]{}
     loop name in names -> merged.push(by_name[name])
     merged
 }
 
 // Right over left over base for one pattern, in pattern order.
 trust_merge_source_maps: fn(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [SourceMapEntry] Never! {
-    by_pattern := [String:SourceMapEntry]{}
+    ^by_pattern: [String:SourceMapEntry]{}
     loop map in base.source_maps -> by_pattern[map.pattern] = map.copy()
     loop map in left.source_maps -> by_pattern[map.pattern] = map.copy()
     loop map in right.source_maps -> by_pattern[map.pattern] = map.copy()
-    patterns := by_pattern.keys().to_list()
+    ^patterns: by_pattern.keys().to_list()
     patterns.sort()
-    merged := [SourceMapEntry]{}
+    ^merged: [SourceMapEntry]{}
     loop pattern in patterns -> merged.push(by_pattern[pattern])
     merged
 }
 
 // `existing` plus each incoming rationale whose (owner, reason) is new.
 trust_merge_rationales: fn(existing: SemanticRecord, incoming: [LockRationale]) -> SemanticRecord Never! {
-    merged := existing
+    ^merged: existing
     loop rationale in incoming {
-        seen := false
+        ^seen: false
         loop kept in merged.rationales {
             if kept.owner_package == rationale.owner_package && kept.reason == rationale.reason {
                 seen = true
@@ -167,7 +167,7 @@ trust_lock_conflict: fn(left: SemanticRecord, right: SemanticRecord) -> LockConf
 trust_explain_semantic_lock: fn(lock: SemanticLockFile, key: String) -> ExplainFact? Never! {
     loop record in lock.records {
         if record.identity.semantic_key() != key -> next
-        owners := [String]{}
+        ^owners: [String]{}
         loop rationale in record.rationales {
             if rationale.owner_package != "" -> owners.push(rationale.owner_package)
         }

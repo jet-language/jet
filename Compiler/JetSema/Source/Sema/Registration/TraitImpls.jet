@@ -58,10 +58,12 @@ sema_trait_impl_declared: fn(known: SemaTraitImplNames, trait_name: String) -> I
 // Fills every impl of `items` with the methods it gains. An owned trait
 // whose defaults do not parse is a row of `unread`, once.
 sema_trait_impls_synthesize: fn(items: ^[Item], unread: ^[SemaTraitDefaultsUnread]) Never! {
-    known := SemaTraitImplNames{}
+    ^known: SemaTraitImplNames{}
     loop (index, item) in items {
         if item == {
-            .Trait(definition) -> { known.traits[name_index(name_intern(known.names, definition.name))] = index }
+            .Trait(definition) -> {
+                known.traits[name_index(name_intern(known.names, definition.name))] = index
+            }
             .Impl(definition) -> {
                 if definition.trait_name == .Val(trait_name) {
                     if definition.delegation_field == None {
@@ -89,7 +91,7 @@ sema_trait_impls_synthesize: fn(items: ^[Item], unread: ^[SemaTraitDefaultsUnrea
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    gains := [SemaTraitImplGain]{}
+    ^gains: [SemaTraitImplGain]{}
     loop (index, item) in items {
         if item == {
             .Impl(definition) -> {
@@ -141,11 +143,11 @@ sema_trait_impl_filled_methods: fn(items: [Item], type_name: String, trait_name:
 // another module resolves its names there: `definition_module` is that
 // module's identity text, "" for the impl's own (Func.definition_module).
 sema_trait_impl_defaults: fn(sigs: [TraitMethodSig], methods: [Func], definition_module: String) -> [Func] Never! {
-    extras := [Func]{}
+    ^extras: [Func]{}
     loop sig in sigs {
         body: sig.default_body ?? next
         if sema_trait_impl_writes(methods, sig.name) -> next
-        function := sema_trait_impl_method(sig)
+        ^function: sema_trait_impl_method(sig)
         function.body = body.copy()
         function.module_caps = sig.module_caps.copy()
         if definition_module != "" -> function.definition_module = definition_module.copy()
@@ -157,24 +159,24 @@ sema_trait_impl_defaults: fn(sigs: [TraitMethodSig], methods: [Func], definition
 // Write each gain's methods into its impl among `items`. The gains come in
 // item order, so a type body's blocks are written in one pass.
 sema_trait_impls_fill: fn(items: ^[Item], gains: ^^[SemaTraitImplGain]) Never! {
-    left := gains.move()
+    ^left: gains.move()
     left.reverse()
     loop left.len() > 0 {
         gain: left.pop() ?? break
         index: gain.item
         if items[index] == {
             .Impl(definition) -> {
-                updated := definition.copy()
+                ^updated: definition.copy()
                 updated.methods = gain.methods.move()
                 items[index] = Item.Impl{value: updated}
             }
             .Struct(definition) -> {
-                updated := definition.copy()
+                ^updated: definition.copy()
                 sema_trait_impls_fill_blocks(updated.trait_impls, gain.move(), left)
                 items[index] = Item.Struct{value: updated}
             }
             .Enum(definition) -> {
-                updated := definition.copy()
+                ^updated: definition.copy()
                 sema_trait_impls_fill_blocks(updated.trait_impls, gain.move(), left)
                 items[index] = Item.Enum{value: updated}
             }
@@ -186,7 +188,7 @@ sema_trait_impls_fill: fn(items: ^[Item], gains: ^^[SemaTraitImplGain]) Never! {
 // Write `first` and each gain after it for the same type body into its
 // `blocks`; `left` holds the gains still to write, the next one last.
 sema_trait_impls_fill_blocks: fn(blocks: ^[TraitImplBlock], first: ^^SemaTraitImplGain, left: ^[SemaTraitImplGain]) Never! {
-    gain := first.move()
+    ^gain: first.move()
     loop {
         blocks[gain.block].methods = gain.methods.move()
         if left.len() == 0 || left[left.len() - 1].item != gain.item -> break
@@ -215,20 +217,20 @@ sema_trait_impls_has_defaults: fn(sigs: [TraitMethodSig]) -> Bool Never! {
 }
 
 sema_trait_impls_foreign: fn(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], table: ModuleTable) Never! {
-    default_traits := name_table()
+    ^default_traits: name_table()
     loop input in inputs {
         loop item in input.program.items {
             if item == .Trait(definition) && sema_trait_impls_has_defaults(definition.methods) {
-                _ := name_intern(default_traits, definition.name)
+                ^_: name_intern(default_traits, definition.name)
             }
         }
     }
     if name_count(default_traits) == 0 {
         return
     }
-    positions := [Int:Int]{}
+    ^positions: [Int:Int]{}
     loop (position, input) in inputs -> positions[module_index(input.module_identity)] = position
-    edges_by_source := [Int:[Int]]{}
+    ^edges_by_source: [Int:[Int]]{}
     loop (edge_index, edge) in edges {
         if edge.source_scope != "" -> next
         src: module_index(edge.source_module_identity)
@@ -236,12 +238,12 @@ sema_trait_impls_foreign: fn(inputs: ^[SemaRegistrationModuleInput], edges: [Sem
         edges_by_source[src].push(edge_index)
         loop binding in import_walk_bindings(edge.declaration) {
             if binding.original == .Val(original) && name_find(default_traits, original) != None {
-                _ := name_intern(default_traits, binding.local)
+                ^_: name_intern(default_traits, binding.local)
             }
         }
     }
     loop position in 0..<inputs.len() {
-        gains := [SemaTraitImplGain]{}
+        ^gains: [SemaTraitImplGain]{}
         loop (index, item) in inputs[position].program.items {
             if item == {
                 .Impl(definition) -> {
@@ -325,10 +327,10 @@ sema_trait_impls_named: fn(inputs: [SemaRegistrationModuleInput], position: Int,
 // two such traits name none, unless exactly one is in a package that
 // `position`'s package imports. Core's traits are left to their own routes.
 sema_trait_impls_unique_owner: fn(inputs: [SemaRegistrationModuleInput], position: Int, edges: [SemaRegistrationImportEdge], positions: [Int:Int], written: String) -> SemaTraitImplForeign? Never! {
-    found := SemaTraitImplForeign?{None}
-    seen := 0
-    imported := SemaTraitImplForeign?{None}
-    seen_imported := 0
+    ^found: SemaTraitImplForeign?{None}
+    ^seen: 0
+    ^imported: SemaTraitImplForeign?{None}
+    ^seen_imported: 0
     loop (index, input) in inputs {
         if input.package_identity == inputs[position].package_identity || module_is_core(input.module_identity) {
             next
@@ -398,7 +400,7 @@ sema_trait_impls_declared: fn(items: [Item], name: String) -> Int? Never! {
 sema_trait_impl_owned_defaults: fn(trait_name: String, at: Span, methods: [Func], delegation: String?, unread: ^[SemaTraitDefaultsUnread]) -> [Func]? Never! {
     if delegation != None -> return None
     owned: owned_trait(trait_name) ?? return None
-    declarations := ""
+    ^declarations: ""
     if owned.contract == .Methods(declared, _, _) {
         loop method in declared {
             source: method.default_source ?? next
@@ -408,7 +410,7 @@ sema_trait_impl_owned_defaults: fn(trait_name: String, at: Span, methods: [Func]
         }
     }
     if declarations == "" -> return None
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop _ in 0..<at.start + 1 -> bytes.push(32)
     loop byte in "{trait_name}: trait {{\n{declarations}}}\n".bytes() -> bytes.push(byte)
     parsed: parse_generated_source(bytes)
@@ -424,15 +426,15 @@ sema_trait_impl_owned_defaults: fn(trait_name: String, at: Span, methods: [Func]
         return None
     }
     // The one item is the generated trait.
-    program := parsed.program.move()
-    extras := [Func]{}
+    ^program: parsed.program.move()
+    ^extras: [Func]{}
     loop {
         item: program.items.pop() ?? break
         if item.move() == .Trait(source_definition) {
-            definition := source_definition.move()
+            ^definition: source_definition.move()
             loop {
                 sig: definition.methods.pop() ?? break
-                function := sema_trait_impl_method(sig)
+                ^function: sema_trait_impl_method(sig)
                 if sig.default_body.move() == .Val(body) {
                     function.body = body.move()
                     function.span = at
@@ -467,11 +469,13 @@ sema_trait_defaults_unknown: fn(unread: [SemaTraitDefaultsUnread], trait_name: S
 // is jet's own defect, which the driver reports as an internal compiler
 // error (JetDriver Pipeline.jet).
 sema_trait_defaults_unread: fn(graph: SemaRegistrationGraph) -> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop (index, module_row) in graph.modules {
         loop row in module_row.trait_defaults_unread {
             earlier: loop before in 0..<index {
-                if sema_trait_defaults_unknown(graph.modules[before].trait_defaults_unread, row.trait_name) -> break true
+                if sema_trait_defaults_unknown(graph.modules[before].trait_defaults_unread, row.trait_name) {
+                    break true
+                }
             } ?? false
             if earlier -> next
             rows.push("the defaults Traits.jet gives `{row.trait_name}`, read in module `{module_text(graph.module_table, module_row.module_identity)}`: {row.problem}")
@@ -483,7 +487,7 @@ sema_trait_defaults_unread: fn(graph: SemaRegistrationGraph) -> [String] Never! 
 // `methods` then `extras`, None when there are no extras.
 sema_trait_impl_with: fn(methods: [Func], extras: ^^[Func]) -> [Func]? Never! {
     if extras.len() == 0 -> return None
-    updated := methods.copy()
+    ^updated: methods.copy()
     updated.extend(extras.move())
     Val(updated)
 }
@@ -492,7 +496,7 @@ sema_trait_impl_with: fn(methods: [Func], extras: ^^[Func]) -> [Func]? Never! {
 // impl method without `priv` is, so a caller outside the impl's module reaches
 // a default the impl gains.
 sema_trait_impl_method: fn(sig: TraitMethodSig) -> Func Never! {
-    function := ast_func(sig.name.copy(), sig.name_span, sig.name_span)
+    ^function: ast_func(sig.name.copy(), sig.name_span, sig.name_span)
     function.is_pub = true
     function.params = sig.params.copy()
     function.return_type = sig.return_type.copy()
@@ -510,8 +514,8 @@ sema_trait_impl_method: fn(sig: TraitMethodSig) -> Func Never! {
 // `m(self`.
 sema_trait_impl_forward: fn(sig: TraitMethodSig, field_name: String) -> Func Never! {
     span: sig.name_span
-    self_span := span
-    args := [CallArg]{}
+    ^self_span: span
+    ^args: [CallArg]{}
     loop param in sig.params {
         if param.name == "self" {
             self_span = param.name_span
@@ -521,7 +525,7 @@ sema_trait_impl_forward: fn(sig: TraitMethodSig, field_name: String) -> Func Nev
     }
     receiver: Expr.Field{base: Expr.Ident{name: "self", span: self_span, id: AST_NODE_GENERATED}, member: field_name.copy(), span: Span{start: span.start, end: self_span.end}, id: AST_NODE_GENERATED}
     call: Expr.MethodCall{receiver: receiver, method: sig.name.copy(), method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}
-    function := sema_trait_impl_method(sig)
+    ^function: sema_trait_impl_method(sig)
     function.body = [Stmt]{Stmt.Expr{expr: call}}
     function
 }

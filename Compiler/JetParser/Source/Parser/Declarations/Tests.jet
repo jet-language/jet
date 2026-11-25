@@ -49,12 +49,12 @@ parser_test_name_of: fn(value: Expr?, fallback: Span) -> {name: String?, span: S
 parser_parse_test: fn(state: ^JetParserState, markers: [Marker]) -> Item {
     marker: parser_parse_marker(state)
     bound: parser_bind_marker_arguments(state, marker, [String]{"name", "faults", "expected_fail"}, 0)
-    values := [Expr?]{None, None, None}
+    ^values: [Expr?]{None, None, None}
     if bound == .Val(found) -> values = found
     faults: values[1]
     expected_fail: values[2]
     if parser_current_kind(state) == TOKEN_KW_FN {
-        pre := [ContractClause]{}
+        ^pre: [ContractClause]{}
         loop written in markers {
             if written.name == "Pre" && parser_contract_clause(state, written) == .Val(clause) {
                 pre.push(clause)

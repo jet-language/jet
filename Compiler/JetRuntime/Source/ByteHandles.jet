@@ -20,7 +20,7 @@ byte_buffer_render: fn(buffer: I64) -> I64 {
     data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     result: jet_rt_string_builder_new()
     rt_text_push_word(result, I64{91}, I64{1})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if (at != I64{0}) { rt_text_push_word(result, I64{8236}, I64{2}) }
         byte: host_u8_get(data, at)
@@ -68,7 +68,7 @@ path_handle_render: fn(path: I64) -> I64 {
     // word-stride composition packs once before the shared UTF8-lossy decoder.
     if (RT_HOST_U8_STRIDE == I64{1}) { return rt_text_lossy(data, length) }
     packed: if (length == I64{0}) -> I64{1} else -> jet_rt_alloc(length, I64{1})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         rt_text_put(wrapping(packed + at), host_u8_get(data, at))
         at += I64{1}

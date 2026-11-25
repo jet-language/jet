@@ -79,13 +79,13 @@ effect_value_base: fn(name: String) -> String Never! {
 // text literal holds no quote or backslash (effect_value_text_valid), so a
 // `, ` inside quotes is the text's own.
 effect_value_fields: fn(name: String) -> [EffectValueField] Never! {
-    fields := [EffectValueField]{}
+    ^fields: [EffectValueField]{}
     if !effect_value_is_valued(name) -> return fields
     parts: name.split_once("{{") ?? return fields
     inner: parts.after.slice(0..<parts.after.len() - 1)
     bytes: inner.bytes()
-    quoted := false
-    start := 0
+    ^quoted: false
+    ^start: 0
     loop index in 0..<bytes.len() + 1 {
         if index < bytes.len() {
             if bytes[index] == (U8{34}) -> quoted = !quoted
@@ -115,7 +115,7 @@ effect_value_text_valid: fn(text: String) -> Bool Never! {
 // Empty when no right names a path, or when another right grants every read
 // (`FS`, `FS.Read`), since a scoped right never narrows a bare one.
 effect_scope_read_paths: fn(rights: [String]) -> [String] Never! {
-    paths := [String]{}
+    ^paths: [String]{}
     loop right in rights {
         split: effect_scope_split(right)
         if split.scope == .Val(path) {
@@ -174,22 +174,22 @@ effect_scope_published_effect: fn(callee_key: String, path_first: Bool, declared
 // a library effect's listed scopes stay static.
 effect_scope_descriptor: fn(name: String, key: String, path_first: Bool, row: [String]?) -> String Never! {
     written_row: row ?? return ""
-    allowed := [String]{}
+    ^allowed: [String]{}
     loop entry in written_row {
         if !entry.starts_with("!") && !entry.starts_with("..") -> allowed.push(entry.trim().copy())
     }
     if effect_scope_published_effect(key, path_first, allowed) == .Val(published) {
         return "@{published}"
     }
-    entries := [String]{}
-    scoped := false
+    ^entries: [String]{}
+    ^scoped: false
     loop entry in written_row {
         if entry.starts_with("..") -> return ""
         denied: entry.starts_with("!")
         written: if denied -> entry.slice(1..<entry.len()) else -> entry
         split: effect_scope_split(written)
         if effect_scope_kind(split.base) == "value" -> next
-        spelled := split.base.copy()
+        ^spelled: split.base.copy()
         if split.scope == .Val(scope) {
             scoped = true
             spelled = effect_scope_name(split.base, scope)
@@ -207,7 +207,7 @@ effect_scope_descriptor: fn(name: String, key: String, path_first: Bool, row: [S
 // host. None when the constant text names no scope.
 effect_scope_of_argument: fn(published: String, text: String, whole: Bool) -> String? Never! {
     if effect_scope_kind(published) == "host" -> return effect_scope_url_host(text, whole)
-    scope := text.copy()
+    ^scope: text.copy()
     if !whole {
         folder: text.cut_last("/") ?? return None
         scope = "{folder.before}/"
@@ -221,7 +221,7 @@ effect_scope_of_argument: fn(published: String, text: String, whole: Bool) -> St
 effect_scope_url_host: fn(text: String, whole: Bool) -> String? Never! {
     rest: (text.split_once("://") ?? return None).after
     bytes: rest.bytes()
-    end := bytes.len()
+    ^end: bytes.len()
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if code == 64 -> return None

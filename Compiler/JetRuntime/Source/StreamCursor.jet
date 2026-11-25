@@ -9,7 +9,7 @@ stream_new: fn(data: I64, len: I64, stride: I64, position: I64) -> I64 {
     handle: jet_rt_alloc(I64{32}, I64{8})
     target: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
     if (stride == I64{1}) { jet_rt_mem_move(target, data, len) } else {
-        at := I64{0}
+        ^at: I64{0}
         loop at < len {
             rt_text_put(wrapping(target + at), scan_byte(data, stride, at))
             at += I64{1}
@@ -69,7 +69,7 @@ stream_clone: fn(handle: I64) -> I64 {
 }
 
 #Export(c) jet_cursor_skip_ws: fn(handle: I64) {
-    position := rt_text_word(wrapping(handle + I64{24}))
+    ^position: rt_text_word(wrapping(handle + I64{24}))
     length: rt_text_len(handle)
     loop position < length {
         scalar: rt_text_decode(wrapping(rt_text_data(handle) + position))
@@ -150,14 +150,14 @@ stream_read: fn(handle: I64, width: I64, little: Bool, signed: Bool, floating: B
         return I64{0}
     }
     data: wrapping(rt_text_data(handle) + position)
-    value := I64{0}
+    ^value: I64{0}
     if (little && left >= I64{8}) {
         // Eight owned bytes start at the field, so one unaligned word load
         // reads them; little-endian, the field is its low `need` bytes.
         word: rt_text_word(data)
         value = if (need == I64{8}) -> word else -> word & wrapping((I64{1} << width) - I64{1})
     } else {
-        at := I64{0}
+        ^at: I64{0}
         loop at < need {
             byte: rt_text_byte(wrapping(data + at))
             if little -> value = value | byte << (at << I64{3}) else {
@@ -339,7 +339,7 @@ stream_negative_error: fn(method: I64, value: I64) -> I64 {
     output: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * stride, I64{8})
     source: wrapping(rt_text_data(handle) + position)
     if (stride == I64{1}) { jet_rt_mem_move(output, source, count) } else {
-        at := I64{0}
+        ^at: I64{0}
         loop at < count {
             rt_text_store(wrapping(output + at * stride), rt_text_byte(wrapping(source + at)))
             at += I64{1}

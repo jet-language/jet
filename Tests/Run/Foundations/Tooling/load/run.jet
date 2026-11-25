@@ -14,7 +14,7 @@ run: fn() {
     server: task {
         listener: net.tcp_listen("127.0.0.1:0")
         sender.send(listener.local_addr())
-        server_i := 0
+        ^server_i: 0
         loop server_i < requests {
             stream: listener.accept()
             _request: stream.read(8192)
@@ -23,8 +23,8 @@ run: fn() {
         }
     }
     address: ch.receive() ?? panic("listener did not start")
-    passed := 0
-    client_i := 0
+    ^passed: 0
+    ^client_i: 0
     loop client_i < requests {
         response: http.get("http://{address}/")
         if response.status() == 200 && response.body().text(8192) == "ok" -> passed += 1

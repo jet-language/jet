@@ -23,8 +23,8 @@ ps_matrix_check: fn() {
         "process-tree-timeout",
         "process-tree-drop",
     }
-    rows := [String]{}
-    first := true
+    ^rows: [String]{}
+    ^first: true
     loop line in matrix.lines() {
         if first {
             assert(line == "capability\tfixture\tlinux\tmacos\twindows\tother", "{path}: header drifted: {line}")
@@ -36,7 +36,7 @@ ps_matrix_check: fn() {
     }
     assert(!first, "{path}: missing header")
     assert(rows.len() == expected.len(), "{path}: {rows.len()} rows; expected {expected.len()}")
-    i := 0
+    ^i: 0
     loop row in rows {
         fields: row.split("\t").to_list()
         assert(fields.len() == 6, "malformed matrix row: {row}")

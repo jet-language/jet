@@ -67,7 +67,7 @@ pipe_clone: fn(pipe: I64) -> I64 {
     refs: wrapping(fd_word(pipe, PIPE_REFS) + I64{1})
     fd_put(pipe, PIPE_REFS, refs)
     source: fd_word(pipe, PIPE_SOURCE)
-    if (refs == I64{2} && source != I64{0}) { _ := jet_rt_handle_clone_process_child(source) }
+    if (refs == I64{2} && source != I64{0}) { ^_: jet_rt_handle_clone_process_child(source) }
     pipe
 }
 
@@ -138,9 +138,9 @@ pipe_output_name: fn() -> I64 {
         return I64{1}
     }
     fd_lock(fd)
-    line := I64{0}
-    failure := I64{0}
-    done := false
+    ^line: I64{0}
+    ^failure: I64{0}
+    ^done: false
     loop !done {
         if (fd_word(fd, I64{16}) != I64{0}) {
             failure = I64{-9}
@@ -158,8 +158,8 @@ pipe_output_name: fn() -> I64 {
         }
         buffer: fd_buffer(fd)
         fd_put(fd, I64{40}, I64{8192})
-        pos := fd_word(fd, I64{56})
-        filled := fd_word(fd, I64{48})
+        ^pos: fd_word(fd, I64{56})
+        ^filled: fd_word(fd, I64{48})
         if (pos == filled) {
             count: host_call(I64{0}, fd_word(fd, I64{8}), buffer, I64{8192})
             // BufRead.read_until retries Interrupted; there is no policy retry.
@@ -174,7 +174,7 @@ pipe_output_name: fn() -> I64 {
             fd_put(fd, I64{48}, filled)
             fd_put(fd, I64{56}, I64{0})
         }
-        end := pos
+        ^end: pos
         loop end < filled {
             // The FD72 lock protects this initialized refill-buffer byte.
             byte: rt_text_byte(wrapping(buffer + end))
@@ -219,7 +219,7 @@ pipe_output_name: fn() -> I64 {
 pipe_read: fn(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 {
     fd_put(output, I64{0}, I64{0})
     fd_put(len, I64{0}, I64{0})
-    limit := I64{16777216}
+    ^limit: I64{16777216}
     if (jet_int_compare(maximum, limit) < I64{0}) {
         if (jet_int_compare(maximum, I64{0}) <= I64{0}) {
             count: if int_fits(maximum, U64{9223372036854775808}) -> jet_int_owned_to_i64(maximum) else -> I64{-9223372036854775808}
@@ -242,8 +242,8 @@ pipe_read: fn(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64
         return I64{1}
     }
     bytes: jet_rt_alloc(limit, I64{8})
-    count := I64{0}
-    failure := I64{0}
+    ^count: I64{0}
+    ^failure: I64{0}
     fd_lock(fd)
     if (fd_word(fd, I64{16}) != I64{0}) { failure = I64{-9} } else if (fd_word(fd, I64{40}) < I64{0}) {
         failure = fd_flush_locked(fd)

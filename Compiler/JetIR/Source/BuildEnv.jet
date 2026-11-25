@@ -82,7 +82,7 @@ ir_environment_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, route: IREnv
         }
     }
     out: ir_out_slot(m, b, 2)
-    call_args := inputs
+    ^call_args: inputs
     if route.op == .Bytes {
         call_args.push(out)
         length_out: ir_address_at(m, b, out, 8)
@@ -132,8 +132,8 @@ ir_environment_byte_payload: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, boxed
 // removed), -1 is EnvError.InvalidName, any other negative status
 // EnvError.InvalidValue.
 ir_environment_status: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
-    ok_ty := Type.Int
-    err_ty := Type.Int
+    ^ok_ty: Type.Int
+    ^err_ty: Type.Int
     if ir_untag(result) == .Result(success, failure) {
         ok_ty = success
         err_ty = failure

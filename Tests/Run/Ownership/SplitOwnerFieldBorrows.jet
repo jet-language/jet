@@ -20,7 +20,7 @@ record: fn(names: [String], marker: String, notes: ^[String]) -> Bool {
 // On the early path the record's last use moves one field out; the later
 // call still reads that field and edits its sibling in place.
 tally: fn(early: Bool) -> Int {
-    bundle := Bundle{names: [String]{"x", "y", "z"}, notes: [String]{}, label: "tally"}
+    ^bundle: Bundle{names: [String]{"x", "y", "z"}, notes: [String]{}, label: "tally"}
     if early {
         taken: Taken{names: bundle.names}
         return taken.names.len()
@@ -31,7 +31,7 @@ tally: fn(early: Bool) -> Int {
 }
 
 run: fn() {
-    bundle := Bundle{names: [String]{"a", "b"}, notes: [String]{}, label: "first"}
+    ^bundle: Bundle{names: [String]{"a", "b"}, notes: [String]{}, label: "first"}
     whole: record(bundle.names, "whole", bundle.notes)
     moved: bundle.label.move()
     split: record(bundle.names, moved, bundle.notes)

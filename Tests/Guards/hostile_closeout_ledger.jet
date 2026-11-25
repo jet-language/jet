@@ -49,7 +49,7 @@ s2_closeout_specs: fn() -> [S2CloseoutFinding] {
 }
 
 s2_closeout_receipts: fn(directory: String) -> [String] {
-    result := [String]{}
+    ^result: [String]{}
     entries: closeout_files.list_dir(directory) ?? panic("cannot read {directory}")
     loop entry in entries {
         metadata: closeout_files.stat(entry.path) ?? next
@@ -61,12 +61,12 @@ s2_closeout_receipts: fn(directory: String) -> [String] {
 }
 
 s2_closeout_observed: fn() -> [String:Int] {
-    counts := [String:Int]{}
-    paths := s2_closeout_receipts("Docs/Audits/Raw/2393R1")
+    ^counts: [String:Int]{}
+    ^paths: s2_closeout_receipts("Docs/Audits/Raw/2393R1")
     paths.sort()
     loop path in paths {
         text: closeout_files.read(path) ?? panic("cannot read {path}")
-        in_codes := false
+        ^in_codes: false
         loop line in text.lines() {
             trimmed: line.trim().copy()
             if !in_codes {
@@ -87,7 +87,7 @@ s2_closeout_observed: fn() -> [String:Int] {
 }
 
 s2_closeout_rows: fn(ledger: String, finding: String) -> [String] {
-    rows := [String]{}
+    ^rows: [String]{}
     loop line in ledger.lines() {
         columns: line.split("|").to_list()
         if columns.len() > 1 && columns[1].trim().starts_with(finding) -> rows.push(line.copy())
@@ -118,7 +118,7 @@ s2_closeout_validate: fn(ledger: String, observed: [String:Int]) -> String {
             return "observed finding {spec.finding} must have one canonical ledger row, found {rows.len()}"
         }
         row: rows[0]
-        required := [String]{spec.owner, spec.raw_witness, spec.fixture}
+        ^required: [String]{spec.owner, spec.raw_witness, spec.fixture}
         loop value in spec.row_requirements -> required.push(value)
         loop value in required {
             if !row.contains(value) {
@@ -143,7 +143,7 @@ s2_closeout_test_missing_row: fn() {
     ledger: closeout_files.read("Docs/Audits/dogfood-jet-experience-5-of-5.md") ?? panic("read closeout ledger")
     observed: s2_closeout_observed()
     loop spec in s2_closeout_specs() {
-        kept := [String]{}
+        ^kept: [String]{}
         loop line in ledger.lines() {
             if !line.contains("| {spec.finding} ") -> kept.push(line.copy())
         }
@@ -164,7 +164,7 @@ s2_closeout_test_mismatched_row: fn() {
         requirements: [String]{spec.owner, spec.raw_witness, spec.fixture}
         loop required in requirements {
             mismatched: row.replace(required, "__mismatched__")
-            lines := [String]{}
+            ^lines: [String]{}
             loop line in ledger.lines() {
                 lines.push(if line == row -> mismatched else -> line.copy())
             }

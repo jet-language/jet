@@ -114,7 +114,7 @@ audits: fn() -> db.Table<Int, Audit> {
 }
 
 open_store: fn() {
-    stores := STORE.guard_edit()
+    ^stores: STORE.guard_edit()
     stores.value.store = Val(db.open_memory())
 }
 
@@ -131,7 +131,7 @@ my_projects: fn() -[DB.Read]> [String] db.DBError! {
     counts: open_counts() ?? return Err(err)
     project_query: projects().query() ?? return Err(err)
     rows: project_query.collect() ?? return Err(db.DBError.Failed(err.reason))
-    cards := [String]{}
+    ^cards: [String]{}
     loop project in rows { cards.push("{project.name} ({counts.get(project.id) ?? 0} open)") }
     Ok(cards)
 }
@@ -151,7 +151,7 @@ measure_my_projects: fn(who: auth.AccountID) -> {shown: String, statements: Int}
 read_audits: fn() -[DB.Read]> [String] db.DBError! {
     query: audits().query() ?? return Err(err)
     rows: query.collect() ?? return Err(db.DBError.Failed(err.reason))
-    notes := [String]{}
+    ^notes: [String]{}
     loop row in rows -> notes.push(row.note)
     Ok(notes)
 }

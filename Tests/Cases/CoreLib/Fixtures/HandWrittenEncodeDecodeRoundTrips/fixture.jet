@@ -12,17 +12,17 @@ Email: struct {
 
     impl Decode {
         decode: fn(tree: Dyn) -> Email [FieldError]! {
-            f := tree.field("email") ?? Dyn.Text("")
-            s := f.text() ?? ""
+            ^f: tree.field("email") ?? Dyn.Text("")
+            ^s: f.text() ?? ""
             return Ok(Email{addr: s})
         }
     }
 }
 
 run: fn() {
-    e := Email{addr: "a@b.com"}
-    s := json.to_string(e)
+    ^e: Email{addr: "a@b.com"}
+    ^s: json.to_string(e)
     print(s)
-    back := json.decode<Email>(s) ?? panic("decode failed")
+    ^back: json.decode<Email>(s) ?? panic("decode failed")
     print(back.addr)
 }

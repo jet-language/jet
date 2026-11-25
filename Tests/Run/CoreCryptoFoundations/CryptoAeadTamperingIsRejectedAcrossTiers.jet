@@ -1,7 +1,7 @@
 use expert: core.crypto.expert
 
 run: fn() {
-    key := [U8]{
+    ^key: [U8]{
         0,
         1,
         2,
@@ -35,7 +35,7 @@ run: fn() {
         30,
         31,
     }
-    nonce := [U8]{
+    ^nonce: [U8]{
         0,
         1,
         2,
@@ -63,7 +63,7 @@ run: fn() {
     }
     #Unsafe("fixed AEAD tamper vector") {
         sealed: expert.xchacha20poly1305_seal(key, nonce, [U8]{1, 2, 3}, [U8]{4, 5}) ?? return
-        tampered := sealed
+        ^tampered: sealed
         tampered[0] = U8{Int{tampered[0]} ~ 1}
         if expert.xchacha20poly1305_open(key, nonce, tampered, [U8]{4, 5}) == {
             .Err(_) -> { print("tamper:rejected") }

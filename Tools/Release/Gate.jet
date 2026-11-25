@@ -20,7 +20,7 @@ Remote: struct {
 // owner/name of a GitHub remote URL (https or ssh), or "".
 github_slug: fn(url: String) -> String Never! {
     text: url.trim()
-    rest := ""
+    ^rest: ""
     if {
         text.starts_with("git@github.com:") -> rest = text.slice(15..<text.len()).copy()
         text.starts_with("https://github.com/") -> rest = text.slice(19..<text.len()).copy()
@@ -37,14 +37,14 @@ github_slug: fn(url: String) -> String Never! {
 // Each tag `git ls-remote --tags` prints, with the commit it names: the peeled
 // `^{}` row of an annotated tag wins over the tag object.
 remote_tags: fn(text: String) -> [Tag] Never! {
-    tags := [Tag]{}
+    ^tags: [Tag]{}
     loop line in text.split("\n").to_list() {
         cells: line.split("\t").to_list()
         if cells.len() != 2 || !cells[1].starts_with("refs/tags/") -> next
-        name := cells[1].slice(10..<cells[1].len()).copy()
+        ^name: cells[1].slice(10..<cells[1].len()).copy()
         peeled: name.ends_with("^{{}}")
         if peeled -> name = name.slice(0..<name.len() - 3).copy()
-        found := -1
+        ^found: -1
         loop (index, known) in tags {
             if known.name == name -> found = index
         }
@@ -75,7 +75,7 @@ release_number: fn(name: String) -> Int? Never! {
         }
     }
     if digits.len() == 0 || (name.starts_with("a0.0.") && digits.starts_with("0")) -> return None
-    value := 0
+    ^value: 0
     loop byte in digits.bytes() {
         code: Int{byte}
         if code < 48 || code > 57 -> return None
@@ -86,7 +86,7 @@ release_number: fn(name: String) -> Int? Never! {
 
 // The next release name, `a0.0.N`, after every release in `names`.
 next_release_name: fn(names: [String]) -> String Never! {
-    highest := 0
+    ^highest: 0
     loop name in names {
         if release_number(name) == .Val(number) && number > highest -> highest = number
     }
@@ -105,7 +105,7 @@ contains_text: fn(list: [String], text: String) -> Bool Never! {
 // identity part zeroed (Release.jet identity_digest); the runtime was lowered
 // by the jet its packer part names, else, without that part, by jet itself.
 release_problems: fn(release: Release) -> [Problem] Never! {
-    problems := [Problem]{}
+    ^problems: [Problem]{}
     if !release.identity.starts_with("jet@") || !is_hex(identity_sha(release.identity), 64) {
         problems.push(problem(INPUT, "IDENTITY `{release.identity}` is not jet@VERSION#SHA256"))
     }
@@ -150,7 +150,7 @@ release_problems: fn(release: Release) -> [Problem] Never! {
 // What publish requires of RELEASE.json: a full, passing gate of the
 // release's own identity.
 admission_problems: fn(record: Dyn, identity: String) -> [Problem] Never! {
-    problems := [Problem]{}
+    ^problems: [Problem]{}
     schema: text_field(record, "schema")
     verdict: text_field(record, "verdict")
     scope: text_field(record, "scope")
@@ -192,8 +192,8 @@ row_class: fn(status: String) -> String Never! {
 // receipt must be pinned to this commit and this jet, and a check may not
 // pass in one run and fail in another.
 receipt_problems: fn(release: Release, receipts: [Receipt], matrix: [MatrixRow]) -> [Problem] Never! {
-    problems := [Problem]{}
-    targets := [String]{}
+    ^problems: [Problem]{}
+    ^targets: [String]{}
     loop row in matrix -> targets.push(row.target.copy())
     if release.target != "" && !contains_text(targets, release.target) {
         problems.push(problem(MATRIX, "the release is built for {release.target}, which {SUPPORT_MATRIX_PATH} does not support"))
@@ -202,7 +202,7 @@ receipt_problems: fn(release: Release, receipts: [Receipt], matrix: [MatrixRow])
         if release.target != "" && row.target != release.target {
             problems.push(problem(MATRIX, "{SUPPORT_MATRIX_PATH} supports {row.target}, and this candidate has no artifact for it"))
         }
-        mine := [Receipt]{}
+        ^mine: [Receipt]{}
         loop receipt in receipts {
             if receipt.target == row.target -> mine.push(receipt.copy())
         }
@@ -217,7 +217,7 @@ receipt_problems: fn(release: Release, receipts: [Receipt], matrix: [MatrixRow])
             }
         }
         loop index in 0..<shards {
-            seen := false
+            ^seen: false
             loop receipt in mine {
                 if receipt.shard == index -> seen = true
             }
@@ -226,7 +226,7 @@ receipt_problems: fn(release: Release, receipts: [Receipt], matrix: [MatrixRow])
             }
         }
     }
-    outcomes := [String:String]{}
+    ^outcomes: [String:String]{}
     loop receipt in receipts {
         problems.extend(receipt.problems)
         if receipt.target != "" && !contains_text(targets, receipt.target) {
@@ -277,7 +277,7 @@ receipt_problems: fn(release: Release, receipts: [Receipt], matrix: [MatrixRow])
 // already holds the release is the caller's question: candidate refuses
 // the name, while publish checks for a partial upload.
 remote_problems: fn(release: Release, remote: Remote, name: String) -> [Problem] Never! {
-    problems := [Problem]{}
+    ^problems: [Problem]{}
     problems.extend(remote.problems)
     if remote.slug == "" -> problems.push(problem(REMOTE, "origin is not a GitHub remote"))
     tagged: tag_commit(remote.origin_tags, name) ?? ""

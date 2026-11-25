@@ -20,16 +20,16 @@ sema_todo_candidates: fn(expected: Type?, check: SemaBodyCheck) -> [String] Neve
     owner: sema_scope_function_owner_key(check.scopes)
     // The bindings met so far, nearest first; a later binding of a name met
     // already is shadowed.
-    met := [Int]{}
-    locals := [Int]{}
-    params := [Int]{}
-    own := [String]{}
-    imported := [String]{}
+    ^met: [Int]{}
+    ^locals: [Int]{}
+    ^params: [Int]{}
+    ^own: [String]{}
+    ^imported: [String]{}
     // The frames in scope, nearest first; the module frame is in scope of
     // every body even where the body's frames do not chain up to it
     // (sema_scope_resolve_in_positions).
-    frames := [Int]{}
-    frame := check.scopes.current
+    ^frames: [Int]{}
+    ^frame: check.scopes.current
     loop frame >= 0 {
         frames.push(frame)
         frame = check.scopes.frames[frame].parent
@@ -68,7 +68,7 @@ sema_todo_candidates: fn(expected: Type?, check: SemaBodyCheck) -> [String] Neve
             }
         }
     }
-    ranked := [String]{}
+    ^ranked: [String]{}
     loop index in locals.concat(params) {
         if ranked.len() == SEMA_TODO_CANDIDATE_LIMIT -> return ranked
         // copy: the goal row keeps the name past the scope table it is read

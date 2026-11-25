@@ -73,8 +73,8 @@ fact_source_plane: fn(name: String, body: String, rules: [TAppliedRule]) -> Regi
     if members.len() != 1 || !members[0].starts_with("impl Fact") {
         build_time_refused("the fact plane {context} holds more or less than its one `impl Fact` block")
     }
-    row := RegistrationFactRow{name: name, target: .Value, identity_bearing: false, safe_direction: "", gates: [String]{}, published_by: None}
-    held := false
+    ^row: RegistrationFactRow{name: name, target: .Value, identity_bearing: false, safe_direction: "", gates: [String]{}, published_by: None}
+    ^held: false
     loop entry in marker_source_members(marker_source_block(members[0], "`impl Fact` in {context}")) {
         separator: marker_source_setting_separator(entry) ?? build_time_refused("a fact setting reads `name: value`, found `{entry}` in {context}")
         key: foundation_byte_text(entry.bytes(), 0, separator).trim()
@@ -103,7 +103,7 @@ fact_source_plane: fn(name: String, body: String, rules: [TAppliedRule]) -> Regi
 // Every fact plane in `source`, the text of Prelude/Facts.jet, in source
 // order; a `.Marker(Name)` gate names one of the marker rules `rules`.
 fact_source_read: fn(source: String, rules: [TAppliedRule]) -> [RegistrationFactRow] Never! {
-    rows := [RegistrationFactRow]{}
+    ^rows: [RegistrationFactRow]{}
     loop member in marker_source_members(marker_source_strip_comments(source)) {
         name: marker_source_struct_name(member) ?? build_time_refused("Prelude/Facts.jet declares `{member}`, which is not a fact plane")
         rows.push(fact_source_plane(name, marker_source_block(member, "{name}: struct"), rules))

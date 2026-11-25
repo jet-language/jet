@@ -18,7 +18,7 @@ process_execution_memory_used: fn(pid: I64, scratch: I64) -> I64 {
     jet_rt_string_drop(path)
     if (file < I64{0}) { return I64{-1} }
     text: jet_rt_string_builder_new()
-    good := true
+    ^good: true
     loop {
         count: host_call(I64{0}, file, scratch, I64{8192})
         if (count == I64{-4}) { next }
@@ -29,17 +29,17 @@ process_execution_memory_used: fn(pid: I64, scratch: I64) -> I64 {
         rt_text_append(text, scratch, count)
     }
     spawn_close(file)
-    used := I64{-1}
+    ^used: I64{-1}
     if good {
         prefix: rt_static_text("VmSize:")
-        at := rt_text_find(text, prefix, I64{0}, false)
+        ^at: rt_text_find(text, prefix, I64{0}, false)
         if (at >= I64{0}) {
             at += rt_text_len(prefix)
             loop at < rt_text_len(text) && (rt_text_byte(wrapping(rt_text_data(text) + at)) == I64{32} || rt_text_byte(wrapping(rt_text_data(text) + at)) == I64{9}) {
                 at += I64{1}
             }
-            value := I64{0}
-            digits := I64{0}
+            ^value: I64{0}
+            ^digits: I64{0}
             loop at < rt_text_len(text) {
                 byte: rt_text_byte(wrapping(rt_text_data(text) + at))
                 if (byte < I64{48} || byte > I64{57}) { break }
@@ -71,7 +71,7 @@ process_execution_files_used: fn(pid: I64, scratch: I64) -> I64 {
     jet_rt_free(name, rt_text_len(path) + I64{1}, I64{1})
     jet_rt_string_drop(path)
     if (file < I64{0}) { return I64{-1} }
-    used := I64{0}
+    ^used: I64{0}
     loop {
         count: host_call(I64{217}, file, scratch, I64{8192})
         if (count == I64{-4}) { next }
@@ -80,7 +80,7 @@ process_execution_files_used: fn(pid: I64, scratch: I64) -> I64 {
             break
         }
         if (count == I64{0}) { break }
-        at := I64{0}
+        ^at: I64{0}
         loop at < count {
             row: wrapping(scratch + at)
             length: rt_text_byte(wrapping(row + I64{16})) | rt_text_byte(wrapping(row + I64{17})) << I64{8}

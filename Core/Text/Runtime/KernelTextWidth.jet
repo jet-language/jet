@@ -18,8 +18,8 @@ use {
 // UTF-8 scalars; an invalid sequence decodes one byte as U+FFFD.
 decode_scalars: fn(text: String) -> [Int] Never! {
     raw: width_string.utf8_bytes(text)
-    out := [Int]{}
-    i := 0
+    ^out: [Int]{}
+    ^i: 0
     loop i < raw.len() {
         first: Int{raw[i]}
         width: width_string.utf8_width_at(raw, i)
@@ -28,12 +28,12 @@ decode_scalars: fn(text: String) -> [Int] Never! {
             i += 1
             next
         }
-        cp := 0
+        ^cp: 0
         if width == 2 -> cp = first & 31
         if width == 3 -> cp = first & 15
         if width == 4 -> cp = first & 7
-        valid := true
-        k := 1
+        ^valid: true
+        ^k: 1
         loop k < width {
             byte: Int{raw[i + k]}
             if byte < 128 || byte >= 192 {
@@ -55,7 +55,7 @@ decode_scalars: fn(text: String) -> [Int] Never! {
 }
 
 encode_cps: fn(cps: [Int]) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop cp in cps -> width_string.append_cp(out, cp)
     String.from_bytes(out) ?? ""
 }
@@ -66,12 +66,12 @@ encode_cps: fn(cps: [Int]) -> String Never! {
 graphemes: fn(text: String) -> [String] Never! {
     cps: decode_scalars(text)
     if cps.len() == 0 -> return [String]{}
-    out := [String]{}
-    cluster := [Int]{cps[0]}
-    ri_run := if is_ri(cps[0]) -> 1 else -> 0
-    saw_pic := is_extended_pictographic(cps[0])
-    incb_pending := incb_class(cps[0]) == 2
-    incb_linker := false
+    ^out: [String]{}
+    ^cluster: [Int]{cps[0]}
+    ^ri_run: if is_ri(cps[0]) -> 1 else -> 0
+    ^saw_pic: is_extended_pictographic(cps[0])
+    ^incb_pending: incb_class(cps[0]) == 2
+    ^incb_linker: false
     loop i in 1..<cps.len() {
         cur: cps[i]
         pc: grapheme_class(cps[i - 1])
@@ -147,9 +147,9 @@ cluster_width: fn(cps: [Int]) -> Int Never! {
     emoji_asset: width_emoji.UNICODE_EMOJI
     presentation_asset: width_emoji_presentation.UNICODE_EMOJI_PRESENTATION
     ignorable_asset: width_ignorable.UNICODE_DEFAULT_IGNORABLE
-    variation := false
-    emoji := false
-    visible := false
+    ^variation: false
+    ^emoji: false
+    ^visible: false
     loop cp in cps {
         if cp == 0xFE0F -> variation = true
         if width_assets.asset_contains(emoji_asset, cp) -> emoji = true
@@ -168,7 +168,7 @@ cluster_width: fn(cps: [Int]) -> Int Never! {
 
 // Summed default cluster widths.
 display_width: fn(text: String) -> Int Never! {
-    total := 0
+    ^total: 0
     loop cluster in graphemes(text) -> total += cluster_width(decode_scalars(cluster))
     total
 }
@@ -183,7 +183,7 @@ fill_columns: fn(fill: String, columns: Int) -> String Never! {
     unit: units[0]
     unit_width: cluster_width(decode_scalars(unit))
     if unit_width <= 0 || unit_width > n -> return spaces(n)
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<(n /% unit_width) {
         loop b in width_string.utf8_bytes(unit) -> out.push(b)
     }
@@ -196,7 +196,7 @@ fill_columns: fn(fill: String, columns: Int) -> String Never! {
 // for core.text.pad_start/pad_end/center, core.text.parse.ljust/rjust/center
 // and the String methods.
 pad: fn(text: String, width: Int, fill: String, left: Bool, right: Bool) -> String Never! {
-    gap := width - display_width(text)
+    ^gap: width - display_width(text)
     if gap < 0 -> gap = 0
     before: if left && right -> gap /% 2 else if left -> gap else -> 0
     after: gap - before
@@ -204,7 +204,7 @@ pad: fn(text: String, width: Int, fill: String, left: Bool, right: Bool) -> Stri
 }
 
 spaces: fn(n: Int) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<n -> out.push(U8{32})
     String.from_bytes(out) ?? panic("spaces are ASCII")
 }

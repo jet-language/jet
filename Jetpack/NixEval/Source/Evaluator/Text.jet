@@ -36,7 +36,7 @@ nixeval_scalar: fn(bytes: [U8], index: Int) -> Int Never! {
     lead: nixeval_byte(bytes, index)
     width: nixeval_scalar_width(bytes, index)
     if width <= 1 -> return lead
-    value := if width == {
+    ^value: if width == {
         2 -> lead % 32
         3 -> lead % 16
         else -> lead % 8
@@ -99,7 +99,7 @@ nixeval_is_ascii_hexdigit: fn(byte: Int) -> Bool Never! {
 // True when `text` is empty after trimming Unicode whitespace.
 nixeval_is_blank: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
-    index := 0
+    ^index: 0
     loop index < bytes.len() {
         if !nixeval_is_whitespace_scalar(nixeval_scalar(bytes, index)) -> return false
         index += nixeval_scalar_width(bytes, index)
@@ -109,7 +109,7 @@ nixeval_is_blank: fn(text: String) -> Bool Never! {
 
 // Number of Unicode scalar values.
 nixeval_scalar_count: fn(text: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop byte in text.bytes() {
         value: Int{byte}
         if value < 128 || value >= 192 -> count += 1
@@ -120,7 +120,7 @@ nixeval_scalar_count: fn(text: String) -> Int Never! {
 // Byte offset of the first occurrence of `needle` at or after `from`, or -1.
 nixeval_find: fn(bytes: [U8], needle: [U8], from: Int) -> Int Never! {
     if needle.len() == 0 -> return from
-    start := from
+    ^start: from
     loop start + needle.len() <= bytes.len() {
         if nixeval_matches_at(bytes, needle, start) -> return start
         start += 1
@@ -165,7 +165,7 @@ nixeval_first_byte: fn(bytes: [U8], byte: Int) -> Int Never! {
 
 // Byte offset of the last `byte`, or -1.
 nixeval_last_byte: fn(bytes: [U8], byte: Int) -> Int Never! {
-    index := bytes.len() - 1
+    ^index: bytes.len() - 1
     loop index >= 0 {
         if (Int{bytes[index]}) == byte -> return index
         index -= 1
@@ -177,7 +177,7 @@ nixeval_last_byte: fn(bytes: [U8], byte: Int) -> Int Never! {
 nixeval_last_segment: fn(text: String, separators: String) -> String Never! {
     bytes: text.bytes()
     stops: separators.bytes()
-    index := bytes.len() - 1
+    ^index: bytes.len() - 1
     loop index >= 0 {
         loop stop in stops {
             if bytes[index] == stop -> return nixeval_slice(bytes, index + 1, bytes.len())
@@ -188,7 +188,7 @@ nixeval_last_segment: fn(text: String, separators: String) -> String Never! {
 }
 
 nixeval_lowercase_ascii: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         value: Int{byte}
         if {
@@ -208,9 +208,9 @@ nixeval_contains_text: fn(list: [String], text: String) -> Bool Never! {
 
 // Sort and remove adjacent duplicates.
 nixeval_sorted_unique: fn(values: [String]) -> [String] Never! {
-    sorted := values.copy()
+    ^sorted: values.copy()
     sorted.sort()
-    out := [String]{}
+    ^out: [String]{}
     loop value in sorted {
         if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
     }
@@ -221,14 +221,14 @@ nixeval_sorted_unique: fn(values: [String]) -> [String] Never! {
 // attribute sets, JSON objects and the reference `BTreeMap`s are key-ordered,
 // so key iteration goes through `nixeval_sorted(map.keys().to_list())`.
 nixeval_sorted: fn(names: [String]) -> [String] Never! {
-    sorted := names.copy()
+    ^sorted: names.copy()
     sorted.sort()
     sorted
 }
 
 // A copy of `map` whose insertion order is its key order.
 nixeval_key_ordered: fn(map: [String:String]) -> [String:String] Never! {
-    ordered := [String:String]{}
+    ^ordered: [String:String]{}
     loop name in nixeval_sorted(map.keys().to_list()) -> ordered[name] = map[name]
     ordered
 }

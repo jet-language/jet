@@ -30,7 +30,7 @@ jet_cli_maintainer_bytes: fn(text: String, start: Int, end: Int) -> String Never
 
 jet_cli_maintainer_name: fn(file: String) -> String Never! {
     bytes: file.bytes()
-    index := bytes.len() - 1
+    ^index: bytes.len() - 1
     loop index >= 0 {
         if bytes[index] == 47 -> return jet_cli_maintainer_bytes(file, index + 1, bytes.len())
         index -= 1
@@ -42,7 +42,7 @@ jet_cli_maintainer_name: fn(file: String) -> String Never! {
 
 jet_cli_maintainer_dot: fn(name: String) -> Int? Never! {
     bytes: name.bytes()
-    index := bytes.len() - 1
+    ^index: bytes.len() - 1
     loop index > 0 {
         if bytes[index] == 46 -> return Val(index)
         index -= 1
@@ -83,7 +83,7 @@ jet_cli_reduce_oracle: fn(scratch: String, source: String, code: String) -> Bool
 
 jet_cli_reduce_candidate: fn(lines: [String], start: Int, end: Int) -> [String] Never! {
     // Build only the retained lines; do not clone and drain the whole input.
-    candidate := [String]{}
+    ^candidate: [String]{}
     loop (index, line) in lines {
         if index < start || index >= end -> candidate.push(line.copy())
     }
@@ -92,13 +92,13 @@ jet_cli_reduce_candidate: fn(lines: [String], start: Int, end: Int) -> [String] 
 
 // The reducer owns its line buffer; candidates borrow it until accepted.
 jet_cli_reduce_lines: fn(lines: ^^[String], scratch: String, code: String) -> [String] {
-    current := lines.move()
-    chunks := 2
+    ^current: lines.move()
+    ^chunks: 2
     loop current.len() >= 2 {
         size: (current.len() + chunks - 1) /% chunks
         if size == 0 -> break
-        progress := false
-        start := 0
+        ^progress: false
+        ^start: 0
         loop start < current.len() {
             end: if start + size < current.len() -> start + size else -> current.len()
             candidate: jet_cli_reduce_candidate(current, start, end)
@@ -125,8 +125,8 @@ jet_cli_devtools_reduce: fn(args: [String], color: Bool, json: Bool) -> JetDrive
         return JetDriverVerbOutput{stdout: "", stderr: usage, exit_code: JET_DRIVER_EXIT_USAGE}
     }
     file: args[0]
-    code := String?{None}
-    index := 1
+    ^code: String?{None}
+    ^index: 1
     loop index < args.len() {
         if args[index] != "--code" {
             return jet_cli_maintainer_error("E2102", "unknown `reduce` flag `{args[index]}`", None, None, color, json, JET_DRIVER_EXIT_USAGE)
@@ -161,13 +161,13 @@ jet_cli_devtools_ice_report: fn(args: [String], color: Bool, json: Bool) -> JetD
     }
     file: args[0]
     source: cli_files.read(file) ?? return jet_cli_maintainer_error("E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", None, None, color, json, JET_DRIVER_EXIT_USER_ERROR)
-    root := ""
+    ^root: ""
     if jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program) == {
         .Refused(output) -> return output
         .Compiled(result, snapshot) -> {
             errors: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
             if errors.len() > 0 {
-                output := jet_cli_maintainer_error("E2105", "`{file}` doesn't reach codegen — the front end already rejects it", Val("ice-report bundles a case the front end accepts"), Val("fix the front-end errors first, or use `jet devtools reduce --code <CODE>` to shrink a front-end diagnostic instead"), color, json, JET_DRIVER_EXIT_USER_ERROR)
+                ^output: jet_cli_maintainer_error("E2105", "`{file}` doesn't reach codegen — the front end already rejects it", Val("ice-report bundles a case the front end accepts"), Val("fix the front-end errors first, or use `jet devtools reduce --code <CODE>` to shrink a front-end diagnostic instead"), color, json, JET_DRIVER_EXIT_USER_ERROR)
                 output.stderr = "{output.stderr}{diagnostic_render_all(file, source, errors, color)}"
                 return output
             }

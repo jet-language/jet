@@ -528,7 +528,7 @@ hash_clear: fn(h: ^Hash) Never! { h = hash_new() }
 
 // strHash: Knuth's multiplicative hash of the ASCII-folded bytes, mod 2^32.
 str_hash: fn(z: [U8]) -> Int Never! {
-    h := 0
+    ^h: 0
     loop b in z {
         c: Int{b}
         if c == 0 -> break
@@ -540,7 +540,7 @@ str_hash: fn(z: [U8]) -> Int Never! {
 
 // insertElement.
 hash_insert_element: fn(h: ^Hash, bucket: Int, e: Int) Never! {
-    head := -1
+    ^head: -1
     if bucket >= 0 {
         if h.ht[bucket].count > 0 -> head = h.ht[bucket].chain
         h.ht[bucket].count += 1
@@ -564,7 +564,7 @@ hash_insert_element: fn(h: ^Hash, bucket: Int, e: Int) Never! {
 hash_rehash: fn(h: ^Hash, new_size: Int) Never! {
     h.ht = [HashBucket]{}
     loop _ in 0..<new_size -> h.ht.push(HashBucket{count: 0, chain: -1})
-    e := h.first
+    ^e: h.first
     h.first = -1
     loop e >= 0 {
         next: h.elems[e].next
@@ -576,8 +576,8 @@ hash_rehash: fn(h: ^Hash, new_size: Int) Never! {
 
 // findElementWithHash: the element, or -1; bucket gets the key's bucket.
 hash_find_elem: fn(h: Hash, key: [U8], bucket: ^Int) -> Int Never! {
-    e := h.first
-    count := h.count
+    ^e: h.first
+    ^count: h.count
     bucket = -1
     if h.ht.len() > 0 {
         bucket = str_hash(key) % h.ht.len()
@@ -594,7 +594,7 @@ hash_find_elem: fn(h: Hash, key: [U8], bucket: ^Int) -> Int Never! {
 
 // sqlite3HashFind: the data for key, or -1.
 hash_find: fn(h: Hash, key: [U8]) -> Int Never! {
-    bucket := -1
+    ^bucket: -1
     e: hash_find_elem(h, key, bucket)
     if e < 0 -> return -1
     h.elems[e].data
@@ -619,7 +619,7 @@ hash_remove_elem: fn(h: ^Hash, e: Int, bucket: Int) Never! {
 
 // sqlite3HashInsert: data -1 removes the key. The previous data, or -1.
 hash_insert: fn(h: ^Hash, key: [U8], data: Int) -> Int Never! {
-    bucket := -1
+    ^bucket: -1
     e: hash_find_elem(h, key, bucket)
     if e >= 0 {
         old: h.elems[e].data
@@ -631,13 +631,13 @@ hash_insert: fn(h: ^Hash, key: [U8], data: Int) -> Int Never! {
     }
     if data < 0 -> return -1
     elem: HashElem{live: true, key: key, data: data, next: -1, prev: -1}
-    slot := h.elems.len()
+    ^slot: h.elems.len()
     if h.free.len() > 0 {
         slot = h.free.pop() ?? slot
         h.elems[slot] = elem
     } else { h.elems.push(elem) }
     h.count += 1
-    b := bucket
+    ^b: bucket
     if h.count >= 10 && h.count > 2 * h.ht.len() {
         hash_rehash(h, h.count * 2)
         b = str_hash(key) % h.ht.len()
@@ -649,8 +649,8 @@ hash_insert: fn(h: ^Hash, key: [U8], data: Int) -> Int Never! {
 
 // The data of every element in iteration order (sqliteHashFirst/Next).
 hash_values: fn(h: Hash) -> [Int] Never! {
-    out := [Int]{}
-    e := h.first
+    ^out: [Int]{}
+    ^e: h.first
     loop e >= 0 {
         out.push(h.elems[e].data)
         e = h.elems[e].next
@@ -660,8 +660,8 @@ hash_values: fn(h: Hash) -> [Int] Never! {
 
 // The keys in iteration order.
 hash_keys: fn(h: Hash) -> [[U8]] Never! {
-    out := [[U8]]{}
-    e := h.first
+    ^out: [[U8]]{}
+    ^e: h.first
     loop e >= 0 {
         out.push(h.elems[e].key)
         e = h.elems[e].next
@@ -1395,7 +1395,7 @@ init_info_new: fn() -> InitInfo Never! {
 // A connection with no databases (the part of openDatabase before the
 // btrees open). The builtin collations are BINARY, NOCASE and RTRIM.
 conn_new: fn() -> Conn Never! {
-    colls := [CollSeq]{
+    ^colls: [CollSeq]{
         CollSeq{name: "BINARY".bytes(), enc: base.UTF8, id: record.COLL_BINARY},
         CollSeq{name: "NOCASE".bytes(), enc: base.UTF8, id: record.COLL_NOCASE},
         CollSeq{name: "RTRIM".bytes(), enc: base.UTF8, id: record.COLL_RTRIM},
@@ -1504,16 +1504,16 @@ temp_in_memory: fn(db: Conn) -> Bool Never! { db.temp_store == 2 }
 // the log and checkpointed frame counts; SQLITE_BUSY when one could not
 // finish.
 checkpoint: fn(db: ^Conn, i_db: Int, e_mode: Int, n_log: ^Int, n_ckpt: ^Int) -[DB]> Int Never! {
-    rc := base.OK
-    busy := false
-    first := true
+    ^rc: base.OK
+    ^busy: false
+    ^first: true
     loop i in 0..<db.dbs.len() {
         if rc != base.OK -> break
         if i != i_db && i_db != MAX_DB -> next
         bt: db.dbs[i].bt
         if bt >= 0 && first -> rc = btree.btree_checkpoint(db.btrees[bt], e_mode, n_log, n_ckpt) else if bt >= 0 {
-            log := -1
-            ckpt := -1
+            ^log: -1
+            ^ckpt: -1
             rc = btree.btree_checkpoint(db.btrees[bt], e_mode, log, ckpt)
         }
         first = false
@@ -1545,7 +1545,7 @@ btree_slot_free: fn(db: ^Conn, s: Int) Never! {
 
 // The state of a Btree slot to give btree_open (the connection's BtDB).
 bt_db_of: fn(db: Conn) -> btree.BtDB Never! {
-    b := btree.bt_db_default()
+    ^b: btree.bt_db_default()
     b.flags = db.flags
     b.n_savepoint = db.n_savepoint
     b.n_vdbe_read = db.n_vdbe_read
@@ -1626,7 +1626,7 @@ trigger_alloc: fn(db: ^Conn) -> Int Never! {
 // A new statement slot, linked at the head of the pVdbe list
 // (sqlite3VdbeCreate's list part).
 vdbe_alloc: fn(db: ^Conn) -> Int Never! {
-    s := db.vdbes.len()
+    ^s: db.vdbes.len()
     link: VdbeLink{live: true, next: db.vdbe_head, expired: 0}
     if db.vdbe_free.len() > 0 {
         s = db.vdbe_free.pop() ?? s
@@ -1645,7 +1645,7 @@ vdbe_alloc: fn(db: ^Conn) -> Int Never! {
 // (sqlite3VdbeDelete's list part).
 vdbe_release: fn(db: ^Conn, s: Int) Never! {
     if db.vdbe_head == s -> db.vdbe_head = db.vdbe_links[s].next else {
-        p := db.vdbe_head
+        ^p: db.vdbe_head
         loop p >= 0 {
             if db.vdbe_links[p].next == s {
                 db.vdbe_links[p].next = db.vdbe_links[s].next
@@ -1662,8 +1662,8 @@ vdbe_release: fn(db: ^Conn, s: Int) Never! {
 
 // The live statements, newest first.
 vdbe_list: fn(db: Conn) -> [Int] Never! {
-    out := [Int]{}
-    p := db.vdbe_head
+    ^out: [Int]{}
+    ^p: db.vdbe_head
     loop p >= 0 {
         out.push(p)
         p = db.vdbe_links[p].next
@@ -1706,13 +1706,13 @@ find_table: fn(db: Conn, name: [U8], db_name: [U8]?) -> Int Never! {
     aliased: name.len() >= 7 && util.str_nicmp(name, "sqlite_".bytes(), 7) == 0
     rest: if aliased -> name[7..<name.len()] else -> name[0..<0]
     if db_name == .Val(zdb) {
-        i := 0
+        ^i: 0
         loop i < db.dbs.len() && util.str_icmp(zdb, db.dbs[i].name) != 0 -> i += 1
         if i >= db.dbs.len() {
             if util.str_icmp(zdb, "main".bytes()) != 0 -> return -1
             i = DB_MAIN
         }
-        p := db_find_table(db, i, name)
+        ^p: db_find_table(db, i, name)
         if p < 0 && aliased {
             if i == DB_TEMP {
                 if util.str_icmp(rest, "temp_schema".bytes()) == 0 || util.str_icmp(rest, "schema".bytes()) == 0 || util.str_icmp(rest, "master".bytes()) == 0 {
@@ -1724,7 +1724,7 @@ find_table: fn(db: Conn, name: [U8], db_name: [U8]?) -> Int Never! {
         }
         return p
     }
-    p := db_find_table(db, DB_TEMP, name)
+    ^p: db_find_table(db, DB_TEMP, name)
     if p >= 0 -> return p
     p = db_find_table(db, DB_MAIN, name)
     if p >= 0 -> return p
@@ -1758,7 +1758,7 @@ find_index: fn(db: Conn, name: [U8], db_name: [U8]?) -> Int Never! {
 
 // sqlite3FindDbName: the index of the database named `name`, or -1.
 find_db_name: fn(db: Conn, name: [U8]) -> Int Never! {
-    i := db.dbs.len() - 1
+    ^i: db.dbs.len() - 1
     loop i >= 0 {
         if util.str_icmp(db.dbs[i].name, name) == 0 -> return i
         if i == 0 && util.str_icmp("main".bytes(), name) == 0 -> return 0
@@ -1804,7 +1804,7 @@ free_index: fn(db: ^Conn, idx: Int) Never! {
 
 // sqlite3FkDelete: unlink and free table tab's foreign keys.
 fkey_delete: fn(db: ^Conn, tab: Int) Never! {
-    fk := db.tables[tab].fkey
+    ^fk: db.tables[tab].fkey
     loop fk >= 0 {
         next: db.fkeys[fk].next_from
         s: db.tables[tab].schema
@@ -1835,7 +1835,7 @@ fk_clear_trigger_cache: fn(db: ^Conn, i_db: Int) Never! {
     s: db.dbs[i_db].schema
     loop tab in hash_values(db.schemas[s].tbl_hash) {
         if db.tables[tab].tab_type != TABTYP_NORM -> next
-        fk := db.tables[tab].fkey
+        ^fk: db.tables[tab].fkey
         loop fk >= 0 {
             loop k in 0..<2 {
                 free_trigger(db, db.fkeys[fk].triggers[k])
@@ -1859,7 +1859,7 @@ free_trigger: fn(db: ^Conn, t: Int) Never! {
 // deleteTable: free table tab and its indexes, unlinking the indexes from
 // their schema's hash.
 delete_table_now: fn(db: ^Conn, tab: Int) Never! {
-    idx := db.tables[tab].index
+    ^idx: db.tables[tab].index
     loop idx >= 0 {
         next: db.indexes[idx].next
         s: db.indexes[idx].schema
@@ -1892,7 +1892,7 @@ delete_table: fn(db: ^Conn, tab: Int) Never! {
 // sqlite3VtabClear: move the VTables of virtual table tab onto the
 // disconnect list, whose references vtab_unlock_list drops.
 vtab_clear: fn(db: ^Conn, tab: Int) Never! {
-    v := db.tables[tab].vtab
+    ^v: db.tables[tab].vtab
     loop v >= 0 {
         next: db.vtables[v].next
         db.vtables[v].next = db.disconnect
@@ -1917,7 +1917,7 @@ unlink_and_delete_index: fn(db: ^Conn, i_db: Int, name: [U8]) Never! {
     if idx >= 0 {
         tab: db.indexes[idx].table
         if db.tables[tab].index == idx -> db.tables[tab].index = db.indexes[idx].next else {
-            p := db.tables[tab].index
+            ^p: db.tables[tab].index
             loop p >= 0 && db.indexes[p].next != idx -> p = db.indexes[p].next
             if p >= 0 -> db.indexes[p].next = db.indexes[idx].next
         }
@@ -1942,7 +1942,7 @@ unlink_and_delete_trigger: fn(db: ^Conn, i_db: Int, name: [U8]) Never! {
             tab: table_of_trigger(db, t)
             if tab >= 0 {
                 if db.tables[tab].trigger == t -> db.tables[tab].trigger = db.triggers[t].next else {
-                    p := db.tables[tab].trigger
+                    ^p: db.tables[tab].trigger
                     loop p >= 0 && db.triggers[p].next != t -> p = db.triggers[p].next
                     if p >= 0 -> db.triggers[p].next = db.triggers[t].next
                 }
@@ -2004,7 +2004,7 @@ reset_all_schemas: fn(db: ^Conn) Never! {
 // sqlite3VtabUnlockList: drop the references of the VTables vtab_clear put
 // on the disconnect list.
 vtab_unlock_list: fn(db: ^Conn) Never! {
-    v := db.disconnect
+    ^v: db.disconnect
     db.disconnect = -1
     loop v >= 0 {
         next: db.vtables[v].next
@@ -2026,7 +2026,7 @@ vtab_lock: fn(db: ^Conn, v: Int) Never! { db.vtables[v].n_ref += 1 }
 
 // sqlite3CollapseDatabaseArray: drop the detached databases.
 collapse_database_array: fn(db: ^Conn) Never! {
-    kept := [DBSlot]{}
+    ^kept: [DBSlot]{}
     loop i in 0..<db.dbs.len() {
         if i < 2 || db.dbs[i].bt >= 0 -> kept.push(db.dbs[i]) else if db.dbs[i].schema >= 0 {
             schema_clear(db, db.dbs[i].schema)
@@ -2054,7 +2054,7 @@ expire_prepared_statements: fn(db: ^Conn, code: Int) Never! {
 }
 
 #Test("hash iteration is newest first and lookups fold case") {
-    h := hash_new()
+    ^h: hash_new()
     _: hash_insert(h, "alpha".bytes(), 1)
     _: hash_insert(h, "Beta".bytes(), 2)
     _: hash_insert(h, "gamma".bytes(), 3)

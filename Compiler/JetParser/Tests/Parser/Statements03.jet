@@ -108,7 +108,7 @@ value_block_binding_init: fn(program: Program, function_name: String) -> Expr {
 
 #Test("value_block_preserves_non_value_and_diverging_tail_rules") {
     diagnostics: value_block_rejected("\nrun: fn() {{\n    result: if ready -> {{\n        loop {{\n            break\n        }}\n        side: 1\n    }} else -> 0\n}}\n")
-    e0114 := false
+    ^e0114: false
     loop diagnostic in diagnostics {
         if diagnostic.code == "E0114" -> e0114 = true
         assert(diagnostic.code != "E0003", "synthetic terminator must not create a spurious E0003")
@@ -159,11 +159,9 @@ value_block_binding_init: fn(program: Program, function_name: String) -> Expr {
     program: value_block_parsed("\nrun: fn(ready: Bool) {{\n    result: if ready -> {{\n        1;\n    }} else -> 0\n}}\n")
     if value_block_binding_init(program, "run") == .If(_, _, then_value, _, _, _, _) {
         assert(then_value == .Int(_, _, _, _, _), "the branch keeps its value")
-    } else {
-        panic("the binding is an if")
-    }
+    } else { panic("the binding is an if") }
     incomplete: value_block_rejected("\nrun: fn() {{\n    result: if ready -> {{\n        1\n    }} else -> {{\n        0\n")
-    rejected := false
+    ^rejected: false
     loop diagnostic in incomplete {
         if diagnostic.code == "E0003" && diagnostic.what.contains("Expected `}}` to close this `if` branch") {
             rejected = true
@@ -286,7 +284,7 @@ arm_table_checked: fn(source: String) -> [Diagnostic] {
 }
 
 arm_table_edits: fn(diagnostics: [Diagnostic]) -> [TextEdit] {
-    edits := [TextEdit]{}
+    ^edits: [TextEdit]{}
     loop diagnostic in diagnostics {
         if diagnostic.code != "L0507" -> next
         if diagnostic.edit == .Val(edit) {
@@ -298,7 +296,7 @@ arm_table_edits: fn(diagnostics: [Diagnostic]) -> [TextEdit] {
 }
 
 arm_table_applied: fn(source: String, edit: TextEdit) -> String {
-    out := [U8]{}
+    ^out: [U8]{}
     bytes: source.bytes()
     loop index in 0..<edit.span.start -> out.push(bytes[index])
     loop byte in edit.new_text.bytes() -> out.push(byte)
@@ -310,7 +308,7 @@ arm_table_applied: fn(source: String, edit: TextEdit) -> String {
 // JetParser port gap: canonical_program/CanonicalAST. Source/edit/diagnostic
 // checks remain.
 arm_table_fix_all: fn(source: String) -> String {
-    text := source
+    ^text: source
     loop _ in 0..<8 {
         diagnostics: arm_table_checked(text)
         edits: arm_table_edits(diagnostics)
@@ -355,7 +353,7 @@ arm_table_fix_all: fn(source: String) -> String {
 #Test("comment_between_branches_keeps_the_warning_without_an_edit") {
     source: "run: fn(a: Bool) {{\n    if a {{\n        print(\"x\")\n    }} /* keep */ else if !a {{\n        print(\"y\")\n    }}\n}}\n"
     diagnostics: arm_table_checked(source)
-    found := false
+    ^found: false
     loop diagnostic in diagnostics {
         if diagnostic.code == "L0507" {
             found = true
@@ -371,7 +369,7 @@ arm_table_fix_all: fn(source: String) -> String {
 #Test("linted_else_if_module_binding_stays_a_declaration") {
     source: "LIMIT: if 1 <= 0 -> 4 else if 2 == 8 -> 5 else -> 6\nNEXT: LIMIT + 1\n"
     diagnostics: arm_table_checked(source)
-    found := false
+    ^found: false
     loop diagnostic in diagnostics {
         if diagnostic.code == "L0507" -> found = true
     }

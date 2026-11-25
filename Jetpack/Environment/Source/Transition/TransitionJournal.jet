@@ -41,7 +41,7 @@ TransitionJournal: struct {
 
 // The normal components of a relative path, and whether any is `..`.
 env_transition_components: fn(path: String) -> [String] Never! {
-    parts := [String]{}
+    ^parts: [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         parts.push(part)
@@ -98,8 +98,8 @@ env_transition_read_bounded: fn(path: String) -[FS]> [U8] EnvironmentError! {
     if info.size > TRANSITION_MAX_JOURNAL_BYTES {
         return Err(env_transition_error("{path} exceeds the {TRANSITION_MAX_JOURNAL_BYTES}-byte transition limit"))
     }
-    reader := files.open(path, links: .Refuse) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
-    bytes := [U8]{}
+    ^reader: files.open(path, links: .Refuse) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
+    ^bytes: [U8]{}
     loop {
         chunk: reader.read_bytes(TRANSITION_READ_CHUNK) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
         if chunk.len() == 0 -> break
@@ -116,7 +116,7 @@ env_transition_safe_path: fn(root: String, relative: String) -[FS]> String Envir
     if env_transition_escapes(relative) {
         return Err(env_transition_error("transition path {relative} escapes the Package root"))
     }
-    cursor := root
+    ^cursor: root
     loop component in env_transition_components(relative) {
         cursor = files.join(cursor, component)
         if files.stat(cursor) == .Ok(info) {
@@ -145,7 +145,7 @@ env_transition_ensure_new_file: fn(root: String, relative: String) -[FS]> Enviro
     if files.stat(path) == .Ok(_) {
         return Err(env_transition_error("transition destination {relative} already exists"))
     }
-    parent := files.dirname(path)
+    ^parent: files.dirname(path)
     loop parent != root && parent != "" {
         if files.stat(parent) == .Ok(info) {
             if info.is_symlink || !info.is_dir {
@@ -194,7 +194,7 @@ env_transition_apply_state: fn(root: String, path: String, state: [U8]?) -[FS, E
 
 env_transition_create_real_dirs: fn(root: String, directory: String) -[FS, Env]> EnvironmentError! {
     relative: env_shell_strip_path_prefix(directory, root) ?? return Err(env_transition_error("transition directory escapes the Package root"))
-    cursor := root
+    ^cursor: root
     loop component in env_transition_components(relative) {
         cursor = files.join(cursor, component)
         if files.stat(cursor) == {
@@ -244,7 +244,7 @@ env_transition_write_atomic: fn(path: String, bytes: [U8]) -[FS, Env]> Environme
 }
 
 env_transition_stage: fn(temp: String, bytes: [U8]) -[FS]> IOError! {
-    output := files.create(temp, if_exists: .Refuse)
+    ^output: files.create(temp, if_exists: .Refuse)
     output.write_bytes(bytes)
     output.fsync()
 }
@@ -258,7 +258,7 @@ env_transition_sync_directory: fn(path: String) -[FS, Env]> IOError! {
 }
 
 env_transition_journal_path: fn(root: String, operation: String, changes: [TransitionFileChange]) -> String Never! {
-    identity := operation.bytes()
+    ^identity: operation.bytes()
     loop change in changes {
         loop byte in change.relative.bytes() -> identity.push(byte)
         if change.before == .Val(bytes) {
@@ -277,7 +277,7 @@ env_transition_encode_state: fn(state: [U8]?) -> String Never! {
 }
 
 env_transition_encode_journal: fn(journal: TransitionJournal) -> [U8] Never! {
-    lines := [String]{
+    ^lines: [String]{
         "{TRANSITION_JOURNAL_HEADER}\n",
         "operation={journal.operation}\n",
         "before={journal.before_fingerprint}\n",
@@ -305,8 +305,8 @@ env_transition_read_journal: fn(path: String) -[FS]> TransitionJournal Environme
     env_transition_validate_journal_operation(operation, path)
     env_transition_validate_journal_fingerprint(before_fingerprint, "before", path)
     env_transition_validate_journal_fingerprint(after_fingerprint, "after", path)
-    changes := [TransitionFileChange]{}
-    seen := [String:Bool]{}
+    ^changes: [TransitionFileChange]{}
+    ^seen: [String:Bool]{}
     loop index in 4..<lines.len() {
         line: lines[index]
         if !line.starts_with("file=") {
@@ -333,7 +333,7 @@ env_transition_read_journal: fn(path: String) -[FS]> TransitionJournal Environme
 }
 
 env_transition_validate_journal_operation: fn(operation: String, path: String) EnvironmentError! {
-    unsafe_name := operation == "" || operation.bytes().len() > 128
+    ^unsafe_name: operation == "" || operation.bytes().len() > 128
     loop byte in operation.bytes() {
         code: Int{byte}
         if !pkg_bytes_is_word(code) && code != 45 -> unsafe_name = true
@@ -350,7 +350,7 @@ env_transition_validate_journal_fingerprint: fn(fingerprint: String, field: Stri
         return Err(env_transition_error("journal {path} has an invalid {field} fingerprint"))
     }
     hex: fingerprint.removeprefix("sha256:").bytes()
-    valid := hex.len() == 64
+    ^valid: hex.len() == 64
     loop byte in hex {
         if !env_transition_is_hex(Int{byte}) -> valid = false
     }
@@ -375,12 +375,12 @@ env_transition_decode_state: fn(value: String?, path: String) -> [U8]? Environme
         return Err(env_transition_error("journal {path} has an invalid file state"))
     }
     hex: text.removeprefix("f").bytes()
-    valid := hex.len() % 2 == 0
+    ^valid: hex.len() % 2 == 0
     loop byte in hex {
         if !env_transition_is_hex(Int{byte}) -> valid = false
     }
     if !valid -> return Err(env_transition_error("journal {path} has invalid file bytes"))
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop index in 0..<(hex.len() /% 2) {
         high: env_files_hex_value(Int{hex[index * 2]})
         low: env_files_hex_value(Int{hex[index * 2 + 1]})

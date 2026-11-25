@@ -25,9 +25,9 @@ jet_cli_debug_fix: fn(session: ^NativeSession, entry: String, deep_checks: DeepC
     if entry == "" -> return "Fix needs the program's source: debug it as `jet debug <file.jet>`\n"
     since: fix_time.unix_ns()
     source: fix_files.read(entry) ?? return "Fix refused: couldn't read `{entry}`: {err}\n"
-    argv := [String]{"-O{session.level()}"}
+    ^argv: [String]{"-O{session.level()}"}
     loop word in deep_checks_flags(deep_checks) -> argv.push(word)
-    chosen := BuildOptions?{None}
+    ^chosen: BuildOptions?{None}
     if jet_cli_build_options(argv, "build", entry, source, color, true) == {
         .Refused(_) -> return "Fix refused: the debug build's options don't apply to `{entry}` now\n"
         .Selected(options, _) -> chosen = Val(options)
@@ -53,8 +53,8 @@ jet_cli_debug_fix_checked: fn(session: ^NativeSession, entry: String, source: St
     checked: inputs.move() ?? return "Fix refused: the compiler finished `{entry}` without its checked functions\n"
     runtime: jet_cli_runtime_exports(jet_cli_runtime_dir())
     if runtime.failure != None -> return "Fix refused: couldn't read the Jet runtime's exports\n"
-    census := [JetDriverIceRow]{}
-    built := jet_cli_native_program(result, checked, None, options, runtime, census, entry, jet_driver_entry_root_path(snapshot))
+    ^census: [JetDriverIceRow]{}
+    ^built: jet_cli_native_program(result, checked, None, options, runtime, census, entry, jet_driver_entry_root_path(snapshot))
     if built.failure != None || census.len() > 0 {
         return "Fix refused: the compiler couldn't build the edit\n"
     }

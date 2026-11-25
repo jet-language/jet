@@ -43,7 +43,7 @@ provider_test_native_entry: fn(verification: StoreVerification, roots: HangarRoo
     if !provider_test_require_sandbox() {
         return
     }
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     evaluation: provider_test_fixed_evaluation()
     roots: provider_test_nix_roots("admit")
     source: provider_test_nix_source("admit")
@@ -73,12 +73,12 @@ provider_test_native_entry: fn(verification: StoreVerification, roots: HangarRoo
     if !provider_test_require_sandbox() {
         return
     }
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     evaluation: provider_test_fixed_evaluation()
     roots: provider_test_nix_roots("receipt-route")
     source: provider_test_nix_source("receipt-route")
     native: provider_test_native_entry(verification, roots, source, evaluation)
-    substituted_envelope := native.envelope
+    ^substituted_envelope: native.envelope
     substituted_envelope.provenance = "{native.reference} via nix"
     substituted: Realized{
         name: native.name,
@@ -106,7 +106,7 @@ provider_test_native_entry: fn(verification: StoreVerification, roots: HangarRoo
     if !provider_test_require_sandbox() {
         return
     }
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     evaluation: provider_test_fixed_evaluation()
     source: provider_test_nix_source("repro")
     left_roots: provider_test_nix_roots("repro-left")
@@ -128,7 +128,7 @@ provider_test_native_entry: fn(verification: StoreVerification, roots: HangarRoo
     if !provider_test_require_sandbox() {
         return
     }
-    verification := StoreVerification.new()
+    ^verification: StoreVerification.new()
     project: provider_test_nix_source("repository-project")
     flake: files.join(project, "native-builder-flake.nix")
     files.write(flake, PROVIDER_TEST_NATIVE_FLAKE) ?? panic("fixture flake")

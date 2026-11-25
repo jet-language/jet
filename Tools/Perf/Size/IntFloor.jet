@@ -35,7 +35,7 @@ fail: fn(message: String) -> Never {
 
 // The arbitrary-precision Int routines among nm's lines.
 wide_symbols: fn(listing: String) -> [String] {
-    wide := [String]{}
+    ^wide: [String]{}
     loop line in listing.lines() {
         fields: line.split(" ").to_list()
         name: fields[fields.len() - 1]
@@ -48,7 +48,7 @@ wide_symbols: fn(listing: String) -> [String] {
 // arbitrary-precision Int symbols.
 image: fn(jet: String, dir: String, name: String, flags: [String]) -> {size: Int, wide: [String]} {
     out: "{dir}/out"
-    argv := [jet.copy(), "build"]
+    ^argv: [jet.copy(), "build"]
     argv.extend(flags.copy())
     argv.push("--output-dir={out}")
     argv.push("{dir}/{name}.jet")
@@ -74,7 +74,7 @@ run: fn() {
     dir: fs.mkdtemp("int-floor") ?? fail("no scratch directory")
     fs.write("{dir}/empty.jet", EMPTY) ?? fail("can't write {dir}/empty.jet")
     fs.write("{dir}/intloop.jet", LOOP) ?? fail("can't write {dir}/intloop.jet")
-    broken := [String]{}
+    ^broken: [String]{}
     builds: ["release", "default"]
     loop build in builds {
         flags: if build == "release" -> ["--release"] else -> [String]{}

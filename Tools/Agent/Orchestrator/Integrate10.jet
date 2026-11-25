@@ -52,14 +52,14 @@ lines_of: fn(path: String) -> [String] { files.read_or(path, "").lines() }
 
 // `lines` sorted, each once.
 unique: fn(lines: [String]) -> [String] {
-    sorted := lines
+    ^sorted: lines
     sorted.sort()
     sorted.dedup().to_list()
 }
 
 // The names in `dir` that `matching` names, sorted.
 named: fn(dir: String, matching: String) -> [String] {
-    names := loop entry in files.list_dir_or(dir, [], matching: matching) -> entry.name
+    ^names: loop entry in files.list_dir_or(dir, [], matching: matching) -> entry.name
     names.sort()
     names
 }
@@ -128,9 +128,9 @@ run: fn() {
     if based.code != 0 || !unpack(w, "origin/dev", t) -> stop("integrate: export failed", 2)
     files.write("{i}/BASE", "{base}\n")
     report_path: "{i}/REPORT.md"
-    report := ["# Integration {batch} on origin/dev {base}", ""]
+    ^report: ["# Integration {batch} on origin/dev {base}", ""]
     files.write(report_path, "{report.join("\n")}\n")
-    stacked := [String]{}
+    ^stacked: [String]{}
     loop ps in (process.env_nonempty("INTEG_PRE") ?? "").words() {
         // An item without a batch names the SUB for both.
         parts: ps.partition(":")
@@ -163,13 +163,13 @@ run: fn() {
         stop(report_path, 3)
     }
     // The census: every file any applied SUB touches selects the Jetpack pass when it is under Jetpack/.
-    touched := [String]{}
+    ^touched: [String]{}
     loop s in applied -> touched.extend(lines_of("{i}/{files.basename(s)}.files"))
     touched = unique(touched)
     print("census start")
     census: Sh{"bash {"{g}/capped.sh"} 32G jet -A {"{o}/CensusSnap2.jet"}"}.extend(touched).spec().env("CENSUS_TREE", t).env("CENSUS_OUT", "{i}/census").env("CAP_CPUS", "16-31").stderr(.Stdout).run()
     files.write("{i}/census.out", census.output)
-    crc := census.code
+    ^crc: census.code
     print("census rc={crc}")
     // The repository ratchets and generator checks (Land.jet ratchets), with the seed on the composed tree, all at once.
     seed: files.canonicalize(r["JET_SEED"])
@@ -178,9 +178,9 @@ run: fn() {
     files.create_dir_all("{i}/ratchets")
     if ratchets.len() == 0 -> files.write("{i}/ratchets/none.out", "no ratchets listed\n")
     checks: process.run_all(loop tool in ratchets -> Sh{"nice -n 19 {"{seed}/jet"} {tool} --check"}.spec().cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).timeout(900s).stderr(.Stdout), ratchets.len() + 1)
-    summary := census.output.lines().filter(fn(line) { line.contains(" rc=") || line.contains("rows=") })
-    failures := [String]{}
-    rrc := if ratchets.len() == 0 -> 1 else -> 0
+    ^summary: census.output.lines().filter(fn(line) { line.contains(" rc=") || line.contains("rows=") })
+    ^failures: [String]{}
+    ^rrc: if ratchets.len() == 0 -> 1 else -> 0
     loop at in 0..<ratchets.len() {
         name: files.basename(ratchets[at])
         receipt: checks[at] ?? stop("integrate: ratchet {name}: {err}", 2)
@@ -218,24 +218,24 @@ run: fn() {
         else -> print("no built jetpack (census jetpack row failed); tests use the seed's")
     }
     runsub: fn(step: String, sub: String) -> ProcessSpec { Sh{"bash {"{g}/runsub6.sh"} {step} {sub}"}.spec().env("I", i).env("T", t).env("SELF", self_jet).env("ID", id).env("G", g).env("B", "{i}/basetree").env("C0", seed).stdout(.Inherit).stderr(.Inherit) }
-    golden_rcs := [String]{}
+    ^golden_rcs: [String]{}
     if built {
         // Every SUB runs its test lines as one job, four SUBs at a time.
-        _ := process.run_all(loop s in applied.filter(fn(s) { files.read_or("{s}/tests", "") != "" }) -> runsub("new", s), 4)
+        ^_: process.run_all(loop s in applied.filter(fn(s) { files.read_or("{s}/tests", "") != "" }) -> runsub("new", s), 4)
         // A failing line reruns on a clean origin/dev export with the seed, so rows that already fail on dev are
         // told apart from the ones this batch introduces (a FAIL row present in both counts as pre-existing).
         failing: named("{i}/tests", "*.rc").filter(fn(name) { lines_of("{i}/tests/{name}").any(fn(line) { !line.starts_with("0\t") }) }).map(fn(name) { name.removesuffix(".rc") })
         if failing.len() > 0 {
             loop dir in ["{i}/basetree", "{i}/basebin"] -> files.create_dir_all(dir)
-            _ := unpack(w, base, "{i}/basetree")
+            ^_: unpack(w, base, "{i}/basetree")
             files.symlink("{seed}/jet", "{i}/basebin/jet", replace: true)
             files.symlink("{seed}/jetpack", "{i}/basebin/jetpack", replace: true)
-            _ := process.run_all(loop name in failing -> runsub("base", name), 4)
+            ^_: process.run_all(loop name in failing -> runsub("base", name), 4)
             files.remove_all("{i}/basetree")
         }
         // Goldens that cite a line of a Core or Prelude file this batch touches (`<corelib>/Core/X.jet:N`) drift
         // when that file moves; run each one so the batch, not the release gate, catches it.
-        cited := [String]{}
+        ^cited: [String]{}
         loop f in touched.filter(fn(f) { regex.is_match(CORE_SOURCE, f) }) {
             cited.extend(Sh{"git grep -l --no-index -F {"<corelib>/{f}:"} -- *.out"}.spec().cwd(t).run().output.lines())
         }
@@ -253,7 +253,7 @@ run: fn() {
         if golden_rcs.len() > 0 -> files.write("{i}/goldens.rc", "{golden_rcs.join("\n")}\n")
     }
     // The report: the summary, then one section per SUB.
-    rows := [String]{}
+    ^rows: [String]{}
     loop name in named("{i}/census", "*keep-going.tsv") {
         rows.extend(lines_of("{i}/census/{name}"))
     }
@@ -267,7 +267,7 @@ run: fn() {
         }
         mine: lines_of("{i}/{n}.files").filter(fn(path) { path != "" })
         hits: unique(rows.filter(fn(row) { mine.any(fn(path) { row.contains(path) }) }))
-        bad := hits.len() > 0
+        ^bad: hits.len() > 0
         if bad {
             report.extend(["Census rows in files this patch touches:", "```"].concat(hits).concat(["```"]))
         }
@@ -291,7 +291,7 @@ run: fn() {
         files.write("{i}/{n}.status", if verdict -> "OK\n" else -> "BAD\n")
     }
     if crc != 0 {
-        named_paths := [String]{}
+        ^named_paths: [String]{}
         loop s in applied {
             named_paths.extend(lines_of("{i}/{files.basename(s)}.files").filter(fn(path) { path.trim() != "" }))
         }

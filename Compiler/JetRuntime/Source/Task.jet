@@ -113,7 +113,7 @@ task_failure_render: fn(failure: I64, debug: Bool) -> I64 {
     task_failure_render(failure, true)
 }
 
-task_retain: fn(child: I64) { _ := sync_add(child, I64{1}) }
+task_retain: fn(child: I64) { ^_: sync_add(child, I64{1}) }
 
 task_drop: fn(child: I64) {
     if (child == I64{0}) {
@@ -278,7 +278,7 @@ task_run: fn(child: I64) {
     saved_provider: rt_time_monotonic_provider_get()
     if (world != I64{0}) {
         sync_store(wrapping(base + I64{104}), world)
-        _ := rt_time_monotonic_provider_set(rt_world_monotonic_provider_address())
+        ^_: rt_time_monotonic_provider_set(rt_world_monotonic_provider_address())
         sync_store(wrapping(base + I64{112}), I64{1})
         sync_store(wrapping(base + I64{120}), I64{0})
     }
@@ -299,13 +299,13 @@ task_run: fn(child: I64) {
     // A paused task waits here before its body starts, and a cancel posted
     // before the start wins: the body never runs. A shield the body opens
     // holds only the cancels that come once it is inside.
-    _ := scheduler_wait_while_paused()
+    ^_: scheduler_wait_while_paused()
     aborted: sync_load(wrapping(control + I64{8})) != I64{0} && sync_load(wrapping(control + I64{16})) != I64{0}
     if aborted -> scheduler_deliver_cancel()
     frame: scheduler_task_completion_begin()
     body: scheduler_body_enter()
     if (!aborted && jet_scheduler_native_propagate() == I64{0}) {
-        _ := coll_call2(sync_load(wrapping(child + I64{72})), sync_load(wrapping(child + I64{64})), sync_load(wrapping(child + I64{48})))
+        ^_: coll_call2(sync_load(wrapping(child + I64{72})), sync_load(wrapping(child + I64{64})), sync_load(wrapping(child + I64{48})))
         if (jet_scheduler_native_propagate() == I64{0}) {
             sync_store(wrapping(child + I64{56}), I64{1})
         }
@@ -344,7 +344,7 @@ task_run: fn(child: I64) {
     perf_causal_progress(rt_static_text("task"))
     if (world != I64{0}) {
         world_task_finished(world)
-        _ := rt_time_monotonic_provider_set(saved_provider)
+        ^_: rt_time_monotonic_provider_set(saved_provider)
         sync_store(wrapping(base + I64{104}), saved_world)
         sync_store(wrapping(base + I64{112}), saved_world_flags)
         sync_store(wrapping(base + I64{120}), saved_world_slot)
@@ -370,7 +370,7 @@ task_run: fn(child: I64) {
 task_drain: fn(child: I64) {
     if task_claim(child) -> scheduler_submit(child)
     loop sync_load(wrapping(child + I64{24})) == (I64{0}) {
-        _ := sync_wait(child + I64{24}, I64{0}, I64{-1})
+        ^_: sync_wait(child + I64{24}, I64{0}, I64{-1})
     }
 }
 
@@ -418,12 +418,12 @@ task_run_stolen: fn(child: I64) {
     }
     root: scheduler_root_required()
     sync_thread_lock(root)
-    _ := sync_add(wrapping(root + I64{40}), I64{1})
+    ^_: sync_add(wrapping(root + I64{40}), I64{1})
     sync_thread_unlock(root)
     task_run(child)
     sync_thread_lock(root)
-    _ := sync_add(wrapping(root + I64{40}), I64{-1})
-    _ := sync_add(wrapping(root + I64{280}), I64{-1})
+    ^_: sync_add(wrapping(root + I64{40}), I64{-1})
+    ^_: sync_add(wrapping(root + I64{280}), I64{-1})
     sync_thread_unlock(root)
 }
 
@@ -448,7 +448,7 @@ task_run_joined: fn(child: I64) -> Bool {
     sync_store(wrapping(record + I64{24}), base)
     sync_store(wrapping(fiber + I64{56}), child)
     sync_thread_lock(root)
-    _ := sync_add(wrapping(root + I64{40}), I64{1})
+    ^_: sync_add(wrapping(root + I64{40}), I64{1})
     sync_thread_unlock(root)
     joiner: scheduler_control_current()
     forward: joiner != I64{0} && !scheduler_shielded() && !scheduler_control_is_root(joiner)
@@ -496,7 +496,7 @@ task_join_wait: fn(child: I64) -> I64 {
     kind: scheduler_msg_join()
     typed: sync_load(wrapping(child + I64{184})) != I64{0}
     bounded: task_join_bounded(child)
-    if !typed -> _ := scheduler_deadline_check(kind)
+    if !typed -> ^_: scheduler_deadline_check(kind)
     awaited: perf_samples_object(PERF_SAMPLES_OBJECT_TASK, sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{56})))
     control: scheduler_control_current()
     observes: !bounded && !scheduler_virtual_wait() && !scheduler_shielded() && jet_ctx_deadline_present()
@@ -504,7 +504,7 @@ task_join_wait: fn(child: I64) -> I64 {
     loop jet_scheduler_native_propagate() == (I64{0}) {
         if (scheduler_wait_point_cancel_check() != I64{0}) { break }
         if (sync_load(wrapping(child + I64{24})) != I64{0}) { break }
-        timeout := I64{-1}
+        ^timeout: I64{-1}
         if observes {
             remaining: jet_deadline_remaining_ms()
             if (remaining <= I64{0}) {
@@ -513,14 +513,14 @@ task_join_wait: fn(child: I64) -> I64 {
             }
             timeout = deadline_ms_to_ns(remaining)
         }
-        _ := scheduler_yield_policy(kind, sync_load(wrapping(child + I64{104})), timeout, false, awaited)
+        ^_: scheduler_yield_policy(kind, sync_load(wrapping(child + I64{104})), timeout, false, awaited)
         if (observes && !task_join_returned(child) && jet_deadline_remaining_ms() <= I64{0}) {
             scheduler_deliver_deadline(kind)
             break
         }
     }
     wait_cycle_note(control, I64{0}, I64{0})
-    if !typed && !task_join_returned(child) -> _ := scheduler_deadline_check(kind)
+    if !typed && !task_join_returned(child) -> ^_: scheduler_deadline_check(kind)
     jet_rt_string_drop(kind)
     jet_scheduler_native_propagate()
 }
@@ -566,15 +566,15 @@ task_panic_prefix: fn(data: I64, length: I64, at: I64) -> Bool {
 task_panic_message: fn(message: I64) -> I64 {
     data: sync_load(message)
     length: sync_load(wrapping(message + I64{8}))
-    line_end := I64{0}
+    ^line_end: I64{0}
     loop line_end < length && trap_byte(wrapping(data + line_end)) != (I64{10}) {
         line_end += I64{1}
     }
     if (line_end < length && line_end > I64{0} && trap_byte(wrapping(wrapping(data + line_end) - I64{1})) == I64{13}) {
         line_end -= I64{1}
     }
-    delimiter := I64{-1}
-    at := I64{0}
+    ^delimiter: I64{-1}
+    ^at: I64{0}
     loop at + (I64{3}) <= line_end {
         if (trap_byte(wrapping(data + at)) == I64{93} && trap_byte(wrapping(wrapping(data + at) + I64{1})) == I64{58} && trap_byte(wrapping(wrapping(data + at) + I64{2})) == I64{32}) {
             delimiter = at
@@ -584,13 +584,13 @@ task_panic_message: fn(message: I64) -> I64 {
     }
     candidate: if (delimiter >= I64{0}) -> delimiter + I64{3} else -> I64{0}
     candidate_end: if (delimiter >= I64{0}) -> line_end else -> length
-    start := I64{0}
-    end := line_end
+    ^start: I64{0}
+    ^end: line_end
     if task_panic_prefix(data, candidate_end, candidate) {
         start = candidate + I64{7}
         end = candidate_end
     }
-    location := I64{-1}
+    ^location: I64{-1}
     at = start
     loop at + (I64{5}) <= end {
         if (trap_byte(wrapping(data + at)) == I64{32} && trap_byte(wrapping(wrapping(data + at) + I64{1})) == I64{40} && trap_byte(wrapping(wrapping(data + at) + I64{2})) == I64{97} && trap_byte(wrapping(wrapping(data + at) + I64{3})) == I64{116} && trap_byte(wrapping(wrapping(data + at) + I64{4})) == I64{32}) {
@@ -599,7 +599,7 @@ task_panic_message: fn(message: I64) -> I64 {
         at += I64{1}
     }
     if (location >= I64{0} && end > start && trap_byte(wrapping(wrapping(data + end) - I64{1})) == I64{41}) {
-        colon := false
+        ^colon: false
         at = location + I64{5}
         loop at < end - (I64{1}) {
             if (trap_byte(wrapping(data + at)) == I64{58}) { colon = true }
@@ -623,7 +623,7 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
     if (sync_load(wrapping(child + I64{152})) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
     sync_store(wrapping(child + I64{152}), I64{1})
     status: sync_load(wrapping(child + I64{32}))
-    success := I64{0}
+    ^success: I64{0}
     if (status == I64{0}) {
         slot: sync_load(wrapping(child + I64{48}))
         meta: sync_load(wrapping(child + I64{40}))
@@ -690,7 +690,7 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
 // a closure header [refs,code,release]. Batch-reverse order; callbacks
 // registered by callbacks drain in the next batch of this frame.
 scheduler_task_completion_begin: fn() -> I64 {
-    stack := sync_load(wrapping(thread_base() + I64{80}))
+    ^stack: sync_load(wrapping(thread_base() + I64{80}))
     if (stack == I64{0}) {
         stack = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(stack, I64{24})
@@ -735,7 +735,7 @@ scheduler_task_completion_end: fn(frame: I64) {
         jet_rt_unreachable(I64{0}, I64{0})
     }
     loop sync_load(frame) != (I64{0}) {
-        count := sync_load(frame)
+        ^count: sync_load(frame)
         capacity: sync_load(wrapping(frame + I64{8}))
         data: sync_load(wrapping(frame + I64{16}))
         thread_zero(frame, I64{24})
@@ -760,7 +760,7 @@ scheduler_task_completion_end: fn(frame: I64) {
 // installs the drain as the process exit's handler step (Main.jet
 // main_exit_handlers_code), so a program that registers no exit handler
 // links no drain.
-task_exit_root := I64{0}
+^task_exit_root: I64{0}
 
 #Export(c) jet_rt_task_exit_init: fn() {
     if (task_exit_root != I64{0}) {
@@ -818,7 +818,7 @@ rt_task_exit_run_address: fn() -> I64 {
         if (count == I64{0}) {
             return
         }
-        at := I64{0}
+        ^at: I64{0}
         loop at < count {
             scheduler_cleanup_closure_run(sync_load(wrapping(data + at * I64{8})))
             at += I64{1}
@@ -874,8 +874,8 @@ task_live_uncanceled: fn(child: I64) -> Bool {
 // that can start or drop tasks.
 task_live_cancel: fn(root: I64) {
     sync_mutex_lock(wrapping(root + I64{240}))
-    capacity := I64{0}
-    node := sync_load(wrapping(root + I64{248}))
+    ^capacity: I64{0}
+    ^node: sync_load(wrapping(root + I64{248}))
     loop node != (I64{0}) {
         if task_live_uncanceled(node) -> capacity += I64{1}
         node = sync_load(wrapping(node + I64{200}))
@@ -885,7 +885,7 @@ task_live_cancel: fn(root: I64) {
         return
     }
     controls: jet_rt_alloc(capacity * I64{8}, I64{8})
-    count := I64{0}
+    ^count: I64{0}
     sync_mutex_lock(wrapping(root + I64{240}))
     node = sync_load(wrapping(root + I64{248}))
     loop node != (I64{0}) && count < capacity {
@@ -898,7 +898,7 @@ task_live_cancel: fn(root: I64) {
         node = sync_load(wrapping(node + I64{200}))
     }
     sync_mutex_unlock(wrapping(root + I64{240}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         control: sync_load(wrapping(controls + at * I64{8}))
         scheduler_control_cancel(control)
@@ -911,8 +911,8 @@ task_live_cancel: fn(root: I64) {
 // The live tasks that have not finished.
 task_live_unfinished: fn(root: I64) -> I64 {
     sync_mutex_lock(wrapping(root + I64{240}))
-    count := I64{0}
-    node := sync_load(wrapping(root + I64{248}))
+    ^count: I64{0}
+    ^node: sync_load(wrapping(root + I64{248}))
     loop node != (I64{0}) {
         if (sync_load(wrapping(node + I64{24})) == I64{0}) { count += I64{1} }
         node = sync_load(wrapping(node + I64{200}))

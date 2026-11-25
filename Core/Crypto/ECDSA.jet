@@ -56,11 +56,11 @@ ecdsa_can_do: fn(id: ecp.GroupID) -> Bool Never! {
 derive_mpi: fn(grp: ecp.EcpGroup, hash: [U8]) -> bn.Mpi ecp.EcpError! {
     n_size: (grp.nbits + 7) /% 8
     use_size: if hash.len() > n_size -> n_size else -> hash.len()
-    x := bn.read_binary(cipher.bytes_of(hash, 0, use_size)) ?? return Err(.Mpi(err))
+    ^x: bn.read_binary(cipher.bytes_of(hash, 0, use_size)) ?? return Err(.Mpi(err))
     if use_size * 8 > grp.nbits -> bn.shift_r(x, use_size * 8 - grp.nbits)
     nl: grp.n.p.len()
-    xl := bn.limbs_of(x, nl)
-    out := bn.zeros(nl) ?? return Err(.Mpi(err))
+    ^xl: bn.limbs_of(x, nl)
+    ^out: bn.zeros(nl) ?? return Err(.Mpi(err))
     borrow: bn.core_sub(out.p, xl, grp.n.p, nl)
     bn.core_cond_assign(out.p, xl, nl, borrow)
     Ok(out)
@@ -90,21 +90,21 @@ sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: ^R,
     nl: grp.n.p.len()
     mm: bn.core_montmul_init(grp.n.p)
     e: derive_mpi(grp, hash)
-    rr := bn.mpi()
+    ^rr: bn.mpi()
     bn.mont_r2(rr, grp.n) ?? return Err(.Mpi(err))
-    work := cipher.words(2 * nl + 1)
-    dl := bn.limbs_of(d, nl)
-    sign_tries := 0
+    ^work: cipher.words(2 * nl + 1)
+    ^dl: bn.limbs_of(d, nl)
+    ^sign_tries: 0
     loop {
         if sign_tries > 10 -> return Err(sign_failed(dl, work, .RandomFailed))
         sign_tries += 1
         // The attempt's outputs, allocated before any secret of it exists.
-        kt := bn.zeros(nl) ?? return Err(sign_failed(dl, work, .Mpi(err)))
-        s := bn.zeros(nl) ?? return Err(sign_failed(dl, work, .Mpi(err)))
+        ^kt: bn.zeros(nl) ?? return Err(sign_failed(dl, work, .Mpi(err)))
+        ^s: bn.zeros(nl) ?? return Err(sign_failed(dl, work, .Mpi(err)))
         // Steps 1-3: an ephemeral key pair (k, k G) and r = x(k G) mod N.
-        key_tries := 0
-        k := bn.mpi()
-        r := bn.mpi()
+        ^key_tries: 0
+        ^k: bn.mpi()
+        ^r: bn.mpi()
         loop {
             if key_tries > 10 -> return Err(sign_failed(dl, work, wiped(k.p, .RandomFailed)))
             key_tries += 1
@@ -117,16 +117,16 @@ sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: ^R,
         }
         // Step 5: e from the hash, and the draw t that blinds the inverse.
         // Step 6: s = t (e + r d) / (k t) mod N.
-        t := blinding_draw(grp, rng, blind, shared_rng) ?? return Err(sign_failed(dl, work, wiped(k.p, err)))
-        tl := bn.limbs_of(t, nl)
-        kl := bn.limbs_of(k, nl)
+        ^t: blinding_draw(grp, rng, blind, shared_rng) ?? return Err(sign_failed(dl, work, wiped(k.p, err)))
+        ^tl: bn.limbs_of(t, nl)
+        ^kl: bn.limbs_of(k, nl)
         bn.core_mul_mod(kt.p, kl, tl, grp.n.p, nl, mm, rr.p, work)
-        inv := bn.gcd_modinv_odd(kt, grp.n, inverse: true) ?? return Err(sign_failed(dl, work, attempt_failed(k, kl, t, tl, kt, .Mpi(err))))
-        rd := cipher.words(nl)
+        ^inv: bn.gcd_modinv_odd(kt, grp.n, inverse: true) ?? return Err(sign_failed(dl, work, attempt_failed(k, kl, t, tl, kt, .Mpi(err))))
+        ^rd: cipher.words(nl)
         bn.core_mul_mod(rd, r.p, dl, grp.n.p, nl, mm, rr.p, work)
-        sum := cipher.words(nl)
+        ^sum: cipher.words(nl)
         bn.core_add_mod(sum, e.p, rd, grp.n.p, nl)
-        sum_t := cipher.words(nl)
+        ^sum_t: cipher.words(nl)
         bn.core_mul_mod(sum_t, sum, tl, grp.n.p, nl, mm, rr.p, work)
         bn.core_mul_mod(s.p, inv.i.p, sum_t, grp.n.p, nl, mm, rr.p, work)
         cipher.wipe_words(rd)
@@ -187,7 +187,7 @@ attempt_failed: fn(k: ^bn.Mpi, kl: ^[U64], t: ^bn.Mpi, tl: ^[U64], kt: ^bn.Mpi, 
 /// Sign hash with private key d, drawing the nonce and the blinding from
 /// rng (mbedtls_ecdsa_sign).
 ecdsa_sign: fn<R: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: ^R) -> ECDSASignature ecp.EcpError! {
-    unused := ecp.NoRNG{}
+    ^unused: ecp.NoRNG{}
     sig: sign_core(grp, d, hash, rng, unused, shared_rng: true)
     Ok(sig)
 }
@@ -206,14 +206,14 @@ ecdsa_sign_det: fn<B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], md: hashes.
     // HMAC_DRBG seeded with the private key and the reduced hash, built at
     // its final size so no growth leaves a copy of the key behind.
     h: derive_mpi(grp, hash)
-    hb := bn.write_binary(h, grp_len) ?? return Err(.Mpi(err))
-    db := bn.write_binary(d, grp_len) ?? return Err(.Mpi(err))
-    data := [U8]{}
+    ^hb: bn.write_binary(h, grp_len) ?? return Err(.Mpi(err))
+    ^db: bn.write_binary(d, grp_len) ?? return Err(.Mpi(err))
+    ^data: [U8]{}
     cipher.reserve(data, db.len() + hb.len())
     loop b in db -> data.push(b)
     loop b in hb -> data.push(b)
     core.crypto.wipe(db)
-    nonces := drbg.hmac_drbg_new(md)
+    ^nonces: drbg.hmac_drbg_new(md)
     drbg.hmac_drbg_seed_buf(nonces, data)
     core.crypto.wipe(data)
     core.crypto.wipe(hb)
@@ -253,9 +253,9 @@ ecdsa_signature_to_asn1: fn(sig: ECDSASignature, sig_size: Int) -> [U8] ECDSAErr
 }
 
 der_signature: fn(sig: ECDSASignature) -> [U8] asn1.ASN1Error! {
-    buf := cipher.zero_bytes(ECDSA_MAX_LEN)
-    p := ECDSA_MAX_LEN
-    len := asn1.write_mpi(buf, p, 0, sig.s)
+    ^buf: cipher.zero_bytes(ECDSA_MAX_LEN)
+    ^p: ECDSA_MAX_LEN
+    ^len: asn1.write_mpi(buf, p, 0, sig.s)
     len += asn1.write_mpi(buf, p, 0, sig.r)
     total: asn1.write_len_and_tag(buf, p, 0, len, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE)
     Ok(cipher.bytes_of(buf, p, total))
@@ -274,7 +274,7 @@ ecdsa_write_signature: fn<R: RNG>(key: ecp.Keypair, md: hashes.Md, hash: [U8], s
 /// (mbedtls_ecdsa_read_signature). SigLenMismatch when a valid signature is
 /// followed by more bytes.
 ecdsa_read_signature: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) ECDSAError! {
-    p := 0
+    ^p: 0
     end: sig.len()
     len: asn1.get_tag(sig, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.BadEncoding(err))
     if p + len != end -> return Err(.BadEncoding(.LengthMismatch))
@@ -288,7 +288,7 @@ ecdsa_read_signature: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) ECDSAError! {
     grp: ecp.group_load(.Secp256r1) ?? panic("load")
     d: bn.read_string(16, "C9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721") ?? panic("d")
     hash: hashes.hash(.SHA256, "sample".bytes())
-    blind := drbg.hmac_drbg_new(.SHA256)
+    ^blind: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(blind, "blinding".bytes())
     sig: ecdsa_sign_det(grp, d, hash, .SHA256, blind) ?? panic("sign")
     r: bn.read_string(16, "EFD48B2AACB6A8FD1140DD9CD45E81D69D2C877B56AAF991C34D0EA84EAF3716") ?? panic("r")
@@ -299,10 +299,10 @@ ecdsa_read_signature: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) ECDSAError! {
 }
 
 #Test("The comb never meets R = ±T before its last step over 3000 random scalars on four curves, against G and another point") {
-    rng := drbg.hmac_drbg_new(.SHA256)
+    ^rng: drbg.hmac_drbg_new(.SHA256)
     drbg.hmac_drbg_seed_buf(rng, "comb invariant".bytes())
     curves: [ecp.GroupID]{ecp.GroupID.Secp192r1, ecp.GroupID.Secp256r1, ecp.GroupID.Bp256r1, ecp.GroupID.Secp384r1}
-    meets := 0
+    ^meets: 0
     loop id in curves {
         grp: ecp.group_load(id) ?? panic("load")
         other: ecp.ecp_mul(grp, bn.from_int(7), grp.g, rng) ?? panic("7G")
@@ -318,23 +318,23 @@ ecdsa_read_signature: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) ECDSAError! {
 #Test("The comb's complete last addition gives 2R for R = T, infinity for R = -T, and T for R at infinity") {
     grp: ecp.group_load(.Secp256r1) ?? panic("load")
     f: grp.f
-    w := ecp.fe_work(f.n)
-    t := ecp.fe_tmp(f.n)
-    spare := ecp.jac_new(f.n)
-    gx := cipher.words(f.n)
-    gy := cipher.words(f.n)
+    ^w: ecp.fe_work(f.n)
+    ^t: ecp.fe_tmp(f.n)
+    ^spare: ecp.jac_new(f.n)
+    ^gx: cipher.words(f.n)
+    ^gy: cipher.words(f.n)
     ecp.fe_from_mpi(f, w, gx, grp.g.x)
     ecp.fe_from_mpi(f, w, gy, grp.g.y)
-    twice := ecp.jac_new(f.n)
+    ^twice: ecp.jac_new(f.n)
     ecp.jac_from_point(f, w, twice, grp.g)
     ecp.jac_double(f, w, t, twice)
     ecp.jac_normalize(f, w, t, twice)
-    r := ecp.jac_new(f.n)
+    ^r: ecp.jac_new(f.n)
     ecp.jac_from_point(f, w, r, grp.g)
     assert(ecp.jac_add_affine(f, w, t, r, gx, gy, spare, true) == 0)
     ecp.jac_normalize(f, w, t, r)
     assert(ecp.fe_eq(f, r.x, twice.x) && ecp.fe_eq(f, r.y, twice.y) && ecp.fe_eq(f, r.z, f.one))
-    neg := gy.copy()
+    ^neg: gy.copy()
     ecp.fe_cond_neg(f, w, neg, U64{1})
     ecp.jac_from_point(f, w, r, grp.g)
     _: ecp.jac_add_affine(f, w, t, r, gx, neg, spare, true)
@@ -362,12 +362,12 @@ FailingAfter: struct {
     grp: ecp.group_load(.Secp256r1) ?? panic("load")
     d: bn.read_string(16, "C9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721") ?? panic("d")
     hash: hashes.hash(.SHA256, "sample".bytes())
-    failures := 0
-    left := 0
+    ^failures: 0
+    ^left: 0
     loop {
-        seed := drbg.hmac_drbg_new(.SHA256)
+        ^seed: drbg.hmac_drbg_new(.SHA256)
         drbg.hmac_drbg_seed_buf(seed, "failing draws".bytes())
-        rng := FailingAfter{left: left, inner: seed}
+        ^rng: FailingAfter{left: left, inner: seed}
         if ecdsa_sign(grp, d, hash, rng) == .Ok(sig) {
             q: ecp.ecp_mul(grp, d, grp.g, rng.inner) ?? panic("q")
             ecdsa_verify(grp, hash, q, sig.r, sig.s) ?? panic("verify")

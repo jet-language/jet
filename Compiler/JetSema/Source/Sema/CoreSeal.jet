@@ -91,11 +91,11 @@ sema_core_seal_row: fn(graph: SemaRegistrationGraph, key: String) -> Int? Never!
 // alone; the union rows are sema_failure_union_infer's, joined over their
 // edges.
 sema_core_seal_failure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaCoreSealFailure Never! {
-    seal := sema_core_seal_failure_none()
+    ^seal: sema_core_seal_failure_none()
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
     // The solve's candidates, each with its edges' rows (-1: no callable).
-    rows := [Int]{}
-    edges := [[Int]]{}
+    ^rows: [Int]{}
+    ^edges: [[Int]]{}
     loop module_result in modules {
         source_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
         if source_index == entry_index -> next
@@ -136,7 +136,7 @@ sema_core_seal_failure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModu
         }
     }
     sema_core_seal_fixpoint(seal.infallible, rows, edges)
-    inferred := [String]{}
+    ^inferred: [String]{}
     loop key in seal.keys {
         row: sema_core_seal_row(graph, key) ?? next
         if seal.infallible.get(row) ?? false -> inferred.push(key)
@@ -150,9 +150,9 @@ sema_core_seal_failure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModu
 // inferred in `inferred`; one with an edge to a row that is not, or is no
 // longer, falls, and its fall reaches every candidate with an edge to it.
 sema_core_seal_fixpoint: fn(inferred: ^[Int:Bool], rows: [Int], edges: [[Int]]) Never! {
-    slots := [Int:Int]{}
-    dependents := [[Int]]{}
-    fallen := [Int]{}
+    ^slots: [Int:Int]{}
+    ^dependents: [[Int]]{}
+    ^fallen: [Int]{}
     loop at in 0..<rows.len() {
         loop edge in edges[at] {
             if !(inferred.get(edge) ?? false) {
@@ -162,7 +162,7 @@ sema_core_seal_fixpoint: fn(inferred: ^[Int:Bool], rows: [Int], edges: [[Int]]) 
                 }
                 next
             }
-            slot := slots.get(edge) ?? -1
+            ^slot: slots.get(edge) ?? -1
             if slot < 0 {
                 slot = dependents.len()
                 slots[edge] = slot
@@ -190,8 +190,8 @@ sema_core_seal_fixpoint: fn(inferred: ^[Int:Bool], rows: [Int], edges: [[Int]]) 
 // one.
 sema_core_seal_unions: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], seal: ^SemaCoreSealFailure) Never! {
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
-    rows := [Int]{}
-    edges := [[Int]]{}
+    ^rows: [Int]{}
+    ^edges: [[Int]]{}
     loop module_result in modules {
         module_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
         loop facts in module_result.failure_facts {
@@ -210,7 +210,7 @@ sema_core_seal_unions: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModul
             edges.push(loop edge in facts.union_edges -> sema_core_seal_row(graph, edge) ?? -1)
         }
     }
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
         loop at in 0..<rows.len() {
@@ -237,18 +237,18 @@ sema_core_seal_unions: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModul
 // is clean and whose return carries no view provenance, and an I line for
 // each other inferred-infallible key; sorted.
 sema_core_seal_lines: fn(graph: SemaRegistrationGraph, failure: SemaCoreSealFailure, effects: [SemaCoreSealEffects]) -> [String] Never! {
-    lines := [String]{}
-    stood := [Int:Bool]{}
+    ^lines: [String]{}
+    ^stood: [Int:Bool]{}
     loop summary in effects {
         row: sema_core_seal_row(graph, summary.key) ?? next
         if failure.unclean.get(row) ?? false -> next
         if failure.views.get(row) != None -> next
-        flags := SEMA_CORE_SEAL_STAND_IN
+        ^flags: SEMA_CORE_SEAL_STAND_IN
         if summary.panic -> flags = "{flags}{SEMA_CORE_SEAL_PANIC}"
         if summary.writes -> flags = "{flags}{SEMA_CORE_SEAL_WRITES}"
         if failure.infallible.get(row) ?? false -> flags = "{flags}{SEMA_CORE_SEAL_INFALLIBLE}"
         if failure.general.get(row) ?? false -> flags = "{flags}{SEMA_CORE_SEAL_GENERAL}"
-        line := "{summary.key}\t{flags}"
+        ^line: "{summary.key}\t{flags}"
         loop name in summary.effects -> line = "{line}\t{name}"
         lines.push(line)
         stood[row] = true
@@ -290,10 +290,10 @@ SEMA_CORE_SEAL_TAB: U8{9}
 // library writes its seal so (JetCLI CoreLibrary.jet), and a program reads
 // it as written.
 sema_core_seal_bound: fn(lines: ^^[String], sealed: [String]) -> [String] Never! {
-    bound := [String]{}
-    at := 0
+    ^bound: [String]{}
+    ^at: 0
     loop line in lines.move() {
-        columns := line.split("\t").to_list()
+        ^columns: line.split("\t").to_list()
         if columns.len() < 2 -> next
         loop at < sealed.len() && sealed[at] < columns[0] -> at += 1
         if at < sealed.len() && sealed[at] == columns[0] {
@@ -313,13 +313,13 @@ sema_core_seal_bound: fn(lines: ^^[String], sealed: [String]) -> [String] Never!
 // no line for `key`, or its line is not `key<TAB>flags[<TAB>effect]...`.
 sema_core_seal_line: fn(seal: SemaCoreSeal, key: String) -> SemaCoreSealLine? Never! {
     wanted: key.bytes()
-    low := 0
-    high := seal.bytes.len()
+    ^low: 0
+    ^high: seal.bytes.len()
     loop low < high {
-        start := (low + high) /% 2
+        ^start: (low + high) /% 2
         loop start > low && seal.bytes[start - 1] != SEMA_CORE_SEAL_NEWLINE -> start -= 1
         order: sema_core_seal_key_order(seal.bytes, start, wanted)
-        end := start
+        ^end: start
         loop end < seal.bytes.len() && seal.bytes[end] != SEMA_CORE_SEAL_NEWLINE -> end += 1
         if order == 0 {
             line: String.from_bytes(seal.bytes.slice(start, end)) ?? return None
@@ -340,7 +340,7 @@ sema_core_seal_line: fn(seal: SemaCoreSeal, key: String) -> SemaCoreSealLine? Ne
 // order is the order the seal's lines are sorted in, as a line's key ends
 // at a tab, below every byte a key spells.
 sema_core_seal_key_order: fn(bytes: [U8], start: Int, wanted: [U8]) -> Int Never! {
-    at := start
+    ^at: start
     loop {
         index: at - start
         if at == bytes.len() || bytes[at] == SEMA_CORE_SEAL_NEWLINE || bytes[at] == SEMA_CORE_SEAL_TAB {
@@ -390,9 +390,9 @@ sema_core_seal_valued: fn(seal: SemaCoreSeal, key: String) -> Bool Never! {
 // driver's walks find the same direct effects as along the bodies it
 // stands for (JetDriver Pipeline.jet jet_driver_required_effects).
 sema_core_seal_stand_in_effects: fn(line: SemaCoreSealLine, key: String, span: Span) -> TEffectFacts Never! {
-    edges := [String]{}
+    ^edges: [String]{}
     if line.flags.contains(SEMA_CORE_SEAL_PANIC) -> edges.push(SEMA_CORE_SEAL_PANIC_EDGE)
-    writes := [TEffectSpan]{}
+    ^writes: [TEffectSpan]{}
     if line.flags.contains(SEMA_CORE_SEAL_WRITES) -> writes.push(TEffectSpan{name: key, span: span})
     spans: loop name in line.effects -> TEffectSpan{name: name, span: span}
     TEffectFacts{direct: line.effects, solved: [String]{}, call_edges: edges, maximal: false, direct_spans: spans, module_writes: writes}

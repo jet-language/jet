@@ -180,7 +180,7 @@ build: fn(jet: String, source: String, dir: String, allocator: String) -> String
 
 counted_run: fn(jet: String, binary: String) -> Counted {
     spec: process.cmd([String]{jet, "debug", binary}).env("NO_COLOR", "1").stdin(.Stream).stdout(.Capture).stderr(.Capture).timeout(time.duration_seconds(300))
-    child := spec.spawn() ?? fail("{jet} debug {binary}: {err}")
+    ^child: spec.spawn() ?? fail("{jet} debug {binary}: {err}")
     child.stdin.write_bytes(DEBUG_COMMANDS.bytes()).drop("a session that stopped reading says why on stderr")
     child.stdin.close()
     result: child.wait() ?? fail("{jet} debug {binary}: {err}")
@@ -207,11 +207,11 @@ peak_rss: fn(repo: String, binary: String, expected: String) -> Int {
 // median(plain): a 32-bit linear congruential draw seeded with
 // BOOTSTRAP_SEED picks each resample's indices; the bounds are nearest ranks.
 paired_bootstrap: fn(surface: [Int], plain: [Int]) -> Interval {
-    state := BOOTSTRAP_SEED
-    ratios := [Float]{}
+    ^state: BOOTSTRAP_SEED
+    ^ratios: [Float]{}
     loop _ in 0..<BOOTSTRAP_RESAMPLES {
-        picked_surface := [Int]{}
-        picked_plain := [Int]{}
+        ^picked_surface: [Int]{}
+        ^picked_plain: [Int]{}
         loop _ in 0..<surface.len() {
             state = (state * 1664525 + 1013904223) %% 4294967296
             selected: state * surface.len() /% 4294967296
@@ -252,11 +252,11 @@ measure: fn(repo: String, argv: [String]) -> Evidence {
     plain_plain: build(jet, row.plain_source, files.join(scratch, "plain"), "")
     surface_counted: build(jet, row.surface_source, files.join(scratch, "surface-counted"), COUNTING)
     plain_counted: build(jet, row.plain_source, files.join(scratch, "plain-counted"), COUNTING)
-    runs := CountedRuns{surface: [Counted]{}, plain: [Counted]{}}
+    ^runs: CountedRuns{surface: [Counted]{}, plain: [Counted]{}}
     loop _ in 0..<COUNTED_RUNS { runs.surface.push(counted_run(jet, surface_counted)) }
     loop _ in 0..<COUNTED_RUNS { runs.plain.push(counted_run(jet, plain_counted)) }
-    surface_rss := [Int]{}
-    plain_rss := [Int]{}
+    ^surface_rss: [Int]{}
+    ^plain_rss: [Int]{}
     // Alternate which arm runs first, surface first on even trials.
     loop index in 0..<TRIALS {
         if index %% 2 == 0 -> surface_rss.push(peak_rss(repo, surface_plain, row.expected_output))
@@ -311,7 +311,7 @@ run: fn() {
     if !script.ends_with(TOOL) -> fail("run this file from its place in the checkout ({TOOL})")
     repo: script.removesuffix(TOOL)
     argv: process.args()
-    result := measure(repo, argv)
+    ^result: measure(repo, argv)
     if argv.contains("--write") {
         path: files.join(repo, pair_row(repo).memory_evidence_file ?? fail("the {PAIR} row has no memory_evidence_file"))
         files.write(path, "{json.to_string_pretty(result) ?? fail("the evidence: {err}")}\n") ?? fail("{path}: {err}")

@@ -55,7 +55,7 @@ run: fn() {
     { sender: started, receiver: began }: channel<Int>()
     start: time.unix_ns()
     worker: task opener(started)
-    _ := began.receive() ?? panic("the grandchild never started")
+    ^_: began.receive() ?? panic("the grandchild never started")
     worker.cancel()
     if worker.join() == {
         .Err(error) -> { print("opener: {failure_label(error)}") }
@@ -65,7 +65,7 @@ run: fn() {
 
     { sender: held_started, receiver: held_began }: channel<Int>()
     held: task shielded_opener(held_started)
-    _ := held_began.receive() ?? panic("the shielded child never started")
+    ^_: held_began.receive() ?? panic("the shielded child never started")
     held.cancel()
     if held.join() == {
         .Err(error) -> { print("shielded opener: {failure_label(error)}") }

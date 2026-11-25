@@ -53,7 +53,7 @@ ENVIRONMENT_SPELLED: [{path: String, why: String}]{
 // Each row of JET_ENVIRONMENT_VARIABLES: its name, and its reader.
 environment_rows: fn() -> [{name: String, reader: String}] {
     text: environment_files.read(ENVIRONMENT_REGISTRY) ?? panic("read {ENVIRONMENT_REGISTRY}: {err}")
-    rows := [{name: String, reader: String}]{}
+    ^rows: [{name: String, reader: String}]{}
     loop line in text.lines() {
         if !line.starts_with("    {{name: \"") -> next
         name: line.removeprefix("    {{name: \"").partition("\"").head
@@ -72,7 +72,7 @@ environment_name_byte: fn(code: Int) -> Bool {
 // Each whole `"JET_…"` or `"JETPACK_…"` string literal of `text`, as `path name`.
 environment_literals: fn(path: String, text: String, out: ^[String]) {
     bytes: text.bytes()
-    at := 0
+    ^at: 0
     loop {
         if at >= bytes.len() {
             return
@@ -81,8 +81,8 @@ environment_literals: fn(path: String, text: String, out: ^[String]) {
             at += 1
             next
         }
-        name := [U8]{}
-        end := at + 1
+        ^name: [U8]{}
+        ^end: at + 1
         loop {
             if end >= bytes.len() || !environment_name_byte(Int{bytes[end]}) -> break
             name.push(bytes[end])
@@ -172,8 +172,8 @@ environment_constant: fn(name: String) -> String {
     rows: environment_rows()
     assert(rows.len() > 50, "{ENVIRONMENT_REGISTRY} lists only {rows.len()} variables")
     variables: control_variable_names()
-    seen := [String]{}
-    problems := [String]{}
+    ^seen: [String]{}
+    ^problems: [String]{}
     loop row in rows {
         if seen.contains(row.name) -> problems.push("{row.name}: two rows")
         seen.push(row.name.copy())
@@ -182,7 +182,7 @@ environment_constant: fn(name: String) -> String {
             problems.push("{row.name}: its reader {row.reader} does not name it")
         }
     }
-    found := [String]{}
+    ^found: [String]{}
     loop root in ENVIRONMENT_ROOTS {
         assert(environment_files.is_dir(root) || environment_files.is_file(root), "the scanned root {root} must exist")
         environment_scan(root, found)
@@ -210,7 +210,7 @@ environment_constant: fn(name: String) -> String {
     assert_eq(environment_accessor("JET_A_*"), "env_prefix_jet_a()")
     assert_eq(environment_constant("JET_B"), "ENV_JET_B")
     assert_eq(environment_constant("JET_A_*"), "ENV_PREFIX_JET_A")
-    lits := [String]{}
+    ^lits: [String]{}
     environment_literals("f", "a(\"JET_X\") b(\"JET_Y: {{v}}\") \"JETPACK_Z\" \"JETX\"", lits)
     assert_eq(lits.join(","), "f JET_X,f JETPACK_Z")
 }
@@ -218,10 +218,10 @@ environment_constant: fn(name: String) -> String {
 #Test("code spells a registered environment variable through its generated name") {
     guards_enter_root()
     rows: environment_rows()
-    found := [String]{}
+    ^found: [String]{}
     loop root in ENVIRONMENT_ROOTS -> environment_scan(root, found)
-    used := [String]{}
-    problems := [String]{}
+    ^used: [String]{}
+    ^problems: [String]{}
     loop entry in found {
         parts: entry.partition(" ")
         if !environment_registered(parts.tail, rows) -> next
@@ -257,7 +257,7 @@ ENVIRONMENT_TOOL_ROOTS: "Tools/Agent/roots.env"
 
 // The names `text`'s roots table sets, in order.
 environment_tool_roots: fn(text: String) -> [String] {
-    names := [String]{}
+    ^names: [String]{}
     loop line in text.lines() {
         trimmed: line.trim()
         if !trimmed.starts_with("JET_") -> next
@@ -271,12 +271,14 @@ environment_tool_roots: fn(text: String) -> [String] {
 #Test("every registry row that names the roots table is in it, and every root in it is a registry row") {
     guards_enter_root()
     text: environment_files.read(ENVIRONMENT_TOOL_ROOTS) ?? panic("read {ENVIRONMENT_TOOL_ROOTS}: {err}")
-    table := environment_tool_roots(text)
+    ^table: environment_tool_roots(text)
     assert(table.len() > 0, "{ENVIRONMENT_TOOL_ROOTS} sets no root")
-    names := [String]{}
+    ^names: [String]{}
     loop row in environment_rows() {
         names.push(row.name.copy())
-        if row.reader == ENVIRONMENT_TOOL_ROOTS -> assert(table.contains(row.name), "`{row.name}` names {ENVIRONMENT_TOOL_ROOTS} as its reader but is not in it")
+        if row.reader == ENVIRONMENT_TOOL_ROOTS {
+            assert(table.contains(row.name), "`{row.name}` names {ENVIRONMENT_TOOL_ROOTS} as its reader but is not in it")
+        }
     }
     loop name in table {
         assert(names.contains(name), "{ENVIRONMENT_TOOL_ROOTS} sets `{name}`, which has no registry row")

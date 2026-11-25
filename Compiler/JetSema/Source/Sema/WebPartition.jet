@@ -61,8 +61,8 @@ sema_web_partition_check: fn(modules: ^[SemaGraphModuleResult], graph: SemaRegis
     // functions without a checked body, so a program that doesn't collects
     // none of them.
     active: sema_web_partition_active(graph)
-    metas := [SemaWebMeta]{}
-    types := SemaWebTypes{names: name_table_sized(64), struct_at: [Int]{-1}, enum_at: [Int]{-1}, structs: [StructDef]{}, enums: [EnumDef]{}}
+    ^metas: [SemaWebMeta]{}
+    ^types: SemaWebTypes{names: name_table_sized(64), struct_at: [Int]{-1}, enum_at: [Int]{-1}, structs: [StructDef]{}, enums: [EnumDef]{}}
     loop module_index in 0..<modules.len() {
         registration: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
         program: graph.modules[registration].program
@@ -74,17 +74,17 @@ sema_web_partition_check: fn(modules: ^[SemaGraphModuleResult], graph: SemaRegis
     if metas.len() == 0 {
         return
     }
-    buckets := [WebBucket]{}
-    reasons := [String]{}
-    any_js := false
+    ^buckets: [WebBucket]{}
+    ^reasons: [String]{}
+    ^any_js: false
     // A method the server runs, which sema_web_placement_check checks in any
     // program.
-    any_server := false
+    ^any_server: false
     // Whether each meta is a Core helper that uses no `Browser`. It serves
     // both buckets, so a JS caller does not move it; were it moved, every
     // other caller would follow it into JS (a native window's frame shares
     // the page's layout walk).
-    shared := [Bool]{}
+    ^shared: [Bool]{}
     loop meta in metas {
         browser: sema_web_uses_browser(modules, meta)
         shared.push(!browser && module_is_core(graph.modules[meta.registration].module_identity))
@@ -102,11 +102,11 @@ sema_web_partition_check: fn(modules: ^[SemaGraphModuleResult], graph: SemaRegis
     // Only a JS bucket moves another along an edge, so a program with none
     // that doesn't opt in to the checks and runs no method on the server
     // resolves no edge.
-    callee_first := [Int]{}
-    callees := [Int]{}
+    ^callee_first: [Int]{}
+    ^callees: [Int]{}
     if any_js || active || any_server {
-        keys := name_table_sized(64)
-        meta_of := [Int]{-1}
+        ^keys: name_table_sized(64)
+        ^meta_of: [Int]{-1}
         loop at in 0..<metas.len() {
             if metas[at].row < 0 -> next
             id: name_index(name_intern(keys, modules[metas[at].slot].functions[metas[at].row].key))
@@ -117,7 +117,7 @@ sema_web_partition_check: fn(modules: ^[SemaGraphModuleResult], graph: SemaRegis
         callees = edges.callees.move()
     }
     // Close the partition over the call edges.
-    changed := any_js
+    ^changed: any_js
     loop changed {
         changed = false
         loop caller in 0..<metas.len() {
@@ -152,7 +152,7 @@ sema_web_partition_check: fn(modules: ^[SemaGraphModuleResult], graph: SemaRegis
     }
     loop at in 0..<metas.len() {
         meta: metas[at]
-        found := [Diagnostic]{}
+        ^found: [Diagnostic]{}
         if meta.marker == .Val(.WasmExport) {
             loop param in meta.params {
                 if !sema_web_abi_safe(param, types) {
@@ -214,17 +214,17 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
     callers: sema_web_callers(metas.len(), callee_first, callees)
     // What each meta's function reaches, by root: always the page's, and the
     // server's in a program that opts in.
-    reaches := [[Bool]]{}
+    ^reaches: [[Bool]]{}
     loop index in 0..<sema_web_placed_root_count() {
         if index > 0 && !active -> break
         reaches.push(sema_web_reach(modules, metas, callers, index))
     }
     // The server resource each meta's function reaches when it is JS code
     // outside Core of a program that opts in; "" for any other.
-    reached := [String]{}
+    ^reached: [String]{}
     loop at in 0..<metas.len() {
         meta: metas[at]
-        found := ""
+        ^found: ""
         if active && meta.row >= 0 && buckets[at] == .JS && !module_is_core(graph.modules[meta.registration].module_identity) {
             loop (index, resource) in SEMA_WEB_SERVER_RESOURCES {
                 if reaches[index + 1][at] {
@@ -236,7 +236,7 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         reached.push(found)
     }
     // The functions reported, by key.
-    reported := name_table_sized(metas.len() * 2)
+    ^reported: name_table_sized(metas.len() * 2)
     loop at in 0..<metas.len() {
         meta: metas[at]
         if meta.row < 0 || module_is_core(graph.modules[meta.registration].module_identity) -> next
@@ -244,7 +244,7 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         if name_find(reported, function.key) != None -> next
         name: sema_app_caller_name(function)
         marker: if function.endpoint != "" -> function.endpoint else -> function.system_run
-        found := [Diagnostic]{}
+        ^found: [Diagnostic]{}
         if marker != "" && reaches[0][at] {
             entry: sema_diagnostic_row("E2824")
             found.push(sema_error("E2824", meta.name_span, entry.what.replace("{{method}}", name).replace("{{marker}}", marker), entry.why, entry.fix.replace("{{method}}", name)))
@@ -260,7 +260,7 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
             }
         }
         if found.len() == 0 -> next
-        _ := name_intern(reported, function.key)
+        ^_: name_intern(reported, function.key)
         sema_attach_diagnostic_source_locations(found, 0, graph.modules[meta.registration].source_segments)
         loop diagnostic in found -> diagnostics.push(diagnostic)
     }
@@ -269,13 +269,13 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
 // Each meta's callers, the call edges `callee_first`/`callees` reversed:
 // callees[first[at]..<first[at + 1]] are the metas that call meta `at`.
 sema_web_callers: fn(count: Int, callee_first: [Int], callees: [Int]) -> SemaWebEdges Never! {
-    first := [Int]{}
+    ^first: [Int]{}
     loop _ in 0..<count + 1 -> first.push(0)
     loop callee in callees -> first[callee + 1] = first[callee + 1] + 1
     loop at in 0..<count -> first[at + 1] = first[at + 1] + first[at]
-    slot := [Int]{}
+    ^slot: [Int]{}
     loop at in 0..<count -> slot.push(first[at])
-    callers := [Int]{}
+    ^callers: [Int]{}
     loop _ in callees -> callers.push(0)
     loop caller in 0..<count {
         loop edge in callee_first[caller]..<callee_first[caller + 1] {
@@ -294,14 +294,14 @@ sema_web_callers: fn(count: Int, callee_first: [Int], callees: [Int]) -> SemaWeb
 // for one.
 sema_web_reach: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta], callers: SemaWebEdges, index: Int) -> [Bool] Never! {
     root: sema_web_placed_root(index)
-    reached := [Bool]{}
-    pending := [Int]{}
+    ^reached: [Bool]{}
+    ^pending: [Int]{}
     loop (at, meta) in metas {
         own: meta.declared[index] || (meta.row >= 0 && sema_web_has_root(modules[meta.slot].functions[meta.row].effects.direct, root))
         reached.push(own)
         if own -> pending.push(at)
     }
-    cursor := 0
+    ^cursor: 0
     loop cursor < pending.len() {
         callee: pending[cursor]
         cursor += 1
@@ -332,8 +332,8 @@ SemaWebEdges: struct {
 // edges, and the parts join in order, so the edges are the same for any
 // thread count.
 sema_web_resolve_edges: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta], keys: NameTable, meta_of: [Int], threads: CompilerThreads) -> SemaWebEdges {
-    weights := [Int]{}
-    work := 0
+    ^weights: [Int]{}
+    ^work: 0
     loop meta in metas {
         count: if meta.row < 0 -> 0 else -> modules[meta.slot].functions[meta.row].effects.call_edges.len()
         weights.push(count)
@@ -341,7 +341,7 @@ sema_web_resolve_edges: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta
     }
     workers: compiler_threads_admit(threads, metas.len(), work, SEMA_WEB_EDGES_PER_THREAD, 0, 0)
     bounds: compiler_threads_partition(weights, workers)
-    edges := SemaWebEdges{first: [Int]{}, callees: [Int]{}}
+    ^edges: SemaWebEdges{first: [Int]{}, callees: [Int]{}}
     loop part in sema_web_resolve_parts(modules, metas, keys, meta_of, bounds, 0) {
         base: edges.callees.len()
         loop start in part.first -> edges.first.push(base + start)
@@ -355,7 +355,7 @@ sema_web_resolve_edges: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta
 // part order: the first part on its own thread, the ones after it the same
 // way, and the last on this one.
 sema_web_resolve_parts: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta], keys: NameTable, meta_of: [Int], bounds: [Int], part: Int) -> [SemaWebEdges] {
-    done := [SemaWebEdges]{}
+    ^done: [SemaWebEdges]{}
     if part + 1 >= bounds.len() -> return done
     if part + 2 == bounds.len() {
         done.push(sema_web_resolve_part(modules, metas, keys, meta_of, bounds[part], bounds[part + 1]))
@@ -373,7 +373,7 @@ sema_web_resolve_parts: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta
 // The edges of metas `start..<end`: `first` counts from this part's own
 // first edge.
 sema_web_resolve_part: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta], keys: NameTable, meta_of: [Int], start: Int, end: Int) -> SemaWebEdges {
-    edges := SemaWebEdges{first: [Int]{}, callees: [Int]{}}
+    ^edges: SemaWebEdges{first: [Int]{}, callees: [Int]{}}
     loop at in start..<end {
         edges.first.push(edges.callees.len())
         if metas[at].row < 0 -> next
@@ -510,7 +510,7 @@ sema_web_rows: fn(functions: [FnBody]) -> SemaWebRows Never! {
 }
 
 sema_web_rows_of: fn(spans: ^^[Span]) -> SemaWebRows Never! {
-    starts := [Int:Int]{}
+    ^starts: [Int:Int]{}
     loop (at, span) in spans {
         if starts.get(span.start) == None -> starts[span.start] = at
     }
@@ -544,8 +544,8 @@ sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, modu
     if !active && row < 0 {
         return
     }
-    name := ""
-    key := ""
+    ^name: ""
+    ^key: ""
     if active {
         name = if owner == .Val(owner_name) -> "{owner_name}.{function.name}" else -> function.name
         key = name
@@ -554,13 +554,13 @@ sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, modu
         }
     }
     // Only a `#Export(wasm)` signature is checked for ABI safety.
-    params := [Type]{}
+    ^params: [Type]{}
     if function.web_marker == .Val(.WasmExport) {
         loop param in function.params -> params.push(param.ty)
     }
     ceiling: sema_web_ceiling_or(module_ceiling, file_ceiling)
     // Which placed roots (sema_web_placed_root) its written row holds.
-    declared := (loop _ in 0..<sema_web_placed_root_count() -> false)
+    ^declared: (loop _ in 0..<sema_web_placed_root_count() -> false)
     if function.declared_effects == .Val(entries) {
         loop entry in entries {
             loop index in 0..<declared.len() {
@@ -703,7 +703,7 @@ sema_web_codable_named: fn(name: String, args: [Type], types: SemaWebTypes) -> B
 // Whether the derives give the type every codec trait: each one named, or a
 // family marker (`Codable`) that derives them.
 sema_web_codable: fn(derives: [NamedSpan]) -> Bool Never! {
-    covered := [String]{}
+    ^covered: [String]{}
     loop marker in derives {
         family: owned_trait_family(marker.name)
         if family.len() == 0 -> covered.push(marker.name.copy())
@@ -733,7 +733,7 @@ sema_web_type_show: fn(ty: Type) -> String Never! {
 }
 
 sema_web_type_debug_list: fn(types: [Type]) -> String Never! {
-    shown := [String]{}
+    ^shown: [String]{}
     loop ty in types -> shown.push(sema_web_type_debug(ty))
     "[{shown.join(", ")}]"
 }

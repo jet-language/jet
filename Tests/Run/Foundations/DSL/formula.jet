@@ -43,8 +43,8 @@ parse_formula: fn(source: String) -> Formula? {
 }
 
 parse: fn(source: String) -> Book? {
-    cells := [String:Formula]{}
-    order := [String]{}
+    ^cells: [String:Formula]{}
+    ^order: [String]{}
     loop raw_line in source.lines() {
         line: raw_line.trim()
         if line != "" {
@@ -84,7 +84,7 @@ valid_cell: fn(name: String, book: Book, visiting: ^[String]) -> Bool {
 
 valid_book: fn(book: Book) -> Bool {
     loop name in book.order {
-        visiting := [String]{}
+        ^visiting: [String]{}
         if !valid_cell(name.copy(), book.copy(), visiting) -> return false
     }
     return true
@@ -179,15 +179,15 @@ recalculate: fn(
     if book.cells.get(changed.copy()) == .None -> return None
     if !valid_book(book.copy()) -> return None
 
-    dirty := [String:Bool]{}
+    ^dirty: [String:Bool]{}
     loop name in book.order {
         formula: book.cells.get(name.copy()) ?? return None
-        seen := [String]{}
+        ^seen: [String]{}
         affected: name == changed || depends_on_formula(formula.copy(), changed, book.copy(), seen)
         dirty.add(name.copy(), affected).drop("dirty cell set")
     }
 
-    values := [String:Int]{}
+    ^values: [String:Int]{}
     loop name in book.order {
         is_dirty: dirty.get(name.copy()) ?? false
         if !is_dirty {
@@ -198,11 +198,11 @@ recalculate: fn(
     }
     values.add(changed.copy(), new_value).drop("changed formula value")
 
-    touched := [String]{}
+    ^touched: [String]{}
     loop name in book.order {
         is_dirty: dirty.get(name.copy()) ?? false
         if is_dirty {
-            visiting := [String]{}
+            ^visiting: [String]{}
             if eval_cell(name.copy(), book.copy(), values, visiting) == .None -> return None
             touched.push(name.copy())
         }

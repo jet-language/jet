@@ -135,7 +135,7 @@ module_values_as_the_program_prints_them: fn(source: String) -[FS, Env, Exec, Ti
     dir: envmodel_test_oci_base_dir("module-value-parity")
     plan: envmodel_evaluate_env(MODULE_VALUE_SOURCE, dir) ?? panic("the revision plans")
     modules: envmodel_evaluate_source(MODULE_VALUE_SOURCE, dir) ?? panic("the revision evaluates")
-    env_entry := EntryContribution?{None}
+    ^env_entry: EntryContribution?{None}
     loop evaluated in modules {
         if evaluated.name == "dev" -> env_entry = Val(evaluated.entries[0].entry)
     }
@@ -152,14 +152,14 @@ module_values_as_the_program_prints_them: fn(source: String) -[FS, Env, Exec, Ti
             OptionPlan{key: "services.desktop.profile", value: ".Default"},
         },
     )
-    fleets := [FleetPlan]{}
+    ^fleets: [FleetPlan]{}
     loop evaluated in modules {
         loop fleet in evaluated.fleets -> fleets.push(fleet)
     }
     assert_eq(fleets.len(), 1)
     overrides: fleets[0].hosts[0].overrides ?? panic("web1 has an override")
-    values := [String:CtValue]{}
-    host_options := [OptionPlan]{}
+    ^values: [String:CtValue]{}
+    ^host_options: [OptionPlan]{}
     loop field in overrides.fields {
         if field.value == {
             .Value(value) -> { values[field.name] = value }
@@ -171,7 +171,7 @@ module_values_as_the_program_prints_them: fn(source: String) -[FS, Env, Exec, Ti
     assert_eq(host_options, [OptionPlan]{OptionPlan{key: "tuning.port", value: "8002"}, OptionPlan{key: "network.hostName", value: "web1"}})
     assert_eq(values.get("port"), Val(CtValue.Int{value: 8001}))
     assert_eq(values.get("region"), Val(CtValue.Int{value: 8002}))
-    found := false
+    ^found: false
     loop row in overrides.provenance {
         if row.field == "region" {
             assert_eq(row.dependencies, [String]{"port"})
@@ -217,7 +217,7 @@ module_values_as_the_program_prints_them: fn(source: String) -[FS, Env, Exec, Ti
 // The headline and the `file:line:col` of a rendered refusal, the
 // directory of its file left out.
 module_value_refusal_head: fn(rendered: String) -> String {
-    head := [String]{}
+    ^head: [String]{}
     loop line in rendered.split("\n") {
         trimmed: line.trim()
         if trimmed.starts_with("Error") -> head.push(trimmed.copy())
@@ -308,7 +308,7 @@ SCHEMA_VALUES: "PROMPT: Prompt{{ label: \"x\", path: .Short }}\nLANGS: [\"rust\"
     files.remove_all(dir) ?? panic("remove the directory")
     if outcome.refused == .Val(diagnostic) -> panic("the values are refused: {diagnostic.what}")
     assert_eq(outcome.unreadable, [String]{})
-    computed := [String:CtValue]{}
+    ^computed: [String:CtValue]{}
     loop named in outcome.values -> computed[named.name] = named.value
     prompt: computed.get("PROMPT") ?? panic("PROMPT is computed")
     assert_eq(module_value_field_names(prompt), [String]{"label", "path"})
@@ -487,7 +487,7 @@ dev: module {
     dir: envmodel_test_oci_base_dir("env-secret-policy-calls")
     plan: envmodel_evaluate_env(ENV_SECRET_POLICY_CALLS, dir) ?? panic("the revision plans: {err.diagnostic.what}")
     files.remove_all(dir) ?? panic("remove the environment")
-    ages := [String:SecretRotationPolicy]{}
+    ^ages: [String:SecretRotationPolicy]{}
     loop secret in plan.secrets {
         ages[secret.name] = secret.rotation
         if secret.name == "DAILY" -> assert_eq(secret.generate, SecretGenerator.Random{length: 32})

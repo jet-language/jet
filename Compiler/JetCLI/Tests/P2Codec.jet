@@ -44,7 +44,7 @@ p2_canonical: fn() Never! {
 
 p2_receipt: fn() Never! {
     section: jet_driver_run_receipt_section_new("regression", "Result", "{{\"a\":{{\"b\":1}}}}\n".bytes()) ?? panic("valid section")
-    receipt := JetDriverRunReceipt{
+    ^receipt: JetDriverRunReceipt{
         claim: JetDriverRunReceiptClaim{verb: "prove", key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", inputs: [JetDriverRunReceiptInput]{}},
         status: -17,
         stdout: [U8]{255, 0, 1},
@@ -60,7 +60,7 @@ p2_receipt: fn() Never! {
     p2_require(decoded.status == -17 && decoded.stdout == receipt.stdout, "i32 status and raw output bytes")
     p2_require(decoded.sections.len() == 1 && decoded.produced[0].kind == "proof", "typed extensions preserved")
     p2_require((jet_driver_run_receipt_encode(decoded) ?? [U8]{}) == encoded, "wire bytes roundtrip")
-    tampered := encoded
+    ^tampered: encoded
     tampered[tampered.len() - 1] = if tampered[tampered.len() - 1] == (U8{48}) -> U8{49} else -> U8{48}
     rejected: if jet_driver_run_receipt_decode(tampered) == {
         .Ok(_) -> false
@@ -95,17 +95,17 @@ p2_record: fn() Never! {
     decoded: jet_cli_record_index_parse_line(line) ?? panic("record decode")
     p2_require((jet_cli_record_index_to_jsonl(decoded) ?? "") == line, "record canonical JSONL roundtrip")
     p2_require(jet_cli_record_entry_is_disposable(decoded), "ordinary replay disposable")
-    saved := decoded
+    ^saved: decoded
     saved.saved = true
     p2_require(!jet_cli_record_entry_is_disposable(saved), "saved replay retained")
-    bad := decoded
+    ^bad: decoded
     bad.path = ".jet/../outside/replay-a"
     rejected: if jet_cli_record_entry_normalize(bad) == {
         .Ok(_) -> false
         .Err(error) -> error.message == "record index path contains an unsafe component"
     }
     p2_require(rejected, "index path traversal refused")
-    index := jet_cli_record_index_new(U64{1024}) ?? panic("record index")
+    ^index: jet_cli_record_index_new(U64{1024}) ?? panic("record index")
     jet_cli_record_index_update(index, decoded) ?? panic("record update")
     retained: jet_cli_record_index_save_replay(index, decoded.artifact_id, decoded.identity, ".jet/replays/saved.jetreplay", U64{64}) ?? panic("save replay")
     p2_require(retained.saved && retained.path == ".jet/replays/saved.jetreplay" && retained.size == U64{64} && retained.recorded_sequence == decoded.recorded_sequence, "save replay preserves row identity and sequence")

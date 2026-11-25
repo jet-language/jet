@@ -37,14 +37,14 @@ compiler_dyn_datetime_from_native: fn(schema: I64, address: I64) -> I64 {
     transitions: wrapping(address + compiler_dyn_datetime_fact(schema, I64{4}))
     transition_data: dyn_word(wrapping(transitions + DATA_SEQUENCE_DATA))
     transition_stride: compiler_dyn_datetime_fact(schema, I64{5})
-    lo := I64{0}
-    hi := dyn_word(wrapping(transitions + DATA_SEQUENCE_LENGTH))
+    ^lo: I64{0}
+    ^hi: dyn_word(wrapping(transitions + DATA_SEQUENCE_LENGTH))
     loop lo < hi {
         mid: (lo + hi) /% I64{2}
         at: dyn_word(wrapping(wrapping(transition_data + mid * transition_stride) + compiler_dyn_datetime_fact(schema, I64{6})))
         if (jet_int_compare(at, secs_word) <= I64{0}) { lo = mid + I64{1} } else { hi = mid }
     }
-    index := I64{0}
+    ^index: I64{0}
     if (lo > I64{0}) {
         index = jet_int_owned_to_i64(dyn_word(wrapping(wrapping(transition_data + (lo - I64{1}) * transition_stride) + compiler_dyn_datetime_fact(schema, I64{7}))))
         if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
@@ -107,7 +107,7 @@ compiler_dyn_datetime_native_drop: fn(schema: I64, address: I64) {
     transitions: wrapping(address + compiler_dyn_datetime_fact(schema, I64{4}))
     transition_capacity: dyn_word(wrapping(transitions + DATA_SEQUENCE_CAPACITY))
     transition_stride: compiler_dyn_datetime_fact(schema, I64{5})
-    at := I64{0}
+    ^at: I64{0}
     loop at < dyn_word(wrapping(transitions + DATA_SEQUENCE_LENGTH)) {
         slot: wrapping(dyn_word(wrapping(transitions + DATA_SEQUENCE_DATA)) + at * transition_stride)
         jet_rt_int_drop(dyn_word(wrapping(slot + compiler_dyn_datetime_fact(schema, I64{6}))))
@@ -145,7 +145,7 @@ compiler_dyn_stop: fn(message: I64) {
 // The semantic row of `native`'s tag; -1 after a stop for an absent tag.
 compiler_dyn_semantic_kind: fn(schema: I64, native: I64) -> I64 {
     native_tag: dyn_word(native)
-    kind := I64{0}
+    ^kind: I64{0}
     loop kind < dyn_word(wrapping(schema + I64{8})) {
         if (dyn_word(compiler_dyn_row(schema, kind)) == native_tag) { return kind }
         kind += I64{1}
@@ -161,7 +161,7 @@ compiler_dyn_sequence_from_native: fn(schema: I64, row: I64, native: I64, kind: 
     stride: if (kind == DYN_OBJECT) -> DYN_ENTRY_BYTES else if (kind == DYN_BYTE_LIST) -> RT_HOST_U8_STRIDE else -> DYN_ELEMENT_BYTES
     result: data_sequence_new(length, stride)
     data: dyn_word(wrapping(result + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         slot: wrapping(source + at * source_stride)
         target: wrapping(data + at * stride)
@@ -214,7 +214,7 @@ compiler_dyn_sequence_to_native: fn(schema: I64, row: I64, sequence: I64, kind: 
     source_stride: if (kind == DYN_OBJECT) -> DYN_ENTRY_BYTES else if (kind == DYN_BYTE_LIST) -> RT_HOST_U8_STRIDE else -> DYN_ELEMENT_BYTES
     result: data_sequence_new(length, stride)
     data: dyn_word(wrapping(result + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         slot: wrapping(source + at * source_stride)
         target: wrapping(data + at * stride)
@@ -243,7 +243,7 @@ compiler_dyn_sequence_to_native: fn(schema: I64, row: I64, sequence: I64, kind: 
     coll_zero(native, bytes)
     dyn_store(native, dyn_word(row))
     if (kind == DYN_NULL) { return native }
-    address := native + dyn_word(wrapping(row + I64{8}))
+    ^address: native + dyn_word(wrapping(row + I64{8}))
     if (dyn_word(wrapping(row + I64{16})) != I64{0}) {
         wrapper_bytes: dyn_word(wrapping(row + I64{24}))
         wrapper: jet_rt_alloc(wrapper_bytes, I64{8})
@@ -289,7 +289,7 @@ compiler_dyn_native_sequence_drop: fn(schema: I64, row: I64, sequence: I64, kind
     capacity: dyn_word(wrapping(sequence + DATA_SEQUENCE_CAPACITY))
     data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     stride: dyn_word(wrapping(row + I64{32}))
-    at := I64{0}
+    ^at: I64{0}
     loop kind != DYN_BYTE_LIST && at < length {
         slot: wrapping(data + at * stride)
         if (kind == DYN_OBJECT) {

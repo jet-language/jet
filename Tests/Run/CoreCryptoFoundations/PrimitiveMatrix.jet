@@ -23,7 +23,7 @@ use {
 unhex: fn(text: String) -> [U8] { hex.decode(text) ?? panic("bad fixture hex") }
 
 repeat_byte: fn(value: U8, count: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop _ in 0..<count -> out.push(value)
     out
 }
@@ -33,7 +33,7 @@ repeat_byte: fn(value: U8, count: Int) -> [U8] {
 runtime: fn(value: Int) -> Int { value }
 
 mod251: fn(count: Int) -> [U8] {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in 0..<count {
         value: i % 251
         out.push(U8{value})
@@ -70,7 +70,7 @@ run: fn() {
     print("blake3_1024 {crypto.blake3(mod251(1024)).hex()}")
     print("blake3_1025 {crypto.blake3(mod251(1025)).hex()}")
     print("blake3_2049 {crypto.blake3(mod251(2049)).hex()}")
-    hasher := crypto.Hasher.new()
+    ^hasher: crypto.Hasher.new()
     hasher.update("ab".bytes())
     hasher.update("c".bytes())
     print("hasher_sha256 {hasher.digest()}")

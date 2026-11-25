@@ -162,7 +162,7 @@ FmtStep: struct {
 fl_no_step: fn() -> FmtStep { FmtStep{ok: false, original: 0, formatted: 0} }
 
 fl_tok: fn(tables: TokenTables, token: Token) -> FmtTok {
-    parts := [FmtPart]{}
+    ^parts: [FmtPart]{}
     if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
         loop part in token_string_parts(tables, token) -> parts.push(fl_part(tables, part))
     }
@@ -170,7 +170,7 @@ fl_tok: fn(tables: TokenTables, token: Token) -> FmtTok {
 }
 
 fl_part: fn(tables: TokenTables, part: StringPart) -> FmtPart {
-    tokens := [FmtTok]{}
+    ^tokens: [FmtTok]{}
     loop token in part.tokens -> tokens.push(fl_tok(tables, token))
     FmtPart{kind: part.kind, text: name_text(tables.names, part.text), byte: part.byte, tokens: tokens.move()}
 }
@@ -202,7 +202,7 @@ fl_uppercase_start: fn(text: String) -> Bool {
 
 // The lexer's diagnostics for `src`, or "".
 fl_lex_codes: fn(src: String) -> String {
-    codes := ""
+    ^codes: ""
     loop diagnostic in lex(src.bytes()).diagnostics {
         codes = "{codes} {diagnostic.code}: {diagnostic.what};"
     }
@@ -213,9 +213,9 @@ fl_lex: fn(src: String, path: String) -> [FmtTok] {
     bytes: src.bytes()
     lexed: lex(bytes)
     if lexed.diagnostics.len() > 0 -> panic("lex failed on {path}:{fl_lex_codes(src)}")
-    out := [FmtTok]{}
+    ^out: [FmtTok]{}
     loop token in lexed.tokens {
-        converted := fl_tok(lexed.tables, token)
+        ^converted: fl_tok(lexed.tables, token)
         if fl_is_comment(token.kind) -> converted.own_line = fl_starts_line(bytes, token.span.start)
         if token.kind == TOKEN_LBRACE -> converted.ends_line = fl_ends_line(bytes, token.span.end)
         out.push(converted)
@@ -225,14 +225,14 @@ fl_lex: fn(src: String, path: String) -> [FmtTok] {
 
 // Only blanks sit between the previous line break and `start`.
 fl_starts_line: fn(bytes: [U8], start: Int) -> Bool {
-    cursor := start - 1
+    ^cursor: start - 1
     loop cursor >= 0 && (bytes[cursor] == 32 || bytes[cursor] == 9) -> cursor -= 1
     cursor < 0 || bytes[cursor] == 10 || bytes[cursor] == 13
 }
 
 // Only blanks sit between `end` and the next line break or the end.
 fl_ends_line: fn(bytes: [U8], end: Int) -> Bool {
-    cursor := end
+    ^cursor: end
     loop cursor < bytes.len() && (bytes[cursor] == 32 || bytes[cursor] == 9) -> cursor += 1
     cursor >= bytes.len() || bytes[cursor] == 10 || bytes[cursor] == 13
 }
@@ -242,14 +242,14 @@ fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
     enum_commas: fl_enum_group_commas(tokens)
     field_commas: fl_declaration_field_commas(tokens)
     arm_commas: fl_table_arm_commas(tokens)
-    kept := [FmtTok]{}
+    ^kept: [FmtTok]{}
     loop index in 0..<tokens.len() {
         if enum_commas[index] || field_commas[index] || arm_commas[index] -> next
         if tokens[index].kind == TOKEN_SEMI || tokens[index].kind == TOKEN_EOF -> next
         kept.push(tokens[index])
     }
-    canonical := [FmtTok]{}
-    index := 0
+    ^canonical: [FmtTok]{}
+    ^index: 0
     loop index < kept.len() {
         next_kind: fl_kind(kept, index + 1)
         if kept[index].kind == TOKEN_COMMA && fl_is_closer(fl_kind_past_comments(kept, index + 1)) {
@@ -361,7 +361,7 @@ fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
 // `&&` binds tighter than `||`, so parentheses around an `&&` chain that is a
 // direct `||` operand group nothing: `(a && b) || c` is `a && b || c`.
 fl_drop_and_groups_in_or: fn(tokens: [FmtTok]) -> [FmtTok] {
-    dropped := [Bool]{}
+    ^dropped: [Bool]{}
     loop _ in 0..<tokens.len() -> dropped.push(false)
     loop index in 0..<tokens.len() {
         if tokens[index].kind != TOKEN_LPAREN -> next
@@ -373,8 +373,8 @@ fl_drop_and_groups_in_or: fn(tokens: [FmtTok]) -> [FmtTok] {
         if !fl_logic_operand_left_edge(before) || !fl_logic_operand_right_edge(tokens, close + 1) {
             next
         }
-        depth := 0
-        and_chain := false
+        ^depth: 0
+        ^and_chain: false
         loop cursor in index + 1..<close {
             kind: tokens[cursor].kind
             if fl_is_opener(kind) -> depth += 1
@@ -391,7 +391,7 @@ fl_drop_and_groups_in_or: fn(tokens: [FmtTok]) -> [FmtTok] {
         dropped[index] = true
         dropped[close] = true
     }
-    out := [FmtTok]{}
+    ^out: [FmtTok]{}
     loop index in 0..<tokens.len() {
         if !dropped[index] -> out.push(tokens[index])
     }
@@ -415,13 +415,13 @@ fl_logic_operand_right_edge: fn(tokens: [FmtTok], index: Int) -> Bool {
 // place (`n`, `p.hp`, `self.x`) and `+`, `-`, `*` or `/`, and parentheses
 // around such a value group nothing (`n = (n + 1)` is `n = n + 1`).
 fl_expand_compound_assignments: fn(tokens: [FmtTok]) -> [FmtTok] {
-    dropped := [Bool]{}
+    ^dropped: [Bool]{}
     loop _ in 0..<tokens.len() -> dropped.push(false)
     loop index in 0..<tokens.len() {
         if tokens[index].kind != TOKEN_EQ -> next
         place_start: fl_place_start(tokens, index)
         if place_start < 0 -> next
-        opens := 0
+        ^opens: 0
         loop fl_kind(tokens, index + 1 + opens) == TOKEN_LPAREN -> opens += 1
         if opens == 0 -> next
         left: index + 1 + opens
@@ -436,7 +436,7 @@ fl_expand_compound_assignments: fn(tokens: [FmtTok]) -> [FmtTok] {
             dropped[close] = true
         }
     }
-    out := [FmtTok]{}
+    ^out: [FmtTok]{}
     loop index in 0..<tokens.len() {
         if dropped[index] -> next
         binary: fl_compound_binary(tokens[index].kind)
@@ -459,7 +459,7 @@ fl_expand_compound_assignments: fn(tokens: [FmtTok]) -> [FmtTok] {
 
 // The first token of the name or field path that ends before `end`, or -1.
 fl_place_start: fn(tokens: [FmtTok], end: Int) -> Int {
-    start := end - 1
+    ^start: end - 1
     if !fl_place_name(fl_kind(tokens, start)) -> return -1
     loop fl_kind(tokens, start - 1) == TOKEN_DOT && fl_place_name(fl_kind(tokens, start - 2)) {
         start -= 2
@@ -501,13 +501,13 @@ fl_compound_text: fn(kind: Int) -> String {
 // A `use { … }` group and one `use` per row parse to the same imports: each
 // group row gets its own `use` keyword and the group braces go.
 fl_flatten_use_groups: fn(tokens: [FmtTok]) -> [FmtTok] {
-    out := [FmtTok]{}
-    index := 0
+    ^out: [FmtTok]{}
+    ^index: 0
     loop index < tokens.len() {
         if tokens[index].kind == TOKEN_KW_USE && fl_kind(tokens, index + 1) == TOKEN_LBRACE {
             close: fl_matching(tokens, index + 1, TOKEN_LBRACE, TOKEN_RBRACE)
             if close > index + 1 {
-                depth := 0
+                ^depth: 0
                 loop cursor in index + 2..<close {
                     kind: tokens[cursor].kind
                     if depth == 0 && fl_use_row_start(tokens, index + 1, cursor) {
@@ -548,7 +548,7 @@ fl_use_row_start: fn(tokens: [FmtTok], open: Int, cursor: Int) -> Bool {
 fl_in_use: fn(tokens: [FmtTok], index: Int) -> Bool {
     open: fl_enclosing_brace(tokens, index)
     if open >= 0 && fl_kind(tokens, open - 1) == TOKEN_KW_USE -> return true
-    cursor := index - 1
+    ^cursor: index - 1
     loop cursor >= 0 && (fl_kind(tokens, cursor) == TOKEN_IDENT || fl_kind(tokens, cursor) == TOKEN_DOT || fl_kind(tokens, cursor) == TOKEN_COLON) {
         cursor -= 1
     }
@@ -573,7 +573,7 @@ fl_leading_param_sigil: fn(tokens: [FmtTok], index: Int) -> Bool {
     if fl_kind(tokens, index + 1) != TOKEN_IDENT || fl_kind(tokens, index + 2) != TOKEN_COLON {
         return false
     }
-    head := index - 1
+    ^head: index - 1
     loop fl_kind(tokens, head) == TOKEN_IDENT && fl_kind(tokens, head - 1) == TOKEN_HASH {
         head -= 2
     }
@@ -587,13 +587,13 @@ fl_piped_generic_bounds_end: fn(tokens: [FmtTok], index: Int) -> Int {
     if fl_kind(tokens, index) != TOKEN_IDENT || fl_kind(tokens, index - 1) != TOKEN_COLON || fl_kind(tokens, index - 2) != TOKEN_IDENT {
         return -1
     }
-    end := index + 1
+    ^end: index + 1
     loop fl_kind(tokens, end) == TOKEN_PIPE && fl_kind(tokens, end + 1) == TOKEN_IDENT -> end += 2
     if end == index + 1 || (fl_kind(tokens, end) != TOKEN_COMMA && fl_kind(tokens, end) != TOKEN_GT) {
         return -1
     }
     // Back over the earlier parameters, `Name` or `Name: bounds`, to the `<`.
-    cursor := index - 3
+    ^cursor: index - 3
     loop cursor >= 0 && fl_generic_param_token(tokens[cursor].kind) -> cursor -= 1
     if fl_kind(tokens, cursor) != TOKEN_LT -> return -1
     owner: fl_kind(tokens, cursor - 1)
@@ -625,8 +625,8 @@ fl_bare_foreign_return: fn(tokens: [FmtTok], index: Int) -> Bool {
     if after != TOKEN_IDENT && after != TOKEN_QUESTION && after != TOKEN_LBRACKET && after != TOKEN_LPAREN {
         return false
     }
-    depth := 0
-    open := index
+    ^depth: 0
+    ^open: index
     loop open >= 0 {
         kind: tokens[open].kind
         if kind == TOKEN_RPAREN -> depth += 1
@@ -636,7 +636,7 @@ fl_bare_foreign_return: fn(tokens: [FmtTok], index: Int) -> Bool {
     }
     if open < 1 || tokens[open - 1].kind != TOKEN_KW_FN -> return false
     depth = 0
-    cursor := index + 1
+    ^cursor: index + 1
     loop cursor < tokens.len() {
         kind: tokens[cursor].kind
         if {
@@ -671,7 +671,7 @@ fl_is_closer: fn(kind: Int) -> Bool {
 // Kind of the first token at or after `index` that is not a comment: a
 // trailing comma may sit before the comments that end a list.
 fl_kind_past_comments: fn(tokens: [FmtTok], index: Int) -> Int {
-    cursor := index
+    ^cursor: index
     loop cursor < tokens.len() && fl_is_comment(tokens[cursor].kind) -> cursor += 1
     fl_kind(tokens, cursor)
 }
@@ -681,8 +681,8 @@ fl_kind_past_comments: fn(tokens: [FmtTok], index: Int) -> Int {
 fl_is_control_body_arrow: fn(tokens: [FmtTok], arrow: Int) -> Bool {
     if tokens[arrow].kind != TOKEN_UNIFIED_ARROW -> return false
     if fl_kind(tokens, arrow - 1) == TOKEN_KW_ELSE -> return true
-    depth := 0
-    cursor := arrow - 1
+    ^depth: 0
+    ^cursor: arrow - 1
     loop cursor >= 0 {
         kind: tokens[cursor].kind
         if fl_is_closer(kind) -> depth += 1 else if fl_is_opener(kind) {
@@ -693,14 +693,14 @@ fl_is_control_body_arrow: fn(tokens: [FmtTok], arrow: Int) -> Bool {
         }
         cursor -= 1
     }
-    head := cursor + 1
+    ^head: cursor + 1
     loop head < arrow && fl_is_trivia(tokens[head].kind) -> head += 1
     head < arrow && (tokens[head].kind == TOKEN_KW_LOOP || tokens[head].kind == TOKEN_KW_IF)
 }
 
 // The token that ends the one-statement body after `arrow`.
 fl_control_body_end: fn(tokens: [FmtTok], arrow: Int) -> Int {
-    depth := 0
+    ^depth: 0
     loop cursor in arrow + 1..<tokens.len() {
         kind: tokens[cursor].kind
         if fl_is_opener(kind) {
@@ -728,10 +728,10 @@ fl_control_body_end: fn(tokens: [FmtTok], arrow: Int) -> Int {
 // already written as one block after its arrow (`else -> { ... }`, the arm
 // braces fmt adds around a broken body) is that block.
 fl_canonicalize_control_arrow_bodies: fn(tokens: [FmtTok]) -> [FmtTok] {
-    closes := [Int]{}
+    ^closes: [Int]{}
     loop _ in 0..<tokens.len() + 1 -> closes.push(0)
-    bodies := [Bool]{}
-    blocks := [Bool]{}
+    ^bodies: [Bool]{}
+    ^blocks: [Bool]{}
     loop index in 0..<tokens.len() {
         body: fl_is_control_body_arrow(tokens, index)
         end: if body -> fl_control_body_end(tokens, index) else -> -1
@@ -740,7 +740,7 @@ fl_canonicalize_control_arrow_bodies: fn(tokens: [FmtTok]) -> [FmtTok] {
         blocks.push(block)
         if body && !block -> closes[end] = closes[end] + 1
     }
-    out := [FmtTok]{}
+    ^out: [FmtTok]{}
     loop index in 0..<tokens.len() {
         loop _ in 0..<closes[index] -> out.push(fl_synthetic(TOKEN_RBRACE, "}}"))
         if blocks[index] -> next
@@ -756,18 +756,18 @@ fl_canonicalize_control_arrow_bodies: fn(tokens: [FmtTok]) -> [FmtTok] {
 // `*`), and `from name` names a parameter by its synthetic `_N` owner, so
 // `fn(line: String) -> View<str> from line` is `fn(String) -> View<str> from _0`.
 fl_canonicalize_fn_type_names: fn(tokens: [FmtTok]) -> [FmtTok] {
-    dropped := [Bool]{}
+    ^dropped: [Bool]{}
     loop _ in 0..<tokens.len() -> dropped.push(false)
-    renamed := [String:String]{}
-    out := [FmtTok]{}
+    ^renamed: [String:String]{}
+    ^out: [FmtTok]{}
     loop index in 0..<tokens.len() {
         if tokens[index].kind != TOKEN_KW_FN || fl_kind(tokens, index + 1) != TOKEN_LPAREN -> next
         close: fl_matching(tokens, index + 1, TOKEN_LPAREN, TOKEN_RPAREN)
         if close < 0 || fl_fn_has_body(tokens, close) -> next
-        names := [String:Int]{}
-        position := 0
-        depth := 0
-        labels := false
+        ^names: [String:Int]{}
+        ^position: 0
+        ^depth: 0
+        ^labels: false
         loop cursor in index + 2..<close {
             kind: tokens[cursor].kind
             if fl_is_opener(kind) || kind == TOKEN_LT {
@@ -794,10 +794,10 @@ fl_canonicalize_fn_type_names: fn(tokens: [FmtTok]) -> [FmtTok] {
             }
         }
         // `from line | other`: each named source after the return type.
-        cursor := close + 1
+        ^cursor: close + 1
         loop cursor < tokens.len() && tokens[cursor].kind != TOKEN_SEMI && tokens[cursor].kind != TOKEN_COMMA && !fl_is_closer(tokens[cursor].kind) && tokens[cursor].kind != TOKEN_LBRACE {
             if fl_is_ident(tokens, cursor) && tokens[cursor].text == FL_KW_FROM {
-                source := cursor + 1
+                ^source: cursor + 1
                 loop fl_is_ident(tokens, source) {
                     if names.get(tokens[source].text) == .Val(slot) {
                         renamed["{source}"] = "_{slot}"
@@ -824,7 +824,7 @@ fl_canonicalize_fn_type_names: fn(tokens: [FmtTok]) -> [FmtTok] {
 // A `{` body follows the parameter list that closes at `close` before the
 // declaration ends.
 fl_fn_has_body: fn(tokens: [FmtTok], close: Int) -> Bool {
-    depth := 0
+    ^depth: 0
     loop cursor in close + 1..<tokens.len() {
         kind: tokens[cursor].kind
         if depth == 0 && kind == TOKEN_LBRACE -> return true
@@ -848,9 +848,9 @@ fl_all_trivia: fn(tokens: [FmtTok]) -> Bool {
 }
 
 fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
-    chunks := [[FmtTok]]{}
-    chunk := [FmtTok]{}
-    brace_depth := 0
+    ^chunks: [[FmtTok]]{}
+    ^chunk: [FmtTok]{}
+    ^brace_depth: 0
     loop token in tokens {
         if token.kind == TOKEN_LBRACE -> brace_depth += 1
         if token.kind == TOKEN_RBRACE -> brace_depth -= 1
@@ -863,8 +863,8 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
     }
     if chunk.len() > 0 -> chunks.push(chunk)
 
-    groups := [FmtGroup]{}
-    leading := [FmtTok]{}
+    ^groups: [FmtGroup]{}
+    ^leading: [FmtTok]{}
     loop current in chunks {
         if fl_all_trivia(current) {
             loop token in current -> leading.push(token)
@@ -877,9 +877,9 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
     if leading.len() > 0 -> groups.push(FmtGroup{category: 3, tokens: leading})
     loop directive in 0..<groups.len() {
         if !fl_is_spanless_file_marker_group(groups[directive].tokens) -> next
-        displaced := [FmtTok]{}
-        rest := [FmtTok]{}
-        leading_trivia := true
+        ^displaced: [FmtTok]{}
+        ^rest: [FmtTok]{}
+        ^leading_trivia: true
         loop token in groups[directive].tokens {
             if leading_trivia && (fl_is_comment(token.kind) || token.kind == TOKEN_SEMI) {
                 displaced.push(token)
@@ -890,7 +890,7 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
         }
         // fmt prints imports first, so an import after the directive emits the
         // comments the spanless directive cannot hold; otherwise the next item.
-        target := -1
+        ^target: -1
         loop candidate in directive + 1..<groups.len() {
             if groups[candidate].category == 1 {
                 target = candidate
@@ -914,13 +914,13 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
     }
     loop import in 0..<groups.len() {
         if groups[import].category != 1 -> next
-        hoisted := [FmtTok]{}
+        ^hoisted: [FmtTok]{}
         // An earlier import keeps its own comments: fmt prints every import in
         // one `use` group under the first import's comments.
         loop earlier in 0..<import {
             if groups[earlier].category == 1 -> next
-            retained := [FmtTok]{}
-            depth := 0
+            ^retained: [FmtTok]{}
+            ^depth: 0
             loop token in groups[earlier].tokens {
                 if token.kind == TOKEN_LBRACE -> depth += 1
                 if token.kind == TOKEN_RBRACE -> depth -= 1
@@ -937,7 +937,7 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
             groups[import].tokens = hoisted
         }
     }
-    out := [FmtTok]{}
+    ^out: [FmtTok]{}
     loop category in 0..<4 {
         loop group in groups {
             if group.category == category {
@@ -949,7 +949,7 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
 }
 
 fl_code_tokens: fn(tokens: [FmtTok]) -> [FmtTok] {
-    out := [FmtTok]{}
+    ^out: [FmtTok]{}
     loop token in tokens {
         if !fl_is_trivia(token.kind) -> out.push(token.copy())
     }
@@ -976,16 +976,16 @@ fl_file_chunk_category: fn(chunk: [FmtTok]) -> Int {
 // one attached rule as `#Rule` and two or more as one `#[A, B]` list (the
 // E0999 fix).
 fl_expand_marker_groups: fn(tokens: [FmtTok]) -> [FmtTok] {
-    out := [FmtTok]{}
-    index := 0
+    ^out: [FmtTok]{}
+    ^index: 0
     loop index < tokens.len() {
         if tokens[index].kind == TOKEN_HASH && fl_kind(tokens, index + 1) == TOKEN_LBRACKET {
             end: fl_matching(tokens, index + 1, TOKEN_LBRACKET, TOKEN_RBRACKET)
             if end >= 0 {
-                group_start := index + 2
-                paren_depth := 0
-                brace_depth := 0
-                bracket_depth := 0
+                ^group_start: index + 2
+                ^paren_depth: 0
+                ^brace_depth: 0
+                ^bracket_depth: 0
                 loop cursor in index + 2..<end + 1 {
                     kind: tokens[cursor].kind
                     split: cursor == end || (kind == TOKEN_COMMA && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0)
@@ -1014,7 +1014,7 @@ fl_expand_marker_groups: fn(tokens: [FmtTok]) -> [FmtTok] {
 
 // Index of the closer matching the opener at `open`, or -1.
 fl_matching: fn(tokens: [FmtTok], open: Int, opener: Int, closer: Int) -> Int {
-    depth := 0
+    ^depth: 0
     loop index in open..<tokens.len() {
         if tokens[index].kind == opener -> depth += 1
         if tokens[index].kind == closer {
@@ -1026,8 +1026,8 @@ fl_matching: fn(tokens: [FmtTok], open: Int, opener: Int, closer: Int) -> Int {
 }
 
 fl_canonicalize_static_generic_calls: fn(tokens: [FmtTok]) -> [FmtTok] {
-    out := [FmtTok]{}
-    index := 0
+    ^out: [FmtTok]{}
+    ^index: 0
     loop index < tokens.len() {
         if tokens[index].kind == TOKEN_IDENT && fl_kind(tokens, index + 1) == TOKEN_LT {
             close: fl_matching(tokens, index + 1, TOKEN_LT, TOKEN_GT)
@@ -1049,11 +1049,11 @@ fl_canonicalize_static_generic_calls: fn(tokens: [FmtTok]) -> [FmtTok] {
 // External-method sugar `Type.method: fn(...) {...}` is the method inside
 // `impl Type { method: fn(...) {...} }`.
 fl_canonicalize_external_methods: fn(tokens: [FmtTok]) -> [FmtTok] {
-    out := [FmtTok]{}
-    index := 0
+    ^out: [FmtTok]{}
+    ^index: 0
     loop index < tokens.len() {
         if tokens[index].kind == TOKEN_IDENT && fl_kind(tokens, index + 1) == TOKEN_DOT && fl_kind(tokens, index + 2) == TOKEN_IDENT && fl_kind(tokens, index + 3) == TOKEN_COLON && fl_kind(tokens, index + 4) == TOKEN_KW_FN {
-            body_open := -1
+            ^body_open: -1
             loop cursor in index + 4..<tokens.len() {
                 if tokens[cursor].kind == TOKEN_LBRACE {
                     body_open = cursor
@@ -1072,7 +1072,7 @@ fl_canonicalize_external_methods: fn(tokens: [FmtTok]) -> [FmtTok] {
                     next
                 }
             } else {
-                method_end := -1
+                ^method_end: -1
                 loop cursor in index + 4..<tokens.len() {
                     if tokens[cursor].kind == TOKEN_SEMI || tokens[cursor].kind == TOKEN_EOF {
                         method_end = cursor
@@ -1099,11 +1099,11 @@ fl_canonicalize_external_methods: fn(tokens: [FmtTok]) -> [FmtTok] {
 }
 
 fl_enum_group_commas: fn(tokens: [FmtTok]) -> [Bool] {
-    ignored := [Bool]{}
+    ^ignored: [Bool]{}
     loop _ in 0..<tokens.len() -> ignored.push(false)
-    enum_base_depth := -1
-    awaiting_enum_body := false
-    brace_stack := [Int]{}
+    ^enum_base_depth: -1
+    ^awaiting_enum_body: false
+    ^brace_stack: [Int]{}
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if kind == TOKEN_KW_ENUM -> awaiting_enum_body = true else if kind == TOKEN_LBRACE {
@@ -1114,10 +1114,10 @@ fl_enum_group_commas: fn(tokens: [FmtTok]) -> [Bool] {
             }
         } else if kind == TOKEN_RBRACE {
             if enum_base_depth == brace_stack.len() -> enum_base_depth = -1
-            if brace_stack.len() > 0 -> _ := brace_stack.pop()
+            if brace_stack.len() > 0 -> ^_: brace_stack.pop()
         } else if kind == TOKEN_COMMA && enum_base_depth >= 0 && brace_stack.len() > enum_base_depth && fl_is_ident(tokens, index - 1) && fl_is_ident(tokens, index + 1) {
             group_open: brace_stack[brace_stack.len() - 1]
-            has_field_colon := false
+            ^has_field_colon: false
             loop cursor in group_open + 1..<index {
                 if tokens[cursor].kind == TOKEN_COLON -> has_field_colon = true
             }
@@ -1132,13 +1132,13 @@ fl_enum_group_commas: fn(tokens: [FmtTok]) -> [Bool] {
 // one entry per line, so the separator is optional layout. A payload's own
 // commas sit inside parentheses and stay.
 fl_declaration_field_commas: fn(tokens: [FmtTok]) -> [Bool] {
-    ignored := [Bool]{}
+    ^ignored: [Bool]{}
     loop _ in 0..<tokens.len() -> ignored.push(false)
-    awaiting_struct_body := false
-    struct_depth := -1
-    brace_depth := 0
-    paren_depth := 0
-    bracket_depth := 0
+    ^awaiting_struct_body: false
+    ^struct_depth: -1
+    ^brace_depth: 0
+    ^paren_depth: 0
+    ^bracket_depth: 0
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM -> awaiting_struct_body = true else if kind == TOKEN_LBRACE {
@@ -1165,13 +1165,13 @@ fl_declaration_field_commas: fn(tokens: [FmtTok]) -> [Bool] {
 // -> 0 }`, or a guard table `if { … }`): the formatter writes it only on a
 // table it keeps on one line, so the separator is optional layout.
 fl_table_arm_commas: fn(tokens: [FmtTok]) -> [Bool] {
-    ignored := [Bool]{}
+    ^ignored: [Bool]{}
     loop _ in 0..<tokens.len() -> ignored.push(false)
     // One entry per open `{`: -1 for a brace that is not a table, else the
     // paren and bracket depth at its opening.
-    tables := [Int]{}
-    depth := 0
-    previous := TOKEN_EOF
+    ^tables: [Int]{}
+    ^depth: 0
+    ^previous: TOKEN_EOF
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind
         if fl_is_comment(kind) -> next
@@ -1181,7 +1181,7 @@ fl_table_arm_commas: fn(tokens: [FmtTok]) -> [Bool] {
                 tables.push(if opens_table -> depth else -> -1)
             }
             kind == TOKEN_RBRACE -> {
-                if tables.len() > 0 -> _ := tables.pop()
+                if tables.len() > 0 -> ^_: tables.pop()
             }
             kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
             kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> depth -= 1
@@ -1206,7 +1206,7 @@ fl_redundant_default_file_alias: fn(canonical: [FmtTok], tokens: [FmtTok], index
 }
 
 fl_plain_string_value: fn(parts: [FmtPart]) -> String? {
-    value := ""
+    ^value: ""
     loop part in parts {
         // A raw `\xNN` byte is not plain text.
         if part.kind != STRING_PART_TEXT -> return None
@@ -1229,7 +1229,7 @@ fl_tokens_equal: fn(left: FmtTok, right: FmtTok) -> Bool {
 }
 
 fl_without_terminators: fn(tokens: [FmtTok]) -> [FmtTok] {
-    out := [FmtTok]{}
+    ^out: [FmtTok]{}
     loop token in tokens {
         if token.kind != TOKEN_SEMI && token.kind != TOKEN_EOF -> out.push(token.copy())
     }
@@ -1260,15 +1260,15 @@ fl_describe: fn(tokens: [FmtTok], index: Int) -> String {
 // "" when `formatted` keeps every meaningful token of `original` in order;
 // otherwise the first difference.
 fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok]) -> String {
-    original_i := 0
-    formatted_i := 0
+    ^original_i: 0
+    ^formatted_i: 0
     // Per open arm block fmt added, innermost last: whether it broke the
     // body onto its own lines.
-    added_arm_blocks := [Bool]{}
+    ^added_arm_blocks: [Bool]{}
     // The original `)` of each labeled payload fmt moved into braces, and of
     // each in-body marker value whose parentheses fmt dropped, innermost last.
-    braced_payloads := [Int]{}
-    unwrapped_markers := [Int]{}
+    ^braced_payloads: [Int]{}
+    ^unwrapped_markers: [Int]{}
     loop original_i < original.len() || formatted_i < formatted.len() {
         if original_i < original.len() && formatted_i < formatted.len() && fl_tokens_equal(original[original_i], formatted[formatted_i]) {
             original_i += 1
@@ -1355,8 +1355,8 @@ fl_formatted_loop_header_comma: fn(tokens: [FmtTok], index: Int) -> Bool {
     if fl_kind(tokens, index) != TOKEN_COMMA || fl_kind(tokens, index + 1) != TOKEN_LBRACE {
         return false
     }
-    depth := 0
-    cursor := index - 1
+    ^depth: 0
+    ^cursor: index - 1
     loop cursor >= 0 {
         kind: tokens[cursor].kind
         if fl_is_closer(kind) -> depth += 1 else if fl_is_opener(kind) {
@@ -1411,7 +1411,7 @@ fl_inbody_marker_simple_parens: fn(tokens: [FmtTok], open: Int) -> Int {
     if first == TOKEN_STRING || first == TOKEN_RAW_STRING || first == TOKEN_INT || first == TOKEN_FLOAT || first == TOKEN_UNIT_NUMBER {
         return if fl_kind(tokens, open + 2) == TOKEN_RPAREN -> open + 2 else -> -1
     }
-    cursor := open + 1
+    ^cursor: open + 1
     loop fl_is_ident(tokens, cursor) {
         if fl_kind(tokens, cursor + 1) == TOKEN_RPAREN -> return cursor + 1
         if fl_kind(tokens, cursor + 1) != TOKEN_DOT -> return -1
@@ -1432,13 +1432,13 @@ fl_union_type_position: fn(tokens: [FmtTok], start: Int) -> Bool {
 fl_simple_union_type_annotation: fn(tokens: [FmtTok], start: Int) -> Bool {
     colon: start - 1
     if fl_kind(tokens, colon) != TOKEN_COLON -> return false
-    awaiting_struct_body := false
-    awaiting_fn_params := false
-    struct_scopes := [[Int]]{}
-    fn_param_scopes := [[Int]]{}
-    brace_depth := 0
-    paren_depth := 0
-    bracket_depth := 0
+    ^awaiting_struct_body: false
+    ^awaiting_fn_params: false
+    ^struct_scopes: [[Int]]{}
+    ^fn_param_scopes: [[Int]]{}
+    ^brace_depth: 0
+    ^paren_depth: 0
+    ^bracket_depth: 0
     loop index in 0..<colon {
         kind: tokens[index].kind
         if kind == TOKEN_KW_STRUCT -> awaiting_struct_body = true else if kind == TOKEN_KW_FN {
@@ -1451,7 +1451,7 @@ fl_simple_union_type_annotation: fn(tokens: [FmtTok], start: Int) -> Bool {
             }
         } else if kind == TOKEN_RBRACE {
             if struct_scopes.len() > 0 && struct_scopes[struct_scopes.len() - 1][0] == brace_depth {
-                _ := struct_scopes.pop()
+                ^_: struct_scopes.pop()
             }
             brace_depth -= 1
         } else if kind == TOKEN_LPAREN {
@@ -1462,7 +1462,7 @@ fl_simple_union_type_annotation: fn(tokens: [FmtTok], start: Int) -> Bool {
             }
         } else if kind == TOKEN_RPAREN {
             if fn_param_scopes.len() > 0 && fn_param_scopes[fn_param_scopes.len() - 1][1] == paren_depth {
-                _ := fn_param_scopes.pop()
+                ^_: fn_param_scopes.pop()
             }
             paren_depth -= 1
         } else if kind == TOKEN_LBRACKET { bracket_depth += 1 } else if kind == TOKEN_RBRACKET {
@@ -1478,8 +1478,8 @@ fl_simple_union_type_annotation: fn(tokens: [FmtTok], start: Int) -> Bool {
 fl_simple_union_members: fn(tokens: [FmtTok], start: Int) -> {members: [String], end: Int} {
     none: {members: [String]{}, end: -1}
     if fl_kind(tokens, start) != TOKEN_IDENT -> return none
-    members := [String]{tokens[start].text}
-    cursor := start + 1
+    ^members: [String]{tokens[start].text}
+    ^cursor: start + 1
     loop fl_kind(tokens, cursor) == TOKEN_PIPE {
         if fl_kind(tokens, cursor + 1) != TOKEN_IDENT -> return none
         members.push(tokens[cursor + 1].text)
@@ -1495,7 +1495,7 @@ fl_simple_union_members: fn(tokens: [FmtTok], start: Int) -> {members: [String],
 fl_text_before: fn(left: String, right: String) -> Bool {
     a: left.bytes()
     b: right.bytes()
-    index := 0
+    ^index: 0
     loop index < a.len() && index < b.len() {
         if a[index] != b[index] -> return a[index] < b[index]
         index += 1
@@ -1504,9 +1504,9 @@ fl_text_before: fn(left: String, right: String) -> Bool {
 }
 
 fl_sorted: fn(values: [String]) -> [String] {
-    out := values
+    ^out: values
     loop index in 1..<out.len() {
-        cursor := index
+        ^cursor: index
         loop cursor > 0 && fl_text_before(out[cursor], out[cursor - 1]) {
             held: out[cursor]
             out[cursor] = out[cursor - 1]
@@ -1546,8 +1546,8 @@ fl_struct_literal_head_before_brace: fn(tokens: [FmtTok], open: Int) -> Bool {
 
 // The innermost unclosed `{` before `index`, or -1.
 fl_enclosing_brace: fn(tokens: [FmtTok], index: Int) -> Int {
-    depth := 0
-    cursor := index - 1
+    ^depth: 0
+    ^cursor: index - 1
     loop cursor >= 0 {
         kind: tokens[cursor].kind
         if kind == TOKEN_RBRACE -> depth += 1 else if kind == TOKEN_LBRACE {
@@ -1576,8 +1576,8 @@ fl_formatted_default_module_alias: fn(tokens: [FmtTok], index: Int) -> Bool {
 }
 
 fl_exact_use_path_before_alias: fn(tokens: [FmtTok], alias_index: Int) -> Bool {
-    use_index := -1
-    cursor := alias_index - 1
+    ^use_index: -1
+    ^cursor: alias_index - 1
     loop cursor >= 0 {
         if tokens[cursor].kind == TOKEN_KW_USE {
             use_index = cursor
@@ -1611,7 +1611,7 @@ fl_ordered_sources_diff: fn(original: String, formatted: String) -> String {
 // inline `package: { ... }` carrier.
 fl_format: fn(src: String) -> {ok: Bool, text: String, codes: String} {
     result: jet_cli_fmt_ordinary(src, false, false)
-    codes := ""
+    ^codes: ""
     loop diagnostic in result.diagnostics -> codes = "{codes} {diagnostic.code}"
     {ok: result.ok, text: result.text, codes: codes}
 }
@@ -1643,7 +1643,7 @@ fl_collect: fn(dir: String, out: ^[String]) {
 }
 
 fl_collect_sorted: fn(dir: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     fl_collect(dir, out)
     fl_sorted(out)
 }
@@ -1676,7 +1676,7 @@ fl_program_source: fn(src: String) -> String {
 // A fixture whose parse recovers through a teaching diagnostic (or E0081)
 // spells a retired or invalid form on purpose; fmt rewrites it to canon.
 fl_teaching_codes: fn(src: String) -> [String] {
-    codes := [String]{}
+    ^codes: [String]{}
     loop diagnostic in parse_source(fl_program_source(src).bytes()).diagnostics {
         if jfmt_is_teaching_parse_diag(diagnostic.code) || diagnostic.code == FL_CODE_BODYLESS_FN {
             codes.push(diagnostic.code.copy())
@@ -1719,10 +1719,10 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
 #Test("fmt_is_lossless_on_supported_source_corpus") {
     example_files: fl_collect_sorted("Examples")
     ui_files: fl_collect_sorted("Tests/UI")
-    failures := [String]{}
-    example_programs := 0
-    example_configs := 0
-    example_generated := 0
+    ^failures: [String]{}
+    ^example_programs: 0
+    ^example_configs: 0
+    ^example_generated: 0
     loop path in example_files {
         if fl_is_config(path) {
             example_configs += 1
@@ -1742,11 +1742,11 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         if problem != "" -> failures.push(problem)
         example_programs += 1
     }
-    ui_parse_valid := 0
-    ui_parse_invalid := 0
-    ui_configs := 0
-    actual_invalid := [String]{}
-    mismatches := [String]{}
+    ^ui_parse_valid: 0
+    ^ui_parse_invalid: 0
+    ^ui_configs: 0
+    ^actual_invalid: [String]{}
+    ^mismatches: [String]{}
     pinned: fl_ui_parse_invalid()
     loop path in ui_files {
         // Package and workspace manifests are config, never program source.
@@ -1797,10 +1797,10 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
 // it accepts, save the rewrites ratified above (#6898 c20). There is no
 // exemption list. Run from the repository root.
 #Test("fmt_is_lossless_on_the_source_tree") {
-    failures := [String]{}
-    checked := 0
-    refused := 0
-    configs := 0
+    ^failures: [String]{}
+    ^checked: 0
+    ^refused: 0
+    ^configs: 0
     roots: [String]{"Compiler", "Core", "Docs", "Jetpack", "Tests", "Tools"}
     loop root in roots {
         loop path in fl_collect_sorted(root) {

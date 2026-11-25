@@ -371,14 +371,14 @@ build_session_new: fn(session_id: Int, package: String, compiler_version: String
 }
 
 build_session_abort: fn(session: BuildSession) Never! {
-    permit := session.storage.guard_edit()
+    ^permit: session.storage.guard_edit()
     permit.value.active = false
 }
 
 // The run stopped at a call the session refused: the evaluator reports that
 // refusal, as the build's own report.
 build_session_refuse: fn(session: BuildSession) Never! {
-    permit := session.storage.guard_edit()
+    ^permit: session.storage.guard_edit()
     permit.value.refused = true
 }
 
@@ -400,7 +400,7 @@ build_session_promised: fn(session: BuildSession) -> [BuildSessionGeneratedModul
 // call as well as the build file's), which an option it sets names as its
 // site.
 build_session_at: fn(session: BuildSession, file: String) Never! {
-    permit := session.storage.guard_edit()
+    ^permit: session.storage.guard_edit()
     permit.value.file = file
 }
 
@@ -410,8 +410,8 @@ build_session_at: fn(session: BuildSession, file: String) Never! {
 // reports are at. A file the driver named no lines of places the call at
 // its start.
 build_session_place: fn(session: BuildSession, file: String, line: Int, column: Int, length: Int) -> Span Never! {
-    permit := session.storage.guard_edit()
-    start := 0
+    ^permit: session.storage.guard_edit()
+    ^start: 0
     if permit.value.lines.get(file) == .Val(starts) && line >= 1 && line <= starts.len() {
         start = starts[line - 1] + column - 1
     }
@@ -421,14 +421,14 @@ build_session_place: fn(session: BuildSession, file: String, line: Int, column: 
 
 // The words after `--` on `jet build` (`b.args()`); a new session has none.
 build_session_set_args: fn(session: BuildSession, args: [String]) Never! {
-    permit := session.storage.guard_edit()
+    ^permit: session.storage.guard_edit()
     permit.value.args = args.copy()
 }
 
 // The source key the running compiler was built from, "" for none
 // (`b.jet_built_from`).
 build_session_set_jet_source: fn(session: BuildSession, key: String) Never! {
-    permit := session.storage.guard_edit()
+    ^permit: session.storage.guard_edit()
     permit.value.jet_source = key.copy()
 }
 
@@ -440,26 +440,26 @@ build_session_tree_source: fn(session: BuildSession) -> String Never! {
 }
 
 build_session_set_tree_source: fn(session: BuildSession, key: String) Never! {
-    permit := session.storage.guard_edit()
+    ^permit: session.storage.guard_edit()
     permit.value.tree_source = key.copy()
 }
 
 // The folders of the packages the build's package.jet lists, by name.
 build_session_set_dependencies: fn(session: BuildSession, dependencies: [String:String]) Never! {
-    permit := session.storage.guard_edit()
+    ^permit: session.storage.guard_edit()
     permit.value.dependencies = dependencies.copy()
 }
 
 // The loader's identity of the build's package (`package` may name it
 // otherwise, as a lone file's stem).
 build_session_set_identity: fn(session: BuildSession, identity: String) Never! {
-    permit := session.storage.guard_edit()
+    ^permit: session.storage.guard_edit()
     permit.value.identity = identity.copy()
 }
 
 // The type table of the build's checked program (BuildSessionState.types).
 build_session_set_types: fn(session: BuildSession, types: ^^JetCompilerServicesTypeTable) Never! {
-    permit := session.storage.guard_edit()
+    ^permit: session.storage.guard_edit()
     permit.value.types = types.move()
 }
 
@@ -467,15 +467,15 @@ build_session_set_types: fn(session: BuildSession, types: ^^JetCompilerServicesT
 // module `b.generate` makes and each step counts (build_session_site).
 build_session_set_source: fn(session: BuildSession, file: String, source: String) Never! {
     build_session_add_source(session, file, source)
-    permit := session.storage.guard_edit()
+    ^permit: session.storage.guard_edit()
     permit.value.build_file = file.copy()
 }
 
 // The lines of source file `file`, where a Core method's `at` may place a
 // call (build_session_place).
 build_session_add_source: fn(session: BuildSession, file: String, source: String) Never! {
-    permit := session.storage.guard_edit()
-    lines := [Int]{0}
+    ^permit: session.storage.guard_edit()
+    ^lines: [Int]{0}
     loop (index, byte) in source.bytes() {
         if byte == 10 -> lines.push(index + 1)
     }
@@ -489,8 +489,8 @@ build_session_site: fn(state: BuildSessionState, at: Int) -> String Never! {
     if state.build_file == "" || (state.file != "" && state.file != state.build_file) -> return ""
     starts: state.lines.get(state.build_file) ?? return ""
     // The line is the count of line starts at or before `at`.
-    low := 0
-    high := starts.len()
+    ^low: 0
+    ^high: starts.len()
     loop low < high {
         middle: (low + high) /% 2
         if starts[middle] <= at -> low = middle + 1 else -> high = middle
@@ -558,7 +558,7 @@ build_session_text: fn(args: [BuildSessionValue], index: Int) -> String? {
 build_session_strings: fn(args: [BuildSessionValue], index: Int) -> [String]? {
     if index >= args.len() -> return None
     if args[index] == .List(values) {
-        out := [String]{}
+        ^out: [String]{}
         loop value in values {
             if value == {
                 .Text(text) -> out.push(text.copy())
@@ -593,7 +593,7 @@ build_session_handle: fn(state: BuildSessionState, value: BuildSessionValue, kin
 build_session_handles: fn(state: BuildSessionState, args: [BuildSessionValue], index: Int, kind: String) -> [Int]? {
     if index >= args.len() -> return None
     if args[index] == .List(values) {
-        out := [Int]{}
+        ^out: [Int]{}
         loop value in values -> out.push(build_session_handle(state, value, kind) ?? return None)
         return Val(out)
     }
@@ -616,8 +616,8 @@ build_session_path_error: fn(path: String) -> BuildSessionError? Never! {
 
 build_session_caps: fn(values: [String]) -> [String]? {
     // BuildEffect declaration order, not lexical string order.
-    out := [String]{}
-    normalized := [String]{}
+    ^out: [String]{}
+    ^normalized: [String]{}
     loop value in values {
         if value.contains(".") -> return None
         lower: value.to_lower()
@@ -666,8 +666,8 @@ BuildSessionCall: struct {
 // `args` (and the generated source `generated`) at `start..<end`. A session
 // whose build returned refuses every call.
 build_session_call: fn(session: ^BuildSession, operation: fn(^BuildSessionState, BuildSessionCall) -> BuildSessionReply Never!, args: [BuildSessionValue], generated: String?, in_impure_gate: Bool, start: Int, end: Int) -> BuildSessionReply Never! {
-    permit := session.storage.guard_edit()
-    state := ^permit.value
+    ^permit: session.storage.guard_edit()
+    state: permit.value.in_place()
     state.start = start
     state.end = end
     if !state.active -> return build_session_fail(state, "build context expired")
@@ -836,7 +836,7 @@ build_session_compiler_handoff: fn(state: ^BuildSessionState, call: BuildSession
     }
     compiler: build_session_handle(state, call.args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
     step: build_session_text(call.args, 1) ?? return build_session_fail(state, "a `Compiler` handoff lost its place")
-    chain := state.compilers[compiler].handoffs.copy()
+    ^chain: state.compilers[compiler].handoffs.copy()
     chain.push(step)
     target: state.compilers[compiler].target
     root: build_session_compiler_root(state, compiler)
@@ -886,7 +886,7 @@ build_session_compiler_rewrite_body: fn(state: ^BuildSessionState, call: BuildSe
     paste: "#{{{function}.body}}"
     source: if pasted == "" || pasted == function -> written.copy() else -> build_session_replace_paste(written, "#{{{pasted}.body}}", paste)
     producer: build_session_text(args, 2)
-    earlier := -1
+    ^earlier: -1
     loop (index, old) in state.generated {
         if old.rewrites == .Val(rewritten) && rewritten == function && (old.package ?? state.identity) == owner {
             earlier = index
@@ -922,13 +922,13 @@ build_session_compiler_report: fn(state: ^BuildSessionState, call: BuildSessionC
         return build_session_fail(state, "`meta.report` takes a compiler value, a finding's code, tier and texts, the call it names and its rewrite")
     }
     _: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
-    texts := [String]{}
+    ^texts: [String]{}
     loop index in 1..<7 {
         text: build_session_text(args, index) ?? return build_session_fail(state, "`meta.report` lost a finding's text")
         texts.push(text)
     }
-    at_start := -1
-    at_end := -1
+    ^at_start: -1
+    ^at_end: -1
     if args[7] == .Span(from, to, _) {
         at_start = from
         at_end = to
@@ -954,7 +954,7 @@ build_session_plan: fn(state: ^BuildSessionState, call: BuildSessionCall) -> Bui
     if call.args.len() > 1 {
         return build_session_fail(state, "`b.plan` accepts zero or one default target")
     }
-    default := -1
+    ^default: -1
     if call.args.len() == 1 && call.args[0] != .Unit {
         default = build_session_handle(state, call.args[0], "BuildTarget") ?? return build_session_fail(state, "default target does not belong to this build")
     }
@@ -970,7 +970,7 @@ build_session_contribute: fn(state: ^BuildSessionState, call: BuildSessionCall) 
     // `cache_slots` names the package's own setting; `tool.loud`, one its
     // dependency `tool` declares.
     parts: name.split(".").to_list()
-    malformed := name.trim() == "" || parts.len() > 2
+    ^malformed: name.trim() == "" || parts.len() > 2
     loop part in parts {
         if part == "" -> malformed = true
     }
@@ -1068,7 +1068,7 @@ build_session_package_dir: fn(package: String) -> String {
 }
 
 build_session_safe_name: fn(name: String) -> String {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop byte in name.bytes() {
         n: Int{byte}
         if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || n == 45 {
@@ -1099,7 +1099,7 @@ build_session_add_generated: fn(state: ^BuildSessionState, generated: BuildSessi
             return build_session_error_fail(state, BuildSessionError.DuplicateGeneratedModulePath{value: generated.path})
         }
     }
-    checked := generated
+    ^checked: generated
     checked.source_digest = "sha256:{build_crypto.sha256(checked.source.bytes()).hex()}"
     owner: checked.package ?? state.identity
     checked.identity = "sha256:{build_crypto.sha256("jet-generated-v1\n{owner}\n{checked.path}".bytes()).hex()}"
@@ -1126,7 +1126,7 @@ BuildSessionMadeStruct: struct {
 // another build.
 build_session_made_structs: fn(session: BuildSession, compiler: BuildSessionValue) -> [BuildSessionMadeStruct] Never! {
     permit: session.storage.guard_read()
-    made := [BuildSessionMadeStruct]{}
+    ^made: [BuildSessionMadeStruct]{}
     index: build_session_handle(permit.value, compiler, "Compiler") ?? return made
     target: permit.value.compilers[index].target
     loop generated in permit.value.generated {
@@ -1141,9 +1141,9 @@ build_session_made_structs: fn(session: BuildSession, compiler: BuildSessionValu
 // `source` with each line that is `paste` alone replaced by the lines of
 // `body`, each indented by that line's margin; blank lines stay blank.
 build_session_replace_paste: fn(source: String, paste: String, body: String) -> String Never! {
-    inserted := body.split("\n").to_list()
+    ^inserted: body.split("\n").to_list()
     loop inserted.len() > 0 && inserted[inserted.len() - 1].trim() == "" -> _: inserted.pop()
-    text := ""
+    ^text: ""
     loop line in source.split("\n").to_list() {
         if line.trim() != paste {
             text = "{text}{line}\n"
@@ -1164,7 +1164,7 @@ build_session_add_toolchain: fn(state: ^BuildSessionState, args: [BuildSessionVa
     if args.len() < 2 || args.len() > 6 {
         return build_session_fail(state, "`b.toolchain` accepts two through six string arguments")
     }
-    texts := [String?]{}
+    ^texts: [String?]{}
     loop index in 0..<args.len() {
         if index >= 2 && args[index] == .Unit {
             texts.push(None)
@@ -1228,7 +1228,9 @@ build_session_add_probe: fn(state: ^BuildSessionState, args: [BuildSessionValue]
     if reproducibility != "ambient" && reproducibility != "reproducible" {
         return build_session_fail(state, "probe reproducibility must be `ambient` or `reproducible`")
     }
-    if reproducibility != "reproducible" && !in_impure_gate -> return build_session_impure(state, "probe")
+    if reproducibility != "reproducible" && !in_impure_gate {
+        return build_session_impure(state, "probe")
+    }
     if name.trim() == "" -> return build_session_error_fail(state, .EmptyProbeName)
     if value.trim() == "" {
         return build_session_error_fail(state, BuildSessionError.EmptyProbeField{value: name})
@@ -1238,7 +1240,7 @@ build_session_add_probe: fn(state: ^BuildSessionState, args: [BuildSessionValue]
             return build_session_error_fail(state, BuildSessionError.DuplicateProbeName{value: name})
         }
     }
-    code := ""
+    ^code: ""
     if kind == "compile_check" {
         code = written_code ?? return build_session_fail(state, "compile_check requires source code")
         if code.trim() == "" {
@@ -1253,7 +1255,7 @@ build_session_add_probe: fn(state: ^BuildSessionState, args: [BuildSessionValue]
         }
     }
     if kind == "header" {
-        invalid := !build_session_path(value)
+        ^invalid: !build_session_path(value)
         loop byte in value.bytes() {
             if byte == (U8{0}) || byte == (U8{10}) || byte == (U8{13}) || byte == (U8{34}) || byte == (U8{60}) || byte == (U8{62}) {
                 invalid = true
@@ -1266,7 +1268,7 @@ build_session_add_probe: fn(state: ^BuildSessionState, args: [BuildSessionValue]
     if kind == "find_folder" && (value.contains("/") || value == "." || value == "..") {
         return build_session_fail(state, "probe `{name}` looks for a folder holding the file `{value}`; name the file alone, as `libc.a`")
     }
-    toolchain := 0
+    ^toolchain: 0
     if args.len() > 5 && args[5] != .Unit {
         toolchain = build_session_handle(state, args[5], "BuildToolchain") ?? return build_session_fail(state, "probe toolchain does not belong to this build")
     }
@@ -1287,9 +1289,9 @@ build_session_project_error: fn(state: ^BuildSessionState, call: BuildSessionCal
     if args.len() != 5 {
         return build_session_fail(state, "`b.error` requires SourceSpan, code, what, why, and fix")
     }
-    start := state.start
-    end := state.end
-    file := ""
+    ^start: state.start
+    ^end: state.end
+    ^file: ""
     if args[0] == {
         .Span(first, last, written) -> {
             start = first
@@ -1302,7 +1304,7 @@ build_session_project_error: fn(state: ^BuildSessionState, call: BuildSessionCal
     what: build_session_text(args, 2) ?? return build_session_fail(state, "build rule what must be a string")
     why: build_session_text(args, 3) ?? return build_session_fail(state, "build rule why must be a string")
     fix: build_session_text(args, 4) ?? return build_session_fail(state, "build rule fix must be a string")
-    reserved := code.len() > 1 && (code.starts_with("E") || code.starts_with("W"))
+    ^reserved: code.len() > 1 && (code.starts_with("E") || code.starts_with("W"))
     bytes: code.bytes()
     loop index in 1..<bytes.len() {
         if bytes[index] < (U8{48}) || bytes[index] > (U8{57}) -> reserved = false
@@ -1393,11 +1395,11 @@ build_session_error_field: fn(name: String, value: String) -> BuildSessionErrorF
 }
 
 build_session_error_json_text: fn(value: String) -> String Never! {
-    bytes := [U8]{U8{34}}
+    ^bytes: [U8]{U8{34}}
     digits: "0123456789abcdef".bytes()
     loop byte in value.bytes() {
         number: Int{byte}
-        escaped := ""
+        ^escaped: ""
         if number == 34 -> escaped = "\\\"" else if number == 92 -> escaped = "\\\\" else if number == 10 {
             escaped = "\\n"
         } else if number == 13 { escaped = "\\r" } else if number == 9 { escaped = "\\t" } else if number < 32 {
@@ -1498,7 +1500,7 @@ build_session_error_projection: fn(error: BuildSessionError) -> BuildSessionErro
 
 build_session_error_diag: fn(state: BuildSessionState, error: BuildSessionError) -> BuildSessionDiagnostic Never! {
     projection: build_session_error_projection(error)
-    diagnostic := build_session_diag(state, projection.text)
+    ^diagnostic: build_session_diag(state, projection.text)
     // A path that leaves the project: a step that wrote or read it would
     // reach past what the build owns, so nothing of the plan runs.
     if error == .InvalidPath(_) {

@@ -53,15 +53,15 @@ describe: fn(event: DataEvent) -> String {
 
 write_json: fn(path: String, events: [DataEvent]) {
     output: files.create(path) ?? panic("create json")
-    sink := json.writer(output) ?? panic("json writer")
+    ^sink: json.writer(output) ?? panic("json writer")
     loop event in events { sink.write(event.copy()) ?? panic("json write {describe(event)}") }
     sink.finish() ?? panic("json finish")
 }
 
 read_json: fn(path: String) -> [DataEvent] {
     input: files.open(path) ?? panic("open json")
-    source := json.reader(input) ?? panic("json reader")
-    events := [DataEvent]{}
+    ^source: json.reader(input) ?? panic("json reader")
+    ^events: [DataEvent]{}
     loop {
         if source.next() == {
             .Val(event) -> events.push(event)
@@ -73,15 +73,15 @@ read_json: fn(path: String) -> [DataEvent] {
 
 write_cbor: fn(path: String, events: [DataEvent]) {
     output: files.create(path) ?? panic("create cbor")
-    sink := cbor.writer(output) ?? panic("cbor writer")
+    ^sink: cbor.writer(output) ?? panic("cbor writer")
     loop event in events { sink.write(event.copy()) ?? panic("cbor write {describe(event)}") }
     sink.finish() ?? panic("cbor finish")
 }
 
 read_cbor: fn(path: String) -> [DataEvent] {
     input: files.open(path) ?? panic("open cbor")
-    source := cbor.reader(input) ?? panic("cbor reader")
-    events := [DataEvent]{}
+    ^source: cbor.reader(input) ?? panic("cbor reader")
+    ^events: [DataEvent]{}
     loop {
         if source.next() == {
             .Val(event) -> events.push(event)
@@ -97,10 +97,10 @@ values_are_inline_enum_values: fn() {
     assert_eq(events[2], DataEvent.Text("jet ☺"))
     assert(events[5] != DataEvent.Int(7))
     assert(events[6] == DataEvent.Int(9007199254740993))
-    held := DataEvent?{None}
+    ^held: DataEvent?{None}
     held = Val(events[7])
     assert_eq(held, Val(DataEvent.Float(Float{1.5})))
-    total := 0
+    ^total: 0
     loop event in events {
         if event == .Int(value) -> total += value
     }
@@ -134,11 +134,11 @@ cbor_round_trip: fn() {
 
 number_is_refused_by_both_writers: fn() {
     dir: files.temp_dir("jet-data-event-number") ?? panic("temp")
-    json_sink := json.writer(files.create("{dir.path}/n.json") ?? panic("create")) ?? panic("json writer")
+    ^json_sink: json.writer(files.create("{dir.path}/n.json") ?? panic("create")) ?? panic("json writer")
     if json_sink.write(DataEvent.Number("1e400")) == .Err(failure) {
         assert_eq(failure.kind, .Unsupported)
     } else { panic("json wrote a Number") }
-    cbor_sink := cbor.writer(files.create("{dir.path}/n.cbor") ?? panic("create")) ?? panic("cbor writer")
+    ^cbor_sink: cbor.writer(files.create("{dir.path}/n.cbor") ?? panic("create")) ?? panic("cbor writer")
     if cbor_sink.write(DataEvent.Number("1e400")) == .Err(failure) {
         assert_eq(failure.kind, .Unsupported)
     } else { panic("cbor wrote a Number") }

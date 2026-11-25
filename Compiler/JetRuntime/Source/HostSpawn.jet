@@ -45,7 +45,7 @@ spawn_text_list_clone: fn(list: I64) -> I64 {
     fd_put(out, I64{0}, length)
     fd_put(out, I64{8}, length)
     fd_put(out, I64{16}, data)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         fd_put(data, wrapping(at * I64{8}), jet_rt_string_clone(fd_word(fd_word(list, I64{16}), wrapping(at * I64{8}))))
         at = wrapping(at + I64{1})
@@ -63,7 +63,7 @@ spawn_text_list_drop: fn(list: I64) {
     if (list == I64{0}) {
         return
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < fd_word(list, I64{0}) {
         jet_rt_string_drop(fd_word(fd_word(list, I64{16}), wrapping(at * I64{8})))
         at = wrapping(at + I64{1})
@@ -79,7 +79,7 @@ spawn_dirs_clone: fn(list: I64) -> I64 {
     fd_put(out, I64{0}, length)
     fd_put(out, I64{8}, length)
     fd_put(out, I64{16}, data)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         source: wrapping(fd_word(list, I64{16}) + at * I64{24})
         target: wrapping(data + at * I64{24})
@@ -140,7 +140,7 @@ SPAWN_SPEC_BYTES: I64{256}
     jet_rt_string_drop(fd_word(spec, I64{200}))
     dirs: fd_word(spec, I64{208})
     if (dirs != I64{0}) {
-        at := I64{0}
+        ^at: I64{0}
         loop at < fd_word(dirs, I64{0}) {
             jet_fd_drop_raw(fd_word(fd_word(dirs, I64{16}), wrapping(at * I64{24})))
             at = wrapping(at + I64{1})
@@ -163,10 +163,10 @@ spawn_pipe: fn(scratch: I64, minimum: I64, read_out: I64, write_out: I64) -> I64
     b: (packed >> I64{32}) & I64{4294967295}
     x: host_call(I64{72}, a, I64{1030}, minimum)
     y: if (x < I64{0}) -> x else -> host_call(I64{72}, b, I64{1030}, minimum)
-    _ := host_call(I64{3}, a, I64{0}, I64{0})
-    _ := host_call(I64{3}, b, I64{0}, I64{0})
+    ^_: host_call(I64{3}, a, I64{0}, I64{0})
+    ^_: host_call(I64{3}, b, I64{0}, I64{0})
     if (y < I64{0}) {
-        if (x >= I64{0}) { _ := host_call(I64{3}, x, I64{0}, I64{0}) }
+        if (x >= I64{0}) { ^_: host_call(I64{3}, x, I64{0}, I64{0}) }
         return y
     }
     fd_put(read_out, I64{0}, x)
@@ -182,7 +182,7 @@ spawn_dup_above: fn(state: I64, minimum: I64) -> I64 {
 }
 
 spawn_close: fn(number: I64) {
-    if (number >= I64{0}) { _ := host_call(I64{3}, number, I64{0}, I64{0}) }
+    if (number >= I64{0}) { ^_: host_call(I64{3}, number, I64{0}, I64{0}) }
 }
 
 SPAWN_CHILD_BYTES: I64{104}
@@ -211,7 +211,7 @@ spawn_timeval_ns: fn(at: I64) -> I64 {
 }
 
 spawn_plan_close: fn(plan: I64, count: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         spawn_close(fd_word(plan, wrapping(at * I64{16})))
         at = wrapping(at + I64{1})
@@ -229,8 +229,8 @@ spawn_pty: fn(terminal: I64, scratch: I64, minimum: I64, child: I64) -> I64 {
     if (master < I64{0}) { return master }
     fd_put(scratch, I64{0}, I64{0})
     fd_put(scratch, I64{64}, I64{10})
-    result := host_call(I64{16}, master, I64{1074025521}, scratch)
-    slave := I64{-1}
+    ^result: host_call(I64{16}, master, I64{1074025521}, scratch)
+    ^slave: I64{-1}
     if (result == I64{0}) {
         fd_put(scratch, I64{64}, I64{11})
         slave = host_call(I64{16}, master, I64{21569}, I64{524546})
@@ -299,9 +299,9 @@ spawn_exec_child: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: 
     spawn_close(fd_word(child, I64{40}))
     spawn_close(fd_word(child, I64{48}))
     spawn_close(fd_word(child, I64{56}))
-    result := I64{0}
-    stage := I64{4}
-    at := I64{0}
+    ^result: I64{0}
+    ^stage: I64{4}
+    ^at: I64{0}
     loop at < (I64{3}) {
         source: fd_word(plan, wrapping(at * I64{16}))
         target: fd_word(plan, wrapping(at * I64{16} + I64{8}))
@@ -322,7 +322,7 @@ spawn_exec_child: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: 
         stage = I64{5}
         result = host_call(I64{157}, I64{1}, I64{9}, I64{0})
         if (result >= I64{0} && host_call(I64{110}, I64{0}, I64{0}, I64{0}) != parent) {
-            _ := host_call(I64{231}, I64{127}, I64{0}, I64{0})
+            ^_: host_call(I64{231}, I64{127}, I64{0}, I64{0})
         }
     }
     if (result >= I64{0}) {
@@ -386,7 +386,7 @@ spawn_exec_child: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: 
     if (result >= I64{0}) {
         stage = I64{7}
         result = I64{-2}
-        denied := false
+        ^denied: false
         at = I64{0}
         loop at < fd_word(candidates, I64{0}) {
             name: fd_word(fd_word(candidates, I64{8}), wrapping(at * I64{8}))
@@ -411,7 +411,7 @@ spawn_exec_child: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: 
         if (sent <= I64{0}) { break }
         at = wrapping(at + sent)
     }
-    _ := host_call(I64{231}, I64{127}, I64{0}, I64{0})
+    ^_: host_call(I64{231}, I64{127}, I64{0}, I64{0})
 }
 
 // The vfork child's own stack; its lowest page is the guard.
@@ -434,21 +434,21 @@ SPAWN_BLOCK_BYTES: I64{216}
 
 #Export(c) jet_rt_process_spawn_child: fn(block: I64) -> I64 {
     action: wrapping(block + I64{16})
-    signal := I64{1}
+    ^signal: I64{1}
     loop signal <= (I64{64}) {
         if (signal != I64{9} && signal != I64{19}) {
             #Unsafe("rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child") {
-                _ := host_syscall(I64{13}, signal, I64{0}, action, I64{8}, I64{0}, I64{0})
+                ^_: host_syscall(I64{13}, signal, I64{0}, action, I64{8}, I64{0}, I64{0})
                 handler: fd_word(action, I64{0})
                 if (handler != I64{0} && handler != I64{1}) {
-                    _ := os_syscall_stack4_i64(I64{13}, signal, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
+                    ^_: os_syscall_stack4_i64(I64{13}, signal, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
                 }
             }
         }
         signal = wrapping(signal + I64{1})
     }
     #Unsafe("rt_sigprocmask reads the parent's saved mask word in this spawn's block") {
-        _ := host_syscall(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
+        ^_: host_syscall(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
     }
     args: wrapping(block + SPAWN_BLOCK_ARGS)
     spawn_exec_child(fd_word(args, I64{0}), fd_word(args, I64{8}), fd_word(args, I64{16}), fd_word(args, I64{24}), fd_word(args, I64{32}), fd_word(args, I64{40}), fd_word(args, I64{48}), fd_word(args, I64{56}), fd_word(args, I64{64}), fd_word(args, I64{72}), fd_word(args, I64{80}), fd_word(args, I64{88}), fd_word(args, I64{96}) != I64{0}, fd_word(args, I64{104}) != I64{0}, fd_word(args, I64{112}) != I64{0}, fd_word(args, I64{120}) != I64{0}, fd_word(args, I64{128}) != I64{0}, fd_word(args, I64{136}), fd_word(args, I64{144}), fd_word(args, I64{152}), fd_word(args, I64{160}))
@@ -497,15 +497,15 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
     entry: wrapping(stack + SPAWN_CHILD_STACK - I64{16})
     fd_put(entry, I64{0}, rt_process_spawn_child_address())
     fd_put(entry, I64{8}, block)
-    pid := I64{-1}
+    ^pid: I64{-1}
     // The lowest page of this spawn's fresh stack mapping is the guard, which
     // is no storage to the memory sentry either.
     alloc_guard(stack, I64{4096})
     jet_rt_sentry_unmap(stack, I64{4096})
     #Unsafe("the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes") {
-        _ := host_syscall(I64{14}, I64{2}, block, wrapping(block + I64{8}), I64{8}, I64{0}, I64{0})
+        ^_: host_syscall(I64{14}, I64{2}, block, wrapping(block + I64{8}), I64{8}, I64{0}, I64{0})
         pid = os_clone_i64(I64{16657}, entry, I64{0}, I64{0})
-        _ := host_syscall(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
+        ^_: host_syscall(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
     }
     jet_rt_free(block, SPAWN_BLOCK_BYTES, I64{8})
     trap_unmap(stack, SPAWN_CHILD_STACK)
@@ -522,8 +522,8 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
     child: spawn_child_new()
     // This target's source supplies osFacts=0, never a fake platform fallback.
     fd_put(scratch, I64{64}, I64{1})
-    minimum := I64{3}
-    at := I64{0}
+    ^minimum: I64{3}
+    ^at: I64{0}
     loop at < count {
         fd_put(plan, wrapping(at * I64{16}), I64{-1})
         fd_put(plan, wrapping(at * I64{16} + I64{8}), I64{-1})
@@ -535,10 +535,10 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         if (target >= minimum) { minimum = wrapping(target + I64{1}) }
         at = wrapping(at + I64{1})
     }
-    err_read := I64{-1}
-    err_write := I64{-1}
+    ^err_read: I64{-1}
+    ^err_write: I64{-1}
     result: spawn_pipe(scratch, minimum, wrapping(scratch + I64{8}), wrapping(scratch + I64{112}))
-    failure := result
+    ^failure: result
     if (result == I64{0}) {
         err_read = fd_word(scratch, I64{8})
         err_write = fd_word(scratch, I64{112})
@@ -564,7 +564,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         }
     }
     if (failure == I64{0} && !terminal) {
-        index := I64{0}
+        ^index: I64{0}
         loop index < (I64{3}) {
             mode: fd_word(spec, wrapping(I64{64} + index * I64{8}))
             target: wrapping(plan + index * I64{16})
@@ -624,12 +624,12 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
             at = wrapping(at + I64{1})
         }
     }
-    fallback_argv := I64{0}
-    fallback_size := I64{0}
+    ^fallback_argv: I64{0}
+    ^fallback_size: I64{0}
     if (failure == I64{0} && fd_word(candidates, I64{0}) != I64{0} && fd_word(candidates, I64{16}) != I64{0}) {
         // Parent-prepared /bin/sh NUL bytes and argv; child changes only argv[1].
         fd_put(scratch, I64{96}, I64{29400045130965551})
-        argc := I64{0}
+        ^argc: I64{0}
         loop fd_word(argv, wrapping(argc * I64{8})) != (I64{0}) -> argc = wrapping(argc + I64{1})
         slots: if (argc <= I64{1}) -> I64{3} else -> wrapping(argc + I64{2})
         fallback_size = wrapping(slots * I64{8})
@@ -661,8 +661,8 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         fd_put(scratch, I64{48}, fd_word(spec, I64{160}))
         fd_put(scratch, I64{56}, fd_word(spec, I64{160}))
     }
-    pid := I64{-1}
-    stage := fd_word(scratch, I64{64})
+    ^pid: I64{-1}
+    ^stage: fd_word(scratch, I64{64})
     if (failure == I64{0}) {
         jet_rt_stdout_flush()
         pid = spawn_vfork(plan, count, child, scratch, err_read, err_write, candidates, argv, envp, fallback_argv, cwd, dirs, session, terminal, cpu, memory, files, fd_word(spec, I64{216}) != I64{0}, fd_word(spec, I64{224}), fd_word(spec, I64{232}), if (fd_word(spec, I64{240}) != I64{0}) -> fd_word(spec, I64{248}) else -> I64{-1})
@@ -673,7 +673,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
             spawn_close(err_write)
             err_write = I64{-1}
             fd_put(child, I64{8}, pid)
-            got := I64{0}
+            ^got: I64{0}
             loop got < (I64{16}) {
                 read_count: host_call(I64{0}, err_read, wrapping(scratch + I64{64} + got), wrapping(I64{16} - got))
                 if (read_count == I64{-4}) { next }
@@ -704,7 +704,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
     jet_rt_free(plan, plan_size, I64{8})
     if (failure != I64{0}) {
         if (pid > I64{0}) {
-            if (stage == I64{8}) { _ := host_call(I64{62}, pid, I64{9}, I64{0}) }
+            if (stage == I64{8}) { ^_: host_call(I64{62}, pid, I64{9}, I64{0}) }
             loop {
                 reaped: host_call(I64{61}, pid, wrapping(scratch + I64{80}), I64{0})
                 if (reaped != I64{-4}) { break }
@@ -771,14 +771,14 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
                 host_error_out(I64{0}, I64{0}, error)
                 return I64{0}
             }
-            _ := sync_wait(wrapping(child + I64{16}), I64{4294967295}, I64{-1})
+            ^_: sync_wait(wrapping(child + I64{16}), I64{4294967295}, I64{-1})
             next
         }
         fd_put(child, I64{16}, I64{-1})
         sync_mutex_unlock(child)
         fd_put(status, I64{0}, I64{0})
         usage: jet_rt_alloc(I64{144}, I64{8})
-        result := I64{0}
+        ^result: I64{0}
         loop {
             result = host_call4(I64{61}, pid, status, if nohang -> I64{1} else -> I64{0}, usage)
             if (result != I64{-4}) { break }
@@ -786,7 +786,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         // The reaping thread alone holds the scope (reaped is -1): the
         // scope's memory.peak, all its processes together, replaces the
         // child's own maxrss, then whatever still runs in it is killed.
-        peak_kib := I64{-1}
+        ^peak_kib: I64{-1}
         scope: fd_word(child, I64{96})
         if (result > I64{0} && scope != I64{0}) {
             fd_put(child, I64{96}, I64{0})
@@ -825,7 +825,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
     // group signaling can still clean descendants after their leader exits.
     result: if (!group && fd_word(child, I64{16}) == I64{1}) -> I64{0} else -> host_call(I64{62}, if group -> wrapping(I64{0} - pid) else -> pid, native_signal, I64{0})
     sync_mutex_unlock(child)
-    _ := fd_error(result, error)
+    ^_: fd_error(result, error)
 }
 
 spawn_stream_offset: fn(child: I64, stream: I64) -> I64 {
@@ -851,7 +851,7 @@ spawn_stream_io: fn(child: I64, stream: I64, bytes: I64, length: I64, number: I6
     packed: spawn_stream_dup(child, index)
     if (packed < I64{0}) { return fd_error(packed, error) }
     native: packed & I64{4294967295}
-    result := I64{0}
+    ^result: I64{0}
     loop {
         result = host_call(number, native, bytes, requested)
         if (result != I64{-4}) { break }
@@ -884,7 +884,7 @@ spawn_stream_io: fn(child: I64, stream: I64, bytes: I64, length: I64, number: I6
     fd_put(child, offset, I64{-1})
     result: if (native < I64{0}) -> I64{0} else -> host_call(I64{3}, native, I64{0}, I64{0})
     sync_mutex_unlock(child)
-    _ := fd_error(result, error)
+    ^_: fd_error(result, error)
 }
 
 #Export(c) jet_process_resize_raw: fn(child: I64, cols: I64, rows: I64, error: I64) {
@@ -899,14 +899,14 @@ spawn_stream_io: fn(child: I64, stream: I64, bytes: I64, length: I64, number: I6
     size: (native_rows & I64{65535}) | ((native_cols & I64{65535}) << I64{16})
     sync_mutex_lock(child)
     master: fd_word(child, I64{56})
-    result := I64{-9}
+    ^result: I64{-9}
     if (master >= I64{0}) {
         #Unsafe("ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes") {
             result = os_ioctl_word_i64(master, I64{21524}, size)
         }
     }
     sync_mutex_unlock(child)
-    _ := fd_error(result, error)
+    ^_: fd_error(result, error)
 }
 
 // musl's realpath(path, resolved): each component is moved from a stack of
@@ -916,7 +916,7 @@ spawn_stream_io: fn(child: I64, stream: I64, bytes: I64, length: I64, number: I6
 // else the errno. Plain readlink and getcwd system calls: like the libc call
 // they replace, they bypass `jet test`'s read recorder.
 process_realpath: fn(path: I64, output: I64) -> I64 {
-    length := I64{0}
+    ^length: I64{0}
     loop length < (I64{4097}) && rt_text_byte(wrapping(path + length)) != (I64{0}) {
         length += I64{1}
     }
@@ -930,11 +930,11 @@ process_realpath: fn(path: I64, output: I64) -> I64 {
 }
 
 process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) -> I64 {
-    p := I64{4096} - length
-    q := I64{0}
-    links := I64{0}
-    up_count := I64{0}
-    check_dir := I64{0}
+    ^p: I64{4096} - length
+    ^q: I64{0}
+    ^links: I64{0}
+    ^up_count: I64{0}
+    ^check_dir: I64{0}
     rt_text_bytes_copy(wrapping(stack + p), path, length + I64{1})
     loop {
         if (process_byte(stack, p) == I64{47}) {
@@ -952,7 +952,7 @@ process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) ->
             }
             p = process_realpath_slashes(stack, p)
         } else {
-            l := I64{0}
+            ^l: I64{0}
             loop process_byte(stack, p + l) != (I64{0}) && process_byte(stack, p + l) != (I64{47}) {
                 l += I64{1}
             }
@@ -975,7 +975,7 @@ process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) ->
                 process_byte_put(output, q + l, I64{0})
                 p += l
                 up: l0 == I64{2} && process_byte(stack, p - I64{2}) == I64{46} && process_byte(stack, p - I64{1}) == I64{46}
-                linked := I64{-22}
+                ^linked: I64{-22}
                 if (up && q <= I64{3} * up_count) {
                     // A `..` with nothing to cancel waits for the cwd.
                     up_count += I64{1}
@@ -1024,13 +1024,13 @@ process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) ->
     process_byte_put(output, q, I64{0})
     if (process_byte(output, I64{0}) == I64{47}) { return I64{0} }
     // A relative result joins the working directory, less its leading `..`s.
-    cwd := I64{0}
+    ^cwd: I64{0}
     #Unsafe("getcwd writes at most 4097 bytes of the owned stack") {
         cwd = host_syscall(I64{79}, stack, I64{4097}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     if (cwd < I64{0}) { return -cwd }
     if (cwd == I64{0} || process_byte(stack, I64{0}) != I64{47}) { return I64{2} }
-    l := I64{0}
+    ^l: I64{0}
     loop process_byte(stack, l) != (I64{0}) -> l += I64{1}
     p = I64{0}
     loop up_count > (I64{0}) {
@@ -1052,7 +1052,7 @@ process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) ->
 
 // The offset after the slashes at `p`.
 process_realpath_slashes: fn(stack: I64, p: I64) -> I64 {
-    at := p
+    ^at: p
     loop process_byte(stack, at) == (I64{47}) -> at += I64{1}
     at
 }
@@ -1067,14 +1067,14 @@ process_byte_put: fn(base: I64, at: I64, value: I64) {
 // the source, else from the first up.
 process_move_up: fn(target: I64, source: I64, count: I64) {
     if (target > source) {
-        at := count
+        ^at: count
         loop at > (I64{0}) {
             at -= I64{1}
             process_byte_put(target, at, process_byte(source, at))
         }
         return
     }
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         process_byte_put(target, at, process_byte(source, at))
         at += I64{1}
@@ -1082,12 +1082,12 @@ process_move_up: fn(target: I64, source: I64, count: I64) {
 }
 
 #Export(c) jet_process_path_stat_raw: fn(path: I64, facts: I64, error: I64) {
-    result := I64{0}
+    ^result: I64{0}
     rt_test_reads_path(I64{83}, I64{-100}, path)
     #Unsafe("source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row") {
         result = os_stat_facts_i64(I64{4}, path, facts)
     }
-    _ := fd_error(result, error)
+    ^_: fd_error(result, error)
 }
 
 // Returns a compact byte buffer owned by the caller: length excludes NUL,
@@ -1102,7 +1102,7 @@ process_move_up: fn(target: I64, source: I64, count: I64) {
         host_error_out(wrapping(I64{0} - errno), I64{0}, error)
         return I64{0}
     }
-    count := I64{0}
+    ^count: I64{0}
     // A successful realpath NUL-terminates its result within the PATH_MAX byte
     // buffer.
     loop rt_text_byte(wrapping(buffer + count)) != (I64{0}) -> count = wrapping(count + I64{1})
@@ -1126,8 +1126,8 @@ process_move_up: fn(target: I64, source: I64, count: I64) {
     sync_mutex_lock(child)
     offset: wrapping(I64{32} + index * I64{8})
     master: fd_word(child, I64{56})
-    number := I64{-1}
-    failure := I64{0}
+    ^number: I64{-1}
+    ^failure: I64{0}
     if (master >= I64{0} && index < I64{2}) {
         if (fd_word(child, offset) != I64{-2}) {
             number = host_call(I64{72}, master, I64{1030}, I64{3})

@@ -1,9 +1,9 @@
 kit_steps_rust_lines: fn(text: String) -> [String] {
-    result := [String]{}
+    ^result: [String]{}
     bytes: text.bytes()
-    start := 0
+    ^start: 0
     loop start < bytes.len() {
-        end := start
+        ^end: start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         stop: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
         result.push(String.from_bytes(bytes.slice(start, stop)) ?? panic("line span is not UTF-8"))
@@ -55,7 +55,7 @@ kit_steps_expression_atom: fn(words: [String], start: Int, line: String) -> KitL
 }
 
 kit_steps_expression_and: fn(words: [String], start: Int, line: String) -> KitLinePredicate {
-    result := kit_steps_expression_atom(words, start, line)
+    ^result: kit_steps_expression_atom(words, start, line)
     loop result.valid && result.next < words.len() && words[result.next] == "&&" {
         right: kit_steps_expression_atom(words, result.next + 1, line)
         result = KitLinePredicate{valid: right.valid, value: result.value && right.value, next: right.next}
@@ -64,7 +64,7 @@ kit_steps_expression_and: fn(words: [String], start: Int, line: String) -> KitLi
 }
 
 kit_steps_expression_or: fn(words: [String], start: Int, line: String) -> KitLinePredicate {
-    result := kit_steps_expression_and(words, start, line)
+    ^result: kit_steps_expression_and(words, start, line)
     loop result.valid && result.next < words.len() && words[result.next] == "||" {
         right: kit_steps_expression_and(words, result.next + 1, line)
         result = KitLinePredicate{valid: right.valid, value: result.value || right.value, next: right.next}

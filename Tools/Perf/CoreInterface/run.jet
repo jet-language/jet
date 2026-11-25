@@ -162,7 +162,7 @@ run: fn() -> Never Err! {
     root: files.normalize("{sys.executable()}/../../../..")
     argv: process.args()
     tmp: process.env_get_or("TMPDIR", "/tmp")
-    args := [String:String]{
+    ^args: [String:String]{
         "before": "",
         "after": "",
         "runs": "11",
@@ -176,7 +176,7 @@ run: fn() -> Never Err! {
         "out": "",
         "time": gnu_time(),
     }
-    i := 0
+    ^i: 0
     loop i < argv.len() {
         key: argv[i].remove_prefix("--")
         if !args.has_key(key) || i + 1 >= argv.len() {
@@ -200,7 +200,7 @@ run: fn() -> Never Err! {
     work: files.normalize(args["work"])
     out: if args["out"] == "" -> work else -> args["out"]
     files.remove_all(work) ?? ()
-    programs := [Program]{}
+    ^programs: [Program]{}
     loop program in all_programs() {
         if args["programs"] != "" && !listed(args["programs"], program.name) -> next
         dir: files.join(work, "programs/{program.name}")
@@ -210,13 +210,13 @@ run: fn() -> Never Err! {
         programs.push(program)
     }
     if programs.len() == 0 -> return Err("--programs names no program")
-    arms := [Arm]{Arm{name: "built-in", root: ""}}
+    ^arms: [Arm]{Arm{name: "built-in", root: ""}}
     if args["tree"] != "" -> arms.push(Arm{name: "named tree", root: files.normalize(args["tree"])})
     if args["edited-tree"] != "" {
         arms.push(Arm{name: "edited tree", root: files.normalize(args["edited-tree"])})
     }
     files.create_dir_all(out)
-    rows := [Row]{}
+    ^rows: [Row]{}
     loop arm in arms {
         loop program in programs {
             loop command in COMMANDS {
@@ -224,14 +224,14 @@ run: fn() -> Never Err! {
             }
         }
     }
-    lines := [String]{"# Core interface step receipt", ""}
+    ^lines: [String]{"# Core interface step receipt", ""}
     lines.extend(compiler_lines("Before", jets[0]))
     lines.extend(compiler_lines("After", jets[1]))
     pinned: if cpus.len() > 0 -> " pinned to CPUs {args["cpus"]}," else -> ""
     lines.push("Each row ran {runs} warm and {cold} cold runs per jet, the jets alternating run by run,{pinned} each with an empty JET_STORE_DIR and XDG_CACHE_HOME, no JET_SEED and NO_COLOR=1; each jet first ran once cold, unrecorded. Values are medians. User and sys are this program's RUSAGE_CHILDREN change across the run; peak and faults are GNU time's %M, %F and %R. A row is worse when its wall or user plus sys rises by more than 3% and 2 ms, or its peak by more than max(1 MB, 1%). Produced by `jet Tools/Perf/CoreInterface/run.jet`.")
     lines.extend(headline_lines(rows))
     lines.extend([String]{"", "## A/B", "", "| Arm | Program | Command | Wall ms | User+sys ms | Peak MB | Wall after/before | Cold wall ms | Cold user+sys ms | Cold peak MB | Cold major faults | Verdict |", "|---|---|---|---|---|---|---:|---|---|---|---|---|"})
-    worse := false
+    ^worse: false
     loop row in rows {
         verdict: row_verdict(row)
         if verdict != "ok" -> worse = true
@@ -265,7 +265,7 @@ gnu_time: fn() -> String {
 
 // "24-31,40" as its CPUs.
 parse_cpus: fn(text: String) -> [Int] {
-    cpus := [Int]{}
+    ^cpus: [Int]{}
     loop part in text.split(",") {
         span: part.trim().partition("-")
         first: Int.parse(span.head) ?? next
@@ -280,7 +280,7 @@ tenths_us: fn(text: String) -> Int? {
     parts: text.trim().partition(".")
     whole: Int.parse(parts.head) ?? return None
     if parts.sep == "" -> return Val(whole * 1000)
-    digits := parts.tail.copy()  // copy: padded below
+    ^digits: parts.tail.copy()  // copy: padded below
     loop digits.count_bytes() < 3 -> digits = "{digits}0"
     fraction: Int.parse(digits.slice(0..<3)) ?? return None
     Val(whole * 1000 + fraction)
@@ -298,7 +298,7 @@ compiler_lines: fn(label: String, jet: String) -> [String] Err! {
 
 // Every run of one arm, program and command for both jets.
 measure_row: fn(jets: [String], gnu: String, cpus: [Int], work: String, arm: Arm, program: Program, command: String, runs: Int, cold: Int) -> Row Err! {
-    row := Row{arm: arm.name.copy(), program: program.name.copy(), command: command.copy(), warm: [[Sample]]{[Sample]{}, [Sample]{}}, cold: [[Sample]]{[Sample]{}, [Sample]{}}, traced: [[Phases]]{[Phases]{}, [Phases]{}}, counters: [[Total]]{[Total]{}, [Total]{}}}  // copy: the row outlives the arm and program
+    ^row: Row{arm: arm.name.copy(), program: program.name.copy(), command: command.copy(), warm: [[Sample]]{[Sample]{}, [Sample]{}}, cold: [[Sample]]{[Sample]{}, [Sample]{}}, traced: [[Phases]]{[Phases]{}, [Phases]{}}, counters: [[Total]]{[Total]{}, [Total]{}}}  // copy: the row outlives the arm and program
     stem: "{arm.name.replace(" ", "-")}.{program.name}.{command}"
     dir: files.join(work, "programs/{program.name}")
     loop side in 0..<2 {
@@ -356,11 +356,11 @@ sample: fn(jet: String, gnu: String, cpus: [Int], work: String, dir: String, arm
     time_file: files.join(run_dir, "time")
     files.create_dir_all(store)
     files.create_dir_all(cache)
-    argv := [String]{gnu, "-f", "%M %F %R", "-o", time_file, jet, command}
+    ^argv: [String]{gnu, "-f", "%M %F %R", "-o", time_file, jet, command}
     if trace != "" -> argv.push("--trace={trace}")
     if detail != "" -> argv.push("--trace-detail={detail}")
     argv.push(program.file)
-    spec := process.cmd(argv).cwd(dir).env_remove("JET_SEED").env_remove("JET_TRACE_FILE").env_remove("JET_TRACE_DETAIL").env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache).env("NO_COLOR", "1")
+    ^spec: process.cmd(argv).cwd(dir).env_remove("JET_SEED").env_remove("JET_TRACE_FILE").env_remove("JET_TRACE_DETAIL").env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache).env("NO_COLOR", "1")
     spec = if arm.root == "" -> spec.env_remove("JET_TOOLCHAIN_ROOT") else -> spec.env("JET_TOOLCHAIN_ROOT", arm.root)
     spec = spec.timeout(time.duration_seconds(TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT)
     if cpus.len() > 0 -> spec = spec.cpu_affinity(cpus.copy())  // copy: every run pins to the same CPUs
@@ -396,16 +396,16 @@ sample: fn(jet: String, gnu: String, cpus: [Int], work: String, dir: String, arm
 // when it is a parse or sema.module span naming a file of `dir` (with
 // `.jet` added for a module); one inside another user span is counted once.
 phases: fn(text: String, dir: String) -> Phases {
-    totals := [Total]{}
-    user_code := 0
-    open := [Int:[Open]]{}
+    ^totals: [Total]{}
+    ^user_code: 0
+    ^open: [Int:[Open]]{}
     loop raw in text.split("\n") {
         line: raw.trim().remove_suffix(",")
         if line == "" || line == "[" || line == "]" -> next
         event: json.decode<TraceEvent>(line) ?? next
         if event.ph != "B" && event.ph != "E" -> next
         tid: event.tid ?? next
-        stack := open.remove(tid) ?? [Open]{}
+        ^stack: open.remove(tid) ?? [Open]{}
         if event.ph == "B" {
             key: event.cat ?? event.name
             mine: (key == "parse" || key == "sema.module") && (files.is_file(files.join(dir, event.name)) || files.is_file(files.join(dir, "{event.name}.jet")))
@@ -422,7 +422,7 @@ phases: fn(text: String, dir: String) -> Phases {
         parent_under: stack.len() > 0 && stack[stack.len() - 1].under
         if span.own && !parent_under -> user_code += cpu
         if stack.len() == 0 {
-            at := 0
+            ^at: 0
             loop at < totals.len() && totals[at].name != span.key -> at += 1
             if at == totals.len() -> totals.push(Total{name: span.key.copy(), value: 0})  // copy: the total outlives the span
             totals[at].value += cpu
@@ -434,7 +434,7 @@ phases: fn(text: String, dir: String) -> Phases {
 
 // A trace's COUNTERS, each summed over its events, -1 for one it lacks.
 counters: fn(text: String) -> [Total] {
-    found := COUNTERS.map(fn(name) { Total{name: name.copy(), value: -1} })  // copy: the totals outlive the list
+    ^found: COUNTERS.map(fn(name) { Total{name: name.copy(), value: -1} })  // copy: the totals outlive the list
     loop raw in text.split("\n") {
         line: raw.trim().remove_suffix(",")
         if line == "" || line == "[" || line == "]" -> next
@@ -452,7 +452,7 @@ counters: fn(text: String) -> [Total] {
 // The row's verdict under the no-slower rule: "ok", or "WORSE" with what
 // grew.
 row_verdict: fn(row: Row) -> String Never! {
-    grew := [String]{}
+    ^grew: [String]{}
     if slower(median(row.warm[0].map(fn(s) { s.wall_ns /% 1000 })), median(row.warm[1].map(fn(s) { s.wall_ns /% 1000 }))) {
         grew.push("wall")
     }
@@ -492,7 +492,7 @@ ratio: fn(after: Int, before: Int) -> String Never! {
 // The figures a step is judged on, before → after on built-in Core: hello's
 // own peak under `jet run`, and rcc's wall and own peak under each command.
 headline_lines: fn(rows: [Row]) -> [String] {
-    lines := [String]{"", "## Headline", ""}
+    ^lines: [String]{"", "## Headline", ""}
     loop row in rows {
         if row.arm != "built-in" -> next
         if row.program == "hello" && row.command == "run" {
@@ -510,7 +510,7 @@ headline_lines: fn(rows: [Row]) -> [String] {
 // untraced user CPU, and each phase's traced CPU, against the target.
 attribution_lines: fn(rows: [Row], target_us: Int) -> [String] {
     found: rows.find(fn(r) { r.arm == "built-in" && r.program == "hello" && r.command == "run" }) ?? return [String]{}
-    lines := [String]{"", "## hello: where its cold user CPU goes", ""}
+    ^lines: [String]{"", "## hello: where its cold user CPU goes", ""}
     user: found.cold.map(fn(side) { median(side.map(fn(s) { s.user_us })) })
     code: found.traced.map(fn(side) { median(side.map(fn(p) { p.user_code_ns /% 1000 })) })
     loop side in 0..<2 {
@@ -521,7 +521,7 @@ attribution_lines: fn(rows: [Row], target_us: Int) -> [String] {
     }
     lines.push("- Target: the user code's CPU is about {us_ms(target_us)} ms, so more than half of hello's user CPU is the user's when the rest falls under that. Each phase's median traced CPU (the user code's parse and sema.module spans included in theirs):")
     lines.extend([String]{"", "| Phase | Before ms | After ms | Change ms | After over the target ms |", "|---|---:|---:|---:|---:|"})
-    names := [String]{}
+    ^names: [String]{}
     loop side in found.traced {
         loop run in side {
             loop phase in run.phases {
@@ -529,7 +529,7 @@ attribution_lines: fn(rows: [Row], target_us: Int) -> [String] {
             }
         }
     }
-    total := [Int]{0, 0}
+    ^total: [Int]{0, 0}
     loop name in names {
         each: [Int]{phase_median(found.traced[0], name), phase_median(found.traced[1], name)}
         total[0] = total[0] + each[0]
@@ -543,9 +543,9 @@ attribution_lines: fn(rows: [Row], target_us: Int) -> [String] {
 
 // The median CPU (µs) of phase `name` over `runs`, 0 in a run without it.
 phase_median: fn(runs: [Phases], name: String) -> Int Never! {
-    values := [Int]{}
+    ^values: [Int]{}
     loop run in runs {
-        spent := 0
+        ^spent: 0
         loop phase in run.phases {
             if phase.name == name -> spent += phase.value
         }
@@ -565,7 +565,7 @@ listed: fn(names: String, name: String) -> Bool Never! {
 // Per row on built-in Core: the bodies a demand wave loaded against those
 // it checked from text, and the CPU per body of each.
 body_lines: fn(rows: [Row]) -> [String] {
-    lines := [String]{"", "## Per-body load against check", "", "From one run per jet with `--trace-detail=functions` (the core.timed counters, task CPU). A load gate holds when a loaded body costs at most a tenth of a body checked from text. `-` is a counter the jet does not trace.", "", "| Program | Command | Jet | Loaded (timed) | µs per load | From text (timed) | µs per check | Load/check | Bodies loaded | Bodies file read MiB | From text | Kept bodies |", "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"}
+    ^lines: [String]{"", "## Per-body load against check", "", "From one run per jet with `--trace-detail=functions` (the core.timed counters, task CPU). A load gate holds when a loaded body costs at most a tenth of a body checked from text. `-` is a counter the jet does not trace.", "", "| Program | Command | Jet | Loaded (timed) | µs per load | From text (timed) | µs per check | Load/check | Bodies loaded | Bodies file read MiB | From text | Kept bodies |", "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"}
     loop row in rows {
         if row.arm != "built-in" -> next
         loop side in 0..<2 {
@@ -601,7 +601,7 @@ shown: fn(n: Int) -> String Never! { if n < 0 -> "-" else -> "{n}" }
 // The middle value, or the rounded mean of the middle two.
 median: fn(values: [Int]) -> Int Never! {
     if values.len() == 0 -> return 0
-    sorted := values.copy()  // copy: the values keep their run order
+    ^sorted: values.copy()  // copy: the values keep their run order
     sorted.sort()
     m: sorted.len() /% 2
     if sorted.len() % 2 == 1 -> return sorted[m]

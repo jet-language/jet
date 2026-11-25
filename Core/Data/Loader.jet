@@ -37,7 +37,7 @@ bind: fn<T>(loader: ^DataLoader<T>, payload: [U8]) DataError! {
             ),
         )
     }
-    bytes := payload.len()
+    ^bytes: payload.len()
     if bytes > loader.limits.encoding.max_item_bytes {
         return Err(loader_error(DataErrorKind.Limit, "payload exceeds max_item_bytes", "data.loader.bind"))
     }
@@ -47,7 +47,7 @@ bind: fn<T>(loader: ^DataLoader<T>, payload: [U8]) DataError! {
             return Err(loader_error(DataErrorKind.Limit, "payload exceeds max_total_bytes", "data.loader.bind"))
         }
     }
-    bound := copy_bytes(payload)
+    ^bound: copy_bytes(payload)
     loader.payload = Val(bound)
     loader.status.freshness = DataFreshness.Pending
     loader.status.error = ""
@@ -130,11 +130,11 @@ stream: fn<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
     if loader.format == None {
         return Err(loader_error(DataErrorKind.Bridge, "a loader made by `file_as` or `url_as` streams with `stream_as`", source_path<T>(loader)))
     }
-    bytes_opt := loader.payload
+    ^bytes_opt: loader.payload
     if bytes_opt == None && loader.offline -> bytes_opt = loader.last_good
     bytes: bytes_opt ?? return Err(loader_error(DataErrorKind.State, "loader has no bound payload", source_path<T>(loader)))
     text: String.from_bytes(bytes) ?? return Err(loader_error(DataErrorKind.Decode, "loader payload is not UTF-8", source_path<T>(loader)))
-    rows := [T]{}
+    ^rows: [T]{}
     if loader.format == Val(DataFormat.CSV) {
         rows = core.data.csv<T>(text) ?? return Err(loader_error(DataErrorKind.Decode, "CSV stream decode failed", source_path<T>(loader)))
     } else if loader.format == Val(DataFormat.JSON) {
@@ -170,7 +170,7 @@ stream_as: fn<T: Decode, F: Format>(loader: DataLoader<T>) -> DataStream<T> Data
     if loader.codec != Val(F.name) {
         return Err(loader_error(DataErrorKind.Bridge, "this loader was not made over the `{F.name}` format", source_path<T>(loader)))
     }
-    bytes_opt := loader.payload
+    ^bytes_opt: loader.payload
     if bytes_opt == None && loader.offline -> bytes_opt = loader.last_good
     bytes: bytes_opt ?? return Err(loader_error(DataErrorKind.State, "loader has no bound payload", source_path<T>(loader)))
     tree: F.read(bytes) ?? return Err(loader_error(DataErrorKind.Decode, "{err}", source_path<T>(loader)))
@@ -182,10 +182,10 @@ stream_as: fn<T: Decode, F: Format>(loader: DataLoader<T>) -> DataStream<T> Data
 }
 
 #Test("a loader over a Format streams the rows that format reads") {
-    loader := core.data.url_as<Int, json.Codec>("https://example.test/rows", "network", DataLimits.safe()) ?? panic("loader")
+    ^loader: core.data.url_as<Int, json.Codec>("https://example.test/rows", "network", DataLimits.safe()) ?? panic("loader")
     assert(loader.format == None)
     bind<Int>(loader, "[1, 2]".bytes()) ?? panic("bind")
-    rows := stream_as<Int, json.Codec>(loader.copy()) ?? panic("stream")
+    ^rows: stream_as<Int, json.Codec>(loader.copy()) ?? panic("stream")
     assert_eq(core.data.stream.collect<Int>(rows) ?? panic("collect"), [Int]{1, 2})
     if stream_as<Int, cbor.Codec>(loader.copy()) == {
         .Ok(_) -> { panic("a JSON loader streamed through CBOR") }
@@ -207,18 +207,18 @@ accepts_payload: fn<T>(loader: DataLoader<T>) -> Bool Never! {
 }
 
 decode_jsonl: fn<T: Decode>(text: String) -> [T] DataError! {
-    out := [T]{}
-    raw := text.bytes()
-    start := 0
+    ^out: [T]{}
+    ^raw: text.bytes()
+    ^start: 0
     loop i in 0..<(raw.len() + 1) {
         if i < raw.len() && raw[i] != (U8{10}) -> next
-        end := i
+        ^end: i
         if end > start && raw[end - 1] == (U8{13}) -> end -= 1
         if end > start {
-            line_bytes := raw[start..(end - 1)]
+            ^line_bytes: raw[start..(end - 1)]
             line: String.from_bytes(line_bytes) ?? return Err(loader_error(DataErrorKind.Decode, "JSONL row is not UTF-8", "data.loader.stream"))
             if !blank(line) {
-                wrapped := "[{line}]"
+                ^wrapped: "[{line}]"
                 row: core.data.json<T>(wrapped) ?? return Err(loader_error(DataErrorKind.Decode, "JSONL row decode failed", "data.loader.stream"))
                 if row.len() != 1 {
                     return Err(loader_error(DataErrorKind.Decode, "JSONL row did not decode to one value", "data.loader.stream"))
@@ -242,7 +242,7 @@ blank: fn(text: String) -> Bool Never! {
 source_path: fn<T>(loader: DataLoader<T>) -> String Never! { loader.source.locator }
 
 copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in bytes -> out.push(byte)
     out
 }

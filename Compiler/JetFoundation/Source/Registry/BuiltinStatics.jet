@@ -194,7 +194,7 @@ BUILTIN_NUMERIC_KINDS: #run builtin_numeric_family_kinds(embed_file("toolchain:C
 
 // The kinds of the sizes `prelude` names, each row owned by this loop.
 builtin_numeric_family_kinds: fn(prelude: String) -> [BuiltinNumericKind] Never! {
-    kinds := [BuiltinNumericKind]{
+    ^kinds: [BuiltinNumericKind]{
         {name: "Int", ty: Type.Int, rust: "i64", integer: true, fixed: false, signed: true, bits: 64},
         {name: "Float", ty: Type.Float, rust: "f64", integer: false, fixed: false, signed: true, bits: 64},
     }
@@ -227,7 +227,7 @@ builtin_numeric_family_kinds: fn(prelude: String) -> [BuiltinNumericKind] Never!
 BUILTIN_NUMERIC_SOURCES: #run builtin_numeric_family_sources(embed_file("toolchain:Core/Prelude/Prelude.jet"))
 
 builtin_numeric_family_sources: fn(prelude: String) -> [BuiltinNumericSource] Never! {
-    sources := [BuiltinNumericSource]{{method: "from_int", source: "Int"}}
+    ^sources: [BuiltinNumericSource]{{method: "from_int", source: "Int"}}
     loop alias in foundation_size_alias_rows(prelude) {
         ty: foundation_family_type(alias.family, alias.sizes) ?? build_time_refused("`{alias.name}` names no family size")
         if type_name(ty) != alias.name -> next
@@ -240,12 +240,12 @@ builtin_numeric_family_sources: fn(prelude: String) -> [BuiltinNumericSource] Ne
 }
 
 #Test("each family size converts by its own name, with its family's host word") {
-    methods := ""
+    ^methods: ""
     loop row in BUILTIN_NUMERIC_SOURCES {
         methods = if methods == "" -> "{row.method}" else -> "{methods} {row.method}"
     }
     assert_eq(methods, "from_int from_i8 from_i16 from_i32 from_i64 from_u8 from_u16 from_u32 from_u64 from_f32 from_float from_decimal from_fraction")
-    words := [String]{}
+    ^words: [String]{}
     loop kind in BUILTIN_NUMERIC_KINDS -> words.push("{kind.name}:{kind.rust}:{kind.bits}")
     assert_eq(words.join(" "), "Int:i64:64 Float:f64:64 I8:i8:8 I16:i16:16 I32:i32:32 I64:i64:64 U8:u8:8 U16:u16:16 U32:u32:32 U64:u64:64 F32:f32:32 F64:f64:64")
     f64: builtin_numeric_kind("F64") ?? panic("F64 is a numeric kind")
@@ -348,14 +348,14 @@ builtin_static_owner_numeric_row: fn(owner: String, method: String) -> BuiltinSt
 // Every row for `owner.method`, across modules; the caller admits the one
 // whose module matches how the owner was named.
 builtin_static_rows: fn(owner: String, method: String) -> [BuiltinStaticRow] Never! {
-    rows := builtin_static_rows_in(BUILTIN_STATIC_ROWS, owner, method)
+    ^rows: builtin_static_rows_in(BUILTIN_STATIC_ROWS, owner, method)
     if builtin_static_owner_numeric_row(owner, method) == .Val(row) -> rows.push(row)
     rows
 }
 
 // The table is a read parameter, so the scan reads its rows in place.
 builtin_static_rows_in: fn(table: [BuiltinStaticRow], owner: String, method: String) -> [BuiltinStaticRow] Never! {
-    rows := [BuiltinStaticRow]{}
+    ^rows: [BuiltinStaticRow]{}
     loop row in table {
         if row.owner == owner && row.method == method -> rows.push(row.copy())
     }

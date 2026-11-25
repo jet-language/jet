@@ -149,12 +149,12 @@ nix_builder_run_in_scratch: fn(scratch: NixBuildScratch, source_dir: String, eva
     names: nixeval_sorted(evaluation.outputs.keys().to_list())
     loop name in names -> nix_builder_validate_output_name(name)
 
-    env := [String:String]{}
+    ^env: [String:String]{}
     loop entry in evaluation.env {
         env[entry.key] = nix_builder_rewrite_output_paths(entry.value, evaluation, names)
     }
     loop name in names -> env[name] = "{NIX_BUILDER_OUTPUT_ROOT}/{name}"
-    args := [String]{}
+    ^args: [String]{}
     loop arg in evaluation.args {
         args.push(nix_builder_rewrite_output_paths(arg, evaluation, names))
     }
@@ -164,7 +164,7 @@ nix_builder_run_in_scratch: fn(scratch: NixBuildScratch, source_dir: String, eva
         return Err(NativeNixBuildError.Failed(nix_builder_command_failure(sandbox.receipt)))
     }
 
-    outputs := [String:NativeNixOutput]{}
+    ^outputs: [String:NativeNixOutput]{}
     loop name in names {
         declared: evaluation.outputs[name]
         path: files.join(output, name)
@@ -179,7 +179,7 @@ nix_builder_run_in_scratch: fn(scratch: NixBuildScratch, source_dir: String, eva
 // Replace every declared output store path in `value` with its sandbox
 // output path.
 nix_builder_rewrite_output_paths: fn(value: String, evaluation: NixNativeDerivation, names: [String]) -> String Never! {
-    rewritten := value
+    ^rewritten: value
     loop name in names {
         store_path: evaluation.outputs[name].path
         if store_path != "" {
@@ -220,8 +220,8 @@ provider_nix_admit_built_derivation: fn(verification: StoreVerification, roots: 
 
 nix_builder_admit: fn(verification: StoreVerification, roots: HangarRoots, build: NativeNixBuild, reference: String, version: String) -[FS, Env, Time]> StoreEntry NativeNixBuildError! {
     primary: build.outputs.get("out") ?? (build.outputs.get("bin") ?? return Err(NativeNixBuildError.Invalid("derivation has no `out` or `bin` output")))
-    named_outputs := [String:String]{}
-    facts := provider_nix_build_facts_record()
+    ^named_outputs: [String:String]{}
+    ^facts: provider_nix_build_facts_record()
     facts["nix.drv_path"] = build.drv_path
     facts["nix.reference"] = reference
     facts["build.sandbox"] = "native"
@@ -242,7 +242,7 @@ nix_builder_admit: fn(verification: StoreVerification, roots: HangarRoots, build
     }
     derivation_digest: pkg_sha256_hex(build.drv_path.bytes())
     producer: provider_producer_record("nix", build.drv_path, derivation_digest, facts, "nix-derivation:{build.drv_path}", identity, facts) ?? return Err(NativeNixBuildError.Store("producer record: {err.message()}"))
-    bin := ""
+    ^bin: ""
     if build.outputs.get("bin") == {
         .Val(output) -> { bin = files.join(output.path, "bin") }
         .None -> {
@@ -290,12 +290,12 @@ nix_builder_validate_builder: fn(evaluation: NixNativeDerivation) NativeNixBuild
 // Every `/nix/store/` reference in the environment or arguments must be one
 // of the derivation's own declared outputs.
 nix_builder_validate_literal_store_paths: fn(evaluation: NixNativeDerivation) NativeNixBuildError! {
-    values := [String]{}
+    ^values: [String]{}
     loop entry in evaluation.env -> values.push(entry.value)
     loop arg in evaluation.args -> values.push(arg.copy())
     loop value in values {
         if !value.contains("/nix/store/") || value == "/nix/store" -> next
-        admitted := false
+        ^admitted: false
         loop entry in evaluation.outputs {
             if value.contains(entry.value.path) -> admitted = true
         }
@@ -352,7 +352,7 @@ nix_builder_command_failure: fn(receipt: ProcessReceipt) -> String Never! {
     stderr: receipt.errors.trim()
     detail: if stderr == "" -> receipt.output.trim() else -> stderr
     if detail == "" -> return "exit status exit status: {receipt.code}"
-    kept := [String]{}
+    ^kept: [String]{}
     loop scalar in detail.chars() {
         if kept.len() == NIX_BUILDER_FAILURE_CHARS -> break
         kept.push("{scalar}")

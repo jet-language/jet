@@ -50,7 +50,7 @@ trust_record_json: fn(record: TrustRecord) -> String TrustError! {
 
 // `{"grants":[...]}`.
 trust_records_json: fn(records: [TrustRecord]) -> String TrustError! {
-    rendered := [Dyn]{}
+    ^rendered: [Dyn]{}
     loop record in records -> rendered.push(trust_record_tree(record))
     trust_json_canonical(Dyn.Object(["grants": Dyn.Array(rendered)]))
 }

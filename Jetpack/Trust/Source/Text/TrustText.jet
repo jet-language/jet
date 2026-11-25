@@ -70,7 +70,7 @@ TrustTextSplit: struct {
 
 // Offset of the first `needle` at or after `from`, or -1.
 trust_text_find: fn(raw: [U8], needle: [U8], from: Int) -> Int Never! {
-    start := from
+    ^start: from
     loop start + needle.len() <= raw.len() {
         if pkg_bytes_starts_with(raw, start, needle) -> return start
         start += 1
@@ -80,7 +80,7 @@ trust_text_find: fn(raw: [U8], needle: [U8], from: Int) -> Int Never! {
 
 // Offset of the first byte equal to `code` at or after `from`, or -1.
 trust_text_find_byte: fn(raw: [U8], code: Int, from: Int) -> Int Never! {
-    index := from
+    ^index: from
     loop index < raw.len() {
         if (Int{raw[index]}) == code -> return index
         index += 1
@@ -90,7 +90,7 @@ trust_text_find_byte: fn(raw: [U8], code: Int, from: Int) -> Int Never! {
 
 // Offset of the last byte equal to `code`, or -1.
 trust_text_rfind_byte: fn(raw: [U8], code: Int) -> Int Never! {
-    index := raw.len() - 1
+    ^index: raw.len() - 1
     loop index >= 0 {
         if (Int{raw[index]}) == code -> return index
         index -= 1
@@ -116,7 +116,7 @@ trust_text_split_last: fn(text: String, code: Int) -> TrustTextSplit? Never! {
 trust_text_split_last_text: fn(text: String, needle: String) -> TrustTextSplit? Never! {
     raw: text.bytes()
     pattern: needle.bytes()
-    at := raw.len() - pattern.len()
+    ^at: raw.len() - pattern.len()
     loop at >= 0 {
         if pkg_bytes_starts_with(raw, at, pattern) {
             return Val(TrustTextSplit{before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + pattern.len(), raw.len())})
@@ -129,8 +129,8 @@ trust_text_split_last_text: fn(text: String, needle: String) -> TrustTextSplit? 
 // Every piece, including empty ones.
 trust_text_split: fn(text: String, code: Int) -> [String] Never! {
     raw: text.bytes()
-    pieces := [String]{}
-    start := 0
+    ^pieces: [String]{}
+    ^start: 0
     loop {
         at: trust_text_find_byte(raw, code, start)
         if at < 0 -> break
@@ -144,8 +144,8 @@ trust_text_split: fn(text: String, code: Int) -> [String] Never! {
 // Strip every leading and trailing `code`.
 trust_text_trim_byte: fn(text: String, code: Int) -> String Never! {
     raw: text.bytes()
-    start := 0
-    end := raw.len()
+    ^start: 0
+    ^end: raw.len()
     loop start < end && (Int{raw[start]}) == code -> start += 1
     loop end > start && (Int{raw[end - 1]}) == code -> end -= 1
     pkg_bytes_text(raw, start, end)
@@ -154,8 +154,8 @@ trust_text_trim_byte: fn(text: String, code: Int) -> String Never! {
 // Trim a set of ASCII bytes from both ends.
 trust_text_trim_bytes: fn(text: String, codes: [Int]) -> String Never! {
     raw: text.bytes()
-    start := 0
-    end := raw.len()
+    ^start: 0
+    ^end: raw.len()
     loop start < end && codes.contains(Int{raw[start]}) -> start += 1
     loop end > start && codes.contains(Int{raw[end - 1]}) -> end -= 1
     pkg_bytes_text(raw, start, end)
@@ -165,12 +165,12 @@ trust_text_trim_bytes: fn(text: String, codes: [Int]) -> String Never! {
 // line after a trailing newline.
 trust_text_lines: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    lines := [String]{}
-    start := 0
+    ^lines: [String]{}
+    ^start: 0
     loop start < raw.len() {
         newline: trust_text_find_byte(raw, TRUST_NEWLINE, start)
         end: if newline < 0 -> raw.len() else -> newline
-        content_end := end
+        ^content_end: end
         if newline >= 0 && content_end > start && (Int{raw[content_end - 1]}) == TRUST_CARRIAGE_RETURN {
             content_end -= 1
         }
@@ -182,8 +182,8 @@ trust_text_lines: fn(text: String) -> [String] Never! {
 
 trust_text_words: fn(text: String) -> [String] Never! {
     raw: text.bytes()
-    words := [String]{}
-    index := 0
+    ^words: [String]{}
+    ^index: 0
     loop index < raw.len() {
         index = pkg_bytes_skip_space(raw, index)
         if index >= raw.len() -> break
@@ -199,8 +199,8 @@ trust_text_replace_all: fn(text: String, needle: String, replacement: String) ->
     raw: text.bytes()
     pattern: needle.bytes()
     if pattern.len() == 0 -> return text.copy()
-    out := [U8]{}
-    index := 0
+    ^out: [U8]{}
+    ^index: 0
     loop index < raw.len() {
         if pkg_bytes_starts_with(raw, index, pattern) {
             loop byte in replacement.bytes() -> out.push(byte)
@@ -219,7 +219,7 @@ trust_text_is_ascii_space: fn(code: Int) -> Bool Never! {
 
 // The first offset at or after `at` that is not ASCII whitespace.
 trust_text_skip_ascii_space: fn(raw: [U8], at: Int) -> Int Never! {
-    index := at
+    ^index: at
     loop index < raw.len() && trust_text_is_ascii_space(Int{raw[index]}) -> index += 1
     index
 }
@@ -247,7 +247,7 @@ trust_text_compare_lists: fn(left: [String], right: [String]) -> Int Never! {
 
 // SHA-256 hex of `parts` joined by NUL bytes.
 trust_sha256_nul_joined: fn(parts: [String]) -> String Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop index in 0..<parts.len() {
         if index > 0 -> bytes.push(U8{0})
         loop byte in parts[index].bytes() -> bytes.push(byte)

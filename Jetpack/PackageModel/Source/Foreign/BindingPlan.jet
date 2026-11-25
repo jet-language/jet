@@ -173,7 +173,7 @@ BindingOperation: struct {
     }
 
     with_pointer_count: fn(self, fact: PointerCountFact) -> BindingOperation Never! {
-        out := self
+        ^out: self
         out.pointer_count = Val(fact)
         out
     }
@@ -196,13 +196,13 @@ BindingInputs: struct {
     }
 
     with_dependencies: fn(self, dependencies: [String]) -> BindingInputs Never! {
-        out := self
+        ^out: self
         out.dependencies = pkg_plan_sorted_strings(dependencies)
         out
     }
 
     with_compiler_flags: fn(self, flags: [String]) -> BindingInputs Never! {
-        out := self
+        ^out: self
         out.compiler_flags = pkg_plan_sorted_strings(flags)
         out
     }
@@ -221,7 +221,7 @@ BindingInputs: struct {
     }
 
     digest: fn(self) -> String Never! {
-        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+        ^identity: ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
         identity.field("target", self.target.bytes())
         identity.field("generator", self.generator.bytes())
         identity.field("artifact", self.artifact.bytes())
@@ -271,7 +271,7 @@ BindingPlan: struct {
             .None -> {}
         }
 
-        required := [String]{"abi", "layout", "width", "alignment", "target"}
+        ^required: [String]{"abi", "layout", "width", "alignment", "target"}
         if operation.pointer_count != None {
             required.push("ownership")
             required.push("lifetime")
@@ -398,7 +398,7 @@ BindingPlan: struct {
 
     // Render the generated facade and its explicit native call seam.
     render_facade: fn(self) -> String Never! {
-        lines := [String]{
+        ^lines: [String]{
             "// jet-ffi-plan={self.digest}\n// jet-ffi-shape={self.shape.as_str()}\n",
             "// jet-ffi-boundary={self.boundary_digest} input={self.input_digest}\n",
             "// ownership={self.semantics.ownership} failure={self.semantics.failure_mapping} copies={self.semantics.copies} placement={self.semantics.placement} effects={self.semantics.effects} cleanup={self.semantics.cleanup}\n",
@@ -510,13 +510,13 @@ pkg_plan_obligation_known: fn(contract: ForeignBoundaryContract, obligation: Str
 
 // Non-blank values, sorted and deduplicated.
 pkg_plan_sorted_strings: fn(values: [String]) -> [String] Never! {
-    kept := [String]{}
+    ^kept: [String]{}
     loop value in values {
         if value.trim() == "" -> next
         kept.push(value.copy())
     }
     kept.sort()
-    out := [String]{}
+    ^out: [String]{}
     loop value in kept {
         if out.len() > 0 && out[out.len() - 1] == value -> next
         out.push(value)
@@ -525,7 +525,7 @@ pkg_plan_sorted_strings: fn(values: [String]) -> [String] Never! {
 }
 
 pkg_plan_digest: fn(operation: BindingOperation, library: String, shape: BindingShape, boundary_digest: String, input_digest: String, checked_obligations: [String], semantics: PlanSemantics) -> String Never! {
-    identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+    ^identity: ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
     identity.field("library", library.bytes())
     identity.field("operation", operation.name.bytes())
     identity.field("native-signature", operation.native_signature.bytes())

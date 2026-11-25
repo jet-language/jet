@@ -112,16 +112,16 @@ cli_cc_parse_args: fn(verb: String, args: [String]) -[FS, Env]> DriverOptions CL
     current_dir: files.canonicalize(cwd) ?? return Err(CLIToolError.new("could not canonicalize the current directory: {err}"))
     response_roots: cli_cc_response_scope_roots(args, current_dir)
     expanded: CcResponseExpansion.run(args, current_dir, response_roots)
-    options := cli_cc_parse_expanded_args(verb, expanded)
+    ^options: cli_cc_parse_expanded_args(verb, expanded)
     options.working_dir = current_dir
     Ok(options)
 }
 
 // Parse already-expanded driver arguments.
 cli_cc_parse_expanded_args: fn(verb: String, args: [String]) -> DriverOptions CLIToolError! {
-    options := DriverOptions.empty()
-    index := 0
-    after_separator := false
+    ^options: DriverOptions.empty()
+    ^index: 0
+    ^after_separator: false
     loop index < args.len() {
         argument: args[index]
         if after_separator {
@@ -256,7 +256,7 @@ cli_cc_parse_expanded_args: fn(verb: String, args: [String]) -> DriverOptions CL
     if options.probe != None && options.argv.len() > 0 {
         return Err(CLIToolError.new("compiler metadata probes must be used without compiler flags or sources"))
     }
-    standalone_verbose := options.verbose
+    ^standalone_verbose: options.verbose
     loop argument in options.argv {
         if argument != "-v" -> standalone_verbose = false
     }
@@ -483,12 +483,12 @@ cli_cc_usage: fn(verb: String) -> String Never! {
 // The directories a response file may live in: the current directory and
 // every explicit project/build root, canonical, sorted, without repeats.
 cli_cc_response_scope_roots: fn(args: [String], current_dir: String) -[FS, Env]> [String] CLIToolError! {
-    roots := [String]{current_dir}
-    index := 0
+    ^roots: [String]{current_dir}
+    ^index: 0
     loop index < args.len() {
         argument: args[index]
         if argument == "--" -> break
-        value := ""
+        ^value: ""
         if {
             argument == "--project-root" || argument == "--build-root" -> {
                 index += 1
@@ -511,7 +511,7 @@ cli_cc_response_scope_roots: fn(args: [String], current_dir: String) -[FS, Env]>
         index += 1
     }
     roots.sort()
-    unique := [String]{}
+    ^unique: [String]{}
     loop root in roots {
         if unique.len() == 0 || unique[unique.len() - 1] != root -> unique.push(root)
     }
@@ -525,7 +525,7 @@ CcResponseExpansion: struct {
     file_count: Int,
 
     run: fn(args: [String], current_dir: String, scope_roots: [String]) -[FS]> [String] CLIToolError! {
-        expansion := CcResponseExpansion{expanded: [String]{}, stack: [String]{}, file_count: 0}
+        ^expansion: CcResponseExpansion{expanded: [String]{}, stack: [String]{}, file_count: 0}
         expansion.expand(args, current_dir, scope_roots, 0)
         Ok(expansion.expanded)
     }
@@ -549,7 +549,7 @@ CcResponseExpansion: struct {
             }
             path: cli_cc_absolutize_lexically(base_dir, raw_path, "response file")
             canonical: files.canonicalize(path) ?? return Err(CLIToolError.new("response file {raw_path} is unavailable: {err}"))
-            inside := false
+            ^inside: false
             loop root in scope_roots {
                 if cli_cc_path_starts_with(canonical, root) -> inside = true
             }
@@ -596,11 +596,11 @@ cli_cc_read_bounded_response_file: fn(path: String) -[FS]> [U8] CLIToolError! {
 // or 0 outside quotes.
 cli_cc_parse_response_words: fn(bytes: [U8], source: String) -> [String] CLIToolError! {
     text: String.from_bytes(bytes) ?? return Err(CLIToolError.new("response file {source} is not UTF-8"))
-    words := [String]{}
-    word := [U8]{}
-    started := false
-    quote := 0
-    escaped := false
+    ^words: [String]{}
+    ^word: [U8]{}
+    ^started: false
+    ^quote: 0
+    ^escaped: false
     loop byte in text.bytes() {
         code: Int{byte}
         if escaped {
@@ -682,7 +682,7 @@ cli_cc_is_ascii_whitespace: fn(code: Int) -> Bool Never! {
 
 // The normal components of `path`, skipping empty and `.` segments.
 cli_cc_path_components: fn(path: String) -> [String] Never! {
-    components := [String]{}
+    ^components: [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         components.push(part)
@@ -730,7 +730,7 @@ cli_cc_absolutize_lexically: fn(base: String, raw: String, label: String) -> Str
     absolute: raw.starts_with("/")
     rooted: absolute || base.starts_with("/")
     base_components: cli_cc_path_components(base)
-    output := if absolute -> [String]{} else -> base_components
+    ^output: if absolute -> [String]{} else -> base_components
     loop part in raw.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -753,7 +753,7 @@ cli_cc_absolutize_lexically: fn(base: String, raw: String, label: String) -> Str
 // `scope_root`; the walk stops at the first missing component.
 cli_cc_reject_existing_symlinks: fn(scope_root: String, path: String, label: String) -[FS]> CLIToolError! {
     relative: cli_cc_path_strip_prefix(path, scope_root) ?? return Err(CLIToolError.new("{label} path {path} escapes its scope"))
-    current := scope_root
+    ^current: scope_root
     loop part in relative {
         if part == ".." -> return Err(CLIToolError.new("{label} path {path} is not normalized"))
         current = files.join(current, part)
@@ -785,7 +785,7 @@ cli_cc_canonical_real_directory: fn(path: String, label: String) -[FS, Env]> Str
 // walk stops at the first missing component.
 cli_cc_reject_symlinks_in_path: fn(path: String, label: String) -[FS]> CLIToolError! {
     rooted: path.starts_with("/")
-    current := [String]{}
+    ^current: [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         if part == ".." -> return Err(CLIToolError.new("{label} {path} is not normalized"))

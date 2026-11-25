@@ -26,7 +26,7 @@ jet_driver_scoped_imports: fn(imports: [ImportDecl], items: [Item], scope: Strin
 }
 
 jet_driver_scoped_alias: fn(aliases: [String:Int], name: String, scope: String) -> Int? Never! {
-    prefix := scope
+    ^prefix: scope
     loop prefix != "" {
         key: "{prefix}.{name}"
         if aliases.get(key) == .Val(index) -> return Val(index)
@@ -51,7 +51,7 @@ jet_driver_marker_group_source: fn(source_files: [SourceFile], path: String) -> 
 }
 
 jet_driver_marker_group_resolve: fn(modules: [JetDriverLoadedModule], edges: [SemaRegistrationImportEdge], module_identity: ModuleID, name: String, scope: String) -> SemaMarkerModuleResolution {
-    prefix := scope
+    ^prefix: scope
     loop {
         candidate: if prefix == "" -> name else -> "{sema_casing_marker_qualifier(prefix)}.{name}"
         target: sema_marker_module_target_in_scope(edges, module_identity, candidate, scope)
@@ -104,9 +104,9 @@ jet_driver_marker_group_item_key: fn(item: Item) -> String Never! {
 }
 
 jet_driver_marker_group_imports: fn(existing: [ImportDecl], parsed: [ImportDecl]) -> [ImportDecl] Never! {
-    rows := [Int:ImportDecl]{}
-    loop declaration in parsed -> _ := rows.add(declaration.span.start, declaration.copy())
-    imports := existing
+    ^rows: [Int:ImportDecl]{}
+    loop declaration in parsed -> ^_: rows.add(declaration.span.start, declaration.copy())
+    ^imports: existing
     loop index in 0..<imports.len() {
         declaration: rows.get(imports[index].span.start) ?? next
         if declaration.span.end != imports[index].span.end -> next
@@ -118,7 +118,7 @@ jet_driver_marker_group_imports: fn(existing: [ImportDecl], parsed: [ImportDecl]
 
 jet_driver_marker_group_replay_item: fn(existing: Item, parsed: Item) -> Item Never! {
     if existing == .CodeModule(old) && parsed == .CodeModule(value) {
-        module_value := value
+        ^module_value: value
         module_value.instance_identity = old.instance_identity
         module_value.imports = jet_driver_marker_group_imports(old.imports, module_value.imports)
         if old.body == .Val(before) && module_value.body == .Val(after) {
@@ -127,7 +127,7 @@ jet_driver_marker_group_replay_item: fn(existing: Item, parsed: Item) -> Item Ne
         return Item.CodeModule{value: module_value}
     }
     if existing == .GenericModule(old) && parsed == .GenericModule(value) {
-        module_value := value
+        ^module_value: value
         module_value.imports = jet_driver_marker_group_imports(old.imports, module_value.imports)
         module_value.body = jet_driver_marker_group_items(old.body, module_value.body)
         return Item.GenericModule{value: module_value}
@@ -140,12 +140,12 @@ jet_driver_marker_group_replay_item: fn(existing: Item, parsed: Item) -> Item Ne
 // Preserve the loader's retained item set (notably owned Core functions), and
 // replay authored declarations, including visibility changed by file groups.
 jet_driver_marker_group_items: fn(existing: [Item], parsed: [Item]) -> [Item] Never! {
-    rows := [String:Item]{}
+    ^rows: [String:Item]{}
     loop item in parsed {
         key: jet_driver_marker_group_item_key(item)
-        if key != "" -> _ := rows.add(key, item.copy())
+        if key != "" -> ^_: rows.add(key, item.copy())
     }
-    items := [Item]{}
+    ^items: [Item]{}
     loop item in existing {
         key: jet_driver_marker_group_item_key(item)
         replacement: rows.get(key) ?? item
@@ -173,7 +173,7 @@ jet_driver_marker_group_dependency_order: fn(identity: ModuleID, indices: [U32:I
 // (items: the bytes lexed) and `load.marker_groups.reparse` (items: the
 // module's items), one span per module.
 jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], edges: ^[SemaRegistrationImportEdge], units: [JetDriverSourceUnit], source_files: [SourceFile], diagnostics: ^[Diagnostic], trace_sink: CompilerTraceSink?) -> Bool {
-    raw := [U32:[JetDriverMarkerGroup]]{}
+    ^raw: [U32:[JetDriverMarkerGroup]]{}
     loop module_index in 0..<modules.len() {
         // Skip lexing files without group declarations.
         declarations: sema_marker_module_declarations(modules[module_index].program.items, "", false)
@@ -185,8 +185,8 @@ jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], 
         if !has_groups -> next
         unit: units[modules[module_index].source_unit_index]
         source: jet_driver_marker_group_source(source_files, unit.path) ?? return false
-        groups := [JetDriverMarkerGroup]{}
-        used_names := modules[module_index].program.used_import_names
+        ^groups: [JetDriverMarkerGroup]{}
+        ^used_names: modules[module_index].program.used_import_names
         group_source: lex_generated(source.bytes())
         loop tokens in named_marker_groups(group_source.tokens, group_source.tables) {
             declaration: sema_marker_module_declaration_by_span(modules[module_index].program.items, tokens.name_span) ?? next
@@ -203,7 +203,7 @@ jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], 
                     if edge.source_scope != "" && edge.source_scope != scope && !scope.starts_with("{edge.source_scope}.") {
                         next
                     }
-                    alias := edge.declaration.alias
+                    ^alias: edge.declaration.alias
                     if edge.declaration.kind == .Unqualified(module_alias, _, _, _, _) {
                         alias = module_alias
                     }
@@ -214,33 +214,33 @@ jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], 
             }
             groups.push(JetDriverMarkerGroup{tokens: tokens, declaring_module: modules[module_index].module_identity, scope: scope, members: members})
         }
-        if groups.len() > 0 -> _ := raw.add(modules[module_index].module_identity.id, groups)
+        if groups.len() > 0 -> ^_: raw.add(modules[module_index].module_identity.id, groups)
         modules[module_index].program.used_import_names = used_names
     }
     if raw.len() == 0 -> return true
-    indices := [U32:Int]{}
-    visited := [Bool]{}
+    ^indices: [U32:Int]{}
+    ^visited: [Bool]{}
     loop index in 0..<modules.len() {
-        _ := indices.add(modules[index].module_identity.id, index)
+        ^_: indices.add(modules[index].module_identity.id, index)
         visited.push(false)
     }
-    order := [Int]{}
+    ^order: [Int]{}
     loop module_row in modules {
         jet_driver_marker_group_dependency_order(module_row.module_identity, indices, edges, visited, order)
     }
-    complete := true
+    ^complete: true
     loop module_index in order {
-        rows := [JetDriverMarkerGroup]{}
+        ^rows: [JetDriverMarkerGroup]{}
         own: raw.get(modules[module_index].module_identity.id) ?? [JetDriverMarkerGroup]{}
         loop group in own {
-            row := group.copy()
+            ^row: group.copy()
             row.tokens.name = jet_driver_marker_group_name("", group.tokens.name)
             rows.push(row)
         }
         loop edge in edges {
             if edge.source_module_identity != modules[module_index].module_identity -> next
             target_groups: raw.get(edge.target_module_identity.id) ?? next
-            alias := edge.declaration.alias
+            ^alias: edge.declaration.alias
             if edge.declaration.kind == .Unqualified(module_alias, _, _, _, _) {
                 alias = module_alias
             }
@@ -249,7 +249,7 @@ jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], 
                 qualified: jet_driver_marker_group_name(alias, group.tokens.name)
                 resolved: jet_driver_marker_group_resolve(modules, edges, modules[module_index].module_identity, qualified, edge.source_scope)
                 if resolved.status != "found" -> next
-                row := group
+                ^row: group
                 row.tokens.name = qualified
                 if edge.source_scope != "" && !edge.source_scope_exported {
                     row.tokens.required_scope = Val(edge.source_scope)
@@ -258,7 +258,7 @@ jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], 
             }
         }
         if rows.len() == 0 -> next
-        groups := [NamedMarkerGroupTokens]{}
+        ^groups: [NamedMarkerGroupTokens]{}
         loop row in rows -> groups.push(row.tokens)
         unit: units[modules[module_index].source_unit_index]
         original: jet_driver_marker_group_source(source_files, unit.path) ?? return false
@@ -269,12 +269,12 @@ jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], 
         if trace_sink == .Val(sink) {
             sink.begin("load.marker_groups.relex", unit.path, module_index, modules.len())
         }
-        lexed := if unit.allow_reserved_identifiers -> lex_generated(source_bytes) else -> lex(source_bytes)
+        ^lexed: if unit.allow_reserved_identifiers -> lex_generated(source_bytes) else -> lex(source_bytes)
         expanded: expand_named_marker_groups_with_uses(lexed.tokens, lexed.tables, groups)
         if trace_sink == .Val(sink) -> sink.end("load.marker_groups.relex", source_bytes.len())
         if expanded.uses.len() == 0 -> next
-        bindings := [SemaMarkerModuleBinding]{}
-        used_names := modules[module_index].program.used_import_names
+        ^bindings: [SemaMarkerModuleBinding]{}
+        ^used_names: modules[module_index].program.used_import_names
         loop application in expanded.uses {
             loop row in rows {
                 if row.tokens.name != application.name -> next
@@ -288,7 +288,7 @@ jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], 
             }
             loop edge in edges {
                 if edge.source_module_identity != modules[module_index].module_identity -> next
-                alias := edge.declaration.alias
+                ^alias: edge.declaration.alias
                 if edge.declaration.kind == .Unqualified(module_alias, _, _, _, _) {
                     alias = module_alias
                 }
@@ -308,7 +308,7 @@ jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], 
         }
         // Replay replaces initial local-group reports one-for-one; distinct
         // repeats at the same authored span must remain distinct diagnostics.
-        prior_count := diagnostics.len()
+        ^prior_count: diagnostics.len()
         loop diagnostic in parsed.diagnostics {
             // copy: `parsed` keeps its diagnostics for the jet_driver_has_errors check below, and
             // the module's diagnostics list gets its own replayed copy, re-pathed to the unit.
@@ -320,7 +320,7 @@ jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], 
                     // written. `previous` is a view into that same list, so it has to be detached
                     // first.
                     matched: previous.copy()
-                    _ := diagnostics.remove(matched)
+                    ^_: diagnostics.remove(matched)
                     prior_count -= 1
                     break
                 }
@@ -331,14 +331,14 @@ jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], 
             complete = false
             next
         }
-        program := parsed.program
+        ^program: parsed.program
         program.items = jet_driver_marker_group_items(modules[module_index].program.items, program.items)
         // Every loader-synthesized import and its exact edge remains authoritative.
         program.imports = jet_driver_marker_group_imports(modules[module_index].program.imports, program.imports)
         loop used in used_names {
             if !program.used_import_names.contains(used) -> program.used_import_names.push(used)
         }
-        imports := [JetDriverScopedImport]{}
+        ^imports: [JetDriverScopedImport]{}
         jet_driver_scoped_imports(program.imports, program.items, "", true, imports)
         sema_marker_module_bind_program(program, bindings)
         modules[module_index].program = program.move()

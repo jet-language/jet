@@ -20,10 +20,10 @@ EXPECTED_NAN: #run hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canon
 EXPECTED_TYPED: #run hex.encode(cbor.to_bytes_canonical(Packet{id: 7, payload: [222, 173]}) ?? panic("canonical"))
 
 run: fn() {
-    actual_map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
-    actual_floats := hex.encode(cbor.to_bytes_canonical([Float]{1.5, 100000.0, -0.0}) ?? panic("canonical"))
-    actual_nan := hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
-    actual_typed := hex.encode(cbor.to_bytes_canonical(Packet{id: 7, payload: [222, 173]}) ?? panic("canonical"))
+    ^actual_map: hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+    ^actual_floats: hex.encode(cbor.to_bytes_canonical([Float]{1.5, 100000.0, -0.0}) ?? panic("canonical"))
+    ^actual_nan: hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
+    ^actual_typed: hex.encode(cbor.to_bytes_canonical(Packet{id: 7, payload: [222, 173]}) ?? panic("canonical"))
     if actual_map != "a261620262616101" -> panic("canonical encoded-key order drift")
     if actual_floats != "83f93e00fa47c35000f98000" -> panic("preferred Float width drift")
     if actual_nan != "f97e00" -> panic("canonical NaN drift")

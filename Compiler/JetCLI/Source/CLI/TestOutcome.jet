@@ -116,7 +116,7 @@ jet_cli_test_stop: fn(stderr: String) -> JetCLITestStop? Never! {
     lines: stderr.split("\n").to_list()
     loop (index, line) in lines {
         head: diagnostic_stop_parse(line) ?? next
-        stop := JetCLITestStop{code: head.code, message: head.what, file: "", line: U32{0}}
+        ^stop: JetCLITestStop{code: head.code, message: head.what, file: "", line: U32{0}}
         if index + 1 < lines.len() {
             location: lines[index + 1].trim()
             if location.starts_with("--> ") {
@@ -154,7 +154,7 @@ jet_cli_test_property_failure: fn(stderr: String) -> JetCLITestPropertyFailure? 
         if of <= head.len() || seed_at <= of || semi <= seed_at -> return None
         number: Int.parse(jet_cli_test_text(bytes, head.len(), of)) ?? return None
         seed: jet_cli_test_text(bytes, seed_at + " (seed ".len(), semi)
-        minimized := ""
+        ^minimized: ""
         if index + 1 < lines.len() && lines[index + 1].starts_with("minimized_inputs: ") {
             minimized = lines[index + 1].removeprefix("minimized_inputs: ")
         }
@@ -166,7 +166,7 @@ jet_cli_test_property_failure: fn(stderr: String) -> JetCLITestPropertyFailure? 
 // Each run test's claim, in run order: a doctest by its doctest claim name, a
 // property by its plan fact (`facts[id - 1]`), else a unit test of `file`.
 jet_cli_test_claims: fn(tests: [JetNativeTestCase], facts: [TTestFact], doctests: [JetCLIDoctestFile], file: String) -> [JetCLITestClaim] Never! {
-    claims := [JetCLITestClaim]{}
+    ^claims: [JetCLITestClaim]{}
     loop test in tests -> claims.push(jet_cli_test_claim(test, facts, doctests, file))
     claims
 }
@@ -227,7 +227,7 @@ jet_cli_member_claims_floor: fn(dir: String, facts: PackageFacts) -[FS, Env]> Cl
     if facts.members.len() > 0 -> return Ok(own)
     // A malformed root is its load's own diagnostic; the floor stays the
     // member's until that root parses.
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     owner_dir: jet_cli_find_workspace_root_checked(cache, dir) ?? return Ok(own)
     manifest: "{owner_dir}/package.jet"
     text: cli_files.read(manifest) ?? return Ok(own)
@@ -269,14 +269,14 @@ jet_cli_claims_floor_fix: fn(grade: ClaimsGrade, required: ClaimsGrade, target: 
         .Generated(count) -> {
             have: if grade == .Generated(found) -> found else -> 0
             // Property tests of 200 cases each, rounded up, and at least one.
-            more := (count - have + 199).div_euclid(200)
+            ^more: (count - have + 199).div_euclid(200)
             if more < 1 -> more = 1
             tests: if more == 1 -> "1 more property test" else -> "{more} more property tests"
             "add {tests} to `{target}`, written `#Test name: fn(x: Int) {{ … }}`; each runs 200 generated cases, and the floor needs {count} to pass"
         }
         .Examples(count) -> {
             have: if grade == .Examples(found) -> found else -> 0
-            more := count - have
+            ^more: count - have
             if more < 1 -> more = 1
             tests: if more == 1 -> "1 more passing `#Test`" else -> "{more} more passing `#Test` examples"
             "add {tests} to `{target}`"
@@ -311,8 +311,8 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
     build_revision: jet_cli_test_env(EVIDENCE_BUILD_REVISION_ENV, receipt_crypto.sha256("jet-test-build-v1:{source_revision}:{profile_tag}".bytes()).hex())
     run_revision: jet_cli_test_env(EVIDENCE_REVISION_ENV, receipt_crypto.sha256("jet-test-mir-v1:{source_revision}:{profile_tag}".bytes()).hex())
     revision: EvidenceRevision{source: source_revision.move(), build: build_revision, revision: run_revision}
-    report := evidence_report_new(report_id.copy(), EvidenceProducerKind.Test, EvidenceSource{path: file.copy(), line: U32{0}, column: U32{1}}, build.copy(), revision.copy())
-    tally := JetCLITestTally{passed: 0, failed: 0, skipped: 0, expected_failures: 0, unexpected_passes: 0}
+    ^report: evidence_report_new(report_id.copy(), EvidenceProducerKind.Test, EvidenceSource{path: file.copy(), line: U32{0}, column: U32{1}}, build.copy(), revision.copy())
+    ^tally: JetCLITestTally{passed: 0, failed: 0, skipped: 0, expected_failures: 0, unexpected_passes: 0}
     loop (index, wire) in wires {
         parts: jet_cli_native_test_wire_parts(wire) ?? return Err(err.message)
         claim: if index < tests.len() -> tests[index].copy() else -> JetCLITestClaim{kind: 0, file: file.copy(), line: U32{0}, mismatch: None}
@@ -324,21 +324,17 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         ran_failed: if expected_failure -> ok else -> !ok
         if {
             skipped -> tally.skipped += 1
-            expected_failure && ok -> {
-                tally.expected_failures += 1
-            }
+            expected_failure && ok -> { tally.expected_failures += 1 }
             expected_failure -> { tally.unexpected_passes += 1 }
             ok -> { tally.passed += 1 }
-            else -> {
-                tally.failed += 1
-            }
+            else -> { tally.failed += 1 }
         }
-        stop := JetCLITestStop?{None}
+        ^stop: JetCLITestStop?{None}
         if !skipped && ran_failed -> stop = jet_cli_test_stop(parts.stderr)
         // A doctest whose output contradicted a claimed value, without a stop.
-        mismatch := JetCLITestStop?{None}
+        ^mismatch: JetCLITestStop?{None}
         if !skipped && ran_failed && stop == None -> mismatch = claim.mismatch.copy()
-        message := ""
+        ^message: ""
         if stop == .Val(found) -> message = found.message.copy()
         if mismatch == .Val(found) -> message = found.message.copy()
         state: if {
@@ -349,7 +345,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         // A property's record counts the generated cases that ran where
         // others have a line; the cases its `#Pre` rejected never count.
         line: if claim.kind == 3 -> checked(U32{parts.property.map(fn(run) { run.cases }) ?? 0}) ?? (U32{0}) else -> claim.line
-        record := evidence_record_from_test_codes(claim.kind, state, parts.name, message, claim.file, line, report_id, build, revision) ?? return Err(err.message)
+        ^record: evidence_record_from_test_codes(claim.kind, state, parts.name, message, claim.file, line, report_id, build, revision) ?? return Err(err.message)
         if mismatch == .Val(found) {
             record.diagnostics = [EvidenceDiagnostic]{EvidenceDiagnostic{code: found.code.copy(), message: found.message.copy(), source: Val(EvidenceSource{path: found.file.copy(), line: found.line, column: U32{1}})}}
         }
@@ -370,7 +366,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         evidence_report_add_record_with_derivation(report, record, derivation) ?? return Err(evidence_merge_error_text(err))
         if stop == .Val(found) {
             place: if found.file == "" -> file.copy() else -> found.file.copy()
-            observed := evidence_record_from_test_codes(2, 1, found.code, found.message, place, found.line, report_id, build, revision) ?? return Err(err.message)
+            ^observed: evidence_record_from_test_codes(2, 1, found.code, found.message, place, found.line, report_id, build, revision) ?? return Err(err.message)
             // A property case and a failed assertion catch their stop; any
             // other stop (flag 8) ended the test at a runtime stop.
             caught: if {
@@ -409,7 +405,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         evidence_report_add_record_with_derivation(report, record, derivation) ?? return Err(evidence_merge_error_text(err))
     }
     grade: projection.grade.render()
-    floor_text := String?{None}
+    ^floor_text: String?{None}
     if floor == .Val(required) -> floor_text = Val(required.render())
     selected: tally.passed + tally.failed + tally.skipped + tally.expected_failures + tally.unexpected_passes
     test: jet_cli_status_object(
@@ -468,7 +464,7 @@ jet_cli_test_contract_record: fn(contract: JetNativeTestContract, file: String, 
     }
     line: Int.parse(fields[1]) ?? return Err("native contract site line is invalid")
     column: Int.parse(fields[2]) ?? return Err("native contract site column is invalid")
-    named := fields[3].copy()
+    ^named: fields[3].copy()
     loop index in 4..<fields.len() -> named = "{named}\t{fields[index]}"
     source: EvidenceSource{
         path: if named == "" -> file.copy() else -> named,
@@ -477,7 +473,7 @@ jet_cli_test_contract_record: fn(contract: JetNativeTestContract, file: String, 
     }
     detail: if contract.held -> "held" else -> "failed"
     identity: evidence_identity_for_record(report_id, fields[0], EvidenceProducerKind.Test, EvidenceKind.Contract, source, U64{1}, detail)
-    record := evidence_record_new(identity, EvidenceKind.Contract, EvidenceProducerKind.Test, if contract.held -> EvidenceOutcome.Passed else -> EvidenceOutcome.Failed, U64{1}, source.copy(), build, revision)
+    ^record: evidence_record_new(identity, EvidenceKind.Contract, EvidenceProducerKind.Test, if contract.held -> EvidenceOutcome.Passed else -> EvidenceOutcome.Failed, U64{1}, source.copy(), build, revision)
     record.detail = detail
     if !contract.held {
         record.diagnostics.push(EvidenceDiagnostic{code: "E3005", message: "#{fields[0]} contract failed", source: Val(source)})
@@ -505,7 +501,7 @@ jet_cli_test_persist: fn(report: EvidenceReport) -> String {
     }
     if report.records.len() == 0 -> return ""
     bytes: evidence_report_encode(report) ?? return jet_cli_history_notice("writing test evidence", err.message)
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     jet_cli_evidence_persist(cache, report, bytes, report.identity.report_id, report.revision.source, false) ?? return jet_cli_history_notice("writing test evidence", err.message)
     ""
 }

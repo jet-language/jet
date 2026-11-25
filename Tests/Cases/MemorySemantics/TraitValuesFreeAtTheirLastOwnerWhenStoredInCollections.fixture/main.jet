@@ -36,26 +36,26 @@ Rack: struct {
 make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{_context: s.copy(), n: n} }
 
 listed: fn(s: Shared<Context>) {
-    list := [Sink]{make(s, 1), make(s, 2)}
+    ^list: [Sink]{make(s, 1), make(s, 2)}
     list.push(make(s, 3))
     list[0] = make(s, 4)
     taken: list.pop() ?? make(s, 5)
-    total := taken.peek()
+    ^total: taken.peek()
     loop k in list -> total += k.peek()
     print("listed {total} {list.len()} live {s.strong_count()}")
 }
 
 mapped: fn(s: Shared<Context>) {
-    map := [String:Sink]{"a": make(s, 1)}
+    ^map: [String:Sink]{"a": make(s, 1)}
     map["b"] = make(s, 2)
     map["a"] = make(s, 3)
-    total := 0
+    ^total: 0
     loop (_, k) in map -> total += k.peek()
     print("mapped {total} {map.len()} live {s.strong_count()}")
 }
 
 nested: fn(s: Shared<Context>) {
-    rack := Rack{sinks: [Sink]{make(s, 1)}, _spare: Val(make(s, 2))}
+    ^rack: Rack{sinks: [Sink]{make(s, 1)}, _spare: Val(make(s, 2))}
     rack.sinks.push(make(s, 3))
     rack._spare = Val(make(s, 4))
     racks: [Rack]{rack, Rack{sinks: [Sink]{}, _spare: None}}
@@ -63,7 +63,7 @@ nested: fn(s: Shared<Context>) {
 }
 
 run: fn() {
-    s := Shared{Context{_id: 1}}
+    ^s: Shared{Context{_id: 1}}
     listed(s)
     print("listed dropped {s.strong_count()}")
     mapped(s)

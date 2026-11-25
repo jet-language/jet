@@ -31,10 +31,10 @@ failed: fn(reason: String) -> [String:[String]] {
 
 // A guard reads the Map as the panic unwinds the frame.
 guarded: fn(rows: [Row]) {
-    groups := [String:[String]]{}
+    ^groups: [String:[String]]{}
     _guard: scope.guard(fn() { print("guarded sees {groups}") })
     loop r in rows {
-        group := groups.get(r.dept) ?? ["head"]
+        ^group: groups.get(r.dept) ?? ["head"]
         group.push(r.name.copy())
         if r.name == "boom" -> panic("boom in {r.dept}")
         groups[r.dept] = group
@@ -43,11 +43,11 @@ guarded: fn(rows: [Row]) {
 
 // The same with the copy written out.
 guarded_copied: fn(rows: [Row]) {
-    groups := [String:[String]]{}
+    ^groups: [String:[String]]{}
     _guard: scope.guard(fn() { print("guarded_copied sees {groups}") })
     loop r in rows {
         held: groups.get(r.dept) ?? ["head"]
-        group := held.copy()
+        ^group: held.copy()
         group.push(r.name.copy())
         if r.name == "boom" -> panic("boom in {r.dept}")
         groups[r.dept] = group
@@ -57,9 +57,9 @@ guarded_copied: fn(rows: [Row]) {
 // Grown in place: a failure leaves the function between the take and the
 // store.
 grown: fn(rows: [Row]) -> [String:[String]] Err! {
-    groups := [String:[String]]{}
+    ^groups: [String:[String]]{}
     loop r in rows {
-        group := groups.get(r.dept) ?? ["head"]
+        ^group: groups.get(r.dept) ?? ["head"]
         group.push(checked(r.name))
         groups[r.dept] = group
     }
@@ -68,10 +68,10 @@ grown: fn(rows: [Row]) -> [String:[String]] Err! {
 
 // The same with the copy written out.
 grown_copied: fn(rows: [Row]) -> [String:[String]] Err! {
-    groups := [String:[String]]{}
+    ^groups: [String:[String]]{}
     loop r in rows {
         held: groups.get(r.dept) ?? ["head"]
-        group := held.copy()
+        ^group: held.copy()
         group.push(checked(r.name))
         groups[r.dept] = group
     }
@@ -80,9 +80,9 @@ grown_copied: fn(rows: [Row]) -> [String:[String]] Err! {
 
 // Grown in place: a panic ends the task between the take and the store.
 ended: fn(rows: [Row]) {
-    groups := [String:[String]]{}
+    ^groups: [String:[String]]{}
     loop r in rows {
-        group := groups.get(r.dept) ?? ["head"]
+        ^group: groups.get(r.dept) ?? ["head"]
         if r.name == "boom" -> panic("boom in {r.dept}")
         group.push(r.name.copy())
         groups[r.dept] = group

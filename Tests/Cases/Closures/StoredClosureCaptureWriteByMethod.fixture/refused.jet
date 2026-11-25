@@ -9,11 +9,11 @@ Stash: struct {
 }
 
 run: fn() {
-    tally := Score{count: 0}
+    ^tally: Score{count: 0}
     h: Stash{action: fn() { tally.bump() }}
     loop _ in 0..<10 -> h.action()
     print(tally.count)
-    kept := Score{count: 0}
+    ^kept: Score{count: 0}
     list: [fn() -[]>]{fn() { kept.bump() }}
     loop _ in 0..<10 {
         act: list[0]

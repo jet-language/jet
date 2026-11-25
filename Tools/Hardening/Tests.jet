@@ -10,8 +10,8 @@ use {
 // The tree's inputs with only the named witnesses, so a test builds the full
 // surface without inspecting the whole corpus.
 tree_inputs: fn(keep: [String]) -[FS]> Inputs Never! {
-    inputs := load_inputs(".") ?? panic("the tree inputs did not load: {err}")
-    kept := [SourceFile]{}
+    ^inputs: load_inputs(".") ?? panic("the tree inputs did not load: {err}")
+    ^kept: [SourceFile]{}
     loop file in inputs.witnesses {
         if contains_text(keep, witness_key(file.path)) -> kept.push(file.copy())
     }
@@ -20,8 +20,8 @@ tree_inputs: fn(keep: [String]) -[FS]> Inputs Never! {
 }
 
 edited: fn(list: [SourceFile], path: String, from: String, to: String) -> [SourceFile] Never! {
-    out := [SourceFile]{}
-    found := false
+    ^out: [SourceFile]{}
+    ^found: false
     loop file in list {
         if {
             file.path == path && file.text.contains(from) -> {
@@ -70,7 +70,7 @@ build_error: fn(inputs: Inputs) -> String Never! {
     assert_eq(row_of(clean, "receiver:Condition.notify_all").status, "missing")
     assert_eq(route_text(row_of(clean, "receiver:Query.filter").surface.route).starts_with("source "), true)
     assert_eq(row_of(clean, "field:BuildGraph.action_keys").status, "missing")
-    broken := inputs.copy()
+    ^broken: inputs.copy()
     broken.core_sources = edited(broken.core_sources, "Core/Text/Text.jet", "byte_count: fn(text: String)", "byte_count_gone: fn(text: String)")
     broken.core_sources = edited(broken.core_sources, "Core/Data/Data.jet", "#Builtin.Role(.QueryFilter) ", "")
     broken.core_sources = edited(broken.core_sources, "Core/Build/Build.jet", "    action_keys: [BuildGraphActionKey]\n", "    action_keys_gone: [BuildGraphActionKey]\n")
@@ -95,14 +95,14 @@ build_error: fn(inputs: Inputs) -> String Never! {
     covered: row_index(clean, "module:core.text.byte_count")
     missing: row_index(clean, "module:core.text.casefold")
     assert_eq(clean.rows[missing].status, "missing")
-    unrouted := -1
-    excluded := -1
+    ^unrouted: -1
+    ^excluded: -1
     loop (index, row) in clean.rows {
         if unrouted < 0 && row.status == "unrouted" -> unrouted = index
         if excluded < 0 && row.status == "excluded" -> excluded = index
     }
     assert(unrouted >= 0 && excluded >= 0)
-    forged := clean.copy()
+    ^forged: clean.copy()
     // A declared-covered row with no witness and no sink.
     forged.rows[missing].status = "covered"
     // A covered row with no route, borrowing a real witness and sink.
@@ -111,7 +111,7 @@ build_error: fn(inputs: Inputs) -> String Never! {
     forged.rows[unrouted].sink = clean.rows[covered].sink.copy()
     // An exclusion whose reason no longer matches exclusions.tsv.
     if forged.rows[excluded].exclusion == .Val(claimed) {
-        changed := claimed.copy()
+        ^changed: claimed.copy()
         changed.reason = "forged reason"
         forged.rows[excluded].exclusion = Val(changed)
     }
@@ -127,7 +127,7 @@ build_error: fn(inputs: Inputs) -> String Never! {
 
 #Test("special routes and exclusions must name real rows and real source text") {
     inputs: tree_inputs([String]{})
-    specials := inputs.copy()
+    ^specials: inputs.copy()
     specials.specials_text = inputs.specials_text.replace("member != \"decode\" {{", "member != \"decode_gone\" {{")
     assert(specials.specials_text != inputs.specials_text)
     specials.specials_text = "{specials.specials_text}module:core.text.no_such\t{BUILD_ROUTES_PATH}\tir_host_method(\nmodule:core.text.byte_count\t{BUILD_ROUTES_PATH}\tir_host_method(\n"
@@ -135,7 +135,7 @@ build_error: fn(inputs: Inputs) -> String Never! {
     assert(message.contains("does not contain `if module_name != \"core.args\" || member != \"decode_gone\" {{"))
     assert(message.contains("`module:core.text.no_such` is not a surface row"))
     assert(message.contains("`module:core.text.byte_count` already routes through source"))
-    exclusions := inputs.copy()
+    ^exclusions: inputs.copy()
     exclusions.exclusions_text = "{inputs.exclusions_text}core.text.no_such\treason\towner\tdecision\n"
     assert(build_error(exclusions).contains("`core.text.no_such` names no surface row"))
     assert(parse_exclusions("core.text.lower\treason\towner\n") == .Err(_))
@@ -148,7 +148,7 @@ build_error: fn(inputs: Inputs) -> String Never! {
 
 fixture: fn(body: String, key: String) -> String Never! {
     module_name: key.rpartition(".").head
-    lines := [String]{"// core-conformance: {key}", "use api: {module_name}", "", "run: fn() {{"}
+    ^lines: [String]{"// core-conformance: {key}", "use api: {module_name}", "", "run: fn() {{"}
     loop line in body.split("\n") -> lines.push("    {line}")
     lines.push("}}")
     lines.join("\n")
@@ -229,16 +229,16 @@ verdict: fn(body: String, key: String, class: String) -> String Never! {
 #Test("a covered row's sink must match the row's result class") {
     clean: built(tree_inputs([String]{"core.text.byte_count"}))
     index: row_index(clean, "module:core.text.byte_count")
-    forged := clean.copy()
+    ^forged: clean.copy()
     if forged.rows[index].sink == .Val(sink) {
-        changed := sink.copy()
+        ^changed: sink.copy()
         changed.result_class = "opaque"
         changed.follow_up = ""
         forged.rows[index].sink = Val(changed)
     }
     errors: validate_manifest(forged).join("\n")
     assert(errors.contains("module:core.text.byte_count: sink result class `opaque` is not the row's `value`"))
-    unit_effect := clean.copy()
+    ^unit_effect: clean.copy()
     unit_effect.rows[index].sink = Val(Sink{kind: "unit-effect", operation: "later-observer", follow_up: "", via: "", result_class: "value"})
     assert(validate_manifest(unit_effect).join("\n").contains("only a unit result may be observed by a later effect"))
 }
@@ -281,7 +281,7 @@ repro_input: fn() -> ReproInput Never! {
 }
 
 with_field: fn(tree: Dyn, name: String, value: Dyn) -> Dyn Never! {
-    kept := [String:Dyn]{}
+    ^kept: [String:Dyn]{}
     if tree == .Object(entries) {
         loop entry in entries -> kept[entry.key.copy()] = entry.value.copy()
     }
@@ -343,13 +343,13 @@ errors_of: fn(tree: Dyn) -> String Never! { validate_repro(tree, "").errors.join
     stale: validate_repro(bundle, digest("moved"))
     assert(stale.stale)
     assert(stale.errors.join("\n").contains("repro registry snapshot is stale"))
-    missing := repro_input()
+    ^missing: repro_input()
     missing.binary_sha256 = ""
     assert(make_repro(missing) == .Err(_))
-    short := repro_input()
+    ^short: repro_input()
     short.commit = "0123456"
     assert(make_repro(short) == .Err(_))
-    unslotted := repro_input()
+    ^unslotted: repro_input()
     unslotted.tier_commands = [TierCommand]{TierCommand{tier: "aot", command: "jet run main.jet"}}
     assert(make_repro(unslotted) == .Err(_))
     loose: with_field(bundle, "stdout_bytes", Dyn.Text("AP8KQQ"))
@@ -372,13 +372,13 @@ errors_of: fn(tree: Dyn) -> String Never! { validate_repro(tree, "").errors.join
     clean: built(inputs)
     stored: render_manifest(clean) ?? panic("the manifest did not render: {err}")
     assert_eq(check_manifest_text(stored, clean, stored).len(), 0)
-    excluded := inputs.copy()
+    ^excluded: inputs.copy()
     excluded.exclusions_text = "{inputs.exclusions_text}# reviewed again\n"
-    registry := inputs.copy()
+    ^registry: inputs.copy()
     registry.registry_files = edited(inputs.registry_files, inputs.registry_files[0].path, "\n", "\n\n")
     cases: [{inputs: Inputs, part: String}]{{inputs: excluded, part: "exclusions"}, {inputs: registry, part: "registries"}}
     loop case in cases {
-        fresh := clean.copy()
+        ^fresh: clean.copy()
         fresh.snapshot = build_snapshot(case.inputs)
         assert(fresh.snapshot.hash != clean.snapshot.hash)
         fresh_text: render_manifest(fresh) ?? panic("the fresh manifest did not render: {err}")
@@ -445,7 +445,7 @@ stored_finding: fn(findings: [Dyn], surface: String) -> Dyn Never! {
 #Test("inverting each regression seed's seam produces one sealed P0 finding bundle on that seam's tier") {
     jet: regression_compiler()
     scratch: regression_scratch()
-    found := [String]{}
+    ^found: [String]{}
     loop seed in regression_seeds() {
         runs: run_seed(seed, jet, scratch, invert: true) ?? panic("{seed.surface}: {err}")
         assert_eq(inversion_problem(seed, runs), "")
@@ -502,7 +502,7 @@ generated: fn(seed: String, cases: Int) -> [Generated] Never! {
 }
 
 run_problem: fn(program: Generated, run: CaseRun) -> String Never! {
-    stderr := run.check.stderr.copy()
+    ^stderr: run.check.stderr.copy()
     loop tier_run in run.runs -> stderr = "{stderr}{tier_run.stderr}"
     "{program.case_id}: {classify(program, run).mismatch}\n{validate_program(program).join("\n")}\n{stderr}"
 }
@@ -510,9 +510,9 @@ run_problem: fn(program: Generated, run: CaseRun) -> String Never! {
 #Test("generated programs are typed, bounded and value-consuming, and every family leads a case") {
     programs: generated(GENERATOR_SEED, GENERATOR_MAX_CASES)
     assert_eq(programs.len(), GENERATOR_MAX_CASES)
-    leading := [String]{}
-    reached := [String]{}
-    sizes := [Int]{0, 0, 0}
+    ^leading: [String]{}
+    ^reached: [String]{}
+    ^sizes: [Int]{0, 0, 0}
     loop program in programs {
         assert_eq(validate_program(program).join("\n"), "")
         assert(program.source.len() <= GENERATOR_SOURCE_LIMIT)
@@ -559,37 +559,37 @@ forged: fn(decls: String, body: String) -> Generated Never! {
 #Test("a missing production, an unlowered construct, an optimizer-only change and observerless generation each fail the layer") {
     assert_eq(layer_controls(), [String]{})
     rows: productions()
-    no_places := [Production]{}
+    ^no_places: [Production]{}
     loop row in rows {
         if row.family != "nested-places" -> no_places.push(row.copy())
     }
     assert(validate_productions(no_places).contains("missing production: no template generates nested-places"))
     assert(generate_programs(GENERATOR_SEED, 0) == .Err(_))
-    holed := rows.copy()
+    ^holed: rows.copy()
     holed[0].body = holed[0].body.replace("$B * 2", "$Z * 2")
     assert(validate_productions(holed).join("\n").contains("construct:expressions/arith-call: the template has a hole the generator does not fill"))
     program: generated(GENERATOR_SEED, 1)[0]
     clean: clean_runs(program)
     assert(case_passes(program, clean))
-    unlowered := clean.copy()
+    ^unlowered: clean.copy()
     unlowered.runs = [TierRun]{}
     loop tier_run in clean.runs -> unlowered.runs.push(planted(tier_run, program, UNLOWERED))
     lowered: classify(program, unlowered)
     assert_eq(lowered.class, UNLOWERED)
     assert_eq(lowered.mismatch, "{UNLOWERED}|{AOT_RELEASE}|exit 1 planted: {AOT_RELEASE} did not lower {primary_instance(program).construct_id}")
     assert_eq(generated_severity(lowered.class), "P1")
-    optimizer := clean.copy()
+    ^optimizer: clean.copy()
     optimizer.runs = [TierRun]{}
     loop tier_run in clean.runs -> optimizer.runs.push(planted(tier_run, program, OPTIMIZER_ONLY))
     changed: classify(program, optimizer)
     assert_eq(changed.class, OPTIMIZER_ONLY)
     assert_eq(changed.mismatch, "{OPTIMIZER_ONLY}|{AOT_RELEASE}|`value_{program.primary} 1` became `value_{program.primary} 1~`")
     assert_eq(generated_severity(changed.class), "P0")
-    refused := clean.copy()
+    ^refused: clean.copy()
     refused.check.exit = Val(1)
     refused.check.stderr = "Error: Jet.UnknownName: Nothing named `x` exists here\n  --> case.jet:3:5\n"
     assert_eq(classify(program, refused).mismatch, "{REJECTED_VALID}|{CHECK_STAGE}|exit 1 Error: Jet.UnknownName: Nothing named `x` exists here")
-    missing_tier := clean.copy()
+    ^missing_tier: clean.copy()
     missing_tier.runs = [TierRun]{clean.runs[1].copy()}
     assert_eq(classify(program, missing_tier).class, UNLOWERED)
     silent: forged("", "value_0: 1\n_: value_0\nprint(\"done\")")
@@ -603,7 +603,7 @@ forged: fn(decls: String, body: String) -> Generated Never! {
 // the construct and the mismatch.
 
 fingerprint: fn(programs: [Generated]) -> [String] Never! {
-    out := [String]{}
+    ^out: [String]{}
     loop program in programs {
         out.push("{program.case_id} {program.seed} {primary_instance(program).construct_id} {digest(program.source)}")
     }
@@ -624,7 +624,7 @@ fingerprint: fn(programs: [Generated]) -> [String] Never! {
 #Test("minimizing a planted finding keeps its construct and mismatch, and its bundle is stable across runs") {
     jet: regression_compiler()
     scratch: regression_scratch()
-    target := generated(GENERATOR_SEED, 1)[0]
+    ^target: generated(GENERATOR_SEED, 1)[0]
     loop program in generated(GENERATOR_SEED, GENERATOR_MAX_CASES) {
         if target.instances.len() < 3 && program.instances.len() == 3 -> target = program.copy()
     }
@@ -653,7 +653,7 @@ fingerprint: fn(programs: [Generated]) -> [String] Never! {
     // The same minimized case run again, by another run at another time,
     // seals to the same stable digest.
     again: run_case(found.program, jet, regression_scratch(), OPTIMIZER_ONLY) ?? panic("rerun: {err}")
-    later := regression_identity()
+    ^later: regression_identity()
     later.run_id = "generate-later"
     later.started = "2026-11-06T00:00:00Z"
     later.finished = "2026-11-06T00:00:09Z"

@@ -25,9 +25,9 @@ lsp_foreign_source: fn(receiver: String, word: String) -> String Never! {
 LSPForeignChecker: struct {
     impl LSPChecker {
         check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
-            checked := LSPFixtureChecker{}.check(entry, overlays)
-            index := checked.index ?? return checked
-            source := ""
+            ^checked: LSPFixtureChecker{}.check(entry, overlays)
+            ^index: checked.index ?? return checked
+            ^source: ""
             loop overlay in overlays {
                 if overlay.path == entry -> source = overlay.source
             }
@@ -60,7 +60,7 @@ LSPForeignChecker: struct {
 
 // The completion items after `value.<word>` on a value of `receiver`.
 lsp_foreign_items: fn(receiver: String, word: String) -> [Dyn] {
-    server := lsp_server(LSPForeignChecker{})
+    ^server: lsp_server(LSPForeignChecker{})
     lsp_test_open(server, LSP_FOREIGN_URI, lsp_foreign_source(receiver, word))
     result: lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_FOREIGN_URI, 1, 10 + word.len()))
     lsp_test_rows(lsp_test_field(result, "items"))
@@ -68,7 +68,7 @@ lsp_foreign_items: fn(receiver: String, word: String) -> [Dyn] {
 
 // Each item a foreign word completes to, as `label/filterText/newText/range`.
 lsp_foreign_completions: fn(items: [Dyn]) -> [String] Never! {
-    found := [String]{}
+    ^found: [String]{}
     loop item in items {
         if lsp_member(item, "filterText") == None -> next
         edit: lsp_test_field(item, "textEdit")
@@ -79,7 +79,7 @@ lsp_foreign_completions: fn(items: [Dyn]) -> [String] Never! {
 
 // The labels of `items`.
 lsp_foreign_labels: fn(items: [Dyn]) -> [String] Never! {
-    labels := [String]{}
+    ^labels: [String]{}
     loop item in items -> labels.push(lsp_test_text(item, "label"))
     labels
 }
@@ -88,7 +88,7 @@ lsp_foreign_labels: fn(items: [Dyn]) -> [String] Never! {
     // Every row that renames a method completes, by its foreign word, to
     // exactly the method it renames to, and the edit writes that name over
     // the word; a row whose receiver or method the editor cannot offer fails.
-    rows := 0
+    ^rows: 0
     loop idiom in SEMA_METHOD_IDIOMS {
         if idiom.receiver == "" || idiom.rename == "" -> next
         rows += 1

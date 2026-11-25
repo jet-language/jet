@@ -92,7 +92,7 @@ CBORError: struct {
     }
 
     display_text: fn(self) -> String Never! {
-        out := "CBOR {self.kind_name()} at byte {self.byte_offset}"
+        ^out: "CBOR {self.kind_name()} at byte {self.byte_offset}"
         if self.path != "" -> out = "{out}, path {self.path}"
         "{out}: {self.reason}"
     }
@@ -132,7 +132,7 @@ validate: fn(value: Dyn, path: String) CBORError! {
 
 encode: fn(value: Dyn, canonical: Bool) -> [U8] CBORError! {
     validate(value, "$") ?? return Err(err)
-    out := [U8]{}
+    ^out: [U8]{}
     encode_value(value, out, canonical) ?? return Err(err)
     Ok(out)
 }
@@ -230,10 +230,10 @@ encode_value: fn(value: Dyn, out: ^[U8], canonical: Bool) CBORError! {
                 }
                 append_length(out, 5, entries.len())
                 if canonical {
-                    order := [Int]{}
+                    ^order: [Int]{}
                     loop i in 0..<entries.len() {
                         order.push(i)
-                        j := order.len() - 1
+                        ^j: order.len() - 1
                         loop j > 0 && key_before(entries[order[j]].key, entries[order[j - 1]].key) {
                             // Snapshot the indexed value before mutating its owner.
                             // A read binding here retains a borrow of order[j - 1].

@@ -44,7 +44,7 @@ pkg_inline_deps_collect: fn(program: Program) -> [InlineDep] Never! {
 
 // Only a single-segment module import carries an inline version.
 pkg_inline_deps_collect_from_imports: fn(imports: [ImportDecl]) -> [InlineDep] Never! {
-    out := [InlineDep]{}
+    ^out: [InlineDep]{}
     loop decl in imports {
         version: decl.inline_version ?? next
         if decl.kind == {
@@ -88,7 +88,7 @@ ScriptCacheIdentity: struct {
     // Dependencies are held in (name, selector, resolved_version,
     // content_hash) order so the identity is order independent.
     new: fn(source_hash: String, dependencies: [ScriptDependencyIdentity], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
-        sorted := dependencies
+        ^sorted: dependencies
         sorted = loop fresh_item in sorted -> fresh_item
         sorted.sort_by(fn(identity) { identity.content_hash })
         sorted = loop fresh_item in sorted -> fresh_item
@@ -103,7 +103,7 @@ ScriptCacheIdentity: struct {
     // Stable cache key. Length framing keeps distinct fields distinct even
     // when a name, hash, or toolchain contains delimiters.
     digest: fn(self) -> String Never! {
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         pkg_inline_deps_framed(bytes, "jet-script-cache.v1")
         pkg_inline_deps_framed(bytes, self.source_hash)
         pkg_inline_deps_framed_count(bytes, self.dependencies.len())
@@ -123,7 +123,7 @@ ScriptCacheIdentity: struct {
 // any dependency source, so callers can recompute it after a source edit
 // and reject a stale prepared result before execution.
 pkg_inline_deps_cache_identity: fn(source_hash: String, dependencies: [InlineDepResolved], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
-    identities := [ScriptDependencyIdentity]{}
+    ^identities: [ScriptDependencyIdentity]{}
     loop dependency in dependencies -> identities.push(dependency.dependency_identity())
     ScriptCacheIdentity.new(source_hash, identities, toolchain, target)
 }
@@ -180,7 +180,7 @@ pkg_inline_deps_resolve: fn(dep: InlineDep, script_dir: String, batteries: Strin
     if pkg_inline_deps_numeric_version(dep.selector) == None {
         return Err(InlineDepUnresolved.InvalidSelector)
     }
-    roots := [String]{files.join(files.join(script_dir, ".jet"), "inline-deps")}
+    ^roots: [String]{files.join(files.join(script_dir, ".jet"), "inline-deps")}
     if sys.get(PKG_INLINE_DEPS_FIXTURES_ENV) == {
         .Val(fixtures) -> { roots.push(fixtures) }
         .None -> {}
@@ -265,7 +265,7 @@ pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [{version: 
             return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"}))
         }
     }
-    out := [{version: String, dir: String}]{}
+    ^out: [{version: String, dir: String}]{}
     loop entry in entries {
         stat: if files.stat(entry.path) == {
             .Ok(found) -> found
@@ -282,7 +282,7 @@ pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [{version: 
 // `1.4.2`); an exact `1.4.2` selector matches only that version.
 pkg_inline_deps_best_match: fn(selector: String, candidates: [{version: String, dir: String}]) -> {version: String, dir: String}? Never! {
     selector_parts: pkg_inline_deps_numeric_version(selector) ?? return None
-    matches := [{version: String, dir: String}]{}
+    ^matches: [{version: String, dir: String}]{}
     loop candidate in candidates {
         version_parts: pkg_inline_deps_numeric_version(candidate.version) ?? next
         accepted: if selector_parts.len() == 3 -> version_parts == selector_parts else -> version_parts.len() == 3 && pkg_inline_deps_has_prefix(version_parts, selector_parts)
@@ -323,12 +323,12 @@ pkg_inline_deps_version_part: fn(version: String, index: Int) -> U64 Never! {
 pkg_inline_deps_numeric_version: fn(value: String) -> [U64]? Never! {
     parts: value.split(".").to_list()
     if parts.len() < 1 || parts.len() > 3 -> return None
-    out := [U64]{}
+    ^out: [U64]{}
     loop part in parts {
         if part == "" || (part.bytes().len() > 1 && part.starts_with("0")) -> return None
         digits: if part.starts_with("+") -> part.slice(1..<part.len()) else -> part
         if digits == "" -> return None
-        number := U64{0}
+        ^number: U64{0}
         loop byte in digits.bytes() {
             if byte < (U8{48}) || byte > (U8{57}) -> return None
             digit: U64{byte - U8{48}}

@@ -69,11 +69,11 @@ recipe_toolchain_from_object: fn(dir: String) -[FS, Env]> CargoToolchain? Never!
         if (cargo_info.mode) & 0o111 == 0 -> return None
     }
     version_path: files.join(dir, "version")
-    version := ""
+    ^version: ""
     if recipe_toolchain_is_regular_file(version_path) {
         version = (files.read(version_path) ?? "").trim()
     }
-    ring_artifacts := [String:String]{}
+    ^ring_artifacts: [String:String]{}
     ring_dir: files.join(dir, "ring")
     if files.stat(ring_dir) == {
         .Ok(ring_info) -> {

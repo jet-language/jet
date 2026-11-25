@@ -7,9 +7,7 @@
 // place in the host. One position map serves every result: diagnostics,
 // navigation and edits come back in host bytes, and editors count UTF-16
 // units from them.
-use {
-    jet_foundation.[Diagnostic, DiagnosticLabel, Span, TextEdit, diagnostic_utf8_width, diagnostic_without_fix]
-}
+use jet_foundation.[Diagnostic, DiagnosticLabel, Span, TextEdit, diagnostic_utf8_width, diagnostic_without_fix]
 
 JetDriverSourceDocument: struct {
     path: String,
@@ -42,8 +40,8 @@ jet_driver_source_document_problem: fn(document: JetDriverSourceDocument) -> Str
     host: document.host ?? return None
     host_bytes: host.text.bytes()
     jet_bytes: document.source.bytes()
-    host_end := 0
-    jet_end := 0
+    ^host_end: 0
+    ^jet_end: 0
     loop index in 0..<host.mappings.len() {
         mapping: host.mappings[index]
         if mapping.host.end - mapping.host.start != mapping.jet.end - mapping.jet.start {
@@ -135,19 +133,19 @@ JetDriverHostDiagnostic: struct {
 // An edit or a cause that names another file is not this document's to move.
 jet_driver_host_diagnostic: fn(document: JetDriverSourceDocument, diagnostic: ^^Diagnostic) -> JetDriverHostDiagnostic Never! {
     host: document.host ?? return JetDriverHostDiagnostic{revision: None, generated: false, diagnostic: diagnostic}
-    placed := diagnostic
-    generated := false
+    ^placed: diagnostic
+    ^generated: false
     if placed.span == .Val(span) {
         if jet_driver_host_span(document, span) == {
-            .Val(moved) -> placed.span = Val(moved)
+            .Val(moved) -> { placed.span = Val(moved) }
             .None -> generated = true
         }
     }
-    fixed := true
+    ^fixed: true
     if placed.edit == .Val(edit) {
-        if jet_driver_host_document_edit(document, edit) == .Val(moved) {
-            placed.edit = Val(moved)
-        } else { fixed = false }
+        if jet_driver_host_document_edit(document, edit) == .Val(moved) -> placed.edit = Val(moved) else {
+            fixed = false
+        }
     }
     loop index in 0..<placed.fix_edits.len() {
         if jet_driver_host_document_edit(document, placed.fix_edits[index]) == .Val(moved) {
@@ -155,7 +153,7 @@ jet_driver_host_diagnostic: fn(document: JetDriverSourceDocument, diagnostic: ^^
         } else { fixed = false }
     }
     if !fixed -> placed = diagnostic_without_fix(placed)
-    labels := [DiagnosticLabel]{}
+    ^labels: [DiagnosticLabel]{}
     loop label in placed.labels.move() {
         if jet_driver_host_span(document, label.span) == .Val(moved) {
             labels.push(DiagnosticLabel{span: moved, message: label.message})
@@ -163,7 +161,7 @@ jet_driver_host_diagnostic: fn(document: JetDriverSourceDocument, diagnostic: ^^
     }
     placed.labels = labels
     loop index in 0..<placed.cause.len() {
-        elsewhere := false
+        ^elsewhere: false
         if placed.cause[index].origin == .Val(cause_origin) {
             elsewhere = true
             if placed.origin == .Val(origin) -> elsewhere = origin.path != cause_origin.path
@@ -182,7 +180,9 @@ jet_driver_host_diagnostic: fn(document: JetDriverSourceDocument, diagnostic: ^^
 // no path or with this document's path moves through the map; one that names
 // another file stays as it is.
 jet_driver_host_document_edit: fn(document: JetDriverSourceDocument, edit: TextEdit) -> TextEdit? Never! {
-    if edit.path == .Val(path) && path != document.path -> return Val(TextEdit{span: edit.span, new_text: edit.new_text, path: edit.path})
+    if edit.path == .Val(path) && path != document.path {
+        return Val(TextEdit{span: edit.span, new_text: edit.new_text, path: edit.path})
+    }
     jet_driver_host_edit(document, edit)
 }
 
@@ -191,8 +191,8 @@ jet_driver_host_document_edit: fn(document: JetDriverSourceDocument, edit: TextE
 // text.
 jet_driver_utf16_offset: fn(text: String, offset: Int) -> Int Never! {
     bytes: text.bytes()
-    count := 0
-    index := 0
+    ^count: 0
+    ^index: 0
     loop index < offset && index < bytes.len() {
         width: diagnostic_utf8_width(bytes, index)
         count += if width == 4 -> 2 else -> 1

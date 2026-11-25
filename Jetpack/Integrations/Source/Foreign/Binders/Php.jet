@@ -181,7 +181,7 @@ pkg_php_bind: fn(path: String, source: String, lib: String, cache: String) -[FS,
     bridge: "{base}\n{pkg_php_render_pool_c(abi, inner, functions)}"
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write PHP pool bridge")
     digest: pkg_binder_identity_digest([String]{"jet-php-bind-v1", source, script, php, worker_source})
-    provenance := "schema=jet-php-bind-v1\nsha256={digest}\nphp={php}\nscript={script}\nworker={worker}\npool_workers=4\n"
+    ^provenance: "schema=jet-php-bind-v1\nsha256={digest}\nphp={php}\nscript={script}\nworker={worker}\npool_workers=4\n"
     pkg_binder_append_artifact_boundary(provenance, language, "PHP", lib, script, archive, "php={php};{pkg_binder_cc_ar_identity()}")
     result: ForeignBindResult{source: pkg_php_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
@@ -210,7 +210,7 @@ pkg_php_discover_functions: fn(php: String, script: String) -[Exec, Time.Wait]> 
 // Validate the tokenizer's `N\t` / `E\tARG\t` rows.
 pkg_php_parse_discovery: fn(output: [U8]) -> [String] ForeignBindError! {
     text: String.from_bytes(output) ?? return Err(ForeignBindError.Source("PHP tokenizer returned non-UTF-8 metadata"))
-    out := [String]{}
+    ^out: [String]{}
     loop line in pkg_binder_lines(text) {
         if line.starts_with("E\tARG\t") {
             return Err(ForeignBindError.Source("PHP function `{line.removeprefix("E\tARG\t")}` must take one required positional argument by value"))
@@ -239,13 +239,13 @@ pkg_php_parse_discovery: fn(output: [U8]) -> [String] ForeignBindError! {
 }
 
 pkg_php_render_worker: fn(functions: [String]) -> String Never! {
-    allowed := [String]{}
+    ^allowed: [String]{}
     loop name in functions -> allowed.push("    '{name}' => true")
     pkg_binder_fill_template(PKG_PHP_WORKER, [String:String]{"allowed": allowed.join(",\n")})
 }
 
 pkg_php_render_pool_c: fn(abi: String, inner: String, functions: [String]) -> String Never! {
-    wrappers := [String]{}
+    ^wrappers: [String]{}
     loop name in functions {
         wrappers.push(pkg_worker_invoke_wrapper(abi, name, "pool_invoke", name))
     }
@@ -254,7 +254,7 @@ pkg_php_render_pool_c: fn(abi: String, inner: String, functions: [String]) -> St
 
 pkg_php_render_jet: fn(lib: String, functions: [String]) -> String Never! {
     abi: "jet_php_{lib}"
-    out := [String]{"#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    cancel: fn(handle: Int) = \"{abi}_cancel\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
+    ^out: [String]{"#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    cancel: fn(handle: Int) = \"{abi}_cancel\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
     loop name in functions {
         out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
     }

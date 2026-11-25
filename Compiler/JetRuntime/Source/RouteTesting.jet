@@ -18,7 +18,7 @@
 testing_flag: fn(value: Bool) -> I64 { if value -> I64{1} else -> I64{0} }
 
 testing_has_nul: fn(text: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < rt_text_len(text) {
         if (rt_text_byte(wrapping(rt_text_data(text) + at)) == I64{0}) { return true }
         at += I64{1}
@@ -120,9 +120,9 @@ testing_facts_new: fn(pid: I64, thread: I64) -> I64 {
 
 // std.thread.ThreadId: a process-unique counter, assigned to a thread the
 // first time it is asked for and kept for its lifetime.
-testing_thread_key := I64{0}
+^testing_thread_key: I64{0}
 
-testing_thread_next := I64{0}
+^testing_thread_next: I64{0}
 
 testing_thread_id: fn() -> I64 {
     if (testing_thread_key == I64{0}) {
@@ -134,7 +134,7 @@ testing_thread_id: fn() -> I64 {
         }
         host_unlock()
     }
-    id := jet_rt_tls_get(testing_thread_key)
+    ^id: jet_rt_tls_get(testing_thread_key)
     if (id == I64{0}) {
         host_lock()
         #Unsafe("written under the host lock") { testing_thread_next += I64{1} }
@@ -199,8 +199,8 @@ testing_thread_id: fn() -> I64 {
 // unless the base is empty or ends in /).
 #Export(c) jet_testing_temp_join_raw: fn(name: I64) -> I64 {
     host_arguments_require()
-    base := host_environment_value(rt_static_text("TMPDIR"))
-    base_length := I64{0}
+    ^base: host_environment_value(rt_static_text("TMPDIR"))
+    ^base_length: I64{0}
     if (base == I64{0}) {
         base = rt_text_data(rt_static_text("/tmp"))
         base_length = I64{4}
@@ -332,7 +332,7 @@ testing_mkdir: fn(path: I64, length: I64) -> I64 {
     name: jet_rt_alloc(length + I64{1}, I64{1})
     rt_text_bytes_copy(name, path, length)
     rt_text_put(wrapping(name + length), I64{0})
-    result := I64{-4}
+    ^result: I64{-4}
     loop result == (I64{-4}) -> result = host_call(I64{83}, name, I64{511}, I64{0})
     jet_rt_free(name, length + I64{1}, I64{1})
     if (result < I64{0}) -> result else -> I64{0}
@@ -341,7 +341,7 @@ testing_mkdir: fn(path: I64, length: I64) -> I64 {
 // Path.parent's byte length: drop trailing separators, the last component,
 // then its separators (a root keeps its "/"); -1 when there is no parent.
 testing_parent_length: fn(path: I64, length: I64) -> I64 {
-    end := length
+    ^end: length
     loop end > (I64{1}) && rt_text_byte(wrapping(wrapping(path + end) - I64{1})) == (I64{47}) {
         end -= I64{1}
     }

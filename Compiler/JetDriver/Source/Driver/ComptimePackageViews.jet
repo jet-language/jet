@@ -108,7 +108,7 @@ JetDriverInlinePackageCarrier: struct {
 jet_driver_package_inline_carrier: fn(resolver: AuthorityResolver) -[FS, Env]> JetDriverInlinePackageCarrier? JetDriverPackageReadError! {
     candidates: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
     loop relative in candidates {
-        file := CheckedFile?{None}
+        ^file: CheckedFile?{None}
         if resolver.checked_file(relative) == {
             .Ok(found) -> { file = Val(found) }
             .Err(error) -> {
@@ -118,7 +118,7 @@ jet_driver_package_inline_carrier: fn(resolver: AuthorityResolver) -[FS, Env]> J
         }
         checked: file ?? next
         source: checked.text() ?? return Err(jet_driver_package_authority_error(PACKAGE_FILE, "could not decode the inline package carrier", err))
-        block := InlinePackageBlock?{None}
+        ^block: InlinePackageBlock?{None}
         if pkg_extract_inline_package(source) == {
             .Ok(found) -> block = found
             .Err(error) -> return Err(jet_driver_package_read_error(PACKAGE_FILE, "could not read the inline package", diagnostic_headline(error.diagnostic().code, "inline Package carrier is malformed; fix the leading package block and try again")))
@@ -162,7 +162,7 @@ jet_driver_package_read_package: fn(root: String) -[FS, Env]> TComptimeValue Jet
                 return Err(jet_driver_package_authority_error(PACKAGE_FILE, "could not compose the package facts", cause))
             }
             carrier: jet_driver_package_inline_carrier(resolver) ?? return Err(jet_driver_package_read_error(PACKAGE_FILE, "could not compose the package facts", "no package manifest or inline Package carrier was found"))
-            facts := PackageFacts.parse_uncomposed(carrier.block.body(carrier.source), carrier.file.path) ?? return Err(jet_driver_package_inline_parse_error(err))
+            ^facts: PackageFacts.parse_uncomposed(carrier.block.body(carrier.source), carrier.file.path) ?? return Err(jet_driver_package_inline_parse_error(err))
             // Configs, guarantees, defaults and members, as the loader composes them.
             if pkg_load_compose_and_validate(facts, resolver) == .Err(error) {
                 return Err(jet_driver_package_authority_error(PACKAGE_FILE, "could not compose the inline package facts", AuthorityError.Invalid{path: carrier.file.path, detail: error.message()}))
@@ -180,7 +180,7 @@ jet_driver_package_read_lock: fn(root: String) -[FS, Env]> TComptimeValue JetDri
     lock: pkg_lock_parse(text) ?? return Err(jet_driver_package_read_error(UNIFIED_LOCK_FILE, "could not parse the package lock", err.message()))
     resolver.revalidate_file(file) ?? return Err(jet_driver_package_authority_error(UNIFIED_LOCK_FILE, "the package lock changed while it was being read", err))
     view: pkg_lock_view_from_lock(lock)
-    packages := [TComptimeValue]{}
+    ^packages: [TComptimeValue]{}
     loop package in view.packages -> packages.push(jet_driver_package_locked_value(package))
     Ok(
         TComptimeValue.Struct{
@@ -215,7 +215,7 @@ JetDriverPackageSourceLoader: struct {
         list_jet_files: fn(^self, relative: String) -[FS, Env]> [String] EnvModelEvalError! {
             self.last_file = relative
             files: self.resolver.discover_files(relative, Val(FILE_EXT)) ?? return Err(jet_driver_package_authority_diagnostic(err))
-            found := [String]{}
+            ^found: [String]{}
             loop file in files.move() {
                 found.push(file.relative)
                 self.checked_inputs.push(file)
@@ -231,7 +231,7 @@ JetDriverPackageSourceLoader: struct {
                     if !error.is_missing() {
                         return Err(EnvModelEvalError{diagnostic: error.diagnostic()})
                     }
-                    cache := WorkspaceDeclarationCache.new()
+                    ^cache: WorkspaceDeclarationCache.new()
                     if pkg_package_facts_for_root(cache, self.resolver.root) == {
                         .Ok(facts) -> Ok(facts)
                         .Err(failure) -> Err(EnvModelEvalError{diagnostic: failure.diagnostic})
@@ -248,17 +248,17 @@ jet_driver_package_read_profiles: fn(root: String) -[FS, Env, Exec, Time.Wait]> 
     env_file: resolver.checked_file(ENV_FILE) ?? return Err(jet_driver_package_authority_error(ENV_FILE, "could not read the profile source", err))
     source: env_file.text() ?? return Err(jet_driver_package_authority_error(ENV_FILE, "could not decode the profile source", err))
     base_dir: resolver.root
-    loader := JetDriverPackageSourceLoader{resolver: resolver, checked_inputs: [CheckedFile]{env_file}, last_file: ENV_FILE}
+    ^loader: JetDriverPackageSourceLoader{resolver: resolver, checked_inputs: [CheckedFile]{env_file}, last_file: ENV_FILE}
     plan: envmodel_evaluate_env_with_source_loader(source, base_dir, loader, None, None) ?? return Err(jet_driver_package_read_error(loader.last_file, "could not evaluate the profile source", jet_driver_package_diagnostic_cause(err.diagnostic)))
     loop file in loader.checked_inputs {
         loader.resolver.revalidate_file(file) ?? return Err(jet_driver_package_authority_error(file.relative, "a profile input changed while it was being read", err))
     }
     // The plan's profiles are already composed (PackageProfileSet.insert_checked)
     // and in name order, re-composed BTreeMap yields them.
-    profiles := [ProfileView]{}
+    ^profiles: [ProfileView]{}
     loop profile in plan.package_profiles -> profiles.push(jet_driver_package_profile_view(profile))
     view: ProfileSetView.from_profiles(profiles)
-    values := [TComptimeValue]{}
+    ^values: [TComptimeValue]{}
     loop profile in view.profiles -> values.push(jet_driver_package_profile_value(profile))
     Ok(
         TComptimeValue.Struct{
@@ -274,9 +274,9 @@ jet_driver_package_read_profiles: fn(root: String) -[FS, Env, Exec, Time.Wait]> 
 
 // `profile_view`: collisions in key order.
 jet_driver_package_profile_view: fn(profile: PackageProfileSpec) -> ProfileView Never! {
-    keys := profile.collisions.keys().to_list()
+    ^keys: profile.collisions.keys().to_list()
     keys.sort()
-    collisions := [{key: String, value: String}]{}
+    ^collisions: [{key: String, value: String}]{}
     loop key in keys -> collisions.push({key: key, value: profile.collisions[key]})
     ProfileView.from_parts(profile.name, profile.extends, profile.packages, collisions, profile.sources)
 }
@@ -398,9 +398,9 @@ jet_driver_package_package_value: fn(view: PackageView) -> TComptimeValue Never!
 
 jet_driver_package_declaration_value: fn(type_name: String, view: ManifestView) -> TComptimeValue Never! {
     dependencies: loop dependency in view.dependencies -> jet_driver_package_dependency_value(dependency)
-    packages := [TComptimeValue]{}
+    ^packages: [TComptimeValue]{}
     loop package in view.packages -> packages.push(jet_driver_package_target_entry_value(package))
-    outputs := [TComptimeValue]{}
+    ^outputs: [TComptimeValue]{}
     loop output in view.outputs -> outputs.push(jet_driver_package_output_value(output))
     profiles: loop profile in view.build_profiles -> jet_driver_package_build_profile_value(profile)
     TComptimeValue.Struct{
@@ -442,7 +442,7 @@ jet_driver_package_locked_value: fn(package: LockedPackageView) -> TComptimeValu
 }
 
 jet_driver_package_profile_value: fn(profile: ProfileView) -> TComptimeValue Never! {
-    collisions := [TComptimeValue]{}
+    ^collisions: [TComptimeValue]{}
     loop collision in profile.collisions {
         collisions.push(
             TComptimeValue.Struct{

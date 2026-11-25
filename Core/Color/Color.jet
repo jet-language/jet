@@ -51,7 +51,7 @@ Color: struct {
         if (count != 4 && count != 7 && count != 9) || (Int{raw[0]}) != 35 {
             return Err(ColorError.InvalidHex(text.copy()))
         }
-        digits := [Int]{}
+        ^digits: [Int]{}
         loop index in 1..<count {
             digits.push(color_hex_digit(raw[index]) ?? return Err(ColorError.InvalidHex(text.copy())))
         }
@@ -89,10 +89,10 @@ Color: struct {
         green: Int{self.g}
         blue: Int{self.b}
         alpha: color_fraction(self.a)
-        high := red
+        ^high: red
         if green > high -> high = green
         if blue > high -> high = blue
-        low := red
+        ^low: red
         if green < low -> low = green
         if blue < low -> low = blue
         lightness: Float{high + low} / 510.0

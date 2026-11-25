@@ -67,7 +67,7 @@ use {
 
 // The little-endian bytes of `words`, `size` bytes each.
 native_test_bytes: fn(words: [Int], size: Int) -> [U8] {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop word in words {
         loop k in 0..<size -> bytes.push(U8{(word >> (8 * k)) & 255})
     }
@@ -114,7 +114,7 @@ native_test_bytes: fn(words: [Int], size: Int) -> [U8] {
     section: [Int]{20, 0, 0, 0, 0, 0, 0, 0, 1, 0x7a, 0x52, 0, 1, 0x78, 0x10, 1, 0x1b, 0x0c, 7, 8, 0x90, 1, 0, 0, 24, 0, 0, 0, 28, 0, 0, 0, 0xe0, 0xef, 0xff, 0xff, 0x10, 0, 0, 0, 0, 0x41, 0x0e, 0x10, 0x86, 0x02, 0x43, 0x0d, 0x06, 0, 0, 0, 0, 0, 0, 0}
     bytes: loop value in section -> U8{value}
     code: NativeCode{address: 0x2000, bytes: bytes}
-    fdes := [NativeFde]{}
+    ^fdes: [NativeFde]{}
     native_frames_index(fdes, code, 0)
     assert_eq(fdes.len(), 1)
     assert_eq(fdes[0].start, 0x1000)
@@ -155,7 +155,7 @@ native_test_unwound: fn(pc: Int) -> NativeUnwound {
     count: NativeVariable{name: "count", line: 1, ty: 40, list: 0, base: 0x1000, role: NativeVariableRole.Parameter, site: -1}
     other: NativeVariable{name: "other", line: 1, ty: 40, list: 15, base: 0x1000, role: NativeVariableRole.Parameter, site: -1}
     function: NativeFunction{low: 0x1000, high: 0x1100, name: "check", file: -1, variables: [NativeVariable]{count, other}, inlined: [NativeInlined]{}}
-    types := [Int:NativeType]{}
+    ^types: [Int:NativeType]{}
     types[40] = NativeType{name: "I64", size: 8, tag: 0x24, encoding: X64DebugEncoding.Signed, target: -1, group: -1}
     arguments: [NativeCallArgument]{NativeCallArgument{at: 0x2005, register: 5, value: [U8]{0x11, 0x03}}}
     image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{function}, types: types, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: loclists, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, arguments: arguments}
@@ -180,7 +180,7 @@ native_test_unwound: fn(pc: Int) -> NativeUnwound {
     loclists: [U8]{0x04, 0x00, 0x80, 0x02, 0x03, 0xa3, 0x01, 0x55, 0x00}
     pair: NativeVariable{name: "pair", line: 1, ty: 50, list: 0, base: 0x1000, role: NativeVariableRole.Parameter, site: -1}
     function: NativeFunction{low: 0x1000, high: 0x1100, name: "check", file: -1, variables: [NativeVariable]{pair}, inlined: [NativeInlined]{}}
-    types := [Int:NativeType]{}
+    ^types: [Int:NativeType]{}
     types[40] = NativeType{name: "I64", size: 8, tag: 0x24, encoding: X64DebugEncoding.Signed, target: -1, group: -1}
     types[50] = NativeType{name: "Pair", size: 16, tag: 0x13, encoding: X64DebugEncoding.Signed, target: -1, group: 0}
     members: [[NativeMember]]{[NativeMember]{NativeMember{name: "first", offset: 0, ty: 40, die: -1}, NativeMember{name: "second", offset: 8, ty: 40, die: -1}}}
@@ -208,7 +208,7 @@ native_test_unwound: fn(pc: Int) -> NativeUnwound {
     assert_eq(native_debug_unbound(done, 26), false)
     assert_eq(native_debug_unbound(count, 18), false)
     function: NativeFunction{low: 0x1000, high: 0x1100, name: "run", file: -1, variables: [NativeVariable]{count, done}, inlined: [NativeInlined]{}}
-    types := [Int:NativeType]{}
+    ^types: [Int:NativeType]{}
     types[40] = NativeType{name: "I64", size: 8, tag: 0x24, encoding: X64DebugEncoding.Signed, target: -1, group: -1}
     image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{function}, types: types, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, arguments: [NativeCallArgument]{}}
     memory: NativeMemory{trace: None, blocks: [NativeBlock]{}}
@@ -230,14 +230,14 @@ native_test_unwound: fn(pc: Int) -> NativeUnwound {
     j: NativeVariable{name: "j", line: 3, ty: 40, list: -1, base: 0x1000, role: NativeVariableRole.Parameter, site: 0}
     run: NativeInlined{die: 10, origin: 1, low: 0x1040, high: 0x1060, call_line: 8, parent: -1, file: -1, call_file: -1}
     function: NativeFunction{low: 0x1000, high: 0x1100, name: "sum_squares", file: -1, variables: [NativeVariable]{i, j}, inlined: [NativeInlined]{run}}
-    types := [Int:NativeType]{}
+    ^types: [Int:NativeType]{}
     types[40] = NativeType{name: "I64", size: 8, tag: 0x24, encoding: X64DebugEncoding.Signed, target: -1, group: -1}
-    abstracts := [Int:NativeAbstract]{}
+    ^abstracts: [Int:NativeAbstract]{}
     abstracts[1] = NativeAbstract{name: "square", file: -1}
     image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{function}, types: types, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: loclists, abstracts: abstracts, allocs: [Int:Int]{}, arguments: [NativeCallArgument]{}}
     memory: NativeMemory{trace: None, blocks: [NativeBlock]{}}
     // rbx, DWARF register 3, is the sixth of the registers ptrace reads.
-    frame := native_test_unwound(0x1048)
+    ^frame: native_test_unwound(0x1048)
     frame.registers[5] = 7
     frame.known[5] = true
     inside: native_frame_locals(image, memory, frame, 0x1048, 0, NativeUnwound?{None})
@@ -320,7 +320,7 @@ native_test_line_functions: fn() -> [X64JetlineFunction] {
     section: [Int]{20, 0, 0, 0, 0, 0, 0, 0, 1, 0x7a, 0x52, 0, 1, 0x78, 0x10, 1, 0x1b, 0x0c, 7, 8, 0x90, 1, 0, 0, 28, 0, 0, 0, 28, 0, 0, 0, 0xe0, 0xef, 0xff, 0xff, 0x10, 0, 0, 0, 0, 0x41, 0x0e, 0x10, 0x86, 0x02, 0x0a, 0x42, 0x0e, 0x20, 0xc6, 0x41, 0x0b, 0, 0, 0, 0, 0, 0, 0}
     bytes: loop value in section -> U8{value}
     code: NativeCode{address: 0x2000, bytes: bytes}
-    fdes := [NativeFde]{}
+    ^fdes: [NativeFde]{}
     native_frames_index(fdes, code, 0)
     frames: NativeFrames{sections: [NativeCode]{code}, fdes: fdes}
     pushed: native_cfi_row(frames, 0x1001) ?? return assert(false, "no row after the push")
@@ -351,8 +351,8 @@ native_test_line_functions: fn() -> [X64JetlineFunction] {
 
 #Test("a_sleb_keeps_every_bit_of_a_64_bit_value") {
     loop value in ([Int]{0, 63, -64, 4611686018427387904, -4611686018427387904, 4611686018427387903}) {
-        bytes := [U8]{}
-        rest := value
+        ^bytes: [U8]{}
+        ^rest: value
         loop {
             low: rest & 127
             rest = rest >> 7
@@ -362,7 +362,7 @@ native_test_line_functions: fn() -> [X64JetlineFunction] {
             }
             bytes.push(U8{low | 128})
         }
-        at := 0
+        ^at: 0
         assert_eq(x64_jetline_sleb(bytes, at), value)
         assert_eq(at, bytes.len())
     }
@@ -371,7 +371,7 @@ native_test_line_functions: fn() -> [X64JetlineFunction] {
 // The checkout these tests run in: the program is built outside it, so the
 // build names the toolchain sources explicitly.
 native_test_toolchain_root: fn() -> String Never! {
-    dir := native_test_files.cwd() ?? panic("cwd: {err}")
+    ^dir: native_test_files.cwd() ?? panic("cwd: {err}")
     loop {
         if native_test_files.exists(native_test_files.join(dir, "Compiler/Prelude")) && native_test_files.exists(native_test_files.join(dir, "Core")) {
             return dir
@@ -389,7 +389,7 @@ native_test_session: fn(root: String, program: String, flags: ^^[String]) -> Nat
     source: native_test_files.join(root, "prog.jet")
     native_test_files.write(source, program) ?? panic("source: {err}")
     out: native_test_files.join(root, "out")
-    argv := [String]{jet, "build"}
+    ^argv: [String]{jet, "build"}
     argv.extend(flags.move())
     argv.push("--output-dir={out}")
     argv.push(source)
@@ -427,11 +427,11 @@ NATIVE_TEST_RING: "Ring: struct {{\n    items: [Int],\n    start: Int,\n    coun
 #Test("a_struct_with_a_debug_view_shows_its_items") {
     scratch: native_test_files.temp_dir("jet-debug-view") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_RING, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_RING, [String]{"-O0"})
     paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 15}}, "prog.jet", NATIVE_TEST_RING.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
     locals: session.locals() ?? panic("locals: {err.detail}")
-    shown := ""
+    ^shown: ""
     loop local in locals {
         if local.name == "ring" -> shown = local.value
     }
@@ -455,13 +455,13 @@ NATIVE_TEST_LOUD: "use {{\n    process: core.process\n    files: core.files\n}}\
 #Test("a_debug_view_that_makes_a_system_call_is_refused_and_the_program_never_runs_it") {
     scratch: native_test_files.temp_dir("jet-debug-loud") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_LOUD, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_LOUD, [String]{"-O0"})
     paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 21}}, "prog.jet", NATIVE_TEST_LOUD.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
     // Twice: each view runs, and is refused, afresh.
     loop _ in 0..<2 {
         locals: session.locals() ?? panic("locals: {err.detail}")
-        shown := ""
+        ^shown: ""
         loop local in locals {
             if local.name == "loud" -> shown = local.value
         }
@@ -484,11 +484,11 @@ NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,
 #Test("a_debug_view_past_its_budget_is_stopped_and_the_program_runs_on") {
     scratch: native_test_files.temp_dir("jet-debug-spin") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_SPIN, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_SPIN, [String]{"-O0"})
     paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 18}}, "prog.jet", NATIVE_TEST_SPIN.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
     locals: session.locals() ?? panic("locals: {err.detail}")
-    shown := ""
+    ^shown: ""
     loop local in locals {
         if local.name == "spin" -> shown = local.value
     }
@@ -507,8 +507,8 @@ NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,
 #Test("a_session_pauses_steps_and_reads_the_native_image") {
     scratch: native_test_files.temp_dir("jet-debug-native") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
-    resolved := -1
+    ^session: native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
+    ^resolved: -1
     if session.break_at("prog.jet", 2) == {
         .Ok(number) -> { resolved = number ?? -1 }
         .Err(failure) -> panic("break: {failure.detail}")
@@ -549,8 +549,8 @@ native_test_frame_end: fn(session: NativeSession, pc: Int) -> String {
     bytes: session.code(pc, 5)
     if bytes.len() < 2 -> return ""
     if bytes[0] == (U8{0xc3}) -> return "ret"
-    offset := 0
-    size := 0
+    ^offset: 0
+    ^size: 0
     if bytes[0] == (U8{0xe9}) && bytes.len() == 5 {
         loop k in 0..<4 -> offset = offset | (Int{bytes[1 + k]} << (8 * k))
         if offset >= 1 << 31 -> offset -= 1 << 32
@@ -575,15 +575,15 @@ native_test_frame_end: fn(session: NativeSession, pc: Int) -> String {
     loop level in ([String]{"-O0", "-O1", "-O2"}) {
         scratch: native_test_files.temp_dir("jet-debug-tail") ?? panic("scratch: {err}")
         root: scratch.path
-        session := native_test_session(root, NATIVE_TEST_TAIL, [String]{level})
+        ^session: native_test_session(root, NATIVE_TEST_TAIL, [String]{level})
         first: session.run_to([NativeBreak]{{file: "prog.jet", line: 14}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
         assert(native_debug_hit_breakpoint(first.stop) != None, "{level}: {first.text}")
         session.clear_breakpoints() ?? panic("clear: {err.detail}")
         // The frame the steps run until it returns.
         out: (session.unwind() ?? panic("unwind: {err.detail}"))[0].cfa
-        before := session.registers() ?? panic("registers: {err.detail}")
-        rets := 0
-        tails := 0
+        ^before: session.registers() ?? panic("registers: {err.detail}")
+        ^rets: 0
+        ^tails: 0
         loop _ in 0..<NATIVE_TEST_MOST_STEPS {
             event: session.go(X64TraceResume.Step) ?? panic("step: {err.detail}")
             if event.ends_run() -> break
@@ -613,7 +613,7 @@ native_test_frame_end: fn(session: NativeSession, pc: Int) -> String {
 #Test("an_o2_session_shows_inlined_frames_and_their_locals") {
     scratch: native_test_files.temp_dir("jet-debug-inlined") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_INLINED, [String]{"-O2"})
+    ^session: native_test_session(root, NATIVE_TEST_INLINED, [String]{"-O2"})
     lines: NATIVE_TEST_INLINED.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 6}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("Breakpoint hit  prog.jet:6  in sum_squares()"), first.text)
@@ -652,7 +652,7 @@ NATIVE_TEST_SCATTERED: "early: fn(n: Int) -> [Int] {{\n    items := [Int]{{}}\n 
     loop level in levels {
         scratch: native_test_files.temp_dir("jet-debug-scattered") ?? panic("scratch: {err}")
         root: scratch.path
-        session := native_test_session(root, NATIVE_TEST_SCATTERED, [String]{level})
+        ^session: native_test_session(root, NATIVE_TEST_SCATTERED, [String]{level})
         stop: session.run_to([NativeBreak]{{file: "prog.jet", line: 8}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
         assert(stop.text.contains("Breakpoint hit  prog.jet:8  in later()"), "{level}: {stop.text}")
         shown: session.command("print items", stop.stop, "prog.jet", lines) ?? panic("print: {err.detail}")
@@ -668,7 +668,7 @@ NATIVE_TEST_SCATTERED: "early: fn(n: Int) -> [Int] {{\n    items := [Int]{{}}\n 
 #Test("an_o2_session_breaks_in_and_lists_an_inlined_function_by_name") {
     scratch: native_test_files.temp_dir("jet-debug-inlined-name") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_INLINED, [String]{"-O2"})
+    ^session: native_test_session(root, NATIVE_TEST_INLINED, [String]{"-O2"})
     lines: NATIVE_TEST_INLINED.split("\n").to_list()
     first: session.open("prog.jet", lines, [String]{}) ?? panic("the session opens at run")
     listed: session.command("disas sum_squares", first.stop, "prog.jet", lines) ?? panic("disas: {err.detail}")
@@ -689,7 +689,7 @@ NATIVE_TEST_SCATTERED: "early: fn(n: Int) -> [Int] {{\n    items := [Int]{{}}\n 
 #Test("a_line_break_skips_a_later_function_holding_an_earlier_inlined_copy") {
     scratch: native_test_files.temp_dir("jet-debug-later-line") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_LATER_LINE, [String]{"-O2"})
+    ^session: native_test_session(root, NATIVE_TEST_LATER_LINE, [String]{"-O2"})
     lines: NATIVE_TEST_LATER_LINE.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("Breakpoint set  prog.jet:9\n"), first.text)
@@ -704,7 +704,7 @@ NATIVE_TEST_INLINED_RUN: "work: fn(n: Int) -> Int {{\n    n * 2\n}}\n\nrun: fn()
 #Test("an_o2_image_whose_run_is_inlined_opens_at_its_entry") {
     scratch: native_test_files.temp_dir("jet-debug-run-source") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_INLINED_RUN, [String]{"-O2"})
+    ^session: native_test_session(root, NATIVE_TEST_INLINED_RUN, [String]{"-O2"})
     named: loop found in session.image.lines.functions {
         if found.name == "run" {
             break true
@@ -734,7 +734,7 @@ NATIVE_TEST_FALLIBLE_RUN: "run: fn() Err! {{\n    n: 21\n    print(\"got {{n * 2
 #Test("a_session_opens_at_the_entry_its_image_runs") {
     scratch: native_test_files.temp_dir("jet-debug-entry") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_FALLIBLE_RUN, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_FALLIBLE_RUN, [String]{"-O0"})
     wrapped: loop found in session.image.lines.functions {
         if found.name == "entry" {
             break true
@@ -765,12 +765,12 @@ NATIVE_TEST_REVERSE: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
 #Test("a_reverse_step_after_a_seek_and_a_step_goes_into_the_call") {
     scratch: native_test_files.temp_dir("jet-debug-reverse") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_REVERSE, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_REVERSE, [String]{"-O0"})
     session.env = Val([String]{"NO_COLOR=1"})
     lines: NATIVE_TEST_REVERSE.split("\n").to_list()
     first: session.open("prog.jet", lines, [String]{}) ?? panic("the session opens at run")
-    stop := first.stop
-    shown := ""
+    ^stop: first.stop
+    ^shown: ""
     words: [String]{"break 10", "c", "rn", "n", "rs"}
     loop word in words {
         step: session.command(word, stop, "prog.jet", lines) ?? panic("{word}: {err.detail}")
@@ -791,11 +791,11 @@ NATIVE_TEST_REVERSE: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
 #Test("why_follows_a_local_held_in_a_register") {
     scratch: native_test_files.temp_dir("jet-debug-why-register") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_REVERSE, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_REVERSE, [String]{"-O0"})
     session.env = Val([String]{"NO_COLOR=1"})
     lines: NATIVE_TEST_REVERSE.split("\n").to_list()
     first: session.open("prog.jet", lines, [String]{}) ?? panic("the session opens at run")
-    stop := first.stop
+    ^stop: first.stop
     words: [String]{"break 10", "c", "c", "c"}
     loop word in words {
         step: session.command(word, stop, "prog.jet", lines) ?? panic("{word}: {err.detail}")
@@ -828,9 +828,9 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
     root: scratch.path
     other: native_test_files.temp_dir("jet-debug-why-recover-o0") ?? panic("scratch: {err}")
     unoptimized: other.path
-    built := native_test_session(unoptimized, NATIVE_TEST_RECOVER, [String]{"-O0", "--dead-code=keep"})
+    ^built: native_test_session(unoptimized, NATIVE_TEST_RECOVER, [String]{"-O0", "--dead-code=keep"})
     built.close()
-    session := native_test_session(root, NATIVE_TEST_RECOVER, [String]{"-O2"})
+    ^session: native_test_session(root, NATIVE_TEST_RECOVER, [String]{"-O2"})
     session.env = Val([String]{"NO_COLOR=1"})
     lines: NATIVE_TEST_RECOVER.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 17}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
@@ -854,7 +854,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
 #Test("why_names_the_line_that_binds_a_local_an_inlined_call_wrote") {
     scratch: native_test_files.temp_dir("jet-debug-why-inlined") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_RECOVER, [String]{"-O2"})
+    ^session: native_test_session(root, NATIVE_TEST_RECOVER, [String]{"-O2"})
     session.env = Val([String]{"NO_COLOR=1"})
     lines: NATIVE_TEST_RECOVER.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 16}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
@@ -872,8 +872,8 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
 #Test("a_split_debug_image_is_read_through_its_debug_link") {
     scratch: native_test_files.temp_dir("jet-debug-split") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_SPLIT, [String]{"-O2", "--debug-info=split"})
-    resolved := -1
+    ^session: native_test_session(root, NATIVE_TEST_SPLIT, [String]{"-O2", "--debug-info=split"})
+    ^resolved: -1
     if session.break_at("prog.jet", 3) == {
         .Ok(number) -> { resolved = number ?? -1 }
         .Err(failure) -> panic("break: {failure.detail}")
@@ -893,8 +893,8 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
     id: native_build_id(image)
     assert(id.len() > 1, "the image has a build id")
     named: ".jet/symbols/.build-id/{native_test_hex.encode(id[0..<1])}/{native_test_hex.encode(id[1..<id.len()])}.debug"
-    stored := ""
-    directory := native_test_files.join(root, "out")
+    ^stored: ""
+    ^directory: native_test_files.join(root, "out")
     loop {
         place: native_test_files.join(directory, named)
         if native_test_files.exists(place) {
@@ -911,7 +911,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
         assert_eq(native_test_files.read_bytes(linked) ?? panic("read: {err}"), native_test_files.read_bytes(stored) ?? panic("read: {err}"))
     }
     native_test_files.remove(linked) ?? panic("unlink: {err}")
-    by_id := NativeSession.start(native_test_files.join(root, "out/prog"), native_test_files.join(root, "output.txt")) ?? panic("start from the store: {err.detail}")
+    ^by_id: NativeSession.start(native_test_files.join(root, "out/prog"), native_test_files.join(root, "output.txt")) ?? panic("start from the store: {err.detail}")
     by_id.close()
     native_test_files.remove(stored) ?? panic("unlink the stored file: {err}")
     if NativeSession.start(native_test_files.join(root, "out/prog"), native_test_files.join(root, "output.txt")) == {
@@ -931,7 +931,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
 #Test("an_image_with_its_dwarf_apart_shows_locals_from_the_side_file") {
     scratch: native_test_files.temp_dir("jet-debug-apart") ?? panic("scratch: {err}")
     root: scratch.path
-    built := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
+    ^built: native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
     built.close()
     whole: native_test_files.read_bytes(native_test_files.join(root, "out/prog")) ?? panic("read: {err}")
     apart: x64_executable_debug_apart(whole, "apart.debug", compiler_threads_single()) ?? panic("apart: {err:Debug}")
@@ -941,8 +941,8 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
     native_test_files.set_mode(binary, 493) ?? panic("mode: {err}")
     native_test_files.write_bytes(side, apart.debug_file) ?? panic("write side: {err}")
     output: native_test_files.join(root, "output.txt")
-    session := NativeSession.start(binary, output) ?? panic("start: {err.detail}")
-    resolved := -1
+    ^session: NativeSession.start(binary, output) ?? panic("start: {err.detail}")
+    ^resolved: -1
     if session.break_at("prog.jet", 2) == {
         .Ok(number) -> { resolved = number ?? -1 }
         .Err(failure) -> panic("break: {failure.detail}")
@@ -960,7 +960,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
     assert_eq(frames[1].line, 9)
     session.close()
     // Another build's side file under the name is refused by its CRC-32.
-    other := native_test_files.read_bytes(side) ?? panic("read side: {err}")
+    ^other: native_test_files.read_bytes(side) ?? panic("read side: {err}")
     other[other.len() - 1] = U8{Int{other[other.len() - 1]} ~ 1}
     native_test_files.write_bytes(side, other) ?? panic("write other: {err}")
     if NativeSession.start(binary, output) == {
@@ -982,7 +982,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
     store: native_test_files.join(root, ".jet/symbols/.build-id/{native_test_hex.encode(id[0..<1])}")
     native_test_files.create_dir_all(store) ?? panic("store: {err}")
     native_test_files.write_bytes(native_test_files.join(store, "{native_test_hex.encode(id[1..<id.len()])}.debug"), apart.debug_file) ?? panic("write stored: {err}")
-    stored := NativeSession.start(binary, output) ?? panic("start from the store: {err.detail}")
+    ^stored: NativeSession.start(binary, output) ?? panic("start from the store: {err.detail}")
     stored.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
@@ -990,7 +990,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
 #Test("run_to_stops_first_at_the_first_breakpoint_reached") {
     scratch: native_test_files.temp_dir("jet-debug-run-to") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
     lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 40}, {file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("No code on prog.jet:40\n"))
@@ -1010,7 +1010,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
 #Test("disassemble_lists_the_stopped_function_with_its_stop_and_breakpoint") {
     scratch: native_test_files.temp_dir("jet-debug-disas") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
     lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     listed: session.command("disas", first.stop, "prog.jet", lines) ?? panic("disas: {err.detail}")
@@ -1045,7 +1045,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
 #Test("step_enters_a_call_finish_leaves_it_and_next_runs_over_it") {
     scratch: native_test_files.temp_dir("jet-debug-steps") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
     lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     session.clear_breakpoints() ?? panic("clear: {err.detail}")
@@ -1071,7 +1071,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
 #Test("next_stops_at_a_breakpoint_in_its_call_and_returns_off_the_last_line") {
     scratch: native_test_files.temp_dir("jet-debug-next-return") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
     lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     session.clear_breakpoints() ?? panic("clear: {err.detail}")
@@ -1094,7 +1094,7 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
 #Test("next_runs_a_one_line_loop_whole_and_steps_over_recursion_in_its_frame") {
     scratch: native_test_files.temp_dir("jet-debug-next-loop") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_LOOP, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_LOOP, [String]{"-O0"})
     lines: NATIVE_TEST_LOOP.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 10}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("Breakpoint hit  prog.jet:10  in run()"), first.text)
@@ -1128,7 +1128,7 @@ NATIVE_TEST_GENERIC_MODULE: "use core.process\n\ncounter: module<T>(start: Int) 
     loop level in levels {
         scratch: native_test_files.temp_dir("jet-debug-generic-module") ?? panic("scratch: {err}")
         root: scratch.path
-        session := native_test_session(root, NATIVE_TEST_GENERIC_MODULE, [String]{level})
+        ^session: native_test_session(root, NATIVE_TEST_GENERIC_MODULE, [String]{level})
         lines: NATIVE_TEST_GENERIC_MODULE.split("\n").to_list()
         first: session.run_to([NativeBreak]{{file: "prog.jet", line: 7}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
         assert(first.text.contains("Breakpoint hit  prog.jet:7"), "{level}: {first.text}")
@@ -1152,7 +1152,7 @@ NATIVE_TEST_WORKER_EXIT: "use process: core.process\n\nhalf: fn(n: Int) -> Int {
 #Test("a_worker_s_stopping_exit_pauses_and_ends_after_its_breakpoint_is_deleted") {
     scratch: native_test_files.temp_dir("jet-debug-worker-exit") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_WORKER_EXIT, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_WORKER_EXIT, [String]{"-O0"})
     lines: NATIVE_TEST_WORKER_EXIT.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 4}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("Breakpoint hit  prog.jet:4  in half()"), first.text)
@@ -1175,7 +1175,7 @@ NATIVE_TEST_OVERFLOW: "depth: fn(n: Int) -> Int {{\n    if n == 0 -> return 0\n 
 #Test("a_fault_stops_like_a_breakpoint_and_continuing_delivers_it") {
     scratch: native_test_files.temp_dir("jet-debug-fault") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_OVERFLOW, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_OVERFLOW, [String]{"-O0"})
     lines: NATIVE_TEST_OVERFLOW.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 7}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("Breakpoint hit  prog.jet:7  in run()"), first.text)
@@ -1210,7 +1210,7 @@ NATIVE_TEST_SIGNALED: "use sys: core.sys\n\ncrash: fn(n: Int) -> Int {{\n    #Un
 #Test("a_fault_s_report_after_its_stop_ends_the_program_by_its_signal") {
     scratch: native_test_files.temp_dir("jet-debug-fault-report") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_SIGNALED, [String]{"-O0"})
+    ^session: native_test_session(root, NATIVE_TEST_SIGNALED, [String]{"-O0"})
     lines: NATIVE_TEST_SIGNALED.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 11}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("Breakpoint hit  prog.jet:11  in run()"), first.text)
@@ -1236,7 +1236,7 @@ NATIVE_TEST_RUNTIME_FAULT: "use mem: core.mem\n\nspill: fn(address: Int, count: 
 #Test("a_fault_inside_a_runtime_routine_shows_the_routines_the_instruction_and_the_address") {
     scratch: native_test_files.temp_dir("jet-debug-runtime-fault") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root, NATIVE_TEST_RUNTIME_FAULT, [String]{"--release", "--debug-info=true"})
+    ^session: native_test_session(root, NATIVE_TEST_RUNTIME_FAULT, [String]{"--release", "--debug-info=true"})
     lines: NATIVE_TEST_RUNTIME_FAULT.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 12}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("Breakpoint hit  prog.jet:12  in run()"), first.text)
@@ -1274,7 +1274,7 @@ NATIVE_TEST_RUNTIME_FAULT: "use mem: core.mem\n\nspill: fn(address: Int, count: 
         NativeInlined{die: 40, origin: 4, low: 0x194, high: 0x19c, call_line: 172, parent: 2, file: 2, call_file: 2, call_path: "<corelib>/Core/Process/Process.jet"},
     }
     function: NativeFunction{low: 0x80, high: 0x200, name: "run", file: 1, variables: [NativeVariable]{}, inlined: runs}
-    abstracts := [Int:NativeAbstract]{}
+    ^abstracts: [Int:NativeAbstract]{}
     abstracts[1] = NativeAbstract{name: "sum_squares", file: 1}
     abstracts[2] = NativeAbstract{name: "square", file: 1}
     abstracts[3] = NativeAbstract{name: "args", file: 2}
@@ -1297,7 +1297,7 @@ NATIVE_TEST_NESTED: "use process: core.process\n\nsquare: fn(i: Int) -> Int {{ i
     loop level in ([String]{"-O1", "-O2"}) {
         scratch: native_test_files.temp_dir("jet-debug-nested") ?? panic("scratch: {err}")
         root: scratch.path
-        session := native_test_session(root, NATIVE_TEST_NESTED, [String]{level})
+        ^session: native_test_session(root, NATIVE_TEST_NESTED, [String]{level})
         stop: session.run_to([NativeBreak]{{file: "prog.jet", line: 3}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
         assert(stop.text.contains("Breakpoint hit  prog.jet:3  in square()"), "{level}: {stop.text}")
         listed: session.command("disas", stop.stop, "prog.jet", lines) ?? panic("disas: {err.detail}")

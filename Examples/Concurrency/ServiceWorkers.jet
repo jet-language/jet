@@ -41,7 +41,7 @@ add_item: fn(cart: ^Cart, item: String) -> Int {
 send_bulk: fn(batch: [Int]) { print("bulk {batch}") }
 
 run: fn() {
-    tree := service.tree("shop")
+    ^tree: service.tree("shop")
     email: tree.worker("email", send_email, capacity: 64) ?? return
     pricing: tree.worker("pricing", price, capacity: 8) ?? return
     cart: tree.worker("cart", add_item, state: Cart{items: [String]{}}, capacity: 8) ?? return

@@ -238,8 +238,8 @@ jet_driver_reach_variant_head: fn(lexed: Lexed, at: Int) -> Bool Never! {
 // `@Name`, each with an optional `( … )`), the line that marks the
 // declaration below it.
 jet_driver_reach_marker_line: fn(lexed: Lexed, code: Int, to: Int) -> Bool Never! {
-    at := code
-    markers := 0
+    ^at: code
+    ^markers: 0
     loop at < to {
         kind: lexed.tokens[at].kind
         if kind == TOKEN_SEMI || jet_driver_reach_trivia(kind) {
@@ -251,7 +251,7 @@ jet_driver_reach_marker_line: fn(lexed: Lexed, code: Int, to: Int) -> Bool Never
         }
         at += 2
         if at < to && lexed.tokens[at].kind == TOKEN_LPAREN {
-            depth := 0
+            ^depth: 0
             loop at < to {
                 inner: lexed.tokens[at].kind
                 if inner == TOKEN_LPAREN -> depth += 1
@@ -272,28 +272,28 @@ jet_driver_reach_marker_line: fn(lexed: Lexed, code: Int, to: Int) -> Bool Never
 // private part's owned members, which are always reached, and `routes` the
 // unit's compiler routes.
 jet_driver_reach_hold: fn(lexed: ^Lexed, cutover_module: String, owned_members: [String], part_members: [String], routes: JetDriverCoreRoutes) -> JetDriverReachHeld Never! {
-    held := JetDriverReachHeld{declarations: [JetDriverReachDeclaration]{}, dropped: [Span]{}}
+    ^held: JetDriverReachHeld{declarations: [JetDriverReachDeclaration]{}, dropped: [Span]{}}
     // A unit holds nothing under a file rule, which the parser reads only as
     // a top-level marker (`#Target`, `#[HTML]`; Entry.jet
     // parser_chunk_scan); the same name in a body (a `.Policy` variant)
     // rules nothing, so a parse with the bodies blanked holds as one of the
     // whole text does.
     rule_names: [String]{MARKER_NO_PRELUDE, MARKER_HTML, MARKER_TARGET, MARKER_POLICY}
-    file_rules := [Int]{}
+    ^file_rules: [Int]{}
     loop rule in rule_names {
         if name_find(lexed.tables.names, rule) == .Val(name) -> file_rules.push(name_index(name))
     }
     // Each top-level statement's tokens: from the one after the terminator
     // before it through its own terminator.
-    starts := [Int]{}
-    ends := [Int]{}
-    depth := 0
-    start := 0
+    ^starts: [Int]{}
+    ^ends: [Int]{}
+    ^depth: 0
+    ^start: 0
     // The previous code token's kind, a top-level `#` whose marker name is
     // still ahead, and a top-level `#[ … ]` marker list open.
-    previous := -1
-    hash_ahead := false
-    marker_list := false
+    ^previous: -1
+    ^hash_ahead: false
+    ^marker_list: false
     loop index in 0..<lexed.tokens.len() {
         kind: lexed.tokens[index].kind
         if kind == TOKEN_FENCE_OPEN || kind == TOKEN_FENCE_CLOSE -> return held
@@ -332,19 +332,19 @@ jet_driver_reach_hold: fn(lexed: ^Lexed, cutover_module: String, owned_members: 
         }
     }
     if depth != 0 -> return held
-    out := [Token]{}
-    cursor := 0
+    ^out: [Token]{}
+    ^cursor: 0
     // Whether the last statement with code was a marker line (`#Overflow(…)`
     // ahead of the declaration it marks, a line of its own,
     // jet_driver_reach_marker_line). A declaration whose marker shares its
     // line (`#ContextKey logger: …`) marks nothing below it, so the item
     // after it is held or not as its own tokens decide, and parses alone
     // as the whole unit's parse holds it.
-    marked := false
+    ^marked: false
     loop at in 0..<starts.len() {
         from: starts[at]
         to: ends[at]
-        code := from
+        ^code: from
         loop code < to && jet_driver_reach_trivia(lexed.tokens[code].kind) -> code += 1
         follows_marker: marked
         if code < to && lexed.tokens[code].kind != TOKEN_SEMI {
@@ -357,7 +357,7 @@ jet_driver_reach_hold: fn(lexed: ^Lexed, cutover_module: String, owned_members: 
         if follows_marker || code + 3 >= to || lexed.tokens[code].kind != TOKEN_IDENT || lexed.tokens[code + 1].kind != TOKEN_COLON {
             next
         }
-        last := to - 1
+        ^last: to - 1
         loop last > code && (lexed.tokens[last].kind == TOKEN_SEMI || jet_driver_reach_trivia(lexed.tokens[last].kind)) {
             last -= 1
         }
@@ -419,8 +419,12 @@ jet_driver_reach_lazy_shape: fn(value: Func) -> Bool Never! {
 jet_driver_reach_lazy_span: fn(item: Item, part_members: [String], routes: JetDriverCoreRoutes) -> Span? Never! {
     if item == {
         .Func(value) -> {
-            if !jet_driver_reach_lazy_shape(value) || part_members.contains(value.name) -> return None
-            if jet_driver_core_f32_member(routes, value) != None || jet_driver_core_family_owner(routes, value) != None -> return Val(value.span)
+            if !jet_driver_reach_lazy_shape(value) || part_members.contains(value.name) {
+                return None
+            }
+            if jet_driver_core_f32_member(routes, value) != None || jet_driver_core_family_owner(routes, value) != None {
+                return Val(value.span)
+            }
             if value.markers.len() > 0 || jet_driver_core_route(routes, value.name) -> return None
             Val(value.span)
         }
@@ -664,8 +668,8 @@ jet_driver_reach_name_rows: fn(rows: ^JetDriverReachRows, declaration: JetDriver
 // The lazy declarations of `items`; a stub of a `held` declaration
 // (jet_driver_reach_hold) gets the declaration's rows.
 jet_driver_reach_rows: fn(items: [Item], held: [JetDriverReachDeclaration], part_members: [String], routes: JetDriverCoreRoutes) -> JetDriverReachRows Never! {
-    rows := jet_driver_reach_no_rows()
-    next_held := 0
+    ^rows: jet_driver_reach_no_rows()
+    ^next_held: 0
     loop (position, item) in items {
         if next_held < held.len() && held[next_held].position == position {
             jet_driver_reach_name_rows(rows, held[next_held])
@@ -688,7 +692,7 @@ jet_driver_reach_rows: fn(items: [Item], held: [JetDriverReachDeclaration], part
         }
         jet_driver_reach_name_rows(rows, JetDriverReachDeclaration{position: position, name: jet_driver_reach_item_name(item), name_start: span.start, span: span, constant: item == .Const(_)})
     }
-    types := [String:Bool]{}
+    ^types: [String:Bool]{}
     if routes.routed {
         loop (position, item) in items {
             span: jet_driver_reach_lazy_type(item) ?? next
@@ -762,7 +766,7 @@ JetDriverCoreRoutes: struct {
 }
 
 jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
-    routes := JetDriverCoreRoutes{module_name: module_name, routed: JET_DRIVER_ROUTED_MODULES.contains(module_name), names: [String:Bool]{}}
+    ^routes: JetDriverCoreRoutes{module_name: module_name, routed: JET_DRIVER_ROUTED_MODULES.contains(module_name), names: [String:Bool]{}}
     // A user unit has no routes.
     if module_name == "" -> return routes
     loop row in CORE_CALLS {
@@ -772,7 +776,7 @@ jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
         target: core_call_source_member(row) ?? next
         // Most targets name another module: skip them before splitting.
         if row.module_name != module_name && !target.starts_with(module_name) -> next
-        parts := target.split(".").to_list()
+        ^parts: target.split(".").to_list()
         member: parts.pop() ?? next
         owner: if parts.len() > 0 -> parts.join(".") else -> row.module_name
         if owner == module_name && (member != row.member || owner != row.module_name) {
@@ -803,7 +807,9 @@ jet_driver_core_role: fn(routes: JetDriverCoreRoutes, value: Func) -> String? Ne
     if !routes.routed || value.markers.len() != 1 -> return None
     marker: value.markers[0]
     if marker.negated || marker.args.len() != 1 -> return None
-    if marker.name != SEMA_CORE_ROLE_MARKER && !marker.name.ends_with(".{SEMA_CORE_ROLE_MARKER}") -> return None
+    if marker.name != SEMA_CORE_ROLE_MARKER && !marker.name.ends_with(".{SEMA_CORE_ROLE_MARKER}") {
+        return None
+    }
     if marker.args[0] == .Expr(expression) {
         if expression == .EnumLit(_, variant, _, _, _, _, _) -> return Val("{variant}")
     }
@@ -857,9 +863,9 @@ JetDriverSpellings: struct {
 // token's bytes (a character, a unit number) are read as maximal runs of
 // word bytes. A word that starts with a digit spells nothing.
 jet_driver_unit_spellings: fn(source: [U8], tokens: [Token], tables: TokenTables) -> JetDriverSpellings Never! {
-    spellings := JetDriverSpellings{table: name_table(), starts: [Int]{}, keys: [Int]{}}
+    ^spellings: JetDriverSpellings{table: name_table(), starts: [Int]{}, keys: [Int]{}}
     // Per lexer name id, its word in `spellings.table`, or -1 before.
-    local := [Int]{}
+    ^local: [Int]{}
     loop token in tokens {
         kind: token.kind
         if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT || kind == TOKEN_INT || kind == TOKEN_FLOAT {
@@ -891,8 +897,8 @@ jet_driver_unit_spellings: fn(source: [U8], tokens: [Token], tables: TokenTables
             next
         }
         text: Int{token.text.id}
-        whole := text > 0 && !(first >= (U8{48}) && first <= (U8{57}))
-        cursor := start + 1
+        ^whole: text > 0 && !(first >= (U8{48}) && first <= (U8{57}))
+        ^cursor: start + 1
         loop whole && cursor < end {
             if !sema_source_word_byte(source[cursor]) -> whole = false
             cursor += 1
@@ -913,7 +919,7 @@ jet_driver_unit_spellings: fn(source: [U8], tokens: [Token], tables: TokenTables
 // Each maximal run of word bytes in `source[start..<end]` that doesn't start
 // with a digit.
 jet_driver_spell_span: fn(source: [U8], start: Int, end: Int, spellings: ^JetDriverSpellings) Never! {
-    cursor := start
+    ^cursor: start
     loop cursor < end {
         if !sema_source_word_byte(source[cursor]) {
             cursor += 1
@@ -933,7 +939,7 @@ jet_driver_spell_span: fn(source: [U8], start: Int, end: Int, spellings: ^JetDri
 // path head spelled with its `#`, the word a deferred import's marker
 // spelling waits for (JetDriverReachEdge.marker).
 jet_driver_spell_push: fn(source: [U8], start: Int, end: Int, word: Int, spellings: ^JetDriverSpellings) Never! {
-    kind := 0
+    ^kind: 0
     if start > 0 && source[start - 1] == (U8{46}) -> kind = 1
     if end < source.len() && source[end] == (U8{46}) -> kind += 2
     spellings.starts.push(start)
@@ -948,9 +954,9 @@ jet_driver_spell_push: fn(source: [U8], start: Int, end: Int, word: Int, spellin
 // The positions of `spans` by start, by insertion: spans come nearly in
 // source order.
 jet_driver_span_order: fn(spans: [Span]) -> [Int] Never! {
-    order := [Int]{}
+    ^order: [Int]{}
     loop at in 0..<spans.len() {
-        slot := order.len()
+        ^slot: order.len()
         order.push(at)
         loop slot > 0 && spans[order[slot - 1]].start > spans[at].start {
             order[slot] = order[slot - 1]
@@ -970,15 +976,15 @@ jet_driver_span_order: fn(spans: [Span]) -> [Int] Never! {
 // one of the `quiet` spans (the unit's imports, and the declarations its
 // program leaves out) counts for nothing.
 jet_driver_unit_words: fn(input: ^^JetDriverSpellings, items: [Item], held: [JetDriverReachDeclaration], quiet: [Span], lazy: Bool, part_members: [String], routes: JetDriverCoreRoutes) -> JetDriverUnitWords Never! {
-    spellings := input.move()
-    rows := if lazy -> jet_driver_reach_rows(items, held, part_members, routes) else -> jet_driver_reach_no_rows()
-    order := jet_driver_span_order(rows.spans)
+    ^spellings: input.move()
+    ^rows: if lazy -> jet_driver_reach_rows(items, held, part_members, routes) else -> jet_driver_reach_no_rows()
+    ^order: jet_driver_span_order(rows.spans)
     hush: jet_driver_span_order(quiet)
     // `open[0..<depth]` holds the rows around the current byte, outermost
     // first.
-    open := [Int]{}
-    depth := 0
-    crossed := false
+    ^open: [Int]{}
+    ^depth: 0
+    ^crossed: false
     loop row in order {
         loop depth > 0 && rows.spans[open[depth - 1]].end <= rows.spans[row].start -> depth -= 1
         if depth > 0 && rows.spans[row].end > rows.spans[open[depth - 1]].end {
@@ -995,14 +1001,14 @@ jet_driver_unit_words: fn(input: ^^JetDriverSpellings, items: [Item], held: [Jet
     // A row's spelling is kept once in a run of it: `seen` stamps a key with
     // its row plus one (a type's row resumes after each of its methods, so a
     // key may repeat there), `rest_seen` marks it in the rest.
-    seen := [Int]{}
-    rest_seen := [Bool]{}
-    spells := [[Int]]{}
+    ^seen: [Int]{}
+    ^rest_seen: [Bool]{}
+    ^spells: [[Int]]{}
     loop _ in rows.spans -> spells.push([Int]{})
-    rest := [Int]{}
+    ^rest: [Int]{}
     depth = 0
-    next_row := 0
-    next_quiet := 0
+    ^next_row: 0
+    ^next_quiet: 0
     loop (index, start) in spellings.starts {
         loop next_quiet < hush.len() && quiet[hush[next_quiet]].end <= start -> next_quiet += 1
         if next_quiet < hush.len() && quiet[hush[next_quiet]].start <= start -> next
@@ -1185,7 +1191,7 @@ jet_driver_reach_admit: fn(reach: ^JetDriverReach, loaded: Int, module_name: Str
             reach.stack.push(index)
         }
     }
-    ids := [Int]{}
+    ^ids: [Int]{}
     loop word in words.words -> ids.push(Int{name_intern(reach.names, word).id})
     loop declaration in imports {
         if declaration.kind == .Unqualified(_, _, selected, _, _) {
@@ -1195,7 +1201,7 @@ jet_driver_reach_admit: fn(reach: ^JetDriverReach, loaded: Int, module_name: Str
             }
         }
     }
-    held := [Bool]{}
+    ^held: [Bool]{}
     loop declaration in words.held {
         loop held.len() <= declaration.position -> held.push(false)
         held[declaration.position] = true
@@ -1203,7 +1209,7 @@ jet_driver_reach_admit: fn(reach: ^JetDriverReach, loaded: Int, module_name: Str
     base: reach.items.len()
     loop (row, position) in words.items {
         name: Int{name_intern(reach.names, words.names[row]).id}
-        spells := [Int]{}
+        ^spells: [Int]{}
         loop spell in words.spells[row] -> spells.push(ids[spell >> 2] * 4 + (spell & 3))
         index: reach.items.len()
         owner: if words.owners[row] >= 0 -> base + words.owners[row] else -> -1
@@ -1243,9 +1249,9 @@ jet_driver_reach_admit: fn(reach: ^JetDriverReach, loaded: Int, module_name: Str
 // `alias.Trait` is declared by the module the alias imports; the module of
 // any other lazy trait is "", an owned one's.
 jet_driver_reach_impl: fn(reach: ^JetDriverReach, module_name: String, type_name: String, written: String, imports: [ImportDecl]) -> Int {
-    trait_module := ""
-    trait_name := written.copy()
-    triggers := [Int]{}
+    ^trait_module: ""
+    ^trait_name: written.copy()
+    ^triggers: [Int]{}
     if owned_trait(written) == .Val(owned) {
         triggers.push(jet_driver_reach_word(reach, owned.name))
         if owned.contract == .Codec(verb) -> triggers.push(jet_driver_reach_word(reach, verb))
@@ -1390,7 +1396,7 @@ jet_driver_reach_demand_follow: fn(reach: ^JetDriverReach, at: Int) {
 
 // How many of the load's lazy Core declarations are reached.
 jet_driver_reach_items_reached: fn(reach: JetDriverReach) -> Int Never! {
-    count := 0
+    ^count: 0
     loop item in reach.items {
         if item.live -> count += 1
     }
@@ -1401,7 +1407,7 @@ jet_driver_reach_items_reached: fn(reach: JetDriverReach) -> Int Never! {
 // functions, methods, trait-block and implementation methods, and trait
 // default bodies. A held stub's body is empty, so it counts once parsed.
 jet_driver_reach_core_bodies: fn(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit]) -> Int Never! {
-    count := 0
+    ^count: 0
     loop module_row in modules {
         if !jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
         loop item in module_row.program.items {
@@ -1424,7 +1430,7 @@ jet_driver_reach_core_bodies: fn(modules: [JetDriverLoadedModule], source_units:
 }
 
 jet_driver_reach_bodies: fn(functions: [Func]) -> Int Never! {
-    count := 0
+    ^count: 0
     loop function in functions {
         if function.body.len() > 0 -> count += 1
     }
@@ -1545,7 +1551,7 @@ JetDriverReachHeldParse: struct {
 // Per module of the load's `count` modules, the program.items positions of
 // the rows the load reached.
 jet_driver_reach_reached_items: fn(reach: JetDriverReach, count: Int) -> [[Bool]] {
-    reached := [[Bool]]{}
+    ^reached: [[Bool]]{}
     loop _ in 0..<count -> reached.push([Bool]{})
     loop item in reach.items {
         if !item.live -> next
@@ -1570,15 +1576,15 @@ jet_driver_reach_reached_items: fn(reach: JetDriverReach, count: Int) -> [[Bool]
 // own blanked source, so the programs and diagnostics are those of parsing
 // each in turn.
 jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriverReach, reached: [[Bool]], held: [JetDriverReachHeldModule], modules: ^[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], diagnostics: ^[Diagnostic], window: ^JetDriverCoreInterfaceWindow) -> JetDriverReachHeldParse {
-    done := JetDriverReachHeldParse{count: 0, fragments: 0, fragment_bytes: 0, fragment_reads: 0, problem: None}
+    ^done: JetDriverReachHeldParse{count: 0, fragments: 0, fragment_bytes: 0, fragment_reads: 0, problem: None}
     reads_before: window.reads
     // The held modules with a declaration to parse, in `held` order: each
     // one's blanked source, with its place in the load's modules and the
     // program.items positions its parse fills.
-    sources := [JetDriverReachSource]{}
+    ^sources: [JetDriverReachSource]{}
     // Where the ready parses the load reads sit, in `held` order: each
     // place's owner is its row in `held`, its slot the declaration's.
-    ready_places := [JetDriverCoreReadyPlace]{}
+    ^ready_places: [JetDriverCoreReadyPlace]{}
     loop (owner, row) in held {
         if row.ready != None {
             loop (index, declaration) in row.declarations {
@@ -1591,9 +1597,9 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
         }
         unit: source_units[modules[row.loaded].source_unit_index]
         text: jet_driver_source_unit_text(request, unit) ?? next
-        source := text.bytes()
-        positions := [Int]{}
-        cursor := 0
+        ^source: text.bytes()
+        ^positions: [Int]{}
+        ^cursor: 0
         loop declaration in row.declarations {
             if reach.enabled && !jet_driver_reach_has(reached[row.loaded], declaration.position) {
                 next
@@ -1606,14 +1612,14 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
         jet_driver_blank_bytes(source, cursor, source.len())
         sources.push(JetDriverReachSource{bytes: source, hold: None, loaded: row.loaded, positions: positions})
     }
-    parts := jet_driver_core_ready_programs(request.core_interface, window, ready_places, request.compiler_threads)
+    ^parts: jet_driver_core_ready_programs(request.core_interface, window, ready_places, request.compiler_threads)
     done.fragment_reads = window.reads - reads_before
     parts.reverse()
     loop {
         read: parts.pop() ?? break
         loaded: held[read.owner].loaded
         declaration: held[read.owner].declarations[read.slot]
-        part := read.part.move() ?? return jet_driver_reach_held_missing(done, modules[loaded].module_name, declaration.name)
+        ^part: read.part.move() ?? return jet_driver_reach_held_missing(done, modules[loaded].module_name, declaration.name)
         item: part.program.items.pop() ?? return jet_driver_reach_held_missing(done, modules[loaded].module_name, declaration.name)
         if part.program.items.len() > 0 {
             return jet_driver_reach_held_missing(done, modules[loaded].module_name, declaration.name)
@@ -1626,8 +1632,8 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
         done.fragments += 1
         done.fragment_bytes += part.size
     }
-    parses := jet_driver_reach_parse_sources(request.compiler_threads, sources)
-    failed := false
+    ^parses: jet_driver_reach_parse_sources(request.compiler_threads, sources)
+    ^failed: false
     loop {
         parse: parses.pop() ?? break
         loaded: parse.loaded
@@ -1661,7 +1667,7 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
 // `done`, stopped on the internal problem of the Core module `module_name`
 // whose held declaration `name` has a ready parse missing or unreadable.
 jet_driver_reach_held_missing: fn(done: JetDriverReachHeldParse, module_name: String, name: String) -> JetDriverReachHeldParse Never! {
-    stopped := done
+    ^stopped: done
     stopped.problem = Val("the Core interface holds no readable parse of the held declaration `{name}` of Core module `{module_name}`")
     stopped
 }
@@ -1701,15 +1707,15 @@ JetDriverReachParse: struct {
 // thread. A parse reads nothing but its own source, so the parses are those
 // of parsing each in turn. Each source's bytes go once it has parsed.
 jet_driver_reach_parse_sources: fn(threads: CompilerThreads, sources: ^[JetDriverReachSource]) -> [JetDriverReachParse] {
-    weights := [Int]{}
-    total := 0
-    largest := 0
+    ^weights: [Int]{}
+    ^total: 0
+    ^largest: 0
     loop source in sources {
         weights.push(source.bytes.len())
         total += source.bytes.len()
         if source.bytes.len() > largest -> largest = source.bytes.len()
     }
-    parses := [JetDriverReachParse]{}
+    ^parses: [JetDriverReachParse]{}
     workers: compiler_threads_admit(threads, sources.len(), total, JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD, largest * JET_DRIVER_PARSE_SCRATCH_PER_BYTE, 0)
     if workers <= 1 {
         // One thread: each module's parse may split across the compiler
@@ -1724,18 +1730,18 @@ jet_driver_reach_parse_sources: fn(threads: CompilerThreads, sources: ^[JetDrive
     // Consecutive parts of the sources, each moved out of `sources` and
     // held last-first.
     bounds: compiler_threads_partition(weights, workers)
-    parts := [[JetDriverReachSource]]{}
+    ^parts: [[JetDriverReachSource]]{}
     loop part in 0..<workers {
         from: bounds[workers - 1 - part]
-        rows := [JetDriverReachSource]{}
+        ^rows: [JetDriverReachSource]{}
         loop sources.len() > from {
-            source := sources.pop() ?? break
+            ^source: sources.pop() ?? break
             rows.push(source)
         }
         rows.reverse()
         parts.push(rows.move())
     }
-    parsed := jet_driver_reach_parse_parts(parts)
+    ^parsed: jet_driver_reach_parse_parts(parts)
     loop part in parsed.move() {
         loop done in part.move() -> parses.push(done)
     }
@@ -1746,9 +1752,9 @@ jet_driver_reach_parse_sources: fn(threads: CompilerThreads, sources: ^[JetDrive
 // One module's parse: its blanked source lexed, held as its `hold` row's
 // own parse holds it (when it has one), and parsed on `threads`.
 jet_driver_reach_parse_source: fn(source: [U8], hold: JetDriverReachHoldRow?, threads: CompilerThreads) -> JetDriverReachParse {
-    lexed := lex_generated_threads(source, threads)
+    ^lexed: lex_generated_threads(source, threads)
     tokens: lexed.lexed.tokens.len()
-    runs := lexed.runs
+    ^runs: lexed.runs
     if hold == .Val(row) {
         part_members: if row.module_name.starts_with("__") -> row.owned_members else -> [String]{}
         held: jet_driver_reach_hold(lexed.lexed, if row.runtime -> "" else -> row.module_name, row.owned_members, part_members, jet_driver_core_routes(row.module_name))
@@ -1764,7 +1770,7 @@ jet_driver_reach_parse_source: fn(source: [U8], hold: JetDriverReachHoldRow?, th
 // and the positions it fills.
 jet_driver_reach_parse_row: fn(source: ^^JetDriverReachSource, threads: CompilerThreads) -> JetDriverReachParse {
     owned: source.move()
-    parse := jet_driver_reach_parse_source(owned.bytes, owned.hold, threads)
+    ^parse: jet_driver_reach_parse_source(owned.bytes, owned.hold, threads)
     parse.loaded = owned.loaded
     parse.positions = owned.positions.move()
     parse
@@ -1775,15 +1781,15 @@ jet_driver_reach_parse_row: fn(source: ^^JetDriverReachSource, threads: Compiler
 // on this one. Each parse runs on its thread alone, so no spawned thread
 // spawns.
 jet_driver_reach_parse_parts: fn(parts: ^[[JetDriverReachSource]]) -> [[JetDriverReachParse]] {
-    parsed := [[JetDriverReachParse]]{}
-    part := parts.pop() ?? return parsed
+    ^parsed: [[JetDriverReachParse]]{}
+    ^part: parts.pop() ?? return parsed
     if parts.len() == 0 {
         parsed.push(jet_driver_reach_parse_part(part.move()))
         return parsed
     }
     task.group held_parse_threads {
         head: task jet_driver_reach_parse_part(part.move())
-        rest := jet_driver_reach_parse_parts(parts)
+        ^rest: jet_driver_reach_parse_parts(parts)
         parsed.push(compiler_threads_joined(head))
         loop done in rest.move() -> parsed.push(done)
     }
@@ -1808,19 +1814,19 @@ jet_driver_reach_parse_part: fn(sources: ^^[JetDriverReachSource]) -> [JetDriver
 // method or trait block leaves its type; a method's name stays, since other
 // types may share it.
 jet_driver_reach_strip: fn(reach: JetDriverReach, modules: ^[JetDriverLoadedModule]) {
-    dead := [[Bool]]{}
-    dead_imports := [[Span]]{}
+    ^dead: [[Bool]]{}
+    ^dead_imports: [[Span]]{}
     // Per unit, the words of its demands never followed: after a `.`, and
     // anywhere.
-    waiting_dotted := [[Bool]]{}
-    waiting_spelled := [[Bool]]{}
+    ^waiting_dotted: [[Bool]]{}
+    ^waiting_spelled: [[Bool]]{}
     loop _ in reach.units {
         dead.push([Bool]{})
         dead_imports.push([Span]{})
         waiting_dotted.push([Bool]{})
         waiting_spelled.push([Bool]{})
     }
-    any := false
+    ^any: false
     loop edge in reach.edges {
         if edge.followed -> next
         any = true
@@ -1846,10 +1852,10 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: ^[JetDriverLoadedModu
             waiting_spelled[demand.unit][demand.word] = true
         }
     }
-    gone := [Bool]{}
+    ^gone: [Bool]{}
     loop _ in reach.items -> gone.push(false)
-    global_gone := [Bool]{}
-    local_gone := [[Bool]]{}
+    ^global_gone: [Bool]{}
+    ^local_gone: [[Bool]]{}
     loop _ in reach.units -> local_gone.push([Bool]{})
     loop index in 0..<reach.items.len() {
         if reach.items[index].live -> next
@@ -1859,13 +1865,13 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: ^[JetDriverLoadedModu
     if !any {
         return
     }
-    grew := true
+    ^grew: true
     loop grew {
         grew = false
         loop index in 0..<reach.items.len() {
             unit: reach.items[index].unit
             if reach.items[index].live || gone[index] -> next
-            hit := false
+            ^hit: false
             loop spell in reach.items[index].spells {
                 id: spell >> 2
                 kind: spell & 3
@@ -1885,9 +1891,9 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: ^[JetDriverLoadedModu
     // Per unit and program.items position: whether the item leaves, and the
     // names of the methods and the traits (as written) of the blocks that
     // leave it.
-    drop := [[Bool]]{}
-    cut := [[[String]]]{}
-    blocks := [[[String]]]{}
+    ^drop: [[Bool]]{}
+    ^cut: [[[String]]]{}
+    ^blocks: [[[String]]]{}
     loop _ in reach.units {
         drop.push([Bool]{})
         cut.push([[String]]{})
@@ -1921,7 +1927,7 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: ^[JetDriverLoadedModu
     loop unit in 0..<reach.units.len() {
         loaded: reach.units[unit].loaded
         if dead_imports[unit].len() > 0 {
-            imports := [ImportDecl]{}
+            ^imports: [ImportDecl]{}
             loop declaration in modules[loaded].program.imports {
                 if !dead_imports[unit].contains(declaration.span) {
                     imports.push(declaration.copy())
@@ -1940,7 +1946,7 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: ^[JetDriverLoadedModu
                 jet_driver_reach_cut_blocks(modules[loaded].program.items, position, blocks[unit][position])
             }
         }
-        items := [Item]{}
+        ^items: [Item]{}
         loop position in 0..<modules[loaded].program.items.len() {
             if !jet_driver_reach_has(drop[unit], position) {
                 items.push(modules[loaded].program.items[position])
@@ -1954,18 +1960,18 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: ^[JetDriverLoadedModu
 // enum.
 jet_driver_reach_cut: fn(items: ^[Item], position: Int, names: [String]) Never! {
     if items[position] == .Struct(value) {
-        updated := value
+        ^updated: value
         updated.methods = jet_driver_reach_kept_methods(value.methods, names)
         items[position] = Item.Struct{value: updated}
     } else if items[position] == .Enum(value) {
-        updated := value
+        ^updated: value
         updated.methods = jet_driver_reach_kept_methods(value.methods, names)
         items[position] = Item.Enum{value: updated}
     }
 }
 
 jet_driver_reach_kept_methods: fn(methods: [Func], names: [String]) -> [Func] Never! {
-    kept := [Func]{}
+    ^kept: [Func]{}
     loop method in methods {
         // copy: the item keeps its methods until the cut item replaces it.
         if !names.contains(method.name) -> kept.push(method.copy())
@@ -1977,18 +1983,18 @@ jet_driver_reach_kept_methods: fn(methods: [Func], names: [String]) -> [Func] Ne
 // are written as in `traits` out of `items[position]`, a struct or enum.
 jet_driver_reach_cut_blocks: fn(items: ^[Item], position: Int, traits: [String]) Never! {
     if items[position] == .Struct(value) {
-        updated := value
+        ^updated: value
         updated.trait_impls = jet_driver_reach_kept_blocks(value.trait_impls, traits)
         items[position] = Item.Struct{value: updated}
     } else if items[position] == .Enum(value) {
-        updated := value
+        ^updated: value
         updated.trait_impls = jet_driver_reach_kept_blocks(value.trait_impls, traits)
         items[position] = Item.Enum{value: updated}
     }
 }
 
 jet_driver_reach_kept_blocks: fn(blocks: [TraitImplBlock], traits: [String]) -> [TraitImplBlock] Never! {
-    kept := [TraitImplBlock]{}
+    ^kept: [TraitImplBlock]{}
     loop block in blocks {
         // copy: the item keeps its blocks until the cut item replaces it.
         if !jet_driver_reach_lazy_block(block) || !traits.contains(block.trait_name) {

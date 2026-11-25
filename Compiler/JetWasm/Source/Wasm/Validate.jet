@@ -52,7 +52,7 @@ WasmValidator: struct {
     }
 
     pop_all: fn(^self, types: [Int]) WasmError! {
-        k := types.len()
+        ^k: types.len()
         loop k > 0 {
             k -= 1
             self.pop_expect(types[k])
@@ -139,7 +139,7 @@ WasmValidator: struct {
 }
 
 wasm_validate_module: fn(wm: WasmModule) WasmError! {
-    v := WasmValidator{
+    ^v: WasmValidator{
         wm: wm,
         ops: WasmOpTable.new(),
         func_types: [Int]{},
@@ -191,7 +191,7 @@ wasm_validate_module: fn(wm: WasmModule) WasmError! {
         wasm_validate_const(v, global.init, global.ty.value, imported_globals)
         v.globals.push(global.ty)
     }
-    names := [String:Bool]{}
+    ^names: [String:Bool]{}
     loop entry in wm.exports {
         if names.get(entry.name) != None {
             return Err(WasmError.new("duplicate export name `{entry.name}`", -1))
@@ -306,17 +306,13 @@ wasm_validate_imports: fn(v: ^WasmValidator) WasmError! {
 // first `visible` globals and only immutable ones.
 wasm_validate_const: fn(v: WasmValidator, expr: WasmConstExpr, expected: Int, visible: Int) WasmError! {
     op: expr.op
-    ty := WASM_UNKNOWN
+    ^ty: WASM_UNKNOWN
     if {
         op == WASM_OP_I32_CONST -> ty = WASM_I32
         op == WASM_OP_I64_CONST -> ty = WASM_I64
-        op == WASM_OP_F32_CONST -> {
-            ty = WASM_F32
-        }
+        op == WASM_OP_F32_CONST -> { ty = WASM_F32 }
         op == WASM_OP_F64_CONST -> { ty = WASM_F64 }
-        op == WASM_OP_REF_NULL -> {
-            ty = expr.value
-        }
+        op == WASM_OP_REF_NULL -> { ty = expr.value }
         op == WASM_OP_REF_FUNC -> {
             if expr.value >= v.func_types.len() {
                 return Err(WasmError.new("unknown function {expr.value}", -1))
@@ -443,8 +439,8 @@ wasm_validate_instruction: fn(v: ^WasmValidator, code: WasmCode, k: Int) WasmErr
                     return Err(v.fail("type mismatch: br_table targets have different arities"))
                 }
                 // Check each target against the stack without consuming it.
-                popped := [Int]{}
-                j := types.len()
+                ^popped: [Int]{}
+                ^j: types.len()
                 loop j > 0 {
                     j -= 1
                     got: v.pop_expect(types[j])

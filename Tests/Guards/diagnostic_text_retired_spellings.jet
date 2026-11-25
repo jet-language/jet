@@ -25,7 +25,7 @@ dr_report: fn(place: String, text: String, violations: ^[String]) {
 dr_registry_violations: fn(violations: ^[String]) {
     text: dr_files.read(DR_ROWS_PATH) ?? panic("read {DR_ROWS_PATH}: {err}")
     keys: [String]{"meaning", "what", "why", "fix", "next"}
-    retired := false
+    ^retired: false
     loop (index, line) in text.lines() {
         trimmed: line.trim()
         if trimmed.starts_with("status: ") -> retired = trimmed.contains(".Retired")
@@ -51,17 +51,17 @@ dr_source_violations: fn(violations: ^[String]) {
 
 #Test("retired_spelling_scanner_finds_each_spelling") {
     guards_enter_root()
-    found := [String]{}
+    ^found: [String]{}
     dr_report("row", "fill it via `mut cells`, or declare it with `:: distinct`", found)
     assert_eq(found, [String]{"row: teaches the retired `mut ", "row: teaches the retired :: distinct"})
-    quiet := [String]{}
+    ^quiet: [String]{}
     dr_report("row", "assign `cells` on every path, or declare `Name: distinct Int`", quiet)
     assert(quiet.is_empty(), "the current spellings read as retired: {quiet.join(", ")}")
 }
 
 #Test("diagnostic_paths_teach_no_retired_spelling") {
     guards_enter_root()
-    violations := [String]{}
+    ^violations: [String]{}
     dr_registry_violations(violations)
     dr_source_violations(violations)
     assert(violations.is_empty(), "a diagnostic path teaches a retired spelling; write the current form and regenerate the rows (jet Tools/Agent/DiagnosticRows.jet --write):\n{violations.join("\n")}")

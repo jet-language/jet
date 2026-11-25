@@ -73,9 +73,9 @@ cli_validate_declared_secrets_with_reuse: fn(theme: Theme, project_dir: String, 
             theme.error_coded("E1333", "secret named {spec.name} is not allowed for environment {environment}", "the selected environment is outside this declaration's allowed-environments policy.", "select an allowed environment or update the named declaration.")
             return Err(CLIError.Reported(EXIT_USAGE))
         }
-        missing := String?{None}
+        ^missing: String?{None}
         if !reuse_verified_store {
-            visiting := [String]{}
+            ^visiting: [String]{}
             if cli_secret_activation_missing(project_dir, spec, specs, visiting) == {
                 .Val(name) -> { missing = Val(name) }
                 .None -> {}
@@ -138,7 +138,7 @@ cli_secret_activation_missing: fn(project_dir: String, spec: SecretSpec, specs: 
         .Compose(_, from) -> {
             visiting.push(spec.name)
             loop input in from {
-                input_spec := SecretSpec?{None}
+                ^input_spec: SecretSpec?{None}
                 loop candidate in specs {
                     if candidate.name == input && input_spec == None -> input_spec = Val(candidate)
                 }
@@ -172,7 +172,7 @@ cli_service_before_start: fn(verification: StoreVerification, cache: ^WorkspaceD
 
 cli_report_service_start_error: fn(theme: Theme, title: String, error: String) -[IO, Time.Wait]> Never! {
     if error.contains("did not become healthy") || error.contains("restart limit exhausted") || error.contains("restart did not produce a running process") {
-        name := "unknown"
+        ^name: "unknown"
         if cli_strip_prefix(error, "service `") == .Val(rest) {
             name = rest.split_once("`")?.before ?? "unknown"
         }
@@ -266,7 +266,7 @@ cli_run_lifecycle_command: fn(theme: Theme, project_dir: String, env: ^ShellEnv,
         theme.error("lifecycle {phase} hook '{hook.name}' has an unsafe cwd", "`{cwd}` resolves outside the project", "use a project-relative directory that does not escape through a symlink.")
         return Err(CLIError.Reported(EXIT_USAGE))
     }
-    spec := process.shell(command).cwd(cwd).stdout(.Capture).stderr(.Capture)
+    ^spec: process.shell(command).cwd(cwd).stdout(.Capture).stderr(.Capture)
     spec = env.apply_in_mode(spec, mode.clean) ?? {
         theme.error("couldn't run {phase} hook '{hook.name}'", err.message(), "re-realize the leased packages, then run the hook again.")
         return Err(CLIError.Reported(EXIT_USAGE))
@@ -310,7 +310,7 @@ cli_service_health_timeout: fn() -[Env]> time.Duration Never! {
 cli_selected_service_order: fn(services: [DevServicePlan], name: String?) -> [Int] ServicesError! {
     order: services_dependency_order(services)
     wanted: name ?? return Ok(order)
-    target := -1
+    ^target: -1
     loop index in 0..<services.len() {
         if target < 0 && services[index].name == wanted -> target = index
     }
@@ -318,8 +318,8 @@ cli_selected_service_order: fn(services: [DevServicePlan], name: String?) -> [In
     if !services[target].enable {
         return Err(ServicesError{message: "service `{wanted}` is disabled"})
     }
-    needed := [Int]{}
-    pending := [Int]{target}
+    ^needed: [Int]{}
+    ^pending: [Int]{target}
     loop pending.len() > 0 {
         index: pending.pop() ?? break
         if needed.contains(index) -> next
@@ -333,7 +333,7 @@ cli_selected_service_order: fn(services: [DevServicePlan], name: String?) -> [In
             }
         }
     }
-    selected := [Int]{}
+    ^selected: [Int]{}
     loop index in order {
         if needed.contains(index) -> selected.push(index)
     }
@@ -358,7 +358,7 @@ SERVICES_ORDER_FIX_CYCLES: "remove dependency cycles and unknown dependencies."
 // With no `<name>` every declared dev service is targeted; `logs` requires
 // exactly one name.
 cli_cmd_services: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     verb_word: parsed.positional.get(0) ?? {
         theme.error("`jet os services` needs a verb", "known verbs: {SERVICES_VERBS.join(", ")}.", "try `jet os services up`.")
         return EXIT_USAGE
@@ -377,7 +377,7 @@ cli_cmd_services: fn(verification: StoreVerification, theme: Theme, parsed: CLIP
             cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
         }
     }
-    targets := [DevServicePlan]{}
+    ^targets: [DevServicePlan]{}
     loop service in plan.dev_services {
         if (name ?? service.name) == service.name -> targets.push(service)
     }
@@ -388,7 +388,7 @@ cli_cmd_services: fn(verification: StoreVerification, theme: Theme, parsed: CLIP
         }
         theme.error(headline, "declare one under an `env.<name> {{ services: {{ … }} }}` role-module (U12).", "")
         if name == None {
-            presets := [String]{}
+            ^presets: [String]{}
             loop preset in services_catalog_presets() {
                 presets.push("{preset.name} ({preset.package})")
             }
@@ -416,7 +416,7 @@ cli_services_logs: fn(theme: Theme, project_dir: String, name: String?) -[IO, FS
         theme.error("`jet os services logs` needs a service name", "logs are per service.", "try `jet os services logs <name>`.")
         return EXIT_USAGE
     }
-    stdout_handle := term.stdout()
+    ^stdout_handle: term.stdout()
     stdout_handle.write(services_logs(project_dir, service)).drop("a closed stdout cannot take service logs")
     EXIT_OK
 }
@@ -425,7 +425,7 @@ cli_services_up: fn(verification: StoreVerification, cache: ^WorkspaceDeclaratio
     project_dir: plan.project_root
     roots: pkg_resolve_roots()
     if roots.dev_mode -> theme.detail(theme.gray("user-owned hangar active"))
-    env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    ^env: cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_DECLARE) ?? return EXIT_USAGE
     entry: cli_find_project_entry(project_dir)
     before_start: fn(svc: DevServicePlan) { cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc) }
@@ -440,7 +440,7 @@ cli_services_up: fn(verification: StoreVerification, cache: ^WorkspaceDeclaratio
 cli_services_restart: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir: plan.project_root
     roots: pkg_resolve_roots()
-    env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    ^env: cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     entry: cli_find_project_entry(project_dir)
     before_start: fn(svc: DevServicePlan) { cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc) }
@@ -458,7 +458,7 @@ cli_services_down: fn(theme: Theme, plan: RunPlan, name: String?) -[IO, FS, Env,
         theme.error("couldn't stop services", err.message, "inspect the service logs and state.")
         return EXIT_USAGE
     }
-    index := order.len() - 1
+    ^index: order.len() - 1
     loop index >= 0 {
         theme.ok("service `{plan.dev_services[order[index]].name}` is down")
         index -= 1
@@ -480,10 +480,10 @@ cli_service_health_label: fn(health: ServiceHealth, json: Bool) -> {label: Strin
 cli_services_health: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed, plan: RunPlan, targets: [DevServicePlan]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir: plan.project_root
     roots: pkg_resolve_roots()
-    env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
-    all_healthy := true
+    ^env: cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    ^all_healthy: true
     if parsed.flags.json {
-        records := [Dyn]{}
+        ^records: [Dyn]{}
         loop svc in targets {
             state: cli_service_health_label(services_health_one(project_dir, env, svc), true)
             all_healthy = all_healthy && state.healthy
@@ -513,7 +513,7 @@ cli_services_health: fn(verification: StoreVerification, theme: Theme, parsed: C
 cli_services_wait: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir: plan.project_root
     roots: pkg_resolve_roots()
-    env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    ^env: cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     loop index in order {
         svc: plan.dev_services[index]
@@ -529,7 +529,7 @@ cli_services_wait: fn(verification: StoreVerification, theme: Theme, parsed: CLI
 cli_services_watch: fn(verification: StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir: plan.project_root
     roots: pkg_resolve_roots()
-    env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    ^env: cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     entry: cli_find_project_entry(project_dir)
     before_start: fn(svc: DevServicePlan) { cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc) }
@@ -552,14 +552,14 @@ cli_services_watch: fn(verification: StoreVerification, cache: ^WorkspaceDeclara
 // Jetpack owns service realization and measurement, `jet budget` owns the
 // typed report, and the compiler validates the versioned row.
 cli_cmd_service_probe: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cache := WorkspaceDeclarationCache.new()
+    ^cache: WorkspaceDeclarationCache.new()
     if parsed.positional.len() != 1 {
         theme.error("internal service probe needs exactly one service name", "the compiler and Jetpack use this operation as a version-checked machine protocol.", "use `jet budget check` or `jet dev`; do not invoke the internal operation directly.")
         return EXIT_USAGE
     }
     name: parsed.positional[0]
     plan: cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
-    found := DevServicePlan?{None}
+    ^found: DevServicePlan?{None}
     loop service in plan.dev_services {
         if found == None && service.name == name -> found = Val(service)
     }
@@ -577,12 +577,12 @@ cli_cmd_service_probe: fn(verification: StoreVerification, theme: Theme, parsed:
     }
     cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
     roots: pkg_resolve_roots()
-    env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    ^env: cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     samples: services_measure_readiness(ServiceHost.Platform, project_dir, env, service, SERVICES_PROBE_SAMPLES) ?? {
         theme.error("couldn't measure service `{name}`", err.message, "check the service run, shutdown, and readiness declarations.")
         return EXIT_USAGE
     }
-    row := [String]{"JETSERVICE1", cli_hex_bytes(name.bytes())}
+    ^row: [String]{"JETSERVICE1", cli_hex_bytes(name.bytes())}
     loop sample in samples -> row.push("{sample}")
     print(row.join("\t"))
     EXIT_OK
@@ -591,7 +591,7 @@ cli_cmd_service_probe: fn(verification: StoreVerification, theme: Theme, parsed:
 // Lowercase two-digit hex of every byte.
 cli_hex_bytes: fn(bytes: [U8]) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in bytes {
         code: Int{byte}
         out.push(digits[code /% 16])

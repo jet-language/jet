@@ -22,14 +22,14 @@ cli_hangar_register_external_root: fn(verification: StoreVerification, theme: Th
     }
     label: args[0]
     reference: args[1]
-    expires_in := Int?{None}
+    ^expires_in: Int?{None}
     if cli_flag_value(parsed, "--expires-in") == .Val(value) {
         expires_in = Val(cli_parse_duration(value) ?? {
             return cli_hangar_report_error(theme, parsed, "E1340", "invalid external-root expiry", err.message, "use a positive duration such as `1h`, `7d`, or `1w`.")
         })
     }
     now: cli_unix_now()
-    expires_at := Int?{None}
+    ^expires_at: Int?{None}
     if expires_in == .Val(seconds) {
         if seconds > CLI_MAX_UNIX_SECONDS - now {
             return cli_hangar_report_error(theme, parsed, "E1340", "external-root expiry is too far in the future", "the requested duration overflows the lifecycle timestamp.", "use a shorter duration.")
@@ -82,7 +82,7 @@ cli_hangar_register_external_root: fn(verification: StoreVerification, theme: Th
 cli_hangar_list_external_roots: fn(verification: StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     views: store_list_external_roots(verification, pkg_resolve_roots(), cli_external_root_principal()) ?? return cli_external_root_error(theme, parsed, err)
     if parsed.flags.json {
-        machine_roots := [Dyn]{}
+        ^machine_roots: [Dyn]{}
         loop view in views {
             machine_roots.push(
                 report_status_object(
@@ -172,7 +172,7 @@ DurationParseError: struct {
 // A positive `<digits><s|m|h|d|w>` duration in seconds.
 cli_parse_duration: fn(value: String) -> Int DurationParseError! {
     raw: value.bytes()
-    split := 0
+    ^split: 0
     loop split < raw.len() && (Int{raw[split]}) >= 48 && (Int{raw[split]}) <= 57 -> split += 1
     number: String.from_bytes(raw[0..<split]) ?? ""
     suffix: String.from_bytes(raw[split..<raw.len()]) ?? ""

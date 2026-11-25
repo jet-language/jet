@@ -116,7 +116,7 @@ run: fn() {
             63.0,
         ],
     ) ?? panic("chunk source")
-    plan := chunked(chunk_source, 8)
+    ^plan: chunked(chunk_source, 8)
     if chunk_count(plan) != 8 -> panic("chunk count")
     indexed_tensor: read_chunk(plan, 1)
     if compute.to_list(indexed_tensor) != ([Float]{8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0}) {
@@ -132,10 +132,10 @@ run: fn() {
     }
     if plan.reads != 2 -> panic("indexed read count")
 
-    all_plan := chunked(chunk_source, 8)
+    ^all_plan: chunked(chunk_source, 8)
     mapped_tensor: map_all(all_plan, double)
     mapped: compute.to_list(mapped_tensor)
-    expected_mapped := [Float]{}
+    ^expected_mapped: [Float]{}
     loop value in 0..<64 -> expected_mapped.push(Float.from_int(value * 2))
     if mapped != expected_mapped -> panic("mapped chunk values")
     if compute.numel(mapped_tensor) != 64 || all_plan.reads != 8 -> panic("mapped chunk coverage")

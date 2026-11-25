@@ -16,7 +16,7 @@ run: fn() {
     path: files.join(root.path, "s")
     listener: net.unix_listen(path) ?? panic("listen: {err}")
     peer: process.cmd([String]{"python3", "peer.py", path}).stdout(.Capture).stderr(.Capture).spawn() ?? panic("peer: {err}")
-    server := net.unix_accept(listener) ?? panic("accept: {err}")
+    ^server: net.unix_accept(listener) ?? panic("accept: {err}")
 
     before: open_descriptors()
     net.unix_send(server, [U8]{1}, [sys.Fd]{}) ?? panic("go: {err}")

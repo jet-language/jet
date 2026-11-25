@@ -29,7 +29,7 @@ watch_snapshot_drop: fn(snapshot: I64) {
     }
     length: trap_word(snapshot)
     data: trap_word(wrapping(snapshot + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         jet_rt_string_drop(trap_word(wrapping(data + at * I64{32})))
         at += I64{1}
@@ -40,7 +40,7 @@ watch_snapshot_drop: fn(snapshot: I64) {
 }
 
 #Export(c) jet_rt_handle_clone_watch_handle: fn(value: I64) -> I64 {
-    _ := sync_add(value, I64{1})
+    ^_: sync_add(value, I64{1})
     value
 }
 
@@ -58,7 +58,7 @@ watch_snapshot_drop: fn(snapshot: I64) {
 }
 
 #Export(c) jet_rt_handle_clone_watch_set: fn(value: I64) -> I64 {
-    _ := sync_add(value, I64{1})
+    ^_: sync_add(value, I64{1})
     value
 }
 
@@ -71,7 +71,7 @@ watch_snapshot_drop: fn(snapshot: I64) {
     }
     length: sync_load(wrapping(value + I64{8}))
     data: sync_load(wrapping(value + I64{24}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         jet_rt_handle_drop_watch_handle(trap_word(wrapping(data + at * I64{8})))
         at += I64{1}
@@ -117,20 +117,20 @@ watch_join: fn(parent: I64, name: I64) -> I64 {
 // jet_watch_snapshot: a stack walk; symlink_metadata of every path, read_dir
 // of every directory; any failure is io_error_at(Read, that path).
 watch_snapshot: fn(root: I64, snapshot: I64, error: I64) -> Bool {
-    stack := jet_rt_alloc(I64{64}, I64{8})
-    stack_capacity := I64{8}
-    depth := I64{1}
+    ^stack: jet_rt_alloc(I64{64}, I64{8})
+    ^stack_capacity: I64{8}
+    ^depth: I64{1}
     trap_store(stack, jet_rt_string_clone(root))
     facts: jet_rt_alloc(I64{160}, I64{8})
     buffer: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
-    failed := false
+    ^failed: false
     loop depth > (I64{0}) && !failed {
         depth -= I64{1}
         path: trap_word(wrapping(stack + depth * I64{8}))
         jet_fs_stat_raw(path, false, facts, wrapping(facts + I64{128}))
         code: files_out_errno(wrapping(facts + I64{128}))
         if (code != I64{0}) {
-            _ := compiler_fs_errno(HOST_IO_OP_READ, path, code, error)
+            ^_: compiler_fs_errno(HOST_IO_OP_READ, path, code, error)
             jet_rt_string_drop(path)
             failed = true
             break
@@ -142,22 +142,22 @@ watch_snapshot: fn(root: I64, snapshot: I64, error: I64) -> Bool {
         watch_snapshot_push(snapshot, jet_rt_string_clone(path), modified, trap_word(wrapping(facts + I64{56})), if directory -> I64{1} else -> I64{0})
         if directory {
             name: fd_c_path(path)
-            fd := I64{-4}
+            ^fd: I64{-4}
             loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, FILES_O_DIRECTORY_CLOEXEC, I64{0})
             fd_c_path_drop(name, path)
             if (fd < I64{0}) {
-                _ := compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
+                ^_: compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
                 failed = true
             } else {
                 loop {
                     count: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
                     if (count == I64{0}) { break }
                     if (count < I64{0}) {
-                        _ := compiler_fs_errno(HOST_IO_OP_READ, path, -count, error)
+                        ^_: compiler_fs_errno(HOST_IO_OP_READ, path, -count, error)
                         failed = true
                         break
                     }
-                    at := I64{0}
+                    ^at: I64{0}
                     loop at < count {
                         record: wrapping(buffer + at)
                         at += rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})
@@ -174,7 +174,7 @@ watch_snapshot: fn(root: I64, snapshot: I64, error: I64) -> Bool {
                         depth += I64{1}
                     }
                 }
-                _ := host_call(I64{3}, fd, I64{0}, I64{0})
+                ^_: host_call(I64{3}, fd, I64{0}, I64{0})
             }
         }
         jet_rt_string_drop(path)
@@ -200,17 +200,17 @@ watch_snapshot_sort: fn(snapshot: I64) {
         return
     }
     original: trap_word(wrapping(snapshot + I64{16}))
-    source := original
-    target := jet_rt_alloc(length * I64{32}, I64{8})
-    width := I64{1}
+    ^source: original
+    ^target: jet_rt_alloc(length * I64{32}, I64{8})
+    ^width: I64{1}
     loop width < length {
-        start := I64{0}
+        ^start: I64{0}
         loop start < length {
             middle: watch_min(start + width, length)
             end: watch_min(start + width * I64{2}, length)
-            left := start
-            right := middle
-            at := start
+            ^left: start
+            ^right: middle
+            ^at: start
             loop at < end {
                 from_left: right >= end || (left < middle && jet_rt_string_compare(trap_word(wrapping(source + left * I64{32})), trap_word(wrapping(source + right * I64{32}))) <= I64{0})
                 if from_left {
@@ -324,11 +324,11 @@ watch_diff: fn(previous: I64, next: I64, events: I64) {
     old_rows: trap_word(wrapping(previous + I64{16}))
     new_count: trap_word(next)
     new_rows: trap_word(wrapping(next + I64{16}))
-    at := I64{0}
-    other := I64{0}
+    ^at: I64{0}
+    ^other: I64{0}
     loop at < new_count {
         row: new_rows + at * I64{32}
-        order := I64{1}
+        ^order: I64{1}
         loop other < old_count {
             order = jet_rt_string_compare(trap_word(wrapping(old_rows + other * I64{32})), trap_word(row))
             if (order >= I64{0}) { break }
@@ -345,7 +345,7 @@ watch_diff: fn(previous: I64, next: I64, events: I64) {
     other = I64{0}
     loop at < old_count {
         row: old_rows + at * I64{32}
-        order := I64{1}
+        ^order: I64{1}
         loop other < new_count {
             order = jet_rt_string_compare(trap_word(wrapping(new_rows + other * I64{32})), trap_word(row))
             if (order >= I64{0}) { break }

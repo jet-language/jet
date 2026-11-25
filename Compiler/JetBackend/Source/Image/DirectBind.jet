@@ -21,8 +21,8 @@ use jet_foundation.[CompilerThreads, NameTable, name_index, name_intern, name_ta
 // are the object writer's. The image is the executable's image part, bound
 // or not.
 x64_bind_functions_at: fn(name: String, program: ^^X64ObjectModule, functions: ^^[X64CompiledFunction], debug: ^^[X64FunctionDebug], threads: CompilerThreads, image: ^^[U8], program_base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
-    c := link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
-    exe := x64_executable_whole([U8]{})
+    ^c: link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
+    ^exe: x64_executable_whole([U8]{})
     if link_direct_bind(c, exe, program, functions, debug, program_base, gap_at, gap) {
         exe.image = c.bufs.remove(1, .Slot) ?? [U8]{}
         return X64BindResult{executable: exe, errors: [String]{}}
@@ -31,7 +31,7 @@ x64_bind_functions_at: fn(name: String, program: ^^X64ObjectModule, functions: ^
     exports: [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
     object: x64_object_functions_threads(program.move(), functions.move(), debug.move(), exports, [X64DataExport]{}, threads, false, false)
     if object.errors.len() > 0 {
-        failed := x64_executable_whole([U8]{})
+        ^failed: x64_executable_whole([U8]{})
         failed.image = taken.move()
         return X64BindResult{executable: failed, errors: object.errors.move(), unwritten: true}
     }
@@ -49,7 +49,7 @@ x64_bind_functions_debug_at: fn(name: String, program: ^^X64ObjectModule, functi
     exports: [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
     object: x64_object_functions_threads(program.move(), functions.move(), debug.move(), exports, [X64DataExport]{}, threads, true, false)
     if object.errors.len() > 0 {
-        failed := x64_executable_whole([U8]{})
+        ^failed: x64_executable_whole([U8]{})
         failed.image = image.move()
         return X64BindResult{executable: failed, errors: object.errors.move(), unwritten: true}
     }
@@ -60,7 +60,7 @@ x64_bind_functions_debug_at: fn(name: String, program: ^^X64ObjectModule, functi
 // `functions`, written into `exe` but for its image part (input 1 of `c`);
 // false, with `exe` unfinished, when the object route must make it.
 link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], program_base: Int, gap_at: Int, gap: Int) -> Bool Never! {
-    view := link_image_view(c, 1, gap_at, gap)
+    ^view: link_image_view(c, 1, gap_at, gap)
     if c.errors.len() > 0 || view.exports_slots == 0 -> return false
     if program_base & LINK_PAGE - 1 != 0 || program_base < view.program_base -> return false
     view.program_base = program_base
@@ -68,12 +68,12 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
     if functions.len() == 0 || debug.len() != functions.len() -> return false
     // Per function id + 1 its first row, as the object writer finds a
     // call's target; `main` is id -1.
-    max_id := -1
+    ^max_id: -1
     loop function in functions {
         if function.id.value < -1 -> return false
         if function.id.value > max_id -> max_id = function.id.value
     }
-    function_rows := [Int]{}
+    ^function_rows: [Int]{}
     loop _ in 0..<(max_id + 2) -> function_rows.push(-1)
     loop (index, function) in functions {
         if function_rows[function.id.value + 1] < 0 -> function_rows[function.id.value + 1] = index
@@ -81,10 +81,10 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
     main_row: function_rows[0]
     if main_row < 0 -> return false
     // The object's `.text`: each function on its alignment, in order.
-    offsets := [Int]{}
-    sizes := [Int]{}
-    text_size := 0
-    text_align := X64_FUNCTION_ALIGN
+    ^offsets: [Int]{}
+    ^sizes: [Int]{}
+    ^text_size: 0
+    ^text_align: X64_FUNCTION_ALIGN
     loop function in functions {
         if function.align > text_align -> text_align = function.align
         loop text_size % function.align != 0 -> text_size += 1
@@ -96,15 +96,15 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
     // The object's `.data` and `.rodata` (x64_object_data_place), and which
     // of them the bind loads: those the code reaches, and `.rodata` when
     // `.data` is loaded and reaches it.
-    placed := [Bool]{}
-    data_offsets := [Int]{}
+    ^placed: [Bool]{}
+    ^data_offsets: [Int]{}
     loop _ in program.data {
         placed.push(false)
         data_offsets.push(0)
     }
-    order := [Int]{}
-    data_live := false
-    rodata_live := false
+    ^order: [Int]{}
+    ^data_live: false
+    ^rodata_live: false
     loop function in functions {
         loop reloc in function.relocs {
             if reloc.kind == X64_RELOC_FUNCTION {
@@ -121,10 +121,10 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
             }
         }
     }
-    data := [U8]{}
-    data_align := 1
-    rodata := [U8]{}
-    rodata_align := 1
+    ^data: [U8]{}
+    ^data_align: 1
+    ^rodata: [U8]{}
+    ^rodata_align: 1
     loop index in order {
         object: program.data[index]
         if {
@@ -166,8 +166,8 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
     // writable from the page after.
     has_rw: data_live || frames
     phnum: view.phnum + 2 + (if has_rw -> 1 else -> 0)
-    addr := program_base + LINK_PHDR_SIZE * phnum
-    rodata_at := addr
+    ^addr: program_base + LINK_PHDR_SIZE * phnum
+    ^rodata_at: addr
     if rodata_live {
         rodata_at = link_align(addr, rodata_align)
         addr = rodata_at + rodata.len()
@@ -182,14 +182,14 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
     startup_at: link_align(code_at + text_size, 16)
     text_end: startup_at + startup.text.len()
     rw_start: link_align(text_end, LINK_PAGE)
-    data_at := rw_start
-    file_end := rw_start
+    ^data_at: rw_start
+    ^file_end: rw_start
     if data_live {
         data_at = link_align(rw_start, data_align)
         file_end = data_at + data.len()
     }
-    bss_at := file_end
-    mem_end := file_end
+    ^bss_at: file_end
+    ^mem_end: file_end
     if frames {
         bss_at = link_align(file_end, 16)
         mem_end = bss_at + startup.bss
@@ -225,8 +225,8 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
     exe.image_gap_at = gap_at
     exe.image_gap = gap
     exe.tail_at = origin
-    out := [U8]{}
-    elf := link_bind_header(c, exe, out, view, layout, start)
+    ^out: [U8]{}
+    ^elf: link_bind_header(c, exe, out, view, layout, start)
     if c.errors.len() > 0 -> return false
     // The loaded bytes, as link_write_contents writes them: zeros before
     // data, int3 before code.
@@ -246,9 +246,9 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
     link_pad_to(out, code_at - program_base, 0xcc)
     code_from: out.len()
     // Each import's address in the image by its id in `names`, once looked up.
-    names := name_table_sized(64)
-    looked := [Bool]{}
-    import_at := [Int]{}
+    ^names: name_table_sized(64)
+    ^looked: [Bool]{}
+    ^import_at: [Int]{}
     loop (index, function) in functions {
         link_pad_to(out, code_from + offsets[index], 0xcc)
         out.extend(function.code)
@@ -272,7 +272,7 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
         rel_name: startup.rel_names[k]
         kind: startup.rel_types[k]
         if kind != LINK_R_PC32 && kind != LINK_R_PLT32 -> return false
-        target := link_direct_startup_address(startup, rel_name, startup_at, bss_at)
+        ^target: link_direct_startup_address(startup, rel_name, startup_at, bss_at)
         if rel_name == "__jet_bind_eh" -> target = eh_start
         if rel_name == "main" -> target = main_at
         if target < 0 -> target = link_direct_import(c, view, names, looked, import_at, rel_name)
@@ -297,8 +297,8 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
     }
     if has_rw -> link_pad_to(out, file_end - program_base, 0)
     // The tail, as link_bind_sections writes it without debug sections.
-    headers := link_bind_image_headers(c, view)
-    extents := [[Int]]{}
+    ^headers: link_bind_image_headers(c, view)
+    ^extents: [[Int]]{}
     loop _ in 0..<LINK_CLASSES -> extents.push([Int]{0, 0})
     if rodata_live -> extents[LINK_RODATA] = [Int]{rodata_at, rodata_end}
     extents[LINK_EH] = [Int]{eh_start, eh_start + eh_size}
@@ -307,13 +307,13 @@ link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectMod
     if has_rw -> extents[LINK_BSS] = [Int]{file_end, mem_end}
     class_headers: link_bind_class_headers(headers, extents, rw_start, 0, c.base)
     text_header: class_headers[LINK_TEXT]
-    symbol_names := [U8]{}
-    locals := [U8]{}
+    ^symbol_names: [U8]{}
+    ^locals: [U8]{}
     loop (index, function) in functions {
         if function.id.value == -1 || function.name == "" -> next
         link_image_symbol(locals, symbol_names, 1, function.name, 2, text_header, code_at + offsets[index], function.code.len())
     }
-    globals := [U8]{}
+    ^globals: [U8]{}
     link_image_symbol(globals, symbol_names, 1, "main", 0x12, text_header, main_at, functions[main_row].code.len())
     loop (k, def_name) in startup.def_names {
         section: startup.def_sections[k]

@@ -13,7 +13,7 @@ jetos_write_etc_tree: fn(dir: String, system: SystemPlan) -[FS]> IOError! {
     }
     root_device: jetos_option_value(system, [String]{"filesystem.root.device"}) ?? "LABEL=jetos-root"
     root_type: pkg_ascii_lower(pkg_trim_start_matches(jetos_option_value(system, [String]{"filesystem.root.type"}) ?? "ext4", "."))
-    fstab := [String]{"{root_device}\t/\t{root_type}\tdefaults\t0\t1\n"}
+    ^fstab: [String]{"{root_device}\t/\t{root_type}\tdefaults\t0\t1\n"}
     loop swap in jetos_collect_names(system, "filesystem.swap") {
         device: jetos_option_value(system, [String]{"filesystem.swap.{swap}.device"}) ?? "LABEL=jetos-swap-{swap}"
         priority: if jetos_option_value(system, [String]{"filesystem.swap.{swap}.priority"}) == {
@@ -30,10 +30,10 @@ jetos_write_etc_tree: fn(dir: String, system: SystemPlan) -[FS]> IOError! {
 jetos_write_identity_files: fn(dir: String, etc: String, system: SystemPlan) -[FS]> IOError! {
     users: jetos_collect_names(system, "users")
     groups: jetos_collect_names(system, "groups")
-    passwd := [String]{"root:x:0:0:root:/root:/bin/sh\n", "messagebus:x:81:81:D-Bus system message bus:/run/dbus:/usr/sbin/nologin\n", "gdm:x:120:120:GDM display manager:/var/lib/gdm:/usr/sbin/nologin\n"}
-    shadow := [String]{"root:!:1::::::\n"}
-    group := [String]{"root:x:0:\nmessagebus:x:81:\ngdm:x:120:\nvideo:x:44:\nrender:x:303:\ninput:x:304:\naudio:x:18:\n"}
-    sysusers := [String]{}
+    ^passwd: [String]{"root:x:0:0:root:/root:/bin/sh\n", "messagebus:x:81:81:D-Bus system message bus:/run/dbus:/usr/sbin/nologin\n", "gdm:x:120:120:GDM display manager:/var/lib/gdm:/usr/sbin/nologin\n"}
+    ^shadow: [String]{"root:!:1::::::\n"}
+    ^group: [String]{"root:x:0:\nmessagebus:x:81:\ngdm:x:120:\nvideo:x:44:\nrender:x:303:\ninput:x:304:\naudio:x:18:\n"}
+    ^sysusers: [String]{}
     loop idx in 0..<users.len() {
         user: users[idx]
         uid: 1000 + idx
@@ -172,7 +172,7 @@ jetos_kernel_source_dyn: fn(entry: JetOSRealizedPackage) -[FS]> Dyn Never! {
         {name: "patches", relative: "source/patches.manifest"},
         {name: "initrd_inputs", relative: "source/initrd-inputs.manifest"},
     }
-    source_files := [Dyn]{}
+    ^source_files: [Dyn]{}
     loop fact in facts {
         path: files.join(out, fact.relative)
         sha: if files.read_bytes(path) == {

@@ -69,7 +69,7 @@ BodyCodecIn: struct {
 }
 
 body_codec_put_uvarint: fn(out: ^BodyCodecOut, value: Int) Never! {
-    rest := value
+    ^rest: value
     loop {
         low: rest & 127
         rest = rest >> 7
@@ -83,8 +83,8 @@ body_codec_put_uvarint: fn(out: ^BodyCodecOut, value: Int) Never! {
 
 body_codec_get_uvarint: fn(bytes: [U8], input: ^BodyCodecIn) -> Int Never! {
     if input.failed -> return 0
-    value := 0
-    shift := 0
+    ^value: 0
+    ^shift: 0
     loop {
         if input.at >= input.end {
             input.failed = true
@@ -352,7 +352,7 @@ body_codec_get_declid: fn(bytes: [U8], input: ^BodyCodecIn) -> DeclID Never! {
         // Only a read that failed has no declaration, and its body is never
         // used: the first row of an empty table stands in.
         input.failed = true
-        rows := Rows<DeclRow>{}
+        ^rows: Rows<DeclRow>{}
         return DeclID{row: rows.add(DeclRow{symbol: SymbolID{id: U32{0}}, kind: SymbolKind.Function})}
     }
     input.decls[at]
@@ -524,9 +524,11 @@ body_codec_get_tcomptimevalue: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptime
         15 -> {
             row: body_codec_get_typeid(bytes, input)
             type_name: body_codec_get_string(bytes, input)
-            fields := body_codec_get_list_tcomptimefield(bytes, input)
+            ^fields: body_codec_get_list_tcomptimefield(bytes, input)
             loop at in 0..<fields.len() {
-                if fields[at].name == "handle" -> fields[at].value = TComptimeValue.Int{value: Int{row.id}}
+                if fields[at].name == "handle" {
+                    fields[at].value = TComptimeValue.Int{value: Int{row.id}}
+                }
             }
             TComptimeValue.Struct{type_name: type_name, fields: fields}
         }
@@ -541,7 +543,7 @@ body_codec_put_list_tcomptimevalue: fn(out: ^BodyCodecOut, values: [TComptimeVal
 
 body_codec_get_list_tcomptimevalue: fn(bytes: [U8], input: ^BodyCodecIn) -> [TComptimeValue] Never! {
     count: body_codec_get_count(bytes, input, 1)
-    values := [TComptimeValue]{}
+    ^values: [TComptimeValue]{}
     loop _ in 0..<count -> values.push(body_codec_get_tcomptimevalue(bytes, input))
     values
 }
@@ -553,7 +555,7 @@ body_codec_put_list_tcomptimefield: fn(out: ^BodyCodecOut, values: [TComptimeFie
 
 body_codec_get_list_tcomptimefield: fn(bytes: [U8], input: ^BodyCodecIn) -> [TComptimeField] Never! {
     count: body_codec_get_count(bytes, input, 1)
-    values := [TComptimeField]{}
+    ^values: [TComptimeField]{}
     loop _ in 0..<count -> values.push(body_codec_get_tcomptimefield(bytes, input))
     values
 }
@@ -565,7 +567,7 @@ body_codec_put_list_tcomptimemapentry: fn(out: ^BodyCodecOut, values: [TComptime
 
 body_codec_get_list_tcomptimemapentry: fn(bytes: [U8], input: ^BodyCodecIn) -> [TComptimeMapEntry] Never! {
     count: body_codec_get_count(bytes, input, 1)
-    values := [TComptimeMapEntry]{}
+    ^values: [TComptimeMapEntry]{}
     loop _ in 0..<count -> values.push(body_codec_get_tcomptimemapentry(bytes, input))
     values
 }
@@ -577,7 +579,7 @@ body_codec_put_list_tcomptimeenumarg: fn(out: ^BodyCodecOut, values: [TComptimeE
 
 body_codec_get_list_tcomptimeenumarg: fn(bytes: [U8], input: ^BodyCodecIn) -> [TComptimeEnumArg] Never! {
     count: body_codec_get_count(bytes, input, 1)
-    values := [TComptimeEnumArg]{}
+    ^values: [TComptimeEnumArg]{}
     loop _ in 0..<count -> values.push(body_codec_get_tcomptimeenumarg(bytes, input))
     values
 }

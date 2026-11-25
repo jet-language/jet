@@ -54,9 +54,9 @@ store_reuse_shared_entry: fn(verification: StoreVerification, roots: HangarRoots
         return Err(store_broker_invalid("shared-store sockets are unsupported on this host"))
     }
     found_stream: store_broker_connect(config.socket)
-    stream := found_stream ?? return Ok(None)
+    ^stream: found_stream ?? return Ok(None)
     store_broker_send(stream, store_broker_encode_read_request(reference))
-    reader := BrokerWireReader.socket(stream)
+    ^reader: BrokerWireReader.socket(stream)
     found_bytes: store_broker_read_archive_response(reader)
     bytes: found_bytes ?? return Ok(None)
     store_import_broker_archive(verification, roots, bytes)
@@ -84,9 +84,9 @@ store_promote_shared_entry: fn(verification: StoreVerification, roots: HangarRoo
     found_credential: store_broker_writer_credential(config)
     credential: found_credential ?? return Ok(false)
     found_stream: store_broker_connect(config.socket)
-    stream := found_stream ?? return Ok(false)
+    ^stream: found_stream ?? return Ok(false)
     store_broker_send(stream, store_broker_encode_write_request(binding, credential, archive))
-    reader := BrokerWireReader.socket(stream)
+    ^reader: BrokerWireReader.socket(stream)
     store_broker_read_response(reader)
 }
 
@@ -98,7 +98,7 @@ store_serve_shared_store: fn(verification: StoreVerification, roots: HangarRoots
         return Err(store_broker_invalid("shared-store socket activation is unsupported on this host"))
     }
     listener: store_broker_activation_listener()
-    stream := net.unix_accept(listener) ?? return Err(store_broker_net_error(err))
+    ^stream: net.unix_accept(listener) ?? return Err(store_broker_net_error(err))
     found_config: store_broker_read_config(store_broker_admin_layout())
     config: found_config ?? return Err(store_broker_invalid("shared-store broker is not installed"))
     store_broker_serve_connection(verification, stream, config)
@@ -127,7 +127,7 @@ store_broker_serve_connection: fn(verification: StoreVerification, stream: ^^Uni
 store_broker_serve_peer: fn(verification: StoreVerification, stream: ^^UnixStream, config: SharedStoreConfig, user: Int) StoreError! {
     shared: HangarRoots.at(config.shared_root)
     key: store_broker_trust_key(config)
-    reader := BrokerWireReader.socket(stream)
+    ^reader: BrokerWireReader.socket(stream)
     if store_broker_read_request_header(reader) == {
         .Write(header) -> {
             store_broker_authorize_peer(config, user, true, Val(header.binding), Val(header.credential))
@@ -264,7 +264,7 @@ store_enroll_shared_store: fn(roots: HangarRoots, uid: String, writable: Bool) -
     }
     store_broker_ensure_real_dir(config.grants)
     path: files.join(config.grants, "{enrolled}")
-    text := "{STORE_BROKER_GRANT_MAGIC}\nread\n"
+    ^text: "{STORE_BROKER_GRANT_MAGIC}\nread\n"
     if writable {
         expires: store_broker_now_secs() + STORE_BROKER_GRANT_TTL_SECS
         secret: random.bytes(32) ?? return Err(StoreError.Other("operating-system randomness is unavailable: {err}"))
@@ -316,7 +316,7 @@ store_broker_trust_key: fn(config: SharedStoreConfig) -> String StoreError! {
 // grant, no write authority, expired, or an empty allowlist).
 store_broker_writer_credential: fn(config: SharedStoreConfig) -> String? StoreError! {
     uid: store_broker_current_uid()
-    grant := WriterGrant.empty()
+    ^grant: WriterGrant.empty()
     if store_broker_read_writer_grant(config, uid) == {
         .Ok(found) -> { grant = found }
         .Err(error) -> {
@@ -360,7 +360,7 @@ store_broker_sweep_stale_incoming_at: fn(incoming: String, now: Int) -> Int Stor
     if entries.len() > STORE_BROKER_MAX_INCOMING_ENTRIES {
         return Err(store_broker_invalid("shared-store incoming staging directory has too many entries"))
     }
-    removed := 0
+    ^removed: 0
     loop entry in entries {
         info: files.stat(entry.path)
         if info.is_symlink {

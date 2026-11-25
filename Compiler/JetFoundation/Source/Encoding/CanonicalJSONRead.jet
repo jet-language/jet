@@ -51,7 +51,7 @@ canonical_json_parse: fn(bytes: [U8]) -> CanonicalJSON CanonicalJSONError! {
     if (Int{bytes[bytes.len() - 1]}) != 10 || (bytes.len() > 1 && Int{bytes[bytes.len() - 2]} == 10) {
         return Err(canonical_json_error("canonical JSON must end in exactly one LF"))
     }
-    parser := CanonicalJSONParser{bytes: bytes.slice(0, bytes.len() - 1), at: 0}
+    ^parser: CanonicalJSONParser{bytes: bytes.slice(0, bytes.len() - 1), at: 0}
     value: canonical_json_value(parser)
     if parser.at != parser.bytes.len() {
         return Err(canonical_json_error("trailing bytes after canonical JSON value"))
@@ -108,7 +108,7 @@ canonical_json_value: fn(parser: ^CanonicalJSONParser) -> CanonicalJSON Canonica
 
 canonical_json_string: fn(parser: ^CanonicalJSONParser) -> String CanonicalJSONError! {
     if canonical_json_take(parser) != 34 -> return Err(canonical_json_error("expected JSON string"))
-    out := [U8]{}
+    ^out: [U8]{}
     loop {
         byte: canonical_json_take(parser)
         if byte == 34 {
@@ -121,8 +121,8 @@ canonical_json_string: fn(parser: ^CanonicalJSONParser) -> String CanonicalJSONE
                 if parser.at + 4 > parser.bytes.len() {
                     return Err(canonical_json_error("short Unicode escape"))
                 }
-                scalar := 0
-                index := parser.at
+                ^scalar: 0
+                ^index: parser.at
                 if (Int{parser.bytes[index]}) == 43 -> index += 1
                 loop index < parser.at + 4 {
                     hex: Int{parser.bytes[index]}
@@ -175,7 +175,7 @@ canonical_json_string: fn(parser: ^CanonicalJSONParser) -> String CanonicalJSONE
 
 canonical_json_array: fn(parser: ^CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
     parser.at += 1
-    values := [CanonicalJSON]{}
+    ^values: [CanonicalJSON]{}
     if canonical_json_peek(parser) == 93 {
         parser.at += 1
         return Ok(CanonicalJSON.Array(values))
@@ -190,8 +190,8 @@ canonical_json_array: fn(parser: ^CanonicalJSONParser) -> CanonicalJSON Canonica
 
 canonical_json_parse_object: fn(parser: ^CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
     parser.at += 1
-    values := [CanonicalJSONField]{}
-    seen := [String:Bool]{}
+    ^values: [CanonicalJSONField]{}
+    ^seen: [String:Bool]{}
     if canonical_json_peek(parser) == 125 {
         parser.at += 1
         return Ok(CanonicalJSON.Object(values))

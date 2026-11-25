@@ -34,7 +34,7 @@ use {
 }
 
 #Test("lexer interns repeated names and relocates literal tables") {
-    result := lex_payload(`alpha alpha "{alpha}"`.bytes(), false)
+    ^result: lex_payload(`alpha alpha "{alpha}"`.bytes(), false)
     assert_eq(result.tokens[0].decoded.id == result.tokens[1].decoded.id, true)
     literal: result.tokens[2].literal
     nested: result.tables.literals[literal].string_parts[0].tokens[0]
@@ -47,9 +47,9 @@ use {
 }
 
 #Test("name table preserves first seen ids across growth") {
-    table := name_table()
+    ^table: name_table()
     first: name_intern(table, "μ_name")
-    loop index in 0..<600 -> _ := name_intern(table, "name{index}")
+    loop index in 0..<600 -> ^_: name_intern(table, "name{index}")
     again: name_intern(table, "μ_name")
     assert_eq(first.id == again.id, true)
     assert_eq(name_count(table), 602)

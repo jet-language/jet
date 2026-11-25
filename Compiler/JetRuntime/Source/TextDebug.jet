@@ -3,7 +3,7 @@
 // against that rustc found 0/1,111,936 non-ASCII differences.
 rt_text_push_rust_unicode_escape: fn(target: I64, cp: I64) {
     rt_text_push_word(target, I64{8090972}, I64{3})  // "\\u{"
-    divisor := I64{1}
+    ^divisor: I64{1}
     loop cp /% divisor >= (I64{16}) -> divisor *= I64{16}
     loop {
         digit: (cp /% divisor) & I64{15}
@@ -21,8 +21,8 @@ rt_text_push_debug_str: fn(target: I64, text: I64, rust_nul: Bool) {
     rt_text_push_word(target, I64{34}, I64{1})
     data: rt_text_data(text)
     length: rt_text_len(text)
-    at := I64{0}
-    start := I64{0}
+    ^at: I64{0}
+    ^start: I64{0}
     loop at < length {
         scalar: trap_scalar(wrapping(data + at))
         cp: scalar.code

@@ -77,7 +77,7 @@ frame_test_triple: fn() -> Type Never! {
 // Buf<N> {data: [Int#N]} and Node {next: Node, value: Int} with `next`
 // boxed.
 frame_test_types: fn() -> JetFrameTypes Never! {
-    defs := [TTypeDef]{
+    ^defs: [TTypeDef]{
         frame_test_struct("Point", [String]{}, [TField]{frame_test_field("x", Type.Int), frame_test_field("y", Type.Int), frame_test_field("tag", frame_test_triple())}, [String]{}),
         frame_test_struct("Pair", [String]{"T"}, [TField]{frame_test_field("a", Type.Named{name: "T"}), frame_test_field("b", Type.Named{name: "T"})}, [String]{}),
         frame_test_struct("Buf", [String]{"N"}, [TField]{frame_test_field("data", Type.FixedList{elem: Type.Int, len: Measure.Symbol{kind: "Int", name: "N"}})}, [String]{}),
@@ -88,8 +88,8 @@ frame_test_types: fn() -> JetFrameTypes Never! {
 
 #Test("frame_storage_sizes_each_value_as_the_ir_lays_it_out") {
     types: frame_test_types()
-    env := [String:Int]{}
-    laying := [String]{}
+    ^env: [String:Int]{}
+    ^laying: [String]{}
     assert_eq(jet_frame_storage_bytes(types, Type.Int, env, laying), Val(0))
     assert_eq(jet_frame_storage_bytes(types, Type.Option{inner: frame_test_triple()}, env, laying), Val(0))
     assert_eq(jet_frame_storage_bytes(types, Type.List{element: Type.Int}, env, laying), Val(24))

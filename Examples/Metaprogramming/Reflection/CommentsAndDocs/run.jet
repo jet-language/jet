@@ -29,7 +29,7 @@ Order: struct {
 
 /// Joins comment texts with " / ".
 joined: fn(comments: [CommentInfo]) -> String {
-    texts := [String]{}
+    ^texts: [String]{}
     loop comment in comments -> texts.push(comment.text)
     texts.join(" / ")
 }
@@ -59,11 +59,11 @@ build: fn(b: Build) {
     loop package in b.program.packages() {
         if package.name != "comments_and_docs" -> next
         loop written in package.modules {
-            lines := 0
-            blocks := 0
-            docs := 0
-            argument := false
-            named := true
+            ^lines: 0
+            ^blocks: 0
+            ^docs: 0
+            ^argument: false
+            ^named: true
             loop comment in written.comments {
                 if comment.kind == {
                     .Line -> { lines += 1 }

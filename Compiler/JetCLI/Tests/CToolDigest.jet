@@ -12,7 +12,7 @@ use {
     cli_files.create_dir_all(root) ?? panic("test root")
     cli_files.write("{root}/cc", "the compiler's bytes") ?? panic("compiler")
     cli_files.write("{root}/ar", "the archiver's bytes") ?? panic("archiver")
-    link := c_tool_link(root)
+    ^link: c_tool_link(root)
     jet_cli_native_c_tool_digest(link) ?? panic("first C build: {err.message}")
     assert(link.tool_digest != "", "the first C build hashes the tools")
     // The link's later C builds keep its digest without reading the tools:
@@ -20,7 +20,7 @@ use {
     cli_files.remove_all(root) ?? panic("tools cleanup")
     jet_cli_native_c_tool_digest(link) ?? panic("later C build read the tools again: {err.message}")
     // Another link reads them itself.
-    other := c_tool_link(root)
+    ^other: c_tool_link(root)
     if jet_cli_native_c_tool_digest(other) == {
         .Err(detail) -> {
             assert(detail.message.contains("couldn't read C tool `{root}/cc`"), detail.message)
@@ -31,7 +31,7 @@ use {
     cli_files.create_dir_all(root) ?? panic("test root again")
     cli_files.write("{root}/cc", "the compiler's bytes") ?? panic("compiler again")
     cli_files.write("{root}/ar", "the archiver's bytes") ?? panic("archiver again")
-    same := c_tool_link(root)
+    ^same: c_tool_link(root)
     jet_cli_native_c_tool_digest(same) ?? panic("same tools: {err.message}")
     assert_eq(link.tool_digest, same.tool_digest)
     // With other bytes, the digest differs.

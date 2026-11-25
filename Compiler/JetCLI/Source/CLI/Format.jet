@@ -15,7 +15,7 @@ jet_cli_format_diagnostics: fn(path: String, source: String, diagnostics: [Diagn
 jet_cli_format_stdin: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOutput {
     source: cli_term.read_all_input() ?? return jet_cli_report_output("", "E2105", "failed to read from stdin", jet_cli_why("E2105"), "correct the named problem, then run the command again", request.color, JET_DRIVER_EXIT_USAGE)
     label: request.stdin_path ?? "<stdin>"
-    hooks := jet_cli_tool_stage_memo()
+    ^hooks: jet_cli_tool_stage_memo()
     file: jet_cli_fmt_one(label, source, request, hooks)
     if file.report == .Val(report) {
         return JetDriverVerbOutput{stdout: "", stderr: report, exit_code: JET_DRIVER_EXIT_USAGE}
@@ -42,20 +42,20 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
     if request.stdin_mode -> return jet_cli_format_stdin(request, json)
     color: request.color
     cwd: cli_files.cwd() ?? "."
-    files := [String]{}
+    ^files: [String]{}
     if {
         request.changed -> {
             files = jet_cli_fmt_changed_files() ?? return jet_cli_report_output("", "E2104", "`--changed` requires a git repository", "`jet fmt --changed` uses git to find modified .jet files", "run from inside a git repository, or format specific files with `jet fmt <path>`", color, JET_DRIVER_EXIT_USAGE)
         }
-        request.paths.len() == 0 -> {
-            jet_cli_fmt_walk(jet_cli_manifest_root(cwd) ?? cwd, files)
-        }
+        request.paths.len() == 0 -> { jet_cli_fmt_walk(jet_cli_manifest_root(cwd) ?? cwd, files) }
         else -> {
             loop raw in request.paths {
-                if cli_files.is_dir(raw) -> jet_cli_fmt_walk(raw, files) else -> files.push(raw.copy())
+                if cli_files.is_dir(raw) -> jet_cli_fmt_walk(raw, files) else {
+                    files.push(raw.copy())
+                }
             }
             files.sort()
-            unique := [String]{}
+            ^unique: [String]{}
             loop file in files {
                 if unique.len() == 0 || unique[unique.len() - 1] != file -> unique.push(file)
             }
@@ -63,9 +63,9 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
         }
     }
     if files.len() == 0 -> return jet_cli_external_fmt_ok(json)
-    results := [JetCLIFmtFile]{}
+    ^results: [JetCLIFmtFile]{}
     // One run learns each package's block hooks once.
-    hooks := jet_cli_tool_stage_memo()
+    ^hooks: jet_cli_tool_stage_memo()
     loop path in files {
         source: cli_files.read(path) ?? {
             results.push(JetCLIFmtFile{path: path, original: "", formatted: "", changed: false, io_error: Val("can't read `{path}`: {jet_cli_io_error_text(err)}"), diagnostics: [Diagnostic]{}, report: None})
@@ -80,9 +80,9 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
     // directory walk found that the formatter refuses, such as a negative test
     // fixture, which doesn't: `--check` over a tree judges the form of every
     // source it can format, as `jet check` judges meaning.
-    failed := false
-    skipped := ""
-    refused := false
+    ^failed: false
+    ^skipped: ""
+    ^refused: false
     loop result in results {
         if {
             result.io_error != None || result.report != None -> failed = true
@@ -98,7 +98,7 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
         }
     }
     if failed {
-        stderr := ""
+        ^stderr: ""
         loop result in results {
             if result.io_error == .Val(problem) {
                 stderr = "{stderr}{if json -> jet_cli_format_io_error(result.path, problem) else -> jet_cli_report("E2105", problem, jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}"
@@ -112,7 +112,7 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
     }
     display_root: jet_cli_manifest_root(cwd) ?? cwd
     if request.check {
-        dirty := [JetCLIFmtFile]{}
+        ^dirty: [JetCLIFmtFile]{}
         loop result in results {
             if result.changed -> dirty.push(result)
         }
@@ -120,26 +120,26 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
             if refused {
                 return JetDriverVerbOutput{stdout: "", stderr: skipped, exit_code: JET_DRIVER_EXIT_USER_ERROR}
             }
-            clean := jet_cli_external_fmt_ok(json)
+            ^clean: jet_cli_external_fmt_ok(json)
             clean.stderr = skipped
             return clean
         }
         relative: loop result in dirty -> jet_cli_fmt_relative(result.path, display_root)
-        order := [Int]{}
+        ^order: [Int]{}
         loop index in 0..<dirty.len() -> order.push(index)
         loop position in 1..<order.len() {
             // copy: `order[position]` stays in its list (owner: `order`; no move out of an element,
             // E0225) and the binding `current` owns its own.
             current: order[position].copy()
-            slot := position
+            ^slot: position
             loop slot > 0 && relative[current] < relative[order[slot - 1]] {
                 order[slot] = order[slot - 1]
                 slot -= 1
             }
             order[slot] = current
         }
-        stdout := ""
-        entries := [JetCLIStatusValue]{}
+        ^stdout: ""
+        ^entries: [JetCLIStatusValue]{}
         loop index in order {
             if {
                 json -> {

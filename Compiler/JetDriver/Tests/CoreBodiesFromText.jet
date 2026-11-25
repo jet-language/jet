@@ -65,18 +65,18 @@ core_text_counters: fn(source: String, timed: Bool, prefix: String) -> [String] 
         entry_root_identity: "core-text-root",
         entry_path: "/core-text/main.jet",
     }
-    core_rows := jet_cli_builtin_core_rows()
+    ^core_rows: jet_cli_builtin_core_rows()
     core_rows.extend(jet_driver_runtime_interface_sources())
-    request := jet_cli_driver_request(snapshot, core_rows, Val(1), JetDriverCompileMode.Check)
+    ^request: jet_cli_driver_request(snapshot, core_rows, Val(1), JetDriverCompileMode.Check)
     request.trace_sink = Val(core_text_sink(CoreTextTrace{path: path, timed: timed}))
     request.host_facts.compiler_identity = Val("jet@{JET_VERSION}#core-text")
     result: jet_driver_compile(request)
     trace: text_files.read(path) ?? panic("cannot read the trace: {err}")
     text_files.remove(path) ?? panic("cannot remove the trace: {err}")
-    problems := [String]{}
+    ^problems: [String]{}
     loop diagnostic in result.diagnostics -> problems.push("{diagnostic.code} {diagnostic.what}")
     assert(result.complete && result.internal_problem == None && !jet_driver_has_errors(result.diagnostics), "the program did not compile: {result.internal_problem:Debug} {problems:Debug}")
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in trace.split("\n") {
         if line.starts_with(prefix) -> lines.push(line)
     }
@@ -85,7 +85,7 @@ core_text_counters: fn(source: String, timed: Bool, prefix: String) -> [String] 
 
 // The value of the counter `name` among `lines`, which must trace it once.
 core_text_value: fn(lines: [String], name: String) -> Int {
-    found := Int?{None}
+    ^found: Int?{None}
     loop line in lines {
         parts: line.split(" = ").to_list()
         if parts[0] != name -> next
@@ -102,7 +102,7 @@ LCM_SOURCE: "use {{ text_math: core.math }}\n\nrun: fn() {{\n    print(text_math
 #Test("a traced compile counts the Core bodies it checks from text, by kind") {
     named: core_text_counters(LCM_SOURCE, false, "counters.core.bodies_from_text")
     assert(named.len() == CORE_TEXT_KINDS.len() + 1, "one total and one count per kind:\n{named.join("\n")}")
-    total := 0
+    ^total: 0
     loop kind in CORE_TEXT_KINDS {
         total += core_text_value(named, "counters.core.bodies_from_text.{kind}")
     }

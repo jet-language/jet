@@ -11,7 +11,7 @@ build_resolve_under: fn(base: String, rel: String) -> String BuildIOError! {
     if rel.starts_with("/") {
         return Err(BuildIOError.new(.InvalidInput, "build output path escapes base directory"))
     }
-    out := base
+    ^out: base
     loop part in rel.split("/") {
         if part == "" || part == "." -> next
         if part == ".." {
@@ -87,7 +87,7 @@ build_validate_probe: fn(name: String, spec: ProbeSpec) HermeticBuildError! {
         .PkgConfig(package, _) -> package.trim() == ""
         .HeaderCheck(header) -> header.trim() == "" || !build_valid_header_name(header)
         .CompileCheck(check, includes, code) -> {
-            bad_include := false
+            ^bad_include: false
             loop include in includes {
                 if !build_valid_header_name(include) -> bad_include = true
             }
@@ -158,7 +158,7 @@ build_validate_action: fn(name: String, spec: ActionSpec) HermeticBuildError! {
     if build_effects_reusable(spec.caps) && spec.outputs.len() == 0 {
         return Err(HermeticBuildError.ReusableActionWithoutOutputs(name))
     }
-    seen := [String]{}
+    ^seen: [String]{}
     loop output in spec.outputs {
         if seen.contains(output) {
             return Err(HermeticBuildError.DuplicateActionOutput{action: name, output: output})
@@ -176,7 +176,7 @@ build_validate_action: fn(name: String, spec: ActionSpec) HermeticBuildError! {
 // (the folder's read-only mount would hide it, and its reader has no order
 // after its maker).
 build_validate_action_output_owners: fn(actions: [HermeticBuildAction]) HermeticBuildError! {
-    owners := [String:String]{}
+    ^owners: [String:String]{}
     loop action in actions {
         loop output in action.outputs {
             if owners.get(output) == .Val(first_action) {

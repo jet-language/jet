@@ -28,13 +28,11 @@
 // Only caller-saved registers are written (rax, rcx, rdx, rsi, rdi, r8-r11 and
 // xmm/ymm/zmm0-7, k1), rsp is untouched, and the code falls through its last byte.
 
-x64_count_code: fn(stride: Int, exact: Bool) -> [U8] Never! {
-    x64_count_leaf(stride, exact).bytes
-}
+x64_count_code: fn(stride: Int, exact: Bool) -> [U8] Never! { x64_count_leaf(stride, exact).bytes }
 
 x64_count_leaf: fn(stride: Int, exact: Bool) -> X64SimdLeaf Never! {
-    code := x64_code()
-    declines := [Int]{}
+    ^code: x64_code()
+    ^declines: [Int]{}
     x64_mov_ri(code, X64_RAX, X64_INT_SUM_DECLINED)
     // 0 <= first < end, end and the total (and an exact value) inline.
     x64_test_rr(code, X64_RSI, X64_RSI)

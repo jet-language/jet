@@ -41,7 +41,7 @@ raw_module_failure: fn(values: [Int]) -> String Never! {
 
 // The decode failure of a module with the standard header followed by `sections`.
 module_failure: fn(sections: [Int]) -> String Never! {
-    values := [Int]{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0}
+    ^values: [Int]{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0}
     loop value in sections -> values.push(value)
     raw_module_failure(values)
 }
@@ -101,7 +101,7 @@ module_failure: fn(sections: [Int]) -> String Never! {
 #Test("every function body of the mathkit module decodes to a closed instruction list") {
     component: component_of(mathkit())
     core: component.modules[0]
-    total := 0
+    ^total: 0
     loop code in core.codes {
         assert(code.op.len() > 0)
         assert_eq(code.op[code.op.len() - 1], 0x0b)

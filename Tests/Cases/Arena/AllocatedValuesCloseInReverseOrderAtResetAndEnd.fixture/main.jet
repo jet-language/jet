@@ -10,14 +10,14 @@ Tracked: struct {
 
 // The arena ends with its scope: its values close then, latest first.
 scoped: fn() {
-    arena := mem.Arena.new()
+    ^arena: mem.Arena.new()
     a: arena.alloc(Tracked{label: "s1"})
     b: arena.alloc(Tracked{label: "s2"})
     print("held {a.label} {b.label}")
 }
 
 run: fn() {
-    arena := mem.Arena.new()
+    ^arena: mem.Arena.new()
     a: arena.alloc(Tracked{label: "a1"})
     print("got {a.label}")
     b: arena.alloc(Tracked{label: "a2"})
@@ -26,7 +26,7 @@ run: fn() {
     arena.reset()
     c: arena.alloc(Tracked{label: "a3"})
     print("got {c.label}")
-    bump := mem.Bump.new(capacity: 256)
+    ^bump: mem.Bump.new(capacity: 256)
     d: bump.alloc(Tracked{label: "b1"})
     e: bump.alloc(Tracked{label: "b2"})
     print("got {d.label} {e.label}")

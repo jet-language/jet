@@ -200,7 +200,7 @@ LockedPackage: struct {
     // floor, registry metadata is the verified source path, and attestation
     // stays recorded until its live verifier lands.
     provenance_report: fn(self) -> DependencyProvenanceReport Never! {
-        locked_hash := self.content_hash
+        ^locked_hash: self.content_hash
         if locked_hash == None {
             if self.locked == {
                 .Val(revision) -> { locked_hash = Val(revision.tree_hash) }
@@ -231,7 +231,7 @@ LockedPackage: struct {
             .Val(value) -> ProvenanceField{value: value, status: ProvenanceStatus.Verified}
             .None -> ProvenanceField.not_recorded()
         }
-        build_value := pkg_lock_nonblank(provenance.build)
+        ^build_value: pkg_lock_nonblank(provenance.build)
         if build_value == None {
             if self.envelope == {
                 .Val(envelope) -> { build_value = pkg_lock_nonblank(Val(envelope.provenance)) }
@@ -434,7 +434,7 @@ NixClosureRecord: struct {
         if !pkg_lock_is_cas_digest(self.project_cas_bundle) {
             return Err(LockError.Invalid("Nix closure record CAS bundle is not a canonical digest"))
         }
-        seen := [String]{}
+        ^seen: [String]{}
         loop reference in self.references {
             if !pkg_lock_is_cas_digest(reference) {
                 return Err(LockError.Invalid("Nix closure record contains an invalid reference identity"))

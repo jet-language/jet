@@ -49,7 +49,7 @@ MetadataFacts: struct {
     // Name, version, license, and dependency keys from a flat Cargo.toml read
     // (`normalize_cargo`); a `build =` line records a build script.
     from_cargo_manifest: fn(cargo_toml: String) -> MetadataFacts Never! {
-        facts := MetadataFacts.empty(ProviderFamily.Cargo, provider_toml_string(cargo_toml, "name") ?? "")
+        ^facts: MetadataFacts.empty(ProviderFamily.Cargo, provider_toml_string(cargo_toml, "name") ?? "")
         facts.version = provider_toml_string(cargo_toml, "version") ?? ""
         facts.license = provider_toml_string(cargo_toml, "license") ?? ""
         facts.dependencies = provider_toml_dependency_keys(cargo_toml, "[dependencies]")
@@ -61,7 +61,7 @@ MetadataFacts: struct {
 
     // A PyPI distribution (`normalize_pypi`); dynamic metadata is a todo.
     from_pypi: fn(name: String, version: String, dynamic_metadata: Bool) -> MetadataFacts Never! {
-        facts := MetadataFacts.empty(ProviderFamily.PyPI, name)
+        ^facts: MetadataFacts.empty(ProviderFamily.PyPI, name)
         facts.version = version
         facts.source_identity = "pypi:{name}@{version}"
         if dynamic_metadata {
@@ -72,7 +72,7 @@ MetadataFacts: struct {
 
     // A SwiftPM package pinned by revision (`normalize_swiftpm`).
     from_swiftpm: fn(name: String, revision: String) -> MetadataFacts Never! {
-        facts := MetadataFacts.empty(ProviderFamily.SwiftPM, name)
+        ^facts: MetadataFacts.empty(ProviderFamily.SwiftPM, name)
         facts.version = revision
         facts.source_identity = "swiftpm:{name}@{revision}"
         facts.integrity_hash = revision
@@ -133,7 +133,7 @@ ProviderFactReport: struct {
     // A report over `facts` that loses the package name or exact identity
     // when either is missing; the facts' conflicts carry over.
     with_identity: fn(facts: MetadataFacts) -> ProviderFactReport Never! {
-        losses := [String]{}
+        ^losses: [String]{}
         if facts.name == "" -> losses.push("provider metadata has no package name")
         if facts.identity_selector().value == "" {
             losses.push("provider metadata has no exact version, revision, or digest")
@@ -149,7 +149,7 @@ ProviderFactReport: struct {
 
     // Keep the native document and its format beside the typed facts.
     retaining: fn(self, native_format: String, document: String) -> ProviderFactReport Never! {
-        out := self
+        ^out: self
         out.native_format = native_format
         out.native_document = document
         out
@@ -167,7 +167,7 @@ provider_toml_string: fn(raw: String, key: String) -> String? Never! {
 
 // Every leading `"` trimmed from both ends (`trim_matches('"')`).
 provider_trim_quotes: fn(value: String) -> String Never! {
-    out := value
+    ^out: value
     loop out.starts_with("\"") -> out = out.removeprefix("\"")
     loop out.ends_with("\"") -> out = out.removesuffix("\"")
     out
@@ -175,8 +175,8 @@ provider_trim_quotes: fn(value: String) -> String Never! {
 
 // Keys assigned under the exact `section` header.
 provider_toml_dependency_keys: fn(raw: String, section: String) -> [String] Never! {
-    keys := [String]{}
-    inside := false
+    ^keys: [String]{}
+    ^inside: false
     loop raw_line in provider_lines(raw) {
         line: raw_line.trim()
         if line.starts_with("[") {
@@ -192,7 +192,7 @@ provider_toml_dependency_keys: fn(raw: String, section: String) -> [String] Neve
 
 // Values in first-seen order without repeats.
 provider_distinct_values: fn(values: [String]) -> [String] Never! {
-    distinct := [String]{}
+    ^distinct: [String]{}
     loop value in values {
         if !distinct.contains(value) -> distinct.push(value.copy())
     }
@@ -210,7 +210,7 @@ provider_format_dependency: fn(raw_name: String, raw_version: String) -> String 
 
 // Sorted without repeats (`sort` then `dedup`).
 provider_sorted_unique: fn(values: [String]) -> [String] Never! {
-    out := provider_distinct_values(values)
+    ^out: provider_distinct_values(values)
     out.sort()
     out
 }

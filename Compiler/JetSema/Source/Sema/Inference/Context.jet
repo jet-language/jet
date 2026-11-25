@@ -93,11 +93,11 @@ sema_inference_binding_at: fn(bindings: [SemaInferenceBinding], name: String) ->
 }
 
 sema_inference_bounds_checked: fn(parameters: [SemaInferenceTypeParam], evidence: [SemaInferenceBoundEvidence], substitutions: [SemaInferenceBinding]) -> Bool Never! {
-    required_count := 0
+    ^required_count: 0
     loop parameter in parameters {
         loop bound in parameter.bounds {
             required_count += 1
-            found := false
+            ^found: false
             loop row in evidence {
                 if row.param == parameter.name && row.bound == bound {
                     found = row.satisfied
@@ -116,7 +116,7 @@ sema_inference_bounds_checked: fn(parameters: [SemaInferenceTypeParam], evidence
     }
     if evidence.len() != required_count -> return false
     loop row in evidence {
-        parameter_found := false
+        ^parameter_found: false
         loop parameter in parameters {
             if parameter.name == row.param {
                 loop bound in parameter.bounds {

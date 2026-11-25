@@ -7,10 +7,10 @@ use {
 s5_grammar_find: fn(text: String, needle: String, start: Int) -> Int {
     bytes: text.bytes()
     wanted: needle.bytes()
-    at := start
+    ^at: start
     loop {
         if at + wanted.len() > bytes.len() -> return -1
-        matched := true
+        ^matched: true
         loop offset in 0..<wanted.len() {
             if bytes[at + offset] != wanted[offset] -> matched = false
         }
@@ -116,10 +116,10 @@ s5_grammar_first_quoted: fn(text: String, start: Int) -> String? {
 #Test("zed_highlight_query_mentions_only_grammar_literals") {
     guards_enter_root()
     nodes: files.read("Tools/Editors/TreeSitter/src/node-types.json") ?? panic("read tree-sitter node types")
-    anonymous := [String]{}
-    current_type := String?{None}
-    named := false
-    seen_named := false
+    ^anonymous: [String]{}
+    ^current_type: String?{None}
+    ^named: false
+    ^seen_named: false
     loop line in nodes.split("\n") {
         trimmed: line.trim().copy()
         if line.starts_with("  {{") {
@@ -145,7 +145,7 @@ s5_grammar_first_quoted: fn(text: String, start: Int) -> String? {
     loop line in query.split("\n") {
         trimmed: line.trim().copy()
         if trimmed.starts_with(";") -> next
-        at := 0
+        ^at: 0
         loop {
             first: s5_grammar_find(trimmed, "\"", at)
             if first < 0 -> break
@@ -180,7 +180,7 @@ s5_grammar_first_quoted: fn(text: String, start: Int) -> String? {
     listing: files.join(scratch, "examples.txt")
     files.write(listing, examples.map(fn(entry) { entry.path.copy() }).join("\n")) ?? panic("write {listing}: {err}")
     parsed: process.cmd([tree_sitter, "parse", "--quiet", "--lib-path", library, "--lang-name", "jet", "--paths", listing]).stdout(.Capture).stderr(.Capture).run() ?? panic("run tree-sitter parse: {err}")
-    offenders := [String]{}
+    ^offenders: [String]{}
     loop line in process.stdout_lines(parsed) {
         if line.contains("(ERROR") || line.contains("(MISSING") {
             offenders.push(line.trim().copy())
@@ -210,7 +210,7 @@ s5_grammar_first_quoted: fn(text: String, start: Int) -> String? {
     assert(built.code == 0, "tree-sitter build failed: {process.combined_output(built).trim()}")
     sample: files.join(scratch, "sample.jet")
     files.write(sample, "Point: struct {{\n    x: Int,\n}}\nmain: fn() {{\n    print(\"hi\")\n}}\n") ?? panic("write {sample}: {err}")
-    failures := [String]{}
+    ^failures: [String]{}
     loop name in ["highlights", "outline", "brackets", "indents", "overrides"] {
         query: "Tools/Editors/Zed/languages/jet/{name}.scm"
         ran: process.cmd([tree_sitter, "query", "--quiet", "--lib-path", library, "--lang-name", "jet", query, sample]).stdout(.Capture).stderr(.Capture).run() ?? panic("run tree-sitter query: {err}")

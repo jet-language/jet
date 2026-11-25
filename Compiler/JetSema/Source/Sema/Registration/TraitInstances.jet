@@ -66,11 +66,11 @@ sema_trait_instances_declares_template: fn(items: [Item]) -> Bool Never! {
 // Each parameterized trait in `items` is replaced by the traits its uses
 // make, in the place it is declared.
 sema_trait_instances_rewrite_items: fn(items: ^^[Item], diagnostics: ^[Diagnostic]) -> [Item] Never! {
-    instances := SemaTraitInstances{names: name_table(), templates: [TraitDef]{}, made: [SemaTraitMade]{}, seen: name_table()}
+    ^instances: SemaTraitInstances{names: name_table(), templates: [TraitDef]{}, made: [SemaTraitMade]{}, seen: name_table()}
     // The structs and enums the module declares: `owners` holds each name
     // once, and `owner_items[id - 1]` is the item named by id `id`.
-    owners := name_table()
-    owner_items := [Int]{}
+    ^owners: name_table()
+    ^owner_items: [Int]{}
     loop (index, item) in items {
         if item == {
             .Trait(definition) -> {
@@ -117,13 +117,13 @@ sema_trait_instances_rewrite_items: fn(items: ^^[Item], diagnostics: ^[Diagnosti
                     sema_trait_instances_note(instances, supertrait, definition.name_span, scope, diagnostics)
                 }
                 loop method in definition.methods {
-                    method_scope := scope.copy()
+                    ^method_scope: scope.copy()
                     method_scope.extend(sema_trait_instances_param_names(method.type_params))
                     sema_trait_instances_params(instances, method.type_params, method_scope, diagnostics)
                 }
             }
             .Impl(definition) -> {
-                scope := sema_trait_instances_owner_params(items, owners, owner_items, definition.type_name)
+                ^scope: sema_trait_instances_owner_params(items, owners, owner_items, definition.type_name)
                 scope.extend(sema_trait_instances_param_names(definition.type_params))
                 sema_trait_instances_params(instances, definition.type_params, scope, diagnostics)
                 if definition.trait_name == .Val(written) {
@@ -136,7 +136,7 @@ sema_trait_instances_rewrite_items: fn(items: ^^[Item], diagnostics: ^[Diagnosti
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
-    out := [Item]{}
+    ^out: [Item]{}
     loop item in items.move() {
         if item == .Trait(definition) {
             if definition.type_params.len() > 0 {
@@ -179,7 +179,7 @@ sema_trait_instances_owner_params: fn(items: [Item], owners: NameTable, owner_it
 }
 
 sema_trait_instances_function: fn(instances: ^SemaTraitInstances, function: Func, outer: [String], diagnostics: ^[Diagnostic]) Never! {
-    scope := outer
+    ^scope: outer
     scope.extend(sema_trait_instances_param_names(function.type_params))
     sema_trait_instances_params(instances, function.type_params, scope, diagnostics)
 }
@@ -217,11 +217,11 @@ sema_trait_instances_note: fn(instances: ^SemaTraitInstances, written: String, s
         return
     }
     known: name_count(instances.seen)
-    _ := name_intern(instances.seen, written)
+    ^_: name_intern(instances.seen, written)
     if name_count(instances.seen) == known {
         return
     }
-    arguments := [Type]{}
+    ^arguments: [Type]{}
     if parse_type_text(written) == .Val(.Apply(_, values)) -> arguments = values
     if arguments.len() != template.type_params.len() {
         diagnostics.push(sema_error("E0104", span, "trait `{written}` has the wrong number of type arguments", "`{parts.head}<{parameters}>` takes {template.type_params.len()} type arguments", "write one type for each of `{parameters}`"))
@@ -232,9 +232,11 @@ sema_trait_instances_note: fn(instances: ^SemaTraitInstances, written: String, s
         diagnostics.push(sema_error("E0104", span, "trait `{written}` names the type parameter `{named}`", "a use of a parameterized trait makes one trait for concrete types, so its arguments cannot be type parameters", "write the concrete type, as in `{parts.head}<Int>`"))
         return
     }
-    rewrite := sema_inline_rewrite_empty()
-    loop (index, param) in template.type_params -> sema_inline_type_put(rewrite.types, param.name, arguments[index])
-    made := sema_inline_rewrite_trait(rewrite, template)
+    ^rewrite: sema_inline_rewrite_empty()
+    loop (index, param) in template.type_params {
+        sema_inline_type_put(rewrite.types, param.name, arguments[index])
+    }
+    ^made: sema_inline_rewrite_trait(rewrite, template)
     made.name = written
     made.type_params = [TypeParam]{}
     instances.made.push(SemaTraitMade{template: template_id, definition: made})
@@ -244,7 +246,7 @@ sema_trait_instances_note: fn(instances: ^SemaTraitInstances, written: String, s
 // parameters: the arguments with every type mark read as a space.
 sema_trait_instances_names_parameter: fn(written: String, scope: [String]) -> String? Never! {
     if scope.len() == 0 -> return None
-    text := written.partition("<").tail
+    ^text: written.partition("<").tail
     marks: [String]{"<", ">", ",", "[", "]", "(", ")", "{", "}", "?", "!", ":", "#", "|"}
     loop mark in marks -> text = text.replace(mark, " ")
     loop word in text.split(" ") {

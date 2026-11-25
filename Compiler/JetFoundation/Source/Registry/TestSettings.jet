@@ -149,7 +149,7 @@ test_setting_flag_row: fn(argument: String) -> TestSettingRow? {
     head: argument.split("=").to_list()[0]
     if head == "-u" -> return test_setting_row("update_snapshots")
     loop row in JET_TEST_SETTINGS {
-        named := row.kind != TestSettingKind.Levels && test_setting_flag(row.name) == head
+        ^named: row.kind != TestSettingKind.Levels && test_setting_flag(row.name) == head
         if row.kind == TestSettingKind.Levels {
             loop level in test_setting_levels(row) {
                 if build_option_level_flag(level) == argument -> named = true
@@ -255,11 +255,11 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
             Val("{index}/{count}")
         }
         .Levels -> {
-            inner := trimmed.copy()
+            ^inner: trimmed.copy()
             if inner.starts_with("[") && inner.ends_with("]") {
                 inner = inner.slice(1..<inner.len() - 1)
             }
-            levels := [String]{}
+            ^levels: [String]{}
             loop part in inner.split(",").to_list() {
                 level: part.trim().replace("\"", "")
                 if !test_setting_levels(row).contains(level) -> return None
@@ -269,8 +269,8 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
             Val(levels.join(","))
         }
         .Duration -> {
-            unit := 1000
-            digits := trimmed.copy()
+            ^unit: 1000
+            ^digits: trimmed.copy()
             if {
                 trimmed.ends_with("ms") -> {
                     unit = 1
@@ -356,7 +356,7 @@ test_settings_put: fn(settings: ^[TestSetting], setting: TestSetting) Never! {
 // `later` over `earlier`: every row `later` writes replaces the earlier value.
 test_settings_layered: fn(earlier: [TestSetting], later: [TestSetting]) -> [TestSetting] Never! {
     // copy: `earlier` stays with the caller; the layered list owns its rows.
-    merged := earlier.copy()
+    ^merged: earlier.copy()
     loop setting in later -> test_settings_put(merged, setting.copy())
     merged
 }
@@ -412,7 +412,7 @@ test_settings_number: fn(settings: [TestSetting], name: String) -> Int Never! {
 // the reader names; one the plan step wrote after `test: fn` called
 // `t.run()` starts with TEST_SETTING_AFTER_RUN (JetRuntime TestSuite.jet).
 test_settings_lines: fn(settings: [TestSetting]) -> String Never! {
-    text := ""
+    ^text: ""
     loop setting in settings -> text = "{text}{setting.name}\t{setting.value}\t{setting.source}\n"
     text
 }
@@ -425,7 +425,7 @@ TEST_SETTING_AFTER_RUN: "!"
 // row, a row not ported yet, or a call after `t.run()`, as the
 // `t.<name>(…)` call that wrote it.
 test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] TestSettingError! {
-    settings := [TestSetting]{}
+    ^settings: [TestSetting]{}
     loop line in text.split("\n").to_list() {
         if line == "" -> next
         late: line.starts_with(TEST_SETTING_AFTER_RUN)

@@ -21,7 +21,7 @@ coll_test_source: fn() -> I64 {
     meta: coll_test_meta()
     header: coll_list_new()
     slot: jet_rt_alloc(I64{8}, I64{8})
-    at := I64{1}
+    ^at: I64{1}
     loop at <= (I64{5}) {
         trap_store(slot, at)
         coll_list_push(header, slot, meta)
@@ -43,8 +43,8 @@ coll_test_live: fn(width: I64) -> I64 { alloc_live_blocks(width) }
 coll_test_bytes: fn() {
     coll_test_require(RT_HOST_U8_STRIDE == I64{1})
     snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
@@ -54,7 +54,7 @@ coll_test_bytes: fn() {
     trap_store(meta, I64{1})
     trap_store(meta + I64{48}, I64{34359738371})
     slot: coll_slot_new(meta)
-    case := I64{0}
+    ^case: I64{0}
     loop case < (I64{3}) {
         length: if (case == I64{0}) -> I64{0} else if (case == I64{1}) -> I64{1} else -> I64{255}
         input: coll_list_new()
@@ -110,7 +110,7 @@ coll_test_bits_render: fn(bits: I64, low: I64, high: I64, length: I64) {
     show: jet_rt_handle_show_jet_bit_set(bits)
     debug: jet_rt_handle_debug_jet_bit_set(bits)
     coll_test_require(rt_text_len(display) == length && rt_text_len(show) == length && rt_text_len(debug) == length)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         word: if (at < I64{8}) -> low else -> high
         shift: (at % I64{8}) * I64{8}
@@ -127,8 +127,8 @@ coll_test_bits_render: fn(bits: I64, low: I64, high: I64, length: I64) {
 
 coll_test_bits: fn() {
     snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
@@ -153,7 +153,7 @@ coll_test_bits: fn() {
     jet_rt_handle_drop_jet_bit_set(empty_copy)
     jet_rt_handle_drop_jet_bit_set(empty_clone)
     cloned: jet_rt_handle_clone_jet_bit_set(bits)
-    index := I64{0}
+    ^index: I64{0}
     loop index < (I64{20}) {
         coll_test_require(jet_bitset_add(cloned, I64{1000} + index))
         index += I64{1}
@@ -217,15 +217,15 @@ coll_test_bits_extent_stop: fn() {
     maximum: jet_int_owned_from_i64(I64{9223372036854775807})
     coll_test_require(jet_bitset_add(bits, maximum) && jet_bit_set_has(bits, maximum))
     jet_rt_int_drop(maximum)
-    _ := jet_bit_set_len(bits)
+    ^_: jet_bit_set_len(bits)
     // Reaching here is a failed witness, never a successful neutral length.
     trap_exit(I64{1})
 }
 
 coll_test_para_fold: fn() {
     snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
@@ -265,8 +265,8 @@ coll_test_para_fold: fn() {
 
 coll_test_i64_lists: fn() {
     snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
@@ -345,8 +345,8 @@ coll_test_short_text: fn(word: I64, length: I64) -> I64 {
 
 coll_test_ordered_map: fn() {
     snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
@@ -371,7 +371,7 @@ coll_test_ordered_map: fn() {
     trap_store(expected + I64{16}, I64{7022836043848178464})
     trap_store(expected + I64{24}, I64{8672560942848243052})
     trap_store(expected + I64{32}, I64{32093})
-    mode := I64{0}
+    ^mode: I64{0}
     loop mode < (I64{3}) {
         text: if (mode == I64{0}) -> jet_rt_handle_display_jet_ordered_map(one) else if (mode == I64{1}) -> jet_rt_handle_show_jet_ordered_map(one) else -> jet_rt_handle_debug_jet_ordered_map(one)
         coll_test_require(rt_text_len(text) == I64{34})
@@ -437,7 +437,7 @@ coll_test_ordered_map: fn() {
 }
 
 coll_test_text_slots_drop: fn(data: I64, length: I64) {
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         jet_rt_string_drop(trap_word(data + at * I64{8}))
         at += I64{1}
@@ -447,8 +447,8 @@ coll_test_text_slots_drop: fn(data: I64, length: I64) {
 
 coll_test_counter: fn() {
     snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
@@ -480,7 +480,7 @@ coll_test_counter: fn() {
     trap_store(expected + I64{16}, I64{8026294335821717548})
     trap_store(expected + I64{24}, I64{3268241390004629109})
     trap_store(expected + I64{32}, I64{137839209622577})
-    mode := I64{0}
+    ^mode: I64{0}
     loop mode < (I64{3}) {
         text: if (mode == I64{0}) -> jet_rt_handle_display_jet_counter(negative) else if (mode == I64{1}) -> jet_rt_handle_show_jet_counter(negative) else -> jet_rt_handle_debug_jet_counter(negative)
         coll_test_require(rt_text_len(text) == I64{38})
@@ -553,8 +553,8 @@ coll_test_counter: fn() {
 
 coll_test_chain: fn() {
     snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
@@ -604,7 +604,7 @@ coll_test_chain: fn() {
     trap_store(expected + I64{16}, I64{8461244959896132961})
     trap_store(expected + I64{24}, I64{2318360240967021413})
     trap_store(expected + I64{32}, I64{8215929})
-    mode := I64{0}
+    ^mode: I64{0}
     loop mode < (I64{3}) {
         text: if (mode == I64{0}) -> jet_rt_handle_display_jet_layer(layer_clone) else if (mode == I64{1}) -> jet_rt_handle_show_jet_layer(layer_clone) else -> jet_rt_handle_debug_jet_layer(layer_clone)
         coll_test_require(rt_text_len(text) == I64{35})
@@ -698,8 +698,8 @@ coll_test_chain_bounds_stop: fn(contains: Bool) {
     out: jet_rt_alloc(I64{8}, I64{8})
     trap_store(input, key)
     chain: jet_coll_chain_push(jet_coll_chain(), input, I64{1}, I64{0}, I64{0})
-    if contains -> _ := jet_coll_chain_contains(chain, key) else {
-        _ := jet_coll_chain_get(chain, key, out)
+    if contains -> ^_: jet_coll_chain_contains(chain, key) else {
+        ^_: jet_coll_chain_get(chain, key, out)
     }
     // Returning from the required checked bounds panic is a witness failure.
     coll_test_require(false)
@@ -713,7 +713,7 @@ coll_test_range_walk: fn(start: I64, end: I64, step: I64, has_step: U8, exclusiv
     jet_rt_int_drop(first)
     jet_rt_int_drop(last)
     jet_rt_int_drop(stride)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         coll_test_require(jet_loop_range_has_next(cursor))
         value: jet_loop_range_value(cursor)
@@ -730,8 +730,8 @@ coll_test_range_walk: fn(start: I64, end: I64, step: I64, has_step: U8, exclusiv
 
 coll_test_range: fn() {
     snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
-    at := I64{0}
+    ^width: I64{32}
+    ^at: I64{0}
     loop at < (I64{8}) {
         trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
@@ -799,8 +799,8 @@ coll_test_range_argument_stop: fn(exhausted: Bool) {
     jet_rt_alloc_init()
     if exhausted {
         cursor: jet_loop_range_init(I64{1}, I64{1}, I64{1}, U8{1}, U8{1})
-        _ := jet_loop_range_value(cursor)
-    } else { _ := jet_loop_range_init(I64{1}, I64{2}, I64{0}, U8{1}, U8{0}) }
+        ^_: jet_loop_range_value(cursor)
+    } else { ^_: jet_loop_range_init(I64{1}, I64{2}, I64{0}, U8{1}, U8{0}) }
     coll_test_require(false)
 }
 

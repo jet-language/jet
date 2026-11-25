@@ -66,18 +66,18 @@ SemaTraitLawTable: struct {
 }
 
 sema_trait_laws_add: fn(graph: ^SemaRegistrationGraph) Never! {
-    groups := Rows<SemaTraitLawGroup>{}
+    ^groups: Rows<SemaTraitLawGroup>{}
     empty_group: groups.add(SemaTraitLawGroup{first: 0, count: 0})
-    declared := SemaTraitLawTable{names: name_table(), groups: groups, group_rows: [Row<SemaTraitLawGroup>]{empty_group}, laws: Rows<SemaTraitLaw>{}, law_rows: [Row<SemaTraitLaw>]{}}
+    ^declared: SemaTraitLawTable{names: name_table(), groups: groups, group_rows: [Row<SemaTraitLawGroup>]{empty_group}, laws: Rows<SemaTraitLaw>{}, law_rows: [Row<SemaTraitLaw>]{}}
     loop row in graph.modules {
-        bytes := [U8]{}
+        ^bytes: [U8]{}
         loop item in row.program.items {
             if item == .Trait(definition) {
                 if definition.laws.len() == 0 || name_find(declared.names, definition.name) != None {
                     next
                 }
                 if bytes.len() == 0 -> bytes = row.source.bytes()
-                _ := name_intern(declared.names, definition.name)
+                ^_: name_intern(declared.names, definition.name)
                 first: declared.law_rows.len()
                 loop law in definition.laws {
                     if law.span.start < 0 || law.span.end > bytes.len() -> next
@@ -92,8 +92,8 @@ sema_trait_laws_add: fn(graph: ^SemaRegistrationGraph) Never! {
         if graph.modules[module_index].package_identity != graph.package_identity || module_is_core(graph.modules[module_index].module_identity) {
             next
         }
-        tests := [TestDef]{}
-        faults := [String?]{}
+        ^tests: [TestDef]{}
+        ^faults: [String?]{}
         loop written in sema_trait_law_impls(graph.modules[module_index].program.items) {
             laws: sema_trait_laws_of(written.trait_name, declared)
             loop (index, law) in laws {
@@ -111,7 +111,7 @@ sema_trait_laws_add: fn(graph: ^SemaRegistrationGraph) Never! {
             if faults[index] == .Val(fault) {
                 graph.law_faults.push(SemaTraitLawFault{key: "{key}", fault: "{fault}"})
             }
-            _ := symbol_intern(graph.symbols, key)
+            ^_: symbol_intern(graph.symbols, key)
             graph.modules[module_index].program.items.push(Item.Test{value: test})
         }
     }
@@ -138,7 +138,7 @@ sema_trait_law_leaf: fn(name: String) -> String Never! {
 
 // The impls `items` write themselves, top-level or in a type's body.
 sema_trait_law_impls: fn(items: [Item]) -> [SemaTraitLawImpl] Never! {
-    found := [SemaTraitLawImpl]{}
+    ^found: [SemaTraitLawImpl]{}
     loop item in items {
         if item == {
             .Impl(definition) -> {
@@ -193,11 +193,11 @@ sema_trait_law_test: fn(graph: SemaRegistrationGraph, module_index: Int, written
     }
     // The law already parsed in its trait, and `Self` becomes a type name:
     // text that does not parse now is the compiler's fault, not the law's.
-    test := sema_trait_law_parse(offset, sema_trait_law_self(law.source, written.type_name)) ?? {
+    ^test: sema_trait_law_parse(offset, sema_trait_law_self(law.source, written.type_name)) ?? {
         return sema_trait_law_stopped(offset, name, "the law `{law.name}` of `{trait_name}` for `{written.type_name}` does not reparse: {err.message}", faults)
     }
     loop parameter in test.params {
-        seen := [Int]{}
+        ^seen: [Int]{}
         reason: sema_property_param_ungeneratable(graph, module_index, parameter.ty, seen) ?? next
         return sema_trait_law_skipped(offset, "{name}, not checked: {reason}", faults)
     }
@@ -210,12 +210,12 @@ sema_trait_law_test: fn(graph: SemaRegistrationGraph, module_index: Int, written
 sema_trait_law_waiver: fn(markers: [Marker], law: String) -> String? Never! {
     loop marker in markers {
         if marker.name != MARKER_WAIVE || marker.negated || marker.args.len() < 2 -> next
-        waived := false
+        ^waived: false
         if marker.args[0] == .Expr(named) {
             if named == .Ident(name, _, _) -> waived = name == law
         }
         if !waived -> next
-        reason := ""
+        ^reason: ""
         if marker.args[1] == .Expr(text) {
             if text == .Str(parts, _, _) {
                 loop part in parts {
@@ -234,7 +234,7 @@ SEMA_TRAIT_LAW_SKIP: "#Test(\"law\") {{\n    .skip {{}}\n}}\n"
 
 // A test named `name` that runs no case: the runner lists it as skipped.
 sema_trait_law_skipped: fn(offset: Int, name: String, faults: ^[String?]) -> TestDef Never! {
-    test := sema_trait_law_parse(offset, SEMA_TRAIT_LAW_SKIP) ?? {
+    ^test: sema_trait_law_parse(offset, SEMA_TRAIT_LAW_SKIP) ?? {
         return sema_trait_law_stopped(offset, name, "the skipped law test `{name}` does not reparse: {err.message}", faults)
     }
     test.name = Val(name)
@@ -249,7 +249,7 @@ sema_trait_law_skipped: fn(offset: Int, name: String, faults: ^[String?]) -> Tes
 // as an internal compiler error (exit 101).
 sema_trait_law_stopped: fn(offset: Int, name: String, fault: String, faults: ^[String?]) -> TestDef Never! {
     report: sema_trait_law_literal("internal compiler error: {fault}")
-    test := sema_trait_law_parse(offset, "#Test(\"law\") {{\n    panic(\"{report}\")\n}}\n") ?? sema_trait_law_empty(offset)
+    ^test: sema_trait_law_parse(offset, "#Test(\"law\") {{\n    panic(\"{report}\")\n}}\n") ?? sema_trait_law_empty(offset)
     test.name = Val(name)
     test.name_expr = None
     faults.push(Val(fault))
@@ -266,7 +266,7 @@ sema_trait_law_empty: fn(offset: Int) -> TestDef Never! {
 // `text` as the inside of a Jet string literal: a backslash, a quote and the
 // braces escaped, a line break as `\n`, any other control byte a space.
 sema_trait_law_literal: fn(text: String) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop byte in text.bytes() {
         if {
             byte == (U8{92}) || byte == (U8{34}) -> {
@@ -291,7 +291,7 @@ sema_trait_law_literal: fn(text: String) -> String Never! {
 // The one test `source` declares, parsed as if it began at byte `offset`;
 // else what the parser found instead.
 sema_trait_law_parse: fn(offset: Int, source: String) -> TestDef Err! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop _ in 0..<offset -> bytes.push(32)
     loop byte in source.bytes() -> bytes.push(byte)
     parsed: parse_generated_source(bytes)
@@ -299,7 +299,7 @@ sema_trait_law_parse: fn(offset: Int, source: String) -> TestDef Err! {
     if parsed.program.items.len() != 1 {
         return Err("it declares {parsed.program.items.len()} items, not one test")
     }
-    program := parsed.program.move()
+    ^program: parsed.program.move()
     item: program.items.pop() ?? return Err("it declares no test")
     if item.move() == .Test(test) -> return Ok(test)
     Err("it declares no test")
@@ -308,9 +308,9 @@ sema_trait_law_parse: fn(offset: Int, source: String) -> TestDef Err! {
 // `source` with each whole word `Self` spelled `type_name`.
 sema_trait_law_self: fn(source: String, type_name: String) -> String Never! {
     bytes: source.bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     replacement: type_name.bytes()
-    index := 0
+    ^index: 0
     loop index < bytes.len() {
         if index + 4 <= bytes.len() && bytes[index] == (U8{83}) && bytes[index + 1] == (U8{101}) && bytes[index + 2] == (U8{108}) && bytes[index + 3] == (U8{102}) {
             before: index > 0 && sema_trait_law_name_byte(bytes[index - 1])
@@ -339,7 +339,7 @@ sema_trait_law_name_byte: fn(byte: U8) -> Bool Never! {
             assert(test.params.len() > 0)
         }
     }
-    faults := [String?]{}
+    ^faults: [String?]{}
     skipped: sema_trait_law_skipped(7, "Equatable.reflexive for Ledger, not checked: `Ledger.entries`", faults)
     assert_eq(skipped.name, Val("Equatable.reflexive for Ledger, not checked: `Ledger.entries`"))
     assert_eq(skipped.body.len(), 1)
@@ -349,11 +349,11 @@ sema_trait_law_name_byte: fn(byte: U8) -> Bool Never! {
 #Test("a law that does not reparse stops as a compiler fault and the next law still gets its test") {
     // The first law is broken text; the second is whole.
     laws: ["#Test broken: fn(a: Price) {{\n    assert(a ==)\n}}\n", "#Test kept: fn(a: Price) {{\n    assert(a == a)\n}}\n"]
-    faults := [String?]{}
-    tests := [TestDef]{}
+    ^faults: [String?]{}
+    ^tests: [TestDef]{}
     loop (index, source) in laws {
         name: "Equatable.law{index} for Price"
-        test := sema_trait_law_parse(index + 3, source) ?? {
+        ^test: sema_trait_law_parse(index + 3, source) ?? {
             tests.push(sema_trait_law_stopped(index + 3, name, "the law `law{index}` of `Equatable` for `Price` does not reparse: {err.message} \"{{\\\n", faults))
             next
         }

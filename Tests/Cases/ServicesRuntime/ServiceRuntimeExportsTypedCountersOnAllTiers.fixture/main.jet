@@ -49,7 +49,7 @@ telemetry_has_service_counters: fn(text: String) -> Bool {
 
 // D-CONC-JOIN1: the dogfood service task is consumed, not dropped.
 service_probe: fn() -> String {
-    probe := service.tree("probe")
+    ^probe: service.tree("probe")
     endpoint: probe.worker("echo", worker_a, capacity: 1) ?? panic("probe worker")
     probe.start() ?? panic("probe start")
     probe.send(endpoint, "probe") ?? panic("probe send")
@@ -59,7 +59,7 @@ service_probe: fn() -> String {
 }
 
 run: fn() {
-    tree := service.tree("app")
+    ^tree: service.tree("app")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     temp: testing.temp_dir("service-runtime")
     state_store: Path.from(temp).join("state.log").to_string()

@@ -8,12 +8,12 @@ Event: enum {
 }
 
 run: fn() {
-    a := Event.Idle
-    b := Event.Count(3)
-    c := Event.Named{name: "x", enabled: true}
+    ^a: Event.Idle
+    ^b: Event.Count(3)
+    ^c: Event.Named{name: "x", enabled: true}
     print(json.to_string(a))
     print(json.to_string(b))
     print(json.to_string(c))
-    back := json.decode<Event>("{{\"Count\":7}}") ?? panic("decode")
+    ^back: json.decode<Event>("{{\"Count\":7}}") ?? panic("decode")
     if back == .Count(n) -> print(n)
 }

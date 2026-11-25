@@ -41,7 +41,7 @@ JET_CLI_EMBED_USAGE: "Usage: jet self devtools embed <image> <runtime-dir> <out>
 JET_CLI_EMBED_IMAGE_MODE: 493
 
 jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
-    operands := args.len() == 4
+    ^operands: args.len() == 4
     loop arg in args -> operands = operands && arg != "" && !arg.starts_with("-")
     if !operands {
         return JetDriverVerbOutput{stdout: "", stderr: JET_CLI_EMBED_USAGE, exit_code: JET_DRIVER_EXIT_USAGE}
@@ -60,11 +60,11 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
     threads: CompilerThreads{cap: None, cores: embed_sys.cpu_count(), memory_available: jet_cli_memory_available()}
     hashing: task jet_cli_image_digest(image)
     splitting: task x64_executable_debug_apart(image, embed_files.basename(side_file), threads)
-    names := [String]{}
-    payloads := [[U8]]{}
-    packer := ""
-    core_exports := ""
-    core_facts := ""
+    ^names: [String]{}
+    ^payloads: [[U8]]{}
+    ^packer: ""
+    ^core_exports: ""
+    ^core_facts: ""
     loop name in JET_CLI_RUNTIME_PART_FILES {
         path: "{runtime_dir}/{name}"
         payload: embed_files.read_bytes(path) ?? return jet_cli_maintenance_error("E2105", "couldn't read the runtime file `{path}`: {jet_cli_io_error_text(err)}", None, color, json)
@@ -101,7 +101,7 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
     // all, on a task of its own while the digest is taken; the identity
     // then goes over the zeros.
     prefix: "jet@{JET_VERSION}#"
-    placeholder := [U8]{}
+    ^placeholder: [U8]{}
     loop _ in 0..<prefix.len() + 64 -> placeholder.push(U8{0})
     names.push(JET_CLI_IDENTITY_PART)
     payloads.push(placeholder)

@@ -39,9 +39,9 @@ census: fn(prefix: String) -[FS]> Int {
 
 run: fn() {
     sys.set_memory_limit(CAP, CAP) ?? panic("set_memory_limit")
-    handles := [Task<Int>]{}
+    ^handles: [Task<Int>]{}
     loop _ in 0..<TASKS -> handles.push(task nap())
-    total := 0
+    ^total: 0
     loop handle in handles -> total += handle.join() ?? 0
     peak: census("VmPeak:")
     print("{total} of {TASKS} tasks completed")

@@ -13,9 +13,9 @@ use {
 // still runs; without it both sides wait out the child's bound.
 child: fn(go: Path) {
     print("ready")
-    out := term.stdout()
+    ^out: term.stdout()
     out.flush() ?? panic("child flush")
-    waited := 0
+    ^waited: 0
     loop !fs.exists(go) {
         if waited >= 500 {
             print("child gave up waiting")
@@ -38,7 +38,7 @@ run: fn() {
     worker: process.cmd([sys.executable(), "--child", go.to_string()])
         .stdout(.Stream)
         .spawn() ?? panic("spawn child")
-    answered := false
+    ^answered: false
     loop line in worker.stdout.lines() {
         print("parent read: {line.trim()}")
         if !answered {

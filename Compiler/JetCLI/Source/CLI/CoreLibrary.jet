@@ -129,7 +129,7 @@ jet_cli_core_library_ir: fn(native: Shared<JetEvalNativeSession>, compiler_threa
 
 jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibraryIR {
     checked: jet_cli_core_checked(native, compiler_threads.cap, trace_sink)
-    inputs := if checked.move() == {
+    ^inputs: if checked.move() == {
         .Stopped(output) -> {
             return jet_cli_core_library_stopped("The Core check of the Core library stopped:\n{output.stderr}{output.stdout}", compiler_threads)
         }
@@ -143,9 +143,9 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
     writing: task jet_cli_core_bodies_file(captures, trace_sink)
     declarations: jet_driver_checked_declarations(inputs)
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    library := ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), inputs.interner.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, JET_CLI_CORE_LOWERED, compiler_threads)
+    ^library: ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), inputs.interner.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, JET_CLI_CORE_LOWERED, compiler_threads)
     if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
-    issues := compiler_take_rows<String>(library.errors)
+    ^issues: compiler_take_rows<String>(library.errors)
     loop failure in library.failures {
         issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     }
@@ -176,7 +176,7 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
     released.detach()
     if issues.len() == 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
-        _ := ir_optimize_module(library.program, ir_opt_options(2), threads)
+        ^_: ir_optimize_module(library.program, ir_opt_options(2), threads)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", library.program.functions.len())
         if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
         loop finding in ir_lint_module(library.program, "ir.opt", threads) {
@@ -232,7 +232,7 @@ jet_cli_core_library_built: fn(native: Shared<JetEvalNativeSession>, prefix: Str
 // runtime's thread receipt `runtime_threads` is known (Request.jet
 // jet_cli_runtime_with_core). A Core check that stopped is the problem.
 jet_cli_core_library_made: fn(built: ^^JetCLICoreLibraryIR, prefix: String, runtime_threads: [String], trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
-    owned := built.move()
+    ^owned: built.move()
     if owned.stopped == .Val(problem) -> return JetCLICoreLibrary{bytes: [U8]{}, problem: problem}
     library: owned.library.pop() ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "the Core library IR was lost"}
     if trace_sink == .Val(sink) -> sink.begin("runtime.core.object", "", -1, -1)
@@ -247,7 +247,7 @@ jet_cli_core_library_made: fn(built: ^^JetCLICoreLibraryIR, prefix: String, runt
 // `runtime_threads` is known.
 jet_cli_core_library: fn(prefix: String, library: ^^IRCoreLibrary, found: ^^[String], seal: String, bodies_in: ^^[U8], runtime_threads: [String], threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
     bodies: bodies_in.move()
-    issues := found.move()
+    ^issues: found.move()
     if issues.len() == 0 {
         thread_exports: ir_thread_exports(library.program, library.exports, runtime_threads)
         if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
@@ -258,7 +258,7 @@ jet_cli_core_library: fn(prefix: String, library: ^^IRCoreLibrary, found: ^^[Str
         // indices through section 0 and `.symtab_shndx`: the image keeps every
         // global of it, and a full link of a program bound to Core keeps only
         // the sections that program reaches (JetCLI Host.jet).
-        object := ir_x64_library_object(compiled, library.exports, library.data, true, true)
+        ^object: ir_x64_library_object(compiled, library.exports, library.data, true, true)
         if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
         if object.errors.len() == 0 {
             o_bytes: object.bytes.move()
@@ -280,7 +280,7 @@ jet_cli_core_library: fn(prefix: String, library: ^^IRCoreLibrary, found: ^^[Str
             p_threads: "{prefix}.threads"
             p_skipped: "{prefix}.skipped"
             skipped_text: skipped.join("\n")
-            write_err := ""
+            ^write_err: ""
             task.group write_core_files {
                 t_obj: task jet_cli_core_write_bytes(p_obj, o_bytes, "cannot write the Core object")
                 t_exports: task jet_cli_core_write_exports(p_exports, rows)
@@ -347,7 +347,7 @@ jet_cli_core_write_facts: fn(path: String, facts: [String]) -> String {
 // stopped it.
 jet_cli_core_interface_made: fn(prefix: String, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> String {
     if trace_sink == .Val(sink) -> sink.begin("runtime.core.interface", "", -1, -1)
-    rows := jet_cli_builtin_core_rows()
+    ^rows: jet_cli_builtin_core_rows()
     rows.extend(jet_driver_runtime_interface_sources())
     made: jet_driver_core_interface_units(rows.move(), compiler_threads)
     if made.problem == .Val(problem) {
@@ -385,7 +385,7 @@ JetCLICoreChecked: enum {
 // neither reads it while it is written; else the problem that stopped it.
 jet_cli_core_identity: fn() -> String {
     if core_library_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) != None -> return ""
-    identity := jet_cli_identity_part() ?? ""
+    ^identity: jet_cli_identity_part() ?? ""
     if identity == "" {
         executable: core_library_sys.executable()
         image: core_library_files.read_bytes(executable) ?? return "couldn't read this jet `{executable}` to name the compiler: {jet_cli_io_error_text(err)}"
@@ -409,7 +409,7 @@ jet_cli_core_checked: fn(native: Shared<JetEvalNativeSession>, threads: Int?, tr
     if prepared.move() == {
         .Refused(output) -> JetCLICoreChecked.Stopped{output: output}
         .Prepared(request, snapshot) -> {
-            selected := request
+            ^selected: request
             selected.every_core_body = true
             selected.core_seal = true
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)

@@ -8,7 +8,7 @@ depth_key: fn(site: I64) -> I64 {
     existing: sync_load(site)
     if (existing != I64{0}) { return existing }
     sync_mutex_lock(thread_tls_registry)
-    key := sync_load(site)
+    ^key: sync_load(site)
     if (key == I64{0}) {
         key = thread_tls_key_new_locked(I64{0}, I64{0})
         sync_store(site, key)

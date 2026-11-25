@@ -30,7 +30,7 @@ CoreProvider: struct {
     }
 
     plan_downloads: fn(self, verification: StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
-        plan := DownloadPlan.empty()
+        ^plan: DownloadPlan.empty()
         loop spec in specs {
             if self.requires_acquisition(spec, table) {
                 plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
@@ -49,10 +49,10 @@ CoreProvider: struct {
                 return Err(ProviderError.CoreBuild(error.message))
             }
         }
-        src_dir := ""
-        canonical := PackageFacts?{None}
-        canonical_kind := PackageKind?{None}
-        canonical_version := ""
+        ^src_dir: ""
+        ^canonical: PackageFacts?{None}
+        ^canonical_kind: PackageKind?{None}
+        ^canonical_version: ""
         if canonical_package == {
             .Val(found) -> {
                 source: found.facts.source ?? "."
@@ -97,13 +97,13 @@ CoreProvider: struct {
         envelope: Envelope.for_output(out_dir, spec.raw, artifact.recipe_id)
         recipe_identity: provider_core_recipe_identity(src_dir, spec.package, manifest, kind, canonical, toolchain) ?? return Err(ProviderError.CoreBuild(err.message))
         identity: provider_plain_cache_identity(fingerprint, recipe_identity, ctx)
-        plan_facts := [String:String]{
+        ^plan_facts: [String:String]{
             "action.kind": "core-build",
             "action.recipe": recipe_identity,
             "build.sandbox": artifact.sandbox_class,
             "build.sandbox_policy": artifact.sandbox_policy,
         }
-        producer_facts := [String:String]{
+        ^producer_facts: [String:String]{
             "source.kind": "core-package-tree",
             "source.tree_schema": PROVIDER_CORE_TREE_SCHEMA,
             "source.tree_fingerprint": fingerprint,
@@ -395,7 +395,7 @@ provider_build_rlib_from_cargo: fn(pkg_dir: String, hangar_dir: String, toolchai
 // Run the sandboxed cargo build in `scratch` and copy the produced rlib into
 // the object; the caller removes the scratch whatever the outcome.
 provider_build_rlib_in_scratch: fn(pkg_dir: String, scratch: CargoBuildScratch, toolchain: CargoToolchain, offline: Bool) -[FS, Env, Exec, Time.Wait]> CargoBuildReceipt CargoBuildError! {
-    args := [String]{"build", "--lib", "--release", "--manifest-path", "/work/source/Cargo.toml", "--locked"}
+    ^args: [String]{"build", "--lib", "--release", "--manifest-path", "/work/source/Cargo.toml", "--locked"}
     if offline -> args.push("--offline")
     files.create_dir_all(files.join(scratch.path, "home")) ?? return Err(CargoBuildError.Failed("could not create Cargo home: {err}"))
     files.create_dir_all(files.join(scratch.path, "cargo-home")) ?? return Err(CargoBuildError.Failed("could not create Cargo cache home: {err}"))
@@ -415,7 +415,7 @@ provider_build_rlib_in_scratch: fn(pkg_dir: String, scratch: CargoBuildScratch, 
     }
     release: files.join(scratch.path, "release")
     entries: files.list_dir(release) ?? return Err(CargoBuildError.Failed("sandboxed cargo produced no release directory: {err}"))
-    built := ""
+    ^built: ""
     loop entry in entries {
         if built == "" && provider_is_lib_rlib(entry.name) -> built = entry.path
     }

@@ -88,7 +88,7 @@
 // The runtime object puts jet_rt_alloc_init in .init_array, so initialization
 // precedes all user code in both programs and entryless libraries. There is no
 // lazy initialization or separate jet_rt_main initialization mechanism.
-alloc_root := I64{0}
+^alloc_root: I64{0}
 
 // The largest payload a size class serves on the ordinary path. Checked mode
 // sets it to 0, so every allocation and free takes the direct-mapping branch,
@@ -102,7 +102,7 @@ alloc_root := I64{0}
 // words.
 ALLOC_CLASS_LIMIT: I64{4096}
 
-alloc_class_limit := I64{4096}
+^alloc_class_limit: I64{4096}
 
 // The checked heap is linked only into a program built with
 // `--checked-alloc`: its entry calls jet_rt_alloc_check_link, which keeps
@@ -112,37 +112,37 @@ alloc_class_limit := I64{4096}
 // runtime image leaves jet_rt_alloc_check_link out (JetBackend
 // Image/RuntimePack.jet), so it holds no checked heap and a checked program
 // links the pack in full.
-alloc_check_take_code := I64{0}
+^alloc_check_take_code: I64{0}
 
-alloc_check_give_code := I64{0}
+^alloc_check_give_code: I64{0}
 
-alloc_check_sweep_code := I64{0}
+^alloc_check_sweep_code: I64{0}
 
 // 1 once jet_rt_alloc_check_init has installed the checked heap.
-alloc_check_linked := I64{0}
+^alloc_check_linked: I64{0}
 
 // A C witness's take and give observers (jet_rt_alloc_check_observe), 0 for
 // none.
-alloc_check_take_observer := I64{0}
+^alloc_check_take_observer: I64{0}
 
-alloc_check_give_observer := I64{0}
+^alloc_check_give_observer: I64{0}
 
 // The checked heap's live list under the alloc lens (alloc_check_track_start):
 // 2 once the observation start arms it, 1 once the entry starts it
 // (alloc_check_track_entry), its first block, and the heap snapshots taken
 // so far (alloc_check_track_hold). The quarantine lock guards all but the
 // switch, which each take loads once.
-alloc_check_tracking := I64{0}
+^alloc_check_tracking: I64{0}
 
-alloc_check_live_head := I64{0}
+^alloc_check_live_head: I64{0}
 
-alloc_check_snapshots := I64{0}
+^alloc_check_snapshots: I64{0}
 
 // The TCB of the thread whose blocks the live list leaves out, the
 // observation writer's (alloc_check_track_skip_thread), -1 for none: its
 // publications and the heap snapshots it takes for `jet perf attach` are
 // the observation's own blocks, not the program's.
-alloc_check_track_skipped := I64{-1}
+^alloc_check_track_skipped: I64{-1}
 
 // Layout.from_size_align(size.max(1), align): alignment must be a nonzero
 // power of two, and rounding the size to alignment must fit isize.MAX.
@@ -263,7 +263,7 @@ alloc_map: fn(bytes: I64, failed_size: I64) -> I64 {
 
 alloc_unmap: fn(address: I64, bytes: I64) {
     #Unsafe("the caller owns this mapping and uses no pointer into it again") {
-        _ := os_unmap_untracked_i64(address, bytes)
+        ^_: os_unmap_untracked_i64(address, bytes)
     }
 }
 
@@ -291,9 +291,7 @@ alloc_map_shared_at: fn(address: I64, bytes: I64, descriptor: I64) -> I64 {
 
 // Makes `bytes` at the page-aligned `address` of a mapping the caller owns
 // inaccessible, as a stack guard.
-alloc_guard: fn(address: I64, bytes: I64) {
-    _ := os_mprotect_i64(address, bytes, I64{0})
-}
+alloc_guard: fn(address: I64, bytes: I64) { ^_: os_mprotect_i64(address, bytes, I64{0}) }
 
 // The page map: every region core.mem.Region.reserve maps
 // is registered by address, so growth and drop find the allocator that
@@ -362,14 +360,14 @@ alloc_page_set: fn(base: I64, bytes: I64, record: I64) -> Bool {
 // caller holds the page lock.
 priv alloc_page_spans: fn(base: I64, bytes: I64) -> Bool {
     #Unsafe("the caller holds the page lock, which serializes every table write; a fresh table is zero-filled before the aligned store that publishes it") {
-        root := os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP))
+        ^root: os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP))
         if (root == I64{0}) {
             root = alloc_map_try(ALLOC_PAGE_ROOT_BYTES)
             if (root == I64{0}) { return false }
             os_store_i64(wrapping(alloc_root + ALLOC_PAGE_MAP), root)
         }
         end: wrapping(base + bytes)
-        at := base
+        ^at: base
         loop at < end {
             cell: wrapping(root + wrapping((at >> I64{32}) * I64{8}))
             if (os_load_i64(cell) == I64{0}) {
@@ -389,7 +387,7 @@ priv alloc_page_write: fn(base: I64, bytes: I64, record: I64) {
     #Unsafe("the root and span tables of the range are mapped for the process's lifetime, and each unit's aligned word is written only by the range's owner") {
         root: os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP))
         end: wrapping(base + bytes)
-        at := base
+        ^at: base
         loop at < end {
             span: os_load_i64(wrapping(root + wrapping((at >> I64{32}) * I64{8})))
             os_store_i64(wrapping(span + wrapping(((at >> I64{16}) & I64{65535}) * I64{8})), record)
@@ -480,7 +478,7 @@ alloc_window: fn() -> I64 {
         alloc_unlock(lock)
         won: if spans -> sync_cas(word, I64{0}, base) else -> I64{-1}
         if (won == I64{0}) { return base }
-        _ := os_unmap_untracked_i64(mapping, bytes)
+        ^_: os_unmap_untracked_i64(mapping, bytes)
         return if (won == I64{-1}) -> I64{0} else -> won
     }
 }
@@ -494,7 +492,7 @@ alloc_window_holds: fn(address: I64) -> Bool {
 // The window class of a region of `bytes` (whole units): the least c with
 // 2^c units >= bytes.
 alloc_window_class: fn(bytes: I64) -> I64 Never! {
-    class := I64{0}
+    ^class: I64{0}
     loop bytes > (ALLOC_PAGE_UNIT << class) -> class = wrapping(class + I64{1})
     class
 }
@@ -524,8 +522,8 @@ priv alloc_window_take: fn(bytes: I64) -> I64 {
         }
     }
     stack: alloc_window_stack(class)
-    unit := I64{0}
-    top := sync_load(stack)
+    ^unit: I64{0}
+    ^top: sync_load(stack)
     loop top & ALLOC_WINDOW_INDEX != (I64{0}) {
         candidate: top & ALLOC_WINDOW_INDEX
         below: sync_load(wrapping(window + wrapping(candidate * I64{8})))
@@ -539,7 +537,7 @@ priv alloc_window_take: fn(bytes: I64) -> I64 {
     if (unit != I64{0}) { return wrapping(window + wrapping(unit * ALLOC_PAGE_UNIT)) }
     size: I64{1} << class
     next: wrapping(alloc_root + ALLOC_WINDOW_NEXT)
-    at := sync_load(next)
+    ^at: sync_load(next)
     loop unit == (I64{0}) {
         if (at > wrapping(wrapping(ALLOC_WINDOW_UNITS - ALLOC_WINDOW_LINK_UNITS) - size)) {
             return I64{0}
@@ -564,7 +562,7 @@ priv alloc_window_take: fn(bytes: I64) -> I64 {
 alloc_window_push: fn(window: I64, unit: I64, class: I64) {
     stack: alloc_window_stack(class)
     link: wrapping(window + wrapping(unit * I64{8}))
-    top := sync_load(stack)
+    ^top: sync_load(stack)
     loop {
         sync_store(link, top & ALLOC_WINDOW_INDEX)
         seen: sync_cas(stack, top, wrapping(wrapping(wrapping(top - (top & ALLOC_WINDOW_INDEX)) + ALLOC_WINDOW_TAG) + unit))
@@ -602,7 +600,7 @@ priv alloc_window_keep: fn(window: I64, unit: I64, class: I64) -> Bool {
 // shared stack.
 alloc_window_shelve: fn(kept: I64, class: I64) {
     window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
-    unit := kept & ALLOC_WINDOW_INDEX
+    ^unit: kept & ALLOC_WINDOW_INDEX
     loop unit != (I64{0}) {
         below: sync_load(wrapping(window + wrapping(unit * I64{8})))
         alloc_window_push(window, unit, class)
@@ -613,7 +611,7 @@ alloc_window_shelve: fn(kept: I64, class: I64) {
 // Moves the run stacks of TCB `from` to TCB `to`, emptying `from`; a class
 // `to` already keeps runs of goes on the shared stack instead.
 alloc_window_rows_move: fn(from: I64, to: I64) {
-    class := I64{0}
+    ^class: I64{0}
     loop class < ALLOC_WINDOW_CLASSES {
         at: wrapping(ALLOC_WINDOW_ROWS + wrapping(class * I64{8}))
         kept: sync_load(wrapping(from + at))
@@ -631,7 +629,7 @@ alloc_window_rows_move: fn(from: I64, to: I64) {
 // Puts every run the calling thread keeps on the shared stacks: thread
 // exit, before its TCB goes away. A thread without a TCB keeps none.
 alloc_window_rows_flush: fn() {
-    class := I64{0}
+    ^class: I64{0}
     loop class < ALLOC_WINDOW_CLASSES {
         row: alloc_window_row(class)
         if (row == I64{0}) {
@@ -695,14 +693,14 @@ alloc_reservation_unmap: fn(base: I64, bytes: I64) {
 alloc_reservation_map: fn(bytes: I64, record_bytes: I64) -> I64 {
     if (bytes <= I64{0} || bytes > wrapping(ALLOC_PAGE_LIMIT - ALLOC_PAGE_UNIT)) { return I64{0} }
     units: alloc_page_bytes(bytes)
-    base := alloc_window_take(units)
+    ^base: alloc_window_take(units)
     if (base == I64{0}) { base = alloc_reservation_direct(units) }
     if (base == I64{0}) { return I64{0} }
     record: alloc_reservation_record(base, record_bytes)
     if (record != I64{0}) {
         sync_store(record, base)
         sync_store(wrapping(record + I64{8}), units)
-        at := I64{16}
+        ^at: I64{16}
         loop at < record_bytes {
             sync_store(wrapping(record + at), I64{0})
             at += I64{8}
@@ -747,7 +745,7 @@ alloc_reservation_record_free: fn(record: I64, record_bytes: I64) {
     record: alloc_page_region(address)
     units: if (record != I64{0}) -> sync_load(wrapping(record + I64{8})) else -> alloc_page_bytes(bytes)
     if (record != I64{0}) {
-        _ := alloc_page_set(address, units, I64{0})
+        ^_: alloc_page_set(address, units, I64{0})
         alloc_user_drop(sync_load(wrapping(record + I64{16})))
         alloc_reservation_record_free(record, ALLOC_REGION_RECORD_BYTES)
     }
@@ -841,17 +839,15 @@ alloc_arena_index: fn() -> I64 {
 }
 
 // The calling thread's arena root.
-alloc_arena: fn() -> I64 {
-    alloc_arena_root(alloc_arena_index())
-}
+alloc_arena: fn() -> I64 { alloc_arena_root(alloc_arena_index()) }
 
 // Live payloads of class `width`: every block handed out of a slab across
 // all arenas minus the blocks parked in attached threads' caches. Isolated
 // fixtures use it as their leak witness; the caller is quiescent (no thread
 // is allocating, freeing or exiting while it reads).
 priv alloc_live_blocks: fn(width: I64) -> I64 {
-    total := I64{0}
-    index := I64{0}
+    ^total: I64{0}
+    ^index: I64{0}
     loop index < (I64{32}) {
         #Unsafe("the live totals are process-lifetime arena words; the quiescent caller needs no lock to read them") {
             total = wrapping(total + os_load_i64(wrapping(alloc_head(alloc_arena_root(index), width) + I64{128})))
@@ -864,7 +860,7 @@ priv alloc_live_blocks: fn(width: I64) -> I64 {
     live: wrapping(thread_tls_registry + I64{64})
     count: sync_load(live)
     data: sync_load(wrapping(live + I64{16}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         // A blocked TCB (alloc_cache_sync) caches nothing.
         cached: sync_load(wrapping(sync_load(wrapping(data + (at + I64{1}) * I64{8})) + count_offset))
@@ -886,7 +882,7 @@ priv alloc_lock: fn(root: I64) {
         if (os_cas_i64(root, I64{0}, I64{1}) == I64{0}) {
             return
         }
-        spins := I64{0}
+        ^spins: I64{0}
         loop spins < (I64{128}) {
             os_spin_pause()
             if (os_load_i64(root) == I64{0} && os_cas_i64(root, I64{0}, I64{1}) == I64{0}) {
@@ -895,7 +891,7 @@ priv alloc_lock: fn(root: I64) {
             spins = wrapping(spins + I64{1})
         }
         loop os_swap_i64(root, I64{2}) != (I64{0}) {
-            _ := host_syscall(I64{202}, root, I64{128}, I64{2}, I64{0}, I64{0}, I64{0})
+            ^_: host_syscall(I64{202}, root, I64{128}, I64{2}, I64{0}, I64{0}, I64{0})
         }
     }
 }
@@ -905,7 +901,7 @@ priv alloc_try_lock: fn(root: I64) -> Bool { sync_cas(root, I64{0}, I64{1}) == I
 alloc_unlock: fn(root: I64) {
     #Unsafe("the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word") {
         if (os_swap_i64(root, I64{0}) == I64{2}) {
-            _ := host_syscall(I64{202}, root, I64{129}, I64{1}, I64{0}, I64{0}, I64{0})
+            ^_: host_syscall(I64{202}, root, I64{129}, I64{1}, I64{0}, I64{0}, I64{0})
         }
     }
 }
@@ -918,7 +914,7 @@ alloc_unlock: fn(root: I64) {
 alloc_fork_hold: fn() {
     alloc_lock(wrapping(alloc_root + I64{136}))
     alloc_lock(wrapping(alloc_root + I64{16}))
-    index := I64{0}
+    ^index: I64{0}
     loop index < (I64{32}) {
         alloc_lock(alloc_large_shard(index))
         index = wrapping(index + I64{1})
@@ -936,7 +932,7 @@ alloc_fork_hold: fn() {
 // initial state (a waiter's wake finds no thread there).
 alloc_fork_release: fn() {
     alloc_unlock(wrapping(alloc_root + I64{736}))
-    index := I64{32}
+    ^index: I64{32}
     loop index > (I64{0}) {
         index = wrapping(index - I64{1})
         alloc_unlock(alloc_arena_root(index))
@@ -1014,8 +1010,8 @@ ALLOC_ARENA_REGION_BATCH: I64{8}
 // A new slab region of `desired` bytes, else of half the size and so on down
 // to one slab; its base, its size stored in `size_cell`, or zero.
 priv alloc_region_map_retry: fn(desired: I64, size_cell: I64) -> I64 {
-    size := desired
-    region := I64{0}
+    ^size: desired
+    ^region: I64{0}
     loop region == (I64{0}) && size >= ALLOC_SLAB_BYTES {
         region = alloc_region_map(size)
         if (region == I64{0}) { size = size >> I64{1} }
@@ -1036,7 +1032,7 @@ priv alloc_region_grow: fn(size: I64) {
 // batch), or zero: the last resort once no region can be mapped. The caller
 // holds `root`, so every other arena is only tried, never waited for.
 priv alloc_slab_steal: fn(root: I64) -> I64 {
-    index := I64{0}
+    ^index: I64{0}
     loop index < (I64{32}) {
         other: alloc_arena_root(index)
         if (other != root && (sync_load(wrapping(other + I64{216})) != I64{0} || sync_load(wrapping(other + I64{232})) != sync_load(wrapping(other + I64{240}))) && alloc_try_lock(other)) {
@@ -1090,8 +1086,8 @@ alloc_slab_map: fn(root: I64) -> I64 {
     alloc_lock(lock)
     top: sync_load(stack)
     if (top != I64{0}) {
-        moved := I64{0}
-        rest := sync_load(top)
+        ^moved: I64{0}
+        ^rest: sync_load(top)
         loop rest != (I64{0}) && moved < wrapping(ALLOC_ARENA_FREE_SLAB_BATCH - I64{1}) {
             following: sync_load(rest)
             sync_store(rest, sync_load(own_stack))
@@ -1147,8 +1143,8 @@ alloc_slab_map: fn(root: I64) -> I64 {
     } else {
         // Another arena mapped a region meanwhile: the slabs past this
         // arena's batch go on the shared stack, so none is lost.
-        spare := wrapping(region + carve)
-        head := sync_load(stack)
+        ^spare: wrapping(region + carve)
+        ^head: sync_load(stack)
         loop spare < wrapping(region + size) {
             sync_store(spare, head)
             head = spare
@@ -1176,8 +1172,8 @@ priv alloc_slab_retire: fn(root: I64, slab: I64) {
         sync_store(own_count, count)
         return
     }
-    tail := slab
-    moved := I64{1}
+    ^tail: slab
+    ^moved: I64{1}
     loop moved < ALLOC_ARENA_FREE_SLAB_BATCH {
         tail = sync_load(tail)
         moved = wrapping(moved + I64{1})
@@ -1200,7 +1196,7 @@ priv alloc_slab_retire: fn(root: I64, slab: I64) {
 alloc_region_map: fn(bytes: I64) -> I64 {
     region: alloc_map_try(bytes)
     if (region == I64{0}) { return I64{0} }
-    _ := os_madvise_i64(region, bytes, I64{15})
+    ^_: os_madvise_i64(region, bytes, I64{15})
     region
 }
 
@@ -1238,8 +1234,8 @@ ALLOC_RETAINED_EMPTY_SLABS: I64{4}
 // The empty slabs arena `root` keeps linked, over its eight classes'
 // retained counts (alloc_head + 64). The caller holds the arena lock.
 priv alloc_arena_retained: fn(root: I64) -> I64 {
-    total := I64{0}
-    at := I64{72}
+    ^total: I64{0}
+    ^at: I64{72}
     loop at < (I64{136}) {
         total = wrapping(total + sync_load(wrapping(root + at)))
         at = wrapping(at + I64{8})
@@ -1255,20 +1251,20 @@ priv alloc_arena_retained: fn(root: I64) -> I64 {
 // (a fresh slab was never counted); an emptied slab is unlinked.
 priv alloc_slab_take: fn(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64 {
     #Unsafe("the held arena lock protects the class list, the slab's free links, carve word and live count, the retained count and the arena live total; row is the caller's exclusive cache row; the blocks leave the slab before any caller sees them") {
-        slab := os_load_i64(head)
-        fresh := false
+        ^slab: os_load_i64(head)
+        ^fresh: false
         if (slab == I64{0}) {
             slab = alloc_new_slab(root, head, slot)
             fresh = true
         }
         if (slab == I64{0}) { return I64{0} }
-        free := os_load_i64(wrapping(slab + I64{16}))
-        carve := os_load_i64(wrapping(slab + I64{48}))
+        ^free: os_load_i64(wrapping(slab + I64{16}))
+        ^carve: os_load_i64(wrapping(slab + I64{48}))
         end: wrapping(slab + I64{65536})
-        list := os_load_i64(row)
-        taken := I64{0}
+        ^list: os_load_i64(row)
+        ^taken: I64{0}
         loop taken < limit {
-            block := free
+            ^block: free
             if (block != I64{0}) { free = os_load_i64(block) } else {
                 if (carve == I64{0}) { break }
                 block = carve
@@ -1334,10 +1330,10 @@ priv alloc_small: fn(root: I64, size: I64, align: I64, slot: I64) -> I64 {
     head: alloc_head(root, slot)
     // The arena's scratch row (root + 200) is exclusive under its lock.
     scratch: wrapping(root + I64{200})
-    block := I64{0}
+    ^block: I64{0}
     alloc_lock(root)
     #Unsafe("the held arena lock makes the arena's scratch row exclusive; it is emptied again before the lock is released") {
-        _ := alloc_slab_take(root, head, slot, scratch, I64{1})
+        ^_: alloc_slab_take(root, head, slot, scratch, I64{1})
         block = os_load_i64(scratch)
         os_store_i64(scratch, I64{0})
         os_store_i64(wrapping(scratch + I64{8}), I64{0})
@@ -1372,7 +1368,7 @@ alloc_cache_row: fn(slot: I64) -> I64 {
 // its allocations take the cache as before; one that never allocates
 // attaches none, and every allocation of an unattached thread takes the
 // uncached path anyway (alloc_cache_row).
-alloc_cache_linked := I64{0}
+^alloc_cache_linked: I64{0}
 
 // Refill this thread's cache row with up to 32 blocks of one slab of the
 // stack band's arena. False when no slab can be mapped or the row is blocked
@@ -1406,10 +1402,10 @@ priv alloc_cache_pop: fn(row: I64, block: I64, align: I64) -> I64 {
 // Return the first `count` cached blocks of a row to their slabs, each under
 // its own slab's arena lock; consecutive blocks of one arena share a hold.
 priv alloc_cache_drain: fn(row: I64, count: I64) {
-    held := I64{0}
-    remaining := count
+    ^held: I64{0}
+    ^remaining: count
     #Unsafe("row is this thread's private cache row; each cached block's slab is live while the block is cached, so its arena word is readable, and the block returns under that arena's lock") {
-        block := os_load_i64(row)
+        ^block: os_load_i64(row)
         loop remaining > (I64{0}) && block != (I64{0}) {
             next_block: os_load_i64(block)
             slab: os_load_i64(wrapping(block + I64{8}))
@@ -1437,8 +1433,8 @@ alloc_cache_flush: fn() {
     if (base == I64{0}) {
         return
     }
-    row := wrapping(base + I64{320})
-    index := I64{0}
+    ^row: wrapping(base + I64{320})
+    ^index: I64{0}
     loop index < (I64{8}) {
         #Unsafe("row is one of this thread's eight private cache rows") {
             alloc_cache_drain(row, os_load_i64(wrapping(row + I64{8})))
@@ -1470,7 +1466,7 @@ priv alloc_cache_blocked: fn(tcb: I64) -> Bool {
 
 // Sets every cache row of `tcb` to `head` and `count`.
 priv alloc_cache_set: fn(tcb: I64, head: I64, count: I64) {
-    row := wrapping(tcb + I64{320})
+    ^row: wrapping(tcb + I64{320})
     loop row < wrapping(tcb + I64{448}) {
         #Unsafe("row is one of the TCB's eight cache rows, which only the thread running on it touches") {
             os_store_i64(row, head)
@@ -1495,7 +1491,7 @@ priv alloc_cache_sync: fn(tcb: I64) {
         return
     }
     if wanted {
-        row := wrapping(tcb + I64{320})
+        ^row: wrapping(tcb + I64{320})
         loop row < wrapping(tcb + I64{448}) {
             #Unsafe("row is one of the running TCB's eight private cache rows") {
                 alloc_cache_drain(row, os_load_i64(wrapping(row + I64{8})))
@@ -1538,7 +1534,7 @@ priv alloc_cache_reclaim: fn(fiber_tcb: I64, tcb: I64) {
         alloc_cache_move(fiber_tcb, tcb)
         return
     }
-    row := wrapping(fiber_tcb + I64{320})
+    ^row: wrapping(fiber_tcb + I64{320})
     loop row < wrapping(fiber_tcb + I64{448}) {
         #Unsafe("row is one of the switched-out fiber's eight cache rows, which no thread runs on now") {
             alloc_cache_drain(row, os_load_i64(wrapping(row + I64{8})))
@@ -1550,7 +1546,7 @@ priv alloc_cache_reclaim: fn(fiber_tcb: I64, tcb: I64) {
 // Moves the cache rows from one TCB to another, emptying the source: a
 // cached block is reachable from exactly one TCB.
 alloc_cache_move: fn(from: I64, to: I64) {
-    at := I64{320}
+    ^at: I64{320}
     loop at < (I64{448}) {
         sync_store(wrapping(to + at), sync_load(wrapping(from + at)))
         sync_store(wrapping(from + at), I64{0})
@@ -1564,8 +1560,8 @@ alloc_cache_move: fn(from: I64, to: I64) {
 alloc_large_class_pages: fn(class: I64) -> I64 Never! {
     if (class < I64{2}) { return wrapping(class + I64{2}) }
     step: wrapping(class - I64{2})
-    pages := wrapping(I64{4} + (step & I64{3}))
-    group := step /% I64{4}
+    ^pages: wrapping(I64{4} + (step & I64{3}))
+    ^group: step /% I64{4}
     loop group > (I64{0}) {
         pages = wrapping(pages * I64{2})
         group = wrapping(group - I64{1})
@@ -1578,7 +1574,7 @@ alloc_large_class_pages: fn(class: I64) -> I64 Never! {
 alloc_large_class: fn(bytes: I64) -> I64 Never! {
     pages: bytes /% I64{4096}
     if (pages > I64{65536}) { return I64{-1} }
-    class := I64{0}
+    ^class: I64{0}
     loop alloc_large_class_pages(class) < pages -> class = wrapping(class + I64{1})
     class
 }
@@ -1619,7 +1615,7 @@ alloc_large_count: fn(bytes: I64) -> Bool {
     total: wrapping(alloc_root + I64{224})
     held: sync_add(total, bytes)
     if (wrapping(held + bytes) <= ALLOC_LARGE_CACHE_BYTES) { return true }
-    _ := sync_add(total, wrapping(I64{0} - bytes))
+    ^_: sync_add(total, wrapping(I64{0} - bytes))
     false
 }
 
@@ -1629,14 +1625,14 @@ alloc_large_take: fn(bytes: I64) -> I64 {
     if (bytes > ALLOC_LARGE_ROW_LIMIT) { return I64{0} }
     rows: alloc_large_rows()
     if (rows == I64{0}) { return I64{0} }
-    row := rows
+    ^row: rows
     loop row < wrapping(rows + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
         #Unsafe("row is one of the running TCB's kept-mapping rows, which only the thread running on it touches") {
             if (os_load_i64(wrapping(row + I64{8})) == bytes) {
                 mapping: os_load_i64(row)
                 os_store_i64(row, I64{0})
                 os_store_i64(wrapping(row + I64{8}), I64{0})
-                _ := sync_add(wrapping(alloc_root + I64{224}), wrapping(I64{0} - bytes))
+                ^_: sync_add(wrapping(alloc_root + I64{224}), wrapping(I64{0} - bytes))
                 return mapping
             }
         }
@@ -1651,7 +1647,7 @@ alloc_large_keep: fn(mapping: I64, bytes: I64) -> Bool {
     if (bytes > ALLOC_LARGE_ROW_LIMIT) { return false }
     rows: alloc_large_rows()
     if (rows == I64{0}) { return false }
-    row := rows
+    ^row: rows
     loop row < wrapping(rows + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
         #Unsafe("row is one of the running TCB's kept-mapping rows, which only the thread running on it touches") {
             if (os_load_i64(wrapping(row + I64{8})) == I64{0}) {
@@ -1680,7 +1676,7 @@ priv alloc_large_shelve: fn(mapping: I64, class: I64) {
 
 // Moves the kept-mapping rows of TCB `from` to TCB `to`, emptying `from`.
 alloc_large_rows_move: fn(from: I64, to: I64) {
-    at := ALLOC_LARGE_ROWS
+    ^at: ALLOC_LARGE_ROWS
     loop at < wrapping(ALLOC_LARGE_ROWS + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
         bytes: sync_load(wrapping(from + wrapping(at + I64{8})))
         if (bytes != I64{0}) {
@@ -1711,7 +1707,7 @@ alloc_large_rows_flush: fn() {
     if (rows == I64{0}) {
         return
     }
-    row := rows
+    ^row: rows
     loop row < wrapping(rows + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
         bytes: sync_load(wrapping(row + I64{8}))
         if (bytes != I64{0}) {
@@ -1733,8 +1729,8 @@ priv alloc_large_cached: fn(class: I64) -> I64 {
     if (kept != I64{0}) { return kept }
     own: alloc_arena_index()
     offset: wrapping(I64{8} + wrapping(class * I64{8}))
-    mapping := I64{0}
-    step := I64{0}
+    ^mapping: I64{0}
+    ^step: I64{0}
     loop mapping == (I64{0}) && step < (I64{32}) {
         shard: alloc_large_shard(wrapping(own + step) & I64{31})
         head: wrapping(shard + offset)
@@ -1751,7 +1747,7 @@ priv alloc_large_cached: fn(class: I64) -> I64 {
         step = wrapping(step + I64{1})
     }
     if (mapping != I64{0}) {
-        _ := sync_add(wrapping(alloc_root + I64{224}), wrapping(I64{0} - bytes))
+        ^_: sync_add(wrapping(alloc_root + I64{224}), wrapping(I64{0} - bytes))
     }
     mapping
 }
@@ -1781,7 +1777,7 @@ priv alloc_large: fn(size: I64, align: I64) -> I64 {
     needed: alloc_align(wrapping(effective + alloc_header(align) + overhead), I64{4096})
     class: alloc_large_class(needed)
     bytes: if (class < I64{0}) -> needed else -> wrapping(alloc_large_class_pages(class) * I64{4096})
-    mapping := if (class < I64{0}) -> I64{0} else -> alloc_large_cached(class)
+    ^mapping: if (class < I64{0}) -> I64{0} else -> alloc_large_cached(class)
     if (mapping == I64{0}) { mapping = alloc_map_try(bytes) }
     if (mapping == I64{0}) { return I64{0} }
     pointer: alloc_align(wrapping(mapping + alloc_header(align)), align)
@@ -1845,9 +1841,9 @@ priv alloc_try_validated: fn(size: I64, align: I64) -> I64 {
         return pointer
     }
     row: alloc_cache_row(slot)
-    pointer := I64{0}
+    ^pointer: I64{0}
     if (row == I64{0}) { pointer = alloc_small(alloc_arena(), size, align, slot) } else {
-        block := I64{0}
+        ^block: I64{0}
         #Unsafe("row is this thread's private cache row") {
             block = os_load_i64(row)
             if (block == I64{0} && alloc_cache_refill(row, slot)) { block = os_load_i64(row) }
@@ -1880,7 +1876,7 @@ alloc_reserve: fn(requested: I64) -> I64 {
     }
     lock: wrapping(alloc_root + I64{136})
     alloc_lock(lock)
-    tracked := I64{0}
+    ^tracked: I64{0}
     #Unsafe("the policy lock exclusively owns the mode, cap and accounting words") {
         if (os_load_i64(wrapping(alloc_root + I64{144})) != I64{0}) {
             live: os_load_i64(wrapping(alloc_root + I64{176}))
@@ -1954,7 +1950,7 @@ alloc_release: fn(requested: I64) {
     offset: if (index < I64{4}) -> wrapping(I64{160} + index * I64{8}) else if (index == I64{4}) -> I64{152} else -> I64{144}
     lock: wrapping(alloc_root + I64{136})
     alloc_lock(lock)
-    value := I64{0}
+    ^value: I64{0}
     #Unsafe("the policy lock protects this bounded fact word in alloc_root") {
         value = os_load_i64(wrapping(alloc_root + offset))
     }
@@ -1988,11 +1984,11 @@ alloc_untrack: fn(pointer: I64) -> I64 {
     }
     lock: wrapping(alloc_root + I64{136})
     alloc_lock(lock)
-    node := I64{0}
-    requested := I64{0}
+    ^node: I64{0}
+    ^requested: I64{0}
     #Unsafe("the policy/tracker lock exclusively owns all side-table links and count") {
-        link := wrapping(alloc_root + I64{192})
-        current := os_load_i64(link)
+        ^link: wrapping(alloc_root + I64{192})
+        ^current: os_load_i64(link)
         loop current != (I64{0}) {
             if (os_load_i64(current) == pointer) {
                 node = current
@@ -2134,7 +2130,7 @@ alloc_user_carrier_new: fn(handler: I64, outer: I64, mark: I64) -> I64 {
 // last reference drops its handler or held arena, frees it and drops its
 // reference to its outer the same way.
 alloc_user_drop: fn(carrier: I64) {
-    at := carrier
+    ^at: carrier
     loop at != (I64{0}) {
         if !jet_rt_native_closure_unref(at) {
             return
@@ -2182,7 +2178,7 @@ alloc_arena_release: fn(slot: I64) {
     sync_store(slot, I64{0})
     base: sync_load(record)
     units: sync_load(wrapping(record + I64{8}))
-    _ := alloc_page_set(base, units, I64{0})
+    ^_: alloc_page_set(base, units, I64{0})
     alloc_free_validated(record, ALLOC_ARENA_RECORD_BYTES, I64{8})
     alloc_reservation_unmap(base, units)
 }
@@ -2210,7 +2206,7 @@ alloc_arena_rewind: fn(carrier: I64) {
         return
     }
     sync_store(wrapping(record + I64{24}), sync_load(wrapping(carrier + I64{40})))
-    at := sync_load(wrapping(carrier + I64{16}))
+    ^at: sync_load(wrapping(carrier + I64{16}))
     loop at != (I64{0}) {
         if (sync_load(wrapping(at + I64{32})) == record) { break }
         at = sync_load(wrapping(at + I64{16}))
@@ -2267,7 +2263,7 @@ alloc_user_owner: fn(address: I64) -> I64 {
     if (record == I64{0}) { return I64{0} }
     owner: sync_load(wrapping(record + I64{16}))
     if (owner != ALLOC_ARENA_OWNER) { return owner }
-    at := sync_load(wrapping(record + I64{32}))
+    ^at: sync_load(wrapping(record + I64{32}))
     loop at != (I64{0}) {
         if (sync_load(wrapping(at + I64{32})) == record && address >= sync_load(wrapping(at + I64{40}))) {
             return at
@@ -2287,9 +2283,9 @@ alloc_owner: fn(address: I64) -> I64 {
     if (served != I64{0}) { return served }
     slot: alloc_user_slot()
     if (slot == I64{0}) { return I64{0} }
-    at := sync_load(slot)
+    ^at: sync_load(slot)
     if (at == I64{0}) { return I64{0} }
-    top := I64{0}
+    ^top: I64{0}
     #Unsafe("reads the stack pointer register only; nothing is dereferenced") {
         top = os_stack_address_i64()
     }
@@ -2307,7 +2303,7 @@ alloc_owner: fn(address: I64) -> I64 {
 alloc_younger: fn(owner: I64, target: I64) -> Bool {
     if (owner == I64{0} || owner == target) { return false }
     if (target == I64{0}) { return true }
-    at := sync_load(wrapping(owner + I64{16}))
+    ^at: sync_load(wrapping(owner + I64{16}))
     loop at != (I64{0}) {
         if (at == target) { return true }
         at = sync_load(wrapping(at + I64{16}))
@@ -2904,7 +2900,7 @@ priv alloc_free_validated: fn(pointer: I64, size: I64, align: I64) {
         // A 0 limit is set only once a heap is installed in the code words
         // (alloc_check_start, or a debugger around an evaluation).
         if (alloc_class_limit == I64{0}) {
-            _ := coll_call3(alloc_check_give_code, pointer, size, align)
+            ^_: coll_call3(alloc_check_give_code, pointer, size, align)
             return
         }
         alloc_large_give(pointer)
@@ -2940,8 +2936,8 @@ priv alloc_large_give: fn(pointer: I64) {
 // Return a class payload straight to its slab under its arena's lock (a
 // thread without a cache row, and a checked block's own heap block).
 priv alloc_arena_give: fn(pointer: I64) {
-    slab := I64{0}
-    root := I64{0}
+    ^slab: I64{0}
+    ^root: I64{0}
     #Unsafe("the caller's live payload header names its slab, whose arena word is fixed when the slab is created") {
         slab = os_load_i64(wrapping(pointer - I64{16}))
         root = os_load_i64(wrapping(slab + I64{40}))
@@ -3029,7 +3025,7 @@ alloc_check_start: fn() {
 // and by `jet perf run`'s (PerfSamples.jet perf_samples_start); until then
 // every walk (alloc_check_frames) is empty.
 alloc_frames_start: fn() {
-    mapped := I64{0}
+    ^mapped: I64{0}
     #Unsafe("the state page's stub word, written only here") {
         mapped = os_load_i64(wrapping(alloc_root + I64{56}))
     }
@@ -3055,14 +3051,14 @@ alloc_check_prefix: fn(align: I64) -> I64 Never! {
 // frame (StackSegment.jet stack_frame_caller), so it never leaves the
 // thread's stacks.
 priv alloc_check_frames: fn(out: I64, count: I64) {
-    frame := I64{0}
+    ^frame: I64{0}
     #Unsafe("the frame stub (alloc_frames_start) only copies rbp to rax and returns; a missing stub leaves no chain") {
         stub: os_load_i64(wrapping(alloc_root + I64{56}))
         if (stub != I64{0}) { frame = os_call_address_i64(stub, I64{0}) }
     }
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
-        address := I64{0}
+        ^address: I64{0}
         if (frame != I64{0} && frame & I64{7} == I64{0}) {
             #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack: each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame") {
                 address = os_load_i64(wrapping(frame + I64{8}))
@@ -3083,16 +3079,16 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
 // into+8, ... It allocates nothing, so a hook on every host call keys its
 // caller by it (PerfSamples.jet perf_syscall_row).
 priv alloc_frames_key: fn(seed: I64, into: I64, count: I64, bias: I64, low: I64, high: I64) -> I64 {
-    frame := I64{0}
+    ^frame: I64{0}
     #Unsafe("the frame stub (alloc_frames_start) only copies rbp to rax and returns; a missing stub leaves no chain") {
         stub: os_load_i64(wrapping(alloc_root + I64{56}))
         if (stub != I64{0}) { frame = os_call_address_i64(stub, I64{0}) }
     }
-    key := seed
-    index := I64{0}
+    ^key: seed
+    ^index: I64{0}
     loop index < count {
         if (frame == I64{0} || frame & I64{7} != I64{0}) { break }
-        address := I64{0}
+        ^address: I64{0}
         #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack: each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame") {
             address = os_load_i64(wrapping(frame + I64{8}))
             frame = stack_frame_caller(frame)
@@ -3125,7 +3121,7 @@ priv alloc_frames_key: fn(seed: I64, into: I64, count: I64, bias: I64, low: I64,
         os_store_i64(wrapping(pointer - I64{24}), if (align >= I64{8}) -> I64{1} else -> I64{0})
         os_store_i64(wrapping(pointer - I64{32}), size)
         os_store_i64(wrapping(pointer - I64{40}), align)
-        at := I64{128}
+        ^at: I64{128}
         loop at <= (I64{200}) {
             os_store_i64(wrapping(pointer - at), I64{0})
             at = wrapping(at + I64{8})
@@ -3146,7 +3142,7 @@ priv alloc_frames_key: fn(seed: I64, into: I64, count: I64, bias: I64, low: I64,
     observer: alloc_check_take_observer
     if (observer != I64{0}) {
         before: jet_scheduler_native_status()
-        _ := coll_call3(observer, pointer, size, align)
+        ^_: coll_call3(observer, pointer, size, align)
         scheduler_hook_checks_arm(before)
     }
     pointer
@@ -3157,7 +3153,7 @@ priv alloc_frames_key: fn(seed: I64, into: I64, count: I64, bias: I64, low: I64,
         alloc_check_fail(I64{2}, pointer, size, align, I64{0})
     }
     lock: wrapping(alloc_root + I64{16})
-    canary := I64{0}
+    ^canary: I64{0}
     alloc_lock(lock)
     #Unsafe("a checked payload's canary word precedes it; the quarantine lock orders racing frees of one block and guards the live list") {
         canary = os_load_i64(wrapping(pointer - I64{8}))
@@ -3184,7 +3180,7 @@ priv alloc_frames_key: fn(seed: I64, into: I64, count: I64, bias: I64, low: I64,
     observer: alloc_check_give_observer
     if (observer != I64{0}) {
         before: jet_scheduler_native_status()
-        _ := coll_call3(observer, pointer, size, align)
+        ^_: coll_call3(observer, pointer, size, align)
         scheduler_hook_checks_arm(before)
     }
     alloc_check_frames(wrapping(pointer - I64{200}), I64{10})
@@ -3193,8 +3189,8 @@ priv alloc_frames_key: fn(seed: I64, into: I64, count: I64, bias: I64, low: I64,
     #Unsafe("the quarantine lock owns the ring and its counters; every parked block is freed and owned by the quarantine") {
         ring: os_load_i64(wrapping(alloc_root + I64{24}))
         pushes: os_load_i64(wrapping(alloc_root + I64{32}))
-        parked := os_load_i64(wrapping(alloc_root + I64{40}))
-        bytes := os_load_i64(wrapping(alloc_root + I64{48}))
+        ^parked: os_load_i64(wrapping(alloc_root + I64{40}))
+        ^bytes: os_load_i64(wrapping(alloc_root + I64{48}))
         loop parked > (I64{0}) && (parked == ALLOC_CHECK_SLOTS || wrapping(bytes + size) > ALLOC_CHECK_BUDGET) {
             oldest: os_load_i64(wrapping(ring + wrapping((wrapping(pushes - parked) & wrapping(ALLOC_CHECK_SLOTS - I64{1})) * I64{8})))
             alloc_check_inspect(lock, oldest)
@@ -3277,8 +3273,8 @@ alloc_check_track_skip_thread: fn() {
 // itself (Thread.jet thread_new_tcb, 1064 B) and its registry row, before GS
 // names it, and the observation's task and channel rows (Observe.jet).
 priv alloc_check_track_thread: fn() -> Bool {
-    base := I64{0}
-    own := I64{0}
+    ^base: I64{0}
+    ^own: I64{0}
     #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); only an attached TCB's own-takes word is read") {
         base = os_tls_base_i64()
         if (base != I64{0}) { own = os_load_i64(wrapping(base + ALLOC_TCB_OWN)) }
@@ -3388,13 +3384,13 @@ alloc_check_live_swap: fn(head: I64) -> I64 {
 // call: the caller's, or the one above it when this call is inlined (the
 // stub of alloc_frames_start reads rbp). 0 without the stub.
 priv alloc_check_caller_frame: fn() -> I64 {
-    frame := I64{0}
+    ^frame: I64{0}
     #Unsafe("the frame stub (alloc_frames_start) only copies rbp to rax and returns; a missing stub leaves no chain") {
         stub: os_load_i64(wrapping(alloc_root + I64{56}))
         if (stub != I64{0}) { frame = os_call_address_i64(stub, I64{0}) }
     }
     if (frame == I64{0} || frame & I64{7} != I64{0}) { return I64{0} }
-    caller := I64{0}
+    ^caller: I64{0}
     #Unsafe("frame is this call's live [saved rbp][return address] pair on this thread's stack") {
         caller = stack_frame_caller(frame)
     }
@@ -3402,7 +3398,7 @@ priv alloc_check_caller_frame: fn() -> I64 {
 }
 
 priv alloc_check_fill: fn(pointer: I64, size: I64) {
-    at := I64{0}
+    ^at: I64{0}
     #Unsafe("the freeing caller owns size payload bytes at pointer") {
         loop wrapping(at + I64{8}) <= size {
             os_store_i64(wrapping(pointer + at), ALLOC_CHECK_POISON)
@@ -3423,7 +3419,7 @@ priv alloc_check_damage: fn(pointer: I64) -> I64 {
             return I64{-8}
         }
         size: os_load_i64(wrapping(pointer - I64{32}))
-        at := I64{0}
+        ^at: I64{0}
         loop wrapping(at + I64{8}) <= size && os_load_i64(wrapping(pointer + at)) == ALLOC_CHECK_POISON {
             at = wrapping(at + I64{8})
         }
@@ -3451,9 +3447,9 @@ priv alloc_check_inspect: fn(lock: I64, pointer: I64) {
 }
 
 priv alloc_check_retire: fn(pointer: I64) {
-    block := I64{0}
-    size := I64{0}
-    align := I64{0}
+    ^block: I64{0}
+    ^size: I64{0}
+    ^align: I64{0}
     #Unsafe("pointer is an inspected parked checked payload; its header still names the enclosing block and layout") {
         block = os_load_i64(wrapping(pointer - I64{16}))
         size = os_load_i64(wrapping(pointer - I64{32}))
@@ -3479,7 +3475,7 @@ alloc_check_sweep: fn() {
     if (alloc_class_limit != I64{0} || code == I64{0}) {
         return
     }
-    _ := coll_call1(code, I64{0})
+    ^_: coll_call1(code, I64{0})
 }
 
 #Export(c) jet_rt_alloc_check_sweep: fn(_unused: I64) -> I64 {
@@ -3489,7 +3485,7 @@ alloc_check_sweep: fn() {
         ring: os_load_i64(wrapping(alloc_root + I64{24}))
         pushes: os_load_i64(wrapping(alloc_root + I64{32}))
         parked: os_load_i64(wrapping(alloc_root + I64{40}))
-        index := I64{0}
+        ^index: I64{0}
         loop index < parked {
             alloc_check_inspect(lock, os_load_i64(wrapping(ring + wrapping((wrapping(wrapping(pushes - parked) + index) & wrapping(ALLOC_CHECK_SLOTS - I64{1})) * I64{8}))))
             index = wrapping(index + I64{1})
@@ -3500,7 +3496,7 @@ alloc_check_sweep: fn() {
 }
 
 alloc_check_write: fn(data: I64, length: I64) {
-    at := I64{0}
+    ^at: I64{0}
     #Unsafe("data lends length readable bytes; write retains no pointer") {
         loop at < length {
             written: host_syscall(I64{1}, I64{2}, wrapping(data + at), wrapping(length - at), I64{0}, I64{0}, I64{0})
@@ -3517,7 +3513,7 @@ alloc_check_say: fn(text: I64) { alloc_check_write(rt_text_data(text), rt_text_l
 
 alloc_check_hex: fn(value: I64) {
     alloc_write_word(I64{30768}, I64{2})
-    shift := I64{60}
+    ^shift: I64{60}
     loop shift > (I64{0}) && (value >> shift) & (I64{15}) == (I64{0}) {
         shift = wrapping(shift - I64{4})
     }
@@ -3537,7 +3533,7 @@ alloc_check_image: fn() -> I64 {
     if (loaded != I64{0}) { return loaded }
     path: alloc_map_try(I64{4096})
     if (path == I64{0}) { return I64{0} }
-    image := I64{0}
+    ^image: I64{0}
     #Unsafe("path is a fresh private page; the image is mapped read-only and only read") {
         // "/proc/self/exe\0", little-endian.
         os_store_i64(path, I64{7310238724270485551})
@@ -3549,7 +3545,7 @@ alloc_check_image: fn() -> I64 {
                 mapped: os_map_untracked_i64(I64{0}, length, I64{1}, I64{2}, fd, I64{0})
                 if (mapped > I64{0}) { image = mapped }
             }
-            _ := host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            ^_: host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
     }
     alloc_unmap(path, I64{4096})
@@ -3561,13 +3557,13 @@ alloc_check_image: fn() -> I64 {
 // A fixed-address executable (every Jet program) has bias 0.
 priv alloc_check_bias: fn(image: I64) -> I64 {
     if (image == I64{0}) { return I64{0} }
-    phdr_address := I64{0}
+    ^phdr_address: I64{0}
     #Unsafe("image is a read-only private mapping of this executable's ELF64 file; its program header table lies inside it") {
         if (os_load_i64(wrapping(image + I64{16})) & I64{65535} != I64{3}) { return I64{0} }
         table: os_load_i64(wrapping(image + I64{32}))
         entry: os_load_i64(wrapping(image + I64{54})) & I64{65535}
         count: os_load_i64(wrapping(image + I64{56})) & I64{65535}
-        index := I64{0}
+        ^index: I64{0}
         loop index < count {
             header: wrapping(image + wrapping(table + wrapping(index * entry)))
             kind: os_load_i64(header) & I64{4294967295}
@@ -3595,7 +3591,7 @@ priv alloc_check_symbol: fn(image: I64, bias: I64, address: I64) {
             sections: wrapping(image + os_load_i64(wrapping(image + I64{40})))
             entry: os_load_i64(wrapping(image + I64{58})) & I64{65535}
             count: os_load_i64(wrapping(image + I64{60})) & I64{65535}
-            index := I64{0}
+            ^index: I64{0}
             loop index < count {
                 section: wrapping(sections + wrapping(index * entry))
                 if (os_load_i64(wrapping(section + I64{4})) & I64{4294967295} == I64{2}) {
@@ -3603,14 +3599,14 @@ priv alloc_check_symbol: fn(image: I64, bias: I64, address: I64) {
                     names: wrapping(image + os_load_i64(wrapping(wrapping(sections + wrapping(link * entry)) + I64{24})))
                     symbols: wrapping(image + os_load_i64(wrapping(section + I64{24})))
                     total: os_load_i64(wrapping(section + I64{32})) /% I64{24}
-                    at := I64{0}
+                    ^at: I64{0}
                     loop at < total {
                         symbol: wrapping(symbols + wrapping(at * I64{24}))
                         start: os_load_i64(wrapping(symbol + I64{8}))
                         extent: os_load_i64(wrapping(symbol + I64{16}))
                         if (extent > I64{0} && target >= start && target < wrapping(start + extent)) {
                             name: wrapping(names + (os_load_i64(symbol) & I64{4294967295}))
-                            length := I64{0}
+                            ^length: I64{0}
                             loop os_load_u8(wrapping(name + length)) != (I64{0}) {
                                 length = wrapping(length + I64{1})
                             }
@@ -3631,9 +3627,9 @@ priv alloc_check_symbol: fn(image: I64, bias: I64, address: I64) {
 
 // One line per nonzero return address of a recorded chain of `count` words.
 priv alloc_check_chain: fn(image: I64, bias: I64, words: I64, count: I64) {
-    index := I64{0}
+    ^index: I64{0}
     loop index < count {
-        address := I64{0}
+        ^address: I64{0}
         #Unsafe("words lends count readable chain words") {
             address = os_load_i64(wrapping(words + wrapping(index * I64{8})))
         }
@@ -3727,8 +3723,8 @@ alloc_write_word: fn(word: I64, count: I64) {
     if (count < I64{0} || count > I64{8}) {
         return
     }
-    remaining := count
-    bytes := word
+    ^remaining: count
+    ^bytes: word
     #Unsafe("remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it") {
         loop remaining > (I64{0}) {
             written: os_write_word_i64(I64{2}, bytes, remaining)
@@ -3739,7 +3735,7 @@ alloc_write_word: fn(word: I64, count: I64) {
             remaining = wrapping(remaining - written)
             // Byte by byte: a constant shift cannot stop, so this raw path
             // links no shift-stop report.
-            dropped := I64{0}
+            ^dropped: I64{0}
             loop dropped < written {
                 bytes = bytes >> I64{8}
                 dropped = wrapping(dropped + I64{1})
@@ -3753,11 +3749,11 @@ alloc_write_word: fn(word: I64, count: I64) {
 // could stop, and its stop report would link the whole program-stop path
 // into every allocating program.
 alloc_write_size: fn(size: I64) {
-    scale := I64{1}
+    ^scale: I64{1}
     loop scale <= size /% (I64{10}) -> scale = wrapping(scale * I64{10})
-    remaining := size
+    ^remaining: size
     loop scale > (I64{0}) {
-        digit := I64{0}
+        ^digit: I64{0}
         loop remaining >= scale {
             remaining = wrapping(remaining - scale)
             digit = wrapping(digit + I64{1})
@@ -3791,11 +3787,11 @@ alloc_abort: fn() {
     #Unsafe("the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed") {
         pid: os_getpid_i64()
         tid: os_gettid_i64()
-        _ := os_syscall_stack4_i64(I64{14}, I64{1}, I64{32}, I64{0}, I64{0}, I64{0}, I64{8})
-        _ := os_tgkill_i64(pid, tid, I64{6})
-        _ := os_syscall_stack4_i64(I64{13}, I64{6}, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
-        _ := os_tgkill_i64(pid, tid, I64{6})
-        _ := os_exit_group_i64(I64{127})
+        ^_: os_syscall_stack4_i64(I64{14}, I64{1}, I64{32}, I64{0}, I64{0}, I64{0}, I64{8})
+        ^_: os_tgkill_i64(pid, tid, I64{6})
+        ^_: os_syscall_stack4_i64(I64{13}, I64{6}, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
+        ^_: os_tgkill_i64(pid, tid, I64{6})
+        ^_: os_exit_group_i64(I64{127})
     }
     loop {
 

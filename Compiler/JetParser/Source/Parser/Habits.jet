@@ -43,7 +43,7 @@ parser_add_habit: fn(state: ^JetParserState, span: Span, what: String, why: Stri
     if parser_aborting(state) {
         return
     }
-    diagnostic := diagnostic_with_edit(diagnostic_from_registry("E0003", Val(span), what, why, fix), edit)
+    ^diagnostic: diagnostic_with_edit(diagnostic_from_registry("E0003", Val(span), what, why, fix), edit)
     loop extra in more -> diagnostic.fix_edits.push(extra)
     state.diagnostics.push(diagnostic)
 }
@@ -59,7 +59,7 @@ parser_habit_abort: fn(state: ^JetParserState) Never! {
 // end of the source.
 parser_line_end_of: fn(state: JetParserState, offset: Int) -> Int Never! {
     end: parser_source_end_offset(state)
-    at := offset
+    ^at: offset
     loop at < end && parser_source_byte(state, at) != 10 -> at += 1
     at
 }
@@ -86,8 +86,8 @@ parser_colon_block_edits: fn(state: JetParserState, colon: Span) -> [TextEdit] N
     header_start: parser_line_start_of(state, colon.start)
     indent: parser_line_indent_width(state, header_start)
     size: parser_source_end_offset(state)
-    at := size
-    line := parser_line_number_of(state, colon.start) + 1
+    ^at: size
+    ^line: parser_line_number_of(state, colon.start) + 1
     max_line: state.line_base + state.line_starts.len()
     loop line <= max_line {
         local: line - 1 - state.line_base
@@ -111,7 +111,7 @@ parser_colon_block_edits: fn(state: JetParserState, colon: Span) -> [TextEdit] N
 // does not end its line.
 parser_report_colon_block: fn(state: ^JetParserState, keyword: String, colon: Token) -> Bool {
     if parser_header_colon_index(state, state.position) != state.position -> return false
-    edits := parser_colon_block_edits(state, colon.span)
+    ^edits: parser_colon_block_edits(state, colon.span)
     first: edits.remove(0, .Slot) ?? return false
     parser_bump(state)
     parser_add_habit(state, colon.span, "a `:` at the end of this `{keyword}` line opens a Python block", "Jet reads a block between braces, not from indentation", "replace the `:` with ` {{` and close the block with `}}`", first, edits)
@@ -214,8 +214,8 @@ parser_one_slip: fn(word: [U8], keyword: [U8]) -> Bool Never! {
     if word.len() + 1 == keyword.len() -> return parser_one_dropped(word, keyword)
     if keyword.len() + 1 == word.len() -> return parser_one_dropped(keyword, word)
     if word.len() != keyword.len() -> return false
-    first := -1
-    second := -1
+    ^first: -1
+    ^second: -1
     loop index in 0..<word.len() {
         if word[index] != keyword[index] {
             if first >= 0 && second >= 0 -> return false
@@ -228,7 +228,7 @@ parser_one_slip: fn(word: [U8], keyword: [U8]) -> Bool Never! {
 
 // Whether `long` is `short` with one byte added.
 parser_one_dropped: fn(short: [U8], long: [U8]) -> Bool Never! {
-    at := 0
+    ^at: 0
     loop at < short.len() && short[at] == long[at] -> at += 1
     loop index in at..<short.len() {
         if short[index] != long[index + 1] -> return false
@@ -258,7 +258,9 @@ parser_report_hash_comment: fn(state: ^JetParserState) -> Bool {
 parser_text_prefix_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if state.words.id_f < 0 -> return false
     token: parser_current(state)
-    if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_f) -> return false
+    if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_f) {
+        return false
+    }
     next: parser_lookahead(state, 1)
     next.kind == TOKEN_STRING && next.span.start == token.span.end
 }
@@ -288,7 +290,9 @@ parser_report_arrow_habit: fn(state: ^JetParserState, name: Token, arrow: Span, 
 parser_report_pass_habit: fn(state: ^JetParserState) -> Bool {
     if state.words.id_pass < 0 -> return false
     token: parser_current(state)
-    if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_pass) -> return false
+    if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_pass) {
+        return false
+    }
     next: parser_kind_at(state, 1)
     if next != TOKEN_SEMI && next != TOKEN_RBRACE && next != TOKEN_EOF -> return false
     line_start: parser_line_start_of(state, token.span.start)
@@ -382,7 +386,7 @@ parser_power_habit_ahead: fn(state: ^JetParserState, operator: Int) -> Bool Neve
 parser_report_power_habit: fn(state: ^JetParserState, base: Expr, base_span: Span, operator: Span, exponent: Span) {
     named: base == .Ident(_, _, _)
     open: if named -> ".pow(" else -> ").pow("
-    more := [TextEdit]{TextEdit{span: Span{start: exponent.end, end: exponent.end}, new_text: ")"}}
+    ^more: [TextEdit]{TextEdit{span: Span{start: exponent.end, end: exponent.end}, new_text: ")"}}
     if !named {
         more.push(TextEdit{span: Span{start: base_span.start, end: base_span.start}, new_text: "("})
     }
@@ -393,7 +397,9 @@ parser_report_power_habit: fn(state: ^JetParserState, base: Expr, base_span: Spa
 parser_not_habit_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if state.words.id_not < 0 -> return false
     token: parser_current(state)
-    if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_not) -> return false
+    if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_not) {
+        return false
+    }
     next: parser_lookahead(state, 1)
     if next.kind == TOKEN_LPAREN && next.span.start == token.span.end -> return false
     parser_habit_operand_ahead(state, 1)

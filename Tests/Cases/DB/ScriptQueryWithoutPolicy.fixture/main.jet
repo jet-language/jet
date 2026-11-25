@@ -15,7 +15,7 @@ add_note: fn(c: db.Store, id: Int, owner: String, title: String) -[DB.Write]> In
 }
 
 run: fn() {
-    c := db.open("notes.db")
+    ^c: db.open("notes.db")
     _: db.migrate(c.all_rows(), "notes-v1", [SQL{"CREATE TABLE notes (id INTEGER, owner TEXT, title TEXT)"}, SQL{"CREATE TABLE tags (note INTEGER, tag TEXT)"}]) ?? panic("migrate: {err}")
     _: add_note(c, 1, "ann", "plan") ?? panic("add plan: {err}")
     _: add_note(c, 2, "ben", "diary") ?? panic("add diary: {err}")

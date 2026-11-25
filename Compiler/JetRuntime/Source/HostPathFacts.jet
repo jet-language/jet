@@ -3,7 +3,7 @@
 // fallbacks and naming.
 
 fs_text_has_nul: fn(path: I64) -> Bool {
-    at := I64{0}
+    ^at: I64{0}
     loop at < rt_text_len(path) {
         if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) { return true }
         at += I64{1}
@@ -71,7 +71,7 @@ fs_text_has_nul: fn(path: I64) -> Bool {
     if (seconds >= I64{0}) {
         if (seconds == I64{0}) { rt_text_push_number(text, nanos) } else {
             rt_text_push_number(text, seconds)
-            divisor := I64{100000000}
+            ^divisor: I64{100000000}
             loop divisor > (I64{0}) {
                 rt_text_push_word(text, I64{48} + (nanos /% divisor) %% I64{10}, I64{1})
                 divisor = divisor /% I64{10}
@@ -91,7 +91,7 @@ fs_text_has_nul: fn(path: I64) -> Bool {
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     name: fd_c_path(path)
-    fd := I64{0}
+    ^fd: I64{0}
     loop {
         fd = host_call(I64{2}, name, I64{524288}, I64{0})
         if (fd != I64{-4}) { break }
@@ -100,13 +100,13 @@ fs_text_has_nul: fn(path: I64) -> Bool {
     if (fd < I64{0}) { return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error) }
     sought: host_call(I64{8}, fd, start, I64{0})
     if (sought < I64{0}) {
-        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        ^_: host_call(I64{3}, fd, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_READ, path, -sought, error)
     }
     capacity: if (limit == I64{0}) -> I64{1} else -> limit
     bytes: jet_rt_alloc(capacity, I64{8})
     got: host_call(I64{0}, fd, bytes, limit)
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     if (got < I64{0}) {
         jet_rt_free(bytes, capacity, I64{8})
         return compiler_fs_errno(HOST_IO_OP_READ, path, -got, error)

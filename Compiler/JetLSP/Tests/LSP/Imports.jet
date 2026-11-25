@@ -135,7 +135,7 @@ lsp_imports_report: fn(text: String, before: String, word: String, code: String,
 // in scope declares (E0102), and the `geo` import of `run` and `tidy` as
 // unused (L0103).
 lsp_imports_reports: fn(entry: String, text: String) -> [Diagnostic] Never! {
-    reports := [Diagnostic]{}
+    ^reports: [Diagnostic]{}
     loop called in ([String]{"area", "squared", "volume"}) {
         what: "Nothing named `{called}` exists here"
         if lsp_imports_report(text, "    print(", called, "E0102", what) == .Val(report) {
@@ -154,7 +154,7 @@ lsp_imports_reports: fn(entry: String, text: String) -> [Diagnostic] Never! {
 LSPImportsChecker: struct {
     impl LSPChecker {
         check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
-            checked := LSPFixtureChecker{}.check(entry, overlays)
+            ^checked: LSPFixtureChecker{}.check(entry, overlays)
             ledger: Shared{name_ledger_from_facts(lsp_imports_facts())}
             loop index in 0..<checked.modules.len() {
                 loop (slot, path) in LSP_IMPORTS_MODULES {
@@ -187,7 +187,7 @@ LSPImportsChecker: struct {
 }
 
 lsp_imports_server: fn() -> LSPServer Never! {
-    server := lsp_server(LSPImportsChecker{})
+    ^server: lsp_server(LSPImportsChecker{})
     lsp_test_open(server, LSP_IMPORTS_RUN_URI, LSP_IMPORTS_RUN)
     lsp_test_open(server, LSP_IMPORTS_GEO_URI, LSP_IMPORTS_GEO)
     lsp_test_open(server, LSP_IMPORTS_SHAPES_URI, LSP_IMPORTS_SHAPES)
@@ -206,12 +206,12 @@ lsp_imports_action_params: fn(uri: String, line: Int, only: String) -> String {
 // `title|kind|preferred|range newText` per edit. An action offered without
 // its edit is resolved for it.
 lsp_imports_actions: fn(server: ^LSPServer, uri: String, line: Int, only: String) -> [String] {
-    shown := [String]{}
+    ^shown: [String]{}
     loop offered in lsp_test_rows(lsp_test_result(server, "textDocument/codeAction", lsp_imports_action_params(uri, line, only))) {
         action: if lsp_member(offered, "edit") == None -> lsp_test_result(server, "codeAction/resolve", jet_error_json_encode_value(offered)) else -> offered
-        preferred := false
+        ^preferred: false
         if lsp_member(action, "isPreferred") == .Val(value) -> preferred = value == Dyn.Bool(true)
-        listed := false
+        ^listed: false
         if lsp_member(offered, "isPreferred") == .Val(value) -> listed = value == Dyn.Bool(true)
         assert_eq(listed, preferred)
         edits: loop edit in lsp_test_rows(lsp_test_field(lsp_test_field(lsp_test_field(action, "edit"), "changes"), uri)) -> "{lsp_test_range(lsp_test_field(edit, "range"))} {lsp_test_text(edit, "newText")}"
@@ -221,12 +221,14 @@ lsp_imports_actions: fn(server: ^LSPServer, uri: String, line: Int, only: String
 }
 
 #Test("a client that resolves code actions gets the import repairs and organize-imports, preferred flags kept") {
-    plain := lsp_imports_server()
-    server := lsp_imports_server()
-    _ := lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"textDocument\":{{\"codeAction\":{{\"resolveSupport\":{{\"properties\":[\"edit\"]}}}}}}}}}}")
+    ^plain: lsp_imports_server()
+    ^server: lsp_imports_server()
+    ^_: lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"textDocument\":{{\"codeAction\":{{\"resolveSupport\":{{\"properties\":[\"edit\"]}}}}}}}}}}")
     offered: lsp_test_rows(lsp_test_result(server, "textDocument/codeAction", lsp_imports_action_params(LSP_IMPORTS_RUN_URI, 3, "quickfix")))
     assert_eq(offered.len(), 2)
-    loop action in offered -> assert(lsp_member(action, "edit") == None, "the list leaves each edit out")
+    loop action in offered {
+        assert(lsp_member(action, "edit") == None, "the list leaves each edit out")
+    }
     assert_eq(lsp_imports_actions(server, LSP_IMPORTS_RUN_URI, 3, "quickfix"), lsp_imports_actions(plain, LSP_IMPORTS_RUN_URI, 3, "quickfix"))
     // The one repair is preferred, in the list and once resolved.
     assert_eq(lsp_imports_actions(server, LSP_IMPORTS_RUN_URI, 4, "quickfix"), [String]{"Write `geo.squared` (shapes.area)|quickfix|true|4:10-4:17 geo.squared"})
@@ -236,7 +238,7 @@ lsp_imports_actions: fn(server: ^LSPServer, uri: String, line: Int, only: String
 }
 
 #Test("an unresolved name's repairs name each accessible declaration it can resolve to") {
-    server := lsp_imports_server()
+    ^server: lsp_imports_server()
     // `area`: geo's through the document's `geo` import, and shapes' through
     // a new row. The private `helpers.area` of the document's own package, a
     // generated module's `area` and the `Box.area` method are never offered.
@@ -254,7 +256,7 @@ lsp_imports_actions: fn(server: ^LSPServer, uri: String, line: Int, only: String
 }
 
 #Test("an import repair writes the row where the document's imports are") {
-    server := lsp_imports_server()
+    ^server: lsp_imports_server()
     // No import yet: a `use` line at the top.
     assert_eq(
         lsp_imports_actions(server, LSP_IMPORTS_FRESH_URI, 1, "quickfix"),
@@ -268,7 +270,7 @@ lsp_imports_actions: fn(server: ^LSPServer, uri: String, line: Int, only: String
 }
 
 #Test("organize imports drops only the rows the check reports unused") {
-    server := lsp_imports_server()
+    ^server: lsp_imports_server()
     assert_eq(lsp_imports_actions(server, LSP_IMPORTS_TIDY_URI, 6, "source"), [String]{"Organize imports|source.organizeImports|false|0:0-3:1 use shapes"})
     // `geo` is reported unused, but the `area` repair writes through it.
     assert_eq(lsp_imports_actions(server, LSP_IMPORTS_RUN_URI, 3, "source.organizeImports"), [String]{})

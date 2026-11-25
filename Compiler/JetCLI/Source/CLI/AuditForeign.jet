@@ -65,7 +65,7 @@ JetCLIForeignAudit: struct {
 // lies outside `bytes`.
 jet_cli_elf_field: fn(bytes: [U8], at: Int, width: Int) -> Int? Never! {
     if at < 0 || width < 1 || at + width > bytes.len() -> return None
-    value := 0
+    ^value: 0
     loop k in 0..<width -> value |= Int{bytes[at + k]} << (8 * k)
     Val(value)
 }
@@ -73,7 +73,7 @@ jet_cli_elf_field: fn(bytes: [U8], at: Int, width: Int) -> Int? Never! {
 // The NUL-terminated UTF-8 string at `at` in `bytes`.
 jet_cli_elf_string: fn(bytes: [U8], at: Int) -> String? Never! {
     if at < 0 || at >= bytes.len() -> return None
-    end := at
+    ^end: at
     loop end < bytes.len() {
         if bytes[end] == (U8{0}) -> break
         end += 1
@@ -110,7 +110,7 @@ jet_cli_elf_loader: fn(bytes: [U8]) -> JetCLIElfLoader JetCLIElfError! {
     if phentsize < 56 || phoff + phnum * phentsize > bytes.len() {
         return Err(jet_cli_elf_error("the ELF program headers lie outside the image"))
     }
-    loader := JetCLIElfLoader{interpreter: None, dynamic: false, needed: [String]{}}
+    ^loader: JetCLIElfLoader{interpreter: None, dynamic: false, needed: [String]{}}
     loop index in 0..<phnum {
         header: phoff + index * phentsize
         kind: jet_cli_elf_field(bytes, header, 4) ?? return Err(jet_cli_elf_error("the ELF program headers are truncated"))
@@ -126,9 +126,9 @@ jet_cli_elf_loader: fn(bytes: [U8]) -> JetCLIElfLoader JetCLIElfError! {
         }
         loader.dynamic = true
         // DT_NEEDED values index the DT_STRTAB string table, in any order.
-        strtab := Int?{None}
-        names := [Int]{}
-        at := offset
+        ^strtab: Int?{None}
+        ^names: [Int]{}
+        ^at: offset
         loop at + 16 <= offset + filesz {
             kind_at: jet_cli_elf_field(bytes, at, 8) ?? return Err(jet_cli_elf_error("the PT_DYNAMIC table is truncated"))
             value: jet_cli_elf_field(bytes, at + 8, 8) ?? return Err(jet_cli_elf_error("the PT_DYNAMIC table is truncated"))
@@ -150,8 +150,8 @@ jet_cli_elf_loader: fn(bytes: [U8]) -> JetCLIElfLoader JetCLIElfError! {
 // The audit of a program whose checked foreign facts are `facts`, whose entry
 // requires `effects`, and whose linked image has the loader needs `loader`.
 jet_cli_foreign_audit: fn(facts: JetDriverForeignLinkFacts, effects: [String], loader: JetCLIElfLoader) -> JetCLIForeignAudit Never! {
-    ffi := [String]{}
-    host := [String]{}
+    ^ffi: [String]{}
+    ^host: [String]{}
     loop row in effects {
         if {
             ffi.contains(row) || host.contains(row) -> next
@@ -161,7 +161,7 @@ jet_cli_foreign_audit: fn(facts: JetDriverForeignLinkFacts, effects: [String], l
     }
     ffi.sort()
     host.sort()
-    libraries := [String]{}
+    ^libraries: [String]{}
     loop library in facts.libraries {
         if !libraries.contains(library) -> libraries.push(library.copy())
     }
@@ -189,7 +189,7 @@ jet_cli_foreign_audit_list: fn(words: [String]) -> String Never! {
 // The human report of `audit`.
 jet_cli_foreign_audit_text: fn(audit: JetCLIForeignAudit) -> String Never! {
     count: if audit.declarations.len() == 0 -> "none" else -> "{audit.declarations.len()}"
-    out := "Foreign declarations: {count}\n"
+    ^out: "Foreign declarations: {count}\n"
     loop row in audit.declarations {
         out = "{out}  {row.path}:{row.line}  {row.language}  {row.name} -> {row.symbol}\n"
     }
@@ -264,7 +264,7 @@ jet_cli_audit_foreign: fn(file: String, source: String, color: Bool, json: Bool)
             if built.move() == {
                 .Failed(failure) -> failure
                 .Image(executable, _) -> {
-                    whole := executable.move()
+                    ^whole: executable.move()
                     complete: x64_executable_complete(whole)
                     if complete != "" {
                         return jet_cli_ice("the foreign audit couldn't read the linked image of `{file}`: {complete}")
@@ -288,7 +288,7 @@ jet_cli_elf_test_put: fn(bytes: ^[U8], at: Int, width: Int, value: Int) Never! {
 // at offset 64, one program header per `segments` row (type, offset,
 // vaddr, filesz).
 jet_cli_elf_test_image: fn(segments: [[Int]], size: Int) -> [U8] Never! {
-    bytes := [U8]{}
+    ^bytes: [U8]{}
     loop _ in 0..<size -> bytes.push(U8{0})
     loop (k, byte) in ([U8]{U8{127}, U8{69}, U8{76}, U8{70}, U8{2}, U8{1}}) -> bytes[k] = byte
     jet_cli_elf_test_put(bytes, 32, 8, 64)
@@ -322,7 +322,7 @@ jet_cli_elf_test_refusal: fn(bytes: [U8]) -> String Never! {
     // PT_LOAD maps file bytes 0..1024 at 0x400000. PT_INTERP is at 512 and
     // PT_DYNAMIC at 640: DT_STRTAB 0x400300, DT_NEEDED 1 and 11, DT_NULL.
     // The string table at file offset 768 holds "\0libc.so.6\0libm.so.6\0".
-    image := jet_cli_elf_test_image(
+    ^image: jet_cli_elf_test_image(
         [[Int]]{
             [Int]{JET_CLI_ELF_PT_LOAD, 0, 4194304, 1024},
             [Int]{JET_CLI_ELF_PT_INTERP, 512, 4194816, 28},
@@ -350,7 +350,7 @@ jet_cli_elf_test_refusal: fn(bytes: [U8]) -> String Never! {
 }
 
 #Test("the foreign audit verdict needs no declarations, FFI effects, C libraries or loader") {
-    facts := JetDriverForeignLinkFacts{libraries: [String]{}, direct_links: [String]{}, transitive_links: [String]{}, c_or_rust_rows: false, inline_c: [JetDriverInlineC]{}, declarations: [JetDriverForeignDeclaration]{}}
+    ^facts: JetDriverForeignLinkFacts{libraries: [String]{}, direct_links: [String]{}, transitive_links: [String]{}, c_or_rust_rows: false, inline_c: [JetDriverInlineC]{}, declarations: [JetDriverForeignDeclaration]{}}
     static: JetCLIElfLoader{interpreter: None, dynamic: false, needed: [String]{}}
     clean: jet_cli_foreign_audit(facts, [String]{"GPU", "FS", "GPU"}, static)
     assert(jet_cli_foreign_audit_clean(clean))

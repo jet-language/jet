@@ -30,12 +30,12 @@ lsp_code_actions: fn(server: LSPServer, view: LSPView, start: Int, end: Int, onl
     // Organize-imports reads every diagnostic of the document, so it runs
     // before the ones in the range move into their fixes.
     organized: if lsp_code_action_wanted(only, "source.organizeImports") -> lsp_organize_imports_edits(view, document) else -> [TextEdit]{}
-    diagnostics := [Diagnostic]{}
+    ^diagnostics: [Diagnostic]{}
     loop diagnostic in document.move() {
         span: diagnostic.span ?? next
         if span.start <= end && start <= span.end -> diagnostics.push(diagnostic)
     }
-    actions := [LSPCodeAction]{}
+    ^actions: [LSPCodeAction]{}
     if lsp_code_action_wanted(only, "quickfix") {
         loop diagnostic in diagnostics {
             repairs: lsp_import_actions(view, diagnostic)
@@ -44,7 +44,7 @@ lsp_code_actions: fn(server: LSPServer, view: LSPView, start: Int, end: Int, onl
                 actions.push(LSPCodeAction{title: repair.title.move(), kind: "quickfix", preferred: single, edits: repair.edits.move()})
             }
         }
-        fixable := [Diagnostic]{}
+        ^fixable: [Diagnostic]{}
         loop diagnostic in diagnostics.move() {
             if lsp_acronym_rename_action(server, view, diagnostic) == .Val(action) {
                 actions.push(action)
@@ -59,7 +59,7 @@ lsp_code_actions: fn(server: LSPServer, view: LSPView, start: Int, end: Int, onl
         fixes: lsp_fixes_from_diagnostics(fixable.move())
         loop fix in fixes.move() {
             preferred: fix.applicability == DiagnosticFixApplicability.Safe
-            whole := [TextEdit]{fix.edit.move()}
+            ^whole: [TextEdit]{fix.edit.move()}
             whole.extend(fix.edits.move())
             actions.push(LSPCodeAction{title: fix.title.move(), kind: "quickfix", preferred: preferred, edits: whole.move()})
         }

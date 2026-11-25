@@ -3,7 +3,7 @@
     output: jet_rt_alloc(I64{16}, I64{1})
     rt_crypto_poly1305(key, input, length, output, scratch)
     if (!rt_crypto_equal(output, expected, I64{16})) { jet_rt_unreachable(I64{0}, I64{0}) }
-    i := I64{0}
+    ^i: I64{0}
     loop {
         if (i >= I64{160}) { break }
         if (rt_text_byte(scratch + i) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
@@ -28,10 +28,10 @@
         jet_rt_unreachable(I64{0}, I64{0})
     }
     // Every tag byte is independently corrupted; no partial plaintext is emitted.
-    tag_index := I64{0}
+    ^tag_index: I64{0}
     loop {
         if (tag_index >= I64{16}) { break }
-        i := I64{0}
+        ^i: I64{0}
         loop i < length {
             rt_text_put(output + I64{1} + i, I64{165})
             i += I64{1}

@@ -4,8 +4,8 @@
 jet_cli_engine_commands: fn(command: String, raw: [String]) -> JetCLIPlan? Never! {
     if command == {
         "env" -> {
-            forwarded := [String]{"env"}
-            removed := false
+            ^forwarded: [String]{"env"}
+            ^removed: false
             loop argument in raw {
                 if !removed && argument == "env" {
                     removed = true
@@ -40,11 +40,11 @@ jet_cli_dev_environment_plan: fn(start: String, raw: [String]) -[FS, Env]> JetCL
         .Root(_) | .Refused(_) -> return None
     }
     if jet_cli_find_env_root(start) == None -> return None
-    engine := [String]{JET_CLI_DEV_ENGINE_VERB}
-    dev := [String]{}
-    named := false
-    value_next := false
-    separated := false
+    ^engine: [String]{JET_CLI_DEV_ENGINE_VERB}
+    ^dev: [String]{}
+    ^named: false
+    ^value_next: false
+    ^separated: false
     loop word in raw {
         if !named && word == "dev" {
             named = true
@@ -94,7 +94,7 @@ JET_CLI_PACKAGE_ENGINE_VERB: "__package-v1"
 jet_cli_package_engine: fn(start: String, words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     command: words[0]
     if command == "fetch" && words.contains("--lock") {
-        argv := [String]{JET_CLI_PACKAGE_ENGINE_VERB, start, "", if color -> "1" else -> "0", if json -> "1" else -> "0"}
+        ^argv: [String]{JET_CLI_PACKAGE_ENGINE_VERB, start, "", if color -> "1" else -> "0", if json -> "1" else -> "0"}
         loop word in words -> argv.push(word.copy())
         return JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: command, argv: argv}}
     }
@@ -104,7 +104,7 @@ jet_cli_package_engine: fn(start: String, words: [String], color: Bool, json: Bo
             return plan
         }
     }
-    notices := [String]{}
+    ^notices: [String]{}
     entry: if jet_cli_find_project_entry(root, command, color, notices) == {
         .Entry(found) -> found.path
         .Refused(plan) -> {
@@ -112,14 +112,14 @@ jet_cli_package_engine: fn(start: String, words: [String], color: Bool, json: Bo
         }
         .Absent -> jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)
     }
-    argv := [String]{JET_CLI_PACKAGE_ENGINE_VERB, root, entry, if color -> "1" else -> "0", if json -> "1" else -> "0"}
+    ^argv: [String]{JET_CLI_PACKAGE_ENGINE_VERB, root, entry, if color -> "1" else -> "0", if json -> "1" else -> "0"}
     loop word in words -> argv.push(word.copy())
     JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: command, argv: argv}}
 }
 
 // The command's words from the jet-owned argv: from the command word on.
 jet_cli_command_words: fn(jet_argv: [String], command: String) -> [String] Never! {
-    words := [String]{}
+    ^words: [String]{}
     loop word in jet_argv {
         if words.len() == 0 && word != command -> next
         words.push(word.copy())

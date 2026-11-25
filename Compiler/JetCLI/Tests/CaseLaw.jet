@@ -49,7 +49,7 @@ case_law_keeps_case: fn(token: String) -> Bool {
 // code, a quote or a `{placeholder}` keeps its case. "" when the line conforms.
 case_law_sentence_violation: fn(value: String) -> String {
     bytes: value.bytes()
-    offset := 0
+    ^offset: 0
     loop offset < bytes.len() && (case_law_is_space(bytes[offset]) || bytes[offset] == (U8{42}) || bytes[offset] == (U8{126}) || bytes[offset] == (U8{95})) {
         offset += 1
     }
@@ -58,7 +58,7 @@ case_law_sentence_violation: fn(value: String) -> String {
     if first == (U8{96}) || first == (U8{34}) || first == (U8{39}) || first == (U8{123}) {
         return ""
     }
-    end := offset
+    ^end: offset
     loop end < bytes.len() && !case_law_is_space(bytes[end]) && !(",;:()[]!".bytes().contains(bytes[end])) {
         end += 1
     }
@@ -72,9 +72,9 @@ case_law_sentence_violation: fn(value: String) -> String {
 // types. "" when the label conforms.
 case_law_title_violation: fn(value: String) -> String {
     if value.starts_with("<") && value.ends_with(">") -> return ""
-    words := [String]{}
+    ^words: [String]{}
     bytes: value.bytes()
-    start := 0
+    ^start: 0
     loop index in 0..<(bytes.len() + 1) {
         if index < bytes.len() && case_law_is_alnum(bytes[index]) -> next
         if index > start -> words.push(case_law_slice(bytes, start, index))
@@ -98,7 +98,7 @@ case_law_push: fn(sources: ^[CaseLawSource], name: String, value: String, kind: 
 
 // The strings each live producer shows a user.
 case_law_sources: fn() -> [CaseLawSource] {
-    sources := [CaseLawSource]{}
+    ^sources: [CaseLawSource]{}
     loop row in diagnostic_registry_rows() {
         case_law_push(sources, "Diagnostics.jet {row.code} meaning", row.meaning, "sentence")
         case_law_push(sources, "Diagnostics.jet {row.code} What", row.what, "sentence")
@@ -132,7 +132,7 @@ case_law_sources: fn() -> [CaseLawSource] {
 }
 
 case_law_violations: fn(sources: [CaseLawSource]) -> [String] {
-    violations := [String]{}
+    ^violations: [String]{}
     loop source in sources {
         violation: if source.kind == "title" -> case_law_title_violation(source.value) else -> case_law_sentence_violation(source.value)
         if violation != "" -> violations.push("{source.name}: {violation}")
@@ -153,7 +153,7 @@ case_law_violations: fn(sources: [CaseLawSource]) -> [String] {
 }
 
 #Test("adding_a_new_title_case_violation_fails_case_check") {
-    sources := case_law_sources()
+    ^sources: case_law_sources()
     assert_eq(case_law_violations(sources).len(), 0)
     case_law_push(sources, "temporary violating label", "Ready And Safe", "title")
     violations: case_law_violations(sources)

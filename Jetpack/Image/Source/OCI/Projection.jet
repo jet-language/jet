@@ -50,7 +50,7 @@ image_write_projection_artifacts: fn(layout: String, manifest_digest: String, pl
 // Write `projection.json`: the sorted, deduplicated classification ledger.
 image_write_projection_report: fn(layout: String, manifest_digest: String, report: ProjectionReport) -[FS, Env]> ImageError! {
     path: files.join(layout, "projection.json")
-    document := [String:Dyn]{}
+    ^document: [String:Dyn]{}
     document["schema"] = Dyn.Text("jet.image.projection")
     document["version"] = Dyn.Int(1)
     document["manifest"] = Dyn.Text(manifest_digest.copy())
@@ -68,9 +68,9 @@ image_write_projection_report: fn(layout: String, manifest_digest: String, repor
 }
 
 image_render_projection_plan: fn(manifest_digest: String, plan: ProjectionPlan) -> String ImageError! {
-    expose := [Dyn]{}
+    ^expose: [Dyn]{}
     loop port in plan.expose -> expose.push(Dyn.Int(port))
-    document := [String:Dyn]{}
+    ^document: [String:Dyn]{}
     document["schema"] = Dyn.Text("jet.image.plan")
     document["version"] = Dyn.Int(1)
     document["manifest"] = Dyn.Text(manifest_digest.copy())
@@ -90,12 +90,12 @@ image_render_projection_plan: fn(manifest_digest: String, plan: ProjectionPlan) 
 }
 
 image_render_projection_dossier: fn(manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) -> String ImageError! {
-    classification := [String:Dyn]{}
+    ^classification: [String:Dyn]{}
     classification["included"] = image_report_values(report.included)
     classification["changed"] = image_report_values(report.changed)
     classification["omitted"] = image_report_values(report.omitted)
     classification["rejected"] = image_report_values(report.rejected)
-    document := [String:Dyn]{}
+    ^document: [String:Dyn]{}
     document["schema"] = Dyn.Text("jet.image.dossier")
     document["version"] = Dyn.Int(1)
     document["manifest"] = Dyn.Text(manifest_digest.copy())
@@ -111,7 +111,7 @@ image_ownership: fn(plan: ProjectionPlan) -> Dyn Never! {
     environment: plan.source.starts_with("env:")
     owners: if environment -> [String]{"Hangar", "Hangar", "Hangar", "Hangar", "Hangar+.jet/lock", ".jet/lock", ".jet/lock", "Hangar"} else -> [String]{"project build", "image builder", "image builder", "image builder", "image plan", "package/build", "image target", "jetpack image"}
     keys: [String]{"content", "cache", "archive", "signing", "provenance", "inputs", "platforms", "publish"}
-    ownership := [String:Dyn]{}
+    ^ownership: [String:Dyn]{}
     loop index in 0..<keys.len() -> ownership[keys[index]] = Dyn.Text(owners[index])
     ownership["remote"] = Dyn.Text("jetpack-remote")
     Dyn.Object(ownership)
@@ -119,9 +119,9 @@ image_ownership: fn(plan: ProjectionPlan) -> Dyn Never! {
 
 // Sorted, deduplicated values as a JSON string array.
 image_report_values: fn(values: [String]) -> Dyn Never! {
-    sorted := values
+    ^sorted: values
     sorted.sort()
-    unique := [String]{}
+    ^unique: [String]{}
     loop value in sorted {
         if unique.len() == 0 || unique[unique.len() - 1] != value -> unique.push(value)
     }
@@ -129,7 +129,7 @@ image_report_values: fn(values: [String]) -> Dyn Never! {
 }
 
 image_json_strings: fn(values: [String]) -> Dyn Never! {
-    items := [Dyn]{}
+    ^items: [Dyn]{}
     loop value in values -> items.push(Dyn.Text(value))
     Dyn.Array(items)
 }

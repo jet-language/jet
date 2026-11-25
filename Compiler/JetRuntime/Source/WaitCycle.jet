@@ -161,7 +161,7 @@ wait_cycle_walk_at: fn(walk: I64, at: I64) -> I64 {
 // holds WAIT_CYCLE_STEPS tasks.
 wait_cycle_walk_add: fn(walk: I64, control: I64) -> Bool {
     count: sync_load(walk)
-    at := I64{0}
+    ^at: I64{0}
     loop at < count {
         if (wait_cycle_walk_at(walk, at) == control) { return true }
         at += I64{1}
@@ -206,8 +206,8 @@ wait_cycle_follow: fn(walk: I64, member: I64) -> Bool {
 // or the walk cannot follow its wait. Under the wait lock.
 wait_cycle_find: fn(control: I64) -> I64 {
     walk: wait_cycle_walk_new()
-    _ := wait_cycle_walk_add(walk, control)
-    at := I64{0}
+    ^_: wait_cycle_walk_add(walk, control)
+    ^at: I64{0}
     loop {
         if (at >= sync_load(walk)) { break }
         if !wait_cycle_follow(walk, wait_cycle_walk_at(walk, at)) {
@@ -235,7 +235,7 @@ wait_cycle_deliver: fn(walk: I64) {
     sync_store(record, length)
     sync_store(wrapping(record + I64{8}), length)
     sync_store(wrapping(record + I64{16}), length)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         member: wait_cycle_walk_at(walk, at)
         entry: wait_cycle_entry(record, at)
@@ -341,15 +341,15 @@ wait_cycle_site: fn() -> I64 {
     if (trace == I64{0}) { return I64{0} }
     data: rt_text_data(trace)
     length: rt_text_len(trace)
-    site := I64{0}
-    start := I64{0}
+    ^site: I64{0}
+    ^start: I64{0}
     loop start < length && site == (I64{0}) {
-        end := start
+        ^end: start
         loop end < length && rt_text_byte(wrapping(data + end)) != (I64{10}) -> end += I64{1}
-        file := start
+        ^file: start
         loop file < end && rt_text_byte(wrapping(data + file)) != (I64{9}) -> file += I64{1}
         file += I64{1}
-        line := file
+        ^line: file
         loop line < end && rt_text_byte(wrapping(data + line)) != (I64{9}) -> line += I64{1}
         file_len: line - file
         if (line < end && file_len > I64{0} && !trap_core_site(wrapping(data + file), file_len)) {
@@ -375,7 +375,7 @@ wait_cycle_site: fn() -> I64 {
 wait_cycle_stop: fn(control: I64) {
     record: sync_load(wrapping(control + I64{184}))
     length: sync_load(wrapping(record + I64{8}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         entry: wait_cycle_entry(record, at)
         if (sync_load(entry) == control) {
@@ -386,9 +386,9 @@ wait_cycle_stop: fn(control: I64) {
     }
     remaining: wrapping(record + I64{16})
     if (sync_add(remaining, I64{-1}) == I64{1}) { sync_wake(remaining, I64{2147483647}) } else {
-        left := sync_load(remaining)
+        ^left: sync_load(remaining)
         loop left != (I64{0}) {
-            _ := sync_wait(remaining, left, I64{-1})
+            ^_: sync_wait(remaining, left, I64{-1})
             left = sync_load(remaining)
         }
     }
@@ -428,7 +428,7 @@ wait_cycle_stop: fn(control: I64) {
 // Whether a task of the cycle `record` is the root.
 wait_cycle_holds_root: fn(record: I64) -> Bool {
     length: sync_load(wrapping(record + I64{8}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if scheduler_control_is_root(sync_load(wait_cycle_entry(record, at))) -> return true
         at += I64{1}
@@ -441,7 +441,7 @@ wait_cycle_release: fn(record: I64) {
         return
     }
     length: sync_load(wrapping(record + I64{8}))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         entry: wait_cycle_entry(record, at)
         jet_rt_string_drop(sync_load(wrapping(entry + I64{8})))

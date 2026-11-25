@@ -102,8 +102,8 @@ new: fn<T>(name: String, value: T) -> WebStore<T> Never! {
 }
 
 with_history: fn<T>(name: String, value: T, limit: Int) -> WebStore<T> Never! {
-    store := new<T>(name, value)
-    n := limit
+    ^store: new<T>(name, value)
+    ^n: limit
     if n < 1 -> n = 1
     if n > 1000 -> n = 1000
     store.history_limit = n
@@ -123,7 +123,7 @@ state_signal: fn<T>(store: WebStore<T>) -> Signal<T> Never! { signal<T>(store) }
 // failure of `apply` is this call's, unchanged, and leaves the store as it was.
 transaction: fn<T, E>(store: ^WebStore<T>, label: String, values: [String], apply: fn(^T) E!) -> WebStoreTransaction<T> E! {
     before: value<T>(store.copy())
-    next := value<T>(store.copy())
+    ^next: value<T>(store.copy())
     apply(next)
     store.state = reactive.set(store.state, next)
     record<T>(store, label, values, before)
@@ -152,7 +152,7 @@ set_state: fn<T>(store: ^WebStore<T>, value: T) -> WebStoreTransaction<T> Never!
 // The changed value is live at once; the patch keeps the value before it, and
 // until patch_commit, patch_rollback returns the store with that value restored.
 optimistic: fn<T, E>(store: ^WebStore<T>, label: String, values: [String], apply: fn(^T) E!) -> WebStorePatch<T> E! {
-    backup := value<T>(store.copy())
+    ^backup: value<T>(store.copy())
     transaction: transaction<T, E>(store, label, values, apply)
     WebStorePatch<T>{store: store.copy(), backup: backup, transaction: transaction, active: true}
 }
@@ -176,7 +176,7 @@ patch_commit: fn<T>(patch: ^WebStorePatch<T>) -> WebStoreTransaction<T> Never! {
 
 patch_rollback: fn<T>(patch: ^WebStorePatch<T>) -> WebStore<T>? Never! {
     if !patch.active -> return None
-    store := patch.store
+    ^store: patch.store
     before: value<T>(store)
     store.state = reactive.set(store.state, patch.backup)
     _: record<T>(store, "rollback", [String]{}, before)
@@ -219,7 +219,7 @@ history_at: fn<T>(store: WebStore<T>, index: Int) -> WebStoreTransaction<T>? Nev
 events: fn<T>(store: WebStore<T>) -> [WebStoreEvent] Never! { store.event_log }
 
 events_since: fn<T>(store: WebStore<T>, cursor: Int) -> [WebStoreEvent] Never! {
-    out := [WebStoreEvent]{}
+    ^out: [WebStoreEvent]{}
     loop event in events<T>(store) {
         if event.cursor >= cursor -> out.push(event)
     }
@@ -236,7 +236,7 @@ clear_history: fn<T>(store: ^WebStore<T>) Never! {
 }
 
 set_history_limit: fn<T>(store: ^WebStore<T>, limit: Int) Never! {
-    n := limit
+    ^n: limit
     if n < 1 -> n = 1
     if n > 1000 -> n = 1000
     if n == store.history_limit {
@@ -310,14 +310,14 @@ event_json: fn<T>(store: WebStore<T>) -> String Never! {
 
 record: fn<T>(store: ^WebStore<T>, action: String, fields: [String], before: T) -> WebStoreTransaction<T> Never! {
     store.generation += 1
-    changed := [String]{}
+    ^changed: [String]{}
     loop field in fields -> changed.push("\"{esc_json(field)}\"")
     diff: "{{\"kind\":\"transaction\",\"generation\":{store.generation},\"action\":\"{esc_json(action)}\",\"changed_fields\":[{changed.join(",")}]}}"
     transaction: WebStoreTransaction<T>{action: action, after: value<T>(store.copy()), generation: store.generation, changed_fields: fields, before: before, diff: diff}
     if store.history_enabled {
         if store.cursor < store.history.len() {
-            kept := [T]{}
-            entries := [WebStoreTransaction<T>]{}
+            ^kept: [T]{}
+            ^entries: [WebStoreTransaction<T>]{}
             loop i in 0..<store.cursor {
                 kept.push(store.history[i])
                 entries.push(store.transactions[i])
@@ -351,20 +351,20 @@ trim: fn<T>(store: ^WebStore<T>) Never! {
 // `U`, not `T`: `trim` calls this with `WebStoreTransaction<T>`, and the
 // solver reads a callee parameter spelled like the caller's as a cycle.
 tail: fn<U>(values: [U], count: Int) -> [U] Never! {
-    start := values.len() - count
+    ^start: values.len() - count
     if start < 0 -> start = 0
-    out := [U]{}
+    ^out: [U]{}
     loop i in start..<values.len() -> out.push(values[i])
     out
 }
 
 esc_json: fn(text: String) -> String {
     raw: text.bytes()
-    out := [U8]{}
-    i := 0
+    ^out: [U8]{}
+    ^i: 0
     loop i < raw.len() {
         b: raw[i]
-        escaped := ""
+        ^escaped: ""
         if {
             b == (U8{34}) -> escaped = "\\\""
             b == (U8{92}) -> escaped = "\\\\"

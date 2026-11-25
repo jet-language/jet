@@ -42,7 +42,7 @@ run: fn() {
     scratch: files.temp_dir("union-lend-loop")
     directory: files.open_directory(scratch.path)
     text: "a lent line of text, longer than any inline form"
-    total := measure(text) + kind(directory)
+    ^total: measure(text) + kind(directory)
     start: status_kb("VmRSS:")
     loop _ in 1..<CALLS -> total += measure(text) + kind(directory)
     grown: status_kb("VmRSS:") - start

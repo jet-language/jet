@@ -12,7 +12,7 @@ use jet_backend.[
 
 // `rows` as execve's block: each row's bytes, then a NUL.
 env_joined: fn(rows: [String]) -> [U8] {
-    block := [U8]{}
+    ^block: [U8]{}
     loop row in rows {
         block.extend(row.bytes())
         block.push(U8{0})
@@ -22,9 +22,9 @@ env_joined: fn(rows: [String]) -> [U8] {
 
 // The block's strings that decode as UTF-8, read one at a time.
 env_strings: fn(block: [U8]) -> [String] {
-    rows := [String]{}
+    ^rows: [String]{}
     loop start in loader_environ_starts(block) {
-        end := start
+        ^end: start
         loop block[end] != (U8{0}) -> end += 1
         row: String.from_bytes(block[start..<end]) ?? next
         rows.push(row)
@@ -49,7 +49,7 @@ env_assert_prepared: fn(rows: [String]) {
 }
 
 #Test("a large environment lays out byte for byte, duplicates and empty values kept") {
-    rows := [String]{}
+    ^rows: [String]{}
     loop k in 0..<4096 {
         rows.push("JET_LAUNCH_{k % 97}={"x".repeat(k % 211)}")
         if k % 13 == 0 -> rows.push("JET_EMPTY=")

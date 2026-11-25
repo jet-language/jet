@@ -93,7 +93,7 @@ pkg_lua_bind: fn(path: String, source: String, lib: String, cache: String) -[FS,
     pkg_binder_remove_file_quiet(c)
     pkg_binder_remove_file_quiet(object)
     digest: pkg_binder_identity_digest([String]{"jet-lua-bind-v2", source, root})
-    provenance := "schema=jet-lua-bind-v2\nsha256={digest}\nruntime={root}\nstate=per-session\ntransport=dyn+table-view\ntable-view=zero-copy\nhook=instructions\n"
+    ^provenance: "schema=jet-lua-bind-v2\nsha256={digest}\nruntime={root}\nstate=per-session\ntransport=dyn+table-view\ntable-view=zero-copy\nhook=instructions\n"
     pkg_binder_append_artifact_boundary(provenance, LUA_MODULE_ROOT, "Lua", lib, path, archive, "luac={luac};{pkg_binder_cc_ar_identity()}")
     Ok(LuaBindResult{source: pkg_lua_render_jet(abi, functions), bound: functions, archive: archive, lib_dir: lib_dir, provenance: provenance})
 }
@@ -116,7 +116,7 @@ pkg_lua_find_library_dir: fn(root: String) -[FS, Env]> String? Never! {
 }
 
 pkg_lua_render_jet: fn(abi: String, functions: [String]) -> String Never! {
-    out := [String]{"#Import c.{abi}: module {{\n"}
+    ^out: [String]{"#Import c.{abi}: module {{\n"}
     fixed: PKG_LUA_FIXED_FUNCTIONS
     loop entry in fixed {
         out.push("    {entry.name}: fn{entry.signature} = \"{abi}_{entry.name}\"\n")
@@ -139,7 +139,7 @@ pkg_lua_render_jet: fn(abi: String, functions: [String]) -> String Never! {
 pkg_lua_render_probe: fn() -> String Never! { pkg_lua_render_jet("registry", [String]{"probe"}) }
 
 pkg_lua_render_c: fn(abi: String, source: String, functions: [String]) -> String Never! {
-    wrappers := [String]{}
+    ^wrappers: [String]{}
     loop name in functions {
         wrappers.push("const char* {abi}_invoke_{name}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{name}\",input,deadline);}}\nint64_t {abi}_view_{name}(int64_t h,int64_t deadline){{return view(h,\"{name}\",deadline);}}\n")
     }
@@ -158,9 +158,9 @@ pkg_lua_render_c: fn(abi: String, source: String, functions: [String]) -> String
 // blocks are skipped by tracking block depth.
 pkg_lua_discover: fn(source: String) -> [String] ForeignBindError! {
     tokens: pkg_lua_lex(source)
-    functions := [String]{}
-    depth := 0
-    index := 0
+    ^functions: [String]{}
+    ^depth: 0
+    ^index: 0
     loop index < tokens.len() {
         word: pkg_lua_word_at(tokens, index) ?? ""
         if word == "function" && depth == 0 {
@@ -230,8 +230,8 @@ pkg_lua_punct_at: fn(tokens: [LuaToken], at: Int) -> Int Never! {
 // Names and `(`, `)`, `,`; comments and string bodies are skipped.
 pkg_lua_lex: fn(source: String) -> [LuaToken] ForeignBindError! {
     bytes: source.bytes()
-    out := [LuaToken]{}
-    index := 0
+    ^out: [LuaToken]{}
+    ^index: 0
     loop index < bytes.len() {
         code: Int{bytes[index]}
         if code == 32 || code == 9 || code == 10 || code == 12 || code == 13 {

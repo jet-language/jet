@@ -4,7 +4,7 @@
 // their Source registry.
 
 foundation_core_menu_ascii_lower: fn(text: String) -> String Never! {
-    bytes := text.bytes()
+    ^bytes: text.bytes()
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
@@ -45,7 +45,7 @@ foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots
     }
     if kind == {
         .Enum(variants) -> {
-            result := [String]{}
+            ^result: [String]{}
             loop variant in variants {
                 canonical: foundation_core_menu_variant(name, variant)
                 if canonical == .Val(value) -> result.push(value)
@@ -71,10 +71,10 @@ foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots
 foundation_core_argument_menus: fn(effect_roots: [String]) -> [TAppliedRuleArgumentMenu]? {
     module_name: "core.compiler.lang"
     declaration: core_module_export(module_name) ?? return None
-    menus := [TAppliedRuleArgumentMenu]{}
+    ^menus: [TAppliedRuleArgumentMenu]{}
     loop name in declaration.type_exports {
         if name != "IntType" {
-            kind := CoreLeafKind.Plain
+            ^kind: CoreLeafKind.Plain
             if core_module_enum_cases(module_name, name) == .Val(enum_variants) {
                 kind = CoreLeafKind.Enum{variants: enum_variants}
             }
@@ -96,7 +96,7 @@ foundation_core_argument_menus: fn(effect_roots: [String]) -> [TAppliedRuleArgum
             first_variant_segment: false,
         },
     )
-    int_type_variants := [String]{}
+    ^int_type_variants: [String]{}
     loop alias in FOUNDATION_SIZE_ALIASES {
         if alias.family != "IEEE" -> int_type_variants.push(alias.name)
     }

@@ -163,7 +163,7 @@ gate_same_fact: fn(left: GateEntry, right: GateEntry) -> Bool Never! {
 }
 
 gate_ledger_push: fn(ledger: ^GateLedger, entry: ^^GateEntry) Never! {
-    written := entry
+    ^written: entry
     if written.provenance.len() == 0 -> written.provenance.push(written.source)
     loop index in 0..<ledger.rows.len() {
         if !gate_same_fact(ledger.rows[index], written) -> next

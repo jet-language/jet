@@ -175,7 +175,7 @@ jet_cli_picker_keywords: fn(name: String) -> [String] Never! {
 
 // Every command the palette lists, in its frequency order.
 jet_cli_picker_index: fn() -> [JetCLIPickerEntry] Never! {
-    entries := [JetCLIPickerEntry]{}
+    ^entries: [JetCLIPickerEntry]{}
     loop at in jet_cli_commands_in("frequency") {
         command: JET_CLI_COMMANDS[at]
         if !jet_cli_command_listed(command.name) -> next
@@ -197,9 +197,9 @@ jet_cli_picker_index: fn() -> [JetCLIPickerEntry] Never! {
 
 // The palette's categories that list a command, then the errors category.
 jet_cli_picker_categories: fn(index: [JetCLIPickerEntry]) -> [String] Never! {
-    categories := [String]{}
+    ^categories: [String]{}
     loop category in JET_CLI_PALETTE_CATEGORIES {
-        listed := false
+        ^listed: false
         loop entry in index {
             if entry.category == category -> listed = true
         }
@@ -211,7 +211,7 @@ jet_cli_picker_categories: fn(index: [JetCLIPickerEntry]) -> [String] Never! {
 
 // The index rows of `category`'s commands; none for a position past the list.
 jet_cli_picker_members: fn(state: JetCLIPickerState, category: Int) -> [Int] Never! {
-    members := [Int]{}
+    ^members: [Int]{}
     if category < 0 || category >= state.categories.len() -> return members
     loop (at, entry) in state.index {
         if entry.category == state.categories[category] -> members.push(at)
@@ -240,9 +240,9 @@ jet_cli_picker_fuzzy: fn(query: String, hay: String, positions: ^[Int]) -> Int? 
     if query == "" -> return Val(0)
     wanted: query.to_lower().chars()
     chars: hay.to_lower().chars()
-    at := 0
-    score := 0
-    previous := -2
+    ^at: 0
+    ^score: 0
+    ^previous: -2
     loop (index, character) in chars {
         if at >= wanted.len() -> break
         if character != wanted[at] -> next
@@ -261,7 +261,7 @@ jet_cli_picker_fuzzy: fn(query: String, hay: String, positions: ^[Int]) -> Int? 
 // Keeps the better of `best` and the match of `query` in `hay`; the earlier
 // text wins a tie.
 jet_cli_picker_consider: fn(best: ^JetCLIPickerHit?, entry: Int, query: String, hay: String) Never! {
-    positions := [Int]{}
+    ^positions: [Int]{}
     score: jet_cli_picker_fuzzy(query, hay, positions) ?? return
     if best == .Val(current) && score <= current.score {
         return
@@ -274,14 +274,14 @@ jet_cli_picker_consider: fn(best: ^JetCLIPickerHit?, entry: Int, query: String, 
 // match it, best first and then by name. An exact name ranks first.
 jet_cli_picker_search: fn(index: [JetCLIPickerEntry], query: String) -> JetCLIPickerFound Never! {
     wanted: query.trim().copy()
-    commands := [JetCLIPickerHit]{}
+    ^commands: [JetCLIPickerHit]{}
     if wanted == "" -> return JetCLIPickerFound{code: None, commands: commands}
     if jet_cli_picker_diagnostic(wanted) == .Val(explanation) {
         return JetCLIPickerFound{code: Val(explanation), commands: commands}
     }
     lowered: wanted.to_ascii_lower()
     loop (at, entry) in index {
-        best := JetCLIPickerHit?{None}
+        ^best: JetCLIPickerHit?{None}
         jet_cli_picker_consider(best, at, wanted, "{JET_CLI_BINARY} {entry.name}")
         jet_cli_picker_consider(best, at, wanted, entry.usage)
         jet_cli_picker_consider(best, at, wanted, entry.summary)
@@ -291,7 +291,7 @@ jet_cli_picker_search: fn(index: [JetCLIPickerEntry], query: String) -> JetCLIPi
         if entry.example == .Val(example) -> jet_cli_picker_consider(best, at, wanted, example)
         loop other in entry.see_also -> jet_cli_picker_consider(best, at, wanted, other)
         loop keyword in entry.keywords -> jet_cli_picker_consider(best, at, wanted, keyword)
-        hit := best ?? next
+        ^hit: best ?? next
         if entry.name.to_ascii_lower() == lowered -> hit.score += 1000
         commands.push(hit)
     }
@@ -332,17 +332,15 @@ jet_cli_picker_lead: fn(byte: U8) -> Bool Never! { (byte & U8{192}) != (U8{128})
 
 // Visible columns of `text`: its scalars outside `ESC ... m` sequences.
 jet_cli_picker_cols: fn(text: String) -> Int Never! {
-    count := 0
-    escaped := false
+    ^count: 0
+    ^escaped: false
     loop byte in text.bytes() {
         if {
             escaped -> {
                 if byte == (U8{109}) -> escaped = false
             }
             byte == (U8{27}) -> { escaped = true }
-            jet_cli_picker_lead(byte) -> {
-                count += 1
-            }
+            jet_cli_picker_lead(byte) -> { count += 1 }
         }
     }
     count
@@ -354,9 +352,9 @@ jet_cli_picker_truncate: fn(text: String, width: Int) -> String Never! {
     if width <= 0 -> return ""
     keep: width - 1
     bytes: text.bytes()
-    out := [U8]{}
-    visible := 0
-    escaped := false
+    ^out: [U8]{}
+    ^visible: 0
+    ^escaped: false
     styled: text.contains(jet_cli_picker_esc())
     loop byte in bytes {
         if escaped {
@@ -434,9 +432,9 @@ jet_cli_picker_mark: fn(opening: Bool, color: Bool) -> String Never! {
 // brackets without color, in the accent color with it.
 jet_cli_picker_emphasize: fn(text: String, positions: [Int], color: Bool) -> String Never! {
     if positions.len() == 0 -> return "{text}"
-    parts := [String]{}
-    marking := false
-    at := 0
+    ^parts: [String]{}
+    ^marking: false
+    ^at: 0
     loop character in text.chars() {
         marked: positions.contains(at)
         if marked && !marking -> parts.push(jet_cli_picker_mark(true, color))
@@ -458,11 +456,11 @@ jet_cli_picker_categorized: fn(state: JetCLIPickerState, expanded: Bool, height:
     width: jet_cli_picker_wide(state.width)
     color: state.color
     selected_entry: jet_cli_picker_category_entry(state)
-    out := [String]{jet_cli_picker_top(width, "{JET_CLI_LANG_NAME} command palette", color)}
+    ^out: [String]{jet_cli_picker_top(width, "{JET_CLI_LANG_NAME} command palette", color)}
     out.push(jet_cli_picker_row(width, diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, "Type to search · ↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1"), false, color))
     out.push(jet_cli_picker_mid(width, color))
-    body := [JetCLIPickerLine]{}
-    header := 0
+    ^body: [JetCLIPickerLine]{}
+    ^header: 0
     loop (at, category) in state.categories {
         current: at == state.cat_selected
         open: current && expanded
@@ -481,7 +479,7 @@ jet_cli_picker_categorized: fn(state: JetCLIPickerState, expanded: Bool, height:
         }
     }
     visible: if height == .Val(rows) -> jet_cli_picker_at_least(rows - 4, 1) else -> body.len()
-    focus := header
+    ^focus: header
     loop (at, line) in body {
         if line.selected {
             focus = at
@@ -507,14 +505,14 @@ jet_cli_picker_results: fn(state: JetCLIPickerState, height: Int?) -> String Nev
     width: jet_cli_picker_wide(state.width)
     color: state.color
     hits: state.found.commands
-    out := [String]{jet_cli_picker_top(width, "Find a Command", color)}
+    ^out: [String]{jet_cli_picker_top(width, "Find a Command", color)}
     query_line: if color -> "{diagnostic_theme_paint(true, DIAGNOSTIC_THEME_ACCENT, ">")} {diagnostic_theme_paint(true, DIAGNOSTIC_THEME_BOLD, state.query)}" else -> "> {state.query}"
     out.push(jet_cli_picker_row(width, query_line, false, color))
     out.push(jet_cli_picker_mid(width, color))
     if hits.len() == 0 {
         out.push(jet_cli_picker_row(width, diagnostic_theme_paint(color, DIAGNOSTIC_THEME_WARN, "no matches"), false, color))
     }
-    example := String?{None}
+    ^example: String?{None}
     if hits.len() > 0 {
         if state.index[hits[0].entry].example == .Val(text) -> example = Val("{text}")
     }
@@ -551,7 +549,7 @@ jet_cli_picker_results: fn(state: JetCLIPickerState, height: Int?) -> String Nev
 // commands.
 jet_cli_picker_detail: fn(entry: JetCLIPickerEntry, width: Int, color: Bool) -> String Never! {
     command: "{JET_CLI_BINARY} {entry.name}"
-    out := [String]{jet_cli_picker_top(width, "{command}  ⇥ Collapse", color)}
+    ^out: [String]{jet_cli_picker_top(width, "{command}  ⇥ Collapse", color)}
     loop (at, line) in entry.usage.split("\n").to_list() {
         label: if at == 0 -> "Usage   " else -> "        "
         out.push(jet_cli_picker_row(width, "{label}{line}", false, color))
@@ -578,10 +576,10 @@ jet_cli_picker_detail: fn(entry: JetCLIPickerEntry, width: Int, color: Bool) -> 
 // stay whole and cost no column; no byte is dropped.
 jet_cli_picker_wrap: fn(text: String, width: Int) -> [JetCLIPickerWrapped] Never! {
     limit: if width < 1 -> 1 else -> width
-    rows := [JetCLIPickerWrapped]{}
-    row := [U8]{}
-    visible := 0
-    escaped := false
+    ^rows: [JetCLIPickerWrapped]{}
+    ^row: [U8]{}
+    ^visible: 0
+    ^escaped: false
     bytes: text.bytes()
     loop byte in bytes {
         if byte == (U8{10}) {
@@ -632,7 +630,7 @@ jet_cli_picker_lines_view: fn(text: String, height: Int, scroll: Int) -> String 
     lines: text.split("\n").to_list()
     tall: jet_cli_picker_at_least(height, 1)
     start: jet_cli_picker_min(scroll, jet_cli_picker_floor(lines.len() - tall))
-    out := [String]{}
+    ^out: [String]{}
     loop at in start..<jet_cli_picker_min(start + tall, lines.len()) -> out.push("{lines[at]}")
     out.join("\n")
 }
@@ -646,9 +644,9 @@ jet_cli_picker_reference: fn(state: JetCLIPickerState) -> String Never! {
     left_width: if width /% 3 < 18 -> 18 else -> width /% 3
     right_width: width - left_width - 2
     search: if state.ref_query == "" -> "" else -> " · Search: {diagnostic_theme_paint(color, DIAGNOSTIC_THEME_BOLD, state.ref_query)}"
-    lines := [String]{jet_cli_picker_pad("{diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ACCENT, JET_CLI_BINARY)} Reference{search}", width)}
-    left := [String]{}
-    selected_row := -1
+    ^lines: [String]{jet_cli_picker_pad("{diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ACCENT, JET_CLI_BINARY)} Reference{search}", width)}
+    ^left: [String]{}
+    ^selected_row: -1
     loop (at, category) in state.categories {
         current: at == state.ref_category
         label: "{if current -> "▾" else -> "▸"} {category}"
@@ -661,7 +659,7 @@ jet_cli_picker_reference: fn(state: JetCLIPickerState) -> String Never! {
             left.push(if chosen -> diagnostic_theme_paint(color, JET_CLI_PICKER_INVERT, row) else -> row)
         }
     }
-    right := [String]{}
+    ^right: [String]{}
     if {
         state.ref_entry == .Val(member) -> {
             right = jet_cli_picker_detail(state.index[member], right_width, color).split("\n").to_list()
@@ -717,7 +715,7 @@ jet_cli_picker_state: fn(width: Int, height: Int, color: Bool) -> JetCLIPickerSt
     // The index is built when the picker opens. Bound to an immutable local,
     // it would be computed while compiling jet, and every build of jet would
     // pay for it.
-    state := JetCLIPickerState{
+    ^state: JetCLIPickerState{
         index: jet_cli_picker_index(),
         categories: [String]{},
         width: width,
@@ -968,16 +966,16 @@ jet_cli_picker_apply: fn(state: ^JetCLIPickerState, key: JetCLIPickerKey) -> Jet
 // The keys in `bytes`. A sequence or character cut off at the end is left
 // in `rest` for the next read.
 jet_cli_picker_keys: fn(bytes: [U8], rest: ^[U8]) -> [JetCLIPickerKey] Never! {
-    keys := [JetCLIPickerKey]{}
+    ^keys: [JetCLIPickerKey]{}
     rest = [U8]{}
-    at := 0
+    ^at: 0
     loop at < bytes.len() {
         byte: Int{bytes[at]}
         if byte == 27 {
             follow: if at + 1 < bytes.len() -> (Int{bytes[at + 1]}) else -> -1
             // CSI (ESC [) and SS3 (ESC O) run to a final byte in 64..126.
             if follow == 91 || follow == 79 {
-                end := at + 2
+                ^end: at + 2
                 loop end < bytes.len() && (Int{bytes[end]} < 64 || Int{bytes[end]} > 126) {
                     end += 1
                 }
@@ -1004,11 +1002,13 @@ jet_cli_picker_keys: fn(bytes: [U8], rest: ^[U8]) -> [JetCLIPickerKey] Never! {
             next
         }
         if byte == 9 || byte == 127 || byte == 8 || byte == 3 || byte == 4 {
-            keys.push(if {
-                byte == 9 -> JetCLIPickerKey.Tab
-                byte == 3 || byte == 4 -> JetCLIPickerKey.Quit
-                else -> JetCLIPickerKey.Backspace
-            })
+            keys.push(
+                if {
+                    byte == 9 -> JetCLIPickerKey.Tab
+                    byte == 3 || byte == 4 -> JetCLIPickerKey.Quit
+                    else -> JetCLIPickerKey.Backspace
+                },
+            )
             at += 1
             next
         }
@@ -1027,7 +1027,7 @@ jet_cli_picker_keys: fn(bytes: [U8], rest: ^[U8]) -> [JetCLIPickerKey] Never! {
             loop index in at..<bytes.len() -> rest.push(bytes[index])
             return keys
         }
-        scalar := [U8]{}
+        ^scalar: [U8]{}
         loop index in at..<(at + size) -> scalar.push(bytes[index])
         text: String.from_bytes(scalar) ?? ""
         // A stray continuation byte or an invalid sequence types nothing.
@@ -1125,15 +1125,15 @@ jet_cli_picker: fn(color: Bool) -[IO, Time.Wait]> JetCLIPlan? Never! {
     }
     if !picker_rt.terminal8_mode_enter(true) -> return None
     size: jet_cli_picker_size()
-    state := jet_cli_picker_state(size.w, size.h, color)
-    alternate := false
+    ^state: jet_cli_picker_state(size.w, size.h, color)
+    ^alternate: false
     // A failed terminal write ends the session with status 1: the terminal
     // is the only place a report could go.
-    drawn := jet_cli_picker_draw(0, jet_cli_picker_render(state), state.height) ?? {
+    ^drawn: jet_cli_picker_draw(0, jet_cli_picker_render(state), state.height) ?? {
         picker_rt.terminal8_mode_leave()
         return Val(jet_cli_done("", "", 1))
     }
-    pending := [U8]{}
+    ^pending: [U8]{}
     loop {
         input: picker_rt.terminal8_take(64)
         if input.read_error != None || input.bytes.len() == 0 {
@@ -1141,7 +1141,7 @@ jet_cli_picker: fn(color: Bool) -[IO, Time.Wait]> JetCLIPlan? Never! {
             return Val(jet_cli_done("", "", 0))
         }
         // The cut-off bytes of the last read lead this one; `pending` is refilled below.
-        bytes := pending.move()
+        ^bytes: pending.move()
         pending = [U8]{}
         loop byte in input.bytes -> bytes.push(byte)
         loop key in jet_cli_picker_keys(bytes, pending) {

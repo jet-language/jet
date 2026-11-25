@@ -83,7 +83,7 @@ is_digit: fn(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
 is_upper: fn(code: Int) -> Bool Never! { code >= 65 && code <= 90 }
 
 digits_value: fn(text: String) -> Int Never! {
-    value := 0
+    ^value: 0
     loop byte in text.bytes() -> value = value * 10 + (Int{byte}) - 48
     value
 }
@@ -96,8 +96,8 @@ ByteSpan: struct {
 // Byte spans [start, end) of every line of `text`, without the newline.
 line_spans: fn(text: String) -> [ByteSpan] Never! {
     bytes: text.bytes()
-    spans := [ByteSpan]{}
-    start := 0
+    ^spans: [ByteSpan]{}
+    ^start: 0
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) {
             spans.push(ByteSpan{start: start, end: index})
@@ -154,8 +154,8 @@ row_name: fn(line: String, source: String) -> String? Never! {
 quoted_text: fn(value: String) -> String? Never! {
     bytes: value.bytes()
     if bytes.len() < 2 || bytes[0] != (U8{34}) || bytes[bytes.len() - 1] != (U8{34}) -> return None
-    out := [U8]{}
-    index := 1
+    ^out: [U8]{}
+    ^index: 1
     loop index < bytes.len() - 1 {
         byte: Int{bytes[index]}
         next_byte: if index + 1 < bytes.len() - 1 -> (Int{bytes[index + 1]}) else -> -1
@@ -197,15 +197,15 @@ action_line: fn(line: String) -> Bool Never! {
 // line that is exactly `    }` or `    },`.
 table_rows: fn(body: String, source: String, row_openers: [String]) -> [CommandRow] CensusError! {
     spans: line_spans(body)
-    rows := [CommandRow]{}
-    index := 0
+    ^rows: [CommandRow]{}
+    ^index: 0
     loop index < spans.len() {
         opener: byte_slice(body, spans[index].start, spans[index].end)
         if !row_openers.contains(opener) || index + 1 >= spans.len() {
             index += 1
             next
         }
-        closing := -1
+        ^closing: -1
         loop candidate in index + 1..<spans.len() {
             line: byte_slice(body, spans[candidate].start, spans[candidate].end)
             if line == "    }}" || line == "    }}," {
@@ -217,11 +217,11 @@ table_rows: fn(body: String, source: String, row_openers: [String]) -> [CommandR
             index += 1
             next
         }
-        name := String?{None}
-        rank := Int?{None}
-        summary := String?{None}
-        usage := String?{None}
-        group := false
+        ^name: String?{None}
+        ^rank: Int?{None}
+        ^summary: String?{None}
+        ^usage: String?{None}
+        ^group: false
         loop row_line in index + 1..<closing + 1 {
             line: byte_slice(body, spans[row_line].start, spans[row_line].end)
             if name == None -> name = row_name(line, source)
@@ -256,8 +256,8 @@ source_rows: fn(table: CommandTable, source: String) -> [CommandRow] CensusError
 // of range, or one two rows share. A missing rank shows as the shared or
 // out-of-range one that took its place.
 rank_problems: fn(rows: [CommandRow], path: String) -> [String] Never! {
-    problems := [String]{}
-    holder := [Int:String]{}
+    ^problems: [String]{}
+    ^holder: [Int:String]{}
     loop row in rows {
         if row.rank < 1 || row.rank > rows.len() {
             problems.push("census: {row.name} has frequency_rank {row.rank} in {path}; the {rows.len()} commands take ranks 1 to {rows.len()}")
@@ -274,16 +274,16 @@ rank_problems: fn(rows: [CommandRow], path: String) -> [String] Never! {
 
 // `value` right-aligned in `width` columns.
 right_aligned: fn(value: Int, width: Int) -> String Never! {
-    text := "{value}"
+    ^text: "{value}"
     loop byte_len(text) < width -> text = " {text}"
     text
 }
 
 // The commands in rank order, one `rank name` line each.
 ranking_lines: fn(rows: [CommandRow]) -> [String] Never! {
-    ordered := rows.copy()
+    ^ordered: rows.copy()
     ordered.sort_by(fn(left: CommandRow, right: CommandRow) { (left.rank <=> right.rank).then(left.name <=> right.name) })
-    lines := [String]{}
+    ^lines: [String]{}
     loop row in ordered -> lines.push("{right_aligned(row.rank, 3)} {row.name}")
     lines
 }
@@ -291,7 +291,7 @@ ranking_lines: fn(rows: [CommandRow]) -> [String] Never! {
 // The command-model forms (JET_CLI_FORMS rows in `source`) marked not built.
 unbuilt_forms: fn(source: String) -> [String] Never! {
     prefix: "{{form: \""
-    forms := [String]{}
+    ^forms: [String]{}
     loop span in line_spans(source) {
         line: byte_slice(source, span.start, span.end).trim()
         if !line.starts_with(prefix) || !line.contains("ported: false") -> next
@@ -311,9 +311,9 @@ padded: fn(text: String, width: Int) -> String Never! {
 // The root index `jet help` prints, one usage row per built command in rank
 // order: its usage padded to USAGE_WIDTH, then its summary.
 index_lines: fn(rows: [CommandRow], unbuilt: [String]) -> [String] Never! {
-    ordered := rows.copy()
+    ^ordered: rows.copy()
     ordered.sort_by(fn(left: CommandRow, right: CommandRow) { (left.rank <=> right.rank).then(left.name <=> right.name) })
-    lines := [String]{}
+    ^lines: [String]{}
     loop row in ordered {
         if unbuilt.contains(row.name) -> next
         shape: row.usage ?? (if row.group -> "{row.name} <command>" else -> "{row.name} [args]")
@@ -337,7 +337,7 @@ doc_with_index: fn(doc: String, lines: [String]) -> String CensusError! {
 }
 
 census_main: fn(args: [String]) -[FS, IO]> Int CensusError! {
-    mode := ""
+    ^mode: ""
     loop arg in args {
         if (arg == "--check" || arg == "--write") && mode == "" {
             mode = arg.copy()
@@ -350,7 +350,7 @@ census_main: fn(args: [String]) -[FS, IO]> Int CensusError! {
     rows: source_rows(table, source) ?? return Err(err)
     loop line in ranking_lines(rows) -> print(line)
     if mode == "" -> return Ok(0)
-    problems := rank_problems(rows, table.path)
+    ^problems: rank_problems(rows, table.path)
     doc: files.read(DOC_PATH) ?? return Err(census_fail("census: cannot read {DOC_PATH}: {err}"))
     indexed: doc_with_index(doc, index_lines(rows, unbuilt_forms(source))) ?? return Err(err)
     if mode == "--write" && indexed != doc {

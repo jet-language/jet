@@ -13,7 +13,7 @@ Holder: struct {
 }
 
 tallied: fn() -> Holder {
-    tally := Counter{count: 0}
+    ^tally: Counter{count: 0}
     Holder{
         action: fn() {
             tally.bump()
@@ -23,7 +23,7 @@ tallied: fn() -> Holder {
 }
 
 tallies: fn() -> [fn() -[]> Int] {
-    tally := Counter{count: 100}
+    ^tally: Counter{count: 100}
     [fn() -[]> Int]{
         fn() {
             tally.bump()
@@ -39,16 +39,16 @@ record: fn(tally: ^Counter) {
             tally.count
         },
     }
-    loop _ in 0..<10 -> _ := h.action()
+    loop _ in 0..<10 -> ^_: h.action()
 }
 
 run: fn() {
-    tally := Counter{count: 0}
+    ^tally: Counter{count: 0}
     bump_it: fn() { tally.bump() }
     loop _ in 0..<10 -> bump_it()
     print(tally.count)
     h: tallied()
-    last := 0
+    ^last: 0
     loop _ in 0..<10 -> last = h.action()
     print(last)
     list: tallies()
@@ -57,7 +57,7 @@ run: fn() {
         last = act()
     }
     print(last)
-    other := Counter{count: 0}
+    ^other: Counter{count: 0}
     record(other)
     print(other.count)
 }

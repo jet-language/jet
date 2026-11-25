@@ -92,8 +92,8 @@ WordUnit: struct {
 // LF or Newline.
 word_reduce: fn(raw: [U8]) -> [WordUnit] Never! {
     word_asset: text_word_break.UNICODE_WORD_BREAK
-    units := [WordUnit]{}
-    at := 0
+    ^units: [WordUnit]{}
+    ^at: 0
     loop at < raw.len() {
         cp: text_string.scalar_at(raw, at)
         class: text_asset.asset_tag(word_asset, cp, 0)
@@ -172,12 +172,12 @@ word_break_at: fn(units: [WordUnit], i: Int, pictographic: [U8]) -> Bool Never! 
 // The word boundary pass: WB15/WB16 regional indicator parity, otherwise
 // word_break_at. Returns each segment's end byte.
 word_boundaries: fn(raw: [U8]) -> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     if raw.len() == 0 -> return out
     units: word_reduce(raw)
     pictographic: text_pictographic.UNICODE_EXTENDED_PICTOGRAPHIC
     n: units.len()
-    ri_run := 0
+    ^ri_run: 0
     loop i in 0..<n {
         class: units[i].class
         ri_run = if class == WB_RI -> ri_run + 1 else -> 0
@@ -192,7 +192,7 @@ word_boundaries: fn(raw: [U8]) -> [Int] Never! {
 
 // Owned copy of one segment's validated UTF-8 byte range.
 owned_segment: fn(raw: [U8], start: Int, end: Int) -> String Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop at in start..<end -> out.push(raw[at])
     String.from_bytes(out) ?? panic("Unicode segment split a UTF-8 scalar")
 }
@@ -200,8 +200,8 @@ owned_segment: fn(raw: [U8], start: Int, end: Int) -> String Never! {
 // Every UAX #29 word segment, owned.
 word_segments: fn(text: String) -> [String] Never! {
     raw: text_string.utf8_bytes(text)
-    out := [String]{}
-    start := 0
+    ^out: [String]{}
+    ^start: 0
     loop end in word_boundaries(raw) {
         out.push(owned_segment(raw, start, end))
         start = end
@@ -215,10 +215,10 @@ words: fn(text: String) -> [String] Never! {
     raw: text_string.utf8_bytes(text)
     alphabetic: text_alphabetic.UNICODE_ALPHABETIC
     numeric: text_numeric.UNICODE_NUMERIC
-    out := [String]{}
-    start := 0
+    ^out: [String]{}
+    ^start: 0
     loop end in word_boundaries(raw) {
-        at := start
+        ^at: start
         loop at < end {
             cp: text_string.scalar_at(raw, at)
             if text_asset.asset_contains(alphabetic, cp) || text_asset.asset_contains(numeric, cp) {
@@ -244,9 +244,9 @@ SentenceUnit: struct {
 // after ATerm/STerm Close* Sp* unless SB8/SB8a/SB9/SB10.
 sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
     n: units.len()
-    breaks := [Bool]{}
+    ^breaks: [Bool]{}
     loop _ in 1..<n -> breaks.push(false)
-    i := 0
+    ^i: 0
     loop i + 1 < n {
         current: units[i].class
         if current == SB_CR && units[i + 1].class == SB_LF {
@@ -267,7 +267,7 @@ sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
                 i += 1  // SB7
                 next
             }
-            j := i + 1
+            ^j: i + 1
             loop j < n && units[j].class == SB_CLOSE -> j += 1
             close_end: j
             loop j < n && units[j].class == SB_SP -> j += 1
@@ -290,7 +290,7 @@ sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
 // SB8 lookahead: ATerm Close* Sp* × (¬(OLetter|Upper|
 // Lower|ParaSep|SATerm))* Lower.
 sentence_lower_follows: fn(units: [SentenceUnit], from: Int) -> Bool Never! {
-    k := from
+    ^k: from
     loop k < units.len() {
         class: units[k].class
         if class == SB_LOWER -> return true
@@ -305,11 +305,11 @@ sentence_lower_follows: fn(units: [SentenceUnit], from: Int) -> Bool Never! {
 // The sentence boundary pass. Extend and Format attach to the preceding unit
 // unless it is CR, LF or Sep (SB5).
 sentence_boundaries: fn(raw: [U8]) -> [Int] Never! {
-    out := [Int]{}
+    ^out: [Int]{}
     if raw.len() == 0 -> return out
     sentence_asset: text_sentence_break.UNICODE_SENTENCE_BREAK
-    units := [SentenceUnit]{}
-    at := 0
+    ^units: [SentenceUnit]{}
+    ^at: 0
     loop at < raw.len() {
         class: text_asset.asset_tag(sentence_asset, text_string.scalar_at(raw, at), 0)
         at += text_string.utf8_width_at(raw, at)
@@ -334,8 +334,8 @@ sentence_boundaries: fn(raw: [U8]) -> [Int] Never! {
 // Every UAX #29 sentence segment, owned.
 sentence_segments: fn(text: String) -> [String] Never! {
     raw: text_string.utf8_bytes(text)
-    out := [String]{}
-    start := 0
+    ^out: [String]{}
+    ^start: 0
     loop end in sentence_boundaries(raw) {
         out.push(owned_segment(raw, start, end))
         start = end
@@ -347,11 +347,11 @@ sentence_segments: fn(text: String) -> [String] Never! {
 // dropped.
 sentences: fn(text: String) -> [String] Never! {
     raw: text_string.utf8_bytes(text)
-    out := [String]{}
-    start := 0
+    ^out: [String]{}
+    ^start: 0
     loop end in sentence_boundaries(raw) {
-        segment := owned_segment(raw, start, end)
-        trimmed := text_string.trim(segment)  // #4303: slice view flows into String list
+        ^segment: owned_segment(raw, start, end)
+        ^trimmed: text_string.trim(segment)  // #4303: slice view flows into String list
         if trimmed != "" -> out.push(trimmed)
         start = end
     }

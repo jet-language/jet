@@ -6,7 +6,7 @@
     source: dyn_word(wrapping(fields + DATA_SEQUENCE_DATA))
     copied: data_sequence_new(length, CSV_FIELD_STRIDE)
     target: dyn_word(wrapping(copied + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         dyn_store(wrapping(target + at * CSV_FIELD_STRIDE), jet_rt_string_clone(dyn_word(wrapping(source + at * CSV_FIELD_STRIDE))))
         at += I64{1}
@@ -26,7 +26,7 @@
     length: dyn_word(wrapping(fields + DATA_SEQUENCE_LENGTH))
     capacity: dyn_word(wrapping(fields + DATA_SEQUENCE_CAPACITY))
     data: dyn_word(wrapping(fields + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         jet_rt_string_drop(dyn_word(wrapping(data + at * CSV_FIELD_STRIDE)))
         at += I64{1}
@@ -43,7 +43,7 @@
     if length != dyn_word(wrapping(b + DATA_SEQUENCE_LENGTH)) -> return false
     first: dyn_word(wrapping(a + DATA_SEQUENCE_DATA))
     second: dyn_word(wrapping(b + DATA_SEQUENCE_DATA))
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         if !jet_rt_string_eq(dyn_word(wrapping(first + at * CSV_FIELD_STRIDE)), dyn_word(wrapping(second + at * CSV_FIELD_STRIDE))) {
             return false

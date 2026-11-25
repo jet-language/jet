@@ -2,7 +2,7 @@
     raw: "package = \"jetapp\"\nversion = \"2.0-1\"\nsource = {{ url = \"file:///tmp/jetapp.tar.gz\", sha256 = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" }}\ndependencies = {{ \"lua >= 5.4\", \"jetdep >= 1.0, < 2.0\" }}\nsupported_platforms = {{ \"unix\", \"!windows\" }}\nbuild = {{ type = \"builtin\", modules = {{ [\"jetapp\"] = \"jetapp.lua\" }} }}\n"
     spec: provider_luarocks_parse_rockspec(raw) ?? panic("rockspec parses")
     assert_eq(spec.name, "jetapp")
-    requirements := -1
+    ^requirements: -1
     loop dependency in spec.dependencies {
         if dependency.name == "jetdep" -> requirements = dependency.requirements.len()
     }

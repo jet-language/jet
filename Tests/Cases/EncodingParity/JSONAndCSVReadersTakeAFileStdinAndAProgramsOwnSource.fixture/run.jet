@@ -23,13 +23,13 @@ MySource: struct {
 
     impl Reader {
         read_bytes: fn(^self, limit: Int) -> [U8] IOError! {
-            out := [U8]{}
+            ^out: [U8]{}
             _: self.read_into(out, limit) ?? return Err(err)
             Ok(out)
         }
 
         read_into: fn(^self, buffer: ^[U8], limit: Int) -> Int IOError! {
-            count := 0
+            ^count: 0
             loop count < limit && count < 2 && self.at < self.data.len() {
                 buffer.push(self.data[self.at])
                 self.at += 1
@@ -60,7 +60,7 @@ event_name: fn(event: encoding.DataEvent) -> String {
 // Every event json.reader reads from `source`, on one line.
 json_line: fn<R: Reader>(label: String, source: ^^R) -> String EncodingError! {
     reader: json.reader(source) ?? return Err(err)
-    names := [String]{}
+    ^names: [String]{}
     loop event in reader -> names.push(event_name(event))
     Ok("json {label}: {names.join(" ")}")
 }
@@ -69,9 +69,9 @@ json_line: fn<R: Reader>(label: String, source: ^^R) -> String EncodingError! {
 // line number and its fields, a line break inside a field shown as `/`.
 csv_line: fn<R: Reader>(label: String, source: ^^R) -> String EncodingError! {
     records: csv.reader(source) ?? return Err(err)
-    rows := [String]{}
+    ^rows: [String]{}
     loop row in records {
-        text := "{row.line} "
+        ^text: "{row.line} "
         loop (index, field) in row.fields {
             if index > 0 -> text = "{text}|"
             text = "{text}{field.replace("\n", "/")}"

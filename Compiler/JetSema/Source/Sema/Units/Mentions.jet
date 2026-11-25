@@ -47,7 +47,7 @@ sema_units_ident: fn(bytes: [U8], at: Int, end: Int) -> Bool Never! {
 }
 
 sema_units_scalar_end: fn(bytes: [U8], at: Int) -> Int Never! {
-    end := at + 1
+    ^end: at + 1
     loop end < bytes.len() && bytes[end] >= (U8{128}) && bytes[end] <= (U8{191}) -> end += 1
     end
 }
@@ -61,7 +61,7 @@ sema_units_mention_suffix: fn(rows: ^[String:SemaUnitSuffixMention], names: Sema
         return
     }
     text: String.from_bytes(bytes[start..<end]) ?? return
-    row := rows.get(text) ?? SemaUnitSuffixMention{text: text, from_span: None, digit_span: None}
+    ^row: rows.get(text) ?? SemaUnitSuffixMention{text: text, from_span: None, digit_span: None}
     if from && row.from_span == None -> row.from_span = Val(Span{start: start, end: end})
     if !from && row.digit_span == None -> row.digit_span = Val(Span{start: start, end: end})
     rows[text] = row
@@ -88,11 +88,11 @@ sema_units_member_prefixed: fn(names: SemaUnitsCatalogNames, bytes: [U8], start:
 sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> SemaUnitSourceMentions Never! {
     bytes: source.bytes()
     count: bytes.len()
-    identifiers := name_table_sized(16)
-    spans := [Span]{Span{start: 0, end: 0}}
-    unqualified := [Bool]{false}
-    suffixes := [String:SemaUnitSuffixMention]{}
-    at := 0
+    ^identifiers: name_table_sized(16)
+    ^spans: [Span]{Span{start: 0, end: 0}}
+    ^unqualified: [Bool]{false}
+    ^suffixes: [String:SemaUnitSuffixMention]{}
+    ^at: 0
     loop at < count {
         byte: bytes[at]
         if byte < (U8{128}) {
@@ -108,8 +108,8 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
             }
         }
         start: at
-        needs_suffix_scan := false
-        prev_digit := false
+        ^needs_suffix_scan: false
+        ^prev_digit: false
         loop at < count {
             run_byte: bytes[at]
             if run_byte < (U8{128}) {
@@ -133,7 +133,7 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
             }
         }
         run_len: at - start
-        may_match := false
+        ^may_match: false
         if run_len >= names.wanted_min_len && run_len <= names.wanted_max_len {
             first: Int{bytes[start]}
             may_match = if {
@@ -152,7 +152,7 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
         }
         // Every scalar start of the run, as the ident loop above visited them.
         if needs_suffix_scan {
-            offset := start
+            ^offset: start
             loop offset < at {
                 here: bytes[offset]
                 if offset > start && bytes[offset - 1] >= (U8{48}) && bytes[offset - 1] <= (U8{57}) && (here < (U8{48}) || here > (U8{57})) {
@@ -165,7 +165,7 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
             }
         }
     }
-    sorted := [SemaUnitSuffixMention]{}
+    ^sorted: [SemaUnitSuffixMention]{}
     loop (_, row) in suffixes -> sorted.push(row)
     sorted.sort_by(fn(left: SemaUnitSuffixMention, right: SemaUnitSuffixMention) { left.text <=> right.text })
     SemaUnitSourceMentions{names: identifiers.move(), spans: spans.move(), unqualified: unqualified.move(), suffixes: sorted.move()}
@@ -177,8 +177,8 @@ sema_units_identifier: fn(mentions: SemaUnitSourceMentions, name: String) -> Boo
 
 // The first suffix not less than the member.
 sema_units_suffix_start: fn(mentions: SemaUnitSourceMentions, member: String) -> Int Never! {
-    low := 0
-    high := mentions.suffixes.len()
+    ^low: 0
+    ^high: mentions.suffixes.len()
     loop low < high {
         middle: low + (high - low) /% 2
         if mentions.suffixes[middle].text < member -> low = middle + 1 else -> high = middle
@@ -206,9 +206,9 @@ sema_units_identifier_span: fn(mentions: SemaUnitSourceMentions, name: String) -
 // type name (sema_registration_unit_type_name).
 sema_units_member_span: fn(mentions: SemaUnitSourceMentions, member: String, type_name: String) -> Span? {
     if sema_units_mention(mentions, type_name) == .Val(id) -> return Val(mentions.spans[id])
-    from := Span?{None}
-    digit := Span?{None}
-    at := sema_units_suffix_start(mentions, member)
+    ^from: Span?{None}
+    ^digit: Span?{None}
+    ^at: sema_units_suffix_start(mentions, member)
     loop at < mentions.suffixes.len() && mentions.suffixes[at].text.starts_with(member) {
         row: mentions.suffixes[at]
         if row.from_span == .Val(span) {

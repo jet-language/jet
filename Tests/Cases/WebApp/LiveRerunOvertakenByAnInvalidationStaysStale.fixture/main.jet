@@ -19,7 +19,7 @@ TASKS: Shared{Tasks{count: 1, runs: 0, racing: false}}
 // One run's read of the tasks. While `racing` is set, another request
 // commits a new task right after this read.
 read_tasks: fn() -> Tasks {
-    tasks := TASKS.guard_edit()
+    ^tasks: TASKS.guard_edit()
     tasks.value.runs += 1
     read: tasks.value.copy()
     if read.racing {
@@ -50,13 +50,13 @@ shown: fn(state: Loadable<Int, CountError>) -> String {
 }
 
 runs: fn() -> Int {
-    tasks := TASKS.guard_edit()
+    ^tasks: TASKS.guard_edit()
     tasks.value.runs
 }
 
 // A write adds task 2, and the next run races with the write of task 3.
 add_task_then_race: fn() {
-    tasks := TASKS.guard_edit()
+    ^tasks: TASKS.guard_edit()
     tasks.value.count = 2
     tasks.value.racing = true
 }

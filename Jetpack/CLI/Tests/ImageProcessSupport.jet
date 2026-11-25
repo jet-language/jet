@@ -63,7 +63,7 @@ cli_test_bytes_position: fn(haystack: [U8], needle: [U8]) -> Int? {
     if needle.len() == 0 -> return Val(0)
     if needle.len() > haystack.len() -> return None
     loop start in 0..<(haystack.len() - needle.len() + 1) {
-        matched := true
+        ^matched: true
         loop offset in 0..<needle.len() {
             if haystack[start + offset] != needle[offset] {
                 matched = false
@@ -78,7 +78,7 @@ cli_test_bytes_position: fn(haystack: [U8], needle: [U8]) -> Int? {
 // Every blob of the OCI layout at `root`.
 cli_test_image_blobs: fn(root: String) -[FS]> [[U8]] {
     entries: files.list_dir(files.join(root, "blobs/sha256")) ?? panic("list image blobs")
-    blobs := [[U8]]{}
+    ^blobs: [[U8]]{}
     loop entry in entries -> blobs.push(files.read_bytes(entry.path) ?? panic("read image blob"))
     blobs
 }
@@ -114,12 +114,12 @@ RegistryTestRequest: struct {
 // Serve `expected_requests` OCI Distribution requests: HEAD misses, POST
 // opens an upload at `/test-upload`, PUT to an upload or manifest succeeds.
 cli_test_registry_server: fn(listener: net.TCPListener, expected_requests: Int) -[Net, Time, Time.Wait]> [RegistryTestRequest] {
-    requests := [RegistryTestRequest]{}
+    ^requests: [RegistryTestRequest]{}
     watch: time.start()
     loop requests.len() < expected_requests && time.elapsed(watch).ns < 20000000000 {
-        stream := net.tcp_accept(listener) ?? next
-        request := [U8]{}
-        header_end := -1
+        ^stream: net.tcp_accept(listener) ?? next
+        ^request: [U8]{}
+        ^header_end: -1
         loop header_end < 0 {
             chunk: stream.read_bytes(4096, deadline: 2s) ?? panic("read registry request")
             if chunk.len() == 0 -> break
@@ -133,7 +133,7 @@ cli_test_registry_server: fn(listener: net.TCPListener, expected_requests: Int) 
         request_parts: (lines.get(0) ?? "").split(" ").to_list()
         method: request_parts.get(0) ?? ""
         path: request_parts.get(1) ?? ""
-        content_length := 0
+        ^content_length: 0
         loop index in 1..<lines.len() {
             pair: lines[index].split_once(":") ?? next
             if pair.before.lower() == "content-length" {
@@ -148,8 +148,8 @@ cli_test_registry_server: fn(listener: net.TCPListener, expected_requests: Int) 
         }
         body_end: if request.len() < header_end + content_length -> request.len() else -> header_end + content_length
         requests.push(RegistryTestRequest{method: method, path: path, body: request.slice(header_end, body_end)})
-        status := 404
-        extra_headers := ""
+        ^status: 404
+        ^extra_headers: ""
         if method == {
             "HEAD" -> status = 404
             "POST" -> {

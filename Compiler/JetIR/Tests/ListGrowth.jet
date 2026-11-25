@@ -7,7 +7,7 @@
 use jet_ir.[IR_HEAP_BLOCK_HEADER, IR_LIST_FIRST_BLOCK, ir_list_growth]
 
 block_of: fn(bytes: Int) -> Int {
-    block := 32
+    ^block: 32
     loop block < bytes -> block *= 2
     block
 }
@@ -28,7 +28,7 @@ first_fits: fn(stride: Int, first: Int) {
     loop stride in ([Int]{1, 2, 4, 8, 16, 32, 64, 128, 256}) {
         growth: ir_list_growth(stride)
         first_fits(stride, growth.first)
-        capacity := growth.first
+        ^capacity: growth.first
         loop _ in 0..<20 {
             used: capacity * stride + IR_HEAP_BLOCK_HEADER
             block: block_of(used)

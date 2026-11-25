@@ -39,18 +39,18 @@ sema_schema_decodable: fn(ty: Type, environment: SemaScopeEnvironment?, program:
 }
 
 check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?, program: SemaProgramTables) -> [Diagnostic] Never! {
-    diagnostics := [Diagnostic]{}
-    migrations := [String:[MigrationOp]]{}
-    conversions := [{from_ty: String, to_ty: String}]{}
+    ^diagnostics: [Diagnostic]{}
+    ^migrations: [String:[MigrationOp]]{}
+    ^conversions: [{from_ty: String, to_ty: String}]{}
     // A checked program holds each accepted top-level conversion into a
     // failure domain as its lowered routine (sema_error_conversion_items); a
     // parsed one, a nested one and every value conversion
     // (`impl Label.From(String)`) still hold the item.
-    functions := [String]{}
+    ^functions: [String]{}
     loop item in items {
         if item == {
             .Migration(migration) -> {
-                operations := migrations.get(migration.type_name) ?? [MigrationOp]{}
+                ^operations: migrations.get(migration.type_name) ?? [MigrationOp]{}
                 loop operation in migration.ops -> operations.push(operation.copy())
                 migrations[migration.type_name] = operations.move()
             }
@@ -87,8 +87,8 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
             if !sema_schema_published(definition) -> next
             baseline: snapshots.get(definition.name) ?? next
             span: definition.published_schema_span ?? definition.name_span
-            current := [String:String]{}
-            old := [String:String]{}
+            ^current: [String:String]{}
+            ^old: [String:String]{}
             loop field in definition.fields -> current[field.name] = type_name(field.ty)
             loop field in baseline.fields -> old[field.name] = field.ty
             operations: migrations.get(definition.name) ?? [MigrationOp]{}
@@ -156,7 +156,7 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
             }
             loop field in baseline.fields {
                 if current.get(field.name) != None -> next
-                bridged := false
+                ^bridged: false
                 loop operation in operations {
                     if operation == {
                         .Rename(from, _, to, _) -> {
@@ -178,7 +178,7 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                 old_ty: old.get(field.name) ?? next
                 new_ty: type_name(field.ty)
                 if old_ty == new_ty -> next
-                converter := Bool?{None}
+                ^converter: Bool?{None}
                 loop operation in operations {
                     if operation == .Change(changed, _, from, _, to, _, via, _, _) {
                         if changed == field.name && type_name(from) == old_ty && type_name(to) == new_ty {
@@ -190,7 +190,7 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                 if converter == {
                     .Val(has_converter) -> {
                         if !has_converter {
-                            has_impl := functions.contains(sema_failure_declared_conversion_name(sema_error_conversion_leaf(old_ty), sema_error_conversion_leaf(new_ty)))
+                            ^has_impl: functions.contains(sema_failure_declared_conversion_name(sema_error_conversion_leaf(old_ty), sema_error_conversion_leaf(new_ty)))
                             loop conversion in conversions {
                                 if conversion.from_ty == old_ty && conversion.to_ty == new_ty {
                                     has_impl = true
@@ -208,7 +208,7 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
             }
             loop field in definition.fields {
                 if old.get(field.name) != None -> next
-                supplied := false
+                ^supplied: false
                 loop operation in operations {
                     if operation == {
                         .Rename(_, _, to, _) -> {
@@ -270,7 +270,7 @@ sema_schema_unknown: fn(name: String, field: String, verb: String, span: Span) -
 // Enters module `module_index` in the pass's scope environment; with none
 // there is no module scope to enter.
 sema_schema_enter_registered_module: fn(environment: ^SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int) Never! {
-    if ^environment == .Val(scope) {
+    if environment.in_place() == .Val(scope) {
         sema_scope_environment_enter_module(scope, program, module_index, SemaComptimeBodyValues{})
     }
 }
@@ -291,14 +291,14 @@ sema_check_schema_migration_graph: fn(registration: ^^SemaRegistrationGraph, che
         return {diagnostics: [Diagnostic]{}, registration: registration.move()}
     }
     module_count: registration.modules.len()
-    types := [TTypeDef]{}
+    ^types: [TTypeDef]{}
     loop module_row in checked.modules {
         loop definition in module_row.declarations.type_defs -> types.push(definition.copy())
     }
     fixed_length_write_params: sema_fixed_length_write_params_in_graph(registration)
-    program := sema_program_tables_init(registration.move(), types)
-    environment := Val(sema_check_pass_environment(program, fixed_length_write_params, SemaComptimeBodyValues{}))
-    diagnostics := [Diagnostic]{}
+    ^program: sema_program_tables_init(registration.move(), types)
+    ^environment: Val(sema_check_pass_environment(program, fixed_length_write_params, SemaComptimeBodyValues{}))
+    ^diagnostics: [Diagnostic]{}
     loop module_index in 0..<module_count {
         sema_schema_enter_registered_module(environment, program, module_index)
         sema_schema_check_registered_module(environment, program, module_index, snapshots, diagnostics)

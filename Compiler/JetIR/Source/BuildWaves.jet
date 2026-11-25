@@ -111,7 +111,7 @@ IRBuildClaim: struct {
 // they reach on up to `threads` threads; with `entry`, roots[0] is the
 // program entry (ir_entry_function), built after the first drain.
 ir_build_waves: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Bool, threads: CompilerThreads) -> IRBuildResult Never! {
-    kept := ir_build_waves_kept(program, roots, entry, threads, None)
+    ^kept: ir_build_waves_kept(program, roots, entry, threads, None)
     kept.result.move()
 }
 
@@ -141,11 +141,11 @@ ir_build_waves_kept: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Bool,
 // `ir.build.order` (the jobs ranked and the parts gathered), ir_merge's
 // steps and `ir.build.recursion`.
 ir_build_waves_parted: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Bool, count: Int, trace_sink: CompilerTraceSink?, release_program: Bool{false}) -> IRBuildKept Never! {
-    p := program.move()
-    slots := [Shared<IRWaveWorker>]{}
-    own := [[Int]]{}
-    own_claimed := [Int]{}
-    seats := [IRBuildSeat]{}
+    ^p: program.move()
+    ^slots: [Shared<IRWaveWorker>]{}
+    ^own: [[Int]]{}
+    ^own_claimed: [Int]{}
+    ^seats: [IRBuildSeat]{}
     loop _ in 0..<count {
         slot: Shared{IRWaveWorker{modules: [IRModule]{ir_module_for(p)}, built: [IRWaveBuilt]{}, preps: [IRMergePrep]{}}}
         slots.push(slot)
@@ -153,7 +153,7 @@ ir_build_waves_parted: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Boo
         own_claimed.push(0)
         seats.push(IRBuildSeat{job: -1})
     }
-    row_jobs := [Int]{}
+    ^row_jobs: [Int]{}
     loop _ in 0..<p.functions.len() -> row_jobs.push(-1)
     queue: Shared{IRBuildQueue{jobs: [IRWaveJob]{}, claimable: [Int]{}, claimed: 0, own: own.move(), own_claimed: own_claimed.move(), waiting: 0, busy: 0, row_jobs: row_jobs.move(), keyed_jobs_keys: name_column_table(), keyed_jobs: name_column()}}
     bell: Shared{IRBuildBell{rings: 0, stopped: 0, seats: seats.move()}}
@@ -161,65 +161,69 @@ ir_build_waves_parted: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Boo
     rooted: ir_build_queue_count(queue)
     inputs: Shared{IRWaveInputs{programs: [IRProgram]{p.move()}}}
     if trace_sink == .Val(sink) -> sink.begin("ir.build.parts", "", -1, count)
-    ended := ir_build_parts(inputs, slots, queue, bell, 0)
-    if ended.stop != "" -> compiler_threads_failed(TaskFailure.Panicked(ir_build_stop_text(ir_build_queue_jobs(queue), ended)))
+    ^ended: ir_build_parts(inputs, slots, queue, bell, 0)
+    if ended.stop != "" {
+        compiler_threads_failed(TaskFailure.Panicked(ir_build_stop_text(ir_build_queue_jobs(queue), ended)))
+    }
     if trace_sink == .Val(sink) -> sink.end("ir.build.parts", ended.built)
-    entry_root := IRMergeRoot{part: -1, local: -1}
-    entry_failures := [IRBuildFailure]{}
+    ^entry_root: IRMergeRoot{part: -1, local: -1}
+    ^entry_failures: [IRBuildFailure]{}
     if entry {
         if trace_sink == .Val(sink) -> sink.begin("ir.build.entry", "", -1, -1)
-        part := 0
-        local := -1
+        ^part: 0
+        ^local: -1
         loop part < slots.len() {
             local = ir_build_local(slots[part], 0)
             if local >= 0 -> break
             part += 1
         }
         if local < 0 -> panic("the IR build lost its entry job")
-        built := ir_waves_entry_in(inputs, slots[part], part, local)
+        ^built: ir_waves_entry_in(inputs, slots[part], part, local)
         entry_root = IRMergeRoot{part: part, local: built.local}
         entry_failures = compiler_take_rows<IRBuildFailure>(built.failures)
-        reached := compiler_take_rows<IRWaveJob>(built.found)
+        ^reached: compiler_take_rows<IRWaveJob>(built.found)
         ir_build_queue_add(queue, reached)
         ended = ir_build_parts(inputs, slots, queue, bell, 0)
-        if ended.stop != "" -> compiler_threads_failed(TaskFailure.Panicked(ir_build_stop_text(ir_build_queue_jobs(queue), ended)))
+        if ended.stop != "" {
+            compiler_threads_failed(TaskFailure.Panicked(ir_build_stop_text(ir_build_queue_jobs(queue), ended)))
+        }
         if trace_sink == .Val(sink) -> sink.end("ir.build.entry", ended.built)
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.build.glues", "", -1, -1)
     glues: ir_waves_glues(inputs, slots, 0)
     if trace_sink == .Val(sink) -> sink.end("ir.build.glues", glues)
-    jobs := ir_build_queue_jobs(queue)
-    built_parts := [[IRWaveBuilt]]{}
-    parts := [IRModule]{}
-    preps := [IRMergePrep]{}
+    ^jobs: ir_build_queue_jobs(queue)
+    ^built_parts: [[IRWaveBuilt]]{}
+    ^parts: [IRModule]{}
+    ^preps: [IRMergePrep]{}
     loop slot in slots {
         built_parts.push(ir_waves_take_built(slot))
         parts.extend(ir_waves_take_modules(slot))
         preps.extend(ir_waves_take_preps(slot))
     }
     if release_program {
-        old_program := ir_waves_take_program(inputs)
-        base_interner := old_program.interner.move()
+        ^old_program: ir_waves_take_program(inputs)
+        ^base_interner: old_program.interner.move()
         old_program.interner = interner_empty()
-        kept_program := ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
-        empty_checks := kept_program.checks.move()
+        ^kept_program: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
+        ^empty_checks: kept_program.checks.move()
         kept_program.checks = old_program.checks.move()
         old_program.checks = empty_checks.move()
         // Split old_program.functions across 4 parallel drop tasks so the
         // checked ASTs (~1 GB) finish freeing during ir.build.order /
         // ir.merge.group / ir.merge.walk, before ir.merge.functions peaks.
-        fns := compiler_take_rows<FnBody>(old_program.functions)
+        ^fns: compiler_take_rows<FnBody>(old_program.functions)
         n: fns.len()
-        q1 := [FnBody]{}
-        q2 := [FnBody]{}
-        q3 := [FnBody]{}
+        ^q1: [FnBody]{}
+        ^q2: [FnBody]{}
+        ^q3: [FnBody]{}
         if n >= 256 {
             cut: n.div_euclid(4)
             loop fns.len() > cut * 3 -> q3.push(fns.pop() ?? break)
             loop fns.len() > cut * 2 -> q2.push(fns.pop() ?? break)
             loop fns.len() > cut -> q1.push(fns.pop() ?? break)
         }
-        result_box := [IRBuildResult]{}
+        ^result_box: [IRBuildResult]{}
         task.group ir_build_drop_program {
             d0: task ^^old_program { old_program.types.len() }
             d1: task ^^fns { fns.len() }
@@ -233,23 +237,23 @@ ir_build_waves_parted: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Boo
             _: compiler_threads_joined(d3)
             _: compiler_threads_joined(d4)
         }
-        finished := compiler_threads_taken(result_box)
+        ^finished: compiler_threads_taken(result_box)
         return IRBuildKept{result: finished.move(), program: kept_program.move()}
     }
-    program_out := ir_waves_take_program(inputs)
-    base_interner := program_out.interner.move()
+    ^program_out: ir_waves_take_program(inputs)
+    ^base_interner: program_out.interner.move()
     program_out.interner = interner_empty()
-    finished := ir_build_waves_finish(jobs.move(), built_parts.move(), parts.move(), preps.move(), base_interner.move(), rooted, entry, entry_root.move(), entry_failures.move(), trace_sink)
+    ^finished: ir_build_waves_finish(jobs.move(), built_parts.move(), parts.move(), preps.move(), base_interner.move(), rooted, entry, entry_root.move(), entry_failures.move(), trace_sink)
     IRBuildKept{result: finished.move(), program: program_out.move()}
 }
 
 ir_build_waves_finish: fn(owned_jobs: ^^[IRWaveJob], owned_built: ^^[[IRWaveBuilt]], owned_parts: ^^[IRModule], owned_preps: ^^[IRMergePrep], base_interner: ^^Interner, rooted: Int, entry: Bool, entry_root: ^^IRMergeRoot, entry_failures: ^^[IRBuildFailure], trace_sink: CompilerTraceSink?) -> IRBuildResult Never! {
     if trace_sink == .Val(sink) -> sink.begin("ir.build.order", "", -1, -1)
-    jobs := owned_jobs.move()
-    built_parts := owned_built.move()
-    parts := owned_parts.move()
-    preps := owned_preps.move()
-    failed := [[IRBuildFailure]]{}
+    ^jobs: owned_jobs.move()
+    ^built_parts: owned_built.move()
+    ^parts: owned_parts.move()
+    ^preps: owned_preps.move()
+    ^failed: [[IRBuildFailure]]{}
     loop _ in 0..<jobs.len() -> failed.push([IRBuildFailure]{})
     loop part in 0..<built_parts.len() {
         loop at in 0..<built_parts[part].len() {
@@ -263,54 +267,54 @@ ir_build_waves_finish: fn(owned_jobs: ^^[IRWaveJob], owned_built: ^^[[IRWaveBuil
     // not queue order: the queue order depends on which thread reached a
     // function first. (Each key is queued once. `sort_by`, as `sort()` leaves
     // a list of named tuples in place.)
-    later := [{key: String, index: Int}]{}
+    ^later: [{key: String, index: Int}]{}
     loop index in rooted..<jobs.len() -> later.push({key: jobs[index].key.copy(), index: index})
     later.sort_by(fn(left: {key: String, index: Int}, right: {key: String, index: Int}) { left.key <=> right.key })
-    ranked := [Int]{}
+    ^ranked: [Int]{}
     loop index in 0..<rooted -> ranked.push(index)
     loop row in later -> ranked.push(row.index)
-    roots_merged := [IRMergeRoot]{}
-    failures := [IRBuildFailure]{}
+    ^roots_merged: [IRMergeRoot]{}
+    ^failures: [IRBuildFailure]{}
     loop index in ranked {
         roots_merged.push(IRMergeRoot{part: jobs[index].part, local: jobs[index].local})
         failures.extend(compiler_take_rows<IRBuildFailure>(failed[index]))
     }
     failures.extend(entry_failures.move())
-    entry_index := -1
+    ^entry_index: -1
     if entry {
         entry_index = roots_merged.len()
         roots_merged.push(entry_root.move())
     }
     if trace_sink == .Val(sink) -> sink.end("ir.build.order", jobs.len())
-    merged := ir_merge_with(parts.move(), preps.move(), roots_merged, entry_index, base_interner.move(), true, trace_sink)
+    ^merged: ir_merge_with(parts.move(), preps.move(), roots_merged, entry_index, base_interner.move(), true, trace_sink)
     IRBuildResult{program: merged.move(), failures: failures}
 }
 
 ir_waves_take_program: fn(inputs: Shared<IRWaveInputs>) -> IRProgram Never! {
-    held := inputs.guard_edit()
-    program := compiler_threads_taken(held.value.programs)
+    ^held: inputs.guard_edit()
+    ^program: compiler_threads_taken(held.value.programs)
     program.move()
 }
 
 ir_waves_take_modules: fn(slot: Shared<IRWaveWorker>) -> [IRModule] {
-    held := slot.guard_edit()
+    ^held: slot.guard_edit()
     compiler_take_rows<IRModule>(held.value.modules)
 }
 
 ir_waves_take_preps: fn(slot: Shared<IRWaveWorker>) -> [IRMergePrep] {
-    held := slot.guard_edit()
+    ^held: slot.guard_edit()
     compiler_take_rows<IRMergePrep>(held.value.preps)
 }
 
 ir_waves_take_built: fn(slot: Shared<IRWaveWorker>) -> [IRWaveBuilt] {
-    held := slot.guard_edit()
+    ^held: slot.guard_edit()
     compiler_take_rows<IRWaveBuilt>(held.value.built)
 }
 
 // The id in `slot`'s part of the function job `index` built, -1 when the
 // part did not build it.
 ir_build_local: fn(slot: Shared<IRWaveWorker>, index: Int) -> Int {
-    held := slot.guard_edit()
+    ^held: slot.guard_edit()
     loop row in held.value.built {
         if row.index == index -> return row.local
     }
@@ -318,20 +322,20 @@ ir_build_local: fn(slot: Shared<IRWaveWorker>, index: Int) -> Int {
 }
 
 ir_build_queue_jobs: fn(queue: Shared<IRBuildQueue>) -> [IRWaveJob] {
-    held := queue.guard_edit()
+    ^held: queue.guard_edit()
     compiler_take_rows<IRWaveJob>(held.value.jobs)
 }
 
 ir_build_queue_count: fn(queue: Shared<IRBuildQueue>) -> Int {
-    held := queue.guard_read()
+    ^held: queue.guard_read()
     held.value.jobs.len()
 }
 
 // Queues the jobs `found` (in order) not queued yet: a lambda job for the
 // part that queued it, any other for any part.
 ir_build_queue_add: fn(queue: Shared<IRBuildQueue>, found: ^^[IRWaveJob]) {
-    rows := found.move()
-    held := queue.guard_edit()
+    ^rows: found.move()
+    ^held: queue.guard_edit()
     loop job in compiler_take_rows<IRWaveJob>(rows) {
         if ir_build_known(held.value, job) -> next
         index: held.value.jobs.len()
@@ -365,9 +369,9 @@ ir_build_note: fn(q: ^IRBuildQueue, index: Int) Never! {
 // batch), then claims up to 8 jobs (own lambda jobs first) under a single lock
 // acquisition so workers avoid lock contention on every function.
 ir_build_step: fn(queue: Shared<IRBuildQueue>, part: Int, busy: Bool, found: ^^[IRWaveJob]) -> IRBuildClaim {
-    rows := found.move()
-    held := queue.guard_edit()
-    added := false
+    ^rows: found.move()
+    ^held: queue.guard_edit()
+    ^added: false
     loop job in compiler_take_rows<IRWaveJob>(rows) {
         if ir_build_known(held.value, job) -> next
         index: held.value.jobs.len()
@@ -388,10 +392,10 @@ ir_build_step: fn(queue: Shared<IRBuildQueue>, part: Int, busy: Bool, found: ^^[
         shared_avail >= parts_count * 4 -> 4
         else -> 1
     }
-    indices := [Int]{}
-    jobs := [IRWaveJob]{}
+    ^indices: [Int]{}
+    ^jobs: [IRWaveJob]{}
     loop indices.len() < want {
-        index := -1
+        ^index: -1
         taken: held.value.own_claimed[part]
         if taken < held.value.own[part].len() {
             index = held.value.own[part][taken]
@@ -422,7 +426,7 @@ ir_build_step: fn(queue: Shared<IRBuildQueue>, part: Int, busy: Bool, found: ^^[
 // panic, which no watcher names.
 ir_build_parts: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], queue: Shared<IRBuildQueue>, bell: Shared<IRBuildBell>, at: Int) -> IRBuildPartsEnd Never! {
     if slots.len() == 1 && at == 0 -> return ir_build_part(inputs, slots[0], queue, bell, 0)
-    ended := IRBuildPartsEnd{built: 0, stop: "", job: -1}
+    ^ended: IRBuildPartsEnd{built: 0, stop: "", job: -1}
     if at >= slots.len() -> return ended
     task.group ir_build_threads {
         head: task ir_build_part(inputs, slots[at], queue, bell, at)
@@ -434,7 +438,7 @@ ir_build_parts: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], 
             rings.value.stopped.store(1)
             _: rings.value.rings.add(1)
         }
-        later := compiler_threads_joined(rest)
+        ^later: compiler_threads_joined(rest)
         ended.built += later.built
         if ended.stop == "" {
             ended.stop = later.stop.move()
@@ -456,17 +460,17 @@ ir_build_stop_text: fn(jobs: [IRWaveJob], ended: IRBuildPartsEnd) -> String {
 // or a part failed.
 ir_build_part: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>, queue: Shared<IRBuildQueue>, bell: Shared<IRBuildBell>, part: Int) -> IRBuildPartsEnd {
     reads: inputs.guard_read()
-    held := slot.guard_edit()
+    ^held: slot.guard_edit()
     rings: bell.guard_read()
-    busy := false
-    built := 0
-    pending_found := [IRWaveJob]{}
+    ^busy: false
+    ^built: 0
+    ^pending_found: [IRWaveJob]{}
     loop {
         // The rings are read before the stop: a stop set after this test
         // rings after the read, so the spin below sees it.
         seen: rings.value.rings.load()
         if rings.value.stopped.load() != 0 -> break
-        claim := ir_build_step(queue, part, busy, pending_found.move())
+        ^claim: ir_build_step(queue, part, busy, pending_found.move())
         pending_found = [IRWaveJob]{}
         busy = claim.busy
         // Ring whenever new jobs were added or this part just idled.
@@ -478,19 +482,19 @@ ir_build_part: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>, queu
             }
             next
         }
-        batch_indices := claim.indices.move()
-        batch_jobs := claim.jobs.move()
+        ^batch_indices: claim.indices.move()
+        ^batch_jobs: claim.jobs.move()
         batch_indices.reverse()
         batch_jobs.reverse()
         loop batch_indices.len() > 0 {
             if rings.value.stopped.load() != 0 -> break
             idx: batch_indices.pop() ?? break
-            job := batch_jobs.pop() ?? break
+            ^job: batch_jobs.pop() ?? break
             rings.value.seats[part].job.store(idx)
-            made := ir_wave_job(held.value.modules[0], reads.value.programs[0], job, part)
+            ^made: ir_wave_job(held.value.modules[0], reads.value.programs[0], job, part)
             rings.value.seats[part].job.store(-1)
             made.index = idx
-            found := compiler_take_rows<IRWaveJob>(made.found)
+            ^found: compiler_take_rows<IRWaveJob>(made.found)
             held.value.built.push(made)
             built += 1
             if found.len() > 0 -> pending_found.extend(found)
@@ -501,13 +505,13 @@ ir_build_part: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>, queu
 
 ir_waves_entry_in: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>, part: Int, entry: Int) -> IRWaveBuilt {
     reads: inputs.guard_read()
-    held := slot.guard_edit()
+    ^held: slot.guard_edit()
     ir_wave_entry(held.value.modules[0], reads.value.programs[0], part, entry)
 }
 
 ir_wave_entry: fn(m: ^IRModule, p: IRProgram, part: Int, entry: Int) -> IRWaveBuilt Never! {
     before: m.queue.len()
-    failures := [IRBuildFailure]{}
+    ^failures: [IRBuildFailure]{}
     local: ir_entry_function(m, p, entry, failures)
     IRWaveBuilt{index: -1, local: local, found: ir_wave_found(m, part, before), failures: failures}
 }
@@ -515,7 +519,7 @@ ir_wave_entry: fn(m: ^IRModule, p: IRProgram, part: Int, entry: Int) -> IRWaveBu
 // Builds `job` in part `part`'s module: a checked function's id there first
 // (its stub, when an earlier job only referenced it), then its body.
 ir_wave_job: fn(m: ^IRModule, p: IRProgram, job: IRWaveJob, part: Int) -> IRWaveBuilt Never! {
-    local := job.local
+    ^local: job.local
     if job.lambda < 0 {
         local = ir_function_id(m, p, p.functions[job.row].key, job.args) ?? panic("an IR build job names no checked function")
         if m.functions[local].key != job.key {
@@ -523,14 +527,14 @@ ir_wave_job: fn(m: ^IRModule, p: IRProgram, job: IRWaveJob, part: Int) -> IRWave
         }
     }
     before: m.queue.len()
-    failures := [IRBuildFailure]{}
+    ^failures: [IRBuildFailure]{}
     ir_build_queued(m, p, failures, IRQueued{row: job.row, id: local, args: job.args.copy(), lambda: job.lambda})
     IRWaveBuilt{index: -1, local: local, found: ir_wave_found(m, part, before), failures: failures}
 }
 
 // The functions queued in part `part` from queue row `before` on, as jobs.
 ir_wave_found: fn(m: IRModule, part: Int, before: Int) -> [IRWaveJob] Never! {
-    found := [IRWaveJob]{}
+    ^found: [IRWaveJob]{}
     loop at in before..<m.queue.len() {
         id: m.queue[at].id
         lambda: m.queue[at].lambda
@@ -545,7 +549,7 @@ ir_wave_found: fn(m: IRModule, part: Int, before: Int) -> [IRWaveJob] Never! {
 ir_waves_glues: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], at: Int) -> Int Never! {
     if at >= slots.len() -> return 0
     if at == slots.len() - 1 -> return ir_wave_glues(inputs, slots[at])
-    done := 0
+    ^done: 0
     task.group ir_build_threads {
         head: task ir_wave_glues(inputs, slots[at])
         done = ir_waves_glues(inputs, slots, at + 1)
@@ -556,7 +560,7 @@ ir_waves_glues: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], 
 
 ir_wave_glues: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>) -> Int {
     reads: inputs.guard_read()
-    held := slot.guard_edit()
+    ^held: slot.guard_edit()
     ir_debug_variants(held.value.modules[0], reads.value.programs[0])
     ir_drop_glues(held.value.modules[0], reads.value.programs[0])
     held.value.preps.push(ir_merge_prepare(held.value.modules[0]))
@@ -568,15 +572,15 @@ ir_wave_glues: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>) -> I
 // the part that claims it fails, and on more than one part the others are
 // left with nothing to claim while it is counted as building.
 ir_build_stop_test_run: fn(count: Int) -> String Never! {
-    p := ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
-    roots := [IRWaveJob]{IRWaveJob{key: "test:stop.jet.gone", row: 0, args: [Type]{Type.Int}, lambda: -1, part: -1, local: -1}}
-    kept := ir_build_waves_parted(p.move(), roots.move(), false, count, None)
+    ^p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
+    ^roots: [IRWaveJob]{IRWaveJob{key: "test:stop.jet.gone", row: 0, args: [Type]{Type.Int}, lambda: -1, part: -1, local: -1}}
+    ^kept: ir_build_waves_parted(p.move(), roots.move(), false, count, None)
     "the build ended with {kept.result.failures.len()} failures"
 }
 
 #Test("a build part that fails ends the build, naming the function it was building") {
     loop count in 2..<4 {
-        stop := ""
+        ^stop: ""
         task.group ir_build_stop_test {
             run: task ir_build_stop_test_run(count)
             stop = run.join() ?? compiler_threads_failure_text(err)
@@ -588,7 +592,7 @@ ir_build_stop_test_run: fn(count: Int) -> String Never! {
 // One part runs on the calling thread, so the build's stop is the job's own:
 // reading row 0 of a program that holds no function.
 #Test("a one-part build runs on the calling thread, so its failure is the job's own") {
-    stop := ""
+    ^stop: ""
     task.group ir_build_stop_test {
         run: task ir_build_stop_test_run(1)
         stop = run.join() ?? compiler_threads_failure_text(err)

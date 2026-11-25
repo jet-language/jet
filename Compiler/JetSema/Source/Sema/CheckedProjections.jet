@@ -35,8 +35,8 @@ sema_checked_layout_items: fn(registration: SemaRegistrationGraph, types: ^[Inte
 // read-only here, so a TypeId of a type it has no row for keeps no handle
 // (sema_comptime_reflection_dropped_types).
 sema_checked_layout_projections: fn(registration: SemaRegistrationGraph, module_index: Int, items: [Item], engine: TargetLayoutEngine, module_identity: String) -> [SemaLayoutProjectionRow] {
-    rows := [SemaLayoutProjectionRow]{}
-    types := [InternerDelta]{}
+    ^rows: [SemaLayoutProjectionRow]{}
+    ^types: [InternerDelta]{}
     sema_checked_layout_items(registration, types, module_index, items, engine, module_identity, rows)
     dropped: sema_comptime_reflection_dropped_types(types)
     if dropped.types.len() > 0 {

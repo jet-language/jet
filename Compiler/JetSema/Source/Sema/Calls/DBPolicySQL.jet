@@ -136,7 +136,7 @@ sema_policy_sym_and: fn(left: Int, right: Int) -> SemaPolicySym Never! {
 }
 
 sema_policy_env_get: fn(env: [SemaPolicyBinding], name: String) -> SemaPolicySym Never! {
-    at := env.len() - 1
+    ^at: env.len() - 1
     loop at >= 0 {
         if env[at].name == name -> return env[at].value
         at -= 1
@@ -145,7 +145,7 @@ sema_policy_env_get: fn(env: [SemaPolicyBinding], name: String) -> SemaPolicySym
 }
 
 sema_policy_env_set: fn(env: ^[SemaPolicyBinding], name: String, value: SemaPolicySym) Never! {
-    at := env.len() - 1
+    ^at: env.len() - 1
     loop at >= 0 {
         if env[at].name == name {
             env[at].value = value
@@ -191,7 +191,7 @@ sema_db_policy_find_func: fn(name: String, module_hint: String, check: SemaBodyC
 sema_policy_str_literal: fn(expr: Expr) -> String? Never! {
     if expr == .Paren(inner, _, _) -> return sema_policy_str_literal(inner)
     if expr == .Str(parts, _, _) {
-        text := ""
+        ^text: ""
         loop part in parts {
             if part == .Lit(piece) -> text = "{text}{piece}" else -> return None
         }
@@ -256,10 +256,10 @@ sema_policy_eval_key_lookup: fn(table_name: String, key_expr: Expr, env: ^[SemaP
     if key_expr == .Paren(inner, _, _) {
         return sema_policy_eval_key_lookup(table_name, inner, env, state, depth, check)
     }
-    columns := [SemaPolicyJoinCol]{}
-    record_name := ""
-    record_fields := [jet_foundation.ExprField]{}
-    is_record := false
+    ^columns: [SemaPolicyJoinCol]{}
+    ^record_name: ""
+    ^record_fields: [jet_foundation.ExprField]{}
+    ^is_record: false
     if key_expr == .StructLit(type_name, _, _, _, fields, _, _, _) {
         record_name = "{type_name}"
         record_fields = fields
@@ -528,7 +528,7 @@ sema_policy_eval_call_func: fn(func: Func, args: [jet_foundation.CallArg], calle
         sema_policy_fail(state, "calls `{func.name}()` with mismatched arity")
         return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
     }
-    inner_env := [SemaPolicyBinding]{}
+    ^inner_env: [SemaPolicyBinding]{}
     loop i in 0..<func.params.len() {
         val: sema_policy_eval_expr(args[i].expr, caller_env, state, depth, check)
         inner_env.push(SemaPolicyBinding{name: "{func.params[i].name}", value: val})
@@ -556,7 +556,7 @@ sema_policy_pattern_account_binding: fn(pattern: Pattern) -> String? Never! {
 }
 
 sema_policy_clone_env: fn(env: [SemaPolicyBinding]) -> [SemaPolicyBinding] Never! {
-    out := [SemaPolicyBinding]{}
+    ^out: [SemaPolicyBinding]{}
     loop b in env {
         v: b.value
         out.push(
@@ -581,7 +581,7 @@ sema_policy_clone_env: fn(env: [SemaPolicyBinding]) -> [SemaPolicyBinding] Never
 }
 
 sema_policy_if_branch_stmts: fn(body: ^^[Stmt], tail: Expr) -> [Stmt] Never! {
-    out := body.move()
+    ^out: body.move()
     out.push(Stmt.Expr{expr: tail})
     out
 }
@@ -591,9 +591,9 @@ sema_policy_if_branch_stmts: fn(body: ^^[Stmt], tail: Expr) -> [Stmt] Never! {
 // key lookup repeated in each desugared arm is recorded only once.
 sema_policy_eval_if_match: fn(root: Expr, subject: Expr, env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, check: SemaBodyCheck) -> SemaPolicySym Never! {
     subj: sema_policy_eval_expr(subject, env, state, depth, check)
-    arms := [SwitchArm]{}
-    else_body := [Stmt]?{None}
-    cursor := root
+    ^arms: [SwitchArm]{}
+    ^else_body: [Stmt]?{None}
+    ^cursor: root
     loop {
         if cursor == .If(cond, then_body, then_val, eb, ev, span, _) {
             if cond == .PatternTest(_, _, _, _) {
@@ -620,9 +620,9 @@ sema_policy_eval_if_match: fn(root: Expr, subject: Expr, env: ^[SemaPolicyBindin
 }
 
 sema_policy_eval_who_switch: fn(arms: [SwitchArm], else_body: [Stmt]?, env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, check: SemaBodyCheck) -> SemaPolicyBlockResult Never! {
-    account_arm := -1
-    account_name := ""
-    anon_arm := -1
+    ^account_arm: -1
+    ^account_name: ""
+    ^anon_arm: -1
     loop i in 0..<arms.len() {
         if arms[i].cond == .PatternTest(_, pat, _, _) {
             if sema_policy_pattern_account_binding(pat) == .Val(bind_name) {
@@ -636,15 +636,15 @@ sema_policy_eval_who_switch: fn(arms: [SwitchArm], else_body: [Stmt]?, env: ^[Se
         sema_policy_fail(state, "branches on `who` without an `.Account` arm")
         return SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
     }
-    anon_ok := false
+    ^anon_ok: false
     if anon_arm >= 0 {
-        anon_env := sema_policy_clone_env(env)
+        ^anon_env: sema_policy_clone_env(env)
         anon_res: sema_policy_eval_stmts(arms[anon_arm].body, anon_env, state, depth, check)
         if anon_res.value.kind == POLICY_SYM_NONE || (anon_res.value.kind == POLICY_SYM_OK && anon_res.value.inner_kind == POLICY_SYM_BOOL && !anon_res.value.inner_flag) {
             anon_ok = true
         }
     } else if else_body == .Val(body) {
-        anon_env := sema_policy_clone_env(env)
+        ^anon_env: sema_policy_clone_env(env)
         anon_res: sema_policy_eval_stmts(body, anon_env, state, depth, check)
         if anon_res.value.kind == POLICY_SYM_NONE || (anon_res.value.kind == POLICY_SYM_OK && anon_res.value.inner_kind == POLICY_SYM_BOOL && !anon_res.value.inner_flag) {
             anon_ok = true
@@ -669,12 +669,12 @@ sema_policy_pat_first_bind: fn(bindings: [jet_foundation.PatSlot]) -> String Nev
 }
 
 sema_policy_eval_lookup_switch: fn(lookup_index: Int, arms: [SwitchArm], env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, check: SemaBodyCheck) -> SemaPolicyBlockResult Never! {
-    ok_arm := -1
-    ok_bind := ""
-    val_arm := -1
-    val_bind := ""
-    none_arm := -1
-    err_arm := -1
+    ^ok_arm: -1
+    ^ok_bind: ""
+    ^val_arm: -1
+    ^val_bind: ""
+    ^none_arm: -1
+    ^err_arm: -1
     loop i in 0..<arms.len() {
         if arms[i].cond == .PatternTest(_, pat, _, _) {
             if pat == .Ok(bind, _, _, _) {
@@ -705,12 +705,12 @@ sema_policy_eval_lookup_switch: fn(lookup_index: Int, arms: [SwitchArm], env: ^[
     }
     // Pattern 2: `.Val(m)` + `.None` (+ `.Err(e)`)
     if val_arm >= 0 && none_arm >= 0 {
-        val_env := sema_policy_clone_env(env)
+        ^val_env: sema_policy_clone_env(env)
         if val_bind != "" && val_bind != "_" {
             sema_policy_env_set(val_env, val_bind, sema_policy_sym_lookup(POLICY_SYM_FOUND_ROW, lookup_index))
         }
         val_res: sema_policy_eval_stmts(arms[val_arm].body, val_env, state, depth, check)
-        none_env := sema_policy_clone_env(env)
+        ^none_env: sema_policy_clone_env(env)
         none_res: sema_policy_eval_stmts(arms[none_arm].body, none_env, state, depth, check)
         // Direct value/return switch: `.Val` -> Ok(true), `.None` -> Ok(false).
         val_is_true: val_res.value.kind == POLICY_SYM_OK && val_res.value.inner_kind == POLICY_SYM_BOOL && val_res.value.inner_flag
@@ -740,7 +740,7 @@ sema_policy_eval_lookup_switch: fn(lookup_index: Int, arms: [SwitchArm], env: ^[
 }
 
 sema_policy_eval_stmts: fn(stmts: [Stmt], env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, check: SemaBodyCheck) -> SemaPolicyBlockResult Never! {
-    last := sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    ^last: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
     loop i in 0..<stmts.len() {
         stmt: stmts[i]
         if stmt == .Val(binding) {
@@ -782,7 +782,7 @@ sema_policy_eval_stmts: fn(stmts: [Stmt], env: ^[SemaPolicyBinding], state: ^Sem
                 next
             }
             if subj.kind == POLICY_SYM_BOOL && subj.flag {
-                matched := false
+                ^matched: false
                 loop arm in arms {
                     cond_val: sema_policy_eval_expr(arm.cond, env, state, depth, check)
                     if cond_val.kind == POLICY_SYM_BOOL {
@@ -833,7 +833,7 @@ sema_policy_collect_used_lookups: fn(sym: SemaPolicySym, out: ^[Int]) -> Bool Ne
 }
 
 sema_policy_encode_join: fn(requires_account: Bool, lookups: [SemaPolicyLookup], used: [Int]) -> String Never! {
-    lines := [String]{"join\t{if requires_account -> "1" else -> "0"}"}
+    ^lines: [String]{"join\t{if requires_account -> "1" else -> "0"}"}
     loop idx in used {
         lookup: lookups[idx]
         lines.push("table\t{lookup.table}")
@@ -848,9 +848,9 @@ sema_policy_encode_join: fn(requires_account: Bool, lookups: [SemaPolicyLookup],
 // its display name plus the compiled join spec (`join\t...`) or a per-row
 // explanation (`per_row\t...`).
 sema_db_policy_plan: fn(policy_arg: Expr, row_type: Type, check: SemaBodyCheck) -> SemaDBPolicyPlan Never! {
-    policy_name := "<lambda>"
-    params := [String]{}
-    body := [Stmt]{}
+    ^policy_name: "<lambda>"
+    ^params: [String]{}
+    ^body: [Stmt]{}
     if policy_arg == .Ident(name, _, _) {
         policy_name = "{name}"
         func: sema_db_policy_find_func(name, "", check) ?? return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\tpolicy function `{name}` is not visible as source"}
@@ -876,13 +876,13 @@ sema_db_policy_plan: fn(policy_arg: Expr, row_type: Type, check: SemaBodyCheck) 
     if row_fields.len() == 0 {
         return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\trow type has no SQL field columns"}
     }
-    env := [SemaPolicyBinding]{
+    ^env: [SemaPolicyBinding]{
         SemaPolicyBinding{name: "{params[0]}", value: sema_policy_sym_plain(POLICY_SYM_ROW)},
         SemaPolicyBinding{name: "{params[1]}", value: sema_policy_sym_plain(POLICY_SYM_OP_READ)},
         SemaPolicyBinding{name: "{params[2]}", value: sema_policy_sym_plain(POLICY_SYM_WHO)},
         SemaPolicyBinding{name: "{params[3]}", value: sema_policy_sym_plain(POLICY_SYM_STORE)},
     }
-    state := SemaPolicyEvalState{row_fields: row_fields, lookups: [SemaPolicyLookup]{}, requires_account: false, failed_reason: ""}
+    ^state: SemaPolicyEvalState{row_fields: row_fields, lookups: [SemaPolicyLookup]{}, requires_account: false, failed_reason: ""}
     result: sema_policy_eval_stmts(body, env, state, 0, check)
     if state.failed_reason != "" {
         return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\t{state.failed_reason}"}
@@ -891,7 +891,7 @@ sema_db_policy_plan: fn(policy_arg: Expr, row_type: Type, check: SemaBodyCheck) 
         return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\tpolicy read path does not reduce to key lookups"}
     }
     inner: sema_policy_sym_unwrap(result.value)
-    used := [Int]{}
+    ^used: [Int]{}
     if !sema_policy_collect_used_lookups(inner, used) {
         return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\tpolicy read result depends on data beyond key presence"}
     }

@@ -41,19 +41,19 @@ NixCorpusReport: struct {
 // Check up to `limit` `.drv` files of `store_dir` in name order. A missing
 // store directory is an empty report.
 nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusReport NixError! {
-    report := NixCorpusReport{checked: 0, skipped: 0, divergences: [NixError]{}}
+    ^report: NixCorpusReport{checked: 0, skipped: 0, divergences: [NixError]{}}
     if !files.is_dir(store_dir) -> return Ok(report)
     entries: files.list_dir(store_dir) ?? return Err(NixError.DrvIO("{err}"))
-    paths := [String]{}
+    ^paths: [String]{}
     loop entry in entries {
         if files.suffix(entry.name) == ".drv" -> paths.push(entry.path)
     }
     paths.sort()
-    store := nix_derivation_store([String:NixDerivation]{})
+    ^store: nix_derivation_store([String:NixDerivation]{})
     loop index in 0..<paths.len() {
         if index >= limit -> break
         path: paths[index]
-        aterm := ""
+        ^aterm: ""
         if files.read(path) == {
             .Ok(text) -> { aterm = text }
             .Err(_) -> {
@@ -61,7 +61,7 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
                 next
             }
         }
-        drv := NixDerivation?{None}
+        ^drv: NixDerivation?{None}
         if NixDerivation.parse(aterm) == {
             .Ok(parsed) -> { drv = Val(parsed) }
             .Err(error) -> {

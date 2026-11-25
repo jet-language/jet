@@ -110,7 +110,7 @@ primary_rank: fn(scalar: String) -> Int Never! {
     folded: scalar.lower()
     at: ROOT_PRIMARY_ORDER.find(folded)
     if at >= 0 && folded.count_bytes() == 1 -> return at
-    rank := 0
+    ^rank: 0
     loop byte in folded.bytes() -> rank = rank * 256 + (Int{byte})
     ROOT_PRIMARY_ORDER.count_bytes() + rank
 }
@@ -119,7 +119,7 @@ primary_rank: fn(scalar: String) -> Int Never! {
 // before uppercase at the first case difference. This is ICU root order for
 // the ASCII names a repository holds.
 primary_ranks: fn(name: String) -> [Int] Never! {
-    ranks := [Int]{}
+    ^ranks: [Int]{}
     loop scalar in name.chars() -> ranks.push(primary_rank("{scalar}"))
     ranks
 }
@@ -131,7 +131,7 @@ collate: fn(left: String, right: String) -> Ordering Never! {
 }
 
 ordered_names: fn(names: [String]) -> [String] Never! {
-    ordered := names
+    ^ordered: names
     ordered.sort_by(fn(left: String, right: String) { collate(left, right) })
     ordered
 }
@@ -157,7 +157,7 @@ visit_docs: fn(directory: String, found: ^[String]) -[FS]> DocFlagsError! {
 // Guidance documents under `base` ("" is the repository root), depth first in
 // collation order, skipping symbolic links and build or tool directories.
 doc_files: fn(base: String) -[FS]> [String] DocFlagsError! {
-    found := [String]{}
+    ^found: [String]{}
     visit_docs(base, found) ?? return Err(err)
     Ok(found)
 }
@@ -166,11 +166,11 @@ doc_files: fn(base: String) -[FS]> [String] DocFlagsError! {
 // number of the line it starts on.
 logical_lines: fn(text: String) -> [LogicalLine] Never! {
     physical: LINE_BREAK.split(text)
-    lines := [LogicalLine]{}
-    index := 0
+    ^lines: [LogicalLine]{}
+    ^index: 0
     loop index < physical.len() {
         start_line: index + 1
-        value := physical[index].copy()
+        ^value: physical[index].copy()
         loop value.trim_end().ends_with("\\") && index + 1 < physical.len() {
             index += 1
             value = "{value.trim_end().remove_suffix("\\")}\n{physical[index]}"
@@ -202,8 +202,8 @@ collect_flags: fn(doc: String, line: LogicalLine, script: String, script_end: In
 }
 
 documented_flags: fn(doc: String, text: String) -[FS]> [Finding] Never! {
-    findings := [Finding]{}
-    seen := [String:Bool]{}
+    ^findings: [Finding]{}
+    ^seen: [String:Bool]{}
     references: [Regex]{AGENT_SCRIPT, BARE_SCRIPT}
     loop line in logical_lines(text) {
         loop pattern in references {
@@ -228,16 +228,16 @@ add_flag: fn(flags: ^[String], flag: String) Never! {
 // not count.
 argv_source_flags: fn(source: String) -> [String] Never! {
     code: LINE_COMMENT.replace(source, "")
-    flags := [String]{}
+    ^flags: [String]{}
     loop line in LINE_BREAK.split(code) {
         if !NAMES_ARGV.is_match(line) || !COMPARES_ARGV.is_match(line) -> next
         loop flag in FLAG.find_all(line) -> add_flag(flags, flag)
     }
-    maps := [String:String]{}
+    ^maps: [String:String]{}
     loop object in CONST_OBJECT.matches(code) {
         maps[object.groups[0].copy()] = object.groups[1].copy()
     }
-    dispatch := [String]{}
+    ^dispatch: [String]{}
     loop found in ARGV_IN_MAP.matches(code) -> dispatch.push(maps.get(found.groups[0]) ?? "")
     loop found in OBJECT_AT_ARGV.matches(code) -> dispatch.push(found.groups[0].copy())
     loop found in NAME_AT_ARGV.matches(code) -> dispatch.push(maps.get(found.groups[0]) ?? "")
@@ -250,7 +250,7 @@ argv_source_flags: fn(source: String) -> [String] Never! {
 // Flags a shell script's parser lines name: a keyword, a test bracket or a
 // `case` pattern, with comments removed.
 shell_source_flags: fn(source: String) -> [String] Never! {
-    flags := [String]{}
+    ^flags: [String]{}
     loop raw in LINE_BREAK.split(source) {
         line: SHELL_COMMENT.replace_first(raw, "$1")
         if !SHELL_PARSER_LINE.is_match(line) -> next
@@ -274,8 +274,8 @@ source_flags: fn(script_path: String) -[FS]> [String] DocFlagsError! {
 
 documentation_policy_errors: fn(path: String, text: String) -> [String] Never! {
     operational: regex.compile_with(OPERATIONAL_TOPIC, regex.flags(true, false, false)) ?? panic("operational heading pattern: {err}")
-    findings := [String]{}
-    fence := ""
+    ^findings: [String]{}
+    ^fence: ""
     loop (index, line) in LINE_BREAK.split(text) {
         if FENCE.match(line) == {
             .Val(marker) -> {
@@ -304,10 +304,10 @@ documentation_policy_errors: fn(path: String, text: String) -> [String] Never! {
 }
 
 check_documentation_policy: fn() -[FS, IO]> Int DocFlagsError! {
-    paths := doc_files("Docs/Spec") ?? return Err(err)
+    ^paths: doc_files("Docs/Spec") ?? return Err(err)
     loop path in doc_files("Docs/Proposals") ?? return Err(err) -> paths.push(path)
     paths.push("README.md")
-    failures := [String]{}
+    ^failures: [String]{}
     loop path in paths {
         text: read_text(path) ?? return Err(err)
         loop failure in documentation_policy_errors(path, text) -> failures.push(failure)
@@ -326,20 +326,20 @@ check_documentation_policy: fn() -[FS, IO]> Int DocFlagsError! {
 }
 
 check_doc_flags: fn() -[FS, IO]> Int DocFlagsError! {
-    findings := [Finding]{}
+    ^findings: [Finding]{}
     loop doc in doc_files("") ?? return Err(err) {
         text: doc_text(doc) ?? return Err(err)
         loop finding in documented_flags(doc, text) -> findings.push(finding)
     }
-    accepted := [String:[String]]{}
-    errors := [String]{}
+    ^accepted: [String:[String]]{}
+    ^errors: [String]{}
     loop finding in findings {
         if accepted.get(finding.script_path) == None {
             accepted[finding.script_path.copy()] = source_flags(finding.script_path) ?? return Err(err)
         }
         flags: accepted.get(finding.script_path) ?? [String]{}
         if flags.contains(finding.flag) -> next
-        sorted := flags
+        ^sorted: flags
         sorted.sort()
         known: if sorted.len() == 0 -> "(none detected)" else -> sorted.join(", ")
         errors.push("{finding.doc}:{finding.line}: {finding.script} {finding.flag} is not accepted; accepted flags: {known}")
@@ -385,7 +385,7 @@ error_lines: fn(errors: [String]) -> String Never! {
 
 #Test("argv dispatch maps and flag comparisons are accepted, unrelated strings are not") {
     source: "\n    const names = {{ '--subject': 'subject', '--root': 'root' }};\n    const help = {{ '--retired': 'old' }};\n    for (const arg of argv) {{\n      if (!(arg in names) && !['--format'].includes(arg)) throw Error('unknown');\n    }}\n    const flag = process.argv[i];\n    if (flag === '--dry-run') continue;\n    const key = {{ '--jet': 'jet', '--runtime-dir': 'runtime', '--out': 'out' }}[flag];\n    const command = ['--spawn-only'];\n    // if (arg === '--comment-only') {{}}\n  "
-    flags := argv_source_flags(source)
+    ^flags: argv_source_flags(source)
     flags.sort()
     assert_eq(flags.join(","), "--dry-run,--format,--jet,--out,--root,--runtime-dir,--subject")
 }
@@ -397,7 +397,7 @@ error_lines: fn(errors: [String]) -> String Never! {
 
 #Test("shell parser lines name flags; comments and plain commands do not") {
     source: "#!/usr/bin/env bash\ncase \"$1\" in\n  --fast) fast=1 ;;\n  --out|-o) out=$2 ;;\nesac\nif [[ $x == --keep ]]; then :; fi # --hidden\necho --not-a-flag\n"
-    flags := shell_source_flags(source)
+    ^flags: shell_source_flags(source)
     flags.sort()
     assert_eq(flags.join(","), "--fast,--keep,--out")
 }

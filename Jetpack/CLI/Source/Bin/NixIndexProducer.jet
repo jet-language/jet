@@ -137,7 +137,7 @@ cli_nix_index_generate: fn(args: [String], write_signature_request: Bool) -[FS, 
     coverage: nix_index_producer_coverage_report(generated.decoded) ?? return Err(CLIToolError.new(err.message()))
     cli_nix_index_write_immutable(files.join(target_dir, "{digest}.coverage.json"), coverage.bytes())
     report_tree: json.parse(generated.report) ?? return Err(CLIToolError.new("generation report is not JSON: {err.reason}"))
-    report := if report_tree == {
+    ^report: if report_tree == {
         .Object(pairs) -> pairs
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
             return Err(CLIToolError.new("generation report is not a JSON object"))
@@ -213,7 +213,7 @@ cli_nix_index_verify_differential: fn(args: [String]) -[FS, IO]> CLIToolError! {
     index_records: nix_index_decode_index_records_for_producer(candidate_bytes) ?? return Err(CLIToolError.new(err.message()))
     oracle_bytes: cli_nix_index_read_file(oracle_path, NIX_INDEX_MAX_DECODED_BYTES, "oracle")
     oracle: nix_index_parse_oracle_for_producer(oracle_bytes, system, revision) ?? return Err(CLIToolError.new(err.message()))
-    expected := [String:NixIndexRecord]{}
+    ^expected: [String:NixIndexRecord]{}
     loop item in oracle {
         key: item.record.attrpath.join(".")
         if expected.has_key(key) {
@@ -221,7 +221,7 @@ cli_nix_index_verify_differential: fn(args: [String]) -[FS, IO]> CLIToolError! {
         }
         expected[key] = item.record
     }
-    actual := [String:NixIndexRecord]{}
+    ^actual: [String:NixIndexRecord]{}
     loop record in index_records {
         key: record.attrpath.join(".")
         if actual.has_key(key) {
@@ -229,12 +229,12 @@ cli_nix_index_verify_differential: fn(args: [String]) -[FS, IO]> CLIToolError! {
         }
         actual[key] = record
     }
-    compared := [String]{}
+    ^compared: [String]{}
     loop key in expected.keys().to_list() -> compared.push(key)
     loop key in actual.keys().to_list() {
         if !compared.contains(key) -> compared.push(key)
     }
-    mismatches := [String]{}
+    ^mismatches: [String]{}
     loop key in compared {
         if expected.get(key) != actual.get(key) -> mismatches.push(key)
     }
@@ -273,7 +273,7 @@ cli_nix_index_manifest: fn(args: [String]) -[IO, FS, Env]> CLIToolError! {
     target_root: cli_nix_index_required(options, "target-root")
     output: cli_nix_index_required(options, "output")
     cli_nix_index_validate_staged_input(target_root, "target root")
-    staged := [NixIndexStagedTarget]{}
+    ^staged: [NixIndexStagedTarget]{}
     index_root: files.join(target_root, "index-v1")
     revisions: files.list_dir(index_root) ?? return Err(CLIToolError.new("read target root: {err}"))
     loop revision_entry in revisions {
@@ -301,14 +301,14 @@ cli_nix_index_manifest: fn(args: [String]) -[IO, FS, Env]> CLIToolError! {
             }
         }
     }
-    listed := [{released: Int, system: String, revision: String}]{}
+    ^listed: [{released: Int, system: String, revision: String}]{}
     loop entry in staged {
         listed.push({released: entry.released_unix, system: entry.target.system, revision: entry.target.revision})
     }
     discoverable: cli_nix_index_newest_discoverable_targets(listed)
-    targets := [NixIndexManifestTarget]{}
+    ^targets: [NixIndexManifestTarget]{}
     loop entry in staged {
-        target := entry.target
+        ^target: entry.target
         target.discoverable = discoverable.contains({system: target.system, revision: target.revision})
         targets.push(target)
     }
@@ -357,7 +357,7 @@ cli_nix_index_staged_target: fn(target: String, name: String, revision: String, 
 }
 
 cli_nix_index_trim_trailing_slashes: fn(value: String) -> String Never! {
-    out := value
+    ^out: value
     loop out.ends_with("/") -> out = out.removesuffix("/")
     out
 }
@@ -365,10 +365,10 @@ cli_nix_index_trim_trailing_slashes: fn(value: String) -> String Never! {
 // The newest NIX_INDEX_DISCOVERABLE_PER_SYSTEM (system, revision) targets
 // of each system: newest release first, ties by system then revision bytes.
 cli_nix_index_newest_discoverable_targets: fn(targets: [{released: Int, system: String, revision: String}]) -> [{system: String, revision: String}] Never! {
-    ordered := targets
+    ^ordered: targets
     ordered.sort_by(fn(left: {released: Int, system: String, revision: String}, right: {released: Int, system: String, revision: String}) { (right.released <=> left.released).then(left.system <=> right.system).then(left.revision <=> right.revision) })
-    counts := [String:Int]{}
-    discoverable := [{system: String, revision: String}]{}
+    ^counts: [String:Int]{}
+    ^discoverable: [{system: String, revision: String}]{}
     loop entry in ordered {
         count: counts.get(entry.system) ?? 0
         pair: {system: entry.system, revision: entry.revision}
@@ -384,8 +384,8 @@ cli_nix_index_newest_discoverable_targets: fn(targets: [{released: Int, system: 
 
 // `--name value` pairs; every option takes one value and may appear once.
 cli_nix_index_options: fn(args: [String]) -> [String:String] CLIToolError! {
-    options := [String:String]{}
-    index := 0
+    ^options: [String:String]{}
+    ^index: 0
     loop index < args.len() {
         if !args[index].starts_with("--") {
             return Err(CLIToolError.new("expected an option, got `{args[index]}`"))
@@ -441,7 +441,7 @@ cli_nix_index_read_file: fn(path: String, limit: Int, label: String) -[FS]> [U8]
 cli_nix_index_read_store_paths: fn(path: String) -[FS]> [String] CLIToolError! {
     bytes: cli_nix_index_read_file(path, 67108864, "store-paths")
     text: String.from_bytes(bytes) ?? return Err(CLIToolError.new("store-paths is not UTF-8"))
-    lines := [String]{}
+    ^lines: [String]{}
     loop line in text.lines() {
         if line != "" -> lines.push(line)
     }
@@ -486,7 +486,7 @@ cli_nix_index_write_immutable: fn(path: String, bytes: [U8]) -[FS, Env]> CLITool
 }
 
 cli_nix_index_publish_partial: fn(partial: String, path: String, bytes: [U8]) -[FS]> CLIToolError! {
-    writer := files.create(partial, if_exists: .Refuse, mode: Val(0o600)) ?? return Err(CLIToolError.new("write temporary output: {err}"))
+    ^writer: files.create(partial, if_exists: .Refuse, mode: Val(0o600)) ?? return Err(CLIToolError.new("write temporary output: {err}"))
     writer.write_bytes(bytes) ?? return Err(CLIToolError.new("write temporary output: {err}"))
     writer.fsync() ?? return Err(CLIToolError.new("sync temporary output: {err}"))
     if files.hard_link(partial, path) == {
@@ -593,18 +593,18 @@ cli_nix_index_collect_store_paths: fn(value: Dyn, paths: ^[String]) Never! {
 // record must name exactly `system`.
 cli_nix_index_read_hydra_output_paths: fn(path: String, system: String) -[FS]> [String] CLIToolError! {
     cli_nix_index_validate_staged_input(path, "Hydra build directory")
-    records := [String]{}
+    ^records: [String]{}
     cli_nix_index_collect_json_files(path, records)
     if records.len() == 0 {
         return Err(CLIToolError.new("Hydra build directory contains no JSON files"))
     }
     records.sort()
-    output_paths := [String]{}
+    ^output_paths: [String]{}
     loop record in records {
         value: cli_nix_index_read_json_input(record, 67108864, "Hydra build record")
-        systems := [String]{}
+        ^systems: [String]{}
         cli_nix_index_collect_named_strings(value, "system", systems)
-        exact := systems.len() > 0
+        ^exact: systems.len() > 0
         loop found in systems {
             if found != system -> exact = false
         }

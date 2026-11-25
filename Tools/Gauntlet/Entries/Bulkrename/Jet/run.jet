@@ -8,7 +8,7 @@ Args: struct {
 run: fn(args: Args) {
     entries: files.list_dir(args.path).filter(fn(entry) { !entry.is_dir })
     pattern: Regex{"IMG_(\d+)\.jpeg"}
-    photos := entries.filter_map(fn(entry) { pattern.match_full(entry.name) }).to_list()
+    ^photos: entries.filter_map(fn(entry) { pattern.match_full(entry.name) }).to_list()
     photos.sort_by(fn(photo) { photo.group_int(1) ?? 0 })
     loop (index, photo) in photos {
         target: "photo-{index + 1:PadLeft(4, "0")}.jpg"

@@ -61,7 +61,9 @@ Encoded: struct {
             loop (index, argument) in call.args {
                 if argument.value != heard[index] -> reject(Unheard{index: index}, at: argument)
             }
-            if call.args[4].value != Val(Dyn.Text("hi")) -> reject(Unheard{index: 4}, at: call.args[4])
+            if call.args[4].value != Val(Dyn.Text("hi")) {
+                reject(Unheard{index: 4}, at: call.args[4])
+            }
             if call.args[1].value != Val(Dyn.Int(7)) -> reject(Unheard{index: 1}, at: call.args[1])
         }
     }

@@ -7,7 +7,7 @@ queue_ack: fn(ack_path: Path, group: String, id: String) -> Bool {
 }
 
 queue_acked: fn(ack_path: Path, group: String) -> [String:Bool] {
-    seen := [String:Bool]{}
+    ^seen: [String:Bool]{}
     records: read_records(ack_path)
     loop record in records {
         parts: record.split("|").to_list()
@@ -17,7 +17,7 @@ queue_acked: fn(ack_path: Path, group: String) -> [String:Bool] {
 }
 
 queue_pending: fn(path: Path, ack_path: Path, group: String) -> [String] {
-    pending := [String]{}
+    ^pending: [String]{}
     seen: queue_acked(ack_path, group)
     records: read_records(path)
     loop record in records {

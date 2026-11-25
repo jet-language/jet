@@ -78,7 +78,7 @@ sema_generic_crossing_note: fn(ty: Type, crossing: SemaSendCrossing, moved: Bool
         return
     }
     loop reach in sema_ownership_crossing_generic_reach(ty, crossing, environment, program, context) {
-        _ := sema_generic_crossing_add(context.generic_crossings, SemaGenericCrossing{param: reach.param.copy(), crossing: crossing, whole: reach.whole, moved: moved, captured: captured})
+        ^_: sema_generic_crossing_add(context.generic_crossings, SemaGenericCrossing{param: reach.param.copy(), crossing: crossing, whole: reach.whole, moved: moved, captured: captured})
     }
 }
 
@@ -92,7 +92,7 @@ sema_generic_crossing_plain: fn(ty: Type) -> Bool Never! {
 
 // A call to generic function `callee` whose type arguments are settled.
 sema_generic_call_note: fn(callee: String, name: String, substitutions: [SemaInferenceBinding], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext) {
-    arguments := [SemaGenericCallArgument]{}
+    ^arguments: [SemaGenericCallArgument]{}
     loop binding in substitutions {
         if sema_generic_crossing_plain(binding.ty) -> next
         given: sema_ownership_crossing_body_problem(binding.ty, SemaSendCrossing.TaskCapture, true, environment, program, context)
@@ -134,8 +134,8 @@ sema_generic_crossing_boundary: fn(crossing: SemaSendCrossing) -> String Never! 
 
 sema_generic_crossing_diagnostic: fn(call: SemaGenericCall, argument: SemaGenericCallArgument, crossing: SemaGenericCrossing, problem: SemaSendabilityProblem) -> Diagnostic {
     boundary: sema_generic_crossing_boundary(crossing.crossing)
-    reason := if crossing.crossing == SemaSendCrossing.ParallelWorker || crossing.crossing == SemaSendCrossing.Kernel -> "this concurrent boundary moves owned values between workers" else -> "tasks and channels move owned values between threads"
-    fix := if problem.kind == {
+    ^reason: if crossing.crossing == SemaSendCrossing.ParallelWorker || crossing.crossing == SemaSendCrossing.Kernel -> "this concurrent boundary moves owned values between workers" else -> "tasks and channels move owned values between threads"
+    ^fix: if problem.kind == {
         .ClosureNeedsTake -> "have `{call.name}` give the closure away with `.move()` where it moves `{argument.param}` {boundary}, or pass plain owned data"
         .ClosureCaptures | .CallableValue | .TraitValue(_) | .ThreadConfined(_) | .DeclaredLocal(_) | .LocalReactive(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> "call `{call.name}` with plain owned data, or share state through `Shared<T>`"
     }
@@ -153,24 +153,24 @@ sema_generic_crossing_diagnostic: fn(call: SemaGenericCall, argument: SemaGeneri
 // meets a problem. `crossings` is indexed by the function key's id in
 // `keys`; only a function with a crossing has one.
 sema_generic_crossings_validate: fn(modules: [SemaGraphModuleResult]) -> [SemaGenericCrossingReport] {
-    reports := [SemaGenericCrossingReport]{}
-    keys := name_table_sized(64)
-    crossings := [[SemaGenericCrossing]]{[SemaGenericCrossing]{}}
-    has_calls := false
+    ^reports: [SemaGenericCrossingReport]{}
+    ^keys: name_table_sized(64)
+    ^crossings: [[SemaGenericCrossing]]{[SemaGenericCrossing]{}}
+    ^has_calls: false
     loop module_row in modules {
         loop facts in module_row.compute_facts {
             if facts.generic_calls.len() > 0 -> has_calls = true
             if facts.generic_crossings.len() == 0 -> next
             id: sema_generic_crossings_slot(keys, crossings, facts.function_key)
             loop crossing in facts.generic_crossings {
-                _ := sema_generic_crossing_add(crossings[id], crossing.copy())
+                ^_: sema_generic_crossing_add(crossings[id], crossing.copy())
             }
         }
     }
     if !has_calls || crossings.len() == 1 -> return reports
     // A generic caller inherits each crossing it passes one of its own type
     // parameters to, until no crossing is new.
-    changed := true
+    ^changed: true
     loop changed {
         changed = false
         loop module_row in modules {
@@ -184,7 +184,7 @@ sema_generic_crossings_validate: fn(modules: [SemaGraphModuleResult]) -> [SemaGe
                         loop argument in call.arguments {
                             if argument.param != crossing.param -> next
                             loop reach in argument.reaches {
-                                inherited := SemaGenericCrossing{param: reach.param.copy(), crossing: crossing.crossing, whole: crossing.whole && reach.whole, moved: crossing.moved, captured: crossing.captured}
+                                ^inherited: SemaGenericCrossing{param: reach.param.copy(), crossing: crossing.crossing, whole: crossing.whole && reach.whole, moved: crossing.moved, captured: crossing.captured}
                                 caller: sema_generic_crossings_slot(keys, crossings, facts.function_key)
                                 if sema_generic_crossing_add(crossings[caller], inherited.move()) {
                                     changed = true

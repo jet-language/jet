@@ -2,19 +2,19 @@
 // iteration's expression: the statements after the loop still run and the
 // locals declared there resolve.
 sum_until_missing: fn(bytes: ^^[U8]) -> Int {
-    acc := 0
+    ^acc: 0
     reader: Reader.over(bytes)
     loop -> acc += Int{reader.read_u16_le() ?? return acc}
 }
 
 run: fn() {
     // `?? break` inside a conversion inside a compound assignment.
-    sum := 0
+    ^sum: 0
     pairs: Reader.over([U8]{0x01, 0x00, 0x02, 0x00, 0x03})
     loop -> sum += Int{pairs.read_u16_le() ?? break}
     print("a {sum} {pairs.remaining()}")
     // The same loop with the fallback on its own binding.
-    total := 0
+    ^total: 0
     again: Reader.over([U8]{0x01, 0x00, 0x02, 0x00, 0x03})
     loop {
         v: again.read_u16_le() ?? break
@@ -22,7 +22,7 @@ run: fn() {
     }
     print("b {total} {again.remaining()}")
     // `?? next` in the same nested position.
-    count := 0
+    ^count: 0
     third: Reader.over([U8]{0x01, 0x00, 0x02, 0x00, 0x03})
     loop {
         if third.remaining() < 2 -> break
@@ -30,7 +30,7 @@ run: fn() {
     }
     print("c {count} {third.remaining()}")
     // `?? break` inside an interpolation's arithmetic.
-    seen := 0
+    ^seen: 0
     items: Reader.over([U8]{0x01, 0x00, 0x02, 0x00, 0x03})
     loop {
         seen += 1

@@ -47,12 +47,12 @@ jet_cli_build_library: fn(file: String, source: String, color: Bool, options: ^^
     // them.
     prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Doc)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    ^output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if prepared.move() == {
         .Refused(refusal) -> { output = refusal }
         .Prepared(request, snapshot) -> {
             directory: jet_cli_output_dir_path(snapshot, owned)
-            selected := request
+            ^selected: request
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             if owned.profile != "" -> selected.profile = owned.profile
             selected.setting_overrides = owned.settings.move()
@@ -77,7 +77,7 @@ jet_cli_build_library: fn(file: String, source: String, color: Bool, options: ^^
             if rows.len() == 0 {
                 jet_cli_finish(jet_cli_report_output("", "E1341", "`{file}` exports no function, so its Library would be empty", jet_cli_why("E1341"), "mark the functions a C host calls with `#Export(c)`", color, JET_DRIVER_EXIT_USER_ERROR), trace_sink)
             }
-            problems := [String]{}
+            ^problems: [String]{}
             prototypes: jet_cli_library_prototypes(rows, checked.functions, problems)
             if problems.len() > 0 {
                 jet_cli_finish(jet_cli_report_output("", "E1341", problems.join("; "), jet_cli_why("E1341"), "export only functions whose parameters and result are C scalars (`Int`, `Float`, `F32`, `Bool`, `I8`-`I64`, `U8`-`U64`)", color, JET_DRIVER_EXIT_USER_ERROR), trace_sink)
@@ -90,7 +90,7 @@ jet_cli_build_library: fn(file: String, source: String, color: Bool, options: ^^
                 jet_cli_finish(jet_cli_ice("the Library of `{file}` failed to lower: {built.issues.join("; ")}"), trace_sink)
             }
             // The header declares what the object exports, in its order.
-            declarations := ""
+            ^declarations: ""
             loop abi in built.library.abis {
                 loop (index, row) in rows {
                     if row.symbol == abi.symbol {
@@ -149,7 +149,7 @@ jet_cli_library_name: fn(file: String, source: String) -[FS]> String Never! {
 // type is read without its tags. An export whose parameter or result has no
 // C spelling (jet_cli_inline_c_type) is a row in `problems`.
 jet_cli_library_prototypes: fn(rows: [IRLibraryExportRow], functions: [FnBody], problems: ^[String]) -> [String] Never! {
-    prototypes := loop _ in rows -> ""
+    ^prototypes: loop _ in rows -> ""
     loop function in functions {
         loop (index, row) in rows {
             if row.key == function.key {
@@ -161,14 +161,14 @@ jet_cli_library_prototypes: fn(rows: [IRLibraryExportRow], functions: [FnBody], 
 }
 
 jet_cli_library_prototype: fn(symbol: String, function: FnBody, problems: ^[String]) -> String Never! {
-    result := "void"
+    ^result: "void"
     if ir_c_export_result(function) == .Val(ty) {
         result = jet_cli_inline_c_type(ir_untag(ty)) ?? {
             problems.push("the export `{symbol}` returns a type a C header can't spell")
             "void"
         }
     }
-    parameters := [String]{}
+    ^parameters: [String]{}
     loop (position, parameter) in function.params {
         spelled: jet_cli_inline_c_type(ir_untag(parameter.ty)) ?? {
             problems.push("parameter `{parameter.name}` of the export `{symbol}` has a type a C header can't spell")
@@ -184,7 +184,7 @@ jet_cli_library_prototype: fn(symbol: String, function: FnBody, problems: ^[Stri
 // bool types the prototypes use, and the `declarations` (one prototype a
 // line) with C linkage in C++.
 jet_cli_library_header: fn(name: String, declarations: String) -> String Never! {
-    guard := [U8]{}
+    ^guard: [U8]{}
     loop byte in name.to_upper().bytes() {
         letter: byte >= U8{65} && byte <= U8{90}
         digit: byte >= U8{48} && byte <= U8{57}

@@ -221,7 +221,7 @@ native_image_read: fn(elf: [U8]) -> NativeImage? Never! { native_image_read_apar
 native_image_read_apart: fn(elf: [U8], dwarf: [U8]) -> NativeImage? Never! {
     lines: if native_elf_header(elf, ".debug_jetline") != None -> elf else -> dwarf
     table: native_elf_section(lines, ".debug_jetline") ?? return None
-    image := NativeImage{lines: x64_jetline_program(x64_jetline_parse(table)), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(dwarf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, frames: native_frames_read(elf), addresses: native_elf_section(dwarf, ".debug_addr") ?? [U8]{}}
+    ^image: NativeImage{lines: x64_jetline_program(x64_jetline_parse(table)), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(dwarf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, frames: native_frames_read(elf), addresses: native_elf_section(dwarf, ".debug_addr") ?? [U8]{}}
     sources: if native_elf_header(elf, ".debug_jetsource") != None -> elf else -> dwarf
     if native_elf_section(sources, ".debug_jetsource") == .Val(record) {
         // A record that doesn't parse is none.
@@ -233,7 +233,7 @@ native_image_read_apart: fn(elf: [U8], dwarf: [U8]) -> NativeImage? Never! {
     // The inlined runs' range lists, and the units' file tables.
     ranges: native_elf_section(dwarf, ".debug_rnglists") ?? [U8]{}
     line_table: native_elf_section(dwarf, ".debug_line") ?? [U8]{}
-    at := 0
+    ^at: 0
     loop at + 12 <= info.len() {
         length: link_debug_le(info, at, 4)
         end: at + 4 + length
@@ -252,9 +252,9 @@ native_image_read_apart: fn(elf: [U8], dwarf: [U8]) -> NativeImage? Never! {
 // a value of a type the program's own image has no DWARF for, such as an
 // evaluated expression's Result (NativeEval.jet).
 native_image_of_types: fn(debug: X64ModuleDebug) -> NativeImage Never! {
-    image := NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    ^image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
     loop (row, ty) in debug.types {
-        made := NativeType{name: ty.name, size: ty.size, tag: NATIVE_TAG_STRUCT, encoding: X64DebugEncoding.Unsigned, target: -1, group: -1}
+        ^made: NativeType{name: ty.name, size: ty.size, tag: NATIVE_TAG_STRUCT, encoding: X64DebugEncoding.Unsigned, target: -1, group: -1}
         if ty.kind == {
             .Base(encoding) -> {
                 made.tag = NATIVE_TAG_BASE
@@ -323,7 +323,7 @@ native_elf_header: fn(elf: [U8], name: String) -> Int? Never! {
 // program's. A SHT_NOBITS header names none: its section has no bytes in
 // this file, as a side debug file's headers of the image's loaded sections.
 native_elf_headers: fn(elf: [U8], name: String) -> [Int] Never! {
-    found := [Int]{}
+    ^found: [Int]{}
     headers: link_debug_addr(elf, 40)
     size: link_debug_le(elf, 58, 2)
     count: link_debug_le(elf, 60, 2)
@@ -358,7 +358,7 @@ native_elf_code: fn(elf: [U8]) -> NativeCode Never! {
 // The bytes and load address of each section of the image named `name`
 // (`.text`, `.eh_frame`).
 native_elf_codes: fn(elf: [U8], name: String) -> [NativeCode] Never! {
-    codes := [NativeCode]{}
+    ^codes: [NativeCode]{}
     loop header in native_elf_headers(elf, name) {
         offset: link_debug_addr(elf, header + 24)
         length: link_debug_addr(elf, header + 32)
@@ -426,7 +426,7 @@ NATIVE_CFI_LOST: 2
 // The call frame information of the image `elf`.
 native_frames_read: fn(elf: [U8]) -> NativeFrames Never! {
     sections: native_elf_codes(elf, ".eh_frame")
-    fdes := [NativeFde]{}
+    ^fdes: [NativeFde]{}
     loop (section, code) in sections -> native_frames_index(fdes, code, section)
     fdes.sort_by(fn(left: NativeFde, right: NativeFde) { left.start <=> right.start })
     NativeFrames{sections: sections, fdes: fdes}
@@ -435,7 +435,7 @@ native_frames_read: fn(elf: [U8]) -> NativeFrames Never! {
 // Each FDE of the `.eh_frame` section `code`, the `section`-th, whose CIE
 // the reader takes.
 native_frames_index: fn(fdes: ^[NativeFde], code: NativeCode, section: Int) Never! {
-    at := 0
+    ^at: 0
     loop at + 8 <= code.bytes.len() {
         length: link_debug_le(code.bytes, at, 4)
         // The terminator, or a 64-bit record, which no writer of Jet's makes.
@@ -475,7 +475,7 @@ native_eh_size: fn(encoding: Int) -> Int Never! {
 // The pointer of DW_EH_PE encoding `encoding` at `at` in `code`.
 native_eh_pointer: fn(code: NativeCode, at: Int, encoding: Int) -> Int Never! {
     size: native_eh_size(encoding)
-    value := link_debug_le(code.bytes, at, size)
+    ^value: link_debug_le(code.bytes, at, size)
     if encoding & 0x08 != 0 && value >= 1 << (8 * size - 1) -> value -= 1 << (8 * size)
     if encoding & 0x70 == 0x10 -> value += code.address + at
     value
@@ -491,8 +491,8 @@ native_cie_read: fn(bytes: [U8], at: Int) -> NativeCie? Never! {
     }
     end: at + 4 + length
     version: link_debug_le(bytes, at + 8, 1)
-    cursor := at + 9
-    letters := [Int]{}
+    ^cursor: at + 9
+    ^letters: [Int]{}
     loop cursor < end && bytes[cursor] != (U8{0}) {
         letters.push(Int{bytes[cursor]})
         cursor += 1
@@ -502,9 +502,9 @@ native_cie_read: fn(bytes: [U8], at: Int) -> NativeCie? Never! {
     data_align: x64_jetline_sleb(bytes, cursor)
     if {
         version == 1 -> cursor += 1
-        else -> _ := link_debug_uleb(bytes, cursor)
+        else -> ^_: link_debug_uleb(bytes, cursor)
     }
-    cie := NativeCie{code_align: code_align, data_align: data_align, encoding: 0, augmented: false, from: 0, to: end}
+    ^cie: NativeCie{code_align: code_align, data_align: data_align, encoding: 0, augmented: false, from: 0, to: end}
     if letters.len() > 0 {
         // "z", then per letter its data: R the FDEs' pointer encoding, P a
         // personality routine's encoding and pointer, L the LSDA's
@@ -512,7 +512,7 @@ native_cie_read: fn(bytes: [U8], at: Int) -> NativeCie? Never! {
         if letters[0] != 0x7a -> return None
         cie.augmented = true
         size: link_debug_uleb(bytes, cursor)
-        data := cursor
+        ^data: cursor
         loop letter in letters[1..<letters.len()] {
             if letter == {
                 0x52 -> {
@@ -538,8 +538,8 @@ native_cie_read: fn(bytes: [U8], at: Int) -> NativeCie? Never! {
 // The row of `frames`' call frame tables at `pc`; None outside every FDE
 // or past an instruction the reader doesn't take (an expression's).
 native_cfi_row: fn(frames: NativeFrames, pc: Int) -> NativeCfiRow? Never! {
-    low := 0
-    high := frames.fdes.len()
+    ^low: 0
+    ^high: frames.fdes.len()
     loop low < high {
         middle: (low + high) /% 2
         if frames.fdes[middle].start <= pc -> low = middle + 1 else -> high = middle
@@ -548,27 +548,27 @@ native_cfi_row: fn(frames: NativeFrames, pc: Int) -> NativeCfiRow? Never! {
     fde: frames.fdes[low - 1]
     bytes: frames.sections[fde.section].bytes
     cie: native_cie_read(bytes, fde.at + 4 - link_debug_le(bytes, fde.at + 4, 4)) ?? return None
-    instructions := fde.at + 8 + 2 * native_eh_size(cie.encoding)
+    ^instructions: fde.at + 8 + 2 * native_eh_size(cie.encoding)
     if cie.augmented {
         skip: link_debug_uleb(bytes, instructions)
         instructions += skip
     }
     end: fde.at + 4 + link_debug_le(bytes, fde.at, 4)
-    row := NativeCfiRow{register: 7, offset: 8, rules: loop _ in 0..<NATIVE_CFI_REGISTERS -> NATIVE_CFI_SAME, offsets: loop _ in 0..<NATIVE_CFI_REGISTERS -> 0}
+    ^row: NativeCfiRow{register: 7, offset: 8, rules: loop _ in 0..<NATIVE_CFI_REGISTERS -> NATIVE_CFI_SAME, offsets: loop _ in 0..<NATIVE_CFI_REGISTERS -> 0}
     // What each change to the row replaced (native_cfi_rule), so that
     // DW_CFA_restore_state can undo back to its DW_CFA_remember_state and
     // DW_CFA_restore can find a register's rule as the CIE left it.
-    log := [Int]{}
+    ^log: [Int]{}
     // The log's length where the CIE's instructions end; -1 within them.
-    cie_end := -1
-    location := fde.start
+    ^cie_end: -1
+    ^location: fde.start
     loop segment in 0..<2 {
-        at := if segment == 0 -> cie.from else -> instructions
+        ^at: if segment == 0 -> cie.from else -> instructions
         to: if segment == 0 -> cie.to else -> end
         loop at < to {
             op: Int{bytes[at]}
             at += 1
-            advance := 0
+            ^advance: 0
             if {
                 op >> 6 == 1 -> advance = (op & 0x3f) * cie.code_align
                 op >> 6 == 2 -> native_cfi_rule(row, log, op & 0x3f, NATIVE_CFI_SAVED, link_debug_uleb(bytes, at) * cie.data_align)
@@ -621,7 +621,7 @@ native_cfi_row: fn(frames: NativeFrames, pc: Int) -> NativeCfiRow? Never! {
                     native_cfi_rule(row, log, NATIVE_CFI_LOG_FRAME, register, x64_jetline_sleb(bytes, at) * cie.data_align)
                 }
                 // DW_CFA_GNU_args_size.
-                op == 0x2e -> _ := link_debug_uleb(bytes, at)
+                op == 0x2e -> ^_: link_debug_uleb(bytes, at)
                 else -> return None
             }
             location += advance
@@ -677,7 +677,7 @@ native_cfi_restore: fn(row: ^NativeCfiRow, log: ^[Int], cie_end: Int, register: 
         native_cfi_rule(row, log, register, NATIVE_CFI_SAME, 0)
         return
     }
-    at := cie_end
+    ^at: cie_end
     loop at + 2 < log.len() {
         if log[at] == register {
             rule: log[at + 1]
@@ -716,7 +716,7 @@ native_cfi_undo: fn(row: ^NativeCfiRow, log: ^[Int], floor: Int) -> Bool Never! 
 native_elf_symbol: fn(elf: [U8], name: String) -> Int? Never! {
     symbols: native_elf_section(elf, ".symtab") ?? return None
     names: native_elf_section(elf, ".strtab") ?? return None
-    at := 0
+    ^at: 0
     loop at + NATIVE_ELF_SYMBOL_BYTES <= symbols.len() {
         named: link_debug_le(symbols, at, 4)
         if named > 0 && x64_jetline_text(names, named) == name {
@@ -800,10 +800,10 @@ native_image_unit: fn(image: ^NativeImage, info: [U8], abbrev: [U8], ranges: [U8
         return
     }
     table: link_debug_abbrevs(abbrev, link_debug_le(info, start + 8, 4)) ?? return
-    at := start + 12
-    bases := NativeUnitBases{low: 0, addr: -1, lists: -1, ranges: -1}
+    ^at: start + 12
+    ^bases: NativeUnitBases{low: 0, addr: -1, lists: -1, ranges: -1}
     // The open DIEs with children, innermost last.
-    open := [NativeDie]{}
+    ^open: [NativeDie]{}
     loop at < end {
         offset: at
         code: link_debug_uleb(info, at)
@@ -817,7 +817,7 @@ native_image_unit: fn(image: ^NativeImage, info: [U8], abbrev: [U8], ranges: [U8
             next
         }
         entry: table.entries.get(code) ?? return
-        die := NativeDie{tag: table.tags[entry], offset: offset, children: table.children[entry], name: "", ty: -1, low: -1, length: -1, location: -1, size: -1, member_offset: -1, encoding: -1, value: 0, line: 0, discriminant: -1, selects: None, origin: -1, call_line: 0, file: -1, call_file: -1, return_pc: -1}
+        ^die: NativeDie{tag: table.tags[entry], offset: offset, children: table.children[entry], name: "", ty: -1, low: -1, length: -1, location: -1, size: -1, member_offset: -1, encoding: -1, value: 0, line: 0, discriminant: -1, selects: None, origin: -1, call_line: 0, file: -1, call_file: -1, return_pc: -1}
         loop k in table.starts[entry]..<table.starts[entry + 1] {
             form: table.forms[k]
             value_at: at
@@ -845,7 +845,7 @@ native_image_unit: fn(image: ^NativeImage, info: [U8], abbrev: [U8], ranges: [U8
 // span.
 native_die_attribute: fn(die: ^NativeDie, attribute: Int, form: Int, info: [U8], at: Int, unit: Int, image: NativeImage, ranges: [U8], bases: ^NativeUnitBases) Never! {
     if form == 0x18 && (attribute == 0x02 || attribute == 0x7e) {
-        cursor := at
+        ^cursor: at
         length: link_debug_uleb(info, cursor)
         if length < 0 || cursor + length > info.len() {
             return
@@ -858,15 +858,15 @@ native_die_attribute: fn(die: ^NativeDie, attribute: Int, form: Int, info: [U8],
         0x08 -> 0
         0x01 | 0x07 -> link_debug_addr(info, at)
         0x1b -> {
-            cursor := at
+            ^cursor: at
             native_address_slot(image.addresses, bases.addr, link_debug_uleb(info, cursor))
         }
         0x22 -> {
-            cursor := at
+            ^cursor: at
             native_list_offset(image.loclists, bases.lists, link_debug_uleb(info, cursor))
         }
         0x23 -> {
-            cursor := at
+            ^cursor: at
             native_list_offset(ranges, bases.ranges, link_debug_uleb(info, cursor))
         }
         0x0b -> link_debug_le(info, at, 1)
@@ -874,11 +874,11 @@ native_die_attribute: fn(die: ^NativeDie, attribute: Int, form: Int, info: [U8],
         0x06 | 0x17 -> link_debug_le(info, at, 4)
         0x13 -> unit + link_debug_le(info, at, 4)
         0x0d -> {
-            cursor := at
+            ^cursor: at
             x64_jetline_sleb(info, cursor)
         }
         0x0f -> {
-            cursor := at
+            ^cursor: at
             link_debug_uleb(info, cursor)
         }
         else -> 1
@@ -935,10 +935,10 @@ native_die_ranges: fn(die: ^NativeDie, addresses: [U8], ranges: [U8], list: Int,
     if list < 0 {
         return
     }
-    at := list
-    base := -1
-    low := -1
-    high := -1
+    ^at: list
+    ^base: -1
+    ^low: -1
+    ^high: -1
     loop {
         if at >= ranges.len() {
             return
@@ -946,8 +946,8 @@ native_die_ranges: fn(die: ^NativeDie, addresses: [U8], ranges: [U8], list: Int,
         kind: Int{ranges[at]}
         at += 1
         if kind == 0 -> break
-        start := -1
-        end := -1
+        ^start: -1
+        ^end: -1
         if kind == {
             // DW_RLE_base_addressx, DW_RLE_base_address.
             0x01 -> base = native_address_slot(addresses, addr_base, link_debug_uleb(ranges, at))
@@ -1015,7 +1015,7 @@ native_producer_level: fn(producer: String) -> Int Never! {
 // the table holds it as a string of its own (DW_FORM_string), else "".
 // Empty when the table can't be read.
 native_line_files: fn(bytes: [U8], start: Int) -> [String] Never! {
-    files := [String]{}
+    ^files: [String]{}
     if start < 0 -> return files
     length: link_debug_le(bytes, start, 4)
     end: start + 4 + length
@@ -1023,12 +1023,12 @@ native_line_files: fn(bytes: [U8], start: Int) -> [String] Never! {
     // Past the fixed fields and the standard opcodes' lengths: the
     // directories, then the files, each a list of entries whose fields
     // its formats give as (content, form) pairs.
-    at := start + 18 + link_debug_le(bytes, start + 17, 1) - 1
+    ^at: start + 18 + link_debug_le(bytes, start + 17, 1) - 1
     loop table in 0..<2 {
         if at >= end -> return [String]{}
         formats: Int{bytes[at]}
         at += 1
-        pairs := [Int]{}
+        ^pairs: [Int]{}
         loop _ in 0..<formats {
             pairs.push(link_debug_uleb(bytes, at))
             pairs.push(link_debug_uleb(bytes, at))
@@ -1036,7 +1036,7 @@ native_line_files: fn(bytes: [U8], start: Int) -> [String] Never! {
         count: link_debug_uleb(bytes, at)
         if count < 0 || at > end -> return [String]{}
         loop _ in 0..<count {
-            path := ""
+            ^path: ""
             loop pair in 0..<formats {
                 value_at: at
                 at = link_debug_form_end(bytes, at, pairs[2 * pair + 1])
@@ -1104,7 +1104,7 @@ native_image_die: fn(image: ^NativeImage, die: NativeDie, open: [NativeDie], bas
                 return
             }
             holder: open[open.len() - 1].offset
-            ty := image.types.get(holder) ?? return
+            ^ty: image.types.get(holder) ?? return
             if ty.tag != NATIVE_TAG_STRUCT || ty.group < 0 {
                 return
             }
@@ -1204,7 +1204,7 @@ native_open_in_function: fn(open: [NativeDie]) -> Bool Never! {
 // The inlined run of `function` the innermost open inlined DIE is, -1 when
 // no inlined DIE is open.
 native_open_site: fn(function: NativeFunction, open: [NativeDie]) -[]> Int {
-    at := open.len() - 1
+    ^at: open.len() - 1
     loop at >= 0 {
         if open[at].tag == NATIVE_TAG_INLINED {
             loop (index, run) in function.inlined {
@@ -1222,17 +1222,17 @@ native_open_site: fn(function: NativeFunction, open: [NativeDie]) -[]> Int {
 // `image.addresses`, DW_LLE_start_length, DW_LLE_base_address,
 // DW_LLE_start_end).
 native_ranges: fn(image: NativeImage, variable: NativeVariable) -> [NativeRange] Never! {
-    ranges := [NativeRange]{}
+    ^ranges: [NativeRange]{}
     bytes: image.loclists
     list: variable.list
     if list < 0 || list >= bytes.len() -> return ranges
-    at := list
-    unit_base := variable.base
+    ^at: list
+    ^unit_base: variable.base
     loop at < bytes.len() {
         kind: Int{bytes[at]}
         at += 1
-        start := 0
-        end := 0
+        ^start: 0
+        ^end: 0
         if kind == {
             0x00 -> return ranges
             0x01 -> {
@@ -1273,8 +1273,8 @@ native_ranges: fn(image: NativeImage, variable: NativeVariable) -> [NativeRange]
 // it, as functions don't overlap.
 native_function_at: fn(image: NativeImage, pc: Int) -> NativeFunction? Never! {
     // The first function starting past `pc`.
-    low := 0
-    high := image.functions.len()
+    ^low: 0
+    ^high: image.functions.len()
     loop low < high {
         middle: (low + high) >> 1
         if {
@@ -1296,7 +1296,7 @@ NativeInlinedPlace: struct {
 }
 
 native_inlined_named: fn(image: NativeImage, name: String) -> [NativeInlinedPlace] Never! {
-    places := [NativeInlinedPlace]{}
+    ^places: [NativeInlinedPlace]{}
     loop (index, function) in image.functions {
         loop (at, run) in function.inlined {
             if image.abstracts.get(run.origin) == .Val(abstract) {
@@ -1336,9 +1336,9 @@ native_image_entry: fn(image: NativeImage, codes: [NativeCode]) -> Int Never! {
 // the entry it runs (Jetline.jet x64_jetline_entry_runs) when the image
 // keeps it whole.
 native_main_entry: fn(code: [U8], low: Int, functions: [X64JetlineFunction]) -> Int Never! {
-    at := if (code.len() > 0 && code[0] == U8{0x53}) -> 1 else -> 0
+    ^at: if (code.len() > 0 && code[0] == U8{0x53}) -> 1 else -> 0
     loop at < code.len() {
-        target := -1
+        ^target: -1
         if {
             (at + 5 <= code.len() && code[at] == U8{0xE8}) -> {
                 target = low + at + 5 + native_number(code, at + 1, 4, X64DebugEncoding.Signed)
@@ -1388,7 +1388,7 @@ native_main_entry: fn(code: [U8], low: Int, functions: [X64JetlineFunction]) -> 
     // main at 0x1000 in a section loaded at 0xFF0: 16 bytes of other code
     // first, then main's rooted form.
     main: [U8]{0x53, 0xE8, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0, 0x48, 0x8D, 0x3D, 0xEE, 0x0F, 0, 0, 0xE8, 0, 0, 0, 0, 0x48, 0x89, 0xC3}
-    text := loop _ in 0..<16 -> U8{0xCC}
+    ^text: loop _ in 0..<16 -> U8{0xCC}
     loop byte in main -> text.push(byte)
     assert_eq(native_image_entry(image, [NativeCode]{NativeCode{address: 0x3000, bytes: [U8]{0xC3}}, NativeCode{address: 0xFF0, bytes: text}}), 0)
     // A section that holds only part of main is not main's code.
@@ -1428,9 +1428,9 @@ native_main_entry: fn(code: [U8], low: Int, functions: [X64JetlineFunction]) -> 
         X64DebugType{name: "Int ParseError!", size: 8, kind: X64DebugTypeKind.Typedef{target: 6}},
     }
     image: native_image_of_types(X64ModuleDebug{directory: "", files: [String]{}, types: types})
-    ok := native_low_bytes(1, 8)
+    ^ok: native_low_bytes(1, 8)
     ok.extend(native_low_bytes(3, 8))
-    failed := native_low_bytes(0, 8)
+    ^failed: native_low_bytes(0, 8)
     failed.extend(native_low_bytes(1, 8))
     memory: NativeMemory{trace: None, blocks: [NativeBlock]{NativeBlock{address: 4096, bytes: ok}, NativeBlock{address: 8192, bytes: failed}}}
     assert_eq(native_render(image, memory, 7, native_low_bytes(4096, 8), 0, 0), String?{Val("Ok(3)")})

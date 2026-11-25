@@ -26,12 +26,12 @@ use {
 }
 
 callable_access_diagnostics: fn(failures: ^[String], source: String) -> [Diagnostic]? {
-    parsed := parse_source(source.bytes())
+    ^parsed: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 {
         failures.push("fixture does not parse ({parsed.diagnostics[0].what}): {source}")
         return None
     }
-    table := module_table()
+    ^table: module_table()
     main_id: module_intern(table, "callable-access.main")
     effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
         failures.push("canonical effect module declares no effects")
@@ -41,23 +41,23 @@ callable_access_diagnostics: fn(failures: ^[String], source: String) -> [Diagnos
     facts: SemaBuildFacts{package_name: "callable-access", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     input: SemaRegistrationModuleInput{package_identity: "callable-access", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "callable-access", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
+    ^graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "callable-access", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
         failures.push("registration failed {err}: {source}")
         return None
     }
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
     // Declaration checking loans the graph to its stage, which returns it.
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? {
+    ^stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? {
         failures.push("declaration checking failed {err}: {source}")
         return None
     }
-    declared := stage.graph.move()
+    ^declared: stage.graph.move()
     stage.graph = None
-    registration := declared.move() ?? {
+    ^registration: declared.move() ?? {
         failures.push("the declaration pass lost its registration graph: {source}")
         return None
     }
-    checked := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? {
+    ^checked: sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None) ?? {
         failures.push("finalization failed {err}: {source}")
         return None
     }
@@ -68,7 +68,7 @@ callable_access_diagnostics: fn(failures: ^[String], source: String) -> [Diagnos
 // `wanted`.
 callable_access_expect: fn(failures: ^[String], name: String, source: String, wanted: [String]) {
     diagnostics: callable_access_diagnostics(failures, source) ?? return
-    found := [String]{}
+    ^found: [String]{}
     loop diagnostic in diagnostics {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
         found.push("{diagnostic.code} {diagnostic.what}")
@@ -82,7 +82,7 @@ callable_access_expect: fn(failures: ^[String], name: String, source: String, wa
 CALLABLE_ACCESS_DECLS: "push_one: fn(buf: ^[Int]) {{\n    buf.push(1)\n}}\nthrough: fn(f: fn(buf: ^[Int]), buf: ^[Int]) {{\n    f(buf)\n}}\nthrough_generic: fn<T>(f: fn(^[T]), buf: ^[T]) {{\n    f(buf)\n}}\nWrapper: struct {{\n    edit: fn(buf: ^[Int]),\n}}\nread_only: fn(f: fn([Int]), buf: [Int]) {{\n    f(buf)\n}}\n"
 
 #Test("callable_access_contracts") {
-    failures := [String]{}
+    ^failures: [String]{}
     // Every callable category fills a write-marked slot and writes the caller's list.
     callable_access_expect(failures, "named", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    through(push_one, values)\n}}\n", [String]{})
     callable_access_expect(failures, "marked lambda", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    through(fn(buf: ^[Int]) {{ buf.push(2) }}, values)\n}}\n", [String]{})

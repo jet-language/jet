@@ -6,7 +6,7 @@ use {
 }
 
 project_stmt_block: fn(g: ^GraphBuilder, index: SemIndex, src: String, stmts: [StmtNode], base: Int, x: Int, y: Int) {
-    cursor_y := y
+    ^cursor_y: y
     loop (i, stmt) in stmts {
         project_stmt(g, index, src, stmt, base + i + 1, x, cursor_y)
         cursor_y += stmt_row_step(g.tables, stmt)
@@ -275,7 +275,7 @@ project_switch: fn(g: ^GraphBuilder, index: SemIndex, src: String, switch: Switc
         arm: switch.arms[0]
         node_id: "{g.graph_id}:stmt:{ordinal}:branch"
         pattern_test: is_pattern_test(g.tables, arm.cond)
-        affordances := [String]{"edit_inline_expr", "source_jump"}
+        ^affordances: [String]{"edit_inline_expr", "source_jump"}
         if pattern_test -> affordances.push("add_pattern_arm")
         add_node(g, node_id, "branch", if pattern_test -> "if ==" else -> "if", switch.span, x, y, [String]{"control"}, affordances)
         if pattern_subject_type(g, index, arm.cond) == .Val(pattern_type) {
@@ -296,7 +296,7 @@ project_switch: fn(g: ^GraphBuilder, index: SemIndex, src: String, switch: Switc
     }
     node_id: "{g.graph_id}:stmt:{ordinal}:dispatch"
     add_node(g, node_id, "dispatch", if subjectless -> "if guards" else -> "if ==", switch.span, x, y, [String]{"control"}, [String]{"add_pattern_arm", "edit_inline_expr", "source_jump"})
-    pattern_type := String?{None}
+    ^pattern_type: String?{None}
     if {
         !subjectless -> { pattern_type = Val(expr_type(g, index, switch.subject)) }
         switch.arms.len() > 0 -> {
@@ -391,9 +391,9 @@ dispatch_arm_pattern_fragment: fn(tables: ASTTables, src: String, expr: ExprNode
     span: ast_expr_span(tables, expr)
     bytes: src.bytes()
     source: if span.start >= 0 && span.end <= bytes.len() && span.start <= span.end -> foundation_byte_text(bytes, span.start, span.end) else -> ""
-    fragment := source.trim_start()
-    offset := source.count_bytes() - fragment.count_bytes()
-    opened := false
+    ^fragment: source.trim_start()
+    ^offset: source.count_bytes() - fragment.count_bytes()
+    ^opened: false
     pos: fragment.find("==")
     if pos >= 0 {
         after_cmp: foundation_byte_text(fragment.bytes(), pos + 2, fragment.count_bytes())
@@ -456,13 +456,13 @@ pattern_span: fn(tables: ASTTables, pattern: PatternNode) -> Span Never! {
 
 // `text` with the closing parentheses its unbalanced opening ones need.
 balance_closing_parens: fn(text: String) -> String Never! {
-    opens := 0
-    closes := 0
+    ^opens: 0
+    ^closes: 0
     loop byte in text.bytes() {
         if byte == 40 -> opens += 1
         if byte == 41 -> closes += 1
     }
-    closing := ""
+    ^closing: ""
     loop _ in closes..<opens -> closing = "{closing})"
     "{text}{closing}"
 }

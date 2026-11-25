@@ -20,16 +20,16 @@ missing_rows: fn(known: [String:Int], found: ^[String]) {
 }
 
 run: fn() {
-    known := [String:Int]{}
+    ^known: [String:Int]{}
     loop row in ROWS -> known[row.name.copy()] = row.count
     // An empty frozen list: the slow path writes it in place.
-    empty := [String]{}
+    ^empty: [String]{}
     missing_rows(known, empty)
     print("empty {empty.len()}")
     // A list with one owner: the hot path writes it in place.
-    owned := [String]{}
+    ^owned: [String]{}
     owned.push("zeta: kept")
-    partial := [String:Int]{}
+    ^partial: [String:Int]{}
     partial["beta"] = 1
     missing_rows(partial, owned)
     print("owned {owned.len()}")

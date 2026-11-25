@@ -23,7 +23,7 @@ b */
 }
 
 #Test("the foldingRange request answers each fold with its kind") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     lsp_test_open(server, "file:///w/folds.jet", LSP_TEST_FOLDS)
     rows: lsp_test_rows(lsp_test_result(server, "textDocument/foldingRange", "{{{lsp_test_text_document("file:///w/folds.jet")}}}"))
     assert_eq(rows.len(), 4)
@@ -39,7 +39,7 @@ LSP_TEST_UNFORMATTED: `f: fn() -> Int {
 `
 
 #Test("formatting replaces the document with the formatter's text") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     uri: "file:///w/fmt.jet"
     lsp_test_open(server, uri, LSP_TEST_UNFORMATTED)
     formatted: jet_format_source(LSP_TEST_UNFORMATTED, false)
@@ -62,7 +62,7 @@ b:   fn()   -> Int {
 `
 
 #Test("range formatting formats the requested lines alone") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     uri: "file:///w/range.jet"
     lsp_test_open(server, uri, LSP_TEST_RANGE_SOURCE)
     selected: "b:   fn()   -> Int {{\n2\n}}\n"
@@ -79,7 +79,7 @@ b:   fn()   -> Int {
 }
 
 lsp_test_typed: fn(src: String, line: Int, character: Int, trigger: String) -> [String] Never! {
-    rows := [String]{}
+    ^rows: [String]{}
     loop edit in lsp_on_type_format_edits(src, lsp_lex_source(src), LSPPos{line: line, character: character}, trigger) {
         rows.push("{edit.span.start}-{edit.span.end}:{edit.new_text}")
     }
@@ -172,7 +172,7 @@ lsp_test_typed: fn(src: String, line: Int, character: Int, trigger: String) -> [
 }
 
 #Test("onTypeFormatting answers the edits for the typed character") {
-    server := lsp_test_server()
+    ^server: lsp_test_server()
     uri: "file:///w/typed.jet"
     lsp_test_open(
         server,

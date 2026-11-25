@@ -95,13 +95,13 @@ LSPFix: struct {
 // A fix whose edits reach another file than the diagnostic's own, or that
 // sema left pending, is no code action: an action edits the one document.
 lsp_fixes_from_diagnostics: fn(diagnostics: ^^[Diagnostic]) -> [LSPFix] Never! {
-    fixes := [LSPFix]{}
+    ^fixes: [LSPFix]{}
     loop diagnostic in diagnostics.move() {
         applicability: diagnostic.applicability ?? next
         safety: diagnostic.safety ?? next
         if diagnostic.fix_calls == None && lsp_fix_in_document(diagnostic) {
             if diagnostic.edit.move() == .Val(edit) {
-                own := [TextEdit]{}
+                ^own: [TextEdit]{}
                 loop other in diagnostic.fix_edits.move() -> own.push(lsp_fix_unnamed(other.move()))
                 fixes.push(LSPFix{title: diagnostic.fix, edit: lsp_fix_unnamed(edit.move()), applicability: applicability, safety: safety, edits: own.move()})
             }
@@ -141,7 +141,7 @@ lsp_fix_unnamed: fn(edit: ^^TextEdit) -> TextEdit Never! {
 
 // The checked module at `path` (a file path), when exactly one matches.
 lsp_checked_module_at: fn(checked: LSPChecked, path: String) -> Int? Never! {
-    found := Int?{None}
+    ^found: Int?{None}
     loop (index, module_ref) in checked.modules {
         if module_ref.physical_path != path && module_ref.path != path -> next
         if found != None -> return None

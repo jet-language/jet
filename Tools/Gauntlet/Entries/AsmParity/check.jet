@@ -26,7 +26,7 @@ Check: struct {
 run: fn(check: Check) {
     here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
     printed: files.read(check.stdout) ?? process.fail(1, "{err}")
-    keep := [Bool]{}
+    ^keep: [Bool]{}
     loop line in printed.lines() {
         text: line.replace(here, "<case>")
         if text.starts_with("| program |") -> keep = steady_columns(text)
@@ -35,7 +35,7 @@ run: fn(check: Check) {
             next
         }
         cells: text.removeprefix("| ").removesuffix(" |").split(" | ").to_list()
-        shown := [String]{}
+        ^shown: [String]{}
         loop (i, cell) in cells {
             shown.push(if i < keep.len() && !keep[i] -> "~" else -> cell.copy())  // copy: the row is rebuilt
         }
@@ -64,7 +64,7 @@ print_gains: fn(report: Dyn, here: String) -[IO, Time.Wait]> {
         if row == .Object(entries) {
             loop entry in entries {
                 if entry.value == .Object(_) {
-                    codes := [String]{}
+                    ^codes: [String]{}
                     loop run in list(field(entry.value, "runs")) {
                         codes.push(show(field(run, "code"), here))
                     }
@@ -88,7 +88,7 @@ print_results: fn(report: Dyn, here: String) -[IO, Time.Wait]> {
 // program, the bytes, the bytes change and the output.
 steady_columns: fn(header: String) -> [Bool] Never! {
     names: header.removeprefix("| ").removesuffix(" |").split(" | ").to_list()
-    keep := [Bool]{}
+    ^keep: [Bool]{}
     loop (i, name) in names {
         keep.push(STEADY.contains(name) || (name == "change" && i > 0 && names[i - 1] == "candidate bytes"))
     }
@@ -109,7 +109,7 @@ list: fn(value: Dyn) -> [Dyn] Never! {
 
 show: fn(value: Dyn, here: String) -> String Never! {
     if value == .Object(entries) {
-        shown := [String]{}
+        ^shown: [String]{}
         loop entry in entries -> shown.push("{entry.key}: {show(entry.value, here)}")
         shown.sort()
         return "{{{shown.join(", ")}}}"

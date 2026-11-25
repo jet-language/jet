@@ -30,8 +30,8 @@ use {
 // The receipt files, then each `--runs-dir`'s `run-*/receipt.json` in name
 // order, each file once.
 read_receipts: fn(args: [String]) -> [{file: String, receipt: Dyn}] {
-    paths := [String]{}
-    i := 0
+    ^paths: [String]{}
+    ^i: 0
     loop i < args.len() {
         if args[i] != "--runs-dir" {
             paths.push(args[i].copy())  // copy: the list outlives the arguments
@@ -45,7 +45,7 @@ read_receipts: fn(args: [String]) -> [{file: String, receipt: Dyn}] {
         runs: files.list_dir(dir, matching: "run-*").filter(fn(entry) { entry.is_dir })
         paths.extend(runs.map(fn(entry) { files.normpath("{dir}/{entry.name}/receipt.json") }).filter(fn(file) { files.exists(file) }))
     }
-    receipts := [{file: String, receipt: Dyn}]{}
+    ^receipts: [{file: String, receipt: Dyn}]{}
     loop path in combinatorics.unique(paths) {
         receipts.push({file: path, receipt: json.parse(files.read(path))?(path)})
     }
@@ -53,9 +53,9 @@ read_receipts: fn(args: [String]) -> [{file: String, receipt: Dyn}] {
 }
 
 command: fn(argv: [String]) -> {text: String, output: String, summary: String, missing: Bool} {
-    inputs := [String]{}
-    flags := [String:String]{}
-    i := 0
+    ^inputs: [String]{}
+    ^flags: [String:String]{}
+    ^i: 0
     loop i < argv.len() {
         arg: argv[i]
         i += 1
@@ -74,7 +74,7 @@ command: fn(argv: [String]) -> {text: String, output: String, summary: String, m
         if !files.is_dir(done) -> return Err("ENOENT: no such directory, watch '{done}'")
         // Core has no blocking file-change wait, so this checks every 100 ms
         // for each planned job's `<name>.rc`.
-        rcs := [String]{}
+        ^rcs: [String]{}
         loop job in plan -> rcs.push("{done}/{job.field("name").text()}.rc")
         loop !rcs.all(fn(rc) { files.exists(rc) }) -> time.sleep(time.duration_ms(100))
     }
@@ -85,9 +85,9 @@ command: fn(argv: [String]) -> {text: String, output: String, summary: String, m
     if receipts.len() == 0 && plan_file == "" {
         process.fail(2, "Usage: jet Tools/Perf/Scaling/Report RECEIPT.json... | --runs-dir DIR [--output FILE] [--findings FILE] [--wait-proofq DONE_DIR --plan FILE]")
     }
-    text := report(receipts)
+    ^text: report(receipts)
     // The planned shapes without a finished receipt of the planned mode.
-    finished := [String]{}
+    ^finished: [String]{}
     loop loaded in receipts {
         if (loaded.receipt.get("finishedAt") ?? "").text() == "" -> next
         mode: (loaded.receipt.get("mode") ?? "").text()
@@ -95,7 +95,7 @@ command: fn(argv: [String]) -> {text: String, output: String, summary: String, m
             finished.push("{mode}/{s.field("shape").text()}")
         }
     }
-    missing := [String]{}
+    ^missing: [String]{}
     loop job in plan {
         mode: job.field("config").field("mode").text()
         shapes: job.field("config").field("shapes").decode<[String]>()
@@ -107,8 +107,8 @@ command: fn(argv: [String]) -> {text: String, output: String, summary: String, m
     findings: flags.get("--findings") ?? ""
     if findings != "" -> text += "\n{files.read(findings)}"
     output: flags.get("--output") ?? ""
-    series := 0
-    failures := 0
+    ^series: 0
+    ^failures: 0
     loop loaded in receipts {
         series += loaded.receipt.field("series").decode<[Dyn]>().len()
         failures += loaded.receipt.field("failures").decode<[String]>().len()
@@ -121,7 +121,7 @@ command: fn(argv: [String]) -> {text: String, output: String, summary: String, m
 // conversion to the entry's `Err`, so it leaves the entry as its text.
 run: fn() {
     done: command(process.args()) ?? return Err("{err}")
-    stdout := term.stdout()
+    ^stdout: term.stdout()
     if {
         done.output == "" -> stdout.write(done.text)
         else -> {

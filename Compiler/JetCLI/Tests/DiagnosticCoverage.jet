@@ -44,7 +44,7 @@ coverage_fact: fn(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetC
 #Test("diagnostic coverage: every active row has an edit or a typed reason, never both") {
     loop row in diagnostic_registry_rows() {
         if row.status != DiagnosticRegistryStatus.Active -> next
-        edit := row.structured_fix != None
+        ^edit: row.structured_fix != None
         if row.structured_fix == .Val(fix) {
             if fix == .CryptoMisuse -> edit = false
         }
@@ -68,16 +68,16 @@ coverage_fact: fn(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetC
         assert_eq(fact.reason_covered, fact.behavior_reasons + fact.design_reasons + fact.ambiguous_reasons)
     }
     // Recount from the registry itself: each projection matches its own rows.
-    edits := 0
-    reasons := 0
-    behavior := 0
-    design := 0
-    ambiguous := 0
-    active := 0
+    ^edits: 0
+    ^reasons: 0
+    ^behavior: 0
+    ^design: 0
+    ^ambiguous: 0
+    ^active: 0
     loop row in diagnostic_registry_rows() {
         if row.status != DiagnosticRegistryStatus.Active -> next
         active += 1
-        edit := row.structured_fix != None
+        ^edit: row.structured_fix != None
         if row.structured_fix == .Val(fix) {
             if fix == .CryptoMisuse -> edit = false
         }
@@ -90,12 +90,12 @@ coverage_fact: fn(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetC
             }
         }
     }
-    total_rows := 0
-    total_edits := 0
-    total_reasons := 0
-    total_behavior := 0
-    total_design := 0
-    total_ambiguous := 0
+    ^total_rows: 0
+    ^total_edits: 0
+    ^total_reasons: 0
+    ^total_behavior: 0
+    ^total_design: 0
+    ^total_ambiguous: 0
     loop fact in facts {
         total_rows += fact.rows
         total_edits += fact.edit_covered

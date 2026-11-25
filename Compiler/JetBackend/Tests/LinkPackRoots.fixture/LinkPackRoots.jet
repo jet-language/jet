@@ -38,7 +38,7 @@ run: fn() {
     missing: files.read_bytes("missing.o") ?? panic("read missing-import object")
     result: x64_link_runtime_pack([String]{"runtime.o", "runtime.a"}, [[U8]]{object, archive}, [String]{"jet_archive_fixture"})
     if result.errors.len() != 0 -> panic("hybrid pack failed: {result.errors}")
-    c := link_context([[U8]]{result.bytes}, LINK_BASE)
+    ^c: link_context([[U8]]{result.bytes}, LINK_BASE)
     link_load_inputs(c, [String]{"hybrid.pack.o"})
     if c.errors.len() != 0 -> panic("pack is not a valid object: {c.errors}")
     public_names: [String]{"jet_rt_fixture_export", "jet_rt_fixture_unreferenced", "jet_rt_fixture_protected", "jet_archive_fixture"}
@@ -68,7 +68,7 @@ run: fn() {
     if object_only.errors.len() != 0 {
         panic("object-only runtime pack required an archive: {object_only.errors}")
     }
-    o := link_context([[U8]]{object_only.bytes}, LINK_BASE)
+    ^o: link_context([[U8]]{object_only.bytes}, LINK_BASE)
     link_load_inputs(o, [String]{"object.pack.o"})
     if o.errors.len() != 0 -> panic("object-only pack is not a valid object")
     loop name in public_names -> pack_roots_defined(o, name, 1)
@@ -77,7 +77,7 @@ run: fn() {
         panic("pack accepted an archive without a Jet runtime object")
     }
     broken: x64_link_runtime_pack([String]{"runtime.o", "missing.o", "runtime.a"}, [[U8]]{object, missing, archive}, [String]{})
-    found_missing := false
+    ^found_missing: false
     loop error in broken.errors {
         if error.contains("undefined symbol `jet_rt_fixture_absent_provider`") {
             found_missing = true

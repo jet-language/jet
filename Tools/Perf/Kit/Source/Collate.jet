@@ -30,7 +30,7 @@ collate_weight: fn(byte: Int) -> Weight Never! {
 }
 
 collate_weights: fn(text: String) -> [Weight] Never! {
-    weights := [Weight]{}
+    ^weights: [Weight]{}
     loop byte in text.bytes() {
         weight: collate_weight(Int{byte})
         if weight.primary > 0 -> weights.push(weight)
@@ -57,9 +57,9 @@ locale_compare: fn(a: String, b: String) -> Int Never! {
 
 // Stable sort by `localeCompare`, as Array.prototype.sort keeps ties.
 locale_sorted: fn(names: [String]) -> [String] Never! {
-    out := names
+    ^out: names
     loop i in 1..<out.len() {
-        j := i
+        ^j: i
         loop j > 0 && locale_compare(out[j - 1], out[j]) > 0 {
             held: out[j - 1].copy()  // copy: the swap keeps both names
             out[j - 1] = out[j].copy()  // copy: the swap keeps both names

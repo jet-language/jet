@@ -92,7 +92,7 @@ atom_name: fn(tree: Dyn) -> String? Never! {
 
 // Unicode scalars in `text`: its bytes that do not continue a sequence.
 scalar_count: fn(text: String) -> Int Never! {
-    count := 0
+    ^count: 0
     loop b in text.bytes() {
         if (Int{b}) & 192 != 128 -> count += 1
     }
@@ -175,7 +175,7 @@ decode: fn<T: Decode>(bytes: [U8], layout: TermLayout{.Map}, strings: StringEnco
 /// The output is charged to `max_total_bytes`, nesting to `max_depth` and
 /// each payload to `max_item_bytes`.
 encode: fn<T: Encode>(value: T, layout: TermLayout{.Map}, strings: StringEncoding{.UTF8Binary}, byte_arrays: ByteEncoding{.Binary}, limits: EncodingLimits{EncodingLimits.safe()}) -> [U8] EncodingError! {
-    writer := TermWriter{out: [U8]{U8{131}}, layout: layout, strings: strings, byte_arrays: byte_arrays, limits: limits}
+    ^writer: TermWriter{out: [U8]{U8{131}}, layout: layout, strings: strings, byte_arrays: byte_arrays, limits: limits}
     writer.term(value.encode(), "$", 1) ?? return Err(err)
     if limits.max_total_bytes == Val(total) && writer.out.len() > total {
         return Err(etf_error(.Limit, 0, "", "max_total_bytes {total} exceeded by the ETF output"))
@@ -192,7 +192,7 @@ u32_at: fn(bytes: [U8], at: Int) -> Int Never! {
 }
 
 slice: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
+    ^out: [U8]{}
     loop i in start..<end -> out.push(bytes[i])
     out
 }
@@ -221,7 +221,7 @@ read: fn(bytes: [U8], view: Bool, layout: TermLayout, strings: StringEncoding, l
         if size > limits.max_item_bytes {
             return Err(etf_error(.Limit, 2, "$", "max_item_bytes {limits.max_item_bytes} exceeded by a compressed term of {size} bytes"))
         }
-        inflated := [U8]{}
+        ^inflated: [U8]{}
         status: zlib.decompress_into(slice(bytes, 6, bytes.len()), inflated)
         if status != zlib.C_INFLATE_OK {
             return Err(etf_error(.Syntax, 6, "$", "the compressed term is not a valid zlib stream ({zlib.fault(status)})"))
@@ -229,14 +229,14 @@ read: fn(bytes: [U8], view: Bool, layout: TermLayout, strings: StringEncoding, l
         if inflated.len() != size {
             return Err(etf_error(.Syntax, 2, "$", "the compressed term declares {size} inflated bytes but inflates to {inflated.len()}"))
         }
-        reader := TermReader{bytes: inflated, at: 0, compressed_at: 1, limits: limits, view: view, layout: layout, strings: strings}
+        ^reader: TermReader{bytes: inflated, at: 0, compressed_at: 1, limits: limits, view: view, layout: layout, strings: strings}
         tree: reader.term("$", 1) ?? return Err(err)
         if reader.at != reader.bytes.len() {
             return Err(reader.fail(.Syntax, "$", "trailing bytes after the compressed term"))
         }
         return Ok(tree)
     }
-    reader := TermReader{bytes: bytes, at: 1, compressed_at: -1, limits: limits, view: view, layout: layout, strings: strings}
+    ^reader: TermReader{bytes: bytes, at: 1, compressed_at: -1, limits: limits, view: view, layout: layout, strings: strings}
     tree: reader.term("$", 1) ?? return Err(err)
     if reader.at != reader.bytes.len() {
         return Err(reader.fail(.Syntax, "", "trailing bytes after the term"))
@@ -333,7 +333,7 @@ TermReader: struct {
         }
         if op == 110 || op == 111 {
             self.need(if op == 110 -> 2 else -> 5, path) ?? return Err(err)
-            count := 0
+            ^count: 0
             if op == 110 -> count = self.byte() else -> count = self.take_u32()
             self.need(1, path) ?? return Err(err)
             sign: self.byte()
@@ -341,7 +341,7 @@ TermReader: struct {
                 return Err(self.fail(.Syntax, path, "a bignum sign byte is 0 or 1, not {sign}"))
             }
             self.item(count, path, "a bignum") ?? return Err(err)
-            magnitude := 0
+            ^magnitude: 0
             loop i in 0..<count {
                 magnitude = magnitude * 256 + (Int{self.bytes[self.at + count - 1 - i]})
             }
@@ -357,7 +357,7 @@ TermReader: struct {
         if op == 99 {
             // FLOAT_EXT: 31 bytes of printf text, NUL-padded.
             self.need(31, path) ?? return Err(err)
-            text := [U8]{}
+            ^text: [U8]{}
             loop i in 0..<31 {
                 b: self.bytes[self.at + i]
                 if b == (U8{0}) -> break
@@ -377,7 +377,7 @@ TermReader: struct {
         }
         if op == 104 || op == 105 {
             self.need(if op == 104 -> 1 else -> 4, path) ?? return Err(err)
-            count := 0
+            ^count: 0
             if op == 104 -> count = self.byte() else -> count = self.take_u32()
             return self.elements(count, path, depth)
         }
@@ -386,7 +386,7 @@ TermReader: struct {
             self.need(2, path) ?? return Err(err)
             count: self.take_u16()
             self.item(count, path, "a byte list") ?? return Err(err)
-            items := [Dyn]{}
+            ^items: [Dyn]{}
             loop _ in 0..<count {
                 value: self.byte()
                 items.push(Dyn.Int(value))
@@ -397,7 +397,7 @@ TermReader: struct {
             self.need(4, path) ?? return Err(err)
             count: self.take_u32()
             proplist: !self.view && self.layout == .Proplist && count > 0 && self.bytes.len() - self.at >= 2 && Int{self.bytes[self.at]} == 104 && Int{self.bytes[self.at + 1]} == 2
-            tree := Dyn.Null
+            ^tree: Dyn.Null
             if proplist -> tree = self.pairs(count, path, depth) ?? return Err(err) else {
                 tree = self.elements(count, path, depth) ?? return Err(err)
             }
@@ -426,7 +426,7 @@ TermReader: struct {
             self.need(4, path) ?? return Err(err)
             count: self.take_u32()
             self.arity(count, 2, path) ?? return Err(err)
-            entries := [{key: String, value: Dyn}]{}
+            ^entries: [{key: String, value: Dyn}]{}
             loop i in 0..<count {
                 key: self.key("{path}[key {i}]") ?? return Err(err)
                 loop entry in entries {
@@ -457,7 +457,7 @@ TermReader: struct {
 
     elements: fn(^self, count: Int, path: String, depth: Int) -> Dyn EncodingError! {
         self.arity(count, 1, path) ?? return Err(err)
-        items := [Dyn]{}
+        ^items: [Dyn]{}
         loop i in 0..<count {
             item: self.term("{path}[{i}]", depth + 1) ?? return Err(err)
             items.push(item)
@@ -468,7 +468,7 @@ TermReader: struct {
     // A proplist: `count` `{Key, Value}` 2-tuples, read as an object.
     pairs: fn(^self, count: Int, path: String, depth: Int) -> Dyn EncodingError! {
         self.arity(count, 4, path) ?? return Err(err)
-        entries := [{key: String, value: Dyn}]{}
+        ^entries: [{key: String, value: Dyn}]{}
         loop i in 0..<count {
             self.need(2, path) ?? return Err(err)
             tuple: self.byte()
@@ -492,10 +492,10 @@ TermReader: struct {
     // strict UTF-8 of at most 255 characters otherwise.
     atom: fn(^self, op: Int, path: String) -> String EncodingError! {
         self.need(if op == 100 || op == 118 -> 2 else -> 1, path) ?? return Err(err)
-        count := 0
+        ^count: 0
         if op == 100 || op == 118 -> count = self.take_u16() else -> count = self.byte()
         self.item(count, path, "an atom") ?? return Err(err)
-        raw := [U8]{}
+        ^raw: [U8]{}
         if op == 100 || op == 115 {
             loop i in 0..<count -> append_scalar(raw, Int{self.bytes[self.at + i]})
         } else { raw = slice(self.bytes, self.at, self.at + count) }
@@ -525,7 +525,7 @@ TermReader: struct {
         }
         if op == 106 -> return Ok("")
         if op == 107 || op == 108 {
-            raw := [U8]{}
+            ^raw: [U8]{}
             if op == 107 {
                 self.need(2, path) ?? return Err(err)
                 count: self.take_u16()
@@ -541,7 +541,7 @@ TermReader: struct {
                 loop _ in 0..<count {
                     self.need(1, path) ?? return Err(err)
                     element: self.byte()
-                    scalar := -1
+                    ^scalar: -1
                     if element == 97 {
                         self.need(1, path) ?? return Err(err)
                         scalar = self.byte()
@@ -708,8 +708,8 @@ TermWriter: struct {
             self.put_u32(value & 4294967295)
             return
         }
-        digits := [U8]{}
-        rest := if value < 0 -> -value else -> value
+        ^digits: [U8]{}
+        ^rest: if value < 0 -> -value else -> value
         loop rest > 0 {
             digits.push(U8{rest % 256})
             rest = rest /% 256

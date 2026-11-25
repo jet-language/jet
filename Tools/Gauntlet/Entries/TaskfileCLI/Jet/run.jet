@@ -15,7 +15,7 @@ save: fn(tasks: [Task]) Err! { files.write("tasks.json", json.to_string(Store{ta
 run: fn() Err! {
     args: process.args()
     command: args.get(0) ?? ""
-    tasks := if files.exists("tasks.json") -> json.decode<Store>(files.read("tasks.json")).tasks else -> [Task]{}
+    ^tasks: if files.exists("tasks.json") -> json.decode<Store>(files.read("tasks.json")).tasks else -> [Task]{}
 
     if command == {
         "add" -> {

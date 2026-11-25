@@ -25,8 +25,8 @@ bytes_shown: fn(read: [U8] NetError!) -> String Never! {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.listener_local_socket_addr(listener) ?? panic("listener address")
-    client := net.tcp_connect_addr(address) ?? panic("connect")
-    server := net.tcp_accept(listener) ?? panic("accept")
+    ^client: net.tcp_connect_addr(address) ?? panic("connect")
+    ^server: net.tcp_accept(listener) ?? panic("accept")
 
     // é (C3 A9) split across two segments.
     net.tcp_write_all_bytes(server, [U8]{0x68, 0xc3}) ?? panic("write")

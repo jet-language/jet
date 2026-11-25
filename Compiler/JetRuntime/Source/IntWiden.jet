@@ -10,10 +10,10 @@
     // limbs. One pass supplies bit_width, trailing zeros and the top bits;
     // unlike the reference's separate scans, no second workspace is needed.
     node: int_copy(value, I64{0})
-    significant := I64{0}
-    trailing := I64{0}
-    seen_one := false
-    top := I64{0}
+    ^significant: I64{0}
+    ^trailing: I64{0}
+    ^seen_one: false
+    ^top: I64{0}
     loop !(int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0}) {
         bit: int_div_small(node, I64{2})
         if !seen_one {
@@ -41,9 +41,9 @@
     // Only an exact <=24/53-bit significand crosses the machine conversion.
     // Binary scaling is exact and stays finite, so F32's returned f64 value
     // matches the canonical f32->f64 projection without a rounding fallback.
-    result := Float{top}
-    shift := significant - precision
-    scale := Float{2.0}
+    ^result: Float{top}
+    ^shift: significant - precision
+    ^scale: Float{2.0}
     loop shift > (I64{0}) {
         if ((shift & I64{1}) != I64{0}) { result *= scale }
         shift >>= I64{1}

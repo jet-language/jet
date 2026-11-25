@@ -72,7 +72,7 @@ event_words_remove: fn(base: I64, index: I64) {
     length: event_word(base)
     data: event_word(wrapping(base + I64{16}))
     last: length - I64{1}
-    at := index
+    ^at: index
     loop at < last {
         event_store(wrapping(data + at * I64{8}), event_word(wrapping(data + (at + I64{1}) * I64{8})))
         at += I64{1}
@@ -113,7 +113,7 @@ event_sub_new: fn() -> I64 {
 }
 
 event_sub_retain: fn(sub: I64) -> I64 {
-    _ := sync_add(sub, I64{1})
+    ^_: sync_add(sub, I64{1})
     sub
 }
 
@@ -148,10 +148,10 @@ event_sub_unsubscribe: fn(sub: I64) {
     id: event_word(wrapping(sub + I64{24}))
     event_core_lock(core)
     // The last Event handle took the list once the strong count reached 0.
-    found := I64{0}
+    ^found: I64{0}
     if (sync_load(core) != I64{0}) {
         base: wrapping(core + I64{24})
-        at := I64{0}
+        ^at: I64{0}
         loop at < event_word(base) {
             listener: event_words_get(base, at)
             if event_word(wrapping(listener + I64{8})) == id {
@@ -227,7 +227,7 @@ event_core_dispatch: fn(core: I64) -> I64 {
 
 // ---- Listener --------------------------------------------------------------
 
-event_listener_retain: fn(listener: I64) { _ := sync_add(listener, I64{1}) }
+event_listener_retain: fn(listener: I64) { ^_: sync_add(listener, I64{1}) }
 
 event_listener_release: fn(listener: I64) {
     if (sync_add(listener, I64{-1}) != I64{1}) {
@@ -257,8 +257,8 @@ event_scope_prune: fn(scope: I64) {
     base: wrapping(scope + I64{16})
     length: event_word(base)
     data: event_word(wrapping(base + I64{16}))
-    kept := I64{0}
-    at := I64{0}
+    ^kept: I64{0}
+    ^at: I64{0}
     loop at < length {
         sub: event_word(wrapping(data + at * I64{8}))
         if event_sub_active(sub) {
@@ -287,7 +287,7 @@ event_scope_track_hard_cancel: fn(scope: I64, core: I64) {
         return
     }
     base: wrapping(scope + I64{40})
-    at := I64{0}
+    ^at: I64{0}
     loop at < event_word(base) {
         if (event_words_get(base, at) == core) {
             return
@@ -306,7 +306,7 @@ event_scope_release_hard: fn(scope: I64, cancel: Bool) {
     capacity: event_word(wrapping(base + I64{8}))
     data: event_word(wrapping(base + I64{16}))
     event_words_take(base)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         core: event_word(wrapping(data + at * I64{8}))
         if cancel -> async_hard_cancel(core)
@@ -329,7 +329,7 @@ event_scope_release_hard: fn(scope: I64, cancel: Bool) {
     capacity: event_word(wrapping(base + I64{8}))
     data: event_word(wrapping(base + I64{16}))
     event_words_take(base)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         sub: event_word(wrapping(data + at * I64{8}))
         event_sub_unsubscribe(sub)
@@ -368,7 +368,7 @@ event_scope_release_hard: fn(scope: I64, cancel: Bool) {
     data: event_word(wrapping(base + I64{16}))
     event_scope_release_hard(scope, false)
     jet_rt_free(scope, I64{72}, I64{8})
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         event_sub_release(event_word(wrapping(data + at * I64{8})))
         at += I64{1}
@@ -467,7 +467,7 @@ event_core_new: fn(ordinal: I64, source: I64) -> I64 {
 }
 
 #Export(c) jet_rt_handle_clone_jet_event: fn(core: I64) -> I64 {
-    _ := sync_add(core, I64{1})
+    ^_: sync_add(core, I64{1})
     core
 }
 
@@ -497,7 +497,7 @@ event_core_weak_release: fn(core: I64) {
     data: event_word(wrapping(base + I64{16}))
     event_words_take(base)
     event_core_unlock(core)
-    at := I64{0}
+    ^at: I64{0}
     loop at < length {
         event_listener_release(event_word(wrapping(data + at * I64{8})))
         at += I64{1}
@@ -525,7 +525,7 @@ event_core_weak_release: fn(core: I64) {
     event_store(wrapping(listener + I64{40}), env)
     event_store(wrapping(listener + I64{48}), invoke)
     event_store(wrapping(listener + I64{56}), release)
-    _ := sync_add(wrapping(core + I64{8}), I64{1})
+    ^_: sync_add(wrapping(core + I64{8}), I64{1})
     event_core_lock(core)
     id: event_word(wrapping(core + I64{16}))
     event_store(wrapping(core + I64{16}), id + I64{1})
@@ -554,7 +554,7 @@ event_ranks_below: fn(rows: I64, position: I64, priority: I64) -> Bool {
 // is already in registration order.
 event_snapshot_insert: fn(rows: I64, count: I64, listener: I64) {
     priority: event_word(wrapping(listener + I64{16}))
-    position := count
+    ^position: count
     loop event_ranks_below(rows, position, priority) {
         event_store(wrapping(rows + position * I64{8}), event_word(wrapping(rows + (position - I64{1}) * I64{8})))
         position -= I64{1}
@@ -579,8 +579,8 @@ event_snapshot: fn(core: I64) -> I64 {
     length: event_word(base)
     snapshot: jet_rt_alloc((length + I64{2}) * I64{8}, I64{8})
     event_store(wrapping(snapshot + I64{8}), length)
-    count := I64{0}
-    at := I64{0}
+    ^count: I64{0}
+    ^at: I64{0}
     loop at < length {
         listener: event_words_get(base, at)
         if event_sub_active(event_word(wrapping(listener + I64{32}))) {
@@ -617,7 +617,7 @@ event_listener_take_turn: fn(listener: I64) -> Bool {
 
 // Runs the listener's handler with `payload` lent; its result goes to `out`.
 event_listener_call: fn(listener: I64, payload: I64, out: I64) {
-    _ := coll_call3(event_word(wrapping(listener + I64{48})), event_word(wrapping(listener + I64{40})), payload, out)
+    ^_: coll_call3(event_word(wrapping(listener + I64{48})), event_word(wrapping(listener + I64{40})), payload, out)
 }
 
 // JetEvent.dispatch :758-806 under the sole AllowDepthFirst policy: nested
@@ -629,16 +629,16 @@ event_listener_call: fn(listener: I64, payload: I64, out: I64) {
 // Observed: DispatchStarted, each handler's HandlerStarted and
 // HandlerDelivered, then the Delivered Terminal.
 #Export(c) jet_event_emit: fn(core: I64, payload: I64) -> I64 {
-    _ := sync_add(core, I64{1})
+    ^_: sync_add(core, I64{1})
     dispatch: event_core_dispatch(core)
     event_core_observe(core, dispatch, rt_static_text("DispatchStarted"), rt_static_text("None"), rt_static_text("None"))
     snapshot: event_snapshot(core)
     count: event_snapshot_count(snapshot)
     scratch: jet_rt_alloc(I64{16}, I64{8})
     coll_zero(scratch, I64{16})
-    delivered := I64{0}
-    stopped := false
-    at := I64{0}
+    ^delivered: I64{0}
+    ^stopped: false
+    ^at: I64{0}
     loop at < count {
         listener: event_snapshot_get(snapshot, at)
         if !stopped && event_listener_take_turn(listener) {
@@ -677,10 +677,10 @@ event_prune_listeners: fn(core: I64) {
     // The last Event handle took the list once the strong count reached 0.
     length: if (sync_load(core) == I64{0}) -> I64{0} else -> event_word(base)
     data: event_word(wrapping(base + I64{16}))
-    dropped := I64{0}
-    removed := I64{0}
-    kept := I64{0}
-    at := I64{0}
+    ^dropped: I64{0}
+    ^removed: I64{0}
+    ^kept: I64{0}
+    ^at: I64{0}
     loop at < length {
         listener: event_word(wrapping(data + at * I64{8}))
         if event_sub_active(event_word(wrapping(listener + I64{32}))) {
@@ -709,8 +709,8 @@ event_prune_listeners: fn(core: I64) {
 
 event_active_listeners: fn(core: I64) -> I64 {
     base: wrapping(core + I64{24})
-    count := I64{0}
-    at := I64{0}
+    ^count: I64{0}
+    ^at: I64{0}
     loop at < event_word(base) {
         if event_sub_active(event_word(wrapping(event_words_get(base, at) + I64{32}))) {
             count += I64{1}

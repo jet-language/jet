@@ -50,7 +50,7 @@ lsp_completion_resolve_response: fn(server: LSPServer, params: Dyn?, id: Dyn) ->
         }
     }
     summary: lsp_completion_summary_json(server, lsp_member(item, "data") ?? Dyn.Null) ?? return lsp_response(id, jet_error_json_encode_value(item))
-    rows := [String]{}
+    ^rows: [String]{}
     loop entry in entries {
         if entry.key == "documentation" -> next
         rows.push("{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}")
@@ -83,12 +83,12 @@ LSP_COMPLETION_BIND_SNIPPETS: [[String]]{
 // Whether a word at `start` begins a statement: only blanks precede it on its
 // line, and it is inside a block.
 lsp_completion_statement_start: fn(lexed: Lexed, bytes: [U8], start: Int) -> Bool Never! {
-    at := start
+    ^at: start
     loop at > 0 && bytes[at - 1] != (U8{10}) {
         if bytes[at - 1] != (U8{32}) && bytes[at - 1] != (U8{9}) -> return false
         at -= 1
     }
-    depth := 0
+    ^depth: 0
     loop token in lexed.tokens {
         if token.span.start >= start -> break
         if token.kind == TOKEN_LBRACE -> depth += 1
@@ -125,7 +125,7 @@ lsp_completion_module_name: fn(root: String, path: String) -> String Never! {
 // check already reads: each inserts `module.Name` and adds the file's `use`
 // line at the document's start. True once the answer is full.
 lsp_completion_auto_imports: fn(server: LSPServer, view: LSPView, prefix: String, seen: ^[String:Bool], items: ^[String]) -> Bool {
-    root := String?{None}
+    ^root: String?{None}
     loop folder in server.workspace_roots {
         if lsp_path_below(view.doc.path, folder) {
             root = Val(folder)
@@ -135,7 +135,9 @@ lsp_completion_auto_imports: fn(server: LSPServer, view: LSPView, prefix: String
     folder: root ?? return false
     saved: server.checker.sources(folder)
     loop source in saved.move() {
-        if source.path == view.doc.path || lsp_checked_module_at(view.checked, source.path) != None -> next
+        if source.path == view.doc.path || lsp_checked_module_at(view.checked, source.path) != None {
+            next
+        }
         if source.path.ends_with("/package.jet") || source.path.ends_with("/env.jet") -> next
         module_name: lsp_completion_module_name(folder, source.path)
         if module_name == "" -> next
@@ -143,7 +145,7 @@ lsp_completion_auto_imports: fn(server: LSPServer, view: LSPView, prefix: String
         alias: segments[segments.len() - 1]
         outline: lsp_saved_outline(source)
         index: outline.index ?? next
-        methods := [String:Bool]{}
+        ^methods: [String:Bool]{}
         loop member in index.members -> methods[member.identity] = true
         loop definition in index.definitions {
             def: definition.def
@@ -185,7 +187,7 @@ LSPCompletionAfter: enum {
 }
 
 lsp_completion_after: fn(lexed: Lexed, start: Int) -> LSPCompletionAfter Never! {
-    dot := -1
+    ^dot: -1
     loop index in 0..<lexed.tokens.len() {
         token: lexed.tokens[index]
         if token.span.end > start -> break
@@ -194,7 +196,9 @@ lsp_completion_after: fn(lexed: Lexed, start: Int) -> LSPCompletionAfter Never! 
     if dot < 0 -> return LSPCompletionAfter.Plain
     if dot == 0 -> return LSPCompletionAfter.Stray
     receiver: lexed.tokens[dot - 1]
-    if receiver.span.end != lexed.tokens[dot].span.start || !lsp_word_token(receiver) -> return LSPCompletionAfter.Stray
+    if receiver.span.end != lexed.tokens[dot].span.start || !lsp_word_token(receiver) {
+        return LSPCompletionAfter.Stray
+    }
     LSPCompletionAfter.Receiver{token: receiver}
 }
 
@@ -204,7 +208,7 @@ lsp_completion_after: fn(lexed: Lexed, start: Int) -> LSPCompletionAfter Never! 
 lsp_type_owner: fn(name: String) -> String Never! {
     if name.starts_with("[") -> return if name.contains(":") -> "Map" else -> "List"
     // `find` counts bytes, so the head is cut from the bytes.
-    cut := name.count_bytes()
+    ^cut: name.count_bytes()
     angle: name.find("<")
     if angle >= 0 -> cut = angle
     question: name.find("?")
@@ -288,16 +292,16 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     offset: lsp_checked_offset_bytes(lsp_line_table_bytes(bytes), bytes, position) ?? return lsp_error_response(id, -32602, "position is outside the document")
     start: lsp_completion_prefix_start(view.lexed, offset)
     prefix: foundation_byte_text(bytes, start, offset)
-    member := LSPMemberScope?{None}
+    ^member: LSPMemberScope?{None}
     after: lsp_completion_after(view.lexed, start)
     if after == {
         .Plain -> {}
         .Receiver(token) -> member = Val(lsp_member_scope(view, token.span.end - 1) ?? return lsp_response(id, "{{\"isIncomplete\":false,\"items\":[]}}"))
         .Stray -> return lsp_response(id, "{{\"isIncomplete\":false,\"items\":[]}}")
     }
-    seen := [String:Bool]{}
-    items := [String]{}
-    incomplete := false
+    ^seen: [String:Bool]{}
+    ^items: [String]{}
+    ^incomplete: false
     // Inside a marked block, the `lsp.completion` hooks of its marker's
     // package answer first.
     loop row in server.stage_items(view, TOOL_STAGE_LSP_COMPLETION, at: offset) {

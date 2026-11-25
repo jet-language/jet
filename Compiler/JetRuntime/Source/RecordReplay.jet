@@ -126,16 +126,16 @@ REPLAY_SELECT_CLOSED: I64{-2}
 // puts it back after (the runtime object exports it, JetBackend
 // X64_DEBUG_EVAL_STORAGE): the evaluation adds no event to a recording and
 // takes none from a replay.
-replay_mode := I64{0}
+^replay_mode: I64{0}
 
 // A replay's turn (jet_rt_replay_take_turn) and output check
 // (jet_rt_replay_output_verify) as code words, which replay_replay_start
 // installs before it sets the mode. 0 in a run that never replays, and a
 // program with no observation start links neither: a plain owned main's
 // print allocates nothing (JetIR EntryOwned.jet).
-replay_turn_code := I64{0}
+^replay_turn_code: I64{0}
 
-replay_verify_code := I64{0}
+^replay_verify_code: I64{0}
 
 // RuntimeLower resolves these checked function-address entries, never the bodies.
 rt_replay_take_turn_address: fn() -> I64 {
@@ -149,9 +149,9 @@ rt_replay_output_verify_address: fn() -> I64 {
 // State64: turn0, events8, eventCount16 (a replay's), data24, dataUsed32 (a
 // recording's cursor, a replay's length), path40 (a recording's text),
 // stopped48 (the first divergence's claim), exited56.
-replay_root := I64{0}
+^replay_root: I64{0}
 
-replay_started := I64{0}
+^replay_started: I64{0}
 
 replay_event: fn(turn: I64) -> I64 {
     wrapping(sync_load(wrapping(replay_root + I64{8})) + turn * REPLAY_EVENT_BYTES)
@@ -230,9 +230,9 @@ replay_replay_start: fn(path: I64) {
         return
     }
     size: host_call(I64{8}, fd, I64{0}, I64{2})
-    _ := host_call(I64{8}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{8}, fd, I64{0}, I64{0})
     region: if (size >= REPLAY_HEADER_BYTES) -> alloc_map_try(size) else -> I64{0}
-    got := I64{0}
+    ^got: I64{0}
     if (region != I64{0}) {
         loop got < size {
             read: host_call(I64{0}, fd, wrapping(region + got), wrapping(size - got))
@@ -241,7 +241,7 @@ replay_replay_start: fn(path: I64) {
             got = wrapping(got + read)
         }
     }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     whole: region != I64{0} && got == size
     count: if whole -> rt_text_word(wrapping(region + I64{16})) else -> I64{-1}
     bytes: if whole -> rt_text_word(wrapping(region + I64{24})) else -> I64{-1}
@@ -282,7 +282,7 @@ replay_shift: fn(value: I64, bits: I64) -> I64 {
 // The id of the `ordinal`th thing `maker` made: SplitMix64's finalizer over
 // the two, never 0 (no id) or 1 (a root).
 replay_mix: fn(maker: I64, ordinal: I64) -> I64 {
-    mixed := wrapping(wrapping(maker * I64{-7046029254386353131}) + ordinal)
+    ^mixed: wrapping(wrapping(maker * I64{-7046029254386353131}) + ordinal)
     mixed = wrapping((mixed ~ replay_shift(mixed, I64{30})) * I64{-4658895280553007687})
     mixed = wrapping((mixed ~ replay_shift(mixed, I64{27})) * I64{-7723592293110705685})
     mixed = mixed ~ replay_shift(mixed, I64{31})
@@ -333,10 +333,10 @@ replay_spawned: fn(control: I64) {
     id: replay_task(scheduler_control_current())
     if (id == I64{0}) { return I64{-1} }
     count: replay_count()
-    ticket := I64{-1}
-    seen := I64{-1}
-    waited := I64{0}
-    last := I64{0}
+    ^ticket: I64{-1}
+    ^seen: I64{-1}
+    ^waited: I64{0}
+    ^last: I64{0}
     loop {
         turn: sync_load(replay_root)
         if (turn >= count) {
@@ -369,7 +369,7 @@ replay_spawned: fn(control: I64) {
             }
         }
         last = now
-        _ := sync_wait(replay_root, turn, sync_deadline(REPLAY_POLL_NS))
+        ^_: sync_wait(replay_root, turn, sync_deadline(REPLAY_POLL_NS))
     }
     ticket
 }
@@ -407,8 +407,8 @@ replay_log_event: fn(kind: I64, object: I64) {
 // The FNV-1a hash of the `length` bytes at `bytes`, then an LF when `line`:
 // the text a print or eprint wrote.
 replay_output_hash: fn(bytes: I64, length: I64, line: Bool) -> I64 {
-    hash := I64{-3750763034362895579}
-    at := I64{0}
+    ^hash: I64{-3750763034362895579}
+    ^at: I64{0}
     loop at < length {
         hash = wrapping((hash ~ rt_text_byte(wrapping(bytes + at))) * I64{1099511628211})
         at += I64{1}
@@ -441,7 +441,7 @@ replay_output_record: fn(kind: I64, bytes: I64, length: I64, line: Bool) {
     if (ticket < I64{0}) {
         return
     }
-    _ := coll_call5(replay_verify_code, ticket, kind, bytes, length, if line -> I64{1} else -> I64{0})
+    ^_: coll_call5(replay_verify_code, ticket, kind, bytes, length, if line -> I64{1} else -> I64{0})
 }
 
 // `line` is 1 when the text ends in print's LF; the answer is always 0.
@@ -645,10 +645,10 @@ replay_write: fn() {
     // O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, owner-only.
     fd: host_call(I64{2}, name, I64{524865}, I64{384})
     if (fd >= I64{0}) {
-        _ := host_write_all(fd, header, REPLAY_HEADER_BYTES)
-        _ := host_write_all(fd, replay_event(I64{0}), count * REPLAY_EVENT_BYTES)
-        _ := host_write_all(fd, replay_data(), bytes)
-        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        ^_: host_write_all(fd, header, REPLAY_HEADER_BYTES)
+        ^_: host_write_all(fd, replay_event(I64{0}), count * REPLAY_EVENT_BYTES)
+        ^_: host_write_all(fd, replay_data(), bytes)
+        ^_: host_call(I64{3}, fd, I64{0}, I64{0})
     }
     alloc_unmap(header, size)
 }
@@ -682,7 +682,7 @@ replay_claim: fn() -> Bool {
     stopped: wrapping(replay_root + I64{48})
     claimed: sync_swap(stopped, I64{1}) == I64{0}
     if !claimed {
-        loop -> _ := sync_wait(stopped, I64{1}, I64{-1})
+        loop -> ^_: sync_wait(stopped, I64{1}, I64{-1})
     }
     claimed
 }
@@ -817,9 +817,9 @@ replay_channel_verb: fn(family: I64, failed: Bool) -> I64 {
 // `task N`: the main task is task 1, a spawned one numbered after it in the
 // recording's spawn order.
 replay_push_task: fn(text: I64, task: I64) {
-    number := if (task == I64{1}) -> I64{1} else -> I64{0}
-    spawns := I64{1}
-    at := I64{0}
+    ^number: if (task == I64{1}) -> I64{1} else -> I64{0}
+    ^spawns: I64{1}
+    ^at: I64{0}
     count: replay_count()
     loop number == (I64{0}) && at < count {
         event: replay_event(at)
@@ -847,16 +847,16 @@ replay_push_object: fn(text: I64, object: I64, low: I64, noun: I64) {
     }
     capacity: I64{4096}
     seen: jet_rt_alloc(capacity * I64{8}, I64{8})
-    known := I64{0}
-    number := I64{0}
-    at := I64{0}
+    ^known: I64{0}
+    ^number: I64{0}
+    ^at: I64{0}
     count: replay_count()
     loop number == (I64{0}) && at < count && known < capacity {
         event: replay_event(at)
         kind: sync_load(wrapping(event + I64{8}))
         named: sync_load(wrapping(event + I64{16}))
         if (kind >= low && kind < high && named != I64{0}) {
-            index := I64{0}
+            ^index: I64{0}
             loop index < known && sync_load(wrapping(seen + index * I64{8})) != named {
                 index += I64{1}
             }

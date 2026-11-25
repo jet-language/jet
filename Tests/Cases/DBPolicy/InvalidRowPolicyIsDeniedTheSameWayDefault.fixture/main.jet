@@ -1,7 +1,7 @@
 use db: core.db
 
 run: fn() {
-    conn := db.open_memory()
+    ^conn: db.open_memory()
     if db.policy("9tasks", "true") == {
         .Ok(_) -> { print("digit-table:accepted") }
         .Err(_) -> { print("digit-table:rejected") }
@@ -15,7 +15,7 @@ run: fn() {
         .Err(_) -> { print("other-expr:rejected") }
     }
     padded: db.policy("  tasks  ", "owner == user") ?? panic("padded policy")
-    scoped := conn.with_policy(padded, "alice")
+    ^scoped: conn.with_policy(padded, "alice")
     _created: db.migrate(scoped, "tasks-v1", [SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}]) ?? panic("create")
     owner: "bob"
     title: "one"

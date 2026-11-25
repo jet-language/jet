@@ -70,7 +70,7 @@ jet_cli_comparison_strings: fn(value: Dyn, key: String) -> [String] JetCLICompar
             return Err(jet_cli_comparison_error("`{key}` must be an array"))
         }
     }
-    result := [String]{}
+    ^result: [String]{}
     loop item in values {
         if item == .Text(text) -> result.push(text) else {
             return Err(jet_cli_comparison_error("`{key}` entries must be strings"))
@@ -97,8 +97,8 @@ jet_cli_comparison_binding: fn(root: Dyn) -> JetCLIComparisonBinding JetCLICompa
         }
     }
     keys: [String]{"boundary_digest", "source_identity", "replacement_identity", "tool_identity", "target_identity", "coverage_digest"}
-    fields := [String]{}
-    missing := false
+    ^fields: [String]{}
+    ^missing: false
     loop key in keys {
         child: jet_cli_comparison_value(binding, key) ?? {
             missing = true
@@ -116,7 +116,7 @@ jet_cli_comparison_binding: fn(root: Dyn) -> JetCLIComparisonBinding JetCLICompa
         }
         fields.push(text)
     }
-    assumptions := [String]{}
+    ^assumptions: [String]{}
     if jet_cli_comparison_value(binding, "assumptions") == .Val(child) {
         values: if {
             child == .Array(items) -> items
@@ -171,7 +171,7 @@ jet_cli_comparison_canonical_data: fn(value: Dyn) -> String Never! {
 jet_cli_comparison_observation: fn(value: Dyn, prefix: String, relation: ObservationRelation) -> ComparisonObservation JetCLIComparisonError! {
     child: jet_cli_comparison_value(value, prefix) ?? return Err(jet_cli_comparison_error("case observation `{prefix}` is missing"))
     raw: if child == .Text(text) -> text else -> jet_cli_comparison_canonical_data(child)
-    observation := ComparisonObservation{raw: raw, typed_failure: jet_cli_comparison_text(value, "{prefix}_failure"), mutation: jet_cli_comparison_text(value, "{prefix}_mutation"), ordered_effects: [String]{}, cleanup: [String]{}}
+    ^observation: ComparisonObservation{raw: raw, typed_failure: jet_cli_comparison_text(value, "{prefix}_failure"), mutation: jet_cli_comparison_text(value, "{prefix}_mutation"), ordered_effects: [String]{}, cleanup: [String]{}}
     if relation == ObservationRelation.OrderedEffects {
         observation.ordered_effects = jet_cli_comparison_strings(value, "{prefix}_effects")
         observation.cleanup = jet_cli_comparison_strings(value, "{prefix}_cleanup")
@@ -194,8 +194,8 @@ jet_cli_comparison_sample: fn(value: Dyn, index: Int, seed: U64?, source: String
     identity: ComparisonIdentity{case_id: case_id, input_id: input_id, seed: jet_cli_comparison_seed(value, seed), source: source, tool: tool, target: target}
     reference: jet_cli_comparison_observation(value, "reference", relation)
     candidate: jet_cli_comparison_observation(value, "candidate", relation)
-    reference_replay := ComparisonObservation?{None}
-    candidate_replay := ComparisonObservation?{None}
+    ^reference_replay: ComparisonObservation?{None}
+    ^candidate_replay: ComparisonObservation?{None}
     if jet_cli_comparison_value(value, "reference_replay") == .Val(_) {
         reference_replay = Val(jet_cli_comparison_observation(value, "reference_replay", relation))
     }
@@ -247,7 +247,7 @@ jet_cli_comparison_parse: fn(input: String, relation_override: String?) -> JetCL
         }
     }
     samples: loop (index, value) in cases -> jet_cli_comparison_sample(value, index, seed, source, tool, target, relation)
-    record := testing_compare_samples_with_discarded(relation, samples, discarded)
+    ^record: testing_compare_samples_with_discarded(relation, samples, discarded)
     if jet_cli_comparison_terminal(jet_cli_comparison_text(root, "status")) == .Val(status) {
         record.status = status
         record.reason = Val("recorded runner outcome is {comparison_status_as_str(status)}")
@@ -276,8 +276,8 @@ jet_cli_comparison_render: fn(record: ComparisonRecord, json: Bool) -> String Ne
         )
         return "{jet_cli_status_render("test-compare", record.status == ComparisonStatus.Matched, [JetCLIStatusField]{jet_cli_status_field("comparison", comparison)})}\n"
     }
-    out := "status={status} relation={relation} samples={record.samples.len()} reason={reason}"
-    mismatch := record.reduced_counterexample
+    ^out: "status={status} relation={relation} samples={record.samples.len()} reason={reason}"
+    ^mismatch: record.reduced_counterexample
     if mismatch == .None {
         if record.first_difference == .Val(index) {
             if index >= 0 && index < record.samples.len() -> mismatch = Val(record.samples[index])
@@ -312,7 +312,7 @@ JetCLIComparisonRead: enum {
 
 jet_cli_comparison_read: fn(target: String, args: [String], json: Bool) -[FS]> JetCLIComparisonRead Never! {
     input: comparison_files.read(target) ?? return JetCLIComparisonRead.Failed{output: jet_cli_comparison_error_output("cannot read comparison corpus `{target}`: {err}", json)}
-    relation := String?{None}
+    ^relation: String?{None}
     loop arg in args {
         if arg.starts_with("--relation=") {
             relation = Val(arg.removeprefix("--relation="))
@@ -333,7 +333,7 @@ jet_cli_comparison_run: fn(target: String, argv: [String], json: Bool, terminal:
     if jet_cli_comparison_read(target, argv, json) == {
         .Failed(output) -> output
         .Ready(run) -> {
-            output := jet_cli_comparison_output(run, json)
+            ^output: jet_cli_comparison_output(run, json)
             if jet_cli_comparison_persist(run, target, argv, terminal) == .Err(error) {
                 output.stderr = jet_cli_history_notice("writing a comparison record", error.message)
             }

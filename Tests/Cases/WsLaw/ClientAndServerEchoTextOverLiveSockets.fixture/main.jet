@@ -22,7 +22,7 @@ run: fn() {
     serving: task { mux.serve_once(listener) ?? panic("serve") }
     client: ws.connect("ws://{addr}/live") ?? panic("connect")
     client.send_text("ping") ?? panic("client send")
-    reply := client.recv() ?? panic("client recv")
+    ^reply: client.recv() ?? panic("client recv")
     loop {
         if reply.is_text() && (reply.text() ?? panic("text")) == "echo:ping" -> break
         reply = client.recv() ?? panic("client recv")

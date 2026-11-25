@@ -72,12 +72,12 @@ BUILD_DEBUG: Shared{BuildDebugHook{events: [Sender<BuildDebugEvent>]{}, lines: [
 // Opens the hook for the console of process `tracer`: the build's events
 // go to `events` until build_debug_close.
 build_debug_open: fn(events: Sender<BuildDebugEvent>, lines: [BuildDebugLine], tracer: Int) Never! {
-    held := BUILD_DEBUG.guard_edit()
+    ^held: BUILD_DEBUG.guard_edit()
     held.value = BuildDebugHook{events: [Sender<BuildDebugEvent>]{events}, lines: lines, tracer: tracer, sources: [SourceFile]{}}
 }
 
 build_debug_close: fn() Never! {
-    held := BUILD_DEBUG.guard_edit()
+    ^held: BUILD_DEBUG.guard_edit()
     held.value = BuildDebugHook{events: [Sender<BuildDebugEvent>]{}, lines: [BuildDebugLine]{}, tracer: 0, sources: [SourceFile]{}}
 }
 
@@ -95,7 +95,7 @@ build_debug_tracer: fn() -> Int Never! {
 
 // The console's breakpoints now wait on `lines`.
 build_debug_set_lines: fn(lines: [BuildDebugLine]) Never! {
-    held := BUILD_DEBUG.guard_edit()
+    ^held: BUILD_DEBUG.guard_edit()
     held.value.lines = lines
 }
 
@@ -122,37 +122,39 @@ build_debug_names: fn(wanted: String, path: String) -> Bool Never! {
 // builds reads its lines from them (JetEval Values.jet
 // jet_eval_ir_watched_sources). Nothing while the hook is closed.
 build_debug_keep_sources: fn(files: [SourceFile]) Never! {
-    held := BUILD_DEBUG.guard_edit()
-    if held.value.events.len() == 0 -> return
+    ^held: BUILD_DEBUG.guard_edit()
+    if held.value.events.len() == 0 {
+        return
+    }
     loop file in files {
-        kept := false
+        ^kept: false
         loop source in held.value.sources {
             if source.path == file.path -> kept = true
         }
-        if !kept -> held.value.sources.push(SourceFile{id: file.id, path: file.path, source: file.source})
+        if !kept {
+            held.value.sources.push(SourceFile{id: file.id, path: file.path, source: file.source})
+        }
     }
 }
 
 // Tells the console `event`, without waiting; nothing while the hook is
 // closed.
-build_debug_tell: fn(event: ^^BuildDebugEvent) Never! {
-    _ := build_debug_send(event.move())
-}
+build_debug_tell: fn(event: ^^BuildDebugEvent) Never! { ^_: build_debug_send(event.move()) }
 
 // Tells the console `event` and waits for its answer: once it has placed
 // what it places, or once the stop it shows is continued. Returns at once
 // while the hook is closed, or when the console is gone.
 build_debug_ask: fn(event: ^^BuildDebugEvent) -[Time.Wait]> Never! {
     { sender: reply, receiver: answer }: channel<Bool>(capacity: 1)
-    asked := event.move()
+    ^asked: event.move()
     asked.reply = Val(reply)
-    if build_debug_send(asked.move()) -> _ := answer.receive() ?? false
+    if build_debug_send(asked.move()) -> ^_: answer.receive() ?? false
 }
 
 // Whether the console took `event`; a console that is gone closes the hook,
 // and the build runs on unwatched.
 build_debug_send: fn(event: ^^BuildDebugEvent) -> Bool Never! {
-    held := BUILD_DEBUG.guard_edit()
+    ^held: BUILD_DEBUG.guard_edit()
     if held.value.events.len() == 0 -> return false
     held.value.events[0].send(event.move()) ?? {
         held.value.events.clear()

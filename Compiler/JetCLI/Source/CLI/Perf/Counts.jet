@@ -34,9 +34,9 @@ jet_cli_perf_attach_command: fn(command: [String], out: String?, allowlist: [Str
     if counted.failure != "" {
         return jet_cli_perf_failed("Jet can't run `{name}`: {counted.failure}", color)
     }
-    capture := jet_cli_perf_counts_capture(counted, wall, jet_cli_perf_counts_paranoid())
+    ^capture: jet_cli_perf_counts_capture(counted, wall, jet_cli_perf_counts_paranoid())
     capture.policy.allowlist = allowlist
-    argv := [String]{"attach", "--lens=counts"}
+    ^argv: [String]{"attach", "--lens=counts"}
     if allowlist.len() > 0 {
         argv.push("--capture")
         argv.push(allowlist.join(","))
@@ -67,7 +67,7 @@ jet_cli_perf_counts_paranoid: fn() -[FS]> Int? Never! {
 // A counted command's capture: its `counts` receipt section the trace's
 // only one (jet_cli_perf_counts_section).
 jet_cli_perf_counts_capture: fn(counted: X64Counted, wall_ns: Int, paranoid: Int?) -> JetCLIPerfCapture Never! {
-    capture := jet_cli_perf_command_capture("a counted command keeps totals, not samples: its `counts` receipt section", counted.cpu_ns, wall_ns)
+    ^capture: jet_cli_perf_command_capture("a counted command keeps totals, not samples: its `counts` receipt section", counted.cpu_ns, wall_ns)
     capture.receipts.push(jet_cli_perf_counts_section(counted, wall_ns, paranoid))
     capture
 }
@@ -83,7 +83,7 @@ jet_cli_perf_command_capture: fn(why: String, cpu_ns: Int, wall_ns: Int) -> JetC
 // its rows are in, and its run window the command's whole run, as
 // jet_cli_perf_command_capture's.
 jet_cli_perf_command_profiled: fn(profile: TraceProfile, sources: [SourceIdentity], cpu_ns: Int, wall_ns: Int) -> JetCLIPerfCapture Never! {
-    capture := jet_cli_perf_capture_new(profile, sources)
+    ^capture: jet_cli_perf_capture_new(profile, sources)
     jet_cli_perf_window(capture.profile, JetCLIPerfRuntimeWindow{elapsed_ns: U64{wall_ns}, cpu_ns: Val(U64{cpu_ns}), exit: true})
     capture.profile.window_reason = "the command's whole run, from jet starting it to jet reaping it, on jet's monotonic clock; its CPU is the user and system time the reap reported, every child it waited for included"
     capture
@@ -158,7 +158,7 @@ jet_cli_perf_counts_text: fn(value: CanonicalJSON) -> String Never! {
 
 // The `counts` line of each `counts` receipt section of `trace`.
 jet_cli_perf_counts_lines: fn(trace: CanonicalJSON) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next

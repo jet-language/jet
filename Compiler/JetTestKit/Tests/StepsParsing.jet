@@ -110,7 +110,7 @@ kit_test_steps_env: fn() -> KitEnv {
     assert_eq(quiet.status, "FAIL")
     assert_eq(quiet.detail, "exit 1; expected 0")
     assert_eq(quiet.diff, "--- streams/case: step run: `./fragment isolated` exit 1\n(stdout and stderr empty)\n")
-    lines := [String]{}
+    ^lines: [String]{}
     loop at in 0..<30 -> lines.push("line {at}")
     loud: KitRun{stdout: "", stderr: lines.join("\n"), code: 1, signal: None, timed_out: false, error: ""}
     told: kit_steps_check(plan.steps[0], context, KitStepState{last: loud, built: "", built_once: false}, "")
@@ -242,7 +242,7 @@ kit_test_steps_env: fn() -> KitEnv {
 
 #Test("exit relation checks exact optional status and membership failures") {
     run: KitRun{stdout: "", stderr: "", code: 7, signal: None, timed_out: false, error: ""}
-    state := KitStepState{last: run, built: "", built_once: false, history: [KitCapturedStep{label: "prior", stdout: "", stderr: "", elapsed_ns: 0, code: Val(7)}]}
+    ^state: KitStepState{last: run, built: "", built_once: false, history: [KitCapturedStep{label: "prior", stdout: "", stderr: "", elapsed_ns: 0, code: Val(7)}]}
     relation: KitAssertion{stream: "exit", path: "", mode: "==", value: "prior"}
     assert_eq(kit_steps_exit_test(relation, state).status, "PASS")
     state.last.code = 8

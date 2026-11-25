@@ -22,15 +22,15 @@ use {
 /// Build a chart plan. Values shorter than labels are explicit zero-valued
 /// observations; excess values are not silently rendered without an x label.
 plot: fn(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetDataPlotPlan Never! {
-    xs := [String]{}
+    ^xs: [String]{}
     loop label in labels -> xs.push(label.copy())
-    ys := [Float]{}
+    ^ys: [Float]{}
     loop i in 0..<labels.len() {
         if i < values.len() -> ys.push(values[i]) else -> ys.push(Float{0.0})
     }
-    h := 24 * xs.len() + 16
+    ^h: 24 * xs.len() + 16
     if mark == JetDataPlotMark.Line || mark == JetDataPlotMark.Point -> h = 120
-    fields := [JetDataPlotField]{JetDataPlotField{name: "x", kind: JetDataPlotValue.Text}, JetDataPlotField{name: "y", kind: JetDataPlotValue.Number}}
+    ^fields: [JetDataPlotField]{JetDataPlotField{name: "x", kind: JetDataPlotValue.Text}, JetDataPlotField{name: "y", kind: JetDataPlotValue.Number}}
     {
         mark: mark,
         labels: xs,
@@ -42,25 +42,25 @@ plot: fn(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetDataPlo
 }
 
 bar_text: fn(labels: [String], values: [Int]) -> String Never! {
-    ys := [Float]{}
+    ^ys: [Float]{}
     loop v in values -> ys.push(Float{v})
     render_bar_text(labels, align_values(labels, ys))
 }
 
 bar_svg: fn(labels: [String], values: [Int]) -> String Never! {
-    ys := [Float]{}
+    ^ys: [Float]{}
     loop v in values -> ys.push(Float{v})
     render_bar_svg(labels, align_values(labels, ys))
 }
 
 line_text: fn(labels: [String], values: [Int]) -> String Never! {
-    ys := [Float]{}
+    ^ys: [Float]{}
     loop v in values -> ys.push(Float{v})
     render_line_text(labels, align_values(labels, ys))
 }
 
 line_svg: fn(labels: [String], values: [Int]) -> String Never! {
-    ys := [Float]{}
+    ^ys: [Float]{}
     loop v in values -> ys.push(Float{v})
     render_line_svg(labels, align_values(labels, ys))
 }
@@ -68,7 +68,7 @@ line_svg: fn(labels: [String], values: [Int]) -> String Never! {
 inspect: fn(labels: [String], values: [Int]) -> String Never! { bar_text(labels, values) }
 
 inspect_json: fn(plan: JetDataPlotPlan) -> String Never! {
-    mark := "bar"
+    ^mark: "bar"
     if plan.mark == JetDataPlotMark.Line -> mark = "line"
     if plan.mark == JetDataPlotMark.Point -> mark = "point"
     "{{\"mark\":\"{mark}\",\"n\":{plan.labels.len()},\"width\":{plan.layout.width},\"height\":{plan.layout.height}}}"
@@ -101,11 +101,11 @@ text: fn(plan: JetDataPlotPlan) -> String Never! {
 show: fn(plan: JetDataPlotPlan) -> String Never! { text(plan) }
 
 normalize_plan: fn(plan: JetDataPlotPlan) -> JetDataPlotPlan {
-    ys := [Float]{}
+    ^ys: [Float]{}
     loop i in 0..<plan.labels.len() {
         if i < plan.values.len() -> ys.push(plan.values[i]) else -> ys.push(Float{0.0})
     }
-    h := plan.layout.height
+    ^h: plan.layout.height
     if plan.mark == JetDataPlotMark.Line || plan.mark == JetDataPlotMark.Point -> h = 120
     if h < 16 -> h = 16
     JetDataPlotPlan{
@@ -119,7 +119,7 @@ normalize_plan: fn(plan: JetDataPlotPlan) -> JetDataPlotPlan {
 }
 
 align_values: fn(labels: [String], values: [Float]) -> [Float] {
-    out := [Float]{}
+    ^out: [Float]{}
     loop i in 0..<labels.len() {
         if i < values.len() -> out.push(values[i]) else -> out.push(Float{0.0})
     }
@@ -130,20 +130,20 @@ render_bar_text: fn(labels: [String], values: [Float]) -> String {
     bounds: value_bounds(values)
     minimum: bounds.min
     maximum: bounds.max
-    baseline := scale_between(Float{0.0}, minimum, maximum, 20)
-    out := ""
+    ^baseline: scale_between(Float{0.0}, minimum, maximum, 20)
+    ^out: ""
     loop i in 0..<labels.len() {
-        v := values[i]
-        bar := ""
+        ^v: values[i]
+        ^bar: ""
         if v >= (Float{0.0}) {
-            width := 0
+            ^width: 0
             if maximum > (Float{0.0}) {
                 width = scale_between(v, Float{0.0}, maximum, 20 - baseline)
             }
             loop _ in 0..<baseline -> bar = "{bar} "
             loop _ in 0..<width -> bar = "{bar}#"
         } else {
-            width := 0
+            ^width: 0
             if minimum < (Float{0.0}) -> width = scale_between(v, minimum, Float{0.0}, baseline)
             loop _ in 0..<width -> bar = "{bar}<"
         }
@@ -156,16 +156,16 @@ render_bar_svg: fn(labels: [String], values: [Float]) -> String {
     bounds: value_bounds(values)
     minimum: bounds.min
     maximum: bounds.max
-    baseline := 100
+    ^baseline: 100
     if maximum > minimum -> baseline = scale_between(Float{0.0}, minimum, maximum, 200)
-    w := 320
-    h := 24 * labels.len() + 16
-    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
+    ^w: 320
+    ^h: 24 * labels.len() + 16
+    ^out: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
     loop i in 0..<labels.len() {
-        v := values[i]
-        y := 8 + i * 24
-        x := 80 + baseline
-        bw := 0
+        ^v: values[i]
+        ^y: 8 + i * 24
+        ^x: 80 + baseline
+        ^bw: 0
         if v >= (Float{0.0}) {
             if maximum > (Float{0.0}) -> bw = scale_between(v, Float{0.0}, maximum, 200 - baseline)
         } else {
@@ -179,25 +179,25 @@ render_bar_svg: fn(labels: [String], values: [Float]) -> String {
 }
 
 render_line_text: fn(labels: [String], values: [Float]) -> String {
-    out := ""
+    ^out: ""
     loop i in 0..<labels.len() -> out = "{out}{labels[i]}={values[i]}\n"
     out
 }
 
 render_point_text: fn(labels: [String], values: [Float]) -> String {
-    out := ""
+    ^out: ""
     loop i in 0..<labels.len() -> out = "{out}{labels[i]}: {values[i]}\n"
     out
 }
 
 render_line_svg: fn(labels: [String], values: [Float]) -> String {
     n: labels.len()
-    w := 320
-    h := 120
+    ^w: 320
+    ^h: 120
     bounds: value_bounds(values)
-    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\"><polyline fill=\"none\" stroke=\"#4a90d9\" points=\""
+    ^out: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\"><polyline fill=\"none\" stroke=\"#4a90d9\" points=\""
     loop i in 0..<n {
-        x := 8
+        ^x: 8
         if n > 1 -> x = i * (w - 16) /% (n - 1) + 8
         y: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
         if i > 0 -> out = "{out} "
@@ -208,12 +208,12 @@ render_line_svg: fn(labels: [String], values: [Float]) -> String {
 
 render_point_svg: fn(labels: [String], values: [Float]) -> String {
     n: labels.len()
-    w := 320
-    h := 120
+    ^w: 320
+    ^h: 120
     bounds: value_bounds(values)
-    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
+    ^out: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
     loop i in 0..<n {
-        x := 8
+        ^x: 8
         if n > 1 -> x = i * (w - 16) /% (n - 1) + 8
         y: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
         out = "{out}<circle cx=\"{x}\" cy=\"{y}\" r=\"3\" fill=\"#4a90d9\"/>"
@@ -223,8 +223,8 @@ render_point_svg: fn(labels: [String], values: [Float]) -> String {
 }
 
 value_bounds: fn(values: [Float]) -> {min: Float, max: Float} {
-    minimum := Float{0.0}
-    maximum := Float{0.0}
+    ^minimum: Float{0.0}
+    ^maximum: Float{0.0}
     loop value in values {
         if value < minimum -> minimum = value
         if value > maximum -> maximum = value
@@ -238,17 +238,17 @@ value_bounds: fn(values: [Float]) -> {min: Float, max: Float} {
 
 scale_between: fn(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int {
     if extent <= 0 || maximum <= minimum -> return 0
-    ratio := (value - minimum) / (maximum - minimum)
+    ^ratio: (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
     if ratio >= (Float{1.0}) -> return extent
     checked(Int{math.trunc(ratio * (Float{extent}))}) ?? panic("plot coordinate must be finite")
 }
 
 xml_escape: fn(text: String) -> String {
-    out := ""
-    chunk := [U8]{}
+    ^out: ""
+    ^chunk: [U8]{}
     loop b in text.bytes() {
-        entity := ""
+        ^entity: ""
         if b == (U8{38}) -> entity = "&amp;" else if b == (U8{60}) -> entity = "&lt;" else if b == (U8{62}) {
             entity = "&gt;"
         } else if b == (U8{34}) { entity = "&quot;" } else if b == (U8{39}) { entity = "&apos;" }

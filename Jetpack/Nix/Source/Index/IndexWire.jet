@@ -198,7 +198,7 @@ NixIndexRecordWire: struct {
     outputs: [NixIndexOutputWire],
 
     from_record: fn(record: NixIndexRecord) -> NixIndexRecordWire Never! {
-        outputs := [NixIndexOutputWire]{}
+        ^outputs: [NixIndexOutputWire]{}
         names: nixeval_sorted(record.outputs.keys().to_list())
         loop name in names {
             outputs.push(NixIndexOutputWire{name: name.copy(), store_path: record.outputs[name]})
@@ -207,13 +207,13 @@ NixIndexRecordWire: struct {
     }
 
     record: fn(self) -> NixIndexRecord Never! {
-        outputs := [String:String]{}
+        ^outputs: [String:String]{}
         loop output in self.outputs -> outputs[output.name] = output.store_path
         NixIndexRecord{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs: nixeval_key_ordered(outputs)}
     }
 
     tree: fn(self) -> Dyn Never! {
-        outputs := [Dyn]{}
+        ^outputs: [Dyn]{}
         loop output in self.outputs -> outputs.push(output.tree())
         Dyn.Object(
             [
@@ -227,7 +227,7 @@ NixIndexRecordWire: struct {
 
     // This record with its outputs in name order.
     sorted: fn(self) -> NixIndexRecordWire Never! {
-        outputs := self.outputs.copy()
+        ^outputs: self.outputs.copy()
         outputs.sort_by(fn(left: NixIndexOutputWire, right: NixIndexOutputWire) { left.name <=> right.name })
         NixIndexRecordWire{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs: outputs}
     }
@@ -289,7 +289,7 @@ NixIndexDocument: struct {
         if self.records.len() > NIX_INDEX_MAX_RECORDS {
             return Err(NixIndexError.Invalid("nix index has too many records"))
         }
-        records := [String:Bool]{}
+        ^records: [String:Bool]{}
         loop record in self.records {
             nix_index_validate_attrpath(record.attrpath)
             key: nix_index_attrpath_key(record.attrpath)
@@ -304,8 +304,8 @@ NixIndexDocument: struct {
             if record.outputs.len() == 0 {
                 return Err(NixIndexError.Invalid("nix index record has no outputs"))
             }
-            output_names := [String]{}
-            output_paths := [String]{}
+            ^output_names: [String]{}
+            ^output_paths: [String]{}
             loop output in record.outputs {
                 if output.name == "" || pkg_text_has_control(output.name) || output_names.contains(output.name) {
                     return Err(NixIndexError.Invalid("nix index record has duplicate output names"))
@@ -321,7 +321,7 @@ NixIndexDocument: struct {
                 return Err(NixIndexError.Invalid("nix index record has neither a primary `out` nor `bin` output"))
             }
         }
-        indexed := [String:Bool]{}
+        ^indexed: [String:Bool]{}
         loop attrpath in self.coverage.indexed {
             nix_index_validate_attrpath(attrpath)
             key: nix_index_attrpath_key(attrpath)
@@ -333,7 +333,7 @@ NixIndexDocument: struct {
         if !nix_index_same_keys(indexed, records) {
             return Err(NixIndexError.Invalid("nix index coverage does not exactly match indexed records"))
         }
-        misses := [String:Bool]{}
+        ^misses: [String:Bool]{}
         reasons: NIX_INDEX_COVERAGE_REASONS
         loop miss in self.coverage.not_indexed {
             nix_index_validate_attrpath(miss.attrpath)
@@ -354,18 +354,18 @@ NixIndexDocument: struct {
     // The canonical, signed encoding: records, outputs and coverage sorted.
     canonical_bytes: fn(self) -> [U8] NixIndexError! {
         self.validate()
-        records := [NixIndexRecordWire]{}
+        ^records: [NixIndexRecordWire]{}
         loop record in self.records -> records.push(record.sorted())
         records.sort_by(fn(left: NixIndexRecordWire, right: NixIndexRecordWire) { nix_index_attrpath_order(left.attrpath, right.attrpath) })
-        indexed := self.coverage.indexed.copy()
+        ^indexed: self.coverage.indexed.copy()
         indexed.sort_by(fn(left: [String], right: [String]) { nix_index_attrpath_order(left, right) })
-        misses := self.coverage.not_indexed.copy()
+        ^misses: self.coverage.not_indexed.copy()
         misses.sort_by(fn(left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) { nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason) })
-        record_trees := [Dyn]{}
+        ^record_trees: [Dyn]{}
         loop record in records -> record_trees.push(record.tree())
-        indexed_trees := [Dyn]{}
+        ^indexed_trees: [Dyn]{}
         loop attrpath in indexed -> indexed_trees.push(pkg_json_texts(attrpath))
-        miss_trees := [Dyn]{}
+        ^miss_trees: [Dyn]{}
         loop miss in misses -> miss_trees.push(miss.tree())
         Ok(
             pkg_json_render(
@@ -394,7 +394,7 @@ NixIndexDocument: struct {
 
     // The miss for `key`: its recorded coverage reason, or `not-listed`.
     not_indexed: fn(self, key: NixIndexKey) -> NixIndexError Never! {
-        reason := "not-listed"
+        ^reason: "not-listed"
         loop miss in self.coverage.not_indexed {
             if miss.attrpath == key.attrpath {
                 reason = miss.reason
@@ -492,7 +492,7 @@ NixIndexChannelManifest: struct {
         value: nix_index_parse_json(text, "parse nix index manifest JSON")
         map: nix_index_object(value, "nix index manifest")
         nix_index_reject_unknown(map, [String]{"schema", "channel", "generation", "issued_unix", "expires_unix", "targets"})
-        targets := [NixIndexManifestTarget]{}
+        ^targets: [NixIndexManifestTarget]{}
         target_values: nix_index_array_field(map, "targets")
         loop target in target_values -> targets.push(nix_index_parse_manifest_target(target))
         manifest: NixIndexChannelManifest{
@@ -518,7 +518,7 @@ NixIndexChannelManifest: struct {
         if self.expires_unix <= self.issued_unix {
             return Err(NixIndexError.Invalid("nix index manifest expiry is not after issue time"))
         }
-        keys := [String]{}
+        ^keys: [String]{}
         loop target in self.targets {
             nix_index_validate_revision(target.revision)
             nix_index_validate_system(target.system)
@@ -549,9 +549,9 @@ NixIndexChannelManifest: struct {
 
     canonical_bytes: fn(self) -> [U8] NixIndexError! {
         self.validate()
-        targets := self.targets.copy()
+        ^targets: self.targets.copy()
         targets.sort_by(fn(left: NixIndexManifestTarget, right: NixIndexManifestTarget) { (left.revision <=> right.revision).then(left.system <=> right.system) })
-        trees := [Dyn]{}
+        ^trees: [Dyn]{}
         loop target in targets -> trees.push(target.tree())
         Ok(
             pkg_json_render(
@@ -599,10 +599,10 @@ nix_index_parse_local_native_recipes: fn(bytes: [U8]) -> [NixNativeRecipe] NixIn
     if values.len() > NIX_INDEX_MAX_RECORDS {
         return Err(NixIndexError.Invalid("local unofficial native catalog has too many recipes"))
     }
-    recipes := [NixNativeRecipe]{}
+    ^recipes: [NixNativeRecipe]{}
     loop item in values -> recipes.push(nix_index_parse_native_recipe(item))
     recipes.sort_by(fn(left: NixNativeRecipe, right: NixNativeRecipe) { (left.name <=> right.name).then(left.version <=> right.version) })
-    identities := [String]{}
+    ^identities: [String]{}
     loop recipe in recipes {
         identity: "{recipe.name}\n{recipe.version}"
         if identities.contains(identity) {
@@ -673,9 +673,9 @@ nix_index_validate_native_recipe_url: fn(url: String) NixIndexError! {
 }
 
 nix_index_canonical_native_recipes_bytes: fn(recipes: [NixNativeRecipe]) -> [U8] Never! {
-    sorted := recipes.copy()
+    ^sorted: recipes.copy()
     sorted.sort_by(fn(left: NixNativeRecipe, right: NixNativeRecipe) { (left.name <=> right.name).then(left.version <=> right.version) })
-    trees := [Dyn]{}
+    ^trees: [Dyn]{}
     loop recipe in sorted -> trees.push(recipe.tree())
     pkg_json_render(Dyn.Object(["schema": Dyn.Int(1), "recipes": Dyn.Array(trees)])).bytes()
 }
@@ -685,7 +685,7 @@ nix_index_parse_records: fn(value: Dyn) -> [NixIndexRecordWire] NixIndexError! {
     if values.len() > NIX_INDEX_MAX_RECORDS {
         return Err(NixIndexError.Invalid("nix index has too many records"))
     }
-    records := [NixIndexRecordWire]{}
+    ^records: [NixIndexRecordWire]{}
     loop item in values -> records.push(nix_index_parse_record(item))
     Ok(records)
 }
@@ -693,7 +693,7 @@ nix_index_parse_records: fn(value: Dyn) -> [NixIndexRecordWire] NixIndexError! {
 nix_index_parse_record: fn(value: Dyn) -> NixIndexRecordWire NixIndexError! {
     map: nix_index_object(value, "nix index record")
     nix_index_reject_unknown(map, [String]{"attrpath", "version", "drvPath", "outputs"})
-    outputs := [NixIndexOutputWire]{}
+    ^outputs: [NixIndexOutputWire]{}
     output_values: nix_index_array_field(map, "outputs")
     loop output in output_values -> outputs.push(nix_index_parse_output(output))
     Ok(
@@ -715,10 +715,10 @@ nix_index_parse_output: fn(value: Dyn) -> NixIndexOutputWire NixIndexError! {
 nix_index_parse_coverage: fn(value: Dyn) -> NixIndexCoverage NixIndexError! {
     map: nix_index_object(value, "nix index coverage")
     nix_index_reject_unknown(map, [String]{"indexed", "notIndexed"})
-    indexed := [[String]]{}
+    ^indexed: [[String]]{}
     indexed_values: nix_index_array_field(map, "indexed")
     loop item in indexed_values -> indexed.push(nix_index_parse_attrpath(item))
-    not_indexed := [NixIndexCoverageMiss]{}
+    ^not_indexed: [NixIndexCoverageMiss]{}
     miss_values: nix_index_array_field(map, "notIndexed")
     loop item in miss_values {
         miss: nix_index_object(item, "nix index coverage miss")
@@ -729,7 +729,7 @@ nix_index_parse_coverage: fn(value: Dyn) -> NixIndexCoverage NixIndexError! {
 }
 
 nix_index_parse_attrpath: fn(value: Dyn) -> [String] NixIndexError! {
-    attrpath := [String]{}
+    ^attrpath: [String]{}
     segments: nix_index_value_array(value, "attrpath")
     loop segment in segments -> attrpath.push(nix_index_string_value(segment, "attrpath segment"))
     Ok(attrpath)
@@ -815,7 +815,7 @@ nix_index_validate_url: fn(url: String) NixIndexError! {
 
 // `127.0.0.1`, `localhost` or `::1`, with an optional port or brackets.
 nix_index_is_loopback_host: fn(authority: String) -> Bool Never! {
-    host := authority
+    ^host: authority
     if authority.starts_with("[") -> host = authority.removeprefix("[").split("]").to_list()[0] else {
         host = authority.split(":").to_list()[0]
     }
@@ -960,7 +960,7 @@ nix_index_parse_endpoint: fn(endpoint: String) -> String NixIndexError! {
             return Err(NixIndexError.Invalid("plain HTTP nix index endpoints must use loopback"))
         }
     }
-    trimmed := endpoint
+    ^trimmed: endpoint
     loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
     Ok(trimmed)
 }

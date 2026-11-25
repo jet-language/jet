@@ -34,7 +34,7 @@ lint_policy_code_error: fn(detail: String, code: String, name: String?) -> LintP
 
 // Every current lint-severity row; a retired lint is never reported.
 lint_registered_lints: fn() -> [DiagnosticRegistryRow] Never! {
-    rows := [DiagnosticRegistryRow]{}
+    ^rows: [DiagnosticRegistryRow]{}
     loop row in DIAGNOSTIC_ROWS {
         if row.severity == DIAGNOSTIC_LINT && row.status != DiagnosticRegistryStatus.Retired {
             rows.push(row)
@@ -88,7 +88,7 @@ lint_selection_code_error: fn(value: String, surface: String, span: Span?) -> Di
 // The `lints:` part of a package policy.
 lint_parse_policy_lints: fn(body: String) -> [String]? LintPolicyError! {
     lints_body: lint_block_body(body, LINT_POLICY_FIELD_LINTS) ?? return Ok(None)
-    deny := [String]{}
+    ^deny: [String]{}
     loop entry in lint_key_value_entries(lints_body) {
         if entry.key != LINT_POLICY_FIELD_DENY {
             return Err(lint_policy_error("unknown `policy.lints` field `{entry.key}` — allowed: `{LINT_POLICY_FIELD_DENY}`"))
@@ -110,10 +110,10 @@ lint_parse_package_source: fn(source: String) -> [String]? LintPolicyError! {
 // newline is kept.
 lint_strip_comments: fn(value: String) -> String Never! {
     raw: value.bytes()
-    out := [U8]{}
-    quoted := false
-    escaped := false
-    at := 0
+    ^out: [U8]{}
+    ^quoted: false
+    ^escaped: false
+    ^at: 0
     loop at < raw.len() {
         code: Int{raw[at]}
         if {
@@ -148,7 +148,7 @@ lint_parse_name_list: fn(value: String) -> [String] LintPolicyError! {
     if !text.starts_with("[") || !text.ends_with("]") || text.bytes().len() < 2 {
         return Err(lint_policy_error("`{LINT_POLICY_FIELD_DENY}:` must be a list like `[same_enum_guard_table, float_money]`"))
     }
-    names := [String]{}
+    ^names: [String]{}
     loop item in lint_top_level_commas(foundation_byte_text(text.bytes(), 1, text.bytes().len() - 1)) {
         entry: item.trim()
         if entry == "" -> next
@@ -169,7 +169,7 @@ lint_parse_name_list: fn(value: String) -> [String] LintPolicyError! {
 
 // The names `policy.lints.deny` takes: lint_by_name finds only a named row.
 lint_known_policy_names: fn() -> String Never! {
-    names := [String]{}
+    ^names: [String]{}
     loop row in lint_registered_lints() {
         if row.lint_name == .Val(name) -> names.push("`{name}`")
     }
@@ -194,9 +194,9 @@ lint_is_diagnostic_code_shape: fn(value: String) -> Bool Never! {
 lint_block_body: fn(text: String, key: String) -> String? Never! {
     raw: text.bytes()
     pattern: key.bytes()
-    at := 0
-    quoted := false
-    escaped := false
+    ^at: 0
+    ^quoted: false
+    ^escaped: false
     loop at < raw.len() {
         code: Int{raw[at]}
         width: diagnostic_utf8_width(raw, at)
@@ -218,7 +218,7 @@ lint_block_body: fn(text: String, key: String) -> String? Never! {
         if lint_bytes_at(raw, at, pattern) && lint_preceded_ok(raw, at) {
             after: foundation_byte_text(raw, at + pattern.len(), raw.len()).trim_start()
             if after.starts_with(":") {
-                rest := after.removeprefix(":").trim_start()
+                ^rest: after.removeprefix(":").trim_start()
                 if rest.starts_with(".") -> rest = rest.removeprefix(".").trim_start()
                 if rest.starts_with("{{") -> return Val(lint_balanced(rest.bytes()))
             }
@@ -239,7 +239,7 @@ lint_bytes_at: fn(raw: [U8], at: Int, pattern: [U8]) -> Bool Never! {
 // No alphanumeric or `_` character immediately before the key.
 lint_preceded_ok: fn(raw: [U8], at: Int) -> Bool Never! {
     if at == 0 -> return true
-    start := at - 1
+    ^start: at - 1
     loop start > 0 && (Int{raw[start]}) >= 128 && (Int{raw[start]}) <= 191 -> start -= 1
     previous: foundation_byte_text(raw, start, at)
     previous != "_" && !lint_unicode.is_alphabetic(previous) && !lint_unicode.is_numeric(previous)
@@ -248,10 +248,10 @@ lint_preceded_ok: fn(raw: [U8], at: Int) -> Bool Never! {
 // `raw` starts at the opening brace; the text up to its matching close (or the
 // rest when unclosed).
 lint_balanced: fn(raw: [U8]) -> String Never! {
-    depth := 1
-    quoted := false
-    escaped := false
-    at := 1
+    ^depth: 1
+    ^quoted: false
+    ^escaped: false
+    ^at: 1
     loop at < raw.len() {
         code: Int{raw[at]}
         if {
@@ -278,11 +278,11 @@ lint_balanced: fn(raw: [U8]) -> String Never! {
 // Split at depth-0 commas outside quotes; a blank tail is dropped.
 lint_top_level_commas: fn(body: String) -> [String] Never! {
     raw: body.bytes()
-    out := [String]{}
-    depth := 0
-    quoted := false
-    escaped := false
-    start := 0
+    ^out: [String]{}
+    ^depth: 0
+    ^quoted: false
+    ^escaped: false
+    ^start: 0
     loop at in 0..<raw.len() {
         code: Int{raw[at]}
         if quoted {
@@ -314,7 +314,7 @@ lint_top_level_commas: fn(body: String) -> [String] Never! {
 
 // `key: value` pairs, trimmed.
 lint_key_value_entries: fn(body: String) -> [{key: String, value: String}] Never! {
-    out := [{key: String, value: String}]{}
+    ^out: [{key: String, value: String}]{}
     loop entry in lint_top_level_commas(body) {
         parts: entry.trim().split_once(":") ?? next
         out.push({key: parts.before.trim(), value: parts.after.trim()})

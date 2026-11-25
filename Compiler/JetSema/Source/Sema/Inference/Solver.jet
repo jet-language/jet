@@ -60,7 +60,7 @@ sema_inference_declared_name: fn(name: String) -> String Never! {
 // Declared spelling -> solver spelling, for each callee parameter a caller's
 // in-scope parameter shadows.
 sema_inference_callee_renames: fn(context: SemaInferenceContext) -> [SemaInferenceBinding] Never! {
-    renames := [SemaInferenceBinding]{}
+    ^renames: [SemaInferenceBinding]{}
     loop parameter in context.type_params {
         if sema_inference_is_lexical_param(context, parameter.name) {
             renames.push(SemaInferenceBinding{name: parameter.name, ty: Type.Named{name: "{parameter.name}{SEMA_INFERENCE_CALLEE_SUFFIX}"}, source: "the callee's own parameter"})
@@ -71,7 +71,7 @@ sema_inference_callee_renames: fn(context: SemaInferenceContext) -> [SemaInferen
 
 sema_inference_solver_context: fn(context: SemaInferenceContext, renames: [SemaInferenceBinding]) -> SemaInferenceContext Never! {
     params: loop parameter in context.type_params -> {
-        name := parameter.name
+        ^name: parameter.name
         if sema_inference_binding_at(renames, parameter.name) == .Val(rename) {
             if rename.ty == .Named(solver_name) -> name = solver_name
         }
@@ -285,7 +285,7 @@ sema_inference_unresolved_bound_diagnostic: fn(has_graph: Bool, bound: String, b
     if sema_marker_rules_builtin_type(bound) == None {
         return sema_error("E0904", span, "no trait named `{bound}` is in scope for the bound on `{param}`", "a generic bound names a declared or imported trait", "declare or import the trait `{bound}`, or correct the bound's spelling")
     }
-    all_types := bounds.len() > 1
+    ^all_types: bounds.len() > 1
     loop written_bound in bounds {
         if sema_marker_rules_builtin_type(written_bound) == None -> all_types = false
     }
@@ -297,7 +297,7 @@ sema_inference_unresolved_bound_diagnostic: fn(has_graph: Bool, bound: String, b
 }
 
 sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph, context: ^SemaInferenceContext, bindings: [SemaInferenceBinding], span: Span, diagnostics: ^[Diagnostic]) -> [SemaInferenceBoundEvidence]? {
-    evidence := [SemaInferenceBoundEvidence]{}
+    ^evidence: [SemaInferenceBoundEvidence]{}
     loop parameter in context.type_params {
         actual: sema_inference_binding_at(bindings, parameter.name) ?? return None
         concrete: sema_inference_resolve_type_bindings(actual.ty, bindings)
@@ -322,8 +322,8 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph, context: ^SemaI
                 name: type_name(concrete)
                 row: sema_diagnostic_row("E0905")
                 what: row.what.replace("{{type}}", name).replace("{{bound}}", bound)
-                why := "`{name}` would need to implement `{bound}` before it can be used here"
-                fix := sema_trait_impl_fix(name, bound)
+                ^why: "`{name}` would need to implement `{bound}` before it can be used here"
+                ^fix: sema_trait_impl_fix(name, bound)
                 if owned_trait_codec(bound) && sema_serde_shape_fix(concrete, bound) == .Val(shape_fix) {
                     fix = shape_fix
                 }
@@ -357,7 +357,7 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph, context: ^SemaI
 }
 
 sema_inference_type_args: fn(context: SemaInferenceContext, bindings: [SemaInferenceBinding]) -> [Type]? {
-    result := [Type]{}
+    ^result: [Type]{}
     loop parameter in context.type_params {
         actual: sema_inference_binding_at(bindings, parameter.name) ?? return None
         result.push(sema_inference_resolve_type_bindings(actual.ty, bindings))
@@ -389,7 +389,7 @@ sema_inference_prepare_explicit: fn(context: SemaInferenceContext, explicit_type
         sema_inference_count_diagnostic(context.type_params.len(), explicit_type_args.len(), span, diagnostics)
         return false
     }
-    conflict := SemaInferenceConflict?{None}
+    ^conflict: SemaInferenceConflict?{None}
     loop index in 0..<context.type_params.len() {
         name: context.type_params[index].name
         if !sema_inference_bind(context, bindings, name, explicit_type_args[index], "the explicit type argument", conflict) {
@@ -403,7 +403,7 @@ sema_inference_prepare_explicit: fn(context: SemaInferenceContext, explicit_type
 sema_infer_validate_explicit: fn(graph: SemaRegistrationGraph, context: ^SemaInferenceContext, type_args: [Type], span: Span, diagnostics: ^[Diagnostic]) -> SemaInferenceResult? {
     renames: sema_inference_callee_renames(context)
     if renames.len() > 0 {
-        solver := sema_inference_solver_context(context, renames)
+        ^solver: sema_inference_solver_context(context, renames)
         return sema_infer_validate_explicit(graph, solver, type_args, span, diagnostics)
     }
     if context.type_params.len() > 0 && type_args.len() == 0 {
@@ -413,10 +413,10 @@ sema_infer_validate_explicit: fn(graph: SemaRegistrationGraph, context: ^SemaInf
     // A written type argument names a type as the caller's module sees it:
     // the instance carries its declaration identity, so a bare `ReadFrame`
     // instantiated in another module is still the caller's ReadFrame.
-    written := type_args
+    ^written: type_args
     caller: sema_type_module_row(graph, context.caller_module_identity)
     written = loop ty in type_args -> sema_type_resolve_declared_recursive(graph, ty, caller, context.lexical_generic_params)
-    bindings := [SemaInferenceBinding]{}
+    ^bindings: [SemaInferenceBinding]{}
     if !sema_inference_prepare_explicit(context, written, bindings, span, diagnostics) {
         return None
     }
@@ -444,7 +444,7 @@ sema_inference_expected_return_view: fn(declared_return: Type, expected: Type) -
 sema_infer_callable: fn(graph: SemaRegistrationGraph, context: ^SemaInferenceContext, parameters: [Type], return_type: Type?, args: [Type], explicit_type_args: [Type], span: Span, diagnostics: ^[Diagnostic]) -> SemaInferenceResult? {
     renames: sema_inference_callee_renames(context)
     if renames.len() > 0 {
-        solver := sema_inference_solver_context(context, renames)
+        ^solver: sema_inference_solver_context(context, renames)
         solver_parameters: loop parameter in parameters -> sema_inference_substitute_type_bindings(parameter, renames)
         solver_return: sema_inference_specialized_return(return_type, renames)
         return sema_infer_callable(graph, solver, solver_parameters, solver_return, args, explicit_type_args, span, diagnostics)
@@ -452,18 +452,18 @@ sema_infer_callable: fn(graph: SemaRegistrationGraph, context: ^SemaInferenceCon
     // Apply heads and their nested arguments must use the same declaration
     // identity before structural unification. Source signatures retain leaves
     // while values crossing a file boundary already carry canonical names.
-    generic_scope := context.lexical_generic_params
+    ^generic_scope: context.lexical_generic_params
     loop parameter in context.type_params {
         generic_scope.push(TGenericParam{name: parameter.name, bounds: []})
     }
     resolved_parameters: loop parameter in parameters -> sema_type_resolve_declared_with_generics(graph, parameter, context.caller_module_identity, generic_scope)
     resolved_args: loop arg in args -> sema_type_resolve_declared_with_generics(graph, arg, context.caller_module_identity, generic_scope)
-    bindings := [SemaInferenceBinding]{}
+    ^bindings: [SemaInferenceBinding]{}
     if !sema_inference_prepare_explicit(context, explicit_type_args, bindings, span, diagnostics) {
         return None
     }
-    compatible := true
-    conflict := SemaInferenceConflict?{None}
+    ^compatible: true
+    ^conflict: SemaInferenceConflict?{None}
     if args.len() != parameters.len() -> compatible = false
     loop index in 0..<args.len() {
         if index < parameters.len() {
@@ -498,7 +498,7 @@ sema_infer_callable: fn(graph: SemaRegistrationGraph, context: ^SemaInferenceCon
     }
     evidence: sema_inference_validate_bounds(graph, context, bindings, span, diagnostics) ?? return None
     specialized_parameters: sema_inference_specialized_parameters(resolved_parameters, bindings)
-    specialized_return := sema_inference_specialized_return(return_type, bindings)
+    ^specialized_return: sema_inference_specialized_return(return_type, bindings)
     loop index in 0..<args.len() {
         if index < specialized_parameters.len() && !sema_inference_assignable(graph, context, specialized_parameters[index], resolved_args[index]) {
             compatible = false

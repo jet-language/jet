@@ -155,8 +155,8 @@ jv_walk: fn(path: String, out: ^[String]) {
 // One file into the census: its old spellings into `findings`, its count of
 // lines naming a release `a0_NNN` into `legacy`.
 jv_census_file: fn(path: String, text: String, findings: ^[String], legacy: ^[String:Int]) {
-    count := 0
-    number := 0
+    ^count: 0
+    ^number: 0
     loop line in text.lines() {
         number += 1
         jv_line_findings(path, number, line, findings)
@@ -169,7 +169,7 @@ jv_census_file: fn(path: String, text: String, findings: ^[String], legacy: ^[St
 jv_census_close: fn(legacy: [String:Int], findings: ^[String]) {
     loop path in legacy.keys() {
         count: legacy[path]
-        allowed := -1
+        ^allowed: -1
         loop row in JV_LEGACY {
             if row.path == path -> allowed = row.lines
         }
@@ -200,11 +200,11 @@ jv_census_close: fn(legacy: [String:Int], findings: ^[String]) {
 
 #Test("no source spells an old Jet version") {
     guards_enter_root()
-    paths := [String]{}
+    ^paths: [String]{}
     loop root in JV_ROOTS -> jv_walk(root, paths)
     assert(paths.len() > 1000, "the census found only {paths.len()} files")
-    findings := [String]{}
-    legacy := [String:Int]{}
+    ^findings: [String]{}
+    ^legacy: [String:Int]{}
     loop path in paths {
         text: jv_files.read(path) ?? next
         jv_census_file(path, text, findings, legacy)
@@ -225,8 +225,8 @@ jv_census_close: fn(legacy: [String:Int], findings: ^[String]) {
     assert(!jv_names_digit_after("0x9f00_b0a0_4dc3", "a0_"))
     assert(jv_names_retired_constant("use [COMPILER_VERSION]"))
     assert(!jv_names_retired_constant("MOD_COMPILER_VERSION: 3"))
-    findings := [String]{}
-    legacy := [String:Int]{}
+    ^findings: [String]{}
+    ^legacy: [String:Int]{}
     jv_census_file("Compiler/New.jet", "pin: \"jet: \\\">=0.1.0\\\"\"\nseed: \"a0_044\"\n", findings, legacy)
     jv_census_file("Tools/Release/Gate.jet", "a0_042\n", findings, legacy)
     jv_census_close(legacy, findings)

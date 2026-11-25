@@ -48,7 +48,7 @@ outcome_value_sample: fn(case_id: String, reference: String, candidate: String) 
 }
 
 outcome_with_replays: fn(sample: ComparisonSample, reference: String, candidate: String) -> ComparisonSample Never! {
-    result := sample
+    ^result: sample
     result.reference_replay = Val(comparison_observation_value(reference))
     result.candidate_replay = Val(comparison_observation_value(candidate))
     result
@@ -86,7 +86,7 @@ outcome_case: fn(sample: ComparisonSample?) -> String Never! {
     // A run whose cases all matched still fails when the runner timed out or was canceled.
     stopped: [ComparisonStatus]{ComparisonStatus.Timeout, ComparisonStatus.Canceled}
     loop status in stopped {
-        record := testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("a", "1", "1")})
+        ^record: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("a", "1", "1")})
         assert(record.status == ComparisonStatus.Matched, "the observed case matched")
         record.status = status
         assert(outcome_failure(record).starts_with("comparison {comparison_status_as_str(status)}:"), "a recorded {comparison_status_as_str(status)} passed")
@@ -103,24 +103,24 @@ outcome_case: fn(sample: ComparisonSample?) -> String Never! {
     partial: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("a", "1", "1")}, 1)
     assert(partial.status == ComparisonStatus.InvalidOracle, "a discard with matching cases is an invalid oracle")
     assert_eq(outcome_failure(partial), "comparison invalid_oracle: comparison discarded cases and cannot claim equality")
-    missing := outcome_value_sample("a", "1", "1")
+    ^missing: outcome_value_sample("a", "1", "1")
     missing.declared_equal = None
     assert(testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{missing}).status == ComparisonStatus.InvalidOracle, "an undeclared equality cannot match")
 }
 
 #Test("comparison outcome: no record claims universal proof, and a matched record needs cases and no discards") {
-    matched := testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("a", "1", "1")})
+    ^matched: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("a", "1", "1")})
     assert(!matched.universal_proof, "equal samples are not a universal proof")
     assert_eq(outcome_invalid(matched), "")
     assert_eq(outcome_failure(matched), "")
-    claimed := matched
+    ^claimed: matched
     claimed.universal_proof = true
     assert_eq(outcome_invalid(claimed), "comparison records cannot claim universal proof")
-    hollow := matched
+    ^hollow: matched
     hollow.samples = [ComparisonSample]{}
     assert_eq(outcome_invalid(hollow), "matched comparison records require non-empty samples and no discarded cases")
     assert(outcome_failure(hollow) != "", "a matched record without cases passed")
-    skipped := matched
+    ^skipped: matched
     skipped.discarded_cases = 2
     assert_eq(outcome_invalid(skipped), "matched comparison records require non-empty samples and no discarded cases")
     assert(outcome_failure(skipped) != "", "a matched record with discards passed")

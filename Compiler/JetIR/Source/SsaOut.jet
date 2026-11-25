@@ -85,16 +85,16 @@ ir_ssa_put: fn(code: ^IRSsaCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, lin
 // reads goes first; a cycle saves one destination in a temporary (one per
 // type row, `temps`) and reads it from there.
 ir_ssa_put_moves: fn(f: ^IRFunction, code: ^IRSsaCode, temps: ^[Int:Int], dsts: [Int], srcs_in: [Int], line: Int) -> Int Never! {
-    srcs := srcs_in.copy()
-    done := [Bool]{}
+    ^srcs: srcs_in.copy()
+    ^done: [Bool]{}
     loop _ in dsts -> done.push(false)
-    left := dsts.len()
-    moves := 0
+    ^left: dsts.len()
+    ^moves: 0
     loop left > 0 {
-        found := -1
+        ^found: -1
         loop i in 0..<dsts.len() {
             if done[i] -> next
-            blocked := false
+            ^blocked: false
             loop j in 0..<dsts.len() {
                 if j != i && !done[j] && srcs[j] == dsts[i] {
                     blocked = true
@@ -113,10 +113,10 @@ ir_ssa_put_moves: fn(f: ^IRFunction, code: ^IRSsaCode, temps: ^[Int:Int], dsts: 
             moves += 1
             next
         }
-        first := 0
+        ^first: 0
         loop done[first] -> first += 1
         row: f.slot_type[dsts[first]]
-        temp := temps.get(row) ?? -1
+        ^temp: temps.get(row) ?? -1
         if temp < 0 {
             temp = ir_slot(f, row, IRSlotKind.Temp, -1, 0)
             temps[row] = temp
@@ -143,21 +143,21 @@ ir_ssa_out_poll: fn(f: IRFunction, s: IRSsa, value: Int) -> Bool Never! {
 ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutStats Never! {
     count: f.slot_type.len()
     values: s.val_slot.len()
-    live := ir_ssa_live(s, f)
+    ^live: ir_ssa_live(s, f)
     // The layout: each edge's moves as an item before the instruction they
     // go before; an If without an Else's false-branch moves after its
     // then-part's.
-    if_false := [Int:Int]{}
-    ordered := [Int]{}
+    ^if_false: [Int:Int]{}
+    ^ordered: [Int]{}
     loop edge in 0..<s.edge_kind.len() {
         if s.edge_kind[edge] == .IfFalse -> if_false[s.edge_at[edge]] = edge else {
             ordered.push(edge)
         }
     }
-    item_inst := [Int]{}
-    item_edge := [Int]{}
-    inst_item := [Int]{}
-    cursor := 0
+    ^item_inst: [Int]{}
+    ^item_edge: [Int]{}
+    ^inst_item: [Int]{}
+    ^cursor: 0
     loop at in 0..<f.op.len() {
         loop cursor < ordered.len() && s.edge_at[ordered[cursor]] == at {
             item_inst.push(-1)
@@ -183,15 +183,15 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
     // Each block's first and last item. An If's false-edge moves belong to
     // none: they run in no block's straight line.
     blocks: s.preds.len()
-    first := [Int]{}
-    last := [Int]{}
+    ^first: [Int]{}
+    ^last: [Int]{}
     loop _ in 0..<blocks {
         first.push(-1)
         last.push(-1)
     }
     loop k in 0..<item_inst.len() {
         at: item_inst[k]
-        block := -1
+        ^block: -1
         if at >= 0 -> block = s.block[at] else if s.edge_kind[item_edge[k]] != .IfFalse {
             block = s.edge_block[item_edge[k]]
         }
@@ -201,15 +201,15 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
     }
     // Each value's write: its block and position (a parameter's before
     // everything, a phi's at its join block's start).
-    needed := [Bool]{}
-    def_block := [Int]{}
-    def_pos := [Int]{}
-    ranges := [[Int]]{}
+    ^needed: [Bool]{}
+    ^def_block: [Int]{}
+    ^def_pos: [Int]{}
+    ^ranges: [[Int]]{}
     loop value in 0..<values {
         kind: s.val_kind[value]
-        block := -1
-        pos := -1
-        need := false
+        ^block: -1
+        ^pos: -1
+        ^need: false
         if kind == {
             .Param -> {
                 need = true
@@ -235,11 +235,11 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
     // The reads, by value: (block, position) each. A phi's argument is read
     // at its edge's moves (an If's false edge: at the If), and the phi's
     // home is written there, a point of its range.
-    use_head := [Int]{}
+    ^use_head: [Int]{}
     loop _ in 0..<values -> use_head.push(-1)
-    use_next := [Int]{}
-    use_block := [Int]{}
-    use_pos := [Int]{}
+    ^use_next: [Int]{}
+    ^use_block: [Int]{}
+    ^use_pos: [Int]{}
     loop k in 0..<item_inst.len() {
         at: item_inst[k]
         if at >= 0 {
@@ -270,34 +270,34 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
         }
     }
     // Live ranges: from each read back to the write, block by block.
-    entered := [Int]{}
-    left := [Int]{}
+    ^entered: [Int]{}
+    ^left: [Int]{}
     loop _ in 0..<blocks {
         entered.push(-1)
         left.push(-1)
     }
-    work := [Int]{}
+    ^work: [Int]{}
     loop value in 0..<values {
         if !needed[value] -> next
-        node := use_head[value]
+        ^node: use_head[value]
         loop node >= 0 {
             ir_ssa_walk(s, first, last, def_block[value], def_pos[value], value, use_block[node], use_pos[node], entered, left, work, ranges[value])
             node = use_next[node]
         }
     }
     // Homes.
-    homes := [Int]{}
-    taken := [[Int]]{}
+    ^homes: [Int]{}
+    ^taken: [[Int]]{}
     loop _ in 0..<count -> taken.push([Int]{})
-    fresh_rows := [Int]{}
-    fresh_by_row := [Int:[Int]]{}
-    changed := false
+    ^fresh_rows: [Int]{}
+    ^fresh_by_row: [Int:[Int]]{}
+    ^changed: false
     loop value in 0..<values {
         homes.push(-1)
         if !needed[value] -> next
         slot: s.val_slot[value]
         own: ir_ssa_sorted(ranges[value])
-        home := -1
+        ^home: -1
         // A stop point's Bool keeps a slot of its own (its slot, else a
         // fresh one no other value shares): selection takes the If after the
         // poll as the stop edge only when nothing else reads that slot
@@ -314,8 +314,8 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
         } else {
             row: f.slot_type[slot]
             known: fresh_by_row.get(row) ?? [Int]{}
-            tried := 0
-            k := known.len() - 1
+            ^tried: 0
+            ^k: known.len() - 1
             loop k >= 0 && tried < 8 {
                 if !ir_ssa_overlap(taken[known[k]], own) {
                     home = known[k]
@@ -328,7 +328,7 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
                 home = count + fresh_rows.len()
                 fresh_rows.push(row)
                 taken.push([Int]{})
-                grown := known.copy()
+                ^grown: known.copy()
                 grown.push(home)
                 fresh_by_row[row] = grown.move()
             }
@@ -338,8 +338,8 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
         taken[home] = ir_ssa_union(taken[home], own)
     }
     // Any edge with moves changes the function too.
-    dsts := [Int]{}
-    srcs := [Int]{}
+    ^dsts: [Int]{}
+    ^srcs: [Int]{}
     if !changed {
         loop edge in 0..<s.edge_kind.len() {
             ir_ssa_edge_moves(m, f, s, live, homes, edge, dsts, srcs)
@@ -350,12 +350,12 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
         }
     }
     if !changed -> return IRSsaOutStats{changed: false, moves: 0, fresh: 0}
-    loop row in fresh_rows -> _ := ir_slot(f, row, IRSlotKind.Temp, -1, 0)
-    code := IRSsaCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}, args: [Int]{}}
-    temps := [Int:Int]{}
-    moves := 0
-    pending_dsts := [Int]{}
-    pending_srcs := [Int]{}
+    loop row in fresh_rows -> ^_: ir_slot(f, row, IRSlotKind.Temp, -1, 0)
+    ^code: IRSsaCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}, args: [Int]{}}
+    ^temps: [Int:Int]{}
+    ^moves: 0
+    ^pending_dsts: [Int]{}
+    ^pending_srcs: [Int]{}
     loop k in 0..<item_inst.len() {
         at: item_inst[k]
         if at < 0 {
@@ -376,7 +376,7 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
         line: f.code_line[at]
         if s.block[at] < 0 {
             // Unreachable: as it was.
-            b := f.b[at]
+            ^b: f.b[at]
             if op == .Call || op == .CallRuntime || op == .CallIndirect {
                 b = code.args.len()
                 loop index in f.b[at]..<(f.b[at] + f.c[at]) -> code.args.push(f.args[index])
@@ -397,7 +397,7 @@ ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
         pending_dsts.clear()
         pending_srcs.clear()
         dst: if s.def[at] >= 0 -> homes[s.def[at]] else -> f.dst[at]
-        b := ir_ssa_home(s, homes, s.use_b[at], f.b[at])
+        ^b: ir_ssa_home(s, homes, s.use_b[at], f.b[at])
         c: ir_ssa_home(s, homes, s.use_c[at], f.c[at])
         if op == .Call || op == .CallRuntime || op == .CallIndirect {
             b = code.args.len()
@@ -482,14 +482,14 @@ ir_ssa_walk: fn(s: IRSsa, first: [Int], last: [Int], home: Int, start: Int, valu
 
 // `ranges` (start, end pairs) sorted by start, overlapping ones merged.
 ir_ssa_sorted: fn(ranges: [Int]) -> [Int] Never! {
-    keys := [Int]{}
-    k := 0
+    ^keys: [Int]{}
+    ^k: 0
     loop k < ranges.len() {
         keys.push((ranges[k] + 1) * IR_SSA_POSITION_LIMIT + ranges[k + 1] + 1)
         k += 2
     }
     keys.sort()
-    out := [Int]{}
+    ^out: [Int]{}
     loop key in keys {
         start: key /% IR_SSA_POSITION_LIMIT - 1
         end: key %% IR_SSA_POSITION_LIMIT - 1
@@ -506,8 +506,8 @@ ir_ssa_sorted: fn(ranges: [Int]) -> [Int] Never! {
 
 // Whether two sorted, merged range lists share a position.
 ir_ssa_overlap: fn(a: [Int], b: [Int]) -> Bool Never! {
-    i := 0
-    j := 0
+    ^i: 0
+    ^j: 0
     loop i < a.len() && j < b.len() {
         if a[i + 1] < b[j] -> i += 2 else if b[j + 1] < a[i] -> j += 2 else -> return true
     }
@@ -516,9 +516,9 @@ ir_ssa_overlap: fn(a: [Int], b: [Int]) -> Bool Never! {
 
 // The union of two sorted, merged range lists, sorted and merged.
 ir_ssa_union: fn(a: [Int], b: [Int]) -> [Int] Never! {
-    out := [Int]{}
-    i := 0
-    j := 0
+    ^out: [Int]{}
+    ^i: 0
+    ^j: 0
     loop i < a.len() || j < b.len() {
         take_a: j >= b.len() || (i < a.len() && a[i] <= b[j])
         start: if take_a -> a[i] else -> b[j]

@@ -22,11 +22,11 @@ provider_producer_record: fn(provider: String, immutable_source: String, source_
 // recursively.
 provider_refresh_provider_facts: fn(producer: ^ProducerRecord, reference: String) ProviderError! {
     carriers: [String]{PROVIDER_SHARED_FACTS, PROVIDER_SHARED_FACTS_DIGEST}
-    native := producer
+    ^native: producer
     native.facts = provider_without_keys(producer.facts, carriers)
     native.plan = ProviderPlanFacts.from_facts(provider_without_keys(producer.plan.facts(), carriers)) ?? return Err(ProviderError.BadOutput(err.message()))
 
-    shared := ProviderFacts.for_reference(producer.provider, reference)
+    ^shared: ProviderFacts.for_reference(producer.provider, reference)
     shared.set_resolved_source(producer.immutable_source)
     document: producer.facts.get(PROVIDER_NIX_NATIVE_DOCUMENT) ?? ""
     format: producer.facts.get(PROVIDER_NIX_NATIVE_FORMAT) ?? ""
@@ -94,7 +94,7 @@ provider_adapter_action_identity: fn(plan: AdapterPlan, recipe: BuildRecipe, sou
 // is an authority input: changing a provider or source changes the hook
 // subject before any tool is realized.
 provider_adapter_dependency_refs: fn(plan: AdapterPlan) -> [String] Never! {
-    dependencies := [String]{}
+    ^dependencies: [String]{}
     loop dependency in plan.deps -> dependencies.push(envmodel_pkg_ref(dependency))
     dependencies.sort()
     dependencies
@@ -104,7 +104,7 @@ provider_adapter_dependency_refs: fn(plan: AdapterPlan) -> [String] Never! {
 // keep its spelling while its pinned upstream or provider changes; that is a
 // trust change even when the recipe and dependency refs do not move.
 provider_adapter_identity_inputs: fn(plan: AdapterPlan, table: SourceTable) -> [String] Never! {
-    inputs := provider_adapter_dependency_refs(plan)
+    ^inputs: provider_adapter_dependency_refs(plan)
     loop line in table.trust_lines() -> inputs.push("authority:{line}")
     inputs.sort()
     inputs
@@ -187,7 +187,7 @@ provider_normalize_nix_identity: fn(value: String) -> String Never! {
 provider_nix_cache_identity: fn(source: String, platform: String, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
     parts: provider_nix_identity_parts(spec, table)
     authority: "source={parts.source}\nnode={parts.node}\nalias={parts.alias}\nquery={parts.query}\nbuild-facts={provider_nix_build_facts_digest()}"
-    identity := provider_cache_identity(source, PROVIDER_NIX_RECIPE_ID, ctx, authority)
+    ^identity: provider_cache_identity(source, PROVIDER_NIX_RECIPE_ID, ctx, authority)
     identity.platform = platform
     identity
 }
@@ -231,7 +231,7 @@ provider_fixtures_from_env: fn(explicit: String?) -[Env]> String? Never! {
 
 // `map` without the listed keys.
 provider_without_keys: fn(map: [String:String], keys: [String]) -> [String:String] Never! {
-    kept := [String:String]{}
+    ^kept: [String:String]{}
     loop entry in map {
         if !keys.contains(entry.key) -> kept[entry.key] = entry.value
     }
@@ -240,7 +240,7 @@ provider_without_keys: fn(map: [String:String], keys: [String]) -> [String:Strin
 
 // Map keys in byte order (a `BTreeMap` walk).
 provider_sorted_keys: fn(map: [String:String]) -> [String] Never! {
-    keys := map.keys().to_list()
+    ^keys: map.keys().to_list()
     keys.sort()
     keys
 }

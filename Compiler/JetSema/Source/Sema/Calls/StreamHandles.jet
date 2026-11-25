@@ -85,7 +85,7 @@ sema_stream_handle_is_canonical: fn(ty: Type, owner: String, environment: SemaSc
     graph: program.registration_graph
     resolved: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
     if resolved == .Val(row) {
-        owner_module := sema_stream_handle_owner_module(owner)
+        ^owner_module: sema_stream_handle_owner_module(owner)
         // A declared or imported type named like a module-less built-in
         // (`Path`) shadows it; the two never share an identity.
         return sema_resolved_kind(graph, row) == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, sema_resolved_module_identity(graph, row)) ?? "") == owner_module
@@ -113,10 +113,10 @@ sema_stream_handle_result: fn(ok: Type, error: Type) -> Type Never! {
 // `effect_name` is the exact handle-method row: these receivers record only
 // `receiver_effect_leaf` (`Time.Wait` on the blocking channel methods).
 sema_stream_handle_spec: fn(owner: String, method: String, receiver_type: Type) -> SemaStreamHandleSpec? {
-    unit := Type.Named{name: "Unit"}
-    string := Type.String
-    u8 := Type.IntN{signed: false, bits: 8}
-    bytes := Type.List{element: u8}
+    ^unit: Type.Named{name: "Unit"}
+    ^string: Type.String
+    ^u8: Type.IntN{signed: false, bits: 8}
+    ^bytes: Type.List{element: u8}
     if owner == "Sender" || owner == "Receiver" {
         element: if receiver_type == {
             .Apply(_, type_args) -> if type_args.len() == 1 -> type_args[0] else -> Type.Int
@@ -250,13 +250,13 @@ sema_stream_handle_reports_no_receiver_convention: fn(owner: String) -> Bool Nev
 }
 
 sema_stream_handle_infer_args: fn(args: [CallArg], check: ^SemaBodyCheck) Never! {
-    loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
+    loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
 }
 
 sema_stream_handle_effect_fact: fn(check: ^SemaBodyCheck, api: String, span: Span, result_type: Type, effect_name: String) -> Bool Never! {
-    entries := [EffectRowEntry]{}
+    ^entries: [EffectRowEntry]{}
     if effect_name != "" -> entries.push(EffectRowEntry{name: effect_name, span: span})
-    facts := SemaCallFacts{
+    ^facts: SemaCallFacts{
         return_type: result_type,
         failure_carrier: sema_call_failure_carrier(Val(result_type)),
         effect_bound: Val(entries),
@@ -293,7 +293,7 @@ sema_stream_handle_argument_mismatch: fn(callee: String, required: Type, offered
 }
 
 sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], args: [CallArg], receiver_expr: Expr?, receiver_value: TExpr?, receiver_convention: AccessConvention, shift_argument: Int, span: Span, check: ^SemaBodyCheck) -> [TExpr]? {
-    checked_args := args
+    ^checked_args: args
     binding: sema_call_bind_args(callee, params, checked_args, span, check.diagnostics) ?? {
         sema_stream_handle_infer_args(args, check)
         return None
@@ -301,12 +301,12 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
     if !sema_call_validate_binding(callee, params, binding, checked_args, span, check.diagnostics) {
         return None
     }
-    values := [TExpr]{}
+    ^values: [TExpr]{}
     loop index in 0..<checked_args.len() {
         slot: sema_call_bound_slot(binding, binding.sources[index], checked_args[index])
         if slot < 0 || slot >= params.len() -> return None
         required_declared: sema_call_parameter_type(params[slot]) ?? return None
-        required := sema_call_resolved_type(required_declared, check.environment.*, check.program.*)
+        ^required: sema_call_resolved_type(required_declared, check.environment.*, check.program.*)
         value_start: check.diagnostics.len()
         value: if shift_argument == index -> sema_check_expression(checked_args[index].expr, None, check) else -> sema_check_expression(checked_args[index].expr, Val(required), check)
         checked: value ?? {
@@ -314,7 +314,7 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
             // it becomes the handle call's argument mismatch.
             value_span: expr_span(checked_args[index].expr)
             if sema_value_mismatch_index(check.diagnostics, value_start, value_span) == .Val(mismatch_index) {
-                probe_diagnostics := [Diagnostic]{}
+                ^probe_diagnostics: [Diagnostic]{}
                 if sema_probe_expression(checked_args[index].expr, None, check, probe_diagnostics) == .Val(offered) {
                     check.diagnostics[mismatch_index] = sema_stream_handle_argument_mismatch(callee, required, sema_call_resolved_type(offered.ty, check.environment.*, check.program.*), value_span, check.program.*)
                 }
@@ -333,7 +333,7 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
                 next
             }
         }
-        compatible := sema_call_type_assignable(required_declared, checked.ty, check) ?? false
+        ^compatible: sema_call_type_assignable(required_declared, checked.ty, check) ?? false
         if !compatible && sema_stream_handle_fixed_list_assignable(required_declared, checked.ty, check) {
             compatible = true
         }
@@ -353,7 +353,7 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
     }
     ownership: if receiver_expr == {
         .Val(expr) -> {
-            convention := receiver_convention
+            ^convention: receiver_convention
             if convention == AccessConvention.Write && sema_ownership_places_from_expr_in_state(expr, check.scopes, check.state).len() == 0 {
                 convention = AccessConvention.Read
             }
@@ -366,7 +366,7 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
 }
 
 sema_stream_handle_finish: fn(receiver: TExpr, operation: BodyHandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
-    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_stream_handle_effect_fact(check, api, span, result_type, effect_name) {
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -375,17 +375,17 @@ sema_stream_handle_finish: fn(receiver: TExpr, operation: BodyHandleOp, args: [T
 }
 
 sema_stream_handle_method_ref: fn(owner: String, method: String, check: ^SemaBodyCheck) -> TMethodRef Never! {
-    owner_module := sema_stream_handle_owner_module(owner)
+    ^owner_module: sema_stream_handle_owner_module(owner)
     TMethodRef{symbol: sema_symbol_id(check.program.*, check.context, SymbolKind.Function, owner_module, owner, method), name: method, mangled: false, trait_owner: None, operator_identity: None}
 }
 
 sema_stream_handle_lines_value: fn(receiver: TExpr, owner: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck Never! {
-    result_type := if owner == "FileReader" -> Type.Named{name: "FileLines"} else -> Type.Named{name: "StdinLines"}
+    ^result_type: if owner == "FileReader" -> Type.Named{name: "FileLines"} else -> Type.Named{name: "StdinLines"}
     method: sema_stream_handle_method_ref(owner, "lines", check)
-    value := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: [TCallArg]{}}, span)
+    ^value: sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: [TCallArg]{}}, span)
     checked: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     // `FileReader.lines` waits; `StdinHandle` records no handle effect.
-    effect_name := if owner == "FileReader" -> "Time.Wait" else -> ""
+    ^effect_name: if owner == "FileReader" -> "Time.Wait" else -> ""
     if !sema_stream_handle_effect_fact(check, "{owner}.lines", span, result_type, effect_name) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -395,7 +395,7 @@ sema_stream_handle_lines_value: fn(receiver: TExpr, owner: String, span: Span, e
 // Called before ordinary method lookup for canonical Core handle types.
 sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     source_lines: sema_stream_handle_source_lines_owner(receiver_value.ty, method)
-    owner := source_lines ?? ""
+    ^owner: source_lines ?? ""
     if source_lines == None {
         owner = sema_stream_handle_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
         if !sema_stream_handle_is_canonical(receiver_value.ty, owner, check.environment.*, check.program.*) {
@@ -408,7 +408,7 @@ sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, me
             check.diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", 0, args.len(), false, span))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        _ := sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span)
+        ^_: sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span)
         if sema_stream_handle_reports_no_receiver_convention(owner) {
             sema_receiver_mark_forget(check.state, receiver)
         }
@@ -420,7 +420,7 @@ sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, me
         check.diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", spec.params.len(), args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    shift_argument := if owner == "Reader" && (method == "seek" || method == "skip" || method == "take") -> 0 else -> -1
+    ^shift_argument: if owner == "Reader" && (method == "seek" || method == "skip" || method == "take") -> 0 else -> -1
     checked_args: sema_stream_handle_checked_args("{owner}.{method}", spec.params, args, Val(receiver), receiver_value, spec.receiver_convention, shift_argument, span, check)
     if sema_stream_handle_reports_no_receiver_convention(owner) {
         sema_receiver_mark_forget(check.state, receiver)
@@ -433,7 +433,7 @@ sema_stream_handle_static_owner_is_canonical: fn(owner: String, check: SemaBodyC
     index: sema_scope_resolve_index(check.scopes, owner) ?? return true
     symbol: check.scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Type -> return false
-    owner_module := sema_stream_handle_owner_module(owner)
+    ^owner_module: sema_stream_handle_owner_module(owner)
     if owner_module == "" -> return false
     graph: check.program.registration_graph
     return (sema_registration_module_name(graph, symbol.module_identity) ?? "") == owner_module
@@ -441,7 +441,7 @@ sema_stream_handle_static_owner_is_canonical: fn(owner: String, check: SemaBodyC
 
 // Static reserved constructors. Callers must still prefer a shadowing user type.
 sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    known := (owner == "Reader" && method == "over") || (owner == "Cursor" && method == "over")
+    ^known: (owner == "Reader" && method == "over") || (owner == "Cursor" && method == "over")
     if !known || !sema_stream_handle_static_owner_is_canonical(owner, check) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -450,15 +450,15 @@ sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [Cal
         check.diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", 1, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    operation := BodyHandleOp.CursorOver
-    result_type := Type.Named{name: "Cursor"}
-    params := [SemaCallParam]{}
-    ownership_args := args
-    shift_argument := -1
+    ^operation: BodyHandleOp.CursorOver
+    ^result_type: Type.Named{name: "Cursor"}
+    ^params: [SemaCallParam]{}
+    ^ownership_args: args
+    ^shift_argument: -1
     if owner == "Cursor" {
         params.push(sema_stream_handle_param("text", Type.String, AccessConvention.Read))
     }
-    owned_reader := false
+    ^owned_reader: false
     if owner == "Reader" {
         operation = BodyHandleOp.ReaderOver{owned: false}
         result_type = Type.Named{name: "Reader"}
@@ -486,7 +486,7 @@ sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [Cal
         }
     }
     typed_args: sema_stream_handle_checked_args("{owner}.{method}", params, ownership_args, None, None, AccessConvention.Read, shift_argument, span, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    values := typed_args
+    ^values: typed_args
     if owner == "Reader" && owned_reader && values.len() == 1 {
         if values[0].kind == {
             .Move(_) -> {}
@@ -495,8 +495,8 @@ sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [Cal
             }
         }
     }
-    unit_receiver := sema_node(check.context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
-    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: unit_receiver, operation: operation, args: values}, span)
+    ^unit_receiver: sema_node(check.context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
+    ^value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: unit_receiver, operation: operation, args: values}, span)
     checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_stream_handle_effect_fact(check, "{owner}.{method}", span, result_type, "") {
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -533,7 +533,7 @@ sema_call_check_channel: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) 
         check.diagnostics.push(sema_error("E0904", call.name_span, "`channel` needs a type argument to infer the element type", "the element type `T` cannot be guessed from an empty channel", "call it with an explicit type argument: `channel<T>()`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    params := [SemaCallParam]{}
+    ^params: [SemaCallParam]{}
     if call.args.len() == 1 {
         params.push(SemaCallParam{label: "capacity", name: "capacity", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Int), variadic: false})
     }
@@ -546,8 +546,8 @@ sema_call_check_channel: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) 
             }
         }
     }
-    element := sema_call_resolved_type(call.type_args[0], check.environment.*, check.program.*)
-    result_type := Type.Tuple{
+    ^element: sema_call_resolved_type(call.type_args[0], check.environment.*, check.program.*)
+    ^result_type: Type.Tuple{
         fields: [TypeTupleField]{
             {name: "sender", ty: Type.Apply{name: "Sender", args: [Type]{element}}},
             {name: "receiver", ty: Type.Apply{name: "Receiver", args: [Type]{element}}},

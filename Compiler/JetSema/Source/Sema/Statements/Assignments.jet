@@ -130,7 +130,7 @@ sema_stmt_transaction_collect_roots: fn(statements: [Stmt], roots: ^[String]) Ne
     loop statement in statements {
         if statement == {
             .Assign(target, _, _, _) -> {
-                root := sema_stmt_transaction_lvalue_root(target)
+                ^root: sema_stmt_transaction_lvalue_root(target)
                 if root != None -> sema_stmt_transaction_add_root(root.move() ?? "", roots)
             }
             .While(_, body, _, _, _) | .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) -> {
@@ -179,7 +179,7 @@ sema_stmt_transaction_rollback_methods: fn(ty: Type, check: SemaBodyCheck) -> Se
     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     loop graph_module_index in 0..<graph.modules.len() {
         loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
-            trait_matches := graph.modules[graph_module_index].impls[implementation_index].trait_name == (Val("Rollback"))
+            ^trait_matches: graph.modules[graph_module_index].impls[implementation_index].trait_name == (Val("Rollback"))
             if graph.modules[graph_module_index].impls[implementation_index].trait_symbol != None {
                 trait_value: graph.modules[graph_module_index].impls[implementation_index].trait_symbol ?? return None
                 trait_matches = trait_value.name == "Rollback"
@@ -187,11 +187,11 @@ sema_stmt_transaction_rollback_methods: fn(ty: Type, check: SemaBodyCheck) -> Se
             if !trait_matches || !(sema_type_graph_impl_matches_nominal(graph, graph.modules[graph_module_index].impls[implementation_index], nominal) ?? false) {
                 next
             }
-            trait_owner := sema_stmt_transaction_rollback_trait_symbol(graph, graph.modules[graph_module_index].impls[implementation_index])
-            snapshot_method := TMethodRef?{None}
-            restore_method := TMethodRef?{None}
+            ^trait_owner: sema_stmt_transaction_rollback_trait_symbol(graph, graph.modules[graph_module_index].impls[implementation_index])
+            ^snapshot_method: TMethodRef?{None}
+            ^restore_method: TMethodRef?{None}
             loop method_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
-                method_ref := TMethodRef{symbol: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.id, name: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name, mangled: false, trait_owner: trait_owner.map(fn(value) { value.id }), operator_identity: None}
+                ^method_ref: TMethodRef{symbol: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.id, name: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name, mangled: false, trait_owner: trait_owner.map(fn(value) { value.id }), operator_identity: None}
                 if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "snapshot" {
                     snapshot_method = Val(method_ref)
                 }
@@ -211,17 +211,17 @@ sema_stmt_transaction_rollback_methods: fn(ty: Type, check: SemaBodyCheck) -> Se
     if nominal.source == .SourceAST(item) {
         loop block in sema_registration_item_trait_blocks(item) {
             if block.trait_name != "Rollback" -> next
-            resolved := sema_registration_lookup_name(graph, nominal.symbol.module_identity, "Rollback")
-            trait_owner := SymbolID?{None}
+            ^resolved: sema_registration_lookup_name(graph, nominal.symbol.module_identity, "Rollback")
+            ^trait_owner: SymbolID?{None}
             if resolved == .Val(found) && sema_resolved_kind(graph, found) == SymbolKind.Trait {
                 trait_owner = Val(sema_resolved_symbol(graph, found).id)
             }
-            snapshot_method := TMethodRef?{None}
-            restore_method := TMethodRef?{None}
+            ^snapshot_method: TMethodRef?{None}
+            ^restore_method: TMethodRef?{None}
             loop method in nominal.methods {
                 loop written in block.methods {
                     if written.span != method.declaration.span -> next
-                    method_ref := TMethodRef{symbol: method.symbol.id, name: method.symbol.name, mangled: false, trait_owner: trait_owner, operator_identity: None}
+                    ^method_ref: TMethodRef{symbol: method.symbol.id, name: method.symbol.name, mangled: false, trait_owner: trait_owner, operator_identity: None}
                     if method.symbol.name == "snapshot" -> snapshot_method = Val(method_ref)
                     if method.symbol.name == "restore" -> restore_method = Val(method_ref)
                 }
@@ -235,22 +235,22 @@ sema_stmt_transaction_rollback_methods: fn(ty: Type, check: SemaBodyCheck) -> Se
 }
 
 sema_stmt_transaction_snapshots: fn(roots: [String], check: SemaBodyCheck) -> [TTransactionSnapshot] Never! {
-    snapshots := [TTransactionSnapshot]{}
+    ^snapshots: [TTransactionSnapshot]{}
     loop name in roots {
-        index := sema_scope_resolve_index(check.scopes, name)
+        ^index: sema_scope_resolve_index(check.scopes, name)
         if index == None -> next
         binding: check.scopes.bindings[index ?? 0]
         if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter {
             next
         }
         local_ty: binding.symbol.ty ?? next
-        local := checked_symbol_local(name, binding.symbol.span, binding.symbol.id, local_ty)
+        ^local: checked_symbol_local(name, binding.symbol.span, binding.symbol.id, local_ty)
         local.mutable = binding.mutable
         local.integer_bounds = binding.integer_bounds
-        rollback := sema_stmt_transaction_rollback_methods(binding.symbol.ty ?? Type.Named{name: "Unit"}, check)
-        rollback_type := Type?{None}
-        snapshot_method := TMethodRef?{None}
-        restore_method := TMethodRef?{None}
+        ^rollback: sema_stmt_transaction_rollback_methods(binding.symbol.ty ?? Type.Named{name: "Unit"}, check)
+        ^rollback_type: Type?{None}
+        ^snapshot_method: TMethodRef?{None}
+        ^restore_method: TMethodRef?{None}
         if rollback != None {
             rollback_value: rollback ?? return snapshots
             rollback_type = Val(binding.symbol.ty ?? Type.Named{name: "Unit"})
@@ -263,7 +263,7 @@ sema_stmt_transaction_snapshots: fn(roots: [String], check: SemaBodyCheck) -> [T
 }
 
 sema_stmt_transaction_stm_local: fn(span: Span) -> TLocal Never! {
-    local := checked_generated_local("stm", span, Type.Named{name: "Stm"})
+    ^local: checked_generated_local("stm", span, Type.Named{name: "Stm"})
     local.mutable = true
     local
 }
@@ -272,7 +272,7 @@ sema_stmt_transaction_stm_local: fn(span: Span) -> TLocal Never! {
 // children are read in place (tree_each_*_child), never copied. `arena`
 // holds the rows of the body's flat nodes (sema_node).
 sema_stmt_tree_children_touch_shared: fn(value: TExpr, check: SemaBodyCheck) -> Bool Never! {
-    found := false
+    ^found: false
     tree_each_expr_child(value, fn(child: TExpr) {
         if !found && sema_stmt_tree_expr_touches_shared(child, check) -> found = true
     })
@@ -280,7 +280,7 @@ sema_stmt_tree_children_touch_shared: fn(value: TExpr, check: SemaBodyCheck) -> 
 }
 
 sema_stmt_tree_pattern_touches_shared: fn(pattern: TPattern, check: SemaBodyCheck) -> Bool Never! {
-    found := false
+    ^found: false
     tree_each_pattern_child(pattern, fn(child: TExpr) {
         if !found && sema_stmt_tree_expr_touches_shared(child, check) -> found = true
     })
@@ -288,7 +288,7 @@ sema_stmt_tree_pattern_touches_shared: fn(pattern: TPattern, check: SemaBodyChec
 }
 
 sema_stmt_tree_condition_touches_shared: fn(condition: TIfCond, check: SemaBodyCheck) -> Bool Never! {
-    found := false
+    ^found: false
     tree_each_if_cond_child(condition, fn(child: TExpr) {
         if !found && sema_stmt_tree_expr_touches_shared(child, check) -> found = true
     })
@@ -296,7 +296,7 @@ sema_stmt_tree_condition_touches_shared: fn(condition: TIfCond, check: SemaBodyC
 }
 
 sema_stmt_tree_statement_children_touch_shared: fn(statement: TStmt, check: SemaBodyCheck) -> Bool Never! {
-    found := false
+    ^found: false
     tree_each_stmt_child(statement, fn(child: TExpr) {
         if !found && sema_stmt_tree_expr_touches_shared(child, check) -> found = true
     })
@@ -534,16 +534,14 @@ sema_stmt_row_touches_shared: fn(check: SemaBodyCheck, index: Int) -> Bool Never
                     row_index: receiver - tree.node_base
                     row_tid: tree.expr_types[row_index].ty
                     is_shared: if row_tid.id != 0 -> sema_type_kind_in(check.program.*, check.context, row_tid) == TypeKind.Shared else -> check.context.arena.arena_syntax[row_index] == .Shared(_)
-                    if method == "capture" && is_shared {
-                        return true
-                    }
+                    if method == "capture" && is_shared -> return true
                 }
                 .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .ContextRead(_) | .ContextGet(_, _, _) | .DebugTrace(_) -> {}
             }
         }
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
-    found := false
+    ^found: false
     body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) {
         if !found && sema_stmt_row_touches_shared(check, child) -> found = true
     })
@@ -551,7 +549,7 @@ sema_stmt_row_touches_shared: fn(check: SemaBodyCheck, index: Int) -> Bool Never
 }
 
 sema_stmt_row_pattern_touches_shared: fn(check: SemaBodyCheck, pattern: BodyPattern) -> Bool Never! {
-    found := false
+    ^found: false
     body_each_pattern_child(check.context.arena.tree, pattern, fn(child: Int) {
         if !found && sema_stmt_row_touches_shared(check, child) -> found = true
     })
@@ -559,7 +557,7 @@ sema_stmt_row_pattern_touches_shared: fn(check: SemaBodyCheck, pattern: BodyPatt
 }
 
 sema_stmt_row_condition_touches_shared: fn(check: SemaBodyCheck, condition: BodyIfCond) -> Bool Never! {
-    found := false
+    ^found: false
     body_each_if_cond_child(check.context.arena.tree, condition, fn(child: Int) {
         if !found && sema_stmt_row_touches_shared(check, child) -> found = true
     })
@@ -681,7 +679,7 @@ sema_stmt_row_statement_touches_shared: fn(check: SemaBodyCheck, item: Int) -> B
         }
         .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> {}
     }
-    found := false
+    ^found: false
     body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], fn(child: Int) {
         if !found && sema_stmt_row_touches_shared(check, child) -> found = true
     })
@@ -696,22 +694,22 @@ sema_stmt_rows_touch_shared: fn(check: SemaBodyCheck, statements: [Int]) -> Bool
 }
 
 sema_stmt_check_transaction: fn(name: String?, name_span: Span?, body: [Stmt], implicit: Bool, span: Span, check: ^SemaBodyCheck) -> TStmt? {
-    roots := [String]{}
+    ^roots: [String]{}
     sema_stmt_transaction_collect_roots(body, roots)
-    snapshots := sema_stmt_transaction_snapshots(roots, check)
-    return_type := check.scopes.return_type
-    loop_depth := check.scopes.loop_depth
-    inside_transaction := implicit && check.scopes.transaction_depth > 0
+    ^snapshots: sema_stmt_transaction_snapshots(roots, check)
+    ^return_type: check.scopes.return_type
+    ^loop_depth: check.scopes.loop_depth
+    ^inside_transaction: implicit && check.scopes.transaction_depth > 0
     sema_scope_enter(check.scopes, check.state, "transact@{span.start}")
-    handle := TLocal?{None}
+    ^handle: TLocal?{None}
     if name != None {
         handle_name: name
         handle_span: name_span ?? span
-        owner := sema_scope_local_owner_key(check.scopes)
+        ^owner: sema_scope_local_owner_key(check.scopes)
         local_module: sema_scope_environment_module_text(check.environment.*, check.program.*)
         key: symbol_key_text(SymbolKind.Local, local_module, owner, handle_name)
-        id := sema_symbol_id_of(check.program.*, check.context, key)
-        symbol := Symbol{id: id, kind: SymbolKind.Local, name: handle_name, module_identity: check.environment.module_identity, owner: Val(owner), span: handle_span, ty: Val(Type.Named{name: "Transaction"}), visibility: 0}
+        ^id: sema_symbol_id_of(check.program.*, check.context, key)
+        ^symbol: Symbol{id: id, kind: SymbolKind.Local, name: handle_name, module_identity: check.environment.module_identity, owner: Val(owner), span: handle_span, ty: Val(Type.Named{name: "Transaction"}), visibility: 0}
         if !sema_scope_declare_local(check.scopes, symbol, key, true, AccessConvention.Read, None, false) {
             check.diagnostics.push(sema_already_defined(handle_name, handle_span))
             sema_scope_leave(check.scopes, check.state)
@@ -720,12 +718,12 @@ sema_stmt_check_transaction: fn(name: String?, name_span: Span?, body: [Stmt], i
         sema_ownership_declare_binding(check.state, symbol, false)
         // A scope head's handle names the scope; holding it is its use.
         check.state.used_ids[id.id] = true
-        local := checked_symbol_local(handle_name, handle_span, symbol.id, Type.Named{name: "Transaction"})
+        ^local: checked_symbol_local(handle_name, handle_span, symbol.id, Type.Named{name: "Transaction"})
         local.mutable = true
         handle = Val(local)
     }
-    previous_transaction_depth := check.scopes.transaction_depth
-    previous_transaction_wall_depth := check.scopes.transaction_wall_depth
+    ^previous_transaction_depth: check.scopes.transaction_depth
+    ^previous_transaction_wall_depth: check.scopes.transaction_wall_depth
     check.scopes.transaction_depth += 1
     if !implicit -> check.scopes.transaction_wall_depth += 1
     nested: sema_check_statements(body, return_type, check, loop_depth)
@@ -735,11 +733,11 @@ sema_stmt_check_transaction: fn(name: String?, name_span: Span?, body: [Stmt], i
     if !nested.complete -> return None
     if inside_transaction -> return Val(TStmt.Region{body: nested.value, span: span})
     if handle == None && snapshots.len() > 0 {
-        synthesized := checked_generated_local("txn", span, Type.Named{name: "Transaction"})
+        ^synthesized: checked_generated_local("txn", span, Type.Named{name: "Transaction"})
         synthesized.mutable = true
         handle = Val(synthesized)
     }
-    stm := TLocal?{None}
+    ^stm: TLocal?{None}
     if sema_stmt_tree_statements_touch_shared(nested.value, check) {
         stm = Val(sema_stmt_transaction_stm_local(span))
     }
@@ -750,7 +748,7 @@ sema_stmt_defer_close_resource: fn(close: Expr, scopes: SemaScopeTable) -> Symbo
     if close == {
         .Call(call, _) -> {
             if call.name != "close" || call.args.len() != 1 -> return None
-            argument := call.args[0]
+            ^argument: call.args[0]
             if argument.convention == AccessConvention.Write -> return None
             root: sema_stmt_for_in_expr_root_ident(argument.expr) ?? return None
             index: sema_scope_resolve_index_at(scopes, root, expr_span(argument.expr)) ?? return None
@@ -770,11 +768,11 @@ sema_stmt_check_defer_close: fn(close: Expr, span: Span, check: ^SemaBodyCheck) 
             if call.name != "close" -> return None
             if call.args.len() != 1 {
                 check.diagnostics.push(sema_error("E0104", call.name_span, "`close` takes exactly one resource, got {call.args.len()}", "`close` takes one value through its nominal `Close` implementation", "write `defer close(resource)`"))
-                loop argument in call.args -> _ := sema_check_expression(argument.expr, None, check)
+                loop argument in call.args -> ^_: sema_check_expression(argument.expr, None, check)
                 return None
             }
-            argument := call.args[0]
-            resource_value := sema_check_expression(argument.expr, None, check)
+            ^argument: call.args[0]
+            ^resource_value: sema_check_expression(argument.expr, None, check)
             if argument.convention == AccessConvention.Write {
                 check.diagnostics.push(sema_error("E0201", argument.span, "`close` takes ownership of its resource", "`Close.close(^^self)` takes its receiver, so cleanup runs on exactly one owner; `^` would only lend it", "write `defer close(resource)`"))
                 return None
@@ -782,19 +780,19 @@ sema_stmt_check_defer_close: fn(close: Expr, span: Span, check: ^SemaBodyCheck) 
             value: resource_value ?? return None
             resource_id: sema_stmt_defer_close_resource(close, check.scopes) ?? return None
             graph: check.program.registration_graph
-            satisfies_close := sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(check.environment.*, graph), check.context.generic_params)
+            ^satisfies_close: sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(check.environment.*, graph), check.context.generic_params)
             if satisfies_close == None -> return None
-            close_valid := satisfies_close == (Val(true))
+            ^close_valid: satisfies_close == (Val(true))
             if !close_valid {
-                shown := type_name(value.ty)
+                ^shown: type_name(value.ty)
                 check.diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}.Close {{ … }}` with every required method"))
             }
-            moved_before := check.state.moved.len()
+            ^moved_before: check.state.moved.len()
             if !sema_stmt_move_direct(argument.expr, check, "the deferred `close`") || !close_valid {
                 return None
             }
             sema_ownership_defer_moves(check.state, moved_before)
-            closed := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, span)
+            ^closed: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, span)
             return Val(TStmt.DeferClose{close: closed, resource: resource_id, span: span})
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
@@ -873,7 +871,7 @@ sema_body_frame_left: fn(scopes: SemaScopeTable, word: String, label: String?, l
 // Whether the innermost loop named `name` encloses the body, whose own loops
 // hold the labels from `labels` on.
 sema_body_label_outside: fn(scopes: SemaScopeTable, name: String, labels: Int) -> Bool Never! {
-    index := scopes.loop_labels.len() - 1
+    ^index: scopes.loop_labels.len() - 1
     loop index >= 0 {
         if scopes.loop_labels[index].name == name -> return index < labels
         index -= 1
@@ -896,13 +894,13 @@ sema_body_propagates: fn(context: SemaCheckContext, scopes: SemaScopeTable, span
 }
 
 sema_stmt_check_reactive: fn(body: [Stmt], span: Span, check: ^SemaBodyCheck) -> TLambda? {
-    forbidden := check.scopes.comptime_execution_depth > 0
+    ^forbidden: check.scopes.comptime_execution_depth > 0
     if forbidden {
         check.diagnostics.push(sema_error("E2914", span, "`#Reactive` can't run at comptime", "reactive effects subscribe to runtime signals and re-run when they change", "move `#Reactive {{ … }}` out of the `#run` block"))
     }
-    closure_body := body
+    ^closure_body: body
     closure_body.push(Stmt.Return{value: None, span: Span{start: span.end, end: span.end}})
-    lambda := Lambda{
+    ^lambda: Lambda{
         take_names: [NamedSpan]{},
         params: [LambdaParam]{},
         effects: None,
@@ -910,9 +908,9 @@ sema_stmt_check_reactive: fn(body: [Stmt], span: Span, check: ^SemaBodyCheck) ->
         span: span,
         meta: ast_empty_lambda_meta(),
     }
-    previous_escapes := check.context.lambda_escapes
+    ^previous_escapes: check.context.lambda_escapes
     check.context.lambda_escapes = Val(true)
-    checked := sema_expression_lambda(lambda, Val(Type.Fn{params: [Type]{}, ret: Val(Type.Named{name: "Unit"}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}), check)
+    ^checked: sema_expression_lambda(lambda, Val(Type.Fn{params: [Type]{}, ret: Val(Type.Named{name: "Unit"}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}), check)
     check.context.lambda_escapes = previous_escapes
     if forbidden -> return None
     expression: checked ?? return None
@@ -940,8 +938,8 @@ sema_expect_fail_code: fn(argument: Expr) -> String? Never! {
 
 sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, body: [Stmt], dsl: Bool, span: Span, return_type: Type?, check: ^SemaBodyCheck, loop_depth: Int) -> TStmt? {
     if dsl {
-        type_header := sema_marker_rules_type_header(check.program.*, name)
-        dsl_args_valid := args.len() == 0
+        ^type_header: sema_marker_rules_type_header(check.program.*, name)
+        ^dsl_args_valid: args.len() == 0
         if name != "HTML" && args.len() == 1 {
             if args[0] == {
                 .Ident(_, _, _) -> dsl_args_valid = true
@@ -949,17 +947,17 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
             }
         }
         if !dsl_args_valid {
-            header_span := args_span ?? span
+            ^header_span: args_span ?? span
             // The marker rules check the header against the block's registered
             // signature first (E0930); a header they already rejected is not
             // reported a second time.
-            registry_reported := false
+            ^registry_reported: false
             loop diagnostic in check.diagnostics {
                 if diagnostic.code == "E0930" && diagnostic.span == .Val(reported) && reported.start >= span.start && reported.end <= header_span.end {
                     registry_reported = true
                 }
             }
-            expected := if {
+            ^expected: if {
                 type_header -> "`#{name} {{ … }}` or `#{name}(Row) {{ … }}`"
                 name == "HTML" -> "`#HTML {{ … }}`"
                 else -> "the declared checked text-block header"
@@ -980,11 +978,11 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
                 dsl_args_valid = false
             }
         }
-        nested := sema_stmt_check_block(body, return_type, check, "scope-dsl@{span.start}", loop_depth)
+        ^nested: sema_stmt_check_block(body, return_type, check, "scope-dsl@{span.start}", loop_depth)
         if !dsl_args_valid || !nested.complete -> return None
         return Val(TStmt.Region{body: nested.value, span: span})
     }
-    kind := TScopeMemberKind?{None}
+    ^kind: TScopeMemberKind?{None}
     if name == {
         "setup" -> {
             if args.len() == 0 -> kind = Val(TScopeMemberKind.Setup) else {
@@ -992,9 +990,9 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
             }
         }
         "expect_fail" -> {
-            code := String?{None}
-            message := String?{None}
-            valid := args.len() <= 2
+            ^code: String?{None}
+            ^message: String?{None}
+            ^valid: args.len() <= 2
             loop argument in args {
                 if argument == {
                     .Ident(_, _, _) | .Field(_, _, _, _) -> {
@@ -1013,7 +1011,7 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
                         }
                         if fields[0].value == {
                             .Str(parts, _, _) -> {
-                                text := ""
+                                ^text: ""
                                 loop part in parts {
                                     if part == {
                                         .Lit(value) -> text = "{text}{value}"
@@ -1049,9 +1047,9 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
             // One argument the ordinary checker types as a Duration; any other
             // shape is the member's own E0617, not a type mismatch.
             if args.len() == 1 {
-                checked := [Diagnostic]{}
+                ^checked: [Diagnostic]{}
                 sema_body_check_swap_diagnostics(check, checked)
-                duration := sema_check_expression(args[0], Val(Type.Named{name: "Duration"}), check)
+                ^duration: sema_check_expression(args[0], Val(Type.Named{name: "Duration"}), check)
                 sema_body_check_swap_diagnostics(check, checked)
                 if !sema_has_error_since(checked, 0) {
                     loop diagnostic in checked -> check.diagnostics.push(diagnostic)
@@ -1103,7 +1101,7 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
     repeats: name == "measure"
     moved_before: if repeats -> check.state.moved.copy() else -> [SemaOwnershipMovedPlace]{}
     entry_depth: check.state.scope_depth
-    nested := if name == "setup" -> sema_check_statements(body, return_type, check, loop_depth) else -> sema_stmt_check_block(body, return_type, check, "scope-member@{span.start}", loop_depth)
+    ^nested: if name == "setup" -> sema_check_statements(body, return_type, check, loop_depth) else -> sema_stmt_check_block(body, return_type, check, "scope-member@{span.start}", loop_depth)
     if repeats && nested.complete && sema_stmt_tree_block_can_fall_through(nested.value) {
         sema_ownership_check_loop_move_backedge(check.state, SemaLoopValueFrame{label: None, kind: SemaLoopValueKind.Effect, ty: None, moved_before: moved_before, scope_depth: entry_depth}, check.diagnostics)
     }
@@ -1120,19 +1118,19 @@ sema_stmt_check_shared_transaction: fn(transaction: Stmt, check: ^SemaBodyCheck)
 }
 
 sema_stmt_check_shared_place_assignment: fn(handle: Expr, target: LValue, op: BinOp?, op_span: Span, expr: Expr, span: Span, payload: String, check: ^SemaBodyCheck) -> TStmt? {
-    needs_transaction := sema_shared_access_expr_touches_shared(expr, check.scopes)
-    value := expr
-    body := [Stmt]{}
+    ^needs_transaction: sema_shared_access_expr_touches_shared(expr, check.scopes)
+    ^value: expr
+    ^body: [Stmt]{}
     if needs_transaction {
-        binding := ast_binding(SEMA_SHARED_HOISTED_RHS, expr_span(expr), false, expr, None)
+        ^binding: ast_binding(SEMA_SHARED_HOISTED_RHS, expr_span(expr), false, expr, None)
         body.push(Stmt.Val{binding: binding})
         value = Expr.Ident{name: SEMA_SHARED_HOISTED_RHS, span: expr_span(expr), id: AST_NODE_GENERATED}
     }
     rewritten_expr: sema_shared_access_desugar_place_write(handle, target, op, op_span, value, span, payload)
     if needs_transaction {
         body.push(Stmt.Expr{expr: rewritten_expr})
-        transaction_span := Span{start: span.start, end: expr_span(expr).end}
-        transaction := Stmt.Transact{name: None, name_span: None, body: body, implicit: true, span: transaction_span}
+        ^transaction_span: Span{start: span.start, end: expr_span(expr).end}
+        ^transaction: Stmt.Transact{name: None, name_span: None, body: body, implicit: true, span: transaction_span}
         return sema_stmt_check_shared_transaction(transaction, check)
     }
     checked: sema_check_expression(rewritten_expr, Val(Type.Named{name: "Unit"}), check) ?? return None
@@ -1204,7 +1202,7 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
     exit_diagnostics: check.diagnostics.len()
     exit_reasons: check.context.incomplete_reasons.len()
     // Keep nested fields and indexes below the cell inside its locked edit.
-    projected := sema_shared_access_write_place(target, check)
+    ^projected: sema_shared_access_write_place(target, check)
     if projected == .Val(place) {
         return sema_stmt_check_shared_place_assignment(place.handle, place.target, op, op_span, expr, place.span, place.name, check)
     }
@@ -1264,7 +1262,7 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
                     }
                     return sema_stmt_check_assignment_target(write.target, None, op_span, write.value, check)
                 }
-                args := [CallArg]{}
+                ^args: [CallArg]{}
                 loop index in 0..<count {
                     lane: (packed >> (index * 2)) & 3
                     args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Int{value: lane, span: swizzle_span, width: None, raw: None, id: AST_NODE_GENERATED}, span: swizzle_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
@@ -1304,7 +1302,7 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
     // with; assigning it a new view would change that public provenance.
     view_graph: check.program.registration_graph
     if target == .Field(_, view_field, view_field_span) {
-        seen := [U32:Bool]{}
+        ^seen: [U32:Bool]{}
         if sema_check_type_contains_view(view_graph, check.environment.module_identity, place.ty, seen) {
             check.diagnostics.push(sema_error("E2305", view_field_span, "view field `{view_field}` cannot be assigned a new source", "a stored view field has one stabilized owner relationship; overwriting it would erase or change that public provenance", "construct a new value with the new view, or keep the original field source unchanged"))
             return sema_stmt_assign_exit(check, exit_diagnostics, exit_reasons, "projected_assignment view field")
@@ -1346,9 +1344,9 @@ sema_stmt_swizzle_slots_write: fn(base: Expr, slots: SemaSwizzleSlots, packed: I
         return Val({target: LValue.Index{base: sema_expression_swizzle_owner(path, slots, span), index: sema_stmt_swizzle_number(packed & 3, span), span: span, kind: IndexKind.Unknown}, value: value})
     }
     name: pipe_value_name(span.start)
-    elements := [Expr]{}
+    ^elements: [Expr]{}
     loop slot in 0..<slots.length {
-        part := -1
+        ^part: -1
         loop index in 0..<count {
             if ((packed >> (index * 2)) & 3) == slot -> part = index
         }
@@ -1418,7 +1416,7 @@ sema_stmt_place_writes_through_view: fn(place: TExpr) -> Bool Never! {
 sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op: BinOp?, op_span: Span, expr: Expr, check: ^SemaBodyCheck) -> TStmt? {
     exit_diagnostics: check.diagnostics.len()
     exit_reasons: check.context.incomplete_reasons.len()
-    place := checked_place.move()
+    ^place: checked_place.move()
     // A plain write through a Dyn member/index chain sets the path on the root
     // in place.
     if place.kind == .HandleMethod(_, operation, _) && sema_stmt_is_dyn_index(operation) {
@@ -1426,8 +1424,8 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
             check.diagnostics.push(sema_error("E0164", place.span, "compound assignment can't target a Dyn path", "a compound update reads the path before it writes", "write the Dyn path assignment explicitly"))
             return sema_stmt_assign_exit(check, exit_diagnostics, exit_reasons, "place_assignment exit 12")
         }
-        keys := [Bool]{}
-        steps := [TExpr]{}
+        ^keys: [Bool]{}
+        ^steps: [TExpr]{}
         span: place.span
         site: if operation == {
             .DynIndexKey(text, _) | .DynIndexAt(text, _) -> text
@@ -1454,7 +1452,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
     if op != None && target == .Field(field_base, _, field_span) {
         if sema_stmt_compound_nested_hook(op, field_base, place.ty, check) {
             check.diagnostics.push(sema_error("E0362", field_span, "compound assignment can't target a nested operator field", "the current operator-place lowering supports one named owner and one field", "bind the inner value, update it, then assign the whole inner value back"))
-            _ := sema_check_expression(expr, Val(place.ty), check)
+            ^_: sema_check_expression(expr, Val(place.ty), check)
             return sema_stmt_assign_exit(check, exit_diagnostics, exit_reasons, "place_assignment exit 13")
         }
     }
@@ -1467,7 +1465,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
             check.diagnostics.push(sema_collection_changed_in_loop(root, "a mutation of `{root}`", index_span))
         }
     }
-    expected := Type?{None}
+    ^expected: Type?{None}
     plain_self_typed: op == None && sema_stmt_numeric_slot_self_typed(expr, place.ty, check)
     if op == None && !plain_self_typed -> expected = Val(place.ty)
     // Same compound contract as `sema_stmt_check_local_assignment`.
@@ -1492,7 +1490,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
     if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment", check) {
         return sema_stmt_assign_exit(check, exit_diagnostics, exit_reasons, "place_assignment exit 4")
     }
-    checked := checked_value
+    ^checked: checked_value
     if op != None && sema_stmt_compound_widens(checked, place.ty) {
         widen_line: sema_source_line_at(check.environment.source_segments, checked.span) ?? 0
         checked = sema_expr_numeric_literal_conversion(checked, place.ty, checked.span, widen_line, check.diagnostics) ?? return sema_stmt_assign_exit(check, exit_diagnostics, exit_reasons, "place_assignment exit 9")
@@ -1503,7 +1501,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
     if op == None && sema_copy_site_check_assignment(expr, check) {
         return sema_stmt_assign_exit(check, exit_diagnostics, exit_reasons, "place_assignment exit 5")
     }
-    tree_op := BinOp?{None}
+    ^tree_op: BinOp?{None}
     if op != None {
         operator: op
         // A record place whose type implements no hook for this operator has no
@@ -1528,7 +1526,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
     }
     // A compound update under an `#Overflow` mode reads the place as a
     // value (sema_stmt_policy_compound), before it becomes the write.
-    read := TExpr?{None}
+    ^read: TExpr?{None}
     if op != None -> read = Val(place.copy())
     if place.kind == {
         .Index(base, index, kind, _, checked_call, location) -> {
@@ -1541,7 +1539,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
         return sema_stmt_assign_exit(check, exit_diagnostics, exit_reasons, "place_assignment exit 17")
     }
     assign_span: Span{start: place.span.start, end: expr_span(expr).end}
-    assigned := checked
+    ^assigned: checked
     if op != None {
         operator: op
         if read == .Val(current) && sema_stmt_policy_compound(operator, place.ty, current, checked, line, assign_span, check.context) == .Val(policed) {
@@ -1558,7 +1556,7 @@ sema_stmt_field_write_mismatch: fn(target: LValue, required: Type, value: Expr, 
     if target == .Field(_, member, _) {
         value_span: expr_span(value)
         mismatch_index: sema_value_mismatch_index(check.diagnostics, diagnostic_start, value_span) ?? return
-        probe_diagnostics := [Diagnostic]{}
+        ^probe_diagnostics: [Diagnostic]{}
         offered: sema_probe_expression(value, None, check, probe_diagnostics) ?? return
         check.diagnostics[mismatch_index] = sema_slot_holds_mismatch("field `{member}`", "field", sema_expr_expected_type(required, check.environment.*, check.program.*), sema_expr_expected_type(offered.ty, check.environment.*, check.program.*), value_span)
     }
@@ -1711,7 +1709,7 @@ sema_stmt_assign_exit: fn(check: ^SemaBodyCheck, diagnostics_start: Int, reasons
 sema_stmt_check_assignment: fn(target: LValue, op: BinOp?, op_span: Span, expr: Expr, check: ^SemaBodyCheck) -> TStmt? {
     diagnostics_before: check.diagnostics.len()
     reasons_before: check.context.incomplete_reasons.len()
-    checked := sema_stmt_check_assignment_target(target, op, op_span, expr, check)
+    ^checked: sema_stmt_check_assignment_target(target, op, op_span, expr, check)
     if op == None && check.context.rule_tables.heard.len() > 0 && sema_stmt_transaction_lvalue_root(target) == .Val(root) {
         sema_rule_table_assigned(root, op_span, check)
     }
@@ -1749,11 +1747,11 @@ sema_stmt_check_assignment_target: fn(target: LValue, op: BinOp?, op_span: Span,
             // A plain `buf[i] = …` fills one slot of a fixed
             // `Type{ uninit }` list, so the base is not read while the
             // write is checked; the remaining slots stay unwritten.
-            taken := SemaOwnershipUninitFact?{None}
+            ^taken: SemaOwnershipUninitFact?{None}
             if op == None && base == .Ident(root, _, _) && sema_scope_resolve_index(check.scopes, root) == .Val(root_index) {
                 taken = sema_ownership_uninit_take(check.state, check.scopes.bindings[root_index].key)
             }
-            projected := sema_stmt_check_projected_assignment(target, op, op_span, expr, check)
+            ^projected: sema_stmt_check_projected_assignment(target, op, op_span, expr, check)
             if taken == .Val(fact) -> sema_stmt_uninit_note_slot_write(check.state, fact, index)
             projected
         }

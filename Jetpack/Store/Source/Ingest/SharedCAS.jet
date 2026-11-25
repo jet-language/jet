@@ -39,7 +39,7 @@ store_clear_write_bits: fn(mode: Int) -> Int Never! { mode - ((mode) & 0o222) }
 
 store_hex8: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
-    out := [U8]{}
+    ^out: [U8]{}
     loop index in 0..<8 {
         shift: (7 - index) * 4
         out.push(digits[((value >> shift)) & 15])
@@ -72,15 +72,15 @@ store_share_tree_files_unlocked_with_report: fn(verification: StoreVerification,
         return Err(StoreError.InvalidInput("shared CAS must not be inside a Hangar output"))
     }
     store_ensure_real_directory(shared, "shared CAS pool")
-    paths := [String]{}
-    infos := [files.Stat]{}
+    ^paths: [String]{}
+    ^infos: [files.Stat]{}
     store_collect_share_candidates(canonical_root, paths, infos)
     // Digests the producer already took from these bytes are reused; the
     // rest are hashed on all workers at once.
     digests: store_content_digests(verification, paths, infos)
-    used := Set<String>.new()
-    report := SharedCASReport{optimized_files: 0, optimized_bytes: 0}
-    touched := false
+    ^used: Set<String>.new()
+    ^report: SharedCASReport{optimized_files: 0, optimized_bytes: 0}
+    ^touched: false
     loop index in 0..<paths.len() {
         store_share_file(paths[index], infos[index], digests[index], shared, used, report, touched)
     }
@@ -100,7 +100,7 @@ store_collect_share_candidates: fn(path: String, paths: ^[String], infos: ^[file
         return
     }
     if info.is_dir {
-        entries := files.list_dir(path)
+        ^entries: files.list_dir(path)
         entries.sort_by(fn(entry: files.DirEntry) { entry.name })
         loop entry in entries -> store_collect_share_candidates(entry.path, paths, infos)
         return
@@ -140,7 +140,7 @@ store_share_file: fn(path: String, info: files.Stat, digest_hex: String, shared:
         parent_info: files.stat(parent)
         files.set_mode(parent, (parent_info.mode) | STORE_MODE_WRITE_BITS)
         touched = true
-        replaced := true
+        ^replaced: true
         store_replace_with_shared_link(path, pooled) ?? {
             replaced = false
             ()
@@ -206,8 +206,8 @@ store_io_link_refused: fn(error: IOError) -> Bool Never! {
 store_copy_shared_file: fn(shared: String, key: String, source_path: String, source: files.Stat, mode: Int) -[FS, Env, Time]> String? StoreError! {
     destination: files.join(shared, key)
     partial: files.join(shared, ".{key}.partial-{sys.pid()}-{store_next_shared_cas_sequence()}")
-    output := files.create(partial, if_exists: .Refuse)
-    input := files.open(source_path)
+    ^output: files.create(partial, if_exists: .Refuse)
+    ^input: files.open(source_path)
     loop {
         chunk: input.read_bytes(65536)
         if chunk.len() == 0 -> break
@@ -232,8 +232,8 @@ store_next_shared_cas_sequence: fn() -> Int Never! {
 
 store_files_equal: fn(left: String, right: String) -[FS]> Bool StoreError! {
     if files.stat(left).size != files.stat(right).size -> return Ok(false)
-    left_reader := files.open(left)
-    right_reader := files.open(right)
+    ^left_reader: files.open(left)
+    ^right_reader: files.open(right)
     loop {
         left_chunk: left_reader.read_bytes(65536)
         right_chunk: right_reader.read_bytes(65536)

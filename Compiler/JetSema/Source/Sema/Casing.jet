@@ -86,7 +86,7 @@ sema_casing_acronyms: fn(name: String, span: Span, diagnostics: ^[Diagnostic]) {
 // in a declaration or in a type position (`Id<Node>`, `HttpRequest`).
 sema_casing_acronym_diagnostic: fn(name: String, span: Span) -> Diagnostic? {
     if span.start == span.end -> return None
-    parts := [String]{}
+    ^parts: [String]{}
     loop segment in name.split(".") {
         if !sema_casing_has_case(segment, SemaNameCase.Pascal) -> return None
         parts.push(sema_casing_acronym_name(segment))

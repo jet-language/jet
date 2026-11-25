@@ -83,7 +83,7 @@ store_artifact_owner_liveness: fn(owner: ArtifactProcessIdentity, current: Artif
 
 // The last byte offset where `needle` occurs, or -1.
 store_artifact_rfind: fn(haystack: [U8], needle: [U8]) -> Int Never! {
-    at := haystack.len() - needle.len()
+    ^at: haystack.len() - needle.len()
     loop at >= 0 {
         if pkg_bytes_starts_with(haystack, at, needle) -> return at
         at -= 1
@@ -154,7 +154,7 @@ store_artifact_parse_lease: fn(bytes: [U8]) -> ArtifactLeaseRecord? Never! {
     pid: store_artifact_parse_pid(header[2]) ?? return None
     if header[3] == "" -> return None
     owner: ArtifactProcessIdentity.new(pid, header[3])
-    targets := [ArtifactEntryKey]{}
+    ^targets: [ArtifactEntryKey]{}
     loop index in 1..<lines.len() {
         fields: lines[index].split("|").to_list()
         if fields.len() != 2 -> return None
@@ -165,7 +165,7 @@ store_artifact_parse_lease: fn(bytes: [U8]) -> ArtifactLeaseRecord? Never! {
 
 // The owner of a lock file (`jet.store.v1|lock|<pid>|<start>`).
 store_artifact_parse_owner_line: fn(bytes: [U8]) -> ArtifactProcessIdentity? Never! {
-    text := String.from_bytes(bytes) ?? return None
+    ^text: String.from_bytes(bytes) ?? return None
     loop text.ends_with("\n") {
         raw: text.bytes()
         text = pkg_bytes_text(raw, 0, raw.len() - 1)
@@ -188,9 +188,9 @@ store_artifact_parse_pid: fn(text: String) -> Int? Never! {
 // `str::lines`: split on LF, drop one CR before each LF, and yield no final
 // empty line after a trailing LF.
 store_artifact_lines: fn(text: String) -> [String] Never! {
-    lines := [String]{}
+    ^lines: [String]{}
     raw: text.bytes()
-    start := 0
+    ^start: 0
     loop index in 0..<raw.len() {
         if (Int{raw[index]}) != 10 -> next
         end: if index > start && (Int{raw[index - 1]}) == 13 -> index - 1 else -> index
@@ -235,8 +235,8 @@ store_artifact_read_journal: fn(path: String) -[FS]> ArtifactJournalState Artifa
             return Err(ArtifactStoreError.IO(error))
         }
     }
-    state := ArtifactJournalState{last_use: [String:Int]{}, last_sequence: 0, bytes: bytes.len(), valid: true}
-    start := 0
+    ^state: ArtifactJournalState{last_use: [String:Int]{}, last_sequence: 0, bytes: bytes.len(), valid: true}
+    ^start: 0
     loop index in 0..<(bytes.len() + 1) {
         if index < bytes.len() && (Int{bytes[index]}) != 10 -> next
         line_start: start
@@ -306,8 +306,8 @@ store_artifact_journal_tail_sequence: fn(path: String) -[FS]> Int? ArtifactStore
     tail: files.read_at(path, length - window, window)
     if tail.len() == 0 || (Int{tail[tail.len() - 1]}) != 10 -> return Ok(None)
     body_end: tail.len() - 1
-    start := -1
-    at := body_end - 1
+    ^start: -1
+    ^at: body_end - 1
     loop at >= 0 {
         if (Int{tail[at]}) == 10 {
             start = at + 1

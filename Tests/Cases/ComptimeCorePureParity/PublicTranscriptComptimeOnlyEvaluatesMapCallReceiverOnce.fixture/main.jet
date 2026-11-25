@@ -8,13 +8,13 @@ counted_map: fn(hits: ^Int) -> [String:Int] {
 }
 
 map_view: fn() -> String {
-    values := [String:Int]{"b": 2, "a": 1}
+    ^values: [String:Int]{"b": 2, "a": 1}
     empty_before: values.is_empty()
     fresh_c: values.add("c", 3) ?? -1
     displaced_b: add_map(values, "b", 20)
     added_d: values.add_new("d", 4)
     duplicate_a: values.add_new("a", 99)
-    seen := [String]{}
+    ^seen: [String]{}
     values.each(fn(key, value) {
         assert((key == "a" && value == 1) || (key == "b" && value == 20) || (key == "c" && value == 3) || (key == "d" && value == 4), "Map.each pair")
         seen.push(key.copy())
@@ -31,7 +31,7 @@ map_view: fn() -> String {
 }
 
 map_call_receiver_view: fn() -> String {
-    receiver_hits := 0
+    ^receiver_hits: 0
     found: counted_map(receiver_hits).has_key("a")
     return "{found}|{receiver_hits}"
 }

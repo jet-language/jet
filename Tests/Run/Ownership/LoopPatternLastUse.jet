@@ -26,21 +26,21 @@ maybe: fn(k: Int) -> Blob? {
 }
 
 texts: fn(blobs: [Blob]) -> String {
-    out := ""
+    ^out: ""
     loop blob in blobs -> out = "{out}{blob.text}:{blob.data.len()} "
     out
 }
 
 run: fn() {
-    from_calls := [Blob]{}
+    ^from_calls: [Blob]{}
     loop k in 0..<5 {
         if maybe(k) == .Val(blob) -> from_calls.push(blob)
     }
     print(texts(from_calls))
-    from_locals := [Blob]{}
-    index := 0
+    ^from_locals: [Blob]{}
+    ^index: 0
     loop index < 7 {
-        shape := make(index)
+        ^shape: make(index)
         if shape == {
             .Circle(blob, _) -> { from_locals.push(blob) }
             .Line(size) -> { from_locals.push(Blob{data: [Int]{}, text: "l{size}"}) }
@@ -49,7 +49,7 @@ run: fn() {
         index += 1
     }
     print(texts(from_locals))
-    sizes := 0
+    ^sizes: 0
     loop k in 0..<4 {
         value: maybe(k)
         if value == {

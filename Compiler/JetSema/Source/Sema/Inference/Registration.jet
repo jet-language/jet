@@ -18,6 +18,6 @@ sema_infer_context_for_registration: fn(caller_module_identity: ModuleID, caller
 // type, or that type resolved in the owner's module), so a caller never copies
 // the whole row (methods and their bodies) to swap one field.
 sema_infer_registered_nominal: fn(nominal: SemaRegistrationNominal, nominal_ty: Type, graph: SemaRegistrationGraph, caller_module_identity: ModuleID, caller_package_identity: String, lexical_generic_params: [TGenericParam], actual: Type, explicit_type_args: [Type], expected: Type?, span: Span, diagnostics: ^[Diagnostic]) -> SemaInferenceResult? {
-    context := sema_infer_context_for_registration(caller_module_identity, caller_package_identity, nominal.generic_params, lexical_generic_params, expected)
+    ^context: sema_infer_context_for_registration(caller_module_identity, caller_package_identity, nominal.generic_params, lexical_generic_params, expected)
     sema_infer_nominal(graph, context, nominal_ty, actual, explicit_type_args, span, diagnostics)
 }

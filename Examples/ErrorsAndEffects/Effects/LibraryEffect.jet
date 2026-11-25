@@ -24,7 +24,7 @@ insert: fn(table: ^Table, row: String) -[SQL.Write]> {
 
 select: fn(table: Table, prefix: String) -[SQL.Read]> [String] {
     print("SELECT * FROM {table.name} WHERE name LIKE '{prefix}%'")
-    found := [String]{}
+    ^found: [String]{}
     loop row in table.rows {
         if row.starts_with(prefix) -> found.push(row.copy())
     }
@@ -38,7 +38,7 @@ seed: fn(table: ^Table) -[SQL]> {
 }
 
 run: fn() {
-    users := Table{name: "users", rows: [String]{}}
+    ^users: Table{name: "users", rows: [String]{}}
     seed(users)
     matches: select(users, "a")
     listed: matches.join(", ")

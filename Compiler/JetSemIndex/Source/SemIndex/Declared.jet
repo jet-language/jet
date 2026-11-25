@@ -26,10 +26,12 @@ print: fn(values: ...Printable) -[IO]> Never! {}
 // `{qualifier}.{name}`, or `{name}` when `qualifier` is "".
 semindex_declared: fn(qualifier: String, source: String) -> [SemDeclared] {
     parsed: parse_source(source.bytes())
-    declared := [SemDeclared]{}
+    ^declared: [SemDeclared]{}
     loop item in parsed.program.items {
         if item == .Func(function) {
-            if !function.name.starts_with("_") -> declared.push(semindex_declared_function(qualifier, function, parsed.program.tables, source))
+            if !function.name.starts_with("_") {
+                declared.push(semindex_declared_function(qualifier, function, parsed.program.tables, source))
+            }
         }
     }
     declared
@@ -63,9 +65,7 @@ semindex_declared_function: fn(qualifier: String, function: Func, tables: ASTTab
     }
 }
 
-semindex_ambient_print: fn() -> SemDeclared {
-    semindex_declared("", SEMINDEX_AMBIENT_PRINT)[0]
-}
+semindex_ambient_print: fn() -> SemDeclared { semindex_declared("", SEMINDEX_AMBIENT_PRINT)[0] }
 
 // The identity of a declaration read from its own source text, by its
 // qualified name: `declared:core.term.print`, `declared:print`.
@@ -79,19 +79,23 @@ semindex_declared_identity: fn(qualified_name: String) -> String Never! {
 // core.term.[print]`), and a free `print` that resolves to nothing names the
 // ambient print, so the call record and hover name the same declaration.
 semindex_call_declarations: fn(db: ^SemDB, modules: [JetDriverDocModule]) Never! {
-    sites := [String:Int]{}
+    ^sites: [String:Int]{}
     loop index in 0..<db.refs.len() {
         sites[semindex_site_key(db.refs[index].module_path, db.refs[index].span)] = index
     }
-    ambient_name := String?{None}
+    ^ambient_name: String?{None}
     loop index in 0..<db.calls.len() {
         site: semindex_site_key(db.calls[index].module_path, db.calls[index].span)
         if sites.get(site) == .Val(at) && db.refs[at].target == .Val(target) {
-            if target.semantic_identity == .Val(identity) -> db.calls[index].declaration = Val("{identity}")
+            if target.semantic_identity == .Val(identity) {
+                db.calls[index].declaration = Val("{identity}")
+            }
             next
         }
         module_at: (loop (position, candidate) in modules {
-            if candidate.path == db.calls[index].module_path -> break position
+            if candidate.path == db.calls[index].module_path {
+                break position
+            }
         } ?? -1)
         if module_at < 0 -> next
         imports: modules[module_at].imports
@@ -99,12 +103,16 @@ semindex_call_declarations: fn(db: ^SemDB, modules: [JetDriverDocModule]) Never!
             // A receiver the check resolved (a local, a parameter) is not an import.
             if db.refs[receiver].target != None -> next
             bound: semindex_import_binding(imports, db.refs[receiver].name) ?? next
-            if bound.starts_with("core.") -> db.calls[index].declaration = Val(semindex_declared_identity("{bound}.{db.calls[index].callee}"))
+            if bound.starts_with("core.") {
+                db.calls[index].declaration = Val(semindex_declared_identity("{bound}.{db.calls[index].callee}"))
+            }
             next
         }
         if db.free_calls.get(site) == None -> next
         if semindex_import_binding(imports, db.calls[index].callee) == .Val(bound) {
-            if bound.starts_with("core.") -> db.calls[index].declaration = Val(semindex_declared_identity(bound))
+            if bound.starts_with("core.") {
+                db.calls[index].declaration = Val(semindex_declared_identity(bound))
+            }
             next
         }
         if ambient_name == None -> ambient_name = Val(semindex_ambient_print().def.name)
@@ -127,7 +135,9 @@ semindex_imports: fn(modules: [JetDriverDocModule], name: String) -> Bool Never!
                     if imported == name || (below && imported.starts_with(name)) -> return true
                 }
                 .Unqualified(module_alias, _, items, _, _) -> {
-                    if module_alias == name || (below && module_alias.starts_with(name)) -> return true
+                    if module_alias == name || (below && module_alias.starts_with(name)) {
+                        return true
+                    }
                     loop item in items {
                         member: "{module_alias}.{item.original}"
                         if member == name || (below && member.starts_with(name)) -> return true

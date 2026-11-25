@@ -159,10 +159,10 @@ jet_cli_remote_run_host: fn(target: JetCLIRemoteRunTarget, jet_argv: [String], a
             return output
         }
     }
-    entry_args := [String]{"run", origin.pin.entry.copy()}
+    ^entry_args: [String]{"run", origin.pin.entry.copy()}
     loop index in 2..<args.len() -> entry_args.push(args[index])
-    entry_argv := [String]{}
-    replaced := false
+    ^entry_argv: [String]{}
+    ^replaced: false
     loop word in jet_argv {
         if word == "--" -> replaced = true
         if !replaced && word == args[1] {
@@ -175,10 +175,10 @@ jet_cli_remote_run_host: fn(target: JetCLIRemoteRunTarget, jet_argv: [String], a
     }
     plan: jet_cli_run(entry_argv, entry_args, passthrough, false, false, color, quiet, verbose, threads)
     if plan == .Run(file, source, run_color, options, run_verbose, json, run_threads, program_args, invocation, notice, watch, entry) {
-        rows := invocation.move() ?? JetCLIInvocationAuthority{all: false, allow: [String]{}, deny: [String]{}}
+        ^rows: invocation.move() ?? JetCLIInvocationAuthority{all: false, allow: [String]{}, deny: [String]{}}
         rows.remote = Val(origin)
         remote_plan: JetCLIPlan.Run{file: file.move(), source: source.move(), color: run_color, options: options.move(), verbose: run_verbose, json: json, threads: run_threads, program_args: program_args.move(), invocation: Val(rows), notice: notice.move(), watch: watch, entry: entry.move()}
-        discovery := WorkspaceDeclarationCache.new()
+        ^discovery: WorkspaceDeclarationCache.new()
         return jet_cli_compile_on_worker(remote_plan, discovery)
     }
     // Only a program run asks before its first instruction; any other plan
@@ -231,8 +231,8 @@ jet_cli_remote_run_url: fn(url: String, sha256: String?, locked: Bool, color: Bo
     }
     entry: jet_cli_remote_run_store(hex, name, body) ?? return jet_cli_remote_run_refused("couldn't store `{url}` in the Hangar: {err.message}", "Jet runs a remote target only from its pinned copy.", "make the Hangar directory writable, then run it again", color)
     content_hash: "sha256-{hex}"
-    accepted := [String]{}
-    changed := false
+    ^accepted: [String]{}
+    ^changed: false
     if record == .Val(pin) {
         if pin.content_hash == content_hash -> accepted = pin.accepted.copy() else {
             changed = pin.accepted.len() > 0
@@ -318,7 +318,7 @@ jet_cli_remote_run_registry: fn(name: String, selector: String, locked: Bool, co
     if locked {
         return jet_cli_remote_run_refused("`{source}` isn't pinned on this machine, and `--locked` refuses to resolve it", "`--locked` runs only what this machine already pinned.", "run it once without `--locked` to fetch and pin it", color)
     }
-    wanted := selector.copy()
+    ^wanted: selector.copy()
     if wanted == "" {
         wanted = jet_cli_remote_run_highest(name, launcher) ?? return jet_cli_remote_run_refused("`{name}` isn't a local path, and this machine knows no version of it", "A bare package name runs the highest version this machine already has; fetching from the registry needs a version.", "check the path, or name a version: `jet run {name}#<version>`", color)
     }
@@ -337,8 +337,8 @@ jet_cli_remote_run_registry: fn(name: String, selector: String, locked: Bool, co
         }
         jet_cli_remote_run_resolved(dep, launcher) ?? return jet_cli_remote_run_refused("the registry fetch of `{source}` left no copy Jet can run", "A registry target resolves as a script's `use {name}#<version>` does, before anything runs.", "run `jet fetch` on a script that has `use {name}#{wanted}` to see what the registry answers", color)
     }
-    accepted := [String]{}
-    changed := false
+    ^accepted: [String]{}
+    ^changed: false
     if record == .Val(pin) {
         if pin.content_hash == found.content_hash -> accepted = pin.accepted.copy() else {
             changed = pin.accepted.len() > 0
@@ -352,10 +352,10 @@ jet_cli_remote_run_registry: fn(name: String, selector: String, locked: Bool, co
 // The highest three-part version of `name` the launcher's managed folder or
 // JET_INLINE_DEPS_FIXTURES holds.
 jet_cli_remote_run_highest: fn(name: String, launcher: String) -> String? {
-    roots := [String]{remote_run_files.join(remote_run_files.join(launcher, ".jet"), "inline-deps")}
+    ^roots: [String]{remote_run_files.join(remote_run_files.join(launcher, ".jet"), "inline-deps")}
     if remote_run_sys.get(PKG_INLINE_DEPS_FIXTURES_ENV) == .Val(fixtures) -> roots.push(fixtures)
-    best := String?{None}
-    best_parts := [U64]{}
+    ^best: String?{None}
+    ^best_parts: [U64]{}
     loop root in roots {
         candidates: pkg_inline_deps_list_versions(root, name) ?? next
         loop candidate in candidates {
@@ -442,14 +442,14 @@ jet_cli_remote_run_accepted: fn(origin: JetCLIRemoteRunOrigin, rights: [String])
 // `--allow`/`-A` rows. The fetched code's own `allow` row grants nothing
 // here, so remote code can't wave its own effects through.
 jet_cli_remote_run_unacknowledged: fn(authority: JetCLIAuthority, rows: JetCLIInvocationAuthority) -> [String] Never! {
-    granted := [String]{}
+    ^granted: [String]{}
     loop right in AUTHORITY_AMBIENT_BASIC_EFFECTS -> granted.push(right)
     if rows.all {
         loop root in authority_grantable_roots() -> granted.push(root)
     }
     loop right in rows.allow -> granted.push(right.copy())
     if jet_cli_read_scope(Val(rows.copy())).len() > 0 -> granted.push("FS.Read")
-    missing := [String]{}
+    ^missing: [String]{}
     loop right in authority.required {
         if authority_is_deny_only(right) || jet_cli_covers_any(authority.denied, right) || jet_cli_covers_any(granted, right) {
             next
@@ -477,22 +477,22 @@ jet_cli_remote_run_consent: fn(origin: JetCLIRemoteRunOrigin, file: String, sour
         )
         return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, [Diagnostic]{diagnostic}, color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
-    console := remote_run_term.stderr()
+    ^console: remote_run_term.stderr()
     console.write("{origin.name} from {origin.from} ({jet_cli_remote_run_short_hash(origin.pin.content_hash)}), {jet_cli_remote_run_status(origin)}\nIt {jet_cli_effect_words(rights)}\nRun it? [y/N] ").drop("remote run question")
-    input := remote_run_term.stdin()
+    ^input: remote_run_term.stdin()
     answer: input.read_line() ?? ""
     word: answer.trim().to_lower()
     if word != "y" && word != "yes" {
         return Val(JetDriverVerbOutput{stdout: "", stderr: "Not run\n", exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
-    accepted := [String]{}
+    ^accepted: [String]{}
     if !origin.changed {
         loop right in origin.pin.accepted -> accepted.push(right.copy())
     }
     loop right in rights {
         if !accepted.contains(right) -> accepted.push(right.copy())
     }
-    pin := origin.pin.copy()
+    ^pin: origin.pin.copy()
     pin.accepted = jet_cli_sorted_set(accepted)
     jet_cli_remote_run_record_write(pin)
     None

@@ -9,10 +9,10 @@ use {
 }
 
 fft_in_place: fn(re: ^[Float], im: ^[Float], n: Int) {
-    j := 0
-    i := 1
+    ^j: 0
+    ^i: 1
     loop i < n {
-        bit := n /% 2
+        ^bit: n /% 2
         loop bit > 0 {
             if j >= bit {
                 j -= bit
@@ -31,20 +31,20 @@ fft_in_place: fn(re: ^[Float], im: ^[Float], n: Int) {
         i += 1
     }
 
-    length := 2
-    half_f := Float{1.0}
+    ^length: 2
+    ^half_f: Float{1.0}
     loop length <= n {
-        half := length /% 2
+        ^half: length /% 2
         angle: -Float{3.141592653589793} / half_f
         step_re: math.cos(angle)
         step_im: math.sin(angle)
-        w_re := Float{1.0}
-        w_im := Float{0.0}
+        ^w_re: Float{1.0}
+        ^w_im: Float{0.0}
         j = 0
         loop j < half {
             i = j
             loop i < n {
-                k := i + half
+                ^k: i + half
                 odd_re: re[k].copy()
                 odd_im: im[k].copy()
                 t_re: w_re * odd_re - w_im * odd_im
@@ -70,8 +70,8 @@ fft_in_place: fn(re: ^[Float], im: ^[Float], n: Int) {
 
 run: fn() {
     n: 8
-    re := [Float]{}
-    im := [Float]{}
+    ^re: [Float]{}
+    ^im: [Float]{}
     loop i in 0..<n {
         if i == 0 -> re.push(Float{1.0}) else -> re.push(Float{0.0})
         im.push(Float{0.0})

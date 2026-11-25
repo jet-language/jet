@@ -176,7 +176,7 @@ wait_labels: fn(d: Driver, count: Int, label: String) -> [String] Failure! {
     loop started.elapsed_millis() < C_WAIT_MS {
         if evaluate(d, C_LIFECYCLE_LABELS) == .Val(raw) {
             tree: json.parse(raw) ?? return Err(Failure{message: "{label}: the labels are not JSON: {err}"})
-            labels := [String]{}
+            ^labels: [String]{}
             loop entry in items(tree) -> labels.push(text(entry))
             if labels.len() == count && (count != 1 || labels[0] == "keep") -> return Ok(labels)
         }

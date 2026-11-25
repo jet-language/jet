@@ -79,10 +79,10 @@ StoreDiagnosticSections: struct {
 // can resolve itself. A diagnostic payload the codec does not carry is an
 // error; the caller then leaves the result unrecorded.
 store_encode_diagnostics: fn(diagnostics: [Diagnostic], closure_revisions: [String]) -> StoreDiagnosticSections StoreDiagnosticRecordError! {
-    table := [DiagnosticOrigin]{}
-    encoded := [RecordValue]{}
+    ^table: [DiagnosticOrigin]{}
+    ^encoded: [RecordValue]{}
     loop diagnostic in diagnostics -> encoded.push(store_diagnostic_encode(diagnostic, table))
-    origins := [RecordValue]{}
+    ^origins: [RecordValue]{}
     loop origin in table {
         source: if closure_revisions.contains(origin.revision) -> RecordValue.Null else -> RecordValue.Str{value: origin.source}
         origins.push(
@@ -103,7 +103,7 @@ store_encode_diagnostics: fn(diagnostics: [Diagnostic], closure_revisions: [Stri
 // revision in the caller's current closure; an origin it cannot resolve makes
 // the whole list undecodable (a miss, never a replay against different bytes).
 store_decode_diagnostics: fn(origins: [RecordValue], diagnostics: [RecordValue], source_for_revision: fn(String) -> String?) -> [Diagnostic] StoreDiagnosticRecordError! {
-    table := [DiagnosticOrigin]{}
+    ^table: [DiagnosticOrigin]{}
     loop origin in origins {
         display: store_diagnostic_text(origin, "display")
         path: store_diagnostic_text(origin, "path")
@@ -118,7 +118,7 @@ store_decode_diagnostics: fn(origins: [RecordValue], diagnostics: [RecordValue],
         }
         table.push(decoded)
     }
-    out := [Diagnostic]{}
+    ^out: [Diagnostic]{}
     loop diagnostic in diagnostics -> out.push(store_diagnostic_decode(diagnostic, table))
     Ok(out)
 }
@@ -260,22 +260,22 @@ store_diagnostic_edit: fn(edit: TextEdit) -> RecordValue Never! {
 // journey frame records no column, so the report's 1-based column is 0 ("not
 // recorded"), as the bootstrap host codec maps it.
 store_diagnostic_build_report: fn(report: DiagnosticBuildError) -> JetErrorReport Never! {
-    causes := [JetErrorReport]{}
+    ^causes: [JetErrorReport]{}
     loop cause in report.causes -> causes.push(store_diagnostic_build_report(cause))
-    frames := [JetErrorContextFrame]{}
+    ^frames: [JetErrorContextFrame]{}
     loop frame in report.context_frames {
         frames.push(JetErrorContextFrame{text: frame.text, file: frame.file, line: frame.line})
     }
-    journey := [JetErrorJourneyFrame]{}
+    ^journey: [JetErrorJourneyFrame]{}
     loop frame in report.source_journey {
         journey.push(JetErrorJourneyFrame{fn_name: frame.fn_name, file: frame.file, line: frame.line, column: 0, note: frame.note, hops: frame.hops})
     }
-    conversions := [JetErrorConversion]{}
+    ^conversions: [JetErrorConversion]{}
     loop conversion in report.conversion_history {
         conversions.push(JetErrorConversion{source: conversion.source, target: conversion.target})
     }
     details: if report.details == .Val(value) -> {
-        fields := [JetErrorField]{}
+        ^fields: [JetErrorField]{}
         loop field in value.fields {
             fields.push(JetErrorField{name: field.name, value: field.value})
         }
@@ -286,22 +286,22 @@ store_diagnostic_build_report: fn(report: DiagnosticBuildError) -> JetErrorRepor
 }
 
 store_diagnostic_build_error: fn(report: JetErrorReport) -> DiagnosticBuildError Never! {
-    causes := [DiagnosticBuildError]{}
+    ^causes: [DiagnosticBuildError]{}
     loop cause in report.causes -> causes.push(store_diagnostic_build_error(cause))
-    frames := [DiagnosticErrorContextFrame]{}
+    ^frames: [DiagnosticErrorContextFrame]{}
     loop frame in report.context_frames {
         frames.push(DiagnosticErrorContextFrame{text: frame.text, file: frame.file, line: frame.line})
     }
-    journey := [DiagnosticErrorJourneyFrame]{}
+    ^journey: [DiagnosticErrorJourneyFrame]{}
     loop frame in report.source_journey {
         journey.push(DiagnosticErrorJourneyFrame{fn_name: frame.fn_name, file: frame.file, line: frame.line, note: frame.note, hops: frame.hops})
     }
-    conversions := [DiagnosticErrorConversion]{}
+    ^conversions: [DiagnosticErrorConversion]{}
     loop conversion in report.conversion_history {
         conversions.push(DiagnosticErrorConversion{source: conversion.source, target: conversion.target})
     }
     details: if report.details == .Val(value) -> {
-        fields := [DiagnosticErrorField]{}
+        ^fields: [DiagnosticErrorField]{}
         loop field in value.fields {
             fields.push(DiagnosticErrorField{name: field.name, value: field.value})
         }
@@ -314,7 +314,7 @@ store_diagnostic_build_error: fn(report: JetErrorReport) -> DiagnosticBuildError
 store_diagnostic_structured: fn(structured: DiagnosticStructured) -> RecordValue Never! {
     if structured == {
         .SuggestedEdits(edits) -> {
-            encoded := [RecordValue]{}
+            ^encoded: [RecordValue]{}
             loop edit in edits -> encoded.push(store_diagnostic_edit(edit))
             RecordValue.Map{
                 fields: [RecordField]{
@@ -352,11 +352,11 @@ store_diagnostic_structured: fn(structured: DiagnosticStructured) -> RecordValue
 }
 
 store_diagnostic_encode: fn(diagnostic: Diagnostic, origins: ^[DiagnosticOrigin]) -> RecordValue StoreDiagnosticRecordError! {
-    labels := [RecordValue]{}
+    ^labels: [RecordValue]{}
     loop label in diagnostic.labels {
         labels.push(RecordValue.List{values: [RecordValue]{RecordValue.Int{value: label.span.start}, RecordValue.Int{value: label.span.end}, RecordValue.Str{value: label.message}}})
     }
-    causes := [RecordValue]{}
+    ^causes: [RecordValue]{}
     loop cause in diagnostic.cause {
         causes.push(
             RecordValue.Map{
@@ -469,14 +469,14 @@ store_diagnostic_decode_structured: fn(value: RecordValue) -> DiagnosticStructur
     kind: store_diagnostic_text(value, "kind")
     if kind == {
         "suggested_edits" -> {
-            edits := [TextEdit]{}
+            ^edits: [TextEdit]{}
             loop edit in store_diagnostic_list(value, "edits") {
                 edits.push(store_diagnostic_decode_edit(edit))
             }
             Ok(DiagnosticStructured.SuggestedEdits{edits: edits})
         }
         "crypto_misuse" -> {
-            actual := Int?{None}
+            ^actual: Int?{None}
             if store_diagnostic_optional_text(value, "actual") == .Val(text) {
                 actual = Val(Int.parse(text) ?? return Err(store_diagnostic_error("invalid crypto misuse value `{text}`")))
             }
@@ -499,7 +499,7 @@ store_diagnostic_decode_structured: fn(value: RecordValue) -> DiagnosticStructur
 }
 
 store_diagnostic_decode: fn(value: RecordValue, origins: [DiagnosticOrigin]) -> Diagnostic StoreDiagnosticRecordError! {
-    labels := [DiagnosticLabel]{}
+    ^labels: [DiagnosticLabel]{}
     loop label in store_diagnostic_list(value, "labels") {
         decoded: record_value_as_list(label)
         parts: decoded.value ?? return Err(store_diagnostic_error(decoded.problem ?? "diagnostic label must be [start, end, message]"))
@@ -514,7 +514,7 @@ store_diagnostic_decode: fn(value: RecordValue, origins: [DiagnosticOrigin]) -> 
             },
         )
     }
-    causes := [DiagnosticCause]{}
+    ^causes: [DiagnosticCause]{}
     loop cause in store_diagnostic_list(value, "cause") {
         causes.push(
             DiagnosticCause{

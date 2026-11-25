@@ -71,7 +71,7 @@ gh_strip_comma: fn(text: String) -> String {
 // Every `NAME: "literal"` constant in the syntax registry directory
 // (EditorGrammars.jet `jet_cli_grammar_constants`).
 gh_constants: fn() -> [{name: String, value: String}] {
-    constants := [{name: String, value: String}]{}
+    ^constants: [{name: String, value: String}]{}
     loop child in (gh_files.list_dir(GH_SYNTAX_DIR) ?? panic("list {GH_SYNTAX_DIR}: {err}")) {
         if child.is_dir || !child.name.ends_with(".jet") -> next
         loop line in gh_read(child.path).split("\n") {
@@ -79,8 +79,8 @@ gh_constants: fn() -> [{name: String, value: String}] {
             name: gh_slice(line, 0, at)
             if !gh_is_ident(name) -> next
             rest: gh_slice(line, at + 3, line.count_bytes())
-            close := -1
-            escaped := false
+            ^close: -1
+            ^escaped: false
             loop (index, byte) in rest.bytes() {
                 if escaped -> escaped = false else if byte == (U8{92}) -> escaped = true else if byte == (U8{34}) {
                     close = index
@@ -110,8 +110,8 @@ gh_resolve: fn(constants: [{name: String, value: String}], written: String) -> S
 // Active marker rule names (EditorGrammars.jet `jet_cli_grammar_markers`): every
 // top-level struct in the Prelude marker source with an `impl Marker` block.
 gh_active_markers: fn() -> [String] {
-    names := [String]{}
-    current := String?{None}
+    ^names: [String]{}
+    ^current: String?{None}
     loop line in gh_read("Compiler/Prelude/Markers.jet").split("\n") {
         if !line.starts_with(" ") && line.contains(": struct") {
             _: gh_index(line, "{{") ?? panic("marker struct without a body: {line}")
@@ -134,8 +134,8 @@ gh_tokens: fn() -> [GhToken] {
     table: gh_slice(source, start, source.count_bytes())
     end: gh_index(table, "\n}}") ?? panic("unterminated JET_HIGHLIGHT_TOKENS table")
     constants: gh_constants()
-    tokens := [GhToken]{}
-    pending := String?{None}
+    ^tokens: [GhToken]{}
+    ^pending: String?{None}
     loop raw in gh_slice(table, 0, end).split("\n") {
         line: raw.trim()
         if line.starts_with("text:") {
@@ -162,7 +162,7 @@ gh_generated_section: fn(path: String) -> String {
 }
 
 gh_regex_escape: fn(text: String) -> String {
-    out := ""
+    ^out: ""
     loop ch in text.chars() {
         if "\\.+*?^$()[]{{}}|/-".contains("{ch}") -> out = "{out}\\"
         out = "{out}{ch}"
@@ -179,9 +179,9 @@ gh_bracket: fn(text: String) -> Bool { gh_has(["{{", "}}", "[", "]", "(", ")"], 
 
 // Jet test fixture.
 gh_anonymous_node_types: fn() -> [String] {
-    out := [String]{}
-    current := String?{None}
-    named := 0
+    ^out: [String]{}
+    ^current: String?{None}
+    ^named: 0
     loop line in gh_read(GH_NODE_TYPES).split("\n") {
         trimmed: line.trim()
         if line.starts_with("  {{") {
@@ -209,12 +209,12 @@ gh_anonymous_node_types: fn() -> [String] {
 
 // Jet test fixture.
 gh_query_string_literals: fn(query: String) -> [String] {
-    out := [String]{}
+    ^out: [String]{}
     loop line in query.split("\n") {
         trimmed: line.trim()
         if trimmed.starts_with(";") -> next
         parts: trimmed.split("\"").to_list()
-        index := 1
+        ^index: 1
         loop index + 1 < parts.len() {
             out.push(parts[index].copy())
             index += 2
@@ -233,7 +233,7 @@ gh_registry_list: fn(list: String) -> [String] {
     body: gh_slice(source, start, source.count_bytes())
     end: gh_index(body, "\n}}") ?? panic("unterminated {list}")
     constants: gh_constants()
-    words := [String]{}
+    ^words: [String]{}
     loop raw in gh_slice(body, 0, end).split("\n") {
         if raw.contains(": ") -> next
         line: gh_strip_comma(raw.copy())
@@ -247,9 +247,9 @@ gh_registry_list: fn(list: String) -> [String] {
 // the words of every `(a|b|c)` alternation in the
 // `match` patterns of the VS Code grammar's `keywords` block.
 gh_grammar_keyword_words: fn() -> [String] {
-    words := [String]{}
-    inside := false
-    depth := 0
+    ^words: [String]{}
+    ^inside: false
+    ^depth: 0
     loop raw in gh_read(GH_VSCODE).split("\n") {
         line: raw.trim()
         if line.contains("\"keywords\"") -> inside = true
@@ -262,7 +262,7 @@ gh_grammar_keyword_words: fn() -> [String] {
         colon: gh_index(after, ":") ?? next
         value: gh_slice(after, colon + 1, after.count_bytes()).trim().copy()
         if !value.starts_with("\"") -> next
-        rest := gh_slice(value, 1, value.count_bytes())
+        ^rest: gh_slice(value, 1, value.count_bytes())
         loop {
             open: gh_index(rest, "(") ?? break
             tail: gh_slice(rest, open + 1, rest.count_bytes())
@@ -285,7 +285,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 #Test("every_highlight_token_is_in_each_generated_section") {
     guards_enter_root()
     sections: [GH_VSCODE, GH_TREE_SITTER].map(fn(path) { {path: path, section: gh_generated_section(path)} })
-    missing := [String]{}
+    ^missing: [String]{}
     loop token in gh_tokens() {
         if gh_bracket(token.text) -> next
         loop entry in sections {
@@ -319,7 +319,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 // registry's separator, and the grammar's `inbody_marker` rule parses it.
 #Test("tree_sitter_parses_the_inbody_marker_line_with_the_registry_separator") {
     guards_enter_root()
-    separator := ""
+    ^separator: ""
     loop constant in gh_constants() {
         if constant.name == "MARKER_INBODY_SEPARATOR" -> separator = constant.value
     }
@@ -334,11 +334,11 @@ gh_grammar_keyword_words: fn() -> [String] {
 #Test("zed_generated_query_covers_anonymous_highlight_words") {
     guards_enter_root()
     anonymous: gh_anonymous_node_types()
-    actual := [String]{}
+    ^actual: [String]{}
     loop literal in gh_query_string_literals(gh_generated_section(GH_ZED)) {
         if !gh_has(actual, literal) -> actual.push(literal)
     }
-    expected := [String]{}
+    ^expected: [String]{}
     loop token in gh_tokens() {
         if token.class != "MarkerRule" && gh_is_ident(token.text) && gh_has(anonymous, token.text) && !gh_has(expected, token.text) {
             expected.push(token.text)
@@ -353,7 +353,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 #Test("syntax_keyword_list_tokens_are_classified_for_highlighting") {
     guards_enter_root()
     texts: gh_tokens().map(fn(token) { token.text })
-    missing := [String]{}
+    ^missing: [String]{}
     loop keyword in gh_keyword_list() {
         if !gh_has(texts, keyword) -> missing.push(keyword)
     }
@@ -364,7 +364,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 #Test("grammar_covers_jet_keyword_list") {
     guards_enter_root()
     words: gh_grammar_keyword_words()
-    missing := [String]{}
+    ^missing: [String]{}
     loop keyword in gh_keyword_list() {
         if !gh_has(words, keyword) -> missing.push(keyword)
     }
@@ -377,7 +377,7 @@ gh_grammar_keyword_words: fn() -> [String] {
     guards_enter_root()
     words: gh_grammar_keyword_words()
     keywords: gh_keyword_list()
-    intruders := [String]{}
+    ^intruders: [String]{}
     loop constant in gh_constants() {
         if !constant.name.starts_with("FOREIGN_") || !gh_is_ident(constant.value) -> next
         if gh_has(words, constant.value) && !gh_has(keywords, constant.value) && !gh_has(intruders, constant.value) {
@@ -391,7 +391,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 // lacks (`!wanted`), as `NAME (spelling)`.
 gh_listed: fn(words: [String], names: [String], wanted: Bool) -> String {
     constants: gh_constants()
-    found := [String]{}
+    ^found: [String]{}
     loop name in names {
         spelling: gh_resolve(constants, name)
         if gh_has(words, spelling) == wanted -> found.push("{name} ({spelling})")
@@ -434,7 +434,7 @@ gh_listed: fn(words: [String], names: [String], wanted: Bool) -> String {
 #Test("lsp_impure_builtins_complete") {
     guards_enter_root()
     builtins: gh_registry_list("IMPURE_BUILTINS")
-    missing := [String]{}
+    ^missing: [String]{}
     required: [String]{"print", "input", "eprint", "read_all_input"}
     loop name in required {
         if !gh_has(builtins, name) -> missing.push(name)

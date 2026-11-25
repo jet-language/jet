@@ -13,20 +13,20 @@ Holder: struct {
 empty_out: fn(readers: ^[files.FileReader]) { readers = [files.FileReader]{} }
 
 run: fn() -[IO, FS.Read]> {
-    local := [files.FileReader]{files.open("a.txt"), files.open("b.txt")}
+    ^local: [files.FileReader]{files.open("a.txt"), files.open("b.txt")}
     local = [files.FileReader]{}
     print("local {local.len()}")
     local.push(files.open("a.txt"))
     print("refilled {local.len()}")
-    holder := Holder{open: [files.FileReader]{files.open("b.txt")}}
+    ^holder: Holder{open: [files.FileReader]{files.open("b.txt")}}
     holder.clear()
     print("field {holder.open.len()}")
     holder.open.push(files.open("a.txt"))
     holder.open = [files.FileReader]{}
     print("field again {holder.open.len()}")
-    passed := [files.FileReader]{files.open("a.txt")}
+    ^passed: [files.FileReader]{files.open("a.txt")}
     empty_out(passed)
     print("param {passed.len()}")
-    again := files.open("b.txt")
+    ^again: files.open("b.txt")
     print("reopened {again.read_line() ?? "none"}")
 }
