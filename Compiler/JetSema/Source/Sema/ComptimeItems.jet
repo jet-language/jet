@@ -34,7 +34,6 @@ use jet_foundation.[
     Symbol,
     SymbolID,
     SymbolKind,
-    TConstantDef,
     TTypeDef,
     Type,
     compiler_threads_admit,
@@ -119,39 +118,15 @@ SemaComptimeAvailableConstants: struct {
     // rows as a landing does, so the item checks' scopes count it too
     // (sema_comptime_available_version).
     typed: Int{0},
-    // Canonical first Constant position, with module/key kept separate:
-    // `constant_modules` holds each module's slot at its ModuleID row
-    // (sema_comptime_index_module_slot). The same append-only frontier
-    // indexes these once for staged lowering.
-    constant_modules: [Int]{[Int]{}},
-    constant_rows: [SemaComptimeKeyRows]{[SemaComptimeKeyRows]{}},
-    indexed_constants: Int{0},
-    // Fixed declaration topology of this run's graph: heads by key and
-    // integer next links retain ALL matching declarations in original order.
-    declaration_heads: [SemaComptimeKeyRows]{[SemaComptimeKeyRows]{}},
-    declaration_next: [[Int]]{[[Int]]{}},
-    indexed_declarations: Int{0},
 }
 
 sema_comptime_available_constants: fn(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaComptimeAvailableConstants Never! {
     available := SemaComptimeAvailableConstants{keys: name_table(), counted_values: 0}
-    loop module_index in 0..<graph.modules.len() {
-        available.declaration_heads.push(sema_comptime_key_rows())
-        available.declaration_next.push([Int]{})
-        loop constant_index in 0..<graph.modules[module_index].constants.len() {
-            if graph.modules[module_index].constants[constant_index].declaration.ct != None {
-                _ := name_intern(available.keys, symbol_table_key(graph.symbols, graph.modules[module_index].constants[constant_index].symbol.id))
+    loop module_row in graph.modules {
+        loop constant in module_row.constants {
+            if constant.declaration.ct != None {
+                _ := name_intern(available.keys, symbol_table_key(graph.symbols, constant.symbol.id))
             }
-            available.declaration_next[module_index].push(-1)
-        }
-        constant_index := graph.modules[module_index].constants.len()
-        loop constant_index > 0 {
-            constant_index -= 1
-            key: symbol_table_key(graph.symbols, graph.modules[module_index].constants[constant_index].symbol.id)
-            id: sema_comptime_key_id(available.declaration_heads[module_index], key)
-            available.declaration_next[module_index][constant_index] = available.declaration_heads[module_index].rows[id]
-            available.declaration_heads[module_index].rows[id] = constant_index
-            available.indexed_declarations += 1
         }
     }
     sema_comptime_available_constants_add(available, values)
@@ -163,10 +138,6 @@ sema_comptime_available_constants_add: fn(available: ^SemaComptimeAvailableConst
     loop index in available.counted_values..<values.len() {
         if values[index].kind == SemaComptimeItemKind.Constant {
             _ := name_intern(available.keys, values[index].key)
-            slot: sema_comptime_index_module_slot(available.constant_modules, available.constant_rows, values[index].module_identity)
-            id: sema_comptime_key_id(available.constant_rows[slot], values[index].key)
-            if available.constant_rows[slot].rows[id] < 0 -> available.constant_rows[slot].rows[id] = index
-            available.indexed_constants += 1
         }
     }
     if values.len() > available.counted_values -> available.counted_values = values.len()
@@ -1563,49 +1534,6 @@ sema_check_declaration_claim: fn(plan: SemaDeclarationPlan) -> Int {
     rank: plan.next.add(1)
     if rank >= plan.order.len() -> return -1
     plan.order[rank]
-}
-
-// The rows sema_comptime_modules_with_values adds for the values at `from`
-// and after in `values`, checked against `resolved_graph`, which already
-// carries every one of `values`. A staged value changes only its own
-// constant's row among the module declarations (sema_checked_declaration_facts
-// reads values only for constant rows, and applying a value only types
-// constant rows of the graph, which no other declaration reads), so a run
-// joins these rows to its staged modules instead of rechecking every module.
-// As there, the first value of a constant key wins.
-sema_comptime_staged_constant_rows: fn(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], from: Int, available: SemaComptimeAvailableConstants) -> [TConstantDef] {
-    if available.counted_values != values.len() {
-        panic("staged constants lost their authenticated value frontier")
-    }
-    if available.declaration_heads.len() != resolved_graph.modules.len() {
-        panic("staged constants lost their graph generation")
-    }
-    rows := [TConstantDef]{}
-    // Staging diagnostics are never reported (as for the module rechecks).
-    diagnostics := [Diagnostic]{}
-    loop index in from..<values.len() {
-        value: values[index]
-        if value.kind != SemaComptimeItemKind.Constant -> next
-        slot: sema_comptime_module_slot(available.constant_modules, value.module_identity) ?? panic("a staged constant lost its indexed module")
-        first: sema_comptime_key_row(available.constant_rows[slot], value.key) ?? panic("a staged constant lost its canonical first position")
-        if first != index -> next
-        module_index: sema_registration_module_index(resolved_graph, value.module_identity) ?? next
-        if available.declaration_next[module_index].len() != resolved_graph.modules[module_index].constants.len() {
-            panic("constant declaration topology changed inside a staging generation")
-        }
-        constant_index := sema_comptime_key_row(available.declaration_heads[module_index], value.key) ?? next
-        staged: Val(value.copy())
-        loop constant_index >= 0 {
-            matched_index: constant_index
-            constant_index = available.declaration_next[module_index][matched_index]
-            if symbol_table_key(resolved_graph.symbols, resolved_graph.modules[module_index].constants[matched_index].symbol.id) != value.key {
-                panic("constant declaration order changed inside a staging generation")
-            }
-            row: sema_checked_constant_with_values(resolved_graph, resolved_graph.modules[module_index], resolved_graph.modules[module_index].constants[matched_index], staged, diagnostics) ?? next
-            rows.push(row)
-        }
-    }
-    rows
 }
 
 // The one environment of a staging run over `program`

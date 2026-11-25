@@ -791,8 +791,8 @@ ir_opt_emit_mapped: fn(f: ^IRFunction, callee: IRFunction, k: Int, map: [Int], l
 
 // The calls left in a caller of `g` once `g` (whose body is one `op` of its
 // Int parameter with itself, returned) is inlined into it: the call is
-// followed by its stop point.
-ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
+// followed by its stop point. None when `g` was not inlined.
+ir_opt_inline_test_calls_left: fn(op: IROp) -> Int? Never! {
     m := ir_module_new()
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
     name_column_set(m.name_rows_keys, m.name_rows, IR_STOP_POLL_KEY, poll)
@@ -819,19 +819,19 @@ ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
     _ := ir_emit(f, IROp.Return, -1, r, -1, -1, 6)
     bodies: [[IRFunction]]{[IRFunction]{}, [IRFunction]{g.move()}, [IRFunction]{}}
     report := ir_opt_report(1)
-    out: ir_opt_inline_build(m, bodies, f, [Bool]{false, false, false}, [Int]{0, 1, 0}, false, 1, IROptInline.Auto, report) ?? panic("g was not inlined")
+    out: ir_opt_inline_build(m, bodies, f, [Bool]{false, false, false}, [Int]{0, 1, 0}, false, 1, IROptInline.Auto, report) ?? return None
     calls := 0
     loop code in out.op {
         if code == .Call -> calls += 1
     }
-    calls
+    Val(calls)
 }
 
 #Test("An inlined quiet body takes the stop point after its call with it") {
     // An Int add publishes no stop: the poll tested only what g reported.
-    assert_eq(ir_opt_inline_test_calls_left(IROp.Add), 0)
+    assert_eq(ir_opt_inline_test_calls_left(IROp.Add), Val(0))
     // An Int shift can stop, and the poll after the body delivers it.
-    assert_eq(ir_opt_inline_test_calls_left(IROp.Shl), 1)
+    assert_eq(ir_opt_inline_test_calls_left(IROp.Shl), Val(1))
 }
 
 // keep(z) calls h, then drops its Zone z (a String) through the glue,
@@ -949,7 +949,8 @@ ir_opt_inline_test_calls: fn(f: IRFunction) -> Int Never! {
 // second), both taken out of `m`: the cost ir_opt_inline_size gives it with
 // g unmarked and then marked (-1: refused), and, marked, f's body after
 // ir_opt_inline_build: its calls, the Moves out of f's parameter, the
-// instructions that write that parameter, and each instruction's line.
+// instructions that write that parameter, and each instruction's line. None
+// when `m` lacks f or g, or g was not inlined.
 IROptInlineTestSplice: struct {
     unmarked: Int,
     marked: Int,
@@ -959,9 +960,9 @@ IROptInlineTestSplice: struct {
     lines: [Int],
 }
 
-ir_opt_inline_test_splice: fn(m: ^IRModule) -> IROptInlineTestSplice Never! {
-    f: m.functions.pop() ?? panic("no f")
-    g := m.functions.pop() ?? panic("no g")
+ir_opt_inline_test_splice: fn(m: ^IRModule) -> IROptInlineTestSplice? Never! {
+    f: m.functions.pop() ?? return None
+    g := m.functions.pop() ?? return None
     at := -1
     loop k in 0..<f.op.len() {
         if f.op[k] == .Call -> at = k
@@ -973,7 +974,7 @@ ir_opt_inline_test_splice: fn(m: ^IRModule) -> IROptInlineTestSplice Never! {
     bodies[0][0].inline_always = true
     marked: ir_opt_inline_size(m, bodies, f, at, recursive, 1000)
     report := ir_opt_report(0)
-    out: ir_opt_inline_build(m, bodies, f, recursive, [Int]{}, false, 0, IROptInline.Marked, report) ?? panic("g was not inlined")
+    out: ir_opt_inline_build(m, bodies, f, recursive, [Int]{}, false, 0, IROptInline.Marked, report) ?? return None
     assert_eq(report.inlined_calls, 1)
     param_moves := 0
     param_writes := 0
@@ -983,17 +984,17 @@ ir_opt_inline_test_splice: fn(m: ^IRModule) -> IROptInlineTestSplice Never! {
         if ir_x64_write(out, k) == 0 -> param_writes += 1
         lines.push(ir_code_line_source(out.code_line[k]))
     }
-    IROptInlineTestSplice{unmarked: unmarked, marked: marked, calls: ir_opt_inline_test_calls(out), param_moves: param_moves, param_writes: param_writes, lines: lines.move()}
+    Val(IROptInlineTestSplice{unmarked: unmarked, marked: marked, calls: ir_opt_inline_test_calls(out), param_moves: param_moves, param_writes: param_writes, lines: lines.move()})
 }
 
 // A module of g, `file`'s function of one parameter of row `param` whose
 // value `body` makes from it, returned, then unmarked f of marked.jet,
 // whose parameter and result have row `arg`, which returns g's result for
-// its parameter.
-ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param: Type, arg: Type) -> IRModule Never! {
+// its parameter. None when `param` or `arg` has no type row.
+ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param: Type, arg: Type) -> IRModule? Never! {
     m := ir_module_new()
-    row: ir_type_row(m, param) ?? panic("no parameter row")
-    passed: ir_type_row(m, arg) ?? panic("no argument row")
+    row: ir_type_row(m, param) ?? return None
+    passed: ir_type_row(m, arg) ?? return None
     g := ir_function_new("g", "test:{file}.g", "", file, 1)
     n: ir_slot(g, row, IRSlotKind.Param, -1, 1)
     g.result = row
@@ -1004,12 +1005,12 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
     f := ir_opt_inline_test_caller("f", 0, passed)
     f.inline_always = false
     m.functions.push(f)
-    m
+    Val(m)
 }
 
 #Test("A marked callee is inlined though it writes its parameter") {
-    m := ir_opt_inline_test_module("marked.jet", IROp.Add, true, Type.Int, Type.Int)
-    splice: ir_opt_inline_test_splice(m)
+    m := ir_opt_inline_test_module("marked.jet", IROp.Add, true, Type.Int, Type.Int) ?? panic("no type rows")
+    splice: ir_opt_inline_test_splice(m) ?? panic("g was not inlined")
     // Unmarked, the written parameter refuses it.
     assert_eq(splice.unmarked, -1)
     assert(splice.marked >= 0)
@@ -1022,8 +1023,8 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
 
 #Test("A marked callee is inlined though it can stop in another file") {
     // g of other.jet divides its parameter by itself, a stop located there.
-    m := ir_opt_inline_test_module("other.jet", IROp.FloorDiv, false, Type.Int, Type.Int)
-    splice: ir_opt_inline_test_splice(m)
+    m := ir_opt_inline_test_module("other.jet", IROp.FloorDiv, false, Type.Int, Type.Int) ?? panic("no type rows")
+    splice: ir_opt_inline_test_splice(m) ?? panic("g was not inlined")
     // Unmarked, the stop in another file refuses it.
     assert_eq(splice.unmarked, -1)
     assert(splice.marked >= 0)
@@ -1036,8 +1037,8 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
 #Test("A marked callee is inlined though its argument has another type row of the same layout") {
     // g takes and returns an I64; f passes and returns a U64, a word of the
     // same size.
-    m := ir_opt_inline_test_module("marked.jet", IROp.BitOr, false, Type.IntN{signed: true, bits: 64}, Type.IntN{signed: false, bits: 64})
-    splice: ir_opt_inline_test_splice(m)
+    m := ir_opt_inline_test_module("marked.jet", IROp.BitOr, false, Type.IntN{signed: true, bits: 64}, Type.IntN{signed: false, bits: 64}) ?? panic("no type rows")
+    splice: ir_opt_inline_test_splice(m) ?? panic("g was not inlined")
     // Unmarked, only the same row may stand for the parameter.
     assert_eq(splice.unmarked, -1)
     assert(splice.marked >= 0)
