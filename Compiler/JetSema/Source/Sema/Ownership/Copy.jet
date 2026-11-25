@@ -1439,11 +1439,43 @@ sema_copy_refusal: fn(facts: SemaCopyFacts, span: Span, environment: SemaScopeEn
     if facts.resource || facts.dynamic_loan || !sema_copy_holds_declared_in(facts.source, environment, program, MarkerHook.MoveOnly) {
         return sema_copy_diagnostic(facts, span)
     }
-    declared: if found == .Val(row) -> sema_copy_nominal_declares(graph.modules[row.module_index].nominals[row.row], MarkerHook.MoveOnly) else -> sema_copy_carrier_declares(facts.source, MarkerHook.MoveOnly)
-    if declared {
+    caller: sema_type_module_row(graph, environment.module_identity)
+    if sema_copy_declares_at(facts.source, graph, caller, MarkerHook.MoveOnly) {
         return Val(sema_error("E0211", span, "`{shown}` can't be copied", "`{shown}` is `#MoveOnly`: its values move and never copy", fix))
     }
-    Val(sema_error("E0211", span, "`{shown}` can't be copied", "it holds a `#MoveOnly` value, which moves and never copies", fix))
+    why: sema_copy_move_only_field_why(shown, facts.source, graph, caller) ?? "it holds a `#MoveOnly` value, which moves and never copies"
+    Val(sema_error("E0211", span, "`{shown}` can't be copied", why, fix))
+}
+
+// Why a record that holds a `#MoveOnly` value can't be copied, through its
+// first stored field that is or holds one, named by the field and its type as
+// the record's source writes them. A write window is "a mutable view": its
+// carrier is a Core-private type no reason names. None for a value with no
+// such field (an enum, a list).
+sema_copy_move_only_field_why: fn(holder: String, ty: Type, graph: SemaRegistrationGraph, caller: Int) -> String? {
+    row: sema_copy_fork_row_at(ty, graph, caller) ?? return None
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    bindings: sema_copy_generic_bindings(nominal, ty).bindings
+    loop field in nominal.fields {
+        if field.computed -> next
+        part: sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings)
+        seen := [String]{}
+        if !sema_copy_holds_declared(part, graph, caller, seen, MarkerHook.MoveOnly) -> next
+        what: if {
+            sema_ownership_is_window_type(part) -> "a mutable view"
+            sema_copy_declares_at(part, graph, caller, MarkerHook.MoveOnly) -> "a `#MoveOnly` `{type_name(part)}`"
+            else -> "a `{type_name(part)}` that holds a `#MoveOnly` value"
+        }
+        return Val("`{holder}` holds field `{field.symbol.name}`, {what}, which moves and never copies")
+    }
+    None
+}
+
+// Whether `ty` itself is declared with the marker that reaches `hook`: a
+// struct or enum by its own declaration, a builtin carrier by its Core one.
+sema_copy_declares_at: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int, hook: MarkerHook) -> Bool {
+    row: sema_copy_fork_row_at(ty, graph, caller) ?? return sema_copy_carrier_declares(ty, hook)
+    sema_copy_nominal_declares(graph.modules[row.module_index].nominals[row.row], hook)
 }
 
 // Why a value holding a duty can't be copied out of its place: the duty is a

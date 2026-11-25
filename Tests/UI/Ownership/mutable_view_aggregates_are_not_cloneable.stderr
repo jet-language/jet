@@ -3,8 +3,8 @@ Error: Jet.CopyNotSupported: `Edit` can't be copied
     |
  13 |     duplicate: borrowed.copy()
     |                ^^^^^^^^^^^^^
- Why: Copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet
- Fix: Move it instead with `.move()` if this is its last use, or change the type so every part can be copied
+ Why: `Edit` holds field `values`, a mutable view, which moves and never copies
+ Fix: Move it instead with `.move()`; a second one has to come from wherever this one came from
 More: jet-lang.dev/e/Jet.CopyNotSupported
 
 Error: Jet.OwnerMovedWhileViewed: `target[…]` already has a live view that conflicts with `duplicate`
