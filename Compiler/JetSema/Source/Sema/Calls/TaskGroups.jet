@@ -1260,7 +1260,7 @@ sema_call_check_channel: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) 
         target: sema_call_core_role_target(role, [Type]{element}, call.name_span, check.environment.*, check.program.*, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         declared: sema_call_params_from_type(target.signature) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         callee: sema_call_callee_decl(check.program.*, target.symbol.id, call.name_span, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        made: sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: [Type]{element}, args: sema_call_core_source_arguments(values, declared, check.environment.*, check.program.*)}, call.name_span)
+        made: sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: [Type]{element}, args: sema_call_core_source_arguments(values, declared, check)}, call.name_span)
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(made, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
     member: if call.args.len() == 0 -> "__channel_new" else -> "__channel_bounded"
