@@ -2019,109 +2019,349 @@ semindex_summary: fn(summaries: [SemSummary], key: String) -> SemSummary? Never!
     None
 }
 
-semindex_call_span: fn(summary: SemSummary, callee: String, modules: [JetDriverDocModule]) -> Span? {
-    raw_callee := ""
-    loop (index, edge) in summary.raw_edges {
-        local: summary.edge_locals[index]
-        if local == "" -> next
-        if callee == local || callee.ends_with(".{local}") {
-            raw_callee = edge
-            break
-        }
-    }
-    loop doc_module in modules {
-        storage: doc_module.name_ledger ?? next
-        permit: storage.guard_read()
-        loop fact in doc_module.call_facts {
-            if fact.caller_key != summary.raw_key -> next
-            target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
-            if target == raw_callee -> return Val(fact.span)
-        }
-    }
-    None
-}
-
 SemWitness: struct {
     path: [String],
     spans: [Span],
 }
 
-// `convert_effects` `witness`: the first call path that reaches `effect` from
-// `function`.
-semindex_witness: fn(function: String, effect_name: String, summaries: [SemSummary], seen: [String], modules: [JetDriverDocModule]) -> SemWitness? {
-    if seen.contains(function) -> return None
-    // copy: `seen` stays with the caller (`seen` is a read parameter: no move out of it, E0201) and
-    // the binding `visited` owns its own.
-    visited := seen.copy()
-    visited.push(function.copy())
-    summary: semindex_summary(summaries, function) ?? return None
-    if summary.direct.contains(effect_name) {
-        spans := [Span]{}
-        loop (index, name) in summary.direct {
-            if name == effect_name -> spans.push(summary.direct_spans[index])
-        }
-        return Val(SemWitness{path: [String]{function}, spans: spans})
-    }
-    if summary.maximal {
-        spans := [Span]{}
-        if summary.maximal_span == .Val(span) -> spans.push(span)
-        return Val(SemWitness{path: [String]{function}, spans: spans})
-    }
+// `convert_effects` `witness`: the first call path that reaches an effect
+// from a function. A function reaches the effect itself when its direct row
+// names it, it is maximal, or (for Panic) its own body panics. Else the path
+// goes on through its first callee, in edge order, whose solved row names the
+// effect and whose own path reaches it without passing a function already on
+// the path; else it ends at the function's first boundary call that covers the
+// effect.
+semindex_reaches_itself: fn(summary: SemSummary, effect_name: String) -> Bool Never! {
     // A panic in the function's own body (`panic`, a checked index, a
     // `require` stop) is the checker's `__jet_panic__` edge, not a call into
     // an indexed callee: the function itself reaches Panic.
-    if effect_name == "Panic" && summary.edges.contains("__jet_panic__") {
-        return Val(SemWitness{path: [String]{function}, spans: [Span]{}})
+    summary.direct.contains(effect_name) || summary.maximal || (effect_name == "Panic" && summary.edges.contains("__jet_panic__"))
+}
+
+// The spans of a function that reaches `effect_name` itself: each direct
+// entry naming it, else the maximal function's span.
+semindex_own_spans: fn(summary: SemSummary, effect_name: String, spans: ^[Span]) Never! {
+    if summary.direct.contains(effect_name) {
+        loop (position, name) in summary.direct {
+            if name == effect_name -> spans.push(summary.direct_spans[position])
+        }
+        return
     }
-    loop callee in summary.edges {
-        callee_summary: semindex_summary(summaries, callee) ?? next
-        if !callee_summary.solved.contains(effect_name) -> next
-        found: semindex_witness(callee, effect_name, summaries, visited, modules) ?? next
-        path := [String]{function}
-        loop part in found.path -> path.push(part)
-        spans := [Span]{}
-        if semindex_call_span(summary, callee, modules) == .Val(span) -> spans.push(span)
-        loop span in found.spans -> spans.push(span)
-        return Val(SemWitness{path: path, spans: spans})
-    }
-    semindex_boundary_witness(function, summary, effect_name)
+    if summary.maximal && summary.maximal_span == .Val(span) -> spans.push(Span{start: span.start, end: span.end})
 }
 
 // The first call of `summary` into a callee outside the indexed modules whose
-// written row covers `effect_name`: `function` reaches the effect through that
-// callee at the call, the same path and call span a call into an indexed
+// written row covers `effect_name`: the function reaches the effect through
+// that callee at the call, the same path and call span a call into an indexed
 // callee starts with (`jet explain effects` names its site).
-semindex_boundary_witness: fn(function: String, summary: SemSummary, effect_name: String) -> SemWitness? Never! {
-    loop call in summary.boundary_calls {
+semindex_boundary_call: fn(summary: SemSummary, effect_name: String) -> Int? Never! {
+    loop (position, call) in summary.boundary_calls {
         loop bound in call.row {
-            if authority_covers(bound, effect_name) {
-                return Val(SemWitness{path: [String]{function, call.callee.copy()}, spans: [Span]{call.span}})
-            }
+            if authority_covers(bound, effect_name) -> return Val(position)
         }
     }
     None
 }
 
-// Same rows, witnesses and order as a per-query scan, at index cost: summary
-// rows by key (first occurrence wins, as the scan's first match), call facts
-// grouped by caller in module order (the scan's first fact), one path-scoped
-// `visited` list pushed and popped around each step (the scan copied it per
-// step), and a stable merge sort of the rows by function key before the output
-// is built (the insertion sort copied whole effect rows quadratically).
-// `failed` keeps each function and effect whose search failed without meeting
-// the current path: that failure holds on every path, so the search runs once
-// per function and effect instead of once per path to it.
-semindex_effects: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -> [SemEffect] {
+// How a function's path ends when no callee carries it on.
+semindex_own_end: fn(summary: SemSummary, effect_name: String) -> Int Never! {
+    if semindex_reaches_itself(summary, effect_name) -> return SEM_WITNESS_OWN
+    if semindex_boundary_call(summary, effect_name) != None -> return SEM_WITNESS_BOUNDARY
+    SEM_WITNESS_NONE
+}
+
+SEM_WITNESS_NONE: -1
+SEM_WITNESS_OWN: -2
+SEM_WITNESS_BOUNDARY: -3
+
+// One effect's witness for every summary row. A row's path starts with its
+// walk inside its strongly connected component of the effect's call graph,
+// `chain_lens[row]` rows of `chain_items` from `chain_starts[row]`. `ends[row]`
+// says how the walk ends: its last row reaches the effect itself
+// (SEM_WITNESS_OWN) or at a boundary call (SEM_WITNESS_BOUNDARY), or it calls
+// the row `ends[row]` outside the component, whose own path the rest is.
+// SEM_WITNESS_NONE is a row with no witness.
+SemEffectWitnesses: struct {
+    chain_starts: [Int],
+    chain_lens: [Int],
+    chain_items: [Int],
+    ends: [Int],
+}
+
+// Every effect's witnesses over one summary list, and the index their call
+// spans come from. Entry `graph` of `graphs` is the effect at position
+// `name_positions[graph]` of the solved row of summary `name_rows[graph]`.
+SemWitnesses: struct {
+    index: SemEffectIndex,
+    name_rows: [Int],
+    name_positions: [Int],
+    graphs: [SemEffectWitnesses],
+}
+
+// The entry of `graphs` for `effect_name`, else -1 when no solved row holds it.
+semindex_witness_graph: fn(name_rows: [Int], name_positions: [Int], summaries: [SemSummary], effect_name: String) -> Int Never! {
+    loop (graph, row) in name_rows {
+        if summaries[row].solved[name_positions[graph]] == effect_name -> return graph
+    }
+    -1
+}
+
+// The witness search for the whole index, one pass per effect. Only the rows
+// of the current path stop a search, and only a callee in the same strongly
+// connected component of the effect's call graph can lead back to one: a
+// callee in another component has the same path on every path to it. So
+// Tarjan's order, which finishes a component after every component it calls,
+// finds each row's path once. Inside a component the walk takes a callee when
+// the callee reaches, without passing the path, a row that reaches the effect
+// itself, at a boundary call or through a call out of the component: exactly
+// when the search below that callee succeeds.
+semindex_witnesses: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -> SemWitnesses {
     index: semindex_index(summaries, modules)
+    // Each row's callee rows in edge order, and the first rows (the rows a
+    // key names) holding each effect, by effect in first-seen order.
+    calls := [[Int]]{}
+    first_rows := [Bool]{}
+    name_rows := [Int]{}
+    name_positions := [Int]{}
+    holders := [[Int]]{}
+    loop (row, summary) in summaries {
+        callees := [Int]{}
+        loop callee in summary.edges {
+            callee_row: index.by_key.get(callee) ?? next
+            callees.push(callee_row)
+        }
+        calls.push(callees)
+        first: (index.by_key.get(summary.key) ?? -1) == row
+        first_rows.push(first)
+        if !first -> next
+        loop (position, effect_name) in summary.solved {
+            graph := semindex_witness_graph(name_rows, name_positions, summaries, effect_name)
+            if graph < 0 {
+                graph = holders.len()
+                name_rows.push(row)
+                name_positions.push(position)
+                holders.push([Int]{})
+            }
+            holders[graph].push(row)
+        }
+    }
+    graphs := [SemEffectWitnesses]{}
+    loop (graph, rows) in holders {
+        eligible := [Bool]{}
+        loop _ in 0..<summaries.len() -> eligible.push(false)
+        loop row in rows -> eligible[row] = true
+        effect_name: summaries[name_rows[graph]].solved[name_positions[graph]]
+        graphs.push(semindex_effect_witnesses(effect_name, summaries, calls, first_rows, eligible))
+    }
+    SemWitnesses{index: index, name_rows: name_rows, name_positions: name_positions, graphs: graphs}
+}
+
+// One effect's witnesses. `eligible` marks the rows whose solved row names
+// the effect, the callees a path may go through; `calls` and `first_rows` are
+// semindex_witnesses'. Tarjan's search runs over the eligible calls without
+// recursion, and each component is walked as it closes.
+semindex_effect_witnesses: fn(effect_name: String, summaries: [SemSummary], calls: [[Int]], first_rows: [Bool], eligible: [Bool]) -> SemEffectWitnesses Never! {
+    count: summaries.len()
+    order := [Int]{}
+    low := [Int]{}
+    on_stack := [Bool]{}
+    component := [Int]{}
+    good := [Bool]{}
+    on_path := [Bool]{}
+    marks := [Int]{}
+    chain_starts := [Int]{}
+    chain_lens := [Int]{}
+    ends := [Int]{}
+    loop _ in 0..<count {
+        order.push(-1)
+        low.push(0)
+        on_stack.push(false)
+        component.push(-1)
+        good.push(false)
+        on_path.push(false)
+        marks.push(0)
+        chain_starts.push(0)
+        chain_lens.push(0)
+        ends.push(SEM_WITNESS_NONE)
+    }
+    chain_items := [Int]{}
+    // Whether each closed component holds a row that reaches the effect.
+    reaches := [Bool]{}
+    stack := [Int]{}
+    frames := [Int]{}
+    cursors := [Int]{}
+    visits := 0
+    stamp := 0
+    loop root in 0..<count {
+        if !first_rows[root] || order[root] >= 0 -> next
+        order[root] = visits
+        low[root] = visits
+        visits += 1
+        stack.push(root)
+        on_stack[root] = true
+        frames.push(root)
+        cursors.push(0)
+        loop frames.len() > 0 {
+            top: frames.len() - 1
+            row: frames[top]
+            position: cursors[top]
+            if position < calls[row].len() {
+                cursors[top] = position + 1
+                callee: calls[row][position]
+                if !eligible[callee] -> next
+                if order[callee] < 0 {
+                    order[callee] = visits
+                    low[callee] = visits
+                    visits += 1
+                    stack.push(callee)
+                    on_stack[callee] = true
+                    frames.push(callee)
+                    cursors.push(0)
+                    next
+                }
+                if on_stack[callee] && order[callee] < low[row] -> low[row] = order[callee]
+                next
+            }
+            _ := frames.pop()
+            _ := cursors.pop()
+            if top > 0 && low[row] < low[frames[top - 1]] -> low[frames[top - 1]] = low[row]
+            if low[row] != order[row] -> next
+            // `row` closes a component: the stack down to it.
+            id: reaches.len()
+            members := [Int]{}
+            loop {
+                member: stack.pop() ?? break
+                on_stack[member] = false
+                component[member] = id
+                members.push(member)
+                if member == row -> break
+            }
+            reached := false
+            loop member in members {
+                good[member] = semindex_own_end(summaries[member], effect_name) != SEM_WITNESS_NONE
+                loop callee in calls[member] {
+                    if good[member] -> break
+                    if eligible[callee] && component[callee] != id && reaches[component[callee]] -> good[member] = true
+                }
+                if good[member] -> reached = true
+            }
+            reaches.push(reached)
+            if !reached -> next
+            loop member in members {
+                chain_starts[member] = chain_items.len()
+                chain_items.push(member)
+                on_path[member] = true
+                current := member
+                end := SEM_WITNESS_NONE
+                loop {
+                    if semindex_reaches_itself(summaries[current], effect_name) {
+                        end = SEM_WITNESS_OWN
+                        break
+                    }
+                    step := -1
+                    loop callee in calls[current] {
+                        if !eligible[callee] || on_path[callee] -> next
+                        if component[callee] != id {
+                            if reaches[component[callee]] {
+                                end = callee
+                                break
+                            }
+                            next
+                        }
+                        stamp += 1
+                        if semindex_component_reaches(callee, calls, eligible, component, good, on_path, marks, stamp) {
+                            step = callee
+                            break
+                        }
+                    }
+                    if end >= 0 || step < 0 -> break
+                    chain_items.push(step)
+                    on_path[step] = true
+                    current = step
+                }
+                if end == SEM_WITNESS_NONE && semindex_boundary_call(summaries[current], effect_name) != None -> end = SEM_WITNESS_BOUNDARY
+                ends[member] = end
+                chain_lens[member] = chain_items.len() - chain_starts[member]
+                loop at in chain_starts[member]..<chain_items.len() -> on_path[chain_items[at]] = false
+            }
+        }
+    }
+    SemEffectWitnesses{chain_starts: chain_starts, chain_lens: chain_lens, chain_items: chain_items, ends: ends}
+}
+
+// Whether `start` reaches, inside its component and without passing a row
+// on the path, a row marked `good`: one that reaches the effect itself, at a
+// boundary call or through a call out of the component. `marks` holds
+// `stamp` for each row this search has seen.
+semindex_component_reaches: fn(start: Int, calls: [[Int]], eligible: [Bool], component: [Int], good: [Bool], on_path: [Bool], marks: ^[Int], stamp: Int) -> Bool Never! {
+    id: component[start]
+    work := [Int]{start}
+    marks[start] = stamp
+    loop {
+        row: work.pop() ?? return false
+        if good[row] -> return true
+        loop callee in calls[row] {
+            if !eligible[callee] || component[callee] != id || on_path[callee] || marks[callee] == stamp -> next
+            marks[callee] = stamp
+            work.push(callee)
+        }
+    }
+}
+
+// The witness of `function` for `effect_name`: the rows of each walk in
+// order, with the call span between each two and at the end the function's
+// own spans or its boundary call. A name no solved row holds has no graph; a
+// path for it can only end at the function itself.
+semindex_witness: fn(witnesses: SemWitnesses, summaries: [SemSummary], function: String, effect_name: String) -> SemWitness? Never! {
+    row := witnesses.index.by_key.get(function) ?? return None
+    graph: semindex_witness_graph(witnesses.name_rows, witnesses.name_positions, summaries, effect_name)
+    path := [String]{}
+    spans := [Span]{}
+    last := row
+    end := SEM_WITNESS_NONE
+    if graph < 0 {
+        path.push(summaries[row].key)
+        end = semindex_own_end(summaries[row], effect_name)
+    }
+    loop graph >= 0 {
+        walk: witnesses.graphs[graph]
+        end = walk.ends[row]
+        if end == SEM_WITNESS_NONE -> return None
+        first: walk.chain_starts[row]
+        loop position in 0..<walk.chain_lens[row] {
+            member: walk.chain_items[first + position]
+            if position > 0 && semindex_indexed_span(summaries[last], summaries[member].key, witnesses.index) == .Val(span) -> spans.push(span)
+            path.push(summaries[member].key)
+            last = member
+        }
+        if end < 0 -> break
+        if semindex_indexed_span(summaries[last], summaries[end].key, witnesses.index) == .Val(span) -> spans.push(span)
+        row = end
+        last = end
+    }
+    summary: summaries[last]
+    if end == SEM_WITNESS_NONE -> return None
+    if end == SEM_WITNESS_OWN -> semindex_own_spans(summary, effect_name, spans)
+    if end == SEM_WITNESS_BOUNDARY {
+        call: summary.boundary_calls[semindex_boundary_call(summary, effect_name) ?? return None]
+        path.push(call.callee)
+        spans.push(call.span)
+    }
+    Val(SemWitness{path: path, spans: spans})
+}
+
+// Same rows, witnesses and order as a per-query search, at index cost: the
+// witnesses of semindex_witnesses, and a stable merge sort of the rows by
+// function key before the output is built (the insertion sort copied whole
+// effect rows quadratically).
+semindex_effects: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -> [SemEffect] {
+    witnesses: semindex_witnesses(summaries, modules)
     output := [SemEffect]{}
-    visited := [String]{}
-    failed := [String:Bool]{}
-    blocks := 0
     loop row in semindex_key_order(summaries) {
         summary: summaries[row]
         provenance := [SemEffectProvenance]{}
         loop effect_name in summary.solved {
-            found: semindex_witness_at(summary.key, effect_name, summaries, index, visited, failed, blocks) ?? next
+            found: semindex_witness(witnesses, summaries, summary.key, effect_name) ?? next
             provenance.push(SemEffectProvenance{effect_name: effect_name, call_path: found.path, spans: found.spans})
         }
         output.push(SemEffect{function: summary.key, direct: summary.direct, callees: summary.edges, inferred: summary.solved, maximal: summary.maximal, provenance: provenance})
@@ -2194,7 +2434,8 @@ semindex_key_order: fn(summaries: [SemSummary]) -> [Int] Never! {
     order
 }
 
-// semindex_call_span over the index.
+// The span of `summary`'s call to `callee`: its first call fact naming the
+// raw edge whose local key `callee` ends with.
 semindex_indexed_span: fn(summary: SemSummary, callee: String, index: SemEffectIndex) -> Span? {
     raw_callee := ""
     loop (row, edge) in summary.raw_edges {
@@ -2210,57 +2451,6 @@ semindex_indexed_span: fn(summary: SemSummary, callee: String, index: SemEffectI
         if target.key == raw_callee -> return Val(target.span)
     }
     None
-}
-
-// semindex_witness over the index; `visited` is the current path. `blocks`
-// counts the searches stopped by a function on the current path; one that
-// fails without such a stop below it is kept in `failed` and not run again.
-semindex_witness_at: fn(function: String, effect_name: String, summaries: [SemSummary], index: SemEffectIndex, visited: ^[String], failed: ^[String:Bool], blocks: ^Int) -> SemWitness? {
-    if visited.contains(function) {
-        blocks += 1
-        return None
-    }
-    memo: "{effect_name} {function}"
-    if failed.get(memo) != None -> return None
-    before: blocks
-    visited.push(function.copy())
-    found: semindex_witness_step(function, effect_name, summaries, index, visited, failed, blocks)
-    _ := visited.pop()
-    if found == None && blocks == before -> failed[memo] = true
-    found
-}
-
-semindex_witness_step: fn(function: String, effect_name: String, summaries: [SemSummary], index: SemEffectIndex, visited: ^[String], failed: ^[String:Bool], blocks: ^Int) -> SemWitness? {
-    row: index.by_key.get(function) ?? return None
-    summary: summaries[row]
-    if summary.direct.contains(effect_name) {
-        spans := [Span]{}
-        loop (position, name) in summary.direct {
-            if name == effect_name -> spans.push(summary.direct_spans[position])
-        }
-        return Val(SemWitness{path: [String]{function}, spans: spans})
-    }
-    if summary.maximal {
-        spans := [Span]{}
-        if summary.maximal_span == .Val(span) -> spans.push(span.copy())
-        return Val(SemWitness{path: [String]{function}, spans: spans})
-    }
-    // The function's own panic, as semindex_witness reads it.
-    if effect_name == "Panic" && summary.edges.contains("__jet_panic__") {
-        return Val(SemWitness{path: [String]{function}, spans: [Span]{}})
-    }
-    loop callee in summary.edges {
-        callee_row: index.by_key.get(callee) ?? next
-        if !summaries[callee_row].solved.contains(effect_name) -> next
-        found: semindex_witness_at(callee, effect_name, summaries, index, visited, failed, blocks) ?? next
-        path := [String]{function}
-        loop part in found.path -> path.push(part)
-        spans := [Span]{}
-        if semindex_indexed_span(summary, callee, index) == .Val(span) -> spans.push(span)
-        loop span in found.spans -> spans.push(span)
-        return Val(SemWitness{path: path, spans: spans})
-    }
-    semindex_boundary_witness(function, summary, effect_name)
 }
 
 // Each summary key's first row, the one semindex_summary finds.
