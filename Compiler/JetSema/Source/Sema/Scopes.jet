@@ -950,6 +950,13 @@ SemaCheckContext: struct {
     // Derived module/place indexes into the canonical ordered source rows.
     comptime_body_source_modules: [Int],
     comptime_body_source_rows: [SemaComptimePlaceRows],
+    // The type parameter each `T.reflect()` read checked in this body
+    // reflects, in order: a compile-time site that reads one is answered
+    // per instance (sema_comptime_generic_site_params).
+    generic_reflections: [Type]{[Type]{}},
+    // A generic body's compile-time site is being checked: a fact read of a
+    // type parameter's record types its code (sema_fact_type_param_read).
+    generic_site: Bool{false},
     compute_calls: [SemaComputeCallFact],
     autodiff_obligations: [SemaAutodiffObligation],
     // Ownership/GenericCrossings.jet: what this body's type parameters cross,

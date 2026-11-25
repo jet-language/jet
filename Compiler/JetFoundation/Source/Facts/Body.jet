@@ -326,6 +326,20 @@ type_reflection_constant_key: fn(concrete: Type) -> String Never! {
     "reflect:{type_carrier_identity(concrete)}"
 }
 
+// The trait name of a TraitConst node that reads the value a compile-time
+// site of a generic body (a `#if` condition or a `name: #run value`) takes
+// at one instance. The node's owner applies this name to the type
+// parameters the site reads, and its name is the site's key; the program
+// publishes each instance's value as the constant row
+// comptime_site_constant_key names.
+COMPTIME_SITE_TRAIT: "run"
+
+// The constant key of the value site `site` takes at the instance whose
+// type parameters the site reads are the arguments of `concrete`.
+comptime_site_constant_key: fn(site: String, concrete: Type) -> String Never! {
+    "run:{site}:{type_carrier_identity(concrete)}"
+}
+
 NodeKind: enum {
     IntLit(value: Int, width: TIntegerWidth?),
     FloatLit(value: Float),

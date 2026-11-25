@@ -1190,7 +1190,10 @@ sema_stmt_path_method_receiver: fn(value: TExpr, method: String) -> TExpr? {
 // type, so the rest of the body checks in full and records what it records with
 // the value, except for the reads of the name: the staged local lands in its
 // owner body like a local value (Comptime/LocalSplice.jet) instead of
-// finalizing the program again.
+// finalizing the program again. In a generic body, a value that reads a type
+// parameter's record (`T.reflect()`) has one value per instance: the name
+// is a local bound to the value each instance gives the site
+// (sema_comptime_generic_site_read).
 sema_stmt_check_prepared_binding: fn(binding: Binding, check: ^SemaBodyCheck) -> TStmt? {
     if sema_runtime_policy_only(check.context.runtime_policy) {
         check.diagnostics.push(sema_runtime_only_build_time_diagnostic("This `#run` runs its code", expr_span(binding.init)))
@@ -1199,9 +1202,13 @@ sema_stmt_check_prepared_binding: fn(binding: Binding, check: ^SemaBodyCheck) ->
     }
     fact_start: check.context.call_facts.len()
     reference_start: check.context.name_references.len()
+    reflection_start: check.context.generic_reflections.len()
+    outer_site: check.context.generic_site
+    check.context.generic_site = true
     check.scopes.comptime_execution_depth += 1
     checked: sema_check_expression(binding.init, binding.ty, check)
     check.scopes.comptime_execution_depth -= 1
+    check.context.generic_site = outer_site
     init: checked ?? {
         sema_stmt_declare_unchecked_binding(binding, check)
         return None
@@ -1221,6 +1228,13 @@ sema_stmt_check_prepared_binding: fn(binding: Binding, check: ^SemaBodyCheck) ->
     if value == None -> value = sema_fact_constant_path_value(init, check.context)
     ty := init.ty
     init_span: expr_span(binding.init)
+    params: sema_comptime_generic_site_params(check.context, reflection_start)
+    if params.len() > 0 {
+        read: sema_comptime_generic_site_read(check, binding.name, binding.init, init.ty, params, init_span, binding.name_span)
+        symbol: sema_stmt_declare_site_local(binding, init.ty, check) ?? return None
+        local: checked_symbol_local(binding.name, binding.name_span, symbol.id, init.ty)
+        return Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: read, gc_promotion: None, gc_transferred: false, span: Span{start: binding.name_span.start, end: init_span.end}})
+    }
     if value == None {
         // An initializer that reads a local still waiting for its value
         // waits with it, and its own name waits in turn.
@@ -1247,15 +1261,7 @@ sema_stmt_check_prepared_binding: fn(binding: Binding, check: ^SemaBodyCheck) ->
 // Declares the local of `name: #run value` with type `ty`, holding `known`
 // when its value is known; false when the name is taken (reported).
 sema_stmt_declare_comptime_local: fn(binding: Binding, ty: Type, known: TComptimeValue?, check: ^SemaBodyCheck) -> Bool {
-    owner := sema_scope_local_owner_key(check.scopes)
-    local_module: sema_scope_environment_module_text(check.environment.*, check.program.*)
-    key: symbol_key_text(SymbolKind.Local, local_module, owner, binding.name)
-    id: sema_symbol_id_of(check.program.*, check.context, key)
-    symbol := Symbol{id: id, kind: SymbolKind.Local, name: binding.name, module_identity: check.environment.module_identity, owner: Val(owner), span: binding.name_span, ty: Val(ty), visibility: 0}
-    if !sema_scope_declare_local(check.scopes, symbol, key, false, AccessConvention.Read, None, false) {
-        check.diagnostics.push(sema_already_defined(binding.name, binding.name_span))
-        return false
-    }
+    _ := sema_stmt_declare_site_local(binding, ty, check) ?? return false
     if binding.name != "_" {
         last: check.scopes.bindings.len() - 1
         sema_scope_note_binding_edit(check.scopes, last)
@@ -1263,9 +1269,24 @@ sema_stmt_declare_comptime_local: fn(binding: Binding, ty: Type, known: TComptim
             check.scopes.bindings[last].pending_prepared = true
         }
     }
+    true
+}
+
+// Declares the immutable local `name` of a `name: #run value` site with type
+// `ty`; None when the name is taken (reported).
+sema_stmt_declare_site_local: fn(binding: Binding, ty: Type, check: ^SemaBodyCheck) -> Symbol? {
+    owner := sema_scope_local_owner_key(check.scopes)
+    local_module: sema_scope_environment_module_text(check.environment.*, check.program.*)
+    key: symbol_key_text(SymbolKind.Local, local_module, owner, binding.name)
+    id: sema_symbol_id_of(check.program.*, check.context, key)
+    symbol := Symbol{id: id, kind: SymbolKind.Local, name: binding.name, module_identity: check.environment.module_identity, owner: Val(owner), span: binding.name_span, ty: Val(ty), visibility: 0}
+    if !sema_scope_declare_local(check.scopes, symbol, key, false, AccessConvention.Read, None, false) {
+        check.diagnostics.push(sema_already_defined(binding.name, binding.name_span))
+        return None
+    }
     sema_ownership_declare_binding(check.state, symbol, false)
     sema_stmt_track_origin(binding, check)
-    true
+    Val(symbol)
 }
 
 // A compile-time site whose calls (from `fact_start` on) reach `core.net`

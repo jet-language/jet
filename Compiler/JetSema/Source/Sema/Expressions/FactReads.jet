@@ -6,6 +6,7 @@
 // select runtime behavior.
 use jet_foundation.[
     AST_NODE_GENERATED,
+    COMPTIME_SITE_TRAIT,
     Diagnostic,
     EnumLitArg,
     Expr,
@@ -55,7 +56,7 @@ use jet_foundation.[
     fact_read_reflection_kind,
     ModuleID,
     module_is_core,
-    type_reflection_constant_key,
+    type_carrier_identity,
 ]
 
 SemaFactReadCheck: struct {
@@ -1226,27 +1227,85 @@ sema_fact_nominal_row_of: fn(graph: SemaRegistrationGraph, ty: Type, module_iden
     sema_type_resolve_nominal_row(graph, ty, module_identity)
 }
 
-// The constant row of each type an instance of a `T.reflect()` read fills
-// `T` with (sema_effect_type_reflections): its TypeInfo record, under the
-// key the instance reads it by (type_reflection_constant_key). The program
-// holds these rows, never a module: which rows there are depends on every
-// instance the program builds. A type no `X.reflect()` folds for is E0302
-// at the read.
-sema_fact_type_reflection_rows: fn(graph: SemaRegistrationGraph, reflections: [SemaTypeReflection], diagnostics: ^[Diagnostic]) -> [TConstantDef] {
+// What the program holds for the reads each instance answers
+// (sema_effect_type_reflections): the constant rows it publishes, and the
+// copies of generic sites still to stage before it holds them all.
+SemaInstanceConstants: struct {
+    rows: [TConstantDef],
+    sources: [SemaComptimeBodySource],
+}
+
+// The constant row of each instance of a read each instance answers. A
+// `T.reflect()` read has the TypeInfo record of the type that fills `T`
+// (type_reflection_constant_key); a type no `X.reflect()` folds for is E0302
+// at the read. A compile-time site of a generic body (`modules`' sources
+// that sema_comptime_generic_site marks) has the value its instance's copy
+// (sema_comptime_generic_site_instance) landed with among `values`
+// (comptime_site_constant_key); a copy not landed yet is a source to stage.
+// The program holds these rows, never a module: which rows there are
+// depends on every instance the program builds.
+sema_fact_instance_constants: fn(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], reflections: [SemaTypeReflection], values: [SemaComptimeItemValue], diagnostics: ^[Diagnostic]) -> SemaInstanceConstants {
     rows := [TConstantDef]{}
+    sources := [SemaComptimeBodySource]{}
     loop reflection in reflections {
-        if sema_fact_type_info_of(graph, reflection.ty, reflection.module_identity) == .Val(info) {
-            rows.push(TConstantDef{module_identity: reflection.read_module_identity, key: type_reflection_constant_key(reflection.ty), name: TYPE_REFLECTION_TRAIT, span: reflection.span, visibility: NameVisibility.Public, ty: sema_fact_named("TypeInfo"), is_comptime: true, is_storage: false, value: sema_fact_declared_value(info)})
+        if reflection.site == "" {
+            info: sema_fact_type_info_of(graph, reflection.ty, reflection.module_identity) ?? {
+                sema_fact_no_type_info(graph, reflection, reflection.params[0], reflection.ty, diagnostics)
+                next
+            }
+            rows.push(TConstantDef{module_identity: reflection.read_module_identity, key: reflection.key, name: TYPE_REFLECTION_TRAIT, span: reflection.span, visibility: NameVisibility.Public, ty: sema_fact_named("TypeInfo"), is_comptime: true, is_storage: false, value: sema_fact_declared_value(info)})
             next
         }
-        shown: type_name(reflection.ty)
-        located := [Diagnostic]{sema_error("E0302", reflection.span, "`T.reflect()` has no TypeInfo record for `{shown}`, which fills `T` here", "a TypeInfo record describes a declared type or a builtin number, and `{shown}` is neither", "call the generic function with a declared type or a builtin number for `T`")}
-        if sema_registration_module_index(graph, reflection.read_module_identity) == .Val(index) {
-            sema_attach_diagnostic_source_locations(located, 0, graph.modules[index].source_segments)
+        site: sema_fact_generic_site(modules, reflection.site) ?? next
+        args: if reflection.ty == .Apply(_, filled) -> filled else -> [Type]{}
+        infos := [TComptimeValue]{}
+        loop index in 0..<args.len() {
+            info: sema_fact_type_info_of(graph, args[index], reflection.module_identity) ?? {
+                sema_fact_no_type_info(graph, reflection, reflection.params[index], args[index], diagnostics)
+                break
+            }
+            infos.push(sema_fact_declared_value(info))
         }
-        diagnostics.push(located[0])
+        if infos.len() != args.len() || args.len() != reflection.params.len() -> next
+        instance: sema_comptime_generic_site_instance(site, reflection.params, infos, type_carrier_identity(reflection.ty))
+        row: sema_fact_landed_value(values, instance.module_identity, instance.key) ?? {
+            sources.push(instance)
+            next
+        }
+        rows.push(TConstantDef{module_identity: reflection.read_module_identity, key: reflection.key, name: COMPTIME_SITE_TRAIT, span: reflection.span, visibility: NameVisibility.Public, ty: values[row].ty, is_comptime: true, is_storage: false, value: values[row].value})
     }
-    rows
+    SemaInstanceConstants{rows: rows, sources: sources}
+}
+
+// The index in `values` of the body site value that landed under `key` in
+// module `module_identity`, the last one when several did.
+sema_fact_landed_value: fn(values: [SemaComptimeItemValue], module_identity: ModuleID, key: String) -> Int? Never! {
+    loop back in 0..<values.len() {
+        index: values.len() - 1 - back
+        if values[index].kind == SemaComptimeItemKind.BodyExpression && values[index].module_identity.id == module_identity.id && values[index].key == key -> return Val(index)
+    }
+    None
+}
+
+// The generic site of `modules` whose key is `key`.
+sema_fact_generic_site: fn(modules: ^[SemaGraphModuleResult], key: String) -> SemaComptimeBodySource? {
+    loop module_result in modules {
+        loop source in module_result.comptime_body_sources {
+            if source.key == key && sema_comptime_generic_site(source) -> return Val(source)
+        }
+    }
+    None
+}
+
+// E0302 at `reflection`'s read: the type `ty` that fills type parameter
+// `param` there has no TypeInfo record.
+sema_fact_no_type_info: fn(graph: SemaRegistrationGraph, reflection: SemaTypeReflection, param: String, ty: Type, diagnostics: ^[Diagnostic]) {
+    shown: type_name(ty)
+    located := [Diagnostic]{sema_error("E0302", reflection.span, "`{param}.reflect()` has no TypeInfo record for `{shown}`, which fills `{param}` here", "a TypeInfo record describes a declared type or a builtin number, and `{shown}` is neither", "call the generic function with a declared type or a builtin number for `{param}`")}
+    if sema_registration_module_index(graph, reflection.read_module_identity) == .Val(index) {
+        sema_attach_diagnostic_source_locations(located, 0, graph.modules[index].source_segments)
+    }
+    diagnostics.push(located[0])
 }
 
 // `FunctionInfo` for a declared function (`f.reflect()`): its source shape,
@@ -1339,6 +1398,59 @@ sema_fact_unit: fn(name: String, check: SemaBodyCheck) -> SemaRegistrationUnitFa
     sema_registration_unit_fact_for_type(graph, Type.Named{name: name})
 }
 
+// The TypeInfo field fact `read` names: `layout`, `name` or `fields`.
+sema_fact_type_info_field: fn(read: FactRead) -> String Never! {
+    if read == FactRead.Layout -> return "layout"
+    if read == FactRead.Name -> return "name"
+    "fields"
+}
+
+// The type of fact `read` of a type's TypeInfo record; None for a fact the
+// record does not answer.
+sema_fact_type_info_read_type: fn(read: FactRead) -> Type? {
+    if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields {
+        return sema_fact_reflection_field_type("TypeInfo", sema_fact_type_info_field(read))
+    }
+    if read == FactRead.Measure || read == FactRead.Exactness || read == FactRead.Classification || read == FactRead.Obligation {
+        return sema_fact_reflected_type(sema_fact_named("TypeInfo"), read)
+    }
+    None
+}
+
+// Fact `read` of the TypeInfo record `info`, with its type; None for a fact
+// the record does not answer.
+sema_fact_type_info_read: fn(read: FactRead, info: TComptimeValue) -> SemaFactReadValue? {
+    ty: sema_fact_type_info_read_type(read) ?? return None
+    if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields {
+        field: sema_fact_struct_field(info, sema_fact_type_info_field(read)) ?? return None
+        return Val(SemaFactReadValue{ty: ty, value: sema_fact_declared_value(field)})
+    }
+    value: sema_fact_reflected_read(info, read) ?? return None
+    Val(SemaFactReadValue{ty: ty, value: value})
+}
+
+// `T.reflect().fact` over a type parameter `T` that a record answers. In the
+// staged check of one instance of a generic body's compile-time site, the
+// record of the type that fills `T` there answers it
+// (sema_comptime_bound_reflection). In the generic body, inside such a
+// site (SemaCheckContext.generic_site), the read only types the site's
+// code: the site is answered per instance (sema_comptime_generic_site_params)
+// and its checked code is dropped. None for any other name, fact or place.
+sema_fact_type_param_read: fn(read: FactRead, name: String, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaFactReadCheck? {
+    ty: sema_fact_type_info_read_type(read) ?? return None
+    if sema_comptime_bound_reflection(name, check) == .Val(info) {
+        resolved: sema_fact_type_info_read(read, info) ?? return None
+        folded: sema_tree_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
+        return Val(SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, check.environment.*, check.program.*, check.diagnostics)})
+    }
+    if !check.context.generic_site || !sema_type_name_is_generic(check.environment.generic_params, name) {
+        return None
+    }
+    check.context.generic_reflections.push(Type.Named{name: name})
+    typed: sema_node(check.context, ty, NodeKind.TraitConst{owner: Type.Named{name: name}, trait_name: TYPE_REFLECTION_TRAIT, name: ""}, span)
+    Val(SemaFactReadCheck{handled: true, value: sema_expr_expected(typed, expected, check.environment.*, check.program.*, check.diagnostics)})
+}
+
 // One subject named by a bare identifier that is not a local: a type, a
 // function, a unit member, or the `report` attribution subject.
 sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, check: SemaBodyCheck) -> SemaFactReadValue? {
@@ -1354,10 +1466,7 @@ sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, check
             }
         }
         info: sema_fact_type_info(symbol, name, [Type]{}, check) ?? return None
-        field: if read == FactRead.Layout -> "layout" else if read == FactRead.Name -> "name" else -> "fields"
-        value: sema_fact_declared_value(sema_fact_struct_field(info, field) ?? return None)
-        ty: sema_fact_reflection_field_type("TypeInfo", field) ?? return None
-        return Val(SemaFactReadValue{ty: ty, value: value})
+        return sema_fact_type_info_read(read, info)
     }
     if read == FactRead.Range {
         if item == .Val(.Distinct(definition)) {
@@ -1374,9 +1483,7 @@ sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, check
     }
     if read == FactRead.Measure || read == FactRead.Exactness || read == FactRead.Classification || read == FactRead.Obligation {
         info: sema_fact_type_info(symbol, name, [Type]{}, check) ?? return None
-        value: sema_fact_reflected_read(info, read) ?? return None
-        ty: sema_fact_reflected_type(sema_fact_named("TypeInfo"), read) ?? return None
-        return Val(SemaFactReadValue{ty: ty, value: value})
+        return sema_fact_type_info_read(read, info)
     }
     if read == FactRead.States {
         if item == .Val(.Struct(definition)) {
@@ -1696,6 +1803,9 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
         }
         if !is_constant && read == FactRead.Uses {
             return sema_fact_uses_check(name, symbol, span, expected, check)
+        }
+        if symbol == None {
+            if sema_fact_type_param_read(read, name, span, expected, check) == .Val(answered) -> return answered
         }
         if !is_constant {
             resolved: sema_fact_subject_value(read, name, symbol, check) ?? {

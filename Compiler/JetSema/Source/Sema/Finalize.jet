@@ -707,10 +707,12 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     core_seal: if final_graph.core_seal -> sema_core_seal_lines(final_graph, seal_failure, effects.core_seal) else -> [String]{}
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
-    // The TypeInfo record of each type a `T.reflect()` read is built at: a
-    // constant row of the program.
+    // What each instance answers on its own: the TypeInfo record of each
+    // type a `T.reflect()` read is built at and the value of each generic
+    // site's instance, as constant rows of the program, and the instance
+    // copies of generic sites still to stage.
     reflection_reports: diagnostics.len()
-    type_reflections: sema_fact_type_reflection_rows(final_graph, effects.type_reflections, diagnostics)
+    instance_constants: sema_fact_instance_constants(final_graph, modules, effects.type_reflections, values, diagnostics)
     if diagnostics.len() > reflection_reports -> complete = false
     if stood_in > 0 && rerun == "" && effects.walks -> rerun = "walks"
     // `sema.late`: the partition, target and compute checks that read the
@@ -1000,7 +1002,8 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         memory_declarations: effects.memory_declarations.move(),
         memory_projections: effects.memory_projections.move(),
         eval_answers: eval_answers,
-        type_reflections: type_reflections,
+        type_reflections: instance_constants.rows.move(),
+        instance_sources: instance_constants.sources.move(),
     }
     SemaFinalized{result: result.move(), graph: final_graph.move()}
 }

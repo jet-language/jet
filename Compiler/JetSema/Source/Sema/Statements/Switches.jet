@@ -362,6 +362,26 @@ sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value
             condition_check = sema_expression_condition_checked(sema_stmt_type_test_condition(param, target, expr_span(condition), check.context))
         }
     } else { condition_check = sema_expression_check_condition(condition, check) }
+    sema_stmt_check_unit_if_arms(condition_check, type_param, type_target, then_body, then_value, else_body, else_value, span, return_type, check, loop_depth)
+}
+
+// The arms of an `if` whose condition `condition_check` holds, inside the
+// source nesting level the `if` entered, which this leaves. A one-arm type
+// test (`type_param` at `type_target`) checks its then arm with the
+// parameter read as the named type.
+sema_stmt_check_unit_if_arms: fn(
+    condition_check: SemaConditionCheck,
+    type_param: String?,
+    type_target: Type?,
+    then_body: [Stmt],
+    then_value: Expr,
+    else_body: [Stmt],
+    else_value: Expr,
+    span: Span,
+    return_type: Type?,
+    check: ^SemaBodyCheck,
+    loop_depth: Int,
+) -> SemaStatementResult {
     checked_condition: condition_check.checked
     condition_bindings: condition_check.bindings
     // Both arms check in place on the live ownership state, each rolled back

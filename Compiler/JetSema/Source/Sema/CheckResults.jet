@@ -262,9 +262,14 @@ SemaGraphResult: struct {
     // The answers of the debugger's probes (EvalProbe.jet), ordered by
     // probe, expression and function; empty without probes.
     eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
-    // The constant row of each type a `T.reflect()` read is built at
-    // (sema_fact_type_reflection_rows): the program's rows, never a module's.
+    // The constant row of each instance of a read each instance answers
+    // (sema_fact_instance_constants): the TypeInfo record of a `T.reflect()`
+    // read, the value of a generic body's compile-time site. The program's
+    // rows, never a module's.
     type_reflections: [TConstantDef]{[TConstantDef]{}},
+    // The copy of a generic site each instance stages
+    // (sema_comptime_generic_site_instance) whose value has not landed yet.
+    instance_sources: [SemaComptimeBodySource]{[SemaComptimeBodySource]{}},
 }
 
 // What sema_finalize_graph hands back: its result, and the registration graph

@@ -1,0 +1,24 @@
+# Compile-time code in a generic body that reads its type parameter's
+# TypeInfo record runs once per instance: in `sizes`, a `#if` condition and a
+# `name: #run value` local over `T.reflect()` give, for each type a call fills
+# `T` with (directly or through `width_again`), the answer that type's record
+# gives, on every tier. Two programs share `sizes` and fill `T` with
+# different types; each computes its own answers, and `never_counted`, which
+# no program calls, computes none and reports nothing.
+fixture: AGenericBodyRunsCompileTimeCodePerInstance.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 wide.jet
+exit: 0
+stdout: = "wide\n2\nnarrow\n0\nnarrow\n0\n"
+step o1: jet run -O1 wide.jet
+exit: 0
+stdout: == o0
+step o2: jet run -O2 wide.jet
+exit: 0
+stdout: == o0
+step narrow0: jet run -O0 narrow.jet
+exit: 0
+stdout: = "narrow\n1\nwide\n3\n"
+step narrow2: jet run -O2 narrow.jet
+exit: 0
+stdout: == narrow0

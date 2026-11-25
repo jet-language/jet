@@ -38,6 +38,7 @@ use {
         sema_call_rule_batches_land,
         sema_call_rules_held,
         sema_comptime_body_item_source,
+        sema_comptime_generic_site,
         sema_comptime_key_set_add,
         sema_comptime_key_set_has,
         sema_comptime_function_diagnostics,
@@ -245,7 +246,8 @@ JetDriverBodySourceRow: struct {
 
 // The body sources of `modules` that `values` holds no staged value for,
 // the first of each module and key, by place: a caller copies only the
-// sources it goes on to take.
+// sources it goes on to take. A generic body's site is never one: each
+// instance stages its own copy (SemaGraphResult.instance_sources).
 jet_driver_pending_comptime_body_rows: fn(
     modules: [SemaGraphModuleResult],
     values: [SemaComptimeItemValue],
@@ -262,7 +264,7 @@ jet_driver_pending_comptime_body_rows: fn(
     seen := SemaComptimeKeySet{}
     loop (owner, graph_module) in modules {
         loop (row, source) in graph_module.comptime_body_sources {
-            if !sema_comptime_key_set_add(seen, source.module_identity, source.key) -> next
+            if !sema_comptime_key_set_add(seen, source.module_identity, source.key) || sema_comptime_generic_site(source) -> next
             if !sema_comptime_key_set_has(present, source.module_identity, source.key) -> rows.push(JetDriverBodySourceRow{owner: owner, row: row})
         }
     }
@@ -310,7 +312,7 @@ jet_driver_comptime_unheard: fn(pending: ^[SemaComptimeBodySource]) Never! {
 // `graph` and so reads its name facts (jet_driver_comptime_body_pass,
 // jet_driver_validate_checked_text).
 jet_driver_comptime_reads_names: fn(graph: SemaGraphResult, values: [SemaComptimeItemValue]) -> Bool Never! {
-    if jet_driver_pending_comptime_body_rows(graph.modules, values).len() > 0 -> return true
+    if graph.instance_sources.len() > 0 || jet_driver_pending_comptime_body_rows(graph.modules, values).len() > 0 -> return true
     loop graph_module in graph.modules {
         loop call in graph_module.comptime_requests {
             if call.checked_text != None -> return true
@@ -404,6 +406,7 @@ jet_driver_comptime_body_pass: fn(
     jet_driver_comptime_diagnostics_add(diagnostics, current_graph.diagnostics)
     jet_driver_trace_step_begin(request.trace_sink, "comptime.body.pending")
     pending := jet_driver_pending_comptime_body_sources(current_graph.modules, values)
+    pending.extend(current_graph.instance_sources)
     if request.eval_config.native == None -> jet_driver_comptime_unheard(pending)
     jet_driver_trace_step_end(request.trace_sink, "comptime.body.pending", pending.len())
     if request.trace_sink == .Val(sink) {
@@ -641,7 +644,7 @@ jet_driver_recheck_first_missing: fn(diagnostics: [Diagnostic], others: [Diagnos
 // registration graph stays out: it holds the shared lookup counters
 // (`Shared<SemaLookupCounters>`), which have no display.
 jet_driver_recheck_graph_rows: fn(graph: SemaGraphResult) -> String Never! {
-    "{graph.package_identity:Debug} {graph.entry_module_identity:Debug} {graph.imports:Debug} {graph.package_policies:Debug} {graph.core_usage:Debug} {graph.call_facts:Debug} {graph.hardware_use:Debug} {graph.comptime_requests:Debug} {graph.comptime_body_sources:Debug} {graph.compute_facts:Debug} {graph.names:Debug} {graph.diagnostics:Debug} {graph.complete} {graph.inferred_infallible:Debug} {graph.programs:Debug} {graph.outputs:Debug} {graph.memory_declarations:Debug} {graph.memory_projections:Debug} {graph.type_reflections:Debug}"
+    "{graph.package_identity:Debug} {graph.entry_module_identity:Debug} {graph.imports:Debug} {graph.package_policies:Debug} {graph.core_usage:Debug} {graph.call_facts:Debug} {graph.hardware_use:Debug} {graph.comptime_requests:Debug} {graph.comptime_body_sources:Debug} {graph.compute_facts:Debug} {graph.names:Debug} {graph.diagnostics:Debug} {graph.complete} {graph.inferred_infallible:Debug} {graph.programs:Debug} {graph.outputs:Debug} {graph.memory_declarations:Debug} {graph.memory_projections:Debug} {graph.type_reflections:Debug} {graph.instance_sources:Debug}"
 }
 
 // The bodies of module `name` that differ between the splice (`ours`) and

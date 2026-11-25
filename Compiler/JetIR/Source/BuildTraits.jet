@@ -4,7 +4,7 @@
 // unknown key stops at jet_rt_unreachable. A copy is one more owner of the
 // same box, and the last owner drops the payload and frees the box
 // (ir_trait_drop_body).
-use jet_foundation.[Interner, Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, FnBody, NameTable, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, TYPE_REFLECTION_TRAIT, Type, body_type, interner_empty, module_none, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, sha256_bytes, symbol_table, type_carrier_identity, type_reflection_constant_key, type_structural_family, type_structural_head_names]
+use jet_foundation.[Interner, Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, COMPTIME_SITE_TRAIT, FnBody, NameTable, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, TYPE_REFLECTION_TRAIT, Type, body_type, comptime_site_constant_key, interner_empty, module_none, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, sha256_bytes, symbol_table, type_carrier_identity, type_reflection_constant_key, type_structural_family, type_structural_head_names]
 
 // The payload key of concrete type `ty`: the key the program gave its
 // identity (IRProgram.trait_keys), or, for a type no implementation is
@@ -544,6 +544,11 @@ ir_trait_constant: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, owner
     // `T.reflect()`: the program's TypeInfo row for this instance's `T`.
     if trait_short == TYPE_REFLECTION_TRAIT {
         return ir_constant(m, p, b, ty, type_reflection_constant_key(ir_untag(concrete)), span)
+    }
+    // A compile-time site of a generic body: the program's row of the value
+    // it takes at this instance.
+    if trait_short == COMPTIME_SITE_TRAIT {
+        return ir_constant(m, p, b, ty, comptime_site_constant_key(name, ir_untag(concrete)), span)
     }
     if trait_short == "Decode" && name == IR_DECODE_ENV_NAMES {
         return ir_decode_env_names(m, p, b, ty, concrete, span)

@@ -529,7 +529,11 @@ Jet has two related reflection paths:
    In a generic body it is the record of the type each instance fills `T`
    with, the record `X.reflect()` gives for that type: a program builds one
    for each type its calls fill `T` with, and a generic function no call
-   reaches builds none.
+   reaches builds none. Compile-time code in a generic body that reads
+   `T.reflect()`, a `#if` condition or a `name: #run value`, runs once for
+   each of those types, and each instance reads its own answer. Such a
+   `#if` checks both arms in the generic body, and such a `name: #run value`
+   is an ordinary local that holds the instance's answer.
    `reflect.of(value)` returns the runtime reflection floor for a value.
 
 Each struct field's `FieldInfo` carries its `type`, a TypeId (below), its
