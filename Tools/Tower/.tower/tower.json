@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114250,
+    "rev": 114255,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75165,6 +75165,11 @@
       "log": [
         {
           "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Batch 47 proof sweep on dev 43951bb7788: c3 FAILS, because Tests/UI/lambda_record_body_thrown_away.jet now reports Jet.InvalidStatement 'found [' at 5:5 for '[1, 2].each(fn(n) { n: n, sq: n * n })' instead of Jet.ValueThrownAway at 5:23 (a statement starting with a list literal no longer parses; this came in with 7001+7002 in batch 47). Sent to the implementer. c6: RecordBodies.jet and NamedArgs.jet golden pass on o0/o1/o2; the tree-sitter corpus test (body_records) and the spec check are still to run. c5: the cutover-list audit is still to run."
+        },
+        {
+          "at": "2026-11-25",
           "by": "Pip",
           "text": "Correction: the review audit Docs/Audits/2026-11-25-binding-and-body-syntax-review.md is landed (commit 4b48f2bc485), so the earlier note that it was not on dev is out of date."
         },
@@ -75205,11 +75210,11 @@
         {
           "n": 4,
           "text": "parser_brace_record_value_at skips a generic argument list only where the generic-head test holds, so an arm record with a Pair<Int, Int>{...} field parses and {ok: MAX < n, big: m > LIMIT} still compares.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T16:45:01.938Z"
+          "evidence": "dev 43951bb7788 (batch 47 compiler): jet test Compiler/JetParser/Tests/Parser/BodyRecords.jet → 400 passed, 0 failed, including the arm record with a Pair<…> field (BodyRecords.jet:100) and {ok: MAX < n, big: m > LIMIT} (BodyRecords.jet:106).",
+          "at": "2026-11-25T20:12:30.211Z"
         },
         {
           "n": 5,
@@ -75237,7 +75242,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T16:20:17.621Z",
-      "updated": "2026-11-25T20:12:28.062Z",
+      "updated": "2026-11-25T20:12:36.561Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -75259,6 +75264,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-25",
+          "by": "Orchestrator",
+          "text": "Batch 47 proof sweep on dev 43951bb7788: c4 is partial. jet_cli_eval_lines and jet_cli_repl_trim_semicolons are gone from Compiler/, but Tests/Cases/CLIPartsSurface/eval_final_value_is_any_final_expression FAILS (Jet.InvalidStatement: a final expression starting with quoted text is refused), and fix_safety_tiers_are_reported_and_applied is REFUSED as malformed (line 46: invalid stream assertion). Both are sent to the implementer. c5: the fmt, docs and editor-grammar checks are still to run."
+        },
         {
           "at": "2026-11-25",
           "by": "Pip",
@@ -75283,20 +75293,20 @@
         {
           "n": 2,
           "text": "jet eval never joins two semicolon-separated statements into one: jet eval 'x := 1; -1; print(x)' prints 1 or is refused, never 0.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T16:45:06.296Z"
+          "evidence": "dev 43951bb7788 (batch 47 compiler): jet eval 'x := 1; -1; print(x)' is refused with Jet.SemicolonWithoutLineBreak and never prints 0; jet test Compiler/JetParser/Tests/Parser/SemicolonLine.jet 400 passed, 0 failed.",
+          "at": "2026-11-25T20:12:32.103Z"
         },
         {
           "n": 3,
           "text": "A semicolon is accepted exactly where the lexer's terminator_events decision would end the statement, refused after a statement or return/break/next arm on the same line, and E0373 stays only where no statement or item list is; both new diagnostics have registered rows and UI snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-25T16:45:07.302Z",
+          "evidence": "dev 43951bb7788 (batch 47 compiler): jet test Compiler --profile ui on Tests/UI/semicolon_without_line_break.jet, semicolon_after_arm.jet, enum_case_semicolon.jet and loop_header_semicolon_retired.jet: 4 PASS; jet test Compiler/JetLexer/Tests/SelfhostTerminators.jet 41 passed; SemicolonLine parser tests 400 passed; DiagnosticRows --check and DiagnosticCensus --check pass.",
+          "at": "2026-11-25T20:12:34.374Z",
           "unblockedFrom": "D-SEMI-LINE1"
         },
         {
@@ -75325,8 +75335,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T16:20:20.411Z",
-      "updated": "2026-11-25T17:40:01.397Z",
-      "updatedBy": "Pip",
+      "updated": "2026-11-25T20:12:38.329Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 5
     },
     {
@@ -142001,6 +142011,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T20:12:38.329Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c090agiq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T20:12:36.561Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0yuue6m",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-25T20:12:34.374Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c090agiq",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-25T20:12:32.103Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c090agiq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-25T20:12:30.211Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0yuue6m",
+      "note": "#4"
+    },
     {
       "at": "2026-11-25T20:12:28.062Z",
       "by": "Orchestrator",
