@@ -1028,11 +1028,11 @@ sema_taint_validate_tag_graph: fn(tag_value: String, module_identity: ModuleID, 
     sema_taint_validate_tag_in_catalog(tag_value, module_identity, catalog, graph, span, diagnostics)
 }
 
-sema_taint_validate_tag: fn(tag_value: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
+sema_taint_validate_tag: fn(tag_value: String, check: ^SemaBodyCheck, span: Span) -> Bool {
     // Snapshot: a lone program's tags are only the built-in ones.
-    if program.registration_graph.mode != .Snapshot {
-        value: program.registration_graph
-            return sema_taint_validate_tag_graph(tag_value, env.module_identity, value, span, diagnostics)
+    if check.program.registration_graph.mode != .Snapshot {
+        value: check.program.registration_graph
+        return sema_taint_validate_tag_graph(tag_value, check.environment.module_identity, value, span, check.diagnostics)
     }
     if sema_taint_builtin_tag(tag_value) != None || tag_value == SEMA_TAINT_ORIGIN_NET || tag_value == SEMA_TAINT_ORIGIN_FS || tag_value == SEMA_TAINT_ORIGIN_ENV || tag_value == SEMA_TAINT_ORIGIN_PROCESS || tag_value == SEMA_TAINT_ORIGIN_FFI {
         return true
@@ -1047,9 +1047,9 @@ sema_taint_validate_tag: fn(tag_value: String, env: SemaScopeEnvironment, progra
     diagnostic := sema_error("E0733", span, "there's no tag called `{tag_value}`", SEMA_TAINT_UNKNOWN_TAG_WHY, fix)
     if suggestion == {
         .Val(value) -> {
-            diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: value}))
+            check.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: value}))
         }
-        .None -> diagnostics.push(diagnostic)
+        .None -> check.diagnostics.push(diagnostic)
     }
     false
 }

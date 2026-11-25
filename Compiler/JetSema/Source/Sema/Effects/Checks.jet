@@ -2748,15 +2748,15 @@ sema_effect_record_intrinsic_fact: fn(environment: SemaScopeEnvironment, program
 
 // Convenience entry point for intrinsic operations whose only call metadata
 // is their canonical effect row. Use an empty row to record a known-pure site.
-sema_effect_record_intrinsic_effects: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: ^[Diagnostic]) -> Bool Never! {
-    if effect_row.len() > 0 && scopes.transaction_wall_depth > 0 {
-        wall := sema_effect_check_transaction_wall(environment, program, scopes, Val(effect_row), api, span, diagnostics)
+sema_effect_record_intrinsic_effects: fn(check: ^SemaBodyCheck, api: String, span: Span, effect_row: [EffectRowEntry]) -> Bool Never! {
+    if effect_row.len() > 0 && check.scopes.transaction_wall_depth > 0 {
+        wall := sema_effect_check_transaction_wall(check.environment.*, check.program.*, check.scopes, Val(effect_row), api, span, check.diagnostics)
         allowed: wall ?? return false
         if !allowed -> return false
     }
-    caller_key := sema_scope_function_owner_key(scopes)
-    if caller_key != "" || scopes.comptime_execution_depth > 0 {
-        context.call_facts.push(
+    caller_key := sema_scope_function_owner_key(check.scopes)
+    if caller_key != "" || check.scopes.comptime_execution_depth > 0 {
+        check.context.call_facts.push(
             SemaCallSiteFact{
                 span: span,
                 caller_key: caller_key,
@@ -2772,16 +2772,16 @@ sema_effect_record_intrinsic_effects: fn(environment: SemaScopeEnvironment, prog
 
 // Fast path for in-place collection and value mutations whose sole effect is
 // deny-only `Mem`: omits the unused `SemaCallSiteDetail` payload.
-sema_effect_record_mem_intrinsic: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, api: String, span: Span, diagnostics: ^[Diagnostic]) -> Bool Never! {
+sema_effect_record_mem_intrinsic: fn(check: ^SemaBodyCheck, api: String, span: Span) -> Bool Never! {
     effect_row: [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
-    if scopes.transaction_wall_depth > 0 {
-        wall := sema_effect_check_transaction_wall(environment, program, scopes, Val(effect_row), api, span, diagnostics)
+    if check.scopes.transaction_wall_depth > 0 {
+        wall := sema_effect_check_transaction_wall(check.environment.*, check.program.*, check.scopes, Val(effect_row), api, span, check.diagnostics)
         allowed: wall ?? return false
         if !allowed -> return false
     }
-    caller_key := sema_scope_function_owner_key(scopes)
-    if caller_key != "" || scopes.comptime_execution_depth > 0 {
-        context.call_facts.push(
+    caller_key := sema_scope_function_owner_key(check.scopes)
+    if caller_key != "" || check.scopes.comptime_execution_depth > 0 {
+        check.context.call_facts.push(
             SemaCallSiteFact{
                 span: span,
                 caller_key: caller_key,

@@ -33,10 +33,10 @@ sema_reactive_element_type: fn(ty: Type, name: String, fallback: Type) -> Type N
     }
 }
 
-sema_reactive_context_element: fn(expected: Type?, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+sema_reactive_context_element: fn(expected: Type?, name: String, check: SemaBodyCheck) -> Type? {
     if expected == {
         .Val(value) -> {
-            resolved := sema_call_resolved_type(value, environment, program)
+            resolved := sema_call_resolved_type(value, check.environment.*, check.program.*)
             if resolved == {
                 .Apply(owner, args) -> if owner == name && args.len() == 1 -> Val(args[0]) else -> None
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
@@ -77,7 +77,7 @@ sema_reactive_infer_args: fn(args: [CallArg], check: ^SemaBodyCheck) -> [TExpr] 
     values
 }
 
-sema_reactive_call_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, api: String, span: Span, result_type: Type, type_args: [Type], effect_name: String, diagnostics: ^[Diagnostic]) -> Bool Never! {
+sema_reactive_call_fact: fn(check: ^SemaBodyCheck, api: String, span: Span, result_type: Type, type_args: [Type], effect_name: String) -> Bool Never! {
     effect_entries := [EffectRowEntry]{}
     if effect_name != "" -> effect_entries.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
@@ -87,12 +87,12 @@ sema_reactive_call_fact: fn(environment: SemaScopeEnvironment, program: SemaProg
         type_args: type_args,
         default_refs: [FunctionDefaultRef]{},
     }
-    sema_effect_record_intrinsic_fact(environment, program, scopes, context, api, span, facts, diagnostics)
+    sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, api, span, facts, check.diagnostics)
 }
 
-sema_reactive_core_call_value: fn(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
-    value: sema_call_core_tree(record, args, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, diagnostics) ?? return None
-    if !sema_call_core_record_effects(record, span, type_args, result_type, sema_call_failure_carrier(Val(result_type)), [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
+sema_reactive_core_call_value: fn(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    value: sema_call_core_tree(record, args, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, check) ?? return None
+    if !sema_call_core_record_effects(record, span, type_args, result_type, sema_call_failure_carrier(Val(result_type)), [FunctionDefaultRef]{}, check) {
         return None
     }
     Val(value)
@@ -135,11 +135,11 @@ sema_reactive_check_retained_lambda: fn(kind: String, argument: CallArg, expecte
     }
 }
 
-sema_reactive_direct_closure: fn(kind: String, lambda: TLambda, result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, type_args: [Type], diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_reactive_direct_closure: fn(kind: String, lambda: TLambda, result_type: Type, span: Span, expected: Type?, check: ^SemaBodyCheck, type_args: [Type]) -> TExpr? {
     closure_kind: if kind == "autorun" -> TCoreClosureKind.ReactiveEffect{executable: lambda} else -> TCoreClosureKind.ReactiveDerived{executable: lambda}
     value := sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: closure_kind}, span)
-    checked: sema_expr_expected(value, expected, environment, program, diagnostics) ?? return None
-    if !sema_reactive_call_fact(environment, program, scopes, context, "core.reactive.{kind}", span, result_type, type_args, "", diagnostics) {
+    checked: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics) ?? return None
+    if !sema_reactive_call_fact(check, "core.reactive.{kind}", span, result_type, type_args, "") {
         return None
     }
     Val(checked)
@@ -157,7 +157,7 @@ sema_reactive_autorun_value: fn(type_args: [Type], span: Span, expected: Type?, 
     }
     lambda: sema_reactive_check_retained_lambda("autorun", args[0], Val(sema_reactive_unit_type()), None, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type := Type.Named{name: "Effect"}
-    value: sema_reactive_direct_closure("autorun", lambda, result_type, span, expected, check.environment.*, check.program.*, check.scopes, check.context, type_args, check.diagnostics)
+    value: sema_reactive_direct_closure("autorun", lambda, result_type, span, expected, check, type_args)
     SemaDirectSpecialCheck{handled: true, value: value}
 }
 
@@ -173,7 +173,7 @@ sema_reactive_derived_value: fn(member: String, type_args: [Type], span: Span, e
     }
     expected_element := if type_args.len() == 1 -> Val(sema_call_resolved_type(type_args[0], check.environment.*, check.program.*)) else -> None
     if expected_element == None {
-        expected_element = sema_reactive_context_element(expected, if member == "computed" -> "Computed" else -> "Derived", check.environment.*, check.program.*)
+        expected_element = sema_reactive_context_element(expected, if member == "computed" -> "Computed" else -> "Derived", check)
     }
     lambda: sema_reactive_check_retained_lambda(member, args[0], None, expected_element, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type: lambda.ret ?? Type.Named{name: "Unit"}
@@ -186,7 +186,7 @@ sema_reactive_derived_value: fn(member: String, type_args: [Type], span: Span, e
     }
     owner := if member == "computed" -> "Computed" else -> "Derived"
     reactive_type := Type.Apply{name: owner, args: [Type]{result_type}}
-    value: sema_reactive_direct_closure(member, lambda, reactive_type, span, expected, check.environment.*, check.program.*, check.scopes, check.context, [Type]{result_type}, check.diagnostics)
+    value: sema_reactive_direct_closure(member, lambda, reactive_type, span, expected, check, [Type]{result_type})
     SemaDirectSpecialCheck{handled: true, value: value}
 }
 
@@ -202,7 +202,7 @@ sema_reactive_signal_value: fn(type_args: [Type], span: Span, expected: Type?, c
         _ := sema_reactive_infer_args(args, check)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    expected_element := if type_args.len() == 1 -> Val(sema_call_resolved_type(type_args[0], check.environment.*, check.program.*)) else -> sema_reactive_context_element(expected, "Signal", check.environment.*, check.program.*)
+    expected_element := if type_args.len() == 1 -> Val(sema_call_resolved_type(type_args[0], check.environment.*, check.program.*)) else -> sema_reactive_context_element(expected, "Signal", check)
     value: sema_reactive_typed_single_argument("signal", args[0], expected_element, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_reactive_value_ok(value.ty, "signal", args[0].span, check.diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}
@@ -224,12 +224,12 @@ sema_reactive_loadable_value: fn(member: String, type_args: [Type], span: Span, 
     }
     if member == "idle" || member == "loading" {
         result_type := sema_reactive_loadable_type(sema_reactive_unit_type(), sema_reactive_unit_type())
-        value: sema_reactive_core_call_value(record, [TExpr]{}, span, type_args, result_type, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+        value: sema_reactive_core_call_value(record, [TExpr]{}, span, type_args, result_type, expected, check)
         return SemaDirectSpecialCheck{handled: true, value: value}
     }
     value: sema_reactive_typed_single_argument(member, args[0], None, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type := if member == "loaded" -> sema_reactive_loadable_type(sema_call_resolved_type(value.ty, check.environment.*, check.program.*), sema_reactive_unit_type()) else -> sema_reactive_loadable_type(sema_reactive_unit_type(), sema_call_resolved_type(value.ty, check.environment.*, check.program.*))
-    value_out: sema_reactive_core_call_value(record, [TExpr]{value}, span, type_args, result_type, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    value_out: sema_reactive_core_call_value(record, [TExpr]{value}, span, type_args, result_type, expected, check)
     SemaDirectSpecialCheck{handled: true, value: value_out}
 }
 
@@ -291,7 +291,7 @@ sema_reactive_checked_handle_args: fn(owner: String, method: String, args: [Call
     // owning argument. A copy value passes; any other moves at its last use,
     // and the ownership check below rejects it (E0209) when it is used again.
     typed: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, checked_args, check, span, false) ?? return None
-    ownership := sema_ownership_check_method_call(check.state, "{owner}.{method}", receiver, AccessConvention.Read, params, checked_args, check.scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check, "{owner}.{method}", receiver, AccessConvention.Read, params, checked_args, span)
     if !ownership.accepted || !ownership.complete -> return None
     Val(typed.values)
 }
@@ -315,6 +315,6 @@ sema_call_try_reactive_handle_method: fn(receiver: Expr, receiver_value: TExpr, 
         else -> BodyHandleOp.ReactiveGet
     }
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: checked_args}, span)
-    checked: sema_expression_call_expected(value, expected, check.environment.*, check.program.*, check.context, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

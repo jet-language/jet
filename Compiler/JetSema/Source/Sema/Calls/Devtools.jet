@@ -26,23 +26,23 @@ SemaDevtoolsPanelIdentity: struct {
     panel: String,
 }
 
-sema_call_devtools_is_publish: fn(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    target.symbol.name == "publish" && sema_call_core_module_is(environment, program, "core.devtools", target.symbol.module_identity)
+sema_call_devtools_is_publish: fn(target: SemaCallDirectTarget, check: SemaBodyCheck) -> Bool Never! {
+    target.symbol.name == "publish" && sema_call_core_module_is(check, "core.devtools", target.symbol.module_identity)
 }
 
 // The checked publication arguments in Core's source parameter order, or None
 // after reporting why the call is not a gated publication.
-sema_call_devtools_publish_args: fn(args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> [CallArg]? {
+sema_call_devtools_publish_args: fn(args: [CallArg], span: Span, check: ^SemaBodyCheck) -> [CallArg]? {
     if args.len() != 2 || sema_call_devtools_label(args[0]) != "field" || sema_call_devtools_label(args[1]) != "value" {
-        diagnostics.push(sema_error("E1404", span, "this published value has no gate", "a published value must name itself with `field:` and `value:`", "write `devtools.publish(field: .state_field, value: <expr>)`"))
+        check.diagnostics.push(sema_error("E1404", span, "this published value has no gate", "a published value must name itself with `field:` and `value:`", "write `devtools.publish(field: .state_field, value: <expr>)`"))
         return None
     }
     field: sema_call_devtools_field_name(args[0].expr) ?? {
-        diagnostics.push(sema_error("E1412", args[0].span, "devtools panel `publish` is invalid", "the `field:` argument must be a leading-dot state field selector", "write `field: .state_field` for a field in the marked panel state"))
+        check.diagnostics.push(sema_error("E1412", args[0].span, "devtools panel `publish` is invalid", "the `field:` argument must be a leading-dot state field selector", "write `field: .state_field` for a field in the marked panel state"))
         return None
     }
-    identity: sema_call_devtools_panel_for_field(environment, program, field) ?? {
-        diagnostics.push(sema_error("E1412", args[0].span, "devtools panel `publish` is invalid", "the package has no uniquely identified panel field `{field}`", "publish a field declared by the package's marked `panel` state"))
+    identity: sema_call_devtools_panel_for_field(check, field) ?? {
+        check.diagnostics.push(sema_error("E1412", args[0].span, "devtools panel `publish` is invalid", "the package has no uniquely identified panel field `{field}`", "publish a field declared by the package's marked `panel` state"))
         return None
     }
     // copy: the rebuilt call owns its value argument; the source call keeps its own.
@@ -87,9 +87,9 @@ sema_call_devtools_text_arg: fn(label: String, text: String, span: Span) -> Call
 
 // A panel of the calling module wins, otherwise exactly one panel of the
 // package must declare the field.
-sema_call_devtools_panel_for_field: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, field: String) -> SemaDevtoolsPanelIdentity? {
-    graph: program.registration_graph
-    caller: sema_scope_caller_index(environment, graph) ?? return None
+sema_call_devtools_panel_for_field: fn(check: SemaBodyCheck, field: String) -> SemaDevtoolsPanelIdentity? {
+    graph: check.program.registration_graph
+    caller: sema_scope_caller_index(check.environment.*, graph) ?? return None
     package: graph.modules[caller].package_identity
     found := SemaDevtoolsPanelIdentity?{None}
     count := 0

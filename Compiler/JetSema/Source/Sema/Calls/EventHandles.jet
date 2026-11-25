@@ -39,10 +39,10 @@ sema_event_handle_family: fn(ty: Type) -> String? {
 // owner path: a bare handle name, one of SYMBOL_BUILTIN_TYPES, never resolves
 // to it only because its module is loaded (TypeRelations.jet
 // `sema_type_graph_unique_type_owner`).
-sema_event_handle_owner: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+sema_event_handle_owner: fn(ty: Type, check: SemaBodyCheck) -> String? {
     owner: sema_event_handle_family(ty) ?? return None
-    graph: program.registration_graph
-    if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None {
+    graph: check.program.registration_graph
+    if sema_type_resolve_nominal_row(graph, ty, check.environment.module_identity) != None {
         return None
     }
     Val(owner)
@@ -161,7 +161,7 @@ sema_event_route_symbol: fn(owner: String, method: String) -> String Never! {
 
 sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     receiver_type: sema_call_resolved_type(receiver_value.ty, check.environment.*, check.program.*)
-    owner: sema_event_handle_owner(receiver_type, check.environment.*, check.program.*) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    owner: sema_event_handle_owner(receiver_type, check) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     type_args := [Type]{}
     if receiver_type == .Apply(_, receiver_args) {
         loop arg in receiver_args {
@@ -184,7 +184,7 @@ sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, met
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     typed: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, checked_args, check, span, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    ownership := sema_ownership_check_method_call(check.state, callee, receiver, AccessConvention.Read, params, checked_args, check.scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check, callee, receiver, AccessConvention.Read, params, checked_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -194,6 +194,6 @@ sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, met
         values.push(handler)
     }
     value := sema_tree_node(shape.result, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.EventMethod{symbol: sema_event_route_symbol(owner, method)}, args: values}, span)
-    checked: sema_expression_call_expected(value, expected, check.environment.*, check.program.*, check.context, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    checked: sema_expression_call_expected(value, expected, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

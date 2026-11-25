@@ -39,30 +39,30 @@ sema_call_shared_owner_snapshot_type: fn(inner: Type, projection: Type) -> Type 
     Type.Apply{name: SEMA_SHARED_SNAPSHOT_TYPE, args: [Type]{inner, projection}}
 }
 
-sema_call_shared_owner_host_value: fn(receiver_value: TExpr, method: String, args: [TExpr], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_host_value: fn(receiver_value: TExpr, method: String, args: [TExpr], result: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     owner: if receiver_value.ty == {
         .Shared(_) -> "Shared"
         .Apply(name, _) -> name
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> type_name(receiver_value.ty)
     }
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{owner}.{method}", span, sema_shared_access_effect_row(receiver_value.ty, method, span), diagnostics) {
+    if !sema_effect_record_intrinsic_effects(check, "{owner}.{method}", span, sema_shared_access_effect_row(receiver_value.ty, method, span)) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     value := sema_tree_node(result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: args}}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
-sema_call_shared_owner_cloneable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
-    facts: sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+sema_call_shared_owner_cloneable: fn(ty: Type, check: SemaBodyCheck) -> Bool Never! {
+    facts: sema_copy_classify(ty, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.context.generic_params, false)
     !facts.complete || facts.copyable || facts.cloneable
 }
 
 // Statements still to run in this and every enclosing block: the span a guard
 // taken here keeps its lock.
-sema_call_shared_owner_lexical_tail_len: fn(tail_store: SemaStatementTailStore, context: SemaCheckContext) -> Int Never! {
+sema_call_shared_owner_lexical_tail_len: fn(check: SemaBodyCheck) -> Int Never! {
     total := 0
-    loop frame in context.lambda_statement_tails {
-        remaining := tail_store.bodies[frame.body_id].statements.len() - frame.start_index
+    loop frame in check.context.lambda_statement_tails {
+        remaining := check.tail_store.bodies[frame.body_id].statements.len() - frame.start_index
         if remaining > 0 -> total += remaining
     }
     total
@@ -81,14 +81,14 @@ sema_call_shared_owner_capture: fn(receiver: Expr, receiver_value: TExpr, inner:
         sema_call_memory_discard_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() == 0 {
-        if !sema_call_shared_owner_cloneable(inner, check.environment.*, check.program.*, check.context) {
+        if !sema_call_shared_owner_cloneable(inner, check) {
             check.diagnostics.push(sema_error("E0112", span, "`Shared<{type_name(inner)}>.capture()` cannot copy its value", "`capture` owns an independent snapshot, so the stored type must support copying", "capture a cloneable projection instead, or add the required copy implementation"))
         }
-        return sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{}, sema_call_shared_owner_snapshot_type(inner, inner), span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+        return sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{}, sema_call_shared_owner_snapshot_type(inner, inner), span, expected, check)
     }
     callback_is_lambda: if args[0].expr == {
         .Lambda(_, _) -> true
@@ -102,14 +102,14 @@ sema_call_shared_owner_capture: fn(receiver: Expr, receiver_value: TExpr, inner:
     callback_expected: Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     callback := sema_expression_lambda_host_callback(args[0].expr, Val(callback_expected), false, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     projected: sema_call_resolved_type(sema_call_signature_return(callback.ty) ?? Type.Named{name: "Unit"}, check.environment.*, check.program.*)
-    if !sema_call_shared_owner_cloneable(projected, check.environment.*, check.program.*, check.context) {
+    if !sema_call_shared_owner_cloneable(projected, check) {
         check.diagnostics.push(sema_error("E0112", span, "`Shared<{type_name(inner)}>.capture(projection)` returns non-copyable `{type_name(projected)}`", "a captured projection is an owned value retained by the snapshot", "return a cloneable value from the projection"))
     }
     if callback.kind == .Lambda(lambda) && (lambda.effects.maximal || lambda.effects.solved.len() > 0) {
         check.diagnostics.push(sema_error("E3401", expr_span(args[0].expr), "`Shared.capture` calls the impure function `capture projection`", "`capture projection` is impure, but `Shared.capture` declares `-[]>`", "remove the call from `Shared.capture`, or drop the `-[]>` bound from `Shared.capture` so its effects are inferred"))
     }
     tree_expr_retype(callback, Type.Fn{params: [Type]{inner}, ret: Val(projected), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
-    sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{callback}, sema_call_shared_owner_snapshot_type(inner, projected), span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{callback}, sema_call_shared_owner_snapshot_type(inner, projected), span, expected, check)
 }
 
 // Consume one owner-bound snapshot ticket plus a
@@ -132,17 +132,17 @@ sema_call_shared_owner_try_replace: fn(receiver: Expr, receiver_value: TExpr, in
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     replacement_checked: sema_check_expression(updated_args[1].expr, Val(inner), check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_shared_cycle_check_replace(inner, updated_args[1].expr, expr_span(updated_args[1].expr), check.environment.*, check.program.*, check.scopes, check.state, check.diagnostics)
+    sema_shared_cycle_check_replace(inner, updated_args[1].expr, expr_span(updated_args[1].expr), check)
     replacement: sema_expr_expected(replacement_checked, Val(inner), check.environment.*, check.program.*, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     params: [SemaCallParam]{sema_call_shared_owner_param("snapshot", AccessConvention.Move, snapshot.ty), sema_call_shared_owner_param("value", AccessConvention.Move, inner)}
-    ownership := sema_ownership_check_method_call(check.state, "Shared.try_replace", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check, "Shared.try_replace", receiver, AccessConvention.Read, params, updated_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     values: [TExpr]{snapshot, replacement}
     result: Type.Result{ok: Type.Bool, err: Type.Named{name: SEMA_SHARED_REVISION_ERROR_TYPE}}
-    sema_scope_record_module_write(receiver, span, check.environment.*, check.scopes, check.context)
-    sema_call_shared_owner_host_value(receiver_value, "try_replace", values, result, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    sema_scope_record_module_write(receiver, span, check)
+    sema_call_shared_owner_host_value(receiver_value, "try_replace", values, result, span, expected, check)
 }
 
 // `a.same(b)` asks whether two `Shared<T>` handles name one cell. Identity
@@ -159,18 +159,18 @@ sema_call_shared_owner_same: fn(receiver: Expr, receiver_value: TExpr, inner: Ty
     other_checked: sema_check_expression(updated_args[0].expr, Val(shared_type), check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     other: sema_expr_expected(other_checked, Val(shared_type), check.environment.*, check.program.*, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     params: [SemaCallParam]{sema_call_shared_owner_param("other", AccessConvention.Read, shared_type)}
-    ownership := sema_ownership_check_method_call(check.state, "Shared.same", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check, "Shared.same", receiver, AccessConvention.Read, params, updated_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    sema_call_shared_owner_host_value(receiver_value, "same", [TExpr]{other}, Type.Bool, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, "same", [TExpr]{other}, Type.Bool, span, expected, check)
 }
 
-sema_call_shared_owner_nullary: fn(receiver: Expr, receiver_value: TExpr, method: String, result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
-    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+sema_call_shared_owner_nullary: fn(receiver: Expr, receiver_value: TExpr, method: String, result: Type, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{}, result, span, expected, environment, program, scopes, context, diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{}, result, span, expected, check)
 }
 
 // `guard_read()`/`guard_edit()` wait for the permit. `try_guard_read()`/
@@ -186,7 +186,7 @@ sema_call_shared_owner_guard: fn(receiver: Expr, receiver_value: TExpr, inner: T
         sema_call_memory_discard_args(args, check)
         return failed
     }
-    if sema_call_shared_owner_lexical_tail_len(check.tail_store, check.context) >= SEMA_SHARED_GUARD_LONG_SCOPE {
+    if sema_call_shared_owner_lexical_tail_len(check) >= SEMA_SHARED_GUARD_LONG_SCOPE {
         check.diagnostics.push(sema_lint("L0206", span, "`Shared.{method}()` keeps its lock through a long lexical scope", "the guard releases at scope exit, so later statements and nested guard acquisitions run while this lock is held", "move the guarded work into a smaller block; when nesting guards is necessary, acquire them in one stable order"))
     }
     editable: method == "guard_edit" || method == "try_guard_edit" || method == "guard_edit_within"
@@ -200,17 +200,15 @@ sema_call_shared_owner_guard: fn(receiver: Expr, receiver_value: TExpr, inner: T
         checked: sema_check_expression(updated_args[0].expr, Val(duration), check) ?? return failed
         limit: sema_expr_expected(checked, Val(duration), check.environment.*, check.program.*, check.diagnostics) ?? return failed
         params: [SemaCallParam]{sema_call_shared_owner_param("limit", AccessConvention.Read, duration)}
-        ownership := sema_ownership_check_method_call(check.state, "Shared.{method}", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
+        ownership := sema_ownership_check_method_call(check, "Shared.{method}", receiver, AccessConvention.Read, params, updated_args, span)
         if !ownership.accepted || !ownership.complete -> return failed
         values.push(limit)
-    } else if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    } else if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return failed
     }
     // An edit lease is the write: every edit through the guard reaches the cell.
-    if editable {
-        sema_scope_record_module_write(receiver, span, check.environment.*, check.scopes, check.context)
-    }
-    sema_call_shared_owner_host_value(receiver_value, method, values, result, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    if editable -> sema_scope_record_module_write(receiver, span, check)
+    sema_call_shared_owner_host_value(receiver_value, method, values, result, span, expected, check)
 }
 
 // (`Cell` receivers), `finish_cell_*` and `cell_method_return` /
@@ -228,10 +226,10 @@ sema_call_cell_get: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args:
         sema_call_memory_discard_args(args, check)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_call_shared_owner_cloneable(inner, check.environment.*, check.program.*, check.context) {
+    if !sema_call_shared_owner_cloneable(inner, check) {
         check.diagnostics.push(sema_error("E0112", span, "`Cell<{sema_type_show(inner)}>.get()` cannot copy its value", "`get` returns an independent owned value, so the stored type must support copying", "use `.read(fn(value) {{ ... }})` to inspect it without making a copy"))
     }
-    sema_call_shared_owner_nullary(receiver, receiver_value, "get", inner, span, expected, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics)
+    sema_call_shared_owner_nullary(receiver, receiver_value, "get", inner, span, expected, check)
 }
 
 // `set` and `replace` consume the new value; `replace` returns the old one.
@@ -245,13 +243,13 @@ sema_call_cell_write: fn(receiver: Expr, receiver_value: TExpr, owner: String, i
     checked: sema_check_expression(updated_args[0].expr, Val(inner), check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value: sema_expr_expected(checked, Val(inner), check.environment.*, check.program.*, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     params: [SemaCallParam]{sema_call_shared_owner_param("value", AccessConvention.Move, inner)}
-    ownership := sema_ownership_check_method_call(check.state, "{owner}.{method}", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check, "{owner}.{method}", receiver, AccessConvention.Read, params, updated_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result: if method == "replace" -> inner else -> Type.Named{name: "Unit"}
-    sema_scope_record_module_write(receiver, span, check.environment.*, check.scopes, check.context)
-    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    sema_scope_record_module_write(receiver, span, check)
+    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, check)
 }
 
 // `get_or_set` initializes an empty `Cell<T?>` from a zero-parameter lambda
@@ -278,15 +276,15 @@ sema_call_cell_get_or_set: fn(receiver: Expr, receiver_value: TExpr, inner: Type
     }
     initializer_type: Type.Fn{params: [Type]{}, ret: Val(stored), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     initializer := sema_check_expression_with_lambda_escapes(args[0].expr, Val(initializer_type), check, Val(false))
-    if !sema_call_shared_owner_cloneable(stored, check.environment.*, check.program.*, check.context) {
+    if !sema_call_shared_owner_cloneable(stored, check) {
         check.diagnostics.push(sema_error("E0112", span, "`Cell<{sema_type_show(stored)}?>.get_or_set()` cannot copy its value", "`get_or_set` returns an independent owned value, so `T` must support copying", "use `.edit(fn(value) {{ ... }})` when the cached value cannot be copied"))
     }
     if !is_lambda -> return SemaMethodSpecialCheck{handled: true, value: None}
     callback: initializer ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    sema_call_shared_owner_host_value(receiver_value, "get_or_set", [TExpr]{callback}, stored, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, "get_or_set", [TExpr]{callback}, stored, span, expected, check)
 }
 
 // The lambda parameter itself or a chain of field reads from it.
@@ -363,7 +361,7 @@ sema_call_cell_guard_map: fn(receiver: Expr, receiver_value: TExpr, editable: Bo
     }
     callback: sema_call_cell_closure("map", inner, args[0], editable, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     path: projection ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_method_receiver(check.state, receiver, AccessConvention.Move, "map", check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_method_receiver(check, receiver, AccessConvention.Move, "map", span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     projected: sema_call_signature_return(callback.ty) ?? Type.Named{name: "Unit"}
@@ -398,7 +396,7 @@ sema_call_cell_guard_split: fn(receiver: Expr, receiver_value: TExpr, editable: 
     first_callback: first ?? return SemaMethodSpecialCheck{handled: true, value: None}
     second_callback: second ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_method_receiver(check.state, receiver, AccessConvention.Move, "split", check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_method_receiver(check, receiver, AccessConvention.Move, "split", span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     first_guard: sema_call_cell_guard_type(editable, sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"})
@@ -428,10 +426,8 @@ sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: Strin
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             // An edit lease is the write: every edit through the guard reaches the cell.
-            if method == "guard_edit" {
-                sema_scope_record_module_write(receiver, span, check.environment.*, check.scopes, check.context)
-            }
-            return sema_call_shared_owner_nullary(receiver, receiver_value, method, sema_call_cell_guard_type(method == "guard_edit", inner), span, expected, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics)
+            if method == "guard_edit" -> sema_scope_record_module_write(receiver, span, check)
+            return sema_call_shared_owner_nullary(receiver, receiver_value, method, sema_call_cell_guard_type(method == "guard_edit", inner), span, expected, check)
         }
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -478,10 +474,10 @@ sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, 
         return failed
     }
     if method == "ids" {
-        if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+        if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
             return failed
         }
-        return sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{}, Type.List{element: id_type}, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+        return sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{}, Type.List{element: id_type}, span, expected, check)
     }
     updated_args := args
     slot: if method == "add" -> element else -> id_type
@@ -489,13 +485,13 @@ sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, 
     value: sema_expr_expected(checked, Val(slot), check.environment.*, check.program.*, check.diagnostics) ?? return failed
     convention: if method == "add" -> AccessConvention.Move else -> AccessConvention.Read
     params: [SemaCallParam]{sema_call_shared_owner_param(if method == "add" -> "value" else -> "id", convention, slot)}
-    ownership := sema_ownership_check_method_call(check.state, "Pool.{method}", receiver, AccessConvention.Read, params, updated_args, check.scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check, "Pool.{method}", receiver, AccessConvention.Read, params, updated_args, span)
     if !ownership.accepted || !ownership.complete -> return failed
-    if !sema_ownership_check_receiver_write(check.state, receiver, method, params, check.scopes, expr_span(receiver), check.diagnostics) {
+    if !sema_ownership_check_receiver_write(check, receiver, method, params, expr_span(receiver)) {
         return failed
     }
     result: if method == "add" -> id_type else -> Type.Option{inner: element}
-    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
+    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, check)
 }
 
 sema_call_try_shared_owner_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
@@ -519,10 +515,10 @@ sema_call_try_shared_owner_method: fn(receiver: Expr, receiver_value: TExpr, met
             }
             // Expert weak edge for intentional cycles.
             if method == "downgrade" {
-                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Apply{name: SEMA_SHARED_WEAK_TYPE, args: [Type]{inner}}, span, expected, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics)
+                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Apply{name: SEMA_SHARED_WEAK_TYPE, args: [Type]{inner}}, span, expected, check)
             }
             if method == "strong_count" {
-                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Int, span, expected, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics)
+                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Int, span, expected, check)
             }
         }
         .Apply(name, type_args) -> {
@@ -533,10 +529,10 @@ sema_call_try_shared_owner_method: fn(receiver: Expr, receiver_value: TExpr, met
             if cell.handled -> return cell
             if args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
             if name == SEMA_SHARED_SNAPSHOT_TYPE && type_args.len() == 2 && method == "value" {
-                return sema_call_shared_owner_nullary(receiver, receiver_value, method, type_args[1], span, expected, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics)
+                return sema_call_shared_owner_nullary(receiver, receiver_value, method, type_args[1], span, expected, check)
             }
             if name == SEMA_SHARED_WEAK_TYPE && type_args.len() == 1 && method == "upgrade" {
-                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Option{inner: Type.Shared{inner: type_args[0]}}, span, expected, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics)
+                return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Option{inner: Type.Shared{inner: type_args[0]}}, span, expected, check)
             }
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}

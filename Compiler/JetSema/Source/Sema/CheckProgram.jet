@@ -2101,7 +2101,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         statements := sema_check_statements(func.body, Val(effective_return), check, 0)
         // The caller's group joins every task this body spawned into a `Group`
         // parameter, so those handles owe no `join` here.
-        sema_taskgroup_mark_spawns_owned(check.context, SemaTaskGroupOrigin.Parameter, check.scopes, check.state, check.diagnostics)
+        sema_taskgroup_mark_spawns_owned(check, SemaTaskGroupOrigin.Parameter)
         check.context.lost_tail_span = None
         check.context.value_tail_span = None
         check.context.fallback_tables = [Int]{}
@@ -2133,8 +2133,8 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // writes under that name's expression go unrecorded, so a used binding
     // would look unread and a reassigned `:=` unwritten.
     if !check.context.compiler_generated && stand_in == None && !sema_has_unresolved_name_since(check.diagnostics, diagnostics_start) {
-        sema_ownership_finalize_references(check.state, check.diagnostics)
-        sema_ownership_report_never_written(check.state, check.diagnostics)
+        sema_ownership_finalize_references(check)
+        sema_ownership_report_never_written(check)
     }
     // The context's facts move to the caller's lists; each emptied field is
     // set again so the spent context still moves whole into the result.
@@ -2152,7 +2152,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     name_references.extend(check.context.name_references.move())
     check.context.name_references = [SemaNameReferenceFact]{}
-    if stand_in == None -> sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics) else {
+    if stand_in == None -> sema_single_use_leave_scope(check) else {
         sema_scope_leave(check.scopes, check.state)
     }
     source_line := sema_source_line_at(updated.source_segments, func.name_span)

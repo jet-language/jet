@@ -33,21 +33,21 @@ sema_call_reflection_leaf_name: fn(name: String) -> String Never! { symbol_key_l
 // capture can't copy: a capture holds the whole value or refuses it. A field
 // the capture can't hold is named first, since it says more than the whole
 // value's copy gate (a secret-bearing field also makes its value one owner's).
-sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> [TExpr]? {
+sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck) -> [TExpr]? {
     args := [TExpr]{}
-    sema_call_reflection_names(ty, span, environment, program, args)
-    if !sema_call_reflection_level_args(ty, span, value_span, environment, program, scopes, [String]{}, args, diagnostics) {
+    sema_call_reflection_names(ty, span, check, args)
+    if !sema_call_reflection_level_args(ty, span, value_span, check, [String]{}, args) {
         return None
     }
     held := ""
-    facts: sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, environment.generic_params, false)
+    facts: sema_copy_classify(ty, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.environment.generic_params, false)
     if facts.holds_resource -> held = "resource state, which has one owner"
     if facts.dynamic_loan -> held = "a borrowed loan, which lives only as long as its lender"
-    if sema_copy_holds_single_use_in(ty, environment, program) {
+    if sema_copy_holds_single_use_in(ty, check.environment.*, check.program.*) {
         held = "a `#SingleUse` value, whose one duty a copy would double"
     }
     if held != "" {
-        diagnostics.push(sema_error("E0112", value_span, "`reflect.of` can't capture {sema_type_show(ty)}", "a capture keeps its own copy of the whole value, and {sema_type_show(ty)} holds {held}", "reflect the parts of the value that hold plain data instead"))
+        check.diagnostics.push(sema_error("E0112", value_span, "`reflect.of` can't capture {sema_type_show(ty)}", "a capture keeps its own copy of the whole value, and {sema_type_show(ty)} holds {held}", "reflect the parts of the value that hold plain data instead"))
         return None
     }
     Val(args)
@@ -59,14 +59,14 @@ sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, envir
 // one's payload identity, type name and path, so the IR names a trait value
 // by the type whose payload key its box holds (ir_trait_reflect_text). Any
 // other type holds none.
-sema_call_reflection_names: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, args: ^[TExpr]) {
-    names: sema_call_reflection_type_names(ty, environment, program)
+sema_call_reflection_names: fn(ty: Type, span: Span, check: SemaBodyCheck, args: ^[TExpr]) {
+    names: sema_call_reflection_type_names(ty, check.environment.*, check.program.*)
     args.push(sema_call_reflection_text(names.type_name, span))
     args.push(sema_call_reflection_text(names.path, span))
     count_at: args.len()
     args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
     if ty == .TraitObject(bounds) {
-        count: sema_call_reflection_declared_impls(bounds, span, program, args)
+        count: sema_call_reflection_declared_impls(bounds, span, check.program.*, args)
         args[count_at] = sema_tree_node(Type.Int, TExprKind.IntLit{value: count, width: None}, span)
     }
 }
@@ -109,8 +109,8 @@ sema_call_reflection_declared_impls: fn(bounds: [String], span: Span, program: S
 // then its cases (sema_call_reflection_case_args). A type already open on the
 // way down lists no fields or cases again: its level is two zero counts.
 // False after reporting the first part that can't be captured.
-sema_call_reflection_level_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, open: [String], args: ^[TExpr], diagnostics: ^[Diagnostic]) -> Bool {
-    path: sema_call_reflection_type_names(ty, environment, program).path
+sema_call_reflection_level_args: fn(ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck, open: [String], args: ^[TExpr]) -> Bool {
+    path: sema_call_reflection_type_names(ty, check.environment.*, check.program.*).path
     if sema_call_reflection_has_name(open, path) {
         args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
         args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
@@ -118,10 +118,8 @@ sema_call_reflection_level_args: fn(ty: Type, span: Span, value_span: Span, envi
     }
     inner := [String]{path}
     loop name in open -> inner.push(name.copy())
-    if !sema_call_reflection_field_args(ty, span, value_span, environment, program, scopes, inner, args, diagnostics) {
-        return false
-    }
-    sema_call_reflection_case_args(ty, path, span, value_span, environment, program, scopes, inner, args, diagnostics)
+    if !sema_call_reflection_field_args(ty, span, value_span, check, inner, args) -> return false
+    sema_call_reflection_case_args(ty, path, span, value_span, check, inner, args)
 }
 
 // The fields half of one level: the count of `ty`'s stored struct fields,
@@ -130,28 +128,28 @@ sema_call_reflection_level_args: fn(ty: Type, span: Span, value_span: Span, envi
 // types open above it. False after reporting the first stored field whose
 // type is unknown or can't be reflected the way the value itself is
 // (sema_call_reflection_validate_value).
-sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, inner: [String], args: ^[TExpr], diagnostics: ^[Diagnostic]) -> Bool {
+sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck, inner: [String], args: ^[TExpr]) -> Bool {
     count_at: args.len()
     args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
-    definition: sema_http_route_find_struct(environment, program, ty, environment.module_identity) ?? return true
+    definition: sema_http_route_find_struct(check, ty, check.environment.module_identity) ?? return true
     count := 0
     loop field in definition.fields {
         if field.computed != None -> next
-        field_ty: sema_shared_access_field_type(ty, field.name, environment, program, scopes) ?? {
-            diagnostics.push(sema_error("E0112", value_span, "field `{field.name}` of {sema_type_show(ty)} can't be captured", "`reflect.of` captures every stored field of the value or refuses the value, and this field's type is unknown here", "pass one of the value's other fields instead"))
+        field_ty: sema_shared_access_field_type(ty, field.name, check.environment.*, check.program.*, check.scopes) ?? {
+            check.diagnostics.push(sema_error("E0112", value_span, "field `{field.name}` of {sema_type_show(ty)} can't be captured", "`reflect.of` captures every stored field of the value or refuses the value, and this field's type is unknown here", "pass one of the value's other fields instead"))
             return false
         }
         if sema_call_reflection_secret_bearing(field_ty) {
-            diagnostics.push(sema_error("E0112", value_span, "field `{field.name}` of {sema_type_show(ty)} holds secret-bearing {sema_type_show(field_ty)}, which can't be reflected", "`reflect.of` captures every stored field of the value or refuses the value, and this field would expose a cryptographic secret", "reflect the value's public fields instead"))
+            check.diagnostics.push(sema_error("E0112", value_span, "field `{field.name}` of {sema_type_show(ty)} holds secret-bearing {sema_type_show(field_ty)}, which can't be reflected", "`reflect.of` captures every stored field of the value or refuses the value, and this field would expose a cryptographic secret", "reflect the value's public fields instead"))
             return false
         }
-        if !sema_call_reflection_field_capturable(field_ty, environment, program) {
-            diagnostics.push(sema_error("E0112", value_span, "field `{field.name}` of {sema_type_show(ty)} holds {sema_type_show(field_ty)}, which can't be reflected", "`reflect.of` captures every stored field of the value or refuses the value, and each field must show the way `\"{{x}}\"` interpolation does", "implement `Display` for the field's type, or reflect the fields that show instead"))
+        if !sema_call_reflection_field_capturable(field_ty, check) {
+            check.diagnostics.push(sema_error("E0112", value_span, "field `{field.name}` of {sema_type_show(ty)} holds {sema_type_show(field_ty)}, which can't be reflected", "`reflect.of` captures every stored field of the value or refuses the value, and each field must show the way `\"{{x}}\"` interpolation does", "implement `Display` for the field's type, or reflect the fields that show instead"))
             return false
         }
         args.push(sema_call_reflection_text(field.name, span))
-        sema_call_reflection_names(field_ty, span, environment, program, args)
-        if !sema_call_reflection_level_args(field_ty, span, value_span, environment, program, scopes, inner, args, diagnostics) {
+        sema_call_reflection_names(field_ty, span, check, args)
+        if !sema_call_reflection_level_args(field_ty, span, value_span, check, inner, args) {
             return false
         }
         count += 1
@@ -169,7 +167,7 @@ sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, envi
 // listed, not just the one a value holds, so a payload no case could capture
 // refuses the value whichever case it holds. False after reporting the first
 // payload member that can't be reflected.
-sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, inner: [String], args: ^[TExpr], diagnostics: ^[Diagnostic]) -> Bool {
+sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_span: Span, check: ^SemaBodyCheck, inner: [String], args: ^[TExpr]) -> Bool {
     count_at: args.len()
     args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
     if sema_call_reflection_outcome_cases(ty) == .Val(cases) {
@@ -180,7 +178,7 @@ sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_spa
             if case.payload != None -> members = 1
             args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: members, width: None}, span))
             if case.payload == .Val(member_ty) {
-                if !sema_call_reflection_case_member(ty, case.name, "value", member_ty, span, value_span, environment, program, scopes, inner, args, diagnostics) {
+                if !sema_call_reflection_case_member(ty, case.name, "value", member_ty, span, value_span, check, inner, args) {
                     return false
                 }
             }
@@ -188,8 +186,8 @@ sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_spa
         args[count_at] = sema_tree_node(Type.Int, TExprKind.IntLit{value: cases.len(), width: None}, span)
         return true
     }
-    graph: program.registration_graph
-    row: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return true
+    graph: check.program.registration_graph
+    row: sema_pattern_nominal_row(graph, check.environment.module_identity, ty) ?? return true
     nominal: graph.modules[row.module_index].nominals[row.row]
     if nominal.kind != SemaRegistrationNominalKind.Enum || nominal.compiler_owned -> return true
     loop variant in nominal.variants {
@@ -200,12 +198,12 @@ sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_spa
             .Single(_, _) -> [String]{"value"}
             .Named(fields) -> loop field in fields -> field.name
         }
-        members: sema_pattern_variant_types(program.registration_graph, variant.payload, nominal, ty)
+        members: sema_pattern_variant_types(check.program.registration_graph, variant.payload, nominal, ty)
         args.push(sema_call_reflection_text(leaf, span))
         args.push(sema_call_reflection_text("{path}.{declared}", span))
         args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: members.len(), width: None}, span))
         loop (index, member_ty) in members {
-            if !sema_call_reflection_case_member(ty, leaf, labels[index], member_ty, span, value_span, environment, program, scopes, inner, args, diagnostics) {
+            if !sema_call_reflection_case_member(ty, leaf, labels[index], member_ty, span, value_span, check, inner, args) {
                 return false
             }
         }
@@ -217,18 +215,18 @@ sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_spa
 // One payload member `label` of case `leaf` of `ty`: its name, its names and
 // its own level pushed onto `args`. False after reporting a member that holds
 // a secret or doesn't show the way `"{x}"` interpolation does.
-sema_call_reflection_case_member: fn(ty: Type, leaf: String, label: String, member_ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, inner: [String], args: ^[TExpr], diagnostics: ^[Diagnostic]) -> Bool {
+sema_call_reflection_case_member: fn(ty: Type, leaf: String, label: String, member_ty: Type, span: Span, value_span: Span, check: ^SemaBodyCheck, inner: [String], args: ^[TExpr]) -> Bool {
     if sema_call_reflection_secret_bearing(member_ty) {
-        diagnostics.push(sema_error("E0112", value_span, "case `{leaf}` of {sema_type_show(ty)} holds secret-bearing {sema_type_show(member_ty)} in `{label}`, which can't be reflected", "`reflect.of` captures every case payload the value could hold or refuses the value, and this payload would expose a cryptographic secret", "reflect a value whose cases hold no secret instead"))
+        check.diagnostics.push(sema_error("E0112", value_span, "case `{leaf}` of {sema_type_show(ty)} holds secret-bearing {sema_type_show(member_ty)} in `{label}`, which can't be reflected", "`reflect.of` captures every case payload the value could hold or refuses the value, and this payload would expose a cryptographic secret", "reflect a value whose cases hold no secret instead"))
         return false
     }
-    if !sema_call_reflection_field_capturable(member_ty, environment, program) {
-        diagnostics.push(sema_error("E0112", value_span, "case `{leaf}` of {sema_type_show(ty)} holds {sema_type_show(member_ty)} in `{label}`, which can't be reflected", "`reflect.of` captures every case payload the value could hold or refuses the value, and each payload must show the way `\"{{x}}\"` interpolation does", "implement `Display` for the payload's type, or reflect a value whose cases show"))
+    if !sema_call_reflection_field_capturable(member_ty, check) {
+        check.diagnostics.push(sema_error("E0112", value_span, "case `{leaf}` of {sema_type_show(ty)} holds {sema_type_show(member_ty)} in `{label}`, which can't be reflected", "`reflect.of` captures every case payload the value could hold or refuses the value, and each payload must show the way `\"{{x}}\"` interpolation does", "implement `Display` for the payload's type, or reflect a value whose cases show"))
         return false
     }
     args.push(sema_call_reflection_text(label, span))
-    sema_call_reflection_names(member_ty, span, environment, program, args)
-    sema_call_reflection_level_args(member_ty, span, value_span, environment, program, scopes, inner, args, diagnostics)
+    sema_call_reflection_names(member_ty, span, check, args)
+    sema_call_reflection_level_args(member_ty, span, value_span, check, inner, args)
 }
 
 // The built-in cases of an outcome type, in the order its patterns name them,
@@ -269,8 +267,8 @@ sema_call_reflection_outcome_payload: fn(ty: Type) -> Type? Never! {
 
 // A stored field reflects under the gate the value itself passes: it shows
 // like `"{x}"` interpolation, or is a Unit.
-sema_call_reflection_field_capturable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if sema_expression_displayable(ty, environment, program) -> return true
+sema_call_reflection_field_capturable: fn(ty: Type, check: SemaBodyCheck) -> Bool {
+    if sema_expression_displayable(ty, check.environment.*, check.program.*) -> return true
     if ty == .Named(name) -> return sema_call_reflection_leaf_name(name) == "Unit"
     false
 }
@@ -546,8 +544,8 @@ sema_call_reflection_body_implements: fn(item: Item, leaf: String) -> Bool Never
 // refuses the whole query (E0605), as a generic enum named without one type
 // per parameter does (E0904): no catalog is filtered, and none is made up.
 // None for any other type, whose catalog is empty.
-sema_call_reflection_cases_refusal: fn(owner: Symbol, written: String, args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic? {
-    graph: program.registration_graph
+sema_call_reflection_cases_refusal: fn(owner: Symbol, written: String, args: [Type], span: Span, check: SemaBodyCheck) -> Diagnostic? {
+    graph: check.program.registration_graph
     row: sema_type_graph_nominal_row(graph, owner.id) ?? return None
     item: sema_registration_nominal_source_item(graph.modules[row.module_index].nominals[row.row].source) ?? return None
     if item == .Enum(definition) {
@@ -555,12 +553,12 @@ sema_call_reflection_cases_refusal: fn(owner: Symbol, written: String, args: [Ty
             return Val(sema_error("E0904", span, "`{written}` is generic, so `{written}.reflect()` has no payload types to list its cases with", "a case catalog describes each payload at one type, and a generic enum named without its type arguments is a family of types", "name one type per parameter, as `{written}<…>.reflect()`"))
         }
         visited := [SemaRegistrationRowRef]{}
-        caller: sema_type_module_row(graph, environment.module_identity)
+        caller: sema_type_module_row(graph, check.environment.module_identity)
         loop arg in args {
-            refusal: sema_call_reflection_cases_reach(graph, arg, caller, [TypeParam]{}, written, span, environment, program, visited)
+            refusal: sema_call_reflection_cases_reach(graph, arg, caller, [TypeParam]{}, written, span, check, visited)
             if refusal != None -> return refusal
         }
-        return sema_call_reflection_cases_row(graph, row, written, span, environment, program, visited)
+        return sema_call_reflection_cases_row(graph, row, written, span, check, visited)
     }
     None
 }
@@ -568,7 +566,7 @@ sema_call_reflection_cases_refusal: fn(owner: Symbol, written: String, args: [Ty
 // One type within a case catalog's reach, named from module row `caller`;
 // `params` are the type parameters of the declaration it is written in,
 // which name no declaration of their own.
-sema_call_reflection_cases_reach: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int, params: [TypeParam], written: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, visited: ^[SemaRegistrationRowRef]) -> Diagnostic? {
+sema_call_reflection_cases_reach: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int, params: [TypeParam], written: String, span: Span, check: SemaBodyCheck, visited: ^[SemaRegistrationRowRef]) -> Diagnostic? {
     if ty == {
         .Named(name) -> {
             loop param in params {
@@ -577,38 +575,38 @@ sema_call_reflection_cases_reach: fn(graph: SemaRegistrationGraph, ty: Type, cal
         }
         .Apply(_, args) -> {
             loop arg in args {
-                refusal: sema_call_reflection_cases_reach(graph, arg, caller, params, written, span, environment, program, visited)
+                refusal: sema_call_reflection_cases_reach(graph, arg, caller, params, written, span, check, visited)
                 if refusal != None -> return refusal
             }
         }
-        .List(element) -> return sema_call_reflection_cases_reach(graph, element, caller, params, written, span, environment, program, visited)
-        .Shared(inner) -> return sema_call_reflection_cases_reach(graph, inner, caller, params, written, span, environment, program, visited)
-        .Option(inner) -> return sema_call_reflection_cases_reach(graph, inner, caller, params, written, span, environment, program, visited)
-        .FixedList(element, _) -> return sema_call_reflection_cases_reach(graph, element, caller, params, written, span, environment, program, visited)
-        .Tagged(_, inner) -> return sema_call_reflection_cases_reach(graph, inner, caller, params, written, span, environment, program, visited)
-        .InlineRange(base, _, _) -> return sema_call_reflection_cases_reach(graph, base, caller, params, written, span, environment, program, visited)
-        .Quantity(base, _) -> return sema_call_reflection_cases_reach(graph, base, caller, params, written, span, environment, program, visited)
-        .Case(_, payload) -> return sema_call_reflection_cases_reach(graph, payload, caller, params, written, span, environment, program, visited)
+        .List(element) -> return sema_call_reflection_cases_reach(graph, element, caller, params, written, span, check, visited)
+        .Shared(inner) -> return sema_call_reflection_cases_reach(graph, inner, caller, params, written, span, check, visited)
+        .Option(inner) -> return sema_call_reflection_cases_reach(graph, inner, caller, params, written, span, check, visited)
+        .FixedList(element, _) -> return sema_call_reflection_cases_reach(graph, element, caller, params, written, span, check, visited)
+        .Tagged(_, inner) -> return sema_call_reflection_cases_reach(graph, inner, caller, params, written, span, check, visited)
+        .InlineRange(base, _, _) -> return sema_call_reflection_cases_reach(graph, base, caller, params, written, span, check, visited)
+        .Quantity(base, _) -> return sema_call_reflection_cases_reach(graph, base, caller, params, written, span, check, visited)
+        .Case(_, payload) -> return sema_call_reflection_cases_reach(graph, payload, caller, params, written, span, check, visited)
         .Map(key, _, value) -> {
-            refusal: sema_call_reflection_cases_reach(graph, key, caller, params, written, span, environment, program, visited)
+            refusal: sema_call_reflection_cases_reach(graph, key, caller, params, written, span, check, visited)
             if refusal != None -> return refusal
-            return sema_call_reflection_cases_reach(graph, value, caller, params, written, span, environment, program, visited)
+            return sema_call_reflection_cases_reach(graph, value, caller, params, written, span, check, visited)
         }
         .Result(ok, err) -> {
-            refusal: sema_call_reflection_cases_reach(graph, ok, caller, params, written, span, environment, program, visited)
+            refusal: sema_call_reflection_cases_reach(graph, ok, caller, params, written, span, check, visited)
             if refusal != None -> return refusal
-            return sema_call_reflection_cases_reach(graph, err, caller, params, written, span, environment, program, visited)
+            return sema_call_reflection_cases_reach(graph, err, caller, params, written, span, check, visited)
         }
         .Tuple(fields) -> {
             loop field in fields {
-                refusal: sema_call_reflection_cases_reach(graph, field.ty, caller, params, written, span, environment, program, visited)
+                refusal: sema_call_reflection_cases_reach(graph, field.ty, caller, params, written, span, check, visited)
                 if refusal != None -> return refusal
             }
             return None
         }
         .Union(members) -> {
             loop member in members {
-                refusal: sema_call_reflection_cases_reach(graph, member, caller, params, written, span, environment, program, visited)
+                refusal: sema_call_reflection_cases_reach(graph, member, caller, params, written, span, check, visited)
                 if refusal != None -> return refusal
             }
             return None
@@ -616,43 +614,43 @@ sema_call_reflection_cases_reach: fn(graph: SemaRegistrationGraph, ty: Type, cal
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> return None
     }
     row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return None
-    sema_call_reflection_cases_row(graph, row, written, span, environment, program, visited)
+    sema_call_reflection_cases_row(graph, row, written, span, check, visited)
 }
 
 // The declaration at `row` within a case catalog's reach: readable from the
 // checking module, with each stored field of a struct readable and its type
 // reached, or each case payload of an enum reached. A row already reached
 // closes its edge.
-sema_call_reflection_cases_row: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, written: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, visited: ^[SemaRegistrationRowRef]) -> Diagnostic? {
+sema_call_reflection_cases_row: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, written: String, span: Span, check: SemaBodyCheck, visited: ^[SemaRegistrationRowRef]) -> Diagnostic? {
     loop seen in visited {
         if seen.module_index == row.module_index && seen.row == row.row -> return None
     }
     visited.push(SemaRegistrationRowRef{module_index: row.module_index, row: row.row})
     registered: graph.modules[row.module_index]
     nominal: registered.nominals[row.row]
-    if !sema_registration_visible(nominal.symbol.visibility, environment.module_identity, environment.package_identity, registered.module_identity, registered.package_identity) {
+    if !sema_registration_visible(nominal.symbol.visibility, check.environment.module_identity, check.environment.package_identity, registered.module_identity, registered.package_identity) {
         return Val(sema_call_reflection_cases_private(written, nominal.symbol.name, span))
     }
     item: sema_registration_nominal_source_item(nominal.source) ?? return None
     if item == .Struct(definition) {
         loop field in definition.fields {
             if field.computed != None -> next
-            if !sema_expression_field_visible(field.is_pub, field.is_package_pub, registered.module_identity, definition.inline_module, span, false, environment, program) {
+            if !sema_expression_field_visible(field.is_pub, field.is_package_pub, registered.module_identity, definition.inline_module, span, false, check.environment.*, check.program.*) {
                 return Val(sema_call_reflection_cases_private(written, "{nominal.symbol.name}.{field.name}", span))
             }
-            refusal: sema_call_reflection_cases_reach(graph, field.ty, row.module_index, definition.type_params, written, span, environment, program, visited)
+            refusal: sema_call_reflection_cases_reach(graph, field.ty, row.module_index, definition.type_params, written, span, check, visited)
             if refusal != None -> return refusal
         }
     }
     if item == .Enum(definition) {
         loop variant in definition.variants {
             if variant.payload == .Single(ty, _) {
-                refusal: sema_call_reflection_cases_reach(graph, ty, row.module_index, definition.type_params, written, span, environment, program, visited)
+                refusal: sema_call_reflection_cases_reach(graph, ty, row.module_index, definition.type_params, written, span, check, visited)
                 if refusal != None -> return refusal
             }
             if variant.payload == .Named(fields) {
                 loop field in fields {
-                    refusal: sema_call_reflection_cases_reach(graph, field.ty, row.module_index, definition.type_params, written, span, environment, program, visited)
+                    refusal: sema_call_reflection_cases_reach(graph, field.ty, row.module_index, definition.type_params, written, span, check, visited)
                     if refusal != None -> return refusal
                 }
             }
@@ -669,15 +667,15 @@ sema_call_reflection_cases_private: fn(written: String, detail: String, span: Sp
 // inferred the value. This keeps argument evaluation and ownership in the
 // ordinary call path while centralizing secret/display diagnostics. A value
 // reflects exactly where bare `"{x}"` interpolation shows it.
-sema_call_reflection_validate_value: fn(value: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool {
-    if sema_expression_displayable(value.ty, environment, program) -> return true
+sema_call_reflection_validate_value: fn(value: TExpr, span: Span, check: ^SemaBodyCheck) -> Bool {
+    if sema_expression_displayable(value.ty, check.environment.*, check.program.*) -> return true
     if value.ty == .Named(name) && sema_call_reflection_leaf_name(name) == "Unit" -> return true
     if {
         sema_call_reflection_secret_bearing(value.ty) -> {
-            diagnostics.push(sema_error("E0112", span, "secret-bearing `{type_name(value.ty)}` cannot be reflected", "reflection would expose a cryptographic secret through generic inspection or display", "keep the value opaque; inspect only public keys, signatures, digests, or envelope metadata"))
+            check.diagnostics.push(sema_error("E0112", span, "secret-bearing `{type_name(value.ty)}` cannot be reflected", "reflection would expose a cryptographic secret through generic inspection or display", "keep the value opaque; inspect only public keys, signatures, digests, or envelope metadata"))
         }
         else -> {
-            diagnostics.push(sema_error("E0112", span, "{type_name(value.ty)} can't be reflected yet", "`reflect.of` inspects the same values `\"{{x}}\"` interpolation can show", "implement `Display` for its type, or pass one of its fields instead"))
+            check.diagnostics.push(sema_error("E0112", span, "{type_name(value.ty)} can't be reflected yet", "`reflect.of` inspects the same values `\"{{x}}\"` interpolation can show", "implement `Display` for its type, or pass one of its fields instead"))
         }
     }
     false
@@ -764,7 +762,7 @@ sema_call_reflection_marker_lookup: fn(
     expected: Type?,
     check: ^SemaBodyCheck,
 ) -> SemaMethodSpecialCheck {
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() != 1 || args[0].label != None {
@@ -790,7 +788,7 @@ sema_call_reflection_marker_lookup: fn(
         check.diagnostics.push(sema_error("E1134", args[0].span, "{shown} is not a marker", "`marker(T)` reads the marker `T` written on a reflected item, so `T` names a struct with an `impl Marker` block or a Prelude marker", "name a marker struct visible here or a Prelude marker such as `Codable`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_effect_record_intrinsic_effects(check.environment.*, check.program.*, check.scopes, check.context, "{owner}.marker", span, [EffectRowEntry]{}, check.diagnostics) {
+    if !sema_effect_record_intrinsic_effects(check, "{owner}.marker", span, [EffectRowEntry]{}) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     host_args := [TExpr]{sema_call_reflection_text(marker.name, span)}
@@ -835,7 +833,7 @@ sema_call_try_reflection_metadata_method: fn(
     }
     if args.len() != 1 {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, check)
-        if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+        if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         check.diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects one String argument, got {args.len()}", "metadata predicates inspect one trait or method name", "call `.{method}(name)` with one String"))
@@ -848,11 +846,11 @@ sema_call_try_reflection_metadata_method: fn(
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     typed: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, checked_args, check, span, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    ownership := sema_ownership_check_method_call(check.state, "{owner}.{method}", receiver, AccessConvention.Read, params, checked_args, check.scopes, span, check.diagnostics)
+    ownership := sema_ownership_check_method_call(check, "{owner}.{method}", receiver, AccessConvention.Read, params, checked_args, span)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_effect_record_intrinsic_effects(check.environment.*, check.program.*, check.scopes, check.context, "{owner}.{method}", span, [EffectRowEntry]{}, check.diagnostics) {
+    if !sema_effect_record_intrinsic_effects(check, "{owner}.{method}", span, [EffectRowEntry]{}) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type: sema_call_reflection_method_return(owner, method, [Type]{Type.String}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -897,7 +895,7 @@ sema_call_try_reflection_handle_method: fn(
     }
     operation: sema_call_reflection_handle_operation(owner, method)
     if operation == None -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, check.scopes, span, check.diagnostics) {
+    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() != 0 {

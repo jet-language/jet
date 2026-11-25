@@ -505,13 +505,13 @@ sema_trait_constant_type_path: fn(base: Expr) -> String? Never! {
 
 // `Type.member` or `T.member` reading a trait constant; unhandled when
 // `member` names no trait constant of the type.
-sema_expression_trait_constant: fn(type_name: String, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
-    if member == SEMA_DECODE_ENV_NAMES && module_is_core(environment.module_identity) && sema_trait_constant_names_generic(environment, type_name) {
-        value: sema_node(context, sema_decode_env_names_type(), NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: "Decode", name: member.copy()}, span)
-        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+sema_expression_trait_constant: fn(type_name: String, member: String, member_span: Span, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
+    if member == SEMA_DECODE_ENV_NAMES && module_is_core(check.environment.module_identity) && sema_trait_constant_names_generic(check.environment.*, type_name) {
+        value: sema_node(check.context, sema_decode_env_names_type(), NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: "Decode", name: member.copy()}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
-    graph: program.registration_graph
-    sema_expression_trait_constant_in(graph, type_name, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
+    graph: check.program.registration_graph
+    sema_expression_trait_constant_in(graph, type_name, member, member_span, span, expected, check)
 }
 
 // Whether `type_name` is one of the enclosing function's type parameters.
@@ -522,11 +522,11 @@ sema_trait_constant_names_generic: fn(environment: SemaScopeEnvironment, type_na
     false
 }
 
-sema_expression_trait_constant_in: fn(graph: SemaRegistrationGraph, type_name: String, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_expression_trait_constant_in: fn(graph: SemaRegistrationGraph, type_name: String, member: String, member_span: Span, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
     unhandled: SemaMethodSpecialCheck{handled: false, value: None}
     found := [SemaTraitConstantFound]{}
     generic := false
-    loop parameter in environment.generic_params {
+    loop parameter in check.environment.generic_params {
         if parameter.name != type_name -> next
         generic = true
         loop bound in parameter.bounds {
@@ -535,29 +535,29 @@ sema_expression_trait_constant_in: fn(graph: SemaRegistrationGraph, type_name: S
         }
     }
     if !generic {
-        if sema_expression_type_symbol(scopes, environment, program, type_name) == None {
+        if sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, type_name) == None {
             return unhandled
         }
-        resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), type_name) ?? return unhandled
+        resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(check.environment.*, graph), type_name) ?? return unhandled
         owner_row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return unhandled
-        owner: sema_trait_constant_head(sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, environment.module_identity)) ?? return unhandled
+        owner: sema_trait_constant_head(sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, check.environment.module_identity)) ?? return unhandled
         sema_trait_constant_collect_impls(graph, owner_row, owner, Val(member), found)
     }
     if found.len() == 0 -> return unhandled
     loop index in 1..<found.len() {
         if found[index].trait_name != found[0].trait_name {
-            diagnostics.push(sema_error("E0937", member_span, "`{type_name}.{member}` names a constant of both `{found[0].trait_name}` and `{found[index].trait_name}`", "each of the two traits declares a constant `{member}`", "rename the constant in one of the traits"))
+            check.diagnostics.push(sema_error("E0937", member_span, "`{type_name}.{member}` names a constant of both `{found[0].trait_name}` and `{found[index].trait_name}`", "each of the two traits declares a constant `{member}`", "rename the constant in one of the traits"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
     if generic {
-        value: sema_node(context, found[0].ty, NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: found[0].trait_name.copy(), name: member.copy()}, span)
-        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+        value: sema_node(check.context, found[0].ty, NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: found[0].trait_name.copy(), name: member.copy()}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
     }
     // The implementation's value was reported where the impl gives it.
     stored: found[0].value ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value: sema_tree_node(found[0].ty, TExprKind.CtLit{value: stored.copy()}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
 // `T.__env_names` in core.sys `decode<T: Decode>`: the checked env name and

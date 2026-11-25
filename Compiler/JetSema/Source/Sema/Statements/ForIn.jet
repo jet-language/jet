@@ -234,14 +234,14 @@ sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String
 // so a failure of it passes up as an implicit fallible call's does, through
 // the same conversion (sema_expression_propagation_conversion) at the
 // header `span`.
-sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type, span: Span, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaForInIterableFact? {
+sema_stmt_for_in_iterable_fact: fn(check: ^SemaBodyCheck, collection_type: Type, span: Span) -> SemaForInIterableFact? {
     if sema_stmt_for_in_named_type_name(collection_type) == None -> return None
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     // Impls key their target by the declaring nominal's identity, so a
     // source type and its `Iter` resolve to that nominal first (a Core
     // type written by its bare name, `HTTPBodyChunks`, included).
     collection_identity := type_identity_key(collection_type)
-    if sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) == .Val(row) {
+    if sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(check.environment.*, graph)) == .Val(row) {
         collection_identity = graph.modules[row.module_index].nominals[row.row].identity_key
     }
     iterable: sema_stmt_for_in_trait_impl(graph, "Iterable", collection_identity) ?? return None
@@ -279,7 +279,7 @@ sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: S
         // method), so the receiver is not read.
         step_call: Expr.MethodCall{receiver: Expr.Unit{span: span, id: AST_NODE_GENERATED}, method: "next", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
         callee: SemaFailureCallee{key: next_key, inferable: false}
-        converted: sema_expression_propagation_conversion(Type.Result{ok: Type.Option{inner: item}, err: error}, Val(step_call), Val(callee), span, true, environment, program, scopes, context, diagnostics)
+        converted: sema_expression_propagation_conversion(Type.Result{ok: Type.Option{inner: item}, err: error}, Val(step_call), Val(callee), span, true, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics)
         routed = converted != None
         failure = converted ?? TTryConvert.Never
     }
@@ -293,9 +293,9 @@ sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: S
 // A Core reader, one whose `next(^self)` answers `Item? E!` (`JSONReader`,
 // `CBORReader`, `CSVReader`, ...): the loop calls that `next` each step
 // (IR ir_encoding_reader_walk), so the item is the `Item` Core declares.
-sema_stmt_for_in_reader_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type) -> SemaForInIterableFact? {
-    graph: program.registration_graph
-    row: sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) ?? return None
+sema_stmt_for_in_reader_fact: fn(check: SemaBodyCheck, collection_type: Type) -> SemaForInIterableFact? {
+    graph: check.program.registration_graph
+    row: sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(check.environment.*, graph)) ?? return None
     if !module_is_core(graph.modules[row.module_index].nominals[row.row].symbol.module_identity) {
         return None
     }
@@ -439,27 +439,27 @@ sema_stmt_for_in_is_list: fn(collection_type: Type) -> Bool Never! {
 
 // A bare name this frame owns outright. A read or write parameter and a live
 // view name storage the caller still owns.
-sema_stmt_for_in_frame_owns: fn(expression: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Bool {
+sema_stmt_for_in_frame_owns: fn(expression: Expr, check: ^SemaBodyCheck) -> Bool {
     if expression == {
-        .Paren(value, _, _) | .Copy(value, _, _) -> return sema_stmt_for_in_frame_owns(value, scopes, state)
+        .Paren(value, _, _) | .Copy(value, _, _) -> return sema_stmt_for_in_frame_owns(value, check)
         .Ident(_, _, _) -> {}
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return true
     }
-    if sema_ownership_view_exists_for_expr(state, expression, scopes) -> return false
-    binding: sema_ownership_binding_for_expr(state, expression, scopes) ?? return true
+    if sema_ownership_view_exists_for_expr(check.state, expression, check.scopes) -> return false
+    binding: sema_ownership_binding_for_expr(check.state, expression, check.scopes) ?? return true
     !(binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write))
 }
 
 // A loop over task handles hands out each handle itself, which takes the list;
 // a borrowed name, a field or an index cannot give the list away.
-sema_stmt_for_in_borrowed_task_list: fn(collection: Expr, collection_type: Type, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Diagnostic {
+sema_stmt_for_in_borrowed_task_list: fn(collection: Expr, collection_type: Type, check: ^SemaBodyCheck) -> Diagnostic {
     why: "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list"
     place: if collection == {
         .Paren(inner, _, _) | .Copy(inner, _, _) -> inner
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> collection
     }
     if place == .Ident(name, _, _) {
-        is_param: if sema_ownership_binding_for_expr(state, place, scopes) == {
+        is_param: if sema_ownership_binding_for_expr(check.state, place, check.scopes) == {
             .Val(binding) -> binding.symbol.kind == SymbolKind.Parameter
             .None -> false
         }
@@ -512,7 +512,7 @@ sema_stmt_for_in_borrowed_elements: fn(expression: Expr, scopes: SemaScopeTable)
 // resource (#6429): each loop name reads an element the list keeps, whoever
 // owns the list, so taking it (`x.move()`) or copying it into an owning position
 // (`out.push(x)`, `-> x`) would leave two owners closing one resource.
-sema_stmt_for_in_resource_elements: fn(expression: Expr, collection_type: Type, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> Bool {
+sema_stmt_for_in_resource_elements: fn(expression: Expr, collection_type: Type, item_type: Type, check: SemaBodyCheck) -> Bool {
     if expression == .Place(_, access, _, _) {
         if access == PlaceAccess.Take -> return false
     }
@@ -520,7 +520,7 @@ sema_stmt_for_in_resource_elements: fn(expression: Expr, collection_type: Type, 
     source: if expression == .Place(inner, _, _, _) -> inner else -> expression
     if !sema_stmt_for_in_plain_place(source) -> return false
     if sema_ownership_type_is_copy(item_type) || item_type == .String -> return false
-    facts: sema_copy_classify(item_type, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    facts: sema_copy_classify(item_type, SemaCopyIntent.Clone, check.environment.*, check.program.*, check.context.generic_params, false)
     facts.complete && facts.holds_resource
 }
 
@@ -545,11 +545,11 @@ sema_stmt_for_in_stable_root: fn(expression: Expr) -> String? {
 // The definition id of a stable source's root, or None when the source is
 // not a place or a write loan on the root is active at loop entry (a write
 // window or mutating capture can change it without naming it in the body).
-sema_stmt_for_in_stable_root_id: fn(expression: Expr, scopes: SemaScopeTable, state: SemaOwnershipState) -> SymbolID? {
+sema_stmt_for_in_stable_root_id: fn(expression: Expr, check: SemaBodyCheck) -> SymbolID? {
     root: sema_stmt_for_in_stable_root(expression) ?? return None
-    index: sema_scope_resolve_index(scopes, root) ?? return None
-    id: scopes.bindings[index].symbol.id
-    loop loan in state.loans {
+    index: sema_scope_resolve_index(check.scopes, root) ?? return None
+    id: check.scopes.bindings[index].symbol.id
+    loop loan in check.state.loans {
         if loan.place.root_id == id && loan.access == AccessConvention.Write -> return None
     }
     Val(id)
@@ -1032,9 +1032,9 @@ sema_stmt_index_write_is_collection: fn(ty: Type) -> Bool Never! {
 
 // E1108: the element name of a `[S]` whose struct is
 // `#Layout(columnar)`; v1 supports only the core read surface on it.
-sema_columnar_list_element: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> String? {
+sema_columnar_list_element: fn(check: SemaBodyCheck, ty: Type) -> String? {
     if sema_expr_unwrap_tag(ty) == .List(inner) {
-        if inner == .Named(element) && sema_stmt_for_in_columnar(environment, program, inner) {
+        if inner == .Named(element) && sema_stmt_for_in_columnar(check, inner) {
             return Val(element)
         }
     }
@@ -1227,28 +1227,28 @@ sema_stmt_for_in_range_zero: fn(span: Span) -> TExpr Never! {
 // binds the loop name under the identity every body read resolves by. None
 // when the name could not be declared (reported here) or is untyped (the
 // loop is incomplete either way).
-sema_stmt_for_in_decl_loop_local: fn(name: String, name_span: Span, ty: Type?, owes_duty: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TLocal? {
-    owner := sema_scope_local_owner_key(scopes)
-    local_module: sema_scope_environment_module_text(environment, program)
+sema_stmt_for_in_decl_loop_local: fn(name: String, name_span: Span, ty: Type?, owes_duty: Bool, check: ^SemaBodyCheck) -> TLocal? {
+    owner := sema_scope_local_owner_key(check.scopes)
+    local_module: sema_scope_environment_module_text(check.environment.*, check.program.*)
     key: symbol_key_text(SymbolKind.Local, local_module, owner, name)
     symbol := Symbol{
-        id: sema_symbol_id_of(program, context, key),
+        id: sema_symbol_id_of(check.program.*, check.context, key),
         kind: SymbolKind.Local,
         name: name,
-        module_identity: environment.module_identity,
+        module_identity: check.environment.module_identity,
         owner: Val(owner),
         span: name_span,
         ty: ty,
         visibility: 0,
     }
-    if !sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false) {
-        diagnostics.push(sema_already_defined(name, name_span))
+    if !sema_scope_declare_local(check.scopes, symbol, key, false, AccessConvention.Read, None, false) {
+        check.diagnostics.push(sema_already_defined(name, name_span))
         return None
     }
-    sema_scope_mark_loop_item(scopes, name)
+    sema_scope_mark_loop_item(check.scopes, name)
     checked_ty: ty ?? return None
-    sema_ownership_declare_binding(state, symbol, false)
-    if owes_duty -> sema_single_use_note_binding(state, symbol, environment, program)
+    sema_ownership_declare_binding(check.state, symbol, false)
+    if owes_duty -> sema_single_use_note_binding(check, symbol)
     Val(checked_symbol_local(name, name_span, symbol.id, checked_ty))
 }
 
@@ -1264,7 +1264,7 @@ sema_stmt_for_in_takes_map: fn(collection: Expr, collection_type: Type) -> Bool 
 
 // Each ViewMut item is lent for one iteration; the descriptor may not escape,
 // and its source still participates in the ordinary view ledger.
-sema_stmt_for_in_lend_view_item: fn(local: TLocal?, ty: Type, collection: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext) {
+sema_stmt_for_in_lend_view_item: fn(local: TLocal?, ty: Type, collection: Expr, check: ^SemaBodyCheck) {
     if ty == .Apply(lend_name, item_args) && lend_name == "ViewMut" {
         if item_args.len() != 1 {
             return
@@ -1274,23 +1274,23 @@ sema_stmt_for_in_lend_view_item: fn(local: TLocal?, ty: Type, collection: Expr, 
     }
     variable: local ?? return
     symbol: variable.symbol_id ?? return
-    facts: sema_stmt_local_view_facts_for_expr(collection, scopes, state, context)
+    facts: sema_stmt_local_view_facts_for_expr(collection, check.scopes, check.state, check.context)
     recorded := false
     loop fact in facts {
         if fact.slot.len() != 1 || fact.slot[0] != "[]" -> next
         loop place in fact.places {
-            _ := sema_ownership_record_view_fact_inner(state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, scopes, -1)
+            _ := sema_ownership_record_view_fact_inner(check.state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, check.scopes, -1)
             recorded = true
         }
     }
     if !recorded {
-        loop place in sema_ownership_element_places(collection, variable.span, scopes, state) {
-            _ := sema_ownership_record_view_fact_inner(state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, scopes, -1)
+        loop place in sema_ownership_element_places(collection, variable.span, check) {
+            _ := sema_ownership_record_view_fact_inner(check.state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, check.scopes, -1)
         }
     }
     // The item is a body local, keyed in the body's own symbols.
-    key: symbol_local_keys_text(context.arena.tree.symbols, symbol)
-    context.lending_view_parameter_keys.push(key)
+    key: symbol_local_keys_text(check.context.arena.tree.symbols, symbol)
+    check.context.lending_view_parameter_keys.push(key)
 }
 
 sema_stmt_for_in_pair_types: fn(collection_type: Type, item_type: Type) -> SemaForInPairTypes? {
@@ -1376,9 +1376,9 @@ sema_stmt_for_in_item_type: fn(collection_type: Type, method_kind: TForInMethod?
 
 // A body pass's tables carry no checked types, so the layout comes from the
 // struct's declaration in the registration graph.
-sema_stmt_for_in_columnar: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, item_type: Type) -> Bool {
-    graph: program.registration_graph
-    nominal_row: sema_type_resolve_nominal_row(graph, item_type, environment.module_identity) ?? return false
+sema_stmt_for_in_columnar: fn(check: SemaBodyCheck, item_type: Type) -> Bool {
+    graph: check.program.registration_graph
+    nominal_row: sema_type_resolve_nominal_row(graph, item_type, check.environment.module_identity) ?? return false
     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
     if sema_registration_nominal_source_item(nominal.source) == .Val(.Struct(definition)) {

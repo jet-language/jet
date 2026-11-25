@@ -146,10 +146,8 @@ sema_app_marker_arg_at: fn(marker: Marker, label: String, position: Int) -> Int?
 
 // The static String that argument `at` of `marker` gives; None when it
 // gives none.
-sema_app_marker_string: fn(marker: Marker, at: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
-    if marker.args[at] == .Expr(value) {
-        return sema_http_route_constant_string(value, environment, program, scopes)
-    }
+sema_app_marker_string: fn(marker: Marker, at: Int, check: SemaBodyCheck) -> String? {
+    if marker.args[at] == .Expr(value) -> return sema_http_route_constant_string(value, check)
     None
 }
 
@@ -239,9 +237,9 @@ SEMA_APP_REMOTE_ARG: "__arg"
 SEMA_APP_REMOTE_RAISE: "__raise"
 
 // Whether `ty`, a resolved type of one type argument, is `app.Remote<S>`.
-sema_app_is_remote: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    graph: program.registration_graph
-    row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return false
+sema_app_is_remote: fn(ty: Type, check: SemaBodyCheck) -> Bool {
+    graph: check.program.registration_graph
+    row: sema_type_resolve_nominal_row(graph, ty, check.environment.module_identity) ?? return false
     graph.modules[row.module_index].module_name == SEMA_APP_MARKER_MODULE && graph.modules[row.module_index].nominals[row.row].symbol.name == SEMA_APP_REMOTE
 }
 
@@ -270,7 +268,7 @@ sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, m
     if sema_type_resolve_nominal_row(graph, service, check.environment.module_identity) == .Val(row) {
         shown = "app.Remote<{graph.modules[row.module_index].nominals[row.row].symbol.name}>"
         service_module: graph.modules[row.module_index].module_identity
-        if sema_http_route_find_struct(check.environment.*, check.program.*, service, check.environment.module_identity) == .Val(definition) {
+        if sema_http_route_find_struct(check, service, check.environment.module_identity) == .Val(definition) {
             loop declaration in definition.methods {
                 if declaration.name != method -> next
                 declared = true
@@ -320,7 +318,7 @@ sema_call_app_endpoints: fn(alias: String, type_args: [Type], args: [CallArg], s
     graph: check.program.registration_graph
     service: sema_type_resolve_declared_with_generics(graph, type_args[0], check.environment.module_identity, check.environment.generic_params)
     row: sema_type_resolve_nominal_row(graph, service, check.environment.module_identity) ?? return sema_app_endpoints_no_service(callee, service, span, check.diagnostics)
-    definition: sema_http_route_find_struct(check.environment.*, check.program.*, service, check.environment.module_identity) ?? return sema_app_endpoints_no_service(callee, service, span, check.diagnostics)
+    definition: sema_http_route_find_struct(check, service, check.environment.module_identity) ?? return sema_app_endpoints_no_service(callee, service, span, check.diagnostics)
     service_module: graph.modules[row.module_index].module_identity
     names := [Expr]{}
     loop declaration in definition.methods {
@@ -401,7 +399,7 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
     }
     if !(receiver == .Ident(_, _, _)) {
         held: sema_stmt_check_binding(ast_binding(remote, expr_span(receiver), false, receiver, None), None, check) ?? {
-            sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+            sema_single_use_leave_scope(check)
             return None
         }
         body.push(held)
@@ -420,7 +418,7 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
             binding := ast_binding(local_name, args[index].span, false, args[index].expr, None)
             binding.ty = Val(sema_type_resolve_declared(graph, declaration.params[index + 1].ty, service_module))
             statement: sema_stmt_check_binding(binding, None, check) ?? {
-                sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+                sema_single_use_leave_scope(check)
                 return None
             }
             body.push(statement)
@@ -450,13 +448,13 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
     // The lowered call keeps its Result carrier: the remote call is the call
     // root, which its consumer (`??`, `?`) reads or auto-propagates.
     checked: sema_check_expression_carrier(lowered, None, check) ?? {
-        sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+        sema_single_use_leave_scope(check)
         return None
     }
     result_type: checked.ty
     body.push(TStmt.ExprStmt{value: checked, span: method_span})
-    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
-    sema_expression_call_expected(sema_tree_node(result_type, TExprKind.InlineBlock{body: body}, method_span), expected, check.environment.*, check.program.*, check.context, check.diagnostics)
+    sema_single_use_leave_scope(check)
+    sema_expression_call_expected(sema_tree_node(result_type, TExprKind.InlineBlock{body: body}, method_span), expected, check)
 }
 
 // `remote.__call<R, E>(method, args, direct, fail)` for an endpoint method
@@ -573,7 +571,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     }
     prefix := ""
     if args.len() == 2 {
-        text: sema_http_route_constant_string(args[0].expr, check.environment.*, check.program.*, check.scopes) ?? {
+        text: sema_http_route_constant_string(args[0].expr, check) ?? {
             check.diagnostics.push(sema_error("E2805", args[0].span, "app.mount prefix must be a static String", "a mounted struct's routes are fully checked while building, prefix included", "use a literal or compile-time String constant"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
@@ -624,7 +622,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
             check.context.incomplete_reasons.push("mounted value has no type")
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        if sema_http_route_find_struct(check.environment.*, check.program.*, value_ty, check.environment.module_identity) == .Val(definition) {
+        if sema_http_route_find_struct(check, value_ty, check.environment.module_identity) == .Val(definition) {
             graph: check.program.registration_graph
             nominal_row: sema_type_resolve_nominal_row(graph, value_ty, check.environment.module_identity) ?? {
                 check.context.incomplete_reasons.push("mount has no nominal row")
@@ -722,13 +720,13 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     custom: verb == sema_http_route_custom_verb()
                     marked_count: if custom -> 2 else -> 1
                     if marker.args.len() != marked_count || marked.len() != marked_count -> next
-                    if custom && sema_http_route_constant_string(marked[0].expr, check.environment.*, check.program.*, check.scopes) == None {
+                    if custom && sema_http_route_constant_string(marked[0].expr, check) == None {
                         check.diagnostics.push(sema_error("E2808", marked[0].span, "`#Server.Custom` route method must be a static String", "a marked route is fully checked while building; only `app.custom` takes a run-time method, checked when it registers", "use a literal or compile-time String constant, or register the route with `app.custom`"))
                         next
                     }
                     if prefix != "" {
                         path_at: marked_count - 1
-                        path: sema_http_route_constant_string(marked[path_at].expr, check.environment.*, check.program.*, check.scopes) ?? {
+                        path: sema_http_route_constant_string(marked[path_at].expr, check) ?? {
                             check.diagnostics.push(sema_error("E2805", marked[path_at].span, "a route marker under a mount prefix needs a static path", "the mounted route's address is the prefix and the marker's path, checked while building", "use a literal or compile-time String constant"))
                             next
                         }
@@ -768,7 +766,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     }
     // The block's value is the App, so `app.mount(value)` chains.
     body.push(TStmt.ExprStmt{value: sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), span: span})
-    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+    sema_single_use_leave_scope(check)
     value: sema_tree_node(receiver_value.ty, TExprKind.InlineBlock{body: body}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
@@ -860,7 +858,7 @@ sema_app_mount_upload: fn(mux: TExpr, value_name: String, service: String, metho
     check_marker: method.markers[check_at]
     // The marker's own check reports a missing argument.
     name_at: sema_app_marker_arg_at(check_marker, "method", 0) ?? return None
-    check_name: sema_app_marker_string(check_marker, name_at, check.environment.*, check.program.*, check.scopes) ?? {
+    check_name: sema_app_marker_string(check_marker, name_at, check) ?? {
         check.diagnostics.push(sema_error("E2805", sema_app_marker_span(check_marker, name_at), "an upload check's method must be a static String", "an upload endpoint's check is found while building", "use a literal or compile-time String constant"))
         return None
     }
@@ -947,7 +945,7 @@ sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, meth
     path_at: sema_app_marker_arg_at(marker, "path", 0) ?? return None
     signature_at: sema_app_marker_arg_at(marker, "signature", 1) ?? return None
     key_at: sema_app_marker_arg_at(marker, "key", 2) ?? return None
-    route: sema_app_marker_string(marker, path_at, check.environment.*, check.program.*, check.scopes) ?? {
+    route: sema_app_marker_string(marker, path_at, check) ?? {
         check.diagnostics.push(sema_error("E2805", sema_app_marker_span(marker, path_at), "a webhook's path must be a static String", "a webhook's route is fully checked while building, mount prefix included", "use a literal or compile-time String constant"))
         return None
     }
@@ -979,7 +977,7 @@ sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, meth
             return None
         }
     }
-    key_name: sema_app_marker_string(marker, key_at, check.environment.*, check.program.*, check.scopes) ?? "…"
+    key_name: sema_app_marker_string(marker, key_at, check) ?? "…"
     key_method_at: sema_app_signing_key_at(methods, key_name, graph, method_module) ?? {
         entry: sema_diagnostic_row("E2814")
         check.diagnostics.push(sema_error("E2814", sema_app_marker_span(marker, key_at), entry.what.replace("{{key}}", key_name).replace("{{service}}", service), entry.why, entry.fix.replace("{{key}}", key_name)))
@@ -1009,7 +1007,7 @@ sema_app_mount_schedule: fn(mux: TExpr, value_name: String, service: String, met
     }
     // The marker's own check reports a missing argument.
     cron_at: sema_app_marker_arg_at(marker, "cron", 0) ?? return None
-    cron: sema_app_marker_string(marker, cron_at, check.environment.*, check.program.*, check.scopes) ?? {
+    cron: sema_app_marker_string(marker, cron_at, check) ?? {
         check.diagnostics.push(sema_error("E2805", sema_app_marker_span(marker, cron_at), "a schedule's cron line must be a static String", "a schedule's cron line is checked while building", "use a literal or compile-time String constant"))
         return None
     }
@@ -1274,9 +1272,7 @@ sema_app_mount_callback: fn(args_name: String, statements: [Stmt], callback_type
         else -> callback_type
     }
     callback: sema_check_expression_with_lambda_escapes(callback_arg.expr, Val(unbounded), check, Val(true)) ?? return None
-    if !sema_call_http_check_middleware_callback(callback, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics) {
-        return None
-    }
+    if !sema_call_http_check_middleware_callback(callback, check) -> return None
     callback_arg.convention = AccessConvention.Move
     Val(sema_call_http_static_tree_arg(callback, callback_arg))
 }

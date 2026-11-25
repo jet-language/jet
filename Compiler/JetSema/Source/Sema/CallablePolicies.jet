@@ -155,7 +155,7 @@ sema_policy_package_declarations: fn(inputs: [SemaRegistrationModuleInput], pack
 // Settings use the same default/label/variadic binder as every ordinary call.
 sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, check: ^SemaBodyCheck) -> TExpr? {
     wrapper_name: sema_policy_wrapper_name(policy.name, target.symbol.name)
-    wrapper: sema_call_resolve_direct(wrapper_name, [Type]{}, check.environment.*, check.program.*, check.scopes, policy.name_span, check.diagnostics) ?? return None
+    wrapper: sema_call_resolve_direct(wrapper_name, [Type]{}, check, policy.name_span) ?? return None
     all_params: sema_call_params_from_type(wrapper.signature) ?? return None
     target_params: sema_call_params_from_type(target.signature) ?? return None
     count: all_params.len() - target_params.len() - 1
@@ -165,7 +165,7 @@ sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, 
     binding := sema_call_bind_args(policy.name, params, arguments, policy.name_span, check.diagnostics) ?? return None
     if binding.default_refs.len() > 0 {
         // Snapshot: a lone program's defaults are its own declarations'.
-        defaults: if check.program.registration_graph.mode == .Snapshot -> sema_call_local_default_values(wrapper, binding, check.environment.*, check.program.*, check.scopes) ?? return None else -> sema_call_registration_defaults(check.program.registration_graph, binding) ?? return None
+        defaults: if check.program.registration_graph.mode == .Snapshot -> sema_call_local_default_values(wrapper, binding, check) ?? return None else -> sema_call_registration_defaults(check.program.registration_graph, binding) ?? return None
         binding = sema_call_materialize_defaults(params, binding, arguments, defaults, policy.name_span, check.diagnostics) ?? return None
     }
     {lowered, pins} := sema_call_check_bound_arguments_owned(check, policy.name, params, None, true, binding, arguments, policy.name_span) ?? return None
@@ -199,8 +199,8 @@ sema_policy_registered_calls: fn(graph: SemaRegistrationGraph, target: SymbolID)
 }
 
 // The policy calls of a callable declared in the checked scope.
-sema_policy_local_calls: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> [Call]? {
-    item: sema_scope_resolve_declaration(environment, program, target) ?? return None
+sema_policy_local_calls: fn(check: SemaBodyCheck, target: SymbolID) -> [Call]? {
+    item: sema_scope_resolve_declaration(check.environment.*, check.program.*, target) ?? return None
     if item == .Func(function) -> return Val(sema_policy_calls(function))
     None
 }
@@ -210,7 +210,7 @@ sema_policy_direct_value: fn(target: SemaCallDirectTarget, span: Span, check: ^S
     // place: returning the declaration copied the whole function, body
     // included, on every direct call.
     // Snapshot: a lone program's policies are its own declarations'.
-    policies: if check.program.registration_graph.mode == .Snapshot -> sema_policy_local_calls(check.environment.*, check.program.*, target.symbol.id) ?? return None else -> sema_policy_registered_calls(check.program.registration_graph, target.symbol.id) ?? return None
+    policies: if check.program.registration_graph.mode == .Snapshot -> sema_policy_local_calls(check, target.symbol.id) ?? return None else -> sema_policy_registered_calls(check.program.registration_graph, target.symbol.id) ?? return None
     if policies.len() == 0 -> return None
     function: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return None
     callee := sema_tree_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, span)
@@ -232,7 +232,7 @@ sema_policy_try_apply: fn(call: Call, expected: Type?, check: ^SemaBodyCheck) ->
     }
     last: call.args[call.args.len() - 1]
     target_name: if last.expr == .Ident(name, _, _) -> name else -> ""
-    target: sema_call_resolve_direct(target_name, [Type]{}, check.environment.*, check.program.*, check.scopes, last.span, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    target: sema_call_resolve_direct(target_name, [Type]{}, check, last.span) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     function: sema_call_callee_decl(check.program.*, target.symbol.id, last.span, check.diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     callee := sema_tree_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, last.span)
     index := call.args.len() - 1

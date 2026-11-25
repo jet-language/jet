@@ -433,14 +433,14 @@ sema_shared_access_is_payload: fn(place: Expr, name: String) -> Bool Never! {
 // The locked-edit callback spans the whole written place, from its first
 // byte: the payload name the projection reads (spanned at the cell handle)
 // resolves against the callback parameter, which must not start after it.
-sema_shared_access_write_place: fn(target: LValue, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> {handle: Expr, target: LValue, span: Span, name: String}? {
+sema_shared_access_write_place: fn(target: LValue, check: ^SemaBodyCheck) -> {handle: Expr, target: LValue, span: Span, name: String}? {
     if target == {
         .Field(base, field, span) -> {
-            projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
+            projected: sema_shared_access_project_place(base, check.environment.*, check.program.*, check.scopes) ?? return None
             return Val({handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Field{base: projected.place, field: field, span: span}, name: projected.name})
         }
         .Index(base, index, span, kind) -> {
-            projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
+            projected: sema_shared_access_project_place(base, check.environment.*, check.program.*, check.scopes) ?? return None
             return Val({handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}, name: projected.name})
         }
         .Local(_, _) -> {
@@ -474,10 +474,10 @@ sema_shared_access_desugar_place_call: fn(handle: Expr, place: Expr, place_span:
 // the place below it, the call's span from the place's first byte, and the
 // edit callback's payload name. None when the receiver is not a written place
 // inside a cell.
-sema_shared_access_call_place: fn(receiver: Expr, method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> {handle: Expr, place: Expr, place_span: Span, span: Span, name: String}? {
+sema_shared_access_call_place: fn(receiver: Expr, method_span: Span, check: ^SemaBodyCheck) -> {handle: Expr, place: Expr, place_span: Span, span: Span, name: String}? {
     if receiver == .Place(value, access, place_span, _) {
         if access != PlaceAccess.Write -> return None
-        projected: sema_shared_access_project_place(value, environment, program, scopes) ?? return None
+        projected: sema_shared_access_project_place(value, check.environment.*, check.program.*, check.scopes) ?? return None
         if sema_shared_access_is_payload(projected.place, projected.name) -> return None
         return Val({handle: projected.handle, place: projected.place, place_span: place_span, span: Span{start: sema_shared_access_place_start(value), end: method_span.end}, name: projected.name})
     }
@@ -487,18 +487,18 @@ sema_shared_access_call_place: fn(receiver: Expr, method_span: Span, environment
 // A statement `cell.place.method(args)` whose arguments read shared state
 // binds those arguments first, inside one implicit transaction with the edit,
 // as a shared place assignment's right side does.
-sema_shared_access_place_call_transaction: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Stmt? {
+sema_shared_access_place_call_transaction: fn(expr: Expr, check: ^SemaBodyCheck) -> Stmt? {
     if expr == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) {
-        if !sema_stmt_binding_is_write_place(receiver) || !sema_shared_access_expr_call_args_touches_shared(args, scopes) {
+        if !sema_stmt_binding_is_write_place(receiver) || !sema_shared_access_expr_call_args_touches_shared(args, check.scopes) {
             return None
         }
-        found: sema_shared_access_call_place(receiver, method_span, environment, program, scopes) ?? return None
+        found: sema_shared_access_call_place(receiver, method_span, check) ?? return None
         body := [Stmt]{}
         hoisted := [CallArg]{}
         loop index in 0..<args.len() {
             // copy: `args` is a read parameter the caller keeps; the hoisted call owns its arguments.
             argument := args[index].copy()
-            if sema_shared_access_expr_touches_shared(argument.expr, scopes) {
+            if sema_shared_access_expr_touches_shared(argument.expr, check.scopes) {
                 name: "{SEMA_SHARED_HOISTED_RHS}_{index}"
                 span: expr_span(argument.expr)
                 body.push(Stmt.Val{binding: ast_binding(name, span, false, argument.expr, None)})

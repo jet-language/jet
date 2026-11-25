@@ -28,10 +28,12 @@ SemaDefaultOwnerScope: struct {
 
 // None when the default is written in the module being checked, or when it is
 // a literal that names nothing, so the caller's scope checks it unchanged.
-sema_default_owner_scope: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, owner_module: ModuleID, default_value: Expr) -> SemaDefaultOwnerScope? {
-    if module_is_none(owner_module) || owner_module == environment.module_identity -> return None
+sema_default_owner_scope: fn(check: SemaBodyCheck, owner_module: ModuleID, default_value: Expr) -> SemaDefaultOwnerScope? {
+    if module_is_none(owner_module) || owner_module == check.environment.module_identity {
+        return None
+    }
     if sema_default_names_nothing(default_value) -> return None
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     module_index: sema_registration_module_index(graph, owner_module) ?? return None
     owner_environment := sema_scope_environment_init(
         graph.modules[module_index].module_identity,
@@ -43,16 +45,16 @@ sema_default_owner_scope: fn(environment: SemaScopeEnvironment, program: SemaPro
         [SemaScopeDeclaration]{},
     )
     // copy: handle copies of the shared comptime publication the caller reads.
-    owner_environment.comptime_body_publication = environment.comptime_body_publication.copy()
-    owner_environment.comptime_body_values = environment.comptime_body_values.copy()
-    owner_environment.function_name = environment.function_name
+    owner_environment.comptime_body_publication = check.environment.comptime_body_publication.copy()
+    owner_environment.comptime_body_values = check.environment.comptime_body_values.copy()
+    owner_environment.function_name = check.environment.function_name
     table := sema_scope_init(owner_module)
     registration_diagnostics := [Diagnostic]{}
     if !sema_registration_apply_graph_module(graph, owner_module, table, registration_diagnostics) {
         return None
     }
     state := sema_ownership_state_init()
-    _ := sema_scope_enter(table, state, sema_scope_function_owner_key(scopes))
+    _ := sema_scope_enter(table, state, sema_scope_function_owner_key(check.scopes))
     Val(SemaDefaultOwnerScope{environment: owner_environment.move(), scopes: table.move(), state: state.move()})
 }
 

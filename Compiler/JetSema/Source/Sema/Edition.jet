@@ -269,9 +269,9 @@ sema_lifecycle_inline_call: fn(raw: [U8], call: Call) -> SemaLifecycleInlineCall
 // - the function has no type parameters, every parameter is read-only, a
 //   left-out argument has a literal default, and nothing but spaces and
 //   commas stands among the call's arguments.
-sema_lifecycle_inline_edit: fn(call: Call, callee: SymbolID?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TextEdit? {
+sema_lifecycle_inline_edit: fn(call: Call, callee: SymbolID?, check: SemaBodyCheck) -> TextEdit? {
     symbol: callee ?? return None
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     row: sema_registration_callable_row_of(graph, symbol) ?? return None
     if row == .Function(module_index, index) {
         // The marker test reads the row in place: binding the declaration
@@ -285,7 +285,7 @@ sema_lifecycle_inline_edit: fn(call: Call, callee: SymbolID?, environment: SemaS
             return None
         }
         if call.args.len() > declaration.params.len() -> return None
-        caller: sema_scope_caller_index(environment, graph) ?? return None
+        caller: sema_scope_caller_index(check.environment.*, graph) ?? return None
         if function_body[0] == .Expr(value) {
             body := SemaLifecycleInlineBody{uses: [SemaLifecycleInlineUse]{}, free_names: [Span]{}, effects: 0}
             if !sema_lifecycle_inline_walk(value, declaration.params, false, false, body) {
@@ -295,13 +295,13 @@ sema_lifecycle_inline_edit: fn(call: Call, callee: SymbolID?, environment: SemaS
             declared: graph.modules[module_index].source.bytes()
             loop written in body.free_names {
                 name: sema_stmt_source_text(declared, written) ?? return None
-                binding: sema_scope_resolve_index_at(scopes, name, call.name_span) ?? return None
-                kind: scopes.bindings[binding].symbol.kind
+                binding: sema_scope_resolve_index_at(check.scopes, name, call.name_span) ?? return None
+                kind: check.scopes.bindings[binding].symbol.kind
                 if kind == SymbolKind.Local || kind == SymbolKind.Parameter -> return None
                 if caller != module_index {
                     found := false
                     loop function in graph.modules[module_index].functions {
-                        if function.symbol.name == name && function.symbol.id.id == scopes.bindings[binding].symbol.id.id {
+                        if function.symbol.name == name && function.symbol.id.id == check.scopes.bindings[binding].symbol.id.id {
                             found = true
                         }
                     }

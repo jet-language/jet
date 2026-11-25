@@ -399,31 +399,27 @@ sema_comptime_body_capture: fn(
 // An explicit local `name: #run value` whose value is not known yet, staged
 // to be computed while compiling; its failures are reported.
 sema_comptime_body_capture_binding: fn(
-    context: ^SemaCheckContext,
-    environment: SemaScopeEnvironment,
-    scopes: SemaScopeTable,
+    check: ^SemaBodyCheck,
     name: String,
     expression: Expr,
     expected_type: Type,
     source_span: Span,
     site_span: Span,
 ) Never! {
-    _ := sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, false, true)
+    _ := sema_comptime_body_capture_site(check.context, check.environment.*, check.scopes, name, expression, expected_type, source_span, site_span, false, true)
 }
 
 // An immutable local `name: value` that calls code, staged to be computed
 // while compiling; it stays run-time code when that fails, without a report.
 sema_comptime_body_capture_local: fn(
-    context: ^SemaCheckContext,
-    environment: SemaScopeEnvironment,
-    scopes: SemaScopeTable,
+    check: ^SemaBodyCheck,
     name: String,
     expression: Expr,
     expected_type: Type,
     source_span: Span,
     site_span: Span,
 ) Never! {
-    _ := sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, true, false)
+    _ := sema_comptime_body_capture_site(check.context, check.environment.*, check.scopes, name, expression, expected_type, source_span, site_span, true, false)
 }
 
 sema_comptime_body_capture_site: fn(
@@ -501,12 +497,12 @@ sema_comptime_body_runtime_locals: fn(scopes: SemaScopeTable) -> [String] Never!
 // it is not staged in this pass, its owner body stays incomplete, and the
 // body is checked again once the local holds its value. Staged now, it
 // would read the local as a run-time value (E0640).
-sema_comptime_reads_pending_local: fn(scopes: SemaScopeTable, context: SemaCheckContext, reference_start: Int) -> Bool Never! {
-    loop index in reference_start..<context.name_references.len() {
-        reference: context.name_references[index]
+sema_comptime_reads_pending_local: fn(check: SemaBodyCheck, reference_start: Int) -> Bool Never! {
+    loop index in reference_start..<check.context.name_references.len() {
+        reference: check.context.name_references[index]
         if reference.kind != Val(SymbolKind.Local) -> next
-        position: sema_scope_resolve_index(scopes, reference.symbol.name) ?? next
-        if scopes.bindings[position].pending_prepared -> return true
+        position: sema_scope_resolve_index(check.scopes, reference.symbol.name) ?? next
+        if check.scopes.bindings[position].pending_prepared -> return true
     }
     false
 }

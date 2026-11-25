@@ -105,7 +105,7 @@ sema_stmt_lint_same_enum_guards: fn(arms: [SwitchArm], conditions: [SemaCheckedC
 // stable local with literals (`if key == "rev" || key == "r" { … }`) are one
 // categorical dispatch; an ordered subject table states it once. A guard body
 // that assigns the subject makes the guards order-dependent, so it ends the run.
-sema_stmt_lint_same_subject_dispatch: fn(statements: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
+sema_stmt_lint_same_subject_dispatch: fn(statements: [Stmt], check: ^SemaBodyCheck) {
     index := 0
     loop index < statements.len() {
         run_end := index + 1
@@ -115,10 +115,10 @@ sema_stmt_lint_same_subject_dispatch: fn(statements: [Stmt], environment: SemaSc
             }
             if run_end - index >= 3 && sema_stmt_guard_run_keeps_subject(statements, index, run_end, subject) {
                 diagnostic := sema_lint("L0514", sema_compiler_index_stmt_span(statements[index]), "Adjacent categorical guards over `{subject}` can be one ordered subject table", "Exclusive guards repeat one stable subject; an ordered table keeps the categories together", "Rewrite as `if {subject} == {{ … }}` and group aliases with `|`; see `Examples/Apps/Programs/Dispatch.jet`")
-                if sema_stmt_same_subject_table_edit(statements, index, run_end, subject, environment, program) == .Val(edit) {
+                if sema_stmt_same_subject_table_edit(statements, index, run_end, subject, check) == .Val(edit) {
                     diagnostic = diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
                 }
-                diagnostics.push(diagnostic)
+                check.diagnostics.push(diagnostic)
             }
         }
         index = run_end
@@ -148,9 +148,9 @@ SemaStmtMapGroupTake: struct {
 // copy (sema_stmt_map_group_moved) is not reported. Only a block that takes
 // a group copies the module's bytes (`String.bytes`): a copy for every block
 // makes a large module's check quadratic.
-sema_stmt_lint_map_group_round_trip: fn(statements: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) {
-    graph: program.registration_graph
-    caller: sema_scope_caller_index(environment, graph) ?? return
+sema_stmt_lint_map_group_round_trip: fn(statements: [Stmt], check: ^SemaBodyCheck) {
+    graph: check.program.registration_graph
+    caller: sema_scope_caller_index(check.environment.*, graph) ?? return
     loop index in 0..<statements.len() {
         if !sema_stmt_map_group_takes(statements[index]) -> next
         raw: graph.modules[caller].source.bytes()
@@ -168,14 +168,14 @@ sema_stmt_lint_map_group_round_trip: fn(statements: [Stmt], environment: SemaSco
                 }
             }
         }
-        if stored < 0 || written == "" || sema_stmt_map_group_moved(statements, index, stored, taken, raw, scopes) {
+        if stored < 0 || written == "" || sema_stmt_map_group_moved(statements, index, stored, taken, raw, check.scopes) {
             next
         }
         diagnostic := sema_lint("L0534", taken.span, "`{taken.name}` copies the whole group out of `{taken.map}` and stores it back", "`{taken.name}` still shares the entry's buffer when it is written, so the write first copies the whole group, and storing it back drops the Map's old copy; in a loop that is quadratic. The build grows the entry in place only when the Map is a variable the function declares, the statements before the store neither name it nor `break` or `next`, and nothing after the store names the group", "Grow the entry in place: `if !{taken.map}.has_key({taken.key}) -> {taken.map}[{taken.key}] = {taken.fallback}`, then `{taken.map}[{taken.key}].{written}(…)`")
         if stored == index + 2 && sema_stmt_map_group_edit(statements, index, taken, raw) == .Val(edit) {
             diagnostic = diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
         }
-        diagnostics.push(diagnostic)
+        check.diagnostics.push(diagnostic)
     }
 }
 
@@ -405,9 +405,9 @@ sema_stmt_identifier_byte: fn(byte: U8) -> Bool {
 // The L0514 rewrite: one `if subject == { … }` table whose arms keep the
 // guards' order, with each guard's literals as one `|` head and its body as
 // the arm body, closed by an empty `else` (a String or Int subject is open).
-sema_stmt_same_subject_table_edit: fn(statements: [Stmt], start: Int, end: Int, subject: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
-    graph: program.registration_graph
-    caller: sema_scope_caller_index(environment, graph) ?? return None
+sema_stmt_same_subject_table_edit: fn(statements: [Stmt], start: Int, end: Int, subject: String, check: SemaBodyCheck) -> TextEdit? {
+    graph: check.program.registration_graph
+    caller: sema_scope_caller_index(check.environment.*, graph) ?? return None
     raw: graph.modules[caller].source.bytes()
     first: sema_compiler_index_stmt_span(statements[start])
     if first.start < 0 || first.start > raw.len() -> return None
@@ -1041,10 +1041,10 @@ sema_stmt_refutable_tree_block_has_never_expr: fn(statements: [TStmt]) -> Bool N
     false
 }
 
-sema_stmt_refutable_contextual_pattern: fn(pattern: Pattern, subject_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Pattern Never! {
+sema_stmt_refutable_contextual_pattern: fn(pattern: Pattern, subject_ty: Type, check: SemaBodyCheck) -> Pattern Never! {
     if pattern == {
         .Or(alternatives, span) -> {
-            normalized := (loop item in alternatives -> sema_stmt_refutable_contextual_pattern(item, subject_ty, environment, program))
+            normalized := (loop item in alternatives -> sema_stmt_refutable_contextual_pattern(item, subject_ty, check))
             return Pattern.Or{alternatives: normalized, span: span}
         }
         .Variant(variant, slots, _, span) -> {
@@ -1060,7 +1060,7 @@ sema_stmt_refutable_contextual_pattern: fn(pattern: Pattern, subject_ty: Type, e
         }
         .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
     }
-    sema_pattern_normalize_contextual(pattern, subject_ty, environment, program)
+    sema_pattern_normalize_contextual(pattern, subject_ty, check)
 }
 
 sema_stmt_refutable_capture_fact: fn(facts: [TPatternBindingFact], name: BindName) -> TPatternBindingFact? {
@@ -1110,7 +1110,7 @@ sema_stmt_refutable_assign_capture_identity: fn(pattern: ^TPattern, name: BindNa
 // live ownership state (sema_ownership_fork), both rolled back at the end
 // (instead of on copies of the whole table and state).
 sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, span: Span, check: ^SemaBodyCheck) -> SemaRefutableFallbackCheck {
-    if sema_body_fallback_exit(fallback, check.context, check.scopes, check.diagnostics) {
+    if sema_body_fallback_exit(fallback, check) {
         return SemaRefutableFallbackCheck{or_fallback: None, statements: [TStmt]{}, complete: false, ambient_err: None}
     }
     before := check.diagnostics.len()
@@ -1156,7 +1156,7 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
             block_loop_depth: check.scopes.loop_depth
             checked_block := sema_check_statements(body, block_return_type, check, block_loop_depth)
             if value == .Val(tail) -> _ := sema_check_expression(tail, None, check)
-            sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+            sema_single_use_leave_scope(check)
             sema_scope_rollback(check.scopes, block_mark)
             diverges := value == None && (sema_stmt_refutable_block_exits(body) || sema_stmt_refutable_tree_block_has_never_expr(checked_block.value))
             valid := diverges && checked_block.complete
@@ -1194,7 +1194,7 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                             checked: sema_stmt_check_return_value(expression, fallback_return_type, check)
                             if checked != None {
                                 checked_value: checked
-                                if sema_stmt_record_return_views(expression, checked_value.ty, check.scopes, check.state, check.context, check.diagnostics) && sema_stmt_move_direct(expression, check.state, check.scopes, "`return`", check.diagnostics) {
+                                if sema_stmt_record_return_views(expression, checked_value.ty, check.scopes, check.state, check.context, check.diagnostics) && sema_stmt_move_direct(expression, check, "`return`") {
                                     return_tree = Val(TOrFallback.Return{value: Val(checked_value)})
                                     statement_value = Val(checked_value)
                                 }
@@ -1286,7 +1286,7 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
         }
     }
     check.context.fallback_err_denial = enclosing_err_denial
-    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+    sema_single_use_leave_scope(check)
     sema_ownership_fork_rollback(check.state, fork)
     sema_ownership_fork_close(check.state, fork)
     sema_scope_rollback(check.scopes, fallback_mark)
@@ -1298,10 +1298,10 @@ sema_stmt_check_refutable_binding: fn(binding: Binding, pattern: Pattern, fallba
     before := check.diagnostics.len()
     subject_value: sema_check_pattern_subject(binding.init, pattern, binding.ty, check)
     subject: subject_value ?? {
-        sema_stmt_destructure_recover(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span}, binding.mutable, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics)
+        sema_stmt_destructure_recover(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span}, binding.mutable, check)
         return None
     }
-    checked_pattern := sema_check_pattern(subject, sema_stmt_refutable_contextual_pattern(pattern, subject.ty, check.environment.*, check.program.*), TPatternPosition.Binding, binding.mutable, false, check)
+    checked_pattern := sema_check_pattern(subject, sema_stmt_refutable_contextual_pattern(pattern, subject.ty, check), TPatternPosition.Binding, binding.mutable, false, check)
     move_subject := false
     loop fact in checked_pattern.bindings {
         if !sema_ownership_type_is_copy(fact.ty) -> move_subject = true
@@ -1310,7 +1310,7 @@ sema_stmt_check_refutable_binding: fn(binding: Binding, pattern: Pattern, fallba
     // still whole there; the success path moves it into the captures after.
     checked_fallback := sema_stmt_check_refutable_fallback(fallback, subject.ty, span, check)
     move_valid := true
-    if move_subject && !sema_stmt_move_direct(binding.init, check.state, check.scopes, "the pattern binding", check.diagnostics) {
+    if move_subject && !sema_stmt_move_direct(binding.init, check, "the pattern binding") {
         move_valid = false
     }
     locals := [TLocal]{}
@@ -1327,7 +1327,7 @@ sema_stmt_check_refutable_binding: fn(binding: Binding, pattern: Pattern, fallba
             .Val(value) -> value.ty
             .None -> Type.Int
         }
-        installed := sema_stmt_destructure_local(name, ty, binding.mutable, check.environment.*, check.program.*, check.scopes, check.state, check.context, check.diagnostics) ?? next
+        installed := sema_stmt_destructure_local(name, ty, binding.mutable, check) ?? next
         if checked_pattern_tree != None {
             typed := checked_pattern_tree ?? next
             sema_stmt_refutable_assign_capture_identity(typed.pattern, name, installed)
@@ -1411,34 +1411,32 @@ SemaStmtBoundsRefinement: struct {
 // `i <= n` leaves lo n+1, and `a || b` leaves both. `limit` is an integer
 // literal or `.len()` of a fixed-size list. Bounds are only tightened: a
 // name with no known interval gains none, so no index check becomes stricter.
-sema_stmt_exit_guard_bound_refinements: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> [SemaStmtBoundsRefinement] {
+sema_stmt_exit_guard_bound_refinements: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, check: SemaBodyCheck) -> [SemaStmtBoundsRefinement] {
     refinements := [SemaStmtBoundsRefinement]{}
     if else_body != None || arms.len() != 1 || !sema_stmt_refutable_is_subjectless_guard(subject, span) {
         return refinements
     }
     if !sema_stmt_refutable_block_exits(arms[0].body) -> return refinements
-    sema_stmt_exit_guard_false_bounds(arms[0].cond, environment, scopes, refinements)
+    sema_stmt_exit_guard_false_bounds(arms[0].cond, check, refinements)
     refinements
 }
 
-sema_stmt_exit_guard_false_bounds: fn(cond: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, refinements: ^[SemaStmtBoundsRefinement]) Never! {
+sema_stmt_exit_guard_false_bounds: fn(cond: Expr, check: SemaBodyCheck, refinements: ^[SemaStmtBoundsRefinement]) Never! {
     if cond == {
-        .Paren(inner, _, _) -> {
-            sema_stmt_exit_guard_false_bounds(inner, environment, scopes, refinements)
-        }
+        .Paren(inner, _, _) -> { sema_stmt_exit_guard_false_bounds(inner, check, refinements) }
         .Binary(op, left, right, _, _) -> {
             if op == BinOp.Or {
-                sema_stmt_exit_guard_false_bounds(left, environment, scopes, refinements)
-                sema_stmt_exit_guard_false_bounds(right, environment, scopes, refinements)
+                sema_stmt_exit_guard_false_bounds(left, check, refinements)
+                sema_stmt_exit_guard_false_bounds(right, check, refinements)
                 return
             }
             if left == .Ident(name, name_span, _) {
-                limit: sema_stmt_guard_limit(right, environment, scopes) ?? return
-                sema_stmt_note_false_bound(name, name_span, op, limit, scopes, refinements)
+                limit: sema_stmt_guard_limit(right, check) ?? return
+                sema_stmt_note_false_bound(name, name_span, op, limit, check.scopes, refinements)
                 return
             }
             if right == .Ident(name, name_span, _) {
-                limit: sema_stmt_guard_limit(left, environment, scopes) ?? return
+                limit: sema_stmt_guard_limit(left, check) ?? return
                 mirrored: if op == {
                     .Lt -> BinOp.Gt
                     .Gt -> BinOp.Lt
@@ -1446,7 +1444,7 @@ sema_stmt_exit_guard_false_bounds: fn(cond: Expr, environment: SemaScopeEnvironm
                     .Ge -> BinOp.Le
                     .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Compare | .And | .Or -> op
                 }
-                sema_stmt_note_false_bound(name, name_span, mirrored, limit, scopes, refinements)
+                sema_stmt_note_false_bound(name, name_span, mirrored, limit, check.scopes, refinements)
             }
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
@@ -1455,15 +1453,15 @@ sema_stmt_exit_guard_false_bounds: fn(cond: Expr, environment: SemaScopeEnvironm
 
 // The constant a guard compares against: an integer literal, or `.len()` of a
 // name whose type is a fixed-size list.
-sema_stmt_guard_limit: fn(expr: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Int? {
+sema_stmt_guard_limit: fn(expr: Expr, check: SemaBodyCheck) -> Int? {
     if expr == {
-        .Paren(inner, _, _) -> return sema_stmt_guard_limit(inner, environment, scopes)
+        .Paren(inner, _, _) -> return sema_stmt_guard_limit(inner, check)
         .Int(value, _, _, _, _) -> return Val(value)
         .MethodCall(receiver, method, _, _, _, args, _) -> {
             if method != "len" || args.len() != 0 -> return None
             if receiver == .Ident(list_name, _, _) {
-                index: sema_scope_resolve_index(scopes, list_name) ?? return None
-                if sema_scope_binding_type(environment, scopes, index) == .Val(.FixedList(_, length)) {
+                index: sema_scope_resolve_index(check.scopes, list_name) ?? return None
+                if sema_scope_binding_type(check.environment.*, check.scopes, index) == .Val(.FixedList(_, length)) {
                     return measure_literal_value(length)
                 }
             }
@@ -1548,7 +1546,7 @@ sema_stmt_check_else_complement: fn(names: [BindName], body: [Stmt], span: Span,
         }
     }
     checked: sema_check_statements(body, return_type, check, loop_depth)
-    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+    sema_single_use_leave_scope(check)
     loop statement in checked.value -> statements.push(statement)
     SemaStatementResult{value: statements, complete: complete && checked.complete}
 }

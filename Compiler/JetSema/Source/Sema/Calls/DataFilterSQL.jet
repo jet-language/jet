@@ -55,26 +55,24 @@ sema_data_filter_none: fn() -> SemaDataFilterSQL Never! {
 }
 
 // `callback`, the predicate of a filter over `row`, written as SQL.
-sema_data_filter_sql: fn(callback: Expr, row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaDataFilterSQL Never! {
-    if callback == .Lambda(lambda, _) {
-        return sema_data_filter_lambda(lambda, row, environment, program)
-    }
+sema_data_filter_sql: fn(callback: Expr, row: Type, check: SemaBodyCheck) -> SemaDataFilterSQL Never! {
+    if callback == .Lambda(lambda, _) -> return sema_data_filter_lambda(lambda, row, check)
     sema_data_filter_none()
 }
 
-sema_data_filter_lambda: fn(lambda: Lambda, row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaDataFilterSQL Never! {
+sema_data_filter_lambda: fn(lambda: Lambda, row: Type, check: SemaBodyCheck) -> SemaDataFilterSQL Never! {
     if lambda.params.len() != 1 -> return sema_data_filter_none()
     if lambda.body == .Expr(value) {
-        return sema_data_filter_body(value, lambda.params[0].name, row, environment, program)
+        return sema_data_filter_body(value, lambda.params[0].name, row, check)
     }
     if lambda.body == .Block(statements) && statements.len() == 1 && statements[0] == .Expr(value) {
-        return sema_data_filter_body(value, lambda.params[0].name, row, environment, program)
+        return sema_data_filter_body(value, lambda.params[0].name, row, check)
     }
     sema_data_filter_none()
 }
 
-sema_data_filter_body: fn(predicate: Expr, parameter: String, row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaDataFilterSQL Never! {
-    fields: sema_data_filter_fields(row, environment, program)
+sema_data_filter_body: fn(predicate: Expr, parameter: String, row: Type, check: SemaBodyCheck) -> SemaDataFilterSQL Never! {
+    fields: sema_data_filter_fields(row, check)
     if fields.len() == 0 -> return sema_data_filter_none()
     values := [Expr]{}
     condition: sema_data_filter_condition(predicate, parameter, fields, values) ?? return sema_data_filter_none()
@@ -86,11 +84,11 @@ sema_data_filter_body: fn(predicate: Expr, parameter: String, row: Type, environ
 // (a local value's closure checked ahead) has no checked types, so the row's
 // declaration is checked here, and its body keeps the condition the
 // program check writes.
-sema_data_filter_fields: fn(row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaDataFilterField] Never! {
+sema_data_filter_fields: fn(row: Type, check: SemaBodyCheck) -> [SemaDataFilterField] Never! {
     out := [SemaDataFilterField]{}
     if row == .Named(name) {
-        definition: sema_comparability_definition(environment, program, environment.module_identity, name) ?? return out
-        if !sema_data_filter_derived(definition) || sema_data_filter_migrated(program, definition.name) {
+        definition: sema_comparability_definition(check.environment.*, check.program.*, check.environment.module_identity, name) ?? return out
+        if !sema_data_filter_derived(definition) || sema_data_filter_migrated(check.program.*, definition.name) {
             return out
         }
         if definition.kind == .Struct(fields, _) {
@@ -245,7 +243,7 @@ sema_data_filter_texts: fn(sql: SemaDataFilterSQL, span: Span) -> Expr Never! {
 // Values that do not check give the empty condition, and the predicate
 // reports what is wrong with them.
 sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, check: ^SemaBodyCheck, source_args: ^[CallArg], argument_types: ^[Type], typed: ^[TExpr]) {
-    sql := sema_data_filter_sql(callback, row, check.environment.*, check.program.*)
+    sql := sema_data_filter_sql(callback, row, check)
     texts := sema_data_filter_texts(sql, span)
     text_list: Type.List{element: Type.String}
     probe := [Diagnostic]{}
@@ -271,7 +269,7 @@ SemaDataCountByTarget: struct {
     method: String,
 }
 
-sema_data_count_by_target: fn(callback: Expr, row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaDataCountByTarget? Never! {
+sema_data_count_by_target: fn(callback: Expr, row: Type, check: SemaBodyCheck) -> SemaDataCountByTarget? Never! {
     if callback == .Lambda(lambda, _) {
         if lambda.params.len() != 1 -> return None
         body := Expr?{None}
@@ -279,7 +277,7 @@ sema_data_count_by_target: fn(callback: Expr, row: Type, environment: SemaScopeE
             body = Val(value)
         }
         selected: body ?? return None
-        fields: sema_data_filter_fields(row, environment, program)
+        fields: sema_data_filter_fields(row, check)
         if fields.len() == 0 -> return None
         field: sema_data_filter_field(selected, lambda.params[0].name, fields) ?? return None
         method: if field.bound == {

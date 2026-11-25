@@ -361,7 +361,7 @@ sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool,
     probe_context.fresh_expr_ids = true
     probe_context.lambda_escapes = Val(false)
     span: expr_span(value)
-    lent: sema_eval_probe_lends(value, check.scopes, check.context)
+    lent: sema_eval_probe_lends(value, check)
     lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Expr{value: value}, span: span, meta: ast_empty_lambda_meta()}
     expected: Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     diagnostics := [Diagnostic]{}
@@ -394,11 +394,11 @@ sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool,
 // (`^^`) and returns it. A debugger passes the stopped frame's value and
 // drops nothing of the result, so the frame keeps its value and nothing is
 // copied. A value of a generic parameter's type is returned as-is.
-sema_eval_probe_lends: fn(value: Expr, scopes: SemaScopeTable, context: SemaCheckContext) -> Bool {
+sema_eval_probe_lends: fn(value: Expr, check: SemaBodyCheck) -> Bool {
     if value == .Ident(name, _, _) {
-        index: sema_scope_resolve_index(scopes, name) ?? return false
-        ty: scopes.bindings[index].symbol.ty ?? return false
-        return !sema_ownership_type_is_scalar(ty) && !sema_copy_site_is_type_parameter(ty, context)
+        index: sema_scope_resolve_index(check.scopes, name) ?? return false
+        ty: check.scopes.bindings[index].symbol.ty ?? return false
+        return !sema_ownership_type_is_scalar(ty) && !sema_copy_site_is_type_parameter(ty, check.context)
     }
     false
 }

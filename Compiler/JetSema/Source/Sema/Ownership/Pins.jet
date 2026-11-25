@@ -85,11 +85,11 @@ sema_pin_record_binding: fn(state: ^SemaOwnershipState, binding: Binding, init_t
 
 // The exact move `place.move()` of a pinned place is E0219. Runs before the
 // moved place is read.
-sema_pin_check_move: fn(state: ^SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
-    loop place in sema_ownership_places_from_expr_in_state(expr, scopes, state) {
-        if sema_ownership_conflicting_view_for_expr(state, place, AccessConvention.Move, expr, scopes) == .Val(fact) {
-            if sema_pin_view_fact(fact, scopes) {
-                diagnostics.push(sema_ownership_diag_view_change(fact, place, "be moved", expr_span(expr), scopes))
+sema_pin_check_move: fn(check: ^SemaBodyCheck, expr: Expr) -> Bool {
+    loop place in sema_ownership_places_from_expr_in_state(expr, check.scopes, check.state) {
+        if sema_ownership_conflicting_view_for_expr(check.state, place, AccessConvention.Move, expr, check.scopes) == .Val(fact) {
+            if sema_pin_view_fact(fact, check.scopes) {
+                check.diagnostics.push(sema_ownership_diag_view_change(fact, place, "be moved", expr_span(expr), check.scopes))
                 return false
             }
         }

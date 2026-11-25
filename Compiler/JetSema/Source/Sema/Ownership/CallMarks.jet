@@ -127,11 +127,11 @@ sema_call_marks_check_argument: fn(scopes: SemaScopeTable, callee: String, recei
 // The receiver of a checked method call. `receiver` is the call's receiver
 // as written, `unmarked` the place sema checked, and `frame` the call's
 // resolved receiver convention.
-sema_call_marks_check_receiver: fn(scopes: SemaScopeTable, receiver: Expr, unmarked: Expr, frame: SemaReceiverMarkFrame, method: String, diagnostics: ^[Diagnostic]) {
+sema_call_marks_check_receiver: fn(check: ^SemaBodyCheck, receiver: Expr, unmarked: Expr, frame: SemaReceiverMarkFrame, method: String) {
     have: sema_call_marks_written_receiver(receiver)
-    if !scopes.writes_explicit {
+    if !check.scopes.writes_explicit {
         if have == .Val(access) {
-            diagnostics.push(sema_call_marks_outside_policy(access, sema_call_marks_receiver_mark_span(receiver, access)))
+            check.diagnostics.push(sema_call_marks_outside_policy(access, sema_call_marks_receiver_mark_span(receiver, access)))
         }
         return
     }
@@ -152,7 +152,7 @@ sema_call_marks_check_receiver: fn(scopes: SemaScopeTable, receiver: Expr, unmar
     at: expr_source_start(unmarked)
     mark_span: if have == .Val(access) -> sema_call_marks_receiver_mark_span(receiver, access) else -> Span{start: at, end: at}
     signature: if frame.signature == "" -> "`.{method}()`" else -> frame.signature
-    diagnostics.push(sema_call_marks_mismatch("`.{method}()`", root, want, have, expr_source_span(unmarked), mark_span, signature))
+    check.diagnostics.push(sema_call_marks_mismatch("`.{method}()`", root, want, have, expr_source_span(unmarked), mark_span, signature))
 }
 
 sema_call_marks_receiver_mark_span: fn(receiver: Expr, access: PlaceAccess) -> Span Never! {

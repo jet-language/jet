@@ -40,12 +40,12 @@ SemaHistoriesDerived: struct {
     unsupported: String,
 }
 
-sema_call_histories_is_call: fn(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    target.symbol.name == "histories" && sema_call_core_module_is(environment, program, "core.testing", target.symbol.module_identity)
+sema_call_histories_is_call: fn(target: SemaCallDirectTarget, check: SemaBodyCheck) -> Bool Never! {
+    target.symbol.name == "histories" && sema_call_core_module_is(check, "core.testing", target.symbol.module_identity)
 }
 
 // The call's arguments followed by the hidden ones.
-sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [CallArg] Never! {
+sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, check: SemaBodyCheck) -> [CallArg] Never! {
     written := ""
     if type_args.len() == 1 && type_args[0] == .Named(name) -> written = name.copy()
     command_type: sema_serde_named_leaf(written)
@@ -53,8 +53,8 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, env
     package_digest := ""
     tool := ""
     target := ""
-    graph: program.registration_graph
-    if sema_scope_caller_index(environment, graph) == .Val(caller) {
+    graph: check.program.registration_graph
+    if sema_scope_caller_index(check.environment.*, graph) == .Val(caller) {
         module_source = graph.modules[caller].source.copy()
         package_digest = sema_call_histories_package_digest(graph, graph.modules[caller].package_identity)
     }
@@ -102,7 +102,7 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, env
     variants_text := "[String]{{}}"
     make_text := "[fn(Int, [Int], [Bool], [String]) -[]> {type_name(type_args[0])} Never!]{{}}"
     if !has_strategy {
-        derived := sema_call_histories_derive(written, command_type, environment, program)
+        derived := sema_call_histories_derive(written, command_type, check)
         if derived.unsupported != "" {
             call_args.push(sema_call_devtools_text_arg("__unsupported", derived.unsupported, span))
         } else {
@@ -180,10 +180,10 @@ sema_call_histories_unsupported: fn(reason: String) -> SemaHistoriesDerived Neve
 // `Bool` or `String` values: one `name:kinds` row per variant (its wire name,
 // then `i`, `b` or `s` per payload field) and the source of the lambda that
 // builds a command from a row position and its payload values.
-sema_call_histories_derive: fn(written: String, command_type: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaHistoriesDerived Never! {
+sema_call_histories_derive: fn(written: String, command_type: String, check: SemaBodyCheck) -> SemaHistoriesDerived Never! {
     no_schema: "core.testing.histories command type `{command_type}` has no checked enum schema"
     if written == "" -> return sema_call_histories_unsupported(no_schema)
-    definition: sema_serde_type_definition(environment, program, written) ?? return sema_call_histories_unsupported(no_schema)
+    definition: sema_serde_type_definition(check.environment.*, check.program.*, written) ?? return sema_call_histories_unsupported(no_schema)
     if definition.generic_params.len() > 0 -> return sema_call_histories_unsupported(no_schema)
     variants: sema_call_histories_enum_variants(definition) ?? return sema_call_histories_unsupported(no_schema)
     if variants.len() == 0 -> return sema_call_histories_unsupported(no_schema)

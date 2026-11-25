@@ -1154,21 +1154,21 @@ sema_copy_hidden_fact: fn(facts: SemaCopyFacts, hidden: CopyFact) -> CopyFact Ne
 }
 
 // sema_copy_hidden_fact for a copy of a `ty` value that is no view.
-sema_copy_hidden_fact_of: fn(ty: Type, hidden: CopyFact, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> CopyFact Never! {
-    sema_copy_hidden_fact(sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, generic_params, false), hidden)
+sema_copy_hidden_fact_of: fn(ty: Type, hidden: CopyFact, check: SemaBodyCheck, generic_params: [TGenericParam]) -> CopyFact Never! {
+    sema_copy_hidden_fact(sema_copy_classify(ty, SemaCopyIntent.Clone, check.environment.*, check.program.*, generic_params, false), hidden)
 }
 
 // Whether a value of `ty` holds a Clock that is not deterministic at any depth:
 // comparing, formatting or copying it reads ambient time.
-sema_copy_observable_clock: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
+sema_copy_observable_clock: fn(ty: Type, check: SemaBodyCheck, generic_params: [TGenericParam]) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .String -> return false
         .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
-    graph: program.registration_graph
-    caller: sema_type_module_row(graph, env.module_identity)
+    graph: check.program.registration_graph
+    caller: sema_type_module_row(graph, check.environment.module_identity)
     walk := sema_copy_walk()
-    sema_copy_type_facts(ty, program.registration_graph, program.copy_facts, caller, generic_params, walk).observable_clock
+    sema_copy_type_facts(ty, check.program.registration_graph, check.program.copy_facts, caller, generic_params, walk).observable_clock
 }
 
 // Whether a semantic copy of `ty` forks: `ty` is a Clock, bare or tagged,
@@ -1176,16 +1176,16 @@ sema_copy_observable_clock: fn(ty: Type, env: SemaScopeEnvironment, program: Sem
 // that holds one at any depth. A `Shared` value is one handle on its state,
 // so its copy shares and forks nothing it holds; a function value, a trait
 // value and a generic parameter fork nothing either.
-sema_copy_holds_fork: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
+sema_copy_holds_fork: fn(ty: Type, check: SemaBodyCheck, generic_params: [TGenericParam]) -> Bool Never! {
     // The copy-fact table answers most copies at once: a value with no
     // observable Clock forks only through a deterministic one it names.
-    if !sema_copy_observable_clock(ty, env, program, generic_params) && !sema_copy_names_deterministic_clock(ty) {
+    if !sema_copy_observable_clock(ty, check, generic_params) && !sema_copy_names_deterministic_clock(ty) {
         return false
     }
-    graph: program.registration_graph
-    caller: sema_type_module_row(graph, env.module_identity)
+    graph: check.program.registration_graph
+    caller: sema_type_module_row(graph, check.environment.module_identity)
     seen := name_table_sized(16)
-    sema_copy_holds_fork_walk(ty, program.registration_graph, caller, generic_params, seen)
+    sema_copy_holds_fork_walk(ty, check.program.registration_graph, caller, generic_params, seen)
 }
 
 // Whether `ty` names a deterministic Clock (the type `Clock.new(…)` gives)
@@ -1276,9 +1276,9 @@ sema_copy_holds_fork_nominal: fn(ty: Type, graph: SemaRegistrationGraph, caller:
 // The row of the registered struct or enum `ty` names from the copy's
 // module. Any other nominal (a distinct type, an alias, a foreign handle) is
 // not rebuilt part by part.
-sema_copy_fork_row: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationRowRef? {
-    graph: program.registration_graph
-    sema_copy_fork_row_at(ty, graph, sema_type_module_row(graph, env.module_identity))
+sema_copy_fork_row: fn(ty: Type, check: SemaBodyCheck) -> SemaRegistrationRowRef? {
+    graph: check.program.registration_graph
+    sema_copy_fork_row_at(ty, graph, sema_type_module_row(graph, check.environment.module_identity))
 }
 
 sema_copy_fork_row_at: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int) -> SemaRegistrationRowRef? {
@@ -1375,7 +1375,7 @@ sema_copy_holds_single_use_in: fn(ty: Type, environment: SemaScopeEnvironment, p
 // temporary directory (removed when its owner drops) or a task handle (its
 // join duty speaks for it). A binding of one is used by being held, so it
 // is no unused binding (L0101).
-sema_copy_acts_when_dropped: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
+sema_copy_acts_when_dropped: fn(ty: Type, check: SemaBodyCheck, generic_params: [TGenericParam]) -> Bool Never! {
     if sema_single_use_is_task(ty) -> return true
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .String | .Fn(_, _, _, _, _, _) -> return false
@@ -1386,10 +1386,10 @@ sema_copy_acts_when_dropped: fn(ty: Type, env: SemaScopeEnvironment, program: Se
         }
         .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
-    graph: program.registration_graph
-    caller: sema_type_module_row(graph, env.module_identity)
+    graph: check.program.registration_graph
+    caller: sema_type_module_row(graph, check.environment.module_identity)
     walk := sema_copy_walk()
-    facts: sema_copy_type_facts(ty, program.registration_graph, program.copy_facts, caller, generic_params, walk)
+    facts: sema_copy_type_facts(ty, check.program.registration_graph, check.program.copy_facts, caller, generic_params, walk)
     facts.resource || facts.holds_resource || facts.dynamic_loan
 }
 
@@ -1413,8 +1413,8 @@ sema_copy_refusal: fn(facts: SemaCopyFacts, span: Span, environment: SemaScopeEn
 
 // Why a value holding a duty can't be copied out of its place: the duty is a
 // resource's cleanup or a `#SingleUse` value's job.
-sema_copy_place_duty_why: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
-    if sema_copy_holds_single_use_in(ty, environment, program) {
+sema_copy_place_duty_why: fn(ty: Type, check: SemaBodyCheck) -> String {
+    if sema_copy_holds_single_use_in(ty, check.environment.*, check.program.*) {
         return "it holds a `#SingleUse` value, whose one duty has one owner; this position takes an owned value, so the copy and the place would both owe that duty"
     }
     "it holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource"

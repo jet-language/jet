@@ -97,7 +97,7 @@ sema_call_check_comptime_input: fn(call: Call, expected: Type?, check: ^SemaBody
     }
     path: sema_comptime_input_path_value(call, check) ?? return failed
     result_type: sema_comptime_input_type(builtin)
-    if !sema_comptime_input_record_effect(builtin, "FS.Read", result_type, call.name_span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+    if !sema_comptime_input_record_effect(builtin, "FS.Read", result_type, call.name_span, check) {
         return failed
     }
     node: sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: path, pin: None}}, call.name_span)
@@ -132,7 +132,7 @@ sema_comptime_input_path_value: fn(call: Call, check: ^SemaBodyCheck) -> TExpr? 
 // row is its one effect (`FS.Read` for an input, `Net` for a fetch), so the
 // calling function's row carries it and its denials refuse it. False after a
 // reported refusal.
-sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
+sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_type: Type, span: Span, check: ^SemaBodyCheck) -> Bool {
     facts := SemaCallFacts{
         return_type: result_type,
         failure_carrier: TFailureCarrier.Infallible,
@@ -140,7 +140,7 @@ sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_ty
         type_args: [Type]{},
         default_refs: [FunctionDefaultRef]{},
     }
-    sema_effect_record_intrinsic_fact(environment, program, scopes, context, api, span, facts, diagnostics)
+    sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, api, span, facts, check.diagnostics)
 }
 
 // `net.fetch(url, sha256: "…")`, the one compile-time network operation: a
@@ -170,7 +170,7 @@ sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [Cal
         check.diagnostics.push(sema_error("E3414", args[0].span, "`net.fetch` URL must be a String, not {sema_type_show(url.ty)}", "the compiler downloads the URL the String names while it builds", "pass a String URL, e.g. `net.fetch(\"https://example.com/data.txt\", sha256: \"…\")`"))
         return failed
     }
-    if !sema_comptime_input_record_effect("net.fetch", "Net", Type.String, span, check.environment.*, check.program.*, check.scopes, check.context, check.diagnostics) {
+    if !sema_comptime_input_record_effect("net.fetch", "Net", Type.String, span, check) {
         return failed
     }
     node: sema_tree_node(Type.String, TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: "fetch", path: url, pin: Val(sha256)}}, span)

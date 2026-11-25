@@ -38,18 +38,18 @@ SemaFieldErrorPath: struct {
 // Whether `module_name.member` is `app.field_error` with an `at:` path that
 // names no field of an argument of the function being checked. The refusal
 // is reported (E2813), so the caller checks the call no further.
-sema_app_field_error_refused: fn(module_name: String, member: String, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
+sema_app_field_error_refused: fn(module_name: String, member: String, args: [CallArg], check: ^SemaBodyCheck) -> Bool {
     if module_name != SEMA_APP_MARKER_MODULE || member != SEMA_FIELD_ERROR_MEMBER -> return false
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     at: sema_field_error_at(args) ?? return false
     at_span: expr_span(at.expr)
-    roots: sema_field_error_roots(graph, environment, scopes)
+    roots: sema_field_error_roots(graph, check)
     path: sema_field_error_path(at.expr) ?? {
-        diagnostics.push(sema_field_error_computed(graph, roots, at_span))
+        check.diagnostics.push(sema_field_error_computed(graph, roots, at_span))
         return true
     }
     steps: sema_field_error_steps(path.checked) ?? {
-        diagnostics.push(sema_field_error_unknown(graph, path.shown, roots, at_span))
+        check.diagnostics.push(sema_field_error_unknown(graph, path.shown, roots, at_span))
         return true
     }
     holders := roots.copy()  // copy: `roots` names the fields the report lists
@@ -64,13 +64,13 @@ sema_app_field_error_refused: fn(module_name: String, member: String, args: [Cal
             }
         }
         ty := found ?? {
-            diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
+            check.diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
             return true
         }
         indexes := step.indexes
         loop indexes > 0 {
             element: sema_field_error_element(ty) ?? {
-                diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
+                check.diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
                 return true
             }
             ty = element
@@ -78,7 +78,7 @@ sema_app_field_error_refused: fn(module_name: String, member: String, args: [Cal
         }
         if position + 1 == steps.len() -> return false
         inner: sema_field_error_struct_row(graph, sema_field_error_unwrap(ty), owner) ?? {
-            diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
+            check.diagnostics.push(sema_field_error_unknown(graph, path.shown, holders, at_span))
             return true
         }
         holders = [SemaRegistrationRowRef]{inner}
@@ -152,12 +152,12 @@ sema_field_error_steps: fn(path: String) -> [SemaFieldErrorStep]? {
 }
 
 // The structs the parameters visible here take, `self` aside, each once.
-sema_field_error_roots: fn(graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> [SemaRegistrationRowRef] {
+sema_field_error_roots: fn(graph: SemaRegistrationGraph, check: SemaBodyCheck) -> [SemaRegistrationRowRef] {
     roots := [SemaRegistrationRowRef]{}
-    caller: sema_type_module_row(graph, environment.module_identity)
-    frame := scopes.current
+    caller: sema_type_module_row(graph, check.environment.module_identity)
+    frame := check.scopes.current
     loop frame >= 0 {
-        loop binding in scopes.bindings {
+        loop binding in check.scopes.bindings {
             if binding.frame != frame || binding.symbol.kind != SymbolKind.Parameter || binding.symbol.name == "self" {
                 next
             }
@@ -170,7 +170,7 @@ sema_field_error_roots: fn(graph: SemaRegistrationGraph, environment: SemaScopeE
             } ?? false
             if !known -> roots.push(row)
         }
-        frame = scopes.frames[frame].parent
+        frame = check.scopes.frames[frame].parent
     }
     roots
 }

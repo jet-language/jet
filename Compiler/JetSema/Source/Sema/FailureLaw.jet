@@ -265,17 +265,17 @@ SemaCatchAllErr: struct {
 
 SEMA_CATCH_ALL_ERR_PREFIX: "__caught_"
 
-sema_catch_all_err_arm: fn(cond: Expr, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCatchAllErr? {
+sema_catch_all_err_arm: fn(cond: Expr, check: SemaBodyCheck) -> SemaCatchAllErr? {
     if cond == .PatternTest(subject, pattern, span, node) {
         if pattern == .Err(name, name_span, inner, pattern_span) {
             if inner == None {
-                return sema_catch_all_err_rewrite(subject, name, name_span, pattern_span, span, node, scopes, environment, program)
+                return sema_catch_all_err_rewrite(subject, name, name_span, pattern_span, span, node, check)
             }
         }
         if pattern == .Variant(variant, slots, leading_dot, pattern_span) {
             if variant == "Err" && leading_dot && slots.len() == 1 {
                 if slots[0] == .Bind(name, name_span) {
-                    return sema_catch_all_err_rewrite(subject, name, name_span, pattern_span, span, node, scopes, environment, program)
+                    return sema_catch_all_err_rewrite(subject, name, name_span, pattern_span, span, node, check)
                 }
             }
         }
@@ -283,14 +283,14 @@ sema_catch_all_err_arm: fn(cond: Expr, scopes: SemaScopeTable, environment: Sema
     None
 }
 
-sema_catch_all_err_rewrite: fn(subject: Expr, name: String, name_span: Span, pattern_span: Span, span: Span, node: Int, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCatchAllErr? {
+sema_catch_all_err_rewrite: fn(subject: Expr, name: String, name_span: Span, pattern_span: Span, span: Span, node: Int, check: SemaBodyCheck) -> SemaCatchAllErr? {
     if name == "_" || name.starts_with(SEMA_CATCH_ALL_ERR_PREFIX) -> return None
     index := Int?{None}
     if subject == .Ident(subject_name, _, _) {
-        index = sema_scope_resolve_index(scopes, subject_name)
+        index = sema_scope_resolve_index(check.scopes, subject_name)
     }
     found: index ?? return None
-    carrier: sema_expr_unwrap_tag(scopes.bindings[found].symbol.ty ?? return None)
+    carrier: sema_expr_unwrap_tag(check.scopes.bindings[found].symbol.ty ?? return None)
     failure: if carrier == .Result(_, error) -> sema_expr_unwrap_tag(error) else -> {
         return None
     }
@@ -299,7 +299,9 @@ sema_catch_all_err_rewrite: fn(subject: Expr, name: String, name_span: Span, pat
         loop member in members {
             if sema_expr_unwrap_tag(member) == (Type.Named{name: "Err"}) -> open = true
         }
-        if !open || !sema_error_source_reaches_err(failure, environment, program) -> return None
+        if !open || !sema_error_source_reaches_err(failure, check.environment.*, check.program.*) {
+            return None
+        }
         hidden: "{SEMA_CATCH_ALL_ERR_PREFIX}{name}"
         payload: "{SEMA_CATCH_ALL_ERR_PREFIX}{name}_member"
         // The value table `if hidden == { .Member(payload) -> … }`, one arm a
@@ -347,15 +349,15 @@ SemaGoneFailure: struct {
     head: Span,
 }
 
-sema_gone_failure_arm: fn(cond: Expr, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaGoneFailure? {
+sema_gone_failure_arm: fn(cond: Expr, check: SemaBodyCheck) -> SemaGoneFailure? {
     if cond == .PatternTest(subject, pattern, _, _) {
         name: sema_gone_failure_written(pattern) ?? return None
         index := Int?{None}
         if subject == .Ident(subject_name, _, _) {
-            index = sema_scope_resolve_index(scopes, subject_name)
+            index = sema_scope_resolve_index(check.scopes, subject_name)
         }
         found: index ?? return None
-        carrier: sema_expr_unwrap_tag(scopes.bindings[found].symbol.ty ?? return None)
+        carrier: sema_expr_unwrap_tag(check.scopes.bindings[found].symbol.ty ?? return None)
         failure: if carrier == .Result(_, error) -> sema_expr_unwrap_tag(error) else -> {
             return None
         }
@@ -365,10 +367,12 @@ sema_gone_failure_arm: fn(cond: Expr, scopes: SemaScopeTable, environment: SemaS
             loop member in members {
                 if type_union_member_tag(sema_pattern_unwrap_tags(member)) == name -> return None
             }
-            if sema_pattern_flat_union_owner(failure, name, environment, program, sema_pattern_span(pattern)) != None {
+            if sema_pattern_flat_union_owner(failure, name, check, sema_pattern_span(pattern)) != None {
                 return None
             }
-            if sema_stmt_type_switch_resolve(name, environment, program) == None -> return None
+            if sema_stmt_type_switch_resolve(name, check.environment.*, check.program.*) == None {
+                return None
+            }
             return Val(SemaGoneFailure{name: name, head: sema_pattern_span(pattern)})
         }
     }
@@ -399,13 +403,13 @@ sema_gone_failure_member: fn(member: Pattern) -> String? Never! {
 // reports none. A table left with no arm and no `else` keeps them all, and
 // each reports its E0305; so does an arm a `#Through` runs into or out of.
 // The arms are read in place: binding one copies its body.
-sema_gone_failure_arms: fn(arms: [SwitchArm], else_body: [Stmt]?, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> [SwitchArm]? {
+sema_gone_failure_arms: fn(arms: [SwitchArm], else_body: [Stmt]?, check: ^SemaBodyCheck) -> [SwitchArm]? {
     gone := [SemaGoneFailure]{}
     gone_at := [Int]{}
     index := 0
     loop index < arms.len() {
         through: arms[index].through != None || (index > 0 && arms[index - 1].through != None)
-        if !through && sema_gone_failure_arm(arms[index].cond, scopes, environment, program) == .Val(found) {
+        if !through && sema_gone_failure_arm(arms[index].cond, check) == .Val(found) {
             gone.push(found)
             gone_at.push(index)
         }
@@ -424,7 +428,7 @@ sema_gone_failure_arms: fn(arms: [SwitchArm], else_body: [Stmt]?, scopes: SemaSc
                 if arms[index].span.end > gone[next_gone].head.end {
                     recorded = Val(arms[index].span)
                 }
-                diagnostics.push(sema_gone_failure_lint(gone[next_gone], recorded, 0, environment, program))
+                check.diagnostics.push(sema_gone_failure_lint(gone[next_gone], recorded, 0, check))
                 next_gone += 1
             }
             else -> {
@@ -440,9 +444,9 @@ sema_gone_failure_arms: fn(arms: [SwitchArm], else_body: [Stmt]?, scopes: SemaSc
 // recorded it, else the pattern through `value_end`, the end of the arm's
 // value, or through the `}` that closes a braced body. A whole line goes with
 // the arm when the arm is all it holds.
-sema_gone_failure_lint: fn(gone: SemaGoneFailure, arm: Span?, value_end: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+sema_gone_failure_lint: fn(gone: SemaGoneFailure, arm: Span?, value_end: Int, check: SemaBodyCheck) -> Diagnostic {
     lint: sema_lint("L0304", gone.head, "arm `{gone.name}` can never match — `{gone.name}` can no longer reach this value", "a failure union holds only the failure types that can still reach it, and `{gone.name}` is no longer one of them", "delete this arm")
-    edit: sema_gone_failure_edit(gone.head, arm, value_end, environment, program) ?? return lint
+    edit: sema_gone_failure_edit(gone.head, arm, value_end, check) ?? return lint
     diagnostic_with_edit_grade(lint, edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
 }
 
@@ -453,9 +457,9 @@ sema_gone_failure_value_end: fn(then_body: [Stmt], then_value: Expr) -> Int Neve
     expr_span(then_value).end
 }
 
-sema_gone_failure_edit: fn(head: Span, arm: Span?, value_end: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
-    graph: program.registration_graph
-    caller: sema_scope_caller_index(environment, graph) ?? return None
+sema_gone_failure_edit: fn(head: Span, arm: Span?, value_end: Int, check: SemaBodyCheck) -> TextEdit? {
+    graph: check.program.registration_graph
+    caller: sema_scope_caller_index(check.environment.*, graph) ?? return None
     raw: graph.modules[caller].source.bytes()
     start: head.start
     end: if arm == .Val(recorded) -> recorded.end else -> sema_gone_failure_braced_end(raw, head.end) ?? value_end

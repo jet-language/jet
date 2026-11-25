@@ -16,16 +16,16 @@ sema_must_use_core_type: fn(name: String) -> Bool Never! {
     name == "ScopeGuard" || name == "Iter" || name == "Delivery"
 }
 
-sema_must_use_type: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+sema_must_use_type: fn(ty: Type, check: SemaBodyCheck) -> Bool {
     name: sema_expr_type_base_name(ty) ?? return false
     if sema_must_use_core_type(name) -> return true
-    definition: sema_serde_type_definition(environment, program, name) ?? return false
+    definition: sema_serde_type_definition(check.environment.*, check.program.*, name) ?? return false
     definition.must_use
 }
 
-sema_must_use_function: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
-    symbol: sema_scope_resolve(scopes, call.name) ?? return false
-    declaration: sema_scope_resolve_declaration(environment, program, symbol.id) ?? return false
+sema_must_use_function: fn(call: Call, check: SemaBodyCheck) -> Bool {
+    symbol: sema_scope_resolve(check.scopes, call.name) ?? return false
+    declaration: sema_scope_resolve_declaration(check.environment.*, check.program.*, symbol.id) ?? return false
     if declaration == {
         .Func(func) -> func.is_must_use
         .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
@@ -33,8 +33,8 @@ sema_must_use_function: fn(call: Call, environment: SemaScopeEnvironment, progra
 }
 
 // A `#MustUse` method declared on the receiver's nominal type.
-sema_must_use_method: fn(type_name: String, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    graph: program.registration_graph
+sema_must_use_method: fn(type_name: String, method: String, check: SemaBodyCheck) -> Bool {
+    graph: check.program.registration_graph
     loop nominal_row in sema_registration_nominal_rows_named(graph, type_name) {
         methods: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
         loop method_index in 0..<methods.len() {
@@ -47,22 +47,20 @@ sema_must_use_method: fn(type_name: String, method: String, environment: SemaSco
 
 // The name of the `#MustUse` function or method the statement calls. A method
 // counts only on a named receiver.
-sema_must_use_call_target: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
+sema_must_use_call_target: fn(expr: Expr, check: SemaBodyCheck) -> String? {
     if expr == {
         .Call(call, _) -> {
-            if sema_must_use_function(call, environment, program, scopes) -> return Val(call.name)
+            if sema_must_use_function(call, check) -> return Val(call.name)
         }
         .MethodCall(receiver, method, _, _, _, _, _) -> {
             if receiver == .Ident(name, _, _) {
-                index: sema_scope_resolve_index(scopes, name) ?? return None
-                ty: sema_scope_binding_type(environment, scopes, index) ?? return None
+                index: sema_scope_resolve_index(check.scopes, name) ?? return None
+                ty: sema_scope_binding_type(check.environment.*, check.scopes, index) ?? return None
                 // A resolved receiver type carries its canonical identity
                 // (`module.Name`); the method rows are keyed by its leaf.
                 base: sema_expr_type_base_name(ty) ?? return None
                 owner: sema_expr_operator_row_name(base)
-                if sema_must_use_method(owner, method, environment, program) {
-                    return Val("{owner}.{method}")
-                }
+                if sema_must_use_method(owner, method, check) -> return Val("{owner}.{method}")
             }
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
@@ -71,22 +69,22 @@ sema_must_use_call_target: fn(expr: Expr, environment: SemaScopeEnvironment, pro
 }
 
 // An ignored must-use value, for a statement whose value is not fallible.
-sema_must_use_check_statement: fn(expr: Expr, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) {
+sema_must_use_check_statement: fn(expr: Expr, ty: Type, span: Span, check: ^SemaBodyCheck) {
     if ty == .Apply(name, _) {
         if name == "Task" {
             return
         }
     }
-    target := sema_must_use_call_target(expr, environment, program, scopes)
+    target := sema_must_use_call_target(expr, check)
     if target == None {
         if ty == (Type.Named{name: "Unit"}) {
             return
         }
-        if !sema_must_use_type(ty, environment, program) {
+        if !sema_must_use_type(ty, check) {
             return
         }
         target = Val(type_name(ty))
     }
     shown: target ?? return
-    diagnostics.push(sema_error("E0419", span, "`{shown}` still owes a use, but it was dropped as a bare statement", "a `#MustUse` result carries work or a resource that is lost when nothing checks it", "bind it (`n: …`) and use it, or discard it on purpose with `.drop(\"reason\")`"))
+    check.diagnostics.push(sema_error("E0419", span, "`{shown}` still owes a use, but it was dropped as a bare statement", "a `#MustUse` result carries work or a resource that is lost when nothing checks it", "bind it (`n: …`) and use it, or discard it on purpose with `.drop(\"reason\")`"))
 }

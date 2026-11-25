@@ -197,7 +197,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
         check.diagnostics.push(sema_app_screen_error(path, "the path does not start with `/`", positional[0].span))
         return rejected
     }
-    handler: sema_app_named_handler("screen", positional[1], check.environment.*, check.program.*, check.scopes, check.diagnostics) ?? return rejected
+    handler: sema_app_named_handler("screen", positional[1], check) ?? return rejected
     view_module: handler.function.symbol.module_identity
     states := [Type]{}
     // The view's parameters in order: the service of each `app.Remote<S>`
@@ -205,7 +205,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
     services := [{ty: Type, key: String}?]{}
     loop parameter in handler.function.declaration.params {
         ty: sema_type_resolve_declared(graph, parameter.ty, view_module)
-        if !sema_app_is_remote(ty, check.environment.*, check.program.*) {
+        if !sema_app_is_remote(ty, check) {
             states.push(ty)
             services.push(None)
             next
@@ -382,7 +382,7 @@ sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg]
         check.diagnostics.push(sema_error("E0104", args[0].span, "`.sitemap` takes one unlabeled argument", "`.sitemap(list)` takes the function that gives the states of the pages the sitemap lists", "pass the function's name alone"))
         return rejected
     }
-    handler: sema_app_named_handler("sitemap", args[0], check.environment.*, check.program.*, check.scopes, check.diagnostics) ?? return rejected
+    handler: sema_app_named_handler("sitemap", args[0], check) ?? return rejected
     shape: "`{handler.name}` must take nothing and give a list of the states of public screens, as `fn() -> [LandingView]`"
     if handler.function.declaration.params.len() != 0 {
         check.diagnostics.push(sema_error("E2810", args[0].span, "App `sitemap` requires a function that takes nothing, and `{handler.name}` takes {handler.function.declaration.params.len()} parameters", "the sitemap asks the function for its pages each time a crawler reads it", shape))
@@ -453,7 +453,7 @@ sema_call_app_head: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], s
         check.diagnostics.push(sema_error("E0104", args[0].span, "`.head` takes one unlabeled argument", "`.head(head)` takes the function that gives a screen's page metadata", "pass the function's name alone"))
         return rejected
     }
-    handler: sema_app_named_handler("head", args[0], check.environment.*, check.program.*, check.scopes, check.diagnostics) ?? return rejected
+    handler: sema_app_named_handler("head", args[0], check) ?? return rejected
     shape: "`{handler.name}` must take a screen's state and give its page's metadata, as `fn(view: LandingView) -> app.Head`"
     if handler.function.declaration.params.len() != 1 {
         check.diagnostics.push(sema_error("E2810", args[0].span, "App `head` requires a function that takes one screen state, and `{handler.name}` takes {handler.function.declaration.params.len()} parameters", "a page asks the function for the metadata of the state it shows", shape))
@@ -694,7 +694,7 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
         if value == .Ident(name, name_span, _) {
             if slot == state_slot {
                 read: sema_check_expression(Expr.Ident{name: "{name}", span: name_span, id: AST_NODE_GENERATED}, None, check) ?? {
-                    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+                    sema_single_use_leave_scope(check)
                     return rejected
                 }
                 view = Val(read.ty.move())
@@ -706,7 +706,7 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
         local: "__jet_app_{span.start}_{params[slot]}"
         binding: ast_binding(local, args[index].span, false, value, None)
         statement: sema_stmt_check_binding(binding, None, check) ?? {
-            sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+            sema_single_use_leave_scope(check)
             return rejected
         }
         if slot == state_slot {
@@ -717,12 +717,12 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
         locals[slot] = Val(Expr.Ident{name: local, span: args[index].span, id: AST_NODE_GENERATED})
     }
     ty: view ?? {
-        sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+        sema_single_use_leave_scope(check)
         return rejected
     }
     found: sema_app_state(graph, ty, check.environment.module_identity) ?? {
         check.diagnostics.push(sema_app_no_screen(type_name(ty), view_span))
-        sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+        sema_single_use_leave_scope(check)
         return rejected
     }
     opened: locals[state_slot] ?? panic("the state's argument was bound above")
@@ -741,12 +741,12 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
         else -> address
     }
     checked: sema_check_expression(lowered, None, check) ?? {
-        sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+        sema_single_use_leave_scope(check)
         return rejected
     }
     result_type: checked.ty.copy()  // copy: the block's value keeps its own type
     body.push(TStmt.ExprStmt{value: checked, span: span})
-    sema_single_use_leave_scope(check.scopes, check.state, check.diagnostics)
+    sema_single_use_leave_scope(check)
     lowered_value: sema_tree_node(result_type, TExprKind.InlineBlock{body: body}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(lowered_value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }

@@ -335,14 +335,14 @@ sema_shared_cycle_note_ident: fn(named: ^[Expr], expression: Expr) {
 // E0221 for storing `value` into `target`, when the place lies in a shared
 // cell and can hold a strong edge back to that cell's type. Runs after the
 // assignment is checked, so every reference it makes is recorded.
-sema_shared_cycle_check_write: fn(target: LValue, value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
+sema_shared_cycle_check_write: fn(target: LValue, value: Expr, check: ^SemaBodyCheck) {
     if target == {
         .Local(_, _) -> {}
         .Field(base, field, field_span) -> {
-            sema_shared_cycle_check_stored(sema_shared_cycle_field_place(base, field, environment, program, scopes), Span{start: sema_shared_access_place_start(base), end: field_span.end}, value, environment, program, scopes, state, diagnostics)
+            sema_shared_cycle_check_stored(sema_shared_cycle_field_place(base, field, check.environment.*, check.program.*, check.scopes), Span{start: sema_shared_access_place_start(base), end: field_span.end}, value, check.environment.*, check.program.*, check.scopes, check.state, check.diagnostics)
         }
         .Index(base, _, index_span, _) -> {
-            sema_shared_cycle_check_stored(sema_shared_cycle_element_place(base, environment, program, scopes), Span{start: sema_shared_access_place_start(base), end: index_span.end}, value, environment, program, scopes, state, diagnostics)
+            sema_shared_cycle_check_stored(sema_shared_cycle_element_place(base, check.environment.*, check.program.*, check.scopes), Span{start: sema_shared_access_place_start(base), end: index_span.end}, value, check.environment.*, check.program.*, check.scopes, check.state, check.diagnostics)
         }
     }
 }
@@ -363,13 +363,13 @@ sema_shared_cycle_check_stored: fn(found: {owner: Type, place: Type}?, span: Spa
 // it stores must be built in place. Runs after the call is checked. Arguments
 // a statement bound ahead of the edit (SEMA_SHARED_HOISTED_RHS) were checked
 // there.
-sema_shared_cycle_check_call: fn(place: Expr, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
+sema_shared_cycle_check_call: fn(place: Expr, args: [CallArg], check: ^SemaBodyCheck) {
     if args.len() == 0 {
         return
     }
-    found: sema_shared_cycle_place(place, environment, program, scopes) ?? return
-    owner: sema_shared_cycle_owner_key(found.owner, environment, program) ?? return
-    if !sema_shared_cycle_reaches(owner, found.place, environment, program) {
+    found: sema_shared_cycle_place(place, check.environment.*, check.program.*, check.scopes) ?? return
+    owner: sema_shared_cycle_owner_key(found.owner, check.environment.*, check.program.*) ?? return
+    if !sema_shared_cycle_reaches(owner, found.place, check.environment.*, check.program.*) {
         return
     }
     stores_functions: sema_shared_cycle_holds_function(found.place)
@@ -380,50 +380,48 @@ sema_shared_cycle_check_call: fn(place: Expr, args: [CallArg], environment: Sema
         if argument.expr == .Ident(name, _, _) && name.starts_with(SEMA_SHARED_HOISTED_RHS) -> next
         // A place that holds no function value cannot store one: a function
         // argument (`kids.sort_by(fn(kid) { … })`) is a callback the call runs.
-        if !stores_functions && sema_shared_cycle_function_argument(argument.expr, environment, program, scopes) {
-            next
-        }
-        if !sema_shared_cycle_fresh(argument.expr, None, owner, allowed, environment, program, scopes, state) {
-            diagnostics.push(sema_shared_cycle_diagnostic(Span{start: sema_shared_access_place_start(place), end: expr_span(place).end}, found.owner, found.place))
+        if !stores_functions && sema_shared_cycle_function_argument(argument.expr, check) -> next
+        if !sema_shared_cycle_fresh(argument.expr, None, owner, allowed, check.environment.*, check.program.*, check.scopes, check.state) {
+            check.diagnostics.push(sema_shared_cycle_diagnostic(Span{start: sema_shared_access_place_start(place), end: expr_span(place).end}, found.owner, found.place))
             return
         }
     }
 }
 
-sema_shared_cycle_function_argument: fn(argument: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Bool {
+sema_shared_cycle_function_argument: fn(argument: Expr, check: ^SemaBodyCheck) -> Bool {
     if argument == .Lambda(_, _) -> return true
-    probed: sema_shared_access_place_type(argument, environment, program, scopes) ?? return false
+    probed: sema_shared_access_place_type(argument, check.environment.*, check.program.*, check.scopes) ?? return false
     sema_shared_cycle_holds_function(probed)
 }
 
 // E0221 for the arguments a writing call statement binds ahead of its edit
 // (sema_shared_access_place_call_transaction): the ones that read shared state.
-sema_shared_cycle_check_hoisted_call: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
+sema_shared_cycle_check_hoisted_call: fn(expr: Expr, check: ^SemaBodyCheck) {
     if expr == .MethodCall(receiver, _, _, _, _, args, _) {
         if receiver == .Place(value, _, _, _) {
             touching := [CallArg]{}
             loop argument in args {
                 // copy: `args` belongs to the statement, which keeps them.
-                if sema_shared_access_expr_touches_shared(argument.expr, scopes) {
+                if sema_shared_access_expr_touches_shared(argument.expr, check.scopes) {
                     touching.push(argument.copy())
                 }
             }
-            sema_shared_cycle_check_call(value, touching, environment, program, scopes, state, diagnostics)
+            sema_shared_cycle_check_call(value, touching, check)
         }
     }
 }
 
 // E0221 for replacing a whole cell's value (`cell.try_replace(snapshot, value)`),
 // after the replacement is checked.
-sema_shared_cycle_check_replace: fn(inner: Type, value: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
-    owner: sema_shared_cycle_owner_key(inner, environment, program) ?? return
-    if !sema_shared_cycle_reaches(owner, inner, environment, program) {
+sema_shared_cycle_check_replace: fn(inner: Type, value: Expr, span: Span, check: ^SemaBodyCheck) {
+    owner: sema_shared_cycle_owner_key(inner, check.environment.*, check.program.*) ?? return
+    if !sema_shared_cycle_reaches(owner, inner, check.environment.*, check.program.*) {
         return
     }
-    if sema_shared_cycle_fresh(value, Val(inner), owner, [Span]{expr_source_span(value)}, environment, program, scopes, state) {
+    if sema_shared_cycle_fresh(value, Val(inner), owner, [Span]{expr_source_span(value)}, check.environment.*, check.program.*, check.scopes, check.state) {
         return
     }
-    diagnostics.push(sema_shared_cycle_diagnostic(span, inner, inner))
+    check.diagnostics.push(sema_shared_cycle_diagnostic(span, inner, inner))
 }
 
 // `place_ty` is the type of the place written; a place that holds function

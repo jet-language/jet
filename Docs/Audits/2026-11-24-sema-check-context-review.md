@@ -248,3 +248,40 @@ groups:
 
 The switch leaves the `jet check` reports for JetSema, JetDriver and JetCLI
 unchanged.
+
+## 6. Helpers fed from the record
+
+Once the record carried all seven parts, 1,086 JetSema functions still took
+two or more parts as separate parameters. Most of them were called only
+with the record's own parts (`check.scopes`, `check.program.*`), either
+directly or through a caller that took those parts the same way. A census
+of the call graph, iterated to a fixed point, found 775 such functions.
+Each one now takes the record in the slot of its first part:
+`check: ^SemaBodyCheck` when it writes a part, and `check: SemaBodyCheck`
+when it only reads them. Each of the 2,220 calls passes `check` in place of
+its part arguments.
+
+The census leaves some functions out, and they keep their parameters:
+
+- functions whose bodies already name `check`;
+- functions used as values;
+- functions with names defined more than once;
+- functions where a call passes a part of another check, such as a probe's
+  scopes, a default's owner scope or a lambda's state;
+- functions called from outside a body check, such as registration or the
+  graph passes;
+- functions where a call writes through the record while another argument
+  of the same call reads it.
+
+| Measure (JetSema) | Before | After |
+|---|---|---|
+| Functions taking the record | 568 | 1,343 |
+| Functions taking two or more parts without it | 1,086 | 432 |
+| Part parameters | 3,867 | 1,970 |
+| Parameters, all functions | 29,927 | 28,440 |
+| Lines | 215,990 | 215,822 |
+| Bytes | 13,065,120 | 12,956,387 |
+| `.copy()` calls | 2,118 | 2,118 |
+
+`jet fmt` reshapes the 223 statements whose length the change pushed over or
+under the line limit. `jet check` on JetSema reports nothing new.

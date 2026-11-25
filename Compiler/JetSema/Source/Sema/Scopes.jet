@@ -487,11 +487,11 @@ sema_loop_value_resolve_frame: fn(context: SemaCheckContext, label: String?) -> 
     None
 }
 
-sema_loop_value_record_break: fn(context: ^SemaCheckContext, frame_index: Int, state: SemaOwnershipState) Never! {
-    if frame_index < 0 || frame_index >= context.loop_break_flows.len() {
+sema_loop_value_record_break: fn(check: ^SemaBodyCheck, frame_index: Int) Never! {
+    if frame_index < 0 || frame_index >= check.context.loop_break_flows.len() {
         return
     }
-    context.loop_break_flows[frame_index].paths.push(sema_ownership_state_snapshot(state))
+    check.context.loop_break_flows[frame_index].paths.push(sema_ownership_state_snapshot(check.state))
 }
 
 sema_loop_value_set_result_type: fn(context: ^SemaCheckContext, frame_index: Int, ty: Type) Never! {
@@ -818,9 +818,9 @@ SemaScopeEnvironment: struct {
 // program's call that leads to it, and a body the program never reaches is
 // never refused. User bodies consume the selected machine fact, never a host
 // OS guess. A function body is checked with the graph in the program tables.
-sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    graph: program.registration_graph
-    graph.target_machine.no_os && environment.package_identity == graph.package_identity
+sema_scope_environment_no_os: fn(check: SemaBodyCheck) -> Bool Never! {
+    graph: check.program.registration_graph
+    graph.target_machine.no_os && check.environment.package_identity == graph.package_identity
 }
 
 // The declaration scopes of the modules compile-time checks (item checks,
@@ -1445,9 +1445,9 @@ sema_symbol_id_of: fn(program: SemaProgramTables, context: ^SemaCheckContext, ke
 
 // The id keyed `key`, a run-wide one or one of the checking body's own; None
 // for a key no declaration holds.
-sema_symbol_lookup: fn(program: SemaProgramTables, context: SemaCheckContext, key: String) -> SymbolID? Never! {
-    if sema_symbol_find(program, key) == .Val(found) -> return Val(found)
-    symbol_local_keys_find(context.arena.tree.symbols, key)
+sema_symbol_lookup: fn(check: SemaBodyCheck, key: String) -> SymbolID? Never! {
+    if sema_symbol_find(check.program.*, key) == .Val(found) -> return Val(found)
+    symbol_local_keys_find(check.context.arena.tree.symbols, key)
 }
 
 // The key text of `id`, a run-wide id or one of the checking body's own. A
@@ -1678,9 +1678,9 @@ sema_scope_caller_index: fn(environment: SemaScopeEnvironment, graph: SemaRegist
 // The AST tables of the module that declares a node: the environment's own
 // for its module, else that module's from the graph. None when no graph
 // registers the module.
-sema_scope_module_tables: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> ASTTables? Never! {
-    if module_identity == environment.module_identity -> return Val(environment.tables)
-    graph: program.registration_graph
+sema_scope_module_tables: fn(check: SemaBodyCheck, module_identity: ModuleID) -> ASTTables? Never! {
+    if module_identity == check.environment.module_identity -> return Val(check.environment.tables)
+    graph: check.program.registration_graph
     module_index: sema_registration_module_index(graph, module_identity) ?? return None
     Val(graph.modules[module_index].program.tables)
 }
@@ -2816,11 +2816,11 @@ sema_scope_knowledge_gate_allows: fn(table: SemaScopeTable, plane: SemaKnowledge
     sema_knowledge_gate_allows(plane, active)
 }
 
-sema_scope_require_knowledge_gate: fn(table: ^SemaScopeTable, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
-    if sema_scope_knowledge_gate_allows(table, plane, gate) -> return true
+sema_scope_require_knowledge_gate: fn(check: ^SemaBodyCheck, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate, span: Span) -> Bool {
+    if sema_scope_knowledge_gate_allows(check.scopes, plane, gate) -> return true
     plane_name: sema_knowledge_plane_name(plane)
     gate_name: sema_knowledge_gate_spelling(gate)
-    diagnostics.push(sema_error("E0156", span, "This operation would loosen {plane_name}", "Knowledge only tightens silently; loosening {plane_name} must be named with a written gate", "Write `{gate_name}(value)` at this boundary"))
+    check.diagnostics.push(sema_error("E0156", span, "This operation would loosen {plane_name}", "Knowledge only tightens silently; loosening {plane_name} must be named with a written gate", "Write `{gate_name}(value)` at this boundary"))
     false
 }
 
@@ -3550,41 +3550,41 @@ sema_scope_binding_row: fn(environment: SemaScopeEnvironment, table: SemaScopeTa
 
 // A write through `place` writes state that outlives the call unless its
 // root is a cell the body built itself: it is recorded in
-// `context.module_writes`. A module-level root (`STATE` in
+// `check.context.module_writes`. A module-level root (`STATE` in
 // `STATE.rows[0].count`, or a module name before it) is module state by
 // name. A parameter or local root (`self`, an alias, a loop name or a
 // capture) may hold a module cell, so its write is recorded as `held`. Two
 // roots are the body's to write: a `:` local bound to a new cell
 // (SemaScopeBinding.own_cell), and a `^` parameter, whose caller lends the
 // place for writing and sees the write in the signature.
-sema_scope_record_module_write: fn(place: Expr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: ^SemaCheckContext) {
+sema_scope_record_module_write: fn(place: Expr, span: Span, check: ^SemaBodyCheck) {
     name: sema_scope_place_root(place) ?? return
-    index: sema_scope_resolve_index(scopes, name) ?? return
-    kind: scopes.bindings[index].symbol.kind
+    index: sema_scope_resolve_index(check.scopes, name) ?? return
+    kind: check.scopes.bindings[index].symbol.kind
     if kind != SymbolKind.Parameter && kind != SymbolKind.Local {
-        context.module_writes.push(TEffectSpan{name: name, span: span})
+        check.context.module_writes.push(TEffectSpan{name: name, span: span})
         return
     }
-    if scopes.bindings[index].own_cell {
+    if check.scopes.bindings[index].own_cell {
         return
     }
-    if kind == SymbolKind.Parameter && scopes.bindings[index].access == AccessConvention.Write {
+    if kind == SymbolKind.Parameter && check.scopes.bindings[index].access == AccessConvention.Write {
         return
     }
-    context.module_writes.push(TEffectSpan{name: name, span: span, held: true})
+    check.context.module_writes.push(TEffectSpan{name: name, span: span, held: true})
 }
 
 // A place lent to a `^` parameter: the callee's writes through it are not
 // recorded (sema_scope_record_module_write), so the caller records a module
 // root as its own write. A local or parameter it lends is its own to lend.
-sema_scope_record_lent_write: fn(place: Expr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: ^SemaCheckContext) {
+sema_scope_record_lent_write: fn(place: Expr, span: Span, check: ^SemaBodyCheck) {
     name: sema_scope_place_root(place) ?? return
-    index: sema_scope_resolve_index(scopes, name) ?? return
-    kind: scopes.bindings[index].symbol.kind
+    index: sema_scope_resolve_index(check.scopes, name) ?? return
+    kind: check.scopes.bindings[index].symbol.kind
     if kind == SymbolKind.Parameter || kind == SymbolKind.Local {
         return
     }
-    context.module_writes.push(TEffectSpan{name: name, span: span})
+    check.context.module_writes.push(TEffectSpan{name: name, span: span})
 }
 
 // An initializer that builds a new cell: `Shared{…}` (optionally in `Val`)
@@ -3815,14 +3815,14 @@ sema_scope_item_kind: fn(item: Item) -> SemaScopeDeclarationKind Never! {
     }
 }
 
-sema_scope_declaration_kind: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationKind? {
-    site: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_kind: fn(check: SemaBodyCheck, id: SymbolID) -> SemaScopeDeclarationKind? {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return None
     if site == .Local(index) {
-        return Val(sema_scope_item_kind(environment.declarations[index].item))
+        return Val(sema_scope_item_kind(check.environment.declarations[index].item))
     }
     if site == .Function(_, _) -> return Val(SemaScopeDeclarationKind.Func)
     if site == .Nominal(module_index, row) {
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         return sema_scope_nominal_kind(graph, module_index, row)
     }
     None
@@ -3837,8 +3837,8 @@ sema_scope_nominal_kind: fn(graph: SemaRegistrationGraph, module_index: Int, row
     None
 }
 
-sema_scope_declaration_is: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
-    found: sema_scope_declaration_kind(environment, program, id) ?? return false
+sema_scope_declaration_is: fn(check: SemaBodyCheck, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
+    found: sema_scope_declaration_kind(check, id) ?? return false
     found == kind
 }
 
@@ -3881,13 +3881,13 @@ sema_scope_nominal_struct: fn(graph: SemaRegistrationGraph, module_index: Int, r
 // The labels of a struct declaration's `state { … }` section (empty when it
 // has none); none when sema_scope_resolve_declaration(environment, id) is not
 // a struct.
-sema_scope_declaration_struct_states: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [String]? {
-    site: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_struct_states: fn(check: SemaBodyCheck, id: SymbolID) -> [String]? {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return None
     if site == .Local(index) {
-        return sema_scope_item_struct_states(environment.declarations[index].item)
+        return sema_scope_item_struct_states(check.environment.declarations[index].item)
     }
     if site == .Nominal(module_index, row) {
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         if graph.modules[module_index].nominals[row].source == .SourceAST(item) {
             return sema_scope_item_struct_states(item)
         }
@@ -3920,11 +3920,13 @@ sema_scope_item_enum: fn(item: Item) -> SemaScopeEnumShape? {
 }
 
 // The enum shape when sema_scope_resolve_declaration(environment, id) is an enum.
-sema_scope_declaration_enum: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeEnumShape? {
-    site: sema_scope_declaration_site(environment, program, id) ?? return None
-    if site == .Local(index) -> return sema_scope_item_enum(environment.declarations[index].item)
+sema_scope_declaration_enum: fn(check: SemaBodyCheck, id: SymbolID) -> SemaScopeEnumShape? {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return None
+    if site == .Local(index) {
+        return sema_scope_item_enum(check.environment.declarations[index].item)
+    }
     if site == .Nominal(module_index, row) {
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         return sema_scope_nominal_enum(graph, module_index, row)
     }
     None
@@ -3947,13 +3949,13 @@ sema_scope_item_enum_declares: fn(item: Item, variant: String) -> Bool Never! {
 }
 
 // sema_scope_resolve_declaration(environment, id) is an enum declaring `variant`.
-sema_scope_declaration_enum_declares: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, variant: String) -> Bool {
-    site: sema_scope_declaration_site(environment, program, id) ?? return false
+sema_scope_declaration_enum_declares: fn(check: SemaBodyCheck, id: SymbolID, variant: String) -> Bool {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return false
     if site == .Local(index) {
-        return sema_scope_item_enum_declares(environment.declarations[index].item, variant)
+        return sema_scope_item_enum_declares(check.environment.declarations[index].item, variant)
     }
     if site == .Nominal(module_index, row) {
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         return sema_scope_nominal_enum_declares(graph, module_index, row, variant)
     }
     false
@@ -3974,13 +3976,13 @@ sema_scope_item_distinct: fn(item: Item) -> DistinctDef? {
 
 // The declaration when sema_scope_resolve_declaration(environment, id) is a
 // distinct type; a distinct declaration has no methods to leave behind.
-sema_scope_declaration_distinct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> DistinctDef? {
-    site: sema_scope_declaration_site(environment, program, id) ?? return None
+sema_scope_declaration_distinct: fn(check: SemaBodyCheck, id: SymbolID) -> DistinctDef? {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return None
     if site == .Local(index) {
-        return sema_scope_item_distinct(environment.declarations[index].item)
+        return sema_scope_item_distinct(check.environment.declarations[index].item)
     }
     if site == .Nominal(module_index, row) {
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         return sema_scope_nominal_distinct(graph, module_index, row)
     }
     None
@@ -4000,12 +4002,12 @@ sema_scope_item_function_type_params: fn(item: Item) -> [TypeParam] Never! {
 
 // The type parameters when sema_scope_resolve_declaration(environment, id) is
 // a function, else none; the function's body is never copied.
-sema_scope_declaration_function_type_params: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [TypeParam] {
-    site: sema_scope_declaration_site(environment, program, id) ?? return [TypeParam]{}
+sema_scope_declaration_function_type_params: fn(check: SemaBodyCheck, id: SymbolID) -> [TypeParam] {
+    site: sema_scope_declaration_site(check.environment.*, check.program.*, id) ?? return [TypeParam]{}
     if site == .Local(index) {
-        return sema_scope_item_function_type_params(environment.declarations[index].item)
+        return sema_scope_item_function_type_params(check.environment.declarations[index].item)
     }
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     if site == .Function(module_index, row) {
         return graph.modules[module_index].functions[row].declaration.type_params
     }

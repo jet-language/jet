@@ -622,11 +622,11 @@ sema_script_variable_read: fn(name: String, call_span: Span) -> Expr Never! {
 // it, or code outside the script's lines, such as a `#Test` or a method,
 // which passes it by name. `declared` is the function's name, where its
 // parameter's default is spanned.
-sema_script_unbound_variable: fn(declared: Span, name: String, call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic {
-    graph: program.registration_graph
-    module_index: sema_registration_module_index(graph, environment.module_identity) ?? return sema_unknown_name_in(name, call_span, scopes)
+sema_script_unbound_variable: fn(declared: Span, name: String, call_span: Span, check: SemaBodyCheck) -> Diagnostic {
+    graph: check.program.registration_graph
+    module_index: sema_registration_module_index(graph, check.environment.module_identity) ?? return sema_unknown_name_in(name, call_span, check.scopes)
     items: graph.modules[module_index].program.items
-    helper: sema_script_function_at(items, declared) ?? return sema_unknown_name_in(name, call_span, scopes)
+    helper: sema_script_function_at(items, declared) ?? return sema_unknown_name_in(name, call_span, check.scopes)
     chain: sema_script_chain(graph.modules[module_index].program.tables, items, graph.modules[module_index].program.entry_locals, helper, name)
     through: if chain.len() == 0 -> "" else -> " through {sema_script_chain_text(chain)}"
     in_lines: sema_script_lines_hold(items, call_span)

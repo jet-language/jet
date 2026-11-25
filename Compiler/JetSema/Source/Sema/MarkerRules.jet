@@ -672,10 +672,10 @@ sema_marker_rules_argument_path: fn(expression: Expr) -> String? {
     None
 }
 
-sema_marker_rules_staged_argument_value: fn(values: [SemaComptimeItemValue], environment: SemaScopeEnvironment, program: SemaProgramTables, marker: Marker, source_index: Int) -> TComptimeValue? {
+sema_marker_rules_staged_argument_value: fn(values: [SemaComptimeItemValue], check: SemaBodyCheck, marker: Marker, source_index: Int) -> TComptimeValue? {
     destination_suffix: if source_index == 0 -> ".marker.{marker.name}.{marker.name_span.start}" else -> ".marker.{marker.name}.{marker.name_span.start}.arg.{source_index}"
     loop value in values {
-        if value.kind == SemaComptimeItemKind.MarkerArgument && value.module_identity == environment.module_identity && value.destination_key.ends_with(destination_suffix) {
+        if value.kind == SemaComptimeItemKind.MarkerArgument && value.module_identity == check.environment.module_identity && value.destination_key.ends_with(destination_suffix) {
             return Val(value.value)
         }
     }
@@ -683,7 +683,7 @@ sema_marker_rules_staged_argument_value: fn(values: [SemaComptimeItemValue], env
 }
 
 // `key` is the constant's key (a body's own constant has its body's key).
-sema_marker_rules_constant_for_reference: fn(symbol: SemaNameReferent, key: String, references: [SemaNameReferenceFact], reference_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> TComptimeValue? {
+sema_marker_rules_constant_for_reference: fn(symbol: SemaNameReferent, key: String, references: [SemaNameReferenceFact], reference_start: Int, check: SemaBodyCheck, values: [SemaComptimeItemValue]) -> TComptimeValue? {
     found := false
     loop index in reference_start..<references.len() {
         reference := references[index]
@@ -698,7 +698,7 @@ sema_marker_rules_constant_for_reference: fn(symbol: SemaNameReferent, key: Stri
             return Val(value.value)
         }
     }
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
     loop constant_index in 0..<graph.modules[module_index].constants.len() {
         if graph.modules[module_index].constants[constant_index].symbol.id == symbol.id {
@@ -709,17 +709,17 @@ sema_marker_rules_constant_for_reference: fn(symbol: SemaNameReferent, key: Stri
     None
 }
 
-sema_marker_rules_constant_value: fn(checked: TExpr, marker: Marker, source_index: Int, reference_start: Int, context: ^SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> TComptimeValue? {
+sema_marker_rules_constant_value: fn(checked: TExpr, marker: Marker, source_index: Int, reference_start: Int, check: ^SemaBodyCheck, values: [SemaComptimeItemValue]) -> TComptimeValue? {
     if source_index == 0 && marker.ct == .Val(value) -> return sema_checked_comptime(value)
-    staged: sema_marker_rules_staged_argument_value(values, environment, program, marker, source_index)
+    staged: sema_marker_rules_staged_argument_value(values, check, marker, source_index)
     if staged != None -> return staged
-    direct: sema_expr_comptime_value(checked, context)
+    direct: sema_expr_comptime_value(checked, check.context)
     if direct != None -> return direct
-    if checked.kind == .Flat(index) && context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .ConstRef(symbol) {
-        loop reference in context.name_references {
+    if checked.kind == .Flat(index) && check.context.arena.tree.nodes[index - check.context.arena.tree.node_base].kind == .ConstRef(symbol) {
+        loop reference in check.context.name_references {
             if reference.symbol.id == symbol && reference.symbol.kind == SymbolKind.Constant {
-                key: sema_symbol_key(program, context, symbol)
-                return sema_marker_rules_constant_for_reference(reference.symbol, key, context.name_references, reference_start, environment, program, values)
+                key: sema_symbol_key(check.program.*, check.context, symbol)
+                return sema_marker_rules_constant_for_reference(reference.symbol, key, check.context.name_references, reference_start, check, values)
             }
         }
     }
@@ -727,20 +727,20 @@ sema_marker_rules_constant_value: fn(checked: TExpr, marker: Marker, source_inde
 }
 
 // The argument was just checked in this module (`reference_start` onward in
-// `context.name_references`), against the environment whose graph already
+// `check.context.name_references`), against the environment whose graph already
 // carries `values`, so its constant dependencies come from those references
 // instead of a second check on a copy of the graph.
-sema_marker_rules_comptime_source: fn(marker: Marker, source_index: Int, expression: Expr, expected_type: Type?, reference_start: Int, context: SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> SemaComptimeItemSource? {
+sema_marker_rules_comptime_source: fn(marker: Marker, source_index: Int, expression: Expr, expected_type: Type?, reference_start: Int, check: SemaBodyCheck, values: [SemaComptimeItemValue]) -> SemaComptimeItemSource? {
     // Snapshot: a marker argument is staged only for a registered module.
-    if program.registration_graph.mode == .Snapshot -> return None
-    graph: program.registration_graph
+    if check.program.registration_graph.mode == .Snapshot -> return None
+    graph: check.program.registration_graph
     destination_key: "{marker.name}.marker.{marker.name_span.start}.arg.{source_index}"
     source := SemaComptimeItemSource{
-        module_identity: environment.module_identity,
-        key: "{module_text(graph.module_table, environment.module_identity)}.{destination_key}",
+        module_identity: check.environment.module_identity,
+        key: "{module_text(graph.module_table, check.environment.module_identity)}.{destination_key}",
         destination_key: destination_key,
         name: "#{marker.name} argument {source_index + 1}",
-        source_file: environment.source_file,
+        source_file: check.environment.source_file,
         kind: SemaComptimeItemKind.MarkerArgument,
         expression: expression,
         expected_type: expected_type,
@@ -748,7 +748,7 @@ sema_marker_rules_comptime_source: fn(marker: Marker, source_index: Int, express
         dependencies: [String]{},
         checked_text: None,
     }
-    references: loop index in reference_start..<context.name_references.len() -> context.name_references[index]
+    references: loop index in reference_start..<check.context.name_references.len() -> check.context.name_references[index]
     source.dependencies = sema_comptime_dependencies_from_references(graph, references, values)
     Val(source)
 }
@@ -793,9 +793,9 @@ sema_marker_rules_observe_argument: fn(marker: Marker, source_index: Int, expect
             checked_value = true
             observed_type = Val(value.ty)
             if capture_constant {
-                constant = sema_marker_rules_constant_value(value, marker, source_index, reference_start, check.context, check.environment.*, check.program.*, values)
+                constant = sema_marker_rules_constant_value(value, marker, source_index, reference_start, check, values)
                 if constant == None && sema_marker_rules_explicit_constant(argument, check.scopes) {
-                    staged_source = sema_marker_rules_comptime_source(marker, source_index, argument, checked_expected, reference_start, check.context, check.environment.*, check.program.*, values)
+                    staged_source = sema_marker_rules_comptime_source(marker, source_index, argument, checked_expected, reference_start, check, values)
                 }
             }
         }
@@ -2542,9 +2542,9 @@ sema_marker_rules_no_prelude_call: fn(call: Call, check: ^SemaBodyCheck) -> Bool
 
 // The bare `input` value under `#NoPrelude` (E0429), when the file declares
 // no `input` of its own.
-sema_marker_rules_no_prelude_input: fn(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool Never! {
-    if !sema_module_no_prelude(environment, program) -> return false
-    diagnostics.push(sema_marker_rules_no_prelude_error("input", span, "write `use io: core.term` and loop over `io.stdin().lines()`, or remove `#NoPrelude`"))
+sema_marker_rules_no_prelude_input: fn(span: Span, check: ^SemaBodyCheck) -> Bool Never! {
+    if !sema_module_no_prelude(check.environment.*, check.program.*) -> return false
+    check.diagnostics.push(sema_marker_rules_no_prelude_error("input", span, "write `use io: core.term` and loop over `io.stdin().lines()`, or remove `#NoPrelude`"))
     true
 }
 

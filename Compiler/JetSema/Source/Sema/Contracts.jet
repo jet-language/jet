@@ -128,12 +128,12 @@ sema_contract_result_for_function: fn(return_type: Type?, span: Span, environmen
     TContractResult{carrier_ty: carrier, binding_ty: binding, carrier_local: carrier_local, binding_local: binding_local, mode: mode}
 }
 
-sema_contract_file: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> String Never! {
-    sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
+sema_contract_file: fn(check: SemaBodyCheck, span: Span) -> String Never! {
+    sema_source_file_at(check.environment.source_segments, check.environment.source_file, check.environment.source_origin, span)
 }
 
-sema_contract_line: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Int Never! {
-    sema_source_line_at(environment.source_segments, span) ?? 0
+sema_contract_line: fn(check: SemaBodyCheck, span: Span) -> Int Never! {
+    sema_source_line_at(check.environment.source_segments, span) ?? 0
 }
 
 // The declared site of the clause whose condition spans `span` in the module
@@ -145,8 +145,8 @@ sema_contract_site: fn(segments: [SemaSourceSegment], file: String, origin: Sema
 // The declared sites of `func`'s `pre` clauses: `func` is the declaration
 // `target` resolves to (sema_contract_function_for_symbol), in its own
 // module, whose source maps the clause spans; a call site's module may differ.
-sema_contract_pre_sites: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID, func: Func) -> [TContractSite] Never! {
-    graph: program.registration_graph
+sema_contract_pre_sites: fn(check: SemaBodyCheck, target: SymbolID, func: Func) -> [TContractSite] Never! {
+    graph: check.program.registration_graph
     if sema_registration_callable_row_of(graph, target) == .Val(row) {
         module_index: if row == {
             .Function(index, _) -> index
@@ -156,7 +156,7 @@ sema_contract_pre_sites: fn(environment: SemaScopeEnvironment, program: SemaProg
         }
         return loop clause in func.pre -> sema_contract_site(graph.modules[module_index].source_segments, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].module_identity, expr_span(clause.cond))
     }
-    loop clause in func.pre -> sema_contract_site(environment.source_segments, environment.source_file, environment.source_origin, environment.module_identity, expr_span(clause.cond))
+    loop clause in func.pre -> sema_contract_site(check.environment.source_segments, check.environment.source_file, check.environment.source_origin, check.environment.module_identity, expr_span(clause.cond))
 }
 
 sema_contract_call_is_pure: fn(fact: SemaCallSiteFact, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
@@ -701,27 +701,27 @@ sema_contract_type_name: fn(ty: Type) -> String? {
     }
 }
 
-sema_contract_distinct_range: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TIntegerRange? {
+sema_contract_distinct_range: fn(ty: Type, check: SemaBodyCheck) -> TIntegerRange? {
     name: sema_contract_type_name(ty) ?? return None
     // The first row that is either `name` owned by this module or the
     // qualified `module.name` itself.
-    local_row: sema_scope_checked_type_row(environment, program, environment.module_identity, name)
-    qualified_row: sema_scope_checked_type_row_qualified(program, name)
+    local_row: sema_scope_checked_type_row(check.environment.*, check.program.*, check.environment.module_identity, name)
+    qualified_row: sema_scope_checked_type_row_qualified(check.program.*, name)
     row := -1
     if local_row == .Val(local) -> row = local
     if qualified_row == .Val(qualified) && (row < 0 || qualified < row) -> row = qualified
     if row < 0 -> return None
     // copy: `range` is a payload of read parameter `program`, which keeps the original; the returned value owns this one
-    if program.checked_types[row].kind == .Distinct(_, range) -> return range.copy()
+    if check.program.checked_types[row].kind == .Distinct(_, range) -> return range.copy()
     None
 }
 
-sema_contract_interval: fn(expr: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TIntegerRange? {
+sema_contract_interval: fn(expr: TExpr, check: SemaBodyCheck) -> TIntegerRange? {
     if expr.kind == {
         .IntLit(value, _) -> Val(TIntegerRange{lo: value, hi: value})
-        .Local(_) -> sema_contract_distinct_range(expr.ty, environment, program)
-        .MethodCall(value, method, _, _) -> if method.name == "raw" -> sema_contract_interval(value, environment, program) else -> None
-        .DistinctRaw(value) -> sema_contract_interval(value, environment, program)
+        .Local(_) -> sema_contract_distinct_range(expr.ty, check)
+        .MethodCall(value, method, _, _) -> if method.name == "raw" -> sema_contract_interval(value, check) else -> None
+        .DistinctRaw(value) -> sema_contract_interval(value, check)
         .StrLit(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
     }
 }
@@ -734,14 +734,14 @@ SEMA_CONTRACT_INDEX_LIMIT: 1099511627776
 // an Int literal, a `distinct Int(lo..hi)` value or its `.raw()`, and `+` or
 // `-` of two such intervals (`faces[roll.raw() - 1]`). None when any part has
 // no interval, so the index keeps its runtime check.
-sema_contract_index_interval: fn(expr: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TIntegerRange? {
+sema_contract_index_interval: fn(expr: TExpr, check: SemaBodyCheck) -> TIntegerRange? {
     range := TIntegerRange?{None}
     if expr.kind == .Binary(op, _, _, left, right) {
         if op != .Add && op != .Sub -> return None
-        lhs: sema_contract_index_interval(left, environment, program) ?? return None
-        rhs: sema_contract_index_interval(right, environment, program) ?? return None
+        lhs: sema_contract_index_interval(left, check) ?? return None
+        rhs: sema_contract_index_interval(right, check) ?? return None
         range = if op == .Add -> Val(TIntegerRange{lo: lhs.lo + rhs.lo, hi: lhs.hi + rhs.hi}) else -> Val(TIntegerRange{lo: lhs.lo - rhs.hi, hi: lhs.hi - rhs.lo})
-    } else { range = sema_contract_interval(expr, environment, program) }
+    } else { range = sema_contract_interval(expr, check) }
     found: range ?? return None
     if found.lo < -SEMA_CONTRACT_INDEX_LIMIT || found.hi > SEMA_CONTRACT_INDEX_LIMIT -> return None
     Val(found)
@@ -759,21 +759,21 @@ sema_contract_interval_comparison: fn(op: BinOp, left: TIntegerRange, right: TIn
     }
 }
 
-sema_contract_expr_proven: fn(expr: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
+sema_contract_expr_proven: fn(expr: TExpr, check: SemaBodyCheck) -> Bool Never! {
     if expr.kind == {
         // A literal condition is a flat `BoolLit` row (sema_node).
         .Flat(index) -> {
-            if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .BoolLit(value) {
+            if check.context.arena.tree.nodes[index - check.context.arena.tree.node_base].kind == .BoolLit(value) {
                 return value
             }
             false
         }
         .Binary(op, _, _, left, right) -> if op == {
-            .And -> sema_contract_expr_proven(left, environment, program, context) && sema_contract_expr_proven(right, environment, program, context)
-            .Or -> sema_contract_expr_proven(left, environment, program, context) || sema_contract_expr_proven(right, environment, program, context)
+            .And -> sema_contract_expr_proven(left, check) && sema_contract_expr_proven(right, check)
+            .Or -> sema_contract_expr_proven(left, check) || sema_contract_expr_proven(right, check)
             .Eq | .Ne | .Lt | .Gt | .Le | .Ge -> {
-                left_range: sema_contract_interval(left, environment, program) ?? return false
-                right_range: sema_contract_interval(right, environment, program) ?? return false
+                left_range: sema_contract_interval(left, check) ?? return false
+                right_range: sema_contract_interval(right, check) ?? return false
                 sema_contract_interval_comparison(op, left_range, right_range)
             }
             .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare -> false
@@ -781,8 +781,8 @@ sema_contract_expr_proven: fn(expr: TExpr, environment: SemaScopeEnvironment, pr
         .CompareChain(operands, operators, _) -> {
             if operators.len() + 1 != operands.len() -> return false
             loop index in 0..<operators.len() {
-                left_range: sema_contract_interval(operands[index], environment, program) ?? return false
-                right_range: sema_contract_interval(operands[index + 1], environment, program) ?? return false
+                left_range: sema_contract_interval(operands[index], check) ?? return false
+                right_range: sema_contract_interval(operands[index + 1], check) ?? return false
                 if !sema_contract_interval_comparison(operators[index], left_range, right_range) {
                     return false
                 }
@@ -793,13 +793,13 @@ sema_contract_expr_proven: fn(expr: TExpr, environment: SemaScopeEnvironment, pr
     }
 }
 
-sema_contract_disposition: fn(condition: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> TContractDisposition Never! {
-    if sema_contract_expr_proven(condition, environment, program, context) -> TContractDisposition.Proven else -> TContractDisposition.Check
+sema_contract_disposition: fn(condition: TExpr, check: SemaBodyCheck) -> TContractDisposition Never! {
+    if sema_contract_expr_proven(condition, check) -> TContractDisposition.Proven else -> TContractDisposition.Check
 }
 
 // `site` is the clause's declared site (TContractSite).
-sema_contract_make: fn(kind: TContractKind, condition: TExpr, message: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, location_span: Span, site: TContractSite, context: SemaCheckContext) -> TContract Never! {
-    TContract{kind: kind, condition: condition, message: message, file: sema_contract_file(environment, program, location_span), line: sema_contract_line(environment, program, location_span), span: span, disposition: sema_contract_disposition(condition, environment, program, context), site: site}
+sema_contract_make: fn(kind: TContractKind, condition: TExpr, message: TExpr, check: SemaBodyCheck, span: Span, location_span: Span, site: TContractSite) -> TContract Never! {
+    TContract{kind: kind, condition: condition, message: message, file: sema_contract_file(check, location_span), line: sema_contract_line(check, location_span), span: span, disposition: sema_contract_disposition(condition, check), site: site}
 }
 
 // `owner` is the function owner key plus a `post` segment: a body local named
@@ -831,7 +831,7 @@ sema_contract_check_function: fn(func: Func, check: ^SemaBodyCheck) -> SemaContr
         if message == None -> complete = false
         if condition == .Val(condition_value) && message == .Val(message_value) {
             site: sema_contract_site(check.environment.source_segments, check.environment.source_file, check.environment.source_origin, check.environment.module_identity, expr_span(clause.cond))
-            pre.push(sema_contract_make(TContractKind.Pre, condition_value, message_value, check.environment.*, check.program.*, clause.span, clause.span, site, check.context))
+            pre.push(sema_contract_make(TContractKind.Pre, condition_value, message_value, check, clause.span, clause.span, site))
         }
     }
     if func.post.len() > 0 {
@@ -865,7 +865,7 @@ sema_contract_check_function: fn(func: Func, check: ^SemaBodyCheck) -> SemaContr
                     if clause.required -> next
                     if condition == .Val(condition_value) && message == .Val(message_value) {
                         site: sema_contract_site(check.environment.source_segments, check.environment.source_file, check.environment.source_origin, check.environment.module_identity, expr_span(clause.cond))
-                        post.push(sema_contract_make(TContractKind.Post, condition_value, message_value, check.environment.*, check.program.*, clause.span, clause.span, site, check.context))
+                        post.push(sema_contract_make(TContractKind.Post, condition_value, message_value, check, clause.span, clause.span, site))
                     }
                 }
                 sema_body_check_swap_state(check, post_state)
@@ -905,20 +905,20 @@ sema_contract_method_function_for_item: fn(item: Item, target_key: String, modul
     None
 }
 
-sema_contract_function_for_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> Func? {
+sema_contract_function_for_symbol: fn(check: SemaBodyCheck, target: SymbolID) -> Func? {
     if symbol_is_local(target) -> return None
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     declaration: sema_registration_callable_declaration(graph, target)
     if declaration != None -> return declaration
-    target_key: sema_program_symbol_key(program, target)
-    loop declaration_index in 0..<environment.declarations.len() {
-        if environment.declarations[declaration_index].symbol_id == target {
+    target_key: sema_program_symbol_key(check.program.*, target)
+    loop declaration_index in 0..<check.environment.declarations.len() {
+        if check.environment.declarations[declaration_index].symbol_id == target {
             // copy: `value` is a payload of read parameter `environment`, which keeps the original; the Val carrier owns this one
-            if environment.declarations[declaration_index].item == .Func(value) {
+            if check.environment.declarations[declaration_index].item == .Func(value) {
                 return Val(value.copy())
             }
         }
-        method: sema_contract_method_function_for_item(environment.declarations[declaration_index].item, target_key, sema_scope_environment_module_text(environment, program))
+        method: sema_contract_method_function_for_item(check.environment.declarations[declaration_index].item, target_key, sema_scope_environment_module_text(check.environment.*, check.program.*))
         if method != None -> return method
     }
     None
@@ -986,9 +986,9 @@ sema_contract_call_site_facts_of_func: fn(func: Func) -> SemaContractCalleeFacts
     Val(SemaContractCalleeFacts{call_checks: call_checks, is_pure: func.is_pure, root_receiver: func.params.len() > 0 && func.params[0].root, param_names: param_names, param_view_from: param_view_from})
 }
 
-sema_contract_call_site_facts: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> SemaContractCalleeFacts? {
+sema_contract_call_site_facts: fn(check: SemaBodyCheck, target: SymbolID) -> SemaContractCalleeFacts? {
     if symbol_is_local(target) -> return None
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     if sema_registration_callable_row_of(graph, target) == .Val(row) {
         if row == {
             .Function(module_index, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].functions[index].declaration)
@@ -997,7 +997,7 @@ sema_contract_call_site_facts: fn(environment: SemaScopeEnvironment, program: Se
             .ImplMethod(module_index, owner, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].impls[owner].methods[index].declaration)
         }
     }
-    sema_contract_function_facts(environment, program, target)
+    sema_contract_function_facts(check.environment.*, check.program.*, target)
 }
 
 sema_contract_registered_facts: fn(graph: SemaRegistrationGraph, target: SymbolID) -> SemaContractCalleeFacts? {
@@ -1060,8 +1060,8 @@ sema_contract_function_facts: fn(environment: SemaScopeEnvironment, program: Sem
 
 // True when a call to `target` has clauses to check: `pre` ones, or `post`
 // ones decided while building.
-sema_contract_function_checks_calls: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> Bool Never! {
-    facts: sema_contract_function_facts(environment, program, target) ?? return false
+sema_contract_function_checks_calls: fn(check: SemaBodyCheck, target: SymbolID) -> Bool Never! {
+    facts: sema_contract_function_facts(check.environment.*, check.program.*, target) ?? return false
     facts.call_checks > 0
 }
 
@@ -1138,7 +1138,7 @@ sema_contract_check_call: fn(func: Func, target: SymbolID, recall: SemaContractR
     fresh_expr_ids: check.context.fresh_expr_ids
     check.context.fresh_expr_ids = true
     reads := [U32:Bool]{}
-    sites: sema_contract_pre_sites(check.environment.*, check.program.*, target, func)
+    sites: sema_contract_pre_sites(check, target, func)
     // A call is heard once per marker, by its first clause the answer fails.
     failed_pre := sema_contract_answer(SemaContractVerdict.Holds)
     // The clauses check on the pinned snapshot state, swapped into the
@@ -1166,7 +1166,7 @@ sema_contract_check_call: fn(func: Func, target: SymbolID, recall: SemaContractR
             next
         }
         if condition == .Val(condition_value) && message == .Val(message_value) {
-            contracts.push(sema_contract_make(TContractKind.Pre, condition_value, message_value, check.environment.*, check.program.*, call_span, call_span, sites[clause_index], check.context))
+            contracts.push(sema_contract_make(TContractKind.Pre, condition_value, message_value, check, call_span, call_span, sites[clause_index]))
         }
     }
     // A `#Post` decided while building reads `result`: this call's own value.
@@ -1283,7 +1283,7 @@ sema_contract_rule_hears: fn(marker: String, callee: String, answer: SemaContrac
             return !sema_call_rule_rejects(landed.value, call_span, check.diagnostics)
         }
         call: sema_rule_call_value(graph, Val(target), callee, call_span, call_span, [CallArg]{}, None, None, call_span, None, [String]{}, owner, check)
-        sema_call_rule_stage(check.context, check.environment.*, owner, owner, rule, call, call_span)
+        sema_call_rule_stage(check, owner, owner, rule, call, call_span)
     }
     true
 }

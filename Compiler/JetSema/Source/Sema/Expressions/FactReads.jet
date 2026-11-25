@@ -223,22 +223,22 @@ sema_fact_enum_pattern: fn(subject_ty: Type, variant: String, slots: [PatSlot], 
 
 // A payload-free variant of a compiler fact enum (`.Approximate` where an
 // `ExactnessKind` is expected, or `ExactnessKind.Approximate`).
-sema_fact_enum_literal: fn(enum_name: String, variant: String, args: [EnumLitArg], span: Span, variant_span: Span?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaFactReadCheck {
+sema_fact_enum_literal: fn(enum_name: String, variant: String, args: [EnumLitArg], span: Span, variant_span: Span?, expected: Type?, check: ^SemaBodyCheck) -> SemaFactReadCheck {
     ty: Type.Named{name: enum_name}
-    variants: sema_fact_enum_menu(ty, environment, program) ?? return sema_fact_read_unhandled()
+    variants: sema_fact_enum_menu(ty, check.environment.*, check.program.*) ?? return sema_fact_read_unhandled()
     compiler_enum: sema_fact_enum_variants(enum_name) == None
     if !variants.contains(variant) {
         diagnostic: if compiler_enum -> sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span) else -> sema_fact_enum_unknown_variant(enum_name, variant, variants, variant_span ?? span)
-        diagnostics.push(diagnostic)
+        check.diagnostics.push(diagnostic)
         return sema_fact_read_failed()
     }
     if args.len() != 0 {
         diagnostic: if compiler_enum -> sema_enum_unit_payload(enum_name, variant, span) else -> sema_error("E0104", span, "`{enum_name}.{variant}` takes no payload", "compiler fact enum variants carry no payload", "write `.{variant}` without arguments")
-        diagnostics.push(diagnostic)
+        check.diagnostics.push(diagnostic)
         return sema_fact_read_failed()
     }
     value: sema_tree_node(ty, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Unit}, span)
-    SemaFactReadCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+    SemaFactReadCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
 sema_fact_field_when: fn(condition: Bool, ty: Type) -> Type? {
@@ -1166,10 +1166,10 @@ sema_fact_function_view_provenance: fn(function: Func) -> TComptimeValue Never! 
 }
 
 // The declaration a subject name resolves to, if it is a module-level item.
-sema_fact_subject_item: fn(symbol: Symbol?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Item? {
+sema_fact_subject_item: fn(symbol: Symbol?, check: SemaBodyCheck) -> Item? {
     resolved: symbol ?? return None
     if resolved.kind != SymbolKind.Type && resolved.kind != SymbolKind.Function -> return None
-    sema_scope_resolve_declaration(environment, program, resolved.id)
+    sema_scope_resolve_declaration(check.environment.*, check.program.*, resolved.id)
 }
 
 // `TypeInfo` for a registered nominal subject. Fact reads need only the
@@ -1177,16 +1177,16 @@ sema_fact_subject_item: fn(symbol: Symbol?, environment: SemaScopeEnvironment, p
 // module scope does not bind (a Core type, `module.Type`) is the nominal row
 // its path names from this module. `args` names a specialization
 // (`Shelf<Int>.reflect()`, see sema_comptime_reflection_type_info).
-sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {
+sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], check: SemaBodyCheck) -> TComptimeValue? {
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     // Snapshot: type info reads a registered declaration.
-    if program.registration_graph.mode == .Snapshot -> return None
-    graph: program.registration_graph
+    if check.program.registration_graph.mode == .Snapshot -> return None
+    graph: check.program.registration_graph
     if symbol == .Val(resolved) {
         if resolved.kind != SymbolKind.Type -> return None
         return sema_comptime_reflection_type_info(graph, resolved.module_identity, name, catalog, args)
     }
-    row: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity) ?? return None
+    row: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, check.environment.module_identity) ?? return None
     sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
 }
 
@@ -1259,10 +1259,10 @@ sema_fact_answered_member: fn(type_name: String, field: String) -> Bool Never! {
     type_name == "MarkerArgInfo" && field == "value"
 }
 
-sema_fact_state_infos: fn(definition: StructDef, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {
+sema_fact_state_infos: fn(definition: StructDef, symbol: Symbol, check: SemaBodyCheck) -> TComptimeValue? {
     if definition.state == None -> return None
     graph_fact := SemaStateGraphFact?{None}
-    graph: program.registration_graph
+    graph: check.program.registration_graph
     module_index: sema_registration_module_index(graph, symbol.module_identity)
     if module_index == .Val(index) {
         loop fact in sema_state_graph_facts(graph.modules[index].program.items) {
@@ -1275,26 +1275,26 @@ sema_fact_state_infos: fn(definition: StructDef, symbol: Symbol, environment: Se
     Val(sema_comptime_reflection_state_view(definition, graph_fact).states)
 }
 
-sema_fact_unit: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
-    graph: program.registration_graph
+sema_fact_unit: fn(name: String, check: SemaBodyCheck) -> SemaRegistrationUnitFact? {
+    graph: check.program.registration_graph
     sema_registration_unit_fact_for_type(graph, Type.Named{name: name})
 }
 
 // One subject named by a bare identifier that is not a local: a type, a
 // function, a unit member, or the `report` attribution subject.
-sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaFactReadValue? {
-    item: sema_fact_subject_item(symbol, environment, program)
-    unit: sema_fact_unit(name, environment, program)
+sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, check: SemaBodyCheck) -> SemaFactReadValue? {
+    item: sema_fact_subject_item(symbol, check)
+    unit: sema_fact_unit(name, check)
     declared: item != None || unit != None
     if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields {
         // A builtin scalar has no declaration, only its fixed target layout.
-        graph: program.registration_graph
+        graph: check.program.registration_graph
         if read == FactRead.Layout && symbol == None {
             if sema_comptime_reflection_builtin_layout(graph, name) == .Val(layout) {
                 return Val(SemaFactReadValue{ty: sema_fact_named("LayoutInfo"), value: sema_fact_declared_value(layout)})
             }
         }
-        info: sema_fact_type_info(symbol, name, [Type]{}, environment, program) ?? return None
+        info: sema_fact_type_info(symbol, name, [Type]{}, check) ?? return None
         field: if read == FactRead.Layout -> "layout" else if read == FactRead.Name -> "name" else -> "fields"
         value: sema_fact_declared_value(sema_fact_struct_field(info, field) ?? return None)
         ty: sema_fact_reflection_field_type("TypeInfo", field) ?? return None
@@ -1314,7 +1314,7 @@ sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, envir
         return Val(SemaFactReadValue{ty: sema_fact_named("DimensionInfo"), value: sema_comptime_reflection_dimension(dimension)})
     }
     if read == FactRead.Measure || read == FactRead.Exactness || read == FactRead.Classification || read == FactRead.Obligation {
-        info: sema_fact_type_info(symbol, name, [Type]{}, environment, program) ?? return None
+        info: sema_fact_type_info(symbol, name, [Type]{}, check) ?? return None
         value: sema_fact_reflected_read(info, read) ?? return None
         ty: sema_fact_reflected_type(sema_fact_named("TypeInfo"), read) ?? return None
         return Val(SemaFactReadValue{ty: ty, value: value})
@@ -1322,7 +1322,7 @@ sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, envir
     if read == FactRead.States {
         if item == .Val(.Struct(definition)) {
             resolved: symbol ?? return None
-            states: sema_fact_state_infos(definition, resolved, environment, program) ?? return None
+            states: sema_fact_state_infos(definition, resolved, check) ?? return None
             return Val(SemaFactReadValue{ty: sema_fact_list_of("StateInfo"), value: states})
         }
         return None
@@ -1394,24 +1394,24 @@ SemaFactUsesTarget: struct {
 // own package may read it (E1136): the list depends on every package that
 // writes `M`, which no other package can see. `name` is the subject as
 // written (`Route`, `routes.Route`); `symbol` is what a bare name binds.
-sema_fact_uses_check: fn(name: String, symbol: Symbol?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaFactReadCheck {
-    graph: program.registration_graph
-    resolved: sema_fact_uses_marker(graph, environment.module_identity, name, symbol)
-    marker: resolved.declaration ?? return sema_fact_read_no_value("$uses", span, diagnostics)
-    reader: sema_registration_module_index(graph, environment.module_identity) ?? return sema_fact_read_no_value("$uses", span, diagnostics)
-    owner: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return sema_fact_read_no_value("$uses", span, diagnostics)
+sema_fact_uses_check: fn(name: String, symbol: Symbol?, span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaFactReadCheck {
+    graph: check.program.registration_graph
+    resolved: sema_fact_uses_marker(graph, check.environment.module_identity, name, symbol)
+    marker: resolved.declaration ?? return sema_fact_read_no_value("$uses", span, check.diagnostics)
+    reader: sema_registration_module_index(graph, check.environment.module_identity) ?? return sema_fact_read_no_value("$uses", span, check.diagnostics)
+    owner: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return sema_fact_read_no_value("$uses", span, check.diagnostics)
     if graph.modules[reader].package_identity != graph.modules[owner].package_identity {
-        diagnostics.push(sema_error("E1136", span, "`{name}.reflect().uses` is read outside the package that declares `{name}`", "a marker's uses span every package that writes it, so only the marker's own package reads them", "read `{name}.reflect().uses` inside the package that declares `{name}`, and export what it builds from them"))
+        check.diagnostics.push(sema_error("E1136", span, "`{name}.reflect().uses` is read outside the package that declares `{name}`", "a marker's uses span every package that writes it, so only the marker's own package reads them", "read `{name}.reflect().uses` inside the package that declares `{name}`, and export what it builds from them"))
         return sema_fact_read_failed()
     }
     target: SemaFactUsesTarget{module_identity: resolved.declaring_module_identity, marker: marker, field: sema_casing_snake_words(marker.name)}
     uses := [TComptimeValue]{}
     loop module_index in 0..<graph.modules.len() {
-        if !sema_fact_uses_in_items(graph, module_index, graph.modules[module_index].program.items, "", target, uses, span, diagnostics) {
+        if !sema_fact_uses_in_items(graph, module_index, graph.modules[module_index].program.items, "", target, uses, span, check.diagnostics) {
             return sema_fact_read_failed()
         }
     }
-    marker_type: sema_call_resolved_type(Type.Named{name: name}, environment, program)
+    marker_type: sema_call_resolved_type(Type.Named{name: name}, check.environment.*, check.program.*)
     use_type: Type.Tuple{
         fields: [TypeTupleField]{
             TypeTupleField{name: target.field, ty: marker_type},
@@ -1419,7 +1419,7 @@ sema_fact_uses_check: fn(name: String, symbol: Symbol?, span: Span, expected: Ty
         },
     }
     folded: sema_tree_node(Type.List{element: use_type}, TExprKind.CtLit{value: TComptimeValue.List{values: uses}}, span)
-    SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)}
+    SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
 // The marker declaration a `uses` subject names: the marker struct a bare
@@ -1636,10 +1636,10 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
             return sema_fact_read_no_value(member, span, check.diagnostics)
         }
         if !is_constant && read == FactRead.Uses {
-            return sema_fact_uses_check(name, symbol, span, expected, check.environment.*, check.program.*, check.diagnostics)
+            return sema_fact_uses_check(name, symbol, span, expected, check)
         }
         if !is_constant {
-            resolved: sema_fact_subject_value(read, name, symbol, check.environment.*, check.program.*) ?? {
+            resolved: sema_fact_subject_value(read, name, symbol, check) ?? {
                 if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields {
                     return sema_fact_read_unhandled()
                 }
@@ -1652,14 +1652,14 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
     // `module.Marker.reflect().uses` names a marker struct of another module.
     if base == .Field(_, _, _, _) && read == FactRead.Uses {
         if sema_fact_expr_path(base) == .Val(path) {
-            return sema_fact_uses_check(path, None, span, expected, check.environment.*, check.program.*, check.diagnostics)
+            return sema_fact_uses_check(path, None, span, expected, check)
         }
     }
     // `module.Type.reflect().name`: a qualified type path is no value to check; it reads
     // the reflected type it names.
     if base == .Field(_, _, _, _) && (read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields) {
         if sema_fact_expr_path(base) == .Val(path) {
-            if sema_fact_subject_value(read, path, None, check.environment.*, check.program.*) == .Val(resolved) {
+            if sema_fact_subject_value(read, path, None, check) == .Val(resolved) {
                 folded: sema_tree_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
                 return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, check.environment.*, check.program.*, check.diagnostics)}
             }
@@ -1702,7 +1702,7 @@ sema_fact_enum_values: fn(base: Expr, span: Span, expected: Type?, check: ^SemaB
             return sema_fact_read_failed()
         }
         symbol: sema_expression_type_symbol(check.scopes, check.environment.*, check.program.*, written) ?? return sema_fact_read_unhandled()
-        shape: sema_scope_declaration_enum(check.environment.*, check.program.*, symbol.id) ?? {
+        shape: sema_scope_declaration_enum(check, symbol.id) ?? {
             check.diagnostics.push(sema_fact_enum_values_not_enum(written, at))
             return sema_fact_read_failed()
         }
