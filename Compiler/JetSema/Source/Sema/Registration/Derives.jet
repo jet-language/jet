@@ -3189,12 +3189,16 @@ SemaDeriveMemo: struct {
     // A record read: its bytes, the reader of its expansions, which hold
     // the module identities and strings they name, the first key of each
     // hash (sema_derive_memo_hash), and per key the next key of its hash,
-    // or -1; `taken` counts the expansions taken from it.
+    // or -1; `taken` counts the expansions taken from it, and `unread` those
+    // that did not read and expanded from their template instead, which
+    // registration keeps for the compile's census
+    // (SemaRegistrationModule.derive_unread).
     bytes: [U8]{[U8]{}},
     reader: BodyCodecIn{BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}},
     first: [U64:Int]{[U64:Int]{}},
     chain: [Int]{[Int]{}},
     taken: Int{0},
+    unread: Int{0},
 }
 
 // A record as the codec writes it in indexed form (sema_derive_memo_read
@@ -3219,8 +3223,12 @@ sema_derive_memo_expand: fn(memo: ^SemaDeriveMemo, trait_name: String, body: [De
         found := memo.first.get(sema_derive_memo_hash(key)) ?? -1
         loop found >= 0 {
             if memo.keys[found] == key {
+                taken: sema_derive_memo_take(memo, found) ?? {
+                    memo.unread += 1
+                    return sema_derive_expand_provider_body(body, type_info, diagnostics)
+                }
                 memo.taken += 1
-                return Val(sema_derive_memo_take(memo, found))
+                return Val(taken)
             }
             found = memo.chain[found]
         }
@@ -3261,17 +3269,17 @@ sema_derive_memo_hash: fn(key: [U8]) -> U64 Never! {
     hash
 }
 
-// The expansion of `memo`'s record at `found`. The record was read whole
-// when the Core library was built (CoreBodies.jet sema_core_bodies_problem),
-// so one that does not read is jet's own defect.
-sema_derive_memo_take: fn(memo: ^SemaDeriveMemo, found: Int) -> [Item] Never! {
+// The expansion of `memo`'s record at `found`; None when it does not read.
+// The record was read whole when the Core library was built (CoreBodies.jet
+// sema_core_bodies_problem), so one that does not read is jet's own defect,
+// which sema_derive_memo_expand counts and expands from its template.
+sema_derive_memo_take: fn(memo: ^SemaDeriveMemo, found: Int) -> [Item]? Never! {
     memo.reader.at = memo.starts[found]
     memo.reader.end = memo.bytes.len()
+    memo.reader.failed = false
     expanded: body_codec_get_list_item(memo.bytes, memo.reader)
-    if memo.reader.failed {
-        panic("internal compiler error: the derive expansion {found} of a Core derive record does not read")
-    }
-    expanded
+    if memo.reader.failed -> return None
+    Val(expanded)
 }
 
 // Pushes onto `captures` the record of the expansions `memo` captured: the

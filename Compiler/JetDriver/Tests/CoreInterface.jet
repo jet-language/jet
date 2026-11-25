@@ -46,6 +46,14 @@ interface_test_fixture_rows: fn() -> [JetDriverCoreSource] {
     }
 }
 
+// The interface rows of each Core unit of `rows`
+// (jet_driver_core_interface_units), each made.
+interface_test_units: fn(rows: ^^[JetDriverCoreSource], threads: CompilerThreads) -> [JetDriverCoreInterfaceUnit] {
+    made := jet_driver_core_interface_units(rows.move(), threads)
+    if made.problem == .Val(problem) -> panic("the Core interface rows were not made: {problem}")
+    made.units.move()
+}
+
 // The text of `start..<end` in `text`.
 interface_test_slice: fn(text: String, start: Int, end: Int) -> String {
     String.from_bytes(text.bytes()[start..<end]) ?? panic("the span {start}..{end} cuts a character")
@@ -104,7 +112,7 @@ interface_test_fragments_read: fn(bytes: [U8], path: String, at: Int, fragments:
 }
 
 #Test("a Core unit's interface keeps its held declarations and the body of each function with statements") {
-    units: jet_driver_core_interface_units(interface_test_fixture_rows(), compiler_threads_single())
+    units: interface_test_units(interface_test_fixture_rows(), compiler_threads_single())
     assert_eq(units.len(), 1)
     unit: units[0]
     bodies: loop body in unit.bodies -> interface_test_slice(INTERFACE_FIXTURE, body.start, body.end)
@@ -130,7 +138,7 @@ interface_test_fragments_read: fn(bytes: [U8], path: String, at: Int, fragments:
         rows.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text(text)})
         texts.push(rows[rows.len() - 1].source())
     }
-    units: jet_driver_core_interface_units(rows.move(), compiler_threads_single())
+    units: interface_test_units(rows.move(), compiler_threads_single())
     bodies := 0
     headless := [String]{}
     loop unit in units {
@@ -145,7 +153,7 @@ interface_test_fragments_read: fn(bytes: [U8], path: String, at: Int, fragments:
 }
 
 #Test("a cut or foreign interface file reads as none") {
-    bytes: jet_driver_core_interface_bytes(jet_driver_core_interface_units(interface_test_fixture_rows(), compiler_threads_single()))
+    bytes: jet_driver_core_interface_bytes(interface_test_units(interface_test_fixture_rows(), compiler_threads_single()))
     entries: jet_driver_core_interface_entries(bytes) ?? panic("the interface has no directory")
     assert(jet_driver_core_interface_entries(bytes[0..<8]) == None)
     assert(jet_driver_core_interface_entries([U8]{U8{0}, U8{0}, U8{0}, U8{0}}) == None)
@@ -412,7 +420,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 // is the one the whole parse gives.
 #Test("a load that reads the Core interface gives the program and spans of one that parses Core whole") {
     source: "use {{\n    files: core.files\n    sys: core.sys\n    process: core.process\n}}\n\nrun: fn() {{\n    path: files.join(sys.temp_dir(), \"probe-{{process.current_pid()}}\")\n    text: files.read(path) ?? \"none\"\n    print(\"{{text.len()}} {{path}} {{[Int]{{3, 1, 2}}.sorted()}}\")\n}}\n"
-    units: jet_driver_core_interface_units(interface_test_core_rows(), compiler_threads_single())
+    units: interface_test_units(interface_test_core_rows(), compiler_threads_single())
     eager: interface_test_load(source, interface_test_core_rows(), [U8]{})
     lazy: interface_test_load(source, interface_test_core_rows(), jet_driver_core_interface_bytes(units))
     assert(eager.load.complete)
@@ -465,7 +473,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 // counters are those of a load that decodes them in turn on one thread.
 #Test("a load that decodes the Core interface's ready parses on several threads gives the program of one that decodes them on one") {
     source: "use {{\n    files: core.files\n    sys: core.sys\n    process: core.process\n}}\n\nrun: fn() {{\n    path: files.join(sys.temp_dir(), \"probe-{{process.current_pid()}}\")\n    text: files.read(path) ?? \"none\"\n    print(\"{{text.len()}} {{path}} {{[Int]{{3, 1, 2}}.sorted()}}\")\n}}\n"
-    units: jet_driver_core_interface_units(interface_test_core_rows(), compiler_threads_single())
+    units: interface_test_units(interface_test_core_rows(), compiler_threads_single())
     interface: jet_driver_core_interface_bytes(units)
     one: interface_test_load_on(source, interface_test_core_rows(), interface, 1)
     many: interface_test_load_on(source, interface_test_core_rows(), interface, 8)
@@ -487,8 +495,8 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     loop row in rows -> text_bytes += row.source().bytes().len()
     // Enough Core text for the interface to admit more than one thread.
     assert(text_bytes >= 2 * JET_DRIVER_CORE_INTERFACE_BYTES_PER_THREAD)
-    one: jet_driver_core_interface_bytes(jet_driver_core_interface_units(interface_test_core_rows(), compiler_threads_single()))
-    many: jet_driver_core_interface_bytes(jet_driver_core_interface_units(rows, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}))
+    one: jet_driver_core_interface_bytes(interface_test_units(interface_test_core_rows(), compiler_threads_single()))
+    many: jet_driver_core_interface_bytes(interface_test_units(rows, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}))
     assert(one == many)
 }
 
@@ -497,7 +505,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 // declaration, never parsing the text again.
 #Test("a Core unit whose ready parses are cut off stops the load as an internal problem") {
     source: "use d: core.devtools\nrun: fn() {{ print(d.twice(d.Shape{{width: 2}}.area())) }}\n"
-    units := jet_driver_core_interface_units(interface_test_fixture_rows(), compiler_threads_single())
+    units := interface_test_units(interface_test_fixture_rows(), compiler_threads_single())
     assert(units[0].fragments.len() > 0)
     units[0].fragments = [U8]{}
     cut: interface_test_load(source, interface_test_fixture_rows(), jet_driver_core_interface_bytes(units))
@@ -509,7 +517,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 // An interface written for other text parses the unit whole.
 #Test("a Core unit whose text isn't the one its interface rows hash parses whole") {
     source: "use d: core.devtools\nrun: fn() {{ print(d.twice(d.Shape{{width: 2}}.area())) }}\n"
-    units: jet_driver_core_interface_units(interface_test_fixture_rows(), compiler_threads_single())
+    units: interface_test_units(interface_test_fixture_rows(), compiler_threads_single())
     interface: jet_driver_core_interface_bytes(units)
     rows: [JetDriverCoreSource]{
         {module_name: "core.devtools", alias: "core_devtools", path: "Core/interface-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(INTERFACE_FIXTURE.replace("value * 2", "value * 3"))},
@@ -529,7 +537,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 // its text, still lazily.
 #Test("a Core unit whose interface heads don't read back parses its heads from its text") {
     source: "use d: core.devtools\nrun: fn() {{ print(d.twice(d.Shape{{width: 2}}.area())) }}\n"
-    units := jet_driver_core_interface_units(interface_test_fixture_rows(), compiler_threads_single())
+    units := interface_test_units(interface_test_fixture_rows(), compiler_threads_single())
     units[0].heads = units[0].heads[0..<units[0].heads.len() - 1]
     cut: interface_test_load(source, interface_test_fixture_rows(), jet_driver_core_interface_bytes(units))
     assert(cut.load.complete)
@@ -556,7 +564,7 @@ interface_test_marked_rows: fn() -> [JetDriverCoreSource] {
 // that parses Core whole.
 #Test("a function below a declaration whose marker shares its line parses whole in a load that reads the Core interface") {
     source: "use d: core.devtools\nrun: fn() {{ print(d.twice(d.Shape{{width: 2}}.area())) }}\n"
-    units: jet_driver_core_interface_units(interface_test_marked_rows(), compiler_threads_single())
+    units: interface_test_units(interface_test_marked_rows(), compiler_threads_single())
     lazy: interface_test_load(source, interface_test_marked_rows(), jet_driver_core_interface_bytes(units))
     assert_eq(lazy.counters.get("counters.load.core_lazy_modules"), Val(1))
     assert((lazy.counters.get("counters.load.core_bodies_restored") ?? 0) > 0)

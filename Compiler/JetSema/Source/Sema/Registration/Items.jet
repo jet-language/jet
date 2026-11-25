@@ -823,8 +823,11 @@ SemaRegistrationModule: struct {
     // The record of the derive templates' expansions the Core library's
     // check kept for this Core module (Derives.jet sema_derive_memo_capture),
     // at most one, which its bodies file holds (CoreBodies.jet
-    // sema_core_derive_bodies).
+    // sema_core_derive_bodies), and how many expansions of the record this
+    // module took did not read (SemaDeriveMemo.unread), a census row
+    // (CoreBodies.jet sema_core_bodies_unread).
     derive_captures: [SemaDeriveCapture]{[SemaDeriveCapture]{}},
+    derive_unread: Int{0},
     // True when any local symbol, import binding, or namespace entry visible
     // from this module contains `.`, so dotted canonical lookups must probe
     // local scope first (computed by sema_registration_index_canonical_nominals).
@@ -860,12 +863,15 @@ SemaRegistrationHostHooks: struct {
     // on compiler threads wait in `core_bodies_ahead`, by function symbol
     // id, for the wave's loads to take them, each leaving None in its place
     // (CoreBodies.jet sema_core_bodies_ahead, sema_core_body_ahead_take).
+    // A record that does not read is a row of `core_bodies_unread`, the
+    // compile's census of them (CoreBodies.jet sema_core_bodies_unread).
     core_bodies: SemaCoreBodies?{None},
     core_bodies_records: SemaCoreBodiesRecords?{None},
     core_bodies_loaded: [Bool]{[Bool]{}},
     core_bodies_read: Int{0},
     core_bodies_reader: BodyCodecIn{BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}},
     core_bodies_ahead: [U32:SemaCoreBodyAhead?]{[U32:SemaCoreBodyAhead?]{}},
+    core_bodies_unread: [String]{[String]{}},
 }
 
 // The folded build snapshot the driver seeds before checking. Sema folds
@@ -4219,6 +4225,7 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
     // bound to that Core takes them in place of expanding.
     derive_memo := owned.derive_memo.move()
     sema_derive_expand_builtin_items_with(module_row.program.items, diagnostics, derive_memo)
+    module_row.derive_unread = derive_memo.unread
     sema_derive_memo_capture(derive_memo.move(), module_row.derive_captures)
     // Explicit and structurally selected codecs
     // enter as ordinary generated `impl T.Encode`/`impl T.Decode` items.

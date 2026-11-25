@@ -116,7 +116,8 @@ derive_record_memo: fn(source: String) -> SemaDeriveMemo {
     file: derive_record_file([SemaCoreBody]{SemaCoreBody{key: key, bytes: capture.bytes.move(), symbols: [String]{}, decls: [String]{}, modules: [String]{}, strings: capture.strings.move()}})
     position: sema_core_bodies_position(Val(file), key) ?? panic("DeriveRecord: the bodies file has no record keyed `{key}`")
     read := 0
-    record: sema_core_derive_read(Val(file), None, module_table(), position, read) ?? panic("DeriveRecord: the record does not read")
+    unread := [String]{}
+    record: sema_core_derive_read(Val(file), None, module_table(), position, read, unread) ?? panic("DeriveRecord: the record does not read: {unread:Debug}")
     if read == 0 -> panic("DeriveRecord: reading the record counted no bytes")
     record
 }
@@ -157,6 +158,20 @@ derive_record_apply: fn(source: String, memo: ^SemaDeriveMemo) -> Int {
     taken: derive_record_apply(derive_record_source("    x: Int,\n    y: Int,\n    z: Int,", ""), memo)
     assert(taken > 0)
     assert(taken < memo.keys.len())
+}
+
+// An expansion of a derive record that does not read is jet's own defect:
+// the type expands from its template, the items the record would give, and
+// the expansion counts in SemaDeriveMemo.unread, the compile's census row
+// (CoreBodies.jet sema_core_bodies_unread).
+#Test("a derive record expansion that does not read expands from its template and is counted") {
+    source: derive_record_source(DERIVE_RECORD_POINT, "")
+    memo := derive_record_memo(source)
+    count: memo.keys.len()
+    assert(count >= 3)
+    memo.bytes = memo.bytes.slice(0, memo.starts[0])
+    assert_eq(derive_record_apply(source, memo), 0)
+    assert_eq(memo.unread, count)
 }
 
 // The registration graph of derive_record_source as Core module

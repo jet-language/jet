@@ -179,6 +179,24 @@ JetDriverCoreInterfaceJob: struct {
     text: String,
 }
 
+// Why the build can't make a Core unit's interface rows: its text does not
+// parse cleanly whole, or a ready parse cut from it does not stand alone
+// (jet_driver_core_ready_write). The Core library's build step reports it
+// and fails (JetDriverCoreInterfaceMade.problem).
+#Error
+JetDriverCoreInterfaceError: struct {
+    message: String,
+}
+
+// The interface rows of Core units, in order, up to the first unit whose
+// rows can't be made, whose problem (JetDriverCoreInterfaceError) ends them;
+// the Core library's build step reports it and fails (JetCLI
+// CoreLibrary.jet).
+JetDriverCoreInterfaceMade: struct {
+    units: [JetDriverCoreInterfaceUnit],
+    problem: String?,
+}
+
 // The interface rows of each Core unit of `rows`, in their order
 // (jet_driver_core_interface_rows). The texts are read here; a unit's rows
 // read nothing of another unit's, so consecutive parts of the units, even
@@ -186,8 +204,9 @@ JetDriverCoreInterfaceJob: struct {
 // its own thread with no threads of its own; the rows are those of making
 // each in turn. The runtime step waits on them before the Core library
 // compiles, and one thread making them in turn ran longer than the Core
-// library's own check, build and optimizer beside it.
-jet_driver_core_interface_units: fn(rows: ^^[JetDriverCoreSource], threads: CompilerThreads) -> [JetDriverCoreInterfaceUnit] {
+// library's own check, build and optimizer beside it. The problem is that
+// of the first unit, in their order, whose rows can't be made.
+jet_driver_core_interface_units: fn(rows: ^^[JetDriverCoreSource], threads: CompilerThreads) -> JetDriverCoreInterfaceMade {
     catalog: sema_units_catalog_names(SEMA_UNITS_CATALOG)
     jobs := [JetDriverCoreInterfaceJob]{}
     weights := [Int]{}
@@ -214,20 +233,24 @@ jet_driver_core_interface_units: fn(rows: ^^[JetDriverCoreSource], threads: Comp
         held.reverse()
         parts.push(held.move())
     }
-    made: jet_driver_core_interface_parts(parts, catalog)
-    units := [JetDriverCoreInterfaceUnit]{}
-    loop part in made.move() {
-        loop unit in part.move() -> units.push(unit)
+    made := JetDriverCoreInterfaceMade{units: [JetDriverCoreInterfaceUnit]{}, problem: None}
+    done: jet_driver_core_interface_parts(parts, catalog)
+    loop part in done.move() {
+        loop unit in part.units.move() -> made.units.push(unit)
+        if part.problem != None {
+            made.problem = part.problem.move()
+            return made
+        }
     }
-    units
+    made
 }
 
 // The rows of the units of `parts` (consecutive parts, held last first), in
 // part order: each part's on its own compiler thread, the last part's on
 // this one, each reading `catalog` in place. Each part runs on its thread
 // alone, so no spawned thread spawns.
-jet_driver_core_interface_parts: fn(parts: ^[[JetDriverCoreInterfaceJob]], catalog: SemaUnitsCatalogNames) -> [[JetDriverCoreInterfaceUnit]] {
-    made := [[JetDriverCoreInterfaceUnit]]{}
+jet_driver_core_interface_parts: fn(parts: ^[[JetDriverCoreInterfaceJob]], catalog: SemaUnitsCatalogNames) -> [JetDriverCoreInterfaceMade] {
+    made := [JetDriverCoreInterfaceMade]{}
     part: parts.pop() ?? return made
     if parts.len() == 0 {
         made.push(jet_driver_core_interface_part(part, catalog, compiler_threads_single()))
@@ -242,22 +265,27 @@ jet_driver_core_interface_parts: fn(parts: ^[[JetDriverCoreInterfaceJob]], catal
     made
 }
 
-// The rows of each unit of `jobs`, in order, made on `threads`.
-jet_driver_core_interface_part: fn(jobs: ^^[JetDriverCoreInterfaceJob], catalog: SemaUnitsCatalogNames, threads: CompilerThreads) -> [JetDriverCoreInterfaceUnit] {
-    units := [JetDriverCoreInterfaceUnit]{}
-    loop job in jobs.move() -> units.push(jet_driver_core_interface_rows(job, catalog, threads))
-    units
+// The rows of each unit of `jobs`, in order, made on `threads`, up to the
+// first unit whose rows can't be made.
+jet_driver_core_interface_part: fn(jobs: ^^[JetDriverCoreInterfaceJob], catalog: SemaUnitsCatalogNames, threads: CompilerThreads) -> JetDriverCoreInterfaceMade {
+    made := JetDriverCoreInterfaceMade{units: [JetDriverCoreInterfaceUnit]{}, problem: None}
+    loop job in jobs.move() {
+        jet_driver_core_interface_rows(job, catalog, threads, made)
+        if made.problem != None -> return made
+    }
+    made
 }
 
-// The interface rows of the Core unit `row`: its text parsed whole holding
-// nothing (jet_driver_core_open_parse) and as a load parses it (a Core job
-// of jet_driver_parse_one, not a `jet test` entry), then parsed from its
-// declaration heads over those rows as a load reading them parses it, for
-// the program it keeps (`heads`), and, for a unit a load reads lazily, its
-// ready parses (jet_driver_core_ready_write), cut from the two whole parses,
-// and its mentions of the catalog units `catalog`. Each whole parse is made
-// once.
-jet_driver_core_interface_rows: fn(row: ^^JetDriverCoreInterfaceJob, catalog: SemaUnitsCatalogNames, threads: CompilerThreads) -> JetDriverCoreInterfaceUnit {
+// Puts into `made` the interface rows of the Core unit `row`: its text
+// parsed whole holding nothing (jet_driver_core_open_parse) and as a load
+// parses it (a Core job of jet_driver_parse_one, not a `jet test` entry),
+// then parsed from its declaration heads over those rows as a load reading
+// them parses it, for the program it keeps (`heads`), and, for a unit a
+// load reads lazily, its ready parses (jet_driver_core_ready_write), cut
+// from the two whole parses, and its mentions of the catalog units
+// `catalog`. Each whole parse is made once. Ready parses that can't be made
+// put their problem instead.
+jet_driver_core_interface_rows: fn(row: ^^JetDriverCoreInterfaceJob, catalog: SemaUnitsCatalogNames, threads: CompilerThreads, made: ^JetDriverCoreInterfaceMade) {
     text: row.text
     open: jet_driver_core_open_parse(text, threads)
     loaded := name_table()
@@ -296,14 +324,17 @@ jet_driver_core_interface_rows: fn(row: ^^JetDriverCoreInterfaceJob, catalog: Se
             hold: if parsed.holds -> Val(JetDriverReachHoldRow{module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime}) else -> JetDriverReachHoldRow?{None}
             held_parse = jet_driver_reach_parse_source(jet_driver_core_ready_source(text, threads), hold, threads).parsed
         }
-        ready = jet_driver_core_ready_write(row, parsed.parsed.program.items, bodies, words.held, held_parse.move(), open.parsed.move())
+        ready = jet_driver_core_ready_write(row, parsed.parsed.program.items, bodies, words.held, held_parse.move(), open.parsed.move()) ?? {
+            made.problem = Val(err.message)
+            return
+        }
         mentions = Val(sema_units_source_mentions(text, catalog))
     }
     heads := [U8]{}
     if parsed.from_heads && parsed.parsed.diagnostics.len() == 0 {
         heads = jet_driver_core_heads_bytes(parsed.parsed.program)
     }
-    JetDriverCoreInterfaceUnit{
+    made.units.push(JetDriverCoreInterfaceUnit{
         path: row.path.move(),
         module_name: row.module_name.move(),
         text_bytes: text.bytes().len(),
@@ -319,7 +350,7 @@ jet_driver_core_interface_rows: fn(row: ^^JetDriverCoreInterfaceJob, catalog: Se
         used_import_names: ready.used_import_names.move(),
         fragments: ready.bytes.move(),
         mentions: mentions.move(),
-    }
+    })
 }
 
 // The whole parse `parsed` (jet_driver_parse_core_text with `keep_dropped`)
@@ -369,10 +400,10 @@ JetDriverCoreReadyWrite: struct {
 // what the parse holding nothing gives inside its span: its one item and
 // its block spans, else arms and debug sites, as a parse of that span alone
 // gives them (jet_driver_reach_parse_held). A Core text that doesn't parse
-// cleanly, or a held declaration that isn't one item, stops the build.
-jet_driver_core_ready_write: fn(row: JetDriverCoreInterfaceJob, heads: [Item], bodies: [Span], held: [JetDriverReachDeclaration], whole: ^^ParseResult, open: ^^ParseResult) -> JetDriverCoreReadyWrite {
+// cleanly, or a held declaration that isn't one item, is the build's error.
+jet_driver_core_ready_write: fn(row: JetDriverCoreInterfaceJob, heads: [Item], bodies: [Span], held: [JetDriverReachDeclaration], whole: ^^ParseResult, open: ^^ParseResult) -> JetDriverCoreReadyWrite JetDriverCoreInterfaceError! {
     if jet_driver_has_errors(whole.diagnostics) || jet_driver_has_errors(open.diagnostics) {
-        panic("the Core unit {row.path} does not parse cleanly whole, so its interface has no ready parses")
+        return Err(JetDriverCoreInterfaceError{message: "the Core unit {row.path} does not parse cleanly whole, so its interface has no ready parses"})
     }
     ends: jet_driver_core_item_ends(heads)
     parts := [Program]{}
@@ -385,7 +416,7 @@ jet_driver_core_ready_write: fn(row: JetDriverCoreInterfaceJob, heads: [Item], b
     loop item in whole.program.items.move() {
         end: jet_driver_core_item_end(item) ?? 0
         if end == 0 && ends.len() > 0 {
-            panic("an item of the Core unit {row.path} has no span, though its heads cut regions")
+            return Err(JetDriverCoreInterfaceError{message: "an item of the Core unit {row.path} has no span, though its heads cut regions"})
         }
         parts[jet_driver_core_region(ends, end - 1)].items.push(item)
     }
@@ -420,7 +451,7 @@ jet_driver_core_ready_write: fn(row: JetDriverCoreInterfaceJob, heads: [Item], b
             write.regions.push(JetDriverCoreFragment{at: write.bytes.len(), size: 0})
             next
         }
-        fragment: jet_driver_core_ready_put(write.bytes, part, row.path)
+        fragment: jet_driver_core_ready_put(write.bytes, part, row.path) ?? return Err(err)
         write.regions.push(fragment)
     }
     loop declaration in held {
@@ -430,7 +461,7 @@ jet_driver_core_ready_write: fn(row: JetDriverCoreInterfaceJob, heads: [Item], b
             if end > declaration.span.start && end <= declaration.span.end -> part.items.push(item)
         }
         if part.items.len() != 1 {
-            panic("the held declaration `{declaration.name}` of the Core unit {row.path} parses as {part.items.len()} items")
+            return Err(JetDriverCoreInterfaceError{message: "the held declaration `{declaration.name}` of the Core unit {row.path} parses as {part.items.len()} items"})
         }
         from: declaration.span.start
         to: declaration.span.end
@@ -443,10 +474,10 @@ jet_driver_core_ready_write: fn(row: JetDriverCoreInterfaceJob, heads: [Item], b
         loop site in open.program.debug_sites {
             if site.name_start >= from && site.name_start < to -> part.debug_sites.push(site)
         }
-        fragment: jet_driver_core_ready_put(write.bytes, part, row.path)
+        fragment: jet_driver_core_ready_put(write.bytes, part, row.path) ?? return Err(err)
         write.held.push(fragment)
     }
-    write
+    Ok(write)
 }
 
 // The bytes of the Core text `text` with its inline-package carrier blanked,
@@ -460,17 +491,17 @@ jet_driver_core_ready_source: fn(text: String, threads: CompilerThreads) -> [U8]
 
 // Appends `part`, one ready parse of the Core unit at `path`, to `bytes` in
 // the syntax codec, and returns where it sits. A parse that names an id of
-// one compile's own tables, which no other compile reads back, stops the
-// build.
-jet_driver_core_ready_put: fn(bytes: ^[U8], part: Program, path: String) -> JetDriverCoreFragment {
+// one compile's own tables, which no other compile reads back, is the
+// build's error.
+jet_driver_core_ready_put: fn(bytes: ^[U8], part: Program, path: String) -> JetDriverCoreFragment JetDriverCoreInterfaceError! {
     out := body_codec_out()
     body_codec_put_program(out, part)
     if out.symbols.len() > 0 || out.decls.len() > 0 || out.modules.len() > 0 {
-        panic("a ready parse of the Core unit {path} names one compile's own ids")
+        return Err(JetDriverCoreInterfaceError{message: "a ready parse of the Core unit {path} names one compile's own ids"})
     }
     at: bytes.len()
     bytes.extend(out.bytes)
-    JetDriverCoreFragment{at: at, size: out.bytes.len()}
+    Ok(JetDriverCoreFragment{at: at, size: out.bytes.len()})
 }
 
 // A run of the interface's bytes read into memory of the load's own
