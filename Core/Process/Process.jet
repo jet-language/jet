@@ -804,15 +804,18 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
 #Test("the spec builders, launch steps and child steps run their Core bodies") {
     // A builder takes its spec and answers it changed; a named spec read
     // again after a builder keeps its own value and ends once.
-    base: cmd(["sh", "-c", "printf '%s %s|%s|%s|%s' \"$1\" \"$2\" \"$JET_LEAF_A\" \"${JET_LEAF_B-unset}\" \"$(pwd)\"", "sh"])
+    base: cmd(["sh", "-c", "printf '%s %s|%s|%s|%s' \"$1\" \"$2\" \"$JET_LEAF_A\" \"${{JET_LEAF_B-unset}}\" \"$(pwd)\"", "sh"])
     built: base.arg("first").args_extend([String]{"second"}).env("JET_LEAF_A", "a").env("JET_LEAF_B", "b").env_remove("JET_LEAF_B").cwd("/")
-    limited: built.output_limit(1 << 20).memory_limit(1 << 30).open_file_limit(256).cpu_affinity([Int]{0}).io_priority(4).detached()
+    limited: built.output_limit(1 << 20).memory_limit(1 << 30).open_file_limit(256).cpu_affinity([Int]{0}).io_priority(4)
     assert_eq((limited.run() ?? panic("the built spec did not run: {err}")).output, "first second|a|unset|/")
     assert_eq((base.run() ?? panic("the base spec did not run: {err}")).output, " ||unset|{core.sys.current_dir() ?? ""}")
-    cleared: cmd(["/bin/sh", "-c", "printf %s \"${HOME-unset}\""]).env_clear().io_idle()
+    cleared: cmd(["/bin/sh", "-c", "printf %s \"${{HOME-unset}}\""]).env_clear().io_idle()
     assert_eq((cleared.run_checked() ?? panic("the cleared spec did not run: {err}")).output, "unset")
     assert(cmd(["false"]).run_checked() == .Err(_))
-    assert(cmd(["true"]).plan() == .Ok(_))
+    // A plan resolves under an authority policy from `.under(…)` only.
+    assert(cmd(["true"]).plan() == .Err(.InvalidInput(_)))
+    // A detached child runs apart from this process, so it hands back no output.
+    assert((cmd(["sh", "-c", "printf out"]).detached().run() ?? panic("the detached spec did not run: {err}")).output == "")
     child: cmd(["sleep", "10"]).spawn() ?? panic("sleep did not start: {err}")
     assert(child.id() > 0)
     assert_eq(child.exited() ?? true, false)
