@@ -24,10 +24,6 @@ use jet_foundation.[
     type_unqualified_nominals,
     UnOp,
     core_identity_in_module,
-    TEST_SETTINGS_PLAN_ENV,
-    TestSettingKind,
-    TestSettingRow,
-    test_setting_row,
     module_text,
     module_is_core,
 ]
@@ -797,112 +793,10 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                 }
                 return sema_data_try_accessor(receiver, receiver_value, name, method, args, type_args, span, expected, check)
             }
-            // `suite.run()` runs the package's `#Test` blocks on the harness the
-            // `Test` value carries and returns the failure count.
-            if name == "Test" && method == "run" {
-                if args.len() != 0 {
-                    sema_data_arity_diagnostic("Test.run", 0, args.len(), span, check.diagnostics)
-                }
-                if type_args.len() != 0 {
-                    sema_data_check_explicit_type_args("Test.run", type_args, 0, span, check.diagnostics)
-                }
-                sema_data_check_discarded_arguments(args, check)
-                if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
-                    return SemaMethodSpecialCheck{handled: true, value: None}
-                }
-                value := sema_tree_node(Type.Int, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.TestSuiteRun, args: [TExpr]{}}, span)
-                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
-            }
-            // `t.suite("name", body)` declares a code suite:
-            // the name is a literal, so `jet test --profile` lists every suite
-            // without running code. It is the core.testing source body that
-            // fills the TestSuiteRun role, which calls `body` with a
-            // `TestRows` only in the profile child that runs that suite.
-            if name == "Test" && method == "suite" {
-                if args.len() != 2 {
-                    sema_data_arity_diagnostic("Test.suite", 2, args.len(), span, check.diagnostics)
-                    sema_data_check_discarded_arguments(args, check)
-                    return SemaMethodSpecialCheck{handled: true, value: None}
-                }
-                if type_args.len() != 0 {
-                    sema_data_check_explicit_type_args("Test.suite", type_args, 0, span, check.diagnostics)
-                }
-                if sema_call_core_no_os_refused(check, "core.testing", "suite", span) {
-                    return SemaMethodSpecialCheck{handled: true, value: None}
-                }
-                target: sema_call_core_role_target("TestSuiteRun", [Type]{}, span, check.environment.*, check.program.*, check.diagnostics) ?? {
-                    check.context.incomplete_reasons.push("Test.suite must resolve its canonical Jet source body")
-                    return SemaMethodSpecialCheck{handled: true, value: None}
-                }
-                // `fn(TestRows)`, as the TestSuiteRun body declares its own.
-                rows_type: if target.signature == .Fn(params, _, _, _, _, _) && params.len() == 2 -> params[1].copy() else -> panic("the TestSuiteRun body must take a name and a body")
-                suite_name: sema_data_check_argument("Test.suite", 0, args[0], Type.String, check)
-                body: sema_data_check_argument("Test.suite", 1, args[1], rows_type, check)
-                checked_name: suite_name ?? return SemaMethodSpecialCheck{handled: true, value: None}
-                if sema_plugin_literal_text(checked_name) == None {
-                    check.diagnostics.push(sema_error("E0635", args[0].span, "the suite name passed to `Test.suite` is computed", "`jet test --profile` lists a package's code suites by reading their names, without running `test: fn`", "write the suite name as a string literal, as in `t.suite(\"perf\", perf_rows)`"))
-                    return SemaMethodSpecialCheck{handled: true, value: None}
-                }
-                checked_body: body ?? return SemaMethodSpecialCheck{handled: true, value: None}
-                if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
-                    return SemaMethodSpecialCheck{handled: true, value: None}
-                }
-                if !sema_effect_record_intrinsic_effects(check, "Test.suite", span, [EffectRowEntry]{EffectRowEntry{name: "FS", span: span}, EffectRowEntry{name: "Env", span: span}}) {
-                    return SemaMethodSpecialCheck{handled: true, value: None}
-                }
-                callee: sema_call_callee_decl(check.program.*, target.symbol.id, span, check.diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-                value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(checked_name), sema_value_method_source_arg(checked_body)}}, span)
-                return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, check)}
-            }
-            // `t.shard(3, 8)`, `t.results("r.json")`, …: a
-            // `jet test` setting row (TestSettings.jet). The call appends
-            // `name<TAB>value` to the plan file TEST_SETTINGS_PLAN_ENV names
-            // and does nothing in a run without it; `jet test` checks the value.
-            if name == "Test" && test_setting_row(method) == .Val(row) {
-                return sema_data_check_test_setting(row, receiver, receiver_value, args, type_args, span, expected, check)
-            }
         }
         .Apply(_, _) | .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     SemaMethodSpecialCheck{handled: false, value: None}
-}
-
-// `t.<setting>(…)` on a `Test` value: one argument of the row's kind (none or
-// a Bool for a Switch, two Ints `i, n` for a Shard), lowered to the runtime
-// handle op that appends the setting's plan line.
-sema_data_check_test_setting: fn(row: TestSettingRow, receiver: Expr, receiver_value: TExpr, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaMethodSpecialCheck {
-    site: "Test.{row.name}"
-    if type_args.len() != 0 {
-        sema_data_check_explicit_type_args(site, type_args, 0, span, check.diagnostics)
-    }
-    arity: if row.kind == TestSettingKind.Shard -> 2 else -> 1
-    bare: row.kind == TestSettingKind.Switch && args.len() == 0
-    if !bare && args.len() != arity {
-        sema_data_arity_diagnostic(site, arity, args.len(), span, check.diagnostics)
-        sema_data_check_discarded_arguments(args, check)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    parts := [TStrPart]{TStrPart.Literal{text: "{row.name}\t"}}
-    if bare -> parts.push(TStrPart.Literal{text: "true"})
-    loop index in 0..<args.len() {
-        ty: if row.kind == {
-            .Switch -> Type.Bool
-            .Count | .Seed | .Retries | .Shard -> Type.Int
-            .Levels -> Type.List{element: Type.String}
-            .Text | .Path | .Capture | .Duration | .Size -> Type.String
-        }
-        value: sema_data_check_argument(site, index, args[index], ty, check) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        if index > 0 -> parts.push(TStrPart.Literal{text: "/"})
-        parts.push(TStrPart.Interpolation{value: value, debug: row.kind == TestSettingKind.Levels})
-    }
-    parts.push(TStrPart.Literal{text: "\n"})
-    if !sema_ownership_check_call_receiver(check, receiver, AccessConvention.Read, span) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    key: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: TEST_SETTINGS_PLAN_ENV}}}, span)
-    line: sema_tree_node(Type.String, TExprKind.StrLit{parts: parts}, span)
-    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.TestSetting, args: [TExpr]{key, line}}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
 }
 
 sema_data_literal_expected: fn(ty: Type, variant: String) -> Type? {

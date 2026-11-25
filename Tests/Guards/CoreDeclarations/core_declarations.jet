@@ -17,6 +17,7 @@ use {
         CoreDeclarations,
         EFFECT_VOCABULARY_ROOTS,
         EFFECT_VOCABULARY_ROWS,
+        JET_TEST_SETTINGS,
         core_declarations_read,
         core_declarations_source_problems,
         core_decl_lang_type_problem,
@@ -66,6 +67,21 @@ core_guard_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] 
     assert_eq(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", EFFECT_VOCABULARY_ROOTS, "the effect vocabulary's roots"), "")
     assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", [String]{"Net", "Rand"}, "the effect vocabulary's roots").ends_with("; write `Effect:plain(Net|Rand)`"))
     assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "SideEffect", [String]{"C"}, "the cases").contains("has no `SideEffect:plain(…)` type"))
+}
+
+// test.jet's `t.<setting>(…)` calls are core.testing's `impl Test` methods:
+// one per `jet test` setting row (JET_TEST_SETTINGS), each writing its own
+// row's name to the plan.
+#Test("core.testing's Test has one method per jet test setting row") {
+    guards_enter_root()
+    source: core_guard_files.read("Core/Testing/Testing.jet") ?? ""
+    missing := ""
+    loop row in JET_TEST_SETTINGS {
+        if !source.contains("\n    {row.name}: fn(self") || !source.contains("test_setting(self, \"{row.name}\", ") {
+            missing = "{missing} {row.name}"
+        }
+    }
+    assert_eq(missing, "")
 }
 
 #Test("an enum list carries its payloads into the Core enum payload rows") {
