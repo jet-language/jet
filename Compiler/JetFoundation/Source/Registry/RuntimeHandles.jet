@@ -682,10 +682,9 @@ ir_host_value_name: fn(name: String) -> Bool Never! {
 // The compiler value (ir_host_value_name) type `name` spells, if any: the
 // bare name, or the key of its `core.compiler` declaration, whose leaf names
 // it. Core declares such a record so its fields are written once; the
-// evaluator still answers it as a host word.
+// evaluator still answers it as a host word. A bare name is its own leaf.
 ir_host_value_leaf: fn(name: String) -> String? Never! {
-    if ir_host_value_name(name) -> return Val(name.copy())
-    if !core_identity_in_module(name, "core.compiler") -> return None
+    if !ir_host_value_name(name) && !core_identity_in_module(name, "core.compiler") -> return None
     leaf: symbol_key_leaf(name)
     if ir_host_value_name(leaf) -> return Val(leaf)
     None
