@@ -4429,22 +4429,6 @@ body_codec_get_bodyplace: fn(bytes: [U8], input: ^BodyCodecIn) -> BodyPlace Neve
     }
 }
 
-body_codec_put_opt_coremarkerapplication: fn(out: ^BodyCodecOut, value: CoreMarkerApplication?) Never! {
-    if value == .Val(inner) {
-        body_codec_put_bool(out, true)
-        body_codec_put_coremarkerapplication(out, inner)
-        return
-    }
-    body_codec_put_bool(out, false)
-}
-
-body_codec_get_opt_coremarkerapplication: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreMarkerApplication? Never! {
-    if body_codec_get_bool(bytes, input) {
-        return Val(body_codec_get_coremarkerapplication(bytes, input))
-    }
-    None
-}
-
 body_codec_put_opt_authoritydecision: fn(out: ^BodyCodecOut, value: AuthorityDecision?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
@@ -4475,7 +4459,6 @@ body_codec_put_corecallrecord: fn(out: ^BodyCodecOut, value: CoreCallRecord) Nev
     body_codec_put_opt_string(out, value.source_role)
     body_codec_put_corecallcoverage(out, value.coverage)
     body_codec_put_bool(out, value.aot_direct)
-    body_codec_put_opt_coremarkerapplication(out, value.marker)
     body_codec_put_opt_authoritydecision(out, value.authority)
 }
 
@@ -4493,9 +4476,8 @@ body_codec_get_corecallrecord: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallR
     f10: body_codec_get_opt_string(bytes, input)
     f11: body_codec_get_corecallcoverage(bytes, input)
     f12: body_codec_get_bool(bytes, input)
-    f13: body_codec_get_opt_coremarkerapplication(bytes, input)
-    f14: body_codec_get_opt_authoritydecision(bytes, input)
-    CoreCallRecord{module_name: f0, member: f1, receiver_types: f2, signature: f3, fallibility: f4, effects: f5, capability: f6, pure_route: f7, symbol: f8, source_target: f9, source_role: f10, coverage: f11, aot_direct: f12, marker: f13, authority: f14}
+    f13: body_codec_get_opt_authoritydecision(bytes, input)
+    CoreCallRecord{module_name: f0, member: f1, receiver_types: f2, signature: f3, fallibility: f4, effects: f5, capability: f6, pure_route: f7, symbol: f8, source_target: f9, source_role: f10, coverage: f11, aot_direct: f12, authority: f13}
 }
 
 body_codec_put_corecallsignature: fn(out: ^BodyCodecOut, value: CoreCallSignature) Never! {
@@ -4617,21 +4599,6 @@ body_codec_put_corecallcoverage: fn(out: ^BodyCodecOut, value: CoreCallCoverage)
 body_codec_get_corecallcoverage: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallCoverage Never! {
     f0: body_codec_get_int(bytes, input)
     CoreCallCoverage{bits: f0}
-}
-
-body_codec_put_coremarkerapplication: fn(out: ^BodyCodecOut, value: CoreMarkerApplication) Never! {
-    body_codec_put_string(out, value.member)
-    body_codec_put_string(out, value.since)
-    body_codec_put_string(out, value.replacement)
-    body_codec_put_opt_string(out, value.removed_in)
-}
-
-body_codec_get_coremarkerapplication: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreMarkerApplication Never! {
-    f0: body_codec_get_string(bytes, input)
-    f1: body_codec_get_string(bytes, input)
-    f2: body_codec_get_string(bytes, input)
-    f3: body_codec_get_opt_string(bytes, input)
-    CoreMarkerApplication{member: f0, since: f1, replacement: f2, removed_in: f3}
 }
 
 body_codec_put_authoritydecision: fn(out: ^BodyCodecOut, value: AuthorityDecision) Never! {
