@@ -440,6 +440,39 @@ priv __spec_abilities: fn(_spec: ProcessSpec) -> Set<String> Never! {
     Set.from([String]{"terminal", "resize", "raw"})
 }
 
+// The ProcessSpec builders and launch steps and the ProcessChild steps:
+// `spec.cwd(path)`, `spec.run()`, `child.wait()` and the rest check as calls
+// of these bodies (`terminal(policy)` is `__spec_terminal_with_policy`), each
+// the jet.runtime.process leaf of its runtime export. A builder takes its
+// spec and answers it changed; a launch or child step reads its receiver.
+priv __spec_cwd: fn(spec: ^^ProcessSpec, path: String) -> ProcessSpec Never! { rt.spec_cwd(spec, path) }
+priv __spec_arg: fn(spec: ^^ProcessSpec, extra: String) -> ProcessSpec Never! { rt.spec_arg(spec, extra) }
+priv __spec_args_extend: fn(spec: ^^ProcessSpec, extra: [String]) -> ProcessSpec Never! { rt.spec_args_extend(spec, extra) }
+priv __spec_env: fn(spec: ^^ProcessSpec, name: String, value: String) -> ProcessSpec Never! { rt.spec_env(spec, name, value) }
+priv __spec_env_remove: fn(spec: ^^ProcessSpec, name: String) -> ProcessSpec Never! { rt.spec_env_remove(spec, name) }
+priv __spec_env_clear: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_env_clear(spec) }
+priv __spec_output_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_output_limit(spec, limit) }
+priv __spec_memory_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_memory_limit(spec, limit) }
+priv __spec_memory_scope: fn(spec: ^^ProcessSpec, bytes: Int) -> ProcessSpec Never! { rt.spec_memory_scope(spec, bytes) }
+priv __spec_open_file_limit: fn(spec: ^^ProcessSpec, limit: Int) -> ProcessSpec Never! { rt.spec_open_file_limit(spec, limit) }
+priv __spec_cpu_affinity: fn(spec: ^^ProcessSpec, cpus: [Int]) -> ProcessSpec Never! { rt.spec_cpu_affinity(spec, cpus) }
+priv __spec_io_priority: fn(spec: ^^ProcessSpec, level: Int) -> ProcessSpec Never! { rt.spec_io_priority(spec, level) }
+priv __spec_io_idle: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_io_idle(spec) }
+priv __spec_detached: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_detached(spec) }
+priv __spec_terminal: fn(spec: ^^ProcessSpec) -> ProcessSpec Never! { rt.spec_terminal(spec) }
+priv __spec_terminal_with_policy: fn(spec: ^^ProcessSpec, policy: TerminalPolicy) -> ProcessSpec Never! { rt.spec_terminal_with_policy(spec, policy) }
+priv __spec_under: fn(spec: ^^ProcessSpec, authority: Authority) -> ProcessSpec Never! { rt.spec_under(spec, authority) }
+priv __spec_plan: fn(spec: ProcessSpec) -> ProcessPlan IOError! { rt.spec_plan(spec) }
+priv __spec_run: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! { rt.spec_run(spec) }
+priv __spec_run_checked: fn(spec: ProcessSpec) -[Exec]> ProcessReceipt IOError! { rt.spec_run_checked(spec) }
+priv __spec_spawn: fn(spec: ProcessSpec) -[Exec]> ProcessChild IOError! { rt.spec_spawn(spec) }
+priv __child_id: fn(child: ProcessChild) -> Int Never! { rt.child_id(child) }
+priv __child_wait: fn(child: ProcessChild) -[Exec]> ProcessReceipt IOError! { rt.child_wait(child) }
+priv __child_exited: fn(child: ProcessChild) -[Exec]> Bool IOError! { rt.child_exited(child) }
+priv __child_kill: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_kill(child) }
+priv __child_terminate: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_terminate(child) }
+priv __child_interrupt: fn(child: ProcessChild) -[Exec]> IOError! { rt.child_interrupt(child) }
+
 status_ok: fn(receipt: ProcessReceipt) -> Bool Never! { receipt.success }
 
 which: fn(name: String) -[FS, Env]> String? Never! {
@@ -766,6 +799,29 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     copied: rt.spec_parent_death(kept.copy())
     assert_eq((copied.run() ?? panic("the copied spec did not run: {err}")).output, "kept")
     assert_eq((kept.run() ?? panic("the kept spec did not run: {err}")).output, "kept")
+}
+
+#Test("the spec builders, launch steps and child steps run their Core bodies") {
+    // A builder takes its spec and answers it changed; a named spec read
+    // again after a builder keeps its own value and ends once.
+    base: cmd(["sh", "-c", "printf '%s %s|%s|%s|%s' \"$1\" \"$2\" \"$JET_LEAF_A\" \"${JET_LEAF_B-unset}\" \"$(pwd)\"", "sh"])
+    built: base.arg("first").args_extend([String]{"second"}).env("JET_LEAF_A", "a").env("JET_LEAF_B", "b").env_remove("JET_LEAF_B").cwd("/")
+    limited: built.output_limit(1 << 20).memory_limit(1 << 30).open_file_limit(256).cpu_affinity([Int]{0}).io_priority(4).detached()
+    assert_eq((limited.run() ?? panic("the built spec did not run: {err}")).output, "first second|a|unset|/")
+    assert_eq((base.run() ?? panic("the base spec did not run: {err}")).output, " ||unset|{core.sys.current_dir() ?? ""}")
+    cleared: cmd(["/bin/sh", "-c", "printf %s \"${HOME-unset}\""]).env_clear().io_idle()
+    assert_eq((cleared.run_checked() ?? panic("the cleared spec did not run: {err}")).output, "unset")
+    assert(cmd(["false"]).run_checked() == .Err(_))
+    assert(cmd(["true"]).plan() == .Ok(_))
+    child: cmd(["sleep", "10"]).spawn() ?? panic("sleep did not start: {err}")
+    assert(child.id() > 0)
+    assert_eq(child.exited() ?? true, false)
+    child.terminate() ?? panic("terminate failed: {err}")
+    assert_eq(exit_status(child.wait() ?? panic("wait failed: {err}")), 143)
+    // A finished child takes every signal as done.
+    child.kill() ?? panic("kill after exit failed: {err}")
+    child.interrupt() ?? panic("interrupt after exit failed: {err}")
+    assert_eq(child.exited() ?? false, true)
 }
 
 // Where a spawned child's standard stream goes: a pipe the program reads or

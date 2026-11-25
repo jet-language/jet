@@ -520,7 +520,9 @@ rl_taken_findings: fn(source: String, bindings: [RLBinding]) -> [String] Never! 
         }
     }
     rows: rl_rows(rl_files.read(RL_CORE_ROWS_PATH) ?? panic("read {RL_CORE_ROWS_PATH}: {err}"))
-    assert(rows.len() > 100, "Core.rows has only {rows.len()} rows with an export")
+    // A parse that finds no row checks nothing. No fixed floor: the rows
+    // shrink as the Core API moves to Jet declarations.
+    assert(rows.len() > 0, "Core.rows has no rows with an export")
     assert_eq(rl_findings(bindings, exports, rows, RL_FIELD_WORDS).join("\n"), "")
     assert_eq(taken.join("\n"), "")
 }
