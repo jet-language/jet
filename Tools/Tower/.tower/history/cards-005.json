@@ -41142,6 +41142,1616 @@
       "completedAt": "2026-11-18T05:21:13.381Z",
       "questions": [],
       "retiredAt": "2026-11-21T05:25:13.375Z"
+    },
+    {
+      "id": "c06m6abh",
+      "num": 4723,
+      "title": "Public-by-default visibility and local imports with declaration re-exports",
+      "body": "Owner directive, 2026-10-07, clarified in chat (Odin/GingerBill model adapted to Jet; a Jet module plays the role of an Odin package). Supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1 and the #PubFile / priv-subtree rules.\n\nRules:\n(1) Everything is public by default. Declarations (fn, struct, enum, trait, const, type alias, and so on) never carry a visibility marker.\n(2) The only keyword is `priv`; `pub` is removed from the language.\n(3) A module may be marked private: `priv module name { ... }` (and the equivalent marker for a file module). Plain `priv` means its contents are usable only by its enclosing module and that module's other children. `priv(package)` means usable by any module of the same package and invisible to other packages.\n(4) Field exception: a struct or record field may be `priv`; it is readable and writable only by code in the type's own module (and its children). This keeps invariants for types like Secret, native handles and validated values.\n(5) Removed: `pub`, `pub(package)`, `#PubFile`, and `priv` on non-module declarations. They are no longer Jet syntax and get no teaching diagnostic (owner order: no teaching errors for old syntax).\n(6) Packages: no package-level privacy in this cutover (later, through the manifest).\n(7) D-VIS-REEXPORT1=A: imports stay local; bare paths to declarations re-export through name: path (D-DECL-COLON1=A); pub use retires. Aliases are written Rows: [[String]] (D-DECL-COLON1=A) and generic aliases Grid<T>: [[T]] (D-ALIAS-GENERIC1=A); the alias keyword of D-ALIAS-BIND2=B is superseded.\n\nCutover: parser and sema in both compiler halves, Syntax.rs registration and decision IDs, diagnostics with UI snapshots, the spec (Docs/spec/syntax-decisions.md S18 and the reference), and every in-repo Jet file (Compiler/, Core/, Jetpack/, Examples/, tests/) migrated in one commit by a re-runnable rewrite script, so in-flight branches can apply it too. Helpers that were private declarations move into `priv module`s or stay public; invariant-carrying fields become `priv` fields.\n\nAcceptance: no `pub` and no declaration-level `priv` anywhere in the repo; `priv module` and `priv(package) module` access rules and the `priv` field rule each have UI snapshots for the allowed and rejected cases; goldens and the compiler fixed point unchanged in behavior.\n\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-VIS-REEXPORT1=A\nEvery original module/field privacy criterion retained; all pub use forms migrate to bare-path alias declarations, use stays local; final pub keyword removed; kind-resolved target casing and canonical identity preserve original home/privacy/generics/defaults/named args/effects/borrow/move/constructors/patterns/methods/traits; forward chains resolve and rootless cycles diagnose; pub-use/duplicate/parenthesized/private-module fixes exact; doc/API record lists target signatures and publication diffs; no pub/priv use remains in live source.\nPaths: Compiler/JetSema/Source/Sema/{Registration/Items,Scopes,Calls/Resolution}.jet declaration aliases, chains/cycles/target identity/case; parser removed pub use fix; Jet API/doc/semindex; Tools/agent/vis-cutover.mjs migration; Core/prelude/prelude.jet; Examples/features/modules/module_reexport; tests/ui/view_write_reexport\nRegistry/spec/UI/goldens: Legacy Syntax.rs KW_PUB/visibility row reference; Jet alias binding/visibility rows cite D-VIS-REEXPORT1=A; retire final pub keyword, preserve use local; no priv use introduced; update generated editor grammar; Docs/spec/syntax-decisions.md S18/D-MOD4 and module reference; public API record/Jetpack/Publication/Source/Diff.jet alias target signature; #4723 rule7 now settled; pub use -> per-name alias fixes; rootless chain cycle diagnostic; parenthesized path E0622 drop-parens note; duplicate use+alias fix removes use member; private module alias refusal lists members; private field through alias still errors; Prelude fourteen names from seven historical pub use lines; shapes.Path == core.files.Path nominal identity; defaults/named/effects/generics/move/traits/constructors preserved; chains any order; doc/API publication records correct; generic recipe NAME bare path alias\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW, completing #4723 reexport slice. Existing VisCut5 pre-verifying Rust+Jet visibility cutover lands as written under #27(c); new generalized alias implementation Jet-only after that baseline, no new Rust mirror. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: Supersedes directive21 recorded lean priv use and #4723 undecided rule7, NOT public-default privacy law. Bare paths alias types WITHOUT alias even though D-ALIAS-BIND2=B. Existing vis branch deliberately retained pub use; add Jet-only slice, preserve prior pre-verifying proofs. #29 does not automatically authorize generalized reexport feature in both halves; minimal resolution seam only if needed to port a current consumer. Existing VisCut5 pre-verification preserved.\n\nD-ALIAS-BIND2=B\nKeep alias keyword and admit every type expression/type-valued recipe call, not only generic alias declarations; bare paths under VIS=A remain keyword-free; bare non-path type expression gets add-alias fix; aliases preserve identity/home/privacy and distinct protection; source name plus single expansion shown in hover/errors; forward chains cycle-diagnose rather than crash; alias constructor Type{...} works; generic spellings migrate to prep fn recipes and plain-refusal UI/fuzz cases become acceptance.\nPaths: Compiler/JetSema/Source/Sema/Registration/Items.jet remove E0324 generic-only restriction; type resolver aliases/cycle guard and constructor head; parser alias generic-to-recipe cutover; formatter alias roundtrip; Core numeric family aliases after generic recipes\nRegistry/spec/UI/goldens: KEEP alias in legacy Syntax.rs/Syntax/core_surface.rs and active Jetpack/Foundation/Source/Syntax.jet keyword projection, cite D-ALIAS-BIND2=B; E0324 generic-only admission retired/redefined with exact history; bare type-expression E0357/E0622 fix ADD alias. Do not use ballot checkInstructions for A.; Docs/spec/Core grammar and syntax-decisions D-TYPEALIAS1/D-ALIAS-OP1 amendments; alias identity/one expansion hover; D-GENERIC-TYPEFN1 recipes; #4723 coupled reexport law; alias Rows :: [[String]] accepted replacing type_alias_no_params stderr/fuzz twin; bare Rows :: [[String]] errors with alias insertion fix; unknown type E0107; cycles list chain not stack overflow; alias Type{...} accepted; distinct alias protection; Five historical generic alias sites become prep fn recipes; type_alias feature/UI/optional_lift_nested/parallel_function_worker/fuzz valid migrate; simple aliases retain identity/methods/traits/constructors/patterns/home; Core U8 :: Unsigned(8) must become alias U8 :: Unsigned(8)\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW as #4723 alias slice; no Rust mirror. Generic recipe and constructor/cycle substrate admission required. Existing formatter #4746 fix remains Jet-half-only unless landing exception. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: OBSERVED current Items.jet:1617-1619 still rejects alias without parameters; DiagnosticRows:3757 generic-only rule stale. B retains keyword despite older owner scratch proposal remove alias. CheckInstructions incorrectly describes A only: NOT B acceptance. VIS=A bare-path exception intentional. Fix reported cycle crash and constructor bug as acceptance, no rerun to confirm.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-20",
+          "by": "Main",
+          "text": "Both open criteria have landed code: c6 errors ab7e5c6987 and c8 doc/API/publication rows 7e34e2e084. Their named proofs pass on batch compiler p338 (ui alias_shows_source_name_and_expansion 1/0; cases doc_reexport_target_signature 1/0). Not met yet, because each criterion promises more than its proof: c6 hover (unrun) and alias identity/home/privacy rows; c8 inline-module re-exports are not listed (its landing note says so). Owner order 2026-11-19: one temporary agent (Closer4723) finishes these gaps in one submission, then stops."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Main 01:24: removed the stale worktree .agent-worktrees/Speed-3-4 (HEAD 35baa2422b, 2026-11-16, 105 uncommitted tracked changes from an earlier Speed session: RuntimeStopExports.jet removal, JetIR Build/BuildLazy/IR, Core App/DB/Data/UI, crewboard case, closed_lists baseline, ownership snapshots). The full diff is saved unlanded at $JET_SCRATCH_ROOT/lanes/Main/salvage/Speed-3-4-35baa2422b.patch; nothing in it is known to be needed."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Owner order 2026-11-18: one additional agent finishes this card, then #5009 c5. Speed-3-3 assigned (brief: $JET_SCRATCH_ROOT/lanes/Main/briefs/4723-then-5009.md). Order: the pub removal and bare-path re-export cutover (c9, c5, c1; 21 files with pub on dev 5f8eb469cd), then priv struct enforcement (c11, c13), inline type import (c12), re-export errors (c7), docs (c8), alias hover (c6), package declarations (c10)."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16 allowed a move to G5 if G5 fits better. Kept in G6: public-by-default visibility and declaration re-exports are declaration semantics; G5 (CLI, errors, editor) is no better fit."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned: c5 split into #4723 c7, #4723 c8, #4723 c9; c6 restated to the open part (the alias constructor and cycle errors have landed; #6176 allows non-generic aliases)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: D-DECL-COLON1=A and D-ALIAS-GENERIC1=A (both 2026-11-06) supersede D-ALIAS-BIND2=B's alias keyword, and re-exports are written name: path. c5, c6 and the body now use the ratified spellings; removed pub/priv forms get no teaching diagnostic (owner order)."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "OWNER 2026-10-09 (reaffirmed): everything is public unless marked priv; priv must be written explicitly. After the 2026-10-09 branch consolidation, dev 69658143e is in a mixed state: pub declarations in .jet fell from 10,226 (2aa8b0349) to 3,964, and the lexer still has K_PUB/K_PRIV. Required on dev: (1) Jet sema and the bootstrap Rust checker both public-by-default, priv explicit (Rust change allowed only to keep the bootstrap working); (2) remove every remaining pub; (3) retire the pub keyword per the greenfield rule (registry, lexer/parser, docs) with a registered diagnostic and UI snapshot; (4) no item that was public becomes private by accident: census of items whose effective visibility changed. Owner: RustExitLead."
+        },
+        {
+          "at": "2026-10-07",
+          "by": "Pip",
+          "text": "D-VIS-REEXPORT1=A, D-ALIAS-BIND2=B ratified; application contract updated. No implementation/build/test or closure receipt claimed. Owners: unowned current implementation (VisCut5 parked #4723 owner, STREAMS:270-271; LandingDesk2 owns landing coordination, not feature); unowned current (#4723 VisCut5 parked; #4746 formatter unowned). Latest owner #29 permits only minimal port seams both halves, dies at cutover; #31 requires actual Jet ports."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/Spec/syntax-decisions.md entry and regenerated editor grammars in the same change (bare-path re-exports and the removed pub keyword). Proof: after `jet self devtools grammars`, `git status --short Tools/Editors` is empty, and `jet test Tests/Guards --filter grammar` and `jet test Tests/Guards --filter syntax_reconciliation` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p292 batch compiler (dev 18de3a687e): `jet self devtools grammars` regenerates and git status --short Tools/Editors is empty; p291 (dev fddd5c3723, drop-pub d00ad39e70) ran jet test Tests/Guards --filter grammar PASS and --filter syntax_reconciliation PASS.",
+          "at": "2026-11-18T04:12:24.610Z"
+        },
+        {
+          "n": 5,
+          "text": "A bare-path re-export declaration `clamp: core.math.clamp` re-exports a declaration with its canonical identity: home, privacy, generics, defaults, named arguments, effects, borrow and move, constructors, patterns, methods and traits (D-VIS-REEXPORT1=A, D-DECL-COLON1=A). `use` stays local. Today re-exports are still `pub use` (Examples/Modules/ModuleReexport). Proof: `jet test Compiler --profile golden --filter Modules/ModuleReexport` passes on o0, o1 and o2 with no `pub use`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p292 batch compiler (dev 18de3a687e; reexport landed 903da7aa3a, drop-pub d00ad39e70, member row e647b4fa9e): golden Modules/ModuleReexport PASS on o0, o1 and o2, and git grep finds no 'pub use' in Examples/Modules.",
+          "at": "2026-11-18T04:12:22.595Z"
+        },
+        {
+          "n": 6,
+          "text": "Hover and errors name a generic alias by its source name plus a single expansion, and an alias keeps the identity, home and privacy of its target (D-ALIAS-GENERIC1=A). The alias constructor (88cb1947d0, Tests/Cases/Generics/an_alias_constructor_builds_its_list_or_map_target) and cycle errors (Tests/UI/type_alias_cycle) have landed, and non-generic aliases such as `Spot: Point` are allowed by owner ruling #6176.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p348 batch compiler (dev e2069b5709): jet test Compiler --profile ui --filter alias_shows_source_name_and_expansion PASS; --profile cases --filter lsp_hover_names_generic_alias PASS. Errors (ab7e5c6987) and hover with alias identity, home and privacy (febba2e0bd) are on dev.",
+          "at": "2026-11-20T09:13:31.789Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "alias_shows_source_name_and_expansion"
+          }
+        },
+        {
+          "n": 7,
+          "text": "Re-export chains resolve forward, and a rootless cycle, a duplicate, a parenthesized target and a private-module target each get a registered error with an exact fix (D-VIS-REEXPORT1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p293 batch compiler (dev 4171547dc0): ui reexport_ passes (landed 6ce698fdd0); the Parser Reexports.jet unit test regression is fixed in follow-up SUBs",
+          "at": "2026-11-18T06:36:32.712Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "reexport_"
+          }
+        },
+        {
+          "n": 8,
+          "text": "The doc and API record list each re-export's target signature, and a publication diff shows a re-export change (D-VIS-REEXPORT1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p346 batch compiler (dev 571ba200dc): jet test Compiler --profile cases --filter doc_reexport_target_signature PASS (Tests/Cases/Pkg/doc_reexport_target_signature.case).",
+          "at": "2026-11-20T09:07:52.793Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "doc_reexport_target_signature"
+          }
+        },
+        {
+          "n": 9,
+          "text": "`pub` is removed: every `pub use` and `pub` declaration (20 files on dev 72a8142651, including Compiler/Prelude/Core/prelude.jet, Core/Encoding/Hex.jet and Core/Testing/Testing.jet) migrates to a bare-path re-export or a plain declaration in one cutover, K_PUB leaves the lexer, and `pub` gets the generic parse error with no teaching. Proof: `git grep -l -E '^\\s*pub ' -- '*.jet'` lists only foreign-language fixtures, and `git grep -n K_PUB -- Compiler` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 18de3a687e (drop-pub landed d00ad39e70): git grep -l -E '^\\s*pub ' -- '*.jet' lists only Jetpack/Integrations/Source/Foreign/RustBridge/WrapperEmit.jet, whose hits are Rust text it emits (pub extern \"C\" fn); git grep -n K_PUB -- Compiler prints nothing.",
+          "at": "2026-11-18T04:12:23.562Z"
+        },
+        {
+          "n": 10,
+          "text": "Every package declares each package its sources import: no `use` of an undeclared package (jet_loader and jet_comptime in JetRepl/Console, jet_fixer in JetDevserver, jetpack_provider in JetLSP Hover at review time) and no dangling import (architecture review L3). Proof: `jet check` of every Compiler member and tool package reports no unresolved-package error. (was #5073 c8)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p293 batch compiler (dev 4171547dc0, landed 2e3eb65bf0): jet check Compiler/JetDevServer/Tests reports no unresolved-package or undeclared-use error (its 546 errors are the devserver package's own stale source, tracked on #5931); the p293 census checks every Compiler member and the 16 Jetpack areas clean",
+          "at": "2026-11-18T06:54:21.451Z"
+        },
+        {
+          "n": 11,
+          "text": "A priv struct is private like a priv function: naming, building or using it as a parameter type outside its module gets E0605, as a priv fn beside it already does. Today the struct is usable from outside with no diagnostic (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probe n12b_priv_type_vs_fn.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a UI snapshot of each refused use.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p292 batch compiler (dev 18de3a687e; Speed-3-3-4723-priv-type landed d4e7198ff3): ui vis_priv_type_module PASS.",
+          "at": "2026-11-18T04:12:20.593Z"
+        },
+        {
+          "n": 12,
+          "text": "use geo.[Point] imports a type from an inline module just as it imports a function from the same module. Today the type import gets E0611 'not defined' while the function import works (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probes n14b_imported_member_arm_first.jet and n16_inline_use_fn_control.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a cases row importing a type and a function from one inline module.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p293 batch compiler (dev 4171547dc0): cases inline_module_imports_a_type_and_a_function passes; InlineModules.jet tests pass (landed b579a1878c)",
+          "at": "2026-11-18T06:36:30.851Z"
+        },
+        {
+          "n": 13,
+          "text": "Using a priv struct from a file module outside that module gets E0605 (private), not E0119 'There's no type called geo.Secret' (p205, O0/O1/O2 alike; D-PRIM-ANY1 round 4), probe o8d in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes. Pairs with c11 (inline modules). Proof: a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p292 batch compiler (dev 18de3a687e; Speed-3-3-4723-priv-type landed d4e7198ff3): ui PrivateTypeFileModule PASS.",
+          "at": "2026-11-18T04:12:21.552Z"
+        },
+        {
+          "n": 14,
+          "text": "A union match arm over an inline module's member type works when the type is qualified: `.geo.Point(p)` matches the Point case of a union holding geo.Point instead of failing with E0305 (found by Speed on gate-p292 while building c12; probe n14b_imported_member_arm_first.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes). Proof: a cases row that matches each arm of such a union on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p293 batch compiler (dev 4171547dc0): cases inline_module_union_arm_names_a_member_type passes on o0/o1/o2 (landed a3ade57098)",
+          "at": "2026-11-18T06:36:31.781Z"
+        },
+        {
+          "n": 15,
+          "text": "An inline module refuses one name declared twice, as a file top level does: `m: module { t: module { f }, t: fn }` and a nested `T` module beside a `T` struct each give E0105 DuplicateDefinition, at the inline level and at the nested level. Proof: `jet test Tests/UI --filter inline_module_duplicate` with rows for both levels.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p293 batch compiler (dev 4171547dc0, landed 9531846eb2): jet test Compiler --profile ui --filter inline_module_duplicate PASS 3/3",
+          "at": "2026-11-18T06:54:20.537Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:task"
+      ],
+      "parentId": "c0jmyt4x",
+      "needsAcceptance": false,
+      "created": "2026-10-07T11:23:08.090Z",
+      "updated": "2026-11-22T02:10:23.711Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 15,
+      "completedAt": "2026-11-20T09:13:34.245Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.968Z"
+    },
+    {
+      "id": "c0gmf0y4",
+      "num": 5009,
+      "title": "Compiler event parity: import, program-wide generation, placeholders, link and artifact stages, per-invocation hooks",
+      "body": "## Outcome\n\nA package can replace the link step of one executable target with a declared, cached build action. That action receives the compiler's object files and libraries and produces the artifact. A package can also run checked steps on the written artifact, such as signing or embedding an icon or manifest, with failures reported as Jet diagnostics.\n\n## Evidence\n\n- Jai: setting `use_custom_link_command` makes the compiler stop at the `READY_FOR_CUSTOM_LINK_COMMAND` phase. `Message_Phase.compiler_generated_object_files` lists the objects, and the metaprogram links them itself, then calls `compiler_custom_link_command_is_complete(w)` (focus-editor `first.jai` @c6b3ead lines 75, 153-155, 357-391).\n- `PRE_WRITE_EXECUTABLE` lets a metaprogram replace the executable (Blow `AdoShhhnsQA` 00:03:53, 2018). `POST_WRITE_EXECUTABLE` reports the linker exit code (The Way to Jai @19cb4b7 `examples/30/30.5_compiler_intercept.jai:46-53`). Focus sets the icon and manifest after a successful link.\n- Jet links internally (`Compiler/JetBackend/Source/Image/ELF.jet:30`) or through rustc. D-HOOK-STAGES1 makes `compiler.emitted(Artifact)` read-only, with findings only. `b.action` (D-BUILDACTION1) can add steps over declared outputs, but it cannot take over an executable target's link.\n\n## Ballot\n\nAmending D-HOOK-STAGES1 or D-BUILDACTION1 to allow a typed link step (c1, c2) is public API; it is on Main's ballot list (2026-11-15). Linker-argument options belong to #5005.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-20",
+          "by": "Main",
+          "text": "c5 status 2026-11-19: the zero-cost half passes on batch compiler p338 (cases hook_runtime_zero_cost 1/0). The web half (cases web_request_decision_scoped_by_prefix) has failed on every batch compiler since it landed (p330-p338 suite rows): under jet run, at O0 and O2, /admin answers 200, not 401. It passes under jet debug. The dispatch is kept in the IR and the layer is placed; the leading cause is that the web.requests module global lazy slot is not one object across modules or tasks. The suite compares only against the previous cycle, so a failure already present was never re-flagged. Closer4723 has it after #4723 c6/c8."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "D-HOOK-POINT1=A ratified 2026-11-18, so c5 is build work. Speed-3-3 takes it right after #4723 (owner order)."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Owner ratified D-HOOK-POINT1=A (2026-11-18). c5 is now build work, queued to the next free implementer."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 decision (within D-LINK-STEP1=A, no ballot): build.action(name, run:, inputs:, outputs:, allow:) is the ratified constructor that the link and before_write hooks return; the session handle type is BuildStep. LinkInputs.default (selected by --link=default) is a BuildAction of a built-in kind that BuildExecute's step runner runs as Jet's in-process native link over the on-disk link inputs. It adds no public command (no `jet link`), and `jet inspect build` shows it as the stock link. This replaces the draft ballot D-LINK-DEFAULT1, which was never posted."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1c decision (Main, within D-LINK-STEP1=A): BuildAction is the plain description struct core.build.BuildAction{name, run, inputs, outputs, allow} that the free build.action(...) makes and a link hook returns (the ratified spelling). The build-session handle that b.run/b.action return is renamed BuildStep in one cutover, and b.action builds the same description and registers it (one mechanism). D-BUILDACTION1 names no handle type. The hook runs at compile time through the tool-stage #run mechanism, and the driver runs the returned action in the hermetic executor."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 ballot needed (D-LINK-DEFAULT1, to post): how LinkInputs.default is spelled as a BuildAction when Jet links in process. Every BuildAction today is an argv the hermetic executor runs (ActionKind only classifies identity; b.jet() names the running compiler as a tool). Options: (A) a public 'jet link <objects> <libraries> -o <out>' verb that b.jet() steps run; (B) a builtin action kind the executor runs as Jet's StaticLink, with no argv; (C) an internal linker binary shipped beside jet. Meanwhile c1c is built with hooks returning their own argv actions, and default means Jet's own link. Slices: c1a option rows, c1c hook action through the executor (cases custom_link_step, ui custom_link_step_fails), c1d per-output options and policy forbid, c2 post_link/before_write."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c4 spelling decided by IfHole within D-HOOK-STAGES1=A: meta.stages() on the root's Compiler value, because D-META-LADDER1 removed compiler.advanced. SUB IfHole-6-1-5009-c4-stages stacks on c3a.r3, c3b and c7.r2."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Plan (IfHole): c3a compiler.Event enum in core.compiler with the ratified payload structs plus JetFoundation COMPILER_EVENTS rows as the one list; c3b JetDriver emits parsed/imported/declared/checked/settled/emitted/finished through one sink from the registry kinds; c3c jet build --json prints one {event,data} line per event, CLI build moments through the same sink; c7 schema generated from the rows (jet inspect events --schema) plus guard compiler_event_names; c4a compiler.advanced.session().stages(), c4b --threads 1 vs 16 case; c3d #On(compiler.X|build.X) checked against the rows plus case compiler_event_one_enum; c1/c2 build.link and before/after_write hooks returning BuildAction with failure diagnostic, cases and example; c6 stage-hook runner under the comptime sandbox with a refusal code. Decision: compiler.Event carries the compiler.* and build.* session moments; fmt/lsp/test/doc tool views stay in the tool-stage table."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c5 needs a spelling for a library to declare a lowercase run-time hook point (module-level runtime values don't exist: E0643, E0357). Ballot to post: D-HOOK-POINT1. A: a bodyless function under a marker, #Point request: fn(r: Request) -> HookDecision<Request, Response>; calling web.request(req) is the dispatch, the compiler writes the body from the static attachments, none means no code. B: a lowercase module constant of a compile-time point type, request: event.decision_point<Request, Response>(), exempt from E0357; dispatch web.request.run(req, key: path). #On itself needs no ballot: one parse separates a .Member build condition on statements from a dotted point path on functions."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): body reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: added #5009 c5 and #5009 c6, the hook items from #3520 (c21, c22), restated as outcomes."
+        },
+        {
+          "at": "2026-10-17",
+          "by": "Main",
+          "text": "D-COMPILER-EVENT1=A ratified 2026-10-17: one compiler.Event enum in core.compiler (Core/compiler/compiler.jet) lists every public moment (proposal section 2.3). Hooks, Session.stages(), `--json` and the jet.session.v1 wire all use its names and fields. The wire/--json schema is generated from its registry rows, and each new variant is a versioned public change. D-BUILD-UI1's event names become variants (none exist in Jet code today)."
+        },
+        {
+          "at": "2026-10-16",
+          "by": "Pip",
+          "text": "Scope widened 2026-10-16: decision D-JAI-EVENTS1 covers the custom link and post-link moments plus every other Jai message-loop capability (Docs/audits/jai-parity-2026-10-16.md, section D)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A package declares a custom link step for one executable target whose inputs are the compiler's object files and libraries; `jet build` runs it on every build and reports its failure as a registered Jet diagnostic. Proof: `jet test Compiler --profile cases --filter custom_link_step` and `jet test Compiler --profile ui --filter custom_link_step_fails`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 6766318336 (p264), b34c036d67 (p265), 3c26300bc5 and 675525c555 (p266), 83c6c2cac7 (p268): a package declares a custom link step (#On(build.link) hook running a typed BuildAction over the compiler's objects and libraries), jet build runs it on every build, and a failing step is the registered E3506 jet.LinkStepFailed. On batch compiler p268, cases custom_link_step PASS and ui CustomLinkStepFails PASS (build_option_link_hooks PASS).",
+          "at": "2026-11-17T15:05:44.835Z"
+        },
+        {
+          "n": 2,
+          "text": "A post-link step (signing, or embedding an icon or manifest) runs on the written artifact through the same typed action mechanism, with an executable example.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a438ca5a1a (p266, post_link stage over the written artifact through the typed BuildAction mechanism) and eba6f39612 (p270, example Examples/Tooling/Build/PostLinkManifest: a post_link step that embeds a manifest via objcopy). On batch compiler p270: golden PostLinkManifest PASS and case post_link_step_signs_artifact PASS (p268).",
+          "at": "2026-11-17T16:05:36.630Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "post_link_step_signs_artifact"
+          }
+        },
+        {
+          "n": 3,
+          "text": "One `compiler.Event` enum in core.compiler carries every public compiler moment with its ratified payload, and `#On` hooks, `compiler.advanced.Session.stages()`, `jet build --json` and the session wire all use its names (D-COMPILER-EVENT1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 637db65226 and a503203940 (cycles p258, p259). On batch compiler p259 (dev 1fb0d7c13c): cases compiler_event_one_enum 1/0 (one compiler.Event enum in core.compiler serves #On, stages() and the session wire), build_json_lists_compiler_events 1/0 (jet build --json uses its names), and the c7 guard Tests/Guards/compiler_event_names.jet passes (no hand-written event name in JetCLI or JetDriver).",
+          "at": "2026-11-17T10:50:48.674Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "compiler_event_one_enum"
+          }
+        },
+        {
+          "n": 4,
+          "text": "`stages()` yields the same compiler.Event sequence with `--threads 1` and `--threads 16` on one program.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a503203940 (IfHole-6-1-5009-c4-stages-fix, cycle p259). On batch compiler p259 (dev 1fb0d7c13c): `jet test Compiler --profile cases --filter stages_sequence_thread_independent` n=1 bad=0 (stages() yields the same compiler.Event sequence with --threads 1 and --threads 16).",
+          "at": "2026-11-17T10:50:47.689Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "stages_sequence_thread_independent"
+          }
+        },
+        {
+          "n": 5,
+          "text": "A run-time typed hook point costs nothing when no hook is attached (no call, no table, checked in the generated IR) and a web hook decision is scoped by path prefix; one mechanism serves both (D-HOOK-ONE1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p340 (dev c5ed0945cf): cases hook_runtime_zero_cost PASS, web_request_decision_scoped_by_prefix PASS, task_hears_point_attached_elsewhere PASS; jet check Compiler/JetIR/Source/BuildCore.jet rc 0.",
+          "at": "2026-11-20T03:26:32.935Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "hook_runtime_zero_cost"
+          }
+        },
+        {
+          "n": 6,
+          "text": "Every typed compiler, build and tool hook stage (D-HOOK-STAGES1=A) runs inside the Jet sandbox with its declared authority only; a hook that reaches outside it is refused with a registered code.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 5d2a888b29 and 4cabf5af35 (p266), 83c6c2cac7 (p268): build-stage hooks run their actions in the Jet sandbox with only their declared authority (E3503 when an action needs an ungranted effect, with no ambient PATH), and compiler and build moment hooks (#On compiler.*) run in the comptime sandbox and are refused with E3410 or E3010 outside it. On batch compiler p268, cases hook_stages_sandboxed and moment_hooks_sandboxed PASS.",
+          "at": "2026-11-17T15:05:45.855Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "hook_stages_sandboxed"
+          }
+        },
+        {
+          "n": 7,
+          "text": "The `jet build --json` event schema is generated from the compiler.Event registry rows, and a check fails on a hand-written event name in JetCli or JetDriver (D-COMPILER-EVENT1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 637db65226 (IfHole-6-1-5009-c7-event-schema.r4, landed in cycle p258): the build --json event schema is generated from the compiler.Event registry rows. On batch compiler p258 (dev aa80e241d2): `jet test Tests/Guards/compiler_event_names.jet` rc=0 PASS (the check that fails on a hand-written event name in JetCLI or JetDriver), and `jet test Compiler --profile cases --filter inspect_events_schema_matches_the_rows` n=1 bad=0.",
+          "at": "2026-11-17T10:23:22.062Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards",
+              "--filter",
+              "compiler_event_names"
+            ]
+          }
+        }
+      ],
+      "refs": [
+        "Docs/audits/jai-parity-2026-10-16.md",
+        "#4760",
+        "#5005"
+      ],
+      "tags": [
+        "mining-2026-10-15",
+        "jai-vs-jet",
+        "build",
+        "hooks",
+        "needs-owner",
+        "wayfinder:decision"
+      ],
+      "parentId": "c02y3vkg",
+      "needsAcceptance": false,
+      "created": "2026-10-16T00:49:38.986Z",
+      "updated": "2026-11-22T02:10:23.712Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 7,
+      "completedAt": "2026-11-20T03:26:53.162Z",
+      "questions": [
+        {
+          "id": "q012d3pt",
+          "cardId": "c0gmf0y4",
+          "decisionId": null,
+          "by": "Pip",
+          "kind": "question",
+          "text": "Owner gate (Jai mining 2026-10-15): Jai lets the build take over linking (use_custom_link_command plus the READY_FOR_CUSTOM_LINK_COMMAND phase) and replace or post-process the written executable. Jet's compiler.emitted hook is read-only. Should a typed build action be allowed to replace one target's link step and post-process the artifact? This amends D-HOOK-STAGES1 or D-BUILDACTION1.",
+          "status": "answered",
+          "answer": "Owner ruling 2026-10-30, relayed by Main: ballot this. A ballot on replacing or post-processing a target's link step follows.",
+          "created": "2026-10-16T00:51:37.768Z",
+          "answeredAt": "2026-10-30",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0vzmbkk",
+      "num": 5965,
+      "title": "Workspace roots: check, test, fmt, doc and build act on members; status and parts list them",
+      "body": "A workspace is one folder holding several packages. Today `jet check`, `jet test`, `jet build` and `jet doc` at the workspace root refuse with \"ambiguous\" and exit 2, `jet status` shows a phantom `target run.jet`, and a failing dependency hides its own errors. This card makes the root useful. What root commands act on is ballot D-WORKSPACE-CMD1, hosted here.\n\nEvidence (audit 2026-10-28, LAY-04, mono_probe.sh / notes/mono_probe.log).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "Probe on dev b66642b8bc (gate-p429 jet), a three-member workspace shop/{alpha,beta,gamma} with one #Test each: at the root `jet check` (exit 0) and `jet test` (each member, exit 0) act on every member as D-WORKSPACE-CMD1=A rules; `jet doc` and `jet build` still refuse with \"`jet doc`/`jet build` is ambiguous — 3 workspace members can run\" (Jet.InvalidCommandInput, exit 2); `jet check -p beta` and `jet build -p alpha` narrow correctly, but `jet test -p gamma` is refused (\"`-p` is only valid with `jet run`, `jet dev`, `jet debug`, `jet check`, `jet build` or `jet jobs`\"); `jet run` still asks (exit 2), as ruled. So c1 is still open: doc and build at the root, and `-p` on test (and doc). Also, the member line for gamma prints after its result (\"gamma: pass ... jet test: member `gamma`\"): member output is not kept in order."
+        },
+        {
+          "at": "2026-10-29",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-WORKSPACE-CMD1=A: at the root of a three-member workspace, `jet check`, `jet test`, `jet doc` and `jet build` act on every member, `-p <member>` narrows them, and `jet run` still asks which program to start.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev c137227f92 (the CLI change 388d556a45, its case files given partial-line reasons in c137227f92), on the p436 batch compiler built from 942f0c6d93: `jet test Compiler --profile cases --filter CLIPartsRuntime/workspace_root_commands_` PASS 2/2 (act_on_each_member: check, test, doc and build act on alpha, beta and gamma, each run headed by its member, and `jet run` exits 2 \"ambiguous — 3 workspace members can run\"; narrow_to_picked_members: -p narrows check, test, doc and build, -p repeats, -p nope is refused naming the members, `jet run -p alpha` runs alpha), and Workspace/root_commands_fan_out_or_pick_a_member PASS.",
+          "at": "2026-11-21T22:52:28.825Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Workspace/root_commands_"
+          }
+        },
+        {
+          "n": 2,
+          "text": "`jet status` at a workspace root lists members and their entries (no phantom `target run.jet`), and `jet project parts` lists the members.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p346 batch compiler (dev 571ba200dc): jet test Compiler --profile ui --filter WorkspaceStatusListsMembers PASS and --filter WorkspacePartsListsMembers PASS.",
+          "at": "2026-11-20T08:51:50.965Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "ListsMembers"
+          }
+        },
+        {
+          "n": 3,
+          "text": "E0626 for a failing dependency prints that dependency's own diagnostics inline.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev c137227f92 (p436 batch compiler, built from 942f0c6d93): `jet test Compiler --profile ui --filter DependencyPackageErrors` PASS: the snapshot prints the dependency shapes own Jet.ReturnTypeMismatch at shapes/shapes.jet:1:29 inline, then Jet.DependencyCheckFailed (E0626) for `shapes`; `jet test Compiler --profile cases --filter workspace_check_covers_every_member` PASS (a failing member s errors print once).",
+          "at": "2026-11-21T22:52:59.359Z"
+        },
+        {
+          "n": 4,
+          "text": "`jet doc` writes to `<project>/.jet/doc/` and prints that path, and never writes docs/ in the source tree. Proof: `jet test Compiler --profile cases --filter JetDoc/writes_under_state_dir`. (was #3421 c11)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed f98f2f3a2e (p273). On batch compiler p273 (dev 049dc799ed): cases JetDoc/writes_under_state_dir PASS.",
+          "at": "2026-11-17T19:38:07.221Z"
+        },
+        {
+          "n": 5,
+          "text": "`jet doc --out <dir>` never overwrites a file that lacks the generated-file header: with a hand-written docs/index.md, `jet doc --out docs` exits non-zero with a registered error naming docs/index.md and leaves the file unchanged. Proof: `jet test Compiler --profile cases --filter JetDoc/out_refuses_hand_written_file`. (was #3421 c12)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed f98f2f3a2e (p273). On batch compiler p273 (dev 049dc799ed): cases JetDoc/out_refuses_hand_written_file PASS.",
+          "at": "2026-11-17T19:38:08.300Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "needs-triage",
+        "audit-2026-10-28",
+        "wayfinder:task"
+      ],
+      "parentId": "c06osxzz",
+      "needsAcceptance": false,
+      "created": "2026-10-28T11:04:13.858Z",
+      "updated": "2026-11-22T02:10:23.713Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-21T22:53:01.079Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0166xrw",
+      "num": 6544,
+      "title": "jet dev: a watched edit takes 3.7-4.9 s to rerun (a cold jet run of the same file takes 1.0 s); slower than a0_022",
+      "body": "Measured by Main 2026-11-01 08:55 EST with $JET_SCRATCH_ROOT/lanes/Main/devwatch/pipe.sh. The script runs jet dev app.jet with stdout on a pipe, edits at +4 s and +8 s, and stamps each output line. The fixture is tests/cases/dev_parts_routine/watching_dev_reruns_on_jit_gap_and_recovers.\\n\\nCandidate a34ef0affd (release chain s2): first run 0.12 s; the gap edit's output arrives 4.9 s after the write; the final edit's output 3.75 s after its write.\\nSeed a0_022: first run 0.17 s; gap edit 2.9 s; final edit 0.14 s.\\nA cold jet run of the gap file takes 0.96 s (a34) and 1.10 s (a0_022), so most of the delay is in jet dev itself: watcher latency, a debounce, or rebuild work beyond one compile.\\n\\nThe two cases watching_dev_reruns_on_jit_gap_and_recovers and watching_dev_deopts_on_gap_edit_and_recovers sleep 800 ms per edit. They now fail on a34, both in the release gate (a0_024 was not released because of them) and in wave 25. Their fixed sleeps should also become readiness waits once the latency is fixed. Under testkit, a recv on the jet dev session saw no stdout for 60 s, while a plain pipe sees lines live; that difference needs explaining too.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "G7",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-20",
+          "by": "Main",
+          "text": "c2 progress on the p346 batch compiler (gap readiness landed): both watch cases (watching_dev_deopts_on_gap_edit_and_recovers, watching_dev_reruns_on_jit_gap_and_recovers) passed the p346 full cases suite (1 of 3 suite runs) and three filtered runs in a row (--filter DevPartsRoutine/, 3 of 3 each). The filter also holds cranelift_shield_defers_task_cancel_without_unwinding_native_frame, which has hung with 0 CPU for 600 s in every suite since p344; Closer4723 is fixing it. c2 is met after two more full suites."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Speed defect: G11 by the owner's 2026-11-09 ruling (speed and size are G11)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "With the release-built jet, pipe.sh shows each watched edit's output within 1.5 s of the write, both for a changed program and for the gap case. The receipt names the root removed. Proof: `jet test Compiler --profile cases --filter DevPartsRoutine/watching_dev_reruns` with the edit-to-output times in its receipt.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Receipt, p390 batch compiler (census build of a8df17dfb5, the release-built jet from the landing census), 2026-11-20 at load 12.8/26.0/72.8: $JET_SCRATCH_ROOT/lanes/Main/proofs-p389/devwatch.py drives `jet dev app.jet` on the WatchingDevRerunsOnJITGapAndRecovers fixture with stdout on a pipe and times each write to its output line. Changed program v2-v6: 0.130, 0.131, 0.130, 0.131 and 0.132 s. Gap edit: 0.646 s. Recovering edit: 0.147 s. Every edit is under 1.5 s (was 4.9 s for the gap and 3.75 s for the final edit on a34ef0affd). Root removed: the slow path was the Rust-era jet dev (a34ef0affd still held 64 .rs sources), whose gap edit went through the JIT gap fallback and rebuilt beyond one compile. The native jet dev compiles each edit once at O0 and runs the linked image from memory (D-EXEC2=A), so that path no longer exists. The root is named by the mechanism replaced, not by a bisect. `--filter DevPartsRoutine/watching_dev_reruns` passes in the p388, p389 and p390 full suites. Receipt JSON: $JET_SCRATCH_ROOT/lanes/Main/proofs-p389/6544-devwatch.json.",
+          "at": "2026-11-21T04:00:08.779Z"
+        },
+        {
+          "n": 2,
+          "text": "Both dev_parts_routine watch cases pass three runs in a row inside the full cases suite, using readiness waits instead of fixed sleeps, with the release gate's retry. Proof: `jet test Compiler --profile cases --filter DevPartsRoutine/` passes three runs in a row.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Both watch cases, Tests/Cases/DevPartsRoutine/watching_dev_reruns_on_jit_gap_and_recovers.case and watching_dev_deopts_on_gap_edit_and_recovers.case, PASS in three consecutive full cases suites: p388 (census build of 859b88924b), p389 (113aff2b14) and p390 (a8df17dfb5), with the suite retry. They wait for each build output instead of sleeping (34c2101f19).",
+          "at": "2026-11-21T04:00:10.123Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-01T13:54:22.305Z",
+      "updated": "2026-11-22T02:10:23.716Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-21T04:00:25.193Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0a2monf",
+      "num": 6559,
+      "title": "Native code faults (SIGSEGV at 0x0) seeking a handle bound by '&executables[i].file == .Val(input)' in store_reuse_executable_lease_members",
+      "body": "Repro (Linux, admitted compiler 657d0c5553 and HEAD 83c4c6521b runtime alike): assemble the Engine unit (JETPACK_BOOTSTRAP_AREAS=$(node Jetpack/Bootstrap/areas.mjs closure Engine) JETPACK_BOOTSTRAP_OWN_AREA=Engine node Jetpack/Bootstrap/assemble.mjs aot), then in its project run: jet test src/jetpack.jet \"realize verified round trips\". The claim 'store broker realize verified round trips through broker and fails closed on auth' (Jetpack/Store/Tests/Broker.jet) FAILs with Fault [SIGSEGV] invalid memory access at address 0x0; backtrace compiler_fs_error <- store_reuse_executable_lease_members (Jetpack/Store/Source, line '&input.seek(0)' after 'if &executables[index].file == .Val(input)') <- store_reuse_build_lease <- store_snapshot_lease_unlocked <- store_snapshot_lease <- store_realize_verified. Safe code must never fault (I1): either the borrowed-pattern binding of an Option field through an indexed borrow lowers a null handle, or the File handle in SnapshotFile is dropped early. The claim is not listed in Tools/testkit/known-failing.tsv. Found by Main while proving #6426.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "G5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 progress on batch compiler p274 (dev d7285f91e6): jet test Compiler --profile packages --filter 'store broker realize verified' 1/1 PASS, no SIGSEGV. Still owed: the minimal repro of the '&executables[i].file == .Va…' pattern as a case (NativeFault/null_deref_repro doesn't exist on dev), plus O1 and O2 runs of the claim."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "QuickLead receipt, 2026-11-08 (seed a0_038, source dev 759775d626): the Engine-unit claim passes on every tier. Steps: Jetpack/Bootstrap/Assemble.jet areas closure Engine; Assemble.jet aot (560 sources, 559 claims, no E1271); then jet test --optimize=none,basic,full src/jetpack.jet \"realize verified round trips\" gives 1 passed, 0 failed at each of none, basic and full. The minimal repro is the b75e525782 case borrowed_list_of_optional_handles. Main reruns this exact proof before meeting c1."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "b75e525782 repro half: cases --filter borrowed_list_of_optional_handles PASS 1/1 (seed-built d405d4cb6c + 8405a508b0). The Engine-unit claim (store broker realize verified round trips) still waits on a locked jetpack source (E1271)."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "a0_034: minimal repro of the faulting pattern (a [SnapshotFile] with FileReader? handles passed by value to a loop, then twice through '&executables[i].file == .Val(input)' seek+read) prints names 3 / bytes 12 / again 12 on O0, O1 and O2: no fault, handles stay open. The Engine-unit claim still needs its jetpack env run."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Likely root: #6677. The faulting statement compares '&executables[index].file == .Val(input)': it widens the borrowed FileReader into an Option union, and before 060bbcd0f1 and 8ac163916e the widened value was moved and dropped, which closes the caller's handle (the 'corrupt after' bisect). Re-run the claim with a0_034, the first seed carrying both fixes, before any other work on this card."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Bisect (assembled Engine unit, s1 of 60324f013d, scratch edits to the assembled copy only): the SnapshotFile FileReader is valid (stat ok) before store_reuse_create_exec_wrappers and corrupt after it; the corrupt handle sends seek/stat into compiler_fs_error, which faults at 0x0. The general FS error path works in the same unit (open of a missing path reports NotFound). A probe placed right after 'ready :: store_reuse_keeper_line(&child)' faults, a probe after the spawn hides the fault, and probes at every step hide it (claim passes). --checked-alloc also hides it (passes). So the damage happens in or around the first keeper_line call (loop line in child.stdout.lines() -> return line: early return out of a shared process-lines iterator, IterSources.jet iter_source_node shared clone/release) and is heap-layout dependent. A standalone repro of that pattern (spawn sh, keeper_line twice, stat a FileReader between) runs clean on jet run. Next: build that standalone with --checked-alloc and run to main return (sweep catches write-after-free), then shrink inside keeper_line. Parked for the owner's marker work."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The Engine-unit claim 'store broker realize verified round trips through broker and fails closed on auth' passes on the assembled Engine unit at O0, O1 and O2, and a minimal repro of the faulting pattern passes too. Proof: `jet test Jetpack/Engine --filter store_broker_realize_verified` and `jet test Compiler --profile cases --filter NativeFault/null_deref_repro`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Repro landed f3a531ada7 (p401). On the p403 batch compiler (dev 236298d8c0, 2026-11-21): the Engine unit assembled by `JETPACK_BOOTSTRAP_TEST_AREAS=Engine jet Jetpack/Bootstrap/Assemble.jet aot` (719 sources, 564 test claims), then in its project `jet test src/jetpack.jet -O0|-O1|-O2 --filter=\"store broker realize verified round trips through broker and fails closed on auth\"` printed \"pass\" and \"1 passed, 0 failed, 0 skipped\" at each of O0, O1 and O2. NativeFault/null_deref_repro passed in the p401 proofs and in the p403 full suite.",
+          "at": "2026-11-21T09:46:54.613Z"
+        },
+        {
+          "n": 2,
+          "text": "The Jetpack Foundation tests pass with no failures and no SIGSEGV at NetFetchError.jet:179. Proof: `jet test Compiler --profile packages --filter Foundation`. (was #3590 c48)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev d7285f91e6. On batch compiler p274: jet test Compiler --profile packages --filter Foundation: 366 rows, 366 passed, 0 failed, no SIGSEGV.",
+          "at": "2026-11-17T20:08:13.324Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-04T10:39:48.294Z",
+      "updated": "2026-11-22T02:10:23.717Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-21T09:46:56.206Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0a8z3u0",
+      "num": 6612,
+      "title": "Tool symbol paths use `.`, not `::`: inspect, find, semindex, docs and the impact selector",
+      "body": "Owner 2026-11-06 chose A: with `::` gone from source (D-DECL-COLON1=A, #6586), tool symbol paths switch from `module::name` to `.`, matching source qualification such as `alias.Type.method`. This changes the public JSON and text output of jet inspect, jet find, the semantic index and jet docs, and the user-typed selector of `jet inspect impact <file> <symbol>`. Greenfield cutover: no `::` reader stays behind.\n\nSites found by the syntax owner at c92bf872eb:\n- User-typed: the jet inspect impact selector (Inspect.jet:1580).\n- User-visible JSON or text: semindex identity, summary and call_path keys (SemIndexBuild.jet 149/1481/1526/1530/2151, Sema SemanticIndex.jet:422, InspectOutput.jet:32; the case semindex_projects_omitted_inferred_effects expects `inferred_effect_signature::announce`); inspect rights keys (InspectRights.jet 142/168/173); inspect shapes (InspectShapes.jet:422); find (Find.jet:308); docs `parent::name` (Docs.jet:279); codemod and try identities (Codemod.jet:1371, Try.jet:242).\n- Internal parsing: ArchitectureAdvice.jet:47, Fill.jet:80, SemIndexBuild.jet:1797, and the ComptimeIR.jet:103 and Pipeline.jet:2712 cache keys.\n- Real Rust paths in RustForeign.jet:210-232 are foreign syntax and stay.\n\nModule paths contain dots (`core.process`), so a tool must know where the module path ends. The tools have the module graph, so a reader resolves the longest prefix that names a module, and the rest is the member path. Writers emit the same form.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Main 01:31 ruling (c1): SymbolTable keys keep the kind as a namespace prefix and dot the rest (`function:m.g`, `parameter:m.f.x`; an empty owner adds no segment), because kinds are separate namespaces. A unit test pins injectivity across kinds and owners. \"Dotted, no kind prefix\" applies to user-facing nominal, method and route names (`core.net.TCPStream`)."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Main ruling 2026-11-18, within this card's approved scope (no ballot needed): (1) the deep-checks package::path scope selector is one of the tool selectors this card moves to '.': it is read with the same longest-module-prefix split as c2 (IfHole-6-1-6612-c2-dotted-selector adds E2122) and the :: form is removed in the same cutover, with no fallback. (2) The one kind-prefix scheme for c4 is the one semindex already writes (fn:, method:, type:, plus the same pattern for any other kind it already names); inspect's callable identity, live value ids and expand's static paths adopt it. c1 is about 3,800 sites in Compiler/ and is sized for several one-hour items; it is parked behind the cheaper e20 cards per the owner's least-work-first overnight order."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c3 held (Main, 2026-11-13). x6612 on the gate-p25 jet over dev c01ff2ad91: semindex/ 31/0 + 9 KF, docs 5/0 + 4 KF, codemod 22/0. inspect has 8 FAIL, find 2 FAIL and try 21 FAIL. Most are unrelated rows that the substring filters catch (jetpack_*, pkg, image, env_dev_trust). Two rows that name a symbol still fail, build_entry/inspect_choices_shows_each_inlined_call_and_why and concurrency_boundaries/inspect_choices_shows_storage_form_and_its_lock (\"expected storage form, got inlining\"), so c3 is not met until they pass or are shown not to be affected. Full list: Lander5 report, 2026-11-13 21:xx."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-06 (chat, second cut questions): c1 stands as written: every `::` in Compiler/ goes, internal keys included (~3,800 sites), not just the tool-visible paths."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every tool output and selector listed in the body writes and reads symbol paths with `.` (for example `inferred_effect_signature.announce`), with no `::` writer, reader or fallback left except real Rust paths in RustForeign.jet; a repo search for `::` in Compiler/ outside Rust-foreign code and dated docs finds none. Proof: git grep for `::` in Compiler, outside RustForeign.jet and dated docs, finds nothing that writes or reads a symbol path.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p325 batch compiler (dev e6ddae4d43) landed 7e7bdeae41: JetSema EvalProbe now keys its probe module \"module:10:eval-probe:main\", the driver identity format, not \"eval-probe::main\". git grep \"::\" in Compiler outside RustForeign*.jet and *.md: 130 lines in 43 files, none a symbol-path writer, reader or fallback. They are IPv6 literals ([::1], ::ffff, ::/96), CSS pseudo-elements (::after, ::before, ::-webkit-details-marker), cgroup v2 \"0::\" rows, GitHub ::{level} annotations, PowerShell :: in completion scripts, Rust/C idioms in comments (u64::MAX, f64::total_cmp, Rc::ptr_eq, Read::read, std::process), the retired-sigil diagnostic E-row and its structured fix, lexer and parser tests of that retired sigil, the DeepChecks malformed-selector rejection test (\"tree::run\" is refused), the Types.jet assertion that a key holds no \"::\", RustSource test fixtures, Unicode table data, retired-with-rust.tsv test names, and one length-prefixed module identity (\"module:14:source-root:0:\" + path) in a JetDebug test.",
+          "at": "2026-11-19T16:05:49.947Z"
+        },
+        {
+          "n": 2,
+          "text": "Readers split a dotted path at the longest prefix that names a module in the program's module graph; a case proves `jet inspect impact <file> core.process.spawn`-style selectors and an ambiguous or unknown prefix gives a registered diagnostic with a UI snapshot. Proof: `jet test Compiler --profile cases --filter Inspect/impact_dotted_selector` and `jet test Compiler --profile ui --filter dotted_path_unknown_prefix`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p293 full suite (dev 4171547dc0): cases Inspect/impact_dotted_selector PASS and ui dotted_path_unknown_prefix PASS (also IfHole on its worktree at 4171547dc0)",
+          "at": "2026-11-18T07:24:49.008Z"
+        },
+        {
+          "n": 3,
+          "text": "The affected cases, snapshots and goldens (semindex_projects_omitted_inferred_effects and every inspect, find, docs, codemod and try row that names a symbol) are updated in the same commit and pass on the default tier; the spec text that documents these outputs shows the `.` form. Proof: `jet test Compiler --profile cases --filter Semindex/semindex_projects_omitted_inferred_effects`, and the inspect, find, docs, codemod and try rows pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p238 batch compiler (dev 5bea729463), full collect-all suite: cases Semindex/semindex_projects_omitted_inferred_effects PASS; no inspect, find, docs, codemod or try row fails.",
+          "at": "2026-11-17T02:09:21.325Z"
+        },
+        {
+          "n": 4,
+          "text": "A guard case fails on any `::` in UI, golden or case expected output, and in a JetCli or JetSemIndex string literal; only foreign-language subjects such as C++ and Rust FFI snippets are exempt. Semindex definition identities, inspect's callable identity, live value ids and expand's static paths use dotted paths with one kind-prefix scheme.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p293 batch compiler (dev 4171547dc0): Tests/Guards --filter no_double_colon_output passes (landed be20972863)",
+          "at": "2026-11-18T06:36:33.637Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards",
+              "--filter",
+              "no_double_colon_output"
+            ]
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax",
+        "tooling",
+        "owner-direction"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T19:42:47.719Z",
+      "updated": "2026-11-22T02:10:23.717Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-19T16:05:52.472Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0miof6j",
+      "num": 6748,
+      "title": "MIT crypto and TLS: rewrite core.crypto and core.net.tls from the specifications, with the same module boundaries, replacing the Apache-2.0 mbedtls translation",
+      "body": "Owner ruling 2026-11-09: keep the mbedtls translation (#6694) for now, then rewrite it from scratch, preserving the module boundaries, so that it can be MIT. Work from the RFCs, FIPS and SP 800 documents, never from mbedtls or another non-MIT source. Starts after G1.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [
+        "c0bnp1zw"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p204 core suite: TLS.jet [O0] dudect failed under suite load (p203 had the two O2 rows). The same flake class as c7."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p203 core suite: a second TLS O2 dudect row failed (TLS 1.2 server RSA premaster timing), beside the RSAES-OAEP row that has failed under load since p188. Same flake class as c7: the suite runs these rows under full machine load."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c6 reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned 2026-11-15: c5 (token policy) moved to the auth package card #6448, since auth leaves Core (D-DB-AUTH-HOME1=A); c6 gated on an RSA owner decision."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner 2026-11-09: the rewrite starts after G1, so it waits on the mbedtls port #6694."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "core.crypto and core.net.tls contain no file derived from mbedtls: every file is MIT, written from the cited specifications (RFC, FIPS, SP 800), and the public and private module boundaries are unchanged. Proof: `git grep -l -i mbedtls -- Core/Crypto Core/Net/Tls` prints nothing, and each file header cites its specification.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6925 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:13.282Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 2,
+          "text": "The rewrite passes the same vectors (NIST CAVP plus the fetched Wycheproof), the interop matrix and the constant-time checks as #6694. Proof: `jet test Compiler --profile core --filter crypto` and `jet test Compiler --profile core --filter tls` with the CAVP, Wycheproof, interop and constant-time rows.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6925 c9, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:15.960Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 3,
+          "text": "The full mbedtls surface that Core does not use is complete in Jet: every mbedtls test-suite vector, interop with OpenSSL and the old mbedtls build on every TLS 1.2 and 1.3 version, suite and curve, client certificates and the remaining X.509 and PSA features, with constant-time checks on every secret-dependent primitive. Proof: `jet test Compiler --profile core --filter crypto` with every mbedtls test-suite vector, and the interop receipt for every TLS version, suite and curve.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6925 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:18.939Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 4,
+          "text": "password_hash_with_salt leaves the public core.crypto surface and all public compiler rows, and fixed-salt tests use expert.argon2id (D-CRYPTO-SALTROW1=A). Proof: `git grep -n password_hash_with_salt -- Core Compiler/Prelude Examples` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6925 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:22.344Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 5,
+          "text": "[#4292] D-AUTH-TOKENPOLICY1, with adversarial auth goldens: • JWT verification requires a named nonempty audience, exp and a matching aud (the auth.jet:89 empty-audience bypass is removed). • HS256 only, with constant-time comparison. • The selected PASETO mode. (was #4268 c16)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6448 c13: core.auth leaves Core for the auth package (D-DB-AUTH-HOME1=A), so token policy lives on #6448",
+          "at": "2026-11-15T03:44:44.098Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 6,
+          "text": "No external dependency is added (I6), and the RSA rows New, generate_key, private_encrypt, private_decrypt, public_encrypt and public_decrypt stay refused as not built; building or deleting them is on Main's ballot list (2026-11-15).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6925 c12, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:05:25.227Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "ui",
+            "filter": "crypto_rsa_not_built"
+          }
+        },
+        {
+          "n": 7,
+          "text": "The dudect constant-time rows in Core/Net/SSL/TLS.jet give the same verdict under suite load as on a quiet machine. Today two O2 rows fail in most full core runs and pass when run alone: 'a TLS 1.2 server takes as long on a good RSA premaster block…' and 'an RSAES-OAEP decryption takes as long on a good block…'. They failed in p188, p189c, p191-p196 and p198-p200, with byte-identical O2 code between p199 and p200. Fix it without weakening detection: run timing rows serially on a reserved core, or use a load-robust statistic, never a looser threshold. Proof: the rows pass in 3 consecutive full core runs, and a planted variable-time branch still fails under the same load.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Three consecutive full core runs on the batch compilers p392, p394 and p399 (no core run between them: p393 and p395-p398 ran no suite) each passed 2772/2772, the two O2 dudect rows included. p399 (dev 50b6fec6e7) carries 0df6b5b615, and in that same full run the planted variable-time leak fails the rows own verdict: `jet test Compiler --profile core --filter \"dudect finds the leak\"` rc=0 (proof row tedverdict-1).",
+          "at": "2026-11-21T07:09:47.475Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T16:49:47.742Z",
+      "updated": "2026-11-22T02:10:23.719Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 7,
+      "completedAt": "2026-11-21T07:09:52.866Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0j93bm1",
+      "num": 6749,
+      "title": "Moving a task &&name capture inside the task body is a false E0121 at the capture mark",
+      "body": "Found by WaylandLead3 on a0_042. owned: Box{..}; child: task &&owned { consume(owned) } with consume(b: &&Box) reports 'owned was consumed by consume, so it can't be used here' at the capture mark, with no later use. The same happens for 'mine: owned' and 'owned :=' inside the body. The capture hands ownership into the task, so a move inside the body is the task's own last use. Repro: $JET_SCRATCH_ROOT-style scratch file a.jet (copied into the card's case when fixed).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Moving a task `&&name` capture inside the body (a call taking `&&`, a let binding, a `:=` rebinding) checks clean and runs on O0, O1 and O2 with the value dropped exactly once. Proof: `jet test Compiler --profile cases --filter Concurrency/task_capture_move_in_body_`, one case per form, each failing on a0_042.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "gate-p392 compiler, dev b3b4cb8c80, same tree as f768b6597e: jet test Compiler --profile cases --filter task_capture_ gives 5 PASS 0 FAIL. Each form has its own case checking clean and running on O0, O1 and O2 with one close line: MemorySemantics/a_task_capture_passed_to_a_taking_call_in_its_body_closes_once (a call taking &&, also an AOT build), a_task_capture_bound_by_name_in_its_body_closes_once (a binding), and a_task_capture_rebound_with_colon_equals_in_its_body_closes_once (a := rebinding). The criterion's named filter Concurrency/task_capture_move_in_body_ selects nothing: the cases were filed under these names. Also PASS in suite-p392 cases.",
+          "at": "2026-11-21T05:36:11.863Z"
+        },
+        {
+          "n": 2,
+          "text": "A real use of the captured name after the body's move still reports E0121 at the later use.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "gate-p392 compiler, dev b3b4cb8c80, same tree as f768b6597e: jet test Compiler --profile ui --filter task_capture gives 8 PASS 0 FAIL, including UI/task_capture_moved_in_body_then_used_after (plain task; a use after the block reports Jet.UseAfterMove, which is E0121, at 18:17, labeling the capture as the move) and UI/E0121_task_capture_used_after_its_move_in_the_body (grouped task; owned.n after consume(owned) in the body reports E0121 at 12:19, labeling the move at 11:30). Also PASS in suite-p392 ui.",
+          "at": "2026-11-21T05:36:13.022Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "E0121_task_capture_later_use"
+          }
+        },
+        {
+          "n": 3,
+          "text": "A value taken by a task `&&name` capture runs its Close exactly once when the task drops it, for plain and grouped tasks on O0, O1 and O2, the same as a local or call-taken value (on seed-b14 it never runs: an I1 leak). Proof: `jet test Compiler --profile cases --filter Concurrency/task_capture_close_once_`, one case per form printing the close line.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "gate-p392 compiler, dev b3b4cb8c80, same tree as f768b6597e: Tests/Cases/TaskControlTiers/a_task_capture_moved_inside_its_body_closes_once_on_every_tier passes on O0, O1 and O2 with empty stderr. Its golden prints one close line per form for plain and grouped tasks (held, call, binding, rebinding), and a value the body never moves closes once when the task drops it. Part of the same cases run, 5 PASS 0 FAIL. The named filter Concurrency/task_capture_close_once_ selects nothing; this case is the per-form proof.",
+          "at": "2026-11-21T05:36:14.209Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T16:58:53.917Z",
+      "updated": "2026-11-22T02:10:23.719Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-21T05:36:16.032Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0w0b4wd",
+      "num": 6834,
+      "title": "Gauntlet peer standings: every entry against Rust, C, Zig, Go, Python, Bun, Node, Vite and the hand-written asm ceiling, for startup, run time and binary size, shown in Tower",
+      "body": "Owner order 2026-11-13: measure each gauntlet entry against Rust, C, Zig, Go, Python, Bun, Node, Vite and hand-optimized asm, comparing startup speed, run-time speed and binary size. The first goal is beating each language (the peer floor); the final goal is meeting or beating hand-optimized asm (the ceiling). A temporary Opus subagent improves the gauntlet harness and Tower; Lander5 runs the full rerun.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G7",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Owner order 2026-11-14 ~11:00: post the peer measurements now, on the Tower gauntlet page, as the bars Jet must meet; Jet's rows are added later for the comparison. This supersedes the 2026-11-13 hold that waited for #6328 c22. Started at 10:59: node Tools/gauntlet/harness/run.mjs --languages rust,c,zig,go,python,node,bun,vite,lua,luajit on dev a8ad13ab06 (the gate-p66 jet only for tool probes), then asm-parity ceilings. Jet rows merge later with --languages jet --merge. CardCloser-2 is updating the existing gauntlet page to render peer-only results (peer and ceiling bars, Jet pending) and the merged file."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Owner order 2026-11-13: the Tower gauntlet page is updated (not duplicated) to show these standings and is driven by the upcoming full rerun. The rerun runs on the extended harness and waits for both #6328 c22 and c1-c4 to land."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Owner order 2026-11-13: precompiled Core (#6328 c22) is done before the full gauntlet rerun (c5). G12Docs-5 works only on c22 until it ships; Lander5 holds the rerun until the c22 proof passes."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every gauntlet entry has a peer slot for Rust, C, Zig, Go, Python, Bun, Node and Vite, plus its asm-parity ceiling reference. A peer that cannot express the entry is recorded in the manifest with its reason (Vite applies to web entries only); a missing program is an uncovered row, never a dropped one.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 3eae175762 (GauntletTower-harness): harness tests 44/44; run.mjs --dry-run lists 26 entries x (Rust, C, Zig, Go, Python, Bun, Node, Vite + asm) with a reason per not_applicable cell; all 10 toolchains ok.",
+          "at": "2026-11-14T01:18:14.128Z"
+        },
+        {
+          "n": 2,
+          "text": "Each cell measures three metrics per peer: startup (exec to first output, wall), run time (wall, cycles and peak RSS) and binary size (the deployed artifact in bytes; for interpreted peers, the script plus the runtime it needs, labelled as such). Each gives a Jet/peer ratio judged at below 1.00 for the peer floor and at most 1.00 against the ceiling.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 3eae175762 (GauntletTower-harness): the dry-run lists startup, run time (wall, cycles, peak RSS) and binary size cells per peer, 1170 cells in total.",
+          "at": "2026-11-14T01:18:16.290Z"
+        },
+        {
+          "n": 3,
+          "text": "One command runs the full gauntlet in collect-all mode, every entry against every peer, and writes one dated results file; a failing, unavailable or mismatched cell is a row with its reason, and the run never stops at the first failure. Proof: a dry run lists every cell, and a one-entry run prints all its rows.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 3eae175762 (GauntletTower-harness): one command (node Tools/gauntlet/harness/run.mjs --jet-bin J) runs collect-all, and the dry-run lists every cell with measure, uncovered, not_applicable or unmeasured and its reason.",
+          "at": "2026-11-14T01:18:18.431Z"
+        },
+        {
+          "n": 4,
+          "text": "Tower shows the standings: for each entry, each peer and each metric, the Jet/peer ratio, pass or fail on the peer floor, and the gap to the asm ceiling, read from the latest results file. Proof: tower serve renders it from a fixture results file, and a tower CLI command prints the same table.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 9135cddd94 (GauntletTower-tower): the existing Gauntlet page renders standings (entry x peer + asm x metric: ratio, floor pass/fail, ceiling gap) from a fixture results file, plus GET /api/gauntlet/standings and tower gauntlet standings; tower tests 26/26 and 53/53.",
+          "at": "2026-11-14T01:18:20.621Z"
+        },
+        {
+          "n": 6,
+          "text": "Fair size basis: the harness records each binary`s linkage and compares sizes on one stated basis (static and stripped for every peer that can build so, or dynamic peers charged their shared libc), and the Tower page names that basis. Proof: the harness dry-run lists the basis per cell, and the hello row shows it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 5147c9f554 (GauntletTower-c6): the dry-run gives 234 size cells, every one with a size basis (static stripped, or a dynamic peer charged its libc); standings and manifest 33/33, run.test 13/13, tower 26/26.",
+          "at": "2026-11-14T01:18:22.737Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T00:14:11.855Z",
+      "updated": "2026-11-22T02:10:23.720Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-20T01:06:40.001Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0i4ehbt",
+      "num": 6897,
+      "title": "Hidden costs are visible: one fact per hidden-cost site, a tidy error for hidden copies in loops, and the per-line cost view (D-COSTLAW1=A)",
+      "body": "Destination: D-COSTLAW1=A on the self-hosted toolchain. Every hidden-cost site (implicit copy, collection clone-on-write, packed-Int fallback, per-call outcome construction) has one sema or JetIR fact row; a hidden copy, clone or representation fallback inside a loop is a tidy error naming the repair (an advisory in the decision, a tidy error under D-NO-WARNINGS1=A); and `jet explain --cost` annotates each line with its hidden allocations, copies, fallbacks and Int boxing.\n\nWhy it matters: no construct may ship an invisible super-linear cost without a matching surface.\n\nThe cost producer port itself is #6652 c2.\n\nSource: Map card #6006 c23-c24; #6312 c10-c12 (G11 mashup).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "Main sweep on p325 (dev e6ddae4d43), c2: the ui rows cost_hidden_copy_in_loop and cost_hidden_copy_in_loop_quiet pass, `jet check` lists L2511 jet.HiddenCopyInLoop (rc 1), and `jet run` of the same file runs to completion (rc 0). But `jet build` of that file exits 0 and lists nothing: its whole output is the authority line, with no L2511. c2 says the error is listed by jet check AND jet build, so it stays open until jet build lists tidy errors (same root as #6858 tidy reporting)."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Decision (Main) on c6 spill caps: a loop condition comparing the growing value with any Int (not only a constant or memory-bounded one) clears geometric growth, since the value stays below twice that Int. Measured: 18 geometric sites so far; 8 are capped round-ups (cleared), and 10 are uncapped doublings, swept to 1 << n."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Decision (Main) on c6: CoW precision first (fires only on a maybe-shared collection). Spill stays in L2511 per D-COSTLAW1 (fallback in a loop, repair named), but only after a sema value-range fact clears memory-bounded Ints (.len(), indices, element counts, accumulators over one collection's elements); the remaining non-constant growth fires with the repair named: a range-typed Int (InlineRange) or a fixed-width I64. Gate: the residual Compiler count from seed lint --cost is measured before the spill half fires; if it is above ~50, Main rules on the list. c2 hidden-copy-rule.r2 = rule + narrowing + Compiler view sweep in one SUB."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Decision (Main): L2511 ImplicitCopy counts only copies that allocate or walk data (clone deep-copies: String, List, Map, structs holding one). Bitwise copy-trivial types (Span, ModuleID) and Shared shares (refcount bump) are not hidden copies; sema decides from the type's clone facts. The c2 rule and the compiler sweep land as one stack."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "c2 refined (Main): collection clone-on-write on an exclusively held collection clones at most once, so it is a fact row, not a tidy error; it is tidy only where the loop body makes a fresh share each turn before the edit and sema knows it. Tidy by default in loops: implicit copies and view copies."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Decision refined (Main, within D-COSTLAW1=A): c2's in-loop tidy error covers per-turn costs with a writable repair: implicit copy, view copy, collection clone-on-write, and unconditional packed-Int fallback (an Int boxed every turn). An exact-Int overflow spill is a guarded path paid only on overflow: it is a c1 fact row and shows in the c4 cost view, not a tidy error (JetFoundation alone has 733 such counter sites). Generic representation fallback stays opt-in under lint --cost. c4's range-proven loop needs an induction/range proof in body_cost_integer_bounds."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Decision (Main, within D-COSTLAW1=A): c2's 'representation fallback' is the packed-Int fallback named in the decision's site list (implicit copy, collection clone-on-write, packed-Int fallback, per-call outcome construction); generic uniform-representation fallback is not a D-COSTLAW1 site and stays opt-in under lint --cost. The in-loop tidy error covers implicit copies, view copies, collection clone-on-write and optimizer-unremoved packed-Int fallback; the rule lands with a whole-repository sweep of its hits."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every hidden-cost site has one sema or JetIR fact row: implicit copy, collection clone-on-write, packed-Int fallback and per-call outcome construction.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p339 batch compiler (census build of dev a67dbdce08): `jet test Compiler --profile cases --filter cost_cli_surfaces` PASS 1/1 (CLIPartsSurface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs). The row asserts one shared-tir fact row per hidden-cost kind: implicit copy (`held := row`), map copy-on-write, exact Int spill (packed-Int fallback), outcome construction, plus view materialization and generic representation fallback; count \"\\\"tier\\\":\\\"shared-tir\\\"\" = 6.",
+          "at": "2026-11-20T01:56:54.202Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "cost_cli_surfaces"
+          }
+        },
+        {
+          "n": 2,
+          "text": "A hidden copy, clone or representation fallback inside a loop is a tidy error listed by `jet check` and `jet build` with the repair named (never stopping `jet run` or `jet dev`), and an optimizer-proven removal reports nothing. Proof: `jet test Compiler --profile ui --filter cost_hidden_copy_in_loop` and its no-fire pair.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3663965861 (IfHole-6-1-sweep-check-only-tidy.r1, with c701f02c42 and the l2511 peer/runtimepack fixes), batch compiler p329 full suite: ui Tests/UI/cost_hidden_copy_in_loop.jet PASS and its no-fire pair cost_hidden_copy_in_loop_quiet.jet PASS; cases TidyErrors/hidden_copy_in_loop_fails_build PASS (jet build lists and refuses) and hidden_copy_in_loop_allowed_builds PASS; TidyErrors/ 7/7 and CLI/Battery 2/2 in the proof run. jet run and jet dev never stop for it (Pipeline.jet lists L2511 only for Check and Program modes). The 33 remaining hits in 6 roots are sweep work under #6839 c61.",
+          "at": "2026-11-19T19:48:02.612Z"
+        },
+        {
+          "n": 3,
+          "text": "`jet explain --cost` on the D-COSTLAW1 example (`out.push(log.lines().first())` in a loop) reports the String copy repeating per loop turn on that line.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p340 (dev c5ed0945cf): the card's named golden Tooling/ExplainCost does not exist; the row that carries this text is cases explain_cost_string_copy_repeats_per_loop_turn, PASS (jet explain --cost reports the String copy repeating per loop turn on the out.push(log.lines().first()) line).",
+          "at": "2026-11-20T03:26:34.236Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Tooling/ExplainCost"
+          }
+        },
+        {
+          "n": 4,
+          "text": "The cost view shows allocations, copies, representation fallbacks and Int boxing per line: a range-proven Int loop shows no boxing and an unbounded Int loop shows it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p340 (dev c5ed0945cf): cases explain_cost_int_boxing PASS (range-proven loop shows no boxing, unbounded shows it), plus cost_cli_surfaces and cost_view_receiver_is_passed_as_a_view PASS.",
+          "at": "2026-11-20T03:26:35.414Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "explain_cost_int_boxing"
+          }
+        },
+        {
+          "n": 5,
+          "text": "A view local used only as a method receiver (`trimmed.len()`) is passed as a view and never materialized; sema's receiver materialization is removed, so no hidden copy fact exists for it. Proof: a cases row whose `jet explain --cost` shows no copy on a view receiver call in a loop.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p339 batch compiler (dev a67dbdce08): `jet test Compiler --profile cases --filter cost_view_receiver_is_passed_as_a_view` PASS 1/1. `jet explain --cost` on a loop reading `trimmed.len()`/`trimmed.is_empty()` shows no view materialization (stdout !~ \"view materialization\"), and `jet lint --cost` has no copy to lint.",
+          "at": "2026-11-20T01:56:55.529Z"
+        },
+        {
+          "n": 6,
+          "text": "L2511 covers representation fallbacks precisely. An ExactIntSpill in a loop fires only on geometric growth: a multiply by a factor outside -1..1, a left shift, or x = x * y. It does not fire when the loop condition bounds the growing value by a constant or a memory-bounded value (a len, count or index), and it never fires on additive growth, which the cost view (c4) still shows per line. The fired diagnostic names the repair: a range-typed Int (InlineRange) or a fixed-width I64. A CollectionCopyOnWrite fires only on a collection that may be shared. Proof: jet test Compiler --profile ui --filter cost_spill_doubling_in_loop and --filter cost_cow_shared_map_in_loop, each with its no-fire pair (a bounded doubling, an additive accumulator, an unshared local map), and jet check of Compiler reports no spill or CoW L2511.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p352 batch compiler (dev f795cbd503): jet test Compiler --profile ui --filter cost_spill_doubling_in_loop PASS 2/2 (the firing case and its no-fire cost_spill_doubling_in_loop_quiet) and --filter cost_cow_shared_map_in_loop PASS 2/2 (with cost_cow_shared_map_in_loop_quiet).",
+          "at": "2026-11-20T11:50:38.027Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "cost",
+        "explain"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T03:50:55.861Z",
+      "updated": "2026-11-22T02:10:23.723Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-20T11:50:59.230Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0xbfhbt",
+      "num": 6909,
+      "title": "Canvas debugs the running program: breakpoints, live values, paused locals and replay on the tier that is actually running",
+      "body": "Destination: the Canvas debug overlay works through one seam whose backend is whatever is actually executing (D-CANVAS-DEBUG-UX1=D). Compiled runs use the native jet debug session; under jet dev, the O0 session is used (the old JIT and interpreter tiers are gone). Breakpoints and watches are local and anchored by file hash and source span, and stale anchors become invalid (D-CANVAS-DEBUGSTATE1=A). The overlay shows real values on pins and wires, the active node, the traversed wire, the call stack and the paused locals, and it never presents a cached value as live.\n\nWhy it matters: a visual debugger that shows stale or simulated values is worse than none.\n\nScenario proof: as on #6618.\n\nSource: #6618 c2, c5, c8-c11, c68 (from #273, #983, #984, #6573).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-20",
+          "by": "Main",
+          "text": "c1 proof moved from WebDev/jet_dev_web_live_canvas_debug_session_round_trip to two Debug cases that carry the same Canvas assertions on the O0 jet dev session and the native compiled session, which is what c1 claims. The WebDev pair tests the web target (jet dev --target=web and its App preview), which is unported (E2104) and owned by #5931. Those rows stay KNOWN-FAILING under #5931, unweakened, with their packages fixed so they pass when #5931 lands."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The Canvas debug overlay offers a session selector, breakpoints and watches anchored by file hash and source span, values on pins and wires, an active node and wire pulse, step, resume and stop, a call stack and an execution trace. It is driven by the native session for compiled runs and by the O0 session under jet dev (D-CANVAS-DEBUG-UX1=D, D-CANVAS-DEBUGSTATE1=A). Proof: `jet test Compiler --profile cases --filter debug/canvas_debug_`, which includes canvas_debug_live_session_round_trip_under_jet_dev and canvas_debug_live_session_round_trip_compiled; the web-target pair under WebDev/ belongs to #5931.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p348 batch compiler (dev e2069b5709): jet test Compiler --profile cases --filter Debug/canvas_debug_ gives PASS 15, FAIL 0, including canvas_debug_live_session_round_trip_under_jet_dev, canvas_debug_live_session_round_trip_compiled, overlay_shows_values_pulse_and_sessions_in_the_page, breakpoint_gestures_reach_the_protocol, anchors_go_stale_after_an_edit, values_at_breakpoint_show_stack_node_and_traversed_wires and paused_locals_render_with_types_and_values.",
+          "at": "2026-11-20T09:15:54.303Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/canvas_debug_"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Setting and clearing a breakpoint on a node, continuing and stepping each work through the production protocol, and the test fails if the gesture path is bypassed. Proof: scenario `breakpoint_gestures`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p340 (dev c5ed0945cf): cases Debug/canvas_debug_breakpoint_gestures_reach_the_protocol PASS (scenario breakpoint_gestures through the production protocol).",
+          "at": "2026-11-20T03:26:36.501Z"
+        },
+        {
+          "n": 3,
+          "text": "At a breakpoint the debugger shows real values, stack frames, the active node and the traversed wire path from the live runtime session. Proof: scenario `debug_values_at_breakpoint`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p340 (dev c5ed0945cf): cases Debug/canvas_debug_values_at_breakpoint_show_in_the_page PASS (scenario debug_values_at_breakpoint).",
+          "at": "2026-11-20T03:26:37.597Z"
+        },
+        {
+          "n": 4,
+          "text": "The paused frame's locals render with their types and current values through the production protocol. Proof: scenario `debug_paused_locals`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p340 (dev c5ed0945cf): cases Debug/canvas_debug_paused_locals_show_in_the_page PASS (scenario debug_paused_locals).",
+          "at": "2026-11-20T03:26:40.118Z"
+        },
+        {
+          "n": 5,
+          "text": "After source edits move code, breakpoint and value anchors report themselves stale instead of pointing at wrong spans. Proof: `jet test Compiler --profile cases --filter Debug/canvas_debug_stop_requires_matching_source_revision_and_tier` and scenario `debug_anchors_go_stale`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev d7ef1c4e5c (Lens-6841-6909-c5-debug-anchors-go-stale), p333 batch compiler: the scenario case Debug/canvas_debug_anchors_go_stale_after_an_edit and Debug/canvas_debug_stop_requires_matching_source_revision_and_tier n=1 bad=0 each; CanvasCLILifecycle/jet_dev_canvas_serves_debug_and_profile_views PASS; `jet test Compiler/JetCanvas/Tests` PASS. Breakpoint and value anchors moved by an edit report stale instead of pointing at wrong spans.",
+          "at": "2026-11-19T21:27:12.911Z"
+        },
+        {
+          "n": 6,
+          "text": "Disconnecting the runtime makes the UI show a disconnected state and present no cached value as live; the test fails if the disconnect path is removed. Proof: scenario `debug_disconnect_not_live`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p340 (dev c5ed0945cf): cases Debug/canvas_debug_disconnect_is_not_live and canvas_debug_disconnect_shows_not_live_in_the_page PASS (scenario debug_disconnect_not_live).",
+          "at": "2026-11-20T03:26:41.292Z"
+        },
+        {
+          "n": 7,
+          "text": "A recorded Canvas debug session (run_session_recorded) replays exactly (run_session_replay) through the native O0 image, and the call sites removed from JetDevserver at #6576 c2 are restored against the real functions.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p340 (dev c5ed0945cf): cases Debug/canvas_debug_session_replays_one_source_bound_session PASS through the native O0 image; JetCanvas tests and JetDebug NativeDump tests rc 0.",
+          "at": "2026-11-20T03:26:42.444Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/canvas_debug_session_replays_one_source_bound_session"
+          }
+        },
+        {
+          "n": 8,
+          "text": "A rejected unsupported continuation leaves the live session and paused state unchanged, and the next valid continuation keeps the same session ID; source-revision and tier mismatches are still refused. Proof: `jet test Compiler --profile cases --filter Debug/canvas_debug_stop_requires_matching_source_revision_and_tier` and `--filter debug/canvas_debug_session_replays_one_source_bound_session`. (was #6730 c20)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3c3c25b3ac (Main-6909-c8-same-session), p332 batch compiler: Debug/canvas_debug_stop_requires_matching_source_revision_and_tier and Debug/canvas_debug_session_replays_one_source_bound_session both n=1 bad=0. The case refuses an unsupported continuation, then the next valid continuation answers with the captured session id ({cap:session}); source-revision and tier mismatches stay refused.",
+          "at": "2026-11-19T20:55:56.158Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "canvas",
+        "debug"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:03:19.063Z",
+      "updated": "2026-11-22T02:10:23.724Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 8,
+      "completedAt": "2026-11-20T09:15:56.270Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c06lmp17",
+      "num": 6919,
+      "title": "jet debug steps backward: record and replay, watch-aware reverse navigation and checked fix-and-continue (D-TIMETRAVEL2)",
+      "body": "Destination: `jet debug --record=r1 prog.jet` and then `jet debug --replay=r1` step backward and answer 'where was this value last set' (D-TIMETRAVEL2). Recorded histories keep per-sequence write transitions; replay navigates indexed retained events without re-executing; and a transactional fix checks its inputs, candidate and checkpoint before installation. Every route (native and DAP) refuses unsupported, stale, empty-history and invalid-watch requests with a source error.\n\nWhy it matters: pdb and the Node inspector cannot step back. Reverse debugging is a headline Jet tool.\n\nRelated: the record index is #6907.\n\nSource: #6730 c15-c19, c24 (from #2463, #4720 c10).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "Correction to the c10 evidence: the step-over row is Debug/next_ PASS 3/3 (FAIL 0), not 4/4. c11 not met: on gate-p325, jet check Compiler/JetDebug exits 0 but prints 6 warnings (2 BranchArmTable, 2 PositionalBoolParameter trail_note/native_debug_text, MutableNeverReassigned diff, ErrFallbackShadow err), and jet test Compiler/JetDebug passes 24 tests, none of them a DAP test."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "Gap map on p323 (dev f8a0b329ca), from the collect-all suite and source: 82 Debug cases pass, including replay_reverse_steps_back_by_line_call_and_caller, replay_reverse_continue_goes_back_to_a_watch_hit, replay_reverse_over_dap, replay_why_names_the_last_write, watch_stops_at_the_changing_write, fix_swaps_function_in_native_process and every dap_cli_ case but one. Open work: c1 `jet debug --record` is registered unported (CLICommands.jet form \"debug --record\", ported false; recording works through `jet run --record`); c7 JetDebug still hand-parses watch paths (Native.jet native_watch path cut, \"needs a literal index\"), so the compiler-parser rule is not met; c13 five EventObservations cases are KNOWN-FAILING; c8/c10 Debug/dap_cli_launches_and_projects_a_live_target_in_jet_terms fails under suite load on p322 and p323 (passes alone); c2-c6 need their named cases (navigation_watches_fix_) or a mapping to the replay cases checked clause by clause; c11 needs `jet check Compiler/JetDebug` and `jet test Compiler/JetDebug` run on the batch compiler."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "OWNER ORDER 2026-11-15 ~13:10: one goal agent slot does Jet's native debugger, profiler and perf (G5: #6730 jet debug, #4632 jet perf, #6918 debug info, #6841, #6919), native only with no lldb, gdb or Linux perf dependency. The G9 slot (GoalsB-5-2) takes it after its returned fixes; G9 is unstaffed until an agent snowballs past G6. Owner: GoalsB-5-2 (Pareto order 6730, 4632, 6918, 6841, 6919)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet debug --record=r1 prog.jet` and then `jet debug --replay=r1` step backward and answer 'where was this value last set' with file:line (D-TIMETRAVEL2).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p330 batch compiler (dev 8acf6a14a1): Debug/record_under_debug_then_replay_why PASS. `jet debug --record=why prog.jet` publishes .jet/replays/why.jetproof-replay; `jet debug --replay=why` answers `why total` with \"total = 2, set at prog.jet:21 in run() (task 1)\" and its stack, and `rc` goes back to the previous hit with its locals. replay_reverse_steps_back_by_line_call_and_caller (rn, rs, rf), replay_why_names_the_last_write and all 13 Debug/record_ and replay cases PASS in suite-p330.",
+          "at": "2026-11-19T20:16:00.986Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/record_replay_step_back"
+          }
+        },
+        {
+          "n": 2,
+          "text": "The debugger offers forward and reverse navigation, bounded Jet-path watches and explicit fix commands through the live, native and replay routes. Proof: `jet test Compiler --profile cases --filter Debug/navigation_watches_fix_` on the native and DAP routes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 8fb6df8746 (IfHole-6-1-6919-c2-navigation-watches-fix.r2) and 9191dde520, p335 batch compiler: `jet test Compiler --profile cases --filter Debug/navigation_watches_fix_` n=2 bad=0; navigation_watches_fix_console (native) and navigation_watches_fix_dap (DAP, including the new `fix` request) cover forward and reverse navigation, bounded Jet-path watches and the explicit fix command.",
+          "at": "2026-11-19T22:31:16.279Z"
+        },
+        {
+          "n": 3,
+          "text": "Reverse and forward navigation over a recording are watch-aware: `back` and `continue` with a watch set stop at the previous or next event where the watched value changes (found by re-execution, c4), and changing a live watch refreshes its baseline at the current event. The test-only DebugHistory model (JetDebug/Source/Debug/History.jet) is removed with its tests, so one mechanism serves replay navigation. Proof: `jet test Compiler --profile cases --filter Debug/replay_watch_` on the native and DAP routes, and `git grep -n DebugHistory -- Compiler` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p338 batch compiler (dev 20fecac525): Debug/replay_watch_back_goes_to_the_last_watch_stop PASS, Debug/replay_ 18/0 (reverse and refusal rows included). `git grep -n DebugHistory -- Compiler` on 20fecac525 prints nothing: the test-only model is removed.",
+          "at": "2026-11-19T23:57:24.646Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/recorded_history_watch_navigation"
+          }
+        },
+        {
+          "n": 4,
+          "text": "Replay navigation follows D-TIMETRAVEL2=B: `jump N` re-executes the recording from the start (or from the nearest checkpoint) with its recorded values and stops at event N, and `back K` from event E is `jump E-K`. Repeated jumps to one event give byte-identical locals on the native and DAP routes, and an index of the recording s events names where each re-execution stops. Proof: `jet test Compiler --profile cases --filter Debug/replay_` passes on the native and DAP routes, including a case that jumps to one event three times and compares the locals.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 33cc7b35f2 (history jump) + 92e1d73822 (case count), p338 batch compiler (dev 20fecac525): Debug/replay_ n=18 bad=0. replay_jump_goes_to_an_event_and_back_again jumps to event 1 three times and the three stops are byte-identical, locals included (tally address 0x7ffff7ef1f18 each time). replay_jump_over_dap PASS, the same on DAP.",
+          "at": "2026-11-19T23:57:23.225Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/replay_uses_indexed_events"
+          }
+        },
+        {
+          "n": 5,
+          "text": "A transactional fix checks unchanged inputs, a checked candidate bundle, and the checkpoint's type, layout and authority before it installs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 5e7dc5526b (IfHole-6-1-6919-c5-transactional-fix), p337 batch compiler: Debug/transactional_fix_checks_before_install n=1 bad=0 (the fix re-reads stamped sources just before install, compiles the candidate at the image level, and checks that the on-disk image is the running .text, the layout, and that no parameter changed while a caller frame is on a stack; on the seed its first edit fixed into garbage \"score 4194654\"). Debug/fix_swaps_function_in_native_process, Debug/navigation_watches_fix_ 2/0, JetDebug NativeFix.jet PASS.",
+          "at": "2026-11-19T23:29:47.183Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/transactional_fix_checks_before_install"
+          }
+        },
+        {
+          "n": 6,
+          "text": "Unsupported, stale, empty-history and invalid-watch requests each get an explicit source error on the native and DAP routes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 73bb0bf154 (Lens-6841-6919-c6-replay-refusals) and 68b549141e, batch compilers p332 and p334: Debug/replay_refusals_ 4/0 (unsupported and empty-history requests refused with a source error), Debug/replay_ 15/0, Debug/watch_ 3/0 (invalid watch), Debug/dap_cli_ 20/0 (the stale binary refused over DAP), Prove/prove_replay_ 7/0, and JetCLI DebugDap \"CLI snapshot records\" PASS. Each refusal names its source on the native and DAP routes (jet.DebugRequestRefused).",
+          "at": "2026-11-19T21:57:40.052Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Debug/replay_refusals_"
+          }
+        },
+        {
+          "n": 7,
+          "text": "Watch expressions are parsed by the compiler's parser, and no second watch-expression parser remains in Compiler/JetDebug. Proof: `jet test Compiler --profile cases --filter Debug/watch_expression_uses_compiler_parser`. (was #6730 c10)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter Debug/watch_expression_uses_compiler_parser: PASS 1, FAIL 0 on batch compiler p326 (dev c701f02c42) (landed ed748fb838). At c701f02c42 NativeSession.watch_path (Compiler/JetDebug/Source/Native.jet:2390) reads its operand only through debug_place, the compiler parser's expression reader; NativeWatchPath is built nowhere else, and no watch parse/lex/token function remains in Compiler/JetDebug.",
+          "at": "2026-11-19T18:19:40.796Z"
+        },
+        {
+          "n": 8,
+          "text": "Breakpoints, stepping, frames, variables, async tasks, optimized code, errors and source locations keep their Jet-level meaning across the platform matrix through the production DAP wire. Proof: `jet test Compiler --profile cases --filter Debug/dap_cli_` (known-failing on #6730 today). (was #6730 c13)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p330 batch compiler (dev 8acf6a14a1): `jet test Compiler --profile cases --filter Debug/dap_cli_`: every dap_cli_ row PASS in suite-p330 except dap_cli_continue_burst_keeps_every_breakpoint_hit (a known load flake), which PASSes 2/2 when rerun alone on the same compiler. No dap_cli_ row is known-failing any more; Lens-6919-c1-c8-fixes (8acf6a14a1) fixed the async-tasks and optimized-code rows.",
+          "at": "2026-11-19T20:16:02.236Z"
+        },
+        {
+          "n": 9,
+          "text": "Stale binaries, optimized-away values, process exit, attach denial, signal or exception storms and disconnect each end cleanly with an honest state, including attach, pause, restart and raw-frame refusal over DAP (E2236). Proof: `jet test Compiler --profile cases --filter Debug/dap_cli_`. (was #6730 c14)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 7c78c2705a (Lens-6841-6919-c9-dap-end-states) and 68b549141e (Lens-6841-p332-regressions), p334 batch compiler: `jet test Compiler --profile cases --filter Debug/dap_cli_` n=20 bad=0, including dap_cli_refuses_a_stale_binary_honestly and dap_cli_launches_and_projects_a_live_target_in_jet_terms (the halt now rearms an unrun trap byte). dap_cli_continue_burst passed in the same run.",
+          "at": "2026-11-19T21:57:39.180Z"
+        },
+        {
+          "n": 10,
+          "text": "`jet debug prog.jet --break file:line` stops there, prints locals with their types, and steps over and into, and `jet debug --dap` drives the same session from VS Code. Proof: `jet test Compiler --profile cases --filter Debug/break_then_continue_stops_at_breakpoint` and `--filter debug/dap_cli_`. (was #6730 c23)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Batch compiler gate-p325 (dev e6ddae4d43), 2026-11-19: jet test Compiler --profile cases --filter Debug/break_then_continue_stops_at_breakpoint PASS 1/1; --filter Debug/dap_cli_ PASS 10/10, FAIL 0 (the criterion spells it debug/dap_cli_, which selects nothing; the case folder is Debug/), including dap_cli_steps_over_and_into_with_typed_variables over the production DAP wire. Every other clause has its own case: --break flag with typed locals, Debug/break_flag_stops_there_and_shows_typed_locals PASS; step into, Debug/step_ PASS 2/2 (step_into_call_and_backtrace, step_stops_at_first_line_with_caret_and_locals); step over, Debug/next_ PASS 4/4.",
+          "at": "2026-11-19T17:34:14.640Z"
+        },
+        {
+          "n": 11,
+          "text": "Compiler/JetDebug checks clean as a package and its DAP tests run, which unblocks #6187 C1 (E2231-E2239 rows with runner-produced snapshots). Proof: `jet check Compiler/JetDebug` exits 0 with no problems, and `jet test Compiler/JetDebug` runs its DAP tests. On 2026-11-14 the check gave 0 errors with gate-p66 at 7700a065ff; the DAP tests have not run yet. (was #6730 c25)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On batch compiler p327 (dev 01b0b4b9e0) (landed edf3db05ff): jet check Compiler/JetDebug rc=0, no problems; jet test Compiler/JetDebug rc=0 (25 passed) and jet test Compiler/JetDebug/Tests rc=0 (62 passed); the DAP test in Compiler/JetCLI/Tests/DebugDap.jet passes in the units leg's JetCLI/Tests run (0 failed). Cycle proofs: $JET_SCRATCH_ROOT/.../proofsp327.out.",
+          "at": "2026-11-19T18:51:35.515Z"
+        },
+        {
+          "n": 12,
+          "text": "jet debug's DAP supports conditional breakpoints, logpoints and evaluate (Docs/Audits/2026-11-14-debugging-profiling-review.md). Proof: `jet test Compiler --profile cases --filter Debug/dap_conditional_breakpoints_logpoints_evaluate`. (was #6730 c28)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p323 batch compiler (census build of dev f8a0b329ca), collect-all cases suite: PASS Debug/dap_cli_conditions_logpoints_and_evaluate (the named proof under the name the DAP cases settled on, dap_cli_*). Over the production `jet debug --dap` wire it asserts supportsConditionalBreakpoints and supportsLogPoints, a breakpoint with condition `i == 3` stops only at i = 3, a logpoint fills its message without stopping, a malformed condition is unverified with \"is not a Jet expression\", and evaluate answers `i` = 3 (Int), `total + i * 10` = 33 and `0 < i && i < 4` = true.",
+          "at": "2026-11-19T15:20:52.095Z"
+        },
+        {
+          "n": 13,
+          "text": "The debugger event-observation behaviours the deleted Rust tests covered have Jet cases: only executed, redacted sync and hook facts; pressure drop, failure, close and single terminals; exact async registration and once-removal; a bounded runtime event sequence the debugger preserves exactly. Proof: `jet test Compiler --profile cases --filter EventObservations/`. (was #6730 c30)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter EventObservations/: PASS 6, FAIL 0 on batch compiler p326 (dev c701f02c42) (landed 2e484b6ad5): async registration and once-removal exact, concurrent observations in push order, executed redacted sync and hook facts, pressure drop/failure/close/single terminals, bounded runtime sequence preserved exactly, async JIT callback contract across tiers.",
+          "at": "2026-11-19T18:19:39.931Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "debug",
+        "replay"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T04:09:16.617Z",
+      "updated": "2026-11-22T02:10:23.724Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 13,
+      "completedAt": "2026-11-19T23:57:31.184Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0yk1mno",
+      "num": 6994,
+      "title": "Build D-AMERICAN-IDENT1=C: American spelling for source identifiers and Jet-owned machine tokens",
+      "body": "The owner ratified D-AMERICAN-IDENT1=C: rename every British-spelled source identifier (B's exact inventory), then migrate the serialized wire and storage tokens Jet owns with a versioned, deterministic offline converter. Foreign protocol keys, historical text, public paths and CLI flags stay as they are. The old format remains only as converter input. Follows #6734, which made user-visible text American.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G2",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "p297 landed Speed-3-3-6994-c2-c-exports (a232635cf2): the runtime's last British C export aliases are gone; remaining British words are external names and NixOS specialisation (no Jet reader). c2 proof pending the p297 suite rerun (golden/cases OOM-killed at 10G; caps raised to 14G)."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "p295 landed c2 arms ffi-descriptor.r2, service, jobs, trace-live.r3 (dev 3f4dd54f21); service/jobs/trace-live proofs PASS on the p295 batch compiler. c2 stays open until the git-grep half holds (no British token in any live reader)."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "p288: the american-sweep r3 landed (1b8bf7b65f). The guard passes and so does american_ident1, but task_failure_rail still expects \"cancelled\" (new suite failure). c1 waits on Speed fixing that fallout and closing the hole in the guard."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every British-spelled identifier in Compiler, Core, Jetpack, Tools, Examples and Tests is renamed to its American spelling in one cutover, with every caller migrated. Proof: the American-spelling guard (Tests/Guards) scans identifiers as well as text and reports 0 hits, and the census and full suite stay green.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p290 batch compiler (dev 903da7aa3a; the sweep landed as 1b8bf7b65f and the output hole fix as 31100075cb): `jet test Tests/Guards/american_spelling.jet` PASS with identifiers and expected output scanned; cases american_ident1_renames_british_name_parts PASS (p288) and task_failure_rail PASS (n=2); p290 census clean, full suite golden 0 FAIL, and the only new cases failures are the known flakes loose_entry_snapshot and browser_test_cli_flags.",
+          "at": "2026-11-18T03:18:13.165Z"
+        },
+        {
+          "n": 2,
+          "text": "Jet-owned serialized tokens (receipts, rows, wire and storage schemas) whose spelling is British are inventoried with their producers and consumers and moved to a new format version. A deterministic offline converter turns the old format into the new and verifies the migration, and no reader keeps the old spelling live. Proof: the converter's round-trip case passes and git grep finds no British token in any live reader.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p325 batch compiler (dev e6ddae4d43): Migrations/american_tokens1_moves_british_tokens_to_new_versions PASS (the AmericanTokens1 converter round trip) and Migrations/american_ident1_renames_british_name_parts PASS. git grep -i over *.jet, *.case and *.json for the British tokens (cancelled, cancelling, colour*, behaviour*, serialis*, initialis*, normalis*, licence, favour*, honour*, centre, analyse/analysed/analysing/analyser, catalogue, artefact*, labelled, modelled, travelled, signalled, marshalled), excluding Compiler/Migrations and the Tests/Guards/american_spelling.jet tables, finds no reader or writer token. The only hits are the converter case s old-format input fixtures (Input/Old/*, which it migrates), the English word \"initialisms\" in Tests/Guards/example_names.jet, and the WAI-ARIA attribute aria-labelledby in the JetCanvas HTML shell, a web-standard name and not a Jet-owned token.",
+          "at": "2026-11-19T16:08:27.983Z"
+        }
+      ],
+      "refs": [
+        "6734"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-17T17:23:18.313Z",
+      "updated": "2026-11-22T02:10:23.731Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-19T16:08:30.035Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T02:21:36.969Z"
+    },
+    {
+      "id": "c0y7kqfw",
+      "num": 6452,
+      "title": "The gauntlet measurement manifest has no slot for a matched Rust peer, so Jet/Rust ratios cannot be gated",
+      "body": "Found by Codegen-1 on 2026-10-31. Tools/gauntlet measurement-manifest.json entries carry jet and python programs only, and axes need a status and harness. There is no field for the matched Rust peer, so the AGENTS.md performance gate (Jet/Rust <= 1.05 per cell and metric, strictly below 1.00 against every other peer) cannot be encoded in the manifest, only in prose and lane notes (Floor cells, Codegen-1 corpus). The manifest must name every required peer per entry, with the matched program, and the gate must fail any required cell where a peer is missing or the comparator fails.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G7",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 progress: the Gauntlet and Perf harness paths follow the TitleCase rename (5af7f0f21c, p268): measurement-manifest.test.mjs 25/0, run 17/0, standings 9/0, Coverage 6/0, status 10/0 (worker run). The peer-slot recording half still needs timed runs in the heavy slot."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Main 2026-10-31: the gauntlet matrix gives each cell exactly one owning entry (measurement-manifest.test.mjs:744), and matrix.json is owner-approved. So the wordfreq 200k-unique-key variant (Codegen-1: gen.py seed 42, input sha256 43e32ccc…, matched Rust collect+sort_by) cannot be added as an entry without a new matrix cell plus a loss_owners source card. Until the owner approves a text.kernel scale-variant cell, its numbers live in the Codegen-1 Map patch msg as lane evidence. Baseline: Jet 26.45 s vs Rust 0.08 s at 200k; Jet 0.63 s vs Rust 0.05 s at 10k (wave-11 s1, --optimize=full)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "measurement-manifest.json names the matched Rust, C, Zig and Go peers per entry where they apply; the gate fails a required cell whose peer is missing, unmatched or fails the AGENTS.md comparator; wordfreq 10k and 200k and cat are recorded with matched peers. Proof: `node --test Tools/Gauntlet/Harness/measurement-manifest.test.mjs`.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "2c721de516: matched rust/c/zig/go peer slots on all 26 entries + peer_floor_workloads (wordfreq-10k, wordfreq-200k, cat 6-peer byte-identical) + strict <1 gate in run.mjs and Scoreboard.jet; measurement-manifest.test.mjs 26/26, run.test.mjs 17/17, standings/Coverage/status/performance-surface 43/43, run-scoreboard & run-publication PASS",
+          "at": "2026-11-22T03:11:14.523Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-31T16:40:33.121Z",
+      "updated": "2026-11-22T03:11:16.330Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-22T03:11:16.330Z",
+      "questions": [],
+      "retiredAt": "2026-11-25T03:12:03.605Z"
     }
   ]
 }
