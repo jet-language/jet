@@ -86,10 +86,7 @@ ir_sentry_body: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, save: Int, body: [
 // On entry to a function that takes raw addresses: its sentry stack frame,
 // left by every return and stop edge (IRTxFrame.sentry_frame).
 ir_sentry_frame: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder) Never! {
-    if !p.sentries || b.row < 0 {
-        return
-    }
-    if !ir_nodes_take_raw_addresses(p.functions[b.row].tree.nodes) {
+    if !p.sentries || !ir_nodes_take_raw_addresses(ir_builder_body(p, b.row)[0].tree.nodes) {
         return
     }
     word_row: ir_word_row(m)

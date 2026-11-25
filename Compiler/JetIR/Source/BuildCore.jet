@@ -605,7 +605,7 @@ ir_core_image_fits: fn(p: IRProgram) -> Bool Never! {
 // (ir_core_call_signature). A function marked `#Inline(Always)` is never
 // bound: the program builds it, so its optimizer can keep the mark's promise.
 ir_core_bound: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, type_args: [Type], slots: [Int], span: Span) -> String Never! {
-    if p.checks.core == None || type_args.len() > 0 || p.functions[row].is_inline_always || ir_bounds_mode(p, row) != .Fatal {
+    if p.checks.core == None || type_args.len() > 0 || p.functions[row].is_inline_always || ir_bounds_mode(p, p.functions[row]) != .Fatal {
         return ""
     }
     if p.checks.core == .Val(image) {

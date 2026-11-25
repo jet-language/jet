@@ -65,10 +65,10 @@ ir_fix_slot: fn(m: IRModule, b: ^IRBuilder, slot: Int) Never! {
 // Marks `slot`, the value of node `expression`, when the node's checked
 // type is fixed or the node reads an element of a list of fixed elements.
 ir_fix_expr: fn(m: IRModule, p: IRProgram, b: ^IRBuilder, expression: Int, slot: Int) Never! {
-    if slot < 0 || b.row < 0 || expression <= IR_FIRST_NODE_ID {
+    if slot < 0 || expression <= IR_FIRST_NODE_ID {
         return
     }
-    function: p.functions[b.row]
+    function: ir_builder_body(p, b.row)[0]
     if function.fixed_tags.len() == 0 || b.instance.names.len() > 0 {
         return
     }
@@ -99,8 +99,7 @@ ir_fixed_element: fn(fixed_tags: [String], ty: Type) -> Bool Never! {
 
 // Whether the branch at `span` of the function being built is masked.
 ir_masked_branch: fn(p: IRProgram, b: IRBuilder, span: Span) -> Bool Never! {
-    if b.row < 0 -> return false
-    loop masked in p.functions[b.row].masked {
+    loop masked in ir_builder_body(p, b.row)[0].masked {
         if masked.start == span.start && masked.end == span.end -> return true
     }
     false
@@ -250,17 +249,14 @@ ir_masked_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: BodyPlace
 // assignment also keeps its old value where `live` is false. Every return
 // of the function gives the chosen value where `live` is false.
 ir_masked_exits: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody) Never! {
-    // The checked body the builder reads (ir_body_stmt, ir_masked_branch):
-    // an early return is the last statement of a masked `if`'s arm.
-    if b.row < 0 {
-        return
-    }
-    row: b.row
+    // The body the builder reads (ir_body_stmt, ir_masked_branch): an early
+    // return is the last statement of a masked `if`'s arm.
+    tree: ir_builder_body(p, b.row)[0].tree
     found := false
-    loop statement in p.functions[row].tree.stmts {
+    loop statement in tree.stmts {
         if statement == .If(_, then_body, _, _, span) {
             if then_body.len() > 0 && ir_masked_branch(p, b, span) {
-                last: body_stmt(p.functions[row].tree, then_body[then_body.len() - 1])
+                last: body_stmt(tree, then_body[then_body.len() - 1])
                 if last == .Return(_, _) -> found = true
             }
         }

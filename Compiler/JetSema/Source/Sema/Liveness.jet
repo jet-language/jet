@@ -34,6 +34,7 @@ use {
         Type,
         Interner,
         InternerDelta,
+        body_node_index,
         checked_expr_type_id,
         delta_type_kind,
         delta_type_syntax,
@@ -834,7 +835,7 @@ sema_liveness_member_body_uses: fn(interner: Interner, function: FnBody, uses: ^
         // prints those values, so it reads and builds them.
         if kind == .HandleMethod(_, operation, args) && (operation == .GameSceneComponent || operation == .GameSceneQuery) {
             loop arg in args {
-                if tree.nodes[sema_comptime_fold_node_row(tree, arg)].kind == .StrLit(parts) {
+                if tree.nodes[body_node_index(tree, arg)].kind == .StrLit(parts) {
                     loop part in parts {
                         if part == .Literal(text) {
                             loop name in text.split(",") {
@@ -1125,7 +1126,7 @@ sema_liveness_marked_signature_uses: fn(function: Func, markers: NameTable, uses
 // Whether node `id` is a value a local computed while compiling landed as
 // (sema_fact_prepared_expr): a literal holding no code.
 sema_liveness_landed_value: fn(tree: BodyTree, id: Int) -> Bool Never! {
-    row: sema_comptime_fold_node_row(tree, id)
+    row: body_node_index(tree, id)
     if tree.nodes[row].kind == .IntLit(_, _) || tree.nodes[row].kind == .BoolLit(_) || tree.nodes[row].kind == .CtLit(_) {
         return true
     }

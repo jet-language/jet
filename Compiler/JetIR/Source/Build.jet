@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, NameVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_taken, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_pair_find_slot, name_pair_slot, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook, ir_host_value_name]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, NameVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_taken, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_tree_new, module_none, BodyParameter, TEffectFacts, TEffectSpan, TWebParamReconstruction, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_pair_find_slot, name_pair_slot, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook, ir_host_value_name]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_substitute_type]
 }
 
@@ -197,11 +197,12 @@ IRBuilder: struct {
     // The `#Impure` blocks open around the code being built: a build host
     // call made inside one may touch the ambient world (ir_host_method).
     impure: Int{0},
-    // The checked function whose body tree (FnBody.tree) holds the nodes and
-    // statements this body reads (-1: glue with no checked body), and the
+    // The checked function this body is built from, by its row in the
+    // program's functions (None: glue, built from none), whose body
+    // (ir_builder_body) holds the nodes and statements it reads; and the
     // nodes and statements the builder made itself (ir_node, ir_stmt_node)
     // with the next node id it hands out.
-    row: Int{-1},
+    row: Int?{None},
     made: BodyTree{BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}},
     next_node: Int{IR_FIRST_NODE_ID},
     // How many closures of each kind this body created so far, at the
@@ -501,19 +502,19 @@ ir_checks_of: fn(bounds: String, backtrace: String, dead_code: String, modules: 
     IRChecks{bounds: mode, modules: modules, backtrace: trace, keep: dead_code == "keep"}
 }
 
-// The bounds mode of checked function `row` (-1: glue, Fatal).
-ir_bounds_mode: fn(p: IRProgram, row: Int) -> IRBoundsMode Never! {
-    if row < 0 || p.checks.bounds == .Fatal -> return IRBoundsMode.Fatal
-    if p.checks.modules.get(p.functions[row].module_identity.id) == None {
+// The bounds mode of a body built from `function` (glue's names no module:
+// Fatal).
+ir_bounds_mode: fn(p: IRProgram, function: FnBody) -> IRBoundsMode Never! {
+    if p.checks.bounds == .Fatal || p.checks.modules.get(function.module_identity.id) == None {
         return IRBoundsMode.Fatal
     }
     p.checks.bounds
 }
 
-// Do the `#On(.Deep)` bodies of checked function `row` emit code: the
-// compile's `--deep-checks` request selects it (-1: glue, none).
-ir_deep_checks_on: fn(p: IRProgram, row: Int) -> Bool Never! {
-    row >= 0 && name_column_get(p.checks.deep_keys, p.checks.deep, p.functions[row].key) != None
+// Do the `#On(.Deep)` bodies of `function` emit code: the compile's
+// `--deep-checks` request selects it (glue's names no key: none).
+ir_deep_checks_on: fn(p: IRProgram, function: FnBody) -> Bool Never! {
+    name_column_get(p.checks.deep_keys, p.checks.deep, function.key) != None
 }
 
 // The checked program the builder reads: the checked functions every IR
@@ -523,6 +524,9 @@ ir_deep_checks_on: fn(p: IRProgram, row: Int) -> Bool Never! {
 // built once per distinct list of concrete type arguments (monomorphized).
 IRProgram: struct {
     functions: [FnBody],
+    // The body a glue builder reads (ir_builder_body): glue is built from no
+    // checked function, so its one body is empty (ir_glue_body).
+    glue: [FnBody]{[FnBody]{ir_glue_body()}},
     // Each function key's first row in `functions` (ir_first_function_rows).
     rows: IRFunctionRows,
     // The run's symbol table: the key of each run-wide SymbolID a checked
@@ -825,7 +829,7 @@ IRLambdaJob: struct {
     source_file: String,
     line: Int,
     instance: IRInstance,
-    row: Int,
+    row: Int?,
     made: BodyTree,
     next_node: Int,
     task_body: Bool{false},
@@ -923,8 +927,7 @@ ir_symbol_key: fn(p: IRProgram, id: SymbolID) -> String Never! { symbol_table_ke
 // one.
 ir_body_symbol_key: fn(p: IRProgram, b: IRBuilder, id: SymbolID) -> String Never! {
     if !symbol_is_local(id) -> return symbol_table_key(p.symbols, id)
-    if b.row < 0 -> panic("{b.f.name}: local symbol {id.id} read without a checked body")
-    symbol_local_keys_text(p.functions[b.row].tree.symbols, id)
+    symbol_local_keys_text(ir_builder_body(p, b.row)[0].tree.symbols, id)
 }
 
 // A program over the checked declarations with no function bound yet
@@ -1971,7 +1974,7 @@ ir_executable_return_in: fn(function: FnBody, declared: Type?) -> Type? Never! {
 // sema's row for it (IRInstance). None when sema published no row for a type
 // that names one of the instance's type parameters.
 ir_fact_type: fn(p: IRProgram, b: IRBuilder, ty: Type) -> Type? Never! {
-    if b.instance.names.len() == 0 || b.row < 0 -> return Val(ty.copy())
+    if b.instance.names.len() == 0 -> return Val(ty.copy())
     Val(sema_inference_substitute_type(ty, b.instance.names, b.instance.args))
 }
 
@@ -2579,8 +2582,7 @@ ir_build_queued: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure], que
     if queued.lambda >= 0 {
         job: m.lambdas[queued.lambda].copy()
         b.instance = job.instance
-        b.row = job.row
-        b.bounds = ir_bounds_mode(p, job.row)
+        ir_builder_from(p, b, job.row)
         b.made = job.made
         b.next_node = job.next_node
         ir_build_lambda(m, p, b, job)
@@ -2593,8 +2595,7 @@ ir_build_queued: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure], que
         names: ir_generic_names(p, p.functions[queued.row])
         b.instance = IRInstance{names: names, args: queued.args.copy()}
     }
-    b.row = queued.row
-    b.bounds = ir_bounds_mode(p, queued.row)
+    ir_builder_from(p, b, Val(queued.row))
     b.entry = queued.row == p.entry && queued.args.len() == 0
     ir_build_function(m, p, b, p.functions[queued.row])
     ir_keep_failures(failures, b, m.functions[queued.id].key, p.functions[queued.row].name, p.functions[queued.row].source_file, p.functions[queued.row].source_span)
@@ -2618,6 +2619,65 @@ ir_builder_new: fn(f: ^^IRFunction) -> IRBuilder Never! {
     IRBuilder{f: f.move(), bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, places: [IRPlace]{}, moved: [IRMovedPart]{}, part_closes: [IRPartClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}}
 }
 
+// Makes `b` build from checked function `row` (None: glue): the body its
+// reads come from (ir_builder_body) and the bounds mode it builds under.
+ir_builder_from: fn(p: IRProgram, b: ^IRBuilder, row: Int?) Never! {
+    b.row = row
+    b.bounds = ir_bounds_mode(p, ir_builder_body(p, row)[0])
+}
+
+// The body a builder built from `row` (IRBuilder `row`) reads: its checked
+// function's, or glue's empty one (IRProgram `glue`). A one-row view of `p`,
+// so a read copies nothing.
+ir_builder_body: fn(p: IRProgram, row: Int?) -> View<FnBody> Never! from p {
+    if row == .Val(at) -> return p.functions[at..at]
+    p.glue[0..0]
+}
+
+// The body of glue, which is built from no checked function: no node,
+// statement, mask or scope region, and no module, key or local symbol.
+ir_glue_body: fn() -> FnBody Never! {
+    FnBody{
+        name: "",
+        module_name: "",
+        module_identity: module_none(),
+        key: "",
+        source_file: "",
+        source_span: Span{start: 0, end: 0},
+        failure_carrier: TFailureCarrier.Infallible,
+        effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
+        web_bucket: None,
+        web_marker: None,
+        visibility: NameVisibility.Private,
+        foreign: None,
+        params: [BodyParameter]{},
+        web_param_reconstructions: [TWebParamReconstruction]{},
+        ret: None,
+        gc_return: false,
+        gc_scope: false,
+        return_view_provenance: None,
+        generic_params: [TGenericParam]{},
+        is_main: false,
+        line: 0,
+        synthetic: false,
+        is_unsafe: false,
+        unsafe_gate: None,
+        is_pure: false,
+        memo_bound: None,
+        memo_unbounded: false,
+        is_reactive: false,
+        reactive_upgrades: [String]{},
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        uses_stack_sentry: false,
+        body: [Int]{},
+        kind: TFuncKind.TopLevel,
+        tree: body_tree_new(),
+    }
+}
+
 // The first id of the nodes a builder makes itself (ir_node), far below the
 // function-local ids the checker and the flattener (TEXPR_FIRST_FLAT_ID) hand out.
 IR_FIRST_NODE_ID: -1099511627776
@@ -2629,37 +2689,27 @@ IR_FIRST_STMT_INDEX: 1099511627776
 // Node `id`: a row of the builder's checked function tree, or a node the
 // builder made (ir_node).
 ir_body_node: fn(p: IRProgram, b: IRBuilder, id: Int) -> BodyNode Never! {
-    if id <= IR_FIRST_NODE_ID {
-        loop node in b.made.nodes {
-            if node.id == id -> return node.copy()
-        }
-        panic("{b.f.name}: builder node {id} was never made")
-    }
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    body_node(p.functions[b.row].tree, id)
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(id)].copy()
+    body_node(ir_builder_body(p, b.row)[0].tree, id)
 }
 
 // Statement `index`: a statement of the builder's checked function tree, or
 // one the builder made (ir_stmt_node).
 ir_body_stmt: fn(p: IRProgram, b: IRBuilder, index: Int) -> StmtKind Never! {
     if index >= IR_FIRST_STMT_INDEX -> return b.made.stmts[index - IR_FIRST_STMT_INDEX].copy()
-    if b.row < 0 -> panic("{b.f.name}: statement {index} read without a checked body")
-    body_stmt(p.functions[b.row].tree, index)
+    body_stmt(ir_builder_body(p, b.row)[0].tree, index)
 }
 
-// The index of builder-made node `id` in `b.made.nodes`.
-ir_made_node_index: fn(b: IRBuilder, id: Int) -> Int Never! {
-    loop (idx, node) in b.made.nodes {
-        if node.id == id -> return idx
-    }
-    panic("{b.f.name}: builder node {id} was never made")
-}
+// The index of builder-made node `id` in `made.nodes` and `made.expr_types`
+// (IRBuilder `made`): ir_node hands the ids out downward from
+// IR_FIRST_NODE_ID as it pushes both rows.
+ir_made_node_index: fn(id: Int) -> Int Never! { IR_FIRST_NODE_ID - id }
 
 // Span of node `id` without cloning its NodeKind payload.
 ir_body_node_span: fn(p: IRProgram, b: IRBuilder, id: Int) -> Span Never! {
-    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].span
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].span
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(id)].span
+    tree: ir_builder_body(p, b.row)[0].tree
+    tree.nodes[body_node_index(tree, id)].span
 }
 
 // Span of statement `index` without cloning its StmtKind payload.
@@ -2667,63 +2717,62 @@ ir_body_stmt_span: fn(p: IRProgram, b: IRBuilder, index: Int) -> Span Never! {
     if index >= IR_FIRST_STMT_INDEX {
         return ir_stmt_kind_span(b.made.stmts[index - IR_FIRST_STMT_INDEX])
     }
-    if b.row < 0 -> panic("{b.f.name}: statement {index} read without a checked body")
-    ir_stmt_kind_span(p.functions[b.row].tree.stmts[index])
+    ir_stmt_kind_span(ir_builder_body(p, b.row)[0].tree.stmts[index])
 }
 
 ir_body_node_is_local: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
-    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].kind == .Local(_)
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Local(_)
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(id)].kind == .Local(_)
+    tree: ir_builder_body(p, b.row)[0].tree
+    tree.nodes[body_node_index(tree, id)].kind == .Local(_)
 }
 
 ir_body_node_is_int_lit: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
     if id <= IR_FIRST_NODE_ID {
-        return b.made.nodes[ir_made_node_index(b, id)].kind == .IntLit(_, _)
+        return b.made.nodes[ir_made_node_index(id)].kind == .IntLit(_, _)
     }
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .IntLit(_, _)
+    tree: ir_builder_body(p, b.row)[0].tree
+    tree.nodes[body_node_index(tree, id)].kind == .IntLit(_, _)
 }
 
 ir_body_node_int_lit: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
     if id <= IR_FIRST_NODE_ID {
-        if b.made.nodes[ir_made_node_index(b, id)].kind == .IntLit(value, _) -> return Val(value)
+        if b.made.nodes[ir_made_node_index(id)].kind == .IntLit(value, _) -> return Val(value)
         return None
     }
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .IntLit(value, _) {
+    tree: ir_builder_body(p, b.row)[0].tree
+    if tree.nodes[body_node_index(tree, id)].kind == .IntLit(value, _) {
         return Val(value)
     }
     None
 }
 
 ir_body_node_is_uninit: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
-    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].kind == .Uninit
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Uninit
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(id)].kind == .Uninit
+    tree: ir_builder_body(p, b.row)[0].tree
+    tree.nodes[body_node_index(tree, id)].kind == .Uninit
 }
 
 ir_body_node_is_move: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
-    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].kind == .Move(_)
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Move(_)
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(id)].kind == .Move(_)
+    tree: ir_builder_body(p, b.row)[0].tree
+    tree.nodes[body_node_index(tree, id)].kind == .Move(_)
 }
 
 ir_body_node_is_slice: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
     if id <= IR_FIRST_NODE_ID {
-        return b.made.nodes[ir_made_node_index(b, id)].kind == .Slice(_, _, _, _, _)
+        return b.made.nodes[ir_made_node_index(id)].kind == .Slice(_, _, _, _, _)
     }
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Slice(_, _, _, _, _)
+    tree: ir_builder_body(p, b.row)[0].tree
+    tree.nodes[body_node_index(tree, id)].kind == .Slice(_, _, _, _, _)
 }
 
 ir_body_node_borrow_inner: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
     if id <= IR_FIRST_NODE_ID {
-        if b.made.nodes[ir_made_node_index(b, id)].kind == .Borrow(inner, _) -> return Val(inner)
+        if b.made.nodes[ir_made_node_index(id)].kind == .Borrow(inner, _) -> return Val(inner)
         return None
     }
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Borrow(inner, _) {
+    tree: ir_builder_body(p, b.row)[0].tree
+    if tree.nodes[body_node_index(tree, id)].kind == .Borrow(inner, _) {
         return Val(inner)
     }
     None
@@ -2731,13 +2780,13 @@ ir_body_node_borrow_inner: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never
 
 ir_body_node_write_borrow_inner: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
     if id <= IR_FIRST_NODE_ID {
-        if b.made.nodes[ir_made_node_index(b, id)].kind == .Borrow(inner, access) && access == .Write {
+        if b.made.nodes[ir_made_node_index(id)].kind == .Borrow(inner, access) && access == .Write {
             return Val(inner)
         }
         return None
     }
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Borrow(inner, access) && access == .Write {
+    tree: ir_builder_body(p, b.row)[0].tree
+    if tree.nodes[body_node_index(tree, id)].kind == .Borrow(inner, access) && access == .Write {
         return Val(inner)
     }
     None
@@ -2745,13 +2794,13 @@ ir_body_node_write_borrow_inner: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int?
 
 ir_body_node_or_fallback_operand: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
     if id <= IR_FIRST_NODE_ID {
-        if b.made.nodes[ir_made_node_index(b, id)].kind == .OrFallback(operand, _, _) {
+        if b.made.nodes[ir_made_node_index(id)].kind == .OrFallback(operand, _, _) {
             return Val(operand)
         }
         return None
     }
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .OrFallback(operand, _, _) {
+    tree: ir_builder_body(p, b.row)[0].tree
+    if tree.nodes[body_node_index(tree, id)].kind == .OrFallback(operand, _, _) {
         return Val(operand)
     }
     None
@@ -2759,23 +2808,23 @@ ir_body_node_or_fallback_operand: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int
 
 ir_body_node_is_split_call: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
     if id <= IR_FIRST_NODE_ID {
-        idx: ir_made_node_index(b, id)
+        idx: ir_made_node_index(id)
         return b.made.nodes[idx].kind == .HandleMethod(_, _, _) || b.made.nodes[idx].kind == .CoreCall(_, _, _, _, _, _)
     }
-    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    idx: body_node_index(p.functions[b.row].tree, id)
-    p.functions[b.row].tree.nodes[idx].kind == .HandleMethod(_, _, _) || p.functions[b.row].tree.nodes[idx].kind == .CoreCall(_, _, _, _, _, _)
+    tree: ir_builder_body(p, b.row)[0].tree
+    idx: body_node_index(tree, id)
+    tree.nodes[idx].kind == .HandleMethod(_, _, _) || tree.nodes[idx].kind == .CoreCall(_, _, _, _, _, _)
 }
 
 ir_body_node_is_no_else: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
     if id <= IR_FIRST_NODE_ID {
-        if b.made.nodes[ir_made_node_index(b, id)].kind == .Never(reason, _) {
+        if b.made.nodes[ir_made_node_index(id)].kind == .Never(reason, _) {
             return reason == "no else arm"
         }
         return false
     }
-    if b.row < 0 -> return false
-    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Never(reason, _) {
+    tree: ir_builder_body(p, b.row)[0].tree
+    if tree.nodes[body_node_index(tree, id)].kind == .Never(reason, _) {
         return reason == "no else arm"
     }
     false
@@ -2790,8 +2839,7 @@ ir_body_stmts_is_no_else: fn(p: IRProgram, b: IRBuilder, stmts: [Int]) -> Bool N
         }
         return false
     }
-    if b.row < 0 -> return false
-    if p.functions[b.row].tree.stmts[id] == .ExprStmt(val, _) {
+    if ir_builder_body(p, b.row)[0].tree.stmts[id] == .ExprStmt(val, _) {
         return ir_body_node_is_no_else(p, b, val)
     }
     false
@@ -2827,10 +2875,10 @@ ir_expr_is_pure_atom_in: fn(p: IRProgram, b: IRBuilder, node: BodyNode) -> Bool 
 
 ir_expr_is_pure_atom: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
     if id <= IR_FIRST_NODE_ID {
-        return ir_expr_is_pure_atom_in(p, b, b.made.nodes[ir_made_node_index(b, id)])
+        return ir_expr_is_pure_atom_in(p, b, b.made.nodes[ir_made_node_index(id)])
     }
-    if b.row < 0 -> return false
-    ir_expr_is_pure_atom_in(p, b, p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)])
+    tree: ir_builder_body(p, b.row)[0].tree
+    ir_expr_is_pure_atom_in(p, b, tree.nodes[body_node_index(tree, id)])
 }
 
 ir_expr_is_pure_tag_test_in: fn(p: IRProgram, b: IRBuilder, node: BodyNode) -> Bool Never! {
@@ -2851,10 +2899,10 @@ ir_expr_is_pure_tag_test_in: fn(p: IRProgram, b: IRBuilder, node: BodyNode) -> B
 
 ir_expr_is_pure_tag_test: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
     if id <= IR_FIRST_NODE_ID {
-        return ir_expr_is_pure_tag_test_in(p, b, b.made.nodes[ir_made_node_index(b, id)])
+        return ir_expr_is_pure_tag_test_in(p, b, b.made.nodes[ir_made_node_index(id)])
     }
-    if b.row < 0 -> return false
-    ir_expr_is_pure_tag_test_in(p, b, p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)])
+    tree: ir_builder_body(p, b.row)[0].tree
+    ir_expr_is_pure_tag_test_in(p, b, tree.nodes[body_node_index(tree, id)])
 }
 
 ir_cond_is_pure_no_binds: fn(p: IRProgram, b: IRBuilder, cond: BodyIfCond) -> Bool Never! {
@@ -2866,33 +2914,21 @@ ir_cond_is_pure_no_binds: fn(p: IRProgram, b: IRBuilder, cond: BodyIfCond) -> Bo
 }
 
 // The checked type of `value`: its row in the expression-type column of the
-// builder's checked function (in an instance, sema's row at the instance:
-// IRInstance), or of the nodes the builder made (ir_node).
+// builder's body (in an instance, sema's row at the instance: IRInstance), or
+// of the nodes the builder made (ir_node).
 ir_ty: fn(m: IRModule, p: IRProgram, b: IRBuilder, value: Int) -> Type Never! {
-    if value <= IR_FIRST_NODE_ID {
-        loop row in b.made.expr_types {
-            if row.id == value -> return ir_tid_syntax(m, p, row.ty)
-        }
-    } else if b.row >= 0 {
-        ty: body_type(p.interner, p.functions[b.row].tree, value)
-        if b.instance.names.len() == 0 -> return ty
-        return sema_inference_substitute_type(ty, b.instance.names, b.instance.args)
-    }
-    panic("{b.f.name}: node {value} has no expression-type row")
+    if value <= IR_FIRST_NODE_ID -> return ir_tid_syntax(m, p, b.made.expr_types[ir_made_node_index(value)].ty)
+    ty: body_type(p.interner, ir_builder_body(p, b.row)[0].tree, value)
+    if b.instance.names.len() == 0 -> return ty
+    sema_inference_substitute_type(ty, b.instance.names, b.instance.args)
 }
 
 // Fast TypeID lookup of node `value` without constructing a Type on the non-generic path.
 ir_ty_id: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, value: Int) -> TypeID Never! {
-    if value <= IR_FIRST_NODE_ID {
-        loop row in b.made.expr_types {
-            if row.id == value -> return row.ty
-        }
-    } else if b.row >= 0 {
-        if b.instance.names.len() == 0 -> return body_type_id(p.functions[b.row].tree, value)
-        ty: body_type(p.interner, p.functions[b.row].tree, value)
-        return ir_intern_tid(m, p, sema_inference_substitute_type(ty, b.instance.names, b.instance.args))
-    }
-    panic("{b.f.name}: node {value} has no expression-type row")
+    if value <= IR_FIRST_NODE_ID -> return b.made.expr_types[ir_made_node_index(value)].ty
+    tree: ir_builder_body(p, b.row)[0].tree
+    if b.instance.names.len() == 0 -> return body_type_id(tree, value)
+    ir_intern_tid(m, p, sema_inference_substitute_type(body_type(p.interner, tree, value), b.instance.names, b.instance.args))
 }
 
 // The layout row of node `value`'s checked type (ir_ty_id, ir_value_type_id).

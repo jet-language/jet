@@ -172,16 +172,13 @@ ir_cell_params: fn(m: ^IRModule, b: ^IRBuilder) Never! {
 // `body` can reach is a closure or a raw address (most functions).
 ir_mutable_captures: fn(p: IRProgram, b: IRBuilder, body: [Int]) -> [String] Never! {
     names := [String]{}
-    if !ir_nodes_have_cells(b.made.nodes) && (b.row < 0 || !ir_nodes_have_cells(p.functions[b.row].tree.nodes)) {
+    tree: ir_builder_body(p, b.row)[0].tree
+    if !ir_nodes_have_cells(b.made.nodes) && !ir_nodes_have_cells(tree.nodes) {
         return names
     }
     loop statement in body {
         kind: ir_body_stmt(p, b, statement)
-        if b.row >= 0 {
-            body_each_stmt_child(p.functions[b.row].tree, kind, fn(expression: Int) { ir_collect_mutable_captures(p, b, expression, names) })
-        } else {
-            body_each_stmt_child(b.made, kind, fn(expression: Int) { ir_collect_mutable_captures(p, b, expression, names) })
-        }
+        body_each_stmt_child(tree, kind, fn(expression: Int) { ir_collect_mutable_captures(p, b, expression, names) })
     }
     names
 }
@@ -205,11 +202,7 @@ ir_collect_mutable_captures: fn(p: IRProgram, b: IRBuilder, expression: Int, nam
             }
         }
     }
-    if b.row >= 0 {
-        body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_collect_mutable_captures(p, b, child, names) })
-    } else {
-        body_each_expr_child(b.made, node, fn(child: Int) { ir_collect_mutable_captures(p, b, child, names) })
-    }
+    body_each_expr_child(ir_builder_body(p, b.row)[0].tree, node, fn(child: Int) { ir_collect_mutable_captures(p, b, child, names) })
 }
 
 ir_nodes_have_cells: fn(nodes: [BodyNode]) -> Bool Never! {
@@ -229,10 +222,9 @@ ir_nodes_have_cells: fn(nodes: [BodyNode]) -> Bool Never! {
 // write borrow.
 ir_window_cells: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, captured: [String]) -> [String] Never! {
     names := captured
-    if b.row >= 0 {
-        ir_window_cells_in(m, p, b, p.functions[b.row].tree.nodes, names)
-        ir_window_cells_named(m, p, b, p.functions[b.row].tree.stmts, names)
-    }
+    tree: ir_builder_body(p, b.row)[0].tree
+    ir_window_cells_in(m, p, b, tree.nodes, names)
+    ir_window_cells_named(m, p, b, tree.stmts, names)
     ir_window_cells_in(m, p, b, b.made.nodes, names)
     ir_window_cells_named(m, p, b, b.made.stmts, names)
     names
@@ -467,8 +459,8 @@ ir_stmt_body: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, statement: Int) Neve
         ir_stmt_body_in(m, p, b, statement, stmt)
         return
     }
-    if b.row < 0 -> panic("{b.f.name}: statement {statement} read without a checked body")
-    ir_stmt_body_in(m, p, b, statement, p.functions[b.row].tree.stmts[statement])
+    tree: ir_builder_body(p, b.row)[0].tree
+    ir_stmt_body_in(m, p, b, statement, tree.stmts[statement])
 }
 
 ir_stmt_body_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, statement: Int, stmt: StmtKind) Never! {
@@ -958,7 +950,7 @@ ir_stmt_body_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, statement: Int, s
         // `--deep-checks` request selects, in every profile; any other
         // function emits no code for it.
         .DeepCheck(body, _) -> {
-            if ir_deep_checks_on(p, b.row) -> ir_stmts(m, p, b, body)
+            if ir_deep_checks_on(p, ir_builder_body(p, b.row)[0]) -> ir_stmts(m, p, b, body)
         }
         .Live(body, _) -> { ir_live(m, p, b, body) }
         .Unsafe(gate, body) -> { ir_unsafe_scope(m, p, b, gate, body) }
@@ -2117,9 +2109,8 @@ ir_expr_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int) -> 
         node: ir_body_node(p, b, expression)
         return ir_expr_slot_in(m, p, b, expression, node)
     }
-    if b.row < 0 -> panic("{b.f.name}: node {expression} read without a checked body")
-    idx: body_node_index(p.functions[b.row].tree, expression)
-    ir_expr_slot_in(m, p, b, expression, p.functions[b.row].tree.nodes[idx])
+    tree: ir_builder_body(p, b.row)[0].tree
+    ir_expr_slot_in(m, p, b, expression, tree.nodes[body_node_index(tree, expression)])
 }
 
 ir_expr_slot_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int, node: BodyNode) -> Int Never! {
@@ -4324,11 +4315,7 @@ ir_note_slot_mention: fn(p: IRProgram, b: IRBuilder, expression: Int, slot: Int,
             }
         }
     }
-    if b.row >= 0 {
-        body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_note_slot_mention(p, b, child, slot, found) })
-    } else {
-        body_each_expr_child(b.made, node, fn(child: Int) { ir_note_slot_mention(p, b, child, slot, found) })
-    }
+    body_each_expr_child(ir_builder_body(p, b.row)[0].tree, node, fn(child: Int) { ir_note_slot_mention(p, b, child, slot, found) })
 }
 
 // Whether the statements `body`, or anything inside them, read the binder
@@ -4337,11 +4324,7 @@ ir_stmts_name: fn(p: IRProgram, b: IRBuilder, body: [Int], id: SymbolID) -> Bool
     found := false
     loop statement in body {
         kind: ir_body_stmt(p, b, statement)
-        if b.row >= 0 {
-            body_each_stmt_child(p.functions[b.row].tree, kind, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
-        } else {
-            body_each_stmt_child(b.made, kind, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
-        }
+        body_each_stmt_child(ir_builder_body(p, b.row)[0].tree, kind, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
         if found -> return true
     }
     false
@@ -4358,11 +4341,7 @@ ir_note_binder_mention: fn(p: IRProgram, b: IRBuilder, expression: Int, id: Symb
             return
         }
     }
-    if b.row >= 0 {
-        body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
-    } else {
-        body_each_expr_child(b.made, node, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
-    }
+    body_each_expr_child(ir_builder_body(p, b.row)[0].tree, node, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
 }
 
 // `print(value)`: its shown text to stdout with a line end
@@ -4922,9 +4901,8 @@ ir_place_needs_address: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, place: Int)
         node: ir_body_node(p, b, place)
         return ir_place_needs_address_in(m, p, b, node)
     }
-    if b.row < 0 -> panic("{b.f.name}: node {place} read without a checked body")
-    idx: body_node_index(p.functions[b.row].tree, place)
-    ir_place_needs_address_in(m, p, b, p.functions[b.row].tree.nodes[idx])
+    tree: ir_builder_body(p, b.row)[0].tree
+    ir_place_needs_address_in(m, p, b, tree.nodes[body_node_index(tree, place)])
 }
 
 ir_place_needs_address_in: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, node: BodyNode) -> Bool Never! {
@@ -4959,9 +4937,8 @@ ir_place_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: Int, back
         node: ir_body_node(p, b, place)
         return ir_place_address_in(m, p, b, place, node, backs, span)
     }
-    if b.row < 0 -> panic("{b.f.name}: node {place} read without a checked body")
-    idx: body_node_index(p.functions[b.row].tree, place)
-    ir_place_address_in(m, p, b, place, p.functions[b.row].tree.nodes[idx], backs, span)
+    tree: ir_builder_body(p, b.row)[0].tree
+    ir_place_address_in(m, p, b, place, tree.nodes[body_node_index(tree, place)], backs, span)
 }
 
 ir_place_address_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: Int, node: BodyNode, backs: ^[IRWriteBack], span: Span) -> Int Never! {
@@ -7152,7 +7129,7 @@ ir_core_function: fn(b: IRBuilder) -> Bool Never! {
 // the user's file, so, like Core, they are no journey hop.
 ir_generated_fragment_function: fn(p: IRProgram, b: IRBuilder) -> Bool Never! {
     if b.f.key.ends_with(".__jet_cli_run") || b.f.key.contains(".__jet_cli_run_") -> return true
-    if b.row < 0 || !p.functions[b.row].synthetic -> return false
+    if !ir_builder_body(p, b.row)[0].synthetic -> return false
     symbol_key_names(b.f.key, "__jet_cli_decode") || symbol_key_names(b.f.key, "merge") || symbol_key_names(b.f.key, "to_int") || symbol_key_names(b.f.key, "from_int")
 }
 
@@ -7503,14 +7480,7 @@ ir_fallback_reads_error: fn(p: IRProgram, b: IRBuilder, fallback: BodyOrFallback
         if fallback == .Panic(_, _) -> return true
         if local.symbol_id == .Val(id) {
             found := false
-            if {
-                b.row >= 0 -> {
-                    body_each_or_fallback_child(p.functions[b.row].tree, fallback, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
-                }
-                else -> {
-                    body_each_or_fallback_child(b.made, fallback, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
-                }
-            }
+            body_each_or_fallback_child(ir_builder_body(p, b.row)[0].tree, fallback, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
             return found
         }
         return true
