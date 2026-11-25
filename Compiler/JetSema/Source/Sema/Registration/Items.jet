@@ -3310,10 +3310,13 @@ sema_registration_file_name_taken_over: fn(module_row: SemaRegistrationModule, n
     false
 }
 
-sema_registration_set_symbol_position: fn(module_row: ^SemaRegistrationModule, name: String, row: Int) Never! {
+// Records `row` as the `symbols` row of `name` in `module_row`; the id of
+// `name` in module_row.symbol_names.
+sema_registration_set_symbol_position: fn(module_row: ^SemaRegistrationModule, name: String, row: Int) -> Int Never! {
     id: name_index(name_intern(module_row.symbol_names, name))
     loop module_row.symbol_rows.len() <= id -> module_row.symbol_rows.push(-1)
     module_row.symbol_rows[id] = row
+    id
 }
 
 // The `symbols` row of `name` (whose name_text_hash is `hash`) in `module_row`.
@@ -3392,7 +3395,7 @@ sema_registration_add_foreign_functions: fn(module_row: ^SemaRegistrationModule,
             next
         }
         registered: sema_registration_foreign_function(function, module_row.module_identity, module_text, owner, symbols, foreign_library, foreign_library_span)
-        sema_registration_set_symbol_position(module_row, registered.symbol.name, module_row.symbols.len())
+        _ := sema_registration_set_symbol_position(module_row, registered.symbol.name, module_row.symbols.len())
         module_row.symbols.push(registered.symbol)
         module_row.symbol_nominal_rows.push(-1)
         module_row.foreign_functions.push(registered)
@@ -3443,8 +3446,7 @@ sema_registration_add_root: fn(module_row: ^SemaRegistrationModule, module_text:
         None -> sema_registration_root_symbol(item, module_row.module_identity, module_text, module_row.module_name, symbols, source_file, source_origin, source_segments, diagnostics) ?? return false
     }
     nominal: sema_registration_nominal(item, module_row.module_identity, module_text, module_row.module_name, symbols, source_file, source_origin, source_segments, diagnostics, item_index)
-    sema_registration_set_symbol_position(module_row, name, module_row.symbols.len())
-    declaration_id: name_index(name_find(module_row.symbol_names, name) ?? panic("a registered name lost its id"))
+    declaration_id: sema_registration_set_symbol_position(module_row, name, module_row.symbols.len())
     loop module_row.declaration_rows.len() <= declaration_id -> module_row.declaration_rows.push(-1)
     module_row.declaration_rows[declaration_id] = module_row.declarations.len()
     module_row.symbols.push(symbol.copy())
@@ -4187,7 +4189,7 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
         }
         nominal: sema_registration_foreign_handle_nominal(facts, module_row.module_identity, module_text, symbols, diagnostics)
         if nominal == .Val(value) {
-            sema_registration_set_symbol_position(module_row, value.symbol.name, module_row.symbols.len())
+            _ := sema_registration_set_symbol_position(module_row, value.symbol.name, module_row.symbols.len())
             module_row.symbols.push(value.symbol)
             module_row.symbol_nominal_rows.push(module_row.nominals.len())
             module_row.nominals.push(value)
