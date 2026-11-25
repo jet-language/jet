@@ -98,6 +98,7 @@ IRRuntimeIntrinsic: enum {
     HookNew,
     DecisionHookNew,
     AsyncEventNew,
+    IterProgress,
 }
 
 // The IEEE bits of a Float as an I64, and back.
@@ -121,6 +122,8 @@ IRRuntimeIntrinsic: enum {
 // IR_CORE_INTRINSICS) at the type arguments of the call's result: a
 // channel's endpoint pair, unbounded or bounded, a timer Receiver, an Event
 // under a policy, a Hook, a DecisionHook and an AsyncEvent.
+// Core's core.term described progress source (Build.jet IR_CORE_INTRINSICS):
+// the runtime's progress Iter over the items, at their element type.
 
 IRIntrinsicShape: enum {
     FloatBits,
@@ -1250,7 +1253,9 @@ ir_f32_bits_signature: fn(function: FnBody, to_bits: Bool) -> Bool Never! {
 // constructor is its provider call at the call's result type
 // (ir_intrinsic_result): BuildChannels.jet ir_channel_new and
 // ir_timer_after, BuildEvents.jet ir_event_with_policy, ir_hook_new,
-// ir_decision_hook_new and ir_async_event_new.
+// ir_decision_hook_new and ir_async_event_new; a core.term described
+// progress source is its Iter route at that type (BuildLazy.jet
+// ir_lazy_progress).
 ir_intrinsic_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, intrinsic: IRRuntimeIntrinsic, callee: String, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "type Float")
@@ -1303,6 +1308,10 @@ ir_intrinsic_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, intrinsic: IRRu
         .AsyncEventNew -> {
             result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
             ir_async_event_new(m, p, b, result_ty, ir_intrinsic_nodes(args), span)
+        }
+        .IterProgress -> {
+            result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
+            ir_lazy_progress(m, p, b, result_ty, ir_intrinsic_nodes(args), span)
         }
     }
 }

@@ -712,6 +712,13 @@ ir_lazy_core_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String,
     Val(ir_lazy_route(m, p, b, symbol, ty, operands, span))
 }
 
+// Core's described progress source (the core.term function filling
+// InlineIterProgress): the progress route over its items, description and
+// template, an Iter of type `ty` that takes the items over.
+ir_lazy_progress: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
+    ir_lazy_core_call(m, p, b, "jet_std_io_progress_iter", ty, args, span) ?? ir_fail_slot(b, span, "progress source over no checked Iter")
+}
+
 // Iter builtins lowered over the List under them rather than through an
 // Iter: `xs.last_index_of(item)` scans the List from its end
 // (ir_list_route), and `xs.cycle(n).to_list()` on a List of scalars fills

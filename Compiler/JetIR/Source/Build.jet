@@ -1324,6 +1324,7 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{role: "InlineHookNew", intrinsic: IRRuntimeIntrinsic.HookNew},
     IRCoreIntrinsicRow{role: "InlineDecisionHookNew", intrinsic: IRRuntimeIntrinsic.DecisionHookNew},
     IRCoreIntrinsicRow{role: "InlineAsyncEventNew", intrinsic: IRRuntimeIntrinsic.AsyncEventNew},
+    IRCoreIntrinsicRow{role: "InlineIterProgress", intrinsic: IRRuntimeIntrinsic.IterProgress},
 }
 
 // The checked Core functions that fill an IR_CORE_INTRINSICS role, by
@@ -1351,7 +1352,8 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> IRIntrinsics Never! {
 // align, its give and room the address. A channel or timer constructor is
 // generic over its element, an Event's over its payload, and a Hook's,
 // DecisionHook's or AsyncEvent's over its payload and result or failure
-// type; each reads the arguments its lowering does.
+// type, and a described progress source over its items' element; each reads
+// the arguments its lowering does.
 ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) -> Bool Never! {
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
@@ -1370,6 +1372,7 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
         .TimerAfter -> ir_intrinsic_generic_shape(function, 1, 2)
         .HookNew | .DecisionHookNew -> ir_intrinsic_generic_shape(function, 2, 1)
         .AsyncEventNew -> ir_intrinsic_generic_shape(function, 2, 2)
+        .IterProgress -> ir_intrinsic_generic_shape(function, 1, 3)
         .FunctionAddress(_) | .StaticText | .FaultReport -> false
     }
 }

@@ -1277,6 +1277,12 @@ sema_call_core_source_function: fn(record: CoreCallRecord, check: SemaBodyCheck)
 // false for an adapter row, or one whose function this program has not loaded.
 sema_call_core_declared_effects: fn(record: CoreCallRecord, check: SemaBodyCheck, effects: ^[String]) -> Bool Never! {
     source: sema_call_core_source_function(record, check) ?? return false
+    sema_call_core_function_effects(source, check, effects)
+}
+
+// Push the effects Core function `source` declares; false when this program
+// has not loaded it.
+sema_call_core_function_effects: fn(source: SemaCoreRoleFunction, check: SemaBodyCheck, effects: ^[String]) -> Bool Never! {
     graph: check.program.registration_graph
     module_index: sema_registration_module_index(graph, source.module_identity) ?? return false
     position: sema_registration_declaration_row(graph.modules[module_index], source.name) ?? return false

@@ -171,9 +171,9 @@ rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
     build: rmlr_files.read("{RMLR_SOURCE}Build.jet") ?? panic("read Build.jet: {err}")
     kernel: rmlr_files.read("Core/Mem/Mem.jet") ?? panic("read Core/Mem/Mem.jet: {err}")
     // The other Core files whose functions fill an IR_CORE_INTRINSICS role:
-    // core.math's bit casts and roots, and core.tasks' and core.event's
-    // constructors.
-    paths: [String]{"Core/Math/Math.jet", "Core/Tasks/Tasks.jet", "Core/Event/Event.jet"}
+    // core.math's bit casts and roots, core.tasks' and core.event's
+    // constructors, and core.term's described progress source.
+    paths: [String]{"Core/Math/Math.jet", "Core/Tasks/Tasks.jet", "Core/Event/Event.jet", "Core/Term/Term.jet"}
     homes: loop path in paths -> rmlr_files.read(path) ?? panic("read {path}: {err}")
     rows := 0
     loop line in build.split("\n") {
