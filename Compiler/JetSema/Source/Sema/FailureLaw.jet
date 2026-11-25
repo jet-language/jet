@@ -1500,6 +1500,35 @@ sema_type_hole: fn(span: Span) -> Diagnostic {
     sema_error("E0119", span, "`_` isn't a type", "a signature names every type; `_` is only a pattern wildcard", "write the type out; in a `T _!` return, name the error domain the body fails with, such as `Int ParseError!`")
 }
 
+// The letters `^` composes with on a keyboard where `^` is a dead key (the
+// X11 compose table and the Windows and macOS European layouts): `^` then
+// `I` types `Î`, `^` then `s` types `ŝ`. SEMA_CIRCUMFLEX_BASE[i] is the
+// letter SEMA_CIRCUMFLEX_COMPOSED[i] was typed from.
+SEMA_CIRCUMFLEX_COMPOSED: [String]{"Â", "Ê", "Î", "Ô", "Û", "Ĉ", "Ĝ", "Ĥ", "Ĵ", "Ŝ", "Ŵ", "Ŷ", "Ẑ", "â", "ê", "î", "ô", "û", "ĉ", "ĝ", "ĥ", "ĵ", "ŝ", "ŵ", "ŷ", "ẑ"}
+SEMA_CIRCUMFLEX_BASE: [String]{"A", "E", "I", "O", "U", "C", "G", "H", "J", "S", "W", "Y", "Z", "a", "e", "i", "o", "u", "c", "g", "h", "j", "s", "w", "y", "z"}
+
+// `name` read back as typed on a dead-key layout: when its first letter is
+// a circumflex composition, the name with that letter's base (`Înt` gives
+// `Int`), which the writer meant to follow the `^` mark.
+sema_dead_key_base: fn(name: String) -> String? Never! {
+    loop i in 0..<SEMA_CIRCUMFLEX_COMPOSED.len() {
+        if name.starts_with(SEMA_CIRCUMFLEX_COMPOSED[i]) {
+            return Val("{SEMA_CIRCUMFLEX_BASE[i]}{name.slice(1, name.len())}")
+        }
+    }
+    None
+}
+
+// E0119 for a type name a dead `^` key composed (`Înt` for `^Int`), when the
+// base names a Jet type or one the module declares; the edit writes the mark.
+sema_dead_key_type_name: fn(name: String, span: Span, declared: [String], name_span: Span?) -> Diagnostic? Never! {
+    base: sema_dead_key_base(name) ?? return None
+    if !JET_TYPE_NAMES.contains(base) && !declared.contains(base) -> return None
+    dead: sema_error("E0119", span, "there's no type called `{name}`", "on a keyboard layout where `^` is a dead key, `^` and the letter after it combine into one accented letter, so `^{base}` was typed as `{name}`", "write `^{base}`; on a dead-key layout type `^` then a space, or switch to the layout's no-dead-keys variant")
+    if name_span == .Val(written) -> return Val(diagnostic_with_edit(dead, TextEdit{span: written, new_text: "^{base}"}))
+    Val(dead)
+}
+
 // E0119: a written type name that names nothing. A name that writes a
 // lexicon acronym word-cased (`HttpRequest`) gets E0358 with its spelling.
 // The common guess `Text` points at `String`, and `Any` at the forms that
@@ -1515,6 +1544,7 @@ sema_unknown_type_name: fn(name: String, span: Span, declared: [String], name_sp
     if name == "Any" {
         return sema_error("E0119", span, "there's no type called `Any`", "Jet has no catch-all type, since every value has one type the compiler knows", "use an enum for a closed set of types, a trait for an open set, or `reflect.of(value)` to inspect any value")
     }
+    if sema_dead_key_type_name(name, span, declared, name_span) == .Val(dead) -> return dead
     if sema_type_core_path_import(name) == .Val(import) {
         return sema_error("E0119", span, "there's no type called `{name}`", "a type path does not reach a Core module through `core`; a file names a Core type through the module it imports", "write `use {import.module_name}` and name the type `{import.written}`")
     }
