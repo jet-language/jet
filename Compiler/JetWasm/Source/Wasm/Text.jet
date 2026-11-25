@@ -154,14 +154,18 @@ wat_parse: fn(text: String) -> WatTree WasmError! {
             start: k
             depth := 0
             loop k < n {
-                if k + 1 < n && (Int{src[k]}) == 0x28 && (Int{src[k + 1]}) == 0x3b {
-                    depth += 1
-                    k += 2
-                } else if k + 1 < n && (Int{src[k]}) == 0x3b && (Int{src[k + 1]}) == 0x29 {
-                    depth -= 1
-                    k += 2
-                    if depth == 0 -> break
-                } else { k += 1 }
+                if {
+                    k + 1 < n && (Int{src[k]}) == 0x28 && (Int{src[k + 1]}) == 0x3b -> {
+                        depth += 1
+                        k += 2
+                    }
+                    k + 1 < n && (Int{src[k]}) == 0x3b && (Int{src[k + 1]}) == 0x29 -> {
+                        depth -= 1
+                        k += 2
+                        if depth == 0 -> break
+                    }
+                    else -> { k += 1 }
+                }
             }
             if depth != 0 -> return Err(WasmError.new("unterminated block comment", start))
             next
@@ -200,30 +204,37 @@ wat_parse: fn(text: String) -> WatTree WasmError! {
                 if k + 1 >= n -> return Err(WasmError.new("unterminated string", start))
                 e: Int{src[k + 1]}
                 k += 2
-                if e == 0x6e -> data.push(U8{0x0a}) else if e == 0x74 -> data.push(U8{0x09}) else if e == 0x72 {
-                    data.push(U8{0x0d})
-                } else if e == 0x22 || e == 0x27 || e == 0x5c { data.push(U8{e}) } else if e == 0x75 {
-                    if k >= n || (Int{src[k]}) != 0x7b {
-                        return Err(WasmError.new("malformed unicode escape", k))
+                if {
+                    e == 0x6e -> data.push(U8{0x0a})
+                    e == 0x74 -> data.push(U8{0x09})
+                    e == 0x72 -> {
+                        data.push(U8{0x0d})
                     }
-                    k += 1
-                    code := 0
-                    loop k < n && (Int{src[k]}) != 0x7d {
-                        d: wat_hex_digit(Int{src[k]})
-                        if d < 0 -> return Err(WasmError.new("malformed unicode escape", k))
-                        code = code * 16 + d
+                    e == 0x22 || e == 0x27 || e == 0x5c -> { data.push(U8{e}) }
+                    e == 0x75 -> {
+                        if k >= n || (Int{src[k]}) != 0x7b {
+                            return Err(WasmError.new("malformed unicode escape", k))
+                        }
+                        k += 1
+                        code := 0
+                        loop k < n && (Int{src[k]}) != 0x7d {
+                            d: wat_hex_digit(Int{src[k]})
+                            if d < 0 -> return Err(WasmError.new("malformed unicode escape", k))
+                            code = code * 16 + d
+                            k += 1
+                        }
+                        k += 1
+                        wat_put_utf8(data, code)
+                    }
+                    else -> {
+                        high: wat_hex_digit(e)
+                        low: if k < n -> wat_hex_digit(Int{src[k]}) else -> -1
+                        if high < 0 || low < 0 {
+                            return Err(WasmError.new("unknown string escape", k - 2))
+                        }
+                        data.push(U8{high * 16 + low})
                         k += 1
                     }
-                    k += 1
-                    wat_put_utf8(data, code)
-                } else {
-                    high: wat_hex_digit(e)
-                    low: if k < n -> wat_hex_digit(Int{src[k]}) else -> -1
-                    if high < 0 || low < 0 {
-                        return Err(WasmError.new("unknown string escape", k - 2))
-                    }
-                    data.push(U8{high * 16 + low})
-                    k += 1
                 }
             }
             if !closed -> return Err(WasmError.new("unterminated string", start))
@@ -243,18 +254,23 @@ wat_parse: fn(text: String) -> WatTree WasmError! {
 }
 
 wat_put_utf8: fn(out: ^[U8], code: Int) Never! {
-    if code < 0x80 -> out.push(U8{code}) else if code < 0x800 {
-        out.push(U8{0xc0 + (code >> 6)})
-        out.push(U8{0x80 + (code & 0x3f)})
-    } else if code < 0x10000 {
-        out.push(U8{0xe0 + (code >> 12)})
-        out.push(U8{0x80 + ((code >> 6) & 0x3f)})
-        out.push(U8{0x80 + (code & 0x3f)})
-    } else {
-        out.push(U8{0xf0 + (code >> 18)})
-        out.push(U8{0x80 + ((code >> 12) & 0x3f)})
-        out.push(U8{0x80 + ((code >> 6) & 0x3f)})
-        out.push(U8{0x80 + (code & 0x3f)})
+    if {
+        code < 0x80 -> out.push(U8{code})
+        code < 0x800 -> {
+            out.push(U8{0xc0 + (code >> 6)})
+            out.push(U8{0x80 + (code & 0x3f)})
+        }
+        code < 0x10000 -> {
+            out.push(U8{0xe0 + (code >> 12)})
+            out.push(U8{0x80 + ((code >> 6) & 0x3f)})
+            out.push(U8{0x80 + (code & 0x3f)})
+        }
+        else -> {
+            out.push(U8{0xf0 + (code >> 18)})
+            out.push(U8{0x80 + ((code >> 12) & 0x3f)})
+            out.push(U8{0x80 + ((code >> 6) & 0x3f)})
+            out.push(U8{0x80 + (code & 0x3f)})
+        }
     }
 }
 
@@ -305,7 +321,7 @@ wasm_load_component: fn(bytes: ^^[U8]) -> WasmComponent WasmError! {
     }
     text: String.from_bytes(bytes) ?? return wasm_decode_component(bytes)
     if !wat_looks_textual(text) -> return wasm_decode_component(bytes)
-    binary := wasm_text_to_binary(text)
+    binary: wasm_text_to_binary(text)
     wasm_decode_component(binary)
 }
 
@@ -315,9 +331,13 @@ wat_looks_textual: fn(text: String) -> Bool Never! {
     k := 0
     loop k < raw.len() {
         c: Int{raw[k]}
-        if wat_is_space(c) -> k += 1 else if c == 0x3b && k + 1 < raw.len() && (Int{raw[k + 1]}) == 0x3b {
-            loop k < raw.len() && (Int{raw[k]}) != 0x0a -> k += 1
-        } else { return c == 0x28 }
+        if {
+            wat_is_space(c) -> k += 1
+            c == 0x3b && k + 1 < raw.len() && (Int{raw[k + 1]}) == 0x3b -> {
+                loop k < raw.len() && (Int{raw[k]}) != 0x0a -> k += 1
+            }
+            else -> { return c == 0x28 }
+        }
     }
     false
 }
@@ -422,16 +442,19 @@ wat_signature: fn(m: ^WatModule, items: [Int], from: Int) -> WatSig WasmError! {
     }
     loop k < items.len() && tree.head(items[k]) == "param" {
         parts: tree.kids(items[k])
-        if parts.len() >= 2 && tree.is_id(parts[1]) {
-            if parts.len() != 3 {
-                return Err(tree.fail(items[k], "a named parameter declares exactly one type"))
+        if {
+            parts.len() >= 2 && tree.is_id(parts[1]) -> {
+                if parts.len() != 3 {
+                    return Err(tree.fail(items[k], "a named parameter declares exactly one type"))
+                }
+                sig.names.push(tree.atom(parts[1]))
+                sig.params.push(wat_valtype(tree, parts[2]))
             }
-            sig.names.push(tree.atom(parts[1]))
-            sig.params.push(wat_valtype(tree, parts[2]))
-        } else {
-            loop j in 1..<parts.len() {
-                sig.names.push("")
-                sig.params.push(wat_valtype(tree, parts[j]))
+            else -> {
+                loop j in 1..<parts.len() {
+                    sig.names.push("")
+                    sig.params.push(wat_valtype(tree, parts[j]))
+                }
             }
         }
         k += 1
@@ -442,19 +465,25 @@ wat_signature: fn(m: ^WatModule, items: [Int], from: Int) -> WatSig WasmError! {
         k += 1
     }
     sig.next = k
-    if sig.type_index >= 0 {
-        if sig.type_index >= m.types.len() {
-            return Err(tree.fail(items[from], "unknown type {sig.type_index}"))
+    if {
+        sig.type_index >= 0 -> {
+            if sig.type_index >= m.types.len() {
+                return Err(tree.fail(items[from], "unknown type {sig.type_index}"))
+            }
+            declared: m.types[sig.type_index]
+            if {
+                sig.params.len() == 0 && sig.results.len() == 0 -> {
+                    sig.params = declared.params
+                    sig.results = declared.results
+                    loop _ in declared.params -> sig.names.push("")
+                }
+                declared.params != sig.params || declared.results != sig.results -> {
+                    return Err(tree.fail(items[from], "inline function type does not match the referenced type"))
+                }
+            }
         }
-        declared: m.types[sig.type_index]
-        if sig.params.len() == 0 && sig.results.len() == 0 {
-            sig.params = declared.params
-            sig.results = declared.results
-            loop _ in declared.params -> sig.names.push("")
-        } else if declared.params != sig.params || declared.results != sig.results {
-            return Err(tree.fail(items[from], "inline function type does not match the referenced type"))
-        }
-    } else { sig.type_index = m.type_of(sig.params, sig.results) }
+        else -> { sig.type_index = m.type_of(sig.params, sig.results) }
+    }
     Ok(sig)
 }
 
@@ -566,32 +595,41 @@ wat_encode_module: fn(tree: WatTree, root: Int, first: Int) -> [U8] WasmError! {
         items: tree.kids(field)
         name: wat_field_name(tree, items)
         after: wat_skip_name_and_exports(tree, items)
-        if head == "import" {
-            if items.len() != 4 {
-                return Err(tree.fail(field, "expected `(import \"module\" \"name\" <desc>)`"))
+        if {
+            head == "import" -> {
+                if items.len() != 4 {
+                    return Err(tree.fail(field, "expected `(import \"module\" \"name\" <desc>)`"))
+                }
+                desc: items[3]
+                kind: tree.head(desc)
+                parts: tree.kids(desc)
+                inner_name: wat_field_name(tree, parts)
+                if {
+                    kind == "func" -> {
+                        start: if parts.len() > 1 && tree.is_id(parts[1]) -> 2 else -> 1
+                        sig: wat_signature(m, parts, start)
+                        m.field_index[field] = m.define("func", inner_name)
+                        m.func_types.push(sig.type_index)
+                    }
+                    kind == "table" || kind == "memory" || kind == "global" -> {
+                        m.field_index[field] = m.define(kind, inner_name)
+                    }
+                    else -> { return Err(tree.fail(desc, "unknown import kind `{kind}`")) }
+                }
             }
-            desc: items[3]
-            kind: tree.head(desc)
-            parts: tree.kids(desc)
-            inner_name: wat_field_name(tree, parts)
-            if kind == "func" {
-                start: if parts.len() > 1 && tree.is_id(parts[1]) -> 2 else -> 1
-                sig: wat_signature(m, parts, start)
-                m.field_index[field] = m.define("func", inner_name)
+            head == "func" -> {
+                sig_start: if wat_inline_import(tree, items, after) != None -> after + 1 else -> after
+                sig: wat_signature(m, items, sig_start)
+                m.field_index[field] = m.define("func", name)
                 m.func_types.push(sig.type_index)
-            } else if kind == "table" || kind == "memory" || kind == "global" {
-                m.field_index[field] = m.define(kind, inner_name)
-            } else { return Err(tree.fail(desc, "unknown import kind `{kind}`")) }
-        } else if head == "func" {
-            sig_start: if wat_inline_import(tree, items, after) != None -> after + 1 else -> after
-            sig: wat_signature(m, items, sig_start)
-            m.field_index[field] = m.define("func", name)
-            m.func_types.push(sig.type_index)
-            if wat_inline_import(tree, items, after) == None -> m.func_nodes.push(field)
-        } else if head == "table" || head == "memory" || head == "global" || head == "elem" || head == "data" {
-            m.field_index[field] = m.define(head, name)
-        } else if head != "type" && head != "export" && head != "start" {
-            return Err(tree.fail(field, "unsupported module field `{head}`"))
+                if wat_inline_import(tree, items, after) == None -> m.func_nodes.push(field)
+            }
+            head == "table" || head == "memory" || head == "global" || head == "elem" || head == "data" -> {
+                m.field_index[field] = m.define(head, name)
+            }
+            head != "type" && head != "export" && head != "start" -> {
+                return Err(tree.fail(field, "unsupported module field `{head}`"))
+            }
         }
     }
     // Pass 3: encode.
@@ -601,45 +639,58 @@ wat_encode_module: fn(tree: WatTree, root: Int, first: Int) -> [U8] WasmError! {
         head: tree.head(field)
         items: tree.kids(field)
         after: wat_skip_name_and_exports(tree, items)
-        if head == "import" -> wat_encode_import(m, items) else if head == "func" || head == "table" || head == "memory" || head == "global" {
-            index: m.field_index.get(field) ?? 0
-            loop j in 1..<after {
-                if tree.head(items[j]) == "export" -> wat_inline_export(m, items[j], head, index)
+        if {
+            head == "import" -> wat_encode_import(m, items)
+            head == "func" || head == "table" || head == "memory" || head == "global" -> {
+                index: m.field_index.get(field) ?? 0
+                loop j in 1..<after {
+                    if tree.head(items[j]) == "export" -> wat_inline_export(m, items[j], head, index)
+                }
+                if {
+                    wat_inline_import(tree, items, after) == .Val(import_node) -> {
+                        wat_encode_inline_import(m, import_node, head, items, after + 1)
+                    }
+                    head == "func" -> {
+                        func_index: m.field_index.get(field) ?? 0
+                        wasm_put_unsigned(defined_funcs, m.func_types[func_index])
+                        defined_count += 1
+                    }
+                    head == "table" -> {
+                        table := [U8]{}
+                        wat_encode_table(m, table, items, after)
+                        wat_put_bytes(m.tables, table)
+                        m.table_count += 1
+                    }
+                    head == "memory" -> {
+                        memory := [U8]{}
+                        _: wat_limits(m, memory, items, after)
+                        wat_put_bytes(m.memories, memory)
+                        m.memory_count += 1
+                    }
+                    else -> {
+                        wat_encode_global(m, items, after)
+                        m.global_count += 1
+                    }
+                }
             }
-            if wat_inline_import(tree, items, after) == .Val(import_node) {
-                wat_encode_inline_import(m, import_node, head, items, after + 1)
-            } else if head == "func" {
-                func_index: m.field_index.get(field) ?? 0
-                wasm_put_unsigned(defined_funcs, m.func_types[func_index])
-                defined_count += 1
-            } else if head == "table" {
-                table := [U8]{}
-                wat_encode_table(m, table, items, after)
-                wat_put_bytes(m.tables, table)
-                m.table_count += 1
-            } else if head == "memory" {
-                memory := [U8]{}
-                _: wat_limits(m, memory, items, after)
-                wat_put_bytes(m.memories, memory)
-                m.memory_count += 1
-            } else {
-                wat_encode_global(m, items, after)
-                m.global_count += 1
+            head == "export" -> {
+                if items.len() != 3 || tree.kinds[items[1]] != WAT_STRING {
+                    return Err(tree.fail(field, "expected `(export \"name\" (<kind> <index>))`"))
+                }
+                kind: tree.head(items[2])
+                parts: tree.kids(items[2])
+                if parts.len() != 2 -> return Err(tree.fail(items[2], "expected `(<kind> <index>)`"))
+                index: m.index(kind, parts[1])
+                wat_inline_export(m, field, kind, index)
             }
-        } else if head == "export" {
-            if items.len() != 3 || tree.kinds[items[1]] != WAT_STRING {
-                return Err(tree.fail(field, "expected `(export \"name\" (<kind> <index>))`"))
+            head == "start" -> {
+                if items.len() != 2 -> return Err(tree.fail(field, "expected `(start <func>)`"))
+                m.start = m.index("func", items[1])
             }
-            kind: tree.head(items[2])
-            parts: tree.kids(items[2])
-            if parts.len() != 2 -> return Err(tree.fail(items[2], "expected `(<kind> <index>)`"))
-            index: m.index(kind, parts[1])
-            wat_inline_export(m, field, kind, index)
-        } else if head == "start" {
-            if items.len() != 2 -> return Err(tree.fail(field, "expected `(start <func>)`"))
-            m.start = m.index("func", items[1])
-        } else if head == "elem" { wat_encode_elem(m, items) } else if head == "data" {
-            wat_encode_data(m, items)
+            head == "elem" -> { wat_encode_elem(m, items) }
+            head == "data" -> {
+                wat_encode_data(m, items)
+            }
         }
     }
     codes := [U8]{}
@@ -691,11 +742,15 @@ wat_func_type_body: fn(m: ^WatModule, node: Int) -> WasmFuncType WasmError! {
         head: tree.head(items[k])
         parts: tree.kids(items[k])
         start: if parts.len() > 1 && tree.is_id(parts[1]) -> 2 else -> 1
-        if head == "param" {
-            loop j in start..<parts.len() -> params.push(wat_valtype(tree, parts[j]))
-        } else if head == "result" {
-            loop j in 1..<parts.len() -> results.push(wat_valtype(tree, parts[j]))
-        } else { return Err(tree.fail(items[k], "expected `(param ...)` or `(result ...)`")) }
+        if {
+            head == "param" -> {
+                loop j in start..<parts.len() -> params.push(wat_valtype(tree, parts[j]))
+            }
+            head == "result" -> {
+                loop j in 1..<parts.len() -> results.push(wat_valtype(tree, parts[j]))
+            }
+            else -> { return Err(tree.fail(items[k], "expected `(param ...)` or `(result ...)`")) }
+        }
     }
     Ok(WasmFuncType{params: params, results: results})
 }
@@ -741,12 +796,17 @@ wat_put_import_desc: fn(m: ^WatModule, module_name: String, name: String, kind: 
     wat_put_name(out, module_name)
     wat_put_name(out, name)
     out.push(U8{wat_kind_byte(kind)})
-    if kind == "func" {
-        sig: wat_signature(m, parts, start)
-        wasm_put_unsigned(out, sig.type_index)
-    } else if kind == "table" { wat_encode_table(m, out, parts, start) } else if kind == "memory" {
-        wat_limits(m, out, parts, start)
-    } else { wat_global_type(m, out, parts[start]) }
+    if {
+        kind == "func" -> {
+            sig: wat_signature(m, parts, start)
+            wasm_put_unsigned(out, sig.type_index)
+        }
+        kind == "table" -> { wat_encode_table(m, out, parts, start) }
+        kind == "memory" -> {
+            wat_limits(m, out, parts, start)
+        }
+        else -> { wat_global_type(m, out, parts[start]) }
+    }
     wat_put_bytes(m.imports, out)
     m.import_count += 1
 }
@@ -761,14 +821,17 @@ wat_encode_table: fn(m: ^WatModule, out: ^[U8], items: [Int], from: Int) WasmErr
 
 wat_global_type: fn(m: ^WatModule, out: ^[U8], node: Int) WasmError! {
     tree: m.tree
-    if tree.head(node) == "mut" {
-        parts: tree.kids(node)
-        if parts.len() != 2 -> return Err(m.fail(node, "expected `(mut <type>)`"))
-        out.push(U8{wat_valtype(tree, parts[1])})
-        out.push(U8{1})
-    } else {
-        out.push(U8{wat_valtype(tree, node)})
-        out.push(U8{0})
+    if {
+        tree.head(node) == "mut" -> {
+            parts: tree.kids(node)
+            if parts.len() != 2 -> return Err(m.fail(node, "expected `(mut <type>)`"))
+            out.push(U8{wat_valtype(tree, parts[1])})
+            out.push(U8{1})
+        }
+        else -> {
+            out.push(U8{wat_valtype(tree, node)})
+            out.push(U8{0})
+        }
     }
 }
 
@@ -795,37 +858,44 @@ wat_encode_elem: fn(m: ^WatModule, items: [Int]) WasmError! {
     k := 1
     if k < items.len() && tree.is_id(items[k]) -> k += 1
     out := [U8]{}
-    if k < items.len() && tree.is_atom(items[k]) && tree.atom(items[k]) == "declare" {
-        k += 1
-        if k < items.len() && tree.atom(items[k]) == "func" -> k += 1
-        out.push(U8{3})
-        out.push(U8{0})
-    } else if k < items.len() && tree.is_list(items[k]) {
-        table := 0
-        if tree.head(items[k]) == "table" {
-            parts: tree.kids(items[k])
-            table = m.index("table", parts[1])
+    if {
+        k < items.len() && tree.is_atom(items[k]) && tree.atom(items[k]) == "declare" -> {
             k += 1
-        }
-        offset := [U8]{}
-        if tree.head(items[k]) == "offset" -> wat_const_expr(m, offset, tree.kids(items[k]), 1) else {
-            wat_const_expr(m, offset, [Int]{items[k]}, 0)
-        }
-        k += 1
-        if k < items.len() && tree.atom(items[k]) == "func" -> k += 1
-        if table == 0 {
-            out.push(U8{0})
-            wat_put_bytes(out, offset)
-        } else {
-            out.push(U8{2})
-            wasm_put_unsigned(out, table)
-            wat_put_bytes(out, offset)
+            if k < items.len() && tree.atom(items[k]) == "func" -> k += 1
+            out.push(U8{3})
             out.push(U8{0})
         }
-    } else {
-        if k < items.len() && tree.atom(items[k]) == "func" -> k += 1
-        out.push(U8{1})
-        out.push(U8{0})
+        k < items.len() && tree.is_list(items[k]) -> {
+            table := 0
+            if tree.head(items[k]) == "table" {
+                parts: tree.kids(items[k])
+                table = m.index("table", parts[1])
+                k += 1
+            }
+            offset := [U8]{}
+            if tree.head(items[k]) == "offset" -> wat_const_expr(m, offset, tree.kids(items[k]), 1) else {
+                wat_const_expr(m, offset, [Int]{items[k]}, 0)
+            }
+            k += 1
+            if k < items.len() && tree.atom(items[k]) == "func" -> k += 1
+            if {
+                table == 0 -> {
+                    out.push(U8{0})
+                    wat_put_bytes(out, offset)
+                }
+                else -> {
+                    out.push(U8{2})
+                    wasm_put_unsigned(out, table)
+                    wat_put_bytes(out, offset)
+                    out.push(U8{0})
+                }
+            }
+        }
+        else -> {
+            if k < items.len() && tree.atom(items[k]) == "func" -> k += 1
+            out.push(U8{1})
+            out.push(U8{0})
+        }
     }
     funcs := [U8]{}
     count := 0
@@ -845,20 +915,23 @@ wat_encode_data: fn(m: ^WatModule, items: [Int]) WasmError! {
     k := 1
     if k < items.len() && tree.is_id(items[k]) -> k += 1
     out := [U8]{}
-    if k < items.len() && tree.is_list(items[k]) {
-        if tree.head(items[k]) == "memory" {
-            parts: tree.kids(items[k])
-            if m.index("memory", parts[1]) != 0 {
-                return Err(m.fail(items[k], "multiple memories are not supported by the plugin engine"))
+    if {
+        k < items.len() && tree.is_list(items[k]) -> {
+            if tree.head(items[k]) == "memory" {
+                parts: tree.kids(items[k])
+                if m.index("memory", parts[1]) != 0 {
+                    return Err(m.fail(items[k], "multiple memories are not supported by the plugin engine"))
+                }
+                k += 1
+            }
+            out.push(U8{0})
+            if tree.head(items[k]) == "offset" -> wat_const_expr(m, out, tree.kids(items[k]), 1) else {
+                wat_const_expr(m, out, [Int]{items[k]}, 0)
             }
             k += 1
         }
-        out.push(U8{0})
-        if tree.head(items[k]) == "offset" -> wat_const_expr(m, out, tree.kids(items[k]), 1) else {
-            wat_const_expr(m, out, [Int]{items[k]}, 0)
-        }
-        k += 1
-    } else { out.push(U8{1}) }
+        else -> { out.push(U8{1}) }
+    }
     bytes := [U8]{}
     loop k < items.len() {
         if tree.kinds[items[k]] != WAT_STRING {
@@ -890,17 +963,20 @@ wat_encode_body: fn(m: ^WatModule, node: Int) -> [U8] WasmError! {
     locals := [Int]{}
     loop k < items.len() && tree.head(items[k]) == "local" {
         parts: tree.kids(items[k])
-        if parts.len() >= 2 && tree.is_id(parts[1]) {
-            if parts.len() != 3 {
-                return Err(m.fail(items[k], "a named local declares exactly one type"))
-            }
-            m.locals[tree.atom(parts[1])] = count
-            locals.push(wat_valtype(tree, parts[2]))
-            count += 1
-        } else {
-            loop j in 1..<parts.len() {
-                locals.push(wat_valtype(tree, parts[j]))
+        if {
+            parts.len() >= 2 && tree.is_id(parts[1]) -> {
+                if parts.len() != 3 {
+                    return Err(m.fail(items[k], "a named local declares exactly one type"))
+                }
+                m.locals[tree.atom(parts[1])] = count
+                locals.push(wat_valtype(tree, parts[2]))
                 count += 1
+            }
+            else -> {
+                loop j in 1..<parts.len() {
+                    locals.push(wat_valtype(tree, parts[j]))
+                    count += 1
+                }
             }
         }
         k += 1
@@ -930,9 +1006,13 @@ wat_instructions: fn(m: ^WatModule, out: ^[U8], items: [Int], from: Int) WasmErr
     loop k < items.len() {
         node: items[k]
         k += 1
-        if tree.is_list(node) -> wat_folded(m, out, node) else if tree.is_atom(node) {
-            k = wat_plain(m, out, node, items, k)
-        } else { return Err(m.fail(node, "expected an instruction, found a string")) }
+        if {
+            tree.is_list(node) -> wat_folded(m, out, node)
+            tree.is_atom(node) -> {
+                k = wat_plain(m, out, node, items, k)
+            }
+            else -> { return Err(m.fail(node, "expected an instruction, found a string")) }
+        }
     }
 }
 
@@ -976,7 +1056,11 @@ wat_plain: fn(m: ^WatModule, out: ^[U8], node: Int, items: [Int], k: Int) -> Int
             j += 1
         }
         end: wat_block_type_end(tree, items, j)
-        out.push(U8{if name == "block" -> 0x02 else if name == "loop" -> 0x03 else -> 0x04})
+        out.push(U8{if {
+            name == "block" -> 0x02
+            name == "loop" -> 0x03
+            else -> 0x04
+        }})
         wat_block_type(m, out, items, j, end)
         m.labels.push(label)
         return Ok(end)
@@ -1121,10 +1205,13 @@ wat_op: fn(m: ^WatModule, out: ^[U8], node: Int, items: [Int], from: Int) -> Int
         return Ok(k)
     }
     op: info.op
-    if op >= 0xfc00 {
-        out.push(U8{0xfc})
-        wasm_put_unsigned(out, op - 0xfc00)
-    } else { out.push(U8{op}) }
+    if {
+        op >= 0xfc00 -> {
+            out.push(U8{0xfc})
+            wasm_put_unsigned(out, op - 0xfc00)
+        }
+        else -> { out.push(U8{op}) }
+    }
     imm: info.imm
     if imm == WASM_IMM_NONE -> return Ok(k)
     if imm == WASM_IMM_LABEL {
@@ -1146,7 +1233,12 @@ wat_op: fn(m: ^WatModule, out: ^[U8], node: Int, items: [Int], from: Int) -> Int
         return Ok(k)
     }
     if imm == WASM_IMM_FUNC || imm == WASM_IMM_GLOBAL || imm == WASM_IMM_ELEM || imm == WASM_IMM_DATA {
-        space: if imm == WASM_IMM_FUNC -> "func" else if imm == WASM_IMM_GLOBAL -> "global" else if imm == WASM_IMM_ELEM -> "elem" else -> "data"
+        space: if {
+            imm == WASM_IMM_FUNC -> "func"
+            imm == WASM_IMM_GLOBAL -> "global"
+            imm == WASM_IMM_ELEM -> "elem"
+            else -> "data"
+        }
         if imm == WASM_IMM_DATA -> m.needs_datacount = true
         if k >= items.len() -> return Err(m.fail(node, "`{name}` needs a {space} index"))
         wasm_put_unsigned(out, m.index(space, items[k]))
@@ -1408,59 +1500,71 @@ wat_defvaltype: fn(tree: WatTree, space: ^WatTypeSpace, id: Int) -> [U8] WasmErr
     head: tree.head(id)
     items: tree.kids(id)
     out := [U8]{}
-    if head == "list" || head == "option" {
-        if items.len() != 2 -> return Err(tree.fail(id, "expected `({head} <type>)`"))
-        out.push(U8{if head == "list" -> 0x70 else -> 0x6b})
-        wat_put_valtype(tree, space, out, items[1])
-    } else if head == "tuple" {
-        out.push(U8{0x6f})
-        wasm_put_unsigned(out, items.len() - 1)
-        loop k in 1..<items.len() -> wat_put_valtype(tree, space, out, items[k])
-    } else if head == "record" {
-        out.push(U8{0x72})
-        wasm_put_unsigned(out, items.len() - 1)
-        loop k in 1..<items.len() {
-            parts: tree.kids(items[k])
-            if tree.head(items[k]) != "field" || parts.len() != 3 {
-                return Err(tree.fail(items[k], "expected `(field \"name\" <type>)`"))
-            }
-            wat_put_name(out, tree.string(parts[1]))
-            wat_put_valtype(tree, space, out, parts[2])
+    if {
+        head == "list" || head == "option" -> {
+            if items.len() != 2 -> return Err(tree.fail(id, "expected `({head} <type>)`"))
+            out.push(U8{if head == "list" -> 0x70 else -> 0x6b})
+            wat_put_valtype(tree, space, out, items[1])
         }
-    } else if head == "variant" {
-        out.push(U8{0x71})
-        wasm_put_unsigned(out, items.len() - 1)
-        loop k in 1..<items.len() {
-            parts: tree.kids(items[k])
-            if tree.head(items[k]) != "case" || parts.len() < 2 || parts.len() > 3 {
-                return Err(tree.fail(items[k], "expected `(case \"name\" <type>?)`"))
-            }
-            wat_put_name(out, tree.string(parts[1]))
-            wat_put_optional_valtype(tree, space, out, if parts.len() == 3 -> parts[2] else -> -1)
-            out.push(U8{0})
+        head == "tuple" -> {
+            out.push(U8{0x6f})
+            wasm_put_unsigned(out, items.len() - 1)
+            loop k in 1..<items.len() -> wat_put_valtype(tree, space, out, items[k])
         }
-    } else if head == "enum" || head == "flags" {
-        out.push(U8{if head == "enum" -> 0x6d else -> 0x6e})
-        wasm_put_unsigned(out, items.len() - 1)
-        loop k in 1..<items.len() -> wat_put_name(out, tree.string(items[k]))
-    } else if head == "result" {
-        ok := -1
-        err := -1
-        loop k in 1..<items.len() {
-            if tree.head(items[k]) == "error" {
+        head == "record" -> {
+            out.push(U8{0x72})
+            wasm_put_unsigned(out, items.len() - 1)
+            loop k in 1..<items.len() {
                 parts: tree.kids(items[k])
-                if parts.len() != 2 -> return Err(tree.fail(items[k], "expected `(error <type>)`"))
-                err = parts[1]
-            } else { ok = items[k] }
+                if tree.head(items[k]) != "field" || parts.len() != 3 {
+                    return Err(tree.fail(items[k], "expected `(field \"name\" <type>)`"))
+                }
+                wat_put_name(out, tree.string(parts[1]))
+                wat_put_valtype(tree, space, out, parts[2])
+            }
         }
-        out.push(U8{0x6a})
-        wat_put_optional_valtype(tree, space, out, ok)
-        wat_put_optional_valtype(tree, space, out, err)
-    } else if head == "own" || head == "borrow" {
-        if items.len() != 2 -> return Err(tree.fail(id, "expected `({head} <resource>)`"))
-        out.push(U8{if head == "own" -> 0x69 else -> 0x68})
-        wasm_put_unsigned(out, wat_type_ref(tree, space, items[1]))
-    } else { return Err(tree.fail(id, "unsupported component type `({head} ...)`")) }
+        head == "variant" -> {
+            out.push(U8{0x71})
+            wasm_put_unsigned(out, items.len() - 1)
+            loop k in 1..<items.len() {
+                parts: tree.kids(items[k])
+                if tree.head(items[k]) != "case" || parts.len() < 2 || parts.len() > 3 {
+                    return Err(tree.fail(items[k], "expected `(case \"name\" <type>?)`"))
+                }
+                wat_put_name(out, tree.string(parts[1]))
+                wat_put_optional_valtype(tree, space, out, if parts.len() == 3 -> parts[2] else -> -1)
+                out.push(U8{0})
+            }
+        }
+        head == "enum" || head == "flags" -> {
+            out.push(U8{if head == "enum" -> 0x6d else -> 0x6e})
+            wasm_put_unsigned(out, items.len() - 1)
+            loop k in 1..<items.len() -> wat_put_name(out, tree.string(items[k]))
+        }
+        head == "result" -> {
+            ok := -1
+            err := -1
+            loop k in 1..<items.len() {
+                if {
+                    tree.head(items[k]) == "error" -> {
+                        parts: tree.kids(items[k])
+                        if parts.len() != 2 -> return Err(tree.fail(items[k], "expected `(error <type>)`"))
+                        err = parts[1]
+                    }
+                    else -> { ok = items[k] }
+                }
+            }
+            out.push(U8{0x6a})
+            wat_put_optional_valtype(tree, space, out, ok)
+            wat_put_optional_valtype(tree, space, out, err)
+        }
+        head == "own" || head == "borrow" -> {
+            if items.len() != 2 -> return Err(tree.fail(id, "expected `({head} <resource>)`"))
+            out.push(U8{if head == "own" -> 0x69 else -> 0x68})
+            wasm_put_unsigned(out, wat_type_ref(tree, space, items[1]))
+        }
+        else -> { return Err(tree.fail(id, "unsupported component type `({head} ...)`")) }
+    }
     Ok(out)
 }
 
@@ -1472,29 +1576,36 @@ wat_functype: fn(tree: WatTree, space: ^WatTypeSpace, items: [Int], from: Int) -
     loop k in from..<items.len() {
         parts: tree.kids(items[k])
         head: tree.head(items[k])
-        if head == "param" {
-            if parts.len() != 3 {
-                return Err(tree.fail(items[k], "expected `(param \"name\" <type>)`"))
+        if {
+            head == "param" -> {
+                if parts.len() != 3 {
+                    return Err(tree.fail(items[k], "expected `(param \"name\" <type>)`"))
+                }
+                wat_put_name(params, tree.string(parts[1]))
+                wat_put_valtype(tree, space, params, parts[2])
+                count += 1
             }
-            wat_put_name(params, tree.string(parts[1]))
-            wat_put_valtype(tree, space, params, parts[2])
-            count += 1
-        } else if head == "result" {
-            if parts.len() != 2 {
-                return Err(tree.fail(items[k], "named or multiple function results are not supported"))
+            head == "result" -> {
+                if parts.len() != 2 {
+                    return Err(tree.fail(items[k], "named or multiple function results are not supported"))
+                }
+                result = parts[1]
             }
-            result = parts[1]
-        } else { return Err(tree.fail(items[k], "expected `(param ...)` or `(result ...)`")) }
+            else -> { return Err(tree.fail(items[k], "expected `(param ...)` or `(result ...)`")) }
+        }
     }
     out := [U8]{0x40}
     wasm_put_unsigned(out, count)
     wat_put_bytes(out, params)
-    if result >= 0 {
-        out.push(U8{0})
-        wat_put_valtype(tree, space, out, result)
-    } else {
-        out.push(U8{1})
-        out.push(U8{0})
+    if {
+        result >= 0 -> {
+            out.push(U8{0})
+            wat_put_valtype(tree, space, out, result)
+        }
+        else -> {
+            out.push(U8{1})
+            out.push(U8{0})
+        }
     }
     Ok(out)
 }
@@ -1505,26 +1616,30 @@ wat_instancetype: fn(tree: WatTree, items: [Int], from: Int) -> [U8] WasmError! 
     loop k in from..<items.len() {
         head: tree.head(items[k])
         parts: tree.kids(items[k])
-        if head == "export" {
-            if parts.len() != 3 {
-                return Err(tree.fail(items[k], "expected `(export \"name\" <desc>)`"))
+        if {
+            head == "export" -> {
+                if parts.len() != 3 {
+                    return Err(tree.fail(items[k], "expected `(export \"name\" <desc>)`"))
+                }
+                desc: wat_externdesc(tree, inner, parts[2])
+                wat_put_bytes(inner.defs, [U8]{0x04, 0x00})
+                wat_put_name(inner.defs, tree.string(parts[1]))
+                wat_put_bytes(inner.defs, desc)
+                inner.pending += 1
             }
-            desc: wat_externdesc(tree, inner, parts[2])
-            wat_put_bytes(inner.defs, [U8]{0x04, 0x00})
-            wat_put_name(inner.defs, tree.string(parts[1]))
-            wat_put_bytes(inner.defs, desc)
-            inner.pending += 1
-        } else if head == "type" {
-            j := 1
-            name := ""
-            if j < parts.len() && tree.is_id(parts[j]) {
-                name = tree.atom(parts[j])
-                j += 1
+            head == "type" -> {
+                j := 1
+                name := ""
+                if j < parts.len() && tree.is_id(parts[j]) {
+                    name = tree.atom(parts[j])
+                    j += 1
+                }
+                def: wat_deftype(tree, inner, parts[j])
+                _: inner.hoist(def, name)
             }
-            def: wat_deftype(tree, inner, parts[j])
-            _: inner.hoist(def, name)
-        } else {
-            return Err(tree.fail(items[k], "unsupported instance type declaration `({head} ...)`"))
+            else -> {
+                return Err(tree.fail(items[k], "unsupported instance type declaration `({head} ...)`"))
+            }
         }
     }
     out := [U8]{0x42}
@@ -1553,12 +1668,15 @@ wat_externdesc: fn(tree: WatTree, space: ^WatTypeSpace, id: Int) -> [U8] WasmErr
     out := [U8]{}
     if head == "func" || head == "instance" {
         out.push(U8{if head == "func" -> 0x01 else -> 0x05})
-        if k < items.len() && tree.head(items[k]) == "type" {
-            parts: tree.kids(items[k])
-            wasm_put_unsigned(out, wat_type_ref(tree, space, parts[1]))
-        } else {
-            def: if head == "func" -> wat_functype(tree, space, items, k) else -> wat_instancetype(tree, items, k)
-            wasm_put_unsigned(out, space.hoist(def, ""))
+        if {
+            k < items.len() && tree.head(items[k]) == "type" -> {
+                parts: tree.kids(items[k])
+                wasm_put_unsigned(out, wat_type_ref(tree, space, parts[1]))
+            }
+            else -> {
+                def: if head == "func" -> wat_functype(tree, space, items, k) else -> wat_instancetype(tree, items, k)
+                wasm_put_unsigned(out, space.hoist(def, ""))
+            }
         }
         return Ok(out)
     }
@@ -1567,12 +1685,16 @@ wat_externdesc: fn(tree: WatTree, space: ^WatTypeSpace, id: Int) -> [U8] WasmErr
         bound: items[k]
         parts: tree.kids(bound)
         out.push(U8{0x03})
-        if tree.head(bound) == "sub" && parts.len() == 2 && tree.atom(parts[1]) == "resource" {
-            out.push(U8{0x01})
-        } else if tree.head(bound) == "eq" && parts.len() == 2 {
-            out.push(U8{0x00})
-            wasm_put_unsigned(out, wat_type_ref(tree, space, parts[1]))
-        } else { return Err(tree.fail(bound, "expected `(sub resource)` or `(eq <type>)`")) }
+        if {
+            tree.head(bound) == "sub" && parts.len() == 2 && tree.atom(parts[1]) == "resource" -> {
+                out.push(U8{0x01})
+            }
+            tree.head(bound) == "eq" && parts.len() == 2 -> {
+                out.push(U8{0x00})
+                wasm_put_unsigned(out, wat_type_ref(tree, space, parts[1]))
+            }
+            else -> { return Err(tree.fail(bound, "expected `(sub resource)` or `(eq <type>)`")) }
+        }
         return Ok(out)
     }
     Err(tree.fail(id, "unsupported extern kind `{head}`"))
@@ -1627,26 +1749,35 @@ wat_canon_options: fn(c: ^WatComponent, items: [Int], from: Int) -> [U8] WasmErr
         node: items[k]
         if tree.is_atom(node) {
             text: tree.atom(node)
-            if text == "string-encoding=utf8" -> out.push(U8{0x00}) else if text == "string-encoding=utf16" {
-                out.push(U8{0x01})
-            } else if text == "string-encoding=latin1+utf16" { out.push(U8{0x02}) } else {
-                return Err(c.fail(node, "unknown canonical option `{text}`"))
+            if {
+                text == "string-encoding=utf8" -> out.push(U8{0x00})
+                text == "string-encoding=utf16" -> {
+                    out.push(U8{0x01})
+                }
+                text == "string-encoding=latin1+utf16" -> { out.push(U8{0x02}) }
+                else -> {
+                    return Err(c.fail(node, "unknown canonical option `{text}`"))
+                }
             }
             count += 1
             next
         }
         head: tree.head(node)
         parts: tree.kids(node)
-        if head == "memory" {
-            index: wat_core_ref(c, "memory", node)
-            out.push(U8{0x03})
-            wasm_put_unsigned(out, index)
-        } else if head == "realloc" || head == "post-return" {
-            if parts.len() != 2 -> return Err(c.fail(node, "expected `({head} <core func>)`"))
-            index: if tree.is_list(parts[1]) -> wat_core_ref(c, "func", parts[1]) else -> c.index("core func", parts[1])
-            out.push(U8{if head == "realloc" -> 0x04 else -> 0x05})
-            wasm_put_unsigned(out, index)
-        } else { return Err(c.fail(node, "unsupported canonical option `({head} ...)`")) }
+        if {
+            head == "memory" -> {
+                index: wat_core_ref(c, "memory", node)
+                out.push(U8{0x03})
+                wasm_put_unsigned(out, index)
+            }
+            head == "realloc" || head == "post-return" -> {
+                if parts.len() != 2 -> return Err(c.fail(node, "expected `({head} <core func>)`"))
+                index: if tree.is_list(parts[1]) -> wat_core_ref(c, "func", parts[1]) else -> c.index("core func", parts[1])
+                out.push(U8{if head == "realloc" -> 0x04 else -> 0x05})
+                wasm_put_unsigned(out, index)
+            }
+            else -> { return Err(c.fail(node, "unsupported canonical option `({head} ...)`")) }
+        }
         count += 1
     }
     result := [U8]{}
@@ -1678,142 +1809,188 @@ wat_component_field: fn(c: ^WatComponent, field: Int) WasmError! {
         kind: tree.atom(items[1])
         name: if items.len() > 2 && tree.is_id(items[2]) -> tree.atom(items[2]) else -> ""
         body: if name != "" -> 3 else -> 2
-        if kind == "module" {
-            bytes: wat_encode_module(tree, field, 2)
-            c.flush_types()
-            wat_put_section(c.out, 1, bytes)
-            _: c.define("core module", name)
-        } else if kind == "instance" { wat_core_instance(c, field, items, body, name) } else if kind == "func" {
-            if body >= items.len() {
-                return Err(c.fail(field, "expected `(canon lower ...)` or `(alias ...)`"))
+        if {
+            kind == "module" -> {
+                bytes: wat_encode_module(tree, field, 2)
+                c.flush_types()
+                wat_put_section(c.out, 1, bytes)
+                _: c.define("core module", name)
             }
-            form: items[body]
-            parts: tree.kids(form)
-            if tree.head(form) == "canon" && parts.len() >= 3 && tree.atom(parts[1]) == "lower" {
-                func_parts: tree.kids(parts[2])
-                if tree.head(parts[2]) != "func" || func_parts.len() != 2 {
-                    return Err(c.fail(parts[2], "expected `(func <index>)`"))
+            kind == "instance" -> { wat_core_instance(c, field, items, body, name) }
+            kind == "func" -> {
+                if body >= items.len() {
+                    return Err(c.fail(field, "expected `(canon lower ...)` or `(alias ...)`"))
                 }
-                func: c.index("func", func_parts[1])
-                options: wat_canon_options(c, parts, 3)
-                item := [U8]{0x01, 0x00}
-                wasm_put_unsigned(item, func)
-                wat_put_bytes(item, options)
-                c.section(8, item)
-                _: c.define("core func", name)
-            } else if tree.head(form) == "alias" && parts.len() == 4 && tree.atom(parts[1]) == "core" && tree.atom(parts[2]) == "export" {
-                return Err(c.fail(form, "expected `(alias core export <instance> \"name\")`"))
-            } else if tree.head(form) == "alias" && parts.len() == 5 && tree.atom(parts[1]) == "core" && tree.atom(parts[2]) == "export" {
-                instance: c.index("core instance", parts[3])
-                wat_alias_core_export(c, "func", instance, tree.string(parts[4]), name)
-            } else { return Err(c.fail(form, "unsupported core func definition")) }
-        } else { return Err(c.fail(field, "unsupported component field `(core {kind} ...)`")) }
+                form: items[body]
+                parts: tree.kids(form)
+                if {
+                    tree.head(form) == "canon" && parts.len() >= 3 && tree.atom(parts[1]) == "lower" -> {
+                        func_parts: tree.kids(parts[2])
+                        if tree.head(parts[2]) != "func" || func_parts.len() != 2 {
+                            return Err(c.fail(parts[2], "expected `(func <index>)`"))
+                        }
+                        func: c.index("func", func_parts[1])
+                        options: wat_canon_options(c, parts, 3)
+                        item := [U8]{0x01, 0x00}
+                        wasm_put_unsigned(item, func)
+                        wat_put_bytes(item, options)
+                        c.section(8, item)
+                        _: c.define("core func", name)
+                    }
+                    tree.head(form) == "alias" && parts.len() == 4 && tree.atom(parts[1]) == "core" && tree.atom(parts[2]) == "export" -> {
+                        return Err(c.fail(form, "expected `(alias core export <instance> \"name\")`"))
+                    }
+                    tree.head(form) == "alias" && parts.len() == 5 && tree.atom(parts[1]) == "core" && tree.atom(parts[2]) == "export" -> {
+                        instance: c.index("core instance", parts[3])
+                        wat_alias_core_export(c, "func", instance, tree.string(parts[4]), name)
+                    }
+                    else -> { return Err(c.fail(form, "unsupported core func definition")) }
+                }
+            }
+            else -> { return Err(c.fail(field, "unsupported component field `(core {kind} ...)`")) }
+        }
         return
     }
     name: if items.len() > 1 && tree.is_id(items[1]) -> tree.atom(items[1]) else -> ""
     body: if name != "" -> 2 else -> 1
-    if head == "type" {
-        if body >= items.len() -> return Err(c.fail(field, "expected a type definition"))
-        def: wat_deftype(tree, c.types, items[body])
-        _: c.types.hoist(def, name)
-        c.flush_types()
-    } else if head == "import" {
-        if items.len() != 3 -> return Err(c.fail(field, "expected `(import \"name\" <desc>)`"))
-        desc_node: items[2]
-        desc: wat_externdesc(tree, c.types, desc_node)
-        item := [U8]{0x00}
-        wat_put_name(item, tree.string(items[1]))
-        wat_put_bytes(item, desc)
-        c.section(10, item)
-        desc_parts: tree.kids(desc_node)
-        inner_name: if desc_parts.len() > 1 && tree.is_id(desc_parts[1]) -> tree.atom(desc_parts[1]) else -> ""
-        sort: wat_desc_sort(tree.head(desc_node))
-        if sort == "type" {
-            index: c.types.count
-            c.types.count += 1
-            if inner_name != "" -> c.types.names[inner_name] = index
-        } else { _: c.define(sort, inner_name) }
-    } else if head == "func" { wat_component_func(c, field, items, body, name) } else if head == "alias" {
-        if items.len() != 5 && items.len() != 6 {
-            return Err(c.fail(field, "expected `(alias [core] export <instance> \"name\" (<sort>))`"))
+    if {
+        head == "type" -> {
+            if body >= items.len() -> return Err(c.fail(field, "expected a type definition"))
+            def: wat_deftype(tree, c.types, items[body])
+            _: c.types.hoist(def, name)
+            c.flush_types()
         }
-        if tree.atom(items[1]) == "core" {
-            target: items[5]
-            target_parts: tree.kids(target)
-            if tree.atom(items[2]) != "export" || tree.head(target) != "core" || target_parts.len() < 2 {
-                return Err(c.fail(field, "expected `(alias core export <instance> \"name\" (core <sort> $id?))`"))
+        head == "import" -> {
+            if items.len() != 3 -> return Err(c.fail(field, "expected `(import \"name\" <desc>)`"))
+            desc_node: items[2]
+            desc: wat_externdesc(tree, c.types, desc_node)
+            item := [U8]{0x00}
+            wat_put_name(item, tree.string(items[1]))
+            wat_put_bytes(item, desc)
+            c.section(10, item)
+            desc_parts: tree.kids(desc_node)
+            inner_name: if desc_parts.len() > 1 && tree.is_id(desc_parts[1]) -> tree.atom(desc_parts[1]) else -> ""
+            sort: wat_desc_sort(tree.head(desc_node))
+            if {
+                sort == "type" -> {
+                    index: c.types.count
+                    c.types.count += 1
+                    if inner_name != "" -> c.types.names[inner_name] = index
+                }
+                else -> { _: c.define(sort, inner_name) }
             }
-            sort: tree.atom(target_parts[1])
-            id: if target_parts.len() > 2 -> tree.atom(target_parts[2]) else -> ""
-            instance: c.index("core instance", items[3])
-            wat_alias_core_export(c, sort, instance, tree.string(items[4]), id)
-        } else {
-            if tree.atom(items[1]) != "export" {
-                return Err(c.fail(field, "only `alias export` and `alias core export` are supported"))
+        }
+        head == "func" -> { wat_component_func(c, field, items, body, name) }
+        head == "alias" -> {
+            if items.len() != 5 && items.len() != 6 {
+                return Err(c.fail(field, "expected `(alias [core] export <instance> \"name\" (<sort>))`"))
             }
-            target: items[4]
-            target_parts: tree.kids(target)
+            if {
+                tree.atom(items[1]) == "core" -> {
+                    target: items[5]
+                    target_parts: tree.kids(target)
+                    if tree.atom(items[2]) != "export" || tree.head(target) != "core" || target_parts.len() < 2 {
+                        return Err(c.fail(field, "expected `(alias core export <instance> \"name\" (core <sort> $id?))`"))
+                    }
+                    sort: tree.atom(target_parts[1])
+                    id: if target_parts.len() > 2 -> tree.atom(target_parts[2]) else -> ""
+                    instance: c.index("core instance", items[3])
+                    wat_alias_core_export(c, sort, instance, tree.string(items[4]), id)
+                }
+                else -> {
+                    if tree.atom(items[1]) != "export" {
+                        return Err(c.fail(field, "only `alias export` and `alias core export` are supported"))
+                    }
+                    target: items[4]
+                    target_parts: tree.kids(target)
+                    sort: tree.head(target)
+                    sort_byte: if {
+                        sort == "func" -> 0x01
+                        sort == "instance" -> 0x05
+                        sort == "type" -> 0x03
+                        else -> -1
+                    }
+                    if sort_byte < 0 -> return Err(c.fail(target, "unsupported alias sort `{sort}`"))
+                    instance: c.index("instance", items[2])
+                    item := [U8]{U8{sort_byte}, 0x00}
+                    wasm_put_unsigned(item, instance)
+                    wat_put_name(item, tree.string(items[3]))
+                    c.section(6, item)
+                    id: if target_parts.len() > 1 -> tree.atom(target_parts[1]) else -> ""
+                    if {
+                        sort == "type" -> {
+                            index: c.types.count
+                            c.types.count += 1
+                            if id != "" -> c.types.names[id] = index
+                        }
+                        else -> { _: c.define(sort, id) }
+                    }
+                }
+            }
+        }
+        head == "export" -> {
+            j := 1
+            export_name := ""
+            if j < items.len() && tree.is_id(items[j]) {
+                export_name = tree.atom(items[j])
+                j += 1
+            }
+            if j + 1 >= items.len() {
+                return Err(c.fail(field, "expected `(export \"name\" (<sort> <index>))`"))
+            }
+            target: items[j + 1]
+            parts: tree.kids(target)
             sort: tree.head(target)
-            sort_byte: if sort == "func" -> 0x01 else if sort == "instance" -> 0x05 else if sort == "type" -> 0x03 else -> -1
-            if sort_byte < 0 -> return Err(c.fail(target, "unsupported alias sort `{sort}`"))
-            instance: c.index("instance", items[2])
-            item := [U8]{U8{sort_byte}, 0x00}
-            wasm_put_unsigned(item, instance)
-            wat_put_name(item, tree.string(items[3]))
-            c.section(6, item)
-            id: if target_parts.len() > 1 -> tree.atom(target_parts[1]) else -> ""
-            if sort == "type" {
-                index: c.types.count
-                c.types.count += 1
-                if id != "" -> c.types.names[id] = index
-            } else { _: c.define(sort, id) }
-        }
-    } else if head == "export" {
-        j := 1
-        export_name := ""
-        if j < items.len() && tree.is_id(items[j]) {
-            export_name = tree.atom(items[j])
-            j += 1
-        }
-        if j + 1 >= items.len() {
-            return Err(c.fail(field, "expected `(export \"name\" (<sort> <index>))`"))
-        }
-        target: items[j + 1]
-        parts: tree.kids(target)
-        sort: tree.head(target)
-        item := [U8]{0x00}
-        wat_put_name(item, tree.string(items[j]))
-        if sort == "core" {
-            if parts.len() != 3 || tree.atom(parts[1]) != "module" {
-                return Err(c.fail(target, "only core modules export from the core sorts"))
+            item := [U8]{0x00}
+            wat_put_name(item, tree.string(items[j]))
+            if {
+                sort == "core" -> {
+                    if parts.len() != 3 || tree.atom(parts[1]) != "module" {
+                        return Err(c.fail(target, "only core modules export from the core sorts"))
+                    }
+                    wat_put_bytes(item, [U8]{0x00, 0x11})
+                    wasm_put_unsigned(item, c.index("core module", parts[2]))
+                }
+                else -> {
+                    sort_byte: if {
+                        sort == "func" -> 0x01
+                        sort == "instance" -> 0x05
+                        sort == "type" -> 0x03
+                        else -> -1
+                    }
+                    if sort_byte < 0 || parts.len() != 2 {
+                        return Err(c.fail(target, "unsupported export `({sort} ...)`"))
+                    }
+                    item.push(U8{sort_byte})
+                    index: if sort == "type" -> wat_type_ref(tree, c.types, parts[1]) else -> c.index(sort, parts[1])
+                    wasm_put_unsigned(item, index)
+                }
             }
-            wat_put_bytes(item, [U8]{0x00, 0x11})
-            wasm_put_unsigned(item, c.index("core module", parts[2]))
-        } else {
-            sort_byte: if sort == "func" -> 0x01 else if sort == "instance" -> 0x05 else if sort == "type" -> 0x03 else -> -1
-            if sort_byte < 0 || parts.len() != 2 {
-                return Err(c.fail(target, "unsupported export `({sort} ...)`"))
+            if {
+                j + 2 < items.len() -> {
+                    item.push(U8{0x01})
+                    wat_put_bytes(item, wat_externdesc(tree, c.types, items[j + 2]))
+                }
+                else -> { item.push(U8{0x00}) }
             }
-            item.push(U8{sort_byte})
-            index: if sort == "type" -> wat_type_ref(tree, c.types, parts[1]) else -> c.index(sort, parts[1])
-            wasm_put_unsigned(item, index)
+            c.section(11, item)
+            if {
+                sort == "type" -> {
+                    index: c.types.count
+                    c.types.count += 1
+                    if export_name != "" -> c.types.names[export_name] = index
+                }
+                sort == "core" -> { _: c.define("core module", export_name) }
+                else -> {
+                    _: c.define(sort, export_name)
+                }
+            }
         }
-        if j + 2 < items.len() {
-            item.push(U8{0x01})
-            wat_put_bytes(item, wat_externdesc(tree, c.types, items[j + 2]))
-        } else { item.push(U8{0x00}) }
-        c.section(11, item)
-        if sort == "type" {
-            index: c.types.count
-            c.types.count += 1
-            if export_name != "" -> c.types.names[export_name] = index
-        } else if sort == "core" { _: c.define("core module", export_name) } else {
-            _: c.define(sort, export_name)
-        }
-    } else { return Err(c.fail(field, "unsupported component field `({head} ...)`")) }
+        else -> { return Err(c.fail(field, "unsupported component field `({head} ...)`")) }
+    }
 }
 
-wat_core_instance: fn(c: ^WatComponent, field: Int, items: [Int], body: Int, name: String) WasmError! {
+wat_core_instance: fn(c: ^WatComponent, _field: Int, items: [Int], body: Int, name: String) WasmError! {
     tree: c.tree
     if body < items.len() && tree.head(items[body]) == "instantiate" {
         parts: tree.kids(items[body])
@@ -1829,9 +2006,12 @@ wat_core_instance: fn(c: ^WatComponent, field: Int, items: [Int], body: Int, nam
             }
             target: tree.kids(with[2])
             instance := 0
-            if target.len() == 2 && tree.is_ref(target[1]) {
-                instance = c.index("core instance", target[1])
-            } else { instance = wat_core_instance_exports(c, target, 1, "") }
+            if {
+                target.len() == 2 && tree.is_ref(target[1]) -> {
+                    instance = c.index("core instance", target[1])
+                }
+                else -> { instance = wat_core_instance_exports(c, target, 1, "") }
+            }
             wat_put_name(args, tree.string(with[1]))
             args.push(U8{0x12})
             wasm_put_unsigned(args, instance)
@@ -1895,10 +2075,13 @@ wat_component_func: fn(c: ^WatComponent, field: Int, items: [Int], body: Int, na
     canon_at := k
     loop canon_at < items.len() && tree.head(items[canon_at]) != "canon" -> canon_at += 1
     if canon_at >= items.len() -> return Err(c.fail(field, "expected `(canon lift ...)`"))
-    if type_index < 0 {
-        def: wat_functype(tree, c.types, items[k..<canon_at], 0)
-        type_index = c.types.hoist(def, "")
-    } else if canon_at != k { return Err(c.fail(items[k], "a function names its type once")) }
+    if {
+        type_index < 0 -> {
+            def: wat_functype(tree, c.types, items[k..<canon_at], 0)
+            type_index = c.types.hoist(def, "")
+        }
+        canon_at != k -> { return Err(c.fail(items[k], "a function names its type once")) }
+    }
     canon: tree.kids(items[canon_at])
     if canon.len() < 3 || tree.atom(canon[1]) != "lift" {
         return Err(c.fail(items[canon_at], "expected `(canon lift (core func ...) <options>)`"))

@@ -197,7 +197,12 @@ wasm_validate_module: fn(wm: WasmModule) WasmError! {
             return Err(WasmError.new("duplicate export name `{entry.name}`", -1))
         }
         names[entry.name] = true
-        count: if entry.kind == WASM_EXTERN_FUNC -> v.func_types.len() else if entry.kind == WASM_EXTERN_TABLE -> v.tables.len() else if entry.kind == WASM_EXTERN_MEMORY -> v.memories else -> v.globals.len()
+        count: if {
+            entry.kind == WASM_EXTERN_FUNC -> v.func_types.len()
+            entry.kind == WASM_EXTERN_TABLE -> v.tables.len()
+            entry.kind == WASM_EXTERN_MEMORY -> v.memories
+            else -> v.globals.len()
+        }
         if entry.index >= count {
             return Err(WasmError.new("export `{entry.name}` names an unknown index {entry.index}", -1))
         }
@@ -272,22 +277,27 @@ wasm_validate_limits: fn(limits: WasmLimits, ceiling: Int, what: String) WasmErr
 
 wasm_validate_imports: fn(v: ^WasmValidator) WasmError! {
     loop entry in v.wm.imports {
-        if entry.kind == WASM_EXTERN_FUNC {
-            if entry.type_index >= v.wm.types.len() {
-                return Err(WasmError.new("unknown type {entry.type_index} for import `{entry.module_name}.{entry.name}`", -1))
+        if {
+            entry.kind == WASM_EXTERN_FUNC -> {
+                if entry.type_index >= v.wm.types.len() {
+                    return Err(WasmError.new("unknown type {entry.type_index} for import `{entry.module_name}.{entry.name}`", -1))
+                }
+                v.func_types.push(entry.type_index)
             }
-            v.func_types.push(entry.type_index)
-        } else if entry.kind == WASM_EXTERN_TABLE {
-            table: entry.table ?? return Err(WasmError.new("malformed table import", -1))
-            wasm_validate_limits(table.limits, TWO_32 - 1, "table")
-            v.tables.push(table.elem)
-        } else if entry.kind == WASM_EXTERN_MEMORY {
-            memory: entry.memory ?? return Err(WasmError.new("malformed memory import", -1))
-            wasm_validate_limits(memory, WASM_MAX_PAGES, "memory")
-            v.memories += 1
-        } else {
-            global: entry.global ?? return Err(WasmError.new("malformed global import", -1))
-            v.globals.push(global.copy())
+            entry.kind == WASM_EXTERN_TABLE -> {
+                table: entry.table ?? return Err(WasmError.new("malformed table import", -1))
+                wasm_validate_limits(table.limits, TWO_32 - 1, "table")
+                v.tables.push(table.elem)
+            }
+            entry.kind == WASM_EXTERN_MEMORY -> {
+                memory: entry.memory ?? return Err(WasmError.new("malformed memory import", -1))
+                wasm_validate_limits(memory, WASM_MAX_PAGES, "memory")
+                v.memories += 1
+            }
+            else -> {
+                global: entry.global ?? return Err(WasmError.new("malformed global import", -1))
+                v.globals.push(global.copy())
+            }
         }
     }
 }
@@ -297,24 +307,32 @@ wasm_validate_imports: fn(v: ^WasmValidator) WasmError! {
 wasm_validate_const: fn(v: ^WasmValidator, expr: WasmConstExpr, expected: Int, visible: Int) WasmError! {
     op: expr.op
     ty := WASM_UNKNOWN
-    if op == WASM_OP_I32_CONST -> ty = WASM_I32 else if op == WASM_OP_I64_CONST -> ty = WASM_I64 else if op == WASM_OP_F32_CONST {
-        ty = WASM_F32
-    } else if op == WASM_OP_F64_CONST { ty = WASM_F64 } else if op == WASM_OP_REF_NULL {
-        ty = expr.value
-    } else if op == WASM_OP_REF_FUNC {
-        if expr.value >= v.func_types.len() {
-            return Err(WasmError.new("unknown function {expr.value}", -1))
+    if {
+        op == WASM_OP_I32_CONST -> ty = WASM_I32
+        op == WASM_OP_I64_CONST -> ty = WASM_I64
+        op == WASM_OP_F32_CONST -> {
+            ty = WASM_F32
         }
-        ty = WASM_FUNCREF
-    } else {
-        if expr.value >= visible {
-            return Err(WasmError.new("unknown global {expr.value} in a constant expression", -1))
+        op == WASM_OP_F64_CONST -> { ty = WASM_F64 }
+        op == WASM_OP_REF_NULL -> {
+            ty = expr.value
         }
-        global: v.globals[expr.value]
-        if global.mutable {
-            return Err(WasmError.new("constant expression required: global {expr.value} is mutable", -1))
+        op == WASM_OP_REF_FUNC -> {
+            if expr.value >= v.func_types.len() {
+                return Err(WasmError.new("unknown function {expr.value}", -1))
+            }
+            ty = WASM_FUNCREF
         }
-        ty = global.value
+        else -> {
+            if expr.value >= visible {
+                return Err(WasmError.new("unknown global {expr.value} in a constant expression", -1))
+            }
+            global: v.globals[expr.value]
+            if global.mutable {
+                return Err(WasmError.new("constant expression required: global {expr.value} is mutable", -1))
+            }
+            ty = global.value
+        }
     }
     if ty != expected {
         return Err(WasmError.new("type mismatch: constant expression has type {wasm_type_name(ty)}, expected {wasm_type_name(expected)}", -1))
@@ -379,133 +397,157 @@ wasm_validate_instruction: fn(v: ^WasmValidator, code: WasmCode, k: Int) WasmErr
         v.push_all(wasm_sig_side(info.sig, true))
         return
     }
-    if op == WASM_OP_UNREACHABLE -> v.unreachable() else if op == WASM_OP_BLOCK || op == WASM_OP_LOOP || op == WASM_OP_IF {
-        sig: v.block_type(a)
-        if op == WASM_OP_IF -> v.pop_expect(WASM_I32)
-        v.pop_all(sig.params)
-        v.push_frame(op, sig.params, sig.results)
-    } else if op == WASM_OP_ELSE {
-        top: v.frame_ops.len() - 1
-        if v.frame_ops[top] != WASM_OP_IF -> return Err(v.fail("else without a matching if"))
-        params: v.frame_params[top]
-        results: v.pop_frame()
-        v.push_frame(WASM_OP_ELSE, params, results)
-    } else if op == WASM_OP_END {
-        top: v.frame_ops.len() - 1
-        kind: v.frame_ops[top]
-        params: v.frame_params[top]
-        results: v.pop_frame()
-        if kind == WASM_OP_IF && params != results {
-            return Err(v.fail("type mismatch: if without else must leave its parameters as its results"))
+    if {
+        op == WASM_OP_UNREACHABLE -> v.unreachable()
+        op == WASM_OP_BLOCK || op == WASM_OP_LOOP || op == WASM_OP_IF -> {
+            sig: v.block_type(a)
+            if op == WASM_OP_IF -> v.pop_expect(WASM_I32)
+            v.pop_all(sig.params)
+            v.push_frame(op, sig.params, sig.results)
         }
-        v.push_all(results)
-    } else if op == WASM_OP_BR {
-        types: v.label_types(a)
-        v.pop_all(types)
-        v.unreachable()
-    } else if op == WASM_OP_BR_IF {
-        v.pop_expect(WASM_I32)
-        types: v.label_types(a)
-        v.pop_all(types)
-        v.push_all(types)
-    } else if op == WASM_OP_BR_TABLE {
-        v.pop_expect(WASM_I32)
-        default_types: v.label_types(b)
-        arity: default_types.len()
-        loop depth in code.tables[a] {
-            types: v.label_types(depth)
-            if types.len() != arity {
-                return Err(v.fail("type mismatch: br_table targets have different arities"))
+        op == WASM_OP_ELSE -> {
+            top: v.frame_ops.len() - 1
+            if v.frame_ops[top] != WASM_OP_IF -> return Err(v.fail("else without a matching if"))
+            params: v.frame_params[top]
+            results: v.pop_frame()
+            v.push_frame(WASM_OP_ELSE, params, results)
+        }
+        op == WASM_OP_END -> {
+            top: v.frame_ops.len() - 1
+            kind: v.frame_ops[top]
+            params: v.frame_params[top]
+            results: v.pop_frame()
+            if kind == WASM_OP_IF && params != results {
+                return Err(v.fail("type mismatch: if without else must leave its parameters as its results"))
             }
-            // Check each target against the stack without consuming it.
-            popped := [Int]{}
-            j := types.len()
-            loop j > 0 {
-                j -= 1
-                got: v.pop_expect(types[j])
-                popped.push(got)
+            v.push_all(results)
+        }
+        op == WASM_OP_BR -> {
+            types: v.label_types(a)
+            v.pop_all(types)
+            v.unreachable()
+        }
+        op == WASM_OP_BR_IF -> {
+            v.pop_expect(WASM_I32)
+            types: v.label_types(a)
+            v.pop_all(types)
+            v.push_all(types)
+        }
+        op == WASM_OP_BR_TABLE -> {
+            v.pop_expect(WASM_I32)
+            default_types: v.label_types(b)
+            arity: default_types.len()
+            loop depth in code.tables[a] {
+                types: v.label_types(depth)
+                if types.len() != arity {
+                    return Err(v.fail("type mismatch: br_table targets have different arities"))
+                }
+                // Check each target against the stack without consuming it.
+                popped := [Int]{}
+                j := types.len()
+                loop j > 0 {
+                    j -= 1
+                    got: v.pop_expect(types[j])
+                    popped.push(got)
+                }
+                loop m in 0..<popped.len() -> v.push(popped[popped.len() - 1 - m])
             }
-            loop m in 0..<popped.len() -> v.push(popped[popped.len() - 1 - m])
+            v.pop_all(default_types)
+            v.unreachable()
         }
-        v.pop_all(default_types)
-        v.unreachable()
-    } else if op == WASM_OP_RETURN {
-        results: v.results.copy()
-        v.pop_all(results)
-        v.unreachable()
-    } else if op == WASM_OP_CALL {
-        sig: v.func_type(a)
-        v.pop_all(sig.params)
-        v.push_all(sig.results)
-    } else if op == WASM_OP_CALL_INDIRECT {
-        table: v.table(b)
-        if table != WASM_FUNCREF {
-            return Err(v.fail("type mismatch: call_indirect through a non-funcref table"))
+        op == WASM_OP_RETURN -> {
+            results: v.results.copy()
+            v.pop_all(results)
+            v.unreachable()
         }
-        if a >= v.wm.types.len() -> return Err(v.fail("unknown type {a}"))
-        sig: v.wm.types[a]
-        v.pop_expect(WASM_I32)
-        v.pop_all(sig.params)
-        v.push_all(sig.results)
-    } else if op == WASM_OP_DROP { v.pop() } else if op == WASM_OP_SELECT {
-        v.pop_expect(WASM_I32)
-        first: v.pop()
-        second: v.pop()
-        if wasm_is_ref(first) || wasm_is_ref(second) {
-            return Err(v.fail("type mismatch: select without a type needs numeric operands"))
+        op == WASM_OP_CALL -> {
+            sig: v.func_type(a)
+            v.pop_all(sig.params)
+            v.push_all(sig.results)
         }
-        if first != second && first != WASM_UNKNOWN && second != WASM_UNKNOWN {
-            return Err(v.fail("type mismatch: select operands differ"))
+        op == WASM_OP_CALL_INDIRECT -> {
+            table: v.table(b)
+            if table != WASM_FUNCREF {
+                return Err(v.fail("type mismatch: call_indirect through a non-funcref table"))
+            }
+            if a >= v.wm.types.len() -> return Err(v.fail("unknown type {a}"))
+            sig: v.wm.types[a]
+            v.pop_expect(WASM_I32)
+            v.pop_all(sig.params)
+            v.push_all(sig.results)
         }
-        v.push(if first == WASM_UNKNOWN -> second else -> first)
-    } else if op == WASM_OP_SELECT_T {
-        v.pop_expect(WASM_I32)
-        v.pop_expect(a)
-        v.pop_expect(a)
-        v.push(a)
-    } else if op == WASM_OP_LOCAL_GET || op == WASM_OP_LOCAL_SET || op == WASM_OP_LOCAL_TEE {
-        if a >= v.locals.len() -> return Err(v.fail("unknown local {a}"))
-        ty: v.locals[a]
-        if op == WASM_OP_LOCAL_GET -> v.push(ty) else {
+        op == WASM_OP_DROP -> { v.pop() }
+        op == WASM_OP_SELECT -> {
+            v.pop_expect(WASM_I32)
+            first: v.pop()
+            second: v.pop()
+            if wasm_is_ref(first) || wasm_is_ref(second) {
+                return Err(v.fail("type mismatch: select without a type needs numeric operands"))
+            }
+            if first != second && first != WASM_UNKNOWN && second != WASM_UNKNOWN {
+                return Err(v.fail("type mismatch: select operands differ"))
+            }
+            v.push(if first == WASM_UNKNOWN -> second else -> first)
+        }
+        op == WASM_OP_SELECT_T -> {
+            v.pop_expect(WASM_I32)
+            v.pop_expect(a)
+            v.pop_expect(a)
+            v.push(a)
+        }
+        op == WASM_OP_LOCAL_GET || op == WASM_OP_LOCAL_SET || op == WASM_OP_LOCAL_TEE -> {
+            if a >= v.locals.len() -> return Err(v.fail("unknown local {a}"))
+            ty: v.locals[a]
+            if op == WASM_OP_LOCAL_GET -> v.push(ty) else {
+                v.pop_expect(ty)
+                if op == WASM_OP_LOCAL_TEE -> v.push(ty)
+            }
+        }
+        op == WASM_OP_GLOBAL_GET || op == WASM_OP_GLOBAL_SET -> {
+            if a >= v.globals.len() -> return Err(v.fail("unknown global {a}"))
+            global: v.globals[a]
+            if op == WASM_OP_GLOBAL_GET -> v.push(global.value) else {
+                if !global.mutable -> return Err(v.fail("global {a} is immutable"))
+                v.pop_expect(global.value)
+            }
+        }
+        op == WASM_OP_TABLE_GET -> {
+            ty: v.table(a)
+            v.pop_expect(WASM_I32)
+            v.push(ty)
+        }
+        op == WASM_OP_TABLE_SET -> {
+            ty: v.table(a)
             v.pop_expect(ty)
-            if op == WASM_OP_LOCAL_TEE -> v.push(ty)
+            v.pop_expect(WASM_I32)
         }
-    } else if op == WASM_OP_GLOBAL_GET || op == WASM_OP_GLOBAL_SET {
-        if a >= v.globals.len() -> return Err(v.fail("unknown global {a}"))
-        global: v.globals[a]
-        if op == WASM_OP_GLOBAL_GET -> v.push(global.value) else {
-            if !global.mutable -> return Err(v.fail("global {a} is immutable"))
-            v.pop_expect(global.value)
+        op == WASM_OP_TABLE_GROW -> {
+            ty: v.table(a)
+            v.pop_expect(WASM_I32)
+            v.pop_expect(ty)
+            v.push(WASM_I32)
         }
-    } else if op == WASM_OP_TABLE_GET {
-        ty: v.table(a)
-        v.pop_expect(WASM_I32)
-        v.push(ty)
-    } else if op == WASM_OP_TABLE_SET {
-        ty: v.table(a)
-        v.pop_expect(ty)
-        v.pop_expect(WASM_I32)
-    } else if op == WASM_OP_TABLE_GROW {
-        ty: v.table(a)
-        v.pop_expect(WASM_I32)
-        v.pop_expect(ty)
-        v.push(WASM_I32)
-    } else if op == WASM_OP_TABLE_FILL {
-        ty: v.table(a)
-        v.pop_expect(WASM_I32)
-        v.pop_expect(ty)
-        v.pop_expect(WASM_I32)
-    } else if op == WASM_OP_REF_NULL { v.push(a) } else if op == WASM_OP_REF_IS_NULL {
-        ty: v.pop()
-        if ty != WASM_UNKNOWN && !wasm_is_ref(ty) {
-            return Err(v.fail("type mismatch: ref.is_null needs a reference"))
+        op == WASM_OP_TABLE_FILL -> {
+            ty: v.table(a)
+            v.pop_expect(WASM_I32)
+            v.pop_expect(ty)
+            v.pop_expect(WASM_I32)
         }
-        v.push(WASM_I32)
-    } else if op == WASM_OP_REF_FUNC {
-        if a >= v.func_types.len() -> return Err(v.fail("unknown function {a}"))
-        if v.refs.get(a) == None -> return Err(v.fail("undeclared function reference {a}"))
-        v.push(WASM_FUNCREF)
-    } else { return Err(v.fail("illegal opcode 0x{wasm_hex(op)}")) }
+        op == WASM_OP_REF_NULL -> { v.push(a) }
+        op == WASM_OP_REF_IS_NULL -> {
+            ty: v.pop()
+            if ty != WASM_UNKNOWN && !wasm_is_ref(ty) {
+                return Err(v.fail("type mismatch: ref.is_null needs a reference"))
+            }
+            v.push(WASM_I32)
+        }
+        op == WASM_OP_REF_FUNC -> {
+            if a >= v.func_types.len() -> return Err(v.fail("unknown function {a}"))
+            if v.refs.get(a) == None -> return Err(v.fail("undeclared function reference {a}"))
+            v.push(WASM_FUNCREF)
+        }
+        else -> { return Err(v.fail("illegal opcode 0x{wasm_hex(op)}")) }
+    }
 }
 
 wasm_log2: fn(width: Int) -> Int Never! {

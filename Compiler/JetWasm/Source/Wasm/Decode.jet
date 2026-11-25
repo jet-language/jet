@@ -61,22 +61,35 @@ wasm_decode_module_body: fn(bytes: ^^[U8], start: Int, end: Int) -> WasmModule W
         if rank < 0 -> return Err(WasmError.new("malformed section id {id}", id_at))
         if rank <= last_rank -> return Err(WasmError.new("section {id} out of order", id_at))
         last_rank = rank
-        if id == 1 -> wasm_decode_types(wm, section) else if id == 2 {
-            wasm_decode_imports(wm, section)
-        } else if id == 3 { wasm_decode_functions(wm, section) } else if id == 4 {
-            wasm_decode_tables(wm, section)
-        } else if id == 5 { wasm_decode_memories(wm, section) } else if id == 6 {
-            wasm_decode_globals(wm, section)
-        } else if id == 7 { wasm_decode_exports(wm, section) } else if id == 8 {
-            index: section.u32()
-            wm.start = Val(index)
-        } else if id == 9 { wasm_decode_elems(wm, section) } else if id == 12 {
-            count: section.u32()
-            wm.data_count = Val(count)
-        } else if id == 10 {
-            wasm_decode_codes(wm, section, ops)
-            code_seen = true
-        } else { wasm_decode_datas(wm, section) }
+        if {
+            id == 1 -> wasm_decode_types(wm, section)
+            id == 2 -> {
+                wasm_decode_imports(wm, section)
+            }
+            id == 3 -> { wasm_decode_functions(wm, section) }
+            id == 4 -> {
+                wasm_decode_tables(wm, section)
+            }
+            id == 5 -> { wasm_decode_memories(wm, section) }
+            id == 6 -> {
+                wasm_decode_globals(wm, section)
+            }
+            id == 7 -> { wasm_decode_exports(wm, section) }
+            id == 8 -> {
+                index: section.u32()
+                wm.start = Val(index)
+            }
+            id == 9 -> { wasm_decode_elems(wm, section) }
+            id == 12 -> {
+                count: section.u32()
+                wm.data_count = Val(count)
+            }
+            id == 10 -> {
+                wasm_decode_codes(wm, section, ops)
+                code_seen = true
+            }
+            else -> { wasm_decode_datas(wm, section) }
+        }
         if !section.done() -> return Err(WasmError.new("section size mismatch", section.at))
     }
     if !code_seen && wm.funcs.len() != 0 {
@@ -183,21 +196,28 @@ wasm_decode_imports: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
         at: section.at
         kind: section.byte()
         entry := WasmImport{module_name: module_name, name: name, kind: kind, type_index: -1, table: None, memory: None, global: None}
-        if kind == WASM_EXTERN_FUNC {
-            index: section.u32()
-            entry.type_index = index
-        } else if kind == WASM_EXTERN_TABLE {
-            table: wasm_read_table_type(section)
-            entry.table = Val(table)
-        } else if kind == WASM_EXTERN_MEMORY {
-            limits: wasm_read_limits(section, WASM_MAX_PAGES)
-            entry.memory = Val(limits)
-        } else if kind == WASM_EXTERN_GLOBAL {
-            global: wasm_read_global_type(section)
-            entry.global = Val(global)
-        } else if kind == 0x04 {
-            return Err(WasmError.new("imports: tag (exceptions) are not supported by the plugin engine", at))
-        } else { return Err(WasmError.new("malformed import kind 0x{wasm_hex(kind)}", at)) }
+        if {
+            kind == WASM_EXTERN_FUNC -> {
+                index: section.u32()
+                entry.type_index = index
+            }
+            kind == WASM_EXTERN_TABLE -> {
+                table: wasm_read_table_type(section)
+                entry.table = Val(table)
+            }
+            kind == WASM_EXTERN_MEMORY -> {
+                limits: wasm_read_limits(section, WASM_MAX_PAGES)
+                entry.memory = Val(limits)
+            }
+            kind == WASM_EXTERN_GLOBAL -> {
+                global: wasm_read_global_type(section)
+                entry.global = Val(global)
+            }
+            kind == 0x04 -> {
+                return Err(WasmError.new("imports: tag (exceptions) are not supported by the plugin engine", at))
+            }
+            else -> { return Err(WasmError.new("malformed import kind 0x{wasm_hex(kind)}", at)) }
+        }
         wm.imports.push(entry)
     }
 }
@@ -254,15 +274,23 @@ wasm_read_const_expr: fn(section: ^WasmReader) -> WasmConstExpr WasmError! {
     at: section.at
     op: section.byte()
     value := 0
-    if op == WASM_OP_I32_CONST -> value = section.signed(32) else if op == WASM_OP_I64_CONST {
-        value = section.signed(64)
-    } else if op == WASM_OP_F32_CONST { value = section.fixed(4) } else if op == WASM_OP_F64_CONST {
-        bits: section.fixed(8)
-        value = wasm_signed(bits, 64)
-    } else if op == WASM_OP_GLOBAL_GET || op == WASM_OP_REF_FUNC { value = section.u32() } else if op == WASM_OP_REF_NULL {
-        value = wasm_read_reftype(section)
-    } else {
-        return Err(WasmError.new("constant expression required (found opcode 0x{wasm_hex(op)})", at))
+    if {
+        op == WASM_OP_I32_CONST -> value = section.signed(32)
+        op == WASM_OP_I64_CONST -> {
+            value = section.signed(64)
+        }
+        op == WASM_OP_F32_CONST -> { value = section.fixed(4) }
+        op == WASM_OP_F64_CONST -> {
+            bits: section.fixed(8)
+            value = wasm_signed(bits, 64)
+        }
+        op == WASM_OP_GLOBAL_GET || op == WASM_OP_REF_FUNC -> { value = section.u32() }
+        op == WASM_OP_REF_NULL -> {
+            value = wasm_read_reftype(section)
+        }
+        else -> {
+            return Err(WasmError.new("constant expression required (found opcode 0x{wasm_hex(op)})", at))
+        }
     }
     end_at: section.at
     closing: section.byte()
@@ -301,17 +329,24 @@ wasm_decode_elems: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
         item_count: wasm_count(section, WASM_MAX_TABLE, "element items")
         items := [Int]{}
         loop _ in 0..<item_count {
-            if uses_exprs {
-                expr_at: section.at
-                expr: wasm_read_const_expr(section)
-                if expr.op == WASM_OP_REF_FUNC -> items.push(expr.value) else if expr.op == WASM_OP_REF_NULL {
-                    items.push(-1)
-                } else {
-                    return Err(WasmError.new("element expressions other than ref.func and ref.null are not supported", expr_at))
+            if {
+                uses_exprs -> {
+                    expr_at: section.at
+                    expr: wasm_read_const_expr(section)
+                    if {
+                        expr.op == WASM_OP_REF_FUNC -> items.push(expr.value)
+                        expr.op == WASM_OP_REF_NULL -> {
+                            items.push(-1)
+                        }
+                        else -> {
+                            return Err(WasmError.new("element expressions other than ref.func and ref.null are not supported", expr_at))
+                        }
+                    }
                 }
-            } else {
-                index: section.u32()
-                items.push(index)
+                else -> {
+                    index: section.u32()
+                    items.push(index)
+                }
             }
         }
         wm.elems.push(WasmElem{mode: mode, table: table, offset: offset, elem_type: elem_type, items: items})
@@ -353,15 +388,18 @@ wasm_decode_names: fn(wm: ^WasmModule, section: ^WasmReader) Never! {
         }
         sub := WasmReader{bytes: section.bytes, at: section.at, end: section.at + size}
         section.at += size
-        if id == 0 {
-            text: sub.name() ?? return
-            wm.name = text
-        } else if id == 1 {
-            count: sub.u32() ?? return
-            loop _ in 0..<count {
-                index: sub.u32() ?? return
+        if {
+            id == 0 -> {
                 text: sub.name() ?? return
-                wm.function_names[index] = text
+                wm.name = text
+            }
+            id == 1 -> {
+                count: sub.u32() ?? return
+                loop _ in 0..<count {
+                    index: sub.u32() ?? return
+                    text: sub.name() ?? return
+                    wm.function_names[index] = text
+                }
             }
         }
     }
@@ -406,60 +444,80 @@ wasm_decode_body: fn(body: ^WasmReader, ops: WasmOpTable, has_data_count: Bool) 
         }
         first: body.byte()
         op := first
-        if first == 0xfc {
-            sub: body.u32()
-            op = 0xfc00 + sub
-        } else if first == 0xfd {
-            return Err(WasmError.new("SIMD instructions are not supported by the plugin engine", at))
-        } else if first == 0xfe {
-            return Err(WasmError.new("atomic instructions (threads) are not supported by the plugin engine", at))
+        if {
+            first == 0xfc -> {
+                sub: body.u32()
+                op = 0xfc00 + sub
+            }
+            first == 0xfd -> {
+                return Err(WasmError.new("SIMD instructions are not supported by the plugin engine", at))
+            }
+            first == 0xfe -> {
+                return Err(WasmError.new("atomic instructions (threads) are not supported by the plugin engine", at))
+            }
         }
         info: ops.info(op) ?? return Err(wasm_unsupported_opcode(op, at))
         a := 0
         b := 0
         imm: info.imm
-        if imm == WASM_IMM_BLOCK -> a = wasm_read_block_type(body) else if imm == WASM_IMM_LABEL || imm == WASM_IMM_FUNC || imm == WASM_IMM_LOCAL || imm == WASM_IMM_GLOBAL || imm == WASM_IMM_TABLE || imm == WASM_IMM_ELEM {
-            a = body.u32()
-        } else if imm == WASM_IMM_DATA {
-            if !has_data_count -> return Err(WasmError.new("data count section required", at))
-            a = body.u32()
-        } else if imm == WASM_IMM_BR_TABLE {
-            n: wasm_count(body, 1000000, "br_table targets")
-            targets := [Int]{}
-            loop _ in 0..<n {
-                target: body.u32()
-                targets.push(target)
+        if {
+            imm == WASM_IMM_BLOCK -> a = wasm_read_block_type(body)
+            imm == WASM_IMM_LABEL || imm == WASM_IMM_FUNC || imm == WASM_IMM_LOCAL || imm == WASM_IMM_GLOBAL || imm == WASM_IMM_TABLE || imm == WASM_IMM_ELEM -> {
+                a = body.u32()
             }
-            a = code.tables.len()
-            code.tables.push(targets)
-            b = body.u32()
-        } else if imm == WASM_IMM_CALL_INDIRECT || imm == WASM_IMM_TABLE_COPY || imm == WASM_IMM_TABLE_INIT {
-            a = body.u32()
-            b = body.u32()
-        } else if imm == WASM_IMM_MEMARG {
-            align_at: body.at
-            a = body.u32()
-            if a >= 64 {
-                return Err(WasmError.new("multiple memories are not supported by the plugin engine", align_at))
+            imm == WASM_IMM_DATA -> {
+                if !has_data_count -> return Err(WasmError.new("data count section required", at))
+                a = body.u32()
             }
-            b = body.u32()
-        } else if imm == WASM_IMM_MEMORY { wasm_read_zero_memory(body) } else if imm == WASM_IMM_MEMORY_COPY {
-            wasm_read_zero_memory(body)
-            wasm_read_zero_memory(body)
-        } else if imm == WASM_IMM_MEMORY_INIT {
-            if !has_data_count -> return Err(WasmError.new("data count section required", at))
-            a = body.u32()
-            wasm_read_zero_memory(body)
-        } else if imm == WASM_IMM_I32 { a = body.signed(32) } else if imm == WASM_IMM_I64 {
-            a = body.signed(64)
-        } else if imm == WASM_IMM_F32 { a = body.fixed(4) } else if imm == WASM_IMM_F64 {
-            bits: body.fixed(8)
-            a = wasm_signed(bits, 64)
-        } else if imm == WASM_IMM_SELECT_T {
-            n: body.u32()
-            if n != 1 -> return Err(WasmError.new("invalid result arity for select", at))
-            a = wasm_read_valtype(body)
-        } else if imm == WASM_IMM_REFTYPE { a = wasm_read_reftype(body) }
+            imm == WASM_IMM_BR_TABLE -> {
+                n: wasm_count(body, 1000000, "br_table targets")
+                targets := [Int]{}
+                loop _ in 0..<n {
+                    target: body.u32()
+                    targets.push(target)
+                }
+                a = code.tables.len()
+                code.tables.push(targets)
+                b = body.u32()
+            }
+            imm == WASM_IMM_CALL_INDIRECT || imm == WASM_IMM_TABLE_COPY || imm == WASM_IMM_TABLE_INIT -> {
+                a = body.u32()
+                b = body.u32()
+            }
+            imm == WASM_IMM_MEMARG -> {
+                align_at: body.at
+                a = body.u32()
+                if a >= 64 {
+                    return Err(WasmError.new("multiple memories are not supported by the plugin engine", align_at))
+                }
+                b = body.u32()
+            }
+            imm == WASM_IMM_MEMORY -> { wasm_read_zero_memory(body) }
+            imm == WASM_IMM_MEMORY_COPY -> {
+                wasm_read_zero_memory(body)
+                wasm_read_zero_memory(body)
+            }
+            imm == WASM_IMM_MEMORY_INIT -> {
+                if !has_data_count -> return Err(WasmError.new("data count section required", at))
+                a = body.u32()
+                wasm_read_zero_memory(body)
+            }
+            imm == WASM_IMM_I32 -> { a = body.signed(32) }
+            imm == WASM_IMM_I64 -> {
+                a = body.signed(64)
+            }
+            imm == WASM_IMM_F32 -> { a = body.fixed(4) }
+            imm == WASM_IMM_F64 -> {
+                bits: body.fixed(8)
+                a = wasm_signed(bits, 64)
+            }
+            imm == WASM_IMM_SELECT_T -> {
+                n: body.u32()
+                if n != 1 -> return Err(WasmError.new("invalid result arity for select", at))
+                a = wasm_read_valtype(body)
+            }
+            imm == WASM_IMM_REFTYPE -> { a = wasm_read_reftype(body) }
+        }
         if op == WASM_OP_BLOCK || op == WASM_OP_LOOP || op == WASM_OP_IF -> depth += 1
         if op == WASM_OP_END -> depth -= 1
         code.op.push(op)
