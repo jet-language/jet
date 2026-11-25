@@ -657,7 +657,7 @@ sema_check_body_stream_take_environment: fn(cells: SemaStreamCells, stream_modul
     entered := compiler_threads_taken(held.value.environments)
     taken := entered.module_scope.move()
     entered.module_scope = None
-    scopes.push(taken.move() ?? panic("a body-stream module scope left its environment"))
+    scopes.push(taken.move() ?? panic("a finishing stream module's environment has no module scope"))
     entered
 }
 
@@ -774,7 +774,7 @@ sema_check_body_stream_publish: fn(out: Shared<SemaStreamOut>, part: ^SemaBodyPa
 // read in place through the read parameter.
 sema_check_body_stream_scope_copy: fn(environment: SemaScopeEnvironment) -> SemaScopeTable {
     if environment.module_scope == .Val(source) -> return sema_scope_light_copy(source)
-    panic("a body-stream module scope left its environment")
+    panic("a stream module's environment has no module scope to copy")
 }
 
 // Checks one claimed job of module `module_index` on `part`'s scope copy and
@@ -1005,7 +1005,7 @@ sema_check_shared_return_scope: fn(shared: Shared<SemaCheckShared>) -> SemaScope
     taken := environment.module_scope.move()
     environment.module_scope = None
     sema_check_shared_put_environment(shared, environment)
-    taken.move() ?? panic("the body-check module scope left the shared environment")
+    taken.move() ?? panic("the shared environment gave back no module scope")
 }
 
 // Gives a thread's slot its own light copy of the shared module scope, made
@@ -1018,7 +1018,7 @@ sema_check_body_part_copy_scope: fn(environment: SemaScopeEnvironment, slot: Sha
         permit.value.scopes = light.move()
         return
     }
-    panic("the body-check module scope left the shared environment")
+    panic("the shared environment lent a thread no module scope")
 }
 
 // Moves a thread's bodies into `placed`, each at its job position.
@@ -1276,7 +1276,7 @@ sema_check_body_stream_take_scope: fn(cell: Shared<SemaStreamEnvironment>) -> Se
     entered := compiler_threads_taken(held.value.environments)
     taken := entered.module_scope.move()
     entered.module_scope = None
-    taken.move() ?? panic("a body-stream module scope left its environment")
+    taken.move() ?? panic("a done stream module's environment has no module scope")
 }
 
 // One thread: makes its light copy of the module scope in its slot, then
@@ -1541,11 +1541,11 @@ sema_check_body_stream: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Se
                 next
             }
             bodies := sema_check_prepared_none()
-            started := starts.pop() ?? panic("a body-stream module lost its declaration check")
-            if started.position != position {
-                panic("a body-stream module took another module's declaration check")
+            // A module whose declaration check was not made up front makes it
+            // itself (sema_check_registration_module_started).
+            if starts.len() > 0 && starts[starts.len() - 1].position == position {
+                bodies.started = starts.pop()
             }
-            bodies.started = Val(started.move())
             sema_check_module_trace_begin_in_shared(shared_state, module_index, phase, trace_sink)
             checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, bodies, threads, phase, trace_sink)
             if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
@@ -1614,12 +1614,9 @@ sema_check_body_stream: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Se
         top_total += tops[s]
         cell: Shared{SemaStreamEnvironment{environments: [SemaScopeEnvironment]{}}}
         environments.push(cell)
-        out_started := [SemaDeclarationCheck]{}
-        if parallel_finish {
-            started := slot_starts[s].pop() ?? panic("a body-stream module lost its declaration check")
-            out_started.push(started.move())
-        }
-        out: Shared{SemaStreamOut{bodies: [SemaClaimedBody]{}, left: 0, ready: false, failed: false, started: out_started.move()}}
+        // A module whose declaration check was not made up front makes it
+        // itself (sema_check_registration_module_started).
+        out: Shared{SemaStreamOut{bodies: [SemaClaimedBody]{}, left: 0, ready: false, failed: false, started: compiler_take_rows<SemaDeclarationCheck>(slot_starts[s])}}
         outs.push(out)
     }
     cells: SemaStreamCells{environments: environments.move(), outs: outs.move(), view_jobs: view_jobs.move()}
