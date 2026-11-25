@@ -309,22 +309,22 @@ SemaTaintFlowState: struct {
     tail_lists: [String]{[String]{}},
     // A fixed value a call carries into an untagged parameter
     // (sema_taint_check_crossing) is looked up by the crossed parameter's
-    // key ("module|owner|name|index|tag"). `crossings` holds the settled
+    // key, the SemaTaintCrossCall it names. `crossings` holds the settled
     // ones: the path on which the callee's body steers on it ("": none),
     // the same whatever walk, program walk order or thread reaches it
     // (sema_taint_crossing_path).
-    crossings: [String:String]{[String:String]{}},
+    crossings: [SemaTaintCrossCall:String]{[SemaTaintCrossCall:String]{}},
     // The keys walked and not yet settled, in walk order (Tarjan's stack
     // over the crossings): each key's position, the call it names and the
     // lowest position its walk reached again; `cross_walks` holds the
     // positions of the walks in progress, innermost last.
-    cross_positions: [String:Int]{[String:Int]{}},
+    cross_positions: [SemaTaintCrossCall:Int]{[SemaTaintCrossCall:Int]{}},
     cross_calls: [SemaTaintCrossCall]{[SemaTaintCrossCall]{}},
     cross_lows: [Int]{[Int]{}},
     cross_walks: [Int]{[Int]{}},
     // While a cycle's keys are walked again (sema_taint_cycle_paths): the
     // path each found in an earlier round, "" for one with none yet.
-    cycle_paths: [String:String]{[String:String]{}},
+    cycle_paths: [SemaTaintCrossCall:String]{[SemaTaintCrossCall:String]{}},
     // Under a crossing walk (sema_taint_crossing_walk): its E0737, E0738
     // and E0739 findings, in walk order and raw, in place of reports; only
     // the walk's path reads them.
@@ -336,7 +336,8 @@ SemaTaintFlowState: struct {
     cross_path: String{""},
 }
 
-// The call a crossing key names (SemaTaintFlowState.cross_calls): its
+// The call a crossing key names, and the key itself: module, owner, callee
+// name, parameter index and tag value (SemaTaintFlowState.cross_calls). Its
 // callee is the first body of that name sema_taint_body_of finds, as every
 // crossing of a call finds it.
 SemaTaintCrossCall: struct {
@@ -2328,9 +2329,9 @@ sema_taint_clause: fn(what: String) -> String Never! {
     "{what.slice(0, 1).lower()}{what.slice(1, what.len())}"
 }
 
-// A crossing's key: "module|owner|name|index|tag".
-sema_taint_cross_key: fn(module_identity: ModuleID, owner: String, name: String, index: Int, tag_value: String) -> String Never! {
-    "{module_identity.id}|{owner}|{name}|{index}|{tag_value}"
+// A crossing's key.
+sema_taint_cross_key: fn(module_identity: ModuleID, owner: String, name: String, index: Int, tag_value: String) -> SemaTaintCrossCall Never! {
+    SemaTaintCrossCall{module_identity: module_identity, owner: owner, name: name, index: index, tag_value: tag_value}
 }
 
 // The path on which `callee` (of `owner`, in module `module_identity`)
