@@ -1345,11 +1345,9 @@ sema_call_core_record_effects: fn(record: CoreCallRecord, span: Span, type_args:
     accepted
 }
 
-sema_call_core_default_expr: fn(default: CoreCallDefault, span: Span) -> Expr Never! {
-    if default == {
-        // `{}` against the parameter's type: every field takes its default.
-        .FieldDefaults -> Expr.StructLit{type_name: "", type_args: [Type]{}, import_ns: None, as_trait: None, fields: [ExprField]{}, inferred: true, span: span, id: AST_NODE_GENERATED}
-    }
+// `{}` against the parameter's type: every field takes its default.
+sema_call_core_field_defaults_expr: fn(span: Span) -> Expr Never! {
+    Expr.StructLit{type_name: "", type_args: [Type]{}, import_ns: None, as_trait: None, fields: [ExprField]{}, inferred: true, span: span, id: AST_NODE_GENERATED}
 }
 
 sema_call_core_inference_parameters: fn(signature: CoreTypedCallSignature, span: Span) -> [SemaInferenceTypeParam] Never! {
@@ -1368,9 +1366,14 @@ sema_call_core_parameter_records: fn(signature: CoreTypedCallSignature, type_arg
     result := [SemaCallParam]{}
     loop (index, parameter) in signature.parameters {
         ty := sema_inference_substitute_type(parameter.ty, names, type_args)
-        default_expr := if parameter.default == {
-            .Val(value) -> Val(sema_call_core_default_expr(value, span))
-            .None -> None
+        default_expr := Expr?{None}
+        default_ref := FunctionDefaultRef?{None}
+        if parameter.default == {
+            .Val(.FieldDefaults) -> default_expr = Val(sema_call_core_field_defaults_expr(span))
+            // The declaration's own default, materialized at the call from its
+            // owning module like a direct call's.
+            .Val(.Declared(reference)) -> default_ref = Val(reference)
+            .None -> {}
         }
         name: if {
             parameter.name != "" -> parameter.name
@@ -1383,7 +1386,7 @@ sema_call_core_parameter_records: fn(signature: CoreTypedCallSignature, type_arg
                 name: name,
                 zone: parameter.zone,
                 default: default_expr,
-                default_ref: None,
+                default_ref: default_ref,
                 convention: parameter.access,
                 ty: Val(ty),
                 variadic: false,
@@ -1443,33 +1446,42 @@ sema_call_core_materialize_authority_boundary: fn(record: CoreCallRecord, index:
     )
 }
 
-// The typed contract of a native Core row: the Core declaration of the same
-// name in the row's module, the wrapper whose body makes that native call
-// (`vault.get`, `net.sendfile`). Its types are resolved as the module sees
-// them. None when the module is not loaded, it declares no such function, or
-// a parameter is optional or a type parameter bounded, which a native call
-// cannot carry.
-sema_call_core_declared_signature: fn(record: CoreCallRecord, span: Span, check: ^SemaBodyCheck) -> CoreTypedCallSignature? {
+// The Core declaration a native Core row's call is checked against: the
+// function of the same name in the row's module, the wrapper whose body makes
+// that native call (`vault.get`, `net.sendfile`). None when the module is not
+// loaded or declares no such function.
+sema_call_core_declared_target: fn(record: CoreCallRecord, span: Span, check: ^SemaBodyCheck) -> SemaCallDirectTarget? {
     identity: sema_call_core_module_identity(check.environment.*, check.program.*, record.module_name) ?? return None
-    target: sema_call_core_source_target(check.environment.*, check.program.*, identity, record.member, [Type]{}, span, true, check.diagnostics) ?? return None
+    sema_call_core_source_target(check.environment.*, check.program.*, identity, record.member, [Type]{}, span, true, check.diagnostics)
+}
+
+// The typed contract `target` declares for a native Core row, its types
+// resolved as the row's module sees them. A defaulted parameter keeps the
+// declaration's default. None when a parameter is variadic or a type
+// parameter bounded, which a native call cannot carry.
+sema_call_core_declared_signature: fn(record: CoreCallRecord, target: SemaCallDirectTarget) -> CoreTypedCallSignature? {
     params: sema_call_params_from_type(target.signature) ?? return None
     parameters := [CoreCallTypedParameter]{}
+    required := 0
     loop param in params {
-        if sema_call_param_optional(param) -> return None
+        if param.variadic -> return None
         ty: param.ty ?? return None
-        parameters.push(CoreCallTypedParameter{name: param.name, label: param.label, zone: param.zone, access: param.convention, ty: ty, default: None})
+        default := CoreCallDefault?{None}
+        if param.default_ref == .Val(reference) {
+            default = Val(CoreCallDefault.Declared(reference))
+        } else { required += 1 }
+        parameters.push(CoreCallTypedParameter{name: param.name, label: param.label, zone: param.zone, access: param.convention, ty: ty, default: default})
     }
     type_parameters := [CoreCallTypeParameter]{}
     loop parameter in target.generic_params {
         if parameter.bounds.len() > 0 -> return None
         type_parameters.push(CoreCallTypeParameter{name: parameter.name})
     }
-    arity: parameters.len()
     Val(CoreTypedCallSignature{
         module_name: record.module_name,
         member: record.member,
-        min_arity: arity,
-        max_arity: arity,
+        min_arity: required,
+        max_arity: parameters.len(),
         parameters: parameters,
         return_type: sema_call_core_native_return(target.signature),
         type_parameters: type_parameters,
@@ -1505,8 +1517,9 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     if canonical_record.module_name == "core.sys" && check.context.unsafe_depth == 0 && sema_call_core_posix_control(canonical_record.member) {
         check.diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `#if #build.target.os` / `#Target(OS.*)`"))
     }
-    table_signature: sema_call_core_typed_signature(canonical_record, args.len(), [Type]{})
-    if table_signature == None && canonical_record.symbol == CoreCallSymbol.SourceOwned {
+    signature_found := sema_call_core_typed_signature(canonical_record, args.len(), [Type]{})
+    from_table: signature_found != None
+    if !from_table && canonical_record.symbol == CoreCallSymbol.SourceOwned {
         // A source-owned row with no fixed table entry is checked against the
         // Core declaration it runs: the function that fills its role, else
         // the one its source target or member names.
@@ -1522,8 +1535,12 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
             }
         }
     }
-    from_table: table_signature != None
-    signature := table_signature ?? sema_call_core_declared_signature(canonical_record, span, check) ?? {
+    declared_target := SemaCallDirectTarget?{None}
+    if !from_table {
+        declared_target = sema_call_core_declared_target(canonical_record, span, check)
+        if declared_target == .Val(target) -> signature_found = sema_call_core_declared_signature(canonical_record, target)
+    }
+    signature := signature_found ?? {
         check.diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no fixed source typed call contract", "fixed Core checking consumes only a complete Source signature", "use the source-owned special checker for a polymorphic Core operation without a fixed row"))
         return None
     }
@@ -1547,8 +1564,18 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         local_args.push(argument.copy())
     }
     shape_params := sema_call_core_parameter_records(signature, [Type]{}, span)
-    binding: sema_call_bind_args("{canonical_record.module_name}.{canonical_record.member}", shape_params, local_args, span, check.diagnostics) ?? return None
+    binding := sema_call_bind_args("{canonical_record.module_name}.{canonical_record.member}", shape_params, local_args, span, check.diagnostics) ?? return None
     resolved_type_args: sema_call_core_infer_type_args(signature, shape_params, binding, source_args, type_args, expected, span, check) ?? return None
+    // A parameter the call leaves unwritten takes the Core declaration's
+    // default, checked in the declaring module like a direct call's.
+    if binding.default_refs.len() > 0 {
+        target: declared_target ?? {
+            check.diagnostics.push(sema_error("E0906", span, "a default argument lost its source reference", "metadata defaults are identified by FunctionDefaultRef", "register the declaration's original default expression"))
+            return None
+        }
+        defaults: sema_call_target_default_values(target, binding, span, check) ?? return None
+        binding = sema_call_materialize_defaults(shape_params, binding, local_args, defaults, span, check.diagnostics) ?? return None
+    }
     params := sema_call_core_parameter_records(signature, resolved_type_args, span)
     {lowered, pins} := sema_call_check_bound_arguments_owned(check, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, local_args, span) ?? return None
     // A `^` argument keeps its Write borrow of the caller's place: a Core leaf
@@ -1570,7 +1597,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     // signature arguments type the result and record the call fact; the
     // native kernel takes no inferred generic.
     fallibility := sema_expression_failure_carrier(result_type)
-    if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, [FunctionDefaultRef]{}, check) {
+    if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, binding.default_refs, check) {
         return None
     }
     value: sema_call_core_tree(canonical_record, values, span, type_args, loop _ in values -> false, result_type, fallibility, None, check) ?? return None
