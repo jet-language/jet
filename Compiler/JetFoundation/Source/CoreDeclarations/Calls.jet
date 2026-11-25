@@ -564,11 +564,6 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             "sleep" | "sleep_until" -> Val("Time.Wait")
             else -> None
         }
-        // A timer's deadline is a monotonic clock read, the waiting leaf.
-        "core.tasks" -> if member == {
-            "yield_now" | "after" -> Val("Time.Wait")
-            else -> None
-        }
         "core.files" -> if member == {
             "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__list_directory" | "__directory_fd" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
             // #3593 provider leaves behind Core/Files/files.jet.

@@ -19,8 +19,8 @@ ir_event_row: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Int Never! {
     ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, tid, "jet_rt_handle_drop_jet_event", "jet_rt_handle_clone_jet_event"))
 }
 
-// `core.event.__event_with_policy<T>(policy)`: the provider borrows the
-// policy, which is released here when consumed.
+// core.event's `event_make<T>(policy)` (Build.jet IR_CORE_INTRINSICS): the
+// provider borrows the policy, which is released here when consumed.
 ir_event_with_policy: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     if !ir_event_type(result_ty) {
         return ir_fail_slot(b, span, "Event.with_policy producing {ir_type_name(result_ty)}")
@@ -228,7 +228,7 @@ ir_event_family_row: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Int? Never! {
     None
 }
 
-// `core.event.__hook_new<T, R>(fallback)`: the hook takes over the moved
+// core.event's `hook_make<T, R>(fallback)`: the hook takes over the moved
 // fallback under R's descriptor.
 ir_hook_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "Hook.new with {args.len()} arguments")
@@ -255,7 +255,7 @@ ir_hook_make: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, fal
     hook
 }
 
-// `core.event.__decision_hook_new<T, E>(policy)`.
+// core.event's `decision_hook_make<T, E>(policy)`.
 ir_decision_hook_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 {
         return ir_fail_slot(b, span, "DecisionHook.new with {args.len()} arguments")
@@ -309,27 +309,13 @@ ir_point_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definition: TConstan
     ir_fail_slot(b, span, "point of {ir_type_name(definition.ty)}")
 }
 
-ir_event_ok_type: fn(ty: Type) -> Type? Never! {
-    if ir_untag(ty) == .Result(ok_ty, _) -> return Val(ok_ty.copy())
-    None
-}
-
-// `core.event.__async_new<T, E>(policy, failures)`: the source validated the
-// capacity, so the provider's event is always the Ok payload
-// (ir_async_event_make).
-ir_async_event_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
-    event_ty: ir_event_ok_type(result_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(result_ty)}")
-    event: ir_async_event_make(m, p, b, event_ty, args, span)
-    if ir_failed(b) || event < 0 -> return -1
-    ir_result_box(m, p, b, result_ty, true, event)
-}
-
-// An AsyncEvent<T, E> of type `event_ty` under `policy` and `failures`
-// (`args`), whose capacity the source validated; the policy record is
-// borrowed and released here when consumed. The provider keeps E's
-// descriptor and the handler result's (`Result<Unit, E>`): it reads each
-// handler's Ok or Err and keeps an Err's E for its DispatchReport.
-ir_async_event_make: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, event_ty: Type, args: [Int], span: Span) -> Int Never! {
+// core.event's `async_event_make<T, E>(policy, failures)`: an
+// AsyncEvent<T, E> of type `event_ty`, whose capacity the source validated;
+// the policy record is borrowed and released here when consumed. The
+// provider keeps E's descriptor and the handler result's
+// (`Result<Unit, E>`): it reads each handler's Ok or Err and keeps an Err's
+// E for its DispatchReport.
+ir_async_event_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, event_ty: Type, args: [Int], span: Span) -> Int Never! {
     row: ir_event_family_row(m, p, event_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(event_ty)}")
     if args.len() != 2 -> return ir_fail_slot(b, span, "AsyncEvent.new with {args.len()} arguments")
     failure_ty := ir_type_args(ir_untag(event_ty))[1].copy()
