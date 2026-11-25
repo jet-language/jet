@@ -50,6 +50,8 @@ extern int64_t jet_net_nodelay(Stream *, bool *, Error **);
 extern int64_t jet_net_set_nodelay(Stream *, bool, Error **);
 extern int64_t jet_net_ttl(Stream *, int64_t *, Error **);
 extern int64_t jet_net_set_ttl(Stream *, int64_t, Error **);
+extern int64_t jet_int_owned_from_i64(int64_t);
+extern void jet_rt_int_drop(int64_t);
 typedef struct { int64_t readable, writable; } Ready;
 extern void jet_rt_free(void *, int64_t, int64_t);
 extern void jet_rt_handle_drop_jet_net_ready(Ready *);
@@ -230,7 +232,10 @@ int main(void) {
     assert(jet_net_set_write_timeout(stream, 11, &error) == 1 && stream->read_ms == 9 && stream->write_ms == 11);
     assert(jet_net_set_timeout(stream, -1, &error) == 0);
     failure(&error, 0, "set tcp timeout", "network timeout must be non-negative");
-    assert(jet_net_set_ttl(stream, INT64_MAX, &error) == 0);
+    // The binding lends the ttl as its exact-Int carrier; I64.MAX is a boxed one.
+    int64_t wide_ttl = jet_int_owned_from_i64(INT64_MAX);
+    assert(jet_net_set_ttl(stream, wide_ttl, &error) == 0);
+    jet_rt_int_drop(wide_ttl);
     failure(&error, 0, "set tcp ttl", "ttl must fit u32");
     jet_socket_stream_mark_closed_raw(stream);
     assert(jet_net_nodelay(stream, &flag.value, &error) == 0);
