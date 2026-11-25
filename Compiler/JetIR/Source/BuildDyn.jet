@@ -8,7 +8,7 @@
 // `decode<T>()` calls T's Decode implementation, a container's Core decode
 // helper or the runtime's scalar Decode adapter, whose String Decode reads a
 // native Text in place.
-use jet_foundation.[Span, TBuiltinOp, BodyCallArg, Measure, NodeKind, BodyHandleOp, TPanicLoc, Type, checked_generated_local, checked_user_local, measure_literal_value, module_is_core, StmtKind]
+use jet_foundation.[Span, TBuiltinOp, BodyCallArg, Measure, NodeKind, BodyHandleOp, TPanicLoc, Type, CORE_ROLE_TYPED_DECODE_READ, checked_generated_local, checked_user_local, measure_literal_value, module_is_core, StmtKind]
 
 // The lowering of `receiver.operation(args)` when the receiver is the
 // canonical Dyn and the operation is one of the tree methods here; None
@@ -1030,24 +1030,19 @@ ir_codec_method_args: fn(p: IRProgram, function: FnBody, concrete: Type) -> [Typ
     Val(args)
 }
 
-// The read a `__Decoding.read<Target, Source>` call lowers to: the target's
-// own read (a derived streaming `__read`), else the `__Decoding` read of a
-// list (not bytes), option, String-keyed map, Int, Bool, Float or String,
-// each with its arguments and then Source. None for another call, and for
-// any other target, which takes the reference body: the value's captured
-// tree, decoded.
+// The read a call of the method filling TypedDecodeRead (`read<Target,
+// Source>`) lowers to: the target's own read (a derived streaming `__read`),
+// else the sibling read (ir_decoding_reads) of a list (not bytes), option,
+// String-keyed map, Int, Bool, Float or String, each with its arguments and
+// then Source. None for another call, and for any other target, which takes
+// the reference body: the value's captured tree, decoded.
 ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> {key: String, args: [Type]}? Never! {
-    if function.name != "read" || type_args.len() != 2 || !function.key.ends_with("read") {
+    if function.role != CORE_ROLE_TYPED_DECODE_READ || type_args.len() != 2 || !function.key.ends_with(function.name) {
         return None
     }
     if !module_is_core(function.module_identity) {
         return None
     }
-    owner: if function.kind == {
-        .Method(_, owner_type) -> ir_nominal_name(ir_untag(owner_type)) ?? ""
-        .TopLevel | .TraitMethod(_, _, _, _, _) -> ""
-    }
-    if ir_short_name(owner) != "__Decoding" -> return None
     target: type_args[0]
     source: type_args[1]
     if ir_codec_impl(p, target, "Decode", "__read") == .Val(own) {
@@ -1086,5 +1081,5 @@ ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> {key:
     }
     if helper == "" -> return None
     args.push(source.copy())
-    Val({key: "{function.key.slice(0, function.key.len() - 4)}{helper}", args: args})
+    Val({key: "{function.key.slice(0, function.key.len() - function.name.len())}{helper}", args: args})
 }

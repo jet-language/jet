@@ -110,6 +110,12 @@
 // `vault.KeyUnlock.Recipient(identity)` and `.Passphrase(secret)` call the
 // core.crypto functions filling VaultUnlockRecipient and
 // VaultUnlockPassphrase.
+// Three core.encoding declarations a `#Codable` type's generated decode
+// names fill roles: its streaming body reads members from the trait filling
+// TypedDecodeSource, one member at a time through the method filling
+// TypedDecodeRead, and reads a Dyn tree through the constructor filling
+// TypedDecodeTree. The compiler reads their names from those markers in
+// Core/Encoding/Encoding.jet while it builds.
 // The core.mem and
 // core.math operations the compiler builds inline at each call, never as a
 // call (a raw List's capacity, a pointer step, a block copy, a bit copy and
@@ -226,6 +232,9 @@ RoleKind: enum {
     DecodeBytes,
     DecodeOption,
     DecodeMap,
+    TypedDecodeSource,
+    TypedDecodeRead,
+    TypedDecodeTree,
     JSONTypedDecode,
     InputJson,
     TOMLTypedDecode,
@@ -452,12 +461,13 @@ RoleKind: enum {
 }
 // END GENERATED
 
-// `#Builtin.Role(.X)` on a Core function makes it the one that fills role X.
+// `#Builtin.Role(.X)` on a Core function, method or trait makes it the one
+// that fills role X.
 Role: struct {
     kind: RoleKind,
 
     impl Marker {
-        sites: [.Function],
+        sites: [.Function, .Method, .Trait],
     }
 }
 

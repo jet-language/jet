@@ -195,6 +195,7 @@ use {
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
         AUTHORITY_PANIC_ROOT,
+        CORE_ROLE_TYPED_DECODE_READ,
         build_debug_keep_sources,
         authority_expert_only,
         effect_scope_read_paths,
@@ -5051,8 +5052,8 @@ jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID]
 // source, and a debugger's evaluation in a Core frame, whose expression is
 // a function appended to that unit that no body calls), which lowering roots
 // whole, the methods lowering selects by owner type
-// (ir_core_method_lowered_by_owner) and the `__Decoding` reads it selects by
-// target (ir_core_decoding_read).
+// (ir_core_method_lowered_by_owner) and the sibling reads it selects by the
+// target of the TypedDecodeRead read (ir_core_decoding_read).
 jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bool]) -> NameTable Never! {
     roots := name_table_sized(256)
     loop module_row in graph.modules {
@@ -5071,8 +5072,12 @@ jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bo
             }
         }
         loop nominal in module_row.nominals {
+            fills_read := false
             loop method in nominal.methods {
-                if ir_core_method_lowered_by_owner(method.declaration.name) || ir_core_decoding_read(identity_text, nominal.symbol.name, method.declaration.name) {
+                if sema_core_role(method.declaration.markers, graph, identity) == CORE_ROLE_TYPED_DECODE_READ -> fills_read = true
+            }
+            loop method in nominal.methods {
+                if ir_core_method_lowered_by_owner(method.declaration.name) || ir_core_decoding_read(fills_read, method.declaration.name) {
                     _ := name_intern(roots, symbol_table_key(graph.symbols, method.symbol.id))
                 }
             }

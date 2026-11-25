@@ -2258,8 +2258,8 @@ sema_type_graph_scan_type_owners: fn(graph: SemaRegistrationGraph, caller_index:
         if nominal.kind != SemaRegistrationNominalKind.Struct && nominal.kind != SemaRegistrationNominalKind.Enum && nominal.kind != SemaRegistrationNominalKind.Distinct && nominal.kind != SemaRegistrationNominalKind.TypeAlias && (nominal.kind != SemaRegistrationNominalKind.Trait || (module_is_core(owner_row.module_identity) && !core_root_type(name))) {
             // A trait in type position (`CompilerTraceSink?`) is a type too: a signature from
             // another package spells it bare where the caller holds its owner-qualified name.
-            // A Core root trait (`__DecodeSource`, the source a generated decode reads) is
-            // seen bare wherever Core is loaded, as a Core root value type is.
+            // A Core root trait (the TypedDecodeSource filler, the source a generated
+            // decode reads) is seen bare wherever Core is loaded, as a Core root value type is.
             next
         }
         if !sema_registration_visible(nominal.symbol.visibility, graph.modules[caller_index].module_identity, graph.modules[caller_index].package_identity, owner_row.module_identity, owner_row.package_identity) {

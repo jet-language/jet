@@ -385,7 +385,121 @@ core_module_for_alias: fn(name: String) -> String? {
     None
 }
 
-core_root_type: fn(name: String) -> Bool Never! { CORE_ROOT_TYPES.contains(name) }
+// Whether `name` is seen bare wherever Core is loaded: a Core root value type
+// (Core.rows `root_types`), or the owner of a typed-decode role
+// (CORE_TYPED_DECODE_ROLES), which the decode bodies generated for a
+// `#Codable` type name in the type's own module.
+core_root_type: fn(name: String) -> Bool Never! {
+    if CORE_ROOT_TYPES.contains(name) -> return true
+    loop row in CORE_TYPED_DECODE_ROLES {
+        if row.owner == name -> return true
+    }
+    false
+}
+
+// The jet_builtins roles (Core/Builtins/Builtins.jet RoleKind) of the
+// core.encoding declarations a generated decode names: the trait a streaming
+// `__read` reads from, the read of one value at a source's cursor, and the
+// constructor of a Dyn tree's source.
+CORE_ROLE_TYPED_DECODE_SOURCE: "TypedDecodeSource"
+
+CORE_ROLE_TYPED_DECODE_READ: "TypedDecodeRead"
+
+CORE_ROLE_TYPED_DECODE_TREE: "TypedDecodeTree"
+
+// A Core declaration that fills a role, as a generated body spells it: the
+// trait or type `owner` and, for a method, its name `member` ("" for the
+// trait or type itself).
+CoreRoleSpelling: struct {
+    role: String,
+    owner: String,
+    member: String,
+}
+
+// The typed-decode roles' declarations, read from the `#Builtin.Role(.X)`
+// markers of Core/Encoding/Encoding.jet while the compiler builds, so the
+// compiler spells only the roles. A role nothing there fills stops the build.
+CORE_TYPED_DECODE_ROLES: #run core_role_spellings(embed_file("toolchain:Core/Encoding/Encoding.jet"), [String]{CORE_ROLE_TYPED_DECODE_SOURCE, CORE_ROLE_TYPED_DECODE_READ, CORE_ROLE_TYPED_DECODE_TREE})
+
+// The trait or type that holds the declaration filling `role`, one of
+// CORE_TYPED_DECODE_ROLES' roles.
+core_role_owner: fn(role: String) -> String Never! {
+    loop row in CORE_TYPED_DECODE_ROLES {
+        if row.role == role -> return "{row.owner}"
+    }
+    ""
+}
+
+// The method that fills `role`, one of CORE_TYPED_DECODE_ROLES' roles; ""
+// when the trait or type itself fills it.
+core_role_member: fn(role: String) -> String Never! {
+    loop row in CORE_TYPED_DECODE_ROLES {
+        if row.role == role -> return "{row.member}"
+    }
+    ""
+}
+
+// A jet_builtins role marker at the start of a declaration line.
+CORE_ROLE_MARKER: "#Builtin.Role(."
+
+// The declarations of `source` whose `#Builtin.Role(.X)` marker names one of
+// `roles`, as a generated body spells them: a trait's or type's marker
+// starts its declaration line at the margin, and a method's starts its
+// indented line inside the block of the type declared last at the margin.
+// A role of `roles` that no declaration fills stops the build.
+core_role_spellings: fn(source: String, roles: [String]) -> [CoreRoleSpelling] Never! {
+    found := [CoreRoleSpelling]{}
+    owner := ""
+    loop line in source.split("\n") {
+        indented: line.starts_with(" ")
+        pair: line.trim_start().split_once(": ") ?? next
+        declared: core_role_declaration(pair.before, pair.after)
+        if !indented && declared.name != "" -> owner = "{declared.name}"
+        if declared.role == "" || declared.name == "" || !roles.contains(declared.role) -> next
+        spelling: if {
+            indented -> CoreRoleSpelling{role: declared.role, owner: "{owner}", member: declared.name}
+            else -> CoreRoleSpelling{role: declared.role, owner: declared.name, member: ""}
+        }
+        found.push(spelling)
+    }
+    loop role in roles {
+        if !core_role_spelled(found, role) {
+            build_time_refused("Core/Encoding/Encoding.jet marks no declaration with `#Builtin.Role(.{role})`, which the decode bodies generated for a `#Codable` type name")
+        }
+    }
+    found
+}
+
+// The role and the name of a declaration line split at its first `: `, `head`
+// before it (`#Builtin.Role(.X) priv Name`, `read`) and `kind` after it
+// (`trait {`, `fn<…`). The role is "" when no role marker starts the line,
+// and the name "" when the line declares no function, method, trait or type.
+core_role_declaration: fn(head: String, kind: String) -> {role: String, name: String} Never! {
+    if !kind.starts_with("fn") && !kind.starts_with("trait") && !kind.starts_with("struct") && !kind.starts_with("enum") {
+        return {role: "", name: ""}
+    }
+    if head.starts_with(CORE_ROLE_MARKER) {
+        marked: head.removeprefix(CORE_ROLE_MARKER).split_once(") ") ?? return {role: "", name: ""}
+        return {role: "{marked.before}", name: core_role_declared_name(marked.after)}
+    }
+    {role: "", name: core_role_declared_name(head)}
+}
+
+// The name `declared` declares (`priv Name`, `read`), or "" when it is no
+// name.
+core_role_declared_name: fn(declared: String) -> String Never! {
+    name: declared.removeprefix("priv ").removeprefix("pub ")
+    if name == "" || name.contains(" ") || name.starts_with("#") || name.starts_with("/") -> return ""
+    "{name}"
+}
+
+// Whether `found` holds a declaration filling `role`.
+core_role_spelled: fn(found: [CoreRoleSpelling], role: String) -> Bool Never! {
+    loop row in found {
+        if row.role == role -> return true
+    }
+    false
+}
 
 // Private semantic routes belong to an exact source declaration, never a
 // short nominal spelling. They do not add public trait implementations.

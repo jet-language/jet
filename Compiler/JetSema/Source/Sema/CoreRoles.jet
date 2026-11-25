@@ -1,7 +1,7 @@
-// The roles a Core function fills. `#Builtin.Role(.AbsF32)`, jet_builtins'
-// Role marker, makes the function it marks the one that fills role `AbsF32`.
-// Lowering then finds that function through its role (FnBody.role and JetIR
-// ir_core_role_row), never through its name.
+// The roles Core declarations fill. `#Builtin.Role(.AbsF32)`, jet_builtins'
+// Role marker, makes the function, method or trait it marks the one that
+// fills role `AbsF32`. Lowering then finds that declaration through its role
+// (FnBody.role and JetIR ir_core_role_row), never through its name.
 use jet_foundation.[CORE_BUILTINS_MODULE, Diagnostic, Marker, ModuleID, Span, module_is_core, owned_trait_for_role]
 
 // The jet_builtins marker that gives a Core function its role.
@@ -140,11 +140,11 @@ sema_core_role_case: fn(graph: SemaRegistrationGraph, kind: SemaCoreRoleKind, ro
     None
 }
 
-// Each role is filled at most once: a Core function that fills a role an
-// earlier one, or a compiler-owned trait (OWNED_TRAITS `role`, the
-// `#Builtin.Role(.X)` of Compiler/Prelude/Traits.jet), already fills is
-// E1014, at its name. Gives the roles the owned traits and the loaded Core
-// functions fill, for sema_core_roles_check_filled.
+// Each role is filled at most once: a Core function, method or trait that
+// fills a role an earlier one, or a compiler-owned trait (OWNED_TRAITS
+// `role`, the `#Builtin.Role(.X)` of Compiler/Prelude/Traits.jet), already
+// fills is E1014, at its name. Gives the roles the owned traits and the
+// loaded Core declarations fill, for sema_core_roles_check_filled.
 sema_core_roles_check: fn(graph: ^SemaRegistrationGraph) -> SemaCoreRoleFill {
     kind: sema_core_role_kind(graph) ?? return SemaCoreRoleFill{kind: None, fillers: [String]{}}
     fillers := [String]{}
@@ -158,11 +158,19 @@ sema_core_roles_check: fn(graph: ^SemaRegistrationGraph) -> SemaCoreRoleFill {
             if function.declaration.markers.len() == 0 -> next
             role: sema_core_role(function.declaration.markers, graph, module_row.module_identity)
             if role == "" -> next
-            slot: sema_core_role_case(graph, kind, role) ?? next
-            if {
-                fillers[slot] == "" -> fillers[slot] = function.declaration.name
-                else -> {
-                    problems.push(SemaCoreRoleProblem{module_index: module_index, diagnostic: sema_duplicate_core_role(function.declaration.name, role, fillers[slot], function.declaration.name_span)})
+            sema_core_role_record(graph, kind, role, function.declaration.name, function.declaration.name_span, module_index, fillers, problems)
+        }
+        loop nominal in module_row.nominals {
+            loop method in nominal.methods {
+                if method.declaration.markers.len() == 0 -> next
+                role: sema_core_role(method.declaration.markers, graph, module_row.module_identity)
+                if role == "" -> next
+                sema_core_role_record(graph, kind, role, "{nominal.symbol.name}.{method.declaration.name}", method.declaration.name_span, module_index, fillers, problems)
+            }
+            if nominal.source == .SourceAST(item) {
+                if item == .Trait(definition) {
+                    role: sema_core_role(definition.markers, graph, module_row.module_identity)
+                    if role != "" -> sema_core_role_record(graph, kind, role, definition.name, definition.name_span, module_index, fillers, problems)
                 }
             }
         }
@@ -171,6 +179,16 @@ sema_core_roles_check: fn(graph: ^SemaRegistrationGraph) -> SemaCoreRoleFill {
         sema_registration_push_graph_diagnostic(graph, problem.module_index, problem.diagnostic)
     }
     SemaCoreRoleFill{kind: kind, fillers: fillers}
+}
+
+// `name`, at `span` in module row `module_index`, fills `role`: the role's
+// first filler, else E1014.
+sema_core_role_record: fn(graph: SemaRegistrationGraph, kind: SemaCoreRoleKind, role: String, name: String, span: Span, module_index: Int, fillers: ^[String], problems: ^[SemaCoreRoleProblem]) {
+    slot: sema_core_role_case(graph, kind, role) ?? return
+    if {
+        fillers[slot] == "" -> fillers[slot] = name
+        else -> problems.push(SemaCoreRoleProblem{module_index: module_index, diagnostic: sema_duplicate_core_role(name, role, fillers[slot], span)})
+    }
 }
 
 // The compiler-owned trait that fills `role`, or "" when none does.

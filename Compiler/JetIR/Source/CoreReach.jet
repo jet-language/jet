@@ -26,7 +26,6 @@ use {
         compiler_threads_partition,
         compiler_transfer_rows,
         TTryConvert,
-        core_identity_in_module,
         foundation_byte_text,
     ]
     jet_foundation.[DeclTable, Interner, ModuleID, NameTable, Span, SymbolTable, Type, TypeID, decl_table_find, decl_table_key, interner_empty, module_is_core, name_column, name_column_set_first, name_column_table, name_count, name_find, name_index, name_intern, name_table_sized, symbol_key, type_syntax]
@@ -43,8 +42,8 @@ ir_core_reach_is_top_level: fn(kind: TFuncKind) -> Bool Never! {
 // `encode`/`decode`/`__read`/`encode_stored`/`decode_stored` method. Sema
 // checks one only when a codec requirement demands it, and its callers reach
 // it through an owner-type lookup during instance lowering (`value.encode()`
-// inside `json.to_string<T>`, `__Decoding.read<T, …>`), never by a key in a
-// body, so a checked one is rooted.
+// inside `json.to_string<T>`, the TypedDecodeRead `read<T, …>`), never by a
+// key in a body, so a checked one is rooted.
 ir_core_reach_generated_codec: fn(function: FnBody) -> Bool Never! {
     function.synthetic && !ir_core_reach_is_top_level(function.kind) && (function.name == "encode" || function.name == "decode" || function.name == "__read" || function.name == "encode_stored" || function.name == "decode_stored")
 }
@@ -108,20 +107,18 @@ ir_core_method_lowered_by_owner: fn(name: String) -> Bool Never! {
     name == "display" || name == "show" || name == "debug" || name == "compare" || name == "close" || name == "read_line" || name == "next" || ir_print_style_method(name)
 }
 
-// The `__Decoding` reads of core.encoding that lowering selects
-// by a `__Decoding.read` call's target (BuildDyn.jet ir_decoding_read), with
-// no keyed call in a checked body. A compile that lowers checks each up front
+// The sibling reads of core.encoding's TypedDecodeRead read that lowering
+// selects by that read's target (BuildDyn.jet ir_decoding_read), with no
+// keyed call in a checked body. A compile that lowers checks each up front
 // under Core demand (driver jet_driver_core_lowering_roots).
 ir_decoding_reads: fn() -> [String] Never! {
     [String]{"read_list", "read_option", "read_map", "read_int", "read_bool", "read_float", "read_string"}
 }
 
-// Whether method `name` of Core nominal `owner` in module `module_identity`
-// is one of those reads.
-ir_core_decoding_read: fn(module_identity: String, owner: String, name: String) -> Bool Never! {
-    if owner != "__Decoding" || !core_identity_in_module(module_identity, "core.encoding") {
-        return false
-    }
+// Whether method `name` of a Core nominal is one of those reads; `fills_read`
+// says whether the nominal holds the method filling TypedDecodeRead.
+ir_core_decoding_read: fn(fills_read: Bool, name: String) -> Bool Never! {
+    if !fills_read -> return false
     loop read in ir_decoding_reads() {
         if read == name -> return true
     }

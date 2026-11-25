@@ -16,6 +16,9 @@
 use jet_foundation.[
     symbol_table_key,
     AST_NODE_GENERATED,
+    CORE_ROLE_TYPED_DECODE_READ,
+    CORE_ROLE_TYPED_DECODE_SOURCE,
+    CORE_ROLE_TYPED_DECODE_TREE,
     AccessConvention,
     BinOp,
     Call,
@@ -69,6 +72,8 @@ use jet_foundation.[
     codable_tag_field,
     codable_untagged,
     compiler_take_rows,
+    core_role_member,
+    core_role_owner,
     expr_span,
     owned_trait_codec,
     type_name,
@@ -430,12 +435,12 @@ sema_serde_items_struct_encode: fn(definition: StructDef, span: Span) -> Item Ne
 }
 
 // A struct with no `#Codable(.Flatten)` field, no `#Secret` field and no
-// migration chain reads its members from a `__DecodeSource` in document order
-// (`__read`), and its `decode(tree)` reads the tree through the same body. Any
-// other struct and every enum decode from the value's tree, which
-// `__Decoding.read` captures for them; a `#Secret` field's struct holds its
-// `decode_stored` body where a streaming one holds its `__read`
-// (SemaSerdeCodecBody).
+// migration chain reads its members in document order from a source, the
+// core.encoding trait filling the TypedDecodeSource role (`__read`), and its
+// `decode(tree)` reads the tree through the same body. Any other struct and
+// every enum decode from the value's tree, which the TypedDecodeRead read
+// captures for them; a `#Secret` field's struct holds its `decode_stored`
+// body where a streaming one holds its `__read` (SemaSerdeCodecBody).
 sema_serde_items_struct_streams: fn(definition: StructDef, items: [Item]) -> Bool Never! {
     loop field in definition.fields {
         if field.computed == None && (sema_serde_items_flattens(field) || sema_serde_items_secret(field)) {
@@ -459,13 +464,13 @@ sema_serde_items_struct_decode: fn(definition: StructDef, items: [Item], span: S
     sema_serde_items_impl(definition.name, "Decode", methods, definition.is_pub, definition.is_package_pub, span)
 }
 
-// `__read<__Source: __DecodeSource>(jet_serde_reader: &__Source) -> Target
-// [FieldError]!`, after the codec's own parameters. Its span is one past the
-// decode method's: the function memory plan keys a method by (module,
-// owner, span).
+// `__read<__Source: Source>(jet_serde_reader: &__Source) -> Target
+// [FieldError]!`, after the codec's own parameters, where `Source` is the
+// trait filling TypedDecodeSource. Its span is one past the decode method's:
+// the function memory plan keys a method by (module, owner, span).
 sema_serde_items_read_method: fn(params: [TypeParam], target: Type, span: Span) -> Func Never! {
     read_params := params.copy()
-    read_params.push(TypeParam{name: SEMA_SERDE_SOURCE, name_span: span, bounds: [String]{"__DecodeSource"}, prep: None})
+    read_params.push(TypeParam{name: SEMA_SERDE_SOURCE, name_span: span, bounds: [String]{core_role_owner(CORE_ROLE_TYPED_DECODE_SOURCE)}, prep: None})
     reader := sema_serde_items_param(SEMA_SERDE_READER, Type.Named{name: SEMA_SERDE_SOURCE}, span)
     reader.convention = AccessConvention.Write
     sema_serde_items_method("__read", read_params, [Param]{reader}, sema_data_result(target, sema_data_decode_error()), Span{start: span.end + 1, end: span.end + 1})
@@ -511,7 +516,7 @@ sema_serde_items_enum_decode: fn(definition: EnumDef, encode: Bool, decode: Bool
 }
 
 // An externally tagged enum (no tag key, not untagged) whose variants with
-// a payload have distinct wire keys reads from a `__DecodeSource` (`__read`,
+// a payload have distinct wire keys reads from a source (`__read`,
 // sema_serde_items_enum_read_body); its `decode(tree)` keeps the tree body.
 sema_serde_items_enum_streams: fn(definition: EnumDef) -> Bool Never! {
     if sema_serde_items_enum_tag(definition) != None || sema_serde_items_untagged(definition) {
@@ -566,25 +571,27 @@ sema_serde_items_distinct_body: fn(definition: DistinctDef, encode: Bool, span: 
 
 sema_serde_items_decode_span: fn(span: Span) -> Span Never! { Span{start: span.end, end: span.end} }
 
-// `__Decoding.read<ty, __Source>(jet_serde_reader)`: the read method's
-// decode of one value at its reader's cursor.
+// `Owner.read<ty, __Source>(jet_serde_reader)`, the read filling
+// TypedDecodeRead: the read method's decode of one value at its reader's
+// cursor.
 sema_serde_items_reader_read: fn(ty: Type, span: Span) -> Expr Never! {
     reader: sema_serde_items_arg(sema_serde_items_ident(SEMA_SERDE_READER, span), span)
-    Expr.MethodCall{receiver: sema_serde_items_ident("__Decoding", span), method: "read", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{ty.copy(), Type.Named{name: SEMA_SERDE_SOURCE}}, args: [CallArg]{reader}, id: AST_NODE_GENERATED}
+    Expr.MethodCall{receiver: sema_serde_items_ident(core_role_owner(CORE_ROLE_TYPED_DECODE_READ), span), method: core_role_member(CORE_ROLE_TYPED_DECODE_READ), method_span: span, owner_type_args: [Type]{}, type_args: [Type]{ty.copy(), Type.Named{name: SEMA_SERDE_SOURCE}}, args: [CallArg]{reader}, id: AST_NODE_GENERATED}
 }
 
 // A streaming type's `decode(tree)`: its own read over the tree
-// (`Name.__read<…, __DecodeTree>`), so the tree and every other source share
-// one body. It names `__read` itself, not `__Decoding.read`, whose body
-// decodes a captured tree: only lowering selects a type's own read there.
+// (`Name.__read<…, Tree>(Tree.new(tree))`, where `Tree.new` fills
+// TypedDecodeTree), so the tree and every other source share one body. It
+// names `__read` itself, not the TypedDecodeRead read, whose body decodes a
+// captured tree: only lowering selects a type's own read there.
 // A generated body keeps its callees' Result carriers, so the read's carrier
 // is bound with its own type and returned as-is.
 sema_serde_items_tree_read_body: fn(name: String, type_params: [TypeParam], span: Span) -> [Stmt] Never! {
     tree_reader: "jet_serde_tree_reader"
     read_name: "jet_serde_tree_read"
-    open: sema_serde_items_method_call(sema_serde_items_ident("__DecodeTree", span), "new", [Expr]{sema_serde_items_ident("tree", span)}, span)
+    open: sema_serde_items_method_call(sema_serde_items_ident(core_role_owner(CORE_ROLE_TYPED_DECODE_TREE), span), core_role_member(CORE_ROLE_TYPED_DECODE_TREE), [Expr]{sema_serde_items_ident("tree", span)}, span)
     type_args := sema_serde_items_type_args(type_params)
-    type_args.push(Type.Named{name: "__DecodeTree"})
+    type_args.push(Type.Named{name: core_role_owner(CORE_ROLE_TYPED_DECODE_TREE)})
     read: Expr.MethodCall{receiver: sema_serde_items_ident(name, span), method: "__read", method_span: span, owner_type_args: [Type]{}, type_args: type_args, args: [CallArg]{sema_serde_items_arg(sema_serde_items_ident(tree_reader, span), span)}, id: AST_NODE_GENERATED}
     read_type: sema_data_result(sema_serde_items_target_type(name, type_params), sema_data_decode_error())
     [Stmt]{
