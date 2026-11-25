@@ -147,6 +147,66 @@ fs_lock_sleep: fn(nanos: I64) {
     }
 }
 
+// The jet.runtime.files lock leaves (Public/Files.jet). Each runs the
+// record export above and writes the record's words into the caller's tuple
+// words, a Bool field one byte and an Int field one exact Int word, then
+// frees the record. A record is 0 only when an argument stopped the call,
+// which writes nothing.
+fs_lock_out_int: fn(record: I64, at: I64, out: I64) {
+    rt_text_store(out, jet_int_owned_from_i64(rt_text_word(wrapping(record + at))))
+}
+
+fs_lock_out_flag: fn(record: I64, at: I64, out: I64) {
+    rt_text_put(out, rt_text_word(wrapping(record + at)))
+}
+
+fs_lock_call_out: fn(call: I64, value: I64, errno: I64, platform: I64) {
+    if (call == I64{0}) { return }
+    fs_lock_out_int(call, I64{0}, value)
+    fs_lock_out_int(call, I64{8}, errno)
+    fs_lock_out_int(call, I64{16}, platform)
+    jet_rt_free(call, I64{24}, I64{8})
+}
+
+fs_lock_identity_out: fn(identity: I64, device: I64, low: I64, high: I64, regular: I64, reparse: I64, errno: I64, platform: I64) {
+    if (identity == I64{0}) { return }
+    fs_lock_out_int(identity, I64{0}, device)
+    fs_lock_out_int(identity, I64{8}, low)
+    fs_lock_out_int(identity, I64{16}, high)
+    fs_lock_out_flag(identity, I64{24}, regular)
+    fs_lock_out_flag(identity, I64{32}, reparse)
+    fs_lock_out_int(identity, I64{40}, errno)
+    fs_lock_out_int(identity, I64{48}, platform)
+    jet_rt_free(identity, I64{56}, I64{8})
+}
+
+#Export(c) jet_fs_lock_open: fn(path: I64, value: I64, errno: I64, platform: I64) {
+    fs_lock_call_out(jet_fs_lock_open_raw(path), value, errno, platform)
+}
+
+#Export(c) jet_fs_lock_try: fn(fd: I64, value: I64, errno: I64, platform: I64) {
+    fs_lock_call_out(jet_fs_lock_try_raw(fd), value, errno, platform)
+}
+
+#Export(c) jet_fs_lock_wait: fn(fd: I64, timeout_ns: I64, bounded: Bool, carried_ns: I64, acquired: I64, timed_out: I64, errno: I64, platform: I64, deadline_ns: I64) {
+    wait: jet_fs_lock_wait_raw(fd, timeout_ns, bounded, carried_ns)
+    if (wait == I64{0}) { return }
+    fs_lock_out_flag(wait, I64{0}, acquired)
+    fs_lock_out_flag(wait, I64{8}, timed_out)
+    fs_lock_out_int(wait, I64{16}, errno)
+    fs_lock_out_int(wait, I64{24}, platform)
+    fs_lock_out_int(wait, I64{32}, deadline_ns)
+    jet_rt_free(wait, I64{40}, I64{8})
+}
+
+#Export(c) jet_fs_lock_fd_identity: fn(fd: I64, device: I64, low: I64, high: I64, regular: I64, reparse: I64, errno: I64, platform: I64) {
+    fs_lock_identity_out(jet_fs_lock_fd_identity_raw(fd), device, low, high, regular, reparse, errno, platform)
+}
+
+#Export(c) jet_fs_lock_path_identity: fn(path: I64, device: I64, low: I64, high: I64, regular: I64, reparse: I64, errno: I64, platform: I64) {
+    fs_lock_identity_out(jet_fs_lock_path_identity_raw(path), device, low, high, regular, reparse, errno, platform)
+}
+
 // Infallible transfer after the source guard is disarmed.
 #Export(c) jet_fs_lock_owner_raw: fn(path: I64, fd: I64) -> I64 {
     native: host_native_int(fd)

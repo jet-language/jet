@@ -4,7 +4,8 @@
 // sema_guest_runtime_binding) of the runtime export that is its one body
 // (RouteAFiles.jet, FilesWalk.jet, CompilerFS.jet, CompilerMapped.jet,
 // CompilerFileLeaves.jet, FilesPathOps.jet, FilesStreams.jet,
-// HostFileLock.jet, HostHeldDirectory.jet, HostPathFacts.jet).
+// HostFileLock.jet, HostHeldDirectory.jet, HostPathFacts.jet,
+// RouteACrypto.jet).
 // An entries context or a walk is a key, and each path in it a slot. A key
 // that is not live, or a slot that is out of range or released, panics. A
 // tuple result's items cross in the checked tuple's written order, which
@@ -197,6 +198,34 @@ files: module {
 
     #Import(c) priv lock_fd: fn(lock: FileLock) -[FS.Read]> Int IOError! = "jet_fs_lock_fd_raw"
 
+    // The advisory-lock calls core.files' lock and try_lock run on
+    // (HostFileLock.jet), each answered as its jet_builtins record. `errno`
+    // and `platform` are the host's own error number and its tag (1 =
+    // Linux), which core.files maps to IOError.
+    // Opens the lock file `path`: `value` is the descriptor, negative on
+    // failure.
+    #Import(c) priv lock_open: fn(path: String) -[FS.Write]> LockCall = "jet_fs_lock_open_raw"
+
+    // Tries the exclusive lock on `fd` once: `value` is negative when it is
+    // not taken.
+    #Import(c) priv lock_try: fn(fd: Int) -[FS.Write]> LockCall = "jet_fs_lock_try_raw"
+
+    // Waits for the exclusive lock on `fd`, for `timeout_ns` when `bounded`.
+    // A zero `carried_ns` starts the deadline, which `deadline_ns` carries
+    // into the next wait.
+    #Import(c) priv lock_wait: fn(fd: Int, timeout_ns: Int, bounded: Bool, carried_ns: Int) -[FS.Write]> LockWait = "jet_fs_lock_wait_raw"
+
+    // Closes `fd`; its errno, 0 when it closed. A negative `fd` closes
+    // nothing.
+    #Import(c) priv lock_close: fn(fd: Int) -[FS.Write]> Int = "jet_fs_lock_close_raw"
+
+    // The file the descriptor `fd` or the path `path` (not following a
+    // final link) names, so a replaced lock file is told apart from the
+    // held one.
+    #Import(c) priv lock_fd_identity: fn(fd: Int) -[FS.Write]> LockIdentity = "jet_fs_lock_fd_identity_raw"
+
+    #Import(c) priv lock_path_identity: fn(path: String) -[FS.Write]> LockIdentity = "jet_fs_lock_path_identity_raw"
+
     // Maps the file `path` for reading.
     #Import(c) priv map_raw: fn(path: String) -[FS.Read]> MappedFile IOError! = "jet_std_files_map"
 
@@ -349,4 +378,31 @@ files: module {
 
     // Opens `path` for reading without waiting for a FIFO's writer.
     #Import(c) priv open_reader_nonblocking: fn(path: String) -[FS.Read]> FileReader IOError! = "jet_std_files_open_reader_nonblocking"
+
+    // The sealed-file descriptor steps behind core.files.sealed
+    // (RouteACrypto.jet), each answered as its jet_builtins record: the
+    // descriptor or count in `value`, or the step's errno.
+    #Import(c) priv jetc_open_directory: fn(path: String) -> JetcRaw = "jet_crypto_jetc_open_directory"
+
+    #Import(c) priv jetc_open_child_directory: fn(parent: Int, name: String) -> JetcRaw = "jet_crypto_jetc_open_child_directory"
+
+    #Import(c) priv jetc_open_source: fn(path: String) -> JetcRaw = "jet_crypto_jetc_open_source"
+
+    #Import(c) priv jetc_create_named: fn(path: String) -> JetcRaw = "jet_crypto_jetc_create_named"
+
+    #Import(c) priv jetc_tmpfile: fn(parent: Int) -> JetcRaw = "jet_crypto_jetc_tmpfile"
+
+    #Import(c) priv jetc_read: fn(fd: Int, count: Int) -> JetcRaw = "jet_crypto_jetc_read"
+
+    #Import(c) priv jetc_write: fn(fd: Int, data: [U8], offset: Int, count: Int) -> JetcRaw = "jet_crypto_jetc_write"
+
+    #Import(c) priv jetc_seek: fn(fd: Int, offset: Int) -> JetcRaw = "jet_crypto_jetc_seek"
+
+    #Import(c) priv jetc_stat: fn(fd: Int) -> JetcStat = "jet_crypto_jetc_stat"
+
+    #Import(c) priv jetc_fsync: fn(fd: Int) -> JetcRaw = "jet_crypto_jetc_fsync"
+
+    #Import(c) priv jetc_link: fn(fd: Int, parent: Int, destination: String) -> JetcRaw = "jet_crypto_jetc_link"
+
+    #Import(c) priv jetc_close: fn(fd: Int) -> JetcRaw = "jet_crypto_jetc_close"
 }

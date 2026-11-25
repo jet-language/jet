@@ -1,8 +1,18 @@
-// `jet.runtime.crypto` (#6615): the host step core.crypto.random reaches, in
-// Jet types with its `Rand` effect row. The member is a runtime binding
-// (Guest.jet sema_guest_runtime_binding) of the runtime export that is its one
-// body (CryptoEntropy.jet). It is `priv`: only core.crypto.random calls it.
+// `jet.runtime.crypto` (#6615): the host steps core.crypto reaches, in Jet
+// types with their effect rows. Each member is a runtime binding (Guest.jet
+// sema_guest_runtime_binding) of the runtime export that is its one body
+// (CryptoEntropy.jet, SHA256.jet, CryptoAES.jet). Each is `priv`: only
+// core.crypto calls them.
 crypto: module {
     // `count` bytes from one OS CSPRNG fill; None when the provider refuses.
     #Import(c) priv os_entropy: fn(count: Int) -[Rand]> [U8]? = "jet_random_os_entropy"
+
+    // core.crypto's block loops (SHA256.jet, CryptoAES.jet): `count` blocks
+    // of `data` from `offset`, on the host's SHA or AES-NI extensions; false
+    // when the host has none, and the caller runs the rounds in Jet.
+    #Import(c) priv sha256_blocks: fn(state: ^[U32], data: [U8], offset: Int, count: Int) -> Bool = "jet_crypto_sha256_blocks"
+
+    #Import(c) priv aes_blocks: fn(keys: [U8], rounds: Int, op: Int, iv: ^[U8], src: [U8], offset: Int, count: Int, out: ^[U8]) -> Bool = "jet_crypto_aes_blocks"
+
+    #Import(c) priv ghash_blocks: fn(h: [U8], y: ^[U8], data: [U8], offset: Int, count: Int) -> Bool = "jet_crypto_ghash_blocks"
 }
