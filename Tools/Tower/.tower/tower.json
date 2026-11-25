@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7038,
-    "rev": 114225,
+    "rev": 114234,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57862,6 +57862,60 @@
             "profile": "cases",
             "filter": "Modules/generic_module_mutable_global"
           }
+        },
+        {
+          "n": 6,
+          "text": "Each test starts with its own copy of every module variable and every module Shared holder, as D-MODULE-VAR1=A point six and D-CORE-GLOBAL-STATE1=A promise: today `jet test` runs a file's tests one after another in one process and nothing resets a global between them (JetRuntime TestHarness.jet:148-156; module Shared holders are Process sites never reset, JetIR BuildSharedSites.jet:62-90). Proof: two tests that write one global pass in either order and in parallel.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:25:19.487Z"
+        },
+        {
+          "n": 7,
+          "text": "A function changes a module variable in place like a local: `enemies.push(e)`, `frame[i] = v` and lending it to a `^` parameter work, and E0223's refusal of every non-#Persist changeable module root (Ownership/StaticCells.jet:1-62, callers Ownership/Checks.jet:2409, 2538, 3471-3477, 5008) is removed; Tests/Run/Comptime/MutableGlobalStartsFromComputedValue.jet then edits its [U8] without #Unsafe.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:25:21.366Z"
+        },
+        {
+          "n": 8,
+          "text": "A #Persist global follows the same task rule as any module variable: today a #Persist global can be written from any function and any task with no check, and the D-MODULE-VAR1 probe m05 compiled and ran such a race. Proof: the m05 program is refused with the registered task error.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:25:23.120Z"
+        },
+        {
+          "n": 9,
+          "text": "The touch fact is the one record of module reads and writes: TEffectFacts.module_writes (JetFoundation Facts/Declarations.jet:36-40) records reads too, and the second read scanner sema_comptime_tree_module_state (JetSema ComptimeItems.jet:847-863, callers ComptimeItems.jet:841-843 and JetDriver Pipeline.jet:1711-1716) reads that fact and is deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:25:25.015Z"
+        },
+        {
+          "n": 10,
+          "text": "A C callback that touches a module variable is refused with a registered error, as a callback that reads the context already is (E3218, JetSema Calls/Checking.jet:486), because C picks the thread the callback runs on.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:25:26.778Z"
+        },
+        {
+          "n": 11,
+          "text": "Diagnostics and teaching match the rule: the E0338 registry row says it covers module-value cycles, which ComptimeItems.jet:1809 already reports under it (Prelude Diagnostics.jet ~5490 says computed fields only); a public function's touches appear in its docs, as D-MODULE-VAR1=A says; and the language reference gains a page on module variables, which none teaches today.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:25:28.387Z"
         }
       ],
       "refs": [],
@@ -57873,9 +57927,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:42.821Z",
-      "updated": "2026-11-22T02:10:23.721Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 5
+      "updated": "2026-11-25T18:25:28.387Z",
+      "updatedBy": "Pip",
+      "criteriaLastN": 11
     },
     {
       "id": "c09qojqz",
@@ -77349,7 +77403,7 @@
       "id": "c01wqict",
       "num": 7032,
       "title": "Changeable module globals stay, with their downsides engineered away: per-test isolation, task safety and visible global writes",
-      "body": "Owner asked on 2026-11-25 to keep mutable module globals (game development needs them) and to find every way to engineer away their downsides, presented as ballot D-GLOBAL-SAFE1, instead of greenfield proposal item P10's context slots. Today `name := value` at file scope is a changeable global computed while building, with no startup copy (D-JAI-COMPTIME1=A; spec.md:455-479). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P10 (master checkout, not yet on dev).",
+      "body": "Owner asked on 2026-11-25 to keep mutable module globals (game development needs them) and to find every way to engineer away their downsides, presented as ballot D-GLOBAL-SAFE1, instead of greenfield proposal item P10's context slots. Today `name := value` at file scope is a changeable global computed while building, with no startup copy (D-JAI-COMPTIME1=A; spec.md:455-479). Source: Docs/Proposals/2026-11-24-greenfield-language.md, Part 2, item P10 (master checkout, not yet on dev). The unbuilt parts of the already-ratified rule D-MODULE-VAR1=A (function writes, in-place edits, per-test copies, #Persist races, the one touch fact, C callbacks, diagnostics and docs) are criteria on #6859; this card holds only what D-GLOBAL-SAFE1 decides.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G4",
@@ -77384,12 +77438,12 @@
         },
         {
           "n": 3,
-          "text": "Two tests that write the same global run in parallel and each sees only its own writes, proved by a case run under the parallel test runner.",
+          "text": "A #Memo function never returns a stale result because of a changeable module global it reads: today E0938 checks only the solved effect row (JetSema Effects/Checks.jet:6674-6686) and module reads are not recorded, so such a function is accepted. This is fixed whichever option of D-GLOBAL-SAFE1 wins (the ballot chooses refusal or keying the cache on the global), with a registered diagnostic or a proof the cache is keyed correctly.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-25T17:59:00.830Z"
+          "at": "2026-11-25T18:25:42.884Z"
         },
         {
           "n": 4,
@@ -77408,6 +77462,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-25T17:59:00.830Z"
+        },
+        {
+          "n": 6,
+          "text": "The rules the ballot decides are built as ratified: whether a pure `-[]>` function may read a changeable global (today E3401 refuses writes only, Effects/Checks.jet:1441-1485), whether task.group workers may read and split-write globals as they do the opener's locals (today the ratified rule refuses every task), and what a detached task may do.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-25T18:25:44.521Z"
         }
       ],
       "refs": [],
@@ -77415,8 +77478,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-25T17:59:00.830Z",
-      "updated": "2026-11-25T17:59:00.830Z",
-      "updatedBy": "Pip"
+      "updated": "2026-11-25T18:25:48.520Z",
+      "updatedBy": "Pip",
+      "criteriaLastN": 6
     },
     {
       "id": "c0pi4dar",
@@ -141603,6 +141667,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-25T18:25:48.520Z",
+      "by": "Pip",
+      "action": "card.update",
+      "ref": "c01wqict",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-25T18:25:44.521Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c01wqict",
+      "note": "#6 The rules the ballot decides are built as ratified: whether "
+    },
+    {
+      "at": "2026-11-25T18:25:42.884Z",
+      "by": "Pip",
+      "action": "card.criteria-edit",
+      "ref": "c01wqict",
+      "note": "#3: Per-test isolation is ratified scope and moved to #6859 c6; this row records the stale #Memo defect instead; was: Two tests that write the same global run in parallel and each sees only its own writes, proved by a case run under the parallel test runner."
+    },
+    {
+      "at": "2026-11-25T18:25:28.388Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0uxxmpm",
+      "note": "11 criteria, soft limit 6: Owner asked on 2026-11-25 that every changeable-global defect be recorded; these are unbuilt parts of D-MODULE-VAR1=A found by the D-GLOBAL-SAFE1 draft"
+    },
+    {
+      "at": "2026-11-25T18:25:28.388Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0uxxmpm",
+      "note": "#11 Diagnostics and teaching match the rule: the E0338 registry "
+    },
+    {
+      "at": "2026-11-25T18:25:26.778Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0uxxmpm",
+      "note": "10 criteria, soft limit 6: Owner asked on 2026-11-25 that every changeable-global defect be recorded; these are unbuilt parts of D-MODULE-VAR1=A found by the D-GLOBAL-SAFE1 draft"
+    },
+    {
+      "at": "2026-11-25T18:25:26.778Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0uxxmpm",
+      "note": "#10 A C callback that touches a module variable is refused with "
+    },
+    {
+      "at": "2026-11-25T18:25:25.015Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0uxxmpm",
+      "note": "9 criteria, soft limit 6: Owner asked on 2026-11-25 that every changeable-global defect be recorded; these are unbuilt parts of D-MODULE-VAR1=A found by the D-GLOBAL-SAFE1 draft"
+    },
+    {
+      "at": "2026-11-25T18:25:25.015Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0uxxmpm",
+      "note": "#9 The touch fact is the one record of module reads and writes:"
+    },
+    {
+      "at": "2026-11-25T18:25:23.121Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0uxxmpm",
+      "note": "8 criteria, soft limit 6: Owner asked on 2026-11-25 that every changeable-global defect be recorded; these are unbuilt parts of D-MODULE-VAR1=A found by the D-GLOBAL-SAFE1 draft"
+    },
+    {
+      "at": "2026-11-25T18:25:23.121Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0uxxmpm",
+      "note": "#8 A #Persist global follows the same task rule as any module v"
+    },
+    {
+      "at": "2026-11-25T18:25:21.366Z",
+      "by": "Pip",
+      "action": "card.over-limit",
+      "ref": "c0uxxmpm",
+      "note": "7 criteria, soft limit 6: Owner asked on 2026-11-25 that every changeable-global defect be recorded; these are unbuilt parts of D-MODULE-VAR1=A found by the D-GLOBAL-SAFE1 draft"
+    },
+    {
+      "at": "2026-11-25T18:25:21.366Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0uxxmpm",
+      "note": "#7 A function changes a module variable in place like a local: "
+    },
+    {
+      "at": "2026-11-25T18:25:19.487Z",
+      "by": "Pip",
+      "action": "card.criteria-add",
+      "ref": "c0uxxmpm",
+      "note": "#6 Each test starts with its own copy of every module variable "
+    },
     {
       "at": "2026-11-25T18:23:39.663Z",
       "by": "Pip",
