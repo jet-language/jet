@@ -1314,7 +1314,9 @@ sema_failure_domain_is_error: fn(ty: Type, seen: [Int], environment: SemaScopeEn
             }
             return true
         }
-        .List(inner) -> return inner == Type.Named{name: "FieldError"}
+        // A list of errors is one failure that carries every fault found
+        // (`[FieldError]`, a checked-text check's faults).
+        .List(inner) -> return inner == Type.Named{name: "FieldError"} || sema_failure_domain_is_error(inner, seen, environment, program)
         .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> return false
     }
 }
