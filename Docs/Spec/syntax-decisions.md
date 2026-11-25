@@ -3697,7 +3697,7 @@ site today; copy on first write and inferred kept parameters complete the
 model in later cards.
 
 *Supersession (D-CALLSITE-MARK2=A, D-MOVE-SIGIL1=A):* the `^place` value
-form and the call-site `^`/`^` marks above are historical text. An early move
+form and the call-site write and take marks above are historical text. An early move
 is `x.move()`, and a call that takes or writes is written plain.
 
 **D-CALLSITE-MARK2=A — marks live in signatures** *(ratified 2026-11-06, card
@@ -3723,11 +3723,20 @@ parameter or `self` is E0205, each quoting the callee's signature line).
 `^T` in a signature means the function may change the input; `^^T` means it
 takes the input for good: `c: ^^T`, `seal: fn(^^self)`,
 `gzclose: fn(file: ^^GzFile) -> Int = "gzclose"`, `task ^^job { … }`. The
-take mark appears only in a parameter type, before `self`, and after `task`,
-so it never meets logical `&&`, which sits between two values. `^` has no
-grammar meaning left (no xor and no power; exclusive-or is `a ~ b` under
-D-BIT-SIGILS1=A) and stays an ordinary error until a ballot gives it a job
-(D-SIGIL-FREED2).
+take mark appears only in a parameter type, before `self`, and after `task`.
+
+*Respelling (D-MARK-CARET1, owner ruling 2026-11-24):* both decisions first
+spelled the write mark `&T` and the take mark `&&T`. Those symbols are also
+bitwise and and logical and between two values, so every `&` and `&&` had
+two meanings that only their position told apart, and a reader paid a second
+look at each. `^` was free (no xor and no power: exclusive-or is `a ~ b` under
+D-BIT-SIGILS1=A, a power is `x.pow(n)`), so the marks moved to `^` and `^^` in
+every position, with the same meaning and placement, and `&` and `&&` keep
+only their operator meanings. Infix `^` stays a parse error. The known cost is
+that `^` is a dead key on many European layouts, where `^I` composes `Î`: the
+checker recognizes a type name composed that way and offers the `^` spelling
+(E0119). Links keep `@` (D-MEMREF1=A). The cutover migrated every mark with
+the `mark-caret1` fix plan and left no alias for the old spelling.
 
 **D-DECL-COLON1=A — every declaration is `name: value`** *(ratified
 2026-11-06, card #6586; retires the `name :: value` binding)*: constants,
