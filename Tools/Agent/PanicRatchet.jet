@@ -7,8 +7,9 @@
 // records, skipping the item) or is proven unreachable: deleted, or kept with
 // its proof in PROVEN. Until then BASELINE holds each file's count of the
 // stops PROVEN does not hold, which may only fall.
-// Calls in comments and in `#Test` blocks do not count: a test that panics is
-// the test's own failure.
+// Calls in comments, in string text (quoted, triple-quoted or backtick
+// fenced, which may span lines), in character literals and in `#Test` blocks
+// do not count: a test that panics is the test's own failure.
 //
 // Usage (from the repository root): jet Tools/Agent/PanicRatchet.jet checks;
 // `--write` lowers the BASELINE rows to the live counts (and seeds the table
@@ -42,10 +43,6 @@ BASELINE: "Tests/Guards/panic_ratchet.tsv"
 // a keep-going report. A proven stop does not count against BASELINE.
 PROVEN: "Tests/Guards/panic_ratchet_proven.tsv"
 
-// Code that ends in a name or a member access, so a `panic(` right after it
-// calls another function (`report_panic(`, `self.panic(`).
-NAME_END: Regex{"[A-Za-z0-9_.]$"}
-
 #Error
 RatchetError: struct {
     message: String,
@@ -72,39 +69,108 @@ phase_sources: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
     Ok(paths)
 }
 
-// Whether `prefix`, the code before a `//`, leaves no string literal open.
-closes_strings: fn(prefix: String) -> Bool Never! {
-    plain: prefix.replace("\\\\", "").replace("\\\"", "")
-    (plain.split("\"").len() - 1) % 2 == 0
+// The byte at `at` of `bytes`, or -1 past either end.
+byte_at: fn(bytes: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= bytes.len() -> return -1
+    Int{bytes[at]}
 }
 
-// The code of a source line: everything before its comment, a `//` that
-// starts the line or follows whitespace outside a string literal.
-code_text: fn(line: String) -> String Never! {
-    code := ""
-    first := true
-    loop part in line.split("//") {
-        starts: code.trim() == "" || code.ends_with(" ") || code.ends_with("\t")
-        if !first && starts && closes_strings(code) -> return code
-        code = if first -> part.copy() else -> "{code}//{part}"
-        first = false
+// Blanks `bytes[start..<end]` to spaces, keeping newlines.
+blank: fn(bytes: ^[U8], start: Int, end: Int) Never! {
+    loop index in start..<end {
+        if index < bytes.len() && bytes[index] != (U8{10}) -> bytes[index] = U8{32}
     }
-    code
 }
 
-// The message of the stop call whose arguments begin `rest`: the source text
-// from the opening quote of its first argument to the next unescaped quote,
-// or "" when the first argument is no string literal.
-stop_message: fn(rest: String) -> String Never! {
-    if !rest.starts_with("\"") -> return ""
+// Whether `fence` backticks start at `at`.
+fence_at: fn(bytes: [U8], at: Int, fence: Int) -> Bool Never! {
+    loop offset in 0..<fence {
+        if byte_at(bytes, at + offset) != 96 -> return false
+    }
+    true
+}
+
+// `source`'s bytes with comments, string text and character literals blanked
+// to spaces. Newlines stay, so each line keeps its offsets; the quotes and
+// fences stay too. A quoted string ends at its line's end at the latest, and
+// `\` escapes the byte after it; a triple-quoted string and a backtick fence
+// run to their close.
+code_bytes: fn(source: String) -> [U8] Never! {
+    out := source.bytes()
+    at := 0
+    loop at < out.len() {
+        code: byte_at(out, at)
+        if {
+            code == 47 && byte_at(out, at + 1) == 47 -> {
+                start: at
+                loop at < out.len() && byte_at(out, at) != 10 -> at += 1
+                blank(out, start, at)
+            }
+            code == 96 -> {
+                fence := 0
+                loop byte_at(out, at + fence) == 96 -> fence += 1
+                start: at + fence
+                at = start
+                loop at < out.len() && !fence_at(out, at, fence) -> at += 1
+                blank(out, start, at)
+                at += fence
+            }
+            code == 34 && byte_at(out, at + 1) == 34 && byte_at(out, at + 2) == 34 -> {
+                start: at + 3
+                at = start
+                loop at < out.len() && !(byte_at(out, at) == 34 && byte_at(out, at + 1) == 34 && byte_at(out, at + 2) == 34) {
+                    at += if byte_at(out, at) == 92 -> 2 else -> 1
+                }
+                blank(out, start, at)
+                at += 3
+            }
+            code == 34 -> {
+                start: at + 1
+                at = start
+                loop at < out.len() && byte_at(out, at) != 34 && byte_at(out, at) != 10 {
+                    at += if byte_at(out, at) == 92 -> 2 else -> 1
+                }
+                blank(out, start, at)
+                at += 1
+            }
+            code == 39 && byte_at(out, at + 2) == 39 -> {
+                blank(out, at + 1, at + 2)
+                at += 3
+            }
+            code == 39 && byte_at(out, at + 1) == 92 && byte_at(out, at + 3) == 39 -> {
+                blank(out, at + 1, at + 3)
+                at += 4
+            }
+            else -> at += 1
+        }
+    }
+    out
+}
+
+// Whether `code` spells `word` from `at`.
+spells_at: fn(code: [U8], at: Int, word: [U8]) -> Bool Never! {
+    loop offset in 0..<word.len() {
+        if byte_at(code, at + offset) != (Int{word[offset]}) -> return false
+    }
+    true
+}
+
+// Whether `code` is a byte of a name or a member access, so a `panic(` right
+// after it calls another function (`report_panic(`, `self.panic(`).
+name_byte: fn(code: Int) -> Bool Never! {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 46
+}
+
+// The message of the stop call whose arguments open at `open` of `line`: the
+// source text from the opening quote of its first argument to the next
+// unescaped quote, or "" when the first argument is no string literal.
+stop_message: fn(line: [U8], open: Int) -> String Never! {
+    if byte_at(line, open) != 34 -> return ""
     message := [U8]{}
     escaped := false
-    first := true
-    loop byte in rest.bytes() {
-        if first {
-            first = false
-            next
-        }
+    first: open + 1
+    loop at in first..<line.len() {
+        byte: line[at]
         if !escaped && byte == (U8{34}) -> break
         escaped = !escaped && byte == (U8{92})
         message.push(byte)
@@ -112,33 +178,39 @@ stop_message: fn(rest: String) -> String Never! {
     String.from_bytes(message) ?? ""
 }
 
-// The message of each process-stopping call in `code`, a line's code text,
-// in order.
-line_stops: fn(code: String) -> [String] Never! {
-    pieces: code.replace("unreachable(", "panic(").split("panic(").to_list()
+// The message of each process-stopping call on one line, in order: `code` is
+// the line's code (code_bytes) and `line` its source, byte for byte.
+line_stops: fn(code: [U8], line: [U8]) -> [String] Never! {
+    panic_word: "panic(".bytes()
+    unreachable_word: "unreachable(".bytes()
     messages := [String]{}
-    loop index in 1..<pieces.len() {
-        if NAME_END.find_all(pieces[index - 1]).len() > 0 -> next
-        messages.push(stop_message(pieces[index]))
+    loop at in 0..<code.len() {
+        if name_byte(byte_at(code, at - 1)) -> next
+        if spells_at(code, at, panic_word) -> messages.push(stop_message(line, at + panic_word.len()))
+        if spells_at(code, at, unreachable_word) -> messages.push(stop_message(line, at + unreachable_word.len()))
     }
     messages
 }
 
-// The message of each process-stopping call in `source`, outside comments
-// and top-level `#Test` blocks (from a `#Test(` line to the next line `}`).
+// The message of each process-stopping call in `source`, outside comments,
+// string text and top-level `#Test` blocks (from a `#Test(` line to the next
+// line `}`).
 stop_messages: fn(source: String) -> [String] Never! {
+    lines: source.split("\n").to_list()
+    codes: (String.from_bytes(code_bytes(source)) ?? "").split("\n").to_list()
     messages := [String]{}
     in_test := false
-    loop line in source.split("\n") {
+    loop index in 0..<lines.len() {
+        code: if index < codes.len() -> codes[index] else -> ""
         if in_test {
-            if line == "}}" -> in_test = false
+            if code.starts_with("}}") && code.trim() == "}}" -> in_test = false
             next
         }
-        if line.starts_with("#Test(") {
-            in_test = !line.ends_with("}}")
+        if code.starts_with("#Test(") {
+            in_test = !code.trim().ends_with("}}")
             next
         }
-        messages.extend(line_stops(code_text(line)))
+        messages.extend(line_stops(code.bytes(), lines[index].bytes()))
     }
     messages
 }
@@ -351,6 +423,11 @@ run: fn() {
 #Test("top-level test blocks do not count") {
     source: "f: fn() {{ panic(\"a\") }}\n#Test(\"t\") {{\n    x ?? panic(\"b\")\n}}\n#Test(\"u\") {{ panic(\"c\") }}\ng: fn() {{ unreachable(\"d\") }}\n"
     assert_eq(stop_messages(source), [String]{"a", "d"})
+}
+
+#Test("a stop spelled in string text or a character literal does not count") {
+    source: "say(\"write `or panic(\\\"m\\\")`\")\ntext: `\n}}\npanic(\"e\")\n`\n#Test(\"t\") {{\n    raw: ``\n}}\nf: fn() {{ panic(\"in text\") }}\n``\n    x ?? panic(\"b\")\n}}\nc: '\"'\nlong: \"\"\"\npanic(\"f\")\n\"\"\"\ng: fn() {{ unreachable(\"d\") }}\n"
+    assert_eq(stop_messages(source), [String]{"d"})
 }
 
 #Test("a stop's message is its source text up to the closing quote") {
