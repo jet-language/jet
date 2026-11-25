@@ -9,12 +9,12 @@ use {
         JetDriverAuthorizedSourceRoot,
         JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode,
-        JetDriverCoreSource,
         JetDriverLoweringInputsResult,
         jet_driver_has_errors,
         jet_driver_lowering_inputs,
+        jet_driver_runtime_interface_sources,
     ]
-    jet_cli.[jet_cli_driver_request]
+    jet_cli.[jet_cli_builtin_core_rows, jet_cli_driver_request]
     jet_sema.[SchemaSnapshot]
 }
 
@@ -71,7 +71,9 @@ data_query_roles_front: fn(source: String) -> JetDriverLoweringInputsResult {
         entry_root_identity: "data-query-roles-root",
         entry_path: "/data-query-roles/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Program)
+    core_rows := jet_cli_builtin_core_rows()
+    core_rows.extend(jet_driver_runtime_interface_sources())
+    request := jet_cli_driver_request(snapshot, core_rows, Val(1), JetDriverCompileMode.Program)
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     jet_driver_lowering_inputs(request, None)
 }
