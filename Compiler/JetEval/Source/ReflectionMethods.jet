@@ -30,30 +30,45 @@ jet_eval_reflection_marker_value: fn(owner: String, args: [TComptimeValue]) -> J
     if args.len() < 2 || args.len() % 2 != 0 {
         return jet_eval_compiler_value_fault("reflection method {owner}.marker takes its receiver, the marker name and default pairs")
     }
-    wanted: if args[1] == .String(text) -> text else -> {
-        return jet_eval_compiler_value_fault("reflection method {owner}.marker requires the marker name")
+    wanted: if {
+        args[1] == .String(text) -> text
+        else -> {
+            return jet_eval_compiler_value_fault("reflection method {owner}.marker requires the marker name")
+        }
     }
     fields: jet_eval_compiler_value_fields(args[0], owner) ?? return jet_eval_compiler_value_fault("reflection metadata route receiver is not {owner}")
     absent: JetEvalCompilerValueAnswer.Value{value: TComptimeValue.Failed{report: .Clean{ty: Type.Named{name: wanted}}}}
     markers: jet_eval_compiler_value_field(fields, "markers") ?? return absent
-    rows: if markers == .List(values) -> values else -> {
-        return absent
+    rows: if {
+        markers == .List(values) -> values
+        else -> {
+            return absent
+        }
     }
     loop row in rows {
-        marker_fields: if row == .Struct(_, values) -> values else -> {
-            next
+        marker_fields: if {
+            row == .Struct(_, values) -> values
+            else -> {
+                next
+            }
         }
         name: jet_eval_compiler_value_field(marker_fields, "name") ?? next
-        text: if name == .String(written_name) -> written_name else -> {
-            next
+        text: if {
+            name == .String(written_name) -> written_name
+            else -> {
+                next
+            }
         }
         if jet_eval_reflection_marker_leaf(text) != wanted -> next
         record := [TComptimeField]{}
         written: jet_eval_compiler_value_field(marker_fields, "args") ?? TComptimeValue.List{values: [TComptimeValue]{}}
         if written == .List(arguments) {
             loop argument in arguments {
-                argument_fields: if argument == .Struct(_, entries) -> entries else -> {
-                    next
+                argument_fields: if {
+                    argument == .Struct(_, entries) -> entries
+                    else -> {
+                        next
+                    }
                 }
                 label: jet_eval_compiler_value_field(argument_fields, "name") ?? next
                 // A record laid out with no value (JetIR ir_comptime_struct)
@@ -88,29 +103,44 @@ jet_eval_reflection_format_key: fn(owner: String, args: [TComptimeValue]) -> Jet
     if args.len() != 2 {
         return jet_eval_compiler_value_fault("reflection method {owner}.key takes its receiver and one format name")
     }
-    wanted: if args[1] == .String(text) -> text else -> {
-        return jet_eval_compiler_value_fault("reflection method {owner}.key requires a String format name")
+    wanted: if {
+        args[1] == .String(text) -> text
+        else -> {
+            return jet_eval_compiler_value_fault("reflection method {owner}.key requires a String format name")
+        }
     }
     fields: jet_eval_compiler_value_fields(args[0], owner) ?? return jet_eval_compiler_value_fault("reflection metadata route receiver is not {owner}")
     absent: JetEvalCompilerValueAnswer.Value{value: TComptimeValue.Failed{report: .Clean{ty: Type.String}}}
     markers: jet_eval_compiler_value_field(fields, "markers") ?? return absent
-    rows: if markers == .List(values) -> values else -> {
-        return absent
+    rows: if {
+        markers == .List(values) -> values
+        else -> {
+            return absent
+        }
     }
     loop row in rows {
-        marker_fields: if row == .Struct(_, values) -> values else -> {
-            next
+        marker_fields: if {
+            row == .Struct(_, values) -> values
+            else -> {
+                next
+            }
         }
         name: jet_eval_compiler_value_field(marker_fields, "name") ?? next
         renames: if name == .String(text) -> jet_eval_reflection_marker_leaf(text) == "Rename" else -> false
         if !renames -> next
         written: jet_eval_compiler_value_field(marker_fields, "args") ?? next
-        arguments: if written == .List(values) -> values else -> {
-            next
+        arguments: if {
+            written == .List(values) -> values
+            else -> {
+                next
+            }
         }
         loop argument in arguments {
-            argument_fields: if argument == .Struct(_, entries) -> entries else -> {
-                next
+            argument_fields: if {
+                argument == .Struct(_, entries) -> entries
+                else -> {
+                    next
+                }
             }
             label: jet_eval_compiler_value_field(argument_fields, "name") ?? next
             labeled: if label == .String(format) -> format == wanted else -> false
@@ -129,26 +159,41 @@ jet_eval_reflection_format_key: fn(owner: String, args: [TComptimeValue]) -> Jet
 // segment, as `info.marker(T)` does), in the program's function order. A
 // program without a `functions` list gives None.
 jet_eval_reflection_marked_functions: fn(program: TComptimeValue, wanted: String) -> TComptimeValue? Never! {
-    program_fields: if program == .Struct(_, values) -> values else -> {
-        return None
+    program_fields: if {
+        program == .Struct(_, values) -> values
+        else -> {
+            return None
+        }
     }
     listed: jet_eval_compiler_value_field(program_fields, "functions") ?? return None
-    functions: if listed == .List(values) -> values else -> {
-        return None
+    functions: if {
+        listed == .List(values) -> values
+        else -> {
+            return None
+        }
     }
     leaf: jet_eval_reflection_marker_leaf(wanted)
     marked := [TComptimeValue]{}
     loop function in functions {
-        function_fields: if function == .Struct(_, values) -> values else -> {
-            next
+        function_fields: if {
+            function == .Struct(_, values) -> values
+            else -> {
+                next
+            }
         }
         markers: jet_eval_compiler_value_field(function_fields, "markers") ?? next
-        rows: if markers == .List(values) -> values else -> {
-            next
+        rows: if {
+            markers == .List(values) -> values
+            else -> {
+                next
+            }
         }
         loop row in rows {
-            marker_fields: if row == .Struct(_, values) -> values else -> {
-                next
+            marker_fields: if {
+                row == .Struct(_, values) -> values
+                else -> {
+                    next
+                }
             }
             name: jet_eval_compiler_value_field(marker_fields, "name") ?? next
             if name == .String(written) && jet_eval_reflection_marker_leaf(written) == leaf {
@@ -166,17 +211,26 @@ jet_eval_reflection_marked_functions: fn(program: TComptimeValue, wanted: String
 // identity or an ambient call's name, in the order the checker met them. A
 // program without `root_calls` gives None.
 jet_eval_reflection_calls_to: fn(program: TComptimeValue, wanted: String) -> TComptimeValue? Never! {
-    program_fields: if program == .Struct(_, values) -> values else -> {
-        return None
+    program_fields: if {
+        program == .Struct(_, values) -> values
+        else -> {
+            return None
+        }
     }
     listed: jet_eval_compiler_value_field(program_fields, "root_calls") ?? return None
-    calls: if listed == .List(values) -> values else -> {
-        return None
+    calls: if {
+        listed == .List(values) -> values
+        else -> {
+            return None
+        }
     }
     heard := [TComptimeValue]{}
     loop call in calls {
-        call_fields: if call == .Struct(_, values) -> values else -> {
-            next
+        call_fields: if {
+            call == .Struct(_, values) -> values
+            else -> {
+                next
+            }
         }
         callee: jet_eval_compiler_value_field(call_fields, "callee") ?? next
         if callee == .String(name) && name == wanted -> heard.push(call.copy())  // copy: the program keeps its call rows
@@ -208,8 +262,11 @@ jet_eval_reflection_answer: fn(owner: String, method: String, args: [TComptimeVa
     if args.len() != 2 {
         return jet_eval_compiler_value_fault("reflection metadata method {owner}.{method} takes its receiver and one name")
     }
-    wanted: if args[1] == .String(text) -> text else -> {
-        return jet_eval_compiler_value_fault("reflection metadata method requires a String name")
+    wanted: if {
+        args[1] == .String(text) -> text
+        else -> {
+            return jet_eval_compiler_value_fault("reflection metadata method requires a String name")
+        }
     }
     fields: jet_eval_compiler_value_fields(args[0], owner) ?? return jet_eval_compiler_value_fault("reflection metadata route receiver is not {owner}")
     found: jet_eval_reflection_metadata_method_list_contains(fields, wanted)

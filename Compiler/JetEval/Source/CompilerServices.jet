@@ -513,7 +513,7 @@ jet_eval_compiler_services_lex: fn(input: JetCompilerServicesSourceInput) -> Jet
     if preparation == {
         .Masked(source) -> {
             compiler_source = source
-            bytes := source.bytes()
+            bytes: source.bytes()
             lexed = lex(bytes)
         }
         .Rejected(diagnostic) -> lexed.diagnostics.push(diagnostic.copy())
@@ -681,11 +681,11 @@ jet_eval_compiler_services_syntax_value: fn(source: String, parsed: ParseResult)
 
 jet_eval_compiler_services_parse: fn(input: JetCompilerServicesSourceInput) -> JetCompilerServicesParseFacts? {
     lex_facts: jet_eval_compiler_services_lex(input) ?? return None
-    parsed := if {
+    parsed: if {
         lex_facts.lexed.diagnostics.len() > 0 -> ParseResult{program: ast_program(), diagnostics: lex_facts.lexed.diagnostics}
         else -> parse_lexed(lex_facts.lexed.copy())
     }
-    value := jet_eval_compiler_services_syntax_value(input.source, parsed)
+    value: jet_eval_compiler_services_syntax_value(input.source, parsed)
     Val(JetCompilerServicesParseFacts{source: input.source, compiler_source: lex_facts.compiler_source, lexed: lex_facts.lexed, parsed: parsed, value: value})
 }
 
@@ -711,9 +711,9 @@ jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph
             }
         }
     }
-    arithmetic := sema_comptime_reflection_arithmetic_facts(function, registration_module.source_file)
-    identity := "{registration_module.module_name}.{function.name}"
-    facts := sema_comptime_reflection_declared_function_facts(function, identity)
+    arithmetic: sema_comptime_reflection_arithmetic_facts(function, registration_module.source_file)
+    identity: "{registration_module.module_name}.{function.name}"
+    facts: sema_comptime_reflection_declared_function_facts(function, identity)
     TComptimeValue.Struct{
         type_name: "FunctionInfo",
         fields: [TComptimeField]{
@@ -857,7 +857,7 @@ jet_eval_compiler_services_name_entry: fn(registration: ^SemaRegistrationGraph, 
 // The checked source's own functions and their effects; a module the
 // compiler supplies adds none.
 jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -> JetCompilerServicesCheckedFacts {
-    diagnostics := input.diagnostics
+    diagnostics: input.diagnostics
     // The checked text is hashed once: the semantic index and the
     // diagnostics' origins share its digest.
     source_digest: sema_source_digest(input.parsed.source)
@@ -883,7 +883,7 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
         loop item in registration_module.program.items {
             if item == .Func(function) {
                 if function.name == "build" -> next
-                function_key := jet_eval_compiler_services_function_key(registration, function, registration_module)
+                function_key: jet_eval_compiler_services_function_key(registration, function, registration_module)
                 // A failed check leaves the registration incomplete, with no
                 // marker registry; like the failed-check FunctionInfo
                 // (JetDriver ComptimeCompiler.jet), its markers then read empty.
@@ -897,7 +897,7 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
         if checked_module == .Val(checked) {
             loop function in checked.functions {
                 declared := [String]?{None}
-                function_id := symbol_find(registration.symbols, function.key)
+                function_id: symbol_find(registration.symbols, function.key)
                 if function_id == .Val(id) {
                     loop registered in registration_module.functions {
                         if registered.symbol.id == id {
@@ -909,14 +909,14 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
             }
         }
     }
-    index := sema_compiler_semantic_index_from_checked(registration, input.graph, source_digest, input.module_sources)
+    index: sema_compiler_semantic_index_from_checked(registration, input.graph, source_digest, input.module_sources)
     has_errors := false
     loop diagnostic in diagnostics {
         if jet_eval_compiler_services_error_diagnostic(diagnostic) -> has_errors = true
     }
     semantic_index := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}
     if !has_errors && index.complete -> semantic_index = TComptimeValue.Present{value: index.value}
-    value := TComptimeValue.Struct{
+    value: TComptimeValue.Struct{
         type_name: "CompilerChecked",
         fields: [TComptimeField]{
             TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},

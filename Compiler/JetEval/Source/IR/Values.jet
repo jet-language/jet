@@ -96,9 +96,9 @@ jet_eval_ir_comptime_build_over: fn(declared: Shared<[IRProgram]>, functions: ^^
     loop definition in landed.move() -> ir_program_put_constant(program, definition, taken_keys, taken)
     ir_program_bind(program, functions, decls)
     ir_foreign_index(program, foreign, decls)
-    kept := ir_build_roots_in(program, item_keys, threads)
+    kept: ir_build_roots_in(program, item_keys, threads)
     jet_eval_ir_program_put(declared, kept.program.move())
-    built := kept.result.move()
+    built: kept.result.move()
     lines := [String]{}
     loop failure in built.failures -> lines.push(jet_eval_ir_build_failure_text(failure))
     items := [Int]{}
@@ -118,9 +118,9 @@ jet_eval_ir_build_interner: fn(interner: Interner) -> Interner Never! {
 // Builds the roots `item_keys` of `program` on up to `threads` compiler
 // threads; `cell` then holds the program.
 jet_eval_ir_comptime_roots: fn(cell: Shared<[IRProgram]>, program: ^^IRProgram, item_keys: [String], threads: CompilerThreads) -> JetEvalIRComptime {
-    kept := ir_build_roots_in(program, item_keys, threads)
+    kept: ir_build_roots_in(program, item_keys, threads)
     jet_eval_ir_program_put(cell, kept.program.move())
-    built := kept.result.move()
+    built: kept.result.move()
     lines := [String]{}
     loop failure in built.failures -> lines.push(jet_eval_ir_build_failure_text(failure))
     items := [Int]{}
@@ -131,7 +131,7 @@ jet_eval_ir_comptime_roots: fn(cell: Shared<[IRProgram]>, program: ^^IRProgram, 
 // The program `cell` holds (its one row), moved out.
 jet_eval_ir_program_take: fn(cell: Shared<[IRProgram]>) -> IRProgram Never! {
     held := cell.guard_edit()
-    program := compiler_threads_taken(held.value)
+    program: compiler_threads_taken(held.value)
     program.move()
 }
 
@@ -148,22 +148,22 @@ jet_eval_ir_build_failure_text: fn(failure: IRBuildFailure) -> String Never! {
 jet_eval_ir_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, word: Int, row: Int) -> TComptimeValue? {
     kind: m.types[row].kind
     if kind == {
-        .Unit -> return Val(TComptimeValue.Unit)
-        .Bool -> return Val(TComptimeValue.Bool{value: word != 0})
+        .Unit -> Val(TComptimeValue.Unit)
+        .Bool -> Val(TComptimeValue.Bool{value: word != 0})
         .Int -> {
             value: jet_eval_ir_int_value(s, word) ?? return None
             // An Int outside 64 bits is a BigInt decimal.
             if !jet_eval_ir_in_range(value, 64, true) {
                 return Val(TComptimeValue.BigInt{decimal: "{value}"})
             }
-            return Val(TComptimeValue.Int{value: value})
+            Val(TComptimeValue.Int{value: value})
         }
-        .Char -> return Val(TComptimeValue.Char{value: word})
-        .Float -> return Val(TComptimeValue.Float{value: jet_eval_ir_float(word), bits: 64})
-        .Float32 -> return Val(TComptimeValue.Float{value: jet_eval_ir_float32(word), bits: 32})
+        .Char -> Val(TComptimeValue.Char{value: word})
+        .Float -> Val(TComptimeValue.Float{value: jet_eval_ir_float(word), bits: 64})
+        .Float32 -> Val(TComptimeValue.Float{value: jet_eval_ir_float32(word), bits: 32})
         .String -> {
             text: jet_eval_ir_text(s, word) ?? return None
-            return Val(TComptimeValue.String{value: text})
+            Val(TComptimeValue.String{value: text})
         }
         .Word -> {
             checked: ir_untag(ir_row_ty(m, p, row))
@@ -191,7 +191,7 @@ jet_eval_ir_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, word: Int, 
                 args: ir_row_args(m, p, row)
                 return jet_eval_ir_enum_data(m, p, s, definition, args, word, word, false)
             }
-            return Val(TComptimeValue.Int{value: word})
+            Val(TComptimeValue.Int{value: word})
         }
         .Pointer -> {
             checked: ir_untag(ir_row_ty(m, p, row))
@@ -253,7 +253,7 @@ jet_eval_ir_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, word: Int, 
                 return Val(TComptimeValue.Struct{type_name: "Authority", fields: [TComptimeField]{TComptimeField{name: "rights", value: rights}}})
             }
             if ir_default_err(p, checked) -> return jet_eval_ir_err_data(s, p, checked, word)
-            return jet_eval_ir_transport_fail(s, checked)
+            jet_eval_ir_transport_fail(s, checked)
         }
         .Aggregate -> {
             checked: ir_untag(ir_row_ty(m, p, row))
@@ -328,7 +328,7 @@ jet_eval_ir_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, word: Int, 
                 output: jet_eval_ir_fields(m, p, s, word, members) ?? return None
                 return Val(TComptimeValue.Struct{type_name: type_name(checked), fields: output})
             }
-            return jet_eval_ir_struct_data(m, p, s, word, row, checked)
+            jet_eval_ir_struct_data(m, p, s, word, row, checked)
         }
     }
 }
@@ -574,9 +574,12 @@ jet_eval_ir_err_zeroed: fn(s: ^JetEvalIRState, bytes: Int) -> Int? {
 
 // Writes the runtime String of text `value` as the header word at `at`.
 jet_eval_ir_err_put_text: fn(s: ^JetEvalIRState, at: Int, value: TComptimeValue) -> Bool {
-    text: if value == .String(raw) -> raw else -> {
-        jet_eval_ir_problem(s, "a default Err text that is not a String: {value}")
-        return false
+    text: if {
+        value == .String(raw) -> raw
+        else -> {
+            jet_eval_ir_problem(s, "a default Err text that is not a String: {value}")
+            return false
+        }
     }
     header: jet_eval_ir_store_text(s, text) ?? return false
     jet_eval_ir_write(s, at, 8, header)
@@ -592,9 +595,12 @@ jet_eval_ir_err_put_optional_text: fn(s: ^JetEvalIRState, at: Int, value: TCompt
 // Writes the records of list `value` as the native inline List at `list` of
 // `stride`-byte rows (the inverse of jet_eval_ir_err_rows).
 jet_eval_ir_err_put_rows: fn(s: ^JetEvalIRState, list: Int, stride: Int, value: TComptimeValue, texts: [String], number: String?) -> Bool {
-    rows: if value == .List(values) -> values else -> {
-        jet_eval_ir_problem(s, "a default Err row list that is not a List: {value}")
-        return false
+    rows: if {
+        value == .List(values) -> values
+        else -> {
+            jet_eval_ir_problem(s, "a default Err row list that is not a List: {value}")
+            return false
+        }
     }
     data := 0
     if rows.len() > 0 -> data = jet_eval_native_alloc(s, rows.len() * stride, 8) ?? return false
@@ -620,14 +626,14 @@ jet_eval_ir_err_put_rows: fn(s: ^JetEvalIRState, list: Int, stride: Int, value: 
 // JetIR ir_comptime_key_value); None for a value no key spells.
 jet_eval_ir_key: fn(m: IRModule, p: IRProgram, value: TComptimeValue, ty: Type) -> TComptimeKey? Never! {
     if value == {
-        .Int(number) -> return Val(checked_comptime_integer_key(number))
-        .BigInt(decimal) -> return Val(TComptimeKey.BigInt{decimal: decimal})
-        .String(text) -> return Val(TComptimeKey.String{value: text})
-        .Bool(flag) -> return Val(TComptimeKey.Bool{value: flag})
-        .Char(code) -> return Val(TComptimeKey.Char{value: code})
+        .Int(number) -> Val(checked_comptime_integer_key(number))
+        .BigInt(decimal) -> Val(TComptimeKey.BigInt{decimal: decimal})
+        .String(text) -> Val(TComptimeKey.String{value: text})
+        .Bool(flag) -> Val(TComptimeKey.Bool{value: flag})
+        .Char(code) -> Val(TComptimeKey.Char{value: code})
         .Enum(name, variant, args) -> {
             if args.len() > 0 -> return None
-            return Val(TComptimeKey.Enum{type_name: name, variant: variant})
+            Val(TComptimeKey.Enum{type_name: name, variant: variant})
         }
         .Struct(name, fields) -> {
             keys := [TComptimeKeyField]{}
@@ -637,9 +643,9 @@ jet_eval_ir_key: fn(m: IRModule, p: IRProgram, value: TComptimeValue, ty: Type) 
                 keys.push(TComptimeKeyField{name: field.name, key: key})
             }
             if ir_untag(ty) == .Tuple(_) -> return Val(TComptimeKey.Tuple{fields: keys})
-            return Val(TComptimeKey.Struct{type_name: name, fields: keys})
+            Val(TComptimeKey.Struct{type_name: name, fields: keys})
         }
-        .Float(_, _) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> return None
+        .Float(_, _) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> None
     }
 }
 
