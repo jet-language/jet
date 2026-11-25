@@ -401,7 +401,7 @@ run_all: fn(specs: [ProcessSpec], jobs: Int) -[Exec, Time.Wait]> [ProcessReceipt
     }
     results := [ProcessReceipt IOError!]{}
     task.group pool(limit: jobs) {
-        handles: loop spec in specs -> task run_all_job(core.process.__spec_parent_death(spec))
+        handles: loop spec in specs -> task run_all_job(rt.spec_parent_death(spec.copy()))
         loop handle in handles {
             outcome: handle.join() ?? {receipt: None, error: Val(run_all_canceled())}
             if outcome.receipt == {
@@ -751,6 +751,21 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     _ := child.wait()
     // One 10ms poll per reply would take a second; woken reads take far less.
     assert(elapsed.ns < 600000000)
+}
+
+#Test("a spec the parent-death leaf takes keeps its value and ends once") {
+    // The leaf takes (`^^`) its spec and its export consumes it, answering
+    // it changed in place: a last use hands the caller's spec over and the
+    // caller ends only what comes back, and a copy leaves the caller its own.
+    // Were the caller to end the spec it handed over too, the one spec the
+    // export answers would end twice and the test would crash.
+    handed: cmd(["printf", "%s", "handed"])
+    marked: rt.spec_parent_death(handed)
+    assert_eq((marked.run() ?? panic("the handed spec did not run: {err}")).output, "handed")
+    kept: cmd(["printf", "%s", "kept"])
+    copied: rt.spec_parent_death(kept.copy())
+    assert_eq((copied.run() ?? panic("the copied spec did not run: {err}")).output, "kept")
+    assert_eq((kept.run() ?? panic("the kept spec did not run: {err}")).output, "kept")
 }
 
 // Where a spawned child's standard stream goes: a pipe the program reads or

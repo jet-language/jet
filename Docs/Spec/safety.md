@@ -6451,14 +6451,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 799,
+      "line": 800,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 892,
+      "line": 893,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
@@ -12668,8 +12668,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/XMLEngine.jet | 3432:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/YAML.jet | 590:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
 | Core | Core/Files/Data.jet | 272:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
-| Core | Core/Files/Files.jet | 799:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 892:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Files/Files.jet | 800:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 893:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Files/Sealed.jet | 161:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
 | Core | Core/HTTP/Client.jet | 862:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 282:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |

@@ -20,6 +20,7 @@ use {
     access_codes.[access_check, advice_code, map_advice_code]
     raw_names.[raw_held_name]
     scope_reads.[scope_roots, scope_has_parent, scope_part_name, scope_input_error, scope_read_at]
+    process_rt: jet.runtime.process
 }
 
 // core.files — one filesystem surface.
@@ -821,7 +822,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
     held: core.files.__directory_fd(directory.handle)
     if !held.available -> return Err(IOError.Unsupported(context))
     if !held.held -> return Err(IOError.Closed(context))
-    row: core.process.__keep_open_raw(spec, held.fd, child_fd, as_cwd)
+    row: process_rt.keep_open_raw(spec.copy(), held.fd, child_fd, as_cwd)
     if !row.available -> return Err(IOError.Unsupported(context))
     if row.errno != 0 {
         return Err(
@@ -873,7 +874,7 @@ priv __spec_keep_open: fn(spec: ProcessSpec, handle: ^^Directory | FileLock | Fi
     }
     slot: at ?? fd
     child: if slot < 3 || slot > 2147483646 -> -1 else -> slot
-    core.process.__keep_open_raw(spec, fd, child, false).spec
+    process_rt.keep_open_raw(spec.copy(), fd, child, false).spec
 }
 
 #Test("compiler process directories retain authority after rename and close") {
