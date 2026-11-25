@@ -475,7 +475,8 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "register_user" | "password_login" | "session_validate" | "magic_link_issue" | "magic_link_consume" | "oauth_begin" | "oauth_finish" | "tokens_login" | "tokens_refresh" | "devices" | "revoke_device" -> Val("DB")
             else -> None
         }
-        "core.plugin" -> Val("Exec")
+        // The plugin boundary's Authority-to-wire conversion runs nothing.
+        "core.plugin" -> if member == "__authority_to_wire" -> None else -> Val("Exec")
         "core.browser.host" | "core.browser.storage.local" | "core.browser.storage.session" -> Val("Browser")
         "core.crypto.vault" -> if member == {
             "get" | "current" | "versions" | "load" | "status" | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke" | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke" | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped" | "authorize_wrapped_import" | "commit_import_wrapped" | "prepare_import_signing" | "prepare_import_x25519" | "commit_import_signing" | "commit_import_x25519" -> Val("Secret")
@@ -501,6 +502,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             "run" -> Val("Time.Wait")
             else -> None
         }
+        "core.net" -> if member == "sendfile" -> Val("Time.Wait") else -> None
         "core.service" -> if member == "state_store" -> Val("FS.Read") else -> None
         "core.time" -> if member == {
             "zone" | "parse_zoned" -> Val("FS.Read")
