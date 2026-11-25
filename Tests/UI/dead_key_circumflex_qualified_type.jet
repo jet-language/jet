@@ -1,0 +1,14 @@
+// A dead-key composed letter at the start of a qualified type: `^` then `j`
+// composes `ĵ`, so the write mark `^json.Dyn` arrives as `ĵson.Dyn`. The
+// checker names the type with the ordinary report; it never stops on the
+// multi-byte letter while it splits the qualified name.
+use json: core.encoding.json
+
+show: fn(x: ĵson.Dyn) {
+    print(x)
+}
+
+run: fn() {
+    value := json.parse("1") ?? return
+    show(value)
+}

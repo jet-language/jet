@@ -257,9 +257,9 @@ sema_registration_unit_leaf_name: fn(ty: Type) -> String? {
     }
     name_value: name ?? return None
     if name_value.count_bytes() == 0 -> return None
-    dot: name_value.rfind(".")
-    if dot < 0 -> return Val(name_value)
-    Val(name_value.slice((dot + 1)..<name_value.count_bytes()))
+    // The last dotted segment. `rfind` answers a byte offset and `slice` counts
+    // characters, so a split keeps a name like `ĵson.Dyn` whole.
+    Val(name_value.split(".").to_list().last() ?? name_value)
 }
 
 // One fact per unit type of each package: packages may mint the same leaf
