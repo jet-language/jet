@@ -1,6 +1,6 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
 // the route table (argument and result carriers, payloads).
-use jet_foundation.[CoreCallRecord, RUNTIME_GENERIC_HANDLES, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index]
+use jet_foundation.[CoreCallRecord, RUNTIME_GENERIC_HANDLES, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index]
 
 // A buffer of `bytes` bytes (a slot) for elements of row `element` to
 // replace the one of the List at `list`, null when `try` and refused. In a
@@ -4908,16 +4908,11 @@ ir_string_cut: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, name: String, input
 // it (a fresh borrowed argument is dropped after the call; a consumed one
 // belongs to the route, so a read of another holder's value is copied first).
 ir_route: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, span: Span) -> Int Never! {
-    ir_route_labeled(m, p, b, symbol, inputs, borrowed, result, [String]{}, span)
+    ir_route_declared(m, p, b, symbol, None, inputs, borrowed, result, [String]{}, span)
 }
 
-// ir_route whose tuple result's kernel items carry the declared `labels`
-// (core_call_native_return_labels).
-ir_route_labeled: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
-    ir_route_declared(m, p, b, symbol, None, inputs, borrowed, result, labels, span)
-}
-
-// ir_route_labeled through `declared` when it is given: the route a
+// ir_route through `declared` when it is given, its tuple result's kernel
+// items carrying the declared `labels`: the route a
 // jet.runtime binding's Jet signature projects (ir_route_of_signature), which
 // no route table row repeats.
 ir_route_declared: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, declared: IRRoute?, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
@@ -6619,9 +6614,8 @@ ir_core_call_routed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rec
     if symbol == "jet_reflect_of" -> return ir_reflect_of(m, p, b, ty, args, span)
     if symbol == "jet_plugin_load" -> return ir_plugin_load(m, p, b, ty, args, span)
     if ir_lazy_core_call(m, p, b, symbol, ty, args, span) == .Val(result) -> return result
-    labels: core_call_native_return_labels(canonical.module_name, canonical.member)
     b.split_armed = split_armed
-    ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, labels, span)
+    ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, [String]{}, span)
 }
 
 // The refusals a route call reading ambient state meets before it runs. A

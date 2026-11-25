@@ -1,0 +1,20 @@
+# files.open_nonblocking opens a FIFO with no writer and returns at once
+# instead of blocking; the handle's metadata reads it as no regular file.
+# Default run and built program.
+requires: os-name:linux
+requires: tool:sh
+requires: tool:mkfifo
+fixture: CoreFilesOpenNonblockingReturnsOnAFifoWithoutAWriter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: = "opened a fifo with no writer; regular file: false\n"
+stderr: empty
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "opened a fifo with no writer; regular file: false\n"
+stderr: empty

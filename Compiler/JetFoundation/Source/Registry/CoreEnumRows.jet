@@ -9,7 +9,7 @@ CORE_ENUM_CASE_ROWS: #run core_enum_case_rows(CORE_DECLARATIONS)
 // Each CORE_ENUM_CASE_ROWS row's case payloads, at the same index: one
 // payload slot list per case (empty for a unit case) when its Core.rows list
 // carries payloads (`Key:plain(Char(Char)|Enter|…|F(Int)|…)`, read with
-// core_sig_row_type), else no entries. A program that names the enum without
+// core_enum_payload_type), else no entries. A program that names the enum without
 // loading its module (a bare `Key`) checks and lays out its cases from these.
 CORE_ENUM_CASE_PAYLOADS: #run core_enum_case_payloads(CORE_DECLARATIONS)
 
@@ -68,10 +68,44 @@ core_enum_case_payloads: fn(declared: CoreDeclarations) -> [[[Type]]] Never! {
                 rows.push([[Type]]{})
                 next
             }
-            rows.push(loop payload in leaf.payloads -> if payload == "" -> [Type]{} else -> [Type]{core_sig_row_type(payload, 0)})
+            rows.push(loop payload in leaf.payloads -> if payload == "" -> [Type]{} else -> [Type]{core_enum_payload_type(payload)})
         }
     }
     rows
+}
+
+// The type of a Core.rows case payload: a name, a list `[T]` or an option
+// `T?` of them, the only payloads core_decl_payload_text admits. `U8` and
+// `I64` name the fixed-width integers.
+core_enum_payload_type: fn(text: String) -> Type Never! {
+    bytes: text.bytes()
+    count: bytes.len()
+    if count > 1 && text.ends_with("?") {
+        return Type.Option{inner: core_enum_payload_type(foundation_byte_text(bytes, 0, count - 1))}
+    }
+    if count > 2 && text.starts_with("[") && text.ends_with("]") {
+        return Type.List{element: core_enum_payload_type(foundation_byte_text(bytes, 1, count - 1))}
+    }
+    if text == {
+        "String" -> return Type.String
+        "Int" -> return Type.Int
+        "Float" -> return Type.Float
+        "F32" -> return Type.Float32
+        "Bool" -> return Type.Bool
+        "Char" -> return Type.Char
+        else -> {}
+    }
+    first: Int{bytes[0]}
+    if (first == 73 || first == 85) && count > 1 {
+        bits := 0
+        loop byte in bytes.slice(1, count) {
+            code: Int{byte}
+            if code < 48 || code > 57 -> return Type.Named{name: text}
+            bits = bits * 10 + code - 48
+        }
+        return Type.IntN{signed: first == 73, bits: bits}
+    }
+    Type.Named{name: text}
 }
 
 core_source_owned_types: fn(declared: CoreDeclarations) -> [CoreSourceOwnedType] Never! {

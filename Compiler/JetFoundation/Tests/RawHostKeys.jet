@@ -3,7 +3,7 @@
 use jet_foundation.[
     Type,
     core_call,
-    core_host_fixed_signature,
+    core_call_typed_signature,
     type_identity_equal,
 ]
 
@@ -18,7 +18,7 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
         .SourceOwned -> panic("raw host route retains its Prelude symbol")
     }
     assert(row.effects == effects)
-    signature: core_host_fixed_signature(module_name, key) ?? panic("raw host typed signature is registered")
+    signature: core_call_typed_signature(module_name, key, parameters.len()) ?? panic("raw host typed signature is registered")
     assert(signature.min_arity == parameters.len() && signature.max_arity == parameters.len() && signature.parameters.len() == parameters.len())
     loop (index, parameter) in parameters {
         assert(type_identity_equal(signature.parameters[index].ty, parameter))
@@ -26,7 +26,7 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
     returned: signature.return_type ?? panic("raw host typed result")
     assert(type_identity_equal(returned, result))
     assert(core_call(module_name, retired) == None)
-    assert(core_host_fixed_signature(module_name, retired) == None)
+    assert(core_call_typed_signature(module_name, retired, parameters.len()) == None)
 }
 
 #Test("raw_host_keys") {

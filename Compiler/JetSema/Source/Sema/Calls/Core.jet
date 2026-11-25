@@ -15,13 +15,13 @@ use jet_foundation.[
     CoreCallProjectionError,
     CoreCallRecord,
     CoreCallSignatureRequest,
-    CoreCallTypeConstraint,
+    CoreCallTypedParameter,
+    CoreCallTypeParameter,
     CoreTypedCallSignature,
     CoreUnbuiltRow,
     core_unbuilt_call,
     core_unbuilt_method,
     Diagnostic,
-    InternalTag,
     EffectRowEntry,
     Expr,
     ExprField,
@@ -34,7 +34,6 @@ use jet_foundation.[
     TFailureCarrier,
     TGenericParam,
     TNumericOp,
-    TagMarker,
     TextEdit,
     Type,
     TypeTupleField,
@@ -1355,32 +1354,6 @@ sema_call_core_default_expr: fn(default: CoreCallDefault, span: Span) -> Expr Ne
     }
 }
 
-sema_call_core_type_constraint_satisfied: fn(constraint: CoreCallTypeConstraint, ty: Type, check: SemaBodyCheck) -> Bool Never! {
-    return if constraint == {
-        .Any -> true
-        // VaultKey is sealed to SigningKey and X25519SecretKey; a generic body
-        // defers the bound to monomorphization, so a type parameter in scope
-        // satisfies it.
-        .VaultKey -> {
-            key := ty
-            if ty == .Tagged(marker, inner) {
-                if marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) {
-                    key = inner
-                }
-            }
-            if key == .Named(name) {
-                loop parameter in check.environment.generic_params {
-                    if parameter.name == name -> return true
-                }
-                colon_leaf: foundation_byte_text(name.bytes(), name.rfind(":") + 1, name.count_bytes())
-                leaf: foundation_byte_text(colon_leaf.bytes(), colon_leaf.rfind(".") + 1, colon_leaf.count_bytes())
-                return leaf == "SigningKey" || leaf == "X25519SecretKey"
-            }
-            false
-        }
-    }
-}
-
 sema_call_core_inference_parameters: fn(signature: CoreTypedCallSignature, span: Span) -> [SemaInferenceTypeParam] Never! {
     parameters: loop parameter in signature.type_parameters -> SemaInferenceTypeParam{
         name: parameter.name,
@@ -1440,24 +1413,7 @@ sema_call_core_infer_type_args: fn(signature: CoreTypedCallSignature, params: [S
     Val(inference.type_args)
 }
 
-sema_call_core_check_type_constraints: fn(signature: CoreTypedCallSignature, type_args: [Type], span: Span, check: ^SemaBodyCheck) -> Bool {
-    if signature.type_parameters.len() != type_args.len() -> return false
-    loop index in 0..<signature.type_parameters.len() {
-        parameter: signature.type_parameters[index]
-        if !sema_call_core_type_constraint_satisfied(parameter.constraint, type_args[index], check) {
-            if parameter.constraint == CoreCallTypeConstraint.VaultKey {
-                check.diagnostics.push(sema_error("E0905", span, "`{type_name(type_args[index])}` is not a persistent vault key type", "VaultKey is sealed and implemented only by SigningKey and X25519SecretKey", "use `crypto.SigningKey` or `crypto.X25519SecretKey`"))
-            } else {
-                check.diagnostics.push(sema_error("E0905", span, "`{type_name(type_args[index])}` does not satisfy the canonical Core constraint for type parameter `{parameter.name}`", "Core polymorphic signatures preserve the native type constraint", "pass a value with the required Core numeric or comparison type"))
-            }
-            return false
-        }
-    }
-    true
-}
-
-// A fixed row with no declared return (`-` in the host tables) is a Unit
-// call.
+// A typed contract with no declared return is a Unit call.
 sema_call_core_result_type: fn(signature: CoreTypedCallSignature, type_args: [Type]) -> Type {
     names: loop parameter in signature.type_parameters -> parameter.name
     declared: signature.return_type ?? return Type.Named{name: "Unit"}
@@ -1489,6 +1445,52 @@ sema_call_core_materialize_authority_boundary: fn(record: CoreCallRecord, index:
     )
 }
 
+// The typed contract of a native Core row: the Core declaration of the same
+// name in the row's module, the wrapper whose body makes that native call
+// (`vault.get`, `net.sendfile`). Its types are resolved as the module sees
+// them. None when the module is not loaded, it declares no such function, or
+// a parameter is optional or a type parameter bounded, which a native call
+// cannot carry.
+sema_call_core_declared_signature: fn(record: CoreCallRecord, span: Span, check: ^SemaBodyCheck) -> CoreTypedCallSignature? {
+    identity: sema_call_core_module_identity(check.environment.*, check.program.*, record.module_name) ?? return None
+    target: sema_call_core_source_target(check.environment.*, check.program.*, identity, record.member, [Type]{}, span, true, check.diagnostics) ?? return None
+    params: sema_call_params_from_type(target.signature) ?? return None
+    parameters := [CoreCallTypedParameter]{}
+    loop param in params {
+        if sema_call_param_optional(param) -> return None
+        ty: param.ty ?? return None
+        parameters.push(CoreCallTypedParameter{name: param.name, label: param.label, zone: param.zone, access: param.convention, ty: ty, default: None})
+    }
+    type_parameters := [CoreCallTypeParameter]{}
+    loop parameter in target.generic_params {
+        if parameter.bounds.len() > 0 -> return None
+        type_parameters.push(CoreCallTypeParameter{name: parameter.name})
+    }
+    arity: parameters.len()
+    Val(CoreTypedCallSignature{
+        module_name: record.module_name,
+        member: record.member,
+        min_arity: arity,
+        max_arity: arity,
+        parameters: parameters,
+        return_type: sema_call_core_native_return(target.signature),
+        type_parameters: type_parameters,
+    })
+}
+
+// A native Core call's result: its declaration's return, where `T Never!` is
+// the infallible spelling of a plain `T`, the value the runtime route
+// marshals (`vault.get`'s `String? Never!` returns a `String?`). A diverging
+// `Never Never!` keeps its carrier.
+sema_call_core_native_return: fn(signature: Type) -> Type? {
+    returned: sema_call_signature_return(signature) ?? return None
+    if returned == .Result(ok, err) && err == (Type.Named{name: "Never"}) {
+        if ok == (Type.Named{name: "Never"}) -> return Val(returned)
+        return Val(ok)
+    }
+    Val(returned)
+}
+
 sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     // Only the plugin boundary inserts the wire; Core reads it through
     // jet.runtime.files.
@@ -1506,27 +1508,36 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         check.diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `#if #build.target.os` / `#Target(OS.*)`"))
     }
     actual_accesses: loop argument in args -> argument.convention
-    signature := sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {
-        // A source-owned row with no fixed table entry takes its signature
-        // from its Core declaration: the call is checked against it.
-        if canonical_record.symbol == CoreCallSymbol.SourceOwned && canonical_record.source_role == None {
-            if sema_call_core_module_identity(check.environment.*, check.program.*, canonical_record.module_name) == .Val(identity) {
-                declared_member: canonical_record.source_target ?? canonical_record.member
-                if sema_call_core_source_target(check.environment.*, check.program.*, identity, declared_member, type_args, span, true, check.diagnostics) == .Val(target) {
-                    return sema_call_core_check_source_owned(target, "{canonical_record.module_name}.{declared_member}", type_args, args, span, expected, check)
-                }
+    table_signature: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{})
+    if table_signature == None && canonical_record.symbol == CoreCallSymbol.SourceOwned {
+        // A source-owned row with no fixed table entry is checked against the
+        // Core declaration it runs: the function that fills its role, else
+        // the one its source target or member names.
+        role: core_call_source_role(canonical_record)
+        if role == .Val(filled) && sema_call_core_role_target(filled, type_args, span, check.environment.*, check.program.*, check.diagnostics) == .Val(target) {
+            return sema_call_core_check_source_owned(target, "{canonical_record.module_name}.{canonical_record.member}", type_args, args, span, expected, check)
+        }
+        if role == None && sema_call_core_module_identity(check.environment.*, check.program.*, canonical_record.module_name) == .Val(identity) {
+            declared_member: canonical_record.source_target ?? canonical_record.member
+            if sema_call_core_source_target(check.environment.*, check.program.*, identity, declared_member, type_args, span, true, check.diagnostics) == .Val(target) {
+                return sema_call_core_check_source_owned(target, "{canonical_record.module_name}.{declared_member}", type_args, args, span, expected, check)
             }
         }
+    }
+    from_table: table_signature != None
+    signature := table_signature ?? sema_call_core_declared_signature(canonical_record, span, check) ?? {
         check.diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no fixed source typed call contract", "fixed Core checking consumes only a complete Source signature", "use the source-owned special checker for a polymorphic Core operation without a fixed row"))
         return None
     }
-    // The row spells Core's types bare; they stay Core's beside a program
+    // A table row spells Core's types bare; they stay Core's beside a program
     // type of the same name.
-    loop index in 0..<signature.parameters.len() {
-        signature.parameters[index].ty = sema_expr_core_row_type(signature.parameters[index].ty, check.environment.*, check.program.*)
-    }
-    if signature.return_type == .Val(declared) {
-        signature.return_type = Val(sema_expr_core_row_type(declared, check.environment.*, check.program.*))
+    if from_table {
+        loop index in 0..<signature.parameters.len() {
+            signature.parameters[index].ty = sema_expr_core_row_type(signature.parameters[index].ty, check.environment.*, check.program.*)
+        }
+        if signature.return_type == .Val(declared) {
+            signature.return_type = Val(sema_expr_core_row_type(declared, check.environment.*, check.program.*))
+        }
     }
     if !sema_call_core_check_type_args(canonical_record.module_name, canonical_record.member, signature.type_parameters.len(), true, type_args, span, check.diagnostics) {
         return None
@@ -1540,9 +1551,6 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     shape_params := sema_call_core_parameter_records(signature, [Type]{}, span)
     binding: sema_call_bind_args("{canonical_record.module_name}.{canonical_record.member}", shape_params, local_args, span, check.diagnostics) ?? return None
     resolved_type_args: sema_call_core_infer_type_args(signature, shape_params, binding, source_args, type_args, expected, span, check) ?? return None
-    if !sema_call_core_check_type_constraints(signature, resolved_type_args, span, check) {
-        return None
-    }
     params := sema_call_core_parameter_records(signature, resolved_type_args, span)
     {lowered, pins} := sema_call_check_bound_arguments_owned(check, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, local_args, span) ?? return None
     // A `^` argument keeps its Write borrow of the caller's place: a Core leaf
@@ -1561,8 +1569,8 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     // The CoreCall carrier is derived from the checked result type
     // (`TFailureCarrier.from_checked_type`: only a Result or Option result can
     // fail), and its type arguments are the call's written ones. The inferred
-    // signature arguments check constraints and record the call fact; the native
-    // kernel takes no inferred generic.
+    // signature arguments type the result and record the call fact; the
+    // native kernel takes no inferred generic.
     fallibility := sema_expression_failure_carrier(result_type)
     if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, [FunctionDefaultRef]{}, check) {
         return None

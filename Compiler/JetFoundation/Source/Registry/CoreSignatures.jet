@@ -1,16 +1,13 @@
-// Canonical typed source-call contracts shared by source sema and the
-// Core-call registry. These rows mirror the native Core signature authority;
-// an absent row is deliberately uncovered rather than inferred from arity.
+// The typed call contracts of the Core calls no Core declaration types: the
+// compiler-owned plugin handle's `plugin.load`, the arity-picked network
+// forms of `tls.client` and `net.unix_connect`, and the compiler's raw
+// spelling of `files.open_nonblocking`. Every other Core row's call is
+// checked against its Core declaration (sema_call_core_check_fixed_record).
 
 // The one argument default a typed Core parameter carries: the parameter's
 // struct type built from its declared field defaults.
 CoreCallDefault: enum {
     FieldDefaults,
-}
-
-CoreCallTypeConstraint: enum {
-    Any,
-    VaultKey,
 }
 
 CoreCallTypedParameter: struct {
@@ -22,10 +19,9 @@ CoreCallTypedParameter: struct {
     default: CoreCallDefault?,
 }
 
+// A Core call's unbounded type parameter, bound by name.
 CoreCallTypeParameter: struct {
     name: String,
-    bounds: [String],
-    constraint: CoreCallTypeConstraint,
 }
 
 CoreTypedCallSignature: struct {
@@ -36,10 +32,6 @@ CoreTypedCallSignature: struct {
     parameters: [CoreCallTypedParameter],
     return_type: Type?,
     type_parameters: [CoreCallTypeParameter],
-    // A labeled tuple return's labels, or a Result return's labeled tuple
-    // error's labels, in the native kernel's declared slot order (the order
-    // `return_type` writes them in); empty for every other return.
-    native_return_labels: [String],
 }
 
 CoreCallSignatureRequest: struct {
@@ -48,11 +40,6 @@ CoreCallSignatureRequest: struct {
     actual_arity: Int,
     actual_accesses: [AccessConvention],
     type_args: [Type],
-}
-
-CoreCallLabelRequirement: struct {
-    argument_index: Int,
-    label: String,
 }
 
 core_sig_parameter: fn(name: String, label: String, zone: ParamZone, access: AccessConvention, ty: Type, default: CoreCallDefault?) -> CoreCallTypedParameter Never! {
@@ -67,10 +54,6 @@ core_sig_param_type: fn(name: String, label: String, zone: ParamZone, ty: Type) 
     core_sig_parameter(name, label, zone, AccessConvention.Read, ty, None)
 }
 
-core_sig_type_parameter: fn(name: String, constraint: CoreCallTypeConstraint) -> CoreCallTypeParameter Never! {
-    CoreCallTypeParameter{name: name, bounds: [String]{}, constraint: constraint}
-}
-
 core_sig: fn(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: Type?) -> CoreTypedCallSignature Never! {
     CoreTypedCallSignature{
         module_name: module_name,
@@ -80,30 +63,12 @@ core_sig: fn(module_name: String, member: String, parameters: [CoreCallTypedPara
         parameters: parameters,
         return_type: return_type,
         type_parameters: [CoreCallTypeParameter]{},
-        native_return_labels: [String]{},
     }
 }
 
 core_sig_result: fn(ok: Type, err: Type) -> Type Never! { Type.Result{ok: ok, err: err} }
 
 core_sig_named: fn(name: String) -> Type Never! { foundation_named_type(name) }
-
-core_sig_one_of: fn(value: String, choices: [String]) -> Bool Never! {
-    loop choice in choices {
-        if value == choice -> return true
-    }
-    false
-}
-
-core_sig_apply: fn(name: String, arg: Type) -> Type Never! {
-    Type.Apply{name: name, args: [Type]{arg}}
-}
-
-core_sig_generic: fn(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: Type?, type_parameter: CoreCallTypeParameter) -> CoreTypedCallSignature Never! {
-    signature := core_sig(module_name, member, parameters, return_type)
-    signature.type_parameters = [CoreCallTypeParameter]{type_parameter}
-    signature
-}
 
 core_sig_network: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     read: AccessConvention.Read
@@ -150,21 +115,39 @@ core_sig_network: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignatur
     None
 }
 
+// `plugin.load(path, authority, limits: …)`: its result is the
+// compiler-owned `Plugin` handle (sema types it from the loaded artifact),
+// which no Core declaration can spell; `limits:` may be left out, its
+// Limits then built from the struct's field defaults.
+core_sig_plugin_load: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
+    if request.module_name != "core.plugin" || request.member != "load" -> return None
+    parameters: [CoreCallTypedParameter]{
+        core_sig_positional(Type.String, AccessConvention.Read),
+        core_sig_positional(Type.Named{name: "Authority"}, AccessConvention.Read),
+        core_sig_parameter("limits", "limits", ParamZone.LabelOnly, AccessConvention.Read, Type.Named{name: "<corelib>/core.plugin.Limits"}, Val(CoreCallDefault.FieldDefaults)),
+    }
+    signature := core_sig(request.module_name, request.member, parameters, Val(Type.Named{name: "Plugin"}))
+    signature.min_arity = 2
+    Val(signature)
+}
+
+// `files.jet_std_files_open_reader_nonblocking(path)`: the raw spelling the
+// compiler's own sources call until they call `files.open_nonblocking`.
+core_sig_files_nonblocking: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
+    if request.module_name != "core.files" || request.member != "jet_std_files_open_reader_nonblocking" -> return None
+    Val(core_sig(request.module_name, request.member, [CoreCallTypedParameter]{core_sig_positional(Type.String, AccessConvention.Read)}, Val(core_sig_result(core_sig_named("FileReader"), core_sig_named("IOError")))))
+}
+
 core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     if core_sig_network(request) == Val(network) -> return Val(network)
-    if core_host_fixed_signature(request.module_name, request.member) == Val(host) {
-        return Val(host)
-    }
-    core_platform_fixed_signature(request.module_name, request.member)
+    if core_sig_files_nonblocking(request) == Val(files) -> return Val(files)
+    core_sig_plugin_load(request)
 }
 
 core_call_typed_signature_for: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     row: core_call(request.module_name, request.member) ?? return None
     if !core_call_coverage_contains(row.coverage, CORE_CALL_COVERAGE_SEMA) -> return None
     resolved_signature: core_sig_fixed(request) ?? return None
-    if resolved_signature.module_name != request.module_name || resolved_signature.member != request.member {
-        return None
-    }
     if request.type_args.len() > 0 && request.type_args.len() != resolved_signature.type_parameters.len() {
         return None
     }
@@ -184,15 +167,4 @@ core_call_typed_signature: fn(module_name: String, member: String, actual_arity:
             type_args: [Type]{},
         },
     )
-}
-
-// The native return of a labeled tuple: the labels in the kernel's declared
-// slot order, so a native route maps each checked tuple member to the kernel
-// slot of the same label. Empty when the fixed signature has no labeled tuple
-// return.
-core_call_native_return_labels: fn(module_name: String, member: String) -> [String] Never! {
-    request: CoreCallSignatureRequest{module_name: module_name, member: member, actual_arity: 0, actual_accesses: [AccessConvention]{}, type_args: [Type]{}}
-    signature: core_sig_fixed(request) ?? return [String]{}
-    if signature.module_name != module_name || signature.member != member -> return [String]{}
-    signature.native_return_labels
 }

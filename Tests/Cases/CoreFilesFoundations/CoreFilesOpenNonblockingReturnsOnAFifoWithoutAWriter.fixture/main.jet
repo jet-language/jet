@@ -1,0 +1,18 @@
+// `files.open_nonblocking` opens a FIFO no process writes to and returns at
+// once, where `files.open` would wait for a writer.
+package: {
+    name: "open_nonblocking_fifo"
+    authority: { allow: [Exec, FS, IO] }
+}
+
+use {
+    files: core.files
+    process: core.process
+}
+
+run: fn() {
+    _setup: process.run_spec(process.cmd(["sh", "-c", "rm -f fifo && mkfifo fifo"])) ?? panic("mkfifo failed")
+    reader: files.open_nonblocking("fifo") ?? panic("open failed")
+    metadata: reader.stat() ?? panic("stat failed")
+    print("opened a fifo with no writer; regular file: {metadata.is_file}")
+}
