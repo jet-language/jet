@@ -445,16 +445,28 @@ CORE_ROLE_MARKER: "#Builtin.Role(."
 
 // The declarations of `source` whose `#Builtin.Role(.X)` marker names one of
 // `roles`, as a generated body spells them: a trait's or type's marker
-// starts its declaration line at the margin, and a method's starts its
-// indented line inside the block of the type declared last at the margin.
-// A role of `roles` that no declaration fills stops the build.
+// starts its declaration line at the margin, or stands alone on the line
+// above it as `jet fmt` writes a block declaration's marker, and a method's
+// starts its indented line inside the block of the type declared last at the
+// margin. A role of `roles` that no declaration fills stops the build.
 core_role_spellings: fn(source: String, roles: [String]) -> [CoreRoleSpelling] Never! {
     ^found: [CoreRoleSpelling]{}
     ^owner: ""
+    ^pending: ""
     loop line in source.split("\n") {
         indented: line.starts_with(" ")
+        trimmed: line.trim()
+        if trimmed.starts_with(CORE_ROLE_MARKER) && trimmed.ends_with(")") {
+            pending = "{trimmed}"
+            next
+        }
         pair: line.trim_start().split_once(": ") ?? next
-        declared: core_role_declaration(pair.before, pair.after)
+        head: if {
+            pending != "" -> "{pending} {pair.before}"
+            else -> "{pair.before}"
+        }
+        pending = ""
+        declared: core_role_declaration(head, pair.after)
         if !indented && declared.name != "" -> owner = "{declared.name}"
         if declared.role == "" || declared.name == "" || !roles.contains(declared.role) -> next
         spelling: if {
