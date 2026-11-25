@@ -9,10 +9,18 @@ package: {
     }
 }
 
+use builtin: jet_builtins
+
 // core.reflect — typed runtime reflection and explicit text inspection.
 
-// `inspect` classifies caller-supplied text. The compiler-owned `of` intrinsic
-// projects typed values and is intentionally not implemented by this module.
+// `inspect` classifies caller-supplied text.
+
+// A snapshot of `value` as a `Value`: its type name and path, its Display
+// text, one Value per stored field and, for an enum or an outcome, the case
+// it holds with one Value per payload member. A value reflects where `"{x}"`
+// interpolation shows it (else E0112). The compiler builds every call from
+// the value's checked type, so the body never runs.
+#Builtin.Role(.InlineReflectOf) of: fn<T>(value: T) -> Value Never! { of(value) }
 
 ReflectValue: struct {
     type_name: String,

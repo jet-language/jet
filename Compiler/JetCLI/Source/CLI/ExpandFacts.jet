@@ -2,7 +2,7 @@
 use {
     jet_driver.[JetDriverDocModule]
     jet_foundation.[BodyTree, TComptimeValue, Span, Diagnostic, Type, ast_comptime_value_show, body_each_expr_child, body_each_stmt_child, body_node, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, diagnostic_line_at, diagnostic_column_at, foundation_byte_text, type_name]
-    jet_sema.[SemaMemoryProjection, sema_user_template_ct_value]
+    jet_sema.[SEMA_CALL_REFLECT_OF_API, SemaMemoryProjection, sema_call_site_detail, sema_user_template_ct_value]
     jet_semindex.[SemIndex]
 }
 
@@ -328,12 +328,15 @@ jet_cli_expand_reflect_fields: fn(tree: BodyTree, args: [Int], at: Int) -> {text
     {text: text, value: jet_cli_status_array(values), next: next}
 }
 
-// Each checked `reflect.of(x)` call below `id`: the type it retains and every
-// stored field it captures with that type, one fact per call site.
-jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, tree: BodyTree, id: Int, facts: ^[JetCLIExpandFact]) Never! {
+// Each checked `reflect.of(x)` call below `id`, a call whose site `sites`
+// holds: the type it retains and every stored field it captures with that
+// type, one fact per call site.
+jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, sites: [Int], tree: BodyTree, id: Int, facts: ^[JetCLIExpandFact]) Never! {
     node: body_node(tree, id)
-    if node.kind == .CoreCall(record, args, span, _, _, _) {
-        if record.module_name == "core.reflect" && record.member == "of" && args.len() >= 5 {
+    span: node.span
+    if node.kind == .Call(_, _, call_args) && sites.contains(span.start) {
+        args: loop argument in call_args -> argument.value
+        if args.len() >= 5 {
             path: jet_cli_expand_reflect_text(tree, args[2])
             ^known: false
             loop fact in facts {
@@ -361,15 +364,27 @@ jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, tree: BodyTree, id: In
             }
         }
     }
-    body_each_expr_child(tree, node, fn(child: Int) { jet_cli_expand_reflect_expr(unit, tree, child, facts) })
+    body_each_expr_child(tree, node, fn(child: Int) { jet_cli_expand_reflect_expr(unit, sites, tree, child, facts) })
+}
+
+// Where `unit` calls the reflection: the call sites Sema recorded as
+// SEMA_CALL_REFLECT_OF_API's (sema_call_check_reflect_of).
+jet_cli_expand_reflect_sites: fn(unit: JetDriverDocModule) -> [Int] Never! {
+    ^sites: [Int]{}
+    loop fact in unit.call_facts {
+        if sema_call_site_detail(fact).intrinsic_api == .Val(api) && api == SEMA_CALL_REFLECT_OF_API -> sites.push(fact.span.start)
+    }
+    sites
 }
 
 jet_cli_expand_reflect: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
     ^facts: [JetCLIExpandFact]{}
     loop unit in modules {
+        sites: jet_cli_expand_reflect_sites(unit)
+        if sites.len() == 0 -> next
         loop function in unit.functions {
             loop statement in function.body {
-                body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { jet_cli_expand_reflect_expr(unit, function.tree, expression, facts) })
+                body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { jet_cli_expand_reflect_expr(unit, sites, function.tree, expression, facts) })
             }
         }
     }

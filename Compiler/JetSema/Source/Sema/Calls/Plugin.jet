@@ -10,7 +10,6 @@ use jet_foundation.[
     Expr,
     FunctionDefaultRef,
     ComponentSignatureDescriptor,
-    CoreCallRecord,
     ComponentTypeDescriptor,
     ComponentTypeField,
     ModuleID,
@@ -30,18 +29,6 @@ sema_plugin_loaded_type: fn(interface: SemaPluginInterface) -> Type Never! {
 sema_plugin_load_type: fn(facts: SemaPluginInterfaceFacts, artifact: String) -> Type? {
     interface: sema_plugin_interface_by_artifact(facts, artifact) ?? return None
     Val(sema_plugin_loaded_type(interface))
-}
-
-// `core.plugin.load("artifact", authority)` with a literal artifact whose
-// Component the compiler read is `Plugin<identity>`; any other load keeps
-// the declared opaque `Plugin`, whose exports never resolve.
-sema_call_core_plugin_load_type: fn(record: CoreCallRecord, values: [TExpr], declared: Type, program: SemaProgramTables) -> Type Never! {
-    if record.module_name != "core.plugin" || record.member != "load" || values.len() == 0 {
-        return declared.copy()
-    }
-    artifact: sema_plugin_literal_text(values[0]) ?? return declared.copy()
-    graph: program.registration_graph
-    sema_plugin_load_type(graph.plugin_facts, artifact) ?? declared
 }
 
 // The role of the Core function that loads a plugin.

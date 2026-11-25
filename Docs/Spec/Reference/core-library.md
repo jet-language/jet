@@ -2817,10 +2817,11 @@ See [`args_spec.jet`](../../../Examples/Systems/CLI/ArgsSpec.jet) and
 
 ### `core.reflect` — runtime structural reflection (D-ANY-JAI1)
 
-`reflect.of(x)` is the compiler-owned intrinsic for values that can be rendered
-by `"{x}"`; the `core.reflect` source module itself owns the explicit text
-classifier `inspect`. Runtime reflection is read-only and retains typed field
-values rather than pre-rendering them.
+`reflect.of(x)` reflects values that can be rendered by `"{x}"`. The
+`core.reflect` source module declares both `of`, a builder intrinsic the
+compiler builds from the value's checked type at each call, and the explicit
+text classifier `inspect`. Runtime reflection is read-only and retains typed
+field values rather than pre-rendering them.
 
 ```jet
 use reflect: core.reflect

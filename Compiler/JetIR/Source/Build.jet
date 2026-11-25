@@ -1337,8 +1337,10 @@ ir_core_role_row: fn(p: IRProgram, role: String) -> Int? {
 // result, which the runtime provider is handed descriptors of. The
 // core.plugin load (Core/Plugin/Plugin.jet) is the load route over the
 // call's own artifact argument, so a literal artifact's guest is linked at
-// that call, and the core.crypto.vault current key (Core/Crypto/Vault.jet)
-// the provider's route tagged by the call's key type.
+// that call, the core.crypto.vault current key (Core/Crypto/Vault.jet)
+// the provider's route tagged by the call's key type, and the core.reflect
+// `of` (Core/Reflect/Reflect.jet) the Value built from the checked names
+// its call carries after the value.
 IRCoreIntrinsicRow: struct {
     role: String,
     intrinsic: IRRuntimeIntrinsic,
@@ -1383,6 +1385,7 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{role: "InlineIterProgress", intrinsic: IRRuntimeIntrinsic.IterProgress},
     IRCoreIntrinsicRow{role: "InlinePluginLoad", intrinsic: IRRuntimeIntrinsic.PluginLoad},
     IRCoreIntrinsicRow{role: "InlineVaultCurrent", intrinsic: IRRuntimeIntrinsic.VaultCurrent},
+    IRCoreIntrinsicRow{role: "InlineReflectOf", intrinsic: IRRuntimeIntrinsic.ReflectOf},
 }
 
 // The checked Core functions that fill an IR_CORE_INTRINSICS role, by
@@ -1413,7 +1416,8 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> IRIntrinsics Never! {
 // type, and a described progress source over its items' element; each reads
 // the arguments its lowering does. A plugin load reads its artifact,
 // authority and limits, and a vault's current key, generic over the key
-// type, its name.
+// type, its name; a reflect.of, generic over the value's type, reads that
+// value and then the checked names its call carries.
 ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) -> Bool Never! {
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
@@ -1434,7 +1438,7 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
         .AsyncEventNew -> ir_intrinsic_generic_shape(function, 2, 2)
         .IterProgress -> ir_intrinsic_generic_shape(function, 1, 3)
         .PluginLoad -> ir_intrinsic_generic_shape(function, 0, 3)
-        .VaultCurrent -> ir_intrinsic_generic_shape(function, 1, 1)
+        .VaultCurrent | .ReflectOf -> ir_intrinsic_generic_shape(function, 1, 1)
         .FunctionAddress(_) | .StaticText | .FaultReport -> false
     }
 }

@@ -202,7 +202,7 @@ source_module core.reactive path Core/Reactive/Reactive.jet alias core_core_reac
 module core.reactive.loadable exports { failed, idle, loaded, loading, Loadable, is_idle, is_loading, is_loaded, is_failed, value, reason, retry } types { Loadable:generic(2) } depends_on [core.reactive]
 source_module core.reactive.loadable path Core/Reactive/Loadable.jet alias core_core_reactive_loadable owns { failed, idle, loaded, loading, is_idle, is_loading, is_loaded, is_failed, value, reason, retry } types { Loadable }
 module core.reflect exports { of, ReflectValue, inspect } types { ReflectValue:plain } depends_on [core.text]
-source_module core.reflect path Core/Reflect/Reflect.jet alias core_core_reflect owns { inspect }
+source_module core.reflect path Core/Reflect/Reflect.jet alias core_core_reflect owns { inspect, of }
 module core.regex exports { compile, compile_with, escape, find, find_all, finditer, flags, full_match, is_match, match, match_full, matches, purge, replace, replace_first, split, split_limit, Match, Regex, RegexFlags, expand, regex, join, search, findall, fullmatch, sub, subn, RegexError } types { Match:plain, Regex:plain, RegexFlags:plain, RegexError:plain } depends_on [core.text]
 source_module core.regex path Core/Regex/Regex.jet alias core_core_regex owns { compile, compile_with, escape, expand, find, find_all, finditer, flags, full_match, is_match, match, match_full, matches, purge, replace, replace_first, split, split_limit, regex, join, search, findall, fullmatch, sub, subn } types { Regex, Match, RegexFlags, RegexError }
 module core.rt exports { callback, RealtimeStream } types { RealtimeStream:plain } depends_on [core.time]
@@ -302,12 +302,8 @@ format_row ETF core.encoding.eetf ETF
 // The expression after `|` is the one tier adapter; the generated
 // registry contains no hand-maintained row list.
 dispatcher_row plain core.term take | CoreCallRecord.source_owned("core.term", "take", &[false]).with_source_role("TermTake")
-dispatcher_row plain core.plugin load | CoreCallRecord.new("core.plugin", "load", "jet_plugin_load", true, &[true, true]) .with_max_arity(3) .without_direct_aot()
-dispatcher_row plain core.crypto.vault current | CoreCallRecord.new("core.crypto.vault", "current", "jet_vault_current_impl", true, &[true]).without_direct_aot()
 dispatcher_row plain core.net.tls client | CoreCallRecord.source_owned("core.net.tls", "client", &[false, true]).with_max_arity(4)
 
-dispatcher_row plain core.reflect of | CoreCallRecord.new("core.reflect", "of", "jet_reflect_of", true, &[true])
 dispatcher_row plain core.net sendfile | CoreCallRecord.new("core.net", "sendfile", "jet_net_sendfile", true, &[true, false])
 dispatcher_row plain core.crypto.vault get | CoreCallRecord.new("core.crypto.vault", "get", "jet_vault_get_impl", true, &[true]).without_direct_aot()
-dispatcher_row adapter core.plugin __authority_to_wire | CoreCallRecord.new("core.plugin", "__authority_to_wire", "jet_authority_to_wire", true, &[true])
 

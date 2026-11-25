@@ -914,33 +914,47 @@ sema_call_check_term_progress_iter: fn(args: [CallArg], span: Span, expected: Ty
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(made, expected, check)}
 }
 
-// `("core.reflect", "of")`: the compiler-owned reflection intrinsic has no
-// typed Source contract. Its one argument is legal wherever `"{x}"`
-// interpolation is (or a Unit), and the call yields the runtime reflection
-// handle `Value`.
-sema_call_try_reflect_core_call: fn(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck {
-    if record.module_name != "core.reflect" || record.member != "of" {
-        return SemaDirectSpecialCheck{handled: false, value: None}
-    }
+// The role of the Core function that reflects a value (`reflect.of`).
+SEMA_CORE_ROLE_REFLECT_OF: "InlineReflectOf"
+
+// The API a checked reflection's call site fact names, by which `jet inspect
+// expand reflect` finds the call.
+SEMA_CALL_REFLECT_OF_API: "core.reflect.of"
+
+// A call of `target`, the Core function that fills SEMA_CORE_ROLE_REFLECT_OF.
+// Its one argument is legal wherever `"{x}"` interpolation is
+// (sema_call_reflection_validate_value).
+// The call carries the value's checked names and field tree after the value
+// (sema_call_reflection_name_args), which the builder reads, and yields the
+// declaration's `Value`. Its effects are the declaration's.
+sema_call_check_reflect_of: fn(target: SemaCallDirectTarget, args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     if args.len() != 1 {
-        check.diagnostics.push(sema_error("E0104", span, "`{record.member}` expects 1 argument, got {args.len()}", "every argument must match a standard library function parameter", "check the call to `{record.member}`"))
-        loop argument in args -> ^_: sema_check_expression(argument.expr, None, check)
-        return SemaDirectSpecialCheck{handled: true, value: None}
+        check.diagnostics.push(sema_error("E0104", span, "`{target.symbol.name}` expects 1 argument, got {args.len()}", "every argument must match a standard library function parameter", "check the call to `{target.symbol.name}`"))
+        return None
     }
-    checked: sema_check_expression(args[0].expr, None, check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    if !sema_call_reflection_validate_value(checked, expr_span(args[0].expr), check) {
-        return SemaDirectSpecialCheck{handled: true, value: None}
+    checked: sema_check_expression(args[0].expr, None, check) ?? return None
+    if !sema_call_reflection_validate_value(checked, expr_span(args[0].expr), check) -> return None
+    ^declared_effects: [String]{}
+    function: SemaCoreRoleFunction{module_identity: target.symbol.module_identity, name: target.symbol.name}
+    if !sema_call_core_function_effects(function, check, declared_effects) -> return None
+    instance: sema_call_core_source_target(check.environment.*, check.program.*, target.symbol.module_identity, target.symbol.name, [Type]{checked.ty}, span, true, check.diagnostics) ?? return None
+    result: sema_call_signature_return(instance.signature) ?? return None
+    effects: loop name in declared_effects -> EffectRowEntry{name: name, span: span}
+    facts: SemaCallFacts{return_type: result, failure_carrier: TFailureCarrier.Infallible, effect_bound: Val(effects), type_args: instance.type_args, default_refs: [FunctionDefaultRef]{}}
+    if !sema_effect_record_intrinsic_fact(check.environment.*, check.program.*, check.scopes, check.context, SEMA_CALL_REFLECT_OF_API, span, facts, check.diagnostics) {
+        return None
     }
-    result: Type.Named{name: "Value"}
-    if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, check) {
-        return SemaDirectSpecialCheck{handled: true, value: None}
+    names: sema_call_reflection_name_args(checked.ty, span, expr_span(args[0].expr), check) ?? return None
+    declared: sema_call_params_from_type(instance.signature) ?? return None
+    callee: sema_call_callee_decl(check.program.*, instance.symbol.id, span, check.diagnostics) ?? return None
+    ^call_args: sema_call_core_source_arguments([TExpr]{checked}, declared, check)
+    // The names are literals the builder reads in place, never a parameter's
+    // argument.
+    loop name in names {
+        call_args.push(TCallArg{value: name, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false})
     }
-    names: sema_call_reflection_name_args(checked.ty, span, expr_span(args[0].expr), check) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    ^values: [TExpr]{checked}
-    values.extend(names)
-    widen_to_vec: loop _ in values -> false
-    ^value: sema_tree_node(result, TExprKind.CoreCall{record: record, args: values, source_span: span, type_args: [Type]{}, widen_to_vec: widen_to_vec, fallibility: TFailureCarrier.Infallible}, span)
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, check.environment.*, check.program.*, check.diagnostics)}
+    made: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: instance.type_args, args: call_args}, span)
+    sema_expression_call_expected(made, expected, check)
 }
 
 // `panic(message)` stops with one String message; the stop is a `Never`
@@ -1136,9 +1150,6 @@ sema_call_try_scope_guard: fn(module_name: String, member: String, alias: String
 // source-owned projections run before the generic fixed-row producer; an
 // unhandled projection deliberately leaves the row for that producer.
 sema_call_try_core_direct_record: fn(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> SemaDirectSpecialCheck Never! {
-    ^reflect: sema_call_try_reflect_core_call(record, args, span, expected, check)
-    if reflect.handled -> return reflect
-
     ^reactive: sema_call_try_reactive_core_call(record.module_name, record.member, args, type_args, span, expected, check)
     if reactive.handled -> return reactive
 

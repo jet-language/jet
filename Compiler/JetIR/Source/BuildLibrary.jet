@@ -101,6 +101,7 @@ IRRuntimeIntrinsic: enum {
     IterProgress,
     PluginLoad,
     VaultCurrent,
+    ReflectOf,
 }
 
 // The IEEE bits of a Float as an I64, and back.
@@ -1258,8 +1259,10 @@ ir_f32_bits_signature: fn(function: FnBody, to_bits: Bool) -> Bool Never! {
 // ir_decision_hook_new and ir_async_event_new; a core.term described
 // progress source is its Iter route at that type (BuildLazy.jet
 // ir_lazy_progress); a core.plugin load is the load route over the call's
-// own literal artifact (BuildRoutes.jet ir_plugin_load) and a vault's
-// current key the provider's route at the key type (ir_core_vault_current).
+// own literal artifact (BuildRoutes.jet ir_plugin_load), a vault's
+// current key the provider's route at the key type (ir_core_vault_current),
+// and a reflect.of the Value its checked names and field tree build
+// (BuildRoutes.jet ir_reflect_of).
 ir_intrinsic_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, intrinsic: IRRuntimeIntrinsic, callee: String, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "type Float")
@@ -1319,11 +1322,15 @@ ir_intrinsic_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, intrinsic: IRRu
         }
         .PluginLoad -> {
             result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
-            ir_plugin_load(m, p, b, result_ty, ir_intrinsic_nodes(args), true, span)
+            ir_plugin_load(m, p, b, result_ty, ir_intrinsic_nodes(args), span)
         }
         .VaultCurrent -> {
             result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
             ir_core_vault_current(m, p, b, result_ty, ir_intrinsic_nodes(args), type_args, span)
+        }
+        .ReflectOf -> {
+            result_ty: ir_intrinsic_result(p, b, callee, type_args, span)
+            ir_reflect_of(m, p, b, result_ty, ir_intrinsic_nodes(args), span)
         }
     }
 }

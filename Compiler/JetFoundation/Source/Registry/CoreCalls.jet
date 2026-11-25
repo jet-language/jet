@@ -128,21 +128,6 @@ core_call_source_role: fn(row: CoreCallRecord) -> String? Never! {
     row.source_role
 }
 
-// The checked authority boundary sema applies to a `core.plugin.load` argument.
-core_call_authority_boundary_at: fn(row: CoreCallRecord, index: Int) -> Bool Never! {
-    row.module_name == "core.plugin" && row.member == "load" && index == 1
-}
-
-#Test("authority boundary stays on plugin load argument one") {
-    row: core_call("core.plugin", "load") ?? panic("plugin load row")
-    assert_eq(core_call_authority_boundary_at(row, 0), false)
-    assert_eq(core_call_authority_boundary_at(row, 1), true)
-    assert_eq(core_call_authority_boundary_at(row, 2), false)
-    wire: core_call("core.plugin", "__authority_to_wire") ?? panic("authority wire row")
-    assert_eq(core_call_authority_boundary_at(wire, 1), false)
-    assert_eq(wire.effects.len(), 0)
-}
-
 #Test("a source-owned row carries no effects of its own") {
     loop row in CORE_CALLS {
         if row.symbol == CoreCallSymbol.SourceOwned && row.effects.len() > 0 {

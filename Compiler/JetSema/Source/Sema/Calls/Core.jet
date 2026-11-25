@@ -33,7 +33,6 @@ use jet_foundation.[
     TypeTupleField,
     CoreCallSymbol,
     core_call,
-    core_call_authority_boundary_at,
     core_call_accepts_arity,
     core_call_coverage_contains,
     core_call_source_member,
@@ -1164,18 +1163,8 @@ sema_call_core_source_arguments: fn(args: [TExpr], params: [SemaCallParam], chec
     result
 }
 
-// A checked Core call. `plugin.load` takes its Authority across the checked
-// boundary as the wire text: the conversion materializes once, here, for the
-// source call and the Core call alike.
+// A checked Core call.
 sema_call_core_tree: fn(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], result_type: Type, fallibility: TFailureCarrier, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    if args.len() > 1 && core_call_authority_boundary_at(record, 1) {
-        wired: loop index in 0..<args.len() -> sema_call_core_materialize_authority_boundary(record, index, args[index], span)
-        return sema_call_core_tree_checked(record, wired, span, type_args, widen_to_vec, result_type, fallibility, expected, check)
-    }
-    sema_call_core_tree_checked(record, args, span, type_args, widen_to_vec, result_type, fallibility, expected, check)
-}
-
-sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], result_type: Type, fallibility: TFailureCarrier, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
     process_run_boundary: record.module_name == "core.process" && record.member == "run" && args.len() == record.signature.arity + 1
     if !core_call_accepts_arity(record, args.len()) && !process_run_boundary {
         ^maximum: record.signature.max_arity
@@ -1415,25 +1404,6 @@ sema_call_core_posix_control: fn(member: String) -> Bool Never! {
     member == "fork" || member == "setuid" || member == "setgid" || member == "set_user_ids" || member == "set_group_ids" || member == "setpgid" || member == "setpgrp" || member == "setsid" || member == "initgroups" || member == "kill" || member == "reset_signal" || member == "wait" || member == "waitpid" || member == "pipe" || member == "close_fd" || member == "mkfifo" || member == "mknod" || member == "umask" || member == "getpriority" || member == "setpriority" || member == "set_scheduling" || member == "set_wall_clock" || member == "utime" || member == "atexit" || member == "stop"
 }
 
-sema_call_core_materialize_authority_boundary: fn(record: CoreCallRecord, index: Int, value: TExpr, span: Span) -> TExpr Never! {
-    // copy: the materialized argument is a new owned TExpr. Off the authority boundary it equals
-    // `value`, the caller's checked argument (a read parameter), which the caller keeps.
-    if !core_call_authority_boundary_at(record, index) -> return value.copy()
-    wire: core_call("core.plugin", "__authority_to_wire") ?? panic("checked Authority wire row is missing")
-    sema_tree_node(
-        Type.String,
-        TExprKind.CoreCall{
-            record: wire,
-            args: [TExpr]{value},
-            source_span: span,
-            type_args: [Type]{},
-            widen_to_vec: [Bool]{false},
-            fallibility: TFailureCarrier.Infallible,
-        },
-        span,
-    )
-}
-
 // The Core declaration a native Core row's call is checked against: the
 // function of the same name in the row's module, the wrapper whose body makes
 // that native call (`vault.get`, `net.sendfile`). None when the module is not
@@ -1477,12 +1447,6 @@ sema_call_core_native_return: fn(signature: Type) -> Type? {
 }
 
 sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    // Only the plugin boundary inserts the wire; Core reads it through
-    // jet.runtime.files.
-    if record.module_name == "core.plugin" && record.member == "__authority_to_wire" {
-        check.diagnostics.push(sema_error("E0510", span, "Authority wire conversion is compiler-private", "only the checked plugin boundary inserts this conversion", "use core.plugin.load with a tightened Authority"))
-        return None
-    }
     canonical_record: sema_call_core_record(record.module_name, record.member, args.len(), span, check.diagnostics) ?? return None
     if !core_call_coverage_contains(canonical_record.coverage, CORE_CALL_COVERAGE_SEMA) {
         check.diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no source semantic call contract", "only SEMA-authorized Core records enter fixed-call checking", "use a SEMA-covered Core call"))
@@ -1552,8 +1516,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
             values.push(sema_tree_node(ty, TExprKind.Borrow{place: argument.value, access: AccessConvention.Write}, at))
         } else { values.push(argument.value) }
     }
-    declared_result: sema_call_core_result_type(names, return_type, resolved_type_args)
-    result_type: sema_call_core_plugin_load_type(canonical_record, values, declared_result, check.program.*)
+    result_type: sema_call_core_result_type(names, return_type, resolved_type_args)
     // The CoreCall carrier is derived from the checked result type
     // (`TFailureCarrier.from_checked_type`: only a Result or Option result can
     // fail), and its type arguments are the call's written ones. The inferred
@@ -1688,6 +1651,9 @@ sema_call_core_shared_success: fn(ty: Type) -> Type? Never! {
 }
 
 sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
+    if sema_core_symbol_role(check.program.registration_graph, target.symbol) == SEMA_CORE_ROLE_REFLECT_OF {
+        return sema_call_check_reflect_of(target, args, span, expected, check)
+    }
     ^call_args: args
     if sema_call_devtools_is_publish(target, check) {
         call_args = sema_call_devtools_publish_args(args, span, check) ?? return None
